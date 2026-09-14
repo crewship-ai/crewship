@@ -143,7 +143,7 @@ describe("<RoutinesExplorer> live rows", () => {
     // this alone flips "12.0s" to "12.1s"; the frozen clock absorbs it.
     sleepRealMs(60)
     render(<RoutinesExplorer routines={[pipeline({})]} {...EXPLORER_PROPS} />)
-    const sub = screen.getByText(/ask-casey/)
+    const sub = screen.getByText(/▶ Running/)
     expect(sub).toBeInTheDocument()
     // Elapsed rides along in the same sub-line (12s → "12.0s").
     expect(sub.textContent).toMatch(/·\s*12\.0s/)

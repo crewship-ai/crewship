@@ -46,6 +46,7 @@ import {
   Microscope,
   Network,
   PackageOpen,
+  Inbox,
   Play,
   PlugZap,
   RotateCcw,
@@ -98,6 +99,14 @@ export const JOURNAL_ENTRY_ICONS: Partial<Record<JournalEntryType, LucideIcon>> 
   "run.failed": XCircle,
   "run.cancelled": Ban,
   "run.timeout": AlertTriangle,
+
+  // Durable work ledger — the dispatch decision under a run. Accept and
+  // claim are the happy path; the other two are the states an operator has
+  // to act on, so they carry the warning shapes.
+  "work.accepted": Inbox,
+  "work.claimed": Play,
+  "work.needs_reconciliation": AlertTriangle,
+  "work.lease_lost": Unplug,
 
   // Security
   "keeper.request": ShieldAlert,
@@ -178,6 +187,7 @@ export const JOURNAL_ENTRY_ICONS: Partial<Record<JournalEntryType, LucideIcon>> 
   // scanning the feed is asking "did this work", not "which engine ran
   // it", and giving the pipeline engine its own vocabulary would make
   // one product concept read as two.
+  "pipeline.published": CheckCircle,
   "pipeline.run.started": Play,
   "pipeline.run.completed": CheckCircle,
   "pipeline.run.failed": XCircle,

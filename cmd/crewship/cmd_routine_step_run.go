@@ -29,10 +29,12 @@ var (
 
 var routineStepRunCmd = &cobra.Command{
 	Use:   "step-run <slug> <step>",
-	Short: "Execute one step against a fixture, without the full pipeline",
-	Long: `Run a SINGLE step of a routine against a given input fixture, in isolation —
+	Short: "Execute one step live using supplied inputs, without the full pipeline",
+	Long: `Run a SINGLE step of a routine live against supplied input data —
 no upstream steps, no DAG, no persisted run record — and print its output +
 validation verdict (+ cost, for agent_run).
+
+This is not a sandbox. External writes and model costs can occur.
 
 Supports agent_run, http, script, and transform steps (#1423 item 3 — the
 "unit test for a step" used to cover only agent_run, leaving the cheapest,
@@ -86,6 +88,8 @@ bookkeeping is skipped).`,
 			return err
 		}
 
+		// Older servers omit this field; step-run has always executed live.
+		res.ExecutionMode = "live"
 		f := resolvedFormatter(cmd)
 		switch f.Format {
 		case "json":
@@ -108,11 +112,11 @@ bookkeeping is skipped).`,
 		// misleading "[ ]" / "0→0 tok".
 		if res.Adapter != "" || res.Model != "" {
 			fmt.Printf("Step %s (%s) → %s  [%s %s]\n", res.StepID, res.StepType, verdict, res.Adapter, res.Model)
-			fmt.Printf("  cost $%.4f · %d→%d tok · %dms · simulated (no run record)\n",
+			fmt.Printf("  cost $%.4f · %d→%d tok · %dms · live execution (no run record)\n",
 				res.CostUSD, res.TokensIn, res.TokensOut, res.DurationMs)
 		} else {
 			fmt.Printf("Step %s (%s) → %s\n", res.StepID, res.StepType, verdict)
-			fmt.Printf("  %dms · simulated (no run record)\n", res.DurationMs)
+			fmt.Printf("  %dms · live execution (no run record)\n", res.DurationMs)
 		}
 		if !res.Valid && res.ValidationReason != "" {
 			fmt.Printf("  validation: %s\n", res.ValidationReason)

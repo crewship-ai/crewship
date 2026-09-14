@@ -3,13 +3,16 @@
 import { useEffect, useMemo, useState, useCallback, useRef } from "react"
 import { useRouter } from "next/navigation"
 import {
-  Shield, AlertTriangle,
+  Shield, AlertTriangle, Menu,
 } from "lucide-react"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { cn } from "@/lib/utils"
 import { apiFetch } from "@/lib/api-fetch"
 import { SubBar } from "@/components/layout/sub-bar"
+import { Button } from "@/components/ui/button"
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet"
+import { useIsMobile } from "@/hooks/use-mobile"
 import {
   SidebarToolbar, SidebarSearch, SidebarSection, SidebarRow, SIDEBAR_WIDTH,
 } from "@/components/layout/sidebar-kit"
@@ -89,6 +92,8 @@ export default function AdminPage() {
   }, [])
   // Universal search doubles as a command-finder — filters the nav live.
   const [navQuery, setNavQuery] = useState("")
+  const [mobileNavOpen, setMobileNavOpen] = useState(false)
+  const isMobile = useIsMobile()
   const navQ = navQuery.trim().toLowerCase()
   // Hooks must run before the early returns below, so keep this memo up here.
   const filteredSections = useMemo(
@@ -363,14 +368,79 @@ export default function AdminPage() {
 
   const activeItem = sections.flatMap((s) => s.items).find((i) => i.key === tab)
 
+  /* One nav body, rendered into a permanent column on a desktop and into a
+     Sheet on a phone. Choosing a section closes the Sheet — on a desktop
+     `setMobileNavOpen(false)` is a no-op. */
+  const adminNav = (
+    <>
+      {/* pr-10 on the phone: SheetContent draws its close button at
+          top-4 right-4 over this row, and it would otherwise take taps
+          meant for the search field. */}
+      <SidebarToolbar className={isMobile ? "pr-10" : undefined}>
+        <SidebarSearch
+          value={navQuery}
+          onValueChange={setNavQuery}
+          placeholder="Search admin…"
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && firstNavMatch) {
+              setTab(firstNavMatch)
+              setMobileNavOpen(false)
+            }
+          }}
+        />
+      </SidebarToolbar>
+      <nav className="flex-1 overflow-y-auto pb-4" aria-label="Admin sections">
+        {filteredSections.map((section) => (
+          <SidebarSection key={section.label} label={section.label}>
+            {section.items.map((item) => {
+              const Icon = item.icon
+              const isActive = item.key === tab
+              return (
+                <SidebarRow
+                  key={item.key}
+                  selected={isActive}
+                  onSelect={() => {
+                    setTab(item.key)
+                    setMobileNavOpen(false)
+                  }}
+                  aria-label={item.label}
+                >
+                  <Icon className={cn("h-3.5 w-3.5 shrink-0", isActive ? "opacity-100" : "opacity-60")} />
+                  <span className="truncate flex-1">{item.label}</span>
+                </SidebarRow>
+              )
+            })}
+          </SidebarSection>
+        ))}
+      </nav>
+    </>
+  )
+
   return (
-    <div className="flex flex-col h-[calc(100vh-48px)]">
+    <div className="flex flex-col h-[calc(100dvh-48px)]">
       {/* Identity lives in the sub-bar (not repeated in the sidebar). */}
       <SubBar
         icon={Shield}
         title="Admin Console"
         section={activeItem?.label}
         ariaLabel="Admin Console"
+        /* The console's own nav is a 280px column. On a phone that leaves the
+           page 109px to render into, which is not a narrow layout — it is no
+           layout (#2483). Below `md` the same nav moves into a Sheet, reached
+           from here, exactly as Settings does. */
+        leading={
+          isMobile ? (
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              className="h-7 w-7 -ml-1 coarse:relative coarse:after:absolute coarse:after:-inset-2.5 coarse:after:content-['']"
+              aria-label="Open admin navigation"
+              onClick={() => setMobileNavOpen(true)}
+            >
+              <Menu className="h-3.5 w-3.5" />
+            </Button>
+          ) : undefined
+        }
         meta={
           <span className="text-[10px] font-mono uppercase tracking-wide text-muted-foreground/60">{role ?? ""}</span>
         }
@@ -378,39 +448,20 @@ export default function AdminPage() {
 
       <div className="flex flex-1 min-h-0">
         {/* ── Left nav ─────────────────────────────────────────────── */}
-        <aside className={cn(SIDEBAR_WIDTH, "shrink-0 border-r border-border bg-sidebar flex flex-col overflow-hidden")}>
-          <SidebarToolbar>
-            <SidebarSearch
-              value={navQuery}
-              onValueChange={setNavQuery}
-              placeholder="Search admin…"
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && firstNavMatch) setTab(firstNavMatch)
-              }}
-            />
-          </SidebarToolbar>
-          <nav className="flex-1 overflow-y-auto pb-4" aria-label="Admin sections">
-            {filteredSections.map((section) => (
-              <SidebarSection key={section.label} label={section.label}>
-                {section.items.map((item) => {
-                  const Icon = item.icon
-                  const isActive = item.key === tab
-                  return (
-                    <SidebarRow
-                      key={item.key}
-                      selected={isActive}
-                      onSelect={() => setTab(item.key)}
-                      aria-label={item.label}
-                    >
-                      <Icon className={cn("h-3.5 w-3.5 shrink-0", isActive ? "opacity-100" : "opacity-60")} />
-                      <span className="truncate flex-1">{item.label}</span>
-                    </SidebarRow>
-                  )
-                })}
-              </SidebarSection>
-            ))}
-          </nav>
-        </aside>
+        {isMobile ? (
+          <Sheet open={mobileNavOpen} onOpenChange={setMobileNavOpen}>
+            <SheetContent side="left" className="w-[280px] max-w-[85vw] p-0">
+              <SheetHeader className="sr-only">
+                <SheetTitle>Admin navigation</SheetTitle>
+              </SheetHeader>
+              <div className="flex h-full flex-col bg-sidebar">{adminNav}</div>
+            </SheetContent>
+          </Sheet>
+        ) : (
+          <aside className={cn(SIDEBAR_WIDTH, "shrink-0 border-r border-border bg-sidebar flex flex-col overflow-hidden")}>
+            {adminNav}
+          </aside>
+        )}
 
         {/* ── Content ─────────────────────────────────────────────── */}
         {/* tabIndex + role/label, not decoration: this pane scrolls, and the
@@ -419,7 +470,7 @@ export default function AdminPage() {
             (axe: scrollable-region-focusable). The label names the section
             rather than saying "content", so the landmark list stays useful. */}
         <div
-          className="flex-1 overflow-y-auto"
+          className="flex-1 min-w-0 overflow-y-auto"
           tabIndex={0}
           role="region"
           aria-label={activeItem ? `Admin ${activeItem.label}` : "Admin content"}

@@ -587,6 +587,29 @@ var startCmd = &cobra.Command{
 			if schedulerLease != nil {
 				sched.SetLeaderGate(schedulerLease)
 			}
+			// The one dispatcher that EXECUTES accepted webhook work.
+			//
+			// Acceptance and execution are separate now: the webhook route
+			// commits a delivery and its work and then hints, and this is what
+			// claims that work, starts a runtime and settles it. Without it a
+			// delivery is accepted durably and never runs — which is a visible,
+			// recoverable state rather than a lost one, but it is not a working
+			// system, so a failure to start it is logged loudly.
+			//
+			// It runs serially for every adapter. The parallel profile is not
+			// verified against a real Claude runtime, and a dispatcher that
+			// quietly permitted two concurrent runs would be enabling it by
+			// omission.
+			if apiRouter := srv.APIRouter(); apiRouter != nil {
+				stopDispatcher, derr := apiRouter.StartWebhookDispatcher(ctx, logger)
+				if derr != nil {
+					logger.Error("webhook dispatcher did not start; accepted webhook work will sit "+
+						"queued until one does", "error", derr)
+				} else {
+					defer stopDispatcher()
+				}
+			}
+
 			if err := sched.Start(ctx); err != nil {
 				logger.Error("scheduler failed to start", "error", err)
 			} else {
@@ -1069,6 +1092,13 @@ var startCmd = &cobra.Command{
 				// this. Defaults to 90 days; see
 				// internal/harbormaster/retention.go.
 				go harbormaster.StartApprovalsRetentionSweeper(ctx, deps.DB, logger, 24*time.Hour)
+
+				// Routine webhook receipts — the dedup record a routine
+				// delivery leaves behind. §6 keeps it for 30 days from
+				// acceptance; after that the same identifier is new work
+				// again, and this is the sweeper that makes it so. See
+				// internal/pipeline/webhook_receipts.go.
+				go pipeline.StartRoutineReceiptRetentionSweeper(ctx, deps.DB, logger, 24*time.Hour)
 			}
 
 			// Pipeline schedules — cron triggers for saved pipelines.
@@ -1169,6 +1199,7 @@ var startCmd = &cobra.Command{
 				if apiRouter := srv.APIRouter(); apiRouter != nil {
 					if ph := apiRouter.Pages(); ph != nil {
 						ph.StartPanelFreshnessSweeper(ctx, 0)
+						ph.StartProjectRetention(ctx)
 						logger.Info("pages freshness sweeper wired (on_failure → issue; 1m tick)")
 					}
 				}

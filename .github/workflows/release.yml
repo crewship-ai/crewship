@@ -1,214 +1,159 @@
 name: Release
-
-on:
+'on':
   push:
     tags:
-      - "v*"
-
+      - v*
 permissions:
-  contents: write
-  packages: write
-  id-token: write  # Required for cosign keyless signing via GitHub OIDC (CRE-122)
-
+  contents: read
+concurrency:
+  group: release-publish
+  cancel-in-progress: false
 env:
-  NODE_VERSION: "22"
-  PNPM_VERSION: "10"
-  GO_VERSION: "1.27.1"
-
+  NODE_VERSION: '22'
+  PNPM_VERSION: '10'
+  GO_VERSION: 1.27.1
 jobs:
-  release:
-    name: Build & Release
+  verified:
+    name: Verify release commit
     runs-on: ubuntu-latest
-    # 45 (was 30): headroom for Apple notarization when the MACOS_* secrets
-    # are set — the notarize pipe waits on up to four darwin binaries
-    # (2 builds x 2 arches), each typically 1-5 min at Apple's side.
-    timeout-minutes: 45
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      actions: read
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           fetch-depth: 0
-
-      # -- Build Next.js static export (required for embed.FS) --
-      # Version-less: pnpm/action-setup reads the `packageManager`
-      # field from package.json. Passing an explicit `version:`
-      # alongside packageManager errors out with ERR_PNPM_BAD_PM_VERSION.
-      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
-
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+          persist-credentials: false
+      - name: Require verified main ancestry and checks
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]
+          [ "${#GITHUB_REF_NAME}" -le 128 ]
+          git merge-base --is-ancestor HEAD origin/main
+          python3 scripts/ci/verified_commit.py "$REPO" "$(git rev-parse HEAD)"
+  release:
+    name: Build and verify signed release assets
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
-
       - run: pnpm install --frozen-lockfile
-
       - name: Generate Prisma Client
         run: pnpm db:generate
         env:
-          DATABASE_URL: "file:./dev.db"
-
-      # -- Resolve tag for the static bundle's Sentry release/environment --
-      # The same value is read by the Go side from -X main.version in
-      # goreleaser; doing this here too means the frontend Release tag in
-      # Sentry matches the backend's Release tag without a second source
-      # of truth (which would drift the day someone re-tags a hotfix).
+          DATABASE_URL: file:./dev.db
       - name: Resolve release tag
         id: meta
         run: echo "version=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
-
       - name: Build Next.js static export
         run: pnpm build
         env:
-          NEXTAUTH_SECRET: "build-time-placeholder"
-          # NEXT_PUBLIC_* envs are baked into the static bundle at build
-          # time. Empty fallback means a PR build from a fork (no secret
-          # access) produces a bundle with Sentry init no-op'd — the
-          # same defense-in-depth as the Go side.
-          #
-          # SENTRY_DSN_FRONTEND (not SENTRY_DSN) routes the embedded
-          # web UI's events to the `crewship-frontend` Sentry project,
-          # not the Go-backend project. Per-platform projects let us
-          # quota-cap and tag separately; see scripts/sentry-bootstrap.sh
-          # for the project ↔ secret mapping.
+          NEXTAUTH_SECRET: build-time-placeholder
           NEXT_PUBLIC_SENTRY_DSN: ${{ secrets.SENTRY_DSN_FRONTEND }}
           NEXT_PUBLIC_CREWSHIP_VERSION: ${{ steps.meta.outputs.version }}
-
-      # Stages out/ into web/out/ AND fails the release if what landed is
-      # the tracked placeholder rather than a real export (#1567). This is
-      # the gate that keeps the always-compiles placeholder from ever
-      # turning into a silently UI-less release.
       - name: Copy static export for embedding
         run: ./scripts/embed-web-out.sh sync
-
-      # -- GoReleaser --
-      # cache: true reuses module + build cache across releases keyed on
-      # go.sum; on the ubuntu-latest hosted runner this cuts setup-go from
-      # ~45s (cold module download for ~80 modules) to <2s.
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: true
-
-      # Install syft for SBOM generation (CRE-122).
-      # Pin to a SHA matching v0.20.7 so a retargeted tag cannot redirect
-      # the action binary; release artifacts now carry both the tag-as-comment
-      # AND the immutable commit SHA (the latter is what GitHub actually fetches).
       - name: Install syft
-        uses: anchore/sbom-action/download-syft@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26 # v0.24.2
+        uses: anchore/sbom-action/download-syft@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26
         with:
           syft-version: v1.38.0
-
-      # Install cosign for keyless release signing (CRE-122).
-      # SHA-pinned to v3.10.0 (same supply-chain rationale as the syft step
-      # above). Cosign version is pinned at the action's input level so the
-      # same git tag always produces the same signature chain.
       - name: Install cosign
-        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6
         with:
           cosign-release: v2.6.3
-
-      # Materialize the deb/rpm signing key from the GPG_SIGNING_KEY secret, if
-      # configured (#932). CONDITIONAL: when the secret is absent the packages
-      # are simply unsigned (GPG_KEY_PATH stays empty → nfpm skips signing), so
-      # a fork or a not-yet-provisioned repo still releases. See packaging/SIGNING.md.
-      - name: Prepare package signing key (if configured)
+      - name: Require package signing key
         env:
           GPG_SIGNING_KEY: ${{ secrets.GPG_SIGNING_KEY }}
         run: |
-          if [ -n "$GPG_SIGNING_KEY" ]; then
-            printf '%s' "$GPG_SIGNING_KEY" | base64 -d > "$RUNNER_TEMP/crewship-signing.asc"
-            echo "GPG_KEY_PATH=$RUNNER_TEMP/crewship-signing.asc" >> "$GITHUB_ENV"
-            echo "deb/rpm signing enabled"
-          else
-            echo "::notice::GPG_SIGNING_KEY not set — deb/rpm packages will be UNSIGNED (see #932)"
-          fi
-
-      # -- Supply-chain CVE gate (completes CRE-122) --
-      # goreleaser already generates the SBOM (syft) and signs keyless (cosign),
-      # but nothing scanned the dependency tree — a Critical CVE could ship
-      # signed. The gate is two-layered, and both layers fail the job BEFORE
-      # goreleaser publishes anything:
-      #
-      #   1. Source scan (go.mod + pnpm-lock.yaml): catches npm-side Criticals
-      #      in the embedded UI — JS deps never appear in the Go binary, so an
-      #      artifact-only scan would miss them entirely.
-      #   2. Built-artifact scan (below): a real snapshot build of the main
-      #      binary, so the gate covers what actually ships — not just the
-      #      checkout, which can diverge from the linked result.
-      #
-      # severity-cutoff=critical keeps the gate tight (High/Medium are reported,
-      # not blocking) so a routine transitive High doesn't wedge every release;
-      # tighten as the dependency tree is triaged. SHA-pinned like syft/cosign.
+          set -euo pipefail
+          [ -n "$GPG_SIGNING_KEY" ] || { echo '::error::GPG_SIGNING_KEY is required for published packages'; exit 1; }
+          printf '%s' "$GPG_SIGNING_KEY" | base64 -d > "$RUNNER_TEMP/crewship-signing.asc"
+          chmod 600 "$RUNNER_TEMP/crewship-signing.asc"
+          echo "GPG_KEY_PATH=$RUNNER_TEMP/crewship-signing.asc" >> "$GITHUB_ENV"
       - name: Grype CVE scan — source (go.mod + pnpm lockfile)
-        uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439 # v7.4.2
+        uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439
         with:
-          path: "."
+          path: .
           fail-build: true
           severity-cutoff: critical
           output-format: table
-
-      # Single-target snapshot build of the full binary, purely as scan input.
-      # Dependencies are identical across all builds and every GOOS/GOARCH
-      # (one shared go.mod, no per-target deps), so ONE linux/amd64 binary is
-      # a sufficient dependency-CVE gate for the whole matrix — building all
-      # targets twice would roughly double release time for no extra signal.
-      # goreleaser OSS has no publish-only mode, hence build-scan-release
-      # rather than release-scan-publish. Reuses the setup-go cache above and
-      # warms the Go build cache for the full release build below.
-      - name: Build snapshot binary for artifact scan
-        uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7
+      - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94
         with:
-          version: "v2.6.1"
-          args: build --clean --snapshot --single-target --id crewship
-
-      # Grype reads the Go module list embedded in the compiled binary
-      # (debug/buildinfo), so scanning dist/ gates the built artifact itself.
-      # `release --clean` below wipes dist/ first, so the snapshot binary can
-      # never leak into the published release.
-      - name: Grype CVE scan — built artifact (gate on Critical)
-        uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439 # v7.4.2
-        with:
-          path: "dist"
-          fail-build: true
-          severity-cutoff: critical
-          output-format: table
-
-      - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7
-        with:
-          # Pin to a specific v2 minor — `~> v2` allows v3 once released,
-          # and goreleaser v3 has breaking config changes.
-          version: "v2.6.1"
-          args: release --clean
+          version: v2.6.1
+          args: release --parallelism 2 --clean --skip=publish
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-          # Empty fallback means an unconfigured secret produces a binary
-          # with telemetry disabled at the link level — safer than failing
-          # the release on a missing secret.
           SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
-          # nfpm reads the signing-key passphrase from NFPM_<ID>_PASSPHRASE
-          # (nfpms id = "packages"). Empty when the key has no passphrase.
           NFPM_PACKAGES_PASSPHRASE: ${{ secrets.GPG_SIGNING_PASSPHRASE }}
-          # macOS code signing + notarization (see notarize: in
-          # .goreleaser.yml and packaging/SIGNING.md). CONDITIONAL: when
-          # MACOS_SIGN_P12 is unset the notarize pipe disables itself and
-          # darwin binaries ship unsigned — same fail-open pattern as the
-          # GPG key above.
           MACOS_SIGN_P12: ${{ secrets.MACOS_SIGN_P12 }}
           MACOS_SIGN_PASSWORD: ${{ secrets.MACOS_SIGN_PASSWORD }}
           MACOS_NOTARY_ISSUER_ID: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
           MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
           MACOS_NOTARY_KEY: ${{ secrets.MACOS_NOTARY_KEY }}
-
-  # Multi-arch Docker image published to GHCR alongside the binary release.
-  # Runs in parallel with `release` because the two share no artifacts — the
-  # Dockerfile builds frontend + backend itself rather than consuming
-  # goreleaser output, which keeps the pipelines independent (a goreleaser
-  # failure shouldn't block the container, and vice versa).
-  #
-  # Tags published per release:
-  #   ghcr.io/crewship-ai/crewship:vX.Y.Z          — always
-  #   ghcr.io/crewship-ai/crewship:vX.Y            — always
-  #   ghcr.io/crewship-ai/crewship:latest          — only on non-prerelease tags
+        name: Build and sign final release assets without publishing
+      - name: Scan final release artifacts
+        uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439
+        with:
+          path: dist
+          fail-build: true
+          severity-cutoff: critical
+          output-format: table
+      - name: Boot the final archive before publication
+        env:
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          test -s dist/checksums.txt.sig
+          test -s dist/checksums.txt.pem
+          archives=(dist/crewship_*_linux_amd64.tar.gz)
+          [ "${#archives[@]}" -eq 1 ] && [ -f "${archives[0]}" ]
+          (cd dist && sha256sum -c checksums.txt)
+          python3 scripts/ci/smoke-archive.py "${archives[0]}" "$SHA"
+      - name: Retain generated Homebrew formulas
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: release-homebrew-${{ github.sha }}
+          path: dist/homebrew/
+          if-no-files-found: error
+          retention-days: 7
+      - name: Share verified release assets
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: release-assets-${{ github.sha }}
+          path: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/*.deb
+            dist/*.rpm
+            dist/*.spdx.json
+            dist/*.cdx.json
+            dist/*.sig
+            dist/*.pem
+            dist/checksums.txt
+          if-no-files-found: error
+          retention-days: 2
+          compression-level: 0
+    needs:
+      - verified
+    permissions:
+      contents: read
+      id-token: write
   docker:
     name: Build & push Docker image
     runs-on: ubuntu-latest
@@ -216,13 +161,12 @@ jobs:
     permissions:
       contents: read
       packages: write
-      id-token: write  # cosign keyless signing via GitHub OIDC
+      id-token: write
     steps:
-      # fetch-depth: 0 so `git log` can read the tag's commit timestamp.
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           fetch-depth: 0
-
+          persist-credentials: false
       - name: Set image metadata
         id: meta
         run: |
@@ -248,7 +192,6 @@ jobs:
           else
             echo "is_stable=false" >> "$GITHUB_OUTPUT"
           fi
-
       - name: Compute tag list
         id: tags
         run: |
@@ -257,7 +200,7 @@ jobs:
           # The majmin alias (v1.2) and the `latest` rolling tag are only
           # emitted for stable releases — moving a stable-looking alias
           # onto a beta/rc image would silently downgrade everyone pinned
-          # to v1.2 the next time they pulled. CodeRabbit caught this.
+          # to v1.2 the next time they pulled. Keep stable aliases off prerelease images.
           {
             echo "list<<EOF"
             echo "${BASE}:${{ steps.meta.outputs.version }}"
@@ -267,54 +210,139 @@ jobs:
             fi
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
-
-      - uses: docker/setup-qemu-action@1f40c72289eff860ee54a304f1438e3cff362e0a # v4.3.0
-      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
-
+      - uses: docker/setup-qemu-action@1f40c72289eff860ee54a304f1438e3cff362e0a
+      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e
       - name: Login to GHCR
-        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Install cosign
-        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6
         with:
           cosign-release: v2.6.3
-
-      - name: Build & push multi-arch image
+      - name: Build immutable release image candidate
         id: build
-        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v6.18.0
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a
         with:
           context: .
+          pull: true
+          # Refresh OS security fixes on retries without rebuilding compiler stages.
+          no-cache-filters: runtime
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: ${{ steps.tags.outputs.list }}
-          # SENTRY_DSN is sourced from secrets.* via an interpolation; the
-          # docker/build-push-action does NOT expose it as a Docker `secret`
-          # because it has to be baked into the binary via ldflags at compile
-          # time, not mounted at runtime. Empty fallback keeps PR builds and
-          # forks (which don't see secrets) working.
+          tags: ghcr.io/${{ github.repository_owner }}/crewship:candidate-release-${{ github.run_id }}-${{ github.run_attempt
+            }}
           build-args: |
             VERSION=${{ steps.meta.outputs.version }}
             COMMIT=${{ github.sha }}
             DATE=${{ steps.meta.outputs.build_date }}
             SENTRY_DSN=${{ secrets.SENTRY_DSN }}
-          # GitHub Actions cache for buildx — survives across runs and cuts
-          # repeated layer rebuilds (pnpm install, go mod download) to seconds.
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      # Cosign keyless: signs the image using the workflow's OIDC identity, so
-      # the resulting attestation can be verified with `cosign verify` without
-      # any pre-shared key. Matches the binary signing flow.
-      - name: Sign image
+            NEXT_PUBLIC_SENTRY_DSN=${{ secrets.SENTRY_DSN_FRONTEND }}
+          cache-from: type=gha,scope=server-image
+          cache-to: type=gha,mode=max,scope=server-image
+          provenance: mode=max
+          sbom: true
+      - name: Scan the built image
+        uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439
+        with:
+          image: ghcr.io/${{ github.repository_owner }}/crewship@${{ steps.build.outputs.digest }}
+          fail-build: true
+          severity-cutoff: critical
+          output-format: table
+      - name: Smoke both image platforms before promotion
         env:
-          DIGEST: ${{ steps.build.outputs.digest }}
-          TAGS: ${{ steps.tags.outputs.list }}
+          IMAGE: ghcr.io/${{ github.repository_owner }}/crewship@${{ steps.build.outputs.digest }}
+          SHA: ${{ github.sha }}
         run: |
+          bash scripts/ci/smoke-image.sh "$IMAGE" "$SHA" linux/amd64
+          bash scripts/ci/smoke-image.sh "$IMAGE" "$SHA" linux/arm64
+      - name: Sign verified image digest
+        env:
+          IMAGE: ghcr.io/${{ github.repository_owner }}/crewship@${{ steps.build.outputs.digest }}
+        run: cosign sign --yes "$IMAGE"
+    needs:
+      - verified
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+      tags: ${{ steps.tags.outputs.list }}
+  promote:
+    name: Promote verified release image
+    needs:
+      - docker
+      - publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      packages: write
+    steps:
+      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Promote the tested digest after binary publication
+        env:
+          IMAGE: ghcr.io/${{ github.repository_owner }}/crewship
+          DIGEST: ${{ needs.docker.outputs.digest }}
+          TAGS: ${{ needs.docker.outputs.tags }}
+        run: |
+          set -euo pipefail
+          args=()
           while IFS= read -r tag; do
-            [ -z "$tag" ] && continue
-            cosign sign --yes "${tag}@${DIGEST}"
+            [ -z "$tag" ] || args+=(--tag "$tag")
           done <<< "$TAGS"
+          [ "${#args[@]}" -gt 0 ]
+          docker buildx imagetools create "${args[@]}" "$IMAGE@$DIGEST"
+  homebrew:
+    name: Publish stable Homebrew formulas
+    needs:
+      - publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: release-homebrew-${{ github.sha }}
+          path: dist/homebrew
+      - name: Update stable Homebrew formulas atomically
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: python3 scripts/ci/publish-homebrew.py "$GITHUB_REF_NAME"
+  publish:
+    name: Publish verified release
+    needs:
+      - verified
+      - docker
+      - release
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: release-assets-${{ github.sha }}
+          path: dist
+      - name: Publish the verified signed assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          DIGEST: ${{ needs.docker.outputs.digest }}
+        run: |
+          set -euo pipefail
+          TAG="$GITHUB_REF_NAME"
+          jq -n --arg sha "$GITHUB_SHA" --arg digest "$DIGEST" --arg image "ghcr.io/${REPO%/*}/crewship" --arg release "$TAG" '{sha:$sha,digest:$digest,image:$image,release:$release}' > dist/image-manifest.json
+          mapfile -d '' assets < <(find dist -maxdepth 1 -type f \( -name '*.tar.gz' -o -name '*.zip' -o -name '*.deb' -o -name '*.rpm' -o -name '*.spdx.json' -o -name '*.cdx.json' -o -name '*.sig' -o -name '*.pem' -o -name 'checksums.txt' -o -name 'image-manifest.json' \) -print0)
+          [ "${#assets[@]}" -gt 0 ]
+          flags=()
+          if ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then flags+=(--prerelease); fi
+          gh release create "$TAG" --repo "$REPO" --verify-tag --draft --title "Crewship $TAG" --generate-notes "${flags[@]}" "${assets[@]}"
+          gh release edit "$TAG" --repo "$REPO" --draft=false

@@ -27,7 +27,6 @@ import {
   Activity,
   AlarmClock,
   AlertTriangle,
-  Banknote,
   CalendarClock,
   CheckCircle2,
   ChevronRight,
@@ -103,10 +102,21 @@ export function RoutinesOverview({
 }: Props) {
   const { runs: recordedRuns } = usePipelineRuns(workspaceId, "all")
   // A finished engine run may still have a failed or human-review result.
-  const runs = React.useMemo(() => recordedRuns.filter(run => routines.some(r => r.slug === run.pipeline_slug)).map(run => ({
-    ...run,
-    status: run.outcome === "FAILED" ? "failed" : run.outcome === "NEEDS_HUMAN" ? "needs_human" : run.status,
-  })), [recordedRuns, routines])
+  const runs = React.useMemo(
+    () =>
+      recordedRuns
+        .filter((run) => routines.some((r) => r.slug === run.pipeline_slug))
+        .map((run) => ({
+          ...run,
+          status:
+            run.outcome === "FAILED"
+              ? "failed"
+              : run.outcome === "NEEDS_HUMAN"
+                ? "needs_human"
+                : run.status,
+        })),
+    [recordedRuns, routines],
+  )
   const { schedules } = usePipelineSchedules(workspaceId)
   const { bySlug: liveBySlug } = useActiveRoutineRuns()
   const { waitpoints, refresh: refreshWaitpoints } = useWorkspaceWaitpoints(workspaceId)
@@ -131,7 +141,10 @@ export function RoutinesOverview({
   const success = React.useMemo(() => successRate(runs, now, SUCCESS_WINDOW_DAYS), [runs, now])
   const next = React.useMemo(() => nextScheduled(schedules, now), [schedules, now])
   const attention = React.useMemo(() => needsAttention(routines), [routines])
-  const buckets = React.useMemo(() => catalogBuckets(routines, liveSlugs), [routines, liveSlugs])
+  const buckets = React.useMemo(
+    () => catalogBuckets(routines, liveSlugs),
+    [routines, liveSlugs],
+  )
   const upcoming = React.useMemo(
     () => upcomingSchedules(schedules, now, UPCOMING_LIMIT),
     [schedules, now],
@@ -147,7 +160,10 @@ export function RoutinesOverview({
     () => pendingApprovals(waitpoints, routines, slugByRunId),
     [waitpoints, routines, slugByRunId],
   )
-  const outcomes = React.useMemo(() => runOutcomesByDay(runs, now, SUCCESS_WINDOW_DAYS), [runs, now])
+  const outcomes = React.useMemo(
+    () => runOutcomesByDay(runs, now, SUCCESS_WINDOW_DAYS),
+    [runs, now],
+  )
   const weekTotal = React.useMemo(
     () => outcomes.reduce((s, d) => s + d.passed + d.failed + d.pending + d.other, 0),
     [outcomes],
@@ -172,9 +188,10 @@ export function RoutinesOverview({
             next_run_at moves the moment one fires. */}
         <Appear order={0}>
           <div>
-            <h1 className="text-lg font-semibold tracking-tight">Overview</h1>
+            <h1 className="text-lg font-semibold tracking-tight">Health</h1>
             <p className="text-xs text-muted-foreground">
-              {routines.length} {routines.length === 1 ? "routine" : "routines"} in this workspace
+              {routines.length} {routines.length === 1 ? "routine" : "routines"} in this
+              workspace
             </p>
           </div>
         </Appear>
@@ -200,7 +217,9 @@ export function RoutinesOverview({
             <KpiCard
               label={`Success · ${SUCCESS_WINDOW_DAYS}d`}
               value={success.pct === null ? "—" : `${success.pct}%`}
-              subtitle={success.total === 0 ? "no finished runs" : `${success.ok} of ${success.total}`}
+              subtitle={
+                success.total === 0 ? "no finished runs" : `${success.ok} of ${success.total}`
+              }
             />
             <KpiCard
               label="Next run"
@@ -220,7 +239,9 @@ export function RoutinesOverview({
                   ? "all clear"
                   : [
                       attention.failing > 0 ? `${attention.failing} failing` : null,
-                      attention.awaitingApproval > 0 ? `${attention.awaitingApproval} to approve` : null,
+                      attention.awaitingApproval > 0
+                        ? `${attention.awaitingApproval} to approve`
+                        : null,
                     ]
                       .filter(Boolean)
                       .join(" · ")
@@ -261,7 +282,7 @@ export function RoutinesOverview({
             >
               {upcoming.length === 0 ? (
                 <Empty icon={AlarmClock}>
-                  No schedule is due. Open a routine and add one under Triggers.
+                  No schedule is due. Open a routine and add one under Schedule.
                 </Empty>
               ) : (
                 <div className="flex flex-col">
@@ -273,7 +294,9 @@ export function RoutinesOverview({
                       <button
                         key={s.id}
                         type="button"
-                        onClick={() => s.target_pipeline_slug && onSelect(s.target_pipeline_slug)}
+                        onClick={() =>
+                          s.target_pipeline_slug && onSelect(s.target_pipeline_slug)
+                        }
                         className="group flex items-center gap-2.5 rounded-md px-1.5 py-2 text-left transition-colors hover:bg-white/[0.03]"
                       >
                         <span className="w-[62px] shrink-0 font-mono text-[11px] tabular-nums text-primary">
@@ -308,125 +331,133 @@ export function RoutinesOverview({
         {/* ── What ran, and what is stuck ────────────────────────── */}
         <Appear order={3}>
           <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-          <DashboardCard
-            title="Recent runs"
-            icon={Activity}
-            hint={recent.length > 0 ? `last ${recent.length}` : "no runs yet"}
-            action={
-              recent.length > 0 ? (
-                <Link href="/activity" className="text-primary hover:underline">
-                  Activity →
-                </Link>
-              ) : undefined
-            }
-          >
-            {recent.length === 0 ? (
-              <Empty icon={Activity}>
-                Nothing has run yet. Pick a routine on the left and press Run, or give it a
-                schedule.
-              </Empty>
-            ) : (
-              <div className="flex flex-col">
-                {recent.map((run) => {
-                  const r = routineBySlug.get(run.pipeline_slug)
-                  const live = isLiveStatus(run.status)
-                  return (
-                    <Link
-                      key={run.id}
-                      href={`/routines?${new URLSearchParams({ slug: run.pipeline_slug, run: run.id })}`}
-                      className="group grid grid-cols-[auto_1fr_auto] items-center gap-3 rounded-md px-1.5 py-2 transition-colors hover:bg-white/[0.03] md:grid-cols-[auto_1fr_auto_auto]"
-                    >
-                      <span className="relative shrink-0">
-                        {r ? (
-                          <CrewIcon
-                            icon={resolveRoutineIcon(r)}
-                            color={resolveRoutineColor(r)}
-                            size="sm"
-                            className="!h-6 !w-6 !rounded-md"
-                          />
-                        ) : (
-                          <span className="h-6 w-6 rounded-md bg-muted" />
-                        )}
-                        <span
-                          aria-hidden
-                          className={cn(
-                            "absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full ring-2 ring-card",
-                            statusDot(run.status),
+            <DashboardCard
+              title="Recent runs"
+              icon={Activity}
+              hint={recent.length > 0 ? `last ${recent.length}` : "no runs yet"}
+              action={
+                recent.length > 0 ? (
+                  <Link href="/activity" className="text-primary hover:underline">
+                    Activity →
+                  </Link>
+                ) : undefined
+              }
+            >
+              {recent.length === 0 ? (
+                <Empty icon={Activity}>
+                  Nothing has run yet. Pick a routine on the left and press Run, or give it a
+                  schedule.
+                </Empty>
+              ) : (
+                <div className="flex flex-col">
+                  {recent.map((run) => {
+                    const r = routineBySlug.get(run.pipeline_slug)
+                    const live = isLiveStatus(run.status)
+                    return (
+                      <Link
+                        key={run.id}
+                        href={`/routines?${new URLSearchParams({ slug: run.pipeline_slug, run: run.id })}`}
+                        className="group grid grid-cols-[auto_1fr_auto] items-center gap-3 rounded-md px-1.5 py-2 transition-colors hover:bg-white/[0.03] md:grid-cols-[auto_1fr_auto_auto]"
+                      >
+                        <span className="relative shrink-0">
+                          {r ? (
+                            <CrewIcon
+                              icon={resolveRoutineIcon(r)}
+                              color={resolveRoutineColor(r)}
+                              size="sm"
+                              className="!h-6 !w-6 !rounded-md"
+                            />
+                          ) : (
+                            <span className="h-6 w-6 rounded-md bg-muted" />
                           )}
-                        />
-                      </span>
-                      <span className="min-w-0">
-                        <span className="block truncate text-[12px] text-foreground/90">
-                          {run.pipeline_name || r?.name || run.pipeline_slug}
+                          <span
+                            aria-hidden
+                            className={cn(
+                              "absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full ring-2 ring-card",
+                              statusDot(run.status),
+                            )}
+                          />
                         </span>
-                        {live && (
-                          <span className="block truncate text-[10px] text-primary">
-                            ▶ {run.current_step_id || "starting…"}
+                        <span className="min-w-0">
+                          <span className="block truncate text-[12px] text-foreground/90">
+                            {run.pipeline_name || r?.name || run.pipeline_slug}
                           </span>
-                        )}
-                      </span>
-                      <span className="hidden w-14 shrink-0 text-right font-mono text-[11px] tabular-nums text-muted-foreground md:block">
-                        {live ? "—" : formatDurationDecimal(run.duration_ms ?? 0)}
-                      </span>
-                      <span className="shrink-0 text-right text-[10px] text-muted-foreground-soft">
-                        {relTime(run.started_at)}
-                      </span>
-                    </Link>
-                  )
-                })}
-              </div>
-            )}
-          </DashboardCard>
+                          {live && (
+                            <span className="block truncate text-[10px] text-primary">
+                              ▶ {run.current_step_id || "starting…"}
+                            </span>
+                          )}
+                        </span>
+                        <span className="hidden w-14 shrink-0 text-right font-mono text-[11px] tabular-nums text-muted-foreground md:block">
+                          {live ? "—" : formatDurationDecimal(run.duration_ms ?? 0)}
+                        </span>
+                        <span className="shrink-0 text-right text-[10px] text-muted-foreground-soft">
+                          {relTime(run.started_at)}
+                        </span>
+                      </Link>
+                    )
+                  })}
+                </div>
+              )}
+            </DashboardCard>
 
-          {/* Beside the runs, not below them: the two answer the same
+            {/* Beside the runs, not below them: the two answer the same
               question a second apart — what happened, and what stopped
               halfway and is waiting for you. A parked run holds real
               state and expires, so burying it under ten finished runs
               is how an approval times out unread. */}
-          <DashboardCard
-            title="Waiting on you"
-            icon={UserCheck}
-            hint={waiting.length > 0 ? `${waiting.length}` : "nothing pending"}
-          >
-            {waiting.length === 0 ? (
-              <Empty icon={CheckCircle2}>Nothing is waiting on a decision.</Empty>
-            ) : (
-              <div className="flex flex-col gap-1">
-                {waiting.map((item) =>
-                  item.kind === "run" ? (
-                    <WaitpointRow
-                      key={item.token}
-                      workspaceId={workspaceId}
-                      item={item}
-                      routine={item.routineSlug ? routineBySlug.get(item.routineSlug) : undefined}
-                      onDecided={refreshWaitpoints}
-                    />
-                  ) : (
-                    <button
-                      key={`prop-${item.slug}`}
-                      type="button"
-                      onClick={() => onSelect(item.slug)}
-                      className="group flex items-center gap-2.5 rounded-md border border-warn/25 bg-warn/[0.06] px-2 py-2 text-left transition-colors hover:bg-warn/[0.1]"
-                    >
-                      <CrewIcon
-                        icon={resolveRoutineIcon(routineBySlug.get(item.slug) ?? { slug: item.slug })}
-                        color={resolveRoutineColor(routineBySlug.get(item.slug) ?? { slug: item.slug })}
-                        size="sm"
-                        className="!h-5 !w-5 !rounded-md shrink-0"
+            <DashboardCard
+              title="Waiting on you"
+              icon={UserCheck}
+              hint={waiting.length > 0 ? `${waiting.length}` : "nothing pending"}
+            >
+              {waiting.length === 0 ? (
+                <Empty icon={CheckCircle2}>Nothing is waiting on a decision.</Empty>
+              ) : (
+                <div className="flex flex-col gap-1">
+                  {waiting.map((item) =>
+                    item.kind === "run" ? (
+                      <WaitpointRow
+                        key={item.token}
+                        workspaceId={workspaceId}
+                        item={item}
+                        routine={
+                          item.routineSlug ? routineBySlug.get(item.routineSlug) : undefined
+                        }
+                        onDecided={refreshWaitpoints}
                       />
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate text-[12px] text-foreground/90">
-                          {item.name}
+                    ) : (
+                      <button
+                        key={`prop-${item.slug}`}
+                        type="button"
+                        onClick={() => onSelect(item.slug)}
+                        className="group flex items-center gap-2.5 rounded-md border border-warn/25 bg-warn/[0.06] px-2 py-2 text-left transition-colors hover:bg-warn/[0.1]"
+                      >
+                        <CrewIcon
+                          icon={resolveRoutineIcon(
+                            routineBySlug.get(item.slug) ?? { slug: item.slug },
+                          )}
+                          color={resolveRoutineColor(
+                            routineBySlug.get(item.slug) ?? { slug: item.slug },
+                          )}
+                          size="sm"
+                          className="!h-5 !w-5 !rounded-md shrink-0"
+                        />
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-[12px] text-foreground/90">
+                            {item.name}
+                          </span>
+                          <span className="block text-[10px] text-warn">
+                            definition needs review
+                          </span>
                         </span>
-                        <span className="block text-[10px] text-warn">definition needs review</span>
-                      </span>
-                      <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground-soft" />
-                    </button>
-                  ),
-                )}
-              </div>
-            )}
-          </DashboardCard>
+                        <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground-soft" />
+                      </button>
+                    ),
+                  )}
+                </div>
+              )}
+            </DashboardCard>
           </div>
         </Appear>
 
@@ -450,7 +481,9 @@ export function RoutinesOverview({
                   summing it into a workspace ledger answered one
                   nobody asked. */}
               {weekTotal === 0 ? (
-                <Empty icon={Activity}>Nothing ran in the last {SUCCESS_WINDOW_DAYS} days.</Empty>
+                <Empty icon={Activity}>
+                  Nothing ran in the last {SUCCESS_WINDOW_DAYS} days.
+                </Empty>
               ) : (
                 <OutcomeChart data={outcomes} />
               )}
@@ -485,7 +518,9 @@ export function RoutinesOverview({
                       <span className="min-w-0 flex-1">
                         <span className="flex items-baseline gap-1.5">
                           <span className="truncate text-[12px] text-foreground/90">
-                            {f.routineName || routineBySlug.get(f.routineSlug)?.name || f.routineSlug}
+                            {f.routineName ||
+                              routineBySlug.get(f.routineSlug)?.name ||
+                              f.routineSlug}
                           </span>
                           {f.stepId && (
                             <span className="shrink-0 font-mono text-[10px] text-destructive">
@@ -622,29 +657,37 @@ function WaitpointRow({
         )}
       </div>
       <div className="flex items-center gap-1.5">
-        <button
-          type="button"
-          disabled={deciding}
-          onClick={() => decide(true)}
-          className="inline-flex h-7 items-center gap-1.5 rounded-md bg-warn px-3 text-[11px] font-semibold text-background transition-colors hover:bg-warn/90 disabled:opacity-60"
-        >
-          {deciding ? <Spinner className="h-3 w-3" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
-          Approve
-        </button>
-        <button
-          type="button"
-          disabled={deciding}
-          onClick={() => decide(false)}
-          className="inline-flex h-7 items-center gap-1.5 rounded-md border border-border/60 px-3 text-[11px] font-medium text-muted-foreground transition-colors hover:text-foreground disabled:opacity-60"
-        >
-          <XCircle className="h-3.5 w-3.5" />
-          Deny
-        </button>
+        {!item.decision_form && (
+          <>
+            <button
+              type="button"
+              disabled={deciding}
+              onClick={() => decide(true)}
+              className="inline-flex h-7 items-center gap-1.5 rounded-md bg-warn px-3 text-[11px] font-semibold text-background transition-colors hover:bg-warn/90 disabled:opacity-60"
+            >
+              {deciding ? (
+                <Spinner className="h-3 w-3" />
+              ) : (
+                <CheckCircle2 className="h-3.5 w-3.5" />
+              )}
+              Approve
+            </button>
+            <button
+              type="button"
+              disabled={deciding}
+              onClick={() => decide(false)}
+              className="inline-flex h-7 items-center gap-1.5 rounded-md border border-border/60 px-3 text-[11px] font-medium text-muted-foreground transition-colors hover:text-foreground disabled:opacity-60"
+            >
+              <XCircle className="h-3.5 w-3.5" />
+              Deny
+            </button>
+          </>
+        )}
         <Link
           href={`/routines?run=${encodeURIComponent(item.runId)}`}
           className="ml-auto text-[10px] text-primary hover:underline"
         >
-          Open run
+          {item.decision_form ? "Open decision form" : "Open run"}
         </Link>
       </div>
     </div>
@@ -689,7 +732,13 @@ function OutcomeChart({ data }: { data: OutcomeDay[] }) {
     <ChartContainer config={config} className="aspect-auto h-[190px] w-full">
       <BarChart data={data} margin={{ top: 8, right: 8, left: -22, bottom: 0 }}>
         <CartesianGrid vertical={false} strokeOpacity={0.08} />
-        <XAxis dataKey="label" tickLine={false} axisLine={false} tickMargin={6} className="text-[10px]" />
+        <XAxis
+          dataKey="label"
+          tickLine={false}
+          axisLine={false}
+          tickMargin={6}
+          className="text-[10px]"
+        />
         <YAxis
           yAxisId="runs"
           allowDecimals={false}
@@ -698,14 +747,35 @@ function OutcomeChart({ data }: { data: OutcomeDay[] }) {
           width={28}
           className="text-[10px]"
         />
-        <ChartTooltip
-          cursor={false}
-          content={<ChartTooltipContent />}
+        <ChartTooltip cursor={false} content={<ChartTooltipContent />} />
+        <Bar
+          yAxisId="runs"
+          dataKey="passed"
+          stackId="runs"
+          fill="var(--color-passed)"
+          radius={[0, 0, 0, 0]}
         />
-        <Bar yAxisId="runs" dataKey="passed" stackId="runs" fill="var(--color-passed)" radius={[0, 0, 0, 0]} />
-        <Bar yAxisId="runs" dataKey="failed" stackId="runs" fill="var(--color-failed)" radius={[0, 0, 0, 0]} />
-        <Bar yAxisId="runs" dataKey="pending" stackId="runs" fill="var(--color-pending)" radius={[0, 0, 0, 0]} />
-        <Bar yAxisId="runs" dataKey="other" stackId="runs" fill="var(--color-other)" radius={[3, 3, 0, 0]} />
+        <Bar
+          yAxisId="runs"
+          dataKey="failed"
+          stackId="runs"
+          fill="var(--color-failed)"
+          radius={[0, 0, 0, 0]}
+        />
+        <Bar
+          yAxisId="runs"
+          dataKey="pending"
+          stackId="runs"
+          fill="var(--color-pending)"
+          radius={[0, 0, 0, 0]}
+        />
+        <Bar
+          yAxisId="runs"
+          dataKey="other"
+          stackId="runs"
+          fill="var(--color-other)"
+          radius={[3, 3, 0, 0]}
+        />
       </BarChart>
     </ChartContainer>
   )

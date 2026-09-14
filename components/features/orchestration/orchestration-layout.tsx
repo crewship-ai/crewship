@@ -602,7 +602,7 @@ export function OrchestrationLayout({
   const showToolbar = visibleTabs.length > 0 || showCreateButtons
 
   return (
-    <div className="flex flex-col h-[calc(100vh-48px)] bg-background">
+    <div className="flex flex-col h-[calc(100dvh-48px)] bg-background">
       {/* ---- Toolbar: Tab navigation + context + actions (single row) ---- */}
       {showToolbar && (
         <SubBar
@@ -648,6 +648,7 @@ export function OrchestrationLayout({
             {/* Mobile: explorer toggle button */}
             {leftCollapsed && (
               <button
+                aria-label="Open explorer"
                 className="absolute top-2 left-2 z-20 h-8 w-8 min-h-[44px] min-w-[44px] rounded-md bg-card border border-white/[0.1] flex items-center justify-center text-muted-foreground hover:text-foreground"
                 onClick={() => setLeftCollapsed(false)}
               >
@@ -674,6 +675,7 @@ export function OrchestrationLayout({
                   >
                     <div className="flex items-center justify-end px-3 py-2 border-b border-white/[0.1]">
                       <button
+                        aria-label="Close explorer"
                         onClick={() => setLeftCollapsed(true)}
                         className="h-8 w-8 min-h-[44px] min-w-[44px] flex items-center justify-center text-muted-foreground hover:text-foreground"
                       >
@@ -865,7 +867,7 @@ export function OrchestrationLayout({
             </div>
           )}
           {activeTab === "issues" && !issueDetailFullWidth && !projectDetailFullWidth && (
-            <div className="h-full overflow-auto">
+            <div className={cn("h-full overflow-auto", isMobile && leftCollapsed && "pt-[52px]")}>
               <IssuesToolbarStrip
                 loaded={issues.length}
                 total={issuesTotal}

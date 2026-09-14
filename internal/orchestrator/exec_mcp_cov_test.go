@@ -50,7 +50,7 @@ func covCollectTokenWrites(t *testing.T, c *covContainer) []covTokenWrite {
 func TestInjectMCPOAuthTokens_NoOAuthCredsIsNoop(t *testing.T) {
 	t.Parallel()
 	c := &covContainer{}
-	err := injectMCPOAuthTokens(context.Background(), c, "ctr1", "bob",
+	err := injectMCPOAuthTokens(context.Background(), c, "ctr1", "bob", "run-cov",
 		[]MCPServerConfig{{Name: "gmail"}},
 		[]Credential{{EnvVarName: "ANTHROPIC_API_KEY", PlainValue: "x"}},
 		covQuietLogger())
@@ -79,7 +79,7 @@ func TestInjectMCPOAuthTokens_MatchedServerWritesBothPaths(t *testing.T) {
 		// The access token row carries the actual token for cred-1.
 		{ID: "tok-row", Type: "OAUTH2", EnvVarName: "_OAUTH_ACCESS_TOKEN:cred-1", PlainValue: "ya29.secret"},
 	}
-	if err := injectMCPOAuthTokens(context.Background(), c, "ctr1", "bob", servers, creds, covQuietLogger()); err != nil {
+	if err := injectMCPOAuthTokens(context.Background(), c, "ctr1", "bob", "run-cov", servers, creds, covQuietLogger()); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	writes := covCollectTokenWrites(t, c)
@@ -87,8 +87,8 @@ func TestInjectMCPOAuthTokens_MatchedServerWritesBothPaths(t *testing.T) {
 		t.Fatalf("expected 2 token writes (package dir + server dir), got %d: %+v", len(writes), writes)
 	}
 	wantPaths := map[string]bool{
-		"/crew/agents/bob/.config/google-workspace-mcp/tokens.json": false,
-		"/crew/agents/bob/.config/google-workspace/tokens.json":     false,
+		"/crew/runs/bob/run-cov/.config/google-workspace-mcp/tokens.json": false,
+		"/crew/runs/bob/run-cov/.config/google-workspace/tokens.json":     false,
 	}
 	for _, w := range writes {
 		if _, ok := wantPaths[w.path]; !ok {
@@ -119,14 +119,14 @@ func TestInjectMCPOAuthTokens_SingleTokenFallback(t *testing.T) {
 	creds := []Credential{
 		{ID: "t1", EnvVarName: "_OAUTH_ACCESS_TOKEN:credX", PlainValue: "tok-fallback"},
 	}
-	if err := injectMCPOAuthTokens(context.Background(), c, "ctr1", "bob", servers, creds, covQuietLogger()); err != nil {
+	if err := injectMCPOAuthTokens(context.Background(), c, "ctr1", "bob", "run-cov", servers, creds, covQuietLogger()); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	writes := covCollectTokenWrites(t, c)
 	if len(writes) != 1 {
 		t.Fatalf("expected 1 token write, got %d", len(writes))
 	}
-	if writes[0].path != "/crew/agents/bob/.config/notion/tokens.json" {
+	if writes[0].path != "/crew/runs/bob/run-cov/.config/notion/tokens.json" {
 		t.Errorf("wrong path: %q", writes[0].path)
 	}
 	if writes[0].body["access_token"] != "tok-fallback" {
@@ -142,7 +142,7 @@ func TestInjectMCPOAuthTokens_AmbiguousTokensSkipUnmatchedServer(t *testing.T) {
 		{EnvVarName: "_OAUTH_ACCESS_TOKEN:a", PlainValue: "tok-a"},
 		{EnvVarName: "_OAUTH_ACCESS_TOKEN:b", PlainValue: "tok-b"},
 	}
-	if err := injectMCPOAuthTokens(context.Background(), c, "ctr1", "bob", servers, creds, covQuietLogger()); err != nil {
+	if err := injectMCPOAuthTokens(context.Background(), c, "ctr1", "bob", "run-cov", servers, creds, covQuietLogger()); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if got := len(covCollectTokenWrites(t, c)); got != 0 {
@@ -157,7 +157,7 @@ func TestInjectMCPOAuthTokens_ExecErrorIsNonFatal(t *testing.T) {
 	}}
 	servers := []MCPServerConfig{{Name: "notion"}}
 	creds := []Credential{{EnvVarName: "_OAUTH_ACCESS_TOKEN:x", PlainValue: "tok"}}
-	if err := injectMCPOAuthTokens(context.Background(), c, "ctr1", "bob", servers, creds, covQuietLogger()); err != nil {
+	if err := injectMCPOAuthTokens(context.Background(), c, "ctr1", "bob", "run-cov", servers, creds, covQuietLogger()); err != nil {
 		t.Fatalf("write failures are best-effort, want nil error, got %v", err)
 	}
 }
@@ -171,7 +171,7 @@ var covMCPWriteRE = regexp.MustCompile(`echo '([A-Za-z0-9+/=]+)' \| base64 -d > 
 func TestSetupMCPConfig_MergeError(t *testing.T) {
 	t.Parallel()
 	c := &covContainer{}
-	err := setupMCPConfig(context.Background(), c, "ctr1", "bob",
+	err := setupMCPConfig(context.Background(), c, "ctr1", "bob", "run-cov",
 		`{"mcpServers":{}}`, `{not json`, nil, covQuietLogger())
 	if err == nil || !strings.Contains(err.Error(), "merge MCP configs") {
 		t.Fatalf("expected merge error, got %v", err)
@@ -187,7 +187,7 @@ func TestSetupMCPConfig_LegacyServerList(t *testing.T) {
 	servers := []MCPServerConfig{
 		{Name: "files", Transport: "stdio", Command: "node", Args: []string{"server.js"}},
 	}
-	if err := setupMCPConfig(context.Background(), c, "ctr1", "bob", "", "", servers, covQuietLogger()); err != nil {
+	if err := setupMCPConfig(context.Background(), c, "ctr1", "bob", "run-cov", "", "", servers, covQuietLogger()); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	var doc struct {
@@ -200,7 +200,7 @@ func TestSetupMCPConfig_LegacyServerList(t *testing.T) {
 			continue
 		}
 		found = true
-		if m[2] != "/crew/agents/bob/.mcp.json" {
+		if m[2] != "/crew/runs/bob/run-cov/.mcp.json" {
 			t.Errorf("config written to wrong path: %q", m[2])
 		}
 		raw, err := base64.StdEncoding.DecodeString(m[1])
@@ -230,7 +230,7 @@ func TestSetupMCPConfig_WriteError(t *testing.T) {
 		}
 		return nil, nil
 	}}
-	err := setupMCPConfig(context.Background(), c, "ctr1", "bob",
+	err := setupMCPConfig(context.Background(), c, "ctr1", "bob", "run-cov",
 		`{"mcpServers":{"x":{"command":"node"}}}`, "", nil, covQuietLogger())
 	if err == nil || !strings.Contains(err.Error(), "write MCP config") {
 		t.Fatalf("expected write error, got %v", err)

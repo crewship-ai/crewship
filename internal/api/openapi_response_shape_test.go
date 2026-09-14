@@ -11,6 +11,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/groupchat"
 	"github.com/crewship-ai/crewship/internal/harbormaster"
+	"github.com/crewship-ai/crewship/internal/pipeline"
 )
 
 // The spec's `required` list must be DERIVED from the response struct, not
@@ -40,6 +41,10 @@ var responseShapeContracts = []struct {
 	// A zero value of the struct the handler serializes.
 	value any
 }{
+	{name: "RoutineFixtureResult", pointer: "/components/schemas/RoutineFixtureResult", value: pipeline.FixtureStepResult{}},
+	{name: "RoutineDraft", pointer: "/components/schemas/RoutineDraft", value: pipeline.Draft{}},
+	{name: "RoutineDraftList", pointer: "/components/schemas/RoutineDraftList/items", value: routineDraftListEntry{}},
+	{name: "RoutinePublishResponse", pointer: "/components/schemas/RoutinePublishResponse", value: pipelineSaveResponse{}},
 	{
 		name:    "GET .../pipelines/calendar",
 		pointer: "/components/schemas/RoutineCalendarResponse",
@@ -240,6 +245,21 @@ var responseShapeContracts = []struct {
 	{name: "WorkspaceConversationAgent", pointer: "/components/schemas/WorkspaceConversationAgent", value: groupchat.AgentMember{}},
 	{name: "WorkspaceConversationAgentJob", pointer: "/components/schemas/WorkspaceConversationAgentJob", value: groupchat.Job{}},
 	{name: "CredentialTestResponse", pointer: "/components/schemas/CredentialTestResponse", value: testConnectionResponse{}},
+	// ── The durable work ledger (§9) ───────────────────────────────────────
+	// Every field on these views is emitted unconditionally, so `required` is
+	// the whole field set. That matters most for WorkCancelResponse: `outcome`
+	// is what separates "stopped" from "asked, and it may still be running",
+	// and a schema that let it be absent would let a UI show the wrong one.
+	{name: "WorkItem", pointer: "/components/schemas/WorkItem", value: workItemView{}},
+	{name: "WorkItemDetail", pointer: "/components/schemas/WorkItemDetail", value: workItemDetailView{}},
+	{name: "WorkItemPage", pointer: "/components/schemas/WorkItemPage", value: workItemPage{}},
+	{name: "WorkAttempt", pointer: "/components/schemas/WorkAttempt", value: workAttemptView{}},
+	{name: "WorkEvent", pointer: "/components/schemas/WorkEvent", value: workEventView{}},
+	{name: "WorkCancelResponse", pointer: "/components/schemas/WorkCancelResponse", value: workCancelResponse{}},
+	{name: "WebhookDelivery", pointer: "/components/schemas/WebhookDelivery", value: webhookDeliveryView{}},
+	{name: "WebhookDeliveryPage", pointer: "/components/schemas/WebhookDeliveryPage", value: webhookDeliveryPage{}},
+	{name: "RoutineWebhookReceipt", pointer: "/components/schemas/RoutineWebhookReceipt", value: routineReceiptView{}},
+	{name: "RoutineWebhookReceiptPage", pointer: "/components/schemas/RoutineWebhookReceiptPage", value: routineReceiptPage{}},
 }
 
 func TestOpenAPIRequired_MatchesTheStructsOwnJSONTags(t *testing.T) {

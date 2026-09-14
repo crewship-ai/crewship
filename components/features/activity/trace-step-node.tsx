@@ -1,5 +1,6 @@
 "use client"
 
+import { describeStep } from "@/lib/routine-step-describe"
 import { memo, useEffect, useRef, useState, type ReactNode } from "react"
 import { Handle, Position, type NodeProps } from "@xyflow/react"
 import {
@@ -251,14 +252,25 @@ function baseName(path: string): string {
 
 function TraceStepNodeBase({ data }: NodeProps) {
   const d = data as unknown as TraceStepNodeData
-  const { step, status, selected, waitpoint, heatmapBucket, durationMs, costUsd, outputSnippet, errorMessage } = d
+  const {
+    step,
+    status,
+    selected,
+    waitpoint,
+    heatmapBucket,
+    durationMs,
+    costUsd,
+    outputSnippet,
+    errorMessage,
+  } = d
   const subSpans = d.subSpans ?? []
   const model = d.model ?? null
   // First concrete tool + artifact across the step's actions — surfaced
   // as node badges so the canvas reads "this step ran ansible + wrote
   // sysfacts.yml" without expanding. Pure derivation, no hooks.
   const toolName = subSpans.find((s) => s.attributes.tool)?.attributes.tool ?? null
-  const artifactPath = subSpans.find((s) => s.attributes.artifact_path)?.attributes.artifact_path ?? null
+  const artifactPath =
+    subSpans.find((s) => s.attributes.artifact_path)?.attributes.artifact_path ?? null
   const visual = KIND_VISUAL[step.type] ?? KIND_VISUAL.agent_run
   const Icon = visual.Icon
   const ring = STATUS_RING[status]
@@ -272,7 +284,7 @@ function TraceStepNodeBase({ data }: NodeProps) {
     <div
       role="button"
       tabIndex={0}
-      aria-label={`${visual.label} step ${step.id}, status ${status}`}
+      aria-label={`${describeStep(step, 1).title}, status ${status}`}
       aria-pressed={selected}
       onKeyDown={(e) => {
         // Only fire when the wrapper itself is focused — keydown
@@ -317,19 +329,20 @@ function TraceStepNodeBase({ data }: NodeProps) {
         <span className={cn("flex h-5 w-5 items-center justify-center rounded", visual.tint)}>
           <Icon className="h-3.5 w-3.5" />
         </span>
-        <span className="truncate font-mono text-xs text-foreground">{step.id}</span>
+        <span className="truncate text-xs font-medium text-foreground">
+          {describeStep(step, 1).title}
+        </span>
         <span className="ml-auto rounded bg-white/[0.06] px-1 py-0 text-[9px] uppercase tracking-wider text-muted-foreground">
           {visual.label}
         </span>
       </div>
 
-      <div className="mt-1 flex items-center gap-1 text-[10px]">
-        {subtitleFor(step)}
-      </div>
+      <div className="mt-1 font-mono text-[10px] text-muted-foreground">{step.id}</div>
+      <div className="mt-1 flex items-center gap-1 text-[10px]">{subtitleFor(step)}</div>
 
       {/* Rich badges — model / tool / artifact + the drill-down count.
-        * Only render when the step actually has agent actions, so a run
-        * with no sub_spans looks exactly as it did before. */}
+       * Only render when the step actually has agent actions, so a run
+       * with no sub_spans looks exactly as it did before. */}
       {(model || toolName || artifactPath || subSpans.length > 0) && (
         <div className="mt-1.5 flex flex-wrap items-center gap-1">
           {model && (
@@ -361,7 +374,17 @@ function TraceStepNodeBase({ data }: NodeProps) {
         </div>
       )}
 
-      {waitpoint && <WaitpointActions waitpoint={waitpoint} stepStatus={status} />}
+      {step.wait?.decision_form
+        ? status === "waiting" && (
+            <a
+              href="/inbox"
+              className="nodrag mt-1.5 block text-xs text-primary underline"
+              onClick={(event) => event.stopPropagation()}
+            >
+              Answer in Inbox
+            </a>
+          )
+        : waitpoint && <WaitpointActions waitpoint={waitpoint} stepStatus={status} />}
     </div>
   )
   return (
@@ -549,14 +572,14 @@ function TriggerNodeBase({ data }: NodeProps) {
     d.triggeredVia === "definition"
       ? "Recipe start"
       : d.triggeredVia === "issue"
-      ? d.issueIdentifier || "issue"
-      : d.triggeredVia === "schedule"
-        ? "schedule"
-        : d.triggeredVia === "webhook"
-          ? "webhook"
-          : d.triggeredVia === "call_pipeline"
-            ? "sub-run"
-            : "manual"
+        ? d.issueIdentifier || "issue"
+        : d.triggeredVia === "schedule"
+          ? "schedule"
+          : d.triggeredVia === "webhook"
+            ? "webhook"
+            : d.triggeredVia === "call_pipeline"
+              ? "sub-run"
+              : "manual"
   return (
     <div
       role="img"
@@ -570,7 +593,12 @@ function TriggerNodeBase({ data }: NodeProps) {
         isConnectable={false}
       />
       <div className="flex items-center gap-1.5">
-        <span className={cn("flex h-5 w-5 items-center justify-center rounded", TRIGGER_VISUAL.tint)}>
+        <span
+          className={cn(
+            "flex h-5 w-5 items-center justify-center rounded",
+            TRIGGER_VISUAL.tint,
+          )}
+        >
           <Icon className="h-3.5 w-3.5" />
         </span>
         <span className="truncate text-xs font-medium text-foreground">{label}</span>

@@ -2,6 +2,9 @@ package memory
 
 import (
 	"context"
+	"crypto/rand"
+	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/memory/memdiff"
 	"github.com/crewship-ai/crewship/internal/safepath"
 )
 
@@ -144,6 +148,28 @@ func ToolSchemas() map[string]ToolSchema {
 						"type": "string",
 						"enum": ["replace", "append"],
 						"description": "replace overwrites the file; append concatenates to existing content."
+					},
+					"operation_id": {
+						"type": "string",
+						"description": "Stable id for this write, reused verbatim when you retry it. Omit and each attempt is a separate write."
+					},
+					"expected_sha256": {
+						"type": "string",
+						"description": "The content_sha256 memory.read returned for this file. Supply it on a replace and the write is refused with memory_conflict if anything changed the file in the meantime, instead of silently discarding it."
+					},
+					"removals": {
+						"type": "array",
+						"description": "The line spans this replace deletes, in the content you read. Declaring them makes a replace that drops lines you did not intend to drop fail with undeclared_removal rather than succeed.",
+						"items": {
+							"type": "object",
+							"properties": {
+								"start_line": {"type": "integer", "minimum": 1, "description": "1-based first line of the span in the content you read."},
+								"line_count": {"type": "integer", "minimum": 1},
+								"old_sha256": {"type": "string", "description": "SHA-256 of the exact removed bytes, each line including its trailing newline."}
+							},
+							"required": ["start_line", "line_count", "old_sha256"],
+							"additionalProperties": false
+						}
 					}
 				},
 				"required": ["tier", "content", "mode"],
@@ -255,6 +281,52 @@ type Dispatcher struct {
 	// handleSearch), which is what a caller with no SQLite gets.
 	agentIndex *Engine
 	crewIndex  *Engine
+
+	// ledger + blobRoot are the §8 mutation ledger. Both are nil/empty
+	// for every construction that exists today, and that is the honest
+	// state of the world rather than an oversight: the only caller of
+	// NewDispatcher is the sidecar's MCP surface (memory_mcp.go), which
+	// runs INSIDE the agent container and holds no handle to the host
+	// database. Without them Mutate runs in ledgerless mode — the lock,
+	// the normalisation, the declared-removal check, the cap and the
+	// durable write all apply; the revision, the operation-id
+	// idempotency and crash recovery do not. handleWrite says which of
+	// the two it did in its result metadata, so nothing downstream can
+	// mistake one for the other.
+	ledger *sql.DB
+	// profile is the guarantee this dispatcher's writes are made under. It
+	// defaults to ProfileLegacy because the in-container dispatcher has no
+	// ledger handle and no way to verify a run's generation, and pretending
+	// otherwise would let a UI describe an unchecked write as revision-checked.
+	// WithMutationProfile turns it up once those are wired.
+	profile  Profile
+	blobRoot string
+}
+
+// WithMutationProfile declares which guarantee this dispatcher's writes carry.
+//
+// It exists so that "legacy" is a decision somebody made rather than a field
+// nobody filled in. Passing ProfileGuaranteed makes Mutate REFUSE any write
+// that lacks a caller-supplied operation id, a durable ledger, CAS with
+// declared removals, or a wired Authorize — it does not quietly downgrade. That
+// is the point: for the parallel release profile a memory write that cannot be
+// checked must fail, not succeed unchecked.
+func WithMutationProfile(p Profile) DispatcherOption {
+	return func(d *Dispatcher) { d.profile = p }
+}
+
+// WithMutationLedger wires the §8 revision anchor and mutation ledger behind
+// memory.write. blobRoot is the content-addressed store ({memoryRoot}/versions)
+// the durable intent parks target content in — the same store memory_versions
+// already uses, so a recovered write and a recorded version share their blobs.
+//
+// Unset (the only case in the tree today) leaves the dispatcher in ledgerless
+// mode. See the ledger field.
+func WithMutationLedger(db *sql.DB, blobRoot string) DispatcherOption {
+	return func(d *Dispatcher) {
+		d.ledger = db
+		d.blobRoot = blobRoot
+	}
 }
 
 // DispatcherOption configures a Dispatcher at construction. Variadic so
@@ -308,7 +380,12 @@ func AdvertisedTools() []string {
 
 // NewDispatcher builds a Dispatcher bound to the given AgentContext.
 func NewDispatcher(ac AgentContext, opts ...DispatcherOption) *Dispatcher {
-	d := &Dispatcher{ctx: ac, now: func() time.Time { return time.Now().UTC() }}
+	d := &Dispatcher{
+		ctx: ac,
+		now: func() time.Time { return time.Now().UTC() },
+		// Legacy unless a caller says otherwise, and named rather than implied.
+		profile: ProfileLegacy,
+	}
 	for _, opt := range opts {
 		opt(d)
 	}
@@ -460,6 +537,110 @@ type writeArgs struct {
 	Key     string `json:"key"`
 	Content string `json:"content"`
 	Mode    string `json:"mode"`
+
+	// The §8 write envelope. All four are optional on this surface and
+	// none of them was here before, so an agent that has been calling
+	// memory.write with four fields keeps working unchanged.
+	//
+	// OperationID is stable across retries of the same logical write; a
+	// missing one is synthesised, and then a retry is a second write
+	// rather than the same one.
+	OperationID string `json:"operation_id"`
+	// ExpectedRevision is §8's CAS term for a replace. It needs the
+	// mutation ledger, which the in-container dispatcher does not have, so
+	// supplying it today is an error rather than a silently ignored field
+	// — the one thing worse than no CAS is a CAS that reports success
+	// without checking.
+	ExpectedRevision int64 `json:"expected_revision"`
+	// ExpectedSHA256 is the CAS that works WITHOUT the ledger: the exact
+	// bytes the client read must still be the bytes on disk. This is the
+	// only lost-update protection available to an agent today.
+	ExpectedSHA256 string `json:"expected_sha256"`
+	// Removals are the spans a replace deletes, in the base revision's
+	// normalised 1-based line numbering. Declaring them turns a replace
+	// that silently drops somebody else's lines into an
+	// undeclared_removal refusal.
+	Removals []memdiff.Removal `json:"removals"`
+}
+
+// scopeForTier is the ownership discriminator recorded on every mutation.
+// It reuses the vocabulary audit_watcher.go already writes into
+// memory_versions.path ("agent:<slug>", "crew:<id>") rather than inventing a
+// second one, so a mutation row and a version row for the same file agree.
+func (d *Dispatcher) scopeForTier(tier string) string {
+	if tier == "CREW" {
+		return "crew:" + d.ctx.CrewID
+	}
+	return "agent:" + d.ctx.AgentID
+}
+
+// auditPathForTier is the workspace-unique key the revision anchor is stored
+// under. The bare filename is NOT unique: every agent in a workspace owns an
+// AGENT.md, and keying the anchor on "AGENT.md" would collide all of them onto
+// one revision counter — a lost-update generator rather than a CAS.
+func (d *Dispatcher) auditPathForTier(tier, key string) string {
+	return d.scopeForTier(tier) + "/" + tierSourceLabel(tier, key)
+}
+
+// versionTierForToolTier maps the seven tool-surface tiers onto the five
+// memory_versions tiers. They are different vocabularies: the tool surface
+// names FILES ("AGENT", "daily", "peers"), memory_versions names OWNERSHIP
+// ("agent", "crew", "workspace", "pins", "learned"), and its CHECK constraint
+// refuses anything else.
+func versionTierForToolTier(tier string) Tier {
+	switch tier {
+	case "CREW":
+		return TierCrew
+	case "pins":
+		return TierPins
+	case "lessons":
+		return TierLearned
+	default:
+		// AGENT, PERSONA, daily and peers are all files the agent owns.
+		return TierAgent
+	}
+}
+
+// NewOperationID mints an operation id for a caller that supplied none. §8
+// requires one on every write; a surface whose existing clients do not send one
+// synthesises it here rather than refusing them.
+//
+// Deliberately random rather than derived from the content: two legitimate
+// appends of the same line are two writes, and a content-derived id would
+// deduplicate the second into silence.
+func NewOperationID() (string, error) {
+	var b [12]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return "", fmt.Errorf("rand for operation id: %w", err)
+	}
+	return "op_" + hex.EncodeToString(b[:]), nil
+}
+
+// mutationErrorMetadata puts the §8 error code in a field the model can branch
+// on, instead of leaving it buried in prose it has to pattern-match. The codes
+// are §8's vocabulary verbatim, so the agent-side retry rule ("re-read and
+// propose again with a NEW operation id, at most twice") can key off them.
+func mutationErrorMetadata(err error, tier string, res MutateResult) map[string]any {
+	meta := map[string]any{"tier": tier}
+	switch {
+	case errors.Is(err, ErrMemoryConflict):
+		meta["error_code"] = "memory_conflict"
+		meta["current_sha256"] = res.BaseSHA256
+		meta["current_revision"] = res.BaseRevision
+	case errors.Is(err, ErrUndeclaredRemoval):
+		meta["error_code"] = "undeclared_removal"
+	case errors.Is(err, ErrOperationConflict):
+		meta["error_code"] = "operation_conflict"
+	case errors.Is(err, ErrProtectedRemoval):
+		meta["error_code"] = "protected_removal"
+	case errors.Is(err, ErrContentTooLarge):
+		meta["error_code"] = "memory_content_too_large"
+	case errors.Is(err, ErrLedgerRequired):
+		meta["error_code"] = "memory_ledger_required"
+	case errors.Is(err, ErrNotCanonical):
+		meta["error_code"] = "memory_not_canonical"
+	}
+	return meta
 }
 
 func (d *Dispatcher) handleWrite(ctx context.Context, raw json.RawMessage) (ToolResult, error) {
@@ -522,148 +703,189 @@ func (d *Dispatcher) handleWrite(ctx context.Context, raw json.RawMessage) (Tool
 		return ToolResult{IsError: true, Content: "memory.write: cancelled: " + err.Error()}, nil
 	}
 
-	// Serialise the read-modify-write window so two concurrent appends
-	// can't each pass the cap check against the same pre-existing size
-	// and then sequentially write past the cap. Same lock primitive
-	// the lesson writer uses (writer.go FileLock / flock).
-	lk := NewFileLock(path + ".lock")
-	if err := lk.Lock(); err != nil {
-		return ToolResult{IsError: true, Content: "memory.write: lock: " + err.Error()}, nil
-	}
-	defer func() { _ = lk.Unlock() }()
-
-	if err := ctx.Err(); err != nil {
-		return ToolResult{IsError: true, Content: "memory.write: cancelled: " + err.Error()}, nil
-	}
-	// Re-check symlink containment after acquiring the lock — a writer
-	// could have raced us between resolvePath and Lock() to swap the
-	// file for a symlink. The lock now serialises further races.
-	if err := d.assertMemoryFile(path); err != nil {
-		return ToolResult{IsError: true, Content: "memory.write: " + err.Error()}, nil
-	}
-
-	// Read the current on-disk body once for both modes. append uses it
-	// as the prefix; replace discards it for the new content but still
-	// surfaces it as current_entries in the overflow guidance below (PR
-	// #6) so the agent can consolidate the existing file in-turn. The
-	// store stays a pure bounded store — this read is only for the
-	// guidance payload, it never widens the cap.
-	// readRegularNoFollow (not os.ReadFile): same TOCTOU no-follow guard as the
-	// read path (#1043) — append re-reads the on-disk body after taking the
-	// lock, and must refuse a raced symlink/FIFO swap rather than follow it.
-	old, err := readRegularNoFollow(path)
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return ToolResult{IsError: true, Content: "memory.write: " + err.Error()}, nil
-	}
-	currentBody := string(old)
-
-	var data []byte
-	existing := len(old)
-	if a.Mode == "append" {
-		data = append(old, []byte(a.Content)...)
-	} else {
-		data = []byte(a.Content)
-	}
-
-	// Audit A10.1 / P1-A: write-path scanner symmetry. handleRead has
-	// scanned every byte returned to the model since PR-A F1, but the
-	// write-path historically trusted the agent that called memory.write.
-	// That single-layer defence collapses in two scenarios the audit
-	// LIVE-verified:
+	// One call, one contract. Everything that used to live inline here —
+	// the flock, the post-lock symlink re-check, the read-modify-write for
+	// append, the injection scan, the cap, the durable temp+fsync+rename —
+	// is now the documented order in Mutate (§8), which the sidecar HTTP
+	// path and Restore run too. What stays here is what only the
+	// dispatcher knows: which quarantine directory a poisoned write lands
+	// in, and how to phrase a cap overflow so the model can fix it in the
+	// same turn.
 	//
-	//  1. Indirect injection -- an agent ingests poison via tool returns
-	//     (web fetch, file read, peer query) and persists the literal
-	//     bytes via memory.write. The next read trips the read-path
-	//     scanner, but the poison sits on disk in the meantime and is
-	//     visible to any other reader (audit_watcher, fts5 indexer,
-	//     operator viewing the file).
-	//
-	//  2. Confused-deputy -- a future code path reads memory files via
-	//     a route that bypasses the dispatcher (raw filesystem walk,
-	//     debug endpoint, backup roundtrip) and serves the poison.
-	//
-	// Scanning at the write step means poison never lands on disk in the
-	// first place. Same Quarantine helper as the read path -- the
-	// original payload lands under .quarantine/<sha>.md for operator
-	// review, the caller gets an IsError result with the category +
-	// pattern so the agent can see why the write was rejected and
-	// (hopefully) self-correct.
-	if hit := ScanContent(string(data)); hit != nil {
-		label := tierSourceLabel(a.Tier, a.Key)
-		_, sha, qerr := Quarantine(d.ctx.AgentMemoryDir, label, string(data), hit)
-		if qerr != nil {
-			// Quarantine write itself failed -- still refuse the
-			// memory.write so poison doesn't reach disk, surface the
-			// dual failure to the caller.
-			return ToolResult{
-				IsError: true,
-				Content: fmt.Sprintf("memory.write: scan hit %s/%s; quarantine also failed: %v", hit.Category, hit.Pattern, qerr),
-			}, nil
-		}
-		return ToolResult{
-			IsError: true,
-			Content: fmt.Sprintf("memory.write: rejected — scanner caught %s/%s. "+
+	// The lock is still taken before the read, so the cap invariant
+	// TestDispatch_Write_AppendCap_NoTOCTOU pins is unchanged: two
+	// concurrent appends still serialise, and the second still sees the
+	// first's bytes before it checks the cap.
+	scanRejected := false
+	var scanMeta map[string]any
+	var scanMessage string
+
+	mreq := MutateRequest{
+		OperationID: a.OperationID,
+		WorkspaceID: d.ctx.WorkspaceID,
+		ActorType:   "agent",
+		ActorID:     d.ctx.AgentID,
+		Source:      "memory.write",
+		Scope:       d.scopeForTier(a.Tier),
+		Key:         a.Key,
+		Tier:        versionTierForToolTier(a.Tier),
+		Path:        path,
+		AuditPath:   d.auditPathForTier(a.Tier, a.Key),
+		Content:     a.Content,
+		Cfg:         WriteConfig{MaxBytes: cap},
+		BlobRoot:    d.blobRoot,
+
+		ExpectedRevision: a.ExpectedRevision,
+		ExpectedSHA256:   a.ExpectedSHA256,
+		Removals:         a.Removals,
+
+		// Authorize is the post-lock containment re-check. A writer could
+		// have raced us between resolvePath and the lock to swap the file
+		// for a symlink; the lock serialises everything after this point.
+		Authorize: func(context.Context) error { return d.assertMemoryFile(path) },
+
+		// Screen is the write-path injection scan (audit A10.1 / P1-A). It
+		// runs under the lock on the exact bytes that would land on disk,
+		// before the cap, which is where it ran before.
+		Screen: func(_ context.Context, final []byte) (*MutateRejection, error) {
+			hit := ScanContent(string(final))
+			if hit == nil {
+				return nil, nil
+			}
+			label := tierSourceLabel(a.Tier, a.Key)
+			_, sha, qerr := Quarantine(d.ctx.AgentMemoryDir, label, string(final), hit)
+			scanRejected = true
+			if qerr != nil {
+				// Quarantine write itself failed — still refuse the
+				// memory.write so poison doesn't reach disk, surface the
+				// dual failure to the caller.
+				scanMessage = fmt.Sprintf("memory.write: scan hit %s/%s; quarantine also failed: %v",
+					hit.Category, hit.Pattern, qerr)
+				return &MutateRejection{Kind: "scan"}, nil
+			}
+			scanMessage = fmt.Sprintf("memory.write: rejected — scanner caught %s/%s. "+
 				"Original content moved to .quarantine/%s.md for operator review. "+
 				"Rewrite the content without the offending pattern before retrying.",
-				hit.Category, hit.Pattern, sha),
-			Metadata: map[string]any{
+				hit.Category, hit.Pattern, sha)
+			scanMeta = map[string]any{
 				"quarantined":         true,
 				"quarantine_sha256":   sha,
 				"quarantine_category": hit.Category,
 				"quarantine_pattern":  hit.Pattern,
 				"source":              label,
 				"tier":                a.Tier,
-			},
-		}, nil
+			}
+			return &MutateRejection{Kind: "scan"}, nil
+		},
+	}
+	if a.Mode == "append" {
+		mreq.Op = OpAppend
+	} else {
+		mreq.Op = OpReplace
+		// A replace discards the base, so importing a non-canonical one
+		// changes nothing on disk — it only lets the declared-removal check
+		// diff against a normalised base instead of refusing outright. An
+		// append leaves Import off, so a CRLF file an agent has been
+		// appending to for months keeps its bytes.
+		mreq.Import = true
+	}
+	if strings.TrimSpace(mreq.OperationID) == "" {
+		// §8 requires an operation id on every write. The tool schema makes
+		// it optional because the model has been calling memory.write
+		// without one since the tool shipped, and refusing those calls would
+		// break every agent to buy idempotency none of them asked for. A
+		// synthesised id is random, not content-derived: two legitimate
+		// appends of the same line are two writes, and deduplicating them
+		// would silently drop the second.
+		gen, gerr := NewOperationID()
+		if gerr != nil {
+			return ToolResult{IsError: true, Content: "memory.write: " + gerr.Error()}, nil
+		}
+		mreq.OperationID = gen
 	}
 
-	if cap > 0 && len(data) > cap {
-		// PR #6: instead of a bare rejection, hand the agent everything
-		// it needs to fix this within the SAME turn — the current file
-		// body (current_entries) plus a usage string — and tell it to
-		// consolidate that body and retry the write now, rather than
-		// abandoning the write. The store does not consolidate for the
-		// agent; it just surfaces the material so the agent can.
+	mreq.Profile = d.profile
+	mres, mErr := Mutate(ctx, d.ledger, mreq)
+	if mErr != nil {
+		// Cancellation keeps its own wording: the model treats "cancelled"
+		// as "the run is going away, stop", and a generic write failure as
+		// "try something else".
+		if errors.Is(mErr, context.Canceled) || errors.Is(mErr, context.DeadlineExceeded) {
+			return ToolResult{IsError: true, Content: "memory.write: cancelled: " + mErr.Error()}, nil
+		}
+		return ToolResult{
+			IsError:  true,
+			Content:  "memory.write: " + mErr.Error(),
+			Metadata: mutationErrorMetadata(mErr, a.Tier, mres),
+		}, nil
+	}
+	if mres.Rejection != nil {
+		if scanRejected {
+			return ToolResult{IsError: true, Content: scanMessage, Metadata: scanMeta}, nil
+		}
+		if mres.Rejection.Kind == "cap" {
+			existing := len(mres.Base)
+			projected, _ := mres.Rejection.Detail["bytes_attempted"].(int)
+			// PR #6: instead of a bare rejection, hand the agent everything
+			// it needs to fix this within the SAME turn — the current file
+			// body (current_entries) plus a usage string — and tell it to
+			// consolidate that body and retry the write now, rather than
+			// abandoning the write. The store does not consolidate for the
+			// agent; it just surfaces the material so the agent can.
+			return ToolResult{
+				IsError: true,
+				Content: fmt.Sprintf(
+					"memory.write: cap exceeded for tier=%s. Final would be %d bytes; cap is %d (%s). "+
+						"Consolidate the current entries shown in metadata.current_entries — merge "+
+						"duplicates, drop stale lines, summarize — then retry this write in this turn "+
+						"with mode='replace' carrying the consolidated body.",
+					a.Tier, projected, cap, capUsage(existing, cap)),
+				Metadata: map[string]any{
+					"tier":            a.Tier,
+					"cap_bytes":       cap,
+					"projected_size":  projected,
+					"current_size":    existing,
+					"current_entries": string(mres.Base),
+					"usage":           capUsage(existing, cap),
+				},
+			}, nil
+		}
 		return ToolResult{
 			IsError: true,
-			Content: fmt.Sprintf(
-				"memory.write: cap exceeded for tier=%s. Final would be %d bytes; cap is %d (%s). "+
-					"Consolidate the current entries shown in metadata.current_entries — merge "+
-					"duplicates, drop stale lines, summarize — then retry this write in this turn "+
-					"with mode='replace' carrying the consolidated body.",
-				a.Tier, len(data), cap, capUsage(existing, cap)),
+			Content: fmt.Sprintf("memory.write: rejected by %s policy: %s", mres.Rejection.Kind, mres.Rejection.Message),
 			Metadata: map[string]any{
-				"tier":            a.Tier,
-				"cap_bytes":       cap,
-				"projected_size":  len(data),
-				"current_size":    existing,
-				"current_entries": currentBody,
-				"usage":           capUsage(existing, cap),
+				"tier":             a.Tier,
+				"rejection_kind":   mres.Rejection.Kind,
+				"rejection_detail": mres.Rejection.Detail,
 			},
 		}, nil
 	}
-
-	// 2a: durable, atomic persist — a memory.write that returns success
-	// MUST be on stable storage (fsync'd) and never leave a torn file. The
-	// old os.WriteFile only reached the page cache and truncated in place,
-	// so "ok" could be returned for a write a crash would lose, and an
-	// interrupted write corrupted the file. writeFileDurable fails closed:
-	// on any error the prior content is intact and we return is_error, so
-	// the model (which surfaces is_error — verified on dev2) reports the
-	// failure instead of a false "DONE".
-	if err := writeFileDurable(path, data, 0o644); err != nil {
-		return ToolResult{IsError: true, Content: "memory.write: " + err.Error()}, nil
-	}
+	written := mres.BytesWritten
 
 	label := d.pathToSourceLabel(path)
 	res := ToolResult{
-		Content: fmt.Sprintf("ok: %d bytes written to %s", len(data), a.Tier),
+		Content: fmt.Sprintf("ok: %d bytes written to %s", written, a.Tier),
 		Metadata: map[string]any{
 			"source":        tierSourceLabel(a.Tier, a.Key),
-			"bytes_written": len(data),
+			"bytes_written": written,
 			"cap_bytes":     cap,
-			"cap_pct":       capPct(len(data), cap),
+			"cap_pct":       capPct(written, cap),
+			// §8's read/write envelope. revision is 0 and
+			// revision_checked false in ledgerless mode — which is every
+			// deployment today, because the in-container dispatcher has no
+			// handle to the host database. Reporting it is how a caller
+			// avoids describing an unchecked write as a checked one.
+			"content_sha256":   mres.ContentSHA256,
+			"revision":         mres.Revision,
+			"revision_checked": mres.LedgerRecorded,
+			"operation_id":     mreq.OperationID,
 		},
+	}
+	if mres.MergedFinalLine {
+		// The file did not end in a newline, so the first appended bytes
+		// joined the previous last line. Silence here is how an agent ends
+		// up believing it added a bullet when it actually extended one.
+		res.Metadata["merged_final_line"] = true
 	}
 
 	// Keep the search index in step with the file we just wrote. Nothing
@@ -684,7 +906,7 @@ func (d *Dispatcher) handleWrite(ctx context.Context, raw json.RawMessage) (Tool
 			res.Metadata["search_index_updated"] = true
 		}
 	}
-	if cap > 0 && float64(len(data)) >= float64(cap)*softCapPct {
+	if cap > 0 && float64(written) >= float64(cap)*softCapPct {
 		// PR #6 parity with the hard-error branch: the write succeeded,
 		// but it's close enough to the cap that the NEXT append will be
 		// rejected. Surface the just-written body as current_entries +
@@ -696,9 +918,9 @@ func (d *Dispatcher) handleWrite(ctx context.Context, raw json.RawMessage) (Tool
 				"metadata.current_entries — merge duplicates, drop stale lines, "+
 				"summarize — and rewrite the consolidated body with mode='replace' "+
 				"in this turn to avoid the next append being rejected.",
-			capUsage(len(data), cap))
-		res.Metadata["current_entries"] = string(data)
-		res.Metadata["usage"] = capUsage(len(data), cap)
+			capUsage(written, cap))
+		res.Metadata["current_entries"] = string(mres.Written)
+		res.Metadata["usage"] = capUsage(written, cap)
 	}
 	return res, nil
 }

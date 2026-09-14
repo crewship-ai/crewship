@@ -96,7 +96,7 @@ func (s *Server) handlePipelinesSave(w http.ResponseWriter, r *http.Request) {
 		writeJSONResponse(w, http.StatusForbidden, map[string]string{"error": "unrecognized agent token"})
 		return
 	}
-	status, respBody := s.savePipeline(r.Context(), body, authorAgentID)
+	status, respBody := s.savePipeline(r.Context(), body, authorAgentID, s.requestChatID(r))
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_, _ = w.Write(respBody)
@@ -122,7 +122,7 @@ func (s *Server) handlePipelinesSave(w http.ResponseWriter, r *http.Request) {
 // authorAgentID is the ACTING agent resolved from the per-agent bearer token
 // by the calling handler (#812) — the shared sidecar's boot AgentID is only a
 // fallback when no token was presented.
-func (s *Server) savePipeline(ctx context.Context, body pipelinesSaveRequest, authorAgentID string) (int, []byte) {
+func (s *Server) savePipeline(ctx context.Context, body pipelinesSaveRequest, authorAgentID, authorChatID string) (int, []byte) {
 	if s.ipc == nil {
 		return http.StatusServiceUnavailable, mustJSON(map[string]string{"error": "IPC not configured"})
 	}
@@ -203,7 +203,7 @@ func (s *Server) savePipeline(ctx context.Context, body pipelinesSaveRequest, au
 		"definition":       body.Definition,
 		"author_crew_id":   s.ipc.CrewID,
 		"author_agent_id":  authorAgentID,
-		"author_chat_id":   s.ipc.ChatID,
+		"author_chat_id":   authorChatID,
 		"save_token":       testRunResult.SaveToken,
 		"target_crew_slug": body.Crew,
 		// B8 (#2359): forwarded verbatim. The main API's InternalSave does

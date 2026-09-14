@@ -128,6 +128,14 @@ func openStoreTestDB(t *testing.T) *sql.DB {
 		_ = db.Close()
 		t.Fatalf("schema: %v", err)
 	}
+	// pipeline_schedules rides along because Save now reads it on every
+	// definition change (#2495's schedule-preset gate). Production always
+	// has the table; a store fixture without it was only ever green because
+	// the gate used to run on the publication path alone.
+	if _, err := db.ExecContext(context.Background(), scheduleSchemaSQL); err != nil {
+		_ = db.Close()
+		t.Fatalf("schedule schema: %v", err)
+	}
 	return db
 }
 

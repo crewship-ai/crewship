@@ -123,12 +123,10 @@ func TestSlashFormSchemaForInputs(t *testing.T) {
 			wantValueType: "",
 		},
 		{
-			// A type from a DSL newer than this build. It must still
-			// draw something the server can validate rather than
-			// vanishing from the form.
-			name:          "unknown future type falls back to text",
+			// A newer DSL type stays visible without accepting an unsafe text substitute.
+			name:          "unknown future type is explicitly unsupported",
 			in:            pipeline.InputSpec{Name: "geo", Type: "geopoint"},
-			wantType:      "text",
+			wantType:      "unsupported",
 			wantValueType: "geopoint",
 		},
 	}
@@ -537,5 +535,17 @@ func TestSlashRoutineChoiceFields(t *testing.T) {
 	}
 	if fields[1].Type != "multiselect" || fields[1].ValueType != "array" || fields[1].Default != `["a,b"]` {
 		t.Fatalf("lost typed default: %+v", fields[1])
+	}
+}
+
+func TestRoutineInputWidgetUnknownReferences(t *testing.T) {
+	for _, input := range []pipeline.InputSpec{
+		{Name: "credential", Type: "string", Widget: "credential"},
+		{Name: "credential", Type: "string", Widget: "credential", Options: []string{"saved-reference"}},
+		{Name: "file", Type: "file", Options: []string{"saved-reference"}},
+	} {
+		if got := routineInputWidget(input); got != "unsupported" {
+			t.Fatalf("%+v mapped to %q", input, got)
+		}
 	}
 }

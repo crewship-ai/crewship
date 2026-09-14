@@ -119,6 +119,7 @@ var AllEntryTypes = []EntryType{
 	EntryPeerConversation,
 	EntryPeerEscalation,
 	EntryPipelineDryRun,
+	EntryPipelinePublished,
 	EntryPipelineRunCompleted,
 	EntryPipelineRunFailed,
 	EntryPipelineRunStarted,
@@ -161,4 +162,8 @@ var AllEntryTypes = []EntryType{
 	EntrySystemHookToggled,
 	EntrySystemMigration,
 	EntryTaskDelegated,
+	EntryWorkAccepted,
+	EntryWorkClaimed,
+	EntryWorkLeaseLost,
+	EntryWorkNeedsReconciliation,
 }

@@ -1,6 +1,16 @@
 # PRD — Pages
 
-Status: draft · 2026-08-12 · **Release 1.0 scope** (owner decision, 2026-08-12) · not yet implemented
+> **Current custom dashboard implementation:** [Pages Apps v1](pages-apps-v1.md), including the single-file YAML portability contract.
+
+Historical design status: draft · 2026-08-12 · **Release 1.0 scope** (owner decision, 2026-08-12). This is the original design snapshot, not current implementation status; see the [current handoff](pages-apps-handoff.md).
+
+> **Follow-up proposal (2026-09-08):** [Pages as internal applications](pages-apps.md)
+> covers custom React applications, framework compatibility, customer workflows,
+> and the integration gates beyond this original panel-oriented design. It is a
+> proposal, not a claim that these additions have shipped.
+> The subsequent [implementation architecture](pages-apps-architecture.md) defines
+> the React/TypeScript/Vite project lifecycle, SDK boundary, runtime isolation,
+> build workers, publication consistency, and measurable production gates.
 
 > **The requirement being specified.** *"Every user, and every agent acting for a user, can
 > compose a page out of panels. A panel's data is produced by a routine or by a script running

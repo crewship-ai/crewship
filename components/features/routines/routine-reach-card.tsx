@@ -4,7 +4,10 @@ import Link from "next/link"
 import { ArrowUpRight, Bell, Bot } from "lucide-react"
 
 import { Skeleton } from "@/components/ui/skeleton"
-import { useWorkspaceAgentDirectory, type WorkspaceAgentIdentity } from "@/hooks/use-workspace-agent-directory"
+import {
+  useWorkspaceAgentDirectory,
+  type WorkspaceAgentIdentity,
+} from "@/hooks/use-workspace-agent-directory"
 import { RoutineAgentLink } from "./routine-agent-link"
 import { cn } from "@/lib/utils"
 import { useAgentReach } from "@/hooks/use-agent-reach"
@@ -33,11 +36,20 @@ const MODE_STYLE: Record<string, string> = {
 export function RoutineReachCard({
   workspaceId,
   agentSlugs,
+  bare = false,
 }: {
   /** Undefined while the page is still resolving its workspace. */
   workspaceId: string | undefined
   /** Agent slugs the routine invokes, from its manifest. */
   agentSlugs: string[]
+  /**
+   * Render the list without its own card shell.
+   *
+   * The routine detail used to stack this beside Access, which lists the same
+   * agents one line higher. Two cards, one question. Access now owns the
+   * header and this owns the rows.
+   */
+  bare?: boolean
 }) {
   const { agents, error } = useWorkspaceAgentDirectory(workspaceId)
 
@@ -49,6 +61,37 @@ export function RoutineReachCard({
     slug,
     agent: agents?.find((a) => a.slug === slug) ?? null,
   }))
+
+  const body =
+    error && !agents ? (
+      <p role="status" className="px-4 py-3 text-xs text-muted-foreground">
+        Agent details are temporarily unavailable.
+      </p>
+    ) : agents === null ? (
+      <div className="space-y-2 px-4 py-3">
+        <Skeleton className="h-4 w-44 rounded" />
+        <Skeleton className="h-4 w-32 rounded" />
+      </div>
+    ) : (
+      <ul className="divide-y divide-white/[0.04]">
+        {resolved.map(({ slug, agent }) => (
+          <li key={slug} className={bare ? "py-2 first:pt-0 last:pb-0" : "px-4 py-2.5"}>
+            {agent ? (
+              <AgentRow workspaceId={workspaceId} agent={agent} />
+            ) : (
+              <div className="flex flex-wrap items-center gap-2 text-xs">
+                <RoutineAgentLink slug={slug} workspaceId={workspaceId} />
+                <span className="text-[11px] text-muted-foreground">
+                  — no such agent in this workspace; the routine would fail here
+                </span>
+              </div>
+            )}
+          </li>
+        ))}
+      </ul>
+    )
+
+  if (bare) return body
 
   return (
     <div className="overflow-hidden rounded-xl border border-white/8 bg-card">
@@ -67,29 +110,7 @@ export function RoutineReachCard({
         </Link>
       </div>
 
-      {error && !agents ? <p role="status" className="px-4 py-3 text-xs text-muted-foreground">Agent details are temporarily unavailable.</p> : agents === null ? (
-        <div className="space-y-2 px-4 py-3">
-          <Skeleton className="h-4 w-44 rounded" />
-          <Skeleton className="h-4 w-32 rounded" />
-        </div>
-      ) : (
-        <ul className="divide-y divide-white/[0.04]">
-          {resolved.map(({ slug, agent }) => (
-            <li key={slug} className="px-4 py-2.5">
-              {agent ? (
-                <AgentRow workspaceId={workspaceId} agent={agent} />
-              ) : (
-                <div className="flex items-center gap-2 text-xs">
-                  <span className="font-mono text-foreground/70">@{slug}</span>
-                  <span className="text-[11px] text-muted-foreground">
-                    — no such agent in this workspace; the routine would fail here
-                  </span>
-                </div>
-              )}
-            </li>
-          ))}
-        </ul>
-      )}
+      {body}
     </div>
   )
 }
@@ -104,7 +125,9 @@ function AgentRow({ workspaceId, agent }: { workspaceId: string; agent: Workspac
       {loading ? (
         <Skeleton className="h-4 w-24 rounded" />
       ) : toolkits.length === 0 && channels.length === 0 ? (
-        <span className="text-[11px] text-muted-foreground">— reaches nothing outside Crewship</span>
+        <span className="text-[11px] text-muted-foreground">
+          — reaches nothing outside Crewship
+        </span>
       ) : (
         <>
           {toolkits.map((t) => (

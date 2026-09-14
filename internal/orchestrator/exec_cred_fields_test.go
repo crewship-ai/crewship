@@ -61,13 +61,14 @@ func TestBuildEnvVars_FieldsAccompanyTheirCredential(t *testing.T) {
 func TestBuildEnvVars_FieldNeverOverwritesAnExistingName(t *testing.T) {
 	req := AgentRunRequest{
 		AgentSlug: "ada",
+		RunID:     "run-1",
 		Credentials: []Credential{{
 			ID: "c1", EnvVarName: "X", PlainValue: "v", Type: "CLI_TOKEN",
 			Fields: []CredentialField{{EnvVar: "HOME", Value: "/tmp/attacker"}},
 		}},
 	}
-	if got := envMap(t, BuildEnvVars(req, nil))["HOME"]; got != "/crew/agents/ada" {
-		t.Errorf("HOME = %q, want the runtime's /crew/agents/ada", got)
+	if got := envMap(t, BuildEnvVars(req, nil))["HOME"]; got != "/crew/runs/ada/run-1" {
+		t.Errorf("HOME = %q, want the runtime's /crew/runs/ada/run-1", got)
 	}
 }
 
@@ -77,10 +78,11 @@ func TestBuildEnvVars_FieldNeverOverwritesAnExistingName(t *testing.T) {
 func TestBuildEnvVars_NoFieldsIsByteIdentical(t *testing.T) {
 	req := AgentRunRequest{
 		AgentSlug:   "ada",
+		RunID:       "run-1",
 		Credentials: []Credential{{ID: "c1", EnvVarName: "GH_TOKEN", PlainValue: "ghp", Type: "CLI_TOKEN"}},
 	}
 	want := []string{
-		"HOME=/crew/agents/ada",
+		"HOME=/crew/runs/ada/run-1",
 		"CLAUDE_CODE_DISABLE_AUTOUPDATE=1",
 		"CREWSHIP_AGENT_ID=",
 		"CREWSHIP_CREW_ID=",

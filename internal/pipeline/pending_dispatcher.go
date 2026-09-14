@@ -162,14 +162,15 @@ func (d *PendingRunDispatcher) sweep(ctx context.Context) {
 // through the executor, then backfills the resulting run id.
 func (d *PendingRunDispatcher) fireOne(ctx context.Context, pr PendingRun) {
 	// Claim the row first so a second tick (or replica) can't double-fire.
-	claimed, err := d.store.MarkFired(ctx, pr.ID, "")
+	claimed, err := d.store.ClaimDue(ctx, pr.ID, time.Now().UTC())
 	if err != nil {
 		d.logger.Warn("pending dispatcher: claim", "error", err, "pending_id", pr.ID)
 		return
 	}
-	if !claimed {
-		return // already fired/cancelled/expired by someone else
+	if claimed == nil {
+		return // already claimed, cancelled, expired or postponed
 	}
+	pr = *claimed
 
 	// Prewarm the crew's container off the critical path: kick provisioning at
 	// claim so the run's first agent step finds it warm instead of paying cold
@@ -199,11 +200,12 @@ func (d *PendingRunDispatcher) fireOne(ctx context.Context, pr PendingRun) {
 
 	triggeredVia, triggeredByID := effectivePendingTrigger(pr)
 	res, runErr := d.executor.Run(ctx, RunInput{
-		PipelineID:   pr.PipelineID,
-		WorkspaceID:  pr.WorkspaceID,
-		Inputs:       inputs,
-		Mode:         ModeRun,
-		TierOverride: Complexity(pr.TierOverride),
+		PinnedVersion: pr.PinnedVersion,
+		PipelineID:    pr.PipelineID,
+		WorkspaceID:   pr.WorkspaceID,
+		Inputs:        inputs,
+		Mode:          ModeRun,
+		TierOverride:  Complexity(pr.TierOverride),
 		// Honour what the row says started it. Before pending_runs carried
 		// attribution this was hard-coded to schedule/self, so every
 		// automation-fired run reported a cron.
@@ -223,11 +225,9 @@ func (d *PendingRunDispatcher) fireOne(ctx context.Context, pr PendingRun) {
 		InvokingUserID: pr.InvokingUserID,
 		Tags:           tags,
 		MetadataJSON:   pr.MetadataJSON,
-		// Each pending row is a one-shot fired once (MarkFired claims it above);
-		// key on the row ID as a second guard so a re-dispatch of the same row
-		// (debounce coalescing, restart) dedupes at the executor rather than
-		// producing a second run.
-		IdempotencyKey: ScheduledFireIdempotencyKey("pending", pr.ID, "once"),
+		// A one-time authoring row can be rearmed for a different date. The
+		// occurrence identifies the start; redispatch of that occurrence dedupes.
+		IdempotencyKey: ScheduledFireIdempotencyKey("pending", pr.ID, pr.FireAt.UTC().Format(time.RFC3339Nano)),
 	})
 	if runErr != nil {
 		d.logger.Warn("pending dispatcher: run failed", "error", runErr, "pending_id", pr.ID)

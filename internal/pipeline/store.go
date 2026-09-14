@@ -198,7 +198,17 @@ func (s *Store) save(ctx context.Context, in SaveInput, trigger *TriggerInput) (
 			return nil, nil, fmt.Errorf("pipeline: begin tx: %w", err)
 		}
 		defer func() { _ = tx.Rollback() }()
-
+		// Read inside the tx so the "did the recipe change" question and the
+		// write that answers it cannot straddle another writer.
+		var existingDefinition string
+		if err := tx.QueryRowContext(ctx,
+			`SELECT definition_json FROM pipelines WHERE id = ?`, existingID,
+		).Scan(&existingDefinition); err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return nil, nil, fmt.Errorf("pipeline: read existing definition: %w", err)
+		}
+		if err := s.consumeDraftTx(ctx, tx, in); err != nil {
+			return nil, nil, err
+		}
 		// Disable-airbag invariant: a routine an OWNER/ADMIN explicitly
 		// 'disabled' must stay disabled across an edit. statusForRisk only
 		// ever yields 'active'/'proposed', so without this a plain re-save
@@ -291,6 +301,30 @@ WHERE id = ?`,
 			return nil, nil, fmt.Errorf("pipeline: save trigger (update): %w", err)
 		}
 
+		// Schedule-preset gate (#2495). Every door that changes an active
+		// recipe lands here — publish, plain save, internal/agent save,
+		// import, manifest apply — so this is where the check belongs rather
+		// than inside consumeDraftTx's publication branch.
+		//
+		// AFTER createTriggerTx on purpose. The question is "after this save,
+		// can every enabled unpinned plan still run?", and a save that
+		// carries a trigger rewrites its own plan's preset in this same
+		// transaction. Checked before the trigger, such a save would be
+		// refused for a preset it was in the middle of fixing — and since the
+		// preset cannot be fixed on its own either (it would not satisfy the
+		// recipe still published at that moment), a schema change and its
+		// plan would deadlock each other. Checked here, changing both
+		// together is the way through.
+		//
+		// Skipped when the definition is byte-identical: a rename or a
+		// description edit must not start failing over a preset that was
+		// already imperfect before this gate existed.
+		if existingDefinition != in.DefinitionJSON {
+			if err := s.checkSchedulePresetsTx(ctx, tx, existingID, in.DefinitionJSON); err != nil {
+				return nil, nil, err
+			}
+		}
+
 		if err := tx.Commit(); err != nil {
 			return nil, nil, fmt.Errorf("pipeline: commit: %w", err)
 		}
@@ -304,6 +338,9 @@ WHERE id = ?`,
 		return nil, nil, fmt.Errorf("pipeline: begin tx (insert): %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := s.consumeDraftTx(ctx, tx, in); err != nil {
+		return nil, nil, err
+	}
 
 	_, err = tx.ExecContext(ctx, `
 INSERT INTO pipelines (
@@ -386,6 +423,22 @@ func (s *Store) createTriggerTx(ctx context.Context, tx *sql.Tx, in SaveInput, p
 	if trigger == nil || trigger.Kind == "" || trigger.Kind == TriggerKindManual {
 		return nil, nil
 	}
+	// A trigger carries a preset, and a preset the recipe would refuse at
+	// dispatch must not be storable (#2496). Same function the run path
+	// uses, against the definition THIS save is publishing — so a recipe and
+	// the trigger created alongside it can never disagree from the moment
+	// they land. ErrInvalidTrigger keeps the existing 422 mapping on both
+	// save doors. A definition that no longer parses is left to the
+	// executor to surface rather than blamed on the trigger.
+	if dsl, perr := Parse([]byte(in.DefinitionJSON)); perr == nil {
+		// Deliberately not gated on a non-empty preset: a trigger that
+		// supplies NOTHING to a recipe with a required input is the
+		// unsatisfiable plan this check exists for, and skipping the empty
+		// case would let exactly that one through.
+		if verr := ValidateFormInputs(dsl, trigger.Inputs); verr != nil {
+			return nil, fmt.Errorf("%w: %s", ErrInvalidTrigger, verr.Error())
+		}
+	}
 	if trigger.Kind == TriggerKindOnce {
 		now := s.now().UTC()
 		if !trigger.FireAt.After(now) || trigger.FireAt.After(now.AddDate(2, 0, 0)) {
@@ -401,13 +454,23 @@ func (s *Store) createTriggerTx(ctx context.Context, tx *sql.Tx, in SaveInput, p
 		if string(inputs) == "null" {
 			inputs = []byte("{}")
 		}
+		var pinnedVersion int
+		if err := tx.QueryRowContext(ctx, `SELECT head_version FROM pipelines WHERE id=?`, pipelineID).Scan(&pinnedVersion); err != nil {
+			return nil, fmt.Errorf("pipeline: read head version: %w", err)
+		}
+		if pinnedVersion < 1 {
+			return nil, fmt.Errorf("%w: publish an archived version before scheduling", ErrInvalidTrigger)
+		}
 		id := "pnd_once_" + pipelineID
 		// Stable authoring identity makes a repeated save update one pending
-		// start. A consumed/cancelled start is never rearmed by editing a recipe.
+		// start. A consumed/cancelled start is never rearmed by editing a
+		// recipe. A fired start can be scheduled again for a new future date;
+		// an explicitly cancelled start requires a new scheduling action.
 		result, err := tx.ExecContext(ctx, `INSERT INTO pending_runs
-          (id,workspace_id,pipeline_id,pipeline_slug,inputs_json,tags_json,metadata_json,priority,fire_at,invoking_user_id,triggered_via,triggered_by_id,status,created_at,updated_at)
-          VALUES (?,?,?,?,?,'[]','{}',0,?,?,'schedule',?,'pending',datetime('now','subsec'),datetime('now','subsec'))
-          ON CONFLICT(id) DO UPDATE SET fire_at=excluded.fire_at,inputs_json=excluded.inputs_json,updated_at=excluded.updated_at WHERE pending_runs.status='pending'`, id, in.WorkspaceID, pipelineID, in.Slug, string(inputs), tsformat.Format(trigger.FireAt), nullableStr(in.Author.UserID), id)
+          (id,workspace_id,pipeline_id,pipeline_slug,inputs_json,tags_json,metadata_json,priority,fire_at,invoking_user_id,triggered_via,triggered_by_id,pinned_version,status,created_at,updated_at)
+          VALUES (?,?,?,?,?,'[]','{}',0,?,?,'schedule',?,?,'pending',datetime('now','subsec'),datetime('now','subsec'))
+          ON CONFLICT(id) DO UPDATE SET fire_at=excluded.fire_at,inputs_json=excluded.inputs_json,pinned_version=excluded.pinned_version,status='pending',updated_at=excluded.updated_at
+          WHERE pending_runs.status='pending' OR (pending_runs.status='fired' AND pending_runs.fire_at <> excluded.fire_at)`, id, in.WorkspaceID, pipelineID, in.Slug, string(inputs), tsformat.Format(trigger.FireAt), nullableStr(in.Author.UserID), id, pinnedVersion)
 		if err != nil {
 			return nil, err
 		}

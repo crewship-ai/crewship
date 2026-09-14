@@ -127,7 +127,7 @@ func TestRoutineStepRunRunE_PrintsVerdictAndOutput(t *testing.T) {
 	if !strings.Contains(out, "PASS") || !strings.Contains(out, "claude-haiku-4-5") {
 		t.Errorf("verdict/model line missing:\n%s", out)
 	}
-	if !strings.Contains(out, "simulated (no run record)") {
+	if !strings.Contains(out, "live execution (no run record)") {
 		t.Errorf("simulation marker missing:\n%s", out)
 	}
 	if !strings.Contains(out, "\"total\": 42") {
@@ -172,7 +172,7 @@ func TestRoutineStepRunRunE_FormatJSON(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RunE: %v", err)
 	}
-	if !strings.Contains(out, `"output": "done"`) || !strings.Contains(out, `"simulated": true`) {
+	if !strings.Contains(out, `"output": "done"`) || !strings.Contains(out, `"simulated": true`) || !strings.Contains(out, `"execution_mode": "live"`) {
 		t.Errorf("json envelope missing fields:\n%s", out)
 	}
 }
@@ -203,7 +203,7 @@ func TestRoutineStepRunRunE_DeterministicStepOmitsAdapterLine(t *testing.T) {
 	if !strings.Contains(out, "PASS") || !strings.Contains(out, "transform") {
 		t.Errorf("verdict/step_type missing:\n%s", out)
 	}
-	if !strings.Contains(out, "simulated (no run record)") {
+	if !strings.Contains(out, "live execution (no run record)") {
 		t.Errorf("simulation marker missing:\n%s", out)
 	}
 }

@@ -74,6 +74,14 @@ func validateStepEgress(st Step) error {
 			return fmt.Errorf("pipeline: step %q (wait) risk_level %q invalid (allowed: %s)",
 				st.ID, st.Wait.RiskLevel, strings.Join(RiskLevels, " "))
 		}
+		if st.Wait.DecisionForm != nil {
+			if st.Wait.Kind != "approval" {
+				return fmt.Errorf("pipeline: decision_form requires an approval wait")
+			}
+			if err := ValidateDecisionForm(st.Wait.DecisionForm); err != nil {
+				return fmt.Errorf("pipeline: step %q: %w", st.ID, err)
+			}
+		}
 		switch st.Wait.Kind {
 		case "approval":
 			if st.Wait.ApprovalPrompt == "" {

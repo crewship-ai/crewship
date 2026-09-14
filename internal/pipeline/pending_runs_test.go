@@ -7,6 +7,8 @@ import (
 	"time"
 
 	_ "modernc.org/sqlite"
+
+	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
 func newPendingDB(t *testing.T) *sql.DB {
@@ -31,6 +33,7 @@ CREATE TABLE pending_runs (
     chain_depth INTEGER,
     chain_origin TEXT,
     triggered_by_id TEXT,
+    pinned_version INTEGER CHECK (pinned_version IS NULL OR pinned_version > 0),
     created_at TEXT NOT NULL DEFAULT (datetime('now','subsec')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now','subsec')));
 CREATE UNIQUE INDEX idx_pending_runs_debounce ON pending_runs (pipeline_id, debounce_key)
@@ -196,5 +199,56 @@ func TestPendingRuns_ExpireAndClaim(t *testing.T) {
 	wonAgain, _ := s.MarkFired(ctx, "p_claim", "run_x")
 	if wonAgain {
 		t.Fatal("second claim must lose (already fired)")
+	}
+}
+
+func TestPendingRuns_DuePreservesOccurrenceAfterRearm(t *testing.T) {
+	db := newPendingDB(t)
+	defer db.Close()
+	s := NewPendingRunStore(db)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	first := now.Add(-2 * time.Minute)
+	id, _, err := s.Enqueue(ctx, PendingRun{ID: "rearmed", WorkspaceID: "w", PipelineID: "pl", PipelineSlug: "s", FireAt: first})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var previousKey string
+	for i, when := range []time.Time{first, first.Add(time.Minute)} {
+		if i > 0 {
+			if _, err := db.ExecContext(ctx, `UPDATE pending_runs SET status='pending', fired_run_id=NULL, fire_at=? WHERE id=?`, tsformat.Format(when), id); err != nil {
+				t.Fatal(err)
+			}
+		}
+		due, err := s.DueRuns(ctx, now, 10)
+		if err != nil || len(due) != 1 {
+			t.Fatalf("due: %v %v", due, err)
+		}
+		if !due[0].FireAt.Equal(when) {
+			t.Fatalf("occurrence %d: FireAt=%s, want %s", i, due[0].FireAt, when)
+		}
+		key := ScheduledFireIdempotencyKey("pending", due[0].ID, due[0].FireAt.UTC().Format(time.RFC3339Nano)) // tsformat:allow: dispatcher identity serialization, not a SQL timestamp comparison
+		if key == previousKey {
+			t.Fatal("new occurrence reused the previous dispatch identity")
+		}
+		previousKey = key
+		if claimed, err := s.MarkFired(ctx, id, "run"); err != nil || !claimed {
+			t.Fatalf("claim: %v %v", claimed, err)
+		}
+	}
+}
+
+func TestPendingClaimRespectsSubsecondDueBoundary(t *testing.T) {
+	s := NewPendingRunStore(newPendingDB(t))
+	now := time.Date(2026, 9, 11, 14, 0, 0, 500000000, time.UTC)
+	fireAt := now.Add(123456 * time.Nanosecond)
+	if _, _, err := s.Enqueue(t.Context(), PendingRun{ID: "boundary", WorkspaceID: "w", PipelineID: "p", PipelineSlug: "p", FireAt: fireAt}); err != nil {
+		t.Fatal(err)
+	}
+	if row, err := s.ClaimDue(t.Context(), "boundary", now); err != nil || row != nil {
+		t.Fatalf("claimed before due: row=%+v err=%v", row, err)
+	}
+	if row, err := s.ClaimDue(t.Context(), "boundary", fireAt); err != nil || row == nil {
+		t.Fatalf("not claimed at due boundary: row=%+v err=%v", row, err)
 	}
 }

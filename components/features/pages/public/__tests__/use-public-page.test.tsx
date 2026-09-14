@@ -38,17 +38,17 @@ function jsonResponse(status: number, body: unknown): Response {
 
 describe("usePublicPage", () => {
   it("fetches the token's document without credentials", async () => {
-    const fetchImpl = vi.fn(async () => jsonResponse(200, DOC))
+    const fetchImpl = vi.fn<typeof fetch>(async () => jsonResponse(200, DOC))
     const { result } = renderHook(() => usePublicPage(TOKEN, fetchImpl))
 
     await waitFor(() => expect(result.current.status).toBe("ready"))
     expect(result.current.page?.slug).toBe("uzaverka")
 
-    const [url, init] = fetchImpl.mock.calls[0] as [string, RequestInit]
+    const [url, init] = fetchImpl.mock.calls[0]
     expect(url).toBe(publicPagePath(TOKEN))
-    expect(init.credentials).toBe("omit")
+    expect(init?.credentials).toBe("omit")
     // No Authorization header, no workspace header: this surface has neither.
-    expect(JSON.stringify(init.headers ?? {})).not.toMatch(/authorization|workspace/i)
+    expect(JSON.stringify(init?.headers ?? {})).not.toMatch(/authorization|workspace/i)
   })
 
   it("treats a 401 as a password prompt and not as a login", async () => {
@@ -80,7 +80,7 @@ describe("usePublicPage", () => {
     expect(url).toBe(publicPageUnlockPath(TOKEN))
     expect(url).not.toContain("uzaverka-2026")
     expect(init.method).toBe("POST")
-    expect(init.credentials).toBe("omit")
+    expect(init?.credentials).toBe("omit")
     expect(JSON.parse(String(init.body))).toEqual({ password: "uzaverka-2026" })
     await waitFor(() => expect(result.current.status).toBe("ready"))
   })

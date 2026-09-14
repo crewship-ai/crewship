@@ -21,7 +21,7 @@
 
 import * as React from "react"
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen, fireEvent } from "@testing-library/react"
+import { render, screen, fireEvent, within } from "@testing-library/react"
 
 import type { Automation } from "@/lib/automations"
 import type { RoutineDetail } from "../routines-detail-panel"
@@ -29,6 +29,7 @@ import type { RoutineDetail } from "../routines-detail-panel"
 const h = vi.hoisted(() => ({
   automations: [] as unknown[],
   records: [] as unknown[],
+  schedules: [] as unknown[],
 }))
 
 // Spreads the rest of the props: the real Link forwards data-* to the anchor,
@@ -48,22 +49,35 @@ vi.mock("next/link", () => ({
   ),
 }))
 
-vi.mock("@/hooks/use-workspace-agent-directory", () => ({ useWorkspaceAgentDirectory: () => ({ agents: [], error: false }) }))
+vi.mock("@/hooks/use-workspace-agent-directory", () => ({
+  useWorkspaceAgentDirectory: () => ({ agents: [], error: false }),
+}))
 
-vi.mock("@/hooks/use-abilities", () => ({ useAbilities: () => ({ role: "OWNER" }) }))
+vi.mock("@/hooks/use-abilities", () => ({
+  useAbilities: () => ({ role: "OWNER" }),
+}))
 
 // The graph and the code editor are heavy, unrelated, and mocked everywhere
 // else this card is exercised.
 vi.mock("../routine-definition-canvas", () => ({
   RoutineDefinitionCanvas: () => <div data-testid="canvas" />,
 }))
-vi.mock("../routine-editor-tab", () => ({ RoutineEditorTab: () => <div /> }))
-vi.mock("../routine-schedules-tab", () => ({ RoutineSchedulesTab: () => <div /> }))
-vi.mock("../routine-webhooks-tab", () => ({ RoutineWebhooksTab: () => <div /> }))
-vi.mock("../routine-versions-tab", () => ({ RoutineVersionsTab: () => <div /> }))
+vi.mock("../routine-schedules-tab", () => ({
+  RoutineSchedulesTab: () => <div />,
+}))
+vi.mock("../routine-webhooks-tab", () => ({
+  RoutineWebhooksTab: () => <div />,
+}))
+vi.mock("../routine-versions-tab", () => ({
+  RoutineVersionsTab: () => <div />,
+}))
 vi.mock("../routine-runs-tab", () => ({ RoutineRunsTab: () => <div /> }))
 vi.mock("../routine-budget-card", () => ({ RoutineBudgetCard: () => <div /> }))
-vi.mock("../routine-reach-card", () => ({ RoutineReachCard: () => <div /> }))
+// The reach rows are the Access card's agent list now, so the card itself is
+// real here and only its network call is stubbed.
+vi.mock("@/hooks/use-agent-reach", () => ({
+  useAgentReach: () => ({ toolkits: [], channels: [], loading: false }),
+}))
 
 vi.mock("@/hooks/use-pipeline-run-records", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/hooks/use-pipeline-run-records")>()),
@@ -76,10 +90,19 @@ vi.mock("@/hooks/use-pipeline-run-records", async (importOriginal) => ({
   }),
 }))
 vi.mock("@/hooks/use-pipeline-schedules", () => ({
-  usePipelineSchedules: () => ({ schedules: [], loading: false, error: null, refresh: vi.fn() }),
+  usePipelineSchedules: () => ({
+    schedules: h.schedules,
+    loading: false,
+    error: null,
+    refresh: vi.fn(),
+  }),
 }))
 vi.mock("@/hooks/use-automations", () => ({
-  useAutomations: () => ({ automations: h.automations, loading: false, error: null }),
+  useAutomations: () => ({
+    automations: h.automations,
+    loading: false,
+    error: null,
+  }),
 }))
 
 import { RoutineCardDetail } from "../routine-card-detail"
@@ -127,16 +150,19 @@ function renderCard(r: RoutineDetail = routine()) {
 beforeEach(() => {
   h.automations = []
   h.records = []
+  h.schedules = []
 })
 
-/** Opens the Automations pane of the Triggers card. */
+/** Automations live in Plan, next to schedules and webhooks (#2519). */
 function openAutomations() {
-  fireEvent.click(screen.getByRole("button", { name: /^automations$/i }))
+  fireEvent.click(screen.getByRole("button", { name: "Plan" }))
 }
 
 describe("automations bound to a routine", () => {
   it("renders nothing extra when no automation targets this routine", () => {
-    h.automations = [rule({ id: "other", action: { routine_slug: "some-other-routine" } })]
+    h.automations = [
+      rule({ id: "other", action: { routine_slug: "some-other-routine" } }),
+    ]
     renderCard()
 
     // No pill, no pane, and — the point — no way to reach one. A routine with
@@ -152,13 +178,23 @@ describe("automations bound to a routine", () => {
     h.automations = [rule({ id: "a1" }), rule({ id: "a2" })]
     renderCard()
 
-    expect(screen.getByTestId("routine-automations-pill")).toHaveTextContent("2 automations")
+    expect(screen.getByTestId("routine-automations-pill")).toHaveTextContent(
+      "2 automations",
+    )
   })
 
   it("names each rule and the event it watches", () => {
     h.automations = [
-      rule({ id: "a1", name: "Triage new bugs", event_type: "mission.status_change" }),
-      rule({ id: "a2", name: "Escalate stalls", event_type: "assignment.failed" }),
+      rule({
+        id: "a1",
+        name: "Triage new bugs",
+        event_type: "mission.status_change",
+      }),
+      rule({
+        id: "a2",
+        name: "Escalate stalls",
+        event_type: "assignment.failed",
+      }),
     ]
     renderCard()
     openAutomations()
@@ -185,7 +221,9 @@ describe("automations bound to a routine", () => {
     h.automations = [rule()]
     renderCard()
     openAutomations()
-    expect(screen.getByTestId("routine-automations")).toHaveTextContent("crewship automation")
+    expect(screen.getByTestId("routine-automations")).toHaveTextContent(
+      "crewship automation",
+    )
   })
 })
 
@@ -274,30 +312,94 @@ describe("what a routine writes back to Crewship", () => {
         },
       }),
     )
-    expect(screen.getByTestId("routine-crewship-actions")).toHaveTextContent("issue.create")
+    expect(screen.getByTestId("routine-crewship-actions")).toHaveTextContent(
+      "issue.create",
+    )
   })
 })
 
-
 describe("routine access and starting points", () => {
-  it("distinguishes timed starts from webhook starts and opens their management", () => {
+  it("does not claim zero starts for a schedule bound by slug", () => {
+    h.schedules = [
+      {
+        id: "schedule-1",
+        target_pipeline_slug: "daily-triage",
+        enabled: true,
+        cron_expr: "0 9 * * *",
+      },
+    ]
     renderCard()
-    expect(screen.getByText("When it runs")).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: /^schedules$/i }).querySelector("svg")).not.toBeNull()
-    fireEvent.click(screen.getByRole("button", { name: "Edit schedules", exact: true }))
-    expect(screen.getByRole("button", { name: "Done", exact: true })).toBeInTheDocument()
-    fireEvent.click(screen.getByRole("button", { name: "Done", exact: true }))
-    fireEvent.click(screen.getByRole("button", { name: /^webhooks$/i }))
-    expect(screen.getByText(/Let another service start/)).toBeInTheDocument()
-    fireEvent.click(screen.getByRole("button", { name: "Manage webhooks", exact: true }))
-    expect(screen.getByRole("button", { name: "Done", exact: true })).toBeInTheDocument()
+    // "Before you run" names the plan instead of a zero.
+    expect(screen.getByText(/Runs:/).parentElement).toHaveTextContent(/09:00/)
+    expect(screen.getByText(/Runs:/).parentElement).not.toHaveTextContent("Manual")
+  })
+
+  it("says Manual when nothing starts it on its own, and hands off to Plan", () => {
+    renderCard()
+    const runs = screen.getByText(/Runs:/).parentElement!
+    expect(runs).toHaveTextContent("Manual")
+    fireEvent.click(within(runs).getByRole("button", { name: "change plan" }))
+    expect(screen.getByRole("button", { name: "Plan", pressed: true })).toBeInTheDocument()
+  })
+
+  it("lists the questions before a run and the effects, without revealing defaults", () => {
+    renderCard(
+      routine({
+        definition: {
+          inputs: [
+            {
+              name: "max_stale_hours",
+              type: "number",
+              required: true,
+              default: 24,
+              description: "How old a page may be",
+            },
+            { name: "token", type: "string", default: "private-value" },
+          ],
+          outputs: [{ name: "change_report", type: "string" }],
+          steps: [{ id: "probe", type: "script" }],
+        },
+      } as Partial<RoutineDetail>),
+    )
+    expect(screen.getByText("Max stale hours")).toBeInTheDocument()
+    expect(screen.getByText(/number · required · has a default/)).toBeInTheDocument()
+    expect(screen.getByText("How old a page may be")).toBeInTheDocument()
+    expect(screen.getByText(/Produces:/).parentElement).toHaveTextContent("Change report")
+    expect(screen.queryByText("private-value")).not.toBeInTheDocument()
+    expect(screen.getByTestId("routine-effects-line")).toHaveTextContent(
+      /Scripts, tools, notifications or called routines can perform actions/,
+    )
+    // The status chrome that used to sit in the header now lives in one
+    // disclosure below the three answers.
+    const technical = screen.getByTestId("routine-technical")
+    expect(technical).not.toHaveAttribute("open")
+    expect(technical).toHaveTextContent("manual / event")
   })
   it("links credential requirements to accounts without inventing an assigned credential", () => {
-    renderCard(routine({ manifest: { agents: ["morgan"], credentials: [{ type: "CLI_TOKEN", scope: "github" }, { type: "AI_CLI_TOKEN", scope: "gitlab" }], egress: ["api.github.com"] } } as Partial<RoutineDetail>))
-    expect(screen.getAllByRole("link", { name: /github|gitlab/i }).filter(link => link.getAttribute("href") === "/credentials")).toHaveLength(2)
+    renderCard(
+      routine({
+        manifest: {
+          agents: ["morgan"],
+          credentials: [
+            { type: "CLI_TOKEN", scope: "github" },
+            { type: "AI_CLI_TOKEN", scope: "gitlab" },
+          ],
+          egress: ["api.github.com"],
+        },
+      } as Partial<RoutineDetail>),
+    )
+    expect(
+      screen
+        .getAllByRole("link", { name: /github|gitlab/i })
+        .filter((link) => link.getAttribute("href") === "/credentials"),
+    ).toHaveLength(2)
     expect(screen.getByRole("link", { name: /AI CLI token/ })).toBeInTheDocument()
-    expect(screen.getByText(/Accounts are resolved when the run starts/)).toBeInTheDocument()
-    expect(screen.getAllByRole("link", { name: "morgan", exact: true })[0]).toHaveAttribute("href", "/crews?agent=morgan")
+    expect(
+      screen.getByText(/accounts are resolved when the run starts/),
+    ).toBeInTheDocument()
+    expect(
+      screen.getAllByRole("link", { name: "morgan" })[0],
+    ).toHaveAttribute("href", "/crews?agent=morgan")
     const host = screen.getByText("api.github.com")
     expect(host.closest("details")).not.toHaveAttribute("open")
     fireEvent.click(screen.getByText("Allowed network hosts"))

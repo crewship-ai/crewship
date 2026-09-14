@@ -12,7 +12,7 @@ HOOK=".git/hooks/pre-commit"
 # Bump this whenever the hook body below changes: the installer is idempotent
 # on this marker, so a body change without a bump reaches nobody who already
 # has the hook installed.
-MARKER="# crewship-pre-commit-v3"
+MARKER="# crewship-pre-commit-v4"
 
 if [ ! -d .git ]; then
   echo "install-hooks.sh: not a git repo, skipping"
@@ -26,7 +26,7 @@ fi
 
 cat > "$HOOK" <<'EOF'
 #!/usr/bin/env bash
-# crewship-pre-commit-v3
+# crewship-pre-commit-v4
 set -euo pipefail
 
 # Sentinel: reject leaked git merge-conflict markers in staged files.
@@ -104,9 +104,30 @@ if [ -n "$STAGED_GO" ] && command -v golangci-lint >/dev/null 2>&1; then
   # Scope the run to the packages of staged Go files so another session's
   # uncommitted work in an unrelated package can't block this commit. Fall
   # back to ./... only if no package dir resolves.
+  #
+  # Directories belonging to a NESTED module are dropped: golangci-lint runs
+  # against the root module, and handing it `./tools/spike-river` (which has
+  # its own go.mod) fails typechecking with "main module does not contain
+  # package …" — zero issues reported, non-zero exit, commit blocked for a
+  # reason the message does not name. `go build ./...` excludes nested modules
+  # for the same reason, so this only restores the behaviour of `./...`.
+  # A nested module lints from inside its own directory, not from here.
   declare -a PKGS=()
   while IFS= read -r d; do
-    [ -n "$d" ] && PKGS+=("./$d")
+    [ -z "$d" ] && continue
+    # Walk up from the file's directory to the repo root looking for a go.mod
+    # that is not the root one. Finding one means a nested module.
+    nested=""
+    probe="$d"
+    while [ "$probe" != "." ] && [ "$probe" != "/" ]; do
+      if [ -f "$probe/go.mod" ]; then
+        nested="$probe"
+        break
+      fi
+      probe="$(dirname "$probe")"
+    done
+    [ -n "$nested" ] && continue
+    PKGS+=("./$d")
   done < <(printf '%s\n' "$STAGED_GO" | xargs -r -n1 dirname | sort -u)
   [ "${#PKGS[@]}" -eq 0 ] && PKGS=("./...")
 

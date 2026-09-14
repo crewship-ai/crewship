@@ -1,0 +1,117 @@
+# Pages storage/compiler review response — 2026-09-10
+
+Independent review scope: #2475 at `4563f5db`, 48 files. The reviewer reported F1–F4 and explicitly did not compile because the disk was full. CodeRabbit's older review is not fresh-head coverage.
+
+## Fixes
+
+Fix commit `79af8b5f` addresses all four findings:
+
+- F1: bootstrap `expectedParent` uses browser-compatible default-port serialization, including IPv6 loopback; non-default ports remain intact.
+- F2: invalid source/artifact contents are distinguishable from filesystem I/O failures. A validated replacement is installed atomically at the same digest. Quota accounting excludes the replaced slot and allows repair at the entry limit. Reads still reject corrupt data; permission/read failures still propagate.
+- F3: successful worker exit does not bypass output-overflow validation. Both stdout and stderr are checked before decoding.
+- F4: the source-layer README no longer links to files that only arrive in later layers. All remaining local link targets were checked to exist.
+
+F1 and F2 regression tests failed before production changes. After the fix, `go test ./internal/pages ./internal/pagebuild -count=1` and focused vet passed. Removing F3's overflow check made its new regression fail with `invalid worker artifact: unexpected EOF`; restoring it passed. Tests additionally cover corrupt-slot recovery at the entry quota and preservation of an underlying filesystem read error.
+
+## Integration
+
+Integrated main `6ce5afd4` through source, server, CLI and UI. Server integration commit `d32f8e43` resolves the three conflicts semantically:
+
+- The MCP list contains ten tools, including `page_project`, `get_routine_draft` and `save_routine_draft`.
+- `go run ./cmd/gen-openapi` generates 654 operations. The docs test supplies the derived sentence: 630 named success schemas, 24 without a success body, and 281 request bodies (277 named JSON and four non-JSON).
+- `go test ./internal/api -run TestMutationRouteRolesMatchManifest -update-route-roles` regenerates the manifest from the combined router.
+
+Router manifest, MCP list and OpenAPI prose checks passed. The docs-layer changelog conflict preserves both the new routines entries and the Pages documentation entry.
+
+[Automatic source PR CI](https://github.com/crewship-ai/crewship/actions/runs/34483084330) tests source head `6cc3e2d6e8190bec4682427d8a50e03f7237f449`.
+[New cumulative UI dispatch](https://github.com/crewship-ai/crewship/actions/runs/34483523993) tests `c68722da3d8c5d45ef11f19609614b5b0373e5ae`.
+The cumulative UI run completed successfully: 18 executed jobs passed and the conditional Binary Build job was skipped. The source PR run also completed successfully. Both runs were started after the integration. Historical successful runs at `08fcfc60` do not validate these changes. PR bodies carry the new links and this distinction.
+
+## Operations and remaining acceptance
+
+The regeneratable Go build cache was cleared after confirming the disk pressure. Available space rose from approximately 1.5 GB to 84 GB (then about 80 GB as builds resumed). No application data was removed. `crewship-ws@3` remained active and its health endpoint returned 200. This work does not claim a new deployed binary.
+
+UI lint passed (zero errors) and the production static build passed after generating the worktree's missing Prisma types with `pnpm exec prisma generate`. Local `go vet ./...` passed. The local full Go attempt hit the default 10-minute
+API timeout (no failed assertion), then continued into other packages. The
+separate API retry and remaining local full run were stopped after both fresh CI
+Go jobs passed, avoiding duplicate long suites with a cold cache. These local
+attempts are not recorded as passing full runs; full-suite evidence is the CI
+Go jobs on the exact source/UI heads above. All configured race jobs passed in the cumulative UI run; the source PR's separate general race job also passed. Layer review remains separate from CI. CodeRabbit was re-requested for #2475; throttling permits the documented manual fallback. Authoring from chat and clean production installation remain open acceptance gates. Safari remains panel-only for v1 as explicitly approved.
+
+## Base moved before merge
+
+Before merging #2475, main advanced to `6a9857f5` via #2482 (92 files).
+The two successful runs above do not cover that newer base. No PR was merged.
+The newer main is now integrated through the stack without additional conflicts.
+Current code heads: source `39146cdb`, server `4122eb35`, CLI `4740b70b`, UI `832e69fc`.
+Fresh [source PR CI](https://github.com/crewship-ai/crewship/actions/runs/34488138789)
+and [cumulative UI CI](https://github.com/crewship-ai/crewship/actions/runs/34488234440)
+are running. Neither is recorded as passed yet. The older green runs above remain
+valid historical evidence, not a merge gate for these new heads.
+
+## Dispatcher integration regression
+
+The new routines dispatcher derives its idempotency key from `PendingRun.FireAt`,
+but `DueRuns` did not load `fire_at`. The returned time was always zero, so rearming
+the same one-time row could reuse the old execution identity. Server commit
+`4b33e6ef` loads and parses the stored occurrence. A regression failed first with
+`FireAt=0001-01-01`, then passed for initial dispatch and a rearmed row. The full
+pipeline package passed (12.129s), as did its vet. Integrated Pages API tests also
+passed (8.683s).
+
+Current code heads after this fix: source `39146cdb`, server `4b33e6ef`, CLI
+`6402d250`, UI `0bba090e`. The UI run above is superseded by
+[fresh cumulative CI 34488992444](https://github.com/crewship-ai/crewship/actions/runs/34488992444)
+at `0bba090e8008aa1e2f9222b9435c38c8fab1aa18`. It is running; source run
+34488138789 remains the applicable source PR check. No PR has been merged.
+
+## Current CI and automatic cache maintenance (14:41 UTC)
+
+Run 34488992444 failed the Go Lint timestamp guard. Commit `187ed2f9`
+uses the repository SQL timestamp formatter in the regression fixture and
+documents the non-SQL parsing/identity serialization exceptions. The guard and
+focused regression pass locally. Current server head is `187ed2f9a5bb6f6d30f676e2d68583809d3e7976`,
+cumulative UI head `aebcb566eb3da8f53a4e000c1cb9ccead4ed36ad`.
+[Replacement cumulative CI](https://github.com/crewship-ai/crewship/actions/runs/34490656928)
+is running; source CI 34488138789 still has race tests running. No new green
+merge claim is made. Pages API tests after the occurrence fix, regenerated
+OpenAPI and its prose gate passed.
+
+At the user's request, server maintenance is installed at
+`/srv/crewship/maintenance/cleanup.py` with enabled
+`crewship-cache-cleanup.timer` (every 15 minutes, up to one minute jitter).
+It only removes recognized Go cache entries unused for more than 25 hours,
+deferring while Go builds/tests run. Above 32 GiB of cache it targets 24 GiB;
+below 30 GiB filesystem free space it targets 40 GiB. Recent entries remain
+protected even if this prevents reaching the target. No databases, projects,
+Docker volumes or backups are in scope. Three synthetic safety tests passed;
+the installed service and dry run both succeeded with `within_limits`.
+The first run saw about 4.5 GiB cache and 72 GiB free and removed nothing.
+Configuration, tests, service/timer sources and operating instructions are
+kept in `/srv/crewship/maintenance/`; the journal records each result.
+
+## Delivery and dev3 verification — 15:12 UTC
+
+Source PR #2475 merged as `410563ec` after source CI 34488138789 completed
+successfully and the documented manual review fallback. Server #2477 now
+targets main at `53b6e1a0`; automatic CI 34493448807 is running. Its CodeRabbit
+request was throttled; manual server review is in progress, not complete.
+Bypassing the guided policy hold made the authoring identity/policy regression
+fail with `held 200`; after reverting the mutation, reviewed-path tests passed
+(2.310s). The other three PRs remain open.
+
+Dev3 was updated after a complete `make build` and rebuilding the pinned tools
+image. Running commit `7e7134bf`, binary SHA256
+`9fc33456205cf86a7618233df1e7bc49285c346ac95baf2ff15f923af2573273`
+was checked against `/proc/<pid>/exe`; health and public Page returned 200.
+The stopped-service snapshot in `rollback-2472-20260910T150945Z` preserves
+SQLite, Pages files and previous binaries, but is not a full crew-volume backup.
+
+A real preview build of revision 3 completed in 5.63 seconds; source/artifact
+integrity and binding checks passed. Existing publication remains version 3.
+Its refresh action reached `completed` (`run_cmtvo063t00026c388d88`). A stale
+source save at revision 2 returned a readable 409 without replacing the draft.
+Exact build/image/run identities are in the existing JSON report. This proves
+the current deployed engineering path, not chat authorship or clean production
+installation. The isolated authoring-crew permission and separate runtime
+domain/DNS/TLS questions remain pending.

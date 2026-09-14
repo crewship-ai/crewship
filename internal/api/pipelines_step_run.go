@@ -26,10 +26,11 @@ type stepRunRequestBody struct {
 	TierOverride string `json:"tier_override,omitempty"`
 }
 
-// stepRunResponse is the debug verdict for one simulated step: what was
+// stepRunResponse is the debug verdict for one live step: what was
 // actually sent (rendered prompt + resolved model), what came back, whether
 // it validates, and what it cost.
 type stepRunResponse struct {
+	ExecutionMode    string  `json:"execution_mode"`
 	StepID           string  `json:"step_id"`
 	StepType         string  `json:"step_type"`
 	Adapter          string  `json:"adapter"`
@@ -42,8 +43,8 @@ type stepRunResponse struct {
 	TokensIn         int     `json:"tokens_in"`
 	TokensOut        int     `json:"tokens_out"`
 	DurationMs       int64   `json:"duration_ms"`
-	// Simulated is always true — a signal to any consumer that this did NOT
-	// produce a real run record (no run id, not in metrics/records).
+	// Simulated is the legacy no-run-record flag, NOT effect isolation.
+	// ExecutionMode explicitly labels this as live execution.
 	Simulated bool `json:"simulated"`
 	// Warnings surfaces debug-loop hazards — chiefly a prompt that references
 	// an upstream `{{ steps.X.output }}` the caller didn't seed via
@@ -226,6 +227,7 @@ func (h *PipelineHandler) StepRun(w http.ResponseWriter, r *http.Request) {
 		TokensOut:        res.TokensOut,
 		DurationMs:       res.DurationMs,
 		Simulated:        true,
+		ExecutionMode:    "live",
 		Warnings:         warnings,
 	})
 }
@@ -283,6 +285,7 @@ func (h *PipelineHandler) stepRunDeterministic(w http.ResponseWriter, r *http.Re
 		CostUSD:          costUSD,
 		DurationMs:       durationMs,
 		Simulated:        true,
+		ExecutionMode:    "live",
 		Warnings:         warnings,
 	})
 }

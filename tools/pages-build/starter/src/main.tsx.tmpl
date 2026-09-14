@@ -1,0 +1,18 @@
+import React from 'react'
+import { createRoot } from 'react-dom/client'
+import { usePageSnapshot } from '@crewship/pages'
+import './style.css'
+
+function Dashboard() {
+  const page = usePageSnapshot()
+  return <main>
+    <header><span className="eyebrow">OPERATIONS / LIVE SNAPSHOTS</span><h1>{page?.name ?? 'Connecting to Crewship…'}</h1><p>Latest information from your crew. Producers run independently of this dashboard.</p></header>
+    <section className="grid">{page?.panels.map(panel => <article key={panel.id}>
+      <div className="card-title"><h2>{panel.title || panel.id}</h2><span className={`state ${panel.state}`}>{panel.state}</span></div>
+      <pre>{panel.data == null ? 'Waiting for the first snapshot' : JSON.stringify(panel.data, null, 2)}</pre>
+      <footer>{panel.producedAt ? `Produced ${new Date(panel.producedAt).toLocaleString()}` : 'Not produced yet'}</footer>
+    </article>)}</section>
+    {page?.panels.length === 0 && <p>No readable panels are available on this Page.</p>}
+  </main>
+}
+createRoot(document.getElementById('root')!).render(<Dashboard />)

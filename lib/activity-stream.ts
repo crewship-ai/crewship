@@ -62,6 +62,13 @@ export const ACTIVITY_SOURCES: ActivitySourceMeta[] = [
       // beside the run it describes, not under System: "this run started
       // without crewship-memory" is a fact about that run.
       "run.session_init",
+      // Dispatch decisions from the durable work ledger. They belong beside
+      // the run they produced: "why did this start 40s late" and "who lost
+      // the lease" are questions about that run, not about the system.
+      "work.accepted",
+      "work.claimed",
+      "work.needs_reconciliation",
+      "work.lease_lost",
     ],
   },
   {
@@ -70,6 +77,7 @@ export const ACTIVITY_SOURCES: ActivitySourceMeta[] = [
     hint: "Scheduled and triggered routine runs, step by step",
     token: "--notice",
     types: [
+      "pipeline.published",
       "pipeline.run.started",
       "pipeline.run.completed",
       "pipeline.run.failed",

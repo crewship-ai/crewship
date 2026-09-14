@@ -103,6 +103,7 @@ export const JOURNAL_ENTRY_TYPES = [
   // reads that Go file directly, so this list cannot fall behind silently
   // again.
   // Routines
+  "pipeline.published",
   "pipeline.run.started",
   "pipeline.run.completed",
   "pipeline.run.failed",
@@ -189,6 +190,10 @@ export const JOURNAL_ENTRY_TYPES = [
   // an untrusted producer: the record has to exist regardless of who clicked.
   "page.action.dispatched",
   "page.spec.changed",
+  "work.accepted",
+  "work.claimed",
+  "work.needs_reconciliation",
+  "work.lease_lost",
 
   // ── Added 2026-08-31 (#2207). Every type below is emitted by the
   // backend today but was declared OUTSIDE internal/journal/types.go — as

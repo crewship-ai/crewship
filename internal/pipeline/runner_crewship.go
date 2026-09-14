@@ -2,7 +2,9 @@ package pipeline
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -33,6 +35,23 @@ func (e *Executor) runCrewshipStep(ctx context.Context, step Step, render Render
 		return fmt.Sprintf("<dry-run: would call %s>", step.Action), 0,
 			time.Since(stepStart).Milliseconds(), nil
 	}
+	// Page payloads are JSON objects, not text. Preserve a whole-object template
+	// from a collector without changing string interpolation for other verbs.
+	if step.Action == "page.write" {
+		if raw, ok := step.Args["data"].(string); ok {
+			source := strings.TrimSpace(raw)
+			match := templateRE.FindStringIndex(source)
+			if match != nil && match[0] == 0 && match[1] == len(source) {
+				rendered, _ := args["data"].(string)
+				var object map[string]any
+				if err := json.Unmarshal([]byte(rendered), &object); err != nil || object == nil {
+					return "", 0, time.Since(stepStart).Milliseconds(), fmt.Errorf("crewship step %q: page.write data template must resolve to a JSON object", step.ID)
+				}
+				args["data"] = object
+			}
+		}
+	}
+
 	if e.crewship == nil {
 		return "", 0, 0, fmt.Errorf("crewship step %q: no CrewshipActions wired on this executor "+
 			"(production wiring is ExecutorDeps.Crewship in cmd_start.go)", step.ID)

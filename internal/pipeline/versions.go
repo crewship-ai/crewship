@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
 // PipelineVersion is one immutable snapshot in a pipeline's edit
@@ -232,8 +234,17 @@ func (s *Store) Rollback(ctx context.Context, pipelineID string, targetVersion i
 	if err != nil {
 		return nil, fmt.Errorf("Rollback: load target: %w", err)
 	}
-	now := time.Now().UTC().Format(time.RFC3339Nano)
-	res, err := s.db.ExecContext(ctx, `
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("Rollback: begin: %w", err)
+	}
+	defer tx.Rollback() // best effort after commit
+	// Keep the compatibility check and HEAD update atomic, just like Save.
+	if err := s.checkSchedulePresetsTx(ctx, tx, pipelineID, target.DefinitionJSON); err != nil {
+		return nil, fmt.Errorf("Rollback: validate schedule presets: %w", err)
+	}
+	now := tsformat.Format(time.Now())
+	res, err := tx.ExecContext(ctx, `
 UPDATE pipelines
 SET head_version = ?, definition_json = ?, definition_hash = ?, updated_at = ?
 WHERE id = ? AND deleted_at IS NULL`,
@@ -244,6 +255,9 @@ WHERE id = ? AND deleted_at IS NULL`,
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
 		return nil, ErrNotFound
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("Rollback: commit: %w", err)
 	}
 	return s.GetByID(ctx, pipelineID)
 }

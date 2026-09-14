@@ -15,6 +15,7 @@ export interface Pipeline {
   slug: string
   name: string
   description?: string
+  step_count?: number
   dsl_version: string
   definition_hash: string
   ephemeral: boolean

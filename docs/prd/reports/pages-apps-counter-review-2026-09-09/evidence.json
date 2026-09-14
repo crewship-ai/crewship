@@ -1,0 +1,114 @@
+{
+  "date": "2026-09-09",
+  "worktree": "/srv/crewship/crewship_3/.claude/worktrees/pages-apps-project",
+  "head": "676e16e45897bf6767f47156a894fb01bfb56162",
+  "tracked_changed_files": 62,
+  "tracked_added_lines": 6109,
+  "tracked_removed_lines": 819,
+  "untracked_files": 139,
+  "untracked_lines": 16290,
+  "total_changed_files": 201,
+  "tools_image": "sha256:cca058230111eea5d07fa69c7537647ee46ea1b5b841233e3ff632e65b0dafb2",
+  "checks": {
+    "go": {
+      "exit_code": 0,
+      "log": "go.log"
+    },
+    "api": {
+      "exit_code": 0,
+      "log": "api.log"
+    },
+    "vitest": {
+      "exit_code": 0,
+      "log": "vitest.log"
+    },
+    "vet": {
+      "exit_code": 0,
+      "log": "vet.log"
+    },
+    "docker": {
+      "exit_code": 0,
+      "log": "docker.log"
+    },
+    "browser": {
+      "exit_code": 0,
+      "log": "browser.log"
+    },
+    "retry": {
+      "exit_code": 0,
+      "log": "retry.log"
+    },
+    "retention": {
+      "exit_code": 0,
+      "log": "retention.log"
+    },
+    "build-quota": {
+      "exit_code": 0,
+      "log": "build-quota.log"
+    },
+    "mcp": {
+      "exit_code": 0,
+      "log": "mcp.log"
+    },
+    "pages-migrations": {
+      "exit_code": 0,
+      "log": "pages-migrations.log"
+    }
+  },
+  "all_go": {
+    "status": "failed",
+    "exit_code": 1,
+    "command": "go test ./... -count=1",
+    "log": "all-go-summary.log",
+    "passed_packages": 137,
+    "no_test_packages": 11,
+    "failed_packages": {
+      "internal/api": "test package timeout at 600.064s",
+      "internal/database": "test package timeout at 600.069s"
+    },
+    "assertion_failure_lines": 0,
+    "interpretation": "Default package timeout exceeded; not a repo-wide PASS and not evidence by itself of a Pages assertion failure. No longer-timeout full rerun in this review.",
+    "full_log_local": "/tmp/pages-countercheck-all-go.log"
+  },
+  "reproductions": {
+    "retry": {
+      "http_status": 200,
+      "receipt_version": 2,
+      "live_version": 3
+    },
+    "git_retention": {
+      "commits": 70,
+      "oldest_ancestor_readable": true,
+      "before_bytes": 111085,
+      "after_bytes": 50931
+    },
+    "build_quota": {
+      "pages": 8,
+      "failed_builds_per_page": 64,
+      "after_retention_count": 512,
+      "new_build_http_status": 507
+    }
+  },
+  "limitations": [
+    "No live chat agent acceptance",
+    "No clean installation or backup restore rerun",
+    "Chromium local separate-site harness only; not dev3 same-origin validation",
+    "Existing local tools image, not rebuilt image",
+    "No full frontend/static build rerun",
+    "No review/merge or production code changes"
+  ],
+  "commands": {
+    "go": "go test ./internal/pages ./internal/pagebuild ./examples/pages-apps -count=1",
+    "api": "go test ./internal/api -run 'Test(Page.*(Project|Publish|Application|Build|Retention)|MutationRouteRolesMatchManifest)' -count=1 -v",
+    "vitest": "pnpm exec vitest run components/features/pages lib/pages hooks/__tests__/use-workspace.test.ts",
+    "vet": "go vet ./...",
+    "docker": "CREWSHIP_TEST_PAGE_BUILD_IMAGE=<tools_image> PAGES_TEST_BUILD_IMAGE=<tools_image> CREWSHIP_TEST_PAGE_ARTIFACT_OUT=/tmp/pages-countercheck-artifact.json go test ./internal/pagebuild ./internal/api ./cmd/crewship -run '^(TestDockerPreviewBuildIntegration|TestPageBuildDockerRoundTrip|TestSeedPageAppLifecycle)$' -count=1 -v",
+    "browser": "PLAYWRIGHT_BROWSERS_PATH=/home/ubuntu/.cache/ms-playwright timeout 90s node e2e/pages-preview-smoke.mjs /tmp/pages-countercheck-artifact.json",
+    "mcp": "CREWSHIP_TEST_PAGE_BUILD_IMAGE=<tools_image> go test ./internal/sidecar -run '^TestPageProjectMCPDockerIntegration$' -count=1 -v",
+    "retry": "go test -overlay /tmp/pages-countercheck-overlay.json ./internal/api -run '^TestPageProjectPublicationAtomicCASRollbackAndReach$' -count=1 -v",
+    "retention": "go test -overlay /tmp/pages-countercheck-git-overlay.json ./internal/pages -run '^TestCountercheck' -count=1 -v",
+    "build-quota": "go test -overlay /tmp/pages-countercheck-build-quota-overlay.json ./internal/api -run '^TestCountercheckWorkspaceBuildQuota' -count=1 -v",
+    "pages-migrations": "go test ./internal/database -run '^TestMigratePages' -count=1 -v"
+  },
+  "reproduction_note": "reproductions.patch contains only additional test assertions. The review ran these via go -overlay, without applying them to the source worktree. The patch passes git apply --check against the reviewed worktree."
+}

@@ -638,7 +638,7 @@ describe("wire names are snake_case (§11b.3, §11b.4)", () => {
     expect(Object.keys(prov)).not.toContain("runId")
     expect(Object.keys(prov)).not.toContain("producedAt")
 
-    const spec = metricFixtures.fresh.panel as Record<string, unknown>
+    const spec = metricFixtures.fresh.panel
     expect(Object.keys(spec)).toContain("sla_seconds")
     expect(Object.keys(spec)).not.toContain("slaSeconds")
   })

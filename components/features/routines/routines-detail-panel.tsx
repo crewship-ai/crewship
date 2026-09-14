@@ -11,6 +11,7 @@ import { STATUS_BADGE_CLASSES, STATUS_DOT_CLASSES } from "@/lib/colors"
 import { AgentlessBadge } from "./routine-agentless-badge"
 import { toast } from "sonner"
 import { apiFetch } from "@/lib/api-fetch"
+import { RoutineStartIntent } from "@/lib/routine-start-intent"
 import { useAbilities } from "@/hooks/use-abilities"
 import {
   routineStatusBadge,
@@ -22,7 +23,10 @@ import {
 import { buildPipelineActionRequest } from "@/lib/pipeline-actions"
 import { routineInputSpecs, type RoutineInputSpec } from "@/lib/routine-inputs"
 import { RoutineRunInputsDialog } from "./routine-run-inputs-dialog"
-import { usePipelineRunRecords, isActiveRunStatus } from "@/hooks/use-pipeline-run-records"
+import {
+  usePipelineRunRecords,
+  isActiveRunStatus,
+} from "@/hooks/use-pipeline-run-records"
 import { integrationLabel, extractMissingIntegrations } from "@/lib/integration-labels"
 import { credentialTypeLabel, extractMissingCredentials } from "@/lib/credential-labels"
 import { extractProblemDetail } from "@/lib/problem-details"
@@ -99,8 +103,15 @@ interface Props {
   onRunStarted?: (runId: string) => void
 }
 
-export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged, onRunStarted }: Props) {
+export function RoutinesDetailPanel({
+  workspaceId,
+  slug,
+  onClose,
+  onChanged,
+  onRunStarted,
+}: Props) {
   const router = useRouter()
+  const startIntent = useRef(new RoutineStartIntent())
   const { role } = useAbilities()
   const [routine, setRoutine] = useState<RoutineDetail | null>(null)
   const [loading, setLoading] = useState(true)
@@ -137,13 +148,17 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged, onR
   // Live run records for THIS routine power the header Cancel button.
   // The hook already refreshes on pipeline.run.* WS events, so the
   // button's enabled state tracks run starts/finishes without polling.
-  const { records: runRecords, refresh: refreshRunRecords } = usePipelineRunRecords(workspaceId, slug)
+  const { records: runRecords, refresh: refreshRunRecords } = usePipelineRunRecords(
+    workspaceId,
+    slug,
+  )
   const activeRuns = runRecords.filter((r) => isActiveRunStatus(r.status))
   // Prefer the run this panel just started (lastRunId); otherwise a
   // lone active run is unambiguous. Several active runs with no known
   // lastRunId → don't guess, send the user to the Runs tab to pick.
   const cancelTarget =
-    activeRuns.find((r) => r.id === lastRunId) ?? (activeRuns.length === 1 ? activeRuns[0] : undefined)
+    activeRuns.find((r) => r.id === lastRunId) ??
+    (activeRuns.length === 1 ? activeRuns[0] : undefined)
 
   const fetchRoutine = async () => {
     abortRef.current?.abort()
@@ -223,25 +238,34 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged, onR
     // the same defect as a stale dialog reached through a different door.
     if (!routine || routine.slug !== slug) return
     const specs = routineInputSpecs(routine.definition)
-    if (specs.length === 0) {
-      void triggerAction("run")
-      return
-    }
     setPendingRun({ workspaceId, slug, inputs: specs })
   }
 
   const triggerAction = async (action: "run", inputs: Record<string, unknown> = {}) => {
-    if (!routine) return
+    if (!routine || routine.slug !== slug) return
+    const { url, body } = buildPipelineActionRequest(
+      workspaceId,
+      slug,
+      action,
+      routine,
+      inputs,
+    )
+    const attempt = startIntent.current.begin(url, body)
+    if (!attempt) return
+    let accepted = false
     setBusyAction(action)
     try {
       // Addresses the saved pipeline by slug. Dry run used to share this
       // path; its panel is gone — two thirds of it repeated the graph
       // and the Access card, and its one unique fact, the model each
       // step resolves to, now sits on the node it describes.
-      const { url, body } = buildPipelineActionRequest(workspaceId, slug, action, routine, inputs)
       const res = await apiFetch(url, {
         method: "POST",
-        headers: { "Content-Type": "application/json", "Prefer": "respond-async" },
+        headers: {
+          "Content-Type": "application/json",
+          Prefer: "respond-async",
+          "Idempotency-Key": attempt.key,
+        },
         body: JSON.stringify(body),
       })
       if (!res.ok) {
@@ -266,7 +290,8 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged, onR
               `This routine needs the ${labels.join(", ")} integration${labels.length > 1 ? "s" : ""} — not connected for this crew`,
               {
                 description:
-                  detail ?? "Connect the missing integration for the crew that runs this routine, then run it again.",
+                  detail ??
+                  "Connect the missing integration for the crew that runs this routine, then run it again.",
                 action: {
                   label: "Manage integrations",
                   onClick: () => router.push("/integrations"),
@@ -286,7 +311,8 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged, onR
               `This routine needs ${labels.length > 1 ? "" : "a "}${labels.join(", ")} credential${labels.length > 1 ? "s" : ""} — not in this crew's vault`,
               {
                 description:
-                  detail ?? "Add the missing credential to the crew that runs this routine, then run it again.",
+                  detail ??
+                  "Add the missing credential to the crew that runs this routine, then run it again.",
                 action: {
                   label: "Manage credentials",
                   onClick: () => router.push("/credentials"),
@@ -299,9 +325,13 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged, onR
         }
         throw new Error(`${res.status}: ${rawBody || res.statusText}`)
       }
-      const data = await res.json().catch(() => ({}))
+      const data = await res.json()
+      if (typeof data.run_id !== "string" || !data.run_id)
+        throw new Error(
+          "The start could not be confirmed. Retry to recover the same run.",
+        )
+      accepted = true
       {
-
         // Surface the just-started run's live activity rail inline.
         if (typeof data.run_id === "string" && data.run_id) {
           setLastRunId(data.run_id)
@@ -321,6 +351,7 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged, onR
         description: e instanceof Error ? e.message : String(e),
       })
     } finally {
+      attempt.finish(accepted)
       setBusyAction(null)
     }
   }
@@ -330,20 +361,35 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged, onR
   // endpoint, toasts the outcome, then refetches so the hero badge +
   // run-guard reflect the new status. enable/disable confirm first
   // (matches the rollback confirm() pattern in the Versions tab).
-  const governanceAction = async (action: "approve" | "reject" | "disable" | "enable") => {
+  const governanceAction = async (
+    action: "approve" | "reject" | "disable" | "enable",
+  ) => {
     if (!routine) return
-    if (action === "disable" && !confirm(`Disable "${routine.name || routine.slug}"? It cannot be run until re-enabled.`)) {
+    if (
+      action === "disable" &&
+      !confirm(
+        `Disable "${routine.name || routine.slug}"? It cannot be run until re-enabled.`,
+      )
+    ) {
       return
     }
-    if (action === "reject" && !confirm(`Reject "${routine.name || routine.slug}"? The proposed routine is discarded.`)) {
+    if (
+      action === "reject" &&
+      !confirm(
+        `Reject "${routine.name || routine.slug}"? The proposed routine is discarded.`,
+      )
+    ) {
       return
     }
     setBusyGov(action)
     try {
-      const res = await apiFetch(`/api/v1/workspaces/${workspaceId}/pipelines/${slug}/${action}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-      })
+      const res = await apiFetch(
+        `/api/v1/workspaces/${workspaceId}/pipelines/${slug}/${action}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+        },
+      )
       if (!res.ok) {
         const t = await res.text().catch(() => "")
         throw new Error(`${res.status}: ${t || res.statusText}`)
@@ -368,7 +414,9 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged, onR
     if (!cancelTarget) {
       // No tab to send them to any more. The per-run cancel buttons are
       // in the Runs card's Manage view, on this same page.
-      toast.info("Multiple runs are active — open Runs → Manage and cancel the one you mean")
+      toast.info(
+        "Multiple runs are active — open Runs → Manage and cancel the one you mean",
+      )
       return
     }
     setCancelling(true)
@@ -379,7 +427,9 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged, onR
       )
       if (!res.ok) {
         if (res.status === 403) {
-          throw new Error("You don't have permission to cancel runs (manager role or above required)")
+          throw new Error(
+            "You don't have permission to cancel runs (manager role or above required)",
+          )
         }
         const t = await res.text().catch(() => "")
         throw new Error(`${res.status}: ${t || res.statusText}`)
@@ -406,7 +456,10 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged, onR
   const showKillControl = canKillRoutine(role)
 
   const latestOutcome = runRecords[0]?.outcome
-  const status = latestOutcome === "FAILED" ? "failed" : (runRecords[0]?.status ?? routine?.last_invocation_status)?.toLowerCase()
+  const status =
+    latestOutcome === "FAILED"
+      ? "failed"
+      : (runRecords[0]?.status ?? routine?.last_invocation_status)?.toLowerCase()
   // Run-status pill routes its colors through the shared palette
   // (lib/colors STATUS_BADGE_CLASSES + STATUS_DOT_CLASSES) so it matches
   // the status pills rendered in Inbox / Issues / Activity — failed reads
@@ -421,17 +474,21 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged, onR
   // words ("this outcome alone is not an approval request"), so it reads as
   // BLOCKED — the same warn tone that file gives it — rather than borrowing
   // the violet approval-gate pill and claiming a decision is pending.
-  const runStatus: { token: string; label: string } = pendingApproval || status === "waiting"
-    ? { token: "AWAITING_APPROVAL", label: "Waiting for approval" }
-    : latestOutcome === "NEEDS_HUMAN"
-    ? { token: "BLOCKED", label: "Last run · needs your attention" }
-    : status === "completed" || status === "succeeded" || status === "success"
-      ? { token: "COMPLETED", label: "Last run · completed" }
-      : status === "failed" || status === "error"
-        ? { token: "FAILED", label: "Last run · failed" }
-        : status === "running"
-          ? { token: "IN_PROGRESS", label: "Running…" }
-          : { token: "PENDING", label: status ? `Last run · ${status}` : "Never invoked" }
+  const runStatus: { token: string; label: string } =
+    pendingApproval || status === "waiting"
+      ? { token: "AWAITING_APPROVAL", label: "Waiting for approval" }
+      : latestOutcome === "NEEDS_HUMAN"
+        ? { token: "BLOCKED", label: "Last run · needs your attention" }
+        : status === "completed" || status === "succeeded" || status === "success"
+          ? { token: "COMPLETED", label: "Last run · completed" }
+          : status === "failed" || status === "error"
+            ? { token: "FAILED", label: "Last run · failed" }
+            : status === "running"
+              ? { token: "IN_PROGRESS", label: "Running…" }
+              : {
+                  token: "PENDING",
+                  label: status ? `Last run · ${status}` : "Never invoked",
+                }
 
   // Top-level tabs are collapsed to the three the redesign elevates
   // (Overview / Runs / Schedules); the four power-user surfaces
@@ -463,83 +520,91 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged, onR
           made, and animating that is what stops an approval from
           feeling like the page jumped under the cursor. */}
       <AnimatePresence initial={false}>
-      {showApprovalBanner && (
-        <motion.div
-          key="approval-banner"
-          initial={{ height: 0, opacity: 0 }}
-          animate={{ height: "auto", opacity: 1 }}
-          exit={{ height: 0, opacity: 0 }}
-          transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
-          className="overflow-hidden"
-        >
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-warn/30 bg-warn/[0.07] px-6 py-3">
-          <div className="min-w-0 flex-1">
-            <div className="text-sm font-medium text-warn">This routine is awaiting approval</div>
-            {/* The reasons the classifier gave. Without them the banner
+        {showApprovalBanner && (
+          <motion.div
+            key="approval-banner"
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
+            className="overflow-hidden"
+          >
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-warn/30 bg-warn/[0.07] px-6 py-3">
+              <div className="min-w-0 flex-1">
+                <div className="text-sm font-medium text-warn">
+                  This routine is awaiting approval
+                </div>
+                {/* The reasons the classifier gave. Without them the banner
                 asks a manager to approve something they cannot see —
                 and the reasons already existed, written into the inbox
                 item at save time; nothing read them back. */}
-            {routine?.risk_reasons && routine.risk_reasons.length > 0 ? (
-              <p className="mt-0.5 text-[12px] text-warn/80">
-                Flagged because it {routine.risk_reasons.join(", ")}.
-              </p>
-            ) : (
-              <p className="mt-0.5 text-[12px] text-warn/70">
-                It was proposed for review and can&apos;t run until a manager approves it.
-              </p>
-            )}
-            {/* The reasons are the category; this is the thing itself.
+                {routine?.risk_reasons && routine.risk_reasons.length > 0 ? (
+                  <p className="mt-0.5 text-[12px] text-warn/80">
+                    Flagged because it {routine.risk_reasons.join(", ")}.
+                  </p>
+                ) : (
+                  <p className="mt-0.5 text-[12px] text-warn/70">
+                    It was proposed for review and can&apos;t run until a manager approves
+                    it.
+                  </p>
+                )}
+                {/* The reasons are the category; this is the thing itself.
                 "Requires credentials" does not tell a reviewer which
                 ones, and that is the question they have. */}
-            <RoutineProposalAsk definition={routine?.definition as RoutineAskDefinition | undefined} />
-          </div>
-          <div className="flex shrink-0 flex-wrap items-center gap-2">
-            <Button
-              size="sm"
-              onClick={() => governanceAction("approve")}
-              disabled={!!busyGov || !!busyAction}
-              className="h-8 gap-1.5 bg-warn px-3 text-sm font-semibold text-background hover:bg-warn/90"
-            >
-              {busyGov === "approve" ? <Spinner className="h-3.5 w-3.5" /> : <Check className="h-3.5 w-3.5" />}
-              Approve
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => governanceAction("reject")}
-              disabled={!!busyGov || !!busyAction}
-              className="h-8 gap-1.5 px-3 text-sm"
-            >
-              <Ban className="h-3.5 w-3.5" />
-              Reject
-            </Button>
-            {/* Beside the decision, not buried in the prose above it.
+                <RoutineProposalAsk
+                  definition={routine?.definition as RoutineAskDefinition | undefined}
+                />
+              </div>
+              <div className="flex shrink-0 flex-wrap items-center gap-2">
+                <Button
+                  size="sm"
+                  onClick={() => governanceAction("approve")}
+                  disabled={!!busyGov || !!busyAction}
+                  className="h-8 gap-1.5 bg-warn px-3 text-sm font-semibold text-background hover:bg-warn/90"
+                >
+                  {busyGov === "approve" ? (
+                    <Spinner className="h-3.5 w-3.5" />
+                  ) : (
+                    <Check className="h-3.5 w-3.5" />
+                  )}
+                  Approve
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => governanceAction("reject")}
+                  disabled={!!busyGov || !!busyAction}
+                  className="h-8 gap-1.5 px-3 text-sm"
+                >
+                  <Ban className="h-3.5 w-3.5" />
+                  Reject
+                </Button>
+                {/* Beside the decision, not buried in the prose above it.
                 The review row carries the diff, the risk reasons and
                 the audit trail, and someone deciding may well want to
                 read it first — so it is a button, and it lands on the
                 row rather than on the inbox root. */}
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={() =>
-                router.push(
-                  routine?.inbox_item_id
-                    ? `/inbox?item=${encodeURIComponent(routine.inbox_item_id)}`
-                    : "/inbox",
-                )
-              }
-              className="h-8 gap-1.5 px-3 text-sm"
-              title="Open the review item in Inbox"
-            >
-              <Inbox className="h-3.5 w-3.5" />
-              Inbox
-            </Button>
-          </div>
-        </div>
-        </motion.div>
-      )}
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() =>
+                    router.push(
+                      routine?.inbox_item_id
+                        ? `/inbox?item=${encodeURIComponent(routine.inbox_item_id)}`
+                        : "/inbox",
+                    )
+                  }
+                  className="h-8 gap-1.5 px-3 text-sm"
+                  title="Open the review item in Inbox"
+                >
+                  <Inbox className="h-3.5 w-3.5" />
+                  Inbox
+                </Button>
+              </div>
+            </div>
+          </motion.div>
+        )}
       </AnimatePresence>
-
 
       {/* Run activity — instant readable status for the just-triggered
           Run, so the user isn't left wondering what's happening
@@ -561,7 +626,10 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged, onR
             runId={lastRunId}
             awaiting={
               pendingApproval
-                ? { stepId: pendingApproval.step_id, ts: pendingApproval.created_at }
+                ? {
+                    stepId: pendingApproval.step_id,
+                    ts: pendingApproval.created_at,
+                  }
                 : null
             }
           />
@@ -572,7 +640,7 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged, onR
           A tab is a hiding place: 38 routines had zero schedules between
           them while Schedules was a tab nobody clicked. Everything that
           worked is still here — the editor opens beside the graph,
-          schedules and webhooks live inside Triggers, versions have
+          schedules and webhooks live under Schedule, versions have
           their own card. What went is the filing, not the machinery.
           Wait points went to Activity, where the run they belong to is. */}
       {/* A SIBLING of the routine block, not a child of it.
@@ -617,7 +685,9 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged, onR
                         lifecycleBadge.className,
                       )}
                     >
-                      <span className={cn("h-1.5 w-1.5 rounded-full", lifecycleBadge.dot)} />
+                      <span
+                        className={cn("h-1.5 w-1.5 rounded-full", lifecycleBadge.dot)}
+                      />
                       {lifecycleBadge.label}
                     </span>
                   )}
@@ -627,7 +697,12 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged, onR
                       STATUS_BADGE_CLASSES[runStatus.token],
                     )}
                   >
-                    <span className={cn("h-1.5 w-1.5 rounded-full", STATUS_DOT_CLASSES[runStatus.token])} />
+                    <span
+                      className={cn(
+                        "h-1.5 w-1.5 rounded-full",
+                        STATUS_DOT_CLASSES[runStatus.token],
+                      )}
+                    />
                     {runStatus.label}
                   </span>
                   <AgentlessBadge agentless={isAgentless(routine.definition)} />
@@ -680,7 +755,11 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged, onR
                       onClick={cancelActiveRun}
                       disabled={cancelling || activeRuns.length === 0}
                     >
-                      {cancelling ? <Spinner className="h-3.5 w-3.5" /> : <Square className="h-3.5 w-3.5" />}
+                      {cancelling ? (
+                        <Spinner className="h-3.5 w-3.5" />
+                      ) : (
+                        <Square className="h-3.5 w-3.5" />
+                      )}
                       Cancel
                     </Button>
                   </span>
@@ -705,6 +784,7 @@ export function RoutinesDetailPanel({ workspaceId, slug, onClose, onChanged, onR
         </div>
       )}
       <RoutineRunInputsDialog
+        definition={routine?.definition}
         inputs={
           pendingRun?.slug === slug && pendingRun.workspaceId === workspaceId
             ? pendingRun.inputs

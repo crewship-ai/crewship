@@ -146,7 +146,7 @@ func (s *Server) handleQuery(w http.ResponseWriter, r *http.Request) {
 		"from_slug":    req.From,
 		"crew_id":      s.ipc.CrewID,
 		"workspace_id": s.ipc.WorkspaceID,
-		"chat_id":      s.ipc.ChatID,
+		"chat_id":      s.requestChatID(r),
 		"depth":        depth,
 	}
 	bodyJSON, err := json.Marshal(body)
@@ -282,7 +282,7 @@ func (s *Server) handleEscalate(w http.ResponseWriter, r *http.Request) {
 		"metadata":     metadata,
 		"crew_id":      s.ipc.CrewID,
 		"workspace_id": s.ipc.WorkspaceID,
-		"chat_id":      s.ipc.ChatID,
+		"chat_id":      s.requestChatID(r),
 	}
 	bodyJSON, err := json.Marshal(body)
 	if err != nil {
@@ -476,7 +476,7 @@ func (s *Server) handleReportConfidence(w http.ResponseWriter, r *http.Request) 
 		"agent_id":     agentID,
 		"crew_id":      s.ipc.CrewID,
 		"workspace_id": s.ipc.WorkspaceID,
-		"chat_id":      s.ipc.ChatID,
+		"chat_id":      s.requestChatID(r),
 		"confidence":   req.Confidence,
 		"reason":       req.Reason,
 	}

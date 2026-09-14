@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
-import { useRouter } from "next/navigation"
+import { useGuardedRouter as useRouter } from "@/hooks/use-navigation-guard"
 import {
   Network, Zap, Key, Activity, Settings, LayoutDashboard, Plus, ShieldCheck,
   CircleDot, Inbox, ClipboardCheck, CalendarClock, Plug, History, MessageSquare,

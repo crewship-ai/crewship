@@ -1,0 +1,147 @@
+{
+  "as_of": "2026-09-09T16:43:00Z",
+  "issue": 2472,
+  "deployment": {
+    "pid": "3786408",
+    "sha256": "98017c717556f2e43811870440f953948e340212ba76c03a2ef58e98517c9782",
+    "commit": "34fd43e5",
+    "health": {
+      "status": "ok"
+    }
+  },
+  "compiler_image": "sha256:f2ba48d349d2d89b8d1e54f9d779c36bd10d37d2a9f70c39965c6d39145d244b",
+  "rollback_snapshot": "/srv/crewship/dev3-pages-release/rollback-2472-20260909",
+  "rollback_scope": "consistent stopped-service database and Pages data, old binaries/wrapper; not crew volumes",
+  "upgrade_copy": {
+    "integrity": "ok",
+    "live_database_modified": false,
+    "migrations_after": 300,
+    "migrations_before": 294
+  },
+  "local_verification": {
+    "go_full": "All code packages passed; docs label failed then affected documentation tests passed. Original full command exited 1.",
+    "go_vet": "passed",
+    "frontend_tests": {
+      "files": 46,
+      "tests": 598
+    },
+    "frontend_lint": {
+      "errors": 0,
+      "warnings": 31
+    },
+    "static_export": "passed",
+    "real_docker_api_mcp_seed_collector_chromium": "passed after HTTPS fixtures corrected; required tests had no skips",
+    "utf8_single_byte_chunks": "passed against installed Docker compiler",
+    "compiled_sdk_action_status_history": "passed in Chromium",
+    "live_chromium_loading": "passed",
+    "live_webkit_panel_fallback": "passed in browser container",
+    "concurrent_save_and_retention_repetitions": 20,
+    "final_script_with_required_sdk_browser": "passed /tmp/pages-2472-verified-final.log"
+  },
+  "live_action": {
+    "receipt": {
+      "status": "SCHEDULED",
+      "pending_id": "pnd_cmtua33x1001c0fbdec96",
+      "fire_at": "2026-09-09T15:53:44.349207265Z",
+      "deduped": false,
+      "coalesced": false,
+      "page": "custom-operations",
+      "panel": "services",
+      "action": "refresh",
+      "routine": "pages-operations-sample"
+    },
+    "status": {
+      "pending_id": "pnd_cmtua33x1001c0fbdec96",
+      "pending_status": "fired",
+      "routine_changed_since_publication": false,
+      "routine_definition_at_enqueue": "6314f4c8a8a622f3981c377a14b6afbed376345e468407315b65e895ab0675f4",
+      "routine_revision_pinned": false,
+      "run_id": "run_cmtua364y000ac5f80683",
+      "run_status": "completed"
+    },
+    "visibleRunStatus": "Stav po\u017eadavku: fired. B\u011bh: completed.",
+    "displayChanged": true
+  },
+  "live_panel_writes": [
+    [
+      "cmttxgl1r07b2af6206dc",
+      342,
+      "2026-09-09T15:53:48Z",
+      "run_cmtua364y000ac5f80683"
+    ],
+    [
+      "cmttxgl1r07b32dd21f9d",
+      342,
+      "2026-09-09T15:53:48Z",
+      "run_cmtua364y000ac5f80683"
+    ]
+  ],
+  "chat_authoring": {
+    "state": "blocked_by_crew_policy",
+    "agent": "alex",
+    "crew": "engineering",
+    "level": "guided",
+    "page": "pages-acceptance-2472",
+    "created": false,
+    "source_revisions": [],
+    "builds": [],
+    "pending_review_response": true,
+    "actionable_approval_queue_entry": false,
+    "policy_changed": false
+  },
+  "review_stack": [
+    2475,
+    2477,
+    2479,
+    2480,
+    2481
+  ],
+  "remaining": [
+    "final CI and review findings; no PR merged yet",
+    "explicit authorization for a separate trusted test crew before live authoring",
+    "separate registered runtime domain and DNS/TLS for production isolation"
+  ],
+  "live_fsck": {
+    "checked_artifacts": 3,
+    "checked_checkpoints": 3,
+    "checked_git_objects": 26,
+    "checked_sources": 3,
+    "failures": [],
+    "healthy": true
+  },
+  "live_database": {
+    "migrations": 300,
+    "integrity": "ok"
+  },
+  "distribution_build": {
+    "status": "passed",
+    "url": "https://github.com/crewship-ai/crewship/actions/runs/34375031600"
+  },
+  "live_reader_revocation": {
+    "role": "VIEWER",
+    "applicationLoadedBeforeRevocation": true,
+    "applicationStatusAfterRevocation": 404,
+    "iframeRemoved": true,
+    "test_membership_removed": true
+  },
+  "source_review": {
+    "state": "approved_before_lock_followup",
+    "submitted_at": "2026-09-09T16:29:21Z",
+    "second_finding": "withdrawn by reviewer after verified rebuttal",
+    "url": "https://github.com/crewship-ai/crewship/pull/2475#discussion_r3970751997"
+  },
+  "macos_followup": {
+    "run": 34374675235,
+    "failure": "concurrent first lock open returned ENOENT",
+    "fix": "open existing inode, exclusive create when missing, reopen winner on EEXIST",
+    "state": "local lease suite x10, race x5, API concurrent saves x30 and vet passed; new remote macOS pending",
+    "source_head": "a9ff7ad726d6fd3d082ea7a55f838f073e98a133",
+    "ci_run": 34377781669
+  },
+  "current_ci": {
+    "source": 34377781669,
+    "server": 34378372215,
+    "ui": 34378375514,
+    "state": "in_progress"
+  }
+}

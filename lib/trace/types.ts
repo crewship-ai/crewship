@@ -8,6 +8,7 @@
 // arrow and makes lib/trace unusable from anywhere else.
 
 import type { PipelineRun } from "@/hooks/use-pipeline-runs"
+import type { DecisionForm } from "@/lib/decision-form"
 import type { HeatmapBucket } from "./percentile-heatmap"
 
 // Mirrors the closed set in internal/pipeline/types.go (StepType).
@@ -27,13 +28,7 @@ export type StepKind =
   | "query"
   | "foreach"
 
-export type StepStatus =
-  | "pending"
-  | "running"
-  | "waiting"
-  | "success"
-  | "failed"
-  | "skipped"
+export type StepStatus = "pending" | "running" | "waiting" | "success" | "failed" | "skipped"
 
 // Trimmed DSL step shape — only the fields the trace view renders.
 // The full Go struct has dozens more (retry, validation, outcomes…)
@@ -46,6 +41,7 @@ export type StepStatus =
 // templated form. Anyone editing this file should keep that
 // invariant — never persist or log resolved values on the client.
 export interface TraceStep {
+  name?: string
   id: string
   type: StepKind
   needs?: string[]
@@ -76,6 +72,7 @@ export interface TraceStep {
     env?: Record<string, string>
   }
   wait?: {
+    decision_form?: DecisionForm
     kind?: string
     approval_prompt?: string
     until?: string
@@ -115,6 +112,7 @@ export interface TraceStep {
 }
 
 export interface PipelineDSL {
+  parallelism?: string
   steps?: TraceStep[]
 }
 

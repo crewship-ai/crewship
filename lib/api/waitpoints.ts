@@ -1,3 +1,4 @@
+import type { DecisionAnswer, DecisionForm } from "@/lib/decision-form"
 import { apiFetch } from "@/lib/api-fetch"
 
 // waitpointDecide — POSTs the explicit boolean to the workspace-scoped
@@ -13,6 +14,7 @@ export async function waitpointDecide(
   workspaceID: string,
   token: string,
   approved: boolean,
+  answer?: DecisionAnswer,
 ): Promise<{ ok: true } | { ok: false; error: string; status?: number }> {
   try {
     const res = await apiFetch(
@@ -20,7 +22,7 @@ export async function waitpointDecide(
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ approved }),
+        body: JSON.stringify({ approved, ...answer }),
       },
     )
     if (!res.ok) {
@@ -42,6 +44,7 @@ export async function waitpointDecide(
 // workspace-wide; callers filter by pipeline_run_id when they want
 // "waitpoints for this run".
 export interface PendingWaitpoint {
+  decision_form?: DecisionForm
   inbox_item_id?: string
   token: string
   pipeline_run_id: string
@@ -53,9 +56,7 @@ export interface PendingWaitpoint {
   created_at: string
 }
 
-export async function listPendingWaitpoints(
-  workspaceID: string,
-): Promise<PendingWaitpoint[]> {
+export async function listPendingWaitpoints(workspaceID: string): Promise<PendingWaitpoint[]> {
   const res = await apiFetch(
     `/api/v1/workspaces/${encodeURIComponent(workspaceID)}/pipelines/waitpoints`,
   )

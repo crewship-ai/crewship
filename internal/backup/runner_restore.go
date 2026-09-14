@@ -11,6 +11,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"github.com/crewship-ai/crewship/internal/pages"
 	"io"
 	"log/slog"
 	"sort"
@@ -94,7 +95,8 @@ type RestoreOptions struct {
 	// untouched would restore rows pointing at a path this instance
 	// never had. Empty skips both steps — matches CreateOptions.BlobRoot's
 	// "empty disables" convention.
-	BlobRoot string
+	BlobRoot         string
+	PageProjectsPath string
 }
 
 // RestoreResult summarises what was restored.
@@ -508,6 +510,7 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 	// would only ever recover the new identity, which is the half we
 	// already know.
 	var bundleCrewSlugs []string
+	bundlePageIDs := originalPageIDs(extracted.DBDump)
 	// journalChainResigned records what the forked-restore chain re-sign
 	// touched, so RestoreResult can report it rather than leaving the
 	// operator to discover a new genesis by reading the journal.
@@ -850,6 +853,15 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 	// parse, checksum verify, payload extract, schema-skew). Nothing
 	// left mutates state, so return early with a synthetic success
 	// result that reports what would have been inserted.
+	pageApply := func(context.Context) error { return nil }
+	if !opts.FilesOnly {
+		var clean func()
+		pageApply, clean, err = preparePageProjectsRestore(ctx, extracted, opts.PageProjectsPath, extracted.DBDump, bundlePageIDs)
+		if err != nil {
+			return nil, err
+		}
+		defer clean()
+	}
 	if opts.DryRun {
 		if opts.Logger != nil {
 			opts.Logger("dry-run: checksum + schema compat OK; no DB or docker writes performed")
@@ -956,6 +968,13 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 	// by expectedInsertCounts() at the rowsInsertedShortfalls comparison
 	// further down.
 	var reconciledUsers int
+	if !opts.FilesOnly && !opts.DryRun && opts.PageProjectsPath != "" && extracted.DBDump != nil {
+		release, err := (&pages.ProjectStore{Directory: opts.PageProjectsPath}).Lease(ctx, firstWorkspaceID(extracted.DBDump), true)
+		if err != nil {
+			return nil, err
+		}
+		defer release()
+	}
 	if extracted.DBDump != nil {
 		// PreInsert composition: --replace wipe FIRST (if enabled),
 		// THEN user-email reconciliation. The order matters when
@@ -1026,6 +1045,9 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 				return recordForkOrigin(ctx, tx, opts, manifest, extracted.DBDump, bundleCrewSlugs)
 			},
 			PreCommit: func(ctx context.Context) error {
+				if err := pageApply(ctx); err != nil {
+					return err
+				}
 				if err := memoryBlobsRestore(ctx); err != nil {
 					return err
 				}

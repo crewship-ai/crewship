@@ -1,7 +1,7 @@
 ---
 name: routine-author
 display_name: Routine Author
-version: 1.0.0
+version: 1.1.0
 category: AUTOMATION
 description: Author a Crewship routine (repeatable declarative workflow) from a natural-language goal. Use when asked to build, create, or automate a repeatable routine or workflow ("make a routine that…", "automate X", "set up a recurring job that…").
 ---
@@ -9,7 +9,7 @@ description: Author a Crewship routine (repeatable declarative workflow) from a 
 # Routine Author
 
 A playbook for turning "make a routine that does X" into a valid, saved Crewship
-routine — grounded in what this crew actually has, tested before it ships.
+draft — grounded in what this crew actually has, reviewed and published by the user.
 
 ## When to Activate
 
@@ -32,11 +32,14 @@ routine — grounded in what this crew actually has, tested before it ships.
 >   that step's prompt and move on.
 > - **Do NOT** test a webhook, ping a host, or re-fetch the routine after saving
 >   to "verify." None of that is authoring.
-> - Creating the routine is **exactly ONE action**: call the `save_routine` tool
->   with the finished DSL (see step 5 — do not curl the save endpoint). Call it a
->   second time only if it returns a DSL error — then fix the JSON and retry.
->   Target ~two messages total: a one-line plan, then the save + a plain summary.
->   A third probing command means you're stalling — stop.
+> - First call `get_routine_draft` for the intended slug. This loads the same
+>   saved draft the user edits, or a revision-zero baseline for a new recipe.
+>   Preserve that envelope, edit its `document`, then call `save_routine_draft`.
+> - Return the saved `editor_url`. Do not publish through `save_routine` during
+>   this authoring flow: that legacy tool still changes the live recipe.
+> - A conflict means somebody edited the draft or its published base. Keep
+>   your proposed changes and explain the conflict; never reload and blindly
+>   overwrite the other editor's work.
 
 1. **Clarify only the genuinely ambiguous essentials.** Ask at most 2–3 questions,
    then default the rest. The three that usually matter:
@@ -111,60 +114,39 @@ routine — grounded in what this crew actually has, tested before it ships.
    }
    ```
 
-5. **Save with a trigger — always, in the same call.** Call the **`save_routine`**
-   tool with `{ name, description, definition, sample_inputs, trigger, activation }`
-   — do NOT curl the save endpoint, and do NOT save the routine first and
-   attach a trigger afterward; the trigger is created in the SAME transaction
-   as the routine, or not at all. `trigger` is REQUIRED — either a real one:
+5. **Save a draft with its proposed start.** Use `get_routine_draft` with
+   `{ "slug": "my-routine" }` (and `crew` only when authorized to author for
+   another crew). Keep `id`, `slug`, `revision`, `base_pipeline_id` and
+   `base_revision` from the returned `draft` unchanged. Fill `draft.document`:
 
    ```json
-   "trigger": {"kind": "schedule", "cron": "0 9 * * 1-5", "timezone": "Europe/Prague",
-               "catchup_policy": "once", "max_consecutive_failures": 5}
+   {
+     "slug": "my-routine",
+     "name": "My routine",
+     "description": "A short purpose",
+     "definition": {"dsl_version": "1.0", "name": "my-routine", "steps": []},
+     "trigger": {"kind": "schedule", "cron": "0 9 * * 1-5", "timezone": "Europe/Prague"}
+   }
    ```
 
-   or, when the goal genuinely has no cadence (a one-off / on-demand routine),
-   the explicit no-op:
+   The empty steps above are only the envelope example; supply the actual DSL
+   you authored. Use `{"kind":"manual"}` for an on-demand start, or a proposed
+   one-time `{"kind":"once","fire_at":"...RFC3339..."}` when requested.
+   Call `save_routine_draft` with `{slug, draft}`. Crew and acting-agent identity
+   are injected by the sidecar; do not copy identity fields from another crew.
+   Saving a draft does not validate or execute steps, create a live routine,
+   activate a schedule, or raise a schedule-approval request. Never claim it did.
+   The legacy `save_routine` tool remains available for existing direct-publish
+   integrations; its `activation:"draft"` means a disabled trigger, NOT an
+   unpublished recipe. Do not use it as a substitute for `save_routine_draft`.
 
-   ```json
-   "trigger": {"kind": "manual"}
-   ```
-
-   Never just omit `trigger` — that reads as an oversight, not a decision, and
-   the routine page shows it as a warning. Add `"activation": "draft"` at the
-   top level (a sibling of `trigger`, not inside it) whenever the routine acts
-   autonomously in a way a human should sign off on before it ever fires
-   unattended — this creates the trigger disabled and raises exactly one
-   approval item in the workspace's inbox instead of letting it fire.
-
-   The tool validates (a fast dry-run) before saving. **If it returns an
-   error, READ it**, fix the DSL or trigger (bad cron, unknown timezone,
-   missing input, wrong step shape), and retry — do not hand the user a
-   routine that never passed validation. Use `list_routines` to check
-   existing routines before authoring a duplicate.
-
-6. **Tell the user the real outcome — routine AND trigger.** A routine is
-   **risky** and lands as `proposed` (a MANAGER must approve it before it can
-   run at all) when it contains an `http` step, a `code` step, declares
-   `egress_targets` or `credentials_required`, or names an integration the
-   crew hasn't connected. A routine built from only `agent_run` / `transform`
-   / `wait` / `call_pipeline` with all integrations already connected goes
-   **live** immediately. Say which one happened — never claim a proposed
-   routine is live.
-
-   Separately, report the trigger from the save response's `trigger` field:
-   - `trigger.kind == "manual"` — say the routine has no automatic trigger and
-     runs only when invoked.
-   - `trigger.kind == "schedule"` and `trigger.approval_required` is false —
-     state `trigger.first_fire_at` as the plain-language first run time
-     ("next Monday at 9:00 AM Europe/Prague").
-   - `trigger.approval_required` is true (activation was "draft") — say the
-     trigger is disabled pending approval, that ONE item is now in the
-     workspace's inbox, and what the first run WOULD be
-     (`trigger.first_fire_at`) once a MANAGER activates it.
-
-   Your final message must always include this: what was created, when it
-   first runs (or that it's manual, or awaiting approval), and whether the
-   routine itself is active or awaiting review.
+6. **Hand the SAME draft to the user.** Return the `editor_url` from the saved
+   response, with a short summary and the saved revision. Explain that it is
+   unpublished and its proposed schedule is inactive. The user opens Recipe /
+   Test / Publish to review, validate without execution, and explicitly publish.
+   Publication checks capability changes and existing recurring presets. The
+   legacy `proposed` governance state is not the same as an unpublished draft.
+   Do not invent a first-fire time or say work ran merely because saving passed.
 
 7. **Present a short readable summary.** Describe the trigger and each step in
    plain language ("On a manual run: 1) Alex summarizes the repo's commits,
@@ -190,6 +172,6 @@ routine — grounded in what this crew actually has, tested before it ships.
 
 ## Verification
 
-- The save response shows `test_run` passed (not a validation or runtime error).
+- The save response contains a nonempty draft ID, its saved revision, `published:false`, and an `editor_url`. Validation and publication still belong to the user review flow.
 - The plain-language summary you give the user matches the saved DSL — same
   trigger, same steps, same destination.

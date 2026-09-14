@@ -1,5 +1,7 @@
 "use client"
 
+import { HumanDecisionForm } from "@/components/features/approvals/human-decision-form"
+import type { DecisionAnswer } from "@/lib/decision-form"
 import { useEffect, useState } from "react"
 import { CheckCircle2, XCircle, Clock, MessageSquare } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -33,7 +35,7 @@ import type { PendingWaitpoint } from "@/hooks/use-pending-approval"
 interface Props {
   waitpoint: PendingWaitpoint
   deciding: boolean
-  onDecide: (approved: boolean, comment?: string) => Promise<boolean>
+  onDecide: (approved: boolean, comment?: string, answer?: DecisionAnswer) => Promise<boolean>
   className?: string
 }
 
@@ -97,83 +99,96 @@ export function RoutineApprovalBanner({ waitpoint, deciding, onDecide, className
         </span>
       </span>
 
-      <div className="flex shrink-0 items-center gap-1.5">
-        <Button
-          size="sm"
-          onClick={() => decide(true)}
-          disabled={deciding}
-          className="h-7 gap-1.5 bg-warn px-3 text-[11px] font-semibold text-background hover:bg-warn/90"
-        >
-          {deciding ? <Spinner className="h-3 w-3" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
-          Approve
-        </Button>
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={() => decide(false)}
-          disabled={deciding}
-          className="h-7 gap-1.5 px-3 text-[11px]"
-        >
-          <XCircle className="h-3.5 w-3.5" />
-          Reject
-        </Button>
-        <Dialog open={open} onOpenChange={setOpen}>
-          <DialogTrigger asChild>
-            <button
-              type="button"
-              className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] text-muted-foreground transition-colors hover:text-foreground"
-            >
-              <MessageSquare className="h-3 w-3" />
-              View request
-            </button>
-          </DialogTrigger>
-          <DialogContent className="max-w-2xl">
-            <DialogHeader>
-              <DialogTitle>Approval request</DialogTitle>
-              <DialogDescription>
-                Step <span className="font-mono">{waitpoint.step_id}</span> · expires in {remaining}
-              </DialogDescription>
-            </DialogHeader>
-            <div className="max-h-[50vh] overflow-auto rounded-md border border-border/60 bg-background/40 px-3 py-2.5">
-              <p className="whitespace-pre-wrap text-[13px] leading-relaxed text-foreground/90">
-                {waitpoint.prompt}
-              </p>
-            </div>
-            <textarea
-              aria-label="Decision comment"
-              placeholder="Decision comment (optional, sent to the parked run as the waitpoint payload)…"
-              value={comment}
-              onChange={(e) => setComment(e.target.value)}
-              className="h-20 w-full resize-none rounded-md border border-white/[0.1] bg-background p-2.5 text-[13px] leading-relaxed placeholder:text-muted-foreground-soft"
-            />
-            <DialogFooter>
-              <Button
-                variant="outline"
-                onClick={() => {
-                  setOpen(false)
-                  void decide(false)
-                }}
-                disabled={deciding}
-                className="gap-1.5"
+      {waitpoint.decision_form ? (
+        <div className="w-full space-y-3">
+          <p className="whitespace-pre-wrap text-sm">{waitpoint.prompt}</p>
+          <HumanDecisionForm
+            key={waitpoint.token}
+            form={waitpoint.decision_form}
+            disabled={deciding}
+            onDecide={(approved, answer) => onDecide(approved, comment, answer)}
+          />
+        </div>
+      ) : (
+        <div className="flex shrink-0 items-center gap-1.5">
+          <Button
+            size="sm"
+            onClick={() => decide(true)}
+            disabled={deciding}
+            className="h-7 gap-1.5 bg-warn px-3 text-[11px] font-semibold text-background hover:bg-warn/90"
+          >
+            {deciding ? <Spinner className="h-3 w-3" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
+            Approve
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => decide(false)}
+            disabled={deciding}
+            className="h-7 gap-1.5 px-3 text-[11px]"
+          >
+            <XCircle className="h-3.5 w-3.5" />
+            Reject
+          </Button>
+          <Dialog open={open} onOpenChange={setOpen}>
+            <DialogTrigger asChild>
+              <button
+                type="button"
+                className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] text-muted-foreground transition-colors hover:text-foreground"
               >
-                <XCircle className="h-3.5 w-3.5" />
-                Reject
-              </Button>
-              <Button
-                onClick={() => {
-                  setOpen(false)
-                  void decide(true)
-                }}
-                disabled={deciding}
-                className="gap-1.5 bg-warn text-background hover:bg-warn/90"
-              >
-                <CheckCircle2 className="h-3.5 w-3.5" />
-                Approve
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-      </div>
+                <MessageSquare className="h-3 w-3" />
+                View request
+              </button>
+            </DialogTrigger>
+            <DialogContent className="max-w-2xl">
+              <DialogHeader>
+                <DialogTitle>Approval request</DialogTitle>
+                <DialogDescription>
+                  Step <span className="font-mono">{waitpoint.step_id}</span> · expires in{" "}
+                  {remaining}
+                </DialogDescription>
+              </DialogHeader>
+              <div className="max-h-[50vh] overflow-auto rounded-md border border-border/60 bg-background/40 px-3 py-2.5">
+                <p className="whitespace-pre-wrap text-[13px] leading-relaxed text-foreground/90">
+                  {waitpoint.prompt}
+                </p>
+              </div>
+              <textarea
+                aria-label="Decision comment"
+                placeholder="Decision comment (optional, sent to the parked run as the waitpoint payload)…"
+                value={comment}
+                onChange={(e) => setComment(e.target.value)}
+                className="h-20 w-full resize-none rounded-md border border-white/[0.1] bg-background p-2.5 text-[13px] leading-relaxed placeholder:text-muted-foreground-soft"
+              />
+              <DialogFooter>
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setOpen(false)
+                    void decide(false)
+                  }}
+                  disabled={deciding}
+                  className="gap-1.5"
+                >
+                  <XCircle className="h-3.5 w-3.5" />
+                  Reject
+                </Button>
+                <Button
+                  onClick={() => {
+                    setOpen(false)
+                    void decide(true)
+                  }}
+                  disabled={deciding}
+                  className="gap-1.5 bg-warn text-background hover:bg-warn/90"
+                >
+                  <CheckCircle2 className="h-3.5 w-3.5" />
+                  Approve
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        </div>
+      )}
     </div>
   )
 }

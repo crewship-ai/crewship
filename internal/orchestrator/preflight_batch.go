@@ -51,6 +51,7 @@ import (
 
 const (
 	preflightStepAgentDirs      = "agent-dirs"
+	preflightStepRunHome        = "run-home"
 	preflightStepMemoryDirs     = "memory-dirs"
 	preflightStepCrewMemoryDirs = "crew-memory-dirs"
 	preflightStepMemoryMigrate  = "memory-migration"

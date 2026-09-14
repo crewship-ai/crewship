@@ -135,6 +135,15 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	"pages":         IntentInclude,
 	"page_panels":   IntentInclude,
 	"page_versions": IntentInclude,
+	// Durable draft metadata and revision audit. Source files live outside
+	// SQLite; until file-phase integration, back up page_projects_path alongside
+	// the DB (docs/prd/pages-apps-v1.md). Never silently drop the metadata.
+	"page_project_publications": IntentInclude,
+	"page_project_withdrawals":  IntentInclude,
+	"page_project_live":         IntentInclude,
+	"page_project_builds":       IntentInclude,
+	"page_project_drafts":       IntentInclude,
+	"page_project_revisions":    IntentInclude,
 	// page_grants is the ACL. Dropping it on restore would silently
 	// widen or narrow who can read a page, and `granted_by_user_id` is
 	// NOT NULL precisely so a grant always names the human accountable
@@ -233,6 +242,59 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	"keeper_aux_settings": IntentExcludeOperational,
 
 	// === Runtime state (regenerates on restore) =====================
+	// The durable work ledger. Runtime, not bundle data, and the distinction
+	// matters more here than usual: a restored bundle carrying queued work
+	// would RUN it, in a workspace that is a copy of the one that accepted it.
+	// The delivery that produced it is long gone, the sender has been answered,
+	// and the external effects it is about to repeat already happened once.
+	// A restore should come up with an empty queue and let real deliveries fill
+	// it, which is what "regenerates naturally" means for this table.
+	"work_items":          IntentExcludeRuntime,
+	"work_attempts":       IntentExcludeRuntime,
+	"work_events":         IntentExcludeRuntime,
+	"external_operations": IntentExcludeRuntime,
+	// The delivery ledger is an operational record of what this instance
+	// received, including raw request bodies. Carrying it into a fork would
+	// duplicate another instance's inbound history under a new workspace, and
+	// the dedup keys it holds are only meaningful against the work items above,
+	// which do not travel either.
+	"webhook_deliveries": IntentExcludeRuntime,
+	// Receipt identities refer to this instance's pipeline runtime history.
+	"routine_webhook_receipts": IntentExcludeRuntime,
+	// Undelivered chat turns waiting for their session. These ARE user words,
+	// which is the argument for including them — but they are addressed to a
+	// live session and a work item that do not survive the restore, so a
+	// restored mailbox would be a queue of messages with nowhere to go. The
+	// delivered ones are already in workspace_conversation_messages, which does
+	// round-trip.
+	"session_mailbox": IntentExcludeRuntime,
+
+	// The memory revision anchor and mutation ledger. Excluded, and the cost is
+	// worth stating because it is not zero.
+	//
+	// The canonical markdown and its version blobs DO travel in the bundle, so a
+	// restore has the content. What it does not have is the revision each file
+	// was at. That is survivable by construction rather than by luck:
+	// ReadCanonical reports drift only when an anchor EXISTS and disagrees with
+	// the file, so a restored workspace with no anchors reads cleanly at
+	// revision 0 and the first append establishes revision 1 — the same path a
+	// brand-new key takes. A guaranteed replace is unavailable until then, which
+	// is already documented behaviour rather than a new hole.
+	//
+	// Including them would be worse. A pending intent row is the thing that
+	// blocks a second writer to a key while recovery is possible, so a restored
+	// intent would block every write to that key in the new workspace until a
+	// recovery pass looked at a temp file from another machine and gave up. And
+	// the idempotency keys are only meaningful against the operations that
+	// created them, which do not travel either.
+	//
+	// What IS lost is mutation provenance across a restore — who changed what,
+	// when, and what corrected or retracted it. Carrying that would mean
+	// separating the provenance history from the intent state machine, which is
+	// a schema change and not a classification choice.
+	"memory_revisions": IntentExcludeRuntime,
+	"memory_mutations": IntentExcludeRuntime,
+
 	"user_sessions": IntentExcludeRuntime,
 	"cli_pairings":  IntentExcludeRuntime,
 	// keeper_requests carries the same caveat as keeper_aux_settings above
@@ -479,6 +541,7 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	// pipeline_tags = routine-DEFINITION discovery tags (v125).
 	"pipeline_tags":     IntentInclude,
 	"pipeline_versions": IntentInclude,
+	"pipeline_drafts":   IntentInclude,
 	// pipeline_waitpoints holds suspended-workflow state (pending
 	// approval tokens, event-wait, decision_payload, timeout_at).
 	// These are DURABLE state — a "pending" waitpoint is a real

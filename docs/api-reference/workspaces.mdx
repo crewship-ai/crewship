@@ -41,6 +41,7 @@ Errors follow [RFC 7807 Problem Details](https://datatracker.ietf.org/doc/html/r
 | `GET` | [`/api/v1/workspaces/{workspaceId}/pipelines/{slug}`](#get-pipeline) | One pipeline with full `definition` |
 | `DELETE` | [`/api/v1/workspaces/{workspaceId}/pipelines/{slug}`](#delete-pipeline) | Soft-delete a pipeline |
 | `POST` | [`/api/v1/workspaces/{workspaceId}/pipelines/save`](#save-pipeline) | Create or update a pipeline |
+| `POST` | [`/api/v1/workspaces/{workspaceId}/pipelines/fixture_test`](#test-a-routine-step-with-sample-data) | Test one step with explicit sample data; no external actions |
 | `POST` | [`/api/v1/workspaces/{workspaceId}/pipelines/{slug}/dry_run`](#dry-run-a-saved-pipeline) | WouldExecute report + manifest, no agent runs |
 | `POST` | [`/api/v1/workspaces/{workspaceId}/pipelines/{slug}/run`](#run-pipeline) | Invoke a saved pipeline |
 | `GET` | [`/api/v1/workspaces/{workspaceId}/pipelines/{slug}/runs`](#list-pipeline-runs-journal-backed) | Journal-backed run entries |
@@ -773,6 +774,96 @@ Soft-deletes the pipeline (`deleted_at` set). Versions, run history, and bound s
 | `403` | Caller below `ADMIN` |
 | `404` | Pipeline not found |
 
+### List routine drafts
+
+```http
+GET /api/v1/workspaces/{workspaceId}/pipelines/drafts
+```
+
+**Auth:** workspace `MANAGER`+.
+
+**Response:** `200 OK`, an array of up to 100 `{slug, revision, updated_at}`
+entries, newest edit first. Draft documents are read separately. `403` means
+insufficient role; `500` means the draft list could not be read.
+
+### Read a routine draft
+
+```http
+GET /api/v1/workspaces/{workspaceId}/pipelines/{slug}/draft
+```
+
+**Auth:** workspace `MANAGER`+.
+
+**Response:** `200 OK`, a `RoutineDraft` envelope containing `id`, `workspace_id`,
+`slug`, `revision`, `base_pipeline_id`, `base_revision`, `document`, `updated_by`,
+`created_at` and `updated_at`. With no saved draft, revision zero describes the
+current published recipe and its base revision. With no published recipe either,
+the document is `{}` and the base ID is empty. Missing drafts are therefore not
+`404`. `403` means insufficient role; `500` means the read failed.
+
+### Save a routine draft
+
+```http
+POST /api/v1/workspaces/{workspaceId}/pipelines/drafts
+```
+
+**Auth:** workspace `MANAGER`+; the authenticated user supplies `updated_by`.
+
+**Request body:** the draft envelope returned by the read operation, with edits
+inside `document`. Preserve `id`, `revision`, `base_pipeline_id` and
+`base_revision`. The document contains the ordinary save fields, including
+`slug`, `name`, `description` and an object `definition`; its slug must match the
+envelope. Incomplete definitions can be saved. Temporary publication tokens and
+legacy validation/governance bypass fields are discarded.
+
+**Response:** `200 OK`, the exact newly stored `RoutineDraft` with its incremented
+revision. An unpublished draft can move to a free slug without changing its ID;
+a draft editing a published recipe cannot. Saving does not publish or activate
+a trigger. `400` means malformed input; `403` means insufficient role; `409`
+means the revision/base changed or the target slug is occupied; `500` means the
+write failed. Keep the returned envelope for the next edit or publication.
+
+### Discard a routine draft
+
+```http
+DELETE /api/v1/workspaces/{workspaceId}/pipelines/{slug}/draft
+```
+
+**Auth:** workspace `MANAGER`+.
+
+**Request body:** `{"id":"draft-id","revision":2}`. Both identify the exact
+saved draft; a discarded and recreated draft has a different ID.
+
+**Response:** `204 No Content`. Only that draft revision is deleted. `400` means
+invalid JSON; `403` means insufficient role; `409` means the ID/revision no longer
+matches; `500` means deletion failed. The published recipe remains available.
+
+### Publish a routine draft
+
+```http
+POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/publish
+```
+
+**Auth:** workspace `MANAGER`+; normal publication capability review still applies.
+
+**Request body:** `{"id":"draft-id","revision":2,"save_token":"...","approve_risk":false}`.
+First obtain `save_token` from `POST /api/v1/workspaces/{workspaceId}/pipelines/test_run`
+for the exact saved definition and author crew. `approve_risk: true` explicitly
+confirms capability changes when publication reports that review is needed.
+
+**Response:** `201 Created`, the saved recipe (`RoutinePublishResponse`) with its
+version and optional trigger result. Publishing atomically verifies and consumes
+the exact draft, checks its published base, and saves the recipe and trigger.
+Enabled recurring schedules that follow the head must have compatible inputs;
+disabled and version-pinned schedules do not block publication.
+
+`400` means malformed input; `403` means insufficient role; `409` means stale
+revision/base, capability review required, or incompatible schedule inputs;
+`422` means an invalid definition, trigger or publication proof; `500` means
+storage failed. Conflicts preserve both the draft and published recipe.
+A schedule conflict includes `schedule_conflict: {schedule_id, name, reason}`;
+a capability-review conflict includes `risk_reasons`.
+
 ### Save pipeline
 
 ```
@@ -807,9 +898,30 @@ Creates or updates a pipeline for the calling user. `authored_via` is always set
 | `409` | Slug already exists in this workspace |
 | `422` | DSL parse / validate / cycle-detect failure, a `crewship` step needing an acting agent on a routine with no `author_agent_id`, or validation gate not satisfied |
 
-<Note>
-There is **no public `test_run` endpoint.** You cannot run an agent "dry" (its scripts have uninterceptable side effects), so a real run is just [Run](#run-pipeline). Drafts are validated server-side on `/save` (parse + schema + cycle detection), and the sidecar agent-authoring flow validates a draft via the internal dry-run gate (`/api/v1/internal/pipelines/test_run`, X-Internal-Token) before persisting.
-</Note>
+### Test an unpublished definition
+
+```http
+POST /api/v1/workspaces/{workspaceId}/pipelines/test_run
+```
+
+**Auth:** authenticated workspace `MANAGER`+.
+
+**Request body:** `definition` (object, required), `author_crew_id` (optional
+string belonging to this workspace), and `sample_inputs` (optional object).
+The endpoint checks the definition and applicable resource gates, then produces
+a static execution plan. It does not execute agents, scripts or HTTP steps.
+
+**Response:** `200 OK`, a `RunResult`. A successful `DRY_RUN_OK` result includes
+`save_token` when the server's signing key is configured. Send that token to
+`/publish` or `/save` within five minutes, with the same definition bytes. The
+token is bound to this workspace, authenticated user and definition hash; a
+successful response without a token is insufficient for normal publication.
+`400` means malformed input, `403` includes foreign crew references, `422`
+means an invalid definition, and `503` means the runner is not wired. Resource
+gates can also refuse the test with their specific missing-resource response.
+
+The separate sidecar endpoint `/api/v1/internal/pipelines/test_run` authenticates
+with `X-Internal-Token`. For actual external work, use [Run](#run-pipeline).
 
 ### Dry-run a saved pipeline
 
@@ -1251,6 +1363,27 @@ Imports **skip the save validation gate** by design -- a marketplace bundle is p
 
 When a pipeline hits a `step_wait` of kind `approval`, the run parks and a waitpoint row is created. The UI's `/inbox` lists pending waitpoints; approving or rejecting wakes the parked run.
 
+### Typed human decisions
+
+An approval wait can declare `decision_form` with `fields` (routine input
+specifications) and `actions` (`id`, `label`, `approved`). The server freezes this
+form when it creates the waitpoint. Later recipe edits cannot change the question
+or validation for a pending decision. Standing trust does not auto-answer a form.
+
+The authenticated approve endpoint accepts the flat request
+`{"approved":true,"action_id":"go","data":{"count":0,"enabled":false}}`.
+The action must exist and its `approved` value must match. The server validates
+required fields and types without converting strings into numbers or booleans.
+Rejection relaxes required fields. `400` means an invalid answer, `403` means an
+unauthorized actor, and `409` means the decision was already answered or expired.
+The accepted JSON answer is the wait step output for downstream steps.
+
+Typed decisions require an authenticated workspace member with `MANAGER`+;
+the public token callback returns `403` even for a well-formed form answer.
+Their pending-list rows carry `decision_form` and omit `callback_url`.
+Legacy binary approvals retain the public callback and their historical output.
+Identity comes from authentication, never from an answer's data fields.
+
 ### List pending waitpoints
 
 ```
@@ -1298,7 +1431,12 @@ Completes a pending approval. Decider identity is taken from the request's auth 
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `approved` | boolean | **effectively yes** | Always send it explicitly (the CLI and UI always do). If the field is omitted entirely, it defaults to **`false`** — a body-less `POST` to this URL **denies** the waitpoint rather than approving it, despite the endpoint being named `.../approve` (`internal/api/pipelines_exec.go`, `Approved bool` — the Go zero value). See **Defaults differ from the public callback**, below, before relying on omission either way. |
-| `comment` | string | no | Forwarded to the parked run as the wait step's output. |
+| `comment` | string | no | Stored with the decision. Included in typed decision output; it does not replace legacy wait output. |
+
+An approved legacy wait returns the literal `waited:approval:approved` as its
+step output. An approved typed wait returns serialized `DecisionAnswer` JSON
+with `action_id`, `data`, and optional `comment`; downstream steps can parse
+that JSON. Rejected decisions follow the wait step's failure behavior.
 
 **Response:** `200 OK`
 
@@ -1739,3 +1877,37 @@ The list lives in `internal/api/workspaces.go` and must stay in sync with `lib/l
 - [Routines guide](/guides/routines) -- authoring DSL pipelines end-to-end
 - [Routines cookbook](/guides/routines-cookbook) -- copy-paste pipeline examples
 - [Credentials guide](/guides/credentials) -- required for the `/skills/generate` endpoint
+
+### Test a routine step with sample data
+
+```http
+POST /api/v1/workspaces/{workspaceId}/pipelines/fixture_test
+```
+
+**Auth:** workspace `MANAGER`+.
+
+**Request body:** `definition` (object) and `step_id` (string) are required.
+`inputs` is an optional object of recipe input values; `step_outputs` maps
+upstream step IDs to output strings. `fixture_output` supplies a replacement
+output for an agent, HTTP or script step. An empty string is an explicit sample.
+
+Transforms compute with the production transform implementation using the
+supplied inputs and step outputs. External steps only check the supplied output;
+the endpoint never calls agents, services or scripts. Only top-level steps are
+supported. Dependencies, conditions, retries and outcome graders are not run;
+external schema references are blocked. Optional `env` and `secrets` objects map names to sample strings; `metadata`
+supplies sample values for `run.metadata.*`. `run.*` aliases use the `env` map,
+as in live rendering. These are explicit test data, never values read from the
+server environment or credential vault. Use fake values for secret samples.
+Missing references cannot silently become empty values. Runtime samples are
+included in the fixture evidence hash.
+
+**Response:** `200 OK`, `RoutineFixtureResult`: `execution_mode`, `step_id`,
+`step_type`, `definition_hash`, `fixture_hash`, `output_source`, `output`, `valid`,
+`validation_declared`, optional `validation_reason`, and `limitations`.
+`valid: false` reports a failed output check; no declared check is distinguished
+by `validation_declared: false`. These results are not publication proofs.
+
+`400` means invalid definition, unsupported step type, missing sample values or
+malformed input; `403` means insufficient role. A failed output check returns
+`200` with `valid: false` so clients can display its evidence.

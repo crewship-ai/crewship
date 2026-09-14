@@ -1,0 +1,21 @@
+apiVersion: crewship/v1
+kind: Page
+metadata:
+  slug: ansible-status
+  name: Ansible checks
+spec:
+  panels:
+    - id: health
+      title: Last playbook check
+      schema: status.v1
+      owner: crew/ops
+      producer: routine/ansible-status-check
+      sla: 1h
+      actions:
+        - id: refresh
+          kind: call
+          label: Run Ansible check
+          routine: ansible-status-check
+          confirm:
+            title: Run the configured playbook in check mode?
+            body: The operations crew controls the inventory, playbook and credentials.

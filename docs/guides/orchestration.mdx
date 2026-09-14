@@ -531,6 +531,68 @@ Missions **you** create through the dashboard or the JWT API are not capped and
 are not counted against the agents' budget: an operator planning work is making
 a decision, not fanning out unattended.
 
+## Per-run tokens and the sidecar's run register
+
+Each agent run gets its own sidecar bearer token, and the sidecar keeps a
+register of which runs are still live so a finished run's token stops working.
+Two environment variables configure that register. Both are read by the
+**sidecar**, inside the crew container, and neither is set by a normal
+deployment.
+
+### `CREWSHIP_SIDECAR_STATE_DIR`
+
+Where the sidecar's run journal is written.
+
+| | |
+|---|---|
+| **Default** | `/tmp/crewship-sidecar-state` |
+| **Who sets it** | nothing in production; it exists so a test gets a directory of its own instead of writing to the container-shaped default |
+| **Scope** | one sidecar process |
+| **If misconfigured** | the sidecar cannot create or write the journal, and a run's start/end records are lost — the register then falls back to its unknown-run policy rather than refusing traffic |
+
+The default lives under `/tmp` on purpose. It survives a sidecar **restart**
+inside a long-lived crew container, and dies with the container — which is the
+right lifetime, because the runs it describes cannot outlive the container
+either. The directory is created `0700` owned by the sidecar's UID (1002), and
+`/tmp` is sticky (`1777`), so the agent at UID 1001 can neither read the journal
+nor unlink the directory: without the sticky bit a world-writable parent would
+let an agent delete the file and un-revoke its own finished run's token. Point
+this at a directory with weaker permissions and that protection is gone.
+
+### `CREWSHIP_SIDECAR_RUN_AUTHORITY`
+
+Makes the sidecar ask crewshipd whether a run is still an active attempt, rather
+than relying on local evidence alone.
+
+| | |
+|---|---|
+| **Default** | unset, meaning **off** |
+| **Accepted values** | `1` enables it |
+| **Who sets it** | an operator, on the crew container |
+| **Scope** | one sidecar process |
+| **If enabled before its precondition holds** | every run — including the sidecar's own boot run — is locked out of every sidecar route on its first call, permanently and across restarts |
+
+The client is complete and verified against the real host handler. What gates it
+is a property of the data, not of the code: the host answers from the work
+ledger, and a run with no attempt row there is answered "not active", which is
+indistinguishable from "this run ended". The registry then does the only thing a
+negative verdict allows and revokes the token durably. So the switch may only go
+on once every run an agent can make is represented in that ledger.
+
+<Warning>
+  As of the durable-dispatch work, **webhook-triggered** runs are claimed through
+  the work ledger and do have attempt rows; chat, assignment, schedule and
+  pipeline runs still do not. The precondition is therefore partly met and not
+  fully met, and this switch must stay off until every producer dispatches
+  through the ledger.
+</Warning>
+
+When the host cannot be reached at all, an unreachable authority is never read
+as a revocation: a run with no local evidence is admitted for a two-minute grace
+from the first failure, long enough to cover a crewshipd restart, and each probe
+is bounded at five seconds because the sidecar sits on the request path of an
+agent's own call.
+
 ## Sidecar API for Orchestration
 
 Any crew agent can reach the sidecar proxy at `localhost:9119`; the orchestration

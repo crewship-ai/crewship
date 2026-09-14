@@ -81,7 +81,7 @@ func executionSchemaComponents() map[string]any {
 	span := obj(map[string]any{"seq": integer(), "kind": str(), "name": str(), "started_at": timeString(), "duration_ms": integer(), "status": str(), "detail": anyObject, "input": anyObject, "output": anyObject, "input_truncated": boolean(), "output_truncated": boolean()})
 	stateEntry := obj(map[string]any{"key": str(), "value": str(), "updated_at": timeString()})
 	stateBucket := obj(map[string]any{"schedule_id": str(), "entries": arr(refOrString("StateEntry"))})
-	waitpoint := obj(map[string]any{"token": str(), "pipeline_run_id": str(), "step_id": str(), "kind": str(), "prompt": str(), "invoking_crew_id": str(), "timeout_at": timeString(), "created_at": timeString(), "callback_url": str()})
+	waitpoint := obj(map[string]any{"decision_form": obj(map[string]any{"fields": arr(map[string]any{"type": "object", "additionalProperties": true}), "actions": arr(obj(map[string]any{"id": str(), "label": str(), "approved": map[string]any{"type": "boolean"}}))}), "token": str(), "pipeline_run_id": str(), "step_id": str(), "kind": str(), "prompt": str(), "invoking_crew_id": str(), "timeout_at": timeString(), "created_at": timeString(), "callback_url": str()})
 	replayOutcome := obj(map[string]any{"source_run_id": str(), "new_run_id": str(), "status": str(), "error": str()})
 	failureGroup := obj(map[string]any{"fingerprint": str(), "count": integer(), "pipeline_slug": str(), "failed_at_step": str(), "sample_error": str(), "run_ids": arr(str())})
 	activeRun := obj(map[string]any{"run_id": str(), "workspace_id": str(), "pipeline_id": str(), "pipeline_slug": str(), "status": str(), "concurrency_key": str(), "started_at": timeString(), "cancel_requested": boolean()})
@@ -103,7 +103,7 @@ func executionSchemaComponents() map[string]any {
 	replayRequest := obj(map[string]any{"pinned_version": integer()})
 	bulkReplayRequest := obj(map[string]any{"run_ids": arr(str()), "fingerprint": str(), "limit": integer()})
 	stateWriteRequest := obj(map[string]any{"value": str(), "schedule_id": str()})
-	waitpointApprovalRequest := obj(map[string]any{"approved": boolean(), "comment": str()})
+	waitpointApprovalRequest := obj(map[string]any{"approved": boolean(), "comment": str(), "action_id": str(), "data": anyMap})
 	// Appearance is a two-column write, so both fields are optional and an
 	// explicit "" clears the stored value while an absent field keeps it —
 	// the distinction the handler's pointer fields exist for.
@@ -116,7 +116,8 @@ func executionSchemaComponents() map[string]any {
 	// deliberately answers 200 with just the two written values rather than
 	// failing a change that already applied.
 	appearanceRoutine := obj(map[string]any{
-		"id": str(), "slug": str(), "name": str(), "description": str(), "dsl_version": str(),
+		"step_count": integer(),
+		"id":         str(), "slug": str(), "name": str(), "description": str(), "dsl_version": str(),
 		"definition_hash": str(), "ephemeral": boolean(), "workspace_visible": boolean(),
 		"invocation_count": integer(), "last_invocation_status": str(), "last_invoked_at": timeString(),
 		"icon": str(), "color": str(), "author_crew_id": str(), "author_agent_id": str(),

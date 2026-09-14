@@ -12,6 +12,7 @@
     "build": "node scripts/prepare-pdf-assets.mjs && next build",
     "lint": "eslint .",
     "test": "vitest run --passWithNoTests",
+    "test:types": "node scripts/typecheck-tests.mjs",
     "test:coverage": "vitest run --coverage",
     "test:watch": "vitest",
     "test:e2e": "playwright test",

@@ -2,11 +2,7 @@
 
 import { useEffect, useId, useMemo, useState } from "react"
 import { motion, AnimatePresence } from "motion/react"
-import {
-  Workflow,
-  Plus, Upload,
-  ChevronLeft, ChevronRight,
-} from "lucide-react"
+import { Workflow, Plus, Upload, ChevronLeft, ChevronRight } from "lucide-react"
 import { SubBar, SubBarPrimary, SubBarSecondary } from "@/components/layout/sub-bar"
 import {
   CreateSurface,
@@ -18,20 +14,18 @@ import {
 } from "@/components/layout/create-surface"
 import { useAppStore } from "@/lib/store"
 import { apiFetch } from "@/lib/api-fetch"
+import { useRoutinePurposes } from "@/hooks/use-routine-purposes"
 import { usePipelines } from "@/hooks/use-pipelines"
 import { useUrlSelection } from "@/hooks/use-issue-detail"
 import { SidebarCollapseButton } from "@/components/layout/sidebar-kit"
-import { isRoutineTestFixture } from "@/lib/routine-filters"
 import { cn } from "@/lib/utils"
 import { useIsMobile } from "@/hooks/use-mobile"
-import type { RoutineFilters } from "./routines-filter-sidebar"
 import { RoutinesExplorer } from "./routines-explorer"
+import { isRoutineTestFixture, type RoutineFilterState as RoutineFilters } from "@/lib/routine-filters"
 import { RoutineRunDetail } from "./routine-run-detail"
 import { RoutinesWorkspace } from "./routines-workspace"
 import { RoutinesDetailPanel } from "./routines-detail-panel"
 import { RoutineCreateDialog } from "./routine-create-dialog"
-import { BottomPanel } from "@/components/features/crews/bottom-panel"
-import type { BottomPanelContext } from "@/components/features/crews/bottom-panel/types"
 
 // Keep the shared explorer mounted across overview, definition and historical
 // run views. The URL identifies the routine and optional execution; filters
@@ -45,13 +39,13 @@ interface RoutinesLayoutProps {
 const ROUTINE_SLUG_OPTIONS = { aliases: ["routine"] as const }
 
 export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
-  const { pipelines, loading, error, refresh } = usePipelines(workspaceId)
+  const { pipelines: loadedPipelines, loading, error, refresh } = usePipelines(workspaceId)
+  const pipelines = useRoutinePurposes(workspaceId, loadedPipelines)
   const isMobile = useIsMobile()
   const [leftCollapsed, setLeftCollapsed] = useState(false)
-  // On a phone the sidebar is 280px of a 390px screen — it does not
-  // sit BESIDE the content, it replaces it. Collapse it when the
-  // viewport narrows, and let it open as an overlay instead of a
-  // column, so the overview keeps the full width it was designed for.
+  // On a phone the sidebar is 280px of a 390px screen — it does not sit
+  // BESIDE the content, it replaces it. Collapse it when the viewport
+  // narrows, and let it open as an overlay instead of a column.
   useEffect(() => {
     if (isMobile) setLeftCollapsed(true)
   }, [isMobile])
@@ -62,7 +56,13 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
     authorAgentId: null,
     showEphemeral: false,
   })
-  const visiblePipelines = useMemo(() => filters.showTestRoutines ? pipelines : pipelines.filter(p => !isRoutineTestFixture(p.slug)), [pipelines, filters.showTestRoutines])
+  const visiblePipelines = useMemo(
+    () =>
+      filters.showTestRoutines
+        ? pipelines
+        : pipelines.filter((p) => !isRoutineTestFixture(p.slug)),
+    [pipelines, filters.showTestRoutines],
+  )
   // The selected routine lives in the URL: /routines?slug=<slug>.
   //
   // It used to be read from the URL once and then kept in component state,
@@ -74,18 +74,33 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
   // as an alias and rewritten on the first pick.
   const [selectedRun, setSelectedRun] = useUrlSelection("run")
   const [selectedSlug, setSelectedSlug] = useUrlSelection("slug", ROUTINE_SLUG_OPTIONS)
+  // The detail's own view (`?view=edit` opens the page editor). It belongs to
+  // one routine: leaving or switching routines must not carry it along, or
+  // the next routine opened would land in the editor uninvited.
+  const [detailView, setDetailView] = useUrlSelection("view")
+  const editing = detailView === "edit" || detailView === "settings"
+  const leaveRoutine = () => {
+    setDetailView(null, { replace: true })
+    setSelectedRun(null, { replace: true })
+    setSelectedSlug(null)
+  }
   const [importDialogOpen, setImportDialogOpen] = useState(false)
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
+  const [linkedDraft, setLinkedDraft] = useUrlSelection("draft")
+  const [linkedDraftId, setLinkedDraftId] = useUrlSelection("draft_id")
+  const [linkedWorkspace, setLinkedWorkspace] = useUrlSelection("workspace")
 
-  // Keyboard shortcuts (mirrors /issues): `/` focuses the routines
+  // Keyboard shortcuts (mirrors /issues): `/` focuses the explorer's
   // search input, `Esc` clears every filter, `c` opens the create
   // dialog. Skips when typing in inputs/textarea/contentEditable.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null
-      const isInputContext = target && (
-        target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable
-      )
+      const isInputContext =
+        target &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.isContentEditable)
       if (e.key === "/" && !isInputContext) {
         const el = document.querySelector<HTMLInputElement>("[data-routines-search] input")
         if (el) {
@@ -96,10 +111,22 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
         return
       }
       if (e.key === "Escape" && !isInputContext) {
-        if (search || filters.status !== "all" || filters.invocations !== "all" || filters.authorAgentId || filters.showEphemeral || filters.showTestRoutines) {
+        if (
+          search ||
+          filters.status !== "all" ||
+          filters.invocations !== "all" ||
+          filters.authorAgentId ||
+          filters.showEphemeral ||
+          filters.showTestRoutines
+        ) {
           e.preventDefault()
           setSearch("")
-          setFilters({ status: "all", invocations: "all", authorAgentId: null, showEphemeral: false })
+          setFilters({
+            status: "all",
+            invocations: "all",
+            authorAgentId: null,
+            showEphemeral: false,
+          })
         }
         return
       }
@@ -110,7 +137,14 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
-  }, [search, filters.status, filters.invocations, filters.authorAgentId, filters.showEphemeral, filters.showTestRoutines])
+  }, [
+    search,
+    filters.status,
+    filters.invocations,
+    filters.authorAgentId,
+    filters.showEphemeral,
+    filters.showTestRoutines,
+  ])
 
   const setBreadcrumbs = useAppStore((s) => s.setBreadcrumbs)
   // We ignore setBreadcrumbs for now; the layout's own toolbar surfaces
@@ -119,38 +153,22 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
 
   const handleSelect = (slug: string) => {
     setSelectedRun(null, { replace: true })
+    setDetailView(null, { replace: true })
     setSelectedSlug(selectedSlug === slug && !selectedRun ? null : slug)
-    // Picking a routine on a phone means "show me that", and the
-    // overlay covering it would be the opposite.
+    // Picking a routine on a phone means "show me that", and the overlay
+    // covering it would be the opposite.
     if (isMobile) setLeftCollapsed(true)
   }
 
   // Selected routine — looked up from the loaded pipeline list so the
   // toolbar breadcrumb can show the human name without a second fetch.
   // The detail panel does its own fetch for the full DSL body.
-  const selectedRoutine = selectedSlug
-    ? pipelines.find((p) => p.slug === selectedSlug)
-    : null
+  const selectedRoutine = selectedSlug ? pipelines.find((p) => p.slug === selectedSlug) : null
 
-  // Context for the bottom dock — runs / logs / schedule / spec of the
-  // routine in focus. MEMOIZED: this layout re-renders on every poll tick,
-  // and a fresh context object each render makes the dock tabs (logs/yaml)
-  // re-fetch + flash "Loading…" forever. Identity must only change when the
-  // routine actually changes.
-  const routineCtx: BottomPanelContext = useMemo(
-    () => (selectedSlug
-      ? { kind: "routine", slug: selectedSlug, pipelineId: selectedRoutine?.id ?? null, name: selectedRoutine?.name }
-      : null),
-    [selectedSlug, selectedRoutine?.id, selectedRoutine?.name],
-  )
-
-  // Live sub-bar description — derived from the loaded pipelines list.
-  // `pipelines.length` = routines in the workspace; `totalRuns` sums each
-  // routine's invocation_count (Pipeline.invocation_count from use-pipelines).
   const totalRuns = visiblePipelines.reduce((sum, p) => sum + (p.invocation_count ?? 0), 0)
 
   return (
-    <div className="flex h-[calc(100vh-48px)] flex-col bg-background">
+    <div className="flex h-[calc(100dvh-48px)] flex-col bg-background">
       {/* ---- Sub-bar: identity + actions ----
           Row 1 carries global context (Import / New routine); the
           page-specific 'Back to routines / <name>' breadcrumb lives one level
@@ -161,8 +179,8 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
         title="Routines"
         description={
           <>
-            {visiblePipelines.length} {visiblePipelines.length === 1 ? "routine" : "routines"} · {totalRuns}{" "}
-            {totalRuns === 1 ? "run" : "runs"}
+            {visiblePipelines.length} {visiblePipelines.length === 1 ? "routine" : "routines"} ·{" "}
+            {totalRuns} {totalRuns === 1 ? "run" : "runs"}
           </>
         }
         ariaLabel="Routines"
@@ -178,7 +196,7 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
             <SubBarPrimary
               icon={Plus}
               onClick={() => setCreateDialogOpen(true)}
-              title="Create a new routine — DSL editor with starter templates + Test & Save"
+              title="Create a routine"
             >
               New routine
             </SubBarPrimary>
@@ -186,28 +204,25 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
         }
       />
 
-      {/* ---- Body: 3-column layout ---- */}
+      {/* ---- Body ---- */}
       <div className="relative flex flex-1 overflow-hidden">
-        {/* Left filter panel — same chrome as the /issues sidebar
-          * (bg-card, not bg-card/30) so the two surfaces feel like
-          * pieces of one app rather than two near-misses. Width unified
-          * to the shared sidebar-kit 280px (SIDEBAR_WIDTH). */}
-        {/* Overlay on a phone, column everywhere else. The collapsed
-            rail stays in flow at both sizes so the expand button never
-            moves. */}
+        {/* The explorer sidebar is the app-wide navigation element (Issues
+            has the same one): search, status buckets and the routine list.
+            The main panel does not repeat its controls — it answers what
+            each routine does and how it went (#2519). */}
         {isMobile && !leftCollapsed && (
           <button
             type="button"
             aria-label="Close routine list"
             onClick={() => setLeftCollapsed(true)}
-            className="absolute inset-0 z-20 bg-black/50"
+            className="fixed inset-0 z-40 bg-black/50 touch-none overscroll-contain"
           />
         )}
         <aside
           className={cn(
             "shrink-0 border-r border-white/[0.06] bg-card transition-all overflow-hidden",
             leftCollapsed ? "w-9" : "w-[280px]",
-            isMobile && !leftCollapsed && "absolute inset-y-0 left-0 z-30 shadow-2xl",
+            isMobile && !leftCollapsed && "absolute inset-y-0 left-0 z-50 shadow-2xl",
           )}
         >
           {leftCollapsed ? (
@@ -215,11 +230,6 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
               <SidebarCollapseButton collapsed onToggle={() => setLeftCollapsed(false)} />
             </div>
           ) : (
-            /* Explorer-style sidebar built on the shared sidebar-kit —
-               SidebarToolbar (search + Filter + collapse), a collapsible
-               STATUS bucket section, and the ROUTINES list. The collapse
-               toggle lives inside the toolbar (next to search), not as a
-               floating button. */
             <RoutinesExplorer
               routines={visiblePipelines}
               search={search}
@@ -237,7 +247,13 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
         <div className="min-w-0 flex-1 overflow-hidden bg-background relative">
           <AnimatePresence mode="wait">
             {selectedRun ? (
-              <div key={selectedRun} className="absolute inset-0 overflow-auto"><RoutineRunDetail key={selectedRun} workspaceId={workspaceId} runId={selectedRun} /></div>
+              <div key={selectedRun} className="absolute inset-0 overflow-auto">
+                <RoutineRunDetail
+                  key={selectedRun}
+                  workspaceId={workspaceId}
+                  runId={selectedRun}
+                />
+              </div>
             ) : selectedSlug ? (
               <motion.div
                 key={`detail-${selectedSlug}`}
@@ -252,30 +268,38 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
                     toolbar. Keeps global affordances (List/Schedules/
                     Insights tabs, Import, New routine) where they
                     belong. */}
-                <div className="flex shrink-0 items-center gap-2 border-b border-border bg-card/40 px-4 py-2">
-                  <button
-                    type="button"
-                    onClick={() => setSelectedSlug(null)}
-                    className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                  >
-                    <ChevronLeft className="h-3.5 w-3.5" />
-                    Back to routines
-                  </button>
-                  <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground-soft" />
-                  <span className="truncate text-xs font-medium text-foreground/85" title={selectedRoutine?.name || selectedSlug}>
-                    {selectedRoutine?.name || selectedSlug}
-                  </span>
-                  {selectedRoutine?.slug && (
-                    <span className="ml-1 truncate font-mono text-[11px] text-muted-foreground">
-                      {selectedRoutine.slug}
+                {/* While the page editor is open, its own header × and footer
+                    Cancel are the way out — both ask before discarding. A
+                    second, unguarded Back here would throw edits away. */}
+                {!editing && (
+                  <div className="flex shrink-0 items-center gap-2 border-b border-border bg-card/40 px-4 py-2">
+                    <button
+                      type="button"
+                      onClick={leaveRoutine}
+                      className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                    >
+                      <ChevronLeft className="h-3.5 w-3.5" />
+                      Back to routines
+                    </button>
+                    <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground-soft" />
+                    <span
+                      className="truncate text-xs font-medium text-foreground/85"
+                      title={selectedRoutine?.name || selectedSlug}
+                    >
+                      {selectedRoutine?.name || selectedSlug}
                     </span>
-                  )}
-                </div>
+                    {selectedRoutine?.slug && (
+                      <span className="ml-1 truncate font-mono text-[11px] text-muted-foreground">
+                        {selectedRoutine.slug}
+                      </span>
+                    )}
+                  </div>
+                )}
                 <div className="flex-1 overflow-hidden">
                   <RoutinesDetailPanel
                     workspaceId={workspaceId}
                     slug={selectedSlug}
-                    onClose={() => setSelectedSlug(null)}
+                    onClose={leaveRoutine}
                     onChanged={refresh}
                     onRunStarted={setSelectedRun}
                   />
@@ -291,29 +315,19 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
                 className="absolute inset-0 overflow-hidden"
               >
                 <RoutinesWorkspace
+                  search={search}
+                  filters={filters}
                   workspaceId={workspaceId}
                   routines={visiblePipelines}
                   loading={loading}
                   error={error}
                   onSelect={handleSelect}
-                  onFilter={(status) => setFilters(f => ({ ...f, status: status as RoutineFilters["status"] }))}
                 />
               </motion.div>
             )}
           </AnimatePresence>
         </div>
       </div>
-
-      {/* ---- Bottom dock — runs / logs / schedule / spec of the selected
-           routine. Appears once a routine is selected, pairing the
-           definition above with its run console below. ---- */}
-      {routineCtx && !selectedRun && (
-        <BottomPanel
-          workspaceId={workspaceId}
-          context={routineCtx}
-          tabs={["runs", "logs", "schedule", "yaml"]}
-        />
-      )}
 
       {/* Import dialog */}
       {importDialogOpen && (
@@ -330,8 +344,22 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
       {/* Create dialog — Test & Save flow with starter templates */}
       <RoutineCreateDialog
         workspaceId={workspaceId}
-        open={createDialogOpen}
-        onClose={() => setCreateDialogOpen(false)}
+        open={createDialogOpen || !!linkedDraft}
+        savedDraftLink={
+          linkedDraft
+            ? {
+                slug: linkedDraft,
+                id: linkedDraftId || undefined,
+                workspaceId: linkedWorkspace || undefined,
+              }
+            : undefined
+        }
+        onClose={() => {
+          setCreateDialogOpen(false)
+          void setLinkedDraft(null, { replace: true })
+          void setLinkedDraftId(null, { replace: true })
+          void setLinkedWorkspace(null, { replace: true })
+        }}
         onCreated={(slug) => {
           setSelectedRun(null, { replace: true })
           refresh()
@@ -427,7 +455,10 @@ export function ImportRoutineDialog({
 
       {/* The parse failure and the server's refusal arrive at the same place,
           out of the scrollport, instead of under a 256px textarea. */}
-      <CreateSurfaceRefusal message={err == null ? null : `Error: ${err}`} onDismiss={() => setErr(null)} />
+      <CreateSurfaceRefusal
+        message={err == null ? null : `Error: ${err}`}
+        onDismiss={() => setErr(null)}
+      />
 
       <CreateSurfaceFooter
         onCancel={onClose}

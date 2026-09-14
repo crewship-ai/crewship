@@ -16,6 +16,7 @@ import (
 // zero-valued for the deterministic step types. Only the fields the CLI
 // renders are decoded; unknown members pass through untouched.
 type StepRunResult struct {
+	ExecutionMode    string   `json:"execution_mode"`
 	StepID           string   `json:"step_id"`
 	StepType         string   `json:"step_type"`
 	Adapter          string   `json:"adapter"`

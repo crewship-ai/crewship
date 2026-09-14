@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -105,6 +106,33 @@ func enqueueDue(t *testing.T, n int) *PendingRunStore {
 		}
 	}
 	return s
+}
+
+func TestN4RearmedPendingStartHasNewIdempotencyKey(t *testing.T) {
+	s := enqueueDue(t, 1)
+	exec := &fakeExecutor{}
+	d := NewPendingRunDispatcher(s, exec, nil)
+	ctx := t.Context()
+	first := PendingRun{ID: "pa"}
+	d.fireOne(ctx, first)
+	secondAt := formatRFC3339(time.Now().Add(-time.Second))
+	if _, err := s.db.ExecContext(ctx, `UPDATE pending_runs SET status='pending',fire_at=? WHERE id='pa'`, secondAt); err != nil {
+		t.Fatal(err)
+	}
+	d.fireOne(ctx, first)
+	if len(exec.seen) != 2 {
+		t.Fatalf("dispatches=%d", len(exec.seen))
+	}
+	if exec.seen[0].IdempotencyKey == exec.seen[1].IdempotencyKey {
+		t.Fatal("new scheduled start reuses consumed start identity")
+	}
+	if _, err := s.db.ExecContext(ctx, `UPDATE pending_runs SET status='pending' WHERE id='pa'`); err != nil {
+		t.Fatal(err)
+	}
+	d.fireOne(ctx, first)
+	if len(exec.seen) != 3 || exec.seen[2].IdempotencyKey != exec.seen[1].IdempotencyKey {
+		t.Fatal("retry must retain the same scheduled start identity")
+	}
 }
 
 // waitFor polls cond until true or the deadline elapses.
@@ -373,5 +401,94 @@ func TestPendingDispatcher_HonoursTheRowsAttribution(t *testing.T) {
 	}
 	if !sawSchedule {
 		t.Error("the unattributed row stopped defaulting to schedule")
+	}
+}
+
+func TestPendingDispatcherPreservesPinnedAndLegacyVersionPolicy(t *testing.T) {
+	s := NewPendingRunStore(newPendingDB(t))
+	ctx := context.Background()
+	past := time.Now().Add(-time.Minute)
+	version := 3
+	for _, pr := range []PendingRun{{ID: "pinned", PinnedVersion: &version}, {ID: "legacy"}} {
+		pr.WorkspaceID = "w"
+		pr.PipelineID = "p"
+		pr.PipelineSlug = "s"
+		pr.FireAt = past
+		if _, _, err := s.Enqueue(ctx, pr); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rows, err := s.DueRuns(ctx, time.Now(), 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	exec := &fakeExecutor{}
+	d := NewPendingRunDispatcher(s, exec, nil)
+	for _, pr := range rows {
+		d.fireOne(ctx, pr)
+	}
+	if len(exec.seen) != 2 {
+		t.Fatalf("runs=%d", len(exec.seen))
+	}
+	pins, legacy := 0, 0
+	for _, in := range exec.seen {
+		if in.PinnedVersion == nil {
+			legacy++
+		} else if *in.PinnedVersion == 3 {
+			pins++
+		}
+	}
+	if pins != 1 || legacy != 1 {
+		t.Fatalf("pinned=%d legacy=%d", pins, legacy)
+	}
+}
+
+// Coalescing after the due-list read must not dispatch the obsolete payload
+// or ignore the newly postponed fire time.
+func TestPendingDispatcherClaimsCurrentCoalescedState(t *testing.T) {
+	for _, postpone := range []bool{false, true} {
+		t.Run(fmt.Sprint(postpone), func(t *testing.T) {
+			store := NewPendingRunStore(newPendingDB(t))
+			first := PendingRun{ID: "first", WorkspaceID: "w", PipelineID: "p", PipelineSlug: "s", DebounceKey: "k", FireAt: time.Now().Add(-time.Minute), InputsJSON: `{"value":"old"}`, InvokingUserID: "alice"}
+			if _, _, err := store.Enqueue(t.Context(), first); err != nil {
+				t.Fatal(err)
+			}
+			due, err := store.DueRuns(t.Context(), time.Now(), 10)
+			if err != nil || len(due) != 1 {
+				t.Fatalf("due=%v err=%v", due, err)
+			}
+			second := first
+			second.ID = "second"
+			second.InputsJSON = `{"value":"new"}`
+			second.InvokingUserID = "bob"
+			if postpone {
+				second.FireAt = time.Now().Add(time.Hour)
+			}
+			if _, _, err := store.Enqueue(t.Context(), second); err != nil {
+				t.Fatal(err)
+			}
+			exec := &fakeExecutor{}
+			d := NewPendingRunDispatcher(store, exec, nil)
+			d.fireOne(t.Context(), due[0])
+			if postpone {
+				if len(exec.seen) != 0 {
+					t.Fatal("dispatched a debounce window that was postponed after listing")
+				}
+				var status string
+				if err := store.db.QueryRowContext(t.Context(), `SELECT status FROM pending_runs WHERE id='first'`).Scan(&status); err != nil {
+					t.Fatal(err)
+				}
+				if status != "pending" {
+					t.Fatalf("postponed row status=%s", status)
+				}
+			} else {
+				if len(exec.seen) != 1 {
+					t.Fatalf("dispatches=%d", len(exec.seen))
+				}
+				if got := exec.seen[0]; got.Inputs["value"] != "new" || got.InvokingUserID != "bob" {
+					t.Fatalf("dispatched stale accepted state: %+v", got)
+				}
+			}
+		})
 	}
 }

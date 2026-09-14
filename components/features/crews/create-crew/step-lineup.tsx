@@ -180,7 +180,7 @@ export function StepLineup({ state, setState, workspaceId, onImport }: Props) {
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder='Search templates… (e.g. "saas", "research")'
-          className="h-8 w-full rounded-md border border-hairline bg-background pl-8 pr-2 text-xs outline-none transition-shadow focus:border-primary focus:ring-2 focus:ring-primary/20 max-sm:h-12 max-sm:text-sm"
+          className="h-8 w-full rounded-md border border-hairline bg-background pl-8 pr-2 text-xs outline-none transition-shadow focus:border-primary focus:ring-2 focus:ring-primary/20 coarse:h-12 coarse:text-sm"
         />
       </div>
 

@@ -269,7 +269,7 @@ export default function DashboardPage() {
   if (loading) return <DashboardSkeleton crews={crews.length} agents={agents.length} />
 
   return (
-    <div className="flex min-h-[calc(100vh-48px)] flex-col bg-background">
+    <div className="flex min-h-[calc(100dvh-48px)] flex-col bg-background">
       <SubBar
         icon={LayoutDashboard}
         title="Dashboard"
@@ -303,7 +303,7 @@ export default function DashboardPage() {
         }
       />
 
-      <main className="mx-auto flex w-full max-w-[1800px] flex-1 flex-col gap-4 p-4 pb-10 md:p-6">
+      <main className="mx-auto flex w-full max-w-[1800px] flex-1 flex-col gap-3 p-4 pb-10 md:p-5">
         <WelcomeChecklist firstAgentId={firstAgentId} />
         {crews.length === 0 && workspaceId && <RecipesEmptyState workspaceId={workspaceId} onInstalled={invalidateDashboard} />}
 
@@ -316,29 +316,28 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        <div className="flex flex-col gap-1">
-          <h1 className="text-xl font-semibold tracking-tight">Your workspace at a glance</h1>
-          <p className="text-body text-muted-foreground">Review the results, unblock your crews, and give your agents their next task.</p>
-        </div>
+        {/* No hero heading: the sub-bar already says Dashboard · N crews · M
+            agents, and the first thing on the page should be what needs a
+            person (docs/ux/README.md §1), not a sentence about the page. */}
+        <h1 className="sr-only">Your workspace at a glance</h1>
 
         <Appear order={0}><AttentionStrip items={attentionItems} inboxLoading={inbox.loading} inboxError={inbox.error} /></Appear>
 
-        <div className="grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-3">
+        <div className="grid min-w-0 grid-cols-1 gap-3 xl:grid-cols-3">
           <Appear order={1} className="min-w-0 xl:col-span-2">
             <DashboardResults key={workspaceId} review={reviewQ.data ?? []} completed={completedQ.data ?? []} runs={activeRuns.recentRuns} agents={agents} crews={crews} workspaceId={workspaceId} loading={reviewQ.isPending || completedQ.isPending} error={reviewQ.isError || completedQ.isError} routineError={activeRuns.error} routineLoading={activeRuns.loading} onRetry={() => { void reviewQ.refetch(); void completedQ.refetch(); activeRuns.refresh() }} />
           </Appear>
-          <Appear order={2} className="flex min-w-0 flex-col gap-4 [&>div]:h-auto">
+          <Appear order={2} className="flex min-w-0 flex-col gap-3 [&>div]:h-auto">
             <RunningNow runs={activeRuns.runs} agents={agents} crews={crews} loading={activeRuns.loading} error={activeRuns.error} />
             <UpNext schedules={schedules.schedules} />
+            <FleetBoard cards={fleetCards} workspaceId={workspaceId} />
           </Appear>
         </div>
 
-        <Appear order={2}><FleetBoard cards={fleetCards} workspaceId={workspaceId} /></Appear>
-
-        <div className="flex flex-wrap items-center gap-2 pt-2">
-          <Radio className="h-4 w-4 text-primary-hover" aria-hidden />
-          <h2 className="text-body font-semibold">Agent run summary</h2>
-          <span className="text-label text-muted-foreground">{reportWindow} · routine runs appear in Activity</span>
+        <div className="flex flex-wrap items-center gap-2">
+          <Radio className="h-3.5 w-3.5 text-primary-hover" aria-hidden />
+          <h2 className="text-[11px] font-semibold uppercase tracking-wider text-foreground/70">Agent run summary</h2>
+          <span className="font-mono text-[10px] text-muted-foreground">{reportWindow} · routine runs appear in Activity</span>
         </div>
 
         <Appear order={2}>
@@ -351,7 +350,7 @@ export default function DashboardPage() {
           />
         </Appear>
 
-        <div className="grid grid-cols-1 gap-4 xl:grid-cols-5">
+        <div className="grid grid-cols-1 gap-3 xl:grid-cols-5">
           <Appear order={2} className="xl:col-span-3">
             <DashboardCard title={`Run volume · ${reportWindow} · by crew`} icon={Radio} hint={volumeQ.data ? `${runVolumeTotal} runs` : "unavailable"} action={<Link href="/activity" className="text-primary-hover hover:underline">Report →</Link>} className="h-full">
               <RunVolumeChart buckets={runVolume.buckets} series={runVolume.series} window={reportWindow} />
@@ -361,7 +360,7 @@ export default function DashboardPage() {
         </div>
 
         <details className="rounded-xl border border-border/60 bg-card">
-          <summary className="cursor-pointer px-4 py-3 text-body font-medium text-muted-foreground transition-colors hover:text-foreground">System details <span className="ml-2 text-label font-normal">Capacity, memory and services</span></summary>
+          <summary className="cursor-pointer px-3 py-2.5 text-body font-medium text-muted-foreground transition-colors hover:text-foreground">System details <span className="ml-2 text-label font-normal">Capacity, memory and services</span></summary>
           <div className="border-t border-border/60 p-4"><SystemSignals capacity={capacityQ.data ?? null} heldCrews={heldCrews} memory={memoryQ.data ?? null} credentialGapCount={credentialGapCount} services={serviceTotals} realtimeStatus={realtimeStatus ?? undefined} /></div>
         </details>
       </main>
@@ -371,15 +370,28 @@ export default function DashboardPage() {
 
 function DashboardSkeleton({ crews, agents }: { crews: number; agents: number }) {
   return (
-    <div className="flex min-h-[calc(100vh-48px)] flex-col">
+    <div className="flex min-h-[calc(100dvh-48px)] flex-col">
       <SubBar icon={LayoutDashboard} title="Dashboard" description={crews || agents ? `${crews} crews · ${agents} agents` : "Loading…"} ariaLabel="Dashboard" />
-      <div className="mx-auto flex w-full max-w-[1800px] flex-col gap-4 p-4 md:p-6">
+      {/* Same geometry as the loaded page (results beside a stacked right
+          column of running / up next / crews, then the KPI strip), so
+          nothing jumps when the data lands. */}
+      <div className="mx-auto flex w-full max-w-[1800px] flex-col gap-3 p-4 md:p-5">
         <Skeleton className="h-[52px] rounded-xl" />
-        <Skeleton className="h-[120px] rounded-xl" />
-        <div className="grid grid-cols-1 gap-4 xl:grid-cols-3"><Skeleton className="h-[420px] rounded-xl xl:col-span-2" /><Skeleton className="h-[200px] rounded-xl" /></div>
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">{Array.from({ length: Math.max(1, Math.min(3, crews || 3)) }, (_, index) => <Skeleton key={index} className="h-[180px] rounded-xl" />)}</div>
-        <div className="grid grid-cols-2 gap-4 xl:grid-cols-4">{Array.from({ length: 4 }, (_, index) => <Skeleton key={index} className="h-[118px] rounded-xl" />)}</div>
-        <div className="grid grid-cols-1 gap-4 xl:grid-cols-5"><Skeleton className="h-[330px] rounded-xl xl:col-span-3" /><Skeleton className="h-[330px] rounded-xl xl:col-span-2" /></div>
+        <Skeleton className="h-[110px] rounded-xl" />
+        <div className="grid grid-cols-1 gap-3 xl:grid-cols-3">
+          <Skeleton className="h-[380px] rounded-xl xl:col-span-2" />
+          <div className="flex flex-col gap-3">
+            <Skeleton className="h-[84px] rounded-xl" />
+            <Skeleton className="h-[84px] rounded-xl" />
+            {/* FleetBoard renders nothing for an empty workspace, so its
+                placeholder must not appear either. */}
+            {crews > 0 && (
+              <Skeleton className="rounded-xl" style={{ height: 60 + 44 * Math.min(3, crews) }} />
+            )}
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">{Array.from({ length: 4 }, (_, index) => <Skeleton key={index} className="h-[58px] rounded-xl" />)}</div>
+        <div className="grid grid-cols-1 gap-3 xl:grid-cols-5"><Skeleton className="h-[220px] rounded-xl xl:col-span-3" /><Skeleton className="h-[220px] rounded-xl xl:col-span-2" /></div>
       </div>
     </div>
   )
