@@ -68,20 +68,35 @@ func TestSkipSidecarRun_StillGetsItsOwnAgentToken(t *testing.T) {
 		t.Fatalf("RunAgent: %v", err)
 	}
 
-	want := "CREWSHIP_AGENT_TOKEN=" + agentAuthToken("master-internal-token", req.WorkspaceID, req.AgentID, covQuietLogger())
+	// E0: the token is per RUN, not per agent. This path matters MORE for that,
+	// not less — SkipSidecar is how delegated sub-agents run, so it is the path
+	// that most reliably puts two concurrent runs inside one container, and a
+	// per-agent token would make both of them indistinguishable to the sidecar
+	// they are both calling.
+	runKey := agentRunKey("master-internal-token", req.WorkspaceID, req.CrewID, covQuietLogger())
+	want := "CREWSHIP_AGENT_TOKEN=" + agentRunAuthToken(runKey, req.WorkspaceID, req.AgentID, req.RunID, covQuietLogger())
 	if want == "CREWSHIP_AGENT_TOKEN=" {
 		t.Fatal("fixture derived an empty token; the assertion below would be vacuous")
 	}
+	// It must NOT be the old per-agent value, which two runs of this agent
+	// would have shared byte for byte.
+	notWant := "CREWSHIP_AGENT_TOKEN=" + agentAuthToken("master-internal-token", req.WorkspaceID, req.AgentID, covQuietLogger())
 	for _, call := range c.snapshotCalls() {
 		if len(call.Cmd) == 0 || call.Cmd[0] != "stdbuf" {
 			continue
+		}
+		for _, e := range call.Env {
+			if e == notWant {
+				t.Fatal("worker exec carries the per-AGENT token: two concurrent sub-agent runs " +
+					"of this agent would present identical credentials to the crew's sidecar")
+			}
 		}
 		for _, e := range call.Env {
 			if e == want {
 				return
 			}
 		}
-		t.Fatalf("worker exec env carries no per-agent token; it cannot authenticate to the crew's sidecar. env=%v", call.Env)
+		t.Fatalf("worker exec env carries no per-run token; it cannot authenticate to the crew's sidecar. env=%v", call.Env)
 	}
 	t.Fatal("agent exec not captured")
 }

@@ -159,25 +159,31 @@ func TestBuildCLICommand(t *testing.T) {
 			// PR-A F1 invariant: --mcp-config is ALWAYS appended for
 			// CLAUDE_CODE because setupMCPConfig auto-injects the
 			// sidecar-hosted crewship-memory server. Path renders with
-			// an empty AgentSlug here because the test doesn't set one.
+			// an empty AgentSlug here because the test doesn't set one — and
+			// since E0 an empty RunID too, hence the doubled separator: the
+			// path is HOME-relative (/crew/runs/<slug>/<runID>/.mcp.json) and
+			// this fixture supplies neither component, and path.Join collapses
+			// the two empty segments away. Neither can be empty on the real
+			// path: validSlugRe gates the slug in assembleSystemPrompt and
+			// ensureRunID gates the run id at the RunAgent boundary.
 			// Default (empty) profile normalises to CODING → curated built-in
 			// allowlist via --tools. Harness-internal tools (TaskCreate, etc.)
 			// are NOT in the list, so the agent can't reach for them.
 			"claude code default",
 			AgentRunRequest{CLIAdapter: "CLAUDE_CODE", UserMessage: "hello"},
-			[]string{"claude", "--print", "--output-format", "stream-json", "--include-partial-messages", "--dangerously-skip-permissions", "--verbose", "--setting-sources", "", "--strict-mcp-config", "--no-session-persistence", "--system-prompt", crewshipSystemPreamble, "--tools", "Read,Glob,Grep,Write,Edit,Bash,WebFetch,WebSearch,ToolSearch", "--max-turns", "50", "--mcp-config", "/crew/agents//.mcp.json", "--", "hello"},
+			[]string{"claude", "--print", "--output-format", "stream-json", "--include-partial-messages", "--dangerously-skip-permissions", "--verbose", "--setting-sources", "", "--strict-mcp-config", "--no-session-persistence", "--system-prompt", crewshipSystemPreamble, "--tools", "Read,Glob,Grep,Write,Edit,Bash,WebFetch,WebSearch,ToolSearch", "--max-turns", "50", "--mcp-config", "/crew/runs/.mcp.json", "--", "hello"},
 		},
 		{
 			"claude code with system prompt",
 			AgentRunRequest{CLIAdapter: "CLAUDE_CODE", SystemPrompt: "be helpful", UserMessage: "hello"},
-			[]string{"claude", "--print", "--output-format", "stream-json", "--include-partial-messages", "--dangerously-skip-permissions", "--verbose", "--setting-sources", "", "--strict-mcp-config", "--no-session-persistence", "--system-prompt", crewshipSystemPreamble + "be helpful", "--tools", "Read,Glob,Grep,Write,Edit,Bash,WebFetch,WebSearch,ToolSearch", "--max-turns", "50", "--mcp-config", "/crew/agents//.mcp.json", "--", "hello"},
+			[]string{"claude", "--print", "--output-format", "stream-json", "--include-partial-messages", "--dangerously-skip-permissions", "--verbose", "--setting-sources", "", "--strict-mcp-config", "--no-session-persistence", "--system-prompt", crewshipSystemPreamble + "be helpful", "--tools", "Read,Glob,Grep,Write,Edit,Bash,WebFetch,WebSearch,ToolSearch", "--max-turns", "50", "--mcp-config", "/crew/runs/.mcp.json", "--", "hello"},
 		},
 		{
 			// MINIMAL is read-only: Read,Glob,Grep (the old value listed a
 			// non-existent "Search" tool and omitted Glob — fixed here).
 			"claude code minimal profile",
 			AgentRunRequest{CLIAdapter: "CLAUDE_CODE", ToolProfile: "MINIMAL", UserMessage: "hello"},
-			[]string{"claude", "--print", "--output-format", "stream-json", "--include-partial-messages", "--dangerously-skip-permissions", "--verbose", "--setting-sources", "", "--strict-mcp-config", "--no-session-persistence", "--system-prompt", crewshipSystemPreamble, "--tools", "Read,Glob,Grep,ToolSearch", "--max-turns", "50", "--mcp-config", "/crew/agents//.mcp.json", "--", "hello"},
+			[]string{"claude", "--print", "--output-format", "stream-json", "--include-partial-messages", "--dangerously-skip-permissions", "--verbose", "--setting-sources", "", "--strict-mcp-config", "--no-session-persistence", "--system-prompt", crewshipSystemPreamble, "--tools", "Read,Glob,Grep,ToolSearch", "--max-turns", "50", "--mcp-config", "/crew/runs/.mcp.json", "--", "hello"},
 		},
 		{
 			// Codex Rust port (npm @openai/codex 0.128.x): non-interactive

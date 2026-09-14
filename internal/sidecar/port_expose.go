@@ -93,8 +93,8 @@ func (s *Server) handleExposePort(w http.ResponseWriter, r *http.Request) {
 		"port":         req.Port,
 		"description":  req.Description,
 	}
-	if s.ipc.ChatID != "" {
-		ipcPayload["chat_id"] = s.ipc.ChatID
+	if chatID := s.requestChatID(r); chatID != "" {
+		ipcPayload["chat_id"] = chatID
 	}
 	if req.TTLSeconds > 0 {
 		ipcPayload["ttl_seconds"] = req.TTLSeconds

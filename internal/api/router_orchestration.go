@@ -1011,6 +1011,10 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 		} else {
 			resolver := chatbridge.NewIPCResolver(baseURL, r.internalToken, r.logger)
 			wh := NewWebhookHandler(r.db, r.logger, resolver, r.orch, r.hub, r.keeperContainer, r.logWriter)
+			// Kept so the server can build the dispatcher that executes what
+			// this route accepts. Acceptance and execution are deliberately
+			// different objects now; this is the only thing that joins them.
+			r.webhookHandler = wh
 			r.mux.Handle("POST /api/v1/webhooks/{crewId}/{agentId}/trigger", http.HandlerFunc(wh.ServeHTTP))
 		}
 	}

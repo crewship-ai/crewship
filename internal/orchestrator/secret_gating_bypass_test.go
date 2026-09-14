@@ -444,6 +444,10 @@ func TestBypass_CleanupAccountingCannotBeDodgedByCredentialType(t *testing.T) {
 // credential actually lands on disk, so it is the only one where there is
 // anything for the scrub to fail to remove.
 func TestBypass_AbortedRunStillScrubsGatedSecretFiles(t *testing.T) {
+	// An explicit run id: since E0 both the secrets directory and the hold
+	// that guards it are keyed per RUN, so this test has to name the run whose
+	// cleanup it is watching for.
+	const bypassRunID = "run-bypass-1"
 	var (
 		wroteCreds  bool
 		cleanupSeen bool
@@ -463,7 +467,7 @@ func TestBypass_AbortedRunStillScrubsGatedSecretFiles(t *testing.T) {
 					Reader: io.NopCloser(strings.NewReader(preflightFailMarker + preflightStepCredentials + "\n")),
 				}, nil
 			}
-			if strings.Contains(joined, "rm -rf '/secrets/riley'") {
+			if strings.Contains(joined, "rm -rf '/secrets/riley/"+bypassRunID+"'") {
 				cleanupSeen = true
 			}
 			return &provider.ExecResult{ExecID: "noop", Reader: secretsTestReader()}, nil
@@ -478,6 +482,7 @@ func TestBypass_AbortedRunStillScrubsGatedSecretFiles(t *testing.T) {
 	err := o.RunAgent(context.Background(), AgentRunRequest{
 		AgentID:     "a1",
 		AgentSlug:   "riley",
+		RunID:       bypassRunID,
 		ChatID:      "s1",
 		ContainerID: "c1",
 		CLIAdapter:  "CLAUDE_CODE",
@@ -500,9 +505,9 @@ func TestBypass_AbortedRunStillScrubsGatedSecretFiles(t *testing.T) {
 			"run for the container's lifetime (orchestrator_run.go — the cleanup defer " +
 			"must be registered before preparePreflightDirs)")
 	}
-	if n := o.secretsHoldCount("c1", "riley"); n != 0 {
+	if n := o.secretsHoldCount("c1", "riley", bypassRunID); n != 0 {
 		t.Errorf("secrets hold count after the aborted run = %d, want 0 — a leaked hold "+
-			"vetoes every future run's cleanup for this container+agent", n)
+			"vetoes this run's own cleanup and leaves the plaintext on disk", n)
 	}
 }
 

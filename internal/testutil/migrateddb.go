@@ -82,6 +82,25 @@ var (
 // the leak and save the per-binary build as well; that is a separate change
 // with its own blast radius and is tracked as follow-up on the PR, not smuggled
 // in here.
+// testSynchronous is the one production pragma the test fixture deliberately
+// does not inherit.
+//
+// database.Open defaults to synchronous=FULL, because an accepted piece of work
+// has to survive an OS crash and NORMAL in WAL mode does not promise that. FULL
+// costs ~21 ms of fsync per acceptance commit on this hardware under the
+// daemon's managed-WAL configuration; measured across the test suite that is ~2%
+// on a read-heavy package and 3.1x on a write-heavy one (internal/work: 4.3s ->
+// 13.4s), and the per-package timeout in CI is 12 minutes. Paying that on every
+// fixture buys nothing real: no unit test survives an OS crash either way, and
+// T14's power-loss evidence needs a separate harness by design.
+//
+// What keeps this from becoming a silent divergence is that the production
+// setting is asserted directly — see TestOpen_DefaultsToFullSynchronous and
+// TestOpen_SynchronousAppliesToEveryPooledConnection in internal/database, plus
+// the boot-wiring assertion on the server's own handle. A test that needs real
+// FULL semantics opens its own handle with database.Open and says so.
+var testSynchronous = database.WithSynchronous(database.SynchronousNormal)
+
 func buildMigratedTemplate() {
 	dir, err := os.MkdirTemp("", "crewship-migrated-template-")
 	if err != nil {
@@ -89,7 +108,7 @@ func buildMigratedTemplate() {
 		return
 	}
 	path := filepath.Join(dir, "template.db")
-	db, err := database.Open("file:" + path)
+	db, err := database.Open("file:"+path, testSynchronous)
 	if err != nil {
 		migratedTemplateErr = err
 		return
@@ -225,7 +244,7 @@ func openMigratedCopy(path string) (*database.DB, error) {
 	if err := copyFileForTest(template, path); err != nil {
 		return nil, fmt.Errorf("copy migrated template: %w", err)
 	}
-	db, err := database.Open("file:" + path)
+	db, err := database.Open("file:"+path, testSynchronous)
 	if err != nil {
 		return nil, fmt.Errorf("open migrated db: %w", err)
 	}

@@ -305,7 +305,26 @@ func (s *Server) respondMemoryMCPToolsCall(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	dispatcher := memory.NewDispatcher(ac, memory.WithSearchIndex(s.memoryIndexFor(r, ac, slug)))
+	// The MCP dispatcher is local and has no host ledger yet. A runtime that
+	// requires guaranteed memory must therefore fail closed on BOTH writers;
+	// the requirement cannot be bypassed by choosing MCP instead of HTTP.
+	if memoryGuaranteedRequiredByRuntime() && (params.Name == "memory.write" || params.Name == "memory.append_daily") {
+		result, _ := json.Marshal(memoryMCPToolCallResult{
+			IsError: true,
+			Content: []memoryMCPToolCallContent{{Type: "text", Text: `{"error_code":"memory_guaranteed_unavailable","message":"Guaranteed memory is unavailable on this tool surface; no write was performed."}`}},
+		})
+		writeJSONResponse(w, http.StatusOK, memoryMCPResponse{
+			JSONRPC: "2.0", ID: req.ID, Result: result,
+		})
+		return
+	}
+
+	// Compatible serial deployments keep the local legacy dispatcher. R6's
+	// host bridge must preserve its path checks, injection screen, quarantine
+	// and cap guidance before this path can offer guaranteed writes.
+	dispatcher := memory.NewDispatcher(ac,
+		memory.WithSearchIndex(s.memoryIndexFor(r, ac, slug)),
+		memory.WithMutationProfile(memory.ProfileLegacy))
 	toolRes, err := dispatcher.Dispatch(r.Context(), memory.ToolCall{
 		Name: params.Name,
 		Args: params.Arguments,

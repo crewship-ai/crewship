@@ -34,6 +34,11 @@ type covContainer struct {
 	inspectRunning bool
 	inspectExit    int
 	inspectErr     error
+	// tmuxSessions is what `tmux list-sessions -F '#{session_name}'`
+	// reports back — how attach resolves an agent slug to a specific RUN
+	// when the client did not name one (E0: a session is
+	// "agent-<slug>-<runID>", so a slug alone no longer names one).
+	tmuxSessions []string
 }
 
 func (m *covContainer) EnsureCrewRuntime(_ context.Context, c provider.CrewConfig) (string, error) {
@@ -69,6 +74,12 @@ func (m *covContainer) Exec(_ context.Context, cfg provider.ExecConfig) (*provid
 	m.execCalls = append(m.execCalls, cfg)
 	if m.execErr != nil {
 		return nil, m.execErr
+	}
+	if len(cfg.Cmd) > 1 && cfg.Cmd[0] == "tmux" && cfg.Cmd[1] == "list-sessions" {
+		return &provider.ExecResult{
+			ExecID: "exec-cov-list",
+			Reader: io.NopCloser(strings.NewReader(strings.Join(m.tmuxSessions, "\n"))),
+		}, nil
 	}
 	return &provider.ExecResult{ExecID: "exec-cov", Reader: io.NopCloser(strings.NewReader(""))}, nil
 }
@@ -516,7 +527,7 @@ func TestServeHTTP_AttachMode(t *testing.T) {
 			states:  []string{"running"},
 			execErr: errors.New("exec broken"),
 		}}
-		got, _, _ := run(t, im, map[string]any{"mode": "attach", "crew_id": "c1", "crew_slug": "crew-a", "agent_slug": "agent-1"})
+		got, _, _ := run(t, im, map[string]any{"mode": "attach", "crew_id": "c1", "crew_slug": "crew-a", "agent_slug": "agent-1", "run_id": "r1"})
 		if got["type"] != "error" || got["message"] != "agent is not running" {
 			t.Errorf("expected agent-not-running error, got %+v", got)
 		}
@@ -527,7 +538,7 @@ func TestServeHTTP_AttachMode(t *testing.T) {
 			states:     []string{"running"},
 			inspectErr: errors.New("inspect down"),
 		}}
-		got, _, _ := run(t, im, map[string]any{"mode": "attach", "crew_id": "c1", "crew_slug": "crew-a", "agent_slug": "agent-1"})
+		got, _, _ := run(t, im, map[string]any{"mode": "attach", "crew_id": "c1", "crew_slug": "crew-a", "agent_slug": "agent-1", "run_id": "r1"})
 		if got["type"] != "error" || !strings.Contains(got["message"], "failed to check agent session") {
 			t.Errorf("expected inspect-failure error, got %+v", got)
 		}
@@ -539,9 +550,89 @@ func TestServeHTTP_AttachMode(t *testing.T) {
 			inspectRunning: false,
 			inspectExit:    1,
 		}}
-		got, _, _ := run(t, im, map[string]any{"mode": "attach", "crew_id": "c1", "crew_slug": "crew-a", "agent_slug": "agent-1"})
+		got, _, _ := run(t, im, map[string]any{"mode": "attach", "crew_id": "c1", "crew_slug": "crew-a", "agent_slug": "agent-1", "run_id": "r1"})
 		if got["type"] != "error" || !strings.Contains(got["message"], "no active tmux session") {
 			t.Errorf("expected dead-session error, got %+v", got)
+		}
+	})
+
+	// ---- E0: a slug alone no longer names a session ----
+
+	t.Run("no run_id, one live run, resolves it", func(t *testing.T) {
+		serverSide, _ := net.Pipe()
+		im := &covInteractive{
+			covContainer: &covContainer{
+				states: []string{"running"}, inspectRunning: false, inspectExit: 0,
+				// One live run of agent-1, plus a neighbouring agent whose
+				// slug is a strict prefix of it — neither may be picked by
+				// mistake.
+				tmuxSessions: []string{"agent-agent-1-only-run", "agent-agent-10-other"},
+			},
+			conn: serverSide,
+		}
+		db := seedTerminalDB(t)
+		h := New(im, v, db, silentLogger(), nil)
+		conn, _ := dialTerminalDone(t, h)
+		t.Cleanup(func() { conn.Close() })
+		authAndInit(t, conn, v, map[string]any{
+			"mode": "attach", "crew_id": "c1", "crew_slug": "crew-a", "agent_slug": "agent-1",
+		})
+		deadline := time.Now().Add(2 * time.Second)
+		for im.config() == nil {
+			if time.Now().After(deadline) {
+				t.Fatal("attach session never started")
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+		if got := im.config().Cmd; len(got) != 4 || got[3] != "agent-agent-1-only-run" {
+			t.Errorf("attach Cmd = %v, want the agent's single live run agent-agent-1-only-run", got)
+		}
+	})
+
+	t.Run("no run_id, two live runs, refuses and names them", func(t *testing.T) {
+		im := &covInteractive{covContainer: &covContainer{
+			states: []string{"running"}, inspectRunning: false, inspectExit: 0,
+			tmuxSessions: []string{"agent-agent-1-run-a", "agent-agent-1-run-b"},
+		}}
+		got, _, _ := run(t, im, map[string]any{
+			"mode": "attach", "crew_id": "c1", "crew_slug": "crew-a", "agent_slug": "agent-1",
+		})
+		// Refusing is the point: attaching to the wrong one of an agent's two
+		// runs is not visibly wrong until the user types into it.
+		if got["type"] != "error" {
+			t.Fatalf("expected a refusal with two live runs, got %+v", got)
+		}
+		for _, want := range []string{"2 runs in progress", "run-a", "run-b", "run_id"} {
+			if !strings.Contains(got["message"], want) {
+				t.Errorf("refusal message %q does not mention %q", got["message"], want)
+			}
+		}
+		if im.config() != nil {
+			t.Error("a session was attached despite the ambiguity")
+		}
+	})
+
+	t.Run("no run_id, no live run", func(t *testing.T) {
+		im := &covInteractive{covContainer: &covContainer{
+			states: []string{"running"}, inspectRunning: false, inspectExit: 0,
+			tmuxSessions: []string{"agent-someone-else-run-a"},
+		}}
+		got, _, _ := run(t, im, map[string]any{
+			"mode": "attach", "crew_id": "c1", "crew_slug": "crew-a", "agent_slug": "agent-1",
+		})
+		if got["type"] != "error" || !strings.Contains(got["message"], "no active tmux session") {
+			t.Errorf("expected a not-running error, got %+v", got)
+		}
+	})
+
+	t.Run("an unsafe run_id is refused before it reaches a shell", func(t *testing.T) {
+		im := &covInteractive{covContainer: &covContainer{states: []string{"running"}}}
+		got, _, _ := run(t, im, map[string]any{
+			"mode": "attach", "crew_id": "c1", "crew_slug": "crew-a",
+			"agent_slug": "agent-1", "run_id": "../escape",
+		})
+		if got["type"] != "error" || !strings.Contains(got["message"], "invalid run_id") {
+			t.Errorf("expected invalid run_id error, got %+v", got)
 		}
 	})
 
@@ -555,7 +646,7 @@ func TestServeHTTP_AttachMode(t *testing.T) {
 		h := New(im, v, db, silentLogger(), nil)
 		conn, done := dialTerminalDone(t, h)
 		authAndInit(t, conn, v, map[string]any{
-			"mode": "attach", "crew_id": "c1", "crew_slug": "crew-a", "agent_slug": "agent-1",
+			"mode": "attach", "crew_id": "c1", "crew_slug": "crew-a", "agent_slug": "agent-1", "run_id": "r1",
 		})
 
 		deadline := time.Now().Add(2 * time.Second)
@@ -566,8 +657,8 @@ func TestServeHTTP_AttachMode(t *testing.T) {
 			time.Sleep(5 * time.Millisecond)
 		}
 		cfg := im.config()
-		want := []string{"tmux", "attach", "-t", "agent-agent-1"}
-		if len(cfg.Cmd) != len(want) || cfg.Cmd[0] != "tmux" || cfg.Cmd[3] != "agent-agent-1" {
+		want := []string{"tmux", "attach", "-t", "agent-agent-1-r1"}
+		if len(cfg.Cmd) != len(want) || cfg.Cmd[0] != "tmux" || cfg.Cmd[3] != "agent-agent-1-r1" {
 			t.Errorf("attach Cmd = %v, want %v", cfg.Cmd, want)
 		}
 		if cfg.WorkingDir != "" {
@@ -575,8 +666,8 @@ func TestServeHTTP_AttachMode(t *testing.T) {
 		}
 		// The tmux has-session probe ran first.
 		probe := im.lastExecCmd()
-		if len(probe) != 4 || probe[0] != "tmux" || probe[1] != "has-session" || probe[3] != "agent-agent-1" {
-			t.Errorf("probe cmd = %v, want tmux has-session -t agent-agent-1", probe)
+		if len(probe) != 4 || probe[0] != "tmux" || probe[1] != "has-session" || probe[3] != "agent-agent-1-r1" {
+			t.Errorf("probe cmd = %v, want tmux has-session -t agent-agent-1-r1", probe)
 		}
 
 		conn.Close()
