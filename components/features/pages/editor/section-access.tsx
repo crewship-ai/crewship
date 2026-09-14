@@ -7,7 +7,12 @@
  * arrives with: people first, then the machines those people vouch for, then
  * the world. Every one of them is an existing card from
  * `components/features/pages/page-settings.tsx`; this section re-homes them,
- * it does not re-implement them.
+ * it does not re-implement them. Two read-only cards follow, in the order
+ * they render: what the Page's FOLDER adds (`./section-access-folder.tsx`,
+ * #2533 — a folder's permissions are inherited by every page in it and are
+ * changed on the folder), then Effective access
+ * (`./section-access-effective.tsx`), the server's answer to who actually
+ * gets in once all of the above is combined with roles and crew membership.
  *
  * Producer tokens are here, and NOT in Data & actions, because minting a
  * webhook token is issuing a credential and a credential is a permission
@@ -54,6 +59,8 @@ import {
   pagePanelIDs,
 } from "@/components/features/pages/page-settings"
 
+import { EffectiveAccessCard } from "./section-access-effective"
+import { FolderAccessCard } from "./section-access-folder"
 import type { EditorSectionProps } from "./section-props"
 
 /**
@@ -94,20 +101,12 @@ export function EditorAccessSection({
 
   return (
     <div data-slot="editor-section-access" className="flex w-full flex-col gap-4">
-      <p className="type-page-meta text-muted-foreground">
-        {SAVE_EFFECT_NOTE["immediate-grant"]} Access changes take effect on their own — they are
-        not part of a draft and not part of a publication.
-      </p>
-
-      {/* Holding this right does not open the other sections, and saying so
-          here is cheaper than a reader discovering it at a refused Save. */}
-      {canManage && (
-        <p className="type-page-meta text-muted-foreground-soft">
-          Administering access does not by itself let you edit this Page&rsquo;s panels or its
-          application source. Those are separate rights, checked in their own sections.
-        </p>
-      )}
-
+      {/* The save model is the first card's footer, not a paragraph above the
+          section: a card's name is its title band and what it means in
+          practice is its one muted line (§9b, the `ui/detail` kit). The
+          second sentence is gated on the right it is about — holding it
+          does not open the other sections, and saying so here is cheaper
+          than a reader discovering it at a refused Save. */}
       <AccessCard
         title="People and crews"
         workspaceId={workspaceId}
@@ -115,6 +114,14 @@ export function EditorAccessSection({
         panelIDs={panelIDs}
         canManage={canManage}
         manageRefusal={REFUSAL.grants}
+        footer={
+          <>
+            {SAVE_EFFECT_NOTE["immediate-grant"]} Access changes take effect on their own — they
+            are not part of a draft and not part of a publication.
+            {canManage &&
+              " Administering access does not by itself let you edit this Page’s panels or its application source; those are separate rights, checked in their own sections."}
+          </>
+        }
       />
 
       <WebhooksCard
@@ -132,6 +139,17 @@ export function EditorAccessSection({
         canManage={canManage}
         manageRefusal={REFUSAL.links}
       />
+
+      {/* What the folder adds, read-only. Sits after the Page's own three
+          lists and before anything that computes the sum of them, so a
+          reader meets the inputs before the answer. Nothing when the Page
+          is in no folder. */}
+      <FolderAccessCard workspaceId={workspaceId} slug={slug} page={page} />
+      {/* The answer to the three cards above: who actually gets in, computed
+          server-side from the same facts it enforces. Read-only, and shown
+          to everyone the section is shown to — a reader the server refuses
+          sees its refusal in the card, never a section with a card missing. */}
+      <EffectiveAccessCard workspaceId={workspaceId} slug={slug} />
 
       <ExportCard workspaceId={workspaceId} slug={slug} />
 

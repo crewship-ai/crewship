@@ -90,12 +90,63 @@ func (r *Router) registerPageRoutes() {
 	r.mux.Handle("GET /api/v1/pages", authed(wsCtx(http.HandlerFunc(p.List))))
 	r.mux.Handle("GET /api/v1/pages/{slug}", authed(wsCtx(http.HandlerFunc(p.Get))))
 	r.mux.Handle("GET /api/v1/pages/{slug}/grants", authed(wsCtx(http.HandlerFunc(p.ListGrants))))
+	// Effective access (pages_access.go) — read-only renderings of the
+	// model above. The literal /pages/access wins over /pages/{slug} in the
+	// mux by specificity, so a page cannot be slugged "access" — and
+	// internal/pages refuses that slug on every document (reservedPageSlugs),
+	// so no page is ever created that this route would shadow.
+	// openapi: query limit:integer cursor:string; responses 200,400,401,403,404,500
+	r.mux.Handle("GET /api/v1/pages/{slug}/access", authed(wsCtx(http.HandlerFunc(p.PageAccess))))
+	// openapi: query subject:string! subject_type:string limit:integer cursor:string; responses 200,400,401,403,404,500
+	r.mux.Handle("GET /api/v1/pages/access", authed(wsCtx(http.HandlerFunc(p.SubjectAccess))))
 	r.authedMut("POST", "/api/v1/pages", roleInline, p.Create)
 	r.authedMut("PATCH", "/api/v1/pages/{slug}", roleSelf, p.Update)
 	r.authedMut("DELETE", "/api/v1/pages/{slug}", roleSelf, p.Delete)
 	r.authedMut("PUT", "/api/v1/pages/{slug}/panels/{panelId}/data", roleSelf, p.PushData)
 	r.authedMut("PUT", "/api/v1/pages/{slug}/grants", roleSelf, p.PutGrant)
 	r.authedMut("DELETE", "/api/v1/pages/{slug}/grants", roleSelf, p.DeleteGrant)
+
+	// Folders (#2527, pages_folders.go). Under /page-folders rather than
+	// /pages/folders: `GET /pages/folders/{slug}` and `GET /pages/{slug}/grants`
+	// both match /pages/folders/grants and neither is more specific, which
+	// Go's mux refuses at registration — the same reason inbound webhooks
+	// live at /page-webhooks. The three mutations that need MANAGER+ by §4
+	// (create; rename; delete; and add, whose accepting half is MANAGER+ or
+	// admin) declare roleCreate so the middleware refuses a MEMBER before the
+	// handler decides crew membership; remove is the page owner's, who may
+	// be a MEMBER, so it is roleSelf.
+	// openapi: responses 200,400,401,500
+	r.mux.Handle("GET /api/v1/page-folders", authed(wsCtx(http.HandlerFunc(p.ListFolders))))
+	// openapi: responses 200,400,401,404,500
+	r.mux.Handle("GET /api/v1/page-folders/{slug}", authed(wsCtx(http.HandlerFunc(p.GetFolder))))
+	// openapi: responses 201,400,401,403,409,413,500
+	r.authedMut("POST", "/api/v1/page-folders", roleCreate, p.CreateFolder)
+	// openapi: responses 200,400,401,403,404,413,500
+	r.authedMut("PATCH", "/api/v1/page-folders/{slug}", roleSelf, p.UpdateFolder)
+	// openapi: responses 204,401,403,404,409,500
+	r.authedMut("DELETE", "/api/v1/page-folders/{slug}", roleCreate, p.DeleteFolder)
+	// openapi: responses 200,400,401,403,404,409,413,500
+	r.authedMut("POST", "/api/v1/page-folders/{slug}/pages", roleSelf, p.AddFolderPage)
+	// openapi: responses 200,400,401,403,404,409,413,500
+	r.authedMut("DELETE", "/api/v1/page-folders/{slug}/pages/{page}", roleSelf, p.RemoveFolderPage)
+
+	// Inherited permissions (#2533, pages_folder_acl.go). The ACL is a
+	// manager's (admin or the owning crew's MANAGER+), so its two mutations
+	// declare roleCreate; a MEMBER is refused by the middleware before the
+	// handler asks about the crew. Rename and add above are roleSelf since
+	// this change: a holder of `w` on the folder — who may be a MEMBER — can
+	// rename it and accept a page they own into it, and only the handler
+	// knows who holds `w`. The batch move is roleSelf for the same reason.
+	// openapi: responses 200,401,403,404,500
+	r.mux.Handle("GET /api/v1/page-folders/{slug}/acl", authed(wsCtx(http.HandlerFunc(p.GetFolderACL))))
+	// openapi: responses 200,400,401,403,404,413,500
+	r.authedMut("PUT", "/api/v1/page-folders/{slug}/acl", roleCreate, p.PutFolderACL)
+	// openapi: responses 204,400,401,403,404,500
+	r.authedMut("DELETE", "/api/v1/page-folders/{slug}/acl/{subject_type}/{subject_id}", roleCreate, p.DeleteFolderACL)
+	// openapi: responses 200,400,401,403,404,409,413,500
+	r.authedMut("POST", "/api/v1/page-folders/{slug}/pages:batch", roleSelf, p.BatchMoveFolderPages)
+	// openapi: responses 200,401,404,500
+	r.mux.Handle("GET /api/v1/pages/{slug}/access/me", authed(wsCtx(http.HandlerFunc(p.MyPageAccess))))
 
 	// Export/import (§10b.2) and the version history behind `page rollback`
 	// (§10b.1) register themselves, next to their handlers — see
