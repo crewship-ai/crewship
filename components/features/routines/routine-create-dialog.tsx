@@ -367,6 +367,13 @@ export function RoutineCreateDialog({
   // it — except for a fork, which is the one wholesale replacement that IS
   // work (see there).
   const pristineText = useRef(liveText)
+  const formValues = {
+    name, description, authorCrewId, icon, color, trigger, scheduledValues,
+    goal, sourcesAndOutput,
+  }
+  // Publication and local editing have different baselines: closing loses
+  // only changes since the last draft save/load, not changes since Publish.
+  const pristineForm = useRef(formValues)
 
   // Reset to the entry screen each time the dialog opens. (Field state is
   // otherwise preserved across a close/reopen within the same session.)
@@ -384,6 +391,11 @@ export function RoutineCreateDialog({
       setAuthorCrewId(routine.author_crew_id ?? "")
       setIcon(resolveRoutineIcon(routine))
       setColor(resolveRoutineColor(routine))
+      pristineForm.current = {
+        ...formValues, name: routine.name, description: routine.description ?? "",
+        authorCrewId: routine.author_crew_id ?? "",
+        icon: resolveRoutineIcon(routine), color: resolveRoutineColor(routine),
+      }
       setDslText(text)
       setLiveText(text)
       bufferRef.current = text
@@ -413,6 +425,11 @@ export function RoutineCreateDialog({
         setScheduledValues({})
         setGoal("")
         setSourcesAndOutput("")
+        pristineForm.current = {
+          name: "", description: "", authorCrewId: "", icon: "workflow", color: "violet",
+          trigger: { ...trigger, kind: "manual", at: "" }, scheduledValues: {},
+          goal: "", sourcesAndOutput: "",
+        }
         setTestResult(null)
         setSaveToken(null)
         setSaveError(null)
@@ -440,24 +457,33 @@ export function RoutineCreateDialog({
     if (typeof doc.icon === "string") setIcon(doc.icon)
     if (typeof doc.color === "string") setColor(doc.color)
     const start = doc.trigger as Record<string, unknown> | undefined
+    const loadedForm = {
+      ...formValues,
+      name: String(doc.name || draft.slug), description: String(doc.description || ""),
+      authorCrewId: String(doc.author_crew_id || ""),
+      icon: typeof doc.icon === "string" ? doc.icon : icon,
+      color: typeof doc.color === "string" ? doc.color : color,
+    }
     if (start) {
-      setTrigger((current) => ({
-        ...current,
-        kind: start.kind as typeof current.kind,
-        cron: String(start.cron || current.cron),
-        timezone: String(start.timezone || current.timezone),
+      loadedForm.trigger = {
+        ...trigger,
+        kind: start.kind as typeof trigger.kind,
+        cron: String(start.cron || trigger.cron),
+        timezone: String(start.timezone || trigger.timezone),
         at: String(start.fire_at || ""),
-      }))
+      }
+      setTrigger(loadedForm.trigger)
       if (start.inputs && typeof start.inputs === "object")
-        setScheduledValues(
+        loadedForm.scheduledValues =
           Object.fromEntries(
             Object.entries(start.inputs).map(([key, value]) => [
               key,
               typeof value === "string" ? value : JSON.stringify(value),
             ]),
-          ),
-        )
+          )
+      setScheduledValues(loadedForm.scheduledValues)
     }
+    pristineForm.current = loadedForm
     setMode("advanced")
     setSection("Recipe")
   }
@@ -886,6 +912,7 @@ export function RoutineCreateDialog({
       toast.error("Fix the recipe before continuing")
       return
     }
+    const submittedText = bufferRef.current
     if (
       (routine || draftRef.current?.base_pipeline_id) &&
       parsed.name !== (routine?.slug || draftRef.current?.slug)
@@ -991,7 +1018,8 @@ export function RoutineCreateDialog({
         draftRef.current = stored
         setDraftRevision(stored.revision)
         if (draftOnly) {
-          pristineText.current = bufferRef.current
+          pristineText.current = submittedText
+          pristineForm.current = formValues
           toast.success(`Draft saved · revision ${stored.revision}`)
           return
         }
@@ -1171,15 +1199,7 @@ Use scripts for deterministic work and agents where judgment is needed. Show a r
   // and no prompt appears. `forkSearch` is deliberately absent — it filters a
   // list rather than composing anything.
   const dirty =
-    Object.keys(scheduledValues).length > 0 ||
-    sourcesAndOutput.trim() !== "" ||
-    trigger.kind !== "manual" ||
-    goal.trim() !== "" ||
-    name !== (routine?.name ?? "") ||
-    description !== (routine?.description ?? "") ||
-    authorCrewId !== (routine?.author_crew_id ?? "") ||
-    icon !== (routine ? resolveRoutineIcon(routine) : "workflow") ||
-    color !== (routine ? resolveRoutineColor(routine) : "violet") ||
+    JSON.stringify(formValues) !== JSON.stringify(pristineForm.current) ||
     liveText !== pristineText.current
 
   // ⌘↵ / Ctrl↵, wired once by the shell. It does whatever the mode's primary
@@ -1207,6 +1227,9 @@ Use scripts for deterministic work and agents where judgment is needed. Show a r
       presentation={presentation}
       dirty={dirty}
       discardLabel="this routine"
+      discardDescription={draftRef.current?.id
+        ? "Closing discards changes made since your last save. Your saved draft will remain available."
+        : undefined}
       onSubmit={handleKeyboardSubmit}
       className={
         mode === "advanced" && !page

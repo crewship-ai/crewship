@@ -21,7 +21,7 @@
 
 import * as React from "react"
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen, fireEvent, within } from "@testing-library/react"
+import { render, screen, fireEvent, within, waitFor } from "@testing-library/react"
 
 import type { Automation } from "@/lib/automations"
 import type { RoutineDetail } from "../routines-detail-panel"
@@ -73,6 +73,11 @@ vi.mock("../routine-versions-tab", () => ({
 }))
 vi.mock("../routine-runs-tab", () => ({ RoutineRunsTab: () => <div /> }))
 vi.mock("../routine-budget-card", () => ({ RoutineBudgetCard: () => <div /> }))
+vi.mock("../routine-create-dialog", () => ({
+  RoutineCreateDialog: ({ onClose }: { onClose: () => void }) => (
+    <button onClick={onClose}>Close editor</button>
+  ),
+}))
 // The reach rows are the Access card's agent list now, so the card itself is
 // real here and only its network call is stubbed.
 vi.mock("@/hooks/use-agent-reach", () => ({
@@ -151,6 +156,17 @@ beforeEach(() => {
   h.automations = []
   h.records = []
   h.schedules = []
+})
+
+it("returns keyboard focus to Edit after leaving the editor page", async () => {
+  renderCard()
+  const opener = screen.getByRole("button", { name: "Edit", exact: true })
+  opener.focus()
+  fireEvent.click(opener)
+  const close = await screen.findByRole("button", { name: "Close editor" })
+  close.focus()
+  fireEvent.click(close)
+  await waitFor(() => expect(screen.getByRole("button", { name: "Edit", exact: true })).toHaveFocus())
 })
 
 /** Automations live in Plan, next to schedules and webhooks (#2519). */

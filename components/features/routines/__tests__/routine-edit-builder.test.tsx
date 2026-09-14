@@ -198,6 +198,30 @@ beforeEach(() => {
   vi.clearAllMocks()
 })
 describe("shared routine editor", () => {
+  it("closes an unchanged loaded draft without claiming its saved work will be lost", async () => {
+    h.linked = true
+    h.linkedExisting = true
+    render(<RoutineCreateDialog {...props} />)
+    await waitFor(() => expect(screen.getByLabelText("Name")).toHaveValue("Draft from Chat"))
+    fireEvent.click(screen.getByRole("button", { name: "Cancel", exact: true }))
+    expect(props.onClose).toHaveBeenCalledOnce()
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument()
+  })
+
+  it("moves the metadata baseline after Save draft, but still guards later edits", async () => {
+    render(<RoutineCreateDialog {...props} />)
+    await waitFor(() => expect(screen.queryByText("Loading saved draft…")).not.toBeInTheDocument())
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Saved name" } })
+    fireEvent.click(screen.getByRole("button", { name: "Save draft", exact: true }))
+    await screen.findByText(/Saved draft · Publish/)
+    fireEvent.click(screen.getByRole("button", { name: "Cancel", exact: true }))
+    expect(props.onClose).toHaveBeenCalledOnce()
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Unsaved name" } })
+    fireEvent.click(screen.getByRole("button", { name: "Cancel", exact: true }))
+    expect(props.onClose).toHaveBeenCalledOnce()
+    expect(screen.getByRole("alertdialog")).toHaveTextContent(/saved draft.*remain/i)
+  })
+
   it("will not publish an existing linked draft without a readable comparison baseline", async () => {
     h.linked = true; h.linkedExisting = true; h.baselineFails = true
     render(<RoutineCreateDialog {...props} routine={undefined} savedDraftLink={{slug:"existing", id:"ai-draft-1", workspaceId:"ws1"}} />)

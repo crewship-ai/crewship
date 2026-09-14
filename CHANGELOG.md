@@ -9,6 +9,10 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+### Fixed
+- Routine results use the database's 30-second contention budget when recording a completed step, instead of failing after five seconds while waiting for a connection. This records the existing execution; it does not repeat the action.
+- Closing a routine editor compares changes with the saved draft, explains what remains saved, and returns keyboard focus to Edit.
+
 ### Added
 - **A tab bar on phones.** Dashboard, Inbox and Chat sit on the bottom edge, with More opening the full navigation. The three are not a taste call: Inbox is the only navigation row in the product carrying a live count, the chat PRD has a section calling the mobile chat "written and unreachable — the cheapest large improvement available", and the dashboard is built as the aggregator of every other surface's urgent items. Issues was left out deliberately until its list view is responsive; its board measures 1088px wide on a 390px screen, so a tab would promote the strongest desktop surface as the worst mobile one.
 - **Back closes an open drawer** instead of navigating the page out from underneath it — the sharpest mobile-web defect left in the app, fixed once in the shared sheet rather than at each call site.

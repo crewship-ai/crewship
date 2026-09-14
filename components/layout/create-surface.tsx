@@ -224,6 +224,8 @@ export interface CreateSurfaceProps {
   dirty?: boolean
   /** What the confirm says. Default is generic; name the thing when you can. */
   discardLabel?: React.ReactNode
+  /** Explain what closing loses when this surface also has durable drafts. */
+  discardDescription?: React.ReactNode
   /** Fixed for the surface's whole life — do not vary it per step. */
   size?: CreateSurfaceSize
   /**
@@ -258,6 +260,7 @@ export function CreateSurface({
   onOpenChange,
   dirty = false,
   discardLabel,
+  discardDescription,
   size = "md",
   onSubmit,
   ariaLabel,
@@ -337,7 +340,7 @@ export function CreateSurface({
           </div>
         </AlertDialogHeader>
         <AlertDialogDescription className="px-4 py-3.5 text-xs leading-relaxed text-muted-foreground sm:px-5 sm:py-4">
-          You have unsaved input. Closing throws it away — there is no draft.
+          {discardDescription ?? "You have unsaved input. Closing throws it away — there is no draft."}
         </AlertDialogDescription>
         <AlertDialogFooter className="shrink-0 gap-2 border-t border-hairline px-4 py-2.5 sm:space-x-0 sm:px-5 sm:py-3">
           <AlertDialogCancel
