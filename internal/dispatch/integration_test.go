@@ -760,10 +760,22 @@ func TestVertical_OnlyAProvablySafeFailureIsRetried(t *testing.T) {
 			h := newHarness(t)
 			h.rt.failWith = errors.New("the run failed")
 			h.rt.classifyAs = tc.classify
-			// Inspect the first outcome without racing the retry backoff. Other
-			// tests exercise advancing eligibility and subsequent claims.
+			// Inspect the first outcome without racing the retry backoff: with
+			// the store's clock frozen, the retry_wait row's eligible_at never
+			// arrives and a second attempt cannot be claimed while the assertion
+			// runs. WithClock returns a copy, so the frozen store has to be the
+			// one the dispatcher is built from — the previous shape discarded
+			// the copy, and under a slow race build the 2s+jitter backoff
+			// elapsed before the assertion, so a second runtime was created.
+			// Other tests exercise advancing eligibility and subsequent claims.
 			now := time.Now()
-			h.store.WithClock(func() time.Time { return now })
+			h.store = h.store.
+				WithClock(func() time.Time { return now }).
+				// Full jitter draws from [0, window): a draw of 0 makes the
+				// retry eligible at `now` itself, which the frozen clock then
+				// satisfies on the very next poll. Pin the draw to the whole
+				// window so eligibility is provably in the future.
+				WithRand(func(n int64) int64 { return n - 1 })
 
 			r := h.accept("dlv-classify")
 			_, stop := h.runDispatcher(nil)

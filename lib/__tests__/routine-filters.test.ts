@@ -58,6 +58,12 @@ describe("matchesRoutineFilters — historical buckets", () => {
     expect(matchesRoutineFilters(base, { ...all, status: "failed" }, new Map())).toBe(false)
   })
 
+  it("counts a completed run whose result failed as failed, like the row's pill", () => {
+    const resultFailed = { ...base, lastStatus: "completed", lastOutcome: "FAILED" }
+    expect(matchesRoutineFilters(resultFailed, { ...all, status: "failed" }, new Map())).toBe(true)
+    expect(matchesRoutineFilters(resultFailed, { ...all, status: "completed" }, new Map())).toBe(true)
+  })
+
   it("never matches only a routine that has not run", () => {
     expect(matchesRoutineFilters(base, { ...all, status: "never" }, new Map())).toBe(false)
     expect(

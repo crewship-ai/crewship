@@ -175,6 +175,7 @@ const WITH_APPLICATION: PageCapabilities = {
   ...NO_PAGE_CAPABILITIES,
   loaded: true,
   hasApplication: true,
+  mayEditDocument: true,
   mayPublishApplication: true,
   mayViewSourceHistory: true,
 }
@@ -819,6 +820,16 @@ describe("what the reviewer is attesting to", () => {
 })
 
 describe("when the fence trips", () => {
+  it("preserves a baseline conflict for retained publication", async () => {
+    publishResponse = jsonResponse(409, { error: "Baseline unavailable", conflict: "baseline" })
+    mount()
+    await waitFor(() => expect(document.querySelectorAll("[data-slot='publication']")).toHaveLength(1))
+    fireEvent.click(await readyToPublish(2))
+    const dialog = await screen.findByRole("alertdialog")
+    fireEvent.click(within(dialog).getByRole("button", { name: "Publish this version" }))
+    await waitFor(() => expect(document.querySelector("[data-slot='publish-conflict']")?.getAttribute("data-conflict")).toBe("baseline"))
+  })
+
   it("names the routines the server refused on, and drops the review tick", async () => {
     publishResponse = jsonResponse(409, {
       error: "A base you reviewed changed before this publication was applied.",
@@ -909,5 +920,18 @@ describe("a routine the published version does not call", () => {
     // nobody moved, and no refetch would ever clear that.
     const body = await publishRequest(sent)
     expect(body.expected_routine_digests).toEqual({ "nightly-close": "r1" })
+  })
+})
+
+describe("opponent history regressions", () => {
+  it("offers source history before the first application publication", async () => {
+    mount({ hasApplication: false, hasApplicationDraft: true })
+    expect(await screen.findByText("Application source")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Restore revision 6 to draft" })).toBeEnabled()
+  })
+  it("disables live definition restore for a partial document reader", async () => {
+    mount({ mayEditDocument: false })
+    const restores = await screen.findAllByRole("button", { name: /Restore panel version/ })
+    for (const restore of restores) expect(restore).toBeDisabled()
   })
 })
