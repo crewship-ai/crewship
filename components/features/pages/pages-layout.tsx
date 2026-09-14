@@ -39,7 +39,7 @@ import * as React from "react"
 import { AnimatePresence, motion } from "motion/react"
 
 import { duration } from "@/lib/motion"
-import { FilePlus2, Pencil, Share2, Upload } from "lucide-react"
+import { AppWindow, FilePlus2, LayoutGrid, Pencil, Share2, Upload } from "lucide-react"
 
 import { SubBar, SubBarPrimary, SubBarSecondary } from "@/components/layout/sub-bar"
 import { SidebarCollapseButton, SIDEBAR_WIDTH } from "@/components/layout/sidebar-kit"
@@ -159,6 +159,20 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
   // support.
   const editing = nav.mode === "edit" && selectedSlug != null && detail.page != null
 
+  // Application | Panels. The switch lives in the page header beside Edit,
+  // because that is where the page is named and where a person looks for
+  // what to do with it; it replaces a second bar under the header that read
+  // "Stop application / show panels". Showing panels unmounts the
+  // application frame — the host's direct way of ending sandboxed code in
+  // this tab — and stops nothing for anyone else. The switch is drawn only
+  // while an application is actually on screen (`applicationAvailable`,
+  // reported by the view), and a newly opened Page starts on its application.
+  const [showPanels, setShowPanels] = React.useState(false)
+  const [applicationAvailable, setApplicationAvailable] = React.useState(false)
+  React.useEffect(() => {
+    setShowPanels(false)
+  }, [selectedSlug])
+
   // One capability we can lower honestly without a second request: React
   // Query shares this key with the Access section's own read, so asking here
   // costs nothing extra, and only while the editor is open — a Page being
@@ -202,6 +216,41 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
         ariaLabel="Pages"
         actions={
           <>
+            {selectedSlug && !editing && applicationAvailable && (
+              <div
+                role="group"
+                aria-label="Show"
+                className="mr-1 flex h-7 items-center rounded-md border border-white/[0.08] p-0.5"
+              >
+                <button
+                  type="button"
+                  aria-pressed={!showPanels}
+                  onClick={() => setShowPanels(false)}
+                  className={cn(
+                    "inline-flex h-6 items-center gap-1.5 rounded px-2 text-xs transition-colors coarse:min-h-11",
+                    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                    !showPanels ? "bg-white/[0.08] font-medium text-foreground" : "text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  <AppWindow className="h-3 w-3" aria-hidden />
+                  Application
+                </button>
+                <button
+                  type="button"
+                  aria-pressed={showPanels}
+                  onClick={() => setShowPanels(true)}
+                  title="Show this Page's panels instead; the application is closed in this tab and keeps running for everyone else"
+                  className={cn(
+                    "inline-flex h-6 items-center gap-1.5 rounded px-2 text-xs transition-colors coarse:min-h-11",
+                    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                    showPanels ? "bg-white/[0.08] font-medium text-foreground" : "text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  <LayoutGrid className="h-3 w-3" aria-hidden />
+                  Panels
+                </button>
+              </div>
+            )}
             {selectedSlug && !editing && (
               <SubBarSecondary
                 icon={Share2}
@@ -244,16 +293,25 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
             className="fixed inset-0 z-40 bg-black/50 touch-none overscroll-contain"
           />
         )}
-        {/* The list stays. Replacing it with the editor's sections was the
-            first draft's riskiest idea and the review's U05: the promise that
-            a list restores its scroll and filters afterwards is the promise
-            that breaks. On a phone it is already an overlay, so the editor
-            gets the full width there without anyone deciding it should. */}
+        {/* The list stays MOUNTED. Replacing it with the editor's sections was
+            the first draft's riskiest idea and the review's U05: the promise
+            that a list restores its scroll and filters afterwards is the
+            promise that breaks. While editing it steps off-screen instead
+            (#2515): still in the DOM at its full width, so its scroll
+            position and its filter state are exactly where they were on
+            return — `display: none` would have reset the scroll — but out of
+            layout, out of the tab order and out of the accessibility tree,
+            so the editor has the whole width and nobody can tab into a list
+            they cannot see. */}
         <aside
+          inert={editing}
+          aria-hidden={editing || undefined}
+          data-editing={editing || undefined}
           className={cn(
             "shrink-0 overflow-hidden border-r border-white/[0.06] bg-card transition-all print:hidden",
             collapsed ? "w-9" : SIDEBAR_WIDTH,
             isMobile && !collapsed && "absolute inset-y-0 left-0 z-50 shadow-2xl",
+            editing && "pointer-events-none absolute inset-y-0 left-0 -translate-x-full opacity-0",
           )}
         >
           {collapsed ? (
@@ -285,10 +343,15 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
             {editing && selectedSlug ? (
               <motion.div
                 key={`editor-${selectedSlug}`}
-                initial={{ opacity: 0, x: 12 }}
+                // The editor arrives from the right edge and leaves the same
+                // way: it is a mode laid over the page, not the next page in
+                // a sequence, and the direction says so. MotionConfig
+                // (`reducedMotion="user"`) turns the travel into a plain
+                // fade for anyone who asked for less motion.
+                initial={{ opacity: 0.4, x: "100%" }}
                 animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: -12 }}
-                transition={{ duration: duration.short, ease: "easeOut" }}
+                exit={{ opacity: 0.4, x: "100%" }}
+                transition={{ duration: duration.base, ease: "easeOut" }}
                 className="absolute inset-0 flex flex-col overflow-hidden"
               >
                 {/* Entering the editor unmounts the live application frame:
@@ -314,7 +377,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
                 transition={{ duration: duration.short, ease: "easeOut" }}
                 className="absolute inset-0 flex flex-col overflow-hidden"
               >
-                <PageApplicationView key={`${workspaceId}:${selectedSlug}`} workspaceId={workspaceId} slug={selectedSlug} page={detail.error ? null : detail.raw} fallback={
+                <PageApplicationView key={`${workspaceId}:${selectedSlug}`} workspaceId={workspaceId} slug={selectedSlug} page={detail.error ? null : detail.raw} panels={showPanels} onAvailableChange={setApplicationAvailable} fallback={
                 <PageView
                   headingRef={viewHeading}
                   page={detail.page}

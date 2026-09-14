@@ -58,7 +58,7 @@ export function ReviewPreview({
             tabIndex={-1}
             // Focused on mount, programmatically. `:focus` rather than
             // `:focus-visible` for the reason given on the review heading.
-            className="rounded-sm text-lg font-semibold outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:ring-offset-background"
+            className="rounded-sm text-lg font-semibold outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
           >
             Candidate preview
           </h2>
