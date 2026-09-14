@@ -398,7 +398,7 @@ describe("routine access and starting points", () => {
       screen.getByText(/accounts are resolved when the run starts/),
     ).toBeInTheDocument()
     expect(
-      screen.getAllByRole("link", { name: "morgan", exact: true })[0],
+      screen.getAllByRole("link", { name: "morgan" })[0],
     ).toHaveAttribute("href", "/crews?agent=morgan")
     const host = screen.getByText("api.github.com")
     expect(host.closest("details")).not.toHaveAttribute("open")

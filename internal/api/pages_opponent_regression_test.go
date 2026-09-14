@@ -250,7 +250,10 @@ func TestPageRollbackResponseFiltersPanelsAddedAfterCommit(t *testing.T) {
 	}
 	update(visiblePanelPatch)
 	production := h.db
-	hook := &reviewQueryHook{match: "SELECT pp.id, pp.panel_id, pp.schema", nth: 1, run: func() {
+	// The panel read this interleaves on is loadPanelsIn since #2526; the match is
+	// its SELECT prefix, and `pp.page_id` first is what tells it from the
+	// on-failure sweeper's panel read.
+	hook := &reviewQueryHook{match: "SELECT pp.page_id, pp.id, pp.panel_id, pp.schema", nth: 1, run: func() {
 		update(withheldCreateBody)
 	}}
 	h.db = reviewHookedDB(t, reviewDBPath(t, production), hook)
