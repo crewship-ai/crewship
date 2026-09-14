@@ -151,7 +151,16 @@ func ToolSchemas() map[string]ToolSchema {
 					},
 					"operation_id": {
 						"type": "string",
-						"description": "Stable id for this write, reused verbatim when you retry it. Omit and each attempt is a separate write."
+						"description": "Stable id for this write, reused verbatim when you retry it (e.g. a UUID you mint once). A retry with the same id and the same content returns the original result instead of writing again; omit it and each attempt is a separate write."
+					},
+					"expected_revision": {
+						"type": "integer",
+						"minimum": 0,
+						"description": "The revision memory.read returned for this file. Supply it on a replace and the write is refused with memory_conflict if the file moved on. Where the host ledger is available this is the CAS term; expected_sha256 is accepted instead and resolved to a revision."
+					},
+					"first_write": {
+						"type": "boolean",
+						"description": "On a replace: state that no revision exists for this file yet (memory.read returned revision 0). The write is refused with memory_conflict if one does. Use this instead of expected_revision for a file you are writing for the first time; do not use both."
 					},
 					"expected_sha256": {
 						"type": "string",
@@ -205,14 +214,26 @@ func ToolSchemas() map[string]ToolSchema {
 		},
 		"memory.append_daily": {
 			Name: "memory.append_daily",
-			Description: "Append a timestamped entry to today's daily log (daily/YYYY-MM-DD.md). " +
-				"Convenience wrapper over memory.write for the common case of session-log additions.",
+			Description: "Append one timestamped entry to today's daily journal (daily/YYYY-MM-DD.md). " +
+				"To retry safely, pass the same operation_id, date and at you used the first time: the entry is then written once.",
 			InputSchema: json.RawMessage(`{
 				"type": "object",
 				"properties": {
 					"entry": {
 						"type": "string",
-						"description": "Plain-text entry. The dispatcher adds an ISO 8601 timestamp prefix."
+						"description": "The journal line to append (one entry; a timestamp is prefixed)."
+					},
+					"operation_id": {
+						"type": "string",
+						"description": "Stable id for this entry, reused verbatim on a retry. Omit and each attempt is a separate entry."
+					},
+					"date": {
+						"type": "string",
+						"description": "Journal day as YYYY-MM-DD. Defaults to today (UTC). Pass the same value on a retry so the entry lands in the same file."
+					},
+					"at": {
+						"type": "string",
+						"description": "Entry timestamp, RFC 3339. Defaults to now (UTC). Pass the same value on a retry so the entry's bytes are identical."
 					}
 				},
 				"required": ["entry"],
@@ -561,6 +582,10 @@ type writeArgs struct {
 	// that silently drops somebody else's lines into an
 	// undeclared_removal refusal.
 	Removals []memdiff.Removal `json:"removals"`
+	// FirstWrite is the explicit first-write precondition for a replace. It
+	// needs the ledger, so on the local dispatcher it is refused like
+	// ExpectedRevision is.
+	FirstWrite bool `json:"first_write"`
 }
 
 // scopeForTier is the ownership discriminator recorded on every mutation.
@@ -736,6 +761,7 @@ func (d *Dispatcher) handleWrite(ctx context.Context, raw json.RawMessage) (Tool
 		BlobRoot:    d.blobRoot,
 
 		ExpectedRevision: a.ExpectedRevision,
+		FirstWrite:       a.FirstWrite,
 		ExpectedSHA256:   a.ExpectedSHA256,
 		Removals:         a.Removals,
 
@@ -1349,6 +1375,42 @@ func (d *Dispatcher) pathToSourceLabel(p string) string {
 
 type appendDailyArgs struct {
 	Entry string `json:"entry"`
+	// OperationID, Date and At make a retry reproduce the SAME write: the
+	// same file, the same bytes, the same identity. Without them a retry is a
+	// second entry with a later stamp, which is what the previous shape did.
+	OperationID string `json:"operation_id"`
+	Date        string `json:"date"`
+	At          string `json:"at"`
+}
+
+// ResolveAppendDaily is resolveAppendDaily for callers outside the package
+// (the sidecar's host bridge), so both surfaces derive identical bytes from
+// identical arguments.
+func ResolveAppendDaily(entry, date, at string, now func() time.Time) (day, line string, err error) {
+	return resolveAppendDaily(appendDailyArgs{Entry: entry, Date: date, At: at}, now)
+}
+
+// resolveAppendDaily turns the caller's arguments into the file day and the
+// exact line, applying the defaults (today, now) only where the caller gave
+// nothing. It is shared by the local dispatcher and the host bridge so the two
+// surfaces write byte-identical entries for identical arguments.
+func resolveAppendDaily(a appendDailyArgs, now func() time.Time) (day, line string, err error) {
+	if strings.TrimSpace(a.Entry) == "" {
+		return "", "", errors.New("entry is required")
+	}
+	day = strings.TrimSpace(a.Date)
+	if day == "" {
+		day = now().Format("2006-01-02")
+	} else if _, perr := time.Parse("2006-01-02", day); perr != nil {
+		return "", "", fmt.Errorf("date must be YYYY-MM-DD: %q", a.Date)
+	}
+	at := strings.TrimSpace(a.At)
+	if at == "" {
+		at = now().Format(time.RFC3339)
+	} else if _, perr := time.Parse(time.RFC3339, at); perr != nil {
+		return "", "", fmt.Errorf("at must be RFC 3339: %q", a.At)
+	}
+	return day, fmt.Sprintf("- %s — %s\n", at, a.Entry), nil
 }
 
 func (d *Dispatcher) handleAppendDaily(ctx context.Context, raw json.RawMessage) (ToolResult, error) {
@@ -1356,17 +1418,16 @@ func (d *Dispatcher) handleAppendDaily(ctx context.Context, raw json.RawMessage)
 	if err := json.Unmarshal(raw, &a); err != nil {
 		return ToolResult{IsError: true, Content: "memory.append_daily: invalid args: " + err.Error()}, nil
 	}
-	if strings.TrimSpace(a.Entry) == "" {
-		return ToolResult{IsError: true, Content: "memory.append_daily: entry is required"}, nil
+	day, line, err := resolveAppendDaily(a, d.now)
+	if err != nil {
+		return ToolResult{IsError: true, Content: "memory.append_daily: " + err.Error()}, nil
 	}
-	today := d.now().Format("2006-01-02")
-	stamp := d.now().Format(time.RFC3339)
-	line := fmt.Sprintf("- %s — %s\n", stamp, a.Entry)
 	inner, _ := json.Marshal(writeArgs{
-		Tier:    "daily",
-		Key:     today,
-		Content: line,
-		Mode:    "append",
+		Tier:        "daily",
+		Key:         day,
+		Content:     line,
+		Mode:        "append",
+		OperationID: a.OperationID,
 	})
 	return d.handleWrite(ctx, inner)
 }
