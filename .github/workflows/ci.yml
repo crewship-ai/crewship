@@ -1203,7 +1203,16 @@ jobs:
     # A second tag set is a second compile of the affected packages, so it is
     # real overhead, not free — and the honest place to pay for it is this cap
     # rather than the daylight the invariant above depends on.
-    timeout-minutes: 22
+    #
+    # 22 → 25, and `-timeout 12m` → 15m below (#2542). internal/database is
+    # one package whose every test migrates a fresh file from scratch, so its
+    # cost grows with the migration count: 523s on main at 176 migrations
+    # (runs 34852827867, 34855297332), over 720s with the two folder
+    # migrations of #2542 on top (runs 34854262908, 34838748948 sat at 546s
+    # before main added another). The real fix is a shared migrated template
+    # for that suite (#2551); until then the budget has to say what the
+    # package costs. 2m33s + 15m = 17m33s leaves 7m27s of daylight.
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -1304,7 +1313,7 @@ jobs:
       # lives in the non-blocking `go-shuffle` job below; see that job for
       # why it is not on the blocking gate yet.
       - name: Go test
-        run: go test ./... -count=1 -timeout 12m
+        run: go test ./... -count=1 -timeout 15m
 
   # ── Go: shuffled execution order ──
   #
@@ -1359,6 +1368,11 @@ jobs:
     # 11m52s for the full suite (job 90889450094) back when internal/api and
     # cmd/crewship were excluded AND still cost 379s/168s; #1547 cut both, and
     # they are back in scope, so the headroom is roughly unchanged.
+    #
+    # `-timeout` 15m → 18m with #2542, for the same reason as the `go` job:
+    # internal/database under a shuffled order ran past 900s (run
+    # 34854262908) once two more migrations were in. 2m33s + 18m = 20m33s
+    # keeps 9m27s under this cap.
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -1392,7 +1406,7 @@ jobs:
             exit 1
           fi
           echo "Shuffling all $n packages."
-          go test ./... -count=1 -shuffle=on -timeout 15m
+          go test ./... -count=1 -shuffle=on -timeout 18m
 
   # ── Go: race detector ──
   #

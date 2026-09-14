@@ -189,12 +189,16 @@ describe("each panel says what it offers", () => {
 
   it("says an action is a real operation, and offers no way to fire one here", () => {
     mount()
-    const services = panelCard("sluzby")
-    expect(services.textContent).toContain("real operation, not a preview")
-    // The only buttons on a panel card are navigation. Nothing here runs.
-    for (const button of Array.from(services.querySelectorAll("button"))) {
-      expect(button.textContent).toMatch(/manage producer access/i)
-    }
+    // Said once, in the card's footer, rather than under every panel: the
+    // truth is about actions in general, not about this panel's.
+    const card = screen.getByTestId("data-actions-card")
+    expect(card.textContent).toContain("real operation, not a preview")
+    // A panel block holds no buttons at all, and the only button on the card
+    // is navigation, in its title band. Nothing here runs.
+    expect(panelCard("sluzby").querySelectorAll("button")).toHaveLength(0)
+    const buttons = Array.from(card.querySelectorAll("button"))
+    expect(buttons).toHaveLength(1)
+    expect(buttons[0].textContent).toMatch(/manage producer access/i)
   })
 
   it("says plainly when a panel declares no actions", () => {
@@ -208,9 +212,8 @@ describe("each panel says what it offers", () => {
 describe("producer access is a permission, and lives in Access", () => {
   it("navigates to Access rather than growing a second form", () => {
     const { onNavigate } = mount()
-    fireEvent.click(
-      screen.getAllByRole("button", { name: /manage producer access/i })[0],
-    )
+    // One link for the whole card — `getByRole`, not the first of several.
+    fireEvent.click(screen.getByRole("button", { name: /manage producer access/i }))
     expect(onNavigate).toHaveBeenCalledWith("access")
   })
 

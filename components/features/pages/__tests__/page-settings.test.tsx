@@ -37,7 +37,6 @@ vi.mock("@/hooks/use-mobile", () => ({ useIsMobile: () => false }))
 import * as cards from "@/components/features/pages/page-settings"
 import {
   AccessCard,
-  PageFactsCard,
   PanelVersionsCard,
   pagePanelIDs,
 } from "@/components/features/pages/page-settings"
@@ -178,22 +177,11 @@ function mount(page: WirePageDetail, routes: Routes = {}) {
 /**
  * One card per mount, because that is now the only way they are ever drawn.
  *
- * These three used to arrive stacked — first by the settings modal, then by
- * the `GeneralCard` composition that outlived it. Both are deleted, and the
- * editor mounts the facts in Content and the version log in History with a
- * whole section between them. A harness that kept stacking them would be the
- * last place in the repo where a card could quietly depend on a sibling.
+ * These used to arrive stacked — first by the settings modal, then by the
+ * `GeneralCard` composition that outlived it. Both are deleted; the editor
+ * mounts the version log in History by itself, and the facts that used to
+ * sit beside it are a strip under the editor's header (editor-header.tsx).
  */
-function mountFacts(page: WirePageDetail) {
-  vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(404, { error: "the facts card fetches nothing" })))
-  const qc = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })
-  render(
-    <QueryClientProvider client={qc}>
-      <PageFactsCard slug={page.slug!} page={page} />
-    </QueryClientProvider>,
-  )
-}
-
 function mountVersions(routes: Routes = {}) {
   const calls: Array<{ method: string; url: string }> = []
   vi.stubGlobal(
@@ -371,42 +359,6 @@ describe("issuing a grant", () => {
   })
 })
 
-// ── 4. General information ─────────────────────────────────────────────────
-
-describe("the page facts card", () => {
-  it("renders the owner and the panel count for a crew-owned page", async () => {
-    mountFacts(CREW_OWNED)
-    const owner = await waitFor(() => document.querySelector("[data-fact='owner']")!)
-    // §7.1 rule 1: owner_user_id XOR owner_crew_id, and which arc it is
-    // changes what the line means.
-    expect(owner.textContent).toContain("crew")
-    expect(owner.textContent).toContain("lookout")
-    expect(owner.textContent).not.toContain("user")
-
-    expect(document.querySelector("[data-fact='panels']")!.textContent).toContain("2")
-    expect(document.querySelector("[data-fact='slug']")!.textContent).toContain("fleet-201")
-    expect(document.querySelector("[data-fact='description']")!.textContent).toContain("Ship telemetry")
-    // It stands alone. The facts go to Content and the version log goes to
-    // History; a card that only drew right beside its old sibling would
-    // break the moment a section mounted it by itself.
-    expect(document.querySelectorAll("[data-slot='page-version']")).toHaveLength(0)
-  })
-
-  it("renders the owner and the panel count for a user-owned page", async () => {
-    mountFacts(USER_OWNED)
-    const owner = await waitFor(() => document.querySelector("[data-fact='owner']")!)
-    expect(owner.textContent).toContain("user")
-    expect(owner.textContent).toContain("ada@example.com")
-    expect(owner.textContent).not.toContain("crew")
-
-    expect(document.querySelector("[data-fact='panels']")!.textContent).toContain("1")
-    // §9b.4: no description is `—`, never a blank that reads as a bug.
-    expect(
-      document.querySelector("[data-fact='description'] [data-slot='fact-value']")!.textContent,
-    ).toBe("—")
-  })
-})
-
 describe("the panel versions card", () => {
   it("lists the version history with who authored each version", async () => {
     mountVersions()
@@ -461,6 +413,10 @@ describe("the card library", () => {
     // thing rendering it.
     expect((cards as Record<string, unknown>).PageSettings).toBeUndefined()
     expect((cards as Record<string, unknown>).GeneralCard).toBeUndefined()
+    // The "General" table that printed the owner as a raw id went with them:
+    // the facts are the strip under the editor's header, the owner and the
+    // folder are Properties.
+    expect((cards as Record<string, unknown>).PageFactsCard).toBeUndefined()
   })
 })
 
@@ -471,6 +427,34 @@ describe("the card library", () => {
 // chrome and the toolbar button that opened it, and the new design has
 // neither: the cards are reached through the editor's Access and History
 // sections, whose own tests live in components/features/pages/editor.
+
+// ── Everyone in this workspace (#2533) ─────────────────────────────────────
+
+describe("granting to everyone in this workspace", () => {
+  it("offers the workspace as a subject kind with no reference to type, read or write only, and sends no subject", async () => {
+    const { mockFetch } = mount(USER_OWNED)
+    await waitFor(() => expect(screen.getByLabelText("Subject kind")).toBeTruthy())
+
+    const kind = screen.getByLabelText("Subject kind") as HTMLSelectElement
+    expect(Array.from(kind.options).map((o) => o.textContent)).toEqual(["user", "crew", "agent", "Everyone in this workspace"])
+    // The form opens on produce; the workspace never produces, so the
+    // switch of kind moves the level to one it may hold.
+    expect((screen.getByLabelText("Level") as HTMLSelectElement).value).toBe("produce")
+    fireEvent.change(kind, { target: { value: "workspace" } })
+
+    expect(screen.queryByLabelText("Subject")).toBeNull()
+    const level = screen.getByLabelText("Level") as HTMLSelectElement
+    expect(Array.from(level.options).map((o) => o.value)).toEqual(["read", "write"])
+    expect(level.value).toBe("read")
+    expect(screen.queryByLabelText("Panels")).toBeNull()
+
+    fireEvent.change(level, { target: { value: "write" } })
+    fireEvent.click(screen.getByRole("button", { name: "Grant" }))
+    await waitFor(() => expect(mockFetch.mock.calls.some(([, init]) => (init as RequestInit | undefined)?.method === "PUT")).toBe(true))
+    const put = mockFetch.mock.calls.find(([, init]) => (init as RequestInit | undefined)?.method === "PUT")!
+    expect(JSON.parse(String((put[1] as RequestInit).body))).toEqual({ subject_type: "workspace", level: "write" })
+  })
+})
 
 describe("toPageGrant", () => {
   it("treats an unreadable verdict as inert, never as live", () => {

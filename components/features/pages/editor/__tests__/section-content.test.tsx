@@ -29,10 +29,6 @@ import { render, screen, fireEvent, cleanup, waitFor, within } from "@testing-li
 // and `application-review.tsx` is being written by S6. Both are mocked so this
 // suite's verdict is about THIS file, not about how far the other streams got.
 
-vi.mock("@/components/features/pages/page-settings", () => ({
-  PageFactsCard: ({ slug }: { slug: string }) => <div data-slot="page-facts">facts for {slug}</div>,
-}))
-
 vi.mock("@/components/features/pages/editor/application-review", () => ({
   EditorApplicationReview: ({ slug }: { slug: string }) => (
     <div data-slot="application-review">review of {slug}</div>
@@ -230,6 +226,9 @@ function mount(harness: Harness = {}) {
       return harness.probe ?? jsonResponse(404, { error: "page has no project draft" })
     }
     if (method === "PATCH") return harness.patch ?? jsonResponse(200, { slug: page?.slug })
+    if (method === "GET" && url.startsWith("/api/v1/page-folders?")) {
+      return jsonResponse(200, { folders: [{ id: "f1", slug: "ops", name: "Ops", icon: "rocket", color: "amber", owner: "crew/lookout", page_count: 1, acl_version: 2 }] })
+    }
     return jsonResponse(404, { error: `unrouted ${method} ${url}` })
   })
   vi.stubGlobal("fetch", mockFetch)
@@ -271,19 +270,19 @@ afterEach(() => vi.unstubAllGlobals())
 // ── 1. The ordinary Page is complete ───────────────────────────────────────
 
 describe("an ordinary panel Page renders as a complete product", () => {
-  it("shows the identity, the address and the derived facts", () => {
+  it("shows the identity as a form in a card named for it", () => {
     mount()
 
-    expect((screen.getByLabelText("Page name") as HTMLInputElement).value).toBe("Fleet overview")
+    expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe("Fleet overview")
     expect((screen.getByLabelText("Description") as HTMLTextAreaElement).value).toBe(
       "Services and container memory",
     )
-    // The address is a fact, not a field: the server refuses a slug change
-    // through PATCH because every producer pushes to that address.
-    expect(screen.getByText("/pages/fleet-overview")).toBeTruthy()
-    expect(screen.getByRole("button", { name: /copy address/i })).toBeTruthy()
-    // The derived facts come from the shared card, not from a second copy of it.
-    expect(document.querySelector("[data-slot='page-facts']")).toBeTruthy()
+    // The address, the folder and the derived facts are not fields of this
+    // form and no longer sit inside it: they belong to the Properties card
+    // and the details strip (properties-card.test.tsx, editor-takeover.test.tsx).
+    expect(screen.queryByText("/pages/fleet-overview")).toBeNull()
+    expect(document.querySelector("[data-slot='page-facts']")).toBeNull()
+    expect(document.querySelector("[data-slot='page-folder']")).toBeNull()
   })
 
   it("lists every panel with its type, its producer and its state", () => {
@@ -401,15 +400,13 @@ describe("an application Page shows the review AND the Page itself", () => {
 
     // F1: every one of these was unreachable when Content returned the review
     // and nothing else — there was no other door onto them in the product.
-    expect((screen.getByLabelText("Page name") as HTMLInputElement).value).toBe("Fleet overview")
+    expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe("Fleet overview")
     expect(screen.getByLabelText("Description")).toBeTruthy()
-    expect(screen.getByText("/pages/fleet-overview")).toBeTruthy()
-    expect(document.querySelector("[data-slot='page-facts']")).toBeTruthy()
     expect(panelRows()).toHaveLength(2)
     expect(screen.getByRole("button", { name: /edit document/i })).toBeTruthy()
 
     // Order: the review is the work; the Page's own content sits under it.
-    const own = screen.getByRole("heading", { name: "This Page itself" })
+    const own = document.querySelector("[data-slot='page-identity']")!
     expect(review.compareDocumentPosition(own) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
 
@@ -417,7 +414,7 @@ describe("an application Page shows the review AND the Page itself", () => {
     const { calls } = await mountApplicationPage()
     await screen.findByText("review of fleet-overview")
 
-    fireEvent.change(screen.getByLabelText("Page name"), { target: { value: "Operations Lab" } })
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Operations Lab" } })
     fireEvent.click(screen.getByRole("button", { name: /save changes/i }))
     await waitFor(() => expect(screen.getByText(/^Saved\./)).toBeTruthy())
 
@@ -439,7 +436,7 @@ describe("an application Page shows the review AND the Page itself", () => {
     expect(line.textContent).toContain("nothing to review")
     // The Page's own content is the whole screen then.
     expect(panelRows()).toHaveLength(2)
-    expect(screen.getByRole("heading", { name: "Page content" })).toBeTruthy()
+    expect(document.querySelector("[data-slot='page-identity']")).toBeTruthy()
   })
 
   it("opens no review when the candidate is identical to what is live", async () => {
@@ -449,7 +446,7 @@ describe("an application Page shows the review AND the Page itself", () => {
     expect(document.querySelector("[data-slot='nothing-to-review']")?.textContent).toBe(
       "The candidate is identical to the live application.",
     )
-    expect(screen.getByLabelText("Page name")).toBeTruthy()
+    expect(screen.getByLabelText("Name")).toBeTruthy()
     expect(panelRows()).toHaveLength(2)
   })
 
@@ -462,7 +459,7 @@ describe("an application Page shows the review AND the Page itself", () => {
     // Never "nothing to review": an unreadable snapshot is not an empty one.
     expect(warning.textContent).toContain("you may not read this application's review")
     expect(warning.textContent).not.toMatch(/nothing to review/)
-    expect(screen.getByLabelText("Page name")).toBeTruthy()
+    expect(screen.getByLabelText("Name")).toBeTruthy()
     expect(panelRows()).toHaveLength(2)
   })
 
@@ -500,7 +497,7 @@ describe("an application Page shows the review AND the Page itself", () => {
 
     // …and the Page's own content was reachable throughout, which is the part
     // of this gate that was already verified and must stay true.
-    expect(screen.getByLabelText("Page name")).toBeTruthy()
+    expect(screen.getByLabelText("Name")).toBeTruthy()
     expect(panelRows()).toHaveLength(2)
   })
 
@@ -531,8 +528,8 @@ describe("a Page whose application has never been published", () => {
     // The first-publication framing itself belongs to the review surface; what
     // this section owes it is the mount and the Page's own content underneath.
     expect(document.querySelector("[data-slot='nothing-to-review']")).toBeNull()
-    expect(screen.getByRole("heading", { name: "This Page itself" })).toBeTruthy()
-    expect((screen.getByLabelText("Page name") as HTMLInputElement).value).toBe("Fleet overview")
+    expect(document.querySelector("[data-slot='page-identity']")).toBeTruthy()
+    expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe("Fleet overview")
     expect(panelRows()).toHaveLength(2)
   })
 
@@ -547,7 +544,7 @@ describe("a Page whose application has never been published", () => {
     expect(line.textContent).not.toMatch(/version 0/)
     expect(line.textContent).not.toMatch(/published as version/)
 
-    expect(screen.getByRole("heading", { name: "Page content" })).toBeTruthy()
+    expect(document.querySelector("[data-slot='page-identity']")).toBeTruthy()
     expect(panelRows()).toHaveLength(2)
   })
 
@@ -573,12 +570,12 @@ describe("a Page carrying a panel this viewer may not see", () => {
     // the Page contains.
     expect(panelRows().length).toBeGreaterThan(0)
     // …and the metadata form is untouched by it.
-    expect(screen.getByLabelText("Page name")).not.toBeDisabled()
+    expect(screen.getByLabelText("Name")).not.toBeDisabled()
   })
 
   it("disables the metadata form only when the metadata capability is off", () => {
     mount({ capabilities: { mayEditMetadata: false } })
-    expect(screen.getByLabelText("Page name")).toBeDisabled()
+    expect(screen.getByLabelText("Name")).toBeDisabled()
     expect(screen.getByRole("button", { name: /save changes/i })).toBeDisabled()
   })
 })
@@ -589,7 +586,7 @@ describe("saving the Page's name and description", () => {
   it("issues exactly one PATCH with the two fields, and reports success", async () => {
     const { calls, onDirtyChange } = mount()
 
-    fireEvent.change(screen.getByLabelText("Page name"), { target: { value: "Fleet overview v2" } })
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Fleet overview v2" } })
     await waitFor(() => expect(onDirtyChange).toHaveBeenCalledWith(true))
 
     fireEvent.click(screen.getByRole("button", { name: /save changes/i }))
@@ -650,16 +647,16 @@ describe("saving the Page's name and description", () => {
       </QueryClientProvider>,
     )
 
-    fireEvent.change(screen.getByLabelText("Page name"), { target: { value: "Renamed offline" } })
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Renamed offline" } })
     fireEvent.click(screen.getByRole("button", { name: /save changes/i }))
 
     await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("Could not reach the server"))
-    expect((screen.getByLabelText("Page name") as HTMLInputElement).value).toBe("Renamed offline")
+    expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe("Renamed offline")
   })
 
   it("refuses to submit an empty name rather than letting the server delete it", () => {
     mount()
-    fireEvent.change(screen.getByLabelText("Page name"), { target: { value: "   " } })
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "   " } })
     expect(screen.getByRole("button", { name: /save changes/i })).toBeDisabled()
     expect(screen.getByText(/A Page needs a name/)).toBeTruthy()
   })
@@ -705,3 +702,6 @@ describe("a failed detail read", () => {
     expect(document.body.textContent).not.toMatch(/declares no panels/)
   })
 })
+
+
+// ── Folder (#2527) ─────────────────────────────────────────────────────────

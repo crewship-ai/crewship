@@ -63,6 +63,16 @@ var slugRE = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
 // reference it could ever author.
 var crewSlugRE = regexp.MustCompile(`^_?[a-z0-9][a-z0-9_-]{0,63}$`)
 
+// reservedPageSlugs are the literal segments mounted beside /pages/{slug}.
+// Go's mux prefers the literal, so a page slugged like one would be created,
+// listed and editable — and never readable: GET /pages/access answers the
+// subject-access report, not the page. The router comment says a page cannot
+// be slugged "access"; this is the place that makes it true, for every way a
+// document arrives (create, import, update).
+var reservedPageSlugs = map[string]bool{
+	"access": true,
+}
+
 // Document is a page as authored.
 type Document struct {
 	APIVersion string   `json:"apiVersion" yaml:"apiVersion"`
@@ -417,6 +427,11 @@ func (d *Document) Validate() error {
 		return newError(CodeInvalidSpec, "",
 			"metadata.slug %q is not a slug; a page is slug-addressable and the slug goes in a URL",
 			d.Metadata.Slug)
+	}
+	if reservedPageSlugs[d.Metadata.Slug] {
+		return newError(CodeInvalidSpec, "",
+			"metadata.slug %q is reserved: /api/v1/pages/%s is a route of its own, so a page by that name could never be read",
+			d.Metadata.Slug, d.Metadata.Slug)
 	}
 
 	switch {

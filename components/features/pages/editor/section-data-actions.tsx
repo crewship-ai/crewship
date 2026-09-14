@@ -25,13 +25,20 @@
  * the LIVE definition. When the Page also carries an application candidate,
  * that candidate can declare a different definition, and a reader who does not
  * know which one they are looking at is the failure §4 names.
+ *
+ * Chrome: one `DetailCard` from the shared detail kit, the same card the issue
+ * detail is built from. Its title band names the section, its band action is
+ * the one link to Access, and every panel is a block in its bare body. The
+ * two sentences that used to repeat under every panel — access is a
+ * permission, an action is a real operation — are said once, in the footer.
  */
 
 import * as React from "react"
 import { useQuery } from "@tanstack/react-query"
+import { Workflow } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
-import { cn } from "@/lib/utils"
+import { DetailCard, Pill } from "@/components/ui/detail"
 import { apiFetch } from "@/lib/api-fetch"
 import { apiErrorMessage } from "@/lib/api-error"
 import { formatDateTime } from "@/lib/time"
@@ -73,13 +80,6 @@ export function EditorDataActionsSection({
 
   return (
     <div className="flex flex-col gap-5">
-      <div>
-        <h3 className="text-heading font-medium">Data &amp; actions</h3>
-        <p className="type-page-meta text-muted-foreground">
-          The producer behind each panel, when it last wrote, and the buttons the panel declares.
-        </p>
-      </div>
-
       <LiveDefinitionBanner
         workspaceId={workspaceId}
         slug={slug}
@@ -94,20 +94,39 @@ export function EditorDataActionsSection({
         onNavigate={onNavigate}
       />
 
-      {panels.length === 0 ? (
-        <p className="type-page-value text-muted-foreground">
-          This Page declares no panels, so there is no producer and no action to describe yet.
-        </p>
-      ) : (
-        panels.map((raw, index) => (
-          <PanelDataCard
-            key={raw.id ?? raw.panel_id ?? index}
-            raw={raw}
-            index={index}
-            onNavigate={onNavigate}
-          />
-        ))
-      )}
+      <DetailCard
+        data-testid="data-actions-card"
+        title="Data & actions"
+        icon={Workflow}
+        subtitle={`${panels.length} panel${panels.length === 1 ? "" : "s"}`}
+        action={
+          // No token form here, by design: issuing a producer credential is a
+          // permission, and every permission on this Page is in one place.
+          // One link for the whole card, not one per panel — the destination
+          // is the same Access section whichever panel the reader came from.
+          <Button
+            type="button"
+            variant="outline"
+            size="xs"
+            className="coarse:min-h-11"
+            onClick={() => onNavigate("access")}
+          >
+            Manage producer access
+          </Button>
+        }
+        bare
+        footer="Who may write to a panel is a permission managed in Access; running an action is a real operation, not a preview, and happens on the Page itself, never here."
+      >
+        {panels.length === 0 ? (
+          <p className="px-4 py-3 type-page-meta text-muted-foreground">
+            This Page declares no panels, so there is no producer and no action to describe yet.
+          </p>
+        ) : (
+          panels.map((raw, index) => (
+            <PanelDataBlock key={raw.id ?? raw.panel_id ?? index} raw={raw} index={index} />
+          ))
+        )}
+      </DetailCard>
     </div>
   )
 }
@@ -319,15 +338,15 @@ function declaredRoutines(raw: WirePanel): Map<string, string> {
   return out
 }
 
-function PanelDataCard({
-  raw,
-  index,
-  onNavigate,
-}: {
-  raw: WirePanel
-  index: number
-  onNavigate: EditorSectionProps["onNavigate"]
-}) {
+/** The label column of a row inside the card — same register as the issue detail's Links rows. */
+const ROW_LABEL = "w-[86px] shrink-0 type-page-label text-muted-foreground-soft"
+
+/**
+ * One panel, as a block in the card's bare body. Blocks are separated by
+ * hairlines rather than each drawn as its own bordered section: the card is
+ * the section, and a border per panel put a card inside a card.
+ */
+function PanelDataBlock({ raw, index }: { raw: WirePanel; index: number }) {
   const view = toPanelView(raw, index)
   const state = view.state ? PAGE_STATE_META[view.state] : null
   const StateIcon = state?.icon
@@ -345,10 +364,10 @@ function PanelDataCard({
       <section
         data-slot="panel-data"
         data-sealed="true"
-        className="rounded-lg border border-border/60 bg-card p-4"
+        className="border-b border-hairline px-4 py-3 last:border-b-0"
       >
-        <h4 className="text-body font-medium">{view.spec.id}</h4>
-        <p className="type-page-meta text-muted-foreground">
+        <h4 className="type-page-stamp font-medium text-foreground">{view.spec.id}</h4>
+        <p className="mt-0.5 type-page-meta text-muted-foreground">
           Sealed · owned by {view.spec.owner_crew_name ?? "another crew"}. Its producer, its data and its
           actions are not yours to read.
         </p>
@@ -360,21 +379,21 @@ function PanelDataCard({
     <section
       data-slot="panel-data"
       data-panel={view.spec.id}
-      className="flex flex-col gap-3 rounded-lg border border-border/60 bg-card p-4"
+      className="flex flex-col gap-2 border-b border-hairline px-4 py-3 last:border-b-0"
     >
-      <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <h4 className="min-w-0 text-body font-medium break-words">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h4 className="min-w-0 type-page-meta font-medium break-words">
           {view.spec.title ?? view.spec.id}
         </h4>
         {state && (
-          <span className={cn("inline-flex items-center gap-1.5 type-page-meta", state.tone)}>
-            {StateIcon && <StateIcon className="h-3.5 w-3.5" aria-hidden />}
+          <Pill tone={state.pill}>
+            {StateIcon && <StateIcon className="h-3 w-3" aria-hidden />}
             {state.label}
-          </span>
+          </Pill>
         )}
       </div>
 
-      <dl data-slot="panel-source" className="flex flex-col gap-1">
+      <dl data-slot="panel-source" className="flex flex-col">
         <SourceLine label="Producer">
           {view.producer ?? view.snapshot.provenance?.producer ?? "No producer declared"}
         </SourceLine>
@@ -398,60 +417,51 @@ function PanelDataCard({
         </SourceLine>
       </dl>
 
-      <div data-slot="panel-actions-declared" className="flex flex-col gap-2 border-t border-border/40 pt-3">
-        <span className="type-page-label text-muted-foreground-soft">Actions this panel offers</span>
+      <div data-slot="panel-actions-declared" className="flex flex-col border-t border-hairline pt-2">
+        <span className="type-page-label text-muted-foreground-soft">
+          Actions this panel offers
+        </span>
         {actions.length === 0 ? (
-          <p className="type-page-meta text-muted-foreground">This panel declares no actions.</p>
+          <p className="py-1.5 type-page-meta text-muted-foreground">This panel declares no actions.</p>
         ) : (
-          <>
-            <ul className="flex flex-col gap-2">
-              {actions.map((action) => (
-                <li key={action.id} data-slot="declared-action" data-action={action.id}>
-                  <p className="type-page-value break-words">
-                    <span className="font-medium">{action.label}</span>{" "}
-                    <span className="type-page-stamp text-muted-foreground">{action.kind}</span>
-                  </p>
-                  <p className="type-page-meta text-muted-foreground break-words">
-                    {routines.has(action.id)
-                      ? `Calls routine ${routines.get(action.id)}`
-                      : action.kind === "call"
-                        ? "The routine it calls is resolved by the server from the stored declaration."
-                        : action.kind === "toggle"
-                          ? `Shows or hides ${(action.target ?? []).join(", ") || "panels on this Page"}`
-                          : "Opens another place in Crewship."}
-                  </p>
+          <ul className="flex flex-col">
+            {actions.map((action) => (
+              <li
+                key={action.id}
+                data-slot="declared-action"
+                data-action={action.id}
+                className="flex items-start gap-2.5 border-b border-hairline py-2 type-page-meta last:border-b-0"
+              >
+                {/* The kind is the row's label column: call, toggle or link
+                    is what a reader scans for before reading what it does. */}
+                <span className={`${ROW_LABEL} pt-px`}>{action.kind}</span>
+                <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+                  <span className="font-medium break-words">{action.label}</span>
+                  <span className="type-meta text-muted-foreground break-words">
+                    {routines.has(action.id) ? (
+                      <>
+                        Calls routine{" "}
+                        <span className="type-page-stamp text-foreground/85">{routines.get(action.id)}</span>
+                      </>
+                    ) : action.kind === "call" ? (
+                      "The routine it calls is resolved by the server from the stored declaration."
+                    ) : action.kind === "toggle" ? (
+                      `Shows or hides ${(action.target ?? []).join(", ") || "panels on this Page"}`
+                    ) : (
+                      "Opens another place in Crewship."
+                    )}
+                  </span>
                   {action.confirm && (
-                    <p className="type-page-meta text-muted-foreground break-words">
+                    <span className="type-meta text-muted-foreground break-words">
                       Confirms first: “{action.confirm.title}
                       {action.confirm.body ? ` — ${action.confirm.body}` : ""}”
-                    </p>
+                    </span>
                   )}
-                </li>
-              ))}
-            </ul>
-            <p className="type-page-meta text-muted-foreground">
-              Running an action is a real operation, not a preview. It is run from the Page itself, not
-              from this editor.
-            </p>
-          </>
+                </div>
+              </li>
+            ))}
+          </ul>
         )}
-      </div>
-
-      <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border/40 pt-3">
-        {/* No token form here, by design: issuing a producer credential is a
-            permission, and every permission on this Page is in one place. */}
-        <p className="type-page-meta min-w-0 text-muted-foreground">
-          Who may write to this panel is a permission, not a setting on the panel.
-        </p>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          className="coarse:min-h-11"
-          onClick={() => onNavigate("access")}
-        >
-          Manage producer access
-        </Button>
       </div>
     </section>
   )
@@ -459,9 +469,9 @@ function PanelDataCard({
 
 function SourceLine({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-      <dt className="type-page-label shrink-0 text-muted-foreground-soft">{label}</dt>
-      <dd className="min-w-0 type-page-value break-words">{children}</dd>
+    <div className="flex items-start gap-2.5 py-1 type-page-meta">
+      <dt className={`${ROW_LABEL} pt-px`}>{label}</dt>
+      <dd className="min-w-0 break-words">{children}</dd>
     </div>
   )
 }
