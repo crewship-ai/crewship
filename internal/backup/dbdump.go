@@ -596,6 +596,22 @@ func DumpWorkspace(ctx context.Context, db *sql.DB, workspaceID string) (*DBDump
 					WHERE workspace_id = ? AND created_by IS NOT NULL)`
 				args = append(args, workspaceID)
 			}
+			// A folder's sharing outlives whoever set it (set_by_user_id is
+			// audit, ON DELETE SET NULL), so the setter is often referenced
+			// by nothing else here — an admin in no crew. Without them the
+			// ACL row fails its FK on restore. Probed like the pool creator:
+			// databases from before #2533 have no such table.
+			hasFolderACL, err := tableExists(ctx, tx, "page_folder_acl")
+			if err != nil {
+				return nil, fmt.Errorf("backup: probe page folder acl setter scope: %w", err)
+			}
+			if hasFolderACL {
+				where = "(" + where + `) OR id IN (
+					SELECT set_by_user_id FROM page_folder_acl
+					WHERE folder_id IN (SELECT id FROM page_folders WHERE workspace_id = ?)
+					  AND set_by_user_id IS NOT NULL)`
+				args = append(args, workspaceID)
+			}
 		}
 		if where == "workspace_id = ?" {
 			// Confirm column presence. If absent, fall through to the

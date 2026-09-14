@@ -530,12 +530,13 @@ describe("PagesRail folders", () => {
     // glyph beside a coloured dot read as two facts).
     const glyph = ops.querySelector<HTMLElement>("[data-slot='folder-glyph']")
     expect(glyph).toBeTruthy()
-    expect(glyph!.style.color).not.toBe("")
+    // Tinted by a palette class, not an inline style (components/ is Tailwind-only).
+    expect(glyph!.className).toMatch(/text-\[#/)
     expect(ops.querySelector("[data-slot='folder-dot']")).toBeNull()
     // No colour, no inline colour — "no colour" and "blue" must not look the same.
     const plain = groupHeader("Archive").querySelector<HTMLElement>("[data-slot='folder-glyph']")
     expect(plain).toBeTruthy()
-    expect(plain!.style.color).toBe("")
+    expect(plain!.className).not.toMatch(/text-\[#/)
     // The owner is not said on a folder row: the group is the folder.
     expect(rowOf("Flotila .201").textContent).not.toMatch(/lookout/)
   })

@@ -7,13 +7,12 @@
  * arrives with: people first, then the machines those people vouch for, then
  * the world. Every one of them is an existing card from
  * `components/features/pages/page-settings.tsx`; this section re-homes them,
- * it does not re-implement them. A fourth, read-only card follows them —
- * Effective access (`./section-access-effective.tsx`), the server's answer to
- * who actually gets in once the three above are combined with roles and
- * crew membership.
- * it does not re-implement them. After them, read-only, what the Page's
- * FOLDER adds (`./section-access-folder.tsx`, #2533): a folder's permissions
- * are inherited by every page in it, and they are changed on the folder.
+ * it does not re-implement them. Two read-only cards follow, in the order
+ * they render: what the Page's FOLDER adds (`./section-access-folder.tsx`,
+ * #2533 — a folder's permissions are inherited by every page in it and are
+ * changed on the folder), then Effective access
+ * (`./section-access-effective.tsx`), the server's answer to who actually
+ * gets in once all of the above is combined with roles and crew membership.
  *
  * Producer tokens are here, and NOT in Data & actions, because minting a
  * webhook token is issuing a credential and a credential is a permission

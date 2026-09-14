@@ -173,19 +173,25 @@ STALE_DIR="$(mktemp -d)"
 git -C "$STALE_DIR" init -q && git -C "$STALE_DIR" -c user.email=t@t -c user.name=t commit -q --allow-empty -m one
 HEAD1=$(git -C "$STALE_DIR" rev-parse HEAD)
 stale_snippet="deploy_staleness '$STALE_DIR' '$STALE_DIR/bin'"
+# Extracted once and required non-empty: these cases pipe the body straight
+# into bash rather than through run_with_fn, so a renamed function would
+# define nothing, print nothing, and let the first case (which asserts
+# silence) pass for a function that no longer exists.
+STALE_FN="$(extract_fn deploy_staleness)"
+if [[ -z "$STALE_FN" ]]; then fail "deploy_staleness could not be extracted from dev.sh"; fi
 # Fresh: marker at HEAD, binary newer than the commit.
 printf '%s\n' "$HEAD1" > "$STALE_DIR/.web-build-marker"
 touch -d '+1 minute' "$STALE_DIR/bin"
-out=$(printf '%s\n%s\n%s\n' 'set -euo pipefail' "$(extract_fn deploy_staleness)" "$stale_snippet" | bash 2>/dev/null)
+out=$(printf '%s\n%s\n%s\n' 'set -euo pipefail' "$STALE_FN" "$stale_snippet" | bash 2>/dev/null)
 if [[ -z "$out" ]]; then pass "quiet when web/out and the binary match HEAD"; else fail "fresh slot reported: $out"; fi
 # Binary older than the commit it should be running.
 touch -d '-1 hour' "$STALE_DIR/bin"
-out=$(printf '%s\n%s\n%s\n' 'set -euo pipefail' "$(extract_fn deploy_staleness)" "$stale_snippet" | bash 2>/dev/null)
+out=$(printf '%s\n%s\n%s\n' 'set -euo pipefail' "$STALE_FN" "$stale_snippet" | bash 2>/dev/null)
 if [[ "$out" == *"built before HEAD was committed"* ]]; then pass "names a binary older than HEAD's commit"; else fail "old binary not reported: '$out'"; fi
 # Marker behind HEAD after a new commit.
 touch -d '+1 minute' "$STALE_DIR/bin"
 git -C "$STALE_DIR" -c user.email=t@t -c user.name=t commit -q --allow-empty -m two
-out=$(printf '%s\n%s\n%s\n' 'set -euo pipefail' "$(extract_fn deploy_staleness)" "$stale_snippet" | bash 2>/dev/null)
+out=$(printf '%s\n%s\n%s\n' 'set -euo pipefail' "$STALE_FN" "$stale_snippet" | bash 2>/dev/null)
 if [[ "$out" == *"web/out/ was built from ${HEAD1:0:8}"* ]]; then pass "names the HEAD web/out was built from when the repo moved on"; else fail "stale marker not reported: '$out'"; fi
 # Validation 2026-09-13: after the file on disk is replaced the process keeps
 # running the old inode; /proc/<pid>/exe then reads "<path> (deleted)" and a
@@ -199,7 +205,7 @@ cp "$(command -v sleep)" "$STALE_DIR/bin"
 RUNNER=$!
 sleep 0.2
 cp "$(command -v sleep)" "$STALE_DIR/bin.new" && mv -f "$STALE_DIR/bin.new" "$STALE_DIR/bin"
-out=$(printf '%s\n%s\n%s\n' 'set -euo pipefail' "$(extract_fn deploy_staleness)" "deploy_staleness '$STALE_DIR' '/proc/$RUNNER/exe'" | bash 2>/dev/null)
+out=$(printf '%s\n%s\n%s\n' 'set -euo pipefail' "$STALE_FN" "deploy_staleness '$STALE_DIR' '/proc/$RUNNER/exe'" | bash 2>/dev/null)
 if [[ "$out" == *"replaced on disk"* ]]; then pass "names a running binary whose file was replaced (proc exe reads deleted)"; else fail "replaced binary not reported: '$out'"; fi
 kill "$RUNNER" 2>/dev/null || true
 wait "$RUNNER" 2>/dev/null || true

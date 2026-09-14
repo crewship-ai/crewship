@@ -150,7 +150,11 @@ with you. "crewship page grants <slug>" shows which rows are still live.`,
 		if len(panels) > 0 {
 			scope = fmt.Sprintf(", scoped to %s", strings.Join(panels, ", "))
 		}
-		fmt.Printf("Granted %s on %s to %s/%s%s.\n", level, args[0], subjectType, subject, scope)
+		who := subjectType + "/" + subject
+		if subjectType == "workspace" {
+			who = "everyone in the workspace"
+		}
+		fmt.Printf("Granted %s on %s to %s%s.\n", level, args[0], who, scope)
 		return nil
 	},
 }

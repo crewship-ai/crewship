@@ -126,8 +126,9 @@ func (f *pageFolderRecord) ref() *pageFolderRef {
 // pageFolderWire is one folder as the folder endpoints send it. PageCount is
 // the number of pages in it the CALLER reaches (§5/12) — the same number of
 // rows Show would return — never the folder's true size. Shared is the
-// no-names sharing label every reader gets (`none`, `crew`, `workspace`;
-// #2533 §3/10); the ACL itself is behind GET …/acl and its gate.
+// no-names sharing label every reader gets — `none`, `people`, `crews`,
+// `people_and_crews` or `workspace` (folderSharedLabel; #2533 §3/10); the
+// ACL itself is behind GET …/acl and its gate.
 type pageFolderWire struct {
 	ID            string `json:"id"`
 	Slug          string `json:"slug"`
@@ -329,10 +330,12 @@ func (h *PageHandler) folderOnPath(w http.ResponseWriter, r *http.Request, wsID 
 
 // folderOrNotFound is folderOnPath plus the read rule: a folder this caller
 // reaches nothing in and has no standing on answers as if it did not exist.
-// The folder's own reads and writes go through here. The two membership
-// endpoints do NOT: a page owner filing their page is told who accepts it
-// (§4's sentence) rather than that the folder does not exist, and an owner
-// taking a page back has, by definition, reached it.
+// The folder's reads and writes go through here, and so do the two ways of
+// filing a page in it: a page owner filing into a folder they can SEE is
+// still told who accepts it (§4's sentence, A3), but that sentence names the
+// owning crew, and on a folder they cannot see it would confirm a guessed
+// slug (§3/11). Only removal skips this: an owner taking a page back has, by
+// definition, reached it, and its refusal names nothing but the page.
 func (h *PageHandler) folderOrNotFound(w http.ResponseWriter, r *http.Request, wsID string, viewer *pageViewer) (*pageFolderRecord, []pageFolderACLRecord, bool) {
 	f, ok := h.folderOnPath(w, r, wsID)
 	if !ok {
@@ -645,13 +648,14 @@ func (h *PageHandler) DeleteFolder(w http.ResponseWriter, r *http.Request) {
 
 // AddFolderPage files a page in this folder, moving it out of whichever
 // folder it was in. The caller is BOTH initiator and acceptor (§4, v1) or
-// the answer is a 403 that says who can.
+// the answer is a 403 that says who can — on a folder they can see; one
+// they cannot is a 404, as folderOrNotFound explains.
 func (h *PageHandler) AddFolderPage(w http.ResponseWriter, r *http.Request) {
 	user, wsID, viewer, ok := h.folderViewer(w, r)
 	if !ok {
 		return
 	}
-	f, ok := h.folderOnPath(w, r, wsID)
+	f, acl, ok := h.folderOrNotFound(w, r, wsID, viewer)
 	if !ok {
 		return
 	}
@@ -670,11 +674,6 @@ func (h *PageHandler) AddFolderPage(w http.ResponseWriter, r *http.Request) {
 	}
 	rec, ok := h.folderPageOrNotFound(w, r, wsID, viewer, strings.TrimSpace(req.Page))
 	if !ok {
-		return
-	}
-	acl, err := h.loadFolderACL(r.Context(), f.ID)
-	if err != nil {
-		replyInternalError(w, h.logger, "load folder permissions", err)
 		return
 	}
 	// Both authorities, in the order a person would ask: may you move this

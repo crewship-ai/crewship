@@ -151,6 +151,15 @@ describe("the Effective access card", () => {
     expect(document.querySelectorAll("[data-slot='page-effective-access-row']")).toHaveLength(0)
   })
 
+  it("presents a failed read as unavailable, never as nobody or a count", async () => {
+    mount(500, { error: "page access is temporarily unavailable" })
+    await waitFor(() => expect(cardText()).toContain("page access is temporarily unavailable"))
+    expect(cardText()).toContain("unavailable")
+    expect(cardText()).not.toContain("nobody")
+    expect(cardText()).not.toContain("Nobody reaches this Page")
+    expect(document.querySelectorAll("[data-slot='page-effective-access-row']")).toHaveLength(0)
+  })
+
   it("says when the listing is longer than what it shows", async () => {
     mount(200, {
       page: "fleet-201",

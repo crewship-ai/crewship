@@ -418,6 +418,57 @@ func TestPageSubjectAccess_AnswersAdminsAboutAnyoneAndMembersAboutThemselves(t *
 			}
 		}
 	})
+
+	// `workspace` is a grant subject, not a subject with an access report:
+	// "everyone" has no single set of paths. The endpoint documents user,
+	// crew and agent, and the 400 must say so rather than answer an empty
+	// listing, in both spellings.
+	t.Run("the workspace subject is 400, not an empty answer", func(t *testing.T) {
+		for _, q := range []string{"subject=workspace:everyone", "subject_type=workspace&subject=everyone"} {
+			rr := pagesSubjectAccessCall(t, h, wsID, "erin", "ADMIN", q)
+			if rr.Code != http.StatusBadRequest {
+				t.Errorf("?%s: status = %d, want 400: %s", q, rr.Code, rr.Body.String())
+				continue
+			}
+			if body := rr.Body.String(); !strings.Contains(body, "user:, crew: or agent:") || strings.Contains(body, "workspace") {
+				t.Errorf("?%s: the 400 does not list the three kinds: %s", q, rr.Body.String())
+			}
+		}
+	})
+}
+
+// TestPageSubjectAccess_ReachesThroughTheFolderACL — the `folder:<slug>`
+// arm on the subject report (#2533). frank reaches fleet-201 through the
+// folder's ACL and through nothing else: no ownership, no crew, no grant.
+// The report has to list the page with that one path, for an admin asking
+// about him and for him asking about himself; and once the entry is gone
+// the page is gone from the report too.
+func TestPageSubjectAccess_ReachesThroughTheFolderACL(t *testing.T) {
+	f := newFoldersFixture(t)
+	f.createFolder(t, "engine-docs", "Engine docs", "crew/engine")
+	f.file(t, "engine-docs", "fleet-201")
+	f.share(t, "engine-docs", "user", "frank", false)
+
+	want := []string{"fleet-201=folder:engine-docs"}
+	for _, tc := range []struct{ name, user, role string }{
+		{"an administrator about the ACL's user", "erin", "ADMIN"},
+		{"the ACL's user about themselves", "frank", "MEMBER"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			doc := pagesSubjectAccessOf(t, f.h, f.wsID, tc.user, tc.role, "subject=user:frank")
+			if got := pagesSubjectAccessKeys(doc); !reflect.DeepEqual(got, want) {
+				t.Errorf("pages = %v, want %v", got, want)
+			}
+		})
+	}
+
+	t.Run("the entry removed, the page is gone from the report", func(t *testing.T) {
+		f.unshare(t, "engine-docs", "user", "frank")
+		doc := pagesSubjectAccessOf(t, f.h, f.wsID, "erin", "ADMIN", "subject=user:frank")
+		if got := pagesSubjectAccessKeys(doc); len(got) != 0 {
+			t.Errorf("pages = %v, want none", got)
+		}
+	})
 }
 
 // ── 5. Constant cost ───────────────────────────────────────────────────────

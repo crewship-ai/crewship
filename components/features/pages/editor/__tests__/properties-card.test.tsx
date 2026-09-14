@@ -97,7 +97,7 @@ describe("where the Page is filed", () => {
     // The colour sits on the icon itself, as in the picker (audit 2026-09-13, F4).
     const glyph = line.querySelector<HTMLElement>("[data-slot='folder-glyph']")
     expect(glyph).toBeTruthy()
-    expect(glyph!.style.color).not.toBe("")
+    expect(glyph!.className).toMatch(/text-\[#/)
     // Nothing is fetched to draw the line: the folder rides on the record.
     expect(calls.filter((c) => c.url.startsWith("/api/v1/page-folders"))).toHaveLength(0)
 

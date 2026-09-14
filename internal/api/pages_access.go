@@ -614,7 +614,12 @@ func pageAccessSubjectParam(w http.ResponseWriter, r *http.Request) (subjectType
 			"subject is required: user:<email or id>, crew:<slug> or agent:<slug> (or subject_type= with a bare subject=)")
 		return "", "", false
 	}
-	if !validPageSubjectType(subjectType) {
+	// Narrower than validPageSubjectType on purpose: `workspace` is a grant
+	// subject, but "everyone" has no one set of paths to report, and the
+	// endpoint documents the three kinds it answers about.
+	switch subjectType {
+	case pageSubjectUser, pageSubjectCrew, pageSubjectAgent:
+	default:
 		replyError(w, http.StatusBadRequest, `subject must be prefixed user:, crew: or agent:, or subject_type must be one of "user", "crew", "agent"`)
 		return "", "", false
 	}
@@ -671,8 +676,11 @@ func decodePageAccessCursor(s string) (string, error) {
 // loadAccessPages is the index's page read, keyed by id with the slug order
 // the subject endpoint walks.
 func (h *PageHandler) loadAccessPages(ctx context.Context, wsID string) (map[string]*pageRecord, []string, error) {
+	// folder_id is read here because folderReachSlug keys on it: without it
+	// the `folder:<slug>` arm is silently empty and a subject who reaches a
+	// page only through its folder's ACL is missing from the report.
 	rows, err := h.db.QueryContext(ctx, `
-		SELECT id, slug, name, COALESCE(owner_user_id, ''), COALESCE(owner_crew_id, '')
+		SELECT id, slug, name, COALESCE(owner_user_id, ''), COALESCE(owner_crew_id, ''), COALESCE(folder_id, '')
 		FROM pages WHERE workspace_id = ? ORDER BY slug ASC`, wsID)
 	if err != nil {
 		return nil, nil, err
@@ -682,7 +690,7 @@ func (h *PageHandler) loadAccessPages(ctx context.Context, wsID string) (map[str
 	var order []string
 	for rows.Next() {
 		var p pageRecord
-		if err := rows.Scan(&p.ID, &p.Slug, &p.Name, &p.OwnerUserID, &p.OwnerCrewID); err != nil {
+		if err := rows.Scan(&p.ID, &p.Slug, &p.Name, &p.OwnerUserID, &p.OwnerCrewID, &p.FolderID); err != nil {
 			return nil, nil, err
 		}
 		byID[p.ID] = &p

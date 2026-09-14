@@ -258,6 +258,35 @@ describe("removing a page from its folder (U3)", () => {
     await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Flotila .201 is no longer in Ops."))
   })
 
+  it("on a 409 while unfiling from the move dialog, re-reads and asks again rather than dead-ending", async () => {
+    let attempts = 0
+    const { calls, writes } = mount({
+      answer: (c) => {
+        if (c.method === "DELETE" && c.url.startsWith("/api/v1/page-folders/ops/pages/fleet-201")) {
+          attempts += 1
+          if (attempts === 1) return json(409, { error: "pages_version is stale", conflict: "pages_version", pages_version: 4, acl_version: 5 })
+          return json(204, null)
+        }
+        return null
+      },
+    })
+    await waitFor(() => expect(screen.getByText("Flotila .201")).toBeTruthy())
+    await waitFor(() => expect(groupHeaders().length).toBe(4))
+    const listReadsBefore = calls.filter((c) => c.method === "GET" && c.url.startsWith("/api/v1/pages?")).length
+
+    chooseFromRowMenu(rowOf("Flotila .201"), /move to folder/i)
+    const dialog = await screen.findByRole("dialog")
+    fireEvent.click(await within(dialog).findByRole("radio", { name: /unfiled/i }))
+    fireEvent.click(within(dialog).getByRole("button", { name: "Remove from folder" }))
+
+    // The fence survived the unfile path: the conflict sentence, the page
+    // named, the list read again, nothing retried on the person's behalf.
+    await waitFor(() => expect(within(dialog).getByText(/The folder or the page changed; try again\./)).toBeTruthy())
+    expect(within(dialog).getByText("pages_version is stale")).toBeTruthy()
+    expect(calls.filter((c) => c.method === "GET" && c.url.startsWith("/api/v1/pages?")).length).toBeGreaterThan(listReadsBefore)
+    expect(writes()).toHaveLength(1)
+  })
+
   it("says the server's refusal where the action was", async () => {
     mount({
       answer: (c) => (c.method === "DELETE" ? json(403, { error: "Only the page's owner or a workspace admin can remove it from a folder." }) : null),

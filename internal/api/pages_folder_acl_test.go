@@ -236,6 +236,10 @@ func TestPageFolderACL_AddNeedsOwnershipAndStandingOnTheTarget(t *testing.T) {
 	f := newFoldersFixture(t)
 	f.createFolder(t, "engine-ops", "Engine ops", "crew/engine")
 	f.share(t, "engine-ops", "user", "frank", true)
+	// alice can SEE the folder and no more: A3's sentence is about the
+	// missing `w`, not about a folder she cannot see (that one is a 404,
+	// TestPageFolderACL_AHiddenFolderIsNotConfirmedByAMove).
+	f.share(t, "engine-ops", "user", "alice", false)
 	pagesGrant(t, f.h, f.wsID, f.owner, "fleet-201", `{"subject_type":"user","subject":"frank","level":"read"}`)
 	cases := []struct {
 		name   string
@@ -256,6 +260,7 @@ func TestPageFolderACL_AddNeedsOwnershipAndStandingOnTheTarget(t *testing.T) {
 	}
 	t.Run("the owner with `w` on the target moves it, and the sentence names the `w` holder as an acceptor", func(t *testing.T) {
 		f.createFolder(t, "engine-two", "Engine two", "crew/engine")
+		f.share(t, "engine-two", "user", "alice", false)
 		rr := f.call(t, "POST", "/api/v1/page-folders/engine-two/pages", "alice", "MEMBER", f.moveBody(t, "engine-two", "fleet-201"))
 		expectStatus(t, rr, http.StatusForbidden, "its permissions let edit it")
 		f.share(t, "engine-two", "user", "alice", true)
@@ -519,6 +524,47 @@ func TestPageFolderACL_BatchMoveIsAllOrNothingAndNamesThePage(t *testing.T) {
 		if moved != 2 {
 			t.Errorf("journalled %d moves, want 2", moved)
 		}
+	})
+}
+
+// TestPageFolderACL_AHiddenFolderIsNotConfirmedByAMove — the membership
+// endpoints keep §3/11: a folder the caller reaches nothing in and has no
+// standing on answers as if it did not exist. The accept refusal names the
+// folder and its owning crew — the crew slug is one of the withheld strings
+// (pages_project_withheld_change_test.go) — so on a hidden folder it would
+// let any member confirm a slug by guessing it, with no page of their own
+// needed for the batch. Once the folder is visible, A3's sentence is back.
+func TestPageFolderACL_AHiddenFolderIsNotConfirmedByAMove(t *testing.T) {
+	f := newFoldersFixture(t)
+	f.createFolder(t, "engine-ops", "Engine ops", "crew/engine")
+	batch := func() string {
+		return fmt.Sprintf(`{"pages":[{"page":"fleet-201","pages_version":%d}],"acl_version":%d}`,
+			f.pagesVersion(t, "fleet-201"), f.aclVersion(t, "engine-ops"))
+	}
+	notConfirmed := func(t *testing.T, rr *httptest.ResponseRecorder) {
+		t.Helper()
+		expectStatus(t, rr, http.StatusNotFound, `engine-ops`, "not found")
+		for _, s := range []string{"crew/engine", "accepts a page"} {
+			if strings.Contains(rr.Body.String(), s) {
+				t.Errorf("a hidden folder's 404 says %q: %s", s, rr.Body.String())
+			}
+		}
+	}
+	t.Run("a member who reaches nothing in it probes the batch route", func(t *testing.T) {
+		notConfirmed(t, f.call(t, "POST", "/api/v1/page-folders/engine-ops/pages:batch", "frank", "MEMBER", batch()))
+	})
+	t.Run("a page owner who reaches nothing in it probes the single route", func(t *testing.T) {
+		notConfirmed(t, f.call(t, "POST", "/api/v1/page-folders/engine-ops/pages", "alice", "MEMBER", f.moveBody(t, "engine-ops", "fleet-201")))
+	})
+	t.Run("a page owner who reaches nothing in it probes the batch route", func(t *testing.T) {
+		notConfirmed(t, f.call(t, "POST", "/api/v1/page-folders/engine-ops/pages:batch", "alice", "MEMBER", batch()))
+	})
+	t.Run("once the folder is visible, the owner is told who accepts (A3)", func(t *testing.T) {
+		f.share(t, "engine-ops", "user", "alice", false)
+		rr := f.call(t, "POST", "/api/v1/page-folders/engine-ops/pages", "alice", "MEMBER", f.moveBody(t, "engine-ops", "fleet-201"))
+		expectStatus(t, rr, http.StatusForbidden, "crew/engine", "you may move the page, but not into this folder")
+		rr = f.call(t, "POST", "/api/v1/page-folders/engine-ops/pages:batch", "alice", "MEMBER", batch())
+		expectStatus(t, rr, http.StatusForbidden, "crew/engine", "you may move the page, but not into this folder")
 	})
 }
 

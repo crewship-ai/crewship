@@ -601,7 +601,12 @@ func (h *PageHandler) BatchMoveFolderPages(w http.ResponseWriter, r *http.Reques
 	if !ok {
 		return
 	}
-	f, ok := h.folderOnPath(w, r, wsID)
+	// The read rule first (§3/11): the accept refusal below names the
+	// folder and its owning crew, and this route needs no page of the
+	// caller's own to reach it, so on a hidden folder it would confirm a
+	// guessed slug to any member. The ACL comes back with the folder and
+	// is the one every later check reads.
+	f, acl, ok := h.folderOrNotFound(w, r, wsID, viewer)
 	if !ok {
 		return
 	}
@@ -620,11 +625,6 @@ func (h *PageHandler) BatchMoveFolderPages(w http.ResponseWriter, r *http.Reques
 	}
 	if req.ACLVersion == nil {
 		replyError(w, http.StatusBadRequest, "acl_version is required: a move is confirmed against the folder's permissions as you last read them")
-		return
-	}
-	acl, err := h.loadFolderACL(r.Context(), f.ID)
-	if err != nil {
-		replyInternalError(w, h.logger, "load folder permissions", err)
 		return
 	}
 	if !mayArrangeFolder(viewer, f, acl) {

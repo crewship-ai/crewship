@@ -2,7 +2,8 @@
 
 import { Folder } from "lucide-react"
 
-import { CREW_ICONS, getCrewDotColor, getCrewIconDef } from "@/lib/entities"
+import { CREW_ICONS, getCrewIconDef } from "@/lib/entities"
+import { GRADIENT_PALETTES } from "@/lib/crew-icons"
 import { cn } from "@/lib/utils"
 
 /**
@@ -39,11 +40,16 @@ export function FolderGlyph({
   className?: string
 }) {
   const Icon = folderIconOf(icon)
+  // A class from the palette, never an inline style: `components/` is
+  // Tailwind-only, and a folder's colour is one of the crew palette's ids by
+  // construction (the server refuses anything else, pages_folders.go), so
+  // every colour has a compiled class. An id the palette does not know draws
+  // in the surrounding text colour rather than in a colour nothing checked.
   return (
     <Icon
       data-slot="folder-glyph"
-      className={cn("h-3.5 w-3.5 shrink-0", className)}
-      style={color ? { color: getCrewDotColor(color) } : undefined}
+      data-color={color || undefined}
+      className={cn("h-3.5 w-3.5 shrink-0", color && folderColorClasses(color)?.glyph, className)}
       aria-hidden
     />
   )
@@ -54,9 +60,15 @@ export function FolderDot({ color, className }: { color: string | null | undefin
   return (
     <span
       data-slot="folder-dot"
+      data-color={color}
       aria-hidden
-      className={cn("inline-block h-1.5 w-1.5 shrink-0 rounded-full", className)}
-      style={{ backgroundColor: getCrewDotColor(color) }}
+      className={cn("inline-block h-1.5 w-1.5 shrink-0 rounded-full", folderColorClasses(color)?.swatch ?? "bg-muted-foreground/40", className)}
     />
   )
+}
+
+/** The palette entry behind a folder colour id, or null for an id the palette does not carry. */
+function folderColorClasses(color: string): { glyph: string; swatch: string } | null {
+  const palette = GRADIENT_PALETTES.find((p) => p.id === color)
+  return palette ? { glyph: palette.glyph, swatch: palette.swatch } : null
 }

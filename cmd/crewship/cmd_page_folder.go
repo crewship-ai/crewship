@@ -699,9 +699,15 @@ func pageFolderPrintACL(raw []byte, did string) error {
 	if err := json.Unmarshal(raw, &doc); err != nil {
 		return fmt.Errorf("decode response: %w", err)
 	}
+	// The id, not the label: `unshare` addresses the entry by what the
+	// operator types, and the server keys it on subject_id. A label like
+	// "Support" for id "c-support" would print a subject that unshare cannot
+	// find, and the departed-user recovery in docs/cli/page.mdx ("removed by
+	// the id or email the entry was set under, which page folder acl prints")
+	// depends on this column being the id. The label is its own column.
 	if f.Format == "quiet" {
 		for _, e := range doc.ACL {
-			fmt.Println(pageFolderSubjectLabel(e.SubjectType, e.Label))
+			fmt.Println(pageFolderSubjectLabel(e.SubjectType, e.SubjectID))
 		}
 		return nil
 	}
@@ -718,9 +724,13 @@ func pageFolderPrintACL(raw []byte, did string) error {
 		if e.CanWrite {
 			right = "can view and edit"
 		}
-		rows = append(rows, []string{pageFolderSubjectLabel(e.SubjectType, e.Label), right, pageDash(e.SetBy), e.SetAt})
+		label := e.Label
+		if e.SubjectType == "workspace" || label == e.SubjectID {
+			label = ""
+		}
+		rows = append(rows, []string{pageFolderSubjectLabel(e.SubjectType, e.SubjectID), pageDash(label), right, pageDash(e.SetBy), e.SetAt})
 	}
-	f.Table([]string{"SUBJECT", "ACCESS", "SET BY", "SET AT"}, rows)
+	f.Table([]string{"SUBJECT", "LABEL", "ACCESS", "SET BY", "SET AT"}, rows)
 	fmt.Printf("acl_version %d — the fence a move is confirmed against.\n", doc.ACLVersion)
 	return nil
 }

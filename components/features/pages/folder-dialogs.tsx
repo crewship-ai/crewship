@@ -61,6 +61,7 @@ import { cn } from "@/lib/utils"
 import type { PageFolderRef } from "@/hooks/use-pages"
 import {
   FOLDER_CONFLICT_SENTENCE,
+  FolderFenceError,
   folderConflictOf,
   refusedPageOf,
   useFolderAcl,
@@ -442,6 +443,12 @@ export function MoveToFolderDialog({ workspaceId, open, onOpenChange, subject, s
           try {
             await removePage.mutateAsync({ folder: s.folder.slug, page: s.slug, pagesVersion: s.pagesVersion })
           } catch (error) {
+            // A 409 keeps its type, with this page named, so the catch below
+            // re-reads and asks again the way it does for a move; wrapping it
+            // in a plain Error dropped the fence and the dialog showed a dead
+            // end where the header promises a fresh confirm.
+            const conflict = folderConflictOf(error)
+            if (conflict) throw new FolderFenceError({ ...conflict, page: conflict.page ?? s.slug })
             throw new Error(`${s.name}: ${messageOf(error, "could not be removed from its folder.")}`)
           }
         }

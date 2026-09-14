@@ -198,7 +198,11 @@ func TestAcceptance_PageFoldersLifecycle(t *testing.T) {
 	if acl.ACLVersion != 2 || len(acl.ACL) != 0 {
 		t.Fatalf("acl after unshare: %+v", acl)
 	}
-	must("page", "grant", "health", "--workspace", "--level", "read")
+	// The confirmation names the workspace in words: the subject has no
+	// reference, and "to workspace/." is a sentence with a hole in it.
+	if out := must("page", "grant", "health", "--workspace", "--level", "read"); strings.Contains(out, "workspace/") {
+		t.Fatalf("workspace grant confirmation: %s", out)
+	}
 	if out, err := run("page", "grant", "health", "--workspace", "--level", "produce"); err == nil || !strings.Contains(out, "produce") {
 		t.Fatalf("a produce grant to the workspace was accepted: %v %s", err, out)
 	}

@@ -189,10 +189,14 @@ func pagesSchemaCatalog() map[string]DomainSchema {
 			"description": "The paths by which the CALLER reaches this page, in a fixed order: `owner` (the caller is owner_user_id), `role` (the caller's workspace role carries manage), `crew:<slug>` (the caller belongs to the owning crew), `panel_crew:<slug>` (one per distinct crew of the caller's that owns a panel, in panel order), `folder:<slug>` (the folder the page is in is shared with the caller), `grant` (a live grant names the caller or one of their crews). Never empty and never omitted on the index: a page is listed because the caller reaches it. The one exception is the row a removal returns to a `w` holder who just took away their own path, which carries an empty reach. It describes the caller and nobody else — the page's ACL is the grants endpoint's, behind its own gate."},
 	})
 
-	folderShow := mergeProps(folder, map[string]any{
+	// `folder` is already wrapped (obj + required), so the page rows go into
+	// its PROPERTIES, not beside them: merged at the top level, "pages" was an
+	// ignored keyword next to "properties" and the required list named a
+	// property the document never defined (CodeRabbit on #2542).
+	folderShow := obj(mergeProps(folder["properties"].(map[string]any), map[string]any{
 		"pages": map[string]any{"type": "array", "items": pageRow,
 			"description": "The pages in this folder the caller reaches, as index rows."},
-	})
+	}))
 	folderShow["required"] = append(append([]string{}, folder["required"].([]string)...), "pages")
 	folderList := obj(map[string]any{"folders": arr(folder)})
 	folderList["required"] = []string{"folders"}

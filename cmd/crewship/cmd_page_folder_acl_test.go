@@ -117,10 +117,21 @@ func TestPageFolderCLI_UnshareAndACL(t *testing.T) {
 	if err != nil {
 		t.Fatalf("acl: %v %s", err, out)
 	}
-	for _, want := range []string{"user:ada@example.com", "can view and edit", "everyone in the workspace", "root@example.com", "acl_version 3"} {
+	// The SUBJECT column is the id the entry is keyed on — what `unshare`
+	// addresses — with the label beside it, never in its place: a label that
+	// differs from the id would round-trip into an unshare of a subject that
+	// does not exist.
+	for _, want := range []string{"user:u1", "ada@example.com", "can view and edit", "everyone in the workspace", "root@example.com", "acl_version 3"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("acl output lacks %q: %s", want, out)
 		}
+	}
+	if strings.Contains(out, "user:ada@example.com") {
+		t.Errorf("acl output addresses the entry by its label, which unshare cannot use: %s", out)
+	}
+	out, err = runPageFolderCLI(t, "page", "folder", "acl", "ops-board", "--format", "quiet")
+	if err != nil || !strings.Contains(out, "user:u1") || strings.Contains(out, "ada@example.com") {
+		t.Errorf("quiet acl should list ids only: %v %s", err, out)
 	}
 }
 

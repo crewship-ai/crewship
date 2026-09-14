@@ -662,10 +662,15 @@ deploy_staleness() {
       echo "the running binary was replaced on disk after it started (${target% (deleted)})"
       return 0
     fi
-    binary_epoch=$(stat -L -c %Y "$binary" 2>/dev/null || echo 0)
+    # GNU stat first, BSD stat second: on macOS `stat -c` is an error, and
+    # falling to 0 there reported every binary as stale. `date -d @…` is
+    # GNU too; BSD spells it `date -r`.
+    binary_epoch=$(stat -L -c %Y "$binary" 2>/dev/null || stat -L -f %m "$binary" 2>/dev/null || echo 0)
     commit_epoch=$(git -C "$project" log -1 --format=%ct 2>/dev/null || echo 0)
     if (( commit_epoch > binary_epoch )); then
-      echo "the running binary was built before HEAD was committed ($(date -d "@$commit_epoch" '+%Y-%m-%d %H:%M' 2>/dev/null || echo "$commit_epoch"))"
+      local when
+      when=$(date -d "@$commit_epoch" '+%Y-%m-%d %H:%M' 2>/dev/null || date -r "$commit_epoch" '+%Y-%m-%d %H:%M' 2>/dev/null || echo "$commit_epoch")
+      echo "the running binary was built before HEAD was committed ($when)"
       return 0
     fi
   fi

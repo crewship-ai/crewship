@@ -80841,125 +80841,6 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "pages": {
-                    "description": "The pages in this folder the caller reaches, as index rows.",
-                    "items": {
-                      "properties": {
-                        "created_at": {
-                          "format": "date-time",
-                          "type": "string"
-                        },
-                        "description": {
-                          "type": "string"
-                        },
-                        "folder": {
-                          "description": "The folder this page is filed in, or null when unfiled. Always sent, never omitted.",
-                          "oneOf": [
-                            {
-                              "properties": {
-                                "color": {
-                                  "description": "A crew palette key (blue, emerald, violet, amber, rose, cyan, lime, fuchsia), or empty.",
-                                  "type": "string"
-                                },
-                                "icon": {
-                                  "description": "A crew icon name, or empty for the client's default folder glyph.",
-                                  "type": "string"
-                                },
-                                "name": {
-                                  "type": "string"
-                                },
-                                "slug": {
-                                  "type": "string"
-                                }
-                              },
-                              "type": "object"
-                            },
-                            {
-                              "type": "null"
-                            }
-                          ]
-                        },
-                        "has_application": {
-                          "type": "boolean"
-                        },
-                        "has_project": {
-                          "description": "This Page has application source (a project draft) at all, published or not. Distinct from has_application, which is true only while a publication is running: a Page awaiting its FIRST publication has has_project true and has_application false, and that is the case the publication review exists for.",
-                          "type": "boolean"
-                        },
-                        "id": {
-                          "type": "string"
-                        },
-                        "last_produced_at": {
-                          "description": "Newest produced_at across the page's visible panels. NOT updated_at, which §10 defines as the SPEC's modification time — a page edited an hour ago whose data last arrived a week ago must not read as \"updated today\".",
-                          "format": "date-time",
-                          "type": "string"
-                        },
-                        "name": {
-                          "type": "string"
-                        },
-                        "owner": {
-                          "type": "string"
-                        },
-                        "owner_crew_slug": {
-                          "type": "string"
-                        },
-                        "pages_version": {
-                          "description": "Changes with every change to the page's folder membership. A move or removal carries it as its fence and is refused with 409 when it is stale.",
-                          "type": "integer"
-                        },
-                        "panel_count": {
-                          "description": "Every panel on the page, sealed ones included — the grid draws a placeholder for those, so a count that skipped them would disagree with what the page renders.",
-                          "type": "integer"
-                        },
-                        "panel_states": {
-                          "properties": {
-                            "failed": {
-                              "type": "integer"
-                            },
-                            "fresh": {
-                              "type": "integer"
-                            },
-                            "never_produced": {
-                              "type": "integer"
-                            },
-                            "stale": {
-                              "type": "integer"
-                            }
-                          },
-                          "type": "object"
-                        },
-                        "publication_version": {
-                          "type": "integer"
-                        },
-                        "reach": {
-                          "description": "The paths by which the CALLER reaches this page, in a fixed order: `owner` (the caller is owner_user_id), `role` (the caller's workspace role carries manage), `crew:\u003cslug\u003e` (the caller belongs to the owning crew), `panel_crew:\u003cslug\u003e` (one per distinct crew of the caller's that owns a panel, in panel order), `folder:\u003cslug\u003e` (the folder the page is in is shared with the caller), `grant` (a live grant names the caller or one of their crews). Never empty and never omitted on the index: a page is listed because the caller reaches it. The one exception is the row a removal returns to a `w` holder who just took away their own path, which carries an empty reach. It describes the caller and nobody else — the page's ACL is the grants endpoint's, behind its own gate.",
-                          "items": {
-                            "type": "string"
-                          },
-                          "type": "array"
-                        },
-                        "slug": {
-                          "type": "string"
-                        },
-                        "state": {
-                          "description": "The page's worst panel.",
-                          "enum": [
-                            "fresh",
-                            "stale",
-                            "failed",
-                            "never_produced"
-                          ],
-                          "type": "string"
-                        },
-                        "updated_at": {
-                          "format": "date-time",
-                          "type": "string"
-                        }
-                      },
-                      "type": "object"
-                    },
-                    "type": "array"
-                  },
                   "properties": {
                     "acl_version": {
                       "description": "Changes with every change to the folder's permissions. A move carries it as its second fence and is refused with 409 when it is stale.",
@@ -80993,6 +80874,125 @@
                     "page_count": {
                       "description": "The number of pages in the folder the CALLER reaches — the rows Show would return — never the folder's true size.",
                       "type": "integer"
+                    },
+                    "pages": {
+                      "description": "The pages in this folder the caller reaches, as index rows.",
+                      "items": {
+                        "properties": {
+                          "created_at": {
+                            "format": "date-time",
+                            "type": "string"
+                          },
+                          "description": {
+                            "type": "string"
+                          },
+                          "folder": {
+                            "description": "The folder this page is filed in, or null when unfiled. Always sent, never omitted.",
+                            "oneOf": [
+                              {
+                                "properties": {
+                                  "color": {
+                                    "description": "A crew palette key (blue, emerald, violet, amber, rose, cyan, lime, fuchsia), or empty.",
+                                    "type": "string"
+                                  },
+                                  "icon": {
+                                    "description": "A crew icon name, or empty for the client's default folder glyph.",
+                                    "type": "string"
+                                  },
+                                  "name": {
+                                    "type": "string"
+                                  },
+                                  "slug": {
+                                    "type": "string"
+                                  }
+                                },
+                                "type": "object"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "has_application": {
+                            "type": "boolean"
+                          },
+                          "has_project": {
+                            "description": "This Page has application source (a project draft) at all, published or not. Distinct from has_application, which is true only while a publication is running: a Page awaiting its FIRST publication has has_project true and has_application false, and that is the case the publication review exists for.",
+                            "type": "boolean"
+                          },
+                          "id": {
+                            "type": "string"
+                          },
+                          "last_produced_at": {
+                            "description": "Newest produced_at across the page's visible panels. NOT updated_at, which §10 defines as the SPEC's modification time — a page edited an hour ago whose data last arrived a week ago must not read as \"updated today\".",
+                            "format": "date-time",
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "owner": {
+                            "type": "string"
+                          },
+                          "owner_crew_slug": {
+                            "type": "string"
+                          },
+                          "pages_version": {
+                            "description": "Changes with every change to the page's folder membership. A move or removal carries it as its fence and is refused with 409 when it is stale.",
+                            "type": "integer"
+                          },
+                          "panel_count": {
+                            "description": "Every panel on the page, sealed ones included — the grid draws a placeholder for those, so a count that skipped them would disagree with what the page renders.",
+                            "type": "integer"
+                          },
+                          "panel_states": {
+                            "properties": {
+                              "failed": {
+                                "type": "integer"
+                              },
+                              "fresh": {
+                                "type": "integer"
+                              },
+                              "never_produced": {
+                                "type": "integer"
+                              },
+                              "stale": {
+                                "type": "integer"
+                              }
+                            },
+                            "type": "object"
+                          },
+                          "publication_version": {
+                            "type": "integer"
+                          },
+                          "reach": {
+                            "description": "The paths by which the CALLER reaches this page, in a fixed order: `owner` (the caller is owner_user_id), `role` (the caller's workspace role carries manage), `crew:\u003cslug\u003e` (the caller belongs to the owning crew), `panel_crew:\u003cslug\u003e` (one per distinct crew of the caller's that owns a panel, in panel order), `folder:\u003cslug\u003e` (the folder the page is in is shared with the caller), `grant` (a live grant names the caller or one of their crews). Never empty and never omitted on the index: a page is listed because the caller reaches it. The one exception is the row a removal returns to a `w` holder who just took away their own path, which carries an empty reach. It describes the caller and nobody else — the page's ACL is the grants endpoint's, behind its own gate.",
+                            "items": {
+                              "type": "string"
+                            },
+                            "type": "array"
+                          },
+                          "slug": {
+                            "type": "string"
+                          },
+                          "state": {
+                            "description": "The page's worst panel.",
+                            "enum": [
+                              "fresh",
+                              "stale",
+                              "failed",
+                              "never_produced"
+                            ],
+                            "type": "string"
+                          },
+                          "updated_at": {
+                            "format": "date-time",
+                            "type": "string"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "type": "array"
                     },
                     "shared": {
                       "description": "The no-names sharing label every reader gets: `none` (the owning crew and admins only), `people` (shared with named people), `crews` (shared with named crews), `people_and_crews` (both), `workspace` (shared with everyone in the workspace). The entries themselves are behind GET …/acl and its gate.",

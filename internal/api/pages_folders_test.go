@@ -332,9 +332,15 @@ func TestPageFolders_MoveNeedsBothAuthoritiesInOneCaller(t *testing.T) {
 	f.createFolder(t, "engine-ops", "Engine ops", "crew/engine")
 	f.createFolder(t, "engine-two", "Engine two", "crew/engine")
 
-	t.Run("the page owner without standing on the folder is refused, and told who can (A4)", func(t *testing.T) {
+	t.Run("the page owner who cannot see the folder is told it does not exist", func(t *testing.T) {
+		rr := f.call(t, "POST", "/api/v1/page-folders/engine-ops/pages", "alice", "MEMBER", f.moveBody(t, "engine-ops", "fleet-201"))
+		expectStatus(t, rr, http.StatusNotFound, "engine-ops", "not found")
+	})
+	t.Run("the page owner who sees the folder but has no standing on it is refused, and told who can (A4)", func(t *testing.T) {
+		f.share(t, "engine-ops", "user", "alice", false)
 		rr := f.call(t, "POST", "/api/v1/page-folders/engine-ops/pages", "alice", "MEMBER", f.moveBody(t, "engine-ops", "fleet-201"))
 		expectStatus(t, rr, http.StatusForbidden, "MANAGER", "crew/engine", "you may move the page")
+		f.unshare(t, "engine-ops", "user", "alice")
 	})
 	t.Run("the folder's MANAGER who is not the page's owner cannot even see the page", func(t *testing.T) {
 		rr := f.call(t, "POST", "/api/v1/page-folders/engine-ops/pages", "mia", "MANAGER", f.moveBody(t, "engine-ops", "fleet-201"))

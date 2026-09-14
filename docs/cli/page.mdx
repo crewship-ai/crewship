@@ -51,8 +51,6 @@ exception in the other direction: it prints YAML unless you ask for
 | `revoke <slug> --agent <agent-slug>` | Remove a grant |
 | `access <slug> --me` | How you reach a page: your own paths |
 | `grants <slug>` | List a page's grants |
-| `access <slug>` | Who reaches a page, and by which paths |
-| `access --subject <kind>:<ref>` | Which pages a user, crew or agent reaches, and how |
 | `folder list` | List the folders you can see, with how many of their pages you reach |
 | `folder create <slug> --owner crew/<slug>` | Create a folder owned by a crew |
 | `folder show <slug>` | Show a folder and the pages in it you reach |
@@ -60,7 +58,6 @@ exception in the other direction: it prints YAML unless you ask for
 | `folder delete <slug> --yes` | Delete an empty folder |
 | `folder add <folder> <page>` | File a page in a folder |
 | `folder remove <folder> <page>` | Take a page out of a folder |
-| `move <page> --folder <slug>\|--unfiled` | Move a page into a folder, or out of the one it is in |
 | `folder acl <slug>` | Who a folder is shared with (owning crew's managers and admins only) |
 | `folder share <slug> <subject> --view\|--edit` | Share a folder with a user, a crew or everyone in the workspace |
 | `folder unshare <slug> <subject>` | Stop sharing a folder with a subject |
@@ -713,7 +710,6 @@ Lists every grant on the page: subject type, subject, level, and (for
 
 ---
 
-## `crewship page access`
 ## `crewship page access <slug> --me`
 
 ```bash
@@ -722,7 +718,7 @@ crewship page access fleet-201 --me
 
 | Flag | Description |
 |---|---|
-| `--me` | Ask about yourself. Required: this command answers about you, and who else reaches a page is `page folder acl` and `page grants`. |
+| `--me` | Ask about yourself: your own paths, which anyone who can open the page may read. Without it the command answers who reaches the page, or with `--subject` what a subject reaches — see [`page access`](#crewship-page-access). |
 
 Prints the paths by which you reach the page, in the API's own words —
 `owner`, `role`, `crew:<slug>`, `panel_crew:<slug>`, `folder:<slug>`, `grant`
@@ -735,14 +731,6 @@ Backed by the page's own-access endpoint (`GET …/access/me`).
 
 ---
 
-Reading a page's access takes the same right as reading its grants: the
-page's owner, or a workspace ADMIN/OWNER. Asking about a subject is an
-administrator's, except that anyone may ask about themselves
-(`--subject user:<your email>`). Every other caller is refused with the
-server's sentence and a non-zero exit.
-
-`--format json` prints the server's document unchanged — the page (or the
-subject), the rows with their `paths`, and `next_cursor` when more follow.
 ## `crewship page folder`
 
 A folder is a named group of pages owned by one crew, with an icon from the
@@ -814,7 +802,8 @@ crewship page folder update ops-board --icon ""
 | `--color <key>` | A crew palette key. Pass `""` to clear it. |
 
 Only the flags you pass are sent. The slug and the owning crew are fixed at
-creation. An admin, or the owning crew's MANAGER (or higher).
+creation. An admin, the owning crew's MANAGER (or higher), or somebody the
+folder's sharing lets edit it.
 
 ### `crewship page folder delete <slug>`
 
@@ -942,6 +931,9 @@ fence you typed says nothing about what you saw.
 
 Moves and removals are journalled as `page.folder_membership_changed`; the
 folder's own changes as `page.folder_changed`.
+
+---
+
 ## `crewship page access`
 
 ```bash

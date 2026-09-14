@@ -216,13 +216,19 @@ export function EffectiveAccessCard({ workspaceId, slug }: { workspaceId: string
   const subjects = query.data?.subjects ?? []
   const more = query.data?.more ?? false
 
+  // A failed read is not a result. The band says "unavailable" and no row is
+  // drawn: a 500 that left the previous answer's rows on screen under a
+  // "nobody" or a count would present a read that did not happen as current.
   const answer = refusal
     ? "not yours to read"
-    : loading
-      ? "loading"
-      : subjects.length === 0
-        ? "nobody"
-        : `${subjects.length}${more ? "+" : ""} ${subjects.length === 1 && !more ? "subject" : "subjects"}`
+    : error
+      ? "unavailable"
+      : loading
+        ? "loading"
+        : subjects.length === 0
+          ? "nobody"
+          : `${subjects.length}${more ? "+" : ""} ${subjects.length === 1 && !more ? "subject" : "subjects"}`
+  const settled = !loading && !refusal && !error
 
   // `DetailCard` has no `data-slot` of its own, and the tests (and the
   // section) address this card by that slot — including its title band, so
@@ -247,7 +253,7 @@ export function EffectiveAccessCard({ workspaceId, slug }: { workspaceId: string
           </div>
         )}
 
-        {!loading && !refusal && !error && subjects.length === 0 && (
+        {settled && subjects.length === 0 && (
           <EmptyState
             size="inline"
             icon={Route}
@@ -256,7 +262,7 @@ export function EffectiveAccessCard({ workspaceId, slug }: { workspaceId: string
           />
         )}
 
-        {!refusal && subjects.length > 0 && (
+        {settled && subjects.length > 0 && (
           <ul data-slot="page-effective-access-rows" className="flex flex-col gap-1.5">
             {subjects.map((s) => (
               <li
@@ -284,7 +290,7 @@ export function EffectiveAccessCard({ workspaceId, slug }: { workspaceId: string
           </ul>
         )}
 
-        {more && (
+        {settled && more && (
           <p className="type-meta text-muted-foreground">
             More subjects reach this Page than are shown here. The complete list is{" "}
             <code className="font-mono">crewship page access {slug}</code>.

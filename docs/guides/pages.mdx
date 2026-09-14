@@ -829,8 +829,8 @@ and the choice is remembered with the folds.
 Every row has a **⋯** menu — on hover, on focus, and on Shift+F10 or the
 ContextMenu key — with **Move to folder…** and, for a filed page, **Remove
 from folder**. The move dialog lists every folder and Unfiled; the same
-dialog opens from **Change…** on the Folder line of the editor's Content
-section. A move carries the page's membership version and the target
+dialog opens from **Change…** on the Folder line of the editor's **Properties**
+card. A move carries the page's membership version and the target
 folder's permission version, and the server refuses a stale one: if somebody
 else moved the page or changed the folder's sharing meanwhile, the dialog
 re-reads both — and the target's sharing — says *The folder or the page
@@ -1068,8 +1068,8 @@ crewship page grants fleet-201
 
 See the [Page commands](/cli/page) reference for the full flag surface.
 
-The same ACL is editable in the browser: open a page and press **Settings**
-in the bar beside **Edit**. The Access card lists every grant with the human
+The same ACL is editable in the browser: open a page and press **Edit**; the
+editor's **Access** card lists every grant with the human
 who issued it and the server's use-time verdict — a grant whose issuer has
 since left the workspace, or lost ADMIN, is shown **inert** with the reason
 rather than hidden, because "the grant you added is doing nothing" is exactly
@@ -1084,9 +1084,10 @@ behind them.
 
 ### What a page is, and what changed it
 
-The same Settings surface answers the other half: the page's owner (a user or
-a crew), its slug, description and panel count, when it was created and when
-its spec last changed — and the retained version history, each version
+The same editor answers the other half: its header and **Properties** card
+give the page's owner (a user or a crew), its slug, description and panel
+count, when it was created and when its spec last changed — and the
+**History** card holds the retained version history, each version
 credited to the human or agent that saved it. Any version can be restored
 from there, with the same confirmation `crewship page rollback` deserves: a
 panel a rollback brings back arrives with no data, because old payloads are
@@ -1334,7 +1335,7 @@ agent holding `write` can rebuild the page freely and can never widen who
 reaches it — otherwise "grant my agent access" would be a privilege-escalation
 primitive.
 
-The same three verbs are in the page's settings panel in the app, with each
+The same three verbs are in the editor's **Access** card in the app, with each
 grant showing who issued it and whether it is still live.
 
 ## Seeing one without building one
