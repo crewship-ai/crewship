@@ -72,7 +72,7 @@ export function WorkLayout({ workspaceId }: WorkLayoutProps) {
   ) : null
 
   return (
-    <div className="flex h-[calc(100dvh-48px)] min-h-0 flex-col">
+    <div className="flex h-[calc(100dvh-var(--app-header-h)-var(--mobile-tab-bar-h))] min-h-0 flex-col">
       <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-hairline px-2">
         <TabBar value={tab} onValueChange={(v) => setTab(v as WorkTab)} ariaLabel="Work ledger" layoutId="work-tabs">
           <TabBar.Item value="work" count={work.items.length}>Work</TabBar.Item>

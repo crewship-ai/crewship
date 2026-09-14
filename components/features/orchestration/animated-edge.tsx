@@ -145,6 +145,19 @@ function AnimatedEdgeInner({
             95% { opacity: 1; }
             100% { offset-distance: 100%; opacity: 0; }
           }
+          /* These are injected into a <style> tag, so the global reduced-motion
+             block in app/globals.css never reaches them. They are also the only
+             infinite animations in the app — one set per rendered edge — so on
+             a phone they are both an accessibility miss and a battery cost that
+             runs for as long as the tab is open. The edges stay drawn; they
+             just stop travelling. */
+          @media (prefers-reduced-motion: reduce) {
+            .edge-dash-active, .edge-dash-idle,
+            .edge-dot-outer, .edge-dot-inner {
+              animation: none;
+            }
+            .edge-dot-outer, .edge-dot-inner { opacity: 0; }
+          }
         `}</style>
       </defs>
     </>

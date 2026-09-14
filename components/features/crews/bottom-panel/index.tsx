@@ -111,6 +111,30 @@ export function BottomPanel({
   const dragRef = useRef<{ startY: number; startH: number } | null>(null)
   const [dragging, setDragging] = useState(false)
 
+  /**
+   * The stored height is a synced user preference, so one chosen on a desktop
+   * — up to PANEL_HEIGHT_MAX — arrives on a phone taller than the viewport,
+   * and since the canvas beside it is the only `min-h-0` sibling the canvas
+   * collapses to nothing rather than the panel yielding.
+   *
+   * Clamped here rather than in the style, so the drag, the rendered height
+   * and the value the resize slider announces are all the same number. A
+   * clamp applied only when rendering left the gesture with a dead zone in
+   * both directions once it passed the ceiling.
+   */
+  const [viewportH, setViewportH] = useState<number | null>(null)
+  useEffect(() => {
+    const read = () => setViewportH(window.innerHeight)
+    read()
+    window.addEventListener("resize", read)
+    return () => window.removeEventListener("resize", read)
+  }, [])
+  const ceiling = Math.max(
+    PANEL_HEIGHT_MIN,
+    viewportH ? Math.round(viewportH * 0.6) : PANEL_HEIGHT_MAX,
+  )
+  const clampedHeight = Math.min(height, ceiling)
+
   useEffect(() => {
     setTab(firstTab)
     setOpen(initialOpen)
@@ -127,7 +151,7 @@ export function BottomPanel({
       if (!dragRef.current) return
       const delta = dragRef.current.startY - clientY
       const next = Math.min(
-        PANEL_HEIGHT_MAX,
+        ceiling,
         Math.max(PANEL_HEIGHT_MIN, dragRef.current.startH + delta),
       )
       setHeight(next)
@@ -152,11 +176,13 @@ export function BottomPanel({
       document.removeEventListener("touchmove", onTouchMove)
       document.removeEventListener("touchend", onUp)
     }
-  }, [dragging, setHeight])
+  }, [dragging, setHeight, ceiling])
 
   const startDrag = (clientY: number) => {
     if (!open) return
-    dragRef.current = { startY: clientY, startH: height }
+    // Start from what is on screen, not from the stored preference: they
+    // differ whenever a desktop-sized height meets a phone ceiling.
+    dragRef.current = { startY: clientY, startH: clampedHeight }
     setDragging(true)
     document.body.style.userSelect = "none"
     document.body.style.cursor = "ns-resize"
@@ -175,7 +201,7 @@ export function BottomPanel({
         // tracks the cursor 1:1 instead of lerping behind it.
         !dragging && "transition-[height] duration-200",
       )}
-      style={{ height: open ? `${height}px` : "36px" }}
+      style={{ height: open ? `${clampedHeight}px` : "36px" }}
     >
       {/* Resize handle — sits at the very top edge, hovers a thin grab
           target. Pointer-events only when the panel is open (it'd be
@@ -185,9 +211,9 @@ export function BottomPanel({
           role="separator"
           aria-orientation="horizontal"
           aria-label="Resize bottom panel"
-          aria-valuenow={height}
+          aria-valuenow={clampedHeight}
           aria-valuemin={PANEL_HEIGHT_MIN}
-          aria-valuemax={PANEL_HEIGHT_MAX}
+          aria-valuemax={ceiling}
           tabIndex={0}
           onMouseDown={(e) => {
             e.preventDefault()
@@ -202,10 +228,13 @@ export function BottomPanel({
             const step = e.key === "PageUp" || e.key === "PageDown" ? 64 : 16
             if (e.key === "ArrowUp" || e.key === "PageUp") {
               e.preventDefault()
-              setHeight(Math.min(PANEL_HEIGHT_MAX, height + step))
+              // From the rendered height, to the same ceiling as the drag:
+              // stepping from a stored desktop height on a phone changed the
+              // preference and nothing on screen.
+              setHeight(Math.min(ceiling, clampedHeight + step))
             } else if (e.key === "ArrowDown" || e.key === "PageDown") {
               e.preventDefault()
-              setHeight(Math.max(PANEL_HEIGHT_MIN, height - step))
+              setHeight(Math.max(PANEL_HEIGHT_MIN, clampedHeight - step))
             }
           }}
           className={cn(
@@ -226,7 +255,7 @@ export function BottomPanel({
           The strip is now a plain flex row with the tablist and the control as
           siblings; nothing moves visually. */}
       <div className="h-9 shrink-0 flex items-center gap-1 px-2 text-xs">
-        <div role="tablist" aria-label="Bottom panel" className="flex items-center gap-1 overflow-x-auto">
+        <div role="tablist" aria-label="Bottom panel" className="flex min-w-0 items-center gap-1 overflow-x-auto">
           {tabIds.map((id) => {
           const meta = TAB_META[id]
           const Icon = meta.icon

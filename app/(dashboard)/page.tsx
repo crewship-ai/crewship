@@ -269,7 +269,7 @@ export default function DashboardPage() {
   if (loading) return <DashboardSkeleton crews={crews.length} agents={agents.length} />
 
   return (
-    <div className="flex min-h-[calc(100dvh-48px)] flex-col bg-background">
+    <div className="flex min-h-[calc(100dvh-var(--app-header-h)-var(--mobile-tab-bar-h))] flex-col bg-background">
       <SubBar
         icon={LayoutDashboard}
         title="Dashboard"
@@ -370,7 +370,7 @@ export default function DashboardPage() {
 
 function DashboardSkeleton({ crews, agents }: { crews: number; agents: number }) {
   return (
-    <div className="flex min-h-[calc(100dvh-48px)] flex-col">
+    <div className="flex min-h-[calc(100dvh-var(--app-header-h)-var(--mobile-tab-bar-h))] flex-col">
       <SubBar icon={LayoutDashboard} title="Dashboard" description={crews || agents ? `${crews} crews · ${agents} agents` : "Loading…"} ariaLabel="Dashboard" />
       {/* Same geometry as the loaded page (results beside a stacked right
           column of running / up next / crews, then the KPI strip), so

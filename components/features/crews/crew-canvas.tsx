@@ -378,7 +378,7 @@ export function CrewCanvas({
       {tab === "memory" && <MemoryWorkspace key={crew.id} workspaceId={workspaceId} crewId={crew.id} />}
       </CanvasTabPanel>
       <CreateCrewDialog workspaceId={workspaceId} crew={crew} open={editOpen} onOpenChange={setEditOpen} onCreated={() => { onCrewChanged(); void fetchCrew() }} />
-      <Dialog open={adminOpen} onOpenChange={setAdminOpen}><DialogContent className="sm:max-w-4xl max-h-[85vh] overflow-y-auto"><DialogHeader><DialogTitle>Crew administration</DialogTitle><DialogDescription>Access policies, integrations and container operations. Each control applies its own change.</DialogDescription></DialogHeader>
+      <Dialog open={adminOpen} onOpenChange={setAdminOpen}><DialogContent className="sm:max-w-4xl max-h-[85dvh] overflow-y-auto"><DialogHeader><DialogTitle>Crew administration</DialogTitle><DialogDescription>Access policies, integrations and container operations. Each control applies its own change.</DialogDescription></DialogHeader>
         <CrewRestartButton workspaceId={workspaceId} crewId={crew.id} name={crew.name} onRestart={onCrewChanged} />
         <SettingsTab workspaceId={workspaceId} crew={crew} agentsForCrew={agentsForCrew} integrations={integrations} patch={patch} applyAvatarStyle={applyAvatarStyle} onDelete={() => setConfirmDelete(true)} />
       </DialogContent></Dialog>

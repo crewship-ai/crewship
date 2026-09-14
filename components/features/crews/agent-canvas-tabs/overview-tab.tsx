@@ -480,7 +480,7 @@ function ManagerDialog({
 }) {
   return (
     <Dialog open={open} onOpenChange={(next) => { if (!next) onClose() }}>
-      <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-[720px]">
+      <DialogContent className="max-h-[85dvh] overflow-y-auto sm:max-w-[720px]">
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription>{description}</DialogDescription>

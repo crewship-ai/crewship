@@ -222,7 +222,7 @@ export function RoutineVersionsTab({ workspaceId, slug, onPrepareDraft }: Props)
                 </div>
               )}
               <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_280px]">
-                <div className="h-[56vh] min-h-[380px]">
+                <div className="h-[56dvh] min-h-[380px]">
                   <RoutineDefinitionCanvas
                     definition={detail.definition}
                     slug={slug}

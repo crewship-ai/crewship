@@ -230,7 +230,7 @@ export function AccessEditor({
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="block max-h-[88vh] max-w-lg overflow-y-auto rounded-xl border-white/10 bg-card shadow-2xl sm:max-w-lg">
+      <DialogContent className="block max-h-[88dvh] max-w-lg overflow-y-auto rounded-xl border-white/10 bg-card shadow-2xl sm:max-w-lg">
         <DialogHeader>
           <DialogTitle className="text-base">Edit access — {agentName}</DialogTitle>
           <DialogDescription className="text-xs leading-relaxed">

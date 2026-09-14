@@ -9,6 +9,9 @@ import {
   Wifi,
   WifiOff,
   Users,
+  Search,
+  Download,
+  Slash as SlashIcon,
 } from "lucide-react"
 import { StatusPill } from "@/components/ui/status-pill"
 import { toast } from "sonner"
@@ -900,7 +903,22 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
               Group · {Object.keys(participantNames).length}
             </span>
           )}
-          <span className="ml-auto"><CopyLinkButton /></span>
+          <span className="ml-auto flex items-center gap-1.5">
+            {/* Search, export and the command palette were mounted in the
+                desktop branch only, so on a phone they did not exist — not
+                degraded, absent. The palette's other way in is ⌘/, which a
+                phone has no way to press. */}
+            <MobileChatAction label="Search this conversation" onClick={() => setSearchOpen(true)}>
+              <Search className="h-4 w-4" />
+            </MobileChatAction>
+            <MobileChatAction label="Export conversation" onClick={() => setExportOpen(true)}>
+              <Download className="h-4 w-4" />
+            </MobileChatAction>
+            <MobileChatAction label={`Chat commands (${CHAT_PALETTE_SHORTCUT})`} onClick={() => setSlashPaletteOpen(true)}>
+              <SlashIcon className="h-4 w-4" />
+            </MobileChatAction>
+            <CopyLinkButton />
+          </span>
         </div>
         <div className="flex-1 flex flex-col overflow-hidden min-h-0">
           {conversationEl}
@@ -935,6 +953,27 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
           onCloseAskForm={closeAskForm}
           renderAskTemplate={renderAskTemplate}
         />
+
+        <SlashPalette
+          agentSlug={agentSlug}
+          workspaceId={workspaceId ?? undefined}
+          onCommand={handleSlashCommand}
+          onNewConversation={onNewConversation}
+          onAction={setSlashAction}
+          disabledCommands={slashDisabledCommands}
+          open={slashPaletteOpen}
+          onOpenChange={setSlashPaletteOpen}
+        />
+        {workspaceId && (
+          <SlashActionModal
+            command={slashAction}
+            workspaceId={workspaceId}
+            contextPreFill={slashActionPreFill}
+            onClose={() => setSlashAction(null)}
+          />
+        )}
+        <ConversationSearch turns={turns} open={searchOpen} onOpenChange={setSearchOpen} />
+        <ExportDialog turns={turns} agentName={agentName} open={exportOpen} onOpenChange={setExportOpen} />
       </div>
     )
   }
@@ -1116,6 +1155,34 @@ function CopyLinkButton() {
  * bare key — react-hotkeys-hook matches the PHYSICAL key — and for anyone
  * driving this surface with a pointer.
  */
+/**
+ * A phone-sized icon trigger for the chat header. Square, labelled, and grown
+ * to the touch floor under a coarse pointer — the desktop pill (CommandsButton
+ * below) carries its label as text and does not fit three of them on a 390px
+ * header.
+ */
+function MobileChatAction({
+  label,
+  onClick,
+  children,
+}: {
+  label: string
+  onClick: () => void
+  children: React.ReactNode
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={label}
+      title={label}
+      className="inline-flex h-8 w-8 coarse:h-12 coarse:w-12 items-center justify-center rounded-md text-muted-foreground transition-colors hover:text-foreground"
+    >
+      {children}
+    </button>
+  )
+}
+
 function CommandsButton({ onClick }: { onClick: () => void }) {
   const label = `Chat commands (${CHAT_PALETTE_SHORTCUT})`
   return (

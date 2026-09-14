@@ -160,6 +160,8 @@ export function TriggersTab({
         <EmptyHint text="No trigger types match." />
       ) : (
         <div className="overflow-hidden rounded-xl border border-white/10 bg-card">
+          {/* Clipped by the rounded wrapper on a narrow screen without this. */}
+          <div className="overflow-x-auto">
           <table className="w-full border-collapse">
             <thead>
               <tr>
@@ -197,6 +199,7 @@ export function TriggersTab({
               ))}
             </tbody>
           </table>
+          </div>
         </div>
       )}
 

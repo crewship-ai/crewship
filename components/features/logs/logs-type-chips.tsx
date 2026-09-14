@@ -27,7 +27,7 @@ export function LogsTypeChips({ counts, muted, onToggle, onResetAll }: LogsTypeC
         hidden: {},
         visible: { transition: { staggerChildren: 0.025, delayChildren: 0.05 } },
       }}
-      className="px-3 py-1.5 border-b border-border/50 bg-card/40 flex flex-wrap items-center gap-1.5"
+      className="px-3 py-1.5 border-b border-border/50 bg-card/40 flex items-center gap-1.5 overflow-x-auto sm:flex-wrap sm:overflow-visible [&>*]:shrink-0"
     >
       <span className="text-[10px] uppercase tracking-wider text-muted-foreground mr-1">Types</span>
       {visible.map((g) => {

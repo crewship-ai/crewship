@@ -1,3 +1,5 @@
+import { devices } from "@playwright/test"
+
 import { test, expect } from "./fixtures/auth"
 
 // One browser context is intentional. NextAuth rotates the session cookie on
@@ -198,5 +200,80 @@ test("PR browser contract subset", async ({ page }) => {
     expect(actBodies).toEqual([{ action: "answer", input: "Use the staging bucket, not prod." }])
 
     await page.unrouteAll({ behavior: "ignoreErrors" })
+  })
+
+})
+
+// ── The phone contract ──────────────────────────────────────────────────────
+//
+// Nothing in the PR gate ran at a phone width before #2483, which is how a
+// navigation missing seven of fifteen destinations, an Admin Console with no
+// mobile layout, and a search field that made iOS zoom the page and stay
+// zoomed all shipped green.
+//
+// A real device profile, not `setViewportSize`: the touch work in that change
+// keys on `@media (pointer: coarse)`, and resizing a Desktop Chrome context
+// leaves `hasTouch` false, so a width-only test would assert the 16px rule
+// against a page where the rule never applied.
+//
+// The title carries the config's grep phrase so this runs without widening it.
+// It is read-only — no mutations — so the second context cannot rotate the
+// session cookie the way the header of the test above warns about.
+test.describe("PR browser contract subset — phone", () => {
+  // The profile minus `defaultBrowserType`: that one key forces a new worker,
+  // which Playwright ≥1.5x refuses inside a describe, and the project is
+  // Chromium already. Viewport, touch, scale and user agent all carry over.
+  const { defaultBrowserType: _browser, ...iphone } = devices["iPhone 13"]
+  test.use(iphone)
+
+  test("PR browser contract subset — the phone contract", async ({ page }) => {
+    await page.goto("/")
+    await page.waitForLoadState("networkidle")
+
+    // The rule the touch work is built on has to be in force, or everything
+    // below tests a desktop page that happens to be narrow.
+    expect(
+      await page.evaluate(() => window.matchMedia("(pointer: coarse)").matches),
+      "not a coarse pointer — the touch rules under test do not apply here",
+    ).toBe(true)
+
+    const sideways = await page.evaluate(
+      () => document.documentElement.scrollWidth > window.innerWidth + 1,
+    )
+    expect(sideways, "the page scrolls sideways at 390px").toBe(false)
+
+    const tabs = page.getByRole("navigation", { name: "Primary" })
+    await expect(tabs).toBeVisible()
+    for (const label of ["Dashboard", "Inbox", "Chat", "More"]) {
+      await expect(tabs.getByText(label, { exact: true })).toBeVisible()
+    }
+
+    // More offers every destination the rail carries — the property that drifted.
+    await tabs.getByRole("button", { name: "More" }).click()
+    const sheet = page.getByRole("dialog")
+    await expect(sheet).toBeVisible()
+    for (const label of ["Inbox", "Issues", "Routines", "Pages", "Activity", "Journal", "Integrations"]) {
+      await expect(sheet.getByText(label, { exact: true })).toBeVisible()
+    }
+
+    // Back closes it in place rather than leaving the page underneath.
+    const before = new URL(page.url()).pathname
+    await page.goBack()
+    await expect(sheet).toBeHidden()
+    expect(new URL(page.url()).pathname, "back left the page instead of closing the sheet").toBe(before)
+
+    // Nothing you can type into renders under 16px, which is what makes iOS
+    // zoom the page on focus and never zoom back out.
+    await page.goto("/settings")
+    await page.waitForLoadState("networkidle")
+    const small = await page.evaluate(() =>
+      [...document.querySelectorAll<HTMLElement>(
+        "input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=color]), textarea, select",
+      )]
+        .filter((el) => el.getBoundingClientRect().width > 0)
+        .filter((el) => parseFloat(getComputedStyle(el).fontSize) < 16)
+        .map((el) => el.getAttribute("aria-label") ?? el.getAttribute("placeholder") ?? el.tagName),
+    )
+    expect(small, "fields under 16px make iOS zoom the page and stay zoomed").toEqual([])
   })
 })

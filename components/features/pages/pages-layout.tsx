@@ -273,7 +273,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
   }, [])
 
   return (
-    <div className="flex h-[calc(100dvh-48px)] flex-col bg-background">
+    <div className="flex h-[calc(100dvh-var(--app-header-h)-var(--mobile-tab-bar-h))] flex-col bg-background">
       <SubBar
         icon={CONCEPT_ICON.pages}
         title="Pages"
@@ -372,7 +372,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
           className={cn(
             "shrink-0 overflow-hidden border-r border-white/[0.06] bg-card transition-all print:hidden",
             collapsed ? "w-9" : SIDEBAR_WIDTH,
-            isMobile && !collapsed && "absolute inset-y-0 left-0 z-50 shadow-2xl",
+            isMobile && !collapsed && "fixed inset-y-0 left-0 z-50 pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] shadow-2xl",
           )}
         >
           {collapsed ? (

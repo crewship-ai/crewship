@@ -5,6 +5,7 @@ import { XIcon } from "lucide-react"
 import { Dialog as SheetPrimitive } from "radix-ui"
 
 import { cn } from "@/lib/utils"
+import { useOverlayBackButton } from "@/hooks/use-overlay-back-button"
 
 function Sheet({ ...props }: React.ComponentProps<typeof SheetPrimitive.Root>) {
   return <SheetPrimitive.Root data-slot="sheet" {...props} />
@@ -44,6 +45,23 @@ function SheetOverlay({
   )
 }
 
+/**
+ * Exists so the hook's lifetime is the sheet's. The marker it renders is
+ * `hidden` and only there to reach the content element: after a back press
+ * the hook needs to know whether the sheet refused Escape, and Radix writes
+ * that answer to `data-state`, nowhere a hook can read it from.
+ */
+function OverlayBackButton() {
+  const marker = React.useRef<HTMLSpanElement>(null)
+  useOverlayBackButton(
+    true,
+    () =>
+      marker.current?.closest('[data-slot="sheet-content"]')?.getAttribute("data-state") ===
+      "open",
+  )
+  return <span ref={marker} hidden />
+}
+
 function SheetContent({
   className,
   children,
@@ -60,7 +78,12 @@ function SheetContent({
       <SheetPrimitive.Content
         data-slot="sheet-content"
         className={cn(
-          "bg-background data-[state=open]:animate-in data-[state=closed]:animate-out fixed z-50 flex flex-col gap-4 shadow-lg transition ease-in-out data-[state=closed]:duration-300 data-[state=open]:duration-500",
+          // 500ms to open was the slowest transition in the system — longer
+          // than lib/motion's own `duration.long` — on the gesture a phone
+          // user repeats more than any other. 240/180 matches `duration.base`
+          // and `duration.short` there, so the drawer reads as quick without
+          // losing the sense of where it came from.
+          "bg-background data-[state=open]:animate-in data-[state=closed]:animate-out fixed z-50 flex flex-col gap-4 shadow-lg transition ease-in-out data-[state=closed]:duration-[180ms] data-[state=open]:duration-[240ms]",
           side === "right" &&
             "data-[state=closed]:slide-out-to-right data-[state=open]:slide-in-from-right inset-y-0 right-0 h-full w-3/4 border-l sm:max-w-sm",
           side === "left" &&
@@ -73,6 +96,14 @@ function SheetContent({
         )}
         {...props}
       >
+        {/* Back closes the sheet instead of leaving the page under it.
+            Rendered here, not called in this component's body: SheetContent
+            mounts as soon as its parent renders it, so a hook up there fires
+            for a CLOSED sheet too — and the toolbar and sidebar each keep one
+            mounted on every page, which turned "back closes the drawer" into
+            "back does nothing, twice". Inside Content it mounts only when the
+            portal does, which is when the sheet is open. */}
+        <OverlayBackButton />
         {children}
         {showCloseButton && (
           <SheetPrimitive.Close className="ring-offset-background focus:ring-ring data-[state=open]:bg-secondary absolute top-4 right-4 rounded-xs opacity-70 transition-opacity hover:opacity-100 focus:ring-2 focus:ring-offset-2 focus:outline-hidden disabled:pointer-events-none">

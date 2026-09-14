@@ -157,6 +157,8 @@ export function BackupList({ workspaceId }: { workspaceId: string | undefined })
         </div>
       ) : (
         <div className="rounded-md border overflow-hidden">
+          {/* Five-plus columns; the rounded wrapper clipped them on a phone. */}
+          <div className="overflow-x-auto">
           <table className="w-full text-xs">
             <thead className="bg-muted/40 text-muted-foreground">
               <tr className="text-left">
@@ -326,6 +328,7 @@ export function BackupList({ workspaceId }: { workspaceId: string | undefined })
               ))}
             </tbody>
           </table>
+          </div>
         </div>
       )}
     </div>

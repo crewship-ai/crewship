@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen, fireEvent, waitFor, cleanup } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor, cleanup, within } from "@testing-library/react"
 
 import { IssuesListView } from "../issues-list-view"
 import type { Mission } from "@/lib/types/mission"
@@ -207,7 +207,13 @@ describe("IssuesListView bulk update", () => {
 })
 
 it("shows the human currently doing the work in list view", () => {
-  render(<IssuesListView issues={[{ ...issue("held", 1), assignee_id: "agent", assignee_name: "Jordan", work_mode: "human", worker_name: "Petra", worker_user_id: "person" }]} onIssueClick={() => {}} />)
-  expect(screen.getByText("Petra")).toBeInTheDocument()
+  const { container } = render(<IssuesListView issues={[{ ...issue("held", 1), assignee_id: "agent", assignee_name: "Jordan", work_mode: "human", worker_name: "Petra", worker_user_id: "person" }]} onIssueClick={() => {}} />)
+  // Scoped to the table: the same rows also render as cards below the
+  // container's `md`, so a document-wide query now matches twice. Who is doing
+  // the work is what this pins, and it must hold in the form under test.
+  const table = within(container.querySelector("table")!)
+  expect(table.getByText("Petra")).toBeInTheDocument()
+  expect(table.queryByText("Jordan")).not.toBeInTheDocument()
+  // and nowhere else either — the card form must not disagree about it
   expect(screen.queryByText("Jordan")).not.toBeInTheDocument()
 })
