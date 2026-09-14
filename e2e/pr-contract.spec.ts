@@ -220,7 +220,11 @@ test("PR browser contract subset", async ({ page }) => {
 // It is read-only — no mutations — so the second context cannot rotate the
 // session cookie the way the header of the test above warns about.
 test.describe("PR browser contract subset — phone", () => {
-  test.use({ ...devices["iPhone 13"] })
+  // The profile minus `defaultBrowserType`: that one key forces a new worker,
+  // which Playwright ≥1.5x refuses inside a describe, and the project is
+  // Chromium already. Viewport, touch, scale and user agent all carry over.
+  const { defaultBrowserType: _browser, ...iphone } = devices["iPhone 13"]
+  test.use(iphone)
 
   test("PR browser contract subset — the phone contract", async ({ page }) => {
     await page.goto("/")
