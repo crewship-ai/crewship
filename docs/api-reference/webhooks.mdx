@@ -285,9 +285,9 @@ A duplicate returns `202` with `status: "DEDUPED"`, the original `run_id`, and
 | `400` | Body too large/unreadable |
 | `401` | Missing or invalid HMAC/timestamp |
 | `404` | Unknown, disabled, or deleted token (deliberately indistinguishable) |
-| `409` | Target routine is not active, or its pinned version is unavailable |
-| `429` | Per-token/concurrency limit; includes `Retry-After` |
-| `503` | Dispatch dependencies are not wired |
+| `409` | Target routine is not active, its pinned version is unavailable, or the same delivery identifier arrived with a different body (`delivery_conflict`; the original record is kept) |
+| `429` | Per-token/concurrency limit for **new** deliveries; includes `Retry-After`. A redelivery of an already-accepted delivery is answered `202 DEDUPED` with its original `run_id` even while the limit is exhausted |
+| `503` | Dispatch dependencies are not wired, or the receipt ledger could not be read; includes `Retry-After`. Never a guessed duplicate |
 
 Dispatch does not accept session/JWT authentication, and it never falls back to
 an unsigned request.

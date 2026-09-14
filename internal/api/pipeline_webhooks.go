@@ -652,6 +652,43 @@ func (h *PipelineHandler) FireWebhook(w http.ResponseWriter, r *http.Request) {
 	if effectiveLimit <= 0 {
 		effectiveLimit = defaultWebhookRatePerMin
 	}
+
+	// The receipt lookup comes BEFORE the rate gate and before every other
+	// capacity pre-check, and after the signature check. A sender retrying a
+	// delivery we already accepted is asking for the receipt it already owns,
+	// and §5 is explicit that a duplicate of accepted work is never refused
+	// for fullness — only NEW work is. The gate used to run first, so a retry
+	// that landed inside a busy minute was told "rate limit exceeded" about
+	// work that was sitting accepted in the ledger, and a sender that believed
+	// it gave up on an event we already held.
+	//
+	// The identity and body rules do not change under throttling either: the
+	// same id with a different body is a conflict, not a duplicate, and an
+	// unreadable ledger is "unavailable", never "you are sending too fast".
+	// This is a read; the acceptance transaction below still owns the atomic
+	// reservation, so two concurrent first arrivals are settled there.
+	idemKey := webhookIdempotencyKey(r, body, wh.Token)
+	bodySum := sha256.Sum256(body)
+	bodySHA := hex.EncodeToString(bodySum[:])
+	if h.db != nil {
+		existing, err := lookupRoutineReceipt(r.Context(), h.db, wh, idemKey, bodySHA)
+		switch {
+		case errors.Is(err, work.ErrDeliveryConflict):
+			h.logger.Warn("webhook fire: delivery conflict", "webhook_id", wh.ID)
+			replyError(w, http.StatusConflict, "delivery_conflict")
+			return
+		case err != nil:
+			h.logger.Error("webhook fire: receipt lookup failed; refusing rather than guessing",
+				"error", err, "webhook_id", wh.ID)
+			w.Header().Set("Retry-After", webhook.IngressRetryAfterSeconds)
+			replyError(w, http.StatusServiceUnavailable, "acceptance unavailable")
+			return
+		case existing != nil:
+			h.answerRoutineDuplicate(w, r, wh, *existing)
+			return
+		}
+	}
+
 	if !pipeline.AllowWebhookFire(wh.Token, effectiveLimit) {
 		w.Header().Set("Retry-After", "60")
 		replyError(w, http.StatusTooManyRequests, "rate limit exceeded")
@@ -787,10 +824,9 @@ func (h *PipelineHandler) FireWebhook(w http.ResponseWriter, r *http.Request) {
 	// The run id is pre-allocated HERE so the 202 can hand the sender
 	// a pollable handle before the run starts; RunIDOverride below
 	// makes the executor journal under the same id.
-	idemKey := webhookIdempotencyKey(r, body, wh.Token)
 	runID := pipeline.NewRunID()
 
-	receipt, acceptErr := h.acceptRoutineDelivery(r, wh, idemKey, runID, body, targetDefinitionJSON)
+	receipt, acceptErr := h.acceptRoutineDelivery(r, wh, idemKey, runID, bodySHA)
 	if acceptErr != nil {
 		switch {
 		case errors.Is(acceptErr, work.ErrDeliveryConflict):
@@ -809,18 +845,9 @@ func (h *PipelineHandler) FireWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if receipt.Duplicate {
-		// Duplicate delivery — answer with the ORIGINAL run's id so retried
-		// webhooks see a stable success response. No dispatch, and no second
-		// attempt merely because the message arrived twice.
-		resolvedRunID := receipt.RunID
-		_, _ = h.webhooks.RecordFire(r.Context(), wh.ID, resolvedRunID, "DEDUPED")
-		writeJSON(w, http.StatusAccepted, map[string]any{
-			"run_id":      resolvedRunID,
-			"status":      "DEDUPED",
-			"deduped":     true,
-			"delivery_id": receipt.DeliveryID,
-			"duplicate":   true,
-		})
+		// Lost the reservation race to a concurrent first arrival of the same
+		// delivery: the ledger holds the other one, so this is its duplicate.
+		h.answerRoutineDuplicate(w, r, wh, receipt)
 		return
 	}
 
@@ -937,11 +964,55 @@ type routineReceipt struct {
 	Duplicate  bool
 }
 
+// routineReceiptQuerier is what the receipt lookup needs from a *sql.DB or a
+// *sql.Tx, so the same query answers the pre-gate read and the in-transaction
+// conflict check.
+type routineReceiptQuerier interface {
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
+
+// lookupRoutineReceipt answers "was this delivery already accepted for this
+// endpoint". Nil means no: this is new work. A receipt means the sender holds
+// it already. ErrDeliveryConflict means the same id arrived with a different
+// body — the original record wins and the caller says so.
+func lookupRoutineReceipt(
+	ctx context.Context, q routineReceiptQuerier, wh *pipeline.Webhook, sourceDeliveryID, bodySHA string,
+) (*routineReceipt, error) {
+	var rec routineReceipt
+	var recordedSHA string
+	err := q.QueryRowContext(ctx, `SELECT id, run_id, body_sha256 FROM routine_webhook_receipts
+   WHERE workspace_id = ? AND endpoint_id = ? AND source_delivery_id = ?`,
+		wh.WorkspaceID, wh.ID, sourceDeliveryID).Scan(&rec.DeliveryID, &rec.RunID, &recordedSHA)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if recordedSHA != bodySHA {
+		return nil, work.ErrDeliveryConflict
+	}
+	rec.Duplicate = true
+	return &rec, nil
+}
+
+// answerRoutineDuplicate answers a redelivery with the ORIGINAL run's id so
+// retried webhooks see a stable success response. No dispatch, and no second
+// attempt merely because the message arrived twice.
+func (h *PipelineHandler) answerRoutineDuplicate(w http.ResponseWriter, r *http.Request, wh *pipeline.Webhook, receipt routineReceipt) {
+	_, _ = h.webhooks.RecordFire(r.Context(), wh.ID, receipt.RunID, "DEDUPED")
+	writeJSON(w, http.StatusAccepted, map[string]any{
+		"run_id":      receipt.RunID,
+		"status":      "DEDUPED",
+		"deduped":     true,
+		"delivery_id": receipt.DeliveryID,
+		"duplicate":   true,
+	})
+}
+
 func (h *PipelineHandler) acceptRoutineDelivery(
-	r *http.Request, wh *pipeline.Webhook, sourceDeliveryID, runID string, body []byte, _ string,
+	r *http.Request, wh *pipeline.Webhook, sourceDeliveryID, runID, bodySHA string,
 ) (routineReceipt, error) {
-	sum := sha256.Sum256(body)
-	bodySHA := hex.EncodeToString(sum[:])
 	receipt := routineReceipt{DeliveryID: generateCUID(), RunID: runID}
 	acceptor := &mainHandleAcceptor{db: h.db, budget: work.DefaultAcceptanceBudget}
 	err := acceptor.Do(r.Context(), func(ctx context.Context, tx *sql.Tx) error {
@@ -961,17 +1032,17 @@ func (h *PipelineHandler) acceptRoutineDelivery(
 		if n == 1 {
 			return nil
 		}
-		var recordedSHA string
-		err = tx.QueryRowContext(ctx, `SELECT id, run_id, body_sha256 FROM routine_webhook_receipts
-   WHERE workspace_id = ? AND endpoint_id = ? AND source_delivery_id = ?`,
-			wh.WorkspaceID, wh.ID, sourceDeliveryID).Scan(&receipt.DeliveryID, &receipt.RunID, &recordedSHA)
+		existing, err := lookupRoutineReceipt(ctx, tx, wh, sourceDeliveryID, bodySHA)
 		if err != nil {
 			return err
 		}
-		if recordedSHA != bodySHA {
-			return work.ErrDeliveryConflict
+		if existing == nil {
+			// The INSERT reported a conflict and the SELECT found nothing:
+			// the row vanished inside our own immediate transaction, which
+			// cannot happen. Refuse rather than mint a receipt for nothing.
+			return fmt.Errorf("routine receipt for %s disappeared inside the acceptance transaction", sourceDeliveryID)
 		}
-		receipt.Duplicate = true
+		receipt = *existing
 		return nil
 	})
 	return receipt, err

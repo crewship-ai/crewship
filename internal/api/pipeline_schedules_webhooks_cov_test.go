@@ -601,20 +601,22 @@ func TestCovPSWWebhooks_Fire_RateLimit_Returns429(t *testing.T) {
 		t.Fatalf("seed webhook: %v", err)
 	}
 
-	body := `{"n":1}`
-	sig := covPSWSign("rl-secret", body)
-	fire := func() *httptest.ResponseRecorder {
+	// Two DIFFERENT deliveries. The gate refuses new work once the minute's
+	// budget is spent; a byte-identical resend is a duplicate of accepted
+	// work and is answered with its receipt however full the gate is, so it
+	// cannot be the thing this test fires second.
+	fire := func(body string) *httptest.ResponseRecorder {
 		req := httptest.NewRequest("POST", "/api/v1/webhooks/"+wh.Token, strings.NewReader(body))
 		req.SetPathValue("token", wh.Token)
-		req.Header.Set("X-Crewship-Signature", sig)
+		req.Header.Set("X-Crewship-Signature", covPSWSign("rl-secret", body))
 		rr := httptest.NewRecorder()
 		h.FireWebhook(rr, req)
 		return rr
 	}
-	if first := fire(); first.Code != http.StatusAccepted {
+	if first := fire(`{"n":1}`); first.Code != http.StatusAccepted {
 		t.Fatalf("first fire status = %d, want 202; body=%s", first.Code, first.Body.String())
 	}
-	second := fire()
+	second := fire(`{"n":2}`)
 	if second.Code != http.StatusTooManyRequests {
 		t.Fatalf("second fire status = %d, want 429", second.Code)
 	}
