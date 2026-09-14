@@ -452,6 +452,7 @@ type ContainerBusyProbe func(ctx context.Context, crewID, containerID string) bo
 type StatsRegisterFunc func(containerID, crewID, workspaceID string)
 
 type Orchestrator struct {
+	agentRuns              sync.Map // run id -> *agentRunControl; independent of credential HOME cleanup
 	userModelReader        func(context.Context, string, string) (string, error)
 	personalizationAllowed func(context.Context, string, string) (bool, error)
 	container              provider.ContainerProvider

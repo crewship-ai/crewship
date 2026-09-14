@@ -208,7 +208,7 @@ func TestAgentLogs_Branches(t *testing.T) {
 // ---- AgentStop ----
 
 func TestAgentStop_Branches(t *testing.T) {
-	routes := map[string]any{}
+	routes := map[string]any{"/agents/agent-pxc/stop": map[string]string{"agent_id": "agent-pxc", "status": "stopped"}}
 	sock := covIPCJSON(t, routes)
 	h, userID, wsID, _, agentID := covProxyRig(t, sock)
 

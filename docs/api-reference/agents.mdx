@@ -1860,9 +1860,15 @@ List execution history for an agent.
 
 These endpoints proxy requests through the crewshipd sidecar to the agent's container.
 
-<Warning>
-  `POST /api/v1/agents/{agentId}/stop` halts a running agent.
-</Warning>
+`POST /api/v1/agents/{agentId}/stop` targets the active invocations owned by
+this daemon when it receives the request. A `200` / `STOPPED` response follows
+confirmed process termination and completion of those invocations. Direct
+execs use an isolated process group; tmux runs use their per-run session.
+
+If the daemon is unavailable, cannot identify the runtime (including an
+unowned run after restart), or cannot confirm termination within its bounded
+wait, the API returns `502` and leaves the stored agent status unchanged.
+The request does not disable the agent or prevent a separate new submission.
 
 | Endpoint | Method | Description |
 |---|---|---|

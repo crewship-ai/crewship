@@ -34,18 +34,18 @@ func TestHandleAgentStop_RunningInState(t *testing.T) {
 	req := httptest.NewRequest("POST", "/agents/a1/stop", nil)
 	rec := httptest.NewRecorder()
 	s.ipcMux.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
+	if rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("status = %d", rec.Code)
 	}
 
-	// State should now read "stopped".
+	// Bookkeeping without an owned runtime is not proof of a stop.
 	got, _ := s.state.Get(context.Background(), "agent_runs", "a1")
 	var run orchestrator.RunState
 	if err := json.Unmarshal(got, &run); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	if run.Status != "stopped" {
-		t.Errorf("status not updated, got %q", run.Status)
+	if run.Status != "running" {
+		t.Errorf("unconfirmed stop rewrote status, got %q", run.Status)
 	}
 }
 
