@@ -503,6 +503,7 @@ func TestPageCLI_ListShowsTheCreatedPage(t *testing.T) {
 			"slug":   pageAcceptSlug,
 			"name":   pageAcceptName,
 			"panels": 1,
+			"reach":  []string{"crew:ops", "grant"},
 		},
 	}))
 
@@ -515,6 +516,12 @@ func TestPageCLI_ListShowsTheCreatedPage(t *testing.T) {
 	}
 	if !strings.Contains(out, pageAcceptName) {
 		t.Errorf("page list output does not name the page %q:\n%s", pageAcceptName, out)
+	}
+	// The server's `reach` (#2524) is repeated, comma-joined, as the REACH
+	// column: it is the server's statement about the caller, and the CLI
+	// neither derives it from the owner column nor drops it.
+	if !strings.Contains(out, "REACH") || !strings.Contains(out, "crew:ops, grant") {
+		t.Errorf("page list output does not carry the REACH column with %q:\n%s", "crew:ops, grant", out)
 	}
 	if len(stub.CallsFor("GET", "/api/v1/pages")) != 1 {
 		t.Errorf("GET /api/v1/pages called %d times, want 1", len(stub.CallsFor("GET", "/api/v1/pages")))
