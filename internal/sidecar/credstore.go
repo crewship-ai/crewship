@@ -90,10 +90,36 @@ type Credential struct {
 	// the config fingerprint of an existing crew does not move.
 	AgentIDs []string `json:"agent_ids,omitempty"`
 
+	// GraceToken is the credential's PREVIOUS value while a rotation's grace
+	// window is open (#1882), delivered through the same boot payload as
+	// Token and living in the same place — this struct, never the agent env.
+	// The proxy replays a request exactly once with it when the upstream
+	// answers 401 to Token. Empty for a credential with no open rotation,
+	// which is every credential most of the time; `omitempty` keeps the
+	// pre-#1882 payload byte-identical for them.
+	//
+	// It is a boot-time snapshot for the same reason Token is: the sidecar
+	// has no plaintext supply line after boot. The window is enforced
+	// locally against GraceExpiresAt (fail-closed, like a lease), and an
+	// operator ending the grace early reaches the store through the
+	// reaper's metadata listing (ScrubGrace), with the same latency a
+	// revocation has.
+	GraceToken string `json:"grace_token,omitempty"`
+	// GraceExpiresAt is the rotation's expires_at in RFC3339 UTC. A grace
+	// value with no parseable deadline is dropped at Load: "I cannot tell
+	// when this stops being valid" reads as "it already has".
+	GraceExpiresAt string `json:"grace_expires_at,omitempty"`
+	// GraceRotationID names the credential_rotations row the grace value
+	// came from, so the fallback can be attributed on the operator's side.
+	GraceRotationID string `json:"grace_rotation_id,omitempty"`
+
 	// leaseDeadline is LeaseExpiresAt parsed once at Load, so the hot Select path
 	// does no time parsing. Zero value means "no lease" (standing). Unexported,
 	// so it never round-trips through the boot JSON.
 	leaseDeadline time.Time
+	// graceDeadline is GraceExpiresAt parsed once at Load. Zero means "no
+	// grace value", never "no deadline": a grace value always has one.
+	graceDeadline time.Time
 }
 
 // grantedTo reports whether agentID may be served this credential.
@@ -132,6 +158,22 @@ func (c *Credential) leaseLapsed(now time.Time) bool {
 // control the safe reading of "I cannot tell when this expires" is "it already
 // did", not "it never does".
 var leaseEpochSentinel = time.Unix(0, 0).UTC()
+
+// graceUsable reports whether this credential's rotation grace value may be
+// replayed as of now: there is one, its window has not closed, and the
+// credential itself is still servable (a lapsed lease refuses everything).
+func (c *Credential) graceUsable(now time.Time) bool {
+	return c.GraceToken != "" && !c.graceDeadline.IsZero() && now.Before(c.graceDeadline) && !c.leaseLapsed(now)
+}
+
+// dropGrace forgets the grace value. Called wherever it can no longer be
+// served, so the plaintext is not resident a moment longer than it is useful.
+func (c *Credential) dropGrace() {
+	c.GraceToken = ""
+	c.GraceExpiresAt = ""
+	c.GraceRotationID = ""
+	c.graceDeadline = time.Time{}
+}
 
 // rrKey identifies one round-robin sequence: a provider, as seen by one acting
 // agent. The agent half exists because #2052 made eligibility per agent, and a
@@ -179,6 +221,22 @@ func (cs *CredStore) Load(creds []Credential) {
 			// Fail closed — see leaseEpochSentinel.
 			cs.creds[i].leaseDeadline = leaseEpochSentinel
 		}
+	}
+	// Rotation grace (#1882): parsed once like the lease, and dropped
+	// outright when it cannot be served — a grace value with no usable
+	// deadline is a secret with no reason to be in memory.
+	for i := range cs.creds {
+		c := &cs.creds[i]
+		if c.GraceToken == "" {
+			c.dropGrace()
+			continue
+		}
+		d, err := time.Parse(time.RFC3339, c.GraceExpiresAt)
+		if err != nil || c.GraceExpiresAt == "" {
+			c.dropGrace()
+			continue
+		}
+		c.graceDeadline = d
 	}
 	// Restart round-robin from the top on a reload (matches the previous
 	// idx-map reset). Safe under the write lock held here; no Select can be
@@ -321,6 +379,76 @@ func (cs *CredStore) HeldForAnotherAgent(provider ProviderType, agentID string) 
 		}
 	}
 	return false
+}
+
+// GraceFor returns the rotation grace value for ONE credential, when it may be
+// replayed as of now (#1882): the credential is still held, its rotation's
+// window is open, and its lease has not lapsed. It is keyed by credential id
+// on purpose — the caller has already selected the credential whose current
+// value just failed, and only THAT credential's previous value is an answer to
+// a 401 on it. Another credential's rotation, however recent, is not.
+//
+// Looked up in the store rather than read off the copy Select returned so a
+// ScrubGrace or ExpireGrace that ran while the first attempt was in flight is
+// honoured by the retry.
+func (cs *CredStore) GraceFor(credID string, now time.Time) (token, rotationID string, ok bool) {
+	cs.mu.RLock()
+	defer cs.mu.RUnlock()
+	for i := range cs.creds {
+		c := &cs.creds[i]
+		if c.ID != credID {
+			continue
+		}
+		if !c.graceUsable(now) {
+			return "", "", false
+		}
+		return c.GraceToken, c.GraceRotationID, true
+	}
+	return "", "", false
+}
+
+// ExpireGrace forgets every rotation grace value whose window has closed as of
+// now, returning how many were dropped (#1882). The reaper's grace primitive,
+// and — like ExpireLeases — independent of any server fetch: the deadline was
+// delivered with the value, so an unreachable crewshipd is no reason to keep
+// serving it. GraceFor already refuses a closed window; this is what stops the
+// plaintext staying resident. The credentials themselves are untouched.
+func (cs *CredStore) ExpireGrace(now time.Time) int {
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+	dropped := 0
+	for i := range cs.creds {
+		c := &cs.creds[i]
+		if c.GraceToken != "" && !now.Before(c.graceDeadline) {
+			c.dropGrace()
+			dropped++
+		}
+	}
+	return dropped
+}
+
+// ScrubGrace forgets the grace value of every credential NOT in keep, returning
+// how many were dropped (#1882). keep is the set of credential ids whose
+// rotation crewshipd still lists as ACTIVE — the reaper's answer to an operator
+// ending a grace window early, which the boot-time deadline cannot see. Same
+// contract as Reap: a nil or empty set is taken literally, so callers must only
+// invoke this after a SUCCESSFUL metadata fetch. The credentials stay.
+func (cs *CredStore) ScrubGrace(keep map[string]struct{}) int {
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+	dropped := 0
+	for i := range cs.creds {
+		c := &cs.creds[i]
+		if c.GraceToken == "" {
+			continue
+		}
+		if _, ok := keep[c.ID]; ok {
+			continue
+		}
+		c.dropGrace()
+		dropped++
+	}
+	return dropped
 }
 
 // Remove removes a credential by ID (e.g. when revoked).
