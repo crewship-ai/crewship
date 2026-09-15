@@ -964,6 +964,7 @@ A path is one of the server's own words, printed verbatim:
 | `role` | The subject's workspace role carries `manage` (ADMIN or OWNER). |
 | `crew:<slug>` | A member of the crew that owns the page. |
 | `panel_crew:<slug>` | A member of a crew that owns a panel on it — one entry per crew, in panel order. On a crew's row, that the crew owns a panel. |
+| `folder:<slug>` | The folder the page is in is shared with the subject — a user directly or through a crew, a crew by name, or everyone in the workspace. The path says the subject is named, not at which level. |
 | `grant:page:<level>` | A live `read`, `produce` or `write` grant names the subject (or, for a user, one of their crews). |
 | `panel_crew:withheld` | A crew you cannot see owns a panel. The server does not name it, and its members are not listed by name; the row's subject prints as `(withheld)`. |
 

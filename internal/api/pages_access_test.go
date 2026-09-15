@@ -471,6 +471,93 @@ func TestPageSubjectAccess_ReachesThroughTheFolderACL(t *testing.T) {
 	})
 }
 
+// TestPageAccess_CrewReachesThroughTheFolderACL — the `folder:<slug>` arm on
+// a CREW subject (#2543). The user arm was reconciled with the folder ACL in
+// #2535; this pins the crew arm to the same rendering on both endpoints: an
+// entry `crew:engine` on the folder lists every page in it for the crew
+// subject, and puts the `crew/engine` row on each page's report with the
+// path `folder:<folder>`, in pageReach's fixed place (after panel_crew,
+// before the grants). The path says the crew is named, not at which level —
+// exactly as it does on a user's row — so a view-only entry renders the same
+// path and still refuses the write. Gone entry, gone row.
+func TestPageAccess_CrewReachesThroughTheFolderACL(t *testing.T) {
+	f := newFoldersFixture(t)
+	f.createFolder(t, "engine-docs", "Engine docs", "crew/engine")
+	f.file(t, "engine-docs", "fleet-201")
+	f.share(t, "engine-docs", "crew", "engine", false)
+
+	// fleet-201's only panel is crew/lookout's, so crew/engine reaches the
+	// page by the folder entry alone: no ownership, no panel, no grant.
+	crewRow := func(doc pagesAccessDoc) string {
+		for _, s := range doc.Subjects {
+			if s.SubjectType == "crew" && s.Label == "engine" {
+				return pagesAccessKey(s)
+			}
+		}
+		return ""
+	}
+
+	t.Run("the subject report lists the page for the crew", func(t *testing.T) {
+		want := []string{"fleet-201=folder:engine-docs"}
+		doc := pagesSubjectAccessOf(t, f.h, f.wsID, "erin", "ADMIN", "subject=crew:engine")
+		if got := pagesSubjectAccessKeys(doc); !reflect.DeepEqual(got, want) {
+			t.Errorf("pages = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("the page report carries the crew row with the folder path", func(t *testing.T) {
+		for _, tc := range []struct{ name, user, role string }{
+			{"for an administrator", "erin", "ADMIN"},
+			{"for the page owner", "alice", "MEMBER"},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				doc := pagesAccessOf(t, f.h, f.wsID, tc.user, tc.role, "fleet-201")
+				if got, want := crewRow(doc), "crew/engine=folder:engine-docs"; got != want {
+					t.Errorf("crew row = %q, want %q\n  %s", got, want, strings.Join(pagesAccessKeys(doc), "\n  "))
+				}
+			})
+		}
+	})
+
+	t.Run("a view-only entry renders the same path and does not grant write", func(t *testing.T) {
+		rr := f.pageCall(t, "PATCH", "/api/v1/pages/fleet-201", "mel", "MEMBER", `{"name":"Renamed by mel"}`, f.h.Update)
+		expectStatus(t, rr, http.StatusForbidden)
+		f.share(t, "engine-docs", "crew", "engine", true)
+		rr = f.pageCall(t, "PATCH", "/api/v1/pages/fleet-201", "mel", "MEMBER", `{"name":"Renamed by mel"}`, f.h.Update)
+		expectStatus(t, rr, http.StatusOK, `"name":"Renamed by mel"`)
+		doc := pagesAccessOf(t, f.h, f.wsID, "erin", "ADMIN", "fleet-201")
+		if got, want := crewRow(doc), "crew/engine=folder:engine-docs"; got != want {
+			t.Errorf("crew row after can_write = %q, want %q (the path names the crew, not the level)", got, want)
+		}
+	})
+
+	t.Run("the folder path keeps its place before the crew's own grants", func(t *testing.T) {
+		pagesGrant(t, f.h, f.wsID, f.owner, "fleet-201", `{"subject_type":"crew","subject":"engine","level":"read"}`)
+		doc := pagesAccessOf(t, f.h, f.wsID, "erin", "ADMIN", "fleet-201")
+		if got, want := crewRow(doc), "crew/engine=folder:engine-docs,grant:page:read"; got != want {
+			t.Errorf("crew row = %q, want %q", got, want)
+		}
+		want := []string{"fleet-201=folder:engine-docs,grant:page:read"}
+		sub := pagesSubjectAccessOf(t, f.h, f.wsID, "erin", "ADMIN", "subject=crew:engine")
+		if got := pagesSubjectAccessKeys(sub); !reflect.DeepEqual(got, want) {
+			t.Errorf("pages = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("the entry removed, the crew's folder path is gone from both reports", func(t *testing.T) {
+		f.unshare(t, "engine-docs", "crew", "engine")
+		doc := pagesAccessOf(t, f.h, f.wsID, "erin", "ADMIN", "fleet-201")
+		if got, want := crewRow(doc), "crew/engine=grant:page:read"; got != want {
+			t.Errorf("crew row = %q, want %q", got, want)
+		}
+		want := []string{"fleet-201=grant:page:read"}
+		sub := pagesSubjectAccessOf(t, f.h, f.wsID, "erin", "ADMIN", "subject=crew:engine")
+		if got := pagesSubjectAccessKeys(sub); !reflect.DeepEqual(got, want) {
+			t.Errorf("pages = %v, want %v", got, want)
+		}
+	})
+}
+
 // ── 5. Constant cost ───────────────────────────────────────────────────────
 
 func TestPageAccess_QueryCountDoesNotGrow(t *testing.T) {
