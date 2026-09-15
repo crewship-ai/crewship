@@ -723,7 +723,10 @@ everyone in the workspace — as *can view* or *can edit*, and they apply
 continuously to whatever is in the folder: filing a page in a shared folder
 shares it, taking it out unshares it. A page's own grants add to that and never
 take from it. *Can edit* implies *can view*; the server stores both and refuses
-a request that says otherwise. Neither ever opens a panel owned by another
+a request that says otherwise. *Can edit* is page `write` for every page in
+the folder, with no workspace-role floor — a VIEWER-role member named by it
+edits those pages, subject to the same whole-document check as a page `write`
+grant. Neither ever opens a panel owned by another
 crew: a panel is sealed by its owning crew's membership whatever the folder
 says. Agents are never a folder subject; an agent reaches a page only by a
 grant on that page.

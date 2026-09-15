@@ -881,11 +881,14 @@ third state; then **Everyone in this workspace**, off until you turn it on.
 *Can edit* means renaming the folder, changing its icon and colour, editing
 the pages in it, and removing pages from it — which takes the inherited
 access away from everyone else, and the sentence above the table says so.
+*Can edit* is `write` on every page in the folder with no workspace-role
+floor: a member whose workspace role is VIEWER edits those pages through it,
+exactly as a page `write` grant would let them, and the dialog says so.
 Nobody edits a folder's sharing but the owning crew's managers and admins;
 anyone who needs to becomes a manager in that crew. An entry stays until a
 manager changes it, even after the person who set it has left.
 
-Everyone else sees, instead of the table, which of three things the folder
+Everyone else sees, instead of the table, which of five things the folder
 is — *Only the owning crew and workspace admins*, *Shared with named people*,
 *Shared with named crews*, *Shared with named people and crews*, *Shared with
 everyone in this workspace* — the product's own sentence about who may see more, and,
@@ -928,23 +931,33 @@ different viewers.
 Two questions, decided separately, and the confusion between them is the one
 thing worth reading this section slowly for:
 
-- **Can you open the page?** You can if you own it, if you are a workspace
-  ADMIN/OWNER, if one of your crews owns a panel on it, or if a grant names
-  you. Otherwise the page is not in your `crewship page list` and opening it
-  by slug answers *not found* — the same answer as a page that was never
-  created, so the endpoint cannot be walked to learn what exists.
+- **Can you open the page?** You can if you own it or belong to the crew
+  that owns it, if you are a workspace ADMIN/OWNER, if one of your crews owns
+  a panel on it, if the [folder](#folders) it is in is shared with you, one
+  of your crews or the whole workspace, or if a grant names you, one of your
+  crews or everyone in the workspace. Otherwise the page is not in your
+  `crewship page list` and opening it by slug answers *not found* — the same
+  answer as a page that was never created, so the endpoint cannot be walked
+  to learn what exists. `crewship page list` reports which of these paths
+  reach you in its REACH column (`owner`, `role`, `crew:<slug>`,
+  `panel_crew:<slug>`, `folder:<slug>`, `grant`), and
+  `crewship page access <slug> --me` spells them out for one page.
 - **Can you read a panel on it?** Only if you are in that panel's owning crew
   (or are an admin). Nothing else opens a panel — not ownership of the page,
   and not any grant.
 
 The Pages list in the browser is drawn from the first answer. It is grouped by
-owner — **Mine**, then the crews you belong to, then the other crews, then
-**Owned by others** for the personal pages of other people that reach you —
-with the owner named once in each group's header. Groups fold and remember it
-per user and workspace; a search opens every group that has a match and hides the
-rest; the arrow keys walk the rows, and Left and Right fold and unfold. When
-the server reports *how* you reach each page, the filter also offers **Shared
-with me**: the pages you reach through a grant and nothing else.
+[folder](#folders) by default — one section per folder you may read, then
+**Unfiled** — and the filter panel's **Group by: Owner** switches it to
+**Mine**, then the crews you belong to, then the other crews, then **Owned by
+others** for the personal pages of other people that reach you, with the owner
+named once in each group's header. Owner grouping is also what you get on a
+server without folders. Groups fold and remember it per user and workspace,
+as does the grouping choice; a search opens every group that has a match and
+hides the rest; the arrow keys walk the rows, and Left and Right fold and
+unfold. When the server reports *how* you reach each page, the filter also
+offers **Shared with me**: the pages you reach through a grant and nothing
+else.
 
 ### Panel visibility is crew membership
 
@@ -1333,9 +1346,12 @@ their `page list` entirely.
 crewship page grant moje --user someone@example.com --level read
 crewship page grant moje --crew quality --level read
 crewship page grant moje --agent devops-bot --level produce --panels moje-vec
+crewship page grant moje --workspace --level read
 ```
 
-Three verbs, three kinds of subject (`--user`, `--crew`, `--agent`):
+Three verbs, four kinds of subject (`--user`, `--crew`, `--agent`, and
+`--workspace` for every current human member — `read` or `write` only, since
+everyone is not a producer):
 
 | Level | Means |
 |---|---|
