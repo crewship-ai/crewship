@@ -192,7 +192,7 @@ export function RoutinesWorkspace(props: RoutinesWorkspaceProps) {
       <div className="min-h-0 flex-1 overflow-auto">
         {tab === "routines" && (
           <section aria-label="Routine list" className="mx-auto max-w-[1160px] p-4 md:p-6">
-            <div aria-label="Needs you" role="group" className="mb-4 grid gap-2.5 md:grid-cols-3">
+            <div aria-label="Needs you" role="group" className="mb-4 grid min-w-0 gap-2.5 md:grid-cols-3">
               <NeedsTile
                 figure={waitingRuns.length}
                 tone="text-warn"
@@ -300,14 +300,14 @@ function NeedsTile({
       >
         {figure}
       </span>
-      <span className="min-w-0 text-xs text-muted-foreground">
+      <span className="min-w-0 flex-1 text-xs text-muted-foreground">
         <span className="block truncate font-medium text-foreground">{title}</span>
         <span className="block truncate">{hint}</span>
       </span>
     </>
   )
   const className = cn(
-    "flex min-h-12 w-full items-center gap-3 rounded-xl border border-border/60 bg-card px-4 py-2.5 text-left",
+    "flex min-h-12 w-full min-w-0 items-center gap-3 overflow-hidden rounded-xl border border-border/60 bg-card px-4 py-2.5 text-left",
     (href || onClick) && "transition-colors hover:border-muted-foreground/40",
   )
   if (href)

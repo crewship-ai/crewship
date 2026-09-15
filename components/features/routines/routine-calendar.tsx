@@ -713,7 +713,7 @@ export function RoutineCalendar({
       </div>
       <p className="text-xs text-muted-foreground">
         <span className="text-primary">Blue</span> = planned start, colours = how a run ended.
-        A busy day shows one row per routine with a count; open the day for every start.
+        A day shows its first two starts; open the day for every start.
       </p>
       {loading && <p role="status">Loading calendar…</p>}
       {error && (
