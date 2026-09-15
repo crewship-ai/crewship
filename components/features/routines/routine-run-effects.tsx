@@ -26,10 +26,12 @@ function firstLine(value: unknown): string {
 
 function approvalWord(step: Record<string, unknown>): string {
   const wait = isRecord(step.wait) ? step.wait : null
-  const approvers = wait?.approvers ?? wait?.approver_roles ?? wait?.roles
+  // The DSL names no approver (WaitStep has kind, approval_prompt and
+  // approval_title); the title is the closest thing to "who".
+  const approvers = wait?.approvers ?? wait?.approval_title
   if (Array.isArray(approvers) && approvers.length)
     return approvers.filter((a) => typeof a === "string").join(", ")
-  if (typeof approvers === "string" && approvers) return approvers
+  if (typeof approvers === "string" && approvers.trim()) return firstLine(approvers)
   return "A person"
 }
 
