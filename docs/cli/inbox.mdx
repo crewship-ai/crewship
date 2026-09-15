@@ -23,9 +23,9 @@ Auth: every subcommand requires `crewship login` plus an active workspace. The i
 | `inbox list` | List inbox items (default: unread only). |
 | `inbox get <id>` | Show a single item with its full body + structured payload. |
 | `inbox count` | Print the bell-badge unread count (cheaper than `list` for polling). |
-| `inbox read <id>` | Mark an item as read. |
-| `inbox unread <id>` | Flip an item back to unread. |
-| `inbox resolve <id>` | Mark resolved, optionally recording the action taken. |
+| `inbox read <id>` | Mark an item as read **for you** — read state is per user, so another recipient of a role-targeted item still sees it unread. |
+| `inbox unread <id>` | Flip an item back to unread for you (clears only your own read marker; restores an archived item for everyone). |
+| `inbox resolve <id>` | Mark resolved, optionally recording the action taken. Resolved is workspace-shared. Refused (`409`) on a live waitpoint or escalation — see [`inbox resolve`](#inbox-resolve). |
 | `inbox act <id> <action>` | Act on a `run_needs_human` card: `answer` delivers `--input` to the agent's session and resumes the run, `take_over` / `dismiss` settle the session. Writes a receipt, resolves the card in place. |
 | `inbox archive <id>` | Resolve with `resolved_action=archived` (Gmail-style clear without a decision). |
 | `inbox bulk read` | Bulk-mark items as read. |
@@ -48,6 +48,23 @@ Auth: every subcommand requires `crewship login` plus an active workspace. The i
 | Flag | Default | Effect |
 | --- | --- | --- |
 | `--action <enum>` | (unset) | Record what was done: `approved`, `denied`, `retried`, `cancelled`, `acknowledged`, `dismissed`. Stored in `resolved_action` for the audit trail. |
+
+Which kinds it applies to:
+
+- `message`, `failed_run` and the other inbox-owned kinds — always.
+- `waitpoint`, `escalation` — **only when the backing record is already gone** (a token the sweep pruned, a staged hire already swept, a keeper-synthetic escalation that never had an `escalations` row). A **live** one is refused with `409`: this is the inbox-side resolve only, it does not call the source endpoint, and closing the row here would leave the run parked forever waiting for a decision that never reached it.
+
+On the refusal the CLI exits non-zero and prints the command that decides it at the source, with the real token filled in:
+
+```text
+API error (409): use the source endpoint for this kind … — inbox PATCH only supports 'read' for source-managed items
+This is a live waitpoint: the decision has to reach the run, so it is made at the source.
+  approve: crewship routine waitpoints approve wp_tok_abc --comment "LGTM"
+  reject:  crewship routine waitpoints reject wp_tok_abc
+  mark it read here instead: crewship inbox read ibx_01HVZ...
+```
+
+An escalation gets the same shape with `crewship escalation resolve <id> --action approve|reject`. To know in advance which case a row is, read `source_missing` on [`inbox get`](#mark-an-item).
 
 ### `inbox act`
 
@@ -120,7 +137,18 @@ crewship inbox resolve inbox_abc123       # generic, no action
 crewship inbox archive inbox_abc123       # resolve with action=archived, no decision
 ```
 
-`inbox get <id>` (backed by `GET /api/v1/inbox/{id}`) is the detail counterpart of `list` — it returns the markdown body and the structured `payload` that the list view omits. `inbox archive <id>` maps to a `resolved` PATCH with `resolved_action=archived`; only non-decision kinds (messages, failed-run notices, advisories) archive — the server `409`s an archive on a source-managed waitpoint/escalation.
+`inbox get <id>` (backed by `GET /api/v1/inbox/{id}`) is the detail counterpart of `list` — it returns the markdown body and the structured `payload` that the list view omits. `inbox archive <id>` maps to a `resolved` PATCH with `resolved_action=archived`; only non-decision kinds (messages, failed-run notices, advisories) archive — the server `409`s an archive on a source-managed waitpoint/escalation whose source is still live.
+
+`read` and `unread` are **per user**: the server computes `state` for the caller from `inbox_item_reads`, so marking a role-targeted item read clears it from your feed and nobody else's, and `unread` only drops your own marker. `resolve` and `archive` are workspace-shared — one decision closes the row for everyone. `inbox list` and `inbox get` print the state the server computed for you; the CLI never assumes it locally.
+
+On a `waitpoint` or `escalation`, `inbox get` also reports whether the record that would decide it still exists — `source_missing` in `--format json`, and one line in the human view before the body:
+
+```text
+source live · decide it at the source (`crewship inbox resolve` answers 409 and prints the command)
+source gone · nothing left to decide this — `crewship inbox resolve ibx_01HVZ...` dismisses it
+```
+
+`false` means a pending waitpoint token, a `PENDING_REVIEW` hire or a pending approval still backs the row, and `inbox resolve` will be refused; `true` means the source was pruned and the row may be dismissed from the inbox. The field is present only on `get` (never on `list`) and only for those two kinds; absent means the server did not probe, not that the source is live.
 
 `--format json` on either `list` or `get` also carries the §12 attention contract where a producer has adopted it (work package B10): `thread_key` (the server-side merge key — two producers describing the same recurring condition collapse onto one row instead of the client stitching them together), `attention_class` (`decision` \| `input` \| `review` \| `repair`), and `actions` (`[{"id", "label", "effect", "irreversible"}, ...]`, unioned across every producer that merged into the row). All three are omitted for a kind that has not adopted the contract yet — script against `payload` for those, same as before.
 

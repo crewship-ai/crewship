@@ -382,7 +382,12 @@ Examples:
 			// adopted the contract yet.
 			ThreadKey      string `json:"thread_key,omitempty" yaml:"thread_key,omitempty"`
 			AttentionClass string `json:"attention_class,omitempty" yaml:"attention_class,omitempty"`
-			Actions        []struct {
+			// Detail-only, waitpoint/escalation only: whether a row still exists
+			// that can decide this. A pointer for the same reason the server's
+			// is — false ("checked, the gate is live") must survive the trip,
+			// because it is what predicts the 409 `inbox resolve` would answer.
+			SourceMissing *bool `json:"source_missing,omitempty" yaml:"source_missing,omitempty"`
+			Actions       []struct {
 				ID           string `json:"id" yaml:"id"`
 				Label        string `json:"label" yaml:"label"`
 				Effect       string `json:"effect,omitempty" yaml:"effect,omitempty"`
@@ -445,6 +450,19 @@ Examples:
 			}
 			if item.ResolvedAction != "" {
 				fmt.Printf("%sresolved · %s%s\n", cli.Green, item.ResolvedAction, cli.Reset)
+			}
+			// Same placement and reason as the four-eyes notice below: this
+			// decides whether `inbox resolve` will work on this row at all.
+			// Silent when the server did not run the probe (a list-only kind,
+			// or a pre-#2225 server) rather than guessing.
+			if item.SourceMissing != nil && item.ResolvedAction == "" {
+				if *item.SourceMissing {
+					fmt.Printf("%ssource gone · nothing left to decide this — `crewship inbox resolve %s` dismisses it%s\n",
+						cli.Yellow, item.ID, cli.Reset)
+				} else {
+					fmt.Printf("%ssource live · decide it at the source (`crewship inbox resolve` answers 409 and prints the command)%s\n",
+						cli.Dim, cli.Reset)
+				}
 			}
 			// Before the body, because it decides whether resolving this from
 			// here will work at all. Silent against a pre-#1574 server rather
