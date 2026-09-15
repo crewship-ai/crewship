@@ -521,7 +521,7 @@ export function RoutineRunDetail({ workspaceId, runId }: RoutineRunDetailProps) 
               className={`h-4 w-4 ${banner.tone === "destructive" ? "text-destructive" : banner.tone === "warn" ? "text-warn" : banner.tone === "blue" ? "text-primary" : banner.tone === "success" ? "text-success" : "text-muted-foreground"}`}
             />
           </span>
-          <div className="min-w-0 flex-1">
+          <div className="min-w-0 flex-1 basis-[calc(100%-44px)] md:basis-auto">
             <h2 className="text-sm font-medium">{banner.title}</h2>
             <p className="mt-1 max-w-[85ch] text-xs leading-relaxed text-muted-foreground">
               {banner.detail}

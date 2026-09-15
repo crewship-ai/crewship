@@ -636,53 +636,13 @@ export function RoutineCalendar({
     (_, i) => addDays(from, i),
   )
   return (
-    <section className="space-y-4 rounded-3xl border border-white/[0.06] bg-card p-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h2 className="font-medium">{title}</h2>
-          <p className="text-xs text-muted-foreground">
-            Calendar times · {routineTimeZone()}
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => setDate(dateKey(moveCalendar(anchor, view, -1)))}
-          >
-            Previous
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => setDate(dateKey(new Date()))}
-          >
-            Today
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={loading}
-            onClick={() => setRevision((v) => v + 1)}
-          >
-            Refresh
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => setDate(dateKey(moveCalendar(anchor, view, 1)))}
-          >
-            Next
-          </Button>
-          {canSchedule && (
-            <Button size="sm" onClick={() => plan(anchor)}>
-              Add routine
-            </Button>
-          )}
-        </div>
-      </div>
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <nav aria-label="Calendar views" className="flex flex-wrap gap-1">
+    <section className="space-y-3 rounded-3xl border border-white/[0.06] bg-card p-4">
+      {/* One toolbar, as the prototype draws it: views · ‹ Today › · title · filters. */}
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+        <nav
+          aria-label="Calendar views"
+          className="flex items-center gap-0.5 rounded-md border border-border/60 p-0.5"
+        >
           {CALENDAR_VIEWS.map((v) => (
             <button
               key={v}
@@ -692,17 +652,44 @@ export function RoutineCalendar({
                 setView(v)
               }}
               className={cn(
-                "rounded-full px-3 py-1.5 text-xs",
+                "rounded px-2.5 py-1 text-xs transition-colors",
                 view === v && !agendaDay
-                  ? "bg-muted font-medium"
-                  : "text-muted-foreground hover:bg-muted/60",
+                  ? "bg-primary/15 font-medium text-primary"
+                  : "text-muted-foreground hover:text-foreground",
               )}
             >
               {CALENDAR_LABELS[v]}
             </button>
           ))}
         </nav>
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex items-center gap-0.5 rounded-md border border-border/60 p-0.5">
+          <button
+            type="button"
+            aria-label="Previous"
+            onClick={() => setDate(dateKey(moveCalendar(anchor, view, -1)))}
+            className="rounded px-2 py-1 text-xs text-muted-foreground hover:text-foreground"
+          >
+            ‹
+          </button>
+          <button
+            type="button"
+            onClick={() => setDate(dateKey(new Date()))}
+            className="rounded px-2 py-1 text-xs text-muted-foreground hover:text-foreground"
+          >
+            Today
+          </button>
+          <button
+            type="button"
+            aria-label="Next"
+            onClick={() => setDate(dateKey(moveCalendar(anchor, view, 1)))}
+            className="rounded px-2 py-1 text-xs text-muted-foreground hover:text-foreground"
+          >
+            ›
+          </button>
+        </div>
+        <label className="relative">
+          <span className="sr-only">Go to date</span>
+          <h2 className="cursor-pointer font-medium">{title}</h2>
           <input
             aria-label="Go to date"
             type="date"
@@ -710,39 +697,45 @@ export function RoutineCalendar({
             onChange={(e) => {
               if (parseCalendarDate(e.target.value)) setDate(e.target.value)
             }}
-            className="min-w-0 rounded-md border bg-card p-1 text-xs"
+            className="absolute inset-0 cursor-pointer opacity-0"
           />
-          <div
-            role="group"
-            aria-label="Calendar events"
-            className="flex flex-wrap items-center gap-1.5"
-          >
-            {CALENDAR_FILTERS.map((f) => (
-              <button
-                key={f}
-                type="button"
-                aria-pressed={filter === f}
-                onClick={() => setFilter(f)}
-                className={cn(
-                  "inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] transition-colors",
-                  filter === f
-                    ? "border-primary/40 bg-primary/[0.12] text-primary"
-                    : "border-white/[0.08] bg-white/[0.02] text-muted-foreground hover:text-foreground/80",
-                )}
-              >
-                <span aria-hidden className={cn("h-2 w-2 rounded-full", FILTER_DOT[f])} />
-                <span>{CALENDAR_FILTER_LABELS[f]}</span>
-                <span className="text-[10px] tabular-nums opacity-60">{counts[f]}</span>
-              </button>
-            ))}
-          </div>
+        </label>
+        <span className="text-xs text-muted-foreground">{routineTimeZone()}</span>
+        <div className="flex-1" />
+        <div
+          role="group"
+          aria-label="Calendar events"
+          className="flex flex-wrap items-center gap-1.5"
+        >
+          {CALENDAR_FILTERS.map((f) => (
+            <button
+              key={f}
+              type="button"
+              aria-pressed={filter === f}
+              onClick={() => setFilter(f)}
+              className={cn(
+                "inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] transition-colors",
+                filter === f
+                  ? "border-primary/40 bg-primary/[0.12] text-primary"
+                  : "border-white/[0.08] bg-white/[0.02] text-muted-foreground hover:text-foreground/80",
+              )}
+            >
+              <span aria-hidden className={cn("h-2 w-2 rounded-full", FILTER_DOT[f])} />
+              <span>{CALENDAR_FILTER_LABELS[f]}</span>
+              <span className="text-[10px] tabular-nums opacity-60">{counts[f]}</span>
+            </button>
+          ))}
         </div>
+        {canSchedule && (
+          <Button size="sm" onClick={() => plan(anchor)}>
+            <Plus className="mr-1 h-3.5 w-3.5" />
+            Schedule a start
+          </Button>
+        )}
       </div>
       <p className="text-xs text-muted-foreground">
-        {routineTimeZone()} · <span className="text-primary">blue</span> = planned start, colours
-        = how a run ended. A day with many starts shows one row per routine with a count; open
-        the day for every start.
-        {canSchedule && " Click + to schedule a routine."}
+        <span className="text-primary">Blue</span> = planned start, colours = how a run ended.
+        A busy day shows one row per routine with a count; open the day for every start.
       </p>
       {loading && <p role="status">Loading calendar…</p>}
       {error && (
