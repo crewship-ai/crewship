@@ -1,10 +1,6 @@
 package database
 
 import (
-	"context"
-	"io"
-	"log/slog"
-	"path/filepath"
 	"testing"
 )
 
@@ -13,16 +9,7 @@ import (
 // no agent_id (the model is per operator, not per agent+operator), and
 // the UNIQUE constraint enforced.
 func TestMigrateV112_UserModelsSchema(t *testing.T) {
-	dir := t.TempDir()
-	db, err := Open("file:" + filepath.Join(dir, "v112.db"))
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	defer db.Close()
-	silent := slog.New(slog.NewTextHandler(io.Discard, nil))
-	if err := Migrate(context.Background(), db.DB, silent); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
+	db := openMigratedTestDB(t)
 
 	// Seed FK targets.
 	if _, err := db.Exec(`INSERT INTO workspaces (id, name, slug) VALUES ('ws1','W','w'),('ws2','W2','w2')`); err != nil {

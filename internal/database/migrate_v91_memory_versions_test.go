@@ -1,10 +1,6 @@
 package database
 
 import (
-	"context"
-	"io"
-	"log/slog"
-	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -14,17 +10,7 @@ import (
 // every documented value, an unknown tier is rejected, and the
 // (workspace_id, path, written_at DESC) index covers the log query.
 func TestMigrateV90_MemoryVersionsSchema(t *testing.T) {
-	dir := t.TempDir()
-	db, err := Open("file:" + filepath.Join(dir, "v90.db"))
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	defer db.Close()
-
-	silent := slog.New(slog.NewTextHandler(io.Discard, nil))
-	if err := Migrate(context.Background(), db.DB, silent); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
+	db := openMigratedTestDB(t)
 
 	wantCols := map[string]string{
 		"id":           "TEXT",

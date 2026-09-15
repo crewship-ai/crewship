@@ -112,17 +112,8 @@ func TestDefaultDataDir_UsesHomeDir(t *testing.T) {
 
 func TestSeedBundledSkills_Idempotent(t *testing.T) {
 	t.Parallel()
-	dir := t.TempDir()
-	db, err := Open("file:" + filepath.Join(dir, "seed.db"))
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	t.Cleanup(func() { db.Close() })
-
+	db := openMigratedTestDB(t)
 	logger := newSilentLogger()
-	if err := Migrate(context.Background(), db.DB, logger); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
 
 	if err := SeedBundledSkills(context.Background(), db.DB, logger); err != nil {
 		t.Fatalf("seed first run: %v", err)
@@ -149,16 +140,8 @@ func TestSeedBundledSkills_Idempotent(t *testing.T) {
 
 func TestSeedBuiltinTemplates_Idempotent(t *testing.T) {
 	t.Parallel()
-	dir := t.TempDir()
-	db, err := Open("file:" + filepath.Join(dir, "tpl.db"))
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	t.Cleanup(func() { db.Close() })
+	db := openMigratedTestDB(t)
 	logger := newSilentLogger()
-	if err := Migrate(context.Background(), db.DB, logger); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
 
 	if _, err := db.Exec(`INSERT INTO workspaces (id, name, slug) VALUES ('ws1', 'WS', 'ws')`); err != nil {
 		t.Fatalf("seed workspace: %v", err)
@@ -189,16 +172,8 @@ func TestSeedBuiltinTemplates_Idempotent(t *testing.T) {
 
 func TestSeedBuiltinCrewTemplates_Idempotent(t *testing.T) {
 	t.Parallel()
-	dir := t.TempDir()
-	db, err := Open("file:" + filepath.Join(dir, "ct.db"))
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	t.Cleanup(func() { db.Close() })
+	db := openMigratedTestDB(t)
 	logger := newSilentLogger()
-	if err := Migrate(context.Background(), db.DB, logger); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
 
 	if err := SeedBuiltinCrewTemplates(context.Background(), db.DB, logger); err != nil {
 		t.Fatalf("seed first: %v", err)
@@ -237,17 +212,8 @@ func TestGenerateSeedID_FormatAndUniqueness(t *testing.T) {
 
 func TestRollbackV47_Idempotent(t *testing.T) {
 	t.Parallel()
-	dir := t.TempDir()
-	db, err := Open("file:" + filepath.Join(dir, "rb.db"))
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	t.Cleanup(func() { db.Close() })
-
+	db := openMigratedTestDB(t)
 	logger := newSilentLogger()
-	if err := Migrate(context.Background(), db.DB, logger); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
 
 	if err := RollbackV47(context.Background(), db.DB, logger); err != nil {
 		t.Fatalf("rollback first: %v", err)

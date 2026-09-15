@@ -1,10 +1,6 @@
 package database
 
 import (
-	"context"
-	"io"
-	"log/slog"
-	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -29,16 +25,7 @@ import (
 // rows, NULL out their capabilities column (legacy state), then
 // re-run the backfill query and assert the resulting bundle.
 func TestMigrateV109_MemberCapabilitiesBackfill(t *testing.T) {
-	dir := t.TempDir()
-	db, err := Open("file:" + filepath.Join(dir, "v109.db"))
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	defer db.Close()
-	silent := slog.New(slog.NewTextHandler(io.Discard, nil))
-	if err := Migrate(context.Background(), db.DB, silent); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
+	db := openMigratedTestDB(t)
 
 	// Seed FK targets — one workspace, five users, one membership row
 	// per role tier so we can assert the bundle for each.
@@ -71,7 +58,7 @@ func TestMigrateV109_MemberCapabilitiesBackfill(t *testing.T) {
 	if _, err := db.Exec(`UPDATE workspace_members SET capabilities = NULL`); err != nil {
 		t.Fatalf("null caps: %v", err)
 	}
-	_, err = db.Exec(migrationMemberCapabilities)
+	_, err := db.Exec(migrationMemberCapabilities)
 	if err != nil {
 		// narrow the catch-all. The ONLY expected
 		// failure mode here is the ALTER complaining about the

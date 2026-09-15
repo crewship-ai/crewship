@@ -18,16 +18,7 @@ import (
 // fixture.
 func migrateChainSetup(t *testing.T) *DB {
 	t.Helper()
-	dir := t.TempDir()
-	db, err := Open("file:" + filepath.Join(dir, "v92.db"))
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	if err := Migrate(context.Background(), db.DB, logger); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
+	db := openMigratedTestDB(t)
 	return db
 }
 
