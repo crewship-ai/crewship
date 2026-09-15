@@ -724,13 +724,13 @@ func (h *QueryHandler) ResolveEscalation(w http.ResponseWriter, r *http.Request)
 	// stays at notice (not warn) because the ongoing-attention signal
 	// ended — filters on "warn+ only" will drop this correctly.
 	//
-	// CRITICAL: CREDENTIAL escalations carry secret material in
-	// body.Resolution (that's why the storage path above encrypts it
-	// before writing to the escalations table). Never write the raw
-	// value into the journal payload — the journal is a broadcast
-	// stream visible to every workspace reader. Replace with an
-	// opaque marker instead; the encrypted value in `escalations.
-	// resolution` stays the canonical record.
+	// A CREDENTIAL escalation's resolution is stored as NULL (#2376, the
+	// storage path above) and a non-empty body.Resolution on one is refused
+	// before we get here — the human-typed secret used to be encrypted into
+	// `escalations.resolution` and echoed as an opaque marker in the
+	// journal, and neither path exists any more. The journal field is
+	// blanked below so the broadcast stream never carries even a marker
+	// that pretends a decision value exists.
 	//
 	// Every OTHER type still writes body.Resolution — an operator-supplied
 	// free-text field — straight into the same permanent, hash-chained

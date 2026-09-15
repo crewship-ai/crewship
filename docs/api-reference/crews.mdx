@@ -1307,9 +1307,23 @@ GET /api/v1/crews/{crewId}/assignments?workspace_id={workspaceId}
 
 **Request:** `crewId` is a required path parameter and `workspace_id` is the workspace query parameter. No request body.
 
-List task assignments for a crew.
+List task assignments for a crew, newest first. `limit` (default 50, max 100)
+and `offset` page through the rows.
 
-**Response:** `200 OK` -- array of assignment objects.
+**Response:** `200 OK` -- a bare array of assignment objects:
+
+| Field | Type | Notes |
+|---|---|---|
+| `id` | string | |
+| `task` | string | The task text as dispatched. |
+| `status` | string | `PENDING`, `QUEUED`, `RUNNING`, `COMPLETED`, `FAILED`, `CANCELLED`. |
+| `assigned_by_name` / `assigned_by_slug` | string | The dispatching agent. |
+| `assigned_to_name` / `assigned_to_slug` | string | The assignee. |
+| `result_summary` | string \| null | Set on completion. |
+| `error_message` | string \| null | Set on failure. |
+| `queued_reason` | `"crew_budget"` \| `"agent_busy"` \| omitted | Why a `QUEUED` row is waiting (#2269): `crew_budget` — the crew's concurrency budget was full when the row was dispatched, and the queue pump will claim it FIFO as budget frees; `agent_busy` — the assignee already had a live run, so the dispatch was parked behind it and is drained by the completion pump. Omitted (stored `NULL`) on every other status. `crewship crew status` renders it as `QUEUED (agent_busy)`. |
+| `started_at` / `finished_at` | RFC3339 \| null | |
+| `created_at` | RFC3339 | |
 
 ---
 

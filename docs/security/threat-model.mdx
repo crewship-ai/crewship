@@ -320,9 +320,15 @@ into a second `peer.escalation` entry if the question is never answered
 identical scrub-then-cap treatment there, not only on the create path.
 `ResolveEscalation`'s closing `peer.escalation` entry scrubs and caps its
 `resolution` field the same way for every escalation type except
-`CREDENTIAL`, whose resolution carries the encrypted secret itself and is
-replaced with an opaque marker instead of being scrubbed (the plaintext
-never reaches the journal at all in that case).
+`CREDENTIAL`, which stores **no resolution at all**: the column is written
+as `NULL` and a non-empty `resolution` on a `CREDENTIAL` escalation is
+refused with `400` (#2376). The value goes through
+`POST /api/v1/escalations/{id}/supply` (`crewship escalation supply`) into
+the vault, and the agent is handed a credential name, never the value — so
+`escalations.resolution` never holds an envelope and the journal entry's
+`resolution` is empty rather than a marker. See
+[Credential Encryption](/security/encryption) and the
+[Credentials guide](/guides/credentials).
 
 For the keeper credential-use path (`/execute`), the scrubber additionally
 masks the **injected secret's own value** and its common encodings — literal,

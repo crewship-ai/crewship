@@ -30,7 +30,7 @@ crewship backup <subcommand> [flags]
 | `list` | List bundles in the server's default backups directory (`$CREWSHIP_DATA_DIR/backups`, or `~/.crewship/backups` if unset). |
 | `download` | Stream a backup bundle from the server to disk. |
 | `inspect` | Show the manifest of a bundle without decrypting the payload. |
-| `verify` | Recompute and check the bundle SHA-256 without restoring. |
+| `verify` | Check the bundle SHA-256 and, for an unencrypted bundle, that the payload's per-table row counts match the manifest — without restoring. |
 | `restore` | Restore a workspace or crew from a bundle. |
 | `rotate` | Apply retention — drop bundles over `--keep-last` / `--keep-days`. |
 | `delete` | Remove a single bundle from disk. |
@@ -123,12 +123,37 @@ crewship backup inspect ~/.crewship/backups/crewship-workspace-acme-...tar.zst
 ## `crewship backup verify`
 
 Recompute the SHA-256 of the sealed payload and check it against the
-manifest. Confirms the bundle was not truncated or tampered with. Does
-not decrypt or restore anything.
+manifest — confirms the bundle was not truncated or tampered with. For an
+**unencrypted** bundle it also checks completeness: the payload's actual
+per-table row counts against the counts the manifest recorded when the
+bundle was written. A table whose counts diverge (a create-side scoping
+bug, or corruption that kept the checksum) makes the bundle `INVALID`,
+and each mismatch is listed as `table: manifest recorded N row(s),
+payload carries M`. Never restores anything.
 
 ```bash
 crewship backup verify ~/.crewship/backups/crewship-workspace-acme-...tar.zst
 ```
+
+Three outcomes, and the difference matters:
+
+```text
+✓ VALID — …tar.zst (12.4 MB) — payload row counts match the manifest
+✓ VALID — …tar.zst (12.4 MB) — checksum only
+⚠ Completeness NOT verified: bundle is encrypted; verify does not decrypt the payload, so row counts cannot be inspected — run `crewship backup restore <file> --dry-run` with the passphrase for a completeness check
+✗ INVALID — …tar.zst: backup: payload row counts do not match the manifest: 1 table(s)
+  issues: manifest recorded 312 row(s), payload carries 0
+```
+
+`checksum only` is printed whenever the row-count comparison could not run —
+an encrypted bundle (verify never decrypts), or a bundle written before the
+manifest carried `table_row_counts` — and the warning names why. It means
+**not evaluated**, never "complete". [`backup restore --dry-run`](#crewship-backup-restore)
+decrypts and makes the same comparison. `--format json` carries the raw
+fields: `valid`, `size_bytes`, `error`, `completeness_checked`,
+`completeness_skip_reason`, `table_row_count_mismatches`
+(see the [API reference](/api-reference/backup#inspect-verify-and-self-test)).
+Exit status is non-zero on `INVALID`.
 
 ---
 
