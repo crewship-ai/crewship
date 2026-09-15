@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next"
 import { Open_Sans } from "next/font/google"
 import { Providers } from "@/components/providers"
+import { HISTORY_NAVIGATION_GUARD_SCRIPT } from "@/lib/navigation-history-guard"
 import "./globals.css"
 
 const openSans = Open_Sans({
@@ -46,6 +47,9 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" className="dark">
+      <head>
+        <script id="crewship-history-guard" dangerouslySetInnerHTML={{ __html: HISTORY_NAVIGATION_GUARD_SCRIPT }} />
+      </head>
       <body className={`${openSans.variable} font-sans antialiased`}>
         <Providers>{children}</Providers>
       </body>

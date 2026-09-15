@@ -119,6 +119,14 @@ export function RoutineCardDetail({
     version: number
   } | null>(null)
   const openEditor = React.useCallback(() => setView("edit"), [setView])
+  const editButtonRef = React.useRef<HTMLButtonElement>(null)
+  const wasEditing = React.useRef(editing)
+  React.useEffect(() => {
+    if (!editing && wasEditing.current) {
+      editButtonRef.current?.focus()
+    }
+    wasEditing.current = editing
+  }, [editing])
   React.useEffect(() => {
     if (editRequest > 0 && canEdit) openEditor()
   }, [editRequest, canEdit, openEditor])
@@ -216,6 +224,7 @@ export function RoutineCardDetail({
         workspaceId={workspaceId}
         onChanged={onChanged}
         onEdit={canEdit ? openEditor : undefined}
+        editButtonRef={editButtonRef}
         actions={actions}
       >
         {routine.ephemeral && <Pill tone="warn">ephemeral</Pill>}

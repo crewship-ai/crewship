@@ -198,6 +198,76 @@ beforeEach(() => {
   vi.clearAllMocks()
 })
 describe("shared routine editor", () => {
+  it("closes an unchanged loaded draft without claiming its saved work will be lost", async () => {
+    h.linked = true
+    h.linkedExisting = true
+    render(<RoutineCreateDialog {...props} />)
+    await waitFor(() => expect(screen.getByLabelText("Name")).toHaveValue("Draft from Chat"))
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }))
+    expect(props.onClose).toHaveBeenCalledOnce()
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument()
+  })
+
+  it("does not block reload for an unchanged durable draft", async () => {
+    h.linked = true
+    h.linkedExisting = true
+    render(<RoutineCreateDialog {...props} />)
+    await waitFor(() => expect(screen.getByLabelText("Name")).toHaveValue("Draft from Chat"))
+    const unload = new Event("beforeunload", { cancelable: true })
+    window.dispatchEvent(unload)
+    expect(unload.defaultPrevented).toBe(false)
+  })
+
+  it.each([false, true])("guards browser Back before the editor can unmount (discard=%s)", async (discard) => {
+    const previousHref = window.location.href
+    const previousState = window.history.state
+    const editorHref = "/routines?slug=existing&view=edit"
+    const editorState = { retainedRouterState: true }
+    window.history.replaceState(editorState, "", editorHref)
+    const originalConfirm = window.confirm
+    const confirm = vi.fn(() => discard)
+    window.confirm = confirm
+    const routerPop = vi.fn()
+    window.addEventListener("popstate", routerPop)
+    try {
+      h.linked = true
+      h.linkedExisting = true
+      render(<RoutineCreateDialog {...props} />)
+      await waitFor(() => expect(screen.getByLabelText("Name")).toHaveValue("Draft from Chat"))
+      fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Unsaved navigation" } })
+      window.history.replaceState({ previousEntry: true }, "", "/routines?slug=existing")
+      window.dispatchEvent(new PopStateEvent("popstate"))
+      expect(confirm).toHaveBeenCalledOnce()
+      expect(routerPop).toHaveBeenCalledTimes(discard ? 1 : 0)
+      if (discard) {
+        expect(window.location.search).toBe("?slug=existing")
+        expect(window.history.state).toEqual({ previousEntry: true })
+      } else {
+        // The standalone root blocks the router; the head dispatcher owns
+        // compensating traversal (covered with a complete history stack).
+        expect(screen.getByLabelText("Name")).toHaveValue("Unsaved navigation")
+      }
+    } finally {
+      window.removeEventListener("popstate", routerPop)
+      window.confirm = originalConfirm
+      window.history.replaceState(previousState, "", previousHref)
+    }
+  })
+
+  it("moves the metadata baseline after Save draft, but still guards later edits", async () => {
+    render(<RoutineCreateDialog {...props} />)
+    await waitFor(() => expect(screen.queryByText("Loading saved draft…")).not.toBeInTheDocument())
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Saved name" } })
+    fireEvent.click(screen.getByRole("button", { name: "Save draft" }))
+    await screen.findByText(/Saved draft · Publish/)
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }))
+    expect(props.onClose).toHaveBeenCalledOnce()
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Unsaved name" } })
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }))
+    expect(props.onClose).toHaveBeenCalledOnce()
+    expect(screen.getByRole("alertdialog")).toHaveTextContent(/saved draft.*remain/i)
+  })
+
   it("will not publish an existing linked draft without a readable comparison baseline", async () => {
     h.linked = true; h.linkedExisting = true; h.baselineFails = true
     render(<RoutineCreateDialog {...props} routine={undefined} savedDraftLink={{slug:"existing", id:"ai-draft-1", workspaceId:"ws1"}} />)
@@ -255,9 +325,9 @@ describe("shared routine editor", () => {
     })
     expect(screen.queryByText("Existing schedules")).not.toBeInTheDocument()
     expect(
-      screen.queryByRole("button", { name: "Continue", exact: true }),
+      screen.queryByRole("button", { name: "Continue" }),
     ).not.toBeInTheDocument()
-    fireEvent.click(screen.getByRole("button", { name: "Code", exact: true }))
+    fireEvent.click(screen.getByRole("button", { name: "Code" }))
     fireEvent.click(screen.getByRole("button", { name: "Back to recipe" }))
     expect(screen.getByLabelText("Name")).toHaveValue("Draft name")
     expect(
@@ -335,7 +405,7 @@ describe("shared routine editor", () => {
     fireEvent.change(screen.getByLabelText("Name"), {
       target: { value: "Unfinished draft" },
     })
-    fireEvent.click(screen.getByRole("button", { name: "Save draft", exact: true }))
+    fireEvent.click(screen.getByRole("button", { name: "Save draft" }))
     await screen.findByText(/Saved draft/)
     expect(
       h.calls.some(
@@ -357,7 +427,7 @@ describe("shared routine editor", () => {
     fireEvent.change(screen.getByLabelText("Name"), {
       target: { value: "Keep my edit" },
     })
-    fireEvent.click(screen.getByRole("button", { name: "Save draft", exact: true }))
+    fireEvent.click(screen.getByRole("button", { name: "Save draft" }))
     await screen.findByText(/Another editor saved this draft/)
     expect(screen.getByLabelText("Name")).toHaveValue("Keep my edit")
     expect(h.calls.some((c) => c.url.endsWith("/publish"))).toBe(false)
@@ -398,7 +468,7 @@ describe("shared routine editor", () => {
     await waitFor(() =>
       expect(screen.getByLabelText("Name")).toHaveValue("Draft from Chat"),
     )
-    fireEvent.click(screen.getByRole("button", { name: "Save draft", exact: true }))
+    fireEvent.click(screen.getByRole("button", { name: "Save draft" }))
     await waitFor(() =>
       expect(h.calls.some((c) => c.url.endsWith("/drafts") && c.body.document)).toBe(
         true,
@@ -423,10 +493,10 @@ describe("shared routine editor", () => {
       />,
     )
     await screen.findByText(/draft link is no longer current/)
-    expect(screen.getByRole("button", { name: "Save draft", exact: true })).toBeDisabled()
-    expect(screen.getByRole("button", { name: "Publish", exact: true })).toBeDisabled()
+    expect(screen.getByRole("button", { name: "Save draft" })).toBeDisabled()
+    expect(screen.getByRole("button", { name: "Publish" })).toBeDisabled()
   })
-  it("opens a historical version as an unsaved draft", () => {
+  it("opens a historical version as an unsaved draft", async () => {
     render(
       <RoutineCreateDialog
         {...props}
@@ -435,6 +505,10 @@ describe("shared routine editor", () => {
     )
     expect(screen.queryByText("1. work")).not.toBeInTheDocument()
     expect(h.calls.some((c) => c.url.endsWith("/publish"))).toBe(false)
+    await waitFor(() => expect(screen.queryByText("Loading saved draft…")).not.toBeInTheDocument())
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }))
+    expect(screen.getByRole("alertdialog")).toBeInTheDocument()
+    expect(props.onClose).not.toHaveBeenCalled()
   })
 })
 
