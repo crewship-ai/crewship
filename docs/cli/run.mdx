@@ -25,7 +25,7 @@ Each invocation creates a new chat by default (origin=`CLI`, so the web UI sideb
 | `run <agent-slug> [prompt]` | Start (or continue) a streamed run. |
 | `run list` | List recent runs across every agent in the workspace (`GET /api/v1/runs`). |
 | `run get <run-id>` | One run in detail, including session provenance (`GET /api/v1/runs/{id}`). |
-| `run insights` | Fleet-ops snapshot over a window — outcome split, duration percentiles, and breakdowns by trigger/crew/model across **all** runs (`GET /api/v1/runs/insights`). |
+| `run insights` | Fleet-ops snapshot over a window — outcome split, duration percentiles, and breakdowns by trigger/crew/model across the workspace's **ad-hoc agent runs** (`GET /api/v1/runs/insights`). Routine runs are listed by `run list` but not aggregated here. |
 
 ### Session provenance
 
@@ -35,6 +35,7 @@ Each invocation creates a new chat by default (origin=`CLI`, so the web UI sideb
 $ crewship run get msg_1786552750441963636_4bd885e80dc9485e
 ID:               msg_1786552750441963636_4bd885e80dc9485e
 Status:           COMPLETED
+Kind:             agent
 Agent:            riley
 Model:            claude-haiku-4-5
 CLI version:      2.1.204
@@ -158,10 +159,17 @@ Saved bytes are sanitised — any ANSI / OSC sequences a tool result emitted are
 
 ```bash
 crewship run list
-# ID                AGENT      STATUS     TRIGGER  CREATED              FINISHED
-# r_xxxxxxx         daniel     COMPLETED  CLI      2026-05-19 14:02     2026-05-19 14:04
-# r_yyyyyyy         viktor     RUNNING    CLI      2026-05-19 14:18     -
+# ID                AGENT      STATUS     KIND      TRIGGER  CREATED              FINISHED
+# r_xxxxxxx         daniel     COMPLETED  agent     CLI      2026-05-19 14:02     2026-05-19 14:04
+# r_yyyyyyy         viktor     RUNNING    agent     CLI      2026-05-19 14:18     -
+# prun_zzzzzz       viktor     COMPLETED  pipeline           2026-05-19 13:00     2026-05-19 13:01
 ```
+
+`KIND` says which engine produced the row: `agent` for an ad-hoc agent/chat run,
+`pipeline` for a routine run (#2284). A routine run's `TRIGGER` cell is empty —
+the pipeline engine does not populate it — so the column is how a script tells
+the two apart without guessing. `run get` shows the same value as its `Kind:`
+row.
 
 Use `--format json` for piping (`crewship run list --format json | jq '.[] | select(.status=="FAILED")'`).
 
@@ -170,17 +178,27 @@ Use `--format json` for piping (`crewship run list --format json | jq '.[] | sel
 ```bash
 crewship run insights
 crewship run insights --window 7d
-crewship run insights --window 30d --format json
+crewship run insights --crew backend
+crewship run insights --agent viktor --window 30d --format json
 ```
 
-`run insights` aggregates **every** run in the workspace (not just routine runs)
-over a window into an ops snapshot: success/fail split, duration percentiles
-(p50/p95), and breakdowns by trigger, crew, and model. Backed by
-`GET /api/v1/runs/insights?window=<w>`.
+`run insights` aggregates the workspace's **ad-hoc agent runs** — chat, CLI,
+webhook and cron invocations of an agent — over a window into an ops snapshot:
+success/fail split, duration percentiles (p50/p95), and breakdowns by trigger,
+crew, and model. Routine runs are **not** counted: `run list` reads both engines
+(#2284), but the insights aggregate and the `stats` tiles were deliberately left
+ad-hoc-only, so a workspace that only runs routines reports `No runs in this
+window` here. Backed by `GET /api/v1/runs/insights?window=<w>`.
 
 | Flag | Default | Effect |
 | --- | --- | --- |
 | `--window <w>` | `24h` | Aggregation window — one of `24h`, `7d`, `30d`. |
+| `--agent <slug-or-id>` | — | Only this agent's runs. Resolved to an id before the request; an unknown agent is refused with a `Did you mean` hint rather than answered with an empty snapshot. Sent as `agent_id`. |
+| `--crew <slug-or-id>` | — | Only this crew's runs. Resolved the same way; sent as `crew_id`. Combines with `--agent` (AND). |
+
+The scope is applied **before** the aggregate is computed, so totals,
+percentiles and every breakdown describe that agent or crew alone — not a
+workspace-wide snapshot with one section filtered.
 
 Honours the global `--format json` / `--format yaml` / `--format ndjson` for
 scripting; the default is a human-readable table.

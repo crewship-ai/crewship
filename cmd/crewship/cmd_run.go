@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"net/url"
 	"os"
 	"os/signal"
 	"strings"
@@ -782,7 +783,7 @@ rather than shown blank.
 
 Examples:
   crewship run get msg_abc
-  crewship run get msg_abc -o json`,
+  crewship run get msg_abc -f json`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		client, err := requireAuthAndWorkspace()
@@ -947,15 +948,20 @@ type insightAgent struct {
 
 var runInsightsCmd = &cobra.Command{
 	Use:   "insights",
-	Short: "Fleet operations overview — outcome, duration, and breakdowns across ALL runs",
-	Long: `Aggregate every run in the workspace over a window (not just routine runs)
-into an operations snapshot: success/fail split, duration percentiles, and
-breakdowns by trigger, crew and model.
+	Short: "Fleet operations overview — outcome, duration, and breakdowns across agent runs",
+	Long: `Aggregate the workspace's ad-hoc agent runs (chat, CLI, webhook, cron — not
+routine runs; see 'crewship routine') over a window into an operations
+snapshot: success/fail split, duration percentiles, and breakdowns by trigger,
+crew and model.
+
+--agent and --crew narrow the aggregate BEFORE it is computed, so the totals
+and every breakdown describe that scope alone. Both take a slug or an id.
 
 Examples:
   crewship run insights
   crewship run insights --window 7d
-  crewship run insights -o json`,
+  crewship run insights --crew backend
+  crewship run insights --agent viktor --window 30d -f json`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := requireAuth(); err != nil {
 			return err
@@ -971,7 +977,27 @@ Examples:
 		}
 
 		client := newAPIClient()
-		resp, err := client.Get("/api/v1/runs/insights?window=" + window)
+		params := url.Values{}
+		params.Set("window", window)
+		// The server scopes on ids (journal.RunInsightsScoped matches
+		// agent_id / crew_id on run.started), so a slug is resolved here —
+		// and an unknown one is refused up front rather than sent through to
+		// come back as an empty snapshot that reads as "no runs".
+		if v, _ := cmd.Flags().GetString("agent"); v != "" {
+			agentID, err := resolveAgentID(client, v)
+			if err != nil {
+				return err
+			}
+			params.Set("agent_id", agentID)
+		}
+		if v, _ := cmd.Flags().GetString("crew"); v != "" {
+			crewID, err := resolveCrewID(client, v)
+			if err != nil {
+				return err
+			}
+			params.Set("crew_id", crewID)
+		}
+		resp, err := client.Get("/api/v1/runs/insights?" + params.Encode())
 		if err != nil {
 			return err
 		}
@@ -1090,6 +1116,8 @@ func init() {
 	runCmd.Flags().Bool("show-thinking", false, "Surface reasoning blocks on stdout (not truncated)")
 
 	runInsightsCmd.Flags().String("window", "24h", "Aggregation window: 24h, 7d, or 30d")
+	runInsightsCmd.Flags().String("agent", "", "Only this agent's runs (slug or ID)")
+	runInsightsCmd.Flags().String("crew", "", "Only this crew's runs (slug or ID)")
 	runCmd.AddCommand(runListCmd)
 	runCmd.AddCommand(runGetCmd)
 	runCmd.AddCommand(runInsightsCmd)
