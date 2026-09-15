@@ -29,8 +29,12 @@ import (
 // Author identity is INJECTED by the sidecar from IPC config; any
 // caller-supplied author_* fields are silently overwritten.
 type pipelinesSaveRequest struct {
-	Name         string          `json:"name"`
-	Description  string          `json:"description"`
+	Name string `json:"name"`
+	// Pointer so an agent that omits the field is forwarded as an omission,
+	// which the main API reads as "keep the stored description"; an explicit
+	// "" is forwarded as "" and clears it (#2405). A plain string here sent
+	// "" on every omission and erased human-written descriptions on re-save.
+	Description  *string         `json:"description,omitempty"`
 	Definition   json.RawMessage `json:"definition"`
 	SampleInputs map[string]any  `json:"sample_inputs"`
 	// Crew is the ONE identity field an agent may supply, and it is not a
@@ -195,11 +199,10 @@ func (s *Server) savePipeline(ctx context.Context, body pipelinesSaveRequest, au
 	// proof-of-test — InternalSave no longer trusts a body-supplied
 	// last_test_run_passed flag (#1371). If the test_run minted no token
 	// (secret unwired), the save fails the gate closed, which is correct.
-	saveBody, err := json.Marshal(map[string]any{
+	saveFields := map[string]any{
 		"workspace_id":     s.ipc.WorkspaceID,
 		"slug":             slug,
 		"name":             body.Name,
-		"description":      body.Description,
 		"definition":       body.Definition,
 		"author_crew_id":   s.ipc.CrewID,
 		"author_agent_id":  authorAgentID,
@@ -211,7 +214,13 @@ func (s *Server) savePipeline(ctx context.Context, body pipelinesSaveRequest, au
 		// — the sidecar only relays what the agent asked for.
 		"trigger":    body.Trigger,
 		"activation": body.Activation,
-	})
+	}
+	// Only relay description when the agent sent it: the key's absence is
+	// the "preserve" signal on the far side (#2405).
+	if body.Description != nil {
+		saveFields["description"] = *body.Description
+	}
+	saveBody, err := json.Marshal(saveFields)
 	if err != nil {
 		return http.StatusInternalServerError, mustJSON(map[string]string{"error": "marshal save body"})
 	}

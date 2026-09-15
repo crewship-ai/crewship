@@ -553,10 +553,14 @@ func (h *PipelineHandler) Rollback(w http.ResponseWriter, r *http.Request) {
 // is enforced by the handler — the sidecar must call test_run
 // first and pass the resulting timestamp through.
 type internalSaveRequest struct {
-	WorkspaceID   string          `json:"workspace_id"`
-	Slug          string          `json:"slug"`
-	Name          string          `json:"name"`
-	Description   string          `json:"description"`
+	WorkspaceID string `json:"workspace_id"`
+	Slug        string `json:"slug"`
+	Name        string `json:"name"`
+	// Pointer, as on userSaveRequest (#2373): an omitted field preserves the
+	// stored description on re-save, an explicit "" clears it. An agent
+	// re-emitting a definition without a description must not erase the one
+	// a human wrote (#2405).
+	Description   *string         `json:"description,omitempty"`
 	Definition    json.RawMessage `json:"definition"`
 	AuthorCrewID  string          `json:"author_crew_id"`
 	AuthorAgentID string          `json:"author_agent_id"`
@@ -1096,12 +1100,17 @@ func (h *PipelineHandler) InternalSave(w http.ResponseWriter, r *http.Request) {
 	// run) + an inbox review item; safe → 'active' as before.
 	risky, riskReasons := h.classifyRoutineRisk(r.Context(), body.WorkspaceID, body.AuthorCrewID, dsl)
 
+	description := ""
+	if body.Description != nil {
+		description = *body.Description
+	}
 	in := pipeline.SaveInput{
-		WorkspaceID:    body.WorkspaceID,
-		Slug:           body.Slug,
-		Name:           body.Name,
-		Description:    body.Description,
-		DefinitionJSON: string(body.Definition),
+		WorkspaceID:         body.WorkspaceID,
+		Slug:                body.Slug,
+		Name:                body.Name,
+		Description:         description,
+		PreserveDescription: body.Description == nil,
+		DefinitionJSON:      string(body.Definition),
 		Author: pipeline.AuthorMeta{
 			CrewID:  body.AuthorCrewID,
 			AgentID: body.AuthorAgentID,
