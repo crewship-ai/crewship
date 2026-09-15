@@ -10,9 +10,10 @@ package api
 // governance proposal in pipeline_governance.go, which is about whether the
 // DEFINITION may run at all, not whether its trigger may fire yet).
 //
-// Only trigger.kind "schedule" and "manual" are supported today. Webhook
-// and automation-binding triggers are a follow-up (routine-author SKILL.md
-// and docs/guides/routines.mdx say so) — see pipeline.TriggerKind.
+// Only trigger.kind "schedule", "manual" and "once" (a single fire_at start,
+// #2460) are supported today. Webhook and automation-binding triggers are a
+// follow-up (routine-author SKILL.md and docs/guides/routines.mdx say so) —
+// see pipeline.TriggerKind.
 
 import (
 	"context"
@@ -56,9 +57,9 @@ func triggerInputFromBody(trigger *triggerRequestBody, activation string) (*pipe
 	switch kind {
 	case pipeline.TriggerKindSchedule, pipeline.TriggerKindManual, pipeline.TriggerKindOnce:
 	case "":
-		return nil, errors.New(`trigger.kind is required ("schedule" or "manual")`)
+		return nil, errors.New(`trigger.kind is required ("schedule", "manual" or "once")`)
 	default:
-		return nil, fmt.Errorf(`unsupported trigger.kind %q (must be "schedule" or "manual")`, trigger.Kind)
+		return nil, fmt.Errorf(`unsupported trigger.kind %q (must be "schedule", "manual" or "once")`, trigger.Kind)
 	}
 	if activation != "" && activation != pipeline.TriggerActivationDraft {
 		return nil, fmt.Errorf(`unsupported activation %q (must be omitted or "draft")`, activation)
