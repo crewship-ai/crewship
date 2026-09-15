@@ -49,6 +49,9 @@ const mockProjects = [
   },
 ]
 
+// Typed so `mock.calls` yields [url, init] tuples the POST-finding predicates can read.
+type FetchStub = (url: string, init?: RequestInit) => Promise<{ ok: boolean; json: () => Promise<unknown> }>
+
 const defaultProps = {
   open: true,
   onOpenChange: vi.fn(),
@@ -129,12 +132,12 @@ describe("CreateIssueModal", () => {
   })
 
   it("submits issue with correct payload", async () => {
-    const mockFetch = vi.fn()
+    const mockFetch = vi.fn<FetchStub>()
       // First call: fetch agents
       .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve([]) })
       // Second call: create issue
       .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ id: "issue-1" }) })
-    global.fetch = mockFetch
+    global.fetch = mockFetch as unknown as typeof fetch
 
     render(<CreateIssueModal {...defaultProps} />)
 
@@ -176,7 +179,7 @@ describe("CreateIssueModal", () => {
       init?.method === "POST"
         ? Promise.resolve({ ok: true, json: () => Promise.resolve({ id: "issue-1" }) })
         : Promise.resolve({ ok: true, json: () => Promise.resolve([]) }),
-    )
+    ) as unknown as typeof fetch
 
     render(
       <CreateIssueModal {...defaultProps} onCreated={onCreated} onOpenChange={onOpenChange} />
@@ -199,7 +202,7 @@ describe("CreateIssueModal", () => {
       init?.method === "POST"
         ? Promise.resolve({ ok: false, json: () => Promise.resolve({ detail: "Server error" }) })
         : Promise.resolve({ ok: true, json: () => Promise.resolve([]) }),
-    )
+    ) as unknown as typeof fetch
 
     render(<CreateIssueModal {...defaultProps} />)
 
@@ -260,10 +263,10 @@ describe("CreateIssueModal", () => {
   })
 
   it("still POSTs the same create-issue request from the shell footer", async () => {
-    const mockFetch = vi.fn()
+    const mockFetch = vi.fn<FetchStub>()
       .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve([]) })
       .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ id: "issue-1" }) })
-    global.fetch = mockFetch
+    global.fetch = mockFetch as unknown as typeof fetch
 
     render(<CreateIssueModal {...defaultProps} />)
 
@@ -298,10 +301,10 @@ describe("CreateIssueModal", () => {
   })
 
   it("still submits on ⌘↵, now wired by the shell rather than by hand", async () => {
-    const mockFetch = vi.fn()
+    const mockFetch = vi.fn<FetchStub>()
       .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve([]) })
       .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ id: "issue-1" }) })
-    global.fetch = mockFetch
+    global.fetch = mockFetch as unknown as typeof fetch
 
     render(<CreateIssueModal {...defaultProps} />)
 
@@ -319,10 +322,10 @@ describe("CreateIssueModal", () => {
   })
 
   it("still opens the pill popovers now that the pill is the trigger", async () => {
-    const mockFetch = vi.fn()
+    const mockFetch = vi.fn<FetchStub>()
       .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve([]) })
       .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ id: "issue-1" }) })
-    global.fetch = mockFetch
+    global.fetch = mockFetch as unknown as typeof fetch
 
     render(<CreateIssueModal {...defaultProps} />)
 
@@ -350,7 +353,7 @@ describe("CreateIssueModal", () => {
       init?.method === "POST"
         ? Promise.resolve({ ok: false, json: () => Promise.resolve({ detail: "Title is already taken" }) })
         : Promise.resolve({ ok: true, json: () => Promise.resolve([]) }),
-    )
+    ) as unknown as typeof fetch
 
     render(<CreateIssueModal {...defaultProps} />)
 

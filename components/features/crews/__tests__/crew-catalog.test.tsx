@@ -21,7 +21,7 @@ it('searches and orders the full server catalog, retaining both on the next page
   fireEvent.click(await screen.findByRole('button', { name: 'Load more crews' }))
   await screen.findByText('Crew 24-0')
   expect(requests.at(-1)).toContain('q=website&order=name&limit=24&offset=24')
-  fireEvent.click(screen.getByRole('link', { name: 'Crew 24-0', exact: true }))
+  fireEvent.click(screen.getByRole('link', { name: 'Crew 24-0' }))
   expect(selectCrew).toHaveBeenCalledWith('crew-24-0')
   fireEvent.click(screen.getByRole('button', { name: 'Show compact crew list' }))
   expect(screen.getByRole('button', { name: 'Show crew cards' })).toHaveAttribute('aria-pressed', 'true')

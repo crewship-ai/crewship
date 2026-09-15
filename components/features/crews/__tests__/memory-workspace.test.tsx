@@ -49,7 +49,7 @@ it('refreshes all personal resources from the main refresh button', async () => 
   fireEvent.click(screen.getByRole('button', { name: 'About me' }))
   await screen.findByText('No saved preferences yet.')
   expect(reads).toBe(1)
-  fireEvent.click(screen.getByRole('button', { name: 'Refresh', exact: true }))
+  fireEvent.click(screen.getByRole('button', { name: 'Refresh' }))
   await screen.findByText('Personal memory refreshed.')
   expect(reads).toBe(2)
 })
@@ -109,7 +109,7 @@ it('renders personal notes as Markdown and confirms forgetting with the original
   expect(screen.getByRole('heading', { name: 'Styl odpovědí' })).toBeVisible()
   fireEvent.click(screen.getByRole('button', { name: 'Forget Styl odpovědí' }))
   expect(fetch.mock.calls.some(([, init]) => init?.method === 'DELETE')).toBe(false)
-  fireEvent.click(screen.getByRole('button', { name: 'Confirm', exact: true }))
+  fireEvent.click(screen.getByRole('button', { name: 'Confirm' }))
   await waitFor(() => expect(fetch.mock.calls.some(([url, init]) => String(url).includes('/user-model/facts/styl_odpovedi?workspace_id=ws1') && init?.method === 'DELETE')).toBe(true))
 })
 

@@ -22,7 +22,8 @@ describe("bindCredentialToCrewTool", () => {
   const calls: { url: string; init?: RequestInit }[] = []
   beforeEach(() => {
     calls.length = 0
-    vi.mocked(apiFetch).mockImplementation(async (url: string, init?: RequestInit) => {
+    vi.mocked(apiFetch).mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
       calls.push({ url, init })
       const json = (body: unknown, ok = true, status = 200) => ({ ok, status, json: async () => body }) as unknown as Response
       if (url.startsWith("/api/v1/agents?")) return json([{ id: "alex" }, { id: "sam" }])

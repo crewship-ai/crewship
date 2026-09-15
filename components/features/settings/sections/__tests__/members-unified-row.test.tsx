@@ -40,11 +40,8 @@ vi.mock("@/components/features/members/invite-member-dialog", () => ({
 // not implement; polyfill them so the role dropdown can open.
 beforeAll(() => {
   Element.prototype.scrollIntoView = vi.fn()
-  // @ts-expect-error happy-dom lacks these pointer-capture stubs
   Element.prototype.hasPointerCapture = vi.fn(() => false)
-  // @ts-expect-error polyfill
   Element.prototype.setPointerCapture = vi.fn()
-  // @ts-expect-error polyfill
   Element.prototype.releasePointerCapture = vi.fn()
 })
 

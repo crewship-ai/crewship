@@ -21,7 +21,7 @@ describe("replacement verification", () => {
     render(<RotationDialog workspaceId="w1" credentialId="c1" credentialName="Fixture" open onOpenChange={() => {}} onRotated={onRotated} />)
     fireEvent.change(screen.getByLabelText("New value"), { target: { value: "  password with spaces  " } })
     expect(screen.queryByText("Grace overlap")).not.toBeInTheDocument()
-    fireEvent.click(screen.getByRole("button", { name: "Replace value", exact: true }))
+    fireEvent.click(screen.getByRole("button", { name: "Replace value" }))
     await waitFor(() => expect(onRotated).toHaveBeenCalledTimes(1))
     expect(h.apiFetch).toHaveBeenCalledWith("/api/v1/credentials/c1/rotate?workspace_id=w1", expect.objectContaining({
       method: "POST", body: JSON.stringify({ value: "  password with spaces  ", grace_seconds: 0 }),
