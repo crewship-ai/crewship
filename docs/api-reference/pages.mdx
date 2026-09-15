@@ -1370,17 +1370,26 @@ to something outside itself, listed so the importer must bind them explicitly:
 
 ```json
 {
-  "format": "crewship.page.bundle/v1",
+  "format": "crewship-page-bundle/v1",
   "page": { "name": "Fleet 201", "slug": "fleet-201", "panels": [] },
   "references": [
-    { "ref": "crew/ops", "kind": "crew", "used_by": ["sluzby"], "reason": "panel owner" }
+    { "ref": "crew/ops", "kind": "crew", "bindable": true, "used_by": ["sluzby"] }
   ],
-  "metadata": { "exported_at": "2026-08-13T17:44:00Z" }
+  "metadata": { "exported_at": "2026-08-13T17:44:00Z", "panel_count": 1 }
 }
 ```
 
 The bundle carries no data, no grants and no tokens — an export is a shape, not
 a snapshot of what the page was showing.
+
+A page that has a [custom application](#custom-application-contract) source
+draft exports as `"format": "crewship-page-bundle/v2"` instead. A v2 bundle
+adds `project` — the draft's source files, lockfile and small assets — and its
+`page.panels[]` carry the draft definition's `actions`, `wake`, `on_failure`
+and `refresh`, which v1 omits. Exporting such a page requires page edit
+permission and visibility of every panel in the definition (403 otherwise);
+the bundle still carries no grants, run data, Git history, build artifacts or
+publication status.
 
 **Statuses:**
 
@@ -1407,7 +1416,7 @@ reference the bundle declares:
 
 ```json
 {
-  "format": "crewship.page.bundle/v1",
+  "format": "crewship-page-bundle/v1",
   "page": { "name": "Fleet 201", "panels": [] },
   "references": [{ "ref": "crew/ops", "kind": "crew" }],
   "slug": "fleet-202",
@@ -1418,6 +1427,18 @@ reference the bundle declares:
 An unbound reference is a **422**, not a guess. Importing a bundle that names
 `crew/ops` into a workspace that happens to have a crew called `ops` would
 otherwise hand a page to whoever holds that name.
+
+`format` is checked first: anything other than `crewship-page-bundle/v1` or
+`crewship-page-bundle/v2` is a 400 naming the format this build reads. A v1
+body carrying `project` is also a 400.
+
+A `crewship-page-bundle/v2` body (one with `project`) creates the page **and**
+an inert source draft at revision 1: the source is stored and checkpointed,
+the draft definition keeps the bundle's `actions`, `wake`, `on_failure` and
+`refresh`, but the live page definition is written without them and nothing
+is published. Reviewing and publishing that draft is a separate step here.
+Importing a v2 bundle requires project storage on the server (503 otherwise)
+and bindings for every routine the actions name, in addition to the crews.
 
 **Response 201:** the created page.
 
@@ -2161,7 +2182,11 @@ drafts, live publication pointers and running builds remain protected.
 **Statuses:** 400 malformed request or missing confirmation; 403 unauthorized;
 503 project storage disabled; 500 storage maintenance failure.
 
-### GET /api/v1/pages/{slug}/project/fsck
+### GET /api/v1/pages/\{slug\}/project/fsck
+
+```
+GET /api/v1/pages/{slug}/project/fsck
+```
 
 **Authentication:** Page edit access. **Request:** Page slug, no body.
 **Response 200:** `healthy`, `checked_sources`, `checked_checkpoints`,

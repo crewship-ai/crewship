@@ -12,6 +12,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 ### Added
 
 - Incoming webhook configuration in Integrations for routines, agents and Page panels, with explicit outgoing notification labels. Routine webhooks can select a GitHub pull request signature profile with content-based replay protection.
+- **CLI:** `crewship page project panel-history <slug> <panel> --publication` reads a panel's payload ring through the published application (the last `/pages/*` route with no CLI), and `crewship workspace update --pages-theme <json|@file>` sets the shared Page colours that until now only the Settings card could; `workspace get` shows them. The `page project` family gains a flag table per subcommand, `page action --publication` is documented, export/import, `review` and the publish fence flags are driven through the built binary, and the api-reference bundle format is corrected to `crewship-page-bundle/v1`. (#2581)
 
 
 ### Fixed
