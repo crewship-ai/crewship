@@ -3,14 +3,20 @@
 import { formatRoutineTime } from "@/lib/routine-time"
 
 import { useEffect, useState } from "react"
+import { toast } from "sonner"
 import { apiFetch } from "@/lib/api-fetch"
 import { useUrlSelection } from "@/hooks/use-issue-detail"
 import { useAbilities } from "@/hooks/use-abilities"
+import { useSessionSafe } from "@/hooks/use-auth"
 import { roleAtLeast } from "@/lib/routine-governance"
+import { relTime } from "@/lib/time"
+import { discardRoutineDraft, loadRoutineDraft, saveRoutineDraft } from "@/lib/routine-drafts"
+import type { PipelineDraftSummary } from "@/hooks/use-pipelines"
 import { DetailCard, Pill } from "@/components/ui/detail"
 import { Button } from "@/components/ui/button"
 import { RoutineDefinitionCanvas } from "./routine-definition-canvas"
 import { RoutineStepDefinition } from "./routine-step-definition"
+import { draftAuthorLabel } from "./routine-identity-header"
 
 interface PipelineVersion {
   version: number
@@ -34,12 +40,25 @@ interface VersionDiff {
 interface Props {
   workspaceId: string
   slug: string
-  onRolledBack: () => void
-  onPrepareDraft?: (definition: Record<string, unknown>, version: number) => void
+  /** The routine's saved draft, when there is one — drawn on top. */
+  draft?: PipelineDraftSummary
+  /** Identity carried into a restored draft's document. */
+  routine?: { name?: string; description?: string; author_crew_id?: string; icon?: string; color?: string }
+  onPublish?: () => void
+  /** The draft row changed (discarded, or a version was restored as one). */
+  onChanged?: () => void
 }
 
-/** Read-only archives and comparisons. Restoring starts an explicit unsaved draft. */
-export function RoutineVersionsTab({ workspaceId, slug, onPrepareDraft }: Props) {
+/**
+ * Read-only archives and comparisons.
+ *
+ * The draft, when there is one, sits on top: it is the one thing here that is
+ * not history. Restoring a version creates a draft from it through the same
+ * drafts API the CLI uses — never a rollback that bypasses the publish review
+ * (oponentura 12. 9.). Publishing that draft is the one way a live version
+ * changes from the web.
+ */
+export function RoutineVersionsTab({ workspaceId, slug, draft, routine, onPublish, onChanged }: Props) {
   const [versions, setVersions] = useState<PipelineVersion[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -50,7 +69,10 @@ export function RoutineVersionsTab({ workspaceId, slug, onPrepareDraft }: Props)
   const [diff, setDiff] = useState<VersionDiff | null>(null)
   const [compare, setCompare] = useState(false)
   const [step, setStep] = useState<string | null>(null)
+  const [busy, setBusy] = useState<string | null>(null)
   const { role } = useAbilities()
+  const { data: session } = useSessionSafe()
+  const manager = roleAtLeast(role, "MANAGER")
   const base = `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/pipelines/${encodeURIComponent(slug)}`
   const head = versions.find((v) => v.is_head)?.version
   useEffect(() => {
@@ -102,78 +124,156 @@ export function RoutineVersionsTab({ workspaceId, slug, onPrepareDraft }: Props)
     })()
     return () => c.abort()
   }, [base, selected, compare, head, retry])
+
+  /** Load the archived definition and save it as the routine's draft. */
+  const restoreAsDraft = async (version: number) => {
+    if (busy) return
+    if (draft && !window.confirm(`Replace draft r${draft.revision} with the recipe of v${version}? The draft's current content is lost; nothing published changes.`)) return
+    setBusy(`restore:${version}`)
+    try {
+      const res = await apiFetch(`${base}/versions/${encodeURIComponent(String(version))}`)
+      if (!res.ok) throw new Error("This historical version could not be loaded.")
+      const archived: VersionDetail = await res.json()
+      const baseline = await loadRoutineDraft(workspaceId, slug)
+      const definition = archived.definition
+      const document: Record<string, unknown> = {
+        ...(baseline.id ? baseline.document : {}),
+        slug,
+        name: routine?.name || (typeof definition.display_name === "string" ? definition.display_name : slug),
+        description: routine?.description ?? (typeof definition.description === "string" ? definition.description : ""),
+        definition,
+      }
+      if (routine?.author_crew_id) document.author_crew_id = routine.author_crew_id
+      if (routine?.icon) document.icon = routine.icon
+      if (routine?.color) document.color = routine.color
+      const saved = await saveRoutineDraft(workspaceId, { ...baseline, slug }, document)
+      toast.success(`Draft r${saved.revision} restored from v${version} · publish to make it live`)
+      onChanged?.()
+    } catch (e) {
+      toast.error("Could not restore this version as a draft", { description: e instanceof Error ? e.message : String(e) })
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const discard = async () => {
+    if (!draft || busy) return
+    if (!window.confirm(`Discard draft r${draft.revision}? The published version stays as it is.`)) return
+    setBusy("discard")
+    try {
+      await discardRoutineDraft(workspaceId, { slug, id: draft.id, revision: draft.revision })
+      toast.success("Draft discarded")
+      onChanged?.()
+    } catch (e) {
+      toast.error("Could not discard the draft", { description: e instanceof Error ? e.message : String(e) })
+    } finally {
+      setBusy(null)
+    }
+  }
+
   const steps = Array.isArray(detail?.definition.steps)
     ? (detail.definition.steps as Record<string, unknown>[])
     : []
   return (
     <div className="space-y-4">
       <DetailCard
-        title="Version history"
+        title="Versions"
         subtitle={loading ? "Loading…" : `${versions.length} loaded`}
+        bare
       >
-        <p className="mb-4 text-xs text-muted-foreground">
-          Versions record changes to the recipe. History records what happened each time it ran.
-          Inspecting a version does not change the active recipe.
-        </p>
-        {error && (
-          <p role="alert" className="text-sm text-destructive">
-            {error} <Button variant="ghost" size="sm" onClick={() => setRetry((v) => v + 1)}>Retry</Button>
-          </p>
-        )}
-        {!loading && !error && !versions.length && (
-          <p className="text-sm text-muted-foreground">No archived versions yet.</p>
-        )}
-        <ol className="divide-y divide-border/40">
-          {versions.map((v) => (
-            <li key={v.version} className="flex flex-wrap items-center gap-3 py-3">
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2">
-                  <span className="font-medium">Version {v.version}</span>
-                  {v.is_head && <Pill tone="blue">Current</Pill>}
-                </div>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  {formatRoutineTime(v.created_at)} ·{" "}
-                  {v.change_summary || "Saved recipe"}
-                </p>
-                <details className="mt-1 text-[11px] text-muted-foreground">
-                  <summary className="cursor-pointer">Author and metadata</summary>
-                  <p className="break-all">
-                    {v.author_type} · {v.author_id || "Not recorded"}
-                  </p>
-                  <p className="break-all">{v.definition_hash}</p>
-                </details>
+        {draft && (
+          <div data-testid="routine-draft-row" className="flex flex-wrap items-center gap-3 border-b border-hairline bg-purple/10 px-4 py-3">
+            <span className="w-16 text-[15px] font-semibold text-purple">Draft</span>
+            <div className="min-w-0 flex-1">
+              <div className="text-sm">
+                <b className="font-medium">r{draft.revision}</b> · saved {relTime(draft.updated_at)} by {draftAuthorLabel(draft.updated_by, session?.user?.id)}
               </div>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => {
-                  setCompare(false)
-                  setSelected(String(v.version))
-                }}
-              >
-                View version {v.version}
-              </Button>
-              {!v.is_head && head != null && (
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => {
-                    setCompare(true)
-                    setSelected(String(v.version))
-                  }}
-                >
-                  Compare with current
-                </Button>
-              )}
-            </li>
-          ))}
-        </ol>
-        {versions.length >= 100 && (
-          <p className="mt-3 text-xs text-muted-foreground">
-            Showing the latest 100 versions. A run’s version link opens its archive directly,
-            including older versions.
-          </p>
+              <p className="text-xs text-muted-foreground">Not used by Run or schedules until published.</p>
+            </div>
+            {manager && (
+              <div className="flex shrink-0 gap-1.5">
+                <Button size="sm" onClick={onPublish} disabled={!onPublish || !!busy}>Review and publish</Button>
+                <Button size="sm" variant="ghost" onClick={() => void discard()} disabled={!!busy}>Discard</Button>
+              </div>
+            )}
+          </div>
         )}
+        <div className="px-4 py-3">
+          <p className="mb-3 text-xs text-muted-foreground">
+            Versions record changes to the recipe. History records what happened each time it ran.
+            Inspecting a version does not change the published one.
+          </p>
+          {error && (
+            <p role="alert" className="text-sm text-destructive">
+              {error} <Button variant="ghost" size="sm" onClick={() => setRetry((v) => v + 1)}>Retry</Button>
+            </p>
+          )}
+          {!loading && !error && !versions.length && (
+            <p className="text-sm text-muted-foreground">Nothing published yet.</p>
+          )}
+          <ol className="divide-y divide-border/40">
+            {versions.map((v) => (
+              <li key={v.version} data-testid={`routine-version-${v.version}`} className="flex flex-wrap items-center gap-3 py-3">
+                <span className="w-16 text-[15px] font-semibold">v{v.version}</span>
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    {v.is_head && <Pill tone="success">Published · Run uses this</Pill>}
+                    <span className="text-xs text-muted-foreground">{formatRoutineTime(v.created_at)}</span>
+                  </div>
+                  <p className="mt-1 text-xs">{v.change_summary || "Saved recipe"}</p>
+                  <details className="mt-1 text-[11px] text-muted-foreground">
+                    <summary className="cursor-pointer">Author and metadata</summary>
+                    <p className="break-all">
+                      {v.author_type} · {v.author_id || "Not recorded"}
+                    </p>
+                    <p className="break-all">{v.definition_hash}</p>
+                  </details>
+                </div>
+                <div className="flex shrink-0 flex-wrap gap-1.5">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      setCompare(false)
+                      setSelected(String(v.version))
+                    }}
+                  >
+                    View
+                  </Button>
+                  {!v.is_head && head != null && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => {
+                        setCompare(true)
+                        setSelected(String(v.version))
+                      }}
+                    >
+                      Compare with published
+                    </Button>
+                  )}
+                  {!v.is_head && manager && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      title="Creates a draft from this version; publishing it makes a new version, history is not rewritten"
+                      disabled={!!busy}
+                      onClick={() => void restoreAsDraft(v.version)}
+                    >
+                      {busy === `restore:${v.version}` ? "Restoring…" : "Restore as draft"}
+                    </Button>
+                  )}
+                </div>
+              </li>
+            ))}
+          </ol>
+          {versions.length >= 100 && (
+            <p className="mt-3 text-xs text-muted-foreground">
+              Showing the latest 100 versions. A run’s version link opens its archive directly,
+              including older versions.
+            </p>
+          )}
+        </div>
       </DetailCard>
       {selected && (
         <DetailCard
@@ -193,20 +293,9 @@ export function RoutineVersionsTab({ workspaceId, slug, onPrepareDraft }: Props)
           {!detail && !detailError && <p role="status">Loading version…</p>}
           {detail && (
             <>
-              <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-                <p className="text-xs text-muted-foreground">
-                  Historical runs retain their own version and inputs.
-                </p>
-                {onPrepareDraft && roleAtLeast(role, "ADMIN") && (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => onPrepareDraft(detail.definition, detail.version)}
-                  >
-                    Use as draft
-                  </Button>
-                )}
-              </div>
+              <p className="mb-3 text-xs text-muted-foreground">
+                Historical runs retain their own version and inputs.
+              </p>
               {diff && (
                 <div className="mb-3 rounded-lg border border-border bg-muted/30 p-3">
                   <p className="text-sm">

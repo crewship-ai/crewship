@@ -123,6 +123,12 @@ describe("layoutRoutineSteps", () => {
     expect(layout.hookCount).toBe(2)
   })
 
+  it("never collapses a long recipe that has no phases", () => {
+    const layout = layoutRoutineSteps({ steps: Array.from({ length: 16 }, (_, i) => step(`s${i}`, { type: "http" })) })
+    expect(layout.big).toBe(false)
+    expect(layout.rows.filter((r) => r.kind === "step")).toHaveLength(16)
+  })
+
   it("does not fold transforms that carry a condition or differ in needs", () => {
     const layout = layoutRoutineSteps({
       steps: [

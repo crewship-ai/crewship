@@ -16,9 +16,9 @@
 //      around the run;
 //   5. `if`, `needs`, checks, retry, timeout, script path and agent become
 //      chips — see `stepChips`;
-//   7. a recipe with more than 12 top-level steps is "big": the map is the
-//      default view and a phase with more than 6 steps collapses into one row
-//      that opens into groups (foreach parent → name pattern → same needs).
+//   7. a phased recipe with more than 12 top-level steps is "big": the map is
+//      the default view and a phase with more than 6 steps collapses into one
+//      row that opens into groups (foreach parent → name pattern → same needs).
 //
 // Pure and framework-free, so it is tested as data.
 
@@ -282,7 +282,10 @@ export function layoutRoutineSteps(definition: unknown, options: LayoutOptions =
   const openPhases = new Set(options.openPhases ?? [])
   const openGroups = new Set(options.openGroups ?? [])
   const hasNeeds = steps.some((s) => Array.isArray(s.needs) && s.needs.length > 0)
-  const big = steps.length > BIG_RECIPE_STEPS
+  // A long recipe without `needs` is a long list, not a wide one: there are
+  // no phases to draw as columns and nothing to collapse, so it keeps plain
+  // numbering and the row cap.
+  const big = hasNeeds && steps.length > BIG_RECIPE_STEPS
   const levels = levelsOf(steps)
   const position = new Map<Step, number>()
   steps.forEach((s, i) => position.set(s, i + 1))

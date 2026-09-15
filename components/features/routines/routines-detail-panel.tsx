@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import { AnimatePresence, motion } from "motion/react"
-import { Play, Square, Check, Ban, Inbox } from "lucide-react"
+import { Play, Check, Ban, Inbox } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
@@ -19,6 +19,7 @@ import {
   canApproveRoutine,
   canKillRoutine,
   normalizeRoutineStatus,
+  roleAtLeast,
 } from "@/lib/routine-governance"
 import { buildPipelineActionRequest } from "@/lib/pipeline-actions"
 import { routineInputSpecs, type RoutineInputSpec } from "@/lib/routine-inputs"
@@ -36,6 +37,7 @@ import { RoutineApprovalBanner } from "@/components/features/routines/routine-ap
 import { RoutineActionsMenu } from "./routine-actions-menu"
 import { RoutineProposalAsk, type RoutineAskDefinition } from "./routine-proposal-ask"
 import { RoutineCardDetail } from "./routine-card-detail"
+import { RoutineLiveRunBanner } from "./routine-live-run-banner"
 import { isAgentless, type RoutineManifest } from "@/lib/routine-flow"
 
 // RoutinesDetailPanel — right-side detail for the selected routine.
@@ -132,12 +134,9 @@ export function RoutinesDetailPanel({
   // lastRunId holds the run_id of the most recent Run so we can show its
   // live activity rail inline (instant status after clicking).
   const [lastRunId, setLastRunId] = useState<string | null>(null)
-  // cancelling gates the header Cancel button while its POST is in
-  // flight (same pattern as busyAction for Run / Dry run).
+  // cancelling gates the banner's Stop while its POST is in flight (same
+  // pattern as busyAction for Run).
   const [cancelling, setCancelling] = useState(false)
-  // Bumped by the kebab's "Edit definition". A counter rather than a
-  // boolean so asking twice reopens the editor after the user closed it.
-  const [editRequest, setEditRequest] = useState(0)
   // abortRef tracks the in-flight fetch so a fast workspace/slug
   // switch cancels stale work. Without this, a slow network +
   // rapid-fire selection could race-overwrite the panel with the
@@ -154,20 +153,14 @@ export function RoutinesDetailPanel({
     decide: decideApproval,
   } = usePendingApproval(workspaceId, lastRunId)
 
-  // Live run records for THIS routine power the header Cancel button.
-  // The hook already refreshes on pipeline.run.* WS events, so the
-  // button's enabled state tracks run starts/finishes without polling.
+  // Live run records for THIS routine power the live-run banner under the
+  // header. The hook already refreshes on pipeline.run.* WS events, so the
+  // banner tracks run starts/finishes without polling.
   const { records: runRecords, refresh: refreshRunRecords } = usePipelineRunRecords(
     workspaceId,
     slug,
   )
   const activeRuns = runRecords.filter((r) => isActiveRunStatus(r.status))
-  // Prefer the run this panel just started (lastRunId); otherwise a
-  // lone active run is unambiguous. Several active runs with no known
-  // lastRunId → don't guess, send the user to the Runs tab to pick.
-  const cancelTarget =
-    activeRuns.find((r) => r.id === lastRunId) ??
-    (activeRuns.length === 1 ? activeRuns[0] : undefined)
 
   const fetchRoutine = async () => {
     abortRef.current?.abort()
@@ -415,42 +408,33 @@ export function RoutinesDetailPanel({
     }
   }
 
-  // Cancel the routine's active run. Targets cancelTarget (the run
-  // this panel started, or the lone active run); when several runs are
-  // active and none is ours, deep-link to the Runs tab where each row
-  // has its own cancel button. RBAC: manage-tier — MEMBERs get a 403.
-  const cancelActiveRun = async () => {
-    if (!cancelTarget) {
-      // No tab to send them to any more. The per-run cancel buttons are
-      // in the Runs card's Manage view, on this same page.
-      toast.info(
-        "Multiple runs are active — open Runs → Manage and cancel the one you mean",
-      )
-      return
-    }
+  // Stop one active run — the banner names which. Stop is the one word for
+  // it everywhere (contract vocabulary); the server route is still /cancel.
+  // RBAC: manage-tier — MEMBERs get a 403.
+  const stopRun = async (runId: string) => {
     setCancelling(true)
     try {
       const res = await apiFetch(
-        `/api/v1/workspaces/${workspaceId}/pipelines/runs/${cancelTarget.id}/cancel`,
+        `/api/v1/workspaces/${workspaceId}/pipelines/runs/${runId}/cancel`,
         { method: "POST" },
       )
       if (!res.ok) {
         if (res.status === 403) {
           throw new Error(
-            "You don't have permission to cancel runs (manager role or above required)",
+            "You don't have permission to stop runs (manager role or above required)",
           )
         }
         const t = await res.text().catch(() => "")
         throw new Error(`${res.status}: ${t || res.statusText}`)
       }
-      toast.success("Cancel requested", {
-        description: `Run ${cancelTarget.id.slice(0, 12)}… will stop at the next step boundary.`,
+      toast.success("Stop requested", {
+        description: "Pending work stops at the next step boundary. What already happened is not undone.",
       })
       refreshRunRecords()
       onChanged()
       fetchRoutine()
     } catch (e) {
-      toast.error("Cancel failed", {
+      toast.error("Stop failed", {
         description: e instanceof Error ? e.message : String(e),
       })
     } finally {
@@ -684,7 +668,16 @@ export function RoutinesDetailPanel({
                 fetchRoutine()
                 onChanged()
               }}
-              editRequest={editRequest}
+              liveRuns={
+                <RoutineLiveRunBanner
+                  runs={activeRuns}
+                  definition={routine.definition}
+                  canStop={roleAtLeast(role, "MANAGER")}
+                  stopping={cancelling}
+                  onOpen={(runId) => onRunStarted?.(runId)}
+                  onStop={stopRun}
+                />
+              }
               statusPills={
                 <>
                   {lifecycleBadge && (
@@ -744,38 +737,13 @@ export function RoutinesDetailPanel({
                       {busyAction === "run" ? "Running…" : "Run"}
                     </Button>
                   </span>
-                  {/* Cancel stays a visible button, not a menu item. An
-                      active run is precisely when you need it, and one
-                      click deeper is the wrong direction for the action
-                      that stops something already burning tokens. */}
-                  <span
-                    title={
-                      activeRuns.length === 0
-                        ? "No active run to cancel"
-                        : cancelTarget
-                          ? `Cancel run ${cancelTarget.id.slice(0, 12)}…`
-                          : "Multiple runs are active — open Runs → Manage and pick one"
-                    }
-                    className="inline-flex"
-                  >
-                    <Button
-                      variant="ghost"
-                      className="h-8 gap-1.5 rounded-lg px-3 text-[12px] font-medium text-muted-foreground hover:text-destructive"
-                      onClick={cancelActiveRun}
-                      disabled={cancelling || activeRuns.length === 0}
-                    >
-                      {cancelling ? (
-                        <Spinner className="h-3.5 w-3.5" />
-                      ) : (
-                        <Square className="h-3.5 w-3.5" />
-                      )}
-                      Cancel
-                    </Button>
-                  </span>
+                </>
+              }
+              menu={
+                <>
                   <RoutineActionsMenu
                     routine={routine}
                     workspaceId={workspaceId}
-                    onEditCode={() => setEditRequest((n) => n + 1)}
                     onChanged={() => {
                       fetchRoutine()
                       onChanged()
