@@ -1539,11 +1539,11 @@ the same data, and withdrawing it leaves the panel page exactly as it was.
 It is optional and needs an operator to have installed the compiler and the
 runtime origin; see [Operate Pages applications](/guides/pages-apps-operations).
 
-Nobody publishes from the chair they wrote in. The lifecycle has five steps,
-and a different party owns each:
+The lifecycle has five steps, and writing and publishing are deliberately
+separate acts, usually by separate parties:
 
-1. **Draft.** An agent, given the page by its owner, writes the source
-   through its `page_project` tool — or a person does the same with
+1. **Draft.** An agent in the page's owning crew writes the source through
+   its `page_project` tool — or a person does the same with
    `crewship page project init|set`. Every save is a **revision**, checkpointed
    in Git; the live page does not move.
 2. **Build.** The revision is compiled by the pinned compiler image; a build
