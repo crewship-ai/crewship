@@ -33,7 +33,7 @@ import {
   daySummary,
   groupByRoutine,
   matchesCalendarFilter,
-  monthCell,
+  sortByTime,
   timeRange,
   type CalendarEntry,
   type CalendarFilter,
@@ -281,86 +281,58 @@ export function RoutineCalendar({
     setOpenGroup(null)
     setAgendaDay(dateKey(day))
   }
+  /** The Day view for that date — the hour grid, not the agenda. */
+  const openDayView = (day: Date) => {
+    setOpenGroup(null)
+    setAgendaDay(null)
+    setDate(dateKey(day))
+    setView("day")
+  }
 
-  /** A month cell: at most three rows, otherwise one row per routine with a
-   * count, a time range and how the runs ended. Fixed height, no scrolling;
-   * on a phone only the icon and the count survive. */
+  /** A month cell: the two earliest starts of the day in order, then how
+   * many follow. The cell itself opens the Day view; one glance says what
+   * the day begins with, the Day view says the rest. */
   const monthCellBody = (list: CalendarEntry[]) => {
-    const cell = monthCell(list)
-    if (cell.mode === "rows")
-      return cell.entries.map((event) => {
-        const outcome = calendarOutcome(event)
-        return (
-          <div
-            key={`${event.kind}:${event.id}`}
-            title={eventTitle(event)}
-            className="flex min-w-0 items-center gap-1.5 text-[11px]"
-          >
-            <span
-              aria-hidden
-              className={cn("hidden h-2 w-2 shrink-0 rounded-full md:block", DOT[outcome])}
-            />
-            <span
-              className={cn(
-                "hidden shrink-0 font-mono text-[10px] md:inline",
-                outcome === "planned" ? "text-primary" : "text-muted-foreground",
-              )}
-            >
-              {calendarClock(event.at)}
-            </span>
-            {icon(event.slug, "!h-4 !w-4 [&>svg]:h-3 [&>svg]:w-3")}
-            <span className="hidden min-w-0 truncate md:inline">
-              {nameOf(event.slug, event.name)}
-            </span>
-          </div>
-        )
-      })
+    const sorted = sortByTime(list)
+    const shown = sorted.slice(0, 2)
+    const later = sorted.length - shown.length
     return (
       <>
-        {cell.groups.map((group) => (
-          <div
-            key={group.slug}
-            title={`${nameOf(group.slug, group.name)} · ${group.entries.length} · ${timeRange(group.entries)}`}
-            className="grid min-w-0 grid-cols-[16px_minmax(0,1fr)_auto] items-center gap-x-1.5 text-[11px]"
-          >
-            {icon(group.slug, "!h-4 !w-4 [&>svg]:h-3 [&>svg]:w-3")}
-            <span className="hidden min-w-0 truncate md:block">{nameOf(group.slug, group.name)}</span>
-            <span className="col-start-3 rounded bg-primary/15 px-1 font-mono text-[10px] font-semibold text-primary">
-              ×{group.entries.length}
-            </span>
-            <span className="col-span-2 col-start-2 hidden gap-1.5 font-mono text-[10px] text-muted-foreground md:flex">
-              <span className={group.allPlanned ? "text-primary" : undefined}>
-                {timeRange(group.entries)}
+        {shown.map((event) => {
+          const outcome = calendarOutcome(event)
+          return (
+            <div
+              key={`${event.kind}:${event.id}`}
+              title={eventTitle(event)}
+              className="flex min-w-0 items-center gap-1.5 text-[11px]"
+            >
+              <span
+                aria-hidden
+                className={cn("hidden h-2 w-2 shrink-0 rounded-full md:block", DOT[outcome])}
+              />
+              <span
+                className={cn(
+                  "hidden shrink-0 font-mono text-[10px] md:inline",
+                  outcome === "planned" ? "text-primary" : "text-muted-foreground",
+                )}
+              >
+                {calendarClock(event.at)}
               </span>
-              {group.counts.completed > 0 && (
-                <span className="text-success">✓{group.counts.completed}</span>
-              )}
-              {group.counts.failed > 0 && (
-                <span className="text-destructive">✕{group.counts.failed}</span>
-              )}
-              {group.counts.waiting > 0 && (
-                <span className="text-warn">?{group.counts.waiting}</span>
-              )}
-            </span>
-          </div>
-        ))}
-        {cell.hidden > 0 && (
-          <span className="hidden rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground md:block">
-            +{cell.hidden} more routine{cell.hidden === 1 ? "" : "s"}
+              {icon(event.slug, "!h-4 !w-4 [&>svg]:h-3 [&>svg]:w-3")}
+              <span className="hidden min-w-0 truncate md:inline">
+                {nameOf(event.slug, event.name)}
+              </span>
+            </div>
+          )
+        })}
+        {later > 0 && (
+          <span
+            data-testid="calendar-cell-later"
+            className="mt-auto truncate text-[10px] text-muted-foreground"
+          >
+            +{later} later
           </span>
         )}
-        <span className="mt-auto hidden md:block">
-          <span
-            aria-hidden
-            className="block h-[3px] overflow-hidden rounded bg-muted"
-            title={`${cell.total} entries`}
-          >
-            <span className="block h-full bg-primary/70" style={{ width: `${cell.density}%` }} />
-          </span>
-          <span className="mt-0.5 block truncate text-[10px] text-muted-foreground">
-            {cell.summary}
-          </span>
-        </span>
       </>
     )
   }
@@ -413,28 +385,34 @@ export function RoutineCalendar({
           return (
             <div
               key={key}
+              role="button"
+              tabIndex={0}
+              aria-label={`Open ${key}, ${entries}`}
+              data-testid={`calendar-day-${key}`}
+              onClick={() => openDayView(day)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault()
+                  openDayView(day)
+                }
+              }}
               className={cn(
-                "flex h-[72px] min-w-0 flex-col gap-0.5 overflow-hidden rounded-xl border border-border/60 bg-muted/20 p-1 md:h-32 md:p-1.5",
+                "flex h-[72px] min-w-0 cursor-pointer flex-col gap-0.5 overflow-hidden rounded-xl border border-border/60 bg-muted/20 p-1 transition-colors hover:border-primary/50 hover:bg-muted/40 focus-visible:outline focus-visible:outline-primary md:h-28 md:p-1.5",
                 today && "border-primary/60",
               )}
             >
               <div className="flex items-center justify-between">
-                <button
-                  type="button"
-                  aria-label={`Open ${key}, ${entries}`}
-                  onClick={() => openDay(day)}
-                  className={cn(
-                    "rounded px-1 text-xs hover:bg-muted",
-                    today && "font-semibold text-primary",
-                  )}
-                >
+                <span className={cn("px-1 text-xs", today && "font-semibold text-primary")}>
                   {i + 1}
-                </button>
+                </span>
                 {canSchedule && (
                   <button
                     type="button"
                     aria-label={`Schedule on ${key}`}
-                    onClick={() => plan(day)}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      plan(day)
+                    }}
                     className="rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
                   >
                     <Plus className="h-3 w-3" />

@@ -9,8 +9,15 @@ import type { Pipeline } from "@/hooks/use-pipelines"
 // quiet day — the two cases the proposal's calendar screen is built around.
 
 const h = vi.hoisted(() => ({ view: "month" as "month" | "week", events: [] as unknown[] }))
+// The year view fetches one range per month; answer each with the events
+// inside it, as the server would, so a day is counted once.
 vi.mock("@/lib/api-fetch", () => ({
-  apiFetch: vi.fn(async () => ({ ok: true, json: async () => ({ events: h.events, truncated: false }) })),
+  apiFetch: vi.fn(async (url: string) => {
+    const params = new URL(url, "https://example.test").searchParams
+    const from = Date.parse(params.get("from") ?? "1970-01-01"), to = Date.parse(params.get("to") ?? "2999-01-01")
+    const events = (h.events as { at: string }[]).filter((e) => Date.parse(e.at) >= from && Date.parse(e.at) < to)
+    return { ok: true, json: async () => ({ events, truncated: false }) }
+  }),
 }))
 vi.mock("@/hooks/use-abilities", () => ({ useAbilities: () => ({ role: "OWNER" }) }))
 vi.mock("@/hooks/use-issue-detail", () => ({
@@ -54,28 +61,34 @@ beforeEach(() => {
 })
 
 describe("routine calendar — month density", () => {
-  it("draws a quiet day as rows and a busy day as one row per routine with counts, never a scrollbar", async () => {
+  it("shows the two earliest starts of a day in order, then how many follow, and never a scrollbar", async () => {
     render(<RoutineCalendar workspaceId="ws" routines={routines} />)
-    const quietButton = await screen.findByRole("button", { name: "Open 2028-01-15, 3 entries" })
-    const quiet = within(quietButton.closest("div.overflow-hidden")!)
-    expect(quiet.getByText("Morning briefing")).toBeInTheDocument()
-    expect(quiet.getByText("07:30")).toBeInTheDocument()
-    expect(quiet.queryByText(/×/)).toBeNull()
+    const quiet = await screen.findByRole("button", { name: "Open 2028-01-15, 3 entries" })
+    // Earliest first: the 07:30 run, then 08:00; the 17:00 start is "later".
+    expect(within(quiet).getByText("07:30")).toBeInTheDocument()
+    expect(within(quiet).getByText("Morning briefing")).toBeInTheDocument()
+    expect(within(quiet).getByText("08:00")).toBeInTheDocument()
+    expect(within(quiet).queryByText("Contract renewal check")).toBeNull()
+    expect(within(quiet).getByTestId("calendar-cell-later")).toHaveTextContent("+1 later")
 
-    const busy = within(screen.getByRole("button", { name: "Open 2028-01-16, 42 entries" }).closest("div.overflow-hidden")!)
-    // Earliest routine first; the 38-start routine shows as one row with a range.
-    expect(busy.getByText("×38")).toBeInTheDocument()
-    expect(busy.getByText("08:00–17:15")).toBeInTheDocument()
-    // At most three routines, then how many more.
-    expect(busy.getAllByText(/^×\d+$/)).toHaveLength(3)
-    expect(busy.getByText("+1 more routine")).toBeInTheDocument()
-    expect(busy.getByText("41 planned · 1 ran · 1 waiting")).toBeInTheDocument()
-    // Runs that happened show their outcome beside the count.
-    expect(busy.getByText("?1")).toBeInTheDocument()
-    // Nothing inside the cell scrolls: the cell clips at a fixed height.
-    const cell = screen.getByRole("button", { name: "Open 2028-01-16, 42 entries" }).closest("div.overflow-hidden")!
-    expect(cell.className).toMatch(/md:h-32/)
-    expect(cell.querySelector(".overflow-y-auto")).toBeNull()
+    const busy = screen.getByRole("button", { name: "Open 2028-01-16, 42 entries" })
+    expect(within(busy).getByText("Morning briefing")).toBeInTheDocument()
+    expect(within(busy).getAllByTestId("routine-icon")).toHaveLength(2)
+    expect(within(busy).getByTestId("calendar-cell-later")).toHaveTextContent("+40 later")
+    expect(within(busy).queryByText(/×\d+/)).toBeNull()
+    // Nothing inside the cell scrolls: the cell clips at a fixed height and lights up on hover.
+    expect(busy.className).toMatch(/md:h-28/)
+    expect(busy.className).toMatch(/hover:/)
+    expect(busy.querySelector(".overflow-y-auto")).toBeNull()
+  })
+
+  it("opens the Day view for the clicked day, and schedules from the + without opening it", async () => {
+    render(<RoutineCalendar workspaceId="ws" routines={routines} />)
+    fireEvent.click(await screen.findByRole("button", { name: "Open 2028-01-15, 3 entries" }))
+    // The hour grid for that date, not the agenda.
+    expect(screen.queryByRole("region", { name: "Day agenda" })).toBeNull()
+    expect(screen.getByRole("button", { name: "Day" })).toHaveAttribute("aria-pressed", "true")
+    expect(screen.getByRole("heading", { level: 2 })).toHaveTextContent(/15 Jan 2028/)
   })
 
   it("filters with counted chips taken from the whole month", async () => {
@@ -94,9 +107,10 @@ describe("routine calendar — month density", () => {
     expect(screen.queryByRole("combobox", { name: "Calendar events" })).toBeNull()
   })
 
-  it("opens a day as an agenda grouped by routine, with the waiting run first", async () => {
+  it("opens a day as an agenda grouped by routine from the year view, with the waiting run first", async () => {
+    h.view = "year"
     render(<RoutineCalendar workspaceId="ws" routines={routines} />)
-    fireEvent.click(await screen.findByRole("button", { name: "Open 2028-01-16, 42 entries" }))
+    fireEvent.click(await screen.findByRole("button", { name: /^Open 2028-01-16, \d+ entries$/ }, { timeout: 4000 }))
     const agenda = within(screen.getByRole("region", { name: "Day agenda" }))
     expect(screen.getByRole("heading", { name: "Sunday, 16 January 2028" })).toBeInTheDocument()
     expect(agenda.getByText("41 planned · 1 ran · 1 waiting")).toBeInTheDocument()
@@ -124,7 +138,7 @@ describe("routine calendar — month density", () => {
     fireEvent.click(agenda.getByRole("button", { name: "Hide" }))
     expect(agenda.queryByText("17:15")).toBeNull()
     // ‹ Month returns to the grid.
-    fireEvent.click(agenda.getByRole("button", { name: "‹ Month" }))
+    fireEvent.click(agenda.getByRole("button", { name: "‹ Year" }))
     expect(screen.queryByRole("region", { name: "Day agenda" })).toBeNull()
     expect(screen.getByRole("button", { name: "Open 2028-01-16, 42 entries" })).toBeInTheDocument()
   })
