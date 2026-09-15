@@ -455,7 +455,11 @@ Since PR #234 the standalone `/runs` page is folded into `/journal` as a preset 
 - **Runs** — a **fleet operations overview** (not just a list). Because it reads the run superset — *every* run in the workspace, including ad-hoc agent/chat/delegation runs that never touch a routine — it surfaces breakdowns the routine-scoped [Routines → Insights](/guides/routines) view structurally can't. See below.
 - **Spend** — cost rollup: total spend, spend-over-time by agent, and the top-N most expensive routines/runs in the window. See [below](#spend-cost-rollup).
 
-All three share the same SSE stream and FTS index — selecting a tab does not retrigger a fetch, only a client-side filter shift. Audit-tab navigation is dropped (it was always a redirect placeholder); the `/audit` page remains in the sidebar for security review.
+All three share the same SSE stream and FTS index — selecting a tab does not retrigger a fetch, only a client-side filter shift. Audit-tab navigation is dropped (it was always a redirect placeholder); the audit log lives under **Settings → Audit** (`/settings?tab=audit`), and the old `/audit` URL redirects there.
+
+### Resources strip
+
+Above the Timeline sits a three-cell **resources strip** — **CPU**, **MEM** and **NET**, each a 30-minute sparkline with its latest reading; click a cell to open the full-height chart. It is fed by `container.metrics` entries and fetches them itself, so the timeline can keep metrics hidden from the event log (the default preference) without starving the strip. With a crew selected the cells are that crew's readings; with none they are the sum across every crew reporting in the window, marked **∑ N crews**. When nothing has reported the strip says so — *No container metrics reported in the last 30 minutes* — rather than drawing an empty chart; a fetch failure reads *Container metrics are unavailable*. There is no disk cell: the runtime has never emitted disk usage, so the strip does not invent one.
 
 ### Timeline — row anatomy
 
@@ -470,7 +474,7 @@ Seven columns, left to right (`components/features/logs/logs-list.tsx`):
 | severity | 3px | Colour bar. Carries a visually-hidden `Severity: <level>` for screen readers — the colour is not the only signal. |
 | time | 84px | `HH:MM:SS.mmm`, local. |
 | identity | 38px | 18px agent avatar + 15px crew icon. |
-| type | 124px | Entry-type icon (`lib/journal-icons.ts`, all 127 types) + the full dotted `entry_type`, tinted by group. The group name is repeated visually-hidden, so group membership is not colour-only either. |
+| type | 124px | Entry-type icon (`lib/journal-icons.ts` — 152 keys at the time of writing, one per known `entry_type`, with a neutral fallback for anything newer) + the full dotted `entry_type`, tinted by group. The group name is repeated visually-hidden, so group membership is not colour-only either. |
 | summary | rest | `entry.summary`, minus a leading `"<agent>: "` when that prefix names the agent already shown in the identity column. |
 | age | 62px | Relative time. |
 | chevron | 14px | The disclosure button — `aria-expanded` plus `aria-controls` onto the detail region, which is a *sibling* grid item, not a descendant. The row container keeps a click handler for the mouse but is not itself a button: with the detail inside a `role="button"`, the detail's own jump controls were nested interactive content and the button's accessible name grew to include the whole payload JSON. |
@@ -567,6 +571,7 @@ answers *what am I looking at* in the URL, so a view is a link.
 | `time` | `5m` \| `15m` \| `1h` \| `24h` \| `7d` \| `30d` \| `all` \| `custom` (omitted = `24h`) | Timeline |
 | `from`, `to` | epoch-ms bounds; only read when `time=custom` and `to > from` | Timeline |
 | `crew_id`, `agent_id`, `trace_id` | ids | Timeline |
+| `mission_id` | an issue id or identifier (`ENG-4`) — the issue focus described above; shown as a clearable **issue** pill | Timeline |
 | `severity` | `info` \| `notice` \| `warn` \| `error` (omitted = all) | Timeline |
 | `mute` | CSV of entry groups to hide | Timeline |
 | `q` | the search box, structured tokens included (`agent:viktor severity:error`) | Timeline |
@@ -595,7 +600,7 @@ one history entry per typing pause would bury the view you came from.
 ### Saved views
 
 The chip row above the tabs reads and writes the same server-stored bookmarks
-as [`crewship saved-view`](/api-reference/saved-views) — `filters_json` carries the URL
+as [`crewship saved-view`](/cli/saved-view) (API: [Saved views](/api-reference/saved-views)) — `filters_json` carries the URL
 params above, so a view made in the UI is editable from the CLI and back.
 
 ```
