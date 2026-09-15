@@ -274,3 +274,17 @@ At this entry, all 143 Integrations tests, targeted GitHub API tests and the rac
 pipeline resume/registry family passed. The full Go/vet and frontend/lint/build
 runs are in progress; final exit results must be recorded separately. These are
 local code tests, not new real-provider or dev2 delivery evidence.
+
+## Closing review: final OpenAPI catalog overrides
+
+CodeRabbit's ac7ebf44 review approved the PR but reported one valid outside-diff
+finding: later schema catalogs replaced the correctly described activity request
+and list response, dropping `ingress_profile` from the generated document.
+`TestWebhookProfileSurvivesFinalDocumentCatalogs` reproduces both omissions using
+`buildDocument` and resolving the operation's final references. It failed before
+the fix; after adding the field to both overriding catalogs, the entire
+`cmd/gen-openapi` package passes. Regeneration changes only these two properties
+(15 JSON lines). Handler, runtime and frontend code are unchanged. Current-head
+CI and renewed approval still need to complete; ac7ebf44's green CI is not a
+result for this subsequent correction. Logs: closing-ac7ebf44 and
+`/tmp/incoming-openapi-profile-{red,green,generate}.log`.

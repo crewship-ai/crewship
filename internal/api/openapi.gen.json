@@ -8782,6 +8782,14 @@
             "nullable": true,
             "type": "boolean"
           },
+          "ingress_profile": {
+            "default": "crewship",
+            "enum": [
+              "crewship",
+              "github"
+            ],
+            "type": "string"
+          },
           "inputs_template": {
             "additionalProperties": true,
             "type": "object"
@@ -15325,6 +15333,13 @@
               "type": "boolean"
             },
             "id": {
+              "type": "string"
+            },
+            "ingress_profile": {
+              "enum": [
+                "crewship",
+                "github"
+              ],
               "type": "string"
             },
             "inputs_template": {
