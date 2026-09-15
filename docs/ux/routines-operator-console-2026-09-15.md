@@ -448,3 +448,28 @@ citace, kde se zastavili. Teprve po tomto kole přepisovat produkční UI.
   pickery v návrhu nejsou; cesta zůstává textové pole s lexikální kontrolou.
 - Seznam souborů říká, co recept deklaruje a zda soubor na svazku je; není to
   důkaz, že kód dělá to, co popis tvrdí, ani že má potřebná oprávnění.
+
+## 9. Co bylo nakonec implementováno jinak (PR #2562, 15. 9. 2026)
+
+Po průchodu s vlastníkem se od návrhu výše liší:
+
+- **Overview není seznam ani dlaždice, ale dashboard** postavený z komponent
+  `/dashboard` (`AttentionStrip`, `OutcomeKpis`, `RunVolumeChart`, `UpNext`,
+  `DashboardCard`): lišta „Needs your attention“ (rozhodnutí · neúspěchy ·
+  další start · drafty), KPI za 7 dní, *Latest results* vlevo, *Routines
+  running now* + *Up next* + *Drafts to publish* vpravo, graf **výsledků po
+  dnech** (completed / could not finish / stopped / still going) přes celou
+  šířku. Katalog rutin je jen v exploreru; záložka *Recent runs* zmizela —
+  běhy jsou v Activity (lens *Routines*), odkaz je v liště záložek.
+- **Kalendář**: měsíční buňka ukazuje dvě nejdřívější položky dne a `+N
+  later`; klik na buňku otevře denní pohled (hodinovou mřížku). Seskupená
+  agenda zůstala dostupná z ročního pohledu a z čipu v hodinové mřížce.
+  Buňky se přizpůsobují šířce mřížky (container query), ne oknu.
+- **Explorer**: jeden řádek na rutinu (bez popisu), živý běh jako čip
+  *Running / Waiting* vpravo, bez stopek.
+- **Files**: náhled je editor z Files panelu agenta (CodeMirror, jen čtení);
+  stav souboru je trojí — present / missing / unverified.
+- **Copy** vytváří draft, ne živou rutinu; slug jen s draftem se otevře jako
+  stránka rutiny s *Publish draft r1*.
+- **Edit** ukládá proti revizi, na které byl otevřen (CAS), a má záložku
+  *Agent prompts*; *Limits* jsou označené jako nástřel.
