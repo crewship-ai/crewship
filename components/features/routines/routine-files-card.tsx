@@ -242,9 +242,9 @@ function FileBody({ file, crewId, workspaceId }: { file: RoutineFile; crewId?: s
         <FileEditor code={text} language={getEditorLanguage(file.path.split("/").pop() ?? file.path)} onSave={() => {}} extraExtensions={READ_ONLY} />
       </div>
       {/* Status bar, as the Files panel draws it — this one says read-only instead of Ctrl+S. */}
-      <div className="flex shrink-0 items-center justify-between bg-[#007acc] px-3 py-0.5 text-micro text-white">
-        <span>Read-only · {text.length.toLocaleString("en")} chars</span>
-        <span className="truncate pl-3">{file.description}</span>
+      <div className="flex shrink-0 items-center gap-3 bg-[#007acc] px-3 py-0.5 text-micro text-white">
+        <span className="shrink-0 whitespace-nowrap">Read-only · {text.length.toLocaleString("en")} chars</span>
+        <span className="min-w-0 flex-1 truncate text-right">{file.description}</span>
       </div>
     </>
   )
