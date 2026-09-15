@@ -442,8 +442,8 @@ func init() {
 	issueCreateCmd.Flags().String("description", "", "Issue description")
 	issueCreateCmd.Flags().String("priority", "none", "Priority: none, low, medium, high, urgent")
 	issueCreateCmd.Flags().String("status", "", "Starting status: BACKLOG (default), TODO, IN_PROGRESS, CANCELLED, DUPLICATE")
-	issueCreateCmd.Flags().String("assignee", "", "Assignee agent slug")
-	issueCreateCmd.Flags().String("assignee-type", "agent", "Assignee type: agent or user")
+	issueCreateCmd.Flags().String("assignee", "", "Assignee: an agent slug or ID (delegate), or with --assignee-type user a member's email or user ID (owner)")
+	issueCreateCmd.Flags().String("assignee-type", "agent", "Assignee type: agent (sets the delegate) or user (sets the human owner)")
 	issueCreateCmd.Flags().String("labels", "", "Comma-separated label IDs")
 	issueCreateCmd.Flags().String("due-date", "", "Due date (ISO 8601)")
 	// PR #292 panel parity: project/milestone/parent/estimate/sort-order/routine-id
@@ -459,8 +459,8 @@ func init() {
 	issueUpdateCmd.Flags().String("description", "", "New description")
 	issueUpdateCmd.Flags().String("status", "", "New status: BACKLOG, TODO, IN_PROGRESS, REVIEW, DONE, FAILED, CANCELLED, DUPLICATE")
 	issueUpdateCmd.Flags().String("priority", "", "New priority: none, low, medium, high, urgent")
-	issueUpdateCmd.Flags().String("assignee", "", "Assignee agent slug")
-	issueUpdateCmd.Flags().String("assignee-type", "", "Assignee type: agent or user")
+	issueUpdateCmd.Flags().String("assignee", "", "Assignee: an agent slug or ID (delegate), or with --assignee-type user a member's email or user ID (owner); empty string clears both")
+	issueUpdateCmd.Flags().String("assignee-type", "", "Assignee type: agent (sets the delegate) or user (sets the human owner)")
 	issueUpdateCmd.Flags().String("due-date", "", "Due date (ISO 8601)")
 	// PR #292 panel parity. Empty string on project/milestone/parent/routine clears it.
 	issueUpdateCmd.Flags().String("project-id", "", "Project ID (empty string = unlink)")
@@ -475,14 +475,20 @@ func init() {
 	issueReviewCmd.Flags().String("action", "", "Review action: approve or request_changes (required)")
 	issueReviewCmd.Flags().String("comment", "", "Review comment")
 	issueReviewCmd.Flags().String("reassign", "", "Agent slug to reassign to (for request_changes)")
+	// #2448's compare-and-set: the command fills both revisions in from the
+	// issue it just read, so a plain call is safe; pinning them refuses a
+	// review of work that changed since the caller looked (409).
+	issueReviewCmd.Flags().Int("revision", 0, "Expected work revision (defaults to the issue's current one)")
+	issueReviewCmd.Flags().Int("brief-revision", 0, "Expected brief revision (defaults to the issue's current one)")
 
 	// issue delete flags
 	issueDeleteCmd.Flags().BoolP("yes", "y", false, "Skip confirmation")
 
-	// issue stop flags (§10.3 Tier 2, B7, #2356): --hard signals the run's
-	// own process (TERM then, after a grace period, KILL) from inside its
-	// container, bounded to a few seconds, on top of plain stop's Tier 1
-	// cooperative cancel. Never affects a sibling agent on the same crew.
+	// issue stop flags (§10.3 Tier 2, B7, #2356/#2366): --hard kills the
+	// run's tmux session and then KILLs the pane's process group inside
+	// its container, bounded to a few seconds, on top of plain stop's
+	// Tier 1 cooperative cancel. Never affects a sibling agent on the same
+	// crew.
 	issueStopCmd.Flags().Bool("hard", false, "also terminate the running process (Tier 2); cooperative stop alone only prevents further work from starting")
 
 	// issue comment flags

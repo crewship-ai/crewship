@@ -38,7 +38,7 @@ Implementation: `internal/api/milestone_handler.go`. Backed by the `milestones` 
 | `status` | string | `active`, `completed`, `archived`, ... (server doesn't enforce the enum). Defaults to `"active"` on create when omitted. |
 | `position` | int | Ordering within the project, ascending. Auto-assigned on create as `MAX(position) + 1`. |
 | `issue_count` | int | Issues attached to this milestone (`missions WHERE milestone_id = ? AND mission_type = 'issue'`). |
-| `done_count` | int | Subset of `issue_count` where `status IN ('DONE', 'COMPLETED')`. |
+| `done_count` | int | Subset of `issue_count` where `status = 'DONE'`. |
 | `created_at` | RFC3339 | |
 | `updated_at` | RFC3339 | |
 
