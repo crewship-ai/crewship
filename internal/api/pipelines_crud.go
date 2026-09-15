@@ -80,6 +80,7 @@ func (h *PipelineHandler) List(w http.ResponseWriter, r *http.Request) {
 	h.enrichRecordedRoutineState(r.Context(), workspaceID, out)
 	enrichPipelineListAuthorNames(r.Context(), h.db, h.logger, out)
 	enrichPipelineListLinkedIssues(r.Context(), h.db, h.logger, workspaceID, out)
+	enrichPipelineDrafts(r.Context(), h.db, h.logger, workspaceID, out)
 	writeJSON(w, http.StatusOK, out)
 }
 
@@ -101,7 +102,16 @@ func (h *PipelineHandler) Get(w http.ResponseWriter, r *http.Request) {
 	out := toPipelineResponse(p, true)
 	batch := []pipelineResponse{out}
 	h.enrichRecordedRoutineState(r.Context(), workspaceID, batch)
+	enrichPipelineDrafts(r.Context(), h.db, h.logger, workspaceID, batch)
 	out = batch[0]
+	// Files this routine runs (#2560): the pure projection from the
+	// definition, then presence/size/header from the author crew's share.
+	// Always an array on the detail — `[]` when nothing is declared.
+	files := []pipeline.FileRef{}
+	if dsl, perr := pipeline.Parse([]byte(p.DefinitionJSON)); perr == nil {
+		files = h.enrichPipelineFiles(r.Context(), p.AuthorCrewID, pipeline.DescribeFiles(dsl))
+	}
+	out.Files = &files
 	// Only for a routine actually awaiting review — the lookup is a
 	// wasted query otherwise, and a stale reason on an active routine
 	// would be worse than none.

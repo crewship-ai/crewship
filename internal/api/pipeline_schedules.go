@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -20,20 +21,26 @@ import (
 // we strip inputs_json into a real object so the caller doesn't
 // have to JSON-decode a string field nested inside JSON.
 type scheduleResponse struct {
-	ID                    string         `json:"id"`
-	WorkspaceID           string         `json:"workspace_id"`
-	Name                  string         `json:"name"`
-	TargetPipelineID      string         `json:"target_pipeline_id"`
-	TargetPipelineSlug    string         `json:"target_pipeline_slug,omitempty"`
-	TargetPipelineVersion *int           `json:"target_pipeline_version,omitempty"`
-	CronExpr              string         `json:"cron_expr"`
-	Timezone              string         `json:"timezone"`
-	Inputs                map[string]any `json:"inputs"`
-	Enabled               bool           `json:"enabled"`
-	LastRunAt             *time.Time     `json:"last_run_at,omitempty"`
-	LastStatus            string         `json:"last_status,omitempty"`
-	LastRunID             string         `json:"last_run_id,omitempty"`
-	NextRunAt             *time.Time     `json:"next_run_at,omitempty"`
+	ID                    string `json:"id"`
+	WorkspaceID           string `json:"workspace_id"`
+	Name                  string `json:"name"`
+	TargetPipelineID      string `json:"target_pipeline_id"`
+	TargetPipelineSlug    string `json:"target_pipeline_slug,omitempty"`
+	TargetPipelineVersion *int   `json:"target_pipeline_version,omitempty"`
+	// EffectiveVersion is the version a fire would run right now (#2560):
+	// the pin when there is one, else the target's current head. null when
+	// the target pipeline is gone. Always present so the UI can say "Uses
+	// latest (now v3)" or "Pinned to v2" without a second fetch.
+	EffectiveVersion *int           `json:"effective_version"`
+	VersionPinned    bool           `json:"version_pinned"`
+	CronExpr         string         `json:"cron_expr"`
+	Timezone         string         `json:"timezone"`
+	Inputs           map[string]any `json:"inputs"`
+	Enabled          bool           `json:"enabled"`
+	LastRunAt        *time.Time     `json:"last_run_at,omitempty"`
+	LastStatus       string         `json:"last_status,omitempty"`
+	LastRunID        string         `json:"last_run_id,omitempty"`
+	NextRunAt        *time.Time     `json:"next_run_at,omitempty"`
 	// Wake gate — see pipeline.Schedule. WakeInputs is always a real
 	// object (like Inputs) so callers don't branch on null; the
 	// telemetry fields are omitted while zero to keep ungated
@@ -85,6 +92,11 @@ func (h *PipelineHandler) toScheduleResponse(s *pipeline.Schedule, slug, wakeSlu
 			h.logger.Warn("unmarshal wake_inputs_json", "schedule_id", s.ID, "error", err)
 		}
 	}
+	var effective *int
+	if s.TargetPipelineVersion != nil {
+		v := *s.TargetPipelineVersion
+		effective = &v
+	}
 	return scheduleResponse{
 		ID:                     s.ID,
 		WorkspaceID:            s.WorkspaceID,
@@ -92,6 +104,8 @@ func (h *PipelineHandler) toScheduleResponse(s *pipeline.Schedule, slug, wakeSlu
 		TargetPipelineID:       s.TargetPipelineID,
 		TargetPipelineSlug:     slug,
 		TargetPipelineVersion:  s.TargetPipelineVersion,
+		EffectiveVersion:       effective,
+		VersionPinned:          s.TargetPipelineVersion != nil,
 		CronExpr:               s.CronExpr,
 		Timezone:               s.Timezone,
 		Inputs:                 inputs,
@@ -364,7 +378,7 @@ func (h *PipelineHandler) CreateSchedule(w http.ResponseWriter, r *http.Request)
 		replyError(w, http.StatusInternalServerError, "failed to create schedule")
 		return
 	}
-	writeJSON(w, http.StatusCreated, h.toScheduleResponse(saved, slug, wakeSlug))
+	writeJSON(w, http.StatusCreated, h.withEffectiveVersion(r.Context(), h.toScheduleResponse(saved, slug, wakeSlug)))
 }
 
 // wakeRefFromBody collapses the wake_pipeline_slug / wake_pipeline_id
@@ -418,7 +432,68 @@ func (h *PipelineHandler) ListSchedules(w http.ResponseWriter, r *http.Request) 
 	for _, s := range rows {
 		out = append(out, h.toScheduleResponse(s, lookupSlug(s.TargetPipelineID), lookupSlug(s.WakePipelineID)))
 	}
+	h.applyEffectiveVersions(r.Context(), out)
 	writeJSON(w, http.StatusOK, out)
+}
+
+// applyEffectiveVersions resolves effective_version for every unpinned row
+// from the targets' current head_version in one query. A pinned row already
+// carries its pin; a row whose target is gone (deleted, or never resolved)
+// keeps null. Best-effort: a query error leaves the unpinned rows at null
+// rather than failing the response.
+func (h *PipelineHandler) applyEffectiveVersions(ctx context.Context, rows []scheduleResponse) {
+	if len(rows) == 0 || h.db == nil {
+		return
+	}
+	idSet := map[string]struct{}{}
+	for _, row := range rows {
+		if !row.VersionPinned && row.TargetPipelineID != "" {
+			idSet[row.TargetPipelineID] = struct{}{}
+		}
+	}
+	if len(idSet) == 0 {
+		return
+	}
+	args := make([]any, 0, len(idSet)+1)
+	args = append(args, rows[0].WorkspaceID)
+	placeholders := make([]string, 0, len(idSet))
+	for id := range idSet {
+		args = append(args, id)
+		placeholders = append(placeholders, "?")
+	}
+	res, err := h.db.QueryContext(ctx,
+		`SELECT id, head_version FROM pipelines WHERE workspace_id = ? AND deleted_at IS NULL AND id IN (`+strings.Join(placeholders, ",")+`)`,
+		args...)
+	if err != nil {
+		h.logger.Warn("schedule effective versions", "error", err)
+		return
+	}
+	defer res.Close()
+	heads := map[string]int{}
+	for res.Next() {
+		var id string
+		var head int
+		if err := res.Scan(&id, &head); err == nil && head > 0 {
+			heads[id] = head
+		}
+	}
+	for i := range rows {
+		if rows[i].VersionPinned {
+			continue
+		}
+		if head, ok := heads[rows[i].TargetPipelineID]; ok {
+			v := head
+			rows[i].EffectiveVersion = &v
+		}
+	}
+}
+
+// withEffectiveVersion is applyEffectiveVersions for a single-row response
+// (create / update / activate).
+func (h *PipelineHandler) withEffectiveVersion(ctx context.Context, row scheduleResponse) scheduleResponse {
+	batch := []scheduleResponse{row}
+	h.applyEffectiveVersions(ctx, batch)
+	return batch[0]
 }
 
 // UpdateSchedule PATCH /workspaces/{wsId}/pipeline-schedules/{scheduleId}
@@ -625,7 +700,7 @@ func (h *PipelineHandler) UpdateSchedule(w http.ResponseWriter, r *http.Request)
 		replyError(w, http.StatusInternalServerError, "failed to update schedule")
 		return
 	}
-	writeJSON(w, http.StatusOK, h.toScheduleResponse(saved, slug, wakeSlug))
+	writeJSON(w, http.StatusOK, h.withEffectiveVersion(r.Context(), h.toScheduleResponse(saved, slug, wakeSlug)))
 }
 
 // DeleteSchedule DELETE /workspaces/{wsId}/pipeline-schedules/{scheduleId}
@@ -746,7 +821,7 @@ func (h *PipelineHandler) ActivateSchedule(w http.ResponseWriter, r *http.Reques
 	if p, perr := h.store.GetByID(r.Context(), activated.TargetPipelineID); perr == nil {
 		slug = p.Slug
 	}
-	writeJSON(w, http.StatusOK, h.toScheduleResponse(activated, slug, ""))
+	writeJSON(w, http.StatusOK, h.withEffectiveVersion(r.Context(), h.toScheduleResponse(activated, slug, "")))
 }
 
 // schedulePreviewMaxCount caps how many fire times a single preview call
