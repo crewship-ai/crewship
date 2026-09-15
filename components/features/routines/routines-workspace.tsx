@@ -2,17 +2,14 @@
 
 import { useMemo, type ReactNode } from "react"
 import Link from "next/link"
-import { CalendarClock, ChevronRight, Workflow } from "lucide-react"
+import { CalendarClock, Workflow } from "lucide-react"
 
 import { formatRoutineTime } from "@/lib/routine-time"
-import { describeCron } from "@/lib/cron-describe"
 import { useUrlSelection } from "@/hooks/use-issue-detail"
 import { usePipelineRuns } from "@/hooks/use-pipeline-runs"
 import { usePipelineSchedules, type PipelineSchedule } from "@/hooks/use-pipeline-schedules"
 import type { Pipeline } from "@/hooks/use-pipelines"
 import { useActiveRoutineRuns, isAwaitingApproval } from "@/hooks/use-active-routine-runs"
-import { useAutomations } from "@/hooks/use-automations"
-import { automationsForRoutine } from "@/lib/automations"
 import { CrewIcon } from "@/components/ui/crew-icon"
 import { StatusPill } from "@/components/ui/status-pill"
 import { InlineEmpty } from "@/components/ui/inline-empty"
@@ -23,9 +20,10 @@ import {
   type RoutineFilterState,
 } from "@/lib/routine-filters"
 import { cn } from "@/lib/utils"
-import { formatAgo, routineRunPresentation } from "@/lib/routine-run-presentation"
+import { routineRunPresentation } from "@/lib/routine-run-presentation"
 import { routineViewHref } from "./routine-navigation"
 import { RoutineCalendar } from "./routine-calendar"
+import { RoutinesDashboard } from "./routines-dashboard"
 
 export const routineRunHref = (slug: string, id: string) =>
   `/routines?${new URLSearchParams({ slug, run: id })}`
@@ -108,13 +106,6 @@ export function routineLastState(
   return { status: tone, label: p.label }
 }
 
-/** "Every day at 09:00 · Europe/Prague" for the enabled plan, else what starts it. */
-function whenItRuns(schedule: PipelineSchedule | undefined, automations: number): string {
-  const plan = schedule ? `${describeCron(schedule.cron_expr)} · ${schedule.timezone || "UTC"}` : null
-  const rules = automations > 0 ? `${automations} automation${automations === 1 ? "" : "s"}` : null
-  return [plan, rules].filter(Boolean).join(" · ") || "Manual"
-}
-
 /** "08:00" in the schedule's zone — the big figure on the next-start tile. */
 function clockIn(iso: string, timeZone?: string): string {
   try {
@@ -133,7 +124,11 @@ export function RoutinesWorkspace(props: RoutinesWorkspaceProps) {
   const tab: ListTab = TABS.includes(selectedTab as ListTab) ? (selectedTab as ListTab) : "routines"
   const { bySlug, runs: activeRuns } = useActiveRoutineRuns()
   const { schedules } = usePipelineSchedules(props.workspaceId)
-  const { automations } = useAutomations(props.workspaceId)
+  const { runs: dashboardRuns, loading: dashboardRunsLoading } = usePipelineRuns(
+    props.workspaceId,
+    "all",
+    200,
+  )
   const filters = props.filters
   const search = props.search ?? ""
 
@@ -149,11 +144,6 @@ export function RoutinesWorkspace(props: RoutinesWorkspaceProps) {
   }, [schedules])
 
   const visible = props.routines as ListRoutine[]
-  // Any explorer facet can empty the list, not only the status bucket.
-  const narrowed =
-    !!search ||
-    (!!filters &&
-      (filters.status !== "all" || filters.invocations !== "all" || filters.authorAgentId !== null))
   const displayed = visible.filter(
     (routine) => !filters || matchesRoutineFilters(routineFilterInput(routine), filters, bySlug, search),
   )
@@ -195,7 +185,7 @@ export function RoutinesWorkspace(props: RoutinesWorkspaceProps) {
                 : "border-transparent text-muted-foreground hover:text-foreground",
             )}
           >
-            {view[0].toUpperCase() + view.slice(1)}
+            {view === "routines" ? "Overview" : view[0].toUpperCase() + view.slice(1)}
           </button>
         ))}
       </nav>
@@ -240,117 +230,31 @@ export function RoutinesWorkspace(props: RoutinesWorkspaceProps) {
               />
             </div>
 
-            {displayed.length !== visible.length && (
-              <div className="mb-3 flex items-center justify-end text-[11px] text-muted-foreground">
-                {displayed.length} of {visible.length} match the explorer&apos;s filters
-              </div>
-            )}
-
             {props.error && (
               <p role="alert" className="mb-3 text-sm text-destructive">
                 Routines could not be loaded.
               </p>
             )}
 
-            <div className="overflow-hidden rounded-xl border border-border/60 bg-card">
-              <div
-                className="hidden gap-3 border-b border-border/60 px-4 py-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground md:grid md:grid-cols-[minmax(0,1fr)_200px_160px_24px]"
-                aria-hidden
-              >
-                <span>Routine and purpose</span>
-                <span>Runs how</span>
-                <span>Last run</span>
-                <span />
+            {/* The catalog lives in the sidebar; this pane is the week at a
+                glance. An empty workspace still needs the way in. */}
+            {!visible.length && !props.loading && !props.error ? (
+              <div className="rounded-xl border border-border/60 bg-card p-3">
+                <InlineEmpty
+                  icon={Workflow}
+                  text="No routines yet. Create one with New routine, or import a bundle."
+                />
               </div>
-              <ul className="divide-y divide-border/60">
-                {displayed.map((routine) => {
-                  const live = bySlug.get(routine.slug) ?? null
-                  const state = routineLastState(routine, live)
-                  const published = (routine.head_version ?? 0) > 0
-                  const draft = routine.draft ?? null
-                  const when = live
-                    ? formatAgo(live.started_at)
-                    : state.status === "PENDING"
-                      ? ""
-                      : formatAgo(routine.last_invoked_at)
-                  return (
-                    <li key={routine.id}>
-                      <button
-                        type="button"
-                        onClick={() => props.onSelect(routine.slug)}
-                        className="relative grid w-full grid-cols-1 gap-2 px-4 py-3 pr-10 text-left transition-colors hover:bg-muted/30 md:grid-cols-[minmax(0,1fr)_200px_160px_24px] md:items-center md:gap-3 md:pr-4"
-                      >
-                        <span className="flex min-w-0 items-start gap-3">
-                          <CrewIcon
-                            icon={resolveRoutineIcon(routine)}
-                            color={resolveRoutineColor(routine)}
-                            size="sm"
-                          />
-                          <span className="min-w-0 flex-1">
-                            <span className="flex min-w-0 items-center gap-2">
-                              <span className="truncate text-sm font-medium">{routine.name}</span>
-                              {draft && (
-                                <StatusPill
-                                  tone="purple"
-                                  label={published ? `Draft r${draft.revision}` : "Draft"}
-                                  title={
-                                    published
-                                      ? `A draft newer than v${routine.head_version} is waiting to be published`
-                                      : "Not published yet — nothing runs until it is"
-                                  }
-                                />
-                              )}
-                            </span>
-                            <span
-                              className="block truncate text-[13px] text-muted-foreground"
-                              title={routine.description || undefined}
-                            >
-                              {routine.description || <i>No purpose written yet</i>}
-                            </span>
-                          </span>
-                        </span>
-                        <span className="hidden text-xs text-muted-foreground md:block">
-                          {draft && !published
-                            ? "Draft · not published"
-                            : whenItRuns(
-                                scheduleBySlug.get(routine.slug),
-                                automationsForRoutine(automations, routine.slug).length,
-                              )}
-                        </span>
-                        <span className="flex flex-col items-start gap-0.5">
-                          <StatusPill
-                            status={state.status}
-                            label={state.label}
-                            live={state.status === "RUNNING"}
-                          />
-                          {when && (
-                            <span className="text-[11px] text-muted-foreground">{when}</span>
-                          )}
-                        </span>
-                        <ChevronRight
-                          aria-hidden
-                          className="absolute right-4 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground md:static md:translate-y-0"
-                        />
-                      </button>
-                    </li>
-                  )
-                })}
-              </ul>
-              {!displayed.length && !props.error && (
-                <div className="p-3">
-                  <InlineEmpty
-                    icon={Workflow}
-                    text={
-                      props.loading
-                        ? "Loading routines…"
-                        : narrowed
-                          ? "No routines match the explorer's filters."
-                          : "No routines yet. Create one with New routine, or import a bundle."
-                    }
-                  />
-                </div>
-              )}
-            </div>
+            ) : (
+              <RoutinesDashboard
+                routines={displayed}
+                runs={dashboardRuns}
+                runsLoading={dashboardRunsLoading}
+                schedules={schedules}
+                onSelect={props.onSelect}
+                onShowRuns={() => setTab("recent runs")}
+              />
+            )}
           </section>
         )}
         {tab === "calendar" && (

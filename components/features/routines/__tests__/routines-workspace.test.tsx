@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, within } from "@testing-library/react"
-import { describe, expect, it, vi } from "vitest"
+import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { Pipeline } from "@/hooks/use-pipelines"
 import { RoutinesWorkspace, routineLastState } from "../routines-workspace"
 
@@ -20,6 +20,7 @@ const h = vi.hoisted(() => ({
     next_run_at?: string
   }[],
   automations: [] as { id: string; enabled: boolean; action: { routine_slug: string } }[],
+  recorded: [] as { id: string; pipeline_slug: string; pipeline_name?: string; status: string; started_at: string; duration_ms?: number; cost_usd?: number }[],
 }))
 
 vi.mock("@/hooks/use-issue-detail", () => ({ useUrlSelection: () => [null, vi.fn()] }))
@@ -33,7 +34,7 @@ vi.mock("@/hooks/use-active-routine-runs", () => ({
 vi.mock("@/hooks/use-pipeline-schedules", () => ({
   usePipelineSchedules: () => ({ schedules: h.schedules, loading: false, error: null }),
 }))
-vi.mock("@/hooks/use-pipeline-runs", () => ({ usePipelineRuns: vi.fn() }))
+vi.mock("@/hooks/use-pipeline-runs", () => ({ usePipelineRuns: () => ({ runs: h.recorded ?? [], loading: false, error: null }) }))
 vi.mock("@/hooks/use-automations", () => ({
   useAutomations: () => ({ automations: h.automations, loading: false, error: null }),
 }))
@@ -75,10 +76,7 @@ const rows = [
 
 const filters = { status: "all" as const, invocations: "all" as const, authorAgentId: null, showEphemeral: false }
 
-/** The rows only — the region also holds the "Needs you" tiles, which name routines too. */
-const rowsOf = () => within(screen.getByRole("region", { name: "Routine list" }).querySelector("ul")!)
-
-function renderList(props: Partial<React.ComponentProps<typeof RoutinesWorkspace>> = {}) {
+function renderPane(props: Partial<React.ComponentProps<typeof RoutinesWorkspace>> = {}) {
   return render(
     <RoutinesWorkspace
       workspaceId="ws"
@@ -92,39 +90,22 @@ function renderList(props: Partial<React.ComponentProps<typeof RoutinesWorkspace
   )
 }
 
-describe("<RoutinesWorkspace> — the one list", () => {
-  it("shows purpose, how it runs and one last-run state per row, then selects the routine", () => {
+describe("<RoutinesWorkspace> — the overview pane", () => {
+  beforeEach(() => {
+    h.recorded = []
+  })
+
+  it("is a dashboard, not a second copy of the sidebar's list", () => {
     h.runs = []
-    h.automations = [{ id: "a1", enabled: true, action: { routine_slug: "other" } }]
-    h.schedules = [
-      {
-        id: "s1",
-        enabled: true,
-        target_pipeline_slug: "report",
-        cron_expr: "30 2 * * *",
-        timezone: "Europe/Prague",
-        next_run_at: "2026-09-13T00:30:00Z",
-      },
-    ]
-    const select = vi.fn()
-    renderList({ onSelect: select })
-    const list = rowsOf()
-    const row = list.getByRole("button", { name: /Weekly report/ })
-    expect(within(row).getByText("Summarize service health")).toBeVisible()
-    expect(within(row).getByText("Every day at 02:30 · Europe/Prague")).toBeInTheDocument()
-    // A routine an automation can start is not "Manual".
-    expect(list.getByRole("button", { name: /Other routine/ })).toHaveTextContent("1 automation")
-    // One state per row: the pill and a relative time, no second sentence.
-    expect(within(row).getByText("Completed")).toBeVisible()
-    expect(within(row).getByText("1 h ago")).toBeVisible()
-    expect(within(row).queryByText(/Finished/)).not.toBeInTheDocument()
-    expect(within(row).queryByText(/steps/)).not.toBeInTheDocument()
-    expect(list.queryByText("Open →")).not.toBeInTheDocument()
-    // The explorer beside this panel owns the buckets and the count.
-    expect(screen.queryByRole("tab", { name: /Health/ })).not.toBeInTheDocument()
-    expect(screen.queryByText(/^3 routines$/)).not.toBeInTheDocument()
-    fireEvent.click(row)
-    expect(select).toHaveBeenCalledWith("report")
+    h.schedules = []
+    h.automations = []
+    renderPane()
+    expect(screen.getByRole("button", { name: "Overview" })).toHaveAttribute("aria-pressed", "true")
+    expect(screen.getByTestId("routines-dashboard")).toBeInTheDocument()
+    // No catalog rows: the explorer beside this pane owns them.
+    expect(screen.queryByText("Summarize service health")).toBeNull()
+    expect(screen.queryByText("Routine and purpose")).toBeNull()
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument()
   })
 
   it("puts the waiting decision first, as a tile that opens the newest waiting run", () => {
@@ -139,15 +120,12 @@ describe("<RoutinesWorkspace> — the one list", () => {
     ]
     h.schedules = []
     h.automations = []
-    renderList()
+    renderPane()
     const needs = screen.getByRole("group", { name: "Needs you" })
     const tile = within(needs).getByRole("link", { name: /Waiting for your decision/ })
     expect(tile).toHaveAttribute("href", "/routines?slug=report&run=run_1")
     expect(tile).toHaveTextContent(/^1/)
     expect(tile).toHaveTextContent("Weekly report")
-    const row = rowsOf().getByRole("button", { name: /Weekly report/ })
-    expect(within(row).getByText("Waiting for a person")).toBeVisible()
-    expect(within(row).getByText("4 min ago")).toBeVisible()
   })
 
   it("counts the routines that could not finish, opens the newest one, and applies the explorer's filters", () => {
@@ -155,19 +133,17 @@ describe("<RoutinesWorkspace> — the one list", () => {
     h.schedules = []
     h.automations = []
     const select = vi.fn()
-    renderList({ onSelect: select, filters: { ...filters, status: "failed" } })
+    renderPane({ onSelect: select, filters: { ...filters, status: "failed" } })
     const needs = screen.getByRole("group", { name: "Needs you" })
     const tile = within(needs).getByRole("button", { name: /Could not finish last time/ })
     expect(tile).toHaveTextContent(/^1/)
     fireEvent.click(tile)
     expect(select).toHaveBeenCalledWith("broken")
-    const list = rowsOf()
-    const row = list.getByRole("button", { name: /Broken routine/ })
-    expect(within(row).getByText("Could not finish")).toBeVisible()
-    expect(list.queryByText("Weekly report")).not.toBeInTheDocument()
-    expect(screen.getByText(/1 of 3 match the explorer's filters/)).toBeInTheDocument()
-    // The explorer owns search and the buckets; the panel repeats neither.
-    expect(screen.queryByRole("textbox")).not.toBeInTheDocument()
+    // The dashboard's "could not finish" list follows the same filter: the
+    // broken routine is there, the healthy ones are not.
+    const dashboard = within(screen.getByTestId("routines-dashboard"))
+    expect(dashboard.getByRole("button", { name: /Broken routine/ })).toBeInTheDocument()
+    expect(dashboard.queryByText("Weekly report")).toBeNull()
     expect(screen.queryByRole("button", { name: "Never run" })).not.toBeInTheDocument()
   })
 
@@ -184,7 +160,7 @@ describe("<RoutinesWorkspace> — the one list", () => {
         next_run_at: "2026-09-13T00:30:00Z",
       },
     ]
-    renderList()
+    renderPane()
     const needs = screen.getByRole("group", { name: "Needs you" })
     const tile = within(needs).getByRole("link", { name: /Next planned start/ })
     expect(tile).toHaveAttribute("href", "/routines?slug=report&view=plan")
@@ -196,7 +172,7 @@ describe("<RoutinesWorkspace> — the one list", () => {
     h.runs = []
     h.schedules = []
     h.automations = []
-    renderList({ routines: [rows[1]] })
+    renderPane({ routines: [rows[1]] })
     const needs = screen.getByRole("group", { name: "Needs you" })
     expect(within(needs).queryAllByRole("link")).toHaveLength(0)
     expect(within(needs).queryAllByRole("button")).toHaveLength(0)
@@ -204,42 +180,29 @@ describe("<RoutinesWorkspace> — the one list", () => {
     expect(within(needs).getByText("No schedule is on")).toBeInTheDocument()
   })
 
-  it("marks a routine with an unpublished draft, and one that was never published", () => {
+  it("lists drafts to publish, published and not, and opens the routine", () => {
     h.runs = []
     h.schedules = []
     h.automations = []
-    renderList({
+    const select = vi.fn()
+    renderPane({
+      onSelect: select,
       routines: [
         { ...rows[0], draft: { id: "drf_1", revision: 2, updated_at: "2026-09-15T10:31:00Z" } },
         { ...rows[1], head_version: 0, draft: { id: "drf_2", revision: 1 } },
         rows[2],
       ] as Pipeline[],
     })
-    const list = rowsOf()
-    const published = list.getByRole("button", { name: /Weekly report/ })
-    expect(within(published).getByText("Draft r2")).toBeVisible()
-    expect(within(published).getByText("Draft r2").closest("[data-slot=status-pill]")).toHaveAttribute(
-      "data-tone",
-      "purple",
-    )
-    const unpublished = list.getByRole("button", { name: /Other routine/ })
-    expect(within(unpublished).getByText("Draft")).toBeVisible()
-    expect(within(unpublished).getByText("Draft · not published")).toBeInTheDocument()
-    expect(within(unpublished).getByText("Never run")).toBeVisible()
-    expect(
-      within(list.getByRole("button", { name: /Broken routine/ })).queryByText(/Draft/),
-    ).not.toBeInTheDocument()
+    expect(screen.getByText("Drafts to publish")).toBeInTheDocument()
+    const dashboard = within(screen.getByTestId("routines-dashboard"))
+    const draftRow = dashboard.getAllByRole("button", { name: /Weekly report/ })[0]
+    expect(draftRow).toHaveTextContent(/Draft r2 · published v3/)
+    fireEvent.click(draftRow)
+    expect(select).toHaveBeenCalledWith("report")
+    expect(dashboard.getByRole("button", { name: /Other routine/ })).toHaveTextContent("Not published yet")
   })
 
-  it("blames the explorer's filters when any facet, not only status, empties the list", () => {
-    h.runs = []
-    h.schedules = []
-    h.automations = []
-    renderList({ filters: { ...filters, invocations: "popular" } })
-    expect(screen.getByText(/No routines match the explorer's filters/)).toBeVisible()
-  })
-
-  it("says what the empty list means instead of leaving a pane", () => {
+  it("says what the empty workspace means instead of leaving a pane", () => {
     h.runs = []
     h.schedules = []
     render(
