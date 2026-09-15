@@ -134,3 +134,35 @@ results before merge. A bot walkthrough is not an approving review.
   Their completion results belong in the final evidence report/PR, not inferred
   from package progress. CI's Go Lint job on 99469cd2 passed including the strict
   documentation gate; other jobs were still running when this entry was written.
+
+## UI opponent follow-up, 15 September
+
+The UI review rejected the former standalone Incoming branch. Incoming now
+uses the same `IntegrationsExplorer`, sidebar collapse/mobile backdrop and
+`AnimatePresence` content as Outgoing. Its default overview has endpoint KPIs
+and a cross-target table; target details and the create/reveal surface share
+one vocabulary and existing mutation hooks rather than embedding the routine,
+chat and Page settings editors.
+
+| Findings | Implementation |
+| --- | --- |
+| F1 / F8 / F9 | Shared explorer, search, sections/counts, collapse, mobile overlay and transition. |
+| F2 / F10 | KPI/table/empty/skeleton/error surfaces. 24h is unavailable, not zero. Page endpoints remain lazy per Page and are explicitly excluded from totals. Failed catalog loads do not claim complete counts. |
+| F3 | One endpoint detail with back navigation, real supported actions and recent receipts. Agent receipts label admission rather than imply execution success. Page receipt history has no API and is stated unavailable. |
+| F4 | Header counts/badge, Refresh for catalogs/endpoints/receipts, Add integration opens actual creation. |
+| F5 | Sender uses FieldLabel + shared Select in the routine editor and the Incoming create surface. |
+| F6 | Secret-bearing routine/Page URLs are revealed once, then masked. Agent URLs have no secret and remain copyable, with an explanation. Signing-key rotation does not recover a routine URL. |
+| F7 / F11 | Removed duplicate Issues section; routine hint explains issue steps. Incoming and Tools Triggers link to one another and explain direct HTTP vs managed subscriptions. |
+| F12 | URL records section and target, restores on reload. Workspace changes remount the layout to discard old catalog state. |
+| F13 | Component tests render actual editors against API boundaries. PR browser contract includes real HTTP routine/GitHub create, reveal, table, detail, disable and Refresh plus phone drawer/search/overflow. |
+| F14 | Updated layout architecture comment and `docs/api-reference/webhooks.mdx` user instructions. |
+
+Validation is in progress: the initial full frontend run passed 759 files /
+9,108 tests with coverage thresholds met; a subsequent component extraction
+and explanatory copy edits require the final rerun. Production export passed.
+Full Go + vet and real browser verification have not yet completed for this
+UI revision. Do not treat this table as independent review acceptance.
+
+No backend behavior, API route or migration changed in the UI follow-up.
+Existing endpoint limitations remain: no agent disable/delete API, Page revoke
+rather than a reversible switch, per-Page discovery and no Page receipt history.

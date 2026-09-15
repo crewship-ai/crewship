@@ -14,6 +14,8 @@ describe("initialIntegrationsRoute", () => {
       notifySection: "connections",
       mcpSection: "accounts",
       server: null,
+      incomingSection: "endpoints",
+      target: null,
     })
   })
 
@@ -42,6 +44,8 @@ describe("initialIntegrationsRoute", () => {
       notifySection: "connections",
       mcpSection: "accounts",
       server: null,
+      incomingSection: "endpoints",
+      target: null,
     })
   })
 
@@ -59,3 +63,9 @@ it("opens incoming webhooks without inheriting a tools section", () => {
  const route = initialIntegrationsRoute("?tab=incoming&section=accounts&server=secret");
  expect(route.tab).toBe("incoming"); expect(route.server).toBeNull();
 });
+
+it("restores an incoming target and rejects cross-tab or unknown sections", () => {
+  expect(initialIntegrationsRoute("?tab=incoming&section=routine&target=review-pr")).toMatchObject({incomingSection:"routine",target:"review-pr"})
+  expect(initialIntegrationsRoute("?tab=incoming&section=accounts&target=review-pr")).toMatchObject({incomingSection:"endpoints",target:null})
+  expect(initialIntegrationsRoute("?tab=tools&section=routine&target=review-pr")).toMatchObject({incomingSection:"endpoints",target:null})
+})

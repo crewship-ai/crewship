@@ -79,12 +79,6 @@ export function usePipelineWebhooks(workspaceId: string | null | undefined) {
       })
       if (ctrl.signal.aborted) return
       if (!res.ok) {
-        if (res.status === 503) {
-          // Backend not wired (test server / no DB).
-          setWebhooks([])
-          setLoading(false)
-          return
-        }
         setError(`pipeline webhooks: ${res.status}`)
         setLoading(false)
         return

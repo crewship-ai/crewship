@@ -1,28 +1,233 @@
-import { describe, it, expect, vi } from "vitest"
-import { render, screen, fireEvent } from "@testing-library/react"
+import { describe, it, expect, vi, beforeEach } from "vitest"
+import {
+  render,
+  screen,
+  fireEvent,
+  waitFor,
+  within,
+} from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { IncomingWebhooksView } from "../views/incoming-webhooks-view"
+import { IncomingCreateDialog } from "../views/incoming-credentials"
+import {
+  incomingRows,
+  incomingExplorer,
+  type IncomingTarget,
+} from "../incoming-model"
+import type { IncomingData } from "../use-incoming-endpoints"
+import type { PipelineWebhook } from "@/hooks/use-pipeline-webhooks"
+import { apiFetch } from "@/lib/api-fetch"
 
-vi.mock("@/hooks/use-pipelines", () => ({ usePipelines: () => ({ pipelines: [{ id: "routine-id", slug: "review", name: "Review PR" }], loading: false, error: null }) }))
-vi.mock("@/hooks/use-pages", () => ({ usePages: () => ({ pages: [{ id: "page-id", slug: "report", name: "Review report" }], loading: false, error: null }), usePage: () => ({ loading: false, page: { panels: [{spec:{id:"results"},producer:"webhook/review"},{spec:{id:"private"},producer:"agent/other"}] } }) }))
-vi.mock("@/hooks/use-page-grants", () => ({ usePageGrants: () => ({ refusal: null }) }))
-vi.mock("@/lib/api-fetch", () => ({ apiFetch: vi.fn(async () => ({ ok: true, json: async () => [{id:"agent-id",slug:"pepa",name:"Pepa"}] })) }))
-vi.mock("@/components/features/routines/routine-webhooks-tab", () => ({ RoutineWebhooksTab: ({pipelineId}: {pipelineId:string}) => <div>Configure routine {pipelineId}</div> }))
-vi.mock("@/components/features/chat/right-panel-tabs/triggers-tab", () => ({ TriggersTab: ({agentId}: {agentId:string}) => <div>Configure agent {agentId}</div> }))
-vi.mock("@/components/features/pages/page-settings", () => ({ WebhooksCard: ({panelIDs}: {panelIDs:string[]}) => <div>Configure panels {panelIDs.join(",")}</div> }))
-function mount() { render(<QueryClientProvider client={new QueryClient({defaultOptions:{queries:{retry:false}}})}><IncomingWebhooksView workspaceId="workspace" /></QueryClientProvider>) }
+vi.mock("@/lib/api-fetch", async (original) => ({
+  ...(await original<typeof import("@/lib/api-fetch")>()),
+  apiFetch: vi.fn(),
+}))
+const targets: IncomingTarget[] = [
+  { id: "r1", slug: "review-pr", name: "PR review", kind: "routine" },
+  {
+    id: "a1",
+    slug: "pepa",
+    name: "Pepa",
+    kind: "agent",
+    crew_id: "crew",
+    webhook_secret_set: true,
+  },
+  { id: "p1", slug: "report", name: "Report", kind: "page" },
+]
+const hook: PipelineWebhook = {
+  id: "h1",
+  workspace_id: "ws",
+  name: "GitHub PRs",
+  target_pipeline_id: "r1",
+  token: "",
+  signing_secret_set: true,
+  enabled: true,
+  fire_count: 12,
+  rate_limit_per_min: 20,
+  created_at: "",
+  updated_at: "",
+  inputs_template: {},
+  ingress_profile: "github",
+}
+function data(): IncomingData {
+  return {
+    targets,
+    rows: incomingRows(targets, [hook]),
+    loading: false,
+    error: null,
+    refresh: vi.fn(),
+    hooks: {
+      webhooks: [hook],
+      loading: false,
+      error: null,
+      refresh: vi.fn(),
+      create: vi.fn(),
+      update: vi.fn(),
+      remove: vi.fn(),
+    },
+  }
+}
+function mount(node: React.ReactNode) {
+  return render(
+    <QueryClientProvider
+      client={
+        new QueryClient({ defaultOptions: { queries: { retry: false } } })
+      }
+    >
+      {node}
+    </QueryClientProvider>,
+  )
+}
+function view(
+  d = data(),
+  section: "endpoints" | "routine" | "agent" | "page" = "endpoints",
+  targetSlug: string | null = null,
+) {
+  return (
+    <IncomingWebhooksView
+      workspaceId="ws"
+      data={d}
+      section={section}
+      search=""
+      targetSlug={targetSlug}
+      onSelect={vi.fn()}
+      onBack={vi.fn()}
+      onAdd={vi.fn()}
+    />
+  )
+}
+beforeEach(() => {
+  vi.clearAllMocks()
+  vi.mocked(apiFetch).mockResolvedValue(
+    new Response(JSON.stringify({ items: [] }), { status: 200 }),
+  )
+})
 
-describe("incoming webhook target configuration", () => {
- it("opens the existing routine configuration and links its activity", () => {
-  mount();fireEvent.click(screen.getByRole("button",{name:"Review PR"}));expect(screen.getByText("Configure routine routine-id")).toBeInTheDocument();expect(screen.getByRole("link",{name:"Open activity"})).toHaveAttribute("href","/activity?pipeline=review")
- })
- it("describes issue routing honestly without pretending selection creates an issue step", () => {
-  mount();fireEvent.click(screen.getByRole("button",{name:"Issues via a routine"}));expect(screen.getByText(/does not add an issue step/)).toBeInTheDocument();fireEvent.click(screen.getByRole("button",{name:"Review PR"}));expect(screen.getByText("Configure routine routine-id")).toBeInTheDocument()
- })
- it("only offers compatible page panels and clears the previous selection", () => {
-  mount();fireEvent.click(screen.getByRole("button",{name:"Review PR"}));fireEvent.click(screen.getByRole("button",{name:"Pages"}));expect(screen.queryByText("Configure routine routine-id")).not.toBeInTheDocument();fireEvent.click(screen.getByRole("button",{name:"Review report"}));expect(screen.getByText("Configure panels results")).toBeInTheDocument()
- })
- it("configures the selected agent without claiming an existing chat turn", async () => {
-  mount();fireEvent.click(screen.getByRole("button",{name:"Agents / chat"}));fireEvent.click(await screen.findByRole("button",{name:"Pepa"}));expect(screen.getByText("Configure agent agent-id")).toBeInTheDocument();expect(screen.getByText(/does not append a turn/)).toBeInTheDocument()
- })
+describe("incoming explorer model", () => {
+  it("counts targets with endpoints once and does not invent Page totals", () => {
+    const model = incomingExplorer(
+      targets,
+      incomingRows(targets, [hook, { ...hook, id: "h2" }]),
+      "endpoints",
+      "",
+    )
+    expect(model.sections.map((s) => [s.key, s.count])).toEqual([
+      ["endpoints", 3],
+      ["routine", 1],
+      ["agent", 1],
+      ["page", "per Page"],
+    ])
+    expect(model.items.find((i) => i.id === "agent:pepa")).toMatchObject({
+      label: "Pepa",
+      dot: "bg-success",
+    })
+    expect(incomingExplorer(targets, [], "routine", "report").items).toEqual([])
+  })
+})
+describe("actual incoming surfaces", () => {
+  it("renders KPI strip, cross-target endpoint table, and honest unknown 24h metric", () => {
+    mount(view())
+    expect(screen.getByText("Received · 24h")).toBeVisible()
+    expect(
+      screen.getByText("No aggregate count available from the API"),
+    ).toBeVisible()
+    expect(
+      within(screen.getByRole("table")).getByRole("button", {
+        name: "GitHub PRs",
+      }),
+    ).toBeVisible()
+    expect(screen.getByText(/Page endpoints are read on demand/)).toBeVisible()
+  })
+  it("uses the shared detail vocabulary and calls the toggle mutation", () => {
+    const d = data()
+    mount(view(d, "routine", "review-pr"))
+    expect(
+      screen.getByRole("button", { name: "Back to endpoints" }),
+    ).toBeVisible()
+    expect(screen.queryByText("Schedule")).not.toBeInTheDocument()
+    expect(
+      screen.getByText("/api/v1/webhooks/•••••/github-pull-request"),
+    ).toBeVisible()
+    fireEvent.click(
+      screen.getByRole("switch", { name: "Disable endpoint GitHub PRs" }),
+    )
+    expect(d.hooks.update).toHaveBeenCalledWith("h1", { enabled: false })
+  })
+  it("uses real Page endpoint markup with revoke, not the Page editor", async () => {
+    vi.mocked(apiFetch).mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          webhooks: [
+            {
+              id: "page-hook",
+              panel: "result",
+              name: "Result updates",
+              live: true,
+              fire_count: 4,
+            },
+          ],
+        }),
+        { status: 200 },
+      ),
+    )
+    mount(view(data(), "page", "report"))
+    expect(await screen.findByText("Result updates")).toBeVisible()
+    expect(
+      screen.getByRole("button", { name: "Delete endpoint Result updates" }),
+    ).toBeVisible()
+    expect(
+      screen.queryByRole("button", { name: "Mint" }),
+    ).not.toBeInTheDocument()
+    expect(screen.getByText("/api/v1/page-webhooks/•••••")).toBeVisible()
+  })
+  it("presents load errors as errors and provides a retry", () => {
+    const d = data()
+    d.error = "backend unavailable"
+    mount(view(d))
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }))
+    expect(d.refresh).toHaveBeenCalled()
+    expect(screen.getByRole("alert")).toHaveTextContent("backend unavailable")
+  })
+  it("creates a GitHub endpoint through the real form and reveals its URL once", async () => {
+    const d = data()
+    vi.mocked(d.hooks.create).mockResolvedValue({
+      ...hook,
+      token: "once",
+      signing_secret: "sign-once",
+    })
+    const done = vi.fn()
+    mount(
+      <IncomingCreateDialog
+        workspaceId="ws"
+        data={d}
+        initialTarget={targets[0]}
+        onClose={vi.fn()}
+        onCreated={done}
+      />,
+    )
+    fireEvent.keyDown(screen.getByRole("combobox", { name: "Sender" }), {
+      key: "ArrowDown",
+    })
+    fireEvent.click(
+      screen.getByRole("option", { name: "GitHub pull requests" }),
+    )
+    fireEvent.change(screen.getByLabelText("Endpoint name"), {
+      target: { value: "PR events" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Create endpoint" }))
+    await waitFor(() =>
+      expect(d.hooks.create).toHaveBeenCalledWith({
+        name: "PR events",
+        target_pipeline_id: "r1",
+        ingress_profile: "github",
+        enabled: true,
+      }),
+    )
+    expect(
+      await screen.findByTestId("incoming-receiving-url"),
+    ).toHaveTextContent("/api/v1/webhooks/once/github-pull-request")
+    expect(screen.getByText("sign-once")).toBeVisible()
+    fireEvent.click(screen.getByRole("button", { name: "Done" }))
+    expect(done).toHaveBeenCalledWith(targets[0])
+  })
 })

@@ -1,7 +1,8 @@
 import { defineConfig, devices } from "@playwright/test"
 import { storageFilePath } from "./e2e/global-setup"
 
-// The PR browser net is intentionally five no-provider checks. Provider-backed
+// The PR browser net covers provider-free UI contracts, including the real HTTP
+// Incoming endpoint lifecycle. Provider-backed
 // chat send/receive and the chat-shell runtime suite remain in nightly-e2e.yml; the
 // exclusion is explicit so a green PR cannot be mistaken for full browser
 // coverage.

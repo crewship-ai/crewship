@@ -15,6 +15,51 @@ and return `202` after authentication and admission checks.
   This endpoint uses **webhook-secret authentication only** — not session or CLI token auth. Provide exactly one of `X-Signature` (preferred) or `X-Webhook-Secret` (deprecated).
 </Note>
 
+## Manage incoming endpoints in Integrations
+
+Open **Integrations → Incoming webhooks** to see routine and agent endpoints
+in one list. The explorer filters targets by **Routines**, **Agents**, or
+**Pages**; search, collapse, and the mobile drawer work like the other
+Integrations tabs. Selecting a target opens its endpoints and recent receipts.
+The selection is linkable, for example
+`/integrations?tab=incoming&section=routine&target=review-pr`.
+
+Use **Add integration → Incoming webhook** (or **Add endpoint** in a target)
+to select an existing target and create its endpoint. For a routine, choose
+**GitHub pull requests** in **Sender** to use GitHub's signature and PR payload
+adapter; choose **Crewship signature** for the generic payload contract.
+Routines can create, update, or comment on Issues, so Issues do not have a
+second, identical target list. Agent webhooks start background runs; they do
+not append a message to an existing chat. Page endpoints target a compatible
+webhook or script panel on that Page.
+
+**Outgoing notifications** send Crewship events to another service. **Incoming
+webhooks** receive direct HTTP requests. **Tools → Triggers** manages
+subscriptions through connected app accounts; it is a separate integration
+mechanism.
+
+The overview counts routine and configured agent endpoints. Page endpoints are
+loaded only when opening a Page and are explicitly excluded from these totals.
+**Receiving** means enabled with credentials, not that delivery was probed.
+**Received · 24h** displays **—** because the API does not provide that aggregate.
+**Refresh** reloads target lists, endpoints, and the open receipt list.
+
+Receiving URLs for routines and Pages contain a secret token: copy the URL
+when it is created; subsequent views show a masked path. The signing secret
+is also shown once. Rotating a routine's signing secret leaves the receiving
+URL unchanged and cannot recover a lost URL; create a replacement endpoint
+if necessary. An agent's URL contains only public identifiers and remains
+copyable; its signing secret is still shown once.
+
+Routine endpoints support enable/disable, secret rotation, and deletion.
+Agent endpoints currently support secret rotation, without a separate
+endpoint disable/delete operation. Page endpoints can be revoked with
+**Delete**; rotation requires creating a replacement. Existing work and
+receipts are retained when an endpoint is deleted. Recent agent receipts show
+**admission** decisions, not execution results; routine receipts show the run
+record's status when available. Pages expose last-fire information, but no
+receipt-history API. All mutations remain subject to backend permissions.
+
 ## Trigger Agent via Webhook
 
 ```

@@ -6,6 +6,7 @@ import { useMemo, useState } from "react"
 import { Plus, Trash2, Webhook, Copy, Check, Eye, EyeOff, Pencil } from "lucide-react"
 import { usePipelineWebhooks, type PipelineWebhook, type WebhookUpdateBody } from "@/hooks/use-pipeline-webhooks"
 import { Button } from "@/components/ui/button"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Input } from "@/components/ui/input"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
@@ -261,11 +262,13 @@ export function RoutineWebhooksTab({ workspaceId, pipelineId, slug }: Props) {
                   unsigned POST to the public URL passed. That hole is closed;
                   leaving this blank chooses who generates the secret, not
                   whether there is one. */}
-              <label className="mb-3 block text-xs">Sender
-                <select aria-label="Webhook sender" className="ml-2 rounded border bg-background p-2 coarse:min-h-12" value={profile} onChange={(e) => setProfile(e.target.value as "crewship" | "github")}>
-                  <option value="crewship">Crewship signature</option><option value="github">GitHub pull requests</option>
-                </select>
-              </label>
+              <div className="mb-3">
+                <FieldLabel>Sender</FieldLabel>
+                <Select value={profile} onValueChange={value=>setProfile(value as "crewship" | "github")}>
+                  <SelectTrigger aria-label="Webhook sender" className="mt-1.5 w-full"><SelectValue/></SelectTrigger>
+                  <SelectContent><SelectItem value="crewship">Crewship signature</SelectItem><SelectItem value="github">GitHub pull requests</SelectItem></SelectContent>
+                </Select>
+              </div>
               <FieldLabel>Signing secret</FieldLabel>
               <Input
                 type="password"

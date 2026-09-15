@@ -90,7 +90,7 @@ function IntegrationsWorkspaceGate() {
       </div>
     )
   }
-  return <IntegrationsLayout workspaceId={workspaceId} />
+  return <IntegrationsLayout key={workspaceId} workspaceId={workspaceId} />
 }
 
 function LegacyIntegrationsPage() {
