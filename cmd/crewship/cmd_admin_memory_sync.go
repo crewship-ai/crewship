@@ -36,24 +36,24 @@ import (
 
 // memorySyncWorkspaceRow mirrors internal/api.memorySyncWorkspaceSummary.
 type memorySyncWorkspaceRow struct {
-	WorkspaceID      string `json:"workspace_id,omitempty"`
-	Candidates       int    `json:"candidates"`
-	Writes           int    `json:"writes"`
-	SkippedThreshold int    `json:"skipped_threshold"`
-	SkippedEmpty     int    `json:"skipped_empty"`
-	SkippedOptOut    int    `json:"skipped_opt_out"`
-	PurgedOptOut     int    `json:"purged_opt_out"`
-	Errors           int    `json:"errors"`
-	Error            string `json:"error,omitempty"`
+	WorkspaceID      string `json:"workspace_id,omitempty" yaml:"workspace_id,omitempty"`
+	Candidates       int    `json:"candidates" yaml:"candidates"`
+	Writes           int    `json:"writes" yaml:"writes"`
+	SkippedThreshold int    `json:"skipped_threshold" yaml:"skipped_threshold"`
+	SkippedEmpty     int    `json:"skipped_empty" yaml:"skipped_empty"`
+	SkippedOptOut    int    `json:"skipped_opt_out" yaml:"skipped_opt_out"`
+	PurgedOptOut     int    `json:"purged_opt_out" yaml:"purged_opt_out"`
+	Errors           int    `json:"errors" yaml:"errors"`
+	Error            string `json:"error,omitempty" yaml:"error,omitempty"`
 }
 
 // memorySyncResult mirrors internal/api.memorySyncResponse.
 type memorySyncResult struct {
-	Sweep      string                   `json:"sweep"`
-	DryRun     bool                     `json:"dry_run"`
-	Workspaces []memorySyncWorkspaceRow `json:"workspaces"`
-	Totals     memorySyncWorkspaceRow   `json:"totals"`
-	DurationMs int64                    `json:"duration_ms"`
+	Sweep      string                   `json:"sweep" yaml:"sweep"`
+	DryRun     bool                     `json:"dry_run" yaml:"dry_run"`
+	Workspaces []memorySyncWorkspaceRow `json:"workspaces" yaml:"workspaces"`
+	Totals     memorySyncWorkspaceRow   `json:"totals" yaml:"totals"`
+	DurationMs int64                    `json:"duration_ms" yaml:"duration_ms"`
 }
 
 // memorySyncTimeout is the per-request cap. The server runs the sweep
