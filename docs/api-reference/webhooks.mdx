@@ -15,6 +15,52 @@ and return `202` after authentication and admission checks.
   This endpoint uses **webhook-secret authentication only** — not session or CLI token auth. Provide exactly one of `X-Signature` (preferred) or `X-Webhook-Secret` (deprecated).
 </Note>
 
+## Manage incoming endpoints in Integrations
+
+Open **Integrations → Incoming webhooks** to see routine and agent endpoints
+in one list. The explorer filters targets by **Routines**, **Agents**, or
+**Pages**; search, collapse, and the mobile drawer work like the other
+Integrations tabs. Selecting a target opens its endpoints and recent receipts.
+The selection is linkable, for example
+`/integrations?tab=incoming&section=routine&target=review-pr`.
+
+Use **Add integration → Incoming webhook** (or **Add endpoint** in a target)
+to select an existing target and create its endpoint. The default routine endpoint accepts signed JSON requests; credentials are generated
+automatically. To connect GitHub pull requests, open **Advanced settings → Webhook
+format** and choose **GitHub pull requests**. This uses GitHub's signature and PR
+payload adapter. Collapsing the settings does not change the selected format.
+Routines can create, update, or comment on Issues, so Issues do not have a
+second, identical target list. Agent webhooks start background runs; they do
+not append a message to an existing chat. Page endpoints target a compatible
+webhook or script panel on that Page.
+
+**Outgoing notifications** send Crewship events to another service. **Incoming
+webhooks** receive direct HTTP requests. **Tools → Triggers** manages
+subscriptions through connected app accounts; it is a separate integration
+mechanism.
+
+The overview counts routine and configured agent endpoints. Page endpoints are
+loaded only when opening a Page and are explicitly excluded from these totals.
+**Receiving** means enabled with credentials, not that delivery was probed.
+**Received · 24h** displays **—** because the API does not provide that aggregate.
+**Refresh** reloads target lists, endpoints, and the open receipt list.
+
+Receiving URLs for routines and Pages contain a secret token: copy the URL
+when it is created; subsequent views show a masked path. The signing secret
+is also shown once. Rotating a routine's signing secret leaves the receiving
+URL unchanged and cannot recover a lost URL; create a replacement endpoint
+if necessary. An agent's URL contains only public identifiers and remains
+copyable; its signing secret is still shown once.
+
+Routine endpoints support enable/disable, secret rotation, and deletion.
+Agent endpoints currently support secret rotation, without a separate
+endpoint disable/delete operation. Page endpoints can be revoked with
+**Delete**; rotation requires creating a replacement. Existing work and
+receipts are retained when an endpoint is deleted. Recent agent receipts show
+**admission** decisions, not execution results; routine receipts show the run
+record's status when available. Pages expose last-fire information, but no
+receipt-history API. All mutations remain subject to backend permissions.
+
 ## Trigger Agent via Webhook
 
 ```
@@ -325,3 +371,56 @@ removes expired receipts; from then on the same identifier is **new work and
 runs again** — the contract promises no replay suppression past the window.
 Receipts recorded before the window existed were dated from the upgrade and
 keep the full 30 days from there.
+
+### POST /api/v1/webhooks/{token}/github-pull-request
+
+Create an endpoint in **Integrations → Incoming webhooks → Routines** and choose
+**Advanced settings → Webhook format → GitHub pull requests**.
+The creation API accepts `ingress_profile: "github"`; the default is `crewship`.
+The profile cannot be changed by PATCH: create a new endpoint when changing
+sender protocols. Copy the URL and signing secret at creation; neither can be
+recovered from the list. Rotating the secret preserves the URL you saved.
+
+Authentication uses the token in the path and `X-Hub-Signature-256`, containing
+`sha256=` plus the HMAC-SHA256 of the exact request body. It does not use a user
+session. Configure GitHub with content type `application/json`, the shown secret
+and **Pull requests** events. The existing hostname and HTTPS ingress suffice;
+a separate webhook DNS name is not required. The base URL without the suffix
+also enforces the stored GitHub profile, so a legacy signature cannot bypass it.
+
+The JSON request can contain the full GitHub payload. Execution requires a
+`pull_request` object and `action` equal to `opened`, `synchronize` or `reopened`:
+
+```json
+{"action":"opened","pull_request":{"number":42},"repository":{"full_name":"example/project"}}
+```
+
+`X-GitHub-Delivery` is required for these actions. `X-GitHub-Event: ping` and
+unsupported actions are acknowledged without starting a routine. The target
+routine is fixed by the endpoint configuration, and the action is read from
+signed JSON rather than chosen by the unsigned event header. The routine receives
+the event as its webhook inputs and must implement the intended issue or review
+steps; choosing a routine does not add those steps automatically.
+
+Response statuses:
+
+| Status | Response / meaning |
+|---|---|
+| `200` | `{"status":"IGNORED","reason":"ping"}` or unsupported pull request action; no execution |
+| `202` | `{"run_id":"run_…","status":"PENDING","deduped":false,"delivery_id":"…","duplicate":false}`; accepted, execution is asynchronous |
+| `202` | A duplicate returns the original `run_id`, `status: "DEDUPED"`, `deduped: true` and `duplicate: true` |
+| `400` | A supported action is missing `X-GitHub-Delivery`, or the request body could not be read |
+| `401` | Missing or invalid GitHub signature |
+| `404` | Unknown/disabled endpoint, or the GitHub suffix was used with a Crewship-profile endpoint |
+| `409` | Delivery ID reused with different bytes, or the target routine/version is unavailable |
+| `413` | Request exceeds the webhook body limit |
+| `429` | New delivery exceeds an ingress limit; retry according to `Retry-After` |
+| `503` | Receipt ledger or dispatch dependency unavailable; retry according to `Retry-After` |
+
+GitHub delivery IDs are unsigned. Within this endpoint, identical signed bytes
+therefore also deduplicate atomically, including concurrent requests with different
+IDs. The receipt records profile `github` and source ID `github:<delivery-id>`.
+The same 30-day receipt retention applies; once expired receipts are removed, the
+same signed payload can start new work. No permanent replay protection is promised.
+This endpoint does not publish PR reviews or enforce a repository/branch allowlist.
+Connect a dedicated review routine only after configuring those decisions there.

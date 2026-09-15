@@ -177,6 +177,18 @@ func (e *Executor) ResumeAfterApproval(runID string, logger *slog.Logger) {
 	if e.runStore == nil {
 		return
 	}
+	// The decision can commit before MarkWaiting, or while the parked run
+	// still owns its registry entry. Wait for that lifetime to finish before
+	// reading its durable state and attempting to acquire its slot again.
+	if e.runs != nil {
+		if released := e.runs.released(runID); released != nil {
+			go func() {
+				<-released
+				e.ResumeAfterApproval(runID, logger)
+			}()
+			return
+		}
+	}
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -226,6 +238,18 @@ func (e *Executor) ResumeAfterApproval(runID string, logger *slog.Logger) {
 func (e *Executor) ResumeAfterSignal(runID string, logger *slog.Logger) {
 	if e.runStore == nil {
 		return
+	}
+	// The decision can commit before MarkWaiting, or while the parked run
+	// still owns its registry entry. Wait for that lifetime to finish before
+	// reading its durable state and attempting to acquire its slot again.
+	if e.runs != nil {
+		if released := e.runs.released(runID); released != nil {
+			go func() {
+				<-released
+				e.ResumeAfterSignal(runID, logger)
+			}()
+			return
+		}
 	}
 	if logger == nil {
 		logger = slog.Default()

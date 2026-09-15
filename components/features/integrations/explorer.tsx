@@ -59,6 +59,8 @@ export interface FacetOption {
  * what is in it, and then the list you wanted is somewhere else on screen.
  */
 export interface ExplorerItem {
+  /** Entity identity, when this row represents an agent, routine or Page. */
+  leading?: React.ReactNode
   id: string
   label: string
   /** Second line: provider, user, whatever identifies this one. */
@@ -280,19 +282,21 @@ export function IntegrationsExplorer<K extends string>({
                   selected={selectedItemId === item.id}
                   onSelect={() => onItemSelect(selectedItemId === item.id ? null : item.id)}
                 >
-                  {item.mark ? (
-                    <ProviderMark
-                      provider={item.mark}
-                      label={item.label}
-                      logoUrl={item.logoUrl}
-                      className="h-4 w-4 rounded-[4px]"
-                    />
-                  ) : item.dot ? (
-                    <span
-                      className={cn("h-1.5 w-1.5 shrink-0 rounded-full", item.dot)}
-                      aria-hidden="true"
-                    />
-                  ) : null}
+                  {item.leading ?? (
+                    item.mark ? (
+                      <ProviderMark
+                        provider={item.mark}
+                        label={item.label}
+                        logoUrl={item.logoUrl}
+                        className="h-4 w-4 rounded-[4px]"
+                      />
+                    ) : item.dot ? (
+                      <span
+                        className={cn("h-1.5 w-1.5 shrink-0 rounded-full", item.dot)}
+                        aria-hidden="true"
+                      />
+                    ) : null
+                  )}
                   <span className="min-w-0 flex-1">
                     <span className="block truncate">{item.label}</span>
                     {item.sublabel && (
@@ -301,7 +305,7 @@ export function IntegrationsExplorer<K extends string>({
                       </span>
                     )}
                   </span>
-                  {item.dot && item.mark && (
+                  {item.dot && (item.mark || item.leading) && (
                     <span
                       className={cn("h-1.5 w-1.5 shrink-0 rounded-full", item.dot)}
                       aria-hidden="true"

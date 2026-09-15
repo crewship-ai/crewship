@@ -2,8 +2,10 @@ package pipeline
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -417,4 +419,121 @@ func resumeAndAwait(t *testing.T, exec *Executor, runStore *RunStore, runID stri
 	// Mirror ResumeAfterApproval: these helpers drive the approval path.
 	plan.reason = resumeReasonApproval
 	exec.runResumedRun(ctx, plan, slog.Default())
+}
+
+// Capture PENDING, then let the real approval handler's resume attempt race
+// with the original run's later MarkWaiting. No timing-dependent sleep.
+type approvalParkBarrier struct {
+	*SQLWaitpointStore
+	pending chan string
+	release chan struct{}
+	once    sync.Once
+}
+
+func (s *approvalParkBarrier) WaitpointStatus(ctx context.Context, token string) (string, error) {
+	status, err := s.SQLWaitpointStore.WaitpointStatus(ctx, token)
+	if err == nil && status == "pending" {
+		s.once.Do(func() {
+			s.pending <- token
+			select {
+			case <-s.release:
+			case <-ctx.Done():
+			}
+		})
+	}
+	return status, err
+}
+
+func TestApprovalResume_DuringOriginalExecutionIsNotLost(t *testing.T) {
+	for _, beforePark := range []bool{true, false} {
+		t.Run(fmt.Sprintf("before_park=%t", beforePark), func(t *testing.T) {
+			db := openResumeTestDB(t)
+			defer db.Close()
+			store, runs := NewStore(db), NewRunStore(db)
+			wp := NewSQLWaitpointStore(db)
+			defer wp.Close()
+			registry := NewRunRegistry()
+			barrier := &approvalParkBarrier{SQLWaitpointStore: wp, pending: make(chan string, 1), release: make(chan struct{})}
+			var releaseOnce sync.Once
+			release := func() { releaseOnce.Do(func() { close(barrier.release) }) }
+			defer release()
+			p := saveResumePipeline(t, store, "approval-race", asyncApprovalLinearDSL)
+			exec := NewExecutor(store, NewResolver(db), newMockRunner(), nil).
+				WithRunStore(runs).WithWaitpointStore(barrier).WithRunRegistry(registry)
+			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+			defer cancel()
+			type outcome struct {
+				res *RunResult
+				err error
+			}
+			finished := make(chan outcome, 1)
+			go func() {
+				res, err := exec.Run(ctx, RunInput{PipelineID: p.ID, WorkspaceID: "ws_test", Mode: ModeRun})
+				finished <- outcome{res, err}
+			}()
+			var token string
+			select {
+			case token = <-barrier.pending:
+			case <-ctx.Done():
+				t.Fatal("no pending approval")
+			}
+			var runID string
+			if err := db.QueryRowContext(ctx, `SELECT pipeline_run_id FROM pipeline_waitpoints WHERE token=?`, token).Scan(&runID); err != nil {
+				t.Fatal(err)
+			}
+			var finish outcome
+			if !beforePark {
+				release()
+				select {
+				case finish = <-finished:
+				case <-ctx.Done():
+					t.Fatal("original run did not park")
+				}
+				if finish.err != nil {
+					t.Fatal(finish.err)
+				}
+				// Hold precisely the lifetime fence a returning parked Run owns.
+				_, drop, err := registry.Acquire(ctx, AcquireOpts{RunID: runID, WorkspaceID: "ws_test", PipelineID: p.ID})
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer drop()
+				release = drop
+			}
+			if err := wp.CompleteApproval(ctx, "ws_test", token, true, "u_admin", "approved"); err != nil {
+				t.Fatal(err)
+			}
+			exec.ResumeAfterApproval(runID, slog.Default())
+			release()
+			if beforePark {
+				select {
+				case finish = <-finished:
+				case <-ctx.Done():
+					t.Fatal("original run did not return")
+				}
+				if finish.err != nil {
+					t.Fatal(finish.err)
+				}
+			}
+			for {
+				rec, err := runs.Get(ctx, runID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if rec.Status == RunStatusCompleted {
+					break
+				}
+				select {
+				case <-time.After(5 * time.Millisecond):
+				case <-ctx.Done():
+					t.Fatalf("approval lost: status=%s", rec.Status)
+				}
+			}
+			// Completion follows the real transform, not merely a row transition.
+			var count int
+			if err := db.QueryRowContext(ctx, `SELECT count(*) FROM pipeline_run_step_outputs WHERE run_id=? AND step_id='done'`, runID).Scan(&count); err != nil || count != 1 {
+				t.Fatalf("done outputs=%d, err=%v", count, err)
+			}
+		})
+	}
 }

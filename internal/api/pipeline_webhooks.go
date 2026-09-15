@@ -20,6 +20,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/pipeline"
 	"github.com/crewship-ai/crewship/internal/tsformat"
 	"github.com/crewship-ai/crewship/internal/webhook"
+	"github.com/crewship-ai/crewship/internal/webhook/profiles"
 	"github.com/crewship-ai/crewship/internal/work"
 )
 
@@ -74,6 +75,7 @@ var reservedWebhookInputKeys = pipeline.WebhookUntrustedInputKeys
 // secret is NEVER returned post-create — the only path that reveals
 // it is the create response, mirroring how Stripe / GitHub do it.
 type webhookResponse struct {
+	IngressProfile        string         `json:"ingress_profile"`
 	ID                    string         `json:"id"`
 	WorkspaceID           string         `json:"workspace_id"`
 	Name                  string         `json:"name"`
@@ -103,6 +105,7 @@ func (h *PipelineHandler) toWebhookResponse(w *pipeline.Webhook, slug string, in
 		tmpl = map[string]any{}
 	}
 	resp := webhookResponse{
+		IngressProfile:        w.IngressProfile,
 		ID:                    w.ID,
 		WorkspaceID:           w.WorkspaceID,
 		Name:                  w.Name,
@@ -128,6 +131,7 @@ func (h *PipelineHandler) toWebhookResponse(w *pipeline.Webhook, slug string, in
 }
 
 type webhookRequestBody struct {
+	IngressProfile        string         `json:"ingress_profile"`
 	Name                  string         `json:"name"`
 	TargetPipelineSlug    string         `json:"target_pipeline_slug"`
 	TargetPipelineID      string         `json:"target_pipeline_id"`
@@ -173,6 +177,10 @@ func (h *PipelineHandler) CreateWebhook(w http.ResponseWriter, r *http.Request) 
 		replyError(w, http.StatusBadRequest, "invalid JSON body: "+err.Error())
 		return
 	}
+	if body.IngressProfile != "" && body.IngressProfile != "crewship" && body.IngressProfile != "github" {
+		replyError(w, http.StatusBadRequest, "unsupported ingress_profile")
+		return
+	}
 	pipelineID, slug, err := h.resolveWebhookPipelineID(r, workspaceID, &body)
 	if err != nil {
 		replyError(w, http.StatusBadRequest, err.Error())
@@ -204,6 +212,7 @@ func (h *PipelineHandler) CreateWebhook(w http.ResponseWriter, r *http.Request) 
 	}
 
 	in := pipeline.SaveWebhookInput{
+		IngressProfile:        body.IngressProfile,
 		WorkspaceID:           workspaceID,
 		Name:                  defaultIfBlank(body.Name, slug),
 		TargetPipelineID:      pipelineID,
@@ -347,7 +356,12 @@ func (h *PipelineHandler) UpdateWebhook(w http.ResponseWriter, r *http.Request) 
 		rotated = true
 	}
 
+	if body.IngressProfile != "" && body.IngressProfile != existing.IngressProfile {
+		replyError(w, http.StatusBadRequest, "create a new webhook to change its signature profile")
+		return
+	}
 	in := pipeline.SaveWebhookInput{
+		IngressProfile:        existing.IngressProfile,
 		ID:                    webhookID,
 		WorkspaceID:           workspaceID,
 		Name:                  defaultIfBlank(body.Name, existing.Name),
@@ -608,6 +622,10 @@ func (h *PipelineHandler) FireWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if isGitHubRoutine(r.Context()) != (wh.IngressProfile == "github") {
+		replyError(w, http.StatusNotFound, "webhook endpoint not configured")
+		return
+	}
 	// HMAC verification before rate limiting -- invalid signatures
 	// shouldn't even consume rate-limit slots. Required (not optional):
 	// ValidateSignature returns false when the webhook row has an
@@ -628,15 +646,48 @@ func (h *PipelineHandler) FireWebhook(w http.ResponseWriter, r *http.Request) {
 	// Forget-reopenable) idempotency window. Optional — a sender that
 	// hasn't adopted the header falls back to the body-only scheme
 	// unchanged, so existing integrations keep working.
-	sig := r.Header.Get("X-Crewship-Signature")
-	if ts := r.Header.Get("X-Crewship-Timestamp"); ts != "" {
-		if !wh.ValidateTimestampedSignature(body, ts, sig, time.Now(), 0) {
+	if isGitHubRoutine(r.Context()) {
+		verdict := profiles.Verify(profiles.VerifyRequest{Profile: profiles.ProfileGitHub, Header: r.Header, RawBody: body, Keys: []profiles.Key{{ID: wh.ID, Secret: []byte(wh.SigningSecret)}}, Now: time.Now()})
+		if !verdict.OK {
+			replyError(w, http.StatusUnauthorized, "invalid GitHub webhook")
+			return
+		}
+		// This endpoint has one fixed action: invoke this routine for PR changes.
+		// Unsigned event headers cannot select a different target or action.
+		if verdict.EventType == profiles.EventPing {
+			writeJSON(w, http.StatusOK, map[string]any{"status": "IGNORED", "reason": "ping"})
+			return
+		}
+		if verdict.EventType != "pull_request" {
+			writeJSON(w, http.StatusOK, map[string]any{"status": "IGNORED", "reason": "not a pull request event"})
+			return
+		}
+		var payload struct {
+			Action      string `json:"action"`
+			PullRequest *struct {
+				Number int `json:"number"`
+			} `json:"pull_request"`
+		}
+		if json.Unmarshal(body, &payload) != nil || payload.PullRequest == nil || (payload.Action != "opened" && payload.Action != "synchronize" && payload.Action != "reopened") {
+			writeJSON(w, http.StatusOK, map[string]any{"status": "IGNORED", "reason": "not a supported pull request action"})
+			return
+		}
+		if verdict.SourceEventID == "" {
+			replyError(w, http.StatusBadRequest, "X-GitHub-Delivery is required")
+			return
+		}
+	} else {
+		sig := r.Header.Get("X-Crewship-Signature")
+		if ts := r.Header.Get("X-Crewship-Timestamp"); ts != "" {
+			if !wh.ValidateTimestampedSignature(body, ts, sig, time.Now(), 0) {
+				replyError(w, http.StatusUnauthorized, "signature mismatch")
+				return
+			}
+		} else if !wh.ValidateSignature(body, sig) {
 			replyError(w, http.StatusUnauthorized, "signature mismatch")
 			return
 		}
-	} else if !wh.ValidateSignature(body, sig) {
-		replyError(w, http.StatusUnauthorized, "signature mismatch")
-		return
+
 	}
 
 	// Audit A17.2 M1: a rate_limit_per_min of 0 (the default for
@@ -985,9 +1036,16 @@ func lookupRoutineReceipt(
 ) (*routineReceipt, error) {
 	var rec routineReceipt
 	var recordedSHA string
-	err := q.QueryRowContext(ctx, `SELECT id, run_id, body_sha256 FROM routine_webhook_receipts
-   WHERE workspace_id = ? AND endpoint_id = ? AND source_delivery_id = ?`,
-		wh.WorkspaceID, wh.ID, sourceDeliveryID).Scan(&rec.DeliveryID, &rec.RunID, &recordedSHA)
+	query := `SELECT id, run_id, body_sha256 FROM routine_webhook_receipts
+      WHERE workspace_id = ? AND endpoint_id = ? AND source_delivery_id = ?`
+	args := []any{wh.WorkspaceID, wh.ID, sourceDeliveryID}
+	if isGitHubRoutine(ctx) {
+		query = `SELECT id, run_id, body_sha256 FROM routine_webhook_receipts
+          WHERE workspace_id = ? AND endpoint_id = ? AND (source_delivery_id = ? OR (profile = 'github' AND body_sha256 = ?))
+          ORDER BY (source_delivery_id = ?) DESC LIMIT 1`
+		args = append(args, bodySHA, sourceDeliveryID)
+	}
+	err := q.QueryRowContext(ctx, query, args...).Scan(&rec.DeliveryID, &rec.RunID, &recordedSHA)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -1020,6 +1078,9 @@ func (h *PipelineHandler) answerRoutineDuplicate(w http.ResponseWriter, r *http.
 // signature behaviour without an explicit configuration change, so this only
 // writes down what verified the request; it never chooses.
 func routineDeliveryProfile(r *http.Request) string {
+	if isGitHubRoutine(r.Context()) {
+		return "github"
+	}
 	if r.Header.Get("X-Crewship-Timestamp") != "" {
 		return "legacy-routine-ts-hmac"
 	}
@@ -1041,7 +1102,7 @@ func (h *PipelineHandler) acceptRoutineDelivery(
 		res, err := tx.ExecContext(ctx, `INSERT INTO routine_webhook_receipts
    (id, workspace_id, endpoint_id, source_delivery_id, body_sha256, run_id,
     received_at, dedup_expires_at, body_bytes, profile)
-   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(workspace_id, endpoint_id, source_delivery_id) DO NOTHING`,
+   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING`,
 			receipt.DeliveryID, wh.WorkspaceID, wh.ID, sourceDeliveryID, bodySHA, runID,
 			tsformat.Format(receivedAt), tsformat.Format(pipeline.RoutineReceiptDedupExpiry(receivedAt)),
 			bodyBytes, routineDeliveryProfile(r))
@@ -1113,6 +1174,9 @@ func (h *PipelineHandler) resolveWebhookPipelineID(r *http.Request, workspaceID 
 // pre-poison dedupe -- the key would still hash differently from
 // the sender-provided form.
 func webhookIdempotencyKey(r *http.Request, body []byte, token string) string {
+	if isGitHubRoutine(r.Context()) {
+		return "github:" + r.Header.Get(profiles.HeaderGitHubDelivery)
+	}
 	if k := r.Header.Get("Idempotency-Key"); k != "" {
 		return k
 	}
@@ -1156,4 +1220,18 @@ func flattenHeaders(h http.Header) map[string]string {
 		out[strings.ToLower(strings.ReplaceAll(k, "-", "_"))] = strings.Join(vs, ",")
 	}
 	return out
+}
+
+// Explicit route selection preserves the legacy endpoint's signature contract.
+type githubRoutineContextKey struct{}
+
+func isGitHubRoutine(ctx context.Context) bool {
+	value, _ := ctx.Value(githubRoutineContextKey{}).(bool)
+	return value
+}
+
+// FireGitHubPullRequest verifies GitHub SHA-256 deliveries for a fixed routine.
+// It does not publish reviews or change the repository's review configuration.
+func (h *PipelineHandler) FireGitHubPullRequest(w http.ResponseWriter, r *http.Request) {
+	h.FireWebhook(w, r.WithContext(context.WithValue(r.Context(), githubRoutineContextKey{}, true)))
 }
