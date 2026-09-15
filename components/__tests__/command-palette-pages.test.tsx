@@ -230,7 +230,8 @@ describe("⌘K — Recent page rows are checked against the authorised list", ()
       JSON.stringify([
         { href: "/pages/fleet", label: "Fleet board (old name)", group: "Pages" },
         { href: "/pages/gone", label: "Deleted page", group: "Pages" },
-        { href: "/pages/revoked", label: "Revoked page", group: "Pages" },
+        // Recent holds five rows at most; a deep link onto a tab is still a page row.
+        { href: "/pages/revoked?tab=ops", label: "Revoked page", group: "Pages" },
         { href: "/pages", label: "Pages", group: "Navigation" },
         { href: "/issues/ENG-1", label: "Rewrite the README", group: "Issues" },
       ]),

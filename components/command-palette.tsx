@@ -165,11 +165,11 @@ function pageHref(slug: string): string {
 
 /**
  * The slug a Recent row points at, or null when the row is not a page deep
- * link. Only `/pages/<one segment>` counts: the Navigation row's `/pages`
- * is the index, not a page, and stays subject to no check.
+ * link. Anything under `/pages/<slug>` counts, a `?tab=` included; the
+ * Navigation row's `/pages` is the index, not a page, and is not checked.
  */
 function pageSlugOfHref(href: string): string | null {
-  const m = /^\/pages\/([^/?#]+)$/.exec(href)
+  const m = /^\/pages\/([^/?#]+)/.exec(href)
   if (!m) return null
   try {
     return decodeURIComponent(m[1])
