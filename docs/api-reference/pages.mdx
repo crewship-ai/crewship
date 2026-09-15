@@ -104,6 +104,8 @@ not supply one).
     "description": "Line 2 uptime",
     "owner": "crew/ops",
     "owner_crew_slug": "ops",
+    "icon": "rocket",
+    "color": "amber",
     "panel_count": 5,
     "panel_states": { "fresh": 4, "stale": 1, "failed": 0, "never_produced": 0 },
     "last_produced_at": "2026-08-13T17:41:02Z",
@@ -120,6 +122,14 @@ what the reader sees. `last_produced_at` is the newest arrival across visible
 panels — deliberately not `updated_at`, which is when the *spec* last changed:
 a page edited an hour ago whose data last arrived a week ago must not read as
 "updated today".
+
+`icon` and `color` are the page's own avatar — a crew icon name and a crew
+palette key, the same vocabulary a [folder](#create-a-folder) uses — and they
+are always present, `""` for none. They are presentation, stored on the page
+row and not in the spec: a [rollback](#roll-a-page-back) does not restore an
+older one and an [export bundle](#export-a-page) does not carry it. The
+freshness `state` is a separate fact and stays beside the avatar everywhere it
+is drawn.
 
 `reach` says how **you**, the caller, reach the page, in a fixed order:
 
@@ -169,6 +179,8 @@ the server never parses YAML:
   "slug": "fleet-201",
   "description": "Line 2 uptime",
   "owner": "crew/ops",
+  "icon": "rocket",
+  "color": "amber",
   "panels": [
     {
       "id": "sluzby",
@@ -188,6 +200,11 @@ the server never parses YAML:
 `owner` is `user/<id>` or `crew/<slug>` — exactly one of the two. `span` is a
 column count on a 12-column grid; **there is no height field**, a panel is as
 tall as its content.
+
+`icon` and `color` are optional: the page's avatar, a crew icon name and a crew
+palette key (`blue`, `emerald`, `violet`, `amber`, `rose`, `cyan`, `lime`,
+`fuchsia`). A value outside either set is refused with a 400 that names the
+set; the page is not created.
 
 A panel may also carry `refresh` — `"on:wake"` or `"on:panels-changed"`, and
 nothing else. It is the event that **runs that panel's producer**, not a
@@ -304,6 +321,11 @@ ADMIN/OWNER, or the holder of a `write` grant.
 **Request body:** the same shape as [create](#create-a-page). Panels are
 reconciled against the submitted list — a panel absent from it is removed, and
 its payload history goes with it.
+
+Every field is optional and an omitted one is left alone, so `{"icon":
+"chart"}` changes the icon and nothing else. `icon` and `color` follow the
+pointer rule exactly: omitted keeps, `""` clears, a name outside the crew icon
+registry or the crew palette is a 400 that stores nothing.
 
 **Response 200:** the updated page.
 

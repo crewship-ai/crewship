@@ -812,6 +812,27 @@ which is precisely what the sealed placeholder is designed not to disclose.
 Every dispatch is journalled with who clicked, which action, and which routine
 the server resolved it to.
 
+## A page's own icon and colour
+
+A page wears an icon and a colour the way a crew, an agent and a folder do,
+so the list on the left can tell eight pages apart by something other than
+their freshness glyph. Open the page's **Edit** screen: the **Content** card
+has an **Icon and colour** field with **Choose…**, which opens the same picker
+a crew uses, and **Remove**, which clears both. Both save with the name — Save
+changes writes name, description, icon and colour in one request, and the
+list on the left redraws at once.
+
+The freshness state keeps its own glyph, always, right after the icon — a
+green check, an amber clock, a red cross, a dashed circle — and the STATUS
+filter reads that, never the colour you chose. Colour on a panel means state;
+colour on the page's icon means nothing but your choice.
+
+The icon and colour are stored on the page, not in its document: re-applying
+a document with `crewship page update --file` leaves them alone, a rollback
+does not restore an older pair, and an export bundle does not carry them.
+From the CLI, `crewship page update <slug> --icon rocket --color amber` sets
+them without a document; `--icon ""` clears one.
+
 ## Folders
 
 A **folder** is a named group of pages owned by one crew, with an icon from

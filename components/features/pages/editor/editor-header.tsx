@@ -5,7 +5,6 @@ import { ArrowLeft, Box } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { DetailCard, Pill, StatStrip, type StatItem } from "@/components/ui/detail"
-import { CONCEPT_ICON } from "@/lib/concept-icons"
 import { formatDateTime } from "@/lib/time"
 import { cn } from "@/lib/utils"
 import type { PageCapabilities } from "@/lib/pages/editor-contract"
@@ -14,6 +13,7 @@ import { pagePanelCount, toPageOwner, type WirePageDetail } from "@/hooks/use-pa
 import { PAGE_STATE_META } from "@/components/features/pages/page-state"
 import type { PanelState } from "@/components/features/pages/panels/types"
 import { FolderGlyph } from "@/components/features/pages/folder-glyph"
+import { PageAvatar } from "@/components/features/pages/page-glyph"
 
 /**
  * The editor's header: the same card an issue opens with.
@@ -54,7 +54,6 @@ export function pageFreshness(page: WirePageDetail | null): PanelState | null {
 }
 
 export function PageEditorHeader({ slug, page, capabilities, headingRef, audience, onBack }: PageEditorHeaderProps) {
-  const PageIcon = CONCEPT_ICON.pages
   const owner = toPageOwner(page)
   const folder = toPageFolderRef(page?.folder)
   const panelCount = pagePanelCount(page)
@@ -71,14 +70,10 @@ export function PageEditorHeader({ slug, page, capabilities, headingRef, audienc
       <div className="flex flex-col gap-3">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="flex min-w-0 items-start gap-3">
-            <div
-              className={cn(
-                "flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-border/60",
-                "bg-surface-raised",
-              )}
-            >
-              <PageIcon className="h-5 w-5 text-muted-foreground" aria-hidden />
-            </div>
+            {/* The page's own avatar (#2563), or the neutral tile a page
+                without one has always worn. The state stays in the strip
+                below — the tile never carries it. */}
+            <PageAvatar icon={page?.icon} color={page?.color} />
             <div className="min-w-0">
               {/* Focus lands here on the way in, on returning from the preview
                   and after a discard. The ring is on `:focus-visible`, not

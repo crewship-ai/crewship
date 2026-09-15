@@ -66,6 +66,8 @@ import { pagesKeys, toPanelView, type WirePanel } from "@/hooks/use-pages"
 import { pageQueryString, type WirePageDetail } from "@/hooks/use-page-grants"
 import { usePageReview } from "@/hooks/use-page-review"
 import { PAGE_STATE_META } from "@/components/features/pages/page-state"
+import { PageAvatar, PageGlyph } from "@/components/features/pages/page-glyph"
+import { IconPickerDialog } from "@/components/ui/icon-picker-dialog"
 import { PageEditor } from "@/components/features/pages/page-editor"
 import type { EditorSectionProps } from "@/components/features/pages/editor/section-props"
 
@@ -321,14 +323,22 @@ function PageOwnContent({
 interface Metadata {
   name: string
   description: string
+  /** The page's avatar (#2563): a crew icon name and a palette key, or null. */
+  icon: string | null
+  color: string | null
 }
 
 function metadataOf(page: WirePageDetail | null): Metadata {
-  return { name: page?.name?.trim() ?? "", description: page?.description ?? "" }
+  return {
+    name: page?.name?.trim() ?? "",
+    description: page?.description ?? "",
+    icon: page?.icon?.trim() || null,
+    color: page?.color?.trim() || null,
+  }
 }
 
 function sameMetadata(a: Metadata, b: Metadata): boolean {
-  return a.name === b.name && a.description === b.description
+  return a.name === b.name && a.description === b.description && a.icon === b.icon && a.color === b.color
 }
 
 function PageIdentityCard({
@@ -355,6 +365,7 @@ function PageIdentityCard({
   const [baseline, setBaseline] = React.useState<Metadata>(server)
   const [refusal, setRefusal] = React.useState<string | null>(null)
   const [saved, setSaved] = React.useState(false)
+  const [pickingIcon, setPickingIcon] = React.useState(false)
 
   const dirty = !sameMetadata(form, baseline)
   const dirtyRef = React.useRef(dirty)
@@ -367,9 +378,9 @@ function PageIdentityCard({
     if (dirtyRef.current) return
     setForm((cur) => (sameMetadata(cur, server) ? cur : server))
     setBaseline((cur) => (sameMetadata(cur, server) ? cur : server))
-    // The two strings, not the object: `metadataOf` builds a fresh one each render.
+    // The four values, not the object: `metadataOf` builds a fresh one each render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [server.name, server.description])
+  }, [server.name, server.description, server.icon, server.color])
 
   // The shell guards Page switches, section switches and Back on this. It is
   // reported from an effect rather than from the change handler so the flag
@@ -390,7 +401,10 @@ function PageIdentityCard({
       init: {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: v.name, description: v.description }),
+        // The avatar rides with the name (#2563). "" is the server's
+        // "clear", and it is sent on purpose: an omitted field would keep
+        // the stored icon, and Remove would then remove nothing.
+        body: JSON.stringify({ name: v.name, description: v.description, icon: v.icon ?? "", color: v.color ?? "" }),
       },
     }),
     invalidateKeys: [pagesKeys.detail(workspaceId, slug), pagesKeys.list(workspaceId)],
@@ -422,7 +436,7 @@ function PageIdentityCard({
     event.preventDefault()
     if (!submittable) return
     setSaved(false)
-    save.mutate({ name: form.name.trim(), description: form.description })
+    save.mutate({ ...form, name: form.name.trim() })
   }
 
   const change = (next: Partial<Metadata>) => {
@@ -466,6 +480,49 @@ function PageIdentityCard({
         />
       </div>
 
+      {/* The page's avatar (#2563): the same picker a crew and a folder use,
+          the same vocabulary the server refuses by name. Part of THIS form —
+          the choice is typed state until Save, like the name — so a picked
+          icon that was never saved is dirty and the shell guards leaving. */}
+      <div className="flex flex-col gap-1.5" data-slot="page-avatar-field">
+        {/* A group, not a labelled control: the label names the field and
+            the two buttons keep their own names ("Choose…", "Remove"). */}
+        <FieldLabel id="page-avatar-label-heading" htmlFor={undefined}>Icon and colour</FieldLabel>
+        <div className="flex items-center gap-3" role="group" aria-labelledby="page-avatar-label-heading">
+          <PageAvatar icon={form.icon} color={form.color} size="sm" />
+          <span className="flex min-w-0 flex-1 items-center gap-1.5 type-page-value text-muted-foreground">
+            <PageGlyph icon={form.icon} color={form.color} className={form.icon ? undefined : "opacity-60"} />
+            <span data-slot="page-avatar-label" className="truncate">
+              {form.icon ?? "No icon"}
+              {form.color ? ` · ${form.color}` : ""}
+            </span>
+          </span>
+          {form.icon || form.color ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              disabled={!mayEdit}
+              onClick={() => change({ icon: null, color: null })}
+            >
+              Remove
+            </Button>
+          ) : null}
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={!mayEdit}
+            onClick={() => setPickingIcon(true)}
+          >
+            Choose…
+          </Button>
+        </div>
+        <p className="type-page-meta text-muted-foreground">
+          Shown beside the name in the list and on the page. The freshness state keeps its own glyph next to it.
+        </p>
+      </div>
+
       {/* The address, the folder and the derived facts used to sit here,
           between the description and Save. None of them is something this
           form writes: the folder and the address are in the Properties card,
@@ -473,7 +530,7 @@ function PageIdentityCard({
 
       {!mayEdit && (
         <p role="note" className="type-page-value text-muted-foreground">
-          You may not change this Page&apos;s name or description.
+          You may not change this Page&apos;s name, description, icon or colour.
         </p>
       )}
 
@@ -484,7 +541,7 @@ function PageIdentityCard({
       )}
       {saved && !dirty && (
         <p role="status" className="type-page-value text-success">
-          Saved. The live Page now shows this name and description.
+          Saved. The live Page now shows this name, description and icon.
         </p>
       )}
 
@@ -501,6 +558,20 @@ function PageIdentityCard({
         </Button>
       </div>
       </form>
+
+      <IconPickerDialog
+        open={pickingIcon}
+        onOpenChange={setPickingIcon}
+        context={form.name.trim() || slug}
+        concept="pages"
+        description="Pick an icon and a colour for this Page. Both show beside its name in the list, next to its freshness state — the colour never stands for the state."
+        icon={form.icon}
+        color={form.color}
+        defaultIcon="dashboard"
+        onSave={({ icon: nextIcon, color: nextColor }) => {
+          change({ icon: nextIcon || null, color: nextColor || null })
+        }}
+      />
     </DetailCard>
   )
 }

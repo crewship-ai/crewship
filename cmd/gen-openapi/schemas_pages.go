@@ -157,6 +157,14 @@ func pagesSchemaCatalog() map[string]DomainSchema {
 	})
 	accessMe["required"] = []string{"page", "subject_type", "subject_id", "label", "paths"}
 
+	// The page's own icon and colour (#2563): the folder's vocabulary exactly,
+	// stored on the row, never in the spec — a rollback restores the contract,
+	// not the picture beside it. Never omitted: "" is "none".
+	avatarOnPage := map[string]any{
+		"icon":  map[string]any{"type": "string", "description": "The page's icon: a crew icon name (the crew icon picker's set, lib/crew-icons.ts), or empty for the default page glyph. Refused by name outside the set."},
+		"color": map[string]any{"type": "string", "description": "The page's colour: a crew palette key (blue, emerald, violet, amber, rose, cyan, lime, fuchsia), or empty for none."},
+	}
+
 	page := obj(map[string]any{
 		"has_project": map[string]any{"type": "boolean", "description": "This Page has application source (a project draft) at all, published or not. Distinct from has_application, which is true only while a publication is running: a Page awaiting its FIRST publication has has_project true and has_application false, and that is the case the publication review exists for."}, "has_application": boolean(), "publication_version": integer(),
 		"id": str(), "slug": str(), "name": str(), "description": str(),
@@ -167,6 +175,7 @@ func pagesSchemaCatalog() map[string]DomainSchema {
 			"description": "Every panel on the page, in spec order. A panel owned by a crew the caller does not belong to arrives as the sealed placeholder — decided server-side, before serialisation, never hidden client-side (§7.1 rule 5, §11b.14)."},
 		"created_at": timeString(), "updated_at": timeString(),
 		"folder": folderOnPage["folder"], "pages_version": folderOnPage["pages_version"],
+		"icon": avatarOnPage["icon"], "color": avatarOnPage["color"],
 	})
 
 	pageRow := obj(map[string]any{
@@ -185,6 +194,7 @@ func pagesSchemaCatalog() map[string]DomainSchema {
 			"description": "Newest produced_at across the page's visible panels. NOT updated_at, which §10 defines as the SPEC's modification time — a page edited an hour ago whose data last arrived a week ago must not read as \"updated today\"."},
 		"created_at": timeString(), "updated_at": timeString(),
 		"folder": folderOnPage["folder"], "pages_version": folderOnPage["pages_version"],
+		"icon": avatarOnPage["icon"], "color": avatarOnPage["color"],
 		"reach": map[string]any{"type": "array", "items": str(),
 			"description": "The paths by which the CALLER reaches this page, in a fixed order: `owner` (the caller is owner_user_id), `role` (the caller's workspace role carries manage), `crew:<slug>` (the caller belongs to the owning crew), `panel_crew:<slug>` (one per distinct crew of the caller's that owns a panel, in panel order), `folder:<slug>` (the folder the page is in is shared with the caller), `grant` (a live grant names the caller or one of their crews). Never empty and never omitted on the index: a page is listed because the caller reaches it. The one exception is the row a removal returns to a `w` holder who just took away their own path, which carries an empty reach. It describes the caller and nobody else — the page's ACL is the grants endpoint's, behind its own gate."},
 	})
@@ -242,6 +252,8 @@ func pagesSchemaCatalog() map[string]DomainSchema {
 		"slug": str(), "name": str(), "description": str(),
 		"panels": map[string]any{"type": "array", "items": obj(writePanelSpec),
 			"description": "The parsed spec (§11b.2). The CLI parses the YAML document and sends this; the server validates it and checks that every declared owner crew and producer routine or agent resolves (§10b.1)."},
+		"icon":  map[string]any{"type": "string", "description": "The page's icon, a crew icon name. On PATCH an omitted field keeps the stored one and \"\" clears it; a name outside the crew icon registry is refused by name (400)."},
+		"color": map[string]any{"type": "string", "description": "The page's colour, a crew palette key. Same pointer rule as icon; a value outside the palette is refused by name (400)."},
 	})
 
 	// ── Grants (§7.1, §7.1b) ────────────────────────────────────────────────

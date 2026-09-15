@@ -270,6 +270,11 @@ type pageWire struct {
 	// carries PagesVersion as its fence (pages_folders.go).
 	Folder       *pageFolderRef `json:"folder"`
 	PagesVersion int64          `json:"pages_version"`
+	// Icon and Color are the page's avatar (#2563): a crew icon name and a
+	// crew palette key, or "" for none. Never omitted, so a client cannot
+	// mistake "no icon" for "this build does not say".
+	Icon  string `json:"icon"`
+	Color string `json:"color"`
 
 	// Authored says the panels below carry their authored half — `public`,
 	// `actions`, `wake`, `on_failure`, `refresh` — because this caller may
@@ -341,6 +346,9 @@ type pageListWire struct {
 	// rail needs the fence without a second read.
 	Folder       *pageFolderRef `json:"folder"`
 	PagesVersion int64          `json:"pages_version"`
+	// Icon and Color: see pageWire. The rail draws the avatar on every row.
+	Icon  string `json:"icon"`
+	Color string `json:"color"`
 }
 
 // zeroPanelStates is the rollup's fixed shape (§11b decision 15).
@@ -367,6 +375,14 @@ type pageWriteRequest struct {
 	Panels      []pagePanelWire  `json:"panels"`
 	Owner       *string          `json:"owner"`
 	Spec        *json.RawMessage `json:"spec"`
+	// Icon and Color are the page's avatar (#2563): a crew icon name and a
+	// crew palette key, the folder's vocabulary exactly (pages_folder_icons.go).
+	// Pointers for the same reason every other field is one — on a PATCH an
+	// omitted field leaves the stored value alone, and "" clears it. They are
+	// columns, never part of spec_json: a rollback restores the contract, not
+	// the picture next to it.
+	Icon  *string `json:"icon"`
+	Color *string `json:"color"`
 }
 
 // ── Internal records ───────────────────────────────────────────────────────
@@ -383,6 +399,8 @@ type pageRecord struct {
 	OwnerCrewID        string
 	FolderID           string
 	PagesVersion       int64
+	Icon               string
+	Color              string
 	CreatedAt          string
 	UpdatedAt          string
 }
@@ -499,6 +517,7 @@ func (h *PageHandler) loadPageIndex(ctx context.Context, wsID string, viewer *pa
 		SELECT p.id, p.slug, p.name, COALESCE(p.description, ''),
 		       COALESCE(p.owner_user_id, ''), COALESCE(p.owner_crew_id, ''),
 		       COALESCE(p.folder_id, ''), p.pages_version,
+		       COALESCE(p.icon, ''), COALESCE(p.color, ''),
 		       p.created_at, p.updated_at,
 		       EXISTS(SELECT 1 FROM page_project_drafts WHERE page_id=p.id),
 		       COALESCE(l.published,0), COALESCE(l.version,0)
@@ -515,6 +534,7 @@ func (h *PageHandler) loadPageIndex(ctx context.Context, wsID string, viewer *pa
 		var p pageRecord
 		if err := rows.Scan(&p.ID, &p.Slug, &p.Name, &p.Description,
 			&p.OwnerUserID, &p.OwnerCrewID, &p.FolderID, &p.PagesVersion,
+			&p.Icon, &p.Color,
 			&p.CreatedAt, &p.UpdatedAt, &p.HasProject, &p.HasApplication, &p.PublicationVersion); err != nil {
 			return nil, err
 		}
@@ -599,6 +619,8 @@ func (h *PageHandler) pageListRow(row *pageIndexRow, folders map[string]*pageFol
 		Reach:        row.reach,
 		Folder:       folders[rec.FolderID].ref(),
 		PagesVersion: rec.PagesVersion,
+		Icon:         rec.Icon,
+		Color:        rec.Color,
 	}
 	if rec.OwnerCrewID != "" {
 		out.Owner = "crew/" + row.ownerCrewSlug
@@ -729,6 +751,10 @@ func (h *PageHandler) Create(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	icon, color, ok := pageAvatarFrom(w, req, "", "")
+	if !ok {
+		return
+	}
 
 	// §10b.3: pages per workspace is a soft, admin-raisable cap that exists to
 	// stop an agent loop producing thousands.
@@ -819,10 +845,10 @@ func (h *PageHandler) Create(w http.ResponseWriter, r *http.Request) {
 	defer func() { _ = tx.Rollback() }()
 
 	if _, err := tx.ExecContext(r.Context(), `
-		INSERT INTO pages (id, workspace_id, slug, name, description, owner_user_id, owner_crew_id, spec_json, created_at, updated_at)
-		VALUES (?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?)`,
+		INSERT INTO pages (id, workspace_id, slug, name, description, owner_user_id, owner_crew_id, spec_json, icon, color, created_at, updated_at)
+		VALUES (?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), ?, NULLIF(?, ''), NULLIF(?, ''), ?, ?)`,
 		pageID, wsID, doc.Metadata.Slug, doc.Metadata.Name, doc.Metadata.Description,
-		ownerUserID, ownerCrewID, string(specJSON), now, now); err != nil {
+		ownerUserID, ownerCrewID, string(specJSON), icon, color, now, now); err != nil {
 		if isUniqueViolation(err) {
 			replyError(w, http.StatusConflict, fmt.Sprintf("a page with slug %q already exists in this workspace", doc.Metadata.Slug))
 			return
@@ -939,6 +965,10 @@ func (h *PageHandler) Update(w http.ResponseWriter, r *http.Request) {
 	if req.Description != nil {
 		base.Metadata.Description = *req.Description
 	}
+	icon, color, ok := pageAvatarFrom(w, req, rec.Icon, rec.Color)
+	if !ok {
+		return
+	}
 	if req.Panels != nil {
 		panels, ok := panelSpecsFrom(w, req.Panels)
 		if !ok {
@@ -1008,8 +1038,8 @@ func (h *PageHandler) Update(w http.ResponseWriter, r *http.Request) {
 	defer func() { _ = tx.Rollback() }()
 
 	result, err := tx.ExecContext(r.Context(),
-		`UPDATE pages SET name = ?, description = NULLIF(?, ''), spec_json = ?, updated_at = ? WHERE id = ? AND spec_json = ?`,
-		base.Metadata.Name, base.Metadata.Description, string(specJSON), now, rec.ID, originalSpec)
+		`UPDATE pages SET name = ?, description = NULLIF(?, ''), icon = NULLIF(?, ''), color = NULLIF(?, ''), spec_json = ?, updated_at = ? WHERE id = ? AND spec_json = ?`,
+		base.Metadata.Name, base.Metadata.Description, icon, color, string(specJSON), now, rec.ID, originalSpec)
 	if err != nil {
 		replyInternalError(w, h.logger, "update page", err)
 		return
@@ -1153,13 +1183,14 @@ func (h *PageHandler) loadPage(ctx context.Context, wsID, slug string) (*pageRec
 		SELECT id, slug, name, COALESCE(description, ''),
 		       COALESCE(owner_user_id, ''), COALESCE(owner_crew_id, ''),
 		       COALESCE(folder_id, ''), pages_version,
+		       COALESCE(icon, ''), COALESCE(color, ''),
 		       created_at, updated_at,
  EXISTS(SELECT 1 FROM page_project_drafts WHERE page_id=pages.id),
  EXISTS(SELECT 1 FROM page_project_live WHERE page_id=pages.id AND published=1),
  COALESCE((SELECT version FROM page_project_live WHERE page_id=pages.id),0)
 		FROM pages WHERE workspace_id = ? AND slug = ?`, wsID, slug).Scan(
 		&p.ID, &p.Slug, &p.Name, &p.Description, &p.OwnerUserID, &p.OwnerCrewID,
-		&p.FolderID, &p.PagesVersion,
+		&p.FolderID, &p.PagesVersion, &p.Icon, &p.Color,
 		&p.CreatedAt, &p.UpdatedAt, &p.HasProject, &p.HasApplication, &p.PublicationVersion)
 	if err != nil {
 		return nil, err
@@ -1566,6 +1597,8 @@ func (h *PageHandler) pageDocumentFor(ctx context.Context, rec *pageRecord, pane
 		// through here (it renders from loadPageIndex's bulk load).
 		Folder:       h.folderRefFor(ctx, rec),
 		PagesVersion: rec.PagesVersion,
+		Icon:         rec.Icon,
+		Color:        rec.Color,
 	}
 	for _, p := range panels {
 		if viewer != nil && !h.canSeePanel(viewer, p) {
@@ -1690,6 +1723,30 @@ func (h *PageHandler) documentFrom(w http.ResponseWriter, req *pageWriteRequest,
 		return nil, false
 	}
 	return doc, true
+}
+
+// pageAvatarFrom resolves the page's icon and colour from a write request
+// against what is stored (#2563): an omitted field keeps the current value, a
+// sent one — "" included — replaces it, and a name outside the crew icon
+// registry or the crew palette is refused by name, through the folder's own
+// validators, so a page and a folder cannot disagree about what a colour is.
+func pageAvatarFrom(w http.ResponseWriter, req *pageWriteRequest, currentIcon, currentColor string) (icon, color string, ok bool) {
+	icon, color = currentIcon, currentColor
+	if req.Icon != nil {
+		icon = strings.TrimSpace(*req.Icon)
+		if !validPageFolderIcon(icon) {
+			replyError(w, http.StatusBadRequest, pageFolderIconRefusal(icon))
+			return "", "", false
+		}
+	}
+	if req.Color != nil {
+		color = strings.TrimSpace(*req.Color)
+		if !validPageFolderColor(color) {
+			replyError(w, http.StatusBadRequest, pageFolderColorRefusal(color))
+			return "", "", false
+		}
+	}
+	return icon, color, true
 }
 
 // panelSpecsFrom converts the wire panels into spec panels.

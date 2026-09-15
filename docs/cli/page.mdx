@@ -42,7 +42,7 @@ exception in the other direction: it prints YAML unless you ask for
 | `list` | List pages in the workspace |
 | `get <slug>` | Show one page's definition and panels |
 | `create --file <file>` | Create a page from a YAML definition |
-| `update <slug>` | Change an existing page's definition |
+| `update <slug>` | Change an existing page's definition, or its icon and colour |
 | `delete <slug> --yes` | Delete a page |
 | `set <slug>/<panel> --data -` | Push a panel's data — the single write path |
 | `actions <slug>/<panel>` | List the actions a panel declares, and the routine each one runs |
@@ -236,6 +236,29 @@ erased from the workspace, and then only to a crew.
 `page get` and `page list` both show the owner, so what you set is visible
 without reading the database.
 
+### `--icon` and `--color` — the page's own avatar
+
+```bash
+crewship page create --file provoz.page.yaml --icon rocket --color amber
+```
+
+| Flag | Description |
+|---|---|
+| `--icon <name>` | A crew icon name, from the crew icon picker's set — the same set a crew and a page folder use. The server refuses anything outside it and says so. |
+| `--color <key>` | A crew palette key: `blue`, `emerald`, `violet`, `amber`, `rose`, `cyan`, `lime` or `fuchsia`. |
+
+A page wears an icon and a colour the way a crew, an agent and a folder do, so
+the list on the left of `/pages` can tell eight pages apart by something other
+than their freshness glyph. The state (fresh, stale, failed, never produced)
+keeps its own glyph beside the avatar, always — the avatar never stands in for
+it, and the STATUS filter is unaffected by it.
+
+Like `--owner`, the avatar is **not part of the document**: it is stored on the
+page row, not in the spec, so a re-apply of the file leaves it alone, a
+[`page rollback`](#crewship-page-rollback-slug) does not restore an older one,
+and an export bundle does not carry it. `page get` and `page list` both return
+`icon` and `color` (empty strings for none, never a missing field).
+
 A panel may also declare the sensor half — a `wake:` threshold that opens an
 issue on a crew when the pushed payload crosses it, and `on_failure:` for when
 it stops arriving at all:
@@ -304,9 +327,16 @@ Backed by `PATCH /api/v1/pages/{slug}`.
 
 | Flag | Required | Description |
 |---|:---:|---|
-| `--file` | ✓ | The page document to replace the spec with (YAML or JSON; `-` reads stdin). |
+| `--file` | ✓* | The page document to replace the spec with (YAML or JSON; `-` reads stdin). *Optional when only `--icon` or `--color` is passed. |
+| `--icon` | | The page's icon, a crew icon name. Pass `""` to clear it. Omitted, the stored one stays. |
+| `--color` | | The page's colour, a crew palette key. Pass `""` to clear it. Omitted, the stored one stays. |
 
-This **replaces** the spec, it does not merge into it: a panel field left out
+```bash
+crewship page update fleet-201 --icon chart --color cyan   # no --file: name, description and panels untouched
+crewship page update fleet-201 --icon ""                   # clear the icon, keep the colour
+```
+
+With `--file`, this **replaces** the spec, it does not merge into it: a panel field left out
 of the file is deleted, including `tab:`, `icon:`, `public:`, `actions:`,
 `wake:`, `on_failure:` and `refresh:`. Panels are reconciled by id, so a panel
 that survives the edit keeps its payload ring.
