@@ -113,6 +113,8 @@ try {
     await page.setViewportSize({ width, height: 1000 })
     await page.goto(base + "/routines?slug=" + slug)
     if (width === 1440) {
+      // The rules summary now sits inside the collapsed Technical details.
+      await page.getByTestId("routine-technical").locator("summary").click()
       const summary = page.getByText("How this routine works · checks and recovery", {
         exact: true,
       })
@@ -132,7 +134,7 @@ try {
     const coverage = dialog.getByLabel("Coverage", { exact: true })
     await coverage.fill("70")
     await dialog.getByLabel("Directory", { exact: true }).fill("../private")
-    await dialog.getByRole("button", { name: "Run", exact: true }).click()
+    await dialog.getByRole("button", { name: "Run now", exact: true }).click()
     await dialog.getByText("Maximum is 1", { exact: true }).waitFor()
     await page.screenshot({ path: `/tmp/crewship-1-clarity-form-${width}.png` })
     assert.equal(await coverage.getAttribute("aria-invalid"), "true")
@@ -150,7 +152,7 @@ try {
     const accepted = page.waitForResponse(
       (r) => r.url().endsWith("/pipelines/" + slug + "/run") && r.request().method() === "POST",
     )
-    await dialog.getByRole("button", { name: "Run", exact: true }).click()
+    await dialog.getByRole("button", { name: "Run now", exact: true }).click()
     const response = await accepted
     assert(response.ok())
     const acceptedRun = await response.json()
