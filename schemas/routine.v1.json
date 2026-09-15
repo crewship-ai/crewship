@@ -161,6 +161,7 @@
       "properties": {
         "widget": { "type": "string", "enum": ["text", "textarea", "number", "boolean", "select", "multiselect"] },
         "options": { "type": "array", "maxItems": 200, "uniqueItems": true, "items": { "type": "string", "minLength": 1 } },
+        "format": { "type": "string", "enum": ["absolute_path"], "description": "Absolute POSIX path without traversal or control characters. Syntax only, not existence or authorization." },
         "allow_custom": { "type": "boolean", "description": "Permit a custom answer alongside a single-choice string list." },
         "placeholder": { "type": "string" },
         "label": { "type": "string", "description": "Human-readable field name; name stays the stable input key." },
@@ -373,7 +374,7 @@
       "type": "object",
       "required": ["criteria", "grader_agent_slug"],
       "additionalProperties": false,
-      "description": "Rubric-based output evaluation by a separate grader agent. Runs after structural Validation passes. Iterates the worker if rubric fails (up to max_iterations). agent_run-only.",
+      "description": "Rubric-based output evaluation by a separate grader agent. Runs after structural Validation passes. Can try configured fallback worker tiers with feedback; max_iterations caps those tier attempts. agent_run-only.",
       "properties": {
         "required": {"type": "boolean", "description": "Fail closed if the grader cannot establish a verdict. Omitted preserves legacy advisory behavior on grader errors."},
         "grader_agent_slug": {
@@ -384,8 +385,8 @@
           "type": "integer",
           "minimum": 0,
           "maximum": 10,
-          "default": 3,
-          "description": "Cap on the worker→grade→revise→grade loop. 1 = single shot, no revision. Default 3."
+          "default": 0,
+          "description": "Cap on worker/checker model tiers per execution attempt. Zero or omitted uses configured tiers; no extra same-tier revisions."
         },
         "on_fail": {
           "type": "string",

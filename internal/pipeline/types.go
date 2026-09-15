@@ -224,6 +224,7 @@ type ExecutionTier struct {
 // (e.g. Max=0.5 would round to 0). Validation rejects fractional
 // bounds when the input Type is "integer".
 type InputSpec struct {
+	Format      string   `json:"format,omitempty" yaml:"format,omitempty"` // absolute_path: syntax only, not existence or access
 	Widget      string   `json:"widget,omitempty" yaml:"widget,omitempty"`
 	Options     []string `json:"options,omitempty" yaml:"options,omitempty"`
 	AllowCustom bool     `json:"allow_custom,omitempty" yaml:"allow_custom,omitempty"`
@@ -807,14 +808,9 @@ type Validation struct {
 // That preserves Pavel's "no API keys" model: the grader auths via
 // its own CLI tool, the same way every other Crewship agent does.
 //
-// On rubric failure:
-//   - "abort"          → step fails, run fails
-//   - "retry_step"     → re-run worker with grader's feedback in prompt
-//   - "escalate_tier"  → re-run worker on a smarter tier (existing
-//     execution-tier escalation), grade again
-//
-// MaxIterations caps the retry loop so a stubborn output can't
-// burn unbounded tokens. Default is 3 (one initial run + 2 revisions).
+// On rubric failure, abort stops the step; escalate_tier and retry_step
+// try the next configured worker tier with the checker's feedback. A positive
+// MaxIterations caps tier attempts; omitted/zero preserves legacy traversal.
 type Outcomes struct {
 	// Required fails closed when the grader cannot establish a verdict.
 	// Omitted preserves legacy advisory behavior on infrastructure errors.
@@ -830,11 +826,12 @@ type Outcomes struct {
 	// same way as StepAgentRun.AgentSlug — security boundary is
 	// identical.
 	GraderAgentSlug string `json:"grader_agent_slug"`
-	// MaxIterations caps the worker→grade→revise→grade loop.
-	// 1 = single shot (grade once, no revision). Default 3.
+	// MaxIterations caps worker/checker model tiers per execution attempt.
+	// Zero means all configured tiers. It never creates an extra same-tier
+	// revision, and transport/step retries have their own budgets.
 	MaxIterations int `json:"max_iterations,omitempty"`
 	// OnFail is what the executor does when the rubric ultimately
-	// can't be satisfied (after MaxIterations exhausted). Defaults
+	// can't be satisfied (after configured tiers exhausted). Defaults
 	// to OnFailAbort — never propagate unrubric'd output downstream.
 	OnFail OnFailAction `json:"on_fail,omitempty"`
 }
