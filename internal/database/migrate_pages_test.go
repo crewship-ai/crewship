@@ -186,6 +186,12 @@ func TestMigratePages_TablesAndColumns(t *testing.T) {
 				// counts membership changes and fences moves.
 				{name: "folder_id"},
 				{name: "pages_version", notNull: true},
+				// #2563: the page's own icon and colour. Both nullable — NULL
+				// is "none", and the client draws its default glyph in no
+				// colour for it. Columns, not spec_json keys: presentation
+				// is not restored by a rollback or carried by a bundle.
+				{name: "icon"},
+				{name: "color"},
 			},
 		},
 		{

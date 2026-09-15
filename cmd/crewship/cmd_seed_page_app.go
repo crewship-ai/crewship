@@ -82,6 +82,10 @@ func seedPageApp(ctx context.Context, client *cli.Client, page seeddata.PageDef)
 		return err
 	}
 	live.Owner = ""
+	// The avatar is not part of the definition either (#2563): a page someone
+	// gave an icon still has the seeded definition, and the seeder must not
+	// read the icon as an edit.
+	live.Icon, live.Color = nil, nil
 	if !reflect.DeepEqual(&live, pageWriteFrom(&definition)) {
 		fmt.Fprintf(os.Stderr, "  = app %s: existing Page definition preserved\n", page.Slug)
 		return nil
