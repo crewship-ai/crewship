@@ -12,6 +12,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 ### Added
 
 - Incoming webhook configuration in Integrations for routines, agents and Page panels, with explicit outgoing notification labels. Routine webhooks can select a GitHub pull request signature profile with content-based replay protection.
+- **Docs gates:** `docs-inventory -strict` now fails an API path no `crewship` command builds (exemptions with a reason in `scripts/docs-inventory/cli-parity-exemptions.txt`) and a CLI flag documented only under another command's heading (baselined in `flag-section-baseline.txt`, ratchet-only); `docs-surface-check` fails a heading with an unescaped `{param}`, which MDX renders as nothing. (#2576)
 
 
 ### Fixed

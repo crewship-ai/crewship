@@ -1,4 +1,12 @@
 // Command docs-surface-check verifies the agent-readable Mintlify surface.
+//
+// Every pass is hermetic and runs on each pull request, in the order main
+// prints them: frontmatter description quality, stability labels, navigation
+// reachability in both directions, internal prose links and their anchors,
+// deprecated terminology, code spans wrapped onto a `<` line, headings with an
+// unescaped `{param}` (since 2026-09-15: MDX renders the parameter as nothing,
+// see unescapedHeadingExpressions), and MDX tag safety. Only the deployed
+// llms.txt comparison reaches the network, and only when -url is passed.
 package main
 
 import (
@@ -89,6 +97,50 @@ var allowedDeprecatedOccurrences = map[string][]string{
 	"docs/manifest/workspace.md": {
 		"the retired `COORDINATOR` value is rejected",
 		"**`COORDINATOR` is retired and rejected everywhere.**",
+	},
+}
+
+// allowedUnescapedHeadings are the headings that carried a bare `{param}` on
+// the day unescapedHeadingExpressions landed (2026-09-15), keyed by page and
+// listed verbatim. Each one publishes with the parameter missing — see that
+// function — and each is a one-token fix (`\{param\}`) that belongs to the
+// page's owner, not to the gate. The gate fails on any heading NOT listed
+// here, and prints a notice for every entry that is no longer needed, so this
+// list can only shrink. Do not add to it; escape the heading instead.
+//
+// The two September entries (webhooks.mdx, pages.mdx) are being fixed by the
+// audit follow-up PRs for those pages; the rest predate the audit.
+var allowedUnescapedHeadings = map[string][]string{
+	"docs/api-reference/admin.mdx": {
+		"## PUT /api/v1/admin/rate-limits/{key}",
+		"## DELETE /api/v1/admin/rate-limits/{key}",
+		"## GET /api/v1/admin/keeper/requests/{requestId}/events",
+	},
+	"docs/api-reference/pages.mdx": {
+		"### GET /api/v1/pages/{slug}/project/fsck",
+	},
+	"docs/api-reference/webhooks.mdx": {
+		"### POST /api/v1/webhooks/{token}/github-pull-request",
+	},
+	"docs/configuration/devcontainers.mdx": {
+		"#### GET /api/v1/crews/{crewId}/provision",
+		"#### POST /api/v1/crews/{crewId}/provision",
+		"#### POST /api/v1/crews/{crewId}/rebuild",
+	},
+	"docs/guides/chat-sessions.mdx": {
+		"#### GET /api/v1/chats/{chatId}/participants",
+		"#### POST /api/v1/chats/{chatId}/participants",
+		"#### DELETE /api/v1/chats/{chatId}/participants/{userId}",
+		"#### POST /api/v1/chats/{chatId}/steer",
+	},
+	"docs/guides/notifications.mdx": {
+		"#### PATCH /api/v1/notification-channels/{id}",
+		"#### POST /api/v1/notification-channels/{id}/test",
+		"#### DELETE /api/v1/notification-channels/{id}",
+		"#### GET /api/v1/notification-channels/{id}/agents",
+		"#### POST /api/v1/notification-channels/{id}/agents",
+		"#### DELETE /api/v1/notification-channels/{id}/agents/{agentId}",
+		"#### PATCH /api/v1/notification-providers/{provider}",
 	},
 }
 
@@ -242,6 +294,23 @@ func main() {
 		fail(fmt.Errorf("inline code spans wrapped onto a line starting with `<`:\n  %s", strings.Join(offenders, "\n  ")))
 	}
 	fmt.Printf("docs-surface-check: no inline code span wraps onto a `<` continuation\n")
+
+	headings, err := unescapedHeadingExpressions(*root)
+	if err != nil {
+		fail(err)
+	}
+	unlisted, stale := partitionHeadingExpressions(headings)
+	if len(unlisted) > 0 {
+		offenders := make([]string, 0, len(unlisted))
+		for _, h := range unlisted {
+			offenders = append(offenders, fmt.Sprintf("%s:%d: %s — MDX evaluates %s and renders nothing; write %s", h.page, h.line, h.text, h.expression, escapeExpression(h.expression)))
+		}
+		fail(fmt.Errorf("headings with an unescaped {param} (published with the parameter missing):\n  %s", strings.Join(offenders, "\n  ")))
+	}
+	for _, entry := range stale {
+		fmt.Printf("docs-surface-check: notice: %s is escaped now — remove it from allowedUnescapedHeadings\n", entry)
+	}
+	fmt.Printf("docs-surface-check: heading expressions %d unescaped, all in the 2026-09-15 allowlist; 0 new\n", len(headings))
 
 	// MDX tag safety. Runs after the content passes because a broken tag fails
 	// the whole external docs build, and that build reports as a status the
@@ -1239,3 +1308,119 @@ func descriptionQuality(root string) (total, good, bad int) {
 
 func fileExists(path string) bool { _, err := os.Stat(path); return err == nil }
 func fail(err error)              { fmt.Fprintln(os.Stderr, "docs-surface-check:", err); os.Exit(1) }
+
+// headingExpression is one heading that carries an unescaped MDX expression.
+type headingExpression struct {
+	page       string
+	line       int
+	expression string
+	text       string
+}
+
+// unescapedHeadingExpressions finds headings whose prose contains `{…}`
+// outside a code span.
+//
+// MDX evaluates a bare `{token}` as an expression, and an undefined one
+// renders as nothing — see renderProseSegment, which has modelled that for
+// the anchor check since #1794. The heading `### POST
+// /api/v1/webhooks/{token}/github-pull-request` therefore publishes as
+// `POST /api/v1/webhooks//github-pull-request`, with the parameter the
+// reader most needs gone from the one line they scan for. The escape is
+// `\{token\}`; inside backticks the braces are literal and need nothing.
+// The anchor check knew the rule and applied it only to compute slugs; it
+// never said the heading was wrong. This does.
+func unescapedHeadingExpressions(root string) ([]headingExpression, error) {
+	docsRoot := filepath.Join(root, "docs")
+	offenders := []headingExpression{}
+	err := filepath.Walk(docsRoot, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			if path == filepath.Join(docsRoot, "prd") {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(path, ".mdx") && !strings.HasSuffix(path, ".md") {
+			return nil
+		}
+		page := filepath.ToSlash(strings.TrimPrefix(path, root+string(filepath.Separator)))
+		body, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		var fence fenceState
+		for i, line := range strings.Split(string(body), "\n") {
+			if fence.feed(line) || fence.inside() {
+				continue
+			}
+			match := atxHeading.FindStringSubmatch(line)
+			if match == nil {
+				continue
+			}
+			if expression := unescapedExpression(match[1]); expression != "" {
+				offenders = append(offenders, headingExpression{page: page, line: i + 1, expression: expression, text: strings.TrimSpace(line)})
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return offenders, nil
+}
+
+// partitionHeadingExpressions splits the offenders into the ones the allowlist
+// does not cover, which fail the run, and returns alongside them the allowlist
+// entries that no longer match any heading, which are reported for deletion.
+func partitionHeadingExpressions(found []headingExpression) (unlisted []headingExpression, stale []string) {
+	seen := map[string]bool{}
+	for _, h := range found {
+		key := h.page + ": " + h.text
+		seen[key] = true
+		allowed := false
+		for _, text := range allowedUnescapedHeadings[h.page] {
+			if text == h.text {
+				allowed = true
+				break
+			}
+		}
+		if !allowed {
+			unlisted = append(unlisted, h)
+		}
+	}
+	for page, texts := range allowedUnescapedHeadings {
+		for _, text := range texts {
+			if !seen[page+": "+text] {
+				stale = append(stale, page+": "+text)
+			}
+		}
+	}
+	sort.Strings(stale)
+	return unlisted, stale
+}
+
+// escapeExpression is the spelling that renders the braces: `{token}` becomes
+// `\{token\}`.
+func escapeExpression(expression string) string {
+	return `\` + strings.TrimSuffix(expression, "}") + `\}`
+}
+
+// unescapedExpression returns the first `{…}` a heading's prose would hand to
+// MDX, or "" when every brace is escaped, inside a code span, or the trailing
+// `{#custom-id}` that names the anchor.
+func unescapedExpression(text string) string {
+	text = customHeadingID.ReplaceAllString(text, "")
+	for i, segment := range splitCodeSpans(text) {
+		if i%2 == 1 {
+			continue
+		}
+		segment = strings.ReplaceAll(segment, `\{`, "\x01")
+		segment = strings.ReplaceAll(segment, `\}`, "\x02")
+		if expression := mdxExpression.FindString(segment); expression != "" {
+			return expression
+		}
+	}
+	return ""
+}
