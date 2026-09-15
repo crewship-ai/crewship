@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/crewship-ai/crewship/internal/devcontainer"
 	"github.com/crewship-ai/crewship/internal/provider"
 	"github.com/crewship-ai/crewship/internal/ws"
 )
@@ -101,5 +102,56 @@ func TestContainerStartError_UnknownCauseIsInternal(t *testing.T) {
 	md, _ := errEvent.Metadata.(map[string]any)
 	if md["code"] != "internal" {
 		t.Errorf("unknown cause code = %v, want internal", md["code"])
+	}
+}
+
+// invalidatingEnqueuer is a stubEnqueuer that also implements the optional
+// imageCacheInvalidator capability, recording whether the bridge told it the
+// daemon's image set disagrees with what the provisioner memoised.
+type invalidatingEnqueuer struct {
+	stubEnqueuer
+	invalidated int
+}
+
+func (e *invalidatingEnqueuer) InvalidateImageCache() { e.invalidated++ }
+
+// #2431: a crew container that fails to start because the daemon has no such
+// image is the daemon saying the provisioner's memoised image list is wrong
+// (an operator's `docker rmi` inside its 60 s TTL). The bridge must pass that
+// on so the NEXT provision relists and rebuilds instead of reporting a cache
+// hit against nothing. An unrelated start failure must not touch the cache —
+// a spurious relist is cheap, but the signal should mean what it says.
+func TestContainerStartError_ImageMissingInvalidatesProvisionerCache(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		raw  string
+		want int
+	}{
+		{name: "provider's cached-image sentinel", raw: "ensure image: cached devcontainer image missing locally; crew needs reprovisioning: crewship-cache:abc", want: 1},
+		{name: "daemon No such image on create", raw: "container create: Error response from daemon: No such image: crewship-cache:abc", want: 1},
+		{name: "daemon no such object on start", raw: "container start: Error response from daemon: no such object: crewship-cache:abc", want: 1},
+		{name: "unrelated start failure", raw: "container start: OCI runtime create failed: cgroup v1 not supported", want: 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			info := cacheMissingInfo("crewship-cache:present")
+			// Verified for the adapter, so the only reason to re-provision
+			// would be the start failure itself.
+			info.CachedRequirements = &devcontainer.AggregatedRequirements{AdapterBinaries: []string{"claude"}}
+			resolver := &mockResolver{info: info}
+			b := testBridgeWithContainer(t, resolver, &legacyVolumeContainer{raw: tc.raw})
+			enq := &invalidatingEnqueuer{}
+			b.SetProvisioningEnqueuer(enq)
+
+			err := b.HandleChatMessage(context.Background(), "user-1", "sess-1", "hello", func(ws.ChatEvent) {})
+			if err == nil || !strings.Contains(err.Error(), "ensure team runtime") {
+				t.Fatalf("expected the start failure to propagate, got %v", err)
+			}
+			if enq.invalidated != tc.want {
+				t.Errorf("InvalidateImageCache called %d times, want %d", enq.invalidated, tc.want)
+			}
+		})
 	}
 }

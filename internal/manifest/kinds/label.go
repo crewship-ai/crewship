@@ -254,6 +254,36 @@ func ExportLabels(ctx context.Context, c internalapi.Client) ([]*LabelDocument, 
 	return docs, nil
 }
 
+// LookupLabelRemoteByName fetches the workspace's labels and returns
+// the row whose name matches, or (nil, nil) when there is none — the
+// caller treats that as "create". The server keys labels on name and
+// the manifest pins slug == name, so the manifest slug is the name.
+//
+// A failed list is an error, not "absent": reading a 500 as "no such
+// label" would plan a create against a server that may well hold the
+// row, and the apply would die on the 409 this lookup exists to
+// prevent (#2426).
+func LookupLabelRemoteByName(ctx context.Context, c internalapi.Client, name string) (*LabelRemote, error) {
+	resp, err := c.Get(ctx, "/api/v1/labels")
+	if err != nil {
+		return nil, fmt.Errorf("list labels: %w", err)
+	}
+	if resp == nil {
+		return nil, fmt.Errorf("list labels: nil response")
+	}
+	rows, err := decodeLabelList(resp)
+	if err != nil {
+		return nil, err
+	}
+	for i := range rows {
+		if rows[i].Name == name {
+			row := rows[i]
+			return &row, nil
+		}
+	}
+	return nil, nil
+}
+
 // ---- internal helpers ----
 
 // decodeLabelList tolerates both a flat array (`[{...}, {...}]`) and

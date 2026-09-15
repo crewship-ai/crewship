@@ -2281,6 +2281,16 @@
             "additionalProperties": true,
             "type": "object"
           },
+          "status": {
+            "enum": [
+              "BACKLOG",
+              "TODO",
+              "IN_PROGRESS",
+              "CANCELLED",
+              "DUPLICATE"
+            ],
+            "type": "string"
+          },
           "title": {
             "type": "string"
           }
@@ -2438,6 +2448,13 @@
             "type": "string"
           },
           "priority": {
+            "enum": [
+              "none",
+              "low",
+              "medium",
+              "high",
+              "urgent"
+            ],
             "type": "string"
           },
           "start_date": {
@@ -2445,6 +2462,14 @@
             "type": "string"
           },
           "status": {
+            "enum": [
+              "backlog",
+              "planned",
+              "in_progress",
+              "paused",
+              "completed",
+              "cancelled"
+            ],
             "type": "string"
           },
           "target_date": {
@@ -2468,6 +2493,11 @@
             "type": "string"
           },
           "health": {
+            "enum": [
+              "on_track",
+              "at_risk",
+              "off_track"
+            ],
             "nullable": true,
             "type": "string"
           },
@@ -2492,6 +2522,13 @@
             "type": "string"
           },
           "priority": {
+            "enum": [
+              "none",
+              "low",
+              "medium",
+              "high",
+              "urgent"
+            ],
             "nullable": true,
             "type": "string"
           },
@@ -2500,6 +2537,14 @@
             "type": "string"
           },
           "status": {
+            "enum": [
+              "backlog",
+              "planned",
+              "in_progress",
+              "paused",
+              "completed",
+              "cancelled"
+            ],
             "nullable": true,
             "type": "string"
           },

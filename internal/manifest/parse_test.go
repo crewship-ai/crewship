@@ -126,7 +126,7 @@ func TestLoad_AcceptsSingleNewKindDoc(t *testing.T) {
 	}{
 		{
 			"project alone",
-			"apiVersion: crewship/v1\nkind: Project\nmetadata: { name: P, slug: p }\nspec: { status: active }\n",
+			"apiVersion: crewship/v1\nkind: Project\nmetadata: { name: P, slug: p }\nspec: { status: in_progress }\n",
 			func(b *Bundle) bool { return len(b.Projects) == 1 },
 		},
 		{

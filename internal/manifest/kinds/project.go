@@ -36,16 +36,29 @@ const projectKind = "Project"
 var projectHexColorRe = regexp.MustCompile(`^#[0-9A-Fa-f]{6}$`)
 
 // validProjectStatuses, validProjectPriorities, validProjectHealth
-// enumerate the spec's allow-lists. Lookups use simple map presence
-// rather than slice scans because Validate runs once per document
-// and a map keeps the code self-documenting.
+// enumerate the allow-lists. They mirror the CHECK constraints on the
+// projects table (internal/database/migrate_consts_v33_v41.go, v40)
+// word for word: the manifest used to accept `active` and `archived`,
+// which the server rejected at INSERT time (#2426). Lookups use
+// simple map presence rather than slice scans because Validate runs
+// once per document and a map keeps the code self-documenting.
 var validProjectStatuses = map[string]struct{}{
-	"planned":   {},
-	"active":    {},
-	"completed": {},
-	"archived":  {},
+	"backlog":     {},
+	"planned":     {},
+	"in_progress": {},
+	"paused":      {},
+	"completed":   {},
+	"cancelled":   {},
 }
+
+// projectStatusList is the same set in the order the error message
+// and docs list it.
+const projectStatusList = "backlog, planned, in_progress, paused, completed, cancelled"
+
+// `none` is the server's default priority, so an exported project
+// must round-trip through Validate with it.
 var validProjectPriorities = map[string]struct{}{
+	"none":   {},
 	"low":    {},
 	"medium": {},
 	"high":   {},
@@ -157,12 +170,14 @@ type projectAgentRow struct {
 // include the offending slug, the bad value, and the allowed set
 // where applicable.
 //
-// FK references (lead_agent_slug → workspaceCtx.Agents) are checked
-// here because the agent set is known up-front from the manifest's
-// declared crews plus the workspace's remote agents. If the lookup
-// list is incomplete (e.g. the caller skipped the remote fetch),
-// HasAgent's union of declared+remote handles the partial case
-// without false negatives.
+// FK references (lead_agent_slug → workspaceCtx agents) are checked
+// here only when the context knows any agents at all — declared in
+// the same bundle or listed from the workspace by the planner. A
+// context that knows no agents cannot prove one is missing: the
+// client-less validation path (ValidateBundle) never fetches, and a
+// standalone Project file declares none, so the reference is left to
+// plan time, where projectResolveAgentSlugToID fails loudly. Same
+// rule as Issue.assignee_slug and Page producers (#2426).
 func (d *ProjectDocument) Validate(ctx internalapi.WorkspaceContext) error {
 	if d.APIVersion != projectAPIVersion {
 		return fmt.Errorf("project %q: unsupported apiVersion %q (want %q)",
@@ -181,13 +196,13 @@ func (d *ProjectDocument) Validate(ctx internalapi.WorkspaceContext) error {
 
 	if d.Spec.Status != "" {
 		if _, ok := validProjectStatuses[d.Spec.Status]; !ok {
-			return fmt.Errorf("project %q: invalid status %q (want one of: planned, active, completed, archived)",
-				d.Metadata.Slug, d.Spec.Status)
+			return fmt.Errorf("project %q: invalid status %q (want one of: %s)",
+				d.Metadata.Slug, d.Spec.Status, projectStatusList)
 		}
 	}
 	if d.Spec.Priority != "" {
 		if _, ok := validProjectPriorities[d.Spec.Priority]; !ok {
-			return fmt.Errorf("project %q: invalid priority %q (want one of: low, medium, high, urgent)",
+			return fmt.Errorf("project %q: invalid priority %q (want one of: none, low, medium, high, urgent)",
 				d.Metadata.Slug, d.Spec.Priority)
 		}
 	}
@@ -207,7 +222,7 @@ func (d *ProjectDocument) Validate(ctx internalapi.WorkspaceContext) error {
 				d.Metadata.Slug, d.Spec.TargetDate)
 		}
 	}
-	if d.Spec.LeadAgentSlug != "" && !ctx.HasAgent(d.Spec.LeadAgentSlug) {
+	if d.Spec.LeadAgentSlug != "" && ctx.KnowsAgents() && !ctx.HasAgent(d.Spec.LeadAgentSlug) {
 		return fmt.Errorf("project %q: lead_agent_slug %q not found in workspace agents",
 			d.Metadata.Slug, d.Spec.LeadAgentSlug)
 	}
