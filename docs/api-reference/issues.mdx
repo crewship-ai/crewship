@@ -94,6 +94,7 @@ Returns issues across the workspace with filtering, sorting, and pagination.
 | `sort` | string | `"created_at"` | Sort column: `created_at`, `updated_at`, `priority`, `sort_order` |
 | `limit` | integer | `50` | Rows per page (1-500) |
 | `offset` | integer | `0` | Pagination offset |
+| `counts` | string | -- | `1` to also compute per-status totals under the same filters as the page (every filter applied, `limit`/`offset` ignored). Answered in the `X-Status-Counts` header; the body is unchanged. Any other value is ignored. |
 
 The body stays a bare array. The total the filter matched — before `limit`/`offset` — is in the `X-Total-Count` response header, with `X-Limit` and `X-Offset` echoing the values applied. An agent assignee carries `assignee_slug` next to `assignee_name`.
 
@@ -156,6 +157,7 @@ The body stays a bare array. The total the filter matched — before `limit`/`of
   |---|---|
   | `X-Total-Count` | Total rows matching the query (every filter applied, `limit`/`offset` ignored) |
   | `X-Has-More` | `"true"` when `offset + len(body)` is less than `X-Total-Count`, else `"false"` |
+  | `X-Status-Counts` | Only with `?counts=1`: a JSON object of status → row count over the same scope as `X-Total-Count`, e.g. `{"BACKLOG":12,"TODO":4,"DONE":31}`. Statuses with no rows are absent. `crewship issue list --counts` prints it. |
 
   A caller that only reads the array still gets identical bytes; a caller
   that wants to know whether a 100-row page was the whole story reads the
