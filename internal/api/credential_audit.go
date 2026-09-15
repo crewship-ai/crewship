@@ -81,6 +81,13 @@ const (
 	// token — by the monitor, before a run start, or on request. Metadata
 	// carries the trigger, the outcome and the new expiry; never a token.
 	AuditEventRefresh CredentialAuditEvent = "REFRESH"
+
+	// AuditEventReattributed (#2308): an Art. 17 erasure handed the
+	// credential's created_by to a custodian because the human who
+	// created it was erased and the column is NOT NULL. Metadata carries
+	// the gdpr_actions id and the custodian; never the erased subject.
+	// See admin_gdpr_erase_identity.go, "Credentials".
+	AuditEventReattributed CredentialAuditEvent = "REATTRIBUTED"
 )
 
 var validAuditEvents = map[CredentialAuditEvent]struct{}{
@@ -95,6 +102,8 @@ var validAuditEvents = map[CredentialAuditEvent]struct{}{
 	AuditEventLeased:   {},
 	AuditEventReveal:   {},
 	AuditEventRefresh:  {},
+
+	AuditEventReattributed: {},
 }
 
 // credentialAuditDropped counts audit events that a best-effort call
