@@ -26,20 +26,20 @@ import (
 )
 
 type agentModelCredentialOut struct {
-	State          string `json:"state"`
-	CredentialName string `json:"credential_name,omitempty"`
-	CredentialID   string `json:"credential_id,omitempty"`
-	Source         string `json:"source,omitempty"`
-	Delivery       string `json:"delivery,omitempty"`
-	Provider       string `json:"provider,omitempty"`
+	State          string `json:"state" yaml:"state"`
+	CredentialName string `json:"credential_name,omitempty" yaml:"credential_name,omitempty"`
+	CredentialID   string `json:"credential_id,omitempty" yaml:"credential_id,omitempty"`
+	Source         string `json:"source,omitempty" yaml:"source,omitempty"`
+	Delivery       string `json:"delivery,omitempty" yaml:"delivery,omitempty"`
+	Provider       string `json:"provider,omitempty" yaml:"provider,omitempty"`
 }
 
 type agentCredentialReadinessOut struct {
-	AgentID         string                  `json:"agent_id"`
-	AgentSlug       string                  `json:"agent_slug"`
-	Adapter         string                  `json:"adapter"`
-	ModelCredential agentModelCredentialOut `json:"model_credential"`
-	Notes           []string                `json:"notes"`
+	AgentID         string                  `json:"agent_id" yaml:"agent_id"`
+	AgentSlug       string                  `json:"agent_slug" yaml:"agent_slug"`
+	Adapter         string                  `json:"adapter" yaml:"adapter"`
+	ModelCredential agentModelCredentialOut `json:"model_credential" yaml:"model_credential"`
+	Notes           []string                `json:"notes" yaml:"notes"`
 }
 
 var agentCredentialReadinessCmd = &cobra.Command{
