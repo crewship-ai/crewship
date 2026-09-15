@@ -20,8 +20,8 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { CrewIcon } from "@/components/ui/crew-icon"
 import { apiFetch } from "@/lib/api-fetch"
-import { extractProblemDetail } from "@/lib/problem-details"
 import { duplicatePayload } from "@/lib/routine-save-payload"
+import { saveRoutineDraft } from "@/lib/routine-drafts"
 import { listRoutineDrafts, type RoutineDraftListEntry } from "@/lib/routine-drafts"
 import { resolveRoutineColor, resolveRoutineIcon } from "@/lib/routine-identity"
 import type { Pipeline } from "@/hooks/use-pipelines"
@@ -33,8 +33,9 @@ import type { Pipeline } from "@/hooks/use-pipelines"
 //                 (get_routine_draft / save_routine_draft); the chat's link
 //                 comes back here as ?draft=<slug>, which opens the routine
 //                 page with the draft row on top;
-//   Copy          an existing routine under a new name, through the same
-//                 save path the kebab's Copy uses;
+//   Copy          an existing routine under a new name, saved as a DRAFT
+//                 (not a live routine): every way in ends as a draft the
+//                 person reads and publishes;
 //   CLI           scripts, agent behaviour and checks are files; the commands
 //                 are the real ones from docs/cli/routine.mdx.
 //
@@ -164,21 +165,38 @@ export function RoutineNewDialog({ open, onOpenChange, workspaceId, routines, on
     try {
       const res = await apiFetch(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}/pipelines/${encodeURIComponent(source.slug)}`)
       if (!res.ok) throw new Error(`Could not read ${source.name || source.slug} (${res.status}).`)
-      const detail = (await res.json()) as { slug: string; name: string; description?: string; definition: Record<string, unknown>; author_crew_id?: string }
+      const detail = (await res.json()) as { slug: string; name: string; description?: string; definition: Record<string, unknown>; author_crew_id?: string; icon?: string; color?: string }
+      // duplicatePayload gives the copy its identity (slug from the name,
+      // definition renamed to match); it is saved as a draft, not published.
       const body = duplicatePayload(
         { slug: detail.slug, name: detail.name, description: detail.description, definition: detail.definition, author_crew_id: detail.author_crew_id },
         { name: `${detail.name || detail.slug} (copy)` },
       )
-      const save = await apiFetch(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}/pipelines/save`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      })
-      if (!save.ok) {
-        const problem = await save.clone().json().then((b) => extractProblemDetail(b) ?? b?.error).catch(() => null)
-        throw new Error(problem || "The copy could not be saved.")
+      const document: Record<string, unknown> = {
+        slug: body.slug,
+        name: body.name,
+        description: body.description,
+        definition: body.definition,
+        ...(body.author_crew_id ? { author_crew_id: body.author_crew_id } : {}),
+        ...(detail.icon ? { icon: detail.icon } : {}),
+        ...(detail.color ? { color: detail.color } : {}),
       }
-      toast.success("Copied · schedules and history stay with the original")
+      let saved
+      try {
+        saved = await saveRoutineDraft(
+          workspaceId,
+          { id: "", slug: body.slug, revision: 0, base_pipeline_id: "", base_revision: 0, document: {} },
+          document,
+        )
+      } catch (e) {
+        const message = e instanceof Error ? e.message : String(e)
+        throw new Error(
+          /conflict|revision/i.test(message)
+            ? `A routine or draft named "${body.slug}" already exists. Rename it first, then copy again.`
+            : message,
+        )
+      }
+      toast.success(`Copied as draft r${saved.revision} · publish it to make it runnable`)
       onCreated?.()
       onOpenChange(false)
       onOpenRoutine(body.slug)
@@ -192,7 +210,7 @@ export function RoutineNewDialog({ open, onOpenChange, workspaceId, routines, on
   const header = {
     pick: { title: "New routine", description: "Every way in ends as a draft you read here and publish when it looks right." },
     describe: { title: "New routine · Describe it", description: undefined },
-    copy: { title: "Copy an existing routine", description: "The copy gets a new name; schedules and history stay with the original." },
+    copy: { title: "Copy an existing routine", description: "The copy is saved as a draft under a new name — nothing runs until you publish it. Schedules and history stay with the original." },
     cli: { title: "Build it with the CLI", description: "Scripts, agent behaviour and checks live in files. The web shows the result and publishes it." },
   }[mode]
 

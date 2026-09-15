@@ -22,7 +22,10 @@ function mockServer() {
     if (url.startsWith("/api/v1/crews?")) return json([{ id: "crew_fin", name: "Finance" }, { id: "crew_ops", name: "Ops" }])
     if (url.startsWith("/api/v1/agents?")) return json([{ id: "a1", name: "Nora", slug: "nora", agent_role: "WORKER", crew_id: "crew_fin" }, { id: "a2", name: "Lead", slug: "fin-lead", agent_role: "LEAD", crew_id: "crew_fin" }])
     if (url.endsWith("/pipelines/invoice-intake") && !init?.method) return json({ slug: "invoice-intake", name: "Invoice intake", description: "Reads invoices.", definition: { name: "invoice-intake", steps: [] }, author_crew_id: "crew_fin" })
-    if (url.endsWith("/pipelines/save")) return json({ slug: "invoice-intake-copy" })
+    if (url.endsWith("/pipelines/drafts") && init?.method === "POST") {
+      const sent = JSON.parse(String(init.body))
+      return json({ ...sent, id: "drf_copy", revision: 1 })
+    }
     throw new Error(`unexpected ${init?.method ?? "GET"} ${url}`)
   })
 }
@@ -92,18 +95,36 @@ describe("<RoutineNewDialog>", () => {
     expect(close).toHaveBeenCalledWith(false)
   })
 
-  it("Copy reads the routine and saves it under a new name through the save path", async () => {
+  it("Copy reads the routine and saves it as a draft under a new name, never as a live routine", async () => {
     const open = vi.fn()
     const created = vi.fn()
     render(<RoutineNewDialog open onOpenChange={() => {}} workspaceId="ws" routines={routines} onOpenRoutine={open} onCreated={created} />)
     fireEvent.click(screen.getByRole("button", { name: /Copy an existing routine/ }))
+    expect(screen.getByText(/saved as a draft under a new name/)).toBeInTheDocument()
     fireEvent.click(screen.getByTestId("routine-copy-invoice-intake"))
     await waitFor(() => expect(open).toHaveBeenCalledWith("invoice-intake-copy"))
-    const save = h.fetcher.mock.calls.find(([url]) => String(url).endsWith("/pipelines/save"))!
+    expect(h.fetcher.mock.calls.some(([url]) => String(url).endsWith("/pipelines/save"))).toBe(false)
+    const save = h.fetcher.mock.calls.find(([url, init]) => String(url).endsWith("/pipelines/drafts") && init?.method === "POST")!
     const body = JSON.parse(String(save[1].body))
-    expect(body).toMatchObject({ slug: "invoice-intake-copy", name: "Invoice intake (copy)", author_crew_id: "crew_fin", skip_test_gate: true })
-    expect(body.skip_governance_gate).toBeUndefined()
+    // A fresh draft (revision 0, no base pipeline) carrying the renamed definition.
+    expect(body).toMatchObject({ id: "", revision: 0, slug: "invoice-intake-copy", base_pipeline_id: "" })
+    expect(body.document).toMatchObject({ slug: "invoice-intake-copy", name: "Invoice intake (copy)", author_crew_id: "crew_fin", definition: { name: "invoice-intake-copy", display_name: "Invoice intake (copy)" } })
     expect(created).toHaveBeenCalled()
+  })
+
+  it("Copy explains a slug clash instead of overwriting anything", async () => {
+    mockServer()
+    h.fetcher.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url.endsWith("/pipelines/drafts") && init?.method === "POST") return json({ error: "draft revision conflict" }, 409)
+      if (url.endsWith("/pipelines/invoice-intake") && !init?.method) return json({ slug: "invoice-intake", name: "Invoice intake", definition: { name: "invoice-intake", steps: [] } })
+      return json([])
+    })
+    const open = vi.fn()
+    render(<RoutineNewDialog open onOpenChange={() => {}} workspaceId="ws" routines={routines} onOpenRoutine={open} />)
+    fireEvent.click(screen.getByRole("button", { name: /Copy an existing routine/ }))
+    fireEvent.click(screen.getByTestId("routine-copy-invoice-intake"))
+    await waitFor(() => expect(screen.getByText(/already exists\. Rename it first/)).toBeInTheDocument())
+    expect(open).not.toHaveBeenCalled()
   })
 
   it("Build it with the CLI shows the commands", () => {

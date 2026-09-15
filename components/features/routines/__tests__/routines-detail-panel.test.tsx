@@ -506,3 +506,57 @@ it.each(["missing run ID", "unreadable JSON"])(
     expect(key(1)).toBe(key(0))
   },
 )
+
+describe("<RoutinesDetailPanel> — a slug with a draft and no published routine", () => {
+  // A copy, a draft the lead saved, or one saved from the CLI: the routine
+  // does not exist yet (404), but its draft does. The page is built from the
+  // draft so it can be read and published; Run waits for the first version.
+  const notFound = () =>
+    ({ ok: false, status: 404, json: async () => ({ error: "not found" }), text: async () => "not found" }) as unknown as Response
+  const DRAFT = {
+    id: "drf_copy",
+    slug: "daily-report-copy",
+    revision: 1,
+    base_pipeline_id: "",
+    base_revision: 0,
+    updated_at: "2026-09-15T10:00:00Z",
+    document: {
+      slug: "daily-report-copy",
+      name: "Daily report (copy)",
+      description: "Copied from Daily report.",
+      definition: { name: "daily-report-copy", display_name: "Daily report (copy)", steps: [{ id: "a", type: "transform", transform: { input: "x", expression: "." } }] },
+      author_crew_id: "crew-1",
+    },
+  }
+
+  beforeEach(() => {
+    h.records = []
+    vi.mocked(apiFetch).mockImplementation(async (url) => {
+      const u = String(url)
+      if (u.endsWith("/pipelines/daily-report-copy/draft")) return okJSON(DRAFT)
+      if (u.endsWith("/pipelines/daily-report-copy")) return notFound()
+      return okJSON([])
+    })
+  })
+
+  it("renders the draft as the routine, disables Run and offers Publish", async () => {
+    render(<RoutinesDetailPanel {...defaultProps} slug="daily-report-copy" />)
+    expect(await screen.findByText("Daily report (copy)")).toBeInTheDocument()
+    expect(screen.queryByText(/fetch routine: 404/)).toBeNull()
+    const run = screen.getByRole("button", { name: /^Run$/ })
+    expect(run).toBeDisabled()
+    expect(run.closest("span")).toHaveAttribute("title", expect.stringMatching(/Publish the draft first/))
+    expect(screen.getByRole("button", { name: /Publish draft r1/ })).toBeInTheDocument()
+  })
+
+  it("still reports a real 404 when there is no draft either", async () => {
+    vi.mocked(apiFetch).mockImplementation(async (url) => {
+      const u = String(url)
+      if (u.endsWith("/draft")) return okJSON({ id: "", slug: "gone", revision: 0, base_pipeline_id: "", base_revision: 0, document: {} })
+      if (u.endsWith("/pipelines/gone")) return notFound()
+      return okJSON([])
+    })
+    render(<RoutinesDetailPanel {...defaultProps} slug="gone" />)
+    expect(await screen.findByText(/fetch routine: 404/)).toBeInTheDocument()
+  })
+})

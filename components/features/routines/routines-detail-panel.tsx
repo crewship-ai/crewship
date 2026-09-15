@@ -11,6 +11,7 @@ import { STATUS_BADGE_CLASSES, STATUS_DOT_CLASSES } from "@/lib/colors"
 import { AgentlessBadge } from "./routine-agentless-badge"
 import { toast } from "sonner"
 import { apiFetch } from "@/lib/api-fetch"
+import { loadRoutineDraft } from "@/lib/routine-drafts"
 import { RoutineStartIntent } from "@/lib/routine-start-intent"
 import { useAbilities } from "@/hooks/use-abilities"
 import {
@@ -99,6 +100,12 @@ export interface RoutineDetail {
   // A saved draft newer than the published version (contract §"API
   // additions"). Absent when nothing is drafted, and on older servers.
   draft?: import("@/hooks/use-pipelines").PipelineDraftSummary
+  /**
+   * The slug has a saved draft and no published routine yet — a copy, a
+   * draft the lead saved, or one saved from the CLI. The page is built from
+   * the draft document; Run waits for the first publication.
+   */
+  draft_only?: boolean
   // Files the recipe runs — every steps[].script.path with its language,
   // the steps that use it, size and whether it is on the crew share. `[]`
   // when nothing is declared; absent on older servers, where the recipe's own
@@ -173,6 +180,16 @@ export function RoutinesDetailPanel({
         signal: ctrl.signal,
       })
       if (ctrl.signal.aborted) return
+      if (res.status === 404) {
+        // Not published yet: a draft alone can still be read, edited and
+        // published from this page (publishing a draft creates the routine).
+        const fromDraft = await routineFromDraftOnly(workspaceId, slug, ctrl.signal)
+        if (ctrl.signal.aborted) return
+        if (fromDraft) {
+          setRoutine(fromDraft)
+          return
+        }
+      }
       if (!res.ok) throw new Error(`fetch routine: ${res.status}`)
       const r: RoutineDetail = await res.json()
       if (ctrl.signal.aborted) return
@@ -444,7 +461,9 @@ export function RoutinesDetailPanel({
 
   const lifecycle = normalizeRoutineStatus(routine?.status)
   const lifecycleBadge = routineStatusBadge(routine?.status)
-  const runGuard = runDisabledReason(routine?.status)
+  const runGuard = routine?.draft_only
+    ? "Publish the draft first — nothing can run until then"
+    : runDisabledReason(routine?.status)
   const showApprovalBanner = lifecycle === "proposed" && canApproveRoutine(role)
   const showKillControl = canKillRoutine(role)
 
@@ -802,5 +821,51 @@ function governanceLabel(a: "approve" | "reject" | "disable" | "enable"): string
       return "Routine disabled"
     case "enable":
       return "Routine enabled"
+  }
+}
+
+/**
+ * A RoutineDetail synthesised from a draft that has no published routine
+ * behind it, or null when there is no such draft either. Everything the page
+ * reads comes from the draft document; version, runs and schedules do not
+ * exist yet.
+ */
+async function routineFromDraftOnly(
+  workspaceId: string,
+  slug: string,
+  signal: AbortSignal,
+): Promise<RoutineDetail | null> {
+  let draft
+  try {
+    draft = await loadRoutineDraft(workspaceId, slug, signal)
+  } catch {
+    return null
+  }
+  if (!draft?.id) return null
+  const doc = draft.document ?? {}
+  const definition =
+    typeof doc.definition === "object" && doc.definition !== null
+      ? (doc.definition as Record<string, unknown>)
+      : {}
+  const text = (value: unknown) => (typeof value === "string" ? value : "")
+  return {
+    id: "",
+    slug,
+    name: text(doc.name) || text(definition.display_name) || slug,
+    description: text(doc.description) || text(definition.description) || undefined,
+    dsl_version: text(definition.dsl_version) || "1.0",
+    definition,
+    definition_hash: "",
+    ephemeral: false,
+    workspace_visible: true,
+    invocation_count: 0,
+    authored_via: "draft",
+    created_at: draft.updated_at ?? "",
+    updated_at: draft.updated_at ?? "",
+    author_crew_id: text(doc.author_crew_id) || undefined,
+    icon: text(doc.icon) || undefined,
+    color: text(doc.color) || undefined,
+    draft: { id: draft.id, revision: draft.revision, updated_at: draft.updated_at ?? "", updated_by: draft.updated_by },
+    draft_only: true,
   }
 }
