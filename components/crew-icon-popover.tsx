@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useMemo } from "react"
+import React, { useState, useMemo } from "react"
 import { Search, Pencil } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
@@ -19,9 +19,16 @@ interface CrewIconPopoverProps {
   size?: "sm" | "md" | "lg" | "xl"
   onIconChange: (icon: string) => void
   onColorChange: (color: string) => void
+  /**
+   * What the trigger button shows instead of `<CrewIcon icon color>`. A page
+   * without an avatar wears a neutral tile, not a default crew icon (#2563),
+   * and the tile must still be the thing you click. The pencil overlay and
+   * the popover's own preview are unchanged.
+   */
+  trigger?: React.ReactNode
 }
 
-export function CrewIconPopover({ icon, color, size = "xl", ariaLabel = "Choose crew icon", modal = false, onIconChange, onColorChange }: CrewIconPopoverProps) {
+export function CrewIconPopover({ icon, color, size = "xl", ariaLabel = "Choose crew icon", modal = false, onIconChange, onColorChange, trigger }: CrewIconPopoverProps) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState("")
   const [activeCategory, setActiveCategory] = useState<string | null>(null)
@@ -50,7 +57,7 @@ export function CrewIconPopover({ icon, color, size = "xl", ariaLabel = "Choose 
     <Popover open={open} onOpenChange={setOpen} modal={modal}>
       <PopoverTrigger asChild>
         <button type="button" className="relative group cursor-pointer" aria-label={ariaLabel}>
-          <CrewIcon icon={icon} color={color} size={size} />
+          {trigger ?? <CrewIcon icon={icon} color={color} size={size} />}
           <div className={cn(
             "absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-all flex items-center justify-center",
             size === "xl" ? "rounded-2xl" : size === "lg" ? "rounded-xl" : size === "md" ? "rounded-xl" : "rounded-lg",
