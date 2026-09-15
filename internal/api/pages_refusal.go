@@ -13,6 +13,15 @@ func (h *PageHandler) refusePageAction(w http.ResponseWriter, r *http.Request, r
 }
 
 func (h *PageHandler) refusePageResponse(w http.ResponseWriter, r *http.Request, rec *pageRecord, status int, forbidden, missing string) {
+	if missing == "" {
+		missing = fmt.Sprintf("page %q not found", rec.Slug)
+	}
+	// This principal has already failed the project ownership gate. Its
+	// authority is crew-bound, independent of any human viewer context.
+	if projectAgentFrom(r.Context()) != nil {
+		replyError(w, http.StatusNotFound, missing)
+		return
+	}
 	user := UserFromContext(r.Context())
 	if user == nil {
 		replyError(w, status, forbidden)
@@ -35,9 +44,6 @@ func (h *PageHandler) refusePageResponse(w http.ResponseWriter, r *http.Request,
 		return
 	}
 	if !reachable {
-		if missing == "" {
-			missing = fmt.Sprintf("page %q not found", rec.Slug)
-		}
 		replyError(w, http.StatusNotFound, missing)
 		return
 	}
