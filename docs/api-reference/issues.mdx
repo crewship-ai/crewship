@@ -253,6 +253,7 @@ The crew must have a LEAD agent. The issue identifier is auto-generated from the
 | `title` | string | Yes | -- | Issue title |
 | `description` | string | No | `null` | Issue description |
 | `priority` | string | No | `"none"` | Priority: `none`, `low`, `medium`, `high`, `urgent` |
+| `status` | string | No | `"BACKLOG"` | Starting status. Validated like a transition from `BACKLOG`, so only `BACKLOG`, `TODO`, `IN_PROGRESS`, `CANCELLED` or `DUPLICATE` are accepted; a terminal start stamps `completed_at` |
 | `assignee_type` | string | No | `null` | `"user"` or `"agent"` |
 | `assignee_id` | string | No | `null` | Assignee ID |
 | `due_date` | string | No | `null` | Due date (YYYY-MM-DD) |
@@ -279,7 +280,7 @@ The crew must have a LEAD agent. The issue identifier is auto-generated from the
 
 | Status | Condition |
 |---|---|
-| `400` | Missing title, crew has no lead agent, `routine_inputs` set without `routine_id`, `routine_id`/`parent_issue_id` not in workspace, or `routine_inputs` not valid JSON |
+| `400` | Missing title, crew has no lead agent, `status` not a legal starting status, `routine_inputs` set without `routine_id`, `routine_id`/`parent_issue_id` not in workspace, or `routine_inputs` not valid JSON |
 | `403` | Insufficient role |
 | `404` | Crew not found |
 

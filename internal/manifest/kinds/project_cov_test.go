@@ -131,7 +131,7 @@ func TestProjectCov_DiffPatch(t *testing.T) {
 			Metadata: internalapi.Metadata{Name: "New", Slug: "roadmap", Description: "new desc"},
 			Spec: ProjectSpec{
 				Color:         "red",
-				Status:        "active",
+				Status:        "in_progress",
 				Priority:      "high",
 				Health:        "at_risk",
 				TargetDate:    "2026-12-31",
@@ -141,7 +141,7 @@ func TestProjectCov_DiffPatch(t *testing.T) {
 		patch := doc.diffPatch(remote, "a1")
 		want := map[string]any{
 			"name": "New", "description": "new desc", "color": "red",
-			"status": "active", "priority": "high", "health": "at_risk",
+			"status": "in_progress", "priority": "high", "health": "at_risk",
 			"target_date": "2026-12-31", "lead_id": "a1", "lead_type": "agent",
 		}
 		for k, v := range want {
@@ -262,7 +262,7 @@ func TestProjectCov_FetchProjectBySlug(t *testing.T) {
 		t.Parallel()
 		body := `[{
 			"id":"p1","workspace_id":"w1","slug":"roadmap","name":"Roadmap",
-			"description":"desc","color":"red","status":"active","priority":"high",
+			"description":"desc","color":"red","status":"in_progress","priority":"high",
 			"health":"on_track","target_date":"2026-12-31","lead_type":"agent","lead_id":"a1"
 		}]`
 		c := newCovClient(map[string]covRoute{"GET /api/v1/projects": {body: body}})

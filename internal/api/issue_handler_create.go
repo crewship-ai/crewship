@@ -5,7 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/statuses"
 )
 
 // ── Create — POST /api/v1/issues ────────────────────────────────────────────
@@ -30,8 +33,14 @@ func (h *IssueHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Title         string   `json:"title"`
-		Description   *string  `json:"description"`
+		Title       string  `json:"title"`
+		Description *string `json:"description"`
+		// Status is the starting status. Empty means the default BACKLOG;
+		// anything else must be a legal transition FROM BACKLOG — the same
+		// rule Update applies — so a caller cannot mint an issue directly
+		// in DONE and skip the review path (#2426: the manifest's
+		// `status: todo` used to be ignored and land as BACKLOG).
+		Status        string   `json:"status"`
 		Priority      string   `json:"priority"`
 		AssigneeType  *string  `json:"assignee_type"`
 		AssigneeID    *string  `json:"assignee_id"`
@@ -59,6 +68,21 @@ func (h *IssueHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Priority == "" {
 		req.Priority = "none"
+	}
+	if req.Status == "" {
+		req.Status = "BACKLOG"
+	}
+	if req.Status != "BACKLOG" && !h.validateStatusTransition("BACKLOG", req.Status) {
+		writeProblem(w, r, http.StatusBadRequest,
+			"status must be BACKLOG or one step from it: "+
+				strings.Join(statuses.AllowedFrom(validIssueTransitions, "BACKLOG"), ", "))
+		return
+	}
+	// A terminal starting status carries completed_at, as it would on PATCH.
+	var completedAt *string
+	if req.Status == "DONE" || req.Status == "CANCELLED" || req.Status == "DUPLICATE" {
+		ts := time.Now().UTC().Format(time.RFC3339)
+		completedAt = &ts
 	}
 
 	tx, err := h.db.BeginTx(r.Context(), nil)
@@ -245,15 +269,15 @@ func (h *IssueHandler) Create(w http.ResponseWriter, r *http.Request) {
 		    parent_issue_id, milestone_id, sort_order, mission_type,
 		    routine_id, routine_inputs_json,
 		    created_by_user_id, authored_via,
-		    created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, 'BACKLOG', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 'issue', ?, COALESCE(?, '{}'), ?, 'user_api', ?, ?)`,
+		    completed_at, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 'issue', ?, COALESCE(?, '{}'), ?, 'user_api', ?, ?, ?)`,
 		id, wsID, crewID, leadAgentID, traceID,
-		req.Title, req.Description, issueNumber, identifier, req.Priority,
+		req.Title, req.Description, req.Status, issueNumber, identifier, req.Priority,
 		req.AssigneeType, req.AssigneeID, ownerUserID, delegateAgentID, req.DueDate, req.ProjectID,
 		req.Estimate, req.ParentIssueID, req.MilestoneID,
 		req.RoutineID, routineInputsJSON,
 		createdByUserID,
-		now, now)
+		completedAt, now, now)
 	if err != nil {
 		internalError(w, r, h.logger, "insert issue", err)
 		return
@@ -283,7 +307,7 @@ func (h *IssueHandler) Create(w http.ResponseWriter, r *http.Request) {
 		Identifier:    &identifier,
 		Title:         req.Title,
 		Description:   req.Description,
-		Status:        "BACKLOG",
+		Status:        req.Status,
 		Priority:      req.Priority,
 		AssigneeType:  req.AssigneeType,
 		AssigneeID:    req.AssigneeID,
