@@ -1,7 +1,7 @@
 # Děděná oprávnění složek Pages — návrh F3′ (verze 2)
 
 Datum: 2026-09-13, verze 2 po externí oponentuře (nad commitem e543324e).
-Stav: **schválený směr, k implementaci jako jedno PR F3′.** Navazuje na
+Stav k 2026-09-14: **implementováno a sloučeno; akceptace má uvedené meze.** Navazuje na
 `pages-collections-access-analysis-2026-09-12.md` v3 a nahrazuje jeho fáze
 F3–F5. Sledování: #2521.
 
@@ -10,6 +10,10 @@ co v ní je; jednodušší a smysluplnější.“* Tři volby rozhodnuty: **(a) 
 `w` složky dědí úpravy stránek; **(b) ano**, `workspace` i na stránce, jen
 pro read a write; **(c) ne**, nová složka je výchozí jen pro vlastnickou
 crew a adminy.
+
+Aktuální API a CLI popisují [Pages API](../api-reference/pages.mdx) a
+[page CLI](../cli/page.mdx). [Stav dodávky a ověření](pages-folder-delivery-status-2026-09-14.md)
+odděluje provedené testy od neprovedené živé akceptace dvěma účty a měření s lidmi.
 
 ## 0. Co oponentura upřesnila (všech šest zapracováno)
 
@@ -45,8 +49,9 @@ které adresář nepřebije (§7.1/2 v `pages.md`).
 Složky bez oprávnění (PR #2531, #2529), `reach` (#2526), efektivní přístup
 jen ke čtení (#2530), stránkové granty s ověřením vydavatele při použití
 (`loadPageGrantRecordsIn`), pravidlo o panelech (`canSeePanel`), kontrola
-úplného dokumentu pro `write` (#2502). Vše nasazeno na dev3 jako kombinace
-větví; nic z §3–§6 není implementováno.
+úplného dokumentu pro `write` (#2502). Původně šlo o kombinaci větví na dev3; tyto části i §3–§6 jsou nyní
+sloučené do main. Návrhová SQL níže popisuje model; autoritativní migrační
+soubory jsou v `internal/database/migrations/`.
 
 ## 3. Pravidla
 
@@ -95,7 +100,7 @@ větví; nic z §3–§6 není implementováno.
    při jediném odmítnutí se nezapíše nic a odpověď říká, která stránka a
    proč.
 10. **Kdo čte ACL složky:** vlastnická crew MANAGER+ a admin vidí celé ACL.
-    Ostatní vidí u složky jen **označení** (`shared: "crew" | "workspace" |
+    Ostatní vidí u složky jen **označení** (`shared: "people" | "crews" | "people_and_crews" | "workspace" |
     "none"` bez jmen) a vlastní efektivní přístup (`GET /pages/{slug}/access`
     zůstává pro vlastníka/admina; pro běžného čtenáře přibude
     `GET /pages/{slug}/access/me`, jen jeho cesty).
@@ -112,8 +117,9 @@ větví; nic z §3–§6 není implementováno.
 14. **`workspace` na stránce** (volba b): stránkový grant se subjektem
     `workspace` pro `read` a `write`, nikdy `produce`; vydává vlastník
     stránky nebo admin jako dnes.
-15. **Nová složka** (volba c): žádný ACL záznam; dosah má vlastnická crew a
-    admini. „Všichni ve workspace“ se zapíná výslovně a UI to řekne větou.
+15. **Nová složka** (volba c): žádný ACL záznam; složku vidí vlastnická crew a
+    admini. Samotné vlastnictví složky nedává její crew dosah všech cizích
+    stránek uvnitř ani automatické `write` na jejich dokumenty; to určuje §3/3. „Všichni ve workspace“ se zapíná výslovně a UI to řekne větou.
 
 ## 4. Oprávnění operací
 
@@ -176,8 +182,8 @@ dotazů (test z #2526, rozšířený o složky v #2531).
 |---|---|---|---|
 | `GET /page-folders/{slug}/acl` | správci | `{acl:[{subject_type, subject_id, label, can_read, can_write, set_by, set_at}], acl_version}` | `page folder acl <slug>` |
 | `PUT /page-folders/{slug}/acl` `{subject_type, subject_id?, can_write}` | správci | 200 záznam; 400 pro agenta nebo `can_write` bez `r` | `page folder share <slug> <subject> --view\|--edit` |
-| `DELETE /page-folders/{slug}/acl/{subject}` | správci | 204 | `page folder unshare <slug> <subject>` |
-| `GET /page-folders` a `GET /page-folders/{slug}` | jako dnes | přibude `shared: "none"\|"crew"\|"workspace"` bez jmen; `acl_version` | `page folder list/show` |
+| `DELETE /page-folders/{slug}/acl/{subject_type}/{subject_id}` | správci | 204 | `page folder unshare <slug> <subject>` |
+| `GET /page-folders` a `GET /page-folders/{slug}` | jako dnes | přibude `shared: "none"\|"people"\|"crews"\|"people_and_crews"\|"workspace"` bez jmen; `acl_version` | `page folder list/show` |
 | `POST /page-folders/{slug}/pages` `{page, pages_version, acl_version}` | §4 | 200; 409 s verzemi, ACL jen pro správce | `page move` |
 | `POST /page-folders/{slug}/pages:batch` `{pages:[{page, pages_version}], acl_version}` | §4 pro každou | vše nebo nic; 403/409 jmenuje stránku | `page move a b c --folder` |
 | `GET /pages/{slug}/access/me` | kdo stránku vidí | jen vlastní cesty | `page access <slug> --me` |
@@ -189,22 +195,31 @@ Každý endpoint má CLI příkaz, akceptační test nad binárkou, řádek v
 
 ## 7. Obrazovky
 
-- **Složka → Sharing** (jen správci): řádek vlastnické crew (upravovat,
-  nelze odebrat), pak záznamy s přepínačem *Může zobrazit* / *Může
+- **Složka → Sharing** (jen správci): řádek vlastnické crew (její manažeři spravují složku,
+  nejde o zděděný grant na stránky a nelze jej odebrat), pak záznamy s přepínačem *Může zobrazit* / *Může
   upravovat*, řádek *Všichni v tomto workspace* vypnutý ve výchozím stavu.
   Věta nad tabulkou: „Oprávnění složky platí pro všechny stránky, které v
   ní právě jsou, včetně těch, které do ní přibudou. Panely vlastněné jinou
   crew zůstanou zapečetěné. Kdo může upravovat, může také stránky ze složky
-  odebrat.“ Ostatní vidí místo tabulky: „Sdílená s crew“ / „Sdílená se
-  všemi ve workspace“ / „Jen vlastnická crew“ a svůj přístup.
+  odebrat.“ Ostatní vidí místo tabulky: „Sdílená s lidmi“ / „Sdílená s crews“ / „Sdílená s lidmi a crews“ /
+  „Sdílená se všemi ve workspace“ / „Jen vlastnická crew a admini“ a svůj přístup.
 - **Přesun** (dialog z #2529): blok „Po přesunu“: pro správce jmenovitě
   („uvidí crew Support a všichni ve workspace; crew Ops bude moci
   upravovat“), pro ostatní obecně („uvidí všichni ve workspace“ / „uvidí
-  členové sdílených crew“). Po 409 se blok přegeneruje z nových verzí.
+  členové sdílených crew“). Jde výslovně o přístup přidaný složkou; vlastní granty a ostatní cesty
+  stránky zůstávají. Prázdné ACL nepřidává přístup. Po 409 se blok
+  přegeneruje z nových verzí.
 - **Sidebar:** u složky sdílené se všemi ve workspace malý symbol a `title`
   „Sdílená se všemi ve workspace“.
 - **Access sekce stránky:** *Direct*, *Ze složky Ops* (jen ke čtení; pro
   správce složky odkaz na Sharing, pro ostatní věta), *Effective access*.
+
+Při chybě načtení nebo obnovení seznamu složek nesmí uložený souhrn
+předstírat aktuální soukromí. Sharing i karta From folder zobrazí
+„Sharing could not be determined“; po zotavení aktuální stav. Identita
+složky zůstává zachována. Platná odpověď plného ACL zůstává zdrojem pro
+správcovskou tabulku. Neznámá hodnota souhrnu se na klientovi mění na
+`unknown`, nikdy na `none`.
 
 ## 8. Akceptační scénáře
 
@@ -237,6 +252,7 @@ vnořené složky, `produce` přes složku, agenti v ACL složky, tlačítko
 
 ## 10. Dodávka
 
-Jedno PR **F3′** nad #2531 + #2529 (backend a frontend mohou jít jako dva
-stohované PR), s testy z §8 a dokumentací. Před merge cílená oponentura
-implementace na A2, A7, A10.
+Dodáno přes #2535 (backend) a #2534 (frontend), nad složkami #2531 /
+#2529 a efektivním přístupem #2530. Historicky plánované jedno F3′ se
+rozdělilo na dvě PR. Testy a zbývající ověření jsou v uzavíracím záznamu
+odkazovaném v úvodu; sloučení samo o sobě není splněním všech akceptací.

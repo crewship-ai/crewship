@@ -37,6 +37,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 ### Fixed
 
 - Agent stop now waits for runtime confirmation instead of merely changing the displayed status; direct agent execs have an isolated, stoppable process identity. A SIGTERM from an explicit agent stop is recorded as cancelled, preserving STOPPED instead of a later false ERROR; successful late completion and unrelated failures retain their outcomes.
+- Pages folder Sharing now reports an unknown sharing state when refreshing the folder list fails, and restores the current audience after recovery.
 - **Motion respects the system's reduced-motion setting.** Every Radix overlay — sheet, dialog, dropdown, select, popover, tooltip — animates through utilities that carried their own keyframes and so ignored the preference entirely. The pipeline graph's edge animations, the only continuous ones in the app, now stop as well.
 - **The navigation drawer opens in 240ms rather than 500ms**, which was the slowest transition in the app on the gesture a phone repeats most. The two hand-copied drawer springs are now the shared one, and their backdrops fade with the panel instead of settling at their own rate.
 - The crew bottom dock's tab strip fits the screen and scrolls; its scroll container had never activated because the row would not shrink below its contents. Its height is also capped to the viewport, so a tall panel chosen on a desktop no longer arrives on a phone taller than the screen with the canvas collapsed to nothing.
