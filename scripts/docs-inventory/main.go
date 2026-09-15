@@ -111,15 +111,20 @@ type docFile struct {
 }
 
 type apiRecord struct {
-	Method                 string         `json:"method"`
-	Path                   string         `json:"path"`
-	OperationID            string         `json:"operation_id"`
-	Tag                    string         `json:"tag"`
-	SourceFile             string         `json:"source_file,omitempty"`
-	ExactDocs              []string       `json:"exact_docs,omitempty"`
-	ResourceDocs           []string       `json:"resource_docs,omitempty"`
-	Status                 string         `json:"status"`
-	TestSignals            []string       `json:"test_signals,omitempty"`
+	Method       string   `json:"method"`
+	Path         string   `json:"path"`
+	OperationID  string   `json:"operation_id"`
+	Tag          string   `json:"tag"`
+	SourceFile   string   `json:"source_file,omitempty"`
+	ExactDocs    []string `json:"exact_docs,omitempty"`
+	ResourceDocs []string `json:"resource_docs,omitempty"`
+	Status       string   `json:"status"`
+	TestSignals  []string `json:"test_signals,omitempty"`
+	// CLIParity is "cli" when cmd/crewship builds this path, "exempt" when
+	// scripts/docs-inventory/cli-parity-exemptions.txt says why it does not,
+	// and "missing" otherwise — see cliparity.go.
+	CLIParity              string         `json:"cli_parity"`
+	CLICallers             []string       `json:"cli_callers,omitempty"`
 	ConcreteResponseSchema bool           `json:"concrete_response_schema"`
 	GenericResponseSchema  bool           `json:"generic_response_schema"`
 	RequestBodyPresent     bool           `json:"request_body_present"`
@@ -373,15 +378,20 @@ func statusMarkerPresent(text string) bool {
 }
 
 type summary struct {
-	APIOperations                  int `json:"api_operations"`
-	APIExactDocs                   int `json:"api_exact_docs"`
-	APIResourceDocs                int `json:"api_resource_docs"`
-	APIMissingDocs                 int `json:"api_missing_docs"`
-	CLIOperations                  int `json:"cli_operations"`
-	CLIExactDocs                   int `json:"cli_exact_docs"`
-	CLIRootDocsPresent             int `json:"cli_root_docs_present"`
-	CLIRootDocsMissing             int `json:"cli_root_docs_missing"`
-	APIWithTestSignals             int `json:"api_with_test_signals"`
+	APIOperations      int `json:"api_operations"`
+	APIExactDocs       int `json:"api_exact_docs"`
+	APIResourceDocs    int `json:"api_resource_docs"`
+	APIMissingDocs     int `json:"api_missing_docs"`
+	CLIOperations      int `json:"cli_operations"`
+	CLIExactDocs       int `json:"cli_exact_docs"`
+	CLIRootDocsPresent int `json:"cli_root_docs_present"`
+	CLIRootDocsMissing int `json:"cli_root_docs_missing"`
+	APIWithTestSignals int `json:"api_with_test_signals"`
+	// APIWithoutCLI counts public paths no cmd/crewship source builds and no
+	// exemption excuses. "Every API endpoint gets a CLI command" was a rule
+	// with no counter until 2026-09-15; five September routes had none.
+	APIWithoutCLI                  int `json:"api_without_cli"`
+	APIExemptFromCLI               int `json:"api_exempt_from_cli"`
 	APIWithConcreteResponseSchemas int `json:"api_with_concrete_response_schemas"`
 	APIGenericResponseSchemas      int `json:"api_generic_response_schemas"`
 	APIWithRequestBodies           int `json:"api_with_request_bodies"`
@@ -449,6 +459,10 @@ func strictGates() []gate {
 			func(r report) []string {
 				return apiRowsWhere(r, func(rec apiRecord) bool { return len(rec.Contract.Structural.Missing) > 0 })
 			}},
+		{"API paths with no CLI command (add one under cmd/crewship, or a reasoned line to " + cliParityExemptionsPath + ")", func(s summary) int { return s.APIWithoutCLI },
+			func(r report) []string {
+				return apiPathsWhere(r, func(rec apiRecord) bool { return rec.CLIParity == cliParityMissing })
+			}},
 		{"API operations with a generic response schema", func(s summary) int { return s.APIGenericResponseSchemas },
 			func(r report) []string {
 				return apiRowsWhere(r, func(rec apiRecord) bool { return rec.GenericResponseSchema })
@@ -506,6 +520,25 @@ func apiRowsWhere(r report, match func(apiRecord) bool) []string {
 		}
 	}
 	return out
+}
+
+// apiPathsWhere is apiRowsWhere without the method, one row per path.
+func apiPathsWhere(r report, match func(apiRecord) bool) []string {
+	var out []string
+	for _, rec := range r.API {
+		if match(rec) {
+			out = appendUnique(out, rec.Path)
+		}
+	}
+	return out
+}
+
+func countPaths(records []apiRecord) int {
+	seen := map[string]bool{}
+	for _, rec := range records {
+		seen[rec.Path] = true
+	}
+	return len(seen)
 }
 
 func cliRowsWhere(r report, match func(cliRecord) bool) []string {
@@ -570,6 +603,16 @@ func run(openAPIFile, commandsFile string, strict bool) error {
 		return err
 	}
 
+	shapes, err := cliPathShapes(sources)
+	if err != nil {
+		return err
+	}
+	exemptions, err := readCLIParityExemptions(cliParityExemptionsPath)
+	if err != nil {
+		return err
+	}
+	routes := specRoutes(openAPI)
+
 	evidence := inventoryEndpointEvidence(docs)
 	r := report{}
 	for path, methods := range openAPI.Paths {
@@ -601,6 +644,8 @@ func run(openAPIFile, commandsFile string, strict bool) error {
 				rec.Status = "missing_docs"
 			}
 			rec.TestSignals = testContaining(path, tests)
+			rec.CLICallers = cliCallers(path, shapes, routes)
+			rec.CLIParity = cliParityFor(path, rec.CLICallers, exemptions)
 			rec.Contract = contractFor(rec.Method, path, evidence, rec.SourceFile, rec.TestSignals, op.RequestBody != nil || len(op.Parameters) > 0)
 			r.API = append(r.API, rec)
 			// Same classifier the published figures are derived through, so the
@@ -682,6 +727,10 @@ func run(openAPIFile, commandsFile string, strict bool) error {
 		return fmt.Errorf("write %s: %w", markdownReport, err)
 	}
 	fmt.Printf("docs-inventory: %d API operations, %d CLI commands\n", len(r.API), len(r.CLI))
+	fmt.Printf("docs-inventory: CLI parity %d API paths, %d with no command, %d exempt\n", countPaths(r.API), r.Summary.APIWithoutCLI, r.Summary.APIExemptFromCLI)
+	for _, stale := range staleCLIParityExemptions(exemptions, r.API) {
+		fmt.Printf("docs-inventory: notice: %s\n", stale)
+	}
 	fmt.Printf("docs-inventory: wrote %s and %s\n", jsonReport, markdownReport)
 	// Reports are written before the gate runs: a failing CI job should still
 	// leave the regenerated inventory on disk for the operator to read.
@@ -1246,6 +1295,7 @@ func summarize(r report) summary {
 			s.ManifestKindsMissing++
 		}
 	}
+	parityCounted := map[string]bool{}
 	for _, rec := range r.API {
 		switch rec.Status {
 		case "documented_exact":
@@ -1257,6 +1307,18 @@ func summarize(r report) summary {
 		}
 		if len(rec.TestSignals) > 0 {
 			s.APIWithTestSignals++
+		}
+		// Counted per path, not per operation: one command reaches every
+		// method on a path this gate can see, so a path with four methods
+		// and no command is one gap, not four.
+		if !parityCounted[rec.Path] {
+			parityCounted[rec.Path] = true
+			switch rec.CLIParity {
+			case cliParityMissing:
+				s.APIWithoutCLI++
+			case cliParityExempt:
+				s.APIExemptFromCLI++
+			}
 		}
 		if rec.ConcreteResponseSchema {
 			s.APIWithConcreteResponseSchemas++
@@ -1317,17 +1379,18 @@ func markdown(r report) string {
 	fmt.Fprintf(&b, "Response schema quality: %d API operations have a concrete 2xx schema; %d still use the generic object fallback.\n\n", r.Summary.APIWithConcreteResponseSchemas, r.Summary.APIGenericResponseSchemas)
 	fmt.Fprintf(&b, "Request schema quality: %d operations have request bodies; %d have concrete JSON schemas, %d use non-JSON media types, and %d still use a generic JSON fallback.\n\n", r.Summary.APIWithRequestBodies, r.Summary.APIWithConcreteJSONRequests, r.Summary.APINonJSONRequestBodies, r.Summary.APIGenericJSONRequests)
 	fmt.Fprintf(&b, "CLI flag quality: %d commands define flags; %d document all of their flags and %d still have undocumented flag(s).\n\n", r.Summary.CLIWithFlags, r.Summary.CLIWithAllFlagsDocumented, r.Summary.CLIMissingFlagDocs)
+	fmt.Fprintf(&b, "CLI parity: %d API paths; %d have no `crewship` command and %d are exempt with a reason in `%s`.\n\n", countPaths(r.API), r.Summary.APIWithoutCLI, r.Summary.APIExemptFromCLI, cliParityExemptionsPath)
 	fmt.Fprintf(&b, "Environment variables: %d discovered, %d missing documentation. Manifest kinds: %d discovered, %d missing documentation.\n\n", r.Summary.EnvironmentVariables, r.Summary.EnvironmentVariablesMissing, r.Summary.ManifestKinds, r.Summary.ManifestKindsMissing)
 	fmt.Fprintf(&b, "Docs → code references: %d commands, %d API paths, %d environment variables, %d manifest kinds, and %d flags; missing symbols: %d, %d, %d, %d, and %d respectively.\n\n", r.Reverse.CommandReferences, r.Reverse.APIPathReferences, r.Reverse.EnvReferences, r.Reverse.KindReferences, r.Reverse.FlagReferences, r.Reverse.MissingCommands, r.Reverse.MissingAPIPaths, r.Reverse.MissingEnv, r.Reverse.MissingKinds, r.Reverse.MissingFlags)
 
 	fmt.Fprintf(&b, "## API operations needing attention\n\n")
-	fmt.Fprintf(&b, "These are missing a resource-level API reference page or have no exact route mention. Exactness is a review signal, not a final correctness verdict.\n\n")
-	fmt.Fprintf(&b, "| Method | Path | Operation | Status | Missing structural fields | Source | Runtime/test signals |\n|---|---|---|---|---|---|---|\n")
+	fmt.Fprintf(&b, "These are missing a resource-level API reference page, have no exact route mention, or have no `crewship` command (CLI column: cli, exempt, missing). Exactness is a review signal, not a final correctness verdict.\n\n")
+	fmt.Fprintf(&b, "| Method | Path | Operation | Status | Missing structural fields | Source | Runtime/test signals | CLI |\n|---|---|---|---|---|---|---|---|\n")
 	for _, rec := range r.API {
-		if len(rec.Contract.Structural.Missing) == 0 && rec.Status == "documented_exact" {
+		if len(rec.Contract.Structural.Missing) == 0 && rec.Status == "documented_exact" && rec.CLIParity == cliParityCovered {
 			continue
 		}
-		fmt.Fprintf(&b, "| `%s` | `%s` | `%s` | `%s` | %s | `%s` | %s |\n", rec.Method, rec.Path, rec.OperationID, rec.Status, joinOrDash(rec.Contract.Structural.Missing), rec.SourceFile, joinOrDash(rec.Contract.SemanticRuntime.TestSignals))
+		fmt.Fprintf(&b, "| `%s` | `%s` | `%s` | `%s` | %s | `%s` | %s | %s |\n", rec.Method, rec.Path, rec.OperationID, rec.Status, joinOrDash(rec.Contract.Structural.Missing), rec.SourceFile, joinOrDash(rec.Contract.SemanticRuntime.TestSignals), rec.CLIParity)
 	}
 	fmt.Fprintf(&b, "\n## CLI commands needing attention\n\n")
 	fmt.Fprintf(&b, "| Command | Use | Status | Documentation | Tests | Flag gaps |\n|---|---|---|---|---|---|\n")
