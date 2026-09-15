@@ -71,10 +71,17 @@ the complete generated routine**.
    broad GitHub credential is deliberately not persisted in the application.
 3. Publish the reviewed draft, install its signed hook, and run the complete
    automatic workflow with actual credential resolution and no operator bridge.
-4. Repeat the real stale-head-during-review test and verify publication refusal.
-   Stale head/base, replay, spoofed marker, truncated diff, destination binding
-   and successful-publication outcome are currently covered by deterministic
-   tests; the live stale-head scenario has not been performed.
+4. Repeat stale-head refusal through the complete unattended workflow. The
+   operator-assisted live test now passes: an asynchronous manual routine run
+   `run_cmu376ibb0015bd6772ff` was observed running its review step before the
+   sandbox PR head changed from `a11c520ab793114ecc1a24b657e5f8895c1de26d`
+   to `c2dc6c15b8bb386a0b4af1371635cacc7a4262b9`. The publication harness
+   refused with `PR changed during review`; published reviews remained one.
+   This invocation was manual, not another webhook delivery. Earlier harness
+   attempts missed the barrier and are not counted as proof. Removing the
+   publication revision check also makes its deterministic regression test fail.
+   Stale base, replay, spoofed marker, truncated diff, destination binding and
+   successful-publication outcome are covered by deterministic tests.
 
 The temporary GitHub hook and Crewship endpoint were disabled after the test;
 the tunnel and relay were stopped. The draft PR and review remain inspectable.
@@ -85,5 +92,8 @@ or copied into public reports. Safe evidence is archived separately under
 
 Validation at this entry: 10 Python guard tests passed; the generated 12-step
 routine passes the real CLI validator; real checks are enumerated above. The
-full Go/vet verification was started separately and is still running at this
-entry; no result is inferred from the unchanged application source.
+full local `go test -p4 ./... -count=1 -timeout=60m` completed with
+`GO_EXIT=0`, and `go vet ./...` completed with `VET_EXIT=0`. Logs are archived
+with the safe evidence. These checks ran on implementation commit c27c2175;
+the follow-up change only updates this report. Draft PR #2572 tracks the example;
+CI status must be checked independently before any merge.
