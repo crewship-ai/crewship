@@ -53,16 +53,18 @@ var helperParsedQueryParameters = []struct {
 	{"GET", "/api/v1/paymaster/top-spenders", "parseWindow", []string{"limit", "range", "since"}},
 
 	// parseJournalQuery (journal_handler.go) is the whole filter grammar of the
-	// journal. GET /api/v1/journal documented none of it.
+	// journal. GET /api/v1/journal documented none of it. run_id (2026-08-08)
+	// reaches a run by trace_id, actor_id or payload.run_id, whichever engine
+	// ran it; it was read for a month before the annotation named it.
 	{"GET", "/api/v1/journal", "parseJournalQuery", []string{
 		"actor_type", "agent_id", "agent_ids", "crew_id", "crew_ids", "cursor",
 		"entry_type", "exclude_entry_type", "limit", "mission_id", "priority",
-		"q", "severity", "since", "trace_id", "until",
+		"q", "run_id", "severity", "since", "trace_id", "until",
 	}},
 	{"GET", "/api/v1/journal/stream", "parseJournalQuery", []string{
 		"actor_type", "agent_id", "agent_ids", "crew_id", "crew_ids", "cursor",
 		"entry_type", "exclude_entry_type", "limit", "mission_id", "priority",
-		"q", "severity", "since", "trace_id", "until",
+		"q", "run_id", "severity", "since", "trace_id", "until",
 	}},
 	// Count parses the same grammar, but off a clone with ?limit and ?cursor
 	// deleted first — a count has no use for either, and parseJournalQuery
@@ -75,7 +77,7 @@ var helperParsedQueryParameters = []struct {
 	{"GET", "/api/v1/journal/count", "parseJournalQuery", []string{
 		"actor_type", "agent_id", "agent_ids", "crew_id", "crew_ids", "cursor",
 		"entry_type", "exclude_entry_type", "limit", "mission_id", "priority",
-		"q", "severity", "since", "trace_id", "until",
+		"q", "run_id", "severity", "since", "trace_id", "until",
 	}},
 
 	// parseTimeseriesParams (metrics_handler.go). ?metric is required — see

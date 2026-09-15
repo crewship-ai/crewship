@@ -125,8 +125,17 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	r.mux.Handle("GET /api/v1/crews/{crewId}/issues/{identifier}", authed(wsCtx(http.HandlerFunc(issues.Get))))
 	r.authedMut("PATCH", "/api/v1/crews/{crewId}/issues/{identifier}", roleCreate, issues.Update)
 	r.authedMut("DELETE", "/api/v1/crews/{crewId}/issues/{identifier}", roleCreate, issues.Delete)
+	// Work delegates to workAs (issue_handler_work.go), which writes every
+	// status but the 401 — out of the body scan's reach.
+	// openapi: responses 400,404,409,500
 	r.authedMut("POST", "/api/v1/crews/{crewId}/issues/{identifier}/work", roleCreate, issues.Work)
 	r.authedMut("PUT", "/api/v1/crews/{crewId}/issues/{identifier}/review-policy", roleCreate, issues.ReviewPolicy)
+	// An issue bound to a routine runs it instead of the mission engine
+	// (#2448): 202 with the run id, 422 for a missing required routine
+	// input, 503 when routine execution is unavailable. All three are
+	// written in startBoundRoutine (issue_routine_start.go), out of the
+	// body scan's reach.
+	// openapi: responses 202,422,503
 	r.authedMut("POST", "/api/v1/crews/{crewId}/issues/{identifier}/start", roleCreate, issues.Start)
 	// openapi: query hard:boolean
 	r.authedMut("POST", "/api/v1/crews/{crewId}/issues/{identifier}/stop", roleCreate, issues.Stop)
@@ -263,14 +272,14 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	// (journal_handler.go), so the generator's handler-body scan sees none of
 	// them and these three operations documented no query string at all. The
 	// annotation is the declared escape hatch for a delegated parser.
-	// openapi: query actor_type:string agent_id:string agent_ids:string crew_id:string crew_ids:string cursor:string entry_type:string exclude_entry_type:string limit:integer mission_id:string priority:string q:string severity:string since:string trace_id:string until:string
+	// openapi: query actor_type:string agent_id:string agent_ids:string crew_id:string crew_ids:string cursor:string entry_type:string exclude_entry_type:string limit:integer mission_id:string priority:string q:string run_id:string severity:string since:string trace_id:string until:string
 	r.mux.Handle("GET /api/v1/journal", authed(wsCtx(http.HandlerFunc(jh.List))))
-	// openapi: query actor_type:string agent_id:string agent_ids:string crew_id:string crew_ids:string cursor:string entry_type:string exclude_entry_type:string limit:integer mission_id:string priority:string q:string severity:string since:string trace_id:string until:string
+	// openapi: query actor_type:string agent_id:string agent_ids:string crew_id:string crew_ids:string cursor:string entry_type:string exclude_entry_type:string limit:integer mission_id:string priority:string q:string run_id:string severity:string since:string trace_id:string until:string
 	r.mux.Handle("GET /api/v1/journal/stream", authed(wsCtx(http.HandlerFunc(jh.Stream))))
 	// Count parses the same grammar off a clone with ?limit and ?cursor
 	// deleted, so neither is declared here — the handler body's own reads
 	// (rawQ.Has) still document them as accepted-and-ignored.
-	// openapi: query actor_type:string agent_id:string agent_ids:string crew_id:string crew_ids:string entry_type:string exclude_entry_type:string mission_id:string priority:string q:string severity:string since:string trace_id:string until:string
+	// openapi: query actor_type:string agent_id:string agent_ids:string crew_id:string crew_ids:string entry_type:string exclude_entry_type:string mission_id:string priority:string q:string run_id:string severity:string since:string trace_id:string until:string
 	r.mux.Handle("GET /api/v1/journal/count", authed(wsCtx(http.HandlerFunc(jh.Count))))
 	// Cost rollup (#1404) — literal path, must be registered before the
 	// {id} wildcard below (same "literal wins over pattern" ordering
@@ -1015,6 +1024,13 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 			// this route accepts. Acceptance and execution are deliberately
 			// different objects now; this is the only thing that joins them.
 			r.webhookHandler = wh
+			// Every status is written in internal/webhook, which the body
+			// scan does not read: 202 accepted / 200 ignored (§5 receipt),
+			// 400 malformed or stale timestamp, 401 bad signature, 404
+			// unknown agent, 413 body too large, 409 delivery conflict,
+			// 429 ingress full and 503 acceptance unavailable (both with
+			// Retry-After), 500 unclassified.
+			// openapi: responses 200,202,400,401,404,409,413,429,500,503
 			r.mux.Handle("POST /api/v1/webhooks/{crewId}/{agentId}/trigger", http.HandlerFunc(wh.ServeHTTP))
 		}
 	}

@@ -72,10 +72,14 @@ func coreResourceSchemas() map[string]any {
 		// product default") and 0 ("keep forever") are different answers.
 		"credential_audit_retention_days": nullableInt(),
 		"audit_log_retention_days":        nullableInt(),
-		"_count":                          ref("WorkspaceCounts"),
-		"_count_crews":                    intSchema(), "_count_agents": intSchema(), "_count_members": intSchema(),
+		// #2233 — the approvals_queue sweep window, same null/0 semantics
+		// as the audit pair.
+		"approvals_retention_days": nullableInt(),
+		"_count":                   ref("WorkspaceCounts"),
+		"_count_crews":             intSchema(), "_count_agents": intSchema(), "_count_members": intSchema(),
 	}, "id", "name", "slug", "created_at", "updated_at", "allow_privileged_credentials",
-		"logo_url", "preferred_language", "pages_theme", "run_retention_days", "credential_audit_retention_days", "audit_log_retention_days")
+		"logo_url", "preferred_language", "pages_theme", "run_retention_days", "credential_audit_retention_days", "audit_log_retention_days",
+		"approvals_retention_days")
 
 	crew := object(map[string]any{
 		"id": stringSchema(), "workspace_id": stringSchema(), "name": stringSchema(), "slug": stringSchema(),
@@ -140,6 +144,7 @@ func coreResourceSchemas() map[string]any {
 			"name": nullableString(), "slug": nullableString(), "preferred_language": nullableString(), "pages_theme": pagesThemeSchema(),
 			"allow_privileged_credentials": nullableBool(), "run_retention_days": nullableInt(),
 			"credential_audit_retention_days": nullableInt(), "audit_log_retention_days": nullableInt(),
+			"approvals_retention_days": nullableInt(),
 		}),
 		"CrewCreateRequest": requestObject(map[string]any{
 			"name": stringSchema(), "slug": stringSchema(), "description": nullableString(), "color": nullableString(), "icon": nullableString(),

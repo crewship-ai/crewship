@@ -164,6 +164,8 @@ crew rollup and a display-named top-agents leaderboard (one workspace-scoped
 | Param | Type | Description |
 |---|---|---|
 | `window` | string | One of `24h`, `7d`, `30d`. Defaults to `24h` when omitted. Any other value → `400`. |
+| `agent_id` | string | Only runs of this agent. Applied before aggregation and before the row cap. |
+| `crew_id` | string | Only runs recorded under this crew. Uses the run's recorded ownership, so moving an agent between crews does not move its history. |
 
 **Response:** `200 OK`
 
