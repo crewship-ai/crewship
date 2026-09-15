@@ -193,8 +193,9 @@ the run continues on the server's own lifecycle context rather than the
 request's -- so a closed connection no longer cancels it. Poll
 `GET .../pipeline-runs/{runId}` for the terminal status. A run that fails
 before it is even registered (a refused preflight, a concurrency conflict)
-still answers synchronously with the usual status code. Comparisons, Inbox
-**Retry** and slash-command runs use this header.
+still answers synchronously with the usual status code. Every manual start
+in the UI uses this header -- the detail panel's Run, a run detail's Retry,
+version comparisons, Inbox Retry and slash-command runs.
 The run status values are:
 
 | Status | Meaning |
@@ -299,7 +300,10 @@ a timezone offset, in the future and within two years; it is parked as a
 pending run pinned to the version this save publishes, the response's
 `trigger` is `{"kind": "once", "first_fire_at", "enabled": true}` with no
 `schedule_id`, and a later save of the same routine with a new `fire_at`
-moves that one pending start rather than adding another), or `"manual"` (an
+moves that one pending start rather than adding another; a start that was
+cancelled is never re-armed by a save, and one that already fired is only
+re-armed for a different `fire_at` -- otherwise the save is `422` "this
+one-time start has already been consumed"), or `"manual"` (an
 explicit, on-purpose "no trigger" — distinct from omitting `trigger`
 entirely). A `"once"` trigger needs a routine that is `active` after this
 save — one that lands `proposed` for review is refused with `422`.

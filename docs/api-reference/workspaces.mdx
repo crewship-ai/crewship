@@ -925,14 +925,24 @@ a client can open it rather than parse prose:
 
 ```json
 {
-  "error": "publication blocked by schedule Nightly: input \"region\" is required",
+  "error": "publication blocked by schedule Nightly: Input region is required by the new recipe",
   "hint": "Update this plan's inputs in the same save (send a `trigger` block), repair the plan first if the new inputs already fit, or disable the plan, publish, then repair its inputs before re-enabling it.",
-  "schedule_conflict": { "schedule_id": "psched_...", "name": "Nightly", "reason": "input \"region\" is required" }
+  "schedule_conflict": { "schedule_id": "psched_...", "name": "Nightly", "reason": "Input region is required by the new recipe" }
 }
 ```
 
-Only enabled plans that follow head (no version pin) are judged; disabled and
-pinned plans never block a save. The same envelope comes back from
+`error` is always `publication blocked by schedule <name>: <reason>`. `reason`
+is `Input <name> is required by the new recipe` for a missing required input,
+`input "<name>": <what is wrong>` for a value of the wrong type or outside its
+choices, or `Stored inputs are unreadable`.
+
+Two kinds of enabled plan are judged: plans that target this routine and
+follow head (no version pin), against their `inputs`; and plans that use this
+routine as their wake probe, pinned or not, against their `wake_inputs`.
+Disabled plans, and pinned plans targeting the routine, never block a save. A
+re-save whose definition is byte-identical to the stored one is never judged
+either, so a rename or description edit cannot start failing over a preset
+that was already imperfect. The same envelope comes back from
 [Import](#import-pipeline-bundle), [Rollback](#rollback-to-a-version) and the
 sidecar's `save_routine` door. The definition is left unchanged on `409`.
 

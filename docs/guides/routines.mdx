@@ -1325,23 +1325,23 @@ Everything else works as usual: egress allowlist, credentials, versioning, dry-r
 
 ## Two-tier execution
 
-The economic value-prop: an Opus-class authoring model designs the routine, a Haiku-class executor model runs each invocation. Workspace `execution_tiers_json` maps complexity classes to `(adapter, model)`:
+The economic value-prop: an Opus-class authoring model designs the routine, a Haiku-class executor model runs each invocation. Workspace `execution_tiers_json` maps complexity classes to `(adapter, model)`. This is the map every workspace is seeded with (migration v78; nothing rewrites it later, so it is what a workspace runs until an operator edits the column):
 
 ```json
 {
-  "trivial":  { "primary": {"adapter":"claude","model":"claude-haiku-4-5"} },
-  "fast":     { "primary": {"adapter":"claude","model":"claude-haiku-4-5"},
-                "fallback":[{"adapter":"claude","model":"claude-sonnet-5"}] },
-  "moderate": { "primary": {"adapter":"claude","model":"claude-sonnet-5"} },
-  "smart":    { "primary": {"adapter":"claude","model":"claude-opus-5"} }
+  "trivial":  { "primary": {"adapter":"claude","model":"claude-haiku-4-5-20251001"} },
+  "fast":     { "primary": {"adapter":"claude","model":"claude-haiku-4-5-20251001"},
+                "fallback":[{"adapter":"claude","model":"claude-sonnet-4-6"}] },
+  "moderate": { "primary": {"adapter":"claude","model":"claude-sonnet-4-6"} },
+  "smart":    { "primary": {"adapter":"claude","model":"claude-opus-4-7"} }
 }
 ```
 
-A workspace with no map (or an unreadable one) resolves each tier through the
-model catalog's Anthropic roles rather than a frozen id: `trivial` and `fast`
+Only a workspace whose map is empty (`""` or `{}`) or unreadable resolves each
+tier through the model catalog's Anthropic roles instead: `trivial` and `fast`
 run the `cheap` role, `moderate` the provider default and `smart` the `top`
 role — today `claude-haiku-4-5`, `claude-sonnet-5` and `claude-opus-5`
-(`config/models.json`), the same generation every other model picker offers.
+(`config/models.json`). A seeded workspace never takes that path.
 
 Per-step `complexity` annotation drives the resolver. With `on_fail: "escalate_tier"`, a failed validation walks the fallback chain — practically: Haiku tries first, Sonnet on validation fail, Opus on second fail.
 
