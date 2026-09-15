@@ -217,6 +217,30 @@ The body stays a bare array. The total the filter matched — before `limit`/`of
 | `created_at` | string | ISO 8601 timestamp |
 | `updated_at` | string | ISO 8601 timestamp |
 | `completed_at` | string? | When issue was completed/cancelled/marked duplicate |
+| `work_mode` | string | Who is working the issue right now: `agent` (automatic runs may start) or `human` (a person holds it; Start answers `409` until it is handed back). See [Transfer Issue Work](#transfer-issue-work) |
+| `work_revision` | integer | Compare-and-set counter for the work contract. Every accepted `work`, `review-policy` and human take-over bumps it; pass it back as `revision` |
+| `worker_user_id` | string? | The person holding the issue while `work_mode` is `human`. Omitted otherwise |
+| `worker_name` | string? | Resolved name of `worker_user_id`. Omitted otherwise |
+| `work_note` | string | The note carried by the last hand-off, take-over or submission (`""` when none) |
+| `work_stopping` | boolean | `true` while the issue is held by a human but a run or routine started before the take-over has received cancellation and not yet finished. Hand-back and submit wait for it to clear |
+| `client_review_required` | boolean | Whether a person must approve before the issue counts as done (default `true`). Set with [Set Issue Review Policy](#set-issue-review-policy) |
+| `brief_revision` | integer? | Counter bumped every time the brief (title/description) changes; Review compares it against the revision the work was produced for. Omitted while `0` |
+| `execution` | object? | The latest execution of the work contract (the thing a Lead reviews), `{id, stage, attempt, reviewer, note, routine_run_id?, workers[]}`. Omitted until the issue has been started under the contract. `workers[]` items are `{assignment_id, name, status, outcome, run_id?, review}` — `review: true` marks the Lead's review run; `status` reads `PREPARING` for a run claimed but not yet exec'd |
+
+**`execution.stage`** is the execution's place in the work→Lead-review→correction loop:
+
+| Stage | Meaning |
+|---|---|
+| `working` | Workers are running (or a bound routine is) |
+| `reviewing` | The Lead's review run is live |
+| `accepted` | The Lead verified the work; the issue moves to `REVIEW` (or straight to `DONE` when `client_review_required` is `false`) |
+| `changes_requested` | Either the Lead sent the work back to a worker (a new `working` execution with `attempt` + 1 starts at once; after the second attempt the Lead must escalate instead) or a person answered Review with `request_changes` on an `accepted`/`needs_human` execution (the issue returns to `TODO`; the next Start opens a new execution) |
+| `needs_human` | The Lead asked for a human decision, approved despite a failed worker, or ran out of attempts; the issue is in `REVIEW` with an inbox notification |
+| `failed` | A worker, the Lead review or the routine failed to produce a usable result; the issue is `FAILED` |
+| `superseded` | Made moot by a take-over, hand-off, brief change or stop while it was `working`/`reviewing` |
+
+Only one execution per issue can be `working` or `reviewing` at a time. The
+narrative is in the guide: [Work, hand-offs and Lead review](/guides/issue-detail#work-hand-offs-and-lead-review).
 
 </Accordion>
 
@@ -254,8 +278,8 @@ The crew must have a LEAD agent. The issue identifier is auto-generated from the
 | `description` | string | No | `null` | Issue description |
 | `priority` | string | No | `"none"` | Priority: `none`, `low`, `medium`, `high`, `urgent` |
 | `status` | string | No | `"BACKLOG"` | Starting status. Validated like a transition from `BACKLOG`, so only `BACKLOG`, `TODO`, `IN_PROGRESS`, `CANCELLED` or `DUPLICATE` are accepted; a terminal start stamps `completed_at` |
-| `assignee_type` | string | No | `null` | `"user"` or `"agent"` |
-| `assignee_id` | string | No | `null` | Assignee ID |
+| `assignee_type` | string | No | `null` | `"user"` or `"agent"`. Decides which typed slot `assignee_id` fills: `user` writes the human **owner** (`owner_user_id`), `agent` writes the agent **delegate** (`delegate_agent_id`). Required when `assignee_id` is set |
+| `assignee_id` | string | No | `null` | A workspace member's user ID (`user`) or an agent ID (`agent`) in this workspace; anything else is `400` |
 | `due_date` | string | No | `null` | Due date (YYYY-MM-DD) |
 | `project_id` | string | No | `null` | Parent project ID |
 | `estimate` | integer | No | `null` | Effort/points estimate |
@@ -314,8 +338,8 @@ PATCH /api/v1/crews/{crewId}/issues/{identifier}?workspace_id={workspaceId}
 | `description` | string | Issue description |
 | `status` | string | New status (must be valid transition) |
 | `priority` | string | Priority level |
-| `assignee_type` | string | `"user"` or `"agent"` |
-| `assignee_id` | string | Assignee ID |
+| `assignee_type` | string | `"user"` or `"agent"` — routes `assignee_id` to the owner or the delegate slot (see below). May be omitted when `assignee_id` is set: the server then resolves it by looking the ID up as a member first, then as an agent |
+| `assignee_id` | string | New owner (`user`) or delegate (`agent`). **`""` clears both** `owner_user_id` and `delegate_agent_id` (the legacy pair goes `null` too) |
 | `due_date` | string | Due date |
 | `project_id` | string | Project ID (empty string to unlink) |
 | `estimate` | integer \| null | Effort/points estimate; **`null` clears it**, a non-number is a `400` |
@@ -323,6 +347,13 @@ PATCH /api/v1/crews/{crewId}/issues/{identifier}?workspace_id={workspaceId}
 | `milestone_id` | string | Milestone ID; empty string unlinks |
 | `sort_order` | number | Manual sort order |
 | `labels` | string[] | Replace all labels with this set of label IDs |
+
+Owner and delegate are independent (#2297, invariant "human owner, agent
+delegate"): a `user` write never touches `delegate_agent_id` and an `agent`
+write never touches `owner_user_id`. The only way to empty a slot is the
+explicit unassign, which empties both. The legacy `assignee_type`/`assignee_id`
+pair is always written alongside as a compatibility projection of the last
+write. The CLI: `crewship issue update <id> --assignee <email|agent> --assignee-type user|agent`.
 | `routine_id` | string | Pipeline ID to bind; empty string clears binding (also resets `routine_inputs`) |
 | `routine_inputs` | object | Full-replacement JSON object for routine inputs |
 
@@ -487,14 +518,30 @@ Starts execution of a `BACKLOG` or `TODO` issue. The issue must have an agent
 used to be sufficient; it is not anymore — the delegate must specifically be
 an executable agent). This:
 
+Start takes one of two paths, chosen by whether the issue has a bound routine
+(`routine_id`):
+
+**Mission path** (no routine bound). This:
+
 1. Creates a synthetic chat session for the mission
 2. Creates or resets unfinished tasks to PENDING; completed and skipped history stays intact
 3. Transitions status to `IN_PROGRESS`
 4. Starts the MissionEngine asynchronously
 
+**Routine path** (`routine_id` set, #2448). The bound routine runs instead of
+the mission engine, under the caller's own identity and the routine's public
+execution gates (the same checks as running the routine directly). The
+server records an `issue_executions` row in stage `working` for the Lead to
+review, moves the issue to `IN_PROGRESS`, and answers `202` with the run ID.
+Stored `routine_inputs_json` are the run's inputs; a required input with no
+value and no default is refused before anything is written. A routine start
+the routine gate rejects is proxied back with that gate's status and body,
+and the execution is marked `failed`. Missing delegate is not a condition on
+this path.
+
 **Auth:** `OWNER`, `ADMIN`, or `MANAGER` role
 
-**Response:** `200 OK`
+**Response (mission path):** `200 OK`
 
 ```json
 {
@@ -503,11 +550,26 @@ an executable agent). This:
 }
 ```
 
+**Response (routine path):** `202 Accepted`
+
+```json
+{
+  "status": "IN_PROGRESS",
+  "identifier": "ENG-42",
+  "run_id": "cm1x9k2p40000abcdef123456"
+}
+```
+
+`run_id` is the routine run to follow (`crewship routine records`); it is
+also the `execution.routine_run_id` on Get Issue.
+
 | Status | Condition |
 |---|---|
-| `400` | Issue not in BACKLOG/TODO; or no agent delegate (`"Issue must have an agent delegate before starting"`); or the delegate is not an executable agent — soft-deleted or `PENDING_REVIEW` (`"Issue delegate is not an executable agent"`) |
+| `400` | Issue not in BACKLOG/TODO; or (mission path) no agent delegate (`"Issue must have an agent delegate before starting"`); or the delegate is not an executable agent — soft-deleted or `PENDING_REVIEW` (`"Issue delegate is not an executable agent"`); or (routine path) the bound routine is not in this workspace, its stored inputs are not a JSON object, or its definition no longer parses |
 | `404` | Issue not found |
-| `409` | Issue was already started by another request, or work is held by a human |
+| `409` | Issue was already started by another request, or work is held by a human (`work_mode` = `human` — hand it back first) |
+| `422` | Routine path: `"Missing required routine input: <name>"` |
+| `503` | Routine path: `"Routine execution is unavailable"` — the server runs without a routine executor |
 
 **WebSocket event:** `issue.started` on `workspace:{workspaceId}`
 
@@ -618,17 +680,31 @@ Submit a review decision for an issue in `REVIEW` or `IN_PROGRESS` status.
 | `action` | string | Yes | `"approve"` or `"request_changes"` |
 | `comment` | string | No | Review comment |
 | `reassign_to` | string | No | Agent slug to reassign to (for `request_changes`) |
+| `revision` | integer | No | The `work_revision` you reviewed. When set, a mismatch is `409` (#2448) |
+| `brief_revision` | integer | No | The `brief_revision` you reviewed. Same rule |
 
 ```json
 {
   "action": "request_changes",
   "comment": "The error handling needs improvement",
-  "reassign_to": "backend-dev"
+  "reassign_to": "backend-dev",
+  "revision": 4,
+  "brief_revision": 2
 }
 ```
 
 - **`approve`**: Transitions issue to `DONE`, adds approval comment and activity
-- **`request_changes`**: Transitions issue to `TODO`, optionally reassigns, adds comment and activity
+- **`request_changes`**: Transitions issue to `TODO`, optionally reassigns, adds comment and activity, and moves a Lead-`accepted` (or `needs_human`) execution to `changes_requested` with the comment as its `note`
+
+The review is a compare-and-set against the work contract. Nothing changes
+on a `409`:
+
+| `409` message | Meaning |
+|---|---|
+| `The issue changed. Refresh before reviewing.` | `revision` or `brief_revision` was sent and does not match the row |
+| `Work or Lead review is still running. Stop it or wait for the result before reviewing.` | A run is live on the issue, or an execution is still `working`/`reviewing` |
+| `The brief changed after submission. Submit an updated result before approving.` | `approve` on human work whose `submitted_brief_revision` is older than the current brief |
+| `The result belongs to an older brief. Run the updated work before approving.` | `approve` on agent work whose latest execution was produced for an older `brief_revision` |
 
 **Response:** `200 OK`
 
@@ -641,8 +717,12 @@ Submit a review decision for an issue in `REVIEW` or `IN_PROGRESS` status.
 
 | Status | Condition |
 |---|---|
-| `400` | Invalid action, or issue not in reviewable status |
+| `400` | Invalid action, issue not in reviewable status, or `reassign_to` is not an available agent in this workspace |
 | `404` | Issue not found |
+| `409` | One of the four compare-and-set refusals above |
+
+CLI: [`crewship issue review`](/cli/issue#crewship-issue-review) sends both
+revisions from the issue it just read; `--revision`/`--brief-revision` pin them.
 
 ---
 
@@ -759,7 +839,7 @@ Returns the activity log for an issue (status changes, assignments, reviews). Li
 ]
 ```
 
-**Activity Actions:** `created`, `status_changed`, `assignee_changed`, `priority_changed`, `description_changed`, `parent_changed`, `relation_added`, `code_link_added`, `code_link_removed`, `review_approved`, `review_changes_requested`, `task_completed`, `task_failed`, `inbox_acted` (a person acted on the issue's NEEDS_HUMAN inbox card — the receipt names the action, the card, the session's `agent_version` and, for an answer, the delivery and run it produced; see [Acting on a card](/api-reference/inbox#acting-on-a-card))
+**Activity Actions:** `created`, `status_changed`, `assignee_changed`, `priority_changed`, `description_changed`, `parent_changed`, `relation_added`, `commented`, `mentioned` (an `@mention` in a comment was recorded for dispatch — the row is the only user-visible trace of the delivery besides the inbox item), `attachment_added`, `attachment_removed`, `code_link_added`, `code_link_removed`, `review_approved`, `review_changes_requested`, `task_completed`, `task_failed`, `task_cancelled` (Stop reached a task or a live run), `inbox_acted` (a person acted on the issue's NEEDS_HUMAN inbox card — the receipt names the action, the card, the session's `agent_version` and, for an answer, the delivery and run it produced; see [Acting on a card](/api-reference/inbox#acting-on-a-card))
 
 `description_changed` records that the description was rewritten, never the
 text itself — `details` carries only lengths (`description updated (128 → 342
@@ -1024,7 +1104,6 @@ Lists every `issue_agent_sessions` row for this issue, newest-updated first.
     "agent_name": "Backend Dev",
     "state": "pending",
     "last_consumed_seq": 0,
-    "active_run_id": "",
     "agent_version": 3,
     "last_activity_at": "2026-09-04T10:00:00Z",
     "created_at": "2026-09-04T10:00:00Z",
@@ -1039,7 +1118,7 @@ Lists every `issue_agent_sessions` row for this issue, newest-updated first.
 | `mission_id` | string | The issue this session belongs to |
 | `agent_id` | string | The agent this session belongs to |
 | `agent_name` | string? | Resolved name of the agent (omitted when empty) |
-| `state` | string | One of `pending`, `active`, `awaiting_input`, `idle`, `error`, `stale`, `closed`. `pending → active` on a claimed run, `active → idle`/`error` when it ends (B4, #2343); `awaiting_input` and the 14-day `idle → stale` sweep are not wired yet |
+| `state` | string | One of `pending`, `active`, `awaiting_input`, `idle`, `error`, `stale`, `closed`. `pending → active` on a claimed run; when it ends, the outcome routes it (B6, #2358): `NO_CHANGE`/`SUCCEEDED`/`WORK_CREATED`/`PARTIAL`/`CANCELLED → idle`, `FAILED → error`, `NEEDS_HUMAN → awaiting_input`. An inbox `answer`, `take_over` or `dismiss` on the card moves `awaiting_input → idle`. Only the 14-day `idle → stale` sweep is not wired yet — nothing writes `stale` |
 | `last_consumed_seq` | integer | The cursor into `mission_activity.seq` — everything above it is unread for this session. `0` for a session that has read nothing |
 | `active_run_id` | string? | The live run this session is waiting on, when one exists (omitted when empty) |
 | `agent_version` | integer? | The `agent_config_history.version` this session was opened under, stamped once at creation (omitted when the agent has no config history) |
@@ -1053,7 +1132,7 @@ Lists every `issue_agent_sessions` row for this issue, newest-updated first.
 
 ### List Checkpoints
 
-<Note>Work package B5 of the Issues & Routines architecture (`docs/prd/PRD-ISSUES-AND-ROUTINES-2026.md` §9.5, #2345). A checkpoint is the structured state a session-bearing run reports at the end of every run (`done`/`plan`/`facts`/`blockers`/`next_step`/`confidence`), so the next run on the same session can resume without rediscovering it. It is what the §11.1 context pack's "latest checkpoint" section is built from — see `docs/guides/issue-mentions.mdx`.</Note>
+<Note>Work package B5 of the Issues & Routines architecture (`docs/prd/PRD-ISSUES-AND-ROUTINES-2026.md` §9.5, #2345). A checkpoint is the structured state a session-bearing run reports at the end of every run (`done`/`plan`/`facts`/`blockers`/`next_step`/`confidence`), so the next run on the same session can resume without rediscovering it. It is what the §11.1 context pack's "latest checkpoint" section is built from — see [Sessions, checkpoints and the context pack](/guides/issue-mentions#sessions-checkpoints-and-the-context-pack).</Note>
 
 ```
 GET /api/v1/crews/{crewId}/issues/{identifier}/sessions/{sessionId}/checkpoints?workspace_id={workspaceId}
@@ -1078,8 +1157,6 @@ Lists every `agent_session_checkpoints` row for one session, newest-first — th
     "seq_at_write": 42,
     "done": "Implemented the parser and its tests",
     "plan": "Wire the parser into the dispatch path next",
-    "facts": "",
-    "blockers": "",
     "next_step": "Add the acceptance test",
     "confidence": "high",
     "parsed": true,

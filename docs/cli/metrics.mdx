@@ -22,6 +22,10 @@ Fetch mission performance metrics or pull a metric timeseries. Without flags, re
 A `0` here next to a non-zero `crewship cost` means no mission task was recorded in the window.
 </Warning>
 
+<Note>
+**The Prometheus series are not here either.** The `crewshipd_*` gauges, counters and percentiles — including the Issues & Routines §19.3 service levels for the mention → wake → reply loop (delivery latency, continuation, duplication, checkpoint compliance, outcome routing) and the `crewshipd_issue_agent_sessions{state=…}` gauge — are exposed on the server's `GET /metrics` scrape endpoint for Prometheus, and there is no CLI command that reads them. See the [Prometheus metrics reference](/observability/metrics).
+</Note>
+
 ```bash
 crewship metrics [flags]
 ```

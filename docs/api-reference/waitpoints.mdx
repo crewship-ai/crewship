@@ -16,10 +16,42 @@ GET /api/v1/workspaces/{workspaceId}/pipelines/waitpoints
 ```
 
 Requires workspace authentication and membership. The response is an array
-(maximum 200) of objects containing `token`, `pipeline_run_id`, `step_id`,
-`kind`, `prompt`, `timeout_at`, `created_at`, and `callback_url`;
-`invoking_crew_id` is omitted when empty. `callback_url` is the public
-token-authenticated completion endpoint. A database failure is `500`.
+(maximum 200) of objects:
+
+| Field | Type | Description |
+|---|---|---|
+| `token` | string | The waitpoint's opaque capability — what `approve` and the external route take |
+| `pipeline_run_id` | string | The parked run |
+| `step_id` | string | The `wait` step |
+| `kind` | string | The wait kind (`approval`, …) |
+| `prompt` | string | The prompt shown to the decider |
+| `invoking_crew_id` | string? | Omitted when empty |
+| `timeout_at` | string | When the wait expires |
+| `created_at` | string | When the run parked |
+| `decision_form` | object? | The typed decision form the step declared (see [Typed decisions](/cli/routine#typed-decisions-and-named-actions)). Omitted when the step has none |
+| `inbox_item_id` | string? | The inbox card that carries this waitpoint. Omitted when none was written |
+| `callback_url` | string? | The public token-authenticated completion endpoint (below). **Only present when the step has no `decision_form`** — a typed decision has to be made through the authenticated route, so nothing outside the workspace is handed a way to complete it |
+
+A database failure is `500`.
+
+## Who may decide
+
+Every completing route goes through one resolve door (B14, #2394) that
+derives the decider from the request's auth, never from the body:
+
+- a session or CLI-token principal is a **person** — the inbox, the routine
+  page, `crewship routine waitpoints approve|reject`;
+- the holder of the token on the external route is **external** (recorded
+  as `external-callback`);
+- an agent's internal token is an **agent**, and the door refuses it:
+  `403 {"error": …, "reason": "waitpoint_decider_not_allowed"}`. The
+  waitpoint is untouched and the attempt is written to the audit log as
+  `waitpoint.decision_refused` (`crewship audit --action
+  waitpoint.decision_refused`). A request with no principal at all is refused
+  the same way. In practice an agent never reaches the authenticated route —
+  internal tokens are `401` there — but the door checks the kind regardless,
+  so a future agent-facing route cannot quietly become a way for a peer agent
+  to say "go".
 
 ## Approve or deny from the inbox
 
@@ -35,9 +67,10 @@ route. `comment` is optional and is stored as the decision payload. This is an
 `update`/MANAGER+ operation. A successful response is
 `{"ok":true,"approved":true|false}` and resumes the parked run for either
 decision. Missing tokens are `400`; malformed JSON is `400`; an
-expired/already-decided token is `409`; an unauthorized caller is `401` or
-`403`; an unavailable waitpoint store is `503`; and completion failures are
-`500`.
+expired/already-decided token is `409`; an unauthenticated caller is `401`,
+a role below MANAGER `403`, and an agent or principal-less caller `403` with
+`reason: waitpoint_decider_not_allowed` (see above); an unavailable waitpoint
+store is `503`; and completion failures are `500`.
 
 ## Complete from an external service
 

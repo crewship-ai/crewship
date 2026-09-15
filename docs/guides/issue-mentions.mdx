@@ -150,6 +150,12 @@ be recorded never turns a posted comment into an error.
    titles are written by whoever wanted to write them, so the woken agent is
    told to read them and never to obey them.
 
+   Because the run belongs to a **session** (below), the brief also carries a
+   *context pack*: a snapshot of the issue, the session's latest checkpoint,
+   and every activity on the issue the session has not read yet — so an agent
+   woken a week later resumes rather than starts over. It ends with the
+   instruction to close the run with a `---CHECKPOINT---` block.
+
 ### What bounds it
 
 A mention is a way to start an agent run, so it is bounded by the same two
@@ -175,6 +181,96 @@ Two more rules the dispatch inherits from the assign path:
   connected to the issue's crew records the mention and dispatches nothing.
 - **An agent does not mention itself awake.** A self-mention is recorded and
   skipped.
+
+## Sessions, checkpoints and the context pack
+
+A mention does not just start a run; it opens — or reuses — a **session**:
+one durable row per (issue, agent), `crewship issue sessions <id>`. The
+second mention of the same agent on the same issue finds the same session,
+which is what makes "resume where you left off" possible at all.
+
+### The session lifecycle
+
+| State | When |
+| --- | --- |
+| `pending` | Opened by a mention; no run has claimed it yet. |
+| `active` | A run is going; `active_run_id` names it. At most one live run per session, enforced by the database, which is why a follow-up during a run waits (see the known limits). |
+| `idle` | The run ended with `NO_CHANGE`, `SUCCEEDED`, `WORK_CREATED`, `PARTIAL` or `CANCELLED`. Nothing is owed; the next mention reopens it. |
+| `awaiting_input` | The run ended `NEEDS_HUMAN` and raised an inbox card. Answering, taking over or dismissing that card moves the session back to `idle`. |
+| `error` | The run ended `FAILED` (which includes a run that never wrote a checkpoint). Mention again to retry. |
+| `stale`, `closed` | Reserved. Nothing writes `stale` yet — the 14-day idle sweep is not wired — and `closed` is not reachable from the mention path. |
+
+The state is on `crewship issue sessions` and on the issue's Sessions panel,
+and every change is pushed as `issue.session.state` on the workspace
+channel.
+
+### The checkpoint block
+
+A session-bearing run is told to end its output with this block, and it is
+required on every run:
+
+```
+---CHECKPOINT---
+done: <what is actually finished, so it is not repeated>
+plan: <the current path to the goal>
+facts: <identifiers, decisions and constraints worth carrying forward, or "none">
+blockers: <anything stopping progress, or "none">
+next_step: <the single next action to take>
+confidence: <low|medium|high>
+outcome: <NO_CHANGE|SUCCEEDED|WORK_CREATED|PARTIAL|NEEDS_HUMAN|FAILED>
+---END CHECKPOINT---
+```
+
+`facts` and `blockers` may run over several lines; a field's value continues
+until the next `key:` line or the closing marker. `outcome` is what routes
+the run (`crewship issue runs` shows it) — leaving it out is treated as
+`FAILED`, so an agent that ran fine but forgot the block is a visible
+failure rather than a silent success. Every block is stored as a row in the
+session's history (`crewship issue checkpoints <id> --agent <slug>`); a run
+that ended without a valid block is stored too, with `parsed: false` and
+every other field empty, so "forgot to report" and "reported nothing" stay
+distinguishable.
+
+### The context pack
+
+Every real dispatch on a session appends a context pack to the brief, in
+this order, each part inside its own `<untrusted>` fence and under its own
+token budget:
+
+1. **Issue snapshot** — identifier, title, status, priority, owner and
+   delegate, parent issue, the current work mode and note, and the
+   description (800 tokens).
+2. **Latest checkpoint** — the most recent parsed block on this session, so
+   the run reads `done` before deciding what to do (600 tokens).
+3. **Unread activity** — every `mission_activity` event with a `seq` above
+   the session's `last_consumed_seq`: comments, status changes, mentions,
+   run results, in order (1,200 tokens, at most 2,000 rows).
+
+When the unread delta does not fit, it is first rendered one line per event
+(`summarized`); when even that does not fit, the oldest contiguous run of
+events that does fit is rendered (`truncated`) and the rest waits for the
+next wake. The cursor only ever advances over events the run was actually
+shown, so nothing is marked read that no agent read; the path taken is
+recorded on the run. A fold-in — a follow-up appended to a run that is
+already going — does **not** advance the cursor, because that run never saw
+the pack.
+
+Memory search and the artifact manifest are not part of the pack.
+
+### Leases: how a dead run is noticed
+
+Every RUNNING assignment carries a **lease** — an owner (the server process
+driving it, `hostname:pid`) and an expiry 90 seconds out. The process renews
+it every 20 seconds while the run is in flight; a sweeper looks every 15
+seconds for RUNNING rows whose lease has lapsed and fails them, with the
+error *lease expired — no renewal from owner … within 1m30s*. That error is
+what `crewship issue runs` shows on the run; the lease columns themselves
+are not on any API. Recovery is keyed on the lease, not on when a server
+booted: a row a *different*, still-live process is renewing is never
+touched, and the same rule guards boot-time recovery after a crash. A
+lease expiry is a plain Tier 1 failure of the run (`FAILED`, session to
+`error`) — it never kills a container process; that is what
+[`issue stop --hard`](/cli/issue#crewship-issue-stop) is for.
 
 ### Known limits in 1.0
 
@@ -237,8 +333,11 @@ And one that is not a limit but a hold:
 
 A mention that starts nothing is recorded either way: the join row keeps
 `dispatch_state` and the reason, and the issue's History still shows the
-`mentioned` entry. A *refused*, *skipped* or *failed* mention is not queued —
-re-mention once the reason no longer holds. The one case that **is** queued is
+`mentioned` entry. The join row itself has no API or CLI read path — what
+you can see is the History row (`crewship issue activity`, action
+`mentioned`), the inbox item described below, and the run in
+`crewship issue runs` when one started. A *refused*, *skipped* or *failed*
+mention is not queued — re-mention once the reason no longer holds. The one case that **is** queued is
 an agent that is simply busy: see the known limits above.
 
 Whether anyone is *told* depends on who wrote the comment.
