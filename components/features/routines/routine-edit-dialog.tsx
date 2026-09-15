@@ -24,7 +24,7 @@ import { apiFetch } from "@/lib/api-fetch"
 import { cn } from "@/lib/utils"
 import { extractProblemDetail } from "@/lib/problem-details"
 import { renamePayload } from "@/lib/routine-save-payload"
-import { loadRoutineDraft, saveRoutineDraft } from "@/lib/routine-drafts"
+import { loadRoutineDraft, saveRoutineDraft, type RoutineDraft } from "@/lib/routine-drafts"
 import { routineInputSpecs, formatInputDefault, type RoutineInputSpec } from "@/lib/routine-inputs"
 import { resolveRoutineColor, resolveRoutineIcon } from "@/lib/routine-identity"
 import { isRecord, asString } from "@/lib/routine-step-describe"
@@ -90,6 +90,12 @@ export function RoutineEditDialog({ open, onOpenChange, workspaceId, routine, fi
   const [description, setDescription] = React.useState(routine.description ?? "")
   const [appearance, setAppearance] = React.useState({ icon: resolveRoutineIcon(routine), color: resolveRoutineColor(routine) })
   const [base, setBase] = React.useState<Record<string, unknown>>(() => clone(routine.definition ?? {}))
+  // The draft envelope (id, revision, base) as it was when the dialog opened.
+  // Saving sends THIS envelope, never a freshly loaded one: the server's
+  // compare-and-set has to compare against the revision the edits started
+  // from, otherwise a colleague's r3 saved meanwhile would be overwritten with
+  // our r2-based document under r3's number. null = not loaded yet or failed.
+  const [envelope, setEnvelope] = React.useState<RoutineDraft | null>(null)
   const [doc, setDoc] = React.useState<Record<string, unknown>>(() => clone(routine.definition ?? {}))
   const [loading, setLoading] = React.useState(false)
   const [busy, setBusy] = React.useState(false)
@@ -109,12 +115,17 @@ export function RoutineEditDialog({ open, onOpenChange, workspaceId, routine, fi
     const published = clone(routine.definition ?? {})
     setBase(published)
     setDoc(clone(published))
-    if (!routine.draft) return
+    setEnvelope(null)
+    // Always load the envelope, even without a draft: the revision-0 baseline
+    // carries the base pipeline id and publication revision the server checks
+    // when the first revision is inserted.
     const controller = new AbortController()
     setLoading(true)
     loadRoutineDraft(workspaceId, slug, controller.signal)
       .then((draft) => {
-        if (controller.signal.aborted || !draft.id || !isRecord(draft.document.definition)) return
+        if (controller.signal.aborted) return
+        setEnvelope(draft)
+        if (!draft.id || !isRecord(draft.document.definition)) return
         setBase(clone(draft.document.definition))
         setDoc(clone(draft.document.definition))
       })
@@ -184,7 +195,8 @@ export function RoutineEditDialog({ open, onOpenChange, workspaceId, routine, fi
         }
       }
       if (definitionDirty) {
-        const baseline = await loadRoutineDraft(workspaceId, slug)
+        if (!envelope) throw new Error("The draft baseline did not load, so this change cannot be saved safely. Close Edit and open it again.")
+        const baseline = envelope
         const document: Record<string, unknown> = {
           ...(baseline.id ? baseline.document : {}),
           slug,
@@ -196,6 +208,7 @@ export function RoutineEditDialog({ open, onOpenChange, workspaceId, routine, fi
         if (!document.icon) document.icon = appearance.icon
         if (!document.color) document.color = appearance.color
         const saved = await saveRoutineDraft(workspaceId, { ...baseline, slug }, document)
+        setEnvelope(saved)
         toast.success(`Saved as draft r${saved.revision} · publish to make it live`)
       } else if (identityDirty) {
         toast.success("Name and purpose saved")

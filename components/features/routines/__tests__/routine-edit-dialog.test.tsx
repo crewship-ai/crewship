@@ -64,6 +64,7 @@ describe("<RoutineEditDialog>", () => {
     mockServer()
     const changed = vi.fn()
     render(<RoutineEditDialog open onOpenChange={() => {}} workspaceId="ws" routine={routine} onChanged={changed} />)
+    await waitFor(() => expect(screen.queryByText(/Loading the current draft/)).toBeNull())
     expect(screen.getByRole("tab", { name: "Identity", selected: true })).toBeInTheDocument()
     expect(screen.getByText(/Identity applies at once; definition changes become a draft/)).toBeInTheDocument()
     fireEvent.change(screen.getByLabelText(/^Name/), { target: { value: "Invoice intake v2" } })
@@ -81,6 +82,7 @@ describe("<RoutineEditDialog>", () => {
     mockServer()
     const changed = vi.fn()
     render(<RoutineEditDialog open onOpenChange={() => {}} workspaceId="ws" routine={routine} onChanged={changed} />)
+    await waitFor(() => expect(screen.queryByText(/Loading the current draft/)).toBeNull())
     fireEvent.click(screen.getByRole("tab", { name: "Inputs · 2" }))
     const card = screen.getByTestId("routine-edit-input-auto_approve_limit")
     expect(card).toHaveTextContent("auto_approve_limit")
@@ -117,9 +119,37 @@ describe("<RoutineEditDialog>", () => {
     expect(toast.success).toHaveBeenCalledWith("Saved as draft r3 · publish to make it live")
   })
 
+  it("sends the revision it opened on, not the revision the server has at save time", async () => {
+    // Open on r2; a colleague saves r3 while the dialog is open. The save must
+    // carry r2 so the server's compare-and-set refuses it, instead of reading
+    // r3 back and overwriting the colleague's work under r3's number.
+    let serverRevision = 2
+    h.fetcher.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url.endsWith("/invoice-intake/draft") && !init?.method)
+        return json({ id: "drf_1", slug: "invoice-intake", revision: serverRevision, base_pipeline_id: "pipe-1", base_revision: 3, document: { slug: "invoice-intake", name: "Invoice intake", description: "Reads invoices.", definition: { ...definition, max_cost_usd: 9 }, author_crew_id: "crew_fin" } })
+      if (url.endsWith("/pipelines/drafts") && init?.method === "POST") {
+        const sent = JSON.parse(String(init.body))
+        if (sent.revision !== serverRevision) return json({ error: "draft revision conflict" }, 409)
+        return json({ ...sent, revision: sent.revision + 1 })
+      }
+      throw new Error(`unexpected ${init?.method ?? "GET"} ${url}`)
+    })
+    render(<RoutineEditDialog open onOpenChange={() => {}} workspaceId="ws" routine={{ ...routine, draft: { id: "drf_1", revision: 2, updated_at: "" } }} onChanged={() => {}} />)
+    await waitFor(() => expect(screen.queryByText(/Loading the current draft/)).toBeNull())
+    serverRevision = 3
+    fireEvent.click(screen.getByRole("tab", { name: "Agent prompts · 2" }))
+    fireEvent.change(screen.getByLabelText("Judge"), { target: { value: "Judge it carefully" } })
+    fireEvent.click(screen.getByRole("button", { name: "Save draft" }))
+    await waitFor(() => expect(screen.getByText(/Someone saved a newer draft meanwhile/)).toBeInTheDocument())
+    const save = h.fetcher.mock.calls.find(([url, init]) => String(url).endsWith("/pipelines/drafts") && init?.method === "POST")!
+    expect(JSON.parse(String(save[1].body))).toMatchObject({ id: "drf_1", revision: 2 })
+    expect(toast.success).not.toHaveBeenCalled()
+  })
+
   it("maps limits and the slash command onto DSL fields", async () => {
     mockServer()
     render(<RoutineEditDialog open onOpenChange={() => {}} workspaceId="ws" routine={routine} onChanged={() => {}} />)
+    await waitFor(() => expect(screen.queryByText(/Loading the current draft/)).toBeNull())
     fireEvent.click(screen.getByRole("tab", { name: "Limits" }))
     expect(screen.getByText(/Sketch — which of these belong in the web/)).toBeInTheDocument()
     fireEvent.change(screen.getByLabelText(/Cost cap per run/), { target: { value: "5" } })
