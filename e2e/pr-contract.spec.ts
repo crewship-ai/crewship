@@ -92,97 +92,57 @@ test("PR browser contract subset", async ({ page }) => {
     )
   })
 
-  // #2398 — a run_needs_human card is acted on from /inbox.
+  // #2398 / #2403 — a run_needs_human card is acted on from /inbox, against
+  // the real server, and the receipt is read back off the issue.
   //
   // The card is written only when a run reports outcome NEEDS_HUMAN, which
   // needs a provider-backed agent this gate does not have (see the header of
-  // playwright.pr.config.ts). So the inbox API is mocked at the browser: the
-  // list serves one seeded card, the act door records what the page sent and
-  // answers with B15's receipt shape. What this proves is the web side of
-  // the contract — the card renders its actions[], Answer requires text, the
-  // POST carries {action, input}, and the card flips to resolved with the
-  // receipt without a reload. What it does NOT prove is the server: that the
-  // answer reaches the session and that `inbox_acted` lands on the issue's
-  // event log is covered by B15's Go + CLI acceptance tests (#2399,
-  // internal/api/inbox_act.go and cmd/crewship inbox act), not here — a real
-  // card needs a NEEDS_HUMAN run behind a provider this PR gate does not
-  // have. A follow-up issue tracks a supported e2e fixture that could seed
-  // one without a live agent run; until then this step is route-mocked.
-  await test.step("inbox: act on a seeded run_needs_human card (route-mocked)", async () => {
+  // playwright.pr.config.ts). Until #2403 this step route-mocked the inbox
+  // API and could prove only the web half of the contract. Now the server
+  // is started with CREWSHIP_E2E_FIXTURES=1 (ci.yml, the browser server
+  // step), which registers a seed door — POST /api/v1/e2e/fixtures/
+  // run-needs-human — that plants what a NEEDS_HUMAN run leaves behind (the
+  // session parked awaiting input, the run that reported it) and raises the
+  // card through the same producer the real path uses. Nothing here is
+  // mocked: the list, the act door and the issue's event log are all the
+  // real server's. What is NOT proven is that a NEEDS_HUMAN run raises the
+  // card in the first place — that is B6's Go test, not a browser concern.
+  await test.step("inbox: answer a run_needs_human card; the receipt lands on the issue's event log", async () => {
     const workspaces = await (await page.request.get("/api/v1/workspaces")).json()
     const workspaceID: string = Array.isArray(workspaces) ? workspaces[0]?.id : workspaces.id
     expect(workspaceID).toBeTruthy()
+    const crews = await (await page.request.get(`/api/v1/crews?workspace_id=${workspaceID}`)).json()
+    const engineering = crews.find((crew: { slug?: string }) => crew.slug === "engineering")
+    expect(engineering?.id, "the seed's engineering crew").toBeTruthy()
 
-    const cardID = "ibx_e2e_needs_human_1"
-    const now = new Date().toISOString()
-    const card = {
-      id: cardID,
-      workspace_id: workspaceID,
-      kind: "run_needs_human",
-      source_id: "asg_e2e_1",
-      title: "Casey needs your input on ENG-7",
-      body_md: "Which bucket should the export go to — staging or prod?",
-      sender_type: "agent",
-      sender_name: "Casey",
-      state: "unread",
-      priority: "high",
-      blocking: true,
-      attention_class: "input",
-      thread_key: `issue:${workspaceID}:m_e2e_1`,
-      actions: [
-        { id: "answer", label: "Answer", effect: "Delivers your input to the agent's session and resumes the run from its checkpoint", irreversible: false },
-        { id: "take_over", label: "Take over", effect: "Opens the issue for you to continue; the agent's session goes idle", irreversible: false },
-        { id: "dismiss", label: "Dismiss", effect: "No further work now; the agent's session goes idle", irreversible: false },
-      ],
-      payload: { who_can_act: ["role:MANAGER"], context: { issue: "ENG-7", run: "asg_e2e_1" } },
-      created_at: now,
-      updated_at: now,
-    }
-    const receipt = {
-      action: "answer",
-      acted_by: "usr_e2e",
-      acted_at: now,
-      inbox_item_id: cardID,
-      session_id: "ses_e2e_1",
-      agent_version: 3,
-      source_run_id: "asg_e2e_1",
-      comment_id: "cmt_e2e_1",
-      delivery_id: "mcm_e2e_1",
-      run_id: "asg_e2e_2",
-      dispatch_state: "dispatched",
-      event_id: "act_e2e_1",
-      seq: 14,
-    }
-    // Stateful on purpose: once acted, any refetch the page makes must see
-    // the resolved card, the way the real server would answer.
-    let acted = false
-    const actBodies: unknown[] = []
-    const resolvedCard = { ...card, state: "resolved", resolved_action: "answer", resolved_at: now, payload: { ...card.payload, receipt } }
+    // An issue of its own, so the event log read at the end is unambiguous.
+    const title = `E2E needs-human ${Date.now()}`
+    const createResponse = await page.request.post(
+      `/api/v1/crews/${engineering.id}/issues?workspace_id=${encodeURIComponent(workspaceID)}`,
+      { data: { title, priority: "high" } },
+    )
+    expect(createResponse.status(), await createResponse.text()).toBe(201)
+    const issue = await createResponse.json()
+    const identifier: string = issue.identifier
+    expect(identifier).toBeTruthy()
 
-    await page.route("**/api/v1/inbox?*", async (route) => {
-      const rows = [acted ? resolvedCard : card]
-      await route.fulfill({ json: { rows, count: rows.length, unread_count: acted ? 0 : 1, has_more: false } })
-    })
-    await page.route("**/api/v1/inbox/count?*", async (route) => {
-      await route.fulfill({ json: { unread_count: acted ? 0 : 1 } })
-    })
-    await page.route(`**/api/v1/inbox/${cardID}?*`, async (route) => {
-      if (route.request().method() === "PATCH") {
-        await route.fulfill({ json: { id: cardID, state: "read" } })
-        return
-      }
-      await route.fulfill({ json: acted ? resolvedCard : card })
-    })
-    await page.route(`**/api/v1/inbox/${cardID}/act?*`, async (route) => {
-      actBodies.push(route.request().postDataJSON())
-      acted = true
-      await route.fulfill({ json: { id: cardID, state: "resolved", action: "answer", receipt } })
-    })
+    // The seed door. A 404 here means the server was started without
+    // CREWSHIP_E2E_FIXTURES — the route does not exist on a normal instance.
+    const seeded = await page.request.post(
+      `/api/v1/e2e/fixtures/run-needs-human?workspace_id=${encodeURIComponent(workspaceID)}`,
+      { data: { issue_identifier: identifier, reason: "Which bucket should the export go to — staging or prod?" } },
+    )
+    expect(seeded.status(), await seeded.text()).toBe(201)
+    const fixture = await seeded.json()
+    const cardID: string = fixture.inbox_item_id
+    expect(cardID).toBeTruthy()
+    expect(fixture.session_id).toBeTruthy()
 
     await page.goto(`/inbox?item=${cardID}`)
     const pane = page.getByRole("main", { name: "Inbox detail" })
-    await expect(pane.getByText("Casey needs your input on ENG-7")).toBeVisible()
-    // The §12 badge, and the three actions the card carries.
+    await expect(pane.getByText(`needs your input on ${identifier}`)).toBeVisible()
+    await expect(pane.getByText("Which bucket should the export go to — staging or prod?")).toBeVisible()
+    // The §12 badge, and the three actions B6 puts on the card.
     await expect(pane.getByTestId("attention-badge")).toHaveText("Input needed")
     await expect(pane.getByRole("button", { name: "Take over" })).toBeVisible()
     await expect(pane.getByRole("button", { name: "Dismiss" })).toBeVisible()
@@ -192,19 +152,51 @@ test("PR browser contract subset", async ({ page }) => {
     await expect(send).toBeDisabled()
     await pane.getByRole("textbox", { name: "Your answer" }).fill("Use the staging bucket, not prod.")
     await expect(send).toBeEnabled()
+    const actResponse = page.waitForResponse(
+      (response) => response.request().method() === "POST" && response.url().includes(`/api/v1/inbox/${cardID}/act`),
+    )
     await send.click()
+    const acted = await actResponse
+    expect(acted.status(), await acted.text()).toBe(200)
+    const receipt = (await acted.json()).receipt
+    expect(acted.request().postDataJSON()).toEqual({ action: "answer", input: "Use the staging bucket, not prod." })
+    // The answer reached the session that asked: a delivery, dispatched as a
+    // new run, and a receipt with its position on the issue's event log.
+    expect(receipt.session_id).toBe(fixture.session_id)
+    expect(receipt.dispatch_state).toBe("dispatched")
+    expect(receipt.run_id).toBeTruthy()
+    expect(receipt.run_id).not.toBe(fixture.assignment_id)
+    expect(receipt.seq).toBeGreaterThan(0)
 
     // Resolved in place, with the receipt — no navigation, no reload.
     const rec = pane.getByTestId("act-receipt")
     await expect(rec).toBeVisible()
-    await expect(rec).toContainText("asg_e2e_2")
-    await expect(rec).toContainText("event #14")
+    await expect(rec).toContainText(`run ${receipt.run_id}`)
+    await expect(rec).toContainText(`event #${receipt.seq}`)
     await expect(pane.getByRole("button", { name: "Send" })).toHaveCount(0)
     await expect(pane.getByText(/^Resolved /)).toBeVisible()
     expect(page.url()).toContain("/inbox")
-    expect(actBodies).toEqual([{ action: "answer", input: "Use the staging bucket, not prod." }])
 
-    await page.unrouteAll({ behavior: "ignoreErrors" })
+    // The same card, resolved on the server — not just in the pane.
+    const after = await (await page.request.get(`/api/v1/inbox/${cardID}?workspace_id=${encodeURIComponent(workspaceID)}`)).json()
+    expect(after.state).toBe("resolved")
+    expect(after.resolved_action).toBe("answer")
+
+    // The receipt on the issue's event log, read the way a person reads it:
+    // the issue's History tab shows the inbox_acted row.
+    await page.goto(`/issues/${encodeURIComponent(identifier)}`)
+    await expect(page.getByRole("heading", { name: title })).toBeVisible({ timeout: 15_000 })
+    await page.getByRole("button", { name: /^history$/i }).click()
+    await expect(page.getByText(/inbox acted/)).toBeVisible()
+    // And as the CLI reads it (`crewship issue events`): the same row, the
+    // same seq the receipt named.
+    const events = await (await page.request.get(
+      `/api/v1/crews/${engineering.id}/issues/${encodeURIComponent(identifier)}/events?workspace_id=${encodeURIComponent(workspaceID)}&after_seq=0`,
+    )).json()
+    const rows = Array.isArray(events) ? events : events.events ?? events.rows ?? []
+    const actedRow = rows.find((event: { action?: string }) => event.action === "inbox_acted")
+    expect(actedRow, JSON.stringify(rows)).toBeTruthy()
+    expect(actedRow.seq).toBe(receipt.seq)
   })
 
   await test.step("Incoming: create GitHub endpoint, reveal, overview, detail, disable and refresh (real HTTP)", async () => {
