@@ -88,7 +88,7 @@ export function RoutineIdentityHeader({
   return <DetailCard><div className="space-y-3">
     <div className="flex flex-wrap items-start justify-between gap-3">
       <div className="flex min-w-0 items-start gap-3">
-        {manager ? <div aria-busy={saving} className={saving ? "pointer-events-none opacity-70" : ""}><CrewIconPopover {...appearance} size="lg" onIconChange={icon => void save({ icon })} onColorChange={color => void save({ color })} /></div> : <CrewIcon {...appearance} size="lg" />}
+        {manager && published ? <div aria-busy={saving} className={saving ? "pointer-events-none opacity-70" : ""}><CrewIconPopover {...appearance} size="lg" onIconChange={icon => void save({ icon })} onColorChange={color => void save({ color })} /></div> : <CrewIcon {...appearance} size="lg" />}
         <div className="min-w-0"><h1 className="break-words text-lg font-semibold tracking-tight">{routine.name || routine.slug}</h1><div data-testid="routine-state-line" className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
           {published ? <Pill tone="success">Published v{routine.head_version}</Pill> : <Pill tone="default">Not published</Pill>}
           {draft && <Pill tone="purple" data-testid="routine-draft-pill">Draft r{draft.revision} · {draftAuthorLabel(draft.updated_by, session?.user?.id)} · {relTime(draft.updated_at)}</Pill>}

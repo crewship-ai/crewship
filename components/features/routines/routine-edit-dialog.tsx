@@ -141,7 +141,10 @@ export function RoutineEditDialog({ open, onOpenChange, workspaceId, routine, fi
 
   const identityDirty = name.trim() !== (routine.name ?? "").trim() || description.trim() !== (routine.description ?? "").trim()
   const definitionDirty = !same(doc, base)
-  const dirty = identityDirty || definitionDirty
+  const published = (routine.head_version ?? 0) > 0
+  const appearanceDirty = !published && !same(appearance, { icon: resolveRoutineIcon(routine), color: resolveRoutineColor(routine) })
+  const dirty = identityDirty || definitionDirty || appearanceDirty
+  const saveAsDraft = definitionDirty || (!published && dirty)
   const nextRevision = (envelope?.revision ?? routine.draft?.revision ?? 0) + 1
   const update = (patch: (next: Record<string, unknown>) => void) =>
     setDoc((previous) => {
@@ -153,6 +156,7 @@ export function RoutineEditDialog({ open, onOpenChange, workspaceId, routine, fi
   const saveAppearance = async (next: Partial<typeof appearance>) => {
     const previous = appearance
     setAppearance({ ...appearance, ...next })
+    if (!published) return
     try {
       const res = await apiFetch(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}/pipelines/${encodeURIComponent(slug)}/appearance`, {
         method: "PATCH",
@@ -176,7 +180,7 @@ export function RoutineEditDialog({ open, onOpenChange, workspaceId, routine, fi
     setBusy(true)
     setRefusal(null)
     try {
-      if (identityDirty && !definitionDirty) {
+      if (identityDirty && !saveAsDraft) {
         const res = await apiFetch(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}/pipelines/save`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -196,7 +200,7 @@ export function RoutineEditDialog({ open, onOpenChange, workspaceId, routine, fi
           throw new Error(problem || "The name and purpose could not be saved.")
         }
       }
-      if (definitionDirty) {
+      if (saveAsDraft) {
         if (!envelope) throw new Error("The draft baseline did not load, so this change cannot be saved safely. Close Edit and open it again.")
         const baseline = envelope
         // An input-only edit must retain identity already authored in the
@@ -216,8 +220,8 @@ export function RoutineEditDialog({ open, onOpenChange, workspaceId, routine, fi
           definition: { ...doc, display_name: draftName, description: draftDescription },
         }
         if (routine.author_crew_id && !document.author_crew_id) document.author_crew_id = routine.author_crew_id
-        if (!document.icon) document.icon = appearance.icon
-        if (!document.color) document.color = appearance.color
+        if (!document.icon || !published) document.icon = appearance.icon
+        if (!document.color || !published) document.color = appearance.color
         const saved = await saveRoutineDraft(workspaceId, { ...baseline, slug }, document)
         setEnvelope(saved)
         toast.success(`Saved as draft r${saved.revision} · publish to make it live`)
@@ -303,7 +307,9 @@ export function RoutineEditDialog({ open, onOpenChange, workspaceId, routine, fi
                 <Textarea id="routine-edit-purpose" rows={3} value={description} onChange={(e) => setDescription(e.target.value)} />
               </CreateSurfaceField>
               <p className="text-[11px] text-muted-foreground">
-                Icon and colour save at once. Name and purpose save at once too — they do not change how the routine runs.
+                {published
+                  ? "Icon and colour save at once. Name and purpose save at once when edited alone; combined definition changes stay in the draft."
+                  : "Name, purpose, icon and colour stay in this draft until you publish it."}
               </p>
             </div>
           </div>
@@ -462,12 +468,14 @@ crewship routine draft save draft.json -f json > saved.json`}
       <CreateSurfaceRefusal message={refusal} onDismiss={() => setRefusal(null)} />
       <CreateSurfaceFooter
         hint={
-          definitionDirty
-            ? `All changes, including name and purpose, are saved as draft r${nextRevision}; published v${routine.head_version ?? 0} keeps running`
+          saveAsDraft
+            ? published
+              ? `All changes, including name and purpose, are saved as draft r${nextRevision}; published v${routine.head_version ?? 0} keeps running`
+              : `Changes are saved as draft r${nextRevision}; publish it before running`
             : "Identity applies at once; definition changes become a draft"
         }
         onCancel={() => onOpenChange(false)}
-        primaryLabel={busy ? "Saving…" : definitionDirty ? "Save draft" : "Save"}
+        primaryLabel={busy ? "Saving…" : saveAsDraft ? "Save draft" : "Save"}
         primaryIcon={Save}
         onPrimary={() => void save()}
         primaryDisabled={!dirty || loading || !envelope}

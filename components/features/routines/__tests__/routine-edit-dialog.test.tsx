@@ -11,7 +11,7 @@ vi.mock("@/lib/api-fetch", () => ({ apiFetch: h.fetcher, broadcastSessionExpired
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
 vi.mock("@/hooks/use-realtime", () => ({ useRealtimeEvent: () => {}, useRealtimeEventSafe: () => {} }))
 vi.mock("@/hooks/use-workspace-agent-directory", () => ({ useWorkspaceAgentDirectory: () => ({ agents: [{ id: "a1", slug: "nora", name: "Nora" }], error: false }) }))
-vi.mock("@/components/crew-icon-popover", () => ({ CrewIconPopover: () => <div data-testid="icon-popover" /> }))
+vi.mock("@/components/crew-icon-popover", () => ({ CrewIconPopover: ({ onIconChange }: { onIconChange: (icon: string) => void }) => <button type="button" data-testid="icon-popover" onClick={() => onIconChange("FileText")}>Choose test icon</button> }))
 
 const definition = {
   display_name: "Invoice intake",
@@ -76,6 +76,20 @@ describe("<RoutineEditDialog>", () => {
     expect(body.definition.display_name).toBe("Invoice intake v2")
     expect(h.fetcher.mock.calls.some(([url]) => String(url).endsWith("/pipelines/drafts"))).toBe(false)
     expect(toast.success).toHaveBeenCalledWith("Name and purpose saved")
+  })
+
+  it("keeps a draft-only routine unpublished when only its name changes", async () => {
+    mockServer(true)
+    render(<RoutineEditDialog open onOpenChange={() => {}} workspaceId="ws" routine={{ ...routine, head_version: 0 }} onChanged={() => {}} />)
+    await waitFor(() => expect(screen.queryByText(/Loading the current draft/)).toBeNull())
+    fireEvent.change(screen.getByLabelText(/^Name/), { target: { value: "Renamed unpublished copy" } })
+    fireEvent.click(screen.getByTestId("icon-popover"))
+    fireEvent.click(screen.getByRole("button", { name: "Save draft" }))
+    await waitFor(() => expect(toast.success).toHaveBeenCalled())
+    expect(h.fetcher.mock.calls.some(([url]) => String(url).endsWith("/pipelines/save"))).toBe(false)
+    const call = h.fetcher.mock.calls.find(([url, init]) => String(url).endsWith("/pipelines/drafts") && init?.method === "POST")!
+    expect(JSON.parse(String(call[1].body)).document).toMatchObject({ name: "Renamed unpublished copy", icon: "FileText" })
+    expect(h.fetcher.mock.calls.some(([url]) => String(url).endsWith("/appearance"))).toBe(false)
   })
 
   it("saves identity and input edits together without first changing the published recipe", async () => {

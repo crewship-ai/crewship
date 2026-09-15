@@ -20,7 +20,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 
 ### Fixed
-- **Routine Edit keeps combined changes in the draft.** Editing a name and inputs together no longer changes the published recipe before saving the draft. Unavailable draft baselines block saves visibly; input edits preserve identity already authored in the draft, and unverified script files are labelled consistently in Edit. Draft conflicts are recognized by HTTP 409 rather than English error wording.
+- **Routine Edit keeps combined changes in the draft.** Editing a name and inputs together no longer changes the published recipe before saving the draft. Unavailable draft baselines block saves visibly; input edits preserve identity already authored in the draft, and unverified script files are labelled consistently in Edit. Draft conflicts are recognized by HTTP 409 rather than English error wording. Name, purpose and appearance changes to an unpublished copy remain in its draft until explicit publication.
 - Pages management and denied data writes return the same not-found response for hidden and missing pages; explicit folder edit grants now explain that they also apply to workspace Viewers.
 - Routine results use the database's 30-second contention budget when recording a completed step, instead of failing after five seconds while waiting for a connection. This records the existing execution; it does not repeat the action.
 - Routine editors compare closing, reload and navigation against the saved draft. Unsaved edits are protected during browser history and app navigation; closing returns keyboard focus to Edit.
