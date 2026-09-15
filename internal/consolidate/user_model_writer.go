@@ -98,6 +98,11 @@ type UserModelOutcome struct {
 // every crew directory on disk (see the opt-out branch); paths is still
 // used for the write branch, which only ever writes to the operator's
 // CURRENT most-active crew.
+//
+// evidence is where each fact in content came from (#1693), recorded
+// beside the file on the write branch and purged with it on the opt-out
+// branch. nil is allowed — an extractor without evidence — and records
+// nothing.
 func SyncUserModel(
 	ctx context.Context,
 	db *sql.DB,
@@ -105,11 +110,12 @@ func SyncUserModel(
 	threshold UserModelThreshold,
 	cand UserModelCandidate,
 	content string,
+	evidence []UserModelEvidence,
 	paths memory.UserModelPaths,
 	basePath string,
 	now time.Time,
 ) UserModelOutcome {
-	return syncUserModel(ctx, db, logger, threshold, cand, content, paths, basePath, now, false)
+	return syncUserModel(ctx, db, logger, threshold, cand, content, evidence, paths, basePath, now, false)
 }
 
 // syncUserModel is SyncUserModel with the dry-run seam (#1702). With dryRun
@@ -124,6 +130,7 @@ func syncUserModel(
 	threshold UserModelThreshold,
 	cand UserModelCandidate,
 	content string,
+	evidence []UserModelEvidence,
 	paths memory.UserModelPaths,
 	basePath string,
 	now time.Time,
@@ -170,6 +177,14 @@ func syncUserModel(
 		`, cand.WorkspaceID, slug); err != nil {
 			out.Action = "delete_opt_out"
 			out.Err = fmt.Errorf("delete user_models index on opt-out: %w", err)
+			return out
+		}
+		// The evidence goes with the model (#1693). Opt-out is one of the
+		// four delete paths that must reach it, and an error here is a
+		// failed purge like the two above, not a footnote.
+		if _, err := PurgeUserModelProvenance(ctx, db, cand.WorkspaceID, slug); err != nil {
+			out.Action = "delete_opt_out"
+			out.Err = fmt.Errorf("delete user model provenance on opt-out: %w", err)
 			return out
 		}
 		recordAudit(ctx, db, logger, peerAuditRow{
@@ -235,6 +250,15 @@ func syncUserModel(
 		out.Err = fmt.Errorf("user_models upsert: %w", err)
 		return out
 	}
+	// Provenance beside the file (#1693): one row per fact THIS sync put in
+	// the file. Evidence for a key the cap trim dropped, or the merge did
+	// not carry, is not recorded — a row must point at a line that exists.
+	if _, err := RecordUserModelProvenance(ctx, db, cand.WorkspaceID, cand.UserID, slug,
+		evidenceInContent(content, evidence), now); err != nil {
+		out.Action = "write"
+		out.Err = fmt.Errorf("user model provenance: %w", err)
+		return out
+	}
 	recordAudit(ctx, db, logger, peerAuditRow{
 		workspaceID:  cand.WorkspaceID,
 		actorKind:    "system",
@@ -244,6 +268,27 @@ func syncUserModel(
 	})
 	out.Action = "write"
 	out.Bytes = len(content)
+	return out
+}
+
+// evidenceInContent keeps the evidence entries whose key is a bullet in
+// content with the value the evidence supports. The merge can keep a
+// prior value for a key the extraction re-touched only if the extraction
+// was silent about it, and the cap trim drops whole lines from the end;
+// either way a row for a fact that is not in the file would be provenance
+// for nothing.
+func evidenceInContent(content string, evidence []UserModelEvidence) []UserModelEvidence {
+	if len(evidence) == 0 {
+		return nil
+	}
+	fields, _, _ := splitFields(content)
+	out := make([]UserModelEvidence, 0, len(evidence))
+	for _, ev := range evidence {
+		key := strings.ToLower(strings.TrimSpace(ev.Key))
+		if v, ok := fields[key]; ok && v == strings.TrimSpace(ev.Value) {
+			out = append(out, ev)
+		}
+	}
 	return out
 }
 
