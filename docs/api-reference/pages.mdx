@@ -77,6 +77,28 @@ validation.
 Routes are workspace-unscoped; the workspace comes from the session context or
 the `workspace_id` query parameter, the same shape saved views and routines use.
 
+## Unreachable pages are not found
+
+Every management endpoint on a page — update, delete, push, grants, access,
+versions, rollback, export, project sources, public links and webhook tokens —
+answers **404** for a page the caller cannot reach, whatever the caller was
+trying to do. The `403` rows in the status tables below apply only to a caller
+who reaches the page — as its owner or a member of its owning crew, a workspace
+ADMIN/OWNER, a member of a crew that owns a panel on it, through the sharing of
+the folder it is in, or by a grant; the `reach` vocabulary under
+[List pages](#list-pages) — and lacks the standing the endpoint needs. A `403`
+therefore always says "this page exists and you may open it, but not do this";
+a `404` never says which of "does not exist" and "not yours to see" it is, so
+no management endpoint can be walked to learn which pages exist. The same rule
+covers a wrong panel id on the push path: *page "x" has no panel "y"* is
+answered only to a caller who reaches the page.
+
+The concealment is decided after the endpoint's own gate has refused, so it
+never gates a successful action: a declared producer or an agent whose
+authority is crew-bound pushes or writes sources without holding any human
+read path to the page. An agent refused on a project route
+(`…/project`, `…/project/*`) always receives `404`.
+
 ---
 
 ## List pages
@@ -339,8 +361,8 @@ modification time; the optimistic lock (409) still applies.
 | 200 | Updated. A new structural version is recorded. |
 | 400 | Malformed spec, or an unresolvable owner/producer/routine reference. |
 | 401 | No session or token. |
-| 403 | No write authority, a panel replacement includes unreadable current/target panels, or a hidden reference no longer validates. |
-| 404 | No such page. |
+| 403 | No write authority, a panel replacement includes unreadable current/target panels, or a hidden reference no longer validates. Only for a caller who reaches the page. |
+| 404 | No such page, or one the caller [cannot reach](#unreachable-pages-are-not-found). |
 | 409 | The live definition changed before the update; reload before saving. |
 
 ---
@@ -362,8 +384,8 @@ ADMIN/OWNER.
 |---|---|
 | 204 | Deleted, with its panels, payload history, grants, webhook tokens and public links. |
 | 401 | No session or token. |
-| 403 | Not the owner and not an admin. A `write` grant is not enough to delete. |
-| 404 | No such page. |
+| 403 | Not the owner and not an admin. A `write` grant is not enough to delete. Only for a caller who reaches the page. |
+| 404 | No such page, or one the caller [cannot reach](#unreachable-pages-are-not-found). |
 
 ---
 
@@ -422,8 +444,8 @@ push's own server-side reference `push:<panel>:<seq>` in place of a run id.
 | 200 | Stored. Connected viewers are notified over the page's websocket channel. |
 | 400 | The payload does not satisfy the panel's schema. The message names the field and why. |
 | 401 | No session or token. |
-| 403 | The caller is not the panel's declared producer and holds no `produce` grant. The refusal writes a journal entry and notifies the page owner — treat it as a signal to investigate, not noise to retry past. |
-| 404 | No such page, or the page has no such panel. |
+| 403 | The caller is not the panel's declared producer and holds no `produce` grant, and reaches the page some other way. The refusal writes a journal entry and notifies the page owner — treat it as a signal to investigate, not noise to retry past. |
+| 404 | No such page, or one the caller [cannot reach](#unreachable-pages-are-not-found), or the page has no such panel. A caller who cannot reach the page gets this answer for an unauthorised push too — still journalled, and the owner still notified. |
 | 422 | The payload exceeds 64 KiB. The rejection names the bytes attempted and the limit. |
 | 429 | Faster than one push per two seconds for this panel, or over the per-minute budget. |
 
@@ -473,7 +495,8 @@ decides something while its issuer still stands behind it.
 | 200 | Listed. |
 | 400 | No workspace in context and none supplied. |
 | 401 | No session or token. |
-| 403 | Not the owner and not an admin. |
+| 403 | Not the owner and not an admin. Only for a caller who reaches the page. |
+| 404 | No such page, or one the caller [cannot reach](#unreachable-pages-are-not-found). |
 
 ---
 
@@ -538,7 +561,8 @@ and by members of the crews that own its panels.
 | 200 | Issued, or updated in place if the subject already held one. |
 | 400 | Unknown `subject_type` or `level`, missing subject, `produce` for the `workspace` subject, or `panels` naming a panel the page does not have. |
 | 401 | No session. |
-| 403 | Not the owner and not an admin, or the caller is an agent rather than a human. |
+| 403 | Not the owner and not an admin, or the caller is an agent rather than a human. Only for a caller who reaches the page. |
+| 404 | No such page, or one the caller [cannot reach](#unreachable-pages-are-not-found). |
 
 ---
 
@@ -564,8 +588,8 @@ answers **400** rather than reporting a success it did not perform.
 | 200 | Revoked. `changed` is 0 when the subject held no grant. |
 | 400 | No subject named on the query string. |
 | 401 | No session or token. |
-| 403 | Not the owner and not an admin. |
-| 404 | No such page. |
+| 403 | Not the owner and not an admin. Only for a caller who reaches the page. |
+| 404 | No such page, or one the caller [cannot reach](#unreachable-pages-are-not-found). |
 
 ---
 
@@ -638,8 +662,8 @@ An administrator sees every crew named.
 | 200 | Listed. |
 | 400 | `limit` is not a positive integer, or `cursor` is not one this endpoint issued. |
 | 401 | No session or token. |
-| 403 | Not the owner and not an admin. A grant of any level is not enough. |
-| 404 | No such page. |
+| 403 | Not the owner and not an admin. A grant of any level is not enough — but a caller who reaches the page by one gets this answer rather than the 404 below. |
+| 404 | No such page, or one the caller [cannot reach](#unreachable-pages-are-not-found). |
 
 ---
 
@@ -1273,7 +1297,10 @@ GET /api/v1/pages/{slug}/versions
 The page's **structural** history — which panels existed, their layout, owners
 and producers. Panel data is not versioned.
 
-**Authentication:** session cookie or CLI token; any caller who can see the page.
+**Authentication:** session cookie or CLI token; page edit permission — the
+owner, a workspace ADMIN/OWNER, or a `write` grantee. A version row carries the
+whole arrangement, panels sealed to a reader included, so seeing the page is
+not enough.
 
 **Response 200:**
 
@@ -1296,8 +1323,8 @@ and producers. Panel data is not versioned.
 | 200 | Listed. |
 | 400 | No workspace in context and none supplied. |
 | 401 | No session or token. |
-| 403 | Caller cannot see the page. |
-| 404 | No such page. |
+| 403 | No edit permission — a version carries the whole arrangement, sealed panels included. Only for a caller who reaches the page. |
+| 404 | No such page, or one the caller [cannot reach](#unreachable-pages-are-not-found). |
 
 ---
 
@@ -1349,8 +1376,8 @@ five minutes later.
 | 200 | Rolled back. |
 | 400 | `to` missing, invalid request, or a stored definition that no longer validates. |
 | 401 | No session or token. |
-| 403 | No write authority, or the current/archived definition contains panels the caller cannot read. |
-| 404 | No such page or retained version. |
+| 403 | No write authority, or the current/archived definition contains panels the caller cannot read. Only for a caller who reaches the page. |
+| 404 | No such page, or one the caller [cannot reach](#unreachable-pages-are-not-found), or no such retained version. |
 | 409 | The live definition changed before rollback; reload before restoring. |
 
 ---
@@ -1363,7 +1390,9 @@ GET /api/v1/pages/{slug}/export
 
 **Path parameters:** `slug`. **Query parameters:** `workspace_id` when the caller's context supplies none. No request body.
 
-**Authentication:** session cookie or CLI token; a caller who can see the page.
+**Authentication:** session cookie or CLI token; a caller with page edit
+permission — the owner, a workspace ADMIN/OWNER, or a `write` grantee — who
+can also read every panel in it.
 
 **Response 200** — a portable bundle: the spec, plus every reference it makes
 to something outside itself, listed so the importer must bind them explicitly:
@@ -1389,8 +1418,8 @@ a snapshot of what the page was showing.
 | 200 | Exported. |
 | 400 | No workspace in context and none supplied. |
 | 401 | No session or token. |
-| 403 | Caller cannot see the page. |
-| 404 | No such page. |
+| 403 | No edit permission, or a panel in the definition the caller cannot read — the bundle would otherwise carry declarations an ordinary read withholds. Only for a caller who reaches the page. |
+| 404 | No such page, or one the caller [cannot reach](#unreachable-pages-are-not-found). |
 
 ---
 
@@ -1456,8 +1485,8 @@ and whether it shows provenance. It cannot show the link itself — see
 | 200 | Listed. |
 | 400 | No workspace in context and none supplied. |
 | 401 | No session or token. |
-| 403 | Not the owner and not an admin. |
-| 404 | No such page. |
+| 403 | Not the owner and not an admin. Only for a caller who reaches the page. |
+| 404 | No such page, or one the caller [cannot reach](#unreachable-pages-are-not-found). |
 
 ---
 
@@ -1498,8 +1527,8 @@ panels explicitly marked public appear on it.
 | 201 | Published. |
 | 400 | `expires_in_days` out of range, or a password shorter than 8 or longer than 72 bytes. |
 | 401 | No session. |
-| 403 | Not the owner and not an admin. |
-| 404 | No such page. |
+| 403 | Not the owner and not an admin. Only for a caller who reaches the page. |
+| 404 | No such page, or one the caller [cannot reach](#unreachable-pages-are-not-found). |
 
 ---
 
@@ -1525,8 +1554,8 @@ working — several links per page is the intended shape.
 |---|---|
 | 200 | Withdrawn. |
 | 401 | No session or token. |
-| 403 | Not the owner and not an admin. |
-| 404 | No such page, or no such link on it. |
+| 403 | Not the owner and not an admin. Only for a caller who reaches the page. |
+| 404 | No such page, or one the caller [cannot reach](#unreachable-pages-are-not-found), or no such link on it. |
 
 ---
 
@@ -1570,8 +1599,8 @@ No `token` field: it is stored as a digest and cannot be re-read.
 | 200 | Listed. |
 | 400 | No workspace in context and none supplied. |
 | 401 | No session or token. |
-| 403 | Not the owner and not an admin. |
-| 404 | No such page. |
+| 403 | Not the owner and not an admin. Only for a caller who reaches the page. |
+| 404 | No such page, or one the caller [cannot reach](#unreachable-pages-are-not-found). |
 
 ---
 
@@ -1610,8 +1639,8 @@ shape, so revoking the PLC's does not break the CI job's.
 | 201 | Minted. |
 | 400 | `panel` missing, or naming a panel the page does not have. |
 | 401 | No session. |
-| 403 | Not the owner and not an admin. |
-| 404 | No such page. |
+| 403 | Not the owner and not an admin. Only for a caller who reaches the page. |
+| 404 | No such page, or one the caller [cannot reach](#unreachable-pages-are-not-found). |
 
 ---
 
@@ -1635,8 +1664,8 @@ when it was already revoked.
 |---|---|
 | 200 | Revoked. Further pushes with that token answer 403. |
 | 401 | No session or token. |
-| 403 | Not the owner and not an admin. |
-| 404 | No such page, or no such token on it. |
+| 403 | Not the owner and not an admin. Only for a caller who reaches the page. |
+| 404 | No such page, or one the caller [cannot reach](#unreachable-pages-are-not-found), or no such token on it. |
 
 ---
 

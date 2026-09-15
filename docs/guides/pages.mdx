@@ -1020,9 +1020,12 @@ Two consequences worth knowing:
   as it would for any other viewer, and the agent sees the same sealed
   placeholder a human without access would see.
 - **An unauthorised `produce` attempt is treated as a signal, not noise.** It
-  returns `403`, writes a journal entry, and notifies the page owner — it is
-  equally likely to be a misconfiguration or an injection, and either way it
-  deserves attention on the first occurrence, not the hundredth.
+  writes a journal entry and notifies the page owner — it is equally likely
+  to be a misconfiguration or an injection, and either way it deserves
+  attention on the first occurrence, not the hundredth. The caller gets `403`
+  if they can reach the page some other way, and `404` if they cannot: the
+  refusal never confirms that a page exists to somebody who may not see it,
+  and the journal entry is written either way.
 
 An agent's authority is always a **subset** of the authorising human's, never
 a superset, and it is evaluated at use time — if that human later loses
