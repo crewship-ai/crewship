@@ -139,11 +139,11 @@ func (h *E2EFixtureHandler) RunNeedsHuman(w http.ResponseWriter, r *http.Request
 	}
 
 	// The issue, in the caller's workspace.
-	var missionID, crewID, title string
-	var leadAgentID sql.NullString
+	var missionID, title string
+	var crewIDRow, leadAgentID sql.NullString
 	err := h.db.QueryRowContext(ctx,
 		`SELECT id, crew_id, lead_agent_id, title FROM missions WHERE workspace_id = ? AND identifier = ? ORDER BY created_at LIMIT 1`,
-		workspaceID, req.IssueIdentifier).Scan(&missionID, &crewID, &leadAgentID, &title)
+		workspaceID, req.IssueIdentifier).Scan(&missionID, &crewIDRow, &leadAgentID, &title)
 	if errors.Is(err, sql.ErrNoRows) {
 		replyError(w, http.StatusNotFound, "issue not found")
 		return
@@ -153,6 +153,13 @@ func (h *E2EFixtureHandler) RunNeedsHuman(w http.ResponseWriter, r *http.Request
 		replyError(w, http.StatusInternalServerError, "lookup failed")
 		return
 	}
+	// A card is raised for a crew's agent; an issue filed outside any crew
+	// has nobody to have asked, and saying so beats a scan error.
+	if !crewIDRow.Valid || crewIDRow.String == "" {
+		replyError(w, http.StatusUnprocessableEntity, "issue has no crew; a run_needs_human card needs a crew agent")
+		return
+	}
+	crewID := crewIDRow.String
 
 	// The agent whose session asked. A held (PENDING_REVIEW) agent is
 	// never chosen by default: the answer path refuses to wake one

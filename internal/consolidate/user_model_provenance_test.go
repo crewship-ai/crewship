@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -329,5 +330,41 @@ func TestRecordUserModelProvenance_IdenticalEvidenceIsNotDuplicated(t *testing.T
 	}
 	if got["role"].RecordedAt != "2026-09-19T05:00:00.000Z" {
 		t.Errorf("newest row dated %s, want the last append", got["role"].RecordedAt)
+	}
+}
+
+// A provenance failure after the model is on disk must not read as "nothing
+// written": the action stays "write", the audit row is recorded, and the
+// error is carried on the outcome for the summary to count.
+func TestSyncUserModel_ProvenanceFailureKeepsTheWrite(t *testing.T) {
+	db, wsID, userID := userModelTestDB(t)
+	dir := t.TempDir()
+	paths := memory.UserModelPaths{SharedDir: dir}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	cand := UserModelCandidate{WorkspaceID: wsID, UserID: userID, MessageCount: 12}
+	if _, err := db.Exec(`DROP TABLE user_model_provenance`); err != nil {
+		t.Fatalf("drop provenance table: %v", err)
+	}
+
+	out := SyncUserModel(context.Background(), db, logger, DefaultUserModelThreshold, cand,
+		"- role: runs the platform team",
+		[]UserModelEvidence{{Key: "role", Value: "runs the platform team", Quote: "I run the platform team here", MessageID: "msg-1", Source: "stated"}},
+		paths, dir, time.Now())
+	if out.Action != "write" || out.Bytes == 0 {
+		t.Fatalf("action = %q bytes = %d, want a write: %+v", out.Action, out.Bytes, out)
+	}
+	if out.Err == nil || !strings.Contains(out.Err.Error(), "provenance") {
+		t.Fatalf("err = %v, want the provenance failure reported", out.Err)
+	}
+	if body, _ := memory.LoadUserModel(paths, userID, wsID); !strings.Contains(body, "platform team") {
+		t.Errorf("model not on disk: %q", body)
+	}
+	var audits int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM peer_card_audit WHERE workspace_id=? AND target_user_id=? AND action='write'`,
+		wsID, userID).Scan(&audits); err != nil {
+		t.Fatalf("count audit rows: %v", err)
+	}
+	if audits != 1 {
+		t.Errorf("audit rows = %d, want 1 — the write happened and is owed its row", audits)
 	}
 }

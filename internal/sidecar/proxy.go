@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -516,7 +517,9 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 		// too — otherwise a flapping outbound endpoint looks like silent
 		// success from the journal's perspective. statusCode 0 marks the
 		// "transport error" case distinctly from any HTTP 5xx response.
-		if p.onEgress != nil {
+		// A failed grace replay was already journaled by its own observer,
+		// so it is not reported a second time here.
+		if p.onEgress != nil && !replayed {
 			p.onEgress(host, r.Method, provider, 0, false)
 		}
 		return
@@ -843,7 +846,7 @@ func (p *Proxy) reverseProxyToProvider(w http.ResponseWriter, r *http.Request, s
 	if err != nil {
 		p.logger.Error("reverse proxy upstream failed", "provider", s.ID, "host", up.Host, "path", r.URL.Path, "error", err)
 		http.Error(w, "upstream request failed", http.StatusBadGateway)
-		if p.onEgress != nil {
+		if p.onEgress != nil && !replayed {
 			p.onEgress(up.Host, r.Method, s.ID, 0, false)
 		}
 		return
@@ -893,7 +896,15 @@ func captureGraceReplay(w http.ResponseWriter, r *http.Request, cred *Credential
 	if r.Body != nil && r.Body != http.NoBody {
 		body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxRequestBodyBytes))
 		if err != nil {
-			http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
+			// Only the cap is a 413; a client that aborted mid-body or a
+			// transport read error is a bad request, the same answer the
+			// streaming path would give it.
+			var tooLarge *http.MaxBytesError
+			if errors.As(err, &tooLarge) {
+				http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
+			} else {
+				http.Error(w, "request body could not be read", http.StatusBadRequest)
+			}
 			return nil, false
 		}
 		g.body = body

@@ -173,7 +173,12 @@ func RunUserModelSync(
 			sum.Errors++
 			logger.Warn("user model sync candidate failed",
 				"user_id", cand.UserID, "action", out.Action, "err", out.Err)
-			continue
+			// A write whose only failure was the provenance row still wrote
+			// the model; count it as both so the summary does not read
+			// "nothing written" for a file that exists.
+			if out.Action != "write" {
+				continue
+			}
 		}
 		switch out.Action {
 		case "write":

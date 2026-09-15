@@ -10,6 +10,7 @@ package sidecar
 // credential's rotation, not a rotation that has expired or been cancelled.
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -53,8 +54,15 @@ func (u *graceUpstream) roundTrip(r *http.Request) (*http.Response, error) {
 	if i := len(u.calls) - 1; i < len(u.statuses) {
 		status = u.statuses[i]
 	}
+	if status == graceTransportError {
+		return nil, errors.New("upstream connection reset")
+	}
 	return jsonUpstreamResponse(status, "application/json", fmt.Sprintf(`{"status":%d}`, status), nil), nil
 }
+
+// graceTransportError in a statuses slice makes that attempt fail at the
+// transport instead of answering — the replay-failed shape.
+const graceTransportError = -1
 
 func newGraceProxy(t *testing.T, creds []Credential, statuses []int, observe GraceFallbackObserver, egress EgressObserver) (*Proxy, *CredStore, *graceUpstream) {
 	t.Helper()
@@ -108,6 +116,15 @@ func TestProxy_GraceFallback(t *testing.T) {
 			wantCode:   200,
 			wantCalls:  []string{"sk-new", "sk-old"},
 			wantEvent:  &GraceFallback{CredentialID: "c1", RotationID: "rot-c1", Provider: "ANTHROPIC", Host: "api.anthropic.com", Status: 200},
+			wantEgress: []int{401},
+		},
+		{
+			name:       "the replay fails at the transport: 502, journaled once by the fallback observer",
+			creds:      []Credential{anthropicCred("c1", "sk-new", "sk-old", future)},
+			statuses:   []int{401, graceTransportError},
+			wantCode:   http.StatusBadGateway,
+			wantCalls:  []string{"sk-new", "sk-old"},
+			wantEvent:  &GraceFallback{CredentialID: "c1", RotationID: "rot-c1", Provider: "ANTHROPIC", Host: "api.anthropic.com", Status: 0},
 			wantEgress: []int{401},
 		},
 		{

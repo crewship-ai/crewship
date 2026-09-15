@@ -253,11 +253,19 @@ func syncUserModel(
 	// Provenance beside the file (#1693): one row per fact THIS sync put in
 	// the file. Evidence for a key the cap trim dropped, or the merge did
 	// not carry, is not recorded — a row must point at a line that exists.
+	//
+	// The file and the user_models row are already written by now, so a
+	// provenance failure must not turn this into an error the sweep counts
+	// as "nothing written": the write happened and its audit row is owed.
+	// The next sync repairs the missing rows (identical evidence appends
+	// once); the failure is logged and reported on the summary's error
+	// field without changing the action.
+	provenanceErr := ""
 	if _, err := RecordUserModelProvenance(ctx, db, cand.WorkspaceID, cand.UserID, slug,
 		evidenceInContent(content, evidence), now); err != nil {
-		out.Action = "write"
-		out.Err = fmt.Errorf("user model provenance: %w", err)
-		return out
+		provenanceErr = err.Error()
+		logger.Warn("user model provenance not recorded; the model was written",
+			"workspace_id", cand.WorkspaceID, "user_slug", slug, "error", err)
 	}
 	recordAudit(ctx, db, logger, peerAuditRow{
 		workspaceID:  cand.WorkspaceID,
@@ -268,6 +276,9 @@ func syncUserModel(
 	})
 	out.Action = "write"
 	out.Bytes = len(content)
+	if provenanceErr != "" {
+		out.Err = fmt.Errorf("user model provenance: %s", provenanceErr)
+	}
 	return out
 }
 
