@@ -180,6 +180,20 @@ describe("actual incoming surfaces", () => {
     ).not.toBeInTheDocument()
     expect(screen.getByText("/api/v1/page-webhooks/•••••")).toBeVisible()
   })
+  it("creates a Page endpoint with an absolute receiving URL from the real form", async () => {
+    vi.mocked(apiFetch).mockImplementation(async (_url, init) => new Response(JSON.stringify(
+      init?.method === "POST"
+        ? {id:"new-page-hook",url:"/api/v1/page-webhooks/one-time",live:true}
+        : {id:"p1",slug:"report",name:"Report",panels:[{id:"result",schema:"status.v1",producer:"webhook/test"}]}
+    ), {status: init?.method === "POST" ? 201 : 200}))
+    mount(<IncomingCreateDialog workspaceId="ws" data={data()} initialTarget={targets[2]} onClose={vi.fn()} onCreated={vi.fn()}/>)
+    const panel = await screen.findByRole("combobox", {name:"Panel"})
+    fireEvent.keyDown(panel, {key:"ArrowDown"})
+    fireEvent.click(screen.getByRole("option", {name:"result"}))
+    fireEvent.click(screen.getByRole("button", {name:"Create endpoint"}))
+    expect(await screen.findByTestId("incoming-receiving-url")).toHaveTextContent(`${window.location.origin}/api/v1/page-webhooks/one-time`)
+    expect(apiFetch).toHaveBeenCalledWith("/api/v1/pages/report/webhooks?workspace_id=ws", expect.objectContaining({method:"POST",body:JSON.stringify({panel:"result"})}))
+  })
   it("presents load errors as errors and provides a retry", () => {
     const d = data()
     d.error = "backend unavailable"

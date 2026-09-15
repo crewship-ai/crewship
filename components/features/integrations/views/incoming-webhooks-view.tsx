@@ -303,12 +303,12 @@ export function IncomingWebhooksView({
           <p className="text-xs text-muted-foreground">
             Routines can create, update or comment on Issues. For app-managed
             subscriptions, see{" "}
-            <Link
+            <a
               className="text-primary hover:underline"
               href="/integrations?tab=tools&section=triggers"
             >
               Tools → Triggers
-            </Link>
+            </a>
             ; Incoming is for direct HTTP senders.
           </p>
         </div>

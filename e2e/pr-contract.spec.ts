@@ -8,10 +8,14 @@ import { incomingWebhookFlow } from "./incoming-webhook-flow"
 // global-setup snapshot and eventually redirect to /login (or hit the login
 // rate limit if each spec tried to repair that itself).
 test("PR browser contract subset", async ({ page }) => {
+  // Includes the real HTTP Incoming lifecycle and its disposable routine setup.
+  test.setTimeout(90_000)
   await test.step("login flow", async () => {
     await page.goto("/crews")
     await expect(page).toHaveURL(/\/crews/)
-    await expect(page.getByRole("heading", { name: "Crews & agents", exact: true })).toBeVisible()
+    // A cold embedded export hydrates after the workspace request. The CI trace
+    // showed the correct heading just after the former five-second deadline.
+    await expect(page.getByRole("heading", { name: "Crews & agents", exact: true })).toBeVisible({ timeout: 20_000 })
   })
 
   await test.step("agent create dialog is reachable", async () => {

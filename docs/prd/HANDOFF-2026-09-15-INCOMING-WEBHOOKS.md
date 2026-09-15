@@ -163,6 +163,13 @@ and explanatory copy edits require the final rerun. Production export passed.
 Full Go + vet and real browser verification have not yet completed for this
 UI revision. Do not treat this table as independent review acceptance.
 
-No backend behavior, API route or migration changed in the UI follow-up.
+Live verification found that `GET /agents` omitted `webhook_secret_set` even
+though `GET /agents/{id}` supplied it. The catalog now computes the existing
+boolean without returning the secret, and Incoming follows catalog pagination.
+A SQLite regression failed before the fix for configured/unconfigured agents;
+the UI refuses unknown configuration instead of offering an accidental key
+rotation. This is the only backend change in the UI follow-up; no new route
+or migration was added. Browser verification also caught same-page Next links
+leaving the old tab mounted; the cross-links now navigate to the named tab.
 Existing endpoint limitations remain: no agent disable/delete API, Page revoke
 rather than a reversible switch, per-Page discovery and no Page receipt history.

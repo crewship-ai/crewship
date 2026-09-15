@@ -1,7 +1,6 @@
 "use client"
 
 import * as React from "react"
-import Link from "next/link"
 import { Zap, Search } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
@@ -98,7 +97,7 @@ export function TriggersTab({
 
       <p className="text-xs text-muted-foreground">
         These subscriptions use connected app accounts. For a direct HTTP sender, use{" "}
-        <Link className="text-primary hover:underline" href="/integrations?tab=incoming">Incoming webhooks</Link>.
+        <a className="text-primary hover:underline" href="/integrations?tab=incoming">Incoming webhooks</a>.
       </p>
 
       {/* Active instances */}

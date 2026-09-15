@@ -6,6 +6,10 @@ export async function incomingWebhookFlow(page: Page) {
   const workspaces = await (await page.request.get("/api/v1/workspaces")).json()
   const workspaceId = workspaces[0]?.id
   expect(workspaceId).toBeTruthy()
+  const agents = await (await page.request.get(`/api/v1/agents?workspace_id=${workspaceId}`)).json()
+  expect(agents.length).toBeGreaterThan(0)
+  for (const agent of agents) expect(typeof agent.webhook_secret_set).toBe("boolean")
+
   const crews = await (
     await page.request.get(`/api/v1/crews?workspace_id=${workspaceId}`)
   ).json()
@@ -54,7 +58,9 @@ export async function incomingWebhookFlow(page: Page) {
       .click()
     await page.getByRole("button", { name: /Incoming webhook/ }).click()
     const dialog = page.getByRole("dialog")
-    await expect(dialog.getByRole("combobox", { name: "Target", exact: true })).toBeVisible()
+    await expect(
+      dialog.getByRole("combobox", { name: "Target", exact: true }),
+    ).toBeVisible()
     await dialog.getByRole("combobox", { name: "Target", exact: true }).click()
     await page.getByRole("option", { name: slug, exact: true }).click()
     await dialog
@@ -126,6 +132,12 @@ export async function incomingWebhookFlow(page: Page) {
     await expect(
       page.getByRole("table").getByText(`${slug} refreshed`, { exact: true }),
     ).toBeVisible()
+    await page.getByRole("button", { name: "Back to endpoints" }).click()
+    await page.getByRole("link", { name: "Tools → Triggers" }).click()
+    await expect(page).toHaveURL(/tab=tools/)
+    await expect(page.getByText("Received · 24h", { exact: true })).toHaveCount(
+      0,
+    )
   } finally {
     for (const id of hooks) {
       const deleted = await page.request.delete(

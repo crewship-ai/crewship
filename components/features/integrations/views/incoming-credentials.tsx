@@ -160,14 +160,15 @@ export function IncomingCreateDialog({
     .map((p) => p.spec.id)
   const pageCreate = usePageWebhookCreate(workspaceId, target?.slug ?? "", {
     onOk: (w) => {
-      if (target) setReveal({ url: w.url, target })
+      if (target && w.url) setReveal({ url: absolute(w.url), target })
+      else setError("Endpoint created, but the server did not return its receiving URL.")
     },
     onRefused: setError,
   })
   const ready =
     !!target &&
     (kind !== "page" || panelIds.includes(panel)) &&
-    !(kind === "agent" && (!target.crew_id || target.webhook_secret_set))
+    !(kind === "agent" && (!target.crew_id || target.webhook_secret_set !== false))
   const finish = () => {
     if (reveal) onCreated(reveal.target)
     onClose()
