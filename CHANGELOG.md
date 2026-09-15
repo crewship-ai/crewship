@@ -10,6 +10,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 ## [Unreleased]
 
 ### Fixed
+- Pages management and denied data writes return the same not-found response for hidden and missing pages; explicit folder edit grants now explain that they also apply to workspace Viewers.
 - Routine results use the database's 30-second contention budget when recording a completed step, instead of failing after five seconds while waiting for a connection. This records the existing execution; it does not repeat the action.
 - Routine editors compare closing, reload and navigation against the saved draft. Unsaved edits are protected during browser history and app navigation; closing returns keyboard focus to Edit.
 

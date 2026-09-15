@@ -904,7 +904,7 @@ func (h *PageHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 	// `write` is authority over ARRANGEMENT, never over content (§7.1b rule 2).
 	if !h.mayEditSpec(r.Context(), wsID, user.ID, RoleFromContext(r.Context()), rec) {
-		replyError(w, http.StatusForbidden, "only the page owner, a workspace admin, or a write grantee may edit this page")
+		h.refusePageAction(w, r, rec, "only the page owner, a workspace admin, or a write grantee may edit this page", "")
 		return
 	}
 
@@ -1122,7 +1122,7 @@ func (h *PageHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	// Deleting is not editing: a `write` grant rearranges the page, it does not
 	// remove it. Owner or workspace ADMIN/OWNER only.
 	if !h.isPageOwner(r.Context(), wsID, user.ID, rec) && !canRole(RoleFromContext(r.Context()), "manage") {
-		replyError(w, http.StatusForbidden, "only the page owner or a workspace admin may delete this page")
+		h.refusePageAction(w, r, rec, "only the page owner or a workspace admin may delete this page", "")
 		return
 	}
 	if _, err := h.db.ExecContext(r.Context(), `DELETE FROM pages WHERE id = ?`, rec.ID); err != nil {

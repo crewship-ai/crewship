@@ -76,7 +76,7 @@ func TestPageBuildLifecycleRBACAndRevision(t *testing.T) {
 		t.Fatal(w.Body.String())
 	}
 	for _, method := range []string{"POST", "GET"} {
-		if w := buildRequest(t, h, method, "/", ws, "other", "MEMBER", `{"expected_revision":1}`); w.Code != 403 {
+		if w := buildRequest(t, h, method, "/", ws, "other", "MEMBER", `{"expected_revision":1}`); w.Code != 404 {
 			t.Fatalf("unauthorized %s: %d", method, w.Code)
 		}
 		if w := buildRequest(t, h, method, "/", "other-workspace", user, "OWNER", `{"expected_revision":1}`); w.Code != 404 {

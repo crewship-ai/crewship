@@ -497,7 +497,7 @@ func TestPageProjectReviewAuthorization(t *testing.T) {
 		t.Fatalf("not_permitted erased the rest of the review: %+v", snapshot)
 	}
 
-	if w, _ := reviewCall(t, h, ws, "stranger", "MEMBER", "health"); w.Code != 403 {
+	if w, _ := reviewCall(t, h, ws, "stranger", "MEMBER", "health"); w.Code != 404 {
 		t.Fatalf("stranger: %d", w.Code)
 	}
 	if w, _ := reviewCall(t, h, "other-workspace", user, "OWNER", "health"); w.Code != 404 {

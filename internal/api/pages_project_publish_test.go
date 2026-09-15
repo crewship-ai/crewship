@@ -53,7 +53,7 @@ func TestPageProjectPublicationAtomicCASRollbackAndReach(t *testing.T) {
 	first := makeBuild(1)
 	zero := int64(0)
 	req := pageProjectPublishRequest{BuildID: first.ID, ExpectedRevision: 1, ExpectedPublication: &zero, ReviewedCode: true}
-	if w := call("other", "MEMBER", req); w.Code != 403 {
+	if w := call("other", "MEMBER", req); w.Code != 404 {
 		t.Fatalf("unauthorized publication %d", w.Code)
 	}
 	missing := req
@@ -162,7 +162,7 @@ func TestPageProjectPublicationAtomicCASRollbackAndReach(t *testing.T) {
 		h.UnpublishProject(w, r)
 		return w
 	}
-	if w := withdraw("other", "MEMBER", 3); w.Code != 403 {
+	if w := withdraw("other", "MEMBER", 3); w.Code != 404 {
 		t.Fatalf("unauthorized withdrawal: %d", w.Code)
 	}
 	if w := withdraw(user, "OWNER", 2); w.Code != 409 {

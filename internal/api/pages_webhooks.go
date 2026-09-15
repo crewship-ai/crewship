@@ -191,7 +191,7 @@ func (h *PageHandler) CreateWebhook(w http.ResponseWriter, r *http.Request) {
 	// reaches it, and minting a token that can be pasted into anybody's cron is
 	// as wide as widening gets.
 	if !h.isPageOwner(r.Context(), wsID, user.ID, rec) && !canRole(RoleFromContext(r.Context()), "manage") {
-		replyError(w, http.StatusForbidden, "only the page owner or a workspace admin may issue a webhook on this page")
+		h.refusePageAction(w, r, rec, "only the page owner or a workspace admin may issue a webhook on this page", "")
 		return
 	}
 
@@ -325,7 +325,7 @@ func (h *PageHandler) ListWebhooks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !h.isPageOwner(r.Context(), wsID, user.ID, rec) && !canRole(RoleFromContext(r.Context()), "manage") {
-		replyError(w, http.StatusForbidden, "only the page owner or a workspace admin may see this page's webhooks")
+		h.refusePageAction(w, r, rec, "only the page owner or a workspace admin may see this page's webhooks", "")
 		return
 	}
 
@@ -393,7 +393,7 @@ func (h *PageHandler) RevokeWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !h.isPageOwner(r.Context(), wsID, user.ID, rec) && !canRole(RoleFromContext(r.Context()), "manage") {
-		replyError(w, http.StatusForbidden, "only the page owner or a workspace admin may revoke this page's webhooks")
+		h.refusePageAction(w, r, rec, "only the page owner or a workspace admin may revoke this page's webhooks", "")
 		return
 	}
 
