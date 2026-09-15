@@ -19,6 +19,7 @@ type kindsFakeAPI struct {
 	wsID     string
 	projects []map[string]any
 	labels   []map[string]any
+	agents   []map[string]any
 	Calls    []fakeCall
 }
 
@@ -41,10 +42,13 @@ func (f *kindsFakeAPI) Get(_ context.Context, path string) (*http.Response, erro
 	case path == "/api/v1/labels":
 		return jsonResp(200, f.labels), nil
 	case path == "/api/v1/agents", strings.HasPrefix(path, "/api/v1/agents?"):
-		// Project.Export resolves lead_agent_id → slug via /api/v1/agents.
-		// We don't need agent rows for the create-side tests, but the
-		// endpoint must respond cleanly so Plan's pre-flight doesn't 404.
-		return jsonResp(200, []map[string]any{}), nil
+		// Project.Export resolves lead_agent_id → slug via /api/v1/agents,
+		// and the planner lists the workspace's agents into
+		// WorkspaceContext.RemoteAgents. Empty unless a test seeds rows.
+		if f.agents == nil {
+			return jsonResp(200, []map[string]any{}), nil
+		}
+		return jsonResp(200, f.agents), nil
 	}
 	return jsonResp(404, map[string]any{"error": "not found"}), nil
 }
@@ -116,7 +120,7 @@ func TestBuildPlan_NewKindsRouting(t *testing.T) {
 apiVersion: crewship/v1
 kind: Project
 metadata: { name: Q2, slug: q2-launch }
-spec: { status: active, priority: high }
+spec: { status: in_progress, priority: high }
 `)
 	bundle, err := Load(body)
 	if err != nil {
@@ -158,7 +162,7 @@ func TestApply_NewKindsExecutesPOST(t *testing.T) {
 apiVersion: crewship/v1
 kind: Project
 metadata: { name: Q2, slug: q2-launch }
-spec: { status: active }
+spec: { status: in_progress }
 `)
 	bundle, _ := Load(body)
 	api := newKindsFakeAPI()

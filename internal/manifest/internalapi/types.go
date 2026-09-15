@@ -178,6 +178,15 @@ func (w *WorkspaceContext) HasAgent(slug string) bool {
 	return hasSlug(w.DeclaredAgents, slug) || hasSlug(w.RemoteAgents, slug)
 }
 
+// KnowsAgents reports whether the context carries any agent at all.
+// A validator may only reject an agent slug when this is true: a
+// context that knows no agents (client-less validation, or a bundle
+// that declares none against a fetch that never ran) cannot prove a
+// slug is missing, so the kinds defer that reference to plan time.
+func (w *WorkspaceContext) KnowsAgents() bool {
+	return len(w.DeclaredAgents) > 0 || len(w.RemoteAgents) > 0
+}
+
 // HasRoutine reports whether the routine slug is declared or remote. Used by
 // Issue.routine_slug, so a bundle that declares both a routine and an issue
 // bound to it validates without a round trip.

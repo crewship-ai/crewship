@@ -441,6 +441,7 @@ func init() {
 	issueCreateCmd.Flags().String("title", "", "Issue title (required)")
 	issueCreateCmd.Flags().String("description", "", "Issue description")
 	issueCreateCmd.Flags().String("priority", "none", "Priority: none, low, medium, high, urgent")
+	issueCreateCmd.Flags().String("status", "", "Starting status: BACKLOG (default), TODO, IN_PROGRESS, CANCELLED, DUPLICATE")
 	issueCreateCmd.Flags().String("assignee", "", "Assignee agent slug")
 	issueCreateCmd.Flags().String("assignee-type", "agent", "Assignee type: agent or user")
 	issueCreateCmd.Flags().String("labels", "", "Comma-separated label IDs")

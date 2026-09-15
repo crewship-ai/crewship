@@ -36,9 +36,9 @@ Read routes require an authenticated workspace member.
 | `description` | string \| null | Optional description. |
 | `icon` | string \| null | Optional icon value. |
 | `color` | string | Color value; defaults to `blue` on create. |
-| `status` | string | Status; defaults to `backlog` on create. |
-| `priority` | string | Priority; defaults to `none` on create. |
-| `health` | string | Health value; defaults to `on_track` on create. |
+| `status` | string | One of `backlog`, `planned`, `in_progress`, `paused`, `completed`, `cancelled`; defaults to `backlog` on create. Any other value is a `400` naming the field. |
+| `priority` | string | One of `none`, `low`, `medium`, `high`, `urgent`; defaults to `none` on create. Any other value is a `400`. |
+| `health` | string | One of `on_track`, `at_risk`, `off_track`; always `on_track` on create, settable on update. Any other value is a `400`. |
 | `lead_type` | string \| null | `user` or `agent` when `lead_id` is set. |
 | `lead_id` | string \| null | Workspace-local user or agent ID. |
 | `lead_name` | string \| null | Resolved lead display name. |
@@ -73,7 +73,8 @@ Accepted fields are `name` (required), `description`, `icon`, `color`,
 `status`, `priority`, `lead_type`, `lead_id`, `start_date`, and `target_date`.
 The lead pair is validated against the current workspace. Returns `201
 Created` with the full project shape. Missing `name` or malformed JSON returns
-`400`; an invalid or cross-workspace lead also returns `400`.
+`400`; an invalid or cross-workspace lead also returns `400`, as does a
+`status` or `priority` outside the allowed set (the error names the field).
 
 The slug is derived from `name`, and `(workspace_id, slug)` is unique. A name
 that slugifies onto an existing project returns `409 Conflict` — including when
@@ -103,8 +104,10 @@ PATCH /api/v1/projects/{projectId}
 
 All project fields except `id`, `workspace_id`, computed fields, and timestamps
 are accepted as optional patch fields. Supplying no accepted field returns
-`400`. A changed `name` also updates `slug`; lead changes must remain a valid
-workspace-local `user`/`agent` pair. Returns the updated project.
+`400`, and so does a `status`, `priority` or `health` outside its allowed set
+(the error names the field). A changed `name` also updates `slug`; lead changes
+must remain a valid workspace-local `user`/`agent` pair. Returns the updated
+project.
 
 ### Delete a project
 

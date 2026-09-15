@@ -79,17 +79,17 @@ func coreResourceRequestSchemaCatalogV2() (map[string]DomainSchema, map[string]a
 	}))
 
 	request("CoreProjectCreateRequestV2", object(map[string]any{
-		"name": str(), "description": nullable(str()), "icon": nullable(str()), "color": str(), "status": str(), "priority": str(),
+		"name": str(), "description": nullable(str()), "icon": nullable(str()), "color": str(), "status": enum("backlog", "planned", "in_progress", "paused", "completed", "cancelled"), "priority": enum("none", "low", "medium", "high", "urgent"),
 		"lead_type": nullable(enum("user", "agent")), "lead_id": nullable(str()), "start_date": nullable(str()), "target_date": nullable(str()),
 	}, "name"))
 	request("CoreProjectUpdateRequestV2", object(map[string]any{
-		"name": nullable(str()), "description": nullable(str()), "icon": nullable(str()), "color": nullable(str()), "status": nullable(str()), "priority": nullable(str()), "health": nullable(str()),
+		"name": nullable(str()), "description": nullable(str()), "icon": nullable(str()), "color": nullable(str()), "status": nullable(enum("backlog", "planned", "in_progress", "paused", "completed", "cancelled")), "priority": nullable(enum("none", "low", "medium", "high", "urgent")), "health": nullable(enum("on_track", "at_risk", "off_track")),
 		"lead_type": nullable(enum("user", "agent")), "lead_id": nullable(str()), "start_date": nullable(str()), "target_date": nullable(str()),
 	}))
 
 	stringArray := array(str())
 	request("CoreIssueCreateRequestV2", object(map[string]any{
-		"title": str(), "description": nullable(str()), "priority": str(), "assignee_type": nullable(enum("user", "agent")), "assignee_id": nullable(str()), "due_date": nullable(str()),
+		"title": str(), "description": nullable(str()), "status": enum("BACKLOG", "TODO", "IN_PROGRESS", "CANCELLED", "DUPLICATE"), "priority": str(), "assignee_type": nullable(enum("user", "agent")), "assignee_id": nullable(str()), "due_date": nullable(str()),
 		"project_id": nullable(str()), "estimate": nullable(integer()), "parent_issue_id": nullable(str()), "milestone_id": nullable(str()), "labels": stringArray,
 		"routine_id": nullable(str()), "routine_inputs": freeObject(),
 	}, "title"))
