@@ -360,6 +360,9 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	r.mux.Handle("GET /api/v1/agents/{agentId}/credentials", authed(wsCtx(http.HandlerFunc(agents.ListCredentials))))
 	r.authedMut("POST", "/api/v1/agents/{agentId}/credentials", roleManage, agents.AddCredential)
 	r.authedMut("DELETE", "/api/v1/agents/{agentId}/credentials/{assignmentId}", roleManage, agents.RemoveCredential)
+	// Read-only, same tier as the crew readiness route: does a delivered
+	// credential authenticate this agent's model? (#2183)
+	r.mux.Handle("GET /api/v1/agents/{agentId}/credential-readiness", authed(wsCtx(http.HandlerFunc(agents.CredentialReadiness))))
 
 	// Agent chats & runs
 	r.mux.Handle("GET /api/v1/agents/{agentId}/chats", authed(wsCtx(http.HandlerFunc(agents.ListChats))))

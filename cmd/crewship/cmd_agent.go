@@ -294,6 +294,7 @@ func init() {
 	agentCmd.AddCommand(agentDebugCmd)
 	agentCmd.AddCommand(agentSkillsCmd)
 	agentCmd.AddCommand(agentCredentialsCmd)
+	agentCmd.AddCommand(agentCredentialReadinessCmd)
 }
 
 // Resolver helpers and shared types

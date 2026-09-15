@@ -245,6 +245,9 @@ var responseShapeContracts = []struct {
 	{name: "WorkspaceConversationAgent", pointer: "/components/schemas/WorkspaceConversationAgent", value: groupchat.AgentMember{}},
 	{name: "WorkspaceConversationAgentJob", pointer: "/components/schemas/WorkspaceConversationAgentJob", value: groupchat.Job{}},
 	{name: "CredentialTestResponse", pointer: "/components/schemas/CredentialTestResponse", value: testConnectionResponse{}},
+	// ── Agent credential readiness (#2183) ─────────────────────────────────
+	{name: "AgentCredentialReadiness", pointer: "/components/schemas/RemainingAgentCredentialReadinessV1", value: agentCredentialReadinessResponse{}},
+	{name: "AgentCredentialReadiness.model_credential", pointer: "/components/schemas/RemainingAgentCredentialReadinessV1/properties/model_credential", value: agentModelCredential{}},
 	// ── The durable work ledger (§9) ───────────────────────────────────────
 	// Every field on these views is emitted unconditionally, so `required` is
 	// the whole field set. That matters most for WorkCancelResponse: `outcome`
