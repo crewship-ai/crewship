@@ -147,29 +147,49 @@ async function renderPanel() {
   await waitFor(() => expect(screen.getByText("Daily report")).toBeInTheDocument())
 }
 
-describe("<RoutinesDetailPanel> — header Cancel button", () => {
+/** Stop lives in the live-run banner and asks first. */
+async function stopFromBanner() {
+  fireEvent.click(screen.getByRole("button", { name: "Stop" }))
+  expect(await screen.findByText("Stop this run?")).toBeInTheDocument()
+  fireEvent.click(screen.getByRole("button", { name: "Stop run" }))
+}
+
+describe("<RoutinesDetailPanel> — live-run banner and Stop", () => {
   beforeEach(() => {
     h.records = []
     mockApi()
   })
 
-  it("keeps Cancel disabled when no run is active", async () => {
+  it("shows no banner and no Stop when no run is active", async () => {
     await renderPanel()
-    expect(screen.getByRole("button", { name: "Cancel" })).toBeDisabled()
+    expect(screen.queryByTestId("routine-live-run-banner")).toBeNull()
+    expect(screen.queryByRole("button", { name: "Stop" })).toBeNull()
+    expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull()
   })
 
-  it("cancels the single active run and toasts success", async () => {
+  it("names a waiting run and offers Decide, which opens the run", async () => {
+    h.records = [{ ...activeRecord("run-wait-1"), status: "waiting" }]
+    const onRunStarted = vi.fn()
+    render(<RoutinesDetailPanel {...defaultProps} onRunStarted={onRunStarted} />)
+    await waitFor(() => expect(screen.getByText("Daily report")).toBeInTheDocument())
+    const banner = screen.getByTestId("routine-live-run-banner")
+    expect(banner).toHaveTextContent("A run is waiting for your decision")
+    fireEvent.click(screen.getByRole("button", { name: "Decide" }))
+    expect(onRunStarted).toHaveBeenCalledWith("run-wait-1")
+  })
+
+  it("stops the active run after confirming and toasts Stop requested", async () => {
     h.records = [activeRecord("run-live-1")]
     await renderPanel()
-    const btn = screen.getByRole("button", { name: "Cancel" })
-    expect(btn).not.toBeDisabled()
-    fireEvent.click(btn)
+    expect(screen.getByTestId("routine-live-run-banner")).toHaveTextContent("A run is in progress")
+    expect(screen.getByRole("button", { name: "Watch" })).toBeInTheDocument()
+    await stopFromBanner()
     await waitFor(() => {
       expect(apiFetch).toHaveBeenCalledWith(
         "/api/v1/workspaces/ws-1/pipelines/runs/run-live-1/cancel",
         expect.objectContaining({ method: "POST" }),
       )
-      expect(toast.success).toHaveBeenCalled()
+      expect(toast.success).toHaveBeenCalledWith("Stop requested", expect.anything())
       expect(h.refreshRecords).toHaveBeenCalled()
     })
   })
@@ -186,10 +206,10 @@ describe("<RoutinesDetailPanel> — header Cancel button", () => {
       } as unknown as Response,
     })
     await renderPanel()
-    fireEvent.click(screen.getByRole("button", { name: "Cancel" }))
+    await stopFromBanner()
     await waitFor(() => {
       expect(toast.error).toHaveBeenCalledWith(
-        "Cancel failed",
+        "Stop failed",
         expect.objectContaining({
           description: expect.stringMatching(/permission/i),
         }),

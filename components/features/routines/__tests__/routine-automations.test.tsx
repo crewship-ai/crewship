@@ -62,8 +62,11 @@ vi.mock("@/hooks/use-abilities", () => ({
 vi.mock("../routine-definition-canvas", () => ({
   RoutineDefinitionCanvas: () => <div data-testid="canvas" />,
 }))
+// The Plan tab folds webhooks and automations under its "Other ways this
+// routine starts" disclosure (the `otherWays` slot); the stub renders the slot
+// open so the rows are reachable.
 vi.mock("../routine-schedules-tab", () => ({
-  RoutineSchedulesTab: () => <div />,
+  RoutineSchedulesTab: ({ otherWays }: { otherWays?: React.ReactNode }) => <div>{otherWays}</div>,
 }))
 vi.mock("../routine-webhooks-tab", () => ({
   RoutineWebhooksTab: () => <div />,
@@ -73,11 +76,12 @@ vi.mock("../routine-versions-tab", () => ({
 }))
 vi.mock("../routine-runs-tab", () => ({ RoutineRunsTab: () => <div /> }))
 vi.mock("../routine-budget-card", () => ({ RoutineBudgetCard: () => <div /> }))
-vi.mock("../routine-create-dialog", () => ({
-  RoutineCreateDialog: ({ onClose }: { onClose: () => void }) => (
-    <button onClick={onClose}>Close editor</button>
-  ),
+vi.mock("../routine-edit-dialog", () => ({
+  RoutineEditDialog: ({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) =>
+    open ? <button onClick={() => onOpenChange(false)}>Close editor</button> : null,
 }))
+vi.mock("../routine-publish-dialog", () => ({ RoutinePublishDialog: () => null }))
+vi.mock("../routine-files-card", () => ({ RoutineFilesCard: () => null }))
 // The reach rows are the Access card's agent list now, so the card itself is
 // real here and only its network call is stubbed.
 vi.mock("@/hooks/use-agent-reach", () => ({
@@ -158,7 +162,7 @@ beforeEach(() => {
   h.schedules = []
 })
 
-it("returns keyboard focus to Edit after leaving the editor page", async () => {
+it("returns keyboard focus to Edit after closing the Edit dialog", async () => {
   renderCard()
   const opener = screen.getByRole("button", { name: "Edit" })
   opener.focus()
@@ -371,20 +375,22 @@ describe("routine access and starting points", () => {
       },
     ]
     renderCard()
-    // "Before you run" names the plan instead of a zero.
-    expect(screen.getByText(/Runs:/).parentElement).toHaveTextContent(/09:00/)
-    expect(screen.getByText(/Runs:/).parentElement).not.toHaveTextContent("Manual")
+    // The Plan card names the plan instead of a zero.
+    const plan = screen.getByTestId("routine-plan-card")
+    expect(plan).toHaveTextContent(/09:00/)
+    expect(plan).toHaveTextContent("uses latest published")
+    expect(plan).not.toHaveTextContent("Manual only")
   })
 
-  it("says Manual when nothing starts it on its own, and hands off to Plan", () => {
+  it("says Manual only when nothing starts it on its own, and hands off to Plan", () => {
     renderCard()
-    const runs = screen.getByText(/Runs:/).parentElement!
-    expect(runs).toHaveTextContent("Manual")
-    fireEvent.click(within(runs).getByRole("button", { name: "change plan" }))
+    const plan = screen.getByTestId("routine-plan-card")
+    expect(plan).toHaveTextContent("Manual only")
+    fireEvent.click(within(plan).getByRole("button", { name: "Change plan" }))
     expect(screen.getByRole("button", { name: "Plan", pressed: true })).toBeInTheDocument()
   })
 
-  it("lists the questions before a run and the effects, without revealing defaults", () => {
+  it("answers the six questions in one look, without revealing defaults", () => {
     renderCard(
       routine({
         definition: {
@@ -403,14 +409,15 @@ describe("routine access and starting points", () => {
         },
       } as Partial<RoutineDetail>),
     )
-    expect(screen.getByText("Max stale hours")).toBeInTheDocument()
-    expect(screen.getByText(/number · required · has a default/)).toBeInTheDocument()
-    expect(screen.getByText("How old a page may be")).toBeInTheDocument()
-    expect(screen.getByText(/Produces:/).parentElement).toHaveTextContent("Change report")
-    expect(screen.queryByText("private-value")).not.toBeInTheDocument()
-    expect(screen.getByTestId("routine-effects-line")).toHaveTextContent(
-      /Scripts, tools, notifications or called routines can perform actions/,
+    expect(screen.getByTestId("routine-look-what-you-provide")).toHaveTextContent("Max stale hours, Token (optional)")
+    expect(screen.getByTestId("routine-look-what-you-get")).toHaveTextContent("Change report")
+    expect(screen.getByTestId("routine-look-who-does-the-work")).toHaveTextContent("1 script on the crew share")
+    expect(screen.getByTestId("routine-look-what-is-checked")).toHaveTextContent("No checks declared")
+    expect(screen.getByTestId("routine-look-when-it-needs-you")).toHaveTextContent("Never — it runs without a decision.")
+    expect(screen.getByTestId("routine-look-what-it-can-touch")).toHaveTextContent(
+      "Runs scripts on the crew. Stopping does not undo what already happened.",
     )
+    expect(screen.queryByText("private-value")).not.toBeInTheDocument()
     // The status chrome that used to sit in the header now lives in one
     // disclosure below the three answers.
     const technical = screen.getByTestId("routine-technical")

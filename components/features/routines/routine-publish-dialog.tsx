@@ -175,12 +175,12 @@ export function RoutinePublishDialog({ open, onOpenChange, workspaceId, routine,
     return () => controller.abort()
   }, [open, workspaceId, routine.slug, routine.author_crew_id, base])
 
-  const published = isRecord(routine.definition) ? routine.definition : {}
   const draftDefinition = draft && isRecord(draft.document.definition) ? draft.document.definition : null
-  const summary = React.useMemo(
-    () => (draftDefinition ? publicationSummary(routine.head_version ? published : {}, draftDefinition) : null),
-    [draftDefinition, published, routine.head_version],
-  )
+  const summary = React.useMemo(() => {
+    if (!draftDefinition) return null
+    const published = routine.head_version && isRecord(routine.definition) ? routine.definition : {}
+    return publicationSummary(published, draftDefinition)
+  }, [draftDefinition, routine.definition, routine.head_version])
   const impact = scheduleImpact(schedules as ScheduleRow[], routine)
   const next = (routine.head_version ?? 0) + 1
   const revision = draft?.revision ?? routine.draft?.revision

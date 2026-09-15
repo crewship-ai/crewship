@@ -710,7 +710,7 @@ export function RoutinesDetailPanel({
                   <AgentlessBadge agentless={isAgentless(routine.definition)} />
                 </>
               }
-              actions={
+              primary={
                 <>
                   {/* Wrapped in a span so the run-guard tooltip still
                       shows on a disabled button — disabled buttons
@@ -762,6 +762,8 @@ export function RoutinesDetailPanel({
       )}
       <RoutineRunInputsDialog
         definition={routine?.definition}
+        headVersion={routine?.head_version}
+        draft={routine?.draft}
         inputs={
           pendingRun?.slug === slug && pendingRun.workspaceId === workspaceId
             ? pendingRun.inputs

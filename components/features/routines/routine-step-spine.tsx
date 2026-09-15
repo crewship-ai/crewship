@@ -157,7 +157,7 @@ export function RoutineStepSpine({
   const [openIds, setOpenIds] = React.useState<ReadonlySet<string>>(() => new Set())
   const [openPhases, setOpenPhases] = React.useState<ReadonlySet<number>>(() => new Set())
   const [openGroups, setOpenGroups] = React.useState<ReadonlySet<string>>(() => new Set())
-  const dsl = isRecord(definition) ? definition : {}
+  const dsl = React.useMemo(() => (isRecord(definition) ? definition : {}), [definition])
   const running = record?.currentStepId ?? null
   const steps = React.useMemo(
     () => (Array.isArray(dsl.steps) ? dsl.steps.filter(isRecord) : []),
