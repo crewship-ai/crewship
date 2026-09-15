@@ -230,7 +230,7 @@ describe("actual incoming surfaces", () => {
       />,
     )
     expect(screen.queryByRole("combobox", { name: "Webhook format" })).not.toBeInTheDocument()
-    fireEvent.click(screen.getByRole("button", { name: "Advanced settings", exact: true }))
+    fireEvent.click(screen.getByRole("button", { name: "Advanced settings" }))
     fireEvent.keyDown(screen.getByRole("combobox", { name: "Webhook format" }), {
       key: "ArrowDown",
     })

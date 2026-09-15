@@ -219,3 +219,27 @@ companion fixture change; it is not counted as a pass.
 The final documentation-only follow-up corrects the earlier API environment
 description: setting `TMPDIR` did not override Go 1.27's `GOTMPDIR=/tmp` for
 `t.TempDir`. Production code and tests remain byte-identical to 31852e92.
+
+## Simplified creation follow-up
+
+The default routine creation form now asks only for target and endpoint name.
+`Sender` moved into a collapsed `Advanced settings` section as `Webhook format`.
+The existing signed Crewship JSON contract remains the default; GitHub PR support
+remains explicitly selectable. No new authentication scheme, unsigned fallback,
+provider detection or payload translator was added. This is not a claim that all
+third-party webhook protocols are compatible. Signature, size, rate and target
+permission enforcement remain server-side and unchanged.
+
+Validation: 140 Integrations tests passed, including default creation without
+opening advanced settings and explicit GitHub creation. Frontend build and lint
+passed (30 pre-existing lint warnings). Webhook and signature-profile Go packages
+passed. A real dev2 browser flow passed default-field visibility, GitHub endpoint
+creation through advanced settings, secret reveal, refresh, disable and cleanup;
+only session presentation uses the CLI identity, not a normal browser login.
+Screenshot: backups/crewship_2/incoming-webhooks-ui-2026-09-15/09-simple-create.png.
+
+The earlier whole-tree Go run in /tmp/incoming-avatar-go.log ended GO_EXIT=1:
+internal/api and internal/database hit the default 10-minute timeout. A repeat of
+those entire packages with a 20-minute timeout and private tmpfs GOTMPDIR is
+running in /tmp/incoming-simple-go-recheck.log. Do not call the whole suite green
+until that exit result is observed. No Go source changed in this UI follow-up.
