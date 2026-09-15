@@ -4,6 +4,7 @@ import * as React from "react"
 import { AnimatePresence, motion } from "motion/react"
 import {
   Bell,
+  ArrowDownToLine,
   Blocks,
   CircleHelp,
   Clock,
@@ -58,6 +59,7 @@ import { ToolAccountDetail } from "./views/tool-account-detail"
 import { buildServiceOptions, catalogSections, catalogSize } from "./service-catalog"
 import { DeliveriesView } from "./views/deliveries-view"
 import { AddChannelDialog, type AddChannelTarget } from "./add-channel-dialog"
+import { IncomingWebhooksView } from "./views/incoming-webhooks-view"
 import { AddIntegrationDialog, type ServiceOption } from "./add-integration-dialog"
 
 /**
@@ -76,7 +78,8 @@ import { AddIntegrationDialog, type ServiceOption } from "./add-integration-dial
  */
 
 const TABS = [
-  { id: "notifications" as const, label: "Notifications", icon: Bell },
+  { id: "notifications" as const, label: "Outgoing notifications", icon: Bell },
+  { id: "incoming" as const, label: "Incoming webhooks", icon: ArrowDownToLine },
   { id: "tools" as const, label: "Tools (MCP)", icon: Wrench },
 ] as const
 
@@ -159,7 +162,7 @@ export function initialIntegrationsRoute(search: string): {
   server: string | null
 } {
   const p = new URLSearchParams(search)
-  const tab: IntegrationsTab = p.get("tab") === "tools" ? "tools" : "notifications"
+  const tab: IntegrationsTab = p.get("tab") === "tools" ? "tools" : p.get("tab") === "incoming" ? "incoming" : "notifications"
   const section = p.get("section")
 
   const notifyMatch = NOTIFY_SECTIONS.find((s) => s.key === section)
@@ -278,7 +281,8 @@ export function IntegrationsLayout({ workspaceId }: { workspaceId: string }) {
     }
     const url = new URL(window.location.href)
     url.searchParams.set("tab", tab)
-    url.searchParams.set("section", tab === "notifications" ? notifySection : mcpSection)
+    if (tab === "incoming") url.searchParams.delete("section")
+    else url.searchParams.set("section", tab === "notifications" ? notifySection : mcpSection)
     window.history.replaceState(null, "", url.toString())
   }, [tab, notifySection, mcpSection])
 
@@ -589,7 +593,7 @@ export function IntegrationsLayout({ workspaceId }: { workspaceId: string }) {
         icon={Plug}
         title="Integrations"
         description={
-          tab === "tools" ? (
+          tab === "incoming" ? <>Receive events and choose what they do</> : tab === "tools" ? (
             composioStatus.configured ? (
               <>
                 {composioStatus.counts.accounts} connected ·{" "}
@@ -615,7 +619,7 @@ export function IntegrationsLayout({ workspaceId }: { workspaceId: string }) {
           badge:
             t.id === "notifications"
               ? rows.length || undefined
-              : toolCount || undefined,
+              : t.id === "tools" ? toolCount || undefined : undefined,
         }))}
         activeTab={tab}
         onTabChange={setTab}
@@ -640,7 +644,7 @@ export function IntegrationsLayout({ workspaceId }: { workspaceId: string }) {
             <SubBarPrimary
               icon={Plus}
               onClick={() => setAddOpen(true)}
-              title="Connect a notification service, or managed tools for agents"
+              title="Add incoming webhooks, outgoing notifications or agent tools"
             >
               Add integration
             </SubBarPrimary>
@@ -648,7 +652,7 @@ export function IntegrationsLayout({ workspaceId }: { workspaceId: string }) {
         }
       />
 
-      <div className="relative flex flex-1 overflow-hidden">
+      {tab === "incoming" ? <IncomingWebhooksView key={workspaceId} workspaceId={workspaceId} /> : <div className="relative flex flex-1 overflow-hidden">
         {/* Tapping away closes the overlay; without it the only way back to
             the content on a phone is a collapse button the rail is covering. */}
         {isMobile && !collapsed && (
@@ -901,7 +905,7 @@ export function IntegrationsLayout({ workspaceId }: { workspaceId: string }) {
             </motion.div>
           </AnimatePresence>
         </div>
-      </div>
+      </div>}
 
       <ConfirmDialog
         open={pendingDelete !== null}
@@ -931,6 +935,7 @@ export function IntegrationsLayout({ workspaceId }: { workspaceId: string }) {
         services={services}
         sections={serviceSections}
         onPickService={handlePickService}
+        onPickIncoming={() => setTab("incoming")}
         onPickTools={handlePickTools}
         toolsConfigured={composioStatus.configured}
       />

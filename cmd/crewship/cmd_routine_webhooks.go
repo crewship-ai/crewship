@@ -543,7 +543,7 @@ func init() {
 
 	routineWebhooksCreateCmd.Flags().String("slug", "", "target routine slug (REQUIRED)")
 	routineWebhooksCreateCmd.Flags().String("name", "", "human-readable webhook name (default: '<slug> webhook')")
-	routineWebhooksCreateCmd.Flags().String("hmac-secret", "", "HMAC signing secret — empty means no signature verification")
+	routineWebhooksCreateCmd.Flags().String("hmac-secret", "", "HMAC signing secret — empty generates a secret shown once")
 	routineWebhooksCreateCmd.Flags().Int("rate-limit", 60, "max fires per minute per webhook (default 60)")
 	routineWebhooksCreateCmd.Flags().String("inputs-template", "", "JSON template merged with the request body to form routine inputs")
 	routineWebhooksCreateCmd.Flags().String("base-url", "", "override the public base URL printed in the response (defaults to server URL)")

@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { Bell, Check, KeyRound, Search, Wrench } from "lucide-react"
+import { ArrowDownToLine, Bell, Check, KeyRound, Search, Wrench } from "lucide-react"
 import type { LucideIcon } from "lucide-react"
 
 import {
@@ -51,7 +51,7 @@ import { ProviderMark } from "./provider-marks"
  *    it filters is a filter you cannot see while reading the results.
  */
 
-export type IntegrationKind = "notification" | "tools"
+export type IntegrationKind = "notification" | "tools" | "incoming"
 
 interface KindOption {
   key: IntegrationKind
@@ -71,9 +71,10 @@ interface KindOption {
 }
 
 const KINDS: KindOption[] = [
+  { key: "incoming", label: "Incoming webhook", blurb: "Receive events from GitHub or another service", distinguisher: "Start work or update a Page in Crewship", icon: ArrowDownToLine, accent: "blue" },
   {
     key: "notification",
-    label: "Notifications",
+    label: "Outgoing notifications",
     blurb: "Chat, push, on-call, e-mail or your own endpoint",
     distinguisher: "Somewhere Crewship reaches a person",
     icon: Bell,
@@ -108,6 +109,7 @@ interface AddIntegrationDialogProps {
   /** Chosen a notification service — the host opens its form. */
   onPickService: (service: ServiceOption) => void
   /** Chosen tools — the host switches to that tab (or opens the key dialog). */
+  onPickIncoming?: () => void
   onPickTools: () => void
   /** false = Composio has no API key yet, so tools needs setup first. */
   toolsConfigured: boolean
@@ -119,6 +121,7 @@ export function AddIntegrationDialog({
   services,
   sections,
   onPickService,
+  onPickIncoming,
   onPickTools,
   toolsConfigured,
 }: AddIntegrationDialogProps) {
@@ -162,7 +165,7 @@ export function AddIntegrationDialog({
         }
         description={
           kind === null
-            ? "Two kinds of thing live here. Which one are you connecting?"
+            ? "Receive events, send notifications, or connect tools for agents."
             : kind === "notification"
               ? "Where should Crewship reach you? You can add more later."
               : "Managed accounts your agents call on a person's behalf."
@@ -194,7 +197,7 @@ export function AddIntegrationDialog({
       <CreateSurfaceBody>
         {kind === null && (
           <CreateSurfaceGrid>
-            {KINDS.map((k, i) => (
+            {KINDS.filter((k) => k.key !== "incoming" || onPickIncoming).map((k, i) => (
               <CreateSurfaceTile
                 key={k.key}
                 // The shell does not autofocus — it leaves that to the surface
@@ -219,6 +222,11 @@ export function AddIntegrationDialog({
                   ) : undefined
                 }
                 onClick={() => {
+                  if (k.key === "incoming") {
+                    onOpenChange(false)
+                    onPickIncoming?.()
+                    return
+                  }
                   if (k.key === "tools") {
                     onOpenChange(false)
                     onPickTools()

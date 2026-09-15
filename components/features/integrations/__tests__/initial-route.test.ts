@@ -54,3 +54,8 @@ describe("initialIntegrationsRoute", () => {
     expect(initialIntegrationsRoute("?tab=notifications&server=srv_1").server).toBeNull()
   })
 })
+
+it("opens incoming webhooks without inheriting a tools section", () => {
+ const route = initialIntegrationsRoute("?tab=incoming&section=accounts&server=secret");
+ expect(route.tab).toBe("incoming"); expect(route.server).toBeNull();
+});

@@ -58,6 +58,7 @@ export function RoutineWebhooksTab({ workspaceId, pipelineId, slug }: Props) {
   }
 
   const [formOpen, setFormOpen] = useState(false)
+  const [profile, setProfile] = useState<"crewship" | "github">("crewship")
   const [name, setName] = useState("")
   const [signingSecret, setSigningSecret] = useState("")
   const [rateLimit, setRateLimit] = useState(60)
@@ -68,6 +69,7 @@ export function RoutineWebhooksTab({ workspaceId, pipelineId, slug }: Props) {
     setBusy(true)
     try {
       const w = await create({
+        ingress_profile: profile,
         name: name || `${slug} webhook`,
         target_pipeline_slug: slug,
         signing_secret: signingSecret || undefined,
@@ -181,9 +183,10 @@ export function RoutineWebhooksTab({ workspaceId, pipelineId, slug }: Props) {
                       {w.enabled ? "enabled" : "disabled"}
                     </Pill>
                     {w.signing_secret_set && (
-                      <Pill tone="success">HMAC verified</Pill>
+                      <Pill tone="success">Signing configured</Pill>
                     )}
                   </div>
+                  <p className="text-xs text-muted-foreground">{w.ingress_profile === "github" ? "GitHub pull requests" : "Crewship signature"} · Receiving URL shown once when created</p>
                   <div className="font-mono text-[12px] text-muted-foreground">
                     Token <span className="text-foreground/85">{w.token.slice(0, 16)}…</span>
                   </div>
@@ -258,6 +261,11 @@ export function RoutineWebhooksTab({ workspaceId, pipelineId, slug }: Props) {
                   unsigned POST to the public URL passed. That hole is closed;
                   leaving this blank chooses who generates the secret, not
                   whether there is one. */}
+              <label className="mb-3 block text-xs">Sender
+                <select aria-label="Webhook sender" className="ml-2 rounded border bg-background p-2 coarse:min-h-12" value={profile} onChange={(e) => setProfile(e.target.value as "crewship" | "github")}>
+                  <option value="crewship">Crewship signature</option><option value="github">GitHub pull requests</option>
+                </select>
+              </label>
               <FieldLabel>Signing secret</FieldLabel>
               <Input
                 type="password"
@@ -268,7 +276,7 @@ export function RoutineWebhooksTab({ workspaceId, pipelineId, slug }: Props) {
               />
               <p className="mt-1.5 text-[11px] text-muted-foreground">
                 Signing cannot be turned off. Senders must include{" "}
-                <span className="font-mono">X-Crewship-Signature: sha256=&lt;hmac&gt;</span>, and a
+                <span className="font-mono">{profile === "github" ? "X-Hub-Signature-256: sha256=<hmac>" : "X-Crewship-Signature: sha256=<hmac>"}</span>, and a
                 generated secret is shown once when the webhook is created.
               </p>
             </div>
@@ -326,7 +334,7 @@ function CreatedReveal({
   const [copied, setCopied] = useState<string | null>(null)
   const [showSecret, setShowSecret] = useState(false)
 
-  const url = `${typeof window !== "undefined" ? window.location.origin : ""}/api/v1/webhooks/${webhook.token}`
+  const url = `${typeof window !== "undefined" ? window.location.origin : ""}/api/v1/webhooks/${webhook.token}${webhook.ingress_profile === "github" ? "/github-pull-request" : ""}`
 
   const copy = (val: string, key: string) => {
     navigator.clipboard.writeText(val).then(() => {
@@ -364,6 +372,7 @@ function CreatedReveal({
           </Button>
         </div>
         <RevealField label="Public URL" value={url} copyKey="url" copied={copied} onCopy={copy} />
+        {webhook.ingress_profile === "github" && <p className="text-xs text-muted-foreground">For GitHub, choose application/json, paste the signing secret, and subscribe to pull requests. Opened, reopened and synchronize actions run this routine; ping does not start work.</p>}
         <RevealField label="Token" value={webhook.token} copyKey="token" copied={copied} onCopy={copy} mono />
         {webhook.signing_secret && (
           <div>
