@@ -81,8 +81,8 @@ func seedAgentMemory(ctx context.Context, client *cli.Client, crewIDs map[string
 		return fmt.Errorf("seedAgentMemory: list agents: %w", err)
 	}
 	var agents []struct {
-		Slug   string `json:"slug"`
-		CrewID string `json:"crew_id"`
+		Slug   string `json:"slug" yaml:"slug"`
+		CrewID string `json:"crew_id" yaml:"crew_id"`
 	}
 	if err := cli.ReadJSON(resp, &agents); err != nil {
 		return fmt.Errorf("seedAgentMemory: parse agents: %w", err)

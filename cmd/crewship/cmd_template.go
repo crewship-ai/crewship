@@ -34,15 +34,15 @@ var templateListCmd = &cobra.Command{
 		}
 
 		var templates []struct {
-			ID          string  `json:"id"`
-			Name        string  `json:"name"`
-			Slug        string  `json:"slug"`
-			Description *string `json:"description"`
-			Category    string  `json:"category"`
-			IsBuiltin   bool    `json:"is_builtin"`
+			ID          string  `json:"id" yaml:"id"`
+			Name        string  `json:"name" yaml:"name"`
+			Slug        string  `json:"slug" yaml:"slug"`
+			Description *string `json:"description" yaml:"description"`
+			Category    string  `json:"category" yaml:"category"`
+			IsBuiltin   bool    `json:"is_builtin" yaml:"is_builtin"`
 			Agents      []struct {
-				Name string `json:"name"`
-			} `json:"agents"`
+				Name string `json:"name" yaml:"name"`
+			} `json:"agents" yaml:"agents"`
 		}
 		if err := cli.ReadJSON(resp, &templates); err != nil {
 			return err
@@ -98,19 +98,19 @@ var templateGetCmd = &cobra.Command{
 		}
 
 		var t struct {
-			ID          string  `json:"id"`
-			Name        string  `json:"name"`
-			Slug        string  `json:"slug"`
-			Description *string `json:"description"`
-			Category    string  `json:"category"`
-			IsBuiltin   bool    `json:"is_builtin"`
-			CreatedAt   string  `json:"created_at"`
+			ID          string  `json:"id" yaml:"id"`
+			Name        string  `json:"name" yaml:"name"`
+			Slug        string  `json:"slug" yaml:"slug"`
+			Description *string `json:"description" yaml:"description"`
+			Category    string  `json:"category" yaml:"category"`
+			IsBuiltin   bool    `json:"is_builtin" yaml:"is_builtin"`
+			CreatedAt   string  `json:"created_at" yaml:"created_at"`
 			Agents      []struct {
-				Name      string  `json:"name"`
-				Slug      string  `json:"slug"`
-				RoleTitle *string `json:"role_title"`
-				AgentRole string  `json:"agent_role"`
-			} `json:"agents"`
+				Name      string  `json:"name" yaml:"name"`
+				Slug      string  `json:"slug" yaml:"slug"`
+				RoleTitle *string `json:"role_title" yaml:"role_title"`
+				AgentRole string  `json:"agent_role" yaml:"agent_role"`
+			} `json:"agents" yaml:"agents"`
 		}
 		if err := cli.ReadJSON(resp, &t); err != nil {
 			return err
@@ -193,11 +193,11 @@ var templateDeployCmd = &cobra.Command{
 		}
 
 		var result struct {
-			CrewID     string   `json:"crew_id"`
-			CrewName   string   `json:"crew_name"`
-			CrewSlug   string   `json:"crew_slug"`
-			AgentCount int      `json:"agent_count"`
-			AgentIDs   []string `json:"agent_ids"`
+			CrewID     string   `json:"crew_id" yaml:"crew_id"`
+			CrewName   string   `json:"crew_name" yaml:"crew_name"`
+			CrewSlug   string   `json:"crew_slug" yaml:"crew_slug"`
+			AgentCount int      `json:"agent_count" yaml:"agent_count"`
+			AgentIDs   []string `json:"agent_ids" yaml:"agent_ids"`
 		}
 		if err := cli.ReadJSON(resp, &result); err != nil {
 			return err

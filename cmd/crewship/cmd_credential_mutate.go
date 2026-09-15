@@ -545,13 +545,13 @@ var credCreateCmd = &cobra.Command{
 		}
 
 		var created struct {
-			ID   string `json:"id"`
-			Name string `json:"name"`
+			ID   string `json:"id" yaml:"id"`
+			Name string `json:"name" yaml:"name"`
 			// Status is decoded so the machine formats can answer the
 			// question the human hint below answers in prose: an OAuth
 			// credential is created PENDING and works only once the flow
 			// completes.
-			Status string `json:"status,omitempty"`
+			Status string `json:"status,omitempty" yaml:"status,omitempty"`
 		}
 		if err := cli.ReadJSON(resp, &created); err != nil {
 			return err
@@ -676,8 +676,8 @@ var credUpdateCmd = &cobra.Command{
 					cli.PrintWarning("Could not fetch credential metadata for validation: " + err.Error())
 				} else {
 					var cred struct {
-						Type     string `json:"type"`
-						Provider string `json:"provider"`
+						Type     string `json:"type" yaml:"type"`
+						Provider string `json:"provider" yaml:"provider"`
 					}
 					if err := cli.ReadJSON(metaResp, &cred); err != nil {
 						cli.PrintWarning("Could not parse credential metadata, skipping validation: " + err.Error())
@@ -807,8 +807,8 @@ Examples:
 				return err
 			}
 			var cred struct {
-				Type     string `json:"type"`
-				Provider string `json:"provider"`
+				Type     string `json:"type" yaml:"type"`
+				Provider string `json:"provider" yaml:"provider"`
 			}
 			if err := cli.ReadJSON(metaResp, &cred); err != nil {
 				return err
@@ -867,10 +867,10 @@ Examples:
 		}
 
 		var out struct {
-			ID           string `json:"id"`
-			Status       string `json:"status"`
-			GraceSeconds int    `json:"grace_seconds"`
-			ExpiresAt    string `json:"expires_at"`
+			ID           string `json:"id" yaml:"id"`
+			Status       string `json:"status" yaml:"status"`
+			GraceSeconds int    `json:"grace_seconds" yaml:"grace_seconds"`
+			ExpiresAt    string `json:"expires_at" yaml:"expires_at"`
 		}
 		if err := cli.ReadJSON(resp, &out); err != nil {
 			return err
@@ -910,8 +910,8 @@ var credRotationCancelCmd = &cobra.Command{
 			return err
 		}
 		var out struct {
-			Status  string `json:"status"`
-			Message string `json:"message"`
+			Status  string `json:"status" yaml:"status"`
+			Message string `json:"message" yaml:"message"`
 		}
 		if err := cli.ReadJSON(resp, &out); err != nil {
 			return err

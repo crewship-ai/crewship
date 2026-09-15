@@ -38,11 +38,11 @@ var intgToolsListCmd = &cobra.Command{
 			return err
 		}
 		var tools []struct {
-			ID          string  `json:"id"`
-			ToolName    string  `json:"tool_name"`
-			Description *string `json:"description"`
-			Enabled     bool    `json:"enabled"`
-			UpdatedAt   string  `json:"updated_at"`
+			ID          string  `json:"id" yaml:"id"`
+			ToolName    string  `json:"tool_name" yaml:"tool_name"`
+			Description *string `json:"description" yaml:"description"`
+			Enabled     bool    `json:"enabled" yaml:"enabled"`
+			UpdatedAt   string  `json:"updated_at" yaml:"updated_at"`
 		}
 		if err := cli.ReadJSON(resp, &tools); err != nil {
 			return err
@@ -139,8 +139,8 @@ allowed_tools scope, not through this binding.`,
 // it" should mean. Encoding an empty string instead would overwrite a good
 // description with a blank one.
 type discoveredTool struct {
-	Name        string  `json:"name"`
-	Description *string `json:"description,omitempty"`
+	Name        string  `json:"name" yaml:"name"`
+	Description *string `json:"description,omitempty" yaml:"description,omitempty"`
 }
 
 // toolsFileEnvelope lets --tools-file accept an MCP `tools/list` result
@@ -148,9 +148,9 @@ type discoveredTool struct {
 // can be piped straight in.
 type toolsFileEnvelope struct {
 	Tools []struct {
-		Name        string  `json:"name"`
-		Description *string `json:"description"`
-	} `json:"tools"`
+		Name        string  `json:"name" yaml:"name"`
+		Description *string `json:"description" yaml:"description"`
+	} `json:"tools" yaml:"tools"`
 }
 
 // readDiscoveredToolsFile loads --tools-file, where "-" means stdin.

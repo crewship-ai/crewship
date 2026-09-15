@@ -32,8 +32,8 @@ func fetchRoutineStepCount(client *cli.Client, ws, slug string) int {
 	}
 	var body struct {
 		Definition struct {
-			Steps []json.RawMessage `json:"steps"`
-		} `json:"definition"`
+			Steps []json.RawMessage `json:"steps" yaml:"steps"`
+		} `json:"definition" yaml:"definition"`
 	}
 	if json.NewDecoder(resp.Body).Decode(&body) != nil {
 		return 0

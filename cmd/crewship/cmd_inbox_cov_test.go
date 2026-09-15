@@ -434,7 +434,7 @@ func TestInboxCountRunE_ErrorBranchesAndYAML(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RunE yaml: %v", err)
 	}
-	if !strings.Contains(out, "unreadcount: 9") {
+	if !strings.Contains(out, "unread_count: 9") {
 		t.Errorf("yaml count output wrong; got:\n%s", out)
 	}
 }

@@ -24,22 +24,22 @@ import (
 // could not be reached", and printing a bare "up to date" for the second is
 // the exact false assurance the provider's classifier refuses to give.
 type crewImageStatusResponse struct {
-	CrewID         string `json:"crew_id"`
-	Image          string `json:"image"`
-	ContainerID    string `json:"container_id"`
-	Running        bool   `json:"running"`
-	RunningDigest  string `json:"running_digest"`
-	ResolvedDigest string `json:"resolved_digest"`
-	Behind         bool   `json:"behind"`
-	Reason         string `json:"reason"`
+	CrewID         string `json:"crew_id" yaml:"crew_id"`
+	Image          string `json:"image" yaml:"image"`
+	ContainerID    string `json:"container_id" yaml:"container_id"`
+	Running        bool   `json:"running" yaml:"running"`
+	RunningDigest  string `json:"running_digest" yaml:"running_digest"`
+	ResolvedDigest string `json:"resolved_digest" yaml:"resolved_digest"`
+	Behind         bool   `json:"behind" yaml:"behind"`
+	Reason         string `json:"reason" yaml:"reason"`
 }
 
 type crewImageRefreshResponse struct {
-	CrewID           string `json:"crew_id"`
-	Image            string `json:"image"`
-	PreviousDigest   string `json:"previous_digest"`
-	NewDigest        string `json:"new_digest"`
-	ContainerRemoved bool   `json:"container_removed"`
+	CrewID           string `json:"crew_id" yaml:"crew_id"`
+	Image            string `json:"image" yaml:"image"`
+	PreviousDigest   string `json:"previous_digest" yaml:"previous_digest"`
+	NewDigest        string `json:"new_digest" yaml:"new_digest"`
+	ContainerRemoved bool   `json:"container_removed" yaml:"container_removed"`
 }
 
 var crewImageStatusCmd = &cobra.Command{

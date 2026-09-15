@@ -22,11 +22,11 @@ import (
 // routineReceiptRow mirrors the API's RoutineWebhookReceipt. A NAMED type so
 // cli_yaml_key_parity_test.go can hold it to the json/yaml contract.
 type routineReceiptRow struct {
-	ID               string  `json:"id"`
+	ID               string  `json:"id" yaml:"id"`
 	WorkspaceID      string  `json:"workspace_id" yaml:"workspace_id"`
 	WebhookID        string  `json:"webhook_id" yaml:"webhook_id"`
 	SourceDeliveryID string  `json:"source_delivery_id" yaml:"source_delivery_id"`
-	Profile          string  `json:"profile"`
+	Profile          string  `json:"profile" yaml:"profile"`
 	BodySHA256       string  `json:"body_sha256" yaml:"body_sha256"`
 	BodyBytes        int64   `json:"body_bytes" yaml:"body_bytes"`
 	RunID            string  `json:"run_id" yaml:"run_id"`
@@ -36,7 +36,7 @@ type routineReceiptRow struct {
 }
 
 type routineReceiptPageBody struct {
-	Items      []routineReceiptRow `json:"items"`
+	Items      []routineReceiptRow `json:"items" yaml:"items"`
 	NextCursor *string             `json:"next_cursor" yaml:"next_cursor"`
 }
 

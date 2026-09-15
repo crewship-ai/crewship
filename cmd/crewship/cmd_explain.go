@@ -106,7 +106,7 @@ Examples:
 			return err
 		}
 		var chatResult struct {
-			ID string `json:"id"`
+			ID string `json:"id" yaml:"id"`
 		}
 		if err := cli.ReadJSON(resp, &chatResult); err != nil {
 			return err
@@ -149,9 +149,9 @@ func runWindowStart(client *cli.Client, runID string) (time.Time, error) {
 	}
 	var body struct {
 		Data []struct {
-			ID        string `json:"id"`
-			CreatedAt string `json:"created_at"`
-		} `json:"data"`
+			ID        string `json:"id" yaml:"id"`
+			CreatedAt string `json:"created_at" yaml:"created_at"`
+		} `json:"data" yaml:"data"`
 	}
 	if err := cli.ReadJSON(resp, &body); err != nil {
 		return time.Time{}, err
@@ -186,7 +186,7 @@ func fetchJournalForExplain(client *cli.Client, agentID string, from time.Time, 
 		return "", err
 	}
 	var body struct {
-		Entries []map[string]any `json:"entries"`
+		Entries []map[string]any `json:"entries" yaml:"entries"`
 	}
 	if err := cli.ReadJSON(resp, &body); err != nil {
 		return "", err

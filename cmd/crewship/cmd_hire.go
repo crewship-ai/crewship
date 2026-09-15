@@ -25,21 +25,21 @@ import (
 // here because internal/api is a server-side package the CLI can't
 // import without bringing the whole API graph into the binary.
 type hireResponseShape struct {
-	ID            string  `json:"id"`
-	CrewID        *string `json:"crew_id"`
-	WorkspaceID   string  `json:"workspace_id"`
-	Slug          string  `json:"slug"`
-	Name          string  `json:"name"`
-	Status        string  `json:"status"`
-	Ephemeral     bool    `json:"ephemeral"`
-	ExpiresAt     *string `json:"expires_at"`
-	ExpiredAt     *string `json:"expired_at"`
-	ParentLeadID  *string `json:"parent_lead_id"`
-	HireReason    *string `json:"hire_reason"`
-	PendingReview bool    `json:"pending_review"`
-	InboxItemID   string  `json:"inbox_item_id,omitempty"`
-	ApprovalID    string  `json:"approval_id,omitempty"`
-	Decision      string  `json:"decision"`
+	ID            string  `json:"id" yaml:"id"`
+	CrewID        *string `json:"crew_id" yaml:"crew_id"`
+	WorkspaceID   string  `json:"workspace_id" yaml:"workspace_id"`
+	Slug          string  `json:"slug" yaml:"slug"`
+	Name          string  `json:"name" yaml:"name"`
+	Status        string  `json:"status" yaml:"status"`
+	Ephemeral     bool    `json:"ephemeral" yaml:"ephemeral"`
+	ExpiresAt     *string `json:"expires_at" yaml:"expires_at"`
+	ExpiredAt     *string `json:"expired_at" yaml:"expired_at"`
+	ParentLeadID  *string `json:"parent_lead_id" yaml:"parent_lead_id"`
+	HireReason    *string `json:"hire_reason" yaml:"hire_reason"`
+	PendingReview bool    `json:"pending_review" yaml:"pending_review"`
+	InboxItemID   string  `json:"inbox_item_id,omitempty" yaml:"inbox_item_id,omitempty"`
+	ApprovalID    string  `json:"approval_id,omitempty" yaml:"approval_id,omitempty"`
+	Decision      string  `json:"decision" yaml:"decision"`
 }
 
 var hireCmd = &cobra.Command{

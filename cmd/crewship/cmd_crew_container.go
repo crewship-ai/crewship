@@ -72,21 +72,21 @@ var crewContainerStatusCmd = &cobra.Command{
 // block renders. It is not the whole payload — `--format json` emits that
 // verbatim, and this struct must never become the machine contract.
 type crewContainerStatus struct {
-	CrewID string `json:"crew_id"`
-	Status string `json:"status"`
-	Uptime string `json:"uptime"`
+	CrewID string `json:"crew_id" yaml:"crew_id"`
+	Status string `json:"status" yaml:"status"`
+	Uptime string `json:"uptime" yaml:"uptime"`
 	// RuntimeContract is absent when the provider has no opinion, and absent
 	// is not "current" — nothing is printed in that case.
-	RuntimeContract string `json:"runtime_contract"`
+	RuntimeContract string `json:"runtime_contract" yaml:"runtime_contract"`
 	// ConfigDrift names the per-crew settings the container does not carry —
 	// its memory / CPU limits, which are applied at container create and
 	// nowhere else (#1681). Empty whenever the container matches its crew, and
 	// whenever the provider reported no limits to compare against.
 	ConfigDrift []struct {
-		Field      string  `json:"field"`
-		Configured float64 `json:"configured"`
-		Effective  float64 `json:"effective"`
-	} `json:"config_drift"`
+		Field      string  `json:"field" yaml:"field"`
+		Configured float64 `json:"configured" yaml:"configured"`
+		Effective  float64 `json:"effective" yaml:"effective"`
+	} `json:"config_drift" yaml:"config_drift"`
 }
 
 // running reports whether the container is actually serving right now.

@@ -31,13 +31,13 @@ var intgCrewListCmd = &cobra.Command{
 			return err
 		}
 		var items []struct {
-			ID            string  `json:"id"`
-			Name          string  `json:"name"`
-			DisplayName   string  `json:"display_name"`
-			Transport     string  `json:"transport"`
-			Endpoint      *string `json:"endpoint"`
-			Enabled       bool    `json:"enabled"`
-			DefaultAccess string  `json:"default_access"`
+			ID            string  `json:"id" yaml:"id"`
+			Name          string  `json:"name" yaml:"name"`
+			DisplayName   string  `json:"display_name" yaml:"display_name"`
+			Transport     string  `json:"transport" yaml:"transport"`
+			Endpoint      *string `json:"endpoint" yaml:"endpoint"`
+			Enabled       bool    `json:"enabled" yaml:"enabled"`
+			DefaultAccess string  `json:"default_access" yaml:"default_access"`
 		}
 		if err := cli.ReadJSON(resp, &items); err != nil {
 			return err
@@ -139,8 +139,8 @@ var intgCrewCreateCmd = &cobra.Command{
 			return err
 		}
 		var created struct {
-			ID   string `json:"id"`
-			Name string `json:"name"`
+			ID   string `json:"id" yaml:"id"`
+			Name string `json:"name" yaml:"name"`
 		}
 		if err := cli.ReadJSON(resp, &created); err != nil {
 			return fmt.Errorf("decode response: %w", err)

@@ -50,14 +50,14 @@ var crewContainersCmd = &cobra.Command{
 		// idle container where nothing was measured.
 		var out struct {
 			Containers []struct {
-				Name       string   `json:"name"`
-				Image      string   `json:"image"`
-				Kind       string   `json:"kind"`
-				Status     string   `json:"status"`
-				CPUPercent *float64 `json:"cpu_percent"`
-				MemoryMB   *int     `json:"memory_mb"`
-				AgentCount *int     `json:"agent_count"`
-			} `json:"containers"`
+				Name       string   `json:"name" yaml:"name"`
+				Image      string   `json:"image" yaml:"image"`
+				Kind       string   `json:"kind" yaml:"kind"`
+				Status     string   `json:"status" yaml:"status"`
+				CPUPercent *float64 `json:"cpu_percent" yaml:"cpu_percent"`
+				MemoryMB   *int     `json:"memory_mb" yaml:"memory_mb"`
+				AgentCount *int     `json:"agent_count" yaml:"agent_count"`
+			} `json:"containers" yaml:"containers"`
 		}
 		if err := cli.ReadJSON(resp, &out); err != nil {
 			return err

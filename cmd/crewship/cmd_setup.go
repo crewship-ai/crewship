@@ -282,11 +282,11 @@ func runSetup(cmd *cobra.Command, _ []string) error {
 	}
 
 	var result struct {
-		WorkspaceID string   `json:"workspace_id"`
-		CrewID      string   `json:"crew_id"`
-		AgentID     string   `json:"agent_id"`
-		AgentIDs    []string `json:"agent_ids"`
-		AgentCount  int      `json:"agent_count"`
+		WorkspaceID string   `json:"workspace_id" yaml:"workspace_id"`
+		CrewID      string   `json:"crew_id" yaml:"crew_id"`
+		AgentID     string   `json:"agent_id" yaml:"agent_id"`
+		AgentIDs    []string `json:"agent_ids" yaml:"agent_ids"`
+		AgentCount  int      `json:"agent_count" yaml:"agent_count"`
 	}
 	if err := cli.ReadJSON(resp, &result); err != nil {
 		return fmt.Errorf("parse response: %w", err)
@@ -474,7 +474,7 @@ func serverTelemetryEnabled() bool {
 		return crashreport.DefaultOptIn(version)
 	}
 	var st struct {
-		Enabled bool `json:"enabled"`
+		Enabled bool `json:"enabled" yaml:"enabled"`
 	}
 	if err := cli.ReadJSON(resp, &st); err != nil {
 		return crashreport.DefaultOptIn(version)

@@ -63,7 +63,7 @@ Examples:
 			if d.ChatID != nil && *d.ChatID != "" {
 				path := "/api/v1/chats/" + url.PathEscape(*d.ChatID) + "/messages?limit=50"
 				var body struct {
-					Messages []map[string]any `json:"messages"`
+					Messages []map[string]any `json:"messages" yaml:"messages"`
 				}
 				if e := getJSON(client, path, &body); e == nil {
 					out.Messages = body.Messages

@@ -41,13 +41,13 @@ import (
 
 // revealResult is the server's 200 body.
 type revealResult struct {
-	CredentialID   string `json:"credential_id"`
-	Name           string `json:"name"`
-	Type           string `json:"type"`
-	Sensitivity    string `json:"sensitivity"`
-	Value          string `json:"value"`
-	RevealedAt     string `json:"revealed_at"`
-	JournalEntryID string `json:"journal_entry_id"`
+	CredentialID   string `json:"credential_id" yaml:"credential_id"`
+	Name           string `json:"name" yaml:"name"`
+	Type           string `json:"type" yaml:"type"`
+	Sensitivity    string `json:"sensitivity" yaml:"sensitivity"`
+	Value          string `json:"value" yaml:"value"`
+	RevealedAt     string `json:"revealed_at" yaml:"revealed_at"`
+	JournalEntryID string `json:"journal_entry_id" yaml:"journal_entry_id"`
 }
 
 // revealTTYCheck is indirected so tests can drive both branches without a
@@ -216,7 +216,7 @@ func revealInteractiveClient(cmd *cobra.Command) (*cli.Client, error) {
 // empty result just means we prompt for the email too.
 func revealCallerEmail(client *cli.Client) string {
 	var info struct {
-		UserEmail string `json:"user_email"`
+		UserEmail string `json:"user_email" yaml:"user_email"`
 	}
 	if err := getJSON(client, "/api/v1/auth/cli-token/validate", &info); err != nil {
 		return ""
@@ -258,8 +258,8 @@ Examples:
 		}
 
 		var out struct {
-			WorkspaceID string `json:"workspace_id"`
-			Enabled     bool   `json:"enabled"`
+			WorkspaceID string `json:"workspace_id" yaml:"workspace_id"`
+			Enabled     bool   `json:"enabled" yaml:"enabled"`
 		}
 
 		if !enable && !disable {
@@ -346,9 +346,9 @@ Examples:
 			return err
 		}
 		var out struct {
-			CredentialID string `json:"credential_id"`
-			Sensitivity  string `json:"sensitivity"`
-			Previous     string `json:"previous"`
+			CredentialID string `json:"credential_id" yaml:"credential_id"`
+			Sensitivity  string `json:"sensitivity" yaml:"sensitivity"`
+			Previous     string `json:"previous" yaml:"previous"`
 		}
 		if err := cli.ReadJSON(resp, &out); err != nil {
 			return err

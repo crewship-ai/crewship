@@ -29,15 +29,15 @@ import (
 // Create handlers. Optional columns surface as pointers so we can render
 // them as "-" instead of an empty cell.
 type workflowTemplateItem struct {
-	ID           string  `json:"id"`
-	Name         string  `json:"name"`
-	Description  *string `json:"description"`
-	TemplateJSON string  `json:"template_json"`
-	Icon         *string `json:"icon"`
-	Color        *string `json:"color"`
-	IsBuiltin    bool    `json:"is_builtin"`
-	CreatedAt    string  `json:"created_at"`
-	UpdatedAt    string  `json:"updated_at"`
+	ID           string  `json:"id" yaml:"id"`
+	Name         string  `json:"name" yaml:"name"`
+	Description  *string `json:"description" yaml:"description"`
+	TemplateJSON string  `json:"template_json" yaml:"template_json"`
+	Icon         *string `json:"icon" yaml:"icon"`
+	Color        *string `json:"color" yaml:"color"`
+	IsBuiltin    bool    `json:"is_builtin" yaml:"is_builtin"`
+	CreatedAt    string  `json:"created_at" yaml:"created_at"`
+	UpdatedAt    string  `json:"updated_at" yaml:"updated_at"`
 }
 
 // workflowManifestStage is the per-stage shape under `spec.stages` in the

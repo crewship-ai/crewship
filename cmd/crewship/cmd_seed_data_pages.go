@@ -378,8 +378,8 @@ func seedPagePanelData(client *cli.Client, wsID, slug string, panel seeddata.Pag
 func seedPageError(resp *http.Response) error {
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<10))
 	var body struct {
-		Error   string `json:"error"`
-		Message string `json:"message"`
+		Error   string `json:"error" yaml:"error"`
+		Message string `json:"message" yaml:"message"`
 	}
 	_ = json.Unmarshal(raw, &body)
 	switch {

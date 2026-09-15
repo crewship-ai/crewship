@@ -31,14 +31,14 @@ import (
 
 // adminWorkspaceRow mirrors internal/api.AdminHandler.ListWorkspaces's wsRow.
 type adminWorkspaceRow struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	Slug        string `json:"slug"`
-	CreatedAt   string `json:"created_at"`
-	UpdatedAt   string `json:"updated_at"`
-	MemberCount int    `json:"_count_members"`
-	AgentCount  int    `json:"_count_agents"`
-	CrewCount   int    `json:"_count_crews"`
+	ID          string `json:"id" yaml:"id"`
+	Name        string `json:"name" yaml:"name"`
+	Slug        string `json:"slug" yaml:"slug"`
+	CreatedAt   string `json:"created_at" yaml:"created_at"`
+	UpdatedAt   string `json:"updated_at" yaml:"updated_at"`
+	MemberCount int    `json:"_count_members" yaml:"_count_members"`
+	AgentCount  int    `json:"_count_agents" yaml:"_count_agents"`
+	CrewCount   int    `json:"_count_crews" yaml:"_count_crews"`
 }
 
 var adminWorkspacesCmd = &cobra.Command{

@@ -21,9 +21,9 @@ import (
 // instanceSettingItem is the wire shape returned by the handler's
 // instanceSetting struct (key/value/updated_at).
 type instanceSettingItem struct {
-	Key       string `json:"key"`
-	Value     string `json:"value"`
-	UpdatedAt string `json:"updated_at,omitempty"`
+	Key       string `json:"key" yaml:"key"`
+	Value     string `json:"value" yaml:"value"`
+	UpdatedAt string `json:"updated_at,omitempty" yaml:"updated_at,omitempty"`
 }
 
 // ── Top-level: `crewship instance ...` ─────────────────────────────────

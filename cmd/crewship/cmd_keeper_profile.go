@@ -75,47 +75,47 @@ Examples:
 // keeperProfileField mirrors one {value, source, editable} entry of the
 // judge_profile block in internal/api/admin_keeper_config.go.
 type keeperProfileBoolField struct {
-	Value  bool   `json:"value"`
-	Source string `json:"source"`
+	Value  bool   `json:"value" yaml:"value"`
+	Source string `json:"source" yaml:"source"`
 }
 
 type keeperProfileStrField struct {
-	Value  string `json:"value"`
-	Source string `json:"source"`
+	Value  string `json:"value" yaml:"value"`
+	Source string `json:"source" yaml:"source"`
 }
 
 type keeperProfileIntField struct {
-	Value  int64  `json:"value"`
-	Source string `json:"source"`
+	Value  int64  `json:"value" yaml:"value"`
+	Source string `json:"source" yaml:"source"`
 }
 
 type keeperProfileListField struct {
-	Value  []string `json:"value"`
-	Source string   `json:"source"`
+	Value  []string `json:"value" yaml:"value"`
+	Source string   `json:"source" yaml:"source"`
 }
 
 type keeperJudgeProfile struct {
-	Name               keeperProfileStrField  `json:"name"`
-	Evidence           keeperProfileBoolField `json:"evidence"`
-	EvidenceFacts      keeperProfileListField `json:"evidence_facts"`
-	HardGate           keeperProfileBoolField `json:"hard_gate"`
-	EscalateFrom       keeperProfileIntField  `json:"escalate_from"`
-	Precedent          keeperProfileBoolField `json:"precedent"`
-	PrecedentN         keeperProfileIntField  `json:"precedent_n"`
-	ConsistencySamples keeperProfileIntField  `json:"consistency_samples"`
-	PromptBudgetTokens keeperProfileIntField  `json:"prompt_budget_tokens"`
+	Name               keeperProfileStrField  `json:"name" yaml:"name"`
+	Evidence           keeperProfileBoolField `json:"evidence" yaml:"evidence"`
+	EvidenceFacts      keeperProfileListField `json:"evidence_facts" yaml:"evidence_facts"`
+	HardGate           keeperProfileBoolField `json:"hard_gate" yaml:"hard_gate"`
+	EscalateFrom       keeperProfileIntField  `json:"escalate_from" yaml:"escalate_from"`
+	Precedent          keeperProfileBoolField `json:"precedent" yaml:"precedent"`
+	PrecedentN         keeperProfileIntField  `json:"precedent_n" yaml:"precedent_n"`
+	ConsistencySamples keeperProfileIntField  `json:"consistency_samples" yaml:"consistency_samples"`
+	PromptBudgetTokens keeperProfileIntField  `json:"prompt_budget_tokens" yaml:"prompt_budget_tokens"`
 
-	Overridden bool     `json:"overridden"`
-	Choices    []string `json:"choices"`
-	Facts      []string `json:"available_facts"`
-	Stamp      string   `json:"stamp"`
+	Overridden bool     `json:"overridden" yaml:"overridden"`
+	Choices    []string `json:"choices" yaml:"choices"`
+	Facts      []string `json:"available_facts" yaml:"available_facts"`
+	Stamp      string   `json:"stamp" yaml:"stamp"`
 }
 
 // keeperProfileEnvelope is the config response narrowed to what this command
 // reads. It shares the endpoint with `keeper config`, so it deliberately
 // decodes only the profile block rather than duplicating that struct.
 type keeperProfileEnvelope struct {
-	Profile keeperJudgeProfile `json:"judge_profile"`
+	Profile keeperJudgeProfile `json:"judge_profile" yaml:"judge_profile"`
 }
 
 func getKeeperJudgeProfile(client *cli.Client) (keeperJudgeProfile, error) {

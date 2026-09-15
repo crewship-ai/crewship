@@ -38,9 +38,9 @@ import (
 // Deliberately not the full API shape: everything else here would be a field
 // that could change under us for no benefit.
 type pairedCredential struct {
-	Name     string `json:"name"`
-	Provider string `json:"provider"`
-	Status   string `json:"status"`
+	Name     string `json:"name" yaml:"name"`
+	Provider string `json:"provider" yaml:"provider"`
+	Status   string `json:"status" yaml:"status"`
 }
 
 // needsModelTokenHandoff reports whether the workspace is missing a usable
@@ -211,8 +211,8 @@ func firstWorkspaceID(client *cli.Client) (string, error) {
 
 // workspaceRef is the slice of GET /api/v1/workspaces this file needs.
 type workspaceRef struct {
-	ID        string `json:"id"`
-	CreatedAt string `json:"created_at"`
+	ID        string `json:"id" yaml:"id"`
+	CreatedAt string `json:"created_at" yaml:"created_at"`
 }
 
 // oldestWorkspaceID picks the workspace the onboarding BACKEND would pick.

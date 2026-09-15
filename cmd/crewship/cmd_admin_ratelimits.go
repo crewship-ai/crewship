@@ -22,18 +22,18 @@ import (
 
 // rateLimiterRow mirrors internal/ratelimitcfg.State.
 type rateLimiterRow struct {
-	Key         string `json:"key"`
-	Group       string `json:"group"`
-	DisplayName string `json:"display_name"`
-	Description string `json:"description"`
-	Unit        string `json:"unit"`
-	Default     int    `json:"default"`
-	Value       int    `json:"value"`
-	Overridden  bool   `json:"overridden"`
+	Key         string `json:"key" yaml:"key"`
+	Group       string `json:"group" yaml:"group"`
+	DisplayName string `json:"display_name" yaml:"display_name"`
+	Description string `json:"description" yaml:"description"`
+	Unit        string `json:"unit" yaml:"unit"`
+	Default     int    `json:"default" yaml:"default"`
+	Value       int    `json:"value" yaml:"value"`
+	Overridden  bool   `json:"overridden" yaml:"overridden"`
 }
 
 type rateLimiterListResponse struct {
-	Limiters []rateLimiterRow `json:"limiters"`
+	Limiters []rateLimiterRow `json:"limiters" yaml:"limiters"`
 }
 
 var adminRateLimitsCmd = &cobra.Command{

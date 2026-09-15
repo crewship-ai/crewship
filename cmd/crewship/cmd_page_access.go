@@ -30,30 +30,30 @@ import (
 // ── The wire (mirrors internal/api/pages_access.go) ────────────────────────
 
 type pageAccessSubjectJSON struct {
-	SubjectType string   `json:"subject_type"`
-	SubjectID   string   `json:"subject_id"`
-	Label       string   `json:"label"`
-	Paths       []string `json:"paths"`
+	SubjectType string   `json:"subject_type" yaml:"subject_type"`
+	SubjectID   string   `json:"subject_id" yaml:"subject_id"`
+	Label       string   `json:"label" yaml:"label"`
+	Paths       []string `json:"paths" yaml:"paths"`
 }
 
 type pageAccessJSON struct {
-	Page       string                  `json:"page"`
-	Subjects   []pageAccessSubjectJSON `json:"subjects"`
-	NextCursor string                  `json:"next_cursor"`
+	Page       string                  `json:"page" yaml:"page"`
+	Subjects   []pageAccessSubjectJSON `json:"subjects" yaml:"subjects"`
+	NextCursor string                  `json:"next_cursor" yaml:"next_cursor"`
 }
 
 type pageSubjectAccessJSON struct {
 	Subject struct {
-		SubjectType string `json:"subject_type"`
-		SubjectID   string `json:"subject_id"`
-		Label       string `json:"label"`
-	} `json:"subject"`
+		SubjectType string `json:"subject_type" yaml:"subject_type"`
+		SubjectID   string `json:"subject_id" yaml:"subject_id"`
+		Label       string `json:"label" yaml:"label"`
+	} `json:"subject" yaml:"subject"`
 	Pages []struct {
-		Slug  string   `json:"slug"`
-		Name  string   `json:"name"`
-		Paths []string `json:"paths"`
-	} `json:"pages"`
-	NextCursor string `json:"next_cursor"`
+		Slug  string   `json:"slug" yaml:"slug"`
+		Name  string   `json:"name" yaml:"name"`
+		Paths []string `json:"paths" yaml:"paths"`
+	} `json:"pages" yaml:"pages"`
+	NextCursor string `json:"next_cursor" yaml:"next_cursor"`
 }
 
 var pageAccessCmd = &cobra.Command{

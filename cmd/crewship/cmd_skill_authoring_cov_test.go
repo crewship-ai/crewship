@@ -14,21 +14,21 @@ import (
 // skillRow mirrors the anonymous struct assembleSkillMD takes — identical
 // field names, types and tags, so Go treats them as the same type.
 type skillRowAlias = struct {
-	Slug                   string  `json:"slug"`
-	DisplayName            string  `json:"display_name"`
-	Description            *string `json:"description"`
-	Version                string  `json:"version"`
-	Author                 *string `json:"author"`
-	Vendor                 *string `json:"vendor"`
-	Homepage               *string `json:"homepage"`
-	License                *string `json:"license"`
-	Category               string  `json:"category"`
-	Runtime                string  `json:"runtime"`
-	Maturity               string  `json:"maturity"`
-	Icon                   *string `json:"icon"`
-	Tags                   *string `json:"tags"`
-	CredentialRequirements *string `json:"credential_requirements"`
-	Content                *string `json:"content"`
+	Slug                   string  `json:"slug" yaml:"slug"`
+	DisplayName            string  `json:"display_name" yaml:"display_name"`
+	Description            *string `json:"description" yaml:"description"`
+	Version                string  `json:"version" yaml:"version"`
+	Author                 *string `json:"author" yaml:"author"`
+	Vendor                 *string `json:"vendor" yaml:"vendor"`
+	Homepage               *string `json:"homepage" yaml:"homepage"`
+	License                *string `json:"license" yaml:"license"`
+	Category               string  `json:"category" yaml:"category"`
+	Runtime                string  `json:"runtime" yaml:"runtime"`
+	Maturity               string  `json:"maturity" yaml:"maturity"`
+	Icon                   *string `json:"icon" yaml:"icon"`
+	Tags                   *string `json:"tags" yaml:"tags"`
+	CredentialRequirements *string `json:"credential_requirements" yaml:"credential_requirements"`
+	Content                *string `json:"content" yaml:"content"`
 }
 
 func covStrPtr(s string) *string { return &s }

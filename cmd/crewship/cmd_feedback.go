@@ -16,14 +16,14 @@ import (
 
 // feedbackRow mirrors the wire shape of /api/v1/feedback rows.
 type feedbackRow struct {
-	ID        string  `json:"id"`
-	MessageID string  `json:"message_id"`
-	ChatID    *string `json:"chat_id,omitempty"`
-	TraceID   *string `json:"trace_id,omitempty"`
-	Signal    string  `json:"signal"`
-	Reason    *string `json:"reason,omitempty"`
-	UserID    *string `json:"user_id,omitempty"`
-	CreatedAt string  `json:"created_at"`
+	ID        string  `json:"id" yaml:"id"`
+	MessageID string  `json:"message_id" yaml:"message_id"`
+	ChatID    *string `json:"chat_id,omitempty" yaml:"chat_id,omitempty"`
+	TraceID   *string `json:"trace_id,omitempty" yaml:"trace_id,omitempty"`
+	Signal    string  `json:"signal" yaml:"signal"`
+	Reason    *string `json:"reason,omitempty" yaml:"reason,omitempty"`
+	UserID    *string `json:"user_id,omitempty" yaml:"user_id,omitempty"`
+	CreatedAt string  `json:"created_at" yaml:"created_at"`
 }
 
 var feedbackCmd = &cobra.Command{
@@ -76,7 +76,7 @@ var feedbackCreateCmd = &cobra.Command{
 		// The server returns only the persisted row id; echo the inputs
 		// back so machine output is self-describing.
 		var created struct {
-			ID string `json:"id"`
+			ID string `json:"id" yaml:"id"`
 		}
 		if err := cli.ReadJSON(resp, &created); err != nil {
 			return err
@@ -124,7 +124,7 @@ var feedbackListCmd = &cobra.Command{
 		}
 		// The server wraps rows in {"feedback": [...]}.
 		var envelope struct {
-			Feedback []feedbackRow `json:"feedback"`
+			Feedback []feedbackRow `json:"feedback" yaml:"feedback"`
 		}
 		if err := cli.ReadJSON(resp, &envelope); err != nil {
 			return err

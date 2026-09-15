@@ -533,9 +533,9 @@ func seedBootstrap(ctx context.Context, password string) (*cli.Client, string, e
 	if resp.StatusCode == http.StatusCreated || resp.StatusCode == http.StatusOK {
 		// Fresh DB — extract token and workspace
 		var result struct {
-			UserID      string `json:"user_id"`
-			WorkspaceID string `json:"workspace_id"`
-			CLIToken    string `json:"cli_token"`
+			UserID      string `json:"user_id" yaml:"user_id"`
+			WorkspaceID string `json:"workspace_id" yaml:"workspace_id"`
+			CLIToken    string `json:"cli_token" yaml:"cli_token"`
 		}
 		if err := cli.ReadJSON(resp, &result); err != nil {
 			return nil, "", fmt.Errorf("read bootstrap response: %w", err)
@@ -605,7 +605,7 @@ func resolveCurrentUserID(client *cli.Client) string {
 		return ""
 	}
 	var info struct {
-		UserID string `json:"user_id"`
+		UserID string `json:"user_id" yaml:"user_id"`
 	}
 	if cli.ReadJSON(resp, &info) == nil {
 		return info.UserID
@@ -632,7 +632,7 @@ func createOrResolve(client *cli.Client, createPath string, body interface{}, li
 		return "", err
 	}
 	var created struct {
-		ID string `json:"id"`
+		ID string `json:"id" yaml:"id"`
 	}
 	if err := cli.ReadJSON(resp, &created); err != nil {
 		return "", err
@@ -648,8 +648,8 @@ func resolveBySlug(client *cli.Client, listPath, slug string) (string, error) {
 		return "", err
 	}
 	var items []struct {
-		ID   string `json:"id"`
-		Slug string `json:"slug"`
+		ID   string `json:"id" yaml:"id"`
+		Slug string `json:"slug" yaml:"slug"`
 	}
 	if err := cli.ReadJSON(resp, &items); err != nil {
 		return "", err

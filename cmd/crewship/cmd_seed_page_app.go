@@ -43,7 +43,7 @@ func seedPageApp(ctx context.Context, client *cli.Client, page seeddata.PageDef)
 		return resp.StatusCode, err
 	}
 	var publications struct {
-		Version int64 `json:"publication_version"`
+		Version int64 `json:"publication_version" yaml:"publication_version"`
 	}
 	if _, err := request("GET", "/project/publications", nil, &publications); err != nil {
 		return err
@@ -91,9 +91,9 @@ func seedPageApp(ctx context.Context, client *cli.Client, page seeddata.PageDef)
 		return nil
 	}
 	var draft struct {
-		Revision   int64          `json:"revision"`
-		Digest     string         `json:"digest"`
-		Definition pages.Document `json:"definition"`
+		Revision   int64          `json:"revision" yaml:"revision"`
+		Digest     string         `json:"digest" yaml:"digest"`
+		Definition pages.Document `json:"definition" yaml:"definition"`
 	}
 	code, err := request("GET", "/project", nil, &draft)
 	if code == http.StatusNotFound {
@@ -119,13 +119,13 @@ func seedPageApp(ctx context.Context, client *cli.Client, page seeddata.PageDef)
 		return nil
 	}
 	type build struct {
-		ID       string `json:"id"`
-		Revision int64  `json:"source_revision"`
-		Digest   string `json:"source_digest"`
-		State    string `json:"state"`
+		ID       string `json:"id" yaml:"id"`
+		Revision int64  `json:"source_revision" yaml:"source_revision"`
+		Digest   string `json:"source_digest" yaml:"source_digest"`
+		State    string `json:"state" yaml:"state"`
 	}
 	var preview struct {
-		Build *build `json:"build"`
+		Build *build `json:"build" yaml:"build"`
 	}
 	if _, err = request("GET", "/project/preview", nil, &preview); err != nil {
 		return err
@@ -162,12 +162,12 @@ func seedPageApp(ctx context.Context, client *cli.Client, page seeddata.PageDef)
 	// else: it attests to values it read, not to values it assumed.
 	var snapshot struct {
 		Baseline struct {
-			DefinitionDigest string `json:"definition_digest"`
-		} `json:"baseline"`
+			DefinitionDigest string `json:"definition_digest" yaml:"definition_digest"`
+		} `json:"baseline" yaml:"baseline"`
 		Routines []struct {
-			Routine       string  `json:"routine"`
-			CurrentDigest *string `json:"current_digest"`
-		} `json:"routines"`
+			Routine       string  `json:"routine" yaml:"routine"`
+			CurrentDigest *string `json:"current_digest" yaml:"current_digest"`
+		} `json:"routines" yaml:"routines"`
 	}
 	if _, err = request("GET", "/project/review", nil, &snapshot); err != nil {
 		return err

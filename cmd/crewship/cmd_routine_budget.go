@@ -22,21 +22,21 @@ import (
 // both shapes fit in one struct since budgetSummaryRow is a strict
 // subset of budgetResponse's fields.
 type budgetRow struct {
-	Slug             string  `json:"slug"`
-	HasBudget        bool    `json:"has_budget"`
-	MonthlyBudgetUSD float64 `json:"monthly_budget_usd"`
-	Month            string  `json:"month,omitempty"`
-	SpentUSD         float64 `json:"spent_usd"`
-	PctUsed          float64 `json:"pct_used,omitempty"`
-	OverBudget       bool    `json:"over_budget,omitempty"`
+	Slug             string  `json:"slug" yaml:"slug"`
+	HasBudget        bool    `json:"has_budget" yaml:"has_budget"`
+	MonthlyBudgetUSD float64 `json:"monthly_budget_usd" yaml:"monthly_budget_usd"`
+	Month            string  `json:"month,omitempty" yaml:"month,omitempty"`
+	SpentUSD         float64 `json:"spent_usd" yaml:"spent_usd"`
+	PctUsed          float64 `json:"pct_used,omitempty" yaml:"pct_used,omitempty"`
+	OverBudget       bool    `json:"over_budget,omitempty" yaml:"over_budget,omitempty"`
 }
 
 // budgetSummaryRowsResponse mirrors internal/api.budgetSummaryResponse.
 type budgetSummaryRowsResponse struct {
-	Month          string      `json:"month"`
-	Routines       []budgetRow `json:"routines"`
-	TotalBudgetUSD float64     `json:"total_budget_usd"`
-	TotalSpentUSD  float64     `json:"total_spent_usd"`
+	Month          string      `json:"month" yaml:"month"`
+	Routines       []budgetRow `json:"routines" yaml:"routines"`
+	TotalBudgetUSD float64     `json:"total_budget_usd" yaml:"total_budget_usd"`
+	TotalSpentUSD  float64     `json:"total_spent_usd" yaml:"total_spent_usd"`
 }
 
 var routineBudgetCmd = &cobra.Command{

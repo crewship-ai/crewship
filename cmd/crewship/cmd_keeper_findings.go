@@ -36,18 +36,18 @@ Examples:
 // keeperFindingsRecipient mirrors the response shape of
 // internal/api/admin_keeper_findings.go.
 type keeperFindingsRecipient struct {
-	UserID string `json:"user_id"`
-	Email  string `json:"email"`
-	Name   string `json:"name"`
-	Role   string `json:"role"`
-	Reason string `json:"reason"`
+	UserID string `json:"user_id" yaml:"user_id"`
+	Email  string `json:"email" yaml:"email"`
+	Name   string `json:"name" yaml:"name"`
+	Role   string `json:"role" yaml:"role"`
+	Reason string `json:"reason" yaml:"reason"`
 }
 
 type keeperFindingsTestResult struct {
-	InboxItemID           string                    `json:"inbox_item_id"`
-	Recipients            []keeperFindingsRecipient `json:"recipients"`
-	SecurityContactUserID string                    `json:"security_contact_user_id"`
-	Warning               string                    `json:"warning"`
+	InboxItemID           string                    `json:"inbox_item_id" yaml:"inbox_item_id"`
+	Recipients            []keeperFindingsRecipient `json:"recipients" yaml:"recipients"`
+	SecurityContactUserID string                    `json:"security_contact_user_id" yaml:"security_contact_user_id"`
+	Warning               string                    `json:"warning" yaml:"warning"`
 }
 
 var keeperFindingsTestCmd = &cobra.Command{
