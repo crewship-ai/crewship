@@ -145,3 +145,26 @@ func TestAcceptance_JournalCount_ResolvesTheSameReferences(t *testing.T) {
 		}
 	}
 }
+
+func TestAcceptance_Journal_UnknownCrewFiltersToNothingNotAnError(t *testing.T) {
+	// The branch the fix changed. Before, an unknown --crew was refused by
+	// the CLI's own slug-only resolver ("crew not found", exit 3); now it
+	// reaches the server, which leaves an unresolved reference as typed so
+	// it filters on the id column and matches nothing — the documented
+	// rule ("a typo returns nothing rather than silently widening"). Exit
+	// 0 with zero rows is the contract, the same one --agent has had.
+	cfg := startJournalRefsServer(t)
+
+	out := runJournalRefsCLI(t, cfg, "journal", "--crew", "nobody")
+	if strings.Contains(out, "VIKTOR-ROW") || strings.Contains(out, "NADIA-ROW") {
+		t.Errorf("--crew nobody must match no rows (not widen to the workspace):\n%s", out)
+	}
+	if strings.Contains(out, "not found") {
+		t.Errorf("--crew nobody must not be refused client-side:\n%s", out)
+	}
+
+	count := strings.TrimSpace(runJournalRefsCLI(t, cfg, "journal", "count", "--crew", "nobody"))
+	if !strings.HasSuffix(count, "0") {
+		t.Errorf("journal count --crew nobody = %q, want 0", count)
+	}
+}

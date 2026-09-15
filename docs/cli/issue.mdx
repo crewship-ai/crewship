@@ -79,14 +79,14 @@ crewship issue list --counts --crew backend-team
 | `--search` | `string` | | Search issues by title or identifier, on the server (sent as `q`). |
 | `--limit` | `int` | `50` | Rows per page (the server caps it at 500). |
 | `--offset` | `int` | `0` | Skip this many rows. Page with `--offset 50`, `--offset 100`, … |
-| `--counts` | `bool` | `false` | Also report how many issues sit in each status **under the same filter** (`?counts=1`, read from the `X-Status-Counts` header). A human table gains a `status counts: BACKLOG 12 · TODO 4 · DONE 31` line in workflow order; `json` / `yaml` / `ndjson` switch from the bare array to `{ "issues": [...], "status_counts": { "TODO": 4, ... } }`, since a header is invisible to `jq`. Opt-in, so pipelines that read the array today are unchanged. |
+| `--counts` | `bool` | `false` | Also report how many issues sit in each status **under the same filter** (`?counts=1`, read from the `X-Status-Counts` header). A human table gains a `status counts: BACKLOG 12 · TODO 4 · DONE 31` line in workflow order; `json` / `yaml` switch from the bare array to `{ "issues": [...], "status_counts": { "TODO": 4, ... } }` (and `ndjson` emits that one object as its single line instead of one issue per line), since a header is invisible to `jq`. Opt-in, so pipelines that read the array today are unchanged. |
 
 **Output columns:** ID, TITLE, STATUS, PRIORITY, ASSIGNEE, CREATOR, CREW, LABELS, UPDATED
 
 A human table ends with `showing 1–50 of 1 015 · next page: --offset 50`, read from the
 `X-Total-Count` / `X-Limit` / `X-Offset` headers every paged list sends. Machine formats
-(`json`, `yaml`, `ndjson`) stay a bare array, since scripts decode it directly (the one
-exception is `--counts`, above); `quiet` stays one id per line.
+stay flat — `json` / `yaml` a bare array, `ndjson` one issue object per line — since scripts
+decode them directly (the one exception is `--counts`, above); `quiet` stays one id per line.
 The response also carries `X-Has-More` (#2286) for clients that only read that boolean.
 
 ---

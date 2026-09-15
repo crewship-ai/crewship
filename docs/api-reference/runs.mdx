@@ -167,8 +167,6 @@ join).
 | Param | Type | Description |
 |---|---|---|
 | `window` | string | One of `24h`, `7d`, `30d`. Defaults to `24h` when omitted. Any other value → `400`. |
-| `agent_id` | string | Only runs whose `run.started` carries this agent id. Applied inside the aggregate (`journal.RunInsightsScoped`), so totals, percentiles and every breakdown describe that agent alone. An id that matches nothing yields an empty snapshot, not an error. `crewship run insights --agent` resolves a slug to this. |
-| `crew_id` | string | Same, on the crew id stamped on `run.started`. Combines with `agent_id` (AND). `crewship run insights --crew` resolves a slug to this. |
 
 **Response:** `200 OK`
 

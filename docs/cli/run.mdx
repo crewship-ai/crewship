@@ -162,7 +162,7 @@ crewship run list
 # ID                AGENT      STATUS     KIND      TRIGGER  CREATED              FINISHED
 # r_xxxxxxx         daniel     COMPLETED  agent     CLI      2026-05-19 14:02     2026-05-19 14:04
 # r_yyyyyyy         viktor     RUNNING    agent     CLI      2026-05-19 14:18     -
-# prun_zzzzzz       viktor     COMPLETED  pipeline           2026-05-19 13:00     2026-05-19 13:01
+# run_zzzzzzz       viktor     COMPLETED  pipeline           2026-05-19 13:00     2026-05-19 13:01
 ```
 
 `KIND` says which engine produced the row: `agent` for an ad-hoc agent/chat run,
@@ -194,7 +194,7 @@ window` here. Backed by `GET /api/v1/runs/insights?window=<w>`.
 | --- | --- | --- |
 | `--window <w>` | `24h` | Aggregation window — one of `24h`, `7d`, `30d`. |
 | `--agent <slug-or-id>` | — | Only this agent's runs. Resolved to an id before the request; an unknown agent is refused with a `Did you mean` hint rather than answered with an empty snapshot. Sent as `agent_id`. |
-| `--crew <slug-or-id>` | — | Only this crew's runs. Resolved the same way; sent as `crew_id`. Combines with `--agent` (AND). |
+| `--crew <slug-or-id>` | — | Only this crew's runs. Resolved to an id before the request; an unknown crew is refused with a plain `crew not found` (no near-match hint). Sent as `crew_id`. Combines with `--agent` (AND). |
 
 The scope is applied **before** the aggregate is computed, so totals,
 percentiles and every breakdown describe that agent or crew alone — not a
