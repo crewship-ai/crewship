@@ -31475,6 +31475,24 @@
               }
             },
             "description": "Not Found"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Gateway"
           }
         },
         "security": [
@@ -80924,6 +80942,10 @@
                       "description": "The pages in this folder the caller reaches, as index rows.",
                       "items": {
                         "properties": {
+                          "color": {
+                            "description": "The page's colour: a crew palette key (blue, emerald, violet, amber, rose, cyan, lime, fuchsia), or empty for none.",
+                            "type": "string"
+                          },
                           "created_at": {
                             "format": "date-time",
                             "type": "string"
@@ -80964,6 +80986,10 @@
                           "has_project": {
                             "description": "This Page has application source (a project draft) at all, published or not. Distinct from has_application, which is true only while a publication is running: a Page awaiting its FIRST publication has has_project true and has_application false, and that is the case the publication review exists for.",
                             "type": "boolean"
+                          },
+                          "icon": {
+                            "description": "The page's icon: a crew icon name (the crew icon picker's set, lib/crew-icons.ts), or empty for the default page glyph. Refused by name outside the set.",
+                            "type": "string"
                           },
                           "id": {
                             "type": "string"
@@ -82171,6 +82197,10 @@
                   "properties": {
                     "page": {
                       "properties": {
+                        "color": {
+                          "description": "The page's colour: a crew palette key (blue, emerald, violet, amber, rose, cyan, lime, fuchsia), or empty for none.",
+                          "type": "string"
+                        },
                         "created_at": {
                           "format": "date-time",
                           "type": "string"
@@ -82211,6 +82241,10 @@
                         "has_project": {
                           "description": "This Page has application source (a project draft) at all, published or not. Distinct from has_application, which is true only while a publication is running: a Page awaiting its FIRST publication has has_project true and has_application false, and that is the case the publication review exists for.",
                           "type": "boolean"
+                        },
+                        "icon": {
+                          "description": "The page's icon: a crew icon name (the crew icon picker's set, lib/crew-icons.ts), or empty for the default page glyph. Refused by name outside the set.",
+                          "type": "string"
                         },
                         "id": {
                           "type": "string"
@@ -82466,6 +82500,10 @@
                   "properties": {
                     "page": {
                       "properties": {
+                        "color": {
+                          "description": "The page's colour: a crew palette key (blue, emerald, violet, amber, rose, cyan, lime, fuchsia), or empty for none.",
+                          "type": "string"
+                        },
                         "created_at": {
                           "format": "date-time",
                           "type": "string"
@@ -82506,6 +82544,10 @@
                         "has_project": {
                           "description": "This Page has application source (a project draft) at all, published or not. Distinct from has_application, which is true only while a publication is running: a Page awaiting its FIRST publication has has_project true and has_application false, and that is the case the publication review exists for.",
                           "type": "boolean"
+                        },
+                        "icon": {
+                          "description": "The page's icon: a crew icon name (the crew icon picker's set, lib/crew-icons.ts), or empty for the default page glyph. Refused by name outside the set.",
+                          "type": "string"
                         },
                         "id": {
                           "type": "string"
@@ -82789,6 +82831,10 @@
                     "pages": {
                       "items": {
                         "properties": {
+                          "color": {
+                            "description": "The page's colour: a crew palette key (blue, emerald, violet, amber, rose, cyan, lime, fuchsia), or empty for none.",
+                            "type": "string"
+                          },
                           "created_at": {
                             "format": "date-time",
                             "type": "string"
@@ -82829,6 +82875,10 @@
                           "has_project": {
                             "description": "This Page has application source (a project draft) at all, published or not. Distinct from has_application, which is true only while a publication is running: a Page awaiting its FIRST publication has has_project true and has_application false, and that is the case the publication review exists for.",
                             "type": "boolean"
+                          },
+                          "icon": {
+                            "description": "The page's icon: a crew icon name (the crew icon picker's set, lib/crew-icons.ts), or empty for the default page glyph. Refused by name outside the set.",
+                            "type": "string"
                           },
                           "id": {
                             "type": "string"
@@ -83175,6 +83225,10 @@
                 "schema": {
                   "items": {
                     "properties": {
+                      "color": {
+                        "description": "The page's colour: a crew palette key (blue, emerald, violet, amber, rose, cyan, lime, fuchsia), or empty for none.",
+                        "type": "string"
+                      },
                       "created_at": {
                         "format": "date-time",
                         "type": "string"
@@ -83215,6 +83269,10 @@
                       "has_project": {
                         "description": "This Page has application source (a project draft) at all, published or not. Distinct from has_application, which is true only while a publication is running: a Page awaiting its FIRST publication has has_project true and has_application false, and that is the case the publication review exists for.",
                         "type": "boolean"
+                      },
+                      "icon": {
+                        "description": "The page's icon: a crew icon name (the crew icon picker's set, lib/crew-icons.ts), or empty for the default page glyph. Refused by name outside the set.",
+                        "type": "string"
                       },
                       "id": {
                         "type": "string"
@@ -83371,7 +83429,15 @@
             "application/json": {
               "schema": {
                 "properties": {
+                  "color": {
+                    "description": "The page's colour, a crew palette key. Same pointer rule as icon; a value outside the palette is refused by name (400).",
+                    "type": "string"
+                  },
                   "description": {
+                    "type": "string"
+                  },
+                  "icon": {
+                    "description": "The page's icon, a crew icon name. On PATCH an omitted field keeps the stored one and \"\" clears it; a name outside the crew icon registry is refused by name (400).",
                     "type": "string"
                   },
                   "name": {
@@ -83504,6 +83570,10 @@
               "application/json": {
                 "schema": {
                   "properties": {
+                    "color": {
+                      "description": "The page's colour: a crew palette key (blue, emerald, violet, amber, rose, cyan, lime, fuchsia), or empty for none.",
+                      "type": "string"
+                    },
                     "created_at": {
                       "format": "date-time",
                       "type": "string"
@@ -83544,6 +83614,10 @@
                     "has_project": {
                       "description": "This Page has application source (a project draft) at all, published or not. Distinct from has_application, which is true only while a publication is running: a Page awaiting its FIRST publication has has_project true and has_application false, and that is the case the publication review exists for.",
                       "type": "boolean"
+                    },
+                    "icon": {
+                      "description": "The page's icon: a crew icon name (the crew icon picker's set, lib/crew-icons.ts), or empty for the default page glyph. Refused by name outside the set.",
+                      "type": "string"
                     },
                     "id": {
                       "type": "string"
@@ -83712,6 +83786,10 @@
               "application/json": {
                 "schema": {
                   "properties": {
+                    "color": {
+                      "description": "The page's colour: a crew palette key (blue, emerald, violet, amber, rose, cyan, lime, fuchsia), or empty for none.",
+                      "type": "string"
+                    },
                     "created_at": {
                       "format": "date-time",
                       "type": "string"
@@ -83752,6 +83830,10 @@
                     "has_project": {
                       "description": "This Page has application source (a project draft) at all, published or not. Distinct from has_application, which is true only while a publication is running: a Page awaiting its FIRST publication has has_project true and has_application false, and that is the case the publication review exists for.",
                       "type": "boolean"
+                    },
+                    "icon": {
+                      "description": "The page's icon: a crew icon name (the crew icon picker's set, lib/crew-icons.ts), or empty for the default page glyph. Refused by name outside the set.",
+                      "type": "string"
                     },
                     "id": {
                       "type": "string"
@@ -84525,6 +84607,10 @@
               "application/json": {
                 "schema": {
                   "properties": {
+                    "color": {
+                      "description": "The page's colour: a crew palette key (blue, emerald, violet, amber, rose, cyan, lime, fuchsia), or empty for none.",
+                      "type": "string"
+                    },
                     "created_at": {
                       "format": "date-time",
                       "type": "string"
@@ -84565,6 +84651,10 @@
                     "has_project": {
                       "description": "This Page has application source (a project draft) at all, published or not. Distinct from has_application, which is true only while a publication is running: a Page awaiting its FIRST publication has has_project true and has_application false, and that is the case the publication review exists for.",
                       "type": "boolean"
+                    },
+                    "icon": {
+                      "description": "The page's icon: a crew icon name (the crew icon picker's set, lib/crew-icons.ts), or empty for the default page glyph. Refused by name outside the set.",
+                      "type": "string"
                     },
                     "id": {
                       "type": "string"
@@ -84733,6 +84823,10 @@
               "application/json": {
                 "schema": {
                   "properties": {
+                    "color": {
+                      "description": "The page's colour: a crew palette key (blue, emerald, violet, amber, rose, cyan, lime, fuchsia), or empty for none.",
+                      "type": "string"
+                    },
                     "created_at": {
                       "format": "date-time",
                       "type": "string"
@@ -84773,6 +84867,10 @@
                     "has_project": {
                       "description": "This Page has application source (a project draft) at all, published or not. Distinct from has_application, which is true only while a publication is running: a Page awaiting its FIRST publication has has_project true and has_application false, and that is the case the publication review exists for.",
                       "type": "boolean"
+                    },
+                    "icon": {
+                      "description": "The page's icon: a crew icon name (the crew icon picker's set, lib/crew-icons.ts), or empty for the default page glyph. Refused by name outside the set.",
+                      "type": "string"
                     },
                     "id": {
                       "type": "string"
@@ -85286,6 +85384,10 @@
               "application/json": {
                 "schema": {
                   "properties": {
+                    "color": {
+                      "description": "The page's colour: a crew palette key (blue, emerald, violet, amber, rose, cyan, lime, fuchsia), or empty for none.",
+                      "type": "string"
+                    },
                     "created_at": {
                       "format": "date-time",
                       "type": "string"
@@ -85326,6 +85428,10 @@
                     "has_project": {
                       "description": "This Page has application source (a project draft) at all, published or not. Distinct from has_application, which is true only while a publication is running: a Page awaiting its FIRST publication has has_project true and has_application false, and that is the case the publication review exists for.",
                       "type": "boolean"
+                    },
+                    "icon": {
+                      "description": "The page's icon: a crew icon name (the crew icon picker's set, lib/crew-icons.ts), or empty for the default page glyph. Refused by name outside the set.",
+                      "type": "string"
                     },
                     "id": {
                       "type": "string"
@@ -85594,7 +85700,15 @@
             "application/json": {
               "schema": {
                 "properties": {
+                  "color": {
+                    "description": "The page's colour, a crew palette key. Same pointer rule as icon; a value outside the palette is refused by name (400).",
+                    "type": "string"
+                  },
                   "description": {
+                    "type": "string"
+                  },
+                  "icon": {
+                    "description": "The page's icon, a crew icon name. On PATCH an omitted field keeps the stored one and \"\" clears it; a name outside the crew icon registry is refused by name (400).",
                     "type": "string"
                   },
                   "name": {
@@ -85727,6 +85841,10 @@
               "application/json": {
                 "schema": {
                   "properties": {
+                    "color": {
+                      "description": "The page's colour: a crew palette key (blue, emerald, violet, amber, rose, cyan, lime, fuchsia), or empty for none.",
+                      "type": "string"
+                    },
                     "created_at": {
                       "format": "date-time",
                       "type": "string"
@@ -85767,6 +85885,10 @@
                     "has_project": {
                       "description": "This Page has application source (a project draft) at all, published or not. Distinct from has_application, which is true only while a publication is running: a Page awaiting its FIRST publication has has_project true and has_application false, and that is the case the publication review exists for.",
                       "type": "boolean"
+                    },
+                    "icon": {
+                      "description": "The page's icon: a crew icon name (the crew icon picker's set, lib/crew-icons.ts), or empty for the default page glyph. Refused by name outside the set.",
+                      "type": "string"
                     },
                     "id": {
                       "type": "string"
@@ -93452,6 +93574,10 @@
                     },
                     "page": {
                       "properties": {
+                        "color": {
+                          "description": "The page's colour: a crew palette key (blue, emerald, violet, amber, rose, cyan, lime, fuchsia), or empty for none.",
+                          "type": "string"
+                        },
                         "created_at": {
                           "format": "date-time",
                           "type": "string"
@@ -93492,6 +93618,10 @@
                         "has_project": {
                           "description": "This Page has application source (a project draft) at all, published or not. Distinct from has_application, which is true only while a publication is running: a Page awaiting its FIRST publication has has_project true and has_application false, and that is the case the publication review exists for.",
                           "type": "boolean"
+                        },
+                        "icon": {
+                          "description": "The page's icon: a crew icon name (the crew icon picker's set, lib/crew-icons.ts), or empty for the default page glyph. Refused by name outside the set.",
+                          "type": "string"
                         },
                         "id": {
                           "type": "string"

@@ -188,6 +188,13 @@ export interface WirePage {
    * list neither has refreshed.
    */
   pages_version?: number | null
+  /**
+   * The page's own avatar (#2563): a crew icon name and a crew palette key,
+   * "" for none. Optional only because an older server sends neither; a
+   * missing field and "" both draw the default page glyph in no colour.
+   */
+  icon?: string | null
+  color?: string | null
 }
 
 /** The folder as it rides on a page row: enough to draw the header, no more. */
@@ -486,6 +493,10 @@ export interface PageView {
   folder: PageFolderRef | null | undefined
   /** The membership version a move must send back, or null when unknown. */
   pagesVersion: number | null
+  /** The page's avatar (#2563): a crew icon name, or null for the default glyph. */
+  icon: string | null
+  /** A crew palette key, or null for no colour. Never encodes state. */
+  color: string | null
 }
 
 /** A folder reference as every Pages surface consumes it (#2527). */
@@ -615,6 +626,8 @@ export function toPageView(raw: WirePage): PageView {
       typeof raw.pages_version === "number" && Number.isFinite(raw.pages_version)
         ? raw.pages_version
         : null,
+    icon: trimmed(raw.icon),
+    color: trimmed(raw.color),
   }
 }
 

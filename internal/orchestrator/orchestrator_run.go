@@ -97,6 +97,14 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 		return fmt.Errorf("run agent: %w", err)
 	}
 
+	ctx, finishTrackedRun := o.trackAgentRun(ctx, &req)
+	defer func() {
+		if errors.Is(err, context.Canceled) && o.agentStopRequested(req.RunID) {
+			err = fmt.Errorf("%w: %v", ErrAgentStopped, err)
+		}
+		finishTrackedRun()
+	}()
+
 	// Open the outermost OTel span for this agent invocation. Every
 	// downstream LLM call, tool execution, and sub-agent fan-out becomes
 	// a child of this span via context propagation. We capture the
@@ -955,6 +963,9 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 		// over a generic adapter exit so callers retain the failure class.
 		status = "error"
 		execErr = inBandErr
+	} else if exitCode == 143 && o.agentStopRequested(req.RunID) {
+		status = "cancelled"
+		execErr = ErrAgentStopped
 	} else if exitCode != 0 {
 		status = "error"
 		o.logger.Warn("agent exited with error", "agent_id", req.AgentID, "exit_code", exitCode)
@@ -1760,7 +1771,7 @@ func (o *Orchestrator) buildExecCommand(ctx context.Context, req AgentRunRequest
 	var execCmd []string
 	var execStdin io.Reader
 	if getAdapter(req.CLIAdapter).PromptViaStdin(req) {
-		execCmd = append([]string{"stdbuf", "-oL"}, cmd...)
+		execCmd = directRunCommand(req.RunID, cmd)
 		execStdin = strings.NewReader(req.UserMessage)
 		o.logger.Info("delivering oversized agent prompt via stdin (tmux bypassed)",
 			"agent_id", req.AgentID, "prompt_bytes", len(req.UserMessage))
@@ -1790,7 +1801,7 @@ func (o *Orchestrator) buildExecCommand(ctx context.Context, req AgentRunRequest
 				o.logger.Warn("tmux setup failed, falling back to direct exec (further occurrences for this container log at debug)",
 					"error", tmuxErr, "container_id", req.ContainerID)
 			}
-			execCmd = append([]string{"stdbuf", "-oL"}, cmd...)
+			execCmd = directRunCommand(req.RunID, cmd)
 		}
 	}
 

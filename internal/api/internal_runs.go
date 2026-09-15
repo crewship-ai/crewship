@@ -277,6 +277,14 @@ func (h *InternalHandler) UpdateRun(w http.ResponseWriter, r *http.Request) {
 	if body.Status == "FAILED" || body.Status == "TIMEOUT" {
 		failedStatus = "ERROR"
 	}
+	if body.Status == "CANCELLED" {
+		var stopMeta struct {
+			Origin string `json:"stop_origin"`
+		}
+		if json.Unmarshal(body.Metadata, &stopMeta) == nil && stopMeta.Origin == "agent_stop" {
+			failedStatus = "STOPPED"
+		}
+	}
 	agentStatus := failedStatus
 	if agentID != "" {
 		if _, err := h.db.ExecContext(r.Context(), `

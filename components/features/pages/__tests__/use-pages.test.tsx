@@ -192,6 +192,16 @@ describe("page normalising", () => {
     expect(page.ownerLabel).toBe("lookout")
   })
 
+  it("reads the page's avatar off the wire, and reads none as null — never as a default (#2563)", () => {
+    expect(toPageView(wirePage({ icon: "rocket", color: "amber" }))).toMatchObject({ icon: "rocket", color: "amber" })
+    // "" is the server's "none"; an older server sends nothing at all. Both
+    // are null here, so nothing downstream draws a default colour.
+    expect(toPageView(wirePage({ icon: "", color: "" }))).toMatchObject({ icon: null, color: null })
+    expect(toPageView(wirePage({}))).toMatchObject({ icon: null, color: null })
+    // The avatar is not freshness: a coloured page with no state has no state.
+    expect(toPageView(wirePage({ icon: "rocket", color: "amber", panels: [] })).state).toBeNull()
+  })
+
   it("reads a list envelope in any of the shapes this repo uses", () => {
     const row = { slug: "a" }
     expect(normalizePageList([row])).toEqual([row])

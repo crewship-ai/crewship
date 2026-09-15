@@ -458,6 +458,8 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
                   notFound={detail.notFound}
                   onBack={closePage}
                   now={now}
+                  workspaceId={workspaceId}
+                  mayEditAvatar={capabilities.mayEditMetadata}
                   // Straight from the subscription `usePage` registered — the
                   // header indicator is lit only while this page's channel is
                   // on a live socket, never on a timer of its own (epic #1935).

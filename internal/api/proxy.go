@@ -219,7 +219,7 @@ func (h *ProxyHandler) AgentLogs(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, []interface{}{})
 }
 
-// AgentStop sends a stop signal to a running agent via the sidecar.
+// AgentStop reports STOPPED only after the daemon confirms runtime termination.
 func (h *ProxyHandler) AgentStop(w http.ResponseWriter, r *http.Request) {
 	agentID := r.PathValue("agentId")
 	workspaceID := WorkspaceIDFromContext(r.Context())
@@ -240,8 +240,22 @@ func (h *ProxyHandler) AgentStop(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Try to stop via crewshipd (best effort)
-	h.ipcPost(r.Context(), fmt.Sprintf("/agents/%s/stop", url.PathEscape(agentID)), nil)
+	resp, err := h.ipcPost(r.Context(), fmt.Sprintf("/agents/%s/stop", url.PathEscape(agentID)), nil)
+	if err != nil {
+		replyError(w, http.StatusBadGateway, "runtime stop unavailable")
+		return
+	}
+	defer resp.Body.Close()
+	var confirmed struct {
+		AgentID string `json:"agent_id"`
+		Status  string `json:"status"`
+	}
+	body, readErr := io.ReadAll(io.LimitReader(resp.Body, 4097))
+	decodeErr := json.Unmarshal(body, &confirmed)
+	if resp.StatusCode != http.StatusOK || readErr != nil || len(body) > 4096 || decodeErr != nil || confirmed.AgentID != agentID || confirmed.Status != "stopped" {
+		replyError(w, http.StatusBadGateway, "runtime stop not confirmed")
+		return
+	}
 
 	now := time.Now().UTC().Format(time.RFC3339)
 	res, err := h.db.ExecContext(r.Context(),

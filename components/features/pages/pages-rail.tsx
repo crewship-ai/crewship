@@ -67,6 +67,7 @@ import { Checkbox } from "@/components/ui/checkbox"
 import type { PanelState } from "@/components/features/pages/panels/types"
 import { PAGE_STATE_META, PAGE_STATE_ORDER } from "@/components/features/pages/page-state"
 import { FolderGlyph } from "@/components/features/pages/folder-glyph"
+import { PageGlyph } from "@/components/features/pages/page-glyph"
 import { FolderHeaderMenu, PageRowMenu } from "@/components/features/pages/pages-rail-menus"
 
 export type PagesGroupBy = "folder" | "owner"
@@ -724,7 +725,7 @@ export function PagesRail({
               <AnimatePresence initial={false}>
                 {group.pages.map((page) => {
                   const meta = page.state ? PAGE_STATE_META[page.state] : null
-                  const Icon = meta?.icon ?? CONCEPT_ICON.pages
+                  const StateIcon = meta?.icon
                   const inFolder = Boolean(page.folder)
                   return (
                     <motion.div
@@ -767,10 +768,25 @@ export function PagesRail({
                             className="pointer-events-none"
                           />
                         )}
-                        <Icon
-                          className={cn("h-3.5 w-3.5 shrink-0", meta?.tone ?? "text-muted-foreground-soft")}
-                          aria-hidden
+                        {/* Two glyphs, two facts (#2563): the page's own
+                            avatar first, then its freshness — ALWAYS beside
+                            it, never replaced by it. The avatar's colour is
+                            the author's choice; the state's colour is the
+                            state (§9b.4), and a reader filtering on STATUS
+                            must be able to check the pick against the row. */}
+                        <PageGlyph
+                          icon={page.icon}
+                          color={page.color}
+                          className={cn(!page.color && "text-muted-foreground-soft")}
                         />
+                        {StateIcon && meta && (
+                          <StateIcon
+                            data-slot="page-state-glyph"
+                            data-state={page.state ?? undefined}
+                            className={cn("h-3 w-3 shrink-0", meta.tone)}
+                            aria-hidden
+                          />
+                        )}
                         {/* One line, whatever the name's length; the full
                             name is in `title`, and the owner is in the header
                             above — never repeated here. */}
