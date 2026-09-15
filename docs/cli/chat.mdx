@@ -37,6 +37,19 @@ Auth: every subcommand requires an authenticated session (`crewship login`). All
 | `chat participants list <chat-id>` | List the humans in a group chat (columns `USER ID` / `EMAIL` / `NAME` / `ROLE`). Prints `No participants (private chat).` when empty. Alias: `members`. |
 | `chat participants add <chat-id> <user-id>` | Add a workspace user. Adding the first participant promotes the chat to a group, after which the agent only replies when @mentioned. |
 | `chat participants remove <chat-id> <user-id>` | Remove a user (`rm` / `delete` aliases). Cannot remove the chat owner. |
+| `chat room list` | List the workspace rooms you can see — DMs, private groups and channels — one page at a time. `rooms` is an alias for the group. |
+| `chat room create` | Create a private human group or a workspace-visible channel. |
+| `chat room direct <user-id>` | Open, or reuse, your fixed two-person DM with another workspace member. |
+| `chat room get <room-id>` | Room metadata plus your own read cursor, unread count and mute state. |
+| `chat room messages <room-id>` | Read the latest page, older history (`--before-sequence`) or catch up (`--after-sequence`). |
+| `chat room send <room-id>` | Send a message with a stable retry id; `--mention-agent` is the only thing that invokes an agent. |
+| `chat room read <room-id>` | Advance your read cursor to an explicit sequence. |
+| `chat room mute <room-id>` | Mute — or with `--muted=false` unmute — the room's inbox notifications for you. |
+| `chat room jobs <room-id>` | The agent mention jobs a room has queued, with their state, assignment and error. |
+| `chat room participants list / add / remove` | The human roster of a private group (creator-only mutations). |
+| `chat room agents list / add / remove` | The agents joined to a channel (creator-only mutations; channels only). |
+| `chat room activity <room-id>` | Show, or as the creator set, whether a channel receives issue and routine lifecycle events. |
+| `chat room continue <room-id>` | Start a fresh group or channel from a DM or private group; private history is never copied. |
 
 ## Flags
 
@@ -240,6 +253,254 @@ command-specific flags. On success it prints
 `Removed <emoji> from message <message-id>.` Repeating the operation is safe
 because reactions are idempotent per chat, message, emoji, and user.
 
+## `crewship chat room`
+
+Workspace **rooms** are the human side of Chat: a DM is a fixed pair of
+people, a private *group* is a roster of people, and a *channel* is visible to
+the whole workspace and may have agents joined to it. They live on the
+`/api/v1/conversations` routes and their ids and message sequences are separate
+from the agent sessions every other `chat` subcommand takes — a room id is not a
+chat id. `chat room` and `chat rooms` are the same group.
+
+Rules that hold for every room command:
+
+- **Auth:** a login plus a selected workspace, like the rest of `chat`. Private
+  groups and DMs also require membership; a room you cannot reach answers
+  `404 conversation not found`, including the creator-only mutations, so a
+  refusal never reveals who else is in it.
+- **Machine output is the server's envelope.** `--format json` / `yaml` /
+  `ndjson` print the response verbatim — pagination cursors, `has_more`, job
+  states — and a `204 No Content` success prints `{"status":"ok"}`. The
+  default human format renders the same envelope as key/value rows, with `id`
+  first; `--format quiet` prints the bare id.
+- **Agents run only when mentioned.** Joining an agent to a channel gives it
+  the history when it is asked; only `send --mention-agent` queues work.
+  Plain `@name` in the text does nothing.
+- **Retries are by id.** `send` and `continue` take a `--client-id` you choose;
+  repeating the same request with the same id returns the original result
+  (`200`) instead of a duplicate, and the same id with *different* content is
+  refused with `409`.
+
+### `chat room list`
+
+```bash
+crewship chat room list
+crewship chat room list --limit 20 --offset 20
+```
+
+| Flag | Default | Effect |
+| --- | --- | --- |
+| `--limit <n>` | `100` | Page size, `1..100`. |
+| `--offset <n>` | `0` | Start offset. A full page's envelope carries a numeric `next_offset`; follow it until it is `null`. |
+
+Calls `GET /api/v1/conversations`. Only rooms you can reach are listed:
+your DMs, the private groups you are in, and every channel in the workspace.
+
+### `chat room create`
+
+```bash
+crewship chat room create --title "Planning" --member usr_bob --member usr_carol
+crewship chat room create --title "Ops" --kind channel
+```
+
+| Flag | Default | Effect |
+| --- | --- | --- |
+| `--title <text>` | (required) | Room title, 1–120 characters after trimming. |
+| `--kind <group\|channel>` | `group` | `group` is private to its roster; `channel` is visible to the whole workspace. |
+| `--member <user-id>` | (none) | Workspace user to include. Repeatable. You are included automatically. |
+
+Calls `POST /api/v1/conversations` and prints the new room (`201`). A member
+who is not in the workspace is refused with `400`. Creating a channel does not
+invoke any agent; use `chat room agents add` and then `chat room send
+--mention-agent`, both below.
+
+### `chat room direct <user-id>`
+
+```bash
+crewship chat room direct usr_bob
+```
+
+No command-specific flags. Calls `POST /api/v1/conversations/direct`. The
+first call creates the pair's DM (`201`); every later call from either side
+returns the same room (`200`) — there is never a second DM for the same two
+people, and its roster cannot be edited (`participants add` on a DM is a
+`400`; use `chat room continue`, below, to bring in a third person without
+exposing the DM's history). The target must be a *different*
+current workspace member.
+
+### `chat room get <room-id>`
+
+```bash
+crewship chat room get ROOM_ID
+crewship chat room get ROOM_ID --format json | jq .unread_count
+```
+
+No command-specific flags. Calls `GET /api/v1/conversations/{conversationId}`
+and prints the room: `id`, `kind`, `title`, `created_by`, `is_direct`,
+`last_sequence`, plus the caller's own `last_read_sequence`, `unread_count`
+and `muted`. A DM adds `direct_user_id`, `direct_user_name` and
+`direct_avatar_url` for the other person.
+
+### `chat room messages <room-id>`
+
+```bash
+crewship chat room messages ROOM_ID                          # the latest page
+crewship chat room messages ROOM_ID --before-sequence 101 --limit 50   # older history
+crewship chat room messages ROOM_ID --after-sequence 150     # catch up after a cursor
+```
+
+| Flag | Default | Effect |
+| --- | --- | --- |
+| `--limit <n>` | `100` | Page size, `1..100`. The envelope's `has_more` says whether the page filled the limit. |
+| `--before-sequence <n>` | (unset) | Messages older than this sequence (must be positive). |
+| `--after-sequence <n>` | (unset) | Messages newer than this sequence; `0` starts at the beginning. |
+
+Calls `GET /api/v1/conversations/{conversationId}/messages`. The two cursor
+flags are mutually exclusive — the CLI refuses both before making a request.
+Messages within a page are in ascending sequence order and carry the server
+id, sequence, author, content, timestamp, retry id, structured mentions and
+kind; a system message (an agent joining, an activity event) is marked
+`source_kind=activity`.
+
+### `chat room send <room-id>`
+
+```bash
+crewship chat room send ROOM_ID -m "Deploy is green" --client-id deploy-note-1
+crewship chat room send CHANNEL_ID -m "Ava, check the queue" --client-id q-1 --mention-agent AGENT_ID
+```
+
+| Flag | Default | Effect |
+| --- | --- | --- |
+| `-m`, `--message <text>` | (required) | Message text, at most 32768 UTF-8 bytes and not blank. |
+| `--client-id <id>` | (required) | Stable retry id, at most 128 bytes. Reuse it with the *same* content to retry after a lost response. |
+| `--mention-agent <agent-id>` | (none) | Joined agent to invoke. Repeatable (up to 10). This — not `@name` in the text — is what queues an agent job. |
+
+Calls `POST /api/v1/conversations/{conversationId}/messages` and prints the
+persisted message (`201`; a retry prints the original, `200`). Mentioning an
+agent that is not joined to the room — or mentioning any agent in a group or
+DM, which cannot hold agents — is a `400`. The message is accepted before the
+agent has answered: watch `chat room jobs` for the reply's progress.
+
+### `chat room read <room-id>`
+
+```bash
+crewship chat room read ROOM_ID --sequence 175
+```
+
+| Flag | Default | Effect |
+| --- | --- | --- |
+| `--sequence <n>` | (required) | The last message sequence you actually read. Nonnegative. |
+
+Calls `POST /api/v1/conversations/{conversationId}/read`. Your own cursor
+only, and it never moves backwards; nobody else's unread count changes.
+
+### `chat room mute <room-id>`
+
+```bash
+crewship chat room mute ROOM_ID
+crewship chat room mute ROOM_ID --muted=false
+```
+
+| Flag | Default | Effect |
+| --- | --- | --- |
+| `--muted` | `true` | Whether the room's inbox notifications are muted for you. Pass `--muted=false` to unmute. |
+
+Calls `POST /api/v1/conversations/{conversationId}/mute`. A notification
+preference, not membership — the room keeps counting your unread messages.
+
+### `chat room jobs <room-id>`
+
+```bash
+crewship chat room jobs CHANNEL_ID --format json | jq '.jobs[] | {agent_id, state, error}'
+```
+
+No command-specific flags. Calls
+`GET /api/v1/conversations/{conversationId}/agent-jobs` and prints
+`{"jobs":[…]}`: one entry per mention with `id`, `message_id`, `agent_id`,
+`state` (`pending` until the server picks it up), `assignment_id` once the
+work is running and `error` when it failed. This is how you tell "accepted"
+from "answered".
+
+### `chat room participants` — list, add, remove
+
+```bash
+crewship chat room participants list ROOM_ID
+crewship chat room participants add GROUP_ID usr_carol
+crewship chat room participants remove GROUP_ID usr_carol      # alias: rm
+```
+
+No command-specific flags. `list` calls
+`GET /api/v1/conversations/{conversationId}/participants` and prints
+`{"participants":[…]}` with `user_id`, `name`, `avatar_url`, `joined_at` and
+an informational `role`; for a channel this is the explicit roster, not a
+limit on who can read it.
+
+`add` and `remove` (`POST …/participants`, `DELETE …/participants/{userId}`)
+are **creator-only** — anyone else gets `404`. `add` grants the room's
+existing history and is idempotent. A DM refuses both (`400`), a channel
+refuses `remove`, and the creator cannot be removed from a group.
+
+### `chat room agents` — list, add, remove
+
+```bash
+crewship chat room agents list CHANNEL_ID
+crewship chat room agents add CHANNEL_ID AGENT_ID
+crewship chat room agents remove CHANNEL_ID AGENT_ID           # alias: rm
+```
+
+No command-specific flags. `list` calls
+`GET /api/v1/conversations/{conversationId}/agents` and prints
+`{"agents":[…]}` with `agent_id`, `name`, `slug`, `joined_at` and avatar
+fields. `add` (`POST …/agents`) and `remove` (`DELETE …/agents/{agentId}`) are
+**creator-only** and **channels only** — a group or DM answers `400`. Joining
+posts a visible notice and gives the agent access to the channel's history
+when it is mentioned; it starts no work. Queued mention jobs re-check access
+before they run, so a removed agent does not answer from the queue.
+
+### `chat room activity <room-id>`
+
+```bash
+crewship chat room activity CHANNEL_ID
+crewship chat room activity CHANNEL_ID --issues=true --routines=false
+```
+
+| Flag | Default | Effect |
+| --- | --- | --- |
+| `--issues` | (unset) | Publish future issue lifecycle events into the channel. |
+| `--routines` | (unset) | Publish future routine run lifecycle events into the channel. |
+
+With neither flag the command reads the settings
+(`GET /api/v1/conversations/{conversationId}/activity`); any workspace member
+who can see the channel may. To change them (`PUT`, **creator-only**) both
+flags must be given explicitly — setting only one is refused before any request
+is made. Both default to `false` on the server. Enabling starts with *future*
+events: nothing is backfilled, and the system messages it posts never queue
+agent jobs. A private group or DM has no activity settings (`400`).
+
+### `chat room continue <room-id>`
+
+```bash
+crewship chat room continue DM_ID --kind group --title "Planning" --member usr_carol --client-id planning-1
+crewship chat room continue PRIVATE_ROOM_ID --kind channel --title "Team and agent" --agent AGENT_ID --client-id channel-1
+```
+
+| Flag | Default | Effect |
+| --- | --- | --- |
+| `--title <text>` | (required) | Title of the new room, 1–120 characters. |
+| `--kind <group\|channel>` | `group` | `group` needs a DM as the source and at least one `--member`; `channel` needs `--agent` and becomes workspace-visible. |
+| `--member <user-id>` | (none) | Additional workspace human. Repeatable; the source room's humans are kept. |
+| `--agent <agent-id>` | (none) | Agent to join the new channel. Joining does not run it. |
+| `--client-id <id>` | (required) | Stable retry id, at most 128 bytes. |
+
+Calls `POST /api/v1/conversations/{conversationId}/continue` and prints the
+new room (`201`; the same request retried prints the same room, `200`). The
+source is left exactly as it was and **its messages are never copied**: a
+group continuation starts empty, a channel continuation holds only the
+agent-joined notice. Inviting an agent into what started as a private
+discussion therefore always means choosing a new, workspace-visible channel on
+purpose. Mixing the two shapes — an `--agent` on a group, or no `--agent` on a
+channel — is refused before any request is made.
+
 ## Examples
 
 ### Print a transcript
@@ -352,51 +613,3 @@ Adding the first participant flips the chat to group visibility, after which the
 - [`crewship ask`](/cli/ask) — one-shot prompt (also creates a chat, tagged `origin=CLI`).
 - [`crewship session`](/cli/session) — browser session management, unrelated noun.
 - [Conversations API](/api-reference/conversations) — the underlying endpoints.
-
-### Continue into a new room
-
-Keep the original private discussion and start a separate room with fresh
-history. A private group continuation requires a DM and at least one additional
-human. Inviting an agent from a private discussion requires explicitly choosing
-a new workspace-visible channel; old private history is never copied.
-
-```bash
-crewship chat room continue DM_ID --kind group --title "Planning" --member USER_ID --client-id planning-request-1
-crewship chat room continue PRIVATE_ROOM_ID --kind channel --title "Team and agent" --agent AGENT_ID --client-id channel-request-1
-```
-
-Repeat `--member` to add workspace humans. Both original DM participants (or the
-existing private group roster for a channel) are retained. Use the same
-`--client-id` when retrying the same request after a lost response; a different
-payload with that ID is rejected. Joining the agent does not start work: send a
-new message with `--mention-agent AGENT_ID` when ready.
-
-### Room history, read cursors and notification controls
-
-`crewship chat room messages ROOM_ID` returns the latest page. `--limit` defaults
-to 100 and accepts 1–100. Use `--before-sequence N` (positive) for older history
-or `--after-sequence N` (nonnegative) to catch up; the two flags are mutually
-exclusive. `--after-sequence 0` starts at the beginning. JSON includes `has_more`;
-messages within each page are ordered by sequence.
-
-```bash
-crewship chat room messages ROOM_ID --before-sequence 101 --limit 50
-crewship chat room messages ROOM_ID --after-sequence 150
-crewship chat room read ROOM_ID --sequence 175
-crewship chat room mute ROOM_ID --muted=true
-crewship chat room mute ROOM_ID --muted=false
-```
-
-`crewship chat room read` requires `--sequence` (nonnegative): pass the last
-message actually read. The server only advances your own read cursor.
-`crewship chat room mute` defaults `--muted` to true; explicitly pass false to
-restore your room notifications. Neither command changes another user's state.
-
-`crewship chat room activity ROOM_ID` reads the channel's activity settings.
-To change them, the channel creator must explicitly provide both `--issues` and
-`--routines`; omitting only one is an error. Both are false by default. Enabling
-starts with future events, without replaying historical issues or routine runs.
-
-```bash
-crewship chat room activity ROOM_ID --issues=true --routines=false
-```

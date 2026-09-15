@@ -12,6 +12,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 ### Added
 
 - Incoming webhook configuration in Integrations for routines, agents and Page panels, with explicit outgoing notification labels. Routine webhooks can select a GitHub pull request signature profile with content-based replay protection.
+- **CLI:** `crewship memory inventory --agent|--crew` lists the current knowledge documents the server reads for an agent or a crew, with per-scope states; `crewship crew peer-conversations --agent` reaches the route's `agent_id` filter; `crewship chat room` is documented per subcommand and, like both, proved by an acceptance test that drives the built binary against the real router. (#2579)
 
 
 ### Fixed
