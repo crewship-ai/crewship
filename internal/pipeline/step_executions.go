@@ -73,8 +73,12 @@ func (s *ExecutionStore) finish(ctx context.Context, id, output string, runErr e
 			status = "cancelled"
 		}
 	}
-	// Persist cancellation even though the execution context has ended.
-	persistCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	// Persist cancellation even though the execution context has ended. Give
+	// completed results the same contention budget as the production SQLite
+	// handle (30s); a shorter deadline also expires while waiting for a pooled
+	// connection and turns successful work into a failure under transient load.
+	// This updates the existing execution only; it never repeats the action.
+	persistCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 	defer cancel()
 	scrub := scrubber.New()
 	_, err := s.db.ExecContext(persistCtx, `UPDATE pipeline_step_executions SET status=?,ended_at=?,output=?,error=? WHERE id=? AND status='running'`, status, tsformat.Format(time.Now()), scrub.Scrub(output), scrub.Scrub(reason), id)

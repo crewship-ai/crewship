@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState, type ReactNode } from "react"
+import { useEffect, useState, type ReactNode, type Ref } from "react"
 import Link from "next/link"
 import { Pencil } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -20,8 +20,8 @@ import type { RoutineDetail } from "./routines-detail-panel"
 export type RoutineIdentity = Pick<RoutineDetail, "slug" | "name" | "description" | "icon" | "color" | "head_version" | "manifest">
 
 /** One identity card, shared by the recipe and every entry into its run history. */
-export function RoutineIdentityHeader({ routine, workspaceId, onChanged, onEdit, actions, children }: {
-  routine: RoutineIdentity; workspaceId: string; onChanged?: () => void; onEdit?: () => void; actions?: ReactNode; children?: ReactNode
+export function RoutineIdentityHeader({ routine, workspaceId, onChanged, onEdit, editButtonRef, actions, children }: {
+  routine: RoutineIdentity; workspaceId: string; onChanged?: () => void; onEdit?: () => void; editButtonRef?: Ref<HTMLButtonElement>; actions?: ReactNode; children?: ReactNode
 }) {
   const { role } = useAbilities()
   const { agents } = useWorkspaceAgentDirectory(workspaceId)
@@ -49,7 +49,7 @@ export function RoutineIdentityHeader({ routine, workspaceId, onChanged, onEdit,
           {agent && <RoutineAgentLink slug={agent} agent={agents?.find(a => a.slug === agent)} workspaceId={workspaceId} />}
         </div></div>
       </div>
-      <div className="flex flex-wrap items-center gap-1.5">{roleAtLeast(role, "MANAGER") && (onEdit ? <Button variant="outline" size="sm" onClick={onEdit}><Pencil className="mr-1.5 h-3.5 w-3.5" />Edit</Button> : <Button variant="outline" size="sm" asChild><Link href={`/routines?${new URLSearchParams({ slug: routine.slug, view: "edit" })}`}><Pencil className="mr-1.5 h-3.5 w-3.5" />Edit</Link></Button>)}{actions}</div>
+      <div className="flex flex-wrap items-center gap-1.5">{roleAtLeast(role, "MANAGER") && (onEdit ? <Button ref={editButtonRef} variant="outline" size="sm" onClick={onEdit}><Pencil className="mr-1.5 h-3.5 w-3.5" />Edit</Button> : <Button variant="outline" size="sm" asChild><Link href={`/routines?${new URLSearchParams({ slug: routine.slug, view: "edit" })}`}><Pencil className="mr-1.5 h-3.5 w-3.5" />Edit</Link></Button>)}{actions}</div>
     </div>
     {routine.description && <p className="max-w-[80ch] text-[13px] leading-relaxed text-foreground/85">{routine.description}</p>}
     {isRoutineTestFixture(routine.slug) && <p className="rounded-lg border border-warn/20 bg-warn/10 px-3 py-2 text-xs text-warn">Test recipe · release verification, not a client example. Its inputs may be technical test parameters.</p>}

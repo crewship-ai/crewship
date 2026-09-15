@@ -27,6 +27,7 @@ import { RoutineInputFormBuilder } from "./routine-input-form-builder"
 import { RoutineTriggerFields, type RoutineTriggerDraft } from "./routine-trigger-fields"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
+import { useUnsavedNavigationGuard } from "@/hooks/use-unsaved-navigation-guard"
 import { Save, Sparkles, GitFork, Braces, Search } from "lucide-react"
 import { FormField } from "@/components/features/chat/asks/form-field"
 import {
@@ -367,6 +368,32 @@ export function RoutineCreateDialog({
   // it — except for a fork, which is the one wholesale replacement that IS
   // work (see there).
   const pristineText = useRef(liveText)
+  const formValues = {
+    name, description, authorCrewId, icon, color, trigger, scheduledValues,
+    goal, sourcesAndOutput,
+  }
+  // Publication and local editing have different baselines: closing loses
+  // only changes since the last draft save/load, not changes since Publish.
+  const pristineForm = useRef(formValues)
+
+  // Closing, reload and navigation share one saved-work baseline. The
+  // starter template the editor opens with is not input, so an untouched
+  // buffer is not dirty.
+  //
+  // It describes the DRAFT, not the screen. Keyed on `mode` it had an
+  // entry/fork arm of literal `false`, and nothing clears these fields when
+  // the mode changes — so the header's back arrow, which is navigation rather
+  // than a discard, moved a typed goal onto a screen that reported nothing to
+  // lose, and every exit from there closed silently. The state that survives
+  // the arrow is the state the guard has to look at.
+  //
+  // The entry tiles and the fork list still cost nothing when there is nothing
+  // typed, which is the case #2076 measured: land on the tiles, press Cancel,
+  // and no prompt appears. `forkSearch` is deliberately absent — it filters a
+  // list rather than composing anything.
+  const dirty =
+    JSON.stringify(formValues) !== JSON.stringify(pristineForm.current) ||
+    liveText !== pristineText.current
 
   // Reset to the entry screen each time the dialog opens. (Field state is
   // otherwise preserved across a close/reopen within the same session.)
@@ -384,6 +411,11 @@ export function RoutineCreateDialog({
       setAuthorCrewId(routine.author_crew_id ?? "")
       setIcon(resolveRoutineIcon(routine))
       setColor(resolveRoutineColor(routine))
+      pristineForm.current = {
+        ...formValues, name: routine.name, description: routine.description ?? "",
+        authorCrewId: routine.author_crew_id ?? "",
+        icon: resolveRoutineIcon(routine), color: resolveRoutineColor(routine),
+      }
       setDslText(text)
       setLiveText(text)
       bufferRef.current = text
@@ -413,6 +445,11 @@ export function RoutineCreateDialog({
         setScheduledValues({})
         setGoal("")
         setSourcesAndOutput("")
+        pristineForm.current = {
+          name: "", description: "", authorCrewId: "", icon: "workflow", color: "violet",
+          trigger: { ...trigger, kind: "manual", at: "" }, scheduledValues: {},
+          goal: "", sourcesAndOutput: "",
+        }
         setTestResult(null)
         setSaveToken(null)
         setSaveError(null)
@@ -440,24 +477,33 @@ export function RoutineCreateDialog({
     if (typeof doc.icon === "string") setIcon(doc.icon)
     if (typeof doc.color === "string") setColor(doc.color)
     const start = doc.trigger as Record<string, unknown> | undefined
+    const loadedForm = {
+      ...formValues,
+      name: String(doc.name || draft.slug), description: String(doc.description || ""),
+      authorCrewId: String(doc.author_crew_id || ""),
+      icon: typeof doc.icon === "string" ? doc.icon : icon,
+      color: typeof doc.color === "string" ? doc.color : color,
+    }
     if (start) {
-      setTrigger((current) => ({
-        ...current,
-        kind: start.kind as typeof current.kind,
-        cron: String(start.cron || current.cron),
-        timezone: String(start.timezone || current.timezone),
+      loadedForm.trigger = {
+        ...trigger,
+        kind: start.kind as typeof trigger.kind,
+        cron: String(start.cron || trigger.cron),
+        timezone: String(start.timezone || trigger.timezone),
         at: String(start.fire_at || ""),
-      }))
+      }
+      setTrigger(loadedForm.trigger)
       if (start.inputs && typeof start.inputs === "object")
-        setScheduledValues(
+        loadedForm.scheduledValues =
           Object.fromEntries(
             Object.entries(start.inputs).map(([key, value]) => [
               key,
               typeof value === "string" ? value : JSON.stringify(value),
             ]),
-          ),
-        )
+          )
+      setScheduledValues(loadedForm.scheduledValues)
     }
+    pristineForm.current = loadedForm
     setMode("advanced")
     setSection("Recipe")
   }
@@ -608,70 +654,12 @@ export function RoutineCreateDialog({
   // edited there are held to one standard.
   const dslExtensions = useMemo(() => routineDslExtensions(dslFormat), [dslFormat])
 
-  useEffect(() => {
-    if (!open) return
-    const changed =
-      liveText !== pristineText.current ||
-      name !== (routine?.name ?? "") ||
-      description !== (routine?.description ?? "") ||
-      authorCrewId !== (routine?.author_crew_id ?? "") ||
-      icon !== (routine ? resolveRoutineIcon(routine) : "workflow") ||
-      color !== (routine ? resolveRoutineColor(routine) : "violet") ||
-      goal.trim() !== "" ||
-      trigger.kind !== "manual" ||
-      sourcesAndOutput.trim() !== "" ||
-      Object.keys(scheduledValues).length > 0
-    if (!changed) return
-    const beforeUnload = (event: BeforeUnloadEvent) => {
-      event.preventDefault()
-      event.returnValue = ""
-    }
-    const onNavigate = (event: MouseEvent) => {
-      const link = (event.target as Element)?.closest?.(
-        "a[href]",
-      ) as HTMLAnchorElement | null
-      // Only guard a click that actually leaves this view. An in-page anchor
-      // (href="#", a fragment, a download, a new tab) does not discard the
-      // draft, and prompting on it — then swallowing the event in the capture
-      // phase, before React sees it — breaks every anchor-shaped control on
-      // the page for as long as the editor stays dirty.
-      const href = link?.getAttribute("href") ?? ""
-      const navigates =
-        !!link &&
-        !link.hasAttribute("download") &&
-        link.target !== "_blank" &&
-        href !== "" &&
-        !href.startsWith("#")
-      if (
-        navigates &&
-        !event.ctrlKey &&
-        !event.metaKey &&
-        !window.confirm("Discard unsaved recipe changes?")
-      ) {
-        event.preventDefault()
-        event.stopPropagation()
-      }
-    }
-    window.addEventListener("beforeunload", beforeUnload)
-    document.addEventListener("click", onNavigate, true)
-    return () => {
-      window.removeEventListener("beforeunload", beforeUnload)
-      document.removeEventListener("click", onNavigate, true)
-    }
-  }, [
-    open,
-    liveText,
-    name,
-    description,
-    authorCrewId,
-    icon,
-    color,
-    routine,
-    goal,
-    trigger.kind,
-    sourcesAndOutput,
-    scheduledValues,
-  ])
+  useUnsavedNavigationGuard(
+    open && dirty,
+    draftRef.current?.id
+      ? "Discard unsaved recipe changes? Your saved draft will remain available."
+      : "Discard unsaved recipe changes?",
+  )
 
   if (!open) return null
 
@@ -886,6 +874,7 @@ export function RoutineCreateDialog({
       toast.error("Fix the recipe before continuing")
       return
     }
+    const submittedText = bufferRef.current
     if (
       (routine || draftRef.current?.base_pipeline_id) &&
       parsed.name !== (routine?.slug || draftRef.current?.slug)
@@ -991,7 +980,8 @@ export function RoutineCreateDialog({
         draftRef.current = stored
         setDraftRevision(stored.revision)
         if (draftOnly) {
-          pristineText.current = bufferRef.current
+          pristineText.current = submittedText
+          pristineForm.current = formValues
           toast.success(`Draft saved · revision ${stored.revision}`)
           return
         }
@@ -1154,34 +1144,6 @@ Use scripts for deterministic work and agents where judgment is needed. Show a r
             // it does not matter — pick the one whose inputs you already have.
             "Three ways in. All three land on the same routine — pick the one you have inputs for."
 
-  // The shell's discard guard — Esc and an overlay click ask before throwing
-  // input away, and the header's × and the footer's Cancel ask too. The
-  // starter template the editor opens with is not input, so an untouched
-  // buffer is not dirty.
-  //
-  // It describes the DRAFT, not the screen. Keyed on `mode` it had an
-  // entry/fork arm of literal `false`, and nothing clears these fields when
-  // the mode changes — so the header's back arrow, which is navigation rather
-  // than a discard, moved a typed goal onto a screen that reported nothing to
-  // lose, and every exit from there closed silently. The state that survives
-  // the arrow is the state the guard has to look at.
-  //
-  // The entry tiles and the fork list still cost nothing when there is nothing
-  // typed, which is the case #2076 measured: land on the tiles, press Cancel,
-  // and no prompt appears. `forkSearch` is deliberately absent — it filters a
-  // list rather than composing anything.
-  const dirty =
-    Object.keys(scheduledValues).length > 0 ||
-    sourcesAndOutput.trim() !== "" ||
-    trigger.kind !== "manual" ||
-    goal.trim() !== "" ||
-    name !== (routine?.name ?? "") ||
-    description !== (routine?.description ?? "") ||
-    authorCrewId !== (routine?.author_crew_id ?? "") ||
-    icon !== (routine ? resolveRoutineIcon(routine) : "workflow") ||
-    color !== (routine ? resolveRoutineColor(routine) : "violet") ||
-    liveText !== pristineText.current
-
   // ⌘↵ / Ctrl↵, wired once by the shell. It does whatever the mode's primary
   // does, and nothing on the two modes whose actions are their list rows.
   const handleKeyboardSubmit = () => {
@@ -1207,6 +1169,9 @@ Use scripts for deterministic work and agents where judgment is needed. Show a r
       presentation={presentation}
       dirty={dirty}
       discardLabel="this routine"
+      discardDescription={draftRef.current?.id
+        ? "Closing discards changes made since your last save. Your saved draft will remain available."
+        : undefined}
       onSubmit={handleKeyboardSubmit}
       className={
         mode === "advanced" && !page
