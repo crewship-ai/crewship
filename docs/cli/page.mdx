@@ -74,6 +74,26 @@ exception in the other direction: it prints YAML unless you ask for
 | `publish <slug>` | Publish a page behind an expiring public link |
 | `links <slug>` | List a page's public links and which still work |
 | `unpublish <slug> --id <id>` | Withdraw one public link |
+| `project init` | Print the React/TypeScript source starter, or write it into a directory |
+| `project pack <directory>` | Print a working directory as one portable source YAML |
+| `project unpack <directory> --file <source>` | Extract a source YAML into a new working directory |
+| `project get <slug>` | Read the draft's source and definition, or a historical revision |
+| `project set <slug> --file <source> --revision <n>` | Save a source document against the expected draft revision |
+| `project history <slug>` | List audited source revisions and their Git checkpoints |
+| `project restore <slug> --revision <n> --expected-revision <m>` | Restore a revision as a new draft, never a publication |
+| `project build <slug> --revision <n>` | Start an isolated preview build |
+| `project preview <slug>` | Read the latest build's state and artifact |
+| `project check <slug> --build <id> --revision <n>` | Verify a built candidate's source, artifact and bindings |
+| `project review <slug>` | Read the review snapshot a publication is fenced against |
+| `project publish <slug> --build <id> --revision <n> --expected-publication <v> --reviewed-code` | Publish a reviewed candidate |
+| `project rollback <slug> --publication <v> --expected-publication <w> --reviewed-code` | Republish an earlier application version |
+| `project application <slug>` | Read the published application and its receipt |
+| `project publications <slug>` | List publication receipts |
+| `project unpublish <slug> --expected-publication <v> --yes` | Withdraw the application for every viewer |
+| `project action-status <slug> <pending-id>` | Read the state of an application action you dispatched |
+| `project panel-history <slug> <panel> --publication <v>` | Read a panel's payload ring through the published application |
+| `project fsck <slug>` | Verify a Page's source, checkpoint and artifact integrity |
+| `project compact` | Reclaim Page storage across the workspace |
 
 ---
 
@@ -90,9 +110,10 @@ not in the list.
 `list` takes no flags of its own. Columns are `SLUG  NAME  PANELS  STATE
 OWNER  REACH  LAST DATA`, where `PANELS` counts every panel on the page
 including the ones sealed to you, and `REACH` says how *you* reach the page —
-`owner`, `role`, `crew:<slug>`, `panel_crew:<slug>`, `grant`, comma-joined
-when there is more than one path. A page whose only path is `grant` is one
-somebody shared with you. `--format quiet` prints one slug per line, which is
+`owner`, `role`, `crew:<slug>`, `panel_crew:<slug>`, `folder:<slug>`, `grant`,
+comma-joined when there is more than one path. `folder:<slug>` means the folder
+the page is filed in is shared with you, one of your crews, or the whole
+workspace. A page whose only path is `grant` is one somebody shared with you. `--format quiet` prints one slug per line, which is
 the form the next command in a pipe wants.
 
 ---
@@ -367,6 +388,15 @@ See [`page rollback`](#crewship-page-rollback-slug) to undo one. An update
 that changes only `--icon` or `--color` is not a save of the document: it
 records no version and leaves the page's `updated_at` where it was.
 
+Replacing the panels requires that you can **read every panel** in both the
+current and the submitted definition. A `write` grant alone does not give you
+that: a panel owned by a crew you are not in is sealed to you, and a document
+that omits it would delete it. The server answers a partial reader with a
+neutral 403 (exit `4`) rather than a truncated save. If somebody else saved
+the live definition between your read and your write, the update is refused
+with 409 (exit `5`) and the newer document is left intact — re-read it and
+apply your change again.
+
 ---
 
 ## `crewship page delete <slug>`
@@ -565,8 +595,10 @@ Queued: restart-api on fleet-201/sluzby runs routine/restart-api.
 |---|:---:|---|
 | `--input k=v` | | An input the action declared. **Repeatable**; a value may contain a comma, so this is not a comma-separated list. |
 | `--idempotency-key` | | Pin the dedupe key. Defaults to a fresh UUID per invocation. |
+| `--publication <version>` | | Dispatch through the **published application** instead of the panel, fenced on this application version. The version must still be current and the live Page definition must match what that publication recorded; otherwise 409. See [custom applications](#custom-react-projects-experimental). |
 
-Backed by `POST /api/v1/pages/{slug}/panels/{id}/actions/{actionId}`.
+Backed by `POST /api/v1/pages/{slug}/panels/{id}/actions/{actionId}`, or with
+`--publication` by `POST /api/v1/pages/{slug}/application/actions/{panelId}/{actionId}`.
 
 ### You cannot name a routine here, and that is the design
 
@@ -1096,6 +1128,13 @@ rollback is exactly the dishonesty the [freshness
 contract](/guides/pages#the-freshness-contract) exists to prevent. Up to the
 last 50 versions are kept.
 
+A rollback replaces the whole definition, so it has the same visibility rule as
+[`page update --file`](#crewship-page-update-slug): you must be able to read
+every panel in both the current and the archived definition. A partial reader
+gets a neutral 403 (exit `4`). If the live definition changed after you read
+it, the rollback is refused with 409 (exit `5`) and the newer document stays;
+reload before restoring.
+
 ---
 
 ## `crewship page versions <slug>`
@@ -1241,8 +1280,8 @@ needs to branch on:
 | `0` | The push or dispatch was accepted | For `page action`, accepted is not finished |
 | `2` | Payload invalid, over the 64 KiB cap, or the spec/flags did not validate | Fix it; retrying unchanged fails identically |
 | `3` | No such page or panel — or none you may see | Do not retry |
-| `4` | You are not the panel's declared producer and hold no `produce` grant, or you are not authenticated | A 403 here is journalled and notifies the page owner |
-| `5` | An idempotency key was replayed with different inputs, or the routine is missing, unapproved or disabled | Do not retry with the same key |
+| `4` | You are not the panel's declared producer and hold no `produce` grant, or you are not authenticated — or, on `update --file`, `rollback` and the `project` reads and writes, a panel in the document is sealed to you | A 403 on `page set` is journalled and notifies the page owner. A 403 on a whole-document write is not a retry: ask the owning crew or an administrator |
+| `5` | An idempotency key was replayed with different inputs, or the routine is missing, unapproved or disabled — or the live definition moved under an `update`, `rollback`, `project set`, `project restore`, `project publish` or `project rollback` | Do not retry with the same key. For a moved definition, re-read (`page get`, `project get`, `project review`) and send again with the current revision or fence |
 | `6` | Rate limited | Sleep for the interval the message names, then retry |
 | `7` / `8` | Server error, or the request never got an answer | Safe to retry a `page set` — it is last-write-wins |
 
@@ -1265,6 +1304,10 @@ The operator must configure protected source storage, a pinned build image and
 a separate-site runtime origin. The current profile accepts its fixed dependency
 set and lockfile, with custom React and CSS. It does not install arbitrary packages.
 
+Every `page project` subcommand prints the server's document — JSON unless
+`--format yaml` or `ndjson` asks otherwise; there is no table form — except
+`init` and `pack`, which print source YAML. The lifecycle, in order:
+
 ```sh
 crewship page project init --dir health-app
 # Edit health-app/src/main.tsx and health-app/src/style.css.
@@ -1274,63 +1317,242 @@ crewship page project get health
 crewship page project history health
 crewship page project build health --revision 1
 crewship page project preview health
+crewship page project review health
+crewship page project check health --build BUILD_ID --revision 1
+crewship page project publish health --build BUILD_ID --revision 1 --expected-publication 0 --reviewed-code
+crewship page project application health
 ```
 
-`init` prints source YAML unless `--dir` is set (or JSON with `--format json`).
-`pack` prints YAML and skips `.git`, `node_modules` and `dist`; `unpack <directory>
---file source.yaml` extracts into a new directory. Existing directories are never
-overwritten. Symlinks, environment files and paths outside the project are refused.
 Source limits are 256 files, 512 KiB/file and 2 MiB total decoded content.
+Symlinks, environment files and paths outside the project are refused.
 
-`set --revision` is the **expected current draft revision**, with 0 for the first
-save. Add `--definition page.yaml` to save an authored definition in the same
-draft. `build --revision` requires the revision to build. Stale values return 409.
-Build returns a job receipt, not a ready preview; `preview` reads its current state.
-A busy compiler returns 429 without a waiting queue.
+**Who may do what.** Every `page project` command that reads or writes
+source (`get`, `history`, `restore`, `set`, `build`, `preview`, `check`,
+`review`, `fsck`) and `page export` require Page edit permission, not just
+permission to view its panels. The commands that return or replace a **whole
+definition** additionally require that you can read every panel in it: `get`
+(without `--source-only`), `get --revision`, `export`, `set` and `restore`.
+A `write` grant does not grant visibility of another crew's panels, and a
+document with a panel missing would delete it on save, so a partial reader is
+answered with a neutral 403 (exit `4`) rather than a truncated document. `set`
+and `restore` apply the rule to the live definition, the existing draft and the
+proposed definition alike; a refused save leaves the draft revision unchanged.
+`get --source-only` omits the definition and is not gated this way. `review`
+is not refused either: it withholds the panels you cannot read from both
+documents and reports `excluded_panels` and `withheld_changed` instead (see
+below). Publishing, rolling back and withdrawing require Page ownership or
+workspace administration. `application`, `action-status` and `panel-history`
+are reader operations: they need the page to be visible to you and, for the
+last two, the panel too.
 
-```sh
+### `crewship page project init`
+
+```bash
+crewship page project init --dir health-app
+crewship page project init > starter.yaml
+```
+
+Prints the supported React/TypeScript starter as one source YAML document, or
+with `--dir` writes its files into a new working directory. An existing
+directory is never overwritten. `--format json` prints the same document as
+JSON. Nothing is sent to the server.
+
+| Flag | Required | Description |
+|---|:---:|---|
+| `--dir <directory>` | | Write the starter files into this new directory instead of printing them. |
+
+### `crewship page project pack <directory>`
+
+```bash
+crewship page project pack health-app > health-source.yaml
+```
+
+Prints a working directory as one portable source YAML, the document `set`
+takes. `.git`, `node_modules` and `dist` are skipped. Nothing is sent to the
+server. `pack` takes no flags of its own.
+
+### `crewship page project unpack <directory>`
+
+```bash
+crewship page project unpack health-app --file health-source.yaml
+```
+
+Extracts a source YAML/JSON document into a **new** working directory; an
+existing one is never overwritten. Nothing is sent to the server.
+
+| Flag | Required | Description |
+|---|:---:|---|
+| `--file <source>` | ✓ | The source document to extract; `-` reads stdin. |
+
+### `crewship page project get <slug>`
+
+```bash
+crewship page project get health
 crewship page project get health --revision 1
-# Review sources without requesting the complete panel declaration:
 crewship page project get health --source-only
 crewship page project get health --revision 1 --source-only
-crewship page project restore health --revision 1 --expected-revision 3
+```
+
+Backed by `GET /api/v1/pages/{slug}/project`, or with `--revision` by
+`GET /api/v1/pages/{slug}/project/history/{revision}`; `--source-only` appends
+`/source` to either. Prints the draft's `revision`, its `project` (the source
+files) and its `definition` (the authored Page document the draft would make
+live). `--source-only` omits the definition, which is the form to use when you
+want to read code without requesting the complete panel declaration.
+
+| Flag | Required | Description |
+|---|:---:|---|
+| `--revision <n>` | | Read this historical source revision instead of the current draft. |
+| `--source-only` | | Omit the panel definition and return only the source files. Combines with `--revision`. |
+
+### `crewship page project set <slug>`
+
+```bash
+crewship page project set health --file health-source.yaml --revision 0
+crewship page project set health --file health-source.yaml --revision 3 --definition health.page.yaml
+```
+
+Backed by `PUT /api/v1/pages/{slug}/project`. Saves a source document against
+the draft revision you expect to be current. The reply carries the new
+`revision` and a `git_commit`: every save is a Git checkpoint.
+
+| Flag | Required | Description |
+|---|:---:|---|
+| `--file <source>` | ✓ | Source project YAML/JSON, as `pack` prints it; `-` reads stdin. |
+| `--revision <n>` | ✓ | The **expected current draft revision**; `0` creates the first draft. A stale value returns 409 (exit `5`). |
+| `--definition <page.yaml>` | | An authored Page document to save into the draft in the same write. It must keep the page's slug, and every crew and routine it references must resolve here. |
+
+### `crewship page project history <slug>`
+
+```bash
+crewship page project history health
 crewship page project history health --before 50
 ```
 
-History lists at most 50 revisions per page. Restore creates a new Git checkpoint
-and source revision; it does not change the live application. Source reads and
-history require Page edit permission, not just permission to view its panels.
+Backed by `GET /api/v1/pages/{slug}/project/history`. Lists audited source
+revisions — who saved each one, when, and its Git checkpoint — at most 50 per
+call.
 
-After inspecting the source and preview, check and publish the exact candidate:
+| Flag | Required | Description |
+|---|:---:|---|
+| `--before <revision>` | | List revisions older than this one. |
 
-```sh
-crewship page project review health
-crewship page project check health --build BUILD_ID --revision 4
-crewship page project publish health --build BUILD_ID --revision 4 --expected-publication 0 --reviewed-code
-crewship page project application health
-crewship page project rollback health --publication 1 --expected-publication 2 --reviewed-code
+### `crewship page project restore <slug>`
+
+```bash
+crewship page project restore health --revision 1 --expected-revision 3
 ```
 
-`review --publication <version>` asks the same question about a retained
-version instead of the draft: the candidate becomes that publication's
-archived source and its routines become the ones its archived definition
-declares, which is what a rollback is fenced on. Without the flag, `review`
-prints the snapshot a publication is fenced against: the candidate
-draft revision and its build, the live publication and its retained source, the
-routine definitions each `call` action would run, and machine-readable
-`blockers` explaining why publishing is refused. A baseline it cannot read back
-reports `source_available: false` with a reason — that is a missing comparison,
-not agreement — and a routine with no recorded digest is `unknown`, never
-`unchanged`.
+Backed by `POST /api/v1/pages/{slug}/project/restore`. Restores a historical
+source revision **as a new draft**, creating a new revision and Git checkpoint.
+It never touches the live application; publishing the restored draft is a
+separate, reviewed step.
 
-Use the actual build ID, source revision and publication version returned by the
-server. `check` verifies stored source/artifact integrity, the compiler result and
-current bindings. It still requires browser and code review. `--reviewed-code`
-confirms that review; it is not a request for an automated security scan.
-Publication requires Page owner/workspace admin authority. An ordinary write grant
-does not grant permission to publish executable code for readers.
+| Flag | Required | Description |
+|---|:---:|---|
+| `--revision <n>` | ✓ | The historical source revision to restore. |
+| `--expected-revision <n>` | ✓ | The current draft revision. A stale value returns 409 (exit `5`). |
 
-`publish` and `rollback` also send the two fence values.
+### `crewship page project build <slug>`
+
+```bash
+crewship page project build health --revision 1
+```
+
+Backed by `POST /api/v1/pages/{slug}/project/build`. Starts an isolated
+preview build of the given source revision in the pinned build image. Returns
+a **job receipt**, not a ready preview; `preview` reads its state. A busy
+compiler returns 429 without a waiting queue.
+
+| Flag | Required | Description |
+|---|:---:|---|
+| `--revision <n>` | ✓ | The source revision to build. A stale value returns 409. |
+
+### `crewship page project preview <slug>`
+
+```bash
+crewship page project preview health
+```
+
+Backed by `GET /api/v1/pages/{slug}/project/preview`. Prints the latest
+build's `state` (`running`, `ready`, `failed`, `interrupted`), its diagnostics,
+and the artifact once it is ready. `preview` takes no flags of its own.
+
+### `crewship page project check <slug>`
+
+```bash
+crewship page project check health --build BUILD_ID --revision 4
+```
+
+Backed by `POST /api/v1/pages/{slug}/project/check`. Verifies a built
+candidate: stored source and artifact integrity, the compiler result, and
+that the routines and crews the definition binds to still resolve. A clean
+check is **not** a review — it still requires browser and code review.
+
+| Flag | Required | Description |
+|---|:---:|---|
+| `--build <id>` | ✓ | The build receipt ID from `build`. |
+| `--revision <n>` | ✓ | The source revision that build compiled. |
+
+### `crewship page project review <slug>`
+
+```bash
+crewship page project review health
+crewship page project review health --publication 1
+```
+
+Backed by `GET /api/v1/pages/{slug}/project/review`. Prints the snapshot a
+publication is fenced against: the candidate draft revision and its build, the
+live publication and its retained source, the routine definitions each `call`
+action would run, and machine-readable `blockers` explaining why publishing is
+refused. A baseline it cannot read back reports `source_available: false` with
+a reason — that is a missing comparison, not agreement — and a routine with no
+recorded digest is `unknown`, never `unchanged`. Before the draft has been
+built the snapshot carries `build_missing`; before there is a draft at all,
+`no_candidate`.
+
+`--publication <version>` asks the same question about a retained version
+instead of the draft: the candidate becomes that publication's archived source
+and its routines become the ones its archived definition declares, which is
+what a rollback is fenced on.
+
+`review` also answers whether the comparison it just printed is the whole
+change. Panels belonging to crews you are not in are withheld from it, and
+`excluded_panels` says how many; `withheld_changed` says whether any of them
+actually differs between the live definition and the candidate. When it does,
+`publish` and `rollback` are refused with 403 and `blockers` carries
+`withheld_change`.
+
+| Flag | Required | Description |
+|---|:---:|---|
+| `--publication <version>` | | Review a retained publication as a rollback candidate instead of the current draft. |
+
+### `crewship page project publish <slug>`
+
+```bash
+crewship page project publish health --build BUILD_ID --revision 4 --expected-publication 0 --reviewed-code
+```
+
+Backed by `POST /api/v1/pages/{slug}/project/publish`. Publishes the exact
+candidate you reviewed: the build, the source revision, and the Page
+definition the draft carries. Use the actual build ID, source revision and
+publication version returned by the server. `--expected-publication 0` creates
+the first publication. Exact retries return the original receipt.
+
+| Flag | Required | Description |
+|---|:---:|---|
+| `--build <id>` | ✓ | The reviewed build ID. |
+| `--revision <n>` | ✓ | The reviewed source revision. |
+| `--expected-publication <version>` | ✓ | The current publication version; `0` for the first publication. A stale value returns 409 (exit `5`). |
+| `--reviewed-code` | ✓ | Confirms this exact source and build were reviewed for execution by Page readers. It is a human attestation, not a request for an automated scan. |
+| `--expected-definition-digest <sha256>` | | The digest of the Page definition that was reviewed. Omitted, it is read from `review` immediately before publishing. |
+| `--expected-routine-digest <routine>=<sha256>` | | The routine definition behind a `call` action that was reviewed. **Repeatable**, one per routine. Omitted, the set is read from `review`. |
+| `--acknowledge-unavailable-baseline` | | Publish although the live publication's retained source cannot be read back. Never filled in for you; see below. |
+
+Publication requires Page owner/workspace admin authority. An ordinary write
+grant does not grant permission to publish executable code for readers.
+
+**The fence.** `publish` and `rollback` send two fence values.
 `--expected-definition-digest` is the sha256 of the Page definition that was
 reviewed, and `--expected-routine-digest routine=sha256` (repeatable) is the
 routine definition behind each `call` action. Pass either flag and that half
@@ -1346,54 +1568,183 @@ run `crewship page project review <slug>`, read it, and pass the values back
 with the flags. If the live definition or a routine script moves between the
 snapshot and the write, the server refuses with 409 and names which one.
 
-`review` also answers whether the comparison it just printed is the whole
-change. Panels belonging to crews you are not in are withheld from it, and
-`excluded_panels` says how many; `withheld_changed` says whether any of them
-actually differs between the live definition and the candidate. When it does,
-`publish` and `rollback` are refused with 403 and `blockers` carries
-`withheld_change`. `--reviewed-code` attests that the whole change was
+**Withheld panels.** `--reviewed-code` attests that the whole change was
 reviewed, and that attestation cannot be made by a publisher who cannot read
 all of it — the rollback path included, since restoring a version replaces the
-live definition too. Publishing the Page is still yours to do; this particular
+live definition too. When `review` reports `withheld_changed`, the server
+refuses with 403. Publishing the Page is still yours to do; this particular
 claim is not yours to make, so there is no flag that waives it, unlike the
 baseline acknowledgement below. Ask a workspace administrator, or a member of
 the crew that owns the withheld part, to publish instead. The CLI prints the
 refusal ahead of the request, and says how many panels are withheld and
 nothing about what they are.
 
-`--acknowledge-unavailable-baseline` is separate from the digests and is never
-filled in for you. When the live publication's retained source cannot be read
-back — history compacted, a checkpoint lost — there is nothing to compare the
-candidate against, and the server refuses the publication with 409 until
-somebody says so explicitly. The CLI prints what is missing and what
-acknowledging it would mean, and then stops; passing the flag records that
-nobody made that comparison. It proves nothing about the candidate, which is
-verified in full either way, and the publication's `checks` keep the answer as
-`baseline_source`.
+**Unavailable baseline.** `--acknowledge-unavailable-baseline` is separate
+from the digests and is never filled in for you. When the live publication's
+retained source cannot be read back — history compacted, a checkpoint lost —
+there is nothing to compare the candidate against, and the server refuses the
+publication with 409 until somebody says so explicitly. The CLI prints what is
+missing and what acknowledging it would mean, and then sends the request as
+you gave it; passing the flag records that nobody made that comparison. It
+proves nothing about the candidate, which is verified in full either way, and
+the publication's `checks` keep the answer as `baseline_source`. An initial
+publication has no baseline and needs no acknowledgement.
 
-`--expected-publication 0` creates the first publication. Exact retries return the
-original receipt. Rollback creates a new publication of an earlier artifact and
-Page definition, keeping the source draft unchanged. It does not undo work already
-performed by routines. Publication metadata is separate from the older panel-only
-`page versions`/`page rollback` history.
+### `crewship page project rollback <slug>`
 
-```sh
+```bash
+crewship page project rollback health --publication 1 --expected-publication 2 --reviewed-code
+```
+
+Backed by `POST /api/v1/pages/{slug}/project/publish` with
+`rollback_version`. Creates a **new** publication of an earlier artifact and
+Page definition, keeping the source draft unchanged. It does not undo work
+already performed by routines. The fence, the withheld-panel rule and the
+baseline acknowledgement are the same as `publish`'s, computed against the
+retained version being restored. Publication metadata is separate from the
+older panel-only [`page versions`](#crewship-page-versions-slug)/[`page
+rollback`](#crewship-page-rollback-slug) history.
+
+| Flag | Required | Description |
+|---|:---:|---|
+| `--publication <version>` | ✓ | The earlier publication version to restore. |
+| `--expected-publication <version>` | ✓ | The current publication version. A stale value returns 409 (exit `5`). |
+| `--reviewed-code` | ✓ | Confirms the earlier application code was reviewed. |
+| `--expected-definition-digest <sha256>` | | As for `publish`. |
+| `--expected-routine-digest <routine>=<sha256>` | | As for `publish`; repeatable. |
+| `--acknowledge-unavailable-baseline` | | As for `publish`. |
+
+### `crewship page project application <slug>`
+
+```bash
+crewship page project application health
+```
+
+Backed by `GET /api/v1/pages/{slug}/application`. Prints the live publication
+receipt (`publication`, `publication_version`), the artifact, `runtime_url`
+and whether you may publish. A Page with no live application answers
+`"publication": null`. `application` takes no flags of its own.
+
+### `crewship page project publications <slug>`
+
+```bash
+crewship page project publications health
+crewship page project publications health --before 40
+```
+
+Backed by `GET /api/v1/pages/{slug}/project/publications`. Lists immutable
+application publication receipts and the current publication counter, 50 per
+request. Use `page project get <slug> --revision <source-revision>` to inspect
+exact source before a reviewed rollback.
+
+| Flag | Required | Description |
+|---|:---:|---|
+| `--before <version>` | | Return receipts older than this publication version. |
+
+### `crewship page project unpublish <slug>`
+
+```bash
+crewship page project unpublish health --expected-publication 3 --yes
+```
+
+Backed by `POST /api/v1/pages/{slug}/project/unpublish`. Withdraws the custom
+application for all viewers. Requires Page ownership or workspace
+administration. Panels, source and retained publication history remain
+available. The version counter does not reset; stale requests return 409.
+Withdrawal does not cancel routines already queued, and repeating the same
+withdrawal is idempotent.
+
+| Flag | Required | Description |
+|---|:---:|---|
+| `--expected-publication <version>` | ✓ | The current publication version. |
+| `--yes` | ✓ | Confirms withdrawing the application for every viewer. |
+
+### `crewship page project action-status <slug> <pending-id>`
+
+```bash
 crewship page action health/health refresh --publication 2 --idempotency-key check-20260908
 crewship page project action-status health PENDING_ID
 ```
 
-`page action --publication` uses the published application action endpoint. The
-version must still be current and the Page declaration must match the publication.
-The existing routine RBAC/policy still applies. Reuse the same key for an explicit
-retry; a receipt means **queued**, not completed. `action-status` returns only the
-current user's pending/run identifiers and states, never another reader's run.
-A network timeout does not mean execution stopped.
+Backed by `GET /api/v1/pages/{slug}/application/actions/{pendingId}`.
+[`page action --publication`](#crewship-page-action) uses
+the published application action endpoint. The version must still be current
+and the Page declaration must match the publication. The existing routine
+RBAC/policy still applies. Reuse the same key for an explicit retry; a receipt
+means **queued**, not completed. `action-status` returns only the current
+user's pending/run identifiers and states, never another reader's run. A
+network timeout does not mean execution stopped. `action-status` takes no
+flags of its own.
+
+### `crewship page project panel-history <slug> <panel>`
+
+```bash
+crewship page project panel-history health mysql --publication 2
+crewship page project panel-history health mysql --publication 2 --limit 5 --before 41
+```
+
+Backed by `GET /api/v1/pages/{slug}/application/panels/{panelId}/history`,
+the route the `@crewship/pages` SDK's `getPanelHistory` calls. Prints the
+panel's readable payload ring — `items` of `sequence`, `data`, `producedAt`
+and `state`, newest first — plus `next_before` (`0` at the end) and the
+`publication` it was read through. Nothing about the producer, its run or any
+other endpoint is on the wire; this is what a published application is allowed
+to see, and no more.
+
+The read is **fenced on the publication**: `--publication` is required, and a
+version that is no longer current, has been withdrawn, or whose recorded Page
+definition no longer matches the live one is answered with 409 (exit `5`) —
+reload `page project application` for the current version. A panel you cannot
+see, or that does not exist, is 404 either way. Responses are bounded to 1 MiB;
+a single entry over that is 413.
+
+| Flag | Required | Description |
+|---|:---:|---|
+| `--publication <version>` | ✓ | The mounted application version the read is fenced on. |
+| `--limit <n>` | | Entries per call, 1–20. The server default is 20. |
+| `--before <sequence>` | | Return entries older than this sequence — the previous call's `next_before`. |
+
+### `crewship page project fsck <slug>`
+
+```bash
+crewship page project fsck health
+```
+
+Backed by `GET /api/v1/pages/{slug}/project/fsck`. Checks referenced sources,
+checkpoint contents, artifacts and reachable Git objects, with Page edit
+permission. Returns `healthy`, object counts and failures; the command exits
+nonzero when unhealthy. It does not repair or publish anything. `fsck` takes
+no flags of its own.
+
+### `crewship page project compact`
+
+```bash
+crewship page project compact
+crewship page project compact --discard-history --yes
+```
+
+Backed by `POST /api/v1/pages/maintenance`. Runs workspace-wide Page storage
+maintenance (OWNER or ADMIN required). Without flags, retains the configured
+recent history plus current draft/live/running roots. `--discard-history
+--yes` explicitly discards optional history across all Pages in this workspace
+while keeping those protected roots. This cannot recover space occupied
+entirely by protected current content.
+
+| Flag | Required | Description |
+|---|:---:|---|
+| `--discard-history` | | Discard optional history while retaining drafts, live publications and running builds. |
+| `--yes` | ✓* | Confirms discarding history across the workspace. *Required with `--discard-history`. |
+
+### Export and import with source
 
 `page export` automatically uses `crewship-page-bundle/v2` for a Page with source:
 one YAML contains the authored definition, sources, lockfile and small assets.
-Import accepts v1/v2 JSON or YAML, revalidates bindings and creates an inert draft.
-It does not transfer grants, credentials, run data, Git history, build artifacts
-or trusted publication status. The referenced crews/routines must exist at the
+Import accepts v1/v2 JSON or YAML, revalidates bindings and creates an **inert
+draft**: the imported page's live definition carries no actions and nothing is
+published, while the draft's definition keeps the `call` actions the export
+declared, ready to be reviewed and published here. It does not transfer
+grants, credentials, run data, Git history, build artifacts or trusted
+publication status. The referenced crews/routines must exist at the
 destination. Export is not a backup of the complete project history.
 
 ## Related
@@ -1458,36 +1809,3 @@ the reviewed build through Studio or `crewship page project publish`.
 After a transport timeout the outcome can be unknown; inspect the current
 revision and build status before retrying. Data producers keep pushing through
 the existing panel API/`page.write` path independently of source edits.
-
-### `crewship page project publications <slug>`
-
-List immutable application publication receipts and the current publication
-counter. Pass `--before <version>` for older receipts (50 per request). Use
-`page project get <slug> --revision <source-revision>` to inspect exact source
-before a reviewed rollback.
-
-### `crewship page project unpublish <slug>`
-
-Withdraw the custom application for all viewers:
-
-```bash
-crewship page project unpublish health --expected-publication 3 --yes
-```
-
-Requires Page ownership or workspace administration. Panels, source and retained
-publication history remain available. The version counter does not reset; stale
-requests return 409. Withdrawal does not cancel routines already queued.
-
-## `crewship page project compact`
-
-Runs workspace-wide Page storage maintenance (OWNER or ADMIN required).
-Without flags, retains the configured recent history plus current draft/live/running
-roots. `--discard-history --yes` explicitly discards optional history across all
-Pages in this workspace while keeping those protected roots. This cannot recover
-space occupied entirely by protected current content.
-
-## `crewship page project fsck <slug>`
-
-Checks referenced sources, checkpoint contents, artifacts and reachable Git
-objects with Page edit permission. Returns `healthy`, object counts and failures;
-the command exits nonzero when unhealthy. It does not repair or publish anything.

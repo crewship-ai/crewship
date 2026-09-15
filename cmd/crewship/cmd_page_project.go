@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/crewship-ai/crewship/internal/pages"
@@ -283,6 +285,37 @@ func newPageProjectCommand() *cobra.Command {
 	status := &cobra.Command{Use: "action-status <slug> <pending-id>", Args: cobra.ExactArgs(2), Short: "Read your own published application's pending and run status", RunE: func(cmd *cobra.Command, args []string) error {
 		return projectCLIRequest(cmd, "GET", "/api/v1/pages/"+pagePathEscape(args[0])+"/application/actions/"+pagePathEscape(args[1]), nil)
 	}}
+	// The panel ring as the published application reads it: the same route
+	// the SDK's getPanelHistory calls, fenced on the publication the caller
+	// says it is looking at. `--publication` is required rather than resolved
+	// here because the fence is the point — a reader of version 2 must not be
+	// handed version 3's answer without noticing the application moved.
+	panelHistory := &cobra.Command{Use: "panel-history <slug> <panel>", Args: cobra.ExactArgs(2), Short: "Read a panel's readable payload ring through the published application", RunE: func(cmd *cobra.Command, args []string) error {
+		publication, _ := cmd.Flags().GetInt64("publication")
+		limit, _ := cmd.Flags().GetInt("limit")
+		before, _ := cmd.Flags().GetInt64("before")
+		if publication < 1 {
+			return fmt.Errorf("--publication is required: the mounted application version, see `crewship page project application %s`", args[0])
+		}
+		if cmd.Flags().Changed("limit") && (limit < 1 || limit > 20) {
+			return fmt.Errorf("--limit must be between 1 and 20")
+		}
+		if before < 0 {
+			return fmt.Errorf("--before must be a positive sequence")
+		}
+		query := url.Values{}
+		query.Set("publication", strconv.FormatInt(publication, 10))
+		if limit > 0 {
+			query.Set("limit", strconv.Itoa(limit))
+		}
+		if before > 0 {
+			query.Set("before", strconv.FormatInt(before, 10))
+		}
+		return projectCLIRequest(cmd, "GET", "/api/v1/pages/"+pagePathEscape(args[0])+"/application/panels/"+pagePathEscape(args[1])+"/history?"+query.Encode(), nil)
+	}}
+	panelHistory.Flags().Int64("publication", 0, "Mounted application version the read is fenced on; a stale or withdrawn one returns 409")
+	panelHistory.Flags().Int("limit", 0, "Entries per page, 1-20 (server default 20)")
+	panelHistory.Flags().Int64("before", 0, "Return entries older than this sequence; the previous response's next_before")
 	publications := &cobra.Command{Use: "publications <slug>", Args: cobra.ExactArgs(1), Short: "List application publication receipts", RunE: func(cmd *cobra.Command, args []string) error {
 		before, _ := cmd.Flags().GetInt64("before")
 		if before < 0 {
@@ -347,7 +380,7 @@ func newPageProjectCommand() *cobra.Command {
 	compact.Flags().Bool("discard-history", false, "Discard optional history while retaining drafts, live publications and running builds")
 	compact.Flags().Bool("yes", false, "Confirm discarding optional history across this workspace")
 	cmd.AddCommand(fsck, compact)
-	cmd.AddCommand(publications, withdraw, status, newPageProjectPackCommand(), newPageProjectUnpackCommand(), get, set, init, build, preview, history, restore, review, check, publish, rollback, application)
+	cmd.AddCommand(publications, withdraw, status, panelHistory, newPageProjectPackCommand(), newPageProjectUnpackCommand(), get, set, init, build, preview, history, restore, review, check, publish, rollback, application)
 	return cmd
 }
 
