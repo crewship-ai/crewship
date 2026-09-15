@@ -37,7 +37,7 @@ Hlavičkové čtení tedy bylo čistě útočná plocha. Druhá polovina nálezu
 | Test | Co dokazuje | HEAD | Po opravě |
 |---|---|---|---|
 | `TestRun_InvokingHeadersFromJWTCallerAreIgnored` (`internal/api`) | MEMBER+`routine.run` s podvrženými hlavičkami (`full` crew, vymyšlený agent): 200, uložená provenance crew/agent prázdná, `invoking_user_id` = volající. **HTTP → řádek → trust:** trust grant pro (pipeline, `publish`, hash běhu) + strict autor → `CreateApproval` = `pending`. | FAIL (`crew="crew-full-sibling" agent="agent-i-made-up"`) | PASS |
-| `TestInternalRun_InvokingIdentityIsVerified` (`internal/api`, 12 případů) | crew-bound: vlastní crew+agent 200; bez agenta 200; sibling crew 403 (#1186 beze změny); vlastní crew + sibling agent 403; + agent z cizího workspace 403; + neznámý agent 403. Master token: sibling crew + její agent 200 (workspace-wide zůstává); cizí workspace crew 403; sibling crew + cizí agent 403; neznámá crew 403. Workspace-bound: cizí crew 403; sibling crew + agent 200. Odmítnutí nezanechá `pipeline_runs` řádek; povolené případy mají uloženou přesně tu identitu a `invoking_user_id` prázdné. | 5 případů FAIL (200 místo 403) | PASS |
+| `TestInternalRun_InvokingIdentityIsVerified` (`internal/api`, 13 případů) | crew-bound: vlastní crew+agent 200; bez agenta 200; sibling crew 403 (#1186 beze změny); vlastní crew + sibling agent 403; + agent z cizího workspace 403; + neznámý agent 403. Master token: sibling crew + její agent 200 (workspace-wide zůstává); cizí workspace crew 403; sibling crew + cizí agent 403; neznámá crew 403. Workspace-bound: cizí crew 403; sibling crew + agent 200. Master token bez crew + sibling agent → 200 s crew doplněnou z agenta. Odmítnutí nezanechá `pipeline_runs` řádek; povolené případy mají uloženou přesně tu identitu a `invoking_user_id` prázdné. | 5 případů FAIL (200 místo 403) | PASS |
 | `TestCreateApproval_InvokingCrewCannotRelaxStrictAuthor` (`internal/pipeline`) | Řádek běhu s `invoking_crew_id` = `full` crew, autor `strict`, aktivní grant → `pending`; autor `guided` → `approved` (cross-crew cesta funguje dál). | FAIL (`approved`) | PASS |
 | `TestHandlePipelinesRun_NoInvokerHeadersUpstream` (`internal/sidecar`) | Upstream request nenese `X-Crewship-Invoking-*` (ani z requestu), nese `X-Internal-Token`. | n/a (nahrazuje skip) | PASS |
 
@@ -78,9 +78,13 @@ Nesoulad, který zůstává (rozhodnutí R2 v oponentuře, neřešeno zde): oper
 ## 5. Autorizační kontrakt po změně
 
 - Veřejná `/run`: provenance = `invoking_user_id` (ověřený uživatel / CLI token); `invoking_crew_id`, `invoking_agent_id` vždy prázdné. Žádná hlavička není čtena.
-- `InternalRun`: `invoking_crew_id` = crew tokenu (crwv1, doplní se při vynechání) nebo crew v bound workspace (wsv1) nebo libovolná crew v `body.WorkspaceID` (master); vždy živý řádek. `invoking_agent_id` prázdný, nebo živý agent téhož workspace a člen uvedené crew. Jinak 403 bez vytvoření běhu.
+- `InternalRun`: `invoking_crew_id` = crew tokenu (crwv1, doplní se při vynechání) nebo crew v bound workspace (wsv1) nebo libovolná crew v `body.WorkspaceID` (master); vždy živý řádek. `invoking_agent_id` prázdný, nebo živý agent téhož workspace a člen uvedené crew; je-li agent uveden bez crew (jen master/wsv1), crew se doplní z řádku agenta, takže uložená dvojice je vždy konzistentní. Jinak 403 bez vytvoření běhu.
 - Trust grant (`wait(approval)`): strict **autorská** crew vždy blokuje; jinak postura invoking crew (je-li) nebo autora. Nečitelná crew = strict. Nečitelný `pipelines` řádek bez invokera = strict; s invokerem = postura invokera (původní chování, kryto existujícími testy).
 - Sémantika revokace za běhu se nemění (dokumentace odložena — viz §7).
+
+## 5a. Review
+
+CodeRabbit byl při otevření PR rate-limited (status zelený, review žádné); retrigger požádán. Nezávislé code-review (Claude, úroveň high, celý diff + okolní kód) nenašlo chybu správnosti; jeden nit (agent bez crew u master/wsv1 volajícího → nekonzistentní „From“ dvojice) opraven doplněním crew z řádku agenta; redundantní čtení postury autora odstraněno. Stav strojového review v době merge je v PR.
 
 ## 6. Limity a co není hotové
 

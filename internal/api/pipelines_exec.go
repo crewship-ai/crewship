@@ -433,7 +433,7 @@ func (h *PipelineHandler) InternalRun(w http.ResponseWriter, r *http.Request) {
 	// standing trust grant fires — so both must resolve to real rows
 	// inside the workspace the run belongs to, with the agent a member of
 	// the invoking crew.
-	if !assertInvokingIdentity(w, r, h.db, h.logger, body.WorkspaceID, body.InvokingCrewID, body.InvokingAgentID) {
+	if !assertInvokingIdentity(w, r, h.db, h.logger, body.WorkspaceID, &body.InvokingCrewID, body.InvokingAgentID) {
 		return
 	}
 

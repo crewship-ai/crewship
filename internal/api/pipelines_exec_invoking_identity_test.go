@@ -166,6 +166,9 @@ func TestInternalRun_InvokingIdentityIsVerified(t *testing.T) {
 		{"master token, foreign-workspace crew", masterCtx, foreignCrew, "", http.StatusForbidden},
 		{"master token, sibling crew, own agent", masterCtx, siblingCrew, ownAgent, http.StatusForbidden},
 		{"master token, unknown crew", masterCtx, "crew-does-not-exist", "", http.StatusForbidden},
+		// An agent named without a crew: the crew is completed from the
+		// agent's row, so the persisted pair is always consistent.
+		{"master token, no crew, sibling agent → crew filled", masterCtx, "", siblingAgent, http.StatusOK},
 		// Workspace-bound token without a crew: crew must be in the workspace.
 		{"workspace-bound token, foreign-workspace crew", boundCtx(""), foreignCrew, "", http.StatusForbidden},
 		{"workspace-bound token, sibling crew, sibling agent", boundCtx(""), siblingCrew, siblingAgent, http.StatusOK},
@@ -196,8 +199,12 @@ func TestInternalRun_InvokingIdentityIsVerified(t *testing.T) {
 				return
 			}
 			_, crew, agent, user, _ := runProvenance(t, h, "pipe-internal")
-			if crew != tc.crew || agent != tc.agent {
-				t.Errorf("persisted provenance crew=%q agent=%q, want crew=%q agent=%q", crew, agent, tc.crew, tc.agent)
+			wantCrew := tc.crew
+			if wantCrew == "" && tc.agent != "" {
+				wantCrew = siblingCrew // completed from the agent's row
+			}
+			if crew != wantCrew || agent != tc.agent {
+				t.Errorf("persisted provenance crew=%q agent=%q, want crew=%q agent=%q", crew, agent, wantCrew, tc.agent)
 			}
 			if user != "" {
 				t.Errorf("invoking_user_id = %q, want empty on an agent-invoked run", user)

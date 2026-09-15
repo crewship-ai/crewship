@@ -414,9 +414,13 @@ SELECT pipeline_id, COALESCE(definition_hash, ''), COALESCE(invoking_crew_id, ''
 	var authorCrew string
 	authorErr := s.db.QueryRowContext(ctx,
 		`SELECT COALESCE(author_crew_id, '') FROM pipelines WHERE id = ?`, out.pipelineID).Scan(&authorCrew)
-	if authorErr == nil && authorCrew != "" && s.crewAutonomy(ctx, authorCrew) == string(policy.AutonomyStrict) {
-		out.autonomy = string(policy.AutonomyStrict)
-		return out
+	authorAutonomy := ""
+	if authorErr == nil && authorCrew != "" {
+		authorAutonomy = s.crewAutonomy(ctx, authorCrew)
+		if authorAutonomy == string(policy.AutonomyStrict) {
+			out.autonomy = string(policy.AutonomyStrict)
+			return out
+		}
 	}
 	if crewID == "" {
 		// invoking_crew_id is empty for the ordinary case — a user
@@ -426,6 +430,10 @@ SELECT pipeline_id, COALESCE(definition_hash, ''), COALESCE(invoking_crew_id, ''
 			// Cannot establish which crew owns this routine → assume the
 			// strictest posture rather than auto-approving blind.
 			out.autonomy = string(policy.AutonomyStrict)
+			return out
+		}
+		if authorCrew != "" {
+			out.autonomy = authorAutonomy
 			return out
 		}
 		crewID = authorCrew
