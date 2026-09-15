@@ -78,9 +78,12 @@ func (s *Server) reapRevokedCredentials(ctx context.Context) {
 		return
 	}
 	// Metadata shape (values withheld for the non-loopback sidecar): we only
-	// need the live IDs.
+	// need the live IDs, and — for #1882 — whether each still has an ACTIVE
+	// rotation. rotation_grace_until is the open window's deadline or absent;
+	// it is metadata the public rotation listing already shows, never a value.
 	var live []struct {
-		ID string `json:"id"`
+		ID                 string `json:"id"`
+		RotationGraceUntil string `json:"rotation_grace_until,omitempty"`
 	}
 	if err := json.Unmarshal(body, &live); err != nil {
 		s.logger.Warn("credential reap: decode failed, keeping current creds", "error", err)
@@ -88,13 +91,24 @@ func (s *Server) reapRevokedCredentials(ctx context.Context) {
 	}
 
 	keep := make(map[string]struct{}, len(live))
+	keepGrace := make(map[string]struct{})
 	for _, c := range live {
 		if c.ID != "" {
 			keep[c.ID] = struct{}{}
+			if c.RotationGraceUntil != "" {
+				keepGrace[c.ID] = struct{}{}
+			}
 		}
 	}
 	if removed := s.credStore.Reap(keep); removed > 0 {
 		s.logger.Info("credential reap: dropped revoked/removed credentials", "count", removed)
+	}
+	// An operator who ended a grace window early scrubbed the value on the
+	// server; this is where the sidecar's copy follows. Only after a good
+	// fetch, for the same reason Reap is: a blip must not drop a fallback a
+	// draining run is about to need.
+	if scrubbed := s.credStore.ScrubGrace(keepGrace); scrubbed > 0 {
+		s.logger.Info("credential reap: dropped grace values of cancelled rotations", "count", scrubbed)
 	}
 }
 
@@ -122,6 +136,9 @@ func (s *Server) startCredentialReaper(ctx context.Context) {
 		case tick := <-ticker.C:
 			if dropped := s.credStore.ExpireLeases(tick); dropped > 0 {
 				s.logger.Info("credential reap: dropped credentials with lapsed leases", "count", dropped)
+			}
+			if dropped := s.credStore.ExpireGrace(tick); dropped > 0 {
+				s.logger.Info("credential reap: dropped grace values of expired rotations", "count", dropped)
 			}
 			s.reapRevokedCredentials(ctx)
 		}

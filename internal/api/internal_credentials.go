@@ -133,13 +133,22 @@ func (h *InternalHandler) ListCredentials(w http.ResponseWriter, r *http.Request
 		statusClause = "status = 'ACTIVE'"
 	}
 
+	// rotation_grace_until (#1882): the end of this credential's open
+	// rotation window, or NULL. The crew sidecar's reaper reads it to drop
+	// its boot-time copy of the previous value once the operator ends the
+	// window early — the boot-delivered deadline covers expiry, this covers
+	// cancellation. Metadata only: the value itself never travels here.
 	query := `SELECT id, workspace_id, name, type, provider, encrypted_value,
-		encrypted_refresh_token, token_expires_at, account_label, account_email, status
+		encrypted_refresh_token, token_expires_at, account_label, account_email, status,
+		(SELECT cr.expires_at FROM credential_rotations cr
+		  WHERE cr.credential_id = credentials.id AND cr.status = 'ACTIVE'
+		    AND cr.expires_at > ? AND cr.old_value != ''
+		  ORDER BY cr.rotated_at DESC LIMIT 1) AS rotation_grace_until
 		FROM credentials
 		WHERE ` + statusClause + ` AND deleted_at IS NULL
 		AND type IN ('AI_CLI_TOKEN', 'API_KEY') AND provider != 'NONE'`
 
-	var args []any
+	args := []any{leaseComparisonNow()}
 	if workspaceID != "" {
 		query += " AND workspace_id = ?"
 		args = append(args, workspaceID)
@@ -288,17 +297,24 @@ func (h *InternalHandler) ListCredentials(w http.ResponseWriter, r *http.Request
 		TokenExpires *string `json:"token_expires_at"`
 		AccountLabel *string `json:"account_label"`
 		Status       string  `json:"status"`
+		// RotationGraceUntil is set only while an ACTIVE rotation's window
+		// is open (#1882); omitted otherwise so an older sidecar sees the
+		// row it always saw.
+		RotationGraceUntil *string `json:"rotation_grace_until,omitempty"`
 	}
 
 	var result []credResult
 	for rows.Next() {
 		var c credResult
 		var encValue string
-		var encRefresh, accountEmail sql.NullString
+		var encRefresh, accountEmail, graceUntil sql.NullString
 		if err := rows.Scan(&c.ID, &c.WorkspaceID, &c.Name, &c.Type, &c.Provider,
-			&encValue, &encRefresh, &c.TokenExpires, &c.AccountLabel, &accountEmail, &c.Status); err != nil {
+			&encValue, &encRefresh, &c.TokenExpires, &c.AccountLabel, &accountEmail, &c.Status, &graceUntil); err != nil {
 			replyInternalError(w, h.logger, "scan internal credential", err)
 			return
+		}
+		if graceUntil.Valid && graceUntil.String != "" {
+			c.RotationGraceUntil = &graceUntil.String
 		}
 		if includeValues {
 			decrypted, derr := encryption.Decrypt(encValue)

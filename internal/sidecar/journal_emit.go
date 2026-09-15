@@ -60,6 +60,48 @@ func (s *Server) buildEgressObserver() EgressObserver {
 	}
 }
 
+// buildGraceFallbackObserver returns the proxy-side hook that makes a
+// rotation grace replay (#1882) visible to the operator. It is a
+// network.egress entry — the replay IS an outbound request, and that type is
+// the one the sidecar may emit — with a summary that says what happened and
+// a payload that names the credential and the rotation, so a run that
+// succeeded on the previous value can be found from either side. The
+// summary carries identifiers only; the value never leaves the CredStore.
+//
+// Same shape as buildEgressObserver: dropped without IPC, fire-and-forget,
+// no back-pressure on the proxy hot path.
+func (s *Server) buildGraceFallbackObserver() GraceFallbackObserver {
+	return func(e GraceFallback) {
+		if s == nil || s.ipc == nil || s.ipc.BaseURL == "" || s.ipc.WorkspaceID == "" {
+			return
+		}
+		go func(e GraceFallback) {
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+
+			payload := map[string]any{
+				"host":           e.Host,
+				"method":         e.Method,
+				"status_code":    e.Status,
+				"provider":       e.Provider,
+				"credential_id":  e.CredentialID,
+				"rotation_id":    e.RotationID,
+				"grace_fallback": true,
+			}
+			if e.AgentID != "" {
+				payload["agent_id"] = e.AgentID
+			}
+			outcome := fmt.Sprintf("%d", e.Status)
+			if e.Status == 0 {
+				outcome = "transport error"
+			}
+			summary := fmt.Sprintf("%s %s → %s after a 401: replayed once with credential %s's rotation grace value (rotation %s)",
+				e.Method, e.Host, outcome, e.CredentialID, e.RotationID)
+			s.emitJournal(ctx, "network.egress", summary, payload, nil)
+		}(e)
+	}
+}
+
 // journalEmitRequest mirrors the wire format defined by the crewshipd
 // handler in internal/api/internal_journal.go. Kept as a private struct
 // here so a breaking change on either side surfaces as a compile error
