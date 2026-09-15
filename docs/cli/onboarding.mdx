@@ -43,6 +43,8 @@ crewship onboarding proposal create --crew-name "Uptime Watch" \
 | `--agent "<Name>:<Role>"` | — | Name one roster agent. Repeatable, 1–6 total. Split on the **first** colon only, so a role may contain more. |
 | `--template-slug <slug>` | `""` | Derive the roster from a builtin crew template instead. |
 | `--crew-slug <slug>` | derived | Slug override. Derived from `--crew-name` when omitted; diacritics are folded, so "Hlídač dostupnosti" becomes `hlidac-dostupnosti`. |
+| `--crew-icon <name>` | template's, or none | Icon for the crew card and row — a name from the web icon set (`shield`, `rocket`, `code`, `chart`, `users`, …). Sent as `crew_icon`. Checked against the server's vocabulary; an unknown name is **dropped, not refused**, so the proposal is still created with the default look. |
+| `--crew-color <color>` | template's, or none | Colour for the crew card: a palette id (`blue`, `emerald`, `violet`, `amber`, `rose`, `cyan`, `lime`, `fuchsia`) or a 6-digit hex (`1a2b3c` or `#1a2b3c`, stored with the `#`). Sent as `crew_color`; anything else is dropped the same way. |
 | `--llm-provider <id>` | `ANTHROPIC` | Provider for the model override. |
 | `--llm-model <id>` | provider default | Model id. Validated against the provider's curated catalogue — an id outside it is replaced with the workspace default rather than creating a crew that fails at the adapter on every run. |
 
@@ -54,8 +56,9 @@ wins and the template supplies the rest of the crew metadata.
 Only the name and the role are taken from what you type. Each agent's system
 prompt, tool profile and adapter are composed server-side.
 
-Prints the proposal id, its status (`PENDING`) and the resolved roster. Add
-`--output json` for the full payload.
+Prints the proposal id, its status (`PENDING`) and the resolved roster, plus a
+`Crew Icon` / `Crew Color` row for each the proposal carries. Add `--format json`
+for the full payload, where they are `payload.crew_icon` / `payload.crew_color`.
 
 ## crewship onboarding proposal get
 

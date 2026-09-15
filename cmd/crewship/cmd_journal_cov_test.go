@@ -136,10 +136,9 @@ func TestJournalRunE_ListQueryAndOutput(t *testing.T) {
 	defer stub.Close()
 	setupStubCLICov(t, stub)
 
-	crewID := "ccrewaaaaaaaaaaaaaaaaaa"
-	stub.OnGet("/api/v1/crews", clitest.JSONResponse(200, []map[string]string{
-		{"id": crewID, "slug": "backend-team"},
-	}))
+	// --crew goes to the server as typed (the journal handler resolves an
+	// id, a slug or a display name itself since #2206), so no /crews
+	// lookup is stubbed — a resolver round-trip here would be the bug.
 	stub.OnGet("/api/v1/journal", clitest.JSONResponse(200, map[string]any{
 		"entries": []map[string]any{
 			{"ts": "2026-01-02T03:04:05Z", "entry_type": "run.completed", "severity": "info",
@@ -185,7 +184,7 @@ func TestJournalRunE_ListQueryAndOutput(t *testing.T) {
 	}
 	wantParams := map[string]string{
 		"limit":              "75",
-		"crew_id":            crewID,
+		"crew_id":            "backend-team",
 		"agent_id":           "agent-1",
 		"mission_id":         "mis-1",
 		"trace_id":           "trace-1",
@@ -648,18 +647,33 @@ func TestJournalCommands_NetworkError(t *testing.T) {
 	}
 }
 
-func TestJournalRunE_CrewResolveError(t *testing.T) {
+func TestJournalRunE_CrewNameReachesServerVerbatim(t *testing.T) {
+	// A display name is a valid --crew (help text: "name, slug or ID"). The
+	// CLI must not pre-resolve it by slug and refuse; the server matches
+	// id, slug and name (resolveJournalRefs) and an unknown reference
+	// filters to nothing rather than erroring.
 	stub := clitest.NewStubServer()
 	defer stub.Close()
 	setupStubCLICov(t, stub)
-	stub.OnGet("/api/v1/crews", clitest.JSONResponse(200, []map[string]string{
-		{"id": "c1", "slug": "other-crew"},
-	}))
-	setFlagCov(t, journalCmd, "crew", "ghost-crew")
+	stub.OnGet("/api/v1/journal", clitest.JSONResponse(200, map[string]any{"entries": []any{}, "count": 0}))
+	setFlagCov(t, journalCmd, "crew", "Backend Team")
 
-	err := journalCmd.RunE(journalCmd, nil)
-	if err == nil || !strings.Contains(err.Error(), "crew not found: ghost-crew") {
-		t.Fatalf("want crew not found, got %v", err)
+	if _, err := captureStdoutCov(t, func() error { return journalCmd.RunE(journalCmd, nil) }); err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	calls := stub.CallsFor("GET", "/api/v1/journal")
+	if len(calls) != 1 {
+		t.Fatalf("expected one GET /api/v1/journal, got %d", len(calls))
+	}
+	q, err := url.ParseQuery(calls[0].Query)
+	if err != nil {
+		t.Fatalf("parse query: %v", err)
+	}
+	if got := q.Get("crew_id"); got != "Backend Team" {
+		t.Fatalf("crew_id = %q, want the name as typed", got)
+	}
+	if calls := stub.CallsFor("GET", "/api/v1/crews"); len(calls) != 0 {
+		t.Fatalf("--crew must not round-trip through /api/v1/crews, got %d call(s)", len(calls))
 	}
 }
 
@@ -775,14 +789,12 @@ func TestJournalCountRunE_FormatsAndCrew(t *testing.T) {
 		}
 	})
 
-	t.Run("crew filter resolves to id", func(t *testing.T) {
+	t.Run("crew filter reaches the server as typed", func(t *testing.T) {
+		// Same contract as the list command: the server resolves id, slug
+		// or name, so the CLI forwards the reference and stubs no /crews.
 		stub := clitest.NewStubServer()
 		defer stub.Close()
 		setupStubCLICov(t, stub)
-		crewID := "ccrewcccccccccccccccccc"
-		stub.OnGet("/api/v1/crews", clitest.JSONResponse(200, []map[string]string{
-			{"id": crewID, "slug": "backend-team"},
-		}))
 		stub.OnGet("/api/v1/journal/count", clitest.JSONResponse(200, map[string]int64{"total": 1}))
 		setFlagCov(t, journalCountCmd, "crew", "backend-team")
 
@@ -793,21 +805,11 @@ func TestJournalCountRunE_FormatsAndCrew(t *testing.T) {
 			t.Fatalf("RunE: %v", err)
 		}
 		calls := stub.CallsFor("GET", "/api/v1/journal/count")
-		if len(calls) != 1 || !strings.Contains(calls[0].Query, "crew_id="+crewID) {
+		if len(calls) != 1 || !strings.Contains(calls[0].Query, "crew_id=backend-team") {
 			t.Errorf("crew_id missing from count query: %+v", calls)
 		}
-	})
-
-	t.Run("crew resolve failure", func(t *testing.T) {
-		stub := clitest.NewStubServer()
-		defer stub.Close()
-		setupStubCLICov(t, stub)
-		stub.OnGet("/api/v1/crews", clitest.JSONResponse(200, []map[string]string{}))
-		setFlagCov(t, journalCountCmd, "crew", "ghost")
-
-		err := journalCountCmd.RunE(journalCountCmd, nil)
-		if err == nil || !strings.Contains(err.Error(), "crew not found") {
-			t.Fatalf("want crew not found, got %v", err)
+		if calls := stub.CallsFor("GET", "/api/v1/crews"); len(calls) != 0 {
+			t.Errorf("--crew must not round-trip through /api/v1/crews, got %d call(s)", len(calls))
 		}
 	})
 
