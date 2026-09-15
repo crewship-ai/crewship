@@ -168,8 +168,9 @@ Validation on the deployed application revision **b8f9c2fb**:
   the additional reveal (8) and account-group UI checks (5). The full frontend
   suite passed **760 files / 9,111 tests**. Other Go variants were still running
   when this entry was written; current check state belongs to the PR.
-- Full current API passed **195.852s**, `-count=1`, using file-backed SQLite on
-  isolated tmpfs (executables on disk). Full `go vet`, production export,
+- Full current API passed **195.852s**, `-count=1`, with test databases on
+  normal disk (`GOTMPDIR=/tmp` takes precedence over `TMPDIR` for Go 1.27
+  `t.TempDir`). Full `go vet`, production export,
   ESLint (0 errors / 30 existing warnings), strict docs inventory and the test
   type baseline gate passed. The latter still records 183 existing diagnostics.
 - The full local Go run started before the catalog change and exposed a flaky
@@ -197,3 +198,24 @@ or migration was added. Browser verification also caught same-page Next links
 leaving the old tab mounted; the cross-links now navigate to the named tab.
 Existing endpoint limitations remain: no agent disable/delete API, Page revoke
 rather than a reversible switch, per-Page discovery and no Page receipt history.
+
+### Final verification of the snapshot follow-up
+
+On **31852e92**, CI 34977457689 passed the complete shuffled Go command
+`go test ./... -count=1 -shuffle=on -timeout 18m`: all 155 packages, including
+145 with test results and 10 without tests, with no exclusions. Frontend and
+the real-login Playwright job also passed again. The remaining race/platform
+checks were still running at this entry; the PR links their live status.
+
+Locally, the snapshot family passed three repetitions on normal disk
+(197.053s). The complete database package then passed with both synchronization
+fixes, using a separately built test binary and `GOTMPDIR` pointing to a
+private tmpfs directory; the binary returned **DATABASE_EXIT=0**. The test
+files' actual open paths were checked under `/dev/shm`. This is database
+functional verification, not a power-failure durability test. An intermediate
+rerun was cancelled when it was found to still use disk and to predate the
+companion fixture change; it is not counted as a pass.
+
+The final documentation-only follow-up corrects the earlier API environment
+description: setting `TMPDIR` did not override Go 1.27's `GOTMPDIR=/tmp` for
+`t.TempDir`. Production code and tests remain byte-identical to 31852e92.
