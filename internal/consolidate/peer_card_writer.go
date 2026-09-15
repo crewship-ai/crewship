@@ -127,6 +127,24 @@ func SyncPeerCard(
 	paths memory.PeerPaths,
 	now time.Time,
 ) PeerSyncOutcome {
+	return syncPeerCard(ctx, db, logger, threshold, cand, content, paths, now, false)
+}
+
+// syncPeerCard is SyncPeerCard with the dry-run seam (#1702). With dryRun
+// set, the opt-out purge and the write return the outcome they would have
+// produced and touch neither disk, the index nor peer_card_audit. Every
+// read-only step before them runs as usual.
+func syncPeerCard(
+	ctx context.Context,
+	db *sql.DB,
+	logger *slog.Logger,
+	threshold PeerCardThreshold,
+	cand PeerCandidate,
+	content string,
+	paths memory.PeerPaths,
+	now time.Time,
+	dryRun bool,
+) PeerSyncOutcome {
 	slug := memory.UserSlug(cand.UserID, cand.WorkspaceID)
 	out := PeerSyncOutcome{UserID: cand.UserID, AgentID: cand.AgentID, UserSlug: slug}
 
@@ -144,6 +162,11 @@ func SyncPeerCard(
 		// Propagate file + DB errors so the routine summary counts
 		// these as failures (otherwise GDPR purge looks complete
 		// when disk/DB cleanup actually failed).
+		if dryRun {
+			out.Action = "delete_opt_out"
+			out.Reason = "user opted out (dry run: nothing purged)"
+			return out
+		}
 		if err := memory.DeletePeerCard(paths, cand.UserID, cand.WorkspaceID); err != nil {
 			out.Action = "delete_opt_out"
 			out.Err = fmt.Errorf("delete peer card on opt-out: %w", err)
@@ -188,6 +211,12 @@ func SyncPeerCard(
 	}
 
 	// 4) write
+	if dryRun {
+		out.Action = "write"
+		out.Bytes = len(content)
+		out.Reason = "dry run: nothing written"
+		return out
+	}
 	if err := memory.WritePeerCard(paths, cand.UserID, cand.WorkspaceID, content); err != nil {
 		out.Action = "write"
 		out.Err = fmt.Errorf("WritePeerCard: %w", err)

@@ -334,7 +334,7 @@ describe("<RoutinesDetailPanel> — the input form and the selected routine", ()
     // `{routine && …}` — so for the width of that fetch the Run button is
     // live while the panel still shows the last routine's definition.
     // Opening there builds the form from A's inputs and posts it to B.
-    let release: (() => void) | null = null
+    let release: () => void = () => {}
     vi.mocked(apiFetch).mockImplementation(async (url, init) => {
       const u = String(url)
       if (init?.method === "POST" && u.endsWith("/run")) {
@@ -372,7 +372,7 @@ describe("<RoutinesDetailPanel> — the input form and the selected routine", ()
       )
     expect(runPosts).toEqual([])
 
-    release?.()
+    release()
   })
 
   it("still runs the selected routine with its own inputs", async () => {
@@ -483,7 +483,7 @@ it.each(["missing run ID", "unreadable JSON"])(
             json: async () => {
               throw new SyntaxError("Unreadable response")
             },
-          } as Response)
+          } as unknown as Response)
     const post = vi
       .fn()
       .mockResolvedValueOnce(invalid)

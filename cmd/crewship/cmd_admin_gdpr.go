@@ -33,12 +33,12 @@ import (
 // operator closing a SAR ticket is told "Erased." over an erasure that
 // only partly happened.
 type gdprDeleteResult struct {
-	ActionID    string         `json:"action_id"`
-	DataSubject string         `json:"data_subject"`
-	WorkspaceID string         `json:"workspace_id"`
-	RowsDeleted int            `json:"rows_deleted"`
-	Scope       map[string]int `json:"scope"`
-	Error       string         `json:"error"`
+	ActionID    string         `json:"action_id" yaml:"action_id"`
+	DataSubject string         `json:"data_subject" yaml:"data_subject"`
+	WorkspaceID string         `json:"workspace_id" yaml:"workspace_id"`
+	RowsDeleted int            `json:"rows_deleted" yaml:"rows_deleted"`
+	Scope       map[string]int `json:"scope" yaml:"scope"`
+	Error       string         `json:"error" yaml:"error"`
 }
 
 // sortedScopeTables keeps the per-table breakdown in a stable order —

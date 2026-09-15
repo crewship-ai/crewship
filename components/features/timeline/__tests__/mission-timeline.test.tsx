@@ -59,11 +59,8 @@ async function openForkDialog() {
 
 beforeEach(() => {
   // happy-dom has no pointer capture; Radix calls into it on trigger press.
-  // @ts-expect-error polyfill
   Element.prototype.hasPointerCapture = vi.fn(() => false)
-  // @ts-expect-error polyfill
   Element.prototype.setPointerCapture = vi.fn()
-  // @ts-expect-error polyfill
   Element.prototype.releasePointerCapture = vi.fn()
   vi.clearAllMocks()
   apiFetch.mockResolvedValue({

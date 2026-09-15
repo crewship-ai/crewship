@@ -44,6 +44,27 @@ func remainingCrewAgentSchemaCatalogV1() (map[string]DomainSchema, map[string]an
 	add("GET", "/api/v1/agent-load", "RemainingAgentLoadV1", object(map[string]any{"agents": array(anyObject()), "total": integer(), "running": integer()}))
 	add("GET", "/api/v1/agents/{agentId}/credential-bindings", "RemainingAgentCredentialBindingsV1", array(anyObject()))
 	add("GET", "/api/v1/agents/{agentId}/credentials", "RemainingAgentCredentialsV1", array(anyObject()))
+	// #2183: mirrors agentCredentialReadinessResponse (agent_credential_readiness.go).
+	// The required lists are graded against the struct's own json tags by
+	// TestOpenAPIRequired_MatchesTheStructsOwnJSONTags (internal/api).
+	modelCredential := object(map[string]any{
+		"state":           map[string]any{"type": "string", "enum": []string{"ready", "missing", "unknown"}},
+		"credential_name": str(),
+		"credential_id":   str(),
+		"source":          str(),
+		"delivery":        str(),
+		"provider":        str(),
+	})
+	modelCredential["required"] = []string{"state"}
+	readiness := object(map[string]any{
+		"agent_id":         str(),
+		"agent_slug":       str(),
+		"adapter":          str(),
+		"model_credential": modelCredential,
+		"notes":            array(str()),
+	})
+	readiness["required"] = []string{"agent_id", "agent_slug", "adapter", "model_credential", "notes"}
+	add("GET", "/api/v1/agents/{agentId}/credential-readiness", "RemainingAgentCredentialReadinessV1", readiness)
 	add("GET", "/api/v1/agents/{agentId}/debug", "RemainingAgentDebugV1", object(map[string]any{"agent_id": str(), "status": str(), "details": anyObject()}))
 	add("GET", "/api/v1/agents/{agentId}/git-log", "RemainingAgentGitLogV1", object(map[string]any{"commits": array(anyObject()), "branch": str()}))
 	add("GET", "/api/v1/agents/{agentId}/integrations/resolved", "RemainingAgentResolvedIntegrationsV1", object(map[string]any{"integrations": array(anyObject())}))

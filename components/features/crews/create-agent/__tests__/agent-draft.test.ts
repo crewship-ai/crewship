@@ -6,6 +6,7 @@ import {
   isDraftDirty,
   resolveFinalPrompt,
   isIdentityValid,
+  type AgentDraft,
 } from "../types"
 
 describe("agent draft", () => {
@@ -373,7 +374,7 @@ describe("agent draft", () => {
     })
 
     it("lead_mode is null for non-LEAD roles (backend ignores otherwise)", () => {
-      const draft = { ...initialAgentDraft("eng"), agentRole: "AGENT" as const }
+      const draft: AgentDraft = { ...initialAgentDraft("eng"), agentRole: "AGENT" }
       const lead_mode = draft.agentRole === "LEAD" ? draft.leadMode : null
       expect(lead_mode).toBeNull()
     })

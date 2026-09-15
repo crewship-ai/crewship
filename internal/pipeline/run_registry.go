@@ -45,8 +45,9 @@ type RunInfo struct {
 // runEntry is the registry's internal record. Holds the cancel func
 // for the run's context plus the metadata exposed via Active().
 type runEntry struct {
-	info   RunInfo
-	cancel context.CancelFunc
+	info     RunInfo
+	cancel   context.CancelFunc
+	released chan struct{}
 }
 
 // RunRegistry tracks in-flight pipeline runs for cancel + concurrency
@@ -141,7 +142,8 @@ func (r *RunRegistry) Acquire(parent context.Context, opts AcquireOpts) (context
 			ConcurrencyKey: opts.ConcurrencyKey,
 			StartedAt:      time.Now(),
 		},
-		cancel: cancel,
+		cancel:   cancel,
+		released: make(chan struct{}),
 	}
 	r.runs[opts.RunID] = entry
 	if countKey != "" {
@@ -159,6 +161,7 @@ func (r *RunRegistry) Acquire(parent context.Context, opts AcquireOpts) (context
 		if cur, ok := r.runs[opts.RunID]; ok && cur == entry {
 			cur.cancel() // idempotent
 			delete(r.runs, opts.RunID)
+			close(cur.released)
 			if countKey != "" {
 				if n := r.keyCounts[countKey] - 1; n > 0 {
 					r.keyCounts[countKey] = n
@@ -294,4 +297,16 @@ func (r *RunRegistry) Count(workspaceID, concurrencyKey string) int {
 		n++
 	}
 	return n
+}
+
+// released returns the current execution's lifetime fence, or nil if it has
+// already released its slot. Observe it under the same lock as release: a
+// decision arriving just before a run parks must not lose its resume request.
+func (r *RunRegistry) released(runID string) <-chan struct{} {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if entry := r.runs[runID]; entry != nil {
+		return entry.released
+	}
+	return nil
 }

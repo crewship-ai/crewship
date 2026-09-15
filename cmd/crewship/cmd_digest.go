@@ -243,9 +243,9 @@ func createDigestRoutine(client *cli.Client, ws, crewSlug string, note func(stri
 		return err
 	}
 	var testResult struct {
-		Status    string `json:"status"`
-		SaveToken string `json:"save_token"`
-		Error     string `json:"error_message"`
+		Status    string `json:"status" yaml:"status"`
+		SaveToken string `json:"save_token" yaml:"save_token"`
+		Error     string `json:"error_message" yaml:"error_message"`
 	}
 	if err := json.NewDecoder(testResp.Body).Decode(&testResult); err != nil {
 		return fmt.Errorf("decode test_run response: %w", err)

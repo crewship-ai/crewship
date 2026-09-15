@@ -211,7 +211,7 @@ func serverAllowsSignup(client *cli.Client) (allow, known bool) {
 		return false, false
 	}
 	var status struct {
-		AllowSignup *bool `json:"allow_signup"`
+		AllowSignup *bool `json:"allow_signup" yaml:"allow_signup"`
 	}
 	if err := cli.ReadJSON(resp, &status); err != nil || status.AllowSignup == nil {
 		return false, false
@@ -237,9 +237,9 @@ func findWorkspaceMemberByEmail(client *cli.Client, wsID, email string) (userID,
 		return "", "", err
 	}
 	var rows []struct {
-		ID    string  `json:"id"`
-		Email string  `json:"email"`
-		Role  *string `json:"role"`
+		ID    string  `json:"id" yaml:"id"`
+		Email string  `json:"email" yaml:"email"`
+		Role  *string `json:"role" yaml:"role"`
 	}
 	if err := cli.ReadJSON(resp, &rows); err != nil {
 		return "", "", err

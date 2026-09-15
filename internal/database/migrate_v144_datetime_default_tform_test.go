@@ -30,17 +30,7 @@ var legacySpaceFormPattern = regexp.MustCompile(`^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:
 // insert a row without created_at, read it back, and it's the legacy
 // space-form shape rather than T-form.
 func TestMigrateV144_ConvertedColumnsDefaultToTForm(t *testing.T) {
-	dir := t.TempDir()
-	db, err := Open("file:" + filepath.Join(dir, "v144.db"))
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-
-	if err := Migrate(context.Background(), db.DB, logger); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
+	db := openMigratedTestDB(t)
 
 	if _, err := db.Exec(`INSERT INTO workspaces (id, name, slug) VALUES ('ws_v144', 'WS142', 'ws-v144')`); err != nil {
 		t.Fatalf("seed workspace: %v", err)
@@ -84,17 +74,7 @@ func TestMigrateV144_ConvertedColumnsDefaultToTForm(t *testing.T) {
 // space-form (' ' sorts before 'T' in ASCII, so legacy rows always sorted
 // as "earlier" than any RFC3339 row no matter their actual time).
 func TestMigrateV144_TFormSortsCorrectlyAgainstExplicitWrites(t *testing.T) {
-	dir := t.TempDir()
-	db, err := Open("file:" + filepath.Join(dir, "v144_sort.db"))
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-
-	if err := Migrate(context.Background(), db.DB, logger); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
+	db := openMigratedTestDB(t)
 
 	if _, err := db.Exec(`INSERT INTO workspaces (id, name, slug) VALUES ('ws_v144s', 'WS142S', 'ws-v144s')`); err != nil {
 		t.Fatalf("seed workspace: %v", err)
@@ -154,17 +134,7 @@ func TestMigrateV144_TFormSortsCorrectlyAgainstExplicitWrites(t *testing.T) {
 // if a future change reintroduced table recreation and lost the trigger,
 // this bad insert would silently succeed instead of failing.
 func TestMigrateV144_IndexesAndTriggersSurviveRecreation(t *testing.T) {
-	dir := t.TempDir()
-	db, err := Open("file:" + filepath.Join(dir, "v144_triggers.db"))
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-
-	if err := Migrate(context.Background(), db.DB, logger); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
+	db := openMigratedTestDB(t)
 
 	var triggerName string
 	if err := db.QueryRow(
@@ -200,7 +170,7 @@ func TestMigrateV144_IndexesAndTriggersSurviveRecreation(t *testing.T) {
 		t.Fatalf("seed credential: %v", err)
 	}
 
-	_, err = db.Exec(`INSERT INTO credential_crews (credential_id, crew_id) VALUES ('cred_a_v144', 'crew_b_v144')`)
+	_, err := db.Exec(`INSERT INTO credential_crews (credential_id, crew_id) VALUES ('cred_a_v144', 'crew_b_v144')`)
 	if err == nil {
 		t.Fatal("expected trg_credential_crews_workspace_check to reject a cross-workspace credential_crews row, insert succeeded")
 	}
@@ -211,17 +181,7 @@ func TestMigrateV144_IndexesAndTriggersSurviveRecreation(t *testing.T) {
 // NOT touched by this migration — their DEFAULT stays space-form because
 // the column is never string-compared.
 func TestMigrateV144_SkippedTablesStayLegacyForm(t *testing.T) {
-	dir := t.TempDir()
-	db, err := Open("file:" + filepath.Join(dir, "v144_skip.db"))
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-
-	if err := Migrate(context.Background(), db.DB, logger); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
+	db := openMigratedTestDB(t)
 
 	for table, checkSQL := range map[string]string{
 		"mcp_registry_servers": `SELECT sql FROM sqlite_master WHERE type='table' AND name='mcp_registry_servers'`,
@@ -326,17 +286,7 @@ func TestMigrateV144_BackfillsHistoricalLegacyRows(t *testing.T) {
 // TestMigrateV144_MemoryVersionsUntouched guards the boundary with 1073a:
 // this migration must not modify memory_versions at all.
 func TestMigrateV144_MemoryVersionsUntouched(t *testing.T) {
-	dir := t.TempDir()
-	db, err := Open("file:" + filepath.Join(dir, "v144_memver.db"))
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-
-	if err := Migrate(context.Background(), db.DB, logger); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
+	db := openMigratedTestDB(t)
 
 	var name string
 	if err := db.QueryRow(`SELECT name FROM sqlite_master WHERE type='table' AND name='memory_versions'`).Scan(&name); err != nil {
@@ -376,17 +326,7 @@ func inboxCreatedAtOrder(t *testing.T, db *DB, wsID string) []string {
 // value, not the space-form-with-fraction the subsec DEFAULT produced — and
 // the schema literal itself must no longer carry a subsec DEFAULT.
 func TestMigrateV144_ConvertsSubsecDefaultToTForm(t *testing.T) {
-	dir := t.TempDir()
-	db, err := Open("file:" + filepath.Join(dir, "v144_subsec.db"))
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-
-	if err := Migrate(context.Background(), db.DB, logger); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
+	db := openMigratedTestDB(t)
 
 	if _, err := db.Exec(`INSERT INTO workspaces (id, name, slug) VALUES ('ws_ss', 'SS', 'ws-ss')`); err != nil {
 		t.Fatalf("seed workspace: %v", err)

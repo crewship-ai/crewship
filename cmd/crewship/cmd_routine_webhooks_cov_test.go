@@ -278,9 +278,9 @@ func TestRoutineWebhooksCreateRunE_MissingTokenInResponse(t *testing.T) {
 
 func TestRoutineWebhooksUrlRunE_FoundAndNotFound(t *testing.T) {
 	stub := covSetupCli4(t)
-	stub.OnGet(covWebhooksPath, clitest.JSONResponse(200, []map[string]any{
-		covWebhookRow("wh-1", "gh-prs", "pr-review", "tok url+escape", true, true),
-	}))
+	row := covWebhookRow("wh-1", "gh-prs", "pr-review", "tok url+escape", true, true)
+	row["ingress_profile"] = "github"
+	stub.OnGet(covWebhooksPath, clitest.JSONResponse(200, []map[string]any{row}))
 
 	c := covFreshCmd(routineWebhooksUrlCmd, func(c *cobra.Command) {
 		c.Flags().String("base-url", "", "")
@@ -292,7 +292,7 @@ func TestRoutineWebhooksUrlRunE_FoundAndNotFound(t *testing.T) {
 		t.Fatalf("RunE: %v", err)
 	}
 	// Token must be path-escaped in the printed URL.
-	if !strings.Contains(out, "https://pub.example.com/api/v1/webhooks/tok%20url+escape") {
+	if !strings.Contains(out, "https://pub.example.com/api/v1/webhooks/tok%20url+escape/github-pull-request") {
 		t.Errorf("escaped public URL missing: %q", out)
 	}
 

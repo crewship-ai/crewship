@@ -51,7 +51,7 @@ var crewConnectCmd = &cobra.Command{
 		}
 
 		var created struct {
-			ID string `json:"id"`
+			ID string `json:"id" yaml:"id"`
 		}
 		if err := cli.ReadJSON(resp, &created); err != nil {
 			return err
@@ -110,12 +110,12 @@ var crewConnectionsCmd = &cobra.Command{
 		}
 
 		var conns []struct {
-			ID           string `json:"id"`
-			FromCrewSlug string `json:"from_crew_slug"`
-			ToCrewSlug   string `json:"to_crew_slug"`
-			Direction    string `json:"direction"`
-			Status       string `json:"status"`
-			CreatedAt    string `json:"created_at"`
+			ID           string `json:"id" yaml:"id"`
+			FromCrewSlug string `json:"from_crew_slug" yaml:"from_crew_slug"`
+			ToCrewSlug   string `json:"to_crew_slug" yaml:"to_crew_slug"`
+			Direction    string `json:"direction" yaml:"direction"`
+			Status       string `json:"status" yaml:"status"`
+			CreatedAt    string `json:"created_at" yaml:"created_at"`
 		}
 		if err := cli.ReadJSON(resp, &conns); err != nil {
 			return err
@@ -211,14 +211,14 @@ var crewPeerConvsCmd = &cobra.Command{
 		}
 
 		type peerConv struct {
-			ID        string  `json:"id"`
-			FromName  string  `json:"from_name"`
-			ToName    string  `json:"to_name"`
-			Question  string  `json:"question"`
-			Response  *string `json:"response"`
-			Status    string  `json:"status"`
-			Escalated bool    `json:"escalated"`
-			CreatedAt string  `json:"created_at"`
+			ID        string  `json:"id" yaml:"id"`
+			FromName  string  `json:"from_name" yaml:"from_name"`
+			ToName    string  `json:"to_name" yaml:"to_name"`
+			Question  string  `json:"question" yaml:"question"`
+			Response  *string `json:"response" yaml:"response"`
+			Status    string  `json:"status" yaml:"status"`
+			Escalated bool    `json:"escalated" yaml:"escalated"`
+			CreatedAt string  `json:"created_at" yaml:"created_at"`
 		}
 		var items []peerConv
 		if err := cli.ReadJSON(resp, &items); err != nil {

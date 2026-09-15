@@ -89,16 +89,8 @@ func TestSnapshotBeforeMigrate_FreshInstall(t *testing.T) {
 func TestSnapshotBeforeMigrate_NoPending(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "uptodate.db")
-	db, err := Open("file:" + dbPath)
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	defer db.Close()
-
+	db := openMigratedTestDBAt(t, dbPath)
 	logger := newTestLogger()
-	if err := Migrate(context.Background(), db.DB, logger); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
 
 	if err := SnapshotBeforeMigrate(context.Background(), db, logger); err != nil {
 		t.Fatalf("SnapshotBeforeMigrate: %v", err)
@@ -115,16 +107,8 @@ func TestSnapshotBeforeMigrate_NoPending(t *testing.T) {
 func TestSnapshotBeforeMigrate_CreatesBackup(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "pending.db")
-	db, err := Open("file:" + dbPath)
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	defer db.Close()
-
+	db := openMigratedTestDBAt(t, dbPath)
 	logger := newTestLogger()
-	if err := Migrate(context.Background(), db.DB, logger); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
 
 	// Drop the last two migration rows to fake pending state. The schema
 	// columns those migrations added still exist — Migrate's re-run will
@@ -178,16 +162,8 @@ func TestSnapshotBeforeMigrate_EnvOptOut(t *testing.T) {
 
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "optout.db")
-	db, err := Open("file:" + dbPath)
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	defer db.Close()
-
+	db := openMigratedTestDBAt(t, dbPath)
 	logger := newTestLogger()
-	if err := Migrate(context.Background(), db.DB, logger); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
 	if _, err := db.Exec(`DELETE FROM _migrations WHERE version =
 		(SELECT MAX(version) FROM _migrations)`); err != nil {
 		t.Fatalf("tamper: %v", err)

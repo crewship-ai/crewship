@@ -255,6 +255,7 @@ var mutationRoutesOutsideTheRoleGate = map[string]string{
 	// not have by construction.
 	"POST /api/v1/auth/pair/redeem": "redeems a single-use CLI pairing code with a 10-minute TTL; the code is " +
 		"the credential (router_auth.go:118)",
+	"POST /api/v1/webhooks/{token}/github-pull-request": "public GitHub PR dispatch: high-entropy endpoint token plus SHA-256 verification by profiles.Verify; TestPipelineWebhooks_GitHubPullRequestDelivery rejects invalid signatures and unsigned-header replay",
 	"POST /api/v1/webhooks/{token}": "public pipeline dispatch: the high-entropy token in the path is the auth " +
 		"surface, with signing_secret + HMAC layered on top (router_pipelines.go:184)",
 	"POST /api/v1/waitpoint-tokens/{token}": "an external system completes one waitpoint via its callback URL " +

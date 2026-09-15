@@ -33,6 +33,7 @@ crewship agent <subcommand> [flags]
 | `debug` | Show agent debug info (container state, env, crewshipd status) |
 | `skills` | List skills assigned to an agent |
 | `credentials` | List credentials assigned to an agent |
+| `credential-readiness` | Report whether a delivered credential authenticates the agent's model |
 | `channels` | List notification channels the agent may send to |
 | `avatar` | Inspect, set, or clear an agent's stored avatar |
 | `mcp` | Show or set MCP server configuration for an agent |
@@ -444,6 +445,43 @@ crewship agent credentials <slug-or-id>
 | `crew` | the credential is linked to the agent's crew | unlink it from the crew — there is no per-agent assignment to revoke |
 
 A `crew` row shows `-` for ID because no assignment row exists behind it. `SOURCE` is a different question: it names the approval that put a *lease* on the grant (`manual`, `keeper_allow`, `escalation_approve`), and is `-` for a standing grant.
+
+This listing answers "what reaches the agent?", not "can the agent call its model?". One crew-scoped `GH_TOKEN` binding makes it non-empty for every agent in the crew, including one with no model credential at all. For that question use `credential-readiness`.
+
+---
+
+## `crewship agent credential-readiness`
+
+Report whether a credential the runtime will actually deliver authenticates this agent's model provider.
+
+The verdict is computed by the runtime's own delivery rules, not by looking at the credential list: a Claude Code agent is served by the sidecar proxy (its env holds a dummy key by design), a Codex or Gemini login lands in a file under `HOME`, an OpenCode or Cursor key is written to the env. `ready` means the run's own selector finds the credential; `missing` means it will not, and the first run fails at the first model call; `unknown` means the server has no opinion (an adapter it does not recognise, an OpenCode agent naming no provider, a local endpoint) and says nothing rather than guess.
+
+```bash
+crewship agent credential-readiness <slug-or-id>
+crewship agent credential-readiness <slug-or-id> --format json
+```
+
+```
+Agent casey (CLAUDE_CODE): model credential ready.
+
+PROVIDER    CREDENTIAL                SOURCE        DELIVERY
+ANTHROPIC   CLAUDE_CODE_OAUTH_TOKEN   agent_grant   login_env
+```
+
+```
+Agent parity-probe (CLAUDE_CODE): NO model credential reaches this agent for ANTHROPIC.
+Its first run will fail at the first model call.
+
+no credential in this agent's delivery authenticates ANTHROPIC for CLAUDE_CODE
+
+Grant one, then re-check:
+  crewship credential list
+  crewship credential assign <credential> parity-probe
+```
+
+`SOURCE` uses the vocabulary of `crewship credential resolve` (`agent_grant`, `agent_binding`, `crew_binding`, `workspace_binding`, `crew_link`). `DELIVERY` is the channel: `sidecar` (the proxy injects it, the env holds a dummy), `login_env`, `login_file`, `env`. Below the `manage` role the credential's name is withheld, as it is from `agent credentials`; the verdict is not.
+
+This command only reports. It assigns nothing.
 
 ---
 

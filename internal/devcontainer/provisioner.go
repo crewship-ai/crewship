@@ -590,6 +590,13 @@ func (p *Provisioner) Provision(ctx context.Context, baseImage string, cfg *Conf
 	// 2. Create temporary container from the (possibly feature-baked) base.
 	containerID, err := p.createTempContainer(ctx, effectiveBase)
 	if err != nil {
+		// The image we were about to run from is not there after all — most
+		// likely the memoised list said the feature image existed and the
+		// daemon has since lost it. Drop the list so the next attempt relists
+		// and rebuilds instead of tripping on the same stale entry (#2431).
+		if isImageNotFound(err) {
+			p.invalidateImageListCache()
+		}
 		return fail(ProvStepContainerCreate, fmt.Errorf("creating temp container: %w", err))
 	}
 	emitEvt(ProvisionEvent{Step: ProvStepContainerCreate, Status: ProvStatusCompleted, Detail: containerID})
@@ -603,6 +610,9 @@ func (p *Provisioner) Provision(ctx context.Context, baseImage string, cfg *Conf
 
 	// 3. Start the container.
 	if _, err := p.docker.ContainerStart(ctx, containerID, client.ContainerStartOptions{}); err != nil {
+		if isImageNotFound(err) {
+			p.invalidateImageListCache()
+		}
 		return fail("container_start", fmt.Errorf("starting temp container: %w", err))
 	}
 

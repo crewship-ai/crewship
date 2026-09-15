@@ -98,7 +98,7 @@ metadata:
   description: All Q2 launch deliverables
 spec:
   color: "#3B82F6"
-  status: active
+  status: in_progress
   priority: high
   health: on_track
   target_date: "2026-06-30"

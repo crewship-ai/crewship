@@ -82,42 +82,42 @@ Examples:
 // nothing was ever replayed. That is the failure mode this whole family is
 // about — a zero value rendered as a finding.
 type backtestSourceRun struct {
-	RunID     string `json:"id"`
-	Status    string `json:"status"`
-	Output    string `json:"output"`
-	StartedAt string `json:"started_at"`
+	RunID     string `json:"id" yaml:"id"`
+	Status    string `json:"status" yaml:"status"`
+	Output    string `json:"output" yaml:"output"`
+	StartedAt string `json:"started_at" yaml:"started_at"`
 }
 
 // backtestRunRow is one graded (source, candidate) pair.
 type backtestRunRow struct {
-	SourceRunID         string  `json:"source_run_id"`
-	SourceStartedAt     string  `json:"source_started_at"`
-	SourceOutput        string  `json:"source_output,omitempty"`
-	CandidateRunID      string  `json:"candidate_run_id,omitempty"`
-	CandidateStatus     string  `json:"candidate_status,omitempty"`
-	CandidateOutput     string  `json:"candidate_output,omitempty"`
-	CandidateCostUSD    float64 `json:"candidate_cost_usd,omitempty"`
-	CandidateDurationMs int64   `json:"candidate_duration_ms,omitempty"`
-	OutputChanged       bool    `json:"output_changed"`
-	Error               string  `json:"error,omitempty"`
-	Verdict             string  `json:"verdict"`
+	SourceRunID         string  `json:"source_run_id" yaml:"source_run_id"`
+	SourceStartedAt     string  `json:"source_started_at" yaml:"source_started_at"`
+	SourceOutput        string  `json:"source_output,omitempty" yaml:"source_output,omitempty"`
+	CandidateRunID      string  `json:"candidate_run_id,omitempty" yaml:"candidate_run_id,omitempty"`
+	CandidateStatus     string  `json:"candidate_status,omitempty" yaml:"candidate_status,omitempty"`
+	CandidateOutput     string  `json:"candidate_output,omitempty" yaml:"candidate_output,omitempty"`
+	CandidateCostUSD    float64 `json:"candidate_cost_usd,omitempty" yaml:"candidate_cost_usd,omitempty"`
+	CandidateDurationMs int64   `json:"candidate_duration_ms,omitempty" yaml:"candidate_duration_ms,omitempty"`
+	OutputChanged       bool    `json:"output_changed" yaml:"output_changed"`
+	Error               string  `json:"error,omitempty" yaml:"error,omitempty"`
+	Verdict             string  `json:"verdict" yaml:"verdict"`
 }
 
 // backtestSummary is the top-level report — table / JSON / markdown
 // via the shared formatter.
 type backtestSummary struct {
-	ExecutionMode  string           `json:"execution_mode"`
-	Slug           string           `json:"slug"`
-	AgainstVersion int              `json:"against_version"`
-	Since          string           `json:"since"`
-	Runs           int              `json:"runs"`
-	Matched        int              `json:"matched"`
-	Diverged       int              `json:"diverged"`
-	Regressed      int              `json:"regressed"`
-	Errored        int              `json:"errored"`
-	Rows           []backtestRunRow `json:"rows"`
-	Verdict        string           `json:"verdict"`
-	GeneratedAt    string           `json:"generated_at"`
+	ExecutionMode  string           `json:"execution_mode" yaml:"execution_mode"`
+	Slug           string           `json:"slug" yaml:"slug"`
+	AgainstVersion int              `json:"against_version" yaml:"against_version"`
+	Since          string           `json:"since" yaml:"since"`
+	Runs           int              `json:"runs" yaml:"runs"`
+	Matched        int              `json:"matched" yaml:"matched"`
+	Diverged       int              `json:"diverged" yaml:"diverged"`
+	Regressed      int              `json:"regressed" yaml:"regressed"`
+	Errored        int              `json:"errored" yaml:"errored"`
+	Rows           []backtestRunRow `json:"rows" yaml:"rows"`
+	Verdict        string           `json:"verdict" yaml:"verdict"`
+	GeneratedAt    string           `json:"generated_at" yaml:"generated_at"`
 }
 
 func runRoutineBacktest(cmd *cobra.Command, args []string) error {
@@ -252,12 +252,12 @@ func replayBacktestRun(client *cli.Client, ws string, against int, src backtestS
 		return row
 	}
 	var result struct {
-		RunID        string  `json:"run_id"`
-		Status       string  `json:"status"`
-		Output       string  `json:"output"`
-		DurationMs   int64   `json:"duration_ms"`
-		CostUSD      float64 `json:"cost_usd"`
-		ErrorMessage string  `json:"error_message"`
+		RunID        string  `json:"run_id" yaml:"run_id"`
+		Status       string  `json:"status" yaml:"status"`
+		Output       string  `json:"output" yaml:"output"`
+		DurationMs   int64   `json:"duration_ms" yaml:"duration_ms"`
+		CostUSD      float64 `json:"cost_usd" yaml:"cost_usd"`
+		ErrorMessage string  `json:"error_message" yaml:"error_message"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		row.Error = fmt.Sprintf("decode replay response: %v", err)

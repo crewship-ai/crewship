@@ -85,9 +85,9 @@ function renderDialog() {
       onCreated={vi.fn()}
     />,
   )
-  fireEvent.click(screen.getByRole("button", { name: "Model and execution", exact: true }))
-  fireEvent.click(screen.getByRole("radio", { name: "Anthropic", exact: true }))
-  fireEvent.click(screen.getByRole("button", { name: "Permissions", exact: true }))
+  fireEvent.click(screen.getByRole("button", { name: "Model and execution" }))
+  fireEvent.click(screen.getByRole("radio", { name: "Anthropic" }))
+  fireEvent.click(screen.getByRole("button", { name: "Permissions" }))
   return result
 }
 

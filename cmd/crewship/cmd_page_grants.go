@@ -48,28 +48,28 @@ import (
 // ── The wire (mirrors internal/api/pages_grants.go) ────────────────────────
 
 type pageGrantJSON struct {
-	SubjectType string   `json:"subject_type"`
-	Subject     string   `json:"subject"`
-	SubjectID   string   `json:"subject_id"`
-	Level       string   `json:"level"`
-	Panels      []string `json:"panels"`
-	GrantedBy   string   `json:"granted_by"`
-	GrantedAt   string   `json:"granted_at"`
-	Live        bool     `json:"live"`
-	InertReason string   `json:"inert_reason"`
+	SubjectType string   `json:"subject_type" yaml:"subject_type"`
+	Subject     string   `json:"subject" yaml:"subject"`
+	SubjectID   string   `json:"subject_id" yaml:"subject_id"`
+	Level       string   `json:"level" yaml:"level"`
+	Panels      []string `json:"panels" yaml:"panels"`
+	GrantedBy   string   `json:"granted_by" yaml:"granted_by"`
+	GrantedAt   string   `json:"granted_at" yaml:"granted_at"`
+	Live        bool     `json:"live" yaml:"live"`
+	InertReason string   `json:"inert_reason" yaml:"inert_reason"`
 }
 
 type pageGrantsJSON struct {
-	Page   string          `json:"page"`
-	Grants []pageGrantJSON `json:"grants"`
+	Page   string          `json:"page" yaml:"page"`
+	Grants []pageGrantJSON `json:"grants" yaml:"grants"`
 }
 
 // pageGrantWriteBody is the PUT body.
 type pageGrantWriteBody struct {
-	SubjectType string   `json:"subject_type"`
-	Subject     string   `json:"subject"`
-	Level       string   `json:"level"`
-	Panels      []string `json:"panels,omitempty"`
+	SubjectType string   `json:"subject_type" yaml:"subject_type"`
+	Subject     string   `json:"subject" yaml:"subject"`
+	Level       string   `json:"level" yaml:"level"`
+	Panels      []string `json:"panels,omitempty" yaml:"panels,omitempty"`
 }
 
 // ── grant ──────────────────────────────────────────────────────────────────

@@ -512,7 +512,8 @@ The trusted endpoint the sidecar forwards to when an agent emits a new pipeline 
 | `workspace_id` | string | **Required.** |
 | `slug` | string | **Required.** |
 | `definition` | JSON | **Required.** Raw pipeline DSL. |
-| `name`, `description` | string | Optional metadata. |
+| `name` | string | Optional metadata. |
+| `description` | string | Optional. On re-save of an existing slug, omitting the key preserves the stored description; an explicit `""` clears it. |
 | `author_crew_id`, `author_agent_id`, `author_chat_id`, `author_run_id` | string | Author attribution; recorded with `authored_via = agent`. `author_crew_id` also scopes the agent-slug validation set. |
 | `last_test_run_at` | string | RFC 3339. Feeds the test-run gate. |
 | `last_test_run_passed` | bool | Feeds the test-run gate. |

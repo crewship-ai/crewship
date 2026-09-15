@@ -22,15 +22,15 @@ var modelCmd = &cobra.Command{
 // modelInfoRow mirrors llm.ModelInfo / the API's modelsListResponse.models,
 // plus the facts the embedded catalog knows about the same id.
 type modelInfoRow struct {
-	ID          string `json:"id"`
-	DisplayName string `json:"display_name,omitempty"`
-	Provider    string `json:"provider"`
+	ID          string `json:"id" yaml:"id"`
+	DisplayName string `json:"display_name,omitempty" yaml:"display_name,omitempty"`
+	Provider    string `json:"provider" yaml:"provider"`
 	// Catalog is nil when the embedded models.dev snapshot has no entry for
 	// this id — which is the normal case for an Ollama tag or a model newer
 	// than the snapshot. It is a pointer and not a flattened set of fields
 	// because "the catalog does not know this model" and "the catalog says
 	// zero context, free" have to stay distinguishable.
-	Catalog *modelCatalogFacts `json:"catalog,omitempty"`
+	Catalog *modelCatalogFacts `json:"catalog,omitempty" yaml:"catalog,omitempty"`
 }
 
 // modelCatalogFacts is what the snapshot adds to a model id: how much fits,
@@ -43,18 +43,18 @@ type modelInfoRow struct {
 // rates, not necessarily the billed ones — paymaster's hand-verified table
 // sits above the catalog and can correct it.
 type modelCatalogFacts struct {
-	ContextTokens   int64    `json:"context_tokens,omitempty"`
-	MaxOutputTokens int64    `json:"max_output_tokens,omitempty"`
-	ToolCall        bool     `json:"tool_call"`
-	Reasoning       bool     `json:"reasoning"`
-	InputPerMTok    *float64 `json:"input_usd_per_mtok,omitempty"`
-	OutputPerMTok   *float64 `json:"output_usd_per_mtok,omitempty"`
+	ContextTokens   int64    `json:"context_tokens,omitempty" yaml:"context_tokens,omitempty"`
+	MaxOutputTokens int64    `json:"max_output_tokens,omitempty" yaml:"max_output_tokens,omitempty"`
+	ToolCall        bool     `json:"tool_call" yaml:"tool_call"`
+	Reasoning       bool     `json:"reasoning" yaml:"reasoning"`
+	InputPerMTok    *float64 `json:"input_usd_per_mtok,omitempty" yaml:"input_usd_per_mtok,omitempty"`
+	OutputPerMTok   *float64 `json:"output_usd_per_mtok,omitempty" yaml:"output_usd_per_mtok,omitempty"`
 }
 
 type modelListResult struct {
-	Provider string         `json:"provider"`
-	Source   string         `json:"source"`
-	Models   []modelInfoRow `json:"models"`
+	Provider string         `json:"provider" yaml:"provider"`
+	Source   string         `json:"source" yaml:"source"`
+	Models   []modelInfoRow `json:"models" yaml:"models"`
 }
 
 // Where `model list` reads from. "live" is the server's own resolution (a live

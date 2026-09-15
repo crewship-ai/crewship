@@ -1,16 +1,21 @@
 import { devices } from "@playwright/test"
 
 import { test, expect } from "./fixtures/auth"
+import { incomingWebhookFlow } from "./incoming-webhook-flow"
 
 // One browser context is intentional. NextAuth rotates the session cookie on
 // some authenticated mutations; six independent contexts would reuse the
 // global-setup snapshot and eventually redirect to /login (or hit the login
 // rate limit if each spec tried to repair that itself).
 test("PR browser contract subset", async ({ page }) => {
+  // Includes the real HTTP Incoming lifecycle and its disposable routine setup.
+  test.setTimeout(90_000)
   await test.step("login flow", async () => {
     await page.goto("/crews")
     await expect(page).toHaveURL(/\/crews/)
-    await expect(page.getByRole("heading", { name: "Crews & agents", exact: true })).toBeVisible()
+    // A cold embedded export hydrates after the workspace request. The CI trace
+    // showed the correct heading just after the former five-second deadline.
+    await expect(page.getByRole("heading", { name: "Crews & agents", exact: true })).toBeVisible({ timeout: 20_000 })
   })
 
   await test.step("agent create dialog is reachable", async () => {
@@ -202,6 +207,10 @@ test("PR browser contract subset", async ({ page }) => {
     await page.unrouteAll({ behavior: "ignoreErrors" })
   })
 
+  await test.step("Incoming: create GitHub endpoint, reveal, overview, detail, disable and refresh (real HTTP)", async () => {
+    await incomingWebhookFlow(page)
+  })
+
 })
 
 // ── The phone contract ──────────────────────────────────────────────────────
@@ -275,5 +284,15 @@ test.describe("PR browser contract subset — phone", () => {
         .map((el) => el.getAttribute("aria-label") ?? el.getAttribute("placeholder") ?? el.tagName),
     )
     expect(small, "fields under 16px make iOS zoom the page and stay zoomed").toEqual([])
+
+    await page.goto("/integrations?tab=incoming")
+    await page.getByRole("button", { name: "Expand sidebar", exact: true }).click()
+    await expect(page.getByRole("textbox", { name: "Search incoming targets" })).toBeVisible()
+    await page.getByRole("textbox", { name: "Search incoming targets" }).fill("no-such-target-e2e")
+    await expect(page.getByText("No matching targets. Create a routine, agent or Page first.")).toBeVisible()
+    await page.getByRole("button", { name: "Close the integrations list" }).click({ position: { x: 330, y: 300 } })
+    await expect(page.getByRole("button", { name: "Expand sidebar", exact: true })).toBeVisible()
+    expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1)).toBe(false)
+
   })
 })

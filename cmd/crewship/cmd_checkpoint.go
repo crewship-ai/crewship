@@ -35,13 +35,13 @@ Examples:
 // ignored by json.Decoder and can be added here when new columns are
 // desired in the table view.
 type checkpointRow struct {
-	ID            string `json:"id"`
-	MissionID     string `json:"mission_id"`
-	Label         string `json:"label"`
-	JournalCursor string `json:"journal_cursor"`
-	CreatedBy     string `json:"created_by"`
-	CreatedAt     string `json:"created_at"`
-	ForkOf        string `json:"fork_of,omitempty"`
+	ID            string `json:"id" yaml:"id"`
+	MissionID     string `json:"mission_id" yaml:"mission_id"`
+	Label         string `json:"label" yaml:"label"`
+	JournalCursor string `json:"journal_cursor" yaml:"journal_cursor"`
+	CreatedBy     string `json:"created_by" yaml:"created_by"`
+	CreatedAt     string `json:"created_at" yaml:"created_at"`
+	ForkOf        string `json:"fork_of,omitempty" yaml:"fork_of,omitempty"`
 }
 
 var checkpointListCmd = &cobra.Command{
@@ -69,9 +69,9 @@ var checkpointListCmd = &cobra.Command{
 		}
 
 		var body struct {
-			Checkpoints []checkpointRow `json:"checkpoints"`
-			Count       int             `json:"count"`
-			MissionID   string          `json:"mission_id"`
+			Checkpoints []checkpointRow `json:"checkpoints" yaml:"checkpoints"`
+			Count       int             `json:"count" yaml:"count"`
+			MissionID   string          `json:"mission_id" yaml:"mission_id"`
 		}
 		if err := cli.ReadJSON(resp, &body); err != nil {
 			return err
@@ -163,9 +163,9 @@ anchored at this point.`,
 			return err
 		}
 		var body struct {
-			Checkpoint     checkpointRow `json:"checkpoint"`
-			JournalCursor  string        `json:"journal_cursor"`
-			WarnDivergence []string      `json:"warn_divergence"`
+			Checkpoint     checkpointRow `json:"checkpoint" yaml:"checkpoint"`
+			JournalCursor  string        `json:"journal_cursor" yaml:"journal_cursor"`
+			WarnDivergence []string      `json:"warn_divergence" yaml:"warn_divergence"`
 		}
 		if err := cli.ReadJSON(resp, &body); err != nil {
 			return err
@@ -211,8 +211,8 @@ var checkpointForkCmd = &cobra.Command{
 			return err
 		}
 		var out struct {
-			NewMissionID    string `json:"new_mission_id"`
-			NewCheckpointID string `json:"new_checkpoint_id"`
+			NewMissionID    string `json:"new_mission_id" yaml:"new_mission_id"`
+			NewCheckpointID string `json:"new_checkpoint_id" yaml:"new_checkpoint_id"`
 		}
 		if err := cli.ReadJSON(resp, &out); err != nil {
 			return err

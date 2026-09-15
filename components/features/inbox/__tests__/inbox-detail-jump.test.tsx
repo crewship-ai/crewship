@@ -41,6 +41,7 @@ function renderDetail(it: InboxItem) {
       role="OWNER"
       onResolve={vi.fn()}
       onRefresh={vi.fn()}
+      onArchive={vi.fn()}
       onMarkUnread={vi.fn()}
     />,
   )

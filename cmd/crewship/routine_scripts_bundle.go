@@ -27,9 +27,9 @@ import (
 // Path is the script-step path exactly as declared in the DSL; ContentB64 is
 // the file's bytes, base64-encoded (the bundle is JSON, so binary-safe).
 type scriptEntry struct {
-	Path       string `json:"path"`
-	ContentB64 string `json:"content_b64"`
-	Size       int    `json:"size,omitempty"`
+	Path       string `json:"path" yaml:"path"`
+	ContentB64 string `json:"content_b64" yaml:"content_b64"`
+	Size       int    `json:"size,omitempty" yaml:"size,omitempty"`
 }
 
 // decodeBundleScripts extracts the top-level `scripts` array from a decoded

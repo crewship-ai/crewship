@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/rand/v2"
 	"net/http"
 	"runtime/debug"
 	"strings"
@@ -610,6 +611,77 @@ func (h *ProvisioningHandler) failPending(pending map[string]chatbridge.PendingC
 	}
 }
 
+// Bounds for the re-deferral loop resumeMessage guards against (#2431). A
+// completed build whose image is still unstartable makes HandleChatMessage
+// defer the message to another build; each completion resumes it again. The
+// provisioner now confirms a cache hit against the daemon, so a healthy
+// system no longer loops — this is the floor under whatever the next stale
+// answer turns out to be: wait 2 s, 4 s, then stop, instead of 83 provisions
+// in one second bounded only by the rate limiter.
+const (
+	maxDeferredResumes       = 3
+	deferredResumeBaseDelay  = 2 * time.Second
+	deferredResumeMaxDelay   = 30 * time.Second
+	deferredResumeLoopReason = "provisioning_loop"
+)
+
+// deferredResumeBackoff returns the wait before the (n+1)-th consecutive
+// re-deferred resume: base·2^(n-1) plus jitter of up to one step, capped, so
+// several chats deferred by the same pruned image do not re-enqueue in lock
+// step.
+func deferredResumeBackoff(n int) time.Duration {
+	if n < 1 {
+		return 0
+	}
+	step := deferredResumeBaseDelay << uint(n-1)
+	if step > deferredResumeMaxDelay || step <= 0 {
+		step = deferredResumeMaxDelay
+	}
+	return step + time.Duration(rand.Int64N(int64(step)))
+}
+
+// noteDeferredResume records one more resume of chatID's deferred message and
+// returns the consecutive count including this one.
+func (h *ProvisioningHandler) noteDeferredResume(chatID string) int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.deferredResumes == nil {
+		h.deferredResumes = make(map[string]int)
+	}
+	h.deferredResumes[chatID]++
+	return h.deferredResumes[chatID]
+}
+
+// clearDeferredResume forgets chatID's consecutive re-deferral count.
+func (h *ProvisioningHandler) clearDeferredResume(chatID string) {
+	h.mu.Lock()
+	delete(h.deferredResumes, chatID)
+	h.mu.Unlock()
+}
+
+// deferredResumeCount reads chatID's consecutive re-deferral count.
+func (h *ProvisioningHandler) deferredResumeCount(chatID string) int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.deferredResumes[chatID]
+}
+
+// sleepBeforeResume waits d (through the resumeSleep hook when installed) and
+// reports false if ctx ended first.
+func (h *ProvisioningHandler) sleepBeforeResume(ctx context.Context, d time.Duration) bool {
+	if h.resumeSleep != nil {
+		return h.resumeSleep(ctx, d)
+	}
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-t.C:
+		return true
+	}
+}
+
 // resumeMessage runs (buildErr == nil) or fails (buildErr != nil) exactly one
 // deferred chat message, once. It is always called either from inside the
 // h.mu critical section that just drained the message off ProvisionJob.Pending
@@ -632,10 +704,10 @@ func (h *ProvisioningHandler) resumeMessage(msg chatbridge.PendingChatMessage, b
 			"chat_id", msg.ChatID, "user_id", msg.UserID)
 		return
 	}
-	run := h.wsHub.BeginSessionRun(msg.ChatID)
-	defer run.End()
-
 	if buildErr != nil {
+		h.clearDeferredResume(msg.ChatID)
+		run := h.wsHub.BeginSessionRun(msg.ChatID)
+		defer run.End()
 		// The build itself failed: say so plainly and point at the fix,
 		// rather than leaving the user's original message answered with
 		// silence (the bug this whole mechanism exists to close) or, worse,
@@ -652,6 +724,46 @@ func (h *ProvisioningHandler) resumeMessage(msg chatbridge.PendingChatMessage, b
 		return
 	}
 
+	ctx, cancel := context.WithTimeout(context.Background(), resumeMessageTimeout)
+	defer cancel()
+
+	// A build completed and the message it carried is about to run. If the
+	// LAST completed build's resume ended right back here — HandleChatMessage
+	// found the crew still unstartable and deferred it again — this is the
+	// loop #2431 describes, and the two answers are a wait and, past the
+	// bound, a verdict the user can act on. Both happen before the session
+	// run is opened so no chat sits "streaming" through a back-off.
+	attempt := h.noteDeferredResume(msg.ChatID)
+	if attempt > maxDeferredResumes {
+		h.clearDeferredResume(msg.ChatID)
+		h.logger.Error("deferred chat message gave up: every completed build left the crew unstartable",
+			"chat_id", msg.ChatID, "rebuilds", maxDeferredResumes)
+		run := h.wsHub.BeginSessionRun(msg.ChatID)
+		defer run.End()
+		run.Emit(ws.ChatEvent{
+			Type: "error",
+			Content: fmt.Sprintf(
+				"Your message could not run: the crew's environment was rebuilt %d times, but after each build its container image was still missing from the Docker daemon (a stale image cache, or something removing crewship-cache images). Check the server logs and `docker images`, then send your message again.",
+				maxDeferredResumes,
+			),
+			Metadata: map[string]any{"reason": deferredResumeLoopReason, "rebuilds": maxDeferredResumes},
+		})
+		run.Emit(ws.ChatEvent{Type: "done", Content: ""})
+		return
+	}
+	if attempt > 1 {
+		delay := deferredResumeBackoff(attempt - 1)
+		h.logger.Warn("deferred chat message deferred again by a completed build; backing off before the next resume",
+			"chat_id", msg.ChatID, "attempt", attempt, "delay", delay)
+		if !h.sleepBeforeResume(ctx, delay) {
+			h.clearDeferredResume(msg.ChatID)
+			return
+		}
+	}
+
+	run := h.wsHub.BeginSessionRun(msg.ChatID)
+	defer run.End()
+
 	if h.chatResumer == nil {
 		// Should not happen in production boot (cmd_start.go wires this
 		// alongside SetProvisioningEnqueuer) but surface rather than silently
@@ -662,9 +774,6 @@ func (h *ProvisioningHandler) resumeMessage(msg chatbridge.PendingChatMessage, b
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), resumeMessageTimeout)
-	defer cancel()
-
 	// Replays the ORIGINAL send through the exact path a live one takes:
 	// same persistence, same cross-chat run exclusivity (tryMarkRunStart), same
 	// error classification. devcontainerNeedsProvision now resolves false
@@ -674,7 +783,13 @@ func (h *ProvisioningHandler) resumeMessage(msg chatbridge.PendingChatMessage, b
 	// defer-and-attach path and is handled identically to the first time.
 	err := h.chatResumer.HandleChatMessage(ctx, msg.UserID, msg.ChatID, msg.Content, run.Emit, msg.Opts)
 	if err == nil {
+		h.clearDeferredResume(msg.ChatID)
 		return
+	}
+	// Only a re-deferral keeps the consecutive count; every other outcome
+	// ended this message's journey through the build queue.
+	if !errors.Is(err, ws.ErrCrewProvisioning) {
+		h.clearDeferredResume(msg.ChatID)
 	}
 	switch {
 	case errors.Is(err, chatbridge.ErrAgentBusyElsewhere):
@@ -709,8 +824,10 @@ func (h *ProvisioningHandler) resumeMessage(msg chatbridge.PendingChatMessage, b
 		// The crew needed re-provisioning again (e.g. its cached image was
 		// pruned in the moments since this job completed). HandleChatMessage
 		// already streamed its own crew_provisioning card and re-attached the
-		// message to the new job — this call's job is done.
-		h.logger.Info("deferred message deferred again: crew needs re-provisioning", "chat_id", msg.ChatID)
+		// message to the new job — this call's job is done. The consecutive
+		// count kept above is what bounds this if it never stops (#2431).
+		h.logger.Info("deferred message deferred again: crew needs re-provisioning",
+			"chat_id", msg.ChatID, "consecutive", attempt)
 	default:
 		// Everything else: HandleChatMessage already streams a classified
 		// error event for every other failure mode before returning

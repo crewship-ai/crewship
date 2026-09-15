@@ -40,10 +40,21 @@ func (pb *planBuilder) planNewKinds(ctx context.Context, b *Bundle) error {
 		return fmt.Errorf("manifest: planBuilder has nil client (programmer error)")
 	}
 	wsCtx := buildKindWorkspaceContext(b)
+	c := newInternalClient(pb.client)
+	// The server's agents join the FK universe before validation runs,
+	// so a standalone Project naming a lead (or an Issue an assignee)
+	// that was created in an earlier apply is not rejected as unknown
+	// (#2426). Best-effort: when the list cannot be fetched RemoteAgents
+	// stays nil, the kinds defer the reference to plan time, and the
+	// plan-time resolver reports the real failure.
+	if bundleReferencesAgents(b) {
+		if remote, err := kinds.ListAgentSlugs(ctx, c); err == nil {
+			wsCtx.RemoteAgents = remote
+		}
+	}
 	if err := validateAllKinds(b, wsCtx); err != nil {
 		return err
 	}
-	c := newInternalClient(pb.client)
 	if pb.opts.SkipTestGate {
 		// Decorator pattern: the routine kind keeps building a plain
 		// save body, the boundary injects the OWNER/ADMIN bypass
@@ -69,10 +80,16 @@ func (pb *planBuilder) planNewKinds(ctx context.Context, b *Bundle) error {
 		pb.appendKindItems(items)
 	}
 
-	// Phase 4: Labels (no deps)
+	// Phase 4: Labels (no deps). The remote row is looked up by name
+	// (slug == name is a Label invariant) so a second apply plans
+	// Unchanged or Update instead of a create the server 409s (#2426).
 	for i := range b.Labels {
 		doc := &b.Labels[i]
-		items, err := doc.Plan(ctx, c, nil)
+		remote, err := kinds.LookupLabelRemoteByName(ctx, c, doc.Metadata.Name)
+		if err != nil {
+			return fmt.Errorf("label %q: lookup remote: %w", doc.Metadata.Slug, err)
+		}
+		items, err := doc.Plan(ctx, c, remote)
 		if err != nil {
 			return fmt.Errorf("label %q: plan: %w", doc.Metadata.Slug, err)
 		}
@@ -592,6 +609,44 @@ func buildKindWorkspaceContext(b *Bundle) internalapi.WorkspaceContext {
 	}
 
 	return ctx
+}
+
+// bundleReferencesAgents reports whether any document in the bundle
+// names an agent by slug, i.e. whether fetching the workspace's agents
+// into the validation context can change its outcome. Every kind whose
+// Validate calls ctx.HasAgent is listed — Routine, RecurringIssue and
+// TriageRule check the slug unconditionally, so leaving one out rejects
+// an agent from an earlier apply as "not found". Pages count whenever
+// present: their producers may be `agent:` references.
+func bundleReferencesAgents(b *Bundle) bool {
+	for i := range b.Projects {
+		if b.Projects[i].Spec.LeadAgentSlug != "" {
+			return true
+		}
+	}
+	for i := range b.Issues {
+		if b.Issues[i].Spec.AssigneeSlug != "" {
+			return true
+		}
+	}
+	for i := range b.Routines {
+		for _, step := range b.Routines[i].Spec.Steps {
+			if step.AgentSlug != "" {
+				return true
+			}
+		}
+	}
+	for i := range b.RecurringIssues {
+		if b.RecurringIssues[i].Spec.Template.AssigneeAgentSlug != "" {
+			return true
+		}
+	}
+	for i := range b.TriageRules {
+		if b.TriageRules[i].Spec.Match.FromAgentSlug != "" || b.TriageRules[i].Spec.Actions.AssignToAgentSlug != "" {
+			return true
+		}
+	}
+	return len(b.Pages) > 0
 }
 
 // appendKindItems converts a []internalapi.PlanItem into the

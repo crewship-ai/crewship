@@ -165,11 +165,11 @@ type recentSession struct {
 func recentSessions(client *cli.Client, want int) ([]recentSession, error) {
 	var runs struct {
 		Data []struct {
-			ID        string  `json:"id"`
-			AgentSlug *string `json:"agent_slug"`
-			ChatID    *string `json:"chat_id"`
-			CreatedAt string  `json:"created_at"`
-		} `json:"data"`
+			ID        string  `json:"id" yaml:"id"`
+			AgentSlug *string `json:"agent_slug" yaml:"agent_slug"`
+			ChatID    *string `json:"chat_id" yaml:"chat_id"`
+			CreatedAt string  `json:"created_at" yaml:"created_at"`
+		} `json:"data" yaml:"data"`
 	}
 	q := url.Values{}
 	q.Set("limit", strconv.Itoa(min(want*5, runsPageMax)))
@@ -253,10 +253,10 @@ func findChatForPR(client *cli.Client, owner, repo string, num int) (chatID, age
 	q.Set("limit", "5")
 	var body struct {
 		Entries []struct {
-			TraceID string `json:"trace_id"`
-			ChatID  string `json:"chat_id"`
-			AgentID string `json:"agent_id"`
-		} `json:"entries"`
+			TraceID string `json:"trace_id" yaml:"trace_id"`
+			ChatID  string `json:"chat_id" yaml:"chat_id"`
+			AgentID string `json:"agent_id" yaml:"agent_id"`
+		} `json:"entries" yaml:"entries"`
 	}
 	if err := getJSON(client, "/api/v1/journal?"+q.Encode(), &body); err != nil {
 		return "", "", fmt.Errorf("journal search: %w (try a chat-id instead)", err)

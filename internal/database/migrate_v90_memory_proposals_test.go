@@ -1,11 +1,7 @@
 package database
 
 import (
-	"context"
 	"database/sql"
-	"log/slog"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -21,20 +17,7 @@ import (
 // regressions, whereas distinct subtests let CI surface every breakage at
 // once.
 func TestMigrateV90_MemoryProposalsSchema(t *testing.T) {
-	dir := t.TempDir()
-	db, err := Open("file:" + filepath.Join(dir, "v90.db"))
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	defer db.Close()
-
-	// Suite-standard test logger: warnings + errors only on stderr.
-	// io.Discard would hide useful migration diagnostics (cascade-
-	// trigger conflicts, partial-applies) on a failing test run.
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
-	if err := Migrate(context.Background(), db.DB, logger); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
+	db := openMigratedTestDB(t)
 
 	// Seed the prerequisite workspace + crew once; the inbox + status
 	// subtests reuse them.

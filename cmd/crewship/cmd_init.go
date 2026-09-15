@@ -72,10 +72,10 @@ Example:
 		}
 
 		var result struct {
-			UserID      string `json:"user_id"`
-			Email       string `json:"email"`
-			WorkspaceID string `json:"workspace_id"`
-			CLIToken    string `json:"cli_token"`
+			UserID      string `json:"user_id" yaml:"user_id"`
+			Email       string `json:"email" yaml:"email"`
+			WorkspaceID string `json:"workspace_id" yaml:"workspace_id"`
+			CLIToken    string `json:"cli_token" yaml:"cli_token"`
 		}
 		if err := cli.ReadJSON(resp, &result); err != nil {
 			return err

@@ -71,7 +71,7 @@ var notifyStatusCmd = &cobra.Command{
 		on := cli.NotificationsEnabled(cliCfg)
 		return resolvedFormatter(cmd).AutoHuman(
 			struct {
-				Enabled bool `json:"enabled"`
+				Enabled bool `json:"enabled" yaml:"enabled"`
 			}{on},
 			func() {
 				if on {

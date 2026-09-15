@@ -23,38 +23,38 @@ import (
 )
 
 type runRecordRow struct {
-	ID               string  `json:"id"`
-	PipelineID       string  `json:"pipeline_id"`
-	PipelineSlug     string  `json:"pipeline_slug"`
-	Status           string  `json:"status"`
-	Mode             string  `json:"mode"`
-	StartedAt        string  `json:"started_at"`
-	EndedAt          string  `json:"ended_at,omitempty"`
-	CurrentStepID    string  `json:"current_step_id,omitempty"`
-	Output           string  `json:"output,omitempty"`
-	CostUSD          float64 `json:"cost_usd"`
-	DurationMs       int64   `json:"duration_ms"`
-	ErrorMessage     string  `json:"error_message,omitempty"`
-	FailedAtStep     string  `json:"failed_at_step,omitempty"`
-	ErrorFingerprint string  `json:"error_fingerprint,omitempty"`
-	TriggeredVia     string  `json:"triggered_via"`
-	TriggeredByID    string  `json:"triggered_by_id,omitempty"`
-	IdempotencyKey   string  `json:"idempotency_key,omitempty"`
+	ID               string  `json:"id" yaml:"id"`
+	PipelineID       string  `json:"pipeline_id" yaml:"pipeline_id"`
+	PipelineSlug     string  `json:"pipeline_slug" yaml:"pipeline_slug"`
+	Status           string  `json:"status" yaml:"status"`
+	Mode             string  `json:"mode" yaml:"mode"`
+	StartedAt        string  `json:"started_at" yaml:"started_at"`
+	EndedAt          string  `json:"ended_at,omitempty" yaml:"ended_at,omitempty"`
+	CurrentStepID    string  `json:"current_step_id,omitempty" yaml:"current_step_id,omitempty"`
+	Output           string  `json:"output,omitempty" yaml:"output,omitempty"`
+	CostUSD          float64 `json:"cost_usd" yaml:"cost_usd"`
+	DurationMs       int64   `json:"duration_ms" yaml:"duration_ms"`
+	ErrorMessage     string  `json:"error_message,omitempty" yaml:"error_message,omitempty"`
+	FailedAtStep     string  `json:"failed_at_step,omitempty" yaml:"failed_at_step,omitempty"`
+	ErrorFingerprint string  `json:"error_fingerprint,omitempty" yaml:"error_fingerprint,omitempty"`
+	TriggeredVia     string  `json:"triggered_via" yaml:"triggered_via"`
+	TriggeredByID    string  `json:"triggered_by_id,omitempty" yaml:"triggered_by_id,omitempty"`
+	IdempotencyKey   string  `json:"idempotency_key,omitempty" yaml:"idempotency_key,omitempty"`
 	// ChainDepth / ChainOrigin place a run in a COMPOSED chain: 0 is a run
 	// somebody started, 1 a routine that run called, 2 an automation fired by
 	// an event that run emitted. Capped at 8 by the server.
-	ChainDepth  int    `json:"chain_depth"`
-	ChainOrigin string `json:"chain_origin,omitempty"`
+	ChainDepth  int    `json:"chain_depth" yaml:"chain_depth"`
+	ChainOrigin string `json:"chain_origin,omitempty" yaml:"chain_origin,omitempty"`
 	// AutomationID / AutomationName / TriggerEventType name the RULE behind a
 	// rule-fired run. They are not redundant with TriggeredVia: the server
 	// fires every deferred run with triggered_via="schedule", so the enum
 	// alone cannot tell a cron from an automation.
-	AutomationID     string `json:"automation_id,omitempty"`
-	AutomationName   string `json:"automation_name,omitempty"`
-	TriggerEventType string `json:"trigger_event_type,omitempty"`
+	AutomationID     string `json:"automation_id,omitempty" yaml:"automation_id,omitempty"`
+	AutomationName   string `json:"automation_name,omitempty" yaml:"automation_name,omitempty"`
+	TriggerEventType string `json:"trigger_event_type,omitempty" yaml:"trigger_event_type,omitempty"`
 	// Outcome is the §9.6 routing decision (work package B6, #2349) — empty
 	// for a non-terminal run, or one that predates the outcome column.
-	Outcome string `json:"outcome,omitempty"`
+	Outcome string `json:"outcome,omitempty" yaml:"outcome,omitempty"`
 }
 
 // triggerLabel is what the TRIGGER column prints.

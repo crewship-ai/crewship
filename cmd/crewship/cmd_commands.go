@@ -18,28 +18,28 @@ import (
 
 // flagManifest describes one flag in the commands manifest.
 type flagManifest struct {
-	Name      string `json:"name"`
-	Shorthand string `json:"shorthand,omitempty"`
-	Type      string `json:"type"`
-	Default   string `json:"default,omitempty"`
-	Usage     string `json:"usage"`
+	Name      string `json:"name" yaml:"name"`
+	Shorthand string `json:"shorthand,omitempty" yaml:"shorthand,omitempty"`
+	Type      string `json:"type" yaml:"type"`
+	Default   string `json:"default,omitempty" yaml:"default,omitempty"`
+	Usage     string `json:"usage" yaml:"usage"`
 }
 
 // commandManifest describes one command (and its subtree).
 type commandManifest struct {
-	Path     string            `json:"path"`
-	Use      string            `json:"use"`
-	Short    string            `json:"short,omitempty"`
-	Aliases  []string          `json:"aliases,omitempty"`
-	Flags    []flagManifest    `json:"flags,omitempty"`
-	Commands []commandManifest `json:"commands,omitempty"`
+	Path     string            `json:"path" yaml:"path"`
+	Use      string            `json:"use" yaml:"use"`
+	Short    string            `json:"short,omitempty" yaml:"short,omitempty"`
+	Aliases  []string          `json:"aliases,omitempty" yaml:"aliases,omitempty"`
+	Flags    []flagManifest    `json:"flags,omitempty" yaml:"flags,omitempty"`
+	Commands []commandManifest `json:"commands,omitempty" yaml:"commands,omitempty"`
 }
 
 // commandsManifest is the top-level document.
 type commandsManifest struct {
-	Version     string            `json:"version"`
-	GlobalFlags []flagManifest    `json:"global_flags"`
-	Commands    []commandManifest `json:"commands"`
+	Version     string            `json:"version" yaml:"version"`
+	GlobalFlags []flagManifest    `json:"global_flags" yaml:"global_flags"`
+	Commands    []commandManifest `json:"commands" yaml:"commands"`
 }
 
 var commandsCmd = &cobra.Command{

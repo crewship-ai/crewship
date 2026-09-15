@@ -49,11 +49,11 @@ token (see 'crewship login').`,
 		}
 
 		var body struct {
-			WorkspaceID string             `json:"workspace_id"`
-			CrewID      string             `json:"crew_id"`
-			Overall     float64            `json:"overall"`
-			Metrics     map[string]float64 `json:"metrics"`
-			Details     map[string]any     `json:"details"`
+			WorkspaceID string             `json:"workspace_id" yaml:"workspace_id"`
+			CrewID      string             `json:"crew_id" yaml:"crew_id"`
+			Overall     float64            `json:"overall" yaml:"overall"`
+			Metrics     map[string]float64 `json:"metrics" yaml:"metrics"`
+			Details     map[string]any     `json:"details" yaml:"details"`
 		}
 		if err := cli.ReadJSON(resp, &body); err != nil {
 			return err

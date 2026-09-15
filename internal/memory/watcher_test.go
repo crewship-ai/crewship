@@ -10,8 +10,17 @@ import (
 	"time"
 )
 
-// TestWatcher_DebounceCoalesce writes 10 files within a debounce window
-// and asserts the watcher emits exactly one event covering all paths.
+// TestWatcher_DebounceCoalesce writes 10 files in one burst and asserts
+// the watcher coalesces them: fewer events than writes, and the union of
+// paths across those events is exactly the written set — nothing lost,
+// nothing duplicated.
+//
+// It deliberately does not assert "exactly one event". The debounce
+// window is wall-clock, and under CI load the write loop can straddle
+// its edge, in which case the watcher correctly emits twice (#2486).
+// Asserting on the union keeps the test independent of that margin
+// while a real coalescing regression — one event per write, or a path
+// dropped or repeated across flushes — still fails.
 func TestWatcher_DebounceCoalesce(t *testing.T) {
 	dir := t.TempDir()
 	silent := slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -27,28 +36,59 @@ func TestWatcher_DebounceCoalesce(t *testing.T) {
 	}
 	defer w.Stop()
 
-	for i := 0; i < 10; i++ {
+	// No sleep between writes: the burst is what is under test, and the
+	// watcher keys its pending set by path, so the Create+Write pair
+	// each WriteFile raises for the same file needs no spacing to dedupe.
+	const writes = 10
+	want := make(map[string]bool, writes)
+	for i := 0; i < writes; i++ {
 		path := filepath.Join(dir, "f"+string(rune('0'+i))+".md")
 		if err := os.WriteFile(path, []byte("x"), 0o644); err != nil {
 			t.Fatalf("seed write: %v", err)
 		}
-		time.Sleep(5 * time.Millisecond)
+		want[path] = true
 	}
 
-	select {
-	case ev := <-w.Events():
-		if len(ev.Paths) == 0 {
-			t.Errorf("expected coalesced event to carry at least one path")
+	// Drain events until every written path has been seen, recording
+	// each path's first sighting so a repeat is reported with both events.
+	seen := make(map[string]int, writes)
+	var events []WatchEvent
+	deadline := time.After(5 * time.Second)
+	for len(seen) < writes {
+		select {
+		case ev := <-w.Events():
+			if len(ev.Paths) == 0 {
+				t.Errorf("event %d carries no paths", len(events))
+			}
+			for _, p := range ev.Paths {
+				if !want[p] {
+					t.Errorf("event %d carries unexpected path %s", len(events), p)
+					continue
+				}
+				if first, dup := seen[p]; dup {
+					t.Errorf("path %s repeated: first in event %d, again in event %d", p, first, len(events))
+					continue
+				}
+				seen[p] = len(events)
+			}
+			events = append(events, ev)
+		case <-deadline:
+			t.Fatalf("saw %d of %d written paths in %d events before deadline", len(seen), writes, len(events))
 		}
-	case <-time.After(2 * time.Second):
-		t.Fatalf("no event received after 10 writes")
 	}
 
-	// No further event should arrive in the next debounce window — all
-	// 10 writes should have coalesced into the single emit above.
+	// Coalescing proper: a burst of N writes must not surface as N
+	// events. By pigeonhole this also means at least one event carried
+	// more than one path.
+	if len(events) >= writes {
+		t.Errorf("got %d events for %d writes; expected the debounce to coalesce them", len(events), writes)
+	}
+
+	// Once the union is complete, nothing is pending — any further event
+	// could only repeat a path already delivered.
 	select {
 	case ev := <-w.Events():
-		t.Fatalf("unexpected second event: %+v", ev)
+		t.Fatalf("unexpected event after all %d paths were delivered: %+v", writes, ev)
 	case <-time.After(500 * time.Millisecond):
 		// good
 	}

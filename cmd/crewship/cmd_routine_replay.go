@@ -54,10 +54,10 @@ guarantee: this never changes head_version or which version is live).`,
 			return err
 		}
 		var res struct {
-			RunID  string  `json:"run_id"`
-			Status string  `json:"status"`
-			Output string  `json:"output"`
-			Cost   float64 `json:"cost_usd"`
+			RunID  string  `json:"run_id" yaml:"run_id"`
+			Status string  `json:"status" yaml:"status"`
+			Output string  `json:"output" yaml:"output"`
+			Cost   float64 `json:"cost_usd" yaml:"cost_usd"`
 		}
 		if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
 			return fmt.Errorf("decode response: %w", err)
@@ -98,7 +98,7 @@ Pick a fingerprint and replay the whole group with:
 			return err
 		}
 		var body struct {
-			Groups []errorGroupRow `json:"groups"`
+			Groups []errorGroupRow `json:"groups" yaml:"groups"`
 		}
 		if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
 			return fmt.Errorf("decode response: %w", err)
@@ -177,8 +177,8 @@ var routineBulkReplayCmd = &cobra.Command{
 			return err
 		}
 		var out struct {
-			Requested int `json:"requested"`
-			Replayed  int `json:"replayed"`
+			Requested int `json:"requested" yaml:"requested"`
+			Replayed  int `json:"replayed" yaml:"replayed"`
 		}
 		if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 			return fmt.Errorf("decode response: %w", err)

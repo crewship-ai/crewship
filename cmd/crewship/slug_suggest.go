@@ -45,7 +45,7 @@ func suggestSimilarRoutineSlugs(client interface {
 		return ""
 	}
 	var rows []struct {
-		Slug string `json:"slug"`
+		Slug string `json:"slug" yaml:"slug"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&rows); err != nil {
 		return ""

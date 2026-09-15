@@ -380,6 +380,19 @@
         },
         "type": "object"
       },
+      "AdminMemorySyncRequest": {
+        "properties": {
+          "dry_run": {
+            "description": "Run everything up to the write, including the extractor, and report what would have happened. Nothing is written, indexed or audited. Also accepted as ?dry_run=true.",
+            "type": "boolean"
+          },
+          "workspace_id": {
+            "description": "Narrow the run to one workspace, by id or slug. Omitted: every active workspace on the instance, as the scheduled sweep does. Body only — the ?workspace_id= query parameter is the session workspace, not a filter.",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
       "AdminRateLimitRequest": {
         "properties": {
           "value": {
@@ -2281,6 +2294,16 @@
             "additionalProperties": true,
             "type": "object"
           },
+          "status": {
+            "enum": [
+              "BACKLOG",
+              "TODO",
+              "IN_PROGRESS",
+              "CANCELLED",
+              "DUPLICATE"
+            ],
+            "type": "string"
+          },
           "title": {
             "type": "string"
           }
@@ -2438,6 +2461,13 @@
             "type": "string"
           },
           "priority": {
+            "enum": [
+              "none",
+              "low",
+              "medium",
+              "high",
+              "urgent"
+            ],
             "type": "string"
           },
           "start_date": {
@@ -2445,6 +2475,14 @@
             "type": "string"
           },
           "status": {
+            "enum": [
+              "backlog",
+              "planned",
+              "in_progress",
+              "paused",
+              "completed",
+              "cancelled"
+            ],
             "type": "string"
           },
           "target_date": {
@@ -2468,6 +2506,11 @@
             "type": "string"
           },
           "health": {
+            "enum": [
+              "on_track",
+              "at_risk",
+              "off_track"
+            ],
             "nullable": true,
             "type": "string"
           },
@@ -2492,6 +2535,13 @@
             "type": "string"
           },
           "priority": {
+            "enum": [
+              "none",
+              "low",
+              "medium",
+              "high",
+              "urgent"
+            ],
             "nullable": true,
             "type": "string"
           },
@@ -2500,6 +2550,14 @@
             "type": "string"
           },
           "status": {
+            "enum": [
+              "backlog",
+              "planned",
+              "in_progress",
+              "paused",
+              "completed",
+              "cancelled"
+            ],
             "nullable": true,
             "type": "string"
           },
@@ -8740,6 +8798,14 @@
             "nullable": true,
             "type": "boolean"
           },
+          "ingress_profile": {
+            "default": "crewship",
+            "enum": [
+              "crewship",
+              "github"
+            ],
+            "type": "string"
+          },
           "inputs_template": {
             "additionalProperties": true,
             "type": "object"
@@ -9579,6 +9645,64 @@
           "type": "object"
         },
         "type": "array"
+      },
+      "RemainingAgentCredentialReadinessV1": {
+        "properties": {
+          "adapter": {
+            "type": "string"
+          },
+          "agent_id": {
+            "type": "string"
+          },
+          "agent_slug": {
+            "type": "string"
+          },
+          "model_credential": {
+            "properties": {
+              "credential_id": {
+                "type": "string"
+              },
+              "credential_name": {
+                "type": "string"
+              },
+              "delivery": {
+                "type": "string"
+              },
+              "provider": {
+                "type": "string"
+              },
+              "source": {
+                "type": "string"
+              },
+              "state": {
+                "enum": [
+                  "ready",
+                  "missing",
+                  "unknown"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "state"
+            ],
+            "type": "object"
+          },
+          "notes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "agent_id",
+          "agent_slug",
+          "adapter",
+          "model_credential",
+          "notes"
+        ],
+        "type": "object"
       },
       "RemainingAgentCredentialRemovedV1": {
         "properties": {
@@ -15400,6 +15524,13 @@
               "type": "boolean"
             },
             "id": {
+              "type": "string"
+            },
+            "ingress_profile": {
+              "enum": [
+                "crewship",
+                "github"
+              ],
               "type": "string"
             },
             "inputs_template": {
@@ -22110,6 +22241,279 @@
         ]
       }
     },
+    "/api/v1/admin/memory/peer-card-sync": {
+      "post": {
+        "operationId": "post_api_v1_admin_memory_peer-card-sync",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "dry_run",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminMemorySyncRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "dry_run": {
+                      "type": "boolean"
+                    },
+                    "duration_ms": {
+                      "type": "integer"
+                    },
+                    "sweep": {
+                      "enum": [
+                        "user_model",
+                        "peer_card"
+                      ],
+                      "type": "string"
+                    },
+                    "totals": {
+                      "properties": {
+                        "candidates": {
+                          "type": "integer"
+                        },
+                        "error": {
+                          "description": "Present when the sweep for this workspace could not run at all (the candidate query failed). The other workspaces still ran.",
+                          "type": "string"
+                        },
+                        "errors": {
+                          "description": "Candidates that failed inside a sweep that ran; each has a Warn line in the server log.",
+                          "type": "integer"
+                        },
+                        "purged_opt_out": {
+                          "type": "integer"
+                        },
+                        "skipped_empty": {
+                          "description": "Candidates the extractor had nothing to write for — with no model on the curator slot, every one of them.",
+                          "type": "integer"
+                        },
+                        "skipped_opt_out": {
+                          "type": "integer"
+                        },
+                        "skipped_threshold": {
+                          "description": "Candidates below the interaction threshold.",
+                          "type": "integer"
+                        },
+                        "workspace_id": {
+                          "type": "string"
+                        },
+                        "writes": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "candidates",
+                        "writes",
+                        "skipped_threshold",
+                        "skipped_empty",
+                        "skipped_opt_out",
+                        "purged_opt_out",
+                        "errors"
+                      ],
+                      "type": "object"
+                    },
+                    "workspaces": {
+                      "items": {
+                        "properties": {
+                          "candidates": {
+                            "type": "integer"
+                          },
+                          "error": {
+                            "description": "Present when the sweep for this workspace could not run at all (the candidate query failed). The other workspaces still ran.",
+                            "type": "string"
+                          },
+                          "errors": {
+                            "description": "Candidates that failed inside a sweep that ran; each has a Warn line in the server log.",
+                            "type": "integer"
+                          },
+                          "purged_opt_out": {
+                            "type": "integer"
+                          },
+                          "skipped_empty": {
+                            "description": "Candidates the extractor had nothing to write for — with no model on the curator slot, every one of them.",
+                            "type": "integer"
+                          },
+                          "skipped_opt_out": {
+                            "type": "integer"
+                          },
+                          "skipped_threshold": {
+                            "description": "Candidates below the interaction threshold.",
+                            "type": "integer"
+                          },
+                          "workspace_id": {
+                            "type": "string"
+                          },
+                          "writes": {
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "candidates",
+                          "writes",
+                          "skipped_threshold",
+                          "skipped_empty",
+                          "skipped_opt_out",
+                          "purged_opt_out",
+                          "errors"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "sweep",
+                    "dry_run",
+                    "workspaces",
+                    "totals",
+                    "duration_ms"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "tags": [
+          "admin"
+        ]
+      }
+    },
     "/api/v1/admin/memory/stats": {
       "get": {
         "operationId": "get_api_v1_admin_memory_stats",
@@ -22263,6 +22667,279 @@
               }
             },
             "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/v1/admin/memory/user-model-sync": {
+      "post": {
+        "operationId": "post_api_v1_admin_memory_user-model-sync",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "dry_run",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminMemorySyncRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "dry_run": {
+                      "type": "boolean"
+                    },
+                    "duration_ms": {
+                      "type": "integer"
+                    },
+                    "sweep": {
+                      "enum": [
+                        "user_model",
+                        "peer_card"
+                      ],
+                      "type": "string"
+                    },
+                    "totals": {
+                      "properties": {
+                        "candidates": {
+                          "type": "integer"
+                        },
+                        "error": {
+                          "description": "Present when the sweep for this workspace could not run at all (the candidate query failed). The other workspaces still ran.",
+                          "type": "string"
+                        },
+                        "errors": {
+                          "description": "Candidates that failed inside a sweep that ran; each has a Warn line in the server log.",
+                          "type": "integer"
+                        },
+                        "purged_opt_out": {
+                          "type": "integer"
+                        },
+                        "skipped_empty": {
+                          "description": "Candidates the extractor had nothing to write for — with no model on the curator slot, every one of them.",
+                          "type": "integer"
+                        },
+                        "skipped_opt_out": {
+                          "type": "integer"
+                        },
+                        "skipped_threshold": {
+                          "description": "Candidates below the interaction threshold.",
+                          "type": "integer"
+                        },
+                        "workspace_id": {
+                          "type": "string"
+                        },
+                        "writes": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "candidates",
+                        "writes",
+                        "skipped_threshold",
+                        "skipped_empty",
+                        "skipped_opt_out",
+                        "purged_opt_out",
+                        "errors"
+                      ],
+                      "type": "object"
+                    },
+                    "workspaces": {
+                      "items": {
+                        "properties": {
+                          "candidates": {
+                            "type": "integer"
+                          },
+                          "error": {
+                            "description": "Present when the sweep for this workspace could not run at all (the candidate query failed). The other workspaces still ran.",
+                            "type": "string"
+                          },
+                          "errors": {
+                            "description": "Candidates that failed inside a sweep that ran; each has a Warn line in the server log.",
+                            "type": "integer"
+                          },
+                          "purged_opt_out": {
+                            "type": "integer"
+                          },
+                          "skipped_empty": {
+                            "description": "Candidates the extractor had nothing to write for — with no model on the curator slot, every one of them.",
+                            "type": "integer"
+                          },
+                          "skipped_opt_out": {
+                            "type": "integer"
+                          },
+                          "skipped_threshold": {
+                            "description": "Candidates below the interaction threshold.",
+                            "type": "integer"
+                          },
+                          "workspace_id": {
+                            "type": "string"
+                          },
+                          "writes": {
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "candidates",
+                          "writes",
+                          "skipped_threshold",
+                          "skipped_empty",
+                          "skipped_opt_out",
+                          "purged_opt_out",
+                          "errors"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "sweep",
+                    "dry_run",
+                    "workspaces",
+                    "totals",
+                    "duration_ms"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Service Unavailable"
           }
         },
         "security": [
@@ -27201,6 +27878,128 @@
               }
             },
             "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "tags": [
+          "agents"
+        ]
+      }
+    },
+    "/api/v1/agents/{agentId}/credential-readiness": {
+      "get": {
+        "operationId": "get_api_v1_agents_agentId_credential-readiness",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agentId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RemainingAgentCredentialReadinessV1"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
           }
         },
         "security": [
@@ -106463,6 +107262,152 @@
         ]
       }
     },
+    "/api/v1/webhooks/{token}/github-pull-request": {
+      "post": {
+        "operationId": "post_api_v1_webhooks_token_github-pull-request",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "sha256= followed by the HMAC-SHA256 of the exact request bytes using the endpoint signing secret",
+            "in": "header",
+            "name": "X-Hub-Signature-256",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Required for supported pull request actions; unsigned delivery identity, additionally deduplicated by signed body fingerprint",
+            "in": "header",
+            "name": "X-GitHub-Delivery",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "GitHub event name; ping is ignored, execution is selected from the signed pull_request body",
+            "in": "header",
+            "name": "X-GitHub-Event",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "action": {
+                    "type": "string"
+                  },
+                  "pull_request": {
+                    "properties": {
+                      "number": {
+                        "type": "integer"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "repository": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "sender": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "zen": {
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "deduped": {
+                      "type": "boolean"
+                    },
+                    "delivery_id": {
+                      "type": "string"
+                    },
+                    "duplicate": {
+                      "type": "boolean"
+                    },
+                    "reason": {
+                      "type": "string"
+                    },
+                    "run_id": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "status"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "deduped": {
+                      "type": "boolean"
+                    },
+                    "delivery_id": {
+                      "type": "string"
+                    },
+                    "duplicate": {
+                      "type": "boolean"
+                    },
+                    "reason": {
+                      "type": "string"
+                    },
+                    "run_id": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "status"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Accepted"
+          }
+        },
+        "security": [],
+        "tags": [
+          "webhooks"
+        ]
+      }
+    },
     "/api/v1/workflow-templates": {
       "get": {
         "operationId": "get_api_v1_workflow-templates",
@@ -112337,6 +113282,13 @@
                     "id": {
                       "type": "string"
                     },
+                    "ingress_profile": {
+                      "enum": [
+                        "crewship",
+                        "github"
+                      ],
+                      "type": "string"
+                    },
                     "inputs_template": {
                       "additionalProperties": true,
                       "type": "object"
@@ -112404,6 +113356,13 @@
                       "type": "integer"
                     },
                     "id": {
+                      "type": "string"
+                    },
+                    "ingress_profile": {
+                      "enum": [
+                        "crewship",
+                        "github"
+                      ],
                       "type": "string"
                     },
                     "inputs_template": {
@@ -112798,6 +113757,13 @@
                       "type": "integer"
                     },
                     "id": {
+                      "type": "string"
+                    },
+                    "ingress_profile": {
+                      "enum": [
+                        "crewship",
+                        "github"
+                      ],
                       "type": "string"
                     },
                     "inputs_template": {

@@ -29,50 +29,50 @@ var onboardingProposalCmd = &cobra.Command{
 // onboardingProposalAgentOut mirrors internal/api.onboardingProposalAgent —
 // one agent in a proposal's resolved roster.
 type onboardingProposalAgentOut struct {
-	Name         string `json:"name"`
-	Slug         string `json:"slug"`
-	RoleTitle    string `json:"role_title"`
-	LLMProvider  string `json:"llm_provider"`
-	LLMModel     string `json:"llm_model"`
-	SystemPrompt string `json:"system_prompt"`
+	Name         string `json:"name" yaml:"name"`
+	Slug         string `json:"slug" yaml:"slug"`
+	RoleTitle    string `json:"role_title" yaml:"role_title"`
+	LLMProvider  string `json:"llm_provider" yaml:"llm_provider"`
+	LLMModel     string `json:"llm_model" yaml:"llm_model"`
+	SystemPrompt string `json:"system_prompt" yaml:"system_prompt"`
 }
 
 // onboardingProposalPayloadOut mirrors internal/api.onboardingProposalPayload.
 type onboardingProposalPayloadOut struct {
-	CrewName     string                       `json:"crew_name"`
-	CrewSlug     string                       `json:"crew_slug"`
-	CrewIcon     *string                      `json:"crew_icon,omitempty"`
-	TemplateSlug string                       `json:"template_slug"`
-	LLMProvider  string                       `json:"llm_provider,omitempty"`
-	LLMModel     string                       `json:"llm_model,omitempty"`
-	Agents       []onboardingProposalAgentOut `json:"agents"`
+	CrewName     string                       `json:"crew_name" yaml:"crew_name"`
+	CrewSlug     string                       `json:"crew_slug" yaml:"crew_slug"`
+	CrewIcon     *string                      `json:"crew_icon,omitempty" yaml:"crew_icon,omitempty"`
+	TemplateSlug string                       `json:"template_slug" yaml:"template_slug"`
+	LLMProvider  string                       `json:"llm_provider,omitempty" yaml:"llm_provider,omitempty"`
+	LLMModel     string                       `json:"llm_model,omitempty" yaml:"llm_model,omitempty"`
+	Agents       []onboardingProposalAgentOut `json:"agents" yaml:"agents"`
 }
 
 // onboardingProposalOut mirrors internal/api.onboardingProposalResponse —
 // the Create and Get response shape.
 type onboardingProposalOut struct {
-	ID            string                       `json:"id"`
-	WorkspaceID   string                       `json:"workspace_id"`
-	CreatedBy     string                       `json:"created_by"`
-	CreatedAt     string                       `json:"created_at"`
-	AppliedAt     *string                      `json:"applied_at"`
-	Status        string                       `json:"status"`
-	Payload       onboardingProposalPayloadOut `json:"payload"`
-	AppliedCrewID *string                      `json:"applied_crew_id,omitempty"`
+	ID            string                       `json:"id" yaml:"id"`
+	WorkspaceID   string                       `json:"workspace_id" yaml:"workspace_id"`
+	CreatedBy     string                       `json:"created_by" yaml:"created_by"`
+	CreatedAt     string                       `json:"created_at" yaml:"created_at"`
+	AppliedAt     *string                      `json:"applied_at" yaml:"applied_at"`
+	Status        string                       `json:"status" yaml:"status"`
+	Payload       onboardingProposalPayloadOut `json:"payload" yaml:"payload"`
+	AppliedCrewID *string                      `json:"applied_crew_id,omitempty" yaml:"applied_crew_id,omitempty"`
 }
 
 // onboardingProposalApplyOut mirrors internal/api.onboardingProposalApplyResponse.
 type onboardingProposalApplyOut struct {
-	ProposalID     string `json:"proposal_id"`
-	Status         string `json:"status"`
-	AlreadyApplied bool   `json:"already_applied"`
+	ProposalID     string `json:"proposal_id" yaml:"proposal_id"`
+	Status         string `json:"status" yaml:"status"`
+	AlreadyApplied bool   `json:"already_applied" yaml:"already_applied"`
 	Crew           struct {
-		CrewID     string   `json:"crew_id"`
-		CrewName   string   `json:"crew_name"`
-		CrewSlug   string   `json:"crew_slug"`
-		AgentCount int      `json:"agent_count"`
-		AgentIDs   []string `json:"agent_ids"`
-	} `json:"crew"`
+		CrewID     string   `json:"crew_id" yaml:"crew_id"`
+		CrewName   string   `json:"crew_name" yaml:"crew_name"`
+		CrewSlug   string   `json:"crew_slug" yaml:"crew_slug"`
+		AgentCount int      `json:"agent_count" yaml:"agent_count"`
+		AgentIDs   []string `json:"agent_ids" yaml:"agent_ids"`
+	} `json:"crew" yaml:"crew"`
 }
 
 // onboardingProposalDetailPairs renders the summary key/value list shared by
@@ -268,8 +268,8 @@ var onboardingSetupAgentCmd = &cobra.Command{
 
 // onboardingSetupAgentStartOut mirrors internal/api.onboardingSetupAgentStartResponse.
 type onboardingSetupAgentStartOut struct {
-	AgentID   string `json:"agent_id"`
-	SessionID string `json:"session_id"`
+	AgentID   string `json:"agent_id" yaml:"agent_id"`
+	SessionID string `json:"session_id" yaml:"session_id"`
 }
 
 var onboardingSetupAgentStartCmd = &cobra.Command{

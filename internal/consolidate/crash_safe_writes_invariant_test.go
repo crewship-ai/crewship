@@ -57,10 +57,15 @@ import (
 // allowlisting one silently allowlisted every future twin in the
 // package.
 //
-// (cmd/crewship/cmd_seed_data_memory.go's writeFileIfAbsent was called
-// out here as deliberately out of scope back when cmd/crewship was not
-// walked at all. It is now walked, and that site has its own entry
-// below on the same "never overwrites live content" reasoning.)
+// #2124 then read the sites #1999 had only triaged as a class (the
+// cmd/crewship group plus four in devcontainer/apple) one at a time,
+// converted the four whose reader is another process or a later
+// command (apple_runtime.go's bind-mount CopyToContainer branch,
+// cmd_prompt.go, cmd_eval_baseline.go, cmd_seed_data_memory.go's
+// writeFileIfAbsent — the one this comment used to call "deliberately
+// out of scope", whose os.Stat guard meant a torn seed was never
+// repaired), and widened the regex to the .Create( / .CreateTemp(
+// shapes, which had let os.Create + io.Copy sites through unseen.
 //
 // Three shapes are recognised:
 //
@@ -138,7 +143,7 @@ func TestNoRawFileWritesOutsideDurableHelper(t *testing.T) {
 		"../memory/writer_lock_unix.go|f, err := l.root.OpenFile(l.name, os.O_CREATE|os.O_RDWR|unix.O_NOFOLLOW, 0o600)": "writer_lock_unix.go: root-anchored form of the flock sentinel open — same reasoning as its os.OpenFile twin above, only its existence as an flock anchor matters",
 		"../memory/writer_lock_windows.go|f, err := l.root.OpenFile(l.name, os.O_CREATE|os.O_RDWR, 0o600)":              "writer_lock_windows.go: same flock-sentinel reasoning as the unix build's root-anchored open",
 
-		// ---- #1999: devcontainer + apple provider ----
+		// ---- #1999 / #2124: devcontainer + apple provider ----
 		//
 		// Build artefacts and cache entries, not persistent memory
 		// content. Common to all of them: the destination is a
@@ -150,56 +155,96 @@ func TestNoRawFileWritesOutsideDurableHelper(t *testing.T) {
 		// []byte — routing them through it would mean buffering up to
 		// the 50 MiB per-entry cap in memory to buy durability for a
 		// file that is regenerated on demand.
+		//
+		// #2124 read the four sites #1999 had not individually
+		// triaged. One (apple_runtime.go's bind-mount branch of
+		// CopyToContainer) was converted: its reader is the agent
+		// process inside the container, and the old reason's "not
+		// running yet" claim was false. The other three stay, with
+		// reasons that name their reader.
 		"../devcontainer/features.go|f, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode)":                                      "features.go: extractTarGz's tar-extraction loop for a devcontainer feature, streaming each entry via io.Copy into the private temp dir its caller just made with createExtractTempDir (and RemoveAll's on any failure). O_TRUNC only bites if one archive names the same entry twice; there is no pre-existing content to lose.",
 		`../devcontainer/imagebuilder.go|if err = os.WriteFile(filepath.Join(contextDir, "Dockerfile"), []byte(dockerfile), 0o644); err != nil {`:  "imagebuilder.go: the generated Dockerfile for an image build, written into a freshly-made context dir that is handed straight to the builder and discarded after. Regenerated from the devcontainer spec every build.",
 		"../devcontainer/imagebuilder.go|out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, perm)":                                   "imagebuilder.go: copyFile, the generic streaming file-copy primitive copyTree uses to populate a build context (io.Copy from an already-open source). Same standing as backup's storage.go Create above — a stream primitive, not a memory-content write.",
-		"../devcontainer/provenance.go|return os.WriteFile(filepath.Join(dir, featureDigestFile), []byte(digest), 0o600)":                          "provenance.go: writeFeatureDigest records a resolved feature digest beside the extracted feature cache. Best-effort by contract — readFeatureDigest degrades a missing or unreadable digest to \"unknown\" and never fails a build, so a lost write costs a provenance note, not correctness.",
-		`../devcontainer/provisioner_build.go|if err := os.WriteFile(joinPath(contextDir, "Dockerfile"), []byte(dockerfile), 0o600); err != nil {`: "provisioner_build.go: the provisioner's own generated Dockerfile, same fresh-context-dir reasoning as imagebuilder.go's.",
-		"../devcontainer/runtimes_fetcher.go|if err := os.WriteFile(tmp, data, 0o644); err != nil {":                                               "runtimes_fetcher.go: the runtime catalogue disk cache, and already a temp-write + os.Rename — atomic for readers, merely missing the two fsyncs. It is a re-fetchable cache of a remote catalogue, so a crash losing it costs one HTTP round trip on the next start.",
-		"../provider/apple/apple_runtime.go|if err := os.WriteFile(dst, data, 0o600); err != nil {":                                                "apple_runtime.go: copies already-staged files into a container's host-mapped mount during provisioning. The source is still on disk in the staging dir, so a failed copy is retried rather than lost, and the destination is a container that is not running yet.",
-		"../provider/apple/apple_runtime.go|f, err := rootFS.OpenFile(rel, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode)":                              "apple_runtime.go: tar-extraction into the container staging area, ANCHORED TO AN *os.Root. Deliberately not converted: memory.WriteFileDurable is not root-anchored, so swapping it in would drop the traversal fence that safepath.JoinRel + rootFS together provide on attacker-controlled tar entry names. WriteFileDurableRoot would keep the fence but takes []byte, forcing the bounded io.Copy to buffer a whole entry in memory. Staging dir, freshly created, no live readers.",
+		"../devcontainer/provenance.go|return os.WriteFile(filepath.Join(dir, featureDigestFile), []byte(digest), 0o600)":                          "provenance.go: writeFeatureDigest, called only from FeatureDownloader.pull, which writes the digest into the extraction temp dir BEFORE the os.Rename that publishes the whole feature dir — so no reader can see the file before it is complete, and it moves atomically with install.sh. Its one reader, readFeatureDigest (via resolveFromCache), degrades a missing or malformed digest to \"\" and never fails a build; a power loss between the dir rename and writeback would tear install.sh in the same dir just as readily, and IsCached would then reject the whole cache entry.",
+		`../devcontainer/provisioner_build.go|if err := os.WriteFile(joinPath(contextDir, "Dockerfile"), []byte(dockerfile), 0o600); err != nil {`: "provisioner_build.go: stageBuildContextWithSteps writing the generated Dockerfile into the os.MkdirTemp context dir it just made, which the same call hands to the builder and RemoveAll's. Regenerated by GenerateDockerfile on every build; no reader outside this process, no previous content.",
+		"../devcontainer/provisioner_build.go|out, err := os.Create(dst) // #nosec G304 — dst is an internally built temp path":                    "provisioner_build.go: tarTree, streaming a feature dir into <contextDir>/features/<id>.tar for the same fresh build context as the Dockerfile entry above (os.Create + tar.Writer, so the durable helper's []byte signature would mean buffering the archive). Made visible to this guard by #2124's .Create( widening.",
+		"../devcontainer/runtimes_fetcher.go|if err := os.WriteFile(tmp, data, 0o644); err != nil {":                                               "runtimes_fetcher.go: RuntimeFetcher.writeDiskCache — already a temp-write + os.Rename, so its reader, readDiskCache (via GetRuntimes), sees whole files only; what is missing is the two fsyncs. A power loss that leaves the renamed file empty is rejected by readDiskCache's json.Unmarshal, GetRuntimes then serves FallbackRuntimeCatalog, and server_lifecycle.go's startCatalogRefresh rewrites the cache within 60s of the next start. A re-fetchable cache of a remote catalogue; converting would buy fsyncs for a file whose loss costs one HTTP round trip.",
+		`../devcontainer/catalog_fetcher.go|tmpFile, err := os.CreateTemp(f.cacheDir, featureCatalogFile+".*.tmp")`:                                "catalog_fetcher.go: CatalogFetcher.writeDiskCache, the feature-catalogue twin of runtimes_fetcher.go's entry — os.CreateTemp + os.Rename, atomic for its reader readDiskCache (via GetCatalog), no fsync. Same degradation path: an empty file after power loss fails json.Unmarshal, GetCatalog serves the embedded fallback, startCatalogRefresh re-fetches on the next start. Made visible by #2124's .CreateTemp( widening.",
+		"../provider/apple/apple_runtime.go|f, err := rootFS.OpenFile(rel, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode)":                              "apple_runtime.go: unpackTarInto, tar-extraction into the CopyToContainer staging area, ANCHORED TO AN *os.Root. Deliberately not converted: memory.WriteFileDurable is not root-anchored, so swapping it in would drop the traversal fence that safepath.JoinRel + rootFS together provide on attacker-controlled tar entry names. WriteFileDurableRoot would keep the fence but takes []byte, forcing the bounded io.Copy to buffer a whole entry in memory. Staging dir, freshly created by os.MkdirTemp, no live readers, RemoveAll'd on return.",
 
-		// ---- #1999: cmd/crewship ----
+		// ---- #1999: backup's StorageOps callers ----
 		//
-		// SCOPE NOTE, so these are not mistaken for individually
-		// audited decisions. Widening dirs to cover cmd/crewship was
-		// required by #1999 for two named sites (cmd_token.go, now
-		// converted, and cmd_issue_attachments.go). Doing so also
-		// surfaced ~15 further writes that #1999 never listed. They
-		// were triaged AS A CLASS, not one by one, and the class is:
-		// a one-shot CLI process writing a destination the operator
-		// named on the command line (-o/--out/--output) or a scaffold
-		// path the subcommand exists to create.
+		// Made visible by #2124's .Create( / .CreateTemp( widening.
+		// Every one of these goes through the StorageOps interface to
+		// LocalStorageOps.Create / LocalStorageOps.CreateTemp (the
+		// storage.go primitives above), and every one is backup's own
+		// ".partial then Rename" or "temp then stream" idiom. Bundle
+		// and keyring durability is the backup subsystem's separately
+		// tracked concern, as the storage.go entry already says — note
+		// for whoever picks that up that none of these fsync before
+		// the rename.
+		"../backup/keyring.go|w, err := k.storage.Create(ctx, partial, 0o600)":                                       "keyring.go: Keyring.saveLocked writing the keyring JSON to <path>.partial, then storage.Rename over the live file — atomic for readers, no fsync. Through LocalStorageOps.Create.",
+		"../backup/restorer.go|f, err := st.CreateTemp(ctx, tempDir, safe+\"-*.tar\")":                               "restorer.go: ExtractPayload's per-section tar sinks in the restore temp dir, streamed out of the payload. Fresh unique files nothing reads until extraction finishes. Through LocalStorageOps.CreateTemp.",
+		`../backup/runner_create.go|payloadFile, err := st.CreateTemp(ctx, "", "crewship-backup-payload-*.tar.zst")`: "runner_create.go: CreateBackup's streamed payload temp, removed on every exit path. Through LocalStorageOps.CreateTemp.",
+		`../backup/runner_create.go|sealedFile, err := st.CreateTemp(ctx, "", "crewship-backup-sealed-*")`:           "runner_create.go: CreateBackup's sealed-payload temp, streamed into the bundle in step 8 and removed after. Through LocalStorageOps.CreateTemp.",
+		"../backup/runner_create.go|outFile, err := st.Create(ctx, partialPath, 0o600)":                              "runner_create.go: CreateBackup's final bundle, written as <bundle>.partial and st.Rename'd into place — the partial is removed on any failure, so a torn bundle never carries the real name. No fsync before the rename. Through LocalStorageOps.Create.",
+		"../backup/storage.go|f, err := os.CreateTemp(cleanDir, pattern)":                                            "storage.go: LocalStorageOps.CreateTemp, the primitive the four entries above reach — a fresh O_EXCL file with a random name, so it can never truncate anything a reader holds. Same standing as LocalStorageOps.Create above.",
+
+		// ---- #2124: cmd/crewship, read one site at a time ----
 		//
-		// Why that class is acceptable here: there is no concurrent
-		// reader, no daemon state, and nothing downstream treats these
-		// files as authoritative system state — the failure mode is
-		// "the command failed, run it again", which the non-zero exit
-		// already tells the operator. Overwriting a file the user
-		// explicitly pointed at is also the documented contract of
-		// every comparable tool (cp, curl -o).
+		// #1999 widened dirs to cover cmd/crewship for two named sites
+		// and surfaced the rest, which it triaged AS A CLASS: a one-shot
+		// CLI process writing a destination the operator named on the
+		// command line (-o/--out/--output) or a scaffold path the
+		// subcommand exists to create. #2124 read each one.
 		//
-		// What this entry does NOT claim: that per-site durability was
-		// considered for each. If one of these later turns out to feed
-		// something that reads it back, it deserves its own line and
-		// its own verdict rather than shelter under this paragraph.
-		// The point of listing them individually anyway is that a NEW
-		// raw write in cmd/crewship still fails this test.
-		`../../cmd/crewship/cmd_admin_gdpr.go|if err := os.WriteFile(out, append(pretty, '\n'), 0o600); err != nil {`:                       "cmd_admin_gdpr.go: --out destination for a GDPR subject export. Operator-named path, 0600 already, regenerated by re-running the command.",
-		"../../cmd/crewship/cmd_agent_avatar.go|if err := os.WriteFile(out, svg, 0o644); err != nil {":                                      "cmd_agent_avatar.go: -o destination for a generated avatar SVG. Operator-named path; the avatar is deterministic from the agent, so re-running reproduces it.",
-		"../../cmd/crewship/cmd_eval_baseline.go|if err := os.WriteFile(path, data, 0o644); err != nil {":                                   "cmd_eval_baseline.go: saves an eval baseline to a path the subcommand was told to write. One-shot, operator-directed.",
-		"../../cmd/crewship/cmd_export.go|if err := os.WriteFile(path, data, 0o600); err != nil {":                                          "cmd_export.go: writeArtifactFile, one artifact of an export bundle written into the --out dir the operator named. Chmods to 0600 immediately after for the same sensitivity reason documented there.",
-		"../../cmd/crewship/cmd_export_manifest.go|if err := os.WriteFile(output, []byte(yaml), 0o644); err != nil {":                       "cmd_export_manifest.go (two call sites, identical line): --output destination for a rendered manifest. Operator-named, regenerated on re-run.",
-		"../../cmd/crewship/cmd_export_page.go|if err := os.WriteFile(output, []byte(rendered), 0o644); err != nil {":                       "cmd_export_page.go: --output destination for a rendered page. Same operator-named one-shot class.",
-		"../../cmd/crewship/cmd_issue_attachments.go|out, err := os.OpenFile(attachmentOutPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)": "cmd_issue_attachments.go: -o destination for an attachment download, streamed via io.Copy under a 25 MiB LimitReader (so the durable helper's []byte signature would mean buffering the whole attachment). Named by #1999; kept as-is deliberately. The surrounding code ALREADY handles the partial-write case the O_TRUNC class is about — every failure path closes the handle and os.Remove's the partial file rather than leaving a truncated download that looks complete.",
-		"../../cmd/crewship/cmd_prompt.go|if err := os.WriteFile(path, data, 0o600); err != nil {":                                          "cmd_prompt.go: writes a prompt payload to an operator-named path. One-shot CLI output.",
-		"../../cmd/crewship/cmd_routine_init.go|if err := os.WriteFile(outPath, payload, 0o644); err != nil {":                              "cmd_routine_init.go: scaffolds a new routine file at the path the operator asked for. Creating that file IS the command's purpose.",
-		"../../cmd/crewship/cmd_routine_report.go|if err := os.WriteFile(reportOutFile, []byte(out), 0o644); err != nil {":                  "cmd_routine_report.go: --out destination for a routine report. Operator-named, regenerated on re-run.",
-		"../../cmd/crewship/cmd_routine_schema.go|if err := os.WriteFile(out, schemas.RoutineV1, 0o644); err != nil {":                      "cmd_routine_schema.go: dumps the embedded routine JSON schema to an operator-named path. Content is a compile-time constant, so a lost write is recovered by re-running.",
-		"../../cmd/crewship/cmd_seed_data_memory.go|return os.WriteFile(path, []byte(content), 0o644)":                                      "cmd_seed_data_memory.go: writeFileIfAbsent, the dev-only seed helper. Guarded by an os.Stat that returns early when the file exists, so it never overwrites live content — the exact site this test's header comment already called out as deliberately out of scope before cmd/crewship was walked at all.",
-		"../../cmd/crewship/cmd_skill_authoring.go|if err := os.WriteFile(dest, []byte(content), 0o644); err != nil {":                      "cmd_skill_authoring.go: scaffolds a new skill file. Creating the file is the command's purpose; operator-named destination.",
-		"../../cmd/crewship/cmd_skill_authoring.go|if err := os.WriteFile(dest, []byte(full), 0o644); err != nil {":                         "cmd_skill_authoring.go: writes the assembled skill body to the same scaffold destination, same reasoning.",
-		"../../cmd/crewship/cmd_slash_admin.go|if err := os.WriteFile(sample, []byte(content), 0o644); err != nil {":                        "cmd_slash_admin.go: writes a sample slash-command file for the operator to edit. Scaffold output, regenerated on re-run.",
+		// Three of them were NOT that class and are now converted:
+		// cmd_prompt.go (promptSaveCmd writes ~/.crewship/prompts/<name>
+		// that promptUseCmd pipes into ask/run), cmd_eval_baseline.go
+		// (evalBaselineSaveCmd writes ~/.crewship/eval-baselines/<name>
+		// that `eval baseline diff` reads back in CI) and
+		// cmd_seed_data_memory.go (writeFileIfAbsent lays down
+		// PERSONA.md/pins.md that the server reads, and its os.Stat
+		// guard meant a torn first write was never repaired). Each has
+		// a *_durable_test.go that fails on the old code.
+		//
+		// What makes the remaining entries acceptable, per site rather
+		// than per class: the operator typed the destination, the
+		// command prints "wrote <path>" only after the write returned,
+		// and a failed write is a non-zero exit naming the path — so a
+		// torn file is visible to the person who asked for it, and
+		// re-running the command reproduces it. Nothing in this
+		// process or the server reads any of these paths back.
+		// Overwriting a file the user explicitly pointed at is also the
+		// documented contract of every comparable tool (cp, curl -o).
+		//
+		// Two of the os.Create entries (cmd_activity.go,
+		// cmd_system_openapi.go) `defer f.Close()` on the writable
+		// handle, so a Close error would be swallowed after the success
+		// line; cmd_issue_attachments.go and cmd_backup_admin.go show
+		// the explicit-close shape. Noted, not fixed here — a Close
+		// error on a local file after successful writes is not the
+		// torn-write class this guard is about.
+		`../../cmd/crewship/cmd_admin_gdpr.go|if err := os.WriteFile(out, append(pretty, '\n'), 0o600); err != nil {`:                       "cmd_admin_gdpr.go: adminGDPRExportCmd's --out destination for a GDPR subject export. Operator-named path, 0600 already, PrintSuccess only after the write; regenerated by re-running the command.",
+		"../../cmd/crewship/cmd_activity.go|f, err := os.Create(outPath)":                                                                   "cmd_activity.go: activityCmd's --out file for --export ndjson/csv, encoded straight into the handle. Operator-named path, PrintSuccess after the encoder finishes; re-running reproduces it from the API. Made visible by #2124's .Create( widening.",
+		"../../cmd/crewship/cmd_agent_avatar.go|if err := os.WriteFile(out, svg, 0o644); err != nil {":                                      "cmd_agent_avatar.go: agentAvatarShowCmd's --out destination for the stored avatar SVG fetched from the server. Operator-named path; the server still holds the avatar, so re-running reproduces it.",
+		"../../cmd/crewship/cmd_backup_admin.go|f, err := os.Create(dest)":                                                                  "cmd_backup_admin.go: backupDownloadCmd's --out (default: the bundle's basename), streamed via io.Copy from the download body. Refuses an existing file without --force, closes explicitly and os.Remove's the partial on any write or close error — the same partial-file handling as cmd_issue_attachments.go. Made visible by #2124's .Create( widening.",
+		"../../cmd/crewship/cmd_doctor.go|f, err := os.CreateTemp(dataDir.Root, \".doctor-write-*.tmp\")":                                   "cmd_doctor.go: checkDataDirWritable's touch-test probe — created, closed and removed within the function, never written to. Same standing as memory's provider.go health probe above.",
+		"../../cmd/crewship/cmd_export.go|if err := os.WriteFile(path, data, 0o600); err != nil {":                                          "cmd_export.go: writeArtifactFile, one artifact (prompt.md, response.md, timeline.txt, and writeJSONFile's JSON) of an export bundle written into exportCmd's --out dir (default ./run-<run-id>). Chmods to 0600 immediately after for the sensitivity reason documented at exportMkdir. Nothing reads the bundle back; it exists to be read by a person or diffed in git.",
+		"../../cmd/crewship/cmd_export_manifest.go|if err := os.WriteFile(output, []byte(yaml), 0o644); err != nil {":                       "cmd_export_manifest.go (two call sites, identical line): runExportWorkspace and runExportCrew's --output destination for a rendered manifest, \"wrote <path>\" on stderr after. Operator-named, regenerated from the API on re-run.",
+		"../../cmd/crewship/cmd_export_page.go|if err := os.WriteFile(output, []byte(rendered), 0o644); err != nil {":                       "cmd_export_page.go: runExportPage's --output destination for the rendered page manifests, \"wrote <path>\" after. Refuses to write at all when there are no pages, precisely so an existing export is not truncated to nothing. Operator-named, regenerated on re-run.",
+		"../../cmd/crewship/cmd_issue_attachments.go|out, err := os.OpenFile(attachmentOutPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)": "cmd_issue_attachments.go: issueAttachmentCmd's -o destination for an attachment download, streamed via io.Copy under a 25 MiB LimitReader (so the durable helper's []byte signature would mean buffering the whole attachment). Named by #1999; kept as-is deliberately. The surrounding code ALREADY handles the partial-write case the O_TRUNC class is about — every failure path closes the handle and os.Remove's the partial file rather than leaving a truncated download that looks complete.",
+		`../../cmd/crewship/cmd_persona.go|tmp, err := os.CreateTemp("", "persona-*"+ext)`:                                                  "cmd_persona.go: openInEditor's scratch file for $EDITOR — a fresh unique temp, removed on return, whose only reader is the editor this process is about to launch and then this process reading the result back. Not persisted anywhere.",
+		"../../cmd/crewship/cmd_routine_init.go|if err := os.WriteFile(outPath, payload, 0o644); err != nil {":                              "cmd_routine_init.go: routineInitCmd's --output destination for a routine skeleton (or a fetched definition). Creating that file IS the command's purpose; it then tells the operator to edit it and run `routine validate` on it, which would reject a torn one.",
+		"../../cmd/crewship/cmd_routine_report.go|if err := os.WriteFile(reportOutFile, []byte(out), 0o644); err != nil {":                  "cmd_routine_report.go: routineReportCmd's --out destination for a rendered md/html report, \"Wrote ... report to <path>\" after. Operator-named, regenerated from the API on re-run.",
+		"../../cmd/crewship/cmd_routine_schema.go|if err := os.WriteFile(out, schemas.RoutineV1, 0o644); err != nil {":                      "cmd_routine_schema.go: routineSchemaCmd's --output destination for the embedded routine JSON schema. Content is a compile-time constant, so a lost write is recovered by re-running.",
+		"../../cmd/crewship/cmd_seed_team_chat.go|f, err := os.CreateTemp(filepath.Dir(path), \".accounts-*\")":                             "cmd_seed_team_chat.go: teamSeedSave, the dev seed's private account state — already a full durable sequence inline (CreateTemp beside the target, Chmod 0600, Write, f.Sync, Close, os.Rename), short only of the parent-dir fsync. Its reader is the next seed invocation under the same exclusive lock. Made visible by #2124's .CreateTemp( widening.",
+		"../../cmd/crewship/cmd_self_update.go|f, err := os.CreateTemp(dir, \".crewship-write-probe-*\")":                                   "cmd_self_update.go: dirWritable's probe — created, closed and removed within the function, never written to. Same standing as cmd_doctor.go's.",
+		"../../cmd/crewship/cmd_skill_authoring.go|if err := os.WriteFile(dest, []byte(content), 0o644); err != nil {":                      "cmd_skill_authoring.go: skillInitCmd scaffolding <--output or ./<slug>>/SKILL.md. Refuses an existing file without --force; creating the file is the command's purpose and it tells the operator to edit it next.",
+		"../../cmd/crewship/cmd_skill_authoring.go|if err := os.WriteFile(dest, []byte(full), 0o644); err != nil {":                         "cmd_skill_authoring.go: skillExportCmd's --output destination (a directory means <slug>.md inside it) for a SKILL.md reassembled from the server's copy, PrintSuccess after. Operator-named; the server still holds the skill, so re-running reproduces it.",
+		"../../cmd/crewship/cmd_slash_admin.go|if err := os.WriteFile(sample, []byte(content), 0o644); err != nil {":                        "cmd_slash_admin.go: slashInitCmd writing the sample review.md into cli.DefaultSlashDir, guarded by an os.Stat so it never overwrites one that exists. The command prints the path and tells the operator to try it, so a torn sample is seen by the person who asked for it; it is a template to edit, not state anything reads back unprompted.",
+		"../../cmd/crewship/cmd_system_openapi.go|f, err := os.Create(path)":                                                                "cmd_system_openapi.go: systemOpenAPICmd's --out destination for the spec, io.Copy'd from the response body after the content-type check. Operator-named path, PrintSuccess after the copy; re-running reproduces it from the server. Made visible by #2124's .Create( widening.",
+		"../../cmd/crewship/cmd_telemetry.go|f, err := os.CreateTemp(filepath.Dir(dbPath), \".crewship-ro-probe-*.tmp\")":                   "cmd_telemetry.go: walIndexUnbuildable's writability probe beside the SQLite file — created, closed and removed within the function, never written to. Same standing as cmd_doctor.go's.",
 	}
 
 	// appendLines lists O_APPEND call sites accepted under the
@@ -260,7 +305,17 @@ func TestNoRawFileWritesOutsideDurableHelper(t *testing.T) {
 	// unscanned. That blind spot is why consolidator.go's two O_APPEND
 	// sites sat here allowlisted-but-unmatched after they moved to
 	// os.Root — the guard would not have caught a regression in them.
-	wholeFileRe := regexp.MustCompile(`os\.WriteFile\(|\.OpenFile\(`)
+	//
+	// `.Create(` and `.CreateTemp(` (#2124): os.Create is
+	// O_RDWR|O_CREATE|O_TRUNC — the whole-file-overwrite shape spelled
+	// differently — and four sites in the walked packages used it while
+	// the guard matched only os.WriteFile and .OpenFile, so an
+	// `os.Create` + `io.Copy` into an operator's -o path was invisible
+	// here. os.CreateTemp never truncates anything, but it is how every
+	// hand-rolled "temp + rename" sequence starts, and those are exactly
+	// the sites that need reading for a missing fsync. The method form
+	// covers *os.Root.Create too, same as .OpenFile above.
+	wholeFileRe := regexp.MustCompile(`os\.WriteFile\(|\.OpenFile\(|\.Create\(|\.CreateTemp\(`)
 
 	checkedFiles := 0
 	for _, dir := range dirs {
@@ -287,7 +342,8 @@ func TestNoRawFileWritesOutsideDurableHelper(t *testing.T) {
 					continue
 				}
 				if !strings.Contains(line, "O_WRONLY") && !strings.Contains(line, "O_RDWR") &&
-					!strings.Contains(line, "os.WriteFile(") {
+					!strings.Contains(line, "os.WriteFile(") &&
+					!strings.Contains(line, ".Create(") && !strings.Contains(line, ".CreateTemp(") {
 					// Read-only open (e.g. O_RDONLY) — not a write.
 					continue
 				}

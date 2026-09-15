@@ -1075,7 +1075,7 @@ Runs the **body** once per element of a JSON array, collecting each item's resul
 | `parallelism` | Max items in flight at once. `0` (default) uses the platform wave concurrency; `1` forces sequential; higher values are clamped to the wave cap. |
 | `steps` | The per-item body. Steps run **sequentially within an item** and **in parallel across items** (bounded). Each body step sees the parent's inputs, the loop variable, every upstream (pre-`foreach`) step output, and its own earlier body steps. |
 
-Within an item the body runs like a mini-pipeline: per-step `retry:`, `validation`, `outcomes`, and tier escalation all apply. **Cost is summed across every item** and attributed to the `foreach` step, so `max_cost_usd` still bounds the whole fan-out. The first item that fails cancels the rest and fails the step (fail-fast). `wait`, `call_pipeline`, and a nested `foreach` are **not allowed** inside the body — the fan-out is a bounded, self-contained unit.
+Within an item the body runs like a mini-pipeline: per-step `retry:`, `validation`, `outcomes`, and tier escalation all apply. **Cost is summed across every item** and attributed to the `foreach` step, so `max_cost_usd` still bounds the whole fan-out. The first item that fails cancels the rest and fails the step (fail-fast). `wait`, `call_pipeline`, and a nested `foreach` are **not allowed** inside the body — the fan-out is a bounded, self-contained unit. `items` may hold at most 10,000 elements, and because every item receives its own copy of the run inputs, a run with more than 1,024 inputs fails the step before any item runs.
 
 ### `crewship` — act on Crewship's own nouns
 

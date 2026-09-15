@@ -42,20 +42,20 @@ var providerRouteCmd = &cobra.Command{
 // rather than pre-rendered because an agent parsing --format json is checking
 // "does my key go into a header named X", and a formatted string makes it guess.
 type providerRouteSlot struct {
-	Placement string `json:"placement"` // "header" or "query"
-	Name      string `json:"name"`
+	Placement string `json:"placement" yaml:"placement"` // "header" or "query"
+	Name      string `json:"name" yaml:"name"`
 	// Prefix is what precedes the token in the slot's value — "Bearer " for an
 	// Authorization header, empty for x-api-key. Never the token itself: this
 	// command never sees a credential.
-	Prefix string `json:"prefix,omitempty"`
+	Prefix string `json:"prefix,omitempty" yaml:"prefix,omitempty"`
 }
 
 // providerRouteAuthRule is one token-shape branch. TokenPrefix empty is the
 // default rule, and llmroute guarantees exactly one of those, last — so a
 // reader can take the last entry as "what happens to an ordinary key".
 type providerRouteAuthRule struct {
-	TokenPrefix string              `json:"token_prefix,omitempty"`
-	Slots       []providerRouteSlot `json:"slots"`
+	TokenPrefix string              `json:"token_prefix,omitempty" yaml:"token_prefix,omitempty"`
+	Slots       []providerRouteSlot `json:"slots" yaml:"slots"`
 }
 
 // providerRouteRow is one descriptor as the CLI renders it. The json tags name
@@ -68,47 +68,47 @@ type providerRouteAuthRule struct {
 // provider whose upstream comes OUT of the credential has nowhere to send a
 // request without one.
 type providerRouteRow struct {
-	ID          string `json:"id"`
-	DisplayName string `json:"display_name"`
+	ID          string `json:"id" yaml:"id"`
+	DisplayName string `json:"display_name" yaml:"display_name"`
 
 	// PathPrefix is the path an agent's CLI is pointed at on 127.0.0.1:9119.
-	PathPrefix  string `json:"path_prefix"`
-	StripPrefix bool   `json:"strip_prefix"`
+	PathPrefix  string `json:"path_prefix" yaml:"path_prefix"`
+	StripPrefix bool   `json:"strip_prefix" yaml:"strip_prefix"`
 
 	// Upstream is the fixed dial target, base path included. Empty exactly when
 	// UpstreamFromCredential — the endpoint is operator data and this command
 	// deliberately does not read credentials to fill it in.
-	Upstream               string `json:"upstream,omitempty"`
-	UpstreamFromCredential bool   `json:"upstream_from_credential"`
-	RequiresCredential     bool   `json:"requires_credential"`
+	Upstream               string `json:"upstream,omitempty" yaml:"upstream,omitempty"`
+	UpstreamFromCredential bool   `json:"upstream_from_credential" yaml:"upstream_from_credential"`
+	RequiresCredential     bool   `json:"requires_credential" yaml:"requires_credential"`
 
 	// LedgerProvider is the key cost_ledger rows are written under; BodyCodec
 	// is which response shape usage is parsed from. They differ for OpenRouter,
 	// which speaks OpenAI's body shape but bills on its own rate card.
-	LedgerProvider string `json:"ledger_provider"`
-	BodyCodec      string `json:"body_codec,omitempty"`
+	LedgerProvider string `json:"ledger_provider" yaml:"ledger_provider"`
+	BodyCodec      string `json:"body_codec,omitempty" yaml:"body_codec,omitempty"`
 
 	// Priced is false when LedgerProvider has no row in the rate card, which
 	// means every call through this route bills $0. That is the honest outcome
 	// for a bring-your-own endpoint and the operator is meant to see it here
 	// rather than discover it in an empty spend report.
-	Priced bool `json:"priced"`
+	Priced bool `json:"priced" yaml:"priced"`
 
-	Auth          []providerRouteAuthRule `json:"auth"`
-	StaticHeaders map[string]string       `json:"static_headers,omitempty"`
+	Auth          []providerRouteAuthRule `json:"auth" yaml:"auth"`
+	StaticHeaders map[string]string       `json:"static_headers,omitempty" yaml:"static_headers,omitempty"`
 
-	KeyEnvVars []string `json:"key_env_vars,omitempty"`
+	KeyEnvVars []string `json:"key_env_vars,omitempty" yaml:"key_env_vars,omitempty"`
 
 	// ForwardProxyHosts are the upstream hostnames the sidecar ALSO recognises
 	// on its forward-proxy path (an agent dialling api.openai.com directly).
 	// Empty for a provider added after the reverse proxy became descriptor-
 	// driven — see internal/llmroute for why that asymmetry is deliberate.
-	ForwardProxyHosts []string `json:"forward_proxy_hosts,omitempty"`
+	ForwardProxyHosts []string `json:"forward_proxy_hosts,omitempty" yaml:"forward_proxy_hosts,omitempty"`
 }
 
 // providerRouteListResult is the `provider route list` document.
 type providerRouteListResult struct {
-	Routes []providerRouteRow `json:"routes"`
+	Routes []providerRouteRow `json:"routes" yaml:"routes"`
 }
 
 var providerRouteListCmd = &cobra.Command{

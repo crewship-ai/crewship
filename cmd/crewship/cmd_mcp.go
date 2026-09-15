@@ -114,15 +114,15 @@ var mcpRegistryListCmd = &cobra.Command{
 		}
 		var result struct {
 			Servers []struct {
-				Name        string `json:"name"`
-				DisplayName string `json:"display_name"`
-				Category    string `json:"category"`
-				Transport   string `json:"transport"`
-				TrustTier   string `json:"trust_tier"`
-				IsFeatured  bool   `json:"is_featured"`
-				PackageName string `json:"package_name"`
-			} `json:"servers"`
-			Total int `json:"total"`
+				Name        string `json:"name" yaml:"name"`
+				DisplayName string `json:"display_name" yaml:"display_name"`
+				Category    string `json:"category" yaml:"category"`
+				Transport   string `json:"transport" yaml:"transport"`
+				TrustTier   string `json:"trust_tier" yaml:"trust_tier"`
+				IsFeatured  bool   `json:"is_featured" yaml:"is_featured"`
+				PackageName string `json:"package_name" yaml:"package_name"`
+			} `json:"servers" yaml:"servers"`
+			Total int `json:"total" yaml:"total"`
 		}
 		if err := cli.ReadJSON(resp, &result); err != nil {
 			return err
@@ -202,8 +202,8 @@ var mcpRegistrySyncCmd = &cobra.Command{
 			return err
 		}
 		var out struct {
-			Status  string `json:"status"`
-			Message string `json:"message"`
+			Status  string `json:"status" yaml:"status"`
+			Message string `json:"message" yaml:"message"`
 		}
 		if err := cli.ReadJSON(resp, &out); err != nil {
 			return err
@@ -219,7 +219,7 @@ var mcpRegistrySyncCmd = &cobra.Command{
 
 // mcpConfig is the validated structure of an MCP JSON config.
 type mcpConfig struct {
-	MCPServers map[string]json.RawMessage `json:"mcpServers"`
+	MCPServers map[string]json.RawMessage `json:"mcpServers" yaml:"mcpServers"`
 }
 
 // validateAndNormalizeMCPJSON validates that value is valid MCP JSON with a
@@ -328,7 +328,7 @@ var crewMCPCmd = &cobra.Command{
 			return err
 		}
 		var crew struct {
-			MCPConfigJSON *string `json:"mcp_config_json"`
+			MCPConfigJSON *string `json:"mcp_config_json" yaml:"mcp_config_json"`
 		}
 		if err := cli.ReadJSON(resp, &crew); err != nil {
 			return err
@@ -445,8 +445,8 @@ var agentMCPCmd = &cobra.Command{
 				return err
 			}
 			var agent struct {
-				CrewID        *string `json:"crew_id"`
-				MCPConfigJSON *string `json:"mcp_config_json"`
+				CrewID        *string `json:"crew_id" yaml:"crew_id"`
+				MCPConfigJSON *string `json:"mcp_config_json" yaml:"mcp_config_json"`
 			}
 			if err := cli.ReadJSON(resp, &agent); err != nil {
 				return err
@@ -462,14 +462,14 @@ var agentMCPCmd = &cobra.Command{
 					return err
 				}
 				var crew struct {
-					MCPConfigJSON *string `json:"mcp_config_json"`
+					MCPConfigJSON *string `json:"mcp_config_json" yaml:"mcp_config_json"`
 				}
 				if err := cli.ReadJSON(crewResp, &crew); err != nil {
 					return fmt.Errorf("read crew response: %w", err)
 				}
 				if crew.MCPConfigJSON != nil && *crew.MCPConfigJSON != "" {
 					var parsed struct {
-						MCPServers map[string]json.RawMessage `json:"mcpServers"`
+						MCPServers map[string]json.RawMessage `json:"mcpServers" yaml:"mcpServers"`
 					}
 					if err := json.Unmarshal([]byte(*crew.MCPConfigJSON), &parsed); err != nil {
 						return fmt.Errorf("parse crew MCP config: %w", err)
@@ -481,7 +481,7 @@ var agentMCPCmd = &cobra.Command{
 			agentServers := map[string]json.RawMessage{}
 			if agent.MCPConfigJSON != nil && *agent.MCPConfigJSON != "" {
 				var parsed struct {
-					MCPServers map[string]json.RawMessage `json:"mcpServers"`
+					MCPServers map[string]json.RawMessage `json:"mcpServers" yaml:"mcpServers"`
 				}
 				if err := json.Unmarshal([]byte(*agent.MCPConfigJSON), &parsed); err != nil {
 					return fmt.Errorf("malformed agent MCP config: %w", err)
@@ -546,7 +546,7 @@ var agentMCPCmd = &cobra.Command{
 			return err
 		}
 		var agent struct {
-			MCPConfigJSON *string `json:"mcp_config_json"`
+			MCPConfigJSON *string `json:"mcp_config_json" yaml:"mcp_config_json"`
 		}
 		if err := cli.ReadJSON(resp, &agent); err != nil {
 			return err
@@ -591,11 +591,11 @@ func fetchResolvedIntegrations(client *cli.Client, agentID string) []resolvedInt
 		return nil
 	}
 	var raw []struct {
-		Name      string  `json:"name"`
-		Scope     string  `json:"scope"`
-		Transport string  `json:"transport"`
-		Endpoint  *string `json:"endpoint"`
-		CredName  *string `json:"credential_name"`
+		Name      string  `json:"name" yaml:"name"`
+		Scope     string  `json:"scope" yaml:"scope"`
+		Transport string  `json:"transport" yaml:"transport"`
+		Endpoint  *string `json:"endpoint" yaml:"endpoint"`
+		CredName  *string `json:"credential_name" yaml:"credential_name"`
 	}
 	if err := cli.ReadJSON(resp, &raw); err != nil {
 		return nil

@@ -38,3 +38,11 @@ func (a provisioningAdapter) EnqueueForCrew(ctx context.Context, crewID, workspa
 func (a provisioningAdapter) AttachPendingMessage(crewID string, msg chatbridge.PendingChatMessage) bool {
 	return a.h.AttachPendingMessage(crewID, msg)
 }
+
+// InvalidateImageCache forwards the bridge's "the daemon says this image is
+// gone" signal to the provisioner's memoised image list (#2431). Without it
+// the bridge's optional-interface assertion never matches the production
+// enqueuer and the invalidation only ever runs in tests.
+func (a provisioningAdapter) InvalidateImageCache() {
+	a.h.InvalidateImageCache()
+}

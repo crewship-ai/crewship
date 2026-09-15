@@ -19,19 +19,19 @@ import (
 // declared three times and a single tag typo would have silently
 // produced $0.0000 rows via the "unsupported rows type" default case.
 type crewSpendRow struct {
-	CrewID    string  `json:"crew_id"`
-	CostUSD   float64 `json:"cost_usd"`
-	CallCount int64   `json:"call_count"`
-	InTokens  int64   `json:"input_tokens"`
-	OutTokens int64   `json:"output_tokens"`
+	CrewID    string  `json:"crew_id" yaml:"crew_id"`
+	CostUSD   float64 `json:"cost_usd" yaml:"cost_usd"`
+	CallCount int64   `json:"call_count" yaml:"call_count"`
+	InTokens  int64   `json:"input_tokens" yaml:"input_tokens"`
+	OutTokens int64   `json:"output_tokens" yaml:"output_tokens"`
 }
 
 type agentSpendRow struct {
-	AgentID   string  `json:"agent_id"`
-	CostUSD   float64 `json:"cost_usd"`
-	CallCount int64   `json:"call_count"`
-	InTokens  int64   `json:"input_tokens"`
-	OutTokens int64   `json:"output_tokens"`
+	AgentID   string  `json:"agent_id" yaml:"agent_id"`
+	CostUSD   float64 `json:"cost_usd" yaml:"cost_usd"`
+	CallCount int64   `json:"call_count" yaml:"call_count"`
+	InTokens  int64   `json:"input_tokens" yaml:"input_tokens"`
+	OutTokens int64   `json:"output_tokens" yaml:"output_tokens"`
 }
 
 var paymasterCmd = &cobra.Command{
@@ -73,7 +73,7 @@ var paymasterByCrewCmd = &cobra.Command{
 			return err
 		}
 		var body struct {
-			Rows []crewSpendRow `json:"rows"`
+			Rows []crewSpendRow `json:"rows" yaml:"rows"`
 		}
 		if err := cli.ReadJSON(resp, &body); err != nil {
 			return err
@@ -111,7 +111,7 @@ var paymasterByAgentCmd = &cobra.Command{
 			return err
 		}
 		var body struct {
-			Rows []agentSpendRow `json:"rows"`
+			Rows []agentSpendRow `json:"rows" yaml:"rows"`
 		}
 		if err := cli.ReadJSON(resp, &body); err != nil {
 			return err
@@ -153,11 +153,11 @@ var paymasterTopCmd = &cobra.Command{
 		// misleading $0.0000 rows.
 		var body struct {
 			Rows []struct {
-				ScopeKind string  `json:"scope_kind"`
-				ScopeID   string  `json:"scope_id"`
-				CostUSD   float64 `json:"cost_usd"`
-				CallCount int64   `json:"call_count"`
-			} `json:"rows"`
+				ScopeKind string  `json:"scope_kind" yaml:"scope_kind"`
+				ScopeID   string  `json:"scope_id" yaml:"scope_id"`
+				CostUSD   float64 `json:"cost_usd" yaml:"cost_usd"`
+				CallCount int64   `json:"call_count" yaml:"call_count"`
+			} `json:"rows" yaml:"rows"`
 		}
 		if err := cli.ReadJSON(resp, &body); err != nil {
 			return err
@@ -254,13 +254,13 @@ Example:
 		}
 		var body struct {
 			Row struct {
-				MissionID string  `json:"mission_id"`
-				CostUSD   float64 `json:"cost_usd"`
-				CallCount int64   `json:"call_count"`
-				InTokens  int64   `json:"input_tokens"`
-				OutTokens int64   `json:"output_tokens"`
-			} `json:"row"`
-			MissionID string `json:"mission_id"`
+				MissionID string  `json:"mission_id" yaml:"mission_id"`
+				CostUSD   float64 `json:"cost_usd" yaml:"cost_usd"`
+				CallCount int64   `json:"call_count" yaml:"call_count"`
+				InTokens  int64   `json:"input_tokens" yaml:"input_tokens"`
+				OutTokens int64   `json:"output_tokens" yaml:"output_tokens"`
+			} `json:"row" yaml:"row"`
+			MissionID string `json:"mission_id" yaml:"mission_id"`
 		}
 		if err := cli.ReadJSON(resp, &body); err != nil {
 			return err
@@ -324,14 +324,14 @@ Examples:
 		}
 		var body struct {
 			Rows []struct {
-				CredentialID string `json:"credential_id,omitempty"`
-				Plan         string `json:"subscription_plan"`
-				Provider     string `json:"provider"`
-				CallCount    int64  `json:"call_count"`
-				InTokens     int64  `json:"input_tokens"`
-				OutTokens    int64  `json:"output_tokens"`
-				LastUsedAt   string `json:"last_ts"`
-			} `json:"rows"`
+				CredentialID string `json:"credential_id,omitempty" yaml:"credential_id,omitempty"`
+				Plan         string `json:"subscription_plan" yaml:"subscription_plan"`
+				Provider     string `json:"provider" yaml:"provider"`
+				CallCount    int64  `json:"call_count" yaml:"call_count"`
+				InTokens     int64  `json:"input_tokens" yaml:"input_tokens"`
+				OutTokens    int64  `json:"output_tokens" yaml:"output_tokens"`
+				LastUsedAt   string `json:"last_ts" yaml:"last_ts"`
+			} `json:"rows" yaml:"rows"`
 		}
 		if err := cli.ReadJSON(resp, &body); err != nil {
 			return err

@@ -430,7 +430,8 @@ func TestForkedRestore_EveryBackupTable(t *testing.T) {
 	sort.Strings(skipped)
 	t.Logf("row-per-table fixture: seeded %d table(s); could not seed %d:\n  %s",
 		len(seeded), len(skipped), strings.Join(skipped, "\n  "))
-	// Pinned to the coverage the fixture achieves today (102 of 109), not a
+	// Pinned to the coverage the fixture achieves today (102 of 104; the five
+	// #2274 dead names never counted, they only inflated the denominator), not a
 	// token floor: a schema change that halves real coverage must fail here,
 	// not pass while the doc comment above still claims "every table". Lower
 	// it only with a reason written next to the new number.

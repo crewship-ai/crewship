@@ -146,24 +146,24 @@ always enabled for crew containers.`,
 
 // crewInfo is a minimal projection of GET /api/v1/crews/{id} fields we need.
 type crewInfo struct {
-	ID                 string  `json:"id"`
-	Name               string  `json:"name"`
-	Slug               string  `json:"slug"`
-	RuntimeImage       *string `json:"runtime_image"`
-	DevcontainerConfig *string `json:"devcontainer_config"`
-	MiseConfig         *string `json:"mise_config"`
-	CachedImage        *string `json:"cached_image"`
-	ConfigHash         *string `json:"config_hash"`
+	ID                 string  `json:"id" yaml:"id"`
+	Name               string  `json:"name" yaml:"name"`
+	Slug               string  `json:"slug" yaml:"slug"`
+	RuntimeImage       *string `json:"runtime_image" yaml:"runtime_image"`
+	DevcontainerConfig *string `json:"devcontainer_config" yaml:"devcontainer_config"`
+	MiseConfig         *string `json:"mise_config" yaml:"mise_config"`
+	CachedImage        *string `json:"cached_image" yaml:"cached_image"`
+	ConfigHash         *string `json:"config_hash" yaml:"config_hash"`
 }
 
 // provisionStatus is a minimal projection of GET /api/v1/crews/{id}/provision.
 type provisionStatus struct {
-	Status             string  `json:"status"`
-	CachedImage        *string `json:"cached_image"`
-	ConfigHash         *string `json:"config_hash"`
-	DevcontainerConfig *string `json:"devcontainer_config"`
-	MiseConfig         *string `json:"mise_config"`
-	Error              string  `json:"error"`
+	Status             string  `json:"status" yaml:"status"`
+	CachedImage        *string `json:"cached_image" yaml:"cached_image"`
+	ConfigHash         *string `json:"config_hash" yaml:"config_hash"`
+	DevcontainerConfig *string `json:"devcontainer_config" yaml:"devcontainer_config"`
+	MiseConfig         *string `json:"mise_config" yaml:"mise_config"`
+	Error              string  `json:"error" yaml:"error"`
 }
 
 func fetchCrewInfo(client *cli.Client, crewID string) (*crewInfo, error) {

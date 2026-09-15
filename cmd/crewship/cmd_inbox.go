@@ -592,16 +592,16 @@ Examples:
 			return err
 		}
 		var out struct {
-			ID      string `json:"id"`
-			State   string `json:"state"`
-			Action  string `json:"action"`
+			ID      string `json:"id" yaml:"id"`
+			State   string `json:"state" yaml:"state"`
+			Action  string `json:"action" yaml:"action"`
 			Receipt struct {
-				DeliveryID    string `json:"delivery_id"`
-				RunID         string `json:"run_id"`
-				DispatchState string `json:"dispatch_state"`
-				Seq           int    `json:"seq"`
-				AgentVersion  *int64 `json:"agent_version"`
-			} `json:"receipt"`
+				DeliveryID    string `json:"delivery_id" yaml:"delivery_id"`
+				RunID         string `json:"run_id" yaml:"run_id"`
+				DispatchState string `json:"dispatch_state" yaml:"dispatch_state"`
+				Seq           int    `json:"seq" yaml:"seq"`
+				AgentVersion  *int64 `json:"agent_version" yaml:"agent_version"`
+			} `json:"receipt" yaml:"receipt"`
 		}
 		if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 			return fmt.Errorf("decode response: %w", err)
@@ -685,8 +685,8 @@ func inboxSourceHint(client *cli.Client, id string, err error) error {
 		"?workspace_id=" + url.QueryEscape(cli.ResolveWorkspace(flagWorkspace, cliCfg))); gerr == nil {
 		if cli.CheckError(resp) == nil {
 			var item struct {
-				Kind     string `json:"kind"`
-				SourceID string `json:"source_id"`
+				Kind     string `json:"kind" yaml:"kind"`
+				SourceID string `json:"source_id" yaml:"source_id"`
 			}
 			if cli.ReadJSON(resp, &item) == nil {
 				sourceID = item.SourceID
@@ -764,7 +764,7 @@ Examples:
 			return err
 		}
 		var body struct {
-			UnreadCount int `json:"unread_count"`
+			UnreadCount int `json:"unread_count" yaml:"unread_count"`
 		}
 		if err := cli.ReadJSON(resp, &body); err != nil {
 			return err
@@ -866,8 +866,8 @@ func runInboxBulk(cmd *cobra.Command, state, action string) error {
 		}
 		var body struct {
 			Rows []struct {
-				ID string `json:"id"`
-			} `json:"rows"`
+				ID string `json:"id" yaml:"id"`
+			} `json:"rows" yaml:"rows"`
 		}
 		if err := cli.ReadJSON(resp, &body); err != nil {
 			return err
@@ -921,9 +921,9 @@ func runInboxBulk(cmd *cobra.Command, state, action string) error {
 			return err
 		}
 		var out struct {
-			Updated  int `json:"updated"`
-			Skipped  int `json:"skipped"`
-			NotFound int `json:"not_found"`
+			Updated  int `json:"updated" yaml:"updated"`
+			Skipped  int `json:"skipped" yaml:"skipped"`
+			NotFound int `json:"not_found" yaml:"not_found"`
 		}
 		if err := cli.ReadJSON(resp, &out); err != nil {
 			return err

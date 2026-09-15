@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -111,6 +112,21 @@ import (
 //     awareness we don't have at this layer. The handler logs a
 //     warning naming the deleted user_id so the operator knows to
 //     manually review lessons.md if any. See Known Gaps.
+//   - workspace_members — membership is removed by RemoveMember
+//     (#2020), not by an Art. 17 erasure; an erasure that also evicted
+//     would be doing something the operator did not ask for.
+//   - Instance-scoped tables with no workspace column: users, accounts,
+//     sessions, user_sessions, cli_tokens, cli_pairings, user_preferences,
+//     skills, skill_reviews, rate_limit_overrides, keeper_runtime_settings,
+//     keeper_aux_settings. A workspace-scoped erasure cannot speak for
+//     them — the same person may be a member elsewhere. They belong to an
+//     account-deletion path that does not exist yet.
+//   - Two columns the schema will not let this cascade clear:
+//     memory_proposals.decided_by_user_id (a CHECK requires a decided
+//     proposal to name its decider) and agent_config_history.changed_by
+//     (NOT NULL REFERENCES users). Nulling is refused by the constraint,
+//     re-attributing would falsify an accountability record; both wait on a
+//     decision, and the tests do not seed them. See #2308.
 //
 // # Pages (docs/prd/pages.md §7.1 rule 1b, issue #1944)
 //
@@ -135,6 +151,21 @@ import (
 // declared actions inside this one workspace, which is what makes the
 // contract below true.
 //
+// # Everything else that names the subject (issue #2308)
+//
+// The same sweep that found the Pages four (subjectSightings, in
+// admin_gdpr_pages_identity_test.go) found ~40 more columns on rows this
+// workspace owns: credentials and channels the subject created, routines and
+// issues they authored, trust grants and invitations they issued, their own
+// saved views and notification preferences. eraseSubjectIdentity
+// (admin_gdpr_erase_identity.go) applies the same three verbs to all of them
+// — the subject's own records are deleted, a capability with a NOT NULL
+// issuer is revoked, history is anonymised — in one transaction, with one
+// receipt key per table. The file header there argues each table; the one
+// non-obvious call is credentials, whose NOT NULL created_by is handed to a
+// custodian (the admin running the erasure) rather than the credential being
+// deleted out from under the agents that use it.
+//
 // # The contract: unnamed IN THIS WORKSPACE, on the tables enumerated here
 //
 // The promise is that no row of an ENUMERATED table still names the subject in
@@ -146,13 +177,12 @@ import (
 //     is scoped through workspace_id (or, for tables that have none, through a
 //     join that reaches one).
 //   - Enumerated, not exhaustive. The excluded list below is the principled
-//     part of the gap; the rest is simply unfinished — a schema sweep
-//     (subjectSightings, in admin_gdpr_pages_identity_test.go) walks every
-//     table and finds columns this cascade never reaches: credentials and
-//     notification channels the subject created, pipelines and missions they
-//     authored, their own saved_views. Tracked in #2308. Do not restate the
-//     contract as "every row" until that lands; docs/security/gdpr.mdx says
-//     the same thing to the operator, in the same words.
+//     part; the tables still awaiting a decision (missions.owner_user_id, the
+//     chat family, user_peer_consent, peer_card_audit,
+//     memory_proposals.decided_by_user_id, agent_config_history.changed_by)
+//     are listed in admin_gdpr_erase_identity.go's "What is deliberately NOT
+//     here" and in docs/security/gdpr.mdx, in the same words. Do not restate
+//     the contract as "every row" while that list is non-empty.
 //
 // # Idempotency
 //
@@ -263,6 +293,40 @@ type gdprActionScope struct {
 	PageGrantsRemoved       int `json:"page_grants_removed"`
 	PagePublicTokensRevoked int `json:"page_public_tokens_revoked"`
 	PageWebhooksRevoked     int `json:"page_webhooks_revoked"`
+
+	// Identity is the receipt of eraseSubjectIdentity (#2308): one count per
+	// table it reaches, keyed `<table>_<verb>` exactly like the four Pages
+	// keys above, flattened into the same JSON object by MarshalJSON so the
+	// audit row and `crewship admin gdpr delete` see one flat map. The keys
+	// are the identitySteps table in admin_gdpr_erase_identity.go, and every
+	// one is present (at zero) whenever the step ran or rolled back, for the
+	// reason the four fields above give. Nil only on the export path, which
+	// never runs the step and must not report keys for it.
+	Identity map[string]int `json:"-"`
+}
+
+// MarshalJSON flattens Identity into the struct's own keys. The scope is one
+// object with one key per table because that is what the audit row has held
+// since v107 and what the CLI prints; a nested object would make the
+// #2308 tables read as a different kind of thing from the Pages ones, and
+// they are not.
+func (s gdprActionScope) MarshalJSON() ([]byte, error) {
+	type plain gdprActionScope // no MarshalJSON, so no recursion
+	raw, err := json.Marshal(plain(s))
+	if err != nil {
+		return nil, err
+	}
+	if len(s.Identity) == 0 {
+		return raw, nil
+	}
+	flat := map[string]json.RawMessage{}
+	if err := json.Unmarshal(raw, &flat); err != nil {
+		return nil, err
+	}
+	for key, n := range s.Identity {
+		flat[key] = json.RawMessage(strconv.Itoa(n))
+	}
+	return json.Marshal(flat) // map keys marshal sorted, so the row is stable
 }
 
 // newGDPRActionID returns a short hex id for a gdpr_actions row.
@@ -359,6 +423,10 @@ func (h *AdminGDPRHandler) transferOrRefuseUserPages(ctx context.Context, action
 //   - page_versions in this workspace no longer name the subject as author
 //     (the versions themselves stay), and the page_grants, page_public_tokens
 //     and page_webhooks rows they issued are gone (#1976).
+//   - every table in identitySteps (admin_gdpr_erase_identity.go) no longer
+//     names the subject in this workspace: their own records and the
+//     capabilities they issued are gone, their attribution on history is
+//     cleared, their credentials have a custodian (#2308).
 //   - gdpr_actions has a 'delete' row with scope_json + status=
 //     'completed' (or 'failed' with error populated).
 //
@@ -705,6 +773,22 @@ func (h *AdminGDPRHandler) DeleteUserData(w http.ResponseWriter, r *http.Request
 	scope.PagePublicTokensRevoked = pagesIdentity.PublicTokensRevoked
 	scope.PageWebhooksRevoked = pagesIdentity.WebhooksRevoked
 
+	// 7) everything else that names the subject in this workspace (#2308):
+	// their own records go, the capabilities they issued are revoked, their
+	// attribution on history is cleared, their credentials get a custodian.
+	// See admin_gdpr_erase_identity.go for the per-table argument. Same
+	// shape as step 6: one transaction, a zeroed receipt on failure, and a
+	// 207 rather than a refusal because rows have already gone by now.
+	identity, err := h.eraseSubjectIdentity(r.Context(), actionID, actorID, wsID, targetID)
+	if err != nil {
+		h.logger.Warn("gdpr delete: identity erasure failed",
+			"action_id", actionID, "workspace_id", wsID, "target", targetID, "err", err)
+		if firstErr == nil {
+			firstErr = err
+		}
+	}
+	scope.Identity = identity.Counts
+
 	// Punted: lessons.md content scan. We do not have a content-
 	// aware redactor at this layer and a naive substring sweep
 	// could corrupt lesson semantics. Log a clear warning so the
@@ -722,7 +806,8 @@ func (h *AdminGDPRHandler) DeleteUserData(w http.ResponseWriter, r *http.Request
 	// else, the same distinction pages_transferred already draws.
 	rowsDeleted := scope.PeerCards + scope.MemoryVersions + scope.InboxItems + scope.InboxItemReads +
 		scope.UserModels + scope.ApprovalsQueue +
-		scope.PageGrantsRemoved + scope.PagePublicTokensRevoked + scope.PageWebhooksRevoked
+		scope.PageGrantsRemoved + scope.PagePublicTokensRevoked + scope.PageWebhooksRevoked +
+		identity.RowsDeleted
 	status := http.StatusAccepted
 	resp := map[string]any{
 		"action_id":    actionID,

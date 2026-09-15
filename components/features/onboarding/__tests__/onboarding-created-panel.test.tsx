@@ -18,7 +18,8 @@ function routeTo({ crews = [], routines = [], pages = [] }: {
   routines?: unknown[]
   pages?: unknown[]
 }) {
-  apiFetch.mockImplementation(async (url: string) => {
+  apiFetch.mockImplementation(async (input: RequestInfo | URL) => {
+    const url = String(input)
     if (url.startsWith("/api/v1/crews")) return jsonOk(crews)
     if (url.includes("/pipelines")) return jsonOk(routines)
     if (url.startsWith("/api/v1/pages")) return jsonOk(pages)
@@ -104,7 +105,8 @@ describe("OnboardingCreatedPanel", () => {
   })
 
   it("survives one endpoint failing rather than showing nothing", async () => {
-    apiFetch.mockImplementation(async (url: string) => {
+    apiFetch.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input)
       if (url.includes("/pipelines")) return { ok: false } as unknown as Response
       if (url.startsWith("/api/v1/pages")) return jsonOk([{ slug: "p", name: "A page", panel_count: 1 }])
       return jsonOk([])

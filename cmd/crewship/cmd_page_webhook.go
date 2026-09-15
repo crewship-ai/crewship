@@ -49,27 +49,27 @@ import (
 // ── The wire (mirrors internal/api/pages_webhooks.go) ──────────────────────
 
 type pageWebhookJSON struct {
-	ID          string `json:"id"`
-	Panel       string `json:"panel"`
-	Name        string `json:"name"`
-	Token       string `json:"token"`
-	URL         string `json:"url"`
-	CreatedBy   string `json:"created_by"`
-	CreatedAt   string `json:"created_at"`
-	RevokedAt   string `json:"revoked_at"`
-	LastFiredAt string `json:"last_fired_at"`
-	FireCount   int64  `json:"fire_count"`
-	Live        bool   `json:"live"`
+	ID          string `json:"id" yaml:"id"`
+	Panel       string `json:"panel" yaml:"panel"`
+	Name        string `json:"name" yaml:"name"`
+	Token       string `json:"token" yaml:"token"`
+	URL         string `json:"url" yaml:"url"`
+	CreatedBy   string `json:"created_by" yaml:"created_by"`
+	CreatedAt   string `json:"created_at" yaml:"created_at"`
+	RevokedAt   string `json:"revoked_at" yaml:"revoked_at"`
+	LastFiredAt string `json:"last_fired_at" yaml:"last_fired_at"`
+	FireCount   int64  `json:"fire_count" yaml:"fire_count"`
+	Live        bool   `json:"live" yaml:"live"`
 }
 
 type pageWebhooksJSON struct {
-	Page     string            `json:"page"`
-	Webhooks []pageWebhookJSON `json:"webhooks"`
+	Page     string            `json:"page" yaml:"page"`
+	Webhooks []pageWebhookJSON `json:"webhooks" yaml:"webhooks"`
 }
 
 type pageWebhookCreateBody struct {
-	Panel string `json:"panel"`
-	Name  string `json:"name,omitempty"`
+	Panel string `json:"panel" yaml:"panel"`
+	Name  string `json:"name,omitempty" yaml:"name,omitempty"`
 }
 
 // ── The parent noun ────────────────────────────────────────────────────────
@@ -308,7 +308,7 @@ after we pulled it" stays answerable.`,
 			return pageEmitMachine(f, raw, "{}")
 		}
 		var out struct {
-			Already bool `json:"already"`
+			Already bool `json:"already" yaml:"already"`
 		}
 		_ = json.Unmarshal(raw, &out)
 		if out.Already {

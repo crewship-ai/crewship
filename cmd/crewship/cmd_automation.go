@@ -71,28 +71,28 @@ rule against real history before trusting it:
 // every server field through, so the struct is the full shape rather than the
 // columns the table happens to print.
 type automationRow struct {
-	ID          string `json:"id"`
-	WorkspaceID string `json:"workspace_id"`
-	Name        string `json:"name"`
-	Enabled     bool   `json:"enabled"`
-	EventType   string `json:"event_type"`
+	ID          string `json:"id" yaml:"id"`
+	WorkspaceID string `json:"workspace_id" yaml:"workspace_id"`
+	Name        string `json:"name" yaml:"name"`
+	Enabled     bool   `json:"enabled" yaml:"enabled"`
+	EventType   string `json:"event_type" yaml:"event_type"`
 	Matcher     struct {
-		CrewIDs       []string       `json:"crew_ids"`
-		AgentIDs      []string       `json:"agent_ids"`
-		MissionIDs    []string       `json:"mission_ids"`
-		Severities    []string       `json:"severities"`
-		PayloadEquals map[string]any `json:"payload_equals"`
-	} `json:"matcher"`
-	ActionKind string `json:"action_kind"`
+		CrewIDs       []string       `json:"crew_ids" yaml:"crew_ids"`
+		AgentIDs      []string       `json:"agent_ids" yaml:"agent_ids"`
+		MissionIDs    []string       `json:"mission_ids" yaml:"mission_ids"`
+		Severities    []string       `json:"severities" yaml:"severities"`
+		PayloadEquals map[string]any `json:"payload_equals" yaml:"payload_equals"`
+	} `json:"matcher" yaml:"matcher"`
+	ActionKind string `json:"action_kind" yaml:"action_kind"`
 	Action     struct {
-		RoutineSlug string         `json:"routine_slug"`
-		Inputs      map[string]any `json:"inputs"`
-	} `json:"action"`
-	DebounceSeconds int    `json:"debounce_seconds"`
-	MaxPerHour      int    `json:"max_per_hour"`
-	CreatedBy       string `json:"created_by"`
-	CreatedAt       string `json:"created_at"`
-	UpdatedAt       string `json:"updated_at"`
+		RoutineSlug string         `json:"routine_slug" yaml:"routine_slug"`
+		Inputs      map[string]any `json:"inputs" yaml:"inputs"`
+	} `json:"action" yaml:"action"`
+	DebounceSeconds int    `json:"debounce_seconds" yaml:"debounce_seconds"`
+	MaxPerHour      int    `json:"max_per_hour" yaml:"max_per_hour"`
+	CreatedBy       string `json:"created_by" yaml:"created_by"`
+	CreatedAt       string `json:"created_at" yaml:"created_at"`
+	UpdatedAt       string `json:"updated_at" yaml:"updated_at"`
 }
 
 var automationListCmd = &cobra.Command{
@@ -114,8 +114,8 @@ var automationListCmd = &cobra.Command{
 			return err
 		}
 		var body struct {
-			Automations []automationRow `json:"automations"`
-			Count       int             `json:"count"`
+			Automations []automationRow `json:"automations" yaml:"automations"`
+			Count       int             `json:"count" yaml:"count"`
 		}
 		if err := cli.ReadJSON(resp, &body); err != nil {
 			return err
@@ -477,16 +477,16 @@ Examples:
 			return err
 		}
 		var out struct {
-			EventType   string `json:"event_type"`
-			WindowHours int    `json:"window_hours"`
-			Scanned     int    `json:"scanned"`
-			Matched     int    `json:"matched"`
+			EventType   string `json:"event_type" yaml:"event_type"`
+			WindowHours int    `json:"window_hours" yaml:"window_hours"`
+			Scanned     int    `json:"scanned" yaml:"scanned"`
+			Matched     int    `json:"matched" yaml:"matched"`
 			TopReject   struct {
-				Clause    string `json:"clause"`
-				Count     int    `json:"count"`
-				Detail    string `json:"detail"`
-				KeyAbsent bool   `json:"key_absent"`
-			} `json:"top_rejection"`
+				Clause    string `json:"clause" yaml:"clause"`
+				Count     int    `json:"count" yaml:"count"`
+				Detail    string `json:"detail" yaml:"detail"`
+				KeyAbsent bool   `json:"key_absent" yaml:"key_absent"`
+			} `json:"top_rejection" yaml:"top_rejection"`
 		}
 		if err := cli.ReadJSON(resp, &out); err != nil {
 			return err
@@ -578,9 +578,9 @@ func refuseSilentMatcherLoss(id string, next map[string]any, replace bool) error
 	}
 	var listed struct {
 		Automations []struct {
-			ID      string         `json:"id"`
-			Matcher map[string]any `json:"matcher"`
-		} `json:"automations"`
+			ID      string         `json:"id" yaml:"id"`
+			Matcher map[string]any `json:"matcher" yaml:"matcher"`
+		} `json:"automations" yaml:"automations"`
 	}
 	if err := cli.ReadJSON(resp, &listed); err != nil {
 		return nil

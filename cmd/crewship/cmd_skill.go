@@ -85,15 +85,15 @@ Examples:
 		}
 
 		var skills []struct {
-			ID         string  `json:"id"`
-			Slug       string  `json:"slug"`
-			Name       string  `json:"display_name"`
-			Category   string  `json:"category"`
-			Version    string  `json:"version"`
-			Source     string  `json:"source"`
-			Vendor     *string `json:"vendor"`
-			Maturity   string  `json:"maturity"`
-			ScanStatus string  `json:"scan_status"`
+			ID         string  `json:"id" yaml:"id"`
+			Slug       string  `json:"slug" yaml:"slug"`
+			Name       string  `json:"display_name" yaml:"display_name"`
+			Category   string  `json:"category" yaml:"category"`
+			Version    string  `json:"version" yaml:"version"`
+			Source     string  `json:"source" yaml:"source"`
+			Vendor     *string `json:"vendor" yaml:"vendor"`
+			Maturity   string  `json:"maturity" yaml:"maturity"`
+			ScanStatus string  `json:"scan_status" yaml:"scan_status"`
 		}
 		if err := cli.ReadJSON(resp, &skills); err != nil {
 			return err
@@ -133,16 +133,16 @@ var skillGetCmd = &cobra.Command{
 		}
 
 		var skill struct {
-			ID          string  `json:"id"`
-			Name        string  `json:"display_name"`
-			Slug        string  `json:"slug"`
-			Category    string  `json:"category"`
-			Version     string  `json:"version"`
-			Source      string  `json:"source"`
-			Description *string `json:"description"`
-			Author      *string `json:"author"`
-			ToolCount   *int    `json:"tool_count"`
-			CreatedAt   string  `json:"created_at"`
+			ID          string  `json:"id" yaml:"id"`
+			Name        string  `json:"display_name" yaml:"display_name"`
+			Slug        string  `json:"slug" yaml:"slug"`
+			Category    string  `json:"category" yaml:"category"`
+			Version     string  `json:"version" yaml:"version"`
+			Source      string  `json:"source" yaml:"source"`
+			Description *string `json:"description" yaml:"description"`
+			Author      *string `json:"author" yaml:"author"`
+			ToolCount   *int    `json:"tool_count" yaml:"tool_count"`
+			CreatedAt   string  `json:"created_at" yaml:"created_at"`
 		}
 		if err := cli.ReadJSON(resp, &skill); err != nil {
 			return err
@@ -242,20 +242,20 @@ The --repo flow shells out to git on the server with --depth 1 --filter=blob:non
 				return err
 			}
 			var result struct {
-				Source        string `json:"source"`
-				TotalFound    int    `json:"total_found"`
-				TotalImported int    `json:"total_imported"`
-				Truncated     bool   `json:"truncated"`
+				Source        string `json:"source" yaml:"source"`
+				TotalFound    int    `json:"total_found" yaml:"total_found"`
+				TotalImported int    `json:"total_imported" yaml:"total_imported"`
+				Truncated     bool   `json:"truncated" yaml:"truncated"`
 				Imported      []struct {
-					SkillID string `json:"skill_id"`
-					Slug    string `json:"slug"`
-					Created bool   `json:"created"`
-				} `json:"imported"`
+					SkillID string `json:"skill_id" yaml:"skill_id"`
+					Slug    string `json:"slug" yaml:"slug"`
+					Created bool   `json:"created" yaml:"created"`
+				} `json:"imported" yaml:"imported"`
 				Skipped []struct {
-					Path   string `json:"path"`
-					Slug   string `json:"slug"`
-					Reason string `json:"reason"`
-				} `json:"skipped"`
+					Path   string `json:"path" yaml:"path"`
+					Slug   string `json:"slug" yaml:"slug"`
+					Reason string `json:"reason" yaml:"reason"`
+				} `json:"skipped" yaml:"skipped"`
 			}
 			if err := cli.ReadJSON(resp, &result); err != nil {
 				return err
@@ -312,9 +312,9 @@ The --repo flow shells out to git on the server with --depth 1 --filter=blob:non
 		}
 
 		var result struct {
-			ID   string `json:"id"`
-			Slug string `json:"slug"`
-			Name string `json:"display_name"`
+			ID   string `json:"id" yaml:"id"`
+			Slug string `json:"slug" yaml:"slug"`
+			Name string `json:"display_name" yaml:"display_name"`
 		}
 		if err := cli.ReadJSON(resp, &result); err != nil {
 			return err
@@ -481,9 +481,9 @@ func resolveCrewMembers(client *cli.Client, crewSlugOrID string) ([]assignTarget
 		return nil, err
 	}
 	var agents []struct {
-		ID     string `json:"id"`
-		Slug   string `json:"slug"`
-		CrewID string `json:"crew_id"`
+		ID     string `json:"id" yaml:"id"`
+		Slug   string `json:"slug" yaml:"slug"`
+		CrewID string `json:"crew_id" yaml:"crew_id"`
 	}
 	if err := cli.ReadJSON(resp, &agents); err != nil {
 		return nil, fmt.Errorf("decode agents: %w", err)
@@ -569,8 +569,8 @@ func resolveSkillID(client *cli.Client, slugOrID string) (string, error) {
 	}
 
 	var skills []struct {
-		ID   string `json:"id"`
-		Slug string `json:"slug"`
+		ID   string `json:"id" yaml:"id"`
+		Slug string `json:"slug" yaml:"slug"`
 	}
 	if err := cli.ReadJSON(resp, &skills); err != nil {
 		return "", err
@@ -640,12 +640,12 @@ Example:
 		}
 
 		var result struct {
-			SkillID    string `json:"skill_id"`
-			Slug       string `json:"slug"`
-			Content    string `json:"content"`
-			ScanStatus string `json:"scan_status"`
-			ScanReason string `json:"scan_reason"`
-			Quality    string `json:"description_quality"`
+			SkillID    string `json:"skill_id" yaml:"skill_id"`
+			Slug       string `json:"slug" yaml:"slug"`
+			Content    string `json:"content" yaml:"content"`
+			ScanStatus string `json:"scan_status" yaml:"scan_status"`
+			ScanReason string `json:"scan_reason" yaml:"scan_reason"`
+			Quality    string `json:"description_quality" yaml:"description_quality"`
 		}
 		if err := cli.ReadJSON(resp, &result); err != nil {
 			return err

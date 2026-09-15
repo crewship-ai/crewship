@@ -9,6 +9,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/backup"
 	"github.com/crewship-ai/crewship/internal/provider"
+	"github.com/crewship-ai/crewship/internal/usermodel"
 )
 
 // registerAdminRoutes wires admin + audit + backup endpoints.
@@ -214,6 +215,27 @@ func (r *Router) registerAdminRoutes() {
 	memCfg.SetJournal(r.Journal())
 	r.authedAdmin("GET", "/api/v1/admin/memory/config", memCfg.Get)
 	r.authedMut("PATCH", "/api/v1/admin/memory/config", roleManage, memCfg.Patch)
+
+	// Manual runs of the two daily memory sweeps (#1702). The operator-model
+	// sweep fires at 05:00 UTC and the peer-card sweep at 04:00, and until
+	// this pair of routes there was no other way to see either run — which,
+	// for a feature whose every failure mode is silent by design, meant no
+	// way at all. Each route is the worker's own sweep over the worker's own
+	// workspace set, with the worker's own extractor wiring (the user-model
+	// extractor is built here exactly as cmd_start.go builds it for the
+	// worker: same curator slot, same profile setting, resolved per call),
+	// returning the per-workspace summary the worker only ever logged.
+	// `dry_run` reports without writing. roleManage: it spends the curator
+	// slot's tokens and writes under the storage root.
+	memSync := NewAdminMemorySyncHandler(r.db, r.logger, r.outputBasePath)
+	if r.db != nil {
+		memSync.WithUserModelExtractor(usermodel.New(
+			r.db, r.UserModelAux, usermodel.ProfileFromSettings(r.db, r.logger), r.logger))
+	}
+	// openapi: query dry_run:boolean; responses 200,400,401,403,404,500,503
+	r.authedMut("POST", "/api/v1/admin/memory/user-model-sync", roleManage, memSync.UserModelSync)
+	// openapi: query dry_run:boolean; responses 200,400,401,403,404,500,503
+	r.authedMut("POST", "/api/v1/admin/memory/peer-card-sync", roleManage, memSync.PeerCardSync)
 
 	// Backups (admin-only; require workspace context for scoping).
 	// Adapt the concrete Docker client to backup.DockerOps so the

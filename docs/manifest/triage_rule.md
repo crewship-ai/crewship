@@ -136,7 +136,7 @@ references both.
 apiVersion: crewship/v1
 kind: Project
 metadata: { name: Q2 Roadmap, slug: q2-roadmap }
-spec: { status: active, priority: high }
+spec: { status: in_progress, priority: high }
 ---
 apiVersion: crewship/v1
 kind: Label

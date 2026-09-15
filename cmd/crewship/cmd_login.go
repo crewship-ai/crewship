@@ -278,10 +278,10 @@ user has no CLI token to validate).`,
 		}
 
 		var workspaces []struct {
-			ID   string `json:"id"`
-			Name string `json:"name"`
-			Slug string `json:"slug"`
-			Role string `json:"currentUserRole"`
+			ID   string `json:"id" yaml:"id"`
+			Name string `json:"name" yaml:"name"`
+			Slug string `json:"slug" yaml:"slug"`
+			Role string `json:"currentUserRole" yaml:"currentUserRole"`
 		}
 		if err := cli.ReadJSON(resp, &workspaces); err != nil {
 			return err
@@ -300,8 +300,8 @@ user has no CLI token to validate).`,
 		validateResp, err := client.Get("/api/v1/auth/cli-token/validate")
 		if err == nil && validateResp.StatusCode == 200 {
 			var userInfo struct {
-				UserEmail string `json:"user_email"`
-				UserID    string `json:"user_id"`
+				UserEmail string `json:"user_email" yaml:"user_email"`
+				UserID    string `json:"user_id" yaml:"user_id"`
 			}
 			if err := cli.ReadJSON(validateResp, &userInfo); err == nil {
 				userEmail = userInfo.UserEmail
@@ -340,10 +340,10 @@ user has no CLI token to validate).`,
 // output. Mirrors the active workspace's id+name+slug+role; only
 // emitted when one is selected.
 type whoamiWorkspaceJSON struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
-	Slug string `json:"slug"`
-	Role string `json:"role"`
+	ID   string `json:"id" yaml:"id"`
+	Name string `json:"name" yaml:"name"`
+	Slug string `json:"slug" yaml:"slug"`
+	Role string `json:"role" yaml:"role"`
 }
 
 // whoamiJSON is the --json output shape. Pointer fields are omitted
@@ -352,10 +352,10 @@ type whoamiWorkspaceJSON struct {
 // no-cli-token case doesn't emit `"user_email": ""` that a strict
 // schema validator would reject.
 type whoamiJSON struct {
-	UserEmail       string               `json:"user_email,omitempty"`
-	Server          string               `json:"server"`
-	Workspace       *whoamiWorkspaceJSON `json:"workspace,omitempty"`
-	WorkspacesCount int                  `json:"workspaces_count"`
+	UserEmail       string               `json:"user_email,omitempty" yaml:"user_email,omitempty"`
+	Server          string               `json:"server" yaml:"server"`
+	Workspace       *whoamiWorkspaceJSON `json:"workspace,omitempty" yaml:"workspace,omitempty"`
+	WorkspacesCount int                  `json:"workspaces_count" yaml:"workspaces_count"`
 }
 
 // emitWhoamiJSON writes the structured whoami payload. Pulled out as
@@ -364,10 +364,10 @@ type whoamiJSON struct {
 // returned by GET /api/v1/workspaces; activeWS is the slug-or-id
 // the CLI thinks is currently selected.
 func emitWhoamiJSON(out io.Writer, userEmail, server, activeWS string, workspaces []struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
-	Slug string `json:"slug"`
-	Role string `json:"currentUserRole"`
+	ID   string `json:"id" yaml:"id"`
+	Name string `json:"name" yaml:"name"`
+	Slug string `json:"slug" yaml:"slug"`
+	Role string `json:"currentUserRole" yaml:"currentUserRole"`
 }) error {
 	payload := whoamiJSON{
 		UserEmail:       userEmail,
@@ -442,8 +442,8 @@ func loginWithPairing(serverURL, code, adapterHint string) error {
 	}
 
 	var redeem struct {
-		CliToken string `json:"cli_token"`
-		Email    string `json:"email"`
+		CliToken string `json:"cli_token" yaml:"cli_token"`
+		Email    string `json:"email" yaml:"email"`
 	}
 	if err := cli.ReadJSON(resp, &redeem); err != nil {
 		return fmt.Errorf("parse redeem response: %w", err)
@@ -544,7 +544,7 @@ func loginWithGoogle(serverURL string) error {
 		return fmt.Errorf("google status: %w", err)
 	}
 	var status struct {
-		Enabled bool `json:"enabled"`
+		Enabled bool `json:"enabled" yaml:"enabled"`
 	}
 	if err := cli.ReadJSON(statusResp, &status); err != nil {
 		return fmt.Errorf("parse google status: %w", err)
@@ -614,7 +614,7 @@ func loginInteractive(serverURL string) error {
 	if err == nil {
 		if cliTokenResp.StatusCode == http.StatusOK {
 			var tokenResult struct {
-				Token string `json:"token"`
+				Token string `json:"token" yaml:"token"`
 			}
 			if err := cli.ReadJSON(cliTokenResp, &tokenResult); err == nil && tokenResult.Token != "" {
 				finalToken = tokenResult.Token
@@ -709,7 +709,7 @@ func exchangeCredentialsForSession(client *cli.Client, serverURL, email, passwor
 		}
 	}
 	var csrfBody struct {
-		CSRFToken string `json:"csrfToken"`
+		CSRFToken string `json:"csrfToken" yaml:"csrfToken"`
 	}
 	if err := cli.ReadJSON(csrfResp, &csrfBody); err != nil {
 		return "", fmt.Errorf("parse CSRF: %w", err)
@@ -758,8 +758,8 @@ func exchangeCredentialsForSession(client *cli.Client, serverURL, email, passwor
 		return "", fmt.Errorf("read login response: %w", err)
 	}
 	var loginResult struct {
-		OK    bool   `json:"ok"`
-		Error string `json:"error"`
+		OK    bool   `json:"ok" yaml:"ok"`
+		Error string `json:"error" yaml:"error"`
 	}
 	_ = json.Unmarshal(body, &loginResult) // best-effort; status is the primary signal
 

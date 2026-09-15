@@ -21,7 +21,8 @@ const FIXTURES: Record<string, unknown[]> = {}
 beforeEach(() => {
   h.role = "OWNER"
   for (const k of Object.keys(FIXTURES)) delete FIXTURES[k]
-  vi.mocked(apiFetch).mockImplementation(async (url: string) => {
+  vi.mocked(apiFetch).mockImplementation(async (input: RequestInfo | URL) => {
+    const url = String(input)
     const key = Object.keys(FIXTURES).find((k) => url.includes(k))
     return { ok: true, json: async () => (key ? FIXTURES[key] : []) } as unknown as Response
   })

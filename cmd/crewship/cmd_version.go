@@ -19,46 +19,46 @@ var flagVersionRemote bool
 
 // versionClientInfo is the local half of the report.
 type versionClientInfo struct {
-	Version   string `json:"version"`
-	Commit    string `json:"commit"`
-	BuildTime string `json:"build_time"`
-	Dirty     *bool  `json:"dirty"`
-	GoVersion string `json:"go_version"`
-	OS        string `json:"os"`
-	Arch      string `json:"arch"`
+	Version   string `json:"version" yaml:"version"`
+	Commit    string `json:"commit" yaml:"commit"`
+	BuildTime string `json:"build_time" yaml:"build_time"`
+	Dirty     *bool  `json:"dirty" yaml:"dirty"`
+	GoVersion string `json:"go_version" yaml:"go_version"`
+	OS        string `json:"os" yaml:"os"`
+	Arch      string `json:"arch" yaml:"arch"`
 }
 
 // versionServerInfo is the remote half, decoded from GET
 // /api/v1/system/version plus the URL it was asked of.
 type versionServerInfo struct {
-	URL           string `json:"url"`
-	Version       string `json:"version"`
-	Commit        string `json:"commit"`
-	BuildTime     string `json:"build_time"`
-	Dirty         *bool  `json:"dirty"`
-	GoVersion     string `json:"go_version"`
-	OS            string `json:"os"`
-	Arch          string `json:"arch"`
-	SchemaVersion int    `json:"schema_version"`
+	URL           string `json:"url" yaml:"url"`
+	Version       string `json:"version" yaml:"version"`
+	Commit        string `json:"commit" yaml:"commit"`
+	BuildTime     string `json:"build_time" yaml:"build_time"`
+	Dirty         *bool  `json:"dirty" yaml:"dirty"`
+	GoVersion     string `json:"go_version" yaml:"go_version"`
+	OS            string `json:"os" yaml:"os"`
+	Arch          string `json:"arch" yaml:"arch"`
+	SchemaVersion int    `json:"schema_version" yaml:"schema_version"`
 }
 
 // versionServerResponse is the wire shape (internal/api/system.go →
 // SystemHandler.Version). `current` is the version key: it predates this
 // command and drives the web UI's update banner, so it is not renamed.
 type versionServerResponse struct {
-	Current       string `json:"current"`
-	Commit        string `json:"commit"`
-	BuildTime     string `json:"build_time"`
-	Dirty         *bool  `json:"dirty"`
-	GoVersion     string `json:"go_version"`
-	OS            string `json:"os"`
-	Arch          string `json:"arch"`
-	SchemaVersion int    `json:"schema_version"`
+	Current       string `json:"current" yaml:"current"`
+	Commit        string `json:"commit" yaml:"commit"`
+	BuildTime     string `json:"build_time" yaml:"build_time"`
+	Dirty         *bool  `json:"dirty" yaml:"dirty"`
+	GoVersion     string `json:"go_version" yaml:"go_version"`
+	OS            string `json:"os" yaml:"os"`
+	Arch          string `json:"arch" yaml:"arch"`
+	SchemaVersion int    `json:"schema_version" yaml:"schema_version"`
 }
 
 type versionPayload struct {
-	Client versionClientInfo  `json:"client"`
-	Server *versionServerInfo `json:"server,omitempty"`
+	Client versionClientInfo  `json:"client" yaml:"client"`
+	Server *versionServerInfo `json:"server,omitempty" yaml:"server,omitempty"`
 }
 
 var versionCmd = &cobra.Command{

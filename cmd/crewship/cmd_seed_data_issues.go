@@ -36,7 +36,7 @@ func seedIssues(ctx context.Context, client *cli.Client, crewIDs, agentIDs map[s
 		}
 		if resp.StatusCode < 400 {
 			var created struct {
-				ID string `json:"id"`
+				ID string `json:"id" yaml:"id"`
 			}
 			if cli.ReadJSON(resp, &created) == nil && created.ID != "" {
 				labelIDs[l.Name] = created.ID
@@ -87,7 +87,7 @@ func seedIssues(ctx context.Context, client *cli.Client, crewIDs, agentIDs map[s
 			return fmt.Errorf("project %s: HTTP %d: %s", p.Name, resp.StatusCode, strings.TrimSpace(string(body)))
 		}
 		var created struct {
-			ID string `json:"id"`
+			ID string `json:"id" yaml:"id"`
 		}
 		if cli.ReadJSON(resp, &created) == nil {
 			projectIDs[p.Name] = created.ID
@@ -137,8 +137,8 @@ func seedIssues(ctx context.Context, client *cli.Client, crewIDs, agentIDs map[s
 			continue
 		}
 		var created struct {
-			ID         string  `json:"id"`
-			Identifier *string `json:"identifier"`
+			ID         string  `json:"id" yaml:"id"`
+			Identifier *string `json:"identifier" yaml:"identifier"`
 		}
 		if err := cli.ReadJSON(resp, &created); err != nil {
 			continue

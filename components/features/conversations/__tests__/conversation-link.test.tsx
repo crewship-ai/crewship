@@ -17,7 +17,7 @@ describe("conversation links", () => {
     fireEvent.click(screen.getByRole("button", { name: "External issue" }))
     expect(screen.getByRole("alertdialog")).toHaveTextContent(href)
     expect(opened).not.toHaveBeenCalled()
-    fireEvent.click(screen.getByRole("button", { name: "Open link", exact: true }))
+    fireEvent.click(screen.getByRole("button", { name: "Open link" }))
     expect(opened).toHaveBeenCalledWith(href, "_blank", "noopener,noreferrer")
   })
   it.each(["javascript:alert(1)", "data:text/html,bad", "file:///tmp/file"])("never enables untrusted scheme %s", (href) => {

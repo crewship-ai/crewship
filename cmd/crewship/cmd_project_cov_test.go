@@ -463,9 +463,8 @@ func TestProjectStatsRunE_YAMLFormat(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RunE: %v", err)
 	}
-	// YAML marshalling lowercases the Go field names (no json tags on
-	// the anonymous struct), so the key is "totalissues".
-	if !strings.Contains(out, "totalissues: 8") || !strings.Contains(out, "agentname: viktor") {
+	// The yaml keys mirror the json keys (#1211, #2119).
+	if !strings.Contains(out, "total_issues: 8") || !strings.Contains(out, "agent_name: viktor") {
 		t.Errorf("yaml output missing: %q", out)
 	}
 }

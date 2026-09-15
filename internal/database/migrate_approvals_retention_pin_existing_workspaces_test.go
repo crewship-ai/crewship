@@ -4,7 +4,6 @@ import (
 	"context"
 	"io"
 	"log/slog"
-	"path/filepath"
 	"testing"
 )
 
@@ -18,14 +17,7 @@ func approvalsRetentionTestDB(t *testing.T) (*DB, context.Context, *slog.Logger)
 	t.Helper()
 	silent := slog.New(slog.NewTextHandler(io.Discard, nil))
 	ctx := context.Background()
-	db, err := Open("file:" + filepath.Join(t.TempDir(), "approvals-retention.db"))
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	t.Cleanup(func() { db.Close() })
-	if err := Migrate(ctx, db.DB, silent); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
+	db := openMigratedTestDB(t)
 	return db, ctx, silent
 }
 

@@ -1,10 +1,6 @@
 package database
 
 import (
-	"context"
-	"log/slog"
-	"os"
-	"path/filepath"
 	"testing"
 )
 
@@ -15,17 +11,7 @@ import (
 // alone. The statement is idempotent, so re-executing it against a
 // fully-migrated DB exercises exactly what v136 ran at upgrade time.
 func TestMigrateV136_HeadVersionBackfill(t *testing.T) {
-	dir := t.TempDir()
-	db, err := Open("file:" + filepath.Join(dir, "v136.db"))
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	defer db.Close()
-
-	migLogger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
-	if err := Migrate(context.Background(), db.DB, migLogger); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
+	db := openMigratedTestDB(t)
 
 	mustExec(t, db.DB, `INSERT INTO workspaces (id, name, slug) VALUES ('ws1', 'WS', 'ws1')`)
 

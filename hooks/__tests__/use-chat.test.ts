@@ -31,6 +31,10 @@ vi.stubGlobal("crypto", {
 import { renderHook, act } from "@testing-library/react"
 import { useChat } from "@/hooks/use-chat"
 
+// The hook re-fetches its WS ticket through getToken on every (re)connect;
+// useWebSocket is mocked above, so the stub is never invoked here.
+const getToken = vi.fn(async () => "test")
+
 describe("useChat", () => {
   // useChat now batches streamed text tokens into one commit per
   // animation frame. Capture scheduled frames so tests can flush them
@@ -65,7 +69,7 @@ describe("useChat", () => {
 
   it("starts with empty turns and not streaming", () => {
     const { result } = renderHook(() =>
-      useChat({ wsUrl: "ws://localhost:8080/ws", token: "test", sessionId: "s1" }),
+      useChat({ wsUrl: "ws://localhost:8080/ws", getToken, sessionId: "s1" }),
     )
     expect(result.current.turns).toHaveLength(0)
     expect(result.current.messages).toHaveLength(0)
@@ -74,7 +78,7 @@ describe("useChat", () => {
 
   it("sendMessage adds user turn and calls ws send", () => {
     const { result } = renderHook(() =>
-      useChat({ wsUrl: "ws://localhost:8080/ws", token: "test", sessionId: "s1" }),
+      useChat({ wsUrl: "ws://localhost:8080/ws", getToken, sessionId: "s1" }),
     )
 
     act(() => {
@@ -92,7 +96,7 @@ describe("useChat", () => {
 
   it("ignores empty messages", () => {
     const { result } = renderHook(() =>
-      useChat({ wsUrl: "ws://localhost:8080/ws", token: "test", sessionId: "s1" }),
+      useChat({ wsUrl: "ws://localhost:8080/ws", getToken, sessionId: "s1" }),
     )
 
     // Ignore the subscribe/resume the hook sends on mount; assert the empty
@@ -108,7 +112,7 @@ describe("useChat", () => {
 
   it("groups text events into single assistant turn", () => {
     const { result } = renderHook(() =>
-      useChat({ wsUrl: "ws://localhost:8080/ws", token: "test", sessionId: "s1" }),
+      useChat({ wsUrl: "ws://localhost:8080/ws", getToken, sessionId: "s1" }),
     )
     const onMessage = getOnMessage()
 
@@ -140,7 +144,7 @@ describe("useChat", () => {
 
   it("groups thinking + text into one assistant turn", () => {
     const { result } = renderHook(() =>
-      useChat({ wsUrl: "ws://localhost:8080/ws", token: "test", sessionId: "s1" }),
+      useChat({ wsUrl: "ws://localhost:8080/ws", getToken, sessionId: "s1" }),
     )
     const onMessage = getOnMessage()
 
@@ -178,7 +182,7 @@ describe("useChat", () => {
   // few seconds" card. (Live UI showed 7 blocks chopping one sentence apart.)
   it("accumulates consecutive thinking chunks into a single thinking part", () => {
     const { result } = renderHook(() =>
-      useChat({ wsUrl: "ws://localhost:8080/ws", token: "test", sessionId: "s1" }),
+      useChat({ wsUrl: "ws://localhost:8080/ws", getToken, sessionId: "s1" }),
     )
     const onMessage = getOnMessage()
 
@@ -206,7 +210,7 @@ describe("useChat", () => {
   // and stopped" with no reply.
   it("keeps text after a tool_result as its own part (final answer not lost)", () => {
     const { result } = renderHook(() =>
-      useChat({ wsUrl: "ws://localhost:8080/ws", token: "test", sessionId: "s1" }),
+      useChat({ wsUrl: "ws://localhost:8080/ws", getToken, sessionId: "s1" }),
     )
     const onMessage = getOnMessage()
     const emit = (payload: Record<string, unknown>) =>
@@ -238,7 +242,7 @@ describe("useChat", () => {
 
   it("reassembles seq'd events in order, deduping and reordering", () => {
     const { result } = renderHook(() =>
-      useChat({ wsUrl: "ws://localhost:8080/ws", token: "test", sessionId: "s1" }),
+      useChat({ wsUrl: "ws://localhost:8080/ws", getToken, sessionId: "s1" }),
     )
     const onMessage = getOnMessage()
     const emit = (m: Record<string, unknown>) =>
@@ -264,7 +268,7 @@ describe("useChat", () => {
     // A fresh client on a chat whose channel already streamed earlier runs must
     // NOT wait forever for seq 1..50 — run_begin rebases it to the run's start.
     const { result } = renderHook(() =>
-      useChat({ wsUrl: "ws://localhost:8080/ws", token: "test", sessionId: "s1" }),
+      useChat({ wsUrl: "ws://localhost:8080/ws", getToken, sessionId: "s1" }),
     )
     const onMessage = getOnMessage()
     const emit = (m: Record<string, unknown>) =>
@@ -285,7 +289,7 @@ describe("useChat", () => {
     // resolves. They must be buffered, not dropped, and must not be clobbered
     // when loadHistory replaces the turns.
     const { result } = renderHook(() =>
-      useChat({ wsUrl: "ws://localhost:8080/ws", token: "test", sessionId: "s1" }),
+      useChat({ wsUrl: "ws://localhost:8080/ws", getToken, sessionId: "s1" }),
     )
     const onMessage = getOnMessage()
     const emit = (m: Record<string, unknown>) =>
@@ -311,7 +315,7 @@ describe("useChat", () => {
     // An error must finalize them, else the Thought card spins forever on a turn
     // that has actually failed.
     const { result } = renderHook(() =>
-      useChat({ wsUrl: "ws://localhost:8080/ws", token: "test", sessionId: "s1" }),
+      useChat({ wsUrl: "ws://localhost:8080/ws", getToken, sessionId: "s1" }),
     )
     const onMessage = getOnMessage()
     const emit = (payload: Record<string, unknown>) =>
@@ -328,7 +332,7 @@ describe("useChat", () => {
 
   it("opens the streaming gate via markHistoryUnavailable when history load fails", () => {
     const { result } = renderHook(() =>
-      useChat({ wsUrl: "ws://localhost:8080/ws", token: "test", sessionId: "s1" }),
+      useChat({ wsUrl: "ws://localhost:8080/ws", getToken, sessionId: "s1" }),
     )
     const onMessage = getOnMessage()
     const emit = (m: Record<string, unknown>) =>
@@ -348,7 +352,7 @@ describe("useChat", () => {
 
   it("resyncs to the live tail after resume_reset (truncated buffer)", () => {
     const { result } = renderHook(() =>
-      useChat({ wsUrl: "ws://localhost:8080/ws", token: "test", sessionId: "s1" }),
+      useChat({ wsUrl: "ws://localhost:8080/ws", getToken, sessionId: "s1" }),
     )
     const onMessage = getOnMessage()
     const emit = (m: Record<string, unknown>) =>
@@ -377,7 +381,7 @@ describe("useChat", () => {
     // …) arrives as a burst of status events. They must NOT stack into a column
     // of rows — only one quiet status line is shown, reflecting the latest.
     const { result } = renderHook(() =>
-      useChat({ wsUrl: "ws://localhost:8080/ws", token: "test", sessionId: "s1" }),
+      useChat({ wsUrl: "ws://localhost:8080/ws", getToken, sessionId: "s1" }),
     )
     const onMessage = getOnMessage()
 
@@ -399,7 +403,7 @@ describe("useChat", () => {
 
   it("renders a broadcast user_message from another participant, attributed", () => {
     const { result } = renderHook(() =>
-      useChat({ wsUrl: "ws://localhost:8080/ws", token: "test", sessionId: "s1" }),
+      useChat({ wsUrl: "ws://localhost:8080/ws", getToken, sessionId: "s1" }),
     )
     const onMessage = getOnMessage()
     act(() => {
@@ -417,7 +421,7 @@ describe("useChat", () => {
 
   it("drops the echo of the local user's OWN broadcast user_message", () => {
     const { result } = renderHook(() =>
-      useChat({ wsUrl: "ws://localhost:8080/ws", token: "test", sessionId: "s1", currentUserId: "me" }),
+      useChat({ wsUrl: "ws://localhost:8080/ws", getToken, sessionId: "s1", currentUserId: "me" }),
     )
     const onMessage = getOnMessage()
     act(() => {
@@ -437,7 +441,7 @@ describe("useChat", () => {
     // Consecutive chunks must fold into a single card — not stack into a column
     // of "Thought for a few seconds" blocks that chop the sentence apart.
     const { result } = renderHook(() =>
-      useChat({ wsUrl: "ws://localhost:8080/ws", token: "test", sessionId: "s1" }),
+      useChat({ wsUrl: "ws://localhost:8080/ws", getToken, sessionId: "s1" }),
     )
     const onMessage = getOnMessage()
 
@@ -462,7 +466,7 @@ describe("useChat", () => {
 
   it("accumulates streaming thinking deltas into one part", () => {
     const { result } = renderHook(() =>
-      useChat({ wsUrl: "ws://localhost:8080/ws", token: "test", sessionId: "s1" }),
+      useChat({ wsUrl: "ws://localhost:8080/ws", getToken, sessionId: "s1" }),
     )
     const onMessage = getOnMessage()
 
@@ -491,7 +495,7 @@ describe("useChat", () => {
 
   it("handles tool_call + tool_result parts in one turn", () => {
     const { result } = renderHook(() =>
-      useChat({ wsUrl: "ws://localhost:8080/ws", token: "test", sessionId: "s1" }),
+      useChat({ wsUrl: "ws://localhost:8080/ws", getToken, sessionId: "s1" }),
     )
     const onMessage = getOnMessage()
 
@@ -519,7 +523,7 @@ describe("useChat", () => {
 
   it("status events appear before text", () => {
     const { result } = renderHook(() =>
-      useChat({ wsUrl: "ws://localhost:8080/ws", token: "test", sessionId: "s1" }),
+      useChat({ wsUrl: "ws://localhost:8080/ws", getToken, sessionId: "s1" }),
     )
     const onMessage = getOnMessage()
 
@@ -552,7 +556,7 @@ describe("useChat", () => {
 
   it("done event marks turn as not streaming and removes status parts", () => {
     const { result } = renderHook(() =>
-      useChat({ wsUrl: "ws://localhost:8080/ws", token: "test", sessionId: "s1" }),
+      useChat({ wsUrl: "ws://localhost:8080/ws", getToken, sessionId: "s1" }),
     )
     const onMessage = getOnMessage()
 
@@ -582,7 +586,7 @@ describe("useChat", () => {
 
   it("handles error event", () => {
     const { result } = renderHook(() =>
-      useChat({ wsUrl: "ws://localhost:8080/ws", token: "test", sessionId: "s1" }),
+      useChat({ wsUrl: "ws://localhost:8080/ws", getToken, sessionId: "s1" }),
     )
     const onMessage = getOnMessage()
 
@@ -603,7 +607,7 @@ describe("useChat", () => {
 
   it("ignores events for different session", () => {
     const { result } = renderHook(() =>
-      useChat({ wsUrl: "ws://localhost:8080/ws", token: "test", sessionId: "s1" }),
+      useChat({ wsUrl: "ws://localhost:8080/ws", getToken, sessionId: "s1" }),
     )
     const onMessage = getOnMessage()
 
@@ -620,7 +624,7 @@ describe("useChat", () => {
 
   it("stopGeneration sends cancel_message", () => {
     const { result } = renderHook(() =>
-      useChat({ wsUrl: "ws://localhost:8080/ws", token: "test", sessionId: "s1" }),
+      useChat({ wsUrl: "ws://localhost:8080/ws", getToken, sessionId: "s1" }),
     )
 
     act(() => {
@@ -634,7 +638,7 @@ describe("useChat", () => {
 
   it("stopGeneration clears part-level isStreaming flags on the open turn", () => {
     const { result } = renderHook(() =>
-      useChat({ wsUrl: "ws://localhost:8080/ws", token: "test", sessionId: "s1" }),
+      useChat({ wsUrl: "ws://localhost:8080/ws", getToken, sessionId: "s1" }),
     )
     const onMessage = getOnMessage()
 
@@ -661,7 +665,7 @@ describe("useChat", () => {
 
   it("stopGeneration drops late deltas so cancelled stream cannot resurrect", () => {
     const { result } = renderHook(() =>
-      useChat({ wsUrl: "ws://localhost:8080/ws", token: "test", sessionId: "s1" }),
+      useChat({ wsUrl: "ws://localhost:8080/ws", getToken, sessionId: "s1" }),
     )
     const onMessage = getOnMessage()
 
@@ -713,7 +717,7 @@ describe("useChat", () => {
 
   it("loadHistory converts flat messages to turns", () => {
     const { result } = renderHook(() =>
-      useChat({ wsUrl: "ws://localhost:8080/ws", token: "test", sessionId: "s1" }),
+      useChat({ wsUrl: "ws://localhost:8080/ws", getToken, sessionId: "s1" }),
     )
 
     act(() => {

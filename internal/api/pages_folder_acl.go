@@ -268,6 +268,29 @@ func folderReachSlug(rec *pageRecord, folders map[string]*pageFolderRecord, acl 
 	return f.Slug
 }
 
+// folderCrewReachSlug is folderReachSlug asked of a crew rather than of a
+// person: the folder's slug when its ACL carries an entry for THIS crew, ""
+// otherwise. A crew is named by its own `crew:` entry and by nothing else —
+// not by a member's `user:` entry, and not by the workspace entry, which is
+// for people (folderACLReach). It is the crew arm of the access report
+// (pages_access.go, #2543); the enforcement side never asks about a crew as
+// a subject, only about a viewer who belongs to one.
+func folderCrewReachSlug(rec *pageRecord, folders map[string]*pageFolderRecord, acl map[string][]pageFolderACLRecord, crewID string) string {
+	if rec.FolderID == "" || crewID == "" {
+		return ""
+	}
+	f := folders[rec.FolderID]
+	if f == nil {
+		return ""
+	}
+	for _, e := range acl[rec.FolderID] {
+		if e.SubjectType == pageSubjectCrew && e.SubjectID == crewID {
+			return f.Slug
+		}
+	}
+	return ""
+}
+
 // folderSharedLabel is the no-names rendering of an ACL (§3/10).
 func folderSharedLabel(entries []pageFolderACLRecord) string {
 	people, crews := false, false

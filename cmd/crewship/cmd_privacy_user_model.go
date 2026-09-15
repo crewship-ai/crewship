@@ -29,21 +29,21 @@ to turn the whole feature off to correct it.`,
 }
 
 type userModelFact struct {
-	Key   string `json:"key"`
-	Value string `json:"value"`
+	Key   string `json:"key" yaml:"key"`
+	Value string `json:"value" yaml:"value"`
 }
 
 type userModelResponse struct {
-	UserID    string          `json:"user_id"`
-	Exists    bool            `json:"exists"`
-	UserSlug  string          `json:"user_slug"`
-	Bytes     int             `json:"bytes"`
-	UpdatedAt string          `json:"updated_at"`
-	Content   string          `json:"content"`
-	Facts     []userModelFact `json:"facts"`
-	Purged    int             `json:"purged"`
-	Forgot    string          `json:"forgot"`
-	Remaining []userModelFact `json:"remaining"`
+	UserID    string          `json:"user_id" yaml:"user_id"`
+	Exists    bool            `json:"exists" yaml:"exists"`
+	UserSlug  string          `json:"user_slug" yaml:"user_slug"`
+	Bytes     int             `json:"bytes" yaml:"bytes"`
+	UpdatedAt string          `json:"updated_at" yaml:"updated_at"`
+	Content   string          `json:"content" yaml:"content"`
+	Facts     []userModelFact `json:"facts" yaml:"facts"`
+	Purged    int             `json:"purged" yaml:"purged"`
+	Forgot    string          `json:"forgot" yaml:"forgot"`
+	Remaining []userModelFact `json:"remaining" yaml:"remaining"`
 }
 
 var privacyUserModelListCmd = &cobra.Command{

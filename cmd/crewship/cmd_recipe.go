@@ -19,16 +19,16 @@ import (
 // recipeRow mirrors the wire shape of GET /api/v1/recipes entries; only
 // the fields the CLI renders are typed.
 type recipeRow struct {
-	Slug        string `json:"slug"`
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	CrewSlug    string `json:"crew_slug"`
+	Slug        string `json:"slug" yaml:"slug"`
+	Name        string `json:"name" yaml:"name"`
+	Description string `json:"description" yaml:"description"`
+	CrewSlug    string `json:"crew_slug" yaml:"crew_slug"`
 	Credentials []struct {
-		EnvVarName string `json:"env_var_name"`
-	} `json:"credentials"`
+		EnvVarName string `json:"env_var_name" yaml:"env_var_name"`
+	} `json:"credentials" yaml:"credentials"`
 	MCPServers []struct {
-		Name string `json:"name"`
-	} `json:"mcp_servers"`
+		Name string `json:"name" yaml:"name"`
+	} `json:"mcp_servers" yaml:"mcp_servers"`
 }
 
 var recipeCmd = &cobra.Command{
@@ -138,10 +138,10 @@ var recipePreviewCmd = &cobra.Command{
 			return err
 		}
 		var preview struct {
-			NeededCredentials   []string        `json:"needed_credentials"`
-			ExistingCredentials map[string]bool `json:"existing_credentials"`
-			CrewSlugAvailable   bool            `json:"crew_slug_available"`
-			ResolvedCrewSlug    string          `json:"resolved_crew_slug"`
+			NeededCredentials   []string        `json:"needed_credentials" yaml:"needed_credentials"`
+			ExistingCredentials map[string]bool `json:"existing_credentials" yaml:"existing_credentials"`
+			CrewSlugAvailable   bool            `json:"crew_slug_available" yaml:"crew_slug_available"`
+			ResolvedCrewSlug    string          `json:"resolved_crew_slug" yaml:"resolved_crew_slug"`
 		}
 		if err := cli.ReadJSON(resp, &preview); err != nil {
 			return err
@@ -219,11 +219,11 @@ Examples:
 			return err
 		}
 		var out struct {
-			CrewID            string   `json:"crew_id"`
-			CrewSlug          string   `json:"crew_slug"`
-			CredentialsAdded  []string `json:"credentials_added"`
-			CredentialsReused []string `json:"credentials_reused"`
-			MCPServersAdded   []string `json:"mcp_servers_added"`
+			CrewID            string   `json:"crew_id" yaml:"crew_id"`
+			CrewSlug          string   `json:"crew_slug" yaml:"crew_slug"`
+			CredentialsAdded  []string `json:"credentials_added" yaml:"credentials_added"`
+			CredentialsReused []string `json:"credentials_reused" yaml:"credentials_reused"`
+			MCPServersAdded   []string `json:"mcp_servers_added" yaml:"mcp_servers_added"`
 		}
 		if err := cli.ReadJSON(resp, &out); err != nil {
 			return err

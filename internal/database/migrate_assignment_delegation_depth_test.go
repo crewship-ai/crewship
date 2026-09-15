@@ -1,11 +1,7 @@
 package database
 
 import (
-	"context"
 	"database/sql"
-	"io"
-	"log/slog"
-	"path/filepath"
 	"testing"
 )
 
@@ -14,14 +10,7 @@ import (
 // that skipped the ALTER, or a DEFAULT that came out NULL, turns "how deep is
 // this chain" into "unknown", and the cap into a scan that never fires.
 func TestAssignmentDelegationColumns(t *testing.T) {
-	dbh, err := Open("file:" + filepath.Join(t.TempDir(), "delegation.db"))
-	if err != nil {
-		t.Fatalf("open: %v", err)
-	}
-	t.Cleanup(func() { _ = dbh.Close() })
-	if err := Migrate(context.Background(), dbh.DB, slog.New(slog.NewTextHandler(io.Discard, nil))); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
+	dbh := openMigratedTestDB(t)
 	db := dbh.DB
 
 	cols := map[string]struct {

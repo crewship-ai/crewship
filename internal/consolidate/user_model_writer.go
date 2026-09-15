@@ -109,6 +109,26 @@ func SyncUserModel(
 	basePath string,
 	now time.Time,
 ) UserModelOutcome {
+	return syncUserModel(ctx, db, logger, threshold, cand, content, paths, basePath, now, false)
+}
+
+// syncUserModel is SyncUserModel with the dry-run seam (#1702). With dryRun
+// set, the two branches that touch disk, the index and the audit table —
+// the opt-out purge and the write — return the outcome they would have
+// produced and do nothing. Every read-only step before them runs as usual,
+// so the report is the real sweep's decision, not an estimate of it.
+func syncUserModel(
+	ctx context.Context,
+	db *sql.DB,
+	logger *slog.Logger,
+	threshold UserModelThreshold,
+	cand UserModelCandidate,
+	content string,
+	paths memory.UserModelPaths,
+	basePath string,
+	now time.Time,
+	dryRun bool,
+) UserModelOutcome {
 	slug := memory.UserSlug(cand.UserID, cand.WorkspaceID)
 	out := UserModelOutcome{UserID: cand.UserID, UserSlug: slug}
 
@@ -134,6 +154,11 @@ func SyncUserModel(
 		// delete) were fixed to avoid. Opt-out is a user-initiated
 		// erasure trigger exactly like those two, so it gets the same
 		// exhaustive delete.
+		if dryRun {
+			out.Action = "delete_opt_out"
+			out.Reason = "user opted out (dry run: nothing purged)"
+			return out
+		}
 		if _, err := memory.DeleteUserModelEverywhere(basePath, slug); err != nil {
 			out.Action = "delete_opt_out"
 			out.Err = fmt.Errorf("delete user model on opt-out: %w", err)
@@ -176,6 +201,12 @@ func SyncUserModel(
 	}
 
 	// 4) write
+	if dryRun {
+		out.Action = "write"
+		out.Bytes = len(content)
+		out.Reason = "dry run: nothing written"
+		return out
+	}
 	if err := memory.WriteUserModel(paths, cand.UserID, cand.WorkspaceID, content); err != nil {
 		out.Action = "write"
 		out.Err = fmt.Errorf("WriteUserModel: %w", err)

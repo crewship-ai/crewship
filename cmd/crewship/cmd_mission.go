@@ -55,15 +55,15 @@ var missionListCmd = &cobra.Command{
 		meta := readListMeta(resp)
 
 		var missions []struct {
-			ID        string `json:"id"`
-			Title     string `json:"title"`
-			Status    string `json:"status"`
-			LeadSlug  string `json:"lead_agent_slug"`
-			CreatedAt string `json:"created_at"`
+			ID        string `json:"id" yaml:"id"`
+			Title     string `json:"title" yaml:"title"`
+			Status    string `json:"status" yaml:"status"`
+			LeadSlug  string `json:"lead_agent_slug" yaml:"lead_agent_slug"`
+			CreatedAt string `json:"created_at" yaml:"created_at"`
 			TaskStats *struct {
-				Total     int `json:"total"`
-				Completed int `json:"completed"`
-			} `json:"task_stats"`
+				Total     int `json:"total" yaml:"total"`
+				Completed int `json:"completed" yaml:"completed"`
+			} `json:"task_stats" yaml:"task_stats"`
 		}
 		if err := cli.ReadJSON(resp, &missions); err != nil {
 			return err
@@ -120,21 +120,21 @@ var missionGetCmd = &cobra.Command{
 		}
 
 		var mission struct {
-			ID          string  `json:"id"`
-			Title       string  `json:"title"`
-			Description *string `json:"description"`
-			Status      string  `json:"status"`
-			LeadName    string  `json:"lead_agent_name"`
-			LeadSlug    string  `json:"lead_agent_slug"`
-			CreatedAt   string  `json:"created_at"`
-			CompletedAt *string `json:"completed_at"`
+			ID          string  `json:"id" yaml:"id"`
+			Title       string  `json:"title" yaml:"title"`
+			Description *string `json:"description" yaml:"description"`
+			Status      string  `json:"status" yaml:"status"`
+			LeadName    string  `json:"lead_agent_name" yaml:"lead_agent_name"`
+			LeadSlug    string  `json:"lead_agent_slug" yaml:"lead_agent_slug"`
+			CreatedAt   string  `json:"created_at" yaml:"created_at"`
+			CompletedAt *string `json:"completed_at" yaml:"completed_at"`
 			Tasks       []struct {
-				ID        string  `json:"id"`
-				Title     string  `json:"title"`
-				Status    string  `json:"status"`
-				AgentSlug *string `json:"agent_slug"`
-				TaskOrder int     `json:"task_order"`
-			} `json:"tasks"`
+				ID        string  `json:"id" yaml:"id"`
+				Title     string  `json:"title" yaml:"title"`
+				Status    string  `json:"status" yaml:"status"`
+				AgentSlug *string `json:"agent_slug" yaml:"agent_slug"`
+				TaskOrder int     `json:"task_order" yaml:"task_order"`
+			} `json:"tasks" yaml:"tasks"`
 		}
 		if err := cli.ReadJSON(resp, &mission); err != nil {
 			return err
@@ -194,8 +194,8 @@ func resolveMission(client *cli.Client, missionID string) (crewID, fullMissionID
 	}
 
 	var missions []struct {
-		ID     string `json:"id"`
-		CrewID string `json:"crew_id"`
+		ID     string `json:"id" yaml:"id"`
+		CrewID string `json:"crew_id" yaml:"crew_id"`
 	}
 	if err := cli.ReadJSON(listResp, &missions); err != nil {
 		return "", "", err
@@ -219,10 +219,10 @@ func findLeadAgent(client *cli.Client, crewID string) (string, error) {
 	}
 
 	var agents []struct {
-		ID     string `json:"id"`
-		Slug   string `json:"slug"`
-		Role   string `json:"agent_role"`
-		CrewID string `json:"crew_id"`
+		ID     string `json:"id" yaml:"id"`
+		Slug   string `json:"slug" yaml:"slug"`
+		Role   string `json:"agent_role" yaml:"agent_role"`
+		CrewID string `json:"crew_id" yaml:"crew_id"`
 	}
 	if err := cli.ReadJSON(resp, &agents); err != nil {
 		return "", err

@@ -26,7 +26,8 @@ vi.mock("sonner", () => ({
   toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() },
 }))
 
-vi.mock("@/lib/api-fetch", () => ({
+vi.mock("@/lib/api-fetch", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/api-fetch")>()),
   apiFetch: (...args: unknown[]) => h.apiFetch(...args),
 }))
 

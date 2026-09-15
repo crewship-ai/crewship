@@ -1,10 +1,6 @@
 package database
 
 import (
-	"context"
-	"io"
-	"log/slog"
-	"path/filepath"
 	"testing"
 )
 
@@ -14,16 +10,7 @@ import (
 // are exercised by inserting at every valid value plus one rejected
 // value, mirroring the existing v98+v99 test pattern.
 func TestMigrateV103_PeerConsentSchema(t *testing.T) {
-	dir := t.TempDir()
-	db, err := Open("file:" + filepath.Join(dir, "v103.db"))
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	defer db.Close()
-	silent := slog.New(slog.NewTextHandler(io.Discard, nil))
-	if err := Migrate(context.Background(), db.DB, silent); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
+	db := openMigratedTestDB(t)
 
 	// Seed FK targets.
 	if _, err := db.Exec(`INSERT INTO workspaces (id, name, slug) VALUES ('ws1','W','w')`); err != nil {

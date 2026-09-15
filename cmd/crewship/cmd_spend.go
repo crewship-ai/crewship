@@ -15,36 +15,36 @@ import (
 )
 
 type spendByAgentRow struct {
-	Date      string  `json:"date"`
-	CrewID    string  `json:"crew_id"`
-	AgentID   string  `json:"agent_id"`
-	CostUSD   float64 `json:"cost_usd"`
-	CallCount int     `json:"call_count"`
+	Date      string  `json:"date" yaml:"date"`
+	CrewID    string  `json:"crew_id" yaml:"crew_id"`
+	AgentID   string  `json:"agent_id" yaml:"agent_id"`
+	CostUSD   float64 `json:"cost_usd" yaml:"cost_usd"`
+	CallCount int     `json:"call_count" yaml:"call_count"`
 }
 
 type spendByRoutineRow struct {
-	Date         string  `json:"date"`
-	PipelineID   string  `json:"pipeline_id"`
-	PipelineSlug string  `json:"pipeline_slug"`
-	CostUSD      float64 `json:"cost_usd"`
-	RunCount     int     `json:"run_count"`
+	Date         string  `json:"date" yaml:"date"`
+	PipelineID   string  `json:"pipeline_id" yaml:"pipeline_id"`
+	PipelineSlug string  `json:"pipeline_slug" yaml:"pipeline_slug"`
+	CostUSD      float64 `json:"cost_usd" yaml:"cost_usd"`
+	RunCount     int     `json:"run_count" yaml:"run_count"`
 }
 
 type spendTopRow struct {
-	Kind    string  `json:"kind"`
-	ID      string  `json:"id"`
-	Label   string  `json:"label"`
-	CostUSD float64 `json:"cost_usd"`
+	Kind    string  `json:"kind" yaml:"kind"`
+	ID      string  `json:"id" yaml:"id"`
+	Label   string  `json:"label" yaml:"label"`
+	CostUSD float64 `json:"cost_usd" yaml:"cost_usd"`
 }
 
 type spendResponse struct {
-	Window       string              `json:"window"`
-	TotalCostUSD float64             `json:"total_cost_usd"`
-	ByAgent      []spendByAgentRow   `json:"by_agent"`
-	ByRoutine    []spendByRoutineRow `json:"by_routine"`
-	TopRoutines  []spendTopRow       `json:"top_routines"`
-	TopRuns      []spendTopRow       `json:"top_runs"`
-	Truncated    bool                `json:"truncated"`
+	Window       string              `json:"window" yaml:"window"`
+	TotalCostUSD float64             `json:"total_cost_usd" yaml:"total_cost_usd"`
+	ByAgent      []spendByAgentRow   `json:"by_agent" yaml:"by_agent"`
+	ByRoutine    []spendByRoutineRow `json:"by_routine" yaml:"by_routine"`
+	TopRoutines  []spendTopRow       `json:"top_routines" yaml:"top_routines"`
+	TopRuns      []spendTopRow       `json:"top_runs" yaml:"top_runs"`
+	Truncated    bool                `json:"truncated" yaml:"truncated"`
 }
 
 var spendCmd = &cobra.Command{

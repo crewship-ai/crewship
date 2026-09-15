@@ -226,7 +226,7 @@ describe("ConnectorConnectSheet — PAT flow", () => {
     fireEvent.click(screen.getByRole("button", { name: /connect/i }))
 
     await waitFor(() => {
-      expect((toast as { error: ReturnType<typeof vi.fn> }).error).toHaveBeenCalled()
+      expect(toast.error).toHaveBeenCalled()
     })
   })
 

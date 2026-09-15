@@ -425,18 +425,18 @@ const memoryVersionsPageCeiling = 200
 // entire chain to find it.
 func memoryVersionsFromAPI(client *cli.Client, workspaceID, path string, limit int, matchSha string) ([]memory.VersionEntry, error) {
 	type apiRow struct {
-		ID        string `json:"id"`
-		Path      string `json:"path"`
-		Tier      string `json:"tier"`
-		Sha256    string `json:"sha256"`
-		Bytes     int    `json:"bytes"`
-		WrittenAt string `json:"written_at"`
-		WrittenBy string `json:"written_by"`
-		ParentSha string `json:"parent_sha"`
+		ID        string `json:"id" yaml:"id"`
+		Path      string `json:"path" yaml:"path"`
+		Tier      string `json:"tier" yaml:"tier"`
+		Sha256    string `json:"sha256" yaml:"sha256"`
+		Bytes     int    `json:"bytes" yaml:"bytes"`
+		WrittenAt string `json:"written_at" yaml:"written_at"`
+		WrittenBy string `json:"written_by" yaml:"written_by"`
+		ParentSha string `json:"parent_sha" yaml:"parent_sha"`
 	}
 	type apiPage struct {
-		Rows       []apiRow `json:"rows"`
-		NextCursor *string  `json:"next_cursor"`
+		Rows       []apiRow `json:"rows" yaml:"rows"`
+		NextCursor *string  `json:"next_cursor" yaml:"next_cursor"`
 	}
 
 	var out []memory.VersionEntry

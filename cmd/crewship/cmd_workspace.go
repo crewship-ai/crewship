@@ -41,10 +41,10 @@ var workspaceListCmd = &cobra.Command{
 		}
 
 		var workspaces []struct {
-			ID   string `json:"id"`
-			Name string `json:"name"`
-			Slug string `json:"slug"`
-			Role string `json:"currentUserRole"`
+			ID   string `json:"id" yaml:"id"`
+			Name string `json:"name" yaml:"name"`
+			Slug string `json:"slug" yaml:"slug"`
+			Role string `json:"currentUserRole" yaml:"currentUserRole"`
 		}
 		if err := cli.ReadJSON(resp, &workspaces); err != nil {
 			return err
@@ -94,9 +94,9 @@ var workspaceUseCmd = &cobra.Command{
 			resp, err := client.Get("/api/v1/workspaces")
 			if err == nil && resp.StatusCode == 200 {
 				var workspaces []struct {
-					ID   string `json:"id"`
-					Slug string `json:"slug"`
-					Name string `json:"name"`
+					ID   string `json:"id" yaml:"id"`
+					Slug string `json:"slug" yaml:"slug"`
+					Name string `json:"name" yaml:"name"`
 				}
 				if cli.ReadJSON(resp, &workspaces) == nil {
 					found := false
@@ -210,13 +210,13 @@ var workspaceGetCmd = &cobra.Command{
 		}
 
 		var ws struct {
-			ID                         string  `json:"id"`
-			Name                       string  `json:"name"`
-			Slug                       string  `json:"slug"`
-			CreatedAt                  string  `json:"created_at"`
-			LogoURL                    *string `json:"logo_url"`
-			PreferredLanguage          *string `json:"preferred_language"`
-			AllowPrivilegedCredentials bool    `json:"allow_privileged_credentials"`
+			ID                         string  `json:"id" yaml:"id"`
+			Name                       string  `json:"name" yaml:"name"`
+			Slug                       string  `json:"slug" yaml:"slug"`
+			CreatedAt                  string  `json:"created_at" yaml:"created_at"`
+			LogoURL                    *string `json:"logo_url" yaml:"logo_url"`
+			PreferredLanguage          *string `json:"preferred_language" yaml:"preferred_language"`
+			AllowPrivilegedCredentials bool    `json:"allow_privileged_credentials" yaml:"allow_privileged_credentials"`
 		}
 		if err := cli.ReadJSON(resp, &ws); err != nil {
 			return err
@@ -374,17 +374,17 @@ var workspaceMemberCmd = &cobra.Command{
 // convenience that flag exists for. The flat fields stay as a fallback:
 // reading one shape should not mean refusing the other.
 type workspaceMemberRow struct {
-	ID        string `json:"id"`
-	UserID    string `json:"user_id"`
-	Email     string `json:"email"`
-	FullName  string `json:"full_name"`
-	Role      string `json:"role"`
-	CreatedAt string `json:"created_at"`
+	ID        string `json:"id" yaml:"id"`
+	UserID    string `json:"user_id" yaml:"user_id"`
+	Email     string `json:"email" yaml:"email"`
+	FullName  string `json:"full_name" yaml:"full_name"`
+	Role      string `json:"role" yaml:"role"`
+	CreatedAt string `json:"created_at" yaml:"created_at"`
 	User      *struct {
-		ID       string `json:"id"`
-		Email    string `json:"email"`
-		FullName string `json:"full_name"`
-	} `json:"user,omitempty"`
+		ID       string `json:"id" yaml:"id"`
+		Email    string `json:"email" yaml:"email"`
+		FullName string `json:"full_name" yaml:"full_name"`
+	} `json:"user,omitempty" yaml:"user,omitempty"`
 }
 
 func (m workspaceMemberRow) email() string {
@@ -690,9 +690,9 @@ func sendWorkspaceInvitation(cmd *cobra.Command, email, role string) error {
 	}
 
 	var inv struct {
-		ID    string `json:"id"`
-		Email string `json:"email"`
-		Role  string `json:"role"`
+		ID    string `json:"id" yaml:"id"`
+		Email string `json:"email" yaml:"email"`
+		Role  string `json:"role" yaml:"role"`
 	}
 	if err := cli.ReadJSON(resp, &inv); err != nil {
 		return err
@@ -730,11 +730,11 @@ var workspaceInviteListCmd = &cobra.Command{
 		}
 
 		var invitations []struct {
-			ID        string `json:"id"`
-			Email     string `json:"email"`
-			Role      string `json:"role"`
-			ExpiresAt string `json:"expires_at"`
-			CreatedAt string `json:"created_at"`
+			ID        string `json:"id" yaml:"id"`
+			Email     string `json:"email" yaml:"email"`
+			Role      string `json:"role" yaml:"role"`
+			ExpiresAt string `json:"expires_at" yaml:"expires_at"`
+			CreatedAt string `json:"created_at" yaml:"created_at"`
 		}
 		if err := cli.ReadJSON(resp, &invitations); err != nil {
 			return err

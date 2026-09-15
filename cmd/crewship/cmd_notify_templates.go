@@ -62,10 +62,10 @@ Examples:
 // notifyTemplateRow mirrors the API payload for CLI I/O without importing the
 // server-side package into the CLI binary.
 type notifyTemplateRow struct {
-	Category  string `json:"category"`
-	ChannelID string `json:"channel_id"`
-	Title     string `json:"title"`
-	Body      string `json:"body"`
+	Category  string `json:"category" yaml:"category"`
+	ChannelID string `json:"channel_id" yaml:"channel_id"`
+	Title     string `json:"title" yaml:"title"`
+	Body      string `json:"body" yaml:"body"`
 }
 
 var notifyTemplatesListCmd = &cobra.Command{
@@ -86,7 +86,7 @@ var notifyTemplatesListCmd = &cobra.Command{
 			return err
 		}
 		var body struct {
-			Templates []notifyTemplateRow `json:"templates"`
+			Templates []notifyTemplateRow `json:"templates" yaml:"templates"`
 		}
 		if err := cli.ReadJSON(resp, &body); err != nil {
 			return err

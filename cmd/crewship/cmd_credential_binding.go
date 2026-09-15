@@ -31,21 +31,21 @@ import (
 )
 
 type credBindingOut struct {
-	ID             string  `json:"id"`
-	CredentialID   string  `json:"credential_id"`
-	CredentialName string  `json:"credential_name"`
-	Scope          string  `json:"scope"`
-	CrewID         *string `json:"crew_id"`
-	AgentID        *string `json:"agent_id"`
-	Slot           string  `json:"slot"`
-	CreatedAt      string  `json:"created_at"`
+	ID             string  `json:"id" yaml:"id"`
+	CredentialID   string  `json:"credential_id" yaml:"credential_id"`
+	CredentialName string  `json:"credential_name" yaml:"credential_name"`
+	Scope          string  `json:"scope" yaml:"scope"`
+	CrewID         *string `json:"crew_id" yaml:"crew_id"`
+	AgentID        *string `json:"agent_id" yaml:"agent_id"`
+	Slot           string  `json:"slot" yaml:"slot"`
+	CreatedAt      string  `json:"created_at" yaml:"created_at"`
 }
 
 type credResolvedSlotOut struct {
-	Slot           string `json:"slot"`
-	CredentialID   string `json:"credential_id"`
-	CredentialName string `json:"credential_name"`
-	Source         string `json:"source"`
+	Slot           string `json:"slot" yaml:"slot"`
+	CredentialID   string `json:"credential_id" yaml:"credential_id"`
+	CredentialName string `json:"credential_name" yaml:"credential_name"`
+	Source         string `json:"source" yaml:"source"`
 }
 
 // resolveBindingScope turns the --crew/--agent flags into the (scope, owner)
@@ -208,7 +208,7 @@ particular agent will actually receive after resolution, use:
 			return err
 		}
 		var env struct {
-			Bindings []credBindingOut `json:"bindings"`
+			Bindings []credBindingOut `json:"bindings" yaml:"bindings"`
 		}
 		if err := cli.ReadJSON(resp, &env); err != nil {
 			return err
@@ -317,7 +317,7 @@ func lookupBindingID(client *cli.Client, scope, crewID, agentID, slot string) (s
 		return "", err
 	}
 	var env struct {
-		Bindings []credBindingOut `json:"bindings"`
+		Bindings []credBindingOut `json:"bindings" yaml:"bindings"`
 	}
 	if err := cli.ReadJSON(resp, &env); err != nil {
 		return "", err
@@ -367,15 +367,15 @@ Values are never shown. This answers "which account", not "what is the secret".`
 			return err
 		}
 		var env struct {
-			AgentID string                `json:"agent_id"`
-			Slots   []credResolvedSlotOut `json:"slots"`
+			AgentID string                `json:"agent_id" yaml:"agent_id"`
+			Slots   []credResolvedSlotOut `json:"slots" yaml:"slots"`
 			// Warnings are credentials whose name the server had to normalise
 			// onto a legal environment variable, or could not and did not
 			// deliver (#1657). They are not slots — a credential with no
 			// variable has no row in the map — so without printing them here
 			// the operator's `github-token` would simply be absent from the
 			// table with nothing saying why.
-			Warnings []string `json:"warnings,omitempty"`
+			Warnings []string `json:"warnings,omitempty" yaml:"warnings,omitempty"`
 		}
 		if err := cli.ReadJSON(resp, &env); err != nil {
 			return err

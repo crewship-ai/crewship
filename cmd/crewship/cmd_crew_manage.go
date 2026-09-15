@@ -45,7 +45,7 @@ func fetchCrewAllowedDomains(client *cli.Client, crewID string) ([]string, error
 		return nil, err
 	}
 	var crew struct {
-		AllowedDomains []string `json:"allowed_domains"`
+		AllowedDomains []string `json:"allowed_domains" yaml:"allowed_domains"`
 	}
 	if err := cli.ReadJSON(resp, &crew); err != nil {
 		return nil, err
@@ -232,13 +232,13 @@ var crewCreateCmd = &cobra.Command{
 		}
 
 		var created struct {
-			ID   string `json:"id"`
-			Slug string `json:"slug"`
+			ID   string `json:"id" yaml:"id"`
+			Slug string `json:"slug" yaml:"slug"`
 			// #1638: sizing advisories. The server accepts an undersized
 			// crew rather than refusing it, and says so here — the floor is
 			// an instance setting, so the CLI must report the server's
 			// answer rather than carry a second copy of the rule.
-			Warnings []string `json:"warnings"`
+			Warnings []string `json:"warnings" yaml:"warnings"`
 		}
 		if err := cli.ReadJSON(resp, &created); err != nil {
 			return err
@@ -385,7 +385,7 @@ var crewUpdateCmd = &cobra.Command{
 		// is accepted, and this is the only place the operator hears about
 		// it before the first OOM-killed run.
 		var updated struct {
-			Warnings []string `json:"warnings"`
+			Warnings []string `json:"warnings" yaml:"warnings"`
 		}
 		if err := cli.ReadJSON(resp, &updated); err != nil {
 			return err
@@ -444,9 +444,9 @@ var crewDeleteCmd = &cobra.Command{
 		// a promise the server could not keep.
 		var deleted struct {
 			SidecarTeardown struct {
-				Status string `json:"status"`
-				Reason string `json:"reason"`
-			} `json:"sidecar_teardown"`
+				Status string `json:"status" yaml:"status"`
+				Reason string `json:"reason" yaml:"reason"`
+			} `json:"sidecar_teardown" yaml:"sidecar_teardown"`
 		}
 		// Read defensively: the crew is ALREADY deleted at this point, so a body
 		// this build cannot parse (an older server answering 204, a proxy
@@ -539,13 +539,13 @@ var crewSuggestCmd = &cobra.Command{
 		}
 
 		var result struct {
-			CrewName    string `json:"crew_name"`
-			Description string `json:"description"`
+			CrewName    string `json:"crew_name" yaml:"crew_name"`
+			Description string `json:"description" yaml:"description"`
 			Agents      []struct {
-				Name      string `json:"name"`
-				RoleTitle string `json:"role_title"`
-				AgentRole string `json:"agent_role"`
-			} `json:"agents"`
+				Name      string `json:"name" yaml:"name"`
+				RoleTitle string `json:"role_title" yaml:"role_title"`
+				AgentRole string `json:"agent_role" yaml:"agent_role"`
+			} `json:"agents" yaml:"agents"`
 		}
 		if err := cli.ReadJSON(resp, &result); err != nil {
 			return err

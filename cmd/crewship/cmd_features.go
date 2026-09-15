@@ -37,14 +37,14 @@ var featuresListCmd = &cobra.Command{
 
 		var result struct {
 			Features []struct {
-				Ref         string `json:"ref"`
-				Name        string `json:"name"`
-				Description string `json:"description"`
-				Category    string `json:"category"`
-				SizeHint    string `json:"size_hint"`
-				Publisher   string `json:"publisher"`
-				Tier        string `json:"tier"`
-			} `json:"features"`
+				Ref         string `json:"ref" yaml:"ref"`
+				Name        string `json:"name" yaml:"name"`
+				Description string `json:"description" yaml:"description"`
+				Category    string `json:"category" yaml:"category"`
+				SizeHint    string `json:"size_hint" yaml:"size_hint"`
+				Publisher   string `json:"publisher" yaml:"publisher"`
+				Tier        string `json:"tier" yaml:"tier"`
+			} `json:"features" yaml:"features"`
 		}
 		if err := cli.ReadJSON(resp, &result); err != nil {
 			return err
@@ -86,15 +86,15 @@ var featuresInfoCmd = &cobra.Command{
 
 		var result struct {
 			Features []struct {
-				Ref         string `json:"ref"`
-				Name        string `json:"name"`
-				Description string `json:"description"`
-				Category    string `json:"category"`
-				Icon        string `json:"icon"`
-				SizeHint    string `json:"size_hint"`
-				Publisher   string `json:"publisher"`
-				Tier        string `json:"tier"`
-			} `json:"features"`
+				Ref         string `json:"ref" yaml:"ref"`
+				Name        string `json:"name" yaml:"name"`
+				Description string `json:"description" yaml:"description"`
+				Category    string `json:"category" yaml:"category"`
+				Icon        string `json:"icon" yaml:"icon"`
+				SizeHint    string `json:"size_hint" yaml:"size_hint"`
+				Publisher   string `json:"publisher" yaml:"publisher"`
+				Tier        string `json:"tier" yaml:"tier"`
+			} `json:"features" yaml:"features"`
 		}
 		if err := cli.ReadJSON(resp, &result); err != nil {
 			return err
@@ -125,10 +125,10 @@ var featuresInfoCmd = &cobra.Command{
 // baseImageEntry mirrors the UI's BASE_IMAGES catalog in
 // components/features/crews/runtime-config.tsx. Keep these two lists in sync.
 type baseImageEntry struct {
-	Image       string `json:"image"`
-	Label       string `json:"label"`
-	Description string `json:"description"`
-	Recommended bool   `json:"recommended,omitempty"`
+	Image       string `json:"image" yaml:"image"`
+	Label       string `json:"label" yaml:"label"`
+	Description string `json:"description" yaml:"description"`
+	Recommended bool   `json:"recommended,omitempty" yaml:"recommended,omitempty"`
 }
 
 var baseImagesCatalog = []baseImageEntry{

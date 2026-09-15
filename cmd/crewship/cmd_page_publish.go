@@ -58,29 +58,29 @@ import (
 // ── The wire (mirrors internal/api/pages_public_tokens.go) ─────────────────
 
 type pagePublicTokenJSON struct {
-	ID             string   `json:"id"`
-	Token          string   `json:"token"`
-	URL            string   `json:"url"`
-	ExpiresAt      string   `json:"expires_at"`
-	ShowProvenance bool     `json:"show_provenance"`
-	HasPassword    bool     `json:"has_password"`
-	CreatedBy      string   `json:"created_by"`
-	CreatedAt      string   `json:"created_at"`
-	RevokedAt      string   `json:"revoked_at"`
-	LastSeenAt     string   `json:"last_seen_at"`
-	Live           bool     `json:"live"`
-	Panels         []string `json:"panels"`
+	ID             string   `json:"id" yaml:"id"`
+	Token          string   `json:"token" yaml:"token"`
+	URL            string   `json:"url" yaml:"url"`
+	ExpiresAt      string   `json:"expires_at" yaml:"expires_at"`
+	ShowProvenance bool     `json:"show_provenance" yaml:"show_provenance"`
+	HasPassword    bool     `json:"has_password" yaml:"has_password"`
+	CreatedBy      string   `json:"created_by" yaml:"created_by"`
+	CreatedAt      string   `json:"created_at" yaml:"created_at"`
+	RevokedAt      string   `json:"revoked_at" yaml:"revoked_at"`
+	LastSeenAt     string   `json:"last_seen_at" yaml:"last_seen_at"`
+	Live           bool     `json:"live" yaml:"live"`
+	Panels         []string `json:"panels" yaml:"panels"`
 }
 
 type pagePublicTokensJSON struct {
-	Page   string                `json:"page"`
-	Tokens []pagePublicTokenJSON `json:"tokens"`
+	Page   string                `json:"page" yaml:"page"`
+	Tokens []pagePublicTokenJSON `json:"tokens" yaml:"tokens"`
 }
 
 type pagePublishBody struct {
-	ExpiresInDays  *int    `json:"expires_in_days,omitempty"`
-	Password       *string `json:"password,omitempty"`
-	ShowProvenance *bool   `json:"show_provenance,omitempty"`
+	ExpiresInDays  *int    `json:"expires_in_days,omitempty" yaml:"expires_in_days,omitempty"`
+	Password       *string `json:"password,omitempty" yaml:"password,omitempty"`
+	ShowProvenance *bool   `json:"show_provenance,omitempty" yaml:"show_provenance,omitempty"`
 }
 
 // ── publish ────────────────────────────────────────────────────────────────

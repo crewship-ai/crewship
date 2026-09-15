@@ -158,8 +158,8 @@ func fetchRoutineDefinition(slug string) ([]byte, error) {
 
 	var bundle struct {
 		Pipeline struct {
-			Definition json.RawMessage `json:"definition"`
-		} `json:"pipeline"`
+			Definition json.RawMessage `json:"definition" yaml:"definition"`
+		} `json:"pipeline" yaml:"pipeline"`
 	}
 	if err := cli.ReadJSON(resp, &bundle); err != nil {
 		return nil, err

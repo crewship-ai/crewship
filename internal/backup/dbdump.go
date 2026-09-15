@@ -44,6 +44,20 @@ import (
 // Agent memory lives on the per-crew container filesystem (`/output`)
 // which is collected by the docker phase, not the DB dump.
 //
+// Removed 2026-09-15 (#2274), the same orphan shape found again: `hooks`,
+// `routines`, `schedules` and `webhooks` were never created by any
+// migration — the real tables are `hooks_config`, `pipelines`,
+// `pipeline_schedules` / `scheduled_jobs` and `pipeline_webhooks` /
+// `page_webhooks`, all of which are listed below. `agent_runs` WAS real
+// (v01) but v61 (`drop_agent_runs`) folded it into `journal_entries` and
+// dropped it; its `agent_runs_archive` snapshot is a one-off migration
+// artefact, classified IntentExcludeOperational in intent.go. Every one of
+// the five hit RestoreDump's "unknown tables are skipped" branch on every
+// restore — a silent no-op that read like coverage. TestBackupTables_*
+// (backup_tables_schema_test.go) now pins both directions: every listed
+// name exists in the migrated schema, and every workspace-scoped table in
+// the schema is either listed or explicitly excluded with a reason.
+//
 // Still out of scope for MVP (deliberate, with reasons):
 //   - workspace_members: instance-level invitations / role assignments.
 //     Adding it without also adding a user-existence guarantee leaks
@@ -143,14 +157,10 @@ var BackupTables = []string{
 	// notification_templates references notification_channels(id) on its
 	// optional channel_id, so it restores after the channel parent too.
 	"notification_templates",
-	"webhooks",
-	"routines",
-	"schedules",
 	"recurring_issues",
 	"triage_rules",
 	"workflow_templates",
 	"saved_views",
-	"hooks",
 	"labels",
 	"milestones",
 	"projects",
@@ -176,7 +186,6 @@ var BackupTables = []string{
 	"agent_mcp_bindings",
 	"agent_credentials",
 	"agent_config_history",
-	"agent_runs",
 	"checkpoints",
 	// issue_agent_sessions (§9.2, B1 — #2332) must land here: it FKs into
 	// missions and agents (both already dumped above), and "assignments"

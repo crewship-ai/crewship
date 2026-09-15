@@ -17,6 +17,7 @@ import (
 
 const webhookSchemaSQL = `
 CREATE TABLE IF NOT EXISTS pipeline_webhooks (
+ ingress_profile TEXT NOT NULL DEFAULT 'crewship',
     id                       TEXT PRIMARY KEY,
     workspace_id             TEXT NOT NULL,
     name                     TEXT NOT NULL,

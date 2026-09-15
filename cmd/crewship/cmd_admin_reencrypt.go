@@ -60,17 +60,17 @@ Examples:
 		}
 
 		var out struct {
-			KeyVersion  string `json:"key_version"`
-			Reencrypted int    `json:"reencrypted"`
-			Skipped     int    `json:"skipped"`
-			Failed      int    `json:"failed"`
+			KeyVersion  string `json:"key_version" yaml:"key_version"`
+			Reencrypted int    `json:"reencrypted" yaml:"reencrypted"`
+			Skipped     int    `json:"skipped" yaml:"skipped"`
+			Failed      int    `json:"failed" yaml:"failed"`
 			Columns     []struct {
-				Table       string `json:"table"`
-				Column      string `json:"column"`
-				Reencrypted int    `json:"reencrypted"`
-				Skipped     int    `json:"skipped"`
-				Failed      int    `json:"failed"`
-			} `json:"columns"`
+				Table       string `json:"table" yaml:"table"`
+				Column      string `json:"column" yaml:"column"`
+				Reencrypted int    `json:"reencrypted" yaml:"reencrypted"`
+				Skipped     int    `json:"skipped" yaml:"skipped"`
+				Failed      int    `json:"failed" yaml:"failed"`
+			} `json:"columns" yaml:"columns"`
 		}
 		if err := cli.ReadJSON(resp, &out); err != nil {
 			return err

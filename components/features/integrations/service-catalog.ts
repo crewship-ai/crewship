@@ -81,7 +81,7 @@ export function buildServiceOptions(
     },
     {
       key: "webhook",
-      label: "Webhook",
+      label: "Outgoing webhook",
       blurb: "A signed POST to an endpoint you control",
       section: BUILTIN_SECTION,
       available: true,

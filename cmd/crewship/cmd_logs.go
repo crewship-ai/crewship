@@ -90,7 +90,7 @@ func runAgentLogs(cmd *cobra.Command, agentRef string, lines int, follow bool) e
 		return err
 	}
 	var agent struct {
-		CrewID *string `json:"crew_id"`
+		CrewID *string `json:"crew_id" yaml:"crew_id"`
 	}
 	if err := cli.ReadJSON(resp, &agent); err != nil {
 		return err
