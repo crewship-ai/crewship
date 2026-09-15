@@ -196,7 +196,7 @@ export function RoutinesDashboard({ routines, runs, runsLoading, schedules, onSe
     })
 
   return (
-    <div className="flex flex-col gap-3" data-testid="routines-dashboard">
+    <div className="@container/overview flex flex-col gap-3" data-testid="routines-dashboard">
       <AttentionStrip items={attention} />
 
       <div className="flex flex-wrap items-center gap-2">
@@ -215,8 +215,10 @@ export function RoutinesDashboard({ routines, runs, runsLoading, schedules, onSe
         spendPerRun={kpis.successTotal > 0 ? kpis.spendUsd / kpis.successTotal : null}
       />
 
-      <div className="grid grid-cols-1 gap-3 xl:grid-cols-5">
-        <div className="xl:col-span-3">
+      {/* Two columns only when this pane — not the viewport — is wide enough:
+          beside the explorer a 1280px window leaves ~930px here. */}
+      <div className="grid grid-cols-1 gap-3 @5xl/overview:grid-cols-5">
+        <div className="@5xl/overview:col-span-3">
           <DashboardCard
             title={`Run volume · ${WINDOW_DAYS}d · by routine`}
             icon={Radio}
@@ -231,7 +233,7 @@ export function RoutinesDashboard({ routines, runs, runsLoading, schedules, onSe
           </DashboardCard>
         </div>
 
-        <div className="flex min-w-0 flex-col gap-3 xl:col-span-2">
+        <div className="flex min-w-0 flex-col gap-3 @5xl/overview:col-span-2">
           <DashboardCard
             title="Routines running now"
             icon={Play}
