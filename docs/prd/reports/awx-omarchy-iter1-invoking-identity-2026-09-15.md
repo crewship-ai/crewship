@@ -20,7 +20,7 @@ Hlavičkové čtení tedy bylo čistě útočná plocha. Druhá polovina nálezu
 |---|---|
 | `internal/api/pipelines_exec.go` | `Run`: hlavičky se nečtou; `InvokingCrewID/AgentID` jsou prázdné (user-driven), `InvokingUserID` = ověřený volající. `InternalRun`: po `assertBoundCrewWorkspaceDB` nově `assertInvokingIdentity`. |
 | `internal/api/pipelines_exec_identity.go` (nový) | `assertInvokingIdentity`: neprázdná crew musí být živý řádek `crews` v `body.WorkspaceID`; neprázdný agent živý řádek `agents` v tomtéž workspace a (je-li crew uvedena) `agents.crew_id == crew`. Jinak 403, nic se tiše nepřepisuje. Prázdné hodnoty = neatribuováno (fallback na autorskou crew v executoru zůstává). |
-| `internal/pipeline/waitpoints.go` | `routineTrust`: nejprve autorská crew — je-li čitelná a `strict`, výsledek je strict bez ohledu na invokera; jinak beze změny (invoking crew má přednost, fallback autor). Nový helper `crewAutonomy` (nečitelná crew = strict). Chybějící `pipelines` řádek při přítomném invokerovi zachovává původní chování (existující fixture bez `pipelines` řádku). |
+| `internal/pipeline/waitpoints.go` | `routineTrust`: nejprve autorská crew — je-li čitelná a `strict`, výsledek je strict bez ohledu na invokera; jinak beze změny (invoking crew má přednost, fallback autor). Nový helper `crewAutonomy` (nečitelná crew = strict). Nečitelný `pipelines` řádek = strict i při přítomném invokerovi (fail closed). |
 | `internal/sidecar/pipelines.go` | `handlePipelinesRun` už hlavičky nenastavuje; forged per-agent token dál → 403. Komentář popisuje skutečný stav (route nemá kanál pro identitu). |
 | `internal/sidecar/pipelines_test.go` | Skipnutý „KNOWN GAP“ test nahrazen `TestHandlePipelinesRun_NoInvokerHeadersUpstream` (hlavičky ani z requestu ani ze sidecaru neodcházejí upstream, `X-Internal-Token` ano). |
 | `internal/api/pipelines_exec_invoking_identity_test.go` (nový) | viz §3 |
@@ -43,7 +43,7 @@ Hlavičkové čtení tedy bylo čistě útočná plocha. Druhá polovina nálezu
 
 Regresní běhy (vše v popředí, `-count=1`):
 
-```
+```text
 go vet ./...                                                           clean
 go test ./internal/pipeline/ ./internal/sidecar/                       ok 30.2 s / ok 62.0 s (plné balíčky)
 go test ./internal/api/ -run 'Pipeline|InternalRun|RunEndpoint|Trust|Waitpoint|Replay|Schedule|Slash|PageAction|Invoking|CallPipeline|Deferred|Pending|RouteRoles|RouteAuthz'
@@ -79,7 +79,7 @@ Nesoulad, který zůstává (rozhodnutí R2 v oponentuře, neřešeno zde): oper
 
 - Veřejná `/run`: provenance = `invoking_user_id` (ověřený uživatel / CLI token); `invoking_crew_id`, `invoking_agent_id` vždy prázdné. Žádná hlavička není čtena.
 - `InternalRun`: `invoking_crew_id` = crew tokenu (crwv1, doplní se při vynechání) nebo crew v bound workspace (wsv1) nebo libovolná crew v `body.WorkspaceID` (master); vždy živý řádek. `invoking_agent_id` prázdný, nebo živý agent téhož workspace a člen uvedené crew; je-li agent uveden bez crew (jen master/wsv1), crew se doplní z řádku agenta, takže uložená dvojice je vždy konzistentní. Jinak 403 bez vytvoření běhu.
-- Trust grant (`wait(approval)`): strict **autorská** crew vždy blokuje; jinak postura invoking crew (je-li) nebo autora. Nečitelná crew = strict. Nečitelný `pipelines` řádek bez invokera = strict; s invokerem = postura invokera (původní chování, kryto existujícími testy).
+- Trust grant (`wait(approval)`): strict **autorská** crew vždy blokuje; jinak postura invoking crew (je-li) nebo autora. Nečitelná crew = strict. Nečitelný `pipelines` řádek = strict vždy (fail closed i s invokerem; CodeRabbit nález, fixtury doplněny o řádek rutiny).
 - Sémantika revokace za běhu se nemění (dokumentace odložena — viz §7).
 
 ## 5a. Review

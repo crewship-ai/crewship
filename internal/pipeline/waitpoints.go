@@ -412,31 +412,29 @@ SELECT pipeline_id, COALESCE(definition_hash, ''), COALESCE(invoking_crew_id, ''
 	// arbitrary members — a forged one) let a standing grant fire on a
 	// strict author's gate.
 	var authorCrew string
-	authorErr := s.db.QueryRowContext(ctx,
-		`SELECT COALESCE(author_crew_id, '') FROM pipelines WHERE id = ?`, out.pipelineID).Scan(&authorCrew)
-	authorAutonomy := ""
-	if authorErr == nil && authorCrew != "" {
-		authorAutonomy = s.crewAutonomy(ctx, authorCrew)
+	if err := s.db.QueryRowContext(ctx,
+		`SELECT COALESCE(author_crew_id, '') FROM pipelines WHERE id = ?`, out.pipelineID).Scan(&authorCrew); err != nil {
+		// Cannot establish which crew owns this routine → assume the
+		// strictest posture rather than auto-approving blind. This holds
+		// with an invoking crew present too: the author's opt-out is the
+		// one fact this gate may not skip, and an unreadable author is an
+		// unknown opt-out.
+		out.autonomy = string(policy.AutonomyStrict)
+		return out
+	}
+	if authorCrew != "" {
+		authorAutonomy := s.crewAutonomy(ctx, authorCrew)
 		if authorAutonomy == string(policy.AutonomyStrict) {
 			out.autonomy = string(policy.AutonomyStrict)
 			return out
 		}
-	}
-	if crewID == "" {
-		// invoking_crew_id is empty for the ordinary case — a user
-		// triggering a routine from the CLI or the dashboard — so the
-		// author crew is the one whose dial applies.
-		if authorErr != nil {
-			// Cannot establish which crew owns this routine → assume the
-			// strictest posture rather than auto-approving blind.
-			out.autonomy = string(policy.AutonomyStrict)
-			return out
-		}
-		if authorCrew != "" {
+		if crewID == "" {
+			// invoking_crew_id is empty for the ordinary case — a user
+			// triggering a routine from the CLI or the dashboard — so the
+			// author crew is the one whose dial applies.
 			out.autonomy = authorAutonomy
 			return out
 		}
-		crewID = authorCrew
 	}
 	if crewID == "" {
 		// A routine with no author crew at all: no crew-level posture
