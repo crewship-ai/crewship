@@ -8782,6 +8782,14 @@
             "nullable": true,
             "type": "boolean"
           },
+          "ingress_profile": {
+            "default": "crewship",
+            "enum": [
+              "crewship",
+              "github"
+            ],
+            "type": "string"
+          },
           "inputs_template": {
             "additionalProperties": true,
             "type": "object"
@@ -15325,6 +15333,13 @@
               "type": "boolean"
             },
             "id": {
+              "type": "string"
+            },
+            "ingress_profile": {
+              "enum": [
+                "crewship",
+                "github"
+              ],
               "type": "string"
             },
             "inputs_template": {
@@ -106328,6 +106343,152 @@
         ]
       }
     },
+    "/api/v1/webhooks/{token}/github-pull-request": {
+      "post": {
+        "operationId": "post_api_v1_webhooks_token_github-pull-request",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "sha256= followed by the HMAC-SHA256 of the exact request bytes using the endpoint signing secret",
+            "in": "header",
+            "name": "X-Hub-Signature-256",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Required for supported pull request actions; unsigned delivery identity, additionally deduplicated by signed body fingerprint",
+            "in": "header",
+            "name": "X-GitHub-Delivery",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "GitHub event name; ping is ignored, execution is selected from the signed pull_request body",
+            "in": "header",
+            "name": "X-GitHub-Event",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "action": {
+                    "type": "string"
+                  },
+                  "pull_request": {
+                    "properties": {
+                      "number": {
+                        "type": "integer"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "repository": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "sender": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "zen": {
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "deduped": {
+                      "type": "boolean"
+                    },
+                    "delivery_id": {
+                      "type": "string"
+                    },
+                    "duplicate": {
+                      "type": "boolean"
+                    },
+                    "reason": {
+                      "type": "string"
+                    },
+                    "run_id": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "status"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "deduped": {
+                      "type": "boolean"
+                    },
+                    "delivery_id": {
+                      "type": "string"
+                    },
+                    "duplicate": {
+                      "type": "boolean"
+                    },
+                    "reason": {
+                      "type": "string"
+                    },
+                    "run_id": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "status"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Accepted"
+          }
+        },
+        "security": [],
+        "tags": [
+          "webhooks"
+        ]
+      }
+    },
     "/api/v1/workflow-templates": {
       "get": {
         "operationId": "get_api_v1_workflow-templates",
@@ -112202,6 +112363,13 @@
                     "id": {
                       "type": "string"
                     },
+                    "ingress_profile": {
+                      "enum": [
+                        "crewship",
+                        "github"
+                      ],
+                      "type": "string"
+                    },
                     "inputs_template": {
                       "additionalProperties": true,
                       "type": "object"
@@ -112269,6 +112437,13 @@
                       "type": "integer"
                     },
                     "id": {
+                      "type": "string"
+                    },
+                    "ingress_profile": {
+                      "enum": [
+                        "crewship",
+                        "github"
+                      ],
                       "type": "string"
                     },
                     "inputs_template": {
@@ -112663,6 +112838,13 @@
                       "type": "integer"
                     },
                     "id": {
+                      "type": "string"
+                    },
+                    "ingress_profile": {
+                      "enum": [
+                        "crewship",
+                        "github"
+                      ],
                       "type": "string"
                     },
                     "inputs_template": {

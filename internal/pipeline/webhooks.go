@@ -289,6 +289,7 @@ var WebhookUntrustedInputKeys = map[string]struct{}{
 // Pinned to target_pipeline_id (not slug) so a rename keeps the
 // webhook working — callers don't need to update their senders.
 type Webhook struct {
+	IngressProfile        string
 	ID                    string
 	WorkspaceID           string
 	Name                  string
@@ -317,6 +318,7 @@ type Webhook struct {
 
 // SaveWebhookInput is the payload for WebhookStore.Save.
 type SaveWebhookInput struct {
+	IngressProfile        string
 	ID                    string // "" = create; non-empty = update
 	WorkspaceID           string
 	Name                  string
@@ -369,6 +371,12 @@ func redactedWebhookToken(id string) string { return redactedTokenPrefix + id }
 // every existing sender — callers should delete + re-create if they
 // want a new token).
 func (s *WebhookStore) Save(ctx context.Context, in SaveWebhookInput) (*Webhook, error) {
+	if in.IngressProfile == "" {
+		in.IngressProfile = "crewship"
+	}
+	if in.IngressProfile != "crewship" && in.IngressProfile != "github" {
+		return nil, errors.New("unsupported webhook ingress profile")
+	}
 	if in.WorkspaceID == "" || in.TargetPipelineID == "" {
 		return nil, errors.New("pipeline_webhooks: workspace_id + target_pipeline_id required")
 	}
@@ -404,8 +412,8 @@ INSERT INTO pipeline_webhooks (
     id, workspace_id, name, target_pipeline_id, target_pipeline_version,
     token, token_hash, signing_secret, inputs_template,
     enabled, rate_limit_per_min,
-    created_at, updated_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    created_at, updated_at, ingress_profile
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			id, in.WorkspaceID, in.Name, in.TargetPipelineID,
 			nullInt(in.TargetPipelineVersion),
 			// The cleartext never reaches the table (#1888): only its
@@ -414,7 +422,7 @@ INSERT INTO pipeline_webhooks (
 			redactedWebhookToken(id), HashCapabilityToken(token),
 			nullStr(storedSigning), string(tmplJSON),
 			boolToInt(in.Enabled), in.RateLimitPerMin,
-			now, now,
+			now, now, in.IngressProfile,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("insert webhook: %w", err)
@@ -433,11 +441,11 @@ INSERT INTO pipeline_webhooks (
 UPDATE pipeline_webhooks
 SET name = ?, target_pipeline_id = ?, target_pipeline_version = ?,
     signing_secret = ?, inputs_template = ?, enabled = ?, rate_limit_per_min = ?,
-    updated_at = ?
+    updated_at = ?, ingress_profile = ?
 WHERE id = ? AND deleted_at IS NULL`,
 		in.Name, in.TargetPipelineID, nullInt(in.TargetPipelineVersion),
 		nullStr(storedSigning), string(tmplJSON),
-		boolToInt(in.Enabled), in.RateLimitPerMin, now, in.ID,
+		boolToInt(in.Enabled), in.RateLimitPerMin, now, in.IngressProfile, in.ID,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("update webhook: %w", err)
@@ -821,7 +829,7 @@ SELECT id, workspace_id, name, target_pipeline_id, target_pipeline_version,
        COALESCE(token_hash, ''), COALESCE(signing_secret, ''), inputs_template,
        enabled, rate_limit_per_min,
        last_fired_at, COALESCE(last_status, ''), COALESCE(last_run_id, ''),
-       fire_count, created_at, updated_at, deleted_at
+       fire_count, created_at, updated_at, deleted_at, ingress_profile
 FROM pipeline_webhooks`
 
 func scanWebhook(rs rowScanner) (*Webhook, error) {
@@ -839,7 +847,7 @@ func scanWebhook(rs rowScanner) (*Webhook, error) {
 		&w.TokenHash, &w.SigningSecret, &w.InputsTemplateJSON,
 		&enabled, &w.RateLimitPerMin,
 		&lastFired, &w.LastStatus, &w.LastRunID,
-		&w.FireCount, &createdAt, &updatedAt, &deletedAt,
+		&w.FireCount, &createdAt, &updatedAt, &deletedAt, &w.IngressProfile,
 	)
 	if err != nil {
 		return nil, err

@@ -307,9 +307,9 @@ type agentResponse struct {
 	// WebhookSecretSet reports whether a webhook signing secret is
 	// configured. The secret value itself is show-once (#999) — never
 	// readable back; POST .../webhook-secret/rotate mints and returns a
-	// new one exactly once. Pointer + omitempty: only the Get handler
-	// computes it, so list responses omit the field rather than reporting
-	// a false "not configured".
+	// new one exactly once. List and Get compute this boolean without
+	// returning the secret. Pointer + omitempty keeps mutation responses
+	// that do not load it from claiming a false "not configured".
 	WebhookSecretSet *bool `json:"webhook_secret_set,omitempty"`
 	// SuggestedPrompts is the agent's own chat suggestions, one per line
 	// (PRD chat-as-a-primary-surface, Step 7). null when unconfigured, which

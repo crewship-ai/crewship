@@ -27,6 +27,7 @@ import (
 )
 
 type WebhookRow struct {
+	IngressProfile        string                 `json:"ingress_profile" yaml:"ingress_profile"`
 	ID                    string                 `json:"id" yaml:"id"`
 	WorkspaceID           string                 `json:"workspace_id" yaml:"workspace_id"`
 	Name                  string                 `json:"name" yaml:"name"`
@@ -72,7 +73,7 @@ var routineWebhooksCmd = &cobra.Command{
 	Short: "Manage event-driven webhook triggers",
 	Long: `Webhooks fire saved routines when external services POST to
 /api/v1/webhooks/{token}. Each webhook is named, targets one routine,
-optionally HMAC-signed for delivery integrity, and rate-limited per
+HMAC-signed for delivery integrity, and rate-limited per
 token. The signing secret is revealed only once on create — to rotate,
 delete + recreate.
 
@@ -82,7 +83,7 @@ Examples:
   crewship routine webhooks create --slug pr-review-structured \
       --name "github-pr-reviews" --hmac-secret "$(openssl rand -hex 32)" \
       --rate-limit 30
-  crewship routine webhooks create --slug summarize-text  # no HMAC
+  crewship routine webhooks create --slug summarize-text  # generate and show HMAC secret
   crewship routine webhooks delete <webhook_id>
   crewship routine webhooks url <webhook_id>     # print public URL
 `,
@@ -251,7 +252,7 @@ var routineWebhooksCreateCmd = &cobra.Command{
 		if baseURL == "" {
 			baseURL = clientBaseURL(client)
 		}
-		publicURL := strings.TrimRight(baseURL, "/") + "/api/v1/webhooks/" + url.PathEscape(w.Token)
+		publicURL := routineWebhookPublicURL(baseURL, w)
 
 		// This used to always print the human block regardless of
 		// --format. Unlike `webhooks list` (which redacts tokens/secrets
@@ -440,7 +441,7 @@ var routineWebhooksUrlCmd = &cobra.Command{
 				if baseURL == "" {
 					baseURL = clientBaseURL(client)
 				}
-				full := strings.TrimRight(baseURL, "/") + "/api/v1/webhooks/" + url.PathEscape(w.Token)
+				full := routineWebhookPublicURL(baseURL, w)
 				// The bare URL stays the human output — this command exists so
 				// you can paste it into a sender's config, and a JSON envelope
 				// around it would be in the way. Under a machine format it
@@ -543,7 +544,7 @@ func init() {
 
 	routineWebhooksCreateCmd.Flags().String("slug", "", "target routine slug (REQUIRED)")
 	routineWebhooksCreateCmd.Flags().String("name", "", "human-readable webhook name (default: '<slug> webhook')")
-	routineWebhooksCreateCmd.Flags().String("hmac-secret", "", "HMAC signing secret — empty means no signature verification")
+	routineWebhooksCreateCmd.Flags().String("hmac-secret", "", "HMAC signing secret — empty generates a secret shown once")
 	routineWebhooksCreateCmd.Flags().Int("rate-limit", 60, "max fires per minute per webhook (default 60)")
 	routineWebhooksCreateCmd.Flags().String("inputs-template", "", "JSON template merged with the request body to form routine inputs")
 	routineWebhooksCreateCmd.Flags().String("base-url", "", "override the public base URL printed in the response (defaults to server URL)")
@@ -568,4 +569,12 @@ func init() {
 	routineWebhooksCmd.AddCommand(routineWebhooksDeleteCmd)
 
 	pipelineCmd.AddCommand(routineWebhooksCmd)
+}
+
+func routineWebhookPublicURL(baseURL string, w WebhookRow) string {
+	suffix := ""
+	if w.IngressProfile == "github" {
+		suffix = "/github-pull-request"
+	}
+	return strings.TrimRight(baseURL, "/") + "/api/v1/webhooks/" + url.PathEscape(w.Token) + suffix
 }

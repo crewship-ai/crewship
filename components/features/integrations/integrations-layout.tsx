@@ -4,6 +4,7 @@ import * as React from "react"
 import { AnimatePresence, motion } from "motion/react"
 import {
   Bell,
+  ArrowDownToLine,
   Blocks,
   CircleHelp,
   Clock,
@@ -58,25 +59,22 @@ import { ToolAccountDetail } from "./views/tool-account-detail"
 import { buildServiceOptions, catalogSections, catalogSize } from "./service-catalog"
 import { DeliveriesView } from "./views/deliveries-view"
 import { AddChannelDialog, type AddChannelTarget } from "./add-channel-dialog"
+import { IncomingWebhooksView } from "./views/incoming-webhooks-view"
+import { IncomingCreateDialog } from "./views/incoming-credentials"
+import { useIncomingEndpoints } from "./use-incoming-endpoints"
+import { resolveIncomingTarget, incomingExplorer, incomingSection as readIncomingSection, type IncomingSection, type IncomingTarget } from "./incoming-model"
 import { AddIntegrationDialog, type ServiceOption } from "./add-integration-dialog"
 
 /**
- * /integrations — two tabs, one shape.
- *
- * The page settled at two top-level tabs because there are exactly two kinds
- * of thing here: places Crewship reaches a HUMAN, and things an AGENT can act
- * through. Everything else people used to reach for a tab for — the preference
- * matrix, the delivery log, Composio's six views — is a SECTION inside its
- * tab, in the left panel, with the same toolbar and the same Filter popover on
- * both sides.
- *
- * That symmetry is the point. "Left bars everywhere" was already true; "the
- * same logic in every left bar" was not, and a page with five top tabs and two
- * differently-behaving rails is not simpler for having more entry points.
+ * /integrations — three tabs, one shared explorer and content skeleton.
+ * Outgoing reaches people; Incoming accepts direct HTTP events; Tools owns
+ * managed app capabilities and subscriptions. Each tab supplies sections,
+ * items and content to the same collapsible/mobile rail and animated panel.
  */
 
 const TABS = [
-  { id: "notifications" as const, label: "Notifications", icon: Bell },
+  { id: "notifications" as const, label: "Outgoing notifications", icon: Bell },
+  { id: "incoming" as const, label: "Incoming webhooks", icon: ArrowDownToLine },
   { id: "tools" as const, label: "Tools (MCP)", icon: Wrench },
 ] as const
 
@@ -157,9 +155,11 @@ export function initialIntegrationsRoute(search: string): {
   mcpSection: ToolsSection
   /** `?server=`: the crew tool a "Connect" link elsewhere points at. */
   server: string | null
+  incomingSection: IncomingSection
+  target: string | null
 } {
   const p = new URLSearchParams(search)
-  const tab: IntegrationsTab = p.get("tab") === "tools" ? "tools" : "notifications"
+  const tab: IntegrationsTab = p.get("tab") === "tools" ? "tools" : p.get("tab") === "incoming" ? "incoming" : "notifications"
   const section = p.get("section")
 
   const notifyMatch = NOTIFY_SECTIONS.find((s) => s.key === section)
@@ -168,6 +168,8 @@ export function initialIntegrationsRoute(search: string): {
 
   return {
     tab,
+    incomingSection: tab === "incoming" ? readIncomingSection(section) : "endpoints",
+    target: tab === "incoming" && readIncomingSection(section) !== "endpoints" ? p.get("target") : null,
     notifySection: tab === "notifications" && notifyMatch ? notifyMatch.key : "connections",
     mcpSection: tab === "tools" && mcpMatch ? (mcpMatch.key as ToolsSection) : "accounts",
     server: tab === "tools" && server ? server : null,
@@ -225,6 +227,19 @@ export function IntegrationsLayout({ workspaceId }: { workspaceId: string }) {
   const [collapsed, setCollapsed] = React.useState(false)
   const [addTarget, setAddTarget] = React.useState<AddChannelTarget | null>(null)
   const [addOpen, setAddOpen] = React.useState(false)
+  const [incomingSection, setIncomingSection] = React.useState<IncomingSection>("endpoints")
+  const [incomingTarget, setIncomingTarget] = React.useState<string | null>(null)
+  const [incomingCreate, setIncomingCreate] = React.useState<{target?: IncomingTarget} | null>(null)
+  const incoming = useIncomingEndpoints(workspaceId, true)
+  const incomingRail = incomingExplorer(incoming.targets, incoming.rows, incomingSection, search)
+  React.useEffect(() => {
+    const target = resolveIncomingTarget(incoming.targets, incomingSection, incomingTarget)
+    if (target && target.id !== incomingTarget) setIncomingTarget(target.id)
+  }, [incoming.targets, incomingSection, incomingTarget])
+  const selectIncoming = (target: IncomingTarget) => {
+    setIncomingSection(target.kind); setIncomingTarget(target.id)
+    if (isMobile) setCollapsed(true)
+  }
 
   // Tools tab: which of Composio's six views is showing, and the facets that
   // narrow it. Held here because the left panel renders them and the main
@@ -252,6 +267,8 @@ export function IntegrationsLayout({ workspaceId }: { workspaceId: string }) {
     setNotifySection(r.notifySection)
     setMcpSection(r.mcpSection)
     setLinkedServerId(r.server)
+    setIncomingSection(r.incomingSection)
+    setIncomingTarget(r.target)
   }, [])
 
   // On a phone the rail is 280px of a 390px screen: it does not sit beside the
@@ -278,9 +295,11 @@ export function IntegrationsLayout({ workspaceId }: { workspaceId: string }) {
     }
     const url = new URL(window.location.href)
     url.searchParams.set("tab", tab)
-    url.searchParams.set("section", tab === "notifications" ? notifySection : mcpSection)
+    url.searchParams.set("section", tab === "incoming" ? incomingSection : tab === "notifications" ? notifySection : mcpSection)
+    if (tab === "incoming" && incomingTarget) url.searchParams.set("target", incomingTarget)
+    else url.searchParams.delete("target")
     window.history.replaceState(null, "", url.toString())
-  }, [tab, notifySection, mcpSection])
+  }, [tab, notifySection, mcpSection, incomingSection, incomingTarget])
 
   const {
     channels,
@@ -403,7 +422,9 @@ export function IntegrationsLayout({ workspaceId }: { workspaceId: string }) {
   }, [providers, search])
 
   // ---- actions ------------------------------------------------------------
+  const refreshIncoming = incoming.refresh
   const refreshAll = React.useCallback(() => {
+    refreshIncoming()
     void refreshChannels()
     void refreshProviders()
     void refreshDeliveries()
@@ -411,7 +432,7 @@ export function IntegrationsLayout({ workspaceId }: { workspaceId: string }) {
     // dropping its cache is what makes the next visit fetch rather than paint
     // what this button was pressed to replace.
     if (workspaceId) invalidate(`composio:${workspaceId}:`)
-  }, [refreshChannels, refreshProviders, refreshDeliveries, workspaceId])
+  }, [refreshChannels, refreshProviders, refreshDeliveries, workspaceId, refreshIncoming])
 
   const handleToggle = async (row: ConnectionRow, next: boolean) => {
     try {
@@ -589,7 +610,7 @@ export function IntegrationsLayout({ workspaceId }: { workspaceId: string }) {
         icon={Plug}
         title="Integrations"
         description={
-          tab === "tools" ? (
+          tab === "incoming" ? <>{incoming.error ? "Endpoints unavailable" : incoming.loading ? "Refreshing endpoints…" : `${incoming.rows.length} endpoints · ${incoming.targets.length} targets`} · Pages per Page</> : tab === "tools" ? (
             composioStatus.configured ? (
               <>
                 {composioStatus.counts.accounts} connected ·{" "}
@@ -615,7 +636,7 @@ export function IntegrationsLayout({ workspaceId }: { workspaceId: string }) {
           badge:
             t.id === "notifications"
               ? rows.length || undefined
-              : toolCount || undefined,
+              : t.id === "tools" ? toolCount || undefined : incoming.error || incoming.loading ? "—" : incoming.rows.length,
         }))}
         activeTab={tab}
         onTabChange={setTab}
@@ -640,7 +661,7 @@ export function IntegrationsLayout({ workspaceId }: { workspaceId: string }) {
             <SubBarPrimary
               icon={Plus}
               onClick={() => setAddOpen(true)}
-              title="Connect a notification service, or managed tools for agents"
+              title="Add incoming webhooks, outgoing notifications or agent tools"
             >
               Add integration
             </SubBarPrimary>
@@ -675,6 +696,18 @@ export function IntegrationsLayout({ workspaceId }: { workspaceId: string }) {
             <div className="flex h-full flex-col items-center pt-1.5">
               <SidebarCollapseButton collapsed onToggle={() => setCollapsed(false)} />
             </div>
+          ) : tab === "incoming" ? (
+            <IntegrationsExplorer<IncomingSection>
+              sectionsLabel="Incoming" sections={incomingRail.sections} section={incomingSection}
+              onSectionChange={next=>{setIncomingSection(next);setIncomingTarget(null);if(isMobile)setCollapsed(true)}}
+              search={search} onSearchChange={setSearch} searchPlaceholder="Search targets…" searchAriaLabel="Search incoming targets"
+              facets={[]} onClearFilters={()=>setSearch("")} items={incomingRail.items} itemsLabel="Targets"
+              selectedItemId={incomingTarget ? `${incomingSection}:${incomingTarget}` : null}
+              onItemSelect={id=>{if(!id){setIncomingTarget(null);return}const target=incoming.targets.find(t=>`${t.kind}:${t.id}`===id);if(target)selectIncoming(target)}}
+              itemsEmpty={<p className="px-3 py-3 text-[11px] leading-relaxed text-muted-foreground">{incoming.loading ? "Loading targets…" : incoming.error ? "Targets unavailable. Use Refresh to retry." : "No matching targets. Create a routine, agent or Page first."}</p>}
+              onToggleCollapse={()=>setCollapsed(true)}
+              footer={<p className="px-3 py-3 text-[11px] leading-relaxed text-muted-foreground">Page endpoints are listed per Page. Gray means no known enabled endpoint, not a delivery failure.</p>}
+            />
           ) : tab === "tools" ? (
             /* Same component, different inputs. The facets differ because
                Kind/Status/Scope/Service filter nothing here — but the toolbar,
@@ -768,7 +801,7 @@ export function IntegrationsLayout({ workspaceId }: { workspaceId: string }) {
           <AnimatePresence mode="wait">
             <motion.div
               key={
-                tab === "tools"
+                tab === "incoming" ? `incoming:${incomingTarget ?? incomingSection}` : tab === "tools"
                   ? `tools:${selectedAccountId ?? mcpSection}`
                   : `notify:${selectedConnectionId ?? notifySection}`
               }
@@ -777,6 +810,7 @@ export function IntegrationsLayout({ workspaceId }: { workspaceId: string }) {
               exit={{ opacity: 0 }}
               transition={{ duration: 0.15 }}
             >
+              {tab === "incoming" && <IncomingWebhooksView key={workspaceId} workspaceId={workspaceId} data={incoming} section={incomingSection} search={search} targetId={incomingTarget} onSelect={selectIncoming} onBack={()=>{setIncomingTarget(null);setIncomingSection("endpoints")}} onAdd={target=>setIncomingCreate({target})}/>}
               {tab === "notifications" &&
                 notifySection === "connections" &&
                 selectedConnection && (
@@ -931,10 +965,12 @@ export function IntegrationsLayout({ workspaceId }: { workspaceId: string }) {
         services={services}
         sections={serviceSections}
         onPickService={handlePickService}
+        onPickIncoming={() => {setTab("incoming");setIncomingCreate({})}}
         onPickTools={handlePickTools}
         toolsConfigured={composioStatus.configured}
       />
 
+      {incomingCreate && <IncomingCreateDialog key={workspaceId} workspaceId={workspaceId} data={incoming} initialTarget={incomingCreate.target} onClose={()=>setIncomingCreate(null)} onCreated={selectIncoming}/>}
       <AddChannelDialog
         target={addTarget}
         onClose={() => {

@@ -9,7 +9,15 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+### Added
+
+- Incoming webhook configuration in Integrations for routines, agents and Page panels, with explicit outgoing notification labels. Routine webhooks can select a GitHub pull request signature profile with content-based replay protection.
+
+
 ### Fixed
+- OpenAPI preserves the incoming webhook signature profile in the final create request and endpoint list schemas, so generated clients can configure and recognize GitHub endpoints.
+- Approval or signal delivery arriving while a routine is parking waits for the original execution to release its slot before resuming, preventing a decided run from remaining stuck in waiting.
+- Incoming webhooks use the shared Integrations explorer, overview and endpoint detail on desktop and phones. Creation opens from Add integration, target links survive reload, and Refresh reloads endpoints and receipts. Agent catalogs report whether a signing key is configured without exposing it; paged catalogs are fully read before counting endpoints.
 - **Manifest:** a standalone `Project` can name a workspace agent as lead, `Project.status` uses the API vocabulary (`backlog|planned|in_progress|paused|completed|cancelled`; a bad value is a 400 naming the field instead of a 500), re-applying a `Label` is idempotent, and `Issue.status` is honoured on create — `POST …/issues` and `crewship issue create --status` accept a starting status. (#2426)
 - **Provisioning:** a cache hit is confirmed against the Docker daemon before it is reported, a container start on a missing image invalidates the memoised image list, and a message deferred to a rebuild backs off and stops after three consecutive rebuilds with a clear error — `docker rmi crewship-cache:*` no longer triggers 80+ provisions a second and a dead chat. (#2431)
 - An agent re-saving a routine without a description no longer erases the stored one: the sidecar IPC save and the `save_routine` tool are PATCH-like (omitted preserves, `""` clears), matching the CLI and UI path. (#2405)
