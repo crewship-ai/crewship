@@ -188,7 +188,7 @@ export function RoutineWebhooksTab({ workspaceId, pipelineId, slug }: Props) {
                   </div>
                   <p className="text-xs text-muted-foreground">{w.ingress_profile === "github" ? "GitHub pull requests" : "Crewship signature"} · Receiving URL shown once when created</p>
                   <div className="font-mono text-[12px] text-muted-foreground">
-                    Token <span className="text-foreground/85">{w.token.slice(0, 16)}…</span>
+                    Endpoint <span className="text-foreground/85">{w.id}</span>
                   </div>
                   <div className="flex flex-wrap items-center gap-x-3 text-[11px] text-muted-foreground">
                     <span>
@@ -371,9 +371,9 @@ function CreatedReveal({
             </span>
           </Button>
         </div>
-        <RevealField label="Public URL" value={url} copyKey="url" copied={copied} onCopy={copy} />
+        {webhook.token && <RevealField label="Public URL" value={url} copyKey="url" copied={copied} onCopy={copy} />}
         {webhook.ingress_profile === "github" && <p className="text-xs text-muted-foreground">For GitHub, choose application/json, paste the signing secret, and subscribe to pull requests. Opened, reopened and synchronize actions run this routine; ping does not start work.</p>}
-        <RevealField label="Token" value={webhook.token} copyKey="token" copied={copied} onCopy={copy} mono />
+        {webhook.token && <RevealField label="Token" value={webhook.token} copyKey="token" copied={copied} onCopy={copy} mono />}
         {webhook.signing_secret && (
           <div>
             <div className="mb-1.5 flex items-center justify-between">
