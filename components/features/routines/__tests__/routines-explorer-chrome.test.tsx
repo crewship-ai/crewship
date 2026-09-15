@@ -57,7 +57,7 @@ describe("<RoutinesExplorer> chrome", () => {
     // them at the same weight as the ones with content is what made
     // the column a wall of identical rows.
     render(<RoutinesExplorer {...PROPS} routines={[pipeline({})]} />)
-    const empty = screen.getByText("Failed").className
+    const empty = screen.getByText("Could not finish").className
     const filled = screen.getByText("Completed").className
     expect(empty).toContain("text-foreground/40")
     expect(filled).toContain("text-foreground/80")

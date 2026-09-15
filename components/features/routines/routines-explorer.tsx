@@ -39,6 +39,7 @@ import { isAwaitingApproval, useActiveRoutineRuns } from "@/hooks/use-active-rou
 import { useTick } from "@/hooks/use-tick"
 import type { RoutineFilters } from "@/components/features/routines/routines-filter-sidebar"
 import { formatElapsedSince } from "./routine-cost-format"
+import { formatAgo } from "@/lib/routine-run-presentation"
 
 // RoutinesExplorer — the /routines left sidebar, built on the shared
 // sidebar-kit primitives (SidebarToolbar/Search/FilterButton/Section/
@@ -79,11 +80,11 @@ const STATUS_BUCKETS: {
   // Live buckets first. A routine parked on a human is the only state on
   // this page that is waiting for the person reading it — burying that
   // under three historical outcomes gets it found last.
-  { id: "awaiting", label: "Awaiting approval", icon: PauseCircle, tone: "text-warn" },
+  { id: "awaiting", label: "Waiting for you", icon: PauseCircle, tone: "text-warn" },
   { id: "running", label: "Running", icon: Activity, tone: "text-primary" },
   { id: "completed", label: "Completed", icon: CheckCircle2, tone: "text-success" },
-  { id: "failed", label: "Failed", icon: XCircle, tone: "text-destructive" },
-  { id: "never", label: "Never invoked", icon: CircleDashed, tone: "text-muted-foreground" },
+  { id: "failed", label: "Could not finish", icon: XCircle, tone: "text-destructive" },
+  { id: "never", label: "Never run", icon: CircleDashed, tone: "text-muted-foreground" },
 ]
 
 export function RoutinesExplorer({
@@ -183,11 +184,23 @@ export function RoutinesExplorer({
     [routines, search, filters, liveBySlug],
   )
 
-  // 1s re-render tick ONLY while a displayed routine has a live run,
-  // so the "· 0:12" elapsed segment counts up. Idle sidebar = no
-  // interval at all (useTick treats <=0 as off).
-  const hasLiveRow = displayed.some((p) => liveBySlug.has(p.slug))
-  useTick(hasLiveRow ? 1000 : 0)
+  // 1s re-render tick ONLY while a displayed routine is actually running,
+  // so the "· 0:12" elapsed segment counts up. A routine parked on a person
+  // shows "Waiting for your decision · 4 min ago" — a line that changes once
+  // a minute, so it re-renders once a minute; a ticking stopwatch beside a
+  // decision nobody has made yet was noise. Idle sidebar = no interval at
+  // all (useTick treats <=0 as off).
+  let liveTick = 0
+  for (const p of displayed) {
+    const live = liveBySlug.get(p.slug)
+    if (!live) continue
+    if (!isAwaitingApproval(live.status)) {
+      liveTick = 1000
+      break
+    }
+    liveTick = 60_000
+  }
+  useTick(liveTick)
 
   return (
     <div className="flex flex-col h-full">
@@ -522,7 +535,7 @@ export function RoutinesExplorer({
                                 )}
                               >
                                 {liveAwaiting
-                                  ? `⏸ awaiting approval · ${formatElapsedSince(liveRun.started_at)}`
+                                  ? `⏸ Waiting for your decision · ${formatAgo(liveRun.started_at)}`
                                   : `▶ Running · ${formatElapsedSince(liveRun.started_at)}`}
                               </motion.span>
                             )}

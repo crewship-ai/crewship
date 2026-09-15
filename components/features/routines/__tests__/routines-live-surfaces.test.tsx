@@ -134,7 +134,7 @@ describe("<RoutinesExplorer> live rows", () => {
   it("shows no live sub-line when the routine has no active run", () => {
     render(<RoutinesExplorer routines={[pipeline({})]} {...EXPLORER_PROPS} />)
     expect(screen.queryByText(/ask-casey/)).not.toBeInTheDocument()
-    expect(screen.queryByText(/awaiting approval/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/Waiting for your decision/)).not.toBeInTheDocument()
   })
 
   it("renders the current step + elapsed sub-line for a running routine", () => {
@@ -149,12 +149,16 @@ describe("<RoutinesExplorer> live rows", () => {
     expect(sub.textContent).toMatch(/·\s*12\.0s/)
   })
 
-  it("renders the amber awaiting-approval sub-line for a parked routine", () => {
-    h.runs = [activeRun({ status: "waiting" })]
+  it("renders the amber waiting sub-line for a parked routine in minutes, not a stopwatch", () => {
+    h.runs = [activeRun({ status: "waiting", started_at: new Date(NOW - 4 * 60_000 - 500).toISOString() })]
     render(<RoutinesExplorer routines={[pipeline({})]} {...EXPLORER_PROPS} />)
-    expect(screen.getByText(/awaiting approval/)).toBeInTheDocument()
+    const sub = screen.getByText(/Waiting for your decision/)
+    // "4 min ago", never "240.5s": a decision nobody has made yet does not tick.
+    expect(sub.textContent).toMatch(/· 4 min ago$/)
+    expect(sub.textContent).not.toMatch(/\d\.\ds/)
     // The running-step form must not render for a parked run.
     expect(screen.queryByText(/ask-casey/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/awaiting approval/)).not.toBeInTheDocument()
   })
 
   it("only marks the routine whose slug matches the active run", () => {
