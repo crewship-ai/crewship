@@ -4,7 +4,10 @@ import { formatRoutineTime } from "@/lib/routine-time"
 
 import { Button } from "@/components/ui/button"
 
-// Read the saved recipe here; author and edit it in the shared routine builder.
+// The routine page: identity, a live-run banner, then Overview · History ·
+// Versions · Plan. Authoring is not here — Edit changes what the DSL lets a
+// person change without files, Publish reviews a draft, and the recipe itself
+// is written with the CLI or by the lead (docs/ux/routines-operator-console).
 
 import * as React from "react"
 import Link from "next/link"
@@ -13,10 +16,10 @@ import {
   CheckCircle2,
   ChevronRight,
   Clock,
+  Eye,
   Globe,
   KeyRound,
   PenSquare,
-  PlayCircle,
   Puzzle,
   ShieldAlert,
   XCircle,
@@ -49,10 +52,15 @@ import { RoutineBehaviorSummary } from "./routine-behavior"
 import { RoutineStepSpine } from "./routine-step-spine"
 import { routineInputSpecs } from "@/lib/routine-inputs"
 import { routineEffects } from "@/lib/routine-effects"
-import { isRecord } from "@/lib/routine-step-describe"
+import { isRecord, asString } from "@/lib/routine-step-describe"
+import { describeTimeout, foreachBody, nameLookup, stepChips } from "@/lib/routine-steps-layout"
+import { routineFilesFromDefinition } from "@/lib/routine-files"
 import { RoutineDefinitionCanvas } from "./routine-definition-canvas"
 import { RoutineBudgetCard } from "./routine-budget-card"
-import { RoutineCreateDialog } from "./routine-create-dialog"
+import { RoutineFilesCard } from "./routine-files-card"
+import { RoutineEditDialog } from "./routine-edit-dialog"
+import { RoutinePublishDialog } from "./routine-publish-dialog"
+import { isActiveRunStatus } from "@/hooks/use-pipeline-run-records"
 import { useAbilities } from "@/hooks/use-abilities"
 import { roleAtLeast } from "@/lib/routine-governance"
 import { RoutineSchedulesTab } from "./routine-schedules-tab"
@@ -68,14 +76,16 @@ interface Props {
   workspaceId: string
   onChanged: () => void
   /**
-   * Run / Dry run / Enable / Disable / Cancel, rendered top-right of the
-   * identity card.
+   * Run, first in the identity card's action row, and the ⋯ menu, last.
    *
    * Passed in rather than rebuilt here: the panel owns the handlers, the
    * RBAC guards and the busy states, and a second copy of that wiring is
    * a second thing to keep correct.
    */
-  actions?: React.ReactNode
+  primary?: React.ReactNode
+  menu?: React.ReactNode
+  /** The live-run banner under the header; the panel owns the run records. */
+  liveRuns?: React.ReactNode
   /**
    * Lifecycle + run-status pills, rendered first in the identity row.
    *
@@ -86,8 +96,6 @@ interface Props {
    * shared palette so the pill matches Inbox, Issues and Activity.
    */
   statusPills?: React.ReactNode
-  /** Bumped when something outside asks for the code editor. */
-  editRequest?: number
 }
 
 /**
@@ -104,22 +112,22 @@ export function RoutineCardDetail({
   routine,
   workspaceId,
   onChanged,
-  actions,
+  primary,
+  menu,
+  liveRuns,
   statusPills,
-  editRequest = 0,
 }: Props) {
   const [selectedView, setView] = useUrlSelection("view")
   const view = ROUTINE_VIEWS.find((v) => v === selectedView) ?? "definition"
   const { role } = useAbilities()
   const canEdit = roleAtLeast(role, "MANAGER")
   // `?view=edit` IS the editing state (#2519): reload, Back and Forward all
-  // land where the address says, and leaving the routine clears it.
+  // land where the address says, and leaving the routine clears it. The Edit
+  // dialog opens over the page; `?view=publish` opens the publish review.
   const editing = (selectedView === "edit" || selectedView === "settings") && canEdit
-  const [draft, setDraft] = React.useState<{
-    definition: Record<string, unknown>
-    version: number
-  } | null>(null)
+  const publishing = selectedView === "publish" && canEdit && !!routine.draft
   const openEditor = React.useCallback(() => setView("edit"), [setView])
+  const openPublish = React.useCallback(() => setView("publish"), [setView])
   const editButtonRef = React.useRef<HTMLButtonElement>(null)
   const wasEditing = React.useRef(editing)
   React.useEffect(() => {
@@ -128,11 +136,7 @@ export function RoutineCardDetail({
     }
     wasEditing.current = editing
   }, [editing])
-  React.useEffect(() => {
-    if (editRequest > 0 && canEdit) openEditor()
-  }, [editRequest, canEdit, openEditor])
-  const closeEditor = React.useCallback(() => {
-    setDraft(null)
+  const closeDialog = React.useCallback(() => {
     setView(null, { replace: true })
   }, [setView])
   const [selected, setSelected] = React.useState<string | null>(null)
@@ -192,28 +196,20 @@ export function RoutineCardDetail({
   }, [routine.definition])
 
   const lastRun = records[0] ?? null
+  const activeRuns = records.filter((r) => isActiveRunStatus(r.status)).length
   // The graph pane is as tall as its graph needs. Two nodes in a 56vh box
   // read as a broken page, not as a small recipe.
   const mapHeight = Math.min(560, Math.max(300, steps.length * 78))
-
-  if (editing) {
-    return (
-      <div className="flex h-full min-h-0 flex-col" data-testid="routine-editor-page">
-        <RoutineCreateDialog
-          presentation="page"
-          workspaceId={workspaceId}
-          routine={routine}
-          initialDraft={draft?.definition}
-          open
-          onClose={closeEditor}
-          onCreated={() => {
-            closeEditor()
-            onChanged()
-          }}
-        />
-      </div>
-    )
-  }
+  // Files come from the detail's projection; an older server sends none, and
+  // then the recipe's own script paths stand in with presence unknown.
+  const files = React.useMemo(
+    () => routine.files ?? routineFilesFromDefinition(routine.definition),
+    [routine.files, routine.definition],
+  )
+  const nameOf = React.useMemo(
+    () => nameLookup(isRecord(routine.definition) ? routine.definition : {}),
+    [routine.definition],
+  )
 
   return (
     <div className="flex flex-col gap-4 p-4">
@@ -225,22 +221,25 @@ export function RoutineCardDetail({
         workspaceId={workspaceId}
         onChanged={onChanged}
         onEdit={canEdit ? openEditor : undefined}
+        onPublish={canEdit ? openPublish : undefined}
         editButtonRef={editButtonRef}
-        actions={actions}
+        primary={primary}
+        actions={menu}
+        runUses
       >
         {routine.ephemeral && <Pill tone="warn">ephemeral</Pill>}
       </RoutineIdentityHeader>
+      {liveRuns}
       <RoutineNavigation slug={routine.slug} view={view} onChange={setView} />
       {view === "versions" && (
         <div className="space-y-5">
           <RoutineVersionsTab
             workspaceId={workspaceId}
             slug={routine.slug}
-            onRolledBack={onChanged}
-            onPrepareDraft={(definition, version) => {
-              setDraft({ definition, version })
-              openEditor()
-            }}
+            draft={routine.draft}
+            routine={routine}
+            onPublish={canEdit ? openPublish : undefined}
+            onChanged={onChanged}
           />
           <details className="rounded-xl border border-border/60 bg-card px-4 py-3 text-xs">
             <summary className="cursor-pointer text-muted-foreground">
@@ -262,28 +261,34 @@ export function RoutineCardDetail({
             workspaceId={workspaceId}
             pipelineId={routine.id}
             slug={routine.slug}
+            headVersion={routine.head_version}
+            draft={routine.draft}
             concurrencyKey={concurrencyKey}
             maxConcurrent={maxConcurrent}
+            otherWays={
+              <>
+                <RoutineWebhooksTab
+                  workspaceId={workspaceId}
+                  pipelineId={routine.id}
+                  slug={routine.slug}
+                />
+                {myAutomations.length > 0 && (
+                  <DetailCard title="Automations" icon={Zap}>
+                    <div data-testid="routine-automations" className="space-y-2.5">
+                      <p className="text-[12px] text-muted-foreground">
+                        <span data-testid="routine-automations-count" className="text-foreground/85">
+                          {myAutomations.length}
+                        </span>{" "}
+                        {myAutomations.length === 1 ? "automation" : "automations"} can start this
+                        routine.
+                      </p>
+                      <AutomationList automations={myAutomations} />
+                    </div>
+                  </DetailCard>
+                )}
+              </>
+            }
           />
-          <RoutineWebhooksTab
-            workspaceId={workspaceId}
-            pipelineId={routine.id}
-            slug={routine.slug}
-          />
-          {myAutomations.length > 0 && (
-            <DetailCard title="Automations" icon={Zap}>
-              <div data-testid="routine-automations" className="space-y-2.5">
-                <p className="text-[12px] text-muted-foreground">
-                  <span data-testid="routine-automations-count" className="text-foreground/85">
-                    {myAutomations.length}
-                  </span>{" "}
-                  {myAutomations.length === 1 ? "automation" : "automations"} can start this
-                  routine.
-                </p>
-                <AutomationList automations={myAutomations} />
-              </div>
-            </DetailCard>
-          )}
           <details className="rounded-xl border border-hairline p-4">
             <summary className="cursor-pointer text-sm font-medium">
               Access and budget
@@ -323,102 +328,90 @@ export function RoutineCardDetail({
         </div>
       )}
 
-      {view === "definition" && draft && (
-        <DetailCard>
-          <p className="text-sm">
-            Unsaved draft from version {draft.version}. Review the editor and save to
-            create a new version. The graph still shows the currently saved recipe.
-          </p>
-          <button
-            className="mt-2 text-xs text-primary"
-            onClick={closeEditor}
-          >
-            Discard draft
-          </button>
-        </DetailCard>
-      )}
       {view === "definition" && (
         <>
-          <RoutineBehaviorSummary behavior={routine.behavior} />
-          {/* Three answers, in the order a reader brings them: what it does,
-              how it went last time, what I need before I run it. Everything
-              that used to compete with them — status chrome, access, the
-              schedule card — sits below in one disclosure or in Plan (#2519). */}
-          <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,1fr)]">
-            <Appear order={2} className="min-w-0">
-              <RoutineStepSpine
-                workspaceId={workspaceId}
-                definition={routine.definition}
-                behavior={routine.behavior}
-                onEdit={canEdit ? openEditor : undefined}
-                map={() => (
-                  <div className="flex flex-col md:flex-row" style={{ height: mapHeight }}>
-                    <div className="relative min-h-[240px] w-full min-w-0 flex-1 md:min-w-[380px]">
-                      <RoutineDefinitionCanvas
-                        definition={routine.definition}
-                        slug={routine.slug}
-                        name={routine.name}
-                        selectedStepId={selected}
-                        onStepSelect={handleSelect}
-                        focusStepId={focus}
-                      />
-                      {canEdit && (
-                        <button
-                          type="button"
-                          onClick={openEditor}
-                          className="absolute right-3 top-3 z-10 inline-flex items-center gap-1.5 rounded-lg border border-border/60 bg-card/85 px-2.5 py-1.5 text-[11px] text-muted-foreground hover:text-foreground"
-                        >
-                          <PenSquare className="h-3.5 w-3.5" />
-                          Edit recipe
-                        </button>
-                      )}
-                    </div>
-                    {selected && !editing && (
-                      <aside className="h-[45%] max-h-[45%] w-full shrink-0 overflow-auto border-t p-4 md:h-auto md:max-h-none md:w-[320px] md:border-l md:border-t-0">
-                        <button
-                          onClick={() => setSelected(null)}
-                          className="mb-3 text-xs text-muted-foreground"
-                        >
-                          Close step detail
-                        </button>
-                        <RoutineStepDefinition
-                          step={(
-                            routine.definition.steps as
-                              | Record<string, unknown>[]
-                              | undefined
-                          )?.find((s) => s.id === selected)}
-                        />
-                      </aside>
-                    )}
+          {/* Six answers a reader brings, before a single step is read. */}
+          <Appear order={2}>
+            <InOneLookCard routine={routine} files={files} />
+          </Appear>
+          <Appear order={3}>
+            <RoutineStepSpine
+              workspaceId={workspaceId}
+              definition={routine.definition}
+              behavior={routine.behavior}
+              slug={routine.slug}
+              map={() => (
+                <div className="flex flex-col md:flex-row" style={{ height: mapHeight }}>
+                  <div className="relative min-h-[240px] w-full min-w-0 flex-1 md:min-w-[380px]">
+                    <RoutineDefinitionCanvas
+                      definition={routine.definition}
+                      slug={routine.slug}
+                      name={routine.name}
+                      selectedStepId={selected}
+                      onStepSelect={handleSelect}
+                      focusStepId={focus}
+                    />
                   </div>
-                )}
-              />
-            </Appear>
-            <Appear order={3} className="min-w-0">
+                  {selected && (
+                    <aside className="h-[45%] max-h-[45%] w-full shrink-0 overflow-auto border-t p-4 md:h-auto md:max-h-none md:w-[320px] md:border-l md:border-t-0">
+                      <button
+                        onClick={() => setSelected(null)}
+                        className="mb-3 text-xs text-muted-foreground"
+                      >
+                        Close step detail
+                      </button>
+                      <RoutineStepDefinition
+                        step={(
+                          routine.definition.steps as
+                            | Record<string, unknown>[]
+                            | undefined
+                        )?.find((s) => s.id === selected)}
+                      />
+                    </aside>
+                  )}
+                </div>
+              )}
+            />
+          </Appear>
+          <Appear order={4}>
+            <RoutineFilesCard
+              files={files}
+              workspaceId={workspaceId}
+              crewId={routine.author_crew_id}
+              nameOf={nameOf}
+              derived={routine.files == null}
+            />
+          </Appear>
+          <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
+            <Appear order={5} className="min-w-0">
               <LastRunCard
                 status={lastRun?.status ?? routine.last_invocation_status}
                 outcome={lastRun?.outcome}
                 at={lastRun?.started_at ?? routine.last_invoked_at}
                 runId={lastRun?.id}
                 durationMs={lastRun?.duration_ms}
+                version={lastRun?.pipeline_version}
+                reason={lastRunReason(lastRun, nameOf)}
                 slug={routine.slug}
               />
             </Appear>
-            <Appear order={4} className="min-w-0">
-              <BeforeYouRunCard
-                definition={routine.definition}
+            <Appear order={6} className="min-w-0">
+              <PlanCard
                 schedules={mine}
                 automations={myAutomations.length}
+                headVersion={routine.head_version}
                 onPlan={() => setView("plan")}
               />
             </Appear>
           </div>
-          <Appear order={5}>
+          <Appear order={7}>
             <details
               data-testid="routine-technical"
               className="rounded-xl border border-border/60 bg-card px-4 py-3 text-xs"
             >
-              <summary className="cursor-pointer text-muted-foreground">Technical details</summary>
+              <summary className="cursor-pointer text-muted-foreground">
+                Technical details · identifier, version hash, access, budget, webhooks, automations
+              </summary>
               <div className="mt-3 space-y-4">
                 <div className="flex flex-wrap items-center gap-1.5">
                   {statusPills}
@@ -436,11 +429,13 @@ export function RoutineCardDetail({
                   )}
                 </div>
                 <Metadata routine={routine} steps={steps.length} />
+                <RoutineBehaviorSummary behavior={routine.behavior} />
                 <AccessCard
                   workspaceId={workspaceId}
                   routine={routine}
                   crewshipActions={crewshipActions}
                 />
+                <RoutineBudgetCard workspaceId={workspaceId} slug={routine.slug} />
               </div>
             </details>
           </Appear>
@@ -457,8 +452,171 @@ export function RoutineCardDetail({
           />
         </Appear>
       )}
+      {canEdit && (
+        <RoutineEditDialog
+          open={editing}
+          onOpenChange={(open) => {
+            if (!open) closeDialog()
+          }}
+          workspaceId={workspaceId}
+          routine={routine}
+          files={files}
+          onChanged={onChanged}
+        />
+      )}
+      {canEdit && routine.draft && (
+        <RoutinePublishDialog
+          open={publishing}
+          onOpenChange={(open) => {
+            if (!open) closeDialog()
+          }}
+          workspaceId={workspaceId}
+          routine={routine}
+          activeRuns={activeRuns}
+          onPublished={onChanged}
+          onDiscarded={onChanged}
+        />
+      )}
     </div>
   )
+}
+
+/* ------------------------------------------------------------------ *
+ *  In one look                                                        *
+ * ------------------------------------------------------------------ */
+
+const listOf = (items: string[]) =>
+  items.length <= 1 ? items.join("") : `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`
+
+/** Six answers, every one derived from the definition — nothing invented. */
+export function inOneLook(
+  routine: Pick<RoutineDetail, "definition" | "description" | "manifest">,
+  files: { path: string; language: string }[],
+): { label: string; text: string }[] {
+  const dsl = isRecord(routine.definition) ? routine.definition : {}
+  const steps = Array.isArray(dsl.steps) ? dsl.steps.filter(isRecord) : []
+  const all = [...steps, ...steps.flatMap(foreachBody)]
+  const nameOf = nameLookup(dsl)
+  const inputs = routineInputSpecs(dsl)
+  const outputs = Array.isArray(dsl.outputs) ? dsl.outputs.filter(isRecord) : []
+
+  const get = outputs.length
+    ? outputs
+        .map((o) => {
+          const label = typeof o.label === "string" ? o.label : readableName(o.name || "Result")
+          return typeof o.description === "string" && o.description ? `${label} — ${o.description}` : label
+        })
+        .join("; ") + "."
+    : routine.description || "The results of the steps below — no result labels are declared."
+
+  const provide = inputs.length
+    ? inputs.map((i) => `${i.label || readableName(i.name)}${i.required ? "" : " (optional)"}`).join(", ")
+    : "Nothing — Run starts immediately."
+
+  const agentSlugs = [
+    ...new Set([
+      ...(routine.manifest?.agents ?? []),
+      ...all.map((s) => asString(s.agent_slug)).filter(Boolean),
+      ...all.map((s) => (isRecord(s.outcomes) ? asString(s.outcomes.grader_agent_slug) : "")).filter(Boolean),
+    ]),
+  ]
+  const people = all.filter((s) => s.type === "wait" && (!isRecord(s.wait) || !asString(s.wait.kind) || asString(s.wait.kind) === "approval"))
+  const scripts = Math.max(
+    files.filter((f) => !["yaml", "json", "md"].includes(f.language)).length,
+    all.filter((s) => s.type === "script").length,
+  )
+  const who: string[] = []
+  if (agentSlugs.length) who.push(`${listOf(agentSlugs)} (${agentSlugs.length === 1 ? "agent" : "agents"})`)
+  if (people.length) who.push(people.length === 1 ? "a person who decides" : `${people.length} decisions by people`)
+  if (scripts) who.push(`${scripts} ${scripts === 1 ? "script" : "scripts"} on the crew share`)
+  if (all.some((s) => s.type === "notify")) who.push("notifications")
+  if (all.some((s) => s.type === "http")) who.push("external services")
+  if (all.some((s) => s.type === "crewship")) who.push("Crewship pages and issues")
+  if (all.some((s) => s.type === "call_pipeline")) who.push("another routine")
+  const whoText = who.length ? who.join(", ") : "Local data preparation only."
+
+  const checked = all
+    .map((s) => ({ s, chips: stepChips(s, nameOf) }))
+    .filter(({ chips }) => chips.checks)
+    .map(({ s, chips }) =>
+      chips.checks!.grader
+        ? `${chips.checks!.count} ${chips.checks!.count === 1 ? "rule" : "rules"} by ${chips.checks!.grader} on “${nameOf(String(s.id))}”`
+        : `${chips.checks!.count} ${chips.checks!.count === 1 ? "check" : "checks"} on “${nameOf(String(s.id))}”`,
+    )
+  const checkedText = checked.length ? checked.join("; ") + "." : "No checks declared — completion alone does not prove quality."
+
+  const needs = people.map((s) => {
+    const wait = isRecord(s.wait) ? s.wait : {}
+    const when = typeof s.if === "string" && s.if.trim() ? `Only when ${s.if.trim()}` : `At “${nameOf(String(s.id))}”`
+    const timeout = typeof wait.timeout_sec === "number" && wait.timeout_sec > 0 ? ` · answer within ${describeTimeout(wait.timeout_sec)}` : ""
+    return when + timeout
+  })
+  const needsText = needs.length ? needs.join("; ") : "Never — it runs without a decision."
+
+  const effects = routineEffects(dsl)
+  const crewship = crewshipActionsInDefinition(dsl)
+  const touch: string[] = []
+  if (effects.http) touch.push(`Calls ${effects.hosts.length ? listOf(effects.hosts) : "external services"}.`)
+  if (crewship.length) touch.push(`Writes to Crewship (${crewship.join(", ")}).`)
+  if (all.some((s) => s.type === "script" || s.type === "code")) touch.push("Runs scripts on the crew.")
+  if (all.some((s) => s.type === "notify")) touch.push("Sends notifications.")
+  if (effects.credentials.length) touch.push(`Uses ${listOf(effects.credentials)} from the crew vault.`)
+  if (!touch.length) touch.push(effects.agents.length ? "Agents act with their own tools; no external writes are declared." : "No external writes declared.")
+  touch.push("Stopping does not undo what already happened.")
+  if (typeof dsl.max_cost_usd === "number" && dsl.max_cost_usd > 0) touch.push(`Cost cap $${dsl.max_cost_usd} per run.`)
+
+  return [
+    { label: "What you get", text: get },
+    { label: "What you provide", text: provide },
+    { label: "Who does the work", text: whoText },
+    { label: "What is checked", text: checkedText },
+    { label: "When it needs you", text: needsText },
+    { label: "What it can touch", text: touch.join(" ") },
+  ]
+}
+
+function InOneLookCard({ routine, files }: { routine: RoutineDetail; files: { path: string; language: string }[] }) {
+  const cells = React.useMemo(() => inOneLook(routine, files), [routine, files])
+  return (
+    <DetailCard title="In one look" icon={Eye} bare data-testid="routine-in-one-look">
+      <dl className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
+        {cells.map((cell, i) => (
+          <div
+            key={cell.label}
+            data-testid={`routine-look-${cell.label.toLowerCase().replace(/[^a-z]+/g, "-")}`}
+            className={cn(
+              "border-hairline px-4 py-3",
+              i % 3 !== 2 && "lg:border-r",
+              i < 3 && "lg:border-b",
+              i % 2 === 0 && "sm:border-r lg:border-r-0",
+              i < 4 && "sm:border-b",
+              i < 5 && "border-b sm:border-b-0",
+              i === 2 && "lg:border-r-0",
+              i === 3 && "lg:border-r",
+            )}
+          >
+            <dt className="mb-1 text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground-soft">{cell.label}</dt>
+            <dd className="text-[13px] leading-relaxed text-foreground/90">{cell.text}</dd>
+          </div>
+        ))}
+      </dl>
+    </DetailCard>
+  )
+}
+
+/** One line under the Last run facts: what stopped it, or what it produced. */
+function lastRunReason(run: PipelineRunRecord | null, nameOf: (id: string) => string): string | undefined {
+  if (!run) return undefined
+  const failure = (run as PipelineRunRecord & { failure?: { step_name?: string; summary?: string } }).failure
+  if (failure?.summary) return failure.step_name ? `Stopped at “${failure.step_name}”: ${failure.summary}` : failure.summary
+  if (run.status === "failed" || run.outcome === "FAILED") {
+    const step = run.failed_at_step ? `Stopped at “${nameOf(run.failed_at_step)}”` : "Could not finish"
+    return run.error_message ? `${step}: ${run.error_message.split("\n")[0].slice(0, 160)}` : step
+  }
+  if (run.status === "waiting") return run.current_step_id ? `Waiting for a person at “${nameOf(run.current_step_id)}”.` : "Waiting for a person."
+  if (run.status === "cancelled") return "Stopped. What already happened was not undone."
+  if (run.output) return run.output.split("\n")[0].slice(0, 160)
+  return undefined
 }
 
 /* ------------------------------------------------------------------ *
@@ -485,6 +643,8 @@ function LastRunCard({
   at,
   runId,
   durationMs,
+  version,
+  reason,
   slug,
 }: {
   status?: string
@@ -492,6 +652,8 @@ function LastRunCard({
   at?: string
   runId?: string
   durationMs?: number
+  version?: number
+  reason?: string
   slug: string
 }) {
   const presentation = routineRunPresentation({ status, outcome })
@@ -503,9 +665,7 @@ function LastRunCard({
   if (!at) {
     return (
       <DetailCard title="Last run">
-        <p className="text-[12px] text-muted-foreground">
-          This routine hasn&apos;t been invoked yet.
-        </p>
+        <p className="text-[12px] text-muted-foreground">Not run yet.</p>
       </DetailCard>
     )
   }
@@ -547,7 +707,13 @@ function LastRunCard({
             label="duration"
             value={durationMs && durationMs > 0 ? formatDurationDecimal(durationMs) : "—"}
           />
+          <Fact label="version" value={version != null ? `v${version}` : "—"} />
         </dl>
+        {reason && (
+          <p data-testid="routine-last-run-reason" className="text-[12px] text-foreground/85">
+            {reason}
+          </p>
+        )}
         <Link
           href={activityHref(slug, runId)}
           className="inline-flex items-center gap-1 text-[11px] text-primary hover:underline"
@@ -589,85 +755,48 @@ const readableName = (value: unknown) =>
     .replace(/[_-]+/g, " ")
     .replace(/^\w/, (c) => c.toUpperCase())
 
-/** What the reader needs before pressing Run: the questions, the effects, the plan. */
-function BeforeYouRunCard({
-  definition,
+/** The plan in one card: each schedule, which version it uses, and the door to Plan. */
+function PlanCard({
   schedules,
   automations,
+  headVersion,
   onPlan,
 }: {
-  definition: unknown
-  schedules: { enabled: boolean; cron_expr: string; timezone?: string }[]
+  schedules: { id: string; enabled: boolean; cron_expr: string; timezone?: string; target_pipeline_version?: number | null }[]
   automations: number
+  headVersion?: number
   onPlan: () => void
 }) {
-  const dsl = isRecord(definition) ? definition : {}
-  const inputs = routineInputSpecs(dsl)
-  const outputs = Array.isArray(dsl.outputs) ? dsl.outputs.filter(isRecord) : []
-  const effects = routineEffects(dsl)
-  const plan = schedules.find((s) => s.enabled)
-  const parts: string[] = []
-  if (effects.agents.length) parts.push(`uses ${effects.agents.join(", ")} (tools, costs)`)
-  if (effects.http)
-    parts.push(`sends HTTP requests${effects.hosts.length ? " to " + effects.hosts.join(", ") : ""}`)
-  if (effects.credentials.length) parts.push(`needs ${effects.credentials.join(", ")}`)
-  const effectLine = parts.length
-    ? `A run ${parts.join(", ")}. Stopping does not undo what already happened.`
-    : effects.indirect
-      ? "Scripts, tools, notifications or called routines can perform actions. Stopping does not undo what already happened."
-      : "Runs locally. No agents, no network, no credentials."
   return (
-    <DetailCard title="Before you run" icon={PlayCircle}>
-      <div className="space-y-3 text-[12px]">
-        {inputs.length ? (
-          <div>
-            <p className="mb-1 text-muted-foreground">You will be asked for:</p>
-            <dl className="grid grid-cols-[max-content_1fr] gap-x-3 gap-y-1">
-              {inputs.map((input) => (
-                <React.Fragment key={input.name}>
-                  <dt className="font-medium">{input.label || readableName(input.name)}</dt>
-                  <dd className="text-muted-foreground">
-                    {input.type || "text"}
-                    {input.required ? " · required" : ""}
-                    {input.default !== undefined ? " · has a default" : ""}
-                    {input.description && (
-                      <span className="block text-muted-foreground-soft">{input.description}</span>
-                    )}
-                  </dd>
-                </React.Fragment>
-              ))}
-            </dl>
-          </div>
+    <DetailCard title="Plan" icon={Clock} data-testid="routine-plan-card">
+      <div className="space-y-2 text-[12px]">
+        {schedules.length === 0 ? (
+          <p className="text-muted-foreground">Manual only.</p>
         ) : (
-          <p className="text-muted-foreground">Nothing to fill in. Run starts immediately.</p>
+          schedules.map((s) => (
+            <p key={s.id}>
+              <span className="font-medium">{describeCron(s.cron_expr)}</span>
+              <span className="text-muted-foreground">
+                {" "}· {s.timezone || "UTC"} · {s.enabled ? "on" : "off"} ·{" "}
+                {s.target_pipeline_version != null
+                  ? `pinned to v${s.target_pipeline_version}`
+                  : `uses latest published${headVersion ? ` (v${headVersion})` : ""}`}
+              </span>
+            </p>
+          ))
         )}
-        {outputs.length > 0 && (
+        {automations > 0 && (
           <p className="text-muted-foreground">
-            <span className="font-medium text-foreground">Produces:</span>{" "}
-            {outputs
-              .map((o) =>
-                typeof o.label === "string" ? o.label : readableName(o.name || "Result"),
-              )
-              .join(", ")}
+            {automations} {automations === 1 ? "automation" : "automations"} can start it.
           </p>
         )}
-        <p className="text-muted-foreground" data-testid="routine-effects-line">
-          {effectLine}
-        </p>
-        <p>
-          <span className="font-medium">Runs:</span>{" "}
-          {plan ? `${describeCron(plan.cron_expr)} · ${plan.timezone || "UTC"}` : "Manual"}
-          {automations > 0 && ` · ${automations} automation${automations === 1 ? "" : "s"}`}{" "}
-          ·{" "}
-          <button type="button" className="text-primary hover:underline" onClick={onPlan}>
-            change plan
-          </button>
-        </p>
+        <Button variant="outline" size="sm" className="mt-1" onClick={onPlan}>
+          Change plan
+        </Button>
       </div>
     </DetailCard>
   )
 }
-
 
 /**
  * Everything the routine can reach, as one row of chips.
@@ -992,6 +1121,3 @@ function RunsList({ slug, workspaceId }: { slug: string; workspaceId: string }) 
   )
 }
 
-// Referenced for the Pill import so the identity chrome in the panel
-// above can keep using the same tone vocabulary.
-void Pill

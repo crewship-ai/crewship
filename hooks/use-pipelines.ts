@@ -49,6 +49,19 @@ export interface Pipeline {
   // row can render a chip like "ENG-12 +2".
   linked_issue_count?: number
   linked_issues?: string[]
+  // A saved draft newer than the published version, when a row exists in
+  // pipeline_drafts for this slug. `updated_by` is the stored user id; the
+  // page renders it as "you" when it is the viewer's own and as the raw id
+  // otherwise (no lookup). Absent on older servers.
+  draft?: PipelineDraftSummary
+}
+
+/** The `draft` field of a list row and of the detail (contract §"API additions"). */
+export interface PipelineDraftSummary {
+  id: string
+  revision: number
+  updated_at: string
+  updated_by?: string
 }
 
 // PipelineRunSummary is the shape ListRuns returns — a journal entry

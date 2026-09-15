@@ -25,7 +25,7 @@ import { isRoutineTestFixture, type RoutineFilterState as RoutineFilters } from 
 import { RoutineRunDetail } from "./routine-run-detail"
 import { RoutinesWorkspace } from "./routines-workspace"
 import { RoutinesDetailPanel } from "./routines-detail-panel"
-import { RoutineCreateDialog } from "./routine-create-dialog"
+import { RoutineNewDialog } from "./routine-new-dialog"
 
 // Keep the shared explorer mounted across overview, definition and historical
 // run views. The URL identifies the routine and optional execution; filters
@@ -86,9 +86,24 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
   }
   const [importDialogOpen, setImportDialogOpen] = useState(false)
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
+  // The lead's "Open the draft" link: /routines?draft=<slug>&draft_id=…
+  // (&workspace=…). There is no editor to land in any more — the routine
+  // page itself shows the draft row on top — so the link opens that page
+  // and the draft params are cleared from the address.
   const [linkedDraft, setLinkedDraft] = useUrlSelection("draft")
   const [linkedDraftId, setLinkedDraftId] = useUrlSelection("draft_id")
   const [linkedWorkspace, setLinkedWorkspace] = useUrlSelection("workspace")
+  useEffect(() => {
+    if (!linkedDraft) return
+    const slug = linkedDraft
+    setLinkedDraft(null, { replace: true })
+    setLinkedDraftId(null, { replace: true })
+    setLinkedWorkspace(null, { replace: true })
+    setSelectedRun(null, { replace: true })
+    setDetailView(null, { replace: true })
+    setSelectedSlug(slug, { replace: true })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [linkedDraft, linkedDraftId, linkedWorkspace])
 
   // Keyboard shortcuts (mirrors /issues): `/` focuses the explorer's
   // search input, `Esc` clears every filter, `c` opens the create
@@ -341,28 +356,17 @@ export function RoutinesLayout({ workspaceId }: RoutinesLayoutProps) {
         />
       )}
 
-      {/* Create dialog — Test & Save flow with starter templates */}
-      <RoutineCreateDialog
+      {/* New routine — Describe it · Copy an existing routine · Build it with
+          the CLI. Every way in ends as a draft on the routine page. */}
+      <RoutineNewDialog
         workspaceId={workspaceId}
-        open={createDialogOpen || !!linkedDraft}
-        savedDraftLink={
-          linkedDraft
-            ? {
-                slug: linkedDraft,
-                id: linkedDraftId || undefined,
-                workspaceId: linkedWorkspace || undefined,
-              }
-            : undefined
-        }
-        onClose={() => {
-          setCreateDialogOpen(false)
-          void setLinkedDraft(null, { replace: true })
-          void setLinkedDraftId(null, { replace: true })
-          void setLinkedWorkspace(null, { replace: true })
-        }}
-        onCreated={(slug) => {
+        open={createDialogOpen}
+        onOpenChange={setCreateDialogOpen}
+        routines={pipelines}
+        onCreated={refresh}
+        onOpenRoutine={(slug) => {
           setSelectedRun(null, { replace: true })
-          refresh()
+          setDetailView(null, { replace: true })
           setSelectedSlug(slug)
         }}
       />

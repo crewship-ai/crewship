@@ -189,7 +189,7 @@ describe("client routine workspace", () => {
         }}
       />,
     )
-    expect(screen.getByText("Only if")).toBeInTheDocument()
+    expect(screen.getByTestId("routine-step-only")).toHaveTextContent("Only when inputs.enabled")
     expect(screen.getAllByText("Runs after: fetch").length).toBeGreaterThan(0)
     expect(screen.queryByText(/Ready to run/)).not.toBeInTheDocument()
   })

@@ -84,9 +84,12 @@ describe("routine step spine", () => {
       />,
     )
     const summary = document.querySelector('[data-step-id="join"] > summary')!
-    expect(summary).toHaveTextContent("Depends on: left, right")
-    expect(screen.getByText(/not execution order/)).toBeVisible()
+    expect(summary).toHaveTextContent("after Transform data, Transform data")
+    expect(screen.getAllByText(/Phases come from declared dependencies/).length).toBeGreaterThan(0)
     expect(summary.querySelector("[data-step-kind]")).not.toHaveTextContent("1")
+    // Two phases: the two independent transforms first, the join after them.
+    expect(screen.getByTestId("routine-phase-1")).toHaveTextContent("First · 2 in parallel")
+    expect(screen.getByTestId("routine-phase-2")).toHaveTextContent("Then")
   })
 
   it("opens a failed step beyond the initial limit and respects a manual close during polling", async () => {
@@ -116,14 +119,14 @@ describe("routine step spine", () => {
   })
   it("describes the saved recipe without claiming any state", () => {
     render(<RoutineStepSpine definition={definition} />)
-    expect(screen.getByText("What this routine does")).toBeInTheDocument()
+    expect(screen.getByText("How it works")).toBeInTheDocument()
     expect(document.querySelector('[data-step-id="probe"] > summary')).toHaveTextContent(
       "Run script probe",
     )
     expect(document.querySelector('[data-step-id="triage"] > summary')).toHaveTextContent(
       "Ask morgan",
     )
-    expect(screen.getByText("Only if")).toBeInTheDocument()
+    expect(screen.getByTestId("routine-step-only")).toHaveTextContent("Only when steps.triage.ok")
     expect(screen.queryByText(/No response recorded/)).not.toBeInTheDocument()
     expect(screen.queryByText("Done")).not.toBeInTheDocument()
   })
@@ -183,6 +186,89 @@ describe("routine step spine", () => {
     fireEvent.click(screen.getAllByText("Details")[0])
     expect(screen.getAllByText("Step responses could not be loaded.").length).toBeGreaterThan(0)
     expect(screen.queryByText(/No response was recorded for this step/)).not.toBeInTheDocument()
+  })
+
+  it("folds helper transforms, nests a foreach, draws hooks and chips on a complex recipe", () => {
+    render(
+      <RoutineStepSpine
+        slug="docs-drift-audit"
+        definition={{
+          hooks: {
+            before_all: { id: "clean", type: "code", name: "Clean the scratch folder" },
+            on_failure: { id: "tell", type: "notify", name: "Tell #docs the audit did not finish", notify: { to: "workspace" } },
+          },
+          steps: [
+            { id: "scan", type: "script", name: "Scan the repository", script: { path: "scripts/docs_audit.sh" }, timeout_seconds: 600 },
+            { id: "a", type: "transform", name: "Panel state", needs: ["scan"] },
+            { id: "b", type: "transform", name: "Panel label", needs: ["scan"] },
+            { id: "c", type: "transform", name: "Commit label", needs: ["scan"] },
+            { id: "pairs", type: "transform", name: "Doc pairs", needs: ["scan"] },
+            {
+              id: "judge_each", type: "foreach", name: "Judge each candidate", needs: ["pairs"],
+              foreach: { items: "{{ steps.pairs.output }}", parallelism: 3, steps: [
+                { id: "fetch", type: "http", name: "Fetch the doc page", http: { url: "https://github.com" }, retry: { max_attempts: 3 } },
+                { id: "judge", type: "agent_run", name: "Decide: real drift?", agent_slug: "jordan", outcomes: { grader_agent_slug: "vale", criteria: [{ name: "a", rule: "a" }, { name: "b", rule: "b" }, { name: "c", rule: "c" }] } },
+              ] },
+            },
+            { id: "post", type: "notify", name: "Post the summary", notify: { to: "workspace" }, needs: ["judge_each"], if: "steps.total.output > 0" },
+          ],
+        }}
+      />,
+    )
+    expect(screen.getByText(/7 steps \(9 with nested\) · 2 hooks/)).toBeInTheDocument()
+    expect(screen.getByTestId("routine-phase-before_all")).toHaveTextContent("Before the run")
+    expect(screen.getByTestId("routine-phase-on_failure")).toHaveTextContent("If the run fails")
+    expect(document.querySelector('[data-step-id="clean"]')).toHaveAttribute("data-hook", "before_all")
+    expect(screen.getByTestId("routine-phase-2")).toHaveTextContent("Then · 4 in parallel")
+    expect(screen.getByTestId("routine-fold-2")).toHaveTextContent("4 data preparations from Scan the repository")
+    expect(document.querySelector('[data-step-id="a"]')).toBeNull()
+    expect(document.querySelector('[data-step-id="fetch"]')).toHaveAttribute("data-nested", "true")
+    expect(screen.getByTestId("routine-step-loop")).toHaveTextContent("3 at a time · 2 steps per item")
+    const scan = document.querySelector('[data-step-id="scan"] > summary')!
+    expect(scan).toHaveTextContent("⏱ 10 min")
+    expect(scan.querySelector('[data-testid="routine-step-file"]')).toHaveTextContent("docs_audit.sh")
+    expect(document.querySelector('[data-step-id="fetch"] > summary')).toHaveTextContent("3 attempts")
+    expect(document.querySelector('[data-step-id="judge"] > summary')).toHaveTextContent("✓ 3 rules · vale")
+    expect(document.querySelector('[data-step-id="post"] > summary')).toHaveTextContent("after Judge each candidate")
+    expect(screen.getByTestId("routine-step-only")).toHaveTextContent("Only when steps.total.output > 0")
+    expect(screen.queryByText(/Show all/)).not.toBeInTheDocument()
+  })
+
+  it("caps a long recipe at nine rows and shows the rest on request", () => {
+    render(
+      <RoutineStepSpine
+        definition={{ steps: Array.from({ length: 14 }, (_, i) => ({ id: `s${i}`, type: "http", name: `Call ${i}`, http: { url: "https://x" } })) }}
+      />,
+    )
+    expect(document.querySelectorAll("details[data-step-id]")).toHaveLength(9)
+    fireEvent.click(screen.getByRole("button", { name: "Show all 14 rows" }))
+    expect(document.querySelectorAll("details[data-step-id]")).toHaveLength(14)
+  })
+
+  it("opens a big phased recipe on the grouped map and drills into a phase and group", () => {
+    const services = ["Billing", "Ledger", "Auth", "Search", "Mailer", "Reports", "Webhooks", "Pages"]
+    const steps: Record<string, unknown>[] = [
+      { id: "build", type: "http", name: "Fetch the build", http: { url: "https://ci" } },
+      { id: "matrix", type: "transform", name: "Prepare the matrix", needs: ["build"] },
+    ]
+    for (const svc of services)
+      for (let i = 0; i < 12; i += 1)
+        steps.push({ id: `${svc.toLowerCase()}_${i}`, type: "script", name: `Check ${i} on ${svc}`, script: { path: `checks/${svc.toLowerCase()}/${i}.sh` }, needs: ["matrix"] })
+    steps.push({ id: "post", type: "notify", name: "Post the matrix", notify: { to: "workspace" }, needs: steps.slice(2).map((s) => s.id) })
+    render(<RoutineStepSpine definition={{ steps }} />)
+    expect(screen.getByRole("button", { name: "map", exact: true })).toHaveAttribute("aria-pressed", "true")
+    const map = screen.getByTestId("routine-grouped-map")
+    expect(map).toHaveTextContent("Then · 96")
+    expect(screen.getByTestId("routine-map-node-name:Billing")).toHaveTextContent("×12")
+    fireEvent.click(screen.getByTestId("routine-map-node-name:Billing"))
+    expect(screen.getByRole("button", { name: "list", exact: true })).toHaveAttribute("aria-pressed", "true")
+    expect(screen.getByTestId("routine-phase-3")).toHaveTextContent("Then · 96 steps in parallel")
+    expect(screen.getByTestId("routine-phase-3")).toHaveTextContent("Script ×96 · 8 groups")
+    expect(screen.getByTestId("routine-group-group:3:name:Billing")).toHaveTextContent("Billing · 12 steps")
+    expect(document.querySelectorAll('details[data-step-id^="billing_"]')).toHaveLength(12)
+    expect(document.querySelectorAll('details[data-step-id^="ledger_"]')).toHaveLength(0)
+    fireEvent.click(screen.getByTestId("routine-phase-3"))
+    expect(screen.queryByTestId("routine-group-group:3:name:Billing")).toBeNull()
   })
 
   it("returns from the map to the list with the selected step open", () => {
