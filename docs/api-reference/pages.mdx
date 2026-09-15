@@ -74,6 +74,35 @@ validation.
 | GET | [`/api/v1/public/pages/{token}`](#view-a-public-page) | Public read, no account |
 | POST | [`/api/v1/public/pages/{token}/unlock`](#unlock-a-public-page) | Submit a public link's password |
 
+A page may carry a [custom application](/guides/pages#custom-applications);
+its source, build, review and publication routes are the
+[custom application contract](#custom-application-contract) at the end of
+this page:
+
+| Method | Endpoint | Purpose |
+|---|---|---|
+| GET | [`/api/v1/pages/{slug}/project`](#read-custom-source) | The current source draft and its definition |
+| PUT | [`/api/v1/pages/{slug}/project`](#save-custom-source) | Save a source revision |
+| GET | [`/api/v1/pages/{slug}/project/source`](#read-candidate-source-evidence) | The draft's files without the definition |
+| POST | [`/api/v1/pages/{slug}/project/build`](#build-custom-source) | Compile a revision |
+| GET | [`/api/v1/pages/{slug}/project/preview`](#read-build-preview) | The latest build and its artifact |
+| GET | [`/api/v1/pages/{slug}/project/history`](#list-source-history) | Source revisions |
+| GET | [`/api/v1/pages/{slug}/project/history/{revision}`](#read-historical-source) | One archived revision with its definition |
+| GET | [`/api/v1/pages/{slug}/project/history/{revision}/source`](#read-archived-source-evidence) | One archived revision's files only |
+| POST | [`/api/v1/pages/{slug}/project/restore`](#restore-source-draft) | Make an archived revision the new draft |
+| POST | [`/api/v1/pages/{slug}/project/check`](#check-a-publication-candidate) | Verify a built candidate |
+| GET | [`/api/v1/pages/{slug}/project/review`](#review-a-publication-candidate) | The snapshot a publication is fenced on |
+| POST | [`/api/v1/pages/{slug}/project/publish`](#publish-or-roll-back-an-application) | Publish a candidate, or republish a retained version |
+| GET | [`/api/v1/pages/{slug}/project/publications`](#publication-history-and-withdrawal) | Publication receipts |
+| POST | [`/api/v1/pages/{slug}/project/unpublish`](#publication-history-and-withdrawal) | Withdraw the live application |
+| GET | `/api/v1/pages/{slug}/project/fsck` | Verify one page's source, checkpoint and artifact integrity |
+| POST | [`/api/v1/pages/maintenance`](#post-/api/v1/pages/maintenance) | Reclaim project storage across the workspace |
+| GET | [`/api/v1/pages/{slug}/application`](#read-the-live-application) | The live application and its artifact |
+| POST | [`/api/v1/pages/{slug}/application/actions/{panelId}/{actionId}`](#dispatch-a-published-action) | Dispatch an action from the published application |
+| GET | [`/api/v1/pages/{slug}/application/actions/{pendingId}`](#read-own-application-action-status) | The caller's own pending action |
+| GET | [`/api/v1/pages/{slug}/application/panels/{panelId}/history`](#application-panel-history) | A panel's recent payloads, for the application |
+| GET | [`/api/v1/pages/runtime/bootstrap`](#bootstrap-the-isolated-runtime) | The isolated runtime's bootstrap document |
+
 Routes are workspace-unscoped; the workspace comes from the session context or
 the `workspace_id` query parameter, the same shape saved views and routines use.
 
@@ -1414,6 +1443,17 @@ to something outside itself, listed so the importer must bind them explicitly:
 The bundle carries no data, no grants and no tokens — an export is a shape, not
 a snapshot of what the page was showing.
 
+**A page with a custom application exports as `crewship-page-bundle/v2`.**
+The bundle then carries `project` — the current draft's source project, the
+same `crewship-page-source/v1` document `PUT …/project` accepts, files and
+lockfile included — and `page` is the draft's authored definition rather than
+the live one, with each panel's `actions`, `wake`, `on_failure` and `refresh`
+and with every `public` flag cleared. A draft that declares a `link` or
+`custom` action is not yet portable and answers **422**. The v2 bundle does
+not carry builds, publications, Git history, grants, credentials or data; it
+is one revision's source and definition, never the application's trusted
+state. An export does not need the compiler.
+
 **Statuses:**
 
 | Status | Condition |
@@ -1423,6 +1463,8 @@ a snapshot of what the page was showing.
 | 401 | No session or token. |
 | 403 | No edit permission, or a panel in the definition the caller cannot read — the bundle would otherwise carry declarations an ordinary read withholds. Only for a caller who reaches the page. |
 | 404 | No such page, or one the caller [cannot reach](#unreachable-pages-are-not-found). |
+| 422 | The draft declares a `link` or `custom` action, which a v2 bundle cannot carry yet. |
+| 503 | The page has a draft and project storage is not configured on this server. |
 
 ---
 
@@ -1451,6 +1493,18 @@ An unbound reference is a **422**, not a guess. Importing a bundle that names
 `crew/ops` into a workspace that happens to have a crew called `ops` would
 otherwise hand a page to whoever holds that name.
 
+A `crewship-page-bundle/v2` body — `format` set to that and `project`
+present — is accepted by the same endpoint and goes through the same binding.
+It creates an **inert draft**: the page is created with its panels, the
+bundle's `project` is stored as source revision 1 with a Git checkpoint, and
+the bundle's authored definition (actions, wake gates, `on_failure`,
+`refresh`) becomes the draft's definition — but the **live** page is written
+without them, nothing is built and nothing is published. Whoever imports it
+builds, reviews and publishes it here, as for any candidate. A v1 body that
+carries `project`, and a v2 body without one, are refused with **400**;
+`public` flags are never read from either. The v2 size cap is the project
+document's plus the spec cap plus 64 KiB, in place of the v1 envelope.
+
 **Response 201:** the created page.
 
 **Statuses:**
@@ -1458,11 +1512,12 @@ otherwise hand a page to whoever holds that name.
 | Status | Condition |
 |---|---|
 | 201 | Imported. |
-| 400 | Unknown bundle format. |
-| 422 | A reference left unbound, or a binding naming something that does not exist. The response lists each one and what would satisfy it. |
+| 400 | Unknown bundle format, a v1 bundle carrying `project`, or a v2 bundle whose `project` does not parse. |
+| 422 | A reference left unbound, or a binding naming something that does not exist — the response lists each one and what would satisfy it; a v2 definition that enables `public` on a panel or declares a `link`/`custom` action. |
 | 401 | No session or token. |
 | 403 | Caller lacks `page.create`, or bound a reference to a crew they do not belong to. |
 | 409 | A page with the requested slug already exists. |
+| 503 | A v2 bundle on a server without project storage configured. |
 
 ---
 
