@@ -52,6 +52,9 @@ See [Routines guide](/guides/routines) for the conceptual overview.
 | Runs | `replay <run_id>` | Re-run a prior run with its original inputs (marked `is_replay`) |
 | Runs | `metadata <run_id>` | Mutate a run's metadata scratchpad (set / increment / append) |
 | Runs | `signal <run_id>` | Deliver a payload to a running run's `wait:event` step (topic-wide: [`crewship signal send`](/cli/signal)) |
+| Runs | `executions <run_id>` | List every step execution a run made (attempts, foreach items, nested steps), or print one execution's output |
+| Runs | `artifacts <run_id>` | List the artifacts a run declared, print one's content, or download a file artifact |
+| Runs | `calendar` | Schedule board: planned occurrences, pending one-time starts and past runs in a time window |
 | Failures | `errors` | List failed runs grouped by error fingerprint |
 | Failures | `bulk-replay` | Replay all failed runs under a fingerprint (after a fix) |
 | Deferred | `pending ...` | List or cancel deferred (delayed/debounced) routine triggers |
@@ -149,6 +152,7 @@ crewship routine save \
 | `--max-consecutive-failures` | | Circuit-breaker trip threshold for the schedule (default `5`) |
 | `--trigger-manual` | | Explicitly declare the routine has no trigger, instead of just omitting one |
 | `--draft` | | Create the trigger disabled and raise one approval item instead of activating it immediately. Requires `--cron` |
+| `--trigger-inputs` | | Preset input the `--cron` schedule fires with, as `key=value` (repeatable; a value that parses as JSON keeps its type, so `count=3` is a number and `who='"3"'` is text). Requires `--cron`. Sent as `trigger.inputs` |
 
 <Note>
   Atomic authoring (B8): passing `--cron` creates the routine, its version,
@@ -160,6 +164,23 @@ crewship routine save \
   the exact `crewship routine schedules activate <id>` command to turn it on
   — that command is also how the one approval item this raises gets
   resolved. `--cron` and `--trigger-manual` are mutually exclusive.
+</Note>
+
+<Note>
+  **`409 schedule_conflict` on re-save.** A recipe change that an enabled,
+  unpinned plan's stored preset can no longer satisfy (a renamed or newly
+  required input) is refused, and the CLI prints the server's hint. The way
+  out is the same save carrying the repaired preset — the plan is updated
+  before the preset gate runs, so this lands where the bare save did not:
+
+  ```bash
+  crewship routine save --name nightly --definition nightly.json --author-crew ops \
+      --cron "0 9 * * *" --trigger-inputs recipient=alice --trigger-inputs count=3
+  ```
+
+  The alternatives the hint names (repair the plan first with
+  `schedules update --inputs`, or disable → publish →
+  repair → re-enable) work too; this one is a single command.
 </Note>
 
 <Note>
@@ -273,6 +294,16 @@ crewship routine run pr-review-structured --inputs '{"diff":"..."}' --invoking-c
 # Force every agent_run step onto a specific tier (eval / debug)
 crewship routine run eval-extract-emails --tier-override fast
 crewship routine run eval-extract-emails --tier-override smart
+
+# One-time start tonight, pinned to the recipe version that passed preflight
+crewship routine run nightly-report --fire-at 2026-09-16T22:00:00Z --inputs '{"who":"alice"}'
+
+# Run an archived version now (a historical manual start; HEAD is untouched)
+crewship routine run nightly-report --pinned-version 3
+
+# Fire and return the run id immediately; poll it later (or add --wait)
+crewship routine run nightly-report --async
+crewship routine run nightly-report --async --wait
 ```
 
 | Flag | Description |
@@ -293,14 +324,19 @@ crewship routine run eval-extract-emails --tier-override smart
 | `--debounce-key` | Coalesce burst triggers sharing this key into one run |
 | `--debounce-window` | Debounce window in seconds (default 30) — fires this long after the last trigger |
 | `--debounce-max` | Max debounce extension in seconds (a continuously-retriggered key still fires by then) |
+| `--fire-at` | One-time start: park the run until this RFC3339 instant (offset required, at most two years out), pinned to the recipe version that passed preflight, and return `SCHEDULED`. Cannot be combined with `--delay`, `--ttl` or `--debounce-key` (`400`). Sent as `fire_at` |
+| `--pinned-version` | Run this archived recipe version instead of HEAD — immediate or `--fire-at` starts only; `--delay`/`--debounce-key` keep their own version policy (`400`). A version that does not exist is `404 recipe version not found`. Sent as `pinned_version` |
+| `--async` | Send `Prefer: respond-async`: the server answers `202 {run_id, status: "IN_PROGRESS"}` as soon as the run row is durable instead of holding the connection for the whole run. Prints the run id and the `crewship wait --routine` / `routine result` follow-ups; combine with `--wait` to poll it to a terminal status |
 
 Output: `run_id`, `status`, `output`, `duration_ms`, `cost_usd`. Immediate runs
 use `COMPLETED`, `FAILED`, or `CANCELLED`; `WAITING` means the run is parked at
 an approval waitpoint and is not a failure; `DEDUPED` means the idempotency key
-returned the original run. A delayed or debounced invocation returns
-`SCHEDULED` with `pending_id`, `fire_at`, `priority`, and `coalesced` instead
-of a run id. The API uses `200` for immediate results and `202` for this
-deferred receipt.
+returned the original run. A delayed, debounced or `--fire-at` invocation
+returns `SCHEDULED` with `pending_id`, `fire_at`, `priority`, and `coalesced`
+instead of a run id (a `--fire-at` start also appears in
+[`pending list`](#pending-list) with its pinned `RECIPE VERSION`). With
+`--async` the receipt is `IN_PROGRESS` plus the run id. The API uses `200` for
+immediate results and `202` for the deferred and async receipts.
 
 <Note>
 If the routine hits a `kind: approval` gate, `run` terminates with **`status: WAITING`** (exit 0, not a failure): it prints `paused at approval step: <id>` plus the waitpoint token and the `approve`/`reject` command hints, then releases its execution slot. Resume it with [`crewship routine waitpoints approve|reject <token>`](#crewship-routine-waitpoints). See [HITL waitpoints](/guides/routines#hitl-waitpoints).
@@ -975,14 +1011,21 @@ crewship routine schema -o routine.schema.json
 Test a selected top-level step without contacting Crewship or executing external
 work. This is separate from `validate` (no step computation) and `step-run`
 (real execution). The editor exposes the same implementation under **Test →
-Test with fixtures**. The HTTP API exposes the same implementation at
-`POST /api/v1/workspaces/{workspaceId}/pipelines/fixture_test`.
+Test with fixtures**. The HTTP API exposes it at
+`POST /api/v1/workspaces/{workspaceId}/pipelines/fixture_test`, and `--remote`
+sends this command's input there instead of running it in the binary — the
+same request body, the same report, and the server's `400` (untestable recipe
+or step) or `403` (below the `create` tier) relayed as the usual API error.
+Use it from an agent container that has a token but no local build, or to
+confirm the server's build reaches the verdict yours does. The default stays
+offline: no login, no workspace, no network.
 
 ```bash
 crewship routine fixture-test invoice.json --step normalize \
   --input @sample-inputs.json --outputs @captured-outputs.json
 crewship routine fixture-test invoice.json --step fetch \
   --fixture-output-file sample-response.json
+crewship routine fixture-test invoice.json --step normalize --input @sample-inputs.json --remote
 ```
 
 | Option | Meaning |
@@ -991,6 +1034,10 @@ crewship routine fixture-test invoice.json --step fetch \
 | `--input` | Typed JSON object, inline or `@file`; recipe defaults apply. |
 | `--outputs` | JSON object keyed by upstream step ID, inline or `@file`. |
 | `--fixture-output-file` | Explicit replacement output for an agent, HTTP or script step. An empty file is an empty fixture. |
+| `--env` | Sample `env.*` and `run.*` values: string-valued JSON object, inline or `@file`. |
+| `--metadata` | Sample `run.metadata.*` values: JSON object, inline or `@file`. |
+| `--secrets` | Fake `secrets.*` samples: string-valued JSON object, inline or `@file`. Never real credentials. |
+| `--remote` | Run the test on the configured server (needs login + workspace) instead of in this binary. |
 
 Transforms use the same pure Go transform implementation as a live run and
 refuse missing template values. Agent/HTTP/script steps only validate the
@@ -1383,6 +1430,100 @@ run parked on an event without knowing which they are, use
 
 ---
 
+## `crewship routine executions <run_id>`
+
+Every step invocation a run made — retries, `foreach` items and nested
+`call_pipeline` steps each get their own row — with status, agent, model and
+the size of the output. Pages of 100; the command prints the next-page
+command when more remain. Distinct from `routine logs`
+(the journal trace) and `routine tree` (child *runs*,
+not steps).
+
+```bash
+crewship routine executions run_cmox10oci00016b48aacd
+crewship routine executions run_cmox10oci00016b48aacd --after 100
+crewship routine executions run_cmox10oci00016b48aacd --execution-id exec_9f0c... > step-output.txt
+crewship routine executions run_cmox10oci00016b48aacd -f json
+```
+
+| Flag | Description |
+|------|-------------|
+| `--after` | Cursor from the previous page's `next_cursor` (sent as `?after=`) |
+| `--execution-id` | Print this one execution's output instead of the list (sent as `?execution_id=`) |
+
+**Output columns:** EXECUTION_ID, PATH (`execution_path`, e.g. `/review/items/2/summarise`), ATTEMPT, KIND, STATUS (`running`, `completed`, `failed`, `skipped`, `waiting`, `cancelled`; a `running` row of a finished run reads `interrupted`), AGENT, MODEL, STARTED, ENDED, OUTPUT (size), ERROR.
+
+The list carries sizes, never transcripts — an execution's output can be
+megabytes, so it is a second call with `--execution-id`, which prints the
+output verbatim (`-f json` gives `{ id, output }`). `-f json` on the list is
+the endpoint's page: `{ rows[], next_cursor }`. An unknown run or execution is
+`404`; a malformed cursor is `400`.
+
+---
+
+## `crewship routine artifacts <run_id>`
+
+The artifacts a run **declared** — an `artifacts` envelope in a step's JSON
+output, or `/crew/shared` paths in its handoff — promoted, immutable, and tied
+to the step execution that produced them. Distinct from
+`routine result`, which lists files that *changed*
+on the crew during the run. Pages of 50.
+
+```bash
+crewship routine artifacts run_cmox10oci00016b48aacd
+crewship routine artifacts run_cmox10oci00016b48aacd --artifact-id art_7c1e...
+crewship routine artifacts run_cmox10oci00016b48aacd --download art_7c1e... --out report.pdf
+crewship routine artifacts run_cmox10oci00016b48aacd --download art_7c1e... --out - | wc -c
+```
+
+| Flag | Description |
+|------|-------------|
+| `--after` | Cursor from the previous page's `next_cursor` (sent as `?after=`) |
+| `--artifact-id` | Print this artifact's inline content (text/JSON kinds) instead of the list (sent as `?artifact_id=`) |
+| `--download` | Stream this **file** artifact's stored bytes (sent as `?download=`); a text artifact has no blob and is `404` |
+| `--out` | Where `--download` writes (default: the file name the server sends; `-` for stdout). Written atomically |
+
+`--artifact-id` and `--download` are mutually exclusive.
+
+**Output columns:** ARTIFACT_ID, KIND, LABEL, STATE, MEDIA_TYPE, SIZE (`content_bytes`), PATH (the producing `execution_path`), SOURCE, ERROR.
+
+`-f json` on the list is the endpoint's page: `{ artifacts[], truncated,
+next_cursor }`; with `--artifact-id` it is `{ id, content }`. A download is raw
+bytes with the artifact's own content type, never JSON.
+
+---
+
+## `crewship routine calendar`
+
+The routines workspace's Plan board as a list. One window, three kinds of
+event: `planned` occurrences computed from enabled schedules, `pending`
+one-time or deferred starts already parked (`run --fire-at`, `--delay`,
+`--debounce-key`), and `run` rows that executed. Past entries are real runs —
+never yesterday's cron extrapolated backwards.
+
+```bash
+crewship routine calendar                                     # the coming week
+crewship routine calendar --from 2026-10-01T00:00:00Z --to 2026-10-08T00:00:00Z
+crewship routine calendar --to 2026-09-20T00:00:00Z -f json
+```
+
+| Flag | Description |
+|------|-------------|
+| `--from` | RFC3339 start of the window (default: now). Sent as `?from=` |
+| `--to` | RFC3339 end of the window, at most 32 days after `--from` (default: `--from` + 7 days). Sent as `?to=` |
+
+**Output columns:** AT, KIND, ROUTINE, RESULT (`status/outcome` for `run` rows), VERSION (pinned recipe for `pending` rows and pinned plans), INPUTS (the read-only preset preview, `—` for runs), ID (`schedule_id:instant` for planned, `pending_id`, or `run_id`).
+
+The table is sorted by time; `-f json` is the endpoint's body `{ events[],
+truncated }` in the server's order (planned, pending, run). Planned and pending
+events carry an `inputs` preview that keeps safe primitives and replaces
+credential, file and secret-looking values with `{type: "credential"|"file"|"redacted"}`
+— it cannot replay a run. A window holding more than the server returns
+(1,000 events) prints a truncation warning: narrow the window rather than
+paging. A window outside zero to 32 days, or a malformed instant, is `400`.
+
+---
+
 ## `crewship routine errors`
 
 List the workspace's failed runs bucketed by a stable error fingerprint (failing step + normalized message) so like failures group together. Pick a fingerprint and replay the whole bucket with [`bulk-replay`](#crewship-routine-bulk-replay).
@@ -1428,7 +1569,7 @@ List or cancel deferred routine triggers — the parked dispatches created by `r
 crewship routine pending list
 ```
 
-Requires login and workspace context. Backed by `GET /api/v1/workspaces/{ws}/pipelines/pending` (`200 OK`, member-scoped), which returns at most 100 not-yet-fired rows with `id`, `pipeline_slug`, optional `debounce_key`, `priority`, and RFC3339Nano `fire_at`. **Output columns:** PENDING ID, ROUTINE, PRIORITY, DEBOUNCE KEY, FIRES AT. Nothing pending prints `No deferred triggers pending.`
+Requires login and workspace context. Backed by `GET /api/v1/workspaces/{ws}/pipelines/pending` (`200 OK`, member-scoped), which returns at most 100 not-yet-fired rows with `id`, `pipeline_slug`, optional `debounce_key`, `priority`, RFC3339Nano `fire_at`, `pinned_version` (the archived recipe the start will run; `null` for a legacy row that resolves HEAD at dispatch) and a read-only `inputs` preview. **Output columns:** PENDING ID, ROUTINE, PRIORITY, DEBOUNCE KEY, FIRES AT, RECIPE VERSION (`v3`, or `live at dispatch (legacy/deferred)` when unpinned). Nothing pending prints `No deferred triggers pending.` A `run --fire-at` start shows up here pinned to the version that passed preflight.
 
 ### `pending cancel <pending_id>`
 
