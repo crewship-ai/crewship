@@ -6376,15 +6376,7 @@
           },
           "facts": {
             "items": {
-              "properties": {
-                "key": {
-                  "type": "string"
-                },
-                "value": {
-                  "type": "string"
-                }
-              },
-              "type": "object"
+              "$ref": "#/components/schemas/FinalUserModelFact"
             },
             "type": "array"
           },
@@ -6398,6 +6390,20 @@
             "type": "string"
           },
           "workspace_id": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "FinalUserModelFact": {
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "provenance": {
+            "$ref": "#/components/schemas/FinalUserModelProvenance"
+          },
+          "value": {
             "type": "string"
           }
         },
@@ -6426,6 +6432,23 @@
             "type": "array"
           },
           "user_id": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "FinalUserModelProvenance": {
+        "properties": {
+          "at": {
+            "type": "string"
+          },
+          "message_id": {
+            "type": "string"
+          },
+          "quote": {
+            "type": "string"
+          },
+          "source_type": {
             "type": "string"
           }
         },
