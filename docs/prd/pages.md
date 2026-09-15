@@ -556,7 +556,7 @@ Three rules decided 2026-08-12:
    orchestration role the feature exists for. `write` is authority over arrangement, never over
    content.
 3. **An unauthorised push is a signal, not noise.** A `produce` attempt on a panel the caller does
-   not hold returns **403**, writes a journal entry, and notifies the page owner. It is equally
+   not hold returns **403** if the caller can reach the page, or the same **404** as a missing page otherwise. It writes a journal entry and notifies the page owner. It is equally
    likely to be a misconfiguration or an injection, and both deserve a human's attention on the
    first occurrence rather than the hundredth.
 
@@ -1442,7 +1442,7 @@ Repo rule: red test → fix → green, and it must fail on current `main`.
     panel's data in any subsequent read (§7.1b rule 2 — one test, both halves);
   - an agent cannot issue a grant by any route, including on its own crew (§7.1b rule 1);
   - an agent grant narrows automatically when the granting human loses the underlying access;
-  - an unauthorised `produce` returns 403, writes a journal entry **and** notifies the owner
+  - an unauthorised `produce` returns 403 for a reachable page (404 otherwise), writes a journal entry **and** notifies the owner
     (§7.1b rule 3);
   - a producer token cannot claim another agent's identity via the request body;
   - agent-created page records the authorising human as owner.

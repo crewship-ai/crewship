@@ -309,8 +309,8 @@ func TestPageGrants_AuthorityNarrowsWithTheIssuerAtUseTime(t *testing.T) {
 			t.Fatalf("remove issuer from workspace: %v", err)
 		}
 
-		if push := pagesPush(t, h, wsID, "grantee", "MEMBER", "fleet-201", "sluzby", pagesStatusPayload); push.Code != http.StatusForbidden {
-			t.Fatalf("status = %d, want 403 — a grant whose issuer left the workspace is authority delegated by nobody; body: %s",
+		if push := pagesPush(t, h, wsID, "grantee", "MEMBER", "fleet-201", "sluzby", pagesStatusPayload); push.Code != http.StatusNotFound {
+			t.Fatalf("status = %d, want 404 — a grant whose issuer left the workspace is authority delegated by nobody; body: %s",
 				push.Code, push.Body.String())
 		}
 		if n := pagesGrantRows(t, h, pageID); n != 1 {
@@ -346,8 +346,8 @@ func TestPageGrants_AuthorityNarrowsWithTheIssuerAtUseTime(t *testing.T) {
 			t.Fatalf("demote issuer: %v", err)
 		}
 
-		if push := pagesPush(t, h, wsID, "grantee", "MEMBER", "fleet-201", "sluzby", pagesStatusPayload); push.Code != http.StatusForbidden {
-			t.Fatalf("status = %d, want 403 — a demoted issuer cannot keep delegating authority they no longer hold; body: %s",
+		if push := pagesPush(t, h, wsID, "grantee", "MEMBER", "fleet-201", "sluzby", pagesStatusPayload); push.Code != http.StatusNotFound {
+			t.Fatalf("status = %d, want 404 — a demoted issuer cannot keep delegating authority they no longer hold; body: %s",
 				push.Code, push.Body.String())
 		}
 		if n := pagesGrantRows(t, h, pageID); n != 1 {
@@ -635,9 +635,13 @@ func TestPageGrants_OnlyTheOwnerOrAnAdminAdministersThem(t *testing.T) {
 			{"DELETE", "/api/v1/pages/fleet-201/grants?subject_type=user&subject=writer@example.com", ""},
 		} {
 			rr := pagesGrantCall(t, h, call.method, call.target, wsID, caller, "MEMBER", "fleet-201", call.body)
-			if rr.Code != http.StatusForbidden {
-				t.Errorf("%s %s as %q: status = %d, want 403 — widening access is not itself grantable; body: %s",
-					call.method, call.target, caller, rr.Code, rr.Body.String())
+			want := http.StatusForbidden
+			if caller == "bystander" {
+				want = http.StatusNotFound
+			}
+			if rr.Code != want {
+				t.Errorf("%s %s as %q: status = %d, want %d; body: %s",
+					call.method, call.target, caller, rr.Code, want, rr.Body.String())
 			}
 		}
 	}
