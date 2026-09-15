@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/cli"
+	"github.com/crewship-ai/crewship/internal/memory"
 	"github.com/spf13/cobra"
 )
 
@@ -156,7 +157,13 @@ var evalBaselineSaveCmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("marshal baseline: %w", err)
 		}
-		if err := os.WriteFile(path, data, 0o644); err != nil {
+		// Durable, not os.WriteFile (#2124): the path is derived from the
+		// name, not chosen by the operator, and `eval baseline diff` reads
+		// it back later as the regression reference. os.WriteFile truncates
+		// before it writes, so an interrupted re-save of "main" destroyed
+		// the previous good baseline; the rename replaces it whole or not
+		// at all.
+		if err := memory.WriteFileDurable(path, data, 0o644); err != nil {
 			return fmt.Errorf("write baseline: %w", err)
 		}
 		fmt.Fprintf(cmd.OutOrStderr(), "\nSaved baseline %q → %s (%d cells)\n", name, path, len(rec.Cells))

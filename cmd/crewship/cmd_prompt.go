@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/crewship-ai/crewship/internal/cli"
+	"github.com/crewship-ai/crewship/internal/memory"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )
@@ -150,7 +151,12 @@ Examples:
 				return fmt.Errorf("read stdin: %w", err)
 			}
 		}
-		if err := os.WriteFile(path, data, 0o600); err != nil {
+		// Durable, not os.WriteFile (#2124): this is library state that a
+		// later `prompt use` pipes straight into ask/run, and os.WriteFile
+		// truncates before it writes. Re-saving an existing prompt must
+		// replace it whole or not at all, never leave a torn file for the
+		// next command to read as the prompt.
+		if err := memory.WriteFileDurable(path, data, 0o600); err != nil {
 			return fmt.Errorf("write %s: %w", path, err)
 		}
 		fmt.Fprintf(os.Stderr, "%s[saved %d bytes → %s]%s\n",

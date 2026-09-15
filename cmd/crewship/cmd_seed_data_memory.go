@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/cli"
+	"github.com/crewship-ai/crewship/internal/memory"
 )
 
 // safePathSegment rejects values that could escape a filepath.Join base
@@ -171,11 +172,18 @@ func resolveStorageBasePath() string {
 // seed with --with-memory doesn't clobber any edits an operator made
 // after the first seed. To force-overwrite, delete the file first
 // or pass --nuke before re-seeding.
+//
+// Durable, not os.WriteFile (#2124): these are PERSONA.md, pins.md and
+// learned.md under the storage base path, which the running server reads
+// as memory content, and os.WriteFile's create and first write are two
+// syscalls with an empty file visible between them. The os.Stat guard
+// above makes that worse than a one-shot write: a torn first write is
+// never repaired, because the next seed sees the file and skips it.
 func writeFileIfAbsent(path, content string) error {
 	if _, err := os.Stat(path); err == nil {
 		return nil
 	}
-	return os.WriteFile(path, []byte(content), 0o644)
+	return memory.WriteFileDurable(path, []byte(content), 0o644)
 }
 
 func demoAgentMD(agentSlug, crewSlug string) string {
