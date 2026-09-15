@@ -119,13 +119,13 @@ describe("<RoutinesWorkspace> — the overview pane", () => {
       { id: "s1", enabled: true, target_pipeline_slug: "report", cron_expr: "30 2 * * *", timezone: "Europe/Prague", next_run_at: new Date(Date.now() + 3_600_000).toISOString() },
     ]
     renderPane()
-    expect(screen.getByRole("link", { name: /1 run is waiting for your decision/ })).toHaveAttribute("href", "/routines?slug=report&run=run_1")
-    expect(screen.getByRole("link", { name: /Next planned start/ })).toHaveAttribute("href", "/routines?slug=report&view=plan")
+    expect(screen.getByRole("link", { name: /1 decision waiting/ })).toHaveAttribute("href", "/routines?slug=report&run=run_1")
+    expect(screen.getByRole("link", { name: /Next start/ })).toHaveAttribute("href", "/routines?slug=report&view=plan")
     // The explorer's status filter narrows the pane too.
     cleanup()
     renderPane({ filters: { ...filters, status: "failed" } })
-    expect(screen.queryByRole("link", { name: /waiting for your decision/ })).toBeNull()
-    expect(screen.getByRole("link", { name: /1 routine could not finish last time/ })).toBeInTheDocument()
+    expect(screen.queryByRole("link", { name: /decision waiting/ })).toBeNull()
+    expect(screen.getByRole("link", { name: /1 could not finish/ })).toBeInTheDocument()
   })
 
   it("says what the empty workspace means instead of leaving a pane", () => {

@@ -11,9 +11,9 @@ import { InlineEmpty } from "@/components/ui/inline-empty"
 import { DashboardCard } from "@/components/features/dashboard/dashboard-card"
 import { RunVolumeChart, type RunVolumeBucket, type RunVolumeSeries } from "@/components/features/dashboard/run-volume-chart"
 import { AttentionStrip, OutcomeKpis, UpNext, type AttentionItem, type OutcomeKpiData } from "@/components/features/dashboard/dashboard-overview"
-import { crewColor, foldRunVolumeSeries, RUN_VOLUME_OTHER_KEY } from "@/app/(dashboard)/dashboard-helpers"
+import { CREW_PALETTE, foldRunVolumeSeries, RUN_VOLUME_OTHER_KEY } from "@/app/(dashboard)/dashboard-helpers"
 import { resolveRoutineIcon, resolveRoutineColor } from "@/lib/routine-identity"
-import { routineRunPresentation, formatAgo } from "@/lib/routine-run-presentation"
+import { routineRunPresentation, formatAgo, formatUntil } from "@/lib/routine-run-presentation"
 import type { OverviewRun } from "@/lib/routines-overview"
 import type { Pipeline } from "@/hooks/use-pipelines"
 import type { PipelineSchedule } from "@/hooks/use-pipeline-schedules"
@@ -112,9 +112,14 @@ export function runVolumeByRoutine(
     slugs.add(run.pipeline_slug)
     buckets[index][run.pipeline_slug] = Number(buckets[index][run.pipeline_slug] ?? 0) + 1
   }
-  const series: RunVolumeSeries[] = [...slugs].map((slug) => {
+  // Hues in the dashboard's fixed categorical order, assigned by slug so a
+  // routine keeps its hue whatever the filters show beside it. Most routines
+  // carry no colour of their own, and the ones that do share a handful, so
+  // painting by routine colour made eight series the same pink.
+  const hues = Object.values(CREW_PALETTE)
+  const series: RunVolumeSeries[] = [...slugs].sort().map((slug, index) => {
     const routine = routines.find((r) => r.slug === slug)
-    return { key: slug, label: routine?.name ?? slug, color: crewColor(routine ? resolveRoutineColor(routine) : undefined) }
+    return { key: slug, label: routine?.name ?? slug, color: hues[index % hues.length] }
   })
   const folded = foldRunVolumeSeries(buckets, series)
   return {
@@ -154,7 +159,7 @@ export function RoutinesDashboard({ routines, runs, runsLoading, schedules, onSe
   if (waiting.length)
     attention.push({
       id: "approvals",
-      label: `${waiting.length} ${waiting.length === 1 ? "run is" : "runs are"} waiting for your decision`,
+      label: `${waiting.length} ${waiting.length === 1 ? "decision" : "decisions"} waiting`,
       detail: `Newest · ${waiting[0].pipeline_name || routineOf(waiting[0].pipeline_slug)?.name || waiting[0].pipeline_slug}`,
       href: routineRunHref(waiting[0].pipeline_slug, waiting[0].id),
       tone: "warn",
@@ -163,7 +168,7 @@ export function RoutinesDashboard({ routines, runs, runsLoading, schedules, onSe
   if (failing.length)
     attention.push({
       id: "failures",
-      label: `${failing.length} ${failing.length === 1 ? "routine" : "routines"} could not finish last time`,
+      label: `${failing.length} could not finish`,
       detail: `Newest · ${failing[0].name}`,
       href: `/routines?${new URLSearchParams({ slug: failing[0].slug })}`,
       tone: "danger",
@@ -172,7 +177,7 @@ export function RoutinesDashboard({ routines, runs, runsLoading, schedules, onSe
   if (nextStart?.target_pipeline_slug)
     attention.push({
       id: "schedules",
-      label: `Next planned start ${formatAgo(nextStart.next_run_at!)}`,
+      label: `Next start in ${formatUntil(nextStart.next_run_at!)}`,
       detail: routineOf(nextStart.target_pipeline_slug)?.name ?? nextStart.target_pipeline_slug,
       href: routineViewHref(nextStart.target_pipeline_slug, "plan"),
       tone: "blue",

@@ -65,9 +65,9 @@ describe("<RoutinesDashboard>", () => {
     render(<RoutinesDashboard routines={routines} runs={runs} schedules={schedules} onSelect={select} />)
     // The attention strip, with routine-shaped items and their verbs.
     expect(screen.getByText("Needs your attention")).toBeInTheDocument()
-    expect(screen.getByRole("link", { name: /1 run is waiting for your decision.*Review/ })).toHaveAttribute("href", "/routines?slug=briefing&run=r4")
-    expect(screen.getByRole("link", { name: /1 routine could not finish last time.*Inspect/ })).toHaveAttribute("href", "/routines?slug=briefing")
-    expect(screen.getByRole("link", { name: /Next planned start.*Review/ })).toHaveAttribute("href", "/routines?slug=invoice&view=plan")
+    expect(screen.getByRole("link", { name: /1 decision waiting.*Review/ })).toHaveAttribute("href", "/routines?slug=briefing&run=r4")
+    expect(screen.getByRole("link", { name: /1 could not finish.*Inspect/ })).toHaveAttribute("href", "/routines?slug=briefing")
+    expect(screen.getByRole("link", { name: /Next start.*Review/ })).toHaveAttribute("href", "/routines?slug=invoice&view=plan")
     // A fourth item is named under the strip, as on /dashboard.
     expect(screen.getByText("1 more:")).toBeInTheDocument()
     expect(screen.getByRole("link", { name: "1 draft to publish" })).toHaveAttribute("href", "/routines?slug=invoice&view=versions")
