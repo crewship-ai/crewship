@@ -256,12 +256,12 @@ describe("routine step spine", () => {
         steps.push({ id: `${svc.toLowerCase()}_${i}`, type: "script", name: `Check ${i} on ${svc}`, script: { path: `checks/${svc.toLowerCase()}/${i}.sh` }, needs: ["matrix"] })
     steps.push({ id: "post", type: "notify", name: "Post the matrix", notify: { to: "workspace" }, needs: steps.slice(2).map((s) => s.id) })
     render(<RoutineStepSpine definition={{ steps }} />)
-    expect(screen.getByRole("button", { name: "map", exact: true })).toHaveAttribute("aria-pressed", "true")
+    expect(screen.getByRole("button", { name: /^map$/ })).toHaveAttribute("aria-pressed", "true")
     const map = screen.getByTestId("routine-grouped-map")
     expect(map).toHaveTextContent("Then · 96")
     expect(screen.getByTestId("routine-map-node-name:Billing")).toHaveTextContent("×12")
     fireEvent.click(screen.getByTestId("routine-map-node-name:Billing"))
-    expect(screen.getByRole("button", { name: "list", exact: true })).toHaveAttribute("aria-pressed", "true")
+    expect(screen.getByRole("button", { name: /^list$/ })).toHaveAttribute("aria-pressed", "true")
     expect(screen.getByTestId("routine-phase-3")).toHaveTextContent("Then · 96 steps in parallel")
     expect(screen.getByTestId("routine-phase-3")).toHaveTextContent("Script ×96 · 8 groups")
     expect(screen.getByTestId("routine-group-group:3:name:Billing")).toHaveTextContent("Billing · 12 steps")
@@ -282,7 +282,7 @@ describe("routine step spine", () => {
         )}
       />,
     )
-    fireEvent.click(screen.getByRole("button", { name: "map", exact: true }))
+    fireEvent.click(screen.getByRole("button", { name: /^map$/ }))
     fireEvent.click(screen.getByRole("button", { name: "pick triage" }))
     expect(screen.queryByRole("button", { name: "pick triage" })).not.toBeInTheDocument()
     const open = document.querySelectorAll("details[open]")

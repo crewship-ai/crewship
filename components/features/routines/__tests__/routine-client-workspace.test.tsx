@@ -118,7 +118,7 @@ describe("client routine workspace", () => {
     expect(await screen.findByRole("heading", { name: "Service report" })).toBeInTheDocument()
     expect(screen.getByText("Recorded files")).toBeInTheDocument()
     expect(screen.queryByTestId("map")).not.toBeInTheDocument()
-    fireEvent.click(screen.getByRole("button", { name: "map", exact: true }))
+    fireEvent.click(screen.getByRole("button", { name: /^map$/ }))
     expect(screen.getByTestId("map")).toHaveTextContent("historical-step")
     expect(screen.getByTestId("map")).not.toHaveTextContent("new-head")
   })
@@ -131,12 +131,12 @@ describe("client routine workspace", () => {
       error_message: "",
     }
     render(<RoutineRunDetail workspaceId="ws" runId="run_1" />)
-    fireEvent.click(screen.getAllByRole("button", { name: "Stop", exact: true })[0])
+    fireEvent.click(screen.getAllByRole("button", { name: /^Stop$/ })[0])
     expect(
       screen.getByText(/Actions that already happened are not rolled back/),
     ).toBeInTheDocument()
     expect(h.api.mock.calls.filter(([, options]) => options?.method === "POST")).toHaveLength(0)
-    fireEvent.click(screen.getByRole("button", { name: "Stop this run", exact: true }))
+    fireEvent.click(screen.getByRole("button", { name: /^Stop this run$/ }))
     await waitFor(() =>
       expect(h.api).toHaveBeenCalledWith("/api/v1/workspaces/ws/pipelines/runs/run_1/cancel", {
         method: "POST",
@@ -158,7 +158,7 @@ describe("client routine workspace", () => {
     expect(
       document.querySelector('[data-step-id="historical-step"] > summary'),
     ).toHaveTextContent("Ask an agent")
-    fireEvent.click(screen.getByRole("button", { name: "map", exact: true }))
+    fireEvent.click(screen.getByRole("button", { name: /^map$/ }))
     expect(screen.getByTestId("map")).toHaveTextContent("historical-step")
   })
   it("keeps unavailable step evidence distinct from no output", () => {
