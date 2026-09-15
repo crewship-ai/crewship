@@ -227,7 +227,7 @@ Nepřidává se žádný nový pojem; „recipe“ zůstává jen v technických
      (slug, hash, přístup, rozpočet, webhooky).
    - **Složitá rutina zůstává čitelná** — ověřeno na modelu skutečné
      *Docs drift audit* z dev1 (10 kroků, 9 `needs`, script + 5 transformací +
-     agent + notify + 2× `crewship page.write`, guardrails, cost cap,
+     agent + notify + two `page.write` Crewship steps, guardrails, cost cap,
      concurrency), doplněné o `foreach`, checker a hooky. Pravidla, všechna
      odvozená z DSL, nic se nevymýšlí:
      1. **Fáze ze závislostí.** `needs` dává každému kroku úroveň
