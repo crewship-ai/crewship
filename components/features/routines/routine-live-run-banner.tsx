@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { Spinner } from "@/components/ui/spinner"
 import { cn } from "@/lib/utils"
-import { relTime } from "@/lib/time"
+import { formatAgo } from "@/lib/routine-run-presentation"
 import { nameLookup } from "@/lib/routine-steps-layout"
 import type { PipelineRunRecord } from "@/hooks/use-pipeline-run-records"
 
@@ -60,7 +60,7 @@ export function RoutineLiveRunBanner({
       <div className="min-w-0 flex-1">
         <div className="text-[13px] font-medium">
           {waiting ? "A run is waiting for your decision" : "A run is in progress"}
-          {run.started_at && <span className="font-normal text-muted-foreground"> · started {relTime(run.started_at)}</span>}
+          {run.started_at && <span className="font-normal text-muted-foreground"> · started {formatAgo(run.started_at)}</span>}
         </div>
         <div className="text-xs text-muted-foreground">
           {step ? `Step “${step}”` : waiting ? "A person has to answer before it continues." : "Steps are being carried out."}
