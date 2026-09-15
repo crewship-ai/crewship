@@ -129,6 +129,8 @@ Examples:
 			events := append([]routineCalendarEvent(nil), body.Events...)
 			sort.SliceStable(events, func(i, j int) bool { return events[i].At < events[j].At })
 			w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+			// ID is last and untruncated: a planned id is schedule_id +
+			// ":" + instant, longer than any cut that keeps it copyable.
 			fmt.Fprintln(w, "AT\tKIND\tROUTINE\tRESULT\tVERSION\tINPUTS\tID")
 			for _, e := range events {
 				result := e.Status
@@ -143,7 +145,7 @@ Examples:
 					version = fmt.Sprintf("v%d", *e.PinnedVersion)
 				}
 				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-					e.At, e.Kind, e.Slug, result, version, formatCalendarInputs(e.Inputs), truncIDForCLI(e.ID, 40))
+					e.At, e.Kind, e.Slug, result, version, formatCalendarInputs(e.Inputs), e.ID)
 			}
 			flush.of(w)
 			if body.Truncated {

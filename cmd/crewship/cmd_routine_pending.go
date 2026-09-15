@@ -72,12 +72,16 @@ var routinePendingListCmd = &cobra.Command{
 
 // pendingTriggerRow is one deferred (delayed/debounced) routine trigger.
 type pendingTriggerRow struct {
-	PinnedVersion *int   `json:"pinned_version" yaml:"pinned_version"`
-	ID            string `json:"id" yaml:"id"`
-	PipelineSlug  string `json:"pipeline_slug" yaml:"pipeline_slug"`
-	DebounceKey   string `json:"debounce_key" yaml:"debounce_key"`
-	Priority      int    `json:"priority" yaml:"priority"`
-	FireAt        string `json:"fire_at" yaml:"fire_at"`
+	// Inputs is the server's read-only preview of the preset (#2489):
+	// safe primitives kept, credential/file/secret values replaced by a
+	// {type: ...} marker. It cannot replay the run.
+	Inputs        map[string]any `json:"inputs" yaml:"inputs"`
+	PinnedVersion *int           `json:"pinned_version" yaml:"pinned_version"`
+	ID            string         `json:"id" yaml:"id"`
+	PipelineSlug  string         `json:"pipeline_slug" yaml:"pipeline_slug"`
+	DebounceKey   string         `json:"debounce_key" yaml:"debounce_key"`
+	Priority      int            `json:"priority" yaml:"priority"`
+	FireAt        string         `json:"fire_at" yaml:"fire_at"`
 }
 
 var routinePendingCancelCmd = &cobra.Command{

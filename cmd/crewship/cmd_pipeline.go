@@ -348,7 +348,7 @@ belong to --author-crew.`,
 		maxConsecutiveFailures, _ := cmd.Flags().GetInt("max-consecutive-failures")
 		triggerManual, _ := cmd.Flags().GetBool("trigger-manual")
 		draft, _ := cmd.Flags().GetBool("draft")
-		triggerInputPairs, _ := cmd.Flags().GetStringSlice("trigger-inputs")
+		triggerInputPairs, _ := cmd.Flags().GetStringArray("trigger-inputs")
 
 		if definitionPath == "" {
 			return fmt.Errorf("--definition <path> required")
@@ -719,13 +719,14 @@ var pipelineRunCmd = &cobra.Command{
 		// one extra round-trip but only on the slow / failing
 		// path, which is exactly when the user wants help.
 		if err := cli.CheckError(resp); err != nil {
-			// Only a 404 about the ROUTINE gets the did-you-mean treatment.
-			// The same status also answers "recipe version not found" for
+			// Only a 404 about the ROUTINE gets the did-you-mean treatment —
+			// the two strings the handler emits for a missing slug. The same
+			// status also answers "recipe version not found" for
 			// --pinned-version, and rewriting that into a slug hint would
 			// suggest the very slug the caller typed.
 			var apiErr *cli.APIError
 			if errors.As(err, &apiErr) && apiErr.Status == http.StatusNotFound &&
-				!strings.Contains(strings.ToLower(apiErr.Detail), "version") {
+				(apiErr.Detail == "pipeline not found" || apiErr.Detail == "routine not found") {
 				if hint := suggestSimilarRoutineSlugs(client, ws, args[0]); hint != "" {
 					return cli.NotFoundf("routine %q not found — %s", args[0], hint)
 				}
@@ -829,6 +830,35 @@ var pipelineRunCmd = &cobra.Command{
 	},
 }
 
+// printWaitpointHints prints the "paused at approval step" block the sync
+// run path prints, for a run seen parking while --wait polled it. The
+// token comes from the workspace waitpoint list filtered to this run;
+// best-effort — a lookup failure still names the step and the list
+// command, never hides the pause.
+func printWaitpointHints(client *cli.Client, runID, stepID string) {
+	fmt.Printf("  paused at approval step: %s\n", stepID)
+	token := ""
+	resp, err := client.Get(fmt.Sprintf("/api/v1/workspaces/%s/pipelines/waitpoints", client.GetWorkspaceID()))
+	if err == nil {
+		defer resp.Body.Close()
+		var rows []waitpointRow
+		if cli.CheckError(resp) == nil && json.NewDecoder(resp.Body).Decode(&rows) == nil {
+			for _, r := range rows {
+				if r.PipelineRunID == runID {
+					token = r.Token
+					break
+				}
+			}
+		}
+	}
+	if token == "" {
+		fmt.Println("  find the token: crewship routine waitpoints list")
+		return
+	}
+	fmt.Printf("  approve: crewship routine waitpoints approve %s --comment \"LGTM\"\n", token)
+	fmt.Printf("  reject:  crewship routine waitpoints reject %s\n", token)
+}
+
 // waitForPipelineRun blocks until the routine run reaches a terminal
 // status, printing status transitions to stderr and the final outcome to
 // stdout. Backs `routine run --wait` for the two receipts that used to
@@ -852,6 +882,15 @@ func waitForPipelineRun(cmd *cobra.Command, client *cli.Client, runID string, ti
 			lastStatus = d.Status
 			fmt.Fprintf(os.Stderr, "%s[wait]%s %s status=%s elapsed=%s\n",
 				cli.Dim, cli.Reset, runID, d.Status, time.Since(start).Truncate(time.Second))
+			if strings.EqualFold(d.Status, "waiting") {
+				// The run parked on an approval while we were polling (an
+				// --async start, or a DEDUPED original). The sync path
+				// prints the token and the approve/reject commands from
+				// the run response; a polled detail has no token, so look
+				// it up — the operator watching this terminal is the one
+				// who has to act.
+				printWaitpointHints(client, runID, d.CurrentStep)
+			}
 		}
 	})
 	if err != nil {
@@ -1210,7 +1249,9 @@ func init() {
 	pipelineSaveCmd.Flags().Int("max-consecutive-failures", 0, "circuit-breaker trip threshold for the schedule (default 5)")
 	pipelineSaveCmd.Flags().Bool("trigger-manual", false, "explicitly declare the routine has no trigger, instead of just omitting one")
 	pipelineSaveCmd.Flags().Bool("draft", false, "create the trigger disabled and raise one approval item instead of activating it immediately")
-	pipelineSaveCmd.Flags().StringSlice("trigger-inputs", nil, "preset input for the --cron schedule as key=value (repeatable); the same save is how a 409 schedule_conflict on re-save is escaped")
+	// StringArray, not StringSlice: a slice flag comma-splits its value,
+	// which would tear apart a JSON list or a comma-bearing string preset.
+	pipelineSaveCmd.Flags().StringArray("trigger-inputs", nil, "preset input for the --cron schedule as key=value (repeatable); the same save is how a 409 schedule_conflict on re-save is escaped")
 
 	pipelineRunCmd.Flags().String("inputs", "", "JSON inputs for the run (e.g. '{\"since\":\"yesterday\"}')")
 	pipelineRunCmd.Flags().String("invoking-crew", "", "crew_id to record as the invoker (cross-crew reuse audit)")

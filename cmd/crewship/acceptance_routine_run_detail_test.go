@@ -180,13 +180,16 @@ func TestAcceptance_RoutineSave_TriggerInputs_EscapesScheduleConflict(t *testing
 
 	// The escape the hint prescribes: the same save carrying the repaired
 	// preset. The plan is upserted BEFORE the gate runs, so this lands.
+	// The value carries a comma on purpose: the flag is a StringArray, so
+	// cobra must not split "bob,carol" into two pairs (a JSON list or a
+	// comma-bearing string preset would otherwise never reach the server).
 	escapeOut, err := runRoutineDetailCLI(t, cfgPath, "routine", "save",
 		"--name", "acceptance-detail",
 		"--definition", v2,
 		"--author-crew", "dtl-crew",
 		"--sample-inputs", `{"recipient":"sample"}`,
 		"--cron", "0 9 * * *",
-		"--trigger-inputs", "recipient=bob",
+		"--trigger-inputs", "recipient=bob,carol",
 	)
 	if err != nil {
 		t.Fatalf("expected the save carrying --trigger-inputs to escape the conflict: %v\n%s", err, escapeOut)
@@ -194,8 +197,8 @@ func TestAcceptance_RoutineSave_TriggerInputs_EscapesScheduleConflict(t *testing
 	if err := db.QueryRow(`SELECT inputs_json FROM pipeline_schedules WHERE name='acceptance-detail' AND deleted_at IS NULL`).Scan(&preset); err != nil {
 		t.Fatalf("re-read the plan's preset: %v", err)
 	}
-	if preset != `{"recipient":"bob"}` {
-		t.Fatalf("the escape save did not repair the preset, stored %q", preset)
+	if preset != `{"recipient":"bob,carol"}` {
+		t.Fatalf("the escape save did not repair the preset (or split the value on the comma), stored %q", preset)
 	}
 
 	// A malformed pair is a CLI error before any request is made.
@@ -234,6 +237,21 @@ func TestAcceptance_RoutineRun_FireAtPinnedVersionAsync(t *testing.T) {
 	// v1, the only version — and the pending list says so.
 	if !strings.Contains(pendingOut, "acceptance-detail") || !strings.Contains(pendingOut, "v1") {
 		t.Fatalf("expected the pending list to show the start pinned to v1, got:\n%s", pendingOut)
+	}
+	// -f json carries the row's inputs preview, not just the columns.
+	pendingJSON, err := runRoutineDetailCLI(t, cfgPath, "routine", "pending", "list", "-f", "json")
+	if err != nil {
+		t.Fatalf("routine pending list -f json failed: %v\n%s", err, pendingJSON)
+	}
+	var pendingRows []struct {
+		PinnedVersion *int           `json:"pinned_version"`
+		Inputs        map[string]any `json:"inputs"`
+	}
+	if err := json.Unmarshal([]byte(pendingJSON), &pendingRows); err != nil || len(pendingRows) != 1 {
+		t.Fatalf("pending list JSON is not the endpoint's row list (err=%v):\n%s", err, pendingJSON)
+	}
+	if pendingRows[0].PinnedVersion == nil || *pendingRows[0].PinnedVersion != 1 || pendingRows[0].Inputs["who"] != "carol" {
+		t.Fatalf("pending row should carry pinned_version 1 and the inputs preview, got %+v", pendingRows[0])
 	}
 
 	// fire_at cannot be combined with a delay — the server says so and the
