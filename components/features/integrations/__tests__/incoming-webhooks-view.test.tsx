@@ -138,6 +138,18 @@ describe("actual incoming surfaces", () => {
     ).toBeVisible()
     expect(screen.getByText(/Page endpoints are read on demand/)).toBeVisible()
   })
+  it("groups URL copy and secret rotation in the overview credentials column", () => {
+    mount(view())
+    const table = screen.getByRole("table")
+    expect(within(table).getByRole("columnheader", { name: "Credentials" })).toBeVisible()
+    const copy = within(table).getByRole("button", { name: "Copy receiving URL" })
+    const cell = copy.closest("td")!
+    expect(within(cell).getByRole("button", { name: "Rotate secret" })).toBeVisible()
+    expect(cell.cellIndex).toBe(7)
+    fireEvent.click(within(cell).getByRole("button", { name: "Rotate secret" }))
+    expect(screen.getByRole("alertdialog")).toHaveTextContent("Rotate secret for Pepa?")
+    expect(apiFetch).not.toHaveBeenCalledWith(expect.stringContaining("webhook-secret/rotate"), expect.anything())
+  })
   it("uses the shared detail vocabulary and calls the toggle mutation", () => {
     const d = data()
     mount(view(d, "routine", "review-pr"))

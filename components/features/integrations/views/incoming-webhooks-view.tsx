@@ -260,6 +260,7 @@ export function IncomingWebhooksView({
               busy={busy}
               onToggle={toggle}
               onDelete={remove}
+              onRotate={rotate}
             />
             {!rows.length && !data.error && section !== "page" && (
               <Empty onAdd={() => onAdd()} />
@@ -374,6 +375,7 @@ function EndpointTable({
               "Fired / last",
               "Status",
               "Actions",
+              "Credentials",
             ].map((h) => (
               <th
                 key={h}
@@ -404,17 +406,6 @@ function EndpointTable({
                 >
                   {r.path}
                 </code>
-                {r.target.kind === "agent" && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    aria-label="Copy receiving URL"
-                    onClick={() => copy(absolute(r.path))}
-                  >
-                    <Copy className="size-3" />
-                    Copy URL
-                  </Button>
-                )}
               </td>
               <td className="px-4 py-3">
                 <span className="flex items-center gap-1.5">
@@ -464,17 +455,6 @@ function EndpointTable({
                       onCheckedChange={(v) => onToggle(r, v)}
                     />
                   )}{" "}
-                  {onRotate && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      disabled={busy}
-                      onClick={() => onRotate(r)}
-                    >
-                      <RotateCw className="size-3.5" />
-                      Rotate secret
-                    </Button>
-                  )}
                   {onDelete && (r.routine || r.target.kind === "page") && (
                     <Button
                       variant="ghost"
@@ -487,6 +467,36 @@ function EndpointTable({
                     >
                       <Trash2 className="size-3.5" />
                     </Button>
+                  )}
+                </div>
+              </td>
+              <td className="whitespace-nowrap px-4 py-3">
+                <div className="flex items-center gap-1">
+                  {r.target.kind === "agent" && (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      title="Copy URL"
+                      aria-label="Copy receiving URL"
+                      onClick={() => copy(absolute(r.path))}
+                    >
+                      <Copy className="size-3" />
+                    </Button>
+                  )}
+                  {onRotate && (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      title="Rotate secret"
+                      aria-label="Rotate secret"
+                      disabled={busy}
+                      onClick={() => onRotate(r)}
+                    >
+                      <RotateCw className="size-3.5" />
+                    </Button>
+                  )}
+                  {r.target.kind !== "agent" && !onRotate && (
+                    <span className="text-muted-foreground">—</span>
                   )}
                 </div>
               </td>
