@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	cerrdefs "github.com/containerd/errdefs"
 	"github.com/moby/moby/api/types/image"
 	"github.com/moby/moby/client"
 )
@@ -153,20 +154,65 @@ func (p *Provisioner) IsCached(ctx context.Context, hash string) (bool, error) {
 // imageExists checks whether a locally available image matches the given
 // reference (e.g. "crewship-cache:a1b2c3d4e5f6"). Uses the cached image list
 // when fresh.
+//
+// A list hit is confirmed against the daemon with one ImageInspect before it
+// is believed. The list is memoised for imageListTTL, and an operator's
+// `docker rmi crewship-cache:<hash>` (or a `docker system prune` under disk
+// pressure) inside that window left the tag in the list with nothing behind
+// it: Provision answered cache_hit → ready without building, the crew's
+// start then failed on the missing image, and the chat re-enqueued a
+// provision that hit the same stale entry — 83 provisions in one second,
+// stopped only by the rate limiter (#2431). A definitive not-found drops the
+// memoised list and answers "absent", so the caller falls through to the
+// build. Any other inspect error is "cannot tell" and the list hit stands,
+// the same stance waitForImage takes on a probe that errors: a transport
+// hiccup must not cost a six-minute rebuild.
 
 func (p *Provisioner) imageExists(ctx context.Context, ref string) (bool, error) {
 	imgs, err := p.listImages(ctx)
 	if err != nil {
 		return false, fmt.Errorf("listing images: %w", err)
 	}
+	listed := false
 	for _, img := range imgs {
 		for _, tag := range img.RepoTags {
 			if tag == ref {
-				return true, nil
+				listed = true
+				break
 			}
 		}
+		if listed {
+			break
+		}
 	}
-	return false, nil
+	if !listed {
+		return false, nil
+	}
+	if _, err := p.docker.ImageInspect(ctx, ref); err != nil {
+		if isImageNotFound(err) {
+			p.logger.Info("image listed but gone from the daemon; dropping the memoised image list", "ref", ref)
+			p.invalidateImageListCache()
+			return false, nil
+		}
+		p.logger.Warn("could not confirm listed image against the daemon; trusting the list", "ref", ref, "error", err)
+	}
+	return true, nil
+}
+
+// isImageNotFound reports whether err is the daemon saying an image (or the
+// object a container was to be created from) does not exist. The client maps
+// the daemon's 404 to a containerd NotFound; the substrings cover the same
+// answer once it has been flattened into text by a wrapping layer ("No such
+// image: …" from ContainerCreate, "no such object: …" from ContainerStart).
+func isImageNotFound(err error) bool {
+	if err == nil {
+		return false
+	}
+	if cerrdefs.IsNotFound(err) {
+		return true
+	}
+	lower := strings.ToLower(err.Error())
+	return strings.Contains(lower, "no such image") || strings.Contains(lower, "no such object")
 }
 
 // listImages returns the local image summaries, using a short-lived cache to
@@ -198,6 +244,18 @@ func (p *Provisioner) invalidateImageListCache() {
 	p.imageListMu.Lock()
 	p.imageListCache = imageListCacheEntry{}
 	p.imageListMu.Unlock()
+}
+
+// InvalidateImageListCache is the exported form of invalidateImageListCache
+// for callers outside this package that learn the local image set changed
+// behind our back — the runtime provider failing a crew container start on
+// "no such image" is the daemon telling us the memoised list is wrong, and
+// the next Provision must relist rather than report a cache hit (#2431).
+func (p *Provisioner) InvalidateImageListCache() {
+	if p == nil {
+		return
+	}
+	p.invalidateImageListCache()
 }
 
 // Provision builds a cached image by installing devcontainer features and
