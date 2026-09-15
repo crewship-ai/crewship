@@ -629,91 +629,6 @@
         ],
         "type": "object"
       },
-      "AgentCreateRequest": {
-        "properties": {
-          "agent_role": {
-            "enum": [
-              "AGENT",
-              "LEAD"
-            ],
-            "type": "string"
-          },
-          "avatar_seed": {
-            "nullable": true,
-            "type": "string"
-          },
-          "avatar_style": {
-            "nullable": true,
-            "type": "string"
-          },
-          "cli_adapter": {
-            "type": "string"
-          },
-          "crew_id": {
-            "nullable": true,
-            "type": "string"
-          },
-          "description": {
-            "nullable": true,
-            "type": "string"
-          },
-          "lead_mode": {
-            "enum": [
-              "active",
-              "passive"
-            ],
-            "nullable": true,
-            "type": "string"
-          },
-          "llm_model": {
-            "nullable": true,
-            "type": "string"
-          },
-          "llm_provider": {
-            "nullable": true,
-            "type": "string"
-          },
-          "memory_enabled": {
-            "type": "boolean"
-          },
-          "name": {
-            "type": "string"
-          },
-          "role_title": {
-            "nullable": true,
-            "type": "string"
-          },
-          "slug": {
-            "type": "string"
-          },
-          "system_prompt": {
-            "nullable": true,
-            "type": "string"
-          },
-          "timeout_seconds": {
-            "format": "int32",
-            "type": "integer"
-          },
-          "tool_profile": {
-            "enum": [
-              "MINIMAL",
-              "CODING",
-              "FULL"
-            ],
-            "type": "string"
-          }
-        },
-        "required": [
-          "name",
-          "slug",
-          "agent_role",
-          "cli_adapter",
-          "timeout_seconds",
-          "tool_profile",
-          "memory_enabled"
-        ],
-        "type": "object"
-      },
       "AgentCredential": {
         "properties": {
           "agent_id": {
@@ -989,103 +904,6 @@
         },
         "type": "object"
       },
-      "AgentUpdateRequest": {
-        "properties": {
-          "agent_role": {
-            "enum": [
-              "AGENT",
-              "LEAD"
-            ],
-            "type": "string"
-          },
-          "avatar_seed": {
-            "nullable": true,
-            "type": "string"
-          },
-          "avatar_style": {
-            "nullable": true,
-            "type": "string"
-          },
-          "cli_adapter": {
-            "type": "string"
-          },
-          "cli_tools": {
-            "nullable": true,
-            "type": "string"
-          },
-          "crew_id": {
-            "nullable": true,
-            "type": "string"
-          },
-          "description": {
-            "nullable": true,
-            "type": "string"
-          },
-          "lead_mode": {
-            "enum": [
-              "active",
-              "passive"
-            ],
-            "type": "string"
-          },
-          "llm_model": {
-            "nullable": true,
-            "type": "string"
-          },
-          "llm_provider": {
-            "nullable": true,
-            "type": "string"
-          },
-          "mcp_config_json": {
-            "nullable": true,
-            "type": "string"
-          },
-          "memory_enabled": {
-            "type": "boolean"
-          },
-          "name": {
-            "type": "string"
-          },
-          "role_title": {
-            "nullable": true,
-            "type": "string"
-          },
-          "schedule_cron": {
-            "nullable": true,
-            "type": "string"
-          },
-          "schedule_enabled": {
-            "type": "boolean"
-          },
-          "schedule_prompt": {
-            "nullable": true,
-            "type": "string"
-          },
-          "slug": {
-            "type": "string"
-          },
-          "system_prompt": {
-            "nullable": true,
-            "type": "string"
-          },
-          "timeout_seconds": {
-            "format": "int32",
-            "type": "integer"
-          },
-          "tool_profile": {
-            "enum": [
-              "MINIMAL",
-              "CODING",
-              "FULL"
-            ],
-            "type": "string"
-          },
-          "webhook_require_timestamp": {
-            "type": "boolean"
-          }
-        },
-        "type": "object"
-      },
       "BulkReplayRequest": {
         "properties": {
           "fingerprint": {
@@ -1118,6 +936,11 @@
             "type": "array"
           }
         },
+        "required": [
+          "requested",
+          "replayed",
+          "results"
+        ],
         "type": "object"
       },
       "CLIToken": {
@@ -1157,30 +980,6 @@
             "type": "string"
           }
         },
-        "type": "object"
-      },
-      "CLITokenCreateRequest": {
-        "properties": {
-          "expires_in_seconds": {
-            "type": "integer"
-          },
-          "name": {
-            "type": "string"
-          },
-          "scopes": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "tier": {
-            "nullable": true,
-            "type": "string"
-          }
-        },
-        "required": [
-          "name"
-        ],
         "type": "object"
       },
       "CLITokenList": {
@@ -1847,6 +1646,14 @@
             "type": "array"
           },
           "description": {
+            "nullable": true,
+            "type": "string"
+          },
+          "mode": {
+            "enum": [
+              "subscription",
+              "api_key"
+            ],
             "nullable": true,
             "type": "string"
           },
@@ -2932,138 +2739,6 @@
         ],
         "type": "object"
       },
-      "CredentialBindingRequest": {
-        "properties": {
-          "agent_id": {
-            "type": "string"
-          },
-          "credential_id": {
-            "type": "string"
-          },
-          "crew_id": {
-            "type": "string"
-          },
-          "scope": {
-            "type": "string"
-          },
-          "slot": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "credential_id",
-          "scope",
-          "slot"
-        ],
-        "type": "object"
-      },
-      "CredentialCreateRequest": {
-        "properties": {
-          "account_email": {
-            "nullable": true,
-            "type": "string"
-          },
-          "account_label": {
-            "nullable": true,
-            "type": "string"
-          },
-          "created_by_actor_id": {
-            "nullable": true,
-            "type": "string"
-          },
-          "created_by_actor_type": {
-            "nullable": true,
-            "type": "string"
-          },
-          "crew_id": {
-            "nullable": true,
-            "type": "string"
-          },
-          "crew_ids": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "description": {
-            "nullable": true,
-            "type": "string"
-          },
-          "mode": {
-            "nullable": true,
-            "type": "string"
-          },
-          "name": {
-            "type": "string"
-          },
-          "oauth_auth_url": {
-            "nullable": true,
-            "type": "string"
-          },
-          "oauth_client_id": {
-            "nullable": true,
-            "type": "string"
-          },
-          "oauth_client_secret": {
-            "nullable": true,
-            "type": "string"
-          },
-          "oauth_scopes": {
-            "nullable": true,
-            "type": "string"
-          },
-          "oauth_token_url": {
-            "nullable": true,
-            "type": "string"
-          },
-          "pending": {
-            "type": "boolean"
-          },
-          "provider": {
-            "type": "string"
-          },
-          "provisioned_for_service": {
-            "nullable": true,
-            "type": "string"
-          },
-          "refresh_token": {
-            "nullable": true,
-            "type": "string"
-          },
-          "scope": {
-            "type": "string"
-          },
-          "security_level": {
-            "nullable": true,
-            "type": "integer"
-          },
-          "tags": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "token_expires_at": {
-            "nullable": true,
-            "type": "string"
-          },
-          "type": {
-            "type": "string"
-          },
-          "username": {
-            "nullable": true,
-            "type": "string"
-          },
-          "value": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "name",
-          "value"
-        ],
-        "type": "object"
-      },
       "CredentialField": {
         "properties": {
           "created_at": {
@@ -3102,26 +2777,6 @@
         },
         "type": "array"
       },
-      "CredentialFieldRequest": {
-        "properties": {
-          "is_secret": {
-            "type": "boolean"
-          },
-          "key": {
-            "type": "string"
-          },
-          "ordinal": {
-            "type": "integer"
-          },
-          "value": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "value"
-        ],
-        "type": "object"
-      },
       "CredentialList": {
         "items": {
           "$ref": "#/components/schemas/Credential"
@@ -3146,6 +2801,7 @@
         },
         "required": [
           "credentials",
+          "next_cursor",
           "limit"
         ],
         "type": "object"
@@ -3213,32 +2869,6 @@
           "rotated_by",
           "status",
           "old_value_gone"
-        ],
-        "type": "object"
-      },
-      "CredentialRotationRequest": {
-        "properties": {
-          "endpoint_auth_token": {
-            "type": "string"
-          },
-          "endpoint_base_url": {
-            "type": "string"
-          },
-          "endpoint_headers": {
-            "additionalProperties": {
-              "type": "string"
-            },
-            "type": "object"
-          },
-          "grace_seconds": {
-            "type": "integer"
-          },
-          "value": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "value"
         ],
         "type": "object"
       },
@@ -3533,76 +3163,6 @@
         ],
         "type": "object"
       },
-      "CrewCreateRequest": {
-        "properties": {
-          "allow_private_endpoints": {
-            "type": "boolean"
-          },
-          "allowed_domains": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "color": {
-            "nullable": true,
-            "type": "string"
-          },
-          "container_cpus": {
-            "format": "double",
-            "type": "number"
-          },
-          "container_memory_mb": {
-            "format": "int32",
-            "nullable": true,
-            "type": "integer"
-          },
-          "container_ttl_hours": {
-            "format": "int32",
-            "nullable": true,
-            "type": "integer"
-          },
-          "description": {
-            "nullable": true,
-            "type": "string"
-          },
-          "devcontainer_config": {
-            "nullable": true,
-            "type": "string"
-          },
-          "icon": {
-            "nullable": true,
-            "type": "string"
-          },
-          "mise_config": {
-            "nullable": true,
-            "type": "string"
-          },
-          "name": {
-            "type": "string"
-          },
-          "network_mode": {
-            "nullable": true,
-            "type": "string"
-          },
-          "runtime_image": {
-            "nullable": true,
-            "type": "string"
-          },
-          "services_json": {
-            "nullable": true,
-            "type": "string"
-          },
-          "slug": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "name",
-          "slug"
-        ],
-        "type": "object"
-      },
       "CrewCredentialReadinessResponseV1": {
         "properties": {
           "credentials": {
@@ -3630,21 +3190,6 @@
           },
           "ready": {
             "type": "boolean"
-          }
-        },
-        "type": "object"
-      },
-      "CrewEscalationsResponseV1": {
-        "properties": {
-          "count": {
-            "type": "integer"
-          },
-          "escalations": {
-            "items": {
-              "additionalProperties": true,
-              "type": "object"
-            },
-            "type": "array"
           }
         },
         "type": "object"
@@ -3707,182 +3252,6 @@
               "type": "string"
             },
             "status": {
-              "type": "string"
-            }
-          },
-          "type": "object"
-        },
-        "type": "array"
-      },
-      "CrewIssueActivityResponseV1": {
-        "items": {
-          "properties": {
-            "actor_id": {
-              "type": "string"
-            },
-            "created_at": {
-              "type": "string"
-            },
-            "id": {
-              "type": "string"
-            },
-            "message": {
-              "type": "string"
-            },
-            "type": {
-              "type": "string"
-            }
-          },
-          "type": "object"
-        },
-        "type": "array"
-      },
-      "CrewIssueCommentsResponseV1": {
-        "items": {
-          "properties": {
-            "author_id": {
-              "type": "string"
-            },
-            "author_name": {
-              "type": "string"
-            },
-            "body": {
-              "type": "string"
-            },
-            "created_at": {
-              "type": "string"
-            },
-            "id": {
-              "type": "string"
-            },
-            "updated_at": {
-              "type": "string"
-            }
-          },
-          "type": "object"
-        },
-        "type": "array"
-      },
-      "CrewIssueRelationsResponseV1": {
-        "items": {
-          "properties": {
-            "id": {
-              "type": "string"
-            },
-            "issue_id": {
-              "type": "string"
-            },
-            "related_issue_id": {
-              "type": "string"
-            },
-            "relation_type": {
-              "type": "string"
-            }
-          },
-          "type": "object"
-        },
-        "type": "array"
-      },
-      "CrewIssueResponseV1": {
-        "properties": {
-          "brief_revision": {
-            "type": "integer"
-          },
-          "client_review_required": {
-            "type": "boolean"
-          },
-          "created_at": {
-            "type": "string"
-          },
-          "description": {
-            "type": "string"
-          },
-          "execution": {
-            "additionalProperties": true,
-            "type": "object"
-          },
-          "id": {
-            "type": "string"
-          },
-          "identifier": {
-            "type": "string"
-          },
-          "priority": {
-            "type": "string"
-          },
-          "status": {
-            "type": "string"
-          },
-          "title": {
-            "type": "string"
-          },
-          "updated_at": {
-            "type": "string"
-          }
-        },
-        "type": "object"
-      },
-      "CrewIssueRunsResponseV1": {
-        "items": {
-          "properties": {
-            "agent_id": {
-              "type": "string"
-            },
-            "error_message": {
-              "type": "string"
-            },
-            "finished_at": {
-              "type": "string"
-            },
-            "id": {
-              "type": "string"
-            },
-            "started_at": {
-              "type": "string"
-            },
-            "status": {
-              "type": "string"
-            }
-          },
-          "type": "object"
-        },
-        "type": "array"
-      },
-      "CrewIssueSubtasksResponseV1": {
-        "items": {
-          "properties": {
-            "brief_revision": {
-              "type": "integer"
-            },
-            "client_review_required": {
-              "type": "boolean"
-            },
-            "created_at": {
-              "type": "string"
-            },
-            "description": {
-              "type": "string"
-            },
-            "execution": {
-              "additionalProperties": true,
-              "type": "object"
-            },
-            "id": {
-              "type": "string"
-            },
-            "identifier": {
-              "type": "string"
-            },
-            "priority": {
-              "type": "string"
-            },
-            "status": {
-              "type": "string"
-            },
-            "title": {
-              "type": "string"
-            },
-            "updated_at": {
               "type": "string"
             }
           },
@@ -4091,26 +3460,6 @@
         },
         "type": "object"
       },
-      "CrewProvisionResponseV1": {
-        "properties": {
-          "crew_id": {
-            "type": "string"
-          },
-          "message": {
-            "type": "string"
-          },
-          "phase": {
-            "type": "string"
-          },
-          "status": {
-            "type": "string"
-          },
-          "updated_at": {
-            "type": "string"
-          }
-        },
-        "type": "object"
-      },
       "CrewServicesResponseV1": {
         "properties": {
           "services": {
@@ -4163,96 +3512,6 @@
         },
         "type": "object"
       },
-      "CrewUpdateRequest": {
-        "properties": {
-          "allow_private_endpoints": {
-            "nullable": true,
-            "type": "boolean"
-          },
-          "allowed_domains": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "avatar_style": {
-            "nullable": true,
-            "type": "string"
-          },
-          "color": {
-            "nullable": true,
-            "type": "string"
-          },
-          "container_cpus": {
-            "format": "double",
-            "type": "number"
-          },
-          "container_memory_mb": {
-            "format": "int32",
-            "nullable": true,
-            "type": "integer"
-          },
-          "container_ttl_hours": {
-            "format": "int32",
-            "nullable": true,
-            "type": "integer"
-          },
-          "description": {
-            "nullable": true,
-            "type": "string"
-          },
-          "devcontainer_config": {
-            "nullable": true,
-            "type": "string"
-          },
-          "escalation_config": {
-            "nullable": true,
-            "type": "string"
-          },
-          "icon": {
-            "nullable": true,
-            "type": "string"
-          },
-          "issue_prefix": {
-            "nullable": true,
-            "type": "string"
-          },
-          "max_ephemeral_agents": {
-            "format": "int32",
-            "nullable": true,
-            "type": "integer"
-          },
-          "mcp_config_json": {
-            "nullable": true,
-            "type": "string"
-          },
-          "mise_config": {
-            "nullable": true,
-            "type": "string"
-          },
-          "name": {
-            "nullable": true,
-            "type": "string"
-          },
-          "network_mode": {
-            "nullable": true,
-            "type": "string"
-          },
-          "runtime_image": {
-            "nullable": true,
-            "type": "string"
-          },
-          "services_json": {
-            "nullable": true,
-            "type": "string"
-          },
-          "slug": {
-            "nullable": true,
-            "type": "string"
-          }
-        },
-        "type": "object"
-      },
       "DeniedTool": {
         "properties": {
           "count": {
@@ -4264,24 +3523,57 @@
         },
         "type": "object"
       },
+      "DryRunResult": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/RunResult"
+          },
+          {
+            "properties": {
+              "manifest": {
+                "additionalProperties": true,
+                "nullable": true,
+                "type": "object"
+              }
+            },
+            "required": [
+              "manifest"
+            ],
+            "type": "object"
+          }
+        ]
+      },
       "DryRunStep": {
         "properties": {
-          "agent_slug": {
-            "type": "string"
-          },
-          "prompt": {
-            "type": "string"
+          "estimated_cost_usd": {
+            "type": "number"
           },
           "step_id": {
             "type": "string"
           },
-          "tier": {
+          "step_type": {
             "type": "string"
           },
-          "type": {
+          "tier_adapter": {
+            "type": "string"
+          },
+          "tier_model": {
+            "type": "string"
+          },
+          "would_call_agent": {
+            "type": "string"
+          },
+          "would_call_pipeline": {
+            "type": "string"
+          },
+          "would_pass": {
             "type": "string"
           }
         },
+        "required": [
+          "step_id",
+          "step_type"
+        ],
         "type": "object"
       },
       "EmptyRequest": {
@@ -4959,20 +4251,6 @@
             "type": "integer"
           },
           "state": {
-            "type": "string"
-          }
-        },
-        "type": "object"
-      },
-      "FinalAdminPlatformOAuthProvider": {
-        "properties": {
-          "auth_url": {
-            "type": "string"
-          },
-          "default_scopes": {
-            "type": "string"
-          },
-          "token_url": {
             "type": "string"
           }
         },
@@ -5736,26 +5014,6 @@
         ],
         "type": "object"
       },
-      "FinalCoreRefreshToolsRequest": {
-        "properties": {
-          "tools": {
-            "items": {
-              "properties": {
-                "description": {
-                  "nullable": true,
-                  "type": "string"
-                },
-                "name": {
-                  "type": "string"
-                }
-              },
-              "type": "object"
-            },
-            "type": "array"
-          }
-        },
-        "type": "object"
-      },
       "FinalCoreWorkspaceCapabilitiesRequest": {
         "properties": {
           "grant": {
@@ -6352,14 +5610,6 @@
         "additionalProperties": {},
         "type": "object"
       },
-      "FinalStatus": {
-        "properties": {
-          "status": {
-            "type": "string"
-          }
-        },
-        "type": "object"
-      },
       "FinalUserModel": {
         "properties": {
           "bytes": {
@@ -6398,34 +5648,6 @@
             "type": "string"
           },
           "workspace_id": {
-            "type": "string"
-          }
-        },
-        "type": "object"
-      },
-      "FinalUserModelMutation": {
-        "properties": {
-          "exists": {
-            "type": "boolean"
-          },
-          "forgot": {
-            "type": "string"
-          },
-          "remaining": {
-            "items": {
-              "properties": {
-                "key": {
-                  "type": "string"
-                },
-                "value": {
-                  "type": "string"
-                }
-              },
-              "type": "object"
-            },
-            "type": "array"
-          },
-          "user_id": {
             "type": "string"
           }
         },
@@ -6527,11 +5749,16 @@
         },
         "required": [
           "id",
+          "crew_id",
           "workspace_id",
           "slug",
           "name",
           "status",
           "ephemeral",
+          "expires_at",
+          "expired_at",
+          "parent_lead_id",
+          "hire_reason",
           "pending_review",
           "decision"
         ],
@@ -6682,51 +5909,6 @@
         },
         "type": "object"
       },
-      "IntegrationCreateRequest": {
-        "properties": {
-          "args_json": {
-            "nullable": true,
-            "type": "string"
-          },
-          "command": {
-            "nullable": true,
-            "type": "string"
-          },
-          "config_json": {
-            "nullable": true,
-            "type": "string"
-          },
-          "display_name": {
-            "type": "string"
-          },
-          "endpoint": {
-            "nullable": true,
-            "type": "string"
-          },
-          "env_json": {
-            "nullable": true,
-            "type": "string"
-          },
-          "icon": {
-            "nullable": true,
-            "type": "string"
-          },
-          "name": {
-            "type": "string"
-          },
-          "transport": {
-            "type": "string"
-          },
-          "workspace_mcp_server_id": {
-            "nullable": true,
-            "type": "string"
-          }
-        },
-        "required": [
-          "name"
-        ],
-        "type": "object"
-      },
       "IntegrationList": {
         "items": {
           "$ref": "#/components/schemas/Integration"
@@ -6774,47 +5956,6 @@
           "enabled": {
             "nullable": true,
             "type": "boolean"
-          }
-        },
-        "type": "object"
-      },
-      "IntegrationUpdateRequest": {
-        "properties": {
-          "args_json": {
-            "nullable": true,
-            "type": "string"
-          },
-          "command": {
-            "nullable": true,
-            "type": "string"
-          },
-          "config_json": {
-            "nullable": true,
-            "type": "string"
-          },
-          "display_name": {
-            "nullable": true,
-            "type": "string"
-          },
-          "enabled": {
-            "nullable": true,
-            "type": "boolean"
-          },
-          "endpoint": {
-            "nullable": true,
-            "type": "string"
-          },
-          "env_json": {
-            "nullable": true,
-            "type": "string"
-          },
-          "icon": {
-            "nullable": true,
-            "type": "string"
-          },
-          "transport": {
-            "nullable": true,
-            "type": "string"
           }
         },
         "type": "object"
@@ -7179,29 +6320,6 @@
         },
         "type": "object"
       },
-      "IntegrationsAuthNotificationTemplateRequest": {
-        "properties": {
-          "body": {
-            "type": "string"
-          },
-          "category": {
-            "type": "string"
-          },
-          "channel_id": {
-            "type": "string"
-          },
-          "title": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "category",
-          "channel_id",
-          "title",
-          "body"
-        ],
-        "type": "object"
-      },
       "IntegrationsAuthOAuthAutoConnectRequest": {
         "properties": {
           "mcp_url": {
@@ -7554,122 +6672,6 @@
         ],
         "type": "object"
       },
-      "IssueBulkUpdateRequest": {
-        "properties": {
-          "ids": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "updates": {
-            "properties": {
-              "assignee_id": {
-                "nullable": true,
-                "type": "string"
-              },
-              "assignee_type": {
-                "nullable": true,
-                "type": "string"
-              },
-              "labels": {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              "priority": {
-                "nullable": true,
-                "type": "string"
-              },
-              "project_id": {
-                "nullable": true,
-                "type": "string"
-              },
-              "status": {
-                "nullable": true,
-                "type": "string"
-              }
-            },
-            "required": [
-              "status",
-              "priority",
-              "assignee_type",
-              "assignee_id",
-              "project_id",
-              "labels"
-            ],
-            "type": "object"
-          }
-        },
-        "required": [
-          "ids",
-          "updates"
-        ],
-        "type": "object"
-      },
-      "IssueCreateRequest": {
-        "properties": {
-          "assignee_id": {
-            "nullable": true,
-            "type": "string"
-          },
-          "assignee_type": {
-            "nullable": true,
-            "type": "string"
-          },
-          "description": {
-            "nullable": true,
-            "type": "string"
-          },
-          "due_date": {
-            "nullable": true,
-            "type": "string"
-          },
-          "estimate": {
-            "nullable": true,
-            "type": "integer"
-          },
-          "labels": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "milestone_id": {
-            "nullable": true,
-            "type": "string"
-          },
-          "parent_issue_id": {
-            "nullable": true,
-            "type": "string"
-          },
-          "priority": {
-            "type": "string"
-          },
-          "project_id": {
-            "nullable": true,
-            "type": "string"
-          },
-          "routine_id": {
-            "nullable": true,
-            "type": "string"
-          },
-          "routine_inputs": {
-            "additionalProperties": {
-              "type": "string"
-            },
-            "type": "object"
-          },
-          "title": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "title"
-        ],
-        "type": "object"
-      },
       "IssueCreator": {
         "properties": {
           "id": {
@@ -7752,75 +6754,6 @@
         ],
         "type": "object"
       },
-      "IssueUpdateRequest": {
-        "properties": {
-          "assignee_id": {
-            "nullable": true,
-            "type": "string"
-          },
-          "assignee_type": {
-            "nullable": true,
-            "type": "string"
-          },
-          "description": {
-            "nullable": true,
-            "type": "string"
-          },
-          "due_date": {
-            "nullable": true,
-            "type": "string"
-          },
-          "estimate": {
-            "nullable": true,
-            "type": "integer"
-          },
-          "labels": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "milestone_id": {
-            "nullable": true,
-            "type": "string"
-          },
-          "parent_issue_id": {
-            "nullable": true,
-            "type": "string"
-          },
-          "priority": {
-            "nullable": true,
-            "type": "string"
-          },
-          "project_id": {
-            "nullable": true,
-            "type": "string"
-          },
-          "routine_id": {
-            "nullable": true,
-            "type": "string"
-          },
-          "routine_inputs": {
-            "additionalProperties": {
-              "type": "string"
-            },
-            "type": "object"
-          },
-          "sort_order": {
-            "nullable": true,
-            "type": "number"
-          },
-          "status": {
-            "nullable": true,
-            "type": "string"
-          },
-          "title": {
-            "nullable": true,
-            "type": "string"
-          }
-        },
-        "type": "object"
-      },
       "Label": {
         "properties": {
           "color": {
@@ -7845,47 +6778,11 @@
         ],
         "type": "object"
       },
-      "LabelCreateRequest": {
-        "properties": {
-          "color": {
-            "type": "string"
-          },
-          "label_group": {
-            "nullable": true,
-            "type": "string"
-          },
-          "name": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "name",
-          "color"
-        ],
-        "type": "object"
-      },
       "LabelList": {
         "items": {
           "$ref": "#/components/schemas/Label"
         },
         "type": "array"
-      },
-      "LabelUpdateRequest": {
-        "properties": {
-          "color": {
-            "nullable": true,
-            "type": "string"
-          },
-          "label_group": {
-            "nullable": true,
-            "type": "string"
-          },
-          "name": {
-            "nullable": true,
-            "type": "string"
-          }
-        },
-        "type": "object"
       },
       "MCPServerError": {
         "properties": {
@@ -8618,58 +7515,6 @@
         },
         "type": "object"
       },
-      "PipelineRunRequest": {
-        "properties": {
-          "debounce_key": {
-            "type": "string"
-          },
-          "debounce_max_seconds": {
-            "type": "integer"
-          },
-          "debounce_window_seconds": {
-            "type": "integer"
-          },
-          "delay_seconds": {
-            "type": "integer"
-          },
-          "idempotency_key": {
-            "type": "string"
-          },
-          "idempotency_key_ttl_seconds": {
-            "type": "integer"
-          },
-          "inputs": {
-            "additionalProperties": true,
-            "type": "object"
-          },
-          "metadata": {
-            "additionalProperties": true,
-            "type": "object"
-          },
-          "priority": {
-            "type": "integer"
-          },
-          "tags": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "tier_override": {
-            "type": "string"
-          },
-          "triggered_by_id": {
-            "type": "string"
-          },
-          "triggered_via": {
-            "type": "string"
-          },
-          "ttl_seconds": {
-            "type": "integer"
-          }
-        },
-        "type": "object"
-      },
       "PipelineRunStepExecution": {
         "properties": {
           "agent_slug": {
@@ -8964,54 +7809,6 @@
         ],
         "type": "object"
       },
-      "ProjectCreateRequest": {
-        "properties": {
-          "color": {
-            "type": "string"
-          },
-          "description": {
-            "nullable": true,
-            "type": "string"
-          },
-          "icon": {
-            "nullable": true,
-            "type": "string"
-          },
-          "lead_id": {
-            "nullable": true,
-            "type": "string"
-          },
-          "lead_type": {
-            "enum": [
-              "user",
-              "agent"
-            ],
-            "nullable": true,
-            "type": "string"
-          },
-          "name": {
-            "type": "string"
-          },
-          "priority": {
-            "type": "string"
-          },
-          "start_date": {
-            "nullable": true,
-            "type": "string"
-          },
-          "status": {
-            "type": "string"
-          },
-          "target_date": {
-            "nullable": true,
-            "type": "string"
-          }
-        },
-        "required": [
-          "name"
-        ],
-        "type": "object"
-      },
       "ProjectList": {
         "items": {
           "$ref": "#/components/schemas/Project"
@@ -9112,59 +7909,6 @@
           "start_date",
           "target_date"
         ],
-        "type": "object"
-      },
-      "ProjectUpdateRequest": {
-        "properties": {
-          "color": {
-            "nullable": true,
-            "type": "string"
-          },
-          "description": {
-            "nullable": true,
-            "type": "string"
-          },
-          "health": {
-            "nullable": true,
-            "type": "string"
-          },
-          "icon": {
-            "nullable": true,
-            "type": "string"
-          },
-          "lead_id": {
-            "nullable": true,
-            "type": "string"
-          },
-          "lead_type": {
-            "enum": [
-              "user",
-              "agent"
-            ],
-            "nullable": true,
-            "type": "string"
-          },
-          "name": {
-            "nullable": true,
-            "type": "string"
-          },
-          "priority": {
-            "nullable": true,
-            "type": "string"
-          },
-          "start_date": {
-            "nullable": true,
-            "type": "string"
-          },
-          "status": {
-            "nullable": true,
-            "type": "string"
-          },
-          "target_date": {
-            "nullable": true,
-            "type": "string"
-          }
-        },
         "type": "object"
       },
       "ProviderLogin": {
@@ -9612,13 +8356,6 @@
         },
         "type": "object"
       },
-      "RemainingAgentChatsV1": {
-        "items": {
-          "additionalProperties": true,
-          "type": "object"
-        },
-        "type": "array"
-      },
       "RemainingAgentCreatedV1": {
         "$ref": "#/components/schemas/Agent"
       },
@@ -9715,13 +8452,6 @@
         },
         "type": "object"
       },
-      "RemainingAgentCredentialsV1": {
-        "items": {
-          "additionalProperties": true,
-          "type": "object"
-        },
-        "type": "array"
-      },
       "RemainingAgentCrewsStatusV1": {
         "properties": {
           "agents": {
@@ -9809,23 +8539,6 @@
           },
           "success": {
             "type": "boolean"
-          }
-        },
-        "type": "object"
-      },
-      "RemainingAgentHiredV1": {
-        "properties": {
-          "agent": {
-            "$ref": "#/components/schemas/Agent"
-          },
-          "approval_required": {
-            "type": "boolean"
-          },
-          "message": {
-            "type": "string"
-          },
-          "status": {
-            "type": "string"
           }
         },
         "type": "object"
@@ -10131,37 +8844,6 @@
         },
         "type": "object"
       },
-      "RemainingCredentialBinding": {
-        "properties": {
-          "agent_id": {
-            "nullable": true,
-            "type": "string"
-          },
-          "created_at": {
-            "type": "string"
-          },
-          "credential_id": {
-            "type": "string"
-          },
-          "credential_name": {
-            "type": "string"
-          },
-          "crew_id": {
-            "nullable": true,
-            "type": "string"
-          },
-          "id": {
-            "type": "string"
-          },
-          "scope": {
-            "type": "string"
-          },
-          "slot": {
-            "type": "string"
-          }
-        },
-        "type": "object"
-      },
       "RemainingCredentialField": {
         "properties": {
           "created_at": {
@@ -10184,28 +8866,6 @@
             "type": "string"
           }
         },
-        "type": "object"
-      },
-      "RemainingCredentialFieldRequest": {
-        "properties": {
-          "key": {
-            "type": "string"
-          },
-          "label": {
-            "type": "string"
-          },
-          "secret": {
-            "type": "boolean"
-          },
-          "value": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "key",
-          "label",
-          "value"
-        ],
         "type": "object"
       },
       "RemainingCredentialSensitivityRequest": {
@@ -10301,20 +8961,6 @@
         },
         "type": "object"
       },
-      "RemainingCrewEscalationsDeletedV1": {
-        "properties": {
-          "message": {
-            "type": "string"
-          },
-          "status": {
-            "type": "string"
-          },
-          "success": {
-            "type": "boolean"
-          }
-        },
-        "type": "object"
-      },
       "RemainingCrewFileDeletedV1": {
         "properties": {
           "deleted": {
@@ -10392,23 +9038,6 @@
         },
         "type": "object"
       },
-      "RemainingCrewIssueCommentCreatedV1": {
-        "properties": {
-          "message": {
-            "type": "string"
-          },
-          "status": {
-            "type": "string"
-          },
-          "success": {
-            "type": "boolean"
-          }
-        },
-        "type": "object"
-      },
-      "RemainingCrewIssueCreatedV1": {
-        "$ref": "#/components/schemas/Issue"
-      },
       "RemainingCrewIssueDeletedV1": {
         "properties": {
           "message": {
@@ -10422,65 +9051,6 @@
           }
         },
         "type": "object"
-      },
-      "RemainingCrewIssueRelationCreatedV1": {
-        "properties": {
-          "message": {
-            "type": "string"
-          },
-          "status": {
-            "type": "string"
-          },
-          "success": {
-            "type": "boolean"
-          }
-        },
-        "type": "object"
-      },
-      "RemainingCrewIssueReviewedV1": {
-        "properties": {
-          "message": {
-            "type": "string"
-          },
-          "status": {
-            "type": "string"
-          },
-          "success": {
-            "type": "boolean"
-          }
-        },
-        "type": "object"
-      },
-      "RemainingCrewIssueStartedV1": {
-        "properties": {
-          "message": {
-            "type": "string"
-          },
-          "status": {
-            "type": "string"
-          },
-          "success": {
-            "type": "boolean"
-          }
-        },
-        "type": "object"
-      },
-      "RemainingCrewIssueStoppedV1": {
-        "properties": {
-          "message": {
-            "type": "string"
-          },
-          "status": {
-            "type": "string"
-          },
-          "success": {
-            "type": "boolean"
-          }
-        },
-        "type": "object"
-      },
-      "RemainingCrewIssueUpdatedV1": {
-        "$ref": "#/components/schemas/Issue"
       },
       "RemainingCrewMemberCreatedV1": {
         "$ref": "#/components/schemas/CrewMemberResponseV1"
@@ -10851,38 +9421,6 @@
         },
         "type": "object"
       },
-      "RemainingFeedbackCreateRequest": {
-        "properties": {
-          "chat_id": {
-            "type": "string"
-          },
-          "message_id": {
-            "type": "string"
-          },
-          "reason": {
-            "type": "string"
-          },
-          "signal": {
-            "enum": [
-              "helpful",
-              "not_helpful",
-              "inaccurate",
-              "unsafe",
-              "edit",
-              "regenerate"
-            ],
-            "type": "string"
-          },
-          "trace_id": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "message_id",
-          "signal"
-        ],
-        "type": "object"
-      },
       "RemainingHook": {
         "properties": {
           "blocking": {
@@ -10941,42 +9479,6 @@
             "type": "string"
           },
           "name": {
-            "type": "string"
-          }
-        },
-        "type": "object"
-      },
-      "RemainingLabelCreateRequest": {
-        "properties": {
-          "color": {
-            "type": "string"
-          },
-          "label_group": {
-            "nullable": true,
-            "type": "string"
-          },
-          "name": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "name",
-          "color"
-        ],
-        "type": "object"
-      },
-      "RemainingLabelUpdateRequest": {
-        "properties": {
-          "color": {
-            "nullable": true,
-            "type": "string"
-          },
-          "label_group": {
-            "nullable": true,
-            "type": "string"
-          },
-          "name": {
-            "nullable": true,
             "type": "string"
           }
         },
@@ -11336,14 +9838,9 @@
             "type": "string"
           }
         },
-        "type": "object"
-      },
-      "ReplayRequest": {
-        "properties": {
-          "pinned_version": {
-            "type": "integer"
-          }
-        },
+        "required": [
+          "source_run_id"
+        ],
         "type": "object"
       },
       "RoutineCalendarEvent": {
@@ -12114,6 +10611,16 @@
             "type": "array"
           }
         },
+        "required": [
+          "run_id",
+          "pipeline_id",
+          "pipeline_slug",
+          "status",
+          "output",
+          "step_outputs",
+          "duration_ms",
+          "cost_usd"
+        ],
         "type": "object"
       },
       "RunStats": {
@@ -12263,55 +10770,6 @@
             "type": "array"
           },
           "timezone": {
-            "type": "string"
-          }
-        },
-        "type": "object"
-      },
-      "ScheduleRequest": {
-        "properties": {
-          "catchup_policy": {
-            "type": "string"
-          },
-          "cron_expr": {
-            "type": "string"
-          },
-          "enabled": {
-            "type": "boolean"
-          },
-          "inputs": {
-            "additionalProperties": true,
-            "type": "object"
-          },
-          "max_consecutive_failures": {
-            "type": "integer"
-          },
-          "name": {
-            "type": "string"
-          },
-          "target_pipeline_id": {
-            "type": "string"
-          },
-          "target_pipeline_slug": {
-            "type": "string"
-          },
-          "target_pipeline_version": {
-            "type": "integer"
-          },
-          "timezone": {
-            "type": "string"
-          },
-          "wake_fail_closed": {
-            "type": "boolean"
-          },
-          "wake_inputs": {
-            "additionalProperties": true,
-            "type": "object"
-          },
-          "wake_pipeline_id": {
-            "type": "string"
-          },
-          "wake_pipeline_slug": {
             "type": "string"
           }
         },
@@ -12609,22 +11067,28 @@
           "scan_status",
           "created_at",
           "updated_at",
-          "agent_count"
+          "description",
+          "author",
+          "icon",
+          "rating_avg",
+          "tags",
+          "tool_count",
+          "vendor",
+          "homepage",
+          "spdx_license",
+          "description_quality",
+          "content",
+          "credential_requirements",
+          "mcp_server_command",
+          "mcp_server_image",
+          "mcp_transport",
+          "dependencies",
+          "license",
+          "agent_count",
+          "security_score",
+          "allowed_domains",
+          "changelog"
         ],
-        "type": "object"
-      },
-      "SkillImportRequest": {
-        "properties": {
-          "allow_unsafe_license": {
-            "type": "boolean"
-          },
-          "content": {
-            "type": "string"
-          },
-          "url": {
-            "type": "string"
-          }
-        },
         "type": "object"
       },
       "SkillList": {
@@ -12787,24 +11251,6 @@
           },
           "token": {
             "type": "string"
-          }
-        },
-        "type": "object"
-      },
-      "WaitpointApprovalRequest": {
-        "properties": {
-          "action_id": {
-            "type": "string"
-          },
-          "approved": {
-            "type": "boolean"
-          },
-          "comment": {
-            "type": "string"
-          },
-          "data": {
-            "additionalProperties": true,
-            "type": "object"
           }
         },
         "type": "object"
@@ -15027,25 +13473,6 @@
         ],
         "type": "object"
       },
-      "WorkspaceCreateRequest": {
-        "properties": {
-          "name": {
-            "type": "string"
-          },
-          "preferred_language": {
-            "nullable": true,
-            "type": "string"
-          },
-          "slug": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "name",
-          "slug"
-        ],
-        "type": "object"
-      },
       "WorkspaceInvitationsResponseV1": {
         "items": {
           "properties": {
@@ -15480,73 +13907,6 @@
           "type": "object"
         },
         "type": "array"
-      },
-      "WorkspaceUpdateRequest": {
-        "properties": {
-          "allow_privileged_credentials": {
-            "nullable": true,
-            "type": "boolean"
-          },
-          "audit_log_retention_days": {
-            "format": "int32",
-            "nullable": true,
-            "type": "integer"
-          },
-          "credential_audit_retention_days": {
-            "format": "int32",
-            "nullable": true,
-            "type": "integer"
-          },
-          "name": {
-            "nullable": true,
-            "type": "string"
-          },
-          "pages_theme": {
-            "additionalProperties": false,
-            "description": "Workspace colors for custom Pages. Omitted keys inherit SDK defaults; an empty object resets the palette.",
-            "properties": {
-              "accent": {
-                "pattern": "^#[0-9a-fA-F]{6}$",
-                "type": "string"
-              },
-              "background": {
-                "pattern": "^#[0-9a-fA-F]{6}$",
-                "type": "string"
-              },
-              "border": {
-                "pattern": "^#[0-9a-fA-F]{6}$",
-                "type": "string"
-              },
-              "muted": {
-                "pattern": "^#[0-9a-fA-F]{6}$",
-                "type": "string"
-              },
-              "surface": {
-                "pattern": "^#[0-9a-fA-F]{6}$",
-                "type": "string"
-              },
-              "text": {
-                "pattern": "^#[0-9a-fA-F]{6}$",
-                "type": "string"
-              }
-            },
-            "type": "object"
-          },
-          "preferred_language": {
-            "nullable": true,
-            "type": "string"
-          },
-          "run_retention_days": {
-            "format": "int32",
-            "nullable": true,
-            "type": "integer"
-          },
-          "slug": {
-            "nullable": true,
-            "type": "string"
-          }
-        },
-        "type": "object"
       }
     },
     "securitySchemes": {
@@ -25270,7 +23630,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RemainingAgentHiredV1"
+                  "$ref": "#/components/schemas/HireResponse"
                 }
               }
             },
@@ -27865,7 +26225,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RemainingAgentCredentialsV1"
+                  "$ref": "#/components/schemas/AgentCredentialList"
                 }
               }
             },
@@ -41977,7 +40337,14 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/CredentialList"
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/CredentialList"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CredentialPage"
+                    }
+                  ]
                 }
               }
             },
@@ -72123,10 +70490,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/RemainingLabel"
-                  },
-                  "type": "array"
+                  "$ref": "#/components/schemas/LabelList"
                 }
               }
             },
@@ -83246,6 +81610,22 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "pages_version": {
+                    "description": "The page's pages_version as last read. Required.",
+                    "type": "integer"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
             "content": {
@@ -102892,7 +101272,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Skill"
+                  "$ref": "#/components/schemas/SkillDetail"
                 }
               }
             },
@@ -115091,7 +113471,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RemainingworkspacesV1"
+                  "$ref": "#/components/schemas/BulkReplayResult"
                 }
               }
             },
@@ -115553,7 +113933,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RemainingworkspacesV1"
+                  "$ref": "#/components/schemas/RunResult"
                 }
               }
             },
@@ -117357,6 +115737,15 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RoutineDraftRevisionRequest"
+              }
+            }
+          }
+        },
         "responses": {
           "204": {
             "description": "No Content"
@@ -117559,7 +115948,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RemainingworkspacesV1"
+                  "$ref": "#/components/schemas/DryRunResult"
                 }
               }
             },

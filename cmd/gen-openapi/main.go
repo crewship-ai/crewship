@@ -434,6 +434,14 @@ func buildDocument(routes []route) map[string]any {
 		switch rt.method {
 		case "POST", "PUT", "PATCH":
 			op["requestBody"] = requestBodyForRoute(rt)
+		case "DELETE":
+			// A DELETE gets a body only when its catalog entry declares one:
+			// two handlers read a confirmation body (a draft revision, a
+			// pages_version), and their catalogued schemas were silently
+			// dropped here until #1849.
+			if schema, ok := routeSchemaCatalog()[rt.method+" "+rt.path]; ok && schema.Request != nil {
+				op["requestBody"] = requestBodyForRoute(rt)
+			}
 		}
 
 		opsForPath[strings.ToLower(rt.method)] = op
@@ -660,7 +668,7 @@ func remainingAuthIntegrationsSchemaCatalogRoutes() map[string]DomainSchema {
 func responseSchemaName(path string) string {
 	return map[string]string{
 		"GET /api/v1/issues": "IssueList", "GET /api/v1/issues/{identifier}": "Issue",
-		"GET /api/v1/skills": "SkillList", "GET /api/v1/skills/{skillId}": "Skill",
+		"GET /api/v1/skills": "SkillList", "GET /api/v1/skills/{skillId}": "SkillDetail",
 		"GET /api/v1/credentials": "CredentialList", "GET /api/v1/credentials/{credentialId}": "Credential",
 		"GET /api/v1/credentials/{credentialId}/fields": "CredentialFieldList",
 		"GET /api/v1/credentials/bindings":              "CredentialBindingList",
@@ -671,17 +679,10 @@ func requestSchema(rt route) map[string]any {
 	if schema, ok := routeSchemaCatalog()[rt.method+" "+rt.path]; ok && schema.Request != nil {
 		return schema.Request
 	}
-	name := map[string]string{
-		"POST /api/v1/workspaces": "WorkspaceCreateRequest", "PATCH /api/v1/workspaces/{workspaceId}": "WorkspaceUpdateRequest",
-		"POST /api/v1/crews": "CrewCreateRequest", "PATCH /api/v1/crews/{crewId}": "CrewUpdateRequest", "PUT /api/v1/crews/{crewId}": "CrewUpdateRequest",
-		"POST /api/v1/agents": "AgentCreateRequest", "PATCH /api/v1/agents/{agentId}": "AgentUpdateRequest",
-		"POST /api/v1/projects": "ProjectCreateRequest", "PATCH /api/v1/projects/{projectId}": "ProjectUpdateRequest",
-		"POST /api/v1/agents/hire": "HireRequest", "POST /api/v1/labels": "LabelCreateRequest", "PATCH /api/v1/labels/{labelId}": "LabelUpdateRequest",
-		"POST /api/v1/credentials": "CredentialCreateRequest", "POST /api/v1/credentials/bindings": "CredentialBindingRequest",
-		"POST /api/v1/workspaces/{workspaceId}/skills/import": "SkillImportRequest",
-	}[rt.method+" "+rt.path]
-	if name != "" {
-		return ref(name)
+	// Every other request body is owned by a route catalog; the only
+	// fallback left here is the one route no catalog claims.
+	if rt.method+" "+rt.path == "POST /api/v1/agents/hire" {
+		return ref("HireRequest")
 	}
 	return map[string]any{"type": "object"}
 }
@@ -734,7 +735,7 @@ func auditedResponseName(path string) string {
 		"/api/v1/issues":                   "IssueList",
 		"/api/v1/issues/{identifier}":      "Issue",
 		"/api/v1/skills":                   "SkillList",
-		"/api/v1/skills/{skillId}":         "Skill",
+		"/api/v1/skills/{skillId}":         "SkillDetail",
 		"/api/v1/runs":                     "RunList",
 		"/api/v1/runs/{id}":                "Run",
 	}[path]

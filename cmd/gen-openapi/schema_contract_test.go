@@ -21,7 +21,7 @@ var auditedResponseContracts = []struct {
 	{path: "/api/v1/issues", componentName: "IssueList"},
 	{path: "/api/v1/issues/{identifier}", componentName: "Issue"},
 	{path: "/api/v1/skills", componentName: "SkillList"},
-	{path: "/api/v1/skills/{skillId}", componentName: "Skill"},
+	{path: "/api/v1/skills/{skillId}", componentName: "SkillDetail"},
 	{path: "/api/v1/runs", componentName: "RunList"},
 	{path: "/api/v1/runs/{id}", componentName: "Run"},
 }
@@ -55,7 +55,9 @@ func TestAuditedResponseContractsNeverUseGenericObjectFallback(t *testing.T) {
 }
 
 func TestAuditedResponseComponentsHaveConcreteShapes(t *testing.T) {
-	schemas := responseComponents()["schemas"].(map[string]any)
+	// The merged document, not responseComponents() alone: the domain
+	// catalogs overwrite most of that map, and SkillDetail lives only there.
+	schemas := buildDocument(nil)["components"].(map[string]any)["schemas"].(map[string]any)
 	for _, contract := range auditedResponseContracts {
 		contract := contract
 		t.Run(contract.path, func(t *testing.T) {

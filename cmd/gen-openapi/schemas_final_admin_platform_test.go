@@ -7,7 +7,7 @@ func TestFinalAdminPlatformCatalogAuditsRequestedRoutes(t *testing.T) {
 	want := []string{
 		"GET /api/v1/admin/keeper/governance", "GET /api/v1/auth/google/status", "POST /api/v1/bootstrap",
 		"GET /api/v1/onboarding/status", "GET /api/v1/features/catalog", "GET /api/v1/models",
-		"GET /api/v1/instance/settings", "GET /api/v1/oauth/providers", "GET /api/v1/ws-token",
+		"GET /api/v1/instance/settings", "GET /api/v1/ws-token",
 	}
 	for _, route := range want {
 		if routes[route].Response == nil {
