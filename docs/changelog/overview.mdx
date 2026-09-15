@@ -21,6 +21,211 @@ tag: Experimental
   user-visible pull request is required to add to it.
 </Note>
 
+<Update label="September 15, 2026" tags={["features", "updates", "fixes", "security"]}>
+
+## Pages: folders, one editor, and applications you review before they go live
+
+Pages can be grouped into **crew-owned folders** with an icon and a colour,
+and a folder can be shared — with a user, a crew or the whole workspace, as
+*can view* or *can edit* — so whatever is in the folder right now is shared
+with it: filing a page shares it, taking it out unshares it, and a page's own
+grants only ever add. The Pages list is grouped by owner (Mine, your crews,
+other crews, owned by others) and every row says how you reach the page;
+`crewship page list` prints that as `REACH`, and `crewship page access` tells
+you who reaches a page and by which path. A page has its own icon and colour,
+stored on the row rather than in its document, so a re-applied document or a
+rollback leaves it alone. **Edit** now takes over the page the way an issue
+opens — a header card, then Content, Data & actions and History with
+Properties and Access beside them — instead of a rail of four settings
+sections, and it asks about unsaved work whichever link you leave by. A page
+with a custom application gets a review screen: what an agent changed, side by
+side with what is live, and a publication that attests to exactly what it
+showed you. See [Pages](/guides/pages#folders),
+[A page's own icon and colour](/guides/pages#a-page’s-own-icon-and-colour)
+and [Pages applications](/guides/pages-apps-operations).
+
+<Warning>
+  **Publishing a Page application now has to say what was reviewed.**
+  `POST /api/v1/pages/{slug}/project/publish` requires
+  `expected_definition_digest` and `expected_routine_digests` and answers
+  **409** with a named `conflict` when the live definition or a routine moved
+  after the review; a script that published blind must read the review
+  endpoint first. **A Page write grant alone no longer permits whole-document
+  reads or replacements** — a draft, an archived definition or an export that
+  would reveal a panel hidden from the caller is refused; partial readers
+  review source through the endpoints that omit the definition, and a save
+  cannot silently drop a withheld panel. Management endpoints answer the same
+  not-found for a hidden page and a missing one.
+</Warning>
+
+## Routines: one workspace, a calendar, and edits that cannot break a plan
+
+A routine opens on what it does, how it went last time and what to check
+before you run it, with History, Versions and Plan beside — a historical run
+keeps the exact recipe it executed, its retries and its immutable outputs, and
+**Run again** reviews those inputs without touching the head. The **Calendar**
+(Day / 3 days / Week / Month / Year) shows planned and past starts and
+schedules from a click on a date or an hour; a save can carry a one-time
+`trigger.kind: "once"` with a `fire_at`. Prepared start-form answers — choice,
+text, number, boolean, structured — are declared on the recipe and validated
+on the server before anything is enqueued. Authoring is one recipe document
+with durable drafts, per-step **Test** with explicit samples, and a full-page
+editor that protects unsaved work across navigation. Routine webhook receipts
+can be read and they expire (`crewship routine webhooks receipts list|get`),
+and a sender retrying a delivery Crewship already holds gets its receipt back
+even while the endpoint is throttled. A run whose caller goes away is recorded
+as cancelled, not failed; a start you schedule for later runs the recipe you
+scheduled; and an agentless routine's clean completion settles `SUCCEEDED`
+instead of `FAILED · no outcome reported`. See [Routines](/guides/routines)
+and the [CLI](/cli/routine).
+
+<Warning>
+  **Publish requires a change review and a confirmation**, and a routine's
+  recipe can no longer change out from under a live plan by any door: `routine
+  save`, the agent save, an import, a manifest apply and rollback all refuse a
+  recipe an enabled plan's stored preset can no longer satisfy, inside the
+  same transaction, so a refusal leaves the original in place. A plan can no
+  longer be saved with inputs its routine would reject — an unanswered required
+  question, a choice outside the options — and editing a plan's target
+  re-checks its inputs against the recipe it will actually run.
+</Warning>
+
+## Work that survives a crash, and a stop that means stopped
+
+An accepted agent webhook is recorded together with the work it produces in
+one transaction, so a process that dies before answering leaves the work
+queued and the sender's resend finds the same work rather than making a
+second; a delivery ledger keeps even the deliveries a filter ignored, and one
+dispatcher owns execution, claiming a delivery and recording where its runtime
+will be before creating it, so a restart cannot run a webhook twice. Every
+agent run has its own runtime identity — session, environment, script, FIFO
+and signal channel are per run, so a second run of one agent no longer kills
+the first. Work held on a staged agent waits for the person instead of
+failing. A cancel that arrives before the agent process exists is answered by
+protocol, and an unconfirmed process is never called stopped; **Stop** on an
+agent now waits for the runtime to confirm. GitHub and Standard Webhooks
+signatures are verified, with GitHub's replay gap closed. Agent memory tools
+write through the host's revision-checked ledger, and a write that cannot be
+revision-checked is refused rather than performed and labelled. See
+[Work items](/api-reference/work-items), [Webhooks](/api-reference/webhooks)
+and [Agent memory](/guides/agent-memory#requiring-the-guaranteed-write-profile).
+
+<Warning>
+  **The database now commits with `synchronous=FULL`** — work answered `202`
+  has to survive a power cut. Measured cost is about 21 ms of fsync per
+  acceptance commit. **Memory MCP writes require the host ledger**: until the
+  bridge is available to a run, `memory.write` and `memory.append_daily`
+  return an error instead of silently writing through the legacy path. An
+  interrupted dispatch that cannot be confirmed stopped stays in
+  reconciliation for an operator — `crewship work resolve` records the
+  investigated outcome with a reason and an explicit runtime-stop attestation.
+</Warning>
+
+## Incoming webhooks, and messages between people
+
+**Integrations** gained incoming webhook configuration for routines, agents
+and Page panels, on the same explorer, overview and endpoint detail as every
+other integration; a routine webhook can select a GitHub pull-request
+signature profile with content-based replay protection. See
+[Integrations](/guides/integrations).
+
+Chat is one column for everything you can talk in: agent sessions,
+**direct messages** with a colleague, private **groups** and workspace
+**channels** — a mentioned agent answers in a channel, and a DM or a group can
+be continued into a new room without exposing its history. Personal
+**notification sounds** (five tones, separate Chat and Inbox choices, Do not
+disturb) live under Settings, and an image or a PDF opened from the Files
+panel previews in place. `crewship chat room` manages the rooms; `crewship
+seed --with-team-chat` seeds six colleagues with real roles and messages. See
+[People, groups and channels](/guides/chat-sessions#people-groups-and-channels).
+
+## Crews, credentials and issues
+
+A crew or an agent opens on Overview / Team / Work / **Memory** — the
+knowledge it has retained by scope, and what agents have saved about *you*
+with a **Forget** on each — and creating one requires an explicit provider
+choice, with the matching runner installed automatically. Provider **logins**
+(Codex and Gemini device sign-in, `crewship credential login`, server-held
+refresh) join API keys; **provider pools** define explicit account sets with
+priorities (`credential pool`, and an admin screen), though runtime binding is
+still to come; the guided credential flows separate Add secret from Add
+provider. Codex works again through the sidecar: the `OPENAI_BASE_URL` route
+the binary no longer reads is replaced by a per-run `model_provider`, MCP
+notifications are acknowledged with `202`, and two OpenAI hosts a Codex run
+needs are on the default allowlist. Issues can move between people and agents
+with explicit handoff notes and a current worker, `crewship issue
+review-policy` requires human acceptance before an issue counts as done, and
+an issue that ever ran can be deleted. See [First crew](/guides/first-crew),
+[Provider logins](/guides/credentials#provider-logins) and
+[Issue detail](/guides/issue-detail).
+
+<Warning>
+  **Provider account administration is owner/admin only**, in the API and the
+  console alike — legacy provider API keys and CLI logins included; other roles
+  see only the provider brand. **OWNER/ADMIN memberships without explicit
+  capability overrides now receive `credentials:reveal`** (existing explicit
+  sets, revocations included, stay authoritative), and a revealed value
+  disappears after 30 seconds. **Agent peer-profile endpoints answer only the
+  signed-in user's own profile**, administrators included. Imported Gemini
+  refresh needs a server-side OAuth client that matches the grant; the bundled
+  client credentials are gone. And with Keeper off, **an unclassified
+  credential type is no longer injected into the agent environment** — a
+  legacy row that relied on the fallback-as-SECRET treatment stops working and
+  the server logs which `credpolicy` row is missing.
+</Warning>
+
+## The phone is a first-class way to run Crewship
+
+A tab bar (Dashboard, Inbox, Chat, More) on the bottom edge, "Add to Home
+Screen" with its own icon, Back that closes an open drawer instead of leaving
+the page, explorer drawers that open full height, tables that scroll instead
+of clipping, a search field that no longer zooms the page on iOS, and motion
+that respects the system's reduced-motion setting. The PR gate now runs at a
+phone width. The dashboard fits one screen: results and crews are rows, the
+run summary is one strip, the chart is shorter.
+
+## Updates
+
+- **The two daily memory sweeps can be run now** — `crewship admin memory
+  sync user-model|peer-cards [--all] [--dry-run]`.
+- **An agent reports whether its credential actually authenticates its
+  model** — `crewship agent credential-readiness <agent>` (`ready` /
+  `missing` / `unknown`), computed by the runtime's own delivery rules.
+- **Routine waits take typed decision forms** on the web, in the inbox and
+  from the CLI, and a rejection or an approved answer can be recovered.
+- **The Docker image is verified before it is promoted** — boot, health and
+  the embedded UI, per platform by its immutable digest, with the runtime's
+  security packages refreshed at publication. `dev.sh status` says when a
+  workstation serves old code.
+- **`-f yaml` prints the same keys as `-f json` on every command**, and
+  `crewship work get -f yaml` no longer panics.
+- **Building from source needs Go 1.27** — the `go.mod` floor moved from 1.26
+  because a dependency required it.
+
+## Fixes
+
+- **A GDPR erasure now unnames the subject on every workspace-scoped table**
+  (~40 columns): credentials they created pass to a custodian with a
+  `REATTRIBUTED` audit event, grants and invitations are revoked, history
+  columns are anonymised.
+- **An agent turn-limit failure no longer appears as a generic process exit**;
+  the cause and the turn count survive a nonzero exit.
+- **`docker rmi crewship-cache:*` no longer triggers eighty provisions a
+  second** — a cache hit is confirmed against the daemon, and a rebuild loop
+  stops after three attempts with a clear error.
+- **An agent re-saving a routine without a description no longer erases it**;
+  step environments and arguments are bounded before allocation.
+- **The approval gate's queue row no longer carries the raw prompt** — a
+  scrubbed preview sits in `payload.review`, and because the gate's arguments
+  are also its reward-tuning fingerprint, auto-tuning can finally reach its
+  quorum for `agent_run`.
+- **Five `BackupTables` entries no table backs are gone**, each a silent no-op
+  on every restore; a schema guard now checks the list both ways.
+- **Two OSV advisories that turned `main` red overnight** (`sharp`'s bundled
+  libheif, `grpc`) are cleared.
+
+</Update>
+
 <Update label="September 5, 2026" tags={["features", "updates", "fixes", "security"]}>
 
 ## The answer to a credential ask is a grant, not a value
