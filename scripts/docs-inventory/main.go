@@ -10,6 +10,18 @@
 // The report is deliberately evidence-oriented. A documentation page existing
 // is not treated as proof that every operation is described: an exact route
 // mention is stronger evidence than a resource-level page fallback.
+//
+// Two checks were added after the 2026-09-15 audit showed the gates measuring
+// less than they claimed, and both are described where they live:
+//
+//   - CLI parity (cliparity.go): every public path in the OpenAPI document must
+//     be built somewhere in the CLI's Go source, or be excused with a reason
+//     in cli-parity-exemptions.txt.
+//   - Section-scoped flags (flagsections.go): a flag is documented for a
+//     command only in that command's own heading section or on a line that
+//     invokes it; the misses that existed on the day the check landed are in
+//     flag-section-baseline.txt, and -strict fails on any miss not listed
+//     there.
 package main
 
 import (
@@ -147,6 +159,9 @@ type cliRecord struct {
 	Flags           []string `json:"flags,omitempty"`
 	DocumentedFlags []string `json:"documented_flags,omitempty"`
 	MissingFlags    []string `json:"missing_flags,omitempty"`
+	// FlagsOutsideSection are flags the page mentions, but not in a section
+	// about this command nor on a line that invokes it — see flagsections.go.
+	FlagsOutsideSection []string `json:"flags_outside_section,omitempty"`
 }
 
 type report struct {
@@ -156,6 +171,9 @@ type report struct {
 	Env      []surfaceRecord `json:"environment_variables,omitempty"`
 	Manifest []surfaceRecord `json:"manifest_kinds,omitempty"`
 	Reverse  reverseChecks   `json:"docs_to_code"`
+	// flagSectionMissesNew are the section-scoped flag misses the baseline
+	// does not list, as `<command> --<flag>`; derived, not published.
+	flagSectionMissesNew []string
 }
 
 type surfaceRecord struct {
@@ -402,6 +420,11 @@ type summary struct {
 	CLIWithFlags                   int `json:"cli_with_flags"`
 	CLIWithAllFlagsDocumented      int `json:"cli_with_all_flags_documented"`
 	CLIMissingFlagDocs             int `json:"cli_missing_flag_docs"`
+	// CLIFlagsOutsideSection counts flags documented only under another
+	// command's heading; CLIFlagsOutsideSectionNew is the subset the baseline
+	// file does not tolerate, and is what -strict enforces.
+	CLIFlagsOutsideSection    int `json:"cli_flags_outside_section"`
+	CLIFlagsOutsideSectionNew int `json:"cli_flags_outside_section_new"`
 	// APIContractGaps counts operations whose docs are missing at least one
 	// of the four structural markers (auth, request, response, statuses).
 	// The release audit CLAIMED this was zero; without a counter the claim
@@ -481,6 +504,8 @@ func strictGates() []gate {
 			func(r report) []string {
 				return cliRowsWhere(r, func(rec cliRecord) bool { return len(rec.MissingFlags) > 0 })
 			}},
+		{"CLI flags documented only under another command's heading (move the flag into the command's section of docs/cli/<root>.mdx)", func(s summary) int { return s.CLIFlagsOutsideSectionNew },
+			func(r report) []string { return r.flagSectionMissesNew }},
 		{"environment variables with no documentation", func(s summary) int { return s.EnvironmentVariablesMissing },
 			func(r report) []string {
 				return surfaceRowsWhere(r.Env, func(rec surfaceRecord) bool { return rec.Status == "missing_docs" })
@@ -612,6 +637,13 @@ func run(openAPIFile, commandsFile string, strict bool) error {
 		return err
 	}
 	routes := specRoutes(openAPI)
+	flagBaseline, err := readCLIFlagSectionBaseline(cliFlagSectionBaselinePath)
+	if err != nil {
+		return err
+	}
+	knownCommands, _ := commandInventory(manifest)
+	docIndex := newCLIDocIndex(docs, knownCommands)
+	variants := commandVariants(manifest)
 
 	evidence := inventoryEndpointEvidence(docs)
 	r := report{}
@@ -698,6 +730,7 @@ func run(openAPIFile, commandsFile string, strict bool) error {
 			}
 			rec.TestSignals = cliTestSignals(node, tests)
 			rec.DocumentedFlags, rec.MissingFlags = cliFlagEvidence(node, rec.ExactDocs, rec.RootDocs, docs)
+			rec.FlagsOutsideSection = cliFlagSectionEvidence(node, variants[node.Path], rec.MissingFlags, docIndex)
 			r.CLI = append(r.CLI, rec)
 			walk(node.Commands)
 		}
@@ -710,6 +743,7 @@ func run(openAPIFile, commandsFile string, strict bool) error {
 		return err
 	}
 	r.Reverse = inventoryDocsToCode(openAPI, manifest, docs, r.Env, r.Manifest)
+	r.flagSectionMissesNew = newFlagSectionMisses(r.CLI, flagBaseline)
 	r.Summary = summarize(r)
 
 	if err := os.MkdirAll(reportDir, 0o755); err != nil {
@@ -729,6 +763,10 @@ func run(openAPIFile, commandsFile string, strict bool) error {
 	fmt.Printf("docs-inventory: %d API operations, %d CLI commands\n", len(r.API), len(r.CLI))
 	fmt.Printf("docs-inventory: CLI parity %d API paths, %d with no command, %d exempt\n", countPaths(r.API), r.Summary.APIWithoutCLI, r.Summary.APIExemptFromCLI)
 	for _, stale := range staleCLIParityExemptions(exemptions, r.API) {
+		fmt.Printf("docs-inventory: notice: %s\n", stale)
+	}
+	fmt.Printf("docs-inventory: flag sections %d flags documented only under another command's heading, %d of them not in the baseline\n", r.Summary.CLIFlagsOutsideSection, r.Summary.CLIFlagsOutsideSectionNew)
+	for _, stale := range staleFlagSectionBaseline(r.CLI, flagBaseline) {
 		fmt.Printf("docs-inventory: notice: %s\n", stale)
 	}
 	fmt.Printf("docs-inventory: wrote %s and %s\n", jsonReport, markdownReport)
@@ -1285,6 +1323,7 @@ func summarize(r report) summary {
 	s.DocsEnvMissing = r.Reverse.MissingEnv
 	s.DocsKindsMissing = r.Reverse.MissingKinds
 	s.DocsFlagsMissing = r.Reverse.MissingFlags
+	s.CLIFlagsOutsideSectionNew = len(r.flagSectionMissesNew)
 	for _, rec := range r.Env {
 		if rec.Status == "missing_docs" {
 			s.EnvironmentVariablesMissing++
@@ -1363,6 +1402,7 @@ func summarize(r report) summary {
 			} else {
 				s.CLIMissingFlagDocs++
 			}
+			s.CLIFlagsOutsideSection += len(rec.FlagsOutsideSection)
 		}
 	}
 	return s
@@ -1379,6 +1419,7 @@ func markdown(r report) string {
 	fmt.Fprintf(&b, "Response schema quality: %d API operations have a concrete 2xx schema; %d still use the generic object fallback.\n\n", r.Summary.APIWithConcreteResponseSchemas, r.Summary.APIGenericResponseSchemas)
 	fmt.Fprintf(&b, "Request schema quality: %d operations have request bodies; %d have concrete JSON schemas, %d use non-JSON media types, and %d still use a generic JSON fallback.\n\n", r.Summary.APIWithRequestBodies, r.Summary.APIWithConcreteJSONRequests, r.Summary.APINonJSONRequestBodies, r.Summary.APIGenericJSONRequests)
 	fmt.Fprintf(&b, "CLI flag quality: %d commands define flags; %d document all of their flags and %d still have undocumented flag(s).\n\n", r.Summary.CLIWithFlags, r.Summary.CLIWithAllFlagsDocumented, r.Summary.CLIMissingFlagDocs)
+	fmt.Fprintf(&b, "CLI flag placement: %d flags are mentioned on their page but not in their command's own section or invocation; %d of those are not in `%s`.\n\n", r.Summary.CLIFlagsOutsideSection, r.Summary.CLIFlagsOutsideSectionNew, cliFlagSectionBaselinePath)
 	fmt.Fprintf(&b, "CLI parity: %d API paths; %d have no `crewship` command and %d are exempt with a reason in `%s`.\n\n", countPaths(r.API), r.Summary.APIWithoutCLI, r.Summary.APIExemptFromCLI, cliParityExemptionsPath)
 	fmt.Fprintf(&b, "Environment variables: %d discovered, %d missing documentation. Manifest kinds: %d discovered, %d missing documentation.\n\n", r.Summary.EnvironmentVariables, r.Summary.EnvironmentVariablesMissing, r.Summary.ManifestKinds, r.Summary.ManifestKindsMissing)
 	fmt.Fprintf(&b, "Docs → code references: %d commands, %d API paths, %d environment variables, %d manifest kinds, and %d flags; missing symbols: %d, %d, %d, %d, and %d respectively.\n\n", r.Reverse.CommandReferences, r.Reverse.APIPathReferences, r.Reverse.EnvReferences, r.Reverse.KindReferences, r.Reverse.FlagReferences, r.Reverse.MissingCommands, r.Reverse.MissingAPIPaths, r.Reverse.MissingEnv, r.Reverse.MissingKinds, r.Reverse.MissingFlags)
@@ -1395,12 +1436,12 @@ func markdown(r report) string {
 	fmt.Fprintf(&b, "\n## CLI commands needing attention\n\n")
 	fmt.Fprintf(&b, "| Command | Use | Status | Documentation | Tests | Flag gaps |\n|---|---|---|---|---|---|\n")
 	for _, rec := range r.CLI {
-		if (rec.Status == "documented_root" || rec.Status == "documented_exact") && len(rec.TestSignals) > 0 && len(rec.MissingFlags) == 0 {
+		if (rec.Status == "documented_root" || rec.Status == "documented_exact") && len(rec.TestSignals) > 0 && len(rec.MissingFlags) == 0 && len(rec.FlagsOutsideSection) == 0 {
 			continue
 		}
 		docs := appendUnique(append([]string{}, rec.ExactDocs...), rec.RootDocs...)
 		missing := joinOrDash(rec.MissingFlags)
-		fmt.Fprintf(&b, "| `%s` | `%s` | `%s` | %s | %s | missing flags: %s |\n", rec.Path, rec.Use, rec.Status, joinOrDash(docs), joinOrDash(rec.TestSignals), missing)
+		fmt.Fprintf(&b, "| `%s` | `%s` | `%s` | %s | %s | missing flags: %s; outside section: %s |\n", rec.Path, rec.Use, rec.Status, joinOrDash(docs), joinOrDash(rec.TestSignals), missing, joinOrDash(rec.FlagsOutsideSection))
 	}
 	return b.String()
 }
