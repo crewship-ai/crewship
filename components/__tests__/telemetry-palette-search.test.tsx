@@ -16,7 +16,10 @@ vi.mock("@/hooks/use-workspace", () => ({
   useWorkspace: () => ({ workspaceId: "ws-test", role: "OWNER" }),
 }))
 
-vi.mock("@/lib/api-fetch", () => ({ apiFetch: vi.fn() }))
+// broadcastSessionExpired: the palette reaches hooks/use-pages for the page
+// normalisers, and that module loads the realtime hook, which binds the
+// session-expiry broadcast at import time.
+vi.mock("@/lib/api-fetch", () => ({ apiFetch: vi.fn(), broadcastSessionExpired: vi.fn() }))
 
 import { apiFetch } from "@/lib/api-fetch"
 import { resetChatTelemetry, setChatTelemetrySink, type ChatEvent } from "@/lib/telemetry"
