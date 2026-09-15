@@ -1,6 +1,6 @@
 "use client"
 
-import { FileText } from "lucide-react"
+import { CONCEPT_ICON } from "@/lib/concept-icons"
 import { AgentAvatar } from "@/components/ui/agent-avatar"
 import { CrewIcon } from "@/components/ui/crew-icon"
 import { resolveRoutineColor, resolveRoutineIcon } from "@/lib/routine-identity"
@@ -30,7 +30,7 @@ export function IncomingTargetAvatar({ target }: { target: IncomingTarget }) {
     )
   }
   return (
-    <FileText
+    <CONCEPT_ICON.pages
       className="size-5 shrink-0 text-muted-foreground"
       aria-hidden="true"
     />
