@@ -112,6 +112,21 @@ try {
   for (const width of [1440, 390]) {
     await page.setViewportSize({ width, height: 1000 })
     await page.goto(base + "/routines?slug=" + slug)
+    if (width === 1440) {
+      const summary = page.getByText("How this routine works · checks and recovery", {
+        exact: true,
+      })
+      await summary.click()
+      await summary
+        .locator("..")
+        .getByText(
+          "No output acceptance checks declared. Successful execution alone does not establish result quality.",
+          { exact: true },
+        )
+        .waitFor()
+      await summary.click()
+      report.checks.push("Recipe displays server-derived configured rules")
+    }
     await page.getByRole("button", { name: "Run", exact: true }).click()
     const dialog = page.getByRole("dialog")
     const coverage = dialog.getByLabel("Coverage", { exact: true })
@@ -175,7 +190,12 @@ try {
     },
   })
   await publish(failureDefinition)
-  const failedStart = await request("POST", api + "/pipelines/" + failureDefinition.name + "/run", { inputs: { coverage: 0 } }, 202)
+  const failedStart = await request(
+    "POST",
+    api + "/pipelines/" + failureDefinition.name + "/run",
+    { inputs: { coverage: 0 } },
+    200,
+  )
   const failedId = failedStart.run_id || failedStart.id
   report.runs.push(failedId)
   let failedRun
