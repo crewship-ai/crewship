@@ -119,6 +119,7 @@ try {
     await dialog.getByLabel("Directory", { exact: true }).fill("../private")
     await dialog.getByRole("button", { name: "Run", exact: true }).click()
     await dialog.getByText("Maximum is 1", { exact: true }).waitFor()
+    await page.screenshot({ path: `/tmp/crewship-1-clarity-form-${width}.png` })
     assert.equal(await coverage.getAttribute("aria-invalid"), "true")
     assert(await coverage.evaluate((el) => document.activeElement === el))
     await dialog.getByLabel("Directory", { exact: true }).fill("/crew/shared/project")
