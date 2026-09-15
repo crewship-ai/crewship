@@ -458,6 +458,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
                   notFound={detail.notFound}
                   onBack={closePage}
                   now={now}
+                  workspaceId={workspaceId}
                   mayEditAvatar={capabilities.mayEditMetadata}
                   // Straight from the subscription `usePage` registered — the
                   // header indicator is lit only while this page's channel is
