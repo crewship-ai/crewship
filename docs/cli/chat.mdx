@@ -272,7 +272,12 @@ Rules that hold for every room command:
   `ndjson` print the response verbatim — pagination cursors, `has_more`, job
   states — and a `204 No Content` success prints `{"status":"ok"}`. The
   default human format renders the same envelope as key/value rows, with `id`
-  first; `--format quiet` prints the bare id.
+  first. `--format quiet` prints the first row's value only: the bare id for
+  `create`, `direct`, `get`, `send` and `continue`, but for `list`,
+  `messages`, `jobs`, `participants list`, `agents list`, `activity` and the
+  `204` commands it is the value of the first key in sorted order (`agents`,
+  `conversations`, `issues`, `jobs`, `messages`, `participants`, `status`) —
+  use `--format json` to script against those.
 - **Agents run only when mentioned.** Joining an agent to a channel gives it
   the history when it is asked; only `send --mention-agent` queues work.
   Plain `@name` in the text does nothing.
@@ -310,7 +315,9 @@ crewship chat room create --title "Ops" --kind channel
 | `--member <user-id>` | (none) | Workspace user to include. Repeatable. You are included automatically. |
 
 Calls `POST /api/v1/conversations` and prints the new room (`201`). A member
-who is not in the workspace is refused with `400`. Creating a channel does not
+who is not in the workspace is refused with `404` — the same answer as a room
+you cannot reach, so the refusal does not confirm who is in the workspace.
+Creating a channel does not
 invoke any agent; use `chat room agents add` and then `chat room send
 --mention-agent`, both below.
 
@@ -376,9 +383,11 @@ crewship chat room send CHANNEL_ID -m "Ava, check the queue" --client-id q-1 --m
 | `--mention-agent <agent-id>` | (none) | Joined agent to invoke. Repeatable (up to 10). This — not `@name` in the text — is what queues an agent job. |
 
 Calls `POST /api/v1/conversations/{conversationId}/messages` and prints the
-persisted message (`201`; a retry prints the original, `200`). Mentioning an
-agent that is not joined to the room — or mentioning any agent in a group or
-DM, which cannot hold agents — is a `400`. The message is accepted before the
+persisted message (`201`; a retry prints the original, `200`). Two different
+refusals: mentioning *any* agent in a group or DM, which cannot hold agents,
+is a `400`; mentioning an agent that is not joined to the channel is a `404`
+(the agent is treated as unreachable, like a room you are not in). The
+message is accepted before the
 agent has answered: watch `chat room jobs` for the reply's progress.
 
 ### `chat room read <room-id>`
@@ -392,7 +401,9 @@ crewship chat room read ROOM_ID --sequence 175
 | `--sequence <n>` | (required) | The last message sequence you actually read. Nonnegative. |
 
 Calls `POST /api/v1/conversations/{conversationId}/read`. Your own cursor
-only, and it never moves backwards; nobody else's unread count changes.
+only, and it never moves backwards; nobody else's unread count changes. A
+sequence beyond the room's `last_sequence` is refused with `400` — the cursor
+can only point at a message that exists.
 
 ### `chat room mute <room-id>`
 

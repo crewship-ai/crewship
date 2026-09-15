@@ -187,7 +187,21 @@ func TestAcceptance_ChatRoom(t *testing.T) {
 		t.Errorf("job = %v", job)
 	}
 
-	// ── messages: latest page, catch-up cursor ─────────────────────────────
+	// ── send without a mention: a plain message, no job ────────────────────
+	plain := must(bob, "send", channelID, "-m", "Reading along", "--client-id", "plain-1")
+	plainID := str(plain["id"])
+	plainSeq, _ := plain["sequence"].(float64)
+	if plainID == "" || plainID == msgID || plainSeq <= sent["sequence"].(float64) {
+		t.Fatalf("mention-less send = %v", plain)
+	}
+	if mentions, ok := plain["mentioned_agent_ids"].([]any); !ok || len(mentions) != 0 {
+		t.Errorf("mention-less send carries mentions: %v", plain["mentioned_agent_ids"])
+	}
+	if jobsAfter, _ := must(owner, "jobs", channelID)["jobs"].([]any); len(jobsAfter) != 1 {
+		t.Errorf("a mention-less send queued a job: %v", jobsAfter)
+	}
+
+	// ── messages: latest page, older history, catch-up cursor ─────────────
 	messages, _ := must(bob, "messages", channelID)["messages"].([]any)
 	var lastSeq float64
 	var sawSent bool
@@ -203,8 +217,28 @@ func TestAcceptance_ChatRoom(t *testing.T) {
 	if !sawSent || lastSeq < 1 {
 		t.Errorf("messages = %v", messages)
 	}
+	if lastSeq != plainSeq {
+		t.Errorf("newest sequence = %v, want the plain message's %v", lastSeq, plainSeq)
+	}
 	if later, _ := must(bob, "messages", channelID, "--after-sequence", seqArg(lastSeq))["messages"].([]any); len(later) != 0 {
 		t.Errorf("--after-sequence <last> returned %d rows, want 0", len(later))
+	}
+	// Older history: everything before the plain message, the mention
+	// message included, the plain one excluded — which is only true if the
+	// flag reached the server as before_sequence.
+	older := must(bob, "messages", channelID, "--before-sequence", seqArg(plainSeq), "--limit", "50")
+	olderRows, _ := older["messages"].([]any)
+	if len(olderRows) == 0 || older["has_more"] != false {
+		t.Fatalf("--before-sequence = %v", older)
+	}
+	for _, m := range olderRows {
+		row := m.(map[string]any)
+		if seq, _ := row["sequence"].(float64); seq >= plainSeq {
+			t.Errorf("--before-sequence returned sequence %v, not older than %v", seq, plainSeq)
+		}
+	}
+	if last := olderRows[len(olderRows)-1].(map[string]any); str(last["id"]) != msgID {
+		t.Errorf("older page does not end with the mention message: %v", last)
 	}
 
 	// ── read and mute: the caller's own state only ─────────────────────────

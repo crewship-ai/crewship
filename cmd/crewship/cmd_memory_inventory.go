@@ -102,7 +102,7 @@ Examples:
 		// because the server could not look", which the table alone cannot.
 		// Machine formats carry `scopes` in the envelope; quiet is for pipes.
 		if f.RoutesToHuman() && f.Format != "quiet" {
-			fmt.Println(out.scopeLine())
+			fmt.Fprintln(f.Writer, out.scopeLine())
 		}
 		return f.Auto(out, headers, rows)
 	},

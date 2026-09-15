@@ -1694,7 +1694,7 @@ provenance, not input the caller is entitled to invent: any other value is
 **Request:** Optional JSON object with `session_id` and `origin`. `origin` is
 one of `UI`, `CLI`, `WEBHOOK`, `CRON`, `AGENT` or `ROUTINE`.
 
-**Status:** `200` or `201` with the created chat id; `400` invalid JSON,
+**Status:** `201` with the created chat id; `400` invalid JSON,
 `401` unauthenticated, `403` denied, `404` agent not found, and `409`
 when the requested session conflicts. An unknown `origin` is not a `400`.
 
