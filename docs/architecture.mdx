@@ -204,7 +204,7 @@ when a route registered there is not classified by whose identity guards it.
 | **MCP gateway** | `/mcp/tools`, `/mcp/call`, `/mcp/status` |
 | **Assignment** | `/assign`, `/results/{id}`, `/query`, `/standup`, `/escalate`, `/report-confidence` |
 | **Missions** | `/mission/create`, `/mission/templates`, `/mission/{id}` (GET status, POST `/start`) |
-| **Issues** | `/issue/create`, `/issues` (GET), `/issue/{identifier}` (GET/PATCH, plus `/comment`, `/link`, `/attachments`, `/attachments/{id}`) |
+| **Issues** | `/issue/create`, `/issues` (GET), `/issue/{identifier}` (GET/PATCH, plus POST `/comment`, GET `/comments`, `/link`, `/work`, `/attachments`, `/attachments/{id}`) |
 | **Pipelines** | `/pipelines` (GET), `/pipelines/save`, `/pipelines/{slug}` (GET, POST `/run`, POST `/dry_run`) |
 | **Pages** | `/pages/{page}/{panel}` (PUT — the producer door, see [Pages](/guides/pages)) |
 | **Connections** | `/connections`, `/connections/{id}` (`/message`, `/messages`, `/files`), `/crew-connections` |
