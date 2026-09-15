@@ -173,11 +173,11 @@ Examples:
 			return err
 		}
 		var answer struct {
-			RunID      string `json:"run_id"`
-			Status     string `json:"status"`
-			DeliveryID string `json:"delivery_id"`
-			Duplicate  bool   `json:"duplicate"`
-			Reason     string `json:"reason"`
+			RunID      string `json:"run_id" yaml:"run_id"`
+			Status     string `json:"status" yaml:"status"`
+			DeliveryID string `json:"delivery_id" yaml:"delivery_id"`
+			Duplicate  bool   `json:"duplicate" yaml:"duplicate"`
+			Reason     string `json:"reason" yaml:"reason"`
 		}
 		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<16))
 		if err := json.Unmarshal(raw, &answer); err != nil {
