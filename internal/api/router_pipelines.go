@@ -5,7 +5,11 @@ package api
 // route lives in router_internal.go because it shares the
 // X-Internal-Token auth chain with the other sidecar IPC endpoints.
 
-import "net/http"
+import (
+	"net/http"
+
+	"github.com/crewship-ai/crewship/internal/config"
+)
 
 // registerPipelineRoutes wires the public pipeline / schedules /
 // webhooks surface. Returns the PipelineHandler so the orchestrator
@@ -24,6 +28,13 @@ func (r *Router) registerPipelineRoutes() *PipelineHandler {
 	// serves agent authoring. Neither dispatches a real run; /run does.
 	pipes := NewPipelineHandler(r.db, r.logger, nil, nil)
 	pipes.storagePath = r.storagePath
+	// The routine detail's `files` member reads the author crew's shared
+	// volume over the same crewshipd socket the Files panel proxies to.
+	crewSocket := r.socketPath
+	if crewSocket == "" {
+		crewSocket = config.DefaultSocketPath()
+	}
+	pipes.SetCrewFileReader(newIPCCrewFileReader(crewSocket))
 	r.PipelinesHandler = pipes // expose for orchestrator wiring
 	// `crewship` step dispatch — loopback HTTP to our own internal API with
 	// the master token. Options are applied before route registration, so the

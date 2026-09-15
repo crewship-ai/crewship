@@ -43,6 +43,15 @@ func crewWorkspaceGETSchemaCatalogV1() (map[string]map[string]DomainSchema, map[
 		"enabled":      boolean(),
 		"created_at":   str(),
 		"updated_at":   str(),
+		// draft (#2560): the pending pipeline_drafts row for the slug —
+		// present on list and detail only while one exists.
+		"draft": object(map[string]any{"id": str(), "revision": integer(), "updated_at": str(), "updated_by": str()}),
+		// files (#2560, detail only): what the routine runs, with presence
+		// and size read from the author crew's share when reachable.
+		"files": array(object(map[string]any{
+			"path": str(), "language": str(), "interpreter": str(), "step_ids": array(str()),
+			"description": str(), "size_bytes": integer(), "updated_at": str(), "present": boolean(),
+		})),
 	})
 
 	add("/api/v1/crews/{crewId}/capabilities", "CrewCapabilitiesResponseV1", object(map[string]any{"crew_id": str(), "crew_slug": str(), "container": anyObject(), "integrations": array(anyObject()), "agents": array(object(map[string]any{"slug": str(), "name": str()})), "runtimes": anyObject(), "schema": anyObject()}))

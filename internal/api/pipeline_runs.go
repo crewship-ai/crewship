@@ -280,7 +280,8 @@ func (h *PipelineHandler) GetRun(w http.ResponseWriter, r *http.Request) {
 		"sub_spans": h.loadRunAgentSpans(r.Context(), workspaceID, runID, resolveIOStep(r)),
 	}
 	resp["step_outputs_available"] = outputsAvailable
-	h.enrichRunDefinition(r.Context(), workspaceID, runID, resp)
+	dsl := h.enrichRunDefinition(r.Context(), workspaceID, runID, resp)
+	h.enrichRunFailure(r.Context(), runID, status, outcome.String, errorMessage.String, failedAtStep.String, currentStepID.String, dsl, stepOutputs, resp)
 	writeJSON(w, http.StatusOK, resp)
 }
 

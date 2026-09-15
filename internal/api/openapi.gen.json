@@ -8362,6 +8362,9 @@
           "failed_at_step": {
             "type": "string"
           },
+          "failure": {
+            "$ref": "#/components/schemas/RunFailure"
+          },
           "id": {
             "type": "string"
           },
@@ -11808,6 +11811,56 @@
         },
         "type": "object"
       },
+      "RunFailure": {
+        "properties": {
+          "kept_step_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "kind": {
+            "enum": [
+              "checker_rejected",
+              "validation_failed",
+              "transform_input",
+              "timeout",
+              "cancelled",
+              "missing_credential",
+              "missing_integration",
+              "http_status",
+              "script_exit",
+              "cost_cap",
+              "unknown"
+            ],
+            "type": "string"
+          },
+          "not_done_step_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "step_id": {
+            "type": "string"
+          },
+          "step_name": {
+            "type": "string"
+          },
+          "summary": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "step_id",
+          "step_name",
+          "summary",
+          "kept_step_ids",
+          "not_done_step_ids"
+        ],
+        "type": "object"
+      },
       "RunList": {
         "properties": {
           "data": {
@@ -12039,6 +12092,10 @@
           "disabled_reason": {
             "type": "string"
           },
+          "effective_version": {
+            "nullable": true,
+            "type": "integer"
+          },
           "enabled": {
             "type": "boolean"
           },
@@ -12094,6 +12151,9 @@
           "updated_at": {
             "format": "date-time",
             "type": "string"
+          },
+          "version_pinned": {
+            "type": "boolean"
           },
           "wake_check_count": {
             "type": "integer"
@@ -15167,8 +15227,60 @@
           "description": {
             "type": "string"
           },
+          "draft": {
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "revision": {
+                "type": "integer"
+              },
+              "updated_at": {
+                "type": "string"
+              },
+              "updated_by": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
           "enabled": {
             "type": "boolean"
+          },
+          "files": {
+            "items": {
+              "properties": {
+                "description": {
+                  "type": "string"
+                },
+                "interpreter": {
+                  "type": "string"
+                },
+                "language": {
+                  "type": "string"
+                },
+                "path": {
+                  "type": "string"
+                },
+                "present": {
+                  "type": "boolean"
+                },
+                "size_bytes": {
+                  "type": "integer"
+                },
+                "step_ids": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "updated_at": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
           },
           "id": {
             "type": "string"
@@ -15321,8 +15433,60 @@
             "description": {
               "type": "string"
             },
+            "draft": {
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "revision": {
+                  "type": "integer"
+                },
+                "updated_at": {
+                  "type": "string"
+                },
+                "updated_by": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
             "enabled": {
               "type": "boolean"
+            },
+            "files": {
+              "items": {
+                "properties": {
+                  "description": {
+                    "type": "string"
+                  },
+                  "interpreter": {
+                    "type": "string"
+                  },
+                  "language": {
+                    "type": "string"
+                  },
+                  "path": {
+                    "type": "string"
+                  },
+                  "present": {
+                    "type": "boolean"
+                  },
+                  "size_bytes": {
+                    "type": "integer"
+                  },
+                  "step_ids": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "updated_at": {
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              },
+              "type": "array"
             },
             "id": {
               "type": "string"
