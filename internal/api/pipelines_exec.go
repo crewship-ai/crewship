@@ -157,14 +157,26 @@ func (h *PipelineHandler) Run(w http.ResponseWriter, r *http.Request) {
 		p.DefinitionJSON = v.DefinitionJSON
 	}
 
-	// invoking_crew_id / invoking_agent_id come from a future
-	// header (X-Crewship-Invoking-Crew, X-Crewship-Invoking-Agent)
-	// that the sidecar will inject when an in-container agent
-	// triggers the run. UI-driven runs leave both empty — that's
-	// fine; the journal entry just records "user-driven" rather
-	// than "Crew B → Crew A".
-	invokingCrew := r.Header.Get("X-Crewship-Invoking-Crew")
-	invokingAgent := r.Header.Get("X-Crewship-Invoking-Agent")
+	// invoking_crew_id / invoking_agent_id are NOT read from this
+	// request. This route is JWT/CLI-token authenticated, so the only
+	// identity the server has verified is the human (or their CLI
+	// token) in the context below — there is no verified crew or agent
+	// to attribute the run to, and the run is recorded as user-driven.
+	//
+	// It used to read X-Crewship-Invoking-Crew / -Agent here "for the
+	// sidecar to inject". No legitimate caller ever could: RequireAuth
+	// rejects the sidecar's X-Internal-Token, and the sidecar's own IPC
+	// proxy never forwarded the headers anyway. What the header read did
+	// do was let any workspace member stamp a run with an arbitrary
+	// crew/agent id, which then showed as the "From" crew on the
+	// approval card and — because routineTrust prefers the invoking
+	// crew's autonomy dial — could route a strict author crew's gate
+	// through a standing trust grant. Agent-invoked runs carry their
+	// identity in the body of InternalRun, where it is checked against
+	// the token's cryptographic crew binding and the agents table
+	// (assertInvokingIdentity).
+	invokingCrew := ""
+	invokingAgent := ""
 
 	// invoking_user_id is the authenticated caller — the person who
 	// triggered this run. notify steps targeting `to: trigger` deliver
@@ -411,6 +423,17 @@ func (h *PipelineHandler) InternalRun(w http.ResponseWriter, r *http.Request) {
 	// also FILLS IN an omitted invoking_crew_id with the token's own crew
 	// (#1222), so the run is never left unattributed.
 	if !assertBoundCrewWorkspaceDB(w, r, h.db, h.logger, &body.InvokingCrewID) {
+		return
+	}
+	// The crew-bound check above proves the CREW; nothing so far has
+	// looked at invoking_agent_id, and a master/workspace-bound caller has
+	// not proven the crew lives in body.WorkspaceID either. Both become
+	// the run's persisted provenance — the "From" line on approval cards
+	// and, via routineTrust, the autonomy posture consulted before a
+	// standing trust grant fires — so both must resolve to real rows
+	// inside the workspace the run belongs to, with the agent a member of
+	// the invoking crew.
+	if !assertInvokingIdentity(w, r, h.db, h.logger, body.WorkspaceID, body.InvokingCrewID, body.InvokingAgentID) {
 		return
 	}
 

@@ -9,10 +9,12 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+### Security
+- A routine run's invoking crew and agent now come only from a verified identity. `POST …/pipelines/{slug}/run` (JWT / CLI token) no longer reads `X-Crewship-Invoking-Crew` / `-Agent` — any member could stamp a run, the "From" crew on its approval card and the autonomy posture consulted before a standing trust grant fires with a crew of their choosing; such runs are recorded as user-driven with `invoking_user_id` set. The sidecar's internal run route additionally verifies that `invoking_agent_id` is a live agent of the invoking crew and that the crew belongs to the run's workspace, whatever token presented them (a master or workspace-bound token could previously name a crew from another tenant). Before a trust grant fires, the routine's author crew posture is honoured regardless of who invoked the run: a strict author's gate always waits for a human. Provenance stored before this change remains as recorded and is not retroactively verified.
+
 ### Added
 
 - Incoming webhook configuration in Integrations for routines, agents and Page panels, with explicit outgoing notification labels. Routine webhooks can select a GitHub pull request signature profile with content-based replay protection.
-
 
 ### Fixed
 - **GDPR:** the Art. 17 erasure now unnames the subject on every workspace-scoped table the schema sweep found (~40 columns): credentials the subject created pass to a custodian with a `REATTRIBUTED` audit event, their trust grants and pending invitations are revoked, history columns are anonymised, and their saved views, notification preferences and deliveries are removed — one receipt key per table on the audit row. Chats, membership, peer consent and the accountability tables stay excluded and are listed as such. (#2308)
