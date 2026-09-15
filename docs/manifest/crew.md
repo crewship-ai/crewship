@@ -206,6 +206,41 @@ wire shape mirrors the server's `serviceWire`.
 | `volumes` | []object | no | Named volumes `{ name, mount }`. Bind mounts (path-like names) are rejected; mounts must be unique. |
 | `healthcheck` | object | no | Docker healthcheck `{ test, interval, timeout, retries, start_period }`. Duration strings must parse via Go's `time.ParseDuration` ("5s", "1m"); `retries` non-negative. |
 
+#### Private service settings
+
+A service that declares anything beyond `name`, `image`, `ports`,
+`env_refs` and `volumes` — that is, `env`, `command`, `healthcheck` or
+`auto_credentials` — is **private** once applied. The server never
+returns such a configuration on a read, whatever the caller's role:
+`services_json` on every crew response is the literal string
+`[service configuration withheld: contains private runtime settings]`,
+because a literal `env` value or a `command` argument can carry a
+password and crew read permission is not permission to reveal one.
+
+Three consequences for manifests:
+
+- **The manifest you applied is the only copy.** `crewship export`
+  refuses the crew (`private service configuration cannot be exported;
+  use the original manifest`) rather than emitting a redacted
+  placeholder that would be applied back as an empty service list.
+- **A later `apply` of the same crew must omit `services:` or fail.** The
+  differ has nothing trustworthy to compare against, so a document that
+  carries a `services:` key (even `[]`) is refused with `private service
+  configuration cannot be diffed or replaced from a redacted snapshot`.
+  Metadata-only edits (name, description, colour, devcontainer, mise) go
+  through. To change the sidecars, delete and re-create the crew from the
+  manifest, or edit them where the values are visible.
+- **A `PATCH` that would replace them is `409`.** The API refuses any
+  `services_json` other than the unchanged plaintext (`Private service
+  settings cannot be replaced through crew updates`), so an old client
+  that reads the placeholder and writes it back cannot wipe a running
+  service's authentication.
+
+The [Postgres example](#with-a-postgres-sidecar) below is private on all
+three counts (`env`, `healthcheck`). A service that names only `env_refs`
+for its secrets and leaves the rest to the image stays readable and
+round-trips.
+
 ### `spec.files[]`
 
 Local files (scripts, fixtures, configs) delivered into the crew's **shared
@@ -307,7 +342,7 @@ spec:
 | `crewship crew delete <slug>` | Imperative delete (also used to free a slug before re-deploying a template). |
 | `crewship apply --file crew.yaml` | Declarative upsert (Create / Update / Unchanged). |
 | `crewship apply --dir ./manifests/` | Walk a directory; crews + agents run before projects/labels in topo order. |
-| `crewship export workspace` | Round-trip — emits one `kind: Crew` document per crew (see "Round-trip via export"). |
+| `crewship export workspace` | Round-trip — emits one `kind: Crew` document per crew (see "Round-trip via export"); refused for a crew with [private service settings](#private-service-settings). |
 | `crewship export crew <slug>` | Export just one crew + everything labelled `crew: <slug>`. |
 
 ## REST endpoint mapping
@@ -389,7 +424,9 @@ surfaces at Apply.
 `devcontainer_config` / `mise_config` / `services_json` are compared
 after JSON normalisation, so server-side key reordering doesn't trigger
 phantom drift. `services: []` (empty array) clears all sidecars; an
-absent `services:` key leaves them alone.
+absent `services:` key leaves them alone — and is the only form accepted
+once the remote crew's services are [private](#private-service-settings),
+since a redacted snapshot cannot be diffed.
 
 ## Round-trip via export
 
@@ -399,6 +436,14 @@ decoded back into the typed sub-fields where possible, with anything
 unmodeled stashed under `raw:` so the round-trip stays byte-stable.
 Columns the manifest doesn't model (cached_image, config_hash,
 container_ttl_hours, network_mode) are dropped.
+
+The round-trip holds only for crews whose services are readable. A crew
+with [private service settings](#private-service-settings) — any service
+carrying `env`, `command`, `healthcheck` or `auto_credentials`, including
+the Postgres example on this page — makes the whole export fail with
+`crew "<slug>": private service configuration cannot be exported; use the
+original manifest`. Keep the applied manifest under version control; it is
+the only complete copy.
 
 ## See also
 

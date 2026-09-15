@@ -205,6 +205,10 @@ Sidecar container that runs alongside the agent on the crew's bridge network. Ag
 | `healthcheck` | `ServiceHealthcheck` | — | Provisioner waits for `HEALTHY` before starting the agent. |
 | `auto_credentials` | `[]AutoCredential` | — | Secrets Crewship generates and manages for the sidecar. Each entry produces an `AUTO_MANAGED` credential row (attributed to the crew's lead agent), is injected into this sidecar's env, and is appended to every crew agent's `env_refs`. Known images (`postgres:*`, `mysql:*`, `mongo:*`, …) get a sugar default merged in. **Refused when the service publishes a port to the host** (external attack surface needs an operator-chosen credential). |
 
+<Warning>
+  **Private once applied.** A service that sets `env`, `command`, `healthcheck` or `auto_credentials` is never returned on a read: `services_json` on every crew response becomes the literal `[service configuration withheld: contains private runtime settings]`, for every role. `crewship export` then refuses the crew, a later `apply` of a document that carries a `services:` key is refused (`cannot be diffed or replaced from a redacted snapshot`), and a `PATCH` with any other `services_json` is `409`. Keep the applied manifest — it is the only complete copy. A service that names only `name`, `image`, `ports`, `env_refs` and `volumes` stays readable and round-trips. See [Crew manifest → Private service settings](/manifest/crew#private-service-settings).
+</Warning>
+
 ### `AutoCredential`
 
 | Field | Type | Default | Notes |
