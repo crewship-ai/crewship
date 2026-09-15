@@ -21,7 +21,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { CrewIcon } from "@/components/ui/crew-icon"
 import { apiFetch } from "@/lib/api-fetch"
 import { duplicatePayload } from "@/lib/routine-save-payload"
-import { saveRoutineDraft } from "@/lib/routine-drafts"
+import { saveRoutineDraft, RoutineDraftError } from "@/lib/routine-drafts"
 import { listRoutineDrafts, type RoutineDraftListEntry } from "@/lib/routine-drafts"
 import { resolveRoutineColor, resolveRoutineIcon } from "@/lib/routine-identity"
 import type { Pipeline } from "@/hooks/use-pipelines"
@@ -191,7 +191,7 @@ export function RoutineNewDialog({ open, onOpenChange, workspaceId, routines, on
       } catch (e) {
         const message = e instanceof Error ? e.message : String(e)
         throw new Error(
-          /conflict|revision/i.test(message)
+          e instanceof RoutineDraftError && e.status === 409
             ? `A routine or draft named "${body.slug}" already exists. Rename it first, then copy again.`
             : message,
         )

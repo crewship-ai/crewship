@@ -115,7 +115,7 @@ describe("<RoutineNewDialog>", () => {
   it("Copy explains a slug clash instead of overwriting anything", async () => {
     mockServer()
     h.fetcher.mockImplementation(async (url: string, init?: RequestInit) => {
-      if (url.endsWith("/pipelines/drafts") && init?.method === "POST") return json({ error: "draft revision conflict" }, 409)
+      if (url.endsWith("/pipelines/drafts") && init?.method === "POST") return json({ error: "routine draft changed or its published recipe changed; reload and review before publishing" }, 409)
       if (url.endsWith("/pipelines/invoice-intake") && !init?.method) return json({ slug: "invoice-intake", name: "Invoice intake", definition: { name: "invoice-intake", steps: [] } })
       return json([])
     })

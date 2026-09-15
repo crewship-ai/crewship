@@ -1,4 +1,12 @@
 import { apiFetch } from "./api-fetch"
+import { extractProblemDetail } from "./problem-details"
+
+export class RoutineDraftError extends Error {
+  constructor(message: string, readonly status: number) {
+    super(message)
+    this.name = "RoutineDraftError"
+  }
+}
 
 export interface RoutineDraft {
   id: string
@@ -42,7 +50,7 @@ export async function discardRoutineDraft(workspaceId: string, draft: Pick<Routi
 
 async function readDraftResponse(response: Response, fallback: string): Promise<RoutineDraft> {
   const body = await response.json().catch(() => null)
-  if (!response.ok) throw new Error(body?.error || fallback)
+  if (!response.ok) throw new RoutineDraftError(body?.error || extractProblemDetail(body) || fallback, response.status)
   if (!body || typeof body.revision !== "number" || !body.document)
     throw new Error("The server did not return a draft revision.")
   return body

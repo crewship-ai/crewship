@@ -183,7 +183,7 @@ describe("<RoutineEditDialog>", () => {
         return json({ id: "drf_1", slug: "invoice-intake", revision: serverRevision, base_pipeline_id: "pipe-1", base_revision: 3, document: { slug: "invoice-intake", name: "Invoice intake", description: "Reads invoices.", definition: { ...definition, max_cost_usd: 9 }, author_crew_id: "crew_fin" } })
       if (url.endsWith("/pipelines/drafts") && init?.method === "POST") {
         const sent = JSON.parse(String(init.body))
-        if (sent.revision !== serverRevision) return json({ error: "draft revision conflict" }, 409)
+        if (sent.revision !== serverRevision) return json({ error: "routine draft changed or its published recipe changed; reload and review before publishing" }, 409)
         return json({ ...sent, revision: sent.revision + 1 })
       }
       throw new Error(`unexpected ${init?.method ?? "GET"} ${url}`)
@@ -194,7 +194,7 @@ describe("<RoutineEditDialog>", () => {
     fireEvent.click(screen.getByRole("tab", { name: "Agent prompts · 2" }))
     fireEvent.change(screen.getByLabelText("Judge"), { target: { value: "Judge it carefully" } })
     fireEvent.click(screen.getByRole("button", { name: "Save draft" }))
-    await waitFor(() => expect(screen.getByText(/Someone saved a newer draft meanwhile/)).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText(/Someone saved a newer draft or published recipe/)).toBeInTheDocument())
     const save = h.fetcher.mock.calls.find(([url, init]) => String(url).endsWith("/pipelines/drafts") && init?.method === "POST")!
     expect(JSON.parse(String(save[1].body))).toMatchObject({ id: "drf_1", revision: 2 })
     expect(toast.success).not.toHaveBeenCalled()

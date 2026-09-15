@@ -24,7 +24,7 @@ import { apiFetch } from "@/lib/api-fetch"
 import { cn } from "@/lib/utils"
 import { extractProblemDetail } from "@/lib/problem-details"
 import { renamePayload } from "@/lib/routine-save-payload"
-import { loadRoutineDraft, saveRoutineDraft, type RoutineDraft } from "@/lib/routine-drafts"
+import { loadRoutineDraft, saveRoutineDraft, RoutineDraftError, type RoutineDraft } from "@/lib/routine-drafts"
 import { routineInputSpecs, formatInputDefault, type RoutineInputSpec } from "@/lib/routine-inputs"
 import { resolveRoutineColor, resolveRoutineIcon } from "@/lib/routine-identity"
 import { isRecord, asString } from "@/lib/routine-step-describe"
@@ -228,7 +228,7 @@ export function RoutineEditDialog({ open, onOpenChange, workspaceId, routine, fi
       onOpenChange(false)
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e)
-      setRefusal(/conflict|revision/i.test(message) ? `Someone saved a newer draft meanwhile — close Edit and open it again to continue from theirs. (${message})` : message)
+      setRefusal(e instanceof RoutineDraftError && e.status === 409 ? "Someone saved a newer draft or published recipe. Your changes are still here. Copy what you want to keep, then reopen Edit to review the latest version." : message)
     } finally {
       setBusy(false)
     }
