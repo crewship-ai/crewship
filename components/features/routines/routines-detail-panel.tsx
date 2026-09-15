@@ -94,6 +94,14 @@ export interface RoutineDetail {
   // id from (kind, source_id) inside the inbox writer; reconstructing
   // it here would be a second copy of that rule.
   inbox_item_id?: string
+  // A saved draft newer than the published version (contract §"API
+  // additions"). Absent when nothing is drafted, and on older servers.
+  draft?: import("@/hooks/use-pipelines").PipelineDraftSummary
+  // Files the recipe runs — every steps[].script.path with its language,
+  // the steps that use it, size and whether it is on the crew share. `[]`
+  // when nothing is declared; absent on older servers, where the recipe's own
+  // script paths stand in (lib/routine-files.ts).
+  files?: import("@/lib/routine-files").RoutineFile[]
 }
 
 interface Props {
