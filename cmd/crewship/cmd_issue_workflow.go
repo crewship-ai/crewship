@@ -235,7 +235,7 @@ var issueStopCmd = &cobra.Command{
 		}
 		return resolvedFormatter(cmd).AutoHuman(result, func() {
 			if hard {
-				cli.PrintSuccess(fmt.Sprintf("Hard stop requested for %s — the running agent process is being terminated (TERM, then KILL after a grace period)", identifier))
+				cli.PrintSuccess(fmt.Sprintf("Hard stop requested for %s — the running agent's tmux session is being killed, then its process group (KILL)", identifier))
 				return
 			}
 			cli.PrintSuccess(fmt.Sprintf("Stop requested for %s — the current step will finish; no further step will start", identifier))
@@ -271,7 +271,14 @@ var issueReviewCmd = &cobra.Command{
 			return fmt.Errorf("--action must be 'approve' or 'request_changes'")
 		}
 
-		body := map[string]interface{}{"action": action, "revision": iss.WorkRevision, "brief_revision": iss.BriefRevision}
+		revision, briefRevision := iss.WorkRevision, iss.BriefRevision
+		if cmd.Flags().Changed("revision") {
+			revision, _ = cmd.Flags().GetInt("revision")
+		}
+		if cmd.Flags().Changed("brief-revision") {
+			briefRevision, _ = cmd.Flags().GetInt("brief-revision")
+		}
+		body := map[string]interface{}{"action": action, "revision": revision, "brief_revision": briefRevision}
 		if comment, _ := cmd.Flags().GetString("comment"); comment != "" {
 			body["comment"] = comment
 		}

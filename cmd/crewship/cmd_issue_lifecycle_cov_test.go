@@ -115,11 +115,29 @@ func TestIssueCreateRunE_UnsupportedAssigneeType(t *testing.T) {
 	stubIssueDirectory(stub)
 	c := covFreshCmd(issueCreateCmd, declareIssueCreateFlags)
 	covSetFlagsCli4(t, c, map[string]string{
+		"crew": "engineering", "title": "x", "assignee": "someone", "assignee-type": "team",
+	})
+	err := c.RunE(c, nil)
+	if err == nil || !strings.Contains(err.Error(), `--assignee-type "team" is not supported`) {
+		t.Fatalf("want unsupported assignee-type, got %v", err)
+	}
+}
+
+// --assignee-type user wants a member's email or a user id; a bare name is
+// refused before any request rather than forwarded as a doomed assignee_id.
+func TestIssueCreateRunE_UserAssigneeNeedsEmailOrID(t *testing.T) {
+	stub := covSetupCli4(t)
+	stubIssueDirectory(stub)
+	c := covFreshCmd(issueCreateCmd, declareIssueCreateFlags)
+	covSetFlagsCli4(t, c, map[string]string{
 		"crew": "engineering", "title": "x", "assignee": "someone", "assignee-type": "user",
 	})
 	err := c.RunE(c, nil)
-	if err == nil || !strings.Contains(err.Error(), `--assignee-type "user" is not supported`) {
-		t.Fatalf("want unsupported assignee-type, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "email or user ID") {
+		t.Fatalf("want an email-or-id hint, got %v", err)
+	}
+	if calls := stub.CallsFor("POST", "/api/v1/crews/"+covCrewIDCli4+"/issues"); len(calls) != 0 {
+		t.Fatalf("a refused assignee must not create the issue, saw %d POSTs", len(calls))
 	}
 }
 
@@ -212,9 +230,9 @@ func TestIssueUpdateRunE_AssigneeTypeAlone(t *testing.T) {
 	stub := covSetupCli4(t)
 	stubIssueDirectory(stub)
 
-	// Non-"agent" value errors out.
+	// A value that is neither agent nor user errors out.
 	c := covFreshCmd(issueUpdateCmd, declareIssueUpdateFlags)
-	covSetFlagsCli4(t, c, map[string]string{"assignee-type": "user"})
+	covSetFlagsCli4(t, c, map[string]string{"assignee-type": "team"})
 	err := c.RunE(c, []string{"ENG-7"})
 	if err == nil || !strings.Contains(err.Error(), "not supported") {
 		t.Fatalf("want unsupported error, got %v", err)
