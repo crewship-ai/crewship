@@ -506,6 +506,10 @@ steps:
   prompt, and every declared routine input also arrives as
   `CREWSHIP_INPUT_<NAME>`. `interpreter`, `path`, and `args` are assembled into
   an argv (never a shell string), so arguments cannot inject.
+- **Limits**: at most 256 `args`, and at most 1,024 environment entries per
+  step (run inputs plus `env`, the same cap as a `code` step's `env`). A step
+  over either limit fails before the script starts, naming the field and the
+  maximum.
 - **Output**: the script's **stdout** becomes the step output (flows to
   `{{ steps.parse.output }}`) — write only your payload (e.g. strict JSON) to
   stdout and diagnostics to stderr; a non-zero exit code **fails the step**

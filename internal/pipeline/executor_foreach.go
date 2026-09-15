@@ -16,6 +16,14 @@ import (
 // routine and keeps the pre-sized results slice bounded.
 const maxForeachItems = 10000
 
+// maxForeachItemInputs bounds how many run inputs a foreach item inherits.
+// runForeachItem copies the parent inputs map once per item (plus the loop
+// variable), and the inputs count is caller-supplied rather than fixed by the
+// DSL — mergeInputs keeps undeclared extras — so it is checked before the
+// per-item allocation (#2456). Same ceiling as maxStepEnvEntries: 1024 inputs
+// is far beyond any real routine.
+const maxForeachItemInputs = 1024
+
 // runForeachStep executes a foreach step: it renders the items template to a
 // JSON array and fans the body out over each element (#1419, part 1).
 //
@@ -139,12 +147,16 @@ func (e *Executor) runForeachItem(ctx context.Context, step Step, item any, in R
 		as = "item"
 	}
 
-	// Per-item inputs = parent inputs + the loop variable.
-	// Capacity hint only, and deliberately without the `+1` for the loop
-	// variable: CodeQL reads any arithmetic in a make() size as a possible
-	// overflow (go/allocation-size-overflow) and one extra bucket is not
-	// worth a suppression comment on a hot path.
-	itemInputs := make(map[string]any, len(in.Inputs))
+	// Per-item inputs = parent inputs + the loop variable. Every item gets
+	// its own copy, so the fan-out allocates len(items) × len(inputs) entries;
+	// items is already capped (maxForeachItems) and the inputs count is
+	// checked here, at the allocation, so the bound is visible where the size
+	// is computed (go/allocation-size-overflow, #2456).
+	n := len(in.Inputs)
+	if n > maxForeachItemInputs {
+		return "", 0, fmt.Errorf("%d inputs exceeds the maximum of %d copied per foreach item — trim the run inputs", n, maxForeachItemInputs)
+	}
+	itemInputs := make(map[string]any, n+1)
 	for k, v := range in.Inputs {
 		itemInputs[k] = v
 	}
