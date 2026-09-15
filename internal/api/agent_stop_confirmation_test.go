@@ -3,6 +3,7 @@ package api
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -14,6 +15,9 @@ func TestAgentStop_DaemonFailureDoesNotInventStopped(t *testing.T) {
 	}{
 		{"daemon error", 503, `{"error":"cannot stop"}`},
 		{"empty success", 200, `{}`},
+		{"trailing garbage", 200, `{"agent_id":"agent-pxc","status":"stopped"}oops`},
+		{"two values", 200, `{"agent_id":"agent-pxc","status":"stopped"}{}`},
+		{"oversized confirmation", 200, `{"agent_id":"agent-pxc","status":"stopped"}` + strings.Repeat(" ", 4096)},
 		{"another agent", 200, `{"agent_id":"someone-else","status":"stopped"}`},
 		{"only requested", 200, `{"agent_id":"agent-pxc","status":"requested"}`},
 	} {

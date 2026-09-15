@@ -81,16 +81,36 @@ func (o *Orchestrator) StopAgent(ctx context.Context, agentID string) error {
 		}
 		return true
 	})
+	// Close every gate before cancelling preparation (which can wake callers).
+	creating := make([]bool, len(runs))
+	for i, c := range runs {
+		c.mu.Lock()
+		c.stopped = true
+		creating[i] = c.creating
+		c.mu.Unlock()
+	}
+	for i, c := range runs {
+		if !creating[i] {
+			c.cancel()
+		}
+	}
+	// Ownership inspection may block or fail. Known invocations still receive
+	// their stop independently, and one slow provider cannot starve its siblings.
+	stopResults := make(chan error, len(runs))
+	for i, c := range runs {
+		go func() { stopResults <- o.stopAgentInvocation(ctx, c, creating[i]) }()
+	}
 	var errs []error
 	if o.state != nil {
 		states, err := o.state.List(ctx, "agent_runs")
 		if err != nil {
-			return fmt.Errorf("inspect runtime ownership: %w", err)
+			errs = append(errs, fmt.Errorf("inspect runtime ownership: %w", err))
 		}
 		for _, raw := range states {
 			var state RunState
-			if json.Unmarshal(raw, &state) != nil {
-				return fmt.Errorf("unreadable runtime ownership")
+			if err := json.Unmarshal(raw, &state); err != nil {
+				errs = append(errs, fmt.Errorf("decode runtime ownership: %w", err))
+				continue
 			}
 			if state.AgentID != agentID || state.Status != "running" {
 				continue
@@ -108,15 +128,8 @@ func (o *Orchestrator) StopAgent(ctx context.Context, agentID string) error {
 		}
 	}
 
-	for _, c := range runs {
-		c.mu.Lock()
-		c.stopped = true
-		creating := c.creating
-		if !creating {
-			c.cancel()
-		}
-		c.mu.Unlock()
-		if err := o.stopAgentInvocation(ctx, c, creating); err != nil {
+	for range runs {
+		if err := <-stopResults; err != nil {
 			errs = append(errs, err)
 		}
 	}

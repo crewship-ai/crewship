@@ -109,3 +109,24 @@ independent failure. Final revised-tree results and the repeated live test are
 recorded in the PR and in /srv/crewship/backups/crewship_2/prd-closure-2026-09-15/.
 The T01–T14 matrix in that archive explicitly leaves I7, MCP guaranteed memory,
 mailbox, real parallel Claude isolation and OS/storage crash evidence open.
+
+## Review follow-up on September 15
+
+The isolated complete Go suite and vet passed on f7dd0e26. CodeRabbit then
+submitted an actual review (five comments), replacing the earlier throttling
+status. Its valid stop-control findings are addressed: all owned creation gates
+close before preparation is woken, and stop workers start independently before
+state lookup. Lookup/decode errors are accumulated without abandoning known
+runs. Malformed, trailing and oversized IPC confirmations are rejected; the
+projection test uses QueryRowContext. Regression tests failed on the prior stop
+ordering and state-error behavior. The chatbridge test state provider now locks
+and snapshots its map to model the real provider's concurrent access contract.
+
+The request to remove the named adapter from the evidence is not applied:
+this is the actual tested upstream runtime, explicitly permitted by the
+upstream-dependency exception in .coderabbit.yaml. Removing its identity would
+weaken the PRD's required adapter-specific evidence.
+
+CodeQL's failed job log reached SARIF upload without a reported code finding;
+the failure reason is not established from that truncated log. Fresh CI is
+required after the review fixes; it is not treated as green or waived.

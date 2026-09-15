@@ -250,7 +250,9 @@ func (h *ProxyHandler) AgentStop(w http.ResponseWriter, r *http.Request) {
 		AgentID string `json:"agent_id"`
 		Status  string `json:"status"`
 	}
-	if resp.StatusCode != http.StatusOK || json.NewDecoder(io.LimitReader(resp.Body, 4096)).Decode(&confirmed) != nil || confirmed.AgentID != agentID || confirmed.Status != "stopped" {
+	body, readErr := io.ReadAll(io.LimitReader(resp.Body, 4097))
+	decodeErr := json.Unmarshal(body, &confirmed)
+	if resp.StatusCode != http.StatusOK || readErr != nil || len(body) > 4096 || decodeErr != nil || confirmed.AgentID != agentID || confirmed.Status != "stopped" {
 		replyError(w, http.StatusBadGateway, "runtime stop not confirmed")
 		return
 	}

@@ -31,7 +31,7 @@ func TestAgentStop_TerminalProjectionPreservesStopAndOtherRuns(t *testing.T) {
 				t.Fatalf("%d: %s", rr.Code, rr.Body.String())
 			}
 			var got string
-			if err := h.db.QueryRow(`SELECT status FROM agents WHERE id=?`, agentID).Scan(&got); err != nil {
+			if err := h.db.QueryRowContext(t.Context(), `SELECT status FROM agents WHERE id=?`, agentID).Scan(&got); err != nil {
 				t.Fatal(err)
 			}
 			if got != tc.want {
