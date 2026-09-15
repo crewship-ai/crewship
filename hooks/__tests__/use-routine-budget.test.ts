@@ -80,10 +80,7 @@ describe("useRoutineBudget", () => {
     const { result } = renderHook(() => useRoutineBudget("ws1", "my-routine"))
     await waitFor(() => expect(result.current.loading).toBe(false))
 
-    let updated: Awaited<ReturnType<typeof result.current.setBudget>>
-    await act(async () => {
-      updated = await result.current.setBudget(100)
-    })
+    const updated = await act(() => result.current.setBudget(100))
     expect(updated?.monthly_budget_usd).toBe(100)
     expect(result.current.budget?.monthly_budget_usd).toBe(100)
 

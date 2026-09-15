@@ -35,6 +35,9 @@ const STATUS: ComposioStatus = {
     { slug: "discord", count: 1 },
   ],
   users: [{ id: "pg-test", count: 8 }],
+  accounts: [],
+  agents: [],
+  bindings: {},
 }
 
 describe("notificationFacets", () => {

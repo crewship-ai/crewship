@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest"
+import { describe, it, expect, vi, beforeEach, type Mock } from "vitest"
 import { render, screen, fireEvent, within } from "@testing-library/react"
 
 import { UnifiedExplorer } from "../unified-explorer"
@@ -37,14 +37,18 @@ const ISSUES: Mission[] = [
   issue({ id: "i3", identifier: "DES-1", title: "Design high", crew_id: "c2", assignee_id: "a2", assignee_name: "Sam", priority: "high", status: "BACKLOG" }),
 ]
 
+type ExplorerProps = React.ComponentProps<typeof UnifiedExplorer>
+
+// Mocks carry the component's own handler signatures so a renamed or
+// retyped callback fails here, not only at runtime.
 interface Handlers {
-  onCrewFilter: ReturnType<typeof vi.fn>
-  onAgentFilter: ReturnType<typeof vi.fn>
-  onPriorityFilter: ReturnType<typeof vi.fn>
-  onStatusFilter: ReturnType<typeof vi.fn>
+  onCrewFilter: Mock<ExplorerProps["onCrewFilter"]>
+  onAgentFilter: Mock<ExplorerProps["onAgentFilter"]>
+  onPriorityFilter: Mock<NonNullable<ExplorerProps["onPriorityFilter"]>>
+  onStatusFilter: Mock<NonNullable<ExplorerProps["onStatusFilter"]>>
 }
 
-function setup(props: Partial<React.ComponentProps<typeof UnifiedExplorer>> = {}) {
+function setup(props: Partial<ExplorerProps> = {}) {
   const handlers: Handlers = {
     onCrewFilter: vi.fn(),
     onAgentFilter: vi.fn(),

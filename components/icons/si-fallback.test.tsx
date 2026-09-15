@@ -22,7 +22,7 @@ const REMOVED_ICON_EXPORTS = [
 
 describe("si-fallback vendored icons", () => {
   it.each(REMOVED_ICON_EXPORTS)("%s renders an svg with non-empty path data", (name) => {
-    const Icon = (Fallback as Record<string, React.ComponentType>)[name]
+    const Icon = (Fallback as Record<string, React.ComponentType<{ className?: string }>>)[name]
     expect(Icon, `${name} should be exported`).toBeTypeOf("function")
 
     const { container } = render(createElement(Icon, { className: "size-4" }))

@@ -45,6 +45,9 @@ export interface TraceStep {
   id: string
   type: StepKind
   needs?: string[]
+  // Mirrors internal/pipeline/types.go Step.If. A condition can reference
+  // `steps.<id>` and so takes part in auto-derived dependencies.
+  if?: string
   // type-specific snippets, all optional. Keep them flat instead of
   // discriminated unions so the renderer can do `step.http?.url` etc.
   // without exhaustive switches.

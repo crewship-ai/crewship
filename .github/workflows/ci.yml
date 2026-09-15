@@ -1133,13 +1133,8 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           pnpm-version: ${{ env.PNPM_VERSION }}
 
-      - name: Type-check tests (no new diagnostics)
-        env:
-          TEST_TYPES_BASE_REF: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || '' }}
+      - name: Type-check tests
         run: |
-          if [ -n "$TEST_TYPES_BASE_REF" ]; then
-            git fetch --no-tags --depth=1 origin "$TEST_TYPES_BASE_REF"
-          fi
           node --test scripts/typecheck-tests-node-test.mjs
           pnpm test:types
 

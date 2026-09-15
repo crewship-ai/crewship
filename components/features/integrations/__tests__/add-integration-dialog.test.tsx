@@ -166,7 +166,7 @@ describe("AddIntegrationDialog", () => {
   it("gives a pointer user a Cancel button on the first question", () => {
     const props = renderDialog()
 
-    fireEvent.click(screen.getByRole("button", { name: "Cancel", exact: true }))
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }))
 
     expect(props.onOpenChange).toHaveBeenCalledWith(false)
   })
@@ -175,7 +175,7 @@ describe("AddIntegrationDialog", () => {
     const props = renderDialog()
     chooseNotifications()
 
-    const cancel = screen.getByRole("button", { name: "Cancel", exact: true })
+    const cancel = screen.getByRole("button", { name: "Cancel" })
     fireEvent.click(cancel)
 
     expect(props.onOpenChange).toHaveBeenCalledWith(false)

@@ -18,7 +18,7 @@ const h = vi.hoisted(() => ({
   live: new Map<string, unknown>(),
   waitpoints: [] as unknown[],
   refreshWaitpoints: vi.fn(),
-  decide: vi.fn(async () => ({ ok: true })),
+  decide: vi.fn<typeof import("@/lib/api/waitpoints").waitpointDecide>(async () => ({ ok: true })),
 }))
 
 vi.mock("@/hooks/use-pipeline-runs", () => ({
@@ -34,7 +34,7 @@ vi.mock("@/hooks/use-run-waitpoints", () => ({
   useWorkspaceWaitpoints: () => ({ waitpoints: h.waitpoints, refresh: h.refreshWaitpoints }),
 }))
 vi.mock("@/lib/api/waitpoints", () => ({
-  waitpointDecide: (...args: unknown[]) => h.decide(...args),
+  waitpointDecide: (...args: Parameters<typeof h.decide>) => h.decide(...args),
 }))
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() } }))
 vi.mock("@/components/features/dashboard/status-donut", () => ({
@@ -108,7 +108,7 @@ describe("<RoutinesOverview>", () => {
     h.live = new Map()
     h.waitpoints = []
     h.refreshWaitpoints = vi.fn()
-    h.decide = vi.fn(async () => ({ ok: true }))
+    h.decide = vi.fn<typeof import("@/lib/api/waitpoints").waitpointDecide>(async () => ({ ok: true }))
     vi.useFakeTimers({ now: NOW, shouldAdvanceTime: false })
   })
   afterEach(() => vi.useRealTimers())

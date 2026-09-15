@@ -68,7 +68,7 @@ describe("readable recipe steps", () => {
     expect(screen.getByRole("button", { name: /Wait for approval/ })).toBeInTheDocument()
     expect(screen.getAllByText("Demo scenario: Approval")[0]).toBeInTheDocument()
     expect(screen.queryByText("Interactive graph")).not.toBeInTheDocument()
-    fireEvent.click(screen.getByRole("button", { name: "Map", exact: true }))
+    fireEvent.click(screen.getByRole("button", { name: "Map" }))
     expect(screen.getByText("Interactive graph")).toBeInTheDocument()
   })
   it("edits the selected step while preserving conditions, dependencies and unknown fields", () => {

@@ -19,7 +19,7 @@ function item(partial: Partial<InboxItem>): InboxItem {
 // smart bucket ranked right under "Decisions needed".
 describe("inbox smart grouping — agent replies", () => {
   it("buckets a chat-reply message under Agent replies", () => {
-    const g = groupOf(item({ kind: "message", payload: { chat_url: "/chat/casey?session=c1" } }), "smart")
+    const g = groupOf(item({ kind: "message", payload: { chat_url: "/chat/casey?session=c1" } }))
     expect(g.key).toBe("sm:replies")
     expect(g.label).toBe("Agent replies")
   })
@@ -31,8 +31,8 @@ describe("inbox smart grouping — agent replies", () => {
   })
 
   it("keeps non-chat messages in their existing buckets", () => {
-    expect(groupOf(item({ kind: "message", payload: { issue_identifier: "ENG-6" } }), "smart").key).toBe("sm:review")
-    expect(groupOf(item({ kind: "message", payload: {} }), "smart").key).toBe("sm:fyi")
-    expect(groupOf(item({ kind: "escalation", payload: {} }), "smart").key).toBe("sm:decisions")
+    expect(groupOf(item({ kind: "message", payload: { issue_identifier: "ENG-6" } })).key).toBe("sm:review")
+    expect(groupOf(item({ kind: "message", payload: {} })).key).toBe("sm:fyi")
+    expect(groupOf(item({ kind: "escalation", payload: {} })).key).toBe("sm:decisions")
   })
 })
