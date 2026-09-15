@@ -1037,6 +1037,48 @@ func (h *PageHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	// An edit that left the DOCUMENT as it was — an icon or a colour picked
+	// from the header tile, or an empty patch — is not a save of the spec
+	// (#2563). It records no version (ten colour clicks would otherwise push
+	// ten identical rows through the 50-version window and trim real
+	// history), and it leaves updated_at alone, because §10 defines that as
+	// the SPEC's modification time and the index orders on it. The optimistic
+	// lock still holds: the row is written only against the spec that was
+	// read.
+	if string(specJSON) == originalSpec {
+		result, err := tx.ExecContext(r.Context(),
+			`UPDATE pages SET icon = NULLIF(?, ''), color = NULLIF(?, '') WHERE id = ? AND spec_json = ?`,
+			icon, color, rec.ID, originalSpec)
+		if err != nil {
+			replyInternalError(w, h.logger, "update page avatar", err)
+			return
+		}
+		if n, err := result.RowsAffected(); err != nil {
+			replyInternalError(w, h.logger, "check page avatar update", err)
+			return
+		} else if n != 1 {
+			replyError(w, http.StatusConflict, "Page definition changed before the update; reload before saving")
+			return
+		}
+		if err := tx.Commit(); err != nil {
+			replyInternalError(w, h.logger, "commit page avatar update", err)
+			return
+		}
+		updated, err := h.loadPage(r.Context(), wsID, rec.Slug)
+		if err != nil {
+			replyInternalError(w, h.logger, "reload updated page", err)
+			return
+		}
+		panels, err := h.loadPanels(r.Context(), wsID, updated.ID)
+		if err != nil {
+			replyInternalError(w, h.logger, "reload updated panels", err)
+			return
+		}
+		broadcastWorkspaceEvent(h.hub, wsID, "page.updated", map[string]any{"page_id": updated.ID, "slug": updated.Slug})
+		writeJSON(w, http.StatusOK, h.pageDocument(r.Context(), updated, panels, h.reviewViewer(r.Context(), wsID)))
+		return
+	}
+
 	result, err := tx.ExecContext(r.Context(),
 		`UPDATE pages SET name = ?, description = NULLIF(?, ''), icon = NULLIF(?, ''), color = NULLIF(?, ''), spec_json = ?, updated_at = ? WHERE id = ? AND spec_json = ?`,
 		base.Metadata.Name, base.Metadata.Description, icon, color, string(specJSON), now, rec.ID, originalSpec)

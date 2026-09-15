@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func pagesPatch(t *testing.T, h *PageHandler, wsID, userID, slug, body string) *httptest.ResponseRecorder {
@@ -144,7 +145,7 @@ func TestPagesAvatar_RefusesNamesOutsideTheRegistryByName(t *testing.T) {
 }
 
 func TestPagesAvatar_IsNotPartOfTheSpecOrItsVersions(t *testing.T) {
-	h, _, _, wsID, userID := newPagesFixture(t)
+	h, _, clock, wsID, userID := newPagesFixture(t)
 	pagesCreate(t, h, wsID, userID, "fleet-201")
 	if rr := pagesPatch(t, h, wsID, userID, "fleet-201", `{"icon": "rocket", "color": "amber"}`); rr.Code != http.StatusOK {
 		t.Fatalf("patch: %d %s", rr.Code, rr.Body.String())
@@ -155,5 +156,40 @@ func TestPagesAvatar_IsNotPartOfTheSpecOrItsVersions(t *testing.T) {
 	}
 	if strings.Contains(spec, "rocket") || strings.Contains(spec, "amber") {
 		t.Errorf("the avatar leaked into spec_json — it is a column, a rollback must not restore it: %s", spec)
+	}
+
+	// An avatar-only patch is not a save of the spec: no version row, and
+	// updated_at — the spec's mtime, which the index orders on — stays put.
+	var versions int
+	if err := h.db.QueryRow(`SELECT COUNT(*) FROM page_versions`).Scan(&versions); err != nil {
+		t.Fatalf("count versions: %v", err)
+	}
+	if versions != 1 {
+		t.Errorf("page_versions holds %d rows after create + an avatar patch, want 1 — a colour click must not push an identical spec through the 50-version window", versions)
+	}
+	var updatedAt string
+	if err := h.db.QueryRow(`SELECT updated_at FROM pages WHERE slug = 'fleet-201'`).Scan(&updatedAt); err != nil {
+		t.Fatalf("read updated_at: %v", err)
+	}
+	var createdAt string
+	if err := h.db.QueryRow(`SELECT created_at FROM pages WHERE slug = 'fleet-201'`).Scan(&createdAt); err != nil {
+		t.Fatalf("read created_at: %v", err)
+	}
+	if updatedAt != createdAt {
+		t.Errorf("updated_at moved to %s on an avatar-only patch (created %s); §10 makes it the spec's mtime", updatedAt, createdAt)
+	}
+	// And a rename still is a save: one more version, updated_at moves.
+	clock.advance(time.Minute)
+	if rr := pagesPatch(t, h, wsID, userID, "fleet-201", `{"name": "Flotila .202", "color": "cyan"}`); rr.Code != http.StatusOK {
+		t.Fatalf("rename: %d %s", rr.Code, rr.Body.String())
+	}
+	if err := h.db.QueryRow(`SELECT COUNT(*) FROM page_versions`).Scan(&versions); err != nil {
+		t.Fatalf("count versions: %v", err)
+	}
+	if versions != 2 {
+		t.Errorf("page_versions holds %d rows after a rename, want 2", versions)
+	}
+	if icon, color := pagesAvatarOf(t, pagesGet(t, h, wsID, userID, "OWNER", "fleet-201")); icon != "rocket" || color != "cyan" {
+		t.Errorf("avatar after a rename with a colour = %q/%q, want rocket/cyan", icon, color)
 	}
 }

@@ -325,7 +325,10 @@ its payload history goes with it.
 Every field is optional and an omitted one is left alone, so `{"icon":
 "chart"}` changes the icon and nothing else. `icon` and `color` follow the
 pointer rule exactly: omitted keeps, `""` clears, a name outside the crew icon
-registry or the crew palette is a 400 that stores nothing.
+registry or the crew palette is a 400 that stores nothing. A request that
+leaves the document as it was — an avatar-only change, or an empty body —
+records **no version** and does not move `updated_at`, which is the spec's
+modification time; the optimistic lock (409) still applies.
 
 **Response 200:** the updated page.
 
