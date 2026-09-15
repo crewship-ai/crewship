@@ -88,7 +88,7 @@ func seedIntegrations(ctx context.Context, client *cli.Client, crewIDs, agentIDs
 			continue
 		}
 		var created struct {
-			ID string `json:"id"`
+			ID string `json:"id" yaml:"id"`
 		}
 		// Report parse failures — otherwise the integration exists server-side
 		// but isn't tracked in integrationIDs, so the bindings loop below
@@ -147,7 +147,7 @@ func seedIntegrations(ctx context.Context, client *cli.Client, crewIDs, agentIDs
 			continue
 		}
 		var created struct {
-			ID string `json:"id"`
+			ID string `json:"id" yaml:"id"`
 		}
 		// Mirror the integration-create parse-failure handling above so
 		// OAuth provisioning is debuggable on its own: surface ReadJSON
@@ -248,8 +248,8 @@ func resolveCrewIntegration(client *cli.Client, crewID, name string) (string, er
 		return "", err
 	}
 	var items []struct {
-		ID   string `json:"id"`
-		Name string `json:"name"`
+		ID   string `json:"id" yaml:"id"`
+		Name string `json:"name" yaml:"name"`
 	}
 	if err := cli.ReadJSON(resp, &items); err != nil {
 		return "", err

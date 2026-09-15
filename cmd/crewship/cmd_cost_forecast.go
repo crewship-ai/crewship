@@ -105,9 +105,9 @@ input on average).`,
 		}
 		var runs struct {
 			Data []struct {
-				ID       string         `json:"id"`
-				Metadata map[string]any `json:"metadata"`
-			} `json:"data"`
+				ID       string         `json:"id" yaml:"id"`
+				Metadata map[string]any `json:"metadata" yaml:"metadata"`
+			} `json:"data" yaml:"data"`
 		}
 		if err := cli.ReadJSON(resp, &runs); err != nil {
 			return err
@@ -140,12 +140,12 @@ input on average).`,
 
 // forecastRow is one model + its projected $ for the requested run.
 type forecastRow struct {
-	Model     string  `json:"model"`
-	InputUSD  float64 `json:"input_usd"`
-	OutputUSD float64 `json:"output_usd"`
-	TotalUSD  float64 `json:"total_usd"`
-	InTokens  int     `json:"input_tokens"`
-	OutTokens int     `json:"output_tokens"`
+	Model     string  `json:"model" yaml:"model"`
+	InputUSD  float64 `json:"input_usd" yaml:"input_usd"`
+	OutputUSD float64 `json:"output_usd" yaml:"output_usd"`
+	TotalUSD  float64 `json:"total_usd" yaml:"total_usd"`
+	InTokens  int     `json:"input_tokens" yaml:"input_tokens"`
+	OutTokens int     `json:"output_tokens" yaml:"output_tokens"`
 }
 
 // providerRate is one model + its public per-1M-token list price.

@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { renderHook, act, waitFor } from "@testing-library/react"
 
 import { useJournalStream } from "@/hooks/use-journal-stream"
+import type { JournalEntry } from "@/lib/types/journal"
 
 // In-memory EventSource double (happy-dom ships none). Duplicated from
 // use-journal-stream.test.ts rather than shared, matching what
@@ -354,7 +355,7 @@ describe("useJournalStream — backfill gap", () => {
       .mockResolvedValueOnce(okResponse([entry("p2_0", "2026-01-01T00:00:30.000Z")]))
       .mockResolvedValue(okResponse([]))
 
-    const onEntry = vi.fn()
+    const onEntry = vi.fn<(entry: JournalEntry) => void>()
     const { result } = renderHook(() =>
       useJournalStream({ workspaceId: "ws_test", onEntry }),
     )
@@ -375,7 +376,7 @@ describe("useJournalStream — backfill gap", () => {
     // the complete sequence rather than just its head — checking only the
     // first id passes for an implementation that reverses each page
     // separately and hands back p1 newest-first behind it.
-    expect(onEntry.mock.calls.map(([e]: [{ id: string }]) => e.id)).toEqual([
+    expect(onEntry.mock.calls.map(([e]) => e.id)).toEqual([
       "p2_0",
       ...Array.from({ length: POLL_LIMIT }, (_, i) => `p1_${i}`),
     ])

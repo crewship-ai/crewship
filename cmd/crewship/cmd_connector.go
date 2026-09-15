@@ -45,11 +45,11 @@ var connectorListCmd = &cobra.Command{
 			return err
 		}
 		var rows []struct {
-			ID          string `json:"id"`
-			Name        string `json:"name"`
-			Description string `json:"description"`
-			Category    string `json:"category"`
-			AuthMode    string `json:"auth_mode"`
+			ID          string `json:"id" yaml:"id"`
+			Name        string `json:"name" yaml:"name"`
+			Description string `json:"description" yaml:"description"`
+			Category    string `json:"category" yaml:"category"`
+			AuthMode    string `json:"auth_mode" yaml:"auth_mode"`
 		}
 		if err := cli.ReadJSON(resp, &rows); err != nil {
 			return err
@@ -122,8 +122,8 @@ var connectorVerifyCmd = &cobra.Command{
 			return err
 		}
 		var out struct {
-			OK      bool   `json:"ok"`
-			Message string `json:"message"`
+			OK      bool   `json:"ok" yaml:"ok"`
+			Message string `json:"message" yaml:"message"`
 		}
 		if err := cli.ReadJSON(resp, &out); err != nil {
 			return err
@@ -185,9 +185,9 @@ var connectorInstallCmd = &cobra.Command{
 			return err
 		}
 		var out struct {
-			IntegrationID string `json:"integration_id"`
-			NextStep      string `json:"next_step"`
-			OAuthURL      string `json:"oauth_url"`
+			IntegrationID string `json:"integration_id" yaml:"integration_id"`
+			NextStep      string `json:"next_step" yaml:"next_step"`
+			OAuthURL      string `json:"oauth_url" yaml:"oauth_url"`
 		}
 		if err := cli.ReadJSON(resp, &out); err != nil {
 			return err

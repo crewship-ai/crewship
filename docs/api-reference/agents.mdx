@@ -45,6 +45,7 @@ An **agent** is an AI coding agent with a configurable role, CLI adapter, skills
 | GET | [/api/v1/agents/{agentId}/credentials](#list-credentials) | List credential assignments |
 | POST | [/api/v1/agents/{agentId}/credentials](#assign-credential) | Assign a credential |
 | DELETE | [/api/v1/agents/{agentId}/credentials/{assignmentId}](#remove-credential) | Remove a credential |
+| GET | [/api/v1/agents/{agentId}/credential-readiness](#credential-readiness) | Report whether a delivered credential authenticates the agent's model |
 | GET | [/api/v1/agents/{agentId}/chats](#list-chats) | List chat sessions |
 | POST | [/api/v1/agents/{agentId}/chats](#create-chat) | Create a new chat session |
 | PUT | [/api/v1/agents/{agentId}/chats/{chatId}/read](#mark-chat-read) | Mark a chat read |
@@ -1528,6 +1529,101 @@ The path segment is the **assignment ID** (`agent_credentials.id`), not the cred
 
 ```json
 { "success": true }
+```
+
+### Credential Readiness
+
+```
+GET /api/v1/agents/{agentId}/credential-readiness?workspace_id={workspaceId}
+```
+
+Reports whether a credential the runtime will actually deliver to this agent
+authenticates its adapter's model provider. The agent-scoped member of the
+readiness family ([Crew Credential Readiness](/api-reference/crews#credential-readiness)
+is the other).
+
+It exists because [List Credentials](#list-credentials) answers a different
+question. That listing is the union of everything that reaches the agent, so one
+crew-scoped `GH_TOKEN` binding makes it non-empty for every agent in the crew —
+including an agent with no model credential, whose first run then fails at the
+first model call. Nor is "the model variable in the env is unfilled" the right
+test: for `CLAUDE_CODE`, `CODEX_CLI` and `GEMINI_CLI` the sidecar reverse proxy
+injects the key mid-flight and the env deliberately holds a dummy.
+
+The verdict is computed by the runtime's own delivery rules — the same
+classification that decides what the sidecar CredStore holds, which login is
+written to `CLAUDE_CODE_OAUTH_TOKEN` or rendered to a login file, and which key
+an OpenCode or Cursor run gets in its env — over the same resolved delivery set
+the run boots with (explicit grants, bindings by scope, crew links; lease-gated).
+No credential value is decrypted to answer.
+
+The endpoint is **read-only and advisory**. It grants nothing. A provider or
+adapter the runtime has no opinion about reports `unknown` rather than guessing,
+for the same reason the crew report does: a false "missing" on a healthy agent
+teaches the operator to ignore the report.
+
+**Request:** `agentId` is a required path parameter and `workspace_id` selects the workspace. No request body.
+
+**Auth:** any workspace member. Below the `manage` role the matched credential's
+`credential_name` is withheld — the same rule that hides provider accounts from
+[List Credentials](#list-credentials) — while the verdict itself is not.
+
+**Response:** `200 OK`
+
+```json
+{
+  "agent_id": "cagent0123456789abcdefghi",
+  "agent_slug": "parity-probe",
+  "adapter": "CLAUDE_CODE",
+  "model_credential": {
+    "state": "missing",
+    "provider": "ANTHROPIC"
+  },
+  "notes": ["no credential in this agent's delivery authenticates ANTHROPIC for CLAUDE_CODE"]
+}
+```
+
+```json
+{
+  "agent_id": "cagent0123456789abcdefghj",
+  "agent_slug": "casey",
+  "adapter": "CLAUDE_CODE",
+  "model_credential": {
+    "state": "ready",
+    "credential_name": "CLAUDE_CODE_OAUTH_TOKEN",
+    "credential_id": "ccred0123456789abcdefghij",
+    "source": "agent_grant",
+    "delivery": "login_env",
+    "provider": "ANTHROPIC"
+  },
+  "notes": []
+}
+```
+
+**Response Fields:**
+
+| Field | Type | Description |
+|---|---|---|
+| `agent_id` | string | The agent's ID |
+| `agent_slug` | string | The agent's slug |
+| `adapter` | string | The agent's `cli_adapter` |
+| `model_credential.state` | string | `ready` — a delivered credential authenticates the provider. `missing` — the provider is known and nothing delivered authenticates it. `unknown` — no opinion: an unrecognised adapter, an `OPENCODE` agent naming no provider, or a model on the operator's local endpoint |
+| `model_credential.provider` | string | The LLM provider the adapter pays through (`CLAUDE_CODE` → `ANTHROPIC`, `CODEX_CLI` → `OPENAI`, `GEMINI_CLI` → `GOOGLE`, `CURSOR_CLI` → `CURSOR`, `FACTORY_DROID` → `FACTORY`, `OPENCODE` → the model's provider prefix, else `llm_provider`). Omitted when unknown for want of one |
+| `model_credential.credential_name` | string | The matched credential's name. Only when `ready`; withheld below the `manage` role |
+| `model_credential.credential_id` | string | The matched credential's ID. Only when `ready` |
+| `model_credential.source` | string | Where the match comes from, in the vocabulary of `crewship credential resolve`: `agent_grant`, `agent_binding`, `crew_binding`, `workspace_binding`, `crew_link`. Only when `ready` |
+| `model_credential.delivery` | string | The channel the runtime uses: `sidecar` (the proxy injects it; the env holds a dummy), `login_env` (`CLAUDE_CODE_OAUTH_TOKEN`), `login_file` (Codex `auth.json`, Gemini `oauth_creds.json`), `env` (the real key in the env, for a CLI the proxy cannot inject into). Only when `ready` |
+| `notes` | string[] | Operator-facing reasons: why an unknown is unknown, what a missing is missing. Never `null` |
+
+| Status | Condition |
+|---|---|
+| `400` | `agentId` missing |
+| `404` | Agent not found in this workspace |
+
+**CLI:**
+
+```
+crewship agent credential-readiness <slug-or-id>
 ```
 
 ---

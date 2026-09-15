@@ -84,10 +84,10 @@ Note: the credential argument accepts a name or an ID.`,
 // wants to iterate, so the slug is folded into the row and the result is
 // emitted as a sorted array.
 type oauthProviderRow struct {
-	Provider      string `json:"provider"`
-	AuthURL       string `json:"auth_url"`
-	TokenURL      string `json:"token_url"`
-	DefaultScopes string `json:"default_scopes"`
+	Provider      string `json:"provider" yaml:"provider"`
+	AuthURL       string `json:"auth_url" yaml:"auth_url"`
+	TokenURL      string `json:"token_url" yaml:"token_url"`
+	DefaultScopes string `json:"default_scopes" yaml:"default_scopes"`
 }
 
 var oauthProvidersCmd = &cobra.Command{
@@ -117,9 +117,9 @@ at without looking up their endpoints yourself.`,
 		}
 
 		var catalogue map[string]struct {
-			AuthURL       string `json:"auth_url"`
-			TokenURL      string `json:"token_url"`
-			DefaultScopes string `json:"default_scopes"`
+			AuthURL       string `json:"auth_url" yaml:"auth_url"`
+			TokenURL      string `json:"token_url" yaml:"token_url"`
+			DefaultScopes string `json:"default_scopes" yaml:"default_scopes"`
 		}
 		if err := cli.ReadJSON(resp, &catalogue); err != nil {
 			return err
@@ -196,8 +196,8 @@ exchange cannot recover that verifier without it.`,
 		}
 
 		var out struct {
-			AuthURL string `json:"auth_url"`
-			State   string `json:"state"`
+			AuthURL string `json:"auth_url" yaml:"auth_url"`
+			State   string `json:"state" yaml:"state"`
 		}
 		if err := cli.ReadJSON(resp, &out); err != nil {
 			return err
@@ -282,8 +282,8 @@ server-side state row exists to recover it from.`,
 		}
 
 		var out struct {
-			Status       string `json:"status"`
-			CredentialID string `json:"credential_id"`
+			Status       string `json:"status" yaml:"status"`
+			CredentialID string `json:"credential_id" yaml:"credential_id"`
 		}
 		if err := cli.ReadJSON(resp, &out); err != nil {
 			return err
@@ -300,13 +300,13 @@ server-side state row exists to recover it from.`,
 // reports the terminal status verbatim rather than a bare boolean, so a script
 // that times out can tell PENDING from ERROR without re-fetching.
 type oauthConnectResult struct {
-	CredentialID string `json:"credential_id"`
-	AuthURL      string `json:"auth_url"`
-	LoopbackPort int    `json:"loopback_port"`
-	State        string `json:"state"`
-	Status       string `json:"status"`
-	Connected    bool   `json:"connected"`
-	Waited       bool   `json:"waited"`
+	CredentialID string `json:"credential_id" yaml:"credential_id"`
+	AuthURL      string `json:"auth_url" yaml:"auth_url"`
+	LoopbackPort int    `json:"loopback_port" yaml:"loopback_port"`
+	State        string `json:"state" yaml:"state"`
+	Status       string `json:"status" yaml:"status"`
+	Connected    bool   `json:"connected" yaml:"connected"`
+	Waited       bool   `json:"waited" yaml:"waited"`
 }
 
 var oauthConnectCmd = &cobra.Command{
@@ -363,9 +363,9 @@ Examples:
 		}
 
 		var started struct {
-			AuthURL      string `json:"auth_url"`
-			LoopbackPort int    `json:"loopback_port"`
-			State        string `json:"state"`
+			AuthURL      string `json:"auth_url" yaml:"auth_url"`
+			LoopbackPort int    `json:"loopback_port" yaml:"loopback_port"`
+			State        string `json:"state" yaml:"state"`
 		}
 		if err := cli.ReadJSON(resp, &started); err != nil {
 			return err
@@ -443,7 +443,7 @@ func fetchCredentialStatus(client *cli.Client, credID string) (string, error) {
 		return "", err
 	}
 	var cred struct {
-		Status string `json:"status"`
+		Status string `json:"status" yaml:"status"`
 	}
 	if err := cli.ReadJSON(resp, &cred); err != nil {
 		return "", err
@@ -565,13 +565,13 @@ against the built-in catalogue instead — see ` + "`crewship oauth providers`" 
 		}
 
 		var out struct {
-			AuthURL              string `json:"auth_url"`
-			TokenURL             string `json:"token_url"`
-			RegistrationEndpoint string `json:"registration_endpoint"`
-			Scopes               string `json:"scopes"`
-			SupportsDCR          bool   `json:"supports_dcr"`
-			SupportsPKCE         bool   `json:"supports_pkce"`
-			Source               string `json:"source"`
+			AuthURL              string `json:"auth_url" yaml:"auth_url"`
+			TokenURL             string `json:"token_url" yaml:"token_url"`
+			RegistrationEndpoint string `json:"registration_endpoint" yaml:"registration_endpoint"`
+			Scopes               string `json:"scopes" yaml:"scopes"`
+			SupportsDCR          bool   `json:"supports_dcr" yaml:"supports_dcr"`
+			SupportsPKCE         bool   `json:"supports_pkce" yaml:"supports_pkce"`
+			Source               string `json:"source" yaml:"source"`
 		}
 		if err := cli.ReadJSON(resp, &out); err != nil {
 			return err
@@ -651,13 +651,13 @@ Examples:
 		}
 
 		var out struct {
-			Status       string `json:"status"`
-			AuthURL      string `json:"auth_url"`
-			TokenURL     string `json:"token_url"`
-			Scopes       string `json:"scopes"`
-			RedirectURI  string `json:"redirect_uri"`
-			CredentialID string `json:"credential_id"`
-			Message      string `json:"message"`
+			Status       string `json:"status" yaml:"status"`
+			AuthURL      string `json:"auth_url" yaml:"auth_url"`
+			TokenURL     string `json:"token_url" yaml:"token_url"`
+			Scopes       string `json:"scopes" yaml:"scopes"`
+			RedirectURI  string `json:"redirect_uri" yaml:"redirect_uri"`
+			CredentialID string `json:"credential_id" yaml:"credential_id"`
+			Message      string `json:"message" yaml:"message"`
 		}
 		if err := cli.ReadJSON(resp, &out); err != nil {
 			return err
@@ -896,9 +896,9 @@ func readOAuthAppFlags(flags *pflag.FlagSet, credType string) (*oauthAppSpec, er
 
 // oauthCatalogueEntry is one row of GET /api/v1/oauth/providers.
 type oauthCatalogueEntry struct {
-	AuthURL       string `json:"auth_url"`
-	TokenURL      string `json:"token_url"`
-	DefaultScopes string `json:"default_scopes"`
+	AuthURL       string `json:"auth_url" yaml:"auth_url"`
+	TokenURL      string `json:"token_url" yaml:"token_url"`
+	DefaultScopes string `json:"default_scopes" yaml:"default_scopes"`
 }
 
 // fetchOAuthProviders reads the server's built-in provider catalogue.

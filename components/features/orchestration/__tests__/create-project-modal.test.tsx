@@ -30,6 +30,9 @@ const mockLabels = [
   { id: "label-1", name: "Bug", color: "red", label_group: null },
 ]
 
+// Typed so `mock.calls` yields [url, init] tuples the POST-finding predicates can read.
+type FetchStub = (url: string, init?: RequestInit) => Promise<{ ok: boolean; json: () => Promise<unknown> }>
+
 const defaultProps = {
   open: true,
   onOpenChange: vi.fn(),
@@ -102,10 +105,10 @@ describe("CreateProjectModal", () => {
   })
 
   it("keeps the primary action in the shell footer and posts the same body", async () => {
-    const mockFetch = vi.fn()
+    const mockFetch = vi.fn<FetchStub>()
       .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve([]) })
       .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ id: "proj-1" }) })
-    global.fetch = mockFetch
+    global.fetch = mockFetch as unknown as typeof fetch
 
     const { baseElement } = render(<CreateProjectModal {...defaultProps} />)
     fireEvent.change(screen.getByPlaceholderText("Project name"), { target: { value: "Alpha" } })
@@ -248,12 +251,12 @@ describe("CreateProjectModal", () => {
   })
 
   it("submits project with correct payload", async () => {
-    const mockFetch = vi.fn()
+    const mockFetch = vi.fn<FetchStub>()
       // First call: fetch agents
       .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve([]) })
       // Second call: create project
       .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ id: "proj-1" }) })
-    global.fetch = mockFetch
+    global.fetch = mockFetch as unknown as typeof fetch
 
     render(<CreateProjectModal {...defaultProps} />)
 
@@ -277,10 +280,10 @@ describe("CreateProjectModal", () => {
   })
 
   it("submits no field the server would silently drop", async () => {
-    const mockFetch = vi.fn()
+    const mockFetch = vi.fn<FetchStub>()
       .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve([]) })
       .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ id: "proj-1" }) })
-    global.fetch = mockFetch
+    global.fetch = mockFetch as unknown as typeof fetch
 
     render(<CreateProjectModal {...defaultProps} />)
 

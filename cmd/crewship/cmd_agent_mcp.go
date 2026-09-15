@@ -23,17 +23,17 @@ import (
 // Pointers for nullable columns so missing fields render as "-" rather
 // than empty strings the user could mistake for "set to empty".
 type agentMCPBinding struct {
-	ID             string  `json:"id"`
-	AgentID        string  `json:"agent_id"`
-	MCPServerID    string  `json:"mcp_server_id"`
-	MCPServerScope string  `json:"mcp_server_scope"`
-	CredentialID   *string `json:"credential_id"`
-	CredentialName *string `json:"credential_name"`
-	CredType       *string `json:"cred_type"`
-	Enabled        bool    `json:"enabled"`
-	ServerName     string  `json:"server_name"`
-	ServerDisplay  string  `json:"server_display_name"`
-	CreatedAt      string  `json:"created_at"`
+	ID             string  `json:"id" yaml:"id"`
+	AgentID        string  `json:"agent_id" yaml:"agent_id"`
+	MCPServerID    string  `json:"mcp_server_id" yaml:"mcp_server_id"`
+	MCPServerScope string  `json:"mcp_server_scope" yaml:"mcp_server_scope"`
+	CredentialID   *string `json:"credential_id" yaml:"credential_id"`
+	CredentialName *string `json:"credential_name" yaml:"credential_name"`
+	CredType       *string `json:"cred_type" yaml:"cred_type"`
+	Enabled        bool    `json:"enabled" yaml:"enabled"`
+	ServerName     string  `json:"server_name" yaml:"server_name"`
+	ServerDisplay  string  `json:"server_display_name" yaml:"server_display_name"`
+	CreatedAt      string  `json:"created_at" yaml:"created_at"`
 }
 
 var agentMCPListCmd = &cobra.Command{
@@ -131,8 +131,8 @@ Examples:
 		}
 
 		var created struct {
-			ID      string `json:"id"`
-			Enabled bool   `json:"enabled"`
+			ID      string `json:"id" yaml:"id"`
+			Enabled bool   `json:"enabled" yaml:"enabled"`
 		}
 		if err := postJSON(client, "/api/v1/agents/"+agentID+"/integrations", body, &created); err != nil {
 			return err

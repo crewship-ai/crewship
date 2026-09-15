@@ -17,7 +17,6 @@ import (
 	"database/sql"
 	"io"
 	"log/slog"
-	"path/filepath"
 	"testing"
 )
 
@@ -25,18 +24,9 @@ import (
 // renumber on merge has to come through this test too.
 const mcpDefaultAccessVersion = 20260826190607
 
-func mcpAccessDB(t *testing.T, name string) *sql.DB {
+func mcpAccessDB(t *testing.T) *sql.DB {
 	t.Helper()
-	db, err := Open("file:" + filepath.Join(t.TempDir(), name))
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	t.Cleanup(func() { db.Close() })
-	silent := slog.New(slog.NewTextHandler(io.Discard, nil))
-	if err := Migrate(context.Background(), db.DB, silent); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
-	return db.DB
+	return openMigratedTestSQL(t)
 }
 
 func mcpAccessExec(t *testing.T, db *sql.DB, q string, args ...any) {
@@ -76,7 +66,7 @@ func mcpAccessSeedWorld(t *testing.T, db *sql.DB) {
 // inference meant and never stored. Asserted through a raw INSERT so it is
 // the DB default doing the work, not a handler.
 func TestMCPDefaultAccess_NewRowsAreOpen(t *testing.T) {
-	db := mcpAccessDB(t, "open.db")
+	db := mcpAccessDB(t)
 	mcpAccessSeedWorld(t, db)
 
 	mcpAccessExec(t, db, `INSERT INTO workspace_mcp_servers (id, workspace_id, name, display_name, transport)
@@ -102,7 +92,7 @@ func TestMCPDefaultAccess_NewRowsAreOpen(t *testing.T) {
 // pre-migration schema (drop the columns, forget the ledger row), seeds the
 // two states a live install can be in, and re-applies the real migration.
 func TestMCPDefaultAccess_BackfillFreezesTodaysAudience(t *testing.T) {
-	db := mcpAccessDB(t, "backfill.db")
+	db := mcpAccessDB(t)
 	mcpAccessSeedWorld(t, db)
 
 	// Back to the pre-migration shape.
@@ -177,7 +167,7 @@ func TestMCPDefaultAccess_BackfillFreezesTodaysAudience(t *testing.T) {
 // two tables, so it cannot have one), and the hand-written delete cascades in
 // the handlers never mentioned it. Every per-tool toggle outlived its server.
 func TestMCPDefaultAccess_ToolBindingsFollowTheirServer(t *testing.T) {
-	db := mcpAccessDB(t, "toolbindings.db")
+	db := mcpAccessDB(t)
 	mcpAccessSeedWorld(t, db)
 
 	mcpAccessExec(t, db, `INSERT INTO workspace_mcp_servers (id, workspace_id, name, display_name, transport)
@@ -205,7 +195,7 @@ func TestMCPDefaultAccess_ToolBindingsFollowTheirServer(t *testing.T) {
 // TestMCPDefaultAccess_RejectsToolBindingForMissingServer is the insert half
 // of the emulated FK, mirroring trg_agent_mcp_binding_fk_check from v30.
 func TestMCPDefaultAccess_RejectsToolBindingForMissingServer(t *testing.T) {
-	db := mcpAccessDB(t, "toolfk.db")
+	db := mcpAccessDB(t)
 	mcpAccessSeedWorld(t, db)
 
 	for _, scope := range []string{"workspace", "crew"} {
@@ -219,7 +209,7 @@ func TestMCPDefaultAccess_RejectsToolBindingForMissingServer(t *testing.T) {
 // TestMCPDefaultAccess_SweepsPreExistingOrphans: the rows already stranded by
 // every integration deleted before this migration.
 func TestMCPDefaultAccess_SweepsPreExistingOrphans(t *testing.T) {
-	db := mcpAccessDB(t, "orphans.db")
+	db := mcpAccessDB(t)
 	mcpAccessSeedWorld(t, db)
 
 	// Plant the orphan the way history made it: on the pre-migration schema,

@@ -24,7 +24,7 @@ describe("Agent model settings", () => {
   it("keeps OpenCode when changing its provider and converts minutes only at the API boundary", () => {
     render(<Harness />)
     fireEvent.click(screen.getByRole("radio", { name: /^OpenCode/ }))
-    fireEvent.click(within(screen.getByRole("radiogroup", { name: "Model provider" })).getByRole("radio", { name: "OpenAI", exact: true }))
+    fireEvent.click(within(screen.getByRole("radiogroup", { name: "Model provider" })).getByRole("radio", { name: "OpenAI" }))
     fireEvent.change(screen.getByLabelText("Maximum run duration"), { target: { value: "15" } })
     expect(draft()).toMatchObject({ cliAdapter: "OPENCODE", llmProvider: "OPENAI", timeoutSeconds: 900 })
   })

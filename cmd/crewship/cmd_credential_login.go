@@ -17,18 +17,18 @@ import (
 
 // deviceLoginStart is the server's answer to starting a sign-in.
 type deviceLoginStart struct {
-	DeviceID        string `json:"device_id"`
-	UserCode        string `json:"user_code"`
-	VerificationURL string `json:"verification_url"`
-	ExpiresAt       string `json:"expires_at"`
-	IntervalS       int    `json:"interval_s"`
+	DeviceID        string `json:"device_id" yaml:"device_id"`
+	UserCode        string `json:"user_code" yaml:"user_code"`
+	VerificationURL string `json:"verification_url" yaml:"verification_url"`
+	ExpiresAt       string `json:"expires_at" yaml:"expires_at"`
+	IntervalS       int    `json:"interval_s" yaml:"interval_s"`
 }
 
 // deviceLoginStatus is one status read.
 type deviceLoginStatus struct {
-	Status       string  `json:"status"`
-	CredentialID *string `json:"credential_id"`
-	Error        *string `json:"error"`
+	Status       string  `json:"status" yaml:"status"`
+	CredentialID *string `json:"credential_id" yaml:"credential_id"`
+	Error        *string `json:"error" yaml:"error"`
 }
 
 // deviceLoginPollFloor is the least often the CLI asks the server. The
@@ -223,14 +223,14 @@ func printCredentialDetail(client *cli.Client, f *cli.Formatter, credentialID st
 		return err
 	}
 	var cred struct {
-		ID           string  `json:"id"`
-		Name         string  `json:"name"`
-		Type         string  `json:"type"`
-		Provider     string  `json:"provider"`
-		Status       string  `json:"status"`
-		Scope        string  `json:"scope"`
-		AccountEmail *string `json:"account_email"`
-		CreatedAt    string  `json:"created_at"`
+		ID           string  `json:"id" yaml:"id"`
+		Name         string  `json:"name" yaml:"name"`
+		Type         string  `json:"type" yaml:"type"`
+		Provider     string  `json:"provider" yaml:"provider"`
+		Status       string  `json:"status" yaml:"status"`
+		Scope        string  `json:"scope" yaml:"scope"`
+		AccountEmail *string `json:"account_email" yaml:"account_email"`
+		CreatedAt    string  `json:"created_at" yaml:"created_at"`
 	}
 	if err := cli.ReadJSON(resp, &cred); err != nil {
 		return err

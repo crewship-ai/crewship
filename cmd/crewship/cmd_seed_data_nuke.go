@@ -98,9 +98,9 @@ func nukeWorkspaceIdentity(client *cli.Client) (name, slug string) {
 // workspaceSummary is the subset of the /workspaces list shape that the nuke
 // confirmation gate needs. Named so findActiveWorkspace is unit-testable.
 type workspaceSummary struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
-	Slug string `json:"slug"`
+	ID   string `json:"id" yaml:"id"`
+	Name string `json:"name" yaml:"name"`
+	Slug string `json:"slug" yaml:"slug"`
 }
 
 // findActiveWorkspace returns the (name, slug) of the workspace whose id matches
@@ -406,7 +406,7 @@ func nukeList(ctx context.Context, client *cli.Client, listPath, deletePrefix st
 		return fmt.Errorf("GET %s: %w", listPath, err)
 	}
 	var items []struct {
-		ID string `json:"id"`
+		ID string `json:"id" yaml:"id"`
 	}
 	if err := cli.ReadJSON(resp, &items); err != nil {
 		return fmt.Errorf("decode %s: %w", listPath, err)
@@ -446,7 +446,7 @@ func nukeListBySlug(ctx context.Context, client *cli.Client, listPath, deletePre
 		return fmt.Errorf("GET %s: %w", listPath, err)
 	}
 	var items []struct {
-		Slug string `json:"slug"`
+		Slug string `json:"slug" yaml:"slug"`
 	}
 	if err := cli.ReadJSON(resp, &items); err != nil {
 		return fmt.Errorf("decode %s: %w", listPath, err)
@@ -491,8 +491,8 @@ func nukeCrewIntegrations(ctx context.Context, client *cli.Client) error {
 		return fmt.Errorf("GET /api/v1/integrations/crews: %w", err)
 	}
 	var items []struct {
-		ID     string `json:"id"`
-		CrewID string `json:"crew_id"`
+		ID     string `json:"id" yaml:"id"`
+		CrewID string `json:"crew_id" yaml:"crew_id"`
 	}
 	if err := cli.ReadJSON(resp, &items); err != nil {
 		return fmt.Errorf("decode integrations: %w", err)
@@ -596,7 +596,7 @@ func nukeEscalations(ctx context.Context, client *cli.Client, crewFilter string)
 			return fmt.Errorf("GET /api/v1/crews: %w", err)
 		}
 		var crews []struct {
-			ID string `json:"id"`
+			ID string `json:"id" yaml:"id"`
 		}
 		if err := cli.ReadJSON(resp, &crews); err != nil {
 			return fmt.Errorf("decode crews: %w", err)

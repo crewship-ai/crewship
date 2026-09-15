@@ -15,17 +15,17 @@ var projectMilestoneCmd = &cobra.Command{
 }
 
 type milestoneItem struct {
-	ID          string  `json:"id"`
-	ProjectID   string  `json:"project_id"`
-	Name        string  `json:"name"`
-	Description *string `json:"description"`
-	TargetDate  *string `json:"target_date"`
-	Status      string  `json:"status"`
-	Position    int     `json:"position"`
-	IssueCount  int     `json:"issue_count"`
-	DoneCount   int     `json:"done_count"`
-	CreatedAt   string  `json:"created_at"`
-	UpdatedAt   string  `json:"updated_at"`
+	ID          string  `json:"id" yaml:"id"`
+	ProjectID   string  `json:"project_id" yaml:"project_id"`
+	Name        string  `json:"name" yaml:"name"`
+	Description *string `json:"description" yaml:"description"`
+	TargetDate  *string `json:"target_date" yaml:"target_date"`
+	Status      string  `json:"status" yaml:"status"`
+	Position    int     `json:"position" yaml:"position"`
+	IssueCount  int     `json:"issue_count" yaml:"issue_count"`
+	DoneCount   int     `json:"done_count" yaml:"done_count"`
+	CreatedAt   string  `json:"created_at" yaml:"created_at"`
+	UpdatedAt   string  `json:"updated_at" yaml:"updated_at"`
 }
 
 var projectMilestoneListCmd = &cobra.Command{

@@ -134,7 +134,7 @@ Examples:
 func fetchAllMessages(client *cli.Client, chatID string) ([]map[string]any, error) {
 	path := "/api/v1/chats/" + url.PathEscape(chatID) + "/messages?limit=500"
 	var body struct {
-		Messages []map[string]any `json:"messages"`
+		Messages []map[string]any `json:"messages" yaml:"messages"`
 	}
 	if err := getJSON(client, path, &body); err != nil {
 		return nil, err

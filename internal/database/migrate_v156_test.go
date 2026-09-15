@@ -1,10 +1,6 @@
 package database
 
 import (
-	"context"
-	"io"
-	"log/slog"
-	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -15,16 +11,7 @@ import (
 // grouping query (internal/journal/runs.go) picks it over the broader v60
 // idx_journal_ws_trace index.
 func TestMigrateV156_RunAggregationIndex(t *testing.T) {
-	dir := t.TempDir()
-	db, err := Open("file:" + filepath.Join(dir, "v156.db"))
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	defer db.Close()
-	silent := slog.New(slog.NewTextHandler(io.Discard, nil))
-	if err := Migrate(context.Background(), db.DB, silent); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
+	db := openMigratedTestDB(t)
 
 	var name string
 	if err := db.QueryRow(

@@ -57,7 +57,8 @@ beforeEach(() => {
   events = []
   resetChatTelemetry()
   setChatTelemetrySink((e) => events.push(e))
-  vi.mocked(apiFetch).mockImplementation(async (url: string) => {
+  vi.mocked(apiFetch).mockImplementation(async (input: RequestInfo | URL) => {
+    const url = String(input)
     if (url.includes(SEARCH_PATH)) {
       return {
         ok: true,

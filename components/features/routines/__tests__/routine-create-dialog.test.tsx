@@ -65,21 +65,21 @@ describe("<RoutineCreateDialog>", () => {
 
     expect(screen.queryByTestId("graph")).not.toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole("button", { name: "Code", exact: true }))
+    fireEvent.click(screen.getByRole("button", { name: "Code" }))
     fireEvent.click(screen.getByRole("button", { name: "Back to recipe" }))
-    fireEvent.click(screen.getByRole("button", { name: "Map", exact: true }))
+    fireEvent.click(screen.getByRole("button", { name: "Map" }))
     expect(screen.getByTestId("graph")).toBeInTheDocument()
 
     // And back, without losing the buffer — it is a look, not a mode.
-    fireEvent.click(screen.getByRole("button", { name: "List", exact: true }))
-    fireEvent.click(screen.getByRole("button", { name: "Code", exact: true }))
+    fireEvent.click(screen.getByRole("button", { name: "List" }))
+    fireEvent.click(screen.getByRole("button", { name: "Code" }))
     expect(screen.queryByTestId("graph")).not.toBeInTheDocument()
   })
 
   it("retains typed code through sections and the graph preview", () => {
     render(<RoutineCreateDialog {...PROPS} />)
     fireEvent.click(screen.getByText("Write it yourself"))
-    fireEvent.click(screen.getByRole("button", { name: "Code", exact: true }))
+    fireEvent.click(screen.getByRole("button", { name: "Code" }))
     const typed =
       "dsl_version: '1.0'\nname: preserved\noutputs: [{name: report, type: string}]\nsteps: [{id: result, type: transform, expression: '.'}]\n"
     act(() => lastDocChange?.(typed))
@@ -89,13 +89,13 @@ describe("<RoutineCreateDialog>", () => {
     expect(
       screen.getAllByText("report").some((element) => element.closest("[hidden]") === null),
     ).toBe(true)
-    fireEvent.click(screen.getByRole("button", { name: "Code", exact: true }))
+    fireEvent.click(screen.getByRole("button", { name: "Code" }))
     fireEvent.click(screen.getByRole("button", { name: "Back to recipe" }))
-    fireEvent.click(screen.getByRole("button", { name: "Map", exact: true }))
-    fireEvent.click(screen.getByRole("button", { name: "List", exact: true }))
-    fireEvent.click(screen.getByRole("button", { name: "Code", exact: true }))
+    fireEvent.click(screen.getByRole("button", { name: "Map" }))
+    fireEvent.click(screen.getByRole("button", { name: "List" }))
+    fireEvent.click(screen.getByRole("button", { name: "Code" }))
     // A format switch reads the live buffer; the construction prop stays fixed while typing.
-    fireEvent.click(screen.getByRole("radio", { name: "JSON", exact: true }))
+    fireEvent.click(screen.getByRole("radio", { name: "JSON" }))
     expect(JSON.parse(editorProps.at(-1)?.code ?? "{}")).toMatchObject({
       name: "preserved",
       steps: [{ id: "result" }],

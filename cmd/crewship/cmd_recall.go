@@ -84,8 +84,8 @@ Examples:
 		}
 
 		var body struct {
-			Entries []map[string]any `json:"entries"`
-			Count   int              `json:"count"`
+			Entries []map[string]any `json:"entries" yaml:"entries"`
+			Count   int              `json:"count" yaml:"count"`
 		}
 		if err := cli.ReadJSON(resp, &body); err != nil {
 			return err

@@ -37,9 +37,9 @@ Examples:
 // notifyPrefCellRow mirrors notifyroute.PrefCell for CLI JSON I/O without
 // importing the server-side package into the CLI binary.
 type notifyPrefCellRow struct {
-	Category  string `json:"category"`
-	ChannelID string `json:"channel_id"`
-	State     string `json:"state"`
+	Category  string `json:"category" yaml:"category"`
+	ChannelID string `json:"channel_id" yaml:"channel_id"`
+	State     string `json:"state" yaml:"state"`
 }
 
 var notifyPrefsGetCmd = &cobra.Command{
@@ -61,7 +61,7 @@ var notifyPrefsGetCmd = &cobra.Command{
 			return err
 		}
 		var body struct {
-			Cells []notifyPrefCellRow `json:"cells"`
+			Cells []notifyPrefCellRow `json:"cells" yaml:"cells"`
 		}
 		if err := cli.ReadJSON(resp, &body); err != nil {
 			return err

@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"log/slog"
 	"os"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -30,17 +29,8 @@ import (
 // already-migrated table, or a mix of old and new rows, is a no-op
 // for the rows that need no change).
 func TestMigrateV141_MemoryVersionsTsformatBackfill(t *testing.T) {
-	dir := t.TempDir()
-	db, err := Open("file:" + filepath.Join(dir, "v141.db"))
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	defer db.Close()
-
+	db := openMigratedTestDB(t)
 	migLogger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
-	if err := Migrate(context.Background(), db.DB, migLogger); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
 
 	mustExec(t, db.DB, `INSERT INTO workspaces (id, name, slug) VALUES ('ws1', 'WS', 'ws1')`)
 
@@ -169,17 +159,7 @@ func TestMigrateV141_MemoryVersionsTsformatBackfill(t *testing.T) {
 // invoked directly, as the primary test above does to simulate
 // pre-existing legacy rows.
 func TestMigrateV141_MemoryVersionsTsformatBackfill_AppliedDuringUpgrade(t *testing.T) {
-	dir := t.TempDir()
-	db, err := Open("file:" + filepath.Join(dir, "v141-applied.db"))
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	defer db.Close()
-
-	silent := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-	if err := Migrate(context.Background(), db.DB, silent); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
+	db := openMigratedTestDB(t)
 
 	var name string
 	if err := db.DB.QueryRow(`SELECT name FROM _migrations WHERE version = 141`).Scan(&name); err != nil {

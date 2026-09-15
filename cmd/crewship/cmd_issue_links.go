@@ -24,22 +24,22 @@ import (
 // renders are declared; --output json prints the decoded struct, so anything
 // added server-side that matters here needs a field here too.
 type codeLinkItem struct {
-	ID       string `json:"id"`
-	Provider string `json:"provider"`
-	Host     string `json:"host"`
-	Owner    string `json:"owner"`
-	Repo     string `json:"repo"`
-	Number   int    `json:"number"`
-	URL      string `json:"url"`
+	ID       string `json:"id" yaml:"id"`
+	Provider string `json:"provider" yaml:"provider"`
+	Host     string `json:"host" yaml:"host"`
+	Owner    string `json:"owner" yaml:"owner"`
+	Repo     string `json:"repo" yaml:"repo"`
+	Number   int    `json:"number" yaml:"number"`
+	URL      string `json:"url" yaml:"url"`
 
-	Title        *string `json:"title"`
-	State        *string `json:"state"`
-	Author       *string `json:"author"`
-	SourceBranch *string `json:"source_branch"`
-	TargetBranch *string `json:"target_branch"`
+	Title        *string `json:"title" yaml:"title"`
+	State        *string `json:"state" yaml:"state"`
+	Author       *string `json:"author" yaml:"author"`
+	SourceBranch *string `json:"source_branch" yaml:"source_branch"`
+	TargetBranch *string `json:"target_branch" yaml:"target_branch"`
 
-	LastSyncedAt  *string `json:"last_synced_at"`
-	LastSyncError *string `json:"last_sync_error"`
+	LastSyncedAt  *string `json:"last_synced_at" yaml:"last_synced_at"`
+	LastSyncError *string `json:"last_sync_error" yaml:"last_sync_error"`
 }
 
 // The four paths below are written out with fmt.Sprintf at each call site

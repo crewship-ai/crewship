@@ -142,8 +142,8 @@ func resolveAgentID(client *cli.Client, slugOrID string) (string, error) {
 	}
 
 	var agents []struct {
-		ID   string `json:"id"`
-		Slug string `json:"slug"`
+		ID   string `json:"id" yaml:"id"`
+		Slug string `json:"slug" yaml:"slug"`
 	}
 	if err := cli.ReadJSON(resp, &agents); err != nil {
 		return "", err
@@ -199,8 +199,8 @@ func resolveCrewID(client *cli.Client, slugOrID string) (string, error) {
 	}
 
 	var crews []struct {
-		ID   string `json:"id"`
-		Slug string `json:"slug"`
+		ID   string `json:"id" yaml:"id"`
+		Slug string `json:"slug" yaml:"slug"`
 	}
 	if err := cli.ReadJSON(resp, &crews); err != nil {
 		return "", err
@@ -247,8 +247,8 @@ func resolveProjectID(client *cli.Client, slugOrID string) (string, error) {
 	}
 
 	var projects []struct {
-		ID   string `json:"id"`
-		Slug string `json:"slug"`
+		ID   string `json:"id" yaml:"id"`
+		Slug string `json:"slug" yaml:"slug"`
 	}
 	if err := cli.ReadJSON(resp, &projects); err != nil {
 		return "", err
@@ -284,8 +284,8 @@ func resolveIntegrationID(client *cli.Client, nameOrID string) (string, error) {
 		return "", err
 	}
 	var items []struct {
-		ID   string `json:"id"`
-		Name string `json:"name"`
+		ID   string `json:"id" yaml:"id"`
+		Name string `json:"name" yaml:"name"`
 	}
 	if err := cli.ReadJSON(resp, &items); err != nil {
 		return "", err

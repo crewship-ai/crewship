@@ -40,21 +40,21 @@ Examples:
 
 // keeperJudgeStage / keeperJudgeTestResult mirror internal/api/admin_keeper_judge.go.
 type keeperJudgeStage struct {
-	Name      string `json:"name"`
-	Label     string `json:"label"`
-	OK        bool   `json:"ok"`
-	Skipped   bool   `json:"skipped"`
-	Detail    string `json:"detail"`
-	LatencyMS int64  `json:"latency_ms"`
+	Name      string `json:"name" yaml:"name"`
+	Label     string `json:"label" yaml:"label"`
+	OK        bool   `json:"ok" yaml:"ok"`
+	Skipped   bool   `json:"skipped" yaml:"skipped"`
+	Detail    string `json:"detail" yaml:"detail"`
+	LatencyMS int64  `json:"latency_ms" yaml:"latency_ms"`
 }
 
 type keeperJudgeTestResult struct {
-	OK       bool               `json:"ok"`
-	Endpoint string             `json:"endpoint"`
-	Model    string             `json:"model"`
-	Stages   []keeperJudgeStage `json:"stages"`
-	Models   []string           `json:"models"`
-	Decision string             `json:"decision"`
+	OK       bool               `json:"ok" yaml:"ok"`
+	Endpoint string             `json:"endpoint" yaml:"endpoint"`
+	Model    string             `json:"model" yaml:"model"`
+	Stages   []keeperJudgeStage `json:"stages" yaml:"stages"`
+	Models   []string           `json:"models" yaml:"models"`
+	Decision string             `json:"decision" yaml:"decision"`
 }
 
 // printJudgeStages renders a check's stages. Three states, not two: a SKIPPED
@@ -80,18 +80,18 @@ func printJudgeStages(stages []keeperJudgeStage) {
 }
 
 type keeperJudgeModelsResult struct {
-	Endpoint string   `json:"endpoint"`
-	Models   []string `json:"models"`
-	Error    string   `json:"error"`
+	Endpoint string   `json:"endpoint" yaml:"endpoint"`
+	Models   []string `json:"models" yaml:"models"`
+	Error    string   `json:"error" yaml:"error"`
 	// Suggestions are candidate addresses the server proposes — its own loopback,
 	// and the address this client connected FROM. The second is the one worth
 	// printing: the machine that dials the judge is the SERVER, so the address an
 	// operator running Ollama on their own box needs is one only the server can
 	// see.
 	Suggestions []struct {
-		URL   string `json:"url"`
-		Label string `json:"label"`
-	} `json:"suggestions"`
+		URL   string `json:"url" yaml:"url"`
+		Label string `json:"label" yaml:"label"`
+	} `json:"suggestions" yaml:"suggestions"`
 }
 
 var (

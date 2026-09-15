@@ -60,10 +60,10 @@ func newRoutineDraftCommand(action string) *cobra.Command {
 				return err
 			}
 			var draft struct {
-				ID       string                     `json:"id"`
-				Slug     string                     `json:"slug"`
-				Revision int                        `json:"revision"`
-				Document map[string]json.RawMessage `json:"document"`
+				ID       string                     `json:"id" yaml:"id"`
+				Slug     string                     `json:"slug" yaml:"slug"`
+				Revision int                        `json:"revision" yaml:"revision"`
+				Document map[string]json.RawMessage `json:"document" yaml:"document"`
 			}
 			if err = json.Unmarshal(raw, &draft); err != nil {
 				return fmt.Errorf("read draft: %w", err)
@@ -98,7 +98,7 @@ func newRoutineDraftCommand(action string) *cobra.Command {
 						return err
 					}
 					var proof struct {
-						SaveToken string `json:"save_token"`
+						SaveToken string `json:"save_token" yaml:"save_token"`
 					}
 					err = json.NewDecoder(resp.Body).Decode(&proof)
 					resp.Body.Close()

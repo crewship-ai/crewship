@@ -147,8 +147,8 @@ var evalRunsCmd = &cobra.Command{
 		// json`. The human table below still shows only the scannable
 		// columns; run `eval get <id>` for the full picture on one row.
 		var body struct {
-			Rows  []evalRunDetail `json:"rows"`
-			Count int             `json:"count"`
+			Rows  []evalRunDetail `json:"rows" yaml:"rows"`
+			Count int             `json:"count" yaml:"count"`
 		}
 		if err := cli.ReadJSON(resp, &body); err != nil {
 			return err

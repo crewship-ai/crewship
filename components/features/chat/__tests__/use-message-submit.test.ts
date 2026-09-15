@@ -247,7 +247,7 @@ describe("useMessageSubmit", () => {
       // must still clear or the composer is dead for the rest of the session
       // with nothing on screen to say why. That is a worse failure than the
       // duplicate it exists to prevent.
-      const sendMessage = vi.fn(() => { throw new Error("socket gone") })
+      const sendMessage = vi.fn<(text: string) => void>(() => { throw new Error("socket gone") })
       const { result } = setup({ sendMessage })
 
       await act(async () => {

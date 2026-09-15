@@ -1,10 +1,6 @@
 package database
 
 import (
-	"context"
-	"io"
-	"log/slog"
-	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -15,16 +11,7 @@ import (
 // rename ever regresses, the schema probe here flags it before any
 // runtime SELECT * does.
 func TestMigrateV102_RenamesSystemPromptColumn(t *testing.T) {
-	dir := t.TempDir()
-	db, err := Open("file:" + filepath.Join(dir, "v102.db"))
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	defer db.Close()
-	silent := slog.New(slog.NewTextHandler(io.Discard, nil))
-	if err := Migrate(context.Background(), db.DB, silent); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
+	db := openMigratedTestDB(t)
 
 	rows, err := db.Query(`PRAGMA table_info(agents)`)
 	if err != nil {
@@ -62,16 +49,7 @@ func TestMigrateV102_RenamesSystemPromptColumn(t *testing.T) {
 // rows at every documented tier and assert the previously rejected
 // 'persona' tier now lands.
 func TestMigrateV102_WidensMemoryVersionsTierCheck(t *testing.T) {
-	dir := t.TempDir()
-	db, err := Open("file:" + filepath.Join(dir, "v102b.db"))
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	defer db.Close()
-	silent := slog.New(slog.NewTextHandler(io.Discard, nil))
-	if err := Migrate(context.Background(), db.DB, silent); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
+	db := openMigratedTestDB(t)
 
 	// Seed a workspace so the FK is happy.
 	if _, err := db.Exec(`INSERT INTO workspaces (id, name, slug) VALUES ('ws1','Work','work')`); err != nil {

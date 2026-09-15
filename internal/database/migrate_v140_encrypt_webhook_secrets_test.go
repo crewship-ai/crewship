@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"io"
 	"log/slog"
-	"path/filepath"
 	"testing"
 
 	"github.com/crewship-ai/crewship/internal/encryption"
@@ -25,15 +24,7 @@ func setV140TestKey(t *testing.T) {
 
 func v140FreshDB(t *testing.T) *DB {
 	t.Helper()
-	dir := t.TempDir()
-	db, err := Open("file:" + filepath.Join(dir, "v140.db"))
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	t.Cleanup(func() { db.Close() })
-	if err := Migrate(context.Background(), db.DB, slog.New(slog.NewTextHandler(io.Discard, nil))); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
+	db := openMigratedTestDB(t)
 	return db
 }
 

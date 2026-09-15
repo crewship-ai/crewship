@@ -61,35 +61,35 @@ Examples:
 // keeperConfigBoolField / keeperConfigStrField mirror the per-field
 // {value, source, editable} shape of internal/api/admin_keeper_config.go.
 type keeperConfigBoolField struct {
-	Value    bool   `json:"value"`
-	Source   string `json:"source"`
-	Editable bool   `json:"editable"`
+	Value    bool   `json:"value" yaml:"value"`
+	Source   string `json:"source" yaml:"source"`
+	Editable bool   `json:"editable" yaml:"editable"`
 }
 
 type keeperConfigStrField struct {
-	Value    string `json:"value"`
-	Source   string `json:"source"`
-	Editable bool   `json:"editable"`
+	Value    string `json:"value" yaml:"value"`
+	Source   string `json:"source" yaml:"source"`
+	Editable bool   `json:"editable" yaml:"editable"`
 }
 
 type keeperConfigIntField struct {
-	Value    int64  `json:"value"`
-	Source   string `json:"source"`
-	Editable bool   `json:"editable"`
+	Value    int64  `json:"value" yaml:"value"`
+	Source   string `json:"source" yaml:"source"`
+	Editable bool   `json:"editable" yaml:"editable"`
 }
 
 type keeperInstanceConfig struct {
-	Enabled     keeperConfigBoolField `json:"enabled"`
-	Provider    keeperConfigStrField  `json:"judge_provider"`
-	EndpointURL keeperConfigStrField  `json:"judge_endpoint_url"`
-	Wire        keeperConfigStrField  `json:"judge_wire"`
-	Model       keeperConfigStrField  `json:"judge_model"`
-	TimeoutMS   keeperConfigIntField  `json:"judge_timeout_ms"`
+	Enabled     keeperConfigBoolField `json:"enabled" yaml:"enabled"`
+	Provider    keeperConfigStrField  `json:"judge_provider" yaml:"judge_provider"`
+	EndpointURL keeperConfigStrField  `json:"judge_endpoint_url" yaml:"judge_endpoint_url"`
+	Wire        keeperConfigStrField  `json:"judge_wire" yaml:"judge_wire"`
+	Model       keeperConfigStrField  `json:"judge_model" yaml:"judge_model"`
+	TimeoutMS   keeperConfigIntField  `json:"judge_timeout_ms" yaml:"judge_timeout_ms"`
 
-	Overridden      bool   `json:"overridden"`
-	UpdatedAt       string `json:"updated_at"`
-	UpdatedBy       string `json:"updated_by"`
-	JudgeConfigured bool   `json:"judge_configured"`
+	Overridden      bool   `json:"overridden" yaml:"overridden"`
+	UpdatedAt       string `json:"updated_at" yaml:"updated_at"`
+	UpdatedBy       string `json:"updated_by" yaml:"updated_by"`
+	JudgeConfigured bool   `json:"judge_configured" yaml:"judge_configured"`
 }
 
 const keeperConfigPath = "/api/v1/admin/keeper/config"

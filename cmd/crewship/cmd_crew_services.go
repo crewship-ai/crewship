@@ -39,12 +39,12 @@ var crewServicesCmd = &cobra.Command{
 
 		var out struct {
 			Services []struct {
-				Name   string   `json:"name"`
-				Image  string   `json:"image"`
-				Type   string   `json:"type"`
-				Status string   `json:"status"`
-				Ports  []string `json:"ports"`
-			} `json:"services"`
+				Name   string   `json:"name" yaml:"name"`
+				Image  string   `json:"image" yaml:"image"`
+				Type   string   `json:"type" yaml:"type"`
+				Status string   `json:"status" yaml:"status"`
+				Ports  []string `json:"ports" yaml:"ports"`
+			} `json:"services" yaml:"services"`
 		}
 		if err := cli.ReadJSON(resp, &out); err != nil {
 			return err

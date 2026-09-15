@@ -27,12 +27,12 @@ import (
 
 // memoryConfigRow mirrors internal/api.memoryConfigResponse.
 type memoryConfigRow struct {
-	WorkspaceID string `json:"workspace_id"`
+	WorkspaceID string `json:"workspace_id" yaml:"workspace_id"`
 	// VersionsRetentionDays is the RESOLVED value — the stored setting when
 	// present, otherwise the built-in default. IsDefault says which.
-	VersionsRetentionDays int     `json:"versions_retention_days"`
-	IsDefault             bool    `json:"is_default"`
-	RawConfig             *string `json:"raw_config"`
+	VersionsRetentionDays int     `json:"versions_retention_days" yaml:"versions_retention_days"`
+	IsDefault             bool    `json:"is_default" yaml:"is_default"`
+	RawConfig             *string `json:"raw_config" yaml:"raw_config"`
 }
 
 var adminMemoryConfigCmd = &cobra.Command{

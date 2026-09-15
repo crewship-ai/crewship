@@ -54,15 +54,15 @@ Examples:
 // surfaced even on failure — a scenario that passes 10/10 but
 // burns 100x the budget is still a regression.
 type scenarioOutcome struct {
-	Scenario     string  `json:"scenario"`
-	Tier         string  `json:"tier"`
-	Attempt      int     `json:"attempt"`
-	RunID        string  `json:"run_id"`
-	Status       string  `json:"status"`
-	DurationMs   int64   `json:"duration_ms"`
-	CostUSD      float64 `json:"cost_usd"`
-	FailedAtStep string  `json:"failed_at_step,omitempty"`
-	ErrorMessage string  `json:"error_message,omitempty"`
+	Scenario     string  `json:"scenario" yaml:"scenario"`
+	Tier         string  `json:"tier" yaml:"tier"`
+	Attempt      int     `json:"attempt" yaml:"attempt"`
+	RunID        string  `json:"run_id" yaml:"run_id"`
+	Status       string  `json:"status" yaml:"status"`
+	DurationMs   int64   `json:"duration_ms" yaml:"duration_ms"`
+	CostUSD      float64 `json:"cost_usd" yaml:"cost_usd"`
+	FailedAtStep string  `json:"failed_at_step,omitempty" yaml:"failed_at_step,omitempty"`
+	ErrorMessage string  `json:"error_message,omitempty" yaml:"error_message,omitempty"`
 }
 
 // scenarioCell is the per-(scenario, tier) aggregate the matrix
@@ -164,7 +164,7 @@ func resolveScenarioSlugs(client *cli.Client, ws, supplied string) ([]string, er
 		return nil, fmt.Errorf("list routines: HTTP %d", resp.StatusCode)
 	}
 	var rows []struct {
-		Slug string `json:"slug"`
+		Slug string `json:"slug" yaml:"slug"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&rows); err != nil {
 		return nil, fmt.Errorf("decode routine list: %w", err)
@@ -225,12 +225,12 @@ func executeOneScenario(client *cli.Client, ws, slug, tier string, attempt int, 
 		}
 	}
 	var result struct {
-		RunID        string  `json:"run_id"`
-		Status       string  `json:"status"`
-		DurationMs   int64   `json:"duration_ms"`
-		CostUSD      float64 `json:"cost_usd"`
-		FailedAtStep string  `json:"failed_at_step"`
-		ErrorMessage string  `json:"error_message"`
+		RunID        string  `json:"run_id" yaml:"run_id"`
+		Status       string  `json:"status" yaml:"status"`
+		DurationMs   int64   `json:"duration_ms" yaml:"duration_ms"`
+		CostUSD      float64 `json:"cost_usd" yaml:"cost_usd"`
+		FailedAtStep string  `json:"failed_at_step" yaml:"failed_at_step"`
+		ErrorMessage string  `json:"error_message" yaml:"error_message"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return scenarioOutcome{

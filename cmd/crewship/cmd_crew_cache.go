@@ -14,10 +14,10 @@ import (
 
 // cacheImage mirrors the server-side CacheImageInfo response shape.
 type cacheImage struct {
-	Tag          string   `json:"tag"`
-	Size         int64    `json:"size"`
-	CreatedAt    int64    `json:"created_at"`
-	ReferencedBy []string `json:"referenced_by"`
+	Tag          string   `json:"tag" yaml:"tag"`
+	Size         int64    `json:"size" yaml:"size"`
+	CreatedAt    int64    `json:"created_at" yaml:"created_at"`
+	ReferencedBy []string `json:"referenced_by" yaml:"referenced_by"`
 }
 
 var crewCacheCmd = &cobra.Command{
@@ -182,7 +182,7 @@ func fetchCacheImages(client *cli.Client) ([]cacheImage, error) {
 		return nil, err
 	}
 	var body struct {
-		Images []cacheImage `json:"images"`
+		Images []cacheImage `json:"images" yaml:"images"`
 	}
 	if err := cli.ReadJSON(resp, &body); err != nil {
 		return nil, err

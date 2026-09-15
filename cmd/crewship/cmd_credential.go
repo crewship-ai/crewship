@@ -27,53 +27,53 @@ var credentialCmd = &cobra.Command{
 
 // credRow is a single credential row as rendered by `credential list`.
 type credRow struct {
-	ID         string `json:"id"`
-	Name       string `json:"name"`
-	Type       string `json:"type"`
-	Provider   string `json:"provider"`
-	Status     string `json:"status"`
-	AgentCount int    `json:"_count_agent_credentials"`
+	ID         string `json:"id" yaml:"id"`
+	Name       string `json:"name" yaml:"name"`
+	Type       string `json:"type" yaml:"type"`
+	Provider   string `json:"provider" yaml:"provider"`
+	Status     string `json:"status" yaml:"status"`
+	AgentCount int    `json:"_count_agent_credentials" yaml:"_count_agent_credentials"`
 	// SecurityLevel is the Keeper tier. Listed because it is the property that
 	// decides what happens when an agent asks for the credential — at L4 every
 	// read becomes a human approval — and it was invisible in every listing, so an
 	// operator had no way to notice that a production credential was filed as L1
 	// (which, until the create path was fixed, is exactly what happened to
 	// anything marked 4).
-	SecurityLevel         int     `json:"security_level"`
-	SecurityLevelLabel    *string `json:"security_level_label"`
-	CreatedByActorType    *string `json:"created_by_actor_type"`
-	ProvisionedForService *string `json:"provisioned_for_service"`
+	SecurityLevel         int     `json:"security_level" yaml:"security_level"`
+	SecurityLevelLabel    *string `json:"security_level_label" yaml:"security_level_label"`
+	CreatedByActorType    *string `json:"created_by_actor_type" yaml:"created_by_actor_type"`
+	ProvisionedForService *string `json:"provisioned_for_service" yaml:"provisioned_for_service"`
 	// Login is the provider-login object (PRD provider-logins §10.1), present
 	// on a PROVIDER_LOGIN row and on a legacy AI_CLI_TOKEN / API_KEY of a
 	// model provider. Drives `--kind provider_login`'s table.
-	Login *credLogin `json:"login,omitempty"`
+	Login *credLogin `json:"login,omitempty" yaml:"login,omitempty"`
 }
 
 // credLogin mirrors the API's login object — the fields an operator asks
 // about at the terminal. Values never travel here; the shape carries none.
 type credLogin struct {
-	Mode        string  `json:"mode"`
-	Provider    string  `json:"provider"`
-	Plan        *string `json:"plan"`
-	PlanLabel   *string `json:"plan_label"`
-	OwnerUserID *string `json:"owner_user_id"`
-	OwnerEmail  *string `json:"owner_email"`
-	ExpiresAt   *string `json:"expires_at"`
+	Mode        string  `json:"mode" yaml:"mode"`
+	Provider    string  `json:"provider" yaml:"provider"`
+	Plan        *string `json:"plan" yaml:"plan"`
+	PlanLabel   *string `json:"plan_label" yaml:"plan_label"`
+	OwnerUserID *string `json:"owner_user_id" yaml:"owner_user_id"`
+	OwnerEmail  *string `json:"owner_email" yaml:"owner_email"`
+	ExpiresAt   *string `json:"expires_at" yaml:"expires_at"`
 	Refresh     struct {
-		Supported bool    `json:"supported"`
-		Status    string  `json:"status"`
-		LastAt    *string `json:"last_at"`
-		NextAt    *string `json:"next_at"`
-		Error     *string `json:"error"`
-	} `json:"refresh"`
+		Supported bool    `json:"supported" yaml:"supported"`
+		Status    string  `json:"status" yaml:"status"`
+		LastAt    *string `json:"last_at" yaml:"last_at"`
+		NextAt    *string `json:"next_at" yaml:"next_at"`
+		Error     *string `json:"error" yaml:"error"`
+	} `json:"refresh" yaml:"refresh"`
 	Delivery struct {
-		Kind   string `json:"kind"`
-		Target string `json:"target"`
-	} `json:"delivery"`
+		Kind   string `json:"kind" yaml:"kind"`
+		Target string `json:"target" yaml:"target"`
+	} `json:"delivery" yaml:"delivery"`
 	PaysFor struct {
-		Agents int `json:"agents"`
-		Crews  int `json:"crews"`
-	} `json:"pays_for"`
+		Agents int `json:"agents" yaml:"agents"`
+		Crews  int `json:"crews" yaml:"crews"`
+	} `json:"pays_for" yaml:"pays_for"`
 }
 
 // loginPairs renders a login object as detail rows, appended to a
@@ -126,8 +126,8 @@ func decodeCredentialListPage(raw []byte) ([]credRow, *string, error) {
 		return rows, nil, nil
 	}
 	var env struct {
-		Credentials []credRow `json:"credentials"`
-		NextCursor  *string   `json:"next_cursor"`
+		Credentials []credRow `json:"credentials" yaml:"credentials"`
+		NextCursor  *string   `json:"next_cursor" yaml:"next_cursor"`
 	}
 	if err := json.Unmarshal(raw, &env); err != nil {
 		return nil, nil, err
@@ -358,15 +358,15 @@ var credGetCmd = &cobra.Command{
 		}
 
 		var cred struct {
-			ID        string     `json:"id"`
-			Name      string     `json:"name"`
-			Type      string     `json:"type"`
-			Provider  string     `json:"provider"`
-			Status    string     `json:"status"`
-			Scope     string     `json:"scope"`
-			CreatedAt string     `json:"created_at"`
-			CrewID    *string    `json:"crew_id"`
-			Login     *credLogin `json:"login,omitempty"`
+			ID        string     `json:"id" yaml:"id"`
+			Name      string     `json:"name" yaml:"name"`
+			Type      string     `json:"type" yaml:"type"`
+			Provider  string     `json:"provider" yaml:"provider"`
+			Status    string     `json:"status" yaml:"status"`
+			Scope     string     `json:"scope" yaml:"scope"`
+			CreatedAt string     `json:"created_at" yaml:"created_at"`
+			CrewID    *string    `json:"crew_id" yaml:"crew_id"`
+			Login     *credLogin `json:"login,omitempty" yaml:"login,omitempty"`
 		}
 		if err := cli.ReadJSON(resp, &cred); err != nil {
 			return err
@@ -411,8 +411,8 @@ func resolveCredentialID(client *cli.Client, nameOrID string) (string, error) {
 	}
 
 	var creds []struct {
-		ID   string `json:"id"`
-		Name string `json:"name"`
+		ID   string `json:"id" yaml:"id"`
+		Name string `json:"name" yaml:"name"`
 	}
 	if err := cli.ReadJSON(resp, &creds); err != nil {
 		return "", err
@@ -460,8 +460,8 @@ func testCredentialValue(client *cli.Client, provider, credType, value string) (
 	}
 
 	var result struct {
-		Valid bool   `json:"valid"`
-		Error string `json:"error"`
+		Valid bool   `json:"valid" yaml:"valid"`
+		Error string `json:"error" yaml:"error"`
 	}
 	if err := cli.ReadJSON(resp, &result); err != nil {
 		return false, "failed to read test result"
@@ -534,15 +534,15 @@ var credRotationsCmd = &cobra.Command{
 		}
 
 		var rotations []struct {
-			ID           string  `json:"id"`
-			CredentialID string  `json:"credential_id"`
-			GraceSeconds int     `json:"grace_seconds"`
-			RotatedAt    string  `json:"rotated_at"`
-			ExpiresAt    string  `json:"expires_at"`
-			RotatedBy    string  `json:"rotated_by"`
-			Status       string  `json:"status"`
-			OldValueGone bool    `json:"old_value_gone"`
-			CancelledAt  *string `json:"cancelled_at,omitempty"`
+			ID           string  `json:"id" yaml:"id"`
+			CredentialID string  `json:"credential_id" yaml:"credential_id"`
+			GraceSeconds int     `json:"grace_seconds" yaml:"grace_seconds"`
+			RotatedAt    string  `json:"rotated_at" yaml:"rotated_at"`
+			ExpiresAt    string  `json:"expires_at" yaml:"expires_at"`
+			RotatedBy    string  `json:"rotated_by" yaml:"rotated_by"`
+			Status       string  `json:"status" yaml:"status"`
+			OldValueGone bool    `json:"old_value_gone" yaml:"old_value_gone"`
+			CancelledAt  *string `json:"cancelled_at,omitempty" yaml:"cancelled_at,omitempty"`
 		}
 		if err := cli.ReadJSON(resp, &rotations); err != nil {
 			return err
@@ -604,19 +604,19 @@ var credAuditCmd = &cobra.Command{
 		}
 
 		var events []struct {
-			ID         string         `json:"id"`
-			EventType  string         `json:"event_type"`
-			AgentID    *string        `json:"agent_id"`
-			IPAddress  *string        `json:"ip_address"`
-			Metadata   map[string]any `json:"metadata"`
-			OccurredAt string         `json:"occurred_at"`
+			ID         string         `json:"id" yaml:"id"`
+			EventType  string         `json:"event_type" yaml:"event_type"`
+			AgentID    *string        `json:"agent_id" yaml:"agent_id"`
+			IPAddress  *string        `json:"ip_address" yaml:"ip_address"`
+			Metadata   map[string]any `json:"metadata" yaml:"metadata"`
+			OccurredAt string         `json:"occurred_at" yaml:"occurred_at"`
 			// Who did it, resolved by the server. The AGENT column only ever
 			// held the agent_id column, so a rotation or a reveal — the events
 			// an incident responder cares about most — showed "-" for the
 			// person who did it.
-			ActorKind string `json:"actor_kind"`
-			ActorID   string `json:"actor_id"`
-			ActorName string `json:"actor_name"`
+			ActorKind string `json:"actor_kind" yaml:"actor_kind"`
+			ActorID   string `json:"actor_id" yaml:"actor_id"`
+			ActorName string `json:"actor_name" yaml:"actor_name"`
 		}
 		if err := cli.ReadJSON(resp, &events); err != nil {
 			return err
@@ -693,10 +693,10 @@ var credTestStoredCmd = &cobra.Command{
 		}
 
 		var result struct {
-			Valid     bool   `json:"valid"`
-			Status    int    `json:"status"`
-			Error     string `json:"error"`
-			Supported bool   `json:"supported"`
+			Valid     bool   `json:"valid" yaml:"valid"`
+			Status    int    `json:"status" yaml:"status"`
+			Error     string `json:"error" yaml:"error"`
+			Supported bool   `json:"supported" yaml:"supported"`
 		}
 		if err := cli.ReadJSON(resp, &result); err != nil {
 			return err
@@ -764,7 +764,7 @@ var credDefaultEnvVarCmd = &cobra.Command{
 			return err
 		}
 		var result struct {
-			EnvVar string `json:"env_var"`
+			EnvVar string `json:"env_var" yaml:"env_var"`
 		}
 		if err := cli.ReadJSON(resp, &result); err != nil {
 			return err
@@ -814,7 +814,7 @@ needs_relogin and re-imported.`,
 			return err
 		}
 		var out struct {
-			Login *credLogin `json:"login"`
+			Login *credLogin `json:"login" yaml:"login"`
 		}
 		if err := cli.ReadJSON(resp, &out); err != nil {
 			return err

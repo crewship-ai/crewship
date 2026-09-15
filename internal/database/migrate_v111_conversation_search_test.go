@@ -1,10 +1,6 @@
 package database
 
 import (
-	"context"
-	"io"
-	"log/slog"
-	"path/filepath"
 	"testing"
 )
 
@@ -15,16 +11,7 @@ import (
 // tripping SQLite error 267 ("database disk image is malformed"), which
 // the plain-DELETE trigger form would.
 func TestMigrateV111_ConversationSearchSchema(t *testing.T) {
-	dir := t.TempDir()
-	db, err := Open("file:" + filepath.Join(dir, "v111.db"))
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	defer db.Close()
-	silent := slog.New(slog.NewTextHandler(io.Discard, nil))
-	if err := Migrate(context.Background(), db.DB, silent); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
+	db := openMigratedTestDB(t)
 
 	// Base table + FTS shadow + triggers all present.
 	objects := map[string]string{

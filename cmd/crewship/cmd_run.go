@@ -155,7 +155,7 @@ Examples:
 				return err
 			}
 			var chatResult struct {
-				ID string `json:"id"`
+				ID string `json:"id" yaml:"id"`
 			}
 			if err := cli.ReadJSON(resp, &chatResult); err != nil {
 				return err
@@ -651,7 +651,7 @@ var runListCmd = &cobra.Command{
 		// that way from the day it shipped. One type for the run shape means
 		// the next field added server-side cannot repeat it.
 		var result struct {
-			Data []cli.RunDetail `json:"data"`
+			Data []cli.RunDetail `json:"data" yaml:"data"`
 		}
 		if err := cli.ReadJSON(resp, &result); err != nil {
 			return err
@@ -910,39 +910,39 @@ func mcpSkipShortfall(shown, total int, truncated bool) string {
 
 // runInsightsResp mirrors the /api/v1/runs/insights response.
 type runInsightsResp struct {
-	Window string `json:"window"`
+	Window string `json:"window" yaml:"window"`
 	Totals struct {
-		Total     int `json:"total"`
-		Succeeded int `json:"succeeded"`
-		Failed    int `json:"failed"`
-		Running   int `json:"running"`
-	} `json:"totals"`
+		Total     int `json:"total" yaml:"total"`
+		Succeeded int `json:"succeeded" yaml:"succeeded"`
+		Failed    int `json:"failed" yaml:"failed"`
+		Running   int `json:"running" yaml:"running"`
+	} `json:"totals" yaml:"totals"`
 	Duration struct {
-		P50Ms int64 `json:"p50_ms"`
-		P95Ms int64 `json:"p95_ms"`
-	} `json:"duration"`
-	ByTrigger []insightCat   `json:"by_trigger"`
-	ByModel   []insightCat   `json:"by_model"`
-	ByCrew    []insightCrew  `json:"by_crew"`
-	TopAgents []insightAgent `json:"top_agents"`
-	Truncated bool           `json:"truncated"`
+		P50Ms int64 `json:"p50_ms" yaml:"p50_ms"`
+		P95Ms int64 `json:"p95_ms" yaml:"p95_ms"`
+	} `json:"duration" yaml:"duration"`
+	ByTrigger []insightCat   `json:"by_trigger" yaml:"by_trigger"`
+	ByModel   []insightCat   `json:"by_model" yaml:"by_model"`
+	ByCrew    []insightCrew  `json:"by_crew" yaml:"by_crew"`
+	TopAgents []insightAgent `json:"top_agents" yaml:"top_agents"`
+	Truncated bool           `json:"truncated" yaml:"truncated"`
 }
 
 type insightCat struct {
-	Key    string `json:"key"`
-	Total  int    `json:"total"`
-	Failed int    `json:"failed"`
+	Key    string `json:"key" yaml:"key"`
+	Total  int    `json:"total" yaml:"total"`
+	Failed int    `json:"failed" yaml:"failed"`
 }
 type insightCrew struct {
-	Name   string `json:"name"`
-	Total  int    `json:"total"`
-	Failed int    `json:"failed"`
+	Name   string `json:"name" yaml:"name"`
+	Total  int    `json:"total" yaml:"total"`
+	Failed int    `json:"failed" yaml:"failed"`
 }
 type insightAgent struct {
-	Name     string `json:"name"`
-	CrewName string `json:"crew_name"`
-	Total    int    `json:"total"`
-	Failed   int    `json:"failed"`
+	Name     string `json:"name" yaml:"name"`
+	CrewName string `json:"crew_name" yaml:"crew_name"`
+	Total    int    `json:"total" yaml:"total"`
+	Failed   int    `json:"failed" yaml:"failed"`
 }
 
 var runInsightsCmd = &cobra.Command{

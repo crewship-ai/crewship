@@ -49,10 +49,10 @@ var (
 // keeperReviewResult mirrors the Phase 2 handlers' response — they answer the
 // admin route directly, so this is their shape, not a wrapper.
 type keeperReviewResult struct {
-	RequestID string `json:"request_id"`
-	Decision  string `json:"decision"`
-	Reason    string `json:"reason"`
-	RiskScore int    `json:"risk_score"`
+	RequestID string `json:"request_id" yaml:"request_id"`
+	Decision  string `json:"decision" yaml:"decision"`
+	Reason    string `json:"reason" yaml:"reason"`
+	RiskScore int    `json:"risk_score" yaml:"risk_score"`
 }
 
 var keeperReviewRunCmd = &cobra.Command{

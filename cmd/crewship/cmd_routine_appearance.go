@@ -21,10 +21,10 @@ import (
 // reads back. The endpoint returns the whole routine; only these two
 // fields are the point.
 type appearanceRow struct {
-	Slug  string `json:"slug"`
-	Name  string `json:"name"`
-	Icon  string `json:"icon,omitempty"`
-	Color string `json:"color,omitempty"`
+	Slug  string `json:"slug" yaml:"slug"`
+	Name  string `json:"name" yaml:"name"`
+	Icon  string `json:"icon,omitempty" yaml:"icon,omitempty"`
+	Color string `json:"color,omitempty" yaml:"color,omitempty"`
 }
 
 var routineAppearanceCmd = &cobra.Command{

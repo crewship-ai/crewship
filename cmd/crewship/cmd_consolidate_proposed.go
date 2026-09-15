@@ -71,35 +71,35 @@ default) means the consolidator writes directly and stages nothing.`,
 // scores stay RawMessage: they are opaque per-run JSON blobs and flattening
 // them to a string would lose the shape a script wants to index.
 type proposalExplanation struct {
-	ProposalID      string          `json:"proposal_id"`
-	WorkspaceID     string          `json:"workspace_id"`
-	CrewID          string          `json:"crew_id"`
-	Status          string          `json:"status"`
-	ProposalPath    string          `json:"proposal_path"`
-	RulesCount      int             `json:"rules_count"`
-	EntriesScanned  int             `json:"entries_scanned"`
-	CreatedAt       string          `json:"created_at"`
-	DecidedAt       string          `json:"decided_at,omitempty"`
-	DecidedByUserID string          `json:"decided_by_user_id,omitempty"`
-	Evidence        json.RawMessage `json:"evidence,omitempty"`
-	Scores          json.RawMessage `json:"scores,omitempty"`
+	ProposalID      string          `json:"proposal_id" yaml:"proposal_id"`
+	WorkspaceID     string          `json:"workspace_id" yaml:"workspace_id"`
+	CrewID          string          `json:"crew_id" yaml:"crew_id"`
+	Status          string          `json:"status" yaml:"status"`
+	ProposalPath    string          `json:"proposal_path" yaml:"proposal_path"`
+	RulesCount      int             `json:"rules_count" yaml:"rules_count"`
+	EntriesScanned  int             `json:"entries_scanned" yaml:"entries_scanned"`
+	CreatedAt       string          `json:"created_at" yaml:"created_at"`
+	DecidedAt       string          `json:"decided_at,omitempty" yaml:"decided_at,omitempty"`
+	DecidedByUserID string          `json:"decided_by_user_id,omitempty" yaml:"decided_by_user_id,omitempty"`
+	Evidence        json.RawMessage `json:"evidence,omitempty" yaml:"evidence,omitempty"`
+	Scores          json.RawMessage `json:"scores,omitempty" yaml:"scores,omitempty"`
 }
 
 type proposalDiff struct {
-	ProposalID      string `json:"proposal_id"`
-	WorkspaceID     string `json:"workspace_id"`
-	CrewID          string `json:"crew_id"`
-	Status          string `json:"status"`
-	CanonicalPath   string `json:"canonical_path"`
-	CanonicalExists bool   `json:"canonical_exists"`
-	ProposalPath    string `json:"proposal_path"`
-	RulesCount      int    `json:"rules_count"`
-	Diff            string `json:"diff"`
+	ProposalID      string `json:"proposal_id" yaml:"proposal_id"`
+	WorkspaceID     string `json:"workspace_id" yaml:"workspace_id"`
+	CrewID          string `json:"crew_id" yaml:"crew_id"`
+	Status          string `json:"status" yaml:"status"`
+	CanonicalPath   string `json:"canonical_path" yaml:"canonical_path"`
+	CanonicalExists bool   `json:"canonical_exists" yaml:"canonical_exists"`
+	ProposalPath    string `json:"proposal_path" yaml:"proposal_path"`
+	RulesCount      int    `json:"rules_count" yaml:"rules_count"`
+	Diff            string `json:"diff" yaml:"diff"`
 	Stats           struct {
-		Additions     int `json:"additions"`
-		Deletions     int `json:"deletions"`
-		RulesAppended int `json:"rules_appended"`
-	} `json:"stats"`
+		Additions     int `json:"additions" yaml:"additions"`
+		Deletions     int `json:"deletions" yaml:"deletions"`
+		RulesAppended int `json:"rules_appended" yaml:"rules_appended"`
+	} `json:"stats" yaml:"stats"`
 }
 
 // proposedPath builds the review path for one proposal id.
@@ -266,17 +266,17 @@ Examples:
 		}
 
 		var out struct {
-			ProposalID    string `json:"proposal_id"`
-			CanonicalPath string `json:"canonical_path"`
-			RulesMerged   int    `json:"rules_merged"`
-			WorkspaceID   string `json:"workspace_id"`
-			CrewID        string `json:"crew_id"`
-			DecidedBy     string `json:"decided_by"`
-			VersionSHA    string `json:"version_sha"`
+			ProposalID    string `json:"proposal_id" yaml:"proposal_id"`
+			CanonicalPath string `json:"canonical_path" yaml:"canonical_path"`
+			RulesMerged   int    `json:"rules_merged" yaml:"rules_merged"`
+			WorkspaceID   string `json:"workspace_id" yaml:"workspace_id"`
+			CrewID        string `json:"crew_id" yaml:"crew_id"`
+			DecidedBy     string `json:"decided_by" yaml:"decided_by"`
+			VersionSHA    string `json:"version_sha" yaml:"version_sha"`
 			// Preview carries what --diff showed, so a machine consumer that
 			// asked for it gets it without a second round trip and without a
 			// second document on stdout. Absent when --diff was not passed.
-			Preview *proposalDiff `json:"preview,omitempty"`
+			Preview *proposalDiff `json:"preview,omitempty" yaml:"preview,omitempty"`
 		}
 		if err := cli.ReadJSON(resp, &out); err != nil {
 			return err
@@ -334,10 +334,10 @@ OWNER or ADMIN only. Already-decided proposals answer 409.`,
 		}
 
 		var out struct {
-			ProposalID string `json:"proposal_id"`
-			Status     string `json:"status"`
-			DecidedBy  string `json:"decided_by"`
-			Reason     string `json:"reason"`
+			ProposalID string `json:"proposal_id" yaml:"proposal_id"`
+			Status     string `json:"status" yaml:"status"`
+			DecidedBy  string `json:"decided_by" yaml:"decided_by"`
+			Reason     string `json:"reason" yaml:"reason"`
 		}
 		if err := cli.ReadJSON(resp, &out); err != nil {
 			return err

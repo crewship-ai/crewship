@@ -305,14 +305,14 @@ func pageImportCheckError(resp *http.Response) error {
 	}
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<16))
 	var refused struct {
-		Error      string `json:"error"`
-		Hint       string `json:"hint"`
+		Error      string `json:"error" yaml:"error"`
+		Hint       string `json:"hint" yaml:"hint"`
 		Unresolved []struct {
-			Ref    string   `json:"ref"`
-			Kind   string   `json:"kind"`
-			UsedBy []string `json:"used_by"`
-			Reason string   `json:"reason"`
-		} `json:"unresolved"`
+			Ref    string   `json:"ref" yaml:"ref"`
+			Kind   string   `json:"kind" yaml:"kind"`
+			UsedBy []string `json:"used_by" yaml:"used_by"`
+			Reason string   `json:"reason" yaml:"reason"`
+		} `json:"unresolved" yaml:"unresolved"`
 	}
 	if json.Unmarshal(raw, &refused) == nil && len(refused.Unresolved) > 0 {
 		var b strings.Builder
@@ -336,13 +336,13 @@ func pageImportCheckError(resp *http.Response) error {
 // ── versions ───────────────────────────────────────────────────────────────
 
 type pageVersionRowJSON struct {
-	Seq         int64  `json:"seq"`
-	CreatedAt   string `json:"created_at"`
-	Author      string `json:"author"`
-	AuthorLabel string `json:"author_label"`
-	Name        string `json:"name"`
-	PanelCount  int    `json:"panel_count"`
-	Current     bool   `json:"current"`
+	Seq         int64  `json:"seq" yaml:"seq"`
+	CreatedAt   string `json:"created_at" yaml:"created_at"`
+	Author      string `json:"author" yaml:"author"`
+	AuthorLabel string `json:"author_label" yaml:"author_label"`
+	Name        string `json:"name" yaml:"name"`
+	PanelCount  int    `json:"panel_count" yaml:"panel_count"`
+	Current     bool   `json:"current" yaml:"current"`
 }
 
 var pageVersionsCmd = &cobra.Command{
@@ -377,9 +377,9 @@ never its numbers.`,
 			return pageEmitMachine(f, body, "{}")
 		}
 		var out struct {
-			Page     string               `json:"page"`
-			Retained int                  `json:"retained"`
-			Versions []pageVersionRowJSON `json:"versions"`
+			Page     string               `json:"page" yaml:"page"`
+			Retained int                  `json:"retained" yaml:"retained"`
+			Versions []pageVersionRowJSON `json:"versions" yaml:"versions"`
 		}
 		if err := json.Unmarshal(body, &out); err != nil {
 			return fmt.Errorf("decode response: %w", err)
@@ -484,10 +484,10 @@ itself be rolled back.`,
 			return pageEmitMachine(f, body, "{}")
 		}
 		var out struct {
-			Page         pageJSON `json:"page"`
-			RolledBackTo int64    `json:"rolled_back_to"`
-			Version      int64    `json:"version"`
-			AwaitingData []string `json:"awaiting_data"`
+			Page         pageJSON `json:"page" yaml:"page"`
+			RolledBackTo int64    `json:"rolled_back_to" yaml:"rolled_back_to"`
+			Version      int64    `json:"version" yaml:"version"`
+			AwaitingData []string `json:"awaiting_data" yaml:"awaiting_data"`
 		}
 		if err := json.Unmarshal(body, &out); err != nil {
 			fmt.Printf("Page %s rolled back to version %d.\n", args[0], to)

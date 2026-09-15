@@ -93,7 +93,7 @@ describe("InboxBellView", () => {
   // schedule advisory has one (re-enable the schedule). So both schedule kinds
   // sat under "Needs a decision" with a countdown-free urgency treatment while
   // nothing whatsoever was waiting on them.
-  it.each(["schedule_circuit_breaker_tripped", "schedule_missed"])(
+  it.each(["schedule_circuit_breaker_tripped", "schedule_missed"] as const)(
     "keeps %s in Recent — it wants action, but nothing is parked on it",
     (kind) => {
       const advisory = item({

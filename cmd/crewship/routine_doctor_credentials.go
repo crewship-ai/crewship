@@ -73,9 +73,9 @@ func fetchActiveCredentialTypes(client doctorHTTPGetter, _ string) map[string]st
 		return nil
 	}
 	var rows []struct {
-		Provider string `json:"provider"`
-		Type     string `json:"type"`
-		Status   string `json:"status"`
+		Provider string `json:"provider" yaml:"provider"`
+		Type     string `json:"type" yaml:"type"`
+		Status   string `json:"status" yaml:"status"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&rows); err != nil {
 		return nil

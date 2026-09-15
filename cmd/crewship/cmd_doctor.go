@@ -655,10 +655,10 @@ func runCheckLocalModelEndpoint(ctx context.Context) checkResult {
 		return checkResult{name: name, status: "INFO", detail: "skipped (not authenticated — run `crewship login`)"}
 	}
 	var creds []struct {
-		ID     string `json:"id"`
-		Name   string `json:"name"`
-		Type   string `json:"type"`
-		Status string `json:"status"`
+		ID     string `json:"id" yaml:"id"`
+		Name   string `json:"name" yaml:"name"`
+		Type   string `json:"type" yaml:"type"`
+		Status string `json:"status" yaml:"status"`
 	}
 	if err := cli.ReadJSON(resp, &creds); err != nil {
 		return checkResult{name: name, status: "INFO", detail: "skipped (could not parse credential list)"}
@@ -683,8 +683,8 @@ func runCheckLocalModelEndpoint(ctx context.Context) checkResult {
 		return checkResult{name: name, status: "INFO", detail: fmt.Sprintf("skipped (test call failed for %q)", endpointName)}
 	}
 	var res struct {
-		Valid bool   `json:"valid"`
-		Error string `json:"error"`
+		Valid bool   `json:"valid" yaml:"valid"`
+		Error string `json:"error" yaml:"error"`
 	}
 	if err := cli.ReadJSON(tResp, &res); err != nil {
 		return checkResult{name: name, status: "INFO", detail: "skipped (could not parse test result)"}
@@ -1192,22 +1192,22 @@ func init() {
 // hint is omitempty so consumers can branch on its presence rather
 // than its emptiness.
 type doctorCheckJSON struct {
-	Name   string `json:"name"`
-	Status string `json:"status"`
-	Detail string `json:"detail"`
-	Hint   string `json:"hint,omitempty"`
+	Name   string `json:"name" yaml:"name"`
+	Status string `json:"status" yaml:"status"`
+	Detail string `json:"detail" yaml:"detail"`
+	Hint   string `json:"hint,omitempty" yaml:"hint,omitempty"`
 }
 
 // doctorJSON is the top-level --json output shape. failed + warned
 // are the canonical CI gate inputs; the per-check array is for
 // callers that need richer filtering.
 type doctorJSON struct {
-	Checks  []doctorCheckJSON `json:"checks"`
-	Failed  int               `json:"failed"`
-	Warned  int               `json:"warned"`
-	Version string            `json:"version"`
-	OS      string            `json:"os"`
-	Arch    string            `json:"arch"`
+	Checks  []doctorCheckJSON `json:"checks" yaml:"checks"`
+	Failed  int               `json:"failed" yaml:"failed"`
+	Warned  int               `json:"warned" yaml:"warned"`
+	Version string            `json:"version" yaml:"version"`
+	OS      string            `json:"os" yaml:"os"`
+	Arch    string            `json:"arch" yaml:"arch"`
 }
 
 // emitDoctorJSON marshals the doctor result into the documented

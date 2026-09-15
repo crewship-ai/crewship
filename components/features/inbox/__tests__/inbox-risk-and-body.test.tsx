@@ -33,7 +33,7 @@ function item(over: Partial<InboxItem> & Pick<InboxItem, "id" | "kind" | "title"
 
 function renderDetail(it: InboxItem) {
   return render(
-    <InboxDetail item={it} role="OWNER" onResolve={vi.fn()} onRefresh={vi.fn()} onMarkUnread={vi.fn()} />,
+    <InboxDetail item={it} role="OWNER" onResolve={vi.fn()} onRefresh={vi.fn()} onArchive={vi.fn()} onMarkUnread={vi.fn()} />,
   )
 }
 

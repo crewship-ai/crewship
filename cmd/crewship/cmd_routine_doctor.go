@@ -62,21 +62,21 @@ const (
 // inline when non-empty so the operator gets the fix on the same
 // line as the symptom.
 type doctorCheck struct {
-	Name    string      `json:"name"`
-	Level   doctorLevel `json:"level"`
-	Message string      `json:"message"`
-	Hint    string      `json:"hint,omitempty"`
+	Name    string      `json:"name" yaml:"name"`
+	Level   doctorLevel `json:"level" yaml:"level"`
+	Message string      `json:"message" yaml:"message"`
+	Hint    string      `json:"hint,omitempty" yaml:"hint,omitempty"`
 }
 
 // doctorReport is the top-level structure the JSON output emits;
 // table mode flattens to per-row lines.
 type doctorReport struct {
-	Slug        string        `json:"slug"`
-	WorkspaceID string        `json:"workspace_id"`
-	Checks      []doctorCheck `json:"checks"`
-	Failed      int           `json:"failed"`
-	Warned      int           `json:"warned"`
-	Passed      int           `json:"passed"`
+	Slug        string        `json:"slug" yaml:"slug"`
+	WorkspaceID string        `json:"workspace_id" yaml:"workspace_id"`
+	Checks      []doctorCheck `json:"checks" yaml:"checks"`
+	Failed      int           `json:"failed" yaml:"failed"`
+	Warned      int           `json:"warned" yaml:"warned"`
+	Passed      int           `json:"passed" yaml:"passed"`
 }
 
 // doctorHTTPGetter is the minimal client surface every doctor check
@@ -198,10 +198,10 @@ func printDoctorTable(cmd *cobra.Command, report doctorReport) {
 // than reuse a server-side struct to avoid coupling the CLI to
 // internal types.
 type fetchedRoutine struct {
-	Slug          string                 `json:"slug"`
-	AuthorCrewID  string                 `json:"author_crew_id"`
-	Definition    map[string]interface{} `json:"definition_parsed"`
-	DefinitionRaw json.RawMessage        `json:"definition_json"`
+	Slug          string                 `json:"slug" yaml:"slug"`
+	AuthorCrewID  string                 `json:"author_crew_id" yaml:"author_crew_id"`
+	Definition    map[string]interface{} `json:"definition_parsed" yaml:"definition_parsed"`
+	DefinitionRaw json.RawMessage        `json:"definition_json" yaml:"definition_json"`
 }
 
 func fetchRoutineForDoctor(client doctorHTTPGetter, ws, slug string) (fetchedRoutine, bool) {

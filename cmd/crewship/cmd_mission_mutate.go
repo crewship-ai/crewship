@@ -66,8 +66,8 @@ var missionCreateCmd = &cobra.Command{
 		}
 
 		var created struct {
-			ID    string `json:"id"`
-			Title string `json:"title"`
+			ID    string `json:"id" yaml:"id"`
+			Title string `json:"title" yaml:"title"`
 		}
 		if err := cli.ReadJSON(resp, &created); err != nil {
 			return err
@@ -216,8 +216,8 @@ var missionCloneCmd = &cobra.Command{
 		// API change to honour, so it is tracked separately rather than
 		// papered over here.
 		var result struct {
-			ID     string `json:"id"`
-			Status string `json:"status"`
+			ID     string `json:"id" yaml:"id"`
+			Status string `json:"status" yaml:"status"`
 		}
 		if err := cli.ReadJSON(resp, &result); err != nil {
 			return err

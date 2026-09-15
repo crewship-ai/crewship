@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"io"
 	"log/slog"
-	"path/filepath"
 	"testing"
 )
 
@@ -13,17 +12,8 @@ import (
 // applies cleanly and backfills existing pipeline rows to 'active', and that
 // the CHECK constraint rejects an out-of-enum value.
 func TestMigrateV128_PipelineStatus_BackfillsActive(t *testing.T) {
-	dir := t.TempDir()
-	db, err := Open("file:" + filepath.Join(dir, "v128.db"))
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
+	db := openMigratedTestDB(t)
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-
-	if err := Migrate(context.Background(), db.DB, logger); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
 
 	// Confirm the column exists and defaults to 'active' on insert.
 	wsID := "ws_v128"
@@ -44,7 +34,7 @@ func TestMigrateV128_PipelineStatus_BackfillsActive(t *testing.T) {
 	}
 
 	// CHECK constraint rejects an unknown status.
-	_, err = db.Exec(`UPDATE pipelines SET status = 'bogus' WHERE id = 'pln_v128'`)
+	_, err := db.Exec(`UPDATE pipelines SET status = 'bogus' WHERE id = 'pln_v128'`)
 	if err == nil {
 		t.Errorf("expected CHECK violation updating status to 'bogus', got nil")
 	}

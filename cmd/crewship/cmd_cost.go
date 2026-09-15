@@ -70,20 +70,20 @@ Examples:
 }
 
 type topSpenderRow struct {
-	ScopeKind string  `json:"scope_kind"`
-	ScopeID   string  `json:"scope_id"`
-	CostUSD   float64 `json:"cost_usd"`
-	CallCount int64   `json:"call_count"`
+	ScopeKind string  `json:"scope_kind" yaml:"scope_kind"`
+	ScopeID   string  `json:"scope_id" yaml:"scope_id"`
+	CostUSD   float64 `json:"cost_usd" yaml:"cost_usd"`
+	CallCount int64   `json:"call_count" yaml:"call_count"`
 }
 
 type subUsageRow struct {
-	CredentialID string  `json:"credential_id,omitempty"`
-	Plan         string  `json:"subscription_plan"`
-	Provider     string  `json:"provider"`
-	CallCount    int64   `json:"call_count"`
-	InTokens     int64   `json:"input_tokens"`
-	OutTokens    int64   `json:"output_tokens"`
-	LastUsedAt   *string `json:"last_used_at"`
+	CredentialID string  `json:"credential_id,omitempty" yaml:"credential_id,omitempty"`
+	Plan         string  `json:"subscription_plan" yaml:"subscription_plan"`
+	Provider     string  `json:"provider" yaml:"provider"`
+	CallCount    int64   `json:"call_count" yaml:"call_count"`
+	InTokens     int64   `json:"input_tokens" yaml:"input_tokens"`
+	OutTokens    int64   `json:"output_tokens" yaml:"output_tokens"`
+	LastUsedAt   *string `json:"last_used_at" yaml:"last_used_at"`
 }
 
 func fetchTopSpenders(c *cli.Client, rng string, limit int) ([]topSpenderRow, error) {
@@ -102,7 +102,7 @@ func fetchTopSpenders(c *cli.Client, rng string, limit int) ([]topSpenderRow, er
 		return nil, err
 	}
 	var body struct {
-		Rows []topSpenderRow `json:"rows"`
+		Rows []topSpenderRow `json:"rows" yaml:"rows"`
 	}
 	if err := cli.ReadJSON(resp, &body); err != nil {
 		return nil, err
@@ -123,7 +123,7 @@ func fetchCrewSpend(c *cli.Client, rng string) ([]crewSpendRow, error) {
 		return nil, err
 	}
 	var body struct {
-		Rows []crewSpendRow `json:"rows"`
+		Rows []crewSpendRow `json:"rows" yaml:"rows"`
 	}
 	if err := cli.ReadJSON(resp, &body); err != nil {
 		return nil, err
@@ -146,14 +146,14 @@ func fetchSubscriptionUsage(c *cli.Client, rng string) ([]subUsageRow, error) {
 	}
 	var body struct {
 		Rows []struct {
-			CredentialID string  `json:"credential_id"`
-			Plan         string  `json:"subscription_plan"`
-			Provider     string  `json:"provider"`
-			CallCount    int64   `json:"call_count"`
-			InTokens     int64   `json:"input_tokens"`
-			OutTokens    int64   `json:"output_tokens"`
-			LastTS       *string `json:"last_ts"`
-		} `json:"rows"`
+			CredentialID string  `json:"credential_id" yaml:"credential_id"`
+			Plan         string  `json:"subscription_plan" yaml:"subscription_plan"`
+			Provider     string  `json:"provider" yaml:"provider"`
+			CallCount    int64   `json:"call_count" yaml:"call_count"`
+			InTokens     int64   `json:"input_tokens" yaml:"input_tokens"`
+			OutTokens    int64   `json:"output_tokens" yaml:"output_tokens"`
+			LastTS       *string `json:"last_ts" yaml:"last_ts"`
+		} `json:"rows" yaml:"rows"`
 	}
 	if err := cli.ReadJSON(resp, &body); err != nil {
 		return nil, err

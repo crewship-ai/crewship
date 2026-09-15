@@ -268,13 +268,13 @@ type chatStreamRenderer struct {
 // renderer uses are declared; unknown fields are ignored, which is what lets
 // the server add frames without breaking an older CLI.
 type streamFrame struct {
-	Type    string `json:"type"`
-	Seq     int64  `json:"seq"`
-	Content string `json:"content"`
-	Reason  string `json:"reason"`
-	ChatID  string `json:"chat_id"`
-	Active  bool   `json:"active"`
-	FromSeq int64  `json:"from_seq"`
+	Type    string `json:"type" yaml:"type"`
+	Seq     int64  `json:"seq" yaml:"seq"`
+	Content string `json:"content" yaml:"content"`
+	Reason  string `json:"reason" yaml:"reason"`
+	ChatID  string `json:"chat_id" yaml:"chat_id"`
+	Active  bool   `json:"active" yaml:"active"`
+	FromSeq int64  `json:"from_seq" yaml:"from_seq"`
 }
 
 func (r *chatStreamRenderer) line(raw []byte) error {

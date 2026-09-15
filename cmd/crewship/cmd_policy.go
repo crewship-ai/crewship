@@ -326,9 +326,9 @@ Examples:
 		if crewsResp, err := client.Get("/api/v1/crews"); err == nil {
 			if cli.CheckError(crewsResp) == nil {
 				var crews []struct {
-					ID   string `json:"id"`
-					Name string `json:"name"`
-					Slug string `json:"slug"`
+					ID   string `json:"id" yaml:"id"`
+					Name string `json:"name" yaml:"name"`
+					Slug string `json:"slug" yaml:"slug"`
 				}
 				if err := cli.ReadJSON(crewsResp, &crews); err == nil {
 					for _, c := range crews {
@@ -392,12 +392,12 @@ Examples:
 // field on the API side requires extending this struct in lockstep
 // (the CLI silently drops unknown JSON fields on decode).
 type policyWire struct {
-	CrewID        string `json:"crew_id"`
-	AutonomyLevel string `json:"autonomy_level"`
-	BehaviorMode  string `json:"behavior_mode"`
-	SetByUserID   string `json:"set_by_user_id,omitempty"`
-	SetAt         string `json:"set_at,omitempty"`
-	Reason        string `json:"reason,omitempty"`
+	CrewID        string `json:"crew_id" yaml:"crew_id"`
+	AutonomyLevel string `json:"autonomy_level" yaml:"autonomy_level"`
+	BehaviorMode  string `json:"behavior_mode" yaml:"behavior_mode"`
+	SetByUserID   string `json:"set_by_user_id,omitempty" yaml:"set_by_user_id,omitempty"`
+	SetAt         string `json:"set_at,omitempty" yaml:"set_at,omitempty"`
+	Reason        string `json:"reason,omitempty" yaml:"reason,omitempty"`
 }
 
 func init() {

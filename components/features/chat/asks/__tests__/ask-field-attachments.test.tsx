@@ -29,7 +29,7 @@ vi.mock("sonner", () => ({
 import { renderAskTemplate } from "@/lib/ask-template"
 
 import { AskFormSheet } from "../ask-form-sheet"
-import type { AskForm, AskValues } from "../types"
+import type { AskForm, AskValues, RenderAskTemplate } from "../types"
 import { useComposerStore, type ComposerAttachment } from "@/stores/composer-store"
 
 const SESSION = "sess-1"
@@ -47,7 +47,7 @@ const twoUploads: AskForm = {
   ],
 }
 
-const onSubmit = vi.fn(async () => true)
+const onSubmit = vi.fn<React.ComponentProps<typeof AskFormSheet>["onSubmit"]>(async () => true)
 const onClose = vi.fn()
 
 /** Stand-in renderer — see the note in ask-form-sheet.test.tsx. The real one is
@@ -61,7 +61,7 @@ const stubRender = (form: AskForm, values: AskValues) =>
     return `${v}`
   })
 
-function renderSheet(form: AskForm, render_ = stubRender) {
+function renderSheet(form: AskForm, render_: RenderAskTemplate = stubRender) {
   return render(
     <AskFormSheet
       form={form}

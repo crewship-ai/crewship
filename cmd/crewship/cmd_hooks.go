@@ -396,14 +396,14 @@ Examples:
 // hookDetail is the single-hook projection create/update return — the same
 // shape GET /api/v1/hooks emits per row.
 type hookDetail struct {
-	ID            string         `json:"id"`
-	CrewID        string         `json:"crew_id"`
-	Event         string         `json:"event"`
-	HandlerKind   string         `json:"handler_kind"`
-	HandlerConfig map[string]any `json:"handler_config"`
-	Enabled       bool           `json:"enabled"`
-	Blocking      bool           `json:"blocking"`
-	CreatedAt     string         `json:"created_at"`
+	ID            string         `json:"id" yaml:"id"`
+	CrewID        string         `json:"crew_id" yaml:"crew_id"`
+	Event         string         `json:"event" yaml:"event"`
+	HandlerKind   string         `json:"handler_kind" yaml:"handler_kind"`
+	HandlerConfig map[string]any `json:"handler_config" yaml:"handler_config"`
+	Enabled       bool           `json:"enabled" yaml:"enabled"`
+	Blocking      bool           `json:"blocking" yaml:"blocking"`
+	CreatedAt     string         `json:"created_at" yaml:"created_at"`
 }
 
 func printHookDetail(verb string, hk hookDetail) {
@@ -467,16 +467,16 @@ var hooksListCmd = &cobra.Command{
 		// always blank. The target is derived from handler_config below.
 		var body struct {
 			Rows []struct {
-				ID            string         `json:"id"`
-				CrewID        string         `json:"crew_id"`
-				Event         string         `json:"event"`
-				HandlerKind   string         `json:"handler_kind"`
-				HandlerConfig map[string]any `json:"handler_config"`
-				Enabled       bool           `json:"enabled"`
-				Blocking      bool           `json:"blocking"`
-				CreatedAt     string         `json:"created_at"`
-			} `json:"rows"`
-			Count int `json:"count"`
+				ID            string         `json:"id" yaml:"id"`
+				CrewID        string         `json:"crew_id" yaml:"crew_id"`
+				Event         string         `json:"event" yaml:"event"`
+				HandlerKind   string         `json:"handler_kind" yaml:"handler_kind"`
+				HandlerConfig map[string]any `json:"handler_config" yaml:"handler_config"`
+				Enabled       bool           `json:"enabled" yaml:"enabled"`
+				Blocking      bool           `json:"blocking" yaml:"blocking"`
+				CreatedAt     string         `json:"created_at" yaml:"created_at"`
+			} `json:"rows" yaml:"rows"`
+			Count int `json:"count" yaml:"count"`
 		}
 		if err := cli.ReadJSON(resp, &body); err != nil {
 			return err

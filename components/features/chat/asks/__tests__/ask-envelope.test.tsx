@@ -42,7 +42,7 @@ import {
 } from "../ask-provenance"
 import type { AskForm } from "../types"
 
-const onSubmit = vi.fn(async () => true)
+const onSubmit = vi.fn<React.ComponentProps<typeof AskFormSheet>["onSubmit"]>(async () => true)
 const onClose = vi.fn()
 
 const receipt: AskForm = {
@@ -92,11 +92,7 @@ function attachTo(field: string, names: string[], formId = "receipt") {
 }
 
 function envelopeFromLastSubmit(): AskSubmissionEnvelope {
-  const call = onSubmit.mock.calls[onSubmit.mock.calls.length - 1] as unknown as [
-    AskForm,
-    string,
-    AskSubmissionEnvelope,
-  ]
+  const call = onSubmit.mock.calls[onSubmit.mock.calls.length - 1]
   return call[2]
 }
 
@@ -156,9 +152,7 @@ describe("ask submission envelope", () => {
     renderSheet()
     await fillAndSend("Vodafone")
 
-    const [a, b] = onSubmit.mock.calls.map(
-      (c) => (c as unknown as [AskForm, string, AskSubmissionEnvelope])[2],
-    )
+    const [a, b] = onSubmit.mock.calls.map((c) => c[2])
     // The two messages are character-for-character identical — which is
     // exactly the case a content key could not tell apart.
     expect(a.rendered_text).toBe(b.rendered_text)

@@ -10,36 +10,36 @@ import (
 
 // keeperHealthAlarm mirrors internal/api's response.
 type keeperHealthAlarm struct {
-	Kind    string `json:"kind"`
-	Summary string `json:"summary"`
-	At      string `json:"at,omitempty"`
+	Kind    string `json:"kind" yaml:"kind"`
+	Summary string `json:"summary" yaml:"summary"`
+	At      string `json:"at,omitempty" yaml:"at,omitempty"`
 }
 
 type keeperHealthResult struct {
-	WorkspaceID string `json:"workspace_id"`
+	WorkspaceID string `json:"workspace_id" yaml:"workspace_id"`
 
-	Samples       int `json:"samples"`
-	Allow         int `json:"allow"`
-	Deny          int `json:"deny"`
-	Escalate      int `json:"escalate"`
-	JudgeFailures int `json:"judge_failures"`
+	Samples       int `json:"samples" yaml:"samples"`
+	Allow         int `json:"allow" yaml:"allow"`
+	Deny          int `json:"deny" yaml:"deny"`
+	Escalate      int `json:"escalate" yaml:"escalate"`
+	JudgeFailures int `json:"judge_failures" yaml:"judge_failures"`
 
-	AllowRate        float64 `json:"allow_rate"`
-	DenyRate         float64 `json:"deny_rate"`
-	EscalateRate     float64 `json:"escalate_rate"`
-	ProgressedRate   float64 `json:"progressed_rate"`
-	JudgeFailureRate float64 `json:"judge_failure_rate"`
+	AllowRate        float64 `json:"allow_rate" yaml:"allow_rate"`
+	DenyRate         float64 `json:"deny_rate" yaml:"deny_rate"`
+	EscalateRate     float64 `json:"escalate_rate" yaml:"escalate_rate"`
+	ProgressedRate   float64 `json:"progressed_rate" yaml:"progressed_rate"`
+	JudgeFailureRate float64 `json:"judge_failure_rate" yaml:"judge_failure_rate"`
 
-	P95LatencyMS int64 `json:"p95_latency_ms"`
+	P95LatencyMS int64 `json:"p95_latency_ms" yaml:"p95_latency_ms"`
 
-	MinSamples            int     `json:"min_samples"`
-	AlarmProgressedRate   float64 `json:"alarm_progressed_rate"`
-	AlarmJudgeFailureRate float64 `json:"alarm_judge_failure_rate"`
+	MinSamples            int     `json:"min_samples" yaml:"min_samples"`
+	AlarmProgressedRate   float64 `json:"alarm_progressed_rate" yaml:"alarm_progressed_rate"`
+	AlarmJudgeFailureRate float64 `json:"alarm_judge_failure_rate" yaml:"alarm_judge_failure_rate"`
 
-	Alarm *keeperHealthAlarm `json:"alarm,omitempty"`
+	Alarm *keeperHealthAlarm `json:"alarm,omitempty" yaml:"alarm,omitempty"`
 
-	Oldest string `json:"oldest,omitempty"`
-	Newest string `json:"newest,omitempty"`
+	Oldest string `json:"oldest,omitempty" yaml:"oldest,omitempty"`
+	Newest string `json:"newest,omitempty" yaml:"newest,omitempty"`
 }
 
 var keeperHealthCmd = &cobra.Command{

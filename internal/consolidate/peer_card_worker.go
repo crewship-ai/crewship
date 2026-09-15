@@ -190,6 +190,14 @@ func runSweepAllWorkspaces(
 	)
 }
 
+// ActiveWorkspaceIDs is the set of workspaces the two daily memory sweeps
+// walk. Exported for the operator's "run it now" route (#1702) so a manual
+// run and the 04:00/05:00 sweeps cannot disagree about what "every
+// workspace" means.
+func ActiveWorkspaceIDs(ctx context.Context, db *sql.DB) ([]string, error) {
+	return loadActiveWorkspaceIDs(ctx, db)
+}
+
 // loadActiveWorkspaceIDs returns every non-deleted workspace. Cheap
 // query — workspaces table is tiny relative to chats and is fully
 // indexed. The deleted_at filter matches the convention used across

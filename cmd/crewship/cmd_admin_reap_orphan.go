@@ -60,15 +60,15 @@ broken (its credentials can't sync), so recreation restores it.`,
 		defer resp.Body.Close()
 		data, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 		var out struct {
-			Error   string `json:"error"`
-			Applied bool   `json:"applied"`
-			Count   int    `json:"count"`
+			Error   string `json:"error" yaml:"error"`
+			Applied bool   `json:"applied" yaml:"applied"`
+			Count   int    `json:"count" yaml:"count"`
 			Orphans []struct {
-				CrewID      string `json:"crew_id"`
-				Slug        string `json:"slug"`
-				ContainerID string `json:"container_id"`
-				Reaped      bool   `json:"reaped"`
-			} `json:"orphans"`
+				CrewID      string `json:"crew_id" yaml:"crew_id"`
+				Slug        string `json:"slug" yaml:"slug"`
+				ContainerID string `json:"container_id" yaml:"container_id"`
+				Reaped      bool   `json:"reaped" yaml:"reaped"`
+			} `json:"orphans" yaml:"orphans"`
 			// #1390 coverage: how many containers the sweep reached and how
 			// many it could actually classify.
 			//
@@ -78,9 +78,9 @@ broken (its credentials can't sync), so recreation restores it.`,
 			// "no running crew containers" against an older instance where the
 			// truth is unknown. nil = not reported → fall back to the old,
 			// non-committal wording.
-			Inspected     *int `json:"inspected"`
-			Identified    *int `json:"identified"`
-			DetectorInert bool `json:"detector_inert"`
+			Inspected     *int `json:"inspected" yaml:"inspected"`
+			Identified    *int `json:"identified" yaml:"identified"`
+			DetectorInert bool `json:"detector_inert" yaml:"detector_inert"`
 		}
 		_ = json.Unmarshal(data, &out)
 

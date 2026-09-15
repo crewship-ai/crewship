@@ -50,24 +50,24 @@ var crewListCmd = &cobra.Command{
 		}
 
 		var crews []struct {
-			ID          string  `json:"id"`
-			Name        string  `json:"name"`
-			Slug        string  `json:"slug"`
-			Description *string `json:"description"`
-			MemoryMB    int     `json:"container_memory_mb"`
-			CPUs        float64 `json:"container_cpus"`
-			NetworkMode string  `json:"network_mode"`
+			ID          string  `json:"id" yaml:"id"`
+			Name        string  `json:"name" yaml:"name"`
+			Slug        string  `json:"slug" yaml:"slug"`
+			Description *string `json:"description" yaml:"description"`
+			MemoryMB    int     `json:"container_memory_mb" yaml:"container_memory_mb"`
+			CPUs        float64 `json:"container_cpus" yaml:"container_cpus"`
+			NetworkMode string  `json:"network_mode" yaml:"network_mode"`
 			// #1648: the configured mode is not necessarily the effective
 			// one. Missing on an older server, where the zero value would
 			// read as "not enforced" and mark every crew — so it is a
 			// pointer, and absent means "this server does not report it".
-			NetworkModeEnforced *bool   `json:"network_mode_enforced"`
-			RuntimeImage        *string `json:"runtime_image"`
-			CachedImage         *string `json:"cached_image"`
+			NetworkModeEnforced *bool   `json:"network_mode_enforced" yaml:"network_mode_enforced"`
+			RuntimeImage        *string `json:"runtime_image" yaml:"runtime_image"`
+			CachedImage         *string `json:"cached_image" yaml:"cached_image"`
 			Count               struct {
-				Agents  int `json:"agents"`
-				Members int `json:"members"`
-			} `json:"_count"`
+				Agents  int `json:"agents" yaml:"agents"`
+				Members int `json:"members" yaml:"members"`
+			} `json:"_count" yaml:"_count"`
 		}
 		if err := cli.ReadJSON(resp, &crews); err != nil {
 			return err
@@ -172,25 +172,25 @@ var crewGetCmd = &cobra.Command{
 		}
 
 		var crew struct {
-			ID          string  `json:"id"`
-			Name        string  `json:"name"`
-			Slug        string  `json:"slug"`
-			Description *string `json:"description"`
-			Color       *string `json:"color"`
-			Icon        *string `json:"icon"`
-			MemoryMB    int     `json:"container_memory_mb"`
-			CPUs        float64 `json:"container_cpus"`
-			TTLHours    *int    `json:"container_ttl_hours"`
-			NetworkMode string  `json:"network_mode"`
+			ID          string  `json:"id" yaml:"id"`
+			Name        string  `json:"name" yaml:"name"`
+			Slug        string  `json:"slug" yaml:"slug"`
+			Description *string `json:"description" yaml:"description"`
+			Color       *string `json:"color" yaml:"color"`
+			Icon        *string `json:"icon" yaml:"icon"`
+			MemoryMB    int     `json:"container_memory_mb" yaml:"container_memory_mb"`
+			CPUs        float64 `json:"container_cpus" yaml:"container_cpus"`
+			TTLHours    *int    `json:"container_ttl_hours" yaml:"container_ttl_hours"`
+			NetworkMode string  `json:"network_mode" yaml:"network_mode"`
 			// #1648: configured vs effective. See networkModeDisplay.
-			NetworkModeEnforced         *bool    `json:"network_mode_enforced"`
-			NetworkModeUnenforcedReason string   `json:"network_mode_unenforced_reason"`
-			AllowedDomains              []string `json:"allowed_domains"`
+			NetworkModeEnforced         *bool    `json:"network_mode_enforced" yaml:"network_mode_enforced"`
+			NetworkModeUnenforcedReason string   `json:"network_mode_unenforced_reason" yaml:"network_mode_unenforced_reason"`
+			AllowedDomains              []string `json:"allowed_domains" yaml:"allowed_domains"`
 			// #1377: the API has always returned this; the CLI projection
 			// dropped it, so `crew get` couldn't answer "is private egress on?"
 			// — the one question the flag exists to answer.
-			AllowPrivateEndpoints bool   `json:"allow_private_endpoints"`
-			CreatedAt             string `json:"created_at"`
+			AllowPrivateEndpoints bool   `json:"allow_private_endpoints" yaml:"allow_private_endpoints"`
+			CreatedAt             string `json:"created_at" yaml:"created_at"`
 		}
 		if err := cli.ReadJSON(resp, &crew); err != nil {
 			return err
@@ -280,8 +280,8 @@ var crewStatusCmd = &cobra.Command{
 			return err
 		}
 		var crew struct {
-			Name string `json:"name"`
-			Slug string `json:"slug"`
+			Name string `json:"name" yaml:"name"`
+			Slug string `json:"slug" yaml:"slug"`
 		}
 		if err := cli.ReadJSON(crewResp, &crew); err != nil {
 			return err

@@ -26,13 +26,13 @@ import (
 )
 
 type watchEntry struct {
-	ID        string                 `json:"id"`
-	Timestamp string                 `json:"ts"`
-	EntryType string                 `json:"entry_type"`
-	Severity  string                 `json:"severity"`
-	Summary   string                 `json:"summary"`
-	RunID     string                 `json:"run_id,omitempty"`
-	Payload   map[string]interface{} `json:"payload,omitempty"`
+	ID        string                 `json:"id" yaml:"id"`
+	Timestamp string                 `json:"ts" yaml:"ts"`
+	EntryType string                 `json:"entry_type" yaml:"entry_type"`
+	Severity  string                 `json:"severity" yaml:"severity"`
+	Summary   string                 `json:"summary" yaml:"summary"`
+	RunID     string                 `json:"run_id,omitempty" yaml:"run_id,omitempty"`
+	Payload   map[string]interface{} `json:"payload,omitempty" yaml:"payload,omitempty"`
 }
 
 var routineWatchCmd = &cobra.Command{

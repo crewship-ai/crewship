@@ -294,80 +294,81 @@ func init() {
 	agentCmd.AddCommand(agentDebugCmd)
 	agentCmd.AddCommand(agentSkillsCmd)
 	agentCmd.AddCommand(agentCredentialsCmd)
+	agentCmd.AddCommand(agentCredentialReadinessCmd)
 }
 
 // Resolver helpers and shared types
 
 type agentListItem struct {
-	ID            string          `json:"id"`
-	Slug          string          `json:"slug"`
-	Name          string          `json:"name"`
-	AgentRole     string          `json:"agent_role"`
-	Status        string          `json:"status"`
-	CLIAdapter    string          `json:"cli_adapter"`
-	MemoryEnabled bool            `json:"memory_enabled"`
-	Crew          *agentCrewShort `json:"crew"`
+	ID            string          `json:"id" yaml:"id"`
+	Slug          string          `json:"slug" yaml:"slug"`
+	Name          string          `json:"name" yaml:"name"`
+	AgentRole     string          `json:"agent_role" yaml:"agent_role"`
+	Status        string          `json:"status" yaml:"status"`
+	CLIAdapter    string          `json:"cli_adapter" yaml:"cli_adapter"`
+	MemoryEnabled bool            `json:"memory_enabled" yaml:"memory_enabled"`
+	Crew          *agentCrewShort `json:"crew" yaml:"crew"`
 }
 
 type agentCrewShort struct {
-	Name string `json:"name"`
-	Slug string `json:"slug"`
+	Name string `json:"name" yaml:"name"`
+	Slug string `json:"slug" yaml:"slug"`
 }
 
 type agentDetailResponse struct {
-	ID             string          `json:"id"`
-	Name           string          `json:"name"`
-	Slug           string          `json:"slug"`
-	AgentRole      string          `json:"agent_role"`
-	RoleTitle      *string         `json:"role_title"`
-	Status         string          `json:"status"`
-	CLIAdapter     string          `json:"cli_adapter"`
-	ToolProfile    string          `json:"tool_profile"`
-	MemoryEnabled  bool            `json:"memory_enabled"`
-	TimeoutSeconds int             `json:"timeout_seconds"`
-	CreatedAt      string          `json:"created_at"`
-	Crew           *agentCrewShort `json:"crew"`
+	ID             string          `json:"id" yaml:"id"`
+	Name           string          `json:"name" yaml:"name"`
+	Slug           string          `json:"slug" yaml:"slug"`
+	AgentRole      string          `json:"agent_role" yaml:"agent_role"`
+	RoleTitle      *string         `json:"role_title" yaml:"role_title"`
+	Status         string          `json:"status" yaml:"status"`
+	CLIAdapter     string          `json:"cli_adapter" yaml:"cli_adapter"`
+	ToolProfile    string          `json:"tool_profile" yaml:"tool_profile"`
+	MemoryEnabled  bool            `json:"memory_enabled" yaml:"memory_enabled"`
+	TimeoutSeconds int             `json:"timeout_seconds" yaml:"timeout_seconds"`
+	CreatedAt      string          `json:"created_at" yaml:"created_at"`
+	Crew           *agentCrewShort `json:"crew" yaml:"crew"`
 	// PaysWith is the provider login the agent's model is paid with (PRD
 	// provider-logins §10.3); null when nothing in its delivery pays for
 	// its adapter.
 	PaysWith *struct {
-		Provider     string     `json:"provider,omitempty"`
-		Restricted   bool       `json:"restricted,omitempty"`
-		CredentialID string     `json:"credential_id"`
-		Name         string     `json:"name"`
-		Login        *credLogin `json:"login"`
-	} `json:"pays_with"`
+		Provider     string     `json:"provider,omitempty" yaml:"provider,omitempty"`
+		Restricted   bool       `json:"restricted,omitempty" yaml:"restricted,omitempty"`
+		CredentialID string     `json:"credential_id" yaml:"credential_id"`
+		Name         string     `json:"name" yaml:"name"`
+		Login        *credLogin `json:"login" yaml:"login"`
+	} `json:"pays_with" yaml:"pays_with"`
 	// Schedule (cron) fields — the read side of the `agent update
 	// --schedule-*` flags. The API always returns these; surfacing them
 	// here lets an operator confirm a cron landed (and see last/next run)
 	// via the CLI instead of the raw API.
-	ScheduleCron    *string `json:"schedule_cron"`
-	SchedulePrompt  *string `json:"schedule_prompt"`
-	ScheduleEnabled bool    `json:"schedule_enabled"`
-	ScheduleLastRun *string `json:"schedule_last_run"`
-	ScheduleNextRun *string `json:"schedule_next_run"`
+	ScheduleCron    *string `json:"schedule_cron" yaml:"schedule_cron"`
+	SchedulePrompt  *string `json:"schedule_prompt" yaml:"schedule_prompt"`
+	ScheduleEnabled bool    `json:"schedule_enabled" yaml:"schedule_enabled"`
+	ScheduleLastRun *string `json:"schedule_last_run" yaml:"schedule_last_run"`
+	ScheduleNextRun *string `json:"schedule_next_run" yaml:"schedule_next_run"`
 	// WebhookRequireTimestamp is the read side of `agent update
 	// --webhook-require-timestamp` (#815).
-	WebhookRequireTimestamp bool `json:"webhook_require_timestamp"`
+	WebhookRequireTimestamp bool `json:"webhook_require_timestamp" yaml:"webhook_require_timestamp"`
 	// SuggestedPrompts is the read side of `agent update
 	// --suggested-prompts`: the agent's own chat suggestions, one per line.
 	// nil/empty means unconfigured, i.e. the chat shows the role defaults.
-	SuggestedPrompts *string `json:"suggested_prompts"`
+	SuggestedPrompts *string `json:"suggested_prompts" yaml:"suggested_prompts"`
 	// AskForms is the read side of `agent update --ask-forms`: the agent's
 	// questionnaires, as the canonical JSON document the server stored. Also
 	// what `agent ask-preview` renders from. Pointer: nil on servers
 	// predating the column, so the CLI stays silent rather than claiming the
 	// agent has none.
-	AskForms *string `json:"ask_forms"`
+	AskForms *string `json:"ask_forms" yaml:"ask_forms"`
 	// WebhookSecretSet reports whether a webhook signing secret is
 	// configured (#999). The value itself is show-once — obtain one via
 	// `agent rotate-webhook-secret`. Pointer: nil on servers predating
 	// the field, so the CLI can stay silent instead of claiming "none".
-	WebhookSecretSet *bool `json:"webhook_secret_set"`
+	WebhookSecretSet *bool `json:"webhook_secret_set" yaml:"webhook_secret_set"`
 	Count            struct {
-		Skills      int `json:"skills"`
-		Credentials int `json:"credentials"`
-	} `json:"_count"`
+		Skills      int `json:"skills" yaml:"skills"`
+		Credentials int `json:"credentials" yaml:"credentials"`
+	} `json:"_count" yaml:"_count"`
 }
 
 // refuseRetiredRole rejects --role COORDINATOR on agent create/update

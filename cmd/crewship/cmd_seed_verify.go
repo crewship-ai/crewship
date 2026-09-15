@@ -79,10 +79,10 @@ func init() {
 
 // verifyCheck is one row of the verdict table.
 type verifyCheck struct {
-	Pack   string `json:"pack"`
-	Step   string `json:"step"`
-	Result string `json:"result"` // PASS | FAIL | SKIP
-	Detail string `json:"detail,omitempty"`
+	Pack   string `json:"pack" yaml:"pack"`
+	Step   string `json:"step" yaml:"step"`
+	Result string `json:"result" yaml:"result"` // PASS | FAIL | SKIP
+	Detail string `json:"detail,omitempty" yaml:"detail,omitempty"`
 }
 
 const (
@@ -352,11 +352,11 @@ func (v *packVerifier) verifyRunHistory() {
 
 // verifyRunRecord is the part of a run record this command judges.
 type verifyRunRecord struct {
-	ID           string `json:"id"`
-	Status       string `json:"status"`
-	StartedAt    string `json:"started_at"`
-	FailedAtStep string `json:"failed_at_step"`
-	ErrorMessage string `json:"error_message"`
+	ID           string `json:"id" yaml:"id"`
+	Status       string `json:"status" yaml:"status"`
+	StartedAt    string `json:"started_at" yaml:"started_at"`
+	FailedAtStep string `json:"failed_at_step" yaml:"failed_at_step"`
+	ErrorMessage string `json:"error_message" yaml:"error_message"`
 }
 
 // describe names the run the way `crewship routine records <slug>` would, so
@@ -711,9 +711,9 @@ func (v *packVerifier) verifyInbox(run *cli.PipelineRunDetail) {
 	}
 	var list struct {
 		Rows []struct {
-			Title     string `json:"title"`
-			CreatedAt string `json:"created_at"`
-		} `json:"rows"`
+			Title     string `json:"title" yaml:"title"`
+			CreatedAt string `json:"created_at" yaml:"created_at"`
+		} `json:"rows" yaml:"rows"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&list); err != nil {
 		v.add("inbox", verifyFail, "inbox response: "+err.Error())
@@ -764,12 +764,12 @@ func (v *packVerifier) verifyPage(run *cli.PipelineRunDetail) {
 	// flat"); a flat run_id would decode to "" and fail every panel.
 	var page struct {
 		Panels []struct {
-			ID         string `json:"id"`
+			ID         string `json:"id" yaml:"id"`
 			Provenance struct {
-				RunID      string `json:"run_id"`
-				ProducedAt string `json:"produced_at"`
-			} `json:"provenance"`
-		} `json:"panels"`
+				RunID      string `json:"run_id" yaml:"run_id"`
+				ProducedAt string `json:"produced_at" yaml:"produced_at"`
+			} `json:"provenance" yaml:"provenance"`
+		} `json:"panels" yaml:"panels"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&page); err != nil {
 		v.add("page", verifyFail, "page response: "+err.Error())
@@ -815,10 +815,10 @@ func verifyRunRoutine(ctx context.Context, client *cli.Client, wsID, slug string
 		return nil, fmt.Errorf("run %s: %w", slug, err)
 	}
 	var started struct {
-		RunID     string `json:"run_id"`
-		ID        string `json:"id"`
-		PendingID string `json:"pending_id"`
-		Status    string `json:"status"`
+		RunID     string `json:"run_id" yaml:"run_id"`
+		ID        string `json:"id" yaml:"id"`
+		PendingID string `json:"pending_id" yaml:"pending_id"`
+		Status    string `json:"status" yaml:"status"`
 	}
 	if err := cli.ReadJSON(resp, &started); err != nil {
 		return nil, fmt.Errorf("run %s: %w", slug, err)
@@ -883,8 +883,8 @@ func newestRunSince(client *cli.Client, wsID, slug string, since time.Time) stri
 		return ""
 	}
 	var records []struct {
-		ID        string `json:"id"`
-		StartedAt string `json:"started_at"`
+		ID        string `json:"id" yaml:"id"`
+		StartedAt string `json:"started_at" yaml:"started_at"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&records); err != nil {
 		return ""
@@ -942,15 +942,15 @@ func verifyListCrews(client *cli.Client) (map[string]string, map[string]string, 
 		return nil, nil, err
 	}
 	type crew struct {
-		ID        string `json:"id"`
-		Slug      string `json:"slug"`
-		CreatedAt string `json:"created_at"`
+		ID        string `json:"id" yaml:"id"`
+		Slug      string `json:"slug" yaml:"slug"`
+		CreatedAt string `json:"created_at" yaml:"created_at"`
 	}
 	var rows []crew
 	if err := json.Unmarshal(body, &rows); err != nil {
 		var wrapped struct {
-			Crews []crew `json:"crews"`
-			Items []crew `json:"items"`
+			Crews []crew `json:"crews" yaml:"crews"`
+			Items []crew `json:"items" yaml:"items"`
 		}
 		if err2 := json.Unmarshal(body, &wrapped); err2 != nil {
 			return nil, nil, err
@@ -1105,10 +1105,10 @@ func githubScheduledTruth(ctx context.Context, repo, token string, maxStale time
 	}
 	var wfs struct {
 		Workflows []struct {
-			ID    int64  `json:"id"`
-			Name  string `json:"name"`
-			State string `json:"state"`
-		} `json:"workflows"`
+			ID    int64  `json:"id" yaml:"id"`
+			Name  string `json:"name" yaml:"name"`
+			State string `json:"state" yaml:"state"`
+		} `json:"workflows" yaml:"workflows"`
 	}
 	if err := githubGet(ctx, token, fmt.Sprintf("/repos/%s/actions/workflows?per_page=100", repo), &wfs); err != nil {
 		return truth, err
@@ -1119,9 +1119,9 @@ func githubScheduledTruth(ctx context.Context, repo, token string, maxStale time
 		}
 		var runs struct {
 			WorkflowRuns []struct {
-				Conclusion *string `json:"conclusion"`
-				CreatedAt  string  `json:"created_at"`
-			} `json:"workflow_runs"`
+				Conclusion *string `json:"conclusion" yaml:"conclusion"`
+				CreatedAt  string  `json:"created_at" yaml:"created_at"`
+			} `json:"workflow_runs" yaml:"workflow_runs"`
 		}
 		if err := githubGet(ctx, token, fmt.Sprintf("/repos/%s/actions/workflows/%d/runs?event=schedule&branch=main&per_page=5", repo, w.ID), &runs); err != nil {
 			return truth, err

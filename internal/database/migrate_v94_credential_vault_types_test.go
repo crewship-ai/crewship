@@ -1,11 +1,7 @@
 package database
 
 import (
-	"context"
 	"database/sql"
-	"log/slog"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -20,20 +16,7 @@ import (
 // applied) names exactly what regressed instead of blaming a
 // downstream insert.
 func TestMigrateV94_CredentialVaultTypes(t *testing.T) {
-	dir := t.TempDir()
-	db, err := Open("file:" + filepath.Join(dir, "v94.db"))
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	defer db.Close()
-
-	// Warn-level stderr logger so migration failures surface in `go
-	// test -v` output instead of disappearing into io.Discard — the
-	// project test convention for slog handlers in *_test.go.
-	migLogger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
-	if err := Migrate(context.Background(), db.DB, migLogger); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
+	db := openMigratedTestDB(t)
 
 	// Shared seed: workspaces + users + crews + agents only. Per-case
 	// inserts into credentials / agent_credentials live in each case

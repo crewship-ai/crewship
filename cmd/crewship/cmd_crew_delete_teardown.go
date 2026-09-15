@@ -47,11 +47,11 @@ func sidecarVolumeDisplayName(crewID, crewSlug, volume string) string {
 }
 
 type crewDeleteService struct {
-	Name    string `json:"name"`
-	Image   string `json:"image"`
+	Name    string `json:"name" yaml:"name"`
+	Image   string `json:"image" yaml:"image"`
 	Volumes []struct {
-		Name string `json:"name"`
-	} `json:"volumes"`
+		Name string `json:"name" yaml:"name"`
+	} `json:"volumes" yaml:"volumes"`
 }
 
 // crewSidecarDeleteWarning returns the extra paragraphs the delete confirmation
@@ -72,8 +72,8 @@ func crewSidecarDeleteWarning(client *cli.Client, crewID string) string {
 	}
 
 	var crew struct {
-		Slug         string `json:"slug"`
-		ServicesJSON string `json:"services_json"`
+		Slug         string `json:"slug" yaml:"slug"`
+		ServicesJSON string `json:"services_json" yaml:"services_json"`
 	}
 	if err := cli.ReadJSON(resp, &crew); err != nil {
 		return "Could not check this crew for sidecar services (" + err.Error() + ").\n" +

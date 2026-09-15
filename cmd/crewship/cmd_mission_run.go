@@ -195,8 +195,8 @@ var missionAddTaskCmd = &cobra.Command{
 		}
 
 		var created struct {
-			ID    string `json:"id"`
-			Title string `json:"title"`
+			ID    string `json:"id" yaml:"id"`
+			Title string `json:"title" yaml:"title"`
 		}
 		if err := cli.ReadJSON(resp, &created); err != nil {
 			return err

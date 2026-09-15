@@ -28,16 +28,16 @@ import (
 // renders are declared; --output json prints the decoded struct, so anything
 // added server-side that matters here needs a field here too.
 type attachmentItem struct {
-	ID          string `json:"id"`
-	Filename    string `json:"filename"`
-	ContentType string `json:"content_type"`
-	SizeBytes   int64  `json:"size_bytes"`
-	SHA256      string `json:"sha256"`
-	CreatedAt   string `json:"created_at"`
+	ID          string `json:"id" yaml:"id"`
+	Filename    string `json:"filename" yaml:"filename"`
+	ContentType string `json:"content_type" yaml:"content_type"`
+	SizeBytes   int64  `json:"size_bytes" yaml:"size_bytes"`
+	SHA256      string `json:"sha256" yaml:"sha256"`
+	CreatedAt   string `json:"created_at" yaml:"created_at"`
 
-	UploadedByUserID  *string `json:"uploaded_by_user_id"`
-	UploadedByAgentID *string `json:"uploaded_by_agent_id"`
-	UploadedByName    *string `json:"uploaded_by_name"`
+	UploadedByUserID  *string `json:"uploaded_by_user_id" yaml:"uploaded_by_user_id"`
+	UploadedByAgentID *string `json:"uploaded_by_agent_id" yaml:"uploaded_by_agent_id"`
+	UploadedByName    *string `json:"uploaded_by_name" yaml:"uploaded_by_name"`
 }
 
 // The paths below are written out with fmt.Sprintf at each call site rather than

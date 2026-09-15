@@ -21,13 +21,13 @@ import (
 )
 
 type pageAccessMeJSON struct {
-	Page        string   `json:"page"`
-	SubjectType string   `json:"subject_type"`
-	SubjectID   string   `json:"subject_id"`
-	Label       string   `json:"label"`
-	Paths       []string `json:"paths"`
-	Folder      string   `json:"folder"`
-	Shared      string   `json:"shared"`
+	Page        string   `json:"page" yaml:"page"`
+	SubjectType string   `json:"subject_type" yaml:"subject_type"`
+	SubjectID   string   `json:"subject_id" yaml:"subject_id"`
+	Label       string   `json:"label" yaml:"label"`
+	Paths       []string `json:"paths" yaml:"paths"`
+	Folder      string   `json:"folder" yaml:"folder"`
+	Shared      string   `json:"shared" yaml:"shared"`
 }
 
 // runPageAccessMe answers `page access <slug> --me`: the caller's own paths

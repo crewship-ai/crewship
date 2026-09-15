@@ -1,23 +1,13 @@
 package database
 
 import (
-	"context"
-	"path/filepath"
 	"testing"
 )
 
 // TestMigrationV118_GroupChat verifies the group-chat groundwork lands:
 // chat_participants table + chats.visibility + conversation_messages.author_user_id.
 func TestMigrationV118_GroupChat(t *testing.T) {
-	dir := t.TempDir()
-	db, err := Open("file:" + filepath.Join(dir, "v118.db"))
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	defer db.Close()
-	if err := Migrate(context.Background(), db.DB, newTestLogger()); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
+	db := openMigratedTestDB(t)
 
 	colExists := func(table, col string) bool {
 		rows, err := db.DB.Query("SELECT 1 FROM pragma_table_info(?) WHERE name = ?", table, col)

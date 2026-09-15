@@ -4,7 +4,6 @@ import (
 	"context"
 	"io"
 	"log/slog"
-	"path/filepath"
 	"testing"
 )
 
@@ -34,14 +33,7 @@ const backfillCrewContainerSizesVersion = 20260802155412
 func TestMigrateBackfillCrewContainerSizes(t *testing.T) {
 	silent := slog.New(slog.NewTextHandler(io.Discard, nil))
 	ctx := context.Background()
-	db, err := Open("file:" + filepath.Join(t.TempDir(), "backfill-sizes.db"))
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	defer db.Close()
-	if err := Migrate(ctx, db.DB, silent); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
+	db := openMigratedTestDB(t)
 
 	if _, err := db.Exec(`INSERT INTO workspaces (id, name, slug) VALUES ('ws1','Work','work')`); err != nil {
 		t.Fatalf("seed workspace: %v", err)

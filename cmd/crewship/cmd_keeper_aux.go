@@ -64,30 +64,30 @@ Examples:
 
 // The wire shapes mirror internal/api/admin_keeper_aux.go.
 type keeperAuxIntField struct {
-	Value    int64  `json:"value"`
-	Source   string `json:"source"`
-	Editable bool   `json:"editable"`
+	Value    int64  `json:"value" yaml:"value"`
+	Source   string `json:"source" yaml:"source"`
+	Editable bool   `json:"editable" yaml:"editable"`
 }
 
 type keeperAuxSlot struct {
-	Slot         string               `json:"slot"`
-	Label        string               `json:"label"`
-	Provider     keeperConfigStrField `json:"provider"`
-	Model        keeperConfigStrField `json:"model"`
-	TimeoutMS    keeperAuxIntField    `json:"timeout_ms"`
-	CredentialID keeperConfigStrField `json:"credential_id"`
+	Slot         string               `json:"slot" yaml:"slot"`
+	Label        string               `json:"label" yaml:"label"`
+	Provider     keeperConfigStrField `json:"provider" yaml:"provider"`
+	Model        keeperConfigStrField `json:"model" yaml:"model"`
+	TimeoutMS    keeperAuxIntField    `json:"timeout_ms" yaml:"timeout_ms"`
+	CredentialID keeperConfigStrField `json:"credential_id" yaml:"credential_id"`
 
-	Overridden bool   `json:"overridden"`
-	UpdatedAt  string `json:"updated_at"`
-	UpdatedBy  string `json:"updated_by"`
+	Overridden bool   `json:"overridden" yaml:"overridden"`
+	UpdatedAt  string `json:"updated_at" yaml:"updated_at"`
+	UpdatedBy  string `json:"updated_by" yaml:"updated_by"`
 }
 
 type keeperAuxConfig struct {
-	Slots         []keeperAuxSlot `json:"slots"`
-	Providers     []string        `json:"providers"`
-	JudgeProvider string          `json:"judge_provider"`
-	JudgeModel    string          `json:"judge_model"`
-	AnyOverridden bool            `json:"any_overridden"`
+	Slots         []keeperAuxSlot `json:"slots" yaml:"slots"`
+	Providers     []string        `json:"providers" yaml:"providers"`
+	JudgeProvider string          `json:"judge_provider" yaml:"judge_provider"`
+	JudgeModel    string          `json:"judge_model" yaml:"judge_model"`
+	AnyOverridden bool            `json:"any_overridden" yaml:"any_overridden"`
 }
 
 const keeperAuxPath = "/api/v1/admin/keeper/aux"
