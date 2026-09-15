@@ -81,6 +81,18 @@ type ProvisioningHandler struct {
 	// identical path — persistence, cross-run exclusivity, error
 	// classification — as a live send.
 	chatResumer ws.ChatHandler
+
+	// deferredResumes counts, per chat id, how many CONSECUTIVE completed
+	// builds resumed a deferred message only for HandleChatMessage to defer
+	// it to yet another build. Guarded by mu. Cleared the moment the message
+	// runs, is failed by its build, or the bound is reported; see
+	// resumeMessage and #2431 for the loop this bounds.
+	deferredResumes map[string]int
+
+	// resumeSleep waits for the back-off between two consecutive re-deferred
+	// resumes and reports false when ctx ended first. nil means a real timer;
+	// tests install a recorder so they never sleep for real.
+	resumeSleep func(ctx context.Context, d time.Duration) bool
 }
 
 // SetChatResumer wires the chat handler used to resume a deferred message once
@@ -89,6 +101,19 @@ type ProvisioningHandler struct {
 // after this handler in the server boot sequence (cmd/crewship/cmd_start.go).
 func (h *ProvisioningHandler) SetChatResumer(resumer ws.ChatHandler) {
 	h.chatResumer = resumer
+}
+
+// InvalidateImageCache drops the provisioner's memoised image list. The
+// bridge calls it when a crew container fails to start because the daemon
+// has no such image — the list said the tag existed and the daemon disagrees
+// — so the next Provision relists and rebuilds instead of reporting a cache
+// hit against nothing (#2431). Satisfies chatbridge's optional
+// imageCacheInvalidator capability; safe with no provisioner wired.
+func (h *ProvisioningHandler) InvalidateImageCache() {
+	if h == nil || h.provisioner == nil {
+		return
+	}
+	h.provisioner.InvalidateImageListCache()
 }
 
 func NewProvisioningHandler(

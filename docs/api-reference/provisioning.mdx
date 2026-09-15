@@ -184,7 +184,10 @@ Requires the `create` role action (OWNER, ADMIN, MANAGER). Returns 202 immediate
 **This builds an image. It does not start a container.** A completed provision
 leaves the crew's `cached_image` set and its container `stopped` — the container
 is created lazily on the crew's first agent run. On a cache hit the job reaches
-`completed` in seconds having started nothing at all.
+`completed` in seconds having started nothing at all. A cache hit is confirmed
+against the Docker daemon before it is reported: a `crewship-cache:*` tag
+removed outside Crewship (`docker rmi`, `docker system prune`) is rebuilt, not
+reported present from a stale image list.
 
 To start the container, call
 [`POST /api/v1/crews/{crewId}/container-start`](/api-reference/crews#start-container),

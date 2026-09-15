@@ -222,6 +222,32 @@ type imagePresenceChecker interface {
 	ImagePresentLocally(ctx context.Context, ref string) (bool, error)
 }
 
+// imageCacheInvalidator is the optional capability of a ProvisioningEnqueuer
+// that memoises the daemon's image list (api.ProvisioningHandler over
+// devcontainer.Provisioner). A crew container that fails to start on "no
+// such image" is the daemon contradicting that list — the tag was removed
+// under it — and the next provision must relist and rebuild instead of
+// reporting a cache hit against nothing (#2431). Optional so the stubs and
+// any enqueuer without a cache need not grow the method.
+type imageCacheInvalidator interface {
+	InvalidateImageCache()
+}
+
+// startFailedOnMissingImage reports whether a crew container start failed
+// because the daemon has no image to start from: the provider's own
+// "needs reprovisioning" classification, or the daemon's "No such image" /
+// "no such object" text where the provider passed the raw cause through.
+func startFailedOnMissingImage(code string, err error) bool {
+	if code == "image_missing" {
+		return true
+	}
+	if err == nil {
+		return false
+	}
+	lower := strings.ToLower(err.Error())
+	return strings.Contains(lower, "no such image") || strings.Contains(lower, "no such object")
+}
+
 // Bridge connects the WebSocket chat interface to the orchestrator, resolving
 // sessions, managing containers, persisting conversations, and streaming events.
 type Bridge struct {
@@ -922,6 +948,14 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 			// logs / the run record via the wrapped return below.
 			code, msg := classifyCrewRuntimeError(err)
 			b.logger.Warn("ensure crew runtime failed", "crew_slug", info.CrewSlug, "code", code, "error", err)
+			// The daemon has no such image: whatever the provisioner
+			// memoised about the local image set is wrong, and the next
+			// provision must not answer cache_hit from it (#2431).
+			if startFailedOnMissingImage(code, err) {
+				if inv, ok := b.provisioning.(imageCacheInvalidator); ok {
+					inv.InvalidateImageCache()
+				}
+			}
 			streamFn(ws.ChatEvent{Type: "error", Content: msg, Metadata: map[string]any{"code": code}})
 			return fmt.Errorf("ensure team runtime: %w", err)
 		}
