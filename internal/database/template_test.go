@@ -151,19 +151,6 @@ func copyMigratedTemplate(dst string) error {
 	return nil
 }
 
-// migratedTestDBPath returns the path of a fresh, not-yet-opened copy of the
-// migrated template inside the test's own temp dir. For tests that open the
-// file with their own DSN (a raw sql.Open with foreign keys off, a custom busy
-// timeout) — everything else wants openMigratedTestDB.
-func migratedTestDBPath(t *testing.T) string {
-	t.Helper()
-	path := filepath.Join(t.TempDir(), "migrated.db")
-	if err := copyMigratedTemplate(path); err != nil {
-		t.Fatalf("%v", err)
-	}
-	return path
-}
-
 // openMigratedTestDB returns a fresh database at schema head, opened through
 // Open with the given options, closed when the test ends. It is what a test
 // should reach for instead of Open + Migrate.
