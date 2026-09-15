@@ -283,6 +283,7 @@ var BackupTables = []string{
 	"composio_settings",          // workspace_id PK
 	"keeper_governance_settings", // workspace_id PK
 	"user_models",                // has workspace_id
+	"user_model_provenance",      // has workspace_id; FK users(id) — dumped after users; no FK on message_id by design
 
 	// Pages. Order is FK-safe and load-bearing: `pages` owns everything
 	// below it, `page_panels` must precede `page_panel_data`, and both

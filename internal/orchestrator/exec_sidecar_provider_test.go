@@ -379,6 +379,7 @@ func TestSidecarCredWireTags(t *testing.T) {
 		BaseURL:        "https://llm.example/v1",
 		Headers:        map[string]string{"X-Org": "acme"},
 		AgentIDs:       []string{"agt_a"},
+		GraceToken:     "tok-prev", GraceExpiresAt: "2026-01-02T00:00:00Z", GraceRotationID: "rot_1",
 	}
 	blob, err := json.Marshal(full)
 	if err != nil {
@@ -392,7 +393,8 @@ func TestSidecarCredWireTags(t *testing.T) {
 	want := map[string]bool{
 		"id": true, "provider": true, "token": true, "priority": true,
 		"lease_expires_at": true, "base_url": true, "headers": true,
-		"agent_ids": true,
+		"agent_ids":   true,
+		"grace_token": true, "grace_expires_at": true, "grace_rotation_id": true,
 	}
 	for k := range got {
 		if !want[k] {
