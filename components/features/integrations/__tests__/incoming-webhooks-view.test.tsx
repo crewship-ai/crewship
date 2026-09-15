@@ -180,6 +180,16 @@ describe("actual incoming surfaces", () => {
     ).not.toBeInTheDocument()
     expect(screen.getByText("/api/v1/page-webhooks/•••••")).toBeVisible()
   })
+  it("creates the default signed endpoint without opening advanced settings", async () => {
+    const d = data()
+    vi.mocked(d.hooks.create).mockResolvedValue({ ...hook, token: "once", signing_secret: "sign-once" })
+    mount(<IncomingCreateDialog workspaceId="ws" data={d} initialTarget={targets[0]} onClose={vi.fn()} onCreated={vi.fn()} />)
+    expect(screen.queryByRole("combobox", { name: "Webhook format" })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Create endpoint" }))
+    await waitFor(() => expect(d.hooks.create).toHaveBeenCalledWith(expect.objectContaining({ ingress_profile: "crewship", target_pipeline_id: "r1" })))
+    expect(await screen.findByTestId("incoming-receiving-url")).toHaveTextContent("/api/v1/webhooks/once")
+    expect(screen.getByText("sign-once")).toBeVisible()
+  })
   it("creates a Page endpoint with an absolute receiving URL from the real form", async () => {
     vi.mocked(apiFetch).mockImplementation(async (_url, init) => new Response(JSON.stringify(
       init?.method === "POST"
@@ -219,7 +229,9 @@ describe("actual incoming surfaces", () => {
         onCreated={done}
       />,
     )
-    fireEvent.keyDown(screen.getByRole("combobox", { name: "Sender" }), {
+    expect(screen.queryByRole("combobox", { name: "Webhook format" })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Advanced settings", exact: true }))
+    fireEvent.keyDown(screen.getByRole("combobox", { name: "Webhook format" }), {
       key: "ArrowDown",
     })
     fireEvent.click(

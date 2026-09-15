@@ -66,7 +66,9 @@ export async function incomingWebhookFlow(page: Page) {
     await dialog
       .getByRole("textbox", { name: "Endpoint name" })
       .fill(`${slug} GitHub`)
-    await dialog.getByRole("combobox", { name: "Sender" }).click()
+    await expect(dialog.getByRole("combobox", { name: "Webhook format" })).toHaveCount(0)
+    await dialog.getByRole("button", { name: "Advanced settings", exact: true }).click()
+    await dialog.getByRole("combobox", { name: "Webhook format" }).click()
     await page.getByRole("option", { name: "GitHub pull requests" }).click()
     const createdResponse = page.waitForResponse(
       (r) =>

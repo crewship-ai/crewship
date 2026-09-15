@@ -2,7 +2,8 @@
 
 import { IncomingTargetAvatar } from "../incoming-target-avatar"
 import * as React from "react"
-import { Copy, Plus } from "lucide-react"
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
+import { ChevronDown, Copy, Plus } from "lucide-react"
 import { toast } from "sonner"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Button } from "@/components/ui/button"
@@ -302,23 +303,33 @@ export function IncomingCreateDialog({
               </CreateSurfaceField>
             )}
             {kind === "routine" && (
-              <CreateSurfaceField
-                label="Sender"
-                hint="GitHub: use JSON, Pull requests events and the signing secret shown after creation."
-              >
-                <Select
-                  value={profile}
-                  onValueChange={(v) => setProfile(v as "crewship" | "github")}
-                >
-                  <SelectTrigger aria-label="Sender">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="crewship">Crewship signature</SelectItem>
-                    <SelectItem value="github">GitHub pull requests</SelectItem>
-                  </SelectContent>
-                </Select>
-              </CreateSurfaceField>
+              <Collapsible className="space-y-3">
+                <CollapsibleTrigger asChild>
+                  <Button variant="ghost" size="sm" className="group px-0 text-muted-foreground">
+                    <ChevronDown className="size-3.5 transition-transform group-data-[state=open]:rotate-180" />
+                    Advanced settings{profile === "github" ? " · GitHub" : ""}
+                  </Button>
+                </CollapsibleTrigger>
+                <CollapsibleContent>
+                  <CreateSurfaceField
+                    label="Webhook format"
+                    hint="Use the default for signed JSON requests. For GitHub pull requests, select GitHub and copy the secret into GitHub's webhook settings."
+                  >
+                    <Select
+                      value={profile}
+                      onValueChange={(v) => setProfile(v as "crewship" | "github")}
+                    >
+                      <SelectTrigger aria-label="Webhook format">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="crewship">Signed JSON (default)</SelectItem>
+                        <SelectItem value="github">GitHub pull requests</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </CreateSurfaceField>
+                </CollapsibleContent>
+              </Collapsible>
             )}
             {kind === "page" && (
               <CreateSurfaceField
