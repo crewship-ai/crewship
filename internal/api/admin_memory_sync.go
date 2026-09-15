@@ -231,12 +231,29 @@ func (h *AdminMemorySyncHandler) run(w http.ResponseWriter, r *http.Request, swe
 	dryRun := req.DryRun != nil && *req.DryRun
 	ctx := r.Context()
 
+	// Scope. The route's roleManage gate is the SESSION workspace's, so a
+	// named workspace is checked again against the caller's role THERE —
+	// an ADMIN of one tenant naming another gets the same 404 as an
+	// unknown slug, so the reply confirms nothing. Omitting the workspace
+	// sweeps every active tenant: that is the scheduled run, and it sits
+	// behind the same gate as the other instance-wide admin operations
+	// (reencrypt, backups, prune-legacy-resources), deliberately.
 	var workspaces []string
 	if req.WorkspaceID != "" {
 		id, err := activeWorkspaceID(ctx, h.db, req.WorkspaceID)
 		if err != nil {
 			replyInternalError(w, h.logger, "resolve workspace for memory sweep", err)
 			return
+		}
+		if id != "" {
+			manages, err := userManagesWorkspace(ctx, h.db, UserFromContext(ctx), id)
+			if err != nil {
+				replyInternalError(w, h.logger, "check workspace role for memory sweep", err)
+				return
+			}
+			if !manages {
+				id = ""
+			}
 		}
 		if id == "" {
 			replyError(w, http.StatusNotFound, fmt.Sprintf("workspace %q not found", req.WorkspaceID))
@@ -362,4 +379,24 @@ func activeWorkspaceID(ctx context.Context, db *sql.DB, idOrSlug string) (string
 		return "", err
 	}
 	return id, nil
+}
+
+// userManagesWorkspace reports whether the user holds a manage-tier role
+// (OWNER or ADMIN) in the given workspace — the same bar roleManage sets on
+// the session workspace, re-applied to a workspace the request named.
+func userManagesWorkspace(ctx context.Context, db *sql.DB, u *AuthUser, workspaceID string) (bool, error) {
+	if u == nil || u.ID == "" {
+		return false, nil
+	}
+	var role string
+	err := db.QueryRowContext(ctx,
+		`SELECT role FROM workspace_members WHERE workspace_id = ? AND user_id = ?`,
+		workspaceID, u.ID).Scan(&role)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return role == "OWNER" || role == "ADMIN", nil
 }

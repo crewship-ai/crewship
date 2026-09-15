@@ -36,7 +36,10 @@ func memorySyncFixture(t *testing.T, db *sql.DB) {
 		`INSERT INTO users (id, email, full_name) VALUES ('admin-1', 'admin@example.com', 'Admin')`,
 		`INSERT INTO users (id, email) VALUES ('u1', 'u1@example.com'), ('u2', 'u2@example.com')`,
 		`INSERT INTO workspaces (id, name, slug) VALUES ('ws1', 'WS One', 'ws-one'), ('ws2', 'WS Two', 'ws-two')`,
-		`INSERT INTO workspace_members (id, workspace_id, user_id, role) VALUES ('wm1', 'ws1', 'admin-1', 'OWNER')`,
+		`INSERT INTO users (id, email) VALUES ('admin-a', 'admin-a@example.com')`,
+		`INSERT INTO workspace_members (id, workspace_id, user_id, role) VALUES
+		   ('wm1', 'ws1', 'admin-1', 'OWNER'), ('wm2', 'ws2', 'admin-1', 'ADMIN'),
+		   ('wm3', 'ws1', 'admin-a', 'OWNER'), ('wm4', 'ws2', 'admin-a', 'MEMBER')`,
 		`INSERT INTO crews (id, workspace_id, name, slug) VALUES ('cr1', 'ws1', 'Ops', 'ops'), ('cr2', 'ws2', 'Other', 'other')`,
 		`INSERT INTO agents (id, workspace_id, crew_id, name, slug, agent_role) VALUES
 		   ('a1', 'ws1', 'cr1', 'Dev', 'dev', 'AGENT'), ('a2', 'ws2', 'cr2', 'Ops', 'ops', 'AGENT')`,
@@ -293,6 +296,23 @@ func TestAdminMemorySync_WorkspaceFilter(t *testing.T) {
 			tc.serve(h)(rr, memorySyncReq("OWNER", tc.path, `{"workspace_id": "nope"}`))
 			if rr.Code != http.StatusNotFound {
 				t.Errorf("unknown workspace: status = %d, want 404; body=%s", rr.Code, rr.Body.String())
+			}
+
+			// The session gate is ws1's. Naming ws2 is checked against the
+			// caller's role in ws2: admin-a is OWNER of ws1 but only a
+			// MEMBER of ws2, so the reply is the unknown-slug 404 and ws2
+			// is not swept — an admin of one tenant cannot run, or count,
+			// another tenant's sweep.
+			before := tc.indexRows(t, db, "ws2")
+			rr = httptest.NewRecorder()
+			req := memorySyncReq("OWNER", tc.path, `{"workspace_id": "ws-two"}`)
+			req = req.WithContext(context.WithValue(req.Context(), ctxUser, &AuthUser{ID: "admin-a"}))
+			tc.serve(h)(rr, req)
+			if rr.Code != http.StatusNotFound {
+				t.Errorf("cross-tenant: status = %d, want 404; body=%s", rr.Code, rr.Body.String())
+			}
+			if got := tc.indexRows(t, db, "ws2"); got != before {
+				t.Errorf("cross-tenant: ws2 index rows %d -> %d; the sweep ran", before, got)
 			}
 
 			// The session selector alone: every active workspace, as the

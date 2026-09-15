@@ -50,8 +50,9 @@ package api
 // author on pipeline_versions and a comment's author on mission_comments are
 // NOT NULL beside an author_type. For author_type='user' the id becomes the
 // empty string — the row keeps saying "a human wrote this" and stops saying
-// which one. Both readers of mission_comments tolerate an author that
-// resolves to nobody (they COALESCE the display name).
+// which one. All three readers of mission_comments tolerate an author that
+// resolves to nobody: the comment list and the internal issue view COALESCE
+// the display name, and pendingFollowUpsFor scans it into a NullString.
 //
 // # Why the issue's "revoke" column ends up mostly anonymised
 //
