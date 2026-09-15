@@ -1318,7 +1318,7 @@ and `offset` page through the rows.
 | `task` | string | The task text as dispatched. |
 | `status` | string | `PENDING`, `QUEUED`, `RUNNING`, `COMPLETED`, `FAILED`, `CANCELLED`. |
 | `assigned_by_name` / `assigned_by_slug` | string | The dispatching agent. |
-| `assigned_to_name` / `assigned_to_slug` | string \| null | The assignee, when one was resolved. |
+| `assigned_to_name` / `assigned_to_slug` | string | The assignee. |
 | `result_summary` | string \| null | Set on completion. |
 | `error_message` | string \| null | Set on failure. |
 | `queued_reason` | `"crew_budget"` \| `"agent_busy"` \| omitted | Why a `QUEUED` row is waiting (#2269): `crew_budget` — the crew's concurrency budget was full when the row was dispatched, and the queue pump will claim it FIFO as budget frees; `agent_busy` — the assignee already had a live run, so the dispatch was parked behind it and is drained by the completion pump. Omitted (stored `NULL`) on every other status. `crewship crew status` renders it as `QUEUED (agent_busy)`. |

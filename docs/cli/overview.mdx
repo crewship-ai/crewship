@@ -736,8 +736,11 @@ unchanged. The population is closed and guarded
 | `issue update`, `issue comment`, `issue start`, `issue stop`, `issue review` | The updated issue (or the comment), same shape as `issue get`. |
 | `issue delete` | `{"identifier", "id", "deleted": true}` — synthesised, because the server answers `204` with no body. |
 
-Every other mutation is a bare receipt whose real answer is the exit code; `-f json`
-on those prints nothing on stdout.
+Mutations outside this table are not on the guarded contract. Most are a bare receipt
+whose real answer is the exit code and print nothing on stdout under `-f json`; a few
+(`admin gdpr delete`, `backup self-test`, `backup rotate`, …) already render a
+receipt object. Do not script against the machine output of a
+mutation that is not in the table — check the command's own page first.
 
 ## Resolving resource references
 

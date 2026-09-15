@@ -30,7 +30,10 @@ import (
 	"github.com/crewship-ai/crewship/internal/testutil"
 )
 
-const quickActionsWorkspaceID = "cqaws000000000000001"
+const (
+	quickActionsWorkspaceID    = "cqaws000000000000001"
+	quickActionsApprovalReason = "acceptance: pending approval must be visible"
+)
 
 // startQuickActionsServer seeds one workspace with an OWNER and a MEMBER
 // (each holding a CLI token) and one pending approval, then returns a CLI
@@ -68,7 +71,7 @@ func startQuickActionsServer(t *testing.T) (ownerCfg, memberCfg, approvalID stri
 		WorkspaceID: quickActionsWorkspaceID,
 		RequestedBy: "qa-owner",
 		Kind:        harbormaster.KindCustom,
-		Reason:      "acceptance: pending approval must be visible",
+		Reason:      quickActionsApprovalReason,
 	})
 	if err != nil {
 		t.Fatalf("enqueue approval: %v", err)
@@ -151,6 +154,11 @@ func TestAcceptance_QuickActions_PendingApprovalsAreListed(t *testing.T) {
 		}
 		if !strings.Contains(human, approvalID) {
 			t.Errorf("%s: human render does not list approval %s:\n%s", cmdName, approvalID, human)
+		}
+		// The row has no title; the line must carry what it does have —
+		// the kind and the reason — or it reads as "apr_… •".
+		if !strings.Contains(human, "custom: "+quickActionsApprovalReason) {
+			t.Errorf("%s: human render does not show the approval's kind and reason:\n%s", cmdName, human)
 		}
 		if strings.Contains(human, "[partial]") {
 			t.Errorf("%s: human render carries a [partial] line:\n%s", cmdName, human)

@@ -333,7 +333,7 @@ func TestMeCmdRunE_BareArrayFallback(t *testing.T) {
 	stub := covSetupCli5(t)
 	flagFormat = "json"
 
-	// missions returns a bare array — exercises the second-decode fallback.
+	// missions returns a bare array — exercises fetchRows's bare-array arm.
 	stub.OnGet("/api/v1/missions", clitest.JSONResponse(200,
 		[]map[string]any{{"id": "mis_bare", "title": "Bare"}}))
 	stub.OnGet("/api/v1/approvals", clitest.JSONResponse(200, map[string]any{"rows": []map[string]any{}}))

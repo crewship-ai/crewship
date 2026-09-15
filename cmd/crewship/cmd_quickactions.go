@@ -254,7 +254,9 @@ func renderMe(missions, approvals, runs []map[string]any, errs []string) error {
 	}
 	fmt.Printf("\n%s━━ Approvals waiting on you ━━%s  (%d)\n", cli.Bold, cli.Reset, len(approvals))
 	for _, a := range approvals {
-		fmt.Printf("  %s • %s  %s%s%s\n", str(a["id"]), str(a["title"]), cli.Yellow, str(a["status"]), cli.Reset)
+		// An approvals_queue row (harbormaster.Request) carries kind and
+		// reason, not a title; print what it has.
+		fmt.Printf("  %s • %s: %s  %s%s%s\n", str(a["id"]), str(a["kind"]), str(a["reason"]), cli.Yellow, str(a["status"]), cli.Reset)
 	}
 	fmt.Printf("\n%s━━ Your recent runs ━━%s  (%d)\n", cli.Bold, cli.Reset, len(runs))
 	for _, r := range runs {
@@ -324,7 +326,7 @@ func renderNow(runs, agents, approvals []map[string]any, capacity runtimeCapacit
 	fmt.Printf("\n%sAgents:%s %d idle, %d busy\n", cli.Bold, cli.Reset, idle, busy)
 	fmt.Printf("\n%sPending approvals:%s %d\n", cli.Bold, cli.Reset, len(approvals))
 	for _, a := range approvals {
-		fmt.Printf("  %s • %s\n", str(a["id"]), str(a["title"]))
+		fmt.Printf("  %s • %s: %s\n", str(a["id"]), str(a["kind"]), str(a["reason"]))
 	}
 
 	// Held-for-capacity goes LAST and loud when non-empty: it is the one

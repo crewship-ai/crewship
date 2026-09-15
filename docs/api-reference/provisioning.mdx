@@ -192,7 +192,9 @@ reported present from a stale image list.
 A chat message that arrives while the crew is unstartable is parked on the
 build and resumed when it completes. If the completed build still leaves the
 image missing from the daemon, the message is deferred to another build — with
-a 2 s, then 4 s back-off — and after **3** consecutive rebuilds it gives up:
+a back-off of 2 s, then 4 s, each plus a random jitter of up to one step (so
+several chats deferred by the same pruned image do not re-enqueue in lock
+step; capped at 30 s) — and after **3** consecutive rebuilds it gives up:
 the session receives a streamed `error` event whose `metadata` carries
 `reason: "provisioning_loop"` and `rebuilds: 3`, followed by `done`, and the
 message is not retried. Check the server logs and `docker images` for whatever
