@@ -39,9 +39,14 @@ type onboardingProposalAgentOut struct {
 
 // onboardingProposalPayloadOut mirrors internal/api.onboardingProposalPayload.
 type onboardingProposalPayloadOut struct {
-	CrewName     string                       `json:"crew_name" yaml:"crew_name"`
-	CrewSlug     string                       `json:"crew_slug" yaml:"crew_slug"`
+	CrewName string `json:"crew_name" yaml:"crew_name"`
+	CrewSlug string `json:"crew_slug" yaml:"crew_slug"`
+	// CrewIcon / CrewColor are the look the proposal will give the crew —
+	// both optional, both pointers so an absent value is omitted rather
+	// than rendered as "". crew_color was missing here from the day the
+	// server started sending it (#2305), so `-f json` silently dropped it.
 	CrewIcon     *string                      `json:"crew_icon,omitempty" yaml:"crew_icon,omitempty"`
+	CrewColor    *string                      `json:"crew_color,omitempty" yaml:"crew_color,omitempty"`
 	TemplateSlug string                       `json:"template_slug" yaml:"template_slug"`
 	LLMProvider  string                       `json:"llm_provider,omitempty" yaml:"llm_provider,omitempty"`
 	LLMModel     string                       `json:"llm_model,omitempty" yaml:"llm_model,omitempty"`
@@ -93,6 +98,15 @@ func onboardingProposalDetailPairs(p onboardingProposalOut) [][]string {
 	if p.Payload.LLMModel != "" {
 		pairs = append(pairs, []string{"Model Override", p.Payload.LLMProvider + " / " + p.Payload.LLMModel})
 	}
+	// The look the approval card renders. Shown only when set: a proposal
+	// with no custom look inherits the default, and an empty row would
+	// read as "chosen, and blank".
+	if p.Payload.CrewIcon != nil && *p.Payload.CrewIcon != "" {
+		pairs = append(pairs, []string{"Crew Icon", *p.Payload.CrewIcon})
+	}
+	if p.Payload.CrewColor != nil && *p.Payload.CrewColor != "" {
+		pairs = append(pairs, []string{"Crew Color", *p.Payload.CrewColor})
+	}
 	if p.AppliedAt != nil {
 		pairs = append(pairs, []string{"Applied At", *p.AppliedAt})
 	}
@@ -122,6 +136,8 @@ conversational-onboarding.md §5.6).`,
 		crewName, _ := flags.GetString("crew-name")
 		templateSlug, _ := flags.GetString("template-slug")
 		crewSlug, _ := flags.GetString("crew-slug")
+		crewIcon, _ := flags.GetString("crew-icon")
+		crewColor, _ := flags.GetString("crew-color")
 		llmProvider, _ := flags.GetString("llm-provider")
 		llmModel, _ := flags.GetString("llm-model")
 
@@ -156,6 +172,16 @@ conversational-onboarding.md §5.6).`,
 		}
 		if crewSlug != "" {
 			body["crew_slug"] = crewSlug
+		}
+		// Sent as typed, not validated here: the server owns the icon
+		// vocabulary and the colour palette (internal/api/crew_icons.go)
+		// and DROPS an unknown value rather than refusing the proposal. A
+		// CLI-side list would refuse a name the server had since learned.
+		if crewIcon != "" {
+			body["crew_icon"] = crewIcon
+		}
+		if crewColor != "" {
+			body["crew_color"] = crewColor
 		}
 		if llmProvider != "" {
 			body["llm_provider"] = llmProvider
@@ -331,6 +357,8 @@ func init() {
 	onboardingProposalCreateCmd.Flags().String("template-slug", "", "crew_templates slug to derive the roster from (or use --agent)")
 	onboardingProposalCreateCmd.Flags().StringArray("agent", nil, "Name a roster agent as \"Name:Role\" (repeatable, 1-6; alternative to --template-slug)")
 	onboardingProposalCreateCmd.Flags().String("crew-slug", "", "Crew slug override (defaults to a slugified crew name)")
+	onboardingProposalCreateCmd.Flags().String("crew-icon", "", "Icon for the crew card (a name from the web icon set, e.g. shield, rocket, code); unknown names are dropped server-side")
+	onboardingProposalCreateCmd.Flags().String("crew-color", "", "Colour for the crew card: a palette id (blue, emerald, violet, amber, rose, cyan, lime, fuchsia) or a 6-digit hex; unknown values are dropped server-side")
 	onboardingProposalCreateCmd.Flags().String("llm-provider", "", "Model override provider: ANTHROPIC|OPENAI|GOOGLE|CURSOR|FACTORY|OLLAMA (default ANTHROPIC)")
 	onboardingProposalCreateCmd.Flags().String("llm-model", "", "Model override — applied only to agents matching --llm-provider (Phase 1: template + model swap)")
 
