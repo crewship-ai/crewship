@@ -222,7 +222,14 @@ export function InputsForm({
         <div
           key={f.name}
           data-input-name={f.name}
-          onBlurCapture={() => validateField(f.name)}
+          onBlurCapture={(event) => {
+            // Rendering a new error while a form action is receiving focus can
+            // move that button between pointerdown and click, especially on phones.
+            // Submission validates every field; reset/cancel own their action.
+            const target = event.relatedTarget
+            if (target instanceof HTMLElement && target.closest("button") && formRef.current?.contains(target)) return
+            validateField(f.name)
+          }}
           className="space-y-1"
         >
           <FormField

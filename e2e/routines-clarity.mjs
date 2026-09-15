@@ -163,6 +163,33 @@ try {
     assert.equal(await repeat.getByLabel("Coverage", { exact: true }).inputValue(), "0.7")
     await repeat.getByRole("button", { name: "Cancel", exact: true }).click()
   }
+  const failureDefinition = structuredClone(definition)
+  failureDefinition.name = slug + "-failure"
+  failureDefinition.steps.push({
+    id: "verify",
+    name: "Check acceptance example",
+    type: "transform",
+    transform: {
+      input: "{{ inputs.coverage }}",
+      expression: 'if . == 0 then error("Acceptance example needs attention") else . end',
+    },
+  })
+  await publish(failureDefinition)
+  const failedStart = await request("POST", api + "/pipelines/" + failureDefinition.name + "/run", { inputs: { coverage: 0 } }, 202)
+  const failedId = failedStart.run_id || failedStart.id
+  report.runs.push(failedId)
+  let failedRun
+  for (let attempt = 0; attempt < 50; attempt++) {
+    failedRun = await request("GET", api + "/pipeline-runs/" + failedId)
+    if (failedRun.status === "failed") break
+    await page.waitForTimeout(200)
+  }
+  assert.equal(failedRun.status, "failed")
+  assert(failedRun.step_outputs.echo)
+  await page.goto(base + "/routines?slug=" + failureDefinition.name + "&run=" + failedId)
+  await page.getByRole("link", { name: "inspect retained results and recorded steps" }).click()
+  await page.getByTestId("run-next-step").waitFor()
+  report.checks.push("Failed second step retains first output and exposes recovery guidance")
   assert.equal(report.pageErrors.length, 0)
   report.checks.push("No browser page errors")
 } catch (error) {
