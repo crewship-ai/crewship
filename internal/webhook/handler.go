@@ -116,6 +116,30 @@ type Acceptance struct {
 	Reason string
 }
 
+// AcceptedReceipt is the 202 body serveAcceptance writes for a delivery that
+// produced (or, on a re-delivery, re-identified) work — §5's receipt shape.
+// IgnoredReceipt is the 200 body for a valid ping or a filtered event. Both are
+// named types rather than map literals so the OpenAPI schema for the trigger
+// route (FinalWebhookFire) can be held to them by
+// internal/api/openapi_schema_keys_test.go; the spec described {run_id,
+// status} for this route for months after the durable path replaced it.
+type AcceptedReceipt struct {
+	DeliveryID string `json:"delivery_id"`
+	WorkID     string `json:"work_id"`
+	// Status is the work's current state — "queued" unless a re-delivery
+	// found the original already further along.
+	Status    string `json:"status"`
+	Duplicate bool   `json:"duplicate"`
+}
+
+// IgnoredReceipt — see AcceptedReceipt. Reason is omitted when the filter gave
+// none, so a client must not rely on its presence.
+type IgnoredReceipt struct {
+	Status     string `json:"status"`
+	DeliveryID string `json:"delivery_id"`
+	Reason     string `json:"reason,omitempty"`
+}
+
 // AcceptFunc records a delivery and the work it produces, durably, and returns
 // the receipt. Everything it does must be database work: §5's I1 is that no 202
 // is written before the commit, and the corollary is that nothing outside the
@@ -468,11 +492,7 @@ func (h *Handler) serveAcceptance(w http.ResponseWriter, r *http.Request, crewID
 	// filter decision to be auditable rather than invisible.
 	if acc.Ignored {
 		w.WriteHeader(http.StatusOK)
-		out := map[string]any{"status": "ignored", "delivery_id": acc.DeliveryID}
-		if acc.Reason != "" {
-			out["reason"] = acc.Reason
-		}
-		_ = json.NewEncoder(w).Encode(out)
+		_ = json.NewEncoder(w).Encode(IgnoredReceipt{Status: "ignored", DeliveryID: acc.DeliveryID, Reason: acc.Reason})
 		return
 	}
 
@@ -481,11 +501,11 @@ func (h *Handler) serveAcceptance(w http.ResponseWriter, r *http.Request, crewID
 		state = "queued"
 	}
 	w.WriteHeader(http.StatusAccepted)
-	_ = json.NewEncoder(w).Encode(map[string]any{
-		"delivery_id": acc.DeliveryID,
-		"work_id":     acc.WorkID,
-		"status":      state,
-		"duplicate":   acc.Duplicate,
+	_ = json.NewEncoder(w).Encode(AcceptedReceipt{
+		DeliveryID: acc.DeliveryID,
+		WorkID:     acc.WorkID,
+		Status:     state,
+		Duplicate:  acc.Duplicate,
 	})
 	h.logger.Info("webhook accepted", "crew_id", crewID, "agent_id", agentID,
 		"delivery_id", acc.DeliveryID, "work_id", acc.WorkID, "duplicate", acc.Duplicate)
