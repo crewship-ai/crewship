@@ -69,7 +69,7 @@ Both columns are nullable: most approvals and waitpoints (a credential use, an o
 
 `user_notification_prefs.state` has allowed `'digest'` since the notification-preferences schema shipped, but nothing ever wrote it (F30) — `SUCCEEDED` and `NO_CHANGE` outcomes create no inbox item on their own (the two hard rules of §12), so they were only ever visible in the Journal. `internal/inbox.StartDigestScheduler` closes that: every few hours it summarizes each workspace's quiet runs from the last rolling day into one refreshed `message`-kind card (`payload.subkind = "digest"`), skipping any workspace with nothing to report. This is about **what's in the product inbox**, not the separate (and still-unwritten) question of batching *external* channel delivery for users who set a category's preference to `digest` — the same setting name, a different, larger piece of work.
 
-Chat-reply items get priority placement: under Smart grouping they form their own **Agent replies** group directly beneath *Decisions needed* (never buried in FYI), and each row shows an **Open chat** quick action on hover that deep-links straight into the session — continue the conversation in one click; opening it clears the item.
+Chat-reply items get their own place: in the **Updates** view they form the **Replies & results** section above everything else, and the open item carries an **Open chat** button that deep-links straight into the session — continue the conversation in one click; opening it clears the item.
 
 Items are **written by source-of-truth handlers**, not synthesised by the inbox. So:
 
@@ -83,7 +83,7 @@ The inbox is a **projection**, not a queue. The authoritative state lives on the
 
 ## States
 
-The lifecycle is **unread → read → resolved**, surfaced through three tabs with **Gmail-style** semantics: opening a row marks it read but **keeps it in your inbox** — it only leaves when you **Archive** it.
+The lifecycle is **unread → read → resolved**, surfaced through the three views (**Needs action**, **Updates**, **History**) with **Gmail-style** semantics: opening a row marks it read but **keeps it in your inbox** — it only leaves when you decide it or **Archive** it.
 
 ```
 unread ──(click row)──> read ──(Archive / action)──> resolved
@@ -91,9 +91,9 @@ unread ──(click row)──> read ──(Archive / action)──> resolved
    └──────────────── "Mark unread" / "Restore" ──────────┘
 ```
 
-- **Inbox** (default tab) shows everything that isn't archived — unread *and* read. Clicking a row marks it read in place; it does **not** disappear. This is the fix for "I clicked a message, clicked away, and lost it."
-- **Unread** is a filter, not the default. **Archived** is the resolved bucket.
-- **Archive** is the Gmail move: clear a row from the inbox without recording a decision. It maps to `resolved` with `resolved_action="archived"`, shows an **Undo** toast, and is restorable from the Archived tab (or with `crewship inbox unread <id>`). Archive is offered on non-decision rows (messages, failed-run notices, advisories) **and on keeper-synthetic escalations** (skill review / memory health) — those have no backing escalations row and thus no source endpoint, so the inbox row is the only handle. A real waitpoint/agent escalation is source-managed and still needs an explicit Approve/Deny/Resolve.
+- **Needs action** and **Updates** together show everything that isn't resolved — unread *and* read. Clicking a row marks it read in place; it does **not** disappear. This is the fix for "I clicked a message, clicked away, and lost it."
+- **Unread only** is a filter, not the default. **History** is the resolved bucket, split into *Decisions* and *Archived*.
+- **Archive** is the Gmail move: clear a row from the inbox without recording a decision. It maps to `resolved` with `resolved_action="archived"`, and is restorable from History — **Restore** in the item's menu — or with `crewship inbox unread <id>`. Archive is offered on non-decision rows (messages, failed-run notices, advisories) **and on keeper-synthetic escalations** (skill review / memory health) — those have no backing escalations row and thus no source endpoint, so the inbox row is the only handle. A real waitpoint/agent escalation is source-managed and still needs an explicit Approve/Deny/Resolve.
 - Resolving via an action button (Approve, Deny, Retry, Cancel, Dismiss) stores the shape on `resolved_action` so the audit trail shows *what* you decided, not just that you closed it.
 - "Mark unread" flips a row back; "Restore" un-archives. The bell count and sidebar badge both react.
 
@@ -108,62 +108,51 @@ unread ──(click row)──> read ──(Archive / action)──> resolved
 
 ## The /inbox page
 
-A two-pane layout:
+Two columns, on the same explorer shell Routines, Issues and Crews use:
 
 | Pane | Purpose |
 |------|---------|
-| Left list (460 px) | The column carries its own chrome: **search** + **Select** on one row, then the **Inbox / Unread / Archived** tabs with **Filter** and **Display**. Rows are one line of title and one line of everything else — subject, category, and either the relative time or, for a waitpoint, **how long is left**. Groups are collapsible, and **Decisions needed** is pinned above the rest whatever arrived last. |
-| Right detail | The decision first, then the evidence: a **decision card** with the countdown and the action buttons, a definition strip (subject / crew / category / arrived), for waitpoints a `WaitpointRunDetail` block showing which step is paused, a **rendered-markdown body**, and a humanised **Context** card with credential-looking values masked behind a reveal toggle. |
+| Left column (280 px, collapsible) | **Search** and a **Filter** popover on one row; then the three **views** — **Needs action**, **Updates**, **History** — each with its count; then a **crew** selector. A row is the sender's avatar (an agent's own face, a coloured glyph for a routine or the system), the title, `crew · agent` and the age — or, for a decision, **expires in …**, red inside the hour. A decision row also carries a kind pill (Question · Link · Credential · Hire · Approval · Failed run · Missed run · Paused schedule · Memory proposal · Needs a human · Access request · Skill proposal · Routine proposal); a History row carries the outcome instead (Approved, Denied, Retry started, Archived, …). |
+| Reading pane | Never blank. With nothing open it is the **triage**: *Waiting for you* (with **Open oldest**), *Updates*, *By crew* — click a crew to narrow the list — and *Recent history*. With a row open it shows that item. On a phone the list gives way to the open item and **← Back to inbox** returns. |
 
-**Filter** holds the facets — the smart **buckets** (Decisions needed, Agent replies, Ready for review, Routine progress, Everything else) and a **subject** picker; in the Archived view it swaps to **outcome**, **decided by** and **period**, because those are the questions an archive answers and the live buckets mean nothing over resolved rows. Whatever is applied shows as a removable chip under the toolbar, so a filter can never hide inside a closed menu. **Display** holds grouping (Smart buckets / Category / Subject / Nothing) and sort (Newest / Oldest / **Expiring first**).
+The page header reads *N need you · N updates · N in history* with a **Live** pill while the realtime socket is connected. When one of the sources (inbox events, approval gates, mission signals) cannot be read, a banner says the inbox may be incomplete and offers **Retry** — the pane never pretends an empty feed means nothing is waiting.
 
-The **subject** is who the row is ABOUT, not who sent it: ten producers write their rows as `sender_type=system` ("Keeper", "Skill Curator") while carrying `agent_name` in the payload, so keying identity off the sender alone put a system glyph on "casey requested GH_TOKEN". Identity follows one rule everywhere — **a square is a machine, a circle is a person** — which matters most in the archive, where casey (agent) asked and pavel (user) approved sit in the same row.
+**Views.** *Needs action* is every row waiting on a person: inbox decisions, pending approval-gate rows (owners and admins only — `GET /api/v1/approvals` needs that role, so other members simply see no gate rows) and issue tasks that are blocked or ready for review. *Updates* holds the rest of what is open in two sections, **Replies & results** (your agents' chat replies) and **Important updates**; a **Mark all read** action sits on the section header. *History* holds resolved rows under **Decisions** and **Archived**. The page opens on Needs action when anything is waiting there, otherwise on Updates, and a live arrival never switches the view you are reading.
 
-The subject picker **searches the workspace roster**, not the loaded rows. A facet built from the page can only offer an agent while they are noisy, and going quiet is usually why you go looking for one.
+**Filter** holds three facets, each option with its count: **Type** (the seven inbox kinds plus *Approval gate* and *Mission signal*), **Deadline** (Within the hour / Today / No deadline) and **Unread only**. Whatever is applied shows as a removable chip under the toolbar, and a filtered list that matches nothing offers **Clear**. Search matches the title, the body, and agent and crew names. The URL carries the state — `?view=action|updates|history`, `?kind=<type>`, `?item=<id>` (an inbox item *or* an approval id) and `?agent=<name>` for a search — so a link from the bell, a chat or a run opens the right row.
 
-Search covers `body_md` as well as the title and sender — the sentence someone remembers is usually in the message.
+Every waitpoint carries `timeout_at`, and both the row and the decision card **count down** to it — in minutes, then hours, then days — because a day-long default rendered as "1428m" is a figure nobody converts in their head.
 
-**Selection**: **Select** turns on checkboxes, a click ticks one row and **shift-click takes the range** between the anchor and the target, walking the flattened *visible* order so a range inside one group cannot sweep in the collapsed groups between them.
+Decisions are gated by the role the **server** enforces, not by what the UI feels like offering. `/api/v1/workspaces/{ws}/pipelines/waitpoints/{token}/approve` and the escalation lifecycle are `roleCreate` (MANAGER and up); `/api/v1/skills/proposed/approve` and `/api/v1/consolidate/proposed/{id}/approve` are `roleManage` (OWNER/ADMIN only). When the caller cannot decide, the card **names who can** ("An owner or admin decides this", never a role enum) instead of handing them a button that answers 403 — and the rows themselves are addressed to the role that can act, a pairing `TestInboxTargetRoleMatchesDecider` reads out of the source and requires to agree.
 
-Every waitpoint carries `timeout_at`, and both the row and the decision card **count down** to it — in minutes, then hours, then days, because a day-long default rendered as "1428m" is a figure nobody converts in their head. `Expiring first` sorts on the same field.
+### The reading pane
 
-Decisions are gated by the role the **server** enforces, not by what the UI feels like offering. `/api/v1/workspaces/{ws}/pipelines/waitpoints/{token}/approve` and the escalation lifecycle are `roleCreate` (MANAGER and up); `/api/v1/skills/proposed/approve` and `/api/v1/consolidate/proposed/{id}/approve` are `roleManage` (OWNER/ADMIN only). When the caller cannot decide, the card **names who can** instead of handing them a button that answers 403 — and the rows themselves are addressed to the role that can act, a pairing `TestInboxTargetRoleMatchesDecider` reads out of the source and requires to agree.
+The detail names things. The header is the sender — the agent's face and name (a link to the agent), the crew (icon and name, a link) and the arrival time — with a **⋯** menu for **Mark unread**, **Archive** or **Restore**. Below it a decision opens on its **decision card**: the kind pill, the attention badge, the question without the server's "Agent escalation:" prefix, what is being asked for, and the buttons. There are no cuids and no field captions; identifiers become a **Where this came from** row of links — the chat the escalation was raised in, the run it paused, the issue, the routine, the crew. A **LINK** escalation shows **What you are approving** — the https address, its host and an **Open link** button; a credential proposal shows the credential's name. Then, collapsed: **How the run got here** (a `WaitpointRunDetail` block showing which step is paused, waitpoints only) and **Additional context** — the payload as a humanised key/value card, with credential-looking values masked behind a reveal toggle.
 
-The detail panel's action row is what the source-of-truth call hangs off:
+The action row is what the source-of-truth call hangs off:
 
-- **Waitpoints** show **Approve** + **Deny**. Both hit `/api/v1/workspaces/{ws}/pipelines/waitpoints/{token}/approve`; the boolean `approved` in the body disambiguates. (An empty body decoded to `approved=false` because Go's `json.Unmarshal` gives bools their zero value when absent — the inbox always sends the explicit value.)
+- **Waitpoints** show **Approve** + **Deny**. Both hit `/api/v1/workspaces/{ws}/pipelines/waitpoints/{token}/approve`; the boolean `approved` in the body disambiguates. (An empty body decoded to `approved=false` because Go's `json.Unmarshal` gives bools their zero value when absent — the inbox always sends the explicit value.) A staged **hire** additionally gets **Approve hire**, **Deny** and **Open crew** — see [Approving an ephemeral hire](#approving-an-ephemeral-hire).
+- **Approval-gate rows** (the `/approvals` queue, merged into the same feed) show **Approve** + **Deny** with an optional comment for the audit record; a decided row shows its outcome, who decided ("by you" / "by a person") and when.
 - **Failed runs** show **Retry** + **Cancel**. Retry replays the routine's `inputs_json`. If the payload is missing a `pipeline_slug` for some reason, the row falls back to "cancelled" rather than getting wedged.
 - **Escalations** split two ways. A **real agent escalation** (carries an `escalation_type` and a backing `escalations` row) shows **Approve** / **Reject** — the decision is recorded through the escalation lifecycle, and the inbox just mirrors it. A **keeper-synthetic escalation** (skill review, memory health — `kind=escalation` but no backing row, so no `/escalations/{id}/resolve` endpoint) has no inline decision; the detail points you at **Archive** to clear it. These are the one escalation type the inbox lets you dismiss directly, because there is no source to defer to.
-- **Messages** with an `issue_identifier` in payload show **Open &lt;identifier&gt;** as a direct link into `/issues/&lt;id&gt;`.
+- **Messages** with a chat deep link show **Open chat**; with an `issue_identifier` in payload they show **Open &lt;identifier&gt;** as a direct link into `/issues/&lt;id&gt;`.
 
-When a row is resolved, the detail panel dims, the action row replaces itself with a "Resolved Xm ago · approved" line (or "Archived Xm ago · Restore" for archived rows), and the row moves to the **Archived** tab.
+After a decision the pane replaces itself with a confirmation card — the outcome ("Approved", "Retry started", "Schedule re-enabled", …), the item's title and "the record stays in History" — with **Next to review · N** when more decisions are waiting, **View record** and **Back to inbox**. The decided row moves to **History**; opened from there, a resolved item dims and its footer reads "Resolved 5m ago · approved" (or "Archived …", with **Restore** in the menu).
 
-## The /inbox-v2 page
+A deep link to a row that has been decided elsewhere, archived or belongs to another workspace says so — *That item is no longer in your inbox* — rather than opening the first row in the list with an armed Approve button.
 
-The redesigned inbox (the **Inbox** entry in the rail; `/inbox` above is the older surface) follows the UI contract in `docs/ux/README.md` and the audit in `docs/ux/audit-conversations.md`:
-
-- **A page header** like every other page: Inbox · "94 need you · 0 updates · 9 decided" · a **Live** pill only while the realtime socket is connected · **History** · **Decide next**, which opens the oldest item waiting on you.
-- **A row is a decision, not a log line.** A kind pill (Question · Link · Credential · Hire · Approval · Failed run · Missed run · Paused schedule · Memory proposal · Reply · Issue), the question without the server's "Agent escalation:" prefix, the crew by name and colour, the agent by name, the age — or the expiry, in red inside the hour — and a verb: **Answer**, **Grant**, **Review**, **Approve**, **Retry**, **Run now**, **Re-enable**. In History the pill is the outcome (Approved, Rejected, Expired, Archived).
-- **The reading pane is never blank.** With nothing open it carries the triage: how many are waiting and how many expire today, the approvals, the crews asking (click one to narrow the list), what is live, the Updates line, and the last five decisions with their outcomes. With zero items it is the same card in its zero form, saying what lands here and linking to Routines and Crews.
-- **The detail names things.** The identity strip is the agent (face, name, role — a link to the agent), the crew (dot, name — a link), the kind as a pill and the arrival time. There are no cuids and no field captions; the identifiers become a **Where this came from** row of links: the chat the escalation was raised in, the run it paused, the issue, the routine, the crew. A **LINK** escalation shows **What you are approving** — the https address, its host and an **Open link** button. A credential proposal shows the credential's name. Card headings say what is asked: "Question from an agent", "A link to open", "Credential request". Who may decide reads "An owner or admin decides this", never a role enum.
-- **A staged hire has Deny.** The hire lands as a waitpoint here and as a row in the approvals queue; the inbox finds the queue twin (its payload names the inbox item) and wires its deny to the card, next to **Approve hire** and **Open crew**.
-- **Empty columns say what lands there** and link to where it comes from; a filtered column that matches nothing offers **Clear**.
-
+The **subject** is who the row is ABOUT, not who sent it: ten producers write their rows as `sender_type=system` ("Keeper", "Skill Curator") while carrying `agent_name` in the payload, so keying identity off the sender alone put a system glyph on "casey requested GH_TOKEN". Identity follows one rule everywhere — **a square is a machine, a circle is a person** — which matters most in History, where casey (agent) asked and pavel (user) approved sit in the same row.
 
 The inbox is the one surface that aggregates messages from every agent, routine, and curator — so it's also where raw machine output and leaked secrets would otherwise pile up. Several guards keep it human-readable and safe:
 
 - **Sender avatars.** When the sender is a **real agent**, the row and detail header render that agent's **actual avatar** — the same DiceBear seed/style its agent card uses, so "casey escalated…" reads as Casey's face. The List/Get responses fill `avatar_seed` + `avatar_style` for agent senders via a batched lookup against the `agents` table (no schema change, works retroactively). Non-agent senders (crew / pipeline / system) fall back to a coloured glyph keyed on `sender_type`, so an agent message stays visually distinct from a routine failure.
-- **Rendered bodies, not blobs.** `body_md` is rendered as markdown (`MarkdownContent`), and the `payload` is shown as a humanised key/value **Context** card instead of a raw `JSON.stringify` dump.
+- **Rendered bodies, not blobs.** `body_md` is rendered as markdown (`MarkdownContent`), and the `payload` is shown as a humanised key/value **Additional context** card instead of a raw `JSON.stringify` dump.
 - **Sanitised advisories.** Curator routines (skill review, memory health) used to paste the gatekeeper's internal decision text — e.g. `Keeper LLM unavailable: paymaster: workspace_id required — deny by default` — straight into the body. `inbox.SanitizeReason` now swaps that for a friendly line and keeps the raw text in `payload.raw_reason` for operators. When the cause is an infrastructure outage (curator LLM down), a **pure advisory is suppressed entirely** rather than written once per crew per sweep — this killed the recurring "Memory health advisory" flood.
 - **Secret redaction.** `inbox.RedactSecrets` masks credential material (connection strings, `password=…`, bearer tokens, high-entropy blobs) before it reaches `body_md`, so an agent escalation that quotes a generated `redis://:…@…` URL never broadcasts the secret to every MANAGER. CREDENTIAL-type escalations additionally lead with an explicit "secret handled in the credential flow" note. The source-of-truth row (escalations / credentials table) still holds the real value behind its own ACL; the UI also masks any remaining secret-looking Context values behind a reveal toggle.
 
-### Grouping & bulk triage
+### Grouped notices and bulk operations
 
-Once the list gets long, flat newest-first ordering stops scaling. **Display** groups the list by **Smart buckets** (the default), **Category**, **Subject**, or nothing at all. Smart buckets keep a fixed order with *Decisions needed* first: insertion order would put whichever bucket the newest row happened to land in at the top, so the one thing blocking an agent could sit below routine chatter purely because nothing had been decided in a while. Grouping is **client-side** — it re-buckets the rows already loaded, no extra fetch.
-
-Each group is a collapsible folder with a count in its header. A group-header checkbox selects the whole group (and renders **indeterminate** when only some rows under it are checked); per-row checkboxes select individuals. When you collapse a group or switch filters, off-screen checked ids are pruned from the selection so the counts in the bulk bar stay honest.
-
-With anything selected, a **bulk bar** appears: **Mark read** and **Resolve** apply across the whole selection in one request (`POST /api/v1/inbox/bulk`) rather than a PATCH per row.
+Advisory escalations without an `escalation_type` (curator sweeps, service incidents) are **grouped** in Updates: one row per sender and title prefix, opening on a *Grouped system incident* card that lists the related notices and offers **Archive N updates** plus a link to System Health. That button, and **Mark all read** on the Updates section, are the two callers of `POST /api/v1/inbox/bulk` — there are no checkboxes or per-row multi-select on the page; a decision item is still resolved one at a time from its own card.
 
 <Warning>
 Bulk **Resolve** never silently closes a decision item. If the selection contains any `waitpoint` / `escalation` row or any `blocking=true` row, a confirmation dialog spells out how many items will be left open and resolves only the dismissable remainder. If the *entire* selection is decision items, there is no **Resolve** action at all — open each one individually and act on its source. **Mark read** is always one click and closes nothing. Even if a client bypasses these guards, the [server backstop](/api-reference/inbox#post-/api/v1/inbox/bulk) skips the same rows, so a real decision item can never be resolved by the bulk path. The one exception, applied identically client- and server-side, is a keeper-synthetic escalation (`kind=escalation`, no backing `escalations` row): it has no source to defer to, so bulk **Resolve** clears it instead of skipping it.
@@ -172,7 +161,7 @@ Bulk **Resolve** never silently closes a decision item. If the selection contain
 A row whose `kind` is an unknown value renders as a generic notification (hardened fallback) instead of crashing the row — new server-side kinds degrade gracefully in an older UI.
 
 <Warning>
-`GET /api/v1/inbox` is `LIMIT 100` (500 max) with **no cursor**. The Archived view is therefore the most recent window, not the whole history, and any count computed from the loaded page describes that window. This is why the tabs show a number only for the list actually loaded — unread excepted, since it comes from `/inbox/count`, the same source the bell badge reads. Per-state counts and a cursor are the fix.
+`GET /api/v1/inbox` answers `limit` (100 by default, 500 max) and `offset` with **no cursor**. The web page walks the whole list in pages of 500 on load, so History is complete but grows with the workspace; a script that reads one page sees the most recent window only, and any count it computes describes that window. The unread count on the bell comes from `/inbox/count`, not from the loaded rows.
 </Warning>
 
 ## Realtime
@@ -256,17 +245,7 @@ The Inbox folds all four into one feed. `/approvals` still exists for the worksp
 
 When an operator (or a LEAD agent via the sidecar `/spawn` endpoint) runs `crewship hire` against a `guided`-autonomy crew, the agent row is created with `status='PENDING_REVIEW'` instead of `IDLE`. The chatbridge **refuses to start the agent** in this state — see [`internal/chatbridge/bridge.go`](https://github.com/crewship-ai/crewship/blob/main/internal/chatbridge/bridge.go). A `waitpoint`-kind inbox row lands at the same time so the operator has one place to approve.
 
-The row in the inbox UI:
-
-```
-┌─ Inbox · Pending ─────────────────────────────────────┐
-│ ⏳ Hire pending review                                 │
-│    incident-responder-a3f8 hired into on-call         │
-│    "P1 incident #4582 needs sustained eyes-on"        │
-│    [Approve hire]    "To deny, fire the agent from   │
-│                       its crew page."                 │
-└───────────────────────────────────────────────────────┘
-```
+The card in the inbox UI (kind pill **Hire**) shows the agent, the crew it was hired into, the reason given, and three buttons: **Approve hire**, **Deny** and **Open crew**.
 
 The **Approve hire** button calls `POST /api/v1/agents/{agentId}/approve-hire`. The handler does four things atomically:
 
@@ -275,12 +254,9 @@ The **Approve hire** button calls `POST /api/v1/agents/{agentId}/approve-hire`. 
 3. Journal entry `agent.hire_approved` with the actor's user_id
 4. WebSocket broadcast `agent.hire_approved` so the agent canvas + crew roster repaint instantly
 
-There's intentionally **no Deny button** today. To deny a pending hire, the operator opens the crew page and fires the agent (`DELETE /api/v1/agents/{id}`) — same path as deleting any agent. Two reasons:
+**Deny** goes through the other half of the same decision: a staged hire is one decision in two places — this waitpoint and a `kind=ephemeral_hire` row in the approvals queue whose payload names the inbox item. The inbox finds that queue twin and wires its deny to the card, so pressing Deny calls `POST /api/v1/approvals/{id}/decide` with `denied` (the same call as `crewship approvals deny`). The staged agent ghosts immediately (`expired_at = now`, the terminal state the TTL sweeper writes — the audit trail stays and the crew's ephemeral slot frees up; `crewship rehire` can bring it back), and the waitpoint resolves with `action=denied`. Both transitions are conditional on `status='PENDING_REVIEW'`, so a decision racing the legacy `hire approve` path cannot clobber an already-live agent.
 
-- Avoids a second backend code path with its own audit semantics for the same effect
-- Forces the operator to look at the crew context before rejecting (a "deny" button in the inbox is easy to click mid-coffee; firing requires opening the crew and seeing what's there)
-
-A symmetric "Deny" button is tracked as a UX follow-up — see [`gh issue list --label needs-design`](https://github.com/crewship-ai/crewship/labels/needs-design).
+When the page cannot find the twin — an older server, or the queue row has not arrived yet — the card has no Deny and instead says *To deny, fire the agent from its crew page*, with the crew linked: firing (`DELETE /api/v1/agents/{id}`) is the same path as deleting any agent.
 
 ### Network-failure handling
 
