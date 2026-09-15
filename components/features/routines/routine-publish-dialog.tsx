@@ -302,7 +302,7 @@ export function RoutinePublishDialog({ open, onOpenChange, workspaceId, routine,
                     {" "}and <b className="font-medium">{impact.latest} {impact.latest === 1 ? "schedule" : "schedules"}</b> following the latest version
                   </>
                 )}{" "}
-                use v{next} from the next start.
+                {impact.latest > 0 ? "use" : "uses"} v{next} from the next start.
               </li>
               {impact.pinned > 0 && (
                 <li>
@@ -311,7 +311,9 @@ export function RoutinePublishDialog({ open, onOpenChange, workspaceId, routine,
               )}
               <li>• Pinned one-time starts keep the version they were scheduled with.</li>
               <li>
-                • {activeRuns > 0 ? `${activeRuns} running or waiting ${activeRuns === 1 ? "run keeps" : "runs keep"}` : "Running or waiting runs keep"} v{routine.head_version ?? 0}; nothing in progress changes.
+                {routine.head_version
+                  ? `• ${activeRuns > 0 ? `${activeRuns} running or waiting ${activeRuns === 1 ? "run keeps" : "runs keep"}` : "Running or waiting runs keep"} v${routine.head_version}; nothing in progress changes.`
+                  : "• Nothing has run yet, so nothing in progress is affected."}
               </li>
               {routine.head_version ? <li>• v{routine.head_version} stays in Versions and can be restored as a draft.</li> : null}
             </ul>
