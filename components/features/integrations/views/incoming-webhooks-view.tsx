@@ -20,6 +20,7 @@ import { KpiCard } from "@/components/features/dashboard/kpi-card"
 import { usePageWebhooks, usePageWebhookRevoke } from "@/hooks/use-page-sharing"
 import {
   INCOMING_KINDS,
+  resolveIncomingTarget,
   type IncomingEndpoint,
   type IncomingSection,
   type IncomingTarget,
@@ -44,7 +45,7 @@ export function IncomingWebhooksView({
   data,
   section,
   search,
-  targetSlug,
+  targetId,
   onSelect,
   onBack,
   onAdd,
@@ -53,7 +54,7 @@ export function IncomingWebhooksView({
   data: IncomingData
   section: IncomingSection
   search: string
-  targetSlug: string | null
+  targetId: string | null
   onSelect: (t: IncomingTarget) => void
   onBack: () => void
   onAdd: (t?: IncomingTarget) => void
@@ -66,9 +67,7 @@ export function IncomingWebhooksView({
     title: string
     run: () => Promise<void>
   } | null>(null)
-  const target = data.targets.find(
-    (t) => t.slug === targetSlug && t.kind === section,
-  )
+  const target = resolveIncomingTarget(data.targets, section, targetId)
   const run = async (fn: () => Promise<void>) => {
     setBusy(true)
     setFailure(null)
@@ -125,7 +124,7 @@ export function IncomingWebhooksView({
   )
   return (
     <>
-      {targetSlug && !target && !data.loading ? (
+      {targetId && !target && !data.loading ? (
         <div className="p-4 md:p-6">
           <IncomingError
             message="This target is unavailable in the current workspace."

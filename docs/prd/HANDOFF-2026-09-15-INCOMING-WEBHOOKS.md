@@ -243,3 +243,34 @@ internal/api and internal/database hit the default 10-minute timeout. A repeat o
 those entire packages with a 20-minute timeout and private tmpfs GOTMPDIR is
 running in /tmp/incoming-simple-go-recheck.log. Do not call the whole suite green
 until that exit result is observed. No Go source changed in this UI follow-up.
+
+## Closing review follow-up (2026-09-15, after 9a45d1bb)
+
+PR #2554 merged as f94a1ec3. #2558 is the remaining PR; main through
+0122583b was merged cleanly before this follow-up. Its previous CI
+34993639592 failed Go Shuffle in TestAcceptanceRoutineTypedDecisionHTTP:
+the approved run remained waiting. That run is not a green verification.
+
+Reviewed fixes: workspace switches clear entity-specific URL selection while
+initial deep links survive; target selection uses stable IDs (legacy slugs are
+accepted and canonicalized); agents without crews cannot create endpoint rows.
+The CLI help describes generated HMAC secrets, and CLI URL construction retains
+the GitHub profile suffix. GitHub endpoints reject the legacy route even with a
+valid signature and ignore non-PR event headers before receipt acceptance.
+Snapshot test writers wait for a successful commit, retry transient errors, and
+cancel/join on a bounded timeout instead of failing on the first lock collision.
+
+The shuffled acceptance failure exposed a lost wakeup: approval could read a
+running row before MarkWaiting, or attempt to re-acquire a still-live run ID.
+Approval/signal resume now waits on the shared registry's execution lifetime
+before inspecting the persisted state. The HTTP acceptance fixture now wires
+the shared registry as cmd_start does. A real SQLite regression forces approval
+between the pending-status read and parking. With the old resume implementation
+it fails; the fixed implementation completes the downstream transform. A second
+case exercises a parked row whose lifetime fence is still held; only the first
+case is mutation-discriminating.
+
+At this entry, all 143 Integrations tests, targeted GitHub API tests and the race
+pipeline resume/registry family passed. The full Go/vet and frontend/lint/build
+runs are in progress; final exit results must be recorded separately. These are
+local code tests, not new real-provider or dev2 delivery evidence.

@@ -11,6 +11,7 @@ import { IncomingWebhooksView } from "../views/incoming-webhooks-view"
 import { IncomingCreateDialog } from "../views/incoming-credentials"
 import {
   incomingRows,
+  resolveIncomingTarget,
   incomingExplorer,
   type IncomingTarget,
 } from "../incoming-model"
@@ -89,7 +90,7 @@ function view(
       data={d}
       section={section}
       search=""
-      targetSlug={targetSlug}
+      targetId={targetSlug}
       onSelect={vi.fn()}
       onBack={vi.fn()}
       onAdd={vi.fn()}
@@ -104,6 +105,14 @@ beforeEach(() => {
 })
 
 describe("incoming explorer model", () => {
+  it("keeps ID selection after rename and excludes endpoints with no crew", () => {
+    const renamed = {...targets[1], slug: "renamed", crew_id: undefined}
+    expect(resolveIncomingTarget([renamed], "agent", "a1")).toBe(renamed)
+    expect(resolveIncomingTarget(targets, "agent", "pepa")).toBe(targets[1])
+    expect(incomingRows([renamed], [])).toEqual([])
+    expect(incomingExplorer([renamed], [], "agent", "").items[0].id).toBe("agent:a1")
+  })
+
   it("counts targets with endpoints once and does not invent Page totals", () => {
     const model = incomingExplorer(
       targets,
@@ -117,7 +126,7 @@ describe("incoming explorer model", () => {
       ["agent", 1],
       ["page", "per Page"],
     ])
-    expect(model.items.find((i) => i.id === "agent:pepa")).toMatchObject({
+    expect(model.items.find((i) => i.id === "agent:a1")).toMatchObject({
       label: "Pepa",
       dot: "bg-success",
     })

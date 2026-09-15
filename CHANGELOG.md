@@ -15,6 +15,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 
 ### Fixed
+- Approval or signal delivery arriving while a routine is parking waits for the original execution to release its slot before resuming, preventing a decided run from remaining stuck in waiting.
 - Incoming webhooks use the shared Integrations explorer, overview and endpoint detail on desktop and phones. Creation opens from Add integration, target links survive reload, and Refresh reloads endpoints and receipts. Agent catalogs report whether a signing key is configured without exposing it; paged catalogs are fully read before counting endpoints.
 - Pages management and denied data writes return the same not-found response for hidden and missing pages; explicit folder edit grants now explain that they also apply to workspace Viewers.
 - Routine results use the database's 30-second contention budget when recording a completed step, instead of failing after five seconds while waiting for a connection. This records the existing execution; it does not repeat the action.

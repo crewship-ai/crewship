@@ -81,7 +81,7 @@ export function incomingRows(
     routine: h,
   }))
   for (const t of targets.filter(
-    (t) => t.kind === "agent" && t.webhook_secret_set,
+    (t) => t.kind === "agent" && t.webhook_secret_set && !!t.crew_id,
   ))
     rows.push({
       id: t.id,
@@ -127,7 +127,7 @@ export function incomingExplorer(
         `${t.name} ${t.slug}`.toLowerCase().includes(search.toLowerCase()),
     )
     .map((t) => ({
-      id: `${t.kind}:${t.slug}`,
+      id: `${t.kind}:${t.id}`,
       label: t.name,
       leading: createElement(IncomingTargetAvatar, { target: t }),
       sublabel: `${t.kind} · ${t.slug}`,
@@ -138,4 +138,10 @@ export function incomingExplorer(
         : "bg-muted-foreground/40",
     }))
   return { sections, items }
+}
+
+// Accept old slug links, but canonicalize selection to the persistent row ID.
+export function resolveIncomingTarget(targets: IncomingTarget[], kind: IncomingSection, value: string | null) {
+  return targets.find(t => t.kind === kind && t.id === value)
+    ?? targets.find(t => t.kind === kind && t.slug === value)
 }

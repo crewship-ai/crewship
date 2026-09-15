@@ -168,23 +168,28 @@ func TestSnapshotMechanisms_HotDatabase(t *testing.T) {
 				}
 				stop := make(chan struct{})
 				firstWrite := make(chan error, 1)
+				writerCtx, cancelWriter := context.WithCancel(t.Context())
+				var lastWriteError error
 				var wg sync.WaitGroup
 				wg.Add(1)
 				go func() {
 					defer wg.Done()
+					signalled := false
 					for i := 0; ; i++ {
 						select {
 						case <-stop:
 							return
 						default:
 						}
-						_, writeErr := writer.Exec(
+						_, writeErr := writer.ExecContext(writerCtx,
 							`INSERT INTO journal_entries (id, workspace_id, entry_type, summary, payload)
 							 VALUES (?,?,?,?,?)`,
 							fmt.Sprintf("live-%d", i), "ws-1", "test", "written during snapshot",
 							fmt.Sprintf(`{"run_id":"run-live-%d"}`, i))
-						if i == 0 {
-							firstWrite <- writeErr
+						lastWriteError = writeErr
+						if writeErr == nil && !signalled {
+							firstWrite <- nil
+							signalled = true
 						}
 						if writeErr != nil {
 							// Lock contention is expected and not the point of
@@ -194,15 +199,18 @@ func TestSnapshotMechanisms_HotDatabase(t *testing.T) {
 					}
 				}()
 				cleanup := func() {
+					cancelWriter()
 					close(stop)
 					wg.Wait()
 					writer.Close()
 				}
 				// Observe a committed write instead of guessing when the
 				// goroutine has started. It continues writing during the copy.
-				if err := <-firstWrite; err != nil {
+				select {
+				case <-firstWrite:
+				case <-time.After(10 * time.Second):
 					cleanup()
-					t.Fatalf("first journal commit before snapshot: %v", err)
+					t.Fatalf("first journal commit before snapshot: %v", lastWriteError)
 				}
 				return cleanup
 			},
@@ -379,23 +387,28 @@ func TestSnapshotBeforeMigrate_WhileServerWrites(t *testing.T) {
 	defer writer.Close()
 	stop := make(chan struct{})
 	firstWrite := make(chan error, 1)
+	writerCtx, cancelWriter := context.WithCancel(t.Context())
+	var lastWriteError error
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
+		signalled := false
 		for i := 0; ; i++ {
 			select {
 			case <-stop:
 				return
 			default:
 			}
-			_, writeErr := writer.Exec(
+			_, writeErr := writer.ExecContext(writerCtx,
 				`INSERT INTO journal_entries (id, workspace_id, entry_type, actor_type, summary, payload)
 				 VALUES (?,?,?,?,?,?)`,
 				fmt.Sprintf("live-%d", i), "ws-1", "test", "system", "written during snapshot",
 				fmt.Sprintf(`{"run_id":"run-%d"}`, i))
-			if i == 0 {
-				firstWrite <- writeErr
+			lastWriteError = writeErr
+			if writeErr == nil && !signalled {
+				firstWrite <- nil
+				signalled = true
 			}
 			if writeErr != nil {
 				time.Sleep(time.Millisecond)
@@ -405,13 +418,17 @@ func TestSnapshotBeforeMigrate_WhileServerWrites(t *testing.T) {
 	// Establish the row that the snapshot must preserve. A fixed delay can
 	// expire before the first commit on a busy disk, making an empty but
 	// consistent snapshot look corrupt. The writer keeps running afterwards.
-	if err := <-firstWrite; err != nil {
+	select {
+	case <-firstWrite:
+	case <-time.After(10 * time.Second):
+		cancelWriter()
 		close(stop)
 		wg.Wait()
-		t.Fatalf("first journal commit before snapshot: %v", err)
+		t.Fatalf("first journal commit before snapshot: %v", lastWriteError)
 	}
 
 	snapErr := SnapshotBeforeMigrate(ctx, db, logger)
+	cancelWriter()
 	close(stop)
 	wg.Wait()
 	if snapErr != nil {

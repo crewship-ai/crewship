@@ -62,7 +62,7 @@ import { AddChannelDialog, type AddChannelTarget } from "./add-channel-dialog"
 import { IncomingWebhooksView } from "./views/incoming-webhooks-view"
 import { IncomingCreateDialog } from "./views/incoming-credentials"
 import { useIncomingEndpoints } from "./use-incoming-endpoints"
-import { incomingExplorer, incomingSection as readIncomingSection, type IncomingSection, type IncomingTarget } from "./incoming-model"
+import { resolveIncomingTarget, incomingExplorer, incomingSection as readIncomingSection, type IncomingSection, type IncomingTarget } from "./incoming-model"
 import { AddIntegrationDialog, type ServiceOption } from "./add-integration-dialog"
 
 /**
@@ -232,8 +232,12 @@ export function IntegrationsLayout({ workspaceId }: { workspaceId: string }) {
   const [incomingCreate, setIncomingCreate] = React.useState<{target?: IncomingTarget} | null>(null)
   const incoming = useIncomingEndpoints(workspaceId, true)
   const incomingRail = incomingExplorer(incoming.targets, incoming.rows, incomingSection, search)
+  React.useEffect(() => {
+    const target = resolveIncomingTarget(incoming.targets, incomingSection, incomingTarget)
+    if (target && target.id !== incomingTarget) setIncomingTarget(target.id)
+  }, [incoming.targets, incomingSection, incomingTarget])
   const selectIncoming = (target: IncomingTarget) => {
-    setIncomingSection(target.kind); setIncomingTarget(target.slug)
+    setIncomingSection(target.kind); setIncomingTarget(target.id)
     if (isMobile) setCollapsed(true)
   }
 
@@ -699,7 +703,7 @@ export function IntegrationsLayout({ workspaceId }: { workspaceId: string }) {
               search={search} onSearchChange={setSearch} searchPlaceholder="Search targets…" searchAriaLabel="Search incoming targets"
               facets={[]} onClearFilters={()=>setSearch("")} items={incomingRail.items} itemsLabel="Targets"
               selectedItemId={incomingTarget ? `${incomingSection}:${incomingTarget}` : null}
-              onItemSelect={id=>{if(!id){setIncomingTarget(null);return}const target=incoming.targets.find(t=>`${t.kind}:${t.slug}`===id);if(target)selectIncoming(target)}}
+              onItemSelect={id=>{if(!id){setIncomingTarget(null);return}const target=incoming.targets.find(t=>`${t.kind}:${t.id}`===id);if(target)selectIncoming(target)}}
               itemsEmpty={<p className="px-3 py-3 text-[11px] leading-relaxed text-muted-foreground">{incoming.loading ? "Loading targets…" : incoming.error ? "Targets unavailable. Use Refresh to retry." : "No matching targets. Create a routine, agent or Page first."}</p>}
               onToggleCollapse={()=>setCollapsed(true)}
               footer={<p className="px-3 py-3 text-[11px] leading-relaxed text-muted-foreground">Page endpoints are listed per Page. Gray means no known enabled endpoint, not a delivery failure.</p>}
@@ -806,7 +810,7 @@ export function IntegrationsLayout({ workspaceId }: { workspaceId: string }) {
               exit={{ opacity: 0 }}
               transition={{ duration: 0.15 }}
             >
-              {tab === "incoming" && <IncomingWebhooksView key={workspaceId} workspaceId={workspaceId} data={incoming} section={incomingSection} search={search} targetSlug={incomingTarget} onSelect={selectIncoming} onBack={()=>{setIncomingTarget(null);setIncomingSection("endpoints")}} onAdd={target=>setIncomingCreate({target})}/>}
+              {tab === "incoming" && <IncomingWebhooksView key={workspaceId} workspaceId={workspaceId} data={incoming} section={incomingSection} search={search} targetId={incomingTarget} onSelect={selectIncoming} onBack={()=>{setIncomingTarget(null);setIncomingSection("endpoints")}} onAdd={target=>setIncomingCreate({target})}/>}
               {tab === "notifications" &&
                 notifySection === "connections" &&
                 selectedConnection && (

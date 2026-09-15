@@ -36,6 +36,7 @@ import { AddMCPWizard } from "@/components/features/integrations/add-mcp-wizard"
 import { MCPLogo } from "@/components/icons/mcp-logos"
 import { RecipesEmptyState } from "@/components/features/dashboard/recipes-cards"
 import { serializeArgs, subtitleFor } from "@/components/features/integrations/helpers"
+import { useWorkspaceURLReady } from "@/components/features/integrations/use-workspace-url"
 import { IntegrationsLayout } from "@/components/features/integrations/integrations-layout"
 import { legacyMcpIntegrations } from "@/lib/feature-flags"
 import type {
@@ -73,7 +74,8 @@ export default function IntegrationsPage() {
 /** Thin wrapper so the layout can be handed a resolved workspace id. */
 function IntegrationsWorkspaceGate() {
   const { workspaceId, loading } = useWorkspace()
-  if (loading) {
+  const urlReady = useWorkspaceURLReady(workspaceId, loading)
+  if (loading || (workspaceId && !urlReady)) {
     return (
       <div className="flex h-[calc(100dvh-var(--app-header-h)-var(--mobile-tab-bar-h))] flex-col gap-4 bg-background p-4 md:p-6">
         <Skeleton className="h-9 rounded-lg" />

@@ -97,7 +97,7 @@ export async function incomingWebhookFlow(page: Page) {
       .getByRole("table")
       .getByRole("button", { name: `${slug} GitHub`, exact: true })
       .click()
-    await expect(page).toHaveURL(new RegExp(`section=routine.*target=${slug}`))
+    await expect(page).toHaveURL(new RegExp(`section=routine.*target=${hook.target_pipeline_id}`))
     await page.reload()
     await expect(
       page.getByRole("heading", { name: slug, exact: true }),

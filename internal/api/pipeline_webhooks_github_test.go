@@ -33,8 +33,6 @@ func TestPipelineWebhooks_GitHubPullRequestDelivery(t *testing.T) {
 		req.Header.Set("X-GitHub-Event", event)
 		rr := httptest.NewRecorder()
 		if legacy {
-			req.Header.Del("X-Hub-Signature-256")
-			req.Header.Set("X-Crewship-Signature", signature)
 			h.FireWebhook(rr, req)
 		} else {
 			h.FireGitHubPullRequest(rr, req)
@@ -44,7 +42,7 @@ func TestPipelineWebhooks_GitHubPullRequestDelivery(t *testing.T) {
 	if rr := fire(body, "bad", "pull_request", false, false); rr.Code != 401 {
 		t.Fatalf("bad signature: %d", rr.Code)
 	}
-	if rr := fire(body, "legacy", "pull_request", true, true); rr.Code != 401 {
+	if rr := fire(body, "legacy", "pull_request", true, true); rr.Code != 404 {
 		t.Fatalf("legacy switched profiles: %d", rr.Code)
 	}
 	if rr := fire(`{"zen":"test"}`, "ping", "ping", true, false); rr.Code != 200 {
@@ -52,6 +50,12 @@ func TestPipelineWebhooks_GitHubPullRequestDelivery(t *testing.T) {
 	}
 	if countWebhookRows(t, h.db, `SELECT COUNT(*) FROM routine_webhook_receipts`) != 0 {
 		t.Fatal("ping created work")
+	}
+	if rr := fire(`{"action":"opened","pull_request":{"number":314}}`, "non-pr", "issues", true, false); rr.Code != 200 || !strings.Contains(rr.Body.String(), `"status":"IGNORED"`) {
+		t.Fatalf("non-PR event dispatched: %d %s", rr.Code, rr.Body.String())
+	}
+	if countWebhookRows(t, h.db, `SELECT COUNT(*) FROM routine_webhook_receipts`) != 0 {
+		t.Fatal("ignored event created a receipt")
 	}
 	first := fire(body, "one", "pull_request", true, false)
 	if first.Code != 202 {
@@ -61,7 +65,7 @@ func TestPipelineWebhooks_GitHubPullRequestDelivery(t *testing.T) {
 	if err := json.Unmarshal(first.Body.Bytes(), &receipt); err != nil {
 		t.Fatal(err)
 	}
-	for _, event := range []string{"pull_request", "issues"} {
+	for _, event := range []string{"pull_request"} {
 		rr := fire(body, "changed-unsigned-id", event, true, false)
 		var duplicate map[string]any
 		_ = json.Unmarshal(rr.Body.Bytes(), &duplicate)

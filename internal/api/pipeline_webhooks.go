@@ -622,12 +622,9 @@ func (h *PipelineHandler) FireWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if isGitHubRoutine(r.Context()) && wh.IngressProfile != "github" {
-		replyError(w, http.StatusNotFound, "GitHub endpoint not configured")
+	if isGitHubRoutine(r.Context()) != (wh.IngressProfile == "github") {
+		replyError(w, http.StatusNotFound, "webhook endpoint not configured")
 		return
-	}
-	if wh.IngressProfile == "github" {
-		r = r.WithContext(context.WithValue(r.Context(), githubRoutineContextKey{}, true))
 	}
 	// HMAC verification before rate limiting -- invalid signatures
 	// shouldn't even consume rate-limit slots. Required (not optional):
@@ -659,6 +656,10 @@ func (h *PipelineHandler) FireWebhook(w http.ResponseWriter, r *http.Request) {
 		// Unsigned event headers cannot select a different target or action.
 		if verdict.EventType == profiles.EventPing {
 			writeJSON(w, http.StatusOK, map[string]any{"status": "IGNORED", "reason": "ping"})
+			return
+		}
+		if verdict.EventType != "pull_request" {
+			writeJSON(w, http.StatusOK, map[string]any{"status": "IGNORED", "reason": "not a pull request event"})
 			return
 		}
 		var payload struct {
