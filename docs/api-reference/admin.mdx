@@ -41,6 +41,8 @@ The operational surface for OWNER and ADMIN roles: workspace stats, user managem
 | `GET` | [/api/v1/admin/memory/versions/\{id\}/content](#get-api-v1-admin-memory-versions-id-content) | Raw blob bytes for a single memory version |
 | `GET` | [/api/v1/admin/memory/config](#get-api-v1-admin-memory-config) | Read per-workspace memory configuration |
 | `PATCH` | [/api/v1/admin/memory/config](#patch-api-v1-admin-memory-config) | Partial-merge update of memory configuration |
+| `POST` | [/api/v1/admin/memory/user-model-sync](#post-api-v1-admin-memory-user-model-sync) | Run the operator-model sweep now, with the per-workspace summary |
+| `POST` | [/api/v1/admin/memory/peer-card-sync](#post-api-v1-admin-memory-peer-card-sync) | Run the peer-card sweep now, with the per-workspace summary |
 | `GET` | [/api/v1/admin/keeper/requests](#get-api-v1-admin-keeper-requests) | Keeper access-request audit log |
 | `GET` | [/api/v1/admin/keeper/requests/\{requestId\}/events](#get-api-v1-admin-keeper-requests-requestid-events) | Append-only transition history for one request |
 | `GET` | [/api/v1/admin/journal/verify](#get-api-v1-admin-journal-verify) | Verify the audit journal hash-chain (tamper-evidence) |
@@ -979,6 +981,118 @@ curl -X PATCH \
 <Note>
   The read-merge-write runs inside a SQLite `BEGIN IMMEDIATE` (serializable) transaction so concurrent PATCHes touching different keys serialise rather than last-write-wins. Each real diff emits a `memory.config_updated` journal entry (Notice severity, ActorUser) with payload `{workspace_id, changes: {field: {from, to}}}`. If the stored JSON is corrupt, PATCH still succeeds (treats the existing document as empty) so operators can fix the row without resorting to manual SQL.
 </Note>
+
+## POST /api/v1/admin/memory/user-model-sync
+
+```
+POST /api/v1/admin/memory/user-model-sync
+```
+
+Runs the operator-model sweep now — the one the server otherwise runs once a day at 05:00 UTC — and returns the per-workspace summary the scheduled run only ever logs. It is the same sweep, on the same extractor (the `curator` aux slot, resolved per call, with the `memory.user_model_profile` setting read fresh), over the same set of workspaces; only the trigger and the report differ.
+
+Why it exists: everything about the operator model fails silently by design. Nothing is written when the model proposes nothing, when every candidate is refused by the evidence gate, when the curator slot cannot be built, or when the person is below the interaction threshold — and all four look identical from outside. The summary tells them apart, now, instead of at 05:00 UTC.
+
+The sweep is safe to re-run: the merge is idempotent and the write is capped. It runs synchronously inside the request, one model call per candidate on the slot's per-call budget, so a workspace with many active operators can take minutes — clients must not cap the request at the usual 30 s (the CLI does not).
+
+**Auth:** ADMIN or OWNER (manage permission) in the session workspace. Without a `workspace_id` in the body the run is instance-wide, exactly like the scheduled sweep.
+
+**Request:** optional JSON body. `?workspace_id=` in the query is the *session* workspace, as on every admin route — it is not a filter.
+
+```json
+{
+  "workspace_id": "ws_01HZ…",
+  "dry_run": true
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `workspace_id` | `string?` | Narrow the run to one workspace, by id or slug. Omitted: every active (non-deleted) workspace on the instance. |
+| `dry_run` | `boolean?` | Run everything up to the write — the candidate query, the consent probe, the threshold, the extractor — and report what *would* have happened. Nothing lands on disk, in `user_models`, or in `peer_card_audit`. Also accepted as `?dry_run=true`. |
+
+**Response:** `200 OK` with the run's report.
+
+```json
+{
+  "sweep": "user_model",
+  "dry_run": false,
+  "workspaces": [
+    {
+      "workspace_id": "ws_01HZ…",
+      "candidates": 3,
+      "writes": 1,
+      "skipped_threshold": 1,
+      "skipped_empty": 1,
+      "skipped_opt_out": 0,
+      "purged_opt_out": 0,
+      "errors": 0
+    }
+  ],
+  "totals": { "candidates": 3, "writes": 1, "skipped_threshold": 1, "skipped_empty": 1, "skipped_opt_out": 0, "purged_opt_out": 0, "errors": 0 },
+  "duration_ms": 4120
+}
+```
+
+| Field | Description |
+|-------|-------------|
+| `sweep` | `user_model` here; `peer_card` on the sibling route. |
+| `dry_run` | Echoes the request, so a report cannot be mistaken for a record of what happened. |
+| `workspaces[].candidates` | Operators with a chat in the 14-day lookback window. |
+| `workspaces[].writes` | Models written (or, on a dry run, that would have been). |
+| `workspaces[].skipped_threshold` | Below the interaction threshold (messages and session length). |
+| `workspaces[].skipped_empty` | The extractor had nothing to write. With no model on the curator slot this is every candidate. |
+| `workspaces[].skipped_opt_out` / `purged_opt_out` | The operator has opted out; `purged` means an existing model was deleted (or would have been). |
+| `workspaces[].errors` | Candidates that failed inside the sweep — an extractor error, a failed write. Each has a `Warn` line in the server log. |
+| `workspaces[].error` | Present only when the sweep for that workspace could not run at all (the candidate query failed). The other workspaces still ran. |
+| `totals` | The same counters summed over `workspaces`. |
+
+### Example
+
+```bash
+curl -X POST \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"dry_run": true}' \
+  "https://crewship.example.com/api/v1/admin/memory/user-model-sync?workspace_id=$WS"
+```
+
+| Status | Condition |
+|--------|-----------|
+| `200` | The sweep ran (or, with `dry_run`, was simulated); per-workspace failures are on the rows, not the status |
+| `400` | Malformed JSON body, an unknown field, or a `dry_run` that is not `true`/`false` |
+| `401` | No or invalid credentials |
+| `403` | MEMBER or MANAGER role |
+| `404` | `workspace_id` names no active workspace |
+| `500` | The workspace list or lookup failed |
+| `503` | The server has no storage base path, so the sweep has nowhere to write (the scheduled worker is not running either) |
+
+CLI: `crewship admin memory sync user-model [--all] [--dry-run]`.
+
+## POST /api/v1/admin/memory/peer-card-sync
+
+```
+POST /api/v1/admin/memory/peer-card-sync
+```
+
+Runs the peer-card sweep now — the 04:00 UTC one — and returns the same report shape as the operator-model route above, with `"sweep": "peer_card"`. The sweep walks every (agent, operator) pair that crossed the interaction threshold, purges the cards of operators who have opted out, and writes a card where the extractor produced one. The server wires no peer-card extractor today, so a run indexes and purges without writing new bodies — which is also what the scheduled run does — and every threshold-crosser shows up under `skipped_empty`.
+
+**Auth:** ADMIN or OWNER (manage permission) in the session workspace; instance-wide without `workspace_id`.
+
+**Request:** the same optional body as the operator-model route — `workspace_id` (id or slug) and `dry_run`, the latter also as `?dry_run=true`.
+
+**Response:** `200 OK` with the report — `sweep`, `dry_run`, `workspaces[]`, `totals`, `duration_ms` — where the per-workspace counters are `candidates`, `writes`, `skipped_threshold`, `skipped_empty`, `skipped_opt_out`, `purged_opt_out`, `errors`, plus `error` when that workspace's sweep could not run.
+
+| Status | Condition |
+|--------|-----------|
+| `200` | The sweep ran, or was simulated with `dry_run` |
+| `400` | Malformed JSON body, an unknown field, or a `dry_run` that is not `true`/`false` |
+| `401` | No or invalid credentials |
+| `403` | MEMBER or MANAGER role |
+| `404` | `workspace_id` names no active workspace |
+| `500` | The workspace list or lookup failed |
+| `503` | No storage base path on this server |
+
+CLI: `crewship admin memory sync peer-cards [--all] [--dry-run]`.
 
 ## Keeper
 
