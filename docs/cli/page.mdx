@@ -1326,19 +1326,24 @@ crewship page project application health
 Source limits are 256 files, 512 KiB/file and 2 MiB total decoded content.
 Symlinks, environment files and paths outside the project are refused.
 
-**Who may do what.** Source reads (`get`, `history`, `review`, `fsck`,
-`export`) and source writes (`set`, `restore`, `build`) require Page edit
-permission, not just permission to view its panels — **and** they require
-that you can read every panel in the definition they return or replace. A
-`write` grant does not grant visibility of another crew's panels, and a
+**Who may do what.** Every `page project` command that reads or writes
+source (`get`, `history`, `restore`, `set`, `build`, `preview`, `check`,
+`review`, `fsck`) and `page export` require Page edit permission, not just
+permission to view its panels. The commands that return or replace a **whole
+definition** additionally require that you can read every panel in it: `get`
+(without `--source-only`), `get --revision`, `export`, `set` and `restore`.
+A `write` grant does not grant visibility of another crew's panels, and a
 document with a panel missing would delete it on save, so a partial reader is
 answered with a neutral 403 (exit `4`) rather than a truncated document. `set`
 and `restore` apply the rule to the live definition, the existing draft and the
 proposed definition alike; a refused save leaves the draft revision unchanged.
-Publishing, rolling back and withdrawing require Page ownership or workspace
-administration. `application`, `action-status` and `panel-history` are reader
-operations: they need the page to be visible to you and, for the last two, the
-panel too.
+`get --source-only` omits the definition and is not gated this way. `review`
+is not refused either: it withholds the panels you cannot read from both
+documents and reports `excluded_panels` and `withheld_changed` instead (see
+below). Publishing, rolling back and withdrawing require Page ownership or
+workspace administration. `application`, `action-status` and `panel-history`
+are reader operations: they need the page to be visible to you and, for the
+last two, the panel too.
 
 ### `crewship page project init`
 

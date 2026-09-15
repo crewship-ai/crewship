@@ -89,9 +89,18 @@ func TestAcceptance_PagePanelHistoryAndPublicationFence(t *testing.T) {
 	if out, err := run("page", "project", "panel-history", "health", "mysql", "--publication", "1"); err == nil || !strings.Contains(out, "publication changed") {
 		t.Fatalf("history read with nothing live: %v %s", err, out)
 	}
-	for _, flags := range [][]string{{"--limit", "21"}, {"--limit", "-1"}, {"--before", "-1"}} {
-		if out, err := run(append([]string{"page", "project", "panel-history", "health", "mysql", "--publication", "1"}, flags...)...); err == nil || strings.Contains(out, "http") {
-			t.Fatalf("%v was sent to the server: %v %s", flags, err, out)
+	for _, test := range []struct {
+		flags []string
+		want  string
+	}{
+		{[]string{"--limit", "21"}, "--limit must be between 1 and 20"},
+		{[]string{"--limit", "0"}, "--limit must be between 1 and 20"},
+		{[]string{"--limit", "-1"}, "--limit must be between 1 and 20"},
+		{[]string{"--before", "-1"}, "--before must be a positive sequence"},
+	} {
+		out, err := run(append([]string{"page", "project", "panel-history", "health", "mysql", "--publication", "1"}, test.flags...)...)
+		if err == nil || !strings.Contains(out, test.want) || strings.Contains(out, `"status"`) {
+			t.Fatalf("%v was not refused locally: %v %s", test.flags, err, out)
 		}
 	}
 

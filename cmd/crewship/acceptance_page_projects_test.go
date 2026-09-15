@@ -315,11 +315,15 @@ func exercisePageReviewBeforeBuild(t *testing.T, run func(...string) (string, er
 		t.Fatalf("omitted routine fence was not resolved from the snapshot: %v %s", err, out)
 	}
 	// Neither explicit: both halves come from the snapshot and are printed
-	// before the request; with no build worker the server then answers 503,
-	// which is the first thing after the fence it checks.
+	// before the request. The server's refusal is then PAST the fence shape
+	// check (never a 400): 503 with no build worker configured, 404 for the
+	// unknown build when the pages-apps lane supplies an image.
 	out, err = run("page", "project", "publish", "health", "--build", "b", "--revision", "2", "--expected-publication", "0", "--reviewed-code")
-	if err == nil || !strings.Contains(out, "Fencing this publication on definition sha256 "+snapshot.Baseline.DefinitionDigest) || !strings.Contains(out, "Fencing on routine health-check sha256 "+routine) || !strings.Contains(out, "build worker") {
+	if err == nil || !strings.Contains(out, "Fencing this publication on definition sha256 "+snapshot.Baseline.DefinitionDigest) || !strings.Contains(out, "Fencing on routine health-check sha256 "+routine) {
 		t.Fatalf("auto-fence publish: %v %s", err, out)
+	}
+	if strings.Contains(out, `"status": 400`) || !(strings.Contains(out, "build worker") || strings.Contains(out, "Page build not found")) {
+		t.Fatalf("auto-fence publish was refused before or beyond the fence: %s", out)
 	}
 	if strings.Contains(out, "acknowledge-unavailable-baseline") {
 		t.Fatalf("an initial publication has no baseline to acknowledge: %s", out)

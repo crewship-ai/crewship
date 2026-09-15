@@ -297,7 +297,7 @@ func newPageProjectCommand() *cobra.Command {
 		if publication < 1 {
 			return fmt.Errorf("--publication is required: the mounted application version, see `crewship page project application %s`", args[0])
 		}
-		if limit < 0 || limit > 20 {
+		if cmd.Flags().Changed("limit") && (limit < 1 || limit > 20) {
 			return fmt.Errorf("--limit must be between 1 and 20")
 		}
 		if before < 0 {
