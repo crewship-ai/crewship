@@ -135,6 +135,15 @@ Examples:
 		}
 		useTimestamp, _ := cmd.Flags().GetBool("timestamp")
 		event, _ := cmd.Flags().GetString("event")
+		// A flag the other profile cannot honour is a mistake, not a no-op:
+		// --timestamp on a github endpoint would silently sign body-only,
+		// --event on a crewship endpoint would never be sent.
+		if profile == webhookProfileGitHub && useTimestamp {
+			return cli.WithExitCode(fmt.Errorf("--timestamp applies to the crewship profile only; the github profile signs the body alone"), cli.ExitValidation)
+		}
+		if profile == webhookProfileCrewship && cmd.Flags().Changed("event") {
+			return cli.WithExitCode(fmt.Errorf("--event applies to the github profile only"), cli.ExitValidation)
+		}
 
 		req, err := http.NewRequest(http.MethodPost, target.String(), bytes.NewReader(body))
 		if err != nil {
@@ -222,7 +231,7 @@ func routineWebhookFireURL(arg, baseURL string) (*url.URL, error) {
 	if strings.HasPrefix(arg, "http://") || strings.HasPrefix(arg, "https://") {
 		u, err := url.Parse(arg)
 		if err != nil {
-			return nil, fmt.Errorf("public URL %q: %w", arg, err)
+			return nil, fmt.Errorf("public URL is not parseable: %w", err)
 		}
 		return u, nil
 	}
@@ -231,7 +240,8 @@ func routineWebhookFireURL(arg, baseURL string) (*url.URL, error) {
 		token, suffix = strings.TrimSuffix(arg, webhookGitHubURLSuffix), webhookGitHubURLSuffix
 	}
 	if token == "" || strings.ContainsAny(token, "/?#") {
-		return nil, fmt.Errorf("argument must be the webhook's public URL or its bare token, got %q", arg)
+		// Never echo the argument: a scheme-less URL carries the token.
+		return nil, fmt.Errorf("argument must be the webhook's public URL (with http:// or https://) or its bare token")
 	}
 	u, err := url.Parse(strings.TrimRight(baseURL, "/") + "/api/v1/webhooks/" + url.PathEscape(token) + suffix)
 	if err != nil {
