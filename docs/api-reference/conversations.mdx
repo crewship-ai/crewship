@@ -11,7 +11,9 @@ tag: Experimental
 
 Endpoints for the chat surface beyond the basic message list: conversation
 search, emoji reactions on assistant messages, group-chat participants,
-mid-turn steering, and file attachments uploaded for an agent. See the
+mid-turn steering, file attachments uploaded for an agent, and the
+[workspace rooms](#workspace-rooms) — human DMs, private groups and channels —
+that live on `/api/v1/conversations`. See the
 [Chat & Sessions guide](/guides/chat-sessions) for the user-facing model.
 
 Migration v57 (`add_chat_extras`) added the `message_reactions`, `chat_attachments`, `chat_branches`, and `workspace_files` tables that back this surface.
@@ -36,6 +38,27 @@ Migration v57 (`add_chat_extras`) added the `message_reactions`, `chat_attachmen
 | DELETE | [`/api/v1/agents/{agentId}/chats/{chatId}/attachments/{attachmentId}`](/api-reference/agents#delete-chat-attachment) | Delete one chat attachment |
 | GET | [`/api/v1/chats/{chatId}/stream`](#stream-a-run) | Watch a session's agent run as newline-delimited JSON |
 | POST | [`/api/v1/conversations/search`](#search-conversations) | Search conversation history — one agent, or the whole workspace |
+| GET | [`/api/v1/conversations`](#list-workspace-rooms) | List the workspace rooms the caller can reach |
+| POST | [`/api/v1/conversations`](#create-a-workspace-room) | Create a private group or a workspace channel |
+| POST | [`/api/v1/conversations/direct`](#open-or-reuse-a-human-dm) | Open, or reuse, a fixed two-person DM |
+| GET | [`/api/v1/conversations/{conversationId}`](#read-room-metadata) | Room metadata and the caller's read state |
+| GET | [`/api/v1/conversations/{conversationId}/messages`](#read-room-messages) | Latest page, older history or catch-up by sequence |
+| POST | [`/api/v1/conversations/{conversationId}/messages`](#send-a-room-message) | Send a message with a retry id and structured agent mentions |
+| POST | [`/api/v1/conversations/{conversationId}/read`](#mark-a-room-read) | Advance the caller's read cursor |
+| POST | [`/api/v1/conversations/{conversationId}/mute`](#mute-a-room) | Mute or unmute the room for the caller |
+| GET | [`/api/v1/conversations/{conversationId}/participants`](#list-room-participants) | List the room's human roster |
+| POST | [`/api/v1/conversations/{conversationId}/participants`](#add-a-room-participant) | Add a human to a private group (creator only) |
+| DELETE | [`/api/v1/conversations/{conversationId}/participants/{userId}`](#remove-a-room-participant) | Remove a human from a private group (creator only) |
+| GET | [`/api/v1/conversations/{conversationId}/agents`](#list-joined-room-agents) | List the agents joined to a channel |
+| POST | [`/api/v1/conversations/{conversationId}/agents`](#join-an-agent-to-a-channel) | Join an agent to a channel (creator only) |
+| DELETE | [`/api/v1/conversations/{conversationId}/agents/{agentId}`](#remove-an-agent-from-a-channel) | Remove an agent from a channel (creator only) |
+| GET | [`/api/v1/conversations/{conversationId}/agent-jobs`](#inspect-room-agent-jobs) | The mention jobs a room has queued |
+| GET | [`/api/v1/conversations/{conversationId}/activity`](#read-channel-activity-settings) | Whether a channel receives issue and routine events |
+| PUT | [`/api/v1/conversations/{conversationId}/activity`](#set-channel-activity-settings) | Set those settings (creator only) |
+| POST | [`/api/v1/conversations/{conversationId}/continue`](#continue-a-private-conversation-in-a-new-room) | Start a fresh group or channel from a private room |
+
+The room routes are documented under [Workspace rooms](#workspace-rooms); the
+CLI for them is [`crewship chat room`](/cli/chat#crewship-chat-room).
 
 Peer-to-peer crew messaging lives on the [internal IPC plane](#crew-messaging-sidecar-ipc), not the public API.
 

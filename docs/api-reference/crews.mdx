@@ -1321,9 +1321,14 @@ GET /api/v1/crews/{crewId}/peer-conversations?workspace_id={workspaceId}
 
 **Request:** `crewId` is a required path parameter and `workspace_id` is the workspace query parameter. No request body.
 
-List peer-to-peer conversations between agents in a crew.
+List peer-to-peer conversations between agents in a crew, newest first.
 
-**Response:** `200 OK` with an object containing `conversations` (array) and `count` (integer).
+| Query parameter | Type | Description |
+|---|---|---|
+| `agent_id` | string | Optional. Only conversations this agent asked or answered (`from_agent_id` or `to_agent_id`). Applied inside the query, before `limit` cuts the page. An id that matches no agent yields an empty list. |
+| `limit`, `offset` | int | Optional. Page size 1–100 (default 50) and offset (default 0). |
+
+**Response:** `200 OK` with a JSON array of conversation objects: `id`, `from_name`, `from_slug`, `to_name`, `to_slug`, `question`, `response` (nullable), `status`, `duration_ms` (nullable), `escalated`, `created_at`, `finished_at` (nullable).
 
 | Status | Condition |
 |---|---|

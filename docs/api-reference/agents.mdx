@@ -1647,15 +1647,31 @@ GET /api/v1/agents/{agentId}/chats?workspace_id={workspaceId}
 | `limit`, `offset` | int | Optional. Page size 1–100 (default 100) and offset. The response carries `X-Total-Count` (chats in the same `kind` partition), `X-Limit` and `X-Offset`. |
 | `counts` | `1` | Optional. Adds `X-Chat-Kind-Counts: direct=3,routine=182,…` for every kind the agent has. |
 
-**Response:** `200 OK` -- array of chat session objects.
+**Response:** `200 OK` -- array of chat session objects, ordered by
+`last_activity_at` descending:
+
+| Field | Type | Meaning |
+|---|---|---|
+| `id`, `agent_id`, `workspace_id` | string | Identity of the session and where it lives. |
+| `title` | string or null | The session's name, if it was given one (see [Rename Chat](#rename-chat)). |
+| `mode` | string | `CHAT` for a conversation, `MISSION` for the synthetic chat an issue runs its work in. |
+| `status` | string | Session status (`ACTIVE` until ended). |
+| `origin` | string or null | Raw provenance token as stored: `UI`, `CLI`, `WEBHOOK`, `CRON`, `AGENT` or `ROUTINE`; `null` when the writer sent none or an unknown value. |
+| `kind` | string | The partition the row falls in, decided from `mode` and `origin` on the server: `direct` (a person talking to the agent — the catch-all), `routine` (a routine step, cron or webhook dispatch), `issue` (mode `MISSION`), `agent` (agent-to-agent delegation). Never null; always the same rule the `kind` filter uses. |
+| `message_count` | int | Messages in the session. |
+| `unread_count` | int | Messages the caller has not seen and did not write. |
+| `started_at`, `ended_at`, `created_at`, `last_activity_at` | string | Timestamps; `ended_at` is null while the session is open. |
 
 **Auth:** Authenticated workspace member.
 
 **Request:** No body; `agentId` is required and workspace context scopes the
 list.
 
-**Status:** `400` for invalid request/workspace context, `401` when
-unauthenticated, and `403` when the caller cannot access the workspace.
+**Status:** `400` for invalid request/workspace context, or for a `kind`
+value that names no kind (`?kind=,`, `?kind=chat`) or combines `all` with
+another kind — the filter fails closed rather than silently listing
+everything; `401` when unauthenticated; `403` when the caller cannot access
+the workspace.
 
 ### Create Chat
 
@@ -1668,17 +1684,19 @@ Creates a new interactive chat session with the agent.
 **Response:** `201 Created`
 
 The optional request body is `{ "session_id": "…", "origin": "UI" }`.
-`origin` may be `UI`, `CLI`, `WEBHOOK`, `CRON`, or `AGENT`; unknown values are
-stored as empty. The response is `{ "id": "<chatId>" }`.
+`origin` may be `UI`, `CLI`, `WEBHOOK`, `CRON`, `AGENT` or `ROUTINE`. It is
+provenance, not input the caller is entitled to invent: any other value is
+**stored as null, not rejected** — the chat is created and lists with
+`origin: null` and `kind: direct`. The response is `{ "id": "<chatId>" }`.
 
 **Auth:** Authenticated caller permitted to create a chat for the agent.
 
 **Request:** Optional JSON object with `session_id` and `origin`. `origin` is
-one of `UI`, `CLI`, `WEBHOOK`, `CRON`, or `AGENT`.
+one of `UI`, `CLI`, `WEBHOOK`, `CRON`, `AGENT` or `ROUTINE`.
 
-**Status:** `200` or `201` with the created chat id; `400` invalid JSON or
-origin, `401` unauthenticated, `403` denied, `404` agent not found, and `409`
-when the requested session conflicts.
+**Status:** `201` with the created chat id; `400` invalid JSON,
+`401` unauthenticated, `403` denied, `404` agent not found, and `409`
+when the requested session conflicts. An unknown `origin` is not a `400`.
 
 ### Mark Chat Read
 
