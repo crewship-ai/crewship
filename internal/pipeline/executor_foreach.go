@@ -150,13 +150,15 @@ func (e *Executor) runForeachItem(ctx context.Context, step Step, item any, in R
 	// Per-item inputs = parent inputs + the loop variable. Every item gets
 	// its own copy, so the fan-out allocates len(items) × len(inputs) entries;
 	// items is already capped (maxForeachItems) and the inputs count is
-	// checked here, at the allocation, so the bound is visible where the size
-	// is computed (go/allocation-size-overflow, #2456).
+	// checked here, at the allocation (#2456). No size hint: CodeQL's
+	// go/allocation-size-overflow does not follow the guard through the n+1
+	// and flags the hint on its own; the map is small enough that pre-sizing
+	// is not worth the flagged arithmetic.
 	n := len(in.Inputs)
 	if n > maxForeachItemInputs {
 		return "", 0, fmt.Errorf("%d inputs exceeds the maximum of %d copied per foreach item — trim the run inputs", n, maxForeachItemInputs)
 	}
-	itemInputs := make(map[string]any, n+1)
+	itemInputs := make(map[string]any)
 	for k, v := range in.Inputs {
 		itemInputs[k] = v
 	}
