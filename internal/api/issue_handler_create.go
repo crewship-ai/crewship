@@ -325,10 +325,11 @@ func (h *IssueHandler) Create(w http.ResponseWriter, r *http.Request) {
 		// (handlers that JOIN pipelines); for the create path the
 		// client typically already has the routine in its picker
 		// list and can resolve them locally.
-		RoutineID: req.RoutineID,
-		CreatedAt: now,
-		UpdatedAt: now,
-		Labels:    []labelResponse{},
+		RoutineID:   req.RoutineID,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+		CompletedAt: completedAt,
+		Labels:      []labelResponse{},
 	}
 	if callerID != "" {
 		// Resolve the display name the same way reads do (users.full_name);

@@ -142,3 +142,72 @@ spec: { color: "#EF4444" }
 		})
 	}
 }
+
+// TestBundleReferencesAgents pins that every kind whose Validate calls
+// ctx.HasAgent triggers the workspace agent fetch — Routine, RecurringIssue
+// and TriageRule check the slug unconditionally, so a bundle holding only
+// one of them would otherwise reject an agent from an earlier apply.
+func TestBundleReferencesAgents(t *testing.T) {
+	cases := []struct {
+		name string
+		yaml string
+		want bool
+	}{
+		{"label only", `
+apiVersion: crewship/v1
+kind: Label
+metadata: { name: bug, slug: bug }
+spec: { color: "#ff0000" }
+`, false},
+		{"project lead", `
+apiVersion: crewship/v1
+kind: Project
+metadata: { name: Demo, slug: demo }
+spec: { status: planned, lead_agent_slug: mia }
+`, true},
+		{"routine agent_run step", `
+apiVersion: crewship/v1
+kind: Routine
+metadata: { name: Nightly, slug: nightly }
+spec:
+  crew_slug: ops
+  steps:
+    - { id: run, type: agent_run, agent_slug: mia }
+`, true},
+		{"recurring issue assignee", `
+apiVersion: crewship/v1
+kind: RecurringIssue
+metadata: { name: Weekly, slug: weekly }
+spec:
+  schedule: "0 9 * * 1"
+  template: { title: Weekly review, crew_slug: ops, assignee_agent_slug: mia }
+`, true},
+		{"triage rule assign_to", `
+apiVersion: crewship/v1
+kind: TriageRule
+metadata: { name: Route bugs, slug: route-bugs }
+spec:
+  match: { title_contains: [bug] }
+  actions: { assign_to_agent_slug: mia }
+`, true},
+		{"triage rule from_agent", `
+apiVersion: crewship/v1
+kind: TriageRule
+metadata: { name: From mia, slug: from-mia }
+spec:
+  match: { from_agent_slug: mia }
+  actions: { add_labels: [triaged] }
+`, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			bundle, err := Load([]byte(tc.yaml))
+			if err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			if got := bundleReferencesAgents(bundle); got != tc.want {
+				t.Errorf("bundleReferencesAgents = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}

@@ -88,6 +88,7 @@ func TestIssueCreate_Status(t *testing.T) {
 		{"TODO", `{"title":"t","status":"TODO"}`, http.StatusCreated, "TODO"},
 		{"IN_PROGRESS", `{"title":"t","status":"IN_PROGRESS"}`, http.StatusCreated, "IN_PROGRESS"},
 		{"explicit BACKLOG", `{"title":"t","status":"BACKLOG"}`, http.StatusCreated, "BACKLOG"},
+		{"CANCELLED is a terminal start", `{"title":"t","status":"CANCELLED"}`, http.StatusCreated, "CANCELLED"},
 		{"DONE is not a starting status", `{"title":"t","status":"DONE"}`, http.StatusBadRequest, ""},
 		{"lowercase is not canonical", `{"title":"t","status":"todo"}`, http.StatusBadRequest, ""},
 		{"garbage", `{"title":"t","status":"nope"}`, http.StatusBadRequest, ""},
@@ -113,11 +114,20 @@ func TestIssueCreate_Status(t *testing.T) {
 				t.Errorf("response status = %q, want %q", resp.Status, tc.wantStatus)
 			}
 			var stored string
-			if err := h.db.QueryRow(`SELECT status FROM missions WHERE id = ?`, resp.ID).Scan(&stored); err != nil {
+			var storedCompleted *string
+			if err := h.db.QueryRow(`SELECT status, completed_at FROM missions WHERE id = ?`, resp.ID).Scan(&stored, &storedCompleted); err != nil {
 				t.Fatalf("read row: %v", err)
 			}
 			if stored != tc.wantStatus {
 				t.Errorf("stored status = %q, want %q", stored, tc.wantStatus)
+			}
+			// The 201 body must agree with the row: a terminal starting
+			// status stamps completed_at, and the response carries it.
+			if (storedCompleted != nil) != (resp.CompletedAt != nil) {
+				t.Errorf("completed_at: stored=%v response=%v — the create response disagrees with the row", storedCompleted, resp.CompletedAt)
+			}
+			if tc.wantStatus == "CANCELLED" && resp.CompletedAt == nil {
+				t.Errorf("CANCELLED start must return completed_at")
 			}
 		})
 	}

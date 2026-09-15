@@ -613,8 +613,11 @@ func buildKindWorkspaceContext(b *Bundle) internalapi.WorkspaceContext {
 
 // bundleReferencesAgents reports whether any document in the bundle
 // names an agent by slug, i.e. whether fetching the workspace's agents
-// into the validation context can change its outcome. Pages count
-// whenever present: their producers may be `agent:` references.
+// into the validation context can change its outcome. Every kind whose
+// Validate calls ctx.HasAgent is listed — Routine, RecurringIssue and
+// TriageRule check the slug unconditionally, so leaving one out rejects
+// an agent from an earlier apply as "not found". Pages count whenever
+// present: their producers may be `agent:` references.
 func bundleReferencesAgents(b *Bundle) bool {
 	for i := range b.Projects {
 		if b.Projects[i].Spec.LeadAgentSlug != "" {
@@ -623,6 +626,23 @@ func bundleReferencesAgents(b *Bundle) bool {
 	}
 	for i := range b.Issues {
 		if b.Issues[i].Spec.AssigneeSlug != "" {
+			return true
+		}
+	}
+	for i := range b.Routines {
+		for _, step := range b.Routines[i].Spec.Steps {
+			if step.AgentSlug != "" {
+				return true
+			}
+		}
+	}
+	for i := range b.RecurringIssues {
+		if b.RecurringIssues[i].Spec.Template.AssigneeAgentSlug != "" {
+			return true
+		}
+	}
+	for i := range b.TriageRules {
+		if b.TriageRules[i].Spec.Match.FromAgentSlug != "" || b.TriageRules[i].Spec.Actions.AssignToAgentSlug != "" {
 			return true
 		}
 	}
