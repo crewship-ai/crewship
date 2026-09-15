@@ -68,6 +68,10 @@ func TestMigrate(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "migrate.db")
 
+	// Deliberately NOT the migrated template: this is the one test that
+	// proves the chain itself builds the schema from nothing. The template
+	// (template_test.go) is checked against it, so the two cannot drift
+	// apart without one of them failing.
 	db, err := Open("file:" + dbPath)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
@@ -110,17 +114,7 @@ func TestMigrate(t *testing.T) {
 }
 
 func TestMigrateMemoryConfigColumn(t *testing.T) {
-	dir := t.TempDir()
-	db, err := Open("file:" + filepath.Join(dir, "memory.db"))
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	defer db.Close()
-
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
-	if err := Migrate(context.Background(), db.DB, logger); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
+	db := openMigratedTestDB(t)
 
 	// Verify memory_config column exists on agents table
 	var cid int
@@ -195,17 +189,7 @@ func TestMigrateMemoryConfigColumn(t *testing.T) {
 // of TestMigrateMemoryConfigColumn — pragma_table_info introspection plus a
 // round-trip insert/update so we catch nullability or type regressions.
 func TestMigrateCredentialAuditSignal(t *testing.T) {
-	dir := t.TempDir()
-	db, err := Open("file:" + filepath.Join(dir, "credaudit.db"))
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	defer db.Close()
-
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
-	if err := Migrate(context.Background(), db.DB, logger); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
+	db := openMigratedTestDB(t)
 
 	wantCols := map[string]string{"last_used_at": "TEXT", "last_used_ips": "TEXT"}
 	got := map[string]string{}
@@ -279,19 +263,8 @@ func TestMigrateCredentialAuditSignal(t *testing.T) {
 // skipping. This prevents the classic two-branch-merge schema divergence
 // (both PRs claim the same version number with different SQL).
 func TestMigrateVersionCollision(t *testing.T) {
-	dir := t.TempDir()
-	db, err := Open("file:" + filepath.Join(dir, "collision.db"))
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	defer db.Close()
-
+	db := openMigratedTestDB(t)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
-
-	// First pass: apply everything normally.
-	if err := Migrate(context.Background(), db.DB, logger); err != nil {
-		t.Fatalf("initial Migrate: %v", err)
-	}
 
 	// Tamper with _migrations as if a sibling PR had been merged first with
 	// a different name for the same version. Pick the latest version because
@@ -306,7 +279,7 @@ func TestMigrateVersionCollision(t *testing.T) {
 	}
 
 	// Re-run: must fail with a collision error naming both sides.
-	err = Migrate(context.Background(), db.DB, logger)
+	err := Migrate(context.Background(), db.DB, logger)
 	if err == nil {
 		t.Fatal("expected collision error, got nil")
 	}
@@ -329,17 +302,8 @@ func TestMigrateVersionCollision(t *testing.T) {
 // the _migrations entry matches the code's migration definition, re-running
 // must succeed silently. Regression guard for over-eager collision checks.
 func TestMigrateIdempotentWithMatchingNames(t *testing.T) {
-	dir := t.TempDir()
-	db, err := Open("file:" + filepath.Join(dir, "idempotent.db"))
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	defer db.Close()
-
+	db := openMigratedTestDB(t)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
-	if err := Migrate(context.Background(), db.DB, logger); err != nil {
-		t.Fatalf("first Migrate: %v", err)
-	}
 	if err := Migrate(context.Background(), db.DB, logger); err != nil {
 		t.Fatalf("second Migrate (should be no-op): %v", err)
 	}
@@ -389,19 +353,9 @@ func TestOpenChmodsDBFile(t *testing.T) {
 }
 
 func TestMigrateInsertAndQuery(t *testing.T) {
-	dir := t.TempDir()
-	db, err := Open("file:" + filepath.Join(dir, "crud.db"))
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	defer db.Close()
+	db := openMigratedTestDB(t)
 
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
-	if err := Migrate(context.Background(), db.DB, logger); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
-
-	_, err = db.Exec(`INSERT INTO users (id, email, full_name) VALUES ('u1', 'test@example.com', 'Test User')`)
+	_, err := db.Exec(`INSERT INTO users (id, email, full_name) VALUES ('u1', 'test@example.com', 'Test User')`)
 	if err != nil {
 		t.Fatalf("insert user: %v", err)
 	}
@@ -437,23 +391,14 @@ func TestMigrateInsertAndQuery(t *testing.T) {
 // (2) already-RFC3339 rows are left alone, (3) the migration is idempotent
 // (running it twice is a no-op).
 func TestMigrationBackfillLegacyTimestamps(t *testing.T) {
-	dir := t.TempDir()
-	db, err := Open("file:" + filepath.Join(dir, "backfill.db"))
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	defer db.Close()
-
+	db := openMigratedTestDB(t)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
-	if err := Migrate(context.Background(), db.DB, logger); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
 
 	// At this point all migrations (including 44) have already run. Insert
 	// synthetic legacy-format rows AFTER the fact to simulate data that was
 	// created before the backfill ever ran, then re-run the migration body
 	// directly against the DB to test its logic in isolation.
-	_, err = db.Exec(`INSERT INTO users (id, email, created_at, updated_at) VALUES
+	_, err := db.Exec(`INSERT INTO users (id, email, created_at, updated_at) VALUES
 		('u-legacy', 'legacy@example.com', '2026-04-10 12:34:56', '2026-04-10 13:00:00'),
 		('u-rfc3339', 'rfc@example.com',  '2026-04-10T12:34:56Z', '2026-04-10T13:00:00Z')`)
 	if err != nil {
@@ -576,17 +521,7 @@ func TestIsTimestampColumnName(t *testing.T) {
 // and that the column is nullable (existing rows keep working without
 // a manifest reference).
 func TestMigrateConnectorIDColumn(t *testing.T) {
-	dir := t.TempDir()
-	db, err := Open("file:" + filepath.Join(dir, "connector.db"))
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	defer db.Close()
-
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
-	if err := Migrate(context.Background(), db.DB, logger); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
+	db := openMigratedTestDB(t)
 
 	// Verify both tables got the column. The pragma_table_info pattern
 	// matches what TestMigrateMemoryConfigColumn does — keeping the

@@ -69,10 +69,7 @@ func tableExists(t *testing.T, db *sql.DB, ctx context.Context, name string) boo
 // CREATE TABLE notifications in a later migration without a writer, this is
 // what catches it.
 func TestDropDeadNotifications_FreshInstallHasNoTable(t *testing.T) {
-	db, ctx, logger := openDropNotificationsDB(t)
-	if err := Migrate(ctx, db, logger); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
+	db, ctx := openMigratedTestSQL(t), context.Background()
 	if tableExists(t, db, ctx, "notifications") {
 		t.Error("table `notifications` exists after a full migration — it is the dead " +
 			"entity-scoped feed removed in #1751. If it is genuinely wanted again it needs a " +

@@ -1,11 +1,7 @@
 package database
 
 import (
-	"context"
 	"database/sql"
-	"io"
-	"log/slog"
-	"path/filepath"
 	"testing"
 )
 
@@ -88,14 +84,7 @@ func TestChatOriginRoutineBackfillIsIdempotent(t *testing.T) {
 
 func openChatOriginDB(t *testing.T) *sql.DB {
 	t.Helper()
-	db, err := Open("file:" + filepath.Join(t.TempDir(), "chat_origin.db"))
-	if err != nil {
-		t.Fatalf("open: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err := Migrate(context.Background(), db.DB, slog.New(slog.NewTextHandler(io.Discard, nil))); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
+	db := openMigratedTestDB(t)
 	return db.DB
 }
 

@@ -341,14 +341,7 @@ func TestSnapshotBeforeMigrate_WhileServerWrites(t *testing.T) {
 	dbPath := filepath.Join(dir, "crewship.db")
 	logger := newTestLogger()
 
-	db, err := Open("file:" + dbPath)
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	defer db.Close()
-	if err := Migrate(ctx, db.DB, logger); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
+	db := openMigratedTestDBAt(t, dbPath)
 	// journal_entries needs a workspace to hang off; the real schema has the
 	// FK that the standalone table in newHotJournalDB does not.
 	if _, err := db.ExecContext(ctx,

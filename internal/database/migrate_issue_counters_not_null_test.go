@@ -84,10 +84,7 @@ func issueCountersColumnIsNotNull(t *testing.T, db *sql.DB, ctx context.Context,
 // asking the schema — the backup scoper included — reads. Since #1797 the
 // column carrying it is workspace_id, and crew_id is not there at all.
 func TestIssueCountersCrewNotNull_FreshInstall(t *testing.T) {
-	db, ctx, logger := openIssueCountersDB(t)
-	if err := Migrate(ctx, db, logger); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
+	db, ctx := openMigratedTestSQL(t), context.Background()
 
 	if present, _ := issueCountersColumnIsNotNull(t, db, ctx, "crew_id"); present {
 		t.Error("issue_counters still has a crew_id column — #1797 re-keyed this table " +

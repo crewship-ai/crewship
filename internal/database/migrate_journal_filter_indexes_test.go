@@ -1,11 +1,7 @@
 package database
 
 import (
-	"context"
 	"database/sql"
-	"io"
-	"log/slog"
-	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -22,16 +18,7 @@ import (
 // what supplies those statistics on a live instance.
 func seedJournalPlannerDB(t *testing.T) *sql.DB {
 	t.Helper()
-	dir := t.TempDir()
-	db, err := Open("file:" + filepath.Join(dir, "journalidx.db"))
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	t.Cleanup(func() { db.Close() })
-	silent := slog.New(slog.NewTextHandler(io.Discard, nil))
-	if err := Migrate(context.Background(), db.DB, silent); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
+	db := openMigratedTestDB(t)
 	if _, err := db.Exec(`INSERT INTO workspaces (id, name, slug) VALUES ('ws1','Work','work')`); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
