@@ -117,13 +117,13 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	"port_exposures":      IntentInclude,
 	"scheduled_jobs":      IntentInclude,
 	"backup_destinations": IntentInclude,
-	"webhooks":            IntentInclude,
-	"routines":            IntentInclude,
-	"schedules":           IntentInclude,
-	"recurring_issues":    IntentInclude,
-	"triage_rules":        IntentInclude,
-	"workflow_templates":  IntentInclude,
-	"saved_views":         IntentInclude,
+	// `webhooks`, `routines` and `schedules` used to sit here. No migration ever
+	// created them (#2274): the real tables are pipeline_webhooks / page_webhooks,
+	// pipelines and pipeline_schedules / scheduled_jobs, all classified in this map.
+	"recurring_issues":   IntentInclude,
+	"triage_rules":       IntentInclude,
+	"workflow_templates": IntentInclude,
+	"saved_views":        IntentInclude,
 
 	// === Pages (round-trip) ===================================
 	// PRD docs/prd/pages.md §10b.5 draws the line here: `crewship
@@ -199,16 +199,18 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	// human already closed by hand, and it carries the issue_id that makes the
 	// recovery entry able to name what it is closing.
 	"page_panel_alerts": IntentInclude,
-	"hooks":             IntentInclude,
-	"labels":            IntentInclude,
-	"milestones":        IntentInclude,
-	"projects":          IntentInclude,
+	// `hooks` used to sit here; the table is hooks_config (#2274).
+	"labels":     IntentInclude,
+	"milestones": IntentInclude,
+	"projects":   IntentInclude,
 
 	// === Eval / training (round-trip) =========================
 	"eval_runs":           IntentInclude,
 	"gate_reward_history": IntentInclude,
 	"missions":            IntentInclude,
-	"agent_runs":          IntentInclude,
+	// `agent_runs` used to sit here. v61 (drop_agent_runs) folded it into
+	// journal_entries and dropped the table (#2274); its archive snapshot is the
+	// IntentExcludeOperational entry below.
 
 	// === Operational state (DO NOT export) ==========================
 	"audit_logs":     IntentExcludeOperational,
@@ -316,8 +318,8 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	// audit, not portable workspace configuration, and a restored bundle should
 	// not carry another instance's keeper decision history.
 	"keeper_request_events": IntentExcludeRuntime,
-	"rate_buckets":          IntentExcludeRuntime,
-	"agent_status":          IntentExcludeRuntime, // live status; agent boots IDLE
+	// `rate_buckets` used to sit here; no migration ever created it (#2274).
+	"agent_status": IntentExcludeRuntime, // live status; agent boots IDLE
 	// `notifications` sat here until #1751 dropped the table: it was the
 	// entity-scoped in-app feed, and nothing outside a test ever inserted a
 	// row. A classification for a table that no longer exists is a claim the
