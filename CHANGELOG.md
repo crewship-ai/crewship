@@ -11,6 +11,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Added
 
+- A bounded GitHub review pilot example with repository/revision guards, read-only agent review, commit-bound COMMENT publication, replay checks, and explicit outcome reporting.
+
 - Incoming webhook configuration in Integrations for routines, agents and Page panels, with explicit outgoing notification labels. Routine webhooks can select a GitHub pull request signature profile with content-based replay protection.
 
 
