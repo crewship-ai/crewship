@@ -363,8 +363,8 @@ func TestPageRollback_RefusesToRollBackWithoutTheWriteAuthority(t *testing.T) {
 	req.SetPathValue("slug", pagesVerSlug)
 	rr := httptest.NewRecorder()
 	h.Rollback(rr, req)
-	if rr.Code != http.StatusForbidden {
-		t.Errorf("rollback by a plain member: status = %d, want 403, body: %s", rr.Code, rr.Body.String())
+	if rr.Code != http.StatusNotFound {
+		t.Errorf("rollback by an unreachable caller: status = %d, want 404, body: %s", rr.Code, rr.Body.String())
 	}
 }
 

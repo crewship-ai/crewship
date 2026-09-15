@@ -204,8 +204,8 @@ export function FolderSharingDialog({ workspaceId, open, onOpenChange, folder, m
         title="Sharing"
         description={
           folder?.ownerLabel
-            ? `Owned by ${folder.ownerLabel}. What is set here applies to every page in the folder.`
-            : "What is set here applies to every page in the folder."
+            ? `Owned by ${folder.ownerLabel}. What is set here applies to every page in the folder. Can edit adds write access, including for workspace Viewers.`
+            : "What is set here applies to every page in the folder. Can edit adds write access, including for workspace Viewers."
         }
         onClose={() => onOpenChange(false)}
       />

@@ -52,7 +52,7 @@ func (h *PageHandler) projectPage(w http.ResponseWriter, r *http.Request) (*page
 		allowed = h.mayEditSpec(r.Context(), WorkspaceIDFromContext(r.Context()), u.ID, RoleFromContext(r.Context()), rec)
 	}
 	if !allowed {
-		replyError(w, 403, "reading or editing project sources requires page edit permission")
+		h.refusePageAction(w, r, rec, "reading or editing project sources requires page edit permission", "page not found")
 		return nil, false
 	}
 	if h.projectStore == nil {
