@@ -400,22 +400,39 @@ SELECT pipeline_id, COALESCE(definition_hash, ''), COALESCE(invoking_crew_id, ''
 	if req.InvokingCrewID != "" {
 		crewID = req.InvokingCrewID
 	}
-	if crewID == "" {
-		// Fall back to the routine's AUTHOR crew. invoking_crew_id is
-		// empty for the ordinary case — a user triggering a routine from
-		// the CLI or the dashboard — so reading only that would apply the
-		// strict posture to cross-crew invocations and quietly skip it
-		// for the runs operators actually make.
-		//
-		// The author crew is the right one on the merits, not just as a
-		// fallback: a routine executes in its author's context, reusing
-		// that crew's persona and credentials. The posture that governs
-		// the execution is that crew's.
-		if err := s.db.QueryRowContext(ctx,
-			`SELECT COALESCE(author_crew_id, '') FROM pipelines WHERE id = ?`, out.pipelineID).Scan(&crewID); err != nil {
-			// Cannot establish which crew owns this routine → assume the
-			// strictest posture rather than auto-approving blind.
+	// The AUTHOR crew's posture is consulted regardless of who invoked
+	// the run. A routine executes in its author's context, reusing that
+	// crew's persona and credentials, so the posture that governs the
+	// execution is that crew's — and a strict author has opted out of
+	// every shortcut around the operator, including one a more relaxed
+	// invoking crew would otherwise be entitled to. Before this read the
+	// invoking crew alone, which meant any run row carrying a non-strict
+	// invoking_crew_id (a legitimate cross-crew call, or — until the
+	// public run route stopped reading X-Crewship-Invoking-Crew from
+	// arbitrary members — a forged one) let a standing grant fire on a
+	// strict author's gate.
+	var authorCrew string
+	if err := s.db.QueryRowContext(ctx,
+		`SELECT COALESCE(author_crew_id, '') FROM pipelines WHERE id = ?`, out.pipelineID).Scan(&authorCrew); err != nil {
+		// Cannot establish which crew owns this routine → assume the
+		// strictest posture rather than auto-approving blind. This holds
+		// with an invoking crew present too: the author's opt-out is the
+		// one fact this gate may not skip, and an unreadable author is an
+		// unknown opt-out.
+		out.autonomy = string(policy.AutonomyStrict)
+		return out
+	}
+	if authorCrew != "" {
+		authorAutonomy := s.crewAutonomy(ctx, authorCrew)
+		if authorAutonomy == string(policy.AutonomyStrict) {
 			out.autonomy = string(policy.AutonomyStrict)
+			return out
+		}
+		if crewID == "" {
+			// invoking_crew_id is empty for the ordinary case — a user
+			// triggering a routine from the CLI or the dashboard — so the
+			// author crew is the one whose dial applies.
+			out.autonomy = authorAutonomy
 			return out
 		}
 	}
@@ -425,12 +442,21 @@ SELECT pipeline_id, COALESCE(definition_hash, ''), COALESCE(invoking_crew_id, ''
 		// per-gate decision by a named human.
 		return out
 	}
-	if err := s.db.QueryRowContext(ctx,
-		`SELECT COALESCE(autonomy_level, '') FROM crews WHERE id = ?`, crewID).Scan(&out.autonomy); err != nil {
-		// Cannot read the dial → assume the strictest posture.
-		out.autonomy = string(policy.AutonomyStrict)
-	}
+	out.autonomy = s.crewAutonomy(ctx, crewID)
 	return out
+}
+
+// crewAutonomy reads a crew's autonomy dial. A crew that cannot be read
+// (deleted, foreign, DB error) answers strict: this value only ever
+// decides whether a human may be skipped, so the unknown case must be the
+// one that keeps them in the loop.
+func (s *SQLWaitpointStore) crewAutonomy(ctx context.Context, crewID string) string {
+	var autonomy string
+	if err := s.db.QueryRowContext(ctx,
+		`SELECT COALESCE(autonomy_level, '') FROM crews WHERE id = ?`, crewID).Scan(&autonomy); err != nil {
+		return string(policy.AutonomyStrict)
+	}
+	return autonomy
 }
 
 // consumeTrust fires a standing grant if one covers this gate.
