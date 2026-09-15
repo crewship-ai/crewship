@@ -96,6 +96,7 @@ crewship admin list-users --local
 | `security-posture` | Read-only view of the instance's env-driven security flags (encryption, egress ceiling, signup, rate limiting). **HTTP-backed — needs a running server + login.** |
 | `memory-config get/set` | Read or adjust the workspace's memory retention window. **HTTP-backed — needs a running server + login.** |
 | `memory-stats` | `memory_versions` counts and byte totals for the workspace, by tier and by agent. **HTTP-backed — needs a running server + login.** |
+| `memory sync user-model/peer-cards` | Run one of the two daily memory sweeps now (the 05:00 / 04:00 UTC ones) and get its per-workspace summary; `--dry-run` reports without writing. **HTTP-backed — needs a running server + login.** |
 | `ratelimits list/set/reset` | Inspect and tune the instance's rate limiters at runtime (per-IP HTTP buckets, login lockout, notifications, provisioning, agent webhooks). **HTTP-backed — needs a running server + login.** |
 | `seed-inbox` | Fill a scratch workspace's inbox with one row of every kind so the surface can be exercised. Development data, local-only; needs `--local` when a server is named. |
 
@@ -716,6 +717,76 @@ figures:
   crew/workspace tier)`.
 
 Requires `OWNER` or `ADMIN` (`canRole "manage"`).
+
+---
+
+## `crewship admin memory sync`
+
+Run one of the two daily memory sweeps now instead of waiting for its
+scheduled tick, and see the per-workspace summary the sweep otherwise only
+logs. Two subcommands, one per sweep:
+
+```bash
+crewship admin memory sync user-model              # the operator-model sweep (05:00 UTC)
+crewship admin memory sync user-model --dry-run    # report what it would do; write nothing
+crewship admin memory sync user-model --all -f json
+crewship admin memory sync peer-cards              # the peer-card sweep (04:00 UTC)
+```
+
+Before this command the sweeps could only be observed by being awake when
+they fire. That is worse for the operator model than for most schedulers:
+nothing is written when the model proposes nothing, when every candidate is
+refused by the evidence gate, when the `curator` slot cannot be built, or
+when the person is below the interaction threshold — and all four look the
+same from outside. The summary tells them apart:
+
+```console
+✓ The operator-model sweep ran over 1 workspace(s) in 4.12s.
+WORKSPACE   CANDIDATES  WRITES  BELOW THRESHOLD  EMPTY  OPTED OUT  PURGED  ERRORS  NOTE
+ws_01HZ…    3           1       1                1      0          0       0
+```
+
+| Column | Meaning |
+|---|---|
+| `CANDIDATES` | Operators (or, for peer cards, agent–operator pairs) with a chat in the 14-day lookback window. |
+| `WRITES` | Files written — or, with `--dry-run`, that would have been. |
+| `BELOW THRESHOLD` | Skipped: not enough messages or session time yet. |
+| `EMPTY` | Skipped: the extractor had nothing to write. With no model on the `curator` slot this is every candidate — check `crewship keeper aux`. |
+| `OPTED OUT` / `PURGED` | The operator has opted out of peer memory; `PURGED` means an existing file was deleted (or would have been). |
+| `ERRORS` | Candidates that failed inside the sweep; each has a `Warn` line in the server log. |
+| `NOTE` | Set when the sweep for that workspace could not run at all. The other workspaces still ran. |
+
+A `TOTAL` row is added when more than one workspace was swept.
+
+Scope defaults to the current workspace (`-w` / config). `--all` runs every
+active workspace on the instance — exactly what the scheduler does at its
+tick. The sweeps are safe to re-run: the merge is idempotent and the write is
+capped.
+
+`--dry-run` runs everything up to the write — including the extractor, which
+is the model-backed step worth observing — and reports what *would* have
+happened. Nothing lands on disk, in the index tables, or in the audit log.
+This is how a measurement like "how many facts does the extractor propose,
+and how many does the gate refuse" becomes repeatable without planting data
+in a live instance; the per-extraction counts are on the server log's
+`user model extraction` lines.
+
+The peer-card sweep has no extractor wired on the server today, so it
+indexes and purges without writing new bodies — the same thing the 04:00
+sweep does — and every threshold-crosser shows under `EMPTY`.
+
+| Flag | Type | Default | Meaning |
+|---|---|---|---|
+| `--all` | bool | `false` | Sweep every active workspace on the instance, as the scheduled run does, instead of only the current one. |
+| `--dry-run` | bool | `false` | Run the sweep up to the write and report what it would do; nothing is written. |
+| `--timeout` | duration | `10m` | How long to wait for the sweep. The server runs one model call per candidate inside the request, so a big workspace can take minutes; the CLI's usual 30 s would cancel it — server side too. |
+
+`--format json` prints the server's report verbatim (`sweep`, `dry_run`,
+`workspaces[]`, `totals`, `duration_ms`).
+
+Backed by `POST /api/v1/admin/memory/user-model-sync` and
+`POST /api/v1/admin/memory/peer-card-sync`. Requires `OWNER` or `ADMIN`
+(`canRole "manage"`).
 
 ---
 

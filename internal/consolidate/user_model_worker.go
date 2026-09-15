@@ -61,12 +61,22 @@ type UserModelSyncOptions struct {
 	Extractor      UserModelExtractor
 	// LookbackWindow bounds the chats query. Defaults to 14 days.
 	LookbackWindow time.Duration
+	// DryRun runs the whole sweep — candidate query, consent probe,
+	// threshold, extractor — and reports the outcome each candidate WOULD
+	// have had, without writing, purging, indexing or auditing anything
+	// (#1702). The extractor still runs, because observing it is the
+	// point: the daily sweep fires at 05:00 UTC and there was no other
+	// way to see what it does.
+	DryRun bool
 }
 
 // UserModelSyncSummary is the per-outcome counter a routine run hands
 // back for journal emission + metrics.
 type UserModelSyncSummary struct {
-	WorkspaceID   string
+	WorkspaceID string
+	// DryRun echoes the option so a summary cannot be mistaken for a
+	// record of what happened.
+	DryRun        bool
 	Candidates    int
 	Writes        int
 	SkippedThresh int
@@ -107,7 +117,7 @@ func RunUserModelSync(
 		return UserModelSyncSummary{WorkspaceID: workspaceID},
 			fmt.Errorf("run user model sync: load candidates for workspace %s: %w", workspaceID, err)
 	}
-	sum := UserModelSyncSummary{WorkspaceID: workspaceID, Candidates: len(cands)}
+	sum := UserModelSyncSummary{WorkspaceID: workspaceID, DryRun: opts.DryRun, Candidates: len(cands)}
 	now := time.Now()
 	for _, cand := range cands {
 		paths := UserModelPathsFor(opts.OutputBasePath, cand.CrewID)
@@ -135,7 +145,7 @@ func RunUserModelSync(
 				"cap_bytes", memory.UserModelCapBytes)
 			content = trimmed
 		}
-		out := SyncUserModel(ctx, db, logger, opts.Threshold, cand, content, paths, opts.OutputBasePath, now)
+		out := syncUserModel(ctx, db, logger, opts.Threshold, cand, content, paths, opts.OutputBasePath, now, opts.DryRun)
 		if out.Err != nil {
 			sum.Errors++
 			logger.Warn("user model sync candidate failed",
