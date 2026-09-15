@@ -647,7 +647,9 @@ On a fresh database, `seed` automatically bootstraps the first admin user. On an
 
 ## Output Formats
 
-All list and detail commands support `--format` (`-f`):
+All list and detail commands support `--format` (`-f`), and so does every
+mutation that hands you back something the next command needs (see
+[Mutations that return their result](#mutations-that-return-their-result)):
 
 | Format | Description |
 |--------|-------------|
@@ -717,6 +719,25 @@ A command that *changes* something prints its confirmation (`✓ Integration ena
 it work" is the exit code. Some mutation commands still print their receipt on stdout;
 that is a known cleanup, and `TestMutationReceiptsOnStdoutDoNotGrow` in
 `cmd/crewship` keeps the population from growing.
+
+### Mutations that return their result
+
+A mutation whose result the caller has to *read* — the identifier the server just
+minted, or the new state of the thing that changed — renders that result on stdout
+under `-f json` / `yaml` / `ndjson`, in the same shape the matching read command emits,
+so one parser handles both. Under the default `table` the human receipt on stderr is
+unchanged. The population is closed and guarded
+(`TestMutatingCommandsReturnTheirResultMachineReadably` in `cmd/crewship`):
+
+| Commands | What `-f json` prints |
+|---|---|
+| Every `create` subcommand in the tree (`agent create`, `crew create`, `issue create`, `page create`, `project create`, `workspace create`, …) | The created object, as the corresponding `get` / `list` row shows it (`issue create` emits the [`issue get`](/cli/issue) object). |
+| `token create` | `{"id", "name", "token"}` — the bearer itself, once. The sensitivity warning goes to stderr; `--output-file` and `--quiet` take precedence and keep the token off stdout. |
+| `issue update`, `issue comment`, `issue start`, `issue stop`, `issue review` | The updated issue (or the comment), same shape as `issue get`. |
+| `issue delete` | `{"identifier", "id", "deleted": true}` — synthesised, because the server answers `204` with no body. |
+
+Every other mutation is a bare receipt whose real answer is the exit code; `-f json`
+on those prints nothing on stdout.
 
 ## Resolving resource references
 

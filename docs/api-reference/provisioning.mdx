@@ -189,6 +189,15 @@ against the Docker daemon before it is reported: a `crewship-cache:*` tag
 removed outside Crewship (`docker rmi`, `docker system prune`) is rebuilt, not
 reported present from a stale image list.
 
+A chat message that arrives while the crew is unstartable is parked on the
+build and resumed when it completes. If the completed build still leaves the
+image missing from the daemon, the message is deferred to another build — with
+a 2 s, then 4 s back-off — and after **3** consecutive rebuilds it gives up:
+the session receives a streamed `error` event whose `metadata` carries
+`reason: "provisioning_loop"` and `rebuilds: 3`, followed by `done`, and the
+message is not retried. Check the server logs and `docker images` for whatever
+is removing `crewship-cache:*` images, then send the message again (#2431).
+
 To start the container, call
 [`POST /api/v1/crews/{crewId}/container-start`](/api-reference/crews#start-container),
 which provisions first if the crew has no image and then starts it.

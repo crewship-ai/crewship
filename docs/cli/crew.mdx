@@ -476,10 +476,16 @@ Displays a compound view with three sections:
 - **ASSIGNMENTS (last 5)** -- recent task assignments with status colors
 - **ESCALATIONS (open)** -- pending or open escalations
 
-Agent and assignment statuses are printed as returned by the API. Open
-escalations are those with status `PENDING` or `OPEN`; closed escalations are
-not shown in the open section. The command is a read-only member operation and
-does not resolve assignments or escalations.
+Agent and assignment statuses are printed as returned by the API. A `QUEUED`
+assignment also shows why it is waiting, from the row's `queued_reason`:
+`QUEUED (crew_budget)` — the crew's concurrency budget was full and the queue
+pump will claim it in FIFO order as budget frees; `QUEUED (agent_busy)` — the
+assignee already had a live run and the dispatch was parked behind it (see
+[`crewship run`](/cli/run#streaming-protocol)). Under `--format json` the
+same value is the `queued_reason` field on each assignment, omitted when the
+row is not queued. Open escalations are those with status `PENDING` or `OPEN`;
+closed escalations are not shown in the open section. The command is a
+read-only member operation and does not resolve assignments or escalations.
 
 ---
 

@@ -339,9 +339,25 @@ and the request is available through `keeper history`. They are rate-limited to
 ```text
 --agent <id>         agent slug or ID
 --crew <id>          crew slug or ID
---credential <name>  credential name as shown by credential list
+--credential <ref>   the credential's NAME (as `credential list` prints it) or the
+                     env-var SLOT the agent reads it under (as `agent credentials
+                     <agent>` prints it)
 --intent <text>      stated purpose; the credential tier's minimum applies
 ```
+
+Whichever spelling you pass, the credential has to be reachable **by that
+agent**: the judge rules on a request the agent could actually make. A
+credential that exists in the workspace but is not assigned to the agent is
+refused with exit code `3` and the command that fixes it, rather than judged:
+
+```text
+credential "github-token" exists in this workspace but is not assigned to agent riley, so the judge has nothing to rule on.
+  assign it: crewship credential assign github-token riley
+  what this agent can reach: crewship agent credentials riley
+```
+
+A name that matches neither a workspace credential nor one of the agent's slots
+is refused the same way, pointing at `credential list` and `agent credentials`.
 
 It follows the same tier floors, audit, inbox, and health behavior as an agent
 request. It does not grant a credential or execute a command.
