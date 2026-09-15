@@ -12,6 +12,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 ### Added
 
 - Incoming webhook configuration in Integrations for routines, agents and Page panels, with explicit outgoing notification labels. Routine webhooks can select a GitHub pull request signature profile with content-based replay protection.
+- **CLI:** `run insights --agent/--crew` scope the fleet aggregate to one agent or crew, `issue list --counts` prints the per-status totals (`X-Status-Counts`, as `{issues, status_counts}` in machine formats), and `onboarding proposal create --crew-icon/--crew-color` set the proposal's look, with `crew_color` now present in its output; `journal --crew` accepts a display name as the help always said; `run insights`, `runs.mdx` and `cli/run.mdx` agree the aggregate is ad-hoc-only, and `websocket.mdx` documents `done` metadata, the sender-only `agent_busy` frame, `provision.event`, `workspace.deleted` and `page.action.dispatched` (now allowlisted). (#2589)
 
 
 ### Fixed

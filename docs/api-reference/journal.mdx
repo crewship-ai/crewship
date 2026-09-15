@@ -45,7 +45,8 @@ All filters are AND-combined; CSV-valued ones expand to `IN (?, ?, ...)` predica
 | `crew_id` | string | Filter by a single crew — id, slug or display name (see [References](#references)). |
 | `agent_id` | string | Filter by a single agent — id, slug or display name (see [References](#references)). |
 | `mission_id` | string | Only one issue — its mission id or its identifier (`ENG-4`); resolved per workspace, an unknown reference matches nothing. |
-| `trace_id` | string | Narrow to one run's spans (`trace_id` == run id). |
+| `trace_id` | string | Narrow to one run's spans (`trace_id` == run id). Reaches **ad-hoc agent runs only** — a routine run never sets `trace_id`. |
+| `run_id` | string | Everything that happened during one run, **whichever engine ran it**: matches `trace_id` (ad-hoc agent runs), `actor_id` (routine runs stamp their own id there) and `payload.run_id` (indexed generated column, v120), OR-ed together. Prefer this over `trace_id` unless you specifically want the agent-run spans. Accepted by list, stream and count; `crewship journal --run-id` sends it. |
 | `crew_ids` | string | CSV multi-crew filter — takes precedence over `crew_id` when non-empty. Each value is resolved the same way. |
 | `agent_ids` | string | CSV multi-agent filter — takes precedence over `agent_id` when non-empty. Each value is resolved the same way. |
 | `entry_type` | string | CSV of entry types (e.g. `peer.escalation,keeper.decision`). |
