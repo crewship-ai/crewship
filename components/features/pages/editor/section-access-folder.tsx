@@ -121,6 +121,7 @@ export function FolderAccessCard({
             )}
             {sharing && (
               <FolderSharingDialog
+                marker={marker}
                 workspaceId={workspaceId}
                 open
                 onOpenChange={(open) => !open && setSharing(false)}

@@ -55,6 +55,7 @@ import {
   ownPathsSentence,
   type FolderAclEntry,
   type FolderAclSubjectType,
+  type FolderShared,
 } from "@/lib/pages/folder-sharing"
 import {
   useFolderAcl,
@@ -113,6 +114,8 @@ export interface FolderSharingDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   folder: PageFolderView | null
+  /** Current sharing summary; callers must use unknown when the folder list fails to refresh. */
+  marker: FolderShared
   /**
    * A page in this folder that is open right now, if any. A reader who may
    * not see the table is shown their own paths to it — that is the half of
@@ -121,7 +124,7 @@ export interface FolderSharingDialogProps {
   pageSlug?: string | null
 }
 
-export function FolderSharingDialog({ workspaceId, open, onOpenChange, folder, pageSlug }: FolderSharingDialogProps) {
+export function FolderSharingDialog({ workspaceId, open, onOpenChange, folder, marker, pageSlug }: FolderSharingDialogProps) {
   const slug = folder?.slug ?? null
   const acl = useFolderAcl(workspaceId, slug, open)
   const { set, unset } = useFolderAclMutations(workspaceId, slug)
@@ -201,8 +204,8 @@ export function FolderSharingDialog({ workspaceId, open, onOpenChange, folder, p
         title="Sharing"
         description={
           folder?.ownerLabel
-            ? `Owned by ${folder.ownerLabel}. What is set here applies to every page in the folder.`
-            : "What is set here applies to every page in the folder."
+            ? `Owned by ${folder.ownerLabel}. What is set here applies to every page in the folder. Can edit adds write access, including for workspace Viewers.`
+            : "What is set here applies to every page in the folder. Can edit adds write access, including for workspace Viewers."
         }
         onClose={() => onOpenChange(false)}
       />
@@ -219,7 +222,7 @@ export function FolderSharingDialog({ workspaceId, open, onOpenChange, folder, p
           </p>
         ) : acl.refusal !== null ? (
           <div data-slot="folder-sharing-marker" className="flex flex-col gap-3">
-            <p className="text-sm font-medium text-foreground">{folderSharingSentence(folder?.shared ?? "unknown")}</p>
+            <p className="text-sm font-medium text-foreground">{folderSharingSentence(marker)}</p>
             <p data-slot="control-refusal" className="type-page-meta rounded-md border border-border/50 bg-muted/30 px-3 py-2 text-muted-foreground">
               {acl.refusal}
             </p>

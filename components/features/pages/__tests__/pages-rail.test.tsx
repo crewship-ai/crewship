@@ -707,3 +707,68 @@ describe("PagesRail folders", () => {
     expect(rowOf("Flotila .201")).toBe(row)
   })
 })
+
+describe("PagesRail avatar (#2563)", () => {
+  beforeEach(() => cleanup())
+
+  const glyphOf = (row: HTMLElement) => row.querySelector<SVGElement>("[data-slot='page-glyph']")
+  const stateOf = (row: HTMLElement) => row.querySelector<SVGElement>("[data-slot='page-state-glyph']")
+
+  const WITH_AVATAR = [
+    toPageView({
+      id: "a1", slug: "ops-board", name: "Ops board", owner: "crew/lookout", reach: ["role"],
+      icon: "rocket", color: "amber",
+      panels: [{ id: "a", schema: "status.v1", state: "stale" }],
+    }),
+    toPageView({
+      id: "a2", slug: "plain", name: "Plain page", owner: "crew/lookout", reach: ["role"],
+      panels: [{ id: "a", schema: "status.v1", state: "fresh" }],
+    }),
+    toPageView({
+      id: "a3", slug: "unknown-icon", name: "Unknown icon", owner: "crew/lookout", reach: ["role"],
+      icon: "unicorn", color: "amber",
+      panels: [],
+    }),
+  ]
+
+  it("draws the page's own icon in its colour, with the state glyph beside it — never instead of it", () => {
+    renderRail({ pages: WITH_AVATAR })
+    const row = rowOf("Ops board")
+    const glyph = glyphOf(row)!
+    expect(glyph.getAttribute("data-icon")).toBe("rocket")
+    expect(glyph.getAttribute("data-color")).toBe("amber")
+    // The state is a second glyph, after the avatar, in the state's tone.
+    const state = stateOf(row)!
+    expect(state.getAttribute("data-state")).toBe("stale")
+    expect(state.classList.contains("text-warn")).toBe(true)
+    expect(glyph.compareDocumentPosition(state) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  it("draws the default page glyph, in no colour, for a page without an avatar", () => {
+    renderRail({ pages: WITH_AVATAR })
+    const row = rowOf("Plain page")
+    const glyph = glyphOf(row)!
+    expect(glyph.getAttribute("data-icon")).toBeNull()
+    expect(glyph.getAttribute("data-color")).toBeNull()
+    expect(stateOf(row)!.getAttribute("data-state")).toBe("fresh")
+  })
+
+  it("draws an icon name this build does not know as the default glyph, not as the catalogue's first icon", () => {
+    renderRail({ pages: WITH_AVATAR })
+    const row = rowOf("Unknown icon")
+    // Same SVG as the plain page's default: the concept glyph, not a briefcase.
+    const plain = glyphOf(rowOf("Plain page"))!.innerHTML
+    expect(glyphOf(row)!.innerHTML).toBe(plain)
+    // No readable state on a page with no panels: no state glyph at all
+    // (§9b.4 — nothing is invented for "no basis").
+    expect(stateOf(row)).toBeNull()
+  })
+
+  it("keeps the STATUS facet counting states, unaffected by avatars", () => {
+    renderRail({ pages: WITH_AVATAR })
+    openPanel()
+    const p = panel()!
+    expect(within(p).getByText("Stale").parentElement!.textContent).toMatch(/Stale\s*1/)
+    expect(within(p).getByText("Fresh").parentElement!.textContent).toMatch(/Fresh\s*1/)
+  })
+})

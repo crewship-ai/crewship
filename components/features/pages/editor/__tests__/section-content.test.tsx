@@ -597,7 +597,9 @@ describe("saving the Page's name and description", () => {
     expect(patches[0].url).toContain("/api/v1/pages/fleet-overview")
     expect(patches[0].url).toContain("workspace_id=ws-1")
     // No `panels` and no `slug`: an omitted panel list leaves the stored
-    // panels, their gates and their automations exactly as they are.
+    // panels, their gates and their automations exactly as they are. No
+    // `icon`/`color` either: the form did not touch them, and sending what
+    // it last read would undo a pick made from the header tile (#2563).
     expect(patches[0].body).toEqual({
       name: "Fleet overview v2",
       description: "Services and container memory",
@@ -663,6 +665,84 @@ describe("saving the Page's name and description", () => {
 })
 
 // ── 5. The application offer names the real limitation ─────────────────────
+
+describe("the Page's icon and colour (#2563)", () => {
+  const avatarLabel = () => document.querySelector("[data-slot='page-avatar-label']")!.textContent
+
+  it("shows the stored avatar, and 'No icon' when there is none", () => {
+    mount()
+    expect(avatarLabel()).toBe("No icon")
+    expect(document.querySelector("[data-slot='page-avatar-default']")).toBeTruthy()
+    cleanup()
+
+    mount({ page: { ...PANEL_PAGE, icon: "rocket", color: "amber" } })
+    expect(avatarLabel()).toBe("rocket · amber")
+    // The tile is the crew-style avatar now, not the neutral default.
+    expect(document.querySelector("[data-slot='page-avatar-default']")).toBeNull()
+    expect(screen.getByRole("button", { name: "Remove" })).toBeTruthy()
+  })
+
+  it("draws the picked icon before Save, marks the form dirty, and sends both on Save", async () => {
+    const { calls, onDirtyChange } = mount()
+    fireEvent.click(screen.getByRole("button", { name: "Choose…" }))
+    // The shared picker (the crew one, generalised): swatches and tiles are radios.
+    fireEvent.click(await screen.findByRole("radio", { name: "amber" }))
+    fireEvent.click(screen.getByRole("radio", { name: "Rocket" }))
+    fireEvent.click(screen.getByRole("button", { name: /^Save$/ }))
+    await waitFor(() => expect(screen.queryByRole("radio", { name: "amber" })).toBeNull())
+
+    await waitFor(() => expect(avatarLabel()).toBe("rocket · amber"))
+    await waitFor(() => expect(onDirtyChange).toHaveBeenCalledWith(true))
+    expect(calls.filter((c) => c.method === "PATCH")).toHaveLength(0)
+
+    fireEvent.click(screen.getByRole("button", { name: /save changes/i }))
+    await waitFor(() => expect(screen.getByText(/^Saved\./)).toBeTruthy())
+    const patches = calls.filter((c) => c.method === "PATCH")
+    expect(patches).toHaveLength(1)
+    expect(patches[0].body).toEqual({
+      name: "Fleet overview",
+      description: "Services and container memory",
+      icon: "rocket",
+      color: "amber",
+    })
+  })
+
+  it("a rename on a page with an avatar leaves the avatar out of the PATCH", async () => {
+    const { calls } = mount({ page: { ...PANEL_PAGE, icon: "rocket", color: "amber" } })
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Renamed" } })
+    fireEvent.click(screen.getByRole("button", { name: /save changes/i }))
+    await waitFor(() => expect(screen.getByText(/^Saved\./)).toBeTruthy())
+    const patches = calls.filter((c) => c.method === "PATCH")
+    expect(patches).toHaveLength(1)
+    expect(patches[0].body).toEqual({ name: "Renamed", description: "Services and container memory" })
+  })
+
+  it("Remove clears both and Save sends empty strings, never omitted fields", async () => {
+    const { calls } = mount({ page: { ...PANEL_PAGE, icon: "rocket", color: "amber" } })
+    fireEvent.click(screen.getByRole("button", { name: "Remove" }))
+    expect(avatarLabel()).toBe("No icon")
+
+    fireEvent.click(screen.getByRole("button", { name: /save changes/i }))
+    await waitFor(() => expect(screen.getByText(/^Saved\./)).toBeTruthy())
+    const patches = calls.filter((c) => c.method === "PATCH")
+    expect(patches).toHaveLength(1)
+    expect(patches[0].body).toMatchObject({ icon: "", color: "" })
+  })
+
+  it("keeps the picked avatar, like the typed name, when the server refuses", async () => {
+    mount({ page: { ...PANEL_PAGE, icon: "rocket", color: "amber" }, patch: jsonResponse(400, { error: "icon unicorn is not a crew icon" }) })
+    fireEvent.click(screen.getByRole("button", { name: "Remove" }))
+    fireEvent.click(screen.getByRole("button", { name: /save changes/i }))
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toMatch(/not a crew icon/))
+    expect(avatarLabel()).toBe("No icon")
+  })
+
+  it("disables the avatar controls with the rest of the metadata form", () => {
+    mount({ page: { ...PANEL_PAGE, icon: "rocket", color: "amber" }, capabilities: { mayEditMetadata: false } })
+    expect((screen.getByRole("button", { name: "Choose…" }) as HTMLButtonElement).disabled).toBe(true)
+    expect((screen.getByRole("button", { name: "Remove" }) as HTMLButtonElement).disabled).toBe(true)
+  })
+})
 
 describe("the application offer is honest about this installation", () => {
   it("fetches nothing until it is opened", () => {

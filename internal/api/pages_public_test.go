@@ -1156,7 +1156,7 @@ func TestPublish_RefusesANonOwner(t *testing.T) {
 		t.Fatalf("add member: %v", err)
 	}
 	rr := pagesPublishAs(t, h, wsID, other, "MEMBER", "cizi", "")
-	if rr.Code != http.StatusForbidden {
-		t.Fatalf("a non-owner MEMBER published the page: %d %s", rr.Code, rr.Body.String())
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("unreachable page must be concealed: %d %s", rr.Code, rr.Body.String())
 	}
 }

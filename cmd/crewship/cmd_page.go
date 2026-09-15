@@ -157,6 +157,8 @@ type pageJSON struct {
 	Name        string          `json:"name"`
 	Description string          `json:"description"`
 	Owner       string          `json:"owner"`
+	Icon        string          `json:"icon"`
+	Color       string          `json:"color"`
 	Panels      []pagePanelJSON `json:"panels"`
 	UpdatedAt   string          `json:"updated_at"`
 }
@@ -229,6 +231,37 @@ type pageWriteJSON struct {
 	//
 	// Omitted means the server's default: the creator owns the page.
 	Owner string `json:"owner,omitempty"`
+	// Icon and Color are the page's avatar (#2563) — a crew icon name and a
+	// crew palette key, set from --icon / --color. Like Owner they are NOT part
+	// of the document: the document is the contract, the avatar is the
+	// picture beside it. Pointers, because on `update` the server reads an
+	// omitted field as "keep" and "" as "clear", and a flag not passed must
+	// be the former.
+	Icon  *string `json:"icon,omitempty"`
+	Color *string `json:"color,omitempty"`
+}
+
+// pageAvatarPatchJSON is the body `page update` sends when only --icon or
+// --color was passed: no name, no panels, so the server touches nothing else.
+type pageAvatarPatchJSON struct {
+	Icon  *string `json:"icon,omitempty"`
+	Color *string `json:"color,omitempty"`
+}
+
+// pageAvatarFromFlags reads --icon and --color as pointers: nil when the flag
+// was not passed, a pointer to "" when it was passed empty (clear).
+func pageAvatarFromFlags(cmd *cobra.Command) (icon, color *string) {
+	if cmd.Flags().Changed("icon") {
+		v, _ := cmd.Flags().GetString("icon")
+		v = strings.TrimSpace(v)
+		icon = &v
+	}
+	if cmd.Flags().Changed("color") {
+		v, _ := cmd.Flags().GetString("color")
+		v = strings.TrimSpace(v)
+		color = &v
+	}
+	return icon, color
 }
 
 type pageWritePanelJSON struct {
@@ -396,6 +429,9 @@ func printPageHuman(page pageJSON) {
 	if page.Owner != "" {
 		fmt.Printf("owner: %s\n", page.Owner)
 	}
+	if page.Icon != "" || page.Color != "" {
+		fmt.Printf("icon:  %s\n", pageAvatarLabel(page.Icon, page.Color))
+	}
 	fmt.Println()
 
 	if len(page.Panels) == 0 {
@@ -444,6 +480,12 @@ func printPageHuman(page pageJSON) {
 	}
 }
 
+// pageAvatarLabel prints the avatar the way the picker names it: the icon,
+// then the colour, an em dash for whichever half is not set.
+func pageAvatarLabel(icon, color string) string {
+	return pageDash(icon) + " · " + pageDash(color)
+}
+
 func pageReasonSuffix(p pagePanelJSON) string {
 	if strings.TrimSpace(p.Reason) == "" {
 		return ""
@@ -472,6 +514,7 @@ var pageCreateCmd = &cobra.Command{
 		}
 		body := pageWriteFrom(doc)
 		body.Owner = owner
+		body.Icon, body.Color = pageAvatarFromFlags(cmd)
 		resp, err := client.Post("/api/v1/pages", body)
 		if err != nil {
 			return err
@@ -486,24 +529,40 @@ var pageCreateCmd = &cobra.Command{
 
 var pageUpdateCmd = &cobra.Command{
 	Use:   "update <slug>",
-	Short: "Replace a page's spec from a YAML (or JSON) page document",
+	Short: "Replace a page's spec from a YAML (or JSON) page document, or change its icon and colour",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		doc, err := pageDocumentFromFlag(cmd)
-		if err != nil {
-			return err
-		}
-		if doc.Metadata.Slug != "" && doc.Metadata.Slug != args[0] {
-			return cli.WithExitCode(fmt.Errorf(
-				"the document declares slug %q but you asked to update %q; a page's slug is its address",
-				doc.Metadata.Slug, args[0]), cli.ExitValidation)
+		icon, color := pageAvatarFromFlags(cmd)
+		path, _ := cmd.Flags().GetString("file")
+		// The avatar alone is a legitimate update (#2563): no document, so
+		// the server keeps the name, the description and every panel exactly
+		// as they are. A document with the flags beside it sends both.
+		var body any
+		if strings.TrimSpace(path) == "" && (icon != nil || color != nil) {
+			body = pageAvatarPatchJSON{Icon: icon, Color: color}
+		} else {
+			doc, err := pageDocumentFromFlag(cmd)
+			if err != nil {
+				if icon == nil && color == nil {
+					return cli.WithExitCode(errors.New("--file is required: a page is authored as a YAML document (kind: Page); "+
+						"to change only the icon or colour, pass --icon or --color without --file"), cli.ExitValidation)
+				}
+				return err
+			}
+			if doc.Metadata.Slug != "" && doc.Metadata.Slug != args[0] {
+				return cli.WithExitCode(fmt.Errorf(
+					"the document declares slug %q but you asked to update %q; a page's slug is its address",
+					doc.Metadata.Slug, args[0]), cli.ExitValidation)
+			}
+			write := pageWriteFrom(doc)
+			write.Slug = ""
+			write.Icon, write.Color = icon, color
+			body = write
 		}
 		client, err := pageClient()
 		if err != nil {
 			return err
 		}
-		body := pageWriteFrom(doc)
-		body.Slug = ""
 		resp, err := client.Patch("/api/v1/pages/"+pagePathEscape(args[0]), body)
 		if err != nil {
 			return err
@@ -874,7 +933,11 @@ func init() {
 	// Create only. `update` re-applies a spec, and ownership is not part of the
 	// spec — see pageWriteJSON.Owner.
 	pageCreateCmd.Flags().String("owner", "", "Hand the page to a crew (crew/<slug>); default is the creator")
-	pageUpdateCmd.Flags().String("file", "", "Page document to replace the spec with (YAML or JSON; - for stdin)")
+	pageCreateCmd.Flags().String("icon", "", "The page's icon: a crew icon name (the crew icon picker's set)")
+	pageCreateCmd.Flags().String("color", "", "The page's colour: a crew palette key (blue, emerald, violet, amber, rose, cyan, lime, fuchsia)")
+	pageUpdateCmd.Flags().String("file", "", "Page document to replace the spec with (YAML or JSON; - for stdin); optional when only --icon or --color changes")
+	pageUpdateCmd.Flags().String("icon", "", `The page's icon: a crew icon name; pass "" to clear it`)
+	pageUpdateCmd.Flags().String("color", "", `The page's colour: a crew palette key; pass "" to clear it`)
 	pageDeleteCmd.Flags().BoolP("yes", "y", false, "Skip the interactive confirmation prompt")
 	pageSetCmd.Flags().String("data", "-", `Payload: "-" for stdin, "@path" for a file, or a literal JSON document`)
 	pageSetCmd.Flags().String("state", "", `The producer's own verdict: "ok" (default) or "failed"`)

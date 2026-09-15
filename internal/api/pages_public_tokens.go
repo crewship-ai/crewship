@@ -204,7 +204,7 @@ func (h *PageHandler) Publish(w http.ResponseWriter, r *http.Request) {
 	// over arrangement, never over reach — and a write grant may be held by an
 	// agent, which rule 3 has just refused.
 	if !h.isPageOwner(r.Context(), wsID, user.ID, rec) && !canRole(RoleFromContext(r.Context()), "manage") {
-		replyError(w, http.StatusForbidden, "only the page owner or a workspace admin may publish this page")
+		h.refusePageAction(w, r, rec, "only the page owner or a workspace admin may publish this page", "")
 		return
 	}
 
@@ -401,7 +401,7 @@ func (h *PageHandler) ListPublicLinks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !h.isPageOwner(r.Context(), wsID, user.ID, rec) && !canRole(RoleFromContext(r.Context()), "manage") {
-		replyError(w, http.StatusForbidden, "only the page owner or a workspace admin may see this page's public links")
+		h.refusePageAction(w, r, rec, "only the page owner or a workspace admin may see this page's public links", "")
 		return
 	}
 
@@ -490,7 +490,7 @@ func (h *PageHandler) RevokePublicLink(w http.ResponseWriter, r *http.Request) {
 	// should be able to close it: rule 3 forbids WIDENING reach, and narrowing
 	// it is the opposite move. The owner gate still applies.
 	if !h.isPageOwner(r.Context(), wsID, user.ID, rec) && !canRole(RoleFromContext(r.Context()), "manage") {
-		replyError(w, http.StatusForbidden, "only the page owner or a workspace admin may revoke this page's public links")
+		h.refusePageAction(w, r, rec, "only the page owner or a workspace admin may revoke this page's public links", "")
 		return
 	}
 

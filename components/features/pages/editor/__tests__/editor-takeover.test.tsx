@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import React from "react"
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { render, screen, fireEvent, cleanup, within } from "@testing-library/react"
 
 vi.mock("next/navigation", () => ({
@@ -74,6 +75,16 @@ function Harness({ detail }: { detail: WirePageDetail }) {
   )
 }
 
+// The header's avatar tile saves through react-query (#2563), so the shell
+// is rendered under a client here — the sections are mocked, the header is not.
+function mount(detail: WirePageDetail) {
+  return render(
+    <QueryClientProvider client={new QueryClient()}>
+      <Harness detail={detail} />
+    </QueryClientProvider>,
+  )
+}
+
 describe("the editor as a mode over the whole page", () => {
   beforeEach(() => {
     cleanup()
@@ -81,7 +92,7 @@ describe("the editor as a mode over the whole page", () => {
   })
 
   it("lays every section out at once, each a landmark named for it, under the Page's own header", () => {
-    render(<Harness detail={page({})} />)
+    mount(page({}))
     for (const id of EDITOR_SECTIONS) {
       const frame = screen.getByRole("region", { name: EDITOR_SECTION_LABEL[id] })
       expect(within(frame).getByTestId(`section-${id}`)).toBeTruthy()
@@ -98,7 +109,7 @@ describe("the editor as a mode over the whole page", () => {
   })
 
   it("hands focus to the section the address names, and keeps the other three on screen", () => {
-    render(<Harness detail={page({})} />)
+    mount(page({}))
     expect(document.activeElement).toBe(screen.getByRole("heading", { name: "Operations Lab" }))
     fireEvent.click(screen.getByRole("button", { name: "go to access" }))
     expect(window.location.search).toContain("section=access")
@@ -108,24 +119,24 @@ describe("the editor as a mode over the whole page", () => {
   })
 
   it("names the application as a pill, with its publication", () => {
-    render(<Harness detail={page({ has_application: true, has_project: true, publication_version: 4 } as Partial<WirePageDetail>)} />)
+    mount(page({ has_application: true, has_project: true, publication_version: 4 } as Partial<WirePageDetail>))
     const header = screen.getByTestId("page-editor-header")
     expect(header.textContent).toContain("Custom application")
     expect(header.textContent).toContain("Publication 4")
   })
 
   it("says that viewers keep the live publication while an application Page is edited", () => {
-    render(<Harness detail={page({ has_application: true, publication_version: 4 } as Partial<WirePageDetail>)} />)
+    mount(page({ has_application: true, publication_version: 4 } as Partial<WirePageDetail>))
     expect(screen.getByText(/Viewers still see publication 4/)).toBeTruthy()
   })
 
   it("says the draft is unpublished when the application has never shipped", () => {
-    render(<Harness detail={page({ has_project: true } as Partial<WirePageDetail>)} />)
+    mount(page({ has_project: true } as Partial<WirePageDetail>))
     expect(screen.getByText(/The application draft is not published/)).toBeTruthy()
   })
 
   it("offers one way back, named for where it goes", () => {
-    render(<Harness detail={page({})} />)
+    mount(page({}))
     fireEvent.click(screen.getByRole("button", { name: /back to page/i }))
     expect(screen.getByText("viewing")).toBeTruthy()
   })

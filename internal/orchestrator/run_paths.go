@@ -289,13 +289,13 @@ type RunLocation struct{ ContainerID, AgentSlug, RunID string }
 
 func (o *Orchestrator) RunIsAliveAt(ctx context.Context, location RunLocation) (bool, error) {
 	containerID, agentSlug, runID := location.ContainerID, location.AgentSlug, location.RunID
-	if containerID == "" || agentSlug == "" || runID == "" {
-		return false, fmt.Errorf("incomplete runtime location")
+	if containerID == "" || agentSlug == "" || !ValidRunID(runID) {
+		return false, fmt.Errorf("incomplete or invalid runtime location")
 	}
 	session := TmuxSessionName(agentSlug, runID)
 	// PRESENT / ABSENT are distinct tokens, and anything else — including an
 	// empty read — is not an answer.
-	probe := "if ! command -v tmux >/dev/null 2>&1; then echo NOTMUX; " +
+	probe := directRunProbe(runID, false) + "if ! command -v tmux >/dev/null 2>&1; then echo NOTMUX; " +
 		"elif tmux has-session -t '" + session + "' 2>/dev/null; then echo PRESENT; " +
 		"else echo ABSENT; fi"
 	out, err := o.probeExec(ctx, containerID, probe)
@@ -337,11 +337,11 @@ func (o *Orchestrator) StopRun(ctx context.Context, runID string) (bool, error) 
 
 func (o *Orchestrator) StopRunAt(ctx context.Context, location RunLocation) (bool, error) {
 	containerID, agentSlug, runID := location.ContainerID, location.AgentSlug, location.RunID
-	if containerID == "" || agentSlug == "" || runID == "" {
-		return false, fmt.Errorf("incomplete runtime location")
+	if containerID == "" || agentSlug == "" || !ValidRunID(runID) {
+		return false, fmt.Errorf("incomplete or invalid runtime location")
 	}
 	session := TmuxSessionName(agentSlug, runID)
-	probe := "if ! command -v tmux >/dev/null 2>&1; then echo NOTMUX; else " +
+	probe := directRunProbe(runID, true) + "if ! command -v tmux >/dev/null 2>&1; then echo NOTMUX; else " +
 		"tmux kill-session -t '" + session + "' >/dev/null 2>&1; " +
 		"if tmux has-session -t '" + session + "' 2>/dev/null; then echo PRESENT; else echo ABSENT; fi; fi"
 	out, err := o.probeExec(ctx, containerID, probe)

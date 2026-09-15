@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/crewship-ai/crewship/internal/conversation"
@@ -64,16 +65,21 @@ func testBridge(t *testing.T, resolver ChatResolver) (*Bridge, string) {
 
 // minimal in-memory state for tests
 type memState struct {
+	mu   sync.Mutex
 	data map[string]map[string][]byte
 }
 
 func (m *memState) Get(_ context.Context, bucket, key string) ([]byte, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if b, ok := m.data[bucket]; ok {
 		return b[key], nil
 	}
 	return nil, nil
 }
 func (m *memState) Set(_ context.Context, bucket, key string, value []byte) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if m.data[bucket] == nil {
 		m.data[bucket] = make(map[string][]byte)
 	}
@@ -81,15 +87,25 @@ func (m *memState) Set(_ context.Context, bucket, key string, value []byte) erro
 	return nil
 }
 func (m *memState) Delete(_ context.Context, bucket, key string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if b, ok := m.data[bucket]; ok {
 		delete(b, key)
 	}
 	return nil
 }
 func (m *memState) List(_ context.Context, bucket string) (map[string][]byte, error) {
-	return m.data[bucket], nil
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	result := make(map[string][]byte)
+	for k, v := range m.data[bucket] {
+		result[k] = v
+	}
+	return result, nil
 }
 func (m *memState) ListByPrefix(_ context.Context, bucket, prefix string) (map[string][]byte, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	result := make(map[string][]byte)
 	for k, v := range m.data[bucket] {
 		if strings.HasPrefix(k, prefix) {

@@ -118,7 +118,7 @@ function mount(harness: Harness = {}, slug?: string) {
       <PagesLayout workspaceId="ws-1" slug={slug} now={NOW} />
     </QueryClientProvider>,
   )
-  return { calls, writes: () => calls.filter((c) => c.method !== "GET"), reads: (prefix: string) => calls.filter((c) => c.method === "GET" && c.url.startsWith(prefix)) }
+  return { qc, calls, writes: () => calls.filter((c) => c.method !== "GET"), reads: (prefix: string) => calls.filter((c) => c.method === "GET" && c.url.startsWith(prefix)) }
 }
 
 const rowOf = (name: string) => screen.getByText(name).closest('[role="button"]') as HTMLElement
@@ -409,4 +409,31 @@ describe("moving several pages at once", () => {
     expect(writes()).toHaveLength(1)
     expect(screen.getByRole("dialog")).toBeTruthy()
   })
+})
+
+
+it("replaces a stale sharing marker after a failed refresh and recovers without closing the dialog", async () => {
+  let failed = false
+  let shared = "none"
+  const { qc, writes } = mount({
+    folders: () => [{ ...OPS, shared }],
+    answer: call => failed && call.url.startsWith("/api/v1/page-folders?") ? json(500, { error: "refresh failed" }) : null,
+  })
+  const dialog = await openSharing("Ops")
+  const marker = () => dialog.querySelector('[data-slot="folder-sharing-marker"]')?.textContent
+  await waitFor(() => expect(marker()).toContain("Only the owning crew and workspace admins"))
+  failed = true
+  await act(async () => { await qc.refetchQueries() })
+  expect(qc.getQueryCache().getAll().some(q => q.state.error?.message === "refresh failed")).toBe(true)
+  await waitFor(() => expect(marker()).toContain("Sharing could not be determined"))
+  expect(marker()).not.toContain("Only the owning crew")
+  expect(screen.getByRole("dialog")).toBe(dialog)
+  expect(dialog.textContent).toContain("Ops")
+  failed = false
+  shared = "people"
+  await act(async () => { await qc.refetchQueries() })
+  await waitFor(() => expect(marker()).toContain("Shared with named people"))
+  expect(marker()).not.toContain("Sharing could not be determined")
+  expect(screen.getByRole("dialog")).toBe(dialog)
+  expect(writes()).toEqual([])
 })

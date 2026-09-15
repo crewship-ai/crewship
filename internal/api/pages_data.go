@@ -148,8 +148,8 @@ func (h *PageHandler) PushData(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if panel == nil {
-		replyError(w, http.StatusNotFound,
-			fmt.Sprintf("page %q has no panel %q", slug, panelID))
+		h.refusePageResponse(w, r, rec, http.StatusNotFound,
+			fmt.Sprintf("page %q has no panel %q", slug, panelID), "")
 		return
 	}
 
@@ -158,7 +158,7 @@ func (h *PageHandler) PushData(w http.ResponseWriter, r *http.Request) {
 	// memory on a 64 KiB payload first.
 	if ok, reason := h.mayProduce(r.Context(), wsID, user.ID, RoleFromContext(r.Context()), rec, panel); !ok {
 		h.reportUnauthorisedPush(r, wsID, user, rec, panel, reason)
-		replyError(w, http.StatusForbidden, reason)
+		h.refusePageAction(w, r, rec, reason, "")
 		return
 	}
 

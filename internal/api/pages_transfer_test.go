@@ -258,9 +258,8 @@ func TestPageExport_NeedsTheWriteAuthority(t *testing.T) {
 	req.SetPathValue("slug", pagesXferSlug)
 	rr = httptest.NewRecorder()
 	h.Export(rr, req)
-	if rr.Code != http.StatusForbidden {
-		t.Errorf("export by a plain member: status = %d, want 403 — an export carries panels that reader "+
-			"would receive sealed, body: %s", rr.Code, rr.Body.String())
+	if rr.Code != http.StatusNotFound {
+		t.Errorf("export by an unreachable caller: status = %d, want 404, body: %s", rr.Code, rr.Body.String())
 	}
 }
 

@@ -113,7 +113,8 @@ func TestPX2_AgentStop_ExistsCheckDBError500(t *testing.T) {
 }
 
 func TestPX2_AgentStop_UpdateFails500(t *testing.T) {
-	h, userID, wsID, _, agentID := covProxyRig(t, "/tmp/px2-no-socket-7")
+	sock := covIPCJSON(t, map[string]any{"/agents/agent-pxc/stop": map[string]string{"agent_id": "agent-pxc", "status": "stopped"}})
+	h, userID, wsID, _, agentID := covProxyRig(t, sock)
 	if _, err := h.db.Exec(`
 		CREATE TRIGGER px2_block_stop BEFORE UPDATE ON agents
 		WHEN NEW.status = 'STOPPED'

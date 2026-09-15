@@ -1111,12 +1111,16 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	if runErr != nil {
 		// If context was cancelled (user pressed stop), don't emit error -- the hub
 		// sends a clean "done" event. Emitting error here would cause an error flash.
-		if ctx.Err() == context.Canceled {
+		if ctx.Err() == context.Canceled || errors.Is(runErr, orchestrator.ErrAgentStopped) {
 			b.logger.Info("run cancelled by user", "chat_id", chatID, "duration_ms", time.Since(startedAt).Milliseconds())
 			cancelMsg := "cancelled"
 			cleanCtx, cleanCancel := context.WithTimeout(context.Background(), ledgerWriteTimeout)
 			defer cleanCancel()
-			if err := b.resolver.UpdateRun(cleanCtx, runID, "CANCELLED", nil, &cancelMsg, terminalRunMeta(startedAt, acc, nil)); err != nil {
+			meta := terminalRunMeta(startedAt, acc, nil)
+			if errors.Is(runErr, orchestrator.ErrAgentStopped) {
+				meta["stop_origin"] = "agent_stop"
+			}
+			if err := b.resolver.UpdateRun(cleanCtx, runID, "CANCELLED", nil, &cancelMsg, meta); err != nil {
 				b.logger.Warn("failed to update run status", "run_id", runID, "status", "CANCELLED", "error", err)
 			}
 			// Persist whatever the run produced before it was stopped so the
