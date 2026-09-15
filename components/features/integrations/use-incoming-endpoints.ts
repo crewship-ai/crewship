@@ -70,6 +70,8 @@ export function useIncomingEndpoints(workspaceId: string, enabled: boolean) {
       name: t.name,
       slug: t.slug,
       kind: "routine" as const,
+      icon: t.icon,
+      color: t.color,
     })),
     ...(agents.data ?? []).map((t) => ({ ...t, kind: "agent" as const })),
     ...pages.pages.map((t) => ({

@@ -1,4 +1,6 @@
 "use client"
+
+import { IncomingTargetAvatar } from "../incoming-target-avatar"
 import * as React from "react"
 import Link from "next/link"
 import { useQuery } from "@tanstack/react-query"
@@ -140,10 +142,7 @@ export function IncomingWebhooksView({
               <ChevronLeft className="size-3.5" />
               Back to endpoints
             </Button>
-            {React.createElement(
-              INCOMING_KINDS.find((k) => k.key === target.kind)!.icon,
-              { className: "size-4 text-muted-foreground" },
-            )}
+            <IncomingTargetAvatar target={target} />
             <span className="truncate text-xs font-medium">{target.name}</span>
           </div>
           <div className="space-y-4 p-4 md:p-6">
@@ -290,7 +289,10 @@ export function IncomingWebhooksView({
                           className="w-full justify-between px-4 text-xs"
                           onClick={() => onSelect(t)}
                         >
-                          {t.name}
+                          <span className="flex min-w-0 items-center gap-2">
+                            <IncomingTargetAvatar target={t} />
+                            <span className="truncate">{t.name}</span>
+                          </span>
                           <span className="text-muted-foreground">
                             View endpoints · per Page
                           </span>
@@ -416,10 +418,7 @@ function EndpointTable({
               </td>
               <td className="px-4 py-3">
                 <span className="flex items-center gap-1.5">
-                  {React.createElement(
-                    INCOMING_KINDS.find((k) => k.key === r.target.kind)!.icon,
-                    { className: "size-3.5" },
-                  )}
+                  <IncomingTargetAvatar target={r.target} />
                   {r.target.name}
                 </span>
               </td>

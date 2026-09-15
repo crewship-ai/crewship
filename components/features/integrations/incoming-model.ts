@@ -1,3 +1,5 @@
+import { createElement } from "react"
+import { IncomingTargetAvatar } from "./incoming-target-avatar"
 import { ArrowDownToLine, Bot, FileText, Workflow } from "lucide-react"
 import type { ExplorerItem, ExplorerSection } from "./explorer"
 import type { PipelineWebhook } from "@/hooks/use-pipeline-webhooks"
@@ -9,6 +11,12 @@ export interface IncomingTarget {
   slug: string
   name: string
   kind: IncomingKind
+  avatar_seed?: string | null
+  avatar_style?: string | null
+  avatar_url?: string | null
+  crew?: { avatar_style?: string | null } | null
+  icon?: string | null
+  color?: string | null
   crew_id?: string
   webhook_secret_set?: boolean
 }
@@ -121,6 +129,7 @@ export function incomingExplorer(
     .map((t) => ({
       id: `${t.kind}:${t.slug}`,
       label: t.name,
+      leading: createElement(IncomingTargetAvatar, { target: t }),
       sublabel: `${t.kind} · ${t.slug}`,
       dot: rows.some(
         (r) => r.target.id === t.id && r.target.kind === t.kind && r.enabled,

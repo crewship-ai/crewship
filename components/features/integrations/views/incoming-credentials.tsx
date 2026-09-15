@@ -1,4 +1,6 @@
 "use client"
+
+import { IncomingTargetAvatar } from "../incoming-target-avatar"
 import * as React from "react"
 import { Copy, Plus } from "lucide-react"
 import { toast } from "sonner"
@@ -280,7 +282,10 @@ export function IncomingCreateDialog({
                     .filter((t) => t.kind === kind)
                     .map((t) => (
                       <SelectItem key={t.id} value={t.id}>
-                        {t.name}
+                        <span className="flex items-center gap-2">
+                          <IncomingTargetAvatar target={t} />
+                          {t.name}
+                        </span>
                       </SelectItem>
                     ))}
                 </SelectContent>
