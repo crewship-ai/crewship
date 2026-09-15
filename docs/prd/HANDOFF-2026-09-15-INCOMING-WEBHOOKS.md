@@ -157,11 +157,35 @@ chat and Page settings editors.
 | F13 | Component tests render actual editors against API boundaries. PR browser contract includes real HTTP routine/GitHub create, reveal, table, detail, disable and Refresh plus phone drawer/search/overflow. |
 | F14 | Updated layout architecture comment and `docs/api-reference/webhooks.mdx` user instructions. |
 
-Validation is in progress: the initial full frontend run passed 759 files /
-9,108 tests with coverage thresholds met; a subsequent component extraction
-and explanatory copy edits require the final rerun. Production export passed.
-Full Go + vet and real browser verification have not yet completed for this
-UI revision. Do not treat this table as independent review acceptance.
+Validation on the deployed application revision **b8f9c2fb**:
+
+- Live dev2 browser: real HTTP routine/GitHub create → reveal → table → detail
+  → reload → disable → Refresh → cleanup; actual routine/agent/Page details;
+  Page endpoint creation with an absolute URL; iPhone drawer/search/backdrop
+  and no page overflow. The browser used CLI bearer auth with only session
+  presentation supplied; the business APIs were not mocked.
+- CI 34975673810: the real-login PR browser contracts passed (2 tests), as did
+  the additional reveal (8) and account-group UI checks (5). The full frontend
+  suite passed **760 files / 9,111 tests**. Other Go variants were still running
+  when this entry was written; current check state belongs to the PR.
+- Full current API passed **195.852s**, `-count=1`, using file-backed SQLite on
+  isolated tmpfs (executables on disk). Full `go vet`, production export,
+  ESLint (0 errors / 30 existing warnings), strict docs inventory and the test
+  type baseline gate passed. The latter still records 183 existing diagnostics.
+- The full local Go run started before the catalog change and exposed a flaky
+  `TestSnapshotBeforeMigrate_WhileServerWrites`: its 50ms sleep did not prove
+  the first writer commit had occurred. The log records an empty snapshot
+  assertion; it is not evidence of a lost committed row. The exec wrapper
+  ended with 143 without an overall exit marker, and the package output is
+  explicitly FAIL, so this run is not reported green. Both hot-snapshot test
+  writers now signal their first completed write instead of relying on time.
+  Integrity, generated-column, mode and concurrent-writer assertions remain.
+  A complete database rerun is recorded separately in the evidence report.
+
+Final evidence and subsequent check outcomes are recorded in PR #2558 and
+`/srv/crewship/backups/crewship_2/incoming-webhooks-ui-2026-09-15/REPORT.md`.
+The snapshot synchronization follow-up changes test setup only; the deployed
+application's runtime/frontend code is identical to b8f9c2fb.
 
 Live verification found that `GET /agents` omitted `webhook_secret_set` even
 though `GET /agents/{id}` supplied it. The catalog now computes the existing
