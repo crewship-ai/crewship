@@ -75,7 +75,8 @@ func publicActivitySchemaCatalog() map[string]map[string]DomainSchema {
 	})
 	pagination := object(map[string]any{"page": integer(), "limit": integer(), "total": integer(), "total_pages": integer()})
 	webhook := object(map[string]any{
-		"id": str(), "workspace_id": str(), "name": str(), "target_pipeline_id": str(),
+		"ingress_profile": map[string]any{"type": "string", "enum": []string{"crewship", "github"}},
+		"id":              str(), "workspace_id": str(), "name": str(), "target_pipeline_id": str(),
 		"target_pipeline_slug": str(), "target_pipeline_version": nullable(integer()), "token": str(),
 		"signing_secret_set": boolean(), "signing_secret": str(), "inputs_template": anyObject(),
 		"enabled": boolean(), "rate_limit_per_min": integer(), "last_fired_at": nullable(str()),
@@ -104,7 +105,8 @@ func publicActivitySchemaCatalog() map[string]map[string]DomainSchema {
 	participantAdd := request(map[string]any{"user_id": str(), "role": str()}, "user_id")
 	reactionAdd := request(map[string]any{"emoji": str()}, "emoji")
 	webhookRequest := request(map[string]any{
-		"name": str(), "target_pipeline_slug": str(), "target_pipeline_id": str(),
+		"ingress_profile": map[string]any{"type": "string", "enum": []string{"crewship", "github"}, "default": "crewship"},
+		"name":            str(), "target_pipeline_slug": str(), "target_pipeline_id": str(),
 		"target_pipeline_version": nullable(integer()), "signing_secret": str(), "inputs_template": anyObject(),
 		"enabled": nullable(boolean()), "rate_limit_per_min": integer(),
 	}, "name")
@@ -169,6 +171,23 @@ func publicActivitySchemaCatalog() map[string]map[string]DomainSchema {
 		"GET /api/v1/audit": {Response: object(map[string]any{"data": array(auditEntry), "pagination": pagination})},
 	}
 	webhooks := map[string]DomainSchema{
+		"POST /api/v1/webhooks/{token}/github-pull-request": {
+			Request: object(map[string]any{
+				"action": str(), "pull_request": object(map[string]any{"number": integer()}),
+				"zen": str(), "repository": anyObject(), "sender": anyObject(),
+			}),
+			RequestRequired: true,
+			Parameters: []map[string]any{
+				{"name": "X-Hub-Signature-256", "in": "header", "required": true, "schema": str(), "description": "sha256= followed by the HMAC-SHA256 of the exact request bytes using the endpoint signing secret"},
+				{"name": "X-GitHub-Delivery", "in": "header", "schema": str(), "description": "Required for supported pull request actions; unsigned delivery identity, additionally deduplicated by signed body fingerprint"},
+				{"name": "X-GitHub-Event", "in": "header", "schema": str(), "description": "GitHub event name; ping is ignored, execution is selected from the signed pull_request body"},
+			},
+			SuccessStatuses: []string{"200", "202"},
+			Response: object(map[string]any{
+				"run_id": str(), "status": str(), "deduped": boolean(), "delivery_id": str(),
+				"duplicate": boolean(), "reason": str(),
+			}, "status"),
+		},
 		"GET /api/v1/workspaces/{workspaceId}/pipeline-webhooks":               {Response: array(webhook)},
 		"POST /api/v1/workspaces/{workspaceId}/pipeline-webhooks":              {Request: webhookRequest, Response: webhook},
 		"PATCH /api/v1/workspaces/{workspaceId}/pipeline-webhooks/{webhookId}": {Request: webhookUpdateRequest, Response: webhook},

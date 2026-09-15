@@ -72,3 +72,45 @@ revision-fenced review results, automatic updating of a PR's existing issue,
 shared admission for all producers, or the proposed Work-to-Activity UI merge.
 A GitHub webhook triggers the configured routine; configure a dedicated review
 routine before connecting a repository. No GitHub webhook was created externally.
+
+## Deployed verification on 1d30068e
+
+Dev2 was reloaded successfully and `/api/v1/system/version` reported commit
+`1d30068e`, schema `20260915111000`. No main merge or other instance deployment.
+
+- A real public HTTPS request with GitHub-format headers and HMAC started the
+  configured routine and completed `run_cmu2kvvk10001b2a1c4bd`. Its issue step
+  executed. Receipt `cmu2kvvk1000201b594a2` survived identical delivery and
+  changed unsigned delivery-ID retries. Invalid signature and legacy-profile
+  downgrade returned 401; same delivery ID with changed bytes returned 409;
+  ping returned 200 without execution. This was a locally constructed request,
+  not a delivery emitted by an installed GitHub repository webhook.
+- A browser opened Incoming webhooks, selected the real routine through the
+  Issues target, and displayed the Page token configuration. Browser creation
+  with the GitHub sender returned 201 with `ingress_profile: github`; that
+  disposable browser-created endpoint was deleted (204). Mobile 390px had no
+  horizontal overflow. Existing saved cookie refresh returned 401: this browser
+  exercise used a valid dev2 CLI bearer token for all business APIs and supplied
+  only the frontend `/api/auth/session` presentation from the validated identity.
+  It does not prove the normal login flow.
+- The production ntfy notification adapter POSTed the expected test message to
+  a temporary local HTTP receiver. A separate attempt against a random public
+  ntfy.sh topic returned an acknowledgement but no message was read back;
+  public ntfy.sh end-to-end delivery is **not** claimed as verified.
+- Final frontend tests on 1d30068e: 13 files / 137 tests passed. Full production
+  frontend build and full Go vet exited 0. ESLint had 0 errors and 30 warnings.
+  GitHub-only API race tests exited 0 (53.543s).
+- The full Go run on 1d30068e found one API failure: the additional exhaustive
+  public OpenAPI allow-list omitted the GitHub route. The API package finished
+  in 1101.920s; other packages were still running when this entry was written.
+  The allow-list was corrected with its HMAC reason; a full API rerun started.
+- Manually dispatched CI 34963589302 on 1d30068e found missing request/response
+  schema and endpoint documentation for the alias. Concrete OpenAPI schemas,
+  headers, success statuses and an API guide section were added. Local strict
+  docs-inventory then exited 0. These failures are not counted as green runs.
+
+Evidence (whitelisted logs and screenshots, without signing secrets):
+`/srv/crewship/backups/crewship_2/incoming-webhooks-2026-09-15/`.
+PR #2558 is stacked on #2554; ordinary PR CI does not trigger against that base.
+The manual CI run and local full API rerun must be checked for their actual final
+results before merge. A bot walkthrough is not an approving review.

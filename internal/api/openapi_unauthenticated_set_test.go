@@ -33,6 +33,7 @@ var expectedUnauthenticatedOperations = []unauthenticatedOperation{
 	{"POST", "/api/v1/waitpoint-tokens/{token}", "authenticates a waitpoint action with the credential in the path"},
 	{"POST", "/api/v1/webhooks/{crewId}/{agentId}/trigger", "authenticates webhook delivery with an HMAC signature"},
 	{"POST", "/api/v1/webhooks/{token}", "authenticates webhook delivery with the credential in the path"},
+	{"POST", "/api/v1/webhooks/{token}/github-pull-request", "authenticates delivery with the endpoint credential and GitHub SHA-256 HMAC using the stored GitHub ingress profile; covered by TestPipelineWebhooks_GitHubPullRequestDelivery"},
 }
 
 func TestOpenAPIUnauthenticatedOperationsAreExhaustive(t *testing.T) {
