@@ -223,9 +223,9 @@ The body stays a bare array. The total the filter matched — before `limit`/`of
 | `worker_name` | string? | Resolved name of `worker_user_id`. Omitted otherwise |
 | `work_note` | string | The note carried by the last hand-off, take-over or submission (`""` when none) |
 | `work_stopping` | boolean | `true` while the issue is held by a human but a run or routine started before the take-over has received cancellation and not yet finished. Hand-back and submit wait for it to clear |
-| `client_review_required` | boolean | Whether a person must approve before the issue counts as done (default `true`). Set with [Set Issue Review Policy](#set-issue-review-policy) |
-| `brief_revision` | integer? | Counter bumped every time the brief (title/description) changes; Review compares it against the revision the work was produced for. Omitted while `0` |
-| `execution` | object? | The latest execution of the work contract (the thing a Lead reviews), `{id, stage, attempt, reviewer, note, routine_run_id?, workers[]}`. Omitted until the issue has been started under the contract. `workers[]` items are `{assignment_id, name, status, outcome, run_id?, review}` — `review: true` marks the Lead's review run; `status` reads `PREPARING` for a run claimed but not yet exec'd |
+| `client_review_required` | boolean | **Get only** (List rows carry `false`). Whether a person must approve before the issue counts as done (default `true`). Set with [Set Issue Review Policy](#set-issue-review-policy) |
+| `brief_revision` | integer? | **Get only.** Counter bumped every time the brief (title/description) changes; Review compares it against the revision the work was produced for. Omitted while `0` |
+| `execution` | object? | **Get only.** The latest execution of the work contract (the thing a Lead reviews), `{id, stage, attempt, reviewer, note, routine_run_id?, workers[]}`. Omitted until the issue has been started under the contract. `workers[]` items are `{assignment_id, name, status, outcome, run_id?, review}` — `review: true` marks the Lead's review run; `status` reads `PREPARING` for a run claimed but not yet exec'd |
 
 **`execution.stage`** is the execution's place in the work→Lead-review→correction loop:
 
@@ -347,6 +347,8 @@ PATCH /api/v1/crews/{crewId}/issues/{identifier}?workspace_id={workspaceId}
 | `milestone_id` | string | Milestone ID; empty string unlinks |
 | `sort_order` | number | Manual sort order |
 | `labels` | string[] | Replace all labels with this set of label IDs |
+| `routine_id` | string | Pipeline ID to bind; empty string clears binding (also resets `routine_inputs`) |
+| `routine_inputs` | object | Full-replacement JSON object for routine inputs |
 
 Owner and delegate are independent (#2297, invariant "human owner, agent
 delegate"): a `user` write never touches `delegate_agent_id` and an `agent`
@@ -354,8 +356,6 @@ write never touches `owner_user_id`. The only way to empty a slot is the
 explicit unassign, which empties both. The legacy `assignee_type`/`assignee_id`
 pair is always written alongside as a compatibility projection of the last
 write. The CLI: `crewship issue update <id> --assignee <email|agent> --assignee-type user|agent`.
-| `routine_id` | string | Pipeline ID to bind; empty string clears binding (also resets `routine_inputs`) |
-| `routine_inputs` | object | Full-replacement JSON object for routine inputs |
 
 **Status Transitions:**
 

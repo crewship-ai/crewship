@@ -50,6 +50,40 @@ func TestAcceptance_IssueUpdate_AssigneeTypeUserSetsTheOwner(t *testing.T) {
 		t.Errorf("issue get -f json does not show the new owner:\n%s", out)
 	}
 
+	// A user id (cuid-shaped) is forwarded as-is — the fast path once the
+	// caller already has the id from `workspace member list -f json`.
+	if _, err := db.Exec(`INSERT INTO users (id, email, full_name) VALUES ('cuseriw000000000000000002', 'second@iw-ex.com', 'Second')`); err != nil {
+		t.Fatalf("seed second user: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO workspace_members (id, workspace_id, user_id, role) VALUES ('iwm-second', ?, 'cuseriw000000000000000002', 'MEMBER')`, issueWorkAcceptanceWorkspaceID); err != nil {
+		t.Fatalf("seed second member: %v", err)
+	}
+	out, err = runIssueWorkCLI(t, cfgPath, "issue", "update", "IW-1", "--assignee", "cuseriw000000000000000002", "--assignee-type", "user")
+	if err != nil {
+		t.Fatalf("issue update --assignee <cuid> --assignee-type user: %v\n%s", err, out)
+	}
+	if err := db.QueryRow(`SELECT COALESCE(owner_user_id,''), COALESCE(delegate_agent_id,'') FROM missions WHERE id='iw-mission'`).Scan(&owner, &delegate); err != nil {
+		t.Fatalf("read mission: %v", err)
+	}
+	if owner != "cuseriw000000000000000002" || delegate != "iw-agent" {
+		t.Errorf("after --assignee <cuid>: owner=%q delegate=%q, want the cuid and an untouched delegate", owner, delegate)
+	}
+
+	// --assignee "" is the explicit unassign: both slots and the legacy pair
+	// go empty. (Sent as assignee_id "", which is the only shape the
+	// server's clear branch recognises — a JSON null did nothing.)
+	out, err = runIssueWorkCLI(t, cfgPath, "issue", "update", "IW-1", "--assignee", "")
+	if err != nil {
+		t.Fatalf("issue update --assignee \"\": %v\n%s", err, out)
+	}
+	if err := db.QueryRow(`SELECT COALESCE(owner_user_id,''), COALESCE(delegate_agent_id,''), COALESCE(assignee_type,''), COALESCE(assignee_id,'') FROM missions WHERE id='iw-mission'`).
+		Scan(&owner, &delegate, &legacyType, &legacyID); err != nil {
+		t.Fatalf("read mission: %v", err)
+	}
+	if owner != "" || delegate != "" || legacyType != "" || legacyID != "" {
+		t.Errorf("after --assignee \"\": owner=%q delegate=%q legacy=(%q,%q), want all empty", owner, delegate, legacyType, legacyID)
+	}
+
 	// An email nobody in the workspace has is refused before any request.
 	out, err = runIssueWorkCLI(t, cfgPath, "issue", "update", "IW-1", "--assignee", "nobody@iw-ex.com", "--assignee-type", "user")
 	if err == nil {

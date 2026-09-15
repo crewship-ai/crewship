@@ -162,8 +162,14 @@ var issueUpdateCmd = &cobra.Command{
 		if flags.Changed("assignee") {
 			v, _ := flags.GetString("assignee")
 			if v == "" {
-				body["assignee_id"] = nil
-				body["assignee_type"] = nil
+				// The explicit unassign is assignee_id: "" — the server's
+				// clear branch (issue_handler_update.go) tests for the
+				// empty string, and a JSON null decodes to a nil pointer
+				// that reaches neither branch: alone it was "No fields to
+				// update", beside other flags it was silently ignored.
+				// The server clears both typed slots and the legacy type
+				// itself, so assignee_type is not sent.
+				body["assignee_id"] = ""
 			} else {
 				atype, _ := flags.GetString("assignee-type")
 				assigneeID, atype, err := resolveIssueAssignee(client, atype, v)
@@ -359,5 +365,5 @@ func resolveIssueOwnerUserID(client *cli.Client, ref string) (string, error) {
 		}
 		return id, nil
 	}
-	return "", fmt.Errorf("--assignee %q: with --assignee-type user pass a member's email or user ID (see `crewship workspace member list`)", ref)
+	return "", fmt.Errorf("--assignee %q: with --assignee-type user pass a member's email or user ID (a cuid — see `crewship workspace member list`)", ref)
 }

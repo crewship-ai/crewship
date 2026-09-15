@@ -65,7 +65,7 @@ A decision about a *routine's authored definition* — not just its inbox card �
 
 Both columns are nullable: most approvals and waitpoints (a credential use, an ordinary production-change gate) have nothing to do with a routine's definition and stay `NULL`.
 
-The decided-on `routine_version` column is **stored, not shown**: neither the pending-waitpoints list nor the approvals list nor any CLI command returns it. What you can see is the version *before* deciding — a schedule-activation card carries `payload.routine_version` (the version Approve would enable) — and the version that *then ran*: every run record carries `pipeline_version` (`crewship routine records`, [Pipelines API](/api-reference/pipelines)). Compare those two if the question is "did the same version run".
+Where you can read it back differs by table. An **approval** row returns `routine_version` on `GET /api/v1/approvals` (omitted when `NULL`) and `crewship approval list` prints it beside the other decision fields. A **waitpoint**'s column is stored but not returned: the pending-waitpoints list omits it, and a decided waitpoint is not listed at all. For a waitpoint, the version *before* deciding is on the schedule-activation card's `payload.routine_version`, and the version that *then ran* is `pipeline_version` on every run record (`crewship routine records`, [Pipelines API](/api-reference/pipelines)) — compare those two if the question is "did the same version run".
 
 ### Digest
 

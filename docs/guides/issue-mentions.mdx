@@ -197,8 +197,9 @@ which is what makes "resume where you left off" possible at all.
 | `active` | A run is going; `active_run_id` names it. At most one live run per session, enforced by the database, which is why a follow-up during a run waits (see the known limits). |
 | `idle` | The run ended with `NO_CHANGE`, `SUCCEEDED`, `WORK_CREATED`, `PARTIAL` or `CANCELLED`. Nothing is owed; the next mention reopens it. |
 | `awaiting_input` | The run ended `NEEDS_HUMAN` and raised an inbox card. Answering, taking over or dismissing that card moves the session back to `idle`. |
-| `error` | The run ended `FAILED` (which includes a run that never wrote a checkpoint). Mention again to retry. |
-| `stale`, `closed` | Reserved. Nothing writes `stale` yet — the 14-day idle sweep is not wired — and `closed` is not reachable from the mention path. |
+| `error` | The run ended `FAILED` (which includes a run that never wrote a checkpoint), or the session was `active` when its ephemeral agent expired. Mention again to retry. |
+| `closed` | The session's agent was an ephemeral hire that expired: the reconcile sweep closes a `pending`/`idle`/`awaiting_input` session (and marks an `active` one `error`, dropping its run id). Not reachable from the mention path itself. |
+| `stale` | Reserved. Nothing writes it yet — the 14-day `idle → stale` sweep is not wired. |
 
 The state is on `crewship issue sessions` and on the issue's Sessions panel,
 and every change is pushed as `issue.session.state` on the workspace

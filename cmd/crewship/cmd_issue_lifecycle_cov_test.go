@@ -192,12 +192,14 @@ func TestIssueUpdateRunE_HappyPath_PatchPathAndBody(t *testing.T) {
 	if body["status"] != "done" || body["title"] != "Fixed it" {
 		t.Errorf("fields wrong: %v", body)
 	}
-	// Cleared assignee must be explicit null for both columns.
-	if v, present := body["assignee_id"]; !present || v != nil {
-		t.Errorf("assignee_id = %v (present=%v), want explicit null", v, present)
+	// A cleared assignee is the server's explicit-unassign contract: an
+	// empty assignee_id, and no assignee_type at all (the server nulls it
+	// with both typed slots). A JSON null reaches neither server branch.
+	if v, present := body["assignee_id"]; !present || v != "" {
+		t.Errorf("assignee_id = %v (present=%v), want explicit empty string", v, present)
 	}
-	if v, present := body["assignee_type"]; !present || v != nil {
-		t.Errorf("assignee_type = %v (present=%v), want explicit null", v, present)
+	if v, present := body["assignee_type"]; present {
+		t.Errorf("assignee_type = %v sent on a clear, want it omitted", v)
 	}
 	if v, present := body["routine_id"]; !present || v != "" {
 		t.Errorf("routine_id = %v (present=%v), want empty string", v, present)
