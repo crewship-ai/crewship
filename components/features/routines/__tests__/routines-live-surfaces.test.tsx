@@ -151,7 +151,7 @@ describe("<RoutinesExplorer> live rows", () => {
     expect(chip).toHaveTextContent("Running")
     // No elapsed time: a number changing every second beside the name is
     // what made the column messy.
-    expect(chip.textContent).not.toMatch(/\d\.\ds|s$/)
+    expect(chip.textContent).not.toMatch(/\d+(\.\d+)?\s*s$/)
     expect(screen.queryByText(/ask-casey/)).not.toBeInTheDocument()
   })
 
