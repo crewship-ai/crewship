@@ -1543,9 +1543,11 @@ The lifecycle has five steps, and writing and publishing are deliberately
 separate acts, usually by separate parties:
 
 1. **Draft.** An agent in the page's owning crew writes the source through
-   its `page_project` tool — or a person does the same with
-   `crewship page project init|set`. Every save is a **revision**, checkpointed
-   in Git; the live page does not move.
+   its `page_project` tool — or a person does the same by hand:
+   `crewship page project init` prints the starter, and
+   `crewship page project set <slug> --file …` saves it against the page.
+   Every save is a **revision**, checkpointed in Git; the live page does not
+   move.
 2. **Build.** The revision is compiled by the pinned compiler image; a build
    is `running`, `ready`, `failed` or `interrupted`. A ready build of the
    current draft is a **candidate** — the exact thing that would go live.

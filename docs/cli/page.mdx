@@ -1243,7 +1243,7 @@ needs to branch on:
 | `0` | The push or dispatch was accepted | For `page action`, accepted is not finished |
 | `2` | Payload invalid, over the 64 KiB cap, or the spec/flags did not validate | Fix it; retrying unchanged fails identically |
 | `3` | No such page or panel — or none you may see, including an unauthorised push to a page you cannot reach (journalled all the same) | Do not retry |
-| `4` | You are not the panel's declared producer and hold no `produce` grant (but can reach the page), or you are not authenticated | A 403 here is journalled and notifies the page owner |
+| `4` | You are not the panel's declared producer and hold no `produce` grant — answered only when you can reach the page; otherwise it is exit 3 — or you are not authenticated | A producer 403 is journalled and notifies the page owner |
 | `5` | An idempotency key was replayed with different inputs, or the routine is missing, unapproved or disabled | Do not retry with the same key |
 | `6` | Rate limited | Sleep for the interval the message names, then retry |
 | `7` / `8` | Server error, or the request never got an answer | Safe to retry a `page set` — it is last-write-wins |

@@ -125,8 +125,9 @@ answered only to a caller who reaches the page.
 The concealment is decided after the endpoint's own gate has refused, so it
 never gates a successful action: a declared producer or an agent whose
 authority is crew-bound pushes or writes sources without holding any human
-read path to the page. An agent refused on a project route
-(`…/project`, `…/project/*`) always receives `404`.
+read path to the page. An agent working through its `page_project` tool
+(the internal path, not these routes) is refused with `404` whenever its
+crew-bound gate fails, since no human viewer stands behind it.
 
 ---
 
@@ -1330,9 +1331,10 @@ The page's **structural** history — which panels existed, their layout, owners
 and producers. Panel data is not versioned.
 
 **Authentication:** session cookie or CLI token; page edit permission — the
-owner, a workspace ADMIN/OWNER, or a `write` grantee. A version row carries the
-whole arrangement, panels sealed to a reader included, so seeing the page is
-not enough.
+owner, a workspace ADMIN/OWNER, a `write` grantee, or a holder of *can edit*
+on the page's [folder](#folders). A version row carries the whole
+arrangement, panels sealed to a reader included, so seeing the page is not
+enough.
 
 **Response 200:**
 
@@ -1423,8 +1425,9 @@ GET /api/v1/pages/{slug}/export
 **Path parameters:** `slug`. **Query parameters:** `workspace_id` when the caller's context supplies none. No request body.
 
 **Authentication:** session cookie or CLI token; a caller with page edit
-permission — the owner, a workspace ADMIN/OWNER, or a `write` grantee — who
-can also read every panel in it.
+permission — the owner, a workspace ADMIN/OWNER, a `write` grantee, or a
+holder of *can edit* on the page's [folder](#folders) — who can also read
+every panel in it.
 
 **Response 200** — a portable bundle: the spec, plus every reference it makes
 to something outside itself, listed so the importer must bind them explicitly:
@@ -1445,14 +1448,18 @@ a snapshot of what the page was showing.
 
 **A page with a custom application exports as `crewship-page-bundle/v2`.**
 The bundle then carries `project` — the current draft's source project, the
-same `crewship-page-source/v1` document `PUT …/project` accepts, files and
-lockfile included — and `page` is the draft's authored definition rather than
-the live one, with each panel's `actions`, `wake`, `on_failure` and `refresh`
-and with every `public` flag cleared. A draft that declares a `link` or
-`custom` action is not yet portable and answers **422**. The v2 bundle does
-not carry builds, publications, Git history, grants, credentials or data; it
-is one revision's source and definition, never the application's trusted
-state. An export does not need the compiler.
+same `crewship-page-source/v1` document `PUT …/project` accepts: source
+files, lockfile and small assets (`base64` entries) — and `page` is the
+draft's authored definition rather than the live one, with each panel's
+`actions`, `wake`, `on_failure` and `refresh` and with every `public` flag
+cleared. Every routine a `call` action names joins `references` as
+`routine/<slug>`, beside the crews, so the importer binds them the same way.
+A draft that declares a `link` or `custom` action is not yet portable and
+answers **422**, as does a bundle whose encoded size exceeds the transfer cap
+(the project document limit plus the spec cap plus 64 KiB). The v2 bundle
+does not carry builds, publications, Git history, grants, credentials or
+data; it is one revision's source and definition, never the application's
+trusted state. An export does not need the compiler.
 
 **Statuses:**
 
@@ -1463,7 +1470,7 @@ state. An export does not need the compiler.
 | 401 | No session or token. |
 | 403 | No edit permission, or a panel in the definition the caller cannot read — the bundle would otherwise carry declarations an ordinary read withholds. Only for a caller who reaches the page. |
 | 404 | No such page, or one the caller [cannot reach](#unreachable-pages-are-not-found). |
-| 422 | The draft declares a `link` or `custom` action, which a v2 bundle cannot carry yet. |
+| 422 | The draft declares a `link` or `custom` action, which a v2 bundle cannot carry yet, or the encoded bundle exceeds the transfer cap. |
 | 503 | The page has a draft and project storage is not configured on this server. |
 
 ---
@@ -1494,8 +1501,10 @@ An unbound reference is a **422**, not a guess. Importing a bundle that names
 otherwise hand a page to whoever holds that name.
 
 A `crewship-page-bundle/v2` body — `format` set to that and `project`
-present — is accepted by the same endpoint and goes through the same binding.
-It creates an **inert draft**: the page is created with its panels, the
+present — is accepted by the same endpoint and goes through the same binding:
+every crew *and* every routine the actions name must be bound to one that
+exists here, or the import is a **422** listing them. It creates an **inert
+draft**: the page is created with its panels, the
 bundle's `project` is stored as source revision 1 with a Git checkpoint, and
 the bundle's authored definition (actions, wake gates, `on_failure`,
 `refresh`) becomes the draft's definition — but the **live** page is written
@@ -1513,7 +1522,7 @@ document's plus the spec cap plus 64 KiB, in place of the v1 envelope.
 |---|---|
 | 201 | Imported. |
 | 400 | Unknown bundle format, a v1 bundle carrying `project`, or a v2 bundle whose `project` does not parse. |
-| 422 | A reference left unbound, or a binding naming something that does not exist — the response lists each one and what would satisfy it; a v2 definition that enables `public` on a panel or declares a `link`/`custom` action. |
+| 422 | A reference left unbound — a crew, or a routine a v2 bundle's actions name — or a binding naming something that does not exist; the response lists each one and what would satisfy it. Also a v2 definition that declares a `link`/`custom` action. |
 | 401 | No session or token. |
 | 403 | Caller lacks `page.create`, or bound a reference to a crew they do not belong to. |
 | 409 | A page with the requested slug already exists. |
