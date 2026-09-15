@@ -110,7 +110,9 @@ export function RoutineRunDetail({ workspaceId, runId }: RoutineRunDetailProps) 
   // "Ask the lead to fix it" opens the crew lead's chat with the run pinned
   // in the prompt (the chat page reads ?prompt= and sends it once). The
   // directory rows carry crew_id and agent_role beyond the typed identity.
-  const directory = useWorkspaceAgentDirectory(workspaceId)
+  // Only looked up once the run is here: a run that cannot be loaded must
+  // not fan out to other endpoints (run-drill-down-lookup-error).
+  const directory = useWorkspaceAgentDirectory(run ? workspaceId : undefined)
   const router = useRouter()
   const preparation = useRef(0)
   const startIntent = useRef(new RoutineStartIntent())
