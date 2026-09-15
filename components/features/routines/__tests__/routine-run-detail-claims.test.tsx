@@ -209,10 +209,10 @@ it.each(["current", "3"])("Run again retries an uncertain start with the same ke
   fireEvent.click(screen.getByRole("button", { name: "Run again" }))
   await screen.findByDisplayValue("2026-08")
   fireEvent.change(screen.getByLabelText("Recipe version"), { target: { value: selectedVersion } })
-  await waitFor(() => expect(screen.getByRole("button", { name: "Run" })).not.toBeDisabled())
-  fireEvent.click(screen.getByRole("button", { name: "Run" }))
+  await waitFor(() => expect(screen.getByRole("button", { name: "Run now" })).not.toBeDisabled())
+  fireEvent.click(screen.getByRole("button", { name: "Run now" }))
   await screen.findByText("Response lost")
-  fireEvent.click(screen.getByRole("button", { name: "Run" }))
+  fireEvent.click(screen.getByRole("button", { name: "Run now" }))
   await waitFor(() =>
     expect(h.push).toHaveBeenCalledWith("/routines?slug=monthly-billing&run=recovered-run"),
   )
