@@ -16,6 +16,13 @@ export interface PipelineSchedule {
   target_pipeline_id: string
   target_pipeline_slug?: string
   target_pipeline_version?: number
+  // Operator console contract ("Schedules"): version_pinned is
+  // target_pipeline_version != null; effective_version is the pinned version,
+  // else the target routine's current head (null when the routine is gone).
+  // Both are absent on older servers — the Plan falls back to
+  // target_pipeline_version alone.
+  effective_version?: number | null
+  version_pinned?: boolean
   cron_expr: string
   timezone: string
   inputs: Record<string, unknown>

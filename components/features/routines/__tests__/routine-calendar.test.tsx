@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor, within } from "@testing-library/react"
 import { describe, it, expect, vi } from "vitest"
 import { RoutineCalendar } from "../routine-calendar"
 import type { Pipeline } from "@/hooks/use-pipelines"
@@ -11,22 +11,32 @@ vi.mock("@/components/ui/crew-icon", () => ({ CrewIcon: ({ icon }: { icon: strin
 vi.mock("next/link", () => ({ default: ({ children, ...props }: React.AnchorHTMLAttributes<HTMLAnchorElement>) => <a {...props}>{children}</a> }))
 
 describe("full routine calendar", () => {
-  it("loads every month of the year with bounded intervals, displays identities and plans from leap day", async () => {
+  it("loads every month of the year with bounded intervals, marks density per day and plans from leap day", async () => {
     fetcher.mockImplementation(async (url: string) => {
       const params = new URL(url, "https://example.test").searchParams
       const from = params.get("from")!
       return { ok: true, json: async () => ({ events: [{ id: from, kind: "planned", at: from, slug: "recipe", name: "Daily recipe" }], truncated: false }) }
     })
     render(<RoutineCalendar workspaceId="ws" routines={[{ slug: "recipe", name: "Daily recipe", icon: "alarm-clock", color: "blue" }] as Pipeline[]} />)
-    await waitFor(() => expect(screen.getAllByTestId("routine-icon")).toHaveLength(12))
-    expect(fetcher).toHaveBeenCalledTimes(12)
+    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(12))
     for (const [url] of fetcher.mock.calls) {
       const params = new URL(url, "https://example.test").searchParams
       expect(Date.parse(params.get("to")!) - Date.parse(params.get("from")!)).toBeLessThanOrEqual(32 * 86400000)
     }
-    fireEvent.click(screen.getByRole("button", { name: "Schedule on 2028-02-29" }))
+    // The year view shows a mark per day, not the routines' icons.
+    await waitFor(() => expect(screen.getAllByRole("button", { name: /^Open 2028-\d\d-01, 1 entry$/ })).toHaveLength(12))
+    expect(screen.queryByTestId("routine-icon")).toBeNull()
+    // Opening a day from the year view shows its agenda, not the hour grid.
+    fireEvent.click(screen.getByRole("button", { name: "Open 2028-02-01, 1 entry" }))
+    const agenda = screen.getByRole("region", { name: "Day agenda" })
+    expect(within(agenda).getByText("1 planned")).toBeInTheDocument()
+    expect(within(agenda).getByRole("link", { name: /Daily recipe/ })).toHaveAttribute("href", "/routines?slug=recipe&view=plan")
+    fireEvent.click(within(agenda).getByRole("button", { name: /Schedule a start/ }))
     expect(await screen.findByRole("dialog")).toBeInTheDocument()
-    expect(screen.getByLabelText("Date")).toHaveValue("2028-02-29")
+    expect(screen.getByLabelText("Date")).toHaveValue("2028-02-01")
     expect(screen.getByLabelText("Time")).toHaveValue("09:00")
+    fireEvent.click(screen.getByRole("button", { name: "Close" }))
+    fireEvent.click(within(agenda).getByRole("button", { name: "‹ Year" }))
+    expect(screen.queryByRole("region", { name: "Day agenda" })).toBeNull()
   })
 })

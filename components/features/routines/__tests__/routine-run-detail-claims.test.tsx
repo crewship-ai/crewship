@@ -17,12 +17,13 @@ const h = vi.hoisted(() => ({
   traceRefresh: vi.fn(),
   approvalRefresh: vi.fn(),
   push: vi.fn(),
+  agents: [] as Record<string, unknown>[],
 }))
 
 vi.mock("@/lib/api-fetch", () => ({ apiFetch: vi.fn() }))
 vi.mock("@/hooks/use-realtime", () => ({ useRealtimeEvent: () => {} }))
 vi.mock("@/hooks/use-workspace-agent-directory", () => ({
-  useWorkspaceAgentDirectory: () => ({ agents: [], error: false }),
+  useWorkspaceAgentDirectory: () => ({ agents: h.agents, error: false }),
 }))
 vi.mock("@/hooks/use-run-executions", () => ({
   useRunExecutions: () => ({ byStep: new Map(), error: false, truncated: false, refresh: vi.fn() }),
@@ -90,6 +91,7 @@ beforeEach(() => {
   h.error = null
   h.waitpoint = null
   h.approvalError = null
+  h.agents = []
 })
 
 /** jsdom does not toggle <details> on a summary click; drive it the way the
@@ -185,7 +187,9 @@ describe("routine run detail — run again", () => {
     h.run = baseRun({ status: "running" })
     render(<RoutineRunDetail workspaceId="ws" runId="run_1" />)
     expect(screen.queryByRole("button", { name: "Run again" })).toBeNull()
-    expect(screen.getByRole("button", { name: "Stop run" })).toBeTruthy()
+    // One word everywhere: Stop, in the header and in the banner.
+    expect(screen.getAllByRole("button", { name: "Stop" })).toHaveLength(2)
+    expect(screen.queryByRole("button", { name: "Stop run" })).toBeNull()
   })
 })
 
@@ -209,10 +213,10 @@ it.each(["current", "3"])("Run again retries an uncertain start with the same ke
   fireEvent.click(screen.getByRole("button", { name: "Run again" }))
   await screen.findByDisplayValue("2026-08")
   fireEvent.change(screen.getByLabelText("Recipe version"), { target: { value: selectedVersion } })
-  await waitFor(() => expect(screen.getByRole("button", { name: "Run" })).not.toBeDisabled())
-  fireEvent.click(screen.getByRole("button", { name: "Run" }))
+  await waitFor(() => expect(screen.getByRole("button", { name: "Run now" })).not.toBeDisabled())
+  fireEvent.click(screen.getByRole("button", { name: "Run now" }))
   await screen.findByText("Response lost")
-  fireEvent.click(screen.getByRole("button", { name: "Run" }))
+  fireEvent.click(screen.getByRole("button", { name: "Run now" }))
   await waitFor(() =>
     expect(h.push).toHaveBeenCalledWith("/routines?slug=monthly-billing&run=recovered-run"),
   )
@@ -309,6 +313,8 @@ describe("routine run detail — one page, one order (#2519)", () => {
     } as Response)
     render(<RoutineRunDetail workspaceId="ws" runId="run_1" />)
 
+    // Without the server's failure projection there is no plain reason, so
+    // today's words stay: the verdict, the failed step and the raw error.
     const verdict = screen.getByText("This run could not finish")
     const error = screen.getByRole("alert")
     expect(error.textContent).toBe("Agent did not answer")
@@ -318,16 +324,169 @@ describe("routine run detail — one page, one order (#2519)", () => {
     expect(order(error, screen.getByTestId("run-artifacts"))).toBe(-1)
     expect(order(error, screen.getByTestId("run-technical-details"))).toBe(-1)
 
+    // What to do next: three branches, each with its own way out.
     const next = screen.getByTestId("run-next-step")
-    expect(next.textContent).toBe("If the recipe caused the problem, review it in Edit recipe, then run again.")
+    expect(next.textContent).toContain("If the input was wrong")
+    expect(next.textContent).toContain("If a rule is too strict")
+    expect(next.textContent).toContain("Keeps failing?")
+    expect(next.textContent).toContain("crewship routine draft monthly-billing")
     expect(order(error, next)).toBe(-1)
-    expect(screen.getByRole("link", { name: "Edit recipe" }).getAttribute("href")).toBe(
-      "/routines?slug=monthly-billing&view=edit",
+    expect(screen.queryByRole("link", { name: "Edit recipe" })).toBeNull()
+    expect(within(next).getByRole("link", { name: "History" }).getAttribute("href")).toBe(
+      "/routines?slug=monthly-billing&view=history",
     )
+    // No lead in the directory: the link goes to the chat and the prompt is copied.
+    expect(screen.getByRole("link", { name: "Ask the lead to fix it" }).getAttribute("href")).toBe("/chat")
     // No per-step retry is offered; "run again" is the whole-run action.
     expect(screen.queryByRole("button", { name: /retry/i })).toBeNull()
-    fireEvent.click(screen.getByRole("button", { name: "run again" }))
+    fireEvent.click(within(next).getByRole("button", { name: "run again" }))
     expect(vi.mocked(apiFetch).mock.calls[0][0]).toContain("/pipelines/monthly-billing")
+    // The raw error is also in Technical details, so it is never lost.
+    expect(screen.getByTestId("run-raw-error").textContent).toBe("Agent did not answer")
+  })
+
+  it("uses the server's failure projection: plain reason, Kept / Not done, raw error only in Technical details", () => {
+    h.dsl = {
+      steps: [
+        { id: "extract", name: "Read the invoice", type: "agent_run" },
+        { id: "verify", name: "Check the extraction", type: "agent_run" },
+        { id: "post", name: "Post to the ledger", type: "script" },
+      ],
+    }
+    h.run = baseRun({
+      status: "failed",
+      failed_at_step: "verify",
+      error_message: 'step verify: checker rejected: criterion "total_equals_lines"',
+      failure: {
+        kind: "checker_rejected",
+        step_id: "verify",
+        step_name: "Check the extraction",
+        summary: "The checker rejected the result after 3 model tiers: total_equals_lines.",
+        kept_step_ids: ["extract"],
+        not_done_step_ids: ["post"],
+      },
+    })
+    render(<RoutineRunDetail workspaceId="ws" runId="run_1" />)
+
+    const banner = screen.getByTestId("run-banner")
+    expect(banner).toHaveAttribute("data-tone", "destructive")
+    expect(within(banner).getByRole("heading").textContent).toBe("Stopped at step 2, “Check the extraction”")
+    expect(banner.textContent).toContain("The checker rejected the result after 3 model tiers: total_equals_lines.")
+    expect(banner.textContent).toContain("Kept: Read the invoice. Not done: Post to the ledger.")
+    // The engine's message is not in the banner, but it is kept in Technical details.
+    expect(banner.textContent).not.toContain("criterion")
+    expect(screen.queryByRole("alert")).toBeNull()
+    const details = screen.getByTestId("run-technical-details")
+    expect(details.contains(screen.getByTestId("run-raw-error"))).toBe(true)
+    expect(details.textContent).toContain('criterion "total_equals_lines"')
+    expect(details.textContent).toContain("checker_rejected")
+    expect(screen.getByRole("link", { name: "Ask the lead to fix it" }).getAttribute("href")).toBe("/chat")
+  })
+
+  it("sends Ask the lead to the crew lead's chat with the run and the step in the prompt", () => {
+    h.agents = [
+      { id: "a1", slug: "worker", name: "Worker", crew_id: "crew_fin", agent_role: "AGENT" },
+      { id: "a2", slug: "nora-lead", name: "Nora", crew_id: "crew_fin", agent_role: "LEAD" },
+    ]
+    h.run = baseRun({
+      status: "failed",
+      invoking_crew_id: "crew_fin",
+      failed_at_step: "write",
+      failure: {
+        kind: "timeout",
+        step_id: "write",
+        step_name: "Write the report",
+        summary: "The step did not finish within 10 minutes.",
+      },
+    })
+    render(<RoutineRunDetail workspaceId="ws" runId="run_1" />)
+    const href = screen.getByRole("link", { name: "Ask the lead to fix it" }).getAttribute("href")!
+    expect(href.startsWith("/chat/nora-lead?prompt=")).toBe(true)
+    const prompt = decodeURIComponent(href.split("?prompt=")[1])
+    expect(prompt).toContain("Run run_1")
+    expect(prompt).toContain('step "Write the report"')
+    expect(prompt).toContain("The step did not finish within 10 minutes.")
+    expect(prompt).toContain("save_routine_draft")
+  })
+
+  it("names who needs to decide, why, and when it expires while a run waits", () => {
+    h.dsl = {
+      steps: [
+        { id: "extract", name: "Read the invoice", type: "agent_run" },
+        { id: "decide", name: "Ask Finance", type: "wait", wait: { kind: "approval", approval_title: "Finance" } },
+      ],
+    }
+    h.run = baseRun({ status: "waiting", current_step_id: "decide" })
+    h.waitpoint = {
+      step_id: "decide",
+      token: "t",
+      prompt: "The total is over the auto-approve limit.",
+      timeout_at: new Date(Date.now() + 90 * 60_000).toISOString(),
+    }
+    render(<RoutineRunDetail workspaceId="ws" runId="run_1" />)
+
+    const banner = screen.getByTestId("run-banner")
+    expect(banner).toHaveAttribute("data-tone", "warn")
+    expect(within(banner).getByRole("heading").textContent).toBe("Finance needs to decide")
+    expect(banner.textContent).toContain(
+      "The total is over the auto-approve limit. Nothing after this step has happened yet. This is the same decision shown in Inbox. Expires in 1 h 30 min.",
+    )
+    // The decision form stays below the banner.
+    expect(order(banner, screen.getByTestId("approval-banner"))).toBe(-1)
+  })
+
+  it("says where the work is while it runs, and offers Stop with a confirmation", () => {
+    h.dsl = {
+      steps: [
+        { id: "extract", name: "Read the invoice", type: "agent_run" },
+        { id: "verify", name: "Check the extraction", type: "agent_run" },
+      ],
+    }
+    h.run = baseRun({ status: "running", current_step_id: "verify" })
+    render(<RoutineRunDetail workspaceId="ws" runId="run_1" />)
+
+    const banner = screen.getByTestId("run-banner")
+    expect(banner).toHaveAttribute("data-tone", "blue")
+    expect(within(banner).getByRole("heading").textContent).toBe(
+      "Work in progress · step 2 of 2, “Check the extraction”",
+    )
+    fireEvent.click(within(banner).getByRole("button", { name: "Stop" }))
+    expect(screen.getByRole("dialog").textContent).toContain("Stop this run?")
+    expect(screen.getByRole("button", { name: "Keep running" })).toBeTruthy()
+  })
+
+  it("says what a completed run did, skipped and notified", () => {
+    h.dsl = {
+      steps: [
+        { id: "extract", name: "Read the invoice", type: "agent_run" },
+        { id: "decide", name: "Ask Finance", type: "wait", if: "total > limit" },
+        { id: "notify", name: "Tell #finance", type: "notify", notify: { to: "#finance" } },
+      ],
+    }
+    h.run = baseRun({
+      status: "completed",
+      step_outputs: { extract: "ok", notify: "sent" },
+      step_outputs_available: true,
+    })
+    render(<RoutineRunDetail workspaceId="ws" runId="run_1" />)
+
+    const banner = screen.getByTestId("run-banner")
+    expect(banner).toHaveAttribute("data-tone", "success")
+    expect(within(banner).getByRole("heading").textContent).toBe("Done · Completed")
+    expect(banner.textContent).toContain("Skipped: Ask Finance (its condition was not met). Notified #finance.")
+    expect(screen.queryByTestId("run-next-step")).toBeNull()
+  })
+
+  it("says when a newer version is published than the one this run used", () => {
+    h.run = baseRun({ pipeline_version: 2 })
+    vi.mocked(apiFetch).mockResolvedValue({
+      ok: true,
+      json: async () => ({ slug: "monthly-billing", head_version: 3, definition: { inputs: [] } }),
+    } as Response)
+    render(<RoutineRunDetail workspaceId="ws" runId="run_1" />)
+    return waitFor(() =>
+      expect(screen.getByTestId("run-facts").textContent).toContain("recipe v2 ↗ (v3 is published now)"),
+    )
   })
 
   it("calls a stopped run stopped and offers no fix for it", () => {
@@ -344,6 +503,7 @@ describe("routine run detail — one page, one order (#2519)", () => {
     expect(screen.getByRole("alert").parentElement?.textContent).toContain("Stopped at step")
     expect(screen.queryByText(/Failed step/)).toBeNull()
     expect(screen.queryByTestId("run-next-step")).toBeNull()
+    expect(screen.queryByRole("link", { name: "Ask the lead to fix it" })).toBeNull()
   })
 
   it("keeps the decision directly under the verdict, before the result", () => {
@@ -352,7 +512,7 @@ describe("routine run detail — one page, one order (#2519)", () => {
     render(<RoutineRunDetail workspaceId="ws" runId="run_1" />)
 
     const banner = screen.getByTestId("approval-banner")
-    expect(order(screen.getByText("A review is needed"), banner)).toBe(-1)
+    expect(order(screen.getByText("A person needs to decide"), banner)).toBe(-1)
     expect(order(banner, screen.getByTestId("run-artifacts"))).toBe(-1)
     expect(order(banner, screen.getByTestId("run-technical-details"))).toBe(-1)
     expect(screen.getByRole("link", { name: /same decision in Inbox/ }).getAttribute("href")).toBe(

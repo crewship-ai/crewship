@@ -46,9 +46,11 @@ describe("routine input contracts", () => {
     fireEvent.change(screen.getByLabelText("Directory"), {
       target: { value: "../private" },
     })
-    fireEvent.click(screen.getByRole("button", { name: "Run" }))
+    fireEvent.click(screen.getByRole("button", { name: "Run now" }))
     expect(onRun).not.toHaveBeenCalled()
-    expect(screen.getAllByRole("alert")).toHaveLength(3)
+    // Three field errors plus the summary that counts them.
+    expect(screen.getAllByRole("alert")).toHaveLength(4)
+    expect(screen.getByTestId("routine-input-error-summary")).toHaveTextContent("3 answers need a fix")
     expect(coverage).toHaveFocus()
     fireEvent.change(coverage, { target: { value: "0.7" } })
     fireEvent.change(screen.getByLabelText("Count"), {
@@ -57,7 +59,7 @@ describe("routine input contracts", () => {
     fireEvent.change(screen.getByLabelText("Directory"), {
       target: { value: "/crew/shared/valid" },
     })
-    fireEvent.click(screen.getByRole("button", { name: "Run" }))
+    fireEvent.click(screen.getByRole("button", { name: "Run now" }))
     expect(onRun).toHaveBeenCalledWith({
       coverage: 0.7,
       count: 0,
@@ -76,7 +78,7 @@ describe("routine input contracts", () => {
     expect(screen.getByLabelText("Coverage")).toHaveValue(0.2)
     fireEvent.click(screen.getAllByRole("button", { name: "Restore default" })[0])
     expect(screen.getByLabelText("Coverage")).toHaveValue(0.7)
-    fireEvent.click(screen.getByRole("button", { name: "Run" }))
+    fireEvent.click(screen.getByRole("button", { name: "Run now" }))
     expect(onRun).toHaveBeenCalledWith({ coverage: 0.7, enabled: false })
   })
   it("disables input changes while submitting", () => {
