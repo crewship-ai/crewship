@@ -73,7 +73,7 @@ describe("<RoutinesExplorer> chrome", () => {
     expect(chosen.querySelector("svg")).toBeTruthy()
   })
 
-  it("keeps the live sub-line on a running routine", () => {
+  it("marks a running routine with a Running chip", () => {
     h.live = new Map([
       [
         "nightly",
@@ -81,7 +81,7 @@ describe("<RoutinesExplorer> chrome", () => {
       ],
     ])
     render(<RoutinesExplorer {...PROPS} routines={[pipeline({})]} />)
-    expect(screen.getByText(/▶ Running/)).toBeInTheDocument()
+    expect(screen.getByTestId("routine-live-chip")).toHaveTextContent("Running")
   })
 })
 

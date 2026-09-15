@@ -10,6 +10,13 @@ const { fetcher } = vi.hoisted(() => ({ fetcher: vi.fn() }))
 vi.mock("@/lib/api-fetch", () => ({ apiFetch: fetcher, broadcastSessionExpired: vi.fn() }))
 vi.mock("next/link", () => ({ default: ({ children, href }: { children: React.ReactNode; href: string }) => <a href={href}>{children}</a> }))
 vi.mock("@/components/features/chat/files/file-preview", () => ({ FilePreview: ({ name }: { name: string }) => <div>binary preview {name}</div> }))
+// CodeMirror does not render in jsdom; the editor is the Files panel's own,
+// so here it only needs to receive the text and the read-only extensions.
+vi.mock("@/components/features/files/file-editor", () => ({
+  FileEditor: ({ code, language, extraExtensions }: { code: string; language: string; extraExtensions?: unknown[] }) => (
+    <pre data-testid="mock-file-editor" data-language={language} data-readonly={String((extraExtensions?.length ?? 0) > 0)}>{code}</pre>
+  ),
+}))
 
 const files: RoutineFile[] = [
   { path: "scripts/ledger-post.go", language: "go", step_ids: ["post"], size_bytes: 4120, present: true, description: "Posts one invoice" },
@@ -64,10 +71,15 @@ describe("<RoutineFilesCard>", () => {
     render(<RoutineFilesCard files={files} workspaceId="ws" crewId="crew_fin" nameOf={nameOf} />)
     fireEvent.click(screen.getByTestId("routine-file-scripts/ledger-post.go"))
     const preview = screen.getByTestId("routine-file-preview")
-    expect(preview).toHaveTextContent("/crew/shared/scripts/ledger-post.go")
+    expect(preview).toHaveTextContent("scripts/ledger-post.go")
     await waitFor(() => expect(preview).toHaveTextContent("package main"))
-    expect(preview).toHaveTextContent("read-only")
+    // The Files panel's editor, locked read-only, with the language from the extension.
+    expect(screen.getByTestId("mock-file-editor")).toHaveAttribute("data-language", "go")
+    expect(screen.getByTestId("mock-file-editor")).toHaveAttribute("data-readonly", "true")
+    expect(preview).toHaveTextContent("Read-only")
     expect(preview).toHaveTextContent("Posts one invoice")
+    fireEvent.click(screen.getByRole("button", { name: "Expand preview" }))
+    expect(screen.getByRole("button", { name: "Collapse preview" })).toBeInTheDocument()
     expect(fetcher).toHaveBeenCalledWith(crewFileDownloadUrl("crew_fin", "ws", "scripts/ledger-post.go"), expect.anything())
     expect(fetcher.mock.calls[0][0]).toContain("path=shared%2Fscripts%2Fledger-post.go")
     expect(screen.getByRole("link", { name: /Open in Files/ })).toHaveAttribute("href", "/crews?crew=crew_fin")

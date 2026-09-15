@@ -2,15 +2,18 @@
 
 import * as React from "react"
 import Link from "next/link"
-import { ArrowUpRight, ChevronDown, ChevronRight, FolderCode, X } from "lucide-react"
+import { ArrowUpRight, ChevronDown, ChevronRight, FolderCode, Maximize2, Minimize2, X } from "lucide-react"
+import { EditorState } from "@codemirror/state"
+import { EditorView } from "@codemirror/view"
 
 import { DetailCard, Pill } from "@/components/ui/detail"
 import { Spinner } from "@/components/ui/spinner"
 import { apiFetch } from "@/lib/api-fetch"
 import { cn } from "@/lib/utils"
 import { isPreviewable } from "@/lib/file-format"
-import { getChatFileIcon } from "@/components/features/chat/chat-tree-row"
+import { getChatFileIcon, getEditorLanguage } from "@/components/features/chat/chat-tree-row"
 import { FilePreview } from "@/components/features/chat/files/file-preview"
+import { FileEditor } from "@/components/features/files/file-editor"
 import {
   buildRoutineFileTree,
   formatFileSize,
@@ -22,8 +25,9 @@ import {
 // routine-files-card — the files a routine runs, as a tree under
 // /crew/shared/, drawn the way the agent Files panel draws its tree (same
 // icons, same row), with the step that uses each file and whether it is on
-// the share. A click splits the card and opens a read-only preview beside
-// the tree; on a phone the preview stacks below.
+// the share. A click splits the card and opens the same code editor the
+// Files panel uses (CodeMirror, syntax colours, line numbers), locked
+// read-only, beside the tree; on a phone the preview stacks below.
 //
 // The list says what the recipe declares and whether the file is there. It
 // is not proof that the code does what its header comment says.
@@ -60,6 +64,7 @@ export function RoutineFilesCard({
       else next.add(path)
       return next
     })
+  const [expanded, setExpanded] = React.useState(false)
   if (!files.length) return null
   const missing = files.filter((f) => routineFileStatus(f) === "missing").length
   const unverified = files.filter((f) => routineFileStatus(f) === "unverified").length
@@ -77,26 +82,40 @@ export function RoutineFilesCard({
       bare
       data-testid="routine-files-card"
     >
-      <div className={cn("grid", open && "md:grid-cols-[minmax(260px,1fr)_minmax(0,1.2fr)]")}>
-        <div className="px-2 py-1.5">
+      <div className={cn("grid", open && !expanded && "md:grid-cols-[minmax(260px,1fr)_minmax(0,1.2fr)]")}>
+        <div className={cn("px-2 py-1.5", open && expanded && "hidden")}>
           <div className="px-2 pb-1.5 pt-1 font-mono text-[11px] text-muted-foreground">/crew/shared/</div>
           {tree.map((node) => (
             <FileRow key={node.path} node={node} depth={0} closed={closed} onToggle={toggle} selected={open?.path ?? null} onOpen={setOpen} nameOf={nameOf} />
           ))}
         </div>
         {open && (
-          <div className="min-h-[260px] border-t border-hairline md:max-h-[420px] md:border-l md:border-t-0" data-testid="routine-file-preview">
-            <div className="flex items-center gap-2 border-b border-hairline px-3 py-2 text-xs">
-              {getChatFileIcon(open.path.split("/").pop() ?? open.path, false)}
-              <span className="min-w-0 flex-1 truncate font-mono" title={`/crew/shared/${open.path}`}>/crew/shared/{open.path}</span>
-              {crewId && (
-                <Link href={`/crews?crew=${encodeURIComponent(crewId)}`} className="inline-flex items-center gap-0.5 text-primary hover:underline">
-                  Open in Files <ArrowUpRight className="h-3 w-3" />
-                </Link>
-              )}
-              <button type="button" aria-label="Close preview" onClick={() => setOpen(null)} className="rounded p-1 text-muted-foreground hover:text-foreground">
-                <X className="h-3.5 w-3.5" />
-              </button>
+          <div
+            className={cn(
+              "flex flex-col overflow-hidden border-t border-hairline bg-[#1e1e1e] md:border-l md:border-t-0",
+              expanded ? "h-[70vh]" : "h-[420px]",
+            )}
+            data-testid="routine-file-preview"
+          >
+            {/* The Files panel's editor header, minus Save: same colours, same buttons. */}
+            <div className="flex shrink-0 items-center justify-between border-b border-[#3c3c3c] bg-[#252526] px-3 py-1.5">
+              <div className="flex min-w-0 items-center gap-2">
+                {getChatFileIcon(open.path.split("/").pop() ?? open.path, false)}
+                <span className="truncate font-mono text-label font-medium text-[#cccccc]" title={`/crew/shared/${open.path}`}>{open.path}</span>
+              </div>
+              <div className="flex shrink-0 items-center gap-1">
+                {crewId && (
+                  <Link href={`/crews?crew=${encodeURIComponent(crewId)}`} className="inline-flex items-center gap-0.5 rounded px-2 py-0.5 text-micro text-primary hover:bg-[#3c3c3c]">
+                    Open in Files <ArrowUpRight className="h-3 w-3" />
+                  </Link>
+                )}
+                <button type="button" onClick={() => setExpanded((v) => !v)} aria-label={expanded ? "Collapse preview" : "Expand preview"} className="rounded p-1 text-[#888] hover:bg-[#3c3c3c]">
+                  {expanded ? <Minimize2 className="h-3 w-3" /> : <Maximize2 className="h-3 w-3" />}
+                </button>
+                <button type="button" aria-label="Close preview" onClick={() => { setOpen(null); setExpanded(false) }} className="rounded p-1 text-[#888] hover:bg-[#3c3c3c]">
+                  <X className="h-3 w-3" />
+                </button>
+              </div>
             </div>
             <FileBody key={open.path} file={open} crewId={crewId} workspaceId={workspaceId} />
           </div>
@@ -217,22 +236,19 @@ function FileBody({ file, crewId, workspaceId }: { file: RoutineFile; crewId?: s
         <Spinner className="h-3 w-3" /> Loading preview…
       </p>
     )
-  const lines = text.split("\n")
   return (
-    <div className="max-h-[380px] overflow-auto">
-      <div className="px-3 pt-2 text-[11px] text-muted-foreground">
-        {text.length.toLocaleString("en")} chars · read-only
-        {file.description && <span> · {file.description}</span>}
+    <>
+      <div className="min-h-0 flex-1 overflow-hidden" data-testid="routine-file-editor">
+        <FileEditor code={text} language={getEditorLanguage(file.path.split("/").pop() ?? file.path)} onSave={() => {}} extraExtensions={READ_ONLY} />
       </div>
-      <pre className="px-3 py-2 font-mono text-[11px] leading-[1.55] text-foreground">
-        {lines.map((line, i) => (
-          <React.Fragment key={i}>
-            <span className="mr-3 inline-block w-7 select-none text-right text-muted-foreground-soft">{i + 1}</span>
-            {line}
-            {"\n"}
-          </React.Fragment>
-        ))}
-      </pre>
-    </div>
+      {/* Status bar, as the Files panel draws it — this one says read-only instead of Ctrl+S. */}
+      <div className="flex shrink-0 items-center justify-between bg-[#007acc] px-3 py-0.5 text-micro text-white">
+        <span>Read-only · {text.length.toLocaleString("en")} chars</span>
+        <span className="truncate pl-3">{file.description}</span>
+      </div>
+    </>
   )
 }
+
+/** The editor buffer cannot be typed into or focused for editing. */
+const READ_ONLY = [EditorState.readOnly.of(true), EditorView.editable.of(false)]

@@ -36,10 +36,7 @@ import { CrewIcon } from "@/components/ui/crew-icon"
 import { resolveRoutineIcon, resolveRoutineColor } from "@/lib/routine-identity"
 import type { Pipeline } from "@/hooks/use-pipelines"
 import { isAwaitingApproval, useActiveRoutineRuns } from "@/hooks/use-active-routine-runs"
-import { useTick } from "@/hooks/use-tick"
 import type { RoutineFilters } from "@/components/features/routines/routines-filter-sidebar"
-import { formatElapsedSince } from "./routine-cost-format"
-import { formatAgo } from "@/lib/routine-run-presentation"
 
 // RoutinesExplorer — the /routines left sidebar, built on the shared
 // sidebar-kit primitives (SidebarToolbar/Search/FilterButton/Section/
@@ -184,23 +181,6 @@ export function RoutinesExplorer({
     [routines, search, filters, liveBySlug],
   )
 
-  // 1s re-render tick ONLY while a displayed routine is actually running,
-  // so the "· 0:12" elapsed segment counts up. A routine parked on a person
-  // shows "Waiting for your decision · 4 min ago" — a line that changes once
-  // a minute, so it re-renders once a minute; a ticking stopwatch beside a
-  // decision nobody has made yet was noise. Idle sidebar = no interval at
-  // all (useTick treats <=0 as off).
-  let liveTick = 0
-  for (const p of displayed) {
-    const live = liveBySlug.get(p.slug)
-    if (!live) continue
-    if (!isAwaitingApproval(live.status)) {
-      liveTick = 1000
-      break
-    }
-    liveTick = 60_000
-  }
-  useTick(liveTick)
 
   return (
     <div className="flex flex-col h-full">
@@ -510,41 +490,38 @@ export function RoutinesExplorer({
                             )}
                           />
                         </span>
-                        <span className="min-w-0 flex-1 text-foreground/80">
-                          <span className="block truncate">{routine.name || routine.slug}</span>
-                          <span className="block truncate text-[11px] text-muted-foreground">
-                            {routine.description}
-                          </span>
-                          {/* The sub-line grows the row from one line to
-                              two. Popping that in doubles the row's
-                              height between two frames and shoves every
-                              row below it down a step; animating the
-                              height reads as the row opening rather
-                              than the list jumping. */}
-                          <AnimatePresence initial={false}>
-                            {liveRun && (
-                              <motion.span
-                                key="live"
-                                initial={{ height: 0, opacity: 0 }}
-                                animate={{ height: "auto", opacity: 1 }}
-                                exit={{ height: 0, opacity: 0 }}
-                                transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
-                                className={cn(
-                                  "block overflow-hidden truncate text-[10px]",
-                                  liveAwaiting ? "text-warn" : "text-primary",
-                                )}
-                              >
-                                {liveAwaiting
-                                  ? `⏸ Waiting for your decision · ${formatAgo(liveRun.started_at)}`
-                                  : `▶ Running · ${formatElapsedSince(liveRun.started_at)}`}
-                              </motion.span>
-                            )}
-                          </AnimatePresence>
+                        {/* One line per routine. The purpose lives in the
+                            tooltip and on the page; a second line under
+                            every name made thirty rows read as sixty, and
+                            a live-run line that grew and ticked under one
+                            of them broke the column. */}
+                        <span className="min-w-0 flex-1 truncate text-foreground/80">
+                          {routine.name || routine.slug}
                         </span>
-                        {routine.invocation_count > 0 && (
-                          <span className="text-[10px] font-mono tabular-nums text-muted-foreground-soft shrink-0">
-                            {routine.invocation_count}
+                        {/* While a run is live the row's right edge says
+                            so, in place of the run count and without a
+                            timer: the halo already pulses, and a number
+                            changing every second is what made it messy. */}
+                        {liveRun ? (
+                          <span
+                            data-testid="routine-live-chip"
+                            className={cn(
+                              "inline-flex shrink-0 items-center gap-1 rounded-full px-1.5 py-px text-[10px] font-medium",
+                              liveAwaiting ? "bg-warn/15 text-warn" : "bg-primary/15 text-primary",
+                            )}
+                          >
+                            <span
+                              aria-hidden
+                              className={cn("h-1.5 w-1.5 rounded-full", liveAwaiting ? "bg-warn" : "bg-primary animate-pulse")}
+                            />
+                            {liveAwaiting ? "Waiting" : "Running"}
                           </span>
+                        ) : (
+                          routine.invocation_count > 0 && (
+                            <span className="text-[10px] font-mono tabular-nums text-muted-foreground-soft shrink-0">
+                              {routine.invocation_count}
+                            </span>
+                          )
                         )}
                         {routine.author_agent_id && (
                           <img
