@@ -33,7 +33,7 @@ func TestPageProjectHistoryRestoreCASAndIsolation(t *testing.T) {
 		return w
 	}
 	for _, method := range []string{"GET", "POST"} {
-		if w := call(method, ws, "other", "MEMBER", `{"revision":1,"expected_revision":2}`); w.Code != 403 {
+		if w := call(method, ws, "other", "MEMBER", `{"revision":1,"expected_revision":2}`); w.Code != 404 {
 			t.Fatalf("reader %s: %d", method, w.Code)
 		}
 		if w := call(method, "other-workspace", user, "OWNER", `{"revision":1,"expected_revision":2}`); w.Code != 404 {

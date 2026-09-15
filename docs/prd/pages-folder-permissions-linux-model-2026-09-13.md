@@ -67,7 +67,8 @@ soubory jsou v `internal/database/migrations/`.
    vlastnictví stránky, členství v crew vlastnící panel, granty stránky,
    ACL složky, ve které stránka právě je). Aditivní, jen dolů, bez deny.
    `write` ze složky podléhá kontrole úplného dokumentu (#2502) stejně jako
-   `write` ze stránky.
+   `write` ze stránky. Výslovný `write` grant platí i pro workspace VIEWER;
+   tato role není globální zákaz zápisu a dialog sdílení to musí vysvětlovat.
 4. **Panely:** `r` z čehokoli výše otevře stránku; obsah panelu vidí jen
    člen jeho vlastnické crew nebo admin. Beze změny.
 5. **ACL patří složce, ne tomu, kdo ji nastavil.** Záznam trvá, dokud ho

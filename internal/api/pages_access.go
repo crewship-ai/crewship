@@ -133,7 +133,7 @@ func (h *PageHandler) PageAccess(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !h.mayAdministerGrants(r.Context(), wsID, user.ID, role, rec) {
-		replyError(w, http.StatusForbidden, pageAccessRefusal)
+		h.refusePageAction(w, r, rec, pageAccessRefusal, "")
 		return
 	}
 	limit, after, ok := pageAccessPaging(w, r)

@@ -162,8 +162,7 @@ func (h *PageHandler) Export(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !h.mayEditSpec(r.Context(), wsID, user.ID, RoleFromContext(r.Context()), rec) {
-		replyError(w, http.StatusForbidden,
-			"exporting a page requires page edit permission")
+		h.refusePageAction(w, r, rec, "exporting a page requires page edit permission", "")
 		return
 	}
 	doc, ok := h.currentDocument(r.Context(), w, rec)
