@@ -51,9 +51,9 @@ function stubFetch(rest: () => Response | Promise<Response>) {
 }
 
 /** The POST the dialog exists to make, picked out of the catalogue traffic. */
-function agentsPost(spy: ReturnType<typeof vi.spyOn>) {
+function agentsPost(spy: ReturnType<typeof stubFetch>) {
   return spy.mock.calls.find(
-    ([url, init]) => String(url).includes("/api/v1/agents") && (init as RequestInit | undefined)?.method === "POST",
+    ([url, init]) => String(url).includes("/api/v1/agents") && init?.method === "POST",
   )
 }
 
@@ -102,7 +102,7 @@ describe("CreateAgentDialog", () => {
     expect(screen.getByRole("radio", { name: /Codex/ })).toHaveAttribute("aria-checked", "true")
     fireEvent.click(screen.getByRole("button", { name: "Create agent" }))
     await waitFor(() => expect(agentsPost(spy)).toBeDefined())
-    expect(JSON.parse((agentsPost(spy)![1] as RequestInit).body as string)).toMatchObject({ llm_provider: "OPENAI", cli_adapter: "CODEX_CLI" })
+    expect(JSON.parse(agentsPost(spy)![1]!.body as string)).toMatchObject({ llm_provider: "OPENAI", cli_adapter: "CODEX_CLI" })
   })
 
   it("renders header + footer with disabled Create when name is empty", () => {

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest"
+import { describe, it, expect, vi, beforeEach, type Mock } from "vitest"
 import type { ComponentProps } from "react"
 import { render, screen, fireEvent, waitFor, cleanup } from "@testing-library/react"
 
@@ -57,7 +57,12 @@ const SHOUTRRR_TARGET: AddChannelTarget = { kind: "shoutrrr", provider: "slack",
 const WEBHOOK_TARGET: AddChannelTarget = { kind: "webhook", label: "Webhook" }
 const EMAIL_TARGET: AddChannelTarget = { kind: "email", label: "Email" }
 
-function renderDialog(over: Partial<ComponentProps<typeof AddChannelDialog>> = {}) {
+type DialogProps = ComponentProps<typeof AddChannelDialog>
+// The two async props stay mocks whatever a test passes, so `.mock.calls`
+// on the returned handle is typed.
+type DialogOverrides = Partial<Omit<DialogProps, "create" | "sendDraftTest">> & { create?: Mock; sendDraftTest?: Mock }
+
+function renderDialog(over: DialogOverrides = {}) {
   const props = {
     target: SHOUTRRR_TARGET,
     onClose: vi.fn(),

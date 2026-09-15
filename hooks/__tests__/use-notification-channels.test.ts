@@ -78,14 +78,13 @@ describe("useNotificationChannels", () => {
     const { result } = renderHook(() => useNotificationChannels("ws1"))
     await waitFor(() => expect(result.current.loading).toBe(false))
 
-    let created: Awaited<ReturnType<typeof result.current.create>> = null
-    await act(async () => {
-      created = await result.current.create({
+    const created = await act(() =>
+      result.current.create({
         type: "webhook",
         url: "https://example.com/hook",
         events: ["failed"],
-      })
-    })
+      }),
+    )
     expect(created?.secret).toBe("s3cr3t")
     const [createUrl, createInit] = fetchMock.mock.calls[1] as [string, RequestInit]
     expect(createUrl).toContain("/api/v1/notification-channels")

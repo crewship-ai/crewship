@@ -80,7 +80,7 @@ function edgeBetween(graph: ReturnType<typeof build>, source: string, target: st
   return e
 }
 
-function isDashed(style: Record<string, unknown> | undefined): boolean {
+function isDashed(style: React.CSSProperties | undefined): boolean {
   return typeof style?.strokeDasharray === "string" && style.strokeDasharray.length > 0
 }
 

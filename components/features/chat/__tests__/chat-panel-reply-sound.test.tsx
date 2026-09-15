@@ -15,7 +15,7 @@ const chatStub = {
   connectionStatus: "connected",
 }
 
-const sound = vi.hoisted(() => ({ play: vi.fn(async () => true), complete: (_reply: { sessionId: string; repliedAt: string }) => {} }))
+const sound = vi.hoisted(() => ({ play: vi.fn<typeof import("@/lib/notification-sound-coordinator").playSoundOnce>(async () => true), complete: (_reply: { sessionId: string; repliedAt: string }) => {} }))
 vi.mock("@/lib/notification-sound-coordinator", () => ({ playSoundOnce: sound.play }))
 vi.mock("@/hooks/use-chat", () => ({ useChat: (options: { onReplyCompleted: typeof sound.complete }) => { sound.complete = options.onReplyCompleted; return chatStub } }))
 vi.mock("@/hooks/use-auth", () => ({
@@ -66,7 +66,7 @@ describe("direct agent completion sound wiring", () => {
     expect(sound.play).toHaveBeenCalledWith(JSON.stringify(["user-1", "ws-test"]), {
       key: `agent-reply:draft-1:${Date.parse(repliedAt)}`, category: "chat",
     }, expect.any(Function))
-    const current = sound.play.mock.calls[0][2] as () => boolean
+    const current = sound.play.mock.calls[0][2]
     expect(current()).toBe(true)
     view.rerender(<ChatPanel {...panelProps} sessionId="other" />)
     expect(current()).toBe(false)
@@ -76,7 +76,7 @@ describe("direct agent completion sound wiring", () => {
   it("does not notify after unmount or for routine/issue sessions", () => {
     const view = render(<ChatPanel {...panelProps} />)
     act(() => sound.complete({ sessionId: "draft-1", repliedAt: "2026-09-08T09:00:00.123Z" }))
-    const current = sound.play.mock.calls[0][2] as () => boolean
+    const current = sound.play.mock.calls[0][2]
     view.unmount()
     expect(current()).toBe(false)
     sound.play.mockClear()
