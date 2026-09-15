@@ -119,6 +119,41 @@ func ScriptInterpreterExtensions() map[string]string {
 	return out
 }
 
+// maxStepEnvEntries bounds how many environment variables a script or code
+// step hands its process: every run input becomes a CREWSHIP_INPUT_* variable
+// and every declared script.env / code.env entry adds one more. Neither count
+// is fixed by the DSL — mergeInputs keeps undeclared inputs the caller passed,
+// and routines can be agent-authored — so the sum is checked against this cap
+// before the env map is allocated (go/allocation-size-overflow, #2456). 1024
+// is far above any real routine; a process env that large would be near the
+// kernel's argument limit anyway.
+const maxStepEnvEntries = 1024
+
+// maxScriptArgs bounds script.args. Each entry becomes one argv element for
+// the interpreter; 256 is generous for a bundled script's flags and paths and
+// keeps the rendered-args slice bounded (#2456).
+const maxScriptArgs = 256
+
+// buildStepEnv translates the render context's inputs into CREWSHIP_INPUT_*
+// variables and layers the step's declared (template-rendered) env on top.
+// Shared by script and code steps so both apply the same maxStepEnvEntries
+// check before allocating. kind is "script" or "code" for the error prefix.
+func buildStepEnv(kind, stepID string, rc RenderContext, declared map[string]string) (map[string]string, error) {
+	n := len(rc.Inputs) + len(declared)
+	if n > maxStepEnvEntries {
+		return nil, fmt.Errorf("%s step %q: %d env entries (%d inputs + %d %s.env) exceeds the maximum of %d",
+			kind, stepID, n, len(rc.Inputs), len(declared), kind, maxStepEnvEntries)
+	}
+	env := make(map[string]string, n)
+	for k, v := range rc.Inputs {
+		env["CREWSHIP_INPUT_"+strings.ToUpper(k)] = stringify(v)
+	}
+	for k, v := range declared {
+		env[k] = Render(v, rc)
+	}
+	return env, nil
+}
+
 // resolveScriptPath cleans a declared path and anchors it under the crew
 // shared root, rejecting traversal or absolute paths that escape the root.
 // Returns the absolute in-container path.
@@ -193,6 +228,10 @@ func (e *Executor) runScriptStep(ctx context.Context, step Step, parentRender Re
 	}
 
 	// Render args ({{ inputs.x }}) — passed as argv, never through a shell.
+	// Bounded before the allocation: args is routine-authored (#2456).
+	if n := len(step.Script.Args); n > maxScriptArgs {
+		return "", 0, 0, fmt.Errorf("script step %q: %d script.args exceeds the maximum of %d", step.ID, n, maxScriptArgs)
+	}
 	args := make([]string, len(step.Script.Args))
 	for i, a := range step.Script.Args {
 		args[i] = Render(a, parentRender)
@@ -200,14 +239,9 @@ func (e *Executor) runScriptStep(ctx context.Context, step Step, parentRender Re
 
 	// Env: declared inputs → CREWSHIP_INPUT_*, plus explicit (rendered) env.
 	// Fresh map so the script gets only what we promised — no orchestrator leak.
-	// Hint on the larger of the two sources rather than their sum — see
-	// executor_foreach.go: a summed make() size trips go/allocation-size-overflow.
-	envIn := make(map[string]string, len(parentRender.Inputs))
-	for k, v := range parentRender.Inputs {
-		envIn["CREWSHIP_INPUT_"+strings.ToUpper(k)] = stringify(v)
-	}
-	for k, v := range step.Script.Env {
-		envIn[k] = Render(v, parentRender)
+	envIn, err := buildStepEnv("script", step.ID, parentRender, step.Script.Env)
+	if err != nil {
+		return "", 0, 0, err
 	}
 
 	timeoutSec := step.TimeoutSec

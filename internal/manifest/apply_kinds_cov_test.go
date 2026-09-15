@@ -145,7 +145,7 @@ func TestBuildPlan_MultiKindDispatch(t *testing.T) {
 apiVersion: crewship/v1
 kind: Project
 metadata: { name: Q2, slug: q2 }
-spec: { status: active }
+spec: { status: in_progress }
 ---
 apiVersion: crewship/v1
 kind: Label
@@ -169,7 +169,7 @@ spec: { project_slug: q2 }
 	stub := newKindsCovStub()
 	// The milestone's parent project must exist remotely for the
 	// milestone lookup to succeed (the FK is resolved server-side).
-	stub.on("GET", "/api/v1/projects", 200, `[{"id":"p1","slug":"q2","name":"Q2","status":"active"}]`)
+	stub.on("GET", "/api/v1/projects", 200, `[{"id":"p1","slug":"q2","name":"Q2","status":"in_progress"}]`)
 	plan, err := BuildPlan(context.Background(), NewClient(stub), bundle, Options{})
 	if err != nil {
 		t.Fatalf("BuildPlan: %v", err)
@@ -213,7 +213,7 @@ func TestBuildPlan_FullCompleteExample(t *testing.T) {
 		t.Fatalf("LoadFile(%s): %v", path, err)
 	}
 	stub := newKindsCovStub()
-	stub.on("GET", "/api/v1/projects", 200, `[{"id":"p1","slug":"q2-launch","name":"Q2 Launch","status":"active"}]`)
+	stub.on("GET", "/api/v1/projects", 200, `[{"id":"p1","slug":"q2-launch","name":"Q2 Launch","status":"in_progress"}]`)
 	// The project's lead_agent_slug FK resolves through GET
 	// /api/v1/agents at plan time, so "trapper" must exist remotely.
 	stub.on("GET", "/api/v1/agents", 200, `[{"id":"ag1","slug":"trapper","name":"Trapper"}]`)
@@ -333,7 +333,7 @@ func TestPlanNewKinds_LookupErrorsPropagate(t *testing.T) {
 apiVersion: crewship/v1
 kind: Project
 metadata: { name: P, slug: p }
-spec: { status: active }
+spec: { status: in_progress }
 `, "GET", "/api/v1/projects", `project "p": lookup remote`)
 	})
 	t.Run("milestone lookup fails", func(t *testing.T) {
@@ -346,7 +346,7 @@ spec: { project_slug: p }
 apiVersion: crewship/v1
 kind: Project
 metadata: { name: P, slug: p }
-spec: { status: active }
+spec: { status: in_progress }
 `, "GET", "/api/v1/projects", `project "p": lookup remote`)
 	})
 }

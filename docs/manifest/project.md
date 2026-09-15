@@ -15,8 +15,8 @@ metadata:
   description: All Q2 deliverables # optional — long-form description, stored in projects.description
 spec:
   color: "#3B82F6"                 # optional — six-digit hex, default "blue" applied by server
-  status: planned                  # optional — one of: planned, active, completed, archived
-  priority: medium                 # optional — one of: low, medium, high, urgent
+  status: planned                  # optional — one of: backlog, planned, in_progress, paused, completed, cancelled
+  priority: medium                 # optional — one of: none, low, medium, high, urgent
   health: on_track                 # optional — one of: on_track, at_risk, off_track
   target_date: "2026-06-30"        # optional — YYYY-MM-DD calendar date
   lead_agent_slug: pepa            # optional — slug of an Agent in the same workspace
@@ -52,7 +52,7 @@ metadata:
     sidecar V2 cutover. Owner: Pepa.
 spec:
   color: "#3B82F6"
-  status: active
+  status: in_progress
   priority: high
   health: on_track
   target_date: "2026-06-30"
@@ -123,12 +123,12 @@ Endpoints touched:
 - `kind` must equal `Project`.
 - `metadata.name` is required and non-empty.
 - `metadata.slug` is required and non-empty.
-- `spec.status`, when set, must be one of `planned`, `active`, `completed`, `archived`.
-- `spec.priority`, when set, must be one of `low`, `medium`, `high`, `urgent`.
+- `spec.status`, when set, must be one of `backlog`, `planned`, `in_progress`, `paused`, `completed`, `cancelled` — the same words the API and the `projects.status` CHECK constraint accept.
+- `spec.priority`, when set, must be one of `none`, `low`, `medium`, `high`, `urgent`.
 - `spec.health`, when set, must be one of `on_track`, `at_risk`, `off_track`.
 - `spec.color`, when set, must match `^#[0-9A-Fa-f]{6}$`.
 - `spec.target_date`, when set, must parse as `YYYY-MM-DD`.
-- `spec.lead_agent_slug`, when set, must reference an Agent present in either the declared manifest or the workspace's existing agents.
+- `spec.lead_agent_slug`, when set, must reference an Agent present in either the declared manifest or the workspace's existing agents. `crewship apply` lists the workspace's agents before validating, so a standalone Project file may name an agent created by an earlier apply; a validation pass without a server (the in-container manifest tool) defers the check to plan time.
 
 Validation is executed before any HTTP call, so a malformed document fails fast without partial mutations.
 

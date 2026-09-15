@@ -3,7 +3,6 @@ package pipeline
 import (
 	"context"
 	"fmt"
-	"strings"
 	"time"
 )
 
@@ -53,15 +52,11 @@ func (e *Executor) runCodeStep(ctx context.Context, step Step, parentRender Rend
 
 	// Translate render context inputs → env vars. Use a fresh map
 	// so the runner receives only what we promised — never leak
-	// arbitrary env from the orchestrator.
-	// Hint on the larger of the two sources rather than their sum — see
-	// executor_foreach.go: a summed make() size trips go/allocation-size-overflow.
-	envIn := make(map[string]string, len(parentRender.Inputs))
-	for k, v := range parentRender.Inputs {
-		envIn["CREWSHIP_INPUT_"+strings.ToUpper(k)] = stringify(v)
-	}
-	for k, v := range step.Code.Env {
-		envIn[k] = Render(v, parentRender)
+	// arbitrary env from the orchestrator. buildStepEnv bounds the
+	// entry count (maxStepEnvEntries) before allocating.
+	envIn, err := buildStepEnv("code", step.ID, parentRender, step.Code.Env)
+	if err != nil {
+		return "", 0, 0, err
 	}
 
 	timeoutSec := step.TimeoutSec

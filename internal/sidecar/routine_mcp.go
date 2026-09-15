@@ -32,7 +32,7 @@ var routineMCPSaveSchema = json.RawMessage(`{
 		},
 		"description": {
 			"type": "string",
-			"description": "One-line summary of what the routine does."
+			"description": "One-line summary of what the routine does. When re-saving an existing routine, omit this to keep the stored description; pass an empty string to clear it."
 		},
 		"definition": {
 			"type": "object",

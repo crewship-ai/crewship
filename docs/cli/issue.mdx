@@ -138,6 +138,7 @@ crewship issue create --crew backend-team --title "Add caching" --assignee vikto
 | `--title` | `string` | _(required)_ | Issue title. |
 | `--description` | `string` | | Issue description. |
 | `--priority` | `string` | `none` | Priority: `none`, `low`, `medium`, `high`, `urgent`. |
+| `--status` | `string` | `BACKLOG` | Starting status: `BACKLOG`, `TODO`, `IN_PROGRESS`, `CANCELLED`, `DUPLICATE` — anything not one step from `BACKLOG` is refused with a 400. |
 | `--assignee` | `string` | | Assignee agent slug (resolved to an agent ID client-side). |
 | `--assignee-type` | `string` | `agent` | Assignee type. Only `agent` is currently supported — any other value is rejected. |
 | `--labels` | `string` | | Comma-separated label IDs. |

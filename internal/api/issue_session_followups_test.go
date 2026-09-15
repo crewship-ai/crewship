@@ -308,6 +308,13 @@ func TestDispatchQueuedFollowUps_OversizedDigestLeavesTheOverflowPending(t *test
 
 // onlyNewRunForSession asserts exactly one assignment exists for sessionID
 // besides excludeID (the seeded "winner") and returns its id.
+//
+// Callers read this AFTER WaitDispatches, so the count is final, not
+// eventual: every run the fold dispatched has finished and its own
+// re-entry into dispatchQueuedFollowUpsForSession has run to completion
+// under followUpMu. More than one row therefore means the fold selected
+// the same pending batch twice — the guard 6d8ef23b3 added for #2437 — and
+// never "the runner was slow".
 func onlyNewRunForSession(t *testing.T, f *mentionFixture, sessionID, excludeID string) string {
 	t.Helper()
 	rows, err := f.db.Query(`SELECT id FROM assignments WHERE session_id = ? AND id != ?`, sessionID, excludeID)
@@ -327,7 +334,8 @@ func onlyNewRunForSession(t *testing.T, f *mentionFixture, sessionID, excludeID 
 		t.Fatalf("rows: %v", err)
 	}
 	if len(ids) != 1 {
-		t.Fatalf("new runs for session %s = %d (%v), want exactly 1", sessionID, len(ids), ids)
+		t.Fatalf("new runs for session %s = %d (%v), want exactly 1 — dispatches are drained (WaitDispatches), "+
+			"so this is not load: the fold selected the same pending batch twice (followUpMu, #2437)", sessionID, len(ids), ids)
 	}
 	return ids[0]
 }

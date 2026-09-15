@@ -516,3 +516,52 @@ func TestIPCRequestJSON_UpstreamUnreachable(t *testing.T) {
 		t.Fatal("expected error on unreachable upstream")
 	}
 }
+
+// #2405 — the sidecar must not turn an agent's omitted description into an
+// explicit "" on the forwarded body; the main API treats an omitted key as
+// "preserve" and an explicit "" as "clear", so always sending the key made
+// every re-save without a description erase the stored one.
+func TestSavePipeline_DescriptionForwardedOnlyWhenSent_2405(t *testing.T) {
+	cases := []struct {
+		name     string
+		agent    string // body the agent POSTs
+		wantKey  bool
+		wantDesc string
+	}{
+		{name: "omitted stays omitted", agent: `{"name":"My Pipe","definition":{"steps":[]}}`, wantKey: false},
+		{name: "explicit empty forwarded", agent: `{"name":"My Pipe","description":"","definition":{"steps":[]}}`, wantKey: true, wantDesc: ""},
+		{name: "value forwarded", agent: `{"name":"My Pipe","description":"deploy script","definition":{"steps":[]}}`, wantKey: true, wantDesc: "deploy script"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var saveBody map[string]any
+			mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				switch {
+				case strings.HasSuffix(r.URL.Path, "/test_run"):
+					_, _ = w.Write([]byte(`{"status":"DRY_RUN_OK","save_token":"tok"}`))
+				case strings.HasSuffix(r.URL.Path, "/internal/pipelines/save"):
+					_ = json.NewDecoder(r.Body).Decode(&saveBody)
+					_, _ = w.Write([]byte(`{"saved":true}`))
+				default:
+					http.Error(w, "unexpected path "+r.URL.Path, http.StatusNotFound)
+				}
+			}))
+			defer mock.Close()
+
+			s := newPipelineTestServer(t, &IPCConfig{BaseURL: mock.URL, Token: "t", WorkspaceID: "ws", CrewID: "c", AgentID: "a"})
+			rr := httptest.NewRecorder()
+			s.handlePipelinesSave(rr, httptest.NewRequest("POST", "/pipelines/save", strings.NewReader(tc.agent)))
+			if rr.Code != http.StatusOK {
+				t.Fatalf("code = %d body=%s", rr.Code, rr.Body.String())
+			}
+			got, ok := saveBody["description"]
+			if ok != tc.wantKey {
+				t.Fatalf("description key present=%v want %v (body=%v)", ok, tc.wantKey, saveBody)
+			}
+			if ok && got != tc.wantDesc {
+				t.Errorf("description = %v, want %q", got, tc.wantDesc)
+			}
+		})
+	}
+}

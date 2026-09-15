@@ -592,7 +592,7 @@ func TestProject_Export_LeadResolveFailsContinuesGracefully(t *testing.T) {
 				"name":      "X",
 				"slug":      "x",
 				"color":     "#ffffff",
-				"status":    "active",
+				"status":    "in_progress",
 				"priority":  "medium",
 				"health":    "on_track",
 				"lead_type": "agent",
@@ -622,9 +622,9 @@ func TestProject_Export_LeadResolveFailsContinuesGracefully(t *testing.T) {
 func TestProject_Export_DeterministicOrder(t *testing.T) {
 	// Server returns rows in unsorted order; export must sort by slug.
 	rows := []map[string]any{
-		{"id": "a", "name": "Zee", "slug": "zee", "color": "#000000", "status": "active", "priority": "medium", "health": "on_track"},
-		{"id": "b", "name": "Alpha", "slug": "alpha", "color": "#000000", "status": "active", "priority": "medium", "health": "on_track"},
-		{"id": "c", "name": "Middle", "slug": "middle", "color": "#000000", "status": "active", "priority": "medium", "health": "on_track"},
+		{"id": "a", "name": "Zee", "slug": "zee", "color": "#000000", "status": "in_progress", "priority": "medium", "health": "on_track"},
+		{"id": "b", "name": "Alpha", "slug": "alpha", "color": "#000000", "status": "in_progress", "priority": "medium", "health": "on_track"},
+		{"id": "c", "name": "Middle", "slug": "middle", "color": "#000000", "status": "in_progress", "priority": "medium", "health": "on_track"},
 	}
 	srv := projectFakeServer(t, rows, nil)
 	defer srv.Close()
@@ -646,7 +646,7 @@ func TestProject_Export_DeterministicOrder(t *testing.T) {
 
 func TestProject_FetchProjectBySlug_Found(t *testing.T) {
 	rows := []map[string]any{
-		{"id": "proj_001", "slug": "q2-roadmap", "name": "Q2", "color": "#fff", "status": "active", "priority": "medium", "health": "on_track"},
+		{"id": "proj_001", "slug": "q2-roadmap", "name": "Q2", "color": "#fff", "status": "in_progress", "priority": "medium", "health": "on_track"},
 	}
 	srv := projectFakeServer(t, rows, nil)
 	defer srv.Close()

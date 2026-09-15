@@ -651,6 +651,26 @@ func LookupAgentRemoteBySlug(ctx context.Context, c internalapi.Client, slug str
 	return nil, nil
 }
 
+// ListAgentSlugs lists every agent the workspace has as slug lookups,
+// for WorkspaceContext.RemoteAgents. The planner calls it before the
+// validate pass so a Project lead or Issue assignee that exists only
+// on the server passes the FK check instead of being reported as
+// "not found in workspace agents" (#2426). The result is non-nil on
+// success even for an empty workspace, so KnowsAgents stays truthful:
+// an empty list means "the workspace has no agents", a nil one means
+// "nobody looked".
+func ListAgentSlugs(ctx context.Context, c internalapi.Client) ([]internalapi.SlugLookup, error) {
+	rows, err := agentListAll(ctx, c)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]internalapi.SlugLookup, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, internalapi.SlugLookup{Slug: row.Slug, Name: row.Name})
+	}
+	return out, nil
+}
+
 // LookupCrewIDBySlug resolves a crew slug to its CUID. Returns a
 // not-found error when no row matches; the caller decorates with
 // "agent %q:" context. Used by both Plan (to populate crew_id in the

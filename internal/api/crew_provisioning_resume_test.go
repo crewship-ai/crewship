@@ -18,6 +18,8 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -397,6 +399,130 @@ func TestResumeDeferredChatMessage(t *testing.T) {
 					t.Fatal("never even got the run_begin frame")
 				}
 				expectNoMoreFrames(t, obs)
+			},
+		},
+		{
+			// #2431: a completed build that still leaves the crew unstartable
+			// (the image the build "hit" in a stale list was gone from the
+			// daemon) made HandleChatMessage defer the message to a NEW
+			// build, whose completion resumed it again — 83 provisions in one
+			// second, ended only by the rate limiter, and a chat that died
+			// with "an error occurred processing your message". The resume
+			// must back off between consecutive re-deferrals, give up after
+			// a bound, and then tell the user what actually happened.
+			name: "re-deferral: exponential back-off, bounded retries, then an error naming the cause",
+			run: func(t *testing.T) {
+				h, _, _, hub := resumeTestRig(t, "")
+				fake := newFakeChatResumer()
+				fake.err = ws.ErrCrewProvisioning
+				fake.stream = []ws.ChatEvent{{Type: "crew_provisioning", Content: "building again"}}
+				h.chatResumer = fake
+
+				var mu sync.Mutex
+				var slept []time.Duration
+				h.resumeSleep = func(_ context.Context, d time.Duration) bool {
+					mu.Lock()
+					slept = append(slept, d)
+					mu.Unlock()
+					return true
+				}
+
+				obs := hub.AddObserver("session:chat-loop", "user-1", 64)
+				defer hub.RemoveObserver("session:chat-loop", obs)
+
+				msg := chatbridge.PendingChatMessage{UserID: "user-1", ChatID: "chat-loop", Content: "hi"}
+				// Each call is what one completed build does with its attached
+				// message. The fake defers it again every time, exactly as the
+				// bridge did while the image stayed missing.
+				for i := 0; i < maxDeferredResumes; i++ {
+					h.resumeMessage(msg, nil)
+					// drain: run_begin + the fake's crew_provisioning card
+					ev := nextChatEvent(t, obs)
+					if ev.Type != "crew_provisioning" {
+						t.Fatalf("resume %d: first event = %+v, want the handler's crew_provisioning card", i+1, ev)
+					}
+				}
+				if got := fake.callCount(); got != maxDeferredResumes {
+					t.Fatalf("HandleChatMessage called %d times, want %d (one per resume within the bound)", got, maxDeferredResumes)
+				}
+
+				// One past the bound: no further run, a clear error instead.
+				h.resumeMessage(msg, nil)
+				errEv := nextChatEvent(t, obs)
+				if errEv.Type != "error" {
+					t.Fatalf("past the bound: event = %+v, want error", errEv)
+				}
+				for _, want := range []string{"image", "missing", "rebuilt", "3"} {
+					if !strings.Contains(strings.ToLower(errEv.Content), want) {
+						t.Errorf("error %q does not mention %q — it must name the cause and the attempt count", errEv.Content, want)
+					}
+				}
+				meta, _ := errEv.Metadata.(map[string]any)
+				if meta["reason"] != "provisioning_loop" {
+					t.Errorf("error metadata = %v, want reason=provisioning_loop", errEv.Metadata)
+				}
+				if doneEv := nextChatEvent(t, obs); doneEv.Type != "done" {
+					t.Errorf("event after the error = %+v, want done", doneEv)
+				}
+				if got := fake.callCount(); got != maxDeferredResumes {
+					t.Errorf("HandleChatMessage called %d times after the bound, want still %d", got, maxDeferredResumes)
+				}
+
+				// Back-off: nothing before the first resume, then a growing
+				// delay before each re-resume, jitter within the step.
+				mu.Lock()
+				defer mu.Unlock()
+				if len(slept) != maxDeferredResumes-1 {
+					t.Fatalf("slept %d times (%v), want %d (none before the first resume, one before each later one within the bound)", len(slept), slept, maxDeferredResumes-1)
+				}
+				for i, d := range slept {
+					base := deferredResumeBaseDelay << uint(i)
+					if d < base || d >= 2*base {
+						t.Errorf("sleep %d = %v, want in [%v, %v) (exponential with jitter)", i+1, d, base, 2*base)
+					}
+				}
+
+				// The counter is per chat and resets once the message runs:
+				// a later, ordinary resume on the same chat starts fresh.
+				fake.err = nil
+				fake.stream = nil
+				h.resumeMessage(msg, nil)
+				if got := fake.callCount(); got != maxDeferredResumes+1 {
+					t.Errorf("a fresh resume after the bound was reported ran %d times total, want %d", got, maxDeferredResumes+1)
+				}
+			},
+		},
+		{
+			// The counter must not survive a message that actually ran or was
+			// failed by its build: only CONSECUTIVE re-deferrals count.
+			name: "re-deferral counter clears when the message runs or its build fails",
+			run: func(t *testing.T) {
+				h, _, _, hub := resumeTestRig(t, "")
+				fake := newFakeChatResumer()
+				h.chatResumer = fake
+				h.resumeSleep = func(context.Context, time.Duration) bool { return true }
+				obs := hub.AddObserver("session:chat-clear", "user-1", 64)
+				defer hub.RemoveObserver("session:chat-clear", obs)
+				msg := chatbridge.PendingChatMessage{UserID: "user-1", ChatID: "chat-clear", Content: "hi"}
+
+				fake.err = ws.ErrCrewProvisioning
+				h.resumeMessage(msg, nil)
+				h.resumeMessage(msg, nil)
+				if got := h.deferredResumeCount(msg.ChatID); got != 2 {
+					t.Fatalf("count after two re-deferrals = %d, want 2", got)
+				}
+				fake.err = nil
+				h.resumeMessage(msg, nil) // ran
+				if got := h.deferredResumeCount(msg.ChatID); got != 0 {
+					t.Errorf("count after the message ran = %d, want 0", got)
+				}
+
+				fake.err = ws.ErrCrewProvisioning
+				h.resumeMessage(msg, nil)
+				h.resumeMessage(msg, errors.New("build failed: disk full")) // failed by its build
+				if got := h.deferredResumeCount(msg.ChatID); got != 0 {
+					t.Errorf("count after a failed build = %d, want 0", got)
+				}
 			},
 		},
 		{

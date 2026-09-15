@@ -51,6 +51,9 @@ var issueCreateCmd = &cobra.Command{
 		if v, _ := flags.GetString("priority"); v != "" {
 			body["priority"] = v
 		}
+		if v, _ := flags.GetString("status"); v != "" {
+			body["status"] = v
+		}
 		if v, _ := flags.GetString("assignee"); v != "" {
 			atype, _ := flags.GetString("assignee-type")
 			if atype == "" {

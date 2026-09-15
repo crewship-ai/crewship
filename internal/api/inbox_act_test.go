@@ -113,12 +113,23 @@ func TestInboxAct_Answer_ResumesTheSessionThatAsked(t *testing.T) {
 	if runAgent != r.f.target || runSession != r.sessionID {
 		t.Fatalf("new run = agent %s session %s, want agent %s session %s", runAgent, runSession, r.f.target, r.sessionID)
 	}
+	//    'consumed' is a FINAL state here, not an eventual one: act() drains
+	//    the spawned run via WaitDispatches, so finishAssignment's
+	//    consumeDeliveriesForRun has already run — and if that run finished
+	//    BEFORE the handler's persist stamped claimed_by_run_id (the fast-run
+	//    ordering #2407/#2437 hit under CI load), persist's own terminal
+	//    re-check closes the claim instead (issue_mentions.go, pinned by
+	//    TestMentionPersist_LateClaimAfterRunFinished). A 'claimed' read here
+	//    is therefore a regression of that guard, never a timing artefact —
+	//    polling would only turn it into a slower failure.
 	var delAgent, delState string
 	if err := r.f.db.QueryRow(`SELECT agent_id, state FROM mission_comment_mentions WHERE id = ?`, resp.Receipt.DeliveryID).Scan(&delAgent, &delState); err != nil {
 		t.Fatalf("delivery row: %v", err)
 	}
 	if delAgent != r.f.target || delState != "consumed" {
-		t.Fatalf("delivery = agent %s state %s, want %s consumed", delAgent, delState, r.f.target)
+		t.Fatalf("delivery = agent %s state %s, want %s consumed — the run is already drained (WaitDispatches), "+
+			"so this is not load: either finishAssignment's consumeDeliveriesForRun or persist's terminal re-check must have closed the claim (#2407, #2437)",
+			delAgent, delState, r.f.target)
 	}
 	if state, _ := sessionState(t, r.f, r.sessionID); state == "awaiting_input" {
 		t.Fatalf("session still awaiting_input after the answer resumed it")

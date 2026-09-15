@@ -352,9 +352,7 @@ func (d *IssueDocument) Validate(wsCtx internalapi.WorkspaceContext) error {
 		return fmt.Errorf("issue %q: spec.routine_slug %q does not reference any declared or remote routine",
 			d.Metadata.Slug, d.Spec.RoutineSlug)
 	}
-	if d.Spec.AssigneeSlug != "" &&
-		(len(wsCtx.DeclaredAgents) > 0 || len(wsCtx.RemoteAgents) > 0) &&
-		!wsCtx.HasAgent(d.Spec.AssigneeSlug) {
+	if d.Spec.AssigneeSlug != "" && wsCtx.KnowsAgents() && !wsCtx.HasAgent(d.Spec.AssigneeSlug) {
 		return fmt.Errorf("issue %q: spec.assignee_slug %q does not reference any declared or remote agent",
 			d.Metadata.Slug, d.Spec.AssigneeSlug)
 	}
@@ -581,20 +579,24 @@ func (d *IssueDocument) Plan(ctx context.Context, c internalapi.Client, remote *
 // it. Optional fields are only included when set so the server
 // applies its own defaults (priority="none", status="BACKLOG").
 //
-// Status on create is interesting: the create handler hard-codes
-// status='BACKLOG'. The manifest can still declare a status, but
-// the handler ignores it on POST — to land the row in a non-default
-// state, Plan would have to emit a Create followed by an Update.
-// We're not doing that yet; if a user declares status:done on a
-// brand-new Issue document the row lands in BACKLOG and the next
-// Plan run will detect drift and PATCH it to DONE. This is a known
-// two-apply quirk and is documented in the per-kind docs page.
+// Status is sent in its canonical (upper-case) form when declared.
+// The create handler accepts a starting status and validates it the
+// way an update from the default BACKLOG would be, so `status: todo`
+// lands as TODO in one apply (#2426). A status that is not one step
+// from BACKLOG (say `done`) is refused by the server with a 400 —
+// the same answer the follow-up PATCH used to get when the row had
+// landed in BACKLOG first, only now the apply says so up front.
 func (d *IssueDocument) toCreateBody(projectID, assigneeID string, labelIDs []string, routineID string) map[string]any {
 	body := map[string]any{
 		"title": d.resolvedTitle(),
 	}
 	if d.Spec.Description != "" {
 		body["description"] = d.Spec.Description
+	}
+	if d.Spec.Status != "" {
+		if canonical := validIssueStatuses[d.Spec.Status]; canonical != "" {
+			body["status"] = canonical
+		}
 	}
 	priority := d.Spec.Priority
 	if priority == "" {

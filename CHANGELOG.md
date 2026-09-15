@@ -10,6 +10,12 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 ## [Unreleased]
 
 ### Fixed
+- **Manifest:** a standalone `Project` can name a workspace agent as lead, `Project.status` uses the API vocabulary (`backlog|planned|in_progress|paused|completed|cancelled`; a bad value is a 400 naming the field instead of a 500), re-applying a `Label` is idempotent, and `Issue.status` is honoured on create — `POST …/issues` and `crewship issue create --status` accept a starting status. (#2426)
+- **Provisioning:** a cache hit is confirmed against the Docker daemon before it is reported, a container start on a missing image invalidates the memoised image list, and a message deferred to a rebuild backs off and stops after three consecutive rebuilds with a clear error — `docker rmi crewship-cache:*` no longer triggers 80+ provisions a second and a dead chat. (#2431)
+- An agent re-saving a routine without a description no longer erases the stored one: the sidecar IPC save and the `save_routine` tool are PATCH-like (omitted preserves, `""` clears), matching the CLI and UI path. (#2405)
+- Script and code step environments (1,024 entries), script arguments (256) and per-item foreach inputs (1,024) are bounded before allocation; an over-cap step fails naming the field and the maximum. (#2456)
+- Pages: the access report (`page access`, `GET /pages/access`, `GET /pages/{slug}/access`) renders the `folder:<slug>` path for crew subjects named in a folder's sharing, not only for their members. (#2543)
+- Tests: `TestWatcher_DebounceCoalesce` asserts on the union of paths across events rather than an exact event count, so a debounce-window split under CI load no longer fails it (#2486); the inbox, deliveries and follow-up delivery-state assertions name the guards that make the state final, so a future failure reads as a regression rather than a load flake (#2407, #2437).
 - Pages management and denied data writes return the same not-found response for hidden and missing pages; explicit folder edit grants now explain that they also apply to workspace Viewers.
 - Routine results use the database's 30-second contention budget when recording a completed step, instead of failing after five seconds while waiting for a connection. This records the existing execution; it does not repeat the action.
 - Routine editors compare closing, reload and navigation against the saved draft. Unsaved edits are protected during browser history and app navigation; closing returns keyboard focus to Edit.
