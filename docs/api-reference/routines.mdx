@@ -92,7 +92,7 @@ complete request fields, response fields, merge semantics, and status branches.
 | PATCH | `/api/v1/workspaces/{workspaceId}/pipeline-schedules/{scheduleId}` | `manage` (OWNER/ADMIN) | Schedule update; omitted fields are retained | Updated schedule object | `200`, `400`, `401`, `403`, `404`, `500`, `503` |
 | DELETE | `/api/v1/workspaces/{workspaceId}/pipeline-schedules/{scheduleId}` | `manage` (OWNER/ADMIN) | No body | Empty response | `204`, `400`, `403`, `404`, `500`, `503` |
 | POST | `/api/v1/workspaces/{workspaceId}/pipeline-schedules/{scheduleId}/run` | `create` (MANAGER+) | No body | Run result object | `200`, `400`, `403`, `404`, `409`, `429`, `500`, `503` |
-| POST | `/api/v1/workspaces/{workspaceId}/pipeline-schedules/{scheduleId}/activate` | `create` (MANAGER+) | No body | Activated schedule object | `200`, `403`, `404`, `409`, `500`, `503` |
+| POST | `/api/v1/workspaces/{workspaceId}/pipeline-schedules/{scheduleId}/activate` | `create` (MANAGER+) | No body | Activated schedule object | `200`, `400`, `403`, `404`, `409`, `500`, `503` |
 
 The create request accepts `target_pipeline_slug` or `target_pipeline_id` and
 requires `cron_expr`:
@@ -116,7 +116,10 @@ requires `cron_expr`:
 
 `catchup_policy` is `once`, `all`, or `skip`. A wake pipeline must be a
 different routine whose DSL declares `agentless: true`. Invalid cron, timezone,
-target, wake references, or JSON is `400`. The schedule representation
+target, wake references, or JSON is `400`; so is a preset the target recipe
+rejects, or a pin to a version the routine never archived, on create, on a
+PATCH that changes inputs, target, pin or enables the plan, and on activate
+(see [Schedules](/api-reference/schedules)). The schedule representation
 includes `next_run_at`, `last_run_at`, `last_status`, `last_run_id`, failure
 breaker counters, and wake telemetry. A circuit-breaker disable sets
 `disabled_reason` to `circuit_breaker`.
