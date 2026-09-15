@@ -84,7 +84,7 @@ export function OverviewTab({
   // right-hand drawer: the drawer had to be 420px for a list and 760px for an
   // editor, which is how one pattern ended up with two widths.
   const [manager, setManager] = useState<"skills" | "tools" | "channels" | null>(null)
-  const { issues, credentials, skills, pipelines, loading, error, refresh } = useAgentRelations(workspaceId, agent.id)
+  const { issues, credentials, skills, pipelines, readiness, loading, error, refresh } = useAgentRelations(workspaceId, agent.id)
   const { toolkits, channels, error: reachError, refresh: refreshReach } = useAgentReach(workspaceId, agent.id)
 
   const agentPipelines = useMemo(
@@ -138,31 +138,41 @@ export function OverviewTab({
     tag: t.automatic ? "auto" : "man",
   }))
 
-  // Zero credentials is not "nothing to report" — it is the failure case.
-  // credentials includes both explicit grants and crew-inherited ones
-  // (grant_source "crew", from a crew-scoped credential the agent picks up
-  // automatically), so an agent that is fine because its crew already has a
-  // key still has a non-empty array here and never hits this branch. Only a
-  // genuinely empty array — no explicit grant, no crew to inherit from, or a
-  // crew with none — means the agent has nothing to authenticate with.
-  const credItems: DetailCellItem[] = credentials.length === 0
+  // "Can this agent call its model?" is the SERVER's answer (#2183), not
+  // something inferred from the list below. The list is the union of
+  // everything that reaches the agent, so one crew-scoped GH_TOKEN binding
+  // makes it non-empty for an agent with no model credential (#2169) — and
+  // for CLAUDE_CODE the model variable in the env is a dummy by design, so
+  // "unfilled slot" would false-alarm on every healthy agent. The route
+  // classifies with the runtime's own delivery rules; this only renders it.
+  // `unknown` (and a failed read) is no opinion and shows nothing. The old
+  // zero-length item is gone: it fired only for an agent with no bindings and
+  // no crew links, and it would now contradict the verdict beside it.
+  const modelCredential = readiness?.model_credential
+  const modelMissing = modelCredential?.state === "missing"
+  const missingItem: DetailCellItem[] = modelMissing
     ? [{
-        id: "no-credential",
+        id: "no-model-credential",
         icon: CONCEPT_ICON.credentials,
-        tone: "muted",
-        title: "No credential assigned",
-        subtitle: "No explicit credential grant. Check the chosen model and inherited access in Vault.",
+        tone: "warn",
+        title: "No model credential",
+        subtitle: readiness?.notes[0]
+          ?? `Nothing delivered authenticates ${modelCredential?.provider ?? "the model provider"}; the first run will fail at the first model call.`,
         tag: "wait",
       }]
-    : credentials.map((c): DetailCellItem => ({
-        id: c.id,
-        icon: CONCEPT_ICON.credentials,
-        tone: c.credential_status === "ACTIVE" ? "gold" : "warn",
-        title: c.credential_name,
-        subtitle: `${c.credential_provider?.toLowerCase() ?? "custom"} · ${c.env_var_name}`,
-        meta: c.credential_status?.toLowerCase(),
-        tag: c.credential_status === "ACTIVE" ? "on" : "wait",
-      }))
+    : []
+  const credItems: DetailCellItem[] = [
+    ...missingItem,
+    ...credentials.map((c): DetailCellItem => ({
+      id: c.id,
+      icon: CONCEPT_ICON.credentials,
+      tone: c.credential_status === "ACTIVE" ? "gold" : "warn",
+      title: c.credential_name,
+      subtitle: `${c.credential_provider?.toLowerCase() ?? "custom"} · ${c.env_var_name}`,
+      meta: c.credential_status?.toLowerCase(),
+      tag: c.credential_status === "ACTIVE" ? "on" : "wait",
+    })),
+  ]
 
   const runItems: DetailCellItem[] = (runs ?? []).map((r): DetailCellItem => ({
     id: r.id,
@@ -276,7 +286,7 @@ export function OverviewTab({
           title="Credentials"
           icon={CONCEPT_ICON.credentials}
           count={credentials.length}
-          warn={credentials.some((c) => c.credential_status !== "ACTIVE")}
+          warn={modelMissing || credentials.some((c) => c.credential_status !== "ACTIVE")}
           filters={[
             { id: "all", label: "All" },
             { id: "on", label: "Active" },

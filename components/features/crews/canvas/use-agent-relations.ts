@@ -42,11 +42,38 @@ export interface AgentPipelineRow {
   author_agent_id?: string | null
 }
 
+/**
+ * The server's answer to "does a credential the runtime will actually deliver
+ * authenticate this agent's model?" — GET /agents/{id}/credential-readiness
+ * (#2183). The classification is the orchestrator's own; nothing here re-derives
+ * it from the credentials list, because that list is the union of everything
+ * that reaches the agent and one crew GH_TOKEN binding makes it non-empty for
+ * an agent that cannot call its model (#2169).
+ *
+ * `unknown` is "no opinion", not a failure, and renders as nothing.
+ */
+export interface AgentCredentialReadiness {
+  agent_id: string
+  adapter: string
+  model_credential: {
+    state: "ready" | "missing" | "unknown"
+    credential_name?: string
+    credential_id?: string
+    source?: string
+    delivery?: string
+    provider?: string
+  }
+  notes: string[]
+}
+
 export interface AgentRelations {
   issues: AgentIssueRow[]
   credentials: AgentCredRow[]
   skills: AgentSkillRow[]
   pipelines: AgentPipelineRow[]
+  /** null until answered, and null when the server could not answer — both
+   *  render as "no opinion", never as a warning. */
+  readiness: AgentCredentialReadiness | null
   loading: boolean
   error: string | null
   refresh: () => void
@@ -59,11 +86,29 @@ async function fetchList<T>(url: string, signal?: AbortSignal): Promise<T[]> {
   return Array.isArray(data) ? (data as T[]) : []
 }
 
+async function fetchReadiness(url: string, signal?: AbortSignal): Promise<AgentCredentialReadiness | null> {
+  const r = await apiFetch(url, { signal })
+  // A backend that predates the route must not blank the overview, and "we
+  // could not check" must never render as "missing": null is no opinion.
+  if (!r.ok) return null
+  const data = (await r.json()) as Partial<AgentCredentialReadiness> | null
+  const modelCredential = data?.model_credential
+  const state = modelCredential?.state
+  if (!modelCredential || (state !== "ready" && state !== "missing" && state !== "unknown")) return null
+  return {
+    agent_id: data?.agent_id ?? "",
+    adapter: data?.adapter ?? "",
+    model_credential: modelCredential,
+    notes: Array.isArray(data?.notes) ? data.notes : [],
+  }
+}
+
 export function useAgentRelations(workspaceId: string, agentId: string | undefined): AgentRelations {
   const [issues, setIssues] = useState<AgentIssueRow[]>([])
   const [credentials, setCredentials] = useState<AgentCredRow[]>([])
   const [skills, setSkills] = useState<AgentSkillRow[]>([])
   const [pipelines, setPipelines] = useState<AgentPipelineRow[]>([])
+  const [readiness, setReadiness] = useState<AgentCredentialReadiness | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [nonce, setNonce] = useState(0)
@@ -72,10 +117,10 @@ export function useAgentRelations(workspaceId: string, agentId: string | undefin
 
   useEffect(() => {
     if (!agentId) {
-      setIssues([]); setCredentials([]); setSkills([]); setPipelines([])
+      setIssues([]); setCredentials([]); setSkills([]); setPipelines([]); setReadiness(null)
       return
     }
-    setIssues([]); setCredentials([]); setSkills([]); setPipelines([]); setError(null)
+    setIssues([]); setCredentials([]); setSkills([]); setPipelines([]); setReadiness(null); setError(null)
     const controller = new AbortController()
     const ws = encodeURIComponent(workspaceId)
     const id = encodeURIComponent(agentId)
@@ -87,6 +132,8 @@ export function useAgentRelations(workspaceId: string, agentId: string | undefin
         () => fetchList<AgentCredRow>(`/api/v1/agents/${id}/credentials?workspace_id=${ws}`, controller.signal), TTL_MS),
       skills: readThrough(`workspace:${workspaceId}:agent:${agentId}:skills`,
         () => fetchList<AgentSkillRow>(`/api/v1/agents/${id}/skills?workspace_id=${ws}`, controller.signal), TTL_MS),
+      readiness: readThrough(`workspace:${workspaceId}:agent:${agentId}:credential-readiness`,
+        () => fetchReadiness(`/api/v1/agents/${id}/credential-readiness?workspace_id=${ws}`, controller.signal), TTL_MS),
       // Workspace-scoped, so the key deliberately omits the agent — walking a
       // roster must not re-fetch the same list once per agent.
       pipelines: readThrough(`workspace:${workspaceId}:pipelines`,
@@ -98,16 +145,19 @@ export function useAgentRelations(workspaceId: string, agentId: string | undefin
     if (cached.credentials.value) setCredentials(cached.credentials.value)
     if (cached.skills.value) setSkills(cached.skills.value)
     if (cached.pipelines.value) setPipelines(cached.pipelines.value)
+    if (cached.readiness.value) setReadiness(cached.readiness.value)
     setLoading(true)
 
     void Promise.allSettled([
-      cached.issues.fresh, cached.credentials.fresh, cached.skills.fresh, cached.pipelines.fresh,
-    ]).then(([i, c, s, p]) => {
+      cached.issues.fresh, cached.credentials.fresh, cached.skills.fresh, cached.pipelines.fresh, cached.readiness.fresh,
+    ]).then(([i, c, s, p, r]) => {
       if (controller.signal.aborted) return
       setIssues(i.status === "fulfilled" ? i.value : cached.issues.value ?? [])
       setCredentials(c.status === "fulfilled" ? c.value : cached.credentials.value ?? [])
       setSkills(s.status === "fulfilled" ? s.value : cached.skills.value ?? [])
       setPipelines(p.status === "fulfilled" ? p.value : cached.pipelines.value ?? [])
+      // Advisory: a failed readiness read is no opinion, not an error banner.
+      setReadiness(r.status === "fulfilled" ? r.value : cached.readiness.value ?? null)
       setError([i, c, s, p].some((result) => result.status === "rejected") ? "Some work and access data could not be loaded." : null)
       setLoading(false)
     })
@@ -115,7 +165,7 @@ export function useAgentRelations(workspaceId: string, agentId: string | undefin
     return () => controller.abort()
   }, [workspaceId, agentId, nonce])
 
-  return { issues, credentials, skills, pipelines, loading, error, refresh }
+  return { issues, credentials, skills, pipelines, readiness, loading, error, refresh }
 }
 
 // =============================================================================
