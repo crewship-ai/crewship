@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from "@testing-library/react"
+import { cleanup, render, screen } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { Pipeline } from "@/hooks/use-pipelines"
 import { RoutinesWorkspace, routineLastState } from "../routines-workspace"
@@ -39,6 +39,7 @@ vi.mock("@/hooks/use-automations", () => ({
   useAutomations: () => ({ automations: h.automations, loading: false, error: null }),
 }))
 vi.mock("../routine-calendar", () => ({ RoutineCalendar: () => <div>Calendar</div> }))
+vi.mock("@/components/features/dashboard/run-volume-chart", () => ({ RunVolumeChart: () => <div data-testid="run-volume" /> }))
 
 const rows = [
   {
@@ -93,118 +94,41 @@ function renderPane(props: Partial<React.ComponentProps<typeof RoutinesWorkspace
 describe("<RoutinesWorkspace> — the overview pane", () => {
   beforeEach(() => {
     h.recorded = []
-  })
-
-  it("is a dashboard, not a second copy of the sidebar's list", () => {
     h.runs = []
     h.schedules = []
     h.automations = []
+  })
+
+  it("is the dashboard, not a second copy of the sidebar's list, with runs living in Activity", () => {
     renderPane()
     expect(screen.getByRole("button", { name: "Overview" })).toHaveAttribute("aria-pressed", "true")
     expect(screen.getByTestId("routines-dashboard")).toBeInTheDocument()
-    // No catalog rows: the explorer beside this pane owns them.
+    // No catalog rows and no third tab: the explorer owns the list, Activity the runs.
     expect(screen.queryByText("Summarize service health")).toBeNull()
-    expect(screen.queryByText("Routine and purpose")).toBeNull()
+    expect(screen.queryByRole("button", { name: /Recent runs/ })).toBeNull()
+    expect(screen.getByRole("link", { name: /Runs in Activity/ })).toHaveAttribute("href", "/activity?lens=routines")
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument()
   })
 
-  it("puts the waiting decision first, as a tile that opens the newest waiting run", () => {
-    h.runs = [
-      {
-        id: "run_1",
-        pipeline_slug: "report",
-        pipeline_name: "Weekly report",
-        status: "waiting",
-        started_at: new Date(Date.now() - 4 * 60_000).toISOString(),
-      },
+  it("feeds the dashboard the runs and schedules the page loads, filtered like the sidebar", () => {
+    h.recorded = [
+      { id: "run_1", pipeline_slug: "report", pipeline_name: "Weekly report", status: "waiting", started_at: new Date(Date.now() - 4 * 60_000).toISOString() },
+      { id: "run_2", pipeline_slug: "broken", pipeline_name: "Broken routine", status: "failed", started_at: new Date(Date.now() - 60_000).toISOString() },
     ]
-    h.schedules = []
-    h.automations = []
-    renderPane()
-    const needs = screen.getByRole("group", { name: "Needs you" })
-    const tile = within(needs).getByRole("link", { name: /Waiting for your decision/ })
-    expect(tile).toHaveAttribute("href", "/routines?slug=report&run=run_1")
-    expect(tile).toHaveTextContent(/^1/)
-    expect(tile).toHaveTextContent("Weekly report")
-  })
-
-  it("counts the routines that could not finish, opens the newest one, and applies the explorer's filters", () => {
-    h.runs = []
-    h.schedules = []
-    h.automations = []
-    const select = vi.fn()
-    renderPane({ onSelect: select, filters: { ...filters, status: "failed" } })
-    const needs = screen.getByRole("group", { name: "Needs you" })
-    const tile = within(needs).getByRole("button", { name: /Could not finish last time/ })
-    expect(tile).toHaveTextContent(/^1/)
-    fireEvent.click(tile)
-    expect(select).toHaveBeenCalledWith("broken")
-    // The dashboard's "could not finish" list follows the same filter: the
-    // broken routine is there, the healthy ones are not.
-    const dashboard = within(screen.getByTestId("routines-dashboard"))
-    expect(dashboard.getByRole("button", { name: /Broken routine/ })).toBeInTheDocument()
-    expect(dashboard.queryByText("Weekly report")).toBeNull()
-    expect(screen.queryByRole("button", { name: "Never run" })).not.toBeInTheDocument()
-  })
-
-  it("names the next planned start and opens that routine's Plan", () => {
-    h.runs = []
-    h.automations = []
     h.schedules = [
-      {
-        id: "s1",
-        enabled: true,
-        target_pipeline_slug: "report",
-        cron_expr: "30 2 * * *",
-        timezone: "Europe/Prague",
-        next_run_at: "2026-09-13T00:30:00Z",
-      },
+      { id: "s1", enabled: true, target_pipeline_slug: "report", cron_expr: "30 2 * * *", timezone: "Europe/Prague", next_run_at: new Date(Date.now() + 3_600_000).toISOString() },
     ]
     renderPane()
-    const needs = screen.getByRole("group", { name: "Needs you" })
-    const tile = within(needs).getByRole("link", { name: /Next planned start/ })
-    expect(tile).toHaveAttribute("href", "/routines?slug=report&view=plan")
-    expect(tile).toHaveTextContent("02:30")
-    expect(tile).toHaveTextContent(/13 Sept 2026, 02:30 · Europe\/Prague · Weekly report/)
-  })
-
-  it("says when nothing needs anyone, without a click that goes nowhere", () => {
-    h.runs = []
-    h.schedules = []
-    h.automations = []
-    renderPane({ routines: [rows[1]] })
-    const needs = screen.getByRole("group", { name: "Needs you" })
-    expect(within(needs).queryAllByRole("link")).toHaveLength(0)
-    expect(within(needs).queryAllByRole("button")).toHaveLength(0)
-    expect(within(needs).getAllByText("Nothing right now")).toHaveLength(2)
-    expect(within(needs).getByText("No schedule is on")).toBeInTheDocument()
-  })
-
-  it("lists drafts to publish, published and not, and opens the routine", () => {
-    h.runs = []
-    h.schedules = []
-    h.automations = []
-    const select = vi.fn()
-    renderPane({
-      onSelect: select,
-      routines: [
-        { ...rows[0], draft: { id: "drf_1", revision: 2, updated_at: "2026-09-15T10:31:00Z" } },
-        { ...rows[1], head_version: 0, draft: { id: "drf_2", revision: 1 } },
-        rows[2],
-      ] as Pipeline[],
-    })
-    expect(screen.getByText("Drafts to publish")).toBeInTheDocument()
-    const dashboard = within(screen.getByTestId("routines-dashboard"))
-    const draftRow = dashboard.getAllByRole("button", { name: /Weekly report/ })[0]
-    expect(draftRow).toHaveTextContent(/Draft r2 · published v3/)
-    fireEvent.click(draftRow)
-    expect(select).toHaveBeenCalledWith("report")
-    expect(dashboard.getByRole("button", { name: /Other routine/ })).toHaveTextContent("Not published yet")
+    expect(screen.getByRole("link", { name: /1 run is waiting for your decision/ })).toHaveAttribute("href", "/routines?slug=report&run=run_1")
+    expect(screen.getByRole("link", { name: /Next planned start/ })).toHaveAttribute("href", "/routines?slug=report&view=plan")
+    // The explorer's status filter narrows the pane too.
+    cleanup()
+    renderPane({ filters: { ...filters, status: "failed" } })
+    expect(screen.queryByRole("link", { name: /waiting for your decision/ })).toBeNull()
+    expect(screen.getByRole("link", { name: /1 routine could not finish last time/ })).toBeInTheDocument()
   })
 
   it("says what the empty workspace means instead of leaving a pane", () => {
-    h.runs = []
-    h.schedules = []
     render(
       <RoutinesWorkspace workspaceId="ws" routines={[]} loading={false} error={null} onSelect={vi.fn()} />,
     )
