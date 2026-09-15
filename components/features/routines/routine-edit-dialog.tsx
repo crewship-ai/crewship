@@ -29,7 +29,7 @@ import { routineInputSpecs, formatInputDefault, type RoutineInputSpec } from "@/
 import { resolveRoutineColor, resolveRoutineIcon } from "@/lib/routine-identity"
 import { isRecord, asString } from "@/lib/routine-step-describe"
 import { foreachBody, routineHooks, stepDisplayName, type Step } from "@/lib/routine-steps-layout"
-import { routineFilesFromDefinition, type RoutineFile } from "@/lib/routine-files"
+import { routineFilesFromDefinition, routineFileStatus, type RoutineFile } from "@/lib/routine-files"
 import { useWorkspaceAgentDirectory } from "@/hooks/use-workspace-agent-directory"
 import { StepFileChip } from "./routine-step-spine"
 import type { RoutineDetail } from "./routines-detail-panel"
@@ -129,7 +129,9 @@ export function RoutineEditDialog({ open, onOpenChange, workspaceId, routine, fi
         setBase(clone(draft.document.definition))
         setDoc(clone(draft.document.definition))
       })
-      .catch(() => {})
+      .catch(() => {
+        if (!controller.signal.aborted) setRefusal("Could not load the routine draft. Close Edit and reopen it before saving.")
+      })
       .finally(() => {
         if (!controller.signal.aborted) setLoading(false)
       })
@@ -140,7 +142,7 @@ export function RoutineEditDialog({ open, onOpenChange, workspaceId, routine, fi
   const identityDirty = name.trim() !== (routine.name ?? "").trim() || description.trim() !== (routine.description ?? "").trim()
   const definitionDirty = !same(doc, base)
   const dirty = identityDirty || definitionDirty
-  const nextRevision = (routine.draft?.revision ?? 0) + 1
+  const nextRevision = (envelope?.revision ?? routine.draft?.revision ?? 0) + 1
   const update = (patch: (next: Record<string, unknown>) => void) =>
     setDoc((previous) => {
       const next = clone(previous)
@@ -166,7 +168,7 @@ export function RoutineEditDialog({ open, onOpenChange, workspaceId, routine, fi
   }
 
   const save = async () => {
-    if (busy || loading) return
+    if (busy || loading || !envelope) return
     if (identityDirty && !name.trim()) {
       setRefusal("The routine needs a name.")
       return
@@ -174,7 +176,7 @@ export function RoutineEditDialog({ open, onOpenChange, workspaceId, routine, fi
     setBusy(true)
     setRefusal(null)
     try {
-      if (identityDirty) {
+      if (identityDirty && !definitionDirty) {
         const res = await apiFetch(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}/pipelines/save`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -197,12 +199,21 @@ export function RoutineEditDialog({ open, onOpenChange, workspaceId, routine, fi
       if (definitionDirty) {
         if (!envelope) throw new Error("The draft baseline did not load, so this change cannot be saved safely. Close Edit and open it again.")
         const baseline = envelope
+        // An input-only edit must retain identity already authored in the
+        // draft instead of replacing it with the published page's metadata.
+        const draftName = name.trim() !== (routine.name ?? "").trim()
+          ? name.trim()
+          : asString(baseline.document.name) || asString(doc.display_name) || name.trim() || slug
+        const draftDescription = description.trim() !== (routine.description ?? "").trim()
+          ? description.trim()
+          : typeof baseline.document.description === "string" ? baseline.document.description
+            : typeof doc.description === "string" ? doc.description : description.trim()
         const document: Record<string, unknown> = {
           ...(baseline.id ? baseline.document : {}),
           slug,
-          name: name.trim() || routine.name || slug,
-          description: description.trim(),
-          definition: { ...doc, display_name: name.trim() || routine.name || slug, description: description.trim() },
+          name: draftName,
+          description: draftDescription,
+          definition: { ...doc, display_name: draftName, description: draftDescription },
         }
         if (routine.author_crew_id && !document.author_crew_id) document.author_crew_id = routine.author_crew_id
         if (!document.icon) document.icon = appearance.icon
@@ -439,7 +450,8 @@ crewship routine draft save draft.json -f json > saved.json`}
                     <StepFileChip path={f.path} />
                     {f.description && <span className="min-w-0 flex-1 truncate text-muted-foreground">{f.description}</span>}
                     <span className="ml-auto text-muted-foreground">used by {f.step_ids.map(nameOf).join(", ") || "—"}</span>
-                    {f.present === false && <span className="text-destructive">missing on the share</span>}
+                    {routineFileStatus(f) === "missing" && <span className="text-destructive">missing on the share</span>}
+                    {routineFileStatus(f) === "unverified" && <span className="text-muted-foreground">not verified</span>}
                   </li>
                 ))}
               </ul>
@@ -451,14 +463,14 @@ crewship routine draft save draft.json -f json > saved.json`}
       <CreateSurfaceFooter
         hint={
           definitionDirty
-            ? `Inputs, prompts, limits or slash changed → saved as draft r${nextRevision}; published v${routine.head_version ?? 0} keeps running`
+            ? `All changes, including name and purpose, are saved as draft r${nextRevision}; published v${routine.head_version ?? 0} keeps running`
             : "Identity applies at once; definition changes become a draft"
         }
         onCancel={() => onOpenChange(false)}
         primaryLabel={busy ? "Saving…" : definitionDirty ? "Save draft" : "Save"}
         primaryIcon={Save}
         onPrimary={() => void save()}
-        primaryDisabled={!dirty || loading}
+        primaryDisabled={!dirty || loading || !envelope}
         busy={busy}
       />
     </CreateSurface>

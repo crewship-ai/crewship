@@ -78,6 +78,60 @@ describe("<RoutineEditDialog>", () => {
     expect(toast.success).toHaveBeenCalledWith("Name and purpose saved")
   })
 
+  it("saves identity and input edits together without first changing the published recipe", async () => {
+    mockServer()
+    render(<RoutineEditDialog open onOpenChange={() => {}} workspaceId="ws" routine={routine} onChanged={() => {}} />)
+    await waitFor(() => expect(screen.queryByText(/Loading the current draft/)).toBeNull())
+    fireEvent.change(screen.getByLabelText(/^Name/), { target: { value: "New invoice name" } })
+    fireEvent.click(screen.getByRole("tab", { name: /Inputs/ }))
+    fireEvent.change(screen.getByLabelText("Default", { selector: "#routine-edit-input-auto_approve_limit-default" }), { target: { value: "500" } })
+    fireEvent.click(screen.getByRole("button", { name: "Save draft" }))
+    await waitFor(() => expect(toast.success).toHaveBeenCalled())
+    expect(h.fetcher.mock.calls.some(([url]) => String(url).endsWith("/pipelines/save"))).toBe(false)
+    const call = h.fetcher.mock.calls.find(([url, init]) => String(url).endsWith("/pipelines/drafts") && init?.method === "POST")!
+    expect(JSON.parse(String(call[1].body)).document).toMatchObject({ name: "New invoice name", definition: { display_name: "New invoice name" } })
+  })
+
+  it("preserves identity authored in the draft when only an input changes", async () => {
+    mockServer(true)
+    const fetch = h.fetcher.getMockImplementation()!
+    h.fetcher.mockImplementation(async (url: string, init?: RequestInit) => {
+      const response = await fetch(url, init)
+      if (url.endsWith("/invoice-intake/draft") && !init?.method) {
+        const draft = await response.json()
+        draft.document.name = "Next release name"
+        draft.document.description = "Next release purpose"
+        return json(draft)
+      }
+      return response
+    })
+    render(<RoutineEditDialog open onOpenChange={() => {}} workspaceId="ws" routine={routine} onChanged={() => {}} />)
+    await waitFor(() => expect(screen.queryByText(/Loading the current draft/)).toBeNull())
+    fireEvent.click(screen.getByRole("tab", { name: /Inputs/ }))
+    fireEvent.change(screen.getByLabelText("Default", { selector: "#routine-edit-input-auto_approve_limit-default" }), { target: { value: "500" } })
+    fireEvent.click(screen.getByRole("button", { name: "Save draft" }))
+    await waitFor(() => expect(toast.success).toHaveBeenCalled())
+    const call = h.fetcher.mock.calls.find(([url, init]) => String(url).endsWith("/pipelines/drafts") && init?.method === "POST")!
+    expect(JSON.parse(String(call[1].body)).document).toMatchObject({ name: "Next release name", description: "Next release purpose" })
+  })
+
+  it("shows an unavailable draft baseline and prevents saving", async () => {
+    h.fetcher.mockResolvedValue(json({ error: "temporarily unavailable" }, 503))
+    render(<RoutineEditDialog open onOpenChange={() => {}} workspaceId="ws" routine={routine} onChanged={() => {}} />)
+    await screen.findByText(/Could not load the routine draft/)
+    fireEvent.change(screen.getByLabelText(/^Name/), { target: { value: "Changed" } })
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled()
+    expect(h.fetcher.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false)
+  })
+
+  it("does not call an unverified file missing in Edit", () => {
+    mockServer()
+    render(<RoutineEditDialog open onOpenChange={() => {}} workspaceId="ws" routine={routine} files={[{ path: "scripts/a.py", language: "py", step_ids: ["extract"], present: false, status: "unverified" }]} onChanged={() => {}} />)
+    fireEvent.click(screen.getByRole("tab", { name: "Steps & files" }))
+    expect(screen.queryByText("missing on the share")).toBeNull()
+    expect(screen.getByText("not verified")).toBeInTheDocument()
+  })
+
   it("saves a changed input default as a new draft from the published definition", async () => {
     mockServer()
     const changed = vi.fn()
@@ -168,7 +222,7 @@ describe("<RoutineEditDialog>", () => {
 
   it("shows the read-only steps and files summary with the CLI path", () => {
     mockServer()
-    render(<RoutineEditDialog open onOpenChange={() => {}} workspaceId="ws" routine={routine} files={[{ path: "scripts/a.py", language: "py", step_ids: ["extract"], present: false }]} onChanged={() => {}} />)
+    render(<RoutineEditDialog open onOpenChange={() => {}} workspaceId="ws" routine={routine} files={[{ path: "scripts/a.py", language: "py", step_ids: ["extract"], present: false, status: "missing" }]} onChanged={() => {}} />)
     fireEvent.click(screen.getByRole("tab", { name: "Steps & files" }))
     expect(screen.getByText(/Read-only in the web. 2 steps, 1 file/)).toBeInTheDocument()
     expect(screen.getByText(/crewship routine draft get invoice-intake/)).toBeInTheDocument()
