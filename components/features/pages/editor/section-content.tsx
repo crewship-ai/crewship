@@ -396,15 +396,22 @@ function PageIdentityCard({
     // omitted `panels` leaves the stored panel list, its gates and its
     // automations exactly as they are (:826), which is what makes renaming a
     // Page safe on a Page this viewer may not fully see.
+    //
+    // The avatar (#2563) rides along ONLY when this form changed it. The
+    // header tile saves an icon on its own, on the spot, and a form that
+    // always sent what it last read would put the old icon back with the
+    // next rename. "" is the server's "clear", sent when Remove was pressed.
     request: (v) => ({
       input: `/api/v1/pages/${encodeURIComponent(slug)}${pageQueryString(workspaceId)}`,
       init: {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        // The avatar rides with the name (#2563). "" is the server's
-        // "clear", and it is sent on purpose: an omitted field would keep
-        // the stored icon, and Remove would then remove nothing.
-        body: JSON.stringify({ name: v.name, description: v.description, icon: v.icon ?? "", color: v.color ?? "" }),
+        body: JSON.stringify({
+          name: v.name,
+          description: v.description,
+          ...(v.icon !== baseline.icon ? { icon: v.icon ?? "" } : {}),
+          ...(v.color !== baseline.color ? { color: v.color ?? "" } : {}),
+        }),
       },
     }),
     invalidateKeys: [pagesKeys.detail(workspaceId, slug), pagesKeys.list(workspaceId)],
@@ -446,7 +453,7 @@ function PageIdentityCard({
   }
 
   return (
-    <DetailCard title="Content" icon={FileText} subtitle="name, description">
+    <DetailCard title="Content" icon={FileText} subtitle="name, description, icon">
       <form
         onSubmit={submit}
         data-slot="page-identity"

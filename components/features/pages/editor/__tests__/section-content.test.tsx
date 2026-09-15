@@ -420,12 +420,9 @@ describe("an application Page shows the review AND the Page itself", () => {
 
     const patches = calls.filter((c) => c.method === "PATCH")
     expect(patches).toHaveLength(1)
-    // The avatar rides with the name (#2563): "" for none, sent on purpose.
     expect(patches[0].body).toEqual({
       name: "Operations Lab",
       description: "Services and container memory",
-      icon: "",
-      color: "",
     })
   })
 
@@ -600,14 +597,12 @@ describe("saving the Page's name and description", () => {
     expect(patches[0].url).toContain("/api/v1/pages/fleet-overview")
     expect(patches[0].url).toContain("workspace_id=ws-1")
     // No `panels` and no `slug`: an omitted panel list leaves the stored
-    // panels, their gates and their automations exactly as they are. The
-    // avatar IS sent, as "" — the server reads an omitted field as "keep",
-    // and a form that owns the avatar must be able to clear it (#2563).
+    // panels, their gates and their automations exactly as they are. No
+    // `icon`/`color` either: the form did not touch them, and sending what
+    // it last read would undo a pick made from the header tile (#2563).
     expect(patches[0].body).toEqual({
       name: "Fleet overview v2",
       description: "Services and container memory",
-      icon: "",
-      color: "",
     })
 
     await waitFor(() => expect(onDirtyChange).toHaveBeenLastCalledWith(false))
@@ -710,6 +705,16 @@ describe("the Page's icon and colour (#2563)", () => {
       icon: "rocket",
       color: "amber",
     })
+  })
+
+  it("a rename on a page with an avatar leaves the avatar out of the PATCH", async () => {
+    const { calls } = mount({ page: { ...PANEL_PAGE, icon: "rocket", color: "amber" } })
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Renamed" } })
+    fireEvent.click(screen.getByRole("button", { name: /save changes/i }))
+    await waitFor(() => expect(screen.getByText(/^Saved\./)).toBeTruthy())
+    const patches = calls.filter((c) => c.method === "PATCH")
+    expect(patches).toHaveLength(1)
+    expect(patches[0].body).toEqual({ name: "Renamed", description: "Services and container memory" })
   })
 
   it("Remove clears both and Save sends empty strings, never omitted fields", async () => {

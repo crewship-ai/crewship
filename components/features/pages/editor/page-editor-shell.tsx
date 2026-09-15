@@ -185,6 +185,7 @@ export function PageEditorShell({ workspaceId, slug, page, loading, capabilities
             <>
               <Appear order={0}>
                 <PageEditorHeader
+                  workspaceId={workspaceId}
                   slug={slug}
                   page={page}
                   capabilities={capabilities}

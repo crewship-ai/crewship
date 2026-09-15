@@ -13,7 +13,7 @@ import { pagePanelCount, toPageOwner, type WirePageDetail } from "@/hooks/use-pa
 import { PAGE_STATE_META } from "@/components/features/pages/page-state"
 import type { PanelState } from "@/components/features/pages/panels/types"
 import { FolderGlyph } from "@/components/features/pages/folder-glyph"
-import { PageAvatar } from "@/components/features/pages/page-glyph"
+import { PageAvatarPopover } from "@/components/features/pages/page-avatar-popover"
 
 /**
  * The editor's header: the same card an issue opens with.
@@ -30,6 +30,7 @@ import { PageAvatar } from "@/components/features/pages/page-glyph"
  * anything they touch is already live.
  */
 export interface PageEditorHeaderProps {
+  workspaceId: string
   slug: string
   page: WirePageDetail | null
   capabilities: PageCapabilities
@@ -53,7 +54,7 @@ export function pageFreshness(page: WirePageDetail | null): PanelState | null {
   return worstPanelState(page.panels.map((raw) => toPanelState(raw.state)))
 }
 
-export function PageEditorHeader({ slug, page, capabilities, headingRef, audience, onBack }: PageEditorHeaderProps) {
+export function PageEditorHeader({ workspaceId, slug, page, capabilities, headingRef, audience, onBack }: PageEditorHeaderProps) {
   const owner = toPageOwner(page)
   const folder = toPageFolderRef(page?.folder)
   const panelCount = pagePanelCount(page)
@@ -71,9 +72,16 @@ export function PageEditorHeader({ slug, page, capabilities, headingRef, audienc
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="flex min-w-0 items-start gap-3">
             {/* The page's own avatar (#2563), or the neutral tile a page
-                without one has always worn. The state stays in the strip
-                below — the tile never carries it. */}
-            <PageAvatar icon={page?.icon} color={page?.color} />
+                without one has always worn — and, for an editor, the quick
+                way to change it: click, pick, saved. The state stays in the
+                strip below; the tile never carries it. */}
+            <PageAvatarPopover
+              workspaceId={workspaceId}
+              slug={slug}
+              icon={page?.icon}
+              color={page?.color}
+              mayEdit={capabilities.mayEditMetadata}
+            />
             <div className="min-w-0">
               {/* Focus lands here on the way in, on returning from the preview
                   and after a discard. The ring is on `:focus-visible`, not
