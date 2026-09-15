@@ -98,7 +98,12 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 	}
 
 	ctx, finishTrackedRun := o.trackAgentRun(ctx, &req)
-	defer finishTrackedRun()
+	defer func() {
+		if errors.Is(err, context.Canceled) && o.agentStopRequested(req.RunID) {
+			err = fmt.Errorf("%w: %v", ErrAgentStopped, err)
+		}
+		finishTrackedRun()
+	}()
 
 	// Open the outermost OTel span for this agent invocation. Every
 	// downstream LLM call, tool execution, and sub-agent fan-out becomes
@@ -958,6 +963,9 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 		// over a generic adapter exit so callers retain the failure class.
 		status = "error"
 		execErr = inBandErr
+	} else if exitCode == 143 && o.agentStopRequested(req.RunID) {
+		status = "cancelled"
+		execErr = ErrAgentStopped
 	} else if exitCode != 0 {
 		status = "error"
 		o.logger.Warn("agent exited with error", "agent_id", req.AgentID, "exit_code", exitCode)

@@ -81,3 +81,31 @@ T06/T07/T14 remain separate release work.
 
 Raw logs, including earlier failures, are archived in
 `/srv/crewship/backups/crewship_2/agent-stop-fix-2026-09-14/`.
+
+## September 15 live follow-up
+
+Merged current main a1bfdd1e into this branch (0fb64494) without conflicts.
+The complete local Go suite on that merged revision passed, exit 0, and
+full-tree vet passed. A fresh CI was requested by pushing the merge.
+
+Reloaded dev2 only, confirmed version 0fb64494, then started real Claude run
+msg_1789464853997726387_eeca8dffc3a8063e. Stop returned exit 0 and the observed
+Claude PID 301741 and setsid PID 301735 disappeared. The run terminated with
+143. This is a real deployed CLI/API/runtime test, not the earlier sleep test.
+
+That test exposed a downstream outcome defect: chatbridge only recognized
+cancellation of its own context, so the daemon's signal was recorded as FAILED
+and the agent became ERROR. The follow-up preserves an explicit agent-stop
+cause through SIGTERM settlement (or cancelled preparation), records CANCELLED
+in the bridge, and identifies agent-stop origin in terminal metadata so the
+agent projection agrees on STOPPED. Other active runs still project RUNNING;
+ordinary chat cancellation remains IDLE. Exit 0 remains completion, unrelated
+failure and in-band failure remain failure. Stop confirmation still requires
+process absence and is not inferred from this error classification.
+
+A bridge/orchestrator regression reproduced FAILED before the correction.
+Projection tests cover agent stop, chat cancellation, another active run and
+independent failure. Final revised-tree results and the repeated live test are
+recorded in the PR and in /srv/crewship/backups/crewship_2/prd-closure-2026-09-15/.
+The T01–T14 matrix in that archive explicitly leaves I7, MCP guaranteed memory,
+mailbox, real parallel Claude isolation and OS/storage crash evidence open.

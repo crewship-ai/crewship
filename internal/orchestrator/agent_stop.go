@@ -9,6 +9,22 @@ import (
 	"time"
 )
 
+// ErrAgentStopped identifies a SIGTERM exit following an explicit agent stop.
+// It does not turn an unrelated failure or a successful late completion into
+// cancellation, and is never used as proof that a process has stopped.
+var ErrAgentStopped = errors.New("agent stopped by user")
+
+func (o *Orchestrator) agentStopRequested(runID string) bool {
+	v, ok := o.agentRuns.Load(runID)
+	if !ok {
+		return false
+	}
+	c := v.(*agentRunControl)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.stopped
+}
+
 // agentRunControl is process-local ownership of a RunAgent invocation. Stop
 // closes its creation gate before signalling; disconnecting a stream alone is
 // never reported as a stopped process.
