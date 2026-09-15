@@ -31,6 +31,7 @@ const BASE: Escalation = {
   resolved_at: null,
   created_at: "2026-07-30T10:00:00Z",
   credential_id: "cred1",
+  credential_status: null,
   second_approver_required: false,
   second_approver_by_workspace: false,
   second_approver_by_tier: false,

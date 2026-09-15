@@ -31,7 +31,7 @@ describe("canonical client inbox", () => {
   it("uses the issue assignee, never the crew lead, for a review notification", () => {
     const mission = { id: "issue-1", crew_id: crew.id, lead_agent_id: "lead-id" } as import("@/lib/types/mission").Mission
     const issue = { ...mission, assignee_type: "agent", assignee_id: agent.id } as import("@/lib/types/mission").Mission
-    const notification = { ...entry, inboxItem: { ...entry.inboxItem!, sender_type: "system", sender_name: "Mission engine", payload: { mission_id: mission.id } } }
+    const notification = { ...entry, inboxItem: { ...entry.inboxItem!, sender_type: "system" as const, sender_name: "Mission engine", payload: { mission_id: mission.id } } }
     const withIssue = { ...lookup, missionById: new Map([[mission.id, mission]]), issueById: new Map([[issue.id, issue]]) }
     expect(entryIdentity(notification, withIssue).agent?.id).toBe(agent.id)
     expect(entryIdentity(notification, { ...withIssue, issueById: new Map() }).agent).toBeNull()

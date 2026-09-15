@@ -120,7 +120,6 @@ vi.mock("../setup-agent-api", async () => {
 function turn(overrides: Partial<ChatTurn> & Pick<ChatTurn, "role">): ChatTurn {
   return {
     id: overrides.id ?? Math.random().toString(36),
-    role: overrides.role,
     parts: overrides.parts ?? [],
     isStreaming: overrides.isStreaming ?? false,
     timestamp: overrides.timestamp ?? new Date(),
@@ -146,6 +145,7 @@ const PROPOSAL: OnboardingProposal = {
     { name: "Data Cleaner", role: "Engineer", model: "claude-sonnet-5" },
   ],
   egressDomains: [],
+  tools: [],
   status: "PENDING",
 }
 
@@ -430,7 +430,7 @@ describe("OnboardingSetupChat — once connected", () => {
   })
 
   it("hides the starter prompts once the conversation has begun", async () => {
-    await renderConnected([turn({ role: "assistant", parts: [{ type: "text", text: "Hello!" }] })])
+    await renderConnected([turn({ role: "assistant", parts: [{ id: "p1", type: "text", content: "Hello!", timestamp: new Date() }] })])
     expect(screen.queryByTestId("onboarding-chat-welcome")).toBeNull()
   })
 

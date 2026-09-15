@@ -17,7 +17,6 @@ function entry(over: Partial<JournalEntry> & Pick<JournalEntry, "entry_type">): 
     id: over.id ?? "j_" + Math.random().toString(16).slice(2),
     workspace_id: "ws_1",
     ts: over.ts ?? "2026-06-26T10:31:00.000Z",
-    entry_type: over.entry_type,
     severity: over.severity ?? "info",
     actor_type: over.actor_type ?? "agent",
     summary: over.summary ?? "",

@@ -65,7 +65,6 @@ function renderOverview(
     onSelect?: (id: string) => void
     onSelectTier?: (t: string) => void
     onSelectStatus?: (s: "all" | "attention" | "missing-tool") => void
-    children?: React.ReactNode
   } = {},
 ) {
   const onSelect = over.onSelect ?? vi.fn()
@@ -80,9 +79,7 @@ function renderOverview(
       onSelect={onSelect}
       onSelectTier={onSelectTier}
       onSelectStatus={onSelectStatus}
-    >
-      {over.children}
-    </CredentialsOverview>,
+    />,
   )
   return { onSelect, onSelectTier, onSelectStatus }
 }
