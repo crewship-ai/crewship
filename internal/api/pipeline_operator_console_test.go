@@ -177,11 +177,11 @@ func TestPipelineFiles_OnDetail(t *testing.T) {
 	}
 	want := []map[string]any{
 		{"path": "scripts/ledger-post.go", "language": "go", "interpreter": "go run", "step_ids": []any{"post"},
-			"description": "Posts one invoice to the ERP ledger and retries once.", "size_bytes": float64(4120), "updated_at": "2026-09-15T09:30:00Z", "present": true},
+			"description": "Posts one invoice to the ERP ledger and retries once.", "size_bytes": float64(4120), "updated_at": "2026-09-15T09:30:00Z", "present": true, "status": "present"},
 		{"path": "scripts/cleanup.py", "language": "py", "interpreter": "python3", "step_ids": []any{"cleanup"},
-			"description": "", "present": false},
+			"description": "", "present": false, "status": "missing"},
 		{"path": "config/rules.yaml", "language": "yaml", "interpreter": "", "step_ids": []any{"post"},
-			"description": "Matching rules", "size_bytes": float64(88), "updated_at": "2026-09-15T09:30:00Z", "present": true},
+			"description": "Matching rules", "size_bytes": float64(88), "updated_at": "2026-09-15T09:30:00Z", "present": true, "status": "present"},
 	}
 	if !reflect.DeepEqual(files, want) {
 		t.Errorf("files mismatch\n got: %#v\nwant: %#v", files, want)
@@ -228,6 +228,21 @@ func TestPipelineFiles_NeverFailTheDetail(t *testing.T) {
 			if tc.name != "read fails after listing" && files[0]["present"] != false {
 				t.Errorf("present = %v, want false: %#v", files[0]["present"], files[0])
 			}
+			// The distinction the Files card relies on: a share that could not
+			// be listed leaves every row "unverified"; a listed share marks the
+			// paths it lacks "missing" and the ones it has "present" even when
+			// the header read failed afterwards.
+			wantStatus := map[string]string{
+				"listing fails":            "unverified",
+				"reader not wired":         "unverified",
+				"read fails after listing": "present",
+			}[tc.name]
+			if files[0]["status"] != wantStatus {
+				t.Errorf("status = %v, want %q: %#v", files[0]["status"], wantStatus, files[0])
+			}
+			if tc.name == "read fails after listing" && files[1]["status"] != "missing" {
+				t.Errorf("unlisted path status = %v, want missing: %#v", files[1]["status"], files[1])
+			}
 		})
 	}
 }
@@ -265,8 +280,8 @@ func TestPipelineFiles_IOIsCapped(t *testing.T) {
 	if len(fake.readCalls) != pipelineFilesMaxIO {
 		t.Fatalf("read calls = %d, want the cap %d", len(fake.readCalls), pipelineFilesMaxIO)
 	}
-	if files[pipelineFilesMaxIO]["present"] != false {
-		t.Fatalf("rows past the cap must stay present:false, got %#v", files[pipelineFilesMaxIO])
+	if files[pipelineFilesMaxIO]["present"] != false || files[pipelineFilesMaxIO]["status"] != "unverified" {
+		t.Fatalf("rows past the cap must stay present:false and unverified, got %#v", files[pipelineFilesMaxIO])
 	}
 }
 

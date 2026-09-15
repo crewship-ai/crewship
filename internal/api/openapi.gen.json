@@ -15268,6 +15268,14 @@
                 "size_bytes": {
                   "type": "integer"
                 },
+                "status": {
+                  "enum": [
+                    "present",
+                    "missing",
+                    "unverified"
+                  ],
+                  "type": "string"
+                },
                 "step_ids": {
                   "items": {
                     "type": "string"
@@ -15473,6 +15481,14 @@
                   },
                   "size_bytes": {
                     "type": "integer"
+                  },
+                  "status": {
+                    "enum": [
+                      "present",
+                      "missing",
+                      "unverified"
+                    ],
+                    "type": "string"
                   },
                   "step_ids": {
                     "items": {

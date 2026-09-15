@@ -150,7 +150,19 @@ type FileRef struct {
 	SizeBytes   *int64   `json:"size_bytes,omitempty"`
 	UpdatedAt   string   `json:"updated_at,omitempty"`
 	Present     bool     `json:"present"`
+	// Status says what the share check established: "present" (listed on
+	// the crew share), "missing" (the share was listed and the file is not
+	// there) or "unverified" (the share could not be listed, the per-request
+	// I/O budget ran out first, or no crew owns the routine). Present is the
+	// boolean shorthand of "present" and stays for older readers.
+	Status string `json:"status"`
 }
+
+const (
+	FileStatusPresent    = "present"
+	FileStatusMissing    = "missing"
+	FileStatusUnverified = "unverified"
+)
 
 // fileLanguages is the extension set the UI has an icon and a label for.
 // The language is the extension token itself, so an unknown extension is "".
@@ -221,7 +233,7 @@ func DescribeFiles(dsl *DSL) []FileRef {
 			return
 		}
 		ext := strings.TrimPrefix(strings.ToLower(path.Ext(rel)), ".")
-		ref := FileRef{Path: rel, StepIDs: []string{stepID}, Interpreter: strings.TrimSpace(explicitInterpreter)}
+		ref := FileRef{Path: rel, StepIDs: []string{stepID}, Interpreter: strings.TrimSpace(explicitInterpreter), Status: FileStatusUnverified}
 		if fileLanguages[ext] {
 			ref.Language = ext
 		}

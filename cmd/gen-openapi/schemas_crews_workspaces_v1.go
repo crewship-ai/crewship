@@ -51,6 +51,7 @@ func crewWorkspaceGETSchemaCatalogV1() (map[string]map[string]DomainSchema, map[
 		"files": array(object(map[string]any{
 			"path": str(), "language": str(), "interpreter": str(), "step_ids": array(str()),
 			"description": str(), "size_bytes": integer(), "updated_at": str(), "present": boolean(),
+			"status": map[string]any{"type": "string", "enum": []string{"present", "missing", "unverified"}},
 		})),
 	})
 

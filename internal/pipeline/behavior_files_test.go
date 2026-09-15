@@ -30,20 +30,20 @@ func TestDescribeFiles(t *testing.T) {
 			name: "script path with inferred interpreter and language",
 			def: `{"name":"x","steps":[
 				{"id":"post","type":"script","script":{"path":"scripts/ledger-post.go"}}]}`,
-			want: []FileRef{{Path: "scripts/ledger-post.go", Language: "go", Interpreter: "go run", StepIDs: []string{"post"}}},
+			want: []FileRef{{Path: "scripts/ledger-post.go", Language: "go", Interpreter: "go run", StepIDs: []string{"post"}, Status: FileStatusUnverified}},
 		},
 		{
 			name: "explicit interpreter wins and unknown extension has no language",
 			def: `{"name":"x","steps":[
 				{"id":"a","type":"script","script":{"path":"tools/run.rb","interpreter":"ruby3"}}]}`,
-			want: []FileRef{{Path: "tools/run.rb", Language: "", Interpreter: "ruby3", StepIDs: []string{"a"}}},
+			want: []FileRef{{Path: "tools/run.rb", Language: "", Interpreter: "ruby3", StepIDs: []string{"a"}, Status: FileStatusUnverified}},
 		},
 		{
 			name: "same file in two steps is one row with both step ids",
 			def: `{"name":"x","steps":[
 				{"id":"a","type":"script","script":{"path":"scripts/x.py"}},
 				{"id":"b","type":"script","script":{"path":"/crew/shared/scripts/x.py"}}]}`,
-			want: []FileRef{{Path: "scripts/x.py", Language: "py", Interpreter: "python3", StepIDs: []string{"a", "b"}}},
+			want: []FileRef{{Path: "scripts/x.py", Language: "py", Interpreter: "python3", StepIDs: []string{"a", "b"}, Status: FileStatusUnverified}},
 		},
 		{
 			name: "foreach body, step hooks and routine hooks are walked in order",
@@ -57,11 +57,11 @@ func TestDescribeFiles(t *testing.T) {
 				 "hooks":{"before":{"id":"pre","type":"script","script":{"path":"scripts/pre.sh"}},
 				          "after":{"id":"after","type":"script","script":{"path":"scripts/after.sh"}}}}]}`,
 			want: []FileRef{
-				{Path: "scripts/setup.sh", Language: "sh", Interpreter: "bash", StepIDs: []string{"setup"}},
-				{Path: "scripts/item.py", Language: "py", Interpreter: "python3", StepIDs: []string{"loop/item"}},
-				{Path: "scripts/pre.sh", Language: "sh", Interpreter: "bash", StepIDs: []string{"pre"}},
-				{Path: "scripts/after.sh", Language: "sh", Interpreter: "bash", StepIDs: []string{"after"}},
-				{Path: "scripts/alert.sh", Language: "sh", Interpreter: "bash", StepIDs: []string{"alert"}},
+				{Path: "scripts/setup.sh", Language: "sh", Interpreter: "bash", StepIDs: []string{"setup"}, Status: FileStatusUnverified},
+				{Path: "scripts/item.py", Language: "py", Interpreter: "python3", StepIDs: []string{"loop/item"}, Status: FileStatusUnverified},
+				{Path: "scripts/pre.sh", Language: "sh", Interpreter: "bash", StepIDs: []string{"pre"}, Status: FileStatusUnverified},
+				{Path: "scripts/after.sh", Language: "sh", Interpreter: "bash", StepIDs: []string{"after"}, Status: FileStatusUnverified},
+				{Path: "scripts/alert.sh", Language: "sh", Interpreter: "bash", StepIDs: []string{"alert"}, Status: FileStatusUnverified},
 			},
 		},
 		{
@@ -72,10 +72,10 @@ func TestDescribeFiles(t *testing.T) {
 					"env":{"MAPPING":"/crew/shared/config/map.json","HOME":"/home/agent"}}},
 				{"id":"b","type":"script","script":{"path":"scripts/b.py"}}]}`,
 			want: []FileRef{
-				{Path: "scripts/a.py", Language: "py", Interpreter: "python3", StepIDs: []string{"a"}},
-				{Path: "scripts/b.py", Language: "py", Interpreter: "python3", StepIDs: []string{"b"}},
-				{Path: "config/rules.yaml", Language: "yaml", Interpreter: "", StepIDs: []string{"a"}},
-				{Path: "config/map.json", Language: "json", Interpreter: "", StepIDs: []string{"a"}},
+				{Path: "scripts/a.py", Language: "py", Interpreter: "python3", StepIDs: []string{"a"}, Status: FileStatusUnverified},
+				{Path: "scripts/b.py", Language: "py", Interpreter: "python3", StepIDs: []string{"b"}, Status: FileStatusUnverified},
+				{Path: "config/rules.yaml", Language: "yaml", Interpreter: "", StepIDs: []string{"a"}, Status: FileStatusUnverified},
+				{Path: "config/map.json", Language: "json", Interpreter: "", StepIDs: []string{"a"}, Status: FileStatusUnverified},
 			},
 		},
 		{

@@ -139,6 +139,8 @@ func (h *PipelineHandler) enrichPipelineFiles(ctx context.Context, authorCrewID 
 	entries, err := h.crewFiles.ListShared(listCtx, authorCrewID)
 	cancelList()
 	if err != nil {
+		// Nothing was established: every row stays "unverified" — never
+		// "missing", which would send someone to fix a file that exists.
 		h.logger.Debug("routine files: list shared volume", "crew_id", authorCrewID, "error", err)
 		return files
 	}
@@ -157,10 +159,13 @@ func (h *PipelineHandler) enrichPipelineFiles(ctx context.Context, authorCrewID 
 		}
 		info, ok := present[files[i].Path]
 		if !ok {
+			// The share was listed and this path is not on it.
+			files[i].Status = pipeline.FileStatusMissing
 			continue
 		}
 		size := info.Size
 		files[i].Present = true
+		files[i].Status = pipeline.FileStatusPresent
 		files[i].SizeBytes = &size
 		if !info.ModTime.IsZero() {
 			files[i].UpdatedAt = info.ModTime.UTC().Format(time.RFC3339)

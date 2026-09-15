@@ -19,6 +19,19 @@ export interface RoutineFile {
   updated_at?: string
   /** false = declared but not on the share; undefined = the server did not say. */
   present?: boolean
+  /**
+   * What the share check established. "missing" only when the share was
+   * listed and the path is not on it; "unverified" when it could not be
+   * checked (crew container or volume unavailable, I/O budget spent). An
+   * older server sends no status, which reads as unverified too.
+   */
+  status?: RoutineFileStatus
+}
+export type RoutineFileStatus = "present" | "missing" | "unverified"
+export function routineFileStatus(file: Pick<RoutineFile, "present" | "status">): RoutineFileStatus {
+  if (file.status === "present" || file.status === "missing" || file.status === "unverified") return file.status
+  if (file.present === true) return "present"
+  return "unverified"
 }
 
 export interface RoutineFileNode {
@@ -104,5 +117,6 @@ export function routineFilesFromDefinition(definition: unknown): RoutineFile[] {
     interpreter: interpreters.get(path),
     step_ids,
     present: undefined,
+    status: "unverified",
   }))
 }

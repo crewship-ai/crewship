@@ -14,6 +14,7 @@ import { FilePreview } from "@/components/features/chat/files/file-preview"
 import {
   buildRoutineFileTree,
   formatFileSize,
+  routineFileStatus,
   type RoutineFile,
   type RoutineFileNode,
 } from "@/lib/routine-files"
@@ -60,12 +61,13 @@ export function RoutineFilesCard({
       return next
     })
   if (!files.length) return null
-  const missing = files.filter((f) => f.present === false).length
+  const missing = files.filter((f) => routineFileStatus(f) === "missing").length
+  const unverified = files.filter((f) => routineFileStatus(f) === "unverified").length
   return (
     <DetailCard
       title={`Files this routine runs · ${files.length}`}
       icon={FolderCode}
-      subtitle={missing ? `${missing} missing` : undefined}
+      subtitle={missing ? `${missing} missing` : unverified === files.length ? "not verified" : undefined}
       action={
         <span className="hidden text-[11px] text-muted-foreground sm:inline">
           changed with <code className="font-mono">crewship crew files save</code>
@@ -145,7 +147,12 @@ function FileRow({
         )}
         {getChatFileIcon(node.name, node.is_dir, isOpen)}
         <span className="truncate font-mono text-foreground/85">{node.name}</span>
-        {file?.present === false && <Pill tone="destructive">Missing on the share</Pill>}
+        {file && routineFileStatus(file) === "missing" && <Pill tone="destructive">Missing on the share</Pill>}
+        {file && routineFileStatus(file) === "unverified" && (
+          <span title="The crew share could not be checked right now — the file may well be there.">
+            <Pill tone="default">Not verified</Pill>
+          </span>
+        )}
         {node.is_dir ? (
           <span className="ml-auto shrink-0 text-[11px] text-muted-foreground-soft">
             {node.fileCount} {node.fileCount === 1 ? "file" : "files"}
@@ -169,8 +176,9 @@ function FileBody({ file, crewId, workspaceId }: { file: RoutineFile; crewId?: s
   const [error, setError] = React.useState<string | null>(null)
   const textual = isPreviewable(file.path.split("/").pop() ?? file.path)
   const url = crewId ? crewFileDownloadUrl(crewId, workspaceId, file.path) : null
+  const status = routineFileStatus(file)
   React.useEffect(() => {
-    if (!url || !textual || file.present === false) return
+    if (!url || !textual || status === "missing") return
     const controller = new AbortController()
     setText(null)
     setError(null)
@@ -186,8 +194,8 @@ function FileBody({ file, crewId, workspaceId }: { file: RoutineFile; crewId?: s
         setError(e instanceof Error ? e.message : String(e))
       })
     return () => controller.abort()
-  }, [url, textual, file.present])
-  if (file.present === false)
+  }, [url, textual, status])
+  if (status === "missing")
     return (
       <p className="p-3 text-xs text-muted-foreground">
         The recipe declares this file, but it is not on the crew share. Put it there with{" "}

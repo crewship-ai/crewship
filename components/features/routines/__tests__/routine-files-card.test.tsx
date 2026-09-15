@@ -15,7 +15,7 @@ const files: RoutineFile[] = [
   { path: "scripts/ledger-post.go", language: "go", step_ids: ["post"], size_bytes: 4120, present: true, description: "Posts one invoice" },
   { path: "scripts/normalize_lines.py", language: "py", step_ids: ["extract"], size_bytes: 1800, present: true },
   { path: "checks/invoice-rules.yaml", language: "yaml", step_ids: ["verify"], size_bytes: 614, present: true },
-  { path: "scripts/notify-finance.ts", language: "ts", step_ids: ["notify"], present: false },
+  { path: "scripts/notify-finance.ts", language: "ts", step_ids: ["notify"], present: false, status: "missing" },
 ]
 const names: Record<string, string> = { post: "Post to the ledger", extract: "Read the invoice", verify: "Check the extraction", notify: "Tell #finance" }
 const nameOf = (id: string) => names[id] ?? id
@@ -34,6 +34,21 @@ describe("<RoutineFilesCard>", () => {
     expect(screen.getByTestId("routine-file-scripts/ledger-post.go")).toHaveTextContent("4.0 kB")
     expect(screen.getByTestId("routine-file-scripts/notify-finance.ts")).toHaveTextContent("Missing on the share")
     expect(screen.getAllByText("Missing on the share")).toHaveLength(1)
+  })
+
+  it("tells an unverified share apart from a missing file", () => {
+    // The share could not be listed: nothing is "missing", every row is "Not verified".
+    const unverified = files.map((f) => ({ ...f, present: false, status: "unverified" as const }))
+    render(<RoutineFilesCard files={unverified} workspaceId="ws" crewId="crew_fin" nameOf={nameOf} />)
+    expect(screen.queryByText("Missing on the share")).toBeNull()
+    expect(screen.getAllByText("Not verified")).toHaveLength(4)
+    expect(screen.getByText("not verified")).toBeInTheDocument()
+    // Older servers send only the boolean: false alone never reads as missing,
+    // so the preview still tries to fetch the file instead of declaring it gone.
+    fetcher.mockResolvedValue({ ok: true, status: 200, text: async () => "package main\n" })
+    fireEvent.click(screen.getByTestId("routine-file-scripts/ledger-post.go"))
+    expect(screen.queryByText(/is not on the crew share/)).toBeNull()
+    expect(fetcher).toHaveBeenCalled()
   })
 
   it("collapses and expands a folder", () => {

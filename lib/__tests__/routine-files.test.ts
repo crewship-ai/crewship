@@ -48,7 +48,7 @@ describe("routineFilesFromDefinition", () => {
     const files = routineFilesFromDefinition({
       steps: [{ id: "post", type: "script", script: { path: "scripts/ledger-post.go", interpreter: "go" } }],
     })
-    expect(files).toEqual([{ path: "scripts/ledger-post.go", language: "go", interpreter: "go", step_ids: ["post"], present: undefined }])
+    expect(files).toEqual([{ path: "scripts/ledger-post.go", language: "go", interpreter: "go", step_ids: ["post"], present: undefined, status: "unverified" }])
   })
 })
 
