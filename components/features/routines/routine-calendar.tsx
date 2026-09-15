@@ -308,18 +308,18 @@ export function RoutineCalendar({
             >
               <span
                 aria-hidden
-                className={cn("hidden h-2 w-2 shrink-0 rounded-full md:block", DOT[outcome])}
+                className={cn("hidden h-2 w-2 shrink-0 rounded-full @2xl/month:block", DOT[outcome])}
               />
               <span
                 className={cn(
-                  "hidden shrink-0 font-mono text-[10px] md:inline",
+                  "hidden shrink-0 font-mono text-[10px] @2xl/month:inline",
                   outcome === "planned" ? "text-primary" : "text-muted-foreground",
                 )}
               >
                 {calendarClock(event.at)}
               </span>
               {icon(event.slug, "!h-4 !w-4 [&>svg]:h-3 [&>svg]:w-3")}
-              <span className="hidden min-w-0 truncate md:inline">
+              <span className="hidden min-w-0 truncate @2xl/month:inline">
                 {nameOf(event.slug, event.name)}
               </span>
             </div>
@@ -330,7 +330,7 @@ export function RoutineCalendar({
             data-testid="calendar-cell-later"
             className="mt-auto truncate text-[10px] text-muted-foreground"
           >
-            +{later} later
+            +{later}<span className="hidden @2xl/month:inline"> later</span>
           </span>
         )}
       </>
@@ -341,7 +341,7 @@ export function RoutineCalendar({
     const first = new Date(month.getFullYear(), month.getMonth(), 1)
     const count = new Date(month.getFullYear(), month.getMonth() + 1, 0).getDate()
     return (
-      <div className={cn("grid grid-cols-7", compact ? "gap-1" : "gap-1 md:gap-1.5")}>
+      <div className={cn("@container/month grid grid-cols-7", compact ? "gap-1" : "gap-1 @2xl/month:gap-1.5")}>
         {weekdays.map((day) => (
           <div key={day} className="py-1 text-center text-[11px] text-muted-foreground">
             {day}
@@ -397,7 +397,7 @@ export function RoutineCalendar({
                 }
               }}
               className={cn(
-                "flex h-[72px] min-w-0 cursor-pointer flex-col gap-0.5 overflow-hidden rounded-xl border border-border/60 bg-muted/20 p-1 transition-colors hover:border-primary/50 hover:bg-muted/40 focus-visible:outline focus-visible:outline-primary md:h-28 md:p-1.5",
+                "flex h-[72px] min-w-0 cursor-pointer flex-col gap-0.5 overflow-hidden rounded-xl border border-border/60 bg-muted/20 p-1 transition-colors hover:border-primary/50 hover:bg-muted/40 focus-visible:outline focus-visible:outline-primary @2xl/month:h-28 @2xl/month:p-1.5",
                 today && "border-primary/60",
               )}
             >

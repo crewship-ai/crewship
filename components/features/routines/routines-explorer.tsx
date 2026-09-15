@@ -451,7 +451,7 @@ export function RoutinesExplorer({
                             the detail header uses — two surfaces showing
                             a different icon for one routine would be
                             worse than showing none. */}
-                        <span className="relative shrink-0">
+                        <span className="relative shrink-0 self-center">
                           {/* A halo, not a moved icon. While a run is
                               live the icon keeps its place — a row
                               whose contents shift position is harder

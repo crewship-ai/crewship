@@ -121,7 +121,9 @@ export function runVolumeByRoutine(
     const routine = routines.find((r) => r.slug === slug)
     return { key: slug, label: routine?.name ?? slug, color: hues[index % hues.length] }
   })
-  const folded = foldRunVolumeSeries(buckets, series)
+  // Five named routines and Other: the legend has to fit under the chart on
+  // a phone, where the dashboard's eight crews would run to eight lines.
+  const folded = foldRunVolumeSeries(buckets, series, 5)
   return {
     buckets: folded.buckets,
     series: folded.series.map((s) => (s.key === RUN_VOLUME_OTHER_KEY ? { ...s, label: `Other (${folded.folded} routines)` } : s)),
@@ -224,7 +226,6 @@ export function RoutinesDashboard({ routines, runs, runsLoading, schedules, onSe
                 Activity →
               </Link>
             }
-            className="h-full"
           >
             <RunVolumeChart buckets={volume.buckets} series={volume.series} window="7d" />
           </DashboardCard>

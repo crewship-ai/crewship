@@ -77,7 +77,7 @@ describe("routine calendar — month density", () => {
     expect(within(busy).getByTestId("calendar-cell-later")).toHaveTextContent("+40 later")
     expect(within(busy).queryByText(/×\d+/)).toBeNull()
     // Nothing inside the cell scrolls: the cell clips at a fixed height and lights up on hover.
-    expect(busy.className).toMatch(/md:h-28/)
+    expect(busy.className).toMatch(/@2xl\/month:h-28/)
     expect(busy.className).toMatch(/hover:/)
     expect(busy.querySelector(".overflow-y-auto")).toBeNull()
   })
