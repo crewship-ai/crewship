@@ -9,11 +9,14 @@ tag: Experimental
 # Integrations
 
 <Note>
-**The managed Composio UI is now the default.** The `/integrations` page is the
-full managed integration platform (Composio) — a KPI header plus tabs for
-Catalog, Connected accounts, Agent access, Tools, Triggers, and MCP endpoints —
-so you can connect apps via OAuth without standing up and maintaining your own
-MCP servers.
+**The managed Composio UI is now the default.** The `/integrations` page has
+three tabs — **Outgoing notifications**, **Incoming webhooks** and
+**Tools (MCP)**. Tools (MCP) is the managed integration platform (Composio):
+a KPI header plus sections for App catalog, Connected accounts, Agent access,
+Tools, Triggers, and MCP endpoints — so you can connect apps via OAuth without
+standing up and maintaining your own MCP servers. Incoming webhooks is where
+routine, agent and Page endpoints that *receive* HTTP requests are created
+(see [Incoming webhooks](#incoming-webhooks) below).
 
 The legacy self-hosted MCP connector management UI is restorable by building the
 dashboard with `NEXT_PUBLIC_LEGACY_MCP_INTEGRATIONS=true`. No legacy code or API
@@ -21,7 +24,49 @@ has been removed — the MCP endpoints documented below still work, and
 **credentials are unaffected**. The sections below describe the legacy mechanism.
 </Note>
 
-Crewship supports two integration mechanisms: **OAuth 2.0 connections** for service authentication and **MCP (Model Context Protocol) servers** for extending agent tool capabilities.
+Crewship supports two integration mechanisms: **OAuth 2.0 connections** for service authentication and **MCP (Model Context Protocol) servers** for extending agent tool capabilities. A third, simpler surface — **incoming webhooks** — lets an external service start work in Crewship with a signed HTTP request and no connected account at all.
+
+## Incoming webhooks
+
+**Integrations → Incoming webhooks** lists every endpoint an outside service
+can POST to, grouped by target: **Endpoints** (all of them), then
+**Routines**, **Agents** and **Pages**. A routine endpoint runs a saved
+routine with the request body as its `event` input; an agent endpoint starts
+a background run; a Page endpoint writes a webhook or script panel. Select a
+target to see its endpoints and, for routines and agents, its **Recent
+receipts** — the deliveries the server accepted, with the run or work item
+each produced. The selection is linkable
+(`/integrations?tab=incoming&section=routine&target=<slug>`).
+
+**Creating one.** Click **Add integration → Incoming webhook** (or **Add
+endpoint** inside a target), pick the target kind and target, and name the
+endpoint. Routine endpoints have an **Advanced settings → Webhook format**
+selector:
+
+| Format | Use it for | Signature the sender must provide |
+|---|---|---|
+| **Signed JSON** (default; `ingress_profile: crewship`) | Any service you control — a script, a CI job, another Crewship | `X-Crewship-Signature: sha256=<HMAC-SHA256 of the raw body>`, optionally with `X-Crewship-Timestamp` |
+| **GitHub pull requests** (`ingress_profile: github`) | A GitHub repository webhook; only `pull_request` `opened` / `synchronize` / `reopened` start the routine, `ping` is acknowledged | GitHub's own `X-Hub-Signature-256` — paste the secret into the repository's webhook settings, content type `application/json`, event **Pull requests** |
+
+The format is fixed once the endpoint exists; to switch a sender's protocol,
+create a new endpoint. Collapsing Advanced settings does not change the
+selection.
+
+**Where the URL and secret show.** On **Create endpoint** the dialog shows the
+**Receiving URL** and the **Signing secret** once, each with a copy button.
+The routine URL contains the token and is masked afterwards; the secret is
+never displayed again. Copy both now. A GitHub-format URL ends in
+`/github-pull-request` — the suffix is part of what you paste into GitHub.
+Later, an endpoint row offers enable/disable, **Copy URL** (agents only —
+their URL holds no secret), **Rotate secret** (a new secret shown once; the
+URL survives) and **Delete** (senders get `404`; existing receipts are kept).
+
+**From the CLI.** The same endpoints are `crewship routine webhooks create
+--slug <routine> [--ingress-profile github]`, `crewship routine webhooks fire
+<url> --secret … --body …` to send a signed test delivery, and `crewship
+routine webhooks receipts list --webhook <id>` to read what arrived — see
+[`crewship routine webhooks`](/cli/routine#crewship-routine-webhooks) and the
+[Webhooks API reference](/api-reference/webhooks).
 
 ## Managed Integrations (Composio)
 

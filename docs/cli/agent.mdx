@@ -385,6 +385,14 @@ Stop a running agent.
 crewship agent stop <slug-or-id>
 ```
 
+The command reports `stopped` only after the runtime has **confirmed** the
+stop. When the sidecar cannot be reached, or answers without confirming that
+this agent is stopped, the server answers `502` (`runtime stop unavailable` /
+`runtime stop not confirmed`), the agent's status is left as it was, and the
+command fails with that error and a non-zero exit — it never prints a stop
+that did not happen. Check `crewship agent get <slug-or-id>` and retry once
+the crew's runtime is reachable.
+
 ---
 
 ## `crewship agent logs`
