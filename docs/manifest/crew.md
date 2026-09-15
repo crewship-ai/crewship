@@ -209,8 +209,9 @@ wire shape mirrors the server's `serviceWire`.
 #### Private service settings
 
 A service that declares anything beyond `name`, `image`, `ports`,
-`env_refs` and `volumes` — that is, `env`, `command`, `healthcheck` or
-`auto_credentials` — is **private** once applied. The server never
+`env_refs` and `volumes` — that is, `env`, `command` or `healthcheck`
+(and, in a Workspace bundle, `auto_credentials` or a catalog image's
+sugar defaults) — is **private** once applied. The server never
 returns such a configuration on a read, whatever the caller's role:
 `services_json` on every crew response is the literal string
 `[service configuration withheld: contains private runtime settings]`,
@@ -236,10 +237,12 @@ Three consequences for manifests:
   that reads the placeholder and writes it back cannot wipe a running
   service's authentication.
 
-The [Postgres example](#with-a-postgres-sidecar) below is private on all
-three counts (`env`, `healthcheck`). A service that names only `env_refs`
-for its secrets and leaves the rest to the image stays readable and
-round-trips.
+The [Postgres example](#with-a-postgres-sidecar) below is private on two
+counts (`env`, `healthcheck`). On this top-level `kind: Crew` path there
+is no catalog sugar, so a service that names only `env_refs` for its
+secrets and leaves the rest to the image stays readable and round-trips;
+the same declaration inside a [Workspace bundle](/configuration/manifest-schema#service)
+does not.
 
 ### `spec.files[]`
 

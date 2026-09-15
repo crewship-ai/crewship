@@ -92,6 +92,7 @@ One row per documented internal route, grouped by family. See [Route catalog](#r
 | `POST` | [/api/v1/internal/port-expose](#port-expose) | Request a capability URL for an internal port |
 | `GET` | [/api/v1/internal/notifications/channels](#agent-notifications) | List channels the calling agent may post to |
 | `POST` | [/api/v1/internal/notifications/send](#agent-notifications) | Agent sends a message to a channel it is paired with |
+| `PUT` | [/api/v1/internal/pages/\{page\}/data](#pages) | Write one panel's payload on behalf of a routine run or a container agent |
 | `POST` | [/api/v1/internal/pages/save](#pages) | Agent-authored page creation (name + panels) |
 | `POST` | [/api/v1/internal/pages/project](#pages) | Draft-only source edits and builds of a custom Page application (the `page_project` MCP tool) |
 
@@ -554,7 +555,7 @@ The trusted endpoint the sidecar forwards to when an agent emits a new pipeline 
 | `save_token` | string | The HMAC-signed proof minted by `POST /api/v1/internal/pipelines/test_run` that **this** crew just dry-ran **this** `definition_hash`. It is the only thing that clears the test-run gate on this path; there is no OWNER/ADMIN skip here because an agent has no such role. The former `last_test_run_at` / `last_test_run_passed` body fields are no longer read — a caller claiming "it passed" is not proof it did. |
 | `change_summary` | string | Optional one-line provenance note recorded on the version row. |
 | `trigger` | object | Optional. `{kind: "schedule" \| "manual" \| "once", cron, timezone, catchup_policy, max_consecutive_failures, fire_at, inputs}` — created in the **same transaction** as the routine and its version, so a bad cron or timezone rolls the whole save back. Same block as the public save; see [Atomic trigger authoring](/api-reference/pipelines#atomic-trigger-authoring). |
-| `activation` | string | Optional, top-level next to `trigger`. `"draft"` creates the trigger disabled and raises exactly one inbox item asking a MANAGER+ to activate it; omitted means live at once. Requires `trigger`, and has no meaning for `kind: "manual"` or `"once"`. |
+| `activation` | string | Optional, top-level next to `trigger`. `"draft"` creates the trigger disabled and raises exactly one inbox item asking a MANAGER+ to activate it; omitted means live at once. Requires `trigger`; sending it with `kind: "manual"` or `"once"` is refused as `422`, the same as any other trigger validation failure. |
 
 **Response:** `201 Created` — the saved pipeline object (`toPipelineResponse`), plus a `trigger` block (`kind`, `schedule_id`, `cron_expr`, `timezone`, `enabled`, `first_fire_at`, `approval_required`, `inbox_item_id`) when the save requested one. A risky definition lands as `proposed` with an inbox review item, exactly as on the user path.
 
