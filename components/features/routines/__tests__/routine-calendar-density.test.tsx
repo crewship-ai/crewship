@@ -8,7 +8,7 @@ import type { Pipeline } from "@/hooks/use-pipelines"
 // busy day (39 planned starts of one routine plus a few others) and one
 // quiet day — the two cases the proposal's calendar screen is built around.
 
-const h = vi.hoisted(() => ({ view: "month" as "month" | "week", events: [] as unknown[] }))
+const h = vi.hoisted(() => ({ view: "month" as "month" | "week" | "year", events: [] as unknown[] }))
 // The year view fetches one range per month; answer each with the events
 // inside it, as the server would, so a day is counted once.
 vi.mock("@/lib/api-fetch", () => ({
