@@ -1900,9 +1900,9 @@ request, `429` compiler busy, `507` build-record quota, plus common errors.
 `GET /api/v1/pages/{slug}/project/preview`
 
 **Request:** path `slug`; authenticated Page editor, no body.
-**Response 200:** `{revision, build, runtime_url, development_same_origin,
-artifact?}`. `build` is null before the first build; `development_same_origin`
-is `true` only when the operator has enabled
+**Response 200:** `{revision, build, runtime_url, development_same_origin, artifact?}`.
+`build` is null before the first build; `development_same_origin` is `true`
+only when the operator has enabled
 `CREWSHIP_PAGE_RUNTIME_DEVELOPMENT_SAME_ORIGIN`. A ready build includes the immutable artifact
 `{format:"crewship-page-preview/v1", javascript, css, toolchain}`. This response
 is `no-store`; execute only through the configured separate-site bootstrap.

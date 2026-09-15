@@ -145,3 +145,15 @@ Publishing a Page freezes its UI and declared action binding, not a routine's co
 The confirmation dialog and receipt expose definition drift. The routine runner
 continues to use the routine's current definition and scripts, so sensitive operation
 approval must also follow that routine's own governance.
+
+What a publication *is* fenced on is the routine definitions the reviewer was
+shown: the review snapshot lists a digest for every routine a `call` action
+would run, the publication sends them back as `expected_routine_digests`, and
+the server recomputes and compares them inside the publishing transaction. A
+routine that changed between the review and the click — an upgrade that
+rewrote its script, a maintainer editing it — refuses the publication with
+`409` and `conflict: "routines"`, naming the routines that moved. So when you
+upgrade or edit routines that Pages call, expect in-flight reviews to be
+refused and re-reviewed; that is the fence working, not a failure to work
+around. `crewship page project review <slug>` shows each routine's current
+state (`unchanged`, `changed`, `unknown`) before anyone publishes.
