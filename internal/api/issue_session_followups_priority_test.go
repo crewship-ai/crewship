@@ -53,6 +53,15 @@ func TestDispatchQueuedFollowUps_CorrectionLeadsAndIsLabelled(t *testing.T) {
 	f.assign.dispatchQueuedFollowUpsForSession(ctx, "asg_corr_winner", f.wsID)
 	f.assign.WaitDispatches()
 
+	// Exactly one, and the count is final once WaitDispatches returns: the
+	// run this fold dispatched fails fast in the fixture (no orchestrator),
+	// and its own finishAssignment re-enters dispatchQueuedFollowUpsForSession
+	// for the same session. Without followUpMu that re-entry could select
+	// the same two 'pending' rows before the outer call's claim landed and
+	// mint a second run — the "= 2, want exactly 1" #2437 saw under CI load.
+	// The mutex serialises selection→dispatch→claim, so the re-entry finds
+	// nothing pending; a second run here is that guard broken, not timing
+	// (TestDispatchQueuedFollowUps_ConcurrentCallbacksDispatchOnce pins it).
 	newRunID := onlyNewRunForSession(t, f, "sess_corr", "asg_corr_winner")
 	var task string
 	if err := f.db.QueryRow(`SELECT task FROM assignments WHERE id = ?`, newRunID).Scan(&task); err != nil {
