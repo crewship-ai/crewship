@@ -1845,8 +1845,10 @@ request, `429` compiler busy, `507` build-record quota, plus common errors.
 `GET /api/v1/pages/{slug}/project/preview`
 
 **Request:** path `slug`; authenticated Page editor, no body.
-**Response 200:** `{revision, build, runtime_url, artifact?}`. `build` is null
-before the first build. A ready build includes the immutable artifact
+**Response 200:** `{revision, build, runtime_url, development_same_origin,
+artifact?}`. `build` is null before the first build; `development_same_origin`
+is `true` only when the operator has enabled
+`CREWSHIP_PAGE_RUNTIME_DEVELOPMENT_SAME_ORIGIN`. A ready build includes the immutable artifact
 `{format:"crewship-page-preview/v1", javascript, css, toolchain}`. This response
 is `no-store`; execute only through the configured separate-site bootstrap.
 **Statuses:** `404` missing draft, common errors including `503` if the worker
@@ -2113,8 +2115,14 @@ unpublished Page returns `publication:null`. A published response includes the
 immutable receipt and compiled artifact, never the source project. **304** is
 returned for an unchanged ETag only after current authorization is checked;
 no artifact bytes are read or retransmitted. The tag includes publication,
-runtime and publishing authority. Responses are `no-store`; Studio explicitly
-keeps the active artifact in memory and sends its ETag for revalidation.
+runtime and publishing authority. Responses are `no-store`; the page in the
+browser keeps the active artifact in memory and sends its ETag for
+revalidation. The response also carries `publication_version` — the live
+publication's number, `0` before any — and, when a publication is running,
+`development_same_origin`: `true` only when the operator has enabled
+`CREWSHIP_PAGE_RUNTIME_DEVELOPMENT_SAME_ORIGIN`, so a client can show the
+isolation warning. A withdrawn application answers `publication: null` with
+its `publication_version` kept.
 **Statuses:** common errors; `404` also conceals a Page outside viewer reach.
 Reading published artifacts works with the compiler disabled.
 
@@ -2125,8 +2133,8 @@ Reading published artifacts works with the compiler disabled.
 **Authentication:** existing action-dispatch role, current Page/panel access
 and routine policy. **Request:** `Idempotency-Key` header (1–128 bytes), JSON
 `{publication, inputs}` at most 32 KiB. Only a stored `call` action is accepted;
-there is no shell, arbitrary URL or routine-name parameter. The Studio SDK
-broker obtains confirmation in the trusted host before sending this request.
+there is no shell, arbitrary URL or routine-name parameter. The SDK broker in
+the page obtains confirmation in the trusted host before sending this request.
 **Response 202:** existing action queue receipt including `pending_id`; this
 does not mean the routine completed. Keys/debounce are scoped by viewer and
 publication. Publication/declaration checks and enqueue share a transaction.
@@ -2151,9 +2159,10 @@ panel or another viewer's pending action, `500` storage failure.
 `GET /api/v1/pages/runtime/bootstrap`
 
 **Authentication:** none. **Request:** no body; serve on the configured origin
-on a different site from Studio. **Response 200:** fixed `text/html` bootstrap
-with sandbox/CSP protections. It contains no user data, code artifacts, source
-or credentials; the authorized Studio host initializes a private MessagePort.
+on a different site from the browser origin (`CREWSHIP_PAGE_STUDIO_ORIGIN`).
+**Response 200:** fixed `text/html` bootstrap with sandbox/CSP protections. It
+contains no user data, code artifacts, source or credentials; the authorized
+page host initializes a private MessagePort.
 **Status 404:** runtime origin is not configured. This is the only route that
 needs exposure on the runtime reverse-proxy alias. A separate site does not
 provide a portable hard browser CPU/memory limit or complete anti-exfiltration

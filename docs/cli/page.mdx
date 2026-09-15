@@ -1417,7 +1417,8 @@ optional pinned build image described in the Pages Apps build profile.
 2. Call `page_project` with `operation: "init"`, `slug` and
    `expected_revision: 0` to create the supported React/TypeScript starter.
 3. Use `operation: "read"` to inspect the current revision, file list, Page
-   definition, Studio path and exact `@crewship/pages` SDK source. Add `path`
+   definition, the page's path in the browser (`page_path`) and exact
+   `@crewship/pages` SDK source. Add `path`
    to read one source file. The starter imports `src/style.css`; arbitrary
    design can be written in TSX/CSS within the supported dependency profile.
 4. Save a batch of whole-file replacements with the revision just read:
@@ -1445,7 +1446,8 @@ published Page is unchanged.
    a busy worker refuses another request. Status returns diagnostics and build
    identity without retransmitting compiled JavaScript.
 6. Call `check` with the returned `build_id` and source `expected_revision`.
-   Report the revision/build and Studio path to the user for preview and review.
+   Report the revision/build and `page_path` to the user: the review, with
+   its preview, is in the page editor's **Content** section.
    A successful static check does not replace browser or source security review.
 
 Source initialization, saving and builds obey `page_create` autonomy policy;
@@ -1456,7 +1458,8 @@ The onboarding setup crew must explicitly name the target `crew`, following
 target owner separately. Run attribution is not inferred from an unverified ID.
 
 There is no publish operation in this agent tool. An authorized user publishes
-the reviewed build through Studio or `crewship page project publish`.
+the reviewed build through the page editor (**Edit → Content**, or **History**
+for a retained version) or `crewship page project publish`.
 After a transport timeout the outcome can be unknown; inspect the current
 revision and build status before retrying. Data producers keep pushing through
 the existing panel API/`page.write` path independently of source edits.

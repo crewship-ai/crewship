@@ -835,6 +835,23 @@ does not restore an older pair, and an export bundle does not carry them.
 From the CLI, `crewship page update <slug> --icon rocket --color amber` sets
 them without a document; `--icon ""` clears one.
 
+## The editor
+
+**Edit** on a page opens one editor in the content column, with the Pages
+list still beside it, and a rail of four sections:
+
+| Section | What it holds |
+|---|---|
+| **Content** | Name, description, icon and colour, the panels — and, on a page with a custom application, the review of any change an agent has submitted ([below](#custom-applications)). |
+| **Data & actions** | Where each panel's data comes from, and the actions it offers. |
+| **Access** | Who reads the page, who may push data to it, the folder it inherits from, public links and webhook tokens. |
+| **History** | Panel versions, application source revisions and publications. |
+
+The address carries the section: `/pages/<slug>?mode=edit&section=access`
+opens the editor on Access, and `content`, `data` and `history` name the
+others, so a reload, Back, Forward and a pasted link all land where they
+should. A section holding unsaved changes asks before the address moves.
+
 ## Folders
 
 A **folder** is a named group of pages owned by one crew, with an icon from
@@ -1497,6 +1514,8 @@ crews deleted.
 - [Crew Journal](/guides/crew-journal) — where a page's history actually lives.
 - [Roles & Permissions](/security/rbac) — the workspace-role layer a page's
   grants sit on top of.
+- [Operate Pages applications](/guides/pages-apps-operations) — installing the
+  compiler and runtime origin a custom application needs, backups and upgrades.
 
 
 ### Writing a complete collector payload from a routine
@@ -1509,6 +1528,59 @@ before the write. Normal authored data objects remain supported. This conversion
 is limited to the complete `page.write` data template; other verbs keep ordinary
 string interpolation. See `examples/pages-apps/custom-operations.routine.yaml`.
 
+
+## Custom applications
+
+A page can carry a **custom application**: a small React/TypeScript program,
+compiled offline on the server, that draws the page's panels its own way and
+dispatches the actions they declare. The panels, their producers and their
+grants are unchanged by it — the application is a different way of showing
+the same data, and withdrawing it leaves the panel page exactly as it was.
+It is optional and needs an operator to have installed the compiler and the
+runtime origin; see [Operate Pages applications](/guides/pages-apps-operations).
+
+Nobody publishes from the chair they wrote in. The lifecycle has five steps,
+and a different party owns each:
+
+1. **Draft.** An agent, given the page by its owner, writes the source
+   through its `page_project` tool — or a person does the same with
+   `crewship page project init|set`. Every save is a **revision**, checkpointed
+   in Git; the live page does not move.
+2. **Build.** The revision is compiled by the pinned compiler image; a build
+   is `running`, `ready`, `failed` or `interrupted`. A ready build of the
+   current draft is a **candidate** — the exact thing that would go live.
+3. **Review.** In the editor's **Content** section, the **Application** card
+   says whether a candidate is waiting. When one is, the card becomes the
+   review: what the candidate changes in the page's definition (derived by
+   the server, never the agent's own summary), the routines each `call`
+   action would run and whether their definitions moved, the source diff,
+   and the build. **Open preview** runs the candidate against the page's live
+   data in the isolated runtime. Panels owned by crews you are not in are
+   withheld from the comparison and the review says how many; if one of
+   them differs, publishing is blocked for you — ask an administrator or a
+   member of that crew.
+4. **Publish.** Ticking *I reviewed this candidate's code, definition changes
+   and behaviour* and pressing **Publish application** makes it live for
+   every reader and pins the page's definition to it. Only the page's owner
+   — the user, or a member of the owning crew — or a workspace ADMIN/OWNER
+   may publish; a `write` grant lets someone draft, build and review, never
+   ship code to other people's browsers. The publication is fenced on what
+   you were shown: if the page's definition or a routine changed between
+   the review and the click, the server refuses and the card says what
+   moved. Each publication is a numbered, immutable receipt.
+5. **Withdraw.** **History → Application publications → Withdraw
+   application** hides the application again and returns readers to the
+   panel page. Nothing is deleted: the receipts stay, the draft stays, and
+   publishing the identical candidate is how a withdrawal is undone.
+   **Publish this version** on an older receipt republishes it under a new
+   number — a rollback goes forward, never back.
+
+There is no *Reject*. A review that finds the candidate wrong is closed
+without publishing, and the disagreement goes to the agent in chat; the
+draft is retained. The same five steps are available from the CLI as
+`crewship page project build|review|check|publish|unpublish|rollback` — the
+[Page commands](/cli/page#custom-react-projects-experimental) reference has the
+flags and the fence values a scripted publication must send.
 
 ## Shared company colors
 
@@ -1529,7 +1601,7 @@ Operations Lab does.
 
 ### Opening custom applications
 
-Studio keeps a loading surface in the workspace background color until the
+The page keeps a loading surface in the workspace background color until the
 runtime has received the first snapshot and had two rendering opportunities.
 The application then fades in over 300 ms. Normal data updates do not replay
 this transition, and reduced-motion preferences disable it. If initialization
