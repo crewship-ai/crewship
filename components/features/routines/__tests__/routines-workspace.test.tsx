@@ -126,6 +126,7 @@ describe("<RoutinesWorkspace> — the overview pane", () => {
     renderPane({ filters: { ...filters, status: "failed" } })
     expect(screen.queryByRole("link", { name: /decision waiting/ })).toBeNull()
     expect(screen.getByRole("link", { name: /1 could not finish/ })).toBeInTheDocument()
+    expect(screen.getAllByRole("link", { name: /Open run/ })).toHaveLength(1)
   })
 
   it("says what the empty workspace means instead of leaving a pane", () => {

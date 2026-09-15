@@ -2,9 +2,10 @@
 
 import * as React from "react"
 import Link from "next/link"
-import { AlarmClock, CalendarClock, ChevronRight, FileEdit, Hourglass, Play, Radio, XCircle } from "lucide-react"
+import { CalendarClock, ChevronRight, FileEdit, Hourglass, Play, Radio, XCircle } from "lucide-react"
 
 import { cn } from "@/lib/utils"
+import { formatDurationMs } from "@/lib/activity-stream"
 import { CrewIcon } from "@/components/ui/crew-icon"
 import { StatusPill } from "@/components/ui/status-pill"
 import { InlineEmpty } from "@/components/ui/inline-empty"
@@ -144,6 +145,8 @@ export function RoutinesDashboard({ routines, runs, runsLoading, schedules, onSe
     [...list].sort((a, b) => (Date.parse(b.started_at) || 0) - (Date.parse(a.started_at) || 0))
   const waiting = newest(visibleRuns.filter((r) => ["waiting", "paused"].includes((r.status ?? "").toLowerCase())))
   const running = newest(visibleRuns.filter((r) => ["running", "queued"].includes((r.status ?? "").toLowerCase())))
+  const since = now.getTime() - WINDOW_DAYS * 86_400_000
+  const finished = newest(visibleRuns.filter((r) => !LIVE.has((r.status ?? "").toLowerCase()) && within(r, since)))
   const failing = routines
     .filter((r) => r.last_invocation_status === "failed" || r.last_run_outcome === "FAILED")
     .sort((a, b) => (b.last_invoked_at ?? "").localeCompare(a.last_invoked_at ?? ""))
@@ -215,21 +218,32 @@ export function RoutinesDashboard({ routines, runs, runsLoading, schedules, onSe
         spendPerRun={kpis.successTotal > 0 ? kpis.spendUsd / kpis.successTotal : null}
       />
 
-      {/* Two columns only when this pane — not the viewport — is wide enough:
-          beside the explorer a 1280px window leaves ~930px here. */}
+      {/* The dashboard's shape: the main list on the left, the live column on
+          the right, the chart as its own row. Columns split by this pane's
+          width, not the viewport's — beside the explorer a 1280px window
+          leaves ~930px here. */}
       <div className="grid grid-cols-1 gap-3 @5xl/overview:grid-cols-5">
         <div className="@5xl/overview:col-span-3">
           <DashboardCard
-            title={`Run volume · ${WINDOW_DAYS}d · by routine`}
+            title="Latest results"
             icon={Radio}
-            hint={`${kpis.total} runs`}
+            hint={`${WINDOW_DAYS}d · ${finished.length} finished`}
             action={
               <Link href="/activity?lens=routines" className="text-primary-hover hover:underline">
-                Activity →
+                All runs →
               </Link>
             }
+            className="h-full"
           >
-            <RunVolumeChart buckets={volume.buckets} series={volume.series} window="7d" />
+            {finished.length === 0 ? (
+              <InlineEmpty icon={Radio} text={runsLoading ? "Loading runs…" : "Nothing finished in the last 7 days."} />
+            ) : (
+              <div>
+                {finished.slice(0, 8).map((run) => (
+                  <ResultRow key={run.id} run={run} routine={routineOf(run.pipeline_slug)} />
+                ))}
+              </div>
+            )}
           </DashboardCard>
         </div>
 
@@ -265,32 +279,6 @@ export function RoutinesDashboard({ routines, runs, runsLoading, schedules, onSe
 
           <UpNext schedules={mySchedules} />
 
-          {failing.length > 0 && (
-            <DashboardCard
-              title="Could not finish last time"
-              icon={XCircle}
-              hint={`${failing.length} ${failing.length === 1 ? "routine" : "routines"}`}
-            >
-              <div>
-                {failing.slice(0, 5).map((r) => (
-                  <button
-                    key={r.slug}
-                    type="button"
-                    onClick={() => onSelect(r.slug)}
-                    className="group grid w-full grid-cols-[auto_minmax(0,1fr)_auto_auto] items-center gap-2.5 rounded-md border-b border-border/50 px-2 py-2 text-left last:border-0 hover:bg-foreground/[0.025]"
-                  >
-                    <CrewIcon icon={resolveRoutineIcon(r)} color={resolveRoutineColor(r)} size="sm" />
-                    <span className="truncate text-body font-medium text-foreground/90">{r.name}</span>
-                    <span className="font-mono text-label tabular-nums text-muted-foreground">{r.last_invoked_at ? formatAgo(r.last_invoked_at) : ""}</span>
-                    <span className="inline-flex items-center gap-1 text-label font-medium text-primary-hover">
-                      Inspect <ChevronRight className="h-3.5 w-3.5" />
-                    </span>
-                  </button>
-                ))}
-              </div>
-            </DashboardCard>
-          )}
-
           {drafts.length > 0 && (
             <DashboardCard title="Drafts to publish" icon={FileEdit} hint={String(drafts.length)}>
               <div>
@@ -320,19 +308,46 @@ export function RoutinesDashboard({ routines, runs, runsLoading, schedules, onSe
         </div>
       </div>
 
-      <p className="text-label text-muted-foreground">
-        <AlarmClock className="mr-1 inline h-3.5 w-3.5 align-[-2px]" aria-hidden />
-        Every run, with its steps and files, is in{" "}
-        <Link href="/activity?lens=routines" className="text-primary-hover hover:underline">
-          Activity → Routines
-        </Link>
-        .
-      </p>
+      <DashboardCard
+        title={`Run volume · ${WINDOW_DAYS}d · by routine`}
+        icon={Radio}
+        hint={`${kpis.total} runs`}
+        action={
+          <Link href="/activity?lens=routines" className="text-primary-hover hover:underline">
+            Activity →
+          </Link>
+        }
+      >
+        <RunVolumeChart buckets={volume.buckets} series={volume.series} window="7d" />
+      </DashboardCard>
     </div>
   )
 }
 
 const PILL = { success: "success", destructive: "danger", warn: "warn", blue: "blue", default: "muted" } as const
+
+/** One finished run, as the dashboard's Results & review draws a row: icon,
+ * state pill, name, meta on the right, then the verb. */
+function ResultRow({ run, routine }: { run: DashboardRun; routine?: Pipeline }) {
+  const p = routineRunPresentation({ status: run.status, outcome: run.outcome })
+  return (
+    <Link
+      href={routineRunHref(run.pipeline_slug, run.id)}
+      className="group grid grid-cols-[auto_auto_minmax(0,1fr)_auto] items-center gap-2.5 rounded-md border-b border-border/50 px-2 py-2 last:border-0 hover:bg-foreground/[0.025] @3xl/overview:grid-cols-[auto_auto_minmax(0,1fr)_auto_auto]"
+    >
+      <CrewIcon icon={resolveRoutineIcon(routine ?? { slug: run.pipeline_slug })} color={resolveRoutineColor(routine ?? { slug: run.pipeline_slug })} size="sm" />
+      <StatusPill tone={PILL[p.tone]} label={p.label} />
+      <span className="truncate text-body font-medium text-foreground/90">{run.pipeline_name || routine?.name || run.pipeline_slug}</span>
+      <span className="hidden font-mono text-label tabular-nums text-muted-foreground @3xl/overview:inline">
+        {formatAgo(run.started_at)}
+        {run.duration_ms ? ` · ${formatDurationMs(run.duration_ms)}` : ""}
+      </span>
+      <span className="inline-flex items-center gap-1 text-label font-medium text-primary-hover">
+        Open run <ChevronRight className="h-3.5 w-3.5" />
+      </span>
+    </Link>
+  )
+}
 
 /** One running or waiting run, as the dashboard's Routines running now draws it. */
 function RunRow({ run, routine }: { run: DashboardRun; routine?: Pipeline }) {

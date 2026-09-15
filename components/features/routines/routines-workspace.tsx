@@ -142,7 +142,7 @@ export function RoutinesWorkspace(props: RoutinesWorkspaceProps) {
       </nav>
       <div className="min-h-0 flex-1 overflow-auto">
         {tab === "routines" && (
-          <section aria-label="Routine list" className="mx-auto max-w-[1160px] p-4 md:p-6">
+          <section aria-label="Routine list" className="p-4 md:p-6">
             {props.error && (
               <p role="alert" className="mb-3 text-sm text-destructive">
                 Routines could not be loaded.

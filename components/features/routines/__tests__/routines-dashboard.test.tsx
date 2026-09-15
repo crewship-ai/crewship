@@ -73,7 +73,7 @@ describe("<RoutinesDashboard>", () => {
     expect(screen.getByRole("link", { name: "1 draft to publish" })).toHaveAttribute("href", "/routines?slug=invoice&view=versions")
     // The outcome tiles.
     expect(screen.getByText("Routine run summary")).toBeInTheDocument()
-    expect(screen.getByText("Completed")).toBeInTheDocument()
+    expect(screen.getAllByText("Completed").length).toBeGreaterThan(0)
     expect(screen.getByText("50%")).toBeInTheDocument()
     expect(screen.getByText("P95 duration")).toBeInTheDocument()
     expect(screen.getByText("$0.09")).toBeInTheDocument()
@@ -87,9 +87,16 @@ describe("<RoutinesDashboard>", () => {
     expect(screen.queryByText("Elsewhere")).toBeNull()
     // Up next lists the enabled schedule only.
     expect(screen.getByText("Up next")).toBeInTheDocument()
-    // Could-not-finish and drafts open the routine.
-    fireEvent.click(screen.getByRole("button", { name: /Morning briefing.*Inspect/ }))
-    expect(select).toHaveBeenCalledWith("briefing")
+    // Latest results: finished runs of the window, newest first, each opening its run.
+    const results = screen.getAllByRole("link", { name: /Open run/ })
+    expect(results.map((a) => a.getAttribute("href"))).toEqual([
+      "/routines?slug=invoice&run=r1",
+      "/routines?slug=invoice&run=r2",
+      "/routines?slug=briefing&run=r3",
+    ])
+    expect(results[1]).toHaveTextContent("Result failed")
+    expect(results[2]).toHaveTextContent("Stopped")
+    // Drafts open the routine.
     fireEvent.click(screen.getByRole("button", { name: /Invoice intake.*Publish/ }))
     expect(select).toHaveBeenCalledWith("invoice")
     // Runs live in Activity.
@@ -100,6 +107,7 @@ describe("<RoutinesDashboard>", () => {
     render(<RoutinesDashboard routines={routines.slice(1).map((r) => ({ ...r, last_invocation_status: "completed" }))} runs={[]} schedules={[]} onSelect={vi.fn()} />)
     expect(screen.getByText(/nothing blocking your crews/)).toBeInTheDocument()
     expect(screen.getByText("No routines are running right now.")).toBeInTheDocument()
+    expect(screen.getByText("Nothing finished in the last 7 days.")).toBeInTheDocument()
     expect(screen.queryByText("Drafts to publish")).toBeNull()
   })
 })
