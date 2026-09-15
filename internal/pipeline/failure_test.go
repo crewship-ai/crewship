@@ -81,6 +81,17 @@ func TestClassifyFailure(t *testing.T) {
 			wantNotDone: []string{"post", "notify"},
 		},
 		{
+			name:        "transform input not JSON with a quoted expression",
+			msg:         `transform step "decide" input is not JSON and expression "error(\"required phrase is missing\")" requires JSON`,
+			step:        "decide",
+			wantKind:    FailureTransformInput,
+			wantStep:    "decide",
+			wantName:    "decide",
+			wantSummary: `Step "decide" received input that is not JSON; the expression "error(\"required phrase is missing\")" needs JSON.`,
+			wantKept:    []string{"extract"},
+			wantNotDone: []string{"post", "notify"},
+		},
+		{
 			name:        "step timeout with declared limit",
 			msg:         `script step "post": context deadline exceeded (stderr: )`,
 			step:        "post",

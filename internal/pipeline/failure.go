@@ -45,7 +45,7 @@ var (
 	failureCostRetryCapPattern  = regexp.MustCompile(`breach cap \$([0-9.]+)`)
 	failureCredentialPattern    = regexp.MustCompile(`credential of type "([^"]+)"`)
 	failureIntegrationPattern   = regexp.MustCompile(`integration "([^"]+)"`)
-	failureExpressionPattern    = regexp.MustCompile(`expression "([^"]+)"`)
+	failureExpressionPattern    = regexp.MustCompile(`expression ("(?:[^"\\]|\\.)*")`)
 	failureAfterMarkerMaxLength = 300
 )
 
@@ -111,7 +111,13 @@ func ClassifyFailure(errorMessage, failedStepID string, dsl *DSL, stepOutputs ma
 		f.Kind = FailureTransformInput
 		f.Summary = fmt.Sprintf("%s received input that is not JSON.", upperFirst(stepRef()))
 		if m := failureExpressionPattern.FindStringSubmatch(msg); m != nil {
-			f.Summary = fmt.Sprintf("%s received input that is not JSON; the expression %q needs JSON.", upperFirst(stepRef()), m[1])
+			// The engine formats the expression with %q, so an inner quote
+			// arrives escaped; unquote before quoting again.
+			expr := m[1]
+			if unquoted, err := strconv.Unquote(expr); err == nil {
+				expr = unquoted
+			}
+			f.Summary = fmt.Sprintf("%s received input that is not JSON; the expression %q needs JSON.", upperFirst(stepRef()), expr)
 		}
 	case strings.Contains(lower, "timed out") || strings.Contains(lower, "deadline exceeded"):
 		f.Kind = FailureTimeout
