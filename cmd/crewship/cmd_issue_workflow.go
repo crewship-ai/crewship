@@ -235,7 +235,7 @@ var issueStopCmd = &cobra.Command{
 		}
 		return resolvedFormatter(cmd).AutoHuman(result, func() {
 			if hard {
-				cli.PrintSuccess(fmt.Sprintf("Hard stop requested for %s — the running agent's tmux session is being killed, then its process group (KILL)", identifier))
+				cli.PrintSuccess(fmt.Sprintf("Hard stop requested for %s — the running agent's tmux session is killed, then its process group is terminated (KILL)", identifier))
 				return
 			}
 			cli.PrintSuccess(fmt.Sprintf("Stop requested for %s — the current step will finish; no further step will start", identifier))
