@@ -71,12 +71,12 @@ session-cookie expiry (30 days). Pass 0 to disable the check.`,
 		}
 
 		var sessions []struct {
-			ID         string `json:"id"`
-			CreatedAt  string `json:"created_at"`
-			LastUsedAt string `json:"last_used_at"`
-			UserAgent  string `json:"user_agent"`
-			IP         string `json:"ip"`
-			IsCurrent  bool   `json:"is_current"`
+			ID         string `json:"id" yaml:"id"`
+			CreatedAt  string `json:"created_at" yaml:"created_at"`
+			LastUsedAt string `json:"last_used_at" yaml:"last_used_at"`
+			UserAgent  string `json:"user_agent" yaml:"user_agent"`
+			IP         string `json:"ip" yaml:"ip"`
+			IsCurrent  bool   `json:"is_current" yaml:"is_current"`
 		}
 		if err := cli.ReadJSON(resp, &sessions); err != nil {
 			return err
@@ -186,9 +186,9 @@ return 401 — you'll need to log in again.`,
 		}
 
 		var out struct {
-			OK        bool   `json:"ok"`
-			ID        string `json:"id"`
-			IsCurrent bool   `json:"is_current"`
+			OK        bool   `json:"ok" yaml:"ok"`
+			ID        string `json:"id" yaml:"id"`
+			IsCurrent bool   `json:"is_current" yaml:"is_current"`
 		}
 		if err := cli.ReadJSON(resp, &out); err != nil {
 			return err

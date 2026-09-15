@@ -121,20 +121,20 @@ var approvalsListCmd = &cobra.Command{
 		}
 		var body struct {
 			Rows []struct {
-				ID          string `json:"id"`
-				CrewID      string `json:"crew_id"`
-				AgentID     string `json:"agent_id"`
-				MissionID   string `json:"mission_id"`
-				Kind        string `json:"kind"`
-				Reason      string `json:"reason"`
-				Status      string `json:"status"`
-				RequestedBy string `json:"requested_by"`
-				DecidedBy   string `json:"decided_by"`
-				CreatedAt   string `json:"created_at"`
-			} `json:"rows"`
-			Status  string `json:"status"`
-			Count   int    `json:"count"`
-			HasMore bool   `json:"has_more"`
+				ID          string `json:"id" yaml:"id"`
+				CrewID      string `json:"crew_id" yaml:"crew_id"`
+				AgentID     string `json:"agent_id" yaml:"agent_id"`
+				MissionID   string `json:"mission_id" yaml:"mission_id"`
+				Kind        string `json:"kind" yaml:"kind"`
+				Reason      string `json:"reason" yaml:"reason"`
+				Status      string `json:"status" yaml:"status"`
+				RequestedBy string `json:"requested_by" yaml:"requested_by"`
+				DecidedBy   string `json:"decided_by" yaml:"decided_by"`
+				CreatedAt   string `json:"created_at" yaml:"created_at"`
+			} `json:"rows" yaml:"rows"`
+			Status  string `json:"status" yaml:"status"`
+			Count   int    `json:"count" yaml:"count"`
+			HasMore bool   `json:"has_more" yaml:"has_more"`
 		}
 
 		// Matches `inbox list --all`: the approvals endpoint grew
@@ -253,8 +253,8 @@ Examples:
 			return err
 		}
 		var out struct {
-			Status      string `json:"status"`
-			CancelledBy string `json:"cancelled_by"`
+			Status      string `json:"status" yaml:"status"`
+			CancelledBy string `json:"cancelled_by" yaml:"cancelled_by"`
 		}
 		if err := cli.ReadJSON(resp, &out); err != nil {
 			return err
@@ -290,8 +290,8 @@ func decideApproval(cmd *cobra.Command, id, status string) error {
 	}
 
 	var out struct {
-		Status    string `json:"status"`
-		DecidedBy string `json:"decided_by"`
+		Status    string `json:"status" yaml:"status"`
+		DecidedBy string `json:"decided_by" yaml:"decided_by"`
 	}
 	if err := cli.ReadJSON(resp, &out); err != nil {
 		return err
@@ -357,8 +357,8 @@ Examples:
 			return err
 		}
 		var out struct {
-			Tool        string `json:"tool"`
-			RowsDeleted int    `json:"rows_deleted"`
+			Tool        string `json:"tool" yaml:"tool"`
+			RowsDeleted int    `json:"rows_deleted" yaml:"rows_deleted"`
 		}
 		if err := cli.ReadJSON(resp, &out); err != nil {
 			return err

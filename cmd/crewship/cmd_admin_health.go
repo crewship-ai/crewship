@@ -24,34 +24,34 @@ import (
 )
 
 type adminHealthDB struct {
-	Connected bool   `json:"connected"`
-	Error     string `json:"error,omitempty"`
+	Connected bool   `json:"connected" yaml:"connected"`
+	Error     string `json:"error,omitempty" yaml:"error,omitempty"`
 }
 
 type adminHealthDisk struct {
-	Path       string  `json:"path,omitempty"`
-	Error      string  `json:"error,omitempty"`
-	FreeBytes  int64   `json:"free_bytes,omitempty"`
-	TotalBytes int64   `json:"total_bytes,omitempty"`
-	UsedPct    float64 `json:"used_pct,omitempty"`
+	Path       string  `json:"path,omitempty" yaml:"path,omitempty"`
+	Error      string  `json:"error,omitempty" yaml:"error,omitempty"`
+	FreeBytes  int64   `json:"free_bytes,omitempty" yaml:"free_bytes,omitempty"`
+	TotalBytes int64   `json:"total_bytes,omitempty" yaml:"total_bytes,omitempty"`
+	UsedPct    float64 `json:"used_pct,omitempty" yaml:"used_pct,omitempty"`
 }
 
 // adminHealthLogLevel is the live level, the configured baseline, and the
 // expiry of a temporary override — a level that reverts in ten minutes is a
 // different fact from one someone set for good.
 type adminHealthLogLevel struct {
-	Level     string  `json:"level"`
-	Baseline  string  `json:"baseline"`
-	ExpiresAt *string `json:"expires_at,omitempty"`
+	Level     string  `json:"level" yaml:"level"`
+	Baseline  string  `json:"baseline" yaml:"baseline"`
+	ExpiresAt *string `json:"expires_at,omitempty" yaml:"expires_at,omitempty"`
 }
 
 // adminHealthRow mirrors the map written by api.AdminObservabilityHandler.Health.
 type adminHealthRow struct {
-	UptimeSeconds       int                  `json:"uptime_seconds"`
-	LogLevel            *adminHealthLogLevel `json:"log_level,omitempty"`
-	EncryptionKeySource string               `json:"encryption_key_source,omitempty"`
-	DB                  *adminHealthDB       `json:"db,omitempty"`
-	Disk                *adminHealthDisk     `json:"disk,omitempty"`
+	UptimeSeconds       int                  `json:"uptime_seconds" yaml:"uptime_seconds"`
+	LogLevel            *adminHealthLogLevel `json:"log_level,omitempty" yaml:"log_level,omitempty"`
+	EncryptionKeySource string               `json:"encryption_key_source,omitempty" yaml:"encryption_key_source,omitempty"`
+	DB                  *adminHealthDB       `json:"db,omitempty" yaml:"db,omitempty"`
+	Disk                *adminHealthDisk     `json:"disk,omitempty" yaml:"disk,omitempty"`
 }
 
 // humanUptime renders seconds the way an operator reads them.

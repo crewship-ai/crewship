@@ -82,30 +82,30 @@ var escalationListCmd = &cobra.Command{
 		// through. The CLI used to re-marshal a truncated subset, which made
 		// e.g. filtering CREDENTIAL escalations by .type impossible.
 		var escalations []struct {
-			ID                 string  `json:"id"`
-			Type               string  `json:"type"`
-			FromName           string  `json:"from_name"`
-			FromSlug           string  `json:"from_slug"`
-			Reason             string  `json:"reason"`
-			Context            *string `json:"context"`
-			Metadata           *string `json:"metadata"`
-			PeerConversationID *string `json:"peer_conversation_id"`
-			Status             string  `json:"status"`
-			Resolution         *string `json:"resolution"`
-			Action             *string `json:"action"`
-			RedirectTo         *string `json:"redirect_to"`
-			ResolvedBy         *string `json:"resolved_by"`
-			ResolvedAt         *string `json:"resolved_at"`
-			CreatedAt          string  `json:"created_at"`
-			CredentialID       *string `json:"credential_id"`
+			ID                 string  `json:"id" yaml:"id"`
+			Type               string  `json:"type" yaml:"type"`
+			FromName           string  `json:"from_name" yaml:"from_name"`
+			FromSlug           string  `json:"from_slug" yaml:"from_slug"`
+			Reason             string  `json:"reason" yaml:"reason"`
+			Context            *string `json:"context" yaml:"context"`
+			Metadata           *string `json:"metadata" yaml:"metadata"`
+			PeerConversationID *string `json:"peer_conversation_id" yaml:"peer_conversation_id"`
+			Status             string  `json:"status" yaml:"status"`
+			Resolution         *string `json:"resolution" yaml:"resolution"`
+			Action             *string `json:"action" yaml:"action"`
+			RedirectTo         *string `json:"redirect_to" yaml:"redirect_to"`
+			ResolvedBy         *string `json:"resolved_by" yaml:"resolved_by"`
+			ResolvedAt         *string `json:"resolved_at" yaml:"resolved_at"`
+			CreatedAt          string  `json:"created_at" yaml:"created_at"`
+			CredentialID       *string `json:"credential_id" yaml:"credential_id"`
 			// The two clocks. DeadlineAt bounds the AGENT's long poll;
 			// AnswerDeadlineAt is when the question stops being answerable
 			// by a human, and AgentGaveUpAt says the asking run already
 			// continued without an answer. Null on rows raised before the
 			// respective columns existed.
-			DeadlineAt       *string `json:"deadline_at"`
-			AnswerDeadlineAt *string `json:"answer_deadline_at"`
-			AgentGaveUpAt    *string `json:"agent_gave_up_at"`
+			DeadlineAt       *string `json:"deadline_at" yaml:"deadline_at"`
+			AnswerDeadlineAt *string `json:"answer_deadline_at" yaml:"answer_deadline_at"`
+			AgentGaveUpAt    *string `json:"agent_gave_up_at" yaml:"agent_gave_up_at"`
 		}
 		if err := cli.ReadJSON(resp, &escalations); err != nil {
 			return err
@@ -219,8 +219,8 @@ var escalationResolveCmd = &cobra.Command{
 		// not walk away thinking they unblocked that run, so the note is
 		// printed rather than swallowed with the body.
 		var out struct {
-			AgentStillWaiting *bool  `json:"agent_still_waiting"`
-			Note              string `json:"note"`
+			AgentStillWaiting *bool  `json:"agent_still_waiting" yaml:"agent_still_waiting"`
+			Note              string `json:"note" yaml:"note"`
 		}
 		_ = cli.ReadJSON(resp, &out)
 
@@ -301,14 +301,14 @@ use printf '%s' when the secret itself ends in one.`,
 		}
 		var out struct {
 			Credential struct {
-				Name          string `json:"name"`
-				HandleOnly    bool   `json:"handle_only"`
-				Granted       bool   `json:"granted"`
-				LeaseExpires  string `json:"lease_expires_at"`
-				SecurityLevel int    `json:"security_level"`
-			} `json:"credential"`
-			AgentStillWaiting *bool  `json:"agent_still_waiting"`
-			Note              string `json:"note"`
+				Name          string `json:"name" yaml:"name"`
+				HandleOnly    bool   `json:"handle_only" yaml:"handle_only"`
+				Granted       bool   `json:"granted" yaml:"granted"`
+				LeaseExpires  string `json:"lease_expires_at" yaml:"lease_expires_at"`
+				SecurityLevel int    `json:"security_level" yaml:"security_level"`
+			} `json:"credential" yaml:"credential"`
+			AgentStillWaiting *bool  `json:"agent_still_waiting" yaml:"agent_still_waiting"`
+			Note              string `json:"note" yaml:"note"`
 		}
 		_ = cli.ReadJSON(resp, &out)
 		// The whole receipt goes to stderr through PrintSuccess: a mutation
@@ -447,7 +447,7 @@ diagnostic and a forcing function, not routine maintenance. ADMIN+.
 			return err
 		}
 		var body struct {
-			Expired int `json:"expired"`
+			Expired int `json:"expired" yaml:"expired"`
 		}
 		if err := cli.ReadJSON(resp, &body); err != nil {
 			return err
@@ -488,7 +488,7 @@ Examples:
 			return err
 		}
 		var body struct {
-			Count int `json:"count"`
+			Count int `json:"count" yaml:"count"`
 		}
 		if err := cli.ReadJSON(resp, &body); err != nil {
 			return err

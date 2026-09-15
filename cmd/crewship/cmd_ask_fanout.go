@@ -169,7 +169,7 @@ func fanoutOne(ctx context.Context, client *cli.Client, server, wsToken, agentID
 		return "", err
 	}
 	var out struct {
-		ID string `json:"id"`
+		ID string `json:"id" yaml:"id"`
 	}
 	if err := cli.ReadJSON(resp, &out); err != nil {
 		return "", err

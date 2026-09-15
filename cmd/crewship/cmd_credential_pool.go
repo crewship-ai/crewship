@@ -13,20 +13,20 @@ import (
 )
 
 type poolMemberOut struct {
-	CredentialID string `json:"credential_id"`
-	Priority     int    `json:"priority"`
+	CredentialID string `json:"credential_id" yaml:"credential_id"`
+	Priority     int    `json:"priority" yaml:"priority"`
 }
 
 type poolDefinitionOut struct {
-	Revision        int64           `json:"revision"`
-	ID              string          `json:"id"`
-	Name            string          `json:"name"`
-	Provider        string          `json:"provider"`
-	Mode            string          `json:"mode"`
-	AllowCrossOwner bool            `json:"allow_cross_owner"`
-	CreatedBy       *string         `json:"created_by"`
-	MemberCount     int             `json:"member_count"`
-	Members         []poolMemberOut `json:"members,omitempty"`
+	Revision        int64           `json:"revision" yaml:"revision"`
+	ID              string          `json:"id" yaml:"id"`
+	Name            string          `json:"name" yaml:"name"`
+	Provider        string          `json:"provider" yaml:"provider"`
+	Mode            string          `json:"mode" yaml:"mode"`
+	AllowCrossOwner bool            `json:"allow_cross_owner" yaml:"allow_cross_owner"`
+	CreatedBy       *string         `json:"created_by" yaml:"created_by"`
+	MemberCount     int             `json:"member_count" yaml:"member_count"`
+	Members         []poolMemberOut `json:"members,omitempty" yaml:"members,omitempty"`
 }
 
 func poolDefinitionDetail(out poolDefinitionOut) error {
@@ -62,8 +62,8 @@ func newCredentialPoolCmd() *cobra.Command {
 			return err
 		}
 		var page struct {
-			Items      []poolDefinitionOut `json:"items"`
-			NextCursor *string             `json:"next_cursor"`
+			Items      []poolDefinitionOut `json:"items" yaml:"items"`
+			NextCursor *string             `json:"next_cursor" yaml:"next_cursor"`
 		}
 		if err := cli.ReadJSON(resp, &page); err != nil {
 			return err

@@ -46,42 +46,42 @@ Examples:
 // keeperGovernance mirrors the GET/PUT /api/v1/admin/keeper/governance
 // response shape (internal/api/keeper_governance.go).
 type keeperGovernance struct {
-	Configured            bool     `json:"configured"`
-	Enabled               bool     `json:"enabled"`
-	SecurityContactUserID string   `json:"security_contact_user_id"`
-	DenyNotifyMinRisk     int      `json:"deny_notify_min_risk"`
-	WatchSpec             string   `json:"watch_spec"`
-	WatchPresets          []string `json:"watch_presets"`
+	Configured            bool     `json:"configured" yaml:"configured"`
+	Enabled               bool     `json:"enabled" yaml:"enabled"`
+	SecurityContactUserID string   `json:"security_contact_user_id" yaml:"security_contact_user_id"`
+	DenyNotifyMinRisk     int      `json:"deny_notify_min_risk" yaml:"deny_notify_min_risk"`
+	WatchSpec             string   `json:"watch_spec" yaml:"watch_spec"`
+	WatchPresets          []string `json:"watch_presets" yaml:"watch_presets"`
 	// RequireSecondApprover is the credential-escalation "four-eyes" toggle
 	// (issue #1084): when true, the user recorded as the initiating agent's
 	// owner cannot resolve a CREDENTIAL escalation that agent raised — OWNER
 	// is not exempt. Rides on this same governance row/endpoint but is a
 	// distinct concern from the behavioral watchdog above it.
-	RequireSecondApprover bool `json:"require_second_approver"`
+	RequireSecondApprover bool `json:"require_second_approver" yaml:"require_second_approver"`
 	// EffectiveSecondApprover is the same rule as ENFORCED (issue #1559).
 	// The toggle above is only half of it: the credential's own tier forces
 	// four-eyes on the top tier whatever the toggle says, so printing the
 	// toggle alone told operators the opposite of what the server would do.
 	// Absent (Source == "") when talking to a server older than #1559.
-	EffectiveSecondApprover keeperEffectiveSecondApprover `json:"effective_second_approver"`
+	EffectiveSecondApprover keeperEffectiveSecondApprover `json:"effective_second_approver" yaml:"effective_second_approver"`
 	// AutoLeaseSeconds is the credential-lease auto-issuance TTL (issue #1373):
 	// 0 = off (grants stay standing), positive = a Keeper ALLOW / escalation
 	// approve re-issues an L3/L4 grant as a lease of that length. Managed by
 	// `crewship keeper auto-lease`.
-	AutoLeaseSeconds int `json:"auto_lease_seconds"`
+	AutoLeaseSeconds int `json:"auto_lease_seconds" yaml:"auto_lease_seconds"`
 	// BehaviorSampleEvery is how often the behavioural watchdog reviews a tool
 	// call (issue #1001 M3): one in every N per crew. 0 means the workspace
 	// never set one and follows the built-in default — it does NOT mean "never".
 	// Managed by `crewship keeper sampling`.
-	BehaviorSampleEvery int `json:"behavior_sample_every"`
+	BehaviorSampleEvery int `json:"behavior_sample_every" yaml:"behavior_sample_every"`
 	// Warning is a non-blocking advisory the server returns on a mutation —
 	// e.g. enabling second-approver with fewer than 2 eligible approvers.
-	Warning string `json:"warning,omitempty"`
+	Warning string `json:"warning,omitempty" yaml:"warning,omitempty"`
 
 	// Governance-model selection (M2a, #1001).
-	GovModelProvider     string `json:"gov_model_provider"`
-	GovModelID           string `json:"gov_model_id"`
-	GovModelCredentialID string `json:"gov_model_credential_id"`
+	GovModelProvider     string `json:"gov_model_provider" yaml:"gov_model_provider"`
+	GovModelID           string `json:"gov_model_id" yaml:"gov_model_id"`
+	GovModelCredentialID string `json:"gov_model_credential_id" yaml:"gov_model_credential_id"`
 }
 
 // keeperEffectiveSecondApprover mirrors the effective_second_approver block of
@@ -90,15 +90,15 @@ type keeperGovernance struct {
 // is the shape the server enforces: the workspace toggle covers every tier, and
 // the tier table forces the rule on the top one regardless.
 type keeperEffectiveSecondApprover struct {
-	MinSecurityLevel      int    `json:"min_security_level"`
-	MinSecurityLevelLabel string `json:"min_security_level_label"`
+	MinSecurityLevel      int    `json:"min_security_level" yaml:"min_security_level"`
+	MinSecurityLevelLabel string `json:"min_security_level_label" yaml:"min_security_level_label"`
 	// Source is "workspace", "tier" or "none" — empty from a pre-#1559 server.
-	Source string `json:"source"`
+	Source string `json:"source" yaml:"source"`
 	// TierFloor* is where the tier table forces the rule on its own, reported
 	// whatever the toggle says. Carried so `--format json` stays faithful to
 	// the endpoint; the human line below is built from Source.
-	TierFloorSecurityLevel int    `json:"tier_floor_security_level,omitempty"`
-	TierFloorLabel         string `json:"tier_floor_label,omitempty"`
+	TierFloorSecurityLevel int    `json:"tier_floor_security_level,omitempty" yaml:"tier_floor_security_level,omitempty"`
+	TierFloorLabel         string `json:"tier_floor_label,omitempty" yaml:"tier_floor_label,omitempty"`
 }
 
 // describe renders the one line an operator needs: what actually needs a second
@@ -125,27 +125,27 @@ func (e keeperEffectiveSecondApprover) describe() string {
 
 // keeperServerStatus mirrors GET /api/v1/system/keeper.
 type keeperServerStatus struct {
-	Enabled      bool   `json:"enabled"`
-	OllamaURL    string `json:"ollama_url"`
-	Model        string `json:"model"`
-	OllamaOnline bool   `json:"ollama_online"`
-	OllamaProbed bool   `json:"ollama_probed"`
-	SecretCount  int    `json:"secret_count"`
+	Enabled      bool   `json:"enabled" yaml:"enabled"`
+	OllamaURL    string `json:"ollama_url" yaml:"ollama_url"`
+	Model        string `json:"model" yaml:"model"`
+	OllamaOnline bool   `json:"ollama_online" yaml:"ollama_online"`
+	OllamaProbed bool   `json:"ollama_probed" yaml:"ollama_probed"`
+	SecretCount  int    `json:"secret_count" yaml:"secret_count"`
 
 	// Governance model (M2a, #1001). Configured=false → the server default
 	// judge (OllamaURL/Model) is in use. Degraded=true → a revoked/broken
 	// gov-model credential fell back to the default judge (§4.4).
-	GovModelConfigured    bool   `json:"gov_model_configured"`
-	GovModelProvider      string `json:"gov_model_provider"`
-	GovModelName          string `json:"gov_model"`
-	GovModelDegraded      bool   `json:"gov_model_degraded"`
-	GovModelDegradeReason string `json:"gov_model_degrade_reason"`
+	GovModelConfigured    bool   `json:"gov_model_configured" yaml:"gov_model_configured"`
+	GovModelProvider      string `json:"gov_model_provider" yaml:"gov_model_provider"`
+	GovModelName          string `json:"gov_model" yaml:"gov_model"`
+	GovModelDegraded      bool   `json:"gov_model_degraded" yaml:"gov_model_degraded"`
+	GovModelDegradeReason string `json:"gov_model_degrade_reason" yaml:"gov_model_degrade_reason"`
 }
 
 // keeperStatusPayload is the machine shape for `keeper status --format json`.
 type keeperStatusPayload struct {
-	Server     keeperServerStatus `json:"server"`
-	Governance keeperGovernance   `json:"governance"`
+	Server     keeperServerStatus `json:"server" yaml:"server"`
+	Governance keeperGovernance   `json:"governance" yaml:"governance"`
 }
 
 // getKeeperGovernance fetches the current workspace governance settings.
@@ -322,11 +322,11 @@ var keeperDisableCmd = &cobra.Command{
 // server's generic 400 (the server still validates on PUT).
 func resolveContactUserID(client *cli.Client, email string) (string, error) {
 	var members []struct {
-		UserID string `json:"user_id"`
-		Role   string `json:"role"`
+		UserID string `json:"user_id" yaml:"user_id"`
+		Role   string `json:"role" yaml:"role"`
 		User   struct {
-			Email string `json:"email"`
-		} `json:"user"`
+			Email string `json:"email" yaml:"email"`
+		} `json:"user" yaml:"user"`
 	}
 	wsID := client.GetWorkspaceID()
 	if err := getJSON(client, "/api/v1/workspaces/"+wsID+"/members", &members); err != nil {
@@ -500,22 +500,22 @@ var keeperSecondApproverDisableCmd = &cobra.Command{
 // (internal/api/keeper_log.go:keeperLogEntry) — the Keeper decision audit
 // log, previously API-only (issue #966 part 3).
 type keeperRequestEntry struct {
-	ID           string  `json:"id"`
-	AgentID      string  `json:"agent_id"`
-	AgentName    string  `json:"agent_name"`
-	CrewID       string  `json:"crew_id"`
-	CredentialID string  `json:"credential_id"`
-	CredName     string  `json:"credential_name"`
-	Intent       string  `json:"intent"`
-	RequestType  string  `json:"request_type"`
-	Command      *string `json:"command,omitempty"`
-	Decision     *string `json:"decision"`
-	Reason       *string `json:"reason"`
-	RiskScore    *int    `json:"risk_score"`
-	JudgeProfile *string `json:"judge_profile,omitempty"`
-	ExitCode     *int    `json:"exit_code,omitempty"`
-	CreatedAt    string  `json:"created_at"`
-	DecidedAt    *string `json:"decided_at"`
+	ID           string  `json:"id" yaml:"id"`
+	AgentID      string  `json:"agent_id" yaml:"agent_id"`
+	AgentName    string  `json:"agent_name" yaml:"agent_name"`
+	CrewID       string  `json:"crew_id" yaml:"crew_id"`
+	CredentialID string  `json:"credential_id" yaml:"credential_id"`
+	CredName     string  `json:"credential_name" yaml:"credential_name"`
+	Intent       string  `json:"intent" yaml:"intent"`
+	RequestType  string  `json:"request_type" yaml:"request_type"`
+	Command      *string `json:"command,omitempty" yaml:"command,omitempty"`
+	Decision     *string `json:"decision" yaml:"decision"`
+	Reason       *string `json:"reason" yaml:"reason"`
+	RiskScore    *int    `json:"risk_score" yaml:"risk_score"`
+	JudgeProfile *string `json:"judge_profile,omitempty" yaml:"judge_profile,omitempty"`
+	ExitCode     *int    `json:"exit_code,omitempty" yaml:"exit_code,omitempty"`
+	CreatedAt    string  `json:"created_at" yaml:"created_at"`
+	DecidedAt    *string `json:"decided_at" yaml:"decided_at"`
 }
 
 var keeperRequestsCmd = &cobra.Command{

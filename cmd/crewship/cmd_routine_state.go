@@ -27,21 +27,21 @@ import (
 
 // routineStateEntry mirrors internal/pipeline.StateEntry.
 type routineStateEntry struct {
-	Key       string `json:"key"`
-	Value     string `json:"value"`
-	UpdatedAt string `json:"updated_at"`
+	Key       string `json:"key" yaml:"key"`
+	Value     string `json:"value" yaml:"value"`
+	UpdatedAt string `json:"updated_at" yaml:"updated_at"`
 }
 
 // routineStateBucket mirrors internal/pipeline.StateBucket.
 type routineStateBucket struct {
-	ScheduleID string              `json:"schedule_id"`
-	Entries    []routineStateEntry `json:"entries"`
+	ScheduleID string              `json:"schedule_id" yaml:"schedule_id"`
+	Entries    []routineStateEntry `json:"entries" yaml:"entries"`
 }
 
 // routineStateResp mirrors internal/api.routineStateResponse.
 type routineStateResp struct {
-	Slug    string               `json:"slug"`
-	Buckets []routineStateBucket `json:"buckets"`
+	Slug    string               `json:"slug" yaml:"slug"`
+	Buckets []routineStateBucket `json:"buckets" yaml:"buckets"`
 }
 
 var routineStateCmd = &cobra.Command{
@@ -247,7 +247,7 @@ run. Prefer ` + "`state set`" + ` to a known-good value when you can.`,
 			return err
 		}
 		var out struct {
-			Removed int64 `json:"removed"`
+			Removed int64 `json:"removed" yaml:"removed"`
 		}
 		if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 			return fmt.Errorf("decode response: %w", err)

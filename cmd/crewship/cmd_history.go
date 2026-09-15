@@ -90,22 +90,22 @@ Examples:
 
 		var body struct {
 			Data []struct {
-				ID        string  `json:"id"`
-				AgentSlug *string `json:"agent_slug"`
-				AgentName *string `json:"agent_name"`
+				ID        string  `json:"id" yaml:"id"`
+				AgentSlug *string `json:"agent_slug" yaml:"agent_slug"`
+				AgentName *string `json:"agent_name" yaml:"agent_name"`
 				// Kind ("agent" | "pipeline") and PipelineSlug are what let
 				// the ACTOR column tell "we don't know who ran this" apart
 				// from "a routine ran it, and routines have no agent".
-				Kind              string  `json:"kind"`
-				PipelineSlug      *string `json:"pipeline_slug"`
-				ChatID            *string `json:"chat_id"`
-				Status            string  `json:"status"`
-				TriggerType       string  `json:"trigger_type"`
-				MissionID         *string `json:"mission_id"`
-				MissionIdentifier *string `json:"mission_identifier"`
-				CreatedAt         string  `json:"created_at"`
-				FinishedAt        *string `json:"finished_at"`
-			} `json:"data"`
+				Kind              string  `json:"kind" yaml:"kind"`
+				PipelineSlug      *string `json:"pipeline_slug" yaml:"pipeline_slug"`
+				ChatID            *string `json:"chat_id" yaml:"chat_id"`
+				Status            string  `json:"status" yaml:"status"`
+				TriggerType       string  `json:"trigger_type" yaml:"trigger_type"`
+				MissionID         *string `json:"mission_id" yaml:"mission_id"`
+				MissionIdentifier *string `json:"mission_identifier" yaml:"mission_identifier"`
+				CreatedAt         string  `json:"created_at" yaml:"created_at"`
+				FinishedAt        *string `json:"finished_at" yaml:"finished_at"`
+			} `json:"data" yaml:"data"`
 		}
 		if err := cli.ReadJSON(resp, &body); err != nil {
 			return err
@@ -296,9 +296,9 @@ func fetchFirstUserPrompt(c *cli.Client, chatID string) string {
 	}
 	var body struct {
 		Messages []struct {
-			Role    string `json:"role"`
-			Content string `json:"content"`
-		} `json:"messages"`
+			Role    string `json:"role" yaml:"role"`
+			Content string `json:"content" yaml:"content"`
+		} `json:"messages" yaml:"messages"`
 	}
 	if err := cli.ReadJSON(resp, &body); err != nil {
 		return ""

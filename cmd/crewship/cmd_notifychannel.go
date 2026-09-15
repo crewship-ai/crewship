@@ -97,7 +97,7 @@ var notifyChannelListCmd = &cobra.Command{
 			return err
 		}
 		var body struct {
-			Channels []NotifyChannelRow `json:"channels"`
+			Channels []NotifyChannelRow `json:"channels" yaml:"channels"`
 		}
 		if err := cli.ReadJSON(resp, &body); err != nil {
 			return err
@@ -331,8 +331,8 @@ func notifyProviderToggle(enabled bool) func(*cobra.Command, []string) error {
 			return err
 		}
 		var body struct {
-			Provider string `json:"provider"`
-			Enabled  bool   `json:"enabled"`
+			Provider string `json:"provider" yaml:"provider"`
+			Enabled  bool   `json:"enabled" yaml:"enabled"`
 		}
 		if err := cli.ReadJSON(resp, &body); err != nil {
 			return err
@@ -397,7 +397,7 @@ what each one is, and where to find the value. Those field keys are what
 			return err
 		}
 		var body struct {
-			Providers []notifyProviderRow `json:"providers"`
+			Providers []notifyProviderRow `json:"providers" yaml:"providers"`
 		}
 		if err := cli.ReadJSON(resp, &body); err != nil {
 			return err
@@ -461,21 +461,21 @@ what each one is, and where to find the value. Those field keys are what
 // provider's form definition — the CLI renders the same questions as the UI
 // rather than carrying its own copy of the provider list.
 type notifyProviderRow struct {
-	Provider string `json:"provider"`
-	Label    string `json:"label"`
-	Blurb    string `json:"blurb"`
+	Provider string `json:"provider" yaml:"provider"`
+	Label    string `json:"label" yaml:"label"`
+	Blurb    string `json:"blurb" yaml:"blurb"`
 	// Category is the catalog section: chat | push | incident. It is the one
 	// piece of routing advice the list can give — Opsgenie pages an on-call
 	// rota, Discord posts into a room — so it is a column, not a footnote.
-	Category string `json:"category"`
-	Enabled  bool   `json:"enabled"`
+	Category string `json:"category" yaml:"category"`
+	Enabled  bool   `json:"enabled" yaml:"enabled"`
 	Fields   []struct {
-		Key      string `json:"key"`
-		Label    string `json:"label"`
-		Required bool   `json:"required"`
-		Help     string `json:"help"`
-		HelpURL  string `json:"help_url"`
-	} `json:"fields"`
+		Key      string `json:"key" yaml:"key"`
+		Label    string `json:"label" yaml:"label"`
+		Required bool   `json:"required" yaml:"required"`
+		Help     string `json:"help" yaml:"help"`
+		HelpURL  string `json:"help_url" yaml:"help_url"`
+	} `json:"fields" yaml:"fields"`
 }
 
 // parseFieldFlags turns repeated --field key=value flags into a map.
@@ -554,18 +554,18 @@ is right instead of saving a channel and finding out later.
 // to answer had no answer short of a database shell. A named type is
 // something a test can hold.
 type notifyDeliveryRow struct {
-	ID        string `json:"id"`
-	ChannelID string `json:"channel_id"`
-	UserID    string `json:"user_id"`
-	Category  string `json:"category"`
+	ID        string `json:"id" yaml:"id"`
+	ChannelID string `json:"channel_id" yaml:"channel_id"`
+	UserID    string `json:"user_id" yaml:"user_id"`
+	Category  string `json:"category" yaml:"category"`
 	// Title is the wording the recipient actually saw, message template
 	// included — the log's whole point when someone asks why a notification
 	// said something other than they expected.
-	Title     string `json:"title"`
-	Status    string `json:"status"`
-	Error     string `json:"error"`
-	Attempts  int    `json:"attempts"`
-	CreatedAt string `json:"created_at"`
+	Title     string `json:"title" yaml:"title"`
+	Status    string `json:"status" yaml:"status"`
+	Error     string `json:"error" yaml:"error"`
+	Attempts  int    `json:"attempts" yaml:"attempts"`
+	CreatedAt string `json:"created_at" yaml:"created_at"`
 }
 
 // notifyDeliveryColumns is the rendered table's header, and
@@ -627,7 +627,7 @@ var notifyChannelDeliveriesCmd = &cobra.Command{
 			return err
 		}
 		var body struct {
-			Deliveries []notifyDeliveryRow `json:"deliveries"`
+			Deliveries []notifyDeliveryRow `json:"deliveries" yaml:"deliveries"`
 		}
 		if err := cli.ReadJSON(resp, &body); err != nil {
 			return err
@@ -708,11 +708,11 @@ workspace channel, ownership for a personal one.`,
 }
 
 type notifyChannelAgentRow struct {
-	AgentID   string `json:"agent_id"`
-	AgentName string `json:"agent_name,omitempty"`
-	AgentSlug string `json:"agent_slug,omitempty"`
-	GrantedBy string `json:"granted_by,omitempty"`
-	CreatedAt string `json:"created_at,omitempty"`
+	AgentID   string `json:"agent_id" yaml:"agent_id"`
+	AgentName string `json:"agent_name,omitempty" yaml:"agent_name,omitempty"`
+	AgentSlug string `json:"agent_slug,omitempty" yaml:"agent_slug,omitempty"`
+	GrantedBy string `json:"granted_by,omitempty" yaml:"granted_by,omitempty"`
+	CreatedAt string `json:"created_at,omitempty" yaml:"created_at,omitempty"`
 }
 
 var notifyChannelAgentsListCmd = &cobra.Command{
@@ -735,7 +735,7 @@ var notifyChannelAgentsListCmd = &cobra.Command{
 			return err
 		}
 		var body struct {
-			Agents []notifyChannelAgentRow `json:"agents"`
+			Agents []notifyChannelAgentRow `json:"agents" yaml:"agents"`
 		}
 		if err := cli.ReadJSON(resp, &body); err != nil {
 			return err

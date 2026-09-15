@@ -125,11 +125,11 @@ type issueLabel struct {
 }
 
 type issueComment struct {
-	ID        string  `json:"id"`
-	Body      string  `json:"body"`
-	AuthorID  *string `json:"author_id"`
-	Author    *string `json:"author_name"`
-	CreatedAt string  `json:"created_at"`
+	ID        string  `json:"id" yaml:"id"`
+	Body      string  `json:"body" yaml:"body"`
+	AuthorID  *string `json:"author_id" yaml:"author_id"`
+	Author    *string `json:"author_name" yaml:"author_name"`
+	CreatedAt string  `json:"created_at" yaml:"created_at"`
 }
 
 // labelItem decodes one row of the label surface — GET /api/v1/labels and
@@ -145,10 +145,10 @@ type issueComment struct {
 // absent field is a zero value, and a zero value here reads as "ungrouped":
 // confidently wrong, never an error.
 type labelItem struct {
-	ID    string  `json:"id"`
-	Name  string  `json:"name"`
-	Color string  `json:"color"`
-	Group *string `json:"label_group"`
+	ID    string  `json:"id" yaml:"id"`
+	Name  string  `json:"name" yaml:"name"`
+	Color string  `json:"color" yaml:"color"`
+	Group *string `json:"label_group" yaml:"label_group"`
 }
 
 // ---------- helpers ----------

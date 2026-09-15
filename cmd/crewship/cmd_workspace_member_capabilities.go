@@ -70,9 +70,9 @@ var workspaceMemberCapsListCmd = &cobra.Command{
 			return err
 		}
 		var out struct {
-			UserID       string   `json:"user_id"`
-			Role         string   `json:"role"`
-			Capabilities []string `json:"capabilities"`
+			UserID       string   `json:"user_id" yaml:"user_id"`
+			Role         string   `json:"role" yaml:"role"`
+			Capabilities []string `json:"capabilities" yaml:"capabilities"`
 		}
 		if err := cli.ReadJSON(resp, &out); err != nil {
 			return err
@@ -182,9 +182,9 @@ func patchCapsRaw(userID string, bodyBytes []byte) error {
 		return err
 	}
 	var out struct {
-		UserID       string   `json:"user_id"`
-		Role         string   `json:"role"`
-		Capabilities []string `json:"capabilities"`
+		UserID       string   `json:"user_id" yaml:"user_id"`
+		Role         string   `json:"role" yaml:"role"`
+		Capabilities []string `json:"capabilities" yaml:"capabilities"`
 	}
 	if err := cli.ReadJSON(resp, &out); err != nil {
 		return err

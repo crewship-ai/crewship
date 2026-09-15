@@ -92,13 +92,13 @@ var presenceRosterCmd = &cobra.Command{
 			}
 			var body struct {
 				Rows []struct {
-					AgentID string         `json:"agent_id"`
-					CrewID  string         `json:"crew_id"`
-					Status  string         `json:"status"`
-					Since   string         `json:"since"`
-					Details map[string]any `json:"details"`
-				} `json:"rows"`
-				Count int `json:"count"`
+					AgentID string         `json:"agent_id" yaml:"agent_id"`
+					CrewID  string         `json:"crew_id" yaml:"crew_id"`
+					Status  string         `json:"status" yaml:"status"`
+					Since   string         `json:"since" yaml:"since"`
+					Details map[string]any `json:"details" yaml:"details"`
+				} `json:"rows" yaml:"rows"`
+				Count int `json:"count" yaml:"count"`
 			}
 			if err := cli.ReadJSON(resp, &body); err != nil {
 				return err

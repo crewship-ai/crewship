@@ -103,7 +103,7 @@ var routineStepOverrideListCmd = &cobra.Command{
 			return err
 		}
 		var body struct {
-			Overrides []stepOverrideRow `json:"overrides"`
+			Overrides []stepOverrideRow `json:"overrides" yaml:"overrides"`
 		}
 		if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
 			return fmt.Errorf("decode response: %w", err)

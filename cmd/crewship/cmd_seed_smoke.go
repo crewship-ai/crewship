@@ -65,11 +65,11 @@ func runBackupSelfTest(ctx context.Context, client *cli.Client, target provision
 	}
 
 	var result struct {
-		OK          bool   `json:"ok"`
-		CrewSlug    string `json:"crew_slug"`
-		BundleBytes int    `json:"bundle_bytes"`
-		ElapsedMS   int64  `json:"elapsed_ms"`
-		Error       string `json:"error,omitempty"`
+		OK          bool   `json:"ok" yaml:"ok"`
+		CrewSlug    string `json:"crew_slug" yaml:"crew_slug"`
+		BundleBytes int    `json:"bundle_bytes" yaml:"bundle_bytes"`
+		ElapsedMS   int64  `json:"elapsed_ms" yaml:"elapsed_ms"`
+		Error       string `json:"error,omitempty" yaml:"error,omitempty"`
 	}
 	if err := cli.ReadJSON(resp, &result); err != nil {
 		return fmt.Errorf("backup self-test decode: %w", err)

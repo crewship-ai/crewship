@@ -38,11 +38,11 @@ var agentRunsCmd = &cobra.Command{
 		}
 
 		var runs []struct {
-			ID          string  `json:"id"`
-			Status      string  `json:"status"`
-			TriggerType string  `json:"trigger_type"`
-			CreatedAt   string  `json:"created_at"`
-			FinishedAt  *string `json:"finished_at"`
+			ID          string  `json:"id" yaml:"id"`
+			Status      string  `json:"status" yaml:"status"`
+			TriggerType string  `json:"trigger_type" yaml:"trigger_type"`
+			CreatedAt   string  `json:"created_at" yaml:"created_at"`
+			FinishedAt  *string `json:"finished_at" yaml:"finished_at"`
 		}
 		if err := cli.ReadJSON(resp, &runs); err != nil {
 			return err
@@ -171,11 +171,11 @@ var agentSkillsCmd = &cobra.Command{
 		}
 
 		var skills []struct {
-			ID        string `json:"id"`
-			SkillID   string `json:"skill_id"`
-			SkillName string `json:"skill_name"`
-			Category  string `json:"category"`
-			Enabled   bool   `json:"enabled"`
+			ID        string `json:"id" yaml:"id"`
+			SkillID   string `json:"skill_id" yaml:"skill_id"`
+			SkillName string `json:"skill_name" yaml:"skill_name"`
+			Category  string `json:"category" yaml:"category"`
+			Enabled   bool   `json:"enabled" yaml:"enabled"`
 		}
 		if err := cli.ReadJSON(resp, &skills); err != nil {
 			return err
@@ -226,13 +226,13 @@ Examples:
 		}
 
 		var chats []struct {
-			ID           string  `json:"id"`
-			Title        *string `json:"title"`
-			Status       string  `json:"status"`
-			MessageCount int     `json:"message_count"`
-			StartedAt    string  `json:"started_at"`
-			EndedAt      *string `json:"ended_at"`
-			Origin       *string `json:"origin"`
+			ID           string  `json:"id" yaml:"id"`
+			Title        *string `json:"title" yaml:"title"`
+			Status       string  `json:"status" yaml:"status"`
+			MessageCount int     `json:"message_count" yaml:"message_count"`
+			StartedAt    string  `json:"started_at" yaml:"started_at"`
+			EndedAt      *string `json:"ended_at" yaml:"ended_at"`
+			Origin       *string `json:"origin" yaml:"origin"`
 		}
 		if err := getJSON(client, "/api/v1/agents/"+agentID+"/chats", &chats); err != nil {
 			return err
@@ -287,26 +287,26 @@ var agentCredentialsCmd = &cobra.Command{
 		}
 
 		var creds []struct {
-			ID             string `json:"id"`
-			CredentialID   string `json:"credential_id"`
-			CredentialName string `json:"credential_name"`
-			Provider       string `json:"credential_provider"`
-			Type           string `json:"credential_type"`
-			EnvVarName     string `json:"env_var_name"`
-			ExpiresAt      string `json:"expires_at"`
-			Expired        bool   `json:"expired"`
+			ID             string `json:"id" yaml:"id"`
+			CredentialID   string `json:"credential_id" yaml:"credential_id"`
+			CredentialName string `json:"credential_name" yaml:"credential_name"`
+			Provider       string `json:"credential_provider" yaml:"credential_provider"`
+			Type           string `json:"credential_type" yaml:"credential_type"`
+			EnvVarName     string `json:"env_var_name" yaml:"env_var_name"`
+			ExpiresAt      string `json:"expires_at" yaml:"expires_at"`
+			Expired        bool   `json:"expired" yaml:"expired"`
 			// LeaseSource explains WHY the grant expires (#1373): "manual" (an
 			// operator's `credential assign --ttl`), "keeper_allow" (auto-issued
 			// on a Keeper ALLOW) or "escalation_approve" (auto-issued when a human
 			// approved an agent-proposed credential). Empty on a standing grant
 			// and on pre-v165 leases.
-			LeaseSource string `json:"lease_source,omitempty"`
+			LeaseSource string `json:"lease_source,omitempty" yaml:"lease_source,omitempty"`
 			// GrantSource says WHERE the grant came from: "explicit" (an
 			// assignment an operator made and can revoke by id) or "crew" (the
 			// agent has it by belonging to a crew the credential is linked to,
 			// with no assignment row to revoke). Distinct from LeaseSource,
 			// which explains why a grant EXPIRES.
-			GrantSource string `json:"grant_source,omitempty"`
+			GrantSource string `json:"grant_source,omitempty" yaml:"grant_source,omitempty"`
 		}
 		if err := cli.ReadJSON(resp, &creds); err != nil {
 			return err

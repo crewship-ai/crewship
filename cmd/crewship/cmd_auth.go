@@ -205,12 +205,12 @@ on the roster and in chat.`,
 // bool so a script that times out can tell "still pending" from "the code
 // died" without re-parsing the human error text.
 type authPairResult struct {
-	Code        string `json:"code"`
-	ExpiresAt   string `json:"expires_at"`
-	Status      string `json:"status"`
-	AdapterHint string `json:"adapter_hint,omitempty"`
-	Paired      bool   `json:"paired"`
-	Waited      bool   `json:"waited"`
+	Code        string `json:"code" yaml:"code"`
+	ExpiresAt   string `json:"expires_at" yaml:"expires_at"`
+	Status      string `json:"status" yaml:"status"`
+	AdapterHint string `json:"adapter_hint,omitempty" yaml:"adapter_hint,omitempty"`
+	Paired      bool   `json:"paired" yaml:"paired"`
+	Waited      bool   `json:"waited" yaml:"waited"`
 }
 
 var authPairCmd = &cobra.Command{
@@ -269,8 +269,8 @@ public.`,
 			return err
 		}
 		var started struct {
-			Code      string `json:"code"`
-			ExpiresAt string `json:"expires_at"`
+			Code      string `json:"code" yaml:"code"`
+			ExpiresAt string `json:"expires_at" yaml:"expires_at"`
 		}
 		if err := cli.ReadJSON(resp, &started); err != nil {
 			return err
@@ -351,8 +351,8 @@ func fetchPairStatus(client *cli.Client, code string) (status, adapterHint strin
 		return "", "", err
 	}
 	var poll struct {
-		Status      string `json:"status"`
-		AdapterHint string `json:"adapter_hint"`
+		Status      string `json:"status" yaml:"status"`
+		AdapterHint string `json:"adapter_hint" yaml:"adapter_hint"`
 	}
 	if err := cli.ReadJSON(resp, &poll); err != nil {
 		return "", "", err
@@ -455,10 +455,10 @@ by default, or json/yaml/ndjson for scripts).`,
 		}
 
 		var profile struct {
-			ID        string  `json:"id"`
-			Email     string  `json:"email"`
-			FullName  *string `json:"full_name"`
-			AvatarURL *string `json:"avatar_url"`
+			ID        string  `json:"id" yaml:"id"`
+			Email     string  `json:"email" yaml:"email"`
+			FullName  *string `json:"full_name" yaml:"full_name"`
+			AvatarURL *string `json:"avatar_url" yaml:"avatar_url"`
 		}
 		if err := cli.ReadJSON(resp, &profile); err != nil {
 			return err

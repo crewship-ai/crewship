@@ -58,14 +58,14 @@ Examples:
 // the run response fields plus a captured `Output` so the diff
 // renderer doesn't need a second round-trip to the journal.
 type compareSide struct {
-	Tier         string  `json:"tier"`
-	RunID        string  `json:"run_id"`
-	Status       string  `json:"status"`
-	Output       string  `json:"output"`
-	DurationMs   int64   `json:"duration_ms"`
-	CostUSD      float64 `json:"cost_usd"`
-	FailedAtStep string  `json:"failed_at_step,omitempty"`
-	ErrorMessage string  `json:"error_message,omitempty"`
+	Tier         string  `json:"tier" yaml:"tier"`
+	RunID        string  `json:"run_id" yaml:"run_id"`
+	Status       string  `json:"status" yaml:"status"`
+	Output       string  `json:"output" yaml:"output"`
+	DurationMs   int64   `json:"duration_ms" yaml:"duration_ms"`
+	CostUSD      float64 `json:"cost_usd" yaml:"cost_usd"`
+	FailedAtStep string  `json:"failed_at_step,omitempty" yaml:"failed_at_step,omitempty"`
+	ErrorMessage string  `json:"error_message,omitempty" yaml:"error_message,omitempty"`
 }
 
 func runEvalCompare(cmd *cobra.Command, args []string) error {
@@ -179,7 +179,7 @@ func resolveComparisonVersion(client *cli.Client, ws, slug string, requested int
 				return version, fmt.Errorf("resolve published head: %w", err)
 			}
 			var head struct {
-				Version int `json:"head_version"`
+				Version int `json:"head_version" yaml:"head_version"`
 			}
 			if err := json.NewDecoder(headResponse.Body).Decode(&head); err != nil {
 				return version, fmt.Errorf("decode published head: %w", err)
@@ -234,13 +234,13 @@ func runPinnedComparisonSide(client interface {
 		return compareSide{Tier: tier, Status: fmt.Sprintf("HTTP_%d", resp.StatusCode)}, nil
 	}
 	var result struct {
-		RunID        string  `json:"run_id"`
-		Status       string  `json:"status"`
-		Output       string  `json:"output"`
-		DurationMs   int64   `json:"duration_ms"`
-		CostUSD      float64 `json:"cost_usd"`
-		FailedAtStep string  `json:"failed_at_step"`
-		ErrorMessage string  `json:"error_message"`
+		RunID        string  `json:"run_id" yaml:"run_id"`
+		Status       string  `json:"status" yaml:"status"`
+		Output       string  `json:"output" yaml:"output"`
+		DurationMs   int64   `json:"duration_ms" yaml:"duration_ms"`
+		CostUSD      float64 `json:"cost_usd" yaml:"cost_usd"`
+		FailedAtStep string  `json:"failed_at_step" yaml:"failed_at_step"`
+		ErrorMessage string  `json:"error_message" yaml:"error_message"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return compareSide{Tier: tier, Status: "DECODE_ERROR"}, err

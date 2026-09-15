@@ -26,20 +26,20 @@ import (
 )
 
 type crewCredentialGapOut struct {
-	CredentialID   string `json:"credential_id"`
-	CredentialName string `json:"credential_name"`
-	Provider       string `json:"provider"`
-	Tool           string `json:"tool"`
-	Feature        string `json:"feature"`
-	FeatureID      string `json:"feature_id"`
+	CredentialID   string `json:"credential_id" yaml:"credential_id"`
+	CredentialName string `json:"credential_name" yaml:"credential_name"`
+	Provider       string `json:"provider" yaml:"provider"`
+	Tool           string `json:"tool" yaml:"tool"`
+	Feature        string `json:"feature" yaml:"feature"`
+	FeatureID      string `json:"feature_id" yaml:"feature_id"`
 }
 
 type crewCredentialReadinessOut struct {
-	CrewID   string                 `json:"crew_id"`
-	CrewSlug string                 `json:"crew_slug"`
-	Tools    []string               `json:"tools"`
-	Checked  int                    `json:"checked"`
-	Gaps     []crewCredentialGapOut `json:"gaps"`
+	CrewID   string                 `json:"crew_id" yaml:"crew_id"`
+	CrewSlug string                 `json:"crew_slug" yaml:"crew_slug"`
+	Tools    []string               `json:"tools" yaml:"tools"`
+	Checked  int                    `json:"checked" yaml:"checked"`
+	Gaps     []crewCredentialGapOut `json:"gaps" yaml:"gaps"`
 }
 
 var crewCredentialReadinessCmd = &cobra.Command{

@@ -59,15 +59,15 @@ var exposeListCmd = &cobra.Command{
 		}
 
 		var items []struct {
-			ID            string  `json:"id"`
-			AgentSlug     string  `json:"agent_slug"`
-			ContainerPort int     `json:"container_port"`
-			Description   string  `json:"description,omitempty"`
-			Status        string  `json:"status"`
-			ExpiresAt     string  `json:"expires_at"`
-			RevokedAt     *string `json:"revoked_at,omitempty"`
-			RevokedReason *string `json:"revoked_reason,omitempty"`
-			CreatedAt     string  `json:"created_at"`
+			ID            string  `json:"id" yaml:"id"`
+			AgentSlug     string  `json:"agent_slug" yaml:"agent_slug"`
+			ContainerPort int     `json:"container_port" yaml:"container_port"`
+			Description   string  `json:"description,omitempty" yaml:"description,omitempty"`
+			Status        string  `json:"status" yaml:"status"`
+			ExpiresAt     string  `json:"expires_at" yaml:"expires_at"`
+			RevokedAt     *string `json:"revoked_at,omitempty" yaml:"revoked_at,omitempty"`
+			RevokedReason *string `json:"revoked_reason,omitempty" yaml:"revoked_reason,omitempty"`
+			CreatedAt     string  `json:"created_at" yaml:"created_at"`
 		}
 		if err := cli.ReadJSON(resp, &items); err != nil {
 			return err

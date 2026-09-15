@@ -58,9 +58,9 @@ var promptListCmd = &cobra.Command{
 			return err
 		}
 		type row struct {
-			Name string `json:"name"`
-			Size int64  `json:"size_bytes"`
-			Time string `json:"modified"`
+			Name string `json:"name" yaml:"name"`
+			Size int64  `json:"size_bytes" yaml:"size_bytes"`
+			Time string `json:"modified" yaml:"modified"`
 		}
 		var rows []row
 		for _, e := range entries {

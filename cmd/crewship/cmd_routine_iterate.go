@@ -39,19 +39,19 @@ import (
 
 // iterateScore is a grader verdict for one round.
 type iterateScore struct {
-	Score    int    `json:"score"`
-	Feedback string `json:"feedback"`
+	Score    int    `json:"score" yaml:"score"`
+	Feedback string `json:"feedback" yaml:"feedback"`
 }
 
 // iterateRound is one row of the final summary.
 type iterateRound struct {
-	Round        int     `json:"round"`
-	RunID        string  `json:"run_id"`
-	RunStatus    string  `json:"run_status"`
-	Score        int     `json:"score"`
-	Feedback     string  `json:"feedback,omitempty"`
-	CostUSD      float64 `json:"cost_usd"`
-	SavedVersion bool    `json:"saved_new_version"`
+	Round        int     `json:"round" yaml:"round"`
+	RunID        string  `json:"run_id" yaml:"run_id"`
+	RunStatus    string  `json:"run_status" yaml:"run_status"`
+	Score        int     `json:"score" yaml:"score"`
+	Feedback     string  `json:"feedback,omitempty" yaml:"feedback,omitempty"`
+	CostUSD      float64 `json:"cost_usd" yaml:"cost_usd"`
+	SavedVersion bool    `json:"saved_new_version" yaml:"saved_new_version"`
 }
 
 var routineIterateCmd = &cobra.Command{
@@ -345,11 +345,11 @@ func runIterateRounds(client *cli.Client, ws, slug string, p iterateLoopParams, 
 
 // iterateRunResult is the subset of the synchronous run response iterate needs.
 type iterateRunResult struct {
-	RunID        string  `json:"run_id"`
-	Status       string  `json:"status"`
-	Output       string  `json:"output"`
-	ErrorMessage string  `json:"error_message"`
-	CostUSD      float64 `json:"cost_usd"`
+	RunID        string  `json:"run_id" yaml:"run_id"`
+	Status       string  `json:"status" yaml:"status"`
+	Output       string  `json:"output" yaml:"output"`
+	ErrorMessage string  `json:"error_message" yaml:"error_message"`
+	CostUSD      float64 `json:"cost_usd" yaml:"cost_usd"`
 }
 
 func iterateRunRoutine(client *cli.Client, ws, slug string, inputs map[string]any, timeout time.Duration) (*iterateRunResult, error) {
@@ -372,11 +372,11 @@ func iterateRunRoutine(client *cli.Client, ws, slug string, inputs map[string]an
 // iterateBundle is the subset of the export bundle iterate consumes.
 type iterateBundle struct {
 	Pipeline struct {
-		Slug        string          `json:"slug"`
-		Name        string          `json:"name"`
-		Description string          `json:"description"`
-		Definition  json.RawMessage `json:"definition"`
-	} `json:"pipeline"`
+		Slug        string          `json:"slug" yaml:"slug"`
+		Name        string          `json:"name" yaml:"name"`
+		Description string          `json:"description" yaml:"description"`
+		Definition  json.RawMessage `json:"definition" yaml:"definition"`
+	} `json:"pipeline" yaml:"pipeline"`
 }
 
 func iterateFetchBundle(client *cli.Client, ws, slug string) (*iterateBundle, error) {
@@ -401,10 +401,10 @@ func iterateFetchBundle(client *cli.Client, ws, slug string) (*iterateBundle, er
 // iterateSaveResult is the save response subset iterate needs (status tells
 // us whether governance parked the version as 'proposed').
 type iterateSaveResult struct {
-	Slug           string `json:"slug"`
-	ID             string `json:"id"`
-	DefinitionHash string `json:"definition_hash"`
-	Status         string `json:"status"`
+	Slug           string `json:"slug" yaml:"slug"`
+	ID             string `json:"id" yaml:"id"`
+	DefinitionHash string `json:"definition_hash" yaml:"definition_hash"`
+	Status         string `json:"status" yaml:"status"`
 }
 
 // iterateSaveDefinition mirrors `routine save`'s two-step test_run→save
@@ -422,9 +422,9 @@ func iterateSaveDefinition(client *cli.Client, ws, slug, name, description, auth
 		return nil, err
 	}
 	var testResult struct {
-		Status    string `json:"status"`
-		SaveToken string `json:"save_token"`
-		Error     string `json:"error_message"`
+		Status    string `json:"status" yaml:"status"`
+		SaveToken string `json:"save_token" yaml:"save_token"`
+		Error     string `json:"error_message" yaml:"error_message"`
 	}
 	if err := json.NewDecoder(testResp.Body).Decode(&testResult); err != nil {
 		return nil, fmt.Errorf("decode test_run response: %w", err)
@@ -478,7 +478,7 @@ func askAgentText(client *cli.Client, agentID, prompt string, maxTurns int, time
 		return "", err
 	}
 	var chat struct {
-		ID string `json:"id"`
+		ID string `json:"id" yaml:"id"`
 	}
 	if err := json.NewDecoder(chatResp.Body).Decode(&chat); err != nil {
 		return "", fmt.Errorf("decode chat: %w", err)
@@ -549,8 +549,8 @@ func parseGraderScore(text string) (iterateScore, error) {
 		return iterateScore{}, err
 	}
 	var verdict struct {
-		Score    *float64 `json:"score"`
-		Feedback string   `json:"feedback"`
+		Score    *float64 `json:"score" yaml:"score"`
+		Feedback string   `json:"feedback" yaml:"feedback"`
 	}
 	if err := json.Unmarshal(raw, &verdict); err != nil {
 		return iterateScore{}, fmt.Errorf("parse verdict JSON: %w", err)
@@ -730,9 +730,9 @@ func validateNoNewCapabilities(oldDef, newDef []byte) error {
 func definitionCapabilities(def []byte) (map[string]struct{}, map[string]struct{}, error) {
 	var d struct {
 		Steps []struct {
-			Type          string   `json:"type"`
-			EgressTargets []string `json:"egress_targets"`
-		} `json:"steps"`
+			Type          string   `json:"type" yaml:"type"`
+			EgressTargets []string `json:"egress_targets" yaml:"egress_targets"`
+		} `json:"steps" yaml:"steps"`
 	}
 	if err := json.Unmarshal(def, &d); err != nil {
 		return nil, nil, err

@@ -128,7 +128,7 @@ here. For the finer per-run trace (LLM calls, exec, egress) use ` + "`crewship j
 		}
 
 		var body struct {
-			Entries []ActivityRow `json:"entries"`
+			Entries []ActivityRow `json:"entries" yaml:"entries"`
 		}
 		if err := cli.ReadJSON(resp, &body); err != nil {
 			return err

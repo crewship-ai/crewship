@@ -121,7 +121,7 @@ Examples:
 		}
 
 		var result struct {
-			AvatarURL string `json:"avatar_url"`
+			AvatarURL string `json:"avatar_url" yaml:"avatar_url"`
 		}
 		if err := putJSON(client, "/api/v1/agents/"+url.PathEscape(agentID)+"/avatar",
 			map[string]any{"svg": string(svg)}, &result); err != nil {

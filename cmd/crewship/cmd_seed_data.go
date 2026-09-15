@@ -276,8 +276,8 @@ func seedSkills(ctx context.Context, client *cli.Client, agentIDs map[string]str
 	resp, err := client.Get("/api/v1/skills")
 	if err == nil {
 		var existing []struct {
-			ID   string `json:"id"`
-			Slug string `json:"slug"`
+			ID   string `json:"id" yaml:"id"`
+			Slug string `json:"slug" yaml:"slug"`
 		}
 		if cli.ReadJSON(resp, &existing) == nil {
 			for _, s := range existing {
@@ -310,8 +310,8 @@ func seedSkills(ctx context.Context, client *cli.Client, agentIDs map[string]str
 			continue
 		}
 		var created struct {
-			SkillID string `json:"skill_id"`
-			Slug    string `json:"slug"`
+			SkillID string `json:"skill_id" yaml:"skill_id"`
+			Slug    string `json:"slug" yaml:"slug"`
 		}
 		if cli.ReadJSON(resp, &created) == nil {
 			skillIDs[s.Slug] = created.SkillID
@@ -547,7 +547,7 @@ func seedScopedCredential(client *cli.Client, cred seeddata.CredentialDef, crewI
 		return "", err
 	}
 	var created struct {
-		ID string `json:"id"`
+		ID string `json:"id" yaml:"id"`
 	}
 	if err := cli.ReadJSON(resp, &created); err != nil {
 		return "", err
@@ -715,7 +715,7 @@ func seedOneDemoCredential(client *cli.Client, dc seeddata.DemoCredential) (stri
 		return "", err
 	}
 	var created struct {
-		ID string `json:"id"`
+		ID string `json:"id" yaml:"id"`
 	}
 	if err := cli.ReadJSON(resp, &created); err != nil {
 		return "", err

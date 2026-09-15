@@ -108,7 +108,7 @@ func fetchInspectEntries(client *cli.Client, agentID string, from time.Time, typ
 		"entry_type", types,
 	)
 	var body struct {
-		Entries []map[string]any `json:"entries"`
+		Entries []map[string]any `json:"entries" yaml:"entries"`
 	}
 	if err := getJSON(client, path, &body); err != nil {
 		return nil, err

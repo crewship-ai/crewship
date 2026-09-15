@@ -70,9 +70,9 @@ func checkEpisodicRecallMode(ctx context.Context, serverURL string) checkResult 
 	}
 
 	var body struct {
-		Episodic string `json:"episodic"`
+		Episodic string `json:"episodic" yaml:"episodic"`
 		// Only present when the server has something wrong to report.
-		EpisodicError string `json:"episodic_error"`
+		EpisodicError string `json:"episodic_error" yaml:"episodic_error"`
 	}
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&body); err != nil {
 		return checkResult{

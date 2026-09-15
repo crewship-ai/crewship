@@ -13,14 +13,14 @@ import (
 // featureFlagResponse). Decoded into a CLI-only struct so we don't drag
 // the internal/api package into cmd/crewship.
 type featureFlagItem struct {
-	ID              string  `json:"id"`
-	Key             string  `json:"key"`
-	Description     *string `json:"description"`
-	Enabled         bool    `json:"enabled"`
-	Percentage      int     `json:"percentage"`
-	CreatedAt       string  `json:"created_at"`
-	UpdatedAt       string  `json:"updated_at"`
-	OverrideEnabled *bool   `json:"override_enabled,omitempty"`
+	ID              string  `json:"id" yaml:"id"`
+	Key             string  `json:"key" yaml:"key"`
+	Description     *string `json:"description" yaml:"description"`
+	Enabled         bool    `json:"enabled" yaml:"enabled"`
+	Percentage      int     `json:"percentage" yaml:"percentage"`
+	CreatedAt       string  `json:"created_at" yaml:"created_at"`
+	UpdatedAt       string  `json:"updated_at" yaml:"updated_at"`
+	OverrideEnabled *bool   `json:"override_enabled,omitempty" yaml:"override_enabled,omitempty"`
 }
 
 var featureFlagCmd = &cobra.Command{

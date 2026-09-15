@@ -440,9 +440,9 @@ belong to --author-crew.`,
 			return err
 		}
 		var testResult struct {
-			Status    string `json:"status"`
-			SaveToken string `json:"save_token"`
-			Error     string `json:"error_message"`
+			Status    string `json:"status" yaml:"status"`
+			SaveToken string `json:"save_token" yaml:"save_token"`
+			Error     string `json:"error_message" yaml:"error_message"`
 		}
 		if err := json.NewDecoder(testResp.Body).Decode(&testResult); err != nil {
 			return fmt.Errorf("decode test_run response: %w", err)
@@ -590,14 +590,14 @@ var pipelineRunCmd = &cobra.Command{
 				return err
 			}
 			var br struct {
-				BatchID string `json:"batch_id"`
-				Count   int    `json:"count"`
+				BatchID string `json:"batch_id" yaml:"batch_id"`
+				Count   int    `json:"count" yaml:"count"`
 				Results []struct {
-					Index  int    `json:"index"`
-					RunID  string `json:"run_id"`
-					Status string `json:"status"`
-					Error  string `json:"error"`
-				} `json:"results"`
+					Index  int    `json:"index" yaml:"index"`
+					RunID  string `json:"run_id" yaml:"run_id"`
+					Status string `json:"status" yaml:"status"`
+					Error  string `json:"error" yaml:"error"`
+				} `json:"results" yaml:"results"`
 			}
 			if err := json.NewDecoder(resp.Body).Decode(&br); err != nil {
 				return fmt.Errorf("decode batch response: %w", err)
@@ -680,20 +680,20 @@ var pipelineRunCmd = &cobra.Command{
 		// terminal user, not us — we just label COMPLETED / FAILED
 		// / DRY_RUN_OK + show output + show step outputs map.
 		var result struct {
-			RunID          string            `json:"run_id"`
-			Status         string            `json:"status"`
-			Output         string            `json:"output"`
-			StepOutputs    map[string]string `json:"step_outputs"`
-			DurationMs     int64             `json:"duration_ms"`
-			CostUSD        float64           `json:"cost_usd"`
-			FailedAtStep   string            `json:"failed_at_step"`
-			ErrorMessage   string            `json:"error_message"`
-			WaitpointToken string            `json:"waitpoint_token"`
-			CurrentStep    string            `json:"current_step"`
+			RunID          string            `json:"run_id" yaml:"run_id"`
+			Status         string            `json:"status" yaml:"status"`
+			Output         string            `json:"output" yaml:"output"`
+			StepOutputs    map[string]string `json:"step_outputs" yaml:"step_outputs"`
+			DurationMs     int64             `json:"duration_ms" yaml:"duration_ms"`
+			CostUSD        float64           `json:"cost_usd" yaml:"cost_usd"`
+			FailedAtStep   string            `json:"failed_at_step" yaml:"failed_at_step"`
+			ErrorMessage   string            `json:"error_message" yaml:"error_message"`
+			WaitpointToken string            `json:"waitpoint_token" yaml:"waitpoint_token"`
+			CurrentStep    string            `json:"current_step" yaml:"current_step"`
 			// Deferred-dispatch receipt (delay/debounce path).
-			PendingID string `json:"pending_id"`
-			FireAt    string `json:"fire_at"`
-			Coalesced bool   `json:"coalesced"`
+			PendingID string `json:"pending_id" yaml:"pending_id"`
+			FireAt    string `json:"fire_at" yaml:"fire_at"`
+			Coalesced bool   `json:"coalesced" yaml:"coalesced"`
 		}
 		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 			return fmt.Errorf("decode run response: %w", err)

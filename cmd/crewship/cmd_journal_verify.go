@@ -13,43 +13,43 @@ import (
 // re-serialise THIS struct, so a field missing here is a field the harness
 // never sees.
 type journalVerifyResponse struct {
-	WorkspaceID string              `json:"workspace_id"`
-	OK          bool                `json:"ok"`
-	Count       int                 `json:"count"`
-	Checkpoints int                 `json:"checkpoints"`
-	BrokenSeq   int64               `json:"broken_seq"`
-	BrokenID    string              `json:"broken_id"`
-	Reason      string              `json:"reason"`
-	Breaks      []journalChainBreak `json:"breaks,omitempty"`
+	WorkspaceID string              `json:"workspace_id" yaml:"workspace_id"`
+	OK          bool                `json:"ok" yaml:"ok"`
+	Count       int                 `json:"count" yaml:"count"`
+	Checkpoints int                 `json:"checkpoints" yaml:"checkpoints"`
+	BrokenSeq   int64               `json:"broken_seq" yaml:"broken_seq"`
+	BrokenID    string              `json:"broken_id" yaml:"broken_id"`
+	Reason      string              `json:"reason" yaml:"reason"`
+	Breaks      []journalChainBreak `json:"breaks,omitempty" yaml:"breaks,omitempty"`
 	// omitempty so an OLDER server — which sends none of these — yields
 	// byte-identical JSON to before. Without it the CLI would assert
 	// "break_count: 0", i.e. "no further breaks", when the truth is
 	// "this server never told us".
-	BreakCount      int  `json:"break_count,omitempty"`
-	BreaksTruncated bool `json:"breaks_truncated,omitempty"`
+	BreakCount      int  `json:"break_count,omitempty" yaml:"break_count,omitempty"`
+	BreaksTruncated bool `json:"breaks_truncated,omitempty" yaml:"breaks_truncated,omitempty"`
 	// #1572: the server has always sent these; the CLI dropped them on the
 	// floor. A repairable row is one whose CONTENT the keyed hash proves
 	// authentic but whose priority column the record cannot account for —
 	// indistinguishable from an attacker downgrading a `permanent` entry so
 	// compaction removes it. Decoding them is half the fix; the exit code is
 	// the other half.
-	Repairable          []journalRepairableEntry `json:"repairable,omitempty"`
-	RepairableCount     int                      `json:"repairable_count,omitempty"`
-	RepairableTruncated bool                     `json:"repairable_truncated,omitempty"`
+	Repairable          []journalRepairableEntry `json:"repairable,omitempty" yaml:"repairable,omitempty"`
+	RepairableCount     int                      `json:"repairable_count,omitempty" yaml:"repairable_count,omitempty"`
+	RepairableTruncated bool                     `json:"repairable_truncated,omitempty" yaml:"repairable_truncated,omitempty"`
 }
 
 type journalChainBreak struct {
-	Seq    int64  `json:"seq"`
-	ID     string `json:"id"`
-	Kind   string `json:"kind"`
-	Reason string `json:"reason"`
+	Seq    int64  `json:"seq" yaml:"seq"`
+	ID     string `json:"id" yaml:"id"`
+	Kind   string `json:"kind" yaml:"kind"`
+	Reason string `json:"reason" yaml:"reason"`
 }
 
 type journalRepairableEntry struct {
-	Seq            int64  `json:"seq"`
-	ID             string `json:"id"`
-	StoredPriority string `json:"stored_priority"`
-	EmitPriority   string `json:"emit_priority"`
+	Seq            int64  `json:"seq" yaml:"seq"`
+	ID             string `json:"id" yaml:"id"`
+	StoredPriority string `json:"stored_priority" yaml:"stored_priority"`
+	EmitPriority   string `json:"emit_priority" yaml:"emit_priority"`
 }
 
 // repairableTotal prefers the server's count and falls back to the length of

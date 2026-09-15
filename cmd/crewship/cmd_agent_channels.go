@@ -54,11 +54,11 @@ and of what kind, never where it points. To grant or revoke:
 		}
 		var body struct {
 			Channels []struct {
-				ID       string `json:"id"`
-				Type     string `json:"type"`
-				Provider string `json:"provider"`
-				Enabled  bool   `json:"enabled"`
-			} `json:"channels"`
+				ID       string `json:"id" yaml:"id"`
+				Type     string `json:"type" yaml:"type"`
+				Provider string `json:"provider" yaml:"provider"`
+				Enabled  bool   `json:"enabled" yaml:"enabled"`
+			} `json:"channels" yaml:"channels"`
 		}
 		if err := cli.ReadJSON(resp, &body); err != nil {
 			return err

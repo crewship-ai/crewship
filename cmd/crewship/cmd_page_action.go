@@ -40,47 +40,47 @@ import (
 
 // pageActionJSON is one declared action as `GET …/actions` serves it.
 type pageActionJSON struct {
-	ID      string                `json:"id"`
-	Kind    string                `json:"kind"`
-	Label   string                `json:"label"`
-	Style   string                `json:"style"`
-	Routine string                `json:"routine"`
-	Confirm *pageActionConfirmSON `json:"confirm"`
-	Inputs  []pageActionInputJSON `json:"inputs"`
-	Target  []string              `json:"target"`
-	Ref     *pageActionRefJSON    `json:"ref"`
+	ID      string                `json:"id" yaml:"id"`
+	Kind    string                `json:"kind" yaml:"kind"`
+	Label   string                `json:"label" yaml:"label"`
+	Style   string                `json:"style" yaml:"style"`
+	Routine string                `json:"routine" yaml:"routine"`
+	Confirm *pageActionConfirmSON `json:"confirm" yaml:"confirm"`
+	Inputs  []pageActionInputJSON `json:"inputs" yaml:"inputs"`
+	Target  []string              `json:"target" yaml:"target"`
+	Ref     *pageActionRefJSON    `json:"ref" yaml:"ref"`
 }
 
 type pageActionConfirmSON struct {
-	Title string `json:"title"`
-	Body  string `json:"body"`
+	Title string `json:"title" yaml:"title"`
+	Body  string `json:"body" yaml:"body"`
 }
 
 type pageActionInputJSON struct {
-	Name     string   `json:"name"`
-	Label    string   `json:"label"`
-	Type     string   `json:"type"`
-	Required bool     `json:"required"`
-	Default  string   `json:"default"`
-	Options  []string `json:"options"`
+	Name     string   `json:"name" yaml:"name"`
+	Label    string   `json:"label" yaml:"label"`
+	Type     string   `json:"type" yaml:"type"`
+	Required bool     `json:"required" yaml:"required"`
+	Default  string   `json:"default" yaml:"default"`
+	Options  []string `json:"options" yaml:"options"`
 }
 
 type pageActionRefJSON struct {
-	Kind string `json:"kind"`
-	ID   string `json:"id"`
+	Kind string `json:"kind" yaml:"kind"`
+	ID   string `json:"id" yaml:"id"`
 }
 
 // pageActionDispatchJSON is the 202 receipt.
 type pageActionDispatchJSON struct {
-	Status    string `json:"status"`
-	PendingID string `json:"pending_id"`
-	FireAt    string `json:"fire_at"`
-	Deduped   bool   `json:"deduped"`
-	Coalesced bool   `json:"coalesced"`
-	Page      string `json:"page"`
-	Panel     string `json:"panel"`
-	Action    string `json:"action"`
-	Routine   string `json:"routine"`
+	Status    string `json:"status" yaml:"status"`
+	PendingID string `json:"pending_id" yaml:"pending_id"`
+	FireAt    string `json:"fire_at" yaml:"fire_at"`
+	Deduped   bool   `json:"deduped" yaml:"deduped"`
+	Coalesced bool   `json:"coalesced" yaml:"coalesced"`
+	Page      string `json:"page" yaml:"page"`
+	Panel     string `json:"panel" yaml:"panel"`
+	Action    string `json:"action" yaml:"action"`
+	Routine   string `json:"routine" yaml:"routine"`
 }
 
 // ── actions (list) ─────────────────────────────────────────────────────────
@@ -125,7 +125,7 @@ handler built into the web client.`,
 			return pageEmitMachine(f, body, "{}")
 		}
 		var doc struct {
-			Actions []pageActionJSON `json:"actions"`
+			Actions []pageActionJSON `json:"actions" yaml:"actions"`
 		}
 		if err := json.Unmarshal(body, &doc); err != nil {
 			return fmt.Errorf("decode response: %w", err)

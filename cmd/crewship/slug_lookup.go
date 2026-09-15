@@ -68,14 +68,14 @@ func fetchWorkspaceSlugs(client *cli.Client) workspaceSlugs {
 	}
 	var body struct {
 		Agents []struct {
-			ID   string `json:"id"`
-			Slug string `json:"slug"`
-		} `json:"agents"`
+			ID   string `json:"id" yaml:"id"`
+			Slug string `json:"slug" yaml:"slug"`
+		} `json:"agents" yaml:"agents"`
 		Crews []struct {
-			ID   string `json:"id"`
-			Slug string `json:"slug"`
-			Name string `json:"name"`
-		} `json:"crews"`
+			ID   string `json:"id" yaml:"id"`
+			Slug string `json:"slug" yaml:"slug"`
+			Name string `json:"name" yaml:"name"`
+		} `json:"crews" yaml:"crews"`
 	}
 	if err := cli.ReadJSON(resp, &body); err != nil {
 		return out

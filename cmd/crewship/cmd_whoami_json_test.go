@@ -19,10 +19,10 @@ import (
 func TestEmitWhoamiJSON_HappyPath_ActiveWorkspaceFound(t *testing.T) {
 	t.Parallel()
 	rows := []struct {
-		ID   string `json:"id"`
-		Name string `json:"name"`
-		Slug string `json:"slug"`
-		Role string `json:"currentUserRole"`
+		ID   string `json:"id" yaml:"id"`
+		Name string `json:"name" yaml:"name"`
+		Slug string `json:"slug" yaml:"slug"`
+		Role string `json:"currentUserRole" yaml:"currentUserRole"`
 	}{
 		{ID: "w_a", Name: "Engineering", Slug: "eng", Role: "OWNER"},
 		{ID: "w_b", Name: "Marketing", Slug: "mkt", Role: "MEMBER"},
@@ -61,10 +61,10 @@ func TestEmitWhoamiJSON_HappyPath_ActiveWorkspaceFound(t *testing.T) {
 func TestEmitWhoamiJSON_ActiveWorkspaceMissing(t *testing.T) {
 	t.Parallel()
 	rows := []struct {
-		ID   string `json:"id"`
-		Name string `json:"name"`
-		Slug string `json:"slug"`
-		Role string `json:"currentUserRole"`
+		ID   string `json:"id" yaml:"id"`
+		Name string `json:"name" yaml:"name"`
+		Slug string `json:"slug" yaml:"slug"`
+		Role string `json:"currentUserRole" yaml:"currentUserRole"`
 	}{
 		{ID: "w_a", Name: "Engineering", Slug: "eng", Role: "OWNER"},
 	}
@@ -89,10 +89,10 @@ func TestEmitWhoamiJSON_ActiveWorkspaceMissing(t *testing.T) {
 func TestEmitWhoamiJSON_NoActiveWorkspace(t *testing.T) {
 	t.Parallel()
 	rows := []struct {
-		ID   string `json:"id"`
-		Name string `json:"name"`
-		Slug string `json:"slug"`
-		Role string `json:"currentUserRole"`
+		ID   string `json:"id" yaml:"id"`
+		Name string `json:"name" yaml:"name"`
+		Slug string `json:"slug" yaml:"slug"`
+		Role string `json:"currentUserRole" yaml:"currentUserRole"`
 	}{
 		{ID: "w_a", Name: "Engineering", Slug: "eng", Role: "OWNER"},
 		{ID: "w_b", Name: "Marketing", Slug: "mkt", Role: "MEMBER"},
@@ -119,10 +119,10 @@ func TestEmitWhoamiJSON_NoActiveWorkspace(t *testing.T) {
 func TestEmitWhoamiJSON_OmitsEmptyUserEmail(t *testing.T) {
 	t.Parallel()
 	rows := []struct {
-		ID   string `json:"id"`
-		Name string `json:"name"`
-		Slug string `json:"slug"`
-		Role string `json:"currentUserRole"`
+		ID   string `json:"id" yaml:"id"`
+		Name string `json:"name" yaml:"name"`
+		Slug string `json:"slug" yaml:"slug"`
+		Role string `json:"currentUserRole" yaml:"currentUserRole"`
 	}{}
 	buf := &bytes.Buffer{}
 	if err := emitWhoamiJSON(buf, "", "https://x", "", rows); err != nil {
@@ -139,10 +139,10 @@ func TestEmitWhoamiJSON_OmitsEmptyUserEmail(t *testing.T) {
 func TestEmitWhoamiJSON_ActiveWorkspaceByID(t *testing.T) {
 	t.Parallel()
 	rows := []struct {
-		ID   string `json:"id"`
-		Name string `json:"name"`
-		Slug string `json:"slug"`
-		Role string `json:"currentUserRole"`
+		ID   string `json:"id" yaml:"id"`
+		Name string `json:"name" yaml:"name"`
+		Slug string `json:"slug" yaml:"slug"`
+		Role string `json:"currentUserRole" yaml:"currentUserRole"`
 	}{
 		{ID: "w_xyz", Name: "Engineering", Slug: "eng", Role: "OWNER"},
 	}

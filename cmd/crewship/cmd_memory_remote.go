@@ -57,9 +57,9 @@ Examples:
 			return err
 		}
 		var out struct {
-			Query string           `json:"query"`
-			Count int              `json:"count"`
-			Hits  []map[string]any `json:"hits"`
+			Query string           `json:"query" yaml:"query"`
+			Count int              `json:"count" yaml:"count"`
+			Hits  []map[string]any `json:"hits" yaml:"hits"`
 		}
 		if err := cli.ReadJSON(resp, &out); err != nil {
 			return err
@@ -104,8 +104,8 @@ reach the API. The workspace comes from the auth context.`,
 // through verbatim rather than paraphrased here: the two would drift apart the
 // first time either changed, and the server is the side that knows why.
 type memoryProjection struct {
-	State  string `json:"state"`
-	Reason string `json:"reason"`
+	State  string `json:"state" yaml:"state"`
+	Reason string `json:"reason" yaml:"reason"`
 }
 
 const (
@@ -200,14 +200,14 @@ Examples:
 			return err
 		}
 		var out struct {
-			Path  string `json:"path"`
-			Count int    `json:"count"`
+			Path  string `json:"path" yaml:"path"`
+			Count int    `json:"count" yaml:"count"`
 			// Projection must be on this struct and not read ad hoc: f.Auto
 			// re-marshals `out` for --format json/yaml/ndjson, so a field
 			// missing here is a field missing from the machine output an
 			// agent reads. Dropping it was the defect.
-			Projection memoryProjection `json:"projection"`
-			Entries    []map[string]any `json:"entries"`
+			Projection memoryProjection `json:"projection" yaml:"projection"`
+			Entries    []map[string]any `json:"entries" yaml:"entries"`
 		}
 		if err := cli.ReadJSON(resp, &out); err != nil {
 			return err

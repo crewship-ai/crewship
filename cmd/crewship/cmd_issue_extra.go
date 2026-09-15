@@ -41,13 +41,13 @@ var issueCommentsCmd = &cobra.Command{
 		}
 
 		var comments []struct {
-			ID         string `json:"id"`
-			MissionID  string `json:"mission_id"`
-			AuthorType string `json:"author_type"`
-			AuthorID   string `json:"author_id"`
-			AuthorName string `json:"author_name"`
-			Body       string `json:"body"`
-			CreatedAt  string `json:"created_at"`
+			ID         string `json:"id" yaml:"id"`
+			MissionID  string `json:"mission_id" yaml:"mission_id"`
+			AuthorType string `json:"author_type" yaml:"author_type"`
+			AuthorID   string `json:"author_id" yaml:"author_id"`
+			AuthorName string `json:"author_name" yaml:"author_name"`
+			Body       string `json:"body" yaml:"body"`
+			CreatedAt  string `json:"created_at" yaml:"created_at"`
 		}
 		if err := cli.ReadJSON(resp, &comments); err != nil {
 			return err
@@ -156,14 +156,14 @@ var issueRelationsCmd = &cobra.Command{
 		}
 
 		var rels []struct {
-			ID               string `json:"id"`
-			SourceID         string `json:"source_id"`
-			TargetID         string `json:"target_id"`
-			RelationType     string `json:"relation_type"`
-			TargetIdentifier string `json:"target_identifier"`
-			TargetTitle      string `json:"target_title"`
-			TargetStatus     string `json:"target_status"`
-			CreatedAt        string `json:"created_at"`
+			ID               string `json:"id" yaml:"id"`
+			SourceID         string `json:"source_id" yaml:"source_id"`
+			TargetID         string `json:"target_id" yaml:"target_id"`
+			RelationType     string `json:"relation_type" yaml:"relation_type"`
+			TargetIdentifier string `json:"target_identifier" yaml:"target_identifier"`
+			TargetTitle      string `json:"target_title" yaml:"target_title"`
+			TargetStatus     string `json:"target_status" yaml:"target_status"`
+			CreatedAt        string `json:"created_at" yaml:"created_at"`
 		}
 		if err := cli.ReadJSON(resp, &rels); err != nil {
 			return err
@@ -226,7 +226,7 @@ func resolveRoutineID(client *cli.Client, slug string) (string, error) {
 		return "", fmt.Errorf("routine %q: %w", slug, err)
 	}
 	var p struct {
-		ID string `json:"id"`
+		ID string `json:"id" yaml:"id"`
 	}
 	if err := cli.ReadJSON(resp, &p); err != nil {
 		return "", err
@@ -396,12 +396,12 @@ var issueActivityCmd = &cobra.Command{
 			return err
 		}
 		var events []struct {
-			ID        string  `json:"id"`
-			ActorType string  `json:"actor_type"`
-			ActorName *string `json:"actor_name"`
-			Action    string  `json:"action"`
-			Details   *string `json:"details"`
-			CreatedAt string  `json:"created_at"`
+			ID        string  `json:"id" yaml:"id"`
+			ActorType string  `json:"actor_type" yaml:"actor_type"`
+			ActorName *string `json:"actor_name" yaml:"actor_name"`
+			Action    string  `json:"action" yaml:"action"`
+			Details   *string `json:"details" yaml:"details"`
+			CreatedAt string  `json:"created_at" yaml:"created_at"`
 		}
 		if err := cli.ReadJSON(resp, &events); err != nil {
 			return err
@@ -425,18 +425,18 @@ var issueActivityCmd = &cobra.Command{
 // issueEventDTO mirrors one row of issueEventsResponse.Events
 // (internal/api/issue_events_list.go).
 type issueEventDTO struct {
-	Seq       int     `json:"seq"`
-	ActorType string  `json:"actor_type"`
-	ActorName *string `json:"actor_name"`
-	Action    string  `json:"action"`
-	Details   *string `json:"details"`
-	CreatedAt string  `json:"created_at"`
+	Seq       int     `json:"seq" yaml:"seq"`
+	ActorType string  `json:"actor_type" yaml:"actor_type"`
+	ActorName *string `json:"actor_name" yaml:"actor_name"`
+	Action    string  `json:"action" yaml:"action"`
+	Details   *string `json:"details" yaml:"details"`
+	CreatedAt string  `json:"created_at" yaml:"created_at"`
 }
 
 type issueEventsPageDTO struct {
-	Events    []issueEventDTO `json:"events"`
-	AfterSeq  int             `json:"after_seq"`
-	LatestSeq int             `json:"latest_seq"`
+	Events    []issueEventDTO `json:"events" yaml:"events"`
+	AfterSeq  int             `json:"after_seq" yaml:"after_seq"`
+	LatestSeq int             `json:"latest_seq" yaml:"latest_seq"`
 }
 
 // maxIssueEventsCLIPages bounds how many 500-row server pages `issue
@@ -591,36 +591,36 @@ var issueRunsCmd = &cobra.Command{
 		}
 		meta := readListMeta(resp)
 		var runs []struct {
-			ID            string `json:"id"`
-			RunID         string `json:"run_id"`
-			TraceID       string `json:"trace_id"`
-			Status        string `json:"status"`
-			AgentID       string `json:"agent_id"`
-			AgentSlug     string `json:"agent_slug"`
-			AgentName     string `json:"agent_name"`
-			Task          string `json:"task"`
-			StartedAt     string `json:"started_at"`
-			DurationMs    int64  `json:"duration_ms"`
-			ResultSummary string `json:"result_summary"`
-			ErrorMessage  string `json:"error_message"`
+			ID            string `json:"id" yaml:"id"`
+			RunID         string `json:"run_id" yaml:"run_id"`
+			TraceID       string `json:"trace_id" yaml:"trace_id"`
+			Status        string `json:"status" yaml:"status"`
+			AgentID       string `json:"agent_id" yaml:"agent_id"`
+			AgentSlug     string `json:"agent_slug" yaml:"agent_slug"`
+			AgentName     string `json:"agent_name" yaml:"agent_name"`
+			Task          string `json:"task" yaml:"task"`
+			StartedAt     string `json:"started_at" yaml:"started_at"`
+			DurationMs    int64  `json:"duration_ms" yaml:"duration_ms"`
+			ResultSummary string `json:"result_summary" yaml:"result_summary"`
+			ErrorMessage  string `json:"error_message" yaml:"error_message"`
 			// MissionID and Source (#2313, item 3) mirror issueRunDTO
 			// (internal/api/issue_handler_runs.go): the issue this run is
 			// attributed to, and WHY — "task" (the issue's own plan, via
 			// mission_tasks), "mention" (an @mention dispatch), or
 			// "delegation" (a sub-agent's own further /assign call).
-			MissionID *string `json:"mission_id,omitempty"`
-			Source    string  `json:"source,omitempty"`
+			MissionID *string `json:"mission_id,omitempty" yaml:"mission_id,omitempty"`
+			Source    string  `json:"source,omitempty" yaml:"source,omitempty"`
 			// Outcome is the §9.6 routing decision (work package B6, #2349) —
 			// empty on a run that predates the column.
-			Outcome string `json:"outcome,omitempty"`
+			Outcome string `json:"outcome,omitempty" yaml:"outcome,omitempty"`
 			// HardStopResult/HardStopAt (work package B7b, #2365) is Tier 2
 			// hard termination's own record — empty on a run that was never
 			// hard-stopped. Not shown as a table column (STATUS/OUTCOME
 			// already answer "what happened"); carried through for
 			// `--format json` so a live check can read it without the
 			// journal.
-			HardStopResult string `json:"hard_stop_result,omitempty"`
-			HardStopAt     string `json:"hard_stop_at,omitempty"`
+			HardStopResult string `json:"hard_stop_result,omitempty" yaml:"hard_stop_result,omitempty"`
+			HardStopAt     string `json:"hard_stop_at,omitempty" yaml:"hard_stop_at,omitempty"`
 		}
 		if err := cli.ReadJSON(resp, &runs); err != nil {
 			return err
@@ -706,15 +706,15 @@ var issueSessionsCmd = &cobra.Command{
 			return err
 		}
 		var sessions []struct {
-			ID              string `json:"id"`
-			AgentID         string `json:"agent_id"`
-			AgentName       string `json:"agent_name"`
-			State           string `json:"state"`
-			LastConsumedSeq int    `json:"last_consumed_seq"`
-			ActiveRunID     string `json:"active_run_id"`
-			AgentVersion    *int   `json:"agent_version"`
-			LastActivityAt  string `json:"last_activity_at"`
-			UpdatedAt       string `json:"updated_at"`
+			ID              string `json:"id" yaml:"id"`
+			AgentID         string `json:"agent_id" yaml:"agent_id"`
+			AgentName       string `json:"agent_name" yaml:"agent_name"`
+			State           string `json:"state" yaml:"state"`
+			LastConsumedSeq int    `json:"last_consumed_seq" yaml:"last_consumed_seq"`
+			ActiveRunID     string `json:"active_run_id" yaml:"active_run_id"`
+			AgentVersion    *int   `json:"agent_version" yaml:"agent_version"`
+			LastActivityAt  string `json:"last_activity_at" yaml:"last_activity_at"`
+			UpdatedAt       string `json:"updated_at" yaml:"updated_at"`
 		}
 		if err := cli.ReadJSON(resp, &sessions); err != nil {
 			return err
@@ -793,8 +793,8 @@ var issueCheckpointsCmd = &cobra.Command{
 			return err
 		}
 		var sessions []struct {
-			ID      string `json:"id"`
-			AgentID string `json:"agent_id"`
+			ID      string `json:"id" yaml:"id"`
+			AgentID string `json:"agent_id" yaml:"agent_id"`
 		}
 		if err := cli.ReadJSON(sessResp, &sessions); err != nil {
 			return err
@@ -830,14 +830,14 @@ var issueCheckpointsCmd = &cobra.Command{
 			return err
 		}
 		var checkpoints []struct {
-			ID         string `json:"id"`
-			RunID      string `json:"run_id"`
-			SeqAtWrite int    `json:"seq_at_write"`
-			Done       string `json:"done"`
-			NextStep   string `json:"next_step"`
-			Confidence string `json:"confidence"`
-			Parsed     bool   `json:"parsed"`
-			CreatedAt  string `json:"created_at"`
+			ID         string `json:"id" yaml:"id"`
+			RunID      string `json:"run_id" yaml:"run_id"`
+			SeqAtWrite int    `json:"seq_at_write" yaml:"seq_at_write"`
+			Done       string `json:"done" yaml:"done"`
+			NextStep   string `json:"next_step" yaml:"next_step"`
+			Confidence string `json:"confidence" yaml:"confidence"`
+			Parsed     bool   `json:"parsed" yaml:"parsed"`
+			CreatedAt  string `json:"created_at" yaml:"created_at"`
 		}
 		if err := cli.ReadJSON(resp, &checkpoints); err != nil {
 			return err
@@ -893,15 +893,15 @@ var issueChangesCmd = &cobra.Command{
 			return err
 		}
 		var diff struct {
-			IsRepo bool `json:"is_repo"`
+			IsRepo bool `json:"is_repo" yaml:"is_repo"`
 			Files  []struct {
-				Path      string `json:"path"`
-				Status    string `json:"status"`
-				Additions int    `json:"additions"`
-				Deletions int    `json:"deletions"`
-			} `json:"files"`
-			Diff      string `json:"diff"`
-			Truncated bool   `json:"truncated"`
+				Path      string `json:"path" yaml:"path"`
+				Status    string `json:"status" yaml:"status"`
+				Additions int    `json:"additions" yaml:"additions"`
+				Deletions int    `json:"deletions" yaml:"deletions"`
+			} `json:"files" yaml:"files"`
+			Diff      string `json:"diff" yaml:"diff"`
+			Truncated bool   `json:"truncated" yaml:"truncated"`
 		}
 		if err := cli.ReadJSON(resp, &diff); err != nil {
 			return err
@@ -1061,7 +1061,7 @@ var issueBulkUpdateCmd = &cobra.Command{
 			return err
 		}
 		var out struct {
-			Updated int `json:"updated"`
+			Updated int `json:"updated" yaml:"updated"`
 		}
 		if err := cli.ReadJSON(resp, &out); err != nil {
 			return err

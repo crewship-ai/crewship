@@ -68,32 +68,32 @@ never_produced) is computed server-side from the panel's declared SLA.`,
 // ── The wire (mirrors internal/api/pages_handler.go) ───────────────────────
 
 type pageProvenanceJSON struct {
-	Producer   string `json:"producer"`
-	RunID      string `json:"run_id"`
-	ProducedAt string `json:"produced_at"`
+	Producer   string `json:"producer" yaml:"producer"`
+	RunID      string `json:"run_id" yaml:"run_id"`
+	ProducedAt string `json:"produced_at" yaml:"produced_at"`
 }
 
 type pagePanelJSON struct {
-	ID string `json:"id"`
+	ID string `json:"id" yaml:"id"`
 	// §11b decision 14: a panel the caller may not see arrives as exactly
 	// {panel_id, span, sealed, owner_crew_name}. The renderer keys on `sealed`
 	// being PRESENT rather than on a field being absent, so a serialisation
 	// bug can never be mistaken for a permission decision.
-	PanelID       string `json:"panel_id"`
-	Sealed        bool   `json:"sealed"`
-	OwnerCrewName string `json:"owner_crew_name"`
+	PanelID       string `json:"panel_id" yaml:"panel_id"`
+	Sealed        bool   `json:"sealed" yaml:"sealed"`
+	OwnerCrewName string `json:"owner_crew_name" yaml:"owner_crew_name"`
 
-	Schema     string              `json:"schema"`
-	Title      string              `json:"title"`
-	Owner      string              `json:"owner"`
-	Producer   string              `json:"producer"`
-	SLASeconds int                 `json:"sla_seconds"`
-	SLA        json.RawMessage     `json:"sla"`
-	Span       int                 `json:"span"`
-	State      string              `json:"state"`
-	Reason     string              `json:"reason"`
-	Data       json.RawMessage     `json:"data"`
-	Provenance *pageProvenanceJSON `json:"provenance"`
+	Schema     string              `json:"schema" yaml:"schema"`
+	Title      string              `json:"title" yaml:"title"`
+	Owner      string              `json:"owner" yaml:"owner"`
+	Producer   string              `json:"producer" yaml:"producer"`
+	SLASeconds int                 `json:"sla_seconds" yaml:"sla_seconds"`
+	SLA        json.RawMessage     `json:"sla" yaml:"sla"`
+	Span       int                 `json:"span" yaml:"span"`
+	State      string              `json:"state" yaml:"state"`
+	Reason     string              `json:"reason" yaml:"reason"`
+	Data       json.RawMessage     `json:"data" yaml:"data"`
+	Provenance *pageProvenanceJSON `json:"provenance" yaml:"provenance"`
 
 	// The authored half. The server sends these only to a caller who may edit
 	// the spec (attachAuthoredHalf), and until they were read here the human
@@ -101,13 +101,13 @@ type pagePanelJSON struct {
 	// state and data and had no way to learn that the panel carries a wake
 	// gate, an on_failure crew, a refresh trigger or buttons. `--format json`
 	// was unaffected, so agents were fine and only people were misled.
-	Icon      string          `json:"icon"`
-	Tab       string          `json:"tab"`
-	Public    bool            `json:"public"`
-	Refresh   string          `json:"refresh"`
-	Wake      json.RawMessage `json:"wake"`
-	OnFailure json.RawMessage `json:"on_failure"`
-	Actions   json.RawMessage `json:"actions"`
+	Icon      string          `json:"icon" yaml:"icon"`
+	Tab       string          `json:"tab" yaml:"tab"`
+	Public    bool            `json:"public" yaml:"public"`
+	Refresh   string          `json:"refresh" yaml:"refresh"`
+	Wake      json.RawMessage `json:"wake" yaml:"wake"`
+	OnFailure json.RawMessage `json:"on_failure" yaml:"on_failure"`
+	Actions   json.RawMessage `json:"actions" yaml:"actions"`
 }
 
 // authoredSummary renders the sensor and action half as one line per feature,
@@ -152,34 +152,34 @@ func jsonArrayLen(raw json.RawMessage) int {
 }
 
 type pageJSON struct {
-	ID          string          `json:"id"`
-	Slug        string          `json:"slug"`
-	Name        string          `json:"name"`
-	Description string          `json:"description"`
-	Owner       string          `json:"owner"`
-	Icon        string          `json:"icon"`
-	Color       string          `json:"color"`
-	Panels      []pagePanelJSON `json:"panels"`
-	UpdatedAt   string          `json:"updated_at"`
+	ID          string          `json:"id" yaml:"id"`
+	Slug        string          `json:"slug" yaml:"slug"`
+	Name        string          `json:"name" yaml:"name"`
+	Description string          `json:"description" yaml:"description"`
+	Owner       string          `json:"owner" yaml:"owner"`
+	Icon        string          `json:"icon" yaml:"icon"`
+	Color       string          `json:"color" yaml:"color"`
+	Panels      []pagePanelJSON `json:"panels" yaml:"panels"`
+	UpdatedAt   string          `json:"updated_at" yaml:"updated_at"`
 }
 
 // pageListRowJSON is one index row. `panel_count` is what the server sends;
 // `panels` is read as a number too, because a list that carries a count under
 // the plural noun is the other reasonable shape and reading both costs a line.
 type pageListRowJSON struct {
-	Slug           string         `json:"slug"`
-	Name           string         `json:"name"`
-	Owner          string         `json:"owner"`
+	Slug           string         `json:"slug" yaml:"slug"`
+	Name           string         `json:"name" yaml:"name"`
+	Owner          string         `json:"owner" yaml:"owner"`
 	PanelCount     int            `json:"panel_count" yaml:"panel_count"`
-	Panels         json.Number    `json:"panels"`
+	Panels         json.Number    `json:"panels" yaml:"panels"`
 	PanelStates    map[string]int `json:"panel_states" yaml:"panel_states"`
-	State          string         `json:"state"`
+	State          string         `json:"state" yaml:"state"`
 	LastProducedAt string         `json:"last_produced_at" yaml:"last_produced_at"`
 	UpdatedAt      string         `json:"updated_at" yaml:"updated_at"`
 	// Reach is how the caller reaches the page (owner, role, crew:<slug>,
 	// panel_crew:<slug>, grant) — the server's answer about the caller,
 	// repeated, never derived here from the owner column.
-	Reach []string `json:"reach"`
+	Reach []string `json:"reach" yaml:"reach"`
 }
 
 // slaLabel renders the panel's SLA. `sla_seconds` is canonical (§11b decision
@@ -216,10 +216,10 @@ func (r pageListRowJSON) panelCount() int {
 // the document verbatim as a string would leave the server holding an opaque
 // blob it is required by §10b.1 to validate.
 type pageWriteJSON struct {
-	Slug        string               `json:"slug"`
-	Name        string               `json:"name"`
-	Description string               `json:"description,omitempty"`
-	Panels      []pageWritePanelJSON `json:"panels"`
+	Slug        string               `json:"slug" yaml:"slug"`
+	Name        string               `json:"name" yaml:"name"`
+	Description string               `json:"description,omitempty" yaml:"description,omitempty"`
+	Panels      []pageWritePanelJSON `json:"panels" yaml:"panels"`
 	// Owner hands the page to a crew instead of to whoever ran the command.
 	//
 	// It is NOT part of the page document, and that is the decision rather than
@@ -230,22 +230,22 @@ type pageWriteJSON struct {
 	// on the create REQUEST, is set from --owner, and `update` never sends it.
 	//
 	// Omitted means the server's default: the creator owns the page.
-	Owner string `json:"owner,omitempty"`
+	Owner string `json:"owner,omitempty" yaml:"owner,omitempty"`
 	// Icon and Color are the page's avatar (#2563) — a crew icon name and a
 	// crew palette key, set from --icon / --color. Like Owner they are NOT part
 	// of the document: the document is the contract, the avatar is the
 	// picture beside it. Pointers, because on `update` the server reads an
 	// omitted field as "keep" and "" as "clear", and a flag not passed must
 	// be the former.
-	Icon  *string `json:"icon,omitempty"`
-	Color *string `json:"color,omitempty"`
+	Icon  *string `json:"icon,omitempty" yaml:"icon,omitempty"`
+	Color *string `json:"color,omitempty" yaml:"color,omitempty"`
 }
 
 // pageAvatarPatchJSON is the body `page update` sends when only --icon or
 // --color was passed: no name, no panels, so the server touches nothing else.
 type pageAvatarPatchJSON struct {
-	Icon  *string `json:"icon,omitempty"`
-	Color *string `json:"color,omitempty"`
+	Icon  *string `json:"icon,omitempty" yaml:"icon,omitempty"`
+	Color *string `json:"color,omitempty" yaml:"color,omitempty"`
 }
 
 // pageAvatarFromFlags reads --icon and --color as pointers: nil when the flag
@@ -265,38 +265,38 @@ func pageAvatarFromFlags(cmd *cobra.Command) (icon, color *string) {
 }
 
 type pageWritePanelJSON struct {
-	ID     string `json:"id"`
-	Schema string `json:"schema"`
-	Title  string `json:"title,omitempty"`
+	ID     string `json:"id" yaml:"id"`
+	Schema string `json:"schema" yaml:"schema"`
+	Title  string `json:"title,omitempty" yaml:"title,omitempty"`
 	// The panel's glyph (internal/pages/icons.go). ParseDocument has already
 	// refused anything outside the closed set, and the server refuses it again.
-	Icon string `json:"icon,omitempty"`
+	Icon string `json:"icon,omitempty" yaml:"icon,omitempty"`
 	// The tab this panel renders under (internal/pages/tabs.go). Sent for the
 	// same reason as the icon: it is authored page structure, and a field the
 	// CLI drops is a field `crewship page update --file page.yaml` deletes.
-	Tab        string `json:"tab,omitempty"`
-	Owner      string `json:"owner"`
-	Producer   string `json:"producer"`
-	SLASeconds int    `json:"sla_seconds"`
-	Span       int    `json:"span"`
-	Public     bool   `json:"public,omitempty"`
+	Tab        string `json:"tab,omitempty" yaml:"tab,omitempty"`
+	Owner      string `json:"owner" yaml:"owner"`
+	Producer   string `json:"producer" yaml:"producer"`
+	SLASeconds int    `json:"sla_seconds" yaml:"sla_seconds"`
+	Span       int    `json:"span" yaml:"span"`
+	Public     bool   `json:"public,omitempty" yaml:"public,omitempty"`
 	// Actions ride through verbatim (§8b.1). The CLI does not interpret them:
 	// ParseDocument already refused anything the vocabulary does not admit, and
 	// the server validates again, which is the gate. Re-encoding them field by
 	// field here would be a place for the two representations to drift.
-	Actions []pages.PanelAction `json:"actions,omitempty"`
+	Actions []pages.PanelAction `json:"actions,omitempty" yaml:"actions,omitempty"`
 	// Wake gates and on_failure ride through verbatim for the same reason
 	// (§5, §4 rule 4). The predicate in `when:` is parsed by the SERVER, which
 	// is where the panel's schema is known and where the refusal has to
 	// happen; a CLI-side parse would be a second grammar to keep in step.
-	Wake      []pages.PanelWake     `json:"wake,omitempty"`
-	OnFailure *pages.PanelOnFailure `json:"on_failure,omitempty"`
+	Wake      []pages.PanelWake     `json:"wake,omitempty" yaml:"wake,omitempty"`
+	OnFailure *pages.PanelOnFailure `json:"on_failure,omitempty" yaml:"on_failure,omitempty"`
 	// The event that runs this panel's producer (internal/pages/refresh.go).
 	// Sent for the reason the tab is: a field the CLI drops is a field
 	// `crewship page update --file page.yaml` DELETES — and here what is
 	// deleted is the `automations` row that makes the trigger real, so the
 	// page would go on looking like it refreshes and stop doing it.
-	Refresh string `json:"refresh,omitempty"`
+	Refresh string `json:"refresh,omitempty" yaml:"refresh,omitempty"`
 }
 
 // ── list ───────────────────────────────────────────────────────────────────
@@ -334,8 +334,8 @@ var pageListCmd = &cobra.Command{
 			// A wrapped envelope ({"pages": [...]}) is the other convention in
 			// this repo; read it rather than printing nothing.
 			var wrapped struct {
-				Pages []pageListRowJSON `json:"pages"`
-				Rows  []pageListRowJSON `json:"rows"`
+				Pages []pageListRowJSON `json:"pages" yaml:"pages"`
+				Rows  []pageListRowJSON `json:"rows" yaml:"rows"`
 			}
 			if err2 := json.Unmarshal(body, &wrapped); err2 != nil {
 				return fmt.Errorf("decode response: %w", err)
@@ -787,8 +787,8 @@ is still stored, and the panel renders as failed rather than as current.`,
 			return pageEmitMachine(f, body, "{}")
 		}
 		var ack struct {
-			State      string              `json:"state"`
-			Provenance *pageProvenanceJSON `json:"provenance"`
+			State      string              `json:"state" yaml:"state"`
+			Provenance *pageProvenanceJSON `json:"provenance" yaml:"provenance"`
 		}
 		_ = json.Unmarshal(body, &ack)
 		if ack.Provenance != nil {
@@ -849,10 +849,10 @@ func pageCheckError(resp *http.Response) error {
 	if resp.StatusCode == http.StatusUnprocessableEntity {
 		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<16))
 		var rej struct {
-			Rejected bool           `json:"rejected"`
-			Kind     string         `json:"kind"`
-			Message  string         `json:"message"`
-			Detail   map[string]any `json:"detail"`
+			Rejected bool           `json:"rejected" yaml:"rejected"`
+			Kind     string         `json:"kind" yaml:"kind"`
+			Message  string         `json:"message" yaml:"message"`
+			Detail   map[string]any `json:"detail" yaml:"detail"`
 		}
 		if json.Unmarshal(raw, &rej) == nil && rej.Rejected && strings.TrimSpace(rej.Message) != "" {
 			return cli.WithExitCode(errors.New(rej.Message), cli.ExitValidation)
@@ -872,10 +872,10 @@ func pageCheckError(resp *http.Response) error {
 	if resp.StatusCode == http.StatusTooManyRequests {
 		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<16))
 		var lim struct {
-			Error      string `json:"error"`
-			Reason     string `json:"reason"`
-			Scope      string `json:"scope"`
-			RetryAfter int    `json:"retry_after_secs"`
+			Error      string `json:"error" yaml:"error"`
+			Reason     string `json:"reason" yaml:"reason"`
+			Scope      string `json:"scope" yaml:"scope"`
+			RetryAfter int    `json:"retry_after_secs" yaml:"retry_after_secs"`
 		}
 		if json.Unmarshal(raw, &lim) == nil && strings.TrimSpace(lim.Reason) != "" {
 			msg := lim.Reason

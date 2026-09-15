@@ -155,12 +155,12 @@ var backupCreateCmd = &cobra.Command{
 			return err
 		}
 		var out struct {
-			Path          string `json:"path"`
-			Size          int64  `json:"size_bytes"`
-			SHA256        string `json:"payload_sha256"`
-			FormatVersion int    `json:"format_version"`
-			Scope         string `json:"scope"`
-			Encrypted     bool   `json:"encrypted"`
+			Path          string `json:"path" yaml:"path"`
+			Size          int64  `json:"size_bytes" yaml:"size_bytes"`
+			SHA256        string `json:"payload_sha256" yaml:"payload_sha256"`
+			FormatVersion int    `json:"format_version" yaml:"format_version"`
+			Scope         string `json:"scope" yaml:"scope"`
+			Encrypted     bool   `json:"encrypted" yaml:"encrypted"`
 		}
 		if err := cli.ReadJSON(resp, &out); err != nil {
 			return err
@@ -184,19 +184,19 @@ var backupCreateCmd = &cobra.Command{
 // credential whose security_level the restore had to rewrite because the
 // bundle carried a tier that does not exist (#1603).
 type restoreClamp struct {
-	CredentialID string `json:"credential_id"`
-	Name         string `json:"name"`
-	From         string `json:"from"`
-	To           int    `json:"to"`
+	CredentialID string `json:"credential_id" yaml:"credential_id"`
+	Name         string `json:"name" yaml:"name"`
+	From         string `json:"from" yaml:"from"`
+	To           int    `json:"to" yaml:"to"`
 }
 
 // droppedCol mirrors backup.DroppedColumn on the wire: one column the
 // bundle carried that the target schema does not have, and which the
 // restore therefore discarded (#2034).
 type droppedCol struct {
-	Table  string `json:"table"`
-	Column string `json:"column"`
-	Rows   int    `json:"rows"`
+	Table  string `json:"table" yaml:"table"`
+	Column string `json:"column" yaml:"column"`
+	Rows   int    `json:"rows" yaml:"rows"`
 }
 
 // rowCountMismatch mirrors backup.TableRowCountMismatch on the wire (#2009):
@@ -204,9 +204,9 @@ type droppedCol struct {
 // either the payload level (bundle vs. its own manifest) or the insert
 // level (what landed on the target vs. the manifest).
 type rowCountMismatch struct {
-	Table    string `json:"table"`
-	Recorded int    `json:"recorded"`
-	Actual   int    `json:"actual"`
+	Table    string `json:"table" yaml:"table"`
+	Recorded int    `json:"recorded" yaml:"recorded"`
+	Actual   int    `json:"actual" yaml:"actual"`
 }
 
 var backupRestoreCmd = &cobra.Command{
@@ -287,27 +287,27 @@ var backupRestoreCmd = &cobra.Command{
 			return err
 		}
 		var out struct {
-			RestoredWs             string         `json:"restored_ws"`
-			RestoredWorkspaceID    string         `json:"restored_workspace_id"`
-			CrewsCount             int            `json:"crews_count"`
-			CrewsRestored          int            `json:"crews_restored"`
-			RowsInserted           int            `json:"rows_inserted"`
-			DockerPhaseSkipped     bool           `json:"docker_phase_skipped"`
-			DroppedCrewFilesystems []string       `json:"dropped_crew_filesystems"`
-			SecurityLevelClamped   int            `json:"security_level_clamped"`
-			SecurityLevelClamps    []restoreClamp `json:"security_level_clamps"`
-			ColumnsDropped         int            `json:"columns_dropped"`
-			DroppedColumns         []droppedCol   `json:"dropped_columns"`
-			IssueCountersMigrated  int            `json:"issue_counters_migrated"`
+			RestoredWs             string         `json:"restored_ws" yaml:"restored_ws"`
+			RestoredWorkspaceID    string         `json:"restored_workspace_id" yaml:"restored_workspace_id"`
+			CrewsCount             int            `json:"crews_count" yaml:"crews_count"`
+			CrewsRestored          int            `json:"crews_restored" yaml:"crews_restored"`
+			RowsInserted           int            `json:"rows_inserted" yaml:"rows_inserted"`
+			DockerPhaseSkipped     bool           `json:"docker_phase_skipped" yaml:"docker_phase_skipped"`
+			DroppedCrewFilesystems []string       `json:"dropped_crew_filesystems" yaml:"dropped_crew_filesystems"`
+			SecurityLevelClamped   int            `json:"security_level_clamped" yaml:"security_level_clamped"`
+			SecurityLevelClamps    []restoreClamp `json:"security_level_clamps" yaml:"security_level_clamps"`
+			ColumnsDropped         int            `json:"columns_dropped" yaml:"columns_dropped"`
+			DroppedColumns         []droppedCol   `json:"dropped_columns" yaml:"dropped_columns"`
+			IssueCountersMigrated  int            `json:"issue_counters_migrated" yaml:"issue_counters_migrated"`
 			// #2009: does the decrypted payload match what the manifest
 			// recorded, and did the insert land what the payload carries.
-			PayloadRowCountMismatches []rowCountMismatch `json:"payload_row_count_mismatches"`
-			RowsInsertedShortfalls    []rowCountMismatch `json:"rows_inserted_shortfalls"`
+			PayloadRowCountMismatches []rowCountMismatch `json:"payload_row_count_mismatches" yaml:"payload_row_count_mismatches"`
+			RowsInsertedShortfalls    []rowCountMismatch `json:"rows_inserted_shortfalls" yaml:"rows_inserted_shortfalls"`
 			// #2226: a forked restore regenerates the ids the journal
 			// hash chain commits to, so the chain is re-signed at a new
 			// genesis. Zero on a plain restore.
-			JournalEntriesResigned     int `json:"journal_entries_resigned"`
-			JournalCheckpointsResigned int `json:"journal_checkpoints_resigned"`
+			JournalEntriesResigned     int `json:"journal_entries_resigned" yaml:"journal_entries_resigned"`
+			JournalCheckpointsResigned int `json:"journal_checkpoints_resigned" yaml:"journal_checkpoints_resigned"`
 		}
 		if err := cli.ReadJSON(resp, &out); err != nil {
 			return err

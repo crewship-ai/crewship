@@ -17,10 +17,10 @@ var (
 )
 
 type keeperAskResult struct {
-	RequestID string `json:"request_id"`
-	Decision  string `json:"decision"`
-	Reason    string `json:"reason"`
-	RiskScore int    `json:"risk_score"`
+	RequestID string `json:"request_id" yaml:"request_id"`
+	Decision  string `json:"decision" yaml:"decision"`
+	Reason    string `json:"reason" yaml:"reason"`
+	RiskScore int    `json:"risk_score" yaml:"risk_score"`
 }
 
 var keeperAskCmd = &cobra.Command{
@@ -159,10 +159,10 @@ Examples:
 // agentCredentialRef is one row of GET /api/v1/agents/{id}/credentials: what
 // this agent can actually reach, under both names it goes by.
 type agentCredentialRef struct {
-	CredentialID   string `json:"credential_id"`
-	CredentialName string `json:"credential_name"`
-	EnvVarName     string `json:"env_var_name"`
-	GrantSource    string `json:"grant_source"`
+	CredentialID   string `json:"credential_id" yaml:"credential_id"`
+	CredentialName string `json:"credential_name" yaml:"credential_name"`
+	EnvVarName     string `json:"env_var_name" yaml:"env_var_name"`
+	GrantSource    string `json:"grant_source" yaml:"grant_source"`
 }
 
 // resolveKeeperCredential turns --credential into a credential id.

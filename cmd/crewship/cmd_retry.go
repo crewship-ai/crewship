@@ -94,7 +94,7 @@ Examples:
 				return err
 			}
 			var out struct {
-				ID string `json:"id"`
+				ID string `json:"id" yaml:"id"`
 			}
 			if err := cli.ReadJSON(resp, &out); err != nil {
 				return err
@@ -163,12 +163,12 @@ func fetchRun(client *cli.Client, runID string) (runMetadata, error) {
 	}
 	var body struct {
 		Data []struct {
-			ID        string  `json:"id"`
-			AgentID   string  `json:"agent_id"`
-			AgentSlug *string `json:"agent_slug"`
-			ChatID    *string `json:"chat_id"`
-			Model     *string `json:"model"`
-		} `json:"data"`
+			ID        string  `json:"id" yaml:"id"`
+			AgentID   string  `json:"agent_id" yaml:"agent_id"`
+			AgentSlug *string `json:"agent_slug" yaml:"agent_slug"`
+			ChatID    *string `json:"chat_id" yaml:"chat_id"`
+			Model     *string `json:"model" yaml:"model"`
+		} `json:"data" yaml:"data"`
 	}
 	if err := cli.ReadJSON(resp, &body); err != nil {
 		return runMetadata{}, err

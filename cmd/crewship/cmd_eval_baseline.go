@@ -58,20 +58,20 @@ Examples:
 // flat + JSON-tagged so a future migration can read old files
 // without a converter.
 type baselineRecord struct {
-	Name        string                  `json:"name"`
-	GeneratedAt string                  `json:"generated_at"`
-	WorkspaceID string                  `json:"workspace_id"`
-	Scenarios   []string                `json:"scenarios"`
-	Tiers       []string                `json:"tiers"`
-	RunsPerCell int                     `json:"runs_per_cell"`
-	Cells       map[string]baselineCell `json:"cells"` // key = "<scenario>\x00<tier>"
+	Name        string                  `json:"name" yaml:"name"`
+	GeneratedAt string                  `json:"generated_at" yaml:"generated_at"`
+	WorkspaceID string                  `json:"workspace_id" yaml:"workspace_id"`
+	Scenarios   []string                `json:"scenarios" yaml:"scenarios"`
+	Tiers       []string                `json:"tiers" yaml:"tiers"`
+	RunsPerCell int                     `json:"runs_per_cell" yaml:"runs_per_cell"`
+	Cells       map[string]baselineCell `json:"cells" yaml:"cells"` // key = "<scenario>\x00<tier>"
 }
 
 type baselineCell struct {
-	Pass    int     `json:"pass"`
-	Total   int     `json:"total"`
-	AvgCost float64 `json:"avg_cost"`
-	AvgMs   float64 `json:"avg_ms"`
+	Pass    int     `json:"pass" yaml:"pass"`
+	Total   int     `json:"total" yaml:"total"`
+	AvgCost float64 `json:"avg_cost" yaml:"avg_cost"`
+	AvgMs   float64 `json:"avg_ms" yaml:"avg_ms"`
 }
 
 // baselineDir is the on-disk root for stored baselines. ~/.crewship
@@ -251,12 +251,12 @@ var evalBaselineListCmd = &cobra.Command{
 			return fmt.Errorf("read baseline dir: %w", err)
 		}
 		type row struct {
-			Name        string `json:"name"`
-			GeneratedAt string `json:"generated_at"`
-			Scenarios   int    `json:"scenarios"`
-			Tiers       int    `json:"tiers"`
-			RunsPerCell int    `json:"runs_per_cell"`
-			Path        string `json:"path"`
+			Name        string `json:"name" yaml:"name"`
+			GeneratedAt string `json:"generated_at" yaml:"generated_at"`
+			Scenarios   int    `json:"scenarios" yaml:"scenarios"`
+			Tiers       int    `json:"tiers" yaml:"tiers"`
+			RunsPerCell int    `json:"runs_per_cell" yaml:"runs_per_cell"`
+			Path        string `json:"path" yaml:"path"`
 		}
 		rows := make([]row, 0, len(entries))
 		for _, e := range entries {
@@ -372,18 +372,18 @@ var evalBaselineDeleteCmd = &cobra.Command{
 // outputs; we expose it directly so external tooling doesn't have
 // to recompute.
 type regressionRow struct {
-	Scenario       string  `json:"scenario"`
-	Tier           string  `json:"tier"`
-	BaselinePass   int     `json:"baseline_pass"`
-	BaselineTotal  int     `json:"baseline_total"`
-	CurrentPass    int     `json:"current_pass"`
-	CurrentTotal   int     `json:"current_total"`
-	BaselineRate   float64 `json:"baseline_rate"`
-	CurrentRate    float64 `json:"current_rate"`
-	RateDelta      float64 `json:"rate_delta"`
-	BaselineCostUS float64 `json:"baseline_cost_usd"`
-	CurrentCostUS  float64 `json:"current_cost_usd"`
-	Verdict        string  `json:"verdict"`
+	Scenario       string  `json:"scenario" yaml:"scenario"`
+	Tier           string  `json:"tier" yaml:"tier"`
+	BaselinePass   int     `json:"baseline_pass" yaml:"baseline_pass"`
+	BaselineTotal  int     `json:"baseline_total" yaml:"baseline_total"`
+	CurrentPass    int     `json:"current_pass" yaml:"current_pass"`
+	CurrentTotal   int     `json:"current_total" yaml:"current_total"`
+	BaselineRate   float64 `json:"baseline_rate" yaml:"baseline_rate"`
+	CurrentRate    float64 `json:"current_rate" yaml:"current_rate"`
+	RateDelta      float64 `json:"rate_delta" yaml:"rate_delta"`
+	BaselineCostUS float64 `json:"baseline_cost_usd" yaml:"baseline_cost_usd"`
+	CurrentCostUS  float64 `json:"current_cost_usd" yaml:"current_cost_usd"`
+	Verdict        string  `json:"verdict" yaml:"verdict"`
 }
 
 var evalBaselineDiffCmd = &cobra.Command{

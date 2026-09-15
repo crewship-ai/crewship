@@ -87,7 +87,7 @@ func TestPaymasterTopRunE_YAMLAndNDJSON(t *testing.T) {
 	if len(yamlRows) != 2 {
 		t.Fatalf("yaml: want 2 rows, got %d; out:\n%s", len(yamlRows), out)
 	}
-	if yamlRows[0]["scopekind"] != "crew" || yamlRows[1]["scopekind"] != "agent" {
+	if yamlRows[0]["scope_kind"] != "crew" || yamlRows[1]["scope_kind"] != "agent" {
 		t.Errorf("yaml rows mismatch: %+v", yamlRows)
 	}
 

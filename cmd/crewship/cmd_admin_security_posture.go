@@ -23,23 +23,23 @@ import (
 )
 
 type postureWarningRow struct {
-	Key      string `json:"key"`
-	Severity string `json:"severity"`
-	Message  string `json:"message"`
+	Key      string `json:"key" yaml:"key"`
+	Severity string `json:"severity" yaml:"severity"`
+	Message  string `json:"message" yaml:"message"`
 }
 
 // securityPostureRow mirrors internal/api.securityPostureResponse.
 type securityPostureRow struct {
-	Environment                  string              `json:"environment"`
-	EncryptionKeyConfigured      bool                `json:"encryption_key_configured"`
-	PlaintextSecretsAllowed      bool                `json:"plaintext_secrets_allowed"`
-	PrivateEndpointsCeiling      bool                `json:"private_endpoints_ceiling"`
-	SignupOpen                   bool                `json:"signup_open"`
-	OAuthConfigured              bool                `json:"oauth_configured"`
-	EmailConfigured              bool                `json:"email_configured"`
-	RateLimitDisabled            bool                `json:"rate_limit_disabled"`
-	RateLimitEffectivelyDisabled bool                `json:"rate_limit_effectively_disabled"`
-	Warnings                     []postureWarningRow `json:"warnings"`
+	Environment                  string              `json:"environment" yaml:"environment"`
+	EncryptionKeyConfigured      bool                `json:"encryption_key_configured" yaml:"encryption_key_configured"`
+	PlaintextSecretsAllowed      bool                `json:"plaintext_secrets_allowed" yaml:"plaintext_secrets_allowed"`
+	PrivateEndpointsCeiling      bool                `json:"private_endpoints_ceiling" yaml:"private_endpoints_ceiling"`
+	SignupOpen                   bool                `json:"signup_open" yaml:"signup_open"`
+	OAuthConfigured              bool                `json:"oauth_configured" yaml:"oauth_configured"`
+	EmailConfigured              bool                `json:"email_configured" yaml:"email_configured"`
+	RateLimitDisabled            bool                `json:"rate_limit_disabled" yaml:"rate_limit_disabled"`
+	RateLimitEffectivelyDisabled bool                `json:"rate_limit_effectively_disabled" yaml:"rate_limit_effectively_disabled"`
+	Warnings                     []postureWarningRow `json:"warnings" yaml:"warnings"`
 }
 
 // postureState renders a boolean as the words that match what it MEANS, not

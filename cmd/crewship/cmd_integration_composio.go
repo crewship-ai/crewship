@@ -17,106 +17,106 @@ import (
 
 // composioInventoryResponse mirrors the server's wire shape.
 type composioInventoryResponse struct {
-	Enabled     bool                    `json:"enabled"`
-	AuthConfigs []composioAuthConfig    `json:"auth_configs"`
-	Users       []composioUserInventory `json:"users"`
+	Enabled     bool                    `json:"enabled" yaml:"enabled"`
+	AuthConfigs []composioAuthConfig    `json:"auth_configs" yaml:"auth_configs"`
+	Users       []composioUserInventory `json:"users" yaml:"users"`
 }
 
 type composioToolkit struct {
-	Slug string `json:"slug"`
-	Logo string `json:"logo,omitempty"`
+	Slug string `json:"slug" yaml:"slug"`
+	Logo string `json:"logo,omitempty" yaml:"logo,omitempty"`
 }
 
 type composioAuthConfig struct {
-	ID      string          `json:"id"`
-	Name    string          `json:"name"`
-	Status  string          `json:"status"`
-	Toolkit composioToolkit `json:"toolkit"`
+	ID      string          `json:"id" yaml:"id"`
+	Name    string          `json:"name" yaml:"name"`
+	Status  string          `json:"status" yaml:"status"`
+	Toolkit composioToolkit `json:"toolkit" yaml:"toolkit"`
 }
 
 type composioConnectedAccount struct {
-	ID      string          `json:"id"`
-	UserID  string          `json:"user_id"`
-	Status  string          `json:"status"`
-	Toolkit composioToolkit `json:"toolkit"`
+	ID      string          `json:"id" yaml:"id"`
+	UserID  string          `json:"user_id" yaml:"user_id"`
+	Status  string          `json:"status" yaml:"status"`
+	Toolkit composioToolkit `json:"toolkit" yaml:"toolkit"`
 }
 
 type composioUserInventory struct {
-	UserID            string                     `json:"user_id"`
-	ConnectedAccounts []composioConnectedAccount `json:"connected_accounts"`
+	UserID            string                     `json:"user_id" yaml:"user_id"`
+	ConnectedAccounts []composioConnectedAccount `json:"connected_accounts" yaml:"connected_accounts"`
 }
 
 type composioToolkitCategory struct {
-	Name string `json:"name"`
+	Name string `json:"name" yaml:"name"`
 }
 
 type composioToolkitMeta struct {
-	Description string                    `json:"description"`
-	ToolsCount  int                       `json:"tools_count"`
-	Categories  []composioToolkitCategory `json:"categories"`
+	Description string                    `json:"description" yaml:"description"`
+	ToolsCount  int                       `json:"tools_count" yaml:"tools_count"`
+	Categories  []composioToolkitCategory `json:"categories" yaml:"categories"`
 }
 
 type composioToolkitInfo struct {
-	Slug string              `json:"slug"`
-	Name string              `json:"name"`
-	Meta composioToolkitMeta `json:"meta"`
+	Slug string              `json:"slug" yaml:"slug"`
+	Name string              `json:"name" yaml:"name"`
+	Meta composioToolkitMeta `json:"meta" yaml:"meta"`
 }
 
 type composioToolkitsResponse struct {
-	Enabled  bool                  `json:"enabled"`
-	Total    int                   `json:"total"`
-	Toolkits []composioToolkitInfo `json:"toolkits"`
+	Enabled  bool                  `json:"enabled" yaml:"enabled"`
+	Total    int                   `json:"total" yaml:"total"`
+	Toolkits []composioToolkitInfo `json:"toolkits" yaml:"toolkits"`
 }
 
 type composioTool struct {
-	Slug        string          `json:"slug"`
-	Name        string          `json:"name"`
-	Description string          `json:"description"`
-	Toolkit     composioToolkit `json:"toolkit"`
+	Slug        string          `json:"slug" yaml:"slug"`
+	Name        string          `json:"name" yaml:"name"`
+	Description string          `json:"description" yaml:"description"`
+	Toolkit     composioToolkit `json:"toolkit" yaml:"toolkit"`
 }
 
 type composioToolsResponse struct {
-	Enabled bool           `json:"enabled"`
-	Total   int            `json:"total"`
-	Tools   []composioTool `json:"tools"`
+	Enabled bool           `json:"enabled" yaml:"enabled"`
+	Total   int            `json:"total" yaml:"total"`
+	Tools   []composioTool `json:"tools" yaml:"tools"`
 }
 
 type composioTriggerType struct {
-	Slug        string          `json:"slug"`
-	Name        string          `json:"name"`
-	Description string          `json:"description"`
-	Type        string          `json:"type"`
-	Toolkit     composioToolkit `json:"toolkit"`
+	Slug        string          `json:"slug" yaml:"slug"`
+	Name        string          `json:"name" yaml:"name"`
+	Description string          `json:"description" yaml:"description"`
+	Type        string          `json:"type" yaml:"type"`
+	Toolkit     composioToolkit `json:"toolkit" yaml:"toolkit"`
 }
 
 type composioTriggerTypesResponse struct {
-	Enabled  bool                  `json:"enabled"`
-	Total    int                   `json:"total"`
-	Triggers []composioTriggerType `json:"triggers"`
+	Enabled  bool                  `json:"enabled" yaml:"enabled"`
+	Total    int                   `json:"total" yaml:"total"`
+	Triggers []composioTriggerType `json:"triggers" yaml:"triggers"`
 }
 
 type composioTriggerInstance struct {
-	ID            string         `json:"id"`
-	TriggerName   string         `json:"trigger_name"`
-	UserID        string         `json:"user_id"`
-	TriggerConfig map[string]any `json:"trigger_config"`
-	DisabledAt    string         `json:"disabled_at"`
+	ID            string         `json:"id" yaml:"id"`
+	TriggerName   string         `json:"trigger_name" yaml:"trigger_name"`
+	UserID        string         `json:"user_id" yaml:"user_id"`
+	TriggerConfig map[string]any `json:"trigger_config" yaml:"trigger_config"`
+	DisabledAt    string         `json:"disabled_at" yaml:"disabled_at"`
 }
 
 type composioActiveTriggersResponse struct {
-	Enabled  bool                      `json:"enabled"`
-	Triggers []composioTriggerInstance `json:"triggers"`
+	Enabled  bool                      `json:"enabled" yaml:"enabled"`
+	Triggers []composioTriggerInstance `json:"triggers" yaml:"triggers"`
 }
 
 type composioCreateTriggerResponse struct {
-	Enabled bool                    `json:"enabled"`
-	Trigger composioTriggerInstance `json:"trigger"`
+	Enabled bool                    `json:"enabled" yaml:"enabled"`
+	Trigger composioTriggerInstance `json:"trigger" yaml:"trigger"`
 }
 
 type composioSettingsResponse struct {
-	Configured bool   `json:"configured"`
-	Source     string `json:"source"`
-	Label      string `json:"label"`
+	Configured bool   `json:"configured" yaml:"configured"`
+	Source     string `json:"source" yaml:"source"`
+	Label      string `json:"label" yaml:"label"`
 }
 
 var composioCmd = &cobra.Command{
@@ -387,10 +387,10 @@ var composioTriggersEnableCmd = &cobra.Command{
 
 // composioDefaultResponse mirrors the server's /default wire shape.
 type composioDefaultResponse struct {
-	EnabledFlag        bool   `json:"enabled_flag"`
-	DefaultUserID      string `json:"default_user_id"`
-	DefaultMCPServerID string `json:"default_mcp_server_id"`
-	ConnectedUserCount int    `json:"connected_user_count"`
+	EnabledFlag        bool   `json:"enabled_flag" yaml:"enabled_flag"`
+	DefaultUserID      string `json:"default_user_id" yaml:"default_user_id"`
+	DefaultMCPServerID string `json:"default_mcp_server_id" yaml:"default_mcp_server_id"`
+	ConnectedUserCount int    `json:"connected_user_count" yaml:"connected_user_count"`
 }
 
 var composioDefaultCmd = &cobra.Command{
@@ -570,8 +570,8 @@ var composioConnectCmd = &cobra.Command{
 			return fmt.Errorf("--user is required (the Composio user_id to connect the account under)")
 		}
 		var res struct {
-			RedirectURL string `json:"redirect_url"`
-			UserID      string `json:"user_id"`
+			RedirectURL string `json:"redirect_url" yaml:"redirect_url"`
+			UserID      string `json:"user_id" yaml:"user_id"`
 		}
 		if err := postJSON(client, "/api/v1/integrations/composio/connect", map[string]string{
 			"toolkit": args[0], "user_id": user,
@@ -585,35 +585,35 @@ var composioConnectCmd = &cobra.Command{
 
 // composioBindAppResult mirrors one provisioned app in the bind response.
 type composioBindAppResult struct {
-	Toolkit  string `json:"toolkit"`
-	Mode     string `json:"mode"`
-	Endpoint string `json:"endpoint"`
+	Toolkit  string `json:"toolkit" yaml:"toolkit"`
+	Mode     string `json:"mode" yaml:"mode"`
+	Endpoint string `json:"endpoint" yaml:"endpoint"`
 }
 
 // composioBindResponse mirrors the server's bind wire shape.
 type composioBindResponse struct {
-	AgentID string                  `json:"agent_id"`
-	UserID  string                  `json:"user_id"`
-	Apps    []composioBindAppResult `json:"apps"`
+	AgentID string                  `json:"agent_id" yaml:"agent_id"`
+	UserID  string                  `json:"user_id" yaml:"user_id"`
+	Apps    []composioBindAppResult `json:"apps" yaml:"apps"`
 }
 
 type composioAgentBinding struct {
-	Toolkit  string `json:"toolkit"`
-	Mode     string `json:"mode"`
-	UserID   string `json:"user_id"`
-	Endpoint string `json:"endpoint"`
+	Toolkit  string `json:"toolkit" yaml:"toolkit"`
+	Mode     string `json:"mode" yaml:"mode"`
+	UserID   string `json:"user_id" yaml:"user_id"`
+	Endpoint string `json:"endpoint" yaml:"endpoint"`
 }
 
 type composioListBindingsResponse struct {
-	AgentID  string                 `json:"agent_id"`
-	Bindings []composioAgentBinding `json:"bindings"`
+	AgentID  string                 `json:"agent_id" yaml:"agent_id"`
+	Bindings []composioAgentBinding `json:"bindings" yaml:"bindings"`
 }
 
 // composioAppSpec mirrors the per-app scope in the bind request body.
 type composioAppSpec struct {
-	Toolkit string   `json:"toolkit"`
-	Mode    string   `json:"mode"`
-	Tools   []string `json:"tools,omitempty"`
+	Toolkit string   `json:"toolkit" yaml:"toolkit"`
+	Mode    string   `json:"mode" yaml:"mode"`
+	Tools   []string `json:"tools,omitempty" yaml:"tools,omitempty"`
 }
 
 // parseComposioApp parses a `--app` value of the form

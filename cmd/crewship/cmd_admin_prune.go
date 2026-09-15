@@ -50,9 +50,9 @@ legacy names; the id-scoped resources the live runtime uses are never touched.`,
 		// server logs — needs it to reconcile a partially-mutated docker state.
 		data, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 		var out struct {
-			Error   string   `json:"error"`
-			Removed []string `json:"removed"`
-			Count   int      `json:"count"`
+			Error   string   `json:"error" yaml:"error"`
+			Removed []string `json:"removed" yaml:"removed"`
+			Count   int      `json:"count" yaml:"count"`
 		}
 		_ = json.Unmarshal(data, &out)
 

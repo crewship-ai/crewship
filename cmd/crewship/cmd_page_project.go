@@ -323,7 +323,7 @@ func newPageProjectCommand() *cobra.Command {
 			return err
 		}
 		var report struct {
-			Healthy bool `json:"healthy"`
+			Healthy bool `json:"healthy" yaml:"healthy"`
 		}
 		if err := json.Unmarshal(data, &report); err != nil {
 			return err
@@ -434,18 +434,18 @@ func pageResolveFence(cmd *cobra.Command, slug string, rollbackVersion int64) (p
 
 	var snapshot struct {
 		Baseline struct {
-			DefinitionDigest        string  `json:"definition_digest"`
-			SourceAvailable         bool    `json:"source_available"`
-			SourceUnavailableReason *string `json:"source_unavailable_reason"`
-			ExcludedPanels          int     `json:"excluded_panels"`
-			WithheldChanged         bool    `json:"withheld_changed"`
-		} `json:"baseline"`
-		InitialPublication bool `json:"initial_publication"`
+			DefinitionDigest        string  `json:"definition_digest" yaml:"definition_digest"`
+			SourceAvailable         bool    `json:"source_available" yaml:"source_available"`
+			SourceUnavailableReason *string `json:"source_unavailable_reason" yaml:"source_unavailable_reason"`
+			ExcludedPanels          int     `json:"excluded_panels" yaml:"excluded_panels"`
+			WithheldChanged         bool    `json:"withheld_changed" yaml:"withheld_changed"`
+		} `json:"baseline" yaml:"baseline"`
+		InitialPublication bool `json:"initial_publication" yaml:"initial_publication"`
 		Routines           []struct {
-			Routine       string  `json:"routine"`
-			CurrentDigest *string `json:"current_digest"`
-			InCandidate   bool    `json:"in_candidate"`
-		} `json:"routines"`
+			Routine       string  `json:"routine" yaml:"routine"`
+			CurrentDigest *string `json:"current_digest" yaml:"current_digest"`
+			InCandidate   bool    `json:"in_candidate" yaml:"in_candidate"`
+		} `json:"routines" yaml:"routines"`
 	}
 	if err := pageGetJSON(pageReviewEndpoint(slug, rollbackVersion), &snapshot); err != nil {
 		return fence, fmt.Errorf("read review snapshot for the publication fence: %w", err)
