@@ -7,7 +7,7 @@ import { describe, it, expect, vi } from "vitest"
 import { render, screen, within, fireEvent } from "@testing-library/react"
 import type { Pipeline } from "@/hooks/use-pipelines"
 import type { PipelineSchedule } from "@/hooks/use-pipeline-schedules"
-import { RoutinesDashboard, outcomeKpis, runVolumeByRoutine, type DashboardRun } from "../routines-dashboard"
+import { RoutinesDashboard, outcomeKpis, runOutcomesByDay, type DashboardRun } from "../routines-dashboard"
 
 vi.mock("next/link", () => ({ default: ({ children, href }: { children: React.ReactNode; href: string }) => <a href={href}>{children}</a> }))
 vi.mock("@/components/ui/crew-icon", () => ({ CrewIcon: () => <span data-testid="icon" /> }))
@@ -48,14 +48,17 @@ describe("outcomeKpis", () => {
   })
 })
 
-describe("runVolumeByRoutine", () => {
-  it("buckets the window by day with one series per routine", () => {
-    const v = runVolumeByRoutine(mine, routines)
+describe("runOutcomesByDay", () => {
+  it("buckets the window by day with one series per outcome that occurred", () => {
+    const v = runOutcomesByDay(mine)
     expect(v.buckets).toHaveLength(7)
-    expect(v.series.map((s) => s.label).sort()).toEqual(["Invoice intake", "Morning briefing"])
+    // Today: r1 completed, r4 waiting + r5 running (still going).
     const today = v.buckets[6]
-    expect(today.briefing).toBe(2)
-    expect(today.invoice).toBe(1)
+    expect(today).toMatchObject({ completed: 1, live: 2, failed: 0, stopped: 0 })
+    // Yesterday-ish: the completed-with-failed-result run counts as could not finish.
+    expect(v.buckets.reduce((n, b) => n + Number(b.failed), 0)).toBe(1)
+    expect(v.buckets.reduce((n, b) => n + Number(b.stopped), 0)).toBe(1)
+    expect(v.series.map((s) => s.label)).toEqual(["Completed", "Could not finish", "Stopped", "Still going"])
   })
 })
 

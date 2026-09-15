@@ -12,7 +12,7 @@ import { InlineEmpty } from "@/components/ui/inline-empty"
 import { DashboardCard } from "@/components/features/dashboard/dashboard-card"
 import { RunVolumeChart, type RunVolumeBucket, type RunVolumeSeries } from "@/components/features/dashboard/run-volume-chart"
 import { AttentionStrip, OutcomeKpis, UpNext, type AttentionItem, type OutcomeKpiData } from "@/components/features/dashboard/dashboard-overview"
-import { CREW_PALETTE, foldRunVolumeSeries, RUN_VOLUME_OTHER_KEY } from "@/app/(dashboard)/dashboard-helpers"
+import { STATUS_PALETTE } from "@/app/(dashboard)/dashboard-helpers"
 import { resolveRoutineIcon, resolveRoutineColor } from "@/lib/routine-identity"
 import { routineRunPresentation, formatAgo, formatUntil } from "@/lib/routine-run-presentation"
 import type { OverviewRun } from "@/lib/routines-overview"
@@ -87,21 +87,25 @@ export function outcomeKpis(runs: DashboardRun[], now = new Date()): OutcomeKpiD
   }
 }
 
-/** One bucket per day for the window, one series per routine, as the
- * dashboard's run-volume chart draws crews. */
-export function runVolumeByRoutine(
-  runs: DashboardRun[],
-  routines: Pipeline[],
-  now = new Date(),
-): { buckets: RunVolumeBucket[]; series: RunVolumeSeries[] } {
+/** One bucket per day for the window, one series per outcome, drawn with
+ * the dashboard's run-volume chart and its status palette. Outcomes, not
+ * routines: how many runs ended well says something about the week, which
+ * routine produced them is what the sidebar and Activity are for. */
+export const OUTCOME_SERIES: RunVolumeSeries[] = [
+  { key: "completed", label: "Completed", color: STATUS_PALETTE.COMPLETED },
+  { key: "failed", label: "Could not finish", color: STATUS_PALETTE.FAILED },
+  { key: "stopped", label: "Stopped", color: STATUS_PALETTE.CANCELLED },
+  { key: "live", label: "Still going", color: STATUS_PALETTE.IN_PROGRESS },
+]
+
+export function runOutcomesByDay(runs: DashboardRun[], now = new Date()): { buckets: RunVolumeBucket[]; series: RunVolumeSeries[] } {
   const dayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate())
   const days: Date[] = Array.from({ length: WINDOW_DAYS }, (_, i) => {
     const d = new Date(dayStart)
     d.setDate(dayStart.getDate() - (WINDOW_DAYS - 1 - i))
     return d
   })
-  const slugs = new Set<string>()
-  const buckets: RunVolumeBucket[] = days.map((d) => ({ ts: d.toISOString() }))
+  const buckets: RunVolumeBucket[] = days.map((d) => ({ ts: d.toISOString(), completed: 0, failed: 0, stopped: 0, live: 0 }))
   for (const run of runs) {
     const t = Date.parse(run.started_at)
     if (!Number.isFinite(t)) continue
@@ -110,25 +114,13 @@ export function runVolumeByRoutine(
       (d) => d.getFullYear() === runDay.getFullYear() && d.getMonth() === runDay.getMonth() && d.getDate() === runDay.getDate(),
     )
     if (index < 0) continue
-    slugs.add(run.pipeline_slug)
-    buckets[index][run.pipeline_slug] = Number(buckets[index][run.pipeline_slug] ?? 0) + 1
+    const status = effectiveStatus(run)
+    const key = LIVE.has(status) ? "live" : STOPPED.has(status) ? "stopped" : DONE_OK.has(status) ? "completed" : "failed"
+    buckets[index][key] = Number(buckets[index][key]) + 1
   }
-  // Hues in the dashboard's fixed categorical order, assigned by slug so a
-  // routine keeps its hue whatever the filters show beside it. Most routines
-  // carry no colour of their own, and the ones that do share a handful, so
-  // painting by routine colour made eight series the same pink.
-  const hues = Object.values(CREW_PALETTE)
-  const series: RunVolumeSeries[] = [...slugs].sort().map((slug, index) => {
-    const routine = routines.find((r) => r.slug === slug)
-    return { key: slug, label: routine?.name ?? slug, color: hues[index % hues.length] }
-  })
-  // Five named routines and Other: the legend has to fit under the chart on
-  // a phone, where the dashboard's eight crews would run to eight lines.
-  const folded = foldRunVolumeSeries(buckets, series, 5)
-  return {
-    buckets: folded.buckets,
-    series: folded.series.map((s) => (s.key === RUN_VOLUME_OTHER_KEY ? { ...s, label: `Other (${folded.folded} routines)` } : s)),
-  }
+  // Only the outcomes that occurred, so the legend names what the bars show.
+  const used = OUTCOME_SERIES.filter((s) => buckets.some((b) => Number(b[s.key]) > 0))
+  return { buckets, series: used }
 }
 
 export function RoutinesDashboard({ routines, runs, runsLoading, schedules, onSelect }: Props) {
@@ -138,7 +130,7 @@ export function RoutinesDashboard({ routines, runs, runsLoading, schedules, onSe
     [runs, routines],
   )
   const kpis = React.useMemo(() => outcomeKpis(visibleRuns, now), [visibleRuns, now])
-  const volume = React.useMemo(() => runVolumeByRoutine(visibleRuns, routines, now), [visibleRuns, routines, now])
+  const volume = React.useMemo(() => runOutcomesByDay(visibleRuns, now), [visibleRuns, now])
   const routineOf = (slug: string) => routines.find((p) => p.slug === slug)
 
   const newest = (list: DashboardRun[]) =>
@@ -309,7 +301,7 @@ export function RoutinesDashboard({ routines, runs, runsLoading, schedules, onSe
       </div>
 
       <DashboardCard
-        title={`Run volume · ${WINDOW_DAYS}d · by routine`}
+        title={`Run outcomes · ${WINDOW_DAYS}d · by day`}
         icon={Radio}
         hint={`${kpis.total} runs`}
         action={
