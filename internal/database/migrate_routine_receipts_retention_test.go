@@ -11,6 +11,9 @@ import (
 func TestRoutineReceiptRetentionMigration_BackfillsAgeAndWindow(t *testing.T) {
 	db := migrateChainSetup(t)
 	for _, query := range []string{
+		// Reconstruct the schema before retention, including removal of later
+		// indexes that reference columns this fixture is about to drop.
+		`DROP INDEX routine_receipts_github_content`,
 		`DROP INDEX idx_routine_webhook_receipts_list`,
 		`DROP INDEX idx_routine_webhook_receipts_expiry`,
 		`ALTER TABLE routine_webhook_receipts DROP COLUMN received_at`,

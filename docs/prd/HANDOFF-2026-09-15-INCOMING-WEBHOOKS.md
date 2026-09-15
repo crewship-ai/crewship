@@ -114,3 +114,23 @@ Evidence (whitelisted logs and screenshots, without signing secrets):
 PR #2558 is stacked on #2554; ordinary PR CI does not trigger against that base.
 The manual CI run and local full API rerun must be checked for their actual final
 results before merge. A bot walkthrough is not an approving review.
+
+## Follow-up to the final validation
+
+- Public ntfy.sh delivery is now verified independently of its history endpoint:
+  an open JSON subscription on a fresh private-to-this-test random topic received
+  the exact message sent through dev2's production notification adapter. Evidence:
+  `ntfy-stream-result.json`. The earlier empty history poll remains inconclusive.
+- The full Go run ended with exit 1: 142 package passes, the API allow-list
+  failure above, a stale schema-count sentence in the OpenAPI guide, and a
+  retention migration fixture that dropped `profile` while a later index still
+  referenced it. Database additionally reached its 30-minute timeout. The fixture
+  now removes that later index while reconstructing its pre-retention schema;
+  its migration assertions are unchanged. The guide counts now match the actual
+  generated schemas. The whole docs-inventory test package passed after this fix.
+- A whole database-package rerun uses isolated temporary files on `/dev/shm`
+  with Go executables still built under `/tmp`. It exercises file-backed SQLite
+  on tmpfs, not disk durability. The whole API rerun continues on normal `/tmp`.
+  Their completion results belong in the final evidence report/PR, not inferred
+  from package progress. CI's Go Lint job on 99469cd2 passed including the strict
+  documentation gate; other jobs were still running when this entry was written.
