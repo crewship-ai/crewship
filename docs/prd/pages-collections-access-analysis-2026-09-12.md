@@ -6,10 +6,26 @@ Datum: 2026-09-13, verze 3. Historie: v1 (4be01545) → externí oponentura
 složky s ikonkami a skutečnou správou oprávnění“**. Sledování: #2521.
 Základ: `main` 84615795 plus otevřené PR uvedené v §0.
 
-V rozhraní se objekt jmenuje **Složka** (anglicky *Folder*); interně a v API
-zůstává `collection`. Složka je skupina stránek, nikdy skupina lidí.
+V rozhraní se objekt jmenuje **Složka** (anglicky *Folder*). Složka je
+skupina stránek, nikdy skupina lidí. Původní interní název `collection`
+se při implementaci změnil na `folder`.
 
-## 0. Co už existuje a co je tento dokument
+## Aktuální stav dodávky — 2026-09-14
+
+F1 (složky), F2 (efektivní přístup), P0a/P0b (sidebar a reach) a náhradní
+F3′ (děděná oprávnění) jsou sloučené do `main`; validační základ je
+`bfa28fd8`. **Níže je historická analýza, nikoli aktuální kontrakt API.**
+Fáze F3–F5, delegace `manage`, expirace a vracení dávek byly nahrazeny
+[modelem děděných oprávnění](pages-folder-permissions-linux-model-2026-09-13.md).
+Jejich absence není nedokončenou částí schválené dodávky.
+
+Aktuální kontrakt: [API Pages](../api-reference/pages.mdx) a
+[CLI page](../cli/page.mdx). Objekt i API se jmenují `folder` / `page-folders`;
+ikona v sidebaru nese vybranou barvu přímo. Souhrn sdílení rozlišuje lidi,
+crews, jejich kombinaci a workspace. Stav akceptace a meze ověření jsou
+v [uzavíracím záznamu](pages-folder-delivery-status-2026-09-14.md).
+
+## 0. Historický výchozí stav návrhu
 
 | Věc | Stav | Hlava |
 |---|---|---|
@@ -20,7 +36,7 @@ zůstává `collection`. Složka je skupina stránek, nikdy skupina lidí.
 | Tento dokument | PR #2522 | tento commit |
 
 Seskupení podle vlastníka v #2525 **není** cíl; je to navigace nad dnešními
-daty. Cíl jsou složky z §3–§6. Nic z §3–§6 není implementováno.
+daty. Cíl jsou složky z §3–§6. V době vzniku této analýzy nebylo nic z §3–§6 implementováno; dnešní stav viz výše.
 
 Nálezy druhého kola oponentury (v2 §11) zatím nedorazily; §9 je proto
 seznam bezpečnostně neuzavřených bodů, které jdou k cílené oponentuře
