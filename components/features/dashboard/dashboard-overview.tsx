@@ -189,6 +189,7 @@ const ATTENTION_ACTION: Record<string, string> = {
   capacity: "Details",
   credentials: "Install",
   schedules: "Review",
+  drafts: "Publish",
 }
 
 /** How many rows the strip renders as cards before it starts summarising. */

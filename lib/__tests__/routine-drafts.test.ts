@@ -3,6 +3,15 @@ import { loadRoutineDraft, saveRoutineDraft } from "../routine-drafts"
 import { apiFetch } from "../api-fetch"
 vi.mock("../api-fetch", () => ({ apiFetch: vi.fn() }))
 describe("draft HTTP errors", () => {
+  it.each([
+    { error: "routine draft changed or its published recipe changed" },
+    { detail: "A newer document is available" },
+  ])("preserves conflict status independently of error wording", async (body) => {
+    vi.mocked(apiFetch).mockResolvedValue(new Response(JSON.stringify(body), { status: 409 }))
+    await expect(loadRoutineDraft("ws", "recipe")).rejects.toMatchObject({
+      name: "RoutineDraftError", status: 409, message: body.error || body.detail,
+    })
+  })
   it.each(["load", "save"])("%s explains a non-JSON proxy failure", async (operation) => {
     vi.mocked(apiFetch).mockResolvedValue(new Response("<html>Bad gateway</html>", { status: 502 }))
     const result =

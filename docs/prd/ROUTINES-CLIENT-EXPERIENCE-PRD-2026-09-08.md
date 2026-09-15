@@ -1,5 +1,7 @@
 # Routines: srozumitelná obsluha a spolehlivé autorování
 
+**Navazující inkrement 15. září:** [vstupy, pravidla práce a řešení problémů](ROUTINES-CLARITY-PRD-2026-09-15.md), issue #2555. Níže uvedený úvod je historický stav z 12. září. Opravy #2553 uzavírá [protokol po mergi](https://github.com/crewship-ai/crewship/pull/2553#issuecomment-5672592832); lidská přejímka zůstává otevřená.
+
 Datum zadání: 2026-09-08. Aktualizace stavu: 2026-09-12.
 Toto je živý dokument rozsahu, akceptace a důkazů Routines. Historická předání
 zůstávají archivem. Kód A–D a opravy N1–N4 byly sloučeny a nasazeny na dev1;

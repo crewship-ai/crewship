@@ -57,7 +57,7 @@ describe("<RoutinesExplorer> chrome", () => {
     // them at the same weight as the ones with content is what made
     // the column a wall of identical rows.
     render(<RoutinesExplorer {...PROPS} routines={[pipeline({})]} />)
-    const empty = screen.getByText("Failed").className
+    const empty = screen.getByText("Could not finish").className
     const filled = screen.getByText("Completed").className
     expect(empty).toContain("text-foreground/40")
     expect(filled).toContain("text-foreground/80")
@@ -73,7 +73,7 @@ describe("<RoutinesExplorer> chrome", () => {
     expect(chosen.querySelector("svg")).toBeTruthy()
   })
 
-  it("keeps the live sub-line on a running routine", () => {
+  it("marks a running routine with a Running chip", () => {
     h.live = new Map([
       [
         "nightly",
@@ -81,7 +81,7 @@ describe("<RoutinesExplorer> chrome", () => {
       ],
     ])
     render(<RoutinesExplorer {...PROPS} routines={[pipeline({})]} />)
-    expect(screen.getByText(/▶ Running/)).toBeInTheDocument()
+    expect(screen.getByTestId("routine-live-chip")).toHaveTextContent("Running")
   })
 })
 

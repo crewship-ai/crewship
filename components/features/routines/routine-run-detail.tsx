@@ -6,11 +6,13 @@ import { describeStep } from "@/lib/routine-step-describe"
 import { useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
+import { toast } from "sonner"
 import { RoutineRunInputsDialog } from "./routine-run-inputs-dialog"
 import { routineInputSpecs, type RoutineInputSpec } from "@/lib/routine-inputs"
 import { apiFetch } from "@/lib/api-fetch"
 import { RoutineStartIntent } from "@/lib/routine-start-intent"
 import { useAbilities } from "@/hooks/use-abilities"
+import { useWorkspaceAgentDirectory } from "@/hooks/use-workspace-agent-directory"
 import { canApproveRoutine, roleAtLeast } from "@/lib/routine-governance"
 import { useTrace } from "@/hooks/use-trace"
 import { usePendingApproval } from "@/hooks/use-pending-approval"
@@ -18,6 +20,7 @@ import { TraceCanvas } from "@/components/features/activity/trace-canvas"
 import { RunActivityTimeline } from "@/components/features/activity/run-activity-timeline"
 import { RoutineRunArtifacts } from "./routine-run-artifacts"
 import { RoutineExecutionHistory } from "./routine-execution-history"
+import { RoutineExecutionInsights } from "./routine-execution-insights"
 import { RoutineStepSpine } from "./routine-step-spine"
 import { useRunExecutions } from "@/hooks/use-run-executions"
 import { RoutineApprovalBanner } from "./routine-approval-banner"
@@ -41,17 +44,25 @@ import {
   CheckCircle2,
   AlertCircle,
   History,
+  Lightbulb,
+  XCircle,
 } from "lucide-react"
 import { DetailCard, Pill } from "@/components/ui/detail"
 import { RoutineIdentityHeader } from "./routine-identity-header"
 import { routineViewHref } from "./routine-navigation"
 import {
+  routineRunBanner,
   routineRunPresentation,
   routineResultLabel,
-  routineRunExplanation,
   routineStoppingPointLabel,
 } from "@/lib/routine-run-presentation"
 import type { RoutineDetail } from "./routines-detail-panel"
+import type { RoutineDraftSummary } from "./routines-workspace"
+
+// `draft` is the contract's additive detail field; WP-B types it on
+// RoutineDetail. Read here through a local extension so the page behaves
+// correctly whether or not the field has landed.
+type RoutineDetailWithDraft = RoutineDetail & { draft?: RoutineDraftSummary | null }
 
 import { RoutineSavedInputs, readableFieldName } from "./routine-saved-inputs"
 
@@ -65,7 +76,7 @@ interface RoutineRunDetailProps {
 
 export function RoutineRunDetail({ workspaceId, runId }: RoutineRunDetailProps) {
   const { run, dsl, loading, error, refresh } = useTrace(workspaceId, runId)
-  const [routine, setRoutine] = useState<RoutineDetail | null>(null)
+  const [routine, setRoutine] = useState<RoutineDetailWithDraft | null>(null)
   const [identityRevision, setIdentityRevision] = useState(0)
   useEffect(() => {
     setRoutine(null)
@@ -96,6 +107,12 @@ export function RoutineRunDetail({ workspaceId, runId }: RoutineRunDetailProps) 
   )
   const [selectedStep, setSelectedStep] = useState<string | null>(null)
   const { role } = useAbilities()
+  // "Ask the lead to fix it" opens the crew lead's chat with the run pinned
+  // in the prompt (the chat page reads ?prompt= and sends it once). The
+  // directory rows carry crew_id and agent_role beyond the typed identity.
+  // Only looked up once the run is here: a run that cannot be loaded must
+  // not fan out to other endpoints (run-drill-down-lookup-error).
+  const directory = useWorkspaceAgentDirectory(run ? workspaceId : undefined)
   const router = useRouter()
   const preparation = useRef(0)
   const startIntent = useRef(new RoutineStartIntent())
@@ -228,11 +245,7 @@ export function RoutineRunDetail({ workspaceId, runId }: RoutineRunDetailProps) 
       if (!res.ok) throw new Error("The selected recipe version is unavailable.")
       const routine = await res.json()
       if (request !== preparation.current) return
-      const specs = routineInputSpecs(routine.definition).map((spec) =>
-        Object.hasOwn(run.inputs ?? {}, spec.name)
-          ? { ...spec, default: run.inputs![spec.name] }
-          : spec,
-      )
+      const specs = routineInputSpecs(routine.definition)
       setRunDefinition(routine.definition ?? null)
       setSelectedVersion(version)
       setInputSpecs(specs)
@@ -258,11 +271,74 @@ export function RoutineRunDetail({ workspaceId, runId }: RoutineRunDetailProps) 
   // A run that ended badly on its own merits (failed, interrupted, result
   // failed); a stopped run is not offered a fix because nothing broke.
   const failed = !active && presentation.tone === "destructive"
-  const explanation = routineRunExplanation(
-    run,
-    active ? (approval.waitpoint ? "approval" : currentStep?.wait?.kind) : undefined,
-  )
   const declaredResult = run.output ? routineResultLabel(run.output, dsl) : null
+  const waitKind = active ? (approval.waitpoint ? "approval" : currentStep?.wait?.kind) : undefined
+  const waitStep = approval.waitpoint
+    ? dsl?.steps?.find((s) => s.id === approval.waitpoint?.step_id)
+    : currentStep
+  const banner = routineRunBanner({
+    run,
+    steps: dsl?.steps,
+    waitKind,
+    waiting: approval.waitpoint
+      ? {
+          who:
+            (waitStep?.wait as { approval_title?: string } | undefined)?.approval_title
+              ?.split(/\r?\n/)[0]
+              ?.trim() || undefined,
+          why: approval.waitpoint.prompt?.split(/\r?\n/)[0]?.trim() || undefined,
+          expiresAt: approval.waitpoint.timeout_at,
+        }
+      : undefined,
+    resultLabel: declaredResult,
+  })
+  // Without the server's failure projection there is no plain-language
+  // reason, so the raw message stays in the banner (today's text); with it,
+  // the raw message lives only in Technical details.
+  const rawErrorInBanner = !run.failure?.summary && !!run.error_message && !active
+  const failedStepName =
+    run.failed_at_step && dsl?.steps?.some((step) => step.id === run.failed_at_step)
+      ? describeStep(
+          dsl.steps.find((step) => step.id === run.failed_at_step),
+          1,
+        ).title
+      : null
+  const publishedNow =
+    run.pipeline_version != null &&
+    routine?.slug === run.pipeline_slug &&
+    routine.head_version != null &&
+    routine.head_version > run.pipeline_version
+      ? routine.head_version
+      : null
+  const lead = (() => {
+    const rows = (directory.agents ?? []) as unknown as Array<{
+      id: string
+      slug: string
+      crew_id?: string
+      agent_role?: string
+    }>
+    const crewId = routine?.author_crew_id || run.invoking_crew_id
+    const inCrew = crewId ? rows.filter((a) => a.crew_id === crewId) : []
+    return (
+      inCrew.find((a) => a.agent_role === "LEAD") ??
+      rows.find((a) => a.agent_role === "LEAD") ??
+      inCrew[0] ??
+      null
+    )
+  })()
+  const fixPrompt = `Run ${run.id} of routine "${run.pipeline_name || run.pipeline_slug}" could not finish${run.failure?.step_name || failedStepName || run.failed_at_step ? ` at step "${run.failure?.step_name || failedStepName || run.failed_at_step}"` : ""}.${run.failure?.summary ? ` ${run.failure.summary}` : run.error_message ? ` Error: ${run.error_message}` : ""} Look at the run, tell me what to change in the routine, and save the change as a draft with save_routine_draft — do not publish.`
+  const askLeadHref = lead
+    ? `/chat/${encodeURIComponent(lead.slug)}?prompt=${encodeURIComponent(fixPrompt)}`
+    : "/chat"
+  const askLead = () => {
+    if (lead) return
+    // No lead to hand the prompt to: the reader picks the agent in chat and
+    // pastes what we copied.
+    void navigator.clipboard?.writeText(fixPrompt).then(
+      () => toast.success("Copied the run and the step — paste it to the agent you choose."),
+      () => toast.error("Could not copy. Open the chat and describe the run by its id."),
+    )
+  }
   const identity =
     routine?.slug === run.pipeline_slug
       ? routine
@@ -272,13 +348,15 @@ export function RoutineRunDetail({ workspaceId, runId }: RoutineRunDetailProps) 
         }
   const activityHref = `/activity?${new URLSearchParams({ pipeline: run.pipeline_slug, run: runId })}`
   const StatusIcon =
-    presentation.tone === "destructive" || presentation.tone === "warn"
-      ? AlertCircle
-      : active
-        ? Clock
-        : presentation.tone === "success"
-          ? CheckCircle2
-          : Square
+    banner.tone === "destructive"
+      ? XCircle
+      : banner.tone === "warn"
+        ? AlertCircle
+        : active
+          ? Clock
+          : banner.tone === "success"
+            ? CheckCircle2
+            : Square
   const triggerLabel =
     (
       {
@@ -369,7 +447,7 @@ export function RoutineRunDetail({ workspaceId, runId }: RoutineRunDetailProps) 
                 onClick={() => setConfirmStop(true)}
               >
                 <Square className="mr-1.5 h-3.5 w-3.5" />
-                {stopping ? "Stopping…" : "Stop run"}
+                {stopping ? "Stopping…" : "Stop"}
               </Button>
             )}
             {roleAtLeast(role, "MEMBER") && !active && (
@@ -380,6 +458,13 @@ export function RoutineRunDetail({ workspaceId, runId }: RoutineRunDetailProps) 
                 onClick={() => void prepareAgain()}
               >
                 {starting ? "Preparing…" : "Run again"}
+              </Button>
+            )}
+            {failed && roleAtLeast(role, "MEMBER") && (
+              <Button asChild variant="outline" size="sm">
+                <Link href={askLeadHref} onClick={askLead}>
+                  Ask the lead to fix it
+                </Link>
               </Button>
             )}
           </>
@@ -394,8 +479,7 @@ export function RoutineRunDetail({ workspaceId, runId }: RoutineRunDetailProps) 
           {triggerLabel}
           {!active && run.duration_ms != null && (
             <>
-              {" · "}took{" "}
-              <span className="font-mono">{formatDurationMs(run.duration_ms)}</span>
+              {" · "}took <span className="font-mono">{formatDurationMs(run.duration_ms)}</span>
             </>
           )}
           {" · "}
@@ -409,25 +493,75 @@ export function RoutineRunDetail({ workspaceId, runId }: RoutineRunDetailProps) 
           ) : (
             "recipe version unavailable"
           )}
+          {publishedNow && (
+            <span className="text-muted-foreground-soft"> (v{publishedNow} is published now)</span>
+          )}
         </span>
       </RoutineIdentityHeader>
 
-      {/* The verdict, then the facts. Both used to sit inside a card called Run
-        summary, above a second row of tabs — three levels of chrome before the
-        answer the reader came for. */}
-      <div className="flex flex-col gap-2 rounded-xl border border-border/60 bg-card px-4 py-3">
+      {/* One banner per state, in the reader's words: who needs to decide,
+        where the work is, what stopped and what is kept. The raw error stays
+        in Technical details. */}
+      <div
+        data-testid="run-banner"
+        data-tone={banner.tone}
+        className={`flex flex-col gap-2 rounded-xl border px-4 py-3 ${
+          banner.tone === "destructive"
+            ? "border-destructive/30 bg-destructive/10"
+            : banner.tone === "warn"
+              ? "border-warn/30 bg-warn/10"
+              : banner.tone === "success"
+                ? "border-success/30 bg-success/10"
+                : banner.tone === "blue"
+                  ? "border-primary/30 bg-primary/10"
+                  : "border-border/60 bg-card"
+        }`}
+      >
         <div className="flex flex-wrap items-start gap-3">
-          <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-muted">
+          <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-card">
             <StatusIcon
-              className={`h-4 w-4 ${presentation.tone === "destructive" ? "text-destructive" : presentation.tone === "warn" ? "text-warn" : active ? "text-primary" : presentation.tone === "success" ? "text-success" : "text-muted-foreground"}`}
+              className={`h-4 w-4 ${banner.tone === "destructive" ? "text-destructive" : banner.tone === "warn" ? "text-warn" : banner.tone === "blue" ? "text-primary" : banner.tone === "success" ? "text-success" : "text-muted-foreground"}`}
             />
           </span>
-          <div className="min-w-0 flex-1">
-            <h2 className="text-sm font-medium">{explanation.title}</h2>
+          <div className="min-w-0 flex-1 basis-[calc(100%-44px)] md:basis-auto">
+            <h2 className="text-sm font-medium">{banner.title}</h2>
             <p className="mt-1 max-w-[85ch] text-xs leading-relaxed text-muted-foreground">
-              {explanation.detail}
+              {banner.detail}
             </p>
+            {banner.kept !== undefined && (
+              <p className="mt-1.5 max-w-[85ch] text-xs leading-relaxed">
+                <span className="font-medium">Kept:</span> {banner.kept}.{" "}
+                <span className="font-medium">Not done:</span> {banner.notDone}.
+              </p>
+            )}
+            {rawErrorInBanner && (
+              <div className="mt-2 rounded-lg border border-destructive/15 bg-card/60 px-3 py-2 text-xs">
+                {run.failed_at_step && (
+                  <p className="font-medium text-destructive">
+                    {routineStoppingPointLabel(run)}: {failedStepName ?? "Name unavailable"}
+                    <span className="ml-2 font-mono text-[10px] font-normal text-muted-foreground">
+                      {run.failed_at_step}
+                    </span>
+                  </p>
+                )}
+                <p className="mt-1 whitespace-pre-wrap break-words" role="alert">
+                  {run.error_message}
+                </p>
+              </div>
+            )}
           </div>
+          {run.status === "running" && canApproveRoutine(role) && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="shrink-0"
+              disabled={stopping}
+              onClick={() => setConfirmStop(true)}
+            >
+              <Square className="mr-1.5 h-3.5 w-3.5" />
+              {stopping ? "Stopping…" : "Stop"}
+            </Button>
+          )}
           <Link
             className="inline-flex shrink-0 items-center gap-1.5 text-xs text-primary hover:underline"
             href={activityHref}
@@ -436,58 +570,6 @@ export function RoutineRunDetail({ workspaceId, runId }: RoutineRunDetailProps) 
             Open in Activity ↗
           </Link>
         </div>
-        {(run.error_message || run.failed_at_step) && (
-          <div className="rounded-lg border border-destructive/15 bg-destructive/5 px-3 py-2 text-xs">
-            {run.failed_at_step && (
-              <p className="font-medium text-destructive">
-                {routineStoppingPointLabel(run)}:{" "}
-                {dsl?.steps?.some((step) => step.id === run.failed_at_step)
-                  ? describeStep(
-                      dsl.steps.find((step) => step.id === run.failed_at_step),
-                      1,
-                    ).title
-                  : "Name unavailable"}
-                <span className="ml-2 font-mono text-[10px] font-normal text-muted-foreground">
-                  {run.failed_at_step}
-                </span>
-              </p>
-            )}
-            {run.error_message && (
-              <p className="mt-1 whitespace-pre-wrap break-words" role="alert">
-                {run.error_message}
-              </p>
-            )}
-          </div>
-        )}
-        {failed && (
-          <p className="text-xs text-muted-foreground" data-testid="run-next-step">
-            What you can do: fix the step in{" "}
-            {roleAtLeast(role, "MANAGER") ? (
-              <Link
-                className="text-primary hover:underline"
-                href={`/routines?${new URLSearchParams({ slug: run.pipeline_slug, view: "edit" })}`}
-              >
-                Edit recipe
-              </Link>
-            ) : (
-              "the recipe (a manager can edit it)"
-            )}
-            , then{" "}
-            {roleAtLeast(role, "MEMBER") ? (
-              <button
-                type="button"
-                className="text-primary hover:underline disabled:opacity-60"
-                disabled={starting}
-                onClick={() => void prepareAgain()}
-              >
-                run again
-              </button>
-            ) : (
-              "run again"
-            )}
-            .
-          </p>
-        )}
         {run.issue_identifier && (
           <Link
             className="text-xs text-primary"
@@ -497,6 +579,50 @@ export function RoutineRunDetail({ workspaceId, runId }: RoutineRunDetailProps) 
           </Link>
         )}
       </div>
+      {failed && (
+        <DetailCard title="What to do next" icon={Lightbulb} data-testid="run-next-step">
+          <ul className="space-y-1.5 text-xs leading-relaxed">
+            <li>
+              <span className="font-medium">If the input was wrong</span>: fix or replace it, then{" "}
+              {roleAtLeast(role, "MEMBER") ? (
+                <button
+                  type="button"
+                  className="text-primary hover:underline disabled:opacity-60"
+                  disabled={starting}
+                  onClick={() => void prepareAgain()}
+                >
+                  run again
+                </button>
+              ) : (
+                "run again"
+              )}{" "}
+              — a new run, it does not resume this one.
+            </li>
+            <li>
+              <span className="font-medium">If a rule is too strict</span>:{" "}
+              {roleAtLeast(role, "MEMBER") ? (
+                <Link className="text-primary hover:underline" href={askLeadHref} onClick={askLead}>
+                  ask the lead to change it
+                </Link>
+              ) : (
+                "ask the lead to change it"
+              )}
+              , or edit it with the CLI (
+              <code className="font-mono text-[11px]">
+                crewship routine draft {run.pipeline_slug}
+              </code>
+              ). Either way you get a draft to publish.
+            </li>
+            <li>
+              <span className="font-medium">Keeps failing?</span> Compare with the earlier runs in{" "}
+              <Link className="text-primary hover:underline" href={routineViewHref(run.pipeline_slug, "history")}>
+                History
+              </Link>
+              .
+            </li>
+          </ul>
+        </DetailCard>
+      )}
       {approval.waitpoint && (
         <div className="space-y-2">
           <RoutineApprovalBanner
@@ -526,8 +652,9 @@ export function RoutineRunDetail({ workspaceId, runId }: RoutineRunDetailProps) 
           <DialogHeader>
             <DialogTitle>Stop this run?</DialogTitle>
             <DialogDescription>
-              Pending and active work will be asked to stop. Recorded results remain
-              available. Actions that already happened are not rolled back.
+              Pending work is asked to stop. What already happened — a ledger write, a
+              message — is not undone. Actions that already happened are not rolled back;
+              recorded results stay in History.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -560,7 +687,10 @@ export function RoutineRunDetail({ workspaceId, runId }: RoutineRunDetailProps) 
         selectedVersion={selectedVersion}
         onVersionChange={(v) => void prepareAgain(v)}
         inputs={inputSpecs}
+        initialInputs={run.inputs}
         routineName={run.pipeline_name || run.pipeline_slug}
+        headVersion={routine?.slug === run.pipeline_slug ? routine.head_version : undefined}
+        draft={routine?.slug === run.pipeline_slug ? routine.draft : undefined}
         submitting={starting}
         onCancel={() => {
           preparation.current += 1
@@ -592,6 +722,7 @@ export function RoutineRunDetail({ workspaceId, runId }: RoutineRunDetailProps) 
           </button>
         </p>
       )}
+      <div id="routine-recorded-evidence" className="scroll-mt-4" tabIndex={-1} />
       {resultPanel}
       <RoutineRunArtifacts
         key={`artifacts-${runId}`}
@@ -602,8 +733,14 @@ export function RoutineRunDetail({ workspaceId, runId }: RoutineRunDetailProps) 
         noFinalResult={!run.output && run.step_outputs_available !== false}
       />
 
+      <RoutineExecutionInsights
+        rows={executions.error ? null : executions.rows}
+        partial={executions.truncated}
+        definition={dsl}
+      />
       {dsl ? (
         <RoutineStepSpine
+          behavior={run.behavior}
           workspaceId={workspaceId}
           definition={dsl}
           record={spineRecord}
@@ -674,6 +811,32 @@ export function RoutineRunDetail({ workspaceId, runId }: RoutineRunDetailProps) 
             <dd className="font-mono">${run.cost_usd.toFixed(4)}</dd>
             <dt>Mode</dt>
             <dd>{run.mode}</dd>
+            {run.failed_at_step && (
+              <>
+                <dt>{routineStoppingPointLabel(run)}</dt>
+                <dd>
+                  {failedStepName ?? "Name unavailable"}{" "}
+                  <span className="font-mono">{run.failed_at_step}</span>
+                </dd>
+              </>
+            )}
+            {run.failure?.kind && (
+              <>
+                <dt>Failure kind</dt>
+                <dd className="font-mono">{run.failure.kind}</dd>
+              </>
+            )}
+            {run.error_message && (
+              <>
+                <dt>Raw error</dt>
+                <dd
+                  className="whitespace-pre-wrap break-words font-mono"
+                  data-testid="run-raw-error"
+                >
+                  {run.error_message}
+                </dd>
+              </>
+            )}
           </dl>
           {!active && (
             <section data-testid="run-activity-section">
