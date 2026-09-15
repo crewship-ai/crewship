@@ -58,6 +58,8 @@ export type FormFieldOption = string | { value: string; label?: string }
  */
 
 export interface FormFieldSpec {
+  min?: number
+  max?: number
   value_type?: string
   allow_custom?: boolean
   name: string
@@ -78,6 +80,9 @@ export interface FormFieldSpec {
 }
 
 export interface FormFieldProps {
+  disabled?: boolean
+  invalid?: boolean
+  describedBy?: string
   field: FormFieldSpec
   value: string
   /** Deliberately event-shaped rather than `(value: string) => void`: it is
@@ -158,8 +163,17 @@ export function FormField({
   idPrefix = "",
   testIdPrefix = "form-field",
   attachmentSlot,
+  disabled,
+  invalid,
+  describedBy,
 }: FormFieldProps) {
   const id = `${idPrefix}${field.name}`
+  const controlProps = {
+    disabled,
+    "aria-invalid": invalid || undefined,
+    "aria-describedby":
+      [field.help ? `${id}-help` : "", describedBy].filter(Boolean).join(" ") || undefined,
+  }
   const explicitLabel = !!field.label?.trim()
   const emit = (next: string) => onChange({ target: { value: next } })
 
@@ -172,7 +186,11 @@ export function FormField({
 
   // Rendered under any field that carries one. Slash fields never do, so the
   // modal's markup is unchanged.
-  const help = field.help ? <p className="text-xs text-muted-foreground">{field.help}</p> : null
+  const help = field.help ? (
+    <p id={`${id}-help`} className="text-xs text-muted-foreground">
+      {field.help}
+    </p>
+  ) : null
 
   const options = field.options ?? []
 
@@ -198,6 +216,7 @@ export function FormField({
           {label}
           <Textarea
             id={id}
+            {...controlProps}
             value={value}
             onChange={onChange}
             rows={4}
@@ -213,6 +232,7 @@ export function FormField({
           {label}
           <Input
             id={id}
+            {...controlProps}
             value={value}
             onChange={onChange}
             className="font-mono text-sm"
@@ -229,7 +249,7 @@ export function FormField({
         <div className="space-y-1">
           {label}
           <Select value={value || "UTC"} onValueChange={emit}>
-            <SelectTrigger id={id}>
+            <SelectTrigger id={id} {...controlProps}>
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -251,7 +271,7 @@ export function FormField({
         <div className="space-y-1">
           {label}
           <Select value={value || "none"} onValueChange={emit}>
-            <SelectTrigger id={id}>
+            <SelectTrigger id={id} {...controlProps}>
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -271,7 +291,7 @@ export function FormField({
         <div className="space-y-1">
           {label}
           <Select value={value || "agent"} onValueChange={emit}>
-            <SelectTrigger id={id}>
+            <SelectTrigger id={id} {...controlProps}>
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -289,7 +309,7 @@ export function FormField({
         <div className="space-y-1">
           {label}
           <Select value={value || "SECRET"} onValueChange={emit}>
-            <SelectTrigger id={id}>
+            <SelectTrigger id={id} {...controlProps}>
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -306,7 +326,14 @@ export function FormField({
       return (
         <div className="space-y-1">
           {label}
-          <Input id={id} type="password" value={value} onChange={onChange} autoComplete="off" />
+          <Input
+            id={id}
+            {...controlProps}
+            type="password"
+            value={value}
+            onChange={onChange}
+            autoComplete="off"
+          />
           {help}
         </div>
       )
@@ -317,6 +344,7 @@ export function FormField({
           {label}
           <Input
             id={id}
+            {...controlProps}
             value={value}
             onChange={onChange}
             placeholder="kebab-case-slug"
@@ -334,7 +362,12 @@ export function FormField({
           {label}
           <Input
             id={id}
+            {...controlProps}
             type="number"
+            min={field.min}
+            max={field.max}
+            step={field.value_type === "integer" ? 1 : "any"}
+            inputMode={field.value_type === "integer" ? "numeric" : "decimal"}
             value={value}
             onChange={onChange}
             placeholder={field.placeholder}
@@ -350,6 +383,7 @@ export function FormField({
           value={value}
           emit={emit}
           id={id}
+          {...controlProps}
           label={label}
           help={help}
           testIdPrefix={testIdPrefix}
@@ -360,7 +394,7 @@ export function FormField({
       return (
         <div className="space-y-1">
           {label}
-          <Input id={id} type="date" value={value} onChange={onChange} />
+          <Input id={id} {...controlProps} type="date" value={value} onChange={onChange} />
           {help}
         </div>
       )
@@ -369,7 +403,7 @@ export function FormField({
       return (
         <div className="space-y-1">
           {label}
-          <Input id={id} type="month" value={value} onChange={onChange} />
+          <Input id={id} {...controlProps} type="month" value={value} onChange={onChange} />
           {help}
         </div>
       )
@@ -381,6 +415,7 @@ export function FormField({
             {label}
             <Input
               id={id}
+              {...controlProps}
               list={`${id}-choices`}
               value={value}
               onChange={onChange}
@@ -400,7 +435,7 @@ export function FormField({
         <div className="space-y-1">
           {label}
           <Select value={value} onValueChange={emit}>
-            <SelectTrigger id={id}>
+            <SelectTrigger id={id} {...controlProps}>
               <SelectValue placeholder={field.placeholder ?? "Choose…"} />
             </SelectTrigger>
             <SelectContent>
@@ -435,7 +470,11 @@ export function FormField({
         // Emit in schema order, not click order — the rendered message must
         // not depend on which box the user happened to tick first.
         const ordered = options.map(optionValue).filter((o) => next.has(o))
-        emit(field.value_type === "array" ? JSON.stringify(ordered) : ordered.join(MULTI_SEPARATOR))
+        emit(
+          field.value_type === "array"
+            ? JSON.stringify(ordered)
+            : ordered.join(MULTI_SEPARATOR),
+        )
       }
       return (
         <div className="space-y-1">
@@ -447,6 +486,8 @@ export function FormField({
           </span>
           <div
             role="group"
+            aria-invalid={invalid || undefined}
+            aria-describedby={controlProps["aria-describedby"]}
             aria-label={fieldLabelText(field)}
             className="flex flex-wrap gap-x-4 gap-y-2 pt-1"
           >
@@ -457,6 +498,7 @@ export function FormField({
                 <div key={v} className="flex items-center gap-2">
                   <Checkbox
                     id={optionId}
+                    {...controlProps}
                     checked={selected.has(v)}
                     onCheckedChange={(c) => toggle(v, c === true)}
                   />
@@ -490,6 +532,7 @@ export function FormField({
           <div className="flex items-center gap-2">
             <Checkbox
               id={id}
+              {...controlProps}
               checked={value === "true"}
               onCheckedChange={(c) => emit(c === true ? "true" : "")}
             />
@@ -526,7 +569,13 @@ export function FormField({
       return (
         <div className="space-y-1">
           {label}
-          <Input id={id} value={value} onChange={onChange} placeholder={field.placeholder} />
+          <Input
+            id={id}
+            {...controlProps}
+            value={value}
+            onChange={onChange}
+            placeholder={field.placeholder}
+          />
           {help}
         </div>
       )

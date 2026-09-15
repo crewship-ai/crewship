@@ -9,6 +9,15 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+### Added
+
+- **Routine inputs and recovery rules are visible before starting work.** Run and preset forms show accepted types and ranges, inline accessible errors and restoration of recipe defaults. Recipe and historical step details describe configured checks and failure handling; run details expose retained evidence and recorded duration/attempt diagnostics without treating partial history as complete.
+
+### Changed
+
+- ⚠️ **Behaviour change:** explicit routine input bounds now opt into server validation even without a widget; the optional `absolute_path` format validates path syntax across run producers. Legacy type-only inputs retain their existing server contract. Explicit positive `outcomes.max_iterations` now caps worker/checker model-tier attempts instead of being ignored; zero/omitted preserves configured fallback traversal.
+
+
 ### Fixed
 - Routine results use the database's 30-second contention budget when recording a completed step, instead of failing after five seconds while waiting for a connection. This records the existing execution; it does not repeat the action.
 - Routine editors compare closing, reload and navigation against the saved draft. Unsaved edits are protected during browser history and app navigation; closing returns keyboard focus to Edit.
