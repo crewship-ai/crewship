@@ -166,6 +166,79 @@ test.describe("⌘K — every row opens the thing it names", () => {
     }
   })
 
+  test("a page opens that page", async ({ page }) => {
+    // Own this fixture, as the project test does: a workspace with agents
+    // is not guaranteed a page, and a missing row must not become a skip.
+    // The page is owned by the first crew so the row also carries a crew
+    // name on the right; the producer is a script reference, which needs no
+    // routine to exist.
+    const fixture = await page.evaluate(async () => {
+      const workspace = window.localStorage.getItem("crewship.workspaceId")
+      // eslint-disable-next-line no-restricted-syntax -- Browser-evaluated fixtures cannot capture the app apiFetch import.
+      const crews = await (await fetch(`/api/v1/crews?workspace_id=${workspace}`)).json() as Array<{ slug: string }>
+      if (!Array.isArray(crews) || crews.length === 0) throw new Error("page fixture needs a crew to own it")
+      const slug = `palette-page-${crypto.randomUUID().slice(0, 8)}`
+      const name = `Palette page ${slug.slice(-8)}`
+      // eslint-disable-next-line no-restricted-syntax -- Browser-evaluated fixtures cannot capture the app apiFetch import.
+      const response = await fetch(`/api/v1/pages?workspace_id=${workspace}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          slug,
+          name,
+          owner: `crew/${crews[0].slug}`,
+          panels: [{
+            id: "status",
+            schema: "status.v1",
+            title: "Status",
+            owner: `crew/${crews[0].slug}`,
+            producer: "script/palette-e2e.sh",
+            sla_seconds: 3600,
+            span: 12,
+          }],
+        }),
+      })
+      if (!response.ok) throw new Error(`page fixture failed: ${response.status} ${await response.text()}`)
+      return { slug, name, workspace }
+    })
+    try {
+      const input = await openPalette(page)
+      await input.fill(fixture.name)
+      const row = page.locator(`[cmdk-item][data-href="/pages/${encodeURIComponent(fixture.slug)}"]`)
+      await expect(row).toBeVisible({ timeout: TIMEOUT })
+      // The page's own glyph, not a generic icon.
+      await expect(row.locator('[data-slot="page-glyph"]')).toHaveCount(1)
+      await row.click()
+      await expect(page).toHaveURL(new RegExp(`/pages/${fixture.slug}$`), { timeout: TIMEOUT })
+      // THAT page, not the overview: its name is on the page.
+      await expect(page.locator("main")).toContainText(fixture.name, { timeout: TIMEOUT })
+
+      // Opened once, it is offered again under Recent for this user in this
+      // workspace — and only for as long as the server still lists it.
+      await page.keyboard.press("ControlOrMeta+k")
+      await expect(page.locator("[cmdk-input]")).toBeVisible({ timeout: TIMEOUT })
+      const recent = page.locator("[cmdk-group]", { hasText: /^Recent/ })
+      await expect(recent.locator(`[cmdk-item][data-href="/pages/${encodeURIComponent(fixture.slug)}"]`)).toBeVisible({ timeout: TIMEOUT })
+      await page.keyboard.press("Escape")
+    } finally {
+      const cleaned = await page.evaluate(async ({ slug, workspace }) => {
+        // eslint-disable-next-line no-restricted-syntax -- Browser-evaluated fixtures cannot capture the app apiFetch import.
+        const response = await fetch(`/api/v1/pages/${encodeURIComponent(slug)}?workspace_id=${workspace}`, { method: "DELETE" })
+        return response.ok
+      }, fixture)
+      expect(cleaned, "delete the page created by this test").toBeTruthy()
+    }
+
+    // Deleted, the page is gone from the list — and so from Recent, even
+    // though this browser still holds the row: Recent is checked against
+    // the authorised list on every open, never trusted on its own.
+    const again = await openPalette(page)
+    await again.fill(fixture.name)
+    // Nothing else carries that name: not the Pages group, not Recent.
+    await expect(page.getByText("No results found.")).toBeVisible({ timeout: TIMEOUT })
+    await expect(page.locator(`[cmdk-item][data-href="/pages/${encodeURIComponent(fixture.slug)}"]`)).toHaveCount(0)
+  })
+
   test("a person opens that person's row on the roster", async ({ page }) => {
     await openPalette(page)
     const hit = await firstRow(page, /\/settings\?tab=members&member=/)
