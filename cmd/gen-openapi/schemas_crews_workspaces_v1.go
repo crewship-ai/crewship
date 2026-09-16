@@ -62,7 +62,20 @@ func crewWorkspaceGETSchemaCatalogV1() (map[string]map[string]DomainSchema, map[
 	addList("/api/v1/crews/{crewId}/members", "CrewMembersResponseV1", member)
 	addList("/api/v1/crews/{crewId}/integrations", "CrewIntegrationsResponseV1", object(map[string]any{"id": str(), "name": str(), "display_name": str(), "enabled": boolean(), "status": str()}))
 	addList("/api/v1/crews/{crewId}/integrations/{integrationId}/tools", "CrewIntegrationToolsResponseV1", object(map[string]any{"name": str(), "description": str(), "enabled": boolean(), "input_schema": anyObject()}))
-	addList("/api/v1/crews/{crewId}/assignments", "CrewAssignmentsResponseV1", object(map[string]any{"id": str(), "issue_id": str(), "agent_id": str(), "status": str(), "created_at": str(), "updated_at": str()}))
+	// assignmentListItem (internal/api/assignments.go). The previous
+	// declaration named issue_id/agent_id/updated_at, which the handler has
+	// never emitted, and lacked everything it does; graded by
+	// openapi_schema_keys_test.go now. queued_reason is omitempty, so it is
+	// the one field left out of required.
+	assignment := object(map[string]any{
+		"id": str(), "task": str(), "status": str(),
+		"assigned_by_name": str(), "assigned_by_slug": str(), "assigned_to_name": str(), "assigned_to_slug": str(),
+		"result_summary": nullable("string"), "error_message": nullable("string"), "queued_reason": nullable("string"),
+		"started_at": nullable("string"), "finished_at": nullable("string"), "created_at": str(),
+	})
+	assignment["required"] = []string{"id", "task", "status", "assigned_by_name", "assigned_by_slug", "assigned_to_name", "assigned_to_slug",
+		"result_summary", "error_message", "started_at", "finished_at", "created_at"}
+	addList("/api/v1/crews/{crewId}/assignments", "CrewAssignmentsResponseV1", assignment)
 	addList("/api/v1/crews/{crewId}/missions", "CrewMissionsResponseV1", object(map[string]any{"id": str(), "title": str(), "description": str(), "status": str(), "created_at": str(), "updated_at": str()}))
 	// The crew issue sub-resources (GET .../issues/{identifier}, /activity,
 	// /runs, /comments, /relations, /subtasks), /escalations and /provision

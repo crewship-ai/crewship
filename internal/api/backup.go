@@ -522,51 +522,78 @@ func (h *BackupHandler) Restore(w http.ResponseWriter, r *http.Request) {
 			})
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{
-		"manifest":              result.Manifest,
-		"restored_ws":           result.RestoredWs,
-		"restored_workspace_id": result.RestoredWorkspaceID,
-		"crews_count":           result.CrewsCount,
-		// What the bundle describes (crews_count) and what actually
-		// landed (crews_restored) are different numbers, and reporting
-		// the first as if it were the second is how a restore that
-		// wrote nothing reads as a success.
-		"crews_restored":       result.CrewsRestored,
-		"rows_inserted":        result.RowsInserted,
-		"docker_phase_skipped": result.DockerPhaseSkipped,
-		// The only place that names WHICH crews lost their filesystem
-		// data. It was computed and then dropped on the floor here, so
-		// the CLI could print the generic warning and nothing else —
-		// leaving the operator to work out for themselves which crews
-		// still needed the resume (#1716).
-		"dropped_crew_filesystems": result.DroppedCrewFilesystems,
-		"security_level_clamped":   result.SecurityLevelClamped,
-		"security_level_clamps":    result.SecurityLevelClamps,
-		// Schema skew: values the bundle carried in columns this instance's
-		// schema does not have, which the restore discarded (#2034). A
-		// non-zero count means the restore was incomplete in a way
-		// `rows_inserted` cannot show — a row whose dropped column was part
-		// of its primary key never landed at all, and INSERT OR IGNORE
-		// reported nothing.
-		"columns_dropped": result.ColumnsDropped,
-		"dropped_columns": result.DroppedColumns,
-		// Pre-#1797 issue_counters rows this restore translated instead of
-		// losing to columns_dropped (#2034).
-		"issue_counters_migrated": result.IssueCountersMigrated,
-		// #2009: the two completeness comparisons — does the payload match
-		// the manifest, and did the insert land what the payload carries.
-		// See RestoreResult's doc comments for what distinguishes them.
-		"payload_row_count_mismatches": result.PayloadRowCountMismatches,
-		"rows_inserted_shortfalls":     result.RowsInsertedShortfalls,
-		// A FORKED restore regenerates the ids the journal hash chain
-		// commits to, so it has to re-sign the chain under a new genesis
-		// (#2226). Reported because the fork's journal no longer links
-		// back to the source's history, and an operator who is not told
-		// will read a clean `verify` as provenance it does not have.
-		// Zero on a plain restore, which remaps nothing.
-		"journal_entries_resigned":     result.JournalEntriesResigned,
-		"journal_checkpoints_resigned": result.JournalCheckpointsResigned,
+	writeJSON(w, http.StatusOK, backupRestoreResponse{
+		Manifest:                   result.Manifest,
+		RestoredWs:                 result.RestoredWs,
+		RestoredWorkspaceID:        result.RestoredWorkspaceID,
+		CrewsCount:                 result.CrewsCount,
+		CrewsRestored:              result.CrewsRestored,
+		RowsInserted:               result.RowsInserted,
+		DockerPhaseSkipped:         result.DockerPhaseSkipped,
+		DroppedCrewFilesystems:     result.DroppedCrewFilesystems,
+		SecurityLevelClamped:       result.SecurityLevelClamped,
+		SecurityLevelClamps:        result.SecurityLevelClamps,
+		ColumnsDropped:             result.ColumnsDropped,
+		DroppedColumns:             result.DroppedColumns,
+		IssueCountersMigrated:      result.IssueCountersMigrated,
+		PayloadRowCountMismatches:  result.PayloadRowCountMismatches,
+		RowsInsertedShortfalls:     result.RowsInsertedShortfalls,
+		JournalEntriesResigned:     result.JournalEntriesResigned,
+		JournalCheckpointsResigned: result.JournalCheckpointsResigned,
 	})
+}
+
+// backupRestoreResponse is the body of POST /api/v1/admin/backups/restore. It
+// used to be a map literal, which left the OpenAPI schema
+// (FinalAdminPlatformBackupRestore) with nothing to be checked against, and it
+// drifted: five fields (#2251, #2245, #2009) were emitted for months without
+// the spec naming them. A struct with json tags is what
+// openapi_schema_keys_test.go can compare, so it stays one.
+//
+// Every field is emitted unconditionally, exactly as the map was — a client
+// reading `journal_entries_resigned` on a plain restore gets 0, not absent.
+type backupRestoreResponse struct {
+	Manifest            *backup.Manifest `json:"manifest"`
+	RestoredWs          string           `json:"restored_ws"`
+	RestoredWorkspaceID string           `json:"restored_workspace_id"`
+	CrewsCount          int              `json:"crews_count"`
+	// What the bundle describes (crews_count) and what actually landed
+	// (crews_restored) are different numbers, and reporting the first as
+	// if it were the second is how a restore that wrote nothing reads as a
+	// success.
+	CrewsRestored      int  `json:"crews_restored"`
+	RowsInserted       int  `json:"rows_inserted"`
+	DockerPhaseSkipped bool `json:"docker_phase_skipped"`
+	// The only place that names WHICH crews lost their filesystem data. It
+	// was computed and then dropped on the floor here, so the CLI could
+	// print the generic warning and nothing else — leaving the operator to
+	// work out for themselves which crews still needed the resume (#1716).
+	DroppedCrewFilesystems []string                    `json:"dropped_crew_filesystems"`
+	SecurityLevelClamped   int                         `json:"security_level_clamped"`
+	SecurityLevelClamps    []backup.SecurityLevelClamp `json:"security_level_clamps"`
+	// Schema skew: values the bundle carried in columns this instance's
+	// schema does not have, which the restore discarded (#2034). A non-zero
+	// count means the restore was incomplete in a way `rows_inserted`
+	// cannot show — a row whose dropped column was part of its primary key
+	// never landed at all, and INSERT OR IGNORE reported nothing.
+	ColumnsDropped int                    `json:"columns_dropped"`
+	DroppedColumns []backup.DroppedColumn `json:"dropped_columns"`
+	// Pre-#1797 issue_counters rows this restore translated instead of
+	// losing to columns_dropped (#2034).
+	IssueCountersMigrated int `json:"issue_counters_migrated"`
+	// #2009: the two completeness comparisons — does the payload match the
+	// manifest, and did the insert land what the payload carries. See
+	// RestoreResult's doc comments for what distinguishes them.
+	PayloadRowCountMismatches []backup.TableRowCountMismatch `json:"payload_row_count_mismatches"`
+	RowsInsertedShortfalls    []backup.TableRowCountMismatch `json:"rows_inserted_shortfalls"`
+	// A FORKED restore regenerates the ids the journal hash chain commits
+	// to, so it has to re-sign the chain under a new genesis (#2226).
+	// Reported because the fork's journal no longer links back to the
+	// source's history, and an operator who is not told will read a clean
+	// `verify` as provenance it does not have. Zero on a plain restore,
+	// which remaps nothing.
+	JournalEntriesResigned     int `json:"journal_entries_resigned"`
+	JournalCheckpointsResigned int `json:"journal_checkpoints_resigned"`
 }
 
 // clampedToTier reports the tier the restore clamped to, read off the
