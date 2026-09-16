@@ -228,8 +228,12 @@ func (index *cliDocIndex) invokes(line, command string) bool {
 		if idx < 0 {
 			return false
 		}
-		end := offset + idx + len(needle)
-		offset = offset + idx + 1
+		start := offset + idx
+		end := start + len(needle)
+		offset = start + 1
+		if start > 0 && isFlagNameByte(line[start-1]) {
+			continue
+		}
 		if end < len(line) && isFlagNameByte(line[end]) {
 			continue
 		}

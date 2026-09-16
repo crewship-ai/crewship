@@ -807,7 +807,7 @@ func TestUnescapedExpressionInHeadings(t *testing.T) {
 		{"custom anchor id is not an expression", "Rate limits {#rate-limits}", ""},
 		{"expression before a custom id", "Limits for {key} {#rate-limits}", "{key}"},
 		{"code span then bare prose", "`{ok}` and {bad}", "{bad}"},
-		{"template braces", "Secrets ({{ secrets.<type> }})", "{ secrets.<type> }"},
+		{"template braces", "Secrets ({{ secrets.<type> }})", "{{ secrets.<type> }}"},
 		{"no braces", "Plain heading", ""},
 	}
 	for _, tt := range tests {

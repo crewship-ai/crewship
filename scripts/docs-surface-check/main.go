@@ -64,7 +64,7 @@ var codeFence = regexp.MustCompile("^\\s*(?:```|~~~)")
 // The constructs that put an anchor on a page, or that stand between a heading's
 // Markdown source and the text Mintlify slugs.
 var (
-	atxHeading      = regexp.MustCompile(`^#{1,6}\s+(.*?)\s*$`)
+	atxHeading      = regexp.MustCompile(`^ {0,3}#{1,6}\s+(.*?)\s*$`)
 	customHeadingID = regexp.MustCompile(`\s*\{#([A-Za-z0-9_-]+)\}\s*$`)
 	openingTag      = regexp.MustCompile(`<([A-Za-z][A-Za-z0-9]*)\b[^>]*>`)
 	attributeID     = regexp.MustCompile(`\bid=(?:"([^"]*)"|'([^']*)')`)
@@ -1404,7 +1404,7 @@ func partitionHeadingExpressions(found []headingExpression) (unlisted []headingE
 // escapeExpression is the spelling that renders the braces: `{token}` becomes
 // `\{token\}`.
 func escapeExpression(expression string) string {
-	return `\` + strings.TrimSuffix(expression, "}") + `\}`
+	return strings.NewReplacer("{", `\{`, "}", `\}`).Replace(expression)
 }
 
 // unescapedExpression returns the first `{…}` a heading's prose would hand to
@@ -1418,8 +1418,22 @@ func unescapedExpression(text string) string {
 		}
 		segment = strings.ReplaceAll(segment, `\{`, "\x01")
 		segment = strings.ReplaceAll(segment, `\}`, "\x02")
-		if expression := mdxExpression.FindString(segment); expression != "" {
-			return expression
+		start, depth := -1, 0
+		for pos, char := range segment {
+			switch char {
+			case '{':
+				if depth == 0 {
+					start = pos
+				}
+				depth++
+			case '}':
+				if depth > 0 {
+					depth--
+					if depth == 0 {
+						return segment[start : pos+1]
+					}
+				}
+			}
 		}
 	}
 	return ""
