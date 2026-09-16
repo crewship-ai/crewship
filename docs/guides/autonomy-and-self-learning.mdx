@@ -127,10 +127,25 @@ Every arm — refused, held or allowed — writes an audit row carrying `decisio
 
 ## `behavior_mode` — what happens when the monitor fires
 
-The F4.2 behavior monitor (Keeper Phase 2) samples tool calls per crew config and runs them through a `behavior_evaluator`. The evaluator returns `ALLOW | DENY | ESCALATE`. `behavior_mode` controls what `DENY` means:
+The F4.2 behavior monitor (Keeper Phase 2) samples tool calls — one in every N per crew, N from the workspace's [watchdog governance](/guides/keeper#watchdog-governance-per-workspace), default 5 — and runs them through a `behavior_evaluator`. The evaluator returns `ALLOW | WARN | DENY | ESCALATE`. `behavior_mode` controls what `DENY` means:
 
-- **`warn`** (default) — `DENY` lands as a non-blocking inbox notification; the agent's tool call proceeds. The operator sees the warning and decides whether to tighten autonomy or update the agent's persona. Recommended for new crews — false positives don't break workflows.
-- **`block`** — `DENY` interrupts the agent's next tool call AND opens a blocking inbox approval. The operator has to confirm before the agent can proceed. Recommended for crews with established behavior-monitor confidence (the operator has seen the warn-mode signal pattern for weeks and is ready to trust DENY as a real signal).
+- **`warn`** (default) — `DENY` is degraded to `WARN`; the agent's tool call has already run and nothing is interrupted. Recommended for new crews — false positives don't break workflows.
+- **`block`** — `DENY` is a *block* verdict. Recommended for crews with established behavior-monitor confidence (the operator has seen the warn-mode signal pattern for weeks and is ready to trust DENY as a real signal).
+
+<Warning>
+  **What a verdict actually does depends on which path produced it.** The
+  monitor sees a tool call *after* it has executed (Crewship parses the driven
+  CLI's stream; there is no pre-dispatch hook), so no verdict can undo the call
+  it sampled. On the **live sampled path** the only effect of any verdict is a
+  `hook.blocked` journal entry for a `block`-mode `DENY`; `WARN` and `ESCALATE`
+  from the sampler are not written anywhere, no inbox item is opened, and the
+  agent's next tool call is not held. The inbox rows described in the Phase 2
+  docs — a non-blocking warning, a blocking approval that pauses the crew — are
+  written by the synchronous review endpoint, which is what
+  `crewship keeper review run behavior` and an operator-authored hook call. Read
+  the monitor as detection and an audit signal, not as an authorization
+  boundary; see [Keeper → Watchdog governance](/guides/keeper#watchdog-governance-per-workspace).
+</Warning>
 
 ### Forbidden combination
 
