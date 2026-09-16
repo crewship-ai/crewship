@@ -16,6 +16,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - CI: a **Dependency drift** check on any PR touching `pnpm-lock.yaml`, `go.mod` or `go.sum` posts a table of resolved direct-dependency changes and fails when a version moved without its `package.json`/`go.mod` spec changing — the shape that let `@sentry/nextjs` 10.72 in unrequested; the `deps-drift-ok` label downgrades it to a warning. (#2237)
 - e2e: the PR browser gate answers a real `run_needs_human` card and reads the `inbox_acted` receipt off the issue — a test-only seed door (`CREWSHIP_E2E_FIXTURES=1`, refused in production, absent from the API spec) replaces the route-mocked inbox step. (#2403)
 - Incoming webhook configuration in Integrations for routines, agents and Page panels, with explicit outgoing notification labels. Routine webhooks can select a GitHub pull request signature profile with content-based replay protection.
+- **CLI:** `routine webhooks create --ingress-profile crewship|github`, a PROFILE column on `webhooks list`, and `routine webhooks fire <url|token> --secret … --body …` — a signed test delivery to the public dispatch URL in either profile, with the receipt printed back; the docs for the agent trigger's durable-ledger response (`202 {delivery_id, work_id, status, duplicate}`, `200 ignored`, 409/413/429/503), the pipeline dispatch body and status set, `--hmac-secret`, the GitHub URL suffix and the Incoming webhooks tab are brought up to date. (#2580)
 
 
 ### Fixed
