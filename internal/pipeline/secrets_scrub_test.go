@@ -151,3 +151,45 @@ func TestExecutor_ScriptFailure_ScrubbedBeforePersistAndBroadcast(t *testing.T) 
 		t.Fatalf("missing redaction: %s", persisted.ErrorMessage)
 	}
 }
+
+// The browser refetches run-records as soon as it receives run.started.
+// Reading synchronously in the broadcast callback makes the ordering race
+// deterministic instead of relying on network/SQLite timing.
+type runStartReadProbe struct {
+	t     *testing.T
+	store *RunStore
+	seen  bool
+}
+
+func (p *runStartReadProbe) BroadcastWorkspace(_, event string, payload any) {
+	if event != "pipeline.run.started" {
+		return
+	}
+	p.seen = true
+	id := payload.(map[string]any)["run_id"].(string)
+	if _, err := p.store.Get(context.Background(), id); err != nil {
+		p.t.Errorf("run.started preceded readable projection: %v", err)
+	}
+}
+func TestExecutor_RunStartedAfterProjection(t *testing.T) {
+	db := openStoreTestDB(t)
+	defer db.Close()
+	if _, err := db.Exec(runsProjectionDDL); err != nil {
+		t.Fatal(err)
+	}
+	store, runs := NewStore(db), NewRunStore(db)
+	probe := &runStartReadProbe{t: t, store: runs}
+	exec := NewExecutor(store, NewResolver(db), nil, &captureEmitter{}).WithRunStore(runs).WithWSBroadcaster(probe)
+	in := validSaveInput("start-projection")
+	in.DefinitionJSON = `{"name":"start-projection","agentless":true,"steps":[{"id":"echo","type":"transform","transform":{"input":"hello","expression":"."}}]}`
+	p, err := store.Save(context.Background(), in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := exec.Run(context.Background(), RunInput{PipelineID: p.ID, WorkspaceID: "ws_test", Mode: ModeRun}); err != nil {
+		t.Fatal(err)
+	}
+	if !probe.seen {
+		t.Fatal("missing run.started broadcast")
+	}
+}
