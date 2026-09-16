@@ -4,6 +4,32 @@ Written 2026-09-03 against `docs/ux/README.md` (§1–§6). Analysis only: no co
 was changed, nothing was deployed. Every finding carries a `file:line` or a
 screenshot path so the next agent on this cluster can start from here.
 
+## Status 2026-09-15
+
+Cluster B shipped as #2325 (2026-09-05, "one timeline, URL as state, server
+paging"); Routines were then rebuilt into one workspace by #2460 (2026-09-10)
+and the issue-mentions / durable-work track followed. Against §7:
+
+- **P1 1–6 landed.** `/issues` lists, counts and searches server-side
+  (`q/limit/offset`, `X-Total-Count`); `/routines` writes `?slug=` and
+  `?view=` (`routineViewHref`) and the dashboard / issue callers use it;
+  `/activity` writes its URL (`activity-stream-view.tsx` `pushState`) and the
+  dead `/agents/<id>` link is `entityHref({kind:"agent"})`; issue → runs rows
+  carry `run_id` / `trace_id` / `agent_slug`, the journal reads `mission_id`
+  and the issue detail links "Journal for this issue"; fetch failures are
+  distinct from empties on the audited shells; the journal drops its stats
+  rail and goes two-line below `md`.
+- **Still open or not re-verified:** 7 (board fit at 390 / 1440); 8 (one runs
+  count across Routines, Activity and Journal); 14 — `window.confirm` remains
+  for the routine draft discard (`routine-create-dialog.tsx:838`); 15
+  vocabulary in visible copy; P3 18–22 (dead-file hygiene in particular:
+  `activity/runs-view.tsx`, `issues/activity-feed.tsx` are still present).
+- Superseded by #2460: the §3 findings about the routines explorer (139 rows
+  unsorted, KPIs over the last 100 runs, two polling feeds) describe the
+  pre-rebuild page; the routine now has Overview / History / Versions / Plan
+  views and the "Wait points" tab is gone (waitpoints went to Activity and
+  the inbox).
+
 ## 0. Method and assumptions
 
 - **Tree audited:** `/srv/crewship/crewship_3` at `3fa36df5` plus the

@@ -147,23 +147,15 @@ conversations at all you get "Pick a conversation" instead.
 
 <Step title="The left column">
 
-The column lists **conversations**, not agents. The agent is an attribute of a
-row — its avatar, and its name on the row's second line — the way a sender is an
-attribute of an email, not a folder you have to open first.
+The column is one list for everything you can talk in. Under the **Chat** heading sit **New chat** and a search box, then three collapsible sections: **People** (your direct messages with colleagues), **Agents** (every agent, with its sessions folded under it — expand an agent to see them, click its name to open the freshest one) and **Team spaces** (private groups and workspace channels). The agent is an attribute of a session row, the way a sender is an attribute of an email, not a folder you have to open first.
 
-Top to bottom it is the same chrome as [/issues](/guides/issue-detail) and
-[/routines](/guides/automations), and deliberately: a **Search + Filter**
-toolbar, one bucket section — here **Show**, with **Direct**, **Routines** and
-**Issues**, each carrying its count — then the list. `Conversations`, newest
-activity first, grouped by day once there are enough of them to need headings.
-The `+` beside that heading starts one.
+**New chat** is a menu, not a button: **Chat with an agent** opens the agent picker, **Message a person**, **Create a group** and **Create a channel** open the matching dialog. Which sections are open, and which agents are expanded, are remembered for the tab.
 
 </Step>
 
 <Step title="The scopes">
 
-**Click Routines.** The list you were reading is replaced by routine steps,
-stacked under the routine that ran them.
+**Open Activity & filters** at the foot of the column and **click Routines.** The agent sessions you were reading are replaced by routine steps, stacked under the agent that ran them.
 
 This is the one control on the column that is not a filter. It is a **fetch
 parameter** — `?kind=` on `GET /api/v1/agents/{id}/chats`, which narrows inside
@@ -173,41 +165,29 @@ routines the page was already full of them before any client-side filter could
 look at it, and a person's newest conversation was not below the fold, it was
 outside the query. [Chat Surface Limits](/guides/chat-surface-limits) works
 through the arithmetic. Switching scope therefore re-runs the fan-out, and the
-count sits on the active tab only — the other scopes' totals are genuinely not
-known, and a number we would have to invent is worse than none.
+active scope is named on the **Activity & filters** summary so it is visible
+when the foot is folded.
 
 </Step>
 
-<Step title="Unread, Live, and one agent">
+<Step title="Unread, Running, and one agent">
 
-**Open Filter.** Read state, activity and a per-agent list — the same panel,
-the same facets-AND-together behaviour, the same "Clear all" that every other
-sidebar on this app has.
+The same foot carries two checkboxes: **Unread agent sessions** and **Running agents**. They **compose** with the scope — "unread routines" is a real question — and with the search box above, which matches agent names and session titles.
 
-Unread and Live used to be two thirds of a segmented strip beside **All**,
-which was wrong twice over: they are predicates sitting in a control whose
-third option is a scope, and they read "Unread 0 · Live 0" on most visits,
-which is how a filter teaches its reader that filters here do nothing. In the
-panel they **compose** with the bucket — "unread routines" is a real question,
-and the exclusive strip could not express it, because choosing Unread threw the
-scope away — and the count badge on the Filter button is what keeps them from
-being hidden by the extra click.
-
-**Click Unread only, then open the row it shows.** The count drops immediately and
+**Tick Unread agent sessions, then open the row it shows.** The count on the agent's row drops immediately and
 the row **stays where it is**. Reading something must not delete it from the
 list you are reading it from, so the open conversation is pinned into the list
-whatever the toggles say — and the counts are computed *without* that pin, so
-"Unread 0" can never sit above a list with a row in it.
+whatever the toggles say.
 
-**Live** means the agent is working right now. It is driven by the
+**Running** means the agent is working right now. It is driven by the
 `agent.status` workspace event rather than by a roster fetched once at mount, so
-it flips at the moment a run does: send a message and watch it go to 1, then
-back to 0 when the reply lands. The dot rides the agent's portrait on the row
+it flips at the moment a run does: send a message and watch the agent appear, then
+drop out when the reply lands. The dot rides the agent's portrait on the row
 it belongs to.
 
-**Collapse** (the panel icon at the end of the toolbar) folds the column to a
-9px rail with the expand button in it — same control, same place, same
-behaviour as the other two explorers.
+**Collapse** (the button beside the **Chat** heading) folds the column to a
+narrow rail with the expand button in it — same control, same place, same
+behaviour as the other explorers.
 
 Say what did *not* happen on any of that: no navigation, no refetch, no page
 transition — picking a conversation is a `useState` plus a `replaceState`.
@@ -219,9 +199,8 @@ transition.
 
 <Step title="A thread that names itself">
 
-At the foot of the column, **Not started yet** collects the agents nobody has
-talked to. Click it — or the `+` beside the **Conversations** heading, which
-opens the same picker over every agent rather than choosing one for you — and
+An agent nobody has talked to still has a row under **Agents**, reading "No sessions yet" once expanded. Click its name — or **New chat ▸ Chat with an agent**, which
+opens a picker over every agent rather than choosing one for you — and
 pick `casey`. That mints a conversation id locally and
 posts nothing — arriving is not sending, and a conversation you never write in
 must not leave a row behind.
@@ -259,9 +238,9 @@ it.
 ## Step 2 — The two kinds of chip
 
 Chips render under an **empty** conversation, so you need a second, empty one
-with `casey`. The column cannot give you that today — **Not started yet** only
-lists agents with no conversations at all, and `casey` now has the one from
-step 1 — so mint it from the CLI and open its deep link:
+with `casey`. **New chat ▸ Chat with an agent** would give you one, but it
+mints the id locally and only shows the draft; to have a second session with
+a stable, shareable id, mint it from the CLI and open its deep link:
 
 ```bash
 crewship chat create casey     # prints the chat id
