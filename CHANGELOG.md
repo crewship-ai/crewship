@@ -25,6 +25,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 
 ### Fixed
+- Pages docs: every management endpoint's status table carries the #2561 rule (an unreachable page answers 404, the 403 rows apply only to a caller who reaches it), the guide's reach rule names the owning-crew, folder-sharing and workspace-grant paths, a Custom applications section explains draft → build → review → publish → withdraw and who may publish, backups document the `page-projects/` section, export/import documents the v2 bundle, and "Studio" no longer names a surface the product does not have (#2582)
 - **Docs:** the configuration reference lists every YAML key (`storage.page_*`, `orchestrator`, `memory_root`, sidecar paths) and the three sidecar-side env vars; `internal.mdx` catalogues all 72 registered internal IPC routes including `/pipelines/drafts/*`, `/workspace/overview`, `/issues/{id}/work`, `/issues/{id}/comments` and `/pages/project`; the sidecar verb tables carry `/work` and `/comments`; `services_json` redaction and its effect on `crewship export` / `apply` are documented; and operators get a cosign recipe for published Docker images and the `:nightly` / `:main-<sha>` channels (#2586)
 
 - Routine rule summaries explicitly mark checker outcomes on legacy non-agent steps as unenforced, matching the live runner.
