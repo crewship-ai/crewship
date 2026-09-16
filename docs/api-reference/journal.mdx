@@ -362,7 +362,7 @@ Each list is capped at 1000 rows; workspaces beyond that get a useful subset. Em
 | `agents[].crew_id` | string? | Foreign key to a `crews[]` entry in this same payload. May be null for crew-less agents. |
 | `agents[].avatar_seed` | string? | Deterministic seed; the frontend renders an avatar from this. |
 | `agents[].avatar_style` | string? | Avatar style hint (`pixel-art`, `lorelei`, ...). |
-| `missions[].status` | string | `PENDING`, `IN_PROGRESS`, `COMPLETED`, `CANCELLED`. |
+| `missions[].status` | string | A mission status: `PLANNING`, `IN_PROGRESS`, `REVIEW`, `DONE`, `FAILED`, `CANCELLED` — or, for an issue row, an issue status (`BACKLOG`, `TODO`, `DUPLICATE` as well). `COMPLETED` is retired (B13, #2383): the column holds `DONE`. |
 
 Soft-deleted crews and agents (`deleted_at IS NOT NULL`) are filtered out. Missions have no soft-delete column; all rows are returned, ordered by `created_at DESC` within the cap.
 
