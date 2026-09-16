@@ -500,9 +500,10 @@ A memory about you that you cannot see is a poor default, so you can read it,
 drop one wrong entry, or drop all of it — without turning the feature off:
 
 ```bash
-crewship privacy user-model list             # every field stored about you
-crewship privacy user-model forget timezone  # this one is wrong; keep the rest
-crewship privacy user-model delete           # forget all of it
+crewship privacy user-model list              # every field stored about you
+crewship privacy user-model list --provenance # …and where each one came from
+crewship privacy user-model forget timezone   # this one is wrong; keep the rest
+crewship privacy user-model delete            # forget all of it
 ```
 
 The same three actions are `GET /api/v1/users/me/user-model`,
@@ -512,13 +513,23 @@ server reads your identity from the auth context, so no workspace-admin role is
 needed and no route can reach anyone else's model. Reads and deletions are
 recorded in the peer-card audit log.
 
-<Note>
-`list` shows **what** is stored, not **where each entry came from**. Extraction
-verifies every fact against a verbatim span of your own words, but that span is
-not kept — the file has a 1.5 KB budget that is read into every prompt, and
-carrying provenance inline would halve how much can be recorded. Per-entry
-provenance is tracked as follow-up work.
-</Note>
+**Where each entry came from.** Extraction admits a fact only when it can point
+at a verbatim span of your own words, so every stored entry has a quote behind
+it. `--provenance` shows it: the quote, when it was recorded, and the id of the
+message it was found in — the answer to *"when did I say that?"* before you
+decide whether an entry that looks wrong actually is. The quotes are kept in
+their own table (`user_model_provenance`) beside the model file, never in it:
+the file has a 1.5 KB budget that is read into every prompt, and carrying
+provenance inline would halve how much can be recorded. The store is
+append-only — a field changed or restated in a later message gets a new row
+and the readout shows the newest, so a correction is visible as a correction
+rather than a rewrite; the same sentence re-found by tomorrow's sweep is not
+recorded twice. An entry recorded before provenance was kept shows a dash.
+
+Provenance follows the model on every delete path: `forget` drops that field's
+rows, `delete` and opting out drop them all, and an administrator's
+[Art. 17 erasure](/security/gdpr) reaches them as its own step
+(`user_model_provenance_removed` in the receipt).
 
 **Opt-out and deletion.** The operator model reuses the same per-(operator,
 workspace) consent flag as peer cards: opting out of one opts out of both.

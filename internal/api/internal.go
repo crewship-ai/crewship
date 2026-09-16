@@ -224,6 +224,16 @@ type mcpCredEntry struct {
 	// per-agent grant must keep the fingerprint it has or every shared sidecar
 	// restarts once on upgrade.
 	AgentIDs []string `json:"agent_ids,omitempty"`
+	// GraceToken is the credential's PREVIOUS value while a rotation's grace
+	// window is open (#1882), with the window's end and the rotation it came
+	// from beside it. It rides the boot payload into the sidecar's CredStore
+	// — the same road as Value, because the sidecar has no other plaintext
+	// supply line — and the proxy replays a request once with it when the
+	// upstream answers 401 to Value. All three are empty for a credential
+	// with no open rotation; omitempty keeps that payload byte-identical.
+	GraceToken      string `json:"grace_token,omitempty"`
+	GraceExpiresAt  string `json:"grace_expires_at,omitempty"`
+	GraceRotationID string `json:"grace_rotation_id,omitempty"`
 	// Fields are the credential's additional named parts (PRD-CREDENTIALS-V2
 	// §2.2), already named by credential_field_delivery.go. omitempty is
 	// load-bearing for compatibility: a credential with no parts — every

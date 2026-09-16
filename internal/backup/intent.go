@@ -576,6 +576,7 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	"skill_invocations":      IntentExcludeOperational, // telemetry
 	"subscriptions":          IntentInclude,
 	"user_models":            IntentInclude, // durable per-operator model
+	"user_model_provenance":  IntentInclude, // where each operator-model fact came from (#1693); rides with the model
 	"user_peer_consent":      IntentInclude,
 	"workflow_states":        IntentInclude,
 	"workspace_invitations":  IntentInclude,
