@@ -1435,12 +1435,12 @@ to something outside itself, listed so the importer must bind them explicitly:
 
 ```json
 {
-  "format": "crewship.page.bundle/v1",
+  "format": "crewship-page-bundle/v1",
   "page": { "name": "Fleet 201", "slug": "fleet-201", "panels": [] },
   "references": [
-    { "ref": "crew/ops", "kind": "crew", "used_by": ["sluzby"], "reason": "panel owner" }
+    { "ref": "crew/ops", "kind": "crew", "bindable": true, "used_by": ["sluzby"] }
   ],
-  "metadata": { "exported_at": "2026-08-13T17:44:00Z" }
+  "metadata": { "exported_at": "2026-08-13T17:44:00Z", "panel_count": 1 }
 }
 ```
 
@@ -1489,7 +1489,7 @@ reference the bundle declares:
 
 ```json
 {
-  "format": "crewship.page.bundle/v1",
+  "format": "crewship-page-bundle/v1",
   "page": { "name": "Fleet 201", "panels": [] },
   "references": [{ "ref": "crew/ops", "kind": "crew" }],
   "slug": "fleet-202",
@@ -2267,7 +2267,11 @@ drafts, live publication pointers and running builds remain protected.
 **Statuses:** 400 malformed request or missing confirmation; 403 unauthorized;
 503 project storage disabled; 500 storage maintenance failure.
 
-### GET /api/v1/pages/{slug}/project/fsck
+### GET /api/v1/pages/\{slug\}/project/fsck
+
+```
+GET /api/v1/pages/{slug}/project/fsck
+```
 
 **Authentication:** Page edit access. **Request:** Page slug, no body.
 **Response 200:** `healthy`, `checked_sources`, `checked_checkpoints`,
