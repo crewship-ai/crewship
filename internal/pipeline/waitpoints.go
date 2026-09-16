@@ -447,7 +447,7 @@ SELECT pipeline_id, COALESCE(definition_hash, ''), COALESCE(invoking_crew_id, ''
 }
 
 // crewAutonomy reads a crew's autonomy dial. A crew that cannot be read
-// (deleted, foreign, DB error) answers strict: this value only ever
+// (missing row or DB error) answers strict: this value only ever
 // decides whether a human may be skipped, so the unknown case must be the
 // one that keeps them in the loop.
 func (s *SQLWaitpointStore) crewAutonomy(ctx context.Context, crewID string) string {

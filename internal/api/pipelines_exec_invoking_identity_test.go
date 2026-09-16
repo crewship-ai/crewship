@@ -35,7 +35,7 @@ import (
 // pipeline. Empty strings for NULL columns.
 func runProvenance(t *testing.T, h *PipelineHandler, pipelineID string) (runID, crew, agent, user, hash string) {
 	t.Helper()
-	if err := h.db.QueryRow(`
+	if err := h.db.QueryRowContext(t.Context(), `
 		SELECT id, COALESCE(invoking_crew_id,''), COALESCE(invoking_agent_id,''), COALESCE(invoking_user_id,''), COALESCE(definition_hash,'')
 		  FROM pipeline_runs WHERE pipeline_id = ?`, pipelineID).Scan(&runID, &crew, &agent, &user, &hash); err != nil {
 		t.Fatalf("read run row for %s: %v", pipelineID, err)
