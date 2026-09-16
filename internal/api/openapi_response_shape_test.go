@@ -142,6 +142,17 @@ var responseShapeContracts = []struct {
 		value:   skillResponse{},
 	},
 	{
+		name:    "GET /api/v1/skills/{skillId}",
+		pointer: "/components/schemas/SkillDetail",
+		value:   skillDetailResponse{},
+	},
+	// ── #1849: components that were authored for these routes but never wired ──
+	{name: "POST /api/v1/agents/hire", pointer: "/components/schemas/HireResponse", value: hireResponse{}},
+	{name: "GET /api/v1/agents/{agentId}/credentials[]", pointer: "/components/schemas/AgentCredential", value: agentCredentialResponse{}},
+	{name: "GET /api/v1/credentials?paginate=true", pointer: "/components/schemas/CredentialPage", value: credentialListPage{}},
+	{name: "POST .../pipelines/runs/{runId}/replay", pointer: "/components/schemas/RunResult", value: pipeline.RunResult{}},
+	{name: "RunResult.would_execute[]", pointer: "/components/schemas/DryRunStep", value: pipeline.DryRunStep{}},
+	{
 		name:    "WorkspaceCounts",
 		pointer: "/components/schemas/WorkspaceCounts",
 		value:   workspaceCounts{},

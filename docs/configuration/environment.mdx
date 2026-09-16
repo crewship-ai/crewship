@@ -272,6 +272,7 @@ These names are used by CLI commands, test harnesses, or the agent runtime rathe
 |----------|---------|-------------|
 | `CREWSHIP_CHAT_ID` | (unset) | Chat/session identifier supplied to a command that resumes or inspects one conversation. |
 | `CREWSHIP_CREW_SHARED` | (unset) | Runtime marker selecting the crew-shared memory or filesystem context. |
+| `CREWSHIP_E2E_FIXTURES` | (unset) | Test-only switch (`1` or `true`) that registers the browser-test fixture routes under the `e2e` namespace — the seed door the Playwright PR gate uses to plant a `run_needs_human` inbox card without a live agent run. Ignored when `CREWSHIP_ENV` is `prod`/`production`; never set it on a real instance. |
 | `CREWSHIP_E2E_SKIP_TOKEN_PROBE` | (unset) | Test-only switch that skips the end-to-end token probe when a harness target cannot support it. |
 | `CREWSHIP_INPUT` | (unset) | Input value passed to a CLI or routine step that accepts an environment-backed input. |
 | `CREWSHIP_INPUT_PERIOD` | (unset) | Input period used by recurring routine fixtures and schedule tests. |

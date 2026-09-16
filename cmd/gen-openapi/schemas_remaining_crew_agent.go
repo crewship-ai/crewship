@@ -43,7 +43,9 @@ func remainingCrewAgentSchemaCatalogV1() (map[string]DomainSchema, map[string]an
 	add("GET", "/api/v1/agents/crews-status", "RemainingAgentCrewsStatusV1", object(map[string]any{"crews": array(anyObject()), "agents": array(anyObject())}))
 	add("GET", "/api/v1/agent-load", "RemainingAgentLoadV1", object(map[string]any{"agents": array(anyObject()), "total": integer(), "running": integer()}))
 	add("GET", "/api/v1/agents/{agentId}/credential-bindings", "RemainingAgentCredentialBindingsV1", array(anyObject()))
-	add("GET", "/api/v1/agents/{agentId}/credentials", "RemainingAgentCredentialsV1", array(anyObject()))
+	// ListCredentials writes []agentCredentialResponse (agent_credentials.go);
+	// AgentCredential's required list is graded against that struct.
+	routes["GET /api/v1/agents/{agentId}/credentials"] = DomainSchema{Response: ref("AgentCredentialList")}
 	// #2183: mirrors agentCredentialReadinessResponse (agent_credential_readiness.go).
 	// The required lists are graded against the struct's own json tags by
 	// TestOpenAPIRequired_MatchesTheStructsOwnJSONTags (internal/api).
@@ -78,8 +80,10 @@ func remainingCrewAgentSchemaCatalogV1() (map[string]DomainSchema, map[string]an
 	// AgentHandler.ListRuns writes []runResponse — the same row as GET /runs.
 	add("GET", "/api/v1/agents/{agentId}/runs", "RemainingAgentRunsV1", array(ref("Run")))
 	add("GET", "/api/v1/agents/{agentId}/skills", "RemainingAgentSkillsV1", array(anyObject()))
-	add("GET", "/api/v1/agents/{agentId}/chats", "RemainingAgentChatsV1", array(anyObject()))
 	add("GET", "/api/v1/agents/{agentId}/persona", "RemainingAgentPersonaV1", object(map[string]any{"agent_id": str(), "content": str(), "version": integer(), "created_at": str(), "updated_at": str()}))
+
+	// GET /agents/{agentId}/chats is described by the chat catalog
+	// (FinalChatList); the crew issue mutations by schemas_final_workflow_issues.go.
 
 	// Workspace and crew actions return either a resource or a small status map.
 	add("POST", "/api/v1/workspaces", "RemainingWorkspaceCreatedV1", ref("Workspace"))
@@ -91,8 +95,6 @@ func remainingCrewAgentSchemaCatalogV1() (map[string]DomainSchema, map[string]an
 	add("PUT", "/api/v1/crews/{crewId}", "RemainingCrewReplacedV1", ref("Crew"))
 	add("POST", "/api/v1/crews/{crewId}/members", "RemainingCrewMemberCreatedV1", ref("CrewMemberResponseV1"))
 	add("PATCH", "/api/v1/crews/{crewId}/members/{memberId}", "RemainingCrewMemberUpdatedV1", ref("CrewMemberResponseV1"))
-	add("POST", "/api/v1/crews/{crewId}/issues", "RemainingCrewIssueCreatedV1", ref("Issue"))
-	add("PATCH", "/api/v1/crews/{crewId}/issues/{identifier}", "RemainingCrewIssueUpdatedV1", ref("Issue"))
 	add("POST", "/api/v1/crews/{crewId}/missions", "RemainingCrewMissionCreatedV1", object(map[string]any{"id": str(), "title": str(), "description": str(), "status": str(), "tasks": array(anyObject()), "created_at": str(), "updated_at": str()}))
 	add("PATCH", "/api/v1/crews/{crewId}/missions/{missionId}", "RemainingCrewMissionUpdatedV1", object(map[string]any{"id": str(), "title": str(), "description": str(), "status": str(), "tasks": array(anyObject()), "created_at": str(), "updated_at": str()}))
 	add("PUT", "/api/v1/crews/{crewId}/persona", "RemainingCrewPersonaUpdatedV1", ref("CrewPersonaResponseV1"))
@@ -132,7 +134,10 @@ func remainingCrewAgentSchemaCatalogV1() (map[string]DomainSchema, map[string]an
 
 	// Agent lifecycle and subresource mutations.
 	add("POST", "/api/v1/agents", "RemainingAgentCreatedV1", ref("Agent"))
-	add("POST", "/api/v1/agents/hire", "RemainingAgentHiredV1", object(map[string]any{"agent": ref("Agent"), "status": str(), "approval_required": boolean(), "message": str()}))
+	// Hire writes hireResponse (agents_hire.go) — a flat record, not an
+	// {agent, status, approval_required, message} envelope. HireResponse in
+	// schemas_core.go mirrors the struct and is graded against its json tags.
+	routes["POST /api/v1/agents/hire"] = DomainSchema{Response: ref("HireResponse")}
 	add("POST", "/api/v1/agents/{agentId}/rehire", "RemainingAgentRehiredV1", ref("Agent"))
 	add("POST", "/api/v1/agents/{agentId}/approve-hire", "RemainingAgentHireApprovedV1", action)
 	add("PATCH", "/api/v1/agents/{agentId}", "RemainingAgentUpdatedV1", ref("Agent"))
@@ -180,16 +185,10 @@ func remainingCrewAgentSchemaCatalogV1() (map[string]DomainSchema, map[string]an
 	addAction("POST", "/api/v1/agents/{agentId}/stop", "RemainingAgentStoppedV1")
 	addAction("DELETE", "/api/v1/crews/{crewId}", "RemainingCrewDeletedV1")
 	addAction("POST", "/api/v1/crews/{crewId}/apply-avatar-style", "RemainingCrewAvatarStyleAppliedV1")
-	addAction("DELETE", "/api/v1/crews/{crewId}/escalations", "RemainingCrewEscalationsDeletedV1")
 	add("DELETE", "/api/v1/crews/{crewId}/files/delete", "RemainingCrewFileDeletedV1", object(map[string]any{"path": str(), "deleted": boolean(), "message": str()}))
 	add("PUT", "/api/v1/crews/{crewId}/files/save", "RemainingCrewFileSavedV1", object(map[string]any{"path": str(), "saved": boolean(), "message": str()}))
 	addAction("POST", "/api/v1/crews/{crewId}/integrations/{integrationId}/tools/refresh", "RemainingCrewToolsRefreshedV1")
 	addAction("DELETE", "/api/v1/crews/{crewId}/issues/{identifier}", "RemainingCrewIssueDeletedV1")
-	addAction("POST", "/api/v1/crews/{crewId}/issues/{identifier}/comments", "RemainingCrewIssueCommentCreatedV1")
-	addAction("POST", "/api/v1/crews/{crewId}/issues/{identifier}/relations", "RemainingCrewIssueRelationCreatedV1")
-	addAction("POST", "/api/v1/crews/{crewId}/issues/{identifier}/review", "RemainingCrewIssueReviewedV1")
-	addAction("POST", "/api/v1/crews/{crewId}/issues/{identifier}/start", "RemainingCrewIssueStartedV1")
-	addAction("POST", "/api/v1/crews/{crewId}/issues/{identifier}/stop", "RemainingCrewIssueStoppedV1")
 	addAction("DELETE", "/api/v1/crews/{crewId}/members/{memberId}", "RemainingCrewMemberDeletedV1")
 	addAction("DELETE", "/api/v1/crews/{crewId}/missions/{missionId}", "RemainingCrewMissionDeletedV1")
 	addAction("POST", "/api/v1/crews/{crewId}/missions/{missionId}/clone", "RemainingCrewMissionClonedV1")
@@ -220,9 +219,7 @@ func remainingCrewAgentSchemaCatalogV1() (map[string]DomainSchema, map[string]an
 		"DELETE /api/v1/workspaces/{workspaceId}/pipeline-webhooks/{webhookId}",
 		"POST /api/v1/workspaces/{workspaceId}/pipelines/import",
 		"POST /api/v1/workspaces/{workspaceId}/pipelines/pending/{pendingId}/cancel",
-		"POST /api/v1/workspaces/{workspaceId}/pipelines/runs/bulk_replay",
 		"POST /api/v1/workspaces/{workspaceId}/pipelines/runs/{runId}/cancel",
-		"POST /api/v1/workspaces/{workspaceId}/pipelines/runs/{runId}/replay",
 		"POST /api/v1/workspaces/{workspaceId}/pipelines/save",
 		"POST /api/v1/workspaces/{workspaceId}/pipelines/test_run",
 		"POST /api/v1/workspaces/{workspaceId}/pipelines/waitpoints/{token}/approve",
@@ -230,7 +227,6 @@ func remainingCrewAgentSchemaCatalogV1() (map[string]DomainSchema, map[string]an
 		"POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/approve",
 		"PATCH /api/v1/workspaces/{workspaceId}/pipelines/{slug}/budget",
 		"POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/disable",
-		"POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/dry_run",
 		"POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/enable",
 		"POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/reject",
 		"POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/rollback",

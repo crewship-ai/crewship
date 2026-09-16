@@ -79,6 +79,25 @@ type skillResponse struct {
 	InstalledOn []skillInstalledAgent `json:"installed_on,omitempty"`
 }
 
+// skillDetailResponse is what GET /skills/{skillId} serializes: the list row
+// plus the fields only the detail query reads. Package-level so the OpenAPI
+// SkillDetail component can be graded against these tags
+// (openapi_response_shape_test.go).
+type skillDetailResponse struct {
+	skillResponse
+	Content                *string `json:"content"`
+	CredentialRequirements *string `json:"credential_requirements"`
+	McpServerCommand       *string `json:"mcp_server_command"`
+	McpServerImage         *string `json:"mcp_server_image"`
+	McpTransport           *string `json:"mcp_transport"`
+	Dependencies           *string `json:"dependencies"`
+	License                *string `json:"license"`
+	AgentCount             int     `json:"agent_count"`
+	SecurityScore          *int    `json:"security_score"`
+	AllowedDomains         *string `json:"allowed_domains"`
+	Changelog              *string `json:"changelog"`
+}
+
 type skillInstalledAgent struct {
 	AgentID     string  `json:"agent_id"`
 	AgentSlug   string  `json:"agent_slug"`
@@ -268,21 +287,6 @@ func (h *SkillHandler) populateInstalledOn(r *http.Request, rows []skillResponse
 // Get handles GET /api/v1/skills/{skillId}
 func (h *SkillHandler) Get(w http.ResponseWriter, r *http.Request) {
 	skillID := r.PathValue("skillId")
-
-	type skillDetailResponse struct {
-		skillResponse
-		Content                *string `json:"content"`
-		CredentialRequirements *string `json:"credential_requirements"`
-		McpServerCommand       *string `json:"mcp_server_command"`
-		McpServerImage         *string `json:"mcp_server_image"`
-		McpTransport           *string `json:"mcp_transport"`
-		Dependencies           *string `json:"dependencies"`
-		License                *string `json:"license"`
-		AgentCount             int     `json:"agent_count"`
-		SecurityScore          *int    `json:"security_score"`
-		AllowedDomains         *string `json:"allowed_domains"`
-		Changelog              *string `json:"changelog"`
-	}
 
 	var s skillDetailResponse
 	var featured int

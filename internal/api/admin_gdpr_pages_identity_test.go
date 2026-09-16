@@ -128,6 +128,7 @@ var identityShapes = map[string]struct {
 	"notification_deliveries_removed":        {"notification_deliveries", 1},
 	"notification_channels_removed":          {"notification_channels", 1}, // the scope='user' one
 	"onboarding_proposals_removed":           {"onboarding_proposals", 1},
+	"user_model_provenance_removed":          {"user_model_provenance", 1}, // #1693
 	"workspace_invitations_revoked":          {"workspace_invitations", 1},
 	"trust_grants_revoked":                   {"waitpoint_trust_grants", 1}, // granted by the subject
 	"trust_grants_anonymised":                {"waitpoint_trust_grants", 1}, // revoked by the subject
@@ -192,6 +193,13 @@ func (r *pagesIdentityRig) seedIdentityShapes(t *testing.T, wsID, tag, crew stri
 		id("nd"), wsID, id("nc-ws"), u, "dk-"+tag, id("nd-o"), wsID, id("nc-ws"), o, "dk-o-"+tag)
 	pidExec(t, r.db, `INSERT INTO onboarding_proposals (id, workspace_id, created_by, payload_json) VALUES (?,?,?,'{}')`,
 		id("op"), wsID, u)
+	// The evidence behind the operator model (#1693): the subject's own
+	// quoted words, and a stranger's row in the same table that must stay.
+	pidExec(t, r.db, `INSERT INTO user_model_provenance (id, workspace_id, user_id, user_slug, key, value, quote, message_id, source_type)
+		VALUES (?,?,?,?,'role','runs the platform team','I run the platform team','msg-'||?,'stated'),
+		       (?,?,?,?,'role','writes the docs','I write the docs','msg-o-'||?,'stated')`,
+		id("ump"), wsID, u, "slug-"+tag, tag,
+		id("ump-o"), wsID, o, "slug-o-"+tag, tag)
 
 	// ── capabilities ──
 	pidExec(t, r.db, `INSERT INTO workspace_invitations (id, workspace_id, email, invited_by, token, expires_at)
@@ -478,12 +486,12 @@ func TestGDPRErasure_PageTableCountsInAuditScope(t *testing.T) {
 
 	// Anonymising is not deleting: rows_deleted counts rows that went away,
 	// and a version whose author was cleared did not. 4 from the Pages
-	// tables, plus the seven rows seedIdentityShapes plants that the #2308
-	// step DELETES (their own five records, an invitation, a trust grant);
-	// the thirty-odd anonymised and the re-attributed credential are not in
-	// it.
-	if got, _ := body["rows_deleted"].(float64); got != 11 {
-		t.Errorf("rows_deleted = %v, want 11 (2 grants + 1 token + 1 webhook + 7 #2308 deletes; anonymised rows are not deletions)", got)
+	// tables, plus the eight rows seedIdentityShapes plants that the
+	// identity step DELETES (their own five records, an invitation, a trust
+	// grant, and the operator-model evidence row of #1693); the thirty-odd
+	// anonymised and the re-attributed credential are not in it.
+	if got, _ := body["rows_deleted"].(float64); got != 12 {
+		t.Errorf("rows_deleted = %v, want 12 (2 grants + 1 token + 1 webhook + 7 #2308 deletes + 1 #1693 delete; anonymised rows are not deletions)", got)
 	}
 }
 
@@ -790,6 +798,12 @@ func TestGDPRErasure_IdentityVerbsAreTheRightOnes(t *testing.T) {
 	}
 	if n := count(`SELECT COUNT(*) FROM saved_views WHERE workspace_id = ? AND user_id = ?`, pidWSA, r.other); n != 1 {
 		t.Errorf("another user's saved view was deleted: %d, want 1", n)
+	}
+	if n := count(`SELECT COUNT(*) FROM user_model_provenance WHERE workspace_id = ? AND user_id = ?`, pidWSA, r.other); n != 1 {
+		t.Errorf("another user's operator-model evidence was deleted: %d, want 1", n)
+	}
+	if n := count(`SELECT COUNT(*) FROM user_model_provenance WHERE workspace_id = ? AND user_id = ?`, pidWSA, r.userID); n != 0 {
+		t.Errorf("the subject's operator-model evidence survived the erasure: %d row(s)", n)
 	}
 
 	// The subject's personal channel is gone; the workspace channel they

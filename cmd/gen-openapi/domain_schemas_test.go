@@ -32,6 +32,10 @@ func TestDomainResponseSchemasMatchReadRoutes(t *testing.T) {
 		"GET /api/v1/workspaces/{workspaceId}/pipeline-schedules":     "ScheduleList",
 		"GET /api/v1/workspaces/{workspaceId}/pipelines/{slug}/state": "RoutineState",
 		"GET /api/v1/workspaces/{workspaceId}/pipelines/waitpoints":   "WaitpointList",
+		// Mutations whose body is the execution result (#1849).
+		"POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/dry_run":      "DryRunResult",
+		"POST /api/v1/workspaces/{workspaceId}/pipelines/runs/{runId}/replay": "RunResult",
+		"POST /api/v1/workspaces/{workspaceId}/pipelines/runs/bulk_replay":    "BulkReplayResult",
 	}
 	for route, schema := range want {
 		if routes[route] != schema {
@@ -44,8 +48,6 @@ func TestDomainRequestSchemasExposeHandlerBodies(t *testing.T) {
 	schemas := executionSchemaComponents()
 	routes := executionRequestSchemas()
 	for route, schema := range map[string]string{
-		"POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/run":        "PipelineRunRequest",
-		"POST /api/v1/workspaces/{workspaceId}/pipeline-schedules":          "ScheduleRequest",
 		"POST /api/v1/workspaces/{workspaceId}/pipelines/runs/bulk_replay":  "BulkReplayRequest",
 		"PUT /api/v1/workspaces/{workspaceId}/pipelines/{slug}/state/{key}": "StateWriteRequest",
 	} {

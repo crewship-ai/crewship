@@ -35,16 +35,6 @@ func coreResourceSchemas() map[string]any {
 	requestObject := func(properties map[string]any, required ...string) map[string]any {
 		return object(properties, required...)
 	}
-	stringEnum := func(values ...string) map[string]any {
-		s := stringSchema()
-		s["enum"] = values
-		return s
-	}
-	nullableEnum := func(values ...string) map[string]any {
-		s := nullableString()
-		s["enum"] = values
-		return s
-	}
 
 	workspaceCounts := object(map[string]any{
 		"crews": intSchema(), "agents": intSchema(), "members": intSchema(),
@@ -137,49 +127,15 @@ func coreResourceSchemas() map[string]any {
 		// projectResponse shape.
 		"ProjectListItem": project,
 
-		"WorkspaceCreateRequest": requestObject(map[string]any{
-			"name": stringSchema(), "slug": stringSchema(), "preferred_language": nullableString(),
-		}, "name", "slug"),
-		"WorkspaceUpdateRequest": requestObject(map[string]any{
-			"name": nullableString(), "slug": nullableString(), "preferred_language": nullableString(), "pages_theme": pagesThemeSchema(),
-			"allow_privileged_credentials": nullableBool(), "run_retention_days": nullableInt(),
-			"credential_audit_retention_days": nullableInt(), "audit_log_retention_days": nullableInt(),
-			"approvals_retention_days": nullableInt(),
-		}),
-		"CrewCreateRequest": requestObject(map[string]any{
-			"name": stringSchema(), "slug": stringSchema(), "description": nullableString(), "color": nullableString(), "icon": nullableString(),
-			"container_memory_mb": nullableInt(), "container_cpus": numberSchema(), "container_ttl_hours": nullableInt(), "network_mode": nullableString(),
-			"allowed_domains": arrayOf(stringSchema()), "allow_private_endpoints": boolSchema(), "runtime_image": nullableString(),
-			"devcontainer_config": nullableString(), "mise_config": nullableString(), "services_json": nullableString(),
-		}, "name", "slug"),
-		"CrewUpdateRequest": requestObject(map[string]any{
-			"name": nullableString(), "slug": nullableString(), "description": nullableString(), "color": nullableString(), "icon": nullableString(), "avatar_style": nullableString(),
-			"container_memory_mb": nullableInt(), "container_cpus": numberSchema(), "container_ttl_hours": nullableInt(), "network_mode": nullableString(),
-			"allowed_domains": arrayOf(stringSchema()), "allow_private_endpoints": nullableBool(), "mcp_config_json": nullableString(), "escalation_config": nullableString(),
-			"issue_prefix": nullableString(), "runtime_image": nullableString(), "devcontainer_config": nullableString(), "mise_config": nullableString(), "services_json": nullableString(), "max_ephemeral_agents": nullableInt(),
-		}),
-		"AgentCreateRequest": requestObject(map[string]any{
-			"name": stringSchema(), "slug": stringSchema(), "crew_id": nullableString(), "description": nullableString(), "role_title": nullableString(),
-			"agent_role": stringEnum("AGENT", "LEAD"), "lead_mode": nullableEnum("active", "passive"), "cli_adapter": stringSchema(), "llm_provider": nullableString(), "llm_model": nullableString(),
-			"system_prompt": nullableString(), "avatar_seed": nullableString(), "avatar_style": nullableString(), "timeout_seconds": intSchema(), "tool_profile": stringEnum("MINIMAL", "CODING", "FULL"), "memory_enabled": boolSchema(),
-		}, "name", "slug", "agent_role", "cli_adapter", "timeout_seconds", "tool_profile", "memory_enabled"),
-		"AgentUpdateRequest": requestObject(map[string]any{
-			"name": stringSchema(), "slug": stringSchema(), "description": nullableString(), "role_title": nullableString(), "agent_role": stringEnum("AGENT", "LEAD"), "lead_mode": stringEnum("active", "passive"),
-			"cli_adapter": stringSchema(), "llm_provider": nullableString(), "llm_model": nullableString(), "system_prompt": nullableString(), "avatar_seed": nullableString(), "avatar_style": nullableString(),
-			"timeout_seconds": intSchema(), "tool_profile": stringEnum("MINIMAL", "CODING", "FULL"), "memory_enabled": boolSchema(), "cli_tools": nullableString(), "crew_id": nullableString(),
-			"schedule_cron": nullableString(), "schedule_prompt": nullableString(), "schedule_enabled": boolSchema(), "mcp_config_json": nullableString(), "webhook_require_timestamp": boolSchema(),
-		}),
-		"ProjectCreateRequest": requestObject(map[string]any{
-			"name": stringSchema(), "description": nullableString(), "icon": nullableString(), "color": stringSchema(), "status": stringSchema(), "priority": stringSchema(), "lead_type": nullableEnum("user", "agent"), "lead_id": nullableString(), "start_date": nullableString(), "target_date": nullableString(),
-		}, "name"),
-		"ProjectUpdateRequest": requestObject(map[string]any{
-			"name": nullableString(), "description": nullableString(), "icon": nullableString(), "color": nullableString(), "status": nullableString(), "priority": nullableString(), "health": nullableString(), "lead_type": nullableEnum("user", "agent"), "lead_id": nullableString(), "start_date": nullableString(), "target_date": nullableString(),
-		}),
+		// The create/update request bodies for workspaces, crews, agents and
+		// projects live in schemas_request_core_resources_v2.go (Core…RequestV2);
+		// the copies that used to sit here were never referenced by any
+		// operation (#1849).
 		"HireRequest": requestObject(map[string]any{
 			"crew_id": stringSchema(), "crew_slug": stringSchema(), "template_slug": stringSchema(), "model": stringSchema(), "ttl_minutes": intSchema(), "reason": stringSchema(), "parent_lead_id": stringSchema(),
 		}),
 		"HireResponse": object(map[string]any{
 			"id": stringSchema(), "crew_id": nullableString(), "workspace_id": stringSchema(), "slug": stringSchema(), "name": stringSchema(), "status": stringSchema(), "ephemeral": boolSchema(), "expires_at": nullableString(), "expired_at": nullableString(), "parent_lead_id": nullableString(), "hire_reason": nullableString(), "pending_review": boolSchema(), "inbox_item_id": stringSchema(), "approval_id": stringSchema(), "decision": stringSchema(),
-		}, "id", "workspace_id", "slug", "name", "status", "ephemeral", "pending_review", "decision"),
+		}, "id", "crew_id", "workspace_id", "slug", "name", "status", "ephemeral", "expires_at", "expired_at", "parent_lead_id", "hire_reason", "pending_review", "decision"),
 	}
 }

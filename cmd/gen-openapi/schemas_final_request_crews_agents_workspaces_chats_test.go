@@ -10,9 +10,10 @@ func TestFinalCoreRequestCatalogCoversAllRemainingGenericBodies(t *testing.T) {
 	// is a ratchet on top of it — adding a route here should be a deliberate
 	// act, not something that rides along in a diff.
 	//
-	// Bump it when you add one. 32 including PUT /issues/{identifier}/review-policy.
-	if len(routes) != 32 {
-		t.Fatalf("catalog has %d routes, want 32 — if you added a no-body POST here, bump this; "+
+	// Bump it when you add one. 31 including PUT /issues/{identifier}/review-policy
+	// (the tools/refresh body moved to the auth/integrations catalog, #1849).
+	if len(routes) != 31 {
+		t.Fatalf("catalog has %d routes, want 31 — if you added a no-body POST here, bump this; "+
 			"if you did not, a route lost its concrete request schema", len(routes))
 	}
 	for route, contract := range routes {
@@ -40,7 +41,6 @@ func TestFinalCoreRequestCatalogPinsHandlerFields(t *testing.T) {
 		"FinalCoreIssueReviewRequest":           {"action", "comment", "reassign_to", "revision", "brief_revision"},
 		"IssueReviewPolicyRequest":              {"revision", "client_review_required"},
 		"FinalCoreInboxBulkRequest":             {"ids", "state", "resolved_action"},
-		"FinalCoreRefreshToolsRequest":          {"tools"},
 	}
 	for component, fields := range checks {
 		properties := components[component].(map[string]any)["properties"].(map[string]any)
