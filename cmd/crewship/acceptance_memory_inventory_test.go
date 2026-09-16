@@ -126,7 +126,7 @@ func TestAcceptance_MemoryInventory(t *testing.T) {
 	}
 	wantIDs := "agent:AGENT.md,agent:daily/2026-09-15.md,crew:CREW.md,workspace:handbook.md"
 	if got := strings.Join(docIDs(agentInv), ","); got != wantIDs {
-		t.Errorf("documents = %s, want %s", got, wantIDs)
+		t.Fatalf("documents = %s, want %s", got, wantIDs)
 	}
 	for _, d := range agentInv.Documents {
 		if d.State != "available" || d.Bytes == nil || *d.Bytes == 0 || d.Content == "" || d.Revision == "" || d.UpdatedAt == "" {

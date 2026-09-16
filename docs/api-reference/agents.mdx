@@ -1643,7 +1643,7 @@ GET /api/v1/agents/{agentId}/chats?workspace_id={workspaceId}
 | Parameter | Type | Description |
 |---|---|---|
 | `workspace_id` | string | Required. |
-| `kind` | string | Optional. `direct`, `routine`, `issue`, `agent` — comma-separated; filters before the page is cut. |
+| `kind` | string | Optional. `all` (must be supplied alone), `direct`, `routine`, `issue`, `agent` — comma-separated; filters before the page is cut. |
 | `limit`, `offset` | int | Optional. Page size 1–100 (default 100) and offset. The response carries `X-Total-Count` (chats in the same `kind` partition), `X-Limit` and `X-Offset`. |
 | `counts` | `1` | Optional. Adds `X-Chat-Kind-Counts: direct=3,routine=182,…` for every kind the agent has. |
 
