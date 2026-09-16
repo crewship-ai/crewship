@@ -64,3 +64,27 @@ func TestClarityIterationLimitDrivesExecution(t *testing.T) {
 		})
 	}
 }
+
+func TestClarityStoredNonAgentOutcomesAreNotPresentedAsEnforced(t *testing.T) {
+	// Stored definitions are parsed for display without authoring validation.
+	// A legacy transform can therefore contain an outcomes block even though
+	// new definitions are rejected and its live runner never calls a checker.
+	dsl, err := Parse([]byte(`{"name":"legacy","steps":[{"id":"convert","type":"transform","transform":{"input":"{}","expression":"."},"outcomes":{"grader_agent_slug":"judge","required":true,"max_iterations":4,"criteria":[{"name":"correct","rule":"matches source"}]}}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := DescribeBehavior(dsl).Steps[0]
+	checks := strings.Join(got.Checks, " ")
+	if !strings.Contains(checks, "not enforced") || strings.Contains(checks, "Required:") {
+		t.Fatalf("legacy non-agent checks imply enforcement: %q", checks)
+	}
+	if strings.Contains(got.Failure, "checker verdict") || strings.Contains(got.Attempts, "worker/checker") {
+		t.Fatalf("legacy non-agent recovery implies checker execution: %+v", got)
+	}
+	// The same declaration on an agent still describes the real gate.
+	dsl.Steps[0].Type = StepAgentRun
+	got = DescribeBehavior(dsl).Steps[0]
+	if !strings.Contains(strings.Join(got.Checks, " "), "Required: an unavailable checker blocks the result") {
+		t.Fatalf("agent checker gate disappeared: %+v", got)
+	}
+}

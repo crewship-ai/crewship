@@ -102,7 +102,10 @@ func DescribeBehavior(dsl *DSL) *Behavior {
 					s.Failure = "A structural check failure tries the next configured model tier with feedback; exhaustion fails the step."
 				}
 			}
-			if o := step.Outcomes; o != nil {
+			if step.Outcomes != nil && step.Type != StepAgentRun {
+				s.Checks = append(s.Checks, "Declared checker outcomes are not enforced by this live step runner.")
+			}
+			if o := step.Outcomes; o != nil && step.Type == StepAgentRun {
 				mode := "Advisory availability: an unavailable checker does not block the result"
 				if o.Required {
 					mode = "Required: an unavailable checker blocks the result"
