@@ -81,13 +81,15 @@ export default defineConfig({
       '@': path.resolve(__dirname, ''),
       // The suite runs under happy-dom, so a component importing
       // `@sentry/nextjs` must get the same client build the browser bundle
-      // gets. Node resolution would hand it `index.server.js`, which pulls in
-      // the vendored webpack plugin; that plugin branches on `typeof document`
-      // and, seeing happy-dom's, resolves its loader against `document.baseURI`
-      // — an http: URL that `fileURLToPath` rejects with "The URL must be of
-      // scheme file". Twelve suites died on the import in @sentry/nextjs 10.72+
-      // (#2444) before this alias; the package.json "browser" condition names
-      // this exact entry.
+      // gets; the package.json "browser" condition names this exact entry.
+      // Node resolution would hand it `index.server.js` instead. In 10.72
+      // and 10.73 that entry could not even load under happy-dom: its vendored
+      // webpack plugin branched on `typeof document`, resolved its loader
+      // against `document.baseURI` and fed the http: URL to `fileURLToPath`
+      // ("The URL must be of scheme file"), killing twelve suites at import
+      // (#2444, #2235). Upstream fixed that in 10.74.0
+      // (getsentry/sentry-javascript#23789); the alias stays because the
+      // browser build is the right one here regardless.
       '@sentry/nextjs': path.resolve(
         __dirname,
         'node_modules/@sentry/nextjs/build/esm/index.client.js',
