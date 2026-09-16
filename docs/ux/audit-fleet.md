@@ -3,6 +3,33 @@
 `/crews` (crews, agents, skills), `/credentials`, `/integrations`. Analysis only,
 2026-09-03, against `docs/ux/README.md`. No code was changed.
 
+## Status 2026-09-15
+
+Cluster C shipped as #2318 (2026-09-05, "real totals, Needs-you strip, Crew
+tools"); the crew canvas then gained the Memory tab (#2464) and pages their
+own icon and colour (#2564). Against §6:
+
+- **P1 1–6 and 8 landed.** `/crews`, `/agents`, `/credentials` are paged with
+  true totals in the SubBar; the crew canvas carries the **Needs you** strip
+  (Build now / Retry build / Install / Connect / Inspect / Review); the agent
+  "Waiting on your decision" banner has its buttons (`onOpenInbox`,
+  `agent-canvas.tsx:530`); the Issues cell links `/issues?assignee=`
+  (`entityHref`); the roster is a one-column list under `md`; the Guide is
+  hidden by `lib/fleet-visibility.ts`; crew tools are on Settings →
+  Integrations with Connect beside a gap. 7 (`/integrations` at 390) not
+  re-verified.
+- **P2 landed:** 9 explorer sorted by attention with fold and counts; 14 one
+  `StatusPill` / `formatStatus`; 18 `AlertDialog` for crew and agent delete.
+  19 partly: `?crew=` and `?agent=` are shallow URL state (`hooks/use-crews-selection.tsx`), the canvas tab and the dock are not.
+- **Still open:** 15 — raw `llm_model` ids still render on the roster
+  (`crew-canvas-tabs/roster-tab.tsx:66-68`) and the agent canvas
+  (`agent-canvas.tsx:460-465`) without `getModelLabel`; 28 — the dead
+  component set is still in the tree (`credentials/add-credential-dialog.tsx`
+  included); 10–13, 16, 17, 20–27 not re-verified.
+- The crew canvas tabs are now Overview / Team / Work / Memory
+  (`crew-canvas.tsx:44-50`); settings and delete moved behind a **Crew
+  administration** dialog.
+
 ## How this was verified
 
 - Throwaway server built from the clone 3 working tree (branch
