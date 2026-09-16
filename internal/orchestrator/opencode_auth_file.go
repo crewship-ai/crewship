@@ -13,7 +13,8 @@ func renderOpenCodeAuth(req AgentRunRequest) ([]byte, error) {
 		"OPENROUTER_API_KEY": "openrouter", "XAI_API_KEY": "xai",
 		"GROQ_API_KEY": "groq", "DEEPSEEK_API_KEY": "deepseek",
 		"MOONSHOT_API_KEY": "moonshotai", "ZAI_API_KEY": "zai",
-		"MINIMAX_API_KEY": "minimax",
+		"MINIMAX_API_KEY":  "minimax",
+		"OPENCODE_API_KEY": "opencode", "OPENCODE_GO_API_KEY": "opencode-go",
 	}
 	type apiAuth struct {
 		Type string `json:"type"`

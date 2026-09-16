@@ -31,6 +31,7 @@
 // nothing matched, not a brand you can choose by name.
 
 import type { ComponentType, SVGProps } from "react"
+import { OpenCodeIcon } from "@/components/icons/provider-icons"
 import { GrokIcon, GroqIcon, KimiIcon, ZAIIcon, MinimaxIcon } from "./grok-groq-icons"
 // Lucide stands in for brands Simple Icons has no mark for (Microsoft,
 // Amazon, LinkedIn and the rest were pulled upstream over trademark
@@ -286,6 +287,8 @@ export const BRAND_REGISTRY: BrandEntry[] = [
   // ─── AI / inference (expansion) ────────────────────────────────
   { key: "MISTRAL", label: "Mistral AI", hex: "#FA520F", Icon: SiMistralai as IconComponent, category: "AI", keywords: ["mistral"] },
   { key: "DEEPSEEK", label: "DeepSeek", hex: "#5786FE", Icon: SiDeepseek as IconComponent, category: "AI", keywords: ["deepseek"] },
+  { key: "OPENCODE_GO", label: "OpenCode Go", hex: "#FFFFFF", Icon: OpenCodeIcon, category: "AI", keywords: ["opencode go", "opencode-go", "opencode_go"], cli: true },
+  { key: "OPENCODE", label: "OpenCode Zen", hex: "#FFFFFF", Icon: OpenCodeIcon, category: "AI", keywords: ["opencode"], cli: true },
   { key: "OPENROUTER", label: "OpenRouter", hex: "#94A3B8", Icon: SiOpenrouter as IconComponent, category: "AI", keywords: ["openrouter"], prefixes: ["sk-or-"] },
   // No "grok" keyword: "ngrok" contains it, and AI is walked before
   // DevOps, so every ngrok token would arrive wearing an xAI badge.

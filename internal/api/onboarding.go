@@ -85,6 +85,10 @@ func resolveLLMProvider(provider string) (llmProviderInfo, bool) {
 		return llmProviderInfo{provider: "CURSOR", envVarName: "CURSOR_API_KEY"}, true
 	case "FACTORY":
 		return llmProviderInfo{provider: "FACTORY", envVarName: "FACTORY_API_KEY"}, true
+	case "OPENCODE":
+		return llmProviderInfo{provider: "OPENCODE", envVarName: "OPENCODE_API_KEY"}, true
+	case "OPENCODE_GO":
+		return llmProviderInfo{provider: "OPENCODE_GO", envVarName: "OPENCODE_GO_API_KEY"}, true
 	case "OLLAMA":
 		return llmProviderInfo{provider: "OLLAMA", envVarName: ""}, true
 	default:
@@ -224,7 +228,7 @@ func (h *OnboardingHandler) workspaceHasCredential(ctx context.Context, workspac
 		SELECT COUNT(*) FROM credentials
 		WHERE workspace_id = ? AND deleted_at IS NULL AND status = 'ACTIVE'
 		  AND type IN ('API_KEY', 'AI_CLI_TOKEN')
-		  AND provider IN ('ANTHROPIC', 'OPENAI', 'GOOGLE', 'CURSOR', 'FACTORY', 'OLLAMA')`,
+		  AND provider IN ('ANTHROPIC', 'OPENAI', 'GOOGLE', 'CURSOR', 'FACTORY', 'OLLAMA', 'OPENCODE', 'OPENCODE_GO')`,
 		workspaceID).Scan(&n); err != nil {
 		return false
 	}
@@ -555,7 +559,7 @@ func (h *OnboardingHandler) Setup(w http.ResponseWriter, r *http.Request) {
 	}
 	llm, ok := resolveLLMProvider(req.LlmProvider)
 	if !ok {
-		replyError(w, http.StatusBadRequest, "llm_provider must be ANTHROPIC, OPENAI, GOOGLE, CURSOR, FACTORY, or OLLAMA")
+		replyError(w, http.StatusBadRequest, "llm_provider must be ANTHROPIC, OPENAI, GOOGLE, CURSOR, FACTORY, OLLAMA, OPENCODE, or OPENCODE_GO")
 		return
 	}
 
@@ -720,7 +724,7 @@ func (h *OnboardingHandler) setupFromTemplate(w http.ResponseWriter, r *http.Req
 				h.logger.Error("onboarding template: rollback completion flag after llm_provider reject", "error", rbErr)
 			}
 			writeJSON(w, http.StatusBadRequest, map[string]string{
-				"error": "Unknown llm_provider — expected ANTHROPIC, OPENAI, GOOGLE, CURSOR, FACTORY, or OLLAMA",
+				"error": "Unknown llm_provider — expected ANTHROPIC, OPENAI, GOOGLE, CURSOR, FACTORY, OLLAMA, OPENCODE, or OPENCODE_GO",
 			})
 			return
 		}

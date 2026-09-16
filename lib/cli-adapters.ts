@@ -190,6 +190,8 @@ export function getProviderLabel(provider: string): string {
     CURSOR: "Cursor",
     FACTORY: "Factory",
     OLLAMA: "Ollama",
+    OPENCODE: "OpenCode Zen",
+    OPENCODE_GO: "OpenCode Go",
     NONE: "--",
   }
   return labels[provider] ?? provider
@@ -220,5 +222,6 @@ export function getModelLabel(value: string): string {
  * unknown providers (matches PROVIDER_ICONS map default).
  */
 export function getProviderIcon(provider: string): ComponentType<SVGProps<SVGSVGElement>> {
+  if (provider === "OPENCODE" || provider === "OPENCODE_GO") return OpenCodeIcon
   return CLI_ADAPTERS[Object.keys(CLI_ADAPTERS).find((k) => CLI_ADAPTERS[k].provider === provider) ?? ""]?.icon ?? AnthropicIcon
 }

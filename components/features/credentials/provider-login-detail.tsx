@@ -158,7 +158,7 @@ export function ProviderLoginCards({ workspaceId, credential, accountId, canUpda
               {accountId ? <span className="font-mono">{accountId}</span> : <span className="text-muted-foreground-soft">not reported</span>}
             </Fact>
             <Fact label="Billing">
-              {login.mode === "subscription" ? "flat-rate · no per-call $" : "metered · per token through the sidecar"}
+              {login.provider === "OPENCODE_GO" ? "Go subscription · optional Zen balance overage is managed in OpenCode" : login.mode === "subscription" ? "flat-rate · no per-call $" : "metered · per token through the sidecar"}
             </Fact>
           </dl>
         </DetailCard>

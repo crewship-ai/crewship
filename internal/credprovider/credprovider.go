@@ -25,7 +25,7 @@ import (
 var Providers = []string{
 	// AI / inference
 	"ANTHROPIC", "OPENAI", "GOOGLE", "HUGGINGFACE", "PERPLEXITY",
-	"REPLICATE", "ELEVENLABS", "OLLAMA", "OPENROUTER", "OPENAI_COMPAT",
+	"OPENCODE", "OPENCODE_GO", "REPLICATE", "ELEVENLABS", "OLLAMA", "OPENROUTER", "OPENAI_COMPAT",
 	// Cloud / hosting
 	"AWS", "GCP", "AZURE", "CLOUDFLARE", "VERCEL", "NETLIFY",
 	"RAILWAY", "DIGITALOCEAN", "HEROKU", "SUPABASE",
@@ -71,7 +71,8 @@ var defaultEnvVars = map[string]string{
 	"PERPLEXITY":  "PERPLEXITY_API_KEY",
 	"REPLICATE":   "REPLICATE_API_TOKEN",
 	"ELEVENLABS":  "ELEVENLABS_API_KEY",
-	"OLLAMA":      "OLLAMA_HOST",        // an endpoint, not a secret — Ollama has no auth
+	"OLLAMA":      "OLLAMA_HOST", // an endpoint, not a secret — Ollama has no auth
+	"OPENCODE":    "OPENCODE_API_KEY",
 	"OPENROUTER":  "OPENROUTER_API_KEY", // the variable OpenCode/the OpenAI SDK read for openrouter/<model>
 
 	// Cloud / hosting

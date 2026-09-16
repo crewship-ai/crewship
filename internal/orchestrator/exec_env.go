@@ -1108,7 +1108,7 @@ func resolveRoutedProvider(req AgentRunRequest, viaSidecar bool) (routedProvider
 	if model == "" {
 		return routedProvider{}, false
 	}
-	s, ok := llmroute.Lookup(strings.ToUpper(prefix))
+	s, ok := llmroute.Lookup(providerlogin.Canonical(prefix))
 	if !ok {
 		return routedProvider{}, false
 	}
@@ -1135,6 +1135,12 @@ func resolveRoutedProvider(req AgentRunRequest, viaSidecar bool) (routedProvider
 	// send the request and would 503 a run that has no other way to work.
 	if s.UpstreamFromCredential && strings.TrimSpace(cred.BaseURL) == "" {
 		return routedProvider{}, false
+	}
+	if s.ID == "OPENCODE_GO" {
+		prefix = "opencode-go"
+	}
+	if s.ID == "OPENCODE" {
+		prefix = "opencode"
 	}
 	rp := routedProvider{Spec: s, ProviderID: prefix, ModelID: model, Label: s.DisplayName}
 	if s.UpstreamFromCredential {
@@ -1255,6 +1261,17 @@ func localModelConfigEnv(req AgentRunRequest, viaSidecar bool) (string, bool) {
 	modelID, localActive := localEndpointModel(req)
 	if !isRouted && !localActive {
 		return "", false
+	}
+
+	if isRouted && (routed.Spec.ID == "OPENCODE" || routed.Spec.ID == "OPENCODE_GO") {
+		// An options-only override preserves OpenCode's per-model SDK, model
+		// metadata and native session headers. Forcing openai-compatible here
+		// breaks Anthropic messages, Google models and OpenAI Responses models.
+		cfg := map[string]any{"provider": map[string]any{routed.ProviderID: map[string]any{
+			"options": map[string]string{"baseURL": routed.ProxyBaseURL(), "apiKey": routedProviderDummyKey},
+		}}}
+		raw, err := json.Marshal(cfg)
+		return "OPENCODE_CONFIG_CONTENT=" + string(raw), err == nil
 	}
 
 	type providerCfg struct {
@@ -1680,14 +1697,16 @@ func apiKeyEnvVarsForAdapter(adapter string) map[string]struct{} {
 		// alternative model gateways (OpenRouter, xAI, Groq, DeepSeek) and
 		// Cursor's BYO key for users routing through Cursor.
 		return map[string]struct{}{
-			"ANTHROPIC_API_KEY":  {},
-			"OPENAI_API_KEY":     {},
-			"GOOGLE_API_KEY":     {},
-			"GEMINI_API_KEY":     {},
-			"OPENROUTER_API_KEY": {},
-			"XAI_API_KEY":        {},
-			"GROQ_API_KEY":       {},
-			"DEEPSEEK_API_KEY":   {},
+			"ANTHROPIC_API_KEY":   {},
+			"OPENAI_API_KEY":      {},
+			"GOOGLE_API_KEY":      {},
+			"GEMINI_API_KEY":      {},
+			"OPENROUTER_API_KEY":  {},
+			"OPENCODE_API_KEY":    {},
+			"OPENCODE_GO_API_KEY": {},
+			"XAI_API_KEY":         {},
+			"GROQ_API_KEY":        {},
+			"DEEPSEEK_API_KEY":    {},
 			// #944: remaining providers the OPENCODE model registry
 			// advertises (lib/cli-adapters.ts) — env-var names follow the
 			// models.dev/AI-SDK provider conventions OpenCode reads.

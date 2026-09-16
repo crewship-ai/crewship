@@ -104,6 +104,8 @@ func providerRuntimeDefaults(provider string) (cliAdapter, model string) {
 		return "CURSOR_CLI", "composer"
 	case "FACTORY":
 		return "FACTORY_DROID", crewAgentDefaultModel
+	case "OPENCODE", "OPENCODE_GO":
+		return "OPENCODE", llm.DefaultModel(provider)
 	case "OLLAMA":
 		// OpenCode is Crewship's local/multi-provider adapter. A concrete
 		// local model is installation-specific, so keep its documented

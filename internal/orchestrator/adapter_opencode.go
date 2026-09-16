@@ -77,10 +77,13 @@ func (opencodeAdapter) UseStreamJSON() bool { return true }
 // models already arrive as "ollama/…" via localModelPrefix, so the has-slash
 // guard in qualifyOpenCodeModel short-circuits before we consult this map.
 var openCodeProviderIDs = map[string]string{
-	"ANTHROPIC": "anthropic",
-	"OPENAI":    "openai",
-	"GOOGLE":    "google",
-	"OLLAMA":    "ollama",
+	"ANTHROPIC":   "anthropic",
+	"OPENAI":      "openai",
+	"GOOGLE":      "google",
+	"OLLAMA":      "ollama",
+	"OPENCODE":    "opencode",
+	"OPENCODE_GO": "opencode-go",
+	"OPENCODE-GO": "opencode-go",
 }
 
 // ModelNameProviderID infers the LLM provider id from a bare model name's
@@ -128,6 +131,11 @@ func ModelNameProviderID(model string) string {
 func qualifyOpenCodeModel(provider, model string) string {
 	if model == "" || strings.Contains(model, "/") {
 		return model
+	}
+	// A gateway is an explicit billing choice even when the model names a vendor.
+	p := strings.ToUpper(strings.TrimSpace(provider))
+	if p == "OPENCODE" || p == "OPENCODE_GO" || p == "OPENCODE-GO" {
+		return openCodeProviderIDs[p] + "/" + model
 	}
 	if id := ModelNameProviderID(model); id != "" {
 		return id + "/" + model

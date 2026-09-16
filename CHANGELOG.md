@@ -14,6 +14,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Added
 
+- Credentials: connect OpenCode Go and OpenCode Zen with separate encrypted API-key accounts, existing access assignments, and OpenCode model selection. Gateway calls use the sidecar with native model protocols; setup explains Go subscription limits and optional Zen balance overage. (#2618)
+
 - Command palette: pages are searchable by name or slug in a **Pages** group — each row wears the page's icon and colour, names its folder or owning crew, marks a published application, and opens `/pages/<slug>`; the list is the same authorised index the overview draws, fetched on open. **Recent** is now kept per user and per workspace, and a page row is offered only while that page is still in the list just returned. History stored under the old shared key is cleared once, not migrated. (#2570)
 
 - **Routine inputs and recovery rules are visible before starting work.** Run and preset forms show accepted types and ranges, inline accessible errors and restoration of recipe defaults. Recipe and historical step details describe configured checks and failure handling; run details expose retained evidence and recorded duration/attempt diagnostics without treating partial history as complete.
