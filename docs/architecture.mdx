@@ -204,7 +204,7 @@ when a route registered there is not classified by whose identity guards it.
 | **MCP gateway** | `/mcp/tools`, `/mcp/call`, `/mcp/status` |
 | **Assignment** | `/assign`, `/results/{id}`, `/query`, `/standup`, `/escalate`, `/report-confidence` |
 | **Missions** | `/mission/create`, `/mission/templates`, `/mission/{id}` (GET status, POST `/start`) |
-| **Issues** | `/issue/create`, `/issues` (GET), `/issue/{identifier}` (GET/PATCH, plus `/comment`, `/link`, `/attachments`, `/attachments/{id}`) |
+| **Issues** | `/issue/create`, `/issues` (GET), `/issue/{identifier}` (GET/PATCH, plus POST `/comment`, GET `/comments`, `/link`, `/work`, `/attachments`, `/attachments/{id}`) |
 | **Pipelines** | `/pipelines` (GET), `/pipelines/save`, `/pipelines/{slug}` (GET, POST `/run`, POST `/dry_run`) |
 | **Pages** | `/pages/{page}/{panel}` (PUT — the producer door, see [Pages](/guides/pages)) |
 | **Connections** | `/connections`, `/connections/{id}` (`/message`, `/messages`, `/files`), `/crew-connections` |
@@ -223,21 +223,22 @@ assignment invites someone to add the backend half without the gate.
 
 ## Keeper Request Lifecycle
 
-The agent never holds a credential directly. Anything sensitive goes through one of two endpoints on the sidecar:
+Keeper is **off by default** (`KEEPER_ENABLED=false`), and when it is on it withholds only `type: SECRET` credentials from boot delivery (`internal/credpolicy`) — every other type still reaches the container as a file or env var. A withheld credential is reachable through exactly two endpoints on the sidecar, and neither ever returns the value:
 
 | Endpoint | What the agent gets back | When to use |
 |----------|--------------------------|-------------|
-| `POST /keeper/request` | The credential value, in cleartext | Tools that genuinely need the value (e.g. an SDK constructor that takes an API key) |
-| `POST /keeper/execute` | Stdout / stderr from a command, scrubbed | Anything that can be expressed as a shell command — preferred, because the agent never sees the value |
+| `POST /keeper/request` | A verdict — `ALLOW` / `DENY` / `ESCALATE` with a reason and risk score. **Never the credential value.** | To learn whether a longer piece of work will be allowed before starting it; the judge's answer is not memoized, so it does not pre-authorise a later `execute` |
+| `POST /keeper/execute` | Stdout / stderr from a command, scrubbed | The only way an agent *uses* a Keeper-gated credential — the value is injected into that one command's environment inside the crew container; the response contains scrubbed output |
 
 ### Decision flow
 
 The sidecar forwards both endpoints over `/tmp/crewship.sock` to crewshipd, which calls into `internal/keeper/gatekeeper`:
 
-1. **L1 fast-path** — for `request` only (never `execute`), an L1 credential plus an intent ≥ 10 non-whitespace characters AND ≥ 3 distinct non-whitespace characters is auto-allowed without an LLM round-trip. Single-character, whitespace-only, or trivial-filler intents like `"aaaaaaaaaa"` are rejected.
-2. **LLM evaluation** — every other request is scored by `Gatekeeper.Evaluate`, which prompts a local Ollama model with the request, the agent's recent conversation, and the credential's `SecurityLevel`. The model returns a structured `{ decision, reason, risk }` JSON object.
-3. **Fail-closed default** — if no LLM provider is configured, the Gatekeeper returns `DENY`. The same applies if the LLM response cannot be parsed as JSON.
-4. **Execute branch only** — on `ALLOW`, crewshipd runs the command via `docker exec` inside the crew container with the credential injected as an environment variable. The exec runs as the container's resolved non-root run-as user and fails closed if that user is empty, undeterminable, or root. Stdout and stderr pass through the [scrubber](#output-processing) before being returned. The credential value never crosses back into UID 1001.
+1. **L1 fast-path** — for `request` only (never `execute`), an L1 credential plus an intent ≥ 10 non-whitespace characters AND ≥ 5 distinct non-whitespace characters, not injection-shaped, is auto-allowed without an LLM round-trip — unless the workspace has an active watch policy, which sends every tier to the judge. Single-character, whitespace-only, or trivial-filler intents like `"aaaaaaaaaa"` are rejected.
+2. **Deterministic refusals** — an intent shorter than the tier's minimum (10 / 15 / 25 / 35 characters for L1–L4) is denied before any model is called, on both routes.
+3. **LLM evaluation** — every other request is scored by `Gatekeeper.Evaluate`, which prompts the judge — a local Ollama model by default, or the workspace's governance model — with the credential's tier block, the operator's watch policy, computed facts, the agent's recent conversation, and the request. The model returns a structured `{ decision, reason, risk }` JSON object, after which the tier floor is applied: in the default profile an `ALLOW` at L4 becomes an `ESCALATE` (`--escalate-from 5` removes that step).
+4. **Fail-closed default** — if no LLM provider is configured, the Gatekeeper returns `DENY`. The same applies if the LLM response cannot be parsed as JSON or does not arrive inside the judge's time budget.
+5. **Execute branch only** — on `ALLOW`, crewshipd runs the command via `docker exec` inside the crew container with the credential injected as an environment variable. The exec runs as the container's resolved non-root run-as user and fails closed if that user is empty, undeterminable, or root. Stdout and stderr pass through the [scrubber](#output-processing) before being returned. Execution uses the agent's own non-root identity; scrubbing the reply does not create a separate UID boundary around the injected environment. An `ESCALATE` returns without executing; a person's later ruling records the verdict and does not run the command.
 
 ### Sequence diagram
 
@@ -253,7 +254,7 @@ sequenceDiagram
     Agent->>Side: POST /keeper/execute<br/>{credential_name, intent, command}
     Side->>Cd: POST /api/v1/internal/keeper/execute<br/>(over /tmp/crewship.sock)
     Cd->>GK: Evaluate(EvalRequest)
-    alt L1 request, no command, intent ≥ 10 non-whitespace chars AND ≥ 3 distinct non-whitespace chars
+    alt L1 request, no command, intent ≥ 10 non-whitespace chars AND ≥ 5 distinct non-whitespace chars, no watch policy
         GK-->>Cd: ALLOW (fast-path)
     else otherwise
         GK->>LLM: prompt with intent + history + risk
@@ -289,11 +290,11 @@ The crew journal is the audit trail and is persisted across container restarts: 
 
 ### What Crewship protects against
 
-- **Agent leaking a credential into chat or logs.** `/keeper/execute` runs the command in crewshipd, scrubs stdout/stderr, and only the redacted result reaches UID 1001.
+- **Agent leaking a credential into chat or logs.** `/keeper/execute` has crewshipd run the command inside the crew container with the value injected for that one process, scrubs stdout/stderr, and returns the redacted result through the API — for `SECRET` credentials, which are the ones Keeper withholds. Other types are in the container from boot, and the general output scrubber is what stands between them and the chat.
 - **Unauthorised egress in restricted network mode.** The proxy refuses non-allowlisted hosts. Unknown network modes default to `restricted` (fail-closed) rather than `free`, so a misconfigured workspace cannot accidentally open up egress.
 - **Credential dump from the agent process.** Credentials are held in crewshipd's process memory; UID 1001 can talk to UID 1002 over loopback but cannot read the sidecar's process memory or files. Filesystem credentials at `/secrets/{slug}/` live on the crew's writable tmpfs, owned by UID 1001 with restrictive modes (`0400` files, `0700` directories) — that keeps them from any non-1001 process, but not from sibling agents in the same crew, which share UID 1001 (see below).
 - **Prompt injection in tool output.** `internal/lookout` scans inputs and outputs; on a finding it either sanitises (default for secret-shaped output) or blocks (default for input). Every action is logged to the journal.
-- **Trivial fast-path bypasses.** L1 auto-allow is gated to `request` only — an attacker cannot smuggle a command through the L1 path because `execute` always pays the LLM round-trip. Empty or whitespace-only intents are rejected before they reach the LLM.
+- **Trivial fast-path bypasses.** L1 auto-allow is gated to `request` only — an attacker cannot smuggle a command through the L1 path because `execute` always pays the LLM round-trip. Empty, whitespace-only, filler and injection-shaped intents are rejected before they reach the LLM.
 
 ### What Crewship does NOT protect against
 
@@ -302,8 +303,8 @@ The crew journal is the audit trail and is persisted across container restarts: 
 </Warning>
 
 - **A compromised host.** Docker is the bottom of the trust stack. If the host kernel, Docker daemon, or root account is compromised, every credential and every journal entry is exposed. Run crewshipd on a hardened host; do not expose port 8080 publicly without an authenticating reverse proxy.
-- **A malicious or misconfigured Keeper LLM.** If the Ollama model used by the Gatekeeper has been swapped for an adversarial one, `ALLOW` decisions cannot be trusted. Pin model digests, audit the model out-of-band, and treat the Keeper as a defense-in-depth layer rather than a primary control.
-- **Side channels in scrubbed output.** The scrubber redacts known credential shapes. A sufficiently creative agent can still leak partial information through timing, exit codes, or format-string tricks. Treat `/keeper/request` as a weaker contract than `/keeper/execute` for genuinely sensitive secrets.
+- **A malicious or misconfigured Keeper LLM.** If the model used by the Gatekeeper has been swapped for an adversarial one, `ALLOW` decisions cannot be trusted — the tier floor still turns an L4 `ALLOW` into an escalation in the default profile, but L1–L3 are the model's call. Pin model digests, audit the model out-of-band, and treat the Keeper as a defense-in-depth layer rather than a primary control.
+- **Side channels in scrubbed output.** The scrubber redacts the credential's literal value and a fixed set of encodings of it (base64 in four alphabets, base32, URL-escaped, hex in both cases, reversed) — not every transform. A sufficiently creative agent can still leak partial information through timing, exit codes, chunking, or format-string tricks. The scrubber raises the cost of the common one-liners; the crew's egress policy is the containment.
 - **A hostile sibling agent inside the same crew.** All agents in a crew container run as one principal (UID 1001), so there is no kernel-level isolation between them: each can read and write every sibling's `/secrets/{slug}/` files, home directory, and output, and signal every sibling's processes. The enforced isolation boundary is the **crew** (one container, tmpfs, home volume, and sidecar per crew), not the individual agent. Agents that must not read each other's credentials belong in separate crews — see [Credentials > The trust boundary is the crew](/guides/credentials#the-trust-boundary-is-the-crew-not-the-agent).
 - **Cross-tenant isolation on shared infrastructure.** A single crewshipd process serves a single workspace database at a time. Hosting multiple tenants requires separate crewshipd instances with separate `ENCRYPTION_KEY`s and separate Docker daemons (or namespaces).
 - **Supply-chain compromise of the agent CLIs.** Crewship invokes `claude`, `opencode`, `codex`, and similar binaries as-is. Pin their versions in any Dockerfile you control, and review their changelogs before bumping.

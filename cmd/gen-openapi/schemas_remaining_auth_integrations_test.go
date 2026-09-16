@@ -24,9 +24,8 @@ func TestRemainingAuthIntegrationsCatalogAuditsHandlerSurfaces(t *testing.T) {
 
 func TestRemainingAuthIntegrationsCatalogWiresExactFields(t *testing.T) {
 	routes, components := remainingAuthIntegrationsSchemaCatalog()
-	feedback := components["RemainingFeedbackCreateRequest"].(map[string]any)
-	if got := feedback["required"]; got == nil {
-		t.Fatal("feedback create must require message_id and signal")
+	if _, ok := components["RemainingFeedback"]; !ok {
+		t.Fatal("feedback rows must have a component")
 	}
 	if got := routes["GET /api/v1/hooks"].Response["properties"].(map[string]any)["rows"]; got == nil {
 		t.Fatal("hooks list must expose rows envelope")

@@ -872,6 +872,13 @@ func (h *InternalHandler) resolveAgentCredentials(r *http.Request, agentID strin
 			ce.Value, ce.BaseURL, ce.Headers = token, baseURL, headers
 		}
 
+		// The previous value while a rotation's grace window is open (#1882),
+		// opened with the same helper. Strictly optional: an unusable grace
+		// value delivers nothing and never costs the credential itself.
+		if grace := deliveredGraceToken(d, ce.BaseURL, decryptCredential); grace != "" {
+			ce.GraceToken, ce.GraceExpiresAt, ce.GraceRotationID = grace, d.GraceExpiresAt, d.GraceRotationID
+		}
+
 		// The credential's parts, through the SAME opener its value just went
 		// through. A failure drops the whole credential rather than one part:
 		// half an AWS credential fails at the point of use with an error about

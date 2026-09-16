@@ -38,6 +38,13 @@ func (r *Router) registerRoutes() {
 		r.assignmentHandler.SetProvisioner(r.provisioning)
 	}
 
+	// Browser-test fixtures (#2403) — only on an instance built with
+	// WithE2EFixtures. After the orchestration registrar because the card
+	// is written through its AssignmentHandler.
+	if r.e2eFixtures {
+		r.registerE2EFixtureRoutes(oh)
+	}
+
 	// Pages — the panel surface (docs/prd/pages.md §11). Workspace-unscoped
 	// routes plus the single panel write path.
 	r.registerPageRoutes()

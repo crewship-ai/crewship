@@ -60,7 +60,7 @@ func TestCompactor_ChainStaysVerifiableAfterCompaction(t *testing.T) {
 	// asking the compactor to destroy twelve rows it could no longer vouch for.
 	// Emitting with the timestamp we want is both closer to production (rows
 	// get old by existing) and honest about what the chain commits to.
-	old := time.Now().UTC().Add(-45 * 24 * time.Hour)
+	old := time.Now().UTC().Add(-45 * 24 * time.Hour).Truncate(24 * time.Hour)
 	emit := func(kind journal.EntryType, summary string, ts time.Time) string {
 		id, err := w.Emit(ctx, journal.Entry{
 			WorkspaceID: "ws_test",
@@ -134,7 +134,9 @@ func TestCompactor_RollsUpDailyBuckets(t *testing.T) {
 	defer w.Close()
 
 	now := time.Now().UTC()
-	old := now.Add(-45 * 24 * time.Hour) // well past the 30-day cutoff
+	// Anchor the bucket at UTC midnight: minute offsets must stay in its day,
+	// even when this test executes shortly before midnight.
+	old := now.Add(-45 * 24 * time.Hour).Truncate(24 * time.Hour)
 
 	// 50 exec.output_chunk entries spread across 3 consecutive days,
 	// sized 20/15/15 so each bucket crosses the minBucketSize=10
@@ -271,7 +273,7 @@ func TestCompactor_SmallBucketsNotCompacted(t *testing.T) {
 	w := journal.NewWriter(db, quietLogger(), journal.WriterOptions{FlushSize: 1})
 	defer w.Close()
 
-	old := time.Now().UTC().Add(-45 * 24 * time.Hour)
+	old := time.Now().UTC().Add(-45 * 24 * time.Hour).Truncate(24 * time.Hour)
 	// 5 entries — below minBucketSize.
 	for i := 0; i < 5; i++ {
 		emitDirect(t, db, makeID("small", 0, i), "ws_test", "crew_test",
@@ -306,7 +308,7 @@ func TestCompactor_OnlyCompactableTypes(t *testing.T) {
 	w := journal.NewWriter(db, quietLogger(), journal.WriterOptions{FlushSize: 1})
 	defer w.Close()
 
-	old := time.Now().UTC().Add(-45 * 24 * time.Hour)
+	old := time.Now().UTC().Add(-45 * 24 * time.Hour).Truncate(24 * time.Hour)
 	// 15 peer conversations — NOT compactable.
 	for i := 0; i < 15; i++ {
 		emitDirect(t, db, makeID("pc", 0, i), "ws_test", "crew_test",
@@ -330,7 +332,7 @@ func TestCompactor_MultipleCompactableTypesBucketSeparately(t *testing.T) {
 	w := journal.NewWriter(db, quietLogger(), journal.WriterOptions{FlushSize: 1})
 	defer w.Close()
 
-	old := time.Now().UTC().Add(-45 * 24 * time.Hour)
+	old := time.Now().UTC().Add(-45 * 24 * time.Hour).Truncate(24 * time.Hour)
 	// 12 chunks + 12 metrics on the SAME DAY must produce two buckets,
 	// not one. This catches bucket-key regressions where entry_type gets
 	// accidentally dropped from the composite key.

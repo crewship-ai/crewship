@@ -71,7 +71,7 @@ func TestCompactor_DefaultOlderThanAndNilLogger(t *testing.T) {
 
 	// 12 chunks aged 20 days — younger than the 30-day default cutoff
 	// that kicks in when olderThan <= 0 is passed.
-	old := time.Now().UTC().Add(-20 * 24 * time.Hour)
+	old := time.Now().UTC().Add(-20 * 24 * time.Hour).Truncate(24 * time.Hour)
 	for i := 0; i < 12; i++ {
 		emitDirect(t, db, makeID("def", 0, i), "ws_test", "crew_test",
 			old.Add(time.Duration(i)*time.Minute),
@@ -96,7 +96,7 @@ func TestCompactor_ArchivesBeforeDelete(t *testing.T) {
 	w := journal.NewWriter(db, quietLogger(), journal.WriterOptions{FlushSize: 1})
 	defer w.Close()
 
-	old := time.Now().UTC().Add(-45 * 24 * time.Hour)
+	old := time.Now().UTC().Add(-45 * 24 * time.Hour).Truncate(24 * time.Hour)
 	longPayload := `{"line":"` + strings.Repeat("x", 600) + `"}`
 	for i := 0; i < 12; i++ {
 		emitDirect(t, db, makeID("arch", 0, i), "ws_test", "crew_test",
@@ -146,7 +146,7 @@ func TestCompactor_SkipsUnparseableTimestamps(t *testing.T) {
 	w := journal.NewWriter(db, quietLogger(), journal.WriterOptions{FlushSize: 1})
 	defer w.Close()
 
-	old := time.Now().UTC().Add(-45 * 24 * time.Hour)
+	old := time.Now().UTC().Add(-45 * 24 * time.Hour).Truncate(24 * time.Hour)
 	for i := 0; i < 12; i++ {
 		emitDirect(t, db, makeID("ts", 0, i), "ws_test", "crew_test",
 			old.Add(time.Duration(i)*time.Minute),
@@ -190,7 +190,7 @@ func (f *flushFailEmitter) Flush(ctx context.Context) error {
 func TestCompactor_EmitBucketFailureSkipsBucket(t *testing.T) {
 	db := openDB(t)
 	defer db.Close()
-	old := time.Now().UTC().Add(-45 * 24 * time.Hour)
+	old := time.Now().UTC().Add(-45 * 24 * time.Hour).Truncate(24 * time.Hour)
 	for i := 0; i < 12; i++ {
 		emitDirect(t, db, makeID("ef", 0, i), "ws_test", "crew_test",
 			old.Add(time.Duration(i)*time.Minute),
@@ -217,7 +217,7 @@ func TestCompactor_EmitBucketFailureSkipsBucket(t *testing.T) {
 func TestCompactor_FlushFailureSkipsBucket(t *testing.T) {
 	db := openDB(t)
 	defer db.Close()
-	old := time.Now().UTC().Add(-45 * 24 * time.Hour)
+	old := time.Now().UTC().Add(-45 * 24 * time.Hour).Truncate(24 * time.Hour)
 	for i := 0; i < 12; i++ {
 		emitDirect(t, db, makeID("ff", 0, i), "ws_test", "crew_test",
 			old.Add(time.Duration(i)*time.Minute),
@@ -243,7 +243,7 @@ func TestCompactor_FlushFailureSkipsBucket(t *testing.T) {
 func TestCompactor_RunMarkerEmitFailureSurfaces(t *testing.T) {
 	db := openDB(t)
 	defer db.Close()
-	old := time.Now().UTC().Add(-45 * 24 * time.Hour)
+	old := time.Now().UTC().Add(-45 * 24 * time.Hour).Truncate(24 * time.Hour)
 	for i := 0; i < 12; i++ {
 		emitDirect(t, db, makeID("rm", 0, i), "ws_test", "crew_test",
 			old.Add(time.Duration(i)*time.Minute),

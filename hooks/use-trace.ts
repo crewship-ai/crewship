@@ -28,6 +28,7 @@ import type { PipelineDSL } from "@/lib/trace/types"
 //   - 3s poll while run is in active states (running/queued/paused)
 
 interface RunDetailResponse extends PipelineRun {
+  behavior?: import("@/lib/routine-behavior").RoutineBehavior
   // GET /pipeline-runs/{id} parses step_outputs_json server-side and
   // returns it as `step_outputs` (already in PipelineRun). The
   // response shape is identical to a list-row.

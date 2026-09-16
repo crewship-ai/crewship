@@ -29,7 +29,7 @@ crewship privacy <group> <subcommand> [flags]
 | `peer-consent set <on\|off>` | Opt out of (`on`) or back into (`off`) peer cards. |
 | `peer-cards list` (`cards list`) | List every peer card stored about you. |
 | `peer-cards delete` | Delete every peer card stored about you. |
-| `user-model list` (`operator-model list`, `about-me list`) | Show every fact stored in the operator model about you. |
+| `user-model list [field]` (`operator-model list`, `about-me list`) | Show every fact stored in the operator model about you — with `--provenance`, where each came from. |
 | `user-model forget <field>` | Forget one field and keep the rest. |
 | `user-model delete` | Forget the whole operator model. |
 
@@ -91,15 +91,40 @@ for a mood or a personality read. See
 for what is recorded and how the refusals are enforced.
 
 ```bash
-crewship privacy user-model list             # aliases: ls, show, get
-crewship privacy user-model list -f json     # includes the raw file content
-crewship privacy user-model forget timezone  # this one is wrong; keep the rest
-crewship privacy user-model delete -y        # forget all of it
+crewship privacy user-model list                     # aliases: ls, show, get
+crewship privacy user-model list --provenance        # where each entry came from
+crewship privacy user-model show timezone --provenance  # one field
+crewship privacy user-model list -f json             # includes the raw file content
+crewship privacy user-model forget timezone          # this one is wrong; keep the rest
+crewship privacy user-model delete -y                # forget all of it
 ```
 
 `list` shows one row per field (`FIELD`, `VALUE`). An empty table means nothing
 has been recorded about you in this workspace yet — a fresh operator, or an
-instance with extraction switched off.
+instance with extraction switched off. Name a field (`show timezone`) to see
+just that one; a field that is not stored is an error, not an empty table.
+
+`--provenance` adds where each entry came from — the answer to *"when did I
+say that?"* before deciding whether to forget it:
+
+```
+FIELD     VALUE                   SOURCE  QUOTE                         RECORDED                  MESSAGE
+role      runs the platform team  stated  I run the platform team here  2026-09-15T05:00:00.000Z  msg_1757…
+timezone  UTC+1                   stated  I'm on UTC+1                  2026-09-15T05:00:00.000Z  msg_1757…
+language  Czech                   -       -                             -                         -
+```
+
+`QUOTE` is the exact span of your own words the entry was verified against
+(extraction refuses anything it cannot find in a message you wrote), `RECORDED`
+is when the sweep stored it, and `MESSAGE` is the id of the message it was found
+in. A later conversation that changes a field, or says it again in a new
+message, records a new row and `list` shows the newest; nothing is ever
+rewritten in place, and the same sentence re-found by the next day's sweep is
+not recorded twice — the date stays the first time you said it. A dash means
+the entry was recorded before provenance was kept — the value is still yours
+to forget. With `-f json` each fact carries a `provenance` object with the same
+four fields (`quote`, `message_id`, `source_type`, `at`), omitted for an entry
+that has none.
 
 `forget <field>` is the answer to "an agent recorded something wrong about me"
 that does not cost you everything it recorded correctly. A field name that is
@@ -113,13 +138,15 @@ request, not on the next daily sweep.
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
+| `--provenance` | `bool` | `false` | On `list`: show where each entry came from — the quote, when it was recorded and the message it was found in. |
 | `--yes`, `-y` | `bool` | `false` | Skip the confirmation prompt on `delete`. |
 
 <Note>
-`list` shows what is stored, not where each entry came from. Extraction checks
-every fact against a verbatim span of your own words, but that span is not
-persisted — the file has a 1.5 KB budget read into every agent prompt.
-Per-entry provenance is tracked as follow-up work.
+Provenance lives beside the model, not in it: the model file has a 1.5 KB
+budget read into every agent prompt, so the quotes are kept in their own table
+and never reach a prompt. They are deleted with the model on every path —
+`forget` drops the field's rows, `delete` and opting out drop them all, and an
+administrator's Art. 17 erasure reaches them too.
 </Note>
 
 ---
