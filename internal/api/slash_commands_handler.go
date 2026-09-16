@@ -50,6 +50,7 @@ type slashFormField struct {
 	Max         *float64 `json:"max,omitempty"`
 	Options     []string `json:"options,omitempty"`
 	AllowCustom bool     `json:"allow_custom,omitempty"`
+	Format      string   `json:"format,omitempty"`
 	Placeholder string   `json:"placeholder,omitempty"`
 	Label       string   `json:"label,omitempty"`
 	Name        string   `json:"name"`
