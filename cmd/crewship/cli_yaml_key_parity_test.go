@@ -105,6 +105,8 @@ func yamlParityTypes() []any {
 		webhookCreateResult{},
 		webhookUpdateResult{},
 		webhookURLResult{},
+		// cmd_routine_webhooks_fire.go
+		webhookFireResult{},
 		// Payloads this change turned from "panics under -f yaml" into
 		// "renders under -f yaml". Exporting the embedded type fixed the
 		// crash; that is what put their KEYS on the machine contract, so
