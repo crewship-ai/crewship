@@ -57,7 +57,7 @@ Equivalent to running 'mission list --assignee=me' + 'approvals list
 		fetch := func(path string, into *[]map[string]any, label string, optional bool) {
 			defer wg.Done()
 			var body struct {
-				Data []map[string]any `json:"data"`
+				Data []map[string]any `json:"data" yaml:"data"`
 			}
 			err := getJSON(client, path, &body)
 			if err == nil {
@@ -126,7 +126,7 @@ var todayCmd = &cobra.Command{
 		go func() {
 			defer wg.Done()
 			var body struct {
-				Data []map[string]any `json:"data"`
+				Data []map[string]any `json:"data" yaml:"data"`
 			}
 			q := url.Values{}
 			q.Set("limit", "100")
@@ -185,7 +185,7 @@ var nowCmd = &cobra.Command{
 		fetchData := func(path string, into *[]map[string]any, label string, optional bool) {
 			defer wg.Done()
 			var body struct {
-				Data []map[string]any `json:"data"`
+				Data []map[string]any `json:"data" yaml:"data"`
 			}
 			err := getJSON(client, path, &body)
 			if err == nil {

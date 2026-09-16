@@ -161,15 +161,9 @@ func TestPostDeploy_RefusesAStatementThatNeverConverges(t *testing.T) {
 
 func TestPostDeploy_PendingReportsWhatIsOutstanding(t *testing.T) {
 	ctx := context.Background()
-	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "status.db"))
-	if err != nil {
-		t.Fatalf("open: %v", err)
-	}
-	defer db.Close()
-	t.Setenv("ENCRYPTION_KEY", strings.Repeat("a1b2c3d4", 8))
-	if err := Migrate(ctx, db, pdLogger()); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
+	// The template is what a boot-time Migrate leaves behind, post-deploy
+	// deferrals included, so it is the right thing to ask about.
+	db := openMigratedTestSQL(t)
 
 	pending, err := PostDeployPending(ctx, db)
 	if err != nil {

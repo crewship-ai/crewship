@@ -163,32 +163,32 @@ var systemInfoCmd = &cobra.Command{
 // print ANSI human text regardless of format). License is a pointer so an
 // unavailable license endpoint omits the key instead of emitting zero values.
 type systemRuntimeInfo struct {
-	Available bool   `json:"available"`
-	Runtime   string `json:"runtime"`
-	Version   string `json:"version"`
-	Socket    string `json:"socket,omitempty"`
+	Available bool   `json:"available" yaml:"available"`
+	Runtime   string `json:"runtime" yaml:"runtime"`
+	Version   string `json:"version" yaml:"version"`
+	Socket    string `json:"socket,omitempty" yaml:"socket,omitempty"`
 	// Runtimes is every runtime detected, not just the one in use. Docker
 	// Desktop and Podman on one laptop is the normal case for anyone testing
 	// both, and without this list switching between them is invisible.
-	Runtimes []systemRuntimeEntry `json:"runtimes,omitempty"`
+	Runtimes []systemRuntimeEntry `json:"runtimes,omitempty" yaml:"runtimes,omitempty"`
 	// InstallLinks is the server's "how do I get one" map, keyed by runtime
 	// label. It is sent alongside an available runtime too, not only when none
 	// was found (#1690) — an operator with one runtime installed still needs to
 	// be told what the others are. The CLI used to drop it on the floor (#1707).
-	InstallLinks map[string]string `json:"install_links,omitempty"`
+	InstallLinks map[string]string `json:"install_links,omitempty" yaml:"install_links,omitempty"`
 }
 
 type systemRuntimeEntry struct {
-	Runtime string `json:"runtime"`
-	Version string `json:"version"`
-	Socket  string `json:"socket,omitempty"`
+	Runtime string `json:"runtime" yaml:"runtime"`
+	Version string `json:"version" yaml:"version"`
+	Socket  string `json:"socket,omitempty" yaml:"socket,omitempty"`
 	// InUse marks the single runtime the server is actually driving. Not
 	// omitempty: `false` is the answer for every other entry and dropping it
 	// would make "not in use" indistinguishable from "this server is too old
 	// to say". The whole reason /system/runtime carries the flag is that
 	// installed and in-use are different facts (#1696); the CLI dropped it and
 	// so could not answer the one question the endpoint exists for (#1707).
-	InUse bool `json:"in_use"`
+	InUse bool `json:"in_use" yaml:"in_use"`
 	// Gaps are the crew hardening controls this runtime is measured not to
 	// deliver. The server sets them on the `in_use` entry only, so this is
 	// populated on at most one element (#1672).
@@ -196,7 +196,7 @@ type systemRuntimeEntry struct {
 	// A local twin of docker.Gap rather than the type itself: cmd_system.go
 	// carries no build tag and must keep linking in the `clionly` build, which
 	// deliberately excludes the container provider.
-	Gaps []systemRuntimeGap `json:"gaps,omitempty"`
+	Gaps []systemRuntimeGap `json:"gaps,omitempty" yaml:"gaps,omitempty"`
 }
 
 // systemRuntimeGap is one control the runtime in use will not honour —
@@ -204,8 +204,8 @@ type systemRuntimeEntry struct {
 // verbatim; the CLI never composes the wording, so a gap added server-side
 // reaches an already-installed CLI unchanged.
 type systemRuntimeGap struct {
-	Control string `json:"control"`
-	Detail  string `json:"detail"`
+	Control string `json:"control" yaml:"control"`
+	Detail  string `json:"detail" yaml:"detail"`
 }
 
 // redacted reports whether the server answered with the availability-only
@@ -325,17 +325,17 @@ func printInstallLinks(links map[string]string) {
 }
 
 type systemLicenseInfo struct {
-	Edition     string `json:"edition"`
-	LicenseID   string `json:"license_id,omitempty"`
-	LicenseeOrg string `json:"licensee_org,omitempty"`
-	MaxAgents   int    `json:"max_agents_per_crew"`
-	MaxCrews    int    `json:"max_crews"`
-	MaxMembers  int    `json:"max_members"`
+	Edition     string `json:"edition" yaml:"edition"`
+	LicenseID   string `json:"license_id,omitempty" yaml:"license_id,omitempty"`
+	LicenseeOrg string `json:"licensee_org,omitempty" yaml:"licensee_org,omitempty"`
+	MaxAgents   int    `json:"max_agents_per_crew" yaml:"max_agents_per_crew"`
+	MaxCrews    int    `json:"max_crews" yaml:"max_crews"`
+	MaxMembers  int    `json:"max_members" yaml:"max_members"`
 }
 
 type systemInfoPayload struct {
-	Runtime systemRuntimeInfo  `json:"runtime"`
-	License *systemLicenseInfo `json:"license,omitempty"`
+	Runtime systemRuntimeInfo  `json:"runtime" yaml:"runtime"`
+	License *systemLicenseInfo `json:"license,omitempty" yaml:"license,omitempty"`
 }
 
 var systemKeeperCmd = &cobra.Command{
@@ -366,11 +366,11 @@ var systemKeeperCmd = &cobra.Command{
 		}
 
 		var keeper struct {
-			Enabled      bool   `json:"enabled"`
-			OllamaURL    string `json:"ollama_url"`
-			Model        string `json:"model"`
-			OllamaOnline bool   `json:"ollama_online"`
-			SecretCount  int    `json:"secret_count"`
+			Enabled      bool   `json:"enabled" yaml:"enabled"`
+			OllamaURL    string `json:"ollama_url" yaml:"ollama_url"`
+			Model        string `json:"model" yaml:"model"`
+			OllamaOnline bool   `json:"ollama_online" yaml:"ollama_online"`
+			SecretCount  int    `json:"secret_count" yaml:"secret_count"`
 		}
 		if err := cli.ReadJSON(resp, &keeper); err != nil {
 			return err
@@ -417,10 +417,10 @@ var systemStatsCmd = &cobra.Command{
 		}
 
 		var stats struct {
-			Workspaces int `json:"workspaces"`
-			Users      int `json:"users"`
-			Agents     int `json:"agents"`
-			Running    int `json:"running"`
+			Workspaces int `json:"workspaces" yaml:"workspaces"`
+			Users      int `json:"users" yaml:"users"`
+			Agents     int `json:"agents" yaml:"agents"`
+			Running    int `json:"running" yaml:"running"`
 		}
 		if err := cli.ReadJSON(resp, &stats); err != nil {
 			return err
@@ -627,31 +627,31 @@ welcome banner is still showing.`,
 // Keeping them apart is the whole point. llm.NewOllama never dials, so a
 // box with no Ollama running used to report a perfectly healthy judge.
 type auxSubsystem struct {
-	ID          string `json:"id"`
-	Label       string `json:"label"`
-	Provider    string `json:"provider"`
-	Model       string `json:"model"`
-	TimeoutMS   int64  `json:"timeout_ms,omitempty"`
-	Source      string `json:"source"`
-	Healthy     bool   `json:"healthy"`
-	Detail      string `json:"detail,omitempty"`
-	Reachable   *bool  `json:"reachable,omitempty"`
-	ReachDetail string `json:"reach_detail,omitempty"`
+	ID          string `json:"id" yaml:"id"`
+	Label       string `json:"label" yaml:"label"`
+	Provider    string `json:"provider" yaml:"provider"`
+	Model       string `json:"model" yaml:"model"`
+	TimeoutMS   int64  `json:"timeout_ms,omitempty" yaml:"timeout_ms,omitempty"`
+	Source      string `json:"source" yaml:"source"`
+	Healthy     bool   `json:"healthy" yaml:"healthy"`
+	Detail      string `json:"detail,omitempty" yaml:"detail,omitempty"`
+	Reachable   *bool  `json:"reachable,omitempty" yaml:"reachable,omitempty"`
+	ReachDetail string `json:"reach_detail,omitempty" yaml:"reach_detail,omitempty"`
 }
 
 // auxStatusPayload is what --format json/yaml emits: the current server
 // envelope, verbatim, so `jq '.subsystems[]'` works against CLI output and
 // against curl alike.
 type auxStatusPayload struct {
-	Subsystems []auxSubsystem `json:"subsystems"`
+	Subsystems []auxSubsystem `json:"subsystems" yaml:"subsystems"`
 }
 
 // auxStatusWire adds the pre-#1506 `slots` key purely so a stale server can
 // be NAMED rather than silently rendered as an empty table. It never reaches
 // the formatter — see auxStatusPayload.
 type auxStatusWire struct {
-	Subsystems []auxSubsystem    `json:"subsystems"`
-	Slots      []json.RawMessage `json:"slots"`
+	Subsystems []auxSubsystem    `json:"subsystems" yaml:"subsystems"`
+	Slots      []json.RawMessage `json:"slots" yaml:"slots"`
 }
 
 // auxVerdict collapses healthy + reachable into the single word an operator

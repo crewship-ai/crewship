@@ -8,7 +8,6 @@ import (
 	"log/slog"
 	"sort"
 	"strings"
-	"sync/atomic"
 	"testing"
 
 	_ "modernc.org/sqlite"
@@ -38,31 +37,14 @@ import (
 // they are pinned here, against the migrated schema, rather than trusted to the
 // handlers that will be written on top.
 
-// migratePagesCounter generates unique in-memory database names so parallel
-// tests do not share state — the bare `file::memory:?cache=shared` DSN points
-// every connection at the SAME global database. Same idiom as
-// migrateV89Counter in migrate_v89_test.go.
-var migratePagesCounter atomic.Int64
-
-// pagesMigratedDB opens a fresh in-memory database with foreign keys ON and
-// runs the full migration chain. Foreign keys matter here: half the assertions
+// pagesMigratedDB opens a fresh copy of the migrated template with foreign
+// keys ON (Open's default). Foreign keys matter here: half the assertions
 // below are about what a DELETE does, and with the pragma off they would all
 // pass vacuously.
 func pagesMigratedDB(t *testing.T) *sql.DB {
 	t.Helper()
 
-	name := fmt.Sprintf("crewship-migrate-pages-%d", migratePagesCounter.Add(1))
-	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared&_pragma=foreign_keys(ON)", name)
-	db, err := sql.Open("sqlite", dsn)
-	if err != nil {
-		t.Fatalf("open: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	if err := Migrate(context.Background(), db, logger); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
+	db := openMigratedTestSQL(t)
 
 	// Guard the guard: if foreign_keys did not actually take, every cascade
 	// assertion in this file becomes a no-op that still reports PASS.
@@ -186,6 +168,12 @@ func TestMigratePages_TablesAndColumns(t *testing.T) {
 				// counts membership changes and fences moves.
 				{name: "folder_id"},
 				{name: "pages_version", notNull: true},
+				// #2563: the page's own icon and colour. Both nullable — NULL
+				// is "none", and the client draws its default glyph in no
+				// colour for it. Columns, not spec_json keys: presentation
+				// is not restored by a rollback or carried by a bundle.
+				{name: "icon"},
+				{name: "color"},
 			},
 		},
 		{

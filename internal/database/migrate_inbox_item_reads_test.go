@@ -4,7 +4,6 @@ import (
 	"context"
 	"io"
 	"log/slog"
-	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -125,14 +124,7 @@ func TestMigrate_InboxItemReads_CascadesOnUserDelete(t *testing.T) {
 func TestMigrate_InboxItemReads_Backfill(t *testing.T) {
 	silent := slog.New(slog.NewTextHandler(io.Discard, nil))
 	ctx := context.Background()
-	db, err := Open("file:" + filepath.Join(t.TempDir(), "iir_backfill.db"))
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	defer db.Close()
-	if err := Migrate(ctx, db.DB, silent); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
+	db := openMigratedTestDB(t)
 
 	if _, err := db.Exec(`INSERT INTO workspaces (id, name, slug) VALUES ('ws_bf', 'WS', 'ws-bf')`); err != nil {
 		t.Fatalf("seed workspace: %v", err)

@@ -124,6 +124,10 @@ type pageCapabilityRevocation struct {
 	Type    journal.EntryType
 	Summary string
 	Payload map[string]any
+	// Refs is the entry's structured cross-reference map, for entry types
+	// whose ordinary writer fills one (approval.trust_revoked carries the
+	// grant, routine and step ids there). Nil for the Pages entries.
+	Refs map[string]any
 }
 
 // erasePagesIdentity unnames targetID on the four Pages tables, inside wsID
@@ -424,6 +428,7 @@ func (h *AdminGDPRHandler) journalRevocations(ctx context.Context, actionID, act
 			ActorID:     actorID,
 			Summary:     rev.Summary,
 			Payload:     payload,
+			Refs:        rev.Refs,
 		}); err != nil {
 			h.logger.Warn("gdpr delete: capability revocation was not journalled",
 				"action_id", actionID, "workspace_id", wsID, "type", string(rev.Type), "err", err)

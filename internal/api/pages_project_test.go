@@ -135,7 +135,7 @@ func TestPageProjectRBACAndConcurrentSave(t *testing.T) {
 		} else {
 			h.PutProject(w, r)
 		}
-		if w.Code != 403 {
+		if w.Code != 404 {
 			t.Fatalf("%s status %d", method, w.Code)
 		}
 	}

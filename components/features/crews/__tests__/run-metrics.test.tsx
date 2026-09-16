@@ -8,7 +8,7 @@ vi.mock("@/components/features/dashboard/status-donut", () => ({ StatusDonut: ()
 
 const resource = vi.mocked(useWorkspaceResource)
 function setData(rows?: { key: string; total: number }[]) {
-  resource.mockReturnValue({ data: { totals: { succeeded: 26, failed: 5, running: 0 }, truncated: false, by_trigger: rows }, error: null } as ReturnType<typeof useWorkspaceResource>)
+  resource.mockReturnValue({ key: "runs", data: { totals: { succeeded: 26, failed: 5, running: 0 }, truncated: false, by_trigger: rows } })
 }
 
 describe("RunMetrics", () => {

@@ -1,11 +1,7 @@
 package database
 
 import (
-	"context"
 	"database/sql"
-	"log/slog"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -21,17 +17,7 @@ import (
 // after SPEC-4 took v98; bumped again to v101 after main landed v99
 // (cli_token_tiers) + v100 (rbac_extensions) ahead of this branch.
 func TestMigrateV101_Autonomy(t *testing.T) {
-	dir := t.TempDir()
-	db, err := Open("file:" + filepath.Join(dir, "v101.db"))
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	defer db.Close()
-
-	migLogger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
-	if err := Migrate(context.Background(), db.DB, migLogger); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
+	db := openMigratedTestDB(t)
 
 	mustExec(t, db.DB, `INSERT INTO workspaces (id, name, slug) VALUES ('ws1', 'WS', 'ws1')`)
 

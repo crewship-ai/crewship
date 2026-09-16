@@ -109,11 +109,11 @@ func init() {
 // Duplicated here rather than imported so the CLI binary doesn't pull
 // in the internal/api package's HTTP dependencies.
 type proposedSkillRow struct {
-	FileName           string `json:"file_name"`
-	Name               string `json:"name"`
-	Description        string `json:"description"`
-	DescriptionQuality string `json:"description_quality"`
-	Category           string `json:"category"`
+	FileName           string `json:"file_name" yaml:"file_name"`
+	Name               string `json:"name" yaml:"name"`
+	Description        string `json:"description" yaml:"description"`
+	DescriptionQuality string `json:"description_quality" yaml:"description_quality"`
+	Category           string `json:"category" yaml:"category"`
 }
 
 func runSkillProposedList(cmd *cobra.Command, _ []string) error {
@@ -180,8 +180,8 @@ func runSkillProposedList(cmd *cobra.Command, _ []string) error {
 // proposedRequest mirrors api.approveBody. Used for both approve and
 // reject — the wire format is identical.
 type proposedRequest struct {
-	CrewID   string `json:"crew_id"`
-	FileName string `json:"file_name"`
+	CrewID   string `json:"crew_id" yaml:"crew_id"`
+	FileName string `json:"file_name" yaml:"file_name"`
 }
 
 func runSkillProposedApprove(cmd *cobra.Command, _ []string) error {
@@ -207,10 +207,10 @@ func runSkillProposedApprove(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 	var out struct {
-		SkillID  string `json:"skill_id"`
-		Slug     string `json:"slug"`
-		Created  bool   `json:"created"`
-		FileName string `json:"file_name"`
+		SkillID  string `json:"skill_id" yaml:"skill_id"`
+		Slug     string `json:"slug" yaml:"slug"`
+		Created  bool   `json:"created" yaml:"created"`
+		FileName string `json:"file_name" yaml:"file_name"`
 	}
 	if err := cli.ReadJSON(resp, &out); err != nil {
 		return err
@@ -246,8 +246,8 @@ func runSkillProposedReject(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 	var out struct {
-		FileName string `json:"file_name"`
-		Removed  bool   `json:"removed"`
+		FileName string `json:"file_name" yaml:"file_name"`
+		Removed  bool   `json:"removed" yaml:"removed"`
 	}
 	if err := cli.ReadJSON(resp, &out); err != nil {
 		return err

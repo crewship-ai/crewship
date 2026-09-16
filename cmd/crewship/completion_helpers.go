@@ -50,8 +50,8 @@ func completeAgentSlug(cmd *cobra.Command, args []string, toComplete string) ([]
 	defer resp.Body.Close()
 
 	var agents []struct {
-		Slug string `json:"slug"`
-		Name string `json:"name"`
+		Slug string `json:"slug" yaml:"slug"`
+		Name string `json:"name" yaml:"name"`
 	}
 	if err := cli.ReadJSON(resp, &agents); err != nil {
 		return nil, cobra.ShellCompDirectiveNoFileComp

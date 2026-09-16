@@ -42,35 +42,35 @@ var providerCmd = &cobra.Command{
 // all, and collapsing that into key_set=false would read as "your key is
 // missing" for a provider that is working perfectly.
 type providerRow struct {
-	ID          string `json:"id"`
-	DisplayName string `json:"display_name"`
+	ID          string `json:"id" yaml:"id"`
+	DisplayName string `json:"display_name" yaml:"display_name"`
 	// Registered is false for a provider that exists only in the model
 	// catalog — listable and priceable here, but with no codec in this build,
 	// so nothing can actually call it.
-	Registered bool `json:"registered"`
+	Registered bool `json:"registered" yaml:"registered"`
 
-	Codec string `json:"codec,omitempty"`
-	Auth  string `json:"auth,omitempty"`
+	Codec string `json:"codec,omitempty" yaml:"codec,omitempty"`
+	Auth  string `json:"auth,omitempty" yaml:"auth,omitempty"`
 
-	KeyEnv      string `json:"key_env,omitempty"`
-	KeyRequired bool   `json:"key_required"`
-	KeySet      bool   `json:"key_set"`
+	KeyEnv      string `json:"key_env,omitempty" yaml:"key_env,omitempty"`
+	KeyRequired bool   `json:"key_required" yaml:"key_required"`
+	KeySet      bool   `json:"key_set" yaml:"key_set"`
 
 	// Endpoint is the address this provider resolves to right now: BaseEnv if
 	// the operator set it, BaseDefault otherwise. Any userinfo is redacted —
 	// a self-hosted endpoint may carry credentials in the URL and this command
 	// is routinely pasted into an issue.
-	Endpoint    string `json:"endpoint,omitempty"`
-	EndpointEnv string `json:"endpoint_env,omitempty"`
+	Endpoint    string `json:"endpoint,omitempty" yaml:"endpoint,omitempty"`
+	EndpointEnv string `json:"endpoint_env,omitempty" yaml:"endpoint_env,omitempty"`
 
-	CatalogID       string `json:"catalog_id,omitempty"`
-	CatalogModels   int    `json:"catalog_models"`
-	DefaultAuxModel string `json:"default_aux_model,omitempty"`
+	CatalogID       string `json:"catalog_id,omitempty" yaml:"catalog_id,omitempty"`
+	CatalogModels   int    `json:"catalog_models" yaml:"catalog_models"`
+	DefaultAuxModel string `json:"default_aux_model,omitempty" yaml:"default_aux_model,omitempty"`
 }
 
 // providerListResult is the `provider list` document.
 type providerListResult struct {
-	Providers []providerRow `json:"providers"`
+	Providers []providerRow `json:"providers" yaml:"providers"`
 }
 
 var providerListCmd = &cobra.Command{

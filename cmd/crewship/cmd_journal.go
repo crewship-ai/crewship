@@ -161,8 +161,8 @@ Examples:
 		}
 
 		var body struct {
-			Entries []map[string]any `json:"entries"`
-			Count   int              `json:"count"`
+			Entries []map[string]any `json:"entries" yaml:"entries"`
+			Count   int              `json:"count" yaml:"count"`
 		}
 		if err := cli.ReadJSON(resp, &body); err != nil {
 			return err
@@ -255,9 +255,9 @@ Examples:
 		}
 
 		var out struct {
-			ID       string `json:"id"`
-			Priority string `json:"priority"`
-			Previous string `json:"previous"`
+			ID       string `json:"id" yaml:"id"`
+			Priority string `json:"priority" yaml:"priority"`
+			Previous string `json:"previous" yaml:"previous"`
 		}
 		if err := cli.ReadJSON(resp, &out); err != nil {
 			return err
@@ -364,23 +364,23 @@ Tip: to narrow journal entries to a specific run/trace, use
 
 		var body struct {
 			Crews []struct {
-				ID    string  `json:"id"`
-				Name  string  `json:"name"`
-				Slug  string  `json:"slug"`
-				Icon  *string `json:"icon"`
-				Color *string `json:"color"`
-			} `json:"crews"`
+				ID    string  `json:"id" yaml:"id"`
+				Name  string  `json:"name" yaml:"name"`
+				Slug  string  `json:"slug" yaml:"slug"`
+				Icon  *string `json:"icon" yaml:"icon"`
+				Color *string `json:"color" yaml:"color"`
+			} `json:"crews" yaml:"crews"`
 			Agents []struct {
-				ID     string  `json:"id"`
-				Name   string  `json:"name"`
-				Slug   string  `json:"slug"`
-				CrewID *string `json:"crew_id"`
-			} `json:"agents"`
+				ID     string  `json:"id" yaml:"id"`
+				Name   string  `json:"name" yaml:"name"`
+				Slug   string  `json:"slug" yaml:"slug"`
+				CrewID *string `json:"crew_id" yaml:"crew_id"`
+			} `json:"agents" yaml:"agents"`
 			Missions []struct {
-				ID     string `json:"id"`
-				Title  string `json:"title"`
-				Status string `json:"status"`
-			} `json:"missions"`
+				ID     string `json:"id" yaml:"id"`
+				Title  string `json:"title" yaml:"title"`
+				Status string `json:"status" yaml:"status"`
+			} `json:"missions" yaml:"missions"`
 		}
 		if err := cli.ReadJSON(resp, &body); err != nil {
 			return err
@@ -638,7 +638,7 @@ Examples:
 			return err
 		}
 		var body struct {
-			Total int64 `json:"total"`
+			Total int64 `json:"total" yaml:"total"`
 		}
 		if err := cli.ReadJSON(resp, &body); err != nil {
 			return err

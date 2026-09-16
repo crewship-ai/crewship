@@ -1,8 +1,6 @@
 package database
 
 import (
-	"context"
-	"path/filepath"
 	"testing"
 )
 
@@ -12,15 +10,7 @@ import (
 // remediation step must demote the extras BEFORE creating the unique index,
 // otherwise CREATE UNIQUE INDEX would fail and abort the whole migration.
 func TestMigrationOneLeadPerCrew_RemediatesExistingDuplicates(t *testing.T) {
-	dir := t.TempDir()
-	db, err := Open("file:" + filepath.Join(dir, "dup.db"))
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	defer db.Close()
-	if err := Migrate(context.Background(), db.DB, newTestLogger()); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
+	db := openMigratedTestDB(t)
 
 	// Simulate a pre-fix install: drop the index so duplicates can exist.
 	if _, err := db.DB.Exec(`DROP INDEX IF EXISTS idx_agents_one_lead_per_crew`); err != nil {

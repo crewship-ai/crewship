@@ -320,7 +320,7 @@ func TestPrintSpendTable_YAMLFormat(t *testing.T) {
 	if err != nil {
 		t.Fatalf("printSpendTable yaml: %v", err)
 	}
-	if !strings.Contains(out, `crewid: "y"`) {
+	if !strings.Contains(out, `crew_id: "y"`) {
 		t.Errorf("yaml output missing crew id; got:\n%s", out)
 	}
 }
@@ -383,7 +383,7 @@ func TestPaymasterTopRunE_YAML(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RunE yaml: %v", err)
 	}
-	if !strings.Contains(out, "scopeid: b") {
+	if !strings.Contains(out, "scope_id: b") {
 		t.Errorf("yaml output missing row; got:\n%s", out)
 	}
 }
@@ -418,7 +418,7 @@ func TestPaymasterByMissionRunE_JSONAndYAML(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RunE yaml: %v", err)
 	}
-	if !strings.Contains(out, "missionid: "+covMissionID) {
+	if !strings.Contains(out, "mission_id: "+covMissionID) {
 		t.Errorf("yaml output missing mission id; got:\n%s", out)
 	}
 }

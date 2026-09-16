@@ -85,9 +85,9 @@ func TestRunAgent_LargePrompt_GoesViaStdin_NotArg(t *testing.T) {
 	if strings.Contains(strings.Join(gotCmd, " "), "tmux new-session") {
 		t.Error("oversized-prompt exec must bypass tmux (its stdin is not wired to the exec stream)")
 	}
-	// It should be the direct stdbuf-wrapped exec.
-	if len(gotCmd) < 3 || gotCmd[0] != "stdbuf" || gotCmd[2] != "claude" {
-		t.Errorf("expected direct `stdbuf -oL claude ...` exec, got %v", gotCmd[:min(4, len(gotCmd))])
+	// Direct execution must retain a stoppable process identity and stdin.
+	if len(gotCmd) < 10 || gotCmd[2] != "setsid" || gotCmd[9] != "claude" {
+		t.Errorf("expected supervised direct Claude exec, got %v", gotCmd[:min(4, len(gotCmd))])
 	}
 }
 

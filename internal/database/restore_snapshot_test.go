@@ -52,13 +52,7 @@ func TestRestoreSnapshot_RoundTripWithGuard(t *testing.T) {
 	dbPath := filepath.Join(dir, "crewship.db")
 	ctx := context.Background()
 
-	db, err := Open("file:" + dbPath)
-	if err != nil {
-		t.Fatalf("open: %v", err)
-	}
-	if err := Migrate(ctx, db.DB, newTestLogger()); err != nil {
-		t.Fatalf("initial migrate: %v", err)
-	}
+	db := openMigratedTestDBAt(t, dbPath)
 	maxV := maxKnownMigrationVersion()
 
 	// Snapshot the DB at its current (known-good) version, exactly as

@@ -84,6 +84,8 @@ func startRoutineTriggerAcceptanceServer(t *testing.T) (cfgPath, authorCrewID st
 	router.PipelinesHandler.SetScheduleStore(pipeline.NewScheduleStore(db))
 	router.PipelinesHandler.SetRunner(unusedAgentRunner{})
 	router.PipelinesHandler.SetRunStore(pipeline.NewRunStore(db))
+	// Match cmd_start: approval and original execution share a lifetime fence.
+	router.PipelinesHandler.SetRunRegistry(pipeline.NewRunRegistry())
 	waitpoints := pipeline.NewSQLWaitpointStore(db)
 	t.Cleanup(waitpoints.Close)
 	router.PipelinesHandler.SetWaitpointStore(waitpoints)

@@ -90,8 +90,8 @@ Examples:
 			return err
 		}
 		var body struct {
-			Rows  []workspaceRunRow `json:"rows"`
-			Count int               `json:"count"`
+			Rows  []workspaceRunRow `json:"rows" yaml:"rows"`
+			Count int               `json:"count" yaml:"count"`
 		}
 		if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
 			return fmt.Errorf("decode response: %w", err)

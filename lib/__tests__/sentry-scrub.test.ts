@@ -39,7 +39,6 @@ function newLeakyEvent(): ErrorEvent {
         data: { path: "/api/v1/secret", token: "abc" },
       },
     ],
-    // @ts-expect-error -- modules is a legacy field, still attached by some integrations
     modules: { "react-dom": "19.2.6" },
   } as ErrorEvent
 }
@@ -70,7 +69,6 @@ describe("scrubEvent (frontend Sentry BeforeSend)", () => {
 
   it("clears the modules field", () => {
     const event = scrubEvent(newLeakyEvent())
-    // @ts-expect-error -- runtime check on legacy field
     expect(event.modules).toBeUndefined()
   })
 

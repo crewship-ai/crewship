@@ -144,6 +144,8 @@ POST /api/v1/admin/keeper/judge/test roleManage
 POST /api/v1/admin/keeper/judge/test-hosted roleManage
 POST /api/v1/admin/keeper/requests/{requestId}/resolve roleManage
 POST /api/v1/admin/keeper/review/{slot}/run roleManage
+POST /api/v1/admin/memory/peer-card-sync roleManage
+POST /api/v1/admin/memory/user-model-sync roleManage
 POST /api/v1/admin/prune-crew-runtimes roleManage
 POST /api/v1/admin/prune-legacy-resources roleManage
 POST /api/v1/admin/reap-orphan-containers roleManage

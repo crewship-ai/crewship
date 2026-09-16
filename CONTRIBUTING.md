@@ -643,19 +643,15 @@ we will say so here and in the PR template.
 
 ### Type-checking test fixtures
 
-`pnpm test:types` uses `tsconfig.tests.json`, including Vitest's jest-dom matcher
-types. It runs in the Frontend Test CI job. Existing debt is recorded in
-`scripts/test-types-baseline.json` (#2493); a passing gate means no new
-file/code/message/code-site/count diagnostics, not that the existing debt is gone.
+`pnpm test:types` type-checks every test file through `tsconfig.tests.json`
+(Vitest globals plus the jest-dom matcher types) and fails on any diagnostic.
+It runs in the Frontend Test CI job. There is no baseline: a harness that
+renders a component without a required prop, or a fixture built to a wire
+shape the product does not have, is a red gate, not a warning (#2493).
 
-Fix new diagnostics instead of adding them to the baseline. After repairing
-recorded errors, run `node scripts/typecheck-tests.mjs --write-baseline` and
-review the diff: ordinary cleanup should remove entries or lower counts.
-Never refresh the baseline automatically in CI. Line shifts do not change a
-fingerprint. The code-site anchor hashes the enclosing statement and named test/function
-context, so an identical error moved into a different declaration or test is new.
-PR and merge-group CI also compare the submitted baseline with the target commit
-(`TEST_TYPES_BASE_REF`); increasing allowances fails even when the local baseline
-was regenerated. The first migration from the old unanchored format preserves
-its file/code/message counts. This is a regression gate, not proof of semantic
-error identity or protection against a PR deliberately rewriting CI itself.
+Type a mock with the signature of what it replaces
+(`vi.fn<typeof apiFetch>()`, `Mock<Props["onSelect"]>`) rather than reaching
+into `mock.calls` through a cast, and build fixtures as the product type
+(`const run = (over: Partial<PipelineRunRecord> = {}): PipelineRunRecord`) so a
+renamed field fails here instead of at runtime. `@ts-expect-error` is for a
+test that deliberately feeds a wrong shape, and it says why.

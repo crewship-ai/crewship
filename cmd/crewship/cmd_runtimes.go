@@ -15,14 +15,14 @@ var runtimesCmd = &cobra.Command{
 }
 
 type runtimeEntry struct {
-	Name           string   `json:"name"`
-	Tool           string   `json:"tool"`
-	Description    string   `json:"description"`
-	Category       string   `json:"category"`
-	Icon           string   `json:"icon"`
-	Versions       []string `json:"versions"`
-	DefaultVersion string   `json:"default_version"`
-	Backends       []string `json:"backends"`
+	Name           string   `json:"name" yaml:"name"`
+	Tool           string   `json:"tool" yaml:"tool"`
+	Description    string   `json:"description" yaml:"description"`
+	Category       string   `json:"category" yaml:"category"`
+	Icon           string   `json:"icon" yaml:"icon"`
+	Versions       []string `json:"versions" yaml:"versions"`
+	DefaultVersion string   `json:"default_version" yaml:"default_version"`
+	Backends       []string `json:"backends" yaml:"backends"`
 }
 
 // fetchRuntimeCatalog loads the runtime catalog from the API, optionally
@@ -45,7 +45,7 @@ func fetchRuntimeCatalog(search string) ([]runtimeEntry, error) {
 	}
 
 	var result struct {
-		Runtimes []runtimeEntry `json:"runtimes"`
+		Runtimes []runtimeEntry `json:"runtimes" yaml:"runtimes"`
 	}
 	if err := cli.ReadJSON(resp, &result); err != nil {
 		return nil, err

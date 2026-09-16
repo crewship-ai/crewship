@@ -105,9 +105,9 @@ var agentCreateCmd = &cobra.Command{
 		}
 
 		var created struct {
-			ID   string `json:"id"`
-			Slug string `json:"slug"`
-			Name string `json:"name"`
+			ID   string `json:"id" yaml:"id"`
+			Slug string `json:"slug" yaml:"slug"`
+			Name string `json:"name" yaml:"name"`
 		}
 		if err := cli.ReadJSON(resp, &created); err != nil {
 			return err

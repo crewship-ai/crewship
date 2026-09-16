@@ -41,13 +41,13 @@ var crewMemberListCmd = &cobra.Command{
 		}
 
 		var members []struct {
-			ID   string `json:"id"`
+			ID   string `json:"id" yaml:"id"`
 			User struct {
-				ID       string `json:"id"`
-				Email    string `json:"email"`
-				FullName string `json:"full_name"`
-			} `json:"user"`
-			JoinedAt string `json:"joined_at"`
+				ID       string `json:"id" yaml:"id"`
+				Email    string `json:"email" yaml:"email"`
+				FullName string `json:"full_name" yaml:"full_name"`
+			} `json:"user" yaml:"user"`
+			JoinedAt string `json:"joined_at" yaml:"joined_at"`
 		}
 		if err := cli.ReadJSON(resp, &members); err != nil {
 			return err

@@ -70,19 +70,19 @@ Examples:
 			return err
 		}
 		var payload struct {
-			Format    string `json:"format"`
+			Format    string `json:"format" yaml:"format"`
 			Documents []struct {
-				Path  string   `json:"path"`
-				Tier  string   `json:"tier"`
-				Scope string   `json:"scope"`
-				Title string   `json:"title"`
-				Tags  []string `json:"tags"`
-				Body  string   `json:"body"`
-			} `json:"documents"`
+				Path  string   `json:"path" yaml:"path"`
+				Tier  string   `json:"tier" yaml:"tier"`
+				Scope string   `json:"scope" yaml:"scope"`
+				Title string   `json:"title" yaml:"title"`
+				Tags  []string `json:"tags" yaml:"tags"`
+				Body  string   `json:"body" yaml:"body"`
+			} `json:"documents" yaml:"documents"`
 			Skipped []struct {
-				Source string `json:"source"`
-				Reason string `json:"reason"`
-			} `json:"skipped"`
+				Source string `json:"source" yaml:"source"`
+				Reason string `json:"reason" yaml:"reason"`
+			} `json:"skipped" yaml:"skipped"`
 		}
 		if err := cli.ReadJSON(resp, &payload); err != nil {
 			return err
@@ -287,15 +287,15 @@ func postImportBatch(client *cli.Client, crewID, agentSlug string, docs []mempor
 		return 0, err
 	}
 	var out struct {
-		Written  []string `json:"written"`
+		Written  []string `json:"written" yaml:"written"`
 		Rejected []struct {
-			Path string `json:"path"`
-			Kind string `json:"kind"`
-		} `json:"rejected"`
+			Path string `json:"path" yaml:"path"`
+			Kind string `json:"kind" yaml:"kind"`
+		} `json:"rejected" yaml:"rejected"`
 		Failed []struct {
-			Path   string `json:"path"`
-			Reason string `json:"reason"`
-		} `json:"failed"`
+			Path   string `json:"path" yaml:"path"`
+			Reason string `json:"reason" yaml:"reason"`
+		} `json:"failed" yaml:"failed"`
 	}
 	if err := cli.ReadJSON(resp, &out); err != nil {
 		return 0, err

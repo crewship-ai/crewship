@@ -76,6 +76,7 @@ import { ChevronLeft, ChevronRight } from "lucide-react"
 import { EmptyState } from "@/components/layout/empty-state"
 import { Skeleton } from "@/components/ui/skeleton"
 import { CONCEPT_ICON } from "@/lib/concept-icons"
+import { PageAvatarPopover } from "@/components/features/pages/page-avatar-popover"
 import { cn } from "@/lib/utils"
 import { PanelRenderer } from "@/components/features/pages/panels"
 import {
@@ -264,6 +265,12 @@ export interface PageViewProps {
    */
   workspaceId?: string | null
   /**
+   * Whether the viewer may change the page's icon and colour from the
+   * header tile (#2563) — the metadata capability, decided by the layout.
+   * Defaults to false: a view that does not say so draws a plain tile.
+   */
+  mayEditAvatar?: boolean
+  /**
    * Whether this page is actually subscribed and receiving (`usePage().live`).
    *
    * Defaults to `offline` rather than to `live`: a caller that does not pass it
@@ -283,6 +290,7 @@ export function PageView({
   onBack,
   now,
   workspaceId,
+  mayEditAvatar,
   live = "offline",
 }: PageViewProps) {
   // The bar is derived from the panels the SERVER sent, sealed placeholders
@@ -399,6 +407,7 @@ export function PageView({
             notFound={notFound}
             now={now}
             workspaceId={workspaceId}
+            mayEditAvatar={mayEditAvatar}
             tabs={tabs}
             activeTab={activeTab}
             tabIdScope={tabIdScope}
@@ -418,6 +427,7 @@ function PageBody({
   notFound,
   now,
   workspaceId,
+  mayEditAvatar = false,
   tabs,
   activeTab,
   tabIdScope,
@@ -470,7 +480,17 @@ function PageBody({
   return (
     <>
       <div className="flex items-start justify-between gap-4">
-        <div className="min-w-0">
+        {/* The page's avatar (#2563) beside the title, and the freshness
+            word on the right as before: two facts, two places. */}
+        <PageAvatarPopover
+          workspaceId={workspaceId ?? ""}
+          slug={slug}
+          icon={page.icon}
+          color={page.color}
+          mayEdit={mayEditAvatar}
+          className="mt-0.5"
+        />
+        <div className="min-w-0 flex-1">
           {/* Focusable so the editor has somewhere real to hand focus back
               to on the way out: leaving unmounts the button that had it, and
               a keyboard user was landing on `<body>`. Addressed by a ref the

@@ -237,7 +237,7 @@ describe("<CreateCrewDialog> full wizard flow", () => {
       expect(screen.getByRole("button", { name: /Create crew/ })).toBeInTheDocument()
     })
     expect(screen.getByRole("button", { name: /Create crew/ })).toBeDisabled()
-    fireEvent.click(screen.getByRole("radio", { name: "OpenAI", exact: true }))
+    fireEvent.click(screen.getByRole("radio", { name: "OpenAI" }))
     fireEvent.click(screen.getByRole("button", { name: /Create crew/ }))
 
     await waitFor(() => {
@@ -344,7 +344,7 @@ describe("<CreateCrewDialog> full wizard flow", () => {
       expect(screen.getByRole("button", { name: /Create crew/ })).toBeInTheDocument()
     })
     expect(screen.getByRole("button", { name: /Create crew/ })).toBeDisabled()
-    fireEvent.click(screen.getByRole("radio", { name: "OpenAI", exact: true }))
+    fireEvent.click(screen.getByRole("radio", { name: "OpenAI" }))
     fireEvent.click(screen.getByRole("button", { name: /Create crew/ }))
 
     await waitFor(() => {

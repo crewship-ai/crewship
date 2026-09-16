@@ -236,7 +236,7 @@ describe("<CreateCrewDialog> — step strip", () => {
 
 describe("<CreateCrewDialog> — loading state during submit", () => {
   it("Create button shows 'Creating…' and a spinner while submit is in flight", async () => {
-    let resolveCreate: ((res: Response) => void) | null = null
+    let resolveCreate: (res: Response) => void = () => {}
     const pending = new Promise<Response>((resolve) => { resolveCreate = resolve })
     setupFetch([
       (c) => c.url.includes("/crew-templates") ? jsonResponse([TPL_ENG]) : null,
@@ -266,7 +266,7 @@ describe("<CreateCrewDialog> — loading state during submit", () => {
     expect(screen.getByRole("button", { name: "Cancel" })).toBeDisabled()
 
     // Unblock the pending request so the test cleans up
-    resolveCreate?.(jsonResponse({ id: "x", slug: "x", name: "X" }, 201))
+    resolveCreate(jsonResponse({ id: "x", slug: "x", name: "X" }, 201))
   })
 })
 
@@ -276,7 +276,7 @@ describe("<CreateCrewDialog> — loading state during submit", () => {
 
 describe("<CreateCrewDialog> — double-submit guard", () => {
   it("two rapid Create-crew clicks fire submitCrew exactly once", async () => {
-    let resolveCreate: ((res: Response) => void) | null = null
+    let resolveCreate: (res: Response) => void = () => {}
     const pending = new Promise<Response>((resolve) => { resolveCreate = resolve })
     const calls = setupFetch([
       (c) => c.url.includes("/crew-templates") ? jsonResponse([TPL_ENG]) : null,
@@ -303,7 +303,7 @@ describe("<CreateCrewDialog> — double-submit guard", () => {
     fireEvent.click(createBtn)
 
     // Unblock the pending POST and let the test settle.
-    resolveCreate?.(jsonResponse({ id: "x", slug: "x", name: "X" }, 201))
+    resolveCreate(jsonResponse({ id: "x", slug: "x", name: "X" }, 201))
 
     await waitFor(() => {
       const postCalls = calls.filter((c) => c.url.includes("/api/v1/crews") && c.method === "POST")

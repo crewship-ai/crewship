@@ -201,8 +201,8 @@ func TestPresenceRosterRunE_YAML(t *testing.T) {
 			t.Errorf("RunE: %v", err)
 		}
 	})
-	// The row struct has no yaml tags, so fields marshal lowercased.
-	if !strings.Contains(out, "agentid: agent-1") || !strings.Contains(out, "status: blocked") {
+	// The yaml key mirrors the json key (#1211, #2119).
+	if !strings.Contains(out, "agent_id: agent-1") || !strings.Contains(out, "status: blocked") {
 		t.Errorf("yaml roster missing rows:\n%s", out)
 	}
 }

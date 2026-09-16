@@ -3,9 +3,6 @@ package database
 import (
 	"context"
 	"database/sql"
-	"log/slog"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -24,17 +21,7 @@ import (
 // Numbered by timestamp, not sequentially: the v1..v169 block closed
 // while this branch was open (see the migrations slice tail).
 func TestMigrateTrustGrants(t *testing.T) {
-	dir := t.TempDir()
-	db, err := Open("file:" + filepath.Join(dir, "trustgrants.db"))
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	defer db.Close()
-
-	migLogger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
-	if err := Migrate(context.Background(), db.DB, migLogger); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
+	db := openMigratedTestDB(t)
 
 	ctx := context.Background()
 	if !tableExists(t, db.DB, ctx, "waitpoint_trust_grants") {

@@ -128,15 +128,15 @@ var intgListCmd = &cobra.Command{
 			return err
 		}
 		var items []struct {
-			ID              string `json:"id"`
-			Name            string `json:"name"`
-			DisplayName     string `json:"display_name"`
-			Transport       string `json:"transport"`
-			Endpoint        string `json:"endpoint"`
-			Enabled         bool   `json:"enabled"`
-			DefaultAccess   string `json:"default_access"`
-			AgentBindCount  int    `json:"agent_binding_count"`
-			CrewServerCount int    `json:"crew_server_count"`
+			ID              string `json:"id" yaml:"id"`
+			Name            string `json:"name" yaml:"name"`
+			DisplayName     string `json:"display_name" yaml:"display_name"`
+			Transport       string `json:"transport" yaml:"transport"`
+			Endpoint        string `json:"endpoint" yaml:"endpoint"`
+			Enabled         bool   `json:"enabled" yaml:"enabled"`
+			DefaultAccess   string `json:"default_access" yaml:"default_access"`
+			AgentBindCount  int    `json:"agent_binding_count" yaml:"agent_binding_count"`
+			CrewServerCount int    `json:"crew_server_count" yaml:"crew_server_count"`
 		}
 		if err := cli.ReadJSON(resp, &items); err != nil {
 			return err
@@ -238,8 +238,8 @@ var intgAddCmd = &cobra.Command{
 			return err
 		}
 		var created struct {
-			ID   string `json:"id"`
-			Name string `json:"name"`
+			ID   string `json:"id" yaml:"id"`
+			Name string `json:"name" yaml:"name"`
 		}
 		if err := cli.ReadJSON(resp, &created); err != nil {
 			return fmt.Errorf("decode response: %w", err)
@@ -477,15 +477,15 @@ var intgAgentListCmd = &cobra.Command{
 			return err
 		}
 		var bindings []struct {
-			ID             string  `json:"id"`
-			MCPServerID    string  `json:"mcp_server_id"`
-			MCPServerScope string  `json:"mcp_server_scope"`
-			CredentialID   *string `json:"credential_id"`
-			CredType       *string `json:"cred_type"`
-			Enabled        bool    `json:"enabled"`
-			ServerName     string  `json:"server_name"`
-			ServerDisplay  string  `json:"server_display_name"`
-			CredentialName *string `json:"credential_name"`
+			ID             string  `json:"id" yaml:"id"`
+			MCPServerID    string  `json:"mcp_server_id" yaml:"mcp_server_id"`
+			MCPServerScope string  `json:"mcp_server_scope" yaml:"mcp_server_scope"`
+			CredentialID   *string `json:"credential_id" yaml:"credential_id"`
+			CredType       *string `json:"cred_type" yaml:"cred_type"`
+			Enabled        bool    `json:"enabled" yaml:"enabled"`
+			ServerName     string  `json:"server_name" yaml:"server_name"`
+			ServerDisplay  string  `json:"server_display_name" yaml:"server_display_name"`
+			CredentialName *string `json:"credential_name" yaml:"credential_name"`
 		}
 		if err := cli.ReadJSON(resp, &bindings); err != nil {
 			return err
@@ -538,14 +538,14 @@ var intgResolveCmd = &cobra.Command{
 			return err
 		}
 		var resolved []struct {
-			ServerID    string  `json:"server_id"`
-			Scope       string  `json:"scope"`
-			Name        string  `json:"name"`
-			DisplayName string  `json:"display_name"`
-			Transport   string  `json:"transport"`
-			Endpoint    *string `json:"endpoint"`
-			CredID      *string `json:"credential_id"`
-			CredName    *string `json:"credential_name"`
+			ServerID    string  `json:"server_id" yaml:"server_id"`
+			Scope       string  `json:"scope" yaml:"scope"`
+			Name        string  `json:"name" yaml:"name"`
+			DisplayName string  `json:"display_name" yaml:"display_name"`
+			Transport   string  `json:"transport" yaml:"transport"`
+			Endpoint    *string `json:"endpoint" yaml:"endpoint"`
+			CredID      *string `json:"credential_id" yaml:"credential_id"`
+			CredName    *string `json:"credential_name" yaml:"credential_name"`
 		}
 		if err := cli.ReadJSON(resp, &resolved); err != nil {
 			return err
@@ -594,17 +594,17 @@ var intgGetCmd = &cobra.Command{
 			return err
 		}
 		var s struct {
-			ID            string  `json:"id"`
-			Name          string  `json:"name"`
-			DisplayName   string  `json:"display_name"`
-			Transport     string  `json:"transport"`
-			Endpoint      *string `json:"endpoint"`
-			Command       *string `json:"command"`
-			Enabled       bool    `json:"enabled"`
-			DefaultAccess string  `json:"default_access"`
-			Icon          *string `json:"icon"`
-			CreatedAt     string  `json:"created_at"`
-			UpdatedAt     string  `json:"updated_at"`
+			ID            string  `json:"id" yaml:"id"`
+			Name          string  `json:"name" yaml:"name"`
+			DisplayName   string  `json:"display_name" yaml:"display_name"`
+			Transport     string  `json:"transport" yaml:"transport"`
+			Endpoint      *string `json:"endpoint" yaml:"endpoint"`
+			Command       *string `json:"command" yaml:"command"`
+			Enabled       bool    `json:"enabled" yaml:"enabled"`
+			DefaultAccess string  `json:"default_access" yaml:"default_access"`
+			Icon          *string `json:"icon" yaml:"icon"`
+			CreatedAt     string  `json:"created_at" yaml:"created_at"`
+			UpdatedAt     string  `json:"updated_at" yaml:"updated_at"`
 		}
 		if err := cli.ReadJSON(resp, &s); err != nil {
 			return err

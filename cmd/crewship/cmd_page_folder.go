@@ -54,22 +54,22 @@ import (
 // ── The wire (mirrors internal/api/pages_folders.go) ───────────────────────
 
 type PageFolderJSON struct {
-	ID            string `json:"id"`
-	Slug          string `json:"slug"`
-	Name          string `json:"name"`
-	Icon          string `json:"icon"`
-	Color         string `json:"color"`
-	Owner         string `json:"owner"`
+	ID            string `json:"id" yaml:"id"`
+	Slug          string `json:"slug" yaml:"slug"`
+	Name          string `json:"name" yaml:"name"`
+	Icon          string `json:"icon" yaml:"icon"`
+	Color         string `json:"color" yaml:"color"`
+	Owner         string `json:"owner" yaml:"owner"`
 	OwnerCrewName string `json:"owner_crew_name" yaml:"owner_crew_name"`
 	PageCount     int    `json:"page_count" yaml:"page_count"`
-	Shared        string `json:"shared"`
+	Shared        string `json:"shared" yaml:"shared"`
 	ACLVersion    int64  `json:"acl_version" yaml:"acl_version"`
 	CreatedAt     string `json:"created_at" yaml:"created_at"`
 	UpdatedAt     string `json:"updated_at" yaml:"updated_at"`
 }
 
 type pageFoldersJSON struct {
-	Folders []PageFolderJSON `json:"folders"`
+	Folders []PageFolderJSON `json:"folders" yaml:"folders"`
 }
 
 // PageFolderJSON is exported for the same reason ActivityRow is: yaml.v3
@@ -78,74 +78,74 @@ type pageFoldersJSON struct {
 // make the two formats agree on the keys (cli_yaml_inline_contract_test.go).
 type pageFolderShowJSON struct {
 	PageFolderJSON `json:",inline" yaml:",inline"`
-	Pages          []pageListRowJSON `json:"pages"`
+	Pages          []pageListRowJSON `json:"pages" yaml:"pages"`
 }
 
 // pageFolderWriteBody is create's body; update sends the subset that changed
 // (pointers, so an empty string clears an icon and an omitted one keeps it).
 type pageFolderWriteBody struct {
-	Slug  string  `json:"slug,omitempty"`
-	Name  *string `json:"name,omitempty"`
-	Icon  *string `json:"icon,omitempty"`
-	Color *string `json:"color,omitempty"`
-	Owner string  `json:"owner,omitempty"`
+	Slug  string  `json:"slug,omitempty" yaml:"slug,omitempty"`
+	Name  *string `json:"name,omitempty" yaml:"name,omitempty"`
+	Icon  *string `json:"icon,omitempty" yaml:"icon,omitempty"`
+	Color *string `json:"color,omitempty" yaml:"color,omitempty"`
+	Owner string  `json:"owner,omitempty" yaml:"owner,omitempty"`
 }
 
 type pageFolderMoveBody struct {
-	Page         string `json:"page,omitempty"`
-	PagesVersion int64  `json:"pages_version"`
-	ACLVersion   *int64 `json:"acl_version,omitempty"`
+	Page         string `json:"page,omitempty" yaml:"page,omitempty"`
+	PagesVersion int64  `json:"pages_version" yaml:"pages_version"`
+	ACLVersion   *int64 `json:"acl_version,omitempty" yaml:"acl_version,omitempty"`
 }
 
 type pageFolderBatchMoveBody struct {
 	Pages []struct {
-		Page         string `json:"page"`
-		PagesVersion int64  `json:"pages_version"`
-	} `json:"pages"`
-	ACLVersion int64 `json:"acl_version"`
+		Page         string `json:"page" yaml:"page"`
+		PagesVersion int64  `json:"pages_version" yaml:"pages_version"`
+	} `json:"pages" yaml:"pages"`
+	ACLVersion int64 `json:"acl_version" yaml:"acl_version"`
 }
 
 // pageFolderACLEntryJSON mirrors internal/api/pages_folder_acl.go.
 type pageFolderACLEntryJSON struct {
-	SubjectType string `json:"subject_type"`
-	SubjectID   string `json:"subject_id"`
-	Label       string `json:"label"`
-	CanRead     bool   `json:"can_read"`
-	CanWrite    bool   `json:"can_write"`
-	SetBy       string `json:"set_by"`
-	SetAt       string `json:"set_at"`
+	SubjectType string `json:"subject_type" yaml:"subject_type"`
+	SubjectID   string `json:"subject_id" yaml:"subject_id"`
+	Label       string `json:"label" yaml:"label"`
+	CanRead     bool   `json:"can_read" yaml:"can_read"`
+	CanWrite    bool   `json:"can_write" yaml:"can_write"`
+	SetBy       string `json:"set_by" yaml:"set_by"`
+	SetAt       string `json:"set_at" yaml:"set_at"`
 }
 
 type pageFolderACLJSON struct {
-	Folder     string                   `json:"folder"`
-	ACL        []pageFolderACLEntryJSON `json:"acl"`
-	ACLVersion int64                    `json:"acl_version"`
+	Folder     string                   `json:"folder" yaml:"folder"`
+	ACL        []pageFolderACLEntryJSON `json:"acl" yaml:"acl"`
+	ACLVersion int64                    `json:"acl_version" yaml:"acl_version"`
 }
 
 type pageFolderACLWriteBody struct {
-	SubjectType string `json:"subject_type"`
-	SubjectID   string `json:"subject_id,omitempty"`
-	CanWrite    bool   `json:"can_write"`
+	SubjectType string `json:"subject_type" yaml:"subject_type"`
+	SubjectID   string `json:"subject_id,omitempty" yaml:"subject_id,omitempty"`
+	CanWrite    bool   `json:"can_write" yaml:"can_write"`
 }
 
 // pageMoveTargetJSON is what a move reads back from `GET /pages/{slug}`: the
 // fence and where the page is now.
 type pageMoveTargetJSON struct {
-	Slug         string `json:"slug"`
-	PagesVersion int64  `json:"pages_version"`
+	Slug         string `json:"slug" yaml:"slug"`
+	PagesVersion int64  `json:"pages_version" yaml:"pages_version"`
 	Folder       *struct {
-		Slug string `json:"slug"`
-	} `json:"folder"`
+		Slug string `json:"slug" yaml:"slug"`
+	} `json:"folder" yaml:"folder"`
 }
 
 type pageFolderMovedJSON struct {
 	Page struct {
-		Slug         string `json:"slug"`
-		PagesVersion int64  `json:"pages_version"`
+		Slug         string `json:"slug" yaml:"slug"`
+		PagesVersion int64  `json:"pages_version" yaml:"pages_version"`
 		Folder       *struct {
-			Slug string `json:"slug"`
-		} `json:"folder"`
-	} `json:"page"`
+			Slug string `json:"slug" yaml:"slug"`
+		} `json:"folder" yaml:"folder"`
+	} `json:"page" yaml:"page"`
 }
 
 // ── folder (group) ─────────────────────────────────────────────────────────
@@ -771,8 +771,8 @@ func pageFolderFileMany(client *cli.Client, folder string, pages []string) error
 			return err
 		}
 		body.Pages = append(body.Pages, struct {
-			Page         string `json:"page"`
-			PagesVersion int64  `json:"pages_version"`
+			Page         string `json:"page" yaml:"page"`
+			PagesVersion int64  `json:"pages_version" yaml:"pages_version"`
 		}{Page: page, PagesVersion: target.PagesVersion})
 	}
 	raw, err := pageFolderGet(client, "/api/v1/page-folders/"+pagePathEscape(folder))
@@ -800,9 +800,9 @@ func pageFolderFileMany(client *cli.Client, folder string, pages []string) error
 	}
 	var moved struct {
 		Pages []struct {
-			Slug         string `json:"slug"`
-			PagesVersion int64  `json:"pages_version"`
-		} `json:"pages"`
+			Slug         string `json:"slug" yaml:"slug"`
+			PagesVersion int64  `json:"pages_version" yaml:"pages_version"`
+		} `json:"pages" yaml:"pages"`
 	}
 	if err := json.Unmarshal(raw, &moved); err != nil {
 		return fmt.Errorf("decode response: %w", err)
@@ -887,11 +887,11 @@ func pageFolderRead(resp *http.Response) ([]byte, error) {
 	if resp.StatusCode == http.StatusConflict {
 		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<16))
 		var c struct {
-			Error        string `json:"error"`
-			Conflict     string `json:"conflict"`
-			Page         string `json:"page"`
-			PagesVersion int64  `json:"pages_version"`
-			ACLVersion   int64  `json:"acl_version"`
+			Error        string `json:"error" yaml:"error"`
+			Conflict     string `json:"conflict" yaml:"conflict"`
+			Page         string `json:"page" yaml:"page"`
+			PagesVersion int64  `json:"pages_version" yaml:"pages_version"`
+			ACLVersion   int64  `json:"acl_version" yaml:"acl_version"`
 		}
 		if json.Unmarshal(raw, &c) == nil && c.Conflict != "" {
 			page := ""

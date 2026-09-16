@@ -223,7 +223,7 @@ Examples:
 			return err
 		}
 		var chatResult struct {
-			ID string `json:"id"`
+			ID string `json:"id" yaml:"id"`
 		}
 		if err := cli.ReadJSON(resp, &chatResult); err != nil {
 			return err
@@ -260,8 +260,8 @@ func pickAgentInteractive(client *cli.Client) (string, bool, error) {
 		return "", false, err
 	}
 	var agents []struct {
-		Slug string `json:"slug"`
-		Name string `json:"name"`
+		Slug string `json:"slug" yaml:"slug"`
+		Name string `json:"name" yaml:"name"`
 	}
 	if err := cli.ReadJSON(resp, &agents); err != nil {
 		return "", false, err

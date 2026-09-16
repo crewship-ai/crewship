@@ -58,9 +58,9 @@ var signalSendCmd = &cobra.Command{
 			return err
 		}
 		var body struct {
-			Delivered int      `json:"delivered"`
-			RunIDs    []string `json:"run_ids"`
-			Truncated bool     `json:"truncated"`
+			Delivered int      `json:"delivered" yaml:"delivered"`
+			RunIDs    []string `json:"run_ids" yaml:"run_ids"`
+			Truncated bool     `json:"truncated" yaml:"truncated"`
 		}
 		if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
 			return fmt.Errorf("decode response: %w", err)

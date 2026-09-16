@@ -11,17 +11,17 @@ package main
 // document whose keys it cannot find. That is #1211, which cmd_audit.go
 // already carries a comment about; this file is the executable form of it.
 //
-// SCOPE. The rule is not enforced package-wide: `cmd/crewship` holds ~1250
-// json-tagged fields whose yaml key would differ, most of them on request
-// bodies and server-response decode targets that are never handed to a
-// formatter, and a blanket AST guard would be ~1250 findings of which the
-// large majority are noise. What is enforced here is every *result* struct
-// rendered by the machine formatters — the types that reach stdout. The
-// remaining 1164 fields across 160 files are #2119, the #1211 remainder.
-//
-// Adding a new machine-rendered result struct means adding it to
-// yamlParityTypes. That is deliberate: the list is the inventory of what the
-// CLI promises as a machine contract, and it is short enough to read.
+// SCOPE. Two guards share the rule. cli_yaml_tag_guard_test.go reads the
+// source of every non-test file in this package and requires each json-tagged
+// field to carry a mirroring yaml tag (#2119 closed the #1211 remainder with
+// a package-wide sweep), so any struct written here is covered without being
+// listed. This file walks the *values* — every type reachable from a
+// machine-rendered result, including ones defined in other packages such as
+// cli.ErrorEnvelope and memory.SearchResult, which the source guard cannot
+// see. Adding a new machine-rendered result struct to yamlParityTypes is
+// still worth doing when it reaches into another package; the list is the
+// inventory of what the CLI promises as a machine contract, and it is short
+// enough to read.
 
 import (
 	"reflect"
@@ -105,6 +105,8 @@ func yamlParityTypes() []any {
 		webhookCreateResult{},
 		webhookUpdateResult{},
 		webhookURLResult{},
+		// cmd_routine_webhooks_fire.go
+		webhookFireResult{},
 		// Payloads this change turned from "panics under -f yaml" into
 		// "renders under -f yaml". Exporting the embedded type fixed the
 		// crash; that is what put their KEYS on the machine contract, so

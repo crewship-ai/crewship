@@ -151,7 +151,7 @@ var personaHistoryCmd = &cobra.Command{
 			return err
 		}
 		var resp struct {
-			Entries []personaHistoryEntry `json:"entries"`
+			Entries []personaHistoryEntry `json:"entries" yaml:"entries"`
 		}
 		if err := getJSON(client, "/api/v1/agents/"+url.PathEscape(agentID)+"/persona/history?limit=20", &resp); err != nil {
 			return err

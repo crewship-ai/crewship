@@ -38,7 +38,8 @@ let conv: ConvState
 
 beforeEach(() => {
   conv = { hits: [], queries: [] }
-  vi.mocked(apiFetch).mockImplementation(async (url: string, init?: RequestInit) => {
+  vi.mocked(apiFetch).mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input)
     if (url.includes(SEARCH_PATH)) {
       const body = JSON.parse(String(init?.body ?? "{}"))
       conv.queries.push(body.query)
@@ -151,7 +152,8 @@ describe("CommandPalette — Conversations", () => {
 
   it("never blocks the entity groups on the conversation request", async () => {
     // A search that never resolves must not stop anything else rendering.
-    vi.mocked(apiFetch).mockImplementation(async (url: string) => {
+    vi.mocked(apiFetch).mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input)
       if (url.includes(SEARCH_PATH)) return new Promise<Response>(() => {})
       if (url.includes("/api/v1/issues")) {
         return { ok: true, status: 200, json: async () => [ISSUE_MATCHING_DEPLOY] } as unknown as Response

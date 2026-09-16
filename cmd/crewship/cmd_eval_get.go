@@ -23,22 +23,22 @@ import (
 // to keep the CLI decoupled from server internals — same convention
 // evalRunsCmd already uses for the list endpoint.
 type evalRunDetail struct {
-	ID                 string  `json:"id"`
-	WorkspaceID        string  `json:"workspace_id"`
-	Kind               string  `json:"kind"`
-	MissionID          string  `json:"mission_id,omitempty"`
-	BaselineMissionID  string  `json:"baseline_mission_id,omitempty"`
-	CandidateMissionID string  `json:"candidate_mission_id,omitempty"`
-	Status             string  `json:"status"`
-	Result             string  `json:"result,omitempty"`
-	Seed               int64   `json:"seed"`
-	Signature          string  `json:"signature,omitempty"`
-	TotalTokens        int64   `json:"total_tokens"`
-	TotalCostUSD       float64 `json:"total_cost_usd"`
-	Regressed          bool    `json:"regressed"`
-	CreatedBy          string  `json:"created_by,omitempty"`
-	CreatedAt          string  `json:"created_at"`
-	CompletedAt        string  `json:"completed_at,omitempty"`
+	ID                 string  `json:"id" yaml:"id"`
+	WorkspaceID        string  `json:"workspace_id" yaml:"workspace_id"`
+	Kind               string  `json:"kind" yaml:"kind"`
+	MissionID          string  `json:"mission_id,omitempty" yaml:"mission_id,omitempty"`
+	BaselineMissionID  string  `json:"baseline_mission_id,omitempty" yaml:"baseline_mission_id,omitempty"`
+	CandidateMissionID string  `json:"candidate_mission_id,omitempty" yaml:"candidate_mission_id,omitempty"`
+	Status             string  `json:"status" yaml:"status"`
+	Result             string  `json:"result,omitempty" yaml:"result,omitempty"`
+	Seed               int64   `json:"seed" yaml:"seed"`
+	Signature          string  `json:"signature,omitempty" yaml:"signature,omitempty"`
+	TotalTokens        int64   `json:"total_tokens" yaml:"total_tokens"`
+	TotalCostUSD       float64 `json:"total_cost_usd" yaml:"total_cost_usd"`
+	Regressed          bool    `json:"regressed" yaml:"regressed"`
+	CreatedBy          string  `json:"created_by,omitempty" yaml:"created_by,omitempty"`
+	CreatedAt          string  `json:"created_at" yaml:"created_at"`
+	CompletedAt        string  `json:"completed_at,omitempty" yaml:"completed_at,omitempty"`
 }
 
 var evalGetCmd = &cobra.Command{

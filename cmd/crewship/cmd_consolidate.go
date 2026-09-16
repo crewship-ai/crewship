@@ -71,10 +71,10 @@ var consolidateRunCmd = &cobra.Command{
 		}
 
 		var out struct {
-			Triggered bool   `json:"triggered"`
-			Accepted  bool   `json:"accepted"`
-			WorkerID  string `json:"worker_id"`
-			Note      string `json:"note"`
+			Triggered bool   `json:"triggered" yaml:"triggered"`
+			Accepted  bool   `json:"accepted" yaml:"accepted"`
+			WorkerID  string `json:"worker_id" yaml:"worker_id"`
+			Note      string `json:"note" yaml:"note"`
 		}
 		if err := cli.ReadJSON(resp, &out); err != nil {
 			return err

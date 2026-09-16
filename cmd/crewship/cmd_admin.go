@@ -666,13 +666,13 @@ const adminListUsersLocalHint = "\n(if that server is down, or the login is what
 // table renders are decoded; the endpoint is workspace-scoped by middleware,
 // so `workspace` is the caller's own and `role` is the membership in it.
 type adminAPIUser struct {
-	Email     string  `json:"email"`
-	FullName  *string `json:"full_name"`
-	CreatedAt string  `json:"created_at"`
+	Email     string  `json:"email" yaml:"email"`
+	FullName  *string `json:"full_name" yaml:"full_name"`
+	CreatedAt string  `json:"created_at" yaml:"created_at"`
 	Workspace *struct {
-		Slug string `json:"slug"`
-	} `json:"workspace"`
-	Role *string `json:"role"`
+		Slug string `json:"slug" yaml:"slug"`
+	} `json:"workspace" yaml:"workspace"`
+	Role *string `json:"role" yaml:"role"`
 }
 
 // runAdminListUsers reads the server the CLI targets, unless --local asks for

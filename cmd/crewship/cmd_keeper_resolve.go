@@ -16,10 +16,10 @@ var (
 )
 
 type keeperResolveResult struct {
-	RequestID string `json:"request_id"`
-	Decision  string `json:"decision"`
-	Reason    string `json:"reason"`
-	DecidedAt string `json:"decided_at"`
+	RequestID string `json:"request_id" yaml:"request_id"`
+	Decision  string `json:"decision" yaml:"decision"`
+	Reason    string `json:"reason" yaml:"reason"`
+	DecidedAt string `json:"decided_at" yaml:"decided_at"`
 }
 
 var keeperResolveCmd = &cobra.Command{

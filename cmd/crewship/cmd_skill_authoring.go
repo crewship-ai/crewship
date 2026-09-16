@@ -191,21 +191,21 @@ needed. Combined with skill import this gives a full edit loop:
 		// reconstruct the frontmatter from columns rather than from
 		// `content` alone.
 		var skill struct {
-			Slug                   string  `json:"slug"`
-			DisplayName            string  `json:"display_name"`
-			Description            *string `json:"description"`
-			Version                string  `json:"version"`
-			Author                 *string `json:"author"`
-			Vendor                 *string `json:"vendor"`
-			Homepage               *string `json:"homepage"`
-			License                *string `json:"license"`
-			Category               string  `json:"category"`
-			Runtime                string  `json:"runtime"`
-			Maturity               string  `json:"maturity"`
-			Icon                   *string `json:"icon"`
-			Tags                   *string `json:"tags"`
-			CredentialRequirements *string `json:"credential_requirements"`
-			Content                *string `json:"content"`
+			Slug                   string  `json:"slug" yaml:"slug"`
+			DisplayName            string  `json:"display_name" yaml:"display_name"`
+			Description            *string `json:"description" yaml:"description"`
+			Version                string  `json:"version" yaml:"version"`
+			Author                 *string `json:"author" yaml:"author"`
+			Vendor                 *string `json:"vendor" yaml:"vendor"`
+			Homepage               *string `json:"homepage" yaml:"homepage"`
+			License                *string `json:"license" yaml:"license"`
+			Category               string  `json:"category" yaml:"category"`
+			Runtime                string  `json:"runtime" yaml:"runtime"`
+			Maturity               string  `json:"maturity" yaml:"maturity"`
+			Icon                   *string `json:"icon" yaml:"icon"`
+			Tags                   *string `json:"tags" yaml:"tags"`
+			CredentialRequirements *string `json:"credential_requirements" yaml:"credential_requirements"`
+			Content                *string `json:"content" yaml:"content"`
 		}
 		resp, err := client.Get("/api/v1/skills/" + url.PathEscape(skillID) +
 			"?workspace_id=" + url.QueryEscape(client.GetWorkspaceID()))
@@ -253,21 +253,21 @@ needed. Combined with skill import this gives a full edit loop:
 // keep the frontmatter compact; the importer accepts everything optional
 // here so the result is still valid.
 func assembleSkillMD(s struct {
-	Slug                   string  `json:"slug"`
-	DisplayName            string  `json:"display_name"`
-	Description            *string `json:"description"`
-	Version                string  `json:"version"`
-	Author                 *string `json:"author"`
-	Vendor                 *string `json:"vendor"`
-	Homepage               *string `json:"homepage"`
-	License                *string `json:"license"`
-	Category               string  `json:"category"`
-	Runtime                string  `json:"runtime"`
-	Maturity               string  `json:"maturity"`
-	Icon                   *string `json:"icon"`
-	Tags                   *string `json:"tags"`
-	CredentialRequirements *string `json:"credential_requirements"`
-	Content                *string `json:"content"`
+	Slug                   string  `json:"slug" yaml:"slug"`
+	DisplayName            string  `json:"display_name" yaml:"display_name"`
+	Description            *string `json:"description" yaml:"description"`
+	Version                string  `json:"version" yaml:"version"`
+	Author                 *string `json:"author" yaml:"author"`
+	Vendor                 *string `json:"vendor" yaml:"vendor"`
+	Homepage               *string `json:"homepage" yaml:"homepage"`
+	License                *string `json:"license" yaml:"license"`
+	Category               string  `json:"category" yaml:"category"`
+	Runtime                string  `json:"runtime" yaml:"runtime"`
+	Maturity               string  `json:"maturity" yaml:"maturity"`
+	Icon                   *string `json:"icon" yaml:"icon"`
+	Tags                   *string `json:"tags" yaml:"tags"`
+	CredentialRequirements *string `json:"credential_requirements" yaml:"credential_requirements"`
+	Content                *string `json:"content" yaml:"content"`
 }) string {
 	var b strings.Builder
 	b.WriteString("---\n")

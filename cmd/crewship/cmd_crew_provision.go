@@ -14,35 +14,35 @@ import (
 // All progress fields are optional — only present while a job is in flight or
 // has just completed.
 type provisionStatusResponse struct {
-	Status             string  `json:"status"`
-	Error              string  `json:"error,omitempty"`
-	CachedImage        *string `json:"cached_image"`
-	ConfigHash         *string `json:"config_hash"`
-	DevcontainerConfig *string `json:"devcontainer_config"`
+	Status             string  `json:"status" yaml:"status"`
+	Error              string  `json:"error,omitempty" yaml:"error,omitempty"`
+	CachedImage        *string `json:"cached_image" yaml:"cached_image"`
+	ConfigHash         *string `json:"config_hash" yaml:"config_hash"`
+	DevcontainerConfig *string `json:"devcontainer_config" yaml:"devcontainer_config"`
 	// DevcontainerConfigDefaulted is true when the crew has no devcontainer
 	// config of its own and is running on the server's default instead —
 	// surfaced so that's visible rather than looking identical to a crew an
 	// operator explicitly configured.
-	DevcontainerConfigDefaulted bool     `json:"devcontainer_config_defaulted,omitempty"`
-	Step                        int      `json:"step,omitempty"`
-	Total                       int      `json:"total,omitempty"`
-	Message                     string   `json:"message,omitempty"`
-	Steps                       []string `json:"steps,omitempty"`
-	LogTail                     []string `json:"log_tail,omitempty"`
-	AgentsPendingRestart        int      `json:"agents_pending_restart,omitempty"`
+	DevcontainerConfigDefaulted bool     `json:"devcontainer_config_defaulted,omitempty" yaml:"devcontainer_config_defaulted,omitempty"`
+	Step                        int      `json:"step,omitempty" yaml:"step,omitempty"`
+	Total                       int      `json:"total,omitempty" yaml:"total,omitempty"`
+	Message                     string   `json:"message,omitempty" yaml:"message,omitempty"`
+	Steps                       []string `json:"steps,omitempty" yaml:"steps,omitempty"`
+	LogTail                     []string `json:"log_tail,omitempty" yaml:"log_tail,omitempty"`
+	AgentsPendingRestart        int      `json:"agents_pending_restart,omitempty" yaml:"agents_pending_restart,omitempty"`
 	// ResolvedFeatures is what the image is actually made of. Absent (nil) for
 	// a crew provisioned before this was recorded — a different answer from an
 	// empty list, and reported differently.
-	ResolvedFeatures []resolvedFeature `json:"resolved_features"`
+	ResolvedFeatures []resolvedFeature `json:"resolved_features" yaml:"resolved_features"`
 }
 
 // resolvedFeature mirrors devcontainer.FeatureRecord over the wire.
 type resolvedFeature struct {
-	Ref     string `json:"ref"`
-	ID      string `json:"id"`
-	Version string `json:"version"`
-	Digest  string `json:"digest"`
-	Pinned  bool   `json:"pinned"`
+	Ref     string `json:"ref" yaml:"ref"`
+	ID      string `json:"id" yaml:"id"`
+	Version string `json:"version" yaml:"version"`
+	Digest  string `json:"digest" yaml:"digest"`
+	Pinned  bool   `json:"pinned" yaml:"pinned"`
 }
 
 var crewProvisionCmd = &cobra.Command{
@@ -215,8 +215,8 @@ Examples:
 		}
 
 		var result struct {
-			Restarted int    `json:"restarted"`
-			Error     string `json:"error,omitempty"`
+			Restarted int    `json:"restarted" yaml:"restarted"`
+			Error     string `json:"error,omitempty" yaml:"error,omitempty"`
 		}
 		if err := postJSON(client, "/api/v1/crews/"+crewID+"/restart-agents", nil, &result); err != nil {
 			return err

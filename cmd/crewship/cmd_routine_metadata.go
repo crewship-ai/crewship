@@ -53,7 +53,7 @@ later steps as {{ run.metadata.x }}. Each flag takes a JSON object.`,
 			return err
 		}
 		var body struct {
-			Metadata map[string]any `json:"metadata"`
+			Metadata map[string]any `json:"metadata" yaml:"metadata"`
 		}
 		if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
 			return fmt.Errorf("decode response: %w", err)
@@ -62,8 +62,8 @@ later steps as {{ run.metadata.x }}. Each flag takes a JSON object.`,
 		// header; the machine form is the run id plus the resulting document,
 		// because a caller applying ops needs to read the result back.
 		return resolvedFormatter(cmd).AutoHuman(struct {
-			RunID    string         `json:"run_id"`
-			Metadata map[string]any `json:"metadata"`
+			RunID    string         `json:"run_id" yaml:"run_id"`
+			Metadata map[string]any `json:"metadata" yaml:"metadata"`
 		}{args[0], body.Metadata}, func() {
 			b, _ := json.MarshalIndent(body.Metadata, "", "  ")
 			fmt.Printf("Updated metadata for %s:\n%s\n", args[0], string(b))
@@ -93,7 +93,7 @@ var routineTreeCmd = &cobra.Command{
 			return err
 		}
 		var body struct {
-			Nodes []runTreeNode `json:"nodes"`
+			Nodes []runTreeNode `json:"nodes" yaml:"nodes"`
 		}
 		if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
 			return fmt.Errorf("decode response: %w", err)

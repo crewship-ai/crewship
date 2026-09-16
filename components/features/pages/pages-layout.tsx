@@ -458,6 +458,8 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
                   notFound={detail.notFound}
                   onBack={closePage}
                   now={now}
+                  workspaceId={workspaceId}
+                  mayEditAvatar={capabilities.mayEditMetadata}
                   // Straight from the subscription `usePage` registered — the
                   // header indicator is lit only while this page's channel is
                   // on a live socket, never on a timer of its own (epic #1935).
@@ -527,6 +529,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
           open
           onOpenChange={(open) => !open && closeFolderDialog()}
           folder={folderOf(folderDialog.slug)}
+          marker={folders.error !== null ? "unknown" : (folderOf(folderDialog.slug)?.shared ?? "unknown")}
           // A reader who may not see the table is shown their own paths to
           // the page that is open, when it is in this folder.
           pageSlug={

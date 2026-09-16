@@ -183,7 +183,7 @@ metadata:
   name: Q2 Roadmap
   slug: q2-roadmap
 spec:
-  status: active
+  status: in_progress
 ---
 apiVersion: crewship/v1
 kind: RecurringIssue

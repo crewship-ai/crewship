@@ -113,20 +113,20 @@ Examples:
 		}
 
 		var result struct {
-			Count int    `json:"count"`
-			Query string `json:"query"`
-			Scope string `json:"scope"`
+			Count int    `json:"count" yaml:"count"`
+			Query string `json:"query" yaml:"query"`
+			Scope string `json:"scope" yaml:"scope"`
 			Hits  []struct {
-				ID          string `json:"id"`
-				SessionID   string `json:"session_id"`
-				AgentID     string `json:"agent_id"`
-				AgentSlug   string `json:"agent_slug"`
-				AgentName   string `json:"agent_name"`
-				Role        string `json:"role"`
-				Content     string `json:"content"`
-				ToolSummary string `json:"tool_summary"`
-				Timestamp   string `json:"ts"`
-			} `json:"hits"`
+				ID          string `json:"id" yaml:"id"`
+				SessionID   string `json:"session_id" yaml:"session_id"`
+				AgentID     string `json:"agent_id" yaml:"agent_id"`
+				AgentSlug   string `json:"agent_slug" yaml:"agent_slug"`
+				AgentName   string `json:"agent_name" yaml:"agent_name"`
+				Role        string `json:"role" yaml:"role"`
+				Content     string `json:"content" yaml:"content"`
+				ToolSummary string `json:"tool_summary" yaml:"tool_summary"`
+				Timestamp   string `json:"ts" yaml:"ts"`
+			} `json:"hits" yaml:"hits"`
 		}
 		if err := cli.ReadJSON(resp, &result); err != nil {
 			return err

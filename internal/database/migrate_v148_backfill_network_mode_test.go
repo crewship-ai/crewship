@@ -4,7 +4,6 @@ import (
 	"context"
 	"io"
 	"log/slog"
-	"path/filepath"
 	"testing"
 )
 
@@ -17,14 +16,7 @@ import (
 func TestMigrateV148_BackfillsLegacyFreeRows(t *testing.T) {
 	silent := slog.New(slog.NewTextHandler(io.Discard, nil))
 	ctx := context.Background()
-	db, err := Open("file:" + filepath.Join(t.TempDir(), "v148.db"))
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	defer db.Close()
-	if err := Migrate(ctx, db.DB, silent); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
+	db := openMigratedTestDB(t)
 
 	// A workspace to satisfy the crews FK.
 	if _, err := db.Exec(`INSERT INTO workspaces (id, name, slug) VALUES ('ws1','Work','work')`); err != nil {
@@ -72,14 +64,7 @@ VALUES ('crew_free','ws1','Legacy','legacy','free', NULL),
 func TestMigrateV148_NewInsertDefaultsRestricted(t *testing.T) {
 	silent := slog.New(slog.NewTextHandler(io.Discard, nil))
 	ctx := context.Background()
-	db, err := Open("file:" + filepath.Join(t.TempDir(), "v148def.db"))
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	defer db.Close()
-	if err := Migrate(ctx, db.DB, silent); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
+	db := openMigratedTestDB(t)
 	if _, err := db.Exec(`INSERT INTO workspaces (id, name, slug) VALUES ('ws1','Work','work')`); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}

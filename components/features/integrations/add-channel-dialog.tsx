@@ -216,7 +216,7 @@ export function AddChannelDialog({
       <CreateSurfaceHeader
         concept="integrations"
         context="Integrations"
-        title={`Connect ${target.label}`}
+        title={`Connect ${target.kind === "webhook" ? "outgoing webhook" : target.label}`}
         description={
           spec?.blurb ??
           (target.kind === "webhook"

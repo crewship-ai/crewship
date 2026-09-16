@@ -14,20 +14,20 @@ var projectCmd = &cobra.Command{
 }
 
 type projectItem struct {
-	ID          string  `json:"id"`
-	Name        string  `json:"name"`
-	Slug        string  `json:"slug"`
-	Description *string `json:"description"`
-	Color       string  `json:"color"`
-	Status      string  `json:"status"`
-	Priority    string  `json:"priority"`
-	Health      string  `json:"health"`
-	LeadName    *string `json:"lead_name"`
-	TargetDate  *string `json:"target_date"`
-	IssueCount  int     `json:"issue_count"`
-	DoneCount   int     `json:"done_count"`
-	Progress    int     `json:"progress"`
-	CreatedAt   string  `json:"created_at"`
+	ID          string  `json:"id" yaml:"id"`
+	Name        string  `json:"name" yaml:"name"`
+	Slug        string  `json:"slug" yaml:"slug"`
+	Description *string `json:"description" yaml:"description"`
+	Color       string  `json:"color" yaml:"color"`
+	Status      string  `json:"status" yaml:"status"`
+	Priority    string  `json:"priority" yaml:"priority"`
+	Health      string  `json:"health" yaml:"health"`
+	LeadName    *string `json:"lead_name" yaml:"lead_name"`
+	TargetDate  *string `json:"target_date" yaml:"target_date"`
+	IssueCount  int     `json:"issue_count" yaml:"issue_count"`
+	DoneCount   int     `json:"done_count" yaml:"done_count"`
+	Progress    int     `json:"progress" yaml:"progress"`
+	CreatedAt   string  `json:"created_at" yaml:"created_at"`
 }
 
 var projectListCmd = &cobra.Command{
@@ -135,9 +135,9 @@ var projectCreateCmd = &cobra.Command{
 		}
 
 		var created struct {
-			ID   string `json:"id"`
-			Name string `json:"name"`
-			Slug string `json:"slug"`
+			ID   string `json:"id" yaml:"id"`
+			Name string `json:"name" yaml:"name"`
+			Slug string `json:"slug" yaml:"slug"`
 		}
 		if err := cli.ReadJSON(resp, &created); err != nil {
 			return err
@@ -325,20 +325,20 @@ var projectStatsCmd = &cobra.Command{
 		}
 
 		var stats struct {
-			TotalIssues     int            `json:"total_issues"`
-			CompletedIssues int            `json:"completed_issues"`
-			ByStatus        map[string]int `json:"by_status"`
+			TotalIssues     int            `json:"total_issues" yaml:"total_issues"`
+			CompletedIssues int            `json:"completed_issues" yaml:"completed_issues"`
+			ByStatus        map[string]int `json:"by_status" yaml:"by_status"`
 			ByAssignee      []struct {
-				AgentName string `json:"agent_name"`
-				Total     int    `json:"total"`
-				Completed int    `json:"completed"`
-			} `json:"by_assignee"`
+				AgentName string `json:"agent_name" yaml:"agent_name"`
+				Total     int    `json:"total" yaml:"total"`
+				Completed int    `json:"completed" yaml:"completed"`
+			} `json:"by_assignee" yaml:"by_assignee"`
 			ByLabel []struct {
-				LabelName string `json:"label_name"`
-				Color     string `json:"color"`
-				Count     int    `json:"count"`
-			} `json:"by_label"`
-			Crews []string `json:"crews"`
+				LabelName string `json:"label_name" yaml:"label_name"`
+				Color     string `json:"color" yaml:"color"`
+				Count     int    `json:"count" yaml:"count"`
+			} `json:"by_label" yaml:"by_label"`
+			Crews []string `json:"crews" yaml:"crews"`
 		}
 		if err := cli.ReadJSON(resp, &stats); err != nil {
 			return err

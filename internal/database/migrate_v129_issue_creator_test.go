@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"io"
 	"log/slog"
-	"path/filepath"
 	"testing"
 )
 
@@ -13,17 +12,8 @@ import (
 // cleanly: both creator-identity columns exist, default NULL on legacy-style
 // inserts, accept values, and a second Migrate run is a no-op.
 func TestMigrateV129_IssueCreatorAttribution(t *testing.T) {
-	dir := t.TempDir()
-	db, err := Open("file:" + filepath.Join(dir, "v129.db"))
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
+	db := openMigratedTestDB(t)
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-
-	if err := Migrate(context.Background(), db.DB, logger); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
 
 	// Seed the FK chain a mission row needs.
 	if _, err := db.Exec(`INSERT INTO workspaces (id, name, slug) VALUES ('ws_v129', 'WS129', 'ws-v129')`); err != nil {

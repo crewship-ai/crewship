@@ -170,6 +170,30 @@ func (h *ProjectHandler) List(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, result)
 }
 
+// projectStatuses, projectPriorities and projectHealths mirror the CHECK
+// constraints on the projects table (migration v40, migrate_consts_v33_v41.go).
+// The handler validates against them BEFORE the INSERT/UPDATE so a bad enum is
+// a 400 naming the field, not a 500 with "CHECK constraint failed" in the log
+// (#2426 — the manifest sent `status: active` and got an internal error).
+var (
+	projectStatuses   = []string{"backlog", "planned", "in_progress", "paused", "completed", "cancelled"}
+	projectPriorities = []string{"none", "low", "medium", "high", "urgent"}
+	projectHealths    = []string{"on_track", "at_risk", "off_track"}
+)
+
+// projectEnumOrReject writes a 400 naming the field and its allowed values
+// when value is not in allowed, and reports whether the caller may go on.
+func projectEnumOrReject(w http.ResponseWriter, r *http.Request, field, value string, allowed []string) bool {
+	for _, a := range allowed {
+		if a == value {
+			return true
+		}
+	}
+	writeProblem(w, r, http.StatusBadRequest,
+		fmt.Sprintf("%s must be one of: %s", field, strings.Join(allowed, ", ")))
+	return false
+}
+
 // Create provisions a new project in the workspace with the given name, slug, and metadata.
 // POST /api/v1/projects
 func (h *ProjectHandler) Create(w http.ResponseWriter, r *http.Request) {
@@ -207,6 +231,10 @@ func (h *ProjectHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Priority == "" {
 		req.Priority = "none"
+	}
+	if !projectEnumOrReject(w, r, "status", req.Status, projectStatuses) ||
+		!projectEnumOrReject(w, r, "priority", req.Priority, projectPriorities) {
+		return
 	}
 
 	// lead_type/lead_id is a polymorphic reference — the same shape as
@@ -380,12 +408,21 @@ func (h *ProjectHandler) Update(w http.ResponseWriter, r *http.Request) {
 		ub.Set("color", *req.Color)
 	}
 	if req.Status != nil {
+		if !projectEnumOrReject(w, r, "status", *req.Status, projectStatuses) {
+			return
+		}
 		ub.Set("status", *req.Status)
 	}
 	if req.Priority != nil {
+		if !projectEnumOrReject(w, r, "priority", *req.Priority, projectPriorities) {
+			return
+		}
 		ub.Set("priority", *req.Priority)
 	}
 	if req.Health != nil {
+		if !projectEnumOrReject(w, r, "health", *req.Health, projectHealths) {
+			return
+		}
 		ub.Set("health", *req.Health)
 	}
 	// lead_type and lead_id are one polymorphic reference, so the pair is

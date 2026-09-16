@@ -21,36 +21,36 @@ import (
 )
 
 type runtimeCapacityHold struct {
-	CrewID   string `json:"crew_id"`
-	CrewSlug string `json:"crew_slug"`
-	Reason   string `json:"reason"`
-	Detail   string `json:"detail"`
-	Since    string `json:"since"`
-	WaitedMs int64  `json:"waited_ms"`
+	CrewID   string `json:"crew_id" yaml:"crew_id"`
+	CrewSlug string `json:"crew_slug" yaml:"crew_slug"`
+	Reason   string `json:"reason" yaml:"reason"`
+	Detail   string `json:"detail" yaml:"detail"`
+	Since    string `json:"since" yaml:"since"`
+	WaitedMs int64  `json:"waited_ms" yaml:"waited_ms"`
 }
 
 type runtimeCapacityHost struct {
-	AvailableMB  int64   `json:"AvailableMB"`
-	TotalMB      int64   `json:"TotalMB"`
-	SomeStallPct float64 `json:"SomeStallPct"`
+	AvailableMB  int64   `json:"AvailableMB" yaml:"AvailableMB"`
+	TotalMB      int64   `json:"TotalMB" yaml:"TotalMB"`
+	SomeStallPct float64 `json:"SomeStallPct" yaml:"SomeStallPct"`
 }
 
 type runtimeCapacityLimits struct {
-	MaxConcurrentStarts int     `json:"MaxConcurrentStarts"`
-	MinStartInterval    int64   `json:"MinStartInterval"`
-	RequiredFreeMB      int64   `json:"RequiredFreeMB"`
-	MaxPressurePct      float64 `json:"MaxPressurePct"`
+	MaxConcurrentStarts int     `json:"MaxConcurrentStarts" yaml:"MaxConcurrentStarts"`
+	MinStartInterval    int64   `json:"MinStartInterval" yaml:"MinStartInterval"`
+	RequiredFreeMB      int64   `json:"RequiredFreeMB" yaml:"RequiredFreeMB"`
+	MaxPressurePct      float64 `json:"MaxPressurePct" yaml:"MaxPressurePct"`
 }
 
 type runtimeCapacity struct {
-	Enabled             bool                  `json:"enabled"`
-	Limits              runtimeCapacityLimits `json:"limits"`
-	InFlightStarts      int                   `json:"in_flight_starts"`
-	Held                []runtimeCapacityHold `json:"held"`
-	HeldTotal           uint64                `json:"held_total"`
-	HostSignalAvailable bool                  `json:"host_signal_available"`
-	HostSignalError     string                `json:"host_signal_error"`
-	Host                runtimeCapacityHost   `json:"host"`
+	Enabled             bool                  `json:"enabled" yaml:"enabled"`
+	Limits              runtimeCapacityLimits `json:"limits" yaml:"limits"`
+	InFlightStarts      int                   `json:"in_flight_starts" yaml:"in_flight_starts"`
+	Held                []runtimeCapacityHold `json:"held" yaml:"held"`
+	HeldTotal           uint64                `json:"held_total" yaml:"held_total"`
+	HostSignalAvailable bool                  `json:"host_signal_available" yaml:"host_signal_available"`
+	HostSignalError     string                `json:"host_signal_error" yaml:"host_signal_error"`
+	Host                runtimeCapacityHost   `json:"host" yaml:"host"`
 }
 
 // capacitySummary is the one line `crewship now` shows and `crewship capacity`

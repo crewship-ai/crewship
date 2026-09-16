@@ -62,17 +62,18 @@ spec:
 | `spec.title` | string | * | The on-the-row title. Falls back to `metadata.name`. |
 | `spec.description` | string | no | Free-form markdown body. |
 | `spec.priority` | enum | no | One of `none` \| `low` \| `medium` \| `high` \| `urgent`. Empty → server default `none`. |
-| `spec.status` | enum | no | One of `backlog` \| `todo` \| `in_progress` \| `review` \| `done` \| `failed` \| `cancelled` \| `duplicate` (uppercase also accepted; up-cased before sending). See the create-status quirk below. |
+| `spec.status` | enum | no | One of `backlog` \| `todo` \| `in_progress` \| `review` \| `done` \| `failed` \| `cancelled` \| `duplicate` (uppercase also accepted; up-cased before sending). See the starting-status note below. |
 | `spec.assignee_slug` | string | no | Agent slug → `assignee_type=agent` + `assignee_id`. |
 | `spec.project_slug` | string | no | Project slug → `project_id`. |
 | `spec.labels` | []string | no | Label slugs (the [Label](/manifest/label) kind enforces slug == name). No duplicates, no empty entries. |
 
-> **Create-status quirk.** The create handler hard-codes the new row
-> to `BACKLOG` and ignores `spec.status` on POST. If you declare
-> `status: done` on a brand-new Issue, the row first lands in
-> `BACKLOG`; the **next** apply detects the drift and PATCHes it to
-> `DONE`. Reaching a non-default starting status is therefore a
-> two-apply operation today.
+> **Starting status.** The create body carries `spec.status`, and the
+> server validates it the way it validates a change from the default
+> `BACKLOG`: a new issue may start in `backlog`, `todo`, `in_progress`,
+> `cancelled` or `duplicate`. Declaring `status: done` (or `review`,
+> `failed`) on a brand-new Issue is refused with a 400 at apply time —
+> the same answer a later PATCH from `BACKLOG` would get — so move the
+> issue there in a second apply once it has been worked.
 
 ## Examples
 
@@ -151,7 +152,7 @@ is the global apply/export flow:
 | `spec.title` / `metadata.name` | `title` | Required server-side; the fallback decides which wins. |
 | `spec.description` | `description` | |
 | `spec.priority` | `priority` | Defaults to `none`. |
-| `spec.status` | `status` | Ignored on POST (always BACKLOG); honored on PATCH. |
+| `spec.status` | `status` | Sent up-cased on POST (must be a legal step from `BACKLOG`) and on PATCH. |
 | `spec.assignee_slug` | `assignee_type=agent` + `assignee_id` | Resolved slug → id. |
 | `spec.project_slug` | `project_id` | Resolved slug → id. |
 | `spec.labels[]` | `labels` (id array) | On PATCH the handler treats a non-nil `labels` as a full set replacement. |

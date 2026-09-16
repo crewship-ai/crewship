@@ -51,7 +51,7 @@ Examples:
 
 		path := "/api/v1/chats/" + url.PathEscape(chatID) + "/messages?limit=500"
 		var body struct {
-			Messages []map[string]any `json:"messages"`
+			Messages []map[string]any `json:"messages" yaml:"messages"`
 		}
 		if err := getJSON(client, path, &body); err != nil {
 			return err
@@ -199,10 +199,10 @@ var chatReactListCmd = &cobra.Command{
 			"/messages/" + url.PathEscape(args[1]) + "/reactions"
 		var body struct {
 			Reactions []struct {
-				Emoji string `json:"emoji"`
-				Count int    `json:"count"`
-				Mine  bool   `json:"mine"`
-			} `json:"reactions"`
+				Emoji string `json:"emoji" yaml:"emoji"`
+				Count int    `json:"count" yaml:"count"`
+				Mine  bool   `json:"mine" yaml:"mine"`
+			} `json:"reactions" yaml:"reactions"`
 		}
 		if err := getJSON(client, path, &body); err != nil {
 			return err
@@ -263,8 +263,8 @@ Examples:
 
 		path := "/api/v1/chats/" + url.PathEscape(chatID) + "/steer"
 		var res struct {
-			Queued   bool `json:"queued"`
-			InFlight bool `json:"in_flight"`
+			Queued   bool `json:"queued" yaml:"queued"`
+			InFlight bool `json:"in_flight" yaml:"in_flight"`
 		}
 		if err := postJSON(client, path, map[string]string{"message": message}, &res); err != nil {
 			return err
@@ -430,13 +430,13 @@ Examples:
 			return err
 		}
 		var items []struct {
-			ID        string `json:"id"`
-			Filename  string `json:"filename"`
-			SizeBytes int64  `json:"size_bytes"`
-			SHA256    string `json:"sha256"`
-			Path      string `json:"path"`
-			AgentPath string `json:"agent_path"`
-			CreatedAt string `json:"created_at"`
+			ID        string `json:"id" yaml:"id"`
+			Filename  string `json:"filename" yaml:"filename"`
+			SizeBytes int64  `json:"size_bytes" yaml:"size_bytes"`
+			SHA256    string `json:"sha256" yaml:"sha256"`
+			Path      string `json:"path" yaml:"path"`
+			AgentPath string `json:"agent_path" yaml:"agent_path"`
+			CreatedAt string `json:"created_at" yaml:"created_at"`
 		}
 		if err := cli.ReadJSON(resp, &items); err != nil {
 			return err
@@ -573,17 +573,17 @@ listed — the filter narrows, it never reorders.
 		}
 
 		var chats []struct {
-			ID             string  `json:"id"`
-			Title          *string `json:"title"`
-			Status         string  `json:"status"`
-			MessageCount   int     `json:"message_count"`
-			StartedAt      string  `json:"started_at"`
-			CreatedAt      string  `json:"created_at"`
-			EndedAt        *string `json:"ended_at"`
-			Origin         *string `json:"origin"`
-			LastActivityAt string  `json:"last_activity_at"`
-			UnreadCount    int     `json:"unread_count"`
-			Kind           string  `json:"kind"`
+			ID             string  `json:"id" yaml:"id"`
+			Title          *string `json:"title" yaml:"title"`
+			Status         string  `json:"status" yaml:"status"`
+			MessageCount   int     `json:"message_count" yaml:"message_count"`
+			StartedAt      string  `json:"started_at" yaml:"started_at"`
+			CreatedAt      string  `json:"created_at" yaml:"created_at"`
+			EndedAt        *string `json:"ended_at" yaml:"ended_at"`
+			Origin         *string `json:"origin" yaml:"origin"`
+			LastActivityAt string  `json:"last_activity_at" yaml:"last_activity_at"`
+			UnreadCount    int     `json:"unread_count" yaml:"unread_count"`
+			Kind           string  `json:"kind" yaml:"kind"`
 		}
 		path := "/api/v1/agents/" + agentID + "/chats"
 		// Sent only when asked. An empty `kind` and an absent one mean the
@@ -690,8 +690,8 @@ Examples:
 		path := "/api/v1/agents/" + url.PathEscape(agentID) +
 			"/chats/" + url.PathEscape(chatID) + "/read"
 		var res struct {
-			ChatID     string `json:"chat_id"`
-			LastReadAt string `json:"last_read_at"`
+			ChatID     string `json:"chat_id" yaml:"chat_id"`
+			LastReadAt string `json:"last_read_at" yaml:"last_read_at"`
 		}
 		if err := putJSON(client, path, map[string]string{}, &res); err != nil {
 			return err
@@ -762,8 +762,8 @@ Examples:
 		// The response is one chat row in the same shape `chat list` prints, so
 		// --format json round-trips into the same jq expressions.
 		var updated struct {
-			ID    string  `json:"id"`
-			Title *string `json:"title"`
+			ID    string  `json:"id" yaml:"id"`
+			Title *string `json:"title" yaml:"title"`
 		}
 		if err := cli.ReadJSON(resp, &updated); err != nil {
 			return err
@@ -894,7 +894,7 @@ Examples:
 			return err
 		}
 		var created struct {
-			ID string `json:"id"`
+			ID string `json:"id" yaml:"id"`
 		}
 		if err := cli.ReadJSON(resp, &created); err != nil {
 			return err
@@ -973,8 +973,8 @@ func lookupChatAgent(client *cli.Client, chatID string) (agentID, agentSlug stri
 		return "", "", err
 	}
 	var agents []struct {
-		ID   string `json:"id"`
-		Slug string `json:"slug"`
+		ID   string `json:"id" yaml:"id"`
+		Slug string `json:"slug" yaml:"slug"`
 	}
 	if err := cli.ReadJSON(resp, &agents); err != nil {
 		return "", "", err
@@ -993,7 +993,7 @@ func lookupChatAgent(client *cli.Client, chatID string) (agentID, agentSlug stri
 	var firstErr error
 	for _, a := range agents {
 		var chats []struct {
-			ID string `json:"id"`
+			ID string `json:"id" yaml:"id"`
 		}
 		if err := getJSON(client, "/api/v1/agents/"+a.ID+"/chats", &chats); err != nil {
 			unreadable++
@@ -1111,12 +1111,12 @@ var chatParticipantsListCmd = &cobra.Command{
 		path := "/api/v1/chats/" + url.PathEscape(args[0]) + "/participants"
 		var body struct {
 			Participants []struct {
-				UserID   string `json:"user_id"`
-				Email    string `json:"email"`
-				FullName string `json:"full_name"`
-				Role     string `json:"role"`
-				JoinedAt string `json:"joined_at"`
-			} `json:"participants"`
+				UserID   string `json:"user_id" yaml:"user_id"`
+				Email    string `json:"email" yaml:"email"`
+				FullName string `json:"full_name" yaml:"full_name"`
+				Role     string `json:"role" yaml:"role"`
+				JoinedAt string `json:"joined_at" yaml:"joined_at"`
+			} `json:"participants" yaml:"participants"`
 		}
 		if err := getJSON(client, path, &body); err != nil {
 			return err

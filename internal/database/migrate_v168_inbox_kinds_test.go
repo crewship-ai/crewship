@@ -3,9 +3,6 @@ package database
 import (
 	"context"
 	"database/sql"
-	"io"
-	"log/slog"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -15,14 +12,7 @@ import (
 // openMigratedDB brings a fresh database up to head and returns it.
 func openMigratedDB(t *testing.T) *sql.DB {
 	t.Helper()
-	db, err := Open("file:" + filepath.Join(t.TempDir(), "inbox_kinds.db"))
-	if err != nil {
-		t.Fatalf("open: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err := Migrate(context.Background(), db.DB, slog.New(slog.NewTextHandler(io.Discard, nil))); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
+	db := openMigratedTestDB(t)
 	return db.DB
 }
 

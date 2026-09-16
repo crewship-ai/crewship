@@ -4,7 +4,6 @@ import (
 	"context"
 	"io"
 	"log/slog"
-	"path/filepath"
 	"testing"
 )
 
@@ -23,14 +22,7 @@ import (
 func TestMigrateBackfillsOnboardingSkippedAt(t *testing.T) {
 	silent := slog.New(slog.NewTextHandler(io.Discard, nil))
 	ctx := context.Background()
-	db, err := Open("file:" + filepath.Join(t.TempDir(), "skipped.db"))
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	defer db.Close()
-	if err := Migrate(ctx, db.DB, silent); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
+	db := openMigratedTestDB(t)
 
 	// Three users as an upgraded database really holds them: one completed
 	// before the column existed, one still mid-onboarding, and one already

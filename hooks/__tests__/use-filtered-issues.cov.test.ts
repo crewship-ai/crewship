@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest"
 import { renderHook } from "@testing-library/react"
 import { useFilteredIssues } from "@/hooks/use-filtered-issues"
-import type { Mission, MissionStatus, IssuePriority } from "@/lib/types/mission"
+import type { Mission } from "@/lib/types/mission"
 
 // Coverage companion for use-filtered-issues.test.ts — that file pins the
 // project/crew/agent precedence rules; this one drives the status,
@@ -15,15 +15,15 @@ function issue(overrides: Partial<Mission>): Mission {
     crew_id: "crew-1",
     lead_agent_id: "agent-1",
     trace_id: "trace-1",
-    status: "in_progress",
+    status: "IN_PROGRESS",
     ...overrides,
   } as Mission
 }
 
 const issues = [
-  issue({ id: "i1", title: "Fix login flow", identifier: "CRE-101", status: "in_progress" as MissionStatus, priority: "high" as IssuePriority, assignee_name: "Viktor", crew_name: "Engineering" }),
-  issue({ id: "i2", title: "Write release notes", identifier: "CRE-102", status: "done" as MissionStatus, priority: "low" as IssuePriority, assignee_name: "Nela", crew_name: "Writing" }),
-  issue({ id: "i3", title: "Probe the network", identifier: "CRE-103", status: "backlog" as MissionStatus, priority: undefined, assignee_name: undefined, crew_name: undefined }),
+  issue({ id: "i1", title: "Fix login flow", identifier: "CRE-101", status: "IN_PROGRESS", priority: "high", assignee_name: "Viktor", crew_name: "Engineering" }),
+  issue({ id: "i2", title: "Write release notes", identifier: "CRE-102", status: "DONE", priority: "low", assignee_name: "Nela", crew_name: "Writing" }),
+  issue({ id: "i3", title: "Probe the network", identifier: "CRE-103", status: "BACKLOG", priority: undefined, assignee_name: undefined, crew_name: undefined }),
 ]
 
 function render(overrides: Partial<Parameters<typeof useFilteredIssues>[0]>) {
@@ -53,11 +53,11 @@ function facet(overrides: Partial<Parameters<typeof useFilteredIssues>[0]>) {
 
 describe("useFilteredIssues — status filter", () => {
   it("narrows to the given statuses", () => {
-    expect(run({ filterStatuses: ["done"] as MissionStatus[] })).toEqual(["i2"])
+    expect(run({ filterStatuses: ["DONE"] })).toEqual(["i2"])
   })
 
   it("multiple statuses OR-compose", () => {
-    expect(run({ filterStatuses: ["done", "backlog"] as MissionStatus[] })).toEqual(["i2", "i3"])
+    expect(run({ filterStatuses: ["DONE", "BACKLOG"] })).toEqual(["i2", "i3"])
   })
 })
 
@@ -67,7 +67,7 @@ describe("useFilteredIssues — status filter", () => {
 // unreachable from the UI.
 describe("useFilteredIssues — statusFacet", () => {
   it("ignores the status filter", () => {
-    expect(facet({ filterStatuses: ["done"] as MissionStatus[] })).toEqual(["i1", "i2", "i3"])
+    expect(facet({ filterStatuses: ["DONE"] })).toEqual(["i1", "i2", "i3"])
   })
 
   it("is the same list as `visible` when no status is selected", () => {
@@ -77,21 +77,21 @@ describe("useFilteredIssues — statusFacet", () => {
 
   it("still applies every other filter", () => {
     expect(
-      facet({ search: "probe", filterStatuses: ["done"] as MissionStatus[] }),
+      facet({ search: "probe", filterStatuses: ["DONE"] }),
     ).toEqual(["i3"])
     expect(
-      facet({ filterPriority: "high" as IssuePriority, filterStatuses: ["done"] as MissionStatus[] }),
+      facet({ filterPriority: "high", filterStatuses: ["DONE"] }),
     ).toEqual(["i1"])
   })
 })
 
 describe("useFilteredIssues — priority filter", () => {
   it("narrows to the given priority", () => {
-    expect(run({ filterPriority: "high" as IssuePriority })).toEqual(["i1"])
+    expect(run({ filterPriority: "high" })).toEqual(["i1"])
   })
 
   it("treats a missing priority as 'none'", () => {
-    expect(run({ filterPriority: "none" as IssuePriority })).toEqual(["i3"])
+    expect(run({ filterPriority: "none" })).toEqual(["i3"])
   })
 })
 
@@ -117,6 +117,6 @@ describe("useFilteredIssues — search", () => {
   })
 
   it("search composes AND-style with status filter", () => {
-    expect(run({ search: "e", filterStatuses: ["in_progress"] as MissionStatus[] })).toEqual(["i1"])
+    expect(run({ search: "e", filterStatuses: ["IN_PROGRESS"] })).toEqual(["i1"])
   })
 })

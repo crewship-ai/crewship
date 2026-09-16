@@ -47,7 +47,7 @@ Examples:
 		// recent 500 turns are what matters anyway).
 		path := "/api/v1/chats/" + url.PathEscape(chatID) + "/messages?limit=500"
 		var body struct {
-			Messages []map[string]any `json:"messages"`
+			Messages []map[string]any `json:"messages" yaml:"messages"`
 		}
 		if err := getJSON(client, path, &body); err != nil {
 			return err

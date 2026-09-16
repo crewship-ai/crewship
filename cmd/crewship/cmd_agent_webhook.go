@@ -51,8 +51,8 @@ prefix> (see the webhooks API docs for the timestamped variant).`,
 			return err
 		}
 		var out struct {
-			WebhookSecret string `json:"webhook_secret"`
-			RotatedAt     string `json:"rotated_at"`
+			WebhookSecret string `json:"webhook_secret" yaml:"webhook_secret"`
+			RotatedAt     string `json:"rotated_at" yaml:"rotated_at"`
 		}
 		if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 			return fmt.Errorf("decode response: %w", err)

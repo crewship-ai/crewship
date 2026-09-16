@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import * as React from "react"
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 
 const push = vi.fn()
@@ -49,6 +50,8 @@ const PAGE = { slug: "operations-lab", name: "Operations Lab", panels: [], has_a
 
 const onLeft = vi.fn()
 
+// The header's avatar tile saves through react-query (#2563), so the shell
+// is rendered under a client here — the sections are mocked, the header is not.
 function Harness() {
   const nav = useEditorRoute("operations-lab")
   // Opened once. Re-opening on every render would put the editor straight
@@ -97,7 +100,7 @@ afterEach(cleanup)
 
 describe("leaving the editor by the global navigation", () => {
   it("asks before a link takes unsaved work with it, and stays when told to", () => {
-    render(<Harness />)
+    render(<QueryClientProvider client={new QueryClient()}><Harness  /></QueryClientProvider>)
     act(() => raiseDirty(true))
 
     clickRoutines()
@@ -113,7 +116,7 @@ describe("leaving the editor by the global navigation", () => {
   })
 
   it("performs the navigation it refused once the person discards", () => {
-    render(<Harness />)
+    render(<QueryClientProvider client={new QueryClient()}><Harness  /></QueryClientProvider>)
     act(() => raiseDirty(true))
 
     clickRoutines()
@@ -128,7 +131,7 @@ describe("leaving the editor by the global navigation", () => {
     // most common way out of it, both silent. The way out is placed by the
     // component that renders both halves, because the shell cannot reach the
     // view's heading and a fixed id collides when two views share a document.
-    render(<Harness />)
+    render(<QueryClientProvider client={new QueryClient()}><Harness  /></QueryClientProvider>)
     // On the way in: the editor's own heading, not `<body>`.
     expect(document.activeElement).toBe(screen.getByRole("heading", { name: "Operations Lab" }))
 
@@ -144,7 +147,7 @@ describe("leaving the editor by the global navigation", () => {
     // Radix restores focus to the trigger, and this dialog is open-controlled
     // with no trigger, so Stay here and Escape both dropped focus on `<body>`
     // — the two answers that leave you exactly where you were.
-    render(<Harness />)
+    render(<QueryClientProvider client={new QueryClient()}><Harness  /></QueryClientProvider>)
     act(() => raiseDirty(true))
     clickRoutines()
     fireEvent.click(screen.getByRole("button", { name: "Stay here" }))
@@ -157,13 +160,13 @@ describe("leaving the editor by the global navigation", () => {
   })
 
   it("does not ask when nothing is unsaved", () => {
-    render(<Harness />)
+    render(<QueryClientProvider client={new QueryClient()}><Harness  /></QueryClientProvider>)
     clickRoutines()
     expect(screen.queryByText("Leave without saving?")).toBeNull()
   })
 
   it("stops asking after the work is saved", () => {
-    render(<Harness />)
+    render(<QueryClientProvider client={new QueryClient()}><Harness  /></QueryClientProvider>)
     act(() => raiseDirty(true))
     act(() => raiseDirty(false))
     clickRoutines()

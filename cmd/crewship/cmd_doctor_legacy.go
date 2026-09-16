@@ -57,7 +57,7 @@ func checkLegacyResources(ctx context.Context, client *cli.Client) checkResult {
 	switch resp.StatusCode {
 	case http.StatusOK:
 		var body struct {
-			Present bool `json:"present"`
+			Present bool `json:"present" yaml:"present"`
 		}
 		if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&body); err != nil {
 			return checkResult{name: name, status: "INFO", detail: fmt.Sprintf("could not parse response: %v", err)}

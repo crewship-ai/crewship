@@ -239,7 +239,7 @@ describe("Fields tab", () => {
     // the same page now, and that one is a deliberate placeholder for a value
     // the reveal ceremony can produce. A field's secret half has no such
     // ceremony and no bytes to stand in for.
-    const fieldsCard = screen.getByText("passphrase").closest("[class*='rounded-xl']")!
+    const fieldsCard = screen.getByText("passphrase").closest<HTMLElement>("[class*='rounded-xl']")!
     expect(within(fieldsCard).queryByText(/•/)).not.toBeInTheDocument()
   })
 

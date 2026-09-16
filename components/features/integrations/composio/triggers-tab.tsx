@@ -95,6 +95,11 @@ export function TriggersTab({
         </span>
       </h2>
 
+      <p className="text-xs text-muted-foreground">
+        These subscriptions use connected app accounts. For a direct HTTP sender, use{" "}
+        <a className="text-primary hover:underline" href="/integrations?tab=incoming">Incoming webhooks</a>.
+      </p>
+
       {/* Active instances */}
       <div className="rounded-xl border border-white/10 bg-card p-3">
         <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">

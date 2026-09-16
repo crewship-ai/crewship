@@ -18,9 +18,9 @@ import (
 // verifyRowCountMismatch mirrors backup.TableRowCountMismatch for CLI JSON
 // decode.
 type verifyRowCountMismatch struct {
-	Table    string `json:"table"`
-	Recorded int    `json:"recorded"`
-	Actual   int    `json:"actual"`
+	Table    string `json:"table" yaml:"table"`
+	Recorded int    `json:"recorded" yaml:"recorded"`
+	Actual   int    `json:"actual" yaml:"actual"`
 }
 
 var backupVerifyCmd = &cobra.Command{
@@ -43,12 +43,12 @@ var backupVerifyCmd = &cobra.Command{
 			return err
 		}
 		var out struct {
-			Valid                   bool                     `json:"valid"`
-			SizeBytes               int64                    `json:"size_bytes"`
-			Error                   string                   `json:"error"`
-			CompletenessChecked     bool                     `json:"completeness_checked"`
-			CompletenessSkipReason  string                   `json:"completeness_skip_reason"`
-			TableRowCountMismatches []verifyRowCountMismatch `json:"table_row_count_mismatches"`
+			Valid                   bool                     `json:"valid" yaml:"valid"`
+			SizeBytes               int64                    `json:"size_bytes" yaml:"size_bytes"`
+			Error                   string                   `json:"error" yaml:"error"`
+			CompletenessChecked     bool                     `json:"completeness_checked" yaml:"completeness_checked"`
+			CompletenessSkipReason  string                   `json:"completeness_skip_reason" yaml:"completeness_skip_reason"`
+			TableRowCountMismatches []verifyRowCountMismatch `json:"table_row_count_mismatches" yaml:"table_row_count_mismatches"`
 		}
 		if err := cli.ReadJSON(resp, &out); err != nil {
 			return err
@@ -308,8 +308,8 @@ var backupRotateCmd = &cobra.Command{
 			return err
 		}
 		var out struct {
-			Deleted []string `json:"deleted"`
-			DryRun  bool     `json:"dry_run"`
+			Deleted []string `json:"deleted" yaml:"deleted"`
+			DryRun  bool     `json:"dry_run" yaml:"dry_run"`
 		}
 		if err := cli.ReadJSON(resp, &out); err != nil {
 			return err

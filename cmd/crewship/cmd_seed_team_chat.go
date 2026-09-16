@@ -24,33 +24,33 @@ import (
 )
 
 type teamSeedAccount struct {
-	Email         string `json:"email"`
-	Password      string `json:"password"`
-	UserID        string `json:"user_id,omitempty"`
-	SetupToken    string `json:"setup_token,omitempty"`
-	SetupComplete bool   `json:"setup_complete"`
-	DirectID      string `json:"direct_conversation_id,omitempty"`
+	Email         string `json:"email" yaml:"email"`
+	Password      string `json:"password" yaml:"password"`
+	UserID        string `json:"user_id,omitempty" yaml:"user_id,omitempty"`
+	SetupToken    string `json:"setup_token,omitempty" yaml:"setup_token,omitempty"`
+	SetupComplete bool   `json:"setup_complete" yaml:"setup_complete"`
+	DirectID      string `json:"direct_conversation_id,omitempty" yaml:"direct_conversation_id,omitempty"`
 }
 type teamSeedState struct {
-	Server         string                      `json:"server"`
-	WorkspaceID    string                      `json:"workspace_id"`
-	OwnerID        string                      `json:"owner_id"`
-	ChannelID      string                      `json:"channel_id,omitempty"`
-	ChannelPending bool                        `json:"channel_pending,omitempty"`
-	Accounts       map[string]*teamSeedAccount `json:"accounts"`
+	Server         string                      `json:"server" yaml:"server"`
+	WorkspaceID    string                      `json:"workspace_id" yaml:"workspace_id"`
+	OwnerID        string                      `json:"owner_id" yaml:"owner_id"`
+	ChannelID      string                      `json:"channel_id,omitempty" yaml:"channel_id,omitempty"`
+	ChannelPending bool                        `json:"channel_pending,omitempty" yaml:"channel_pending,omitempty"`
+	Accounts       map[string]*teamSeedAccount `json:"accounts" yaml:"accounts"`
 }
 type teamSeedPersonResult struct {
-	Key      string `json:"key"`
-	Email    string `json:"email"`
-	UserID   string `json:"user_id"`
-	Role     string `json:"role"`
-	DirectID string `json:"direct_conversation_id"`
+	Key      string `json:"key" yaml:"key"`
+	Email    string `json:"email" yaml:"email"`
+	UserID   string `json:"user_id" yaml:"user_id"`
+	Role     string `json:"role" yaml:"role"`
+	DirectID string `json:"direct_conversation_id" yaml:"direct_conversation_id"`
 }
 type teamSeedResult struct {
-	WorkspaceID    string                 `json:"workspace_id"`
-	ChannelID      string                 `json:"channel_id"`
-	ProtectedState string                 `json:"protected_state"`
-	People         []teamSeedPersonResult `json:"people"`
+	WorkspaceID    string                 `json:"workspace_id" yaml:"workspace_id"`
+	ChannelID      string                 `json:"channel_id" yaml:"channel_id"`
+	ProtectedState string                 `json:"protected_state" yaml:"protected_state"`
+	People         []teamSeedPersonResult `json:"people" yaml:"people"`
 }
 
 func newSeedTeamChatCmd() *cobra.Command {
@@ -98,17 +98,17 @@ func teamSeedJSON(client *cli.Client, method, path string, body, out any) error 
 }
 
 type teamSeedMember struct {
-	UserID    string `json:"user_id"`
-	Role      string `json:"role"`
-	Email     string `json:"email"`
-	FullName  string `json:"full_name"`
-	AvatarURL string `json:"avatar_url"`
+	UserID    string `json:"user_id" yaml:"user_id"`
+	Role      string `json:"role" yaml:"role"`
+	Email     string `json:"email" yaml:"email"`
+	FullName  string `json:"full_name" yaml:"full_name"`
+	AvatarURL string `json:"avatar_url" yaml:"avatar_url"`
 	User      *struct {
-		ID        string `json:"id"`
-		Email     string `json:"email"`
-		FullName  string `json:"full_name"`
-		AvatarURL string `json:"avatar_url"`
-	} `json:"user"`
+		ID        string `json:"id" yaml:"id"`
+		Email     string `json:"email" yaml:"email"`
+		FullName  string `json:"full_name" yaml:"full_name"`
+		AvatarURL string `json:"avatar_url" yaml:"avatar_url"`
+	} `json:"user" yaml:"user"`
 }
 
 func (m *teamSeedMember) email() string {
@@ -277,8 +277,8 @@ func seedTeamChat(ctx context.Context, caller *cli.Client, base string) (teamSee
 	}
 	people := teamSeedPeople(w)
 	var me struct {
-		ID    string `json:"user_id"`
-		Email string `json:"user_email"`
+		ID    string `json:"user_id" yaml:"user_id"`
+		Email string `json:"user_email" yaml:"user_email"`
 	}
 	if err = teamSeedJSON(owner, http.MethodGet, "/api/v1/auth/cli-token/validate", nil, &me); err != nil {
 		return result, err
@@ -356,9 +356,9 @@ func seedTeamChat(ctx context.Context, caller *cli.Client, base string) (teamSee
 		justProvisioned := false
 		if account.UserID == "" {
 			var provision struct {
-				UserID   string `json:"user_id"`
-				Created  bool   `json:"created_user"`
-				SetupURL string `json:"setup_url"`
+				UserID   string `json:"user_id" yaml:"user_id"`
+				Created  bool   `json:"created_user" yaml:"created_user"`
+				SetupURL string `json:"setup_url" yaml:"setup_url"`
 			}
 			if err = teamSeedJSON(owner, http.MethodPost, "/api/v1/workspaces/"+url.PathEscape(w)+"/members/provision", map[string]any{"email": person.Email, "full_name": person.FullName, "role": person.Role, "create_only": true}, &provision); err != nil {
 				return result, fmt.Errorf("%s: %w", person.Key, err)
@@ -410,8 +410,8 @@ func seedTeamChat(ctx context.Context, caller *cli.Client, base string) (teamSee
 			}
 		}
 		var identity struct {
-			ID    string `json:"user_id"`
-			Email string `json:"user_email"`
+			ID    string `json:"user_id" yaml:"user_id"`
+			Email string `json:"user_email" yaml:"user_email"`
 		}
 		if err = teamSeedJSON(actor, http.MethodGet, "/api/v1/auth/cli-token/validate", nil, &identity); err != nil {
 			return result, err
@@ -458,7 +458,7 @@ func seedTeamChat(ctx context.Context, caller *cli.Client, base string) (teamSee
 	}
 	if state.ChannelID != "" {
 		var previous struct {
-			ID string `json:"id"`
+			ID string `json:"id" yaml:"id"`
 		}
 		lookupErr := teamSeedJSON(owner, http.MethodGet, "/api/v1/conversations/"+url.PathEscape(state.ChannelID), nil, &previous)
 		if lookupErr != nil {
@@ -481,9 +481,9 @@ func seedTeamChat(ctx context.Context, caller *cli.Client, base string) (teamSee
 		for offset := 0; ; offset += 100 {
 			var page struct {
 				Rooms []struct {
-					Title string `json:"title"`
-				} `json:"conversations"`
-				Next *int `json:"next_offset"`
+					Title string `json:"title" yaml:"title"`
+				} `json:"conversations" yaml:"conversations"`
+				Next *int `json:"next_offset" yaml:"next_offset"`
 			}
 			if err = teamSeedJSON(owner, http.MethodGet, fmt.Sprintf("/api/v1/conversations?limit=100&offset=%d", offset), nil, &page); err != nil {
 				return result, err
@@ -502,7 +502,7 @@ func seedTeamChat(ctx context.Context, caller *cli.Client, base string) (teamSee
 			return result, err
 		}
 		var room struct {
-			ID string `json:"id"`
+			ID string `json:"id" yaml:"id"`
 		}
 		if err = teamSeedJSON(owner, http.MethodPost, "/api/v1/conversations", map[string]any{"title": "Team lounge · demo", "kind": "channel", "member_ids": []string{}}, &room); err != nil {
 			var status *teamSeedStatusError
@@ -527,9 +527,9 @@ func seedTeamChat(ctx context.Context, caller *cli.Client, base string) (teamSee
 		}
 	}
 	var existingRoom struct {
-		Kind      string `json:"kind"`
-		Owner     string `json:"created_by"`
-		Workspace string `json:"workspace_id"`
+		Kind      string `json:"kind" yaml:"kind"`
+		Owner     string `json:"created_by" yaml:"created_by"`
+		Workspace string `json:"workspace_id" yaml:"workspace_id"`
 	}
 	if err = teamSeedJSON(owner, http.MethodGet, "/api/v1/conversations/"+url.PathEscape(state.ChannelID), nil, &existingRoom); err != nil {
 		return result, err
@@ -547,7 +547,7 @@ func seedTeamChat(ctx context.Context, caller *cli.Client, base string) (teamSee
 		account := state.Accounts[person.Key]
 		actor := actors[person.Key]
 		var direct struct {
-			ID string `json:"id"`
+			ID string `json:"id" yaml:"id"`
 		}
 		if err = teamSeedJSON(actor, http.MethodPost, "/api/v1/conversations/direct", map[string]string{"user_id": me.ID}, &direct); err != nil {
 			return result, err
@@ -598,10 +598,10 @@ func requireCreateOnlyProvision(client *cli.Client) error {
 		Components struct {
 			Schemas map[string]struct {
 				Properties map[string]struct {
-					Type string `json:"type"`
-				} `json:"properties"`
-			} `json:"schemas"`
-		} `json:"components"`
+					Type string `json:"type" yaml:"type"`
+				} `json:"properties" yaml:"properties"`
+			} `json:"schemas" yaml:"schemas"`
+		} `json:"components" yaml:"components"`
 	}
 	if err = json.NewDecoder(io.LimitReader(response.Body, 8<<20)).Decode(&spec); err != nil || spec.Components.Schemas["FinalCoreProvisionMemberRequest"].Properties["create_only"].Type != "boolean" {
 		return fmt.Errorf("server does not advertise create-only provisioning; upgrade the server before retrying")

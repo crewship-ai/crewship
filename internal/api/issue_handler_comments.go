@@ -51,11 +51,11 @@ func (h *IssueHandler) ListComments(w http.ResponseWriter, r *http.Request) {
 	}
 	rows, err := h.db.QueryContext(r.Context(), `
 		SELECT mc.id, mc.mission_id, mc.author_type, mc.author_id,
-		       CASE
+		       COALESCE(CASE
 		         WHEN mc.author_type = 'user' THEN (SELECT full_name FROM users WHERE id = mc.author_id)
 		         WHEN mc.author_type = 'agent' THEN (SELECT name FROM agents WHERE id = mc.author_id)
 		         ELSE ''
-		       END,
+		       END, ''),
 		       mc.body, mc.created_at, mc.updated_at
 		FROM mission_comments mc
 		WHERE mc.mission_id = ?`+predicate+order, args...)

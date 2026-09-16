@@ -23,24 +23,24 @@ import (
 )
 
 type trustGrantRow struct {
-	ID              string `json:"id"`
-	StepID          string `json:"step_id"`
-	DefinitionHash  string `json:"definition_hash"`
-	GrantedByUserID string `json:"granted_by_user_id"`
-	GrantedAt       string `json:"granted_at"`
-	Reason          string `json:"reason,omitempty"`
-	PriorApprovals  int    `json:"prior_approvals"`
-	MaxUses         *int   `json:"max_uses,omitempty"`
-	Uses            int    `json:"uses"`
-	ExpiresAt       string `json:"expires_at,omitempty"`
-	RevokedAt       string `json:"revoked_at,omitempty"`
-	Live            bool   `json:"live"`
+	ID              string `json:"id" yaml:"id"`
+	StepID          string `json:"step_id" yaml:"step_id"`
+	DefinitionHash  string `json:"definition_hash" yaml:"definition_hash"`
+	GrantedByUserID string `json:"granted_by_user_id" yaml:"granted_by_user_id"`
+	GrantedAt       string `json:"granted_at" yaml:"granted_at"`
+	Reason          string `json:"reason,omitempty" yaml:"reason,omitempty"`
+	PriorApprovals  int    `json:"prior_approvals" yaml:"prior_approvals"`
+	MaxUses         *int   `json:"max_uses,omitempty" yaml:"max_uses,omitempty"`
+	Uses            int    `json:"uses" yaml:"uses"`
+	ExpiresAt       string `json:"expires_at,omitempty" yaml:"expires_at,omitempty"`
+	RevokedAt       string `json:"revoked_at,omitempty" yaml:"revoked_at,omitempty"`
+	Live            bool   `json:"live" yaml:"live"`
 }
 
 type trustListResponse struct {
-	Slug           string          `json:"slug"`
-	DefinitionHash string          `json:"definition_hash"`
-	Grants         []trustGrantRow `json:"grants"`
+	Slug           string          `json:"slug" yaml:"slug"`
+	DefinitionHash string          `json:"definition_hash" yaml:"definition_hash"`
+	Grants         []trustGrantRow `json:"grants" yaml:"grants"`
 }
 
 var routineTrustCmd = &cobra.Command{
@@ -203,9 +203,9 @@ var routineTrustGrantCmd = &cobra.Command{
 			return err
 		}
 		var out struct {
-			ID             string `json:"id"`
-			StepID         string `json:"step_id"`
-			DefinitionHash string `json:"definition_hash"`
+			ID             string `json:"id" yaml:"id"`
+			StepID         string `json:"step_id" yaml:"step_id"`
+			DefinitionHash string `json:"definition_hash" yaml:"definition_hash"`
 		}
 		if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 			return fmt.Errorf("decode response: %w", err)

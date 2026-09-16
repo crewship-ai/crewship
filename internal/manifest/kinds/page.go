@@ -282,7 +282,7 @@ func pageCtxKnowsCrews(ctx internalapi.WorkspaceContext) bool {
 }
 
 func pageCtxKnowsAgents(ctx internalapi.WorkspaceContext) bool {
-	return len(ctx.DeclaredAgents) > 0 || len(ctx.RemoteAgents) > 0
+	return ctx.KnowsAgents()
 }
 
 func pageCtxKnowsRoutines(ctx internalapi.WorkspaceContext) bool {

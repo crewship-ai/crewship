@@ -35,11 +35,11 @@ var privacyConsentCmd = &cobra.Command{
 }
 
 type peerConsentResponse struct {
-	UserID      string `json:"user_id"`
-	WorkspaceID string `json:"workspace_id"`
-	OptedOut    bool   `json:"opted_out"`
-	OptedOutAt  string `json:"opted_out_at"`
-	Purged      int    `json:"purged"`
+	UserID      string `json:"user_id" yaml:"user_id"`
+	WorkspaceID string `json:"workspace_id" yaml:"workspace_id"`
+	OptedOut    bool   `json:"opted_out" yaml:"opted_out"`
+	OptedOutAt  string `json:"opted_out_at" yaml:"opted_out_at"`
+	Purged      int    `json:"purged" yaml:"purged"`
 }
 
 var privacyConsentGetCmd = &cobra.Command{
@@ -128,20 +128,20 @@ var privacyCardsCmd = &cobra.Command{
 }
 
 type peerCard struct {
-	ID        string `json:"id"`
-	AgentID   string `json:"agent_id"`
-	AgentSlug string `json:"agent_slug"`
-	UserSlug  string `json:"user_slug"`
-	Bytes     int    `json:"bytes"`
-	CreatedAt string `json:"created_at"`
-	UpdatedAt string `json:"updated_at"`
-	Content   string `json:"content,omitempty"`
+	ID        string `json:"id" yaml:"id"`
+	AgentID   string `json:"agent_id" yaml:"agent_id"`
+	AgentSlug string `json:"agent_slug" yaml:"agent_slug"`
+	UserSlug  string `json:"user_slug" yaml:"user_slug"`
+	Bytes     int    `json:"bytes" yaml:"bytes"`
+	CreatedAt string `json:"created_at" yaml:"created_at"`
+	UpdatedAt string `json:"updated_at" yaml:"updated_at"`
+	Content   string `json:"content,omitempty" yaml:"content,omitempty"`
 }
 
 type peerCardsResponse struct {
-	UserID string     `json:"user_id"`
-	Peers  []peerCard `json:"peers"`
-	Purged int        `json:"purged"`
+	UserID string     `json:"user_id" yaml:"user_id"`
+	Peers  []peerCard `json:"peers" yaml:"peers"`
+	Purged int        `json:"purged" yaml:"purged"`
 }
 
 var privacyCardsListCmd = &cobra.Command{

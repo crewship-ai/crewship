@@ -128,7 +128,7 @@ func (h *PageHandler) ListGrants(w http.ResponseWriter, r *http.Request) {
 	// the agents somebody trusted, so it is the owner's and the admin's, not
 	// every workspace member's.
 	if !h.mayAdministerGrants(r.Context(), wsID, user.ID, RoleFromContext(r.Context()), rec) {
-		replyError(w, http.StatusForbidden, pageGrantAdminRefusal)
+		h.refusePageAction(w, r, rec, pageGrantAdminRefusal, "")
 		return
 	}
 	out, ok := h.grantsDocument(w, r, wsID, rec, 0)
@@ -165,7 +165,7 @@ func (h *PageHandler) PutGrant(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !h.mayAdministerGrants(r.Context(), wsID, user.ID, RoleFromContext(r.Context()), rec) {
-		replyError(w, http.StatusForbidden, pageGrantAdminRefusal)
+		h.refusePageAction(w, r, rec, pageGrantAdminRefusal, "")
 		return
 	}
 
@@ -296,7 +296,7 @@ func (h *PageHandler) DeleteGrant(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !h.mayAdministerGrants(r.Context(), wsID, user.ID, RoleFromContext(r.Context()), rec) {
-		replyError(w, http.StatusForbidden, pageGrantAdminRefusal)
+		h.refusePageAction(w, r, rec, pageGrantAdminRefusal, "")
 		return
 	}
 

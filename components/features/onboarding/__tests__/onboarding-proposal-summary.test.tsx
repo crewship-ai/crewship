@@ -14,6 +14,7 @@ const proposal: OnboardingProposal = {
     { name: "Data Collector", role: "Data Acquisition Specialist", model: "claude-sonnet-5" },
   ],
   egressDomains: [],
+  tools: [],
   status: "PENDING",
 }
 

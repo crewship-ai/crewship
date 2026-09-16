@@ -18,11 +18,15 @@ import type { OnboardingProposal } from "../setup-agent-api"
 const PROPOSAL: OnboardingProposal = {
   id: "prop_123",
   crewName: "Seznam Listing Scraper",
+  crewSlug: "seznam-listing-scraper",
+  templateSlug: "software-development",
   agents: [
     { name: "Scraper Lead", role: "Lead", model: "claude-sonnet-5" },
     { name: "Data Cleaner", role: "Engineer", model: "claude-haiku-4-5" },
   ],
   egressDomains: ["www.sreality.cz", "www.bezrealitky.cz"],
+  tools: [],
+  status: "PENDING",
 }
 
 function noop() {}

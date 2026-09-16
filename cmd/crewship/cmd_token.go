@@ -158,12 +158,12 @@ runner, a quarterly compliance script).`,
 
 		var result struct {
 			Data []struct {
-				ID         string  `json:"id"`
-				Name       string  `json:"name"`
-				CreatedAt  string  `json:"created_at"`
-				LastUsedAt *string `json:"last_used_at"`
-				RevokedAt  *string `json:"revoked_at"`
-			} `json:"data"`
+				ID         string  `json:"id" yaml:"id"`
+				Name       string  `json:"name" yaml:"name"`
+				CreatedAt  string  `json:"created_at" yaml:"created_at"`
+				LastUsedAt *string `json:"last_used_at" yaml:"last_used_at"`
+				RevokedAt  *string `json:"revoked_at" yaml:"revoked_at"`
+			} `json:"data" yaml:"data"`
 		}
 		if err := cli.ReadJSON(resp, &result); err != nil {
 			return err
@@ -287,9 +287,9 @@ var tokenCreateCmd = &cobra.Command{
 		}
 
 		var result struct {
-			Token string `json:"token"`
-			ID    string `json:"id"`
-			Name  string `json:"name"`
+			Token string `json:"token" yaml:"token"`
+			ID    string `json:"id" yaml:"id"`
+			Name  string `json:"name" yaml:"name"`
 		}
 		if err := cli.ReadJSON(resp, &result); err != nil {
 			return err
@@ -380,10 +380,10 @@ Examples:
 		}
 		var listBody struct {
 			Data []struct {
-				ID        string  `json:"id"`
-				Name      string  `json:"name"`
-				RevokedAt *string `json:"revoked_at"`
-			} `json:"data"`
+				ID        string  `json:"id" yaml:"id"`
+				Name      string  `json:"name" yaml:"name"`
+				RevokedAt *string `json:"revoked_at" yaml:"revoked_at"`
+			} `json:"data" yaml:"data"`
 		}
 		if err := cli.ReadJSON(listResp, &listBody); err != nil {
 			return fmt.Errorf("parse token list: %w", err)
@@ -424,9 +424,9 @@ Examples:
 			return err
 		}
 		var created struct {
-			Token string `json:"token"`
-			ID    string `json:"id"`
-			Name  string `json:"name"`
+			Token string `json:"token" yaml:"token"`
+			ID    string `json:"id" yaml:"id"`
+			Name  string `json:"name" yaml:"name"`
 		}
 		if err := cli.ReadJSON(createResp, &created); err != nil {
 			return fmt.Errorf("parse new token: %w", err)
@@ -499,10 +499,10 @@ exit status without re-parsing the output.`,
 		}
 
 		var result struct {
-			Valid     bool   `json:"valid"`
-			UserID    string `json:"user_id"`
-			Email     string `json:"email"`
-			ExpiresAt string `json:"expires_at"`
+			Valid     bool   `json:"valid" yaml:"valid"`
+			UserID    string `json:"user_id" yaml:"user_id"`
+			Email     string `json:"email" yaml:"email"`
+			ExpiresAt string `json:"expires_at" yaml:"expires_at"`
 		}
 		if err := cli.ReadJSON(resp, &result); err != nil {
 			return err

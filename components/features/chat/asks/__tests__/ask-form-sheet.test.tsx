@@ -52,7 +52,7 @@ const receipt: AskForm = {
   fields: [{ name: "supplier", label: "Supplier", type: "text", required: true }],
 }
 
-const onSubmit = vi.fn(async () => true)
+const onSubmit = vi.fn<React.ComponentProps<typeof AskFormSheet>["onSubmit"]>(async () => true)
 const onClose = vi.fn()
 
 // The product renderer is lib/ask-template.ts, pinned against Go by

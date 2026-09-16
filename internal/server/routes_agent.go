@@ -190,18 +190,16 @@ func (s *Server) handleAgentStop(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	s.logger.Info("agent stop request", "agent_id", id)
 
-	if s.state != nil {
-		data, err := s.state.Get(r.Context(), "agent_runs", id)
-		if err == nil && data != nil {
-			var run orchestrator.RunState
-			if json.Unmarshal(data, &run) == nil && run.Status == "running" {
-				run.Status = "stopped"
-				run.LastActivity = time.Now()
-				if updated, err := json.Marshal(run); err == nil {
-					_ = s.state.Set(r.Context(), "agent_runs", id, updated)
-				}
-			}
-		}
+	if s.orchestrator == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "runtime stop unavailable"})
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+	if err := s.orchestrator.StopAgent(ctx, id); err != nil {
+		s.logger.Warn("agent stop not confirmed", "agent_id", id, "error", err)
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "runtime stop not confirmed"})
+		return
 	}
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{

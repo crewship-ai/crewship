@@ -511,7 +511,7 @@ func augmentBundleWithScripts(ctx context.Context, client *cli.Client, ws, slug 
 	}
 	// Resolve the author crew — scripts are a crew asset delivered there.
 	var p struct {
-		AuthorCrewID string `json:"author_crew_id"`
+		AuthorCrewID string `json:"author_crew_id" yaml:"author_crew_id"`
 	}
 	if err := getJSON(client, fmt.Sprintf("/api/v1/workspaces/%s/pipelines/%s", ws, slug), &p); err != nil {
 		return nil, fmt.Errorf("resolve author crew for script inlining: %w", err)
@@ -626,8 +626,8 @@ Examples:
 		}
 		respBody, _ := io.ReadAll(resp.Body)
 		var out struct {
-			Slug string `json:"slug"`
-			ID   string `json:"id"`
+			Slug string `json:"slug" yaml:"slug"`
+			ID   string `json:"id" yaml:"id"`
 		}
 		_ = json.Unmarshal(respBody, &out)
 		if out.Slug != "" {

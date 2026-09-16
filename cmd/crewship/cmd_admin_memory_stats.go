@@ -28,34 +28,34 @@ import (
 
 // memoryStatsTotalsRow mirrors internal/api.memoryStatsTotals.
 type memoryStatsTotalsRow struct {
-	Versions int    `json:"versions"`
-	Bytes    int64  `json:"bytes"`
-	Blobs    int    `json:"blobs"`
-	OldestAt string `json:"oldest_at"`
-	NewestAt string `json:"newest_at"`
+	Versions int    `json:"versions" yaml:"versions"`
+	Bytes    int64  `json:"bytes" yaml:"bytes"`
+	Blobs    int    `json:"blobs" yaml:"blobs"`
+	OldestAt string `json:"oldest_at" yaml:"oldest_at"`
+	NewestAt string `json:"newest_at" yaml:"newest_at"`
 }
 
 // memoryStatsByTierRow mirrors internal/api.memoryStatsByTier.
 type memoryStatsByTierRow struct {
-	Tier     string `json:"tier"`
-	Versions int    `json:"versions"`
-	Bytes    int64  `json:"bytes"`
+	Tier     string `json:"tier" yaml:"tier"`
+	Versions int    `json:"versions" yaml:"versions"`
+	Bytes    int64  `json:"bytes" yaml:"bytes"`
 }
 
 // memoryStatsByAgentRow mirrors internal/api.memoryStatsByAgent.
 type memoryStatsByAgentRow struct {
-	AgentSlug string `json:"agent_slug"`
-	Versions  int    `json:"versions"`
-	Bytes     int64  `json:"bytes"`
-	NewestAt  string `json:"newest_at"`
+	AgentSlug string `json:"agent_slug" yaml:"agent_slug"`
+	Versions  int    `json:"versions" yaml:"versions"`
+	Bytes     int64  `json:"bytes" yaml:"bytes"`
+	NewestAt  string `json:"newest_at" yaml:"newest_at"`
 }
 
 // adminMemoryStatsResult mirrors internal/api.memoryStatsResponse.
 type adminMemoryStatsResult struct {
-	WorkspaceID string                  `json:"workspace_id"`
-	Totals      memoryStatsTotalsRow    `json:"totals"`
-	ByTier      []memoryStatsByTierRow  `json:"by_tier"`
-	ByAgent     []memoryStatsByAgentRow `json:"by_agent"`
+	WorkspaceID string                  `json:"workspace_id" yaml:"workspace_id"`
+	Totals      memoryStatsTotalsRow    `json:"totals" yaml:"totals"`
+	ByTier      []memoryStatsByTierRow  `json:"by_tier" yaml:"by_tier"`
+	ByAgent     []memoryStatsByAgentRow `json:"by_agent" yaml:"by_agent"`
 }
 
 var adminMemoryStatsCmd = &cobra.Command{

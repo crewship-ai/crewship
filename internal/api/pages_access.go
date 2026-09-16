@@ -133,7 +133,7 @@ func (h *PageHandler) PageAccess(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !h.mayAdministerGrants(r.Context(), wsID, user.ID, role, rec) {
-		replyError(w, http.StatusForbidden, pageAccessRefusal)
+		h.refusePageAction(w, r, rec, pageAccessRefusal, "")
 		return
 	}
 	limit, after, ok := pageAccessPaging(w, r)
@@ -310,7 +310,8 @@ func (h *PageHandler) SubjectAccess(w http.ResponseWriter, r *http.Request) {
 			paths = h.pageAccessUserPaths(rec, ownerCrewSlug, panelsByPage[rec.ID], viewer,
 				folderReachSlug(rec, folders, folderACL, viewer), grantsByPage[rec.ID])
 		case pageSubjectCrew:
-			paths = pageAccessCrewPaths(rec, subjectID, label, panelsByPage[rec.ID], grantsByPage[rec.ID])
+			paths = pageAccessCrewPaths(rec, subjectID, label, panelsByPage[rec.ID],
+				folderCrewReachSlug(rec, folders, folderACL, subjectID), grantsByPage[rec.ID])
 		default:
 			paths = pageAccessAgentPaths(subjectID, grantsByPage[rec.ID])
 		}
@@ -359,9 +360,13 @@ func (h *PageHandler) pageAccessUserPaths(rec *pageRecord, ownerCrewSlug string,
 	return append(paths, pageAccessGrantPaths(grants, pageViewerGrantMatch(viewer))...)
 }
 
-// pageAccessCrewPaths is a crew's standing on a page: `owner` when the page
-// is its, `panel_crew:<its slug>` when it owns a panel, then its live grants.
-func pageAccessCrewPaths(rec *pageRecord, crewID, slug string, panels []*panelRecord, grants []pageGrantRecord) []string {
+// pageAccessCrewPaths is a crew's standing on a page, in pageReach's order:
+// `owner` when the page is its, `panel_crew:<its slug>` when it owns a
+// panel, `folder:<slug>` when the page's folder names the crew in its ACL
+// (folderCrewReachSlug, #2543), then its live grants. The folder path says
+// the crew is named, never at which level — the same rendering a user's row
+// gets — so a view-only entry and a can-edit entry read alike here.
+func pageAccessCrewPaths(rec *pageRecord, crewID, slug string, panels []*panelRecord, folderSlug string, grants []pageGrantRecord) []string {
 	var paths []string
 	if rec.OwnerCrewID != "" && rec.OwnerCrewID == crewID {
 		paths = append(paths, pageReachOwner)
@@ -371,6 +376,9 @@ func pageAccessCrewPaths(rec *pageRecord, crewID, slug string, panels []*panelRe
 			paths = append(paths, pageReachPanelCrew+slug)
 			break
 		}
+	}
+	if folderSlug != "" {
+		paths = append(paths, pageReachFolder+folderSlug)
 	}
 	return append(paths, pageAccessGrantPaths(grants, func(g pageGrantRecord) bool {
 		return g.SubjectType == pageSubjectCrew && g.SubjectID == crewID
@@ -559,7 +567,8 @@ func (h *PageHandler) pageAccessSubjects(rec *pageRecord, ws *pageAccessWorkspac
 
 	for _, crewID := range ws.CrewOrder {
 		crew := ws.Crews[crewID]
-		paths := withhold(pageAccessCrewPaths(rec, crewID, crew.Slug, panels, grants))
+		paths := withhold(pageAccessCrewPaths(rec, crewID, crew.Slug, panels,
+			folderCrewReachSlug(rec, folders, folderACL, crewID), grants))
 		if len(paths) == 0 {
 			continue
 		}

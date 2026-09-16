@@ -9,6 +9,7 @@ import { useRealtimeEventSafe } from "@/hooks/use-realtime"
 // Stripe / GitHub reveal secrets once); subsequent fetches return
 // SigningSecretSet boolean only.
 export interface PipelineWebhook {
+  ingress_profile?: "crewship" | "github"
   id: string
   workspace_id: string
   name: string
@@ -30,6 +31,7 @@ export interface PipelineWebhook {
 }
 
 export interface WebhookSaveBody {
+  ingress_profile?: "crewship" | "github"
   name: string
   target_pipeline_slug?: string
   target_pipeline_id?: string
@@ -77,12 +79,6 @@ export function usePipelineWebhooks(workspaceId: string | null | undefined) {
       })
       if (ctrl.signal.aborted) return
       if (!res.ok) {
-        if (res.status === 503) {
-          // Backend not wired (test server / no DB).
-          setWebhooks([])
-          setLoading(false)
-          return
-        }
         setError(`pipeline webhooks: ${res.status}`)
         setLoading(false)
         return

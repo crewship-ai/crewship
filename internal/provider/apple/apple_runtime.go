@@ -10,6 +10,7 @@ import (
 
 	"archive/tar"
 	"errors"
+	"github.com/crewship-ai/crewship/internal/memory"
 	"github.com/crewship-ai/crewship/internal/provider"
 	"github.com/crewship-ai/crewship/internal/safepath"
 	"path"
@@ -302,7 +303,14 @@ func (p *Provider) CopyToContainer(ctx context.Context, containerID string, dstP
 			if err != nil {
 				return fmt.Errorf("copy %s into %s: %w", name, dstPath, err)
 			}
-			if err := os.WriteFile(dst, data, 0o600); err != nil {
+			// Durable, not os.WriteFile (#2124): the reader is the agent CLI
+			// inside the container, opening this file through the mount, and
+			// os.WriteFile truncates before it writes. On a re-provision the
+			// previous .mcp.json is already there, so that window shows the
+			// agent an empty config — "no MCP servers", not an error — and it
+			// starts without its tools. The rename makes the file either the
+			// whole old content or the whole new one.
+			if err := memory.WriteFileDurable(dst, data, 0o600); err != nil {
 				return fmt.Errorf("copy %s into %s: %w", name, dstPath, err)
 			}
 			if err := p.giveAgentAccess(dst, 0o644); err != nil {

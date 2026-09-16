@@ -15,6 +15,52 @@ and return `202` after authentication and admission checks.
   This endpoint uses **webhook-secret authentication only** — not session or CLI token auth. Provide exactly one of `X-Signature` (preferred) or `X-Webhook-Secret` (deprecated).
 </Note>
 
+## Manage incoming endpoints in Integrations
+
+Open **Integrations → Incoming webhooks** to see routine and agent endpoints
+in one list. The explorer filters targets by **Routines**, **Agents**, or
+**Pages**; search, collapse, and the mobile drawer work like the other
+Integrations tabs. Selecting a target opens its endpoints and recent receipts.
+The selection is linkable, for example
+`/integrations?tab=incoming&section=routine&target=review-pr`.
+
+Use **Add integration → Incoming webhook** (or **Add endpoint** in a target)
+to select an existing target and create its endpoint. The default routine endpoint accepts signed JSON requests; credentials are generated
+automatically. To connect GitHub pull requests, open **Advanced settings → Webhook
+format** and choose **GitHub pull requests**. This uses GitHub's signature and PR
+payload adapter. Collapsing the settings does not change the selected format.
+Routines can create, update, or comment on Issues, so Issues do not have a
+second, identical target list. Agent webhooks start background runs; they do
+not append a message to an existing chat. Page endpoints target a compatible
+webhook or script panel on that Page.
+
+**Outgoing notifications** send Crewship events to another service. **Incoming
+webhooks** receive direct HTTP requests. **Tools → Triggers** manages
+subscriptions through connected app accounts; it is a separate integration
+mechanism.
+
+The overview counts routine and configured agent endpoints. Page endpoints are
+loaded only when opening a Page and are explicitly excluded from these totals.
+**Receiving** means enabled with credentials, not that delivery was probed.
+**Received · 24h** displays **—** because the API does not provide that aggregate.
+**Refresh** reloads target lists, endpoints, and the open receipt list.
+
+Receiving URLs for routines and Pages contain a secret token: copy the URL
+when it is created; subsequent views show a masked path. The signing secret
+is also shown once. Rotating a routine's signing secret leaves the receiving
+URL unchanged and cannot recover a lost URL; create a replacement endpoint
+if necessary. An agent's URL contains only public identifiers and remains
+copyable; its signing secret is still shown once.
+
+Routine endpoints support enable/disable, secret rotation, and deletion.
+Agent endpoints currently support secret rotation, without a separate
+endpoint disable/delete operation. Page endpoints can be revoked with
+**Delete**; rotation requires creating a replacement. Existing work and
+receipts are retained when an endpoint is deleted. Recent agent receipts show
+**admission** decisions, not execution results; routine receipts show the run
+record's status when available. Pages expose last-fire information, but no
+receipt-history API. All mutations remain subject to backend permissions.
+
 ## Trigger Agent via Webhook
 
 ```
@@ -129,26 +175,53 @@ Data: {repository: org/repo, pr_number: 42, ...}
 
 ### Response
 
-The webhook returns immediately. Agent execution happens asynchronously.
+The webhook returns as soon as the delivery is **durably recorded**. Agent
+execution happens afterwards, asynchronously, and is tracked as a
+[work item](/api-reference/work-items).
 
-**`202 Accepted`** on success — the body is `{"status": "accepted"}`. The status reflects the fire-and-forget contract: the agent run is enqueued asynchronously, and `202` (not `200`) signals "we received it, work has not finished".
+**`202 Accepted`** — the delivery and the work item it produced were committed
+in one transaction before the response was written:
 
-**`401 Unauthorized`** if neither `X-Signature` nor `X-Webhook-Secret` is provided, or the supplied signature/secret is invalid.
+```json
+{"delivery_id":"dlv_…","work_id":"wk_…","status":"queued","duplicate":false}
+```
 
-**`400 Bad Request`** if `X-Timestamp` is present but unparseable or outside the 5-minute tolerance (a stale or replayed signed request).
+`status` is the work item's state at acceptance (`queued`; see
+[States](/api-reference/work-items#states) for what it becomes). A
+**redelivery** of an accepted delivery — same source id, same body — answers
+`202` again with the *original* `delivery_id` and `work_id` and
+`duplicate: true`; no second run starts. This also holds while the agent's
+rate limit is exhausted: a duplicate is never refused for fullness, only new
+work is.
+
+**`200 OK`** — a `ping` event (`{"event":"ping",…}`) is recorded and
+acknowledged without starting an agent:
+
+```json
+{"status":"ignored","delivery_id":"dlv_…","reason":"ping"}
+```
+
+| Status | Meaning |
+|---|---|
+| `400` | Malformed JSON body; `X-Timestamp` unparseable or outside the 5-minute tolerance; a body-only `X-Signature` or `X-Webhook-Secret` on an agent that requires timestamped signatures |
+| `401` | Neither `X-Signature` nor `X-Webhook-Secret` provided, or the value does not verify |
+| `404` | Unknown crew/agent |
+| `409` | `delivery_conflict` — the same delivery identity arrived with a different body; the original record is kept and nothing runs |
+| `413` | Body over the 1 MiB ingress limit (read under a hard cap — a larger request is refused, never truncated and then rejected as "bad signature") |
+| `429` | `ingress capacity full` — the agent's per-minute limit (60/min by default), or the endpoint/workspace queue and byte budgets, are exhausted for **new** deliveries; includes `Retry-After` |
+| `503` | `acceptance unavailable` — the delivery ledger could not be written or read, or the per-agent policy could not be loaded; includes `Retry-After`. Never a false `202`: if the record did not commit, the sender is told to retry |
 
 ### What Happens Behind the Scenes
 
 <Accordion title="Webhook execution pipeline">
 1. **Auth validation** -- the agent's webhook secret is read crew-scoped from the database (the plaintext secret never crosses an IPC hop); an `X-Signature` is verified as an HMAC of the body (or of `"{timestamp}.{body}"` when `X-Timestamp` is present, which must also be within the freshness window), otherwise a plaintext `X-Webhook-Secret` is compared (constant-time)
-2. **Agent config resolution** -- the agent's full configuration (CLI adapter, LLM model, credentials, etc.) is resolved
-3. **Chat session creation** -- a webhook-scoped chat session is created or reused (`webhook-{agentId}`)
-4. **Container startup** -- the crew's container runtime is ensured running
-5. **Run record creation** -- a run record with trigger type `WEBHOOK` is created
+2. **Delivery identity** -- the dedup identity is the verified signature (scoped by agent), else the sender's `Idempotency-Key`, else a hash of the payload; the body's SHA-256 is recorded next to it so a reused identity with different bytes is a `409`, not a silent overwrite
+3. **Durable acceptance** -- inside one transaction the delivery row and a `queued` work item (`source: webhook`, `class: background`) are written to the ledger; the `202` carries their ids. Rate and capacity gates run before this step and answer `429`, a ledger fault answers `503` — nothing is started that was not recorded first
+4. **Response, then dispatch** -- the receipt is flushed to the sender *before* anything outside the database runs, so a cold crew's image pull no longer counts against GitHub's ten-second delivery deadline
+5. **Container startup** -- the crew's container runtime is ensured running by the work dispatcher, which claims the item and records an attempt
 6. **Ingress trust fence** -- the payload (`event`, `source`, `data`) is external, attacker-controlled input, so it is wrapped in a nonce-delimited `<untrusted …>` block and injection-scanned before it becomes the agent's user message. The agent's system prompt instructs it to treat fenced blocks as pure data, never as instructions. See [Ingress trust fence](/security/threat-model#ingress-trust-fence).
-7. **Agent execution** -- the agent is started asynchronously with a 10-minute timeout
-8. **Log streaming** -- agent output is streamed to the log collector and broadcast via WebSocket on `workspace:{workspaceId}`
-9. **Run completion** -- the run record is updated with status (`COMPLETED` or `FAILED`), exit code, duration, and error message
+7. **Agent execution** -- the agent runs under a webhook-scoped session (`webhook-{agentId}-{runId}`), with log streaming to the log collector and WebSocket broadcast on `workspace:{workspaceId}`
+8. **Completion and recovery** -- the work item moves to a terminal state (`succeeded`, `failed`, `cancelled`, …); a crash between acceptance and completion leaves a claimable item, not a lost event. Inspect with `crewship work get <work_id>` / `crewship work deliveries get <delivery_id>`, replay with `crewship work replay`
 </Accordion>
 
 ### Prerequisites
@@ -212,7 +285,7 @@ never re-displayed on a reload.
 
 The response contains the freshly minted `webhook_secret` exactly once — store it in the external system (GitHub/Grafana/… webhook config) immediately. Deliveries signed with the previous secret are rejected as soon as the rotation lands. Rotation requires agent-edit rights (OWNER/ADMIN, or MANAGER for agents they created).
 
-`GET /api/v1/agents/{agentId}` exposes only a `webhook_secret_set` boolean so clients can tell whether a secret is configured.
+`GET /api/v1/agents/{agentId}` and the `GET /api/v1/agents` list expose only a `webhook_secret_set` boolean so clients can tell whether a secret is configured; the plaintext is never returned after the reveal.
 
 <Note>
   The former internal endpoint `GET /api/v1/internal/agents/{agentId}/webhook-secret` was removed — the trigger endpoint validates signatures against the database directly, and the plaintext secret never crosses an IPC hop.
@@ -270,27 +343,32 @@ The signature is required. With `X-Crewship-Timestamp: <unix-seconds>`, sign
 three fields. `Idempotency-Key` (or `X-Crewship-Event-ID`) can select the
 deduplication identity; identical signed deliveries also deduplicate.
 
-Success returns:
+Success returns `202`:
 
 ```json
-{"run_id":"run_123","status":"PENDING","deduped":false}
+{"run_id":"run_123","status":"PENDING","deduped":false,"delivery_id":"crcp_…","duplicate":false}
 ```
 
-A duplicate returns `202` with `status: "DEDUPED"`, the original `run_id`, and
-`deduped: true`. The run may later be `COMPLETED`, `FAILED`, `CANCELLED`, or
-`WAITING`; poll `/api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}`.
+`delivery_id` is the [receipt](#routine-webhook-receipts) written before the
+response. A duplicate returns `202` with `status: "DEDUPED"`, the original
+`run_id` and `delivery_id`, `deduped: true` and `duplicate: true`. The run may
+later be `COMPLETED`, `FAILED`, `CANCELLED`, or `WAITING`; poll
+`/api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}`.
 
 | Status | Meaning |
 |---|---|
-| `400` | Body too large/unreadable |
+| `400` | Body unreadable |
 | `401` | Missing or invalid HMAC/timestamp |
 | `404` | Unknown, disabled, or deleted token (deliberately indistinguishable) |
 | `409` | Target routine is not active, its pinned version is unavailable, or the same delivery identifier arrived with a different body (`delivery_conflict`; the original record is kept) |
+| `413` | Body over the 1 MiB ingress limit — refused outright, never truncated and then failed as a signature mismatch |
 | `429` | Per-token/concurrency limit for **new** deliveries; includes `Retry-After`. A redelivery of an already-accepted delivery is answered `202 DEDUPED` with its original `run_id` even while the limit is exhausted |
-| `503` | Dispatch dependencies are not wired, or the receipt ledger could not be read; includes `Retry-After`. Never a guessed duplicate |
+| `503` | Dispatch dependencies are not wired, or the receipt ledger could not be read or written; includes `Retry-After`. Never a guessed duplicate, never a false `202` |
 
 Dispatch does not accept session/JWT authentication, and it never falls back to
-an unsigned request.
+an unsigned request. From the CLI, `crewship routine webhooks fire <url>
+--secret … --body …` signs and sends a delivery exactly this way (see
+[`webhooks fire`](/cli/routine#webhooks-fire)).
 
 ### Routine webhook receipts
 
@@ -325,3 +403,71 @@ removes expired receipts; from then on the same identifier is **new work and
 runs again** — the contract promises no replay suppression past the window.
 Receipts recorded before the window existed were dated from the upgrade and
 keep the full 30 days from there.
+
+### POST /api/v1/webhooks/\{token\}/github-pull-request
+
+```http
+POST /api/v1/webhooks/{token}/github-pull-request
+Content-Type: application/json
+X-Hub-Signature-256: sha256=<hex HMAC-SHA256(body, signing_secret)>
+X-GitHub-Event: pull_request
+X-GitHub-Delivery: <delivery id>
+```
+
+Create an endpoint in **Integrations → Incoming webhooks → Routines** and choose
+**Advanced settings → Webhook format → GitHub pull requests**, or from the CLI
+`crewship routine webhooks create --slug <routine> --ingress-profile github`.
+The creation API accepts `ingress_profile: "github"`; the default is `crewship`.
+The profile cannot be changed by PATCH: create a new endpoint when changing
+sender protocols. Copy the URL and signing secret at creation; neither can be
+recovered from the list. Rotating the secret preserves the URL you saved.
+
+Authentication uses the token in the path and `X-Hub-Signature-256`, containing
+`sha256=` plus the HMAC-SHA256 of the exact request body. It does not use a user
+session. Configure GitHub with content type `application/json`, the shown secret
+and **Pull requests** events. The existing hostname and HTTPS ingress suffice;
+a separate webhook DNS name is not required. The base URL without the suffix
+also enforces the stored GitHub profile, so a legacy signature cannot bypass it.
+
+The JSON request can contain the full GitHub payload. Execution requires a
+`pull_request` object and `action` equal to `opened`, `synchronize` or `reopened`:
+
+```json
+{"action":"opened","pull_request":{"number":42},"repository":{"full_name":"example/project"}}
+```
+
+`X-GitHub-Delivery` is required for these actions. `X-GitHub-Event: ping` and
+unsupported actions are acknowledged without starting a routine. The target
+routine is fixed by the endpoint configuration, and the action is read from
+signed JSON rather than chosen by the unsigned event header. The routine receives
+the event as its webhook inputs and must implement the intended issue or review
+steps; choosing a routine does not add those steps automatically.
+
+Response statuses:
+
+| Status | Response / meaning |
+|---|---|
+| `200` | `{"status":"IGNORED","reason":"ping"}` or unsupported pull request action; no execution |
+| `202` | `{"run_id":"run_…","status":"PENDING","deduped":false,"delivery_id":"…","duplicate":false}`; accepted, execution is asynchronous |
+| `202` | A duplicate returns the original `run_id`, `status: "DEDUPED"`, `deduped: true` and `duplicate: true` |
+| `400` | A supported action is missing `X-GitHub-Delivery`, or the request body could not be read |
+| `401` | Missing or invalid GitHub signature |
+| `404` | Unknown/disabled endpoint, or the GitHub suffix was used with a Crewship-profile endpoint |
+| `409` | Delivery ID reused with different bytes, or the target routine/version is unavailable |
+| `413` | Request exceeds the webhook body limit |
+| `429` | New delivery exceeds an ingress limit; retry according to `Retry-After` |
+| `503` | Receipt ledger or dispatch dependency unavailable; retry according to `Retry-After` |
+
+GitHub delivery IDs are unsigned. Within this endpoint, identical signed bytes
+therefore also deduplicate atomically, including concurrent requests with different
+IDs. The receipt records profile `github` and source ID `github:<delivery-id>`.
+The same 30-day receipt retention applies; once expired receipts are removed, the
+same signed payload can start new work. No permanent replay protection is promised.
+This endpoint does not publish PR reviews or enforce a repository/branch allowlist.
+Connect a dedicated review routine only after configuring those decisions there.
+
+To exercise the endpoint before pointing GitHub at it,
+`crewship routine webhooks fire <url>/github-pull-request --secret … --body @pull_request.json --delivery-id <id>`
+signs the payload with `X-Hub-Signature-256` and prints the receipt; `crewship
+routine webhooks receipts list --webhook <id> --source-id github:<id>` reads it
+back.

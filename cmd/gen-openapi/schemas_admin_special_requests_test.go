@@ -13,7 +13,7 @@ func TestAdminSpecialRequestCatalogUsesUniqueNamedContracts(t *testing.T) {
 		}
 	}
 	for _, name := range []string{
-		"AdminBackupCreateRequest", "AdminKeeperConfigRequest", "MemoryImportRequest",
+		"AdminBackupCreateRequest", "AdminKeeperConfigRequest", "AdminMemorySyncRequest", "MemoryImportRequest",
 		"RecipeInstallRequest", "TemplateCreateRequest", "ConsolidateRunRequest",
 		"EvalReplayRequest", "EmptyRequest", "InstanceSettingRequest", "FeedbackCreateRequest",
 	} {

@@ -2,13 +2,13 @@ package devcontainer
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"iter"
 	"strings"
 	"testing"
 
+	cerrdefs "github.com/containerd/errdefs"
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/image"
 	"github.com/moby/moby/api/types/jsonstream"
@@ -31,13 +31,15 @@ type mockCommitClient struct {
 	commitRefs        []string
 
 	// Configurable errors.
-	createErr error
-	startErr  error
-	commitErr error
-	listErr   error
+	createErr  error
+	startErr   error
+	commitErr  error
+	listErr    error
+	inspectErr error // overrides ImageInspect's answer for every ref when set
 
 	// Call counters.
 	imageListCalls int
+	inspectCalls   int
 }
 
 type mockCreateCall struct {
@@ -101,12 +103,18 @@ func (m *mockCommitClient) ImagePull(_ context.Context, _ string, _ client.Image
 }
 
 func (m *mockCommitClient) ImageInspect(_ context.Context, ref string, _ ...client.ImageInspectOption) (client.ImageInspectResult, error) {
+	m.inspectCalls++
+	if m.inspectErr != nil {
+		return client.ImageInspectResult{}, m.inspectErr
+	}
 	for _, tag := range m.existingImages {
 		if tag == ref {
 			return client.ImageInspectResult{InspectResponse: image.InspectResponse{RepoDigests: m.inspectDigests[ref]}}, nil
 		}
 	}
-	return client.ImageInspectResult{}, errors.New("no such image")
+	// The real client maps the daemon's 404 to a containerd NotFound, and
+	// that is the shape the stale-list confirmation keys on.
+	return client.ImageInspectResult{}, fmt.Errorf("%w: No such image: %s", cerrdefs.ErrNotFound, ref)
 }
 
 // nopImagePullResponse satisfies client.ImagePullResponse (io.ReadCloser plus

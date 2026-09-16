@@ -1,45 +1,36 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import ts from "typescript"
-import { compareDiagnostics, compareBaseline, diagnosticAnchor } from "./typecheck-tests.mjs"
-const error = { file: "a.test.ts", code: 2322, message: "missing prop", count: 2 }
-test("known errors pass and lower counts are allowed", () => {
- assert.deepEqual(compareDiagnostics([error], [error]), [])
- assert.deepEqual(compareDiagnostics([{...error,count:1}], [error]), [])
-})
-test("increased count, another file, another code, or another message fails", () => {
- for (const changed of [{count:3},{file:"b.test.ts"},{code:2339},{message:"wrong prop"}]) {
-  assert.equal(compareDiagnostics([{...error,...changed}], [error]).length,1)
- }
-})
-test("removing an old error does not buy an allowance for a new one", () => {
- assert.equal(compareDiagnostics([{...error,message:"new",count:1}], [error]).length,1)
+import fs from "node:fs"
+import os from "node:os"
+import path from "node:path"
+import { checkTestTypes, formatDiagnostic } from "./typecheck-tests.mjs"
+
+// A throwaway project, so the gate is exercised against files whose
+// diagnostics are known, not against the repo's own (clean) tests.
+function project(files) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "typecheck-tests-"))
+  fs.writeFileSync(path.join(dir, "tsconfig.json"), JSON.stringify({
+    compilerOptions: { strict: true, noEmit: true, types: [], skipLibCheck: true, target: "ES2020" },
+    include: ["**/*.test.ts"],
+  }))
+  for (const [name, source] of Object.entries(files)) fs.writeFileSync(path.join(dir, name), source)
+  return path.join(dir, "tsconfig.json")
+}
+
+test("a clean project reports nothing", () => {
+  assert.deepEqual(checkTestTypes(project({ "ok.test.ts": "export const n: number = 1\n" })), [])
 })
 
-test("same diagnostic at another code site fails", () => {
- assert.equal(compareDiagnostics([{...error,anchor:"new"}], [{...error,anchor:"old"}]).length,1)
-})
-test("raising the submitted baseline fails against the target branch", () => {
- assert.equal(compareBaseline([{...error,count:3,anchor:"site"}], [error]).length,1)
- assert.deepEqual(compareBaseline([{...error,anchor:"site"}], [error]),[])
- assert.equal(compareBaseline([{...error,anchor:"another"}], [{...error,anchor:"site"}]).length,1)
+test("every diagnostic is reported with its file, line and code", () => {
+  const diagnostics = checkTestTypes(project({
+    "bad.test.ts": "export const s: string = 1\n\nexport const missing: { id: string } = {}\n",
+  }))
+  assert.deepEqual(diagnostics.map(d => [d.file, d.line, d.code]), [["bad.test.ts", 1, 2322], ["bad.test.ts", 3, 2741]])
+  assert.match(formatDiagnostic(diagnostics[0]), /^bad\.test\.ts:1: TS2322: /)
 })
 
-test("anchors distinguish declarations and test names but tolerate shifted lines", () => {
- const anchor = source => {
-  const file=ts.createSourceFile("probe.test.ts",source,ts.ScriptTarget.Latest,true)
-  return diagnosticAnchor({file,start:source.indexOf("bad")})
- }
- const source='it("first", () => { const bad: string = 1 })'
- assert.equal(anchor(source),anchor("\n\n"+source))
- assert.notEqual(anchor(source),anchor(source.replace("first","second")))
- assert.notEqual(anchor(source),anchor(source.replace("bad:","badOther:")))
- const helper='const first = () => { const bad: string = 1 }'
- assert.notEqual(anchor(helper),anchor(helper.replace("first","second")))
- const method='class First { run() { const bad: string = 1 } }'
- assert.notEqual(anchor(method),anchor(method.replace("First","Second")))
- assert.notEqual(anchor(method),anchor(method.replace("run()","other()")))
- const expression='const first = function named() { const bad: string = 1 }'
- assert.notEqual(anchor(expression),anchor(expression.replace("first","second")))
- assert.notEqual(anchor(expression),anchor(expression.replace("named()","other()")))
+test("a broken tsconfig is an error, not a clean run", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "typecheck-tests-"))
+  fs.writeFileSync(path.join(dir, "tsconfig.json"), "{ not json")
+  assert.throws(() => checkTestTypes(path.join(dir, "tsconfig.json")))
 })

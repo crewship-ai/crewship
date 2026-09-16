@@ -51,9 +51,9 @@ function stubFetch(rest: () => Response | Promise<Response>) {
 }
 
 /** The POST the dialog exists to make, picked out of the catalogue traffic. */
-function agentsPost(spy: ReturnType<typeof vi.spyOn>) {
+function agentsPost(spy: ReturnType<typeof stubFetch>) {
   return spy.mock.calls.find(
-    ([url, init]) => String(url).includes("/api/v1/agents") && (init as RequestInit | undefined)?.method === "POST",
+    ([url, init]) => String(url).includes("/api/v1/agents") && init?.method === "POST",
   )
 }
 
@@ -83,9 +83,9 @@ describe("CreateAgentDialog", () => {
     }
     const utils = render(<CreateAgentDialog {...props} />)
     if (!props.agent && chooseProvider) {
-      fireEvent.click(screen.getByRole("button", { name: "Model and execution", exact: true }))
-      fireEvent.click(screen.getByRole("radio", { name: "Anthropic", exact: true }))
-      fireEvent.click(screen.getByRole("button", { name: "Identity", exact: true }))
+      fireEvent.click(screen.getByRole("button", { name: "Model and execution" }))
+      fireEvent.click(screen.getByRole("radio", { name: "Anthropic" }))
+      fireEvent.click(screen.getByRole("button", { name: "Identity" }))
     }
     return { ...utils, props }
   }
@@ -94,15 +94,15 @@ describe("CreateAgentDialog", () => {
     const spy = stubFetch(() => new Response(JSON.stringify({ id: "a1", name: "Test", slug: "test" }), { status: 201 }))
     renderDialog({}, false)
     fireEvent.change(screen.getByPlaceholderText("Filip"), { target: { value: "Test" } })
-    fireEvent.click(screen.getByRole("button", { name: "Choose provider", exact: true }))
+    fireEvent.click(screen.getByRole("button", { name: "Choose provider" }))
     expect(screen.queryAllByRole("radio", { checked: true })).toHaveLength(0)
     fireEvent.keyDown(document.querySelector('[data-slot="dialog-content"]')!, { key: "Enter", ctrlKey: true })
     expect(agentsPost(spy)).toBeUndefined()
-    fireEvent.click(screen.getByRole("radio", { name: "OpenAI", exact: true }))
+    fireEvent.click(screen.getByRole("radio", { name: "OpenAI" }))
     expect(screen.getByRole("radio", { name: /Codex/ })).toHaveAttribute("aria-checked", "true")
-    fireEvent.click(screen.getByRole("button", { name: "Create agent", exact: true }))
+    fireEvent.click(screen.getByRole("button", { name: "Create agent" }))
     await waitFor(() => expect(agentsPost(spy)).toBeDefined())
-    expect(JSON.parse((agentsPost(spy)![1] as RequestInit).body as string)).toMatchObject({ llm_provider: "OPENAI", cli_adapter: "CODEX_CLI" })
+    expect(JSON.parse(agentsPost(spy)![1]!.body as string)).toMatchObject({ llm_provider: "OPENAI", cli_adapter: "CODEX_CLI" })
   })
 
   it("renders header + footer with disabled Create when name is empty", () => {
@@ -377,16 +377,16 @@ describe("CreateAgentDialog", () => {
     const spy = stubFetch(() => new Response(JSON.stringify({ id: "a1", name: "Ada", slug: "ada" })))
     renderDialog()
     fireEvent.change(screen.getByPlaceholderText("Filip"), { target: { value: "Ada" } })
-    fireEvent.click(screen.getByRole("button", { name: "Model and execution", exact: true }))
+    fireEvent.click(screen.getByRole("button", { name: "Model and execution" }))
     fireEvent.click(screen.getByRole("radio", { name: /^Codex CLI/ }))
     fireEvent.change(screen.getByLabelText("Maximum run duration"), { target: { value: "15" } })
-    fireEvent.click(screen.getByRole("button", { name: "Instructions and persona", exact: true }))
+    fireEvent.click(screen.getByRole("button", { name: "Instructions and persona" }))
     fireEvent.change(screen.getByRole("textbox", { name: "Agent system prompt" }), { target: { value: "Review documents carefully." } })
-    fireEvent.click(screen.getByRole("button", { name: "Model and execution", exact: true }))
+    fireEvent.click(screen.getByRole("button", { name: "Model and execution" }))
     expect(screen.getByRole("radio", { name: /^Codex CLI/ })).toHaveAttribute("aria-checked", "true")
     expect(screen.getByLabelText("Maximum run duration")).toHaveValue(15)
     expect(agentsPost(spy)).toBeUndefined()
-    fireEvent.click(screen.getByRole("button", { name: "Create agent", exact: true }))
+    fireEvent.click(screen.getByRole("button", { name: "Create agent" }))
     await waitFor(() => expect(agentsPost(spy)).toBeDefined())
     expect(JSON.parse(String((agentsPost(spy)![1] as RequestInit).body))).toMatchObject({ cli_adapter: "CODEX_CLI", llm_provider: "OPENAI", timeout_seconds: 900, system_prompt: "Review documents carefully." })
   })

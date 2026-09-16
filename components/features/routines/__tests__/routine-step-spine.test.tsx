@@ -196,7 +196,7 @@ describe("routine step spine", () => {
         )}
       />,
     )
-    fireEvent.click(screen.getByRole("button", { name: "map", exact: true }))
+    fireEvent.click(screen.getByRole("button", { name: "map" }))
     fireEvent.click(screen.getByRole("button", { name: "pick triage" }))
     expect(screen.queryByRole("button", { name: "pick triage" })).not.toBeInTheDocument()
     const open = document.querySelectorAll("details[open]")

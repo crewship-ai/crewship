@@ -26,6 +26,25 @@ func TestPageProjectAgentWorkflowIdentityPolicyAndCAS(t *testing.T) {
 	if w.Code != 201 {
 		t.Fatal(w.Body.String())
 	}
+	// A valid agent in another crew must not discover this crew's page by
+	// comparing missing and existing slugs, even through the internal handler.
+	otherCrew := seedCrewRow(t, h.db, "other-page-crew", ws, "Other", "other-pages")
+	otherAgent := seedAgentRow(t, h.db, "other-page-agent", ws, otherCrew, "Other", "other-lead", "LEAD")
+	for _, operation := range []string{"read", "init", "save", "build", "status", "check"} {
+		for _, slug := range []string{"health", "missing"} {
+			body, err := json.Marshal(map[string]any{"workspace_id": ws, "crew_id": otherCrew, "agent_id": otherAgent, "operation": operation, "slug": slug})
+			if err != nil {
+				t.Fatal(err)
+			}
+			r := httptest.NewRequest("POST", "/", bytes.NewReader(body))
+			r = r.WithContext(crewBoundCtx1222(ws, otherCrew))
+			denied := httptest.NewRecorder()
+			h.InternalProject(denied, r)
+			if denied.Code != 404 || denied.Body.String() != "{\"error\":\"page not found\"}\n" {
+				t.Fatalf("agent %s %s: %d %s", operation, slug, denied.Code, denied.Body.String())
+			}
+		}
+	}
 	call := func(operation string, revision int64, fields map[string]any, boundWorkspace string) *httptest.ResponseRecorder {
 		body := map[string]any{"workspace_id": ws, "crew_id": crew, "agent_id": agent, "operation": operation, "slug": "health", "expected_revision": revision}
 		for k, v := range fields {
@@ -110,7 +129,7 @@ func TestPageProjectAgentWorkflowIdentityPolicyAndCAS(t *testing.T) {
 	if _, err := h.db.Exec(`UPDATE pages SET owner_crew_id=NULL,owner_user_id=(SELECT id FROM users LIMIT 1) WHERE slug='health'`); err != nil {
 		t.Fatal(err)
 	}
-	if w := call("read", 0, nil, ws); w.Code != 403 {
+	if w := call("read", 0, nil, ws); w.Code != 404 {
 		t.Fatalf("lost owner gate: %d", w.Code)
 	}
 }

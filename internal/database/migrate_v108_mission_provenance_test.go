@@ -4,7 +4,6 @@ import (
 	"context"
 	"io"
 	"log/slog"
-	"path/filepath"
 	"testing"
 )
 
@@ -22,16 +21,7 @@ import (
 // Mirrors the v107 gdpr_cascade test shape: seed FK targets, hit
 // every CHECK enum positively, at least one negative.
 func TestMigrateV108_MissionProvenance(t *testing.T) {
-	dir := t.TempDir()
-	db, err := Open("file:" + filepath.Join(dir, "v108.db"))
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	defer db.Close()
-	silent := slog.New(slog.NewTextHandler(io.Discard, nil))
-	if err := Migrate(context.Background(), db.DB, silent); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
+	db := openMigratedTestDB(t)
 
 	if _, err := db.Exec(`INSERT INTO workspaces (id, name, slug) VALUES ('ws1','W','w')`); err != nil {
 		t.Fatalf("seed ws: %v", err)
@@ -104,16 +94,8 @@ func TestMigrateV108_MissionProvenance(t *testing.T) {
 // row gate; this test pins the contract that v108 specifically does
 // not regress the gate.
 func TestMigrateV108_Idempotent(t *testing.T) {
-	dir := t.TempDir()
-	db, err := Open("file:" + filepath.Join(dir, "v108_idem.db"))
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	defer db.Close()
+	db := openMigratedTestDB(t)
 	silent := slog.New(slog.NewTextHandler(io.Discard, nil))
-	if err := Migrate(context.Background(), db.DB, silent); err != nil {
-		t.Fatalf("first Migrate: %v", err)
-	}
 	// Second Migrate on the same DB must succeed.
 	if err := Migrate(context.Background(), db.DB, silent); err != nil {
 		t.Fatalf("second Migrate (idempotency check): %v", err)

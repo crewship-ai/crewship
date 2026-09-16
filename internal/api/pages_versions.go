@@ -105,9 +105,8 @@ func (h *PageHandler) ListVersions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !h.mayEditSpec(r.Context(), wsID, user.ID, RoleFromContext(r.Context()), rec) {
-		replyError(w, http.StatusForbidden,
-			"a version carries the page's whole arrangement, including panels sealed to you; "+
-				"only the page owner, a workspace admin, or a write grantee may read the history")
+		h.refusePageAction(w, r, rec, "a version carries the page's whole arrangement, including panels sealed to you; "+
+			"only the page owner, a workspace admin, or a write grantee may read the history", "")
 		return
 	}
 
@@ -215,8 +214,7 @@ func (h *PageHandler) Rollback(w http.ResponseWriter, r *http.Request) {
 	// A rollback is an edit of the arrangement, so it is the `write` verb —
 	// the same gate PATCH runs (§7.1b rule 2).
 	if !h.mayEditSpec(r.Context(), wsID, user.ID, RoleFromContext(r.Context()), rec) {
-		replyError(w, http.StatusForbidden,
-			"only the page owner, a workspace admin, or a write grantee may roll this page back")
+		h.refusePageAction(w, r, rec, "only the page owner, a workspace admin, or a write grantee may roll this page back", "")
 		return
 	}
 

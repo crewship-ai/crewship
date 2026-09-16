@@ -110,6 +110,32 @@ func schemaCatalogAdminApprovalsCheckpointsCacheMemoryProjectsResources() map[st
 		"details": anyObject(),
 	})
 
+	// Manual runs of the two daily memory sweeps (#1702, admin_memory_sync.go).
+	// One row per workspace swept, in the field names the worker's summary
+	// log line uses; totals is the same shape without workspace_id.
+	memorySyncWorkspace := object(map[string]any{
+		"workspace_id": str(),
+		"candidates":   integer(),
+		"writes":       integer(),
+		"skipped_threshold": map[string]any{"type": "integer",
+			"description": "Candidates below the interaction threshold."},
+		"skipped_empty": map[string]any{"type": "integer",
+			"description": "Candidates the extractor had nothing to write for — with no model on the curator slot, every one of them."},
+		"skipped_opt_out": integer(),
+		"purged_opt_out":  integer(),
+		"errors": map[string]any{"type": "integer",
+			"description": "Candidates that failed inside a sweep that ran; each has a Warn line in the server log."},
+		"error": map[string]any{"type": "string",
+			"description": "Present when the sweep for this workspace could not run at all (the candidate query failed). The other workspaces still ran."},
+	}, "candidates", "writes", "skipped_threshold", "skipped_empty", "skipped_opt_out", "purged_opt_out", "errors")
+	memorySync := object(map[string]any{
+		"sweep":       map[string]any{"type": "string", "enum": []string{"user_model", "peer_card"}},
+		"dry_run":     boolean(),
+		"workspaces":  array(memorySyncWorkspace),
+		"totals":      memorySyncWorkspace,
+		"duration_ms": integer(),
+	}, "sweep", "dry_run", "workspaces", "totals", "duration_ms")
+
 	skillAgent := object(map[string]any{
 		"agent_id": str(), "agent_slug": str(), "agent_name": str(), "avatar_seed": nullable(str()),
 		"avatar_style": nullable(str()), "avatar_url": nullable(str()), "crew_id": nullable(str()),
@@ -210,6 +236,8 @@ func schemaCatalogAdminApprovalsCheckpointsCacheMemoryProjectsResources() map[st
 		"GET /api/v1/admin/memory/versions":                        {Response: memoryVersionList},
 		"GET /api/v1/admin/memory/config":                          {Response: memoryConfig},
 		"PATCH /api/v1/admin/memory/config":                        {Request: object(map[string]any{"versions_retention_days": integer()}), Response: memoryConfig},
+		"POST /api/v1/admin/memory/user-model-sync":                {Response: memorySync},
+		"POST /api/v1/admin/memory/peer-card-sync":                 {Response: memorySync},
 		"GET /api/v1/admin/memory/versions/{id}/content":           {Response: map[string]any{"type": "string", "format": "binary"}, ResponseMedia: []string{"text/markdown", "application/octet-stream"}},
 		"GET /api/v1/memory/health":                                {Response: memoryHealth},
 		"GET /api/v1/agents/{agentId}/memory":                      {Response: memoryInventory},

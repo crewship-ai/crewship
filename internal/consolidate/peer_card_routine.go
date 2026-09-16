@@ -60,6 +60,11 @@ type PeerCardSyncOptions struct {
 	// chat with one stale message doesn't trigger a peer card
 	// extraction today. Defaults to 14 days.
 	LookbackWindow time.Duration
+	// DryRun runs the whole sweep and reports the outcome each candidate
+	// WOULD have had, without writing, purging, indexing or auditing
+	// anything (#1702). The extractor still runs. Mirrors
+	// UserModelSyncOptions.DryRun.
+	DryRun bool
 }
 
 // RunPeerCardSync is the routine entry point. Walks every active
@@ -72,7 +77,10 @@ type PeerCardSyncOptions struct {
 // than returns) per-candidate failures so a single bad agent
 // doesn't poison the whole sweep.
 type PeerSyncSummary struct {
-	WorkspaceID   string
+	WorkspaceID string
+	// DryRun echoes the option so a summary cannot be mistaken for a
+	// record of what happened.
+	DryRun        bool
 	Candidates    int
 	Writes        int
 	SkippedThresh int
@@ -108,7 +116,7 @@ func RunPeerCardSync(
 		return PeerSyncSummary{WorkspaceID: workspaceID},
 			fmt.Errorf("run peer card sync: load candidates for workspace %s: %w", workspaceID, err)
 	}
-	sum := PeerSyncSummary{WorkspaceID: workspaceID, Candidates: len(cands)}
+	sum := PeerSyncSummary{WorkspaceID: workspaceID, DryRun: opts.DryRun, Candidates: len(cands)}
 	now := time.Now()
 	for _, cand := range cands {
 		paths := memory.PeerPaths{
@@ -121,7 +129,7 @@ func RunPeerCardSync(
 			sum.Errors++
 			continue
 		}
-		out := SyncPeerCard(ctx, db, logger, opts.Threshold, cand.PeerCandidate, content, paths, now)
+		out := syncPeerCard(ctx, db, logger, opts.Threshold, cand.PeerCandidate, content, paths, now, opts.DryRun)
 		// Any outcome with a non-nil Err is a failure — including
 		// consent-probe failures that surface as Action="skip_opt_out".
 		// Counting them in sum.Errors keeps the routine summary

@@ -111,8 +111,8 @@ var credUnassignCmd = &cobra.Command{
 			return err
 		}
 		var assignments []struct {
-			ID           string `json:"id"`
-			CredentialID string `json:"credential_id"`
+			ID           string `json:"id" yaml:"id"`
+			CredentialID string `json:"credential_id" yaml:"credential_id"`
 		}
 		if err := cli.ReadJSON(listResp, &assignments); err != nil {
 			return err
@@ -183,9 +183,9 @@ var credTestCmd = &cobra.Command{
 		}
 
 		var result struct {
-			Valid  bool   `json:"valid"`
-			Status int    `json:"status"`
-			Error  string `json:"error"`
+			Valid  bool   `json:"valid" yaml:"valid"`
+			Status int    `json:"status" yaml:"status"`
+			Error  string `json:"error" yaml:"error"`
 		}
 		if err := cli.ReadJSON(resp, &result); err != nil {
 			return err

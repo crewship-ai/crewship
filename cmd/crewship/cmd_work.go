@@ -42,23 +42,23 @@ import (
 // worked — the shape of the whole class of defect TestEmbeddedJSONInlineIsAlsoYAMLSafe
 // exists to catch.
 type WorkItemRow struct {
-	ID                 string  `json:"id"`
-	Source             string  `json:"source"`
+	ID                 string  `json:"id" yaml:"id"`
+	Source             string  `json:"source" yaml:"source"`
 	SourceRef          string  `json:"source_ref" yaml:"source_ref"`
 	DomainKind         string  `json:"domain_kind" yaml:"domain_kind"`
 	DomainID           string  `json:"domain_id" yaml:"domain_id"`
 	AgentID            string  `json:"agent_id" yaml:"agent_id"`
 	CrewID             string  `json:"crew_id" yaml:"crew_id"`
 	SessionID          string  `json:"session_id" yaml:"session_id"`
-	Class              string  `json:"class"`
+	Class              string  `json:"class" yaml:"class"`
 	AuthorizedByUserID string  `json:"authorized_by_user_id" yaml:"authorized_by_user_id"`
 	InputSHA256        string  `json:"input_sha256" yaml:"input_sha256"`
 	TargetRevision     string  `json:"target_revision" yaml:"target_revision"`
-	State              string  `json:"state"`
+	State              string  `json:"state" yaml:"state"`
 	StateReason        string  `json:"state_reason" yaml:"state_reason"`
-	Generation         int64   `json:"generation"`
+	Generation         int64   `json:"generation" yaml:"generation"`
 	AttemptCount       int     `json:"attempt_count" yaml:"attempt_count"`
-	Priority           int     `json:"priority"`
+	Priority           int     `json:"priority" yaml:"priority"`
 	EligibleAt         string  `json:"eligible_at" yaml:"eligible_at"`
 	DeadlineAt         *string `json:"deadline_at" yaml:"deadline_at"`
 	ReplayOf           *string `json:"replay_of" yaml:"replay_of"`
@@ -70,8 +70,8 @@ type WorkItemRow struct {
 
 type workAttemptRow struct {
 	RunID          string  `json:"run_id" yaml:"run_id"`
-	Attempt        int     `json:"attempt"`
-	Generation     int64   `json:"generation"`
+	Attempt        int     `json:"attempt" yaml:"attempt"`
+	Generation     int64   `json:"generation" yaml:"generation"`
 	LeaseOwner     string  `json:"lease_owner" yaml:"lease_owner"`
 	LeaseExpiresAt string  `json:"lease_expires_at" yaml:"lease_expires_at"`
 	RuntimeLocator string  `json:"runtime_locator" yaml:"runtime_locator"`
@@ -83,38 +83,38 @@ type workAttemptRow struct {
 }
 
 type workEventRow struct {
-	Seq        int64  `json:"seq"`
-	At         string `json:"at"`
+	Seq        int64  `json:"seq" yaml:"seq"`
+	At         string `json:"at" yaml:"at"`
 	FromState  string `json:"from_state" yaml:"from_state"`
 	ToState    string `json:"to_state" yaml:"to_state"`
 	RunID      string `json:"run_id" yaml:"run_id"`
-	Generation int64  `json:"generation"`
-	Reason     string `json:"reason"`
+	Generation int64  `json:"generation" yaml:"generation"`
+	Reason     string `json:"reason" yaml:"reason"`
 }
 
 type workItemDetail struct {
 	WorkItemRow `json:",inline" yaml:",inline"`
-	Attempts    []workAttemptRow `json:"attempts"`
-	Events      []workEventRow   `json:"events"`
+	Attempts    []workAttemptRow `json:"attempts" yaml:"attempts"`
+	Events      []workEventRow   `json:"events" yaml:"events"`
 }
 
 type workItemPageBody struct {
-	Items      []WorkItemRow `json:"items"`
+	Items      []WorkItemRow `json:"items" yaml:"items"`
 	NextCursor *string       `json:"next_cursor" yaml:"next_cursor"`
 }
 
 type workCancelBody struct {
-	ID      string `json:"id"`
-	State   string `json:"state"`
-	Outcome string `json:"outcome"`
-	Detail  string `json:"detail"`
+	ID      string `json:"id" yaml:"id"`
+	State   string `json:"state" yaml:"state"`
+	Outcome string `json:"outcome" yaml:"outcome"`
+	Detail  string `json:"detail" yaml:"detail"`
 }
 
 type workDeliveryRow struct {
-	ID               string  `json:"id"`
+	ID               string  `json:"id" yaml:"id"`
 	EndpointID       string  `json:"endpoint_id" yaml:"endpoint_id"`
 	EndpointKind     string  `json:"endpoint_kind" yaml:"endpoint_kind"`
-	Profile          string  `json:"profile"`
+	Profile          string  `json:"profile" yaml:"profile"`
 	SourceDeliveryID string  `json:"source_delivery_id" yaml:"source_delivery_id"`
 	EventType        string  `json:"event_type" yaml:"event_type"`
 	EventAction      string  `json:"event_action" yaml:"event_action"`
@@ -132,7 +132,7 @@ type workDeliveryRow struct {
 }
 
 type workDeliveryPageBody struct {
-	Items      []workDeliveryRow `json:"items"`
+	Items      []workDeliveryRow `json:"items" yaml:"items"`
 	NextCursor *string           `json:"next_cursor" yaml:"next_cursor"`
 }
 

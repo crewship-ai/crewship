@@ -17,6 +17,7 @@ import { render, screen } from "@testing-library/react"
 
 import type { Automation } from "@/lib/automations"
 import type { Mission } from "@/lib/types/mission"
+import type { PipelineRunRecord } from "@/hooks/use-pipeline-run-records"
 import { IssueCardDetail } from "../issue-card-detail"
 
 vi.mock("next/link", () => ({
@@ -125,7 +126,7 @@ describe("automations that could react to an issue", () => {
 })
 
 describe("how the bound routine's runs were started", () => {
-  const run = (over: Record<string, unknown> = {}) => ({
+  const run = (over: Partial<PipelineRunRecord> = {}): PipelineRunRecord => ({
     id: "run-1",
     pipeline_id: "pipe-1",
     pipeline_slug: "triage",

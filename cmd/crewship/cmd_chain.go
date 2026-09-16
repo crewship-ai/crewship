@@ -38,17 +38,17 @@ import (
 // the fields this command renders are declared; --format json prints the
 // decoded struct, so a field added server-side needs a field here too.
 type chainNode struct {
-	ID     string `json:"id"`
-	Kind   string `json:"kind"`
-	Ref    string `json:"ref"`
-	Key    string `json:"key"`
-	Label  string `json:"label"`
-	Status string `json:"status"`
-	Depth  int    `json:"depth"`
+	ID     string `json:"id" yaml:"id"`
+	Kind   string `json:"kind" yaml:"kind"`
+	Ref    string `json:"ref" yaml:"ref"`
+	Key    string `json:"key" yaml:"key"`
+	Label  string `json:"label" yaml:"label"`
+	Status string `json:"status" yaml:"status"`
+	Depth  int    `json:"depth" yaml:"depth"`
 	// ChainDepth is the run's own composition depth, not its distance from the
 	// anchor (that is Depth). Rendered only when non-zero, so an ordinary run
 	// reads exactly as it did before.
-	ChainDepth int `json:"chain_depth"`
+	ChainDepth int `json:"chain_depth" yaml:"chain_depth"`
 	// ChainOrigin is which chain a run BELONGS to — pipeline_runs.chain_origin,
 	// the id of the run that started it.
 	//
@@ -60,7 +60,7 @@ type chainNode struct {
 	// asks the question yet, so nothing prints it — but `-f json` is the
 	// supported way an agent drives this command, and an agent that cannot see
 	// the field cannot make the distinction at all.
-	ChainOrigin string `json:"chain_origin"`
+	ChainOrigin string `json:"chain_origin" yaml:"chain_origin"`
 	// OccurredAt / EndedAt / DurationMS are when the node happened and how long
 	// it took. Only run, assignment and inbox carry them; issue, routine, agent
 	// and automation are nouns and send nothing rather than their row's
@@ -70,76 +70,76 @@ type chainNode struct {
 	// that finished inside a millisecond, and absent is a span that could not be
 	// derived. A plain int64 would decode both as 0 and this command would print
 	// "0ms" over work that is still running.
-	OccurredAt    string `json:"occurred_at"`
-	EndedAt       string `json:"ended_at"`
-	DurationMS    *int64 `json:"duration_ms"`
-	Anchor        bool   `json:"anchor"`
-	Partial       bool   `json:"partial"`
-	PartialReason string `json:"partial_reason"`
+	OccurredAt    string `json:"occurred_at" yaml:"occurred_at"`
+	EndedAt       string `json:"ended_at" yaml:"ended_at"`
+	DurationMS    *int64 `json:"duration_ms" yaml:"duration_ms"`
+	Anchor        bool   `json:"anchor" yaml:"anchor"`
+	Partial       bool   `json:"partial" yaml:"partial"`
+	PartialReason string `json:"partial_reason" yaml:"partial_reason"`
 }
 
 type chainEdge struct {
-	From string `json:"from"`
-	To   string `json:"to"`
-	Kind string `json:"kind"`
+	From string `json:"from" yaml:"from"`
+	To   string `json:"to" yaml:"to"`
+	Kind string `json:"kind" yaml:"kind"`
 }
 
 type chainGap struct {
-	From   string `json:"from"`
-	To     string `json:"to"`
-	Reason string `json:"reason"`
+	From   string `json:"from" yaml:"from"`
+	To     string `json:"to" yaml:"to"`
+	Reason string `json:"reason" yaml:"reason"`
 }
 
 type chainGraph struct {
-	Anchor      string      `json:"anchor"`
-	AnchorNode  string      `json:"anchor_node"`
-	MaxDepth    int         `json:"max_depth"`
-	MaxNodes    int         `json:"max_nodes"`
-	Nodes       []chainNode `json:"nodes"`
-	Edges       []chainEdge `json:"edges"`
-	Truncated   bool        `json:"truncated"`
-	TruncatedBy string      `json:"truncated_by"`
-	Gaps        []chainGap  `json:"gaps"`
+	Anchor      string      `json:"anchor" yaml:"anchor"`
+	AnchorNode  string      `json:"anchor_node" yaml:"anchor_node"`
+	MaxDepth    int         `json:"max_depth" yaml:"max_depth"`
+	MaxNodes    int         `json:"max_nodes" yaml:"max_nodes"`
+	Nodes       []chainNode `json:"nodes" yaml:"nodes"`
+	Edges       []chainEdge `json:"edges" yaml:"edges"`
+	Truncated   bool        `json:"truncated" yaml:"truncated"`
+	TruncatedBy string      `json:"truncated_by" yaml:"truncated_by"`
+	Gaps        []chainGap  `json:"gaps" yaml:"gaps"`
 }
 
 // chainSummary / chainList mirror the wire types of GET /api/v1/chains
 // (internal/api/chains_list.go). Same rule as above: --format json prints the
 // decoded struct, so a field added server-side needs a field here too.
 type chainSummary struct {
-	Origin        string `json:"origin"`
-	StartedByKind string `json:"started_by_kind"`
-	StartedByID   string `json:"started_by_id"`
-	StartedByKey  string `json:"started_by_key"`
-	StartedBy     string `json:"started_by"`
-	TriggeredVia  string `json:"triggered_via"`
-	RoutineID     string `json:"routine_id"`
-	RoutineSlug   string `json:"routine_slug"`
-	Runs          int    `json:"runs"`
-	MaxChainDepth int    `json:"max_chain_depth"`
-	FailedRuns    int    `json:"failed_runs"`
-	Failed        bool   `json:"failed"`
+	Origin        string `json:"origin" yaml:"origin"`
+	StartedByKind string `json:"started_by_kind" yaml:"started_by_kind"`
+	StartedByID   string `json:"started_by_id" yaml:"started_by_id"`
+	StartedByKey  string `json:"started_by_key" yaml:"started_by_key"`
+	StartedBy     string `json:"started_by" yaml:"started_by"`
+	TriggeredVia  string `json:"triggered_via" yaml:"triggered_via"`
+	RoutineID     string `json:"routine_id" yaml:"routine_id"`
+	RoutineSlug   string `json:"routine_slug" yaml:"routine_slug"`
+	Runs          int    `json:"runs" yaml:"runs"`
+	MaxChainDepth int    `json:"max_chain_depth" yaml:"max_chain_depth"`
+	FailedRuns    int    `json:"failed_runs" yaml:"failed_runs"`
+	Failed        bool   `json:"failed" yaml:"failed"`
 	// Non-terminal runs, split by whether anything moves without a person.
 	// Timestamps cannot answer this: last_activity falls back to started_at
 	// while a run is in flight, so a chain parked on an approval since Tuesday
 	// and one that finished on Tuesday carry the same instant.
-	RunningRuns   int    `json:"running_runs"`
-	WaitingRuns   int    `json:"waiting_runs"`
-	FirstActivity string `json:"first_activity"`
-	LastActivity  string `json:"last_activity"`
+	RunningRuns   int    `json:"running_runs" yaml:"running_runs"`
+	WaitingRuns   int    `json:"waiting_runs" yaml:"waiting_runs"`
+	FirstActivity string `json:"first_activity" yaml:"first_activity"`
+	LastActivity  string `json:"last_activity" yaml:"last_activity"`
 	// DurationMS is wall clock first-to-last, and a POINTER for the reason the
 	// server made it one: null is a chain with nothing to measure between (a
 	// single run still going), and 0 would assert the work was instant.
-	DurationMS *int64 `json:"duration_ms"`
+	DurationMS *int64 `json:"duration_ms" yaml:"duration_ms"`
 	// What the chain reached. These are what tell two runs of ONE routine
 	// apart — the routine name is identical on both, the nouns are not.
 	//
 	// The lists are capped server-side; the counts are not. Rendering only the
 	// returned refs would make a chain that touched forty issues read as one
 	// that touched five, so both travel together and the count is the truth.
-	Issues     []chainIssueRef `json:"issues"`
-	IssueCount int             `json:"issue_count"`
-	Agents     []chainAgentRef `json:"agents"`
-	AgentCount int             `json:"agent_count"`
+	Issues     []chainIssueRef `json:"issues" yaml:"issues"`
+	IssueCount int             `json:"issue_count" yaml:"issue_count"`
+	Agents     []chainAgentRef `json:"agents" yaml:"agents"`
+	AgentCount int             `json:"agent_count" yaml:"agent_count"`
 }
 
 // chainIssueRef / chainAgentRef mirror internal/api. They exist here for one
@@ -148,29 +148,29 @@ type chainSummary struct {
 // consumer sees null. TestChainSummary_CarriesEveryFieldTheServerSends pins
 // that, because the comment above them saying so was not enough.
 type chainIssueRef struct {
-	ID         string `json:"id"`
-	Identifier string `json:"identifier,omitempty"`
-	Title      string `json:"title,omitempty"`
-	Created    bool   `json:"created,omitempty"`
+	ID         string `json:"id" yaml:"id"`
+	Identifier string `json:"identifier,omitempty" yaml:"identifier,omitempty"`
+	Title      string `json:"title,omitempty" yaml:"title,omitempty"`
+	Created    bool   `json:"created,omitempty" yaml:"created,omitempty"`
 }
 
 type chainAgentRef struct {
-	ID          string `json:"id"`
-	Slug        string `json:"slug,omitempty"`
-	Name        string `json:"name,omitempty"`
-	Assignments int    `json:"assignments"`
+	ID          string `json:"id" yaml:"id"`
+	Slug        string `json:"slug,omitempty" yaml:"slug,omitempty"`
+	Name        string `json:"name,omitempty" yaml:"name,omitempty"`
+	Assignments int    `json:"assignments" yaml:"assignments"`
 }
 
 type chainList struct {
-	Chains  []chainSummary `json:"chains"`
-	Count   int            `json:"count"`
-	Limit   int            `json:"limit"`
-	Offset  int            `json:"offset"`
-	HasMore bool           `json:"has_more"`
+	Chains  []chainSummary `json:"chains" yaml:"chains"`
+	Count   int            `json:"count" yaml:"count"`
+	Limit   int            `json:"limit" yaml:"limit"`
+	Offset  int            `json:"offset" yaml:"offset"`
+	HasMore bool           `json:"has_more" yaml:"has_more"`
 	// HasUnrecordedRuns says this workspace holds runs from before the
 	// chain_origin column existed. They are not in the index and cannot be —
 	// see the note the renderer prints.
-	HasUnrecordedRuns bool `json:"has_unrecorded_runs"`
+	HasUnrecordedRuns bool `json:"has_unrecorded_runs" yaml:"has_unrecorded_runs"`
 }
 
 var chainCmd = &cobra.Command{

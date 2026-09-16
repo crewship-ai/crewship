@@ -21,18 +21,18 @@ import (
 )
 
 type adminStatsRow struct {
-	Workspaces int `json:"workspaces"`
-	Users      int `json:"users"`
-	Crews      int `json:"crews"`
-	Agents     int `json:"agents"`
-	Running    int `json:"running"`
+	Workspaces int `json:"workspaces" yaml:"workspaces"`
+	Users      int `json:"users" yaml:"users"`
+	Crews      int `json:"crews" yaml:"crews"`
+	Agents     int `json:"agents" yaml:"agents"`
+	Running    int `json:"running" yaml:"running"`
 }
 
 type adminLicenseRow struct {
-	Edition          string `json:"edition"`
-	MaxCrews         int    `json:"max_crews"`
-	MaxAgentsPerCrew int    `json:"max_agents_per_crew"`
-	MaxMembers       int    `json:"max_members"`
+	Edition          string `json:"edition" yaml:"edition"`
+	MaxCrews         int    `json:"max_crews" yaml:"max_crews"`
+	MaxAgentsPerCrew int    `json:"max_agents_per_crew" yaml:"max_agents_per_crew"`
+	MaxMembers       int    `json:"max_members" yaml:"max_members"`
 }
 
 // against renders "3 of 15" when a ceiling applies, and the bare count when

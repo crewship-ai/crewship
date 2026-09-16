@@ -51,9 +51,9 @@ Examples:
 		}
 
 		var result struct {
-			Updated int64  `json:"updated"`
-			Reset   bool   `json:"reset"`
-			Style   string `json:"style"`
+			Updated int64  `json:"updated" yaml:"updated"`
+			Reset   bool   `json:"reset" yaml:"reset"`
+			Style   string `json:"style" yaml:"style"`
 		}
 		if err := postJSON(client, "/api/v1/crews/"+crewID+"/apply-avatar-style", body, &result); err != nil {
 			return err

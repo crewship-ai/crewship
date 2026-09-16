@@ -60,33 +60,33 @@ Examples:
 // modes — "5 of 10 hit the cost cap" is more actionable than "5/10
 // failed."
 type benchAttempt struct {
-	Attempt    int     `json:"attempt"`
-	RunID      string  `json:"run_id"`
-	Status     string  `json:"status"`
-	DurationMs int64   `json:"duration_ms"`
-	CostUSD    float64 `json:"cost_usd"`
-	FailReason string  `json:"fail_reason,omitempty"`
+	Attempt    int     `json:"attempt" yaml:"attempt"`
+	RunID      string  `json:"run_id" yaml:"run_id"`
+	Status     string  `json:"status" yaml:"status"`
+	DurationMs int64   `json:"duration_ms" yaml:"duration_ms"`
+	CostUSD    float64 `json:"cost_usd" yaml:"cost_usd"`
+	FailReason string  `json:"fail_reason,omitempty" yaml:"fail_reason,omitempty"`
 }
 
 // benchSummary is the high-level aggregate emitted as the table /
 // JSON top-level. Stats are computed once at the end so the
 // per-attempt output stays clean during the run.
 type benchSummary struct {
-	Slug         string         `json:"slug"`
-	TierOverride string         `json:"tier_override,omitempty"`
-	Runs         int            `json:"runs"`
-	Pass         int            `json:"pass"`
-	PassRate     float64        `json:"pass_rate"`
-	CostTotal    float64        `json:"cost_total_usd"`
-	CostMean     float64        `json:"cost_mean_usd"`
-	CostP95      float64        `json:"cost_p95_usd"`
-	CostMax      float64        `json:"cost_max_usd"`
-	DurP50Ms     int64          `json:"duration_p50_ms"`
-	DurP95Ms     int64          `json:"duration_p95_ms"`
-	DurMaxMs     int64          `json:"duration_max_ms"`
-	FailReasons  map[string]int `json:"fail_reasons,omitempty"`
-	Attempts     []benchAttempt `json:"attempts"`
-	GeneratedAt  string         `json:"generated_at"`
+	Slug         string         `json:"slug" yaml:"slug"`
+	TierOverride string         `json:"tier_override,omitempty" yaml:"tier_override,omitempty"`
+	Runs         int            `json:"runs" yaml:"runs"`
+	Pass         int            `json:"pass" yaml:"pass"`
+	PassRate     float64        `json:"pass_rate" yaml:"pass_rate"`
+	CostTotal    float64        `json:"cost_total_usd" yaml:"cost_total_usd"`
+	CostMean     float64        `json:"cost_mean_usd" yaml:"cost_mean_usd"`
+	CostP95      float64        `json:"cost_p95_usd" yaml:"cost_p95_usd"`
+	CostMax      float64        `json:"cost_max_usd" yaml:"cost_max_usd"`
+	DurP50Ms     int64          `json:"duration_p50_ms" yaml:"duration_p50_ms"`
+	DurP95Ms     int64          `json:"duration_p95_ms" yaml:"duration_p95_ms"`
+	DurMaxMs     int64          `json:"duration_max_ms" yaml:"duration_max_ms"`
+	FailReasons  map[string]int `json:"fail_reasons,omitempty" yaml:"fail_reasons,omitempty"`
+	Attempts     []benchAttempt `json:"attempts" yaml:"attempts"`
+	GeneratedAt  string         `json:"generated_at" yaml:"generated_at"`
 }
 
 func runRoutineBench(cmd *cobra.Command, args []string) error {
@@ -174,12 +174,12 @@ func executeBenchAttempt(client interface {
 		return benchAttempt{Attempt: attempt, Status: fmt.Sprintf("HTTP_%d", resp.StatusCode)}
 	}
 	var result struct {
-		RunID        string  `json:"run_id"`
-		Status       string  `json:"status"`
-		DurationMs   int64   `json:"duration_ms"`
-		CostUSD      float64 `json:"cost_usd"`
-		FailedAtStep string  `json:"failed_at_step"`
-		ErrorMessage string  `json:"error_message"`
+		RunID        string  `json:"run_id" yaml:"run_id"`
+		Status       string  `json:"status" yaml:"status"`
+		DurationMs   int64   `json:"duration_ms" yaml:"duration_ms"`
+		CostUSD      float64 `json:"cost_usd" yaml:"cost_usd"`
+		FailedAtStep string  `json:"failed_at_step" yaml:"failed_at_step"`
+		ErrorMessage string  `json:"error_message" yaml:"error_message"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return benchAttempt{Attempt: attempt, Status: "DECODE_ERROR", FailReason: err.Error()}

@@ -178,7 +178,7 @@ func TestPlanNewKinds_MilestoneLookupErrorPropagates(t *testing.T) {
 apiVersion: crewship/v1
 kind: Project
 metadata: { name: Q2, slug: q2 }
-spec: { status: active }
+spec: { status: in_progress }
 ---
 apiVersion: crewship/v1
 kind: Milestone

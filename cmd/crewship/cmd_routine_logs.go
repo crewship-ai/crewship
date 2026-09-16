@@ -84,10 +84,10 @@ Output formats:
 				return err
 			}
 			var entries []struct {
-				TS      string `json:"ts"`
-				Level   string `json:"level"`
-				Message string `json:"message"`
-				Type    string `json:"type"`
+				TS      string `json:"ts" yaml:"ts"`
+				Level   string `json:"level" yaml:"level"`
+				Message string `json:"message" yaml:"message"`
+				Type    string `json:"type" yaml:"type"`
 			}
 			if err := json.NewDecoder(resp.Body).Decode(&entries); err != nil {
 				return fmt.Errorf("decode response: %w", err)
@@ -244,13 +244,13 @@ Output formats:
 			return err
 		}
 		var rows []struct {
-			ID        string                 `json:"id"`
-			Timestamp string                 `json:"ts"`
-			EntryType string                 `json:"entry_type"`
-			Severity  string                 `json:"severity"`
-			Summary   string                 `json:"summary"`
-			RunID     string                 `json:"run_id,omitempty"`
-			Payload   map[string]interface{} `json:"payload,omitempty"`
+			ID        string                 `json:"id" yaml:"id"`
+			Timestamp string                 `json:"ts" yaml:"ts"`
+			EntryType string                 `json:"entry_type" yaml:"entry_type"`
+			Severity  string                 `json:"severity" yaml:"severity"`
+			Summary   string                 `json:"summary" yaml:"summary"`
+			RunID     string                 `json:"run_id,omitempty" yaml:"run_id,omitempty"`
+			Payload   map[string]interface{} `json:"payload,omitempty" yaml:"payload,omitempty"`
 		}
 		if err := json.NewDecoder(resp.Body).Decode(&rows); err != nil {
 			return fmt.Errorf("decode response: %w", err)

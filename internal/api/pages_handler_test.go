@@ -441,12 +441,12 @@ func TestPagesPush_OverCapIsA422RejectionEnvelope(t *testing.T) {
 
 // ── 4. Only the declared producer may write ────────────────────────────────
 
-// TestPagesPush_UnauthorisedIs403PlusJournalPlusNotification — §7.1b rule 3:
-// "A produce attempt on a panel the caller does not hold returns 403, writes a
+// TestPagesPush_UnreachableIs404PlusJournalPlusNotification — §7.1b rule 3:
+// "A produce attempt on an unreachable page returns 404, writes a
 // journal entry, and notifies the page owner. It is equally likely to be a
 // misconfiguration or an injection, and both deserve a human's attention on the
 // first occurrence rather than the hundredth."
-func TestPagesPush_UnauthorisedIs403PlusJournalPlusNotification(t *testing.T) {
+func TestPagesPush_UnreachableIs404PlusJournalPlusNotification(t *testing.T) {
 	h, spy, _, wsID, userID := newPagesFixture(t)
 	pagesCreate(t, h, wsID, userID, "fleet-201")
 
@@ -459,8 +459,8 @@ func TestPagesPush_UnauthorisedIs403PlusJournalPlusNotification(t *testing.T) {
 	}
 
 	rr := pagesPush(t, h, wsID, "intruder", "MEMBER", "fleet-201", "sluzby", pagesStatusPayload)
-	if rr.Code != http.StatusForbidden {
-		t.Fatalf("status = %d, want 403 — only the declared producer may write a panel (§7.1 rule 4); body: %s",
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404 — the caller cannot reach this page; body: %s",
 			rr.Code, rr.Body.String())
 	}
 

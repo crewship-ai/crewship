@@ -62,6 +62,7 @@ func (h *AgentHandler) List(w http.ResponseWriter, r *http.Request) {
 			a.system_prompt_legacy, a.avatar_seed, a.avatar_style, a.avatar_svg_hash, a.timeout_seconds,
 			a.tool_profile, a.memory_enabled, a.cli_tools,
 			a.schedule_cron, a.schedule_prompt, a.schedule_enabled, a.schedule_last_run, a.schedule_next_run,
+			(a.webhook_secret IS NOT NULL AND a.webhook_secret != ''),
 			a.suggested_prompts,
 			a.ask_forms,
 			a.mcp_config_json,
@@ -116,7 +117,7 @@ func (h *AgentHandler) List(w http.ResponseWriter, r *http.Request) {
 	result := make([]agentResponse, 0, capacityHint(limit))
 	for rows.Next() {
 		var a agentResponse
-		var memEnabled, schedEnabled, ephemeral int
+		var memEnabled, schedEnabled, ephemeral, whSecretSet int
 		var crewName, crewSlug, crewColor, crewAvatarStyle *string
 		var createdByUserID sql.NullString
 		var avatarSVGHash sql.NullString
@@ -126,6 +127,7 @@ func (h *AgentHandler) List(w http.ResponseWriter, r *http.Request) {
 			&avatarSVGHash,
 			&a.TimeoutSeconds, &a.ToolProfile, &memEnabled, &a.CLITools,
 			&a.ScheduleCron, &a.SchedulePrompt, &schedEnabled, &a.ScheduleLastRun, &a.ScheduleNextRun,
+			&whSecretSet,
 			&a.SuggestedPrompts,
 			&a.AskForms,
 			&a.MCPConfigJSON,
@@ -138,6 +140,8 @@ func (h *AgentHandler) List(w http.ResponseWriter, r *http.Request) {
 		}
 		a.MemoryEnabled = memEnabled == 1
 		a.ScheduleEnabled = schedEnabled == 1
+		secretSet := whSecretSet == 1
+		a.WebhookSecretSet = &secretSet
 		a.AvatarURL = agentAvatarURL(a.ID, avatarSVGHash.String, workspaceID)
 		if createdByUserID.Valid {
 			a.CreatedByUserID = createdByUserID.String
