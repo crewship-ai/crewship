@@ -2,7 +2,7 @@
 // JSON file {email,password,workspace_id}; no credentials or session are logged.
 import fs from "node:fs"
 import assert from "node:assert/strict"
-import { chromium } from "@playwright/test"
+import { chromium, expect } from "@playwright/test"
 const base = "https://crewship-dev1.unifylab.cz"
 const account = JSON.parse(fs.readFileSync(process.env.CREWSHIP_CLARITY_ACCOUNT, "utf8"))
 const output = process.env.CREWSHIP_CLARITY_REPORT || "/tmp/crewship-1-clarity-browser.json"
@@ -113,6 +113,8 @@ try {
     await page.setViewportSize({ width, height: 1000 })
     await page.goto(base + "/routines?slug=" + slug)
     if (width === 1440) {
+      // The rules summary now sits inside the collapsed Technical details.
+      await page.getByTestId("routine-technical").locator(":scope > summary").click()
       const summary = page.getByText("How this routine works · checks and recovery", {
         exact: true,
       })
@@ -132,7 +134,7 @@ try {
     const coverage = dialog.getByLabel("Coverage", { exact: true })
     await coverage.fill("70")
     await dialog.getByLabel("Directory", { exact: true }).fill("../private")
-    await dialog.getByRole("button", { name: "Run", exact: true }).click()
+    await dialog.getByRole("button", { name: "Run now", exact: true }).click()
     await dialog.getByText("Maximum is 1", { exact: true }).waitFor()
     await page.screenshot({ path: `/tmp/crewship-1-clarity-form-${width}.png` })
     assert.equal(await coverage.getAttribute("aria-invalid"), "true")
@@ -150,7 +152,7 @@ try {
     const accepted = page.waitForResponse(
       (r) => r.url().endsWith("/pipelines/" + slug + "/run") && r.request().method() === "POST",
     )
-    await dialog.getByRole("button", { name: "Run", exact: true }).click()
+    await dialog.getByRole("button", { name: "Run now", exact: true }).click()
     const response = await accepted
     assert(response.ok())
     const acceptedRun = await response.json()
@@ -207,8 +209,15 @@ try {
   assert.equal(failedRun.status, "failed")
   assert(failedRun.step_outputs.echo)
   await page.goto(base + "/routines?slug=" + failureDefinition.name + "&run=" + failedId)
-  await page.getByRole("link", { name: "inspect retained results and recorded steps" }).click()
-  await page.getByTestId("run-next-step").waitFor()
+  await expect(page.getByTestId("run-banner")).toContainText("Kept:")
+  await expect(page.getByTestId("run-banner")).toContainText("Return provided information")
+  await expect(page.getByTestId("run-next-step")).toBeVisible()
+  const retainedStep = page.locator('details[data-step-id="echo"]')
+  if ((await retainedStep.getAttribute("open")) === null) {
+    await retainedStep.locator(":scope > summary").click()
+  }
+  await expect(retainedStep.getByText("Recorded response", { exact: true })).toBeVisible()
+  await expect(retainedStep).toContainText("coverage")
   report.checks.push("Failed second step retains first output and exposes recovery guidance")
   assert.equal(report.pageErrors.length, 0)
   report.checks.push("No browser page errors")

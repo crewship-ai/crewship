@@ -1,0 +1,1269 @@
+<title>Routines Operator Console</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;500;600;700&display=swap">
+<style>
+  /* Tokens mirror app/globals.css (light on :root, dark under media + data-theme). */
+  :root {
+    --bg: #fcfcfc; --card: #f7f7f8; --raised: #ffffff; --border: #e6e4e6; --hair: rgba(0,0,0,.08);
+    --fg: #1a1f36; --muted: #5c6178; --soft: #7c8199;
+    --primary: #0E6BE8; --primary-fg: #ffffff; --primary-soft: rgba(14,107,232,.10);
+    --success: #1f9d5a; --success-soft: rgba(31,157,90,.12);
+    --warn: #b7791f; --warn-soft: rgba(183,121,31,.14);
+    --danger: #d4442e; --danger-soft: rgba(212,68,46,.12);
+    --purple: #7c4dcc; --purple-soft: rgba(124,77,204,.12);
+    --shadow: 0 10px 30px rgba(20,24,40,.12);
+    --sans: "Open Sans", ui-sans-serif, system-ui, sans-serif;
+    --mono: Menlo, ui-monospace, "SF Mono", Consolas, monospace;
+    --r: 12px;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0f0f14; --card: #17171e; --raised: #1e1e27; --border: #2a2a34; --hair: rgba(255,255,255,.07);
+      --fg: #f2f2f5; --muted: #9c9cad; --soft: #7f7f90;
+      --primary: #1E7BFE; --primary-fg: #0f0f14; --primary-soft: rgba(30,123,254,.16);
+      --success: #3ec27a; --success-soft: rgba(62,194,122,.14);
+      --warn: #e2ab3f; --warn-soft: rgba(226,171,63,.14);
+      --danger: #ef5b4c; --danger-soft: rgba(239,91,76,.14);
+      --purple: #a98bff; --purple-soft: rgba(169,139,255,.14);
+      --shadow: 0 14px 40px rgba(0,0,0,.5);
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0f0f14; --card: #17171e; --raised: #1e1e27; --border: #2a2a34; --hair: rgba(255,255,255,.07);
+    --fg: #f2f2f5; --muted: #9c9cad; --soft: #7f7f90;
+    --primary: #1E7BFE; --primary-fg: #0f0f14; --primary-soft: rgba(30,123,254,.16);
+    --success: #3ec27a; --success-soft: rgba(62,194,122,.14);
+    --warn: #e2ab3f; --warn-soft: rgba(226,171,63,.14);
+    --danger: #ef5b4c; --danger-soft: rgba(239,91,76,.14);
+    --purple: #a98bff; --purple-soft: rgba(169,139,255,.14);
+    --shadow: 0 14px 40px rgba(0,0,0,.5);
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 13.5px/1.5 var(--sans); }
+  button, input, select, textarea { font: inherit; color: inherit; }
+  button { cursor: pointer; }
+  a { color: var(--primary); }
+  code, .mono { font-family: var(--mono); font-size: .92em; }
+  :focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+  @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+
+  /* ---------- prototype chrome ---------- */
+  .proto { position: sticky; top: 0; z-index: 50; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding: 8px 14px; background: var(--card); border-bottom: 1px solid var(--border); font-size: 12px; }
+  .proto .tag { display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px; border-radius: 999px; background: var(--warn-soft); color: var(--warn); font-weight: 600; letter-spacing: .02em; text-transform: uppercase; font-size: 10.5px; }
+  .proto nav { display: flex; flex-wrap: wrap; gap: 4px; }
+  .proto nav button, .proto .tog { border: 1px solid var(--border); background: transparent; border-radius: 8px; padding: 4px 9px; color: var(--muted); }
+  .proto nav button[aria-current="true"], .proto .tog[aria-pressed="true"] { background: var(--primary-soft); color: var(--primary); border-color: transparent; font-weight: 600; }
+  .proto .sp { flex: 1; }
+  .proto .note { color: var(--muted); }
+
+  /* ---------- app frame ---------- */
+  .stage { padding: 18px 14px 40px; display: flex; justify-content: center; }
+  .app { width: min(1400px, 100%); height: 860px; border: 1px solid var(--border); border-radius: 14px; background: var(--bg); overflow: hidden; display: grid; grid-template-rows: 48px 40px 1fr; container-type: inline-size; position: relative; }
+  .app.phone { width: 390px; height: 844px; border-radius: 28px; border-width: 6px; }
+  .topbar { display: flex; align-items: center; gap: 10px; padding: 0 14px; border-bottom: 1px solid var(--border); background: var(--card); }
+  .topbar .brand { font-weight: 700; margin-right: 6px; }
+  .topbar .crumb { color: var(--muted); }
+  .topbar .sp { flex: 1; }
+  .body { display: grid; grid-template-columns: 272px 1fr; min-height: 0; }
+  .explorer { border-right: 1px solid var(--border); background: var(--card); padding: 12px; overflow: auto; min-height: 0; }
+  .explorer .search { width: 100%; border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; background: var(--bg); margin-bottom: 10px; }
+  .explorer h4 { margin: 12px 4px 6px; font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--soft); font-weight: 600; }
+  .xrow { display: grid; grid-template-columns: 22px 1fr auto; gap: 8px; align-items: center; width: 100%; text-align: left; border: 0; background: transparent; border-radius: 8px; padding: 7px 8px; color: var(--fg); }
+  .xrow:hover { background: var(--hair); }
+  .xrow[aria-current="true"] { background: var(--primary-soft); }
+  .xrow .nm { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .xrow .sub { display: block; color: var(--muted); font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .main { overflow: auto; min-height: 0; padding: 18px 22px 40px; }
+  .main > .inner { max-width: 1120px; margin: 0 auto; display: flex; flex-direction: column; gap: 14px; }
+
+  /* ---------- primitives ---------- */
+  .icon { display: inline-grid; place-items: center; width: 36px; height: 36px; border-radius: 10px; font-weight: 700; font-size: 13px; }
+  .icon.sm { width: 22px; height: 22px; border-radius: 6px; font-size: 10px; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: var(--r); }
+  .card > .hd { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--hair); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--soft); font-weight: 600; }
+  .card > .hd .sp { flex: 1; }
+  .card > .bd { padding: 12px 14px; }
+  .pill { display: inline-flex; align-items: center; gap: 6px; padding: 2px 9px; border-radius: 999px; font-size: 11.5px; font-weight: 600; white-space: nowrap; }
+  .pill::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+  .pill.ok { background: var(--success-soft); color: var(--success); }
+  .pill.warn { background: var(--warn-soft); color: var(--warn); }
+  .pill.bad { background: var(--danger-soft); color: var(--danger); }
+  .pill.live { background: var(--primary-soft); color: var(--primary); }
+  .pill.live::before { animation: pulse 1.2s infinite; }
+  .pill.muted { background: var(--hair); color: var(--muted); }
+  .pill.draft { background: var(--purple-soft); color: var(--purple); }
+  .pill.nodot::before { display: none; }
+  @keyframes pulse { 50% { opacity: .3; } }
+  .btn { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 12px; border-radius: 9px; border: 1px solid var(--border); background: var(--raised); color: var(--fg); font-weight: 600; font-size: 12.5px; white-space: nowrap; }
+  .btn:hover { border-color: var(--muted); }
+  .btn.primary { background: var(--primary); color: var(--primary-fg); border-color: transparent; }
+  .btn.primary:hover { filter: brightness(1.08); }
+  .btn.danger { color: var(--danger); }
+  .btn.ghost { background: transparent; border-color: transparent; color: var(--muted); }
+  .btn.ghost:hover { color: var(--fg); background: var(--hair); }
+  .btn.lg { height: 38px; padding: 0 16px; font-size: 13.5px; }
+  .btn[disabled] { opacity: .45; cursor: not-allowed; }
+  .btn.kebab { width: 32px; padding: 0; justify-content: center; }
+  .actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .muted { color: var(--muted); }
+  .soft { color: var(--soft); }
+  .small { font-size: 12px; }
+  .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); }
+  .tabs button { border: 0; background: transparent; padding: 8px 12px; color: var(--muted); border-bottom: 2px solid transparent; margin-bottom: -1px; font-weight: 500; }
+  .tabs button[aria-selected="true"] { color: var(--fg); border-color: var(--primary); }
+  .tabs button .n { margin-left: 5px; color: var(--soft); font-size: 11px; }
+  details.tech { border: 1px dashed var(--border); border-radius: var(--r); padding: 0 14px; color: var(--muted); }
+  details.tech summary { padding: 10px 0; cursor: pointer; font-weight: 500; }
+  details.tech pre { white-space: pre-wrap; word-break: break-word; font-family: var(--mono); font-size: 11.5px; background: var(--bg); padding: 10px; border-radius: 8px; }
+  .kv { display: grid; grid-template-columns: max-content 1fr; gap: 6px 14px; }
+  .kv dt { color: var(--soft); font-size: 11px; text-transform: uppercase; letter-spacing: .06em; padding-top: 2px; }
+  .kv dd { margin: 0; }
+  .grid2 { display: grid; grid-template-columns: 1.4fr 1fr; gap: 14px; align-items: start; }
+  .banner { display: flex; gap: 12px; align-items: flex-start; padding: 12px 14px; border-radius: var(--r); border: 1px solid; }
+  .banner.warn { background: var(--warn-soft); border-color: transparent; }
+  .banner.bad { background: var(--danger-soft); border-color: transparent; }
+  .banner.ok { background: var(--success-soft); border-color: transparent; }
+  .banner.live { background: var(--primary-soft); border-color: transparent; }
+  .banner .t { font-weight: 600; }
+  .banner .b { flex: 1; min-width: 0; }
+  .banner .ic { width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center; background: var(--raised); flex: none; font-weight: 700; }
+  .toast { position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%); background: var(--fg); color: var(--bg); padding: 8px 14px; border-radius: 10px; font-weight: 600; box-shadow: var(--shadow); animation: up .2s ease-out; z-index: 40; max-width: 90%; }
+  @keyframes up { from { transform: translate(-50%, 8px); opacity: 0; } }
+
+  /* identity header */
+  .ident { display: flex; gap: 14px; align-items: flex-start; }
+  .ident h1 { margin: 0; font-size: 20px; line-height: 1.25; text-wrap: balance; }
+  .ident .state { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; margin-top: 4px; font-size: 12px; color: var(--muted); }
+  .ident .purpose { margin: 8px 0 0; max-width: 68ch; }
+  .ident .actions { margin-left: auto; }
+
+  /* answers */
+  .answers { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0; }
+  .answers > div { padding: 12px 14px; border-right: 1px solid var(--hair); border-bottom: 1px solid var(--hair); }
+  .answers > div:nth-child(3n) { border-right: 0; }
+  .answers > div:nth-last-child(-n+3) { border-bottom: 0; }
+  .answers .q { font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--soft); font-weight: 600; margin-bottom: 4px; }
+  .answers .a { line-height: 1.45; }
+
+  /* steps */
+  .steps { display: flex; flex-direction: column; }
+  .step { display: grid; grid-template-columns: 30px 1fr auto; gap: 12px; padding: 12px 14px; border-top: 1px solid var(--hair); align-items: start; }
+  .step:first-child { border-top: 0; }
+  .step .who { color: var(--muted); font-size: 12px; margin-top: 2px; display: flex; flex-wrap: wrap; gap: 4px 10px; }
+  .step .who .tool { font-family: var(--mono); font-size: 11px; background: var(--hair); padding: 0 6px; border-radius: 5px; }
+  .step .nm { font-weight: 600; }
+  .step .ic { width: 30px; height: 30px; border-radius: 8px; display: grid; place-items: center; font-weight: 700; font-size: 11px; position: relative; }
+  .step .st { text-align: right; font-size: 12px; color: var(--muted); white-space: nowrap; }
+  .step .det { margin-top: 8px; padding: 10px 12px; border-radius: 8px; background: var(--bg); border: 1px solid var(--hair); font-size: 12.5px; }
+  .step .det .kv { margin-top: 4px; }
+  .step.cur { background: var(--primary-soft); }
+  .step.bad { background: var(--danger-soft); }
+  .step.wait { background: var(--warn-soft); }
+  .step .cond { display: inline-block; margin-top: 4px; font-size: 11.5px; color: var(--warn); }
+  .who .role { padding: 0 6px; border-radius: 5px; font-weight: 600; }
+  .role.agent { background: var(--purple-soft); color: var(--purple); }
+  .role.check { background: var(--success-soft); color: var(--success); }
+  .role.human { background: var(--warn-soft); color: var(--warn); }
+  .role.script { background: var(--primary-soft); color: var(--primary); }
+  .role.notify { background: var(--hair); color: var(--muted); }
+  .role.transform { background: var(--success-soft); color: var(--success); }
+  .role.http, .role.query { background: var(--primary-soft); color: var(--primary); }
+  .role.crewship, .role.code { background: var(--warn-soft); color: var(--warn); }
+  .role.foreach, .role.call { background: var(--purple-soft); color: var(--purple); }
+  .step .av { width: 30px; height: 30px; border-radius: 9px; display: grid; place-items: center; font-size: 17px; background: var(--purple-soft); }
+  .step .badge { position: absolute; right: -5px; bottom: -5px; min-width: 15px; height: 15px; border-radius: 999px; background: var(--card); border: 1px solid var(--border); font-size: 9px; display: grid; place-items: center; color: var(--muted); font-family: var(--mono); padding: 0 3px; }
+  .phase { display: flex; align-items: center; gap: 8px; padding: 8px 14px 4px; font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--soft); font-weight: 600; border-top: 1px solid var(--hair); }
+  .phase:first-child { border-top: 0; }
+  .phase .ln { flex: 1; height: 1px; background: var(--hair); }
+  .step.nested { margin-left: 44px; border-left: 2px solid var(--purple-soft); background: transparent; }
+  .step.fold .nm { color: var(--muted); font-weight: 500; }
+  .step.hook { opacity: .75; }
+  .step .after { font-size: 11px; color: var(--muted); }
+  .step .after b { font-weight: 500; color: var(--fg); }
+  .chk { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; padding: 0 6px; border-radius: 5px; background: var(--success-soft); color: var(--success); }
+  /* Last run card — as in the app: tinted header by outcome */
+  .lastrun { border: 1px solid var(--border); border-radius: var(--r); background: var(--card); overflow: hidden; }
+  .lastrun .lh { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--hair); }
+  .lastrun.ok .lh { background: linear-gradient(90deg, var(--success-soft), transparent); }
+  .lastrun.bad .lh { background: linear-gradient(90deg, var(--danger-soft), transparent); }
+  .lastrun.warn .lh { background: linear-gradient(90deg, var(--warn-soft), transparent); }
+  .lastrun .lc { width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; font-weight: 700; }
+  .lastrun.ok .lc { background: var(--success-soft); color: var(--success); } .lastrun.bad .lc { background: var(--danger-soft); color: var(--danger); } .lastrun.warn .lc { background: var(--warn-soft); color: var(--warn); } .lastrun.muted .lc { background: var(--hair); color: var(--muted); }
+  .lastrun .lb { padding: 10px 14px; }
+  .lastrun .facts { display: grid; grid-template-columns: repeat(3, max-content); gap: 4px 22px; font-size: 11.5px; }
+  .lastrun .facts dt { font-size: 10px; text-transform: uppercase; letter-spacing: .08em; color: var(--soft); }
+  .lastrun .facts dd { margin: 0; font-variant-numeric: tabular-nums; }
+  /* icon picker popover (as CrewIconPopover) */
+  .picker { position: absolute; z-index: 5; margin-top: 6px; width: 320px; background: var(--raised); border: 1px solid var(--border); border-radius: 14px; padding: 12px; box-shadow: var(--shadow); }
+  .picker .colors { display: flex; gap: 8px; justify-content: space-between; margin-bottom: 8px; }
+  .picker .colors button { width: 26px; height: 26px; border-radius: 8px; border: 2px solid transparent; display: grid; place-items: center; font-size: 11px; font-weight: 700; }
+  .picker .colors button[aria-pressed="true"] { border-color: var(--primary); }
+  .picker .cats { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 11.5px; color: var(--muted); margin: 8px 0; }
+  .picker .grid { display: grid; grid-template-columns: repeat(8, 1fr); gap: 4px; border: 1px solid var(--border); border-radius: 10px; padding: 8px; }
+  .picker .grid button { height: 30px; border: 0; background: transparent; border-radius: 6px; color: var(--muted); }
+  .picker .grid button:hover, .picker .grid button[aria-pressed="true"] { background: var(--primary-soft); color: var(--primary); }
+  .iconbtn { border: 0; background: transparent; padding: 0; position: relative; }
+  /* file tree + read-only preview (as the agent Files panel: CrewFilesScope + FilePreview) */
+  .fcard.split { display: grid; grid-template-columns: minmax(280px, 1fr) minmax(0, 1.2fr); }
+  .fcard.split > .hd { grid-column: 1 / -1; }
+  .tree { padding: 6px 8px; font-size: 12.5px; }
+  .ftrow { display: grid; grid-template-columns: 14px 18px 1fr auto auto; gap: 6px; align-items: center; padding: 4px 6px; border-radius: 6px; border: 0; background: transparent; color: var(--fg); width: 100%; text-align: left; }
+  .ftrow:hover { background: var(--hair); }
+  .ftrow[aria-current="true"] { background: var(--primary-soft); color: var(--primary); }
+  .ftrow .tw { color: var(--soft); font-size: 10px; }
+  .ftrow .nm { font-family: var(--mono); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ftrow .use { font-size: 11px; color: var(--muted); white-space: nowrap; }
+  .ftrow .sz { font-family: var(--mono); font-size: 10.5px; color: var(--soft); white-space: nowrap; }
+  .ftrow .fic { width: 18px; height: 18px; font-size: 8px; border-radius: 4px; }
+  .ftrow .fo { width: 18px; height: 18px; display: grid; place-items: center; color: var(--soft); }
+  .tree .root { font-family: var(--mono); font-size: 11.5px; color: var(--muted); padding: 4px 6px 6px; }
+  .viewer { border-left: 1px solid var(--hair); display: grid; grid-template-rows: auto 1fr; min-height: 260px; max-height: 420px; animation: slide .18s ease-out; }
+  @keyframes slide { from { transform: translateX(16px); opacity: 0; } }
+  .viewer .vh { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-bottom: 1px solid var(--hair); font-size: 12px; }
+  .viewer .vh .path { font-family: var(--mono); flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .viewer pre { margin: 0; overflow: auto; font-family: var(--mono); font-size: 11.5px; line-height: 1.55; padding: 10px 12px; color: var(--fg); background: var(--bg); }
+  .viewer pre .ln { display: inline-block; width: 28px; color: var(--soft); text-align: right; margin-right: 12px; user-select: none; }
+  .viewer pre .c { color: var(--soft); } .viewer pre .k { color: var(--purple); } .viewer pre .s { color: var(--success); }
+  /* large recipes: collapsed phases and the map */
+  .phase.big { cursor: pointer; padding: 10px 14px; }
+  .phase.big .pn { text-transform: none; letter-spacing: 0; font-weight: 500; color: var(--fg); font-size: 12.5px; }
+  .phase.big .pm { text-transform: none; letter-spacing: 0; font-weight: 400; color: var(--muted); font-size: 12px; }
+  .mapwrap { overflow: auto; padding: 12px; }
+  .map { display: grid; grid-auto-flow: column; grid-auto-columns: 190px; gap: 26px; align-items: start; min-width: max-content; }
+  .col { display: flex; flex-direction: column; gap: 6px; position: relative; }
+  .col + .col::before { content: ""; position: absolute; left: -26px; top: 14px; width: 26px; height: 1px; background: var(--border); }
+  .col .ch { font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--soft); font-weight: 600; padding: 0 2px 4px; }
+  .node { display: grid; grid-template-columns: 22px 1fr auto; gap: 6px; align-items: center; border: 1px solid var(--border); border-radius: 8px; padding: 5px 8px; background: var(--card); text-align: left; color: var(--fg); font-size: 12px; width: 100%; }
+  .node:hover { border-color: var(--muted); }
+  .node .nm { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .node .x { font-family: var(--mono); font-size: 10.5px; color: var(--primary); }
+  .node .av2 { width: 22px; height: 22px; border-radius: 6px; display: grid; place-items: center; font-size: 13px; background: var(--purple-soft); }
+  .node .ic2 { width: 22px; height: 22px; border-radius: 6px; display: grid; place-items: center; font-size: 10px; background: var(--hair); color: var(--muted); }
+  .node.ok { border-left: 3px solid var(--success); } .node.bad { border-left: 3px solid var(--danger); } .node.wait { border-left: 3px solid var(--warn); } .node.live { border-left: 3px solid var(--primary); }
+
+  /* list */
+  .rows { display: flex; flex-direction: column; }
+  .row { display: grid; grid-template-columns: 1fr 190px 150px 24px; gap: 12px; align-items: center; padding: 12px 14px; border-top: 1px solid var(--hair); text-align: left; background: transparent; border-left: 0; border-right: 0; border-bottom: 0; color: var(--fg); width: 100%; }
+  .row:first-child { border-top: 0; }
+  .row:hover { background: var(--hair); }
+  .row .id { display: flex; gap: 10px; align-items: flex-start; min-width: 0; }
+  .row .nm { font-weight: 600; display: flex; gap: 8px; align-items: center; }
+  .row .pp { color: var(--muted); font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .row .how { color: var(--muted); font-size: 12px; }
+  .row .chev { color: var(--soft); text-align: right; }
+  .colhead { display: grid; grid-template-columns: 1fr 190px 150px 24px; gap: 12px; padding: 8px 14px; font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--soft); font-weight: 600; border-bottom: 1px solid var(--hair); }
+  .needs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+  .needs button { text-align: left; background: var(--card); border: 1px solid var(--border); border-radius: var(--r); padding: 10px 14px; color: var(--fg); display: flex; gap: 10px; align-items: center; }
+  .needs button:hover { border-color: var(--muted); }
+  .needs .n { font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; min-width: 28px; }
+  .needs .l { font-size: 12px; color: var(--muted); }
+  .needs .l b { display: block; color: var(--fg); font-weight: 600; }
+
+  /* dialog — a centred popup, as the app's CreateSurface / Dialog; full screen on a phone */
+  .scrim { position: absolute; inset: 0; background: rgba(0,0,0,.55); z-index: 30; display: grid; place-items: center; padding: 24px; }
+  .sheet { width: min(680px, 100%); max-height: 100%; background: var(--card); border: 1px solid var(--border); border-radius: 14px; display: grid; grid-template-rows: auto 1fr auto; box-shadow: var(--shadow); animation: pop .18s ease-out; overflow: hidden; }
+  @keyframes pop { from { transform: translateY(8px) scale(.985); opacity: 0; } }
+  .sheet .hd { padding: 14px 18px; border-bottom: 1px solid var(--hair); display: flex; align-items: flex-start; gap: 10px; }
+  .sheet .hd .crumbs { font-size: 12px; color: var(--muted); margin-bottom: 2px; }
+  .sheet .hd h2 { margin: 0; font-size: 16px; }
+  /* files */
+  .files { display: flex; flex-direction: column; }
+  .frow { display: grid; grid-template-columns: 30px 1fr 150px 150px; gap: 12px; align-items: center; padding: 10px 14px; border-top: 1px solid var(--hair); }
+  .frow:first-child { border-top: 0; }
+  .frow .p { font-family: var(--mono); font-size: 12px; }
+  .frow .w { color: var(--muted); font-size: 12px; }
+  .frow .m { color: var(--muted); font-size: 12px; }
+  .fic { display: inline-grid; place-items: center; width: 26px; height: 26px; border-radius: 6px; font-family: var(--mono); font-size: 10px; font-weight: 700; letter-spacing: .02em; }
+  .fic.go { background: rgba(0,173,216,.16); color: #00ADD8; } .fic.py { background: rgba(255,212,59,.18); color: #d9b000; } .fic.ts { background: rgba(49,120,198,.18); color: #4d9be6; } .fic.yaml { background: var(--hair); color: var(--muted); } .fic.sql { background: rgba(240,140,60,.16); color: #e08a3c; } .fic.sh { background: var(--hair); color: var(--muted); }
+  .who .file { font-family: var(--mono); font-size: 11px; padding: 0 6px; border-radius: 5px; border: 1px solid var(--border); display: inline-flex; gap: 5px; align-items: center; }
+  .who .file .fic { width: 14px; height: 14px; border-radius: 3px; font-size: 7px; }
+  .buckets { display: flex; flex-direction: column; gap: 1px; margin-bottom: 4px; }
+  .bucket { display: flex; align-items: center; gap: 8px; border: 0; background: transparent; border-radius: 8px; padding: 5px 8px; color: var(--muted); text-align: left; width: 100%; }
+  .bucket:hover { background: var(--hair); }
+  .bucket .n { margin-left: auto; font-size: 11px; font-variant-numeric: tabular-nums; color: var(--soft); }
+  .subbar { display: flex; align-items: center; gap: 8px; padding: 0 14px; border-bottom: 1px solid var(--border); background: var(--bg); height: 40px; font-size: 12.5px; }
+  .subbar .sp { flex: 1; }
+  /* Issues-style property chips and filter chips */
+  .pchip { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--border); border-radius: 8px; padding: 4px 10px; font-size: 12px; background: var(--raised); color: var(--fg); white-space: nowrap; }
+  .pchip .g { color: var(--muted); font-size: 11px; }
+  .pchip.set { border-color: var(--primary); color: var(--primary); background: var(--primary-soft); }
+  .fchips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .fchips button { border: 1px solid var(--border); background: transparent; border-radius: 999px; padding: 3px 10px; color: var(--muted); font-size: 12px; display: inline-flex; gap: 6px; align-items: center; }
+  .fchips button[aria-pressed="true"] { border-color: var(--primary); color: var(--primary); background: var(--primary-soft); }
+  .fchips button .n { color: var(--soft); font-size: 11px; }
+  .bigtitle { border: 0; background: transparent; font-size: 18px; font-weight: 600; width: 100%; padding: 4px 0; }
+  .bigtitle::placeholder { color: var(--soft); font-weight: 500; }
+  .bigdesc { border: 0; background: transparent; width: 100%; resize: vertical; min-height: 72px; padding: 2px 0; color: var(--fg); }
+  .bigdesc::placeholder { color: var(--soft); }
+  .kbd { font-family: var(--mono); font-size: 11px; border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; color: var(--muted); }
+  /* calendar */
+  .caltb { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; }
+  .caltb h2 { margin: 0; font-size: 16px; }
+  .calgrid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 6px; }
+  .calgrid .dow { font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--soft); text-align: center; padding: 4px 0; }
+  .cell { min-height: 128px; border: 1px solid var(--border); border-radius: 10px; background: var(--card); padding: 6px; display: flex; flex-direction: column; gap: 3px; text-align: left; color: var(--fg); min-width: 0; }
+  .cell:hover { border-color: var(--muted); }
+  .cell.today { border-color: var(--primary); }
+  .cell.blank { background: transparent; border-style: dashed; opacity: .4; }
+  .cell .dn { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); padding: 0 2px; }
+  .cell.today .dn { color: var(--primary); font-weight: 600; }
+  .cell .dn .plus { color: var(--soft); }
+  .cev, .cgrp { display: grid; grid-template-columns: 8px 34px 16px 1fr; gap: 5px; align-items: center; font-size: 11.5px; padding: 2px 3px; border-radius: 5px; min-width: 0; }
+  .cgrp { grid-template-columns: 16px 1fr auto; }
+  .cev .t, .cgrp .t { font-family: var(--mono); font-size: 10.5px; color: var(--muted); }
+  .cev .n, .cgrp .n { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .cgrp .x { font-family: var(--mono); font-size: 10.5px; font-weight: 700; color: var(--primary); background: var(--primary-soft); border-radius: 4px; padding: 0 5px; }
+  .cgrp .st { display: flex; gap: 2px; grid-column: 2 / 4; padding-left: 0; font-size: 10.5px; color: var(--muted); }
+  .cev.planned .t, .cgrp.planned .t { color: var(--primary); }
+  .cell .more { margin-top: auto; border: 0; background: var(--hair); border-radius: 6px; padding: 3px 6px; font-size: 11px; color: var(--muted); text-align: left; }
+  .cell .csum { font-size: 10.5px; color: var(--soft); padding: 0 3px; }
+  .dens { height: 3px; border-radius: 2px; background: var(--hair); overflow: hidden; margin: 2px 3px 0; }
+  .dens i { display: block; height: 100%; background: var(--primary); opacity: .7; }
+  .agenda { display: flex; flex-direction: column; }
+  .agrp { border-top: 1px solid var(--hair); }
+  .agrp:first-child { border-top: 0; }
+  .agrp .ah { display: grid; grid-template-columns: 30px 1fr auto; gap: 12px; align-items: center; padding: 10px 14px; }
+  .agrp .ah .meta { color: var(--muted); font-size: 12px; }
+  .agrp .times { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 14px 12px 56px; }
+  .agrp .times span { font-family: var(--mono); font-size: 11px; border: 1px solid var(--border); border-radius: 6px; padding: 2px 7px; color: var(--muted); display: inline-flex; gap: 5px; align-items: center; }
+  .aev { display: grid; grid-template-columns: 56px 30px 1fr auto 24px; gap: 12px; align-items: center; padding: 9px 14px; border-top: 1px solid var(--hair); background: transparent; border-left: 0; border-right: 0; border-bottom: 0; text-align: left; color: var(--fg); width: 100%; }
+  .aev:first-child { border-top: 0; }
+  .aev:hover { background: var(--hair); }
+  .aev .t { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+  .aev.planned .t { color: var(--primary); }
+  .sheet .hd .x { margin-left: auto; }
+  .sheet .bd { overflow: auto; padding: 16px 18px; display: flex; flex-direction: column; gap: 14px; }
+  .sheet .ft { padding: 12px 18px; border-top: 1px solid var(--hair); display: flex; gap: 8px; justify-content: flex-end; align-items: center; background: var(--card); }
+  .sheet .ft .hint { margin-right: auto; color: var(--muted); font-size: 12px; }
+  .field { display: flex; flex-direction: column; gap: 4px; }
+  .field label { font-weight: 600; font-size: 12.5px; display: flex; gap: 6px; align-items: baseline; }
+  .field label .req { color: var(--danger); }
+  .field label .ty { color: var(--soft); font-weight: 400; font-size: 11.5px; }
+  .field input[type=text], .field input[type=number], .field select, .field textarea { border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; background: var(--bg); width: 100%; }
+  .field input[aria-invalid="true"] { border-color: var(--danger); }
+  .field .hint { color: var(--soft); font-size: 11.5px; }
+  .field .err { color: var(--danger); font-size: 12px; font-weight: 600; }
+  .field .chg { color: var(--muted); font-size: 11.5px; }
+  .field .chg button { border: 0; background: none; color: var(--primary); padding: 0; text-decoration: underline; }
+  .check { display: flex; gap: 8px; align-items: center; font-weight: 500; }
+  .errsum { border-radius: 8px; padding: 8px 12px; background: var(--danger-soft); color: var(--danger); font-weight: 600; font-size: 12.5px; }
+  .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+  .seg button { border: 0; background: transparent; padding: 5px 10px; color: var(--muted); }
+  .seg button[aria-pressed="true"] { background: var(--primary-soft); color: var(--primary); font-weight: 600; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chips button { border: 1px solid var(--border); background: transparent; border-radius: 999px; padding: 3px 10px; color: var(--muted); font-size: 12px; }
+  .chips button[aria-pressed="true"] { border-color: var(--primary); color: var(--primary); background: var(--primary-soft); }
+  .diff { display: grid; grid-template-columns: max-content 1fr; gap: 6px 12px; font-size: 12.5px; }
+  .diff .k { font-weight: 600; }
+  .diff .add { color: var(--success); } .diff .chgd { color: var(--primary); } .diff .rm { color: var(--danger); }
+  .tile { display: grid; grid-template-columns: 36px 1fr; gap: 12px; padding: 14px; border: 1px solid var(--border); border-radius: var(--r); background: var(--card); text-align: left; color: var(--fg); width: 100%; }
+  .tile:hover { border-color: var(--muted); }
+  .tile.rec { border-color: var(--primary); }
+  .tile b { display: block; margin-bottom: 2px; }
+  .tile .d { color: var(--muted); font-size: 12.5px; }
+  .tile .d b { display: inline; margin: 0; color: var(--fg); }
+  .tile .tg { float: right; font-size: 11px; color: var(--soft); }
+  pre.cmd { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; font-family: var(--mono); font-size: 12px; white-space: pre-wrap; margin: 0; }
+  .chat { display: flex; flex-direction: column; gap: 10px; }
+  .msg { max-width: 92%; padding: 10px 12px; border-radius: 12px; background: var(--raised); border: 1px solid var(--hair); }
+  .msg.me { align-self: flex-end; background: var(--primary-soft); }
+  .msg .w { font-size: 11px; color: var(--soft); margin-bottom: 4px; font-weight: 600; }
+  .ver { display: grid; grid-template-columns: 70px 1fr auto; gap: 12px; padding: 12px 14px; border-top: 1px solid var(--hair); align-items: center; }
+  .ver:first-child { border-top: 0; }
+  .ver .v { font-weight: 700; font-size: 15px; }
+  .timeline { display: flex; flex-direction: column; }
+  .trow { display: grid; grid-template-columns: 22px 1fr 110px 90px 24px; gap: 10px; padding: 10px 14px; border-top: 1px solid var(--hair); align-items: center; background: transparent; border-left: 0; border-right: 0; border-bottom: 0; text-align: left; color: var(--fg); width: 100%; }
+  .trow:first-child { border-top: 0; }
+  .trow:hover { background: var(--hair); }
+  .trow .when { font-family: var(--mono); font-size: 11.5px; color: var(--muted); }
+  .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+  .dot.ok { background: var(--success); } .dot.bad { background: var(--danger); } .dot.warn { background: var(--warn); } .dot.live { background: var(--primary); } .dot.muted { background: var(--soft); }
+  .result { display: grid; grid-template-columns: max-content 1fr; gap: 6px 14px; font-size: 12.5px; }
+  .result dt { color: var(--soft); }
+  .result dd { margin: 0; font-family: var(--mono); font-variant-numeric: tabular-nums; }
+  .tools { display: flex; flex-wrap: wrap; gap: 6px; }
+  .tools span { font-family: var(--mono); font-size: 11px; background: var(--hair); padding: 2px 8px; border-radius: 6px; color: var(--muted); }
+  .empty { text-align: center; padding: 40px 20px; color: var(--muted); }
+  .empty h2 { color: var(--fg); margin: 0 0 6px; font-size: 18px; }
+  .empty .ways { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 18px; text-align: left; }
+  .drawerbtn { display: none; }
+  .switch { width: 36px; height: 20px; border-radius: 999px; background: var(--soft); position: relative; border: 0; flex: none; }
+  .switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: #fff; transition: left .15s; }
+  .switch[aria-checked="true"] { background: var(--success); }
+  .switch[aria-checked="true"]::after { left: 18px; }
+  .srow { display: grid; grid-template-columns: auto 1fr auto auto; gap: 12px; align-items: center; padding: 12px 14px; border-top: 1px solid var(--hair); }
+  .srow:first-child { border-top: 0; }
+  .agentline { display: flex; gap: 8px; align-items: flex-start; padding: 6px 0; border-top: 1px solid var(--hair); font-size: 12.5px; }
+  .agentline:first-child { border-top: 0; }
+  .agentline .t { font-family: var(--mono); font-size: 11px; color: var(--soft); flex: none; width: 46px; }
+  .agentline .tool { font-family: var(--mono); font-size: 11px; background: var(--hair); padding: 0 6px; border-radius: 5px; }
+
+  /* ---------- phone layout via container query ---------- */
+  @container (max-width: 700px) {
+    .body { grid-template-columns: 1fr; }
+    .explorer { display: none; }
+    .explorer.open { display: block; position: absolute; inset: 88px 0 0 0; z-index: 20; }
+    .drawerbtn { display: inline-flex; }
+    .main { padding: 12px 12px 90px; }
+    .ident { flex-wrap: wrap; }
+    .ident .actions { margin-left: 0; width: 100%; }
+    .ident .actions .btn { flex: 1; justify-content: center; }
+    .answers { grid-template-columns: 1fr; }
+    .answers > div { border-right: 0; }
+    .answers > div:nth-last-child(-n+3) { border-bottom: 1px solid var(--hair); }
+    .answers > div:last-child { border-bottom: 0; }
+    .grid2 { grid-template-columns: 1fr; }
+    .colhead { display: none; }
+    .row { grid-template-columns: 1fr 24px; }
+    .row .how { display: none; }
+    .needs { grid-template-columns: 1fr; }
+    .needs .n { font-size: 16px; }
+    .step { grid-template-columns: 30px 1fr; }
+    .step .st { grid-column: 2; text-align: left; }
+    .sheet { width: 100%; height: 100%; max-height: none; border-radius: 0; border: 0; }
+    .scrim { padding: 0; }
+    .frow { grid-template-columns: 30px 1fr; }
+    .frow .m, .frow .u { grid-column: 2; }
+    .subbar .cnt { display: none; }
+    .fcard.split { grid-template-columns: 1fr; }
+    .viewer { border-left: 0; border-top: 1px solid var(--hair); }
+    .ftrow .use { display: none; }
+    .calgrid { gap: 3px; }
+    .cell { min-height: 72px; padding: 4px; }
+    .cev, .cgrp .t, .cell .csum, .cell .more { display: none; }
+    .cgrp { grid-template-columns: 1fr auto; }
+    .cgrp .n { display: none; }
+    .cgrp .st { display: none; }
+    .aev { grid-template-columns: 48px 1fr 24px; }
+    .aev .pill, .aev .ic { display: none; }
+    .agrp .ah { grid-template-columns: 1fr; }
+    .agrp .times { padding-left: 14px; }
+    .empty .ways { grid-template-columns: 1fr; }
+    .trow { grid-template-columns: 22px 1fr 24px; }
+    .trow .when, .trow .v { display: none; }
+    .ver { grid-template-columns: 56px 1fr; }
+    .ver .actions { grid-column: 2; }
+    .srow { grid-template-columns: auto 1fr; }
+    .srow .actions { grid-column: 2; }
+    .btn.lg { height: 44px; }
+    .tabs { overflow-x: auto; }
+    .topbar .crumb { display: none; }
+    .stickyact { position: sticky; bottom: 0; background: var(--bg); padding: 10px 0 0; margin-top: -4px; }
+  }
+</style>
+
+<div class="proto" role="region" aria-label="Prototype controls">
+  <span class="tag">Prototype · simulated</span>
+  <nav id="pnav" aria-label="Screens"></nav>
+  <span class="sp"></span>
+  <button class="tog" id="phone" aria-pressed="false" type="button">Phone 390 px</button>
+  <button class="tog" id="reset" type="button">Reset data</button>
+  <span class="note" id="pnote"></span>
+</div>
+<div class="stage"><div class="app" id="app"></div></div>
+
+<script>
+/* ======================= sample data (fictional) ======================= */
+const seed = () => ({
+  routines: [
+    { slug: "invoice-intake", name: "Invoice intake", color: "#a98bff", initials: "IN",
+      purpose: "Reads a supplier invoice PDF, extracts the amounts, checks them, asks Finance when the total is over the limit, then posts the invoice to the ledger and tells #finance.",
+      published: 3, draft: { rev: 2, by: "pavel", via: "CLI", ago: "12 min ago", note: "Raise the auto-approve default to 2 000; add a currency rule to the check" },
+      how: "Weekdays 08:00 · Europe/Prague", lastState: "waiting", lastWhen: "4 min ago",
+      inputs: [
+        { name: "invoice_path", label: "Invoice file", type: "string", format: "absolute_path", required: true, default: "", hint: "Absolute path on the crew share, for example /crew/shared/invoices/2026-09/acme-4471.pdf. The path is checked for shape only; the file is opened when the run starts." },
+        { name: "cost_center", label: "Cost center", type: "select", options: ["Operations", "Marketing", "R&D"], default: "Operations" },
+        { name: "auto_approve_limit", label: "Auto-approve up to (CZK)", type: "number", min: 0, max: 5000, default: "1500", hint: "0 to 5 000. Above this total, Finance is asked before posting." },
+        { name: "notify_finance", label: "Tell #finance when done", type: "boolean", default: "true" },
+      ],
+      steps: [
+        { id: "extract", name: "Read the invoice", role: "agent", who: "Nora (agent)", tools: ["pdf-read", "ocr"], file: "scripts/normalize_lines.py", prompt: "Read the invoice at {{ inputs.invoice_path }}. Return JSON with supplier, vat_id, lines[{description, amount}], total, currency, due_date. Use OCR for scanned pages. If a value is unreadable, return null for it — never guess.", out: "supplier, lines, total, VAT id, due date", fail: "If reading fails, the run stops here." },
+        { id: "verify", name: "Check the extraction", role: "check", who: "Vale (checker)", file: "checks/invoice-rules.yaml", rules: ["Total equals the sum of the lines", "VAT id has a valid format", "Due date is in the future", "Currency is CZK or EUR"], required: true, fail: "If a rule fails: Nora tries again with a stronger model, at most 2 more times. Then the run stops and keeps what was read." },
+        { id: "decide", name: "Ask Finance when over the limit", role: "human", who: "Finance approvers", cond: "Only when total > auto-approve limit", expires: "24 h", fail: "No answer in 24 h: the run stops without posting." },
+        { id: "post", name: "Post to the ledger", role: "script", who: "Script on crew Finance", tools: ["ERP token"], file: "scripts/ledger-post.go", effect: "Writes to the ERP ledger. Cannot be undone by stopping the run.", fail: "If the ERP rejects it: 3 attempts, 30 s apart, then stop." },
+        { id: "notify", name: "Tell #finance", role: "notify", who: "Slack #finance", file: "scripts/notify-finance.ts", cond: "Only when 'Tell #finance' is on" },
+      ],
+      files: [
+        { path: "scripts/ledger-post.go", lang: "go", by: "post", what: "Posts one invoice to the ERP ledger; prints the entry number", size: "4.1 kB", updated: "draft r2 · CLI · 12 min ago", present: true },
+        { path: "scripts/normalize_lines.py", lang: "py", by: "extract", what: "Cleans OCR line items before the check (Nora calls it as a tool)", size: "1.8 kB", updated: "v3", present: true },
+        { path: "checks/invoice-rules.yaml", lang: "yaml", by: "verify", what: "The 4 rules Vale checks, with tolerances", size: "0.6 kB", updated: "v3", present: true },
+        { path: "scripts/notify-finance.ts", lang: "ts", by: "notify", what: "Formats the Slack message", size: "0.9 kB", updated: "v1", present: false },
+      ],
+      versions: [
+        { v: 3, when: "12 Sept 2026, 09:14 · UTC", by: "pavel via CLI", note: "Add the VAT id rule", published: true },
+        { v: 2, when: "9 Sept 2026, 16:40 · UTC", by: "Lead agent (described by Pavel)", note: "Add the Finance decision step" },
+        { v: 1, when: "8 Sept 2026, 11:02 · UTC", by: "Lead agent (described by Pavel)", note: "First version" },
+      ],
+      schedules: [
+        { id: "s1", kind: "repeat", label: "Weekdays at 08:00", tz: "Europe/Prague", enabled: true, uses: "latest", next: "Tue 16 Sept 2026, 08:00", preset: { cost_center: "Operations", auto_approve_limit: "1500", notify_finance: "true" } },
+        { id: "s2", kind: "once", label: "Fri 19 Sept 2026, 14:00", tz: "Europe/Prague", enabled: true, uses: "v2", next: "Fri 19 Sept 2026, 14:00", preset: { cost_center: "Marketing", auto_approve_limit: "500", notify_finance: "false" } },
+      ],
+    },
+    { slug: "docs-drift-audit", name: "Docs drift audit", color: "#e2ab3f", initials: "DD",
+      purpose: "Weekly audit of the documentation ↔ code pairs: a scan lists drift candidates in both directions, Jordan judges each one, and one summary with concrete paths and lines goes to the workspace and the status page.",
+      published: 7, how: "Sundays 03:00 · Europe/Prague", lastState: "completed", lastWhen: "2 d ago", crew: "Quality",
+      limits: { cost: 5, concurrency: "docs-drift-audit", maxConcurrent: 1, tier: ["balanced", "strong"], guardrail: "sanitize", estCost: 0.4, estDur: "≈ 25 min" },
+      slash: { enabled: true, label: "/docs-drift" },
+      inputs: [
+        { name: "repo", label: "Repository", type: "string", default: "crewship-ai/crewship", hint: "GitHub owner/name." },
+        { name: "branch", label: "Branch", type: "string", default: "main", hint: "Drift is judged against main; a feature branch is meaningless here." },
+        { name: "max_candidates", label: "Candidates per category", type: "number", min: 1, max: 200, default: "25", hint: "Truncation is always admitted in the report." },
+      ],
+      hooks: { before: { name: "Clean the scratch folder", role: "code", who: "bash" }, onFailure: { name: "Tell #docs the audit did not finish", role: "notify", who: "Slack #docs" } },
+      steps: [
+        { id: "scan", name: "Scan the repository for drift candidates", role: "script", who: "docs_audit.sh on crew Quality", file: "scripts/docs_audit.sh", tools: ["GitHub token"], timeout: "10 min", out: "candidates, pairs, panel state" },
+        { id: "scan_state", name: "Panel state", role: "transform", who: "jq", needs: ["scan"] },
+        { id: "scan_label", name: "Panel label", role: "transform", who: "jq", needs: ["scan"] },
+        { id: "sha_label", name: "Commit label", role: "transform", who: "jq", needs: ["scan"] },
+        { id: "total", name: "Total candidates", role: "transform", who: "jq", needs: ["scan"] },
+        { id: "pairs", name: "Doc ↔ code pairs", role: "transform", who: "jq", needs: ["scan"] },
+        { id: "judge_each", name: "Judge each candidate", role: "foreach", who: "3 at a time", needs: ["pairs"], items: "pairs", parallelism: 3, children: [
+          { id: "fetch", name: "Fetch the doc page and the code lines", role: "http", who: "GET github.com", tools: ["GitHub token"], retry: "3 attempts" },
+          { id: "judge", name: "Decide: real drift or just another name?", role: "agent", who: "Jordan (agent)", avatar: "🧐", prompt: "For the candidate {{ item.path }}:{{ item.line }} decide CONFIRMED or REJECTED. Open the documentation line and grep the code beyond the listed package before calling anything a phantom. One sentence per rejection.", tools: ["read", "grep"], rules: ["Cites a doc line and a code line", "Verdict is CONFIRMED or REJECTED", "No secrets in the text"], checker: "Vale", fail: "If Vale rejects: Jordan tries a stronger model once, then the candidate is marked ‘unsure’." },
+        ] },
+        { id: "review", name: "Write the audit report", role: "agent", who: "Jordan (agent)", avatar: "🧐", prompt: "You are the documentation auditor of {{ inputs.repo }} ({{ inputs.branch }}). Summarise the judged candidates: COUNTS: confirmed/rejected/unsure, then one line per confirmed finding with doc path:line and code path:line.", needs: ["scan", "judge_each"], tools: ["read"], timeout: "40 min", checks: ["At least 30 characters", "Contains ‘COUNTS:’", "No tokens or secrets"], fail: "A failed check stops the run (abort)." },
+        { id: "post", name: "Post the summary to the workspace", role: "notify", who: "Workspace notification", needs: ["review"], cond: "Only when total > 0" },
+        { id: "page-status", name: "Update the status panel", role: "crewship", who: "page.write", needs: ["review", "scan_state", "scan_label", "sha_label"], effect: "Writes to the Docs status page." },
+        { id: "page-summary", name: "Update the summary page", role: "crewship", who: "page.write", needs: ["page-status", "total", "pairs"], effect: "Writes to the Docs status page." },
+      ],
+      files: [
+        { path: "scripts/docs_audit.sh", lang: "sh", by: "scan", what: "Lists phantom and gap candidates for every curated doc ↔ code pair", size: "6.2 kB", updated: "v7", present: true },
+        { path: "prompts/docs-judge.md", lang: "md", by: "judge", what: "What Jordan is asked per candidate (the prompt text)", size: "2.1 kB", updated: "v7", present: true },
+      ],
+      versions: [
+        { v: 7, when: "13 Sept 2026, 18:02 · UTC", by: "pavel via CLI", note: "Judge candidates one by one, add the Vale check", published: true },
+        { v: 6, when: "6 Sept 2026, 10:41 · UTC", by: "pavel via CLI", note: "Write the status page" },
+      ],
+      schedules: [{ id: "d1", kind: "repeat", label: "Sundays at 03:00", tz: "Europe/Prague", enabled: true, uses: "latest", next: "Sun 20 Sept 2026, 03:00", preset: { repo: "crewship-ai/crewship", branch: "main", max_candidates: "25" } }],
+    },
+    bigRoutine(),
+    { slug: "morning-briefing", name: "Morning briefing", color: "#3ec27a", initials: "MB", purpose: "The crew lead compiles a morning briefing from yesterday's activity and posts it to #standup.", published: 5, how: "Weekdays 07:30 · Europe/Prague", lastState: "failed", lastWhen: "8 d ago" },
+    { slug: "classify-ticket", name: "Classify support ticket", color: "#1E7BFE", initials: "CT", purpose: "Labels an incoming ticket with category, priority and sentiment from fixed label sets.", published: 2, how: "On a new ticket (automation)", lastState: "completed", lastWhen: "2 h ago" },
+    { slug: "weekly-cost-digest", name: "Weekly cost digest", color: "#e2ab3f", initials: "WC", purpose: "Run counts, model spend and top failures for the past 7 days, sent to the owners.", published: 1, how: "Mondays 09:00 · Europe/Prague", lastState: "completed", lastWhen: "6 d ago" },
+    { slug: "contract-renewal-check", name: "Contract renewal check", color: "#ef5b4c", initials: "CR", purpose: "Finds contracts ending in the next 60 days and drafts a renewal note for each owner.", published: 0, draft: { rev: 1, by: "Lead agent", via: "Describe it", ago: "yesterday", note: "Drafted from your description" }, how: "Not published yet", lastState: "never", lastWhen: "" },
+  ],
+  runs: [
+    { id: "run_cmu2k1w9waiting", slug: "invoice-intake", state: "waiting", started: "15 Sept 2026, 10:32 · UTC", ago: "4 min ago", by: "Pavel (manual)", v: 3, inputs: { invoice_path: "/crew/shared/invoices/2026-09/acme-4471.pdf", cost_center: "Operations", auto_approve_limit: "1500", notify_finance: "true" }, at: "decide",
+      extracted: { supplier: "ACME Tools s.r.o.", total: "12 480 CZK", lines: 4, vat: "CZ27184935", due: "30 Sept 2026" }, checks: [true, true, true, true] },
+    { id: "run_cmu2j7s2completed", slug: "invoice-intake", state: "completed", started: "15 Sept 2026, 08:00 · UTC", ago: "2 h ago", by: "Schedule · Weekdays 08:00", v: 3, took: "1 min 48 s", inputs: { invoice_path: "/crew/shared/invoices/2026-09/brno-print-0912.pdf", cost_center: "Operations", auto_approve_limit: "1500", notify_finance: "true" },
+      extracted: { supplier: "Brno Print a.s.", total: "980 CZK", lines: 2, vat: "CZ60751347", due: "28 Sept 2026" }, checks: [true, true, true, true], posted: "Ledger entry LE-2026-09-0412", skipped: ["decide"] },
+    { id: "run_cmu2i4d0failed", slug: "invoice-intake", state: "failed", started: "14 Sept 2026, 08:00 · UTC", ago: "yesterday", by: "Schedule · Weekdays 08:00", v: 3, took: "3 min 06 s", at: "verify", inputs: { invoice_path: "/crew/shared/invoices/2026-09/novak-2231.pdf", cost_center: "Operations", auto_approve_limit: "1500", notify_finance: "true" },
+      extracted: { supplier: "Novák & syn", total: "12 480 CZK", lines: 3, vat: "CZ12345678", due: "20 Sept 2026" }, checks: [false, true, true, true], attempts: 3,
+      plain: "The total on the invoice (12 480 CZK) does not equal the sum of its lines (12 840 CZK). Nora read it three times with three models and got the same numbers, so the invoice itself is probably inconsistent.",
+      raw: "step verify: checker vale rejected after 3 worker/checker tiers (fast → balanced → strong): criterion \"total_equals_lines\" failed: total=12480 lines_sum=12840 (delta 360)" },
+    { id: "run_cmu1z0ddaudit", slug: "docs-drift-audit", state: "completed", started: "13 Sept 2026, 01:00 · UTC", ago: "2 d ago", by: "Schedule · Sundays 03:00", v: 7, took: "22 min 14 s", inputs: { repo: "crewship-ai/crewship", branch: "main", max_candidates: "25" }, posted: "Report: 41 candidates, 6 confirmed, 3 unsure" },
+    { id: "run_cmu2h9x1completed", slug: "invoice-intake", state: "completed", started: "13 Sept 2026, 08:00 · UTC", ago: "2 d ago", by: "Schedule · Weekdays 08:00", v: 2, took: "2 min 12 s", inputs: { invoice_path: "/crew/shared/invoices/2026-09/acme-4470.pdf", cost_center: "Operations", auto_approve_limit: "1500", notify_finance: "true" }, extracted: { supplier: "ACME Tools s.r.o.", total: "3 200 CZK", lines: 1, vat: "CZ27184935", due: "25 Sept 2026" }, checks: [true, true, true, true], posted: "Ledger entry LE-2026-09-0398", decided: "Approved by Jana K. after 41 min" },
+  ],
+});
+
+/* A 101-step recipe: 8 services × 12 checks fan out from one build. Real recipes can look like this (the dev1 fixture has 100 foreach blocks). */
+function bigRoutine() {
+  const services = ["Billing", "Ledger", "Auth", "Search", "Mailer", "Reports", "Webhooks", "Pages"];
+  const checks = ["Health", "Migrations", "Contract tests", "Smoke", "Lint", "Unit", "Integration", "Load", "Security scan", "Dependencies", "Docs build", "Screenshots"];
+  const steps = [
+    { id: "build", name: "Fetch last night's build", role: "http", who: "GET ci.internal", tools: ["CI token"], out: "build tag, artefact URLs" },
+    { id: "matrix", name: "Prepare the service × check matrix", role: "transform", who: "jq", needs: ["build"] },
+    { id: "warm", name: "Warm the test containers", role: "script", who: "warm.sh on crew Quality", file: "scripts/warm.sh", needs: ["build"], timeout: "5 min" },
+  ];
+  for (const svc of services) for (const [ci, chk] of checks.entries()) steps.push({ id: `${svc.toLowerCase()}_${chk.toLowerCase().replace(/ /g, "_")}`, name: `${chk} on ${svc}`, role: ci < 8 ? "script" : "http", who: ci < 8 ? `${chk.toLowerCase().replace(/ /g, "-")}.sh` : "POST quality.internal", file: ci < 8 ? `checks/${svc.toLowerCase()}/${chk.toLowerCase().replace(/ /g, "-")}.sh` : undefined, needs: ["matrix", "warm"], group: svc, retry: ci === 7 ? "2 attempts" : undefined, timeout: "15 min" });
+  steps.push({ id: "judge", name: "Judge flaky results", role: "agent", who: "Jordan (agent)", avatar: "🕵️", needs: steps.filter((s) => s.group).map((s) => s.id), tools: ["read"], checks: ["Every flaky verdict cites two runs", "No secrets in the text"], fail: "A failed check stops the run (abort).", prompt: "For every failed check compare with the previous two nights and mark FLAKY or REAL. Cite both runs." });
+  steps.push({ id: "post", name: "Post the matrix to #quality", role: "notify", who: "Slack #quality", needs: ["judge"] });
+  const files = [{ path: "scripts/warm.sh", lang: "sh", by: "warm", what: "Starts the shared test containers once for the whole matrix", size: "1.1 kB", updated: "v12", present: true }];
+  for (const svc of services) files.push({ path: `checks/${svc.toLowerCase()}/`, dir: true, count: 8, what: `8 check scripts for ${svc}`, updated: "v12", present: true });
+  return { slug: "nightly-regression-matrix", name: "Nightly regression matrix", color: "#22c8d8", initials: "NR", crew: "Quality",
+    purpose: "Runs 12 regression checks for each of 8 services against last night's build, lets Jordan separate flaky from real failures, and posts one matrix to #quality.",
+    published: 12, how: "Daily 02:00 · Europe/Prague", lastState: "completed", lastWhen: "9 h ago", limits: { cost: 3, concurrency: "nightly", maxConcurrent: 1, tier: ["balanced"], guardrail: "block", estCost: 0.9, estDur: "≈ 55 min" },
+    inputs: [{ name: "build_tag", label: "Build tag", type: "string", default: "", hint: "Leave empty for last night's build." }],
+    steps, files, versions: [{ v: 12, when: "10 Sept 2026, 21:10 · UTC", by: "pavel via CLI", note: "Add Pages to the matrix", published: true }],
+    schedules: [{ id: "n1", kind: "repeat", label: "Every day at 02:00", tz: "Europe/Prague", enabled: true, uses: "latest", next: "Wed 16 Sept 2026, 02:00", preset: { build_tag: "" } }] };
+}
+/* Sample file contents for the read-only preview (prototype only). */
+const FILE_TEXT = {
+  "scripts/ledger-post.go": `// ledger-post posts one invoice to the ERP ledger and prints the entry number.\n// Input: extracted invoice JSON on stdin. Env: ERP_TOKEN (from the crew vault).\npackage main\n\nimport (\n\t"encoding/json"\n\t"fmt"\n\t"net/http"\n\t"os"\n)\n\nfunc main() {\n\tvar inv Invoice\n\tif err := json.NewDecoder(os.Stdin).Decode(&inv); err != nil {\n\t\tfail("invoice JSON: %v", err)\n\t}\n\tentry, err := post(inv, os.Getenv("ERP_TOKEN"))\n\tif err != nil {\n\t\tfail("erp: %v", err)\n\t}\n\tfmt.Println(entry) // LE-2026-09-0412\n}`,
+  "scripts/normalize_lines.py": `# Cleans OCR line items before the check: trims, fixes decimal commas, drops empty rows.\nimport json, sys\n\ndef clean(line):\n    amount = str(line.get("amount", "")).replace(" ", "").replace(",", ".")\n    return {"description": line.get("description", "").strip(), "amount": float(amount or 0)}\n\nrows = json.load(sys.stdin)\nprint(json.dumps([clean(r) for r in rows if r.get("description")]))`,
+  "checks/invoice-rules.yaml": `# The 4 rules Vale checks. tolerance is absolute, in the invoice currency.\nrules:\n  - name: total_equals_lines\n    rule: total == sum(lines[].amount)\n    tolerance: 0\n  - name: vat_id_format\n    rule: vat_id matches "^[A-Z]{2}[0-9A-Z]{8,12}$"\n  - name: due_in_future\n    rule: due_date > today\n  - name: currency\n    rule: currency in [CZK, EUR]`,
+  "scripts/notify-finance.ts": null,
+  "scripts/docs_audit.sh": `#!/usr/bin/env bash\n# Lists phantom and gap candidates for every curated doc <-> code pair.\n# Env: REPO, BRANCH, MAX_CANDIDATES, GH_TOKEN. Output: JSON on stdout.\nset -euo pipefail\ngh api "repos/$REPO/git/trees/$BRANCH?recursive=1" > /tmp/tree.json\njq -r '.tree[].path' /tmp/tree.json | grep -E '^docs/.*\\.mdx$' > /tmp/docs.txt\n./audit-pairs --docs /tmp/docs.txt --max "$MAX_CANDIDATES"`,
+  "prompts/docs-judge.md": `# Judge one candidate\n\nFor the candidate {{ item.path }}:{{ item.line }} decide CONFIRMED or REJECTED.\nOpen the documentation line and grep the code beyond the listed package\nbefore calling anything a phantom. One sentence per rejection.`,
+  "scripts/warm.sh": `#!/usr/bin/env bash\n# Starts the shared test containers once so 96 checks do not each pay the cold start.\ndocker compose -f /crew/shared/compose.test.yaml up -d --wait`,
+};
+
+/* ======================= state ======================= */
+let S;
+const load = () => { S = seed(); S.screen = "list"; S.tab = "overview"; S.slug = "invoice-intake"; S.runId = null; S.sheet = null; S.form = {}; S.errors = {}; S.touched = {}; S.drawer = false; S.toast = null; S.chat = null; S.listView = "routines"; };
+load();
+const $ = (s) => document.querySelector(s);
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const routine = () => S.routines.find((r) => r.slug === S.slug);
+const runsOf = (slug) => S.runs.filter((r) => r.slug === slug);
+const go = (patch) => { Object.assign(S, patch); render(); };
+const toast = (t) => { S.toast = t; render(); setTimeout(() => { if (S.toast === t) { S.toast = null; render(); } }, 2400); };
+window.act = (name, ...args) => actions[name](...args);
+
+/* ======================= presentation helpers ======================= */
+const stateWord = { waiting: ["Waiting for a person", "warn"], failed: ["Could not finish", "bad"], completed: ["Completed", "ok"], running: ["Running", "live"], stopped: ["Stopped", "muted"], never: ["Never run", "muted"], queued: ["Starting…", "live"] };
+const pill = (st, extra = "") => { const [w, t] = stateWord[st] || [st, "muted"]; return `<span class="pill ${t}">${extra || w}</span>`; };
+const icon = (r, sm) => `<span class="icon ${sm ? "sm" : ""}" style="background:${r.color}22;color:${r.color}">${r.initials}</span>`;
+const versionLine = (r) => {
+  const parts = [];
+  parts.push(r.published ? `<span class="pill ok nodot">Published v${r.published}</span>` : `<span class="pill muted nodot">Not published</span>`);
+  if (r.draft) parts.push(`<span class="pill draft nodot">Draft r${r.draft.rev} · ${esc(r.draft.via)} · ${esc(r.draft.ago)}</span>`);
+  parts.push(`<span>Run uses ${r.published ? `<b>v${r.published}</b>` : "<b>nothing yet</b> — publish first"}</span>`);
+  return parts.join(" ");
+};
+const roleTag = (s) => ({ agent: "Agent", check: "Checker", human: "A person", script: "Script", notify: "Notification", transform: "Prepare data", http: "Call a service", crewship: "Crewship action", foreach: "For each item", code: "Run code", query: "Read stored data", call: "Run another routine" }[s.role] || "Step");
+const AVATARS = { "Nora (agent)": "🧑‍💻", "Vale (checker)": "🧐", "Jordan (agent)": "🕵️", "Finance approvers": "👥" };
+const avatarOf = (s) => s.avatar || AVATARS[s.who] || null;
+const langOf = (p) => ({ go: "go", py: "py", ts: "ts", tsx: "ts", js: "ts", yaml: "yaml", yml: "yaml", sql: "sql", sh: "sh", md: "md" }[p.split(".").pop()] || "sh");
+const fileGlyph = (p) => { const l = langOf(p); return `<span class="fic ${l}" aria-label="${l} file">${{ go: "Go", py: "Py", ts: "TS", yaml: "Y", sql: "SQL", sh: "sh", md: "md" }[l]}</span>`; };
+const fileChip = (p) => p ? `<span class="file" title="${esc(p)} on /crew/shared">${fileGlyph(p)}${esc(p.split("/").pop())}</span>` : "";
+const stepBits = (s) => `<span class="role ${s.role}">${roleTag(s)}</span><span>${esc(s.who)}</span>${(s.tools || []).map((t) => `<span class="tool">${esc(t)}</span>`).join("")}${fileChip(s.file)}${s.checks || s.rules ? `<span class="chk">✓ ${(s.checks || s.rules).length} ${s.checker ? "rules · " + esc(s.checker) : "checks"}</span>` : ""}${s.retry ? `<span class="tool">${esc(s.retry)}</span>` : ""}${s.timeout ? `<span class="tool">⏱ ${esc(s.timeout)}</span>` : ""}`;
+const ROLE_GLYPH = { script: "&gt;_", transform: "⇄", http: "⌁", notify: "🔔", crewship: "✎", foreach: "⟳", code: "{}", human: "?", query: "▤", call: "⧉", check: "✓" };
+const stepAvatar = (s, n) => { const a = avatarOf(s); return a ? `<span class="av" style="position:relative">${a}${n != null ? `<span class="badge">${n}</span>` : ""}</span>` : `<span class="ic" style="background:var(--hair);color:var(--muted);position:relative">${ROLE_GLYPH[s.role] || "·"}${n != null ? `<span class="badge">${n}</span>` : ""}</span>`; };
+/* Levels from `needs`: 1 + max(level of dependencies). No order is invented — steps without needs are level 1. */
+const levelsOf = (steps) => { const lv = {}; const get = (s) => { if (lv[s.id]) return lv[s.id]; const deps = (s.needs || []).map((id) => steps.find((x) => x.id === id)).filter(Boolean); return (lv[s.id] = 1 + Math.max(0, ...deps.map(get))); }; steps.forEach(get); return lv; };
+const nameOf = (r, id) => { const all = [...r.steps, ...r.steps.flatMap((s) => s.children || [])]; return all.find((s) => s.id === id)?.name || id; };
+/* One list for simple and complex recipes: phases from dependencies, helper transforms folded, foreach nested, hooks around. */
+/* The map: one column per phase; a phase with many steps shows one node per group with a count. Click a node to open that phase in the list. */
+function stepsMap(r) {
+  const steps = r.steps; const lv = levelsOf(steps); const byLevel = new Map(); steps.forEach((s) => { const l = lv[s.id]; if (!byLevel.has(l)) byLevel.set(l, []); byLevel.get(l).push(s); });
+  const node = (s, count, level) => `<button class="node" type="button" onclick="S.stepsView='list';S.phaseOpen=S.phaseOpen||{};S.phaseOpen[${level}]=true;render()">${avatarOf(s) ? `<span class="av2">${avatarOf(s)}</span>` : `<span class="ic2">${ROLE_GLYPH[s.role] || "·"}</span>`}<span class="nm" title="${esc(s.name)}">${esc(count ? s.group : s.name)}</span>${count ? `<span class="x">×${count}</span>` : ""}</button>`;
+  const cols = [...byLevel.entries()].sort((a, b) => a[0] - b[0]).map(([level, group]) => {
+    let body;
+    if (group.length > 6) { const g = {}; group.forEach((s) => { (g[s.group || "Other"] = g[s.group || "Other"] || []).push(s); }); body = Object.entries(g).map(([name, items]) => node({ ...items[0], group: name }, items.length, level)).join(""); }
+    else body = group.map((s) => node(s, 0, level)).join("");
+    return `<div class="col"><div class="ch">${level === 1 ? "First" : "Then"}${group.length > 1 ? ` · ${group.length}` : ""}</div>${body}</div>`;
+  });
+  const hooks = r.hooks ? `<div class="col"><div class="ch">Around the run</div>${r.hooks.before ? node(r.hooks.before, 0, 0) : ""}${r.hooks.onFailure ? node(r.hooks.onFailure, 0, 0) : ""}</div>` : "";
+  return `<div class="mapwrap"><div class="map">${hooks}${cols.join("")}</div><p class="small muted" style="margin:10px 0 0">Columns are phases from declared dependencies. A node with ×N stands for N steps of one group; click it to read them in the list.</p></div>`;
+}
+function stepsList(r, opts = {}) {
+  const steps = r.steps; const hasNeeds = steps.some((s) => s.needs?.length); const lv = levelsOf(steps);
+  const rowsOut = []; let n = 0;
+  const row = (s, cls, extra) => { n++; return `<div class="step ${cls || ""}">${stepAvatar(s, hasNeeds ? null : n)}<div><div class="nm">${esc(s.name)}</div><div class="who">${stepBits(s)}</div>${s.cond ? `<span class="cond">◐ ${esc(s.cond)}</span>` : ""}${s.needs?.length && opts.showAfter !== false ? `<div class="after">after ${s.needs.map((id) => `<b>${esc(nameOf(r, id))}</b>`).join(", ")}</div>` : ""}${extra || ""}${detailsOf(r, s)}</div><span class="st">${opts.state ? opts.state(s) : ""}</span></div>`; };
+  const detailsOf = (r, s) => `<details><summary class="small muted" style="cursor:pointer;margin-top:4px">Details</summary><div class="det"><dl class="kv">${s.out ? `<dt>Produces</dt><dd>${esc(s.out)}</dd>` : ""}${s.rules || s.checks ? `<dt>Rules</dt><dd>${(s.rules || s.checks).map(esc).join("<br>")}</dd>` : ""}${s.expires ? `<dt>Expires</dt><dd>${esc(s.expires)}</dd>` : ""}${s.effect ? `<dt>Effect</dt><dd>${esc(s.effect)}</dd>` : ""}${s.fail ? `<dt>On a problem</dt><dd>${esc(s.fail)}</dd>` : ""}${s.file ? `<dt>File</dt><dd>${fileChip(s.file)} <span class="muted">· on the crew share</span></dd>` : ""}<dt>Change it</dt><dd class="muted">With the CLI (<code>crewship routine draft ${esc(r.slug)}</code>) or by asking the lead agent.</dd></dl></div></details>`;
+  if (r.hooks?.before) rowsOut.push(`<div class="phase">Before the run<span class="ln"></span></div>` + row(r.hooks.before, "hook"));
+  const byLevel = new Map(); steps.forEach((s) => { const l = lv[s.id]; if (!byLevel.has(l)) byLevel.set(l, []); byLevel.get(l).push(s); });
+  for (const [level, group] of [...byLevel.entries()].sort((a, b) => a[0] - b[0])) {
+    if (steps.length > 12 && group.length > 6) {
+      const open = S.phaseOpen?.[level]; const kinds = {}; group.forEach((s) => { kinds[roleTag(s)] = (kinds[roleTag(s)] || 0) + 1; });
+      rowsOut.push(`<button class="phase big" type="button" onclick="S.phaseOpen=S.phaseOpen||{};S.phaseOpen[${level}]=!S.phaseOpen[${level}];render()"><span>${open ? "▾" : "▸"}</span><span class="pn">${level === 1 ? "First" : "Then"} · ${group.length} steps in parallel</span><span class="pm">${Object.entries(kinds).map(([k, v]) => `${k} ×${v}`).join(" · ")}${group[0].group ? ` · ${[...new Set(group.map((s) => s.group))].length} groups` : ""}</span><span class="ln"></span></button>`);
+      if (!open) continue;
+      const g = {}; group.forEach((s) => { (g[s.group || "Other"] = g[s.group || "Other"] || []).push(s); });
+      for (const [name, items] of Object.entries(g)) rowsOut.push(`<div class="step fold" style="padding-left:28px">${stepAvatar(items[0])}<div><div class="nm">${esc(name)} · ${items.length} steps</div><div class="who"><span class="role ${items[0].role}">${roleTag(items[0])}</span><span>after ${items[0].needs.map((id) => esc(nameOf(r, id))).join(", ")}</span></div><details><summary class="small muted" style="cursor:pointer;margin-top:4px">Show the ${items.length}</summary><div class="det">${items.map((t) => `<div>${esc(t.name)} <span class="muted small">· ${esc(t.who)}${t.retry ? " · " + esc(t.retry) : ""}</span></div>`).join("")}</div></details></div><span class="st"></span></div>`);
+      continue;
+    }
+    if (hasNeeds) rowsOut.push(`<div class="phase">${level === 1 ? "First" : "Then"}${group.length > 1 ? ` · ${group.length} in parallel` : ""}<span class="ln"></span></div>`);
+    // fold ≥3 consecutive helper transforms with the same dependencies into one row
+    let i = 0;
+    while (i < group.length) {
+      const s = group[i];
+      const run = []; let j = i; while (j < group.length && group[j].role === "transform" && !group[j].cond && JSON.stringify(group[j].needs) === JSON.stringify(s.needs)) run.push(group[j++]);
+      if (run.length >= 3) { rowsOut.push(`<div class="step fold">${stepAvatar({ role: "transform" })}<div><div class="nm">${run.length} data preparations from ${esc(nameOf(r, s.needs[0]))}</div><div class="who"><span class="role transform">Prepare data</span><span>jq · no effects</span></div><details><summary class="small muted" style="cursor:pointer;margin-top:4px">Show the ${run.length}</summary><div class="det">${run.map((t) => `<div>${esc(t.name)} <span class="muted mono small">${esc(t.id)}</span></div>`).join("")}</div></details></div><span class="st"></span></div>`); i = j; continue; }
+      if (s.role === "foreach") { rowsOut.push(row(s, "", `<div class="small muted" style="margin-top:4px">For each of <b>${esc(s.items)}</b> · ${s.parallelism} at a time · ${s.children.length} steps per item</div>`)); s.children.forEach((c) => rowsOut.push(row(c, "nested"))); i++; continue; }
+      rowsOut.push(row(s)); i++;
+    }
+  }
+  if (r.hooks?.onFailure) rowsOut.push(`<div class="phase">If the run fails<span class="ln"></span></div>` + row(r.hooks.onFailure, "hook"));
+  return rowsOut;
+}
+const stepIcon = (s, st) => { const col = { ok: "var(--success)", bad: "var(--danger)", wait: "var(--warn)", live: "var(--primary)", skip: "var(--soft)" }[st] || "var(--soft)"; const glyph = { ok: "✓", bad: "✕", wait: "…", live: "▶", skip: "–" }[st] || String(routine().steps.indexOf(s) + 1); return `<span class="ic" style="background:${col}22;color:${col}">${glyph}</span>`; };
+
+/* ======================= screens ======================= */
+const screens = {
+  list: "Routines",
+  calendar: "Calendar",
+  empty: "Empty workspace",
+  new: "New routine",
+  routine: "Routine page",
+  complex: "Complex routine",
+  large: "101-step routine",
+  "run-live": "Run · live / decision",
+  "run-failed": "Run · problem",
+  "run-ok": "Run · completed",
+  publish: "Publish a draft",
+};
+function openScreen(key) {
+  S.sheet = null; S.chat = null; S.drawer = false;
+  if (key === "list") go({ screen: "list", listView: "routines" });
+  else if (key === "calendar") go({ screen: "list", listView: "calendar", cal: { view: "month", day: null, filter: "all" } });
+  else if (key === "empty") go({ screen: "empty" });
+  else if (key === "new") go({ screen: "list", sheet: { kind: "new" } });
+  else if (key === "routine") go({ screen: "routine", slug: "invoice-intake", tab: "overview", stepsView: null, fileOpen: null });
+  else if (key === "large") go({ screen: "routine", slug: "nightly-regression-matrix", tab: "overview", stepsAll: false, picker: false, stepsView: null, fileOpen: null });
+  else if (key === "complex") go({ screen: "routine", slug: "docs-drift-audit", tab: "overview", stepsAll: false, picker: false });
+  else if (key === "run-live") go({ screen: "run", slug: "invoice-intake", runId: "run_cmu2k1w9waiting" });
+  else if (key === "run-failed") go({ screen: "run", slug: "invoice-intake", runId: "run_cmu2i4d0failed" });
+  else if (key === "run-ok") go({ screen: "run", slug: "invoice-intake", runId: "run_cmu2j7s2completed" });
+  else if (key === "publish") go({ screen: "routine", slug: "invoice-intake", tab: "overview", sheet: { kind: "publish" } });
+}
+const currentKey = () => S.screen === "empty" ? "empty" : S.screen === "list" && S.listView === "calendar" && !S.sheet ? "calendar" : S.sheet?.kind === "new" ? "new" : S.sheet?.kind === "publish" ? "publish" : S.screen === "run" ? ({ waiting: "run-live", running: "run-live", queued: "run-live", failed: "run-failed", completed: "run-ok" }[S.runs.find((r) => r.id === S.runId)?.state] || "run-ok") : S.screen === "routine" ? (S.slug === "docs-drift-audit" ? "complex" : S.slug === "nightly-regression-matrix" ? "large" : "routine") : "list";
+
+/* ======================= actions (simulated) ======================= */
+const actions = {
+  select(slug) { go({ screen: "routine", slug, tab: "overview", runId: null, drawer: false, picker: false, stepsAll: false, stepsView: null, fileOpen: null, phaseOpen: null }); },
+  tab(t) { go({ tab: t }); },
+  openRun(id) { const r = S.runs.find((x) => x.id === id); go({ screen: "run", runId: id, slug: r.slug, drawer: false }); },
+  back() { go({ screen: S.screen === "run" ? "routine" : "list", tab: S.screen === "run" ? "history" : S.tab, runId: null }); },
+  drawer() { go({ drawer: !S.drawer }); },
+  runSheet(prefill, version) {
+    const r = routine(); const form = {};
+    for (const i of r.inputs) form[i.name] = prefill && Object.hasOwn(prefill, i.name) ? String(prefill[i.name]) : i.default;
+    go({ sheet: { kind: "run", version: version || `v${r.published}`, prefill: !!prefill }, form, errors: {}, touched: {} });
+  },
+  field(name, value) { S.form[name] = value; if (S.touched[name]) S.errors = validate(); render(); },
+  blur(name) { S.touched[name] = true; S.errors = validate(); render(); },
+  restore(name) { const i = routine().inputs.find((x) => x.name === name); S.form[name] = i.default; S.errors = validate(); render(); },
+  submitRun() {
+    for (const i of routine().inputs) S.touched[i.name] = true;
+    S.errors = validate();
+    if (Object.keys(S.errors).length) { render(); const first = document.querySelector('[aria-invalid="true"]'); first && first.focus(); return; }
+    const r = routine(); const over = Number(S.form.auto_approve_limit) < 12480;
+    const id = "run_new" + Date.now();
+    S.runs.unshift({ id, slug: r.slug, state: "running", started: "15 Sept 2026, 10:41 · UTC", ago: "just now", by: "Pavel (manual)", v: Number(S.sheet.version.slice(1)), inputs: { ...S.form }, at: "extract", fresh: true, over });
+    r.lastState = "running"; r.lastWhen = "just now";
+    S.sheet = null; S.screen = "run"; S.runId = id; render(); toast("Run started · uses " + `v${S.runs[0].v}`);
+    // simulated progress
+    const run = S.runs[0];
+    setTimeout(() => { if (S.runs.includes(run)) { run.at = "verify"; run.extracted = { supplier: "ACME Tools s.r.o.", total: "12 480 CZK", lines: 4, vat: "CZ27184935", due: "30 Sept 2026" }; render(); } }, 1800);
+    setTimeout(() => { if (S.runs.includes(run)) { run.checks = [true, true, true, true]; if (run.over) { run.state = "waiting"; run.at = "decide"; r.lastState = "waiting"; } else { run.state = "completed"; run.took = "0 min 41 s"; run.posted = "Ledger entry LE-2026-09-0413"; run.skipped = ["decide"]; r.lastState = "completed"; } render(); } }, 3800);
+  },
+  stopSheet() { go({ sheet: { kind: "stop" } }); },
+  stop() { const run = S.runs.find((x) => x.id === S.runId); run.state = "stopped"; run.took = "0 min 12 s"; routine().lastState = "stopped"; S.sheet = null; render(); toast("Stop requested · finished work stays recorded"); },
+  decide(ok) {
+    const run = S.runs.find((x) => x.id === S.runId);
+    if (ok) { run.state = "completed"; run.decided = "Approved by you just now"; run.posted = "Ledger entry LE-2026-09-0414"; run.took = "6 min 02 s"; toast("Approved · posting to the ledger"); }
+    else { run.state = "stopped"; run.decided = "Rejected by you just now"; run.took = "5 min 50 s"; run.stopReason = "Rejected by Finance. Nothing was posted."; toast("Rejected · nothing was posted"); }
+    routine().lastState = run.state; S.sheet = null; render();
+  },
+  publishSheet() { go({ sheet: { kind: "publish" } }); },
+  publish() {
+    const r = routine(); const nv = r.published + 1;
+    r.versions.unshift({ v: nv, when: "15 Sept 2026, 10:44 · UTC", by: `${r.draft.by} via ${r.draft.via}`, note: r.draft.note, published: true });
+    r.versions.forEach((v) => { v.published = v.v === nv; });
+    r.published = nv; r.draft = null; r.inputs.find((i) => i.name === "auto_approve_limit").default = "2000";
+    r.steps[1].rules[3] = "Currency is CZK, EUR or USD";
+    S.sheet = null; render(); toast(`Published v${nv} · Run and the weekday schedule now use it`);
+  },
+  discardDraft() { routine().draft = null; S.sheet = null; render(); toast("Draft discarded · v" + routine().published + " unchanged"); },
+  editDetails() { const r = routine(); go({ sheet: { kind: "details", section: "identity", name: r.name, purpose: r.purpose, inputs: r.inputs.map((i) => ({ ...i })), limits: { ...(r.limits || { cost: 0, concurrency: "", maxConcurrent: 1, tier: ["balanced"], guardrail: "block", estCost: 0, estDur: "" }) }, slash: { ...(r.slash || { enabled: false, label: "/" + r.slug }) } } }); },
+  saveDetails() {
+    const r = routine(); const sh = S.sheet;
+    const defChanged = !!sh.promptsDirty || JSON.stringify(sh.inputs) !== JSON.stringify(r.inputs) || JSON.stringify(sh.limits) !== JSON.stringify(r.limits || {}) || JSON.stringify(sh.slash) !== JSON.stringify(r.slash || {});
+    r.name = sh.name; r.purpose = sh.purpose;
+    if (defChanged) { r.draft = { rev: (r.draft?.rev || 0) + 1, by: "you", via: "web", ago: "just now", note: "Inputs, limits or slash command changed in the web editor" }; r.pendingInputs = sh.inputs; }
+    S.sheet = null; render(); toast(defChanged ? "Saved as draft r" + r.draft.rev + " · publish to make it live" : "Name and purpose saved");
+  },
+  editSection(s) { S.sheet.section = s; render(); },
+  editInput(i, k, v) { S.sheet.inputs[i][k] = v; render(); },
+  planEdit(id) { const s = routine().schedules.find((x) => x.id === id); go({ sheet: { kind: "plan", id, label: s.label, uses: s.uses, enabled: s.enabled, days: s.label.startsWith("Weekdays") ? "weekdays" : "custom", time: "08:00" } }); },
+  planToggle(id) { const s = routine().schedules.find((x) => x.id === id); s.enabled = !s.enabled; render(); toast(s.enabled ? "Schedule on · next " + s.next : "Schedule off · nothing starts automatically"); },
+  planSave() { const s = routine().schedules.find((x) => x.id === S.sheet.id); s.uses = S.sheet.uses; s.enabled = S.sheet.enabled; s.label = S.sheet.days === "weekdays" ? `Weekdays at ${S.sheet.time}` : `Every day at ${S.sheet.time}`; S.sheet = null; render(); toast("Schedule saved"); },
+  planRemove() { const r = routine(); r.schedules = r.schedules.filter((x) => x.id !== S.sheet.id); S.sheet = null; render(); toast("One-time start removed"); },
+  newSheet() { go({ sheet: { kind: "new" } }); },
+  describe() { go({ chat: { goal: "", msgs: [] }, sheet: { kind: "describe" } }); },
+  describeSend() {
+    const c = S.chat; if (!c.goal.trim()) return;
+    c.msgs.push({ me: true, text: c.goal }); const goal = c.goal; c.goal = ""; render();
+    setTimeout(() => { c.msgs.push({ me: false, w: "Lead agent", text: "I drafted “Contract renewal check” from that: read the contracts folder, find ones ending within 60 days, draft a renewal note per owner, and ask you before anything is sent. Two questions: which folder holds the contracts, and should notes go to Slack or e-mail?" }); render(); }, 900);
+    setTimeout(() => { c.msgs.push({ me: false, w: "Lead agent", text: "Saved as a draft (not published). Open it to read the steps; publish when it looks right.", link: "contract-renewal-check" }); render(); }, 2200);
+  },
+  fork(slug) { const src = S.routines.find((r) => r.slug === slug); const copy = { ...src, slug: src.slug + "-copy", name: src.name + " (copy)", published: 0, draft: { rev: 1, by: "you", via: "fork of " + src.name, ago: "just now", note: "Copied from " + src.name + " v" + src.published }, how: "Not published yet", lastState: "never", lastWhen: "", schedules: [], versions: [] }; S.routines.push(copy); S.sheet = null; S.screen = "routine"; S.slug = copy.slug; S.tab = "overview"; render(); toast("Copied as a draft · schedules and history stay with the original"); },
+  askFix() { go({ chat: { goal: "", msgs: [{ me: false, w: "Lead agent", text: "I have the failed run open (run_cmu2i4d0failed, step “Check the extraction”). The invoice total does not match its lines. Do you want me to (a) add a tolerance of 1 % to the rule, or (b) ask Finance instead of stopping when the sum differs? I will save either as a draft for you to publish." }] }, sheet: { kind: "describe", fix: true } }); },
+  sheetClose() { go({ sheet: null, chat: null }); },
+  setSheet(k, v) { S.sheet[k] = v; render(); },
+  setChat(v) { S.chat.goal = v; },
+  listView(v) { go({ listView: v, cal: S.cal || { view: "month", day: null, filter: "all" } }); },
+  calView(v) { S.cal.view = v; if (v !== "day") S.cal.day = null; render(); },
+  calDay(d) { S.cal.view = "day"; S.cal.day = d; S.cal.open = null; render(); },
+  calFilter(f) { S.cal.filter = f; render(); },
+  calOpen(slug) { S.cal.open = S.cal.open === slug ? null : slug; render(); },
+};
+/* ---------- calendar sample data: September 2026, today = Tue 15 ---------- */
+function calEvents() {
+  if (S._cal) return S._cal;
+  const ev = [];
+  const push = (day, hh, mm, slug, kind, state) => ev.push({ day, t: `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`, slug, kind, state });
+  for (let d = 1; d <= 30; d++) {
+    const dow = new Date(2026, 8, d).getDay(); const past = d < 15;
+    if (dow >= 1 && dow <= 5) {
+      push(d, 7, 30, "morning-briefing", past ? "run" : "planned", past ? (d % 7 === 0 ? "failed" : "completed") : null);
+      if (d >= 8) push(d, 8, 0, "invoice-intake", past ? "run" : "planned", past ? (d === 14 ? "failed" : "completed") : null);
+    }
+    if (dow === 1) push(d, 9, 0, "weekly-cost-digest", past ? "run" : "planned", past ? "completed" : null);
+  }
+  push(15, 7, 30, "morning-briefing", "run", "completed"); push(15, 8, 0, "invoice-intake", "run", "completed"); push(15, 10, 32, "invoice-intake", "run", "waiting");
+  push(15, 17, 0, "weekly-cost-digest", "planned", null);
+  for (let i = 0; i < 38; i++) { const m = 8 * 60 + i * 15; push(16, Math.floor(m / 60), m % 60, "classify-ticket", "planned", null); }
+  push(16, 12, 0, "contract-renewal-check", "planned", null);
+  push(19, 14, 0, "invoice-intake", "planned", null);
+  [8, 10, 12].forEach((d) => [[9, 12], [11, 5], [15, 40]].forEach(([h, m]) => push(d, h, m, "classify-ticket", "run", d === 12 && h === 11 ? "failed" : "completed")));
+  return (S._cal = ev);
+}
+const calFiltered = () => calEvents().filter((e) => { const f = S.cal.filter; return f === "all" || (f === "planned" && e.kind === "planned") || (f === "ran" && e.kind === "run") || (f === "waiting" && e.state === "waiting") || (f === "failed" && e.state === "failed"); });
+const evState = (e) => e.kind === "planned" ? "live" : { completed: "ok", failed: "bad", waiting: "warn" }[e.state] || "muted";
+const groupBy = (list) => { const m = new Map(); for (const e of list) { if (!m.has(e.slug)) m.set(e.slug, []); m.get(e.slug).push(e); } return [...m.entries()].sort((a, b) => a[1][0].t.localeCompare(b[1][0].t)); };
+const daySummary = (list) => { const p = list.filter((e) => e.kind === "planned").length, ran = list.length - p, f = list.filter((e) => e.state === "failed").length, w = list.filter((e) => e.state === "waiting").length; return [p ? `${p} planned` : "", ran ? `${ran} ran` : "", f ? `${f} failed` : "", w ? `${w} waiting` : ""].filter(Boolean).join(" · "); };
+function viewCalendar() {
+  const cal = S.cal; const all = calFiltered(); const counts = { all: calEvents().length, planned: calEvents().filter((e) => e.kind === "planned").length, ran: calEvents().filter((e) => e.kind === "run").length, waiting: calEvents().filter((e) => e.state === "waiting").length, failed: calEvents().filter((e) => e.state === "failed").length };
+  const tb = `<div class="caltb">
+      <span class="seg">${[["day", "Day"], ["three", "3 days"], ["week", "Week"], ["month", "Month"], ["year", "Year"]].map(([k, l]) => `<button type="button" aria-pressed="${cal.view === k}" onclick="act('calView','${k}')">${l}</button>`).join("")}</span>
+      <span class="seg"><button type="button">‹</button><button type="button" onclick="act('calView','month')">Today</button><button type="button">›</button></span>
+      <h2>${cal.view === "day" && cal.day ? new Date(2026, 8, cal.day).toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long", year: "numeric" }) : "September 2026"}</h2>
+      <span class="sp" style="flex:1"></span>
+      <div class="fchips">${[["all", "All"], ["planned", "Planned"], ["ran", "Ran"], ["waiting", "Waiting"], ["failed", "Failed"]].map(([k, l]) => `<button type="button" aria-pressed="${cal.filter === k}" onclick="act('calFilter','${k}')"><span class="dot ${{ all: "muted", planned: "live", ran: "ok", waiting: "warn", failed: "bad" }[k]}"></span>${l}<span class="n">${counts[k]}</span></button>`).join("")}</div>
+    </div>
+    <p class="small muted" style="margin:0">Europe/Prague · <span style="color:var(--primary)">blue</span> = planned start, colours = how a run ended. A day with many starts shows one row per routine with a count; open the day for every start.</p>`;
+  if (cal.view === "day" && cal.day) return tb + viewAgenda(cal.day, all.filter((e) => e.day === cal.day));
+  if (cal.view !== "month") return tb + `<div class="card"><div class="bd muted">${cal.view === "year" ? "Year: twelve mini-months with a density mark per day (how many starts), click a month to open it." : "Day / 3 days / Week keep the hour grid as today. In an hour with several starts of one routine the cell shows one chip “Classify support ticket ×4” instead of four rows; click it to expand."} <a href="#" onclick="act('calView','month');return false">Back to month</a></div></div>`;
+  const cells = []; cells.push(`<div class="cell blank"></div>`);
+  for (let d = 1; d <= 30; d++) {
+    const list = all.filter((e) => e.day === d).sort((a, b) => a.t.localeCompare(b.t)); const groups = groupBy(list); const today = d === 15;
+    let body = "";
+    if (list.length <= 3) body = list.map((e) => `<div class="cev ${e.kind}"><span class="dot ${evState(e)}"></span><span class="t">${e.t}</span>${icon(S.routines.find((r) => r.slug === e.slug), true)}<span class="n">${esc(S.routines.find((r) => r.slug === e.slug).name)}</span></div>`).join("");
+    else {
+      body = groups.slice(0, 3).map(([slug, items]) => { const r = S.routines.find((x) => x.slug === slug); const planned = items.every((e) => e.kind === "planned"); const ok = items.filter((e) => e.state === "completed").length, bad = items.filter((e) => e.state === "failed").length, w = items.filter((e) => e.state === "waiting").length; return `<div class="cgrp ${planned ? "planned" : ""}">${icon(r, true)}<span class="n">${esc(r.name)}</span><span class="x">×${items.length}</span><span class="st"><span class="t">${items[0].t}${items.length > 1 ? "–" + items[items.length - 1].t : ""}</span>${bad ? ` <span style="color:var(--danger)">✕${bad}</span>` : ""}${w ? ` <span style="color:var(--warn)">?${w}</span>` : ""}${ok ? ` <span style="color:var(--success)">✓${ok}</span>` : ""}</span></div>`; }).join("");
+      if (groups.length > 3) body += `<span class="more">+${groups.length - 3} more routines</span>`;
+      body += `<div class="dens" title="${list.length} starts"><i style="width:${Math.min(100, list.length * 2)}%"></i></div><div class="csum">${daySummary(list)}</div>`;
+    }
+    cells.push(`<button class="cell ${today ? "today" : ""}" type="button" onclick="act('calDay',${d})" aria-label="${d} September, ${list.length} entries"><span class="dn"><span>${d}</span><span class="plus">+</span></span>${body}</button>`);
+  }
+  for (let i = 0; i < 4; i++) cells.push(`<div class="cell blank"></div>`);
+  return tb + `<div class="calgrid">${["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((d) => `<div class="dow">${d}</div>`).join("")}${cells.join("")}</div>`;
+}
+function viewAgenda(d, list) {
+  list = [...list].sort((a, b) => a.t.localeCompare(b.t)); const groups = groupBy(list); const waiting = list.filter((e) => e.state === "waiting");
+  const row = (e) => { const r = S.routines.find((x) => x.slug === e.slug); return `<button class="aev ${e.kind}" type="button" onclick="${e.state === "waiting" ? "act('openRun','run_cmu2k1w9waiting')" : `act('select','${r.slug}')`}"><span class="t">${e.t}</span>${icon(r, true)}<span><b>${esc(r.name)}</b><span class="small muted" style="display:block">${e.kind === "planned" ? `Planned · ${d === 16 && r.slug === "classify-ticket" ? "one-time start · pinned v2" : "schedule · latest published"}` : `Ran · ${e.state}`}</span></span>${e.kind === "planned" ? `<span class="pill live nodot">Planned</span>` : pill(e.state)}<span class="chev">›</span></button>`; };
+  return `<div class="card"><div class="hd"><span>${daySummary(list) || "Nothing on this day"}</span><span class="sp"></span><button class="btn" type="button" onclick="act('calView','month')">‹ Month</button><button class="btn primary" type="button" onclick="act('runSheet',null,'v3')">+ Schedule a start</button></div>
+    ${waiting.length ? `<div class="banner warn" style="margin:12px 14px 0"><span class="ic">?</span><div class="b"><div class="t">${waiting.length} run${waiting.length > 1 ? "s" : ""} waiting for your decision</div></div><button class="btn" type="button" onclick="act('openRun','run_cmu2k1w9waiting')">Decide</button></div>` : ""}
+    <div class="agenda">${groups.map(([slug, items]) => { const r = S.routines.find((x) => x.slug === slug); if (items.length <= 2) return items.map(row).join(""); const open = S.cal.open === slug; const planned = items.every((e) => e.kind === "planned"); return `<div class="agrp"><div class="ah">${icon(r, true)}<div><b>${esc(r.name)}</b> <span class="x" style="font-family:var(--mono);color:var(--primary);font-weight:700">×${items.length}</span><div class="meta">${planned ? "planned" : "ran"} · ${items[0].t}–${items[items.length - 1].t}${planned && items.length > 3 ? " · every 15 min" : ""} · ${planned ? "one-time starts · pinned v2 · with: batch = re-classify-2026-09" : daySummary(items)}</div></div><div class="actions"><button class="btn" type="button" onclick="act('select','${slug}')">Open routine</button><button class="btn" type="button" onclick="act('calOpen','${slug}')">${open ? "Hide" : `Show all ${items.length}`}</button></div></div>${open ? `<div class="times">${items.map((e) => `<span><span class="dot ${evState(e)}"></span>${e.t}</span>`).join("")}</div>` : ""}</div>`; }).join("") || `<div class="bd muted">No entries match the filter.</div>`}</div></div>`;
+}
+function validate() {
+  const errors = {}; const r = routine();
+  for (const i of r.inputs) {
+    if (!S.touched[i.name]) continue;
+    const v = (S.form[i.name] ?? "").trim();
+    if (i.required && !v && i.type !== "boolean") { errors[i.name] = "An answer is required"; continue; }
+    if (i.format === "absolute_path" && v && (!v.startsWith("/") || v.split("/").some((p) => p === "." || p === ".."))) errors[i.name] = "Use an absolute path starting with /, for example /crew/shared/invoices/acme.pdf";
+    if (i.type === "number" && v) { const n = Number(v); if (!/^[+-]?\d+(\.\d+)?$/.test(v)) errors[i.name] = `"${v}" is not a number. Use digits, for example 1500`; else if (i.min != null && n < i.min) errors[i.name] = `Minimum is ${i.min}`; else if (i.max != null && n > i.max) errors[i.name] = `Maximum is ${i.max.toLocaleString("en")}`; }
+  }
+  return errors;
+}
+
+/* ======================= render ======================= */
+function render() {
+  const app = $("#app"); app.classList.toggle("phone", $("#phone").getAttribute("aria-pressed") === "true");
+  const r = routine();
+  const crumb = S.screen === "run" ? `Routines › ${esc(r.name)} › Run` : S.screen === "routine" ? `Routines › ${esc(r.name)}` : "Routines";
+  app.innerHTML = `
+    <div class="topbar">
+      <button class="btn ghost drawerbtn" type="button" onclick="act('drawer')" aria-label="Open routine list">☰</button>
+      <span class="brand">Crewship</span><span class="crumb muted">Online · Search ⌘K · Demo</span>
+      <span class="sp"></span>
+    </div>
+    <div class="subbar">
+      <b>Routines</b><span class="cnt muted">· ${S.routines.length} routines · ${S.runs.length} runs</span>
+      <span class="sp"></span>
+      <button class="btn ghost" type="button" title="Import a routine bundle from JSON">Import</button>
+      <button class="btn primary" type="button" onclick="act('newSheet')">+ New routine</button>
+    </div>
+    <div class="body">
+      <aside class="explorer ${S.drawer ? "open" : ""}" aria-label="Routine list">
+        <input class="search" placeholder="Search routines…  /" aria-label="Search routines">
+        <h4>Status</h4>
+        <div class="buckets">${[["All", S.routines.length, "muted"], ["Waiting for you", S.runs.filter((x) => x.state === "waiting").length, "warn"], ["Running", S.runs.filter((x) => x.state === "running").length, "live"], ["Completed", S.routines.filter((x) => x.lastState === "completed").length, "ok"], ["Could not finish", S.routines.filter((x) => x.lastState === "failed").length, "bad"], ["Never run", S.routines.filter((x) => x.lastState === "never").length, "muted"]].map(([l, n, t]) => `<button class="bucket" type="button"><span class="dot ${t}"></span>${l}<span class="n">${n}</span></button>`).join("")}</div>
+        <h4>Routines · ${S.routines.length}</h4>
+        ${S.routines.map((x) => `<button class="xrow" type="button" aria-current="${x.slug === S.slug && S.screen !== "list"}" onclick="act('select','${x.slug}')">${icon(x, true)}<span><span class="nm">${esc(x.name)}</span><span class="sub">${x.published ? esc(x.how) : "Draft · not published"}</span></span><span class="dot ${({ completed: "ok", failed: "bad", waiting: "warn", running: "live" }[x.lastState]) || "muted"}"></span></button>`).join("")}
+      </aside>
+      <main class="main"><div class="inner">${({ list: viewList, empty: viewEmpty, routine: viewRoutine, run: viewRun }[S.screen])()}</div></main>
+      ${S.sheet ? viewSheet() : ""}
+      ${S.toast ? `<div class="toast" role="status">${esc(S.toast)}</div>` : ""}
+    </div>`;
+  const nav = $("#pnav"); nav.innerHTML = Object.entries(screens).map(([k, v]) => `<button type="button" aria-current="${currentKey() === k}" data-k="${k}">${v}</button>`).join("");
+  nav.querySelectorAll("button").forEach((b) => b.addEventListener("click", () => openScreen(b.dataset.k)));
+  $("#pnote").textContent = notes[currentKey()] || "";
+}
+const notes = {
+  list: "Simulated: routines, runs and times are examples. The explorer stays as in the app.",
+  calendar: "Simulated: September 2026, today = 15th. Tue 16 has 39 planned starts — open it. Filters, grouping and the day agenda are the proposal; other views are described in place.",
+  empty: "Simulated: first-run state with the three ways in.",
+  new: "Simulated: “Describe it” answers are scripted; Fork copies locally; the CLI tile shows real commands.",
+  routine: "Simulated: Publish, Edit details and schedule changes update this page only.",
+  large: "Simulated: 101 steps (8 services × 12 checks). Map is the default above 12 steps; the list collapses big phases into groups.",
+  complex: "Simulated: modelled on the real ‘Docs drift audit’ on dev1 (10 steps, 9 dependencies) plus a foreach, a checker and two hooks to test readability.",
+  "run-live": "Simulated: steps advance on a timer; Approve/Reject completes the run locally.",
+  "run-failed": "Simulated: the plain-language reason is a proposed server projection, not today's error_message.",
+  "run-ok": "Simulated: result and ledger entry are examples.",
+  publish: "Simulated: the draft was ‘saved from the CLI’; publishing bumps the version locally.",
+};
+
+/* ---------- list ---------- */
+function viewList() {
+  const waiting = S.runs.filter((x) => x.state === "waiting").length;
+  const failed = S.routines.filter((x) => x.lastState === "failed").length;
+  const next = "Tue 16 Sept, 08:00 · Invoice intake";
+  return `
+    <div class="needs">
+      <button type="button" onclick="${waiting ? `act('openRun','${S.runs.find((x) => x.state === "waiting")?.id}')` : ""}"><span class="n" style="color:var(--warn)">${waiting}</span><span class="l"><b>Waiting for your decision</b>${waiting ? "Open the newest" : "Nothing right now"}</span></button>
+      <button type="button" onclick="act('select','morning-briefing')"><span class="n" style="color:var(--danger)">${failed}</span><span class="l"><b>Could not finish last time</b>Open the newest problem</span></button>
+      <button type="button" onclick="act('select','invoice-intake');act('tab','plan')"><span class="n" style="font-size:13px">08:00</span><span class="l"><b>Next planned start</b>${next}</span></button>
+    </div>
+    <div class="tabs" role="tablist" style="margin-top:-4px">${["routines", "calendar", "recent runs"].map((v) => `<button type="button" role="tab" aria-selected="${S.listView === v}" onclick="act('listView','${v}')">${v[0].toUpperCase() + v.slice(1)}</button>`).join("")}</div>
+    <div class="card">
+      ${S.listView === "routines" ? `
+      <div class="colhead"><span>Routine and purpose</span><span>Runs how</span><span>Last run</span><span></span></div>
+      <div class="rows">${S.routines.map((x) => `
+        <button class="row" type="button" onclick="act('select','${x.slug}')">
+          <span class="id">${icon(x)}<span style="min-width:0"><span class="nm">${esc(x.name)} ${x.published ? "" : `<span class="pill draft nodot">Draft</span>`}${x.published && x.draft ? `<span class="pill draft nodot" title="A draft newer than v${x.published} is waiting to be published">Draft r${x.draft.rev}</span>` : ""}</span><span class="pp" title="${esc(x.purpose)}">${esc(x.purpose)}</span></span></span>
+          <span class="how">${esc(x.how)}</span>
+          <span>${x.lastState === "never" ? `<span class="pill muted">Never run</span>` : `${pill(x.lastState)}<span class="small muted" style="display:block;margin-top:2px">${esc(x.lastWhen)}</span>`}</span>
+          <span class="chev">›</span>
+        </button>`).join("")}</div>` : S.listView === "calendar" ? `<div class="bd" style="display:flex;flex-direction:column;gap:12px">${viewCalendar()}</div>` : `<div class="timeline">${S.runs.map(runRow).join("")}</div>`}
+    </div>`;
+}
+const runRow = (x) => { const rr = S.routines.find((q) => q.slug === x.slug); const t = { completed: "ok", failed: "bad", waiting: "warn", running: "live", stopped: "muted" }[x.state]; return `<button class="trow" type="button" onclick="act('openRun','${x.id}')"><span class="dot ${t}"></span><span><b>${esc(rr.name)}</b> <span class="muted small">· ${esc(x.by)}</span><span class="small muted" style="display:block">${pill(x.state)} ${x.took ? "· took " + esc(x.took) : ""}${x.state === "failed" ? " · stopped at “Check the extraction”" : ""}</span></span><span class="when">${esc(x.started.split(" · ")[0])}</span><span class="v small muted">v${x.v} · ${esc(x.ago)}</span><span class="chev">›</span></button>`; };
+
+/* ---------- empty ---------- */
+function viewEmpty() {
+  return `<div class="card"><div class="bd empty">
+    <h2>No routines yet</h2>
+    <p style="max-width:52ch;margin:0 auto">A routine is a repeatable procedure your crew runs for you — like a recipe: what to provide, who does each step, what is checked, and when a person decides.</p>
+    <div class="ways">${waysIn()}</div>
+    <p class="small soft" style="margin-top:18px">Prefer an example first? <a href="#" onclick="act('fork','invoice-intake');return false">Copy the sample “Invoice intake”</a> — it is a draft until you publish it.</p>
+  </div></div>`;
+}
+const waysIn = () => `
+  <button class="tile rec" type="button" onclick="act('describe')"><span class="icon" style="background:var(--purple-soft);color:var(--purple)">✦</span><span><span class="tg">recommended</span><b>Describe it</b><span class="d">Tell the crew lead what should happen, in your words. It drafts the routine with you in chat and saves a <b>draft</b> — nothing runs until you publish.</span></span></button>
+  <button class="tile" type="button" onclick="act('setSheet','kind','fork')"><span class="icon" style="background:var(--primary-soft);color:var(--primary)">⑂</span><span><b>Copy an existing routine</b><span class="d">Start from one of your routines. The copy is a draft with a new name; schedules and history stay with the original.</span></span></button>
+  <button class="tile" type="button" onclick="act('setSheet','kind','cli')"><span class="icon" style="background:var(--hair);color:var(--muted)">&gt;_</span><span><span class="tg">for builders</span><b>Build it with the CLI</b><span class="d">Scripts, agent behaviour and checks are written as files and saved with <code>crewship routine draft</code>. The web shows the draft and publishes it.</span></span></button>`;
+
+/* ---------- routine page ---------- */
+function viewRoutine() {
+  const r = routine();
+  const live = S.runs.find((x) => x.slug === r.slug && ["running", "waiting", "queued"].includes(x.state));
+  return `
+    <div class="card"><div class="bd">
+      <div class="ident"><span style="position:relative"><button class="iconbtn" type="button" title="Change icon and colour" onclick="S.picker=!S.picker;render()">${icon(r)}</button>${S.picker ? iconPicker(r) : ""}</span>
+        <div style="min-width:0;flex:1">
+          <h1>${esc(r.name)}</h1>
+          <div class="state">${versionLine(r)}</div>
+          <p class="purpose">${esc(r.purpose)}</p>
+        </div>
+        <div class="actions">
+          <button class="btn lg primary" type="button" ${r.published ? "" : "disabled title='Publish the draft first'"} onclick="act('runSheet')">▶ Run</button>
+          ${r.draft ? `<button class="btn lg" type="button" onclick="act('publishSheet')">Publish draft r${r.draft.rev}</button>` : ""}
+          <button class="btn lg" type="button" onclick="act('editDetails')">Edit</button>
+          <button class="btn lg kebab" type="button" aria-label="More" title="Copy · Export · Disable · Delete">⋯</button>
+        </div>
+      </div>
+    </div></div>
+    ${live ? `<div class="banner ${live.state === "waiting" ? "warn" : "live"}"><span class="ic">${live.state === "waiting" ? "?" : "▶"}</span><div class="b"><div class="t">${live.state === "waiting" ? "A run is waiting for your decision" : "A run is in progress"} · started ${esc(live.ago)}</div><div class="small muted">${live.state === "waiting" ? "Step 3 “Ask Finance when over the limit” · expires in 23 h 56 min" : "Step 1 “Read the invoice” · Nora is reading the PDF"}</div></div><button class="btn" type="button" onclick="act('openRun','${live.id}')">${live.state === "waiting" ? "Decide" : "Watch"}</button></div>` : ""}
+    <div class="tabs" role="tablist">${[["overview", "Overview"], ["history", "History", runsOf(r.slug).length], ["versions", "Versions", r.versions?.length || 0], ["plan", "Plan", r.schedules?.length || 0]].map(([k, l, n]) => `<button type="button" role="tab" aria-selected="${S.tab === k}" onclick="act('tab','${k}')">${l}${n != null ? `<span class="n">${n}</span>` : ""}</button>`).join("")}</div>
+    ${({ overview: tabOverview, history: tabHistory, versions: tabVersions, plan: tabPlan }[S.tab])(r)}`;
+}
+/* Icon and colour popover, as CrewIconPopover in the app (345 icons, categories). Saved immediately via the appearance endpoint — not a draft. */
+function iconPicker(r) {
+  const colors = ["#1E7BFE", "#3ec27a", "#a98bff", "#e2ab3f", "#ef5b4c", "#22c8d8", "#7bd66a", "#e06ac4"];
+  const glyphs = ["◇", "◈", "⌂", "☰", "⚙", "✦", "⚑", "☷", "▤", "⌘", "✉", "☎", "♞", "❖", "⚖", "✎", "⌁", "◔", "⊞", "♺", "☁", "✈", "♥", "⌬"];
+  return `<div class="picker" role="dialog" aria-label="Pick a colour and an icon"><div class="colors">${colors.map((c) => `<button type="button" aria-pressed="${c === r.color}" style="background:${c}22;color:${c}" onclick="routine().color='${c}';render()">${r.initials}</button>`).join("")}</div><div class="small muted">Pick a colour, then choose an icon below</div><input class="search" placeholder="Search icons…" style="margin:8px 0 0"><div class="cats">${["Business", "Engineering", "Development", "Design", "Operations", "Marketing", "Security", "Data", "Finance", "Support"].map((c) => `<span>${c}</span>`).join("")}</div><div class="grid">${glyphs.map((g) => `<button type="button" aria-pressed="${r.glyph === g}" onclick="routine().glyph='${g}';routine().initials='${g}';S.picker=false;render()">${g}</button>`).join("")}</div><div class="small soft" style="text-align:center;margin-top:6px">345 icons available · saved at once, not a draft</div></div>`;
+}
+/* Files as a tree under /crew/shared, as the agent Files panel draws it; a click opens a read-only preview beside it. */
+function filesCard(r) {
+  const files = r.files || []; const open = S.fileOpen; const fold = S.fold || (S.fold = {});
+  const dirs = {}; for (const f of files) { const parts = f.path.split("/"); const dir = f.dir ? f.path : parts.length > 1 ? parts.slice(0, -1).join("/") + "/" : ""; (dirs[dir] = dirs[dir] || []).push(f); }
+  const glyphDir = (open) => `<span class="fo">${open ? "▾" : "▸"}</span><span class="fo">🗀</span>`;
+  const rows = [];
+  for (const dir of Object.keys(dirs).sort()) {
+    const dirFiles = dirs[dir].filter((f) => !f.dir); const dirOnly = dirs[dir].find((f) => f.dir);
+    if (dir) rows.push(`<button class="ftrow" type="button" onclick="S.fold['${dir}']=!S.fold['${dir}'];render()">${glyphDir(!fold[dir])}<span class="nm">${esc(dir)}</span><span class="use">${dirOnly ? `${dirOnly.count} files · used by ${esc(dirOnly.what.replace(/^\d+ check scripts for /, ""))}` : `${dirFiles.length} file${dirFiles.length > 1 ? "s" : ""}`}</span><span class="sz">${dirOnly ? esc(dirOnly.updated) : ""}</span></button>`);
+    if (fold[dir]) continue;
+    for (const f of dirFiles) rows.push(`<button class="ftrow" type="button" aria-current="${open === f.path}" onclick="S.fileOpen=S.fileOpen==='${f.path}'?null:'${f.path}';render()" style="${dir ? "padding-left:26px" : ""}"><span></span>${fileGlyph(f.path)}<span class="nm">${esc(f.path.split("/").pop())} ${f.present ? "" : `<span class="pill bad nodot" style="font-family:var(--sans)">Missing on the share</span>`}</span><span class="use">${esc(nameOf(r, f.by))}</span><span class="sz">${esc(f.size)}</span></button>`);
+    if (dirOnly && !fold[dir]) rows.push(`<div class="ftrow" style="padding-left:26px;color:var(--soft)"><span></span><span class="fo">…</span><span class="nm">${dirOnly.count} scripts, one per check</span><span class="use">${esc(nameOf(r, "warm") ? "phase 3" : "")}</span><span></span></div>`);
+  }
+  const f = files.find((x) => x.path === open); const text = f ? FILE_TEXT[f.path] : null;
+  const viewer = !f ? "" : `<div class="viewer"><div class="vh">${fileGlyph(f.path)}<span class="path">/crew/shared/${esc(f.path)}</span><span class="small muted">${f.present ? (text ? `${text.length.toLocaleString("en")} chars · read-only` : "read-only") : "not on the share"}</span><a href="#" class="small" onclick="return false">Open in Files ↗</a><button class="btn ghost" type="button" aria-label="Close preview" onclick="S.fileOpen=null;render()">✕</button></div>${text ? `<pre>${text.split("\n").map((l, i) => `<span class="ln">${i + 1}</span>${esc(l).replace(/^(\s*)(\/\/.*|#.*)$/, "$1<span class=\"c\">$2</span>")}`).join("\n")}</pre>` : `<div class="bd muted small">${f.present ? "Preview is not available for this file type." : "The recipe declares this file, but it is not on the crew share. Put it there with <code>crewship crew files save " + esc(r.crew || "finance").toLowerCase() + " shared/" + esc(f.path) + " --file …</code>"}</div>`}</div>`;
+  return `<div class="card fcard ${f ? "split" : ""}"><div class="hd"><span>Files this routine runs · ${files.filter((x) => !x.dir).length + files.filter((x) => x.dir).reduce((a, x) => a + x.count, 0)}</span><span class="sp"></span><span style="text-transform:none;letter-spacing:0;font-weight:400">changed with <code>crewship crew files save</code> · what a file does comes from its header comment</span></div>
+    <div class="tree"><div class="root">/crew/shared/ · crew ${esc(r.crew || "Finance")}</div>${rows.join("")}</div>${viewer}</div>`;
+}
+function tabOverview(r) {
+  const inputs = r.inputs || [];
+  const humans = r.steps?.filter((s) => s.role === "human") || [];
+  const effects = r.steps?.filter((s) => s.effect) || [];
+  return `
+    <div class="card"><div class="hd">In one look</div>
+      <div class="answers">
+        <div><div class="q">What you get</div><div class="a">${{ "invoice-intake": "The invoice posted to the ledger (entry number) and a note in #finance.", "docs-drift-audit": "One report: every confirmed drift with the doc line and the code line, posted to the workspace and the Docs status page.", "nightly-regression-matrix": "One matrix in #quality: 8 services × 12 checks against last night's build, with flaky failures separated from real ones." }[r.slug] || "A draft note per contract owner, sent after you approve it."}</div></div>
+        <div><div class="q">What you provide</div><div class="a">${inputs.length ? inputs.map((i) => `<b>${esc(i.label)}</b>${i.required ? "" : " <span class='soft'>(optional)</span>"}`).join(", ") : "Nothing — Run starts immediately."}</div></div>
+        <div><div class="q">Who does the work</div><div class="a">${r.steps ? (() => { const all = [...r.steps, ...r.steps.flatMap((s) => s.children || [])]; const agents = [...new Set(all.filter((s) => ["agent", "check"].includes(s.role)).map((s) => s.who.split(" (")[0]))]; const people = all.filter((s) => s.role === "human").map((s) => s.who); const scripts = (r.files || []).filter((f) => !["yaml", "md"].includes(f.lang)).length; return [agents.length ? `${agents.join(" and ")} (agents)` : "", ...people, scripts ? `${scripts} script${scripts > 1 ? "s" : ""} on the crew share` : "", all.some((s) => s.role === "notify") ? "Slack" : "", all.some((s) => s.role === "crewship") ? "Pages" : ""].filter(Boolean).join(", "); })() : "Lead agent"}</div></div>
+        <div><div class="q">What is checked</div><div class="a">${r.steps ? (() => { const all = [...r.steps, ...r.steps.flatMap((s) => s.children || [])]; const c = all.filter((s) => s.rules || s.checks); return c.length ? c.map((s) => `${(s.rules || s.checks).length} ${s.checker ? `rules by ${s.checker}` : "checks"} on “${esc(s.name)}”`).join("; ") + "." : "No checks declared — completion alone does not prove quality."; })() : "No checks declared — completion alone does not prove quality."}</div></div>
+        <div><div class="q">When it needs you</div><div class="a">${humans.length ? humans.map((h) => `${esc(h.cond)} · answer within ${esc(h.expires)}`).join("; ") : "Never — it runs without a decision."}</div></div>
+        <div><div class="q">What it can touch</div><div class="a">${r.steps ? (() => { const all = [...r.steps, ...r.steps.flatMap((s) => s.children || [])]; const eff = [...new Set(all.filter((s) => s.effect).map((s) => s.effect))]; const creds = [...new Set(all.flatMap((s) => s.tools || []).filter((t) => /token/i.test(t)))]; const hosts = all.filter((s) => s.role === "http").map((s) => s.who.replace(/^\w+ /, "")); return `${eff.join(" ") || "No external writes declared."}${hosts.length ? ` Calls ${[...new Set(hosts)].join(", ")}.` : ""}${creds.length ? ` Uses ${creds.join(", ")} from the crew vault.` : ""} Stopping does not undo what already happened.${r.limits ? ` Cost cap $${r.limits.cost} per run.` : ""}`; })() : "Reads files only."}</div></div>
+      </div>
+    </div>
+    ${r.steps ? (() => { const big = r.steps.length > 12; const view = S.stepsView || (big ? "map" : "list"); const rows = view === "list" ? stepsList(r) : []; const total = r.steps.length + r.steps.reduce((a, s) => a + (s.children?.length || 0), 0); const limit = 9; const more = !big && rows.length > limit && !S.stepsAll; return `<div class="card"><div class="hd"><span>How it works · ${r.steps.length} steps${total > r.steps.length ? ` (${total} with nested)` : ""}${r.hooks ? " · 2 hooks" : ""}</span><span class="sp"></span>${r.steps.some((s) => s.needs?.length) ? `<span style="text-transform:none;letter-spacing:0;font-weight:400">Phases come from declared dependencies; steps in one phase may run in parallel</span>` : ""}<span class="seg"><button type="button" aria-pressed="${view === "list"}" onclick="S.stepsView='list';render()">List</button><button type="button" aria-pressed="${view === "map"}" onclick="S.stepsView='map';render()">Map</button></span></div>
+      ${view === "map" ? stepsMap(r) : `<div class="steps">${(more ? rows.slice(0, limit) : rows).join("")}${more ? `<div class="bd"><button class="btn" type="button" onclick="S.stepsAll=true;render()">Show all ${rows.length} rows</button></div>` : ""}</div>`}</div>
+    ${filesCard(r)}`; })() : `<div class="card"><div class="bd muted">The lead agent is still drafting the steps from your description. Open the chat to finish, or publish once they look right.</div></div>`}
+    <div class="grid2">
+      ${lastRunCard(r)}
+      <div class="card"><div class="hd">Plan</div><div class="bd">${r.schedules?.length ? r.schedules.map((s) => `<div class="small"><b>${esc(s.label)}</b> · ${esc(s.tz)} · ${s.enabled ? "on" : "off"} · uses ${s.uses === "latest" ? `latest published (v${r.published})` : "pinned " + s.uses}</div>`).join("") : "<span class='muted'>Manual only.</span>"} <div style="margin-top:8px"><button class="btn" type="button" onclick="act('tab','plan')">Change plan</button></div></div></div>
+    </div>
+    <details class="tech"><summary>Technical details · identifier, version hash, access, budget, webhooks, automations</summary><pre>slug: ${esc(r.slug)}
+published: v${r.published}   hash: 8f3a1c…   dsl: 1.0
+credentials: ERP token (crew vault)   egress: erp.example.internal
+budget: $2.00 per run (workspace cap applies)
+webhooks: none   automations: none</pre></details>`;
+}
+/* Last run — the app's tinted-header card, kept as is: colour says how it ended before a word is read. */
+const lastRunCard = (r) => { const x = runsOf(r.slug)[0]; if (!x) return `<div class="lastrun muted"><div class="lh"><span class="lc">·</span><div><b>Last run</b><div class="small muted">Not run yet</div></div></div></div>`; const t = { completed: "ok", failed: "bad", waiting: "warn", running: "warn", stopped: "muted" }[x.state] || "muted"; const [w] = stateWord[x.state]; return `<div class="lastrun ${t}"><div class="lh"><span class="lc">${{ ok: "✓", bad: "✕", warn: "?", muted: "■" }[t]}</span><div style="min-width:0"><b>Last run · ${w}</b><div class="small muted mono" style="font-size:10.5px">${esc(x.id)}</div></div></div><div class="lb"><dl class="facts"><dt>Started</dt><dt>Duration</dt><dt>Version</dt><dd>${esc(x.ago)}</dd><dd>${esc(x.took || "—")}</dd><dd>v${x.v}</dd></dl>${x.state === "failed" ? `<div class="small" style="margin-top:8px">Stopped at “Check the extraction”: ${esc(x.plain.split(".")[0])}.</div>` : x.state === "waiting" ? `<div class="small" style="margin-top:8px">Waiting for Finance to decide.</div>` : x.posted ? `<div class="small" style="margin-top:8px">${esc(x.posted)}</div>` : ""}<div style="margin-top:8px"><a href="#" onclick="act('openRun','${x.id}');return false">Open run ↗</a></div></div></div>`; };
+function tabHistory(r) { return `<div class="card"><div class="hd"><span>Runs</span><span class="sp"></span><span class="small muted" style="text-transform:none;letter-spacing:0">Times in UTC · newest first</span></div><div class="timeline">${runsOf(r.slug).map(runRow).join("") || `<div class="bd muted">No runs recorded yet.</div>`}</div></div>`; }
+function tabVersions(r) {
+  return `<div class="card"><div class="hd">Versions</div>
+    ${r.draft ? `<div class="ver" style="background:var(--purple-soft)"><span class="v">Draft</span><div><b>r${r.draft.rev}</b> · saved ${esc(r.draft.ago)} by ${esc(r.draft.by)} via ${esc(r.draft.via)}<div class="small muted">${esc(r.draft.note)} · not used by Run or schedules until published</div></div><div class="actions"><button class="btn primary" type="button" onclick="act('publishSheet')">Review and publish</button><button class="btn ghost" type="button" onclick="act('discardDraft')">Discard</button></div></div>` : ""}
+    ${(r.versions || []).map((v) => `<div class="ver"><span class="v">v${v.v}</span><div>${v.published ? `<span class="pill ok nodot">Published · Run uses this</span>` : ""} <span class="small muted">${esc(v.when)} · ${esc(v.by)}</span><div class="small">${esc(v.note)}</div></div><div class="actions"><button class="btn" type="button">View</button>${v.published ? "" : `<button class="btn ghost" type="button" title="Publishes this version again as a new version; history is not rewritten">Restore as draft</button>`}</div></div>`).join("") || `<div class="bd muted">Nothing published yet.</div>`}
+    <div class="bd small muted">Compare two published versions on the same inputs: live runs, real costs — <a href="#" onclick="return false">Compare…</a></div></div>`;
+}
+function tabPlan(r) {
+  return `<div class="card"><div class="hd"><span>Repeating</span><span class="sp"></span><button class="btn" type="button">+ Add</button></div>
+    ${r.schedules.filter((s) => s.kind === "repeat").map((s) => `<div class="srow"><button class="switch" role="switch" aria-checked="${s.enabled}" aria-label="Schedule on" onclick="act('planToggle','${s.id}')"></button><div><b>${esc(s.label)}</b> · ${esc(s.tz)}<div class="small muted">Uses the <b>latest published</b> version (now v${r.published}) · next ${s.enabled ? esc(s.next) : "— off"} · with: ${Object.entries(s.preset).map(([k, v]) => `${esc(k.replace(/_/g, " "))} ${esc(v)}`).join(", ")}</div></div><div class="actions"><button class="btn" type="button" onclick="act('planEdit','${s.id}')">Edit</button></div></div>`).join("") || `<div class="bd muted">No repeating schedule.</div>`}
+  </div>
+  <div class="card"><div class="hd"><span>One-time starts</span><span class="sp"></span><button class="btn" type="button" onclick="act('runSheet',null,'v${r.published}')">+ Schedule a start</button></div>
+    ${r.schedules.filter((s) => s.kind === "once").map((s) => `<div class="srow"><span class="dot live" style="margin:0 8px"></span><div><b>${esc(s.label)}</b> · ${esc(s.tz)}<div class="small muted">Pinned to <b>${esc(s.uses)}</b> — publishing a newer version does not change this start · with: ${Object.entries(s.preset).map(([k, v]) => `${esc(k.replace(/_/g, " "))} ${esc(v)}`).join(", ")}</div></div><div class="actions"><button class="btn" type="button" onclick="act('planEdit','${s.id}')">Edit</button></div></div>`).join("") || `<div class="bd muted">No one-time start planned.</div>`}
+  </div>
+  <details class="tech"><summary>Other ways this routine starts · webhooks, automations, overlap rules</summary><pre>webhooks: none
+automations: none
+if a run is already going: wait for it to finish (max 1 at a time)</pre></details>`;
+}
+
+/* ---------- run page ---------- */
+function viewRun() {
+  const r = routine(); const x = S.runs.find((q) => q.id === S.runId);
+  const order = ["extract", "verify", "decide", "post", "notify"];
+  const stepState = (s) => {
+    const i = order.indexOf(s.id), cur = order.indexOf(x.at || "notify");
+    if (x.state === "completed") return x.skipped?.includes(s.id) ? "skip" : "ok";
+    if (x.state === "stopped") return i < cur ? "ok" : i === cur ? "skip" : "skip";
+    if (x.state === "failed") return i < cur ? "ok" : i === cur ? "bad" : "skip";
+    if (x.state === "waiting") return i < cur ? "ok" : i === cur ? "wait" : "";
+    return i < cur ? "ok" : i === cur ? "live" : "";
+  };
+  const head = {
+    waiting: `<div class="banner warn"><span class="ic">?</span><div class="b"><div class="t">Finance needs to decide</div><div class="small">The invoice total (12 480 CZK) is over the auto-approve limit (${esc(x.inputs.auto_approve_limit)} CZK). Nothing has been posted yet. This is the same decision shown in Inbox. Expires in 23 h 56 min.</div></div></div>`,
+    running: `<div class="banner live"><span class="ic">▶</span><div class="b"><div class="t">Work in progress · step ${order.indexOf(x.at) + 1} of 5, “${esc(r.steps[order.indexOf(x.at)].name)}”</div><div class="small">${x.at === "extract" ? "Nora is reading the PDF with pdf-read and ocr." : "Vale is checking the extracted numbers against 4 rules."}</div></div><button class="btn danger" type="button" onclick="act('stopSheet')">Stop</button></div>`,
+    failed: `<div class="banner bad"><span class="ic">✕</span><div class="b"><div class="t">Stopped at step 2, “Check the extraction”</div><div class="small">${esc(x.plain)}</div><div class="small" style="margin-top:6px"><b>Kept:</b> what Nora read (below). <b>Not done:</b> Finance was not asked, nothing was posted, #finance was not told.</div></div></div>`,
+    completed: `<div class="banner ok"><span class="ic">✓</span><div class="b"><div class="t">Done · ${esc(x.posted || "finished")}</div><div class="small">${x.decided ? esc(x.decided) + " · " : ""}${x.skipped?.includes("decide") ? "Under the limit, so Finance was not asked. " : ""}${x.inputs.notify_finance === "true" ? "#finance was told." : "#finance was not told (turned off for this run)."}</div></div></div>`,
+    stopped: `<div class="banner"><span class="ic">■</span><div class="b"><div class="t">Stopped</div><div class="small">${esc(x.stopReason || "Pending work was cancelled. What already happened is not undone.")}</div></div></div>`,
+  }[x.state];
+  const canRunAgain = ["failed", "completed", "stopped"].includes(x.state);
+  return `
+    <button class="btn ghost" type="button" onclick="act('back')" style="align-self:flex-start">‹ Back to ${esc(r.name)}</button>
+    <div class="card"><div class="bd"><div class="ident">${icon(r)}
+      <div style="min-width:0;flex:1"><h1>${esc(r.name)} <span class="muted" style="font-weight:400">· run</span></h1>
+        <div class="state">${pill(x.state)} <span>started ${esc(x.started)}</span><span>· ${esc(x.by)}</span><span>· recipe <b>v${x.v}</b>${x.v < r.published ? ` <span class="soft">(v${r.published} is published now)</span>` : ""}</span>${x.took ? `<span>· took ${esc(x.took)}</span>` : ""}</div></div>
+      <div class="actions">
+        ${x.state === "waiting" ? `<button class="btn lg primary" type="button" onclick="act('decide',true)">Approve</button><button class="btn lg" type="button" onclick="act('decide',false)">Reject</button><button class="btn lg ghost danger" type="button" onclick="act('stop')">Stop run</button>` : ""}
+        ${x.state === "running" ? `<button class="btn lg danger" type="button" onclick="act('stop')">Stop run</button>` : ""}
+        ${canRunAgain ? `<button class="btn lg primary" type="button" onclick="act('runSheet',${JSON.stringify(x.inputs).replace(/"/g, "&quot;")},'v${r.published}')">Run again</button>` : ""}
+        ${x.state === "failed" ? `<button class="btn lg" type="button" onclick="act('askFix')">Ask the lead to fix it</button>` : ""}
+      </div></div></div></div>
+    ${head}
+    ${x.state === "waiting" ? `<div class="card"><div class="hd">Your decision</div><div class="bd" style="display:flex;flex-direction:column;gap:10px">
+      <dl class="result"><dt>Supplier</dt><dd>${esc(x.extracted.supplier)}</dd><dt>Total</dt><dd>${esc(x.extracted.total)}</dd><dt>VAT id</dt><dd>${esc(x.extracted.vat)}</dd><dt>Due</dt><dd>${esc(x.extracted.due)}</dd><dt>Checks</dt><dd style="font-family:var(--sans)">4 of 4 passed</dd></dl>
+      <div class="field"><label>Note for the record <span class="ty">optional</span></label><input type="text" placeholder="e.g. Approved — PO 2026-118"></div>
+      <div class="actions"><button class="btn primary" type="button" onclick="act('decide',true)">Approve and post</button><button class="btn" type="button" onclick="act('decide',false)">Reject — do not post</button><span class="small muted">One answer counts; a second answer from Inbox is refused.</span></div>
+    </div></div>` : ""}
+    ${x.state === "failed" ? `<div class="card"><div class="hd">What to do next</div><div class="bd small" style="display:flex;flex-direction:column;gap:6px">
+      <div>• <b>If the invoice is wrong</b>: fix or replace the file, then <a href="#" onclick="act('runSheet',${JSON.stringify(x.inputs).replace(/"/g, "&quot;")},'v${r.published}');return false">run again</a> — a new run, it does not resume this one.</div>
+      <div>• <b>If the rule is too strict</b>: <a href="#" onclick="act('askFix');return false">ask the lead agent</a> to change the check, or edit it with the CLI. Either way you get a draft to publish.</div>
+      <div>• <b>Same invoice keeps failing?</b> This is the 2nd time for Novák & syn this month — see <a href="#" onclick="act('tab','history');act('back');return false">History</a>.</div>
+    </div></div>` : ""}
+    <div class="card"><div class="hd"><span>What happened, step by step</span><span class="sp"></span><span class="seg"><button type="button" aria-pressed="true">List</button><button type="button">Map</button></span></div>
+      <div class="steps">${r.steps.map((s, i) => { const st = stepState(s); return `
+        <div class="step ${st === "bad" ? "bad" : st === "wait" ? "wait" : st === "live" ? "cur" : ""}">${stepIcon(s, st)}
+          <div><div class="nm">${esc(s.name)}</div>
+            <div class="who">${stepBits(s)}</div>
+            ${stepDetail(s, st, x)}
+          </div>
+          <span class="st">${{ ok: "Done", bad: `Failed · ${x.attempts || 1} attempts`, wait: "Waiting · 4 min", live: "Running…", skip: x.state === "completed" ? "Skipped · under the limit" : "Not run", "": "Not yet" }[st]}</span>
+        </div>`; }).join("")}</div></div>
+    <details class="tech"><summary>Inputs used for this run</summary><pre>${Object.entries(x.inputs).map(([k, v]) => `${k}: ${v === "" ? "(empty)" : v}`).join("\n")}</pre></details>
+    <details class="tech"><summary>Technical details · run id, hash, cost, raw error, every attempt, activity log</summary><pre>run: ${esc(x.id)}
+recipe hash: 8f3a1c9e…   cost: $0.0412   mode: live
+${x.raw ? "error: " + esc(x.raw) : ""}
+attempts: extract 1 · verify ${x.attempts || 1} · post ${x.posted ? 1 : 0}</pre></details>`;
+}
+function stepDetail(s, st, x) {
+  if (s.id === "extract" && ["ok", "live"].includes(st)) return `<div class="det">${st === "live" ? `<div class="agentline"><span class="t">10:41:03</span><span>Opened <span class="tool">pdf-read</span> on ${esc(x.inputs.invoice_path.split("/").pop())}</span></div><div class="agentline"><span class="t">10:41:09</span><span>Page 2 is a scan → <span class="tool">ocr</span></span></div><div class="agentline"><span class="t">10:41:14</span><span>Extracting line items…</span></div>` : x.extracted ? `<dl class="result"><dt>Supplier</dt><dd>${esc(x.extracted.supplier)}</dd><dt>Total</dt><dd>${esc(x.extracted.total)} · ${x.extracted.lines} lines</dd><dt>VAT id</dt><dd>${esc(x.extracted.vat)}</dd><dt>Due</dt><dd>${esc(x.extracted.due)}</dd></dl><div class="small muted" style="margin-top:6px">Used pdf-read, ocr · 1 attempt · 38 s</div>` : ""}</div>`;
+  if (s.id === "verify" && x.checks) return `<div class="det">${s.rules.map((r, i) => `<div>${x.checks[i] ? `<span style="color:var(--success)">✓</span>` : `<span style="color:var(--danger)">✕</span>`} ${esc(r)}${!x.checks[i] ? ` — <b>12 480 ≠ 12 840</b>` : ""}</div>`).join("")}${st === "bad" ? `<div class="small muted" style="margin-top:6px">Tried 3 times: fast → balanced → strong model. Same numbers each time.</div>` : st === "live" ? `<div class="small muted" style="margin-top:6px">Checking…</div>` : ""}</div>`;
+  if (s.id === "decide" && st === "wait") return `<div class="det">Waiting for Finance approvers since ${esc(x.started.split(", ")[1])} · <a href="#" onclick="return false">also in Inbox</a></div>`;
+  if (s.id === "decide" && x.decided) return `<div class="det">${esc(x.decided)}</div>`;
+  if (s.id === "post" && x.posted) return `<div class="det">${esc(x.posted)} · ERP answered 201 · 1 attempt<div class="small muted" style="margin-top:4px">Ran ${fileChip("scripts/ledger-post.go")} with <code>go run</code> · exit 0 · 1.2 s · <a href="#" onclick="return false">stdout ↗</a></div></div>`;
+  return "";
+}
+
+/* ---------- sheets ---------- */
+function viewSheet() {
+  const k = S.sheet.kind;
+  const body = { run: sheetRun, publish: sheetPublish, details: sheetDetails, plan: sheetPlan, new: sheetNew, describe: sheetDescribe, fork: sheetFork, cli: sheetCli, stop: sheetStop }[k]();
+  return `<div class="scrim" onclick="if(event.target===this)act('sheetClose')"><section class="sheet" role="dialog" aria-modal="true" aria-label="${esc(body.title)}">
+    <div class="hd"><div><div class="crumbs">Routines${["run", "publish", "details", "plan", "stop"].includes(k) ? ` › ${esc(routine().name)}` : ""}</div><h2>${body.title}</h2>${body.sub ? `<div class="small muted">${body.sub}</div>` : ""}</div><button class="btn ghost x" type="button" aria-label="Close" onclick="act('sheetClose')">✕</button></div>
+    <div class="bd">${body.html}</div>
+    <div class="ft">${body.foot}</div></section></div>`;
+}
+function sheetRun() {
+  const r = routine(); const errs = S.errors; const n = Object.keys(errs).length; const isOnce = false;
+  const versions = [`v${r.published}`]; if (S.sheet.prefill) versions.push("v2");
+  return {
+    title: `Run ${esc(r.name)}`,
+    sub: `Uses <b>${esc(S.sheet.version)}</b>${r.draft ? ` — the unpublished draft r${r.draft.rev} is not used` : ""} · a new run is added to History`,
+    html: `
+      <div style="display:flex;flex-wrap:wrap;gap:6px"><span class="pchip set"><span class="g">▣</span>Version ${esc(S.sheet.version)}</span><span class="pchip"><span class="g">👥</span>Crew · Finance</span><span class="pchip"><span class="g">✋</span>Finance decides above the limit</span><span class="pchip"><span class="g">$</span>≈ $0.05</span><span class="pchip"><span class="g">⏱</span>≈ 2 min</span></div>
+      ${S.sheet.prefill ? `<div class="field"><label>Version</label><select onchange="act('setSheet','version',this.value)">${versions.map((v) => `<option ${v === S.sheet.version ? "selected" : ""}>${v}${v === `v${r.published}` ? " · published" : " · what the earlier run used"}</option>`).join("")}</select><div class="hint">Values below are copied from the earlier run. A new run repeats the work; it does not resume the earlier one.</div></div>` : ""}
+      ${n ? `<div class="errsum" role="alert">${n === 1 ? "1 answer needs a fix" : n + " answers need a fix"} — see below.</div>` : ""}
+      ${r.inputs.map((i) => {
+        const v = S.form[i.name] ?? ""; const e = errs[i.name]; const changed = v !== i.default;
+        const ctl = i.type === "select" ? `<select id="f-${i.name}" onchange="act('field','${i.name}',this.value)">${i.options.map((o) => `<option ${o === v ? "selected" : ""}>${o}</option>`).join("")}</select>`
+          : i.type === "boolean" ? `<label class="check"><input type="checkbox" id="f-${i.name}" ${v === "true" ? "checked" : ""} onchange="act('field','${i.name}',this.checked?'true':'false')"> ${v === "true" ? "Yes" : "No"}</label>`
+          : `<input id="f-${i.name}" type="text" value="${esc(v)}" aria-invalid="${!!e}" aria-describedby="h-${i.name}${e ? " e-" + i.name : ""}" oninput="act('field','${i.name}',this.value)" onblur="act('blur','${i.name}')" ${i.type === "number" ? 'inputmode="decimal"' : ""}>`;
+        return `<div class="field"><label for="f-${i.name}">${esc(i.label)} ${i.required ? `<span class="req" aria-hidden="true">*</span>` : ""}<span class="ty">${i.type === "number" ? "number" : i.format === "absolute_path" ? "path" : i.type === "boolean" ? "" : i.type === "select" ? "choice" : "text"}</span></label>${ctl}${i.hint ? `<div class="hint" id="h-${i.name}">${esc(i.hint)}</div>` : ""}${e ? `<div class="err" id="e-${i.name}" role="alert">${esc(e)}</div>` : ""}${changed && i.type !== "boolean" && i.default !== "" ? `<div class="chg">Changed from the recipe default (${esc(i.default)}) · <button type="button" onclick="act('restore','${i.name}')">Restore default</button></div>` : ""}</div>`;
+      }).join("")}
+      <div class="small muted" style="border-top:1px solid var(--hair);padding-top:10px"><b>This run will:</b> read the file with Nora, check it with Vale, ask Finance if the total is over ${esc(S.form.auto_approve_limit || "?")} CZK, write to the ERP ledger and ${S.form.notify_finance === "true" ? "post to #finance" : "stay quiet"}. Stopping does not undo the ledger write. Estimated cost ≈ $0.05.</div>
+      <p class="small soft">Prototype tip: a limit of 9000 or the path <code>invoices/x.pdf</code> shows field errors. Any valid limit under 12 480 sends the simulated run to Finance.</p>`,
+    foot: `<span class="hint">Esc closes · nothing has started</span><button class="btn lg" type="button" onclick="act('sheetClose')">Cancel</button><button class="btn lg primary" type="button" onclick="act('submitRun')">▶ Run now</button>`,
+  };
+}
+function sheetPublish() {
+  const r = routine(); const d = r.draft;
+  return {
+    title: `Publish draft r${d.rev} as v${r.published + 1}`,
+    sub: `Saved ${esc(d.ago)} by ${esc(d.by)} via ${esc(d.via)}`,
+    html: `
+      <div class="card"><div class="hd">What changes vs v${r.published}</div><div class="bd diff">
+        <span class="k">Inputs</span><span><span class="chgd">Changed</span> · “Auto-approve up to” default 1 500 → 2 000</span>
+        <span class="k">Steps</span><span><span class="chgd">Changed</span> · “Check the extraction”: rule 4 now allows USD</span>
+        <span class="k">People</span><span>Unchanged · Finance approvers</span>
+        <span class="k">Effects</span><span>Unchanged · ERP ledger write, Slack #finance</span>
+        <span class="k">Access</span><span>Unchanged · no new credentials or hosts</span>
+      </div></div>
+      <div class="card"><div class="hd">Checked</div><div class="bd small">Recipe parses; every step references a known agent, tool and input; the weekday schedule's saved answers still fit the new inputs. <span class="muted">This check runs no agents, scripts or services — it is not a test run.</span></div></div>
+      <div class="card"><div class="hd">After publishing</div><div class="bd small" style="display:flex;flex-direction:column;gap:4px">
+        <div>• <b>Run</b> and the <b>weekday schedule</b> use v${r.published + 1} from the next start.</div>
+        <div>• The one-time start on Fri 19 Sept stays on <b>v2</b> (pinned).</div>
+        <div>• The run waiting for Finance keeps <b>v${r.published}</b>; it is not changed.</div>
+        <div>• v${r.published} stays in Versions and can be restored.</div>
+      </div></div>
+      <details class="tech"><summary>Technical details · full diff</summary><pre>- default: 1500
++ default: 2000
+- rule: currency in [CZK, EUR]
++ rule: currency in [CZK, EUR, USD]</pre></details>`,
+    foot: `<span class="hint">Nothing runs on publish</span><button class="btn lg ghost" type="button" onclick="act('discardDraft')">Discard draft</button><button class="btn lg" type="button" onclick="act('sheetClose')">Not now</button><button class="btn lg primary" type="button" onclick="act('publish')">Publish v${r.published + 1}</button>`,
+  };
+}
+/* Edit — only what the DSL lets a person change without files: identity (appearance endpoint, saved at once),
+   inputs (InputSpec), result labels (OutputSpec), limits (max_cost_usd, concurrency, execution_tier, guardrails,
+   estimates), slash command (SlashSpec). Steps, checks, hooks, scripts and prompts are CLI / lead. */
+function sheetDetails() {
+  const r = routine(); const sh = S.sheet;
+  const defChanged = !!sh.promptsDirty || JSON.stringify(sh.inputs) !== JSON.stringify(r.inputs) || JSON.stringify(sh.limits) !== JSON.stringify(r.limits || {}) || JSON.stringify(sh.slash) !== JSON.stringify(r.slash || {});
+  const sec = sh.section;
+  const agentSteps = [...(r.steps || []), ...(r.steps || []).flatMap((s) => s.children || [])].filter((s) => s.role === "agent");
+  if (!sh.prompts) sh.prompts = Object.fromEntries(agentSteps.map((s) => [s.id, s.prompt || ""]));
+  const nav = [["identity", "Identity"], ["inputs", `Inputs · ${sh.inputs.length}`], ["prompts", `Agent prompts · ${agentSteps.length}`], ["limits", "Limits"], ["slash", "Slash command"], ["steps", "Steps & files"]];
+  const typeLabel = (i) => i.type === "select" ? "choice" : i.format === "absolute_path" ? "path" : i.type;
+  const body = {
+    identity: `<div style="display:flex;gap:14px;align-items:flex-start"><span style="position:relative"><button class="iconbtn" type="button" onclick="S.picker=!S.picker;render()">${icon(r)}</button>${S.picker ? iconPicker(r) : ""}</span><div style="flex:1;display:flex;flex-direction:column;gap:12px">
+      <div class="field"><label for="d-name">Name</label><input id="d-name" type="text" value="${esc(sh.name)}" oninput="act('setSheet','name',this.value)"></div>
+      <div class="field"><label for="d-purpose">Purpose <span class="ty">shown in the list and to the lead</span></label><textarea id="d-purpose" rows="3" oninput="act('setSheet','purpose',this.value)">${esc(sh.purpose)}</textarea></div>
+      <div class="small muted">Icon and colour save at once. Name and purpose save at once too — they do not change how the routine runs.</div></div></div>`,
+    inputs: `<div class="small muted">The questions asked before a run. Label, hint, default, required, choices and number bounds are editable; the technical name and type stay (steps refer to them).</div>
+      ${sh.inputs.map((i, ix) => `<div class="card"><div class="bd" style="display:flex;flex-direction:column;gap:8px">
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><span class="pchip"><span class="g">⌘</span><span class="mono">${esc(i.name)}</span></span><span class="pchip"><span class="g">⌁</span>${typeLabel(i)}</span>${i.min != null || i.max != null ? `<span class="pchip"><span class="g">↕</span>${i.min ?? "…"} – ${i.max ?? "…"}</span>` : ""}<label class="check small" style="margin-left:auto"><input type="checkbox" ${i.required ? "checked" : ""} onchange="act('editInput',${ix},'required',this.checked)"> Required</label></div>
+        <div class="field"><label>Label</label><input type="text" value="${esc(i.label)}" oninput="act('editInput',${ix},'label',this.value)"></div>
+        <div class="field"><label>Default${i.type === "boolean" ? " (checked = yes)" : ""}</label>${i.type === "select" ? `<select onchange="act('editInput',${ix},'default',this.value)">${i.options.map((o) => `<option ${o === i.default ? "selected" : ""}>${o}</option>`).join("")}</select>` : i.type === "boolean" ? `<label class="check"><input type="checkbox" ${i.default === "true" ? "checked" : ""} onchange="act('editInput',${ix},'default',this.checked?'true':'false')"> ${i.default === "true" ? "Yes" : "No"}</label>` : `<input type="text" value="${esc(i.default)}" oninput="act('editInput',${ix},'default',this.value)">`}</div>
+        <div class="field"><label>Hint <span class="ty">shown under the field</span></label><input type="text" value="${esc(i.hint || "")}" oninput="act('editInput',${ix},'hint',this.value)"></div>
+        ${i.type === "select" ? `<div class="field"><label>Choices</label><div class="chips">${i.options.map((o) => `<button type="button" aria-pressed="true">${esc(o)} ✕</button>`).join("")}<button type="button">+ add</button></div></div>` : ""}
+      </div></div>`).join("")}
+      <button class="btn" type="button">+ Add a question</button>`,
+    prompts: `<div class="small muted">What each agent is asked, word for word (the step's <code>prompt</code>). Placeholders like <code>{{ inputs.invoice_path }}</code> are filled in at run time. A change becomes a draft. Tools, skills and the agent itself are set in the CLI.</div>
+      ${agentSteps.map((s) => `<div class="card"><div class="bd" style="display:flex;flex-direction:column;gap:8px"><div style="display:flex;gap:8px;align-items:center">${stepAvatar(s)}<div><b>${esc(s.name)}</b><div class="small muted">${esc(s.who)}${(s.tools || []).length ? " · tools: " + s.tools.map(esc).join(", ") : ""}${s.checker ? " · checked by " + esc(s.checker) : ""}</div></div></div><textarea rows="4" oninput="S.sheet.prompts['${s.id}']=this.value;S.sheet.promptsDirty=true">${esc(sh.prompts[s.id])}</textarea></div></div>`).join("")}`,
+    limits: `<div class="banner warn" style="padding:8px 12px"><div class="b small">Sketch — which of these belong in the web is not decided yet; every field maps to an existing DSL setting.</div></div><div class="field"><label>Cost cap per run <span class="ty">stops a run that goes over; work already done is paid</span></label><input type="text" inputmode="decimal" value="${sh.limits.cost || ""}" placeholder="no cap" oninput="act('setSheet','limits',{...S.sheet.limits,cost:Number(this.value)||0})"></div>
+      <div class="field"><label>Runs at the same time</label><div class="chips"><button type="button" aria-pressed="${!sh.limits.concurrency}" onclick="act('setSheet','limits',{...S.sheet.limits,concurrency:''})">Unlimited</button><button type="button" aria-pressed="${!!sh.limits.concurrency}" onclick="act('setSheet','limits',{...S.sheet.limits,concurrency:'${esc(r.slug)}',maxConcurrent:1})">One at a time</button></div><div class="hint">“One at a time” queues a new start until the running one finishes.</div></div>
+      <div class="field"><label>Model tier for agent steps <span class="ty">preferred → fallback</span></label><div class="chips">${["fast", "balanced", "strong"].map((t) => `<button type="button" aria-pressed="${sh.limits.tier?.includes(t)}">${t}</button>`).join("")}</div><div class="hint">A step's own model override wins. Fallback is used when the preferred tier fails its checks.</div></div>
+      <div class="field"><label>Suspicious text in inputs</label><div class="chips">${[["block", "Block the run"], ["sanitize", "Clean it and continue"], ["log", "Only log it"]].map(([k, l]) => `<button type="button" aria-pressed="${sh.limits.guardrail === k}" onclick="act('setSheet','limits',{...S.sheet.limits,guardrail:'${k}'})">${l}</button>`).join("")}</div></div>
+      <div class="field"><label>Estimates shown before a run</label><div style="display:flex;gap:8px"><input type="text" placeholder="cost, e.g. 0.4" value="${sh.limits.estCost || ""}"><input type="text" placeholder="duration, e.g. 25 min" value="${esc(sh.limits.estDur || "")}"></div><div class="hint">Planning hints only; not enforced.</div></div>`,
+    slash: `<label class="check"><input type="checkbox" ${sh.slash.enabled ? "checked" : ""} onchange="act('setSheet','slash',{...S.sheet.slash,enabled:this.checked})"> Offer this routine in chat and the CLI as a slash command</label>
+      <div class="field"><label>Command</label><input type="text" value="${esc(sh.slash.label)}" oninput="act('setSheet','slash',{...S.sheet.slash,label:this.value})" ${sh.slash.enabled ? "" : "disabled"}><div class="hint">Typing it opens the same questions as Run.</div></div>`,
+    steps: `<div class="card"><div class="hd">Steps, checks, hooks, scripts, agent prompts</div><div class="bd small muted">Read-only in the web. ${r.steps ? r.steps.length : 0} steps${r.hooks ? ", 2 hooks" : ""}, ${(r.files || []).length} files. Change them with the CLI (<code>crewship routine draft ${esc(r.slug)}</code>, files with <code>crewship crew files save</code>) or by asking the lead agent; the result arrives here as a draft to publish. <a href="#" onclick="act('setSheet','kind','cli');return false">Show me how</a></div></div>
+      <div class="files">${(r.files || []).map((f) => `<div class="frow">${fileGlyph(f.path)}<div><div class="p">${esc(f.path)}</div><div class="w">${esc(f.what)}</div></div><div class="u small muted">Used by <b>${esc(nameOf(r, f.by))}</b></div><div class="m">${esc(f.updated)}</div></div>`).join("")}</div>`,
+  }[sec];
+  return {
+    title: `Edit ${esc(r.name)}`, sub: "",
+    html: `<div class="fchips" role="tablist">${nav.map(([k, l]) => `<button type="button" role="tab" aria-pressed="${sec === k}" onclick="act('editSection','${k}')">${l}</button>`).join("")}</div>${body}`,
+    foot: `<span class="hint">${defChanged ? `Inputs, prompts, limits or slash changed → saved as draft r${(r.draft?.rev || 0) + 1}, published v${r.published} keeps running` : "Identity applies at once; definition changes become a draft"}</span><button class="btn lg" type="button" onclick="act('sheetClose')">Cancel</button><button class="btn lg primary" type="button" onclick="act('saveDetails')">${defChanged ? "Save draft" : "Save"}</button>`,
+  };
+}
+function sheetPlan() {
+  const r = routine(); const sh = S.sheet; const s = r.schedules.find((x) => x.id === sh.id);
+  return {
+    title: s.kind === "repeat" ? "Repeating schedule" : "One-time start", sub: `${esc(r.name)} · ${esc(s.tz)}`,
+    html: `
+      ${s.kind === "repeat" ? `<div class="field"><label>Days</label><div class="chips">${[["weekdays", "Weekdays"], ["daily", "Every day"], ["custom", "Custom…"]].map(([k, l]) => `<button type="button" aria-pressed="${sh.days === k}" onclick="act('setSheet','days','${k}')">${l}</button>`).join("")}</div></div>
+      <div class="field"><label for="p-time">At</label><input id="p-time" type="text" value="${esc(sh.time)}" oninput="act('setSheet','time',this.value)"><div class="hint">Europe/Prague · next start: Tue 16 Sept 2026, 08:00</div></div>` : `<div class="field"><label>When</label><input type="text" value="${esc(s.label)}"></div>`}
+      <div class="field"><label>Which version</label><div class="chips"><button type="button" aria-pressed="${sh.uses === "latest"}" onclick="act('setSheet','uses','latest')">Latest published (now v${r.published})</button><button type="button" aria-pressed="${sh.uses !== "latest"}" onclick="act('setSheet','uses','v${s.kind === "once" ? "2" : r.published}')">Pin to v${s.kind === "once" ? "2" : r.published}</button></div><div class="hint">“Latest” follows every publish. “Pinned” keeps running the same version until you change it.</div></div>
+      <div class="card"><div class="hd">Answers used for these starts</div><div class="bd small">${Object.entries(s.preset).map(([k, v]) => `<div><b>${esc(k.replace(/_/g, " "))}</b>: ${esc(v)}</div>`).join("")}<div class="muted" style="margin-top:6px">Checked against the version above — a publish that breaks them is refused with a link here.</div></div></div>
+      <label class="check"><button class="switch" role="switch" aria-checked="${sh.enabled}" onclick="act('setSheet','enabled',${!sh.enabled})"></button> ${sh.enabled ? "On — starts automatically" : "Off — nothing starts automatically"}</label>`,
+    foot: `${s.kind === "once" ? `<button class="btn lg ghost danger" type="button" onclick="act('planRemove')">Remove</button>` : ""}<span class="hint"></span><button class="btn lg" type="button" onclick="act('sheetClose')">Cancel</button><button class="btn lg primary" type="button" onclick="act('planSave')">Save</button>`,
+  };
+}
+function sheetNew() {
+  const drafts = S.routines.filter((x) => x.draft);
+  return { title: "New routine", sub: "Every way in ends as a draft you read here and publish when it looks right.",
+    html: `${drafts.length ? `<div class="small muted">Continue a draft</div><div class="chips">${drafts.map((d) => `<button type="button" onclick="act('select','${d.slug}')">${esc(d.name)} · r${d.draft.rev}</button>`).join("")}</div>` : ""}<div style="display:flex;flex-direction:column;gap:10px">${waysIn()}</div>`,
+    foot: `<span class="hint">Esc closes</span><button class="btn lg" type="button" onclick="act('sheetClose')">Cancel</button>` };
+}
+function sheetDescribe() {
+  const c = S.chat; const started = c.msgs.length > 0;
+  // Before the first message the dialog is laid out like New issue: title, brief, property chips, ⌘↵ footer.
+  if (!started && !S.sheet.fix) return { title: "New routine · Describe it", sub: "",
+    html: `<input class="bigtitle" placeholder="Routine name" aria-label="Routine name" oninput="S.sheet.name=this.value">
+      <textarea class="bigdesc" id="c-goal" aria-label="What should happen" oninput="act('setChat',this.value)" placeholder="What should happen, for whom, and when? What does a good result look like, and which files, folders or rules matter?"></textarea>
+      <a href="#" class="small" onclick="return false">Use a routine brief template</a>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;border-top:1px solid var(--hair);padding-top:12px"><span class="pchip"><span class="g">👥</span>Crew · Finance</span><span class="pchip"><span class="g">🕒</span>Schedule · not set</span><span class="pchip"><span class="g">⌘</span>Inputs · let the lead propose</span><span class="pchip"><span class="g">✋</span>Needs approval · choose</span><span class="pchip"><span class="g">🏷</span>Labels</span></div>
+      <p class="small muted" style="margin:0">The lead agent drafts the steps from this and asks back in chat. Nothing runs and nothing is published until you say so.</p>`,
+    foot: `<span class="hint"><span class="kbd">⌘↵</span> to create · <span class="kbd">Esc</span> to cancel</span><button class="btn lg" type="button" onclick="act('sheetClose')">Cancel</button><button class="btn lg primary" type="button" onclick="act('describeSend')">Create draft with the lead</button>` };
+  return { title: S.sheet.fix ? "Ask the lead to fix it" : `Describe it · ${esc(S.sheet.name || "New routine")}`, sub: S.sheet.fix ? "The failed run is attached. You get a draft, not a live change." : "The lead asks back, then saves a draft you read here.",
+    html: `<div class="chat">${c.msgs.map((m) => `<div class="msg ${m.me ? "me" : ""}">${m.w ? `<div class="w">${esc(m.w)}</div>` : ""}${esc(m.text)}${m.link ? ` <a href="#" onclick="act('select','${m.link}');return false">Open the draft ›</a>` : ""}</div>`).join("") || `<div class="msg"><div class="w">Lead agent</div>I have the failed run open. What should change?</div>`}</div>
+      <div class="field"><label for="c-goal">Your message</label><textarea id="c-goal" rows="3" oninput="act('setChat',this.value)" placeholder="${S.sheet.fix ? "e.g. Add a 1 % tolerance" : "Answer the lead, or add detail"}"></textarea></div>`,
+    foot: `<span class="hint">Nothing runs from chat · you publish</span><button class="btn lg" type="button" onclick="act('sheetClose')">Close</button><button class="btn lg primary" type="button" onclick="act('describeSend')">Send</button>` };
+}
+function sheetFork() {
+  return { title: "Copy an existing routine", sub: "The copy is a draft with a new name. Schedules and history stay with the original.",
+    html: S.routines.filter((x) => x.published).map((x) => `<button class="tile" type="button" onclick="act('fork','${x.slug}')">${icon(x)}<span><b>${esc(x.name)}</b><span class="d">${esc(x.purpose)}</span><span class="d">v${x.published} · ${esc(x.how)}</span></span></button>`).join(""),
+    foot: `<button class="btn lg" type="button" onclick="act('setSheet','kind','new')">‹ Back</button>` };
+}
+function sheetCli() {
+  const r = routine();
+  return { title: "Build it with the CLI", sub: "Scripts, agent behaviour and checks live in files. The web shows the result and publishes it.",
+    html: `<div class="small">1 · Get the current version (or a starter) as a file:</div><pre class="cmd">crewship routine get ${esc(r.slug)} --format yaml > ${esc(r.slug)}.yaml
+# new routine: crewship routine init my-routine</pre>
+      <div class="small">1b · Put the scripts a step runs on the crew share (they show up under “Files this routine runs”):</div><pre class="cmd">crewship crew files save finance shared/scripts/ledger-post.go --file ./ledger-post.go</pre>
+      <div class="small">2 · Edit steps, checks, scripts; check it without running anything:</div><pre class="cmd">crewship routine validate ${esc(r.slug)}.yaml
+crewship routine fixture-test ${esc(r.slug)}.yaml   # transforms on sample data</pre>
+      <div class="small">3 · Save it as a draft — it appears on the routine page as “Draft r&lt;n&gt; · CLI”:</div><pre class="cmd">crewship routine draft save ${esc(r.slug)}.yaml</pre>
+      <div class="small">4 · Publish here in the web (review + confirm), or with the CLI:</div><pre class="cmd">crewship routine save ${esc(r.slug)}.yaml --publish</pre>
+      <p class="small muted">The exact flags are in <code>docs/cli/routine.mdx</code>; step 3 uses the existing drafts API, step 4 the existing save path with its test gate.</p>`,
+    foot: `<button class="btn lg" type="button" onclick="act('sheetClose')">Close</button>` };
+}
+function sheetStop() {
+  return { title: "Stop this run?", sub: "",
+    html: `<p>Pending work is asked to stop. What already happened — a ledger write, a message — is not undone. Recorded results stay in History.</p>`,
+    foot: `<button class="btn lg" type="button" onclick="act('sheetClose')">Keep running</button><button class="btn lg danger" type="button" onclick="act('stop')">Stop run</button>` };
+}
+
+/* ======================= boot ======================= */
+$("#phone").addEventListener("click", (e) => { const b = e.currentTarget; b.setAttribute("aria-pressed", b.getAttribute("aria-pressed") === "true" ? "false" : "true"); render(); });
+$("#reset").addEventListener("click", () => { load(); render(); });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && S.sheet) { S.sheet = null; S.chat = null; render(); } });
+render();
+</script>

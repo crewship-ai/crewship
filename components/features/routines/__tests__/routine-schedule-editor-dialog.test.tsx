@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor, within } from "@testing-library/react"
 
 // =============================================================================
 // B9 (#2362) — the reliability editor's schedule dialog. Every §13.2 row that
@@ -172,18 +172,43 @@ describe("RoutineScheduleEditorDialog", () => {
     )
   })
 
-  it("sends target_pipeline_version: null when the pin field is cleared (explicit unpin, not omission)", () => {
+  it("sends target_pipeline_version: null when Latest published is chosen (explicit unpin, not omission)", () => {
     render(
       <RoutineScheduleEditorDialog
         schedule={baseSchedule({ target_pipeline_version: 3 })}
+        headVersion={4}
         onCancel={onCancel}
         onSave={onSave}
         onPreview={onPreview}
       />,
     )
-    fireEvent.change(screen.getByLabelText(/version/i), { target: { value: "" } })
+    const chips = within(screen.getByRole("group", { name: "Which version" }))
+    expect(chips.getByRole("button", { name: "Pin to v3" })).toHaveAttribute("aria-pressed", "true")
+    expect(chips.getByRole("button", { name: "Latest published (now v4)" })).toHaveAttribute("aria-pressed", "false")
+    fireEvent.click(chips.getByRole("button", { name: "Latest published (now v4)" }))
+    expect(screen.queryByLabelText(/^version$/i)).toBeNull()
     fireEvent.click(screen.getByRole("button", { name: "Save" }))
     expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ target_pipeline_version: null }))
+  })
+
+  it("pins to the published head with one chip, and lets the number be changed", () => {
+    render(
+      <RoutineScheduleEditorDialog
+        schedule={baseSchedule()}
+        headVersion={4}
+        onCancel={onCancel}
+        onSave={onSave}
+        onPreview={onPreview}
+      />,
+    )
+    const chips = within(screen.getByRole("group", { name: "Which version" }))
+    expect(chips.getByRole("button", { name: "Latest published (now v4)" })).toHaveAttribute("aria-pressed", "true")
+    fireEvent.click(chips.getByRole("button", { name: "Pin to v4" }))
+    expect(screen.getByLabelText(/^version$/i)).toHaveValue(4)
+    fireEvent.change(screen.getByLabelText(/^version$/i), { target: { value: "2" } })
+    expect(chips.getByRole("button", { name: "Pin to v2" })).toHaveAttribute("aria-pressed", "true")
+    fireEvent.click(screen.getByRole("button", { name: "Save" }))
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ target_pipeline_version: 2 }))
   })
 
   it("disables the enabled toggle for a draft trigger awaiting activation", () => {

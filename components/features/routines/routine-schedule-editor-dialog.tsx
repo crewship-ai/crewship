@@ -24,6 +24,7 @@ import {
 } from "@/components/ui/select"
 import { RoutineRecurrenceFields } from "./routine-recurrence-fields"
 import { describeCron } from "@/lib/cron-describe"
+import { cn } from "@/lib/utils"
 import type { PipelineSchedule, SchedulePatchBody, SchedulePreview } from "@/hooks/use-pipeline-schedules"
 
 /**
@@ -44,11 +45,21 @@ import type { PipelineSchedule, SchedulePatchBody, SchedulePreview } from "@/hoo
  */
 export interface RoutineScheduleEditorDialogProps {
   schedule: PipelineSchedule | null
+  /** The routine's published head — "Pin to vN" and "Latest published (now vN)". */
+  headVersion?: number | null
   submitting?: boolean
   onCancel: () => void
   onSave: (body: SchedulePatchBody) => void
   onPreview: (cronExpr: string, timezone: string, count?: number) => Promise<SchedulePreview>
 }
+
+const versionChip = (active: boolean) =>
+  cn(
+    "rounded-full border px-2.5 py-0.5 text-[11px] transition-colors",
+    active
+      ? "border-primary/40 bg-primary/[0.12] text-primary"
+      : "border-white/[0.08] bg-white/[0.02] text-muted-foreground hover:text-foreground/80",
+  )
 
 const CATCHUP_OPTIONS: Array<{ value: "skip" | "once" | "all"; label: string; hint: string }> = [
   { value: "skip", label: "Skip", hint: "Fire nothing for the missed backlog." },
@@ -58,6 +69,7 @@ const CATCHUP_OPTIONS: Array<{ value: "skip" | "once" | "all"; label: string; hi
 
 export function RoutineScheduleEditorDialog({
   schedule,
+  headVersion,
   submitting,
   onCancel,
   onSave,
@@ -147,9 +159,10 @@ export function RoutineScheduleEditorDialog({
     <Dialog open onOpenChange={(open) => !open && onCancel()}>
       <DialogContent className="max-w-lg">
         <DialogHeader>
-          <DialogTitle>Edit schedule</DialogTitle>
+          <DialogTitle>Repeating schedule</DialogTitle>
           <DialogDescription>
-            Choose when this routine runs and how it handles interruptions.
+            Choose when this routine runs, which version it uses and how it handles
+            interruptions.
           </DialogDescription>
         </DialogHeader>
 
@@ -231,17 +244,47 @@ export function RoutineScheduleEditorDialog({
             </div>
           </div>
 
-          <div>
-            <Label htmlFor="sched-pin">Version</Label>
-            <Input
-              id="sched-pin"
-              type="number"
-              min={1}
-              value={pinVersion}
-              onChange={(e) => setPinVersion(e.target.value)}
-              placeholder="blank = track head"
-              className="mt-1.5 w-32"
-            />
+          <div className="space-y-2">
+            <Label id="sched-version-label">Which version</Label>
+            <div role="group" aria-labelledby="sched-version-label" className="flex flex-wrap gap-1.5">
+              <button
+                type="button"
+                aria-pressed={!pinVersion.trim()}
+                onClick={() => setPinVersion("")}
+                className={versionChip(!pinVersion.trim())}
+              >
+                Latest published{headVersion ? ` (now v${headVersion})` : ""}
+              </button>
+              {(headVersion || pinVersion.trim()) && (
+                <button
+                  type="button"
+                  aria-pressed={!!pinVersion.trim()}
+                  onClick={() => setPinVersion(String(pinVersion.trim() || headVersion))}
+                  className={versionChip(!!pinVersion.trim())}
+                >
+                  Pin to v{pinVersion.trim() || headVersion}
+                </button>
+              )}
+            </div>
+            {!!pinVersion.trim() && (
+              <div className="flex items-center gap-2">
+                <Label htmlFor="sched-pin" className="text-xs font-normal text-muted-foreground">
+                  Version
+                </Label>
+                <Input
+                  id="sched-pin"
+                  type="number"
+                  min={1}
+                  value={pinVersion}
+                  onChange={(e) => setPinVersion(e.target.value)}
+                  className="w-24"
+                />
+              </div>
+            )}
+            <p className="text-[11px] text-muted-foreground">
+              “Latest” follows every publish. “Pinned” keeps running the same version until you
+              change it.
+            </p>
           </div>
 
           <div className="flex items-center gap-2">

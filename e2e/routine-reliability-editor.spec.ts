@@ -190,12 +190,20 @@ test.describe("Reliability editor — edit, preview, save (B9)", () => {
     await dialog.getByRole("button", { name: "Save" }).click()
     await expect(dialog).toBeHidden({ timeout: TIMEOUT })
 
-    // The read-only row (a6) reflects the edit — this is the whole loop:
-    // edit -> preview -> save -> the display everyone else reads. The
-    // recurrence line is asserted as one string: since #2514 the row's
-    // "Next:" line also carries the schedule's timezone, so a bare
-    // /Europe\/Prague/ is ambiguous by design, not by accident.
-    await expect(row.getByText("Every day at 03:15 · Europe/Prague")).toBeVisible({ timeout: TIMEOUT })
-    await expect(row.getByText(/^Next: .+ · Europe\/Prague$/)).toBeVisible({ timeout: TIMEOUT })
+    // The operator console shows recurrence, timezone and next start in
+    // separate elements. Keep assertions scoped to this schedule, then read
+    // it back from the server so optimistic UI alone cannot satisfy the test.
+    await expect(row.getByText("Every day at 03:15", { exact: true })).toBeVisible({ timeout: TIMEOUT })
+    await expect(row.getByText("· Europe/Prague", { exact: true })).toBeVisible({ timeout: TIMEOUT })
+    await expect(row.getByTestId(`schedule-uses-${seeded.scheduleId}`)).toContainText(/ · next .+ · with:/, { timeout: TIMEOUT })
+
+    const saved = await page.evaluate(async ({ workspaceId, scheduleId }) => {
+      const response = await fetch(`/api/v1/workspaces/${workspaceId}/pipeline-schedules`)
+      if (!response.ok) throw new Error(`Reading schedules failed: HTTP ${response.status}`)
+      const schedules = await response.json()
+      return schedules.find((schedule: { id: string }) => schedule.id === scheduleId)
+    }, seeded)
+    expect(saved).toMatchObject({ cron_expr: "15 3 * * *", timezone: "Europe/Prague", enabled: true })
+    expect(Date.parse(saved.next_run_at)).toBeGreaterThan(Date.now())
   })
 })
