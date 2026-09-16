@@ -18,6 +18,10 @@ import { CLI_ADAPTERS, CLI_ADAPTER_KEYS, getModelLabel, getModelsForAdapter } fr
 // offered, and no picker can carry a model id of its own.
 
 describe("config/models.json", () => {
+  it("offers Luna in the Codex adapter picker", () => {
+    expect(adapterModels("CODEX_CLI").map((model) => model.id)).toContain("gpt-5.6-luna")
+  })
+
   it("keeps Astra opt-in while Codex uses the compatible existing default", () => {
     expect(adapterDefaultModel("CODEX_CLI")).toBe("gpt-5.5")
     expect(providerDefaultModel("openai")).toBe("gpt-5.5")
