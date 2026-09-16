@@ -31,9 +31,12 @@ import (
 // During the ACTIVE window:
 //   - credentials.encrypted_value already holds the NEW value (so all
 //     fresh agent starts pick up the new key from injection time)
-//   - the old value is reachable via credential_rotations.old_value
-//     for the sidecar fallback path on 401 (tracked in #1882; the data
-//     layer is ready)
+//   - the old value is reachable via credential_rotations.old_value and
+//     is delivered to the crew sidecar beside the new one (#1882, see
+//     credential_grace_delivery.go): a sidecar that boots inside the
+//     window replays a request once with it when the upstream answers
+//     401 to the new value. A sidecar that booted BEFORE the rotation is
+//     still running on the old value and needs nothing.
 
 const (
 	// Default grace window matches the CONNECTIONS.md §7.1 wireframe
@@ -286,12 +289,6 @@ func (h *CredentialHandler) Rotate(w http.ResponseWriter, r *http.Request) {
 		replyInternalError(w, h.logger, "commit rotate tx", err)
 		return
 	}
-
-	// TODO(#1882): wire the sidecar's
-	// 401-fallback path. The data layer is ready: during the ACTIVE
-	// window, sidecar can `SELECT old_value FROM credential_rotations
-	// WHERE credential_id = ? AND status = 'ACTIVE' AND expires_at > now()`
-	// and retry the upstream call once with the previous value.
 
 	writeJSON(w, http.StatusOK, rotationResponse{
 		ID:           rotationID,

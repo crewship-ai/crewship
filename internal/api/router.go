@@ -88,7 +88,12 @@ type Router struct {
 	// ADMIN+ floor (#865). Mutations already carry roleManage via authedMut;
 	// this is the read half. The floor invariant walks it (and source-scans
 	// router_admin.go) so an admin read that forgets its gate fails the build.
-	adminRoutes   []adminRoute
+	adminRoutes []adminRoute
+	// e2eFixtures registers the browser-test seed surface under
+	// /api/v1/e2e/ (e2e_fixtures.go). Set only by WithE2EFixtures, which the
+	// server passes only when E2EFixturesEnabled says so; a router built
+	// without it has no such routes at all.
+	e2eFixtures   bool
 	sessionsStore sessions.Store
 	// revokeNotifiers are extra transports (beyond r.hub) that get an
 	// immediate in-process signal on session revocation — see

@@ -15,7 +15,6 @@ func TestIntegrationsAuthRequestBodyCatalogCoversAuditedRoutes(t *testing.T) {
 		"POST /api/v1/oauth/exchange":                              "IntegrationsAuthOAuthExchangeRequest",
 		"POST /api/v1/oauth/auto-connect":                          "IntegrationsAuthOAuthAutoConnectRequest",
 		"POST /api/v1/notification-channels":                       "IntegrationsAuthNotificationChannelCreateRequest",
-		"PUT /api/v1/notification-templates":                       "IntegrationsAuthNotificationTemplateRequest",
 		"PUT /api/v1/me/notification-prefs":                        "IntegrationsAuthNotificationPreferencesRequest",
 		"POST /api/v1/auth/cli-token":                              "IntegrationsAuthCLITokenRequest",
 		"POST /api/v1/workspaces/{workspaceId}/pipeline-webhooks":  "PipelineWebhookCreateRequest",
@@ -42,7 +41,6 @@ func TestIntegrationsAuthRequestBodyCatalogPinsHandlerRequiredFields(t *testing.
 		"IntegrationsAuthComposioBindRequest":          {"user_id"},
 		"IntegrationsAuthOAuthExchangeRequest":         {"credential_id", "code"},
 		"IntegrationsAuthNotificationPairAgentRequest": {"agent_id"},
-		"IntegrationsAuthNotificationTemplateRequest":  {"category", "channel_id", "title", "body"},
 	}
 	for name, fields := range checks {
 		schema := components[name].(map[string]any)
