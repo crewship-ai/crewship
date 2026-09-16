@@ -100,3 +100,18 @@ CodeRabbit byl při otevření PR rate-limited (status zelený, review žádné)
 - Vycházet z merge commitu tohoto PR (nebo z jeho větve, pokud ještě neprošel review) — iterace 2 je na této změně nezávislá (FE only).
 - Pro iteraci 6/8: `GetRun` dál nevrací `invoking_*` (aditivní pole plánováno v iteraci 3); po tomto commitu je `invoking_crew_id` neprázdné jen u `InternalRun`/`call_pipeline` běhů a je ověřené.
 - Otevřené produktové rozhodnutí R2 (které cesty honorují `routine.run`) blokuje sjednocení Page action / Replay / Schedule-run; tento commit ho nepředjímá.
+
+## Follow-up — 2026-09-16: agent without crew
+
+Closed the reproduced review gap: an explicitly supplied agent must have a
+nonempty crew before its crew can be completed or compared. NULL/empty values
+are rejected rather than accepted as unattributed agent runs. The migrated DB
+allows NULL; it rejects an empty-string crew via its foreign key, so the HTTP
+regressions use the real representable NULL state rather than disabling schema
+constraints. Both master and workspace-bound callers now receive 403 with no
+run row; valid agent-to-crew completion remains covered by the same table.
+
+The two new cases failed before the fix (HTTP 200 and COMPLETED run), then
+passed. All invoking identity/public spoof/trust/sidecar targeted tests pass;
+`go vet ./...` passes. Full pipeline/sidecar suite results and fresh CI are
+recorded in the PR follow-up. No live deployment or merge is claimed here.

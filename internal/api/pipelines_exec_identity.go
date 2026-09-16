@@ -44,7 +44,7 @@ func assertInvokingIdentity(w http.ResponseWriter, r *http.Request, db *sql.DB, 
 		if err == nil && agentWS == workspaceID && *crewID == "" && agentCrew.String != "" {
 			*crewID = agentCrew.String
 		}
-		if err != nil || agentWS != workspaceID || (*crewID != "" && agentCrew.String != *crewID) {
+		if err != nil || agentWS != workspaceID || !agentCrew.Valid || agentCrew.String == "" || agentCrew.String != *crewID {
 			if err != nil && !errors.Is(err, sql.ErrNoRows) && logger != nil {
 				logger.Error("resolve invoking agent", "agent_id", agentID, "error", err)
 			}

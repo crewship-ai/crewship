@@ -127,6 +127,10 @@ func TestInternalRun_InvokingIdentityIsVerified(t *testing.T) {
 	ownAgent := "cov2pc_agent" // seeded by cov2PCRig in ownCrew
 	siblingCrew := seedCrewRow(t, db, "crew-sibling", wsID, "Sibling", "sibling")
 	siblingAgent := seedAgentRow(t, db, "agent-sibling", wsID, siblingCrew, "Sib", "sib", "WORKER")
+	orphanNull := seedAgentRow(t, db, "agent-orphan-null", wsID, ownCrew, "Null", "orphan-null", "WORKER")
+	if _, err := db.Exec(`UPDATE agents SET crew_id = NULL WHERE id = ?`, orphanNull); err != nil {
+		t.Fatal(err)
+	}
 	otherWS := "ws-other-tenant"
 	if _, err := db.Exec(`INSERT INTO workspaces (id, name, slug) VALUES (?, 'Other', 'other-tenant')`, otherWS); err != nil {
 		t.Fatalf("insert other workspace: %v", err)
@@ -150,6 +154,8 @@ func TestInternalRun_InvokingIdentityIsVerified(t *testing.T) {
 		agent      string
 		wantStatus int
 	}{
+		{"master token, orphan NULL crew", masterCtx, "", orphanNull, http.StatusForbidden},
+		{"workspace token, orphan NULL crew", boundCtx(""), "", orphanNull, http.StatusForbidden},
 		// Positive: the honest sidecar of ownCrew, acting agent from that crew.
 		{"crew-bound token, own crew, own agent", boundCtx(ownCrew), ownCrew, ownAgent, http.StatusOK},
 		// Fallback: no agent named — attributed to the crew only.
