@@ -187,6 +187,34 @@ deduplicates a run (the optional `idempotency_key_ttl_seconds` body field sets
 the deduplication window; `0` uses the server default). `run_batch` requires a
 non-empty `items` array and accepts at most 100 items; violations return `400`.
 
+`fire_at` is a **one-time start**: an RFC3339 instant (with offset) in the
+future and within two years, parked in the same pending queue as a delayed
+run and fired by the dispatcher when the time arrives. It cannot be combined
+with `delay_seconds`, `debounce_key` or `ttl_seconds` (`400`).
+
+For a one-time start, use a separate request without the delay/debounce
+fields above. Choose a future instant and an existing published version:
+
+```json
+{
+  "inputs": {"customer_id": "cus_123"},
+  "fire_at": "2026-09-20T07:00:00Z",
+  "pinned_version": 3
+}
+```
+
+`pinned_version` runs an archived version instead of head. It must be a
+positive integer (`400` for zero or a negative value); a positive version
+the routine has not published returns `404`. It is accepted
+only on an immediate or `fire_at` start; a delayed or debounced start answers
+`400`, because those keep their own version policy. Every deferred start is
+pinned: when the body names no version, the server pins the version whose
+hash matches the current head at acceptance and returns it as
+`pinned_version` in the `202` receipt, so a publish while the trigger waits
+does not change what fires. A routine with no archived version is refused
+with `409` -- publish one first. The governance, integration, resource and
+credential preflight always judges the version that will run, never head.
+
 ### Run statuses and responses
 
 `POST .../pipelines/{slug}/run` requires `member` plus either `create`
@@ -201,10 +229,23 @@ NOT covered by it and stays MANAGER+.
 The endpoint returns `200 OK` with a run result for an immediate execution.
 The immediate result includes `run_id`, `pipeline_id`, `pipeline_slug`,
 `status`, `output`, `step_outputs`, `duration_ms`, and `cost_usd` (plus
-failure/wait fields when applicable). A deferred request (`delay_seconds > 0`
-or a non-empty `debounce_key`) returns `202 Accepted` with `{ "status":
-"SCHEDULED", "pending_id", "fire_at", "coalesced", "priority" }` and does
-not yet have a run ID.
+failure/wait fields when applicable). A deferred request (`delay_seconds > 0`,
+a non-empty `debounce_key`, or `fire_at`) returns `202 Accepted` with
+`{ "status": "SCHEDULED", "pending_id", "fire_at", "coalesced", "priority",
+"pinned_version" }` and does not yet have a run ID.
+
+Send `Prefer: respond-async` to get the run ID before the run finishes: the
+response is `202 Accepted` with `Preference-Applied: respond-async` and
+`{ "run_id", "status": "IN_PROGRESS" }` as soon as the run row exists, and
+the run continues on the server's own lifecycle context rather than the
+request's -- so a closed connection no longer cancels it. Poll
+`GET .../pipeline-runs/{runId}` for the terminal status. If a fast run finishes
+before the handler observes its start notification, the handler may return
+the ordinary `200` result instead. A run that fails
+before it is even registered (a refused preflight, a concurrency conflict)
+still answers synchronously with the usual status code. Every manual start
+in the UI uses this header -- the detail panel's Run, a run detail's Retry,
+version comparisons, Inbox Retry and slash-command runs.
 The run status values are:
 
 | Status | Meaning |
@@ -214,6 +255,8 @@ The run status values are:
 | `CANCELLED` | The run was cancelled by an operator. |
 | `WAITING` | The run is parked at a human approval waitpoint; this is not a failure. |
 | `DEDUPED` | An idempotency key matched an existing run; `run_id` identifies the original. |
+| `IN_PROGRESS` | `202` under `Prefer: respond-async`: the run has started and `run_id` is its handle; poll the run for the outcome. |
+| `SCHEDULED` | `202` for a deferred start (`delay_seconds`, `debounce_key` or `fire_at`); no run exists yet, `pending_id` is the handle. |
 | `DRY_RUN_OK` | A `dry_run` or `test_run` preview completed; no agent was invoked. This is not returned by the normal `run` endpoint. |
 
 `SCHEDULED` responses use `202 Accepted` and contain `pending_id`, RFC3339Nano
@@ -309,7 +352,8 @@ has no `failure` key at all.
   "save_token": "...",
   "change_summary": "...",
   "trigger": {"kind": "schedule", "cron": "0 9 * * 1-5", "timezone": "Europe/Prague",
-              "catchup_policy": "once", "max_consecutive_failures": 5},
+              "catchup_policy": "once", "max_consecutive_failures": 5,
+              "inputs": {"region": "eu"}},
   "activation": "draft"
 }
 ```
@@ -328,16 +372,32 @@ as the routine and its version: either all three exist afterward, or none do
 — a malformed cron expression or unknown timezone rolls the whole save back,
 not just the trigger. `trigger.kind` is `"schedule"` (the fields above; only
 `cron` is required, the rest default the same way [schedule create](/api-reference/schedules)
-does) or `"manual"` (an explicit, on-purpose "no trigger" — distinct from
-omitting `trigger` entirely). Webhook and automation-binding trigger kinds
-are not yet supported here; create those separately via their own endpoints.
+does), `"once"` (a single start at `trigger.fire_at`, an RFC3339 instant with
+a timezone offset, in the future and within two years; it is parked as a
+pending run pinned to the version this save publishes, the response's
+`trigger` is `{"kind": "once", "first_fire_at", "enabled": true}` with no
+`schedule_id`, and a later save of the same routine with a new `fire_at`
+moves that one pending start rather than adding another; a start that was
+cancelled is never re-armed by a save, and one that already fired is only
+re-armed for a different `fire_at` -- otherwise the save is `422` "this
+one-time start has already been consumed"), or `"manual"` (an
+explicit, on-purpose "no trigger" — distinct from omitting `trigger`
+entirely). A `"once"` trigger needs a routine that is `active` after this
+save — one that lands `proposed` for review is refused with `422`.
+`trigger.inputs` is the preset the trigger fires with, validated against the
+definition being saved (`422` when it does not fit); on a `"schedule"`
+trigger it becomes the plan's saved inputs, which is how a save that renames
+a required input carries its plan along instead of being refused with
+`409 schedule_conflict`. Webhook and automation-binding trigger kinds are
+not yet supported here; create those separately via their own endpoints.
 
 `activation` (top-level, alongside `trigger`, not inside it) is `"draft"` to
 create the trigger DISABLED and raise exactly one `escalation` inbox item
 asking a MANAGER+ to turn it on — the response's `trigger.approval_required`
 is `true` and `trigger.first_fire_at` names what the first run WOULD be. Omit
-it (or send anything else) to activate the trigger immediately. Approve via
-`POST .../pipeline-schedules/{scheduleId}/activate` (see
+it to activate the trigger immediately; any other value is `422`, and so is
+`"draft"` on a `"manual"` or `"once"` trigger, which have nothing to hold
+back. Approve via `POST .../pipeline-schedules/{scheduleId}/activate` (see
 [Schedules](/api-reference/schedules)).
 
 The response embeds what was created as `trigger`:
@@ -359,8 +419,8 @@ The response embeds what was created as `trigger`:
 
 `trigger` is omitted entirely when the save didn't request one. A validation
 failure in `trigger` (bad cron, unknown timezone, invalid `catchup_policy`,
-or an unsupported `kind`) is `422` and — per the atomicity guarantee above —
-the routine is not saved either.
+an unparseable `fire_at`, or an unsupported `kind`) is `422` and — per the
+atomicity guarantee above — the routine is not saved either.
 
 ## Replay, failures, budgets, and state
 
@@ -831,7 +891,10 @@ execution failure is `502`.
 
 **Response:** `200 OK` with `step_id`, `step_type`, `output`, `valid`, optional
 `validation_reason`, `cost_usd`, `tokens_in`, `tokens_out`, `duration_ms`,
-`simulated: true`, and optional `warnings`. Agent steps additionally include
+`execution_mode: "live"`, `simulated: true`, and optional `warnings`.
+`execution_mode` is the honest label: the step really ran and its side
+effects landed; `simulated` is the legacy flag meaning only that no run
+record was written, not that effects were isolated. Agent steps additionally include
 `adapter`, `model`, and `rendered_prompt`. Unseeded upstream output references
 are reported in `warnings`.
 

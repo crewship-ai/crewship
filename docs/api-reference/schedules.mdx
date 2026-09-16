@@ -115,6 +115,21 @@ Invalid JSON, an invalid cron or timezone, a missing target, an invalid
 `catchup_policy`, or an invalid wake reference returns `400`. A missing or
 foreign schedule is `404`.
 
+The plan's preset is judged against the recipe it will actually run. On
+create, and on a PATCH that sends `inputs`, changes the target or the version
+pin, or enables a disabled plan, the effective `inputs` are validated against
+the target's current definition (or the pinned version's), and the wake
+preset against the wake routine: a required input that is missing, or a value
+of the wrong type or outside its choices, is `400` naming the input. Pinning
+`target_pipeline_version` to a version the routine never archived is `400`
+too. The check is repeated inside the write transaction, so a recipe replaced
+between preflight and commit cannot slip a bad preset through. A PATCH that
+touches none of those fields -- `{"enabled": false}`, a new cron, a rename --
+is never judged, so switching a broken plan off always works. The mirror-image
+gate on the recipe side (a publish, import or rollback that would strand an
+enabled unpinned plan) answers `409 schedule_conflict` on the
+[save door](/api-reference/workspaces#save-pipeline).
+
 ## Schedule representation
 
 Each successful list/create/update response contains an object with these
@@ -164,8 +179,13 @@ and turns on a trigger atomic routine authoring created with
 `enabled` becomes `true`, `next_run_at` is recomputed from the current time,
 and the trigger's approval item in the workspace inbox is resolved as
 approved. Request auth is `create`, the same threshold as an ordinary
-schedule create. A schedule that was never created as a draft, or was already
-activated, answers `409`; a missing or foreign schedule is `404`.
+schedule create. Activation re-validates the draft's stored inputs against
+the recipe it would run at that moment (the routine may have been published
+since the draft was created); a preset the recipe now rejects, or a recipe or
+pinned version that no longer exists, is `400` and the draft stays off. A
+schedule that was never created as a draft, or was already activated, answers
+`409`; a missing or foreign schedule is `404`. Re-enabling an ordinary
+disabled plan through `PATCH {"enabled": true}` runs the same re-validation.
 
 `DELETE` is a soft delete: the row is retained, future cron ticks stop, and an
 already-running invocation is not cancelled. The successful response is empty
