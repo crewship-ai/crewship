@@ -243,6 +243,20 @@ func TestDefaultModelLister(t *testing.T) {
 	}
 }
 
+func TestProviderModelIDs_OpenAICuratedLuna(t *testing.T) {
+	h, wsID, _ := newModelsHandler(t, func(string, string, string) (llm.ModelLister, bool) {
+		t.Fatal("without an API credential, validation must use the curated catalog")
+		return nil, false
+	})
+	set, ok := h.providerModelIDs(context.Background(), wsID, "OPENAI")
+	if !ok || !set["gpt-5.6-luna"] {
+		t.Fatal("curated OpenAI validation must accept the documented Codex Luna model")
+	}
+	if set["gpt-unknown-model"] {
+		t.Fatal("unknown models must remain rejected")
+	}
+}
+
 // TestProviderModelIDs covers the ModelValidator path used by agents_update.
 func TestProviderModelIDs(t *testing.T) {
 	h, wsID, userID := newModelsHandler(t, func(string, string, string) (llm.ModelLister, bool) {
