@@ -228,7 +228,7 @@ Keeper is **off by default** (`KEEPER_ENABLED=false`), and when it is on it with
 | Endpoint | What the agent gets back | When to use |
 |----------|--------------------------|-------------|
 | `POST /keeper/request` | A verdict — `ALLOW` / `DENY` / `ESCALATE` with a reason and risk score. **Never the credential value.** | To learn whether a longer piece of work will be allowed before starting it; the judge's answer is not memoized, so it does not pre-authorise a later `execute` |
-| `POST /keeper/execute` | Stdout / stderr from a command, scrubbed | The only way an agent *uses* a Keeper-gated credential — the value is injected into that one command's environment inside the crew container and never crosses back into UID 1001 |
+| `POST /keeper/execute` | Stdout / stderr from a command, scrubbed | The only way an agent *uses* a Keeper-gated credential — the value is injected into that one command's environment inside the crew container; the response contains scrubbed output |
 
 ### Decision flow
 
@@ -238,7 +238,7 @@ The sidecar forwards both endpoints over `/tmp/crewship.sock` to crewshipd, whic
 2. **Deterministic refusals** — an intent shorter than the tier's minimum (10 / 15 / 25 / 35 characters for L1–L4) is denied before any model is called, on both routes.
 3. **LLM evaluation** — every other request is scored by `Gatekeeper.Evaluate`, which prompts the judge — a local Ollama model by default, or the workspace's governance model — with the credential's tier block, the operator's watch policy, computed facts, the agent's recent conversation, and the request. The model returns a structured `{ decision, reason, risk }` JSON object, after which the tier floor is applied: in the default profile an `ALLOW` at L4 becomes an `ESCALATE` (`--escalate-from 5` removes that step).
 4. **Fail-closed default** — if no LLM provider is configured, the Gatekeeper returns `DENY`. The same applies if the LLM response cannot be parsed as JSON or does not arrive inside the judge's time budget.
-5. **Execute branch only** — on `ALLOW`, crewshipd runs the command via `docker exec` inside the crew container with the credential injected as an environment variable. The exec runs as the container's resolved non-root run-as user and fails closed if that user is empty, undeterminable, or root. Stdout and stderr pass through the [scrubber](#output-processing) before being returned. The credential value never crosses back into UID 1001. An `ESCALATE` returns without executing; a person's later ruling records the verdict and does not run the command.
+5. **Execute branch only** — on `ALLOW`, crewshipd runs the command via `docker exec` inside the crew container with the credential injected as an environment variable. The exec runs as the container's resolved non-root run-as user and fails closed if that user is empty, undeterminable, or root. Stdout and stderr pass through the [scrubber](#output-processing) before being returned. Execution uses the agent's own non-root identity; scrubbing the reply does not create a separate UID boundary around the injected environment. An `ESCALATE` returns without executing; a person's later ruling records the verdict and does not run the command.
 
 ### Sequence diagram
 
@@ -290,7 +290,7 @@ The crew journal is the audit trail and is persisted across container restarts: 
 
 ### What Crewship protects against
 
-- **Agent leaking a credential into chat or logs.** `/keeper/execute` has crewshipd run the command inside the crew container with the value injected for that one process, scrubs stdout/stderr, and only the redacted result reaches UID 1001 — for `SECRET` credentials, which are the ones Keeper withholds. Other types are in the container from boot, and the general output scrubber is what stands between them and the chat.
+- **Agent leaking a credential into chat or logs.** `/keeper/execute` has crewshipd run the command inside the crew container with the value injected for that one process, scrubs stdout/stderr, and returns the redacted result through the API — for `SECRET` credentials, which are the ones Keeper withholds. Other types are in the container from boot, and the general output scrubber is what stands between them and the chat.
 - **Unauthorised egress in restricted network mode.** The proxy refuses non-allowlisted hosts. Unknown network modes default to `restricted` (fail-closed) rather than `free`, so a misconfigured workspace cannot accidentally open up egress.
 - **Credential dump from the agent process.** Credentials are held in crewshipd's process memory; UID 1001 can talk to UID 1002 over loopback but cannot read the sidecar's process memory or files. Filesystem credentials at `/secrets/{slug}/` live on the crew's writable tmpfs, owned by UID 1001 with restrictive modes (`0400` files, `0700` directories) — that keeps them from any non-1001 process, but not from sibling agents in the same crew, which share UID 1001 (see below).
 - **Prompt injection in tool output.** `internal/lookout` scans inputs and outputs; on a finding it either sanitises (default for secret-shaped output) or blocks (default for input). Every action is logged to the journal.

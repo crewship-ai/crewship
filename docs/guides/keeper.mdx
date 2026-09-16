@@ -345,6 +345,8 @@ leases](/guides/credentials#auto-issued-leases-on-approval).
   <Step title="If ALLOW, execute command">
     The grant is re-checked at inject time (still `ACTIVE`, still assigned, still inside its lease — the judge can take seconds), the credential is injected as an environment variable, the command runs inside the agent's own crew container as the container's resolved run-as user (never hardcoded; the exec is refused if that user is undeterminable or root), with a 60s timeout and a 512 KB output cap, and the output is **scrubbed** before being returned to the agent.
 
+    The command uses the agent's own non-root identity, so this flow does not create a separate UID boundary around its injected environment. The crew remains the trust boundary.
+
     The scrub removes the literal value and a fixed set of encodings of it — base64 (standard, URL-safe, and both unpadded), base32, URL-escaped, hex in both cases, and reversed — and nothing else. The code calls this defence in depth, not a boundary: gzip, chunking, XOR or a tool that never prints the value at all are outside the set. The containment for an agent that wants the value out is the crew's egress policy.
   </Step>
 </Steps>
