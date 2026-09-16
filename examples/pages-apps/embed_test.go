@@ -1,8 +1,10 @@
 package pagesdemo
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -27,16 +29,37 @@ func TestOperationsCollectorPayloads(t *testing.T) {
 	}
 	// Substitute only the cgroup mount in this fixture; execute the embedded source.
 	source := strings.ReplaceAll(string(Collector), "/sys/fs/cgroup/", filepath.ToSlash(dir)+"/")
-	run := func() ([]byte, error) {
+	run := func(t *testing.T) ([]byte, []byte, error) {
+		t.Helper()
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		cmd := exec.CommandContext(ctx, node, "--input-type=module")
 		cmd.Stdin = strings.NewReader(source)
-		return cmd.Output()
+		var stderr bytes.Buffer
+		cmd.Stderr = &stderr
+		started := time.Now()
+		out, err := cmd.Output()
+		// Cancellation is a failed test execution, not evidence that the
+		// collector rejected invalid accounting. Keep the original timeout;
+		// report its cause separately from an external kill or Node error.
+		if ctx.Err() != nil {
+			t.Fatalf("collector execution after %s: context=%v, process=%v, stderr=%q",
+				time.Since(started), ctx.Err(), err, stderr.String())
+		}
+		return out, stderr.Bytes(), err
 	}
-	out, err := run()
-	if err != nil {
-		t.Fatal(err)
+	assertRejected := func(t *testing.T) {
+		t.Helper()
+		out, stderr, err := run(t)
+		var exitErr *exec.ExitError
+		const wantError = "Container resource sample failed; retaining the previous Page snapshot."
+		if !errors.As(err, &exitErr) || exitErr.ExitCode() != 1 || len(out) != 0 || strings.TrimSpace(string(stderr)) != wantError {
+			t.Fatalf("accounting rejection must exit 1 with the collector diagnostic and no snapshot: process=%v, stdout=%q, stderr=%q", err, out, stderr)
+		}
+	}
+	out, stderr, err := run(t)
+	if err != nil || len(stderr) != 0 {
+		t.Fatalf("valid accounting failed: process=%v, stdout=%q, stderr=%q", err, out, stderr)
 	}
 	var payload map[string]json.RawMessage
 	if err = json.Unmarshal(out, &payload); err != nil {
@@ -71,15 +94,11 @@ func TestOperationsCollectorPayloads(t *testing.T) {
 					t.Error(err)
 				}
 			})
-			if out, err := run(); err == nil || len(out) != 0 {
-				t.Fatalf("invalid accounting published a snapshot: %s %v", out, err)
-			}
+			assertRejected(t)
 		})
 	}
 	if err = os.Remove(filepath.Join(dir, "cpu.stat")); err != nil {
 		t.Fatal(err)
 	}
-	if out, err = run(); err == nil || len(out) != 0 {
-		t.Fatalf("missing accounting published a healthy snapshot: %s %v", out, err)
-	}
+	assertRejected(t)
 }
