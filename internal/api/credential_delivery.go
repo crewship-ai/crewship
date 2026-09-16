@@ -214,6 +214,14 @@ type deliveredCredential struct {
 	// crew sees the same value — see credential_grantees.go for why that is not
 	// optional.
 	GrantedAgentIDs []string
+	// GraceEncryptedValue is the previous value of this credential, still
+	// encrypted, while a rotation's grace window is open (#1882); empty
+	// otherwise. GraceExpiresAt is that window's end (RFC3339 UTC) and
+	// GraceRotationID the credential_rotations row it came from. Attached by
+	// attachDeliveredCredentialGrace; opened by deliveredGraceToken.
+	GraceEncryptedValue string
+	GraceExpiresAt      string
+	GraceRotationID     string
 	// FieldConflicts are the parts that were refused a name. Carried rather
 	// than logged at the source so the caller, which knows the agent and has a
 	// logger, can report them; a part that vanishes with no trace is the exact
@@ -362,6 +370,12 @@ func loadDeliveredCredentialSnapshot(ctx context.Context, db sqlQuerier, agentID
 	rows.Close()
 
 	if err := attachDeliveredCredentialFields(ctx, db, out); err != nil {
+		return nil, nil, err
+	}
+
+	// The previous value of a credential mid-rotation (#1882), for the
+	// sidecar's 401 replay. Same chokepoint as the parts, same reasoning.
+	if err := attachDeliveredCredentialGrace(ctx, db, out); err != nil {
 		return nil, nil, err
 	}
 

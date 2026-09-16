@@ -2012,6 +2012,7 @@ func (e *Executor) runAgentStep(
 ) (string, float64, int64, error) {
 
 	attempts := append([]AdapterModel{primary}, fallback...)
+	attempts = attempts[:outcomeTierLimit(step, len(attempts))]
 	onFail := step.OnFail
 	// retry_step's retry budget is spent by runStepWithRetry (on EXECUTION
 	// errors) before we reach here; for the validation / outcomes gate — a

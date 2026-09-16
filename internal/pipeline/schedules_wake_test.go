@@ -148,9 +148,25 @@ func TestPipelineScheduler_FireOne_WakeGateSkips(t *testing.T) {
 	seedPipelineDef(t, db, "pipe_probe", "probe", transformPipelineDef("probe", "false"))
 	row := mustSaveWakeSchedule(t, store, "pipe_probe")
 
+	// fireOne computes next_run_at before executing the probe. A probe may
+	// finish after that minute boundary; the expected value is relative to
+	// the captured scheduler clock, not the wall clock after the call.
+	tick := time.Date(2020, 1, 2, 9, 38, 59, 999_000_000, time.UTC)
+	sched.nowFn = func() time.Time { return tick }
+	due := tick.Truncate(time.Minute)
+	row.NextRunAt = &due
+	if _, err := db.ExecContext(context.Background(),
+		`UPDATE pipeline_schedules SET next_run_at = ? WHERE id = ?`,
+		due.Format(time.RFC3339), row.ID); err != nil {
+		t.Fatal(err)
+	}
+
 	sched.fireOne(context.Background(), row)
 
-	got, _ := store.GetByID(context.Background(), row.ID)
+	got, err := store.GetByID(context.Background(), row.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if got.LastWakeStatus != WakeStatusSkipped {
 		t.Errorf("last_wake_status: got %q, want SKIPPED", got.LastWakeStatus)
 	}
@@ -161,8 +177,9 @@ func TestPipelineScheduler_FireOne_WakeGateSkips(t *testing.T) {
 	if got.LastStatus != "" || got.LastRunID != "" {
 		t.Errorf("main run telemetry must stay empty on skip, got status=%q run=%q", got.LastStatus, got.LastRunID)
 	}
-	if got.NextRunAt == nil || !got.NextRunAt.After(time.Now()) {
-		t.Errorf("skip must still advance next_run_at, got %v", got.NextRunAt)
+	wantNext := due.Add(time.Minute)
+	if got.NextRunAt == nil || !got.NextRunAt.Equal(wantNext) {
+		t.Errorf("skip next_run_at = %v, want %v from captured tick %v", got.NextRunAt, wantNext, tick)
 	}
 }
 

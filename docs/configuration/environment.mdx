@@ -149,6 +149,16 @@ These are not configuration — Crewship sets them on the crew container itself,
 |----------|-------------|
 | `CREWSHIP_CREW_ID` | The crew's id. Set on every crew container by both providers, and the one variable the Apple provider guarantees regardless of what the devcontainer's own `containerEnv` asks for. Useful for a hook or script that needs to know which crew it is running in. |
 
+### Read by the sidecar inside the container
+
+These are read by the **sidecar process** in the crew container, not by `crewshipd`. They only take effect when they are present in the crew container's environment (set by whatever launches the container — nothing inside the container can change them), and none of them is set by a normal deployment.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CREWSHIP_MEMORY_REQUIRE_GUARANTEED` | (unset — off) | `1`/`true`/`yes`/`on` makes the guaranteed memory-write profile mandatory for every agent-side write, whatever profile the caller asked for; a write the host path cannot serve is then refused (`503` / `memory_guaranteed_unavailable`) instead of being performed locally. Leave it off where agents run without a per-run capability. Read by `internal/sidecar/memory_write.go`; details in [Agent memory](/guides/agent-memory). |
+| `CREWSHIP_SIDECAR_STATE_DIR` | `/tmp/crewship-sidecar-state` | Directory of the sidecar's durable run journal (which per-run tokens are still live). The default is created `0700` under the sticky `/tmp` so the agent UID cannot unlink it; pointing it at a weaker directory drops that protection. Exists for tests. Read by `internal/sidecar/run_registry.go`; details in [Orchestration](/guides/orchestration#crewship_sidecar_state_dir). |
+| `CREWSHIP_SIDECAR_RUN_AUTHORITY` | (unset — off) | `1` makes the sidecar ask `crewshipd` whether a run is still an active attempt in the work ledger instead of trusting local evidence alone. **Must stay off** until every run producer dispatches through the ledger: today only webhook-triggered runs do, and with it on every other run is locked out of every sidecar route on its first call. Read by `internal/sidecar/run_registry.go`; details in [Orchestration](/guides/orchestration#crewship_sidecar_run_authority). |
+
 <Note>
   `CREWSHIP_CONTAINER_PREFIX` is essential for multi-instance deployments. Without it, multiple Crewship instances will create containers with colliding names like `crewship-team-engineering`.
 </Note>
@@ -162,11 +172,11 @@ These are not configuration — Crewship sets them on the crew container itself,
 | `CREWSHIP_STORAGE_PROVIDER` | `localfs` | Storage backend. `localfs` is the only implemented provider; any other value is refused at startup rather than accepted and ignored. |
 | `CREWSHIP_STORAGE_BASE_PATH` | `/var/lib/crewship` | Base path for local file storage |
 | `CREWSHIP_STORAGE_MEMORY_ROOT` | *(unset)* | Parent directory for the workspace memory tier. Unset disables that tier and memory versioning. `crewship start` derives it from the data directory, but **only when `DATABASE_URL` is unset** — set this explicitly in any deployment that brings its own database |
-| `CREWSHIP_PAGE_PROJECTS_PATH` | *(unset)* | Protected absolute source/Git/artifact directory outside and non-overlapping with crew storage; unset disables custom Page projects. Never mount it into crews. |
+| `CREWSHIP_PAGE_PROJECTS_PATH` | *(unset)* | Protected absolute source/Git/artifact directory outside and non-overlapping with crew storage; unset disables custom Page projects. Never mount it into crews. The five `CREWSHIP_PAGE_*` variables are walked through in [Operate Pages applications](/guides/pages-apps-operations). |
 | `CREWSHIP_PAGE_BUILD_IMAGE` | *(unset)* | Enables the optional offline Page compiler. Requires the projects path and a preinstalled immutable `sha256:…` image ID or `repository@sha256:…` digest; tags and automatic pulls are rejected. |
 | `CREWSHIP_PAGE_STUDIO_ORIGIN` | Falls back to `CREWSHIP_NEXTJS_URL` | Public browser origin allowed to initialize Page applications. Set explicitly behind a proxy; keep `CREWSHIP_NEXTJS_URL` on the internal API transport used by token sync and agent IPC. |
-| `CREWSHIP_PAGE_RUNTIME_ORIGIN` | *(unset)* | Dedicated HTTP(S) origin on a different site from Studio (`CREWSHIP_PAGE_STUDIO_ORIGIN`, falling back to `CREWSHIP_NEXTJS_URL`), e.g. `https://apps.example.net` for `https://studio.example.com`. Expose only `/api/v1/pages/runtime/bootstrap` on its proxy alias. Required to preview/publish/serve custom applications. |
-| `CREWSHIP_PAGE_RUNTIME_DEVELOPMENT_SAME_ORIGIN` | `false` | Reviewed-code development demos only. Literal `true` permits runtime and public Studio to use the exact same origin. Preserves sandbox/CSP/RBAC, but a stuck Page can freeze the Studio tab; no browser process isolation guarantee. Never enabled by a Page author. |
+| `CREWSHIP_PAGE_RUNTIME_ORIGIN` | *(unset)* | Dedicated HTTP(S) origin on a different site from the browser origin (`CREWSHIP_PAGE_STUDIO_ORIGIN`, falling back to `CREWSHIP_NEXTJS_URL`), e.g. `https://apps.example.net` for `https://studio.example.com`. Expose only `/api/v1/pages/runtime/bootstrap` on its proxy alias. Required to preview/publish/serve custom applications. |
+| `CREWSHIP_PAGE_RUNTIME_DEVELOPMENT_SAME_ORIGIN` | `false` | Reviewed-code development demos only. Literal `true` permits the runtime and the browser origin to be the exact same origin. Preserves sandbox/CSP/RBAC, but a stuck Page can freeze the tab the app runs in; no browser process isolation guarantee. Never enabled by a Page author. |
 | `CREWSHIP_LOG_PATH` | `/var/log/crewship` | Path for log files |
 
 ## State
@@ -262,6 +272,7 @@ These names are used by CLI commands, test harnesses, or the agent runtime rathe
 |----------|---------|-------------|
 | `CREWSHIP_CHAT_ID` | (unset) | Chat/session identifier supplied to a command that resumes or inspects one conversation. |
 | `CREWSHIP_CREW_SHARED` | (unset) | Runtime marker selecting the crew-shared memory or filesystem context. |
+| `CREWSHIP_E2E_FIXTURES` | (unset) | Test-only switch (`1` or `true`) that registers the browser-test fixture routes under the `e2e` namespace — the seed door the Playwright PR gate uses to plant a `run_needs_human` inbox card without a live agent run. Ignored when `CREWSHIP_ENV` is `prod`/`production`; never set it on a real instance. |
 | `CREWSHIP_E2E_SKIP_TOKEN_PROBE` | (unset) | Test-only switch that skips the end-to-end token probe when a harness target cannot support it. |
 | `CREWSHIP_INPUT` | (unset) | Input value passed to a CLI or routine step that accepts an environment-backed input. |
 | `CREWSHIP_INPUT_PERIOD` | (unset) | Input period used by recurring routine fixtures and schedule tests. |
