@@ -151,7 +151,7 @@ context where supported, or `X-Workspace-ID` as described above.
 | `runtime_image` | string? | Custom runtime image (e.g., `ghcr.io/org/runtime:1.0`) |
 | `devcontainer_config` | string? | Raw devcontainer.json (max 100 KB) |
 | `mise_config` | string? | Raw mise config TOML (max 10 KB) |
-| `services_json` | string? | Sidecar services JSON (max 64 KB) |
+| `services_json` | string? | Sidecar services JSON (max 64 KB). **Redacted on every read** when any service carries a field beyond `name`, `image`, `ports`, `env_refs` and `volumes` (`env`, `command`, `healthcheck`, or any unknown key) — regardless of the caller's role: the field is then the literal string `[service configuration withheld: contains private runtime settings]`, never a services array. Crew read permission is not permission to read a password |
 | `cached_image` | string? | Locally built image tag (set by provisioner) |
 | `config_hash` | string? | Hash of devcontainer/mise/runtime inputs used for `cached_image` |
 | `max_ephemeral_agents` | integer | Per-crew quota enforced by the hire flow; always present on List/Get/Update responses |
@@ -188,7 +188,7 @@ POST /api/v1/crews?workspace_id={workspaceId}
 | `runtime_image` | string | No | `null` | Custom runtime image; existence is validated against the registry before insert |
 | `devcontainer_config` | string | No | `null` | Raw devcontainer.json (max 100 KB; parsed for syntax) |
 | `mise_config` | string | No | `null` | Raw mise config TOML (max 10 KB; parsed for syntax) |
-| `services_json` | string | No | `null` | Sidecar services JSON (max 64 KB; structurally validated) |
+| `services_json` | string | No | `null` | Sidecar services JSON (max 64 KB; structurally validated). Any key outside the five public ones (`name`, `image`, `ports`, `env_refs`, `volumes`) — `env`, `command`, `healthcheck` — makes the stored configuration come back redacted on every later read; see [Response Fields](#response-fields). This route has no `auto_credentials`: that key is a manifest-bundle feature and is not part of the wire shape |
 
 <Note>
 **Two floors.** `container_memory_mb` and `container_cpus` are rejected with
@@ -309,7 +309,7 @@ Both `PATCH` and `PUT` are supported and behave identically (partial update -- o
 | `runtime_image` | string | Custom runtime image (empty string clears; existence validated) |
 | `devcontainer_config` | string | Raw devcontainer.json (empty string clears; max 100 KB) |
 | `mise_config` | string | Raw mise config TOML (empty string clears; max 10 KB) |
-| `services_json` | string | Sidecar services JSON (empty/whitespace clears; max 64 KB) |
+| `services_json` | string | Sidecar services JSON (empty/whitespace clears; max 64 KB). When the stored configuration is one that reads back redacted, the only accepted value is the unchanged plaintext; anything else — including the redaction sentinel a client read and echoed back, or an empty string — is `409` and leaves the services and their credentials untouched |
 
 **Response:** `200 OK` -- updated crew object.
 
@@ -338,7 +338,7 @@ Both `PATCH` and `PUT` are supported and behave identically (partial update -- o
 | `400` | Invalid field values (name/slug length, slug format, `network_mode`, domain entry, `container_ttl_hours` negative, `max_ephemeral_agents` outside 0-100, MCP JSON missing `mcpServers`, escalation thresholds out of range, oversize or invalid `devcontainer_config`/`mise_config`/`services_json`, `runtime_image` not found) |
 | `403` | Insufficient role |
 | `404` | Crew not found |
-| `409` | Slug already taken |
+| `409` | Slug already taken; or `services_json` differs from a stored configuration that is redacted on read (`Private service settings cannot be replaced through crew updates`) — edit such services through the manifest they were applied from |
 
 ---
 
