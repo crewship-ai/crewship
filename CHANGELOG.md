@@ -12,4 +12,6707 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 ### Added
 
 - Incoming webhook configuration in Integrations for routines, agents and Page panels, with explicit outgoing notification labels. Routine webhooks can select a GitHub pull request signature profile with content-based replay protection.
+- **Routines is one workspace: catalog, calendar and execution history (#2460).** The routines page keeps its searchable explorer and opens a routine on its definition, its historical runs (each with the exact recipe it executed, its retries, foreach items and immutable outputs) and its archived versions; a **Calendar** (Day / 3 days / Week / Month / Year) shows planned and past starts and schedules from a date or hour click. Three read routes back it: `GET /api/v1/workspaces/{workspaceId}/pipelines/calendar`, `GET …/pipeline-runs/{runId}/executions` and `GET …/pipeline-runs/{runId}/artifacts`. A routine save can now carry `trigger.kind: "once"` with an RFC 3339 `fire_at` beside `schedule` and `manual`, and prepared start-form answers (choice, text, number, boolean, structured) are declared on the recipe and validated on the server before enqueue.
 - **CLI:** `routine webhooks create --ingress-profile crewship|github`, a PROFILE column on `webhooks list`, and `routine webhooks fire <url|token> --secret … --body …` — a signed test delivery to the public dispatch URL in either profile, with the receipt printed back; the docs for the agent trigger's durable-ledger response (`202 {delivery_id, work_id, status, duplicate}`, `200 ignored`, 409/413/429/503), the pipeline dispatch body and status set, `--hmac-secret`, the GitHub URL suffix and the Incoming webhooks tab are brought up to date. (#2580)
+
+
+### Fixed
+- **Agentless routine runs settle `SUCCEEDED`, not `FAILED` (#2420).** A run with no agent step (an `agentless: true` probe, or steps that are only script / transform / notify / crewship) had nobody who could report an outcome, so every clean completion was recorded `FAILED · no outcome reported`, `routine logs` printed an error on the happy path and every `SUCCEEDED`-keyed consumer (`crewshipd_successful_runs_total`, the quiet-runs digest) read zero. A run that had an agent (or a `call_pipeline`) and reported nothing keeps the strict `FAILED`. The §12 violation metric also now sees notify-step inbox items keyed `<run_id>:<step_id>`.
+- ⚠️ **An unclassified credential type is no longer injected into the agent environment (#2246).** With Keeper off, the legacy env path selected credentials by `IsKeeperGated` alone, and the fail-safe row for an unknown type (`Delivery: DeliveryNone`) passed that test — so its plaintext reached the agent env despite `DeliveryNone`'s promise; three more selectors (the OAuth-shaped-value match, the MCP env-ref loop, the adapter API-key allowlist) never consulted the policy at all. Every selector now asks `Delivery != DeliveryNone` through one helper. **Behaviour change:** a legacy credential row that relied on the old fallback-as-SECRET treatment is now withheld in both Keeper states; the server logs a `WARN` naming the credential and the missing `credpolicy` row.
+- **The approval gate's queue row no longer carries the raw prompt (#2250).** `agent_run` gates put 500 unscrubbed characters of the user's message into `approvals_queue.payload` as `user_prompt`. The gate's `args` are now `{agent_slug, agent_role}` only, and a scrubbed, bounded preview lives in `payload.review` for the person deciding. Because `args` is also the reward-tuning fingerprint, two runs of the same agent no longer hash into different cohorts — gate auto-tuning can reach its quorum for `agent_run` for the first time. Old `gate_reward_history` rows keep their hash and are never looked up again.
+- **Docs: the user guides describe the UI at HEAD (#2585).** Inbox (the 280 px explorer with Needs action / Updates / History, the triage pane, hire Deny), Chat & Sessions (`app/(dashboard)/chat`, the Files / Team drawer, people rooms, notification sounds, file previews), Bottom dock (crews only), Quickstart and First crew (Issues, crew tabs, workspace-wide agents, dashboard zones), Crew journal (`mission_id`, resources strip, saved-view shape), `crewship setup`/`skill create` default model from the catalog; `docs/changelog/overview.mdx` gains the September 6–15 window; the `docs/ux` plan and audits carry a Status 2026-09-15 block.
+- **GDPR:** the Art. 17 erasure now unnames the subject on every workspace-scoped table the schema sweep found (~40 columns): credentials the subject created pass to a custodian with a `REATTRIBUTED` audit event, their trust grants and pending invitations are revoked, history columns are anonymised, and their saved views, notification preferences and deliveries are removed — one receipt key per table on the audit row. Chats, membership, peer consent and the accountability tables stay excluded and are listed as such. (#2308)
+- **CLI:** `-f yaml` emits the same keys as `-f json` for every command — all 3,058 json-tagged fields in `cmd/crewship` carry a mirroring yaml tag, five tests that asserted the old lowercased keys are corrected, and a source-level guard fails on any new field without one. (#2119, closes the #1211 remainder)
+- Four class-triaged non-atomic writes (Apple `CopyToContainer` bind-mount, `prompt save`, `eval baseline save`, seeded memory files) now go through the durable write helper; every remaining allowlist entry names its function and reader, and the crash-safe guard also sees `os.Create` / `os.CreateTemp`, which it had never matched. (#2124)
+- Backup: five `BackupTables` entries no table backs (`agent_runs`, `hooks`, `routines`, `schedules`, `webhooks`) are removed — each was a silent no-op on every restore — and a schema guard now checks the list in both directions. (#2274, partial)
+- OpenAPI preserves the incoming webhook signature profile in the final create request and endpoint list schemas, so generated clients can configure and recognize GitHub endpoints.
+- Approval or signal delivery arriving while a routine is parking waits for the original execution to release its slot before resuming, preventing a decided run from remaining stuck in waiting.
+- Incoming webhooks use the shared Integrations explorer, overview and endpoint detail on desktop and phones. Creation opens from Add integration, target links survive reload, and Refresh reloads endpoints and receipts. Agent catalogs report whether a signing key is configured without exposing it; paged catalogs are fully read before counting endpoints.
+- **Manifest:** a standalone `Project` can name a workspace agent as lead, `Project.status` uses the API vocabulary (`backlog|planned|in_progress|paused|completed|cancelled`; a bad value is a 400 naming the field instead of a 500), re-applying a `Label` is idempotent, and `Issue.status` is honoured on create — `POST …/issues` and `crewship issue create --status` accept a starting status. (#2426)
+- **Provisioning:** a cache hit is confirmed against the Docker daemon before it is reported, a container start on a missing image invalidates the memoised image list, and a message deferred to a rebuild backs off and stops after three consecutive rebuilds with a clear error — `docker rmi crewship-cache:*` no longer triggers 80+ provisions a second and a dead chat. (#2431)
+- An agent re-saving a routine without a description no longer erases the stored one: the sidecar IPC save and the `save_routine` tool are PATCH-like (omitted preserves, `""` clears), matching the CLI and UI path. (#2405)
+- Script and code step environments (1,024 entries), script arguments (256) and per-item foreach inputs (1,024) are bounded before allocation; an over-cap step fails naming the field and the maximum. (#2456)
+- Pages: the access report (`page access`, `GET /pages/access`, `GET /pages/{slug}/access`) renders the `folder:<slug>` path for crew subjects named in a folder's sharing, not only for their members. (#2543)
+- Tests: `TestWatcher_DebounceCoalesce` asserts on the union of paths across events rather than an exact event count, so a debounce-window split under CI load no longer fails it (#2486); the inbox, deliveries and follow-up delivery-state assertions name the guards that make the state final, so a future failure reads as a regression rather than a load flake (#2407, #2437).
+- Pages management and denied data writes return the same not-found response for hidden and missing pages; explicit folder edit grants now explain that they also apply to workspace Viewers.
+- Routine results use the database's 30-second contention budget when recording a completed step, instead of failing after five seconds while waiting for a connection. This records the existing execution; it does not repeat the action.
+- Routine editors compare closing, reload and navigation against the saved draft. Unsaved edits are protected during browser history and app navigation; closing returns keyboard focus to Edit.
+
+### Added
+- **The two daily memory sweeps can be run now.** `POST /api/v1/admin/memory/user-model-sync` and `…/peer-card-sync`, with `crewship admin memory sync user-model|peer-cards [--all] [--dry-run]`; `--dry-run` extracts and reports without writing. Until now the only way to see a sweep was to be awake at 05:00 UTC. (#1702)
+- **Agents: a credential-readiness verdict computed by the runtime's own rules.** `GET /api/v1/agents/{agentId}/credential-readiness` and `crewship agent credential-readiness <agent>` report whether a credential the runtime actually delivers authenticates the agent's model (`ready` / `missing` / `unknown`), reusing the orchestrator's delivery classification instead of a second copy in the browser. The agent overview warns "No model credential" from that verdict; the previous zero-length guard, which never fired on a workspace with any binding, is gone. (#2183, #2169)
+- **A page has its own icon and colour.** From the page's Edit screen (Content → Icon and colour) or `crewship page create|update --icon <name> --color <key>`, using the crew icon set and palette a crew and a folder already use; both are refused by name outside the set. The list on the left draws the icon in its colour on every row with the freshness glyph always beside it, so the STATUS filter reads the state and never the colour. Stored on the page row, not in its document: a re-applied document, a rollback and an export bundle all leave it alone. `GET /api/v1/pages` and `GET /api/v1/pages/{slug}` return `icon` and `color` (`""` for none); `POST` and `PATCH` accept them, an omitted field keeps the stored value and `""` clears it.
+- **A tab bar on phones.** Dashboard, Inbox and Chat sit on the bottom edge, with More opening the full navigation. The three are not a taste call: Inbox is the only navigation row in the product carrying a live count, the chat PRD has a section calling the mobile chat "written and unreachable — the cheapest large improvement available", and the dashboard is built as the aggregator of every other surface's urgent items. Issues was left out deliberately until its list view is responsive; its board measures 1088px wide on a 390px screen, so a tab would promote the strongest desktop surface as the worst mobile one.
+- **Back closes an open drawer** instead of navigating the page out from underneath it — the sharpest mobile-web defect left in the app, fixed once in the shared sheet rather than at each call site.
+- **Installable on a phone.** A web app manifest gives "Add to Home Screen" its own icon and name and drops the browser chrome. No service worker: Crewship cannot work without its backend, so caching the shell buys a faster blank screen.
+- A route-transition skeleton, so tapping a destination no longer shows nothing until the next screen's own skeleton appears.
+
+- **Routine webhook receipts can be read, and they expire.** A routine delivery leaves a receipt — its identity, the body's fingerprint and the pipeline run it produced — and until now the only way to see one was to re-send the delivery. `GET /api/v1/workspaces/{workspaceId}/routine-webhook-receipts` (and `/{receiptId}`) plus `crewship routine webhooks receipts list|get` read them, fenced to the workspace and paged at 100; `run_status` comes from the real run and is null when no run record is available — the receipt is written before execution starts, so the absence carries no reason and none is invented. Each receipt now records when it was accepted and deduplicates redeliveries for 30 days from then; a daily sweeper removes expired receipts, after which the same identifier is new work again, as the contract promises. Receipts recorded before this change are dated from the upgrade and keep the full window from there.
+- **Agent memory tools write through the host's guaranteed ledger.** `memory.write`, `memory.append_daily` and `memory.read` over MCP, and `POST /memory/write` / `GET /memory/read` over the sidecar's HTTP surface, now reach the host's revision-checked ledger whenever the agent runs under a per-run capability — one revision history per file (`agent:<slug>/<file>`) whichever surface wrote it, where the MCP tools used to keep a second, unchecked one inside the container. The run is taken from the capability the call authenticated with, not from the request (a body naming another run is refused), and the host derives the attempt's generation itself. The model gets the revision, content hash, operation and mutation identity back as a second text item on every tool result, so a conditional write no longer requires guessing. `memory.write` accepts `expected_revision` and `first_write` (the explicit "no revision exists yet" precondition that lets a file be replaced under the contract the first time); `memory.append_daily` accepts `operation_id`, `date` and `at`, so a retry writes the same entry once. A write whose host answer was lost is reported unknown and never resolved locally; a retry under the same operation id is answered with the original result.
+- **One owner for durable dispatch, and work that survives a crash.** An accepted agent webhook is now recorded together with the work it produces in a single transaction, so a process that dies between the commit and its response leaves the work queued and the sender's resend finds the same work instead of creating a second. A delivery ledger records agent webhook deliveries — including the ones a filter ignored, so a decision nobody can look up afterwards stops being indistinguishable from a dropped request. Duplicates return the original receipt with the work's current state; the same identifier arriving with a different body is a conflict rather than a guess.
+- **Every agent run has its own runtime identity.** Two runs of one agent shared a tmux session name and every path derived from it, so starting the second killed the first, and could hand it the first run's environment. Session, arguments, environment, script, FIFO, exit file and signal channel are all per-run now, and cancel and terminal attach target a run rather than an agent.
+- **A memory mutation contract.** `replace` had no expected revision, so a passage deleted between an agent's read and its write came back, and one nobody meant to touch disappeared. Supported writes now go through one path with declared removals, idempotent retries and crash recovery. The guarantee is a stated profile: a write that cannot be revision-checked is refused rather than performed and labelled.
+- **GitHub and Standard Webhooks signature verification**, with GitHub's replay gap closed — it signs the body and not the delivery identifier, so identical verified bytes are treated as one delivery whatever identifier they arrive under.
+- Webhook retention and ingress limits: a payload is kept while its work is unfinished however old it is, a duplicate of already-accepted work is admitted however full the queue is, and an expired payload is distinguishable from one that never existed so the interface can explain why a replay is unavailable.
+
+- **A webhook now runs through the ledger from end to end, and a restart cannot run it twice.** A dispatcher declares the work types it can execute as (producer, domain) pairs and claims nothing else — `webhook` alone is not a work type, because the producer alone does not identify its execution engine, and a dispatcher that took the wrong one would not merely fail it but consume it. A dispatcher that declares nothing refuses to start. The server starts one dispatcher that owns execution: a delivery is claimed, its attempt records where its runtime will be before creating it, and the run is confirmed by asking the provider whether the process exists rather than by waiting for output — so an agent that starts and thinks silently is recorded as running instead of as never started. A cancel before anything started prevents the run; a cancel during one stops that run's own runtime, and a stop that does not take is reported as needing attention rather than as a cancellation nobody performed. A permission removed while work waited for capacity refuses it at dispatch. If the server is killed after a runtime exists and before it was confirmed, the restart finds the surviving process at the identity that was written down and leaves the work for reconciliation instead of starting a second one.
+- **Work held on a person waits for that person.** An agent staged for review is neither allowed nor refused, so a delivery naming one is returned to the queue with its retry budget intact rather than being failed — an approval that arrives ten minutes later now finds work still waiting for it, instead of work that gave up. A cancel that arrives while the work is held is honoured at once rather than discarded with the attempt it was recorded on.
+
+### Changed
+
+- Tests are type-checked with no baseline: 183 diagnostics across 62 test files are fixed (harnesses missing required props, fixtures off the wire shape, untyped mocks; one product type, `TraceStep.if`, was missing) and `pnpm test:types` now fails on any error. (#2493)
+- `internal/database` tests migrate once per test binary and copy a read-only template, so the suite no longer scales with the migration count — the migration tests alone went from a 10-minute timeout to 2½ minutes on the dev box. (#2551)
+- **The database now commits with `synchronous=FULL`.** Work we have answered `202` for has to survive a power cut, and the previous setting only promised to survive a process crash. Measured cost is about 21 ms of fsync per acceptance commit, against a 500 ms budget.
+
+### Fixed
+
+- Agent stop now waits for runtime confirmation instead of merely changing the displayed status; direct agent execs have an isolated, stoppable process identity. A SIGTERM from an explicit agent stop is recorded as cancelled, preserving STOPPED instead of a later false ERROR; successful late completion and unrelated failures retain their outcomes.
+- Pages folder Sharing now reports an unknown sharing state when refreshing the folder list fails, and restores the current audience after recovery.
+- **Motion respects the system's reduced-motion setting.** Every Radix overlay — sheet, dialog, dropdown, select, popover, tooltip — animates through utilities that carried their own keyframes and so ignored the preference entirely. The pipeline graph's edge animations, the only continuous ones in the app, now stop as well.
+- **The navigation drawer opens in 240ms rather than 500ms**, which was the slowest transition in the app on the gesture a phone repeats most. The two hand-copied drawer springs are now the shared one, and their backdrops fade with the panel instead of settling at their own rate.
+- The crew bottom dock's tab strip fits the screen and scrolls; its scroll container had never activated because the row would not shrink below its contents. Its height is also capped to the viewport, so a tall panel chosen on a desktop no longer arrives on a phone taller than the screen with the canvas collapsed to nothing.
+- Page content returns to the top on a route change. Content scrolls inside a container rather than the document, so the browser had nothing to reset and a new screen opened already scrolled down the last one.
+- Log type chips scroll on one row on a phone instead of wrapping onto three.
+- **Focusing a search field no longer breaks the page on iOS.** Anything you type into now renders at least 16px on a touch device. Below that iOS zooms the whole page on focus and does not zoom back out, so the page returns magnified and scrolled sideways — reported on Settings, where focusing the section search did exactly that. This is a floor, not a size: anything already larger is untouched.
+- **Chat's search, export and command palette exist on a phone.** All three were mounted in the desktop branch only — not degraded there, absent — and the palette's other way in is a keyboard shortcut a phone has no way to press.
+- **The drag handle on a bottom sheet drags.** It was a decorative bar advertising a gesture that existed nowhere in the codebase; dragging it down past a third of the sheet now dismisses, through the same guarded path as the close button, so a surface with unsaved work still asks.
+- **Five tables no longer clip their columns on a phone.** Each sat inside a rounded wrapper whose `overflow-hidden` cut off everything past the fold, or had no horizontal escape at all — the columns were not hard to reach, they were gone.
+- **The PR gate runs at a phone width.** No check in it did before, which is how a navigation missing seven destinations, a console with no mobile layout and a page-zooming search field all shipped green. It asserts no sideways scroll, the tab bar and its destinations, that More offers every rail destination, that back closes the sheet in place, and that nothing you can type into renders under 16px.
+- **Explorer drawers open full height on a phone.** They were pinned inside the content column, so a modal drawer opened below the page's own toolbar and left that row lit up behind it, costing 77px of a 664px screen.
+
+- **A cancel before the agent process exists is confirmed by protocol, and an unconfirmed process is never called stopped.** The webhook runtime learned where its agent was only at launch, so a cancel during a cold crew-container start could not be answered and work that had never reached an agent was parked for reconciliation — or, worse, a container start that completed afterwards launched the agent behind a confirmed cancellation. The orchestrator now asks a creation gate synchronously immediately before it creates the agent's exec, with nothing external between the answer and the creation. A stop recorded before that moment refuses the creation, so "stopped" is a fact rather than a probe result: a user cancel ends `cancelled`, a shutdown ends `retry_wait`, and the container start, the run record and the launch all refuse behind it. A creation the gate admits is recorded durably on the attempt (runtime phase `requested`) before it happens, and a write that fails refuses the creation. From then on nothing observed at the location proves the process did not run: an absent probe while the creation is in flight settles nothing, and a requested process that is gone without ever having been confirmed is an unknown outcome that stays in reconciliation — whatever the journal did with its telemetry, which is queued and never consulted for this decision. A run that completes before a late cancel is delivered is recorded `succeeded`, not `cancelled`. A stop after the agent is confirmed goes to the provider's probe as before, and a stop that does not take is still reconciliation.
+- **A routine webhook redelivery is answered with its receipt even while the endpoint is throttled.** The per-token rate gate ran before the receipt lookup, so a sender retrying a delivery Crewship had already accepted was told `429 rate limit exceeded` about work that was sitting in the ledger — and a sender that believed that gave up on an event we already held. The lookup now runs right after signature verification and before every capacity check: a duplicate returns the original `run_id`, the same identifier with a different body is `409 delivery_conflict`, and an unreadable ledger is `503`, throttled or not. New deliveries are still refused when the limit is exhausted.
+- Host memory mutations require a run capability matching the acting workspace, agent and requested run; a token for another live run of the same agent can no longer authorize the write.
+
+- Graceful dispatcher shutdown no longer invents a user cancellation. Each supervisor settles its own attempt; ambiguous interrupted work remains available for operator reconciliation.
+- `crewship work resolve` and its workspace API let an operator record an investigated outcome with a generation fence, reason, and explicit runtime-stop attestation, releasing reconciliation capacity.
+- Agent webhook throttling preserves payload-conflict and database-unavailable responses. Queue item and byte limits are checked inside acceptance, independently of execution capacity.
+- Routine webhook receipts no longer create phantom queued work or advertise ineffective work-item cancellation; their pipeline engine remains the execution owner.
+- Agent webhook cancellation retains launch identity through HOME cleanup so production runtime probes can verify the stop.
+
+- Dispatcher shutdown records reconciliation even when stopping a runtime exhausts its deadline, and cancels local supervision after recording the outcome. An unconfirmed external stop remains reconciliation.
+
+- Host memory mutation and canonical-read routes refuse symlinked directories and keep file operations anchored to the opened parent, including locks and inline crash recovery. Replacing a memory directory during a request can no longer redirect host reads or writes outside it.
+- Memory MCP writes now honor the runtime requirement for guaranteed memory. Until the host ledger bridge is available, both write tools return an error instead of silently writing through the legacy path.
+- **`crewship work get -f yaml` no longer panics**, and the work commands print the same keys in YAML as in JSON. The detail payload embedded an unexported type, which yaml.v3 cannot reflect into, and the field names were being lowercased rather than read from their json tags — so a script written against one machine format silently disagreed with the other.
+### Security
+
+- **Legacy Page panel updates and rollback could overwrite panels the caller could not read.** Both current and target declarations now require visibility, concurrent definition changes return 409, and metadata replies retain sealed placeholders. Project check no longer names routines called only by hidden panels (#2502).
+
+- **Page draft, archived definition and export reads could reveal panels hidden from the caller.** Whole-document authoring now requires visibility of every panel, including for agent project reads. Partial readers review source through separate endpoints that omit the definition; saves cannot silently remove withheld panels. ⚠️ **Behaviour change:** a Page write grant alone no longer permits these complete-document reads or replacements (#2502).
+
+### Fixed
+
+- **Agent turn-limit failures could appear only as a generic process exit.** Structured terminal failures now retain their original cause even with a nonzero exit, and the execution journal preserves the subtype and turn count when the raw output exceeds its capture limit (#2544).
+- **`dev.sh status` now says when a workstation serves old code.** A `STALE:` line names the HEAD `web/out/` was built from when the repo has moved past it, or a running binary older than HEAD's commit, with the reload command to run — two dev slots were serving day-old frontends while looking healthy. `.env.local` also stopped gaining another `CREWSHIP_ALLOWED_ORIGINS` line and banner on every start (clone 3 had over a hundred).
+
+- **Pages history hid source revisions before the first publication and offered live restore to partial readers.** Draft history is now reachable, restore respects document authority, and baseline conflicts retain their kind.
+
+- **Routines rollback and re-enabling a plan now reject incompatible presets.** Rollback leaves HEAD unchanged on conflict; schedule writes and draft activation validate within their transaction, including wake inputs, and an expired run deadline stays failed in both the run and journal. Publish requires a change review and confirmation; live plans and budgets are managed outside the draft editor. Run discloses possible effects and schedule times name their zone (#2473).
+
+- **Closing the Pages editor on an empty Page could leave keyboard focus on the document body.** Empty Pages now keep the same focusable heading as populated Pages.
+- **Form boundaries and the Pages Filter label were hard to distinguish.** Shared controls now use a separate contrast token; CSS and application motion honor reduced-motion preferences, including loading spinners (#2499).
+
+### Changed
+
+- **The Pages editor is laid out like the rest of Crewship.** Edit no longer opens a rail of four sections beside a centred form — it opens the same shape as an issue: a header card with the Page's name, its folder and owner, and its state as pills; the dates and address in a strip behind a disclosure; then Content, Data & actions and History as cards in the main column with Properties and Access beside them. Every card is the shared detail card with an uppercase title band, panel states are pills, and the "General" table that printed the owner as a raw user id is gone. `?section=` in the address still scrolls to and focuses that card, and in-editor links ("Manage producer access", "Data & actions") still land on it. The Pages rail on the left stays where it was.
+
+- **Routines is one list, a three-answer routine, a one-sentence run and a full-page editor** (#2519) — `/routines` showed a routine as seven cards, a Run tab next to the Run button, and an editor in a modal with the steps below the fold. Beside the explorer sidebar, the page now opens on one dense list whose row says what the routine does, how it went last time and how it runs, with a waiting decision as a banner first; a routine opens on What it does · Last time · Before you run, with the status chrome, metadata and access folded into one Technical details; the tabs read Overview / History / Plan / Versions and the run is an item of History; a run leads with its verdict and, when it failed, what to do next, with activity and attempts in one disclosure; Edit opens the recipe as a page (`?view=edit`) with the document in reading order and nothing live until Publish is confirmed. The Health tab is gone; the explorer sidebar stays, and the main panel no longer repeats its search and filters.
+
+- **The dashboard fits one screen** (#2539) — it needed two: a hero heading that repeated the sub-bar, results as 90 px cards with an avatar and three lines each, three crew cards with sparklines, four KPI tiles mostly showing a dash, and a 220 px chart. Every tile keeps its facts in less height: Results & review are one-line rows (id, state, title, who and when, action); Your crews are rows in the column beside them; the agent run summary is one strip of four numbers; the run-volume chart is shorter; cards use 12 px padding and 12 px gaps. Nothing was removed except the heading, which the sub-bar already said.
+
+- **The Pages list is grouped by owner.** The rail folds into Mine, the crews you belong to, the other crews and Owned by others, each with its count in the header and the owner named there once rather than on every row. Groups collapse and remember it per user and workspace; a search opens every group that matches and hides the rest until it is cleared; opening a page unfolds its group; and the arrow keys walk the rows, with Left and Right folding and unfolding. When the server reports how you reach each page, the filter gains a Shared with me switch (#2523).
+
+- **Edit takes over the whole Page.** Pressing Edit now slides the editor in over the page instead of adding a row of tabs under its header: the sections sit in a rail on the left with one line under each name, the open section fills the rest, and the header names the way back and what viewers see meanwhile. The Pages list stays where it was, scroll and filters included, and returns on Back to page. The "Stop application / show panels" bar under an application Page is gone; the header carries an **Application | Panels** switch instead, shown only while an application is on screen — Panels closes the application in this tab and stops nothing for anyone else (#2515).
+
+- **Frontend test fixtures now have a blocking type-check gate.** Existing diagnostic debt is recorded explicitly; new errors cannot silently enter while Vitest transpiles the tests (#2493).
+
+### Added
+
+- **Folders can be shared, and what a folder is shared with applies to every page in it.** A folder's permissions name a user, a crew, or everyone in the workspace as *can view* or *can edit* (edit implies view), and they apply continuously to whatever is in the folder right now: filing a page in a shared folder shares it, taking it out unshares it, and a page's own grants add to that but never take from it. *Can edit* renames the folder, edits the pages inside (subject to the same whole-document check as a page write grant), and takes pages out of the folder; it never moves a page elsewhere, deletes the folder, changes the sharing, or opens a panel owned by another crew. An entry belongs to the folder and outlives whoever set it. Only the owning crew's managers and workspace admins read or change a folder's ACL (`GET`/`PUT`/`DELETE /api/v1/page-folders/{slug}/acl`, `crewship page folder acl|share|unshare`; in the app, **Sharing…** on the folder's header menu opens the table, with the owning crew's managers as its fixed first row and **Everyone in this workspace** off until turned on); everyone else sees a `shared` label (`none`, `people`, `crews`, `people_and_crews`, `workspace`) on the folder — a globe in the rail when it is the whole workspace — and their own paths (`GET /api/v1/pages/{slug}/access/me`, `crewship page access <slug> --me`, the read-only **From folder** card in the editor's Access section). The page list's `reach` gains `folder:<slug>`. A move is fenced on the folder's `acl_version` (renamed from `grants_version`); the move dialog shows **After the move** — with names for the target's managers, in general for everyone else — and after a 409 re-reads the sharing and redraws it rather than retrying; several pages move in one all-or-nothing request that names the page a refusal is about (`POST …/pages:batch`, `crewship page move a b c --folder`, **Select** in the rail). A page grant accepts `subject_type: "workspace"` for read and write, never produce (`crewship page grant --workspace`). ACL changes are journalled as `page.folder_acl_changed` (#2533).
+
+- **Pages can be grouped into crew-owned folders.** A folder has a name, an icon from the crew icon set and a colour from the crew palette; a page sits in at most one, and pages outside any folder are unfiled. Every page row and page document carries `folder` and `pages_version`, and the folder API (`crewship page folder list|create|show|update|delete|add|remove`, `crewship page move`) files and unfiles pages behind two version fences, refusing a stale one with 409 and the current pair. In the app the Pages list groups by folder — every folder you may read, empty ones included, with the count of its pages you can open, then Unfiled — with **Group by: Folder | Owner** in the filter panel; each row's ⋯ menu (hover, focus, Shift+F10) offers **Move to folder…** and **Remove from folder**, the editor's Properties card shows the folder with **Change…**, and New folder, Rename / icon and Delete live on the rail. A move sends both versions and, when either moved meanwhile, the dialog re-reads and asks again rather than retrying; every refusal is shown where the action was, in the server's words. Filing a page changes nobody's access; folder reads show each caller only the pages they already reach, and a folder is deleted only when empty. Folder changes are journalled (`page.folder_changed`, `page.folder_membership_changed`) (#2527).
+
+- **A Page now says who reaches it, and how.** The page's access endpoint lists every user, crew and agent that reaches it with the paths that carry them — `owner`, `role`, `crew:<slug>`, `panel_crew:<slug>`, `grant:page:<level>` — and a subject endpoint answers the reverse question for one user, crew or agent. Both are read-only renderings of today's model: no new grant is defined. A crew the caller cannot see is never named — its paths collapse into one anonymous `panel_crew:withheld` row — and the cost is a fixed number of database statements whatever the workspace's size. `crewship page access <slug>` and `crewship page access --subject user:<id>` print them, and the editor's Access section gains a read-only "Effective access" card. Because the subject endpoint lives at `/pages/access`, `access` is now a reserved page slug: a document naming it is refused on create, import and update rather than creating a page nothing could read (#2528).
+
+- `page project get --source-only`, also with `--revision`, reads shared source without requesting the full panel declaration.
+
+- **The Pages list says how you reach each page.** Every row now carries `reach` — `owner`, `role`, `crew:<slug>`, `panel_crew:<slug>`, `grant` — so a client can group pages by ownership or show the ones shared with you, and `crewship page list` prints it as a `REACH` column. It describes you and nobody else. Listing a workspace now runs a fixed number of database statements whatever its page count (#2524).
+
+- **One editor for a Page, and a screen for reviewing what an agent changed** (#2491) — the Pages toolbar carried five separate doors into one job: Settings, Edit, App preview, Source history and Publications, side by side, three of them behind the same icon. None of them was where the work happens, and for a Page with a custom application the actual work — deciding whether an agent's change goes live — had no screen at all. `Edit` now opens a routed editor in the page's content column with four named sections (Content / Data & actions / Access / History) and the Pages list still beside it; the address carries the section, so reload, Back, Forward and a shared link all land where they should. A Page whose application has a candidate newer than its live publication opens on a review of that change: definition changes derived by comparing the two documents (never a summary the agent wrote), a per-file source diff, a warning naming any routine whose definition moved since the last publication, the candidate's build state, and a consent that is bound to one candidate and one set of baselines and resets, visibly and with a reason, when any of them changes. An ordinary panel Page is a complete case rather than the same screen with features switched off: no empty application headings and no Publish that can never be pressed.
+
+### Changed
+
+- ⚠️ **Behaviour change: publishing a Page application now has to say what was reviewed.** `POST /api/v1/pages/{slug}/project/publish` requires `expected_definition_digest` and `expected_routine_digests`, and refuses with `409` and a named `conflict` when the live definition or a routine moved after the review. The three existing compare-and-swap points only fenced the publication counter, the draft revision, and a definition read moments earlier in the same request — none of them could tell that the baseline a person actually read had changed underneath them, so a panel restored by someone else during a review published silently. Publishing while the retained source behind the live publication cannot be read now takes `acknowledged_unavailable_baseline`, refuses with `409` and `conflict: "baseline"` without it, and records on the publication's receipt which of `verified` / `unavailable_acknowledged` / `initial_publication` it was — compaction legitimately reclaims old checkpoints, so the answer is a statement somebody makes and that is written down, not a block that can strand a workspace. `GET /api/v1/pages/{slug}/project/review` returns the snapshot those values come from — and with `?publication=N` it answers the same question for restoring a retained version, whose routines are the ones *that* version declares rather than the current draft's — and `crewship page project review` prints it; `crewship page project publish` and `rollback` fetch it themselves when the flags are omitted and print what they are attesting to.
+- **A Page carrying a panel you may not see no longer hides four controls.** Edit, App preview, Source history and Publications shared one gate that went false on a single sealed panel, and the server would have answered three of them. Only replacing the whole document is refused now, with the reason stated beside the control; name, description, access and history stay reachable.
+- **Producer tokens moved to Access, and say what they are.** Minting a webhook token is issuing a credential, so it sits with grants and public links rather than beside a panel's data. The list says a token is bound to one panel, that it carries no authority of its own — the server re-derives the issuer's current rights on every write — and reads `Not revoked` rather than a green `Working`, because that column knows only that nobody revoked it.
+- **A Page says whether it has application source, not only whether it has published it.** The page object gains `has_project` beside `has_application`, and the project history entry gains `actor_kind`. The first is why a first publication could not be reviewed: `has_application` is "a publication exists", so a Page whose application had only ever been a draft reported no application at all and the editor showed it none of the candidate. The second is because the history list flattened a user id and an agent id into one opaque string with no way to tell which it was.
+- **Republishing after withdrawing an application works.** A draft identical to a withdrawn publication was reported as already live, so the review offered no candidate and the recovery path was refused.
+- **The review screen can only attest to what it showed you.** Its comparison came from the Page detail query while the publication attested to the review endpoint's digest, so while another author's change was propagating a person could approve a comparison against one definition and sign for another. Both documents now come from one authorized read on the review endpoint, and a change to either clears the consent. Consent is also unavailable until every piece of evidence has arrived — the candidate's source pending or failed used to leave the diff on "Reading…" while Publish stayed live — and panels you may not read are withheld from both sides of the comparison, with the screen saying it is partial.
+- **Leaving the editor by any link asks about unsaved work.** Only the workspace switcher consulted the guard; the sidebar, the toolbar and the phone menu are ordinary links, so leaving for Routines dropped a half-typed form without a word.
+- **History names three restores instead of one.** Restoring a panel version writes the live definition, restoring application source creates a draft and changes nothing live, and publishing a retained version moves the publication counter forward. They had one word between them.
+
+### Fixed
+
+- **The Docker image could report its version but fail to start.** Bundle the target-platform sidecar and agent entrypoint, configure writable non-root storage defaults, and verify boot, health and the embedded UI before promoting images. CI now requires the image check and all race shards; nightly publication is tied to verified commits and immutable artifact identities.
+
+- **Editing a routine plan's target now re-checks its inputs against the recipe it will actually run.** Two gaps in the previous fix: unpinning a plan onto the current recipe validated its inputs against the *old* pinned version and then stored a plan the current recipe rejects, and repinning to another version without touching the inputs was not checked at all. An edit that changes the inputs, the pinned version, or the target routine is now judged as the plan it produces; disabling, rescheduling and renaming remain unchecked so a plan that predates the check can still be switched off. Pinning a plan to a version the routine never archived — on create, repin or retarget — is now refused naming the version, instead of storing an enabled plan with nothing to run; and an archive that cannot be read is an error, not a pass (#2496 follow-up).
+
+- **A routine's schema can no longer change out from under a live plan through a side door.** The check that refuses a recipe an enabled, unpinned plan's stored preset can no longer satisfy ran only on Edit → Publish. `crewship routine save`, the agent save, an import and a manifest apply all walked past it and left the plan pointing at a recipe its preset no longer fits — a plan that looks healthy in the calendar and fails for the first time at its next firing. The check now runs on every door that changes an active recipe, inside the same transaction, so a refusal leaves the original recipe and the original plan untouched; the 409 names which plan to repair, on the import and agent doors too, where an entirely actionable refusal used to surface as a server error. Disabled plans, pinned plans, legacy untyped inputs and saves that do not touch the definition are unaffected (#2495).
+- **A routine plan can no longer be saved with inputs its routine would refuse.** A plan's preset was only ever checked when the *routine* later changed, so a plan could be created or edited carrying values its target already rejects — an unanswered required question, a choice outside the declared options, a word where a number belongs — sit enabled in the calendar looking healthy, and fail for the first time at its next firing, with no run to inspect because the executor refuses before one exists. Creating a plan, editing a plan, and the trigger a routine save can carry now all check the preset with the same validation the run itself applies. `false`, `0` and an empty list remain answers rather than absences, extra inputs are still allowed, and a recipe whose inputs declare no form stays exactly as permissive as before (#2496).
+- **A routine run you schedule for later runs the recipe you scheduled.** Starting a run with a delay, or through a debounce window, parked it without recording which published version it had been accepted against — so publishing an edit while it waited changed what it did when it fired, minutes after the person who started it had seen a receipt for something else. Every deferred start now pins the version that passed its preflight, the way a one-time scheduled start already did; a debounced burst keeps the first trigger's version, since coalescing makes it one trigger. A trigger that joins an open debounce window is judged against the version that window keeps, so inputs written for a newer recipe are refused with 409 rather than stored on a run that cannot use them, and the receipt reports the pin the row actually carries. `pinned_version` remains a one-time or immediate start's option — a delayed or debounced start names none. A routine without an archived version is refused with 409 until a version is published. The dispatcher claims the current queued payload atomically and respects a debounce window extended after its due-list read (#2500).
+
+- **Routine plans show their input presets without opening an editor.** Recurring and one-time plans share a compact summary in Schedules and Calendar, with explicit empty presets, clipped text, and credential/file previews that omit contents, including file prefixes obscured by whitespace or invisible characters. Pending starts and planned calendar events now return read-only, redacted preset previews; run history remains distinct from planned starts.
+
+- **Phones and tablets can reach the whole product.** The phone menu was built from its own copy of the navigation and had lost seven destinations — Inbox, Issues, Routines, Pages, Activity, Journal and Integrations. Both surfaces now read one definition, and the phone menu carries the Inbox unread count, which previously had no mobile home at all. The Admin Console gained the navigation sheet Settings already had, instead of a fixed 280px column that left a 390px screen 109px to render into. The Pages, Routines, Integrations and Credentials drawers now seal the page behind them rather than leaving the top bar live and the content scrolling underneath.
+- **Touch sizing follows the pointer, not the window width.** Touch targets were written to apply below 640px while the app treats anything under 768px as a phone, so large phones and small tablets ran the mobile layout with desktop-sized controls. Sizing now keys on a coarse pointer, which also gives tablets real 44px targets in the desktop layout, including the collapsed navigation rail. Create-flow inputs grow to 16px on touch, so focusing one no longer zooms the page on iOS.
+- **Layouts respect the browser's own chrome.** Viewport heights use `dvh`, so panels no longer end underneath Safari's collapsing toolbar, and the app opts into `viewport-fit=cover` — without it every safe-area inset in the stylesheet evaluated to zero, including the ones the create-flow and save footers already asked for. Dialogs cap their height and scroll, so a primary action cannot sit off-screen with the keyboard open, and popovers can no longer render wider than the screen or flush against its edge.
+
+- Add offline routine step tests with explicit sample outputs and isolated schema validation (#2473).
+
+- **A routine run whose caller goes away is recorded as cancelled, not failed.** The executor only recognised a cancellation that arrived through the Cancel button, so every other way a run's context ends early — a closed tab, a proxy timeout, a CLI deadline, a graceful shutdown — landed a `failed` row whose only stated reason was `context canceled`. Those runs minted an error fingerprint into the errors view, paged the failure notification and ran the `on_failure` hook, while the journal entry for the same instant already read `CANCELLED`. Cancellation is now classified by cause-independent evidence, and the recorded reason names the step the run stopped at (#2473).
+
+### Fixed
+- **Pages in unsupported browsers** (#2472) — show panels immediately in Safari, Firefox and mobile browsers, without waiting for application metadata or requiring a manual switch.
+
+- Pages demo setup leaves time for a full compiler run and publication; invalid container resource limits no longer produce healthy snapshots.
+- **Pages restart verification** (#2472) — require the real CLI publication/restart scenario in the Docker CI lane and use a runtime origin accepted by current configuration validation.
+- **Page application history** (#2472) — use a fixed bounded allocation and verify zero, negative and oversized pagination limits are rejected.
+- **Deferred routine dispatch** (#2472) — preserve the scheduled occurrence when loading due runs, so rearming a one-time row receives a new dispatch identity instead of replaying the old run.
+
+- Routines waiting for a decision resume their captured recipe after publication or restart, preserving the original form and effective step settings.
+
+- Routines: comparison starts survive closing the page and recognize interrupted runs. One-time starts pin their accepted version and new start times no longer reuse an earlier run. Optional nested inputs remain optional; failed artifact capture no longer fails successful work or overwrites another attempt's evidence. Execution pagination remains available during polling, and schedule cancellation works while presets load.
+
+### Changed
+
+- Routines opens on a searchable list with visible purposes and step counts. Steps have optional human names. Edit is one recipe document with step-level Edit/Test tools; run failures show their reason and open the affected step.
+
+- Routine authoring saves durable drafts, reviews publication changes, tests steps with explicit samples and compares archived versions with recorded run evidence. Run details group attempts and outputs by step. Proxy errors and obsolete draft loads preserve the user's work.
+
+- Add typed human decision forms to routine waits, Inbox and CLI; preserve rejection and approved-answer recovery (N5, N10, N15; #2473).
+
+- Routines: durable draft/publication API, CLI and agent tools with revision conflicts, schedule compatibility checks, and browser publication proof preservation (N1, N3, N6, N11; #2473).
+
+### Documentation
+- Document experimental Pages application installation, recovery, browser support and the verified limits of the initial release.
+
+### Changed
+- Crew and agent creation require an explicit AI provider choice in the UI. Matching runner installation starts automatically, including the first crew build and agents added during preparation.
+- Agent and crew editors use focused sidebar sections with preserved drafts and mobile navigation. Model/provider/runner choices are visible with brand icons, run duration uses minutes, and crew network access has explicit provider-only, selected-host and open choices that match the existing API.
+- Crew and agent Work tabs use shared concept icons and dashboard cards. Routines replaces the generic Automations link with crew-owned routine previews; issue and mission links preserve the selected team or agent.
+- Agent overview removes the duplicate role/model/edit footer, moves monthly spending beside run metrics, and provides avatar and direct skills/access actions in a compact menu.
+- Crews and agents share the Routines dashboard visual language, with avatar-based team browsing, server-side purpose search and name sorting, compact crew lists, real run outcome charts, and scoped work/access previews. Create/Edit forms and Memory now expose clearer icon-based navigation and actionable empty states.
+### Fixed
+
+- **An issue that ever ran could not be deleted** — `DELETE /api/v1/crews/{crewId}/issues/{identifier}` answered `500` with a raw `FOREIGN KEY constraint failed`, on a handler whose own refusal text promises that "a mistakenly created issue can always be got rid of". The cascade off `missions` is not self-sufficient: `assignments` outlive the issue by design (their `mission_id` is `ON DELETE SET NULL`) while `issue_executions` cascades away, so a surviving assignment was left pointing at a deleted execution through a `NO ACTION` key. Two further `NO ACTION` edges — `mission_tasks.issue_execution_id` and `issue_executions.review_task_id` — point at each other, so the order one cascade reaches them was load-bearing too. The delete now runs in a transaction that releases the pointer which outlives its target and defers the remaining checks to commit. Found by validating the endpoints #2448 added against a live server, not by a test.
+- **Pages compiler review** (#2472) — normalize bootstrap default ports, atomically repair corrupt content-addressed snapshots without masking I/O errors, and report output overflow even after a successful worker exit.
+- Agent inbox cost summaries query the actual ledger timestamp, including the beginning of the current month. Memory refresh also reloads personal data; exports identify their scope and report empty scopes and download outcomes. Crew navigation updates the selected canvas reliably. The placeholder agent container restart is replaced by a working, confirmed crew-level action with accurate next-run recreation feedback.
+- Invalidated cache requests cannot overwrite newer results, and failed relation refreshes preserve known cached data. Historical collaboration no longer implies an automatic delegation trigger.
+### Changed
+- **Crews & Agents now separates Overview, Work, Team and Memory.** Create and Edit share the same agent and crew forms; advanced runtime settings remain available. Overview shows scoped run metrics, recent outcomes and conversations. Memory reads current knowledge independently of version history and exposes the signed-in user's preferences.
+### Security
+- ⚠️ **Behaviour change:** agent peer-profile endpoints now allow only the signed-in user's own profile, including for workspace administrators; administrator-wide exports retain their explicit administration gate. Personal profiles are excluded from general memory history and group-chat prompts. Personalization opt-out is checked before prompt assembly, and cross-crew user-model reads follow the authoritative workspace index.
+
+- **Guided credentials and provider setup** (#2465) — direct type selection, consistent branded forms, text-file imports, colored tags and compact assignment previews. Save for later creates no delivery bindings; explicit assignment checks occupied slots. Partial saves retry incomplete writes, and provider re-login updates the existing account atomically while retaining assignments.
+- **Credential and private-service protection** (#2465) — private service configuration is encrypted at rest and omitted from public/exported views; re-encryption supports the stored format. Credential disclosure refreshes authorization before returning values, and restricted approval details are scoped to eligible viewers.
+
+- ⚠️ **Behaviour change: default administrator reveal permission** (#2461) — OWNER/ADMIN memberships without explicit capability overrides now receive `credentials:reveal`, as does the admin preset. Existing explicit sets (including revocations) remain authoritative. Workspace opt-in, human-session checks, scope, SEALED denial and audit remain required.
+
+- **Credential demo shapes and bounded reveal** (#2461) — demo data adds branded JSON-file and ID/secret examples. Credential details link to reveal policy settings without bypassing permissions. Revealed values disappear after 30 seconds, on tab hiding, close or target change; stale responses cannot populate another credential's dialog.
+
+### Added
+
+- **Pages application Studio** — source editing, previews, reviewed publication history and declared routine actions. Panel-only Pages render immediately; temporary 503s preserve an open application, while withdrawal clears stale code. Desktop Chromium support and routine-definition changes are shown explicitly. Workspace appearance reaches applications without rebuilding them.
+
+- **Pages application CLI and operations starter** — initialize, pack, save, build, review/publish, roll back and withdraw custom applications; inspect Git history, verify integrity and reclaim optional workspace history. Seed and collector examples are covered by real Docker and Node checks.
+
+- **Pages application API** — workspace-scoped drafts, builds and reviewed publications, transactional action authorization, agent MCP authoring, recoverable storage quotas, integrity checks and protected backup/restore. Publication retries report the current live version.
+
+- **Pages application foundation** — portable source projects, immutable bounded Git checkpoints, protected storage maintenance and an offline React compiler bound to the server release. API and authoring UI follow separately.
+
+- **Provider account groups in Credentials** (#2440) — owners/admins can create, inspect, edit and remove account-set definitions with branded account selection, priorities and explicit cross-owner consent. Stale edits keep the draft instead of overwriting another administrator. Removed groups retain their provider accounts. Groups remain unassigned definitions until runtime pool binding is delivered.
+
+- **Issues can move between people and agents** (#2449) — explicit handoff notes, current worker and next actions, recipient Inbox updates, human result submission, files and project milestones. Taking over pauses automatic work; revisions and operation receipts protect concurrent transfers. The detail brings results and conversation forward, loads long threads in pages, and distinguishes partial results or requests for input from completed work.
+
+- **The issue work contract has its CLI half** (#2449) — `crewship issue review-policy` requires or drops human acceptance before an issue counts as done, and `crewship issue result` prints what one of an issue's runs reported back. Both endpoints existed with no command, so the web panel was their only door; the rule is that every endpoint gets one, because that is the contract an agent drives. Their acceptance tests run the binary against a real router, and so does `crewship issue work`, which had none.
+
+- **Provider pool editing and removal** (#2440) — owners/admins can replace account-set membership and retire definitions through API and CLI. Revision checks prevent stale edits; retirement keeps provider accounts intact and blocks subsequent selection. Provider and authentication mode remain fixed. These operations manage definitions, not runtime assignments.
+
+- **Chat file previews** — open PDF and raster images directly in the Files side panel, with PDF pages/zoom, authenticated agent and crew file access, download and return to the explorer. PDF.js assets are bundled locally; unsupported formats retain a download fallback.
+
+- **Personal notification sounds** — five original short tones, separate Chat/Inbox choices, previews, volume and Do not disturb in Settings → Account → Notification sounds, with a desktop/mobile toolbar shortcut. Authorized fresh human messages and important unread Inbox items can alert after audio is enabled; focused reading, muted rooms, duplicate tabs and history reloads remain quiet.
+
+- **Team demo seed** — Thomas, Paul, Peter, Anna, Sofia and Emma have real workspace roles, distinct bundled portraits and independently authored Chat messages. `seed team-chat` adds only this demo to an existing workspace; `seed --with-team-chat` and `./dev.sh seed` include it in a full demo. Private random credentials and stable room/message references support reruns without resetting users or replacing custom avatars.
+
+- **Chat continuations** — Add people opens a fresh private group from a direct message; Invite agent explicitly opens a workspace channel with the selected agent. Original private history stays private. Atomic creation and durable retry IDs prevent duplicate rooms after uncertain responses, including backup/fork restoration.
+
+- **Team Chat identity and activity** — profile portraits and agent avatars, room icons, day dividers, compact author groups and Markdown bring shared rooms closer to agent chat. Channel creators can subscribe to linked issue/routine journal updates; trusted Crewship cards never invoke agents. Explicit agent mentions receive a bounded, workspace-scoped work snapshot for status questions. Repeatable demo-account and live CLI scenarios cover real colleague messages, routine results and agent replies.
+
+- **Chat room CLI** — `crewship chat room` manages human direct messages, private groups and mixed workspace channels, including members, agent mentions/jobs, message pagination, safe retries, mute and read cursors. Existing agent-session commands remain available under Chat.
+
+- **Unified Chat** — agent sessions, direct messages and shared rooms use one Chat sidebar and New chat menu. Human room links open under `/chat`, with old links redirected compatibly.
+
+- **Human direct messages** — open a colleague conversation from the workspace people picker and reuse the same private history on subsequent opens. Direct conversations keep their two original participants; ordinary groups and channels remain separate.
+
+- **People and workspace channels in Chat** — create participant-only human groups or workspace-readable channels without an agent, manage participants, and keep ordered history with safe send retries. Unread conversation activity reaches the existing inbox through a durable outbox, with personal mute and read cursors. Channel agents join visibly and respond only to explicitly selected mentions through the existing assignment queue; private groups remain human-only because agent execution records are workspace-visible.
+
+- **Provider pool definitions** (#2440) — owners/admins can create, list and inspect explicit account sets through the API and `credential pool create/list/get`. Creation requires credential write scope for scoped CLI tokens; cross-workspace members are rejected. This prepares pool management only: it does not assign accounts, enable runtime failover or add pool controls to the UI.
+
+- **Credentials for clients** (#2428) — separate Add secret and Add provider flows, branded provider selection, provider-specific connection guidance, provider filters, and focused account details. Typed credential editing preserves existing values unless replacement is explicitly selected; access provenance, tags and assignment state are clearer. Provider administration is owner/admin-only in the console as well as the API.
+
+- **Provider onboarding safeguards** (#2428) — completing device sign-in saves the chosen crew access, validates the complete code response, and uses only committed UI callbacks. Disabled data requests cannot restore stale account details. Empty subscription usage remains a valid array response. OpenAI/Codex defaults stay on GPT-5.5; Astra remains selectable for accounts with access, rather than being forced during onboarding.
+
+- **Provider sign-in reliability** (#2428) — CLI imports reject conflicting OAuth options and oversized files; account summaries retain usage timestamps and explain restricted access or missing refresh configuration. Device-code waiting stops at expiry, and completed sign-ins retain their result across server shutdown.
+
+- **Isolated provider refresh** (#2428) — run-start refreshers belong to their router and database instead of a process-global callback, preventing races and cross-instance credential refresh during concurrent server construction.
+
+- **Legacy provider visibility** (#2428) — list filters use the same whitespace normalization as the credential-ID permission guard, so padded legacy provider names cannot expose admin-only account metadata in lists.
+
+- **Provider-account notification privacy** (#2428) — refresh-failure alerts are addressed to current workspace administrators, not personally to a creator who may later be demoted. An upgrade backfill also restricts previously stored alerts, without deleting their history or changing unrelated inbox messages.
+
+- **Provider-login API and CLI** (#2428) — normalized account storage, server-driven device sign-in, centralized refresh with stale-write protection, provider-specific account status, and usage attribution. `credential login`, status and refresh commands use the same server contract; bounded stdin imports accept complete auth files without truncation.
+
+- ⚠️ **Behaviour change: provider account administration** (#2428) — only workspace owners/admins may administer provider accounts, including legacy provider API keys and CLI logins. Ordinary-secret capabilities remain separate. Agent credential/binding reads omit inaccessible metadata after delivery resolution; lower roles see only a provider brand in payer summaries. Imported Gemini refresh requires matching server-side OAuth client configuration and reports configuration-required status when unavailable.
+
+- **Provider-login runtime foundations** (#2428) — adapter-specific Codex and Gemini auth-file delivery with server-retained refresh tokens, normalized login parsing and refresh clients, and credential-attributed usage storage. Generated auth files are withheld from the Files API. Google refresh requires an operator-supplied OAuth client matching the imported grant.
+
+- **Codex runtime compatibility** (#2428) — route metered keys through the sidecar-backed model provider, recognize structured terminal errors, acknowledge MCP notifications with HTTP 202, and omit MCP endpoints blocked by crew network policy. OAuth refresh and device-flow libraries are included here; public onboarding and administration arrive in the dependent API/UI changes.
+
+- **Demo use cases, one script each** (`scripts/demo/`, #2424) — the second version of the demo scripts. `scripts/walkthrough.sh` was one `set -e` checklist that stopped at its first failing line and could not run step six without steps one to five; it is now twelve self-contained use cases (`uc-NN-<slug>.sh`) run alone or all in order by `scripts/demo/run.sh`, each narrated for an audience, verified by assertions and honest about what it could not run: a use case whose need is missing (a model, a GitHub token) exits with the reason and the runner prints **SKIP**, never a green row. Memory recall, delegation, ephemeral hire with its approval, credential escalation answered by `crewship escalation supply`, the approval gate, a token-zero routine landing in the inbox, a wake-gated schedule holding on a real scheduler tick, eval tiers, GitHub token injection, and the three demo packs through `seed verify --pack`. `scripts/demo-test.sh` (CI `shell` job) ShellChecks the suite and drives the runner against stubs. Guide: `docs/guides/demo-use-cases.mdx`.
+- **One client inbox at `/inbox`** — clearer action/update/history views, crew filtering, real issue-assignee avatars and routine identity, and message-first details. Saved `/inbox-v2` links redirect with their selection and filters intact. (#2435)
+
+- **Dashboard results and review** — recent review issues and completed routines now open directly from the main overview, with real agent avatars and crew identity. Crew cards use their own colours, waiting approvals are separate from running routines, and system details are collapsed. (#2433)
+
+- **Demo packs in `crewship seed`** — the seed now ships three real, repeatable use cases instead of a fixture dump: a **nightly CI watch** over the scheduled GitHub Actions workflows of `crewship-ai/crewship` (token-zero probe as the wake gate, Sonnet triage only when something is red or silently stale), a **docs-drift audit** of that repository's documentation against its code, and a **site replica** in which the engineering lead delegates the copy of `www.seznam.cz` across an analyst, a data engineer, a frontend engineer and a tester. Each pack is one crew, its deterministic scripts (with their own unit tests, run by `go test`) delivered to the crew's shared volume, its routines, its Page and its issues — the issues now carry labels, and the three cross-crew file hand-offs of the previous seed are gone (`/crew/shared` is per crew). With `SEED_GITHUB_TOKEN` the GitHub-backed packs get a crew-scoped `CLI_TOKEN`, which is what makes `{{ secrets.CLI_TOKEN }}` resolve to the real token rather than the newest inert demo account. Crew leads run on `claude-sonnet-5`, workers on `claude-haiku-4-5`.
+- **`crewship seed verify`** — runs every pack end to end and checks the agents against the probes: delivered scripts byte-identical to the seed, the probe's verdict against an independent read of GitHub, the agent's `COUNTS:` line reconciled with the probe, no token in the report, the notification in the inbox and the Page panels written by that run. A pack whose requirement is missing is reported as skipped, never as green; `--strict` makes that a failure.
+
+### Changed
+
+- **Two OSV advisories published overnight, cleared** — `sharp` 0.35.3 → 0.35.4 and, transitively, every `@img/sharp-*` platform sibling plus `@img/sharp-libvips-*` 1.3.3. The advisory (GHSA-rgj7-g3m4-5g8c, CVSS 8.9) is not in sharp's own code but in the libheif it bundles, so the override floor moves rather than a direct dependency. `google.golang.org/grpc` 1.83.1 → 1.83.2 (GHSA-2v4p-qf9q-27wj), an indirect module. Neither was introduced by a change here: both versions sat on `main` while the Security workflow was green, and the scanner reads a live advisory database, so the build went red without a commit. The remaining finding, `golang.org/x/crypto` 0.56.0 (GO-2026-5932), has no fixed version published and is Unknown severity, which the gate does not block on.
+
+- ⚠️ **The Go language floor moved 1.26 → 1.27** — `go.mod`'s `go` directive, which is a promise to anyone building Crewship from source, not just a CI detail. It was held at 1.26 deliberately since #2060 and moved here because a dependency forced it: `shoutrrr` v0.19.0 declares `go 1.27`, and the go command refuses a main module whose floor sits below its dependencies'. Building from source now needs a 1.27 toolchain. `scripts/go-toolchain-pin.sh` still does **not** check this line — it is a separate decision from which compiler builds the release, and folding the two together would raise the floor silently on every toolchain bump.
+
+- **Go toolchain 1.27.0 → 1.27.1, in all thirteen places that name it** — `go.mod`'s `toolchain`, the root `Dockerfile`'s `FROM golang:`, `GO_VERSION` in ten workflows and the literal `go-version` in `codeql.yml`. Dependabot's `docker-images` group bumps the `FROM` tag alone, which is the one Go version no pull-request check compiles with; `scripts/go-toolchain-pin.sh` failed the PR for exactly that reason and the rest were moved to match. The analyser pins were re-checked and stay put: `golangci-lint` v2.13.1 and `govulncheck` v1.7.0 both vendor an `x/tools` that already understands 1.27 syntax, so a patch-level toolchain bump does not move them (1.26 → 1.27 did).
+
+- **Dependency updates for 2026-09-07** — the week's five Dependabot groups landed together, because two of them shared `pnpm-lock.yaml` and no merge order avoided rebasing the rest. Go modules (10): `age` 1.3.1→1.3.2, `go-jose/v4` 4.1.4→4.1.5, `go-containerregistry` 0.22.0→0.22.1, `klauspost/compress` 1.19.2→1.20.0, `moby/moby/api` 1.55.0→1.56.0, `moby/moby/client` 0.5.1→0.6.0, `shoutrrr` 0.18.0→0.19.0, `goldmark` 1.8.5→1.8.6, `x/crypto` 0.55.0→0.56.0, `modernc.org/sqlite` 1.57.0→1.58.0. npm production group (41, mostly transitive; the direct ones are `@sentry/nextjs` 10.70.0→10.73.0 and `@codemirror/state` 6.7.1→6.7.3) and `@types/node` 26.4.0→26.4.1. GitHub Actions: `anthropics/claude-code-action` v1.0.210→v1.0.216, `docker/setup-qemu-action` v4.2.0→v4.3.0.
+
+### Fixed
+
+- **Agent reply audio** — direct agent answers now play the selected Chat cue on successful completion, including while focused, and deduplicate against their Inbox projection. Saved audio opt-in reactivates on the next real interaction after reload. Sound settings are linked from the profile menu on desktop/mobile.
+
+- **Create-only member provisioning** — automation can reject existing accounts before changing membership or account-setup tokens. The team seed and CLI create-only flag verify server support first.
+
+- **Chat sidebar hierarchy** — one New chat entry, People/Agents/Team spaces sections and expandable per-agent sessions replace overlapping facet grids. Per-agent New session stays explicit, selection highlights are exclusive, and section/history expansion persists per user and workspace.
+
+- **CLI automation output** — workspace creation, member provisioning and chat attachment upload now honor JSON/YAML/NDJSON output instead of mixing human-readable success text into scripts. Invalid attachment responses return an error.
+
+- **`TestSessionMessagesWithStore` raced its own `TempDir` cleanup** (#2452) — `New()` spawns the catalog and runtime refreshers, which write into `<BasePath>/catalog-cache` on their own schedule; the test never stopped them, so `t.TempDir()` removed the directory underneath a live goroutine and cleanup failed with `directory not empty`. Latent since the refreshers landed and surfaced on the linux-arm64 runner, which is slow enough to lose the race. `t.Cleanup(s.StopBackground)` — the one-liner every other boot test in the package already carries, and the reason `StopBackground` binds to `bgCtx` in the first place.
+
+- **The `@sentry/nextjs` version ceiling is gone, and the bug it hid is actually fixed** (#2444) — `pnpm.overrides` carried `"@sentry/nextjs": "<10.72.0"` since 2026-08-31. It never held: the override names one package, and `@sentry/server-utils` floats on its own, so Dependabot's lockfile regenerated it at 10.73.0 anyway and twelve suites stopped loading with `TypeError: The URL must be of scheme file` — every assertion inside them still passing, which reads like anything but a dependency problem. The fault is a vendored bundler plugin that picks its Node-vs-browser branch on `typeof document === 'undefined'`; under `happy-dom` a `document` exists, so it resolves its loader against `document.baseURI` and hands an `http:` URL to `fileURLToPath`. Production never saw it — `next build` and the server runtime have no `document`. The suite runs under `happy-dom`, so `vitest.config.ts` now resolves the SDK to the client build the browser bundle actually gets (the entry its own `browser` export condition names) and inlines it so Vite's resolver handles its extensionless `next/router` import. The ceiling came off; Sentry is on 10.73.0.
+
+- **Gemini refresh configuration** (#2428) — remove bundled OAuth client credentials. Operators configure the matching client through server-only environment variables; missing configuration disables refresh without invalidating a stored user grant and is explicitly reported in account details.
+
+- **Credential review hardening** (#2428) — reject oversized piped values even when the limit is followed by a newline; device-code sign-in no longer offers an owner change that is not saved; failed provider-account swaps attempt to restore the previous binding, refresh actual assignment state, and report failed recovery explicitly.
+- **Provider account administration** (#2428) — provider accounts, including legacy provider API keys and CLI logins, are restricted to workspace owners/admins in both the API and console. Other roles see only the agent's provider brand. Agent credential/binding lists now respect credential visibility, tenant boundaries and deleted rows without exposing hidden binding winners in warning messages.
+
+- **Codex silently lost every Crewship MCP tool** (#2428) — the sidecar acknowledged an MCP notification with an empty `200`, which carries no `Content-Type`; Codex's MCP client treats that as a fatal transport error, kills the worker and drops the server, so `crewship-memory`, `crewship-routines` and `crewship-notify` were announced at initialize and gone one message later, leaving only log noise. Notifications now answer `202 Accepted` with an empty body, as the streamable-HTTP transport asks. Claude Code's client tolerated the empty `200`, which is why the two adapters disagreed about whether Crewship's own tools exist.
+- **A restricted crew no longer refuses two hosts a Codex run needs** (#2428) — `ab.chatgpt.com` (the feature-flag service Codex calls at startup) and `*.oaiusercontent.com` (session content) are OpenAI's own and are now on the default allowlist beside `chatgpt.com`, which is exact-match. Neither refusal was fatal, but each printed a proxy warning and a CLI error, so a working agent looked broken in its own transcript.
+- **An MCP server the crew's network policy blocks is no longer written into the agent's CLI config** (#2428) — the sidecar already refuses to connect to it, so the config entry only made every CLI dial a host the container proxy rejects; Codex retried three times per run and printed a fatal transport error each time, which read like a Crewship failure rather than a crew policy doing its job.
+- **Codex API-key runs never reached the sidecar** (#2428) — Crewship pointed Codex at the loopback proxy with `OPENAI_BASE_URL`, a variable the Codex binary no longer reads, so every request went straight to `api.openai.com` carrying the dummy key and ended in a 401 the sidecar never saw. Codex's built-in `openai` provider cannot be overridden either, so the route is now a per-run custom `model_provider` block (`base_url` on the sidecar's `/openai/v1`), the same mechanism already used for OpenRouter and OpenAI-compatible endpoints. An OpenAI login is also no longer mistaken for a Claude one: OAuth detection reads the provider, not just the type, so it is never written to `CLAUDE_CODE_OAUTH_TOKEN` or labelled "Anthropic Max".
+
+- **`crewship run` and `crewship ask` no longer hang forever against a busy
+  agent.** An agent serves one run at a time, and since #2269 a send that
+  arrives while it is busy is bounced with a sender-only `agent_busy` event —
+  with, by design, no terminal `done` after it: emitting one would travel the
+  shared session channel and finalize the *winning* sender's live turn
+  mid-generation. The web frontend renders that frame. Neither CLI event loop
+  knew it, so both fell through and went back to waiting for a `done` the
+  server had already decided not to send. Measured on dev3: two of three
+  concurrent `crewship run` calls against one agent printed nothing for 200 s
+  and exited only on the caller's own timeout, while the server logged both
+  the rejection and the frame it sent. They now print
+  `[busy] The agent is busy with another run right now.` and exit non-zero in
+  under a second.
+
+  `run` has **two** event loops — the streaming switch and
+  `collectAgentStream`, which is what `--no-stream`/`--wait` select and which
+  `routine iterate` shares — and the first cut of this fix patched only the
+  first. The unit test passed and the live run still hung, because the test
+  drove the path the flag did not select. Both loops handle the frame now, and
+  both are pinned by tests; `collectAgentStream` is the strict case, since
+  `runNoStream` passes it timeout 0 and there is no deadline to end the wait.
+  The event name is one exported constant (`ws.AgentBusyEventType`) named by
+  server, clients and tests alike, and the scripted-event test harness now
+  builds frames from the server's own `ws.ServerMessage`/`ws.ChatEvent` rather
+  than from the client's mirror of them — a client-shaped fixture is what let
+  this stay green in CI while failing against every real server. Unknown event
+  types are no longer swallowed in silence: under `--verbose` both loops name
+  what arrived, which is how this was found.
+
+- **The docs-drift pack turned its own graceful degrade into a hard failure.**
+  `docs_audit.sh` deliberately exits zero when the scan cannot run, so the
+  status page keeps a meaningful panel — but its two `fail()` paths wrote a
+  panel with only `state` and `label`, while the routine projects
+  `.panel.sha_label` out of that document with a `transform`. A transform whose
+  field is missing does not degrade; it fails the run and takes the agent review
+  and both page panels with it. So every recoverable scan failure destroyed the
+  audit. The other two packs were immune because each builds its panel in one
+  function used by every exit path; docs-drift had duplicated the literal and
+  drifted. Every exit path now leaves through one `panel_for()`, and
+  `sha_label` says `@ not checked out` rather than inventing a SHA or emitting
+  an empty string the page would render as a blank row.
+  `TestPacks_FailureOutputCarriesEveryProjectedField` derives the projected
+  fields from the routine definitions and drives every pack's script down its
+  failure paths, so the next pack cannot repeat it.
+- **`crewship seed verify` reported a broken pack as green.** Without
+  `SEED_GITHUB_TOKEN` it said `env SKIP — the pack is seeded but cannot run`
+  and exited 0, while the seeded schedule had already fired that pack's routine
+  and it had hard-failed, plainly visible as `FAILED` in `crewship routine
+  list`. Verify never looked at what the workspace had already done. A `history`
+  check now runs before the env gate — so a skip cannot hide it — and names the
+  routine, run id, failed step and error. A transport failure reading the
+  history is a `SKIP` with its reason, not a false green. The row is scoped
+  to the current seed generation by the crew's `created_at`: `seed --nuke`
+  recreates the crews but upserts the pipelines, so run history outlives the
+  nuke, and without that scope a freshly seeded workspace verified red on
+  failures belonging to a workspace that no longer existed. What the scope
+  drops is stated in the PASS detail rather than filtered in silence, and an
+  unparseable timestamp never buys a pass.
+
+- **Every routine run was recorded as `FAILED`.** `DeriveOutcome` treats a clean
+  completion that reports no §9.6 hand-off as `FAILED` with "no outcome
+  reported" — right for an agent, which was asked for one, and impossible for a
+  routine built from `script`, `transform`, `notify` and `crewship` steps, where
+  nothing can ever report anything. Every routine run in a seeded workspace read
+  `status=completed, outcome=FAILED`, `crewship routine logs` printed `Error: no
+  outcome reported` on the happy path, and both `crewshipd_successful_runs_total`
+  and the digest's `pipeline_runs WHERE outcome='SUCCEEDED'` counted zero
+  routines forever. The strict default now applies only when the run actually
+  contained a step that could report (`agent_run`, or `call_pipeline`, which
+  fails closed); anything else settles `SUCCEEDED` with an empty reason. A
+  routine that *does* carry an agent step and still says nothing is unchanged —
+  that remains a real missing hand-off. Existing rows are not backfilled.
+- **§12's violation counter could not see the violation it was written for.**
+  `crewshipd_inbox_items_on_successful_runs` joined `pipeline_runs.id =
+  inbox_items.source_id`, and its comment claimed "no other producer keys an
+  item by a run id". A `notify` step keys its item `<run_id>:<step_id>`, so the
+  join never matched and the numerator was structurally always zero. It now
+  compares the run id against the prefix before the separator — equality on the
+  extracted prefix, never a `LIKE`, so a run whose id merely prefixes another's
+  is not miscounted. With this and the outcome fix in place the series reports a
+  real, non-zero ratio on a seeded workspace, because the shipped packs *do*
+  post an inbox message from a successful run. That contradiction between the
+  packs and §12 is now measured rather than hidden, and is left for a decision.
+
+- **`-f json` printed English prose on the commands that mint an identifier.**
+  `--format` is a persistent flag, so every command in the tree advertises it,
+  and the premise of this CLI is that agents drive it. `crewship issue create
+  -f json` answered `Created issue ENG-14: ZZ fmt probe` — an agent had to
+  regex its own identifier out of a sentence. None of the offenders was in
+  `formatContractExempt`, and none would have qualified; the existing guard
+  simply could not see them, because it only exercises commands it can invoke
+  without arguments. A new guard covers every `create` in the tree plus a named
+  ratchet of six issue mutations, and all 21 violations it found are fixed —
+  `issue create -f json` now emits the object `issue get -f json` emits, so one
+  parser handles both, and the human output is byte-identical. The wider
+  population of mutating commands still off-contract is left to its own
+  ratcheting programme rather than papered over.
+- **Internal ids where a name belongs.** `routine list` printed a crew cuid in
+  its AUTHOR CREW column, `cost` and `paymaster` printed `agent/<cuid>`, and
+  `history` showed `?` for every routine run with a blank trigger. Slugs are
+  resolved for the human formats; machine formats keep the ids a script joins
+  on. An entity deleted since the run still shows its id, which is the honest
+  answer rather than a guess.
+- **`crewship issue activity` was unordered** — `created` could appear last —
+  while `issue events` on the same issue was correctly seq-ordered.
+- **Refusals that named no way out.** `keeper ask --credential` matched only a
+  credential's env-var slot and answered "credential not found for name" for a
+  credential plainly present in `credential list`; it now resolves slot, name
+  or id and, when the credential exists but the agent cannot reach it, says
+  exactly that and gives the `credential assign` command. A DONE issue refused
+  both deletion and cancellation with no hint that `DONE → BACKLOG → delete`
+  was open all along; both refusals now name the allowed targets and the
+  shortest route. And `crewship inbox resolve` on a live waitpoint — correctly
+  refused, because the decision has to reach the run — now prints the
+  `routine waitpoints approve/reject` commands with the real token.
+- **`crewship routine active` hid runs paused at a waitpoint**, though a run
+  waiting for a human is in flight in every sense that matters. It now lists
+  queued, running and waiting runs, with the state in a STATUS column.
+
+- **The one documentation page the deployed index could never carry.** The
+  scheduled `Documentation surface` job had been red on a count —
+  "llms.txt lists 306 pages, docs.json declares 307" — which read as Mintlify
+  lag and was not. `docs/manifest/README.md` was declared in the navigation and
+  404 on the live site, because Mintlify does not publish a `README` basename;
+  each merge that added a page moved both numbers and preserved the off-by-one.
+  Renamed to `manifest/overview`, matching `cli/overview` and
+  `api-reference/overview`. `checkServed` now names the pages it cannot find
+  instead of only counting them — it had both sets in memory and threw the
+  difference away, which is why one page hid behind a number for days.
+- **The runtime-conformance harness ignored the gap registry it fills.**
+  `KnownRuntimeGaps` records that podman below 5 drops supplementary GIDs and
+  that upgrading is the only remedy; the harness failed the nightly build over
+  exactly that, on a runner where it could not be otherwise. `ClassifyConformance`
+  joins them: a documented gap is reported in full with its operator-facing
+  detail but no longer reddens the build, an undocumented drop still does, and a
+  control the runtime *honours* while the registry still calls it broken now
+  fails as a stale entry — that registry feeds `doctor` and `/system/runtime`,
+  so leaving it to rot tells operators their agents cannot read crew memory
+  when they can.
+- **Queued comments could start duplicate follow-up runs after an immediate completion.** Follow-up selection and claim attachment are now serialized before another completion callback can select the same batch. Agent execution remains asynchronous.
+- **Starting another conversation with the same agent was hard to find and disabled in Commands.** Chat now has a visible New conversation button and a working New session command, selects a clearly labelled draft, and returns to Direct when starting from Issues or Routines. Unsent message drafts are restored for their author, and mention keyboard navigation no longer resets the selection or reopens after Escape.
+- **Chat Files and Team could show empty or misleading panels.** Mobile Files now loads with error/retry states, Team replaces the empty More panel without a duplicate tab strip, and file Preview opens the editor or offers a download. File edits survive desktop drawer closing and panel tab switches; explicit discard actions ask before losing changes. Team shows crew members separately from agent collaboration, filters history before pagination, and refreshes on relevant realtime events. Agent links open the selected agent, and reconnect notices no longer cover header controls.
+
+- **An answered agent request could stay marked as processing after a fast run finished.** Delivery persistence now catches up with a run that already completed, failed or was cancelled, while running and queued deliveries retain their lifecycle.
+
+- **A routine `script` step ran against a sidecar nobody had started.** Every
+  script step execs with `HTTP_PROXY=127.0.0.1:9119` — that proxy is where the
+  crew egress allowlist is enforced — but crewship-sidecar was only ever
+  started by the *agent* run path, which needs an agent. So on a crew whose
+  container had not yet served an agent run, every script step that touched the
+  network died on `connect to 127.0.0.1 port 9119: Connection refused`. #1473
+  gave script steps the proxy (the security half) and left the liveness half
+  open. It was deterministic on a fresh install, and it hit the demo first: the
+  `ci-nightly-triage` pack runs its `script` probe *before* its `agent_run`, so
+  a new workspace's very first nightly probe failed, and the probe's
+  fail-loud-on-error rule (correct in itself) raised "Nightly CI — something to
+  handle" about the platform's own bug — the exact inverse of the pack's
+  "costs nothing on a quiet night" claim. The crew-agnostic half of
+  `ensureSidecar` is now `settleSidecar`, with `EnsureCrewSidecar` as a second
+  door onto the same check/reuse/restart sequence and the same #1220 lifecycle
+  lock, and `RunScript` calls it before exec. A crew-started sidecar carries the
+  full network policy and *no* credentials — a script step authenticates
+  through its own `script.env` — so it is stamped `crew-only-no-credentials`
+  and an agent run replaces it unconditionally rather than inheriting a sidecar
+  that would inject nothing into its model traffic. The reverse never happens:
+  a healthy agent-started sidecar is reused, never downgraded.
+- **A crew can always run its agents** (#2429) — two defects behind "stdbuf: failed to run command 'claude': No such file or directory" on every wizard-built crew. mise now installs under `/opt/mise` instead of the agent's home — `/home/agent` is a per-crew named volume at runtime and hid every tool the image had put there — and the build puts the agent's tool directories (`/home/agent/.local/bin`, `/opt/mise/data/shims`) plus the matching `MISE_*` variables into the image `ENV`, `/etc/environment` and the runtime container env, so mise-installed tools resolve from the non-login exec the agent runs in; the runtime merges the aggregated PATH, the captured login PATH and the well-known tool directories into one instead of letting a captured login PATH replace the rest. And the adapter CLI is no longer the operator's job: every build reads the crew's agents' `cli_adapter`s, adds a mise tool (or an installer, for `droid`) for each CLI no declared feature provides, and runs `command -v` for every required binary as the agent user before the image is called ready — a miss fails the build with the binary named. The verified binaries are stored with the image and read by the dispatch gate (chat, issues, routines, container start): an image that is missing or not verified for a live agent's adapter is rebuilt before the agent runs, whichever path created the agent, and a plain base image with no features still gets the build its agents need; creating or moving an agent onto an uncovered adapter enqueues the rebuild immediately. A cache hit now returns the runtime contract instead of an empty one that was stored as NULL (which dropped the privileged flag, mounts and env of the previous build). `droid` installs into the image-resident `/opt/crewship/bin`. Cache keys changed (schema v3), so existing crews rebuild once.
+
+<!--
+  Backfill (#2086). The twenty-four entries between this marker and the next
+  one chronicle eighteen PRs that merged with no changelog trace anywhere —
+  more entries than PRs, because a PR that broke three separate things gets
+  three. Written from their diffs, after the fact, rather than by their
+  authors at the time. The `Changelog Guard` workflow now fails a PR that
+  touches `internal/api/`, `cmd/crewship/`, `app/`, `components/`, `lib/`,
+  `hooks/` or `stores/` without adding to this `## [Unreleased]` section —
+  that section specifically, not the file, because it is the only one
+  `RELEASING.md` cuts release notes from.
+
+  The #2086 audit reported fifteen such PRs. Reading the window's merges back
+  against this file turned up seventeen, and #2079 makes eighteen: it merged
+  nineteen minutes after the audit list was cut (2026-08-26T20:52Z against the
+  issue's 20:33Z), unchronicled like the rest, and it supersedes #2070 below —
+  which is why leaving it out was not merely a gap but left a wrong entry
+  standing with nothing to correct it. #2017, which the audit listed as
+  missing, was already chronicled and is untouched.
+-->
+
+### Added
+- **The two §19.3 service levels that had no series — scheduled fire punctuality and inbox items per successful run (#2396).**
+  A scheduled run recorded only when it started; the occurrence it fired
+  for survived only inside the idempotency key's hash, so "how late did
+  this fire" was not a question the schema could answer. The schedule fire
+  path now stamps that occurrence on the run as `pipeline_runs.due_at`
+  (migration; NULL on every non-scheduled run and on runs from before the
+  column), and `/metrics` reports `crewshipd_schedule_fire_punctuality_seconds`
+  p50/p95 over the most recent scheduled runs. And §12's hard rule —
+  a `SUCCEEDED` or `NO_CHANGE` run never creates an inbox item — is now
+  measured rather than trusted: `crewshipd_inbox_items_per_successful_run`
+  joins `inbox_items` to both run tables, with its two raw counts alongside.
+  Both follow the #2380 conventions: a percentile or ratio with nothing to
+  compute is absent, never a fabricated `0`. See
+  [Prometheus metrics](/observability/metrics).
+- **The web inbox renders the §12 action contract (#2398).** A `run_needs_human` card on `/inbox` now shows its `actions[]` as buttons — **Answer** opens a text box and Send delivers the text to the session that asked, **Take over** and **Dismiss** act at once (confirming first when the server marks an action irreversible) — each through `POST /api/v1/inbox/{id}/act`, the door `crewship inbox act` already used. The card resolves in place, no reload, and shows the receipt where the buttons were (the resumed run, `event #<seq>` on the issue's log, the agent version); a resolved card opened from History reads the same receipt back from `payload.receipt`. A `409 already acted on` refreshes the card to the other person's decision instead of erroring; a `409` undeliverable answer keeps the card open and shows the server's reason. `attention_class` is a badge on every card and row that carries one (Decision / Input needed / Review / Repair), and the kind pill names `run_needs_human` ("Needs a human") and the two trigger-failure kinds instead of "Update". `thread_key` is typed on the item and not yet read — the server already collapses rows on it, and the client-side grouping was left as it was.
+
+- **A correction to a running agent is reflected in the next step, ahead of ordinary follow-ups (#2350, PRD §18 scenario 4).** A comment that arrives while an agent's run on an issue is still going is now classified a `correction` (the `stop > correction > normal` delivery priority the schema already reserved). When the queued comments are folded into the next run on that session, corrections lead the brief and are labelled `CORRECTION` with a header telling the agent to apply them first, so the next step reflects the correction rather than treating it as just another later comment. Delivery is at the next safe boundary (the next run on the session), not mid-token interruption of a turn already under way, which remains future work.
+- **Acting on a NEEDS_HUMAN inbox card resumes the run (#2389, PRD §18 scenario 15).** `POST /api/v1/inbox/{id}/act` and `crewship inbox act <id> answer|take_over|dismiss`. `answer --input` posts your text as a comment on the issue and delivers it to the same agent session that asked; the run resumes from its checkpoint with the answer as its next delivery (one delivery, one run — queued if the session is mid-run). `take_over` and `dismiss` move the session to idle. Every action leaves an `inbox_acted` receipt on the issue's event log (who, action, the session's `agent_version`, and the delivery and run an answer produced) and resolves the card in place with the receipt under `payload.receipt` — the same thread, no new card. Acting twice is `409`. The card B6 raises now offers all three actions. Migration: `mission_activity`'s action CHECK admits `inbox_acted`.
+
+- **The §19.3 service levels are computed series on `/metrics`, with a real percentile capability (#2380).**
+  `crewshipd` had no way to compute a p50/p95 anywhere — no Prometheus
+  client, no histograms, and SQLite has no `PERCENTILE_CONT` (F39). New
+  collectors in `internal/server/metrics_domain.go` answer the delivery,
+  continuation, duplication and human-comprehension questions §24.1 says
+  actually get measured: delivery-ack and delivery-claim latency
+  percentiles, lost deliveries, a duplicate-active-run canary, context-pack
+  token-size percentile and compaction outcomes, checkpoint compliance
+  counts, and outcome-routing counts with a violation canary. A percentile
+  with zero samples in its window is absent from the scrape, never a
+  fabricated `0`. See [Prometheus metrics](/observability/metrics) and
+  `docs/guides/routines.mdx`'s Production notes.
+
+### Security
+- **The Keeper judges a credential ASK before it reaches a human (#2392).**
+  A `CREDENTIAL` escalation raised as an ask (#2376) used to go straight to a
+  person's inbox — the Keeper judged credential *use* and *access* but never the
+  request to raise the ask, so an off-task or prompt-injected agent could spam
+  credential requests at the operator. `CreateEscalation` now puts the ask to
+  the same judge that guards access, over the declared name, type, tier and
+  purpose and the agent's conversation (never a value — an ask has none), before
+  anything is staged: **DENY** stages nothing, interrupts no one and returns the
+  reason to the agent (recorded in the journal); **ESCALATE**, and any judge
+  outage, stages and routes to a human with the judge's note attached;
+  **ALLOW** stages as before. With Keeper off, ask gating is off and every ask
+  reaches a human as it did. A *propose* (a value the agent generated) is not
+  judged — it is a human approving a secret, not a request to grant one. Agent
+  prompt, credentials guide and CHANGELOG updated; the `hosts` field remains
+  review metadata (egress enforcement is tracked under EPIC #1001 M2b), and a
+  handle-only credential stays a standing grant because every use of it already
+  re-enters the Keeper-judged `/keeper/execute`.
+- **A peer agent's "GO" cannot satisfy a waitpoint (#2388, PRD §18 scenario 10).** The waitpoint resolve door now takes an explicit actor and refuses an agent — a crew-bound internal token, a sidecar tool, any agent-facing route — and an unidentified caller, before the row is touched. The waitpoint stays pending for a person, the authed approve route answers `403` with `reason: waitpoint_decider_not_allowed`, and the attempt lands in the audit log as `waitpoint.decision_refused` naming the actor and the run (`crewship audit --action waitpoint.decision_refused`). The public token callback is the external holder's door and unchanged; the inbox card now states `who_can_act: ["role:MANAGER"]`.
+
+- **A credential a human supplies to an agent is a grant, never a value the agent can read (#2376).**
+  A `CREDENTIAL` escalation raised without a value stages a `REQUESTED`
+  credential in the vault; the human fills it through the new
+  `POST /api/v1/escalations/{id}/supply` — `crewship escalation supply <id>`,
+  which reads the value from stdin and has no flag for it — and the agent
+  is answered with the credential's name and `use: keeper_execute`. The
+  value used to be encrypted into `escalations.resolution` and handed back
+  to the agent in plaintext by the wait endpoint, landing in its stdout,
+  transcript and model context; that column is no longer written for a
+  `CREDENTIAL` escalation, historical rows hold `[credential submitted]`,
+  and `/resolve` answers **400** to any resolution text on one. New
+  `credentials.handle_only` marks a credential the agent may use but never
+  read, enforced at the shared delivery loader on every path, Keeper on or
+  off. Agent prompt, inbox card, escalation card and docs updated.
+- **A handle-only credential supplied on a running server is usable at once, not only after a restart (#2391).**
+  A handle-only credential's only usage path is `/keeper/execute`, which read
+  the plaintext from the Keeper secrets store — a map loaded once at boot
+  (`type='SECRET'` rows only) and never refreshed. Every credential from the
+  #2376 ask→supply flow becomes `ACTIVE` after boot, so it was absent from the
+  store and an `ALLOW` returned `500 credential not available in secrets
+  store`: the agent was granted a credential it could not use until the next
+  restart, and a handle-only credential of a non-`SECRET` type never entered
+  the store at all. `/keeper/execute` now falls back to a live vault decrypt on
+  a store miss — the same source, key and ciphertext every other delivery path
+  already reads at request time — after the credential has been re-validated
+  `ACTIVE`, assigned and lease-live, and refuses a pending sentinel. Fails
+  closed either way; the store stays a boot cache.
+- **`crewship issue update --force` follows the 409 the terminal-children rule
+  sends (#2382).** #2377 taught the server to refuse moving a parent to
+  DONE/REVIEW while a sub-issue is live and to say "retry with ?force=true";
+  the CLI had no way to do that. It does now, and the override is recorded
+  as the same receipt the API writes.
+
+- **`crewship issue comment --mention` writes a real mention; `issue get` and `issue runs` stop hiding owner/delegate and mission attribution (#2321).**
+- **The Track A live validation is on record, and the PRD says what it found (#2331).**
+  `docs/prd/reports/track-a-live-validation-2026-09-03.md` lists, package by
+  package, what each Track A change did on a factory-reset dev1 — including
+  the two Stop defects (#2312, #2315) and the CLI gaps (#2313) that ten green
+  test suites had not seen — and the PRD's A1 row, A1 status and §24.1
+  coverage-trap section now cite them.
+
+- **Stop now reaches a run that is still queued (#2317).** `issue stop`
+  stamped only `PENDING`/`RUNNING` assignments, so a run parked as `QUEUED`
+  — behind the agent's live run (#2269) or the crew budget — was missed:
+  once the agent freed up, the pump started it and it landed `COMPLETED` on
+  an issue that already read `CANCELLED` (seen live on dev1). Stop now stamps
+  every non-terminal assignment, and the queued row is recorded `CANCELLED`
+  without ever starting its exec.
+
+- **Erasing a user left them named on four Pages tables (#1976).** The
+  Article 17 cascade transferred the subject's pages and stopped, so
+  `page_versions.author_user_id`, `page_grants.granted_by_user_id`,
+  `page_public_tokens.created_by_user_id` and
+  `page_webhooks.created_by_user_id` still carried the name of a person whose
+  SAR ticket had been closed as "erased" — and the public links and inbound
+  webhook tokens they had issued were still live. Every one of those columns
+  already declares what should become of it when the human goes away (three
+  `ON DELETE CASCADE`, one `SET NULL`), and none of them ever fired, because a
+  workspace-scoped erasure deliberately never deletes the `users` row. The
+  cascade now runs those declared actions itself, inside the erased workspace
+  only: the page version keeps its history and loses its author, while the
+  grants (including grants naming the subject), public `/p/{token}` links and
+  webhook tokens are revoked by removal and stop working at once. The receipt
+  and the `gdpr_actions` audit row gained a count per table with the verb in
+  the key (`page_versions_anonymised`, `page_grants_removed`,
+  `page_public_tokens_revoked`, `page_webhooks_revoked`); an anonymised row is
+  not counted in `rows_deleted`, because nothing was deleted. Each revocation
+  also writes the same journal entry the ordinary revoke path writes, so the
+  operator can still see *which* page a crew lost access to and *which*
+  integration the erasure just broke — carrying `fire_count` and
+  `last_seen_at` with it, since the row that held them is gone, and
+  deliberately never writing the subject's own id into a table the erasure
+  cannot reach. `docs/security/gdpr.mdx` now states the contract the erasure
+  keeps, and — equally important for anyone answering a strict RTBF request —
+  the three kinds of row that still name the subject afterwards, plus the
+  longer tail tracked in #2308.
+
+- **The 1.0 known limits are written down where users read (#2299).** The
+  issue-mentions, routines and issue-detail guides now say plainly what Track
+  A deliberately left for 1.1: a busy agent is woken after its live run rather
+  than interrupted, and a chat to it bounces `agent_busy`; the routine
+  webhook and direct agent-run routes are not yet behind that guard; routine
+  runs are missing from the Runs view (#2284); there is no cross-run
+  continuity; Stop is cooperative; and `DONE`/`COMPLETED` are still two words
+  for finished. The mentions guide also stops saying nothing is ever queued —
+  since #2269 a mention of a busy agent is.
+
+- **An issue's owner and its delegate are two columns, not one polymorphic
+  assignee (#2297).** `missions` carried `assignee_type`/`assignee_id`, so
+  delegating an issue to an agent overwrote the person who owned it — the UI
+  then showed the agent where the owner had been, and unassigning left a
+  stale `assignee_type` behind. `missions.owner_user_id` and
+  `missions.delegate_agent_id` are now separate nullable foreign keys, both
+  `ON DELETE SET NULL`; the migration backfills them from the legacy pair.
+  Delegation writes only the delegate; `crewship issue start` refuses an
+  issue with no delegate, or whose delegate is not a live agent, with a named
+  400. The API returns `owner` and `delegate` objects beside the legacy
+  fields, and the issue header and Properties panel render both. Unassign
+  clears every one of the four columns.
+
+- **The public mission-start route now checks the #1768 autonomy gate
+  (#2258).** `autonomyGateApproved` was consulted from exactly one place —
+  the sidecar-facing `POST /api/v1/internal/missions/{missionId}/start` —
+  and never from the public `POST /api/v1/crews/{crewId}/missions/{missionId}/start`
+  that `crewship mission start` calls. `applyAutonomyGateDecisionTx`
+  deliberately writes no marker on the mission row when a gate is denied —
+  the `approvals_queue` row is documented as the *only* door — so that
+  guarantee held only for agent-triggered starts. Any MANAGER (the route's
+  `roleCreate` requirement) could start a mission whose autonomy gate was
+  pending or had been explicitly denied, including by an OWNER, simply by
+  calling the public route instead of the internal one.
+
+  The internal route's check — fail-closed on pending/denied/cancelled/
+  timed-out — is now the shared helper `refuseUnlessAutonomyGateApproved`,
+  and both mission-start handlers call it, so the two routes refuse
+  identically and the next start-like route added does not repeat the
+  omission. A privileged human override of a hold is a separate feature
+  this does not add: it would need to be explicit and audited, not an
+  accident of which handler a request reaches.
+
+### Added
+
+- **`DONE` is now the only word for "finished" on `missions.status`; `COMPLETED` is retired (#2383).**
+  Issues moved to `DONE` while the mission engine's PATCH endpoint moved an
+  orchestrated mission to `COMPLETED` for the identical REVIEW→terminal
+  approval, sharing one column — a decision documented in
+  `docs/prd/PRD-ISSUES-AND-ROUTINES-2026.md` §3.1/§23 (D20). `PATCH
+  .../missions/{id}` now writes `DONE` for both mission types; a legacy
+  `{"status":"COMPLETED"}` request is still accepted and normalized rather
+  than rejected. A migration backfills every existing `COMPLETED` row to
+  `DONE`, and the eight-plus defensive `status IN ('DONE','COMPLETED')`
+  reads across milestones, projects, and cost metrics collapse to `DONE`
+  alone. Scope is `missions.status` only — `assignments.status` and
+  `pipeline_runs.status` keep `COMPLETED`/`completed` untouched, pinned by
+  a dedicated regression test in each package.
+
+- **The issues board moves without a refresh, resyncs a dropped frame, and a parent waits for its children (#2377).**
+  `issue.session.state`, `issue.checkpoint.written` and `run.outcome` are
+  now broadcast on the workspace channel (`internal/api/issue_session_realtime.go`)
+  and registered on the client allowlist (`hooks/use-realtime.tsx`) —
+  before this PR none of the three were ever emitted, so an issue's session
+  panel and the Runs card's status pill went stale until a manual reload.
+  A new `GET /api/v1/crews/{crewId}/issues/{identifier}/events?after_seq=`
+  (`crewship issue events --after-seq`) reads the B1 event log by its own
+  `seq` cursor rather than `created_at`, and a client-side gap detector
+  (`hooks/use-issue-event-gap-resync.ts`) calls it whenever the next
+  `issue.delivery.acked` seq it sees isn't exactly one more than the last —
+  the WebSocket hub's non-blocking dispatch silently drops a frame under
+  load, so registering a realtime type is not the same as never missing
+  one (F43). Separately, §10.4's terminal-children rule: an issue with a
+  non-terminal sub-issue or plan task can no longer move to `DONE`/`REVIEW`
+  without `?force=true`, and forcing past one writes a receipt — the same
+  status-change activity/event row, naming who forced it and which
+  children were still open — rather than a silent override.
+
+- **The reliability editor — every §13.2 field settable, a DST-safe fire
+  preview, webhook edit in place (#2372, closes #2362).** Almost every
+  schedule field the backend already carried (cron/timezone, catch-up
+  policy, the wake gate, the circuit-breaker threshold, the version pin,
+  enable/disable) had no UI door — the create form offered name, cron,
+  timezone and inputs only, and PATCH already accepted the rest (F18). A new
+  reliability editor dialog exposes all of it, wired to the existing PATCH
+  `/pipeline-schedules/{id}`. Two gaps that genuinely had no door: (1) a
+  next-five-fire-times preview, computed server-side by a new stateless
+  endpoint (`GET /pipeline-schedules/preview?cron_expr=&timezone=&count=`,
+  `crewship routine schedules preview`) built on the existing
+  `pipeline.NextOccurrences` helper — proven against real IANA tzdata across
+  both `Europe/Prague` DST transitions (spring: the nonexistent local hour
+  is skipped entirely; autumn: the ambiguous hour fires twice, exactly one
+  hour apart in UTC); (2) webhook editing (F21) — `PATCH
+  /pipeline-webhooks/{id}` changes name, target, inputs_template, enabled
+  and rate limit in place, with signing-secret rotation as one explicit,
+  opt-in field (`rotate_secret`) and the token/public URL **never** rotated
+  by this endpoint under any input (`crewship routine webhooks update`).
+  Concurrency (`concurrency_key`/`max_concurrent`) is a routine-wide DSL
+  field, not per-schedule, so the reliability editor shows it read-only with
+  a pointer to the routine's own Editor tab rather than adding a control
+  that would silently change every trigger of that routine at once.
+
+- **The attention contract — server-side thread merge, versioned receipts, and a digest (#2378).**
+  `inbox_items` gains real `thread_key` / `attention_class` / `actions_json`
+  columns (PRD-ISSUES-AND-ROUTINES-2026 §12, work package B10) instead of
+  the payload-only fields B6 introduced; `internal/inbox.WriteThreaded` is
+  the one write path every attention-contract producer (the a4
+  trigger-failure kinds, B6's `run_needs_human`, B8's routine receipts, and
+  the autonomy-gate/webhook/schedule/automation escalations) shares — a
+  second write under the same `(workspace_id, thread_key)` merges into the
+  open card instead of raising a sibling, and `internal/inbox.
+  ResolveByThreadOrSource` resolves a merged card via the thread when the
+  caller's own `(kind, source_id)` isn't the row's stored identity. This
+  fixes the exact duplicate the B8 live check found on dev1: one `routine
+  save --draft` on a risky routine used to raise BOTH the governance
+  "proposed for review" card and the B8 "trigger ready" receipt — they now
+  share one thread and collapse to one card carrying both asks and the
+  version. `routine_version` (nullable) lands on `approvals_queue` and
+  `pipeline_waitpoints` (§9.8) so a decision about a routine's authored
+  definition names the version it decided on, stamped by the autonomy-held
+  agent-schedule path and by every `wait: approval` step. `internal/inbox.
+  StartDigestScheduler` closes F30 — `user_notification_prefs`' `'digest'`
+  state has been schema-legal and unimplemented since it shipped; every few
+  hours it now refreshes one per-workspace card summarizing the quiet
+  `SUCCEEDED`/`NO_CHANGE` runs from the last rolling day, skipping workspaces
+  with nothing to report. `GET /api/v1/inbox` and `GET /api/v1/inbox/{id}`
+  (and their CLI counterparts) now return the three new fields. `/inbox-v2`
+  drops one of its two `GET /api/v1/inbox` calls (`active` + `resolved` used
+  to each round-trip separately; both now come from one `state=all` fetch) —
+  the approvals poll and the missions walk F28 also named are unchanged and
+  stated as follow-up.
+
+- **Atomic routine authoring — routine, version and trigger commit together (#2367).**
+  `save_routine` (and the user/CLI/internal save endpoints) now accept an
+  optional `trigger` block; `pipeline.Store.SaveWithTrigger` creates the
+  routine, its version, and a cron schedule in ONE transaction — a bad cron
+  expression or timezone rolls the whole save back, proven through the
+  public API. The save response (and the routine-author skill's final
+  message) names the trigger's first fire time. `"activation": "draft"`
+  creates the trigger disabled and raises exactly one MANAGER+ inbox item
+  whose payload pins the routine version it was created against;
+  `POST /api/v1/workspaces/{ws}/pipeline-schedules/{scheduleId}/activate`
+  (`crewship routine schedules activate <id>`) turns it on and resolves that
+  item. `pipeline_schedules.activation` (new, nullable) distinguishes a
+  draft awaiting its first approval from an ordinary disabled/breaker-tripped
+  schedule. Webhook and automation-binding trigger kinds are not yet
+  supported by this endpoint — only `schedule` and the explicit `manual`
+  no-op.
+
+- **One event log per issue, and a durable session per (issue, agent) (#2336).**
+  `mission_activity` was a status-change audit table with no CHECK on
+  `action`, no `workspace_id`, and two writers (`assignments_run.go`,
+  `orchestrator/mission_tasks_completion.go`) that INSERTed straight into it,
+  bypassing the shared emitter. It now carries `seq` (`UNIQUE(mission_id,
+  seq)`, allocated by one race-free helper — `internal/missionactivity` —
+  every writer goes through), a backfilled `workspace_id`, `payload_json`,
+  `source_kind`/`source_id`, and a CHECK on `action`. A new
+  `issue_agent_sessions` table (`UNIQUE(mission_id, agent_id)`) gives every
+  (issue, agent) pair a durable cursor: a mention resolves or creates one
+  rather than ever minting a second, pinned to the agent's config version at
+  creation. `GET /api/v1/crews/{crewId}/issues/{identifier}/sessions` and
+  `crewship issue sessions <identifier>` expose it. Foundations only
+  (PRD-ISSUES-AND-ROUTINES-2026 §9.1/§9.2, work package B1) — no delivery/
+  wake loop and no session-exclusivity index yet; that is B2/B3.
+- **Issues, missions and an issue's runs page with `?limit=&offset=`, publish the total in `X-Total-Count` / `X-Limit` / `X-Offset`, and `?q=` searches on the server** — the board printed the size of the page it received (#2302).
+- **An issue's runs carry `run_id`, `trace_id`, `agent_id` and `agent_slug`; `/api/v1/runs` rows carry `mission_id`, `mission_identifier` and `crew_slug` and filter by `?mission_id=`; `/api/v1/journal?mission_id=` accepts the issue identifier** — the issue → run → journal path had no ids to follow (#2302).
+- **CLI: `issue list`, `mission list` and `issue runs` take `--limit`/`--offset` and end a table with "showing 1–50 of 1 015"; `issue runs` shows the run id; `history --issue ENG-4` and `journal --mission ENG-4` take the identifier; `mission list --crew X --search Y` now searches and counts on the crew-scoped list too** (#2302).
+- **The issue detail lists every run with a status word and links the run, the agent, the crew and the issue's journal; the routine chip links `?slug=`** — it showed the newest run alone with a name nothing linked (#2302).
+- **`/routines` and `/activity` keep their selection in the URL** — a reload resumes the routine or the walk, Back closes it, and a drill-down can be linked; `/routines?routine=` still lands; a bare `/activity?run=` resolves its routine from the journal; the run page links its routine, issue, agent, crew and journal, and the agent link no longer points at a dead route (#2302).
+- **`/journal?mission_id=ENG-4` narrows the timeline to one issue with a clearable pill that links the issue; an expanded row links its issue; the Runs tab shows the issue each run worked on and links the crew** (#2302).
+- **The crews screen says how big the fleet is, and what needs you (#2318).**
+  `/crews` used to show the API's 100-row window as the whole workspace —
+  "100 crews" on 103, and a deep link past the window said "not found". The
+  explorer now reports the real total, groups crews by what needs a person
+  (Needs attention → Running → Idle), folds every group after six, counts
+  search matches and says when nothing matches. A crew canvas opens with a
+  "Needs you" strip — rebuild pending, a credential whose CLI is missing from
+  the image, an MCP server without a credential, an agent in error or waiting
+  — each row with the one action that resolves it (Build now, Install, Connect,
+  Inspect, Review). The agent's decision banner has its button, the Issues
+  cell no longer links to a 404, the roster fits a phone, and the onboarding
+  guide is no longer the first row of the fleet.
+- **Crew tools on Integrations, and Connect (#2318).** Crew-scoped MCP servers
+  lived on neither tab of `/integrations`; Tools (MCP) gains a Crew tools
+  section listing each server with its crew, bound agents and auth state, and
+  *Connect* binds a vault credential or an OAuth token to every agent in the
+  crew. The page's rail now opens as an overlay on a phone. A crew's
+  Settings → Integrations shows the auth state it used to leave blank.
+- **Deleting and revoking ask properly (#2318).** Deleting a crew or an agent,
+  removing a skill or a credential from an agent, deleting a notification
+  connection and revoking or removing a Composio account no longer use the
+  browser's `confirm()`. One dialog says what is lost, what is kept and where
+  to recover; deleting a crew asks for its slug typed back; a failed action
+  keeps the dialog open.
+- **One status pill (#2318).** The agent canvas, the roster, the explorer,
+  the notification connections and deliveries and the Composio accounts all
+  read their state through the shared dot-and-word pill; raw enums (ACTIVE,
+  pending_review, never_used) no longer reach the screen, and a connection
+  whose delivery log the viewer may not read says "Not checked" instead of
+  "Enabled".
+- **List endpoints describe their window (#2318).** `GET /api/v1/crews`,
+  `/agents` and `/credentials` return `X-Total-Count`, `X-Limit` and
+  `X-Offset` (bodies unchanged) and take `?q=` for a server-side search;
+  `crewship crew list`, `agent list` and `credential list` take
+  `--limit`/`--offset` and end with `showing 1–100 of 103 · next page:
+  --offset 100` in human formats.
+
+- **The inbox reads as decisions, and it is never blank (#2314).** A row is a
+  kind pill (Question, Link, Credential, Hire, Failed run, Missed run …), the
+  question without the "Agent escalation:" prefix, the crew and the agent by
+  name, the age or the expiry, and a verb. With nothing open the reading pane
+  carries the triage — what waits, what expires today, by crew, what is live,
+  the last decisions — and empty columns say what lands there. The detail
+  names the agent and the crew as links, turns every identifier into a "Where
+  this came from" link (chat, run, issue, routine, crew), shows the https
+  address a LINK escalation asks to open and the name a credential proposal
+  asks for, and says "An owner or admin decides this" instead of a role enum.
+  A staged hire has Deny. The page has a SubBar with counts, a Live pill,
+  History and Decide next.
+- **Chat says who you are talking to (#2314).** The header is the agent — face
+  with a status dot, name, status word, role, crew link, model label, skills ·
+  credentials · runs — with Copy link instead of a raw session id. An empty
+  conversation shows the agent card and "What <name> can do" from its skills;
+  a routine step's empty transcript says so instead of "Start a conversation".
+  The breadcrumb is Crews / <crew> / <agent> by name, never the slug and never
+  the onboarding Guide's identifier. The column says "13 more with Riley ·
+  Show all" from the server's total, and lists agents not yet talked to as
+  rows with Start.
+- **Escalation inbox rows say what they ask for, chats page, the Guide stays out
+  of rosters (#2314).** The inbox payload carries `link_url` and
+  `credential_name` (never the value); `crewship inbox get` prints them.
+  `GET /agents/{id}/chats` honours `limit`/`offset` with `X-Total-Count`
+  (`crewship chat list --limit/--offset`). `GET /agents` hides the setup
+  crew's agent unless `include_setup=1` (`crewship agent list --include-setup`).
+- **Duplicate deliveries collapse to one run, and a mention is acknowledged
+  before any model call (#2337, #2338).** `mission_comment_mentions` is now
+  also the delivery table (PRD-ISSUES-AND-ROUTINES-2026 §9.3, work package
+  B2): `comment_id` is nullable, `event_id` links a delivery to the
+  `mission_activity` row that raised it, and a new `state` column
+  (`pending`/`claimed`/`consumed`/`failed`/`superseded`) tracks whether a
+  run actually consumed the delivery — a separate question from
+  `dispatch_state`, which only says whether the dispatcher created one.
+  `UNIQUE(event_id, agent_id)` plus a claim/consume CAS (copied from
+  `PendingRunStore.MarkFired`'s error-handling shape) means ten concurrent
+  deliveries of the same event produce exactly one run. On comment, the
+  server now writes the event and delivery and pushes
+  `issue.delivery.acked` on the workspace channel before `dispatchOne` is
+  ever called, so a human sees their mention was received without a
+  refresh — even while the agent is still finishing a prior turn. Gated by
+  the `issue_deliveries` feature flag, which degrades to the exact pre-B2
+  dispatch when off. `mission_comment_mentions` keeps riding backups
+  (`IntentInclude`) rather than switching to `notification_deliveries`'
+  exclude-operational classification — the audit-trail cost of losing
+  mention history outweighs the automatic-recovery benefit, so a delivery
+  left `claimed` across a restore stays that way until B4's lease sweep
+  ships (`internal/backup/intent.go`'s F37 comment on the table).
+- **One active turn per session — a mention on a busy issue queues instead of racing a second run, and is folded into the next one for real (#2342).**
+  A partial unique index, `idx_assignments_one_active_per_session` on
+  `assignments(session_id) WHERE status IN ('PENDING','QUEUED','RUNNING')`,
+  makes invariant I2 (PRD-ISSUES-AND-ROUTINES-2026 §9.4, work package B3)
+  a database guarantee rather than a read-then-write check a fast second
+  comment could still race past. `resolveOrCreateIssueAgentSessionTx` and
+  `insertCappedAssignment` now run inside one transaction
+  (`resolveSessionAndInsertAssignment`), closing the exact TOCTOU window
+  §9.4 named between resolving a session and inserting its run. A second
+  `@mention` that lands while the session's run is still `PENDING`,
+  `QUEUED` or `RUNNING` never starts a second run: `insertCappedAssignment`
+  turns the constraint violation into a typed `*sessionBusyError` naming
+  the run already holding the slot, rather than a raw SQL error reaching
+  the caller. Its delivery is left `pending`, not claimed by the run
+  already in flight — that run captured its own task as a value at
+  dispatch time and cannot see a comment that arrived after (there is no
+  live-injection channel into a turn already in progress; steering a live
+  turn is still future work), so claiming it there would mark the comment
+  `consumed` before anything had read it. Instead, the moment that run
+  actually finishes, `dispatchQueuedFollowUpsForSession`
+  (`internal/api/issue_session_followups.go`, called from
+  `finishAssignment` right after the existing B2 `consumeDeliveriesForRun`)
+  folds every delivery still queued for that session into exactly ONE new,
+  real dispatch — with their text in that run's own brief before its exec
+  starts — and claims them under it, so they are marked `consumed` only
+  once something has actually read them: two comments 2s apart produce one
+  run and two consumed deliveries, and ten produce one run and ten.
+  `docs/guides/issue-mentions.mdx`'s known limits and
+  `docs/api-reference/issues.mdx`'s Sessions section say what changed.
+- **A killed process's runs recover in seconds, not at the next restart, and never steal a live replica's run (#2348).**
+  `assignments` gains `lease_owner`/`lease_expires_at` (PRD-ISSUES-AND-
+  ROUTINES-2026 §9.4, work package B4): the process actually driving a
+  RUNNING assignment stamps its identity and a lease deadline, then renews
+  it every 20s from a heartbeat goroutine that wraps the agent exec —
+  stopped automatically the instant the run ends, however it ends. A new
+  sweeper (`AssignmentHandler.SweepExpiredLeases`/`StartLeaseSweeper`,
+  copied from `harbormaster.StartTimeoutSweeper`'s ticker-plus-DB-sweep
+  shape) reaps a RUNNING row within roughly one lease TTL of its owner
+  going silent, through the same completion path (`failInterruptedAssignment`)
+  the existing stuck-RUNNING sweeper uses. This is F8's actual fix, not
+  just a faster timer: boot-time `RecoverInterruptedRunning` used to fail
+  every RUNNING row older than the *recovering* process's own start time —
+  sound for one process, and wrong for two, since nothing recorded which
+  process owned a run. It now never touches a row whose lease a different,
+  still-live process is actively renewing, no matter how long ago the
+  recovering process itself booted; only a genuinely lease-expired (or
+  lease-less legacy) row is recovered. `issue_agent_sessions.state` now
+  actually moves with its runs — `pending`/`idle`/`awaiting_input`/`error`/
+  `stale` → `active` on a claimed run, `active` → `idle` (completed or
+  cancelled) or `error` (failed or lease-expired) once it ends — visible
+  through `crewship issue sessions` and `crewship issue runs`, both
+  unchanged endpoints. An ephemeral agent that expires mid-session
+  (`ReconcileExpiredEphemeralSessions`, riding the same sweeper) closes or
+  errors its session instead of leaving it rendered `active` over a ghost
+  (F41). Folded in: `crewship issue runs`' `source` column mislabelled a
+  B3 follow-up run `delegation` instead of `mention` — it only ever
+  touched `mission_comment_mentions.claimed_by_run_id`, never
+  `.assignment_id` (#2344).
+- **An agent that wakes on an issue gets a bounded context pack instead of nothing, and can finally read the comment thread it was woken for (#2353).**
+  `agent_session_checkpoints` (PRD-ISSUES-AND-ROUTINES-2026 §9.5, work
+  package B5) is the structured `done`/`plan`/`facts`/`blockers`/`next_step`/
+  `confidence` state a session-bearing run reports at the end of every run
+  (enforced the way HANDOFF is enforced, with `parsed=false` recorded rather
+  than guessed when a run does not comply); `GET .../sessions/{sessionId}/checkpoints`
+  and `crewship issue checkpoints <identifier> [--agent]` read it back. Every
+  session-bearing dispatch now assembles a §11.1 context pack — the issue
+  snapshot, the session's latest checkpoint, and the `mission_activity` delta
+  since `last_consumed_seq` (oldest-first, `#seq · actor · kind · text`) — and
+  appends it to the run's brief inside the same `<untrusted>` fence (and
+  Lookout injection scan) an ordinary mention comment already gets, closing
+  F40 for stored content replayed into a later wake. The delta degrades to a
+  terser one-line-per-event render rather than being silently dropped when it
+  overflows its ~1200-token budget, and the path actually taken (`fit`/
+  `summarized`/`truncated`) is recorded on the run
+  (`assignments.context_pack_compaction`/`context_pack_tokens`) instead of
+  only a journal entry, closing F14 for this new pack the same way. The
+  session's `last_consumed_seq` only ever advances over the CONTIGUOUS range
+  actually shown, never past a dropped event — a pack whose backlog is 200
+  events is the same bounded size as one with 5, not 40x larger. The sidecar
+  gains its missing comment-READ verb, `GET /issue/{id}/comments`, fenced the
+  same way `GET /issue/{id}` already is. Mid-run delivery of a follow-up
+  through the steering queue (F3) is out of scope for this package and is
+  tracked separately as B3b (#2350).
+- **The outcome contract — one routing table, not a guess per consumer (#2358).**
+  `outcome` (PRD-ISSUES-AND-ROUTINES-2026 §9.6, work package B6) lands on
+  both run tables — `assignments` and `pipeline_runs` — as a CHECK'd column
+  with the seven-value vocabulary (`NO_CHANGE`, `SUCCEEDED`, `WORK_CREATED`,
+  `PARTIAL`, `NEEDS_HUMAN`, `FAILED`, `CANCELLED`), parsed from the agent's
+  EXISTING structured hand-off — the `---CHECKPOINT---` block a session-
+  bearing run already emits (B5), or the `---HANDOFF---` block a mission-task
+  run emits — rather than a second, invented block. A run that ends cleanly
+  but reports no recognised outcome is recorded `FAILED` with `error_message`
+  set to `"no outcome reported"`: an absent outcome is a bug, not a silent
+  success. The §9.6 routing table is implemented once
+  (`internal/orchestrator/outcome.go`) and used by every consumer:
+  `NEEDS_HUMAN` raises exactly one `run_needs_human` inbox item with a §12
+  action contract and moves the issue session to `awaiting_input` — the
+  transition B4 named as unreachable without this column; `NO_CHANGE` and
+  `SUCCEEDED` create no inbox item; the terminal `run.*`/`assignment.*`
+  journal entries carry it. `issue runs` / `crewship issue runs` and the
+  routine run surfaces (`GET .../pipeline-runs/{id}`, `run-records`,
+  `crewship routine records`) all expose it.
+- **Hard termination — Tier 2 stop signals the run's own process, not the crew's shared container (#2363).**
+  `crewship issue stop` (and `POST .../issues/{identifier}/stop`) gains an
+  opt-in `--hard`/`?hard=true` (PRD-ISSUES-AND-ROUTINES-2026 §10.3, work
+  package B7): after the existing Tier 1 cooperative stamp lands, every
+  `RUNNING` assignment it reached gets its live exec resolved to an OS pid
+  (`ExecInspect`, now exposed as `provider.ExecPIDProvider`) and that pid
+  signalled — `SIGTERM`, then `SIGKILL` after a short grace period — from a
+  brand-new exec into the *same* container. There is still no `docker kill`
+  on the container itself, because one container is shared by the whole
+  crew; only the one resolved pid is ever touched, so a sibling agent's own
+  exec keeps running. `assignments.exec_id`/`exec_container_id` persist
+  which exec is a run's live process the moment it starts;
+  `hard_stop_at`/`hard_stop_result` and a new `assignment.hard_stopped`
+  journal entry record what was signalled and the result
+  (`TERMINATED_TERM`, `TERMINATED_KILL`, `ALREADY_EXITED`, `NOT_FOUND`,
+  `UNSUPPORTED`, `ERROR`). The Tier 1 stamp always lands first and
+  independently, so a run that races the signal — or a provider that
+  cannot support Tier 2 at all — still ends `CANCELLED` (outcome
+  `CANCELLED`, B6) either way.
+- **The setup wizard reads like a product, not a form (#2305).** Real brand
+  marks for the toolchains, a Before-you-start checklist, Claude Code as the
+  one fully supported toolchain with the experimental ones behind a disclosure,
+  a live hint that tells an account API key from a CLI token, and a Guide chat
+  that opens on a greeting with starter prompts in the chosen language. Every
+  disabled Continue/Launch says why, Skip asks first, an unreachable Guide is
+  explained, and a reload after Create keeps Launch reachable without deploying
+  a second crew. The proposal card shows the crew's icon and every agent's
+  full name, role and model.
+- **One model catalog for the binary and the web (#2305).** `config/models.json`
+  is the only list of models Crewship offers; the Go curated set, the Guide's
+  crew-sizing tiers, housekeeping models, routine execution tiers, the
+  `crewship setup` defaults and every web picker read it. The Go side no
+  longer offers gpt-4o or gemini-1.5 while the web offers GPT-5.5 and
+  Gemini 2.5; the onboarding picker offers every curated Claude model with
+  Sonnet 5 recommended.
+- **The Guide can see the workspace and give a crew a face (#2305).** A
+  read-only `workspace_overview` tool (backed by
+  `GET /api/v1/internal/workspace/overview`) returns crews with agents, icons
+  and models, routines, pages, open issues and credential providers by name.
+  The proposal marker may carry `crew_icon`/`crew_color`, validated against
+  the crew icon vocabulary; the card and the created crew take that look.
+- **A dashboard that answers in order (#2305).** A bridge strip (fleet, spend,
+  runs, what waits on you, next run), attention rows with a verb each, fleet
+  cards with the crew icon, agents with status dots, spend and a run sparkline
+  — priority-ordered, capped at six and folded for a fleet of a hundred — a
+  live journal ticker under Running now, four KPIs, a work snapshot with the
+  issues board, the pages strip and a system grid. Spend is the metered
+  ledger and says "not metered" rather than "$0.00".
+- **Shared UI primitives for every screen (#2300).** One status pill
+  (`StatusPill` + `formatStatus`), one map of where every object lives
+  (`entityHref`, `refHref`), one inline empty state, a promoted sparkline, a
+  paging hook that reads the new `X-Total-Count` header, and 44px tap targets
+  in the sidebar kit under a coarse pointer. The paging convention
+  (`?limit&offset`, `X-Total-Count`/`X-Limit`/`X-Offset`) ships with its
+  server helper and CLI list footer (#2302).
+- **Pages name their silent producers; Admin findings carry an action (#2304).**
+  A page header links its owner crew and every producer behind a panel that
+  has never been produced. Each admin posture finding shows what to do about
+  it, and a crew or member count over the licensed limit turns red and states
+  the consequence.
+- **`crewship admin seed-inbox` fills the inbox with one row of every kind.**
+  The inbox has no create endpoint — every row is written by a producer, so a
+  fresh workspace shows an empty inbox and there is no way to see how the
+  views, facets and reading pane behave against real variety. Reviewing the
+  surface against two rows is guesswork. Rows go in through `inbox.Insert` and
+  `harbormaster.Enqueue`, the same writers the real producers use, so what
+  lands is shaped like production data rather than hand-built SQL that agrees
+  with whatever the UI expects. Host-side like the rest of `admin`, behind the
+  same `--local` gate, and everything it writes carries a `seed_` source id so
+  `--clear` removes exactly what it added and nothing else.
+  `TestSeedInboxRows_CoverEveryInboxKind` fails when a kind is added to
+  `inbox.AllKinds` without a seed row — otherwise the next person reviewing
+  the inbox never sees that kind and concludes it works.
+
+- **Saved views and a real URL contract on `/journal` (#2209).** A dashboard
+  is returned to, not explored, and the journal was the one surface a query
+  could not be kept on: `crewship saved-view create|list|update|delete` had
+  shipped for months and `/journal` could not read or write one, so the only
+  way to hold `routine:nightly-digest outcome:failed` was a browser bookmark
+  — which lost the search box, because the URL mirror wrote `time`, `crew_id`,
+  `agent_id`, `trace_id`, `severity`, `mute` and `tab` but never `q`. A shared
+  "here is the failure I found" link arrived without the query that found it.
+  The Runs tab mirrored nothing at all, so its window, status, trigger and
+  page number could only be handed over as a list of buttons to press.
+
+  `q` and the four Runs filters (`run_window`, `run_status`, `run_trigger`,
+  `run_page`) are part of the URL now, filter changes `push` so Back steps
+  back through them instead of leaving the page, and a saved-view chip row
+  above the tabs reads and writes the same server-stored bookmarks the CLI
+  does — `--shared` included, no backend change. Wrap, sort, dedup, refresh
+  cadence and the stats-rail collapse deliberately stay per-user preferences:
+  a link should not re-style the recipient's journal. Documented in
+  [the journal guide](docs/guides/crew-journal.mdx#shareable-views).
+
+- **The dashboard leads with what needs a human (#2185).** The landing page
+  was a wall of tiles that answered "what exists" before "what is stuck". It
+  now opens with a "Needs your attention" strip — approvals waiting, failed
+  runs, crews held for capacity, credential gaps — each linking to the surface
+  that can act on it, above a Running-now / Up-next pair, the run KPIs
+  (completed, success rate, ledger spend, p95), a run-volume chart grouped by
+  crew, and fleet health per crew.
+
+  `hooks/use-dashboard-data.ts` gains the queries behind it (run insights,
+  crew spend, crew service inventory, capacity holds) with the workspace gate
+  and non-ok-to-empty mapping the existing hooks use, so a failed panel is an
+  empty tile rather than an error state. The 24h / 7d / 30d selector drives
+  every windowed query from one place.
+
+  Windowed KPIs read agent runs (`/api/v1/runs`, journal-backed) while
+  Running-now reads routine runs, so on a workspace with only one kind the
+  other reads zero. That is faithful to the API rather than a bug in the page,
+  and it is called out here because the two sit side by side.
+
+- **The lifecycle-hook registry has a screen (#2162).** `/api/v1/hooks` has
+  had full CRUD and a CLI since the engine landed and no web UI at any role —
+  while a `shell` handler runs `sh -c` on the crewshipd host with a 30s
+  timeout and no container around it, and #2137 wired ten events that
+  previously registered but never fired. Settings → Workspace → Lifecycle
+  hooks lists every hook with its event, handler, target, crew scope and last
+  result, and carries the per-hook enable switch. The row is readable by every
+  workspace member, matching `GET /api/v1/hooks`; the switch renders for
+  ADMIN+, matching the write tier. Three things the screen refuses to fake:
+  `blocking` is read off the event rather than the row, so a post-event that
+  carries `blocking: true` in the database reads `n/a` instead of promising a
+  veto the dispatcher never asks for; `pre_tool_call` rows are marked retired
+  with the reason, because `ValidateEvent` refuses the event and those rows can
+  never fire; and a failed read says so rather than rendering an empty
+  registry. Registration, editing and a workspace-wide pause are not included —
+  the last has no endpoint at all.
+
+- **An approval can say what it would approve (#2160).** Every pending
+  approval in an inbox rendered the same row. The title was the first line
+  of the wait step's `approval_prompt`, which is authored boilerplate, so a
+  credential rotation, a bucket deletion and a replica scale-out all read
+  `"Approve this production action?"` and could not be told apart — and
+  nothing on the row said what any of them would do. The concrete action
+  lived in the run's inputs and never reached the inbox.
+
+  Two author-declared fields on the wait step. **`approval_title`** is the
+  one line the row shows, templated like `approval_prompt` is, so
+  `"Approve: {{ inputs.action }}"` renders a different row per run. Omitting
+  it keeps the old behaviour, so routines written before it are unaffected;
+  the rendered title is secret-redacted and truncated on the same path the
+  fallback is, because a template can just as easily interpolate a token as
+  an action. **`risk_level`** is `normal` or `destructive`, and marks an
+  approval whose action cannot be undone by re-running it — the row and the
+  decision card both carry it.
+
+  Both are declared, never inferred. A heuristic that reads the prompt for
+  "delete" is wrong in both directions, and the direction that matters —
+  calling a destructive action ordinary — fails silently. An unrecognised
+  `risk_level` is rejected at save time rather than being read as `normal`.
+
+  The seeded `approval-gate-demo` routine now declares a title, so the
+  behaviour is visible on a fresh workspace.
+
+- **Five read routes had no CLI command; now they do (#2147).** The run
+  *list* was the one pipeline-run sub-resource missing a command — `logs`,
+  `tree`, `metadata` and `signal` all had one, `GET
+  /workspaces/{id}/pipeline-runs` did not — alongside its `changes`
+  sub-resource (the Activity dock's Changes tab, a run's crew container's
+  git diff) and three fleet-wide reads with no CLI surface at all.
+
+  **`crewship routine runs-all`** lists runs of any status across every
+  routine in the workspace (`--status`/`--since`/`--limit`), distinct from
+  the existing `routine runs <slug>` / `routine records <slug>` (one
+  routine's history) and `routine active` (in-flight only, no filters).
+  **`crewship routine changes <run_id>`** joins `logs`/`tree`/`metadata`/
+  `signal` as a run-scoped sub-resource; a run with no resolvable crew or
+  whose crew container isn't a live git repo degrades to a plain-English
+  "no git changes" and exits 0, matching the API's own degrade behaviour
+  rather than erroring.
+
+  **`crewship agent status`** and **`crewship agent load`** cover the
+  fleet-wide agent-status histogram (`GET /agents/crews-status` — despite
+  the route name, it counts *agents*, not crews) and the per-agent
+  active/pending/token-budget breakdown behind it (`GET /agent-load`).
+  Homed under `agent` rather than `crew status`, since the payload is an
+  agent metric and `crew status <slug>` is already a different, slug-scoped
+  shape. **`crewship system crewshipd`** probes the crewshipd sidecar
+  daemon's own health (uptime, connections) over its Unix socket — a
+  distinct process from the one `system health` already reports on (the API
+  server itself).
+
+- **`crewship auth pair` issues a device-code, closing a CLI↔route
+  asymmetry (#2147).** `POST /api/v1/auth/pair/redeem` had a CLI caller
+  (`crewship login --pair --code=…`) but the two endpoints that ISSUE a
+  code, `POST /api/v1/auth/pair/start` and `GET /api/v1/auth/pair/poll`,
+  had none — the CLI could redeem a pairing code it had no way to mint. The
+  reverse-direction pass over `cmd/crewship/cli_route_contract_test.go`'s
+  extractor that found this (`TestRoutesWithNoCLICaller`,
+  `cli_route_orphan_test.go`) puts the honest count at 35 registered routes
+  with no CLI caller at all, after excluding `/api/v1/internal/*` sidecar
+  IPC and the browser/inbound-token surface; this PR closes two of them.
+
+  `crewship auth pair` mints a code, prints the paste-elsewhere
+  `crewship login --pair --code=…` snippet, and by default polls until the
+  code is redeemed, expires, or `--timeout` (default `9m`, under the
+  server's 10-minute TTL) runs out — a timeout is always a non-zero exit,
+  never a tick. `--no-wait` returns immediately after issuing the code;
+  `--adapter` tags it with a telemetry-only adapter hint. `--format json`
+  reports `code`, `expires_at`, `status`, `paired`, and `waited`.
+
+- **A provider is now a credential, and two new ones can be created (#2051).**
+  The sidecar's LLM proxy routed on a hardcoded three-arm `strings.HasPrefix`
+  switch over `/v1`, `/openai` and `/gemini`. It now routes on a compiled-in
+  descriptor table (`internal/llmroute`, longest bounded prefix wins), and
+  `credentials.provider` is carried end to end — into the sidecar boot payload,
+  the credential loaders, the ledger key and the scrubber — so a provider is a
+  row rather than a branch.
+
+  Two arrive with it: **`OPENROUTER`** (`/llm/openrouter`, credential required,
+  probed live against `GET https://openrouter.ai/api/v1/key`) and
+  **`OPENAI_COMPAT`** (`/llm/openai-compat`, upstream read from the credential
+  itself, unpriced). Every future provider is confined to `/llm/…`; the three
+  legacy prefixes keep their exact paths and strip behaviour, pinned by eleven
+  golden fixtures of the byte-identical outbound request.
+
+  `crewship credential create` gains **`--base-url`** (required for
+  `--provider OPENAI_COMPAT`, rejected for every other provider) and
+  **`--auth-token-stdin`** (also on `credential rotate`), so an operator
+  token never reaches the process table. Two local commands read the route
+  table with no server: **`crewship provider route list`** and
+  **`crewship provider route show <provider>`**. `/health` gains
+  `provider_creds` and `config_fingerprint` beside — not instead of — the
+  three legacy `*_creds` counters.
+
+  ⚠️ **Behaviour change: proxied agent calls start billing for real.** See
+  *Changed*, below. This is the release's most consequential line and it
+  reaches operators who changed nothing.
+
+- **One shell for every create surface, and a `/design` route to audit them
+  (#2056).** Twelve create entry points that had each grown their own dialog
+  are now one kit (`components/layout/create-surface.tsx`): four fixed widths,
+  a bottom sheet below `sm`, ⌘↵ to submit, and a discard guard on Esc, overlay
+  and header-close. `/design` is the scaffolding that tracks the migration and
+  the browser-vs-CLI parity gap — it holds no data, calls no API, has no CLI
+  command, and is meant to be deleted with `components/features/design/` once
+  its table is empty. It is linked from the sidebar under System so the gap is
+  visible rather than filed.
+
+  Three things became reachable from the browser for the first time:
+  **importing a crew manifest** into New crew (parsed client-side, and it names
+  what it cannot create rather than pretending — "This file also declares 2
+  agents and 1 credential", pointing at `crewship apply -f`); **per-agent
+  tools and notification channels** on New agent; and **creating a label from
+  the issue modal**. The crew wizard is four steps, not five — Runtime folded
+  into Container — and "Empty crew" is now "Start empty".
+
+  ⚠️ **Behaviour change: New crew now defaults to `network_mode: "free"`.**
+  The wizard's initial state flipped from `restricted`; the server-side
+  default in `internal/database/crew_defaults.go` is untouched, so anything
+  that creates a crew *without* stating a mode still gets `restricted`. Only
+  the wizard's pre-selection moved, and the copy beside it now says what free
+  means ("Any host, plus your private network and localhost. Cloud metadata
+  stays blocked.").
+
+- **Multi-provider phase 1: two codecs, an embedded catalogue, and the CLI to
+  see them (#2016).** `internal/llm`'s three-arm switch became a registry of
+  `ProviderSpec` rows read by the aux-slot builder, the Keeper validator, the
+  console picker and the error message that tells an operator what they may
+  type. Three ids are registered — `anthropic`, `openai`, `ollama` — and
+  lookup is case-insensitive, which the old switch was not while `internal/api`
+  carried the uppercase enum one layer up. The two hand-written HTTP clients
+  became configurable codecs, so any OpenAI-compatible backend (DeepSeek,
+  vLLM, llama.cpp, Ollama's `/v1` shim) is a preset rather than a new file.
+
+  A trimmed [models.dev](https://models.dev) snapshot ships embedded — eight
+  providers, ~650 KB, refreshed by `go generate ./internal/modelcatalog/...` —
+  and becomes the third step of the rate lookup, below the hand-verified table
+  and its `<provider>/*` wildcard so `ollama/*` and `local/*` stay free.
+  Three local commands read all of it with no server, token or workspace:
+  **`crewship provider list`**, **`crewship provider check`** and
+  **`crewship model price`** (which prints *which* lookup step produced the
+  rate). `crewship model list` gains `--source auto|live|catalog` and
+  `--search`, and answers offline for providers the server cannot reach.
+
+  ⚠️ **Behaviour change: an evaluator slot can move provider, and a call
+  within budget can now trip a cap.** See *Changed*, below.
+
+- **Run a routine from a slash command, with a form for its inputs (#1987).**
+  A routine may opt in with a `spec.slash` block (`enabled`, `label`,
+  `label_cs`, `icon`); it then appears as `/<slug>` in the chat palette and in
+  `crewship shell`, opening a typed form built from the routine's declared
+  `inputs` — widget and coercion chosen from each input's JSON type, help text
+  from its description, defaults formatted losslessly. In the REPL the same
+  thing is `/<slug> key=value key=value`.
+
+  A new **`routine.run`** capability decides who may ask, so a MEMBER can
+  invoke a routine without being promoted to MANAGER
+  (`crewship workspace member capabilities grant <user> routine.run`;
+  it is in the `power` and `admin` bundles). Everything else still applies to
+  an admitted caller — governance status, credential and integration
+  preconditions, spend caps, concurrency.
+
+  Three limits are worth knowing. The run endpoint is **synchronous**, and the
+  REPL drives it through the CLI's 30 s default timeout, so a longer routine is
+  cancelled client-side unless `CREWSHIP_HTTP_TIMEOUT` is raised. The
+  routine's **output is not shown on either surface** — you read it in the run
+  records. And the catalogue is capped at 50 routines, ordered by popularity,
+  with a slug that collides with a platform command (`routine`, `issue`,
+  `skill`, `credential`) dropped.
+
+  `spec.slash` was documented before this and silently dropped by
+  `crewship apply`, so export→edit→apply *stripped* a block set from the
+  dashboard. It now round-trips. `crewship shell` also gains the server
+  catalogue at all: `LoadServerSlashCommands` had no production caller, so the
+  REPL half of the slash feature did not previously exist.
+
+- **A page can be published, webhooked, exported, imported and deleted from
+  the browser (#2054).** Those were CLI-only. New settings cards cover public
+  links (with expiry and password; revoked rows are kept with their withdrawal
+  time rather than vanishing), webhook mint/revoke, export and delete, plus
+  revoking every access level for a subject in **one** DELETE — three
+  sequential revokes leave a window open in between. Import renders a 422
+  refusal as the worklist that caused it, not a toast.
+
+  `crewship page create` gains **`--owner crew/<slug>`**, create-only on
+  purpose: `page update` never sends it, so re-applying a manifest can never
+  be a silent transfer of ownership. `crewship page get` now prints the
+  authored half of each panel — `tab`, `public`, wake gates, `on_fail`,
+  `refresh`, action count — which `--format json` already carried. The demo
+  seed ships four pages, one per producer door (script, routine, agent,
+  webhook) instead of showing one door of the four.
+
+- **The wake-time system prompt now shows its own memory budget (#2135).** Every
+  tier injected into a session's opening prompt — `Pins`, `Crew`,
+  `Workspace`, `Agent` — now reports how many bytes of its allotted
+  slice it used and what percent that is, plus a `Total` line, in a new
+  `[MEMORY BUDGET]` block placed right before `[MEMORY INSTRUCTIONS]`. The
+  wording matches `memory.write`'s existing overflow-guidance usage string
+  byte for byte, unit included (`<used> of <cap> bytes, <pct>%`): both
+  meters count `len(string)` bytes, and the budget these tiers are
+  actually enforced against is itself byte-denominated, so "bytes" is the
+  only label that describes what is measured and capped — an earlier
+  draft of this meter said "chars" while still counting and enforcing
+  bytes, which reads as accurate for pure-ASCII content but is wrong for
+  anything else (this product carries Czech text throughout). A
+  percentage that would round down to 0% for real, non-zero usage now
+  floors to 1% instead. When the budget forced a tier's trailing content
+  to be dropped — previously silent — the meter now says so by name
+  (`Truncated to fit: Agent — trailing content in it was dropped, not
+  just hidden.`), and truncation itself is now rune-aligned so a cut can
+  never sever a multi-byte UTF-8 character and hand the model invalid
+  text. A separate `Read incomplete: Workspace` clause covers a distinct
+  failure the truncation notice can't: a stalled or slow workspace
+  filesystem read that times out mid-scan, which previously came back
+  indistinguishable from "there just wasn't much workspace memory" — the
+  model is now told the read did not finish rather than being left to
+  assume it saw everything. The default 15,000-byte budget, the per-tier
+  allocation ratios, and the truncation policy itself are unchanged; this
+  only makes the existing behaviour visible to the model, honestly.
+
+- **`crewship auth profile` — the one self-service profile mutation with no
+  CLI command (#2147).** `PATCH /api/v1/users/me` (edit your own display
+  name) has existed alongside `auth passwd` and `auth avatar` since #867.1,
+  but had no CLI surface. `crewship auth profile --full-name "Jane Doe"`
+  fills the gap, printing the updated profile and honoring the global
+  `--format` flag like every other reporting command.
+
+- **Three more endpoints get the CLI command the "every endpoint gets a
+  command" rule requires (#2147).** `crewship feature-flag` could list,
+  delete, enable, disable and inherit a flag but had no way to create or
+  update the definition itself — `POST`/`PATCH /api/v1/feature-flags` were
+  reachable only via the web UI, a direct API call or a manifest `apply`.
+  `crewship feature-flag create` and `crewship feature-flag update <key>` now
+  wrap them; `update` sends a partial `PATCH` carrying only the flags you
+  passed, matching the contract `admin memory-config set` already
+  established. Two admin console reads also had no client: `crewship admin
+  workspaces` (`GET /api/v1/admin/workspaces` — the current workspace with
+  member/agent/crew counts) and `crewship admin memory-stats` (`GET
+  /api/v1/admin/memory/stats` — `memory_versions` totals, byte counts and
+  distinct-blob counts, broken down by tier and by agent), the companion read
+  to `admin memory-config`. All three are ADMIN+ (`canRole "manage"`) and, per
+  #2109, target the server the CLI is authenticated against rather than a
+  local database file.
+
+### Changed
+
+- **The New agent dialog can create a workspace-wide (crewless) Agent; only a Lead still needs a crew (#2170).**
+  `requiresCrew` was the literal `true` in `create-agent-dialog.tsx`, so every
+  agent created from the browser had to be given a crew — while
+  `agents_create.go:137` only rejects a missing `crew_id` for the `LEAD` role
+  and `crewship agent create --crew` has always been optional. The three
+  surfaces disagreed on what the product allows, and the browser was the
+  strict one. The Crew field is now optional for an Agent — the picker
+  carries a "Workspace-wide (no crew)" row that clears a preselection, the
+  empty-workspace banner no longer tells an Agent author to go make a crew
+  first, and the dialog posts `crew_id: null` — while a Lead keeps the
+  required marker, the disabled Create button and the "Create a crew first
+  — leads need one" hint. A crewless agent already had a home in the UI:
+  `/crews` lists it under **Unassigned**. Tests cover both branches and fail
+  on the literal.
+
+- **Docs stopped contradicting the code on rollback, concurrency, and the
+  monthly budget; the waitpoint approve-default asymmetry is now
+  documented instead of silently differing (A5) (#2289).** No API or CLI behaviour
+  changed. `docs/cli/routine.mdx` said `routine rollback` "creates a new
+  version on top of HEAD" — it doesn't; `Store.Rollback` only repoints
+  `head_version` (no version row is inserted), matching the CLI's own
+  `--help` text, which the doc now matches too. `docs/guides/routines.mdx`
+  and `docs/guides/routines-cookbook.mdx` said two same-`concurrency_key`
+  requests "queue" (or "wait, or 429") — `RunRegistry.Acquire` always
+  rejects the second immediately with `429` + `Retry-After`; it never
+  queues or waits. That's a different mechanism than deferred dispatch's
+  `--debounce-key`, which genuinely coalesces and was already documented
+  correctly elsewhere — both docs now say so explicitly, and the
+  concurrency-gate docs now also note it has no cross-replica
+  coordination (single-process only). Separately: the authed
+  `POST .../pipelines/waitpoints/{token}/approve` defaults an omitted
+  `approved` to **false** (deny) while the public
+  `POST /api/v1/waitpoint-tokens/{token}` callback defaults it to **true**
+  (approve) — undocumented anywhere before this. Both defaults are kept
+  as-is (an existing test, `TestApproveWaitpoint_NoBody_DefaultsToApprovedFalse`,
+  already pins the authed default, and the public default matches its
+  documented `trigger.dev wait.forToken` design) but are now spelled out
+  with the security reasoning in `docs/api-reference/workspaces.mdx` and in
+  both handlers' doc comments — send `approved` explicitly rather than
+  relying on either default. And `MonthlyBudgetUSD` (`GET`/`PATCH
+  .../pipelines/{slug}/budget`) is reporting-only — it has zero references
+  in `internal/pipeline/executor.go` and never blocks a run; the enforced
+  gate is the DSL's per-run `max_cost_usd`. The field name reads as
+  enforcement, so rather than a breaking rename, every surface that shows
+  it now says so unmissably: a `<Warning>` on the API reference, and a
+  line printed by `crewship routine budget get/set/summary` and its
+  `--help` text. Also fixed a stale comment in `internal/database/database.go`
+  that still said `busy_timeout(5000ms)` next to the DSN pragma that has set
+  `busy_timeout(30000)` since the earlier login-lockout fix.
+
+- **The inbox column is the shared explorer now, and its filters are
+  answerable.** `/inbox-v2` had a 190 px rail holding three nav rows and a
+  permanent "all sources connected" block, plus three raw `<select>`s. Two of
+  those three could not be honoured: "type" filtered on which of the three
+  fetches a row arrived in — a client-only field, with an invented "grouped
+  incidents" member — and "subject" was harvested from whatever rows happened
+  to be loaded, meaning three different things at once (sender for inbox rows,
+  a raw user id for approvals, agent name for missions). "Priority" is a real
+  column for inbox rows only; `approvalEntry` and `missionEntries` synthesise
+  it for the other two. None of the three reached the server, so a filter
+  could never find a row that had not already been downloaded.
+
+  The column is rebuilt on `components/layout/sidebar-kit` — the same
+  explorer Routines, Issues, Crews and Pages use, and the same one the OLD
+  `/inbox` was already built on before v2 hand-rolled its own chrome. The
+  three views are a `SidebarSection` of `SidebarRow`s with counts, the way
+  Routines carries its status buckets; the filter is the kit's
+  `SidebarFilterPopover`, which — unlike the dropdown Routines hand-rolls —
+  stays open when a facet is picked, so two facets can be combined in one
+  visit. Active facets come back as removable `SidebarActiveChip`s. The
+  column collapses to `w-9` like the others, and is full-width on a phone,
+  where a fixed column left a dead strip beside it.
+
+  The facets are type (the seven values of `inbox.AllKinds`, plus "approval
+  gate" and "mission signal" named for what they are rather than for the
+  endpoint that answered), deadline (from the real `timeout_at`, and a
+  deadline further out than today answers to neither bucket rather than being
+  folded into "today"), and unread. Subject and priority are not offered:
+  a filter has to be answerable. Counts are exact because the feed is fully
+  loaded — a comment on `facetCounts` says so, and says they must move to a
+  server-side GROUP BY the day it is not.
+
+- **A `/journal` Timeline row says who acted (#2208).** The row carried a 3px
+  severity bar and a colour-coded text pill and nothing else — no avatar, no
+  crew icon, no entry-type glyph. The agent name appeared only where an emit
+  site happened to write it into the summary string. None of it needed
+  fetching: the avatar seed and style, the crew icon and colour, and an icon
+  for all 127 entry types were already in the browser and already refreshed on
+  realtime events, rendered only inside the two scope dropdowns.
+
+  The row is now seven columns — severity, time, an 18px agent avatar beside a
+  15px crew icon, the entry-type icon with the full dotted `entry_type`, the
+  summary, the age, the chevron. An agent the lookup cannot resolve is seeded
+  from its id rather than left blank. The summary drops a leading
+  `"<agent>: "` when the prefix names the agent now in the avatar, and takes
+  back some of the 40px the identity columns cost it. Long entry types
+  ellipsize — the catalog's median is 18 characters and its tail runs to 41 —
+  with the full string on the cell's `title` and in the expanded detail.
+
+  The avatar is gated on `actor_type`, not on whether `agent_id` is set. Four
+  common entry types — `chat.user_message`, `container.snapshot`,
+  `conversation.compacted`, `sidecar.stale` — emit a `user` or `system` actor
+  *with* the agent id populated, because the agent is what the event is about
+  rather than who caused it. Those rows get the labelled glyph, with the agent
+  named in the label, so a human's message is never captioned with an agent's
+  face.
+
+  Three signals that were colour-only are now also text: severity carries a
+  visually-hidden level (the bar was `aria-hidden`, and the word appeared only
+  after expanding), the entry-type group carries its name, and the disclosure
+  gets `aria-expanded` plus `aria-controls`. The disclosure is the chevron
+  button rather than the row container — with the detail rendered inside a
+  `role="button"`, the detail's own trace/agent/crew jumps were nested
+  interactive content and the button's accessible name grew to include the
+  entire payload JSON.
+
+  The stats rail's "Top agents" showed shortened uuids behind a flat slate
+  swatch, six agents reading as one series, with the avatar-carrying lookup
+  already mounted. It renders the avatar and the resolved name, and each bar
+  takes a seed-derived hue.
+
+  `LogRow` is memoized and the virtualized list's `itemContent` no longer
+  allocates a fresh closure per item per render, so a keystroke in the search
+  box stops re-rendering every mounted row.
+
+- **`/design` is gone; its audit is now a tracked document (#2165).** The
+  create-surface unification proposal shipped as a page inside the product —
+  no data, no API, no CLI command — and its own header said to delete it once
+  the audit it carried had no rows left to fix. It is removed with rows still
+  open, so the evidence moved to `docs/prd/create-surface-parity.md` rather
+  than leaving with the code: all 65 ledger rows with their severity,
+  reference and `fixed` history, the twelve-door divergence table, the token
+  drift counts and the sweep. The document is headed with the audit date and
+  the source commit so it cannot be mistaken for a regenerated report. The
+  route, `components/features/design/`, the sidebar row and the `design`
+  concept icon go with it, and 26 comments that cited the page as their
+  specification now cite a section of the document.
+- **The per-tool MCP toggle now says what it does (#2168).**
+  `mcp_tool_bindings.enabled` was documented and labeled as if disabling a
+  tool blocked it. On the self-hosted/legacy MCP path it never did: the
+  sidecar gateway's `CallTool` has no per-tool check, so a "disabled" tool
+  could still be called directly — the flag only decided whether the tool's
+  name was listed in the agent's `[CONNECTED INTEGRATIONS]` prompt block.
+  `crewship integration tools enable/disable --help`, the API reference, and
+  the legacy integrations UI (behind `NEXT_PUBLIC_LEGACY_MCP_INTEGRATIONS`,
+  default off) now say this is advisory, not access control — Composio-
+  routed integrations remain the exception, enforced through Composio's own
+  `allowed_tools` scope. No behaviour changed; only the claim about it.
+
+  **Twelve of the 65 rows did not survive re-verification, and §7 of the new
+  document says so.** Forty were re-read against the tree before extraction by
+  six parallel audits, each asked to return FALSE / TRUE-BUT-DELIBERATE /
+  TRUE-DEFECT rather than to confirm. Three were simply wrong — sidecar
+  services are writable through `crewship apply`, `AssignToCrewDialog` has
+  assigned a skill to a whole crew since the first skills sprint, and the
+  missing `mcp_tool_bindings` cascade was fixed by migration `20260826190607`,
+  three days *after* the row claiming it was written. Four had gone stale when
+  the Issues create fields shipped in #2056. One cited an event,
+  `pre_tool_call`, that does not exist and never could. Three more were real
+  but graded `blocker` when they are documented decisions — raw MCP sits behind
+  `NEXT_PUBLIC_LEGACY_MCP_INTEGRATIONS` by an intent stated in `cec5fc7a`,
+  Pages panels are producer-fed by specification, and the Composio default
+  connector ships with its flag off — and are re-graded in place.
+
+  The rows stay, marked rather than rewritten: deleting a claim you got wrong
+  turns an audit's own errors into a record of progress. Two things are worth
+  carrying forward. A ledger nobody re-reads decays at a rate this one can now
+  measure. And "the UI cannot do this" and "we decided the UI should not do
+  this" rendered identically in a table with no column for intent, which is how
+  three settled decisions came to be tagged as release blockers — including the
+  one `CODEX-WORK-ORDER-RELEASE-1-0.md:610` records as still open.
+
+- **⚠️ `/chat` is a list of conversations, not a tree of agents (#2069).**
+  ⚠️ **Behaviour change: the left column navigates between conversations, and
+  the per-agent "New session" control it replaced is gone.** The old surface
+  put the roster in the primary navigation and made you pick an agent to reach
+  the thing you came for — seven agents at two lines each, most with nothing to
+  open, in front of the one row anybody wanted. Threads are now the top level,
+  newest first, with the agent's face carrying the attribution its own row used
+  to; agents nobody has talked to fold into a single "not started yet" row. The
+  facets are All / Unread / Live: "Done" is gone because it read `ended_at`,
+  which nothing writes, and "Live" now reads the agent's status off the
+  workspace event stream instead of a column frozen at page load. Deep links
+  are unchanged — `/chat/<slug>?session=` is still the shape every "Open chat"
+  link and `crewship open` builds, and switching threads is a `replaceState`
+  rather than a route change, so the dashboard chrome no longer rebuilds to
+  look at a different name.
+
+  The transcript changed with it: fixed gutters with agent and user avatars,
+  reasoning closed by default, and the hover actions hidden until you want
+  them. Chain of thought is no longer rendered open — it is available, not in
+  the way. The **Files** panel hides internal files behind an explicit toggle,
+  and — the reason it is in this section rather than the next — files it lists
+  now actually open. Agent-written files are owned by the container's UID and
+  crewshipd runs as the host user, so `List` succeeded on the directory while
+  every `Read` took `EACCES`; the panel listed a full tree and answered "file
+  not found" for every entry in it. Downloads now replay through the crew
+  container on a permission error, the way saves have since #922, and a file
+  that exists but cannot be read reports that instead of claiming to be
+  missing. Four published chat guides described the surface this replaces and
+  have been rewritten against the one that ships.
+
+- **⚠️ Proxied agent calls start billing for real (#2051).** ⚠️ **Behaviour
+  change: budget warnings and hard stops that have never fired on a crew can
+  fire on the first deploy.** Every LLM call an agent made through the sidecar
+  proxy recorded **zero tokens and $0** since the proxy was built:
+  `parseLLMUsage` switched on a lowercase provider name while the proxy handed
+  it the uppercase `ProviderType`, so no proxied response body was ever parsed
+  — Anthropic wrote $0 rows, OpenAI and Gemini wrote none at all. Codec and
+  ledger key are now separate fields on the route spec and both are correct.
+
+  Nothing got more expensive. The spend was always there and was being
+  recorded as nothing, so a ceiling that looked generous against $0 may be
+  below a normal day. Before deploying, check `budget_limits` for any crew
+  running proxied agents. Historic rows are **not** backfilled, so a rollup
+  spanning the change is not comparable across it.
+
+- **⚠️ `PATCH /api/v1/credentials/{id}` returns 400 where it returned 200
+  (#2051).** An endpoint-backed credential holds a `{baseURL, apiKey, headers}`
+  object; every other kind holds an opaque value. A PATCH that moves the
+  credential across that line — `provider` to or from `OPENAI_COMPAT`, or
+  `type` between `ENDPOINT_URL` and `API_KEY` — silently re-interprets bytes
+  it did not send, so `value` must now be sent in the same request. A PATCH
+  carrying a `value` also validates the endpoint URL for the first time, which
+  it only ever did on create; a PATCH that used to accept
+  `http://169.254.169.254/v1` now refuses it.
+
+  Two smaller edges from the same PR. `credentials.provider` is folded through
+  `credprovider.Canonical()` on every write, so a client that POSTs
+  `provider: "github"` now reads back `"GITHUB"` — unrecognised strings are
+  still stored verbatim, trimmed. And several `credential create` argument
+  errors moved from a bare exit 1 to `cli.ExitValidation` (**exit 2**): a
+  `--type`/`--auth-token` mismatch, a malformed `--header`, a missing
+  `--value`. A script that branches on exit 1 will see 2.
+
+  `OPENAI_COMPAT` is deliberately **not** validated on create — Crewship does
+  not dial an operator-supplied endpoint from that path — and prints a warning
+  saying so instead of "Key validated successfully". (#2057 later gave it the
+  test it could safely have; see *Fixed*.)
+
+- **⚠️ Rate ceilings moved, and an evaluator slot can change provider
+  (#2016).** ⚠️ **Behaviour change: a call that used to sit inside a spend cap
+  can now trip it.** Four fallback ceilings were below what the embedded
+  snapshot says the provider actually charges and were raised — `openai`
+  $20/$80 → **$150/$600**, `google` $2.50/$15 → **$4/$120**, `xai` $2/$6 →
+  **$4/$12**, `mistral` output $6 → **$7.50** — and two rows were added
+  (`openrouter`, `amazon-bedrock`). Models that previously billed at **$0**
+  because nothing in the table named them (unknown OpenRouter slugs, hosted
+  models with no row) now bill at a real or ceiling rate. The over-estimate is
+  deliberate: under-billing weakens the budget signal exactly when it matters.
+
+  Separately, `LoadAuxiliaryModels` now points each auxiliary slot at the
+  first registered provider **whose key env is actually set**, before env
+  overrides. An instance holding only `OPENAI_API_KEY` used to get six slots
+  hardcoded to Anthropic that each failed at first use; it now gets working
+  evaluators on OpenAI. An instance holding both keys keeps Anthropic —
+  declaration order breaks the tie — and an instance holding neither keeps the
+  shipped default and still errors loudly.
+
+- **⚠️ A crew whose mise shims do not resolve now fails to provision (#2070).**
+  ⚠️ **Behaviour change: a provision that used to succeed can now fail.**
+  `mise reshim` exits 0 whether or not the shims it wrote point at anything.
+  On crews provisioned before #1787 they pointed at a `mise` binary the agent
+  could not read, and a dangling symlink is skipped **silently** by PATH
+  lookup — so the pin served whatever the base image shipped. Measured on a
+  real crew: `config.toml` pinned `terraform = "1.9"`, the agent ran
+  `Terraform v1.15.7`, and nothing was logged anywhere.
+
+  `InstallMiseTools` now verifies every shim resolves and returns
+  `ErrMiseInstallFailed` naming the broken ones when they do not. Crews
+  created before 2026-08-07 carry stale shims and **do not self-heal**, so
+  expect their next provision to fail rather than quietly serve the wrong
+  toolchain. Crews declaring no mise tools are untouched, and an empty shim
+  directory is not treated as a failure. `docs/manifest/crew.md` gains the
+  PATH ordering that makes a pin effective.
+
+- **Crew template slugs are unique per workspace, not globally (#2028).**
+  `crew_templates.slug` carried a global `UNIQUE` declared in v23; v26 added
+  `workspace_id` and never rescoped it, so the column naming the owner played
+  no part in deciding whether a name was free. Two workspaces could not both
+  hold a template called `backend-team`, and — worse — a user template holding
+  a builtin's slug made the seeder's `UPDATE` match nothing and its
+  `INSERT OR IGNORE` collide, so that builtin was **never seeded again, ever**.
+
+  Migration `20260820124407_crew_template_slug_workspace_scope.sql` rebuilds
+  the table behind two partial unique indexes —
+  `(workspace_id, slug) WHERE workspace_id IS NOT NULL` and
+  `(slug) WHERE workspace_id IS NULL`. A single non-partial
+  `UNIQUE(workspace_id, slug)` would not do: SQLite treats NULLs as distinct,
+  so every builtin would be unique to itself no matter how many shared a slug.
+
+  The old constraint was doing undeclared work — it guaranteed the six
+  read/write sites matched at most one row, which is why four of them used
+  `QueryRow` with no tie-break. The rule is now written down: **a workspace
+  template shadows the builtin of the same slug, for that workspace only**,
+  expressed as `ORDER BY (workspace_id IS NULL) LIMIT 1` in a shared constant.
+  The tenant predicate was retightened at the same time: `is_builtin` has no
+  `CHECK` tying it to `workspace_id`, so a row owned by one workspace could
+  carry `is_builtin = 1` and match for every tenant — unreachable while the
+  global UNIQUE stood, expressible the moment it was split.
+
+  **Upgrade note.** The rebuild cannot fail on duplicate slugs: the old
+  constraint is strictly stronger than both new indexes. It does drop one row
+  class — a template whose `workspace_id` names a workspace that no longer
+  exists. Such a row is an FK orphan the schema's own `ON DELETE CASCADE` says
+  should not exist, and copying it would abort boot with
+  `FOREIGN KEY constraint failed (787)` naming neither the table nor the row.
+
+### Fixed
+- **`crewship admin reencrypt` reaches `failed: 0` again on a database that ever answered a credential ask (#2408).** The rotation walk still listed `escalations.resolution` for `CREDENTIAL` escalations, but since #2379 that column never holds an envelope: the migration rewrote every historical answered ask to the plaintext marker `[credential submitted]`, supply resolves with `NULL`, and expiry, cancel and auto-resolve always wrote plaintext prose there. Every such row counted as `failed`, the CLI exited non-zero, and the runbook's "failed=0 ⇒ retire the old key" gate could never be met. The column is out of the inventory; the rows are left exactly as they are.
+- **Hosted OpenAI auxiliary calls now use `max_completion_tokens` (#2015).** The OpenAI registry, provider constructor, and `crewship provider check` now agree on the current Chat Completions output-limit field, while generic OpenAI-compatible endpoints retain their legacy-compatible `max_tokens` default.
+- **Reactions and feedback submitted immediately after a streamed assistant reply now use the persisted message ID and survive a chat reload (#2122).**
+- **Hard stop (`--hard`) now actually ends the run — it was signalling a pid that doesn't exist inside the container (#2366).** #2363's Tier 2 mechanism resolved the run's exec to an OS pid via `ExecInspect` and signalled that pid from a new exec into the container — but that pid is in the HOST pid namespace, not the container's, so the in-container `kill` found no such process and silently signalled nothing (found live on dev1: a hard-stopped run's journal read `hard_stopped -> error`, and the run only ended when the agent finished on its own, ~27s later). Tier 2 now ends the run's own tmux session instead (`tmux kill-session -t agent-{slug}`, a container-visible identity every agent run already owns), escalating to a process-group `kill -KILL` on that session's own pane pids if it's still alive after the grace period — never a host pid, never a container-level operation, and never a sibling agent's session. `hard_stop_result`/`hard_stop_at` are now also exposed on `GET .../issues/{identifier}/runs` and `crewship issue runs -f json`, so a live check can confirm a hard stop landed without reading the journal.
+- **The Journal resource strip no longer invents a disk reading or hides an
+  empty metrics window behind four dashes (#2223).** The backend has never
+  emitted disk usage, so the unfed DISK gauge is gone; CPU, memory and network
+  remain, while a 30-minute window with no samples now says so explicitly.
+  Loading and request failures keep distinct states, and aggregate metrics no
+  longer coerce a missing first network-rate sample to `0 B/s`.
+- **`crewship routine save` no longer erases a routine's description when `--description` is omitted; an explicit empty value still clears it (#2373).**
+- **The Docker image builds again (#2328).** The backend stage did not copy the `config/` package that #2305 introduced for the model catalog, so `go build` inside the image failed on every branch since. `config/` is copied now, and a test (`scripts/dockerfile-sources`) fails whenever a root-level package the binaries import is missing from that stage.
+- **Two GET routes were invisible to the read-scope invariant, the same
+  "assumed out of scope by registration helper" blind spot the invariant
+  exists to catch (#2144).** `route_read_scope_invariant_test.go` scanned
+  `r.mux.Handle("GET …")` and `r.authedAdmin("GET", …)` but not
+  `r.authedMut(` — recorded as "246 uses, zero reads" — which was wrong:
+  `GET /api/v1/admin/keeper/judge/models`, `GET /api/v1/memory/export`, and
+  `GET /api/v1/approvals{,/{id}}` all register that way and were absent from
+  `scanReadRoutes()` entirely, not merely unclassified. Proved by a
+  throwaway test asserting `scanReadRoutes()` returns those two keys — it
+  failed on main. The scan now keys on the verb (`authedMutReadLine`,
+  `authedSelfMutReadLine`) rather than trusting a helper's name, mirroring
+  the mutation invariant's `wrapperMutationLine`. All four routes were
+  checked by hand: `authedMut` always composes
+  `RequireAuth(RequireWorkspace(...))` regardless of the declared role, so
+  they are scoped by the identical chokepoint as `wsCtx` — `judge/models`
+  reads no workspace-scoped rows at all, `memory/export` additionally fences
+  its `crew_id` inside the handler (`TestMemoryExport_CrossWorkspaceCrewIs404`),
+  and the two `approvals` routes read `workspaceID` from the same
+  `RequireWorkspace`-populated context. `TestReadRouteScanFindsTheRealSurface`
+  now also floors the `authedMut`-scanned count so the regex going blind
+  again fails the build.
+- **Paymaster no longer under-bills Gemini 2.5 Flash, Gemini 2.5 Flash-Lite, GPT-5.4 nano, or long-context GPT-5.5 calls (#2013).** The hand-verified rate card now matches the providers' published prices, including GPT-5.5's conservative >272K-token tier, and its catalogue-drift guard has no remaining stale-row exceptions.
+- **`review-status.sh` reported `reviewed` when CodeRabbit's only activity on
+  the head commit was a bodyless reply inside an existing thread, not a read
+  of the diff (#2145).** A `COMMENTED` review with an empty body was promoted
+  to `reviewed` whenever its inline comments fell inside the review's own
+  time window — but that window doesn't distinguish a NEW thread (a real
+  finding) from a REPLY inside a thread a human already started. Seen on
+  #2128: a real `CHANGES_REQUESTED` review landed on an old head, two later
+  re-review requests came back rate-limited, and CodeRabbit's only reply on
+  the new head was a reply-wrapper — yet its `commit_id` named the head, so
+  it outranked the throttle. The classifier now reads GitHub's
+  `in_reply_to_id` on each inline comment and only counts one with none set
+  — a genuinely new thread — as evidence of a read; a bodyless review whose
+  comments are all replies now classifies as `empty-review`, same as one
+  with no comments at all. A fixture reproducing #2128's exact shape
+  (`CHANGES_REQUESTED` on an old head → bodyless reply-wrapper `COMMENTED`
+  on the new head → rate-limit notices) failed on main (`reviewed`) and now
+  reports `throttled`; the #2038/#1729 fixtures this shares logic with are
+  untouched and stay green.
+- **A recent-order sort could put the earlier of two invocations first, in
+  the same second, for pipelines that had never raced a clock before
+  (#2294).** `internal/pipeline/store.go` wrote `created_at` / `updated_at` /
+  `last_invoked_at` with `time.RFC3339Nano`, which trims trailing zero
+  fractional digits — two instants in the same wall-clock second can then
+  serialise to strings of different width, and `List`'s
+  `ORDER BY COALESCE(last_invoked_at, created_at) DESC` compares them as
+  TEXT: `Z` (0x5A) sorts after `0` (0x30), so a shorter, more-trimmed string
+  can sort AFTER a longer one even though it encodes an earlier instant.
+  Pinned with a deterministic (clock-injected, not raced) test reproducing
+  the issue's own collision — `…18.1Z` (05:38:18.100000000) versus
+  `…18.10001Z` (05:38:18.100010000, 10µs later) — which failed on main for
+  both the `created_at` and `last_invoked_at` write paths.
+  `internal/pipeline` now writes every timestamp through the existing
+  `internal/tsformat` package (fixed 9-digit fraction, #990) instead of
+  `time.RFC3339Nano` directly, and a new migration
+  (`20260903190851_pipelines_timestamp_fixed_width`) pads every existing
+  `pipelines` and `pipeline_versions` row to match, so an old (trimmed) row
+  and a new (fixed-width) row compare correctly against each other.
+  `internal/pipeline/waitpoints.go` and `idempotency.go` carry the same
+  `time.RFC3339Nano` pattern under an explicit `tsformat:allow` and are left
+  alone here — see the PR for why each is judged safe on its own terms.
+- **`GET /api/v1/oauth/callback` answers its error branches with
+  `application/json`, matching what the spec has always declared (#2102).**
+  Every error branch used raw `http.Error`, which writes
+  `text/plain; charset=utf-8`; the generated OpenAPI document declares
+  `application/json` for every non-2xx response on every route (#1919), on
+  the grounds that both error helpers route through `writeJSON` — `Callback`
+  reached for neither, so it was the API contract gate's one remaining
+  "Undocumented Content-Type" finding. All nine error branches now go
+  through `replyError`, the same helper the sibling `Initiate`/`Exchange`
+  handlers in the file already use; the success branch's deliberate
+  `text/html` (a browser following the OAuth redirect) is untouched.
+- **`crew-ai-suggest` no longer hands back agent names or slugs
+  `POST /api/v1/agents` refuses (#2204).** Follow-up to #2197/#2200:
+  `validateSuggestion` gave `agent_role` a post-condition — every value an
+  accepted suggestion carries is a literal the create endpoint accepts —
+  but never extended it to name or slug. A suggestion like
+  `{"name":"Q",…}` passed validation and the wizard's very next call died
+  with `400 name must be 2-100 characters`; `slugify` never capped its
+  output either, so a long, space-free name could derive a slug over the
+  50-byte cap. Both bounds are now checked against the same
+  `agentNameMinLen`/`agentNameMaxLen`/`agentSlugMinLen`/`agentSlugMaxLen`
+  constants `agents_create.go` enforces (agents.go now defines them once,
+  shared by both call sites) rather than restated numbers, so the two
+  cannot drift.
+- **`crewship backup` defaults its bundle directory under the instance's own
+  data dir, not a home directory shared by every instance on the host
+  (#2262).** `backup create`/`verify`/`inspect`/`restore` resolved their
+  default location as `Home()+".crewship/backups"` regardless of
+  `CREWSHIP_DATA_DIR`, the env var every other piece of per-instance state
+  (`DATABASE_URL`, `CREWSHIP_BOLT_PATH`, `CREWSHIP_SOCKET_PATH`, storage)
+  already honours. Several isolated instances run by the same user on one
+  host — three dev clones, any number of ephemeral test instances — shared
+  one bundle directory, and a `restore` that picked up another instance's
+  bundle by name landed foreign data into a live database. The default now
+  resolves under `$CREWSHIP_DATA_DIR/backups` when the env var is set,
+  falling back to `~/.crewship/backups` only when it is not; `--output` /
+  `output_dir` still override it explicitly.
+- **A fetch failure on the issues board now renders as an error, and the
+  board says when it's showing a partial page (#2286).** `fetchIssues` used
+  to be `try { if (res.ok) setIssues(...) } catch {}` — any non-2xx response
+  or thrown fetch left `issues` exactly where it was (`[]` on first load),
+  indistinguishable from a genuinely empty workspace. The fetch now lives in
+  `hooks/use-issues-list.ts`, which always resolves to loading, a typed
+  `error`, or populated `issues`; the board renders a dedicated error panel
+  with a retry action instead of going blank. Separately, the board fetched
+  at most 100 rows with no total exposed anywhere, so a 101st issue was
+  silently invisible — `GET /api/v1/issues` now reports the filtered total
+  and whether the page was partial via `X-Total-Count`/`X-Has-More` response
+  headers (the JSON body is unchanged, so no existing client breaks), and
+  the board shows "Showing N of TOTAL issues" with a "Load more" action.
+  `crewship issue list` prints the same footer and gains `--offset` to page
+  past `--limit`.
+- **A 403 on the issues board's request is now reported as a specific,
+  actionable error instead of a request that took the whole board down
+  looking indistinguishable from empty (#2285).** Observed on dev1: a
+  transient 403 — the shape a scoped agent/CLI token failure takes
+  (`AuthKindCLIToken`, `internal/api/middleware.go`, documented as the
+  credential "an agent, CI job, or script holds") — silently emptied the
+  board. `useIssuesList` classifies a 403 separately from a 401/5xx/network
+  failure and names the likely cause (a scoped token, possibly transient)
+  in the error message, with a retry action, rather than rendering an empty
+  board that looks like a workspace with no issues.
+- **A live issue.created/issue.status_changed/etc. event still never
+  repainted the issues board — completing #2257's client half (#2257,
+  #2310).** #2310 registered the board's issue.* realtime subscriptions for
+  the first time, but wired the debounced refetch to `onRefresh`
+  (`OrchestrationPageShell.fetchData` — missions/crews/agents/connections),
+  never to the board's own separate `issues` state
+  (`useIssuesList`/`fetchIssues`, #2285/#2286 above). So the subscription
+  fired, Graph/Timeline data moved, and the issues board itself stayed
+  stale until a manual reload — exactly the symptom #2257 shipped to fix.
+  The wiring is now `hooks/use-issue-board-realtime.ts`, unit-testable
+  without mounting `OrchestrationLayout`: it calls both `fetchIssues` (the
+  board's pagination-preserving refetch) and `onRefresh` (still needed for
+  Graph/Timeline/Activity), debounced together, and also refreshes issues
+  on `realtime.reconnected` — which had the identical gap.
+- **A deploy-window blip no longer wedges the avatar-backfill latch shut for
+  the rest of the browser session (#2203).** `apiFetch` synthesizes a 503
+  whenever a request 401s and `/api/auth/token/refresh` is itself
+  transiently unavailable — a 5xx, a network throw, or its own 10s abort —
+  which is a routine event during an API restart, exactly when several tabs
+  are re-rendering. #2199's latch treated a run of these identically to a
+  genuinely broken endpoint (the #2196 case) and stopped asking for the rest
+  of the JS session, recoverable only by a full reload. A run of 5xx or
+  transport failures now closes the rail for 60 seconds instead of
+  permanently, and still spends its budget; a run of 4xx (other than 403,
+  which already has its own refusal handling) still latches for the
+  session, since that is a property of the endpoint rather than of the
+  minute.
+- **A suggestion or follow-up chip clicked twice can no longer send twice
+  while its session is still being created (#2121).** The chip handler read
+  `isStreaming` — a prop that cannot change until a send produces a render —
+  before awaiting `ensureSessionForSend()`, so two clicks landing inside a
+  draft session's create window both passed the guard and both sent; these
+  chips bypass `useMessageSubmit`, so the #2075 double-submit latch never
+  covered them. Unlike the composer's identical-duplicate case, a second
+  chip is a different question, so the fix disables the chip rail for the
+  duration of the create (extending the existing streaming disable
+  backwards) rather than latching or silently dropping it.
+- **Clearing a crew's issue prefix from the web UI now actually clears it,
+  and the field accepts the same 16-character prefixes the API always has
+  (#2118).** The Issue prefix control sent `{"issue_prefix": null}` on
+  clear; the server decodes a JSON `null` as "field absent" and the write is
+  gated on the field being present (`crews_update.go`), so the PATCH
+  silently no-opped and the value reverted on the next render with no error
+  shown. `""` is the documented clear — it already worked from the CLI
+  (`crewship crew update <crew> --issue-prefix ""`) — and the panel now
+  sends it too. The field's 5-character cap and hint text are also raised to
+  the API's actual limit (`^[A-Za-z0-9_-]{1,16}$`, since #2035).
+- **The issues board now moves on its own instead of only on a manual
+  reload (#2257).** Every status-transition endpoint — the human and agent
+  PATCH, and the review-approve/request-changes/stop workflow actions — now
+  broadcasts a dedicated `issue.status_changed` event (`{id, identifier,
+  crew_id, status, from, to}`) alongside the existing `issue.updated`, and
+  `issue.created`/`issue.deleted` now carry `crew_id` too. The `/issues`
+  board (`OrchestrationLayout`) subscribes to the full issue.* event set for
+  the first time and reconciles rather than trusts: a change to the crew
+  currently in view triggers a debounced refetch, a change the active crew
+  filter can prove is off-screen is skipped, and a socket reconnect always
+  refetches so a dropped connection can't leave the board permanently wrong.
+  The decision logic is `components/features/orchestration/issue-realtime.ts`,
+  unit-tested independently of the component.
+- **The realtime allowlist stopped silently dropping most of the documented
+  event vocabulary (#2125).** `hooks/use-realtime.tsx`'s
+  `VALID_REALTIME_TYPES` had drifted from `docs/api-reference/websocket.mdx`
+  — 40 workspace-channel event types the server already emits (projects,
+  milestones, integrations, feature flags, triage rules, recurring issues,
+  the escalation terminal states, and more) were silently discarded by
+  `handleMessage`, with no error and no log. All of them are now
+  registered, a Vitest parity gate
+  (`hooks/__tests__/realtime-allowlist-docs-parity.test.ts`) reads the
+  documented vocabulary straight off that doc page and fails if the
+  allowlist ever misses one again, and a dropped frame now logs a
+  `console.warn` once per type (not per frame) instead of vanishing. No new
+  subscribers were added for the 40 types — registering them is the durable
+  half of the fix; wiring a consumer per surface is separate, future work.
+- **Routine runs now reach `GET /api/v1/runs` and the Runs view (#2284).**
+  The endpoint aggregated `journal_entries` under `trace_id IS NOT NULL AND
+  entry_type LIKE 'run.%'` — a filter a routine run's `pipeline.run.*`
+  entries structurally could never match, since `internal/pipeline/journal.go`
+  stamps `actor_id` to the run's own id and never sets `trace_id` at all
+  (#2291 made the Runs view's header stop overclaiming this; this is the read
+  fix behind it). `journal.ListRuns` and `journal.GetRunByID` now group on
+  `COALESCE(trace_id, actor_id)`, admitting `pipeline.run.*` rows alongside
+  `run.*` ones, and tag every row `kind: "agent" | "pipeline"` so a caller
+  can tell the two apart — `crewship run list` shows a KIND column. A
+  cancelled routine run (which reuses `pipeline.run.failed` — there is no
+  dedicated `pipeline.run.cancelled` entry type) reports `CANCELLED`, not
+  `FAILED`. Deliberately not widened: `GET /api/v1/runs/insights` and the
+  `stats` tile embedded in `GET /api/v1/runs` itself still aggregate ad-hoc
+  runs only — unifying cost roll-ups and correlation across the two engines
+  is a separate decision this PR did not make.
+- **A run is now attributable to the issue that caused it, including
+  delegation hops and mention dispatches (#2279).** `assignments.mission_id`
+  is the direct link between a run and the issue it belongs to, but neither
+  of `AssignmentHandler.Create`'s two real callers — the sidecar's
+  `handleAssign` and the routine dispatcher's `crewshipBody` — ever set it,
+  so every delegation hop made from inside a mission task, lead-planning, or
+  mention-dispatched run created an assignment with `mission_id = NULL`,
+  invisible to `issue runs` and to Stop's live-run match alike. `Create` now
+  derives `mission_id` server-side when the body omits it: every synthetic
+  mission chat is created with the mission's own id as the chat's primary
+  key, so an existence check against `missions(id)` for the assignment's
+  `chat_id` is the exact FK precondition `mission_id` needs, not a
+  heuristic. Stop's own match now prefers `mission_id` directly over the old
+  `chat_id`/`group_id` heuristic, keeping that heuristic only as a fallback
+  for rows created before this change. `GET /issues/{identifier}/runs` and
+  `crewship issue runs` now return every run attributed to the issue —
+  mission tasks, mention-dispatched runs, and delegation-hop runs alike —
+  instead of only the mission-task rows a join could already reach.
+- **Automations refuse event types and payload keys that could never fire
+  (#2271).** `event_type` was checked for shape only, so a well-formed nonsense
+  type saved with 201 and matched nothing forever. It is now checked against
+  a generated registry (140 entry types), with a drift test, and the error
+  names valid alternatives. `payload_equals` keys are validated for the event
+  types whose payloads are known; for the rest the error, the CLI help and the
+  guide say plainly that no key validation is possible, because no
+  payload-schema registry exists.
+- **A webhook or automation that fails to start a run is now visible, not
+  just logged (#2282).** Schedules already raised a journal entry and an inbox
+  card when they failed; a webhook fire failure wrote a database row only,
+  and an automation whose enqueue failed left nothing but a log line. Both
+  now emit a journal entry on every failure and one inbox card — kinds
+  `webhook_fire_failed` and `automation_enqueue_failed`, routed to the
+  `routines.missed` channel category — once three consecutive failures show
+  the path is broken rather than a blip. A run that started and then failed
+  is not counted; it already has its own failure entry.
+- **Shipped surfaces stop claiming what they cannot show (#2291).** The Runs view's
+  header no longer says it spans routine runs — `GET /api/v1/runs` excludes
+  them by construction, so the honest label is the fix until the read side
+  changes. The three issue lifecycle events the server already emitted
+  (`issue.created`, `issue.deleted`, `issue.started`) now reach the browser
+  instead of being dropped by the realtime allowlist, and a guard test fails
+  when an emitted issue event is left unregistered. A schedule that the
+  circuit breaker disabled now shows its reason, failure streak, catch-up
+  policy and wake statistics — read-only; the editor is separate work.
+
+  **Two regressions in the first cut of this fix, found in review and fixed
+  in the same PR.** First, the registry generator only scanned
+  `internal/journal/types.go`'s const block, but at least eleven real,
+  emitted entry types are declared ad hoc in the packages that emit them
+  (`page.public_view`, `page.webhook_issued`, `keeper.rule_auto_tuned`,
+  `policy.changed`, and seven more) — so the "closed" registry rejected
+  event types that genuinely fired, and `automation create --event
+  page.public_view` (which worked before this feature existed) started
+  returning 400. The registry is now generated by scanning every
+  `journal.EntryType` value declared or used under `internal/` and `cmd/`,
+  not only `types.go`'s const block (`internal/journalgen.ScanTree`); the
+  drift test does the same scan and fails the build if an emitter anywhere
+  uses a value the registry lacks. Two call sites that wrote their entry type
+  as a bare string literal with no `EntryType` token anywhere (a shape no
+  scanner can find soundly without false-positiving on every unrelated
+  `Type:` field in the codebase) were changed to a typed const instead, the
+  same shape every other ad hoc entry type already used.
+
+  Second, `PATCH` re-validated the rule's *effective* (merged) event_type and
+  routine_slug even when the request body carried neither, so a sparse
+  `PATCH {"enabled": false}` on a rule whose target routine had since been
+  soft-deleted returned 400 with no way out but `DELETE` — `Store.Update` and
+  `Store.ListActive` both deliberately tolerate a dangling routine reference,
+  and `PATCH` now does too for whatever it did not touch. The event_type
+  registry check and the `payload_equals` key check moved into
+  `Automation.Validate()` itself (the single gate every writer already used,
+  including `internal/api/pages_wake.go`'s page-wake-gate reconciler, which
+  writes with raw SQL and relies on `Validate` to keep its rows honest) — so
+  `PATCH` no longer duplicates a load-and-merge the store already does, and
+  the wake-gate path is covered by the registry check for the first time.
+  Also: `automation.depth_exceeded`'s curated payload-key set was missing
+  five keys a third emitter (`internal/pipeline/journal.go`) writes
+  (`chain_origin`, `edge`, `pipeline_id`, `pipeline_slug`, `run_id`); and
+  `mission.comment` was removed from the curated map entirely — it has two
+  emitters with disjoint payload shapes, so no single key set is correct for
+  it, and a wrong rejection of a real key is worse than no validation at all.
+
+- **`backup verify` no longer calls a short bundle VALID (#2009).** Verify
+  only ever checked the payload's SHA-256 against the manifest — integrity,
+  not completeness — so a bundle that dumped zero rows for a table (a
+  scoping bug, corruption, or a hand-edited manifest) still reported
+  `✓ VALID`. Bundle creation now records each table's row count in the
+  manifest (`contents.table_row_counts`), and for an **unencrypted** bundle
+  `verify` compares the payload's actual counts against it, reporting
+  `INVALID` on a divergence instead of passing silently. An **encrypted**
+  bundle's completeness still cannot be checked here — `verify` deliberately
+  never asks for a passphrase, which is what lets it run unattended against
+  a whole directory of nightly bundles — but the CLI and API now say so
+  explicitly (`completeness_checked: false`, with a reason) instead of
+  implying the check happened. `crewship backup restore --dry-run`, which
+  already decrypts, makes the same comparison and reports it as
+  `payload_row_count_mismatches`, plus a second, separate comparison —
+  `rows_inserted_shortfalls` — for what actually landed on the target. A
+  bundle written before this change carries no recorded counts and is
+  reported the same honest "not verified" way, never as a false pass or a
+  new failure.
+
+  `payload_row_count_mismatches` is now taken BEFORE a `--as-workspace` /
+  `--as-crew` fork does its own bookkeeping (re-signing the journal chain,
+  adding the restoring admin to `workspace_members`) — those rows are the
+  restore's own doing, not the bundle disagreeing with its manifest, and
+  counting them the same way made every ordinary forked restore report the
+  bundle as suspect. `rows_inserted_shortfalls` no longer names a table
+  whose "shortfall" is INSERT OR IGNORE working as designed: bundled skills
+  reseed with the same IDs on every boot, a user `crewship backup restore`
+  reconciles onto a matching target account by email intentionally no-ops
+  on insert, and (once `issue_counters` re-keying, #2034, lands alongside
+  this) two crews sharing an effective prefix collapse a pre-#1797 bundle's
+  counters onto one row before insert — discounted by exactly how many rows
+  that merge folded away, not excluded outright, so a genuine
+  `issue_counters` shortfall (an unresolvable crew, a real collision) still
+  surfaces. And the warning text for both now follows which one fired —
+  `rows_inserted_shortfalls` is about the *target*, not the bundle, so it
+  no longer tells the operator to treat the bundle as suspect — and says
+  "more" rather than always "fewer" when a table landed extra rows rather
+  than too few.
+- **The crew's shared credential store had no agent dimension, so one member's
+  endpoint credential answered another member's model call (#2052).** One
+  sidecar serves a whole crew container, and `CredStore.Select` took a provider
+  and nothing else: the credential a model call got was whichever one a
+  round-robin counter landed on, not one the calling agent had been granted.
+  While every provider had a fixed vendor upstream, that decided only whose key
+  paid. `OPENAI_COMPAT` takes its upstream FROM the credential, so it also
+  decided where the prompt went — agent A's traffic to agent B's gateway,
+  authenticated with B's key, with B's host allowlisted by #2051's union so
+  there was not even a `403` to notice. `docs/architecture.mdx` had described
+  the store as one "an agent can only read credentials its `agent_id` was
+  granted" throughout; that was the intent, never the code.
+
+  Every credential now travels with the crew members it was granted to, and the
+  store refuses to serve one to anybody else. The calling agent is resolved
+  from its own per-agent route token (#812), which the orchestrator derives per
+  agent and which cannot be forged — it is an HMAC under a key the container
+  never sees. It can, however, be READ: crew members share one container and one
+  uid, and each member's token sits in its own environment and MCP config, so a
+  determined peer can present a sibling's. This is least privilege inside a
+  shared trust domain, which is what #2052 asks for — a crew is already one
+  trust domain — and not isolation from a hostile peer. A member holding no
+  credential for
+  the provider is refused with `503 no credential available` — a loud refusal
+  beats a silent crossover — and a caller whose identity cannot be established
+  at all (a sidecar running without route identity) is served crew-wide
+  credentials only, never one scoped to a named agent.
+
+  The grant you already made is the scope: a credential linked to the crew, or
+  bound at crew or workspace scope, reaches every member and stays available to
+  all of them; one granted to named agents reaches only those. Ownership is
+  computed per CREDENTIAL rather than per delivery, so every member of a crew
+  produces the same boot payload for the same credential — a value that differed
+  per member would move `sidecarConfigFingerprint` and restart the crew's shared
+  sidecar on every alternation between agents, which is the thrash #1160
+  removed. A grant covering every member of the crew is crew-wide in effect and
+  is delivered as such, which is the shape `autoAssignCredentials` leaves every
+  template-created crew in — so for a crew with no per-agent grant the payload
+  is byte-identical, the fingerprint does not move, and no running sidecar
+  restarts on upgrade. A crew that DOES hold a credential granted to a strict
+  subset of its members — the crews this fixes — gains agent ids in its payload,
+  and its sidecar restarts once; an in-flight run there sees the existing
+  fingerprint-mismatch `503` and retries.
+
+- **An invited member could not authenticate with the CLI at all (#2259).**
+  `lookupCLIToken`'s SELECT scanned `u.full_name` into a plain `string`, but
+  the column is nullable and `workspace member invite` creates the user row
+  without one — so `Scan` failed with "converting NULL to string is
+  unsupported" on the very first CLI call from a freshly invited
+  MEMBER/MANAGER/ADMIN. The auth middleware then collapsed that lookup error
+  into the same generic 401 `session_invalid` every bad-token case gets, so
+  the error pointed at the wrong thing and made it look like the token, not
+  the row, was the problem. The query now reads `COALESCE(u.full_name, '')`,
+  matching the idiom `auth_recovery.go` already used for this exact column.
+  Separately, `RequireAuth` no longer reports every lookup failure as an
+  invalid session: only the sentinel `errInvalidCLIToken` (unknown, revoked,
+  expired, tier-mismatched, or not-found token) maps to 401 now, and any
+  other lookup error — a query/scan/driver failure — is logged with its
+  underlying cause and answered with a 500, so a bug like this one names
+  itself instead of requiring a live repro to find.
+- **Every forked restore (`--as-workspace` / `--as-crew`) of a bundle
+  containing a live mission aborted on a `mission_activity` foreign-key
+  violation (#2260).** The error named the wrong row. `RemapIDs` regenerates
+  every primary key so a fork can land beside its source, and it had
+  correctly rewritten `mission_activity.mission_id` to the fork's brand-new
+  mission id — but `missions.trace_id` is `NOT NULL UNIQUE` with no workspace
+  in the key, and the source mission on the same instance was still holding
+  the bundle's value. `RestoreDump` inserts with `INSERT OR IGNORE`
+  (deliberately, so re-restoring a bundle is idempotent), so the forked
+  mission did not fail loudly on that collision — it was dropped in silence,
+  and its correctly-remapped activity rows landed pointing at a parent that
+  never arrived. The deferred `foreign_key_check` then blamed the child. Since
+  essentially every workspace has run a mission, this made `--as-workspace`
+  unusable in practice. A fork now regenerates identity, not merely primary
+  keys: `forkRegeneratedColumns` in `internal/backup/remap.go` declares the
+  columns that are unique per *instance* rather than per workspace, and pass 1
+  mints a fresh value for each — for `trace_id`, the source value's prefix
+  (`mission-`, `issue-`, `tr_`) is kept and only the identifying tail is
+  replaced, the same shape `internal/api` writes. Columns that are unique only
+  within a workspace stay untouched on purpose: `missions.identifier` was
+  rescoped to `UNIQUE(workspace_id, identifier)` by #1733, so the fork keeps
+  the issue identifiers a team already knows. Nothing stores a mission's
+  `trace_id` by value elsewhere — the `trace_id` on `journal_entries` and
+  `eval_runs` is an agent *run* id — so regenerating it breaks no reference.
+  Two tests: the reproduction, and an every-table fork that synthesises a row
+  into 102 of the 109 `BackupTables` entries and requires each remappable
+  table to gain exactly the rows the bundle carried. That second test found
+  seven more tables losing every row to the same class of collision
+  (capability tokens with a hashed twin, and unique keys over columns nothing
+  remaps); they are pinned by name in the test and filed as #2274.
+- **Restoring a bundle taken before the `issue_counters` re-key silently
+  dropped every counter row (#2034).** `#1797` re-keyed `issue_counters`
+  from `crew_id` to `(workspace_id, prefix)` — the first non-additive
+  column change the restore path had met. A bundle taken before that
+  migration carries `{crew_id, next_number}`; `crew_id` has no column on
+  the new table, so it was dropped from the `INSERT`, the statement
+  degenerated into `INSERT OR IGNORE INTO issue_counters (next_number)
+  VALUES (?)`, and the `NOT NULL` on the two new key columns turned the
+  drop into a constraint violation `OR IGNORE` swallowed — the restore
+  reported success having landed nothing. Mostly self-healing (the
+  allocator reseeds a missing counter from the highest identifier already
+  restored under that prefix), except for a crew whose issues had ALL been
+  deleted before the backup: its counter was the only remaining record of
+  how far it had counted, so the crew restarted at 1 and re-used
+  identifiers people and external systems still reference. Restore now
+  resolves each row's crew — from the bundle's own `crews` table, or the
+  target's if it already exists there — to its workspace and effective
+  prefix, and writes the counter under the current key; two crews sharing
+  an effective prefix collapse onto the higher `next_number` rather than
+  either individual value, so the allocator can never re-issue an
+  identifier that already exists. A row whose crew cannot be resolved
+  anywhere still cannot be honestly guessed at, so it falls through to the
+  counted, reported column-drop warning (`columns_dropped` /
+  `dropped_columns`) restore already surfaces for schema skew in general
+  (#2108).
+
+- **The feedback API docs still described the security hole #1213 had
+  already closed (#1617).** `docs/api-reference/feedback.mdx` and
+  `docs/guides/feedback.mdx` said `POST /api/v1/feedback` fell back to the
+  caller's most-recent workspace when `chat_id` was omitted, and one bullet
+  stated outright that "message_id ownership is not enforced" — the exact
+  cross-tenant message-existence oracle #1213 closed by requiring
+  `message_id` to resolve to a real, visible row in `conversation_messages`
+  (#1208). #1617 investigated the resulting 404 as a possible router bug —
+  POST/DELETE register through `authedSelfMut`, GET through the plain
+  `r.mux.Handle` beside it — but the route was never broken; the docs were
+  just stale. Corrected both pages, and added
+  `internal/api/feedback_route_test.go` (drives POST/GET/DELETE through the
+  real router) plus `cmd/crewship/acceptance_feedback_test.go` (drives
+  `crewship feedback create|list|delete` against a real server) so a real
+  registration regression on this route family fails loudly instead of
+  reading like this one did.
+- **A second run for a busy agent no longer kills the first (#2269).** The
+  per-agent exclusivity that already guarded chat sends is now shared with
+  `/assign` and `@mention` dispatch as `AgentRunLock`. Before, a second
+  concurrent run for one agent reused the tmux session `agent-<slug>` and the
+  exec wrapper's opening `kill-session` terminated the first run and deleted
+  its fifo and exit file. A dispatch that loses the lock is queued behind the
+  live run (back of the crew FIFO) and drained by the existing completion
+  pump — it is not failed, and the crew is pumped so a freed budget slot
+  goes to the next eligible row. A queued row now says why (`queued_reason`:
+  `crew_budget` or `agent_busy`) instead of leaving that to a server log. A
+  chat message to an agent that is busy on an issue now bounces with
+  `agent_busy` instead of colliding with it.
+
+  **Known limit.** The lock is taken by chat sends, `/assign`, `@mention`
+  dispatch, the agent cron and a routine's `agent_run` step. It is **not yet**
+  taken by the inbound agent webhook route, the direct agent-run route or the
+  peer-query path; a run started through one of those can still collide with
+  a live run for the same agent.
+- **Inbox read state is now per user, not shared (#2296).** `PATCH
+  /api/v1/inbox/{id}` with `state=read` wrote the shared `read_at` /
+  `read_by_user_id` columns on `inbox_items` with `COALESCE(existing, now)` —
+  the first person to open a role-targeted item (e.g. a MANAGER escalation
+  every MANAGER can see) marked it read for every other recipient too, so a
+  second manager's inbox silently dropped an item they never saw. A new
+  per-`(item, user)` table, `inbox_item_reads`, is now LEFT JOINed in, and the
+  `state` every response reports (`GET /api/v1/inbox`, `GET /api/v1/inbox/{id}`,
+  and the unread count) is computed for the calling user — `resolved` stays
+  workspace-shared, `read`/`unread` does not. The old shared columns are kept
+  and still written the same way as before; they now answer a narrower,
+  separate question ("has anyone dealt with this") rather than deciding
+  `state`. `inbox.Upsert` resurrecting an item back to unread now also clears
+  every caller's per-user read marker, so a refreshed item reads as unread
+  again for everyone, not just the caller who triggered the refresh.
+
+  On a fork (`backup restore --as-workspace` / `--as-crew`) inbox items
+  themselves do not land — `inbox_items` is UNIQUE(kind, source_id)
+  instance-wide (#2274) — so a read marker for one of them has no parent.
+  The restore now skips such a marker instead of aborting on the deferred
+  foreign-key check, and reports the skip in `rows_inserted_shortfalls`.
+
+- **Stop now actually stops the next step, and a late failure report still
+  reads as cancelled (#2295).** `POST /issues/{identifier}/stop` cancelled the
+  issue's row and its pending tasks, but a run already `RUNNING` when Stop
+  was called kept executing to completion and, if it finished with an error
+  after the stop, the websocket broadcast and the mission comment both
+  reported it as a failure (`assignment_failed`, "encountered an issue") —
+  the opposite of what the operator who clicked Stop asked for. Stop is Tier
+  1 (cooperative): there is no kill primitive for a shared crew container, so
+  a run mid-exec is not interrupted. What changed is that the contract is now
+  actually enforced end to end. In one transaction, Stop stamps
+  `assignments.cancel_requested_at` on every live assignment for the issue.
+  `runAssignment` checks the stamp before spending anything on the row —
+  before the container exec, before the LLM call — so a run that has not yet
+  started never starts. `finishAssignment` checks the same stamp again when
+  an already-`RUNNING` run eventually completes, and now the check runs
+  *before* the websocket broadcast switch and the mission-comment block are
+  reached, not only before the `status` column write: a late `COMPLETED` or
+  `FAILED` report is recorded and announced as `CANCELLED` either way, and
+  `mission_activity` gets a dedicated `task_cancelled` action instead of
+  reusing `task_failed`. No further step is scheduled for the issue. A hard
+  kill that interrupts a run mid-exec remains a separate, not-yet-built
+  capability.
+
+- **Stop now reaches a run a mention started on an issue that was never
+  started (#2320).** A mention (`@agent` on an issue's comments) can dispatch
+  a run while the issue itself is still `BACKLOG`/`TODO` — #2279 attributes
+  that run to the issue the same way a mission-task run is (`mission_id`,
+  with the `chat_id`/`group_id` fallback) — but `POST
+  /issues/{identifier}/stop` refused with 400 for any status other than
+  `IN_PROGRESS`/`REVIEW`, so the one door meant to reach every run
+  attributed to an issue (#2295) stayed closed for exactly the runs a
+  mention starts: the agent kept running with no cooperative stop
+  available from the issue. Stop now checks for a live attributed
+  assignment before refusing: when the issue is not `IN_PROGRESS`/`REVIEW`
+  but has at least one, it stamps `cancel_requested_at` on it exactly as
+  before and leaves the issue's own status untouched — it does not
+  promote the issue to `IN_PROGRESS` or move it to `CANCELLED`, since the
+  issue itself was never started. It still refuses with the original 400
+  when the issue is neither in flight nor has any live run to reach. The
+  response now also reports `runs_stopped`, the count of assignment rows
+  the call actually stamped.
+
+- **A routine no longer evicts your conversations from the chat column
+  (#2244).** Four code paths insert into `chats` and only one of them is a
+  conversation: a person opening a thread, a routine minting **one chat per
+  step**, an issue running its work, and an agent delegating to another agent.
+  `GET /agents/{id}/chats` returned all four in one activity-ordered list with
+  no way to narrow — and because the endpoint pages, that was not clutter but
+  eviction: five rows per routine run meant a person's newest conversation was
+  outside the result set within two nights, before any client-side filter could
+  see it. The endpoint now takes `?kind=direct|routine|issue|agent`, applied
+  inside the statement *before* `LIMIT`, and answers `?counts=1` with per-kind
+  totals in `X-Chat-Kind-Counts` so a column can label the buckets it is not
+  fetching. Every row carries its `kind`. The partition lives in one place
+  (`internal/chatkind`) as both Go and SQL, with `direct` written as the
+  negation of the other three — an origin nobody has thought of yet stays
+  visible rather than vanishing from every list at once. The pipeline runner
+  now stamps `ROUTINE` (it stamped nothing) and titles a step chat with the
+  routine's name instead of its id; a migration backfills existing rows,
+  guarded on `created_by IS NULL` as well as the runner's own title shape.
+  Every surface that needed to tell these apart had been asking
+  `created_by IS NULL`, which answers "does this row have an owner" and not
+  "did a person open this" — two questions that stopped being the same in both
+  directions, since `POST /agents/{id}/chats` stamps a creator *and* accepts an
+  origin, and deleting a user nulls the creator on every chat they opened.
+  `crewship chat list --kind` narrows the same way, with a `KIND` column in
+  place of the raw `ORIGIN` token.
+
+- **The chat column's "New conversation" asked nobody who (#2141).** It called
+  `onStartConversation(roster[0])` — whichever agent `/agents` happened to
+  return first — so the one button on the column silently made the only
+  decision it exists to take, and a *second* conversation with a chosen agent
+  could not be started from the UI at all. It now opens a picker over every
+  agent, not only the ones with no history.
+
+- **A forked restore left the journal hash chain unverifiable (#2226).**
+  `crewship backup restore --as-workspace <slug>` returned success and produced
+  a workspace whose `VerifyChain` reported *every* restored row as tampered —
+  the exact false positive the chain work was built to avoid, fired by the
+  admin integrity endpoint on the very next check. `RemapIDs` regenerates the
+  identity columns the entry's keyed HMAC commits to (its own `id`, and every
+  FK column SQLite reports — `workspace_id`), while `seq`, `prev_hash` and
+  `entry_hash` rode through the bundle verbatim, so each stored hash still
+  attested to values the row no longer held. A second, independent break sat
+  beside it: `journal_chain_checkpoints.workspace_id` carries no `REFERENCES`
+  clause, so the remap's FK pass never rewrote it while pass 1 still
+  regenerated the row's primary key — every forked restore wrote a duplicate
+  checkpoint into the **source** workspace's audit state and left the fork with
+  none, turning a legitimately compacted gap into what reads as a malicious
+  mid-chain delete.
+
+  A forked restore now re-signs the chain under this installation's key, the
+  way the v152 migration's `backfillJournalChain` already does for a chain it
+  legitimately rewrote, and re-points *and* re-MACs the compaction checkpoints
+  under the new workspace id (`journal.CheckpointMAC` frames the workspace id,
+  so moving the row without re-signing it would have covered nothing). The fork
+  therefore starts at a **new genesis** — it verifies clean, but it attests to
+  this instance from the restore onward and no longer links back to the
+  source's history, so it does not get one silently: a `backup.chain_resigned`
+  entry is written at the tail of the new chain, inside the chain it describes,
+  naming the source workspace, the bundle digest and the counts. The CLI, the
+  restore API response and the `backup.restore` audit row report the same two
+  numbers. A restore that cannot re-sign the chain now fails before writing
+  anything rather than landing an unverifiable fork; there is no branch that
+  skips the re-sign. A plain or `--replace` restore remaps nothing, re-signs
+  nothing, and is unchanged.
+
+- **A chat journal entry kept the first 240 characters of every message you
+  sent, in a row that cannot be erased (#2229).** #2215 left `chat.user_message`
+  bounded rather than emptied: its payload and summary both carried a scrubbed
+  240-character preview, on the argument that the message *is* the entry. That
+  bounded the exposure without closing it. The scrubber is defence in depth and
+  not a boundary — it cannot match a value nobody registered — so a token pasted
+  at the *start* of a message sat well inside the preview and reached a
+  hash-chained, append-only table that erasure requests deliberately skip.
+
+  The entry now records a measurement instead of the message: `chat_id`,
+  `agent_slug` and `length_chars`, with a summary reading
+  `user → morgan: 312 characters`. There is deliberately no digest of the
+  message beside it — for a short message a digest is a verifier for the pasted
+  token — so `chat_id` is the reference, and the message itself stays in the
+  chat, which **can** be erased. Expanding a Timeline row now offers **Open
+  chat** to get there, which nothing did before. Two consequences: free-text
+  journal search no longer reaches any part of a user message, and the entry's
+  `content` and `truncated` fields are gone rather than emptied.
+
+- **The journal stored the prompt text of every run, verbatim and forever
+  (#2215).** `exec.command` recorded the CLI argv, and the argv carries the
+  run's whole system prompt plus the verbatim user message; `chat.user_message`
+  stored the message body uncapped, while its own summary was capped at 240
+  characters. Both land in a hash-chained, append-only table that erasure
+  requests deliberately skip, and the Timeline tab that renders them is not
+  admin-gated.
+
+  Scrubbing could not close this, and #2205's scrub was never going to: the
+  credential scrubber is defence in depth, not a boundary — it cannot match a
+  value nobody registered and whose shape it does not know, so a token pasted
+  into agent chat survived it. The prompt-bearing values are therefore no
+  longer written. `exec.command` now carries a bounded, typed payload — the
+  argv *shape* with the prompt elements replaced by a placeholder naming the
+  element and its length, plus the adapter, model, tool profile, container,
+  exit code, duration, and a digest and length of the prompt — which answers
+  "what ran, and with which prompt" without storing the prompt. A measured
+  entry drops from about 43 KB to under 1 KB. What remains is capped, with an
+  explicit `truncated` flag. `chat.user_message` is scrubbed and capped to the
+  same 240 characters its summary always was — superseded by #2229 above, which
+  ships in this same release and removes that text entirely — and the run's
+  process log line takes the same sanitised argv. The #2205 scrub is kept and
+  still runs on what is left.
+
+  Two UI readers were fixed with it: the Journal card's terminal line and the
+  run rail's detail line both read a key the orchestrator never wrote, so they
+  were blank for every agent exec. Both now accept either payload shape.
+
+  Three behaviour notes. `crewship journal --query` searches summary and
+  payload, so free-text search now reaches the first 240 characters of a user
+  message and no part of a prompt. `chat.user_message` is bounded rather than
+  emptied — the message is what that entry is for — so within those 240
+  characters the scrubber is still the only control. And `chat.agent_response`
+  still keeps up to 8 KB of the agent's scrubbed reply and `exec.output_chunk`
+  its scrubbed stdout, so an agent that quotes its prompt back still writes
+  that text to the journal.
+
+- **The `exec.command` journal entry wrote the CLI argv unscrubbed (#2205).**
+  All three emit sites recorded the agent CLI's argv verbatim. That argv
+  carries the run's whole system prompt and the verbatim user message, so
+  every entry was a large payload of prompt text that no member-facing
+  surface was filtering: the Timeline tab is not admin-gated, and Export
+  writes every loaded payload to a file in one click.
+
+  The sibling `exec.output_chunk` emit already scrubbed, under a comment
+  stating the reason: the journal is hash-chained and append-only, so whatever
+  lands in a payload can never be redacted afterwards, and the GDPR erasure
+  cascade deliberately skips `journal_entries`. The argv needed it at least as
+  much, because it carries text a *human* typed — a credential pasted into
+  agent chat had nothing between it and permanent storage. Every argv element
+  now goes through the run's own credential scrubber before the entry is
+  written, and two guard tests (one behavioural over all three emit paths, one
+  static over the emit sites themselves) fail if a future site writes the raw
+  argv.
+
+- **The client half of the approvals contract accepted a shape the server
+  never sends.** `ApprovalsHandler.List` writes `{rows, status, count,
+  has_more}` as a map literal — all four keys on every response — and the
+  generated spec requires all four. `approvalListResponseSchema` required only
+  `rows`. `useApprovals({loadAll: true})` pages until `has_more` is false, so
+  an envelope missing that key read as `undefined`, the walk stopped after one
+  page, and the UI presented the first 200 rows of approval history as the
+  whole history with no error anywhere. All four are required now. Every list
+  fixture in the hook's tests was hand-written and none was a real envelope,
+  which is why nothing caught it; they go through one helper that builds what
+  the handler actually writes.
+
+- **Decided approvals were filed under Archived instead of Decisions.**
+  `isArchivedNotDecided` looked for the decider on `entry.inboxItem`, but the
+  two entry constructors are disjoint — `inboxEntry` sets `inboxItem`,
+  `approvalEntry` sets `approval`. Every decided approval therefore had no
+  decider to find and was classified as archived noise, which is precisely the
+  mislabelling the function exists to prevent. It reads either field now, and
+  `timeout` — the approvals queue's spelling of its own sweep, distinct from
+  the waitpoint `timed_out` already listed — counts as not-a-decision.
+
+- **Schedule advisories outranked real gates in the inbox bell.** The bell's
+  "Needs a decision" bucket filtered on `isActionableInboxItem`, which answers
+  "is there a source action behind this row?" and rightly says yes to a missed
+  occurrence or a tripped circuit breaker. The bell asks the narrower question
+  its heading promises — is an agent parked until a human answers? — and
+  nothing is parked on either. They move to Recent, where the bucket's own
+  comment always said they belonged.
+
+- **Inbox deep links stopped working after the first render.** `?item=` and
+  `?agent=` were read into `useState` initializers, and the route stays mounted
+  across a same-route navigation. Leaving `/inbox-v2?item=x` for the bare route
+  kept row x in the reading pane — a link naming no row is a request to show no
+  row, and answering it with the previous one is how the wrong request gets
+  decided — and `?agent=riley` after `?agent=casey` kept filtering on casey.
+  Both now track the URL for the life of the route, and neither overwrites a
+  search the user typed or a row they clicked.
+
+- **`source_missing` could not say "checked, and the source is live".** The
+  detail read computes whether a waitpoint or escalation still has a row that
+  can decide it, and the pane offers a way out of an orphaned row on the
+  strength of it. As `bool` with `omitempty` the false arm was unsendable: a
+  live gate and a list row that never ran the probe were the same empty space
+  on the wire. It is a pointer now, so the detail read states both answers and
+  the list still states neither.
+
+- **`limit` and `offset` were published as strings on `/inbox` and
+  `/approvals`.** Both handlers `strconv.Atoi` them and reject anything that is
+  not a non-negative integer, so the document promised generated clients a
+  contract the server does not honour.
+
+- **`crewship admin seed-inbox` collided with itself.** Both identifier
+  families derived from `time.Now().Unix()`, so a second run within the same
+  second re-minted the same run id and failed on the primary key — or, with no
+  pipeline to hang the run on, re-used every source id, where `inbox.Insert`
+  dedupes silently while the success line still claimed sixteen rows written.
+  One nanosecond-derived suffix per invocation, carried by both families, with
+  the `run_seed_` and `seed_` prefixes `--clear` matches on left intact. Its
+  `--clear` flag is also documented now, which is what the strict docs gate was
+  failing on.
+
+- **The approvals API answered in a shape no browser could read.**
+  `harbormaster.Request` carried no JSON tags and was serialized straight onto
+  the wire, so `GET /api/v1/approvals` returned `"ID"`, `"Kind"`, `"Status"`,
+  `"CreatedAt"` — while `lib/types/approvals.ts` and the generated OpenAPI spec
+  both declared snake_case. Every non-empty response failed `safeParse`, so
+  `/approvals` and the inbox's approval feed rendered zero rows behind
+  "Malformed response from /api/v1/approvals". Only the Go CLI worked, because
+  `encoding/json` matches field names case-insensitively on decode — which is
+  also why every Go test passed: they all decoded into structs. The struct now
+  carries snake_case tags, `DecisionComment` serializes as `decision_comment`
+  (the column name, and what the OpenAPI schema already documented), and
+  `TimeoutSecs` — documented as in-memory-only, but leaking to clients as a
+  constant `0` — is `json:"-"`. `TestApprovals_WireShape_IsSnakeCase` asserts
+  the emitted keys rather than what a Go decoder can recover from them.
+  `docs/api-reference/approvals.mdx`, which had documented the PascalCase
+  shape as a known quirk, is updated with it.
+
+- **Four inbox rows advertised a decision they could not take.** Each was a
+  button that called an endpoint the row could never satisfy:
+
+  *Autonomy-gate holds.* `writeAutonomyHold` writes a `kind=waitpoint` row
+  whose `source_id` is a crew, agent or mission id — never a
+  `pipeline_waitpoints` token — so the generic Approve/Deny resolved to
+  `/pipelines/waitpoints/{crew_id}/approve` and 404'd every time. The decision
+  lives in the approvals queue and the row already carries `approval_id` in
+  its payload; it is decided there now. (The inbox's cross-source dedupe
+  suppresses the approvals row this one projects, so until this fix the only
+  working surface was hidden and the broken one was what remained.)
+
+  *A decision whose source is gone.* A waitpoint whose run was pruned, a hire
+  already swept, an escalation whose `escalations` row was deleted: the source
+  endpoint 404s and the inbox PATCH answered 409 "use the source endpoint", so
+  the row could never leave Needs action and never reached History. The PATCH
+  guard now makes the same exception for waitpoints it already made for
+  source-less escalations, and `BulkPatchState` uses the same predicate rather
+  than the escalation-only one it had drifted to.
+
+  *The Archive button that knew nothing.* The client guessed whether a source
+  still existed by looking at the payload — wrong in both directions. The
+  detail read now answers it (`source_missing`), using the same probe the
+  PATCH guard uses, so a live decision still offers no Archive and an orphaned
+  one does.
+
+  *Retry on a failed run.* It read `payload.pipeline_slug`, which the producer
+  never writes, and fell back to `sender_name` — the SCHEDULE's name — posting
+  `/pipelines/{schedule name}/run`. The `!slug` guard never fired because
+  `sender_name` is always set, so the user got a red toast and the row stayed.
+  Retry now needs a real slug, and a Retry that cannot run no longer resolves
+  the row as "cancelled" behind the user's back.
+
+- **History stopped calling archived noise a decision record.** One click on
+  the grouped advisory card's "Archive 6 updates" put six curator advisories
+  into History under a heading that read "Decision records" — telling the
+  reader six decisions had been made when none had. History now splits into
+  Decisions and Archived. Archiving is not deciding; the PRD says History
+  holds both, not that they are the same thing.
+
+  `scripts`-free cross-check, driving the CLI against the same server the
+  browser reads: for each kind, `crewship inbox list --kind <k> --all` must
+  agree with the facet, the kinds must sum to the unfiltered total, and the
+  facet vocabulary must not have drifted from `inbox.AllKinds`.
+
+- **Journal search said "no entries match" over a result set that was not
+  empty (#2206).** Three defects in the same search box, each producing a
+  false empty answer. Free-text search wrapped the whole input in one FTS5
+  phrase literal, so it was an ordered phrase rather than a set of terms:
+  on a live instance `morgan session` found 56 rows, `session morgan` found
+  0, and `morg` found 0 against a corpus where `morgan` occurs 1,140 times.
+  Terms are now quoted individually and `AND`-ed, with a prefix `*` on the
+  last one — word order stops mattering (`session morgan` → 119, same as
+  `morgan session`) and a half-typed word still matches (`morg` → 1,140).
+  Quoting every term preserves the operator neutralisation the phrase form
+  bought: `AND`, `OR`, `NOT`, `NEAR(...)`, `*`, `summary:x` and stray quotes
+  stay literal search text and can neither restructure the query nor error
+  it out.
+
+  `agent:` and `crew:` in the search box — and `crewship journal --agent` —
+  bound their value straight into a SQL equality on the id column, so the
+  box's own placeholder example (`agent:viktor`) and `--agent morgan`
+  returned zero. Both parameters now accept an id, a slug or a display name,
+  resolved inside the caller's workspace by the API, so the UI, the CLI and
+  direct API callers all get it. A reference that resolves to nothing is
+  still matched against the id column, so a deleted agent's id keeps
+  reaching its history and a typo stays unmatchable rather than widening to
+  the whole workspace; an ambiguous display name matches every hit.
+
+  The timeline's client-side matcher also re-applied the tokens the server
+  had already bound, filtering the server's own rows back out (`agent:`
+  reads the entry's `agent_id`, which is a UUID, against the name the user
+  typed). It now narrows only on what the backend could not bind, and its
+  free-text matching reaches the payload, which the server's index has
+  always covered.
+- **Three Logs filter chips could never appear, and 65 entry types had no
+  chip at all (#2207).** The Crow's Nest type-chip row seeded its per-group
+  counters from a hand-kept list that had fallen three groups behind the
+  eighteen the UI defines, so counting an `audit`, `provisioning` or `chat`
+  entry incremented a counter that did not exist — `NaN`, which fails the
+  `count > 0` test the row uses to decide what to render. Those three chips
+  were unreachable no matter how many such entries were loaded, and the
+  visible chips' totals under-reported. The list is now derived from the
+  render order, so it cannot drift again.
+
+  Scanning the backend for every entry type it can emit finds 139, of which
+  65 had no group: they rendered grey with a raw dotted-string pill, and
+  because muting a chip is pushed to the server as an `exclude_entry_type`
+  filter and the catch-all group has no type list, they could not be filtered
+  out of a busy workspace's 5,000-entry window at all. Two new chips take the
+  families that had nowhere to go — **routine** (the fourteen `pipeline.*`
+  types plus the two `automation.*` refusals that explain why a routine did
+  not run) and **page** (all fifteen `page.*` types, including publishing,
+  public views and webhook credentials). The rest join the existing chips:
+  memory, credentials, approvals-and-trust, notifications, provisioning and
+  runtime freshness, missions, runs, chat, skills, system. The twelve the
+  frontend's entry-type list had never carried — among them
+  `page.owner_transferred`, `page.published` and
+  `onboarding.proposal_applied` — gained an icon and a place in the activity
+  sidebar's facets. `memory.priority_changed`, emitted as a bare string
+  literal since it shipped, is now a named constant on the Go side, so the
+  entry that records who changed a compaction-surviving marker is visible to
+  anything that reads the backend's declarations.
+
+  `hook.dispatch_error` was in the server-side `system` exclusion list but
+  not in the client's type→group map, so muting System dropped it on the
+  server while the client still called it ungrouped. The two maps now agree,
+  and a test asserts it in both directions. `docs/guides/crew-journal.mdx`
+  billed roughly ninety types as the "full entry-type catalog"; it now lists
+  all 139 with the chip each one filters under.
+
+- **Clicking a run in `/journal?tab=runs` moved the address bar and nothing
+  else (#2209).** The row handler pushes `/journal?tab=timeline&trace_id=<id>`
+  — the same pathname, so the App Router re-renders the page without
+  unmounting it. Every URL-derived value was read once at mount
+  (`useMemo(…, [])` or a lazy `useState` initialiser) and nothing re-read
+  `searchParams`, so the tab stayed on Runs, the trace focus stayed empty, and
+  the user was left staring at the runs table while the URL claimed Timeline.
+  Every in-app link into `/journal?…` from an already-mounted journal was
+  equally inert, as was the "click a row → open trace" hint promising it.
+  The URL is derived state now rather than a mount-time copy, so the page
+  follows it. Verified in a browser: `tab=runs` → row click → Timeline with
+  the trace pill, no full page load.
+
+- **The journal Timeline degraded permanently on a real workspace (#2210).**
+  Four faults on one data path, each invisible on a quiet instance.
+
+  *A dropped SSE stream never came back.* On the first `onerror` the hook
+  closed the EventSource, fell back to 5 s polling and never reached for the
+  stream again — only a filter change or a page reload restored the live tail,
+  and the badge read "Polling" for the rest of the session with no explanation
+  and nothing to click. It now reconnects on jittered exponential backoff
+  (1 s doubling to a 30 s ceiling, equal jitter so tabs knocked offline by one
+  server restart do not retry in lockstep), stops polling the moment the
+  stream is back, and the badge is a button that retries immediately and
+  re-reads the head.
+
+  *The polling backfill silently lost the gap it existed to cover.* The
+  watermark was set when the effect mounted and only ever advanced from
+  *polled* entries, never from ones the stream had already delivered — so a
+  stream that dropped after a busy hour re-requested from page-load time and
+  got back one 50-row page, discarding everything in between with nothing
+  saying so. The watermark now advances from stream entries too, each poll
+  walks up to 4 cursor pages to close a deeper backlog, and a backlog deeper
+  still surfaces as "Entries missing" rather than vanishing. `lastError`,
+  which the hook had always computed and the page had always thrown away, is
+  now on the badge.
+
+  *Prepending a live entry was O(n), per event.* Each `prependLive` scanned up
+  to 5,000 buffered entries for a duplicate id and copied the whole array; the
+  page's 250 ms batch then called it once per event, so a 50-event flush was
+  ~250k comparisons and 50 array copies before React rendered once.
+  `prependLive` takes an array: one pass, one update. `ResourcesStrip` was not
+  batching at all — for `container.metrics`, the highest-volume entry type in
+  the product — and now shares the batching hook.
+
+  *Two filters missed the partial indexes built for them, and a third had no
+  index at all.* SQLite uses a partial index only when the query's predicate
+  *implies* the index's, and a single-value `IN` does not: the Timeline sends
+  exactly one severity, so `severity IN ('error')` never matched
+  `idx_journal_ws_sev_ts … WHERE severity IN ('warn','error')` and scanned the
+  workspace partition instead. `priority IN ('high')` missed
+  `idx_journal_entries_priority … WHERE priority != 'normal'` the same way.
+  And `run_id` — `(trace_id = ? OR actor_id = ? OR run_id = ?)` — could not be
+  index-unioned at all, because `actor_id` had no index (`idx_journal_actor_ts`
+  is on actor_*type*), which made every `/journal/count?run_id=` scan the
+  whole workspace partition since `Count()` emits no `LIMIT`. Migration
+  `20260831093500_journal_filter_indexes.sql` adds unconditional
+  `(workspace_id, severity, ts)` and `(workspace_id, priority, ts)` indexes plus
+  a partial `(workspace_id, actor_id, ts)`, drops the now-redundant
+  `idx_journal_entries_priority`, and keeps v146's tiny partial severity index,
+  which still wins the two-value errors-and-warnings shape. Every plan change
+  is pinned by `EXPLAIN QUERY PLAN` assertions against a seeded, `ANALYZE`d
+  database — an index whose plan nobody checked is worse than none, because it
+  looks like the problem is solved.
+
+- **`crewship apply` planned a `COORDINATOR` agent as creatable and then the
+  server refused it (#2195).** The standalone `kind: Agent` validator kept
+  `COORDINATOR` in `validAgentRoles`, so a manifest carrying that role passed
+  `--dry-run` with a green `Plan: 1 to create` and the real apply failed with
+  `400 agent_role must be AGENT or LEAD`. The role was retired in v0.1
+  (`internal/api/agents.go`, pinned by `agents_test.go`); the comment in the
+  validator acknowledged the server rejects it and kept the value anyway, so
+  that a future server rollback would stay a one-line change. That option was
+  never exercised and its price was paid on every run — and a dry-run plan is
+  the artifact CI checks. The validator's own enum error made it worse by
+  advertising `COORDINATOR` among the values to use, so a user who mistyped
+  the role was handed a fix that fails at apply.
+
+  Validation now refuses the retired role before any request, in any casing,
+  with `agent_role COORDINATOR was retired in v0.1 and the server rejects it;
+  use LEAD` — the message #2191 gave `crewship agent create --role`, one layer
+  over. The enum error for other bad values lists only `LEAD, AGENT`. Third
+  surface of the same retired role, after #2166 (create-agent dialog) and
+  #2189 (`crewship agent create --role`); #2197 covers the crew wizard.
+
+- **Agent avatars never actually got stored, and `/crews` re-tried the failed
+  writes on every load (#2196).** The backfill that hands the server a
+  rendered avatar for an agent that has none has never stored a single one
+  since it shipped. Its `PUT /api/v1/agents/{id}/avatar` carried no
+  `workspace_id`: the route resolves its workspace from the query string, a
+  path segment, or the `X-Workspace-ID` header, and the client had none of the
+  three, so every write was refused with `400 workspace_id is required` before
+  the handler ran — eight of eight agents, on every view of `/crews`, with
+  `avatar_url` still `null` a day after a seed. The workspace id is now
+  threaded from the component into `queueAvatarBackfill`, and a missing one
+  skips the write entirely instead of sending a request that cannot succeed —
+  the rule the read path (`agentAvatarURL`) has always applied. `/onboarding`
+  supplies its own workspace id, because that route never loads the workspace
+  store and its Crewship Guide avatar would otherwise be skipped.
+
+  The same function also refunded its per-page-load budget for any non-403
+  failure, so a permanently failing endpoint consumed no budget and the page
+  re-attempted the full allowance every load, forever. A run of failures that
+  are not permission refusals now stops the backfill for the session, the way
+  a run of 403s already did, and a failed write spends its budget. Avatars
+  still render from their seed throughout; nothing on screen changes when a
+  backfill fails.
+
+- **The create-crew wizard could offer a crew it was then unable to create
+  (#2197).** `POST /api/v1/crew-ai-suggest` asks a model for each agent's
+  `agent_role` and constrained it in the prompt only. `validateSuggestion`
+  checked the crew name, the agent count, the required fields, the slugs and
+  that exactly one agent was `LEAD` — never what the other agents claimed to
+  be. A model answering with a role the platform retired in v0.1, a plausible
+  completion given the word "coordinates" sits in the instruction for the
+  sibling role, produced a suggestion that passed validation, rendered as a
+  lineup preview with that role on a badge, and failed at creation:
+  `POST /api/v1/agents` answers `400 agent_role must be AGENT or LEAD`.
+
+  Suggestions are now validated against the same set the create endpoint
+  accepts. A role outside it fails the suggestion the way a missing field
+  does, so the wizard can no longer show a lineup carrying a role it cannot
+  build. (Roles only — `validateSuggestion` still checks names and slugs for
+  presence rather than length, so a suggestion remains a draft to review.)
+  Casing and surrounding whitespace are normalised rather than refused — the
+  same role written the way a model writes JSON — and an omitted role becomes
+  `AGENT`, the default the create endpoint already applies.
+
+  Three renderers printed whatever token arrived, and no longer do: the
+  wizard's lineup preview, the agent roster and the crew canvas roster all
+  present an unrecognised role as an ordinary agent, which is the one thing
+  the form behind them can deliver. Stored agent rows predating the retirement
+  stop carrying a badge for a role that no longer exists. The crew-template
+  and AI-suggest response types narrowed to `"AGENT" | "LEAD"`, so a third
+  value has to be added deliberately — a test catches that, not the compiler,
+  because each renderer takes the field as a plain string on purpose.
+
+  Fourth surface of the same retired role, after the create-agent dialog copy
+  (#2166), `crewship agent create --role` (#2189) and the standalone `Agent`
+  manifest validator (#2195).
+
+- **`crewship crew suggest --goal "…"` could never succeed on any server
+  (#2201).** The command posted `{"goal": …}` and
+  `POST /api/v1/crew-ai-suggest` decodes `{"description": …}`, so the handler
+  always saw an empty string and answered `400 description must be at least 10
+  characters` — a message naming a field the CLI has no flag for, on a request
+  that never reached a model. It now posts `description`; the flag stays
+  `--goal`, which is what `docs/cli/crew.mdx`, the OpenAPI request schema and
+  the web crew wizard already agreed on.
+
+  A goal outside the endpoint's 10–2000 bytes of UTF-8 is now refused locally,
+  naming `--goal` and exiting `2` — the same code the server's `400` maps to,
+  so moving the check between tiers does not change what a script sees (the
+  #2189 precedent). `--goal is required` moves to that exit code too; it
+  previously exited `1`.
+
+  Both layers now say **bytes of UTF-8** where they used to say "characters".
+  The bound has always been `len(string)`, so the old wording was a promise the
+  check did not keep — harmless at the minimum, where a non-ASCII goal only
+  ever passes more easily, but wrong at the maximum, where a CJK or emoji
+  description is refused at roughly a third of the 2000 the message named. The
+  limits themselves are unchanged; only `POST /api/v1/crew-ai-suggest`'s two
+  `400` message strings and the docs are.
+
+  The bug survived CI because the only test of the payload asserted the CLI's
+  own spelling — `strings.Contains(body, "\"goal\":\"grow the userbase\"")` —
+  against a stub server that answered `200` to any body, so it passed
+  *because* the key was wrong. That assertion now decodes the posted body with
+  `api.CrewAISuggestRequest`, the struct the handler itself decodes into, and
+  a new acceptance test drives the built binary against a real `api.NewRouter`
+  to the endpoint's `422` for a workspace with no Anthropic key — the furthest
+  point reachable without spending tokens, and one step past where the bug
+  died.
+
+- **`go test ./internal/api/...` was red on every dev clone, and green in CI
+  (#2188).** `TestEveryCredentialLoader_SplitsTheEndpointObject` walks the
+  repository from its root and skipped `.git`, `node_modules`, `web`, `vendor`
+  and `testdata` — but not `.claude`, which holds the agent worktrees parallel
+  sessions leave behind as complete copies of the tree. The guard classifies
+  files through `notUpstreamDelivery`, a map keyed by repo-relative path, so a
+  copy at `.claude/worktrees/agent-x/internal/api/credentials.go` matched no
+  key and was reported as a brand-new unclassified credential loader — one
+  bogus finding per classified file per worktree, so the package could not be
+  made green locally. CI has no worktrees and never saw it, so the failure
+  existed only on developer machines, where it reads as a security regression
+  until the `.claude/worktrees/` prefix on every path gives it away.
+
+  The same omission is now closed in the two other repository walks,
+  `internal/hooks/dispatch_site_test.go` and
+  `internal/pipeline/cel_module_path_test.go`. Neither was failing: their
+  assertions are not keyed by path, so a copy that satisfies the rule
+  satisfies it under any prefix. Both were re-walking one whole tree per
+  worktree to answer for one, and would have started failing the day either
+  grew a path-keyed exemption.
+
+  The regression test builds a synthetic tree containing
+  `.claude/worktrees/agent-*/internal/api/credentials.go` and asserts the walk
+  does not return it. Asserting the skip list itself would pass against a walk
+  that listed `.claude` and descended into it anyway.
+
+- **`crewship agent create --role COORDINATOR` warned that it was setting the
+  role, then the server refused it (#2189).** The role was retired in v0.1 and
+  the handler answers `400 agent_role must be AGENT or LEAD`, but the CLI
+  printed *"COORDINATOR role is deprecated; use LEAD instead. Setting role
+  anyway."* and forwarded it — and the function's own comment claimed the value
+  was still accepted for back-compat with v1 templates. So the one audience
+  that path existed for, somebody applying an old template, was told their
+  value would be honoured and then got a server refusal naming neither the
+  template nor the deprecation they had just been warned about. The CLI now
+  refuses it locally with `COORDINATOR was retired in v0.1 and the server
+  rejects it; use --role LEAD`. Every other value still goes to the server,
+  which owns what is valid — this is a removal of one false promise, not a new
+  client-side role validator. Companion to #2166, which removed the same dead
+  promise from the create-agent dialog.
+
+- **A missing field on one response took down the whole dashboard (#2185).**
+  `series_labels` is typed as required on the timeseries response, but the
+  type is a claim about the wire and `fetchOr` validates nothing, so a 200
+  with an unexpected body reached `Object.entries(undefined)` inside a
+  `useMemo` — a render-time throw that unmounts the page rather than the one
+  chart it belongs to. The line above it already tolerated a missing
+  `bucket.series` for the same reason.
+
+- **The run-volume chart never refreshed (#2185).** `useInvalidateDashboard`
+  invalidated two fixed-param timeseries keys that nothing mounts, and never
+  the key the page actually uses — `invalidateQueries` compares the params
+  object by deep equality, so the window-dependent key could not match. The
+  KPIs and Running-now updated from the realtime path while the chart beside
+  them stayed frozen until a remount or a window switch.
+
+- **The attention strip dropped items past the third (#2185).** The badge
+  reported the true count, but the order is fixed, so on a workspace with
+  approvals, failures and capacity holds a credential gap could never render
+  — and neither it nor a capacity hold is reachable through the strip's
+  "Open Inbox" link. The remainder is now named, with its links, rather than
+  only counted.
+
+- **The dashboard reported green over failures it could not see (#2185).**
+  Three states were rendered as one. The attention strip said "All clear ·
+  There is nothing blocking your crews right now" whenever `attentionItems`
+  was empty — including while the inbox was still loading, and permanently
+  when the inbox fetch failed, which for an RBAC-gated workspace is a 403 the
+  hook does not retry. The Runtime capacity signal read a green "Available"
+  when its fetch failed, because `capacity?.enabled === false` is also false
+  for a null response, so a dead admission-control endpoint looked like
+  healthy capacity. And the Services row painted "6/6 running" in success
+  green while two of five crews had never been reached.
+
+  Each now has the third state it needed: unknown is not clear. And the strip
+  says so even when it does have something to show: `capacity` and
+  `credentials` come from their own endpoints, so the list can be non-empty
+  while the inbox — which carries approvals and failed runs — was never read,
+  and a confident count over that is the same defect one layer up.
+
+- **The dashboard rendered another workspace's crews (#2185).**
+  `GET /api/v1/runtime/capacity` is deliberately instance-scoped — the host is
+  a property of the instance — and the attention strip rendered
+  `held[0].detail` verbatim. On an instance with more than one tenant that put
+  one workspace's crew detail on another's dashboard, and counted their held
+  starts in its badge. Holds are now filtered to this workspace's crews.
+
+  The same filter fixes the count: `admission.Hold` is appended per held
+  *start*, so five queued starts on one crew read as "5 crews waiting for
+  capacity". It is deduped per crew now.
+
+- **The dashboard showed money that is not money (#2185, #2193).**
+  The "Actual cost" tile is removed. On a flat-rate subscription the marginal
+  cost of a call is structurally not a number — paymaster's own type says so,
+  forcing `CostUSD` to 0 and confidence to Unknown for `BillingFlatRate` — and
+  the tile rendered a ledger figure with no confidence badge, which the same
+  file explicitly forbids. On the workspace it was built against, 25 routine
+  runs carrying $0.83 of adapter-reported usage produced zero ledger rows,
+  because routine runs on the subscription adapter never reach the metered
+  path; the tile showed $0.00 and, with a budget set, a progress bar that
+  filled far slower than reality. The reasoning is left at the call site so
+  it is not re-added without it. #2193 tracks the four other places the same
+  figure is still printed with a `$`.
+
+- **An approval could outlive the run it belonged to, and approving it did
+  nothing (#2163).** A routine run parked on a `wait` step and then marked
+  `interrupted` left its waitpoint `pending`. The inbox kept offering the
+  decision, the approve endpoint accepted it and returned
+  `{"approved":true,"ok":true}`, the row flipped to `resolved` — and the run
+  stayed interrupted, so the approved action never ran. The operator was told
+  they had approved a production change that did not happen, and the audit
+  trail recorded the approval.
+
+  Not an exotic race. The commonest way in is ordinary: edit a routine while
+  one of its approvals is pending, and the next restart refuses to resume that
+  run because the definition hash no longer matches — which is the drift gate
+  working correctly. Every such refusal stranded an approvable gate.
+
+  `CancelWaitpointsForRun` already existed for exactly this ("used when a
+  parked or blocking run is cancelled or dies") and was wired to the explicit
+  -cancel path only. It now hangs off the status transition itself rather than
+  off its callers: `resume.go` marks runs interrupted from five places and the
+  boot fallback from two more, and an invariant enforced at seven call sites is
+  one the eighth will miss. The cascade fires only when the guarded write
+  actually moved the row, so a run that finished between the resume scan's read
+  and the write keeps its waitpoints.
+
+  Rows that already carry the defect are repaired at boot rather than only
+  stopped from recurring, since every install upgrading into this fix still
+  holds them: `CancelOrphanedWaitpoints` settles any pending waitpoint whose
+  run is terminal or whose run row is gone, and logs a non-zero count. The
+  existing recovery scan already reported these as `stranded_pending` and did
+  nothing about them.
+
+- **The app shell clipped the last 64px of every page that had a wide
+  descendant (#2156).** `SidebarInset` renders `<main>` as a flex item
+  (`w-full flex-1`) with no `min-w-0`, so it kept `min-width: auto` and could
+  not shrink below its content's min-content width. A page wide enough pushed
+  it past the 64px icon rail: the inset measured a full viewport wide while
+  starting at x=64, and everything past the right edge went off-screen.
+
+  Nothing on the path scrolls horizontally, so there was no scrollbar to
+  reach the overhang — it was clipped, not scrolled. On `/activity?run=<id>`
+  that cut the run stat strip's `COMPOSED` column, the right edge of the
+  steps rail, and the account menu in the top bar, which read "DU D". At a
+  1600px viewport the inset measured 1600px starting at x=64 (overflowing to
+  1664) where `/inbox` correctly measured 1536px; both are 1536px now.
+
+  The regression test is geometric rather than a class assertion, because the
+  markup was always correct and only the layout was wrong: jsdom sees nothing,
+  and an overflow check on `<html>` finds nothing either, since there is no
+  overflow — only clipping.
+
+- **The inbox detail pane's jump control named a destination and went
+  nowhere (#2157).** `jumpFor` returned `{ label, icon }` and no href, and
+  the pane rendered it as a plain `<Button>` with no `onClick`: it worked out
+  which destination to name, named it, and did nothing when clicked. All
+  three variants were dead — `Open chat`, `Open <identifier>`, `Open run` —
+  and `Open run` is the only control on the pane for reaching the run an
+  approval describes, so a reviewer reading a waitpoint had no way through to
+  its activity.
+
+  It survived because the test asserted `jumpFor(...)?.label` and nothing
+  else: the derivation was right the whole time and the integration was
+  missing, so a test of the return value went green against it. The new spec
+  asserts the rendered DOM — an `<a>` carrying an href.
+
+  `chat_url` is attacker-influenced payload, and the guard against an
+  off-origin jump lived in `kind-actions` only. `jumpFor` had none, so it
+  would return `Open chat` for an absolute URL — harmless while the button
+  was dead, and not harmless the moment an href was added. The guard is now
+  one exported function both call sites share, since two copies of a security
+  check drift and the copy without it was the one deciding whether a
+  destination got named at all. Identifiers are URL-encoded into the path and
+  the query.
+
+- **A long approval message pushed the decision off the screen (#2160).**
+  An inbox item's `body_md` had no height limit of any kind — for a waitpoint
+  it is the whole approval prompt, which for a model-drafted change plan is
+  several hundred words of unbroken prose. The card grew to fit it and pushed
+  the run ladder, the identifiers and the footer below the fold, so the reader
+  who most needed the buttons was the one who had to scroll furthest from
+  them. Long bodies now clamp with an explicit "show the whole message"; the
+  full text stays in the DOM so find-in-page and copy still reach it.
+
+- **A field added to a routine step body could ship without its schema
+  (#2160).** `TestRoutineSchema_AllFieldsCovered` reflected over `DSL` and
+  `Step` only, never over the step bodies — which is where fields are
+  actually added. A Go field with no matching property in
+  `schemas/routine.v1.json` passed CI green while `additionalProperties:
+  false` silently rejected every routine that used it for anyone validating
+  against the published schema. The guard now walks every step body,
+  derived from `Step`'s own pointer fields so a new body type is covered the
+  day it is declared. It immediately caught one live instance:
+  `NotifyStep.Category` (shipped with the notification taxonomy) had no
+  schema property, which is fixed here.
+- **A fresh agent with no credential looked identical to a healthy one
+  (#2169).** The agent overview's Credentials cell warned only when a
+  credential's status was not `ACTIVE`, which never fired for the
+  zero-credential case — an agent with no explicit grant and nothing
+  inherited from its crew showed a quiet empty list, and its first run
+  failed with no warning anywhere on the way there. The cell now flags a
+  genuinely empty credential set with an explicit "No credential
+  assigned" row; an agent that legitimately inherits a crew-scoped
+  credential (`grant_source: "crew"`) still resolves to a non-empty,
+  `ACTIVE` array and stays quiet.
+
+- **The create-agent dialog no longer promises a "Coordinator" role it
+  cannot deliver (#2166).** The empty-workspace banner, the crew-required
+  validation hint, and the crew field's hint text all told the user they
+  could set an agent as a workspace-wide "Coordinator" needing no crew — a
+  role `CreateSurfaceChoice`'s Role picker has never offered; it is AGENT or
+  LEAD, full stop. A user in a brand-new workspace, the exact moment the
+  empty-crews banner fires, followed the product's own instructions into a
+  dead end. All three strings now describe what the form actually does.
+  Whether to let the UI create a crewless AGENT (the API already allows one
+  for non-LEAD roles, and `crewship agent create --crew` is optional) is a
+  separate capability decision, filed as #2170.
+
+- **`claim-issue.sh` produced permanent phantom locks in the majority of
+  cases — measured at 19 of 35 live claims, with 6 issues double-claimed
+  (#2107).** Two compounding bugs. First, the RELEASE parser cancelled a
+  CLAIM only when both clone and branch matched it; CONTRIBUTING says to
+  claim an issue *before* the first commit, i.e. before the feature branch
+  exists, so the ordinary claim → work → release sequence posts the RELEASE
+  from a different branch than the CLAIM and the cancellation never fired.
+  Second, `detect_branch` recorded a `git worktree`'s auto-minted
+  `worktree-agent-<hash>` branch verbatim, which guaranteed that mismatch for
+  every well-behaved worktree session and told a reader nothing besides. A
+  lock that stays stuck more than half the time trains sessions to reach for
+  `--force`, and forcing a live claim looks identical to forcing a dead one.
+  Cancellation now matches on clone identity alone — a release from clone X
+  ends X's open claims regardless of branch, and a release naming neither
+  clone nor branch still ends everything, unchanged. `detect_branch` now
+  refuses a `worktree-agent-*` value, preferring the upstream/tracking
+  branch when one is already configured and otherwise falling back to the
+  worktree path, which does not change between CLAIM and RELEASE.
+
+- **The crew-scoped file download served the exact bytes the agent door had
+  just been taught to refuse (#2142).** #2069 added a check to
+  `GET /agents/{agentId}/files/download` denying the six generated per-agent
+  files that hold resolved MCP credentials, but that check had exactly one
+  call site. `GET /crews/{crewId}/files/download` reads the identical
+  crewshipd storage — the same `<crewID>/<agentSlug>/.mcp.json` key resolves
+  on either door — and forwarded it unguarded, so the same 0600 credential
+  bytes any workspace role with read access was refused on one URL were
+  served whole on the other. The check now also runs in crewshipd's single
+  download funnel, which both HTTP doors proxy through, so a future caller
+  that reaches it inherits the denial rather than needing to remember to add
+  it again.
+
+- **Agent file downloads no longer expose generated MCP credentials (#2069,
+  #2140).** Crewship writes resolved HTTP headers and process environment
+  values into each CLI's native MCP config with mode `0600`. The Files API's
+  new container-side read fallback could nevertheless read those bytes as the
+  agent UID and return them to any workspace role with read access. Downloads
+  now reject the six exact generated config paths before IPC, while ordinary
+  dotfiles and user-authored skills below `.codex/`, `.gemini/`, and similar
+  directories remain available.
+- **The agent's raw stdout+stderr capture reached the audit journal without
+  passing through the credential scrubber (#2133).** `streamOutput`'s
+  end-of-stream `exec.output_chunk` emit wrote `captureBuf` — the process's
+  raw combined output — straight into the journal payload. `wrapScrubHandler`'s
+  stream scrubber only ever sees parsed `AgentEvent`s; `captureBuf` is a
+  second, separate raw-byte capture read directly off the process's
+  stdout/stderr, so it bypassed the scrubber entirely. A credential an agent
+  printed — its own, or one echoed back by a poisoned tool result — landed in
+  a hash-chained, append-only journal row that can never be redacted after the
+  fact. The capture now runs through the same `internal/scrubber` the rest of
+  the outbound path uses, seeded with the run's own loaded credential values,
+  the same way the adapter-exec-error path already scrubs its copy of this
+  same raw output. `total_bytes` and `truncated` still describe the raw
+  stream and are computed before scrubbing, since redaction changes the
+  string's length.
+- **`pre_tool_call` was a hook event you could register that would never
+  fire.** `crewship hooks create --event pre_tool_call` (and the matching
+  `POST /api/v1/hooks`) returned 201 and listed the hook as enabled and
+  healthy, but nothing in the platform ever called `hooks.Dispatch` with
+  that event — Crewship drives agent work by parsing the stream a driven
+  CLI (Claude Code, Cursor, ...) emits, so by the time a tool call is
+  observable the tool has already run; there is no "before the tool runs"
+  interception point to hook. (`post_tool_call` fires after the tool runs
+  and, since the dispatch-gap fix below landed in this same release, now
+  reaches user-registered hooks — see the Hooks guide's coverage table.)
+  `pre_tool_call` is no longer a valid `--event` / `event` — the CLI and
+  the API now reject it the same way they reject any other unknown event
+  name, echoing the same list of legal ones. The `hooks.EventPreToolCall`
+  Go constant stays defined so a `hooks_config` row created before this
+  change still lists, toggles, and can be edited via `PATCH` for any
+  field other than `event` — the store only re-validates `event` when a
+  write actually changes it, so a legacy row isn't frozen out of every
+  edit just because its event predates this change. (That check reads the
+  row's current event first, so the `UPDATE` it guards now also matches on
+  that event — a concurrent write that moves a legacy row onto a valid
+  event can no longer be undone by a stale update putting the retired one
+  back.) It still never dispatches.
+
+  ⚠️ **Behaviour change:** a script or manifest that registers a
+  `pre_tool_call` hook now gets a 400 instead of a silently-dead 201.
+
+- **Ten more hook events registered cleanly and never fired — the same
+  defect class `pre_tool_call` was, minus the one that had no possible
+  fix.** `pre_task_delegation`, `post_task_delegation`, `post_tool_call`,
+  `pre_llm_call`, `post_llm_call`, `pre_memory_write`, `post_memory_write`,
+  `pre_peer_conversation`, `post_peer_conversation`, and
+  `on_budget_exceeded` were all declared in `hooks.AllEvents`, accepted by
+  `crewship hooks create` / `POST /api/v1/hooks`, and reached by zero
+  `hooks.Dispatch` calls anywhere in the tree — a registered hook listed,
+  toggled, and looked healthy while never once running. Unlike
+  `pre_tool_call`, a real dispatch point existed for every one of these
+  ten; each is now wired to it:
+
+  - `pre_task_delegation` / `post_task_delegation` — `AssignmentHandler.runAssignment`, the one function every delegation door (sidecar `/assign`, its retry pump, the mission engine, and `@mention`) converges on.
+  - `post_tool_call` — `postToolCallObserver.Observe`, decoupled from the built-in behavior monitor's governance/sampling gate so a user's own hook fires on every observed tool call regardless of that monitor's settings.
+  - `pre_llm_call` / `post_llm_call` — a new outermost layer in `llm.Middleware`'s caller chain, wrapping every `Complete` and `Stream` call.
+  - `pre_memory_write` / `post_memory_write` — `Consolidator.Run`, around the automated `learned-*.md` write the background consolidator makes with no human in the loop (an agent's own `memory.write` tool call runs inside the sidecar container, which has no database connection to dispatch from, so that path is not covered — see the [Hooks guide](/guides/hooks#coverage-status)).
+  - `pre_peer_conversation` / `post_peer_conversation` — `QueryHandler.Create` / `finishQuery`, the sidecar's `/query` peer-question path.
+  - `on_budget_exceeded` — `paymaster.Enforce`, alongside the `budget.exceeded` journal entry it already wrote on a hard/tiered budget breach.
+
+  `internal/hooks/dispatch_site_test.go`'s `TestEveryOfferedEventHasADispatchSite`
+  — added by the `pre_tool_call` fix as a source-scan invariant, but left
+  logging rather than failing on these ten known gaps — now fails CI if
+  any offered event ever loses its dispatch site again.
+
+  ⚠️ **Behaviour change:** a `Blocking: true` hook registered against any
+  of these ten events previously had no effect no matter what its handler
+  returned. It can now actually refuse the operation it's attached to
+  (`pre_task_delegation` refuses the delegation, `pre_llm_call` refuses
+  the LLM call, `pre_peer_conversation` refuses the peer question,
+  `pre_memory_write` refuses the consolidator's write) — a workspace with
+  such a hook already registered will see it start enforcing on upgrade.
+
+- **Newly wired observation hooks could delay operations, report zero LLM
+  cost, and observe stale peer-query state.** `post_*` and `on_*` events now
+  always dispatch asynchronously; new or edited observation hooks reject
+  `blocking: true`, while legacy rows with that flag are safely treated as
+  non-blocking. The paymaster returns its estimated cost to the LLM hook
+  layer (not only to the ledger), HTTP and shell handlers receive the LLM
+  provider/model/cost fields, and `post_peer_conversation` fires only after
+  the terminal query state is committed.
+
+  Getting the cost to that hook layer meant `paymaster.recordFromResponse`
+  now returns the enriched `CallResponse` rather than computing its numbers
+  into locals — so the cost/confidence/timestamp the ledger records are the
+  same values every layer *above* paymaster sees. Two visible consequences
+  beyond hooks, neither a ledger change (`Record` already forced the
+  flat-rate invariants on disk): the OpenTelemetry LLM span's `cost_usd`
+  attribute now carries the backfilled rate-card estimate instead of the
+  provider's raw — usually zero — number, so spans and the ledger finally
+  agree; and `Confidence` comes back populated (`precise`/`estimate`/
+  `unknown`) where it used to be empty. Dashboards that charted span
+  `cost_usd` will show non-zero where they showed nothing.
+
+- **Two of the new gates called a broken hook a policy refusal.** `Dispatch`
+  distinguishes a hook deciding *no* (`*hooks.BlockedError`) from the hook
+  registry being unreadable or a handler being broken (`*hooks.DispatchError`)
+  — #2138 introduced that split precisely so gate call sites could report the
+  two differently. The new `pre_task_delegation` and `pre_peer_conversation`
+  gates collapsed them: a subagent hook with no handler installed, or a
+  webhook whose lookup failed, marked the assignment `FAILED` with
+  "pre_task_delegation hook blocked", and answered a peer query with `403`
+  plus the raw error (which wraps the underlying DB error) in the response
+  body — sending the operator hunting for a policy that does not exist, and
+  telling the caller it was refused when nothing refused it. Both still fail
+  closed, because a gate that cannot be evaluated is not a gate that passed;
+  they now say which happened, and the peer-query path answers `500` with a
+  generic body rather than `403` with the cause.
+
+  The check is also *ordered*, which the first pass of this fix got wrong.
+  `Dispatch` returns `errors.Join(dispatchErrs..., blocked)` when one blocking
+  hook fails to run and a **later** one blocks, so the joined error satisfies
+  `errors.As` for both types. Asking about `BlockedError` first reported a
+  tidy policy refusal and silently discarded the fact that another hook never
+  executed at all — the half an operator actually has to go fix. `DispatchError`
+  is now checked first at both gates.
+
+- **`post_task_delegation` announced a delegation the database did not yet
+  agree had started.** The dispatch sat immediately before `UPDATE assignments
+  SET status='RUNNING'`, so a handler that read the row back could find it
+  still `PENDING` — for an event whose entire meaning is "this delegation
+  began". It now fires after the transition, the same rule `finishQuery`
+  already follows for `post_peer_conversation`, and on `context.Background()`
+  like the other `post_*` sites so a cancelled caller cannot drop the
+  observation during the registry lookup.
+
+- **A forked mission could never run a task.** `Fork` wrote the mission, its
+  tasks and its checkpoint, but not the synthetic `chats` row that
+  `assignments.chat_id NOT NULL REFERENCES chats(id)` requires — the row the
+  normal mission-create path stamps in the same transaction. The fork itself
+  reported success; the failure surfaced later, as a `FOREIGN KEY constraint
+  failed` the first time the orchestrator tried to dispatch one of the copied
+  tasks. It went unnoticed for the feature's whole life because the package's
+  tests built their own fixture schema with no `chats` table at all, so the
+  constraint could not fire. Those tests now run against the real migration
+  chain, which also surfaced a second case seeding an assignment against a
+  chat that did not exist.
+- **Erasing an operator model reported success while leaving a readable copy
+  behind (#2131).** The user model is stored per crew, at
+  `crews/{crewID}/shared/.memory/users/{slug}.md`, but its index row is keyed
+  `UNIQUE(workspace_id, user_slug)` with `crew_id` merely informational — and
+  the consolidation sweep recomputes that `crew_id` as the operator's
+  *most-active* crew. So a crew change moved the row's pointer forward and
+  wrote a fresh file, without ever removing the one it left behind. All three
+  erasure triggers — the self-service `DELETE /api/v1/users/me/user-model`
+  (`crewship privacy user-model delete`), the admin GDPR subject-access
+  cascade, and the daily sweep's own opt-out purge (`consolidate.SyncUserModel`)
+  — reconstructed a single expected path from a current `crew_id`, so each
+  reached only the newest copy and reported deletion while every prior crew's
+  copy stayed on disk and readable by that crew's agents. Erasure now
+  enumerates the crew directories that actually exist and removes the slug's
+  file from each, rather than trusting one row's idea of where the file
+  should be — including the opt-out path, which the first pass of this fix
+  had not yet reached.
+
+  A second defect in the same fix: the two API surfaces widened the delete
+  from one directory to N but still swallowed a per-directory failure into a
+  log line, deleting the index row unconditionally either way — so a single
+  crew directory that could not be cleared (permissions, a stray non-empty
+  path) still came back `200` (self-service) or `202` full-success (admin
+  cascade), the identical "erasure reports success while a copy survives"
+  bug one level up. Both now surface a real partial failure — `500` from the
+  self-service delete, `207 Multi-Status` from the admin cascade — and leave
+  the index row in place when a directory could not be cleared, rather than
+  deleting it and making the survivor unfindable by the next retry (this
+  code is reached by looking the row up in the first place).
+
+  Not changed: an operator moving to a new crew still starts from an empty
+  model there. Carrying content across would cross the same per-crew boundary
+  the erasure fix deliberately does not treat as one address space, and that
+  is an isolation decision to make explicitly, not a side effect of a
+  deletion fix.
+
+  Known remaining gap, not fixed here: each crew's sidecar keeps its own FTS5
+  search index (`index.sqlite`) alongside `.memory/`, rebuilt from whatever is
+  on disk at container startup and every 60 seconds while the container runs.
+  The host-side erasure above never opens that file. A crew whose container
+  is running clears itself on its next tick; a **dormant** crew — typically
+  exactly the one the operator has since left — keeps the erased content's
+  search chunks until its container is next started. See
+  `docs/security/gdpr.mdx` for the proposed fix.
+
+- **Backups were silently short, and `--replace` deleted through the same
+  wrong filter (#2008).** `DiscoverScopedTables` recorded the *shortest*
+  reverse-foreign-key chain from each table to `workspaces` and built a `WHERE`
+  from it, without ever asking whether the column it landed on was nullable. A
+  filter on a nullable column omits every row where that column is NULL. The
+  bundle is written, `crewship backup verify` passes — it only checks the
+  payload's SHA-256 against the sealed bytes — and the rows are simply absent
+  at restore.
+
+  Seven tables lost rows that way. `mission_tasks` through
+  `assignment_id` lost **every task nobody had claimed**; `crew_mcp_servers`
+  through `workspace_mcp_server_id` lost **every server a crew configured for
+  itself**; `page_versions` through `author_agent_id` lost **every version a
+  human saved**; `agent_credentials` and `agent_mcp_bindings` through
+  `credential_id` lost every binding with no credential; `page_panel_data` and
+  `page_panel_alerts` lost every panel not fed by a routine and every lapse on
+  a panel with no `on_failure`.
+
+  It was not even stable. `reverseFK` was built by ranging over a Go map, so
+  two equidistant parents raced to claim a child and **the same binary against
+  the same schema produced different filters on consecutive runs** — one run
+  lost `mission_tasks`, the next lost `crew_mcp_servers`. And
+  `discoverScopedTablesTx` in `replace.go` was a verbatim copy of the same
+  walk, which is the one deciding what a `--replace` restore **deletes**.
+
+  The walk now minimises `(nullable hops, total hops)` over the whole path,
+  relaxes to a fixed point rather than doing a shortest-path sweep, and breaks
+  every remaining tie deterministically. The `replace.go` fork is deleted.
+
+  **Bundles written before this are still short and nothing detects it** —
+  `Verify` compares a checksum and the manifest records no per-table row
+  counts. That gap is #2009, and it is called out as a `<Warning>` in
+  `docs/guides/backup.mdx`.
+
+  ⚠️ **Upgrade note.** Migration
+  `20260820074400_issue_counters_crew_not_null.sql` rebuilds `issue_counters`
+  to make `crew_id` genuinely `NOT NULL`. There is no `DELETE` statement, but
+  the copy is filtered and the original is dropped, so two row classes are
+  **discarded and not recoverable in place**: rows with `crew_id IS NULL`
+  (which name no crew, hence no workspace and no prefix, and which no code
+  path reads) and rows whose `crew_id` names a crew that no longer exists
+  (FK orphans that would otherwise abort boot with SQLite error 787). Every
+  counter naming a live crew is carried across with `next_number` intact. No
+  action is required before upgrading beyond the ordinary one — keep a copy of
+  the database file.
+
+- **The timeline's "Restore" restored nothing and said it had (#2070).**
+  `POST /api/v1/…/checkpoints/{id}/restore` is non-destructive by design and
+  says so in its own doc comment: no rows are mutated, no containers are torn
+  down, no memory is rewound. It computes a **preview** and journals it as one.
+  The dropdown item said `Restore` and, on any `res.ok`, raised
+  `toast.success("Mission restored to checkpoint")`.
+
+  What it threw away is the part that mattered. The response carries
+  `warn_divergence` — the journal entries strictly newer than the checkpoint
+  cursor, which is precisely the work a real rewind would have to abandon —
+  and the handler discarded the body unread. The item is now labelled
+  **Preview restore**, the body is parsed, and the result says
+  "Restore preview — nothing has been rewound", naming how many later events a
+  restore would abandon and that rewinding is not implemented yet.
+
+- **`pins.md` and `learned-*.md` could be read empty (#1994, #2021).** All
+  three writers opened with `O_CREATE|O_APPEND` and then wrote, which leaves
+  the file on disk at **zero bytes** between two syscalls. The flock above them
+  guards `<name>.lock`, so it serialises writers and does nothing at all for
+  the three readers that take no lock: the memory audit watcher, the
+  proposal-diff endpoint, and **agents reading their own learned rules**.
+
+  A reader landing in that window got an empty file instead of the previous
+  good contents — an operator's entire pinned set momentarily gone from the
+  file the agent reads. It is not a rare race: reproduced at 101/300 and
+  100/300 runs for the two consolidator writers on the six-hourly tick, and
+  55/300 for the approve path. It also produced a CI failure that looked like
+  a data race and was not, because `os.ReadFile` of an empty file returns a
+  non-nil zero-length slice and the poll loop accepted it.
+
+  All three now build the file in memory and go through
+  `memory.WriteFileDurable` (tempfile → fsync → atomic rename → fsync parent).
+  Append-only semantics are preserved verbatim, so hand annotations in
+  `pins.md` survive, and `appendRules` pays nothing for it — it already re-read
+  the whole file after every append to hand back the audit blob, and that read
+  simply moved ahead of the write.
+
+  Two corrections rode along. The exists-check read *every* `stat` failure as
+  "absent", which under a whole-file replace would write the first-run header
+  over content it never read; only `fs.ErrNotExist` qualifies now. And the
+  canonical path is refused if it is a symlink — `os.ReadFile` follows one, and
+  its target's bytes would have become the prefix of what was written back into
+  the crew's learned rules.
+
+  The guard that should have caught this class **had gone blind**:
+  `crash_safe_writes_invariant_test.go` matched `os.OpenFile(` while these
+  packages open through `*os.Root` handles, so every root-anchored write in
+  them was unscanned and two allowlist entries had been matching nothing.
+  Widened to `\.OpenFile\(`.
+
+  Named side effect: the rename resets the file mode to `0o644`, so an
+  operator `chmod` on `pins.md` no longer survives a consolidation tick.
+
+- **Two Keeper aux slots were settable, validated, rendered — and read by
+  nothing (#1986).** The **`curator`** slot was described everywhere, including
+  in the console, as governing skill review *and memory consolidation*. The
+  consolidator never read it: the summariser was built once at boot straight
+  from `KEEPER_OLLAMA_URL` + `KEEPER_MODEL`, bypassing the slot, the resolver
+  and the override store. So an instance with an `ANTHROPIC_API_KEY` and no
+  Ollama logged "memory consolidation disabled" at boot while the Judge models
+  card reported `curator` as configured and healthy — consolidation silently
+  did not run, and mid-conversation compaction fell back to plain truncation on
+  the same unadvertised wiring. Consolidation now resolves the slot per run,
+  through the standard middleware stack so it still appears in the cost ledger,
+  with the boot-time `KEEPER_*` client kept as a fallback so a local-judge
+  install does not *lose* consolidation.
+
+  The **`run_summary`** slot's timeout bounded nothing. `Router.RunVerdict()`
+  returned provider and model and discarded the budget, and both production
+  call sites hand the verdict a background context — so the operator's number
+  sat on the card beside four rows where the identical control worked, while a
+  hung provider could keep a verdict call outstanding indefinitely. The
+  deadline is now applied in the one place both call sites share, and covers
+  the model call only: a verdict answered at 19.9 s of a 20 s budget is not
+  generated, billed and then dropped on the floor.
+
+  ⚠️ **Behaviour change:** `crewship keeper aux set run_summary --timeout 45s`
+  and `keeper aux set curator --provider …` now do something. The shipped
+  `run_summary` default moves 15 s → **20 s**, because the first real deadline
+  on a call must not be tighter than what it had been running under — it
+  matters most on a fully local judge. Consolidation itself is a documented
+  exception and stays on the provider's client timeout: it is batch work over
+  hundreds of journal entries, and a 20 s cut-off would kill every local-model
+  consolidation mid-flight.
+
+- **One unrenderable chat message took down the whole page and dropped the live
+  session (#2024).** There was no error boundary anywhere in the chat tree, so
+  a throw while rendering a single turn propagated to the route segment
+  boundary, which replaces the entire page with "Something went wrong". In
+  practice that meant the chat client unmounted, every turn's state was
+  discarded, a half-typed composer draft was lost, and the **WebSocket of the
+  very session that had just degraded was dropped**. The shipped trigger was
+  `TypeError: value.trim is not a function` — CLI init metadata is forwarded
+  verbatim, so a key holding a string in one CLI release holds an object in the
+  next, and a type assertion catches nothing.
+
+  Now only that one message is replaced, inline in the transcript, with a card
+  saying the rest of the conversation is unaffected and the session is still
+  live. The boundary's reset keys include a **content** digest, not just
+  `turn.id`: a streaming turn mutates in place under a constant id, so keying
+  on identity alone would have wedged that message on the error card until a
+  full page reload, even after the following tokens rendered perfectly. Keyed
+  on content, a garbled message heals itself as soon as the next token arrives.
+
+- **A page's `public` flag was silently cleared by reading it (#2054).** The
+  panel wire shape was built from a record with no `public` column, so the flag
+  travelled inward only. `crewship page export | crewship apply`, a hand-edited
+  `page get -f json`, or the editor's own PATCH therefore **unpublished every
+  public panel**. The published link kept resolving and rendered an empty page,
+  and the next `crewship page publish` refused the page for having no public
+  panels — pointing the operator at entirely the wrong thing.
+
+  Five more from the same PR. A `metric.v1` sparkline drew straight through
+  its gaps: the schema says a `null` marks a producer-known gap, and the
+  renderer filtered nulls out of the array entirely, which also slid every
+  later point leftwards and compressed the window's own time axis. A wake gate
+  told the woken agent to run `crewship page set` — a binary that does not
+  exist in the container it wakes in — and now names the sidecar `PUT` with
+  `curl`. `crewship page set` threw away the 429's body, printing a bare rate
+  limit instead of the reason, the scope ("this panel" and "this workspace"
+  have different fixes) and the retry delay. **`-f quiet` was broken on all six
+  page listings** — each hand-rolled a `tabwriter` table, which ignores the
+  format, so `crewship page links x -f quiet | xargs` was fed column headers.
+  And `crewship page rollback --to 0` answered "`--to <seq>` is required",
+  because 0 is the flag's zero value; it now says what is actually wrong —
+  versions are numbered from 1.
+
+- **`OPENAI_COMPAT` was the one LLM provider that could not be tested, and it
+  reported success (#2057).** Because such a credential is stored as
+  `type = API_KEY`, it fell past every provider arm in `probeProviderInner` to
+  a default that failed an `ENDPOINT_URL` type check and returned
+  `{Valid: true, Error: "No validation available for this provider"}` **without
+  dialling anything**. The operator pasted a base URL, pressed **Test**, got a
+  green tick, and found out the endpoint was unreachable when an agent run
+  failed. It is the provider where this matters most: the endpoint is the one
+  part of it Crewship does not control.
+
+  ⚠️ **Behaviour change:** `crewship credential test-stored <name>` and
+  `POST /api/v1/credentials/{id}/test` now return a real failure for an
+  unreachable host, a broken TLS chain, a wrong path prefix, or an endpoint
+  serving no model list. The probe deliberately tests **reachability, not
+  authentication** — it sends no `Authorization`, no stored key and no custom
+  headers, because whoever holds `update` on a credential can repoint its
+  `baseURL`, and sending the secret would turn Test into an exfiltration
+  primitive. The unauthenticated body path (`POST /credentials/test`, no
+  workspace and no role floor) still does not dial at all and says so.
+
+- **The Add-MCP wizard's "Test" tested nothing and could not fail (#2078).**
+  Its handler was a 400 ms `setTimeout` that set `ok: true` — no socket, no
+  read of any field it claimed to check, and no failure path at any input. A
+  typo'd endpoint, a command that does not exist, a host that is down: green
+  tick every time.
+
+  It is removed rather than wired, because it cannot be wired from where it
+  stands: both real probes begin by selecting the transport, endpoint and
+  command **out of the database**, and the wizard tests before it creates.
+  There is no draft-test route for MCP as there is for credentials and
+  notification channels. In its place the step says connectivity is checked
+  after the server exists, and names the two surfaces that do it — the
+  **Test connection** button on the server's row, and
+  `crewship integration crew test <crew-slug> <integration-id>`.
+
+- **A first integration grant silently revoked it from every other agent
+  (#2070).** A workspace integration with **zero** agent bindings resolved for
+  every agent; the moment any agent got one it flipped to opt-in and everyone
+  else lost it — with no warning, no audit line and nothing on the
+  integration's own page. It had been reachable only through
+  `crewship integration bind`; the new create-agent form put a switch on it.
+  #2070 could not reach the resolver, so it warned beside the switch, by name,
+  which integrations were about to flip — warning rather than preventing,
+  because making a first grant is legitimate.
+
+  **Superseded inside this same unreleased window by #2079, below.** The
+  audience is now a stored column instead of a row count, so a grant made on
+  that form costs no other agent anything, and #2079 deleted the warning
+  #2070 added. Nothing shipping here asks an operator to hesitate before a
+  first grant; read the two entries as one story, not two.
+
+- **An MCP server's audience is a stored column, not a binding count (#2079,
+  closes #2072).** `ResolveAgentIntegrations` decided who could use a
+  workspace MCP server by counting rows in `agent_mcp_bindings`. "Available to
+  every agent" was never a stored state — it was the *absence* of bindings, so
+  it evaporated the moment that absence ended: one
+  `POST /api/v1/agents/{id}/integrations` anywhere in the workspace flipped the
+  server to opt-in and revoked it from every agent relying on the default.
+
+  `default_access` (`all` or `bound-only`) on `workspace_mcp_servers` and
+  `crew_mcp_servers` replaces the inference, and **both** resolvers read it:
+  `ResolveAgentIntegrations` (the console and `crewship integration resolve`)
+  and `resolveAgentMCPServers` in `agent_config.go`, which is what the
+  container actually gets. Fixing only the first would have shown an operator
+  an access list the agent does not have — and the runtime copy was the worse
+  of the two, because its binding count was not workspace-scoped at all, so a
+  binding in a *different* workspace could revoke a server here. Both fail
+  closed: only the exact string `all` opens a server to unbound agents. A
+  binding is now purely additive — a credential, a config override, an
+  opt-out — and cannot change what any other agent resolves.
+
+  The audience is now sayable and visible:
+  `crewship integration access <id-or-name> <all|bound-only>`, `--access` on
+  `integration add` / `integration crew create` / `integration crew update`,
+  `default_access` on the API, an `ACCESS` column on both `integration list`
+  tables, and the integration's detail sheet naming it outright ("Available
+  to: Every agent in the workspace" / "Bound agents only").
+
+  Same pass: `mcp_tool_bindings` had no referential integrity, so deleting an
+  integration stranded its per-tool toggles forever. Its `mcp_server_id` is
+  polymorphic across two ID spaces, so a literal foreign key is not
+  expressible; three triggers stand in for one — two `BEFORE DELETE` cascades
+  and a `BEFORE INSERT` that rejects a toggle naming a server that does not
+  exist — and the rows already orphaned are swept.
+
+  ⚠️ **Behaviour change: the upgrade moves nobody's access, but the old side
+  effect is gone for good.** Migration `20260826190607_mcp_default_access`
+  defaults the column to `all` and then pins every server that already carries
+  an agent binding to `bound-only`, freezing each server at the audience it
+  effectively had — nothing is granted and nothing is revoked at upgrade time.
+  After that, only an explicit change alters who can use a server. Anything
+  that relied on binding one agent to keep a server private must now say so:
+  `crewship integration access <id-or-name> bound-only`.
+
+  ⚠️ **Behaviour change: a replace-mode restore now clears that workspace's
+  per-tool toggles.** `mcp_tool_bindings` is deliberately excluded from
+  backups, and `crewship backup restore --replace` deletes and re-inserts the
+  workspace's server rows; the new cascade trigger takes the toggles with them,
+  where before they survived by being orphaned and were then silently
+  re-adopted by the re-inserted row. Toggles default to enabled, so a cleared
+  set means every tool is on — re-disable the ones you want off with
+  `crewship integration tools disable`.
+
+- **The mission fork button called a route that does not exist (#2056).** It
+  posted to `POST /api/v1/missions/{missionId}/fork`; the route is
+  `POST /api/v1/checkpoints/{checkpointId}/fork`. Every fork 404'd, and the
+  404 was rendered as the friendly *"Not yet wired to backend"* — so a broken
+  call read as an unbuilt feature. It now forks and navigates to the new
+  mission, and a 2xx that carries no new mission id is surfaced as an error
+  rather than as success.
+
+  The checkpoint id it passed was wrong too: it fell back to the journal row
+  id, which could only ever 404. The id is now read from where the journal
+  actually writes it, and Restore is **disabled** when there is none rather
+  than firing a request that cannot succeed.
+
+  Also from #2056: chat reactions moved off `localStorage` onto three real
+  endpoints, so a reaction survives a different browser (the legacy
+  `crewship-reactions` key is dropped on load and **not** migrated); the crew
+  slug field enforces its rule as you type instead of 400-ing three steps
+  later; the crew wizard's "Never" auto-stop actually means never, rather than
+  omitting the field and inheriting the 4-hour default; New project stopped
+  sending a summary and labels that the endpoint binds nowhere and silently
+  discarded; and popovers inside dialogs scroll instead of clipping.
+
+- **New routine had no Cancel on two of its four screens (#2076).** The
+  `entry` and `fork` modes — one of which is the screen the dialog opens on —
+  rendered an empty footer strip where every other create surface in the
+  product puts Cancel. Esc, the header × and an overlay click always worked, so
+  it was never a dead end; what was missing was the affordance, in the one
+  place the shell's own contract promises it will always be. The hint reads
+  `Esc to cancel` rather than the default `⌘↵ to confirm · Esc to cancel`,
+  because ⌘↵ genuinely does nothing on a screen whose action is a row.
+
+- **The crew and agent canvas tab strips said "tab" without meaning it
+  (#2026).** They were plain buttons carrying `aria-selected`, which is not
+  allowed on a button's implicit role — so the one fact the markup tried to
+  convey, *which section you are on*, was dropped by the screen reader and
+  raised an axe `aria-allowed-attr` violation. There was no tablist, no
+  labelled strip and no tabpanel. All three now exist. Separately, the admin
+  console's content pane was a scrollable region with no focusable child, so on
+  the default Overview section a **keyboard-only admin could not scroll it at
+  all** and anything below the fold was unreachable; and the chat crew link was
+  distinguished from surrounding text by colour alone, at a token below the
+  4.5:1 contrast floor.
+
+  **Known gap:** the canvas tab strips still have no arrow-key roving focus —
+  each tab is its own Tab stop. CodeRabbit raised exactly this on the PR and it
+  merged unimplemented. Its sibling #2025 shipped that pattern for the Pages
+  strip, so the two now differ.
+
+- **Every Pages tab was announced without the panel it reveals (#2025).** The
+  buttons carried `role="tab"` and the groups carried `role="tabpanel"`, and
+  **nothing linked them** — so a screen-reader user activating a tab heard
+  "tab, selected" and then had to hunt the document for whatever had appeared,
+  which is the entire thing the tabs pattern exists to prevent. The two halves
+  are now joined by id, and the strip gained full keyboard orchestration:
+  arrow keys cycle, Home/End jump, and roving `tabIndex` makes the whole group
+  one Tab stop instead of one per tab. There is no axe rule for a tab missing
+  `aria-controls`, which is why this went unnoticed; the guard is explicit
+  assertions instead. The bar is also suppressed entirely on an error, where
+  stale cached data used to render it above a body that mounted no panels — a
+  screenful of dangling `aria-controls`.
+
+<!-- End of the #2086 backfill. Entries below were written with their PRs. -->
+
+### Fixed
+
+- **An agent-created mission dispatched its first task straight into a
+  `FOREIGN KEY constraint failed` (#2139).** `assignments.chat_id` is
+  `NOT NULL REFERENCES chats(id)`, and the mission task dispatcher inserts
+  every assignment with `chat_id` set to the mission's own id —
+  unconditionally, with no fallback. Three of the four mission-creating doors
+  stamp that synthetic `chats` row themselves (`mission_handler_mutate.go`'s
+  `Create`, `issue_handler_workflow.go`'s `Start`, and
+  `internal/cartographer/fork.go`'s `Fork`, fixed independently in #2128,
+  same root cause, different door). `InternalMissionHandler.Create` — the
+  sidecar endpoint an agent uses to plan its own mission — was the one that
+  didn't, so an agent-authored mission's first task hit the FK on every
+  dispatch attempt, and `scheduleReadyTasks` turned that into a silently
+  `FAILED` task rather than surfacing it — a mission whose tasks all failed
+  for a reason nothing in the task list explained.
+
+  Fixed twice, deliberately. `Create` now stamps the chat row itself, in the
+  same transaction as the mission row, mirroring the other three doors. And
+  the dispatcher — the one place every mission's assignments are actually
+  written, regardless of which door created the mission — now creates the
+  row lazily if it is missing, before either assignment insert. Two doors
+  have now independently forgotten this row in production; a per-door insert
+  is correctness at the source but does not close the class, so the
+  dispatcher checks for itself too, at the cost of one indexed lookup per
+  dispatch in the common case where the row already exists.
+
+- **The `admin` family answered from a different database than the server you
+  pointed it at.** `openAdminDB()` resolved `~/.crewship/crewship.db` and
+  ignored `--server`, `CREWSHIP_SERVER` and `--profile` entirely, while its own
+  comment claimed it "mirrors the resolution logic of the server" — false on
+  every host where crewshipd runs with its own `DATABASE_URL`, which is every
+  development clone (`file:./crewship.db`), every container and every
+  multi-instance box. `crewship admin list-users` against a populated server
+  printed `(no users — run 'crewship seed' …)` and exited **0**.
+  `db migration-status` reported an unrelated schema version under the heading
+  `Database:`. `memory log` / `memory show` audited an audit chain that was not
+  the one under audit — and the two routes that answer those questions,
+  `GET /api/v1/admin/memory/versions` and `…/{id}/content`, had no CLI command
+  at all.
+
+  `list-users`, `memory log` and `memory show` now read the server, through the
+  routes that already existed. Everything with no route — `reset-password`,
+  `promote`, `invalidate-sessions`, `sessions list`, `memory restore`,
+  `db migration-status`, `db repair-ledger`, `db restore-snapshot`,
+  `keeper eval` — names the file it resolved and **refuses to run when a server
+  is named**, unless you pass the new `--local`. A server on `localhost` is not
+  an exemption: the old rule warned only for a *remote* target, on the
+  inference that a server on this host must use this host's data directory, and
+  that inference is exactly the hole this was reproduced through.
+  `db migration-status` and `keeper eval` also honour `DATABASE_URL` for the
+  first time.
+
+  The read-only diagnostics were the last holdout and are fixed with them:
+  `crewship doctor` (the schema, consent and DSN checks) and
+  `crewship telemetry status` opened `~/.crewship/crewship.db` regardless of
+  `DATABASE_URL`, so on a dev clone they reported on a file the running
+  instance had never written — the #2086 defect surviving inside the command
+  you run to diagnose #2086. They resolve `DATABASE_URL` now. They are
+  deliberately **not** gated: a diagnostic reports on the host you run it on,
+  and one that switched itself off because `CREWSHIP_SERVER` was set would be
+  unavailable exactly when something is wrong. What replaces the refusal is
+  naming — the `db migration version` row and `telemetry status` both print the
+  path they read and where it came from.
+
+  **Breaking for scripts, in two different shapes.** The gated commands refuse
+  only when something names a server, so `--local` is newly required from a
+  shell that exports `CREWSHIP_SERVER`, on a machine that has run
+  `crewship login`, or under a `--profile`. `admin list-users` is **not** gated:
+  it branches on `--local` alone, so it now goes to the server and needs a login
+  *unconditionally* — including on a fresh host with no CLI config and no
+  `CREWSHIP_SERVER`, where it previously printed the table without one. That is
+  the locked-out-operator case, and it is deliberate: a command that fell back
+  to a local file whenever the login failed would be #2086 with an extra step,
+  answering "who exists on the server" from a file that may belong to a
+  different instance. Both failure paths name the fix in their own message, and
+  the fix is one word — `crewship admin list-users --local` is the old
+  behaviour, asked for explicitly. (#2086)
+
+- **`crewship resume <chat-id>` never worked, and the guard that should have
+  caught it could not see two thirds of the CLI.** `resume` asked for two flat
+  chat routes — `GET /api/v1/chats/{chatId}` to find the agent that owns a
+  chat, and a workspace-wide chat list for the picker — neither of which the
+  router has ever registered. The lookup 404'd on every invocation and the
+  user was told `could not determine agent for chat <id>`; the picker's 404
+  fell through to a `/runs` fallback that was therefore the only code path
+  that had ever run. Both now call routes that exist: the agent lookup walks
+  `GET /api/v1/agents` → `GET /api/v1/agents/{agentId}/chats`, which is the
+  only way a chat is addressable, and the picker reads `GET /api/v1/runs`
+  directly, deduplicated so several runs of one chat no longer fill it with
+  duplicates of the same session. No new server route was needed. The
+  CLI↔route contract test is what should have failed years ago, so its
+  extractor was hardened first: it now resolves paths assembled into a local
+  (including with `+=`), the `api_helpers.go` wrappers, `Do`/`NewRequest`/
+  `StreamSSE`/`StreamNDJSON`, package-level path consts, path helpers whose
+  own parameters are filled from the call site (so `proposedPath(id,
+  "approve")` is checked against the route registered for *approve* rather
+  than collapsing to an unregistered `…/{}/{}`), and forwarders discovered
+  from source rather than listed — 1013 call sites checked against
+  the router's real registrations, up from ~450, with the vacuity floor moved
+  to match. Two bounds this walk carries are now named in the errors and the
+  docs rather than left to be discovered: an agent's chat list is a hard 100
+  most recent with no page parameter, so an older chat must be resumed by
+  run-id, and a 403 on every agent is reported as an access failure instead
+  of exiting not-found with "chat not found".
+
+- **A CLI render that failed mid-stream said only "broken pipe".** The
+  formatter's JSON, YAML and NDJSON renderers returned the encoder's error
+  untouched, and what usually reaches that return is a *write* failure — a
+  closed pipe from a `| head -1`, a full disk — whose text names neither the
+  format nor the fact that output was being serialised at all. Each renderer
+  now names itself, and the NDJSON slice path names the row index, so a partial
+  stream says how much of it a consumer already received. The context is added
+  once at the renderer rather than at the four routing helpers and the ~110
+  direct call sites above them, so the message reads the same whichever of them
+  produced it. `gopkg.in/yaml.v3` flattens the cause into its own error type
+  before we see it, so `errors.Is` cannot reach through a YAML render error —
+  the text survives, and a test pins that difference rather than leaving it to
+  be rediscovered.
+
+- **`crewship agent logs` could not print a log line for any agent.** It kept a
+  second reader of its own that decoded the route's JSON *array* into a
+  `map[string]interface{}`, so every invocation died on `cannot unmarshal array
+  into Go value of type map[string]interface {}`; it also sent its line count as
+  `tail`, a parameter the handler has never read (it is `limit`), and printed
+  the container's stdout unsanitised. The duplicate is gone — the subcommand now
+  delegates to the same `runAgentLogs` behind the top-level `crewship logs`.
+  Consolidating them exposed a shared ceiling: the slug scan behind *every*
+  agent lookup read `GET /api/v1/agents` with no `limit`, so it saw only the
+  route's default first 100 rows and answered "agent not found" for an agent
+  that exists past them. The scan now sends the route's own ceiling (`limit=500`),
+  and a CUID goes back to the single-resource `GET /api/v1/agents/{id}`, which
+  has no ceiling at all — so `agent runs`, `agent get` and `run` are uncapped
+  too, not just the log commands. `GET /api/v1/crews` paginates identically and
+  the crew resolver had the same unqualified read, so it got the same ceiling
+  lifted; a workspace past **500** still needs an id rather than a slug, since
+  500 is where both routes stop. (`GET /api/v1/projects` has no `LIMIT` at all,
+  so the project resolver needs nothing.)
+
+- **`crewship project get`, `project milestone list|create` and
+  `skill proposed list|approve|reject` refused the slug their own help
+  advertised.** Each pasted the argument straight into a route that keys on the
+  id, so the documented invocation came back "not found" while the CUID form
+  worked. All of them now resolve slug-or-id through the shared reader, which
+  costs one request for a CUID and carries the "Did you mean" / "Available:"
+  hints on a miss.
+
+- **`crewship memory status` reported failure as success.** A scope that could
+  not be opened printed SQLite's own `unable to open database file (14)` — a
+  string that names neither the path nor the cause — and the command returned
+  zero regardless, so `crewship memory status || handle_it` was dead code in
+  every script that had it. Failures now exit 3 when no scope could be read, and
+  the message names the directory it tried and which of the causes it was: the
+  path is missing, a file sits where the directory belongs, or the directory is
+  there and unreadable. That last one needed a real probe — `os.Stat` succeeds
+  on a directory the caller cannot enter and reports `IsDir()`, which is exactly
+  the uid-1001 container case the wording describes. `memory reindex` now
+  creates the index directory it is asked to build in, because "build an index
+  with `crewship memory reindex`" was advice that looped back into the identical
+  error; it still refuses to invent a missing *base* path, since that is a typo,
+  and answers 3 there like `status` does. Where it cannot create the directory —
+  a base path that exists but is not writable — it now says so and names the
+  parent, rather than dropping the `mkdir` error and letting the check behind it
+  report the directory as merely missing, which is the wording that advises
+  running `crewship memory reindex`: the command that had just failed.
+
+- **A port-expose URL on Colima returned a bare `502` and explained nothing.**
+  The capability-URL proxy dials the crew container on its Docker bridge IP,
+  which is reachable only where crewshipd shares a network namespace with
+  dockerd — true for Docker Engine on Linux and for OrbStack, false for
+  Colima, Rancher Desktop and Docker Desktop, where the bridge exists only
+  inside a VM. Every request timed out and rendered as `bad gateway`, leaving
+  the one useful fact — the target address — visible only in the server log,
+  which is not where a self-hoster debugging their own setup looks. The 502
+  now names the target, and when a *dial* into a private address was
+  blackholed it offers VM routing as one of the two situations that look
+  identical from the proxy's side; a refused connection proves routing works,
+  so the runtime is not blamed there, and neither is a slow response, which
+  is no longer classified at all. The constraint is now documented on the
+  port-expose API page and the `expose` CLI page. The unreachability itself
+  is unchanged — this is diagnosis, not support for those runtimes.
+
+- **A dead escalation sat under "Waiting on you" forever, as two rows.**
+  `scopeOf` recognised exactly one terminal `payload.state` — `resolved` —
+  but a `peer.escalation` also ends as `expired` (the deadline answered it)
+  and `cancelled` (an operator withdrew it). Both carry the same entry type
+  and the same `refs.escalation_id` as the ask, so each one missed twice: the
+  terminal row was filed as a *fresh* ask, and it closed nothing, leaving the
+  original `pending` row open beside it. Two escalations nobody could still
+  act on produced four permanent entries. The terminal set is now explicit
+  (`resolved`, `expired`, `cancelled`) and a test scans the Go emit sites, so
+  a fifth state cannot be added to the API without this list hearing about it.
+  A state the classifier has never seen is still treated as *open* —
+  unrecognised is not the same as answered.
+
+- **Clicking "Waiting on you 1" opened a list of five.** The Overview card
+  counts open asks over the whole window; the Waiting scope it links to
+  refetched with `entry_type` set to the ask types alone. The *answers* —
+  `approval.granted` / `denied` / `cancelled` / `timeout` and
+  `keeper.decision` — are filed under the Security facet, so they were
+  excluded server-side, and the client-side join that retires an answered ask
+  had nothing to join against. Approvals and keeper requests could therefore
+  never be retired in that scope, and a grant arriving live could not retire
+  one either, because the stream shares the query. The waiting fetch now asks
+  for both halves; the answers never reach the feed, because the same
+  narrowing files them under Completed. Because the journal pages by a fixed
+  row count from the newest end, those extra rows would otherwise have pushed
+  the oldest open asks out of the window — hiding them instead of listing
+  them — so the Waiting scope alone now pages to the API's 500-row ceiling.
+
+- **An exec on Apple Containers could be reported as running forever.** Both
+  exec paths spool the CLI's output into memory, so `os/exec` gives the child
+  a pipe and copies out of it in a goroutine — and `cmd.Wait` blocks on that
+  goroutine until every write end of the pipe is closed. A descendant the
+  `container` CLI leaves behind holds one, so a single orphan wedged `Wait`
+  for its whole lifetime. Nothing recovered from that on its own: the exec
+  entry is marked finished only after `Wait` returns, so `ExecInspect`
+  answered "still running" indefinitely and the sweeper never reclaimed the
+  entry. Waiting on the pipes is now bounded, and the command's real exit
+  status is still what the caller sees.
+
+- **A crew's issue prefix could mint an issue at an address no route can
+  reach (#2035).** `crews.issue_prefix` had no charset or length check on any
+  write path — `PATCH /api/v1/crews/{crewId}` stored it verbatim, and the only
+  branch was `""` → `NULL`. The prefix becomes the leading half of the issue
+  identifier, and that identifier is a **single URL path segment** on around
+  twenty routes: get, patch, delete, comments, attachments, relations. So
+  `--issue-prefix "A/B"` filed `A/B-1`, an issue that exists, lists, and can
+  never be opened, and a space, `%`, `#` or `?` each broke the same segment
+  their own way. The prefix must now match `^[A-Za-z0-9_-]{1,16}$` on write,
+  with a 400 that names the field and states the rule; `""` still means "clear
+  it". Validated on the API rather than in the CLI, so the web UI is covered
+  by the same guard. **Prefixes already stored are not migrated and not
+  refused on read** — they keep minting exactly what they mint today — but a
+  prefix outside the rule cannot be written again, so a crew holding one has
+  to move to a valid prefix the next time it changes.
+
+- **A restore dropped columns your schema does not have, and said nothing.**
+  Applying only the columns the target has is what lets a bundle from a newer
+  Crewship restore onto an older instance, and every migration this project
+  had written was additive, so the dropped column was always one the target
+  genuinely did not need. A migration that *re-keys* a table breaks that
+  assumption: a bundle taken before `issue_counters` moved from `crew_id` to
+  `(workspace_id, prefix)` carries a key column the new table does not have,
+  the statement degenerates to `INSERT OR IGNORE INTO issue_counters
+  (next_number) VALUES (?)`, and the `NOT NULL` violation that follows is
+  swallowed by `OR IGNORE`. No error, no row, and `rows_inserted` counts a
+  row that never landed as nothing at all — indistinguishable from a bundle
+  that never carried it. Restore now counts every discarded value, names each
+  `table.column` and how many rows carried it, and warns; `--dry-run` reports
+  the same skew before anything is written. The drop itself is unchanged —
+  what is gone is the silence, which is what made this shape of loss
+  (#1437, #1444, #1973) discoverable only months later.
+
+- **44 commands advertised `-f json` and did not honour it.** `--format`/`-f`
+  is a persistent flag on the root command, so every one of the ~800 commands
+  prints `Output format: table|json|yaml|ndjson|quiet` in its help — and the
+  platform's premise is that agents drive this CLI, which means that flag is
+  what the pipelines depend on. A sweep of the whole tree found four ways it
+  was broken, all of them silent and all exiting 0:
+
+  - **34 reporting commands never resolved the format at all** and printed
+    human text — sometimes ANSI-coloured — under `-f json`. Among them
+    `config show`, `config validate`, `notify status`, `telemetry status`,
+    `server current`, `crew status`, `crew config --show`, `persona view`,
+    `persona history`, `lint`, `logs`, `db migration-status`,
+    `admin sessions list`, `memory search`, `memory status`, `backup metrics`,
+    and eleven of the `routine` family.
+  - **Nine more resolved it and wrote prose to stdout first**, so the JSON was
+    real and the *stream* still would not parse. `digest enable` printed nine
+    advisory lines and then handed `AutoHuman` an empty human renderer.
+  - **Empty lists came back as `null`, not `[]`.** Go marshals an unfilled
+    slice as `null`, so a list command answered `[]` on a populated workspace
+    and `null` on an empty one — `crewship prompt list -f json | jq '.[]'`
+    worked in development and failed on a fresh install. Fixed once, in the
+    shared `cli.Formatter`, rather than at each call site.
+  - **Two commands owned a local flag named `format`**, which shadows the root
+    persistent flag *and takes its `-f` shorthand with it*. `crewship memory
+    search … -f json` therefore did not fall back to human output — it failed
+    with `unknown shorthand flag: 'f'`. `routine get` accepted `-f json` and
+    rejected `-f yaml` and `-f ndjson` outright.
+
+  Human output is byte-identical throughout; the machine formats are what
+  changed. Machine payloads also stop inheriting the human view's display
+  truncation, so `routine active -f json` carries the full run id (the table
+  cuts it at 24 characters, and a truncated id fed back to `routine cancel`
+  is a 404) and `routine versions -f json` the full definition hash.
+
+  Four guards keep it from recurring: two walk the entire command tree and
+  fail the build on a new offender, one ratchets the remaining
+  mutation-receipts-on-stdout population downward, and one keeps the exemption
+  table from rotting. (#2086)
+
+- **`crewship memory search -F` is deprecated.** It survives as
+  `--output-format`, a differently-named alias, so existing scripts keep
+  working; taking the name `format` back would re-break `-f` on that command.
+  It warns and will be removed.
+
+- **`crewship routine get --format human|json` is now the global flag.** The
+  local flag is gone, so all five formats work. `--format human` still renders
+  the human report. `--format xml` no longer errors — an unrecognised format
+  renders as human, uniformly, the way it does on every other command.
+
+- **`crewship routine versions show` no longer prints a non-JSON body to
+  stdout and exits 0.** A 200 whose body does not parse is now an error that
+  names the problem, which is what the command's own help ("pipe to jq")
+  promises.
+
+- **The machine error envelope disagreed with itself across formats.** A
+  failing command emits `cli.ErrorEnvelope` on stderr under
+  `-f json|yaml|ndjson` — every command but `crewship wait`, which owns its
+  run-outcome exit codes and prints plain-text `[wait] error:` diagnostics by
+  design — and it carried `json:` tags only, so the same
+  failure came back as `exit_code` under json and `exitcode` under yaml, with
+  `status: 0`, `detail: ""` and `extensions: {}` added on the yaml side
+  because `omitempty` went with the tag. A caller that branches on the exit
+  code found nothing at that key in one of the two formats it was told were
+  the same data. The failure side now matches the success side (#1211).
+
+- **`crewship routine webhooks create -f yaml` crashed.** The result is an
+  anonymous struct embedding the webhook row beside the public URL, and the
+  embedded field carried no tag: `encoding/json` flattens that, yaml.v3 nests
+  it under the type name — and because the row type was unexported, yaml.v3
+  could not reflect into it at all and the command panicked with a stack
+  trace. Making the command honour `--format` is what turned a latent shape
+  error into a reachable crash. Four more of the same shape (`activity`
+  export, `model price`, `notifychannel create`, `provider check`) are fixed
+  with it: each embedded type is now exported and inlined in both formats. The
+  static guard that caught the first instance only looked at embedded fields
+  that *already* declared `json:",inline"`, so an untagged one — the actual
+  failure mode — was invisible to it; it now checks every embedded field in a
+  json-tagged struct.
+
+- **`digest enable --crew <slug> -f json` emitted prose before the document.**
+  The routine-creation path prints a server-side dry-run progress line, and it
+  went straight to stdout, so on the one invocation that creates the routine
+  the machine output was a sentence followed by an object. It goes through the
+  same note buffer as the rest of the command's human output now.
+
+- **`server current -f json` could return terminal escape codes in a value.**
+  `directory_override_hint` became a machine field in this change while still
+  being built with the colour codes the human line wants around it. The field
+  is plain text now and the colour is applied by the renderer.
+
+- **Four commands rounded large numbers into their own machine output.**
+  `backup metrics`, `backup canary`, `integration tools refresh` and
+  `routine versions show` decoded the server's document into
+  `any`/`map[string]any` before re-encoding it, and `encoding/json` makes
+  every number a `float64` on the way in — so anything past 53 bits (a
+  nanosecond timestamp, an id) came back rounded, and the command silently
+  edited the document it was asked to relay. `routine versions show` is the
+  one that matters most: it returns a routine's stored DSL, and a limit or an
+  id that comes back subtly different is a definition that no longer matches
+  the hash it was stored under. They pass `cli.RawJSON` through instead, which
+  is byte-identical under json/ndjson and decodes via `json.Number` under
+  yaml. `crew config --show` took the same treatment for the stored config
+  blobs it echoes.
+
+- **`-f yaml` named fields after Go identifiers on the payloads this sweep
+  newly reaches.** Exporting the embedded types above stopped `-f yaml`
+  crashing on `provider check`, `model price`, `notifychannel add`,
+  `activity` export and `routine webhooks create` — which promoted their keys
+  from unreachable to part of the machine contract, and yaml.v3 was deriving
+  each one from the lowercased Go field name (`pricing_key` as `pricingkey`,
+  `input_tokens` as `inputtoks`, `per_mtok` as `permtok`). Every field on
+  those payloads now carries a matching `yaml:` tag. Two result payloads that
+  were anonymous structs (`routine webhooks create` and `url`) are named types
+  now, and `notifychannel add`'s too, because the key-parity guard cannot
+  cover a type it cannot name — and that guard now fails the build when an
+  inlining payload is missing from its list, which is how these were found to
+  be missing from it in the first place.
+
+- **Upgrading threw finished users back into the setup wizard.**
+  `onboarding_skipped_at` was added without a backfill, and
+  `OnboardingHandler.Status` reads a NULL there as "this completion was
+  interrupted, reopen it". Sound on a fresh install; on an upgrade every
+  pre-existing completion is NULL by construction, so anyone whose workspace
+  happened to hold no agents — they pressed Skip, or they finished properly
+  and later deleted their crews — was sent back to step one, and Status
+  *persisted* the downgrade rather than merely rendering it. Backfilled: a
+  completion recorded by a build that had no such column is, by definition,
+  not one this build may reopen.
+
+- **An OpenAI or Google workspace got a Claude model id.** The marker template
+  the Guide is told to emit interpolated its suggested model from
+  `providerRuntimeDefaults` (`gpt-5.5`, `gemini-2.5-pro`) while
+  `validateCrewModel` checked against `llm.CuratedModels`, which contains
+  neither. The Guide emitted the id it was handed, the validator missed it and
+  substituted the Anthropic default, and the crew was created as
+  OPENAI + CODEX_CLI + `claude-sonnet-5` — every field valid, the combination
+  unrunnable at the adapter on every run. Both now read the same catalogue.
+  A provider whose models live on the operator's own daemon (Ollama and
+  anything self-hosted) is told to omit the field instead of being handed a
+  Claude id to copy.
+
+- **A crew name in Czech, Greek or Japanese could discard the whole
+  proposal.** `crew_name` was still length-checked with `len()`, which counts
+  bytes — the same fault fixed for `role`, one field over. 120 bytes is about
+  60 accented characters, so an ordinary non-ASCII crew name silently dropped
+  the entire marker and no card ever appeared. Counted in runes now.
+
+- **`GET /system/runtime` reported `in_use` only to unprivileged callers.**
+  The onboarding wizard gates its Crew step on that field and blocks Continue
+  unless it is exactly `true`. It worked only because the probe sends no
+  workspace context and so never resolves a role; an owner who did would read
+  `undefined` and be stuck permanently behind a re-check button that could
+  never clear. Present on both branches now.
+
+- **The token landed after CLI pairing went to the wrong workspace.**
+  `GET /api/v1/workspaces` sorts `created_at DESC` while every onboarding
+  handler resolves the user's membership `ASC`, so taking the first row wrote
+  the freshly paired credential to the *newest* workspace for anyone who
+  belongs to more than one — and `autoAssignCredentials` links workspace
+  credentials to agents at deploy time, so the crew launched with none and
+  could not be repaired afterwards. The frontend already sorted for this
+  reason; the CLI now does too.
+
+- Wake automations compiled from an agent-authored page recorded the agent's
+  id in `automations.created_by`, a user-attribution column with no foreign
+  key to catch it.
+
+- **The Credentials filter panel shut itself after every pick.** Each facet
+  called `setFilterOpen(false)` on select, so combining a brand with a scope
+  meant reopening the menu between them, and a facet held exactly one value —
+  a switch wearing a filter's clothes. The rail now uses the shared
+  `SidebarFilterPopover` from the sidebar kit, the same panel Issues runs on:
+  the panel stays open, each facet carries its own reset row, and Escape
+  closes it. `CredentialFilters` facets are lists, so values inside a group OR
+  and the groups AND — "any Anthropic or GitHub certificate this crew can
+  reach" is now one pass through the panel.
+
+- **The MCP OAuth client never told an authorization server which MCP server
+  a token was for, and never checked which authorization server actually
+  answered.** Two MUSTs from the MCP authorization spec were both absent:
+  the RFC 8707 `resource` indicator was never sent on the authorization
+  request or the token request, so a token minted for one connected MCP
+  server carried no audience binding an operator running that server could
+  be stopped from replaying against another; and the RFC 9207 `iss`
+  parameter an authorization server returns on the redirect was read
+  nowhere, so nothing defended against a mix-up between the several
+  authorization servers Crewship's MCP connections talk to by construction.
+  PKCE and RFC 9728 protected-resource discovery were already in place —
+  discovery just discarded the two fields (`resource`, `issuer`) that make
+  the other two RFCs possible, instead of ever recording them.
+
+  Both are now carried through the connect flow: `AutoConnect` persists the
+  discovered protected-resource `resource` and authorization-server `issuer`
+  on the credential (`oauth_resource`, `oauth_issuer` — new columns, empty
+  for every credential connected before this and for the plain
+  Google/Slack/GitHub-style provider catalogue, which never had a resource
+  to discover), `resource` is sent on the authorization request, the code
+  exchange, and both background and just-in-time refresh requests whenever one
+  is known, and `Callback`/`Loopback` reject the
+  redirect before ever exchanging the code if `iss` is absent or does not
+  match. Discovery itself now fails closed when an authorization server's
+  metadata omits `issuer` — RFC 8414 makes the field REQUIRED, so a server
+  that omits it gives the mix-up defence nothing to check against, and
+  Crewship's whole reason to check `iss` at all is that MCP servers are
+  third-party-operated and not trusted by default. A provider without Dynamic
+  Client Registration can now continue the same discovered flow with an
+  operator-supplied client ID (and optional secret); the server repeats
+  discovery and persists its resource and issuer instead of sending the
+  operator through the generic credential form that discarded both.
+
+  **Known gap, not fixed here:** the manual "paste the redirect URL/code"
+  fallback (`Exchange`, used when the automatic redirect can't reach
+  Crewship — private IP, firewall) still doesn't validate `iss`, because the
+  frontend only ever extracted `code` from the pasted URL. It still sends
+  `resource` on the token request.
+
+- **`crewship inspect` always printed `tool calls: 0`, no matter how many
+  tools the run actually invoked.** The footer counter recognized a journal
+  entry as a tool call when `entry_type` was `tool_call` or started with
+  `tool.` — neither of which the journal ever writes. A run's individual
+  tool invocations are journaled as `run.agent_span`
+  (`internal/journal/types.go`), the leaf of the run's drillable trace tree,
+  and matched neither check, so the counter stayed at zero on every run that
+  used tools. The `errors:` counter beside it had the same blind spot from
+  a different angle: a failed tool call is journaled at severity `warn`, not
+  `error` (`internal/pipeline/agent_span_emit.go` deliberately does not
+  escalate a span failure to the run's own error severity), so a run whose
+  only failures were failed tool calls also reported `errors: 0`. Both
+  counters now recognize `run.agent_span` entries directly, reading the
+  span's own `status` field for the error count.
+
+### Added
+
+- **A database write looked exactly like `ls` in the run trace.** Sub-span
+  kinds were derived from the tool NAME alone, and every shell call is the
+  same tool — so `psql -c "delete from orders"` and a directory listing both
+  rendered as an anonymous `bash` row, and the one question a trace exists to
+  answer ("what did this run touch?") had no answer for infrastructure. Shell
+  calls and MCP calls that reach a datastore now carry their own `db` kind and
+  name the engine (`postgres`, `redis`, `mysql`, `mongodb`, and a dozen more)
+  in `attributes.tool`, so the row shows the store's own mark rather than a
+  terminal glyph.
+
+  Classification reads the first executable of the command — past leading
+  `VAR=value` assignments, a bare `sudo`, quotes and any directory prefix —
+  and stops there. It deliberately does not split on `&&`, `|` or `;`, or
+  descend into subshells and here-docs: doing that correctly means
+  implementing shell quoting, and doing it *incorrectly* is how
+  `echo "psql is great"` becomes a database span. Anything the shallow parse
+  misses — `cd /app && psql …`, an engine not on the list, an MCP server
+  called `prod-db` — keeps its old `bash` / `mcp_tool` kind. Under-classifying
+  is the designed failure: a span that renders as a shell call is recoverable,
+  a span that lies about what it touched is not.
+
+- **The Go toolchain pins are now checked against each other on every PR, and
+  the image can no longer download a compiler behind their back (#2064,
+  partial).** Thirteen files name a Go version and nothing verified they
+  agreed. One of the thirteen is the root `Dockerfile`, which is built by
+  `release.yml` and `nightly.yml` and by nothing that runs on a pull request —
+  so `FROM golang:<ver>`, the compiler for the shipped binary and a line
+  Dependabot bumps on its own, was the one pin structurally beyond reach of
+  the checks meant to catch it. #2060 was that bump: taken alone it would have
+  released binaries built by 1.27.0 while every CI pin and the vuln gate
+  stayed on 1.26.6. It was caught by hand.
+
+  `scripts/go-toolchain-pin.sh` parses `go.mod`'s `toolchain` directive, the
+  Dockerfile's `FROM` tag, `GO_VERSION` in ten workflows and the literal
+  `go-version` in `codeql.yml`, and fails naming the file and line of every
+  disagreement. It runs in CI's `Shell` job, which a Dockerfile-only PR does
+  reach — `paths-ignore` never covered `Dockerfile`. `GO_VERSION` is in the
+  set deliberately: `golangci-lint` and `govulncheck` are pinned *to* it, so a
+  CI toolchain that drifts from the image is the vuln gate grading a compiler
+  that is not the one shipping. `go.mod`'s `go` directive is deliberately
+  outside it — the language floor is a separate promise and stays at 1.26.
+
+  The Dockerfile now states `ENV GOTOOLCHAIN=local` in its Go stage. The
+  official golang-alpine images already default to it, so nothing changes
+  today; the point is that an inherited upstream default is a fact that
+  happens to hold rather than an invariant, and written down it survives a
+  base-image swap and can be checked. `local` and not a version literal:
+  `local` makes the `FROM` tag the sole authority and never downloads, where
+  the default `auto` fetches whatever `go.mod`'s `toolchain` line names, and a
+  literal `GOTOOLCHAIN=go1.27.0` would be one more copy to keep in sync that
+  fails backwards — a forgotten update would silently *download* the old
+  toolchain and undo a base-image bump with every check still green.
+
+  Worth stating because it is the reason the check is static: under `local`
+  the `toolchain` directive is ignored outright, so `toolchain go1.27.1`
+  against a `golang:1.27.0-alpine` base builds with 1.27.0 and exits 0. Only
+  the `go` directive can fail a build, and that one stays at 1.26. No image
+  build, not even nightly's, would ever report this drift — it has to be read
+  off the source.
+
+  This closes the specific hazard from #2060, not the general one. A
+  PR-triggered image build — the other half of #2064 — remains open, so
+  breakage that only an actual `docker build` can surface (a missing `COPY`
+  as in #849/#886, a `pnpm prisma generate` regression, the `web/out` release
+  gate from #1567) is still first caught by nightly.
+
+- **`crewship oauth` — the connect flow had no CLI at all.** Six registered
+  endpoints (`providers`, `initiate`, `exchange`, `loopback`, `discover`,
+  `auto-connect`) were reachable only from the dashboard, so connecting an
+  integration was the one setup step an agent could not perform.
+  `crewship oauth connect` runs the loopback leg and then **waits for the
+  credential to reach `ACTIVE`**, because there is no completion endpoint and
+  the credential's status is the only truthful signal — a wait that runs out
+  exits non-zero and names the status it is stuck in rather than printing a
+  tick over tokens that never arrived. `oauth authorize` + `oauth exchange` is
+  the leg for a browser that cannot reach the API host, and `exchange` sends
+  the `--state` token, which is what lets the server recover the PKCE verifier
+  it stored; the web UI omits it, so that path fails against any provider that
+  enforces PKCE. `oauth auto-connect` treats the server's
+  `status: "needs_client_id"` — a `200` that creates nothing — as a failure,
+  and prints the `auto-connect --oauth-client-id` retry to run instead.
+
+- **`crewship credential create --type OAUTH2` could not set the OAuth app.**
+  `POST /api/v1/credentials` has accepted `oauth_client_id` and its endpoints
+  since the flow was written; the CLI exposed none of them, so an `OAUTH2` row
+  could only be minted through the web UI and `crewship oauth` had nothing to
+  operate on. New `--oauth-provider` fills the authorize URL, token URL and
+  scopes from the same catalogue `crewship oauth providers` prints;
+  `--oauth-client-id/-secret/-auth-url/-token-url/-scopes` cover a provider the
+  catalogue does not carry. The row is created empty and `PENDING`, no value is
+  invented for it, and nothing is probed — there is no token yet to probe. The
+  flags are refused on any other `--type`, where the server would have dropped
+  them silently, and refused alongside `--value`/`--value-stdin`, which would
+  otherwise fill the same column twice and discard one of the two. Filing a
+  token obtained elsewhere as `--type OAUTH2 --value <token>` is untouched.
+  `--oauth-client-secret-stdin` keeps an app secret out of `argv` — it outlives
+  every token it issues, and an argument is readable by anything that can see
+  the process table. Both refusals key off the flag being *named*, not off it
+  carrying a value, so an explicitly empty source cannot slip past them and be
+  dropped in silence; and both are decided before anything reads stdin, which
+  is what makes `--value-stdin --oauth-client-secret-stdin` a refusal instead of
+  a race between two readers over one stream.
+
+- **`crewship consolidate proposed` — the human half of memory consolidation.**
+  `consolidate run` triggered the extraction; the four review endpoints
+  (`explain`, `diff`, `approve`, `reject`) had no CLI, and `explain` and `diff`
+  had no consumer anywhere — not even the web UI, which only wires the
+  approve/reject buttons. `approve --diff` fetches the preview *before* it asks
+  to confirm, which is the pairing the server's byte-equality guarantee between
+  preview and write was built for. `reject --reason` says out loud that the
+  server does not persist the reason yet, rather than implying an audit trail
+  that is not there. The help names both things the API cannot tell you:
+  proposals only exist under `CREWSHIP_CONSOLIDATE_HITL=1`, and since no
+  endpoint lists them, the id comes from
+  `crewship inbox list --kind memory_consolidation`.
+
+- `crewship onboarding proposal create --agent "Name:Role"` (repeatable)
+  names a bespoke roster, so the CLI can finally reach the branch the Guide
+  actually takes. `--template-slug` is no longer required — give one or the
+  other. The role is split on the first colon only, because a role is a
+  sentence and routinely contains more.
+
+- **Everything the onboarding Guide built belonged to the Guide.** A routine
+  or page authored during setup was attributed to `_crewship-setup`, the
+  server-created crew the Crewship Guide itself runs in, because the sidecar
+  injects `author_crew_id` from its own IPC config — the gate that stops
+  Crew B claiming to be Crew A, correct for every crew except the one whose
+  entire job is building for others.
+
+  `author_crew_id` is not a label. `internal/pipeline/egress_gate.go` checks
+  a routine's HTTP steps against the AUTHOR crew's allowlist, so a routine
+  written to poll `seznam.cz` was gated on the Guide's network policy and
+  could only be unblocked by widening the Guide; `internal/pipeline/executor.go`
+  runs agent steps in the author crew's container, so the work ran as the
+  Guide rather than as the crew meant to do it; and the Guide's own
+  `autonomy_level` is `full` (it must be — it creates Pages), so a person's
+  routines took up permanent residence in the most privileged crew in the
+  workspace, outliving onboarding by months. Pages had a fourth version of
+  the same fault: a panel names its producer as `agent/<slug>`, and
+  `discover_capabilities` could only see the Guide's own roster, so pages
+  built at setup pointed their panels at the Guide.
+
+  A `kind='setup'` crew may now name the crew it is authoring FOR
+  (`target_crew_slug` on `/internal/pipelines/save`, `/internal/pipelines/test_run`
+  and `/internal/pages/save`; `crew` on the `save_routine`, `save_page` and
+  `discover_capabilities` MCP tools) and, in exchange, may own nothing at
+  all. Both halves are load-bearing: without the second, naming a crew is
+  an option the model forgets to take and the orphans come back. The
+  exception stays narrow — an ordinary crew naming another crew is still
+  403, the same cross-crew escalation the original gate exists to stop, and
+  the target must be a non-setup crew inside the workspace the caller's
+  token is already bound to. Ownership ordering (crew first, then its work)
+  is now enforced by the slug simply not resolving rather than by the
+  prompt remembering, and the refusal lists the workspace's real crew slugs
+  because a slug is derived server-side and the Guide never sees what its
+  proposed name became. The autonomy gate continues to ask about the ACTOR,
+  not the owner — a brand-new crew defaults to `guided`, and holding a page
+  the Guide is plainly permitted to create would leave setup unable to
+  finish its own job.
+
+- **A crew's first message could be answered by total silence when its
+  devcontainer needed a build.** The server deferred the message (streamed a
+  `crew_provisioning` build card, returned the `ws.ErrCrewProvisioning`
+  control-flow sentinel) and relied on the CLIENT to notice the build
+  finished and resend — but completion was only broadcast on the workspace
+  realtime channel, fanned out to whoever happened to be subscribed at that
+  instant. A client that hadn't yet opened its second WebSocket connection,
+  hadn't resolved `workspaceId`, or had simply closed the tab never saw the
+  frame, and the HTTP poll backstop only sped up once it observed the very
+  signal it had just missed. On a cache-hit build (~90ms) the completion
+  frame was routinely gone before anything was listening.
+
+  The server now owns the resume. `chatbridge.Bridge.HandleChatMessage`
+  attaches the deferred send to the crew's provisioning job
+  (`api.ProvisioningHandler.AttachPendingMessage`); the job's own completion
+  point runs — or fails — it directly, streaming the outcome on the chat's
+  own session channel (`hub.BeginSessionRun`), the one channel a client is
+  always reliably subscribed to. At-most-once is structural, not a flag: the
+  job tracks at most one pending message per chat (a manual resend or a
+  second deferred send on the same chat while the build is still running
+  *coalesces* onto the latest content instead of queuing a duplicate), that
+  slot is drained atomically with the job's terminal-state transition, and
+  the bridge's existing per-chat run exclusivity (`tryMarkRunStart`) means a
+  resumed run racing a live manual send never persists twice — whichever
+  loses gets `ws.ErrAgentBusy` and stays silent rather than double-answering.
+  A failed build now surfaces a real `error` chat event instead of silence or
+  a false success.
+
+  The client-side auto-resume (a `useProvisioningStatus` poll that called
+  `sendMessage` again once a crew's status flipped to `completed`) is
+  removed — it was the unreliable mechanism this fix replaces, and the test
+  that shipped it (`onboarding-setup-chat.test.tsx`, stubbing
+  `useProvisioningStatus`/`useWorkspace`/`RealtimeProvider`) proved the
+  client's wiring against a working feed and never exercised the race at
+  all. The "Resend now" button survives as a manual fallback only, safe even
+  mid-build because of the coalescing above.
+
+- **A crew created by onboarding could not run an agent at all, and had not
+  been able to since 2026-04-15.** Four `INSERT INTO crews` statements omit
+  `devcontainer_config` — the two onboarding paths, recipe install, and the
+  agent-facing `CreateCrew`. A crew with no config was refused by the
+  provisioning gate, never had an image built, and fell through to bare
+  `debian:bookworm-slim`. The agent then died with `exit 127`,
+  `stdbuf: failed to run command 'claude': No such file or directory`.
+
+  Commit `8780f3c4` (PR #154) deleted the pre-provisioned agent-runtime image
+  and switched the platform default to bare Debian, adding these columns with
+  no backfill. Seed data got its own config six weeks later; the templates
+  never did — which is why `./dev.sh seed` produced working crews and the
+  wizard did not, and why four months passed before anyone noticed.
+
+  The default is applied where the config is **read**, not at the four write
+  sites. Adding it to the INSERTs is the obvious fix and the wrong one: this
+  repo has already paid for that lesson twice (`internal/crewstart` exists
+  because thirteen callers each assembled their own config and three forgot
+  `CachedImage`), and a read-time default cannot be missed by a creation path
+  that does not exist yet.
+
+  Three readers are deliberately NOT defaulted: the crew editor (a GET-merge-
+  PATCH would silently freeze the default into every crew the first time an
+  operator toggled a security flag), backup collection (a restore must
+  reproduce what was stored), and the manifest export that reads them. A crew
+  running on the default reports `devcontainer_config_defaulted` so it is
+  visible rather than silent.
+
+- **The chat said "an error occurred processing your message" while the server
+  was building the crew's image.** The provisioning handshake returned an error
+  purely as a control-flow sentinel; it was logged at ERROR and rendered as a
+  generic failure stacked under the informative build card. It is now a typed
+  sentinel (`ErrCrewProvisioning`), logged at Info, and the user is told the
+  environment is being built once and to resend.
+
+- **An agent whose container lacks its CLI now says so.** Adapter-exec failures
+  had no classifier: `exit 127` reached the user as "agent exited with code 127
+  — check the journal for details", while the one fact that resolves it — the
+  binary is not installed — sat in the container's stderr and was discarded.
+  Failures are now typed, the container output rides the error event as
+  metadata, and a missing binary is distinguished from a crash.
+
+- **A credential could not be checked, and was reported as valid.**
+  `probeProviderInner` short-circuited every `sk-ant-oat` token with "OAuth
+  token accepted (cannot validate via API)" having contacted nothing — and that
+  claim was disproven by `probeAnthropicOAuthToken` forty lines away in the
+  same package. It backs `/credentials/test`, the "Test now" button and
+  `crewship credential test-stored`, so for the one credential type onboarding
+  accepts, every tool anyone had answered "fine" without asking. The CLI
+  carried its own copy of the same wrong assumption and skipped before it even
+  reached the server.
+
+  Probing is now shared, and it has three outcomes rather than two: accepted,
+  refused, and **could not ask** — which is rendered as neither. The probe also
+  uses the model the user actually chose; it hardcoded a cheap Haiku, so a
+  token with no entitlement to the chosen model passed onboarding and failed on
+  the first message.
+
+- **"I could not determine whether the image is present" no longer reads as
+  "the image is missing."** `ensureImage` collapsed an errored `ImageInspect`
+  into "absent" and told the operator to reprovision a crew whose image was
+  never gone. The error-distinguishing variant already existed one function
+  below and was unused.
+
+### Added
+
+- **A container-boot conformance test that needs no API key.** The sidecar's
+  `/health` is served from in-memory state, so a real container, a real sidecar
+  and a real health probe cost nothing to run. It asserts uid 1001 resolves,
+  `claude --version` succeeds inside the container, and `/health` answers 200 —
+  the exact facts the four-month regression broke. ~9 s warm; it belongs on
+  every PR, because a nightly cannot protect a branch that has already merged.
+
+  Deliberately not modelled on the existing runtime-conformance harness's
+  four-byte ELF stub: that shortcut is right there, where nothing execs the
+  sidecar, and exactly wrong here, where the sidecar booting is the point.
+
+- **Tabs on a page (#1935).** A panel may declare `tab: Odezva`, and the page
+  grows a bar under the breadcrumb — several screens instead of one long
+  scroll. One optional key on the panel and **no `tabs:` block**: adding a tab
+  is one word on the panel that needs it, and there is no second list that can
+  disagree with the panels about which of them exists. Bar order is first
+  appearance in the panel list; a panel that declares none lands on the first
+  tab; a page where nothing declares one has no bar and renders exactly as it
+  did before.
+
+  A tab HIDES panels, which is why this is not only a layout feature. Every tab
+  carries the **worst freshness state of its own panels** — `failed` over
+  `stale` over `never_produced` over `fresh` — as a glyph beside its name and
+  never as colour alone, and the page's own freshness summary is computed over
+  **every** tab rather than the visible one, so it does not move when the tab
+  does. Without both, a critical panel could sit failing on the third tab while
+  the page read fine, which is the silent-old-numbers failure the freshness
+  contract exists to prevent.
+
+  A tab whose panels are all sealed to a reader still appears on that reader's
+  bar, carrying its placeholders: the page has the same shape for everyone, and
+  a bar that reflowed per viewer would disclose, by what it left out, whose data
+  was on it. `tab` therefore rides on the sealed placeholder too — page
+  structure, like `span`, never the panel's data.
+
+  The selected tab is in the URL (`/pages/sit?tab=odezva`). **Print ignores
+  tabs**: paper cannot be clicked, so a printed page renders every tab's panels
+  in bar order under their tab names, with no bar. On a phone the bar scrolls
+  sideways rather than wrapping. A tab name that is blank, longer than 32
+  characters, carries a control character, collides with another differing only
+  in case, or is the ninth tab on a page, is refused at save with the reason.
+
+  Carried end to end: YAML → CLI → API → the manifest kind (including drift
+  detection, on sealed panels too) → `page export`/`import` → the in-app editor.
+  The editor was **dropping `icon:` on every save** the same way it would have
+  dropped `tab:` — `PATCH` replaces the panel set wholesale, so a key the editor
+  does not mention is a key the save deletes — and both now round-trip.
+
+- **Attachments on issues — and the agent working the issue can read them
+  (#1768).** Attach a crash log, a screenshot, a repro bundle or a diff to an
+  issue over the API (`GET`/`POST` `…/issues/{ident}/attachments`,
+  `GET`/`DELETE` `…/{attachmentId}`), over the CLI (`crewship issue attach` /
+  `attachments` / `attachment` / `detach`), or from an agent through its
+  sidecar (`GET`/`POST /issue/{ident}/attachments`,
+  `GET /issue/{ident}/attachments/{id}`). The agent half is the point: a file
+  an agent cannot read is decoration, and until now the only way one reached an
+  agent was a human pasting its contents into a comment. Every attach and detach
+  goes through the shared issue-event emitter, so it lands on the timeline **and**
+  in the journal — which is what makes it notifiable.
+
+  Content reaching an agent is treated as attacker-controlled: both the file's
+  **text** and its **filename** are wrapped by `internal/untrusted` before they
+  leave the handler (`ignore previous instructions.txt` is a shorter payload than
+  the file, and it shows up in every listing). Binary comes back base64, budgeted
+  at 512 KiB, text at 128 KiB, both with an explicit `truncated` flag — a silent
+  truncation is worse than a refusal.
+
+  The type is resolved from the file's **extension** against an allowlist; the
+  request's own `Content-Type` is discarded, because honouring it is how a stored
+  file becomes stored XSS served from your own origin. `.html` and `.svg` are
+  absent deliberately. Downloads carry the resolved type plus `nosniff` and
+  `Content-Disposition: attachment`.
+
+  Blobs are content-addressed at
+  `attachments/<workspace>/<sha[0:2]>/<sha>` — every component derived from bytes
+  we computed, so a filename of `../../../etc/passwd` is stored as the label
+  `passwd` and path traversal is not expressible rather than merely refused.
+  Identical bytes are de-duplicated **within a workspace and never across one**:
+  a cross-tenant shared blob would make workspace erasure undecidable and would
+  turn write-time de-duplication into an existence oracle. Deletion is
+  reference-counted, so removing a file from one issue never removes it from
+  another that carries the same file. Cascade deletes (an issue hard-deleted)
+  never reach that refcount, so `crewship issue delete` runs a reclaim pass
+  derived purely from the table.
+
+### Changed
+
+- **Go toolchain moved 1.26.6 → 1.27.0, and every place that names it now
+  agrees (#2060).** Dependabot bumps the root `Dockerfile` alone, which is the
+  one Go version no PR ever exercises — the image is built only by `release.yml`
+  and `nightly.yml`. Taken by itself that bump would have shipped release
+  binaries compiled by 1.27.0 while all eleven CI pins, `go.mod`'s `toolchain`
+  directive and the `Go Vuln Scan` gate stayed on 1.26.6, so the published
+  artefact would have been the only thing built by a toolchain nothing had
+  verified. The pins move together instead: `GO_VERSION` in ten workflows,
+  the literal in `codeql.yml`, and `toolchain go1.27.0` in `go.mod`. The `go`
+  directive stays at 1.26 — the language floor is a separate promise to
+  consumers and nothing here needs 1.27 semantics.
+
+  No advisories are cleared or introduced by the move; govulncheck reports zero
+  either side of it. This is a build-toolchain change, not a security fix.
+
+  Two analysis tools had to move with it, both for the same underlying reason:
+  they vendor a copy of `golang.org/x/tools`, and an `x/tools` older than the
+  standard library it is asked to analyse dies on syntax it does not know.
+  `golangci-lint` goes v2.1.6 → v2.13.1 — v2.1.6 answers a 1.27 target with 908
+  phantom `typecheck` errors on valid code, and v2.12.2 panics outright.
+  `govulncheck` goes v1.1.4 → v1.7.0, panicking the same way
+  (`unexpected expr: *ast.KeyValueExpr`). Both pins are now documented as
+  coupled to `GO_VERSION` and must be re-checked whenever it moves.
+
+  The govulncheck failure is worth recording because of *how* it presents: it
+  is not reproducible on demand. v1.1.4 only builds SSA for packages the
+  vulnerability database hands it candidate symbols in, so the same tree
+  scanned clean on one run and crashed on the next — measured here at one of
+  each. A green local scan is therefore not evidence that the pin is
+  compatible. What holds the line is the run step's existing rule that any
+  exit code other than 0 or 3 is a hard failure, so a crashed scan reports as
+  a broken gate instead of falling through as "no vulnerabilities found".
+
+- **The builtin crew templates ship models that are not being retired.** All
+  twelve template files pinned dated snapshots — `claude-sonnet-4-20250514` on
+  43 agents, `claude-opus-4-20250514` on one, `claude-haiku-4-20250514` on
+  three — and those ids retire on 2026-06-15. Every crew the onboarding wizard
+  can deploy was seeded against a model with an end date, on the first screen a
+  new install ever shows.
+
+  The bump is per tier, not a blanket replace: the threat modeller keeps its
+  Opus, the secrets sweeper and the documentation writers keep their Haiku, and
+  everything else moves to Sonnet. A template's model choice is a cost decision
+  someone made deliberately, and flattening 47 pins onto one model would have
+  quietly repriced twelve crews.
+
+  A test walks the YAML exactly as the seeder does and holds two lines for
+  every agent in every template: no dated suffix, and the id must appear in
+  `llm.CuratedModels("anthropic")`. Bare aliases are the convention here —
+  a dated id pins a snapshot that will be withdrawn, and the alias will not.
+
+- **The onboarding preview no longer names a model of its own.** Five
+  hardcoded `"Claude Sonnet 4.6"` strings sat in the preview component, so the
+  same screen could show the picker's model, the template's model and the
+  preview's model and have all three disagree. It resolves one id through
+  `getModelLabel` now — the same function the rest of the UI labels with.
+
+- **First-run now asks for the password twice.** `/bootstrap` creates the one
+  account that owns the workspace, before any session exists, and a typo was
+  only discoverable at the next sign-in — by which point the way back in is a
+  password reset a fresh install may not be able to send. `/signup` already
+  confirmed; this brings the more consequential form in line.
+
+- **Pairing the CLI is no longer a dead end.** Step 3's green line reads "CLI
+  paired. You can finish below or jump to `crewship setup` in the terminal",
+  and Launch stayed disabled until a token was pasted into the browser — so
+  the terminal route it offers was unreachable. The client gate was stricter
+  than the server: `validateOnboardingCredential` returns nil on an empty
+  value, so launching without one is a supported path and the CLI lands the
+  credential afterwards. Browser mode still requires it, because there is no
+  terminal there to add it from later.
+
+- **Step 3 asks one question, then its consequence.** "How will you work?" was
+  asking two unrelated things on one screen — how the human drives Crewship,
+  and which credential the agents use — and ran off the bottom of the viewport
+  doing it, while the two steps before it fit in a third of it. The server says
+  as much in its own comment: `pairing_mode` "drives how the human works, not
+  the agents".
+
+  With a CLI in the picture the second question has a second answer, so in CLI
+  mode the credential block collapses to one line — "Add the token in the
+  terminal", with "Or add it now" to expand it — and the toolchain picker moves
+  inside, because choosing a toolchain only means something once a key is being
+  pasted. Browser mode has no terminal to fall back to, so there it stays open
+  and required, with no terminal instructions at all. The whole step now fits
+  above the fold.
+
+  An empty token is a valid answer once paired; a half-typed one is not, and is
+  rejected rather than stored as a credential that loads but never works.
+
+- **The Claude Code model picker offers only what has been verified with the
+  adapter, and is pinned to the backend's curated list.** It was a third independent copy of "which models
+  exist", alongside `internal/llm/models_curated.go` (which the backend already
+  serves at `GET /api/v1/models`) and the CLI's own adapter defaults — three
+  lists, three different contents. The Go list is the source of truth now, and
+  a test parses it to enforce that the picker never offers an id it does not
+  carry.
+
+  What the picker offers is deliberately narrower than curated: Claude Code
+  lists Sonnet 5 and nothing else, because that is what has actually been run
+  end to end with the adapter. An earlier version of this list was populated
+  from Anthropic's published catalogue, which offered five models of which one
+  was tested — publishing a model is not the same as having verified it.
+  Widening the list means verifying the adapter first.
+
+  Superseded aliases still answer at the API and can be set through the CLI
+  or the API — they are just not offered as a starting point. They keep their
+  display names through a label-only table: `getModelLabel` resolves by
+  scanning adapters, so without it an existing workspace on
+  `claude-sonnet-4-6` would have silently relabelled to "Claude Sonnet 4.6
+  (Cursor)" — the only other adapter that registers it.
+
+  `crewship setup`'s adapter defaults had drifted to Sonnet 4.6 while the web
+  picker moved on, so the two setup paths for the same adapter handed out
+  different models. They match again — which matters more now that the wizard
+  points paired users at the terminal path.
+
+- **Sign-up and the first-run admin screen join the split shell, and the setup
+  wizard stops moving underneath you.** `/signup` and `/bootstrap` were centred
+  cards next to a split `/login` they link to directly; both now mount
+  `AuthSplitShell` with the animated mark and their own panel copy.
+
+  Onboarding deliberately does **not** get the brand panel. It already has a
+  live preview of the workspace and crew you are building, which is worth more
+  than a logo, so it gets the same visual language applied to what is already
+  there: the cropped mark in the lockup, and the preview on a surface of its
+  own — tinted toward the brand with the mark as a watermark — where it used to
+  be `bg-muted/20`, within a hair of the form column, so the split read as one
+  page with a hairline down it.
+
+  The pane is lit rather than decorated: an inset highlight on the edge the
+  two panes share, and the ground falling away beneath it. The first attempt
+  reached for a large soft brand-blue radial glow, which is what every AI
+  product has shipped since 2024 and read as unserious next to a form people
+  have to fill in carefully. Depth is what makes a split read as two panes.
+  Stacked below `lg` the highlight moves to the bottom edge, because that is
+  where the seam actually is.
+
+  **The unauthenticated forms are usable with a thumb.** The shared `Input` is
+  `h-9` and `Button`'s default size is `h-9` — 36px, under every touch
+  guideline there is — and sign-in, sign-up, first-run and setup are the
+  screens most likely to be met on a phone. A `.touch-form` scope raises them
+  to 44px, keyed on `pointer: coarse` rather than on viewport width: width
+  missed the iPad, which is over any phone breakpoint you would pick and still
+  a finger. `components/ui` is untouched, because the same controls sit in
+  dense authenticated tables where 44px would wreck the row rhythm.
+
+  Two more phone fixes: the crew empty state reserved a full card's height on
+  a screen where the preview is below the form and off-screen while you type,
+  and it told you to pick a crew "on the left" when stacked there is no left.
+  The adapter step's token label and its help link stacked into a run-on at
+  390px; they sit on separate lines there now.
+
+  Two fixes found by walking the wizard on a nuked instance rather than by
+  reading it. **The lockup drifted between steps** — the form column was
+  centred as a whole, so the logo and stepper slid as the step content changed
+  height, measured at y=101 on Workspace, y=137 on Crew and y=66 on Adapter.
+  Both columns are top-anchored now; measured steady at y=71 across all three.
+  And **the preview's empty state was a thin strip**, leaving the pane looking
+  ~85% empty on step one — which reads as a failed render, not an empty state —
+  and making the layout jump when the real crew card arrived. It now reserves
+  that card's height and says what will land there instead of pointing at a
+  control.
+
+- **The sign-in screen is now a split, with the brand mark animated on the
+  right.** `/login` was a centred card on a flat gradient. It is now a
+  two-pane shell: the form in a readable column on the left, and on the right
+  the Crewship mark blown up until the panel is its tile.
+
+  The mark moves because it is **taken apart, not redrawn**. The logo is one
+  `<path>`, but that path is three subpaths — three sails. `lib/brand-mark.ts`
+  splits them so each carries its own motion, and the geometry on screen stays
+  byte-identical to the logo we already ship. Two of the three subpaths begin
+  with a *relative* `m`, chained to wherever the previous sail ended, so the
+  split walks the path tracking the current point and rewrites those movetos
+  as absolute; lifting them out verbatim would silently pile the sails at the
+  origin. The split runs at module load rather than into a checked-in
+  generated file, so a redrawn logo cannot leave a stale copy behind.
+
+  Each sail runs three independent sines — bob, swell about its foot, heel
+  about its foot — on periods that do not divide into each other, so the loop
+  never visibly repeats and the sails never sync into a pulse. A specular
+  sweep is clipped to the live union of the moving sails, built from the same
+  matrices that fill them, so it cannot drift off the mark.
+
+  `prefers-reduced-motion` settles the canvas to one composed frame and
+  schedules nothing; a hidden tab cancels the loop; and where there is no 2D
+  context the panel falls back to the shell's CSS gradient rather than to a
+  blank rectangle. Below `lg` the panel becomes a short brand banner above the
+  form — the headline is hidden there, because over a 12 rem banner it ran
+  straight through the sails.
+
+  `<CrewshipLogo tight />` crops the viewBox to the mark's own bounds. The
+  default 1024 box is the *tile's* box — the silhouette fills about 62% of its
+  width and 58% of its height, and the rest is padding the squircle needs.
+  Shown without a tile that padding is most of the element, which is why the
+  sign-in lockup's 28px mark read as a few grey pixels with no legible sails.
+  The lockup now uses the bare cropped mark at 36px. The tight mark is not
+  square (about 1.07:1), so size it on one axis and let the other follow.
+
+  None of the auth logic moved: `safeRedirectPath`, the
+  `/system/setup-status` first-run gate, the four banner states and the
+  signup-allowed flag are untouched. `SAIL_PATH` moved from
+  `components/branding/crewship-logo.tsx` to `lib/brand-mark.ts` and is
+  re-exported, so importers are unaffected.
+
+### Fixed
+
+- **Deploying a crew template links credentials for the agent's own provider.**
+  `autoAssignCredentials` filtered the workspace's credentials with a hardcoded
+  `provider = 'ANTHROPIC'` while the agents it links them to carry whatever
+  provider their template pinned. For an Anthropic crew the two agreed by
+  accident and nothing looked wrong. For any other provider the query matched
+  nothing and every agent in the crew deployed with **zero credentials** — no
+  error, no failed request, just a crew that does not work; and a workspace
+  holding an Anthropic key handed that key to a Google agent, which is worse,
+  because it loads and then fails at call time.
+
+  It reads the agent's own `llm_provider` now and falls back to `ANTHROPIC`
+  only when the column is empty, matching the default the write side applies.
+  A lookup that errors leaves the agent unlinked rather than guessing. The
+  onboarding wizard reaches this path for every builtin template, so it was one
+  adapter choice away on the most common flow in the product, and nothing
+  covered it.
+
+- **The wizard's model choice reaches the crew it deploys.** Picking a model on
+  step 3 did nothing for four of the five crew options: `req.LlmModel` was read
+  only by the branch that builds a blank or single-agent crew, so every builtin
+  template deployed with the model its YAML pinned and the select was
+  decoration. `deployCrewTemplate` takes the override now.
+
+  It applies **only when the chosen provider matches the agent's** — writing a
+  Gemini id onto a `CLAUDE_CODE` agent breaks it outright, which is worse than
+  the template's default. An override with no resolvable provider is ignored
+  for the same reason, and the zero value deploys the template verbatim, which
+  is what every other caller passes.
+
+- **The first-run window is documented as it behaves.** Three source comments
+  and the changelog stated bootstrap closes five minutes after `crewship
+  start`. It does not: it stays open until an admin account exists, and the
+  finite window is opt-in through `CREWSHIP_BOOTSTRAP_WINDOW` for instances
+  reachable from the internet before anyone claims them. One of the comments
+  named a symbol that is not in the tree. Four docs pages also said the closed
+  endpoint answers 403 where the server answers 410, as did an assertion in
+  `e2e/onboarding-fresh.mjs` — the code was right in every case and only the
+  prose and one stale check were wrong, which is the kind of drift that gets
+  believed because it is checked in.
+
+- **`e2e/onboarding-fresh.mjs` runs past its 24th check.** A module-scope
+  `const URL` shadowed the global constructor, so `new URL(...)` threw partway
+  through and the eleven checks after it had never executed — in a script that
+  reports its own pass count, which made a truncated run look like a short one.
+  Nothing in CI runs this script, so it went unnoticed; it completes now, 37
+  checks against a fresh database. Two of the newly-reachable checks were
+  themselves stale: the 410 above, and a `console.anthropic.com` link no
+  onboarding component renders any more (the step deep-links into the adapter's
+  own CLI-auth docs, deliberately not to the API-key page, because onboarding
+  rejects raw API keys).
+
+- **A failed `crewship apply` no longer reports success.** Apply is fail-fast,
+  so on an error the counters describe a *prefix* of the plan — but they were
+  printed under the word `Applied:` regardless, with the error on a later line.
+  A production run that uploaded none of its ten crew files reported
+  `Applied: 7 created, 3 updated` and was filed as done; the routine went on
+  running against the stale script the deploy existed to replace.
+
+  `Applied:` is now reserved for a run that finished. A failed run prints
+  `FAILED after N created, …  — the manifest was NOT fully applied.` and then a
+  `NOT APPLIED` block naming the item it died on and every item behind it that
+  was never attempted. The counters say how far the run got; only that list
+  answers the question the operator actually has, which is *which of them
+  landed*.
+
+- **`crewship apply` stops silently dropping routine DSL fields.** `spec:` was a
+  closed struct and the wire body an 11-key allowlist, so `guardrails`,
+  `integrations_required`, `concurrency_key`, `max_concurrent`, `outputs`,
+  `display_name`, `agentless`, `hooks`, `eval`, `resources`, `execution_tier`
+  and `parallelism` were dropped between the file and the server — no error, no
+  warning, no plan diff. The allowlist was justified by a comment claiming the
+  server rejects unknown keys; `pipeline.Parse` is a plain `json.Unmarshal` and
+  does not, so it bought nothing.
+
+  The export half was the dangerous one: `crewship export` decoded the *stored*
+  definition through the same struct, so a field set via `routine save` or the
+  dashboard vanished from the exported YAML and the next `apply` **deleted** it
+  from the live routine. An `agentless: true` token-zero guarantee could be
+  revoked by editing an unrelated line.
+
+  `spec` now carries an inline catch-all, the pattern its own steps have always
+  used, so any `routine.v1.json` key rides through in both directions. Typed
+  fields still win every collision, and `schedules`/`webhook` still stay out of
+  the definition. Because a typo is now forwarded rather than dropped, apply
+  warns at plan time for every `spec` key the DSL has no field for.
+
+- **The crew-file 409 names a command that exists.** Overwriting a file under
+  `/crew/shared` on a stopped crew answered "start the crew and retry", which
+  reads as `crewship crew provision` — a command that builds an image and, on a
+  cache hit, reports `provisioned` while the container stays `stopped`.
+  Following the message reproduced the 409. It now names `crewship crew start`
+  (below) and rules out the wrong turn it used to invite. `crew provision` says
+  `provisioned (container image ready)` and points at the same command, for the
+  same reason.
+
+### Added
+
+- **`crewship crew start <crew>` — start a crew's container on purpose.** There
+  was no way to. `crew provision` builds an image and stops; the container was
+  only ever created lazily by the crew's first agent run, so the only route to a
+  running crew was to run an agent at it with a throwaway prompt — spending
+  tokens for a side effect. That gap is what made the crew-file 409 unanswerable.
+
+  `POST /api/v1/crews/{crewId}/container-start` runs the same three steps the
+  dispatch path runs before an agent — EnsureProvisioned, then the crew's full
+  resolved config, then `crewstart.Start` — so a crew started this way is the
+  crew a run would have started: its provisioned image, its mounts and limits,
+  its declared sidecars. That sequence is copied rather than reinvented on
+  purpose; `internal/crewstart` exists because thirteen call sites once each had
+  their own idea of what starting a crew meant and disagreed invisibly.
+
+  Idempotent (starting a running crew returns its container and exits `0`, so a
+  deploy can start-then-write without branching), synchronous (the caller's next
+  action depends on the answer), and it provisions a cold crew first rather than
+  starting it onto the bare runtime image. Degradation the start survived — a
+  provider with no sidecar support — comes back as `notices` and is printed, not
+  logged.
+
+  It reports the start to the orchestrator's idle-TTL reaper. Every other
+  `EnsureCrewRuntime` caller gets that for free because an agent run follows and
+  reports the activity; this is the first path whose whole purpose is a start
+  with no run behind it, so an unreported container would have outlived its
+  `container_ttl_hours` until crewshipd restarted and rediscovered it.
+
+  It verifies rather than asserts. `EnsureCrewRuntime` is get-or-create and
+  normally restarts a stopped container, but not always — after two
+  consecutive stops it can return the id of a container that is still
+  `exited`. Answering `"status": "running"` there would be the very defect
+  this command exists to fix in `crew provision`, so the handler polls the
+  runtime before reporting success and returns `502` if the container never
+  comes up. (A known sequence — stop, stop, refused write, start — still fails
+  to restart; it is now a loud failure instead of a silent one, and is pinned
+  as `xfail` in `scripts/test-harness/test-crew-lifecycle.sh`.)
+
+  The CLI waits up to 20 minutes (`--timeout` to change it) rather than the
+  client's 30-second default. The default would not merely time out: Go's client
+  cancels the request, which cancels the handler's context, which tears down the
+  image build it was waiting on — leaving `context deadline exceeded` and no
+  container on exactly the never-provisioned crew this command exists to rescue.
+
+- **`crewship crew stop <crew>`.** The counterpart to `crew start`. Until now a
+  crew container could be started deliberately but only stopped by accident —
+  an idle TTL expiring, or a network-policy edit dropping it as a side effect —
+  so an operator who started three crews to land a restore had no way to give
+  the memory back.
+
+  `POST /api/v1/crews/{crewId}/container-stop` proxies to crewshipd, which
+  already stops the runtime AND the crew's declared sidecars in one operation.
+  Reimplementing the sidecar half here would be a second, slightly different
+  teardown, which is how one once reached into another tenant's Postgres
+  (#1732). Named volumes survive, so data does. Stopping an already-stopped
+  crew succeeds, and the crew is dropped from the idle-TTL reaper's
+  bookkeeping so it no longer logs an expiry for something a human stopped.
+
+  Because container memory and CPU limits are fixed at create time, stop-then-
+  start is also how a resize takes effect on a running crew.
+
+- **`crewship apply` warns at plan time when a crew it writes files into is
+  stopped.** Files under a crew's shared tree are owned by the container user,
+  so overwriting one needs the container up; against a stopped crew the save
+  answers 409, and because apply is fail-fast that lands mid-run, after earlier
+  resources are already committed. The plan knows both halves twenty seconds
+  earlier, so it now says so — naming the crew, the file count, and
+  `crewship crew start <crew>`.
+
+  Advisory, not an error: the crew may be started between the plan and the
+  apply, including by whoever is reading the line. A probe that cannot answer
+  stays silent rather than warning on a guess, and a crew being created by the
+  same apply is never warned about.
+
+- **`crewship apply --no-delete`.** Refuses any run whose plan contains a
+  delete, before a single request is issued, printing what it would have
+  destroyed. Sync mode makes deletion the default for anything that fell out of
+  the manifest, and some deletions are not a rollback away: removing an agent
+  takes its memory and its Composio OAuth binding with it, and that binding is a
+  browser consent no manifest can replay.
+
+  It deliberately outranks `--yes` — `--yes` is the flag every automated
+  invocation already carries, so a guard it could switch off would not be one —
+  and it fails `--dry-run` too, so the rehearsal and the performance agree.
+  This turns "this apply deletes nothing", previously a claim a human made by
+  reading a plan carefully enough, into one CI can check.
+
+  Enforced twice, against two different plans: once by the CLI against the plan
+  it rendered, and again inside `manifest.Apply` against the plan it builds from
+  its own fresh read immediately before executing it. Only the second one closes
+  the window — a resource that disappeared server-side between the two reads
+  adds a delete the rendered plan never showed, and `--yes` (which every CI
+  invocation carries) would have waved it through. SDK callers get the same
+  guarantee via `manifest.Options{NoDelete: true}` → `ErrDeletesRefused`.
+
+### Changed
+
+- **`OTEL_EXPORTER_OTLP_ENDPOINT` is treated as the base URL it is, and
+  `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` is honoured (#1870).** The standard
+  says the generic variable is a base URL for every signal and the signal
+  path is appended to it — including when it already carries a path. We
+  appended only when there was no path, and ignored the signal-specific
+  variable entirely.
+
+  Two consequences. A backend documenting a project-scoped prefix, such as
+  Langfuse's `/api/public/otel`, expects spans at
+  `/api/public/otel/v1/traces`; we posted to the bare prefix, where a
+  collector answers 200 and drops the payload — indistinguishable from
+  working. And an operator who set `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`, the
+  correct way to pin an exact URL, was not listened to at all.
+
+  **If you configured a bare prefix, traces move** — to where the backend
+  wanted them. A path that already ends in `/v1/traces` is not doubled, so a
+  fully-written-out endpoint is unaffected. To pin any exact URL, use
+  `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`.
+
+  The startup line now prints `traces_url` — the resolved destination, signal
+  path included — instead of the configured endpoint. Logging what was
+  configured is what let a misrouted exporter read as healthy for a release.
+
+- **The OTLP endpoint keeps its own `/v1/traces` default.** opentelemetry-go
+  1.45 changed `WithEndpointURL`: a URL with no path of its own used to fall
+  through to the exporter's default signal path, and now resolves to `/`. Since
+  `OTEL_EXPORTER_OTLP_ENDPOINT` is a base URL — that is the standard, and what
+  our setup guide tells you to configure — every collector would have started
+  receiving spans on its root route, where a 200 and a discarded payload look
+  exactly like success. `telemetry.Init` appends the signal path itself now, so
+  the upgrade is invisible to operators and the SDK's default stops mattering
+  to us. An endpoint that already carries a path keeps it verbatim, as before.
+
+  The setup guide also claimed the SDK appends `/v1/traces` to a project-scoped
+  prefix such as `/api/public/otel`. It never did, in any version — if you
+  configured a bare prefix, set the full URL your backend documents.
+- **WAL checkpointing moved off the request path.** Every commit appends
+  frames to the `-wal` sidecar, and SQLite folds them back inside whichever
+  write transaction happens to cross the threshold — so the cost landed on a
+  random agent. The daemon now disables the inline autocheckpoint
+  (`database.WithManagedWAL`) and runs a dedicated checkpointer that does the
+  work on a goroutine nobody is waiting on. At 100 concurrent agents, three
+  runs per policy, p99 write latency went **26.1 ms → 8.9 ms** and the WAL
+  ended at 0 instead of 13.6 MB.
+
+  Two findings are recorded in `internal/database/checkpoint.go` because both
+  contradict the obvious guess: a `PASSIVE`-only checkpointer is **worse than
+  doing nothing** (it folds frames back but never resets the `-wal` file, which
+  grew to 98 MB), and the win comes from *who pays* for the checkpoint, not
+  from checkpointing more often. Only the long-lived daemon disables
+  autocheckpoint; short-lived CLI commands keep SQLite's built-in behaviour,
+  and the pairing is enforced by a test.
+
+- **The port-exposure purge no longer stalls every writer.** The sweeper runs
+  every 30 s and issued one unbounded `UPDATE`, so its cost scaled with the
+  backlog: measured at 41 ms of held write lock for 5,000 rows and **486 ms
+  for 50,000**, with a concurrent live write blocked for 449 ms. That is the
+  same sweeper whose lock hold took logins down on 2026-05-25 and is why
+  `busy_timeout` was raised to 30 s. It now drains in bounded batches,
+  releasing the lock between each, and logs the remaining backlog if it ever
+  stops at its iteration cap.
+
+  Bounding is right here because the job is *frequent* and its backlog grows.
+  It is the wrong move for a large infrequent job: chunking a daily
+  20,000-row sweep measured **worse** (150 ms → 405 ms total, live-writer p95
+  4.1 ms → 21.5 ms), because re-acquiring the write lock costs more than the
+  shorter holds save. Both numbers are in the code comment so the pattern is
+  not copied blindly.
+
+- **The two audit tables that grew forever now have retention windows
+  (#1887).** `credential_audit` and `audit_logs` were the only tables in the
+  schema with no pruning at all — `pipeline_runs`, `inbox_items` and
+  `journal_entries` are all swept, these two never were. `credential_audit`
+  gains a row on every credential read by every agent; on a dev instance with
+  almost no real use it was already the second-largest table in the database.
+
+  The defaults differ deliberately. `credential_audit` keeps **90 days**,
+  matching the pipeline-run window — it is operational telemetry, and the
+  answer an operator actually reads (`last_used_at`, the `last_used_ips` ring)
+  lives on `credentials` and is untouched. `audit_logs` keeps **everything**,
+  because it is the compliance trail and `docs/security/gdpr.mdx` says audit
+  records have to survive the operator's own retention obligations. Crewship is
+  self-hosted: that duty is theirs to know, so the mechanism ships and the
+  decision does not. Both are overridable per workspace, where `NULL` means
+  "use the default" and `0` means an explicit "keep forever" — a distinction
+  `run_retention_days` does not make, because nobody has a legal duty to retain
+  a pipeline run.
+
+  Upgrading never deletes anything on its own: the migration pins every
+  workspace that already existed to an explicit "keep forever", so the 90-day
+  default only ever applies to workspaces created after it. Otherwise the first
+  restart after the upgrade would have swept a year of credential history away
+  before the API that sets the override was even listening.
+
+  The sweep deletes in bounded batches so no single statement can stall every
+  writer, and says how much backlog is left if it stops at its cap. Since
+  `audit_logs` is unlimited by default, it also warns when a workspace has no
+  window and the table passes a million rows — an operator should hear about
+  that from a log line, not from a full disk.
+
+- **The credential audit view stops sorting the whole table to answer one
+  page (#1889).** `credential_audit` had no `workspace_id`, so scoping it to a
+  tenant meant joining through `credentials` — a shape no index could serve.
+  SQLite either walked the table in time order probing `credentials` for every
+  row, or gathered the entire matching set and built a temporary B-tree to sort
+  it before `LIMIT` threw almost all of it away; the page's `COUNT(*)` then ran
+  the same join again. That cost grows with the table, and this is the one
+  audit table with no retention sweep at all.
+
+  The column is now carried directly, with
+  `(workspace_id, occurred_at DESC)` behind it, matching how `audit_logs` and
+  `keeper_request_events` have always worked. The single writer derives the
+  value from the credential inside the same `INSERT`, so it cannot disagree
+  with the row it describes and no caller has to know the workspace to write an
+  audit row. Existing rows are backfilled. No behaviour change — the same rows
+  come back.
+
+- **Sixteen foreign keys indexed, thirty-two deliberately not (#1890).** With
+  foreign keys enforced, deleting a parent row scans every child table whose
+  referencing column does not lead an index — once per deleted row, holding the
+  write lock. 48 columns were in that state. The ones now indexed are those
+  where the parent is genuinely hard-deleted *and* the child table grows;
+  `DELETE FROM missions WHERE crew_id = ?` drove three of them on its own,
+  because it deletes many missions in one statement and re-checks every child
+  of `missions` for each.
+
+  The 32 skipped are the interesting half. Nine reference `users`, and nothing
+  in the tree hard-deletes a user row — so an index there is write cost with no
+  delete to accelerate. The rest are settings and small config tables where a
+  scan costs nothing. Both exclusions are pinned by tests, so they stay
+  decisions rather than oversights, and a ratchet makes the remaining count
+  visible if a new table adds foreign keys nobody sized.
+
+- **A task whose assignment link failed is now FAILED, not stranded (#1892).**
+  `scheduleTask` inserted the assignment and then linked it to the task in two
+  separate statements. A failure between them logged a warning and reported
+  success, leaving the task `IN_PROGRESS` with no assignment — a state
+  `resolveReadyFromTasks` never re-picks, so the work sat there forever with no
+  operator-visible symptom. Both writes are now one transaction, and a link
+  failure surfaces as a failed task. The dependent-task cascades
+  (`unblockDependentTasks`, `failDependentTasksRecurse`) also stopped issuing
+  one standalone `UPDATE` per row: each level is now a single batched
+  transaction, so a mid-cascade failure unblocks nobody instead of half the
+  graph.
+
+- **`presence.Track` no longer fabricates a transition.** The prior status was
+  read and the new one written in two statements, so a losing writer could emit
+  `online → busy` for a transition that had already happened, or report a
+  `prev` that was never the state it overwrote. The journal is consumed as a
+  transition log and is hash-chained, so a wrong `prev` is worse than a
+  redundant row. Read and write now share one transaction; the journal emit
+  stays outside it.
+
+- **Eleven redundant indexes dropped
+  (`20260810120000_drop_redundant_indexes`).** Each was a leading-prefix
+  duplicate of a longer index on the same table, so the planner could never
+  choose it while every write still maintained it — on `missions`, `chats`,
+  `assignments`, `credentials`, `journal_entries` and others.
+  `idx_journal_trace_id` and `idx_journal_trace` turned out to be the same
+  index under two names. A schema invariant test now fails the build if the
+  shape is reintroduced.
+
+- **One attachments table, and `chat_attachments` is gone (#1768).** The schema
+  carried two attachment tables that no product code had ever read or written —
+  `chat_attachments` and `workspace_files` (both migration v57) — while the chat
+  composer's live attachment path wrote blobs and **no metadata row at all**, so
+  a chat attachment had no recorded size, checksum, MIME type or uploader and
+  could not be listed or deleted through any API. The new `attachments` table
+  replaces `chat_attachments` (dropped in the same migration) and holds all owner
+  kinds through an exclusive-arc foreign key, so a row can never decay into an id
+  that resolves to nothing. `ProxyHandler.AgentChatAttachment` now writes its row;
+  the chat blob's location is deliberately unchanged, because
+  `/output/<agentSlug>/attachments/…` is the agent-visible contract.
+
+  `workspace_files` is **not** dropped here: it is a path→metadata index rather
+  than an attachments table, and three v144 timestamp-regression guards use it as
+  their canary. Removing it belongs with #1768 item 8, together with moving those
+  guards.
+
+### Fixed
+
+- **Two crews with the same issue prefix no longer wedge each other (#1797).**
+  An identifier is `<prefix>-<n>`, where the prefix is the crew's
+  `issue_prefix` or the first three letters of its slug — so `engineering` and
+  `engine` both derive `ENG` with nothing configured. The number came from a
+  counter keyed **per crew**, while identifiers are unique **per workspace**, so
+  both crews minted `ENG-1` and the second one's insert was rejected.
+
+  It was not a one-off 500. The counter increment and the issue insert shared
+  one transaction, so the rejection rolled the increment back too: the losing
+  crew asked for the same identifier on every subsequent create and **could
+  never file an issue again**, with no message naming the cause. Any workspace
+  with two such crews had one of them silently out of service.
+
+  The counter is now keyed on `(workspace_id, prefix)`, which is the namespace
+  it feeds. Two crews sharing a prefix share one sequence and interleave
+  (`ENG-1`, `ENG-2`) instead of colliding — no validation to remember at each
+  write site, and no legitimate crew refused for its name. The migration
+  collapses colliding counters onto the highest of them, which also unwedges a
+  crew that was stuck, and seeds each prefix above the identifiers it has
+  already minted so a crew that changed its prefix cannot restart into an
+  existing range. The two duplicate identifier generators (the REST create and
+  the agent/recurring path) are now one.
+
+- **`crewship crew update --issue-prefix` (#1797).** `issue_prefix` has been
+  accepted by `PATCH /api/v1/crews/{id}` since v38 and had no CLI flag at all;
+  it was reachable only from the web UI. Pass an empty string to clear it and
+  fall back to the slug.
+
+### Security
+
+- **cel-go can receive security updates again (#2067).** It had stopped, and
+  nothing said so. cel-go renamed its module: `v0.31.0` declares
+  `module github.com/google/cel-go`, but `v0.32.0` and everything after declare
+  `module cel.dev/cel-go`, served from a different origin repository. v0.31.0 —
+  where we were — is therefore the last release reachable under the import path
+  we used, and Dependabot cannot cross a rename because doing so means editing
+  source. It failed the whole `go_modules` job with `go_module_path_mismatch`
+  instead, in a job log nobody reads, on every run since at least 2026-08-24.
+
+  This matters more than a stale pin because CEL evaluates expressions that
+  come from pipeline definitions, and because the *advisory* channel was
+  affected too: a future advisory would be published against `cel.dev/cel-go`
+  and would not have matched a requirement naming the old path. The gate meant
+  to catch a stale dependency was looking at the wrong name for it.
+
+  Imports move to `cel.dev/cel-go` and the module to v0.32.0. No behaviour
+  change is intended — the two paths serve identical content for the same tags.
+
+- **A crew no longer starts on a known-stale runtime image, whichever way the
+  host got there (#2006, #2019).** ⚠️ **Behaviour change:** a start that used to
+  succeed can now fail.
+
+  Crewship pulls the runtime image **by digest** and then re-creates the
+  `repo:tag` alias itself, because everything downstream — `ContainerCreate`
+  included — addresses the image by tag. When that re-tag failed and an older
+  copy of the tag was still on disk, the tag kept pointing at the **old**
+  manifest: the container ran the old image, and the `provisioning.step` journal
+  attested the newly pulled digest as verified. The journal half is fixed first
+  — the digest recorded is now read back off disk, so a run is never attributed
+  to a manifest it did not execute, and no digest at all is recorded when the
+  daemon answers 404 for the tag. A read-back that *fails* is not read as a 404:
+  a timeout says nothing about what the tag resolves to, so the decision falls
+  back on what was proved before the pull.
+
+  Execution is now fixed too. That state is bit-for-bit the state a **failed
+  pull** over a stale local copy reaches, which has refused to start since
+  #1825 — so one route stopped the fleet while its sibling shrugged and started
+  the wrong image with an error log. Both routes now go through one decision:
+  refuse by default, with the existing host-wide opt-out
+  `CREWSHIP_ALLOW_STALE_RUNTIME_IMAGE=1`, and the error names both digests, what
+  happened, and how to fix it properly. This route is the more recoverable one —
+  the manifest you wanted is already on disk and merely unnamed — so the error
+  hands over the exact `docker tag` that names it.
+
+  **Who is affected:** a host whose registry answers the digest check while its
+  local tag resolves to something else. An air-gapped or offline host is not
+  affected (no digest answer, so nothing is provably stale) and neither is a tag
+  that is simply absent. **If a start now fails**, re-pull or run the `docker
+  tag` the error prints; if you would rather run the older image than stop the
+  fleet, set `CREWSHIP_ALLOW_STALE_RUNTIME_IMAGE=1`. The opt-out relaxes
+  execution only — it still journals the **local** digest with
+  `payload.pinned: false`, because a tamper-evident log that attests a digest
+  which never ran is worse than one that records nothing.
+
+- **Go toolchain bumped 1.26.5 → 1.26.6, clearing eight advisories (#1959).**
+  Seven were in the standard library and reachable from real call paths —
+  `crypto/tls` post-handshake message flooding (GO-2026-6090), `net/http`
+  missing `ReadHeaderTimeout` on the unencrypted HTTP/2 check (GO-2026-6089)
+  and its IDNA Punycode label handling (GO-2026-5026), quadratic
+  `net/url.resolvePath` (GO-2026-6218), unbounded recursion in `encoding/xml`
+  (GO-2026-6088) and `encoding/asn1` (GO-2026-5972), and JavaScript regexp
+  context tracking in `html/template` (GO-2026-6091). The eighth,
+  GO-2026-6222, was excessive memory allocation decoding VP8L in
+  `golang.org/x/image`, reachable from avatar upload, and is fixed by that
+  module's 0.44.0 → 0.45.0 bump.
+
+  Dependabot proposed the toolchain move in the `Dockerfile` alone; the
+  version is pinned in **thirteen** places (`go.mod`, the `Dockerfile` and
+  eleven workflow pins), and only moving them together changes what the
+  released binary and CI are actually built with. `govulncheck ./...` now
+  reports zero.
+
+  The govulncheck allowlist is emptied in the same change. Its five entries
+  were all `docker/docker` advisories, and that module left the graph when the
+  container provider moved to `github.com/moby/moby` — a dead entry would have
+  silently re-accepted those IDs had it ever returned transitively. The
+  allowlist arm of the gate now has unit coverage in
+  `scripts/security-yml-test.sh`, extracted verbatim from the workflow the way
+  the scheduled-report gate already was.
+
+- **Capability tokens are hashed at rest (#1888).** `port_exposures.token` and
+  `pipeline_webhooks.token` were stored in the clear and looked up by equality.
+  Neither `/exposed/{token}/…` nor `POST /api/v1/webhooks/{token}` has any
+  authentication in front of it — by design, the token *is* the authorization
+  — so anyone who could read the database file walked away with every live
+  exposure URL and every configured webhook on the instance. Both columns now
+  carry a SHA-256 digest and are resolved by digest, the way `cli_tokens` has
+  worked since Patch J.
+
+  **Existing tokens keep working.** The migration hashes the cleartext already
+  in the row rather than rotating it: invalidating would have broken every
+  published exposure URL and every already-configured sender, on every
+  instance, and nothing suggests the cleartext leaked. What changes is that the
+  cleartext is then overwritten — neither column can be dropped (both are
+  `NOT NULL UNIQUE`, which SQLite's `DROP COLUMN` refuses, and one is still
+  named by the create path) so each holds `redacted:<row id>` afterwards.
+
+  **The digest is unkeyed SHA-256** (hex, behind an `sh1:` scheme prefix), not
+  an HMAC. A key protects a digest whose input space is small enough to
+  enumerate offline; both of these tokens are 32 bytes of `crypto/rand`, so the
+  preimage search is 2^256 wide either way and a key buys nothing. It would
+  have cost a great deal: an earlier revision of this work keyed the digest off
+  `ENCRYPTION_KEY`, and the documented master-key rotation
+  (`CREWSHIP_ENCRYPTION_KEY_VERSION` + `ENCRYPTION_KEY_V2` +
+  `POST /admin/reencrypt`) **retires that variable as its final step** — after
+  which every presented token would hash under a different scheme than every
+  stored digest, with the cleartext already overwritten and nothing to recover.
+  The keyed `hk1:` scheme never shipped and is not supported; a **dev instance**
+  that ran the earlier revision must re-create those webhooks and re-request
+  those exposures.
+
+  A row the backfill cannot hash is no longer stranded either. The backfill
+  continues past a failed `UPDATE` (SQLite has one writer; a moment of
+  contention used to abort the loop and 404 every remaining webhook until the
+  next restart) and, while any row still holds cleartext, the webhook lookup
+  falls back to it — bounded to rows whose digest is missing, and re-hashing
+  each one it resolves. On the exposure side, an `ACTIVE` row whose hashing
+  failed is hashed at boot and keeps serving; one that nothing can resolve is
+  flipped to `EXPIRED` instead of being reported live with a future expiry.
+  Revoking an exposure now drops it from the registry by row id when the row
+  carries no digest — the previous fallback read a column that always holds
+  `redacted:<id>`, so a revoke could answer `200` while the capability URL kept
+  reverse-proxying into the crew container until the process restarted.
+
+  One behaviour change follows from it: a webhook's token is now **shown once**,
+  in the create response. `GET`/`PATCH` and the list endpoint no longer return
+  it, because it is no longer recoverable. A webhook whose token was lost has to
+  be re-created, and `crewship routine webhooks url <id>` now says so and exits
+  non-zero instead of printing `…/api/v1/webhooks/` with nothing after the
+  slash.
+
+  For port exposures the cleartext never reaches disk at all: the create path
+  writes the spent marker and the digest directly, rather than inserting the
+  live token and redacting it a moment later. That window was short — one
+  request — but a crash, a WAL checkpoint or a backup taken inside it captures
+  a working capability URL, which is the whole exposure being closed. If the
+  process dies between the insert and the registry write, the row is left
+  resolving for nobody, which is the right direction to fail.
+
+  `pipeline_waitpoints.token` is **not** covered. It is the same kind of
+  secret, but it is also that table's primary key, the handle
+  `inbox_items.source_id` and a WAITING run's `waitpoint_token` carry, and the
+  value `GET …/pipelines/waitpoints` reads back out of the column to rebuild
+  the public callback URL. It is a retrievable shared secret by contract rather
+  than a show-once credential, so hashing it means redesigning that contract
+  first; tracked separately.
+
+- **`workspace_members.role` is constrained to the roles that exist (#1893).**
+  `crew_members.role` has carried a `CHECK` since v99; the column deciding what
+  a member can do across a whole *workspace* carried nothing and would accept
+  any string. The API validates today, so this is defense in depth — but the
+  read tier is where it would have mattered: `canRole`'s write tiers switch
+  over the known roles and deny anything else, while its `read` tier accepts
+  any non-empty string. Write fails closed, read fails open, and only the
+  schema can refuse the value independently of whichever write path appears
+  next.
+
+  Enforced with `BEFORE INSERT` / `BEFORE UPDATE` triggers rather than a
+  `CHECK`, because SQLite cannot add one without a full table rebuild — not a
+  trade worth making on the table that decides workspace ownership. The
+  difference is deliberate: a stored legacy row keeps working and is refused
+  only when something tries to write it back, where a rebuilt `CHECK` would
+  have refused to apply at all and failed the boot.
+
+- **The escalation wait endpoint now scopes to the caller's token binding.**
+  `GET /api/v1/internal/escalations/{id}/wait` loaded the escalation by id
+  alone, with no workspace or crew predicate — and when the escalation's type
+  is `CREDENTIAL`, that handler **decrypts the resolution and returns the
+  secret in the clear**. A crew-bound (`crwv1`) sidecar token could therefore
+  wait on another crew's escalation, in another workspace, and be handed its
+  plaintext the moment a human approved it. Both halves leaked: an
+  already-`RESOLVED` foreign escalation returned immediately, and a foreign
+  `PENDING` one long-polled and was delivered on resolve.
+
+  The lookup now carries the predicate its sibling `CreateEscalation` has
+  used since PR-F24: crew-bound callers match their own `crew_id` exactly (a
+  sibling crew in the same workspace is as foreign as another tenant, which
+  is what `crwv1` tokens exist to enforce), workspace-bound callers match
+  their workspace, and the unbound master token stays unrestricted. A refusal
+  is the same `404` as an unknown id rather than a `403`, so the endpoint is
+  not an existence oracle.
+
+- **The Docker API surface the server can reach is now specified, published
+  and gated (#1826).** The server talks to Docker directly, which is
+  root-equivalent on the host. `DOCKER_HOST` already let an operator put a
+  filtering proxy in front of that, and `docker/docker-compose.prod.yml`
+  already shipped one — but nobody had ever derived the endpoint list behind
+  it, and it was wrong: **`COMMIT` was missing**, so crew provisioning behind
+  the proxy we ship would have failed with a `403` on `POST /commit`, and the
+  BuildKit path (`BUILD` + `SESSION`) was unaccounted for entirely.
+
+  The real surface is **31 Engine API endpoints** — not the 25 previously
+  assumed. `ContainerCommit`, `ContainerPause`, `ContainerUnpause`,
+  `CopyFromContainer`, `ImageList`, `ImageRemove`, `Info`, `Ping` and
+  `ServerVersion` were all reached and unlisted; `ContainerLogs` and
+  `NetworkRemove` were listed and never called. `scripts/docker-api-surface`
+  re-derives the list from the call sites on every CI run and fails on drift in
+  **both** directions — a new call nobody declared (the proxy would deny it in
+  production) and a declared endpoint nobody calls (we would be asking
+  operators to grant a permission we do not need). It also catches a package
+  newly importing the Docker SDK, and a subprocess executed with `DOCKER_HOST`
+  pinned, which is a second client of the same socket that no compile-time
+  check would see.
+
+  New guide: [Docker Socket Proxy](https://docs.crewship.ai/guides/docker-socket-proxy).
+  It is deliberately unflattering about the ceiling. The proxy filters URL
+  paths and never request bodies, so it **cannot** block `Privileged: true` in
+  a `ContainerCreate` — the workspace `allow_privileged_credentials` gate stays
+  the real fence. Its granularity is a path prefix, not an endpoint:
+  `CONTAINERS: 1` also opens `POST /containers/prune` and
+  `POST /containers/{id}/update` for every container on the host. And the verbs
+  we genuinely need (`ContainerCreate`, `ExecCreate`/`Start`/`Attach`,
+  `CopyToContainer`) are most of what an attacker would want. What it does
+  remove is real — image build, `commit`, swarm, plugin install, `/system`
+  prune, registry auth — and that is the claim the page makes, no larger.
+
+- **Internal tokens are now bound to a crew, closing the
+  credential-metadata enumeration leak (#1159).** The `?crew_id` scope on
+  `GET /api/v1/internal/credentials` (#1031) was opt-in and fail-open: a
+  workspace-bound `X-Internal-Token` holder could omit `crew_id` (get the
+  whole workspace's credential metadata) or forge a sibling crew's id and
+  enumerate it. A per-crew sidecar now receives a **crew-bound** token —
+  `crwv1.<workspace_id>.<crew_id>.<hex(HMAC-SHA256(master, ctx ||
+  workspace_id || crew_id))>`, `internaltoken.DeriveCrewToken` — carrying
+  the workspace binding (PR-F24) plus a crew binding. `requireInternal`
+  rejects a `?crew_id` that disagrees with the token's crew (403) on every
+  internal route and exposes the bound crew via
+  `InternalTokenCrewFromContext`; the credential listing scopes to that
+  cryptographic crew in preference to the forgeable query parameter. The
+  loopback exemption for the crew-less in-process `TokenSyncer` is
+  connection-based (`r.RemoteAddr`), never header-based. Crew-less runs
+  fall back to the workspace-bound `wsv1` token unchanged. A follow-up
+  audit pins the closure end-to-end — real derived token → `requireInternal`
+  → handler, from a Docker-bridge origin — and adds a sentinel for the one
+  surviving residual: a crew-less (workspace-bound) caller still gets its
+  own workspace's credential metadata, because that is the token's true
+  scope and because an empty listing would make the sidecar's credential
+  reaper evict every provider key the container booted with.
+- **Privileged crews now emit a provision-time WARN (#1032).** A crew
+  provisioned with `--privileged` (e.g. DinD) collapses the UID 1001/1002
+  boundary that isolates the sidecar's IPC token and injected credentials
+  from the agent process. The full remediation is out of scope; the log
+  line surfaces the trust downgrade in ops the moment such a crew is
+  provisioned.
+
+- **`POST /workspaces/{id}/skills/generate` spent the wrong tenant's Anthropic
+  key.** The handler took its workspace from `r.PathValue("workspaceId")`, but
+  `RequireWorkspace` resolves the tenant with `?workspace_id=` taking priority
+  over the path — so the two could disagree. An OWNER of workspace A could send
+  `POST /api/v1/workspaces/<B>/skills/generate?workspace_id=<A>`: the middleware
+  validated A's membership and let the request through, then the handler
+  evaluated A's role against workspace B and looked up, decrypted, and spent B's
+  Anthropic API key. It now reads `WorkspaceIDFromContext`, the only value
+  membership was ever checked against. A source guard
+  (`TestNoHandlerReadsWorkspaceFromPath`, AST-based, allowlist with reasons)
+  fails the build on any new handler that re-reads the path, so the class is
+  closed rather than the one instance.
+
+- **Six write paths persisted foreign-workspace references.** `project_id` and
+  `milestone_id` on issue create/update, `project_id` on recurring-issue
+  create/update, `crew_id` and `project_id` on triage-rule create/update, and
+  `lead_id` on project create/update all went into their INSERT verbatim. This
+  is the #1471 class on the columns that fix did not reach: the caller never
+  requests the foreign row, they name it, and the read path resolves it — so an
+  issue listing rendered another tenant's project name, and a triage rule could
+  route this tenant's incoming issues into another tenant's crew on every match.
+  `assertFKInWorkspace` now carries a per-table membership query (it previously
+  supported only `agents` and `crews`, and projects/milestones were documented
+  as "deliberately not listed", which is why those handlers validated nothing),
+  and `fkInWorkspaceOrReject` makes a call site one line. Found by the new
+  cross-workspace fence matrix rather than by review.
+
+- **An agent could escape its crew's `autonomy_level` by creating a new crew
+  (#1768).** Six `/api/v1/internal/*` routes let an agent create something that
+  keeps acting after the request ends — a crew, a persistent agent, a mission,
+  a cron schedule, a skill — and none of them consulted the calling crew's
+  policy. Each handler justified skipping the check with a claim about its
+  caller ("enforced upstream") rather than a check; nothing ran it. The sharpest
+  consequence: `POST /internal/crews` never set `autonomy_level`, so the new
+  crew took `DEFAULT 'guided'` (migration v101) — an agent held to `strict`
+  could create a `guided` crew, create an agent inside it, and act there
+  unbounded. **Two things close that, and neither is the blocking:** `strict`
+  now refuses `crew_create` outright, and an allowed crew **inherits the
+  creating crew's autonomy level** instead of the column default, so no created
+  crew is ever more permissive than its creator. That property — not any
+  particular cell of the decision matrix — is what closes the escape, and
+  `TestAutonomyInvariant_ChildCrewNeverOutranksCreator` pins it across all four
+  levels of the creating crew so a future re-tuning of the matrix cannot
+  silently reopen it. Every arm (refused, held, allowed) writes an audit row
+  carrying `decision`, `autonomy_level` and `policy_action`; there is no silent
+  allow. When the policy resolver is unwired the gate holds rather than
+  proceeding — a wiring bug fails closed.
+
+### Changed
+
+- **A `container` CLI call that finished microseconds before its deadline no
+  longer reports a timeout (#2030).** The `internal/provider/apple` half of the
+  process-group fix below is a user-visible behaviour change, not only an
+  internal cleanup. `killProcessGroup` is `runCLIWithin`'s `cmd.Cancel`, and it
+  used to return a bare `ESRCH` when the process group emptied between the
+  lookup and the signal — the case where the command finished in the instant its
+  deadline fired. `os/exec` wraps any error from `Cancel` other than
+  `os.ErrProcessDone` as `exec: canceling Cmd: …` and, because the command
+  itself exited 0, hands that to `Wait`; `runCLIWithin` then saw
+  `ctx.Err() == DeadlineExceeded` and reported
+  `container …: timed out after 20m0s`, throwing away output the command had
+  already produced. That `ESRCH` is now mapped to `os.ErrProcessDone`, which
+  `os/exec` treats as "the process already finished, don't inject a needless
+  error", so the call returns its real stdout and a nil error. Callers or
+  operators matching on the old timeout string for these races will stop seeing
+  it — those calls were successes misreported as timeouts.
+- **Agent-driven creation is now gated on the crew's `autonomy_level`, and on
+  the default level (`guided`) some of it blocks (#1768).** This is a
+  behaviour change on default settings, not only a bug fix — a crew that has
+  never had its policy touched will see agents stopped where they previously
+  were not.
+
+  On `guided`, **`POST /internal/crews` and `POST /internal/agents` are
+  blocking**. The row is still written, but inert: a new crew is pinned to
+  `autonomy_level=strict` (so nothing can be created inside it) and a new agent
+  is written `status=PENDING_REVIEW` (so the chat bridge will not start it).
+  The call answers `202 Accepted` with `pending_review: true` and an
+  `approval_id`. The operator gets a **blocking, ADMIN-addressed inbox
+  waitpoint** and a row on the approvals queue.
+
+  Release a held item with `crewship approvals approve <id>` (or deny it, or
+  the `/approvals` page — `POST /api/v1/approvals/{id}/decide`, OWNER/ADMIN).
+  Approving flips the sentinel: the agent becomes `IDLE`, the crew is restored
+  to **the creating crew's** level — never higher. **Denying does not delete
+  anything**, it just never releases, and so does letting the hold lapse: the
+  seven-day timeout leaves the artefact inert rather than turning into a green
+  light.
+
+  On `guided`, **missions and cron schedules are not blocking**. They proceed
+  and leave a non-blocking inbox notice: a mission creates no principal and is
+  pinned to the caller's own crew, and a schedule stays an operator-editable
+  row (`PATCH .../pipeline-schedules/{scheduleId}`), so in both cases a hold
+  bought the same visibility a notice does while stopping ordinary work. At
+  `strict` a mission is held (it can be planned, not started) and a schedule is
+  refused outright.
+
+  To tighten or loosen this per crew:
+
+  ```bash
+  crewship policy set --crew <slug> --level strict  --reason "…"  # refuse crew/agent/schedule creation
+  crewship policy set --crew <slug> --level trusted --reason "…"  # unchanged for crew/agent; missions + schedules go journal-only
+  crewship policy set --crew <slug> --level full    --reason "…"  # nothing blocks; crew/agent still leave a notice
+  ```
+
+  `strict` refuses `crew_create`, `agent_create` and `routine_schedule_create`
+  with a structured `403` naming the level, so the CLI can suggest the
+  `policy set` that would unblock it. `full` blocks nothing but still leaves a
+  non-blocking notice for a new crew or agent — full autonomy is still
+  autonomous, but a new permanent principal is the change an operator wants to
+  see having happened.
+
+- **Agent-created missions are now bounded by two live instance settings
+  (#1768).** Letting `guided` — the default level — start a mission without a
+  hold rested on missions being bounded by the #1757 delegation caps. They are
+  not: the mission engine dispatches its task list through a path that never
+  passes the delegation insert, and both files say so. `POST /mission/create`
+  now answers `403` past either of:
+
+  | Setting | Default | Bounds |
+  |---|---|---|
+  | `mission.max_tasks` | `16` | Tasks one agent-created mission may carry. `0` allows task-less missions only. |
+  | `mission.max_active_per_crew` | `6` | Agent-created missions one crew may have in a non-terminal state. `0` switches agent-driven mission creation off. |
+
+  The refusal body names the `setting` an operator would change, and no mission
+  or task row is written. Both are read live from `app_settings`, so
+  `crewship instance settings set mission.max_tasks 24` applies to the next
+  call, not the next restart, and neither number can be raised from the request
+  — there is no such field on the route.
+
+  The second number is the one that matters, because **mission creation
+  recurses**: a mission created with no tasks makes the engine run its lead as
+  a planning turn, that turn is the one dispatch shape that keeps the sidecar,
+  and the planning brief we send it offers "create a new sub-mission" as an
+  option. A per-mission task cap alone would have bounded nothing. The crew's
+  live-mission budget does, because every mission an agent creates lands in the
+  crew its token is bound to.
+
+  Scope, stated rather than implied: this covers the **agent** door only.
+  Missions created through the dashboard/JWT API are neither capped nor counted
+  against the agents' budget — an operator planning work is making a decision —
+  and issues (which share the `missions` table) never count.
+
+### Fixed
+
+- **Leaving a workspace kept every crew membership (#1976).** `RemoveMember`
+  deleted the `workspace_members` row and nothing else, so each `crew_members`
+  row the departing user held in that workspace outlived their departure —
+  and those rows grant on their own. Crew membership alone opens crew-owned
+  pages (`pages_authz.go`) and crew credentials (`credentials_loaders.go`),
+  and `CrewRoleFromDB` folds `crew_members.role` into
+  `effectiveRole(workspace, crew)`. So a user removed while holding a per-crew
+  ADMIN override and later re-added as a plain MEMBER came back **as crew
+  ADMIN**: `AddMember` inserts a workspace_members row and never looks at
+  `crew_members`, so nothing on the way back in could notice the elevation
+  nobody granted.
+
+  The removal now deletes both, in one transaction — both or neither, because
+  workspace-removed-but-crew-attached is exactly the state being fixed. The
+  purge is scoped through `crews` (`crew_members` has no `workspace_id` of its
+  own), so the same person's crews in other workspaces are untouched, and it
+  runs *after* the page-owner transfer, whose "else the crew the departing
+  user belonged to" fallback reads the very rows being purged.
+
+  **Behaviour change:** re-adding someone to a workspace no longer restores
+  their crews. A returning member must be added back to each crew by hand —
+  including any per-crew role override they used to hold.
+
+- **Cancelling a devcontainer build on macOS could leak the process tree
+  forever (#2030).** `AppleContainerBuilder.Build` left `cmd.Cancel` at
+  `os/exec`'s default, `Process.Kill()` — the direct `container` process and
+  nothing under it — while its own watchdog killed the whole process group.
+  Both woke on the same cancellation, and when exec's kill landed first the
+  child could already be an exited, unreaped zombie by the time the group kill
+  asked which group it was in. Darwin cannot answer that: XNU's `getpgid(2)`
+  goes through `proc_find`, which excludes exited processes, so it returns
+  `ESRCH` where Linux still reports the group. The kill then fell back to
+  re-killing the corpse, the CLI's helpers kept the write end of stdout, the
+  log scanner blocked on a pipe nobody would ever close, and `cmd.Wait()` was
+  never reached. A cancelled provision leaked the goroutine, the pipe and the
+  process tree indefinitely.
+
+  The group id is now derived from what the command was started with — `Setpgid`
+  makes the child its own group leader, so pgid == pid for the pid's whole life,
+  including as a zombie — instead of being looked up at kill time, and `Cancel`
+  is that same group kill, so exec no longer sends a second, racing signal. The
+  watchdog also keeps signalling after a cancellation instead of stopping after
+  one attempt; that closes a narrow gap, a group member that forks between the
+  kernel walking the group and the signal landing, rather than being a general
+  rescue — SIGKILL is uncatchable and the pgid no longer moves, so the first
+  kill already reaches everything in the group. A holder that has left the group
+  entirely (via `setsid`) is still unreachable and still wedges the build, as it
+  does today; note also that once a build is cancelled the idle-timeout branch
+  no longer runs. `internal/provider/apple`'s copy of the helper had the same
+  lookup-at-kill-time shape on its timeout path and got the same fix. The
+  regression tests reap the direct child before killing, which makes Linux's
+  `getpgid` answer `ESRCH` too — so a macOS-only hang is now provable on the
+  Linux runners that gate every PR.
+- **"Waiting on you" counted things nobody was waiting on (#1876).**
+  `scopeOf` — the classifier the Activity rail, feed and status segments all
+  read — put every human-source journal row in the `waiting` bucket. But the
+  journal is an EVENT LOG: an `approval.requested` row stays in it after the
+  approval was granted, and `peer.escalation` is emitted for both the ask
+  (`escalation_handler.go:255`) and its resolution (`:607`,
+  `escalation_autoresolve.go:172`), separated only by `payload.state`. So on
+  any instance that resolves what it asks — which is every working instance —
+  the segment could read `Waiting 4` beside an Overview card reading `0`. Two
+  answers to one question on one screen, and the wrong one was the reassuring
+  direction to be wrong in.
+
+  `scopeOf` now takes the same view the card takes: a human-source row is
+  `waiting` only while its ask is still OPEN. A resolved escalation says so on
+  its own face; an approval or keeper request is closed by a *different* entry
+  type, so the join runs over the window (`answeredAsks` → `scopeCounts`,
+  `entriesInScope`, `scopeByEntry`). The card's `openAsks` is now that same
+  bucket rather than a second opinion about it, and a test pins
+  `openAsks(feed).length === scopeCounts(feed).waiting`. An ask whose answer is
+  outside the window, or that carries no id to join on, stays in `waiting` —
+  over-reporting one row beats hiding something a person is blocking on.
+- **The crew bottom panel's Docker tab could never show a container (#1697).**
+  It fetched `GET /api/v1/system/runtime` — the HOST runtime inventory — and
+  read `data.containers` off it, a field that endpoint has never sent. The
+  guard was `Array.isArray(data?.containers) ? data.containers : []`, so the
+  absent field became an empty list and the tab rendered "No containers
+  running." on every crew, forever, with every container up: the line that
+  would have surfaced the mismatch was the same line that swallowed it.
+
+  Nothing served the data, so there is now something that does.
+  **`GET /api/v1/crews/{crewId}/containers`** returns the crew's live
+  containers — its agent runtime *and* its sidecars — with state, CPU, memory
+  and the runtime row's agent count, read straight from the container runtime;
+  `crewship crew containers <crew>` is its CLI counterpart. `/system/runtime`
+  keeps answering the host question it was built for.
+
+  The client no longer has a fallback to swallow anything: a response without a
+  `containers` array is reported as a broken contract, not as an empty crew, so
+  the next rename fails loudly instead of quietly. Absent numbers stay absent
+  end to end — a stopped container and a runtime without stats support both
+  report `null`, rendered "—", never a `0%` that would draw an idle container
+  where nothing was measured.
+
+- **The status chips on `/issues` could only ever select one status.** The
+  chip row was handed the list `useFilteredIssues` had *already* narrowed by
+  status, so picking "Backlog" dropped every other chip's count to 0 — and a
+  chip whose count is 0 is not rendered at all, which put the second status
+  permanently out of reach. The "All" pill had the mirror-image bug: it
+  advertised the filtered count as the total. The hook now returns
+  `{ visible, statusFacet }` — `visible` is what the board and list render,
+  `statusFacet` is the same set with the status filter left out, and it is
+  what the chips count. The code comment above the call site had described
+  the correct behaviour ("counts derive from the pre-status-filter set")
+  since it was written; only the code disagreed.
+
+- **Bulk editing from the issues list view did nothing.** `IssuesListInline`
+  — the wrapper `/issues` actually renders in list mode — never forwarded
+  `workspaceId`, so `IssuesListView.handleBulkUpdate` returned at
+  `if (!workspaceId) return`: select rows, pick a status, no request, no
+  error, no feedback. That also made the refusal reporting added in #1563
+  unreachable from the real UI. The wrapper now requires `workspaceId` (and
+  forwards `onBulkAction`), and the regression is pinned at the wrapper
+  level rather than only on the inner view, which the old tests had been
+  handing the prop themselves.
+
+- **Renaming a label was a 500 for everyone.** `PATCH /api/v1/labels/{labelId}`
+  built its statement with `newUpdate()`, which always emits `updated_at = ?`
+  first; the `labels` table has only `created_at`, so SQLite answered "no such
+  column: updated_at" on every call since the endpoint shipped. The statement is
+  now built from the columns the table actually has. Worth noting how it
+  surfaced: a route that 500s cannot be tested for tenancy — the UPDATE never
+  executed, so nothing could be said about its `WHERE` clause — and fixing the
+  500 is what made the fence assertion on that route real.
+
+- **A local-model endpoint now works whatever shape it was stored in.** One
+  `ENDPOINT_URL` credential was consumed by three code paths that each expected a
+  *different* shape of the same string: a bare root for `llm.Ollama` (which
+  appended `/api/chat`), `.../v1` for the OpenCode provider block, and the full
+  `.../v1/chat/completions` for `llm.OpenAI` (which used the value verbatim as the
+  POST target). Our own documentation tells operators to store the `.../v1` form —
+  point the Keeper governance model at that credential and the judge POSTed to
+  `.../v1/api/chat`, got a 404, and, Keeper being fail-closed, **denied every
+  credential request**. The credential's own Test button stayed green throughout,
+  because the reachability probe strips `/v1` before falling back to `/api/tags`.
+  A new `internal/llm/endpoint` package normalizes any pasted shape — bare
+  `host:port`, trailing slash, `/v1`, `/v1/chat/completions`, `/api/chat` — to a
+  mount root, and each provider appends the path for the wire it speaks, so the
+  mismatch is now unreachable by construction. A reverse-proxy mount prefix
+  (`https://gw/ollama`) and an Azure-style unversioned deployment are both
+  preserved, as is an `?api-version=` query.
+
+- **A reasoning model no longer silently denies everything as the Keeper judge.**
+  Ollama returns a reasoning model's chain of thought in `message.thinking`,
+  separately from `message.content`. A model that spends its token budget
+  thinking (verified against Ollama 0.32.5 with `qwen3:4b`) answers with empty
+  content, `done_reason: "length"`, and HTTP 200 — which the provider reported as
+  a successful, empty, `end_turn` completion, so the fail-closed judge parsed
+  nothing and denied, with no error to explain it. `Response` now carries
+  `Thinking`, and a budget-truncated answer reports `max_tokens` instead of
+  `end_turn`, so callers can tell "the model said nothing" from "the model
+  reasoned and never reached an answer".
+
+- **A transient database hiccup during hook dispatch was reported to users as
+  "a hook blocked this run".** `hooks.Dispatch` looks up the hooks registered
+  for an event before evaluating any of them; when that lookup itself failed
+  (a closed connection, a busy SQLite file), the error came back wrapped in
+  the same plain `error` that a genuine blocking hook's `*BlockedError`
+  travels in, and every call site — `pre_agent_start` in the orchestrator
+  chief among them — treated any non-nil `Dispatch` error as a block. An
+  infrastructure blip cancelled the agent run and printed "pre_agent_start
+  hook blocked", which was false: no hook ever ran. Registry and handler
+  failures now return a typed `*hooks.DispatchError`; an explicit policy
+  refusal remains `*hooks.BlockedError`. The `pre_agent_start` gate fails
+  closed for either condition but reports "dispatch failed" for infrastructure
+  instead of inventing a policy block. Lookup failures are also logged
+  unconditionally and, when a journal emitter is wired, recorded as a new
+  `hook.dispatch_error` entry so the outage stays observable.
+
+- **A provisioning run held by admission control looked identical to a hung
+  one (#2167).** The `provision.event` wire frame already carries a
+  machine-readable `reason` (`host_memory`, `host_pressure`, `concurrency`,
+  `pacing`) whenever a container start is held for host capacity, but the
+  provisioning popover, the crew canvas banner and the chat provisioning
+  card all built their step label as `p.feature ?? STEP_LABELS[step] ?? step`
+  and never read it — so every held run read "Waiting for host capacity" with
+  no way to tell why, or whether it would ever move. The reason now renders
+  next to that label (e.g. "Waiting for host capacity — not enough free host
+  memory"), mapped from the real `admission.Reason*` tokens and falling back
+  to the raw token for one this build doesn't recognize yet.
+
+- **`approvals_queue` was kept forever, had no GDPR erasure path, and its
+  read endpoints answered any workspace member (#2233).** Every terminal
+  approval decision (approve/deny, cancel, both timeout paths) only ever
+  updated `status`/`decided_*` in place — nothing deleted a row, so the
+  table grew without bound and every row rode into every backup bundle.
+  Decided rows now age out on a per-workspace retention schedule
+  (`workspaces.approvals_retention_days`, defaulting to 90 days, swept
+  daily by `harbormaster.StartApprovalsRetentionSweeper`; set it with
+  `crewship workspace update --approvals-retention-days`, where `0` means
+  keep forever — the same as its `--credential-audit-retention-days` and
+  `--audit-log-retention-days` neighbours on that command), a pending row is
+  never touched regardless of age, a `kind=autonomy_gate` row is never swept
+  regardless of age or status either — for a mission target that row is the
+  hold itself (`autonomyGateApproved` treats "no row" as "proceed"), not
+  history, so sweeping a denied or timed-out one would eventually let a
+  mission that was never approved start running unattended — and the
+  Article 17 cascade
+  (`DELETE /api/v1/admin/users/{userId}/data`) now erases a subject's rows
+  by `requested_by`/`decided_by` since the table has no `data_subject_id`
+  column. Separately, and this is a behaviour change an integrator will
+  notice: `GET /api/v1/approvals` and `GET /api/v1/approvals/{id}` used to
+  require only workspace membership and returned the full request payload
+  to any member; they now require `OWNER`/`ADMIN`, matching the decide/
+  cancel routes next to them. The shipped Inbox (`/inbox-v2` and
+  `/approvals`) fetched this endpoint for every member regardless of role,
+  so both surfaces now gate the fetch on role client-side instead of
+  showing a 403 error banner to a MEMBER/MANAGER viewer; when that gate
+  flips off mid-session (role resolved away from admin tier), rows already
+  fetched while the viewer was authorized are now cleared rather than left
+  rendered. A companion migration
+  (`20260901140000_approvals_retention_pin_existing_workspaces`) pins every
+  workspace that predates this change to an explicit `0` (keep forever):
+  without it the sweeper's immediate first sweep at boot would have
+  resolved every existing workspace's unset override to the 90-day default
+  and deleted decided approval history on the first restart after
+  upgrading. `--approvals-retention-days` now also rejects a value above
+  106751 days (~292 years) — past that point the day count overflows the
+  `int64`-nanosecond duration the sweep computes its cutoff from and wraps
+  negative, which would otherwise delete every terminal row regardless of
+  age.
+- **An escalation's raw text reached the permanent journal entry and the
+  workspace-wide broadcast, even though the inbox copy was scrubbed
+  (#2238).** `CreateEscalation` wrote the same agent-supplied
+  `reason`/`context`/`metadata` into three places — the inbox row, the
+  `peer.escalation` journal entry, and the `escalation_created` /
+  `escalation.created` WebSocket broadcasts — but secret-redaction and a
+  length bound were applied only to the inbox copy. An inbox row is exactly
+  what a GDPR erasure request deletes, while the journal entry is explicitly
+  excluded from that erasure and is never rewritten again, so the copy that
+  survived forever was the unredacted, unbounded one: a credential-shaped
+  value an agent pasted into an escalation sat there permanently, and
+  nothing capped how large `context` could be. The journal payload and its
+  summary line are now redacted and capped at 4096 characters, the same
+  treatment the inbox copy already got — and so is the `reason` sent in
+  `CreateEscalation`'s own workspace-wide broadcast, since that goes out
+  live to every connected member the moment the escalation is raised, not
+  just the person who ends up seeing the inbox row.
+
+  The same gap existed at three other points on the escalation path, closed
+  the same way: the expiry sweeper (`escalation_lifecycle.go`) re-reads
+  `reason` out of the `escalations` table and writes a SECOND permanent
+  `peer.escalation` entry when nobody answers in time — that summary line
+  now gets the identical redact-then-bound treatment, not just the create
+  path's. The auto-confidence escalation path
+  (`confidence_handler.go`) broadcasts its own `escalation.created`
+  workspace-wide with the agent-supplied `reason` — that call site now
+  redacts too. And `ResolveEscalation`'s journal entry redacted
+  `resolution` only when the escalation's type was `CREDENTIAL` and never
+  bounded it for any type, so an operator's free-text resolution on a
+  non-`CREDENTIAL` escalation could carry a secret an operator pasted in
+  ("used token ... to unblock it") into the same permanent entry, verbatim
+  and unbounded — `resolution` is now redacted and capped the same way for
+  every non-`CREDENTIAL` type.
+
+  Left out, deliberately: `CancelEscalation`'s journal entry and broadcasts
+  also carry a raw `reason`, but that text is operator-supplied (the human
+  cancelling, not the agent that raised the question), which is outside
+  this issue's scope of scrubbing agent-supplied text — tracked as a
+  follow-up rather than silently left unredacted.
+
+- **`on_budget_exceeded` now fires once per breach, not once per LLM call
+  while over budget (#2153).** `hooks/types.go` documents the policy/limit
+  events — `on_approval_requested`, `on_guardrail_triggered`,
+  `on_budget_exceeded` — as firing once per triggering condition, but
+  `paymaster.Enforce` dispatched it from inside the per-status loop with
+  nothing recording that a breach had already been announced: it fired on
+  every call made while a budget stayed over, and twice on a single call
+  that breached two budgets. A journal row absorbs repeats fine; a hook
+  routed to pagerduty or Slack does not. `paymaster.announceBudgetBreach`
+  now debounces per `(workspace_id, crew_id-if-the-budget-is-crew-scoped,
+  budget_id, period, limit_usd)` — the first call to push a budget over in
+  a given period dispatches, later calls in the same period do not, and it
+  fires again once the period rolls (the same boundary `sumSpend` uses) or
+  the limit is raised and breached again (folding the limit into the key
+  gets re-fire-on-raise for free, without a separate invalidation path).
+  Two budgets breached by the same call still dispatch once each — that is
+  two distinct triggering conditions, not a repeat of one. The debounce
+  state is in-memory only (mirrors `enforceLocks`' existing trade-off in
+  the same file); a `crewshipd` restart can re-announce an already-seen
+  breach once. Not built: tiered re-firing on a much larger breach (e.g.
+  10% over vs. 400% over) — noted in the PR as a possible follow-up. The
+  `budget.exceeded` journal entry itself is unchanged and still emits every
+  call. The debounce state holds one entry per budget (overwritten in
+  place as its period/limit change via a `CompareAndSwap` retry), not one
+  per `(budget, period, limit)` ever seen — an earlier draft keyed the
+  latter, which meant a regularly-breaching hourly budget grew the map
+  forever over a long `crewshipd` uptime; found in review before merge.
+
+- **`hooks.Dispatch` no longer queries `hooks_config` when nothing is
+  registered (#2154).** `Dispatch` called `ListByEvent` unconditionally
+  before its early return, so a workspace with zero hooks paid the same
+  lookup as one with ten — on every LLM call (`pre_llm_call` +
+  `post_llm_call`), every observed tool call, every delegation hop, every
+  peer query, and every breached budget. A negative cache inside `Dispatch`,
+  keyed `(workspace_id, crew_id, event)`, now remembers "nothing enabled
+  here" and returns immediately without touching the database; only the
+  negative case is cached, so a workspace that does have hooks still pays
+  the query on every call, because the `Matcher` pass that follows is
+  per-call and a cached row set can't safely stand in for it. `Register`,
+  `Update`, `Delete` and `SetEnabled` in `internal/hooks/store.go` — the
+  only writers to `hooks_config` — invalidate every cached entry for that
+  workspace on a successful write, coarse (workspace-wide, not just the
+  touched `(crew_id, event)` pair) but always correct, via an exported
+  `hooks.InvalidateCache(workspaceID)` for any writer introduced outside
+  the package. Invalidation is single-process: a second `crewshipd` writer
+  would serve a stale negative until its own next write, called out as a
+  follow-up rather than built now. A write-epoch counter closes a narrow
+  TOCTOU found in review: a hook registered for the exact triple `Dispatch`
+  is checking, landing between its `ListByEvent` read and its cache write,
+  could otherwise be cached as a permanent false negative — `Dispatch` now
+  re-checks the epoch before caching and skips caching (not an error, just
+  a forgone optimization for that one call) if a write landed in between.
+
+## [1.0.0-rc.1] — 2026-07-12
+
+### Security
+
+- **X-Internal-Token is now bound to a workspace (PR-F24) — closes the
+  documented symmetric cross-tenant bypass.** Sidecars no longer
+  receive the process-wide master internal token. At sidecar start the
+  orchestrator derives a workspace-bound token
+  (`wsv1.<workspace_id>.<HMAC-SHA256(master, workspace_id)>`,
+  `internal/auth/internaltoken`) and injects it via the stdin
+  `IPCConfig`. The `internalAuth` middleware validates the binding on
+  every `/api/v1/internal/*` request: tampered tokens fail the
+  constant-time MAC check, and the binding is enforced as a **mandatory
+  request scope** rather than an optional `?workspace_id` check. For a
+  bound token `requireInternal` rejects a `?workspace_id` that disagrees
+  with the binding (403) and **injects** the bound workspace when the
+  caller omits the query — so every handler that filters by
+  `?workspace_id` (webhook secret, list credentials, agent/chat resolve,
+  crew/agent create) is tenant-scoped automatically, with no
+  legacy-unscoped fall-through. Path-param mutations that don't read the
+  query (chat message-count / title, run finalize, credential status)
+  constrain their `WHERE` clause by the bound workspace (foreign rows →
+  404, never mutated). Handlers scoped by a body-carried `workspace_id`
+  (`cost/record`, `journal/emit`, `pipelines/save`, plus the issue /
+  mission / assignment / query / escalation create handlers and the
+  confidence report) enforce the same binding in-handler via
+  `assertInternalTokenWorkspace`. The unbound master token — which
+  authorizes every workspace and so retains cross-tenant power if leaked
+  from a container — is now **pinned to a loopback origin**: a master
+  token presented from a Docker-bridge / LAN IP is refused (403), capping
+  the blast radius of a leaked master to the host trust boundary
+  (`CREWSHIP_INTERNAL_ALLOW_ANY=true` relaxes the pin for reverse-proxy
+  setups). Pre-fix, an agent that captured the token inside its container
+  could aim internal routes at ANY workspace by picking the
+  `?workspace_id` it wanted (or simply omitting it on the routes that
+  ran unscoped) — the "symmetric case" left open by the earlier Keeper
+  Phase 2 asymmetric fix below. Derivation is stateless (no persistence;
+  derived tokens roll with the master each boot) and the master token
+  remains valid for host-side trusted callers (chat bridge, webhook
+  secret resolver, LLM proxy) that reach the API over loopback and never
+  enter a container. See the updated "Tenant isolation" section in
+  `docs/security/threat-model.mdx` and the retired "known exception"
+  block in `docs/api-reference/internal.mdx`.
+
+- **Cross-tenant scoping on Keeper Phase 2 internal endpoints.** The four
+  `/api/v1/internal/keeper/*` handlers (skill-review, behavior,
+  memory-health, negative-learning) now (a) include `workspace_id` in
+  the `self_learning_enabled` lookup WHERE clause and (b) reject any
+  request where the body `workspace_id` disagrees with the request
+  context `workspace_id` set by `internalWsCtx`. Pre-fix an internal-
+  auth caller could pass an `agent_id` from workspace A while claiming
+  workspace B in the body and read the gate flag — asymmetric cross-
+  tenant bypass. The symmetric case (caller picks one workspace
+  consistently across query + body) is closed by the workspace-bound
+  `X-Internal-Token` entry above (PR-F24); the former "known
+  exception" block in `docs/api-reference/internal.mdx` is retired
+  accordingly.
+
+- **Lessons memory tier hardened against agent-author writes.** The
+  generic `memory.write(tier="lessons", …)` dispatcher path returned
+  cap=0 and bypassed every governance layer the F4.4 evaluator path
+  enforces (schema validation, idempotency by ID, atomic-rename,
+  flock). Agent-author writes to the lessons tier are now rejected
+  with an error that points at the F4.4 negative-learning endpoint as
+  the supported entry point. Tombstone test
+  `TestDispatch_Write_LessonsTier_Rejected` pins the contract.
+
+- **Security hardening v1 wave.** Two-tier CLI tokens (standard +
+  HMAC-keyed admin) with fine-grained PAT-style scopes, per-crew role
+  overrides and per-agent ownership gates, structured 403s with a denial
+  audit log, one-shot setup token on `/api/v1/bootstrap`, internal API
+  refuses non-private client addresses, sidecar credential proxy strips
+  plaintext token fields, `NET_RAW` dropped from default crew container
+  capabilities, `/crew/init.sh` auto-exec now opt-in per crew, and
+  bootstrap/pair tokens widened to 256-bit (#462).
+
+- **May–June external-audit remediation waves.** Prod `docker.sock` is
+  brokered through a filtering proxy (#478); memory writes are scanned
+  *before* persist, including invisible-format (Cf) codepoint evasion
+  (#502, #477); a TOCTOU symlink window in `writeCredentialFiles` closed
+  (#464); path traversal, IDOR, cross-crew access, MCP SSRF,
+  prompt-injection and info-leak findings fixed across four passes
+  (#476–#508, #612, #619, #620, #651, #733, #752).
+
+- **RBAC chokepoint: route-table declared authz.** Previously
+  un-gated control-plane mutation endpoints now enforce role checks
+  (#792); every route's permission gate is declared in the route table
+  and pinned by an invariant test so new endpoints can't ship ungated
+  (#824, closes #809/#811); admin console + system endpoints get a
+  uniform ADMIN+ floor (#893); scoped CLI-token permissions are enforced
+  at the same route-table chokepoint (#888).
+
+- **Ingress trust fence.** Untrusted external content (webhook bodies,
+  poll payloads) is neutralized before it can enter an agent prompt
+  (#819, #808 M0), extended to the remaining mission/task and
+  crew-context ingress sites (#918); `tool_result` events from **all**
+  adapters now pass through one shared injection-scan chokepoint (#950).
+
+- **Per-agent sidecar identity.** Each agent in a crew receives its own
+  derived auth token, closing intra-crew identity spoofing against the
+  sidecar control plane (#826, closes #812), and escalations are
+  attributed to the bound agent rather than a caller-supplied `from`
+  field (#796). Per-agent memory identity fixes landed in the dev2
+  validation sweep (#779, CRE-137…146).
+
+- **Credential revocation is now effective at runtime.** The sidecar's
+  in-memory credstore reaps revoked credentials within ~60s (#795), and
+  revoking a credential also removes its file-based `/secrets` materials
+  from running containers (#903, closes #814).
+
+- **Webhook trigger hardening.** Every pipeline webhook dispatch
+  requires an HMAC signature (#501) with replay auto-dedupe (#506) and a
+  rate-limit floor (#507); empty-secret HMAC configs are rejected and
+  optional signed-timestamp replay defense added (#789), with per-agent
+  `require_timestamp` to close the body-only replay window (#822,
+  closes #815).
+
+- **New crews default to restricted egress**, and egress-policy denials
+  are loud instead of silent (#793); `http` pipeline steps enforce the
+  crew egress policy and resolve credentials from the vault rather than
+  inline secrets (#778).
+
+- **Memory file-path hardening.** Centralized pathsafe fencing on memory
+  paths plus capped search allocations close 13 CodeQL HIGH findings
+  (#926); memory-read and writer-lock opens use `O_NOFOLLOW`, closing a
+  symlink TOCTOU (#936, closes #934/#935).
+
+- **Log-injection neutralized centrally.** One CR/LF + control-character
+  neutralizer covers server and sidecar log sinks (#938); secret
+  redaction is wired through slog (#488) and raw token values in logs
+  replaced by fingerprints (#486).
+
+- **deb/rpm packages are GPG-signed** and the public key published for
+  apt/dnf verification (#942, closes #932).
+
+- **Go toolchain bumped 1.26.0 → 1.26.5** across the release cycle for
+  stdlib CVEs, including the crypto/tls GO-2026-5856 advisory
+  (#570, #907).
+
+### Added
+
+- **Pipeline resume-from-step at boot.** The executor now persists
+  `current_step_id` + the step-outputs map at every step boundary, and
+  boot recovery re-enters previously in-flight runs from the next
+  unfinished step instead of stamping them `interrupted`: completed
+  steps are restored (not re-executed), the in-flight step re-runs
+  with at-least-once semantics, DAG runs recover at wave granularity,
+  and runs parked on a `wait` approval step re-attach to their
+  original pending waitpoint token so the approval card stays
+  answerable across restarts. `interrupted` remains the fallback when
+  persisted state is insufficient (missing pipeline, definition drift,
+  non-resumable mode), with the reason recorded in `error_message`.
+  Operator escape hatch: `CREWSHIP_PIPELINE_RESUME=off` restores the
+  old stamp-everything-interrupted behaviour. See
+  `docs/guides/routines.mdx` § Durability and restart recovery.
+
+  Hardening pass on the resume scan: (1) the boot scan now runs
+  BEFORE the cron scheduler starts and is additionally fenced on
+  process-boot time + the live run registry, so a scheduled run fired
+  at boot can never be "resumed" into a second concurrent execution
+  under the same run id — `RunRegistry.Acquire` also rejects
+  duplicate run ids outright instead of silently overwriting the live
+  entry; (2) a resumed run that loses the concurrency-slot race
+  retries with capped exponential backoff instead of being
+  permanently stamped interrupted; (3) migration v114 stamps the
+  pipeline's definition content hash onto each run row at start, and
+  resume refuses (→ `interrupted: definition changed`) when the
+  definition was edited in place even if every step id survived;
+  (4) a waitpoint that timed out during downtime now fails the
+  resumed run with `timed out` instead of misreporting `denied`.
+
+- **Domain metrics on `/metrics` (W10).** The Prometheus endpoint now
+  exposes operator-facing series next to the existing process gauges:
+  `crewshipd_assignments{status}`, `crewshipd_assignment_queue_depth`
+  / `_queue_crews` / `_queue_depth_max` (aggregated — no per-crew
+  labels by design), `crewshipd_pipeline_runs{status}`,
+  `crewshipd_agent_run_events_total{event}`,
+  `crewshipd_llm_calls_total{provider}` +
+  `crewshipd_llm_cost_usd_total{provider}` from the paymaster ledger,
+  `crewshipd_containers_tracked` / `_reporting`, and
+  `crewshipd_db_migration_version`. Label sets are closed (unknown
+  values fold into `other`), the DB-derived block is cached for 15s,
+  and migration v113 adds the two status indexes the counts ride on.
+  Documented in `docs/observability/metrics.md`.
+
+- **PR-G / PR-F UI surface.** Three React panels expose previously
+  backend-only governance toggles: `CrewPolicyControls`
+  (`autonomy_level` × `behavior_mode` × `max_ephemeral_agents`),
+  `AgentLearningToggle` (per-agent `self_learning_enabled` flag from
+  migration v106), `AuxStatusSection` (read-only diagnostic of the
+  five auxiliary model slots). Plus four keeper P2 review queue
+  sub-tabs in the admin panel, a GDPR admin export/delete panel,
+  inbox approve-hire button, and codemirror markdown editor for the
+  agent memory tab.
+
+- **Migration v106 — per-agent `self_learning_enabled` flag** with the
+  standard audit triple. Consumed by the F4.4 negative-learning and
+  F6 persona-suggest ALLOW paths: when the flag is OFF, the proposal
+  queues a blocking inbox row with the full proposal payload instead
+  of auto-applying.
+
+- **Migration v107 — GDPR cascade primitives.** `data_subject_id`
+  columns on `memory_versions` and `inbox_items`, plus the
+  `gdpr_actions` audit table. New `DELETE /api/v1/admin/users/{id}/data`
+  cascade endpoint + `GET` Art. 15 export bundle. Idempotent — each
+  invocation lands a new `gdpr_actions` row.
+
+- **`MemoryProvider` interface and `LocalDispatcher` reference impl**
+  for future pluggable memory backends. Additive — existing production
+  call sites still route through the built-in dispatcher; swap lands
+  as PR-F17.
+
+- **`AgentBrief` sub-agent briefing primitive.** Replaces the
+  all-or-nothing `SkipConvHistory` boolean with a curated `Mission` +
+  `SharedMemory` + `Constraints` slice written to the child's
+  `BRIEF.md`; picked up by the orchestrator's prompt assembly.
+
+- **Declarative deployment manifests (SPEC-2).** `crewship apply` covers
+  14 manifest kinds end-to-end with validation (duplicate-slug detection
+  at validate time), plus auto-managed sidecar credentials (SPEC-4)
+  (#454, #456, #587).
+
+- **Routines platform wave.** Governance review gate
+  (proposed → approve, with OWNER/ADMIN `skip_governance_gate`),
+  describe-first authoring from chat, `save_routine`/`list_routines` as
+  native MCP tools, precondition gates and declared required
+  integrations, CEL expressions, deferred dispatch, hooks and input
+  streams (#743, #715, #739, #755). Follow-on: first-class token-zero
+  `script` steps (#849) with portable export/import bundles (#913),
+  per-step retry policy with backoff + CEL classifier (#882),
+  auto-parallelized independent steps with bounded DAG waves (#872),
+  single-step fixture runs (#854), `routine init` scaffold/clone (#860),
+  run-result retrieval (#844), run→files listing (#891), client-facing
+  shareable/redacted progress views (#877), offline `validate` parity
+  with server-side checks (#901), and non-blocking `notify` steps with
+  outbound email + signed-webhook channels and anti-spam caps
+  (#843, #859, #910).
+
+- **Managed integrations via Composio.** Catalog, OAuth connect flow,
+  per-agent binding, tool exposure and triggers (#696), a flag-gated
+  default connector for all agents (#699), portal-safe Add-app UX
+  (#703), and agents are made aware of their connected integrations
+  (#704).
+
+- **Chat overhaul.** Faithful history with reload, grouped
+  tool/reasoning UI, sub-agents and multi-user group chat (#702);
+  resumable streams so a reply is never lost to a refresh (#757); smooth
+  streaming reveal (#758); unread badges, activity ordering and
+  agent-replied notifications (#760); mid-turn steering of an in-flight
+  run, long-conversation compaction instead of truncation, cross-session
+  conversation search (BM25), and LLM model discovery with live model
+  switch (#630 wave).
+
+- **Fleet operations UI.** The Journal Runs tab is reworked into a fleet
+  ops overview (#750), a global Activity Bar + readable run-activity
+  timeline (#701), context-aware bottom dock across Issues, Routines &
+  Activity (#710), and a drillable agent-native run trace — tool-call
+  sub-spans, waterfall, persisted per-step input/output with lazy fetch
+  and syntax highlighting (#852, #853, #874), plus per-step
+  container-ready timing (#930).
+
+- **Inbox redesign.** Gmail-style triage with formatted detail,
+  noise/secret hardening and CLI parity (#708), collapsible group tree
+  with bulk select/resolve (#692), refined toolbar (#747), and
+  agent-proposed credentials with one-click human approval (#706).
+
+- **Ephemeral ("hired") agents surfaced in Crews & Agents** with full
+  lifecycle controls (#693); hired agents automatically receive an
+  Anthropic credential so they can actually run (#680).
+
+- **Slash commands + per-user capabilities.** Server-driven slash
+  palette with CLI/UI parity, gated by per-membership capability grants
+  (#595).
+
+- **Packaging: deb/rpm packages + systemd unit** for server installs
+  (#927, #858 phase 4), and **Windows support via a CLI-only
+  `crewship-cli` build** — zip archives, `O_NOFOLLOW` platform split,
+  gated self-update (#949, closes #945).
+
+- **`crewship self-update`** — one upgrade command per install channel
+  (brew/deb/rpm/tarball) (#915), including systemd server-mode upgrade
+  orchestration with health-checked restart (#929, #858 phase 5).
+
+- **Downgrade/version safety.** A version-skew guard refuses to boot a
+  binary over a newer DB schema (#912), and
+  `crewship db restore-snapshot` provides the matching downgrade
+  recovery path (#924); backups got a disaster-recovery rewrite —
+  `--replace` mode, schema-driven FK discovery, user reconciliation
+  (#594).
+
+- **Local-model support.** Ollama-style local endpoints for the OpenCode
+  adapter with BYOK egress (#951), and a first-class `ENDPOINT_URL`
+  credential type so local model endpoints live in the vault like any
+  other credential (#957, closes #955).
+
+- **Devcontainer-based provisioning.** BuildKit feature-image
+  provisioning (#675), proactive auto-provision so crews are runnable on
+  first dispatch (#731), deduped feature catalog preferring canonical
+  publishers (#732), and persisted BuildKit stderr tails so failed
+  builds are debuggable (#884).
+
+- **Agent-authored skills.** Agents can draft skills that route through
+  inbox review into a GENERATED catalog (#734).
+
+- **CLI: agent-ready contract.** Structured errors, stable exit codes,
+  `--wait`, env-var auth and API parity for driving Crewship from
+  agents (#782); native server profiles for multi-instance targeting
+  (#737); unified `crewship nuke` subcommands with full workspace
+  teardown (#748); confirmation prompts + `--yes` on six destructive
+  commands (#579); `--max-turns` on run/ask + agent schedule flags
+  (#753); `routine logs --show-outputs` for post-hoc step debugging
+  (#828); `me preferences` + privacy commands (#754).
+
+- **Cost controls.** Cache-stable prompt assembly, per-run turn caps
+  with a loop guard, and cheap-model routing for aux/sub-agent calls
+  (#751).
+
+- **Operator observability.** Opt-in pprof + Pyroscope push profiling
+  (#552), runtime log-level toggle and disk-health reporting (#784), and
+  every run surfaces the model it actually resolved to.
+
+- **Crew memory from mission outcomes (F4.5).** Mission results are
+  distilled into crew memory with provenance (#546); an evolving
+  per-operator user model personalizes agent behavior over time
+  (#630 wave).
+
+- **Settings & workspace management.** Real workspace switcher (list,
+  select, persist, create) (#597), editable profile with password change
+  and workspace member role management (#883), avatar upload (#900).
+
+- **Release engineering.** The release smoke pipeline runs again on a
+  real trigger plus a pre-merge package smoke (#941, closes #933), and
+  nightlies publish per-run immutable pre-releases instead of a rolling
+  tag (#895).
+
+### Changed
+
+- **Frontend RBAC mirrors backend.** `AgentLearningToggle` derives
+  `canEdit` from `abilities.can("manage", "Agent")` (matching the
+  backend PATCH permission gate); `CrewPolicyControls` mirrors via
+  `abilities.can("update", "Crew")`. Update-only users see the
+  toggle disabled instead of hitting 403 at save time.
+
+- **`Promise.all` → `Promise.allSettled`** in `CrewPolicyControls.load`
+  so a quota-fetch network error doesn't poison the required policy
+  fetch.
+
+- **One request-builder for every dispatch path.** Chat, missions,
+  routines and peer delegation now build agent requests through a single
+  shared factory, which also activated the previously dead HITL approval
+  path and fixed mission/peer MCP + prompt divergence (#825, closes
+  #810); pipeline executor wiring was likewise unified behind one
+  factory (#773).
+
+- **Telemetry defaults to opt-in on stable releases** with an explicit
+  onboarding consent step (crash-reporting opt-out remains for
+  pre-release channels) (#645).
+
+- **First-run bootstrap UX.** The setup-token gate is replaced by an
+  n8n-style first-run flow (#593), and the bootstrap window now stays
+  open until the first admin exists, with the finite time window as an
+  opt-in (#785).
+
+- **UI chrome unified for 1.0** — consistent sub-bars, sidebars and
+  toolbars across pages (#749); agent access consolidated under a single
+  Skills & Tools surface (#698) with a curated built-in tool profile per
+  adapter (dead harness tools removed) (#705).
+
+- **Routine `test_run` is gone** — `dry_run` returns an honest execution
+  plan plus the declared capability manifest instead of pretending to
+  execute (#743 wave).
+
+- **First-party MCP tools are eager-loaded**, removing the per-run
+  ToolSearch discovery tax (#745).
+
+- **Dispatch/runtime performance.** Deferred-run dispatch is async,
+  removing the one-run-per-run-duration cliff (#857); warm crew hits
+  skip the host-wide Docker `ContainerList` (#876); crew containers
+  prewarm on claim, off the critical path (#902).
+
+### Fixed
+
+- **`crewship seed` now bootstraps against the selected `--profile`, not
+  `CREWSHIP_SERVER`.** The seed flow's unauthenticated bootstrap POST (and
+  the `--nuke` confirmation, smoke test, and backup warmup) resolved their
+  target with `ResolveServer`, whose precedence is `--server` >
+  `CREWSHIP_SERVER` > config. Every *authenticated* call in the same command
+  uses `EffectiveServer`, under which an explicit `--profile` /
+  `CREWSHIP_PROFILE` wins over `CREWSHIP_SERVER`. So in a shell that exports
+  `CREWSHIP_SERVER` (the documented multi-clone convention), `crewship seed
+  --profile prod` sent bootstrap to `CREWSHIP_SERVER` while everything else
+  went to the profile server — silently splitting one seed across two
+  instances and surfacing as a bogus `DB already initialized` when
+  `CREWSHIP_SERVER` pointed at an already-bootstrapped instance. The seed
+  flow now routes every call through one `seedTargetServer()` helper backed
+  by `EffectiveServer`.
+
+- **Episodic indexer now starts at server boot.** The journal-embedding
+  sweeper (`episodic.NewIndexer`) was fully implemented and tested but
+  never constructed in production, so `HybridRecall` always queried an
+  empty vector index. The server now starts the sweeper at boot when an
+  embedder is configured (`KEEPER_OLLAMA_URL`). Without one, episodic
+  recall runs in **sparse-only mode** and says so: a WARN at boot, an
+  `episodic: vector|sparse-only` field on `GET /healthz`, and a
+  matching `crewship doctor` check with the enable hint.
+
+- **Stuck-QUEUED assignment sweeper now runs in production.** The
+  crash-recovery sweeper (`StartStuckQueueSweeper`) was implemented
+  and tested but never started — QUEUED assignments stranded by a
+  crash between "row set QUEUED" and the next completion-path pump
+  stayed queued forever after a restart. Server boot now starts the
+  sweeper alongside the other background loops (scan every 60s, rows
+  count as stuck after 10min queued; goroutine exits cleanly on
+  shutdown) and logs a `stuck-queue sweeper started` line at boot.
+
+- **Inbox `fetch()` network-error handling.** Both `wrap("approved")`
+  (approve-hire) and `wrap("retried")` (routine retry) in
+  `inbox-list.tsx` now wrap `await fetch(…)` in `try`/`catch`. Pre-
+  fix, an offline / DNS / CORS preflight failure cleared the busy
+  state with no user toast (silent success).
+
+- **Free-form `reason` text scrubbed from app logs.** The
+  `agent_learning` PATCH handler logged the operator-entered reason
+  verbatim; switched to `reason_len` so centralized logs no longer
+  collect PII / business context that's already on the DB audit row.
+
+- **Inbox enqueue failures surface as 500.** The `self_learning=OFF`
+  gate path in both the F4.4 negative-learning handler and the F6
+  persona-suggest handler was swallowing `inbox.Insert` errors,
+  returning 200 with neither lesson nor inbox row.
+
+- **CI build break from a leaked merge-conflict marker** in
+  `internal/api/agent_config.go` (PR-D `agent.status` + PR-E
+  `system_prompt_legacy` collision during parallel-agent push churn).
+
+- **Credential escalation no longer fakes success.** When a credential
+  proposal can't be staged, the agent gets an error instead of a
+  silent false-success (#787).
+
+- **Recurring issues actually fire.** The dispatcher was never wired
+  into server boot (#791); follow-up adds creator attribution, durable
+  fire idempotency and UTC consistency (#823), and issue creators are
+  recorded and displayed everywhere (#774).
+
+- **Schedulers are at-most-once.** Cron and deferred pipeline fires
+  dedupe via idempotency keys (#788), the agent scheduler gets the same
+  guarantee (#820), and scheduled fires honor `target_pipeline_version`
+  (#777).
+
+- **Container-start failures are classified** instead of collapsing into
+  one masked generic error, so operators see the real cause (bad image,
+  legacy volume, credential prep, …) (#790).
+
+- **Crash recovery for assignments and chats.** RUNNING assignments
+  orphaned by a crash are recovered at boot (#768), orchestration loops
+  re-attach to IN_PROGRESS missions (#641), webhook-triggered runs
+  dispatch asynchronously instead of blocking the receiver (#769), one
+  active run per chat is enforced regardless of sender (#765), and a
+  chat turn never ends in silence — zero-output and restart-interrupted
+  replies are surfaced (#770).
+
+- **Memory writes are durable and fail closed.** MCP memory-write
+  failures no longer report success; memory tools are only advertised
+  when the backing store is healthy; restart-agents matches the right
+  container (#786).
+
+- **dev2 validation sweep (CRE-137…146).** Memory identity, keeper
+  workspace scoping, webhook HMAC, cost attribution and CLI
+  parity/fidelity fixes from a full-instance validation pass (#779).
+
+- **Keeper F4.1 skill-review sweep bills a real workspace** instead of
+  attributing its LLM spend to a phantom one (#970, CRE-138).
+
+- **Full archives ship a Linux ELF sidecar on every platform.**
+  Darwin-built archives previously bundled a Mach-O sidecar that could
+  never run inside Linux crew containers (#968, closes #953); archives
+  now include `crewship-sidecar` + `entrypoint.sh` at all (#914), and
+  sidecar remediation hints are install-channel-aware with the Homebrew
+  libexec layout supported (#925).
+
+- **HTTPS login worked around a CSRF cookie-name mismatch** — the CSRF
+  cookie is re-sent under the server's real `__Host-` name (#875).
+
+- **Crew shared files reach `/crew/shared`.** Bundled `files:` never
+  arrived for agentless crews (#870); delivery is container-routed with
+  overwrite semantics and works for standalone SPEC-2 Crews (#928);
+  re-applying an unchanged file no-ops and succeeds on a stopped crew
+  (#940).
+
+- **OpenCode adapter production parity** — usage keys, model surfacing,
+  JSONL schema and EOF resilience (#948).
+
+- **Raw internal errors no longer leak to chat/comments**; hook warnings
+  surface on the run instead (#771); journal poison entries are dropped
+  rather than retried forever, and dev logs are capped (#783); chat WS
+  sends are guarded against the server's 64 KiB frame cap (#764).
+
+- **Scheduler resolves agent config via loopback** instead of the
+  public Next.js URL, fixing scheduled routines behind proxies (#709);
+  `crewship system keeper` injects the workspace so it stops 400ing
+  after the admin-floor change (#909).
+
+- **Pre-C1 legacy Docker resources are auto-migrated** on use and an
+  ops command detects + prunes orphaned pre-C1 crew resources, fixing
+  the "failed to start agent container" wall after old seeds
+  (#736, #738).
+
+## [0.1.0-beta.4] — 2026-05-19
+
+**Routines 2026, declarative manifests, security hardening.** Substantial
+beta covering observability (OTel spans, prompt-cache token plumbing),
+ADLC phase-7 signal (typed feedback API + thumbs UI), continuous online
+grading (sampler worker), per-routine guardrails, declarative workspace
+manifests with sidecar services, and security CI cleanup. v0.1.0-beta.3
+was skipped — this tag bundles everything from beta.2 → beta.4 on `main`.
+
+### Operator upgrade notes
+
+- **Backup `crewship.db` before upgrading.** Migration v97 recreates
+  the `eval_runs` table via the standard SQLite RENAME → CREATE →
+  `INSERT...SELECT` → DROP pattern to widen the `kind` CHECK constraint
+  for the new `online` sampling kind. The migration runs in a
+  transaction so a mid-migration crash atomically rolls back, but it
+  has not been benchmarked on a production-sized eval suite — schedule
+  the upgrade during a quiet window.
+- **`CREWSHIP_ALLOWED_ORIGINS`** must be set in production env config
+  for browser-driven POSTs (Next.js → daemon cross-port). `dev.sh` now
+  emits it automatically alongside other managed keys; systemd-driven
+  prod deploys must add it to their unit env file.
+- **Online eval sampler runs on every server boot** with a 60-second
+  tick. Routines without `eval.online.sample_rate > 0` are zero-cost
+  deterministic skips. Operators introducing `sample_rate: 1.0` on
+  high-throughput routines should size their grader budget; the sampler
+  enqueues at the routine's rate but the grader cost is per-eval.
+- **Shadow features available but require operator config:**
+  - **Prompt caching:** ledger + telemetry plumb provider-reported
+    `cached_input_tokens` once an `API_KEY`-typed Anthropic credential
+    is provisioned (Claude Code CLI tokens don't go through this path).
+  - **OTel routine spans:** `routine.run` / `routine.step` /
+    `agent.invoke` / `llm.call` spans emit when `OTEL_EXPORTER_OTLP_ENDPOINT`
+    is set; collector wire-up is operator's choice — any OTel-compatible
+    backend consumes the GenAI semconv format natively.
+  - **Per-routine input-guard action policy:** DSL
+    `guardrails.input.prompt_injection.action: block | sanitize | log`
+    only fires for routines that opt in.
+
+### Added — Observability
+
+- **OpenTelemetry GenAI spans** wired across the hot path:
+  `routine.run`, `routine.step`, `agent.invoke`, `llm.call` with the
+  prescribed `gen_ai.*` + `crewship.*` attributes. New
+  `StartRoutineRunSpan` + `StartRoutineStepSpan` helpers
+  (`internal/telemetry/spans_routine.go`). Trace tree mirrors DSL
+  composition; `call_pipeline` nests as a child step. Panic recovery
+  pattern preserves the original crash stack across nested defers
+  via `telemetry.PanicWithStack` so post-mortem traces point at the
+  real explode site, not at the re-panic line. (#447)
+- **Prompt-cache token plumbing** through provider → ledger → OTel.
+  Anthropic's `cache_read_input_tokens` + `cache_creation_input_tokens`
+  and OpenAI's `prompt_tokens_details.cached_tokens` now surface on
+  `llm.Response`, flow into `paymaster.CallResponse.CachedInputTokens`,
+  land in `cost_ledger.cached_input_tokens` / `cache_creation_tokens`,
+  and stamp `gen_ai.usage.cached_input_tokens` on every LLM span.
+  Anthropic tools array gets a `cache_control: ephemeral` breakpoint
+  by default — the single highest-leverage cache hit for agent
+  workloads. (#447)
+
+### Added — Feedback (ADLC phase-7)
+
+- **Typed per-message feedback API** (`/api/v1/feedback`) with six
+  signals (helpful, not_helpful, inaccurate, unsafe, edit, regenerate)
+  bound to `trace_id` for eval-mining correlation. Migration v96
+  introduces `message_feedback`. POST is UPSERT-idempotent; DELETE is
+  idempotent (204 on missing row); GET is workspace + per-user scoped.
+  Body capped at 16 KiB via `MaxBytesReader` before JSON parse;
+  per-field caps at 4096 chars on `reason` and 256 chars on id fields. (#447)
+- **Frontend optimistic-update store** (`stores/feedback-store.ts`)
+  with per-(turn, signal) Promise-chained serialization so a fast
+  thumb-toggle can't race between POST and DELETE. State is namespaced
+  by `user.id`; switching accounts on the same browser clears the
+  previous user's votes. (#447)
+- **Trace_id WS propagation** — `internal/chatbridge/bridge.go` stamps
+  the active OTel trace id onto the `done` event metadata;
+  `hooks/use-chat.ts` lifts it onto `ChatTurn.metadata.trace_id`. The
+  feedback POST flows it through so every signal lands indexed against
+  the routine run that produced the message. (#450)
+
+### Added — Online eval sampler
+
+- **Continuous production grading** via `internal/quartermaster/online_sampler.go`.
+  Worker scans completed `pipeline_runs` every 60s, picks rows at the
+  routine's configured `eval.online.sample_rate`, and enqueues a
+  `kind='online'` eval row. Schema-layer idempotency via partial
+  `UNIQUE INDEX uq_eval_runs_online_pipeline_run`; (ended_at, id) tuple
+  cursor handles sub-millisecond pipeline_run completions without
+  orphaning siblings; doubling-skip backoff on entropy outages capped
+  at 10 ticks. Wired into `cmd/crewship` server start. (#447, #449)
+
+### Added — Guardrails
+
+- **Per-routine input-guard action policy**
+  (`guardrails.input.prompt_injection.action`) with `block` (default) /
+  `sanitize` / `log` modes. Sanitize uses offset-based replacement via
+  new `Finding.MatchEnd` field — earlier substring-based redaction
+  silently let through long jailbreak matches and synthetic unicode
+  findings like `"U+202E"`. (#447)
+- **`on_guardrail_triggered` hook dispatch** via context-attached
+  `GuardListener` callback. Lookout stays zero-dep on the hooks
+  package; the pipeline runner bridges them. Listener receives the
+  full findings slice. (#447)
+
+### Added — Tooling
+
+- **`crewship apply` / `crewship export`** for declarative workspace
+  manifests with sidecar service declarations (Redis, Postgres, MySQL,
+  MongoDB). Migration v95 adds `crews.services_json`. (#448)
+- **Playwright E2E specs:** `e2e/feedback.spec.ts` (8 contract tests)
+  and `e2e/feedback-ui.spec.ts` (browser-side fetch via real NextAuth
+  cookie + CSRF defense pin via spoofed Origin → 403). (#450)
+
+### Added — Installation
+
+- **Auto-generate secrets on first run.** `crewship start` writes
+  NEXTAUTH_SECRET + ENCRYPTION_KEY to
+  `~/.local/share/crewship/secrets.env` when missing. End users no
+  longer touch env files for the happy path. (#446)
+
+### Fixed
+
+- **Online sampler was dead code in PR #447** — `NewOnlineSampler`
+  had test coverage but no production call site. Wired into bootstrap. (#449)
+- **Sampler SQL queried non-existent `completed_at` column.** Real
+  column is `ended_at`. The test fixture matched the bug so unit
+  tests passed; real schema check on dev-VM smoke caught it. (#449)
+- **Code-scanning alerts.** All open CodeQL + Grype findings closed. (#445)
+- **Privacy leak in `GET /api/v1/feedback`** — earlier draft scoped
+  only by workspace membership; now scoped by `user_id` AND workspace. (#447)
+- **Sanitize bypass via mixed zero-width characters.** ScanInput
+  emitted a Finding only for the FIRST zero-width rune; subsequent
+  ZWNJ/ZWJ/BOM in the same payload survived sanitize. Now emits one
+  Finding per occurrence. (#447)
+- **OnlineSampler data race** on watermark cursor between concurrent
+  Start callers — `go test -race` reproduced. Added `sync.Mutex`;
+  `Start` now wrapped in `sync.Once`. (#447)
+- **Sampler panic-naked.** A panic in `runOnce` would kill the
+  daemon. Added deferred `recover()` in `tickWithBackoff` that logs
+  + lets the loop continue. (#447)
+
+## [0.1.0-beta.2] — 2026-05-18
+
+**First public beta release.** APIs and data models may break across
+minor bumps until v1.0. See `RELEASING.md` for upgrade and rollback
+guidance.
+
+> v0.1.0-beta.1 was burned by a series of release-pipeline iterations
+> (cosign version pin, pnpm toolchain mismatch in the Dockerfile,
+> Windows cross-compile, missing direct deps for Turbopack,
+> port_exposures test flake). The "release immutability" toggle was
+> enabled mid-iteration and permanently reserved that tag name even
+> after deletion. The first public tag is therefore v0.1.0-beta.2.
+
+### TL;DR for beta testers
+
+- Install: `brew install crewship-ai/tap/crewship` (macOS) or
+  `docker pull ghcr.io/crewship-ai/crewship:v0.1.0-beta.2` (Linux/Docker).
+- One adapter is production-ready in beta: **Claude Code (Anthropic)**.
+  Codex / Gemini / OpenCode / Cursor / Factory Droid have scaffolds
+  but lack parity testing — see README "Beta status & limitations".
+- Telemetry (Sentry crash reporting) is **enabled by default** during
+  v0.1 beta to give the solo maintainer signal from real installs.
+  Disable any time with `crewship telemetry off`. Reverts to opt-in
+  for v1.0 GA. See `RELEASING.md` Telemetry section.
+- Storage is SQLite-only in v0.1; PostgreSQL is on the v0.2 roadmap.
+
+### Added — Release infrastructure
+
+- **Auto-snapshot before migrations.** `database.SnapshotBeforeMigrate`
+  takes a `VACUUM INTO` copy as `<db>.pre-migrate-vN-to-vM-<UTC>.bak`
+  whenever a migration is pending. Keeps 10 newest snapshots; opt out
+  with `CREWSHIP_SKIP_MIGRATION_BACKUP=1`.
+- **Migration lint in CI.** `.github/workflows/migration-lint.yml` +
+  `scripts/lint-migrations` enforce append-only ordering — versions
+  strictly increase, no rename of a version already shipped to `main`.
+  In-tree Go tests guard monotonicity and uniqueness on every PR.
+- **GHCR multi-arch Docker images.** linux/amd64 + linux/arm64,
+  cosign keyless signed via GitHub OIDC. Tags published per release:
+  `:vX.Y.Z`, `:vX.Y`, and `:latest` (last one ONLY on clean semver tags
+  — pre-release tags never bump `:latest`).
+- **Nightly channel.** `.github/workflows/nightly.yml` rebuilds on every
+  push to `main`: `:nightly` and `:main-<sha>` Docker tags, plus a
+  rolling `nightly` GitHub pre-release with prebuilt binaries.
+- **One-line installer.** `scripts/install.sh` detects OS+arch, verifies
+  sha256 + cosign signatures, installs to `~/.local/bin` (no sudo) or
+  `/usr/local/bin`. Until the project website is live, fetch direct from
+  the repo: `curl -fsSL https://raw.githubusercontent.com/crewship-ai/crewship/main/scripts/install.sh | bash`.
+  The short `crewship.ai/install` redirect will land alongside the
+  website launch.
+- **Update notification.** `internal/update` queries GitHub Releases API
+  daily (cached in `~/.crewship/cache`). CLI prints upgrade banner at
+  startup; web UI surfaces a dismissable banner via
+  `GET /api/v1/system/version`. Optional `GITHUB_TOKEN` to lift the
+  60/h unauthenticated rate limit to 5000/h.
+- **Sentry crash reporting (opt-out by default in beta).** New
+  `internal/crashreport` package wraps `getsentry/sentry-go` behind a
+  consent gate stored in `app_settings`. DSN injected at link time via
+  ldflag from `SENTRY_DSN` GitHub Actions secret. Strict client-side
+  scrubbing of headers, query strings, request bodies, User field, and
+  device/runtime/culture contexts; server-side regex rules in Sentry UI
+  cover email/Bearer/`sk-*`/`ghp_`/`xox*-` patterns in error messages.
+  `CREWSHIP_SENTRY_DSN` env var redirects to a self-hosted/own Sentry.
+- **`crewship telemetry on/off/status`** sub-commands manage consent at
+  runtime; `status` shows the resolved endpoint host plus DSN source
+  (vendor default vs env override). First-run prompt removed — beta
+  default is enabled.
+- **Sentry alert-rule provisioner** (`scripts/sentry-setup-alerts.sh`):
+  idempotent bash script that calls the Sentry REST API to create the
+  "New issue (beta)" and "Spike — 50+ events/hour" alert rules.
+- **PR + repo hygiene.** Stale-bot workflow (issues 90d, PRs 44d, generous
+  opt-out labels), PR template Migration Safety checklist,
+  `scripts/setup-branch-protection.sh` one-shot for required checks +
+  linear history. Hotfix runbook in `RELEASING.md`.
+- **CODE_OF_CONDUCT.md** (Contributor Covenant 2.1 by reference) +
+  `ee/README.md` scaffold for future dual-licensed enterprise add-ons.
+
+### Added — Connectors (catalog → install → MCP)
+
+- **`ConnectorCatalog`** tile-grid UI for browsing the bundled manifest
+  catalog under `manifests/` (`feat/connector-catalog-impl`).
+- **`SchemaForm`** five-field-type renderer (text/secret/select/toggle/
+  number) with per-field validation and defaults.
+- **`ConnectorConnectSheet`** wires SchemaForm into the install flow —
+  validates inputs, persists credentials via the sidecar, hands off
+  OAuth where applicable.
+- **Backend connector handlers** — `ParseManifest`, `Validate`,
+  `Resolve`, `MaterializeMCP`, `LoadAll`; HTTP routes for List / Get /
+  Verify / Install (incl. credential persistence + OAuth handoff).
+
+### Added — Auth + onboarding overhaul (PR #314)
+
+Pre-beta sweep: account recovery, device pairing, split-screen
+onboarding wizard, session-rotation + lockout primitives.
+
+### Added — CLI: AI-first 2026 (15 new commands and flags)
+
+Major CLI surface expansion aligning Crewship with the 2026 agent-CLI playbook (long-running workflows, plan/act separation, headless scripting, real-time dashboards, model-tiering control). All additions live in `cmd/crewship` and `internal/cli`; one server endpoint added (`GET /api/v1/runs/{id}`).
+
+**New top-level commands:**
+
+- **`crewship -p "..."`** — headless one-shot prompt to the default agent. Sets quiet by default, exits non-zero on agent error. Pipe-friendly: `cat issue.md | crewship -p "summarise"`.
+- **`crewship plan <prompt>`** + **`--plan`** flag on `run`/`ask` — plan/act separation. Read-only architect mode that outputs a step-by-step plan + files-to-touch + risks without executing tools. Prompt-engineered (no backend mode), so it composes with every adapter.
+- **`crewship resume [chat-id|run-id|pr-url]`** — pick up the last session, an explicit one, or the session that produced a GitHub/GitLab/Bitbucket PR. No-arg form opens a `huh`-styled picker over the 10 most recent CLI sessions.
+- **`crewship wait <run-id>`** — block until a run reaches a terminal status. Status-aware exit codes (0 done, 1 failed, 2 cancelled, 3 timeout). Use in scripts: `crewship wait $(crewship ask --no-stream -q "..." | jq -r .id) && echo done`.
+- **`crewship tui`** — real-time Bubble Tea dashboard. Three panels: running runs, pending approvals, live journal stream (SSE-pumped). Keys: `q` quit, `r` refresh, `Tab` focus.
+- **`crewship recap <chat-id>`** — LLM-generated summary of a chat session via the default agent. Output is a 4-section markdown brief (outcome / decisions / open threads / next prompt). Tunable bullet count via `--bullets`.
+- **`crewship shell`** — interactive REPL. Slash commands: `/help`, `/agent <slug>`, `/workspace <slug>`, `/cd`, `/plan` (toggle), `/effort <level>`, `/think` (toggle), `/clear`, `/history`, `/quit`. `@file` fuzzy expansion inlines file content into prompts.
+- **`crewship me`** — your missions + your pending approvals + your recent runs (3 parallel REST calls).
+- **`crewship today`** — today's runs and spend.
+- **`crewship now`** — live status: running runs, idle/busy agent counts, pending approvals.
+- **`crewship cost forecast`** — projected cost before you spend tokens. Two modes: `--prompt @file` (token-count heuristic) or `--from-history <agent>` (average of last 20 runs). Renders rate table for Sonnet 4.6 / Opus 4.7 / Haiku 4.5 with output-ratio tuneable (`--output-ratio`, default 2.0×).
+- **`crewship diff <run-a> <run-b>`** — side-by-side comparison of two existing runs (status, agent, output diff). Distinct from `eval compare` which re-runs an eval scenario.
+- **`crewship notify`** — desktop notifications group. `enable` / `disable` / `status` / `test` / `send <title> <body>`. Auto-fires on long-running run completion (≥30 s) and pending approvals. Uses `osascript` on darwin, `notify-send` on linux, BurntToast on Windows (no-op when missing).
+- **`crewship slash`** — manage user-defined slash commands. `slash list` enumerates loaded files; `slash init` scaffolds `~/.crewship/commands/review.md` as a starter.
+
+**New flags on existing commands:**
+
+- **`--format=ndjson`** (global) — line-delimited JSON output, pipe-friendly for `jq -c` / `fx` / stream-processing tools. Plumbed through `Auto` / `AutoDetail` so every list/detail command supports it uniformly.
+- **`--plan`** on `run` / `ask` — plan-mode without a separate command.
+- **`--effort=minimal|low|medium|high|xhigh`** on `run` / `ask` — reasoning effort passthrough, threaded into chat-creation metadata.
+- **`--show-thinking`** on `run` / `ask` — surfaces full reasoning blocks on stdout (not the 100-char truncated stderr peek).
+
+**User-defined slash commands** (`~/.crewship/commands/*.md`)
+
+Markdown files with YAML frontmatter become first-class CLI subcommands at load time:
+
+```markdown
+---
+name: review
+description: Review a diff
+agent: viktor
+plan: true
+vars:
+  - target
+---
+Review this ${target} for $args.
+```
+
+`name`/`description`/`agent`/`effort`/`plan`/`vars` are honoured. `$VAR` / `${VAR}` substitution against positional args. Built-in commands always win on collision (the loader skips + warns).
+
+**Server surface (one endpoint added):**
+
+- **`GET /api/v1/runs/{id}`** — single-run lookup used by `wait`, `resume`, `diff`. Reuses the existing `journal.ListRuns` + enrichment path; 404 for unknown ids (cross-tenant masked).
+
+**New internal helpers** (single-responsibility, all unit-tested):
+
+- `internal/cli/runs.go` — `GetRun(ctx, id)`, `PollRun(ctx, id, interval, onTick)`, `ParsePRURL(s)`, `RunDetail`.
+- `internal/cli/notify.go` — `OSNotify(title, body, level)`, `NotificationsEnabled(cfg)`, GOOS dispatch matrix.
+- `internal/cli/slashcmd.go` — `LoadSlashCommands()`, `ParseSlashFile(path)`, `SlashCommand.Render(args)`, frontmatter loader.
+- `internal/cli/repl.go` — `REPL` struct with slash-dispatch, `ExpandAtFiles(line)`, `ApplyPlanShellPrefix`.
+- `internal/cli/tui/` (package) — Bubble Tea Model/Update/View, SSE journal pump with reconnect, lipgloss styling.
+- Formatter: `NDJSON(v)`, `WriteNDJSONRow(v)`, `"ndjson"` routing in `Auto` / `AutoDetail`.
+
+**Tests added (~30 new tests):**
+
+- `runs_test.go` — `IsTerminal`, `ParsePRURL` (5 hosts), `GetRun` (200/404/empty-id), `PollRun` (3-poll convergence).
+- `notify_test.go` — `NotificationsEnabled` (nil/false/true), `OSNotify` no-panic guard.
+- `slashcmd_test.go` — frontmatter parse, no-frontmatter fallback, `$VAR` / `${VAR}` / `$args` substitution, name validation.
+- `repl_test.go` — slash dispatch, unknown-slash warning, `@file` expansion (existing/missing/`@-`), plan shell prefix idempotency.
+- `formatter_ndjson_test.go` — slice → multi-line, single object → one line, `WriteNDJSONRow`, `Auto` routing.
+- `cmd_run_metadata_test.go` — `SetEffort` validation (5 levels + uppercase + whitespace + invalid), `ChatCreationBody` (default vs plan vs plan+effort), `ApplyPlanFlag` idempotency.
+
+**Documentation:**
+
+- README links to new commands inline (TODO: separate `docs/cli/` page in a follow-up).
+- This CHANGELOG entry doubles as the design rationale for each addition.
+
+### Added — Routines: Eval framework (PR follow-up to #281–#284)
+
+Cross-tier consistency framework that makes routines a credible **agentic-program primitive**. Three new pieces and one resurrected runner:
+
+- **13 eval scenarios** seeded under the `eval-` prefix (`cmd/crewship/seeddata/eval_scenarios.go`). Each is a normal routine with rigorous gates — no special test-mode code path. Categories covered: pure transformation × 2, classification, format compliance, reasoning chain, prompt-injection refusal, RAG faithfulness, cross-family LLM judge, cost guardrail, boundary handling, DAG trajectory, idempotency / concurrency, tier-escalation loop. Cross-family graders (Sonnet judges Haiku) mitigate self-preference bias on rubric-graded scenarios.
+- **`crewship eval scenarios`** — batch runner: sweep eval-* routines × tier list × N runs, output pass-rate matrix in `table` / `json` / `yaml` / `markdown`. Use `--scenarios slug,slug` to scope, `--tiers fast,smart` to compare worker tiers, `--runs N` for variance, `--fail-fast` for early-exit on regression.
+- **`crewship eval compare <slug>`** — head-to-head: run ONE scenario back-to-back on two tiers, report a verdict (`AGREE-PASS` / `AGREE-FAIL` / `DIVERGE-A-PASS` / `DIVERGE-B-PASS` / `AMBIGUOUS`) plus side-by-side outputs. Designed for *gate-pass agreement*, not text identity (two LLM runs are essentially never byte-identical).
+- **`tier_override` field on `RunInput`** + JSON body `{"tier_override":"..."}` on the `/run` endpoint. Replaces every `agent_run` step's `complexity` for the duration of one run; step-level `model_override` still wins. Plumbed through CLI as `crewship routine run --tier-override fast|smart|...`.
+- **JSON Schema gate enforcement** in `internal/pipeline/executor.go validateOutput`. Previously a no-op (`"documentation only"`); now uses `github.com/santhosh-tekuri/jsonschema/v5` (draft 2020-12). Distinct reason prefixes per failure class: `schema invalid:` (author bug), `output not valid JSON:` (worker didn't follow contract), `schema validation:` (output failed constraints).
+- **LLMRunner restored** (`internal/pipeline/runner_llm.go`) as opt-in fallback. Removed in commit `8408f3e6` when OrchestratorRunner shipped; restored here so the eval suite is runnable on a workstation without a fully provisioned crew container stack. Selection at boot: `CREWSHIP_PIPELINE_RUNNER=llm_direct` (explicit override) → `--no-docker` (auto-fallback) → OrchestratorRunner (default; production unchanged).
+- **`schemas/routine.v1.json`** picks up `outcomes`, `concurrency_key`, `max_concurrent` so IDE validation matches the server-accepted DSL surface.
+
+Tests: 8 schema-gate cases, 9 tier-override sub-cases, 10 eval-CLI helper tests, 13 eval-scenario parse+validate tests — 40 new test cases total, all under `-race`.
+
+### Added — Routines (PR #281 + #282)
+
+Routines are AI-authored, workspace-scoped declarative workflow recipes — one declarative layer that any crew can invoke for what previously required a patchwork of infra-as-code scripts, scheduled jobs, cron entries, chat-bot triggers, and ad-hoc shell SOPs. Authored once (preferably by a smart model) and executed many times by the cheaper runtime tier.
+
+User-facing label is **Routine**; backend identifiers (`pipelines` table, `internal/pipeline` package, `/api/v1/.../pipelines/...` HTTP routes) remain unchanged for backwards compat. Three-layer architecture: **Routine** (atomic) → **Recipe** (Marketplace template, future) → **Cyclic Issue** (recurring user issue, future).
+
+#### Frontend
+
+- **New `/routines` page** as a clone of `/orchestration`. 3-column layout: filter sidebar with saved-view facets (status / usage / authored-by / show ephemeral), 4 main tabs (Routines list / Graph / Timeline / Activity), right detail panel with 7 sub-tabs (Overview / Editor / Runs / Versions / Schedules / Webhooks / Waitpoints).
+- **Sidebar entry** *Routines* under *Work* (icon `ScrollText`).
+- **Orchestration tab** *Routines* — 5th tab in `/orchestration` for in-context discovery, reusing the existing detail sheet so users don't lose mission context.
+- **DSL editor dialog** — paste/edit JSON with 3 starter templates. **Test & Save** runs `/test_run` first; on pass calls `/save`. Skip-test-gate checkbox surfaces only for OWNER/ADMIN roles.
+- **Run / Test Run / Dry Run / Cancel** action toolbar.
+- **Live waterfall** — Runs sub-tab subscribes to `pipeline.step.*` WebSocket events; auto-expands the most recent run on first visit.
+
+#### Backend
+
+Five database migrations: v78 (`pipelines` + `workspaces.execution_tiers_json`), v79 (`pipeline_versions` + `pipeline_waitpoints`), v80 (`pipeline_schedules`), v81 (`pipeline_run_idempotency`), v82 (`pipeline_webhooks`).
+
+- **6 step types**: `agent_run`, `call_pipeline`, `http`, `code`, `wait`, `transform`.
+- **DAG with `needs[]`** — independent steps execute in parallel; leaf-node final-output preference for multi-leaf graphs.
+- **Conditional `if`** — any step can carry a template-rendered boolean; false → step skipped.
+- **Two-tier execution** — workspace `execution_tiers_json` resolves `complexity` annotation to `(adapter, model)`; tier override flows through to the CLI adapter's `--model` flag.
+- **Versioning + rollback** — every save creates a new immutable version; rollback creates a new HEAD pointing at the target's definition.
+- **HITL waitpoints** — DB-backed approval primitive with timeout sweeper and boot-time recovery scan reporting stranded entries.
+- **Cron schedules** + **HMAC-signed webhooks** + **idempotency keys** for safe redelivery.
+- **Bundle export/import** for cross-workspace transfer.
+- **Workspace-scoped `POST /api/v1/workspaces/{ws}/pipelines/save`** for UI authoring (MANAGER+ role); `skip_test_gate` flag honoured only for OWNER/ADMIN.
+- **8 stability bug fixes** with regression tests under `-race`: DAG completion bookkeeping, multi-leaf output picker, waitpoint lost-wakeup, webhook rate-limiter race, idempotency stale-row leak, SSRF-via-redirect, cross-workspace agent execution, template validation breadth, exponential-backoff jitter.
+
+#### CLI (17 routine subcommands)
+
+| Group | Commands |
+|-------|----------|
+| Core | `list`, `get`, `save`, `run`, `dry-run`, `delete`, `runs` |
+| Versions | `versions`, `rollback --to N` |
+| Bundles | `export [--include-history]`, `import [file.json]` |
+| Runs | `cancel`, `watch [--json] [--once]` |
+| Authoring | `validate [file.json]` (offline DSL check, CI-friendly) |
+| Schedules | `list`, `create`, `update`, `enable`, `disable`, `now`, `delete` |
+| Webhooks | `list`, `create`, `url`, `delete` |
+| Waitpoints | `list`, `show`, `approve`, `reject` |
+
+The `pipeline` alias is preserved — every `crewship routine X` invocation also works as `crewship pipeline X`.
+
+#### Documentation
+
+- `docs/guides/routines.mdx` — user guide (concepts, three authoring paths, DSL anatomy, all step types, two-tier execution, triggers, HITL, validation gates, observability, RBAC, troubleshooting).
+- `docs/cli/routine.mdx` — per-subcommand reference.
+
+#### Seeded routines
+
+`./dev.sh seed` now populates 5 starter routines on a fresh workspace: `summarize-text`, `fetch-and-summarize`, `pr-review-structured`, `daily-status-digest`, `incident-triage`. Each is independently runnable with default inputs.
+
+### Added — Core platform
+
+- Self-hosted runtime: single Go binary with embedded Next.js UI, embedded
+  SQLite DB, and a sidecar proxy for credential injection.
+- Crew Journal — append-only event stream as canonical source of truth
+  for every observable action; FTS5 search; SSE streaming to the
+  `/journal` UI.
+- Paymaster — hierarchical LLM cost budgets (workspace → crew → mission →
+  agent), per-call ledger written before the LLM request leaves the box.
+- Lookout — guardrails: prompt-injection detection, JSON-schema tool-arg
+  validation, output parsing, secrets redaction.
+- Harbormaster — human-in-the-loop approval queue with sync and async
+  modes, configurable timeouts, full decision history.
+- Cartographer — checkpoint/fork/restore over journal cursor; non-
+  destructive restore returns divergence warnings instead of mutating.
+- Quartermaster — eval suite with trajectory replay, regression detection,
+  and an LLM-as-judge that uses rubric-shuffle anti-bias.
+- Hooks framework — 15 lifecycle event types with shell, HTTP, and
+  subagent handlers; `allowedShell=true` required at register time.
+- Backup — AGE-encrypted, portable `.tar.zst` bundles at workspace and
+  crew scope; retention rotation; advisory locking; forward-compatible
+  manifest.
+- Keeper — credential gatekeeping with AES-256-GCM versioned encryption
+  and an Ollama-backed LLM evaluating per-request access.
+- Multi-runtime container support — auto-detection of Docker, Podman,
+  Colima, OrbStack, Rancher, nerdctl. Apple Containers on macOS Tahoe+.
+- CLI adapters — Claude Code, Codex CLI, Gemini CLI, OpenCode, Cursor
+  CLI, Factory Droid, all wired into the orchestrator dispatch table.
+- Crew templates — Engineering, Quality, DevOps, and Research crews seed
+  ready out of the box; `crewship template apply <slug>` to deploy.
+- Issue tracker — Linear-style with labels, projects, sub-issues, and
+  bulk operations; `crewship issue …` CLI.
+- Multi-workspace support; OWNER/ADMIN/MANAGER/MEMBER/VIEWER server-side
+  RBAC enforcement (UI for tier assignment ships in v0.2).
+- OpenTelemetry GenAI spans with W3C trace-context propagation; OTLP HTTP
+  exporter; every journal entry carries `trace_id`/`span_id`.
+- Devcontainer provisioning with mise-managed runtimes, shared cache
+  images, and 24-hour registry-digest checks.
+- Per-IP rate limiting (10 req/min on auth endpoints, 120 req/min on the
+  general API), security headers, single-use OAuth state with 15 min
+  expiry.
+- Goreleaser pipeline: cross-compiled binaries (Mac amd64+arm64, Linux
+  amd64+arm64, Windows amd64), keyless cosign signatures, SPDX +
+  CycloneDX SBOMs, Homebrew tap auto-publish.
+
+### Security — Pentest 2026-05-14 hardening pass
+
+Internal pentest of `dev2` (`dev-server:8082`, build `a78e8ac`)
+produced 11 findings across 7 surfaces. All fixes have PoCs that
+confirm the bypass before and the block after (reports gitignored
+under `.pentest-2026-05-14/`).
+
+- **F-001 (HIGH):** SSRF in skills import via DNS-resolved hostname
+  bypass — blocked.
+- **F-002 (MEDIUM):** SSRF error messages leaked internal network
+  state — generic error masking.
+- **F-003 (MEDIUM):** `/metrics` exposed without auth — now gated.
+- **F-004 (LOW):** Next.js SPA fallback masked 404 for sensitive paths.
+- **F-005 (INFO):** Inconsistent path-traversal validation — unified.
+- **F-006 (MEDIUM):** No backend Origin check on state-changing routes.
+- **F-007 (HIGH):** Rate limiter bypassable via X-Forwarded-For
+  rotation — IP resolution hardened.
+- **F-009 (LOW):** Scrubber regex bypassable via zero-width characters.
+- **F-011 (HIGH conditional):** Devcontainer features could request
+  `Privileged` / dangerous `CapAdd` — denylist applied.
+- **F-012 (MEDIUM):** `CREWSHIP_DISABLE_RATELIMIT=true` shipped in dev
+  `.env.local`.
+- **F-A1/A3/A4 (HIGH):** Workspace-IDOR on relations + parent_issue_id
+  — workspace-scope enforcement.
+- **F-B4 (LOW):** Capability-URL proxy leaked `Referer` to upstream.
+- **G-002:** Memory injection guard hardening.
+
+### Security — Pass-2 quickfixes
+
+Four backlog items bundled (each <70 LOC, independently revertible):
+
+- Sidecar credential reads now emit audit events.
+- Emoji reactions XSS — payload validation tightened
+  (`emoji_reaction_test.go` covers 24 cases including real XSS strings).
+- `/admin/backups/metrics` redacted to drop cross-owner workspace IDs.
+- WebSocket frames capped at 1 MiB; fan-out N-amplifier closed.
+
+### Security — Supply chain
+
+- All release artifacts signed with cosign keyless via GitHub Actions
+  OIDC (SLSA-3-ish provenance chain). Verify with
+  `cosign verify-blob --certificate-identity-regexp ...`.
+- SBOMs in SPDX and CycloneDX shipped with every release.
+- `migration-lint` CI gate prevents the rebase-collision class of
+  schema-divergence bug that bricks customer DB on upgrade.
+- Goreleaser builds are reproducible (`-trimpath`, fixed `GOFLAGS`).
+- `gitleaks` + `govulncheck` + `grype` run on every PR via
+  `.github/workflows/security.yml`.
+
+### Changed
+
+- **README** rewritten for honest beta status — every feature labeled
+  ✅ stable / 🟡 early / 🚧 WIP. Adapter scaffolds for non-Anthropic
+  CLIs explicitly marked WIP rather than equal-billing alongside the
+  production-tested Claude Code adapter.
+- **Distribution channels** documented in `RELEASING.md` — stable /
+  beta / nightly with their respective Docker tag policies. `:latest`
+  Docker tag only moves on clean semver tags; pre-releases NEVER
+  overwrite `:latest`.
+- **Hotfix workflow** documented in `RELEASING.md`: cherry-pick onto
+  release branch, fix-forward (never untag), forward-port to `main`.
+
+### Removed — Repo hygiene (PR #344, #348)
+
+- `.claude/context/prd/*` and `.claude/context/wireframes/*` —
+  ~52 000 lines of pre-implementation design docs untracked.
+  Mintlify (`docs/`) is now the canonical user-facing docs source.
+- `internal-docs/audit-archive/*`, `internal-docs/wireframes/*` —
+  archived audit reports and HTML wireframes.
+- `mockups/activity-rail-v{2,3}.html` — wireframes for the
+  activity-rail feature shipped in #287.
+
+### v0.2 roadmap
+
+The following ship as packages but are not yet auto-wired into the
+runtime in v0.1; they activate via manual API calls today and become
+default behaviour in v0.2:
+
+- Episodic memory — vector recall over the journal (selective embedding,
+  SQLite BLOB cosine).
+- Consolidate — daily Consolidator that extracts learned rules into
+  crew memory + Compactor that rolls up low-signal old entries.
+
+The following are planned for v0.2 but not in v0.1 at all:
+
+- PostgreSQL primary database (SQLite is the only supported backend in
+  v0.1).
+- Kubernetes container provider.
+- Skills marketplace (local skill imports work today).
+- Workspace-scope memory tier (3-tier today: agent, crew, session).
+- Stripe-backed billing tiers / edition gating (v0.1 ships fully
+  Apache-2.0 with no edition gating).
+- UI for assigning ADMIN/MANAGER/VIEWER workspace roles (server-side
+  enforcement is already wired).
+- Crew-to-crew handoff with critique exchange.
+
+### Notes
+
+- This is the first tagged release. Public APIs and data models may
+  still change in `0.x` minor versions before `1.0`. Pin a commit SHA or
+  a specific `v0.x.y` tag if you ship to production.
+- The `release` branch tracks deployable state (a 5-minute systemd timer
+  on the dogfood prod VM polls it). Push `main:release` to deploy.
+
+[Unreleased]: https://github.com/crewship-ai/crewship/compare/v0.1.0-beta.2...HEAD
+[0.1.0-beta.2]: https://github.com/crewship-ai/crewship/releases/tag/v0.1.0-beta.2
