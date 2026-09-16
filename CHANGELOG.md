@@ -9,6 +9,9 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+### Security
+- A routine run's invoking crew and agent now come only from a verified identity. `POST …/pipelines/{slug}/run` (JWT / CLI token) no longer reads `X-Crewship-Invoking-Crew` / `-Agent` — any member could stamp a run, the "From" crew on its approval card and the autonomy posture consulted before a standing trust grant fires with a crew of their choosing; such runs are recorded as user-driven with `invoking_user_id` set. The sidecar's internal run route additionally verifies that `invoking_agent_id` is a live agent of the invoking crew and that the crew belongs to the run's workspace, whatever token presented them (a master or workspace-bound token could previously name a crew from another tenant). Before a trust grant fires, the routine's author crew posture is honoured regardless of who invoked the run: a strict author's gate always waits for a human. Provenance stored before this change remains as recorded and is not retroactively verified.
+
 ### Added
 
 - Command palette: pages are searchable by name or slug in a **Pages** group — each row wears the page's icon and colour, names its folder or owning crew, marks a published application, and opens `/pages/<slug>`; the list is the same authorised index the overview draws, fetched on open. **Recent** is now kept per user and per workspace, and a page row is offered only while that page is still in the list just returned. History stored under the old shared key is cleared once, not migrated. (#2570)
@@ -26,7 +29,6 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 ### Changed
 
 - ⚠️ **Behaviour change:** explicit routine input bounds now opt into server validation even without a widget; the optional `absolute_path` format validates path syntax across run producers. Legacy type-only inputs retain their existing server contract. Explicit positive `outcomes.max_iterations` now caps worker/checker model-tier attempts instead of being ignored; zero/omitted preserves configured fallback traversal.
-
 
 ### Fixed
 - Legacy routine errors are redacted in both workspace and per-routine run lists, before preview truncation can split a credential.

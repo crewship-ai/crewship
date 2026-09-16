@@ -20,9 +20,9 @@ func pipelinesSilentLogger() *slog.Logger {
 // calls to crewshipd with author identity injected from IPC.
 //
 // Tests focus on the trust boundary: the sidecar MUST overwrite any
-// caller-supplied author_* fields with values from s.ipc, and inject
-// X-Crewship-Invoking-* headers on Run so the journal records the
-// real invoker (the cross-crew reuse security gate).
+// caller-supplied author_* fields with values from s.ipc. Invoker
+// identity for a run travels in the body of the internal run route
+// (see routine_mcp_test.go), never in request headers.
 // ---------------------------------------------------------------------------
 
 func newPipelineTestServer(t *testing.T, ipc *IPCConfig) *Server {
@@ -196,16 +196,44 @@ func TestHandlePipelinesRun_RoutesToRunPathAndForwardsBody(t *testing.T) {
 	}
 }
 
-// TestHandlePipelinesRun_InvokerHeadersForwarded documents a gap: the
-// Run handler sets X-Crewship-Invoking-{Crew,Agent} on the incoming
-// request, but proxyIPCJSON constructs a *new* upstream request and
-// only carries X-Internal-Token across — the invoker headers never
-// reach crewshipd. Per the source comment this means the executor
-// records cross-crew pipeline calls as "user-driven", losing the
-// cross-crew-reuse signal in the Graph view. Skipped until
-// proxyIPCJSON learns to propagate forwardable headers.
-func TestHandlePipelinesRun_InvokerHeadersForwarded(t *testing.T) {
-	t.Skip("KNOWN GAP: proxyIPCJSON does not propagate X-Crewship-Invoking-* set by handlePipelinesRun (see source comment at handlePipelinesRun)")
+// TestHandlePipelinesRun_NoInvokerHeadersUpstream pins the contract that
+// replaced a long-skipped "known gap" test: the sidecar does NOT send
+// X-Crewship-Invoking-{Crew,Agent} upstream. crewshipd no longer reads
+// them (a JWT route cannot verify them, so they were only ever a way to
+// invent provenance); attributed agent runs use the internal run route
+// with identity in the body. If someone re-adds the headers here, this
+// test is the reminder that the server will ignore them.
+func TestHandlePipelinesRun_NoInvokerHeadersUpstream(t *testing.T) {
+	var gotHeaders http.Header
+	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotHeaders = r.Header.Clone()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"run_id":"r1"}`))
+	}))
+	defer mock.Close()
+
+	s := newPipelineTestServer(t, &IPCConfig{
+		BaseURL: mock.URL, Token: "t", WorkspaceID: "ws", CrewID: "crew-caller", AgentID: "agent-caller",
+	})
+	body := `{"inputs":{}}`
+	req := httptest.NewRequest("POST", "/pipelines/foo/run", strings.NewReader(body))
+	req.ContentLength = int64(len(body))
+	// A caller-supplied header must not leak upstream either.
+	req.Header.Set("X-Crewship-Invoking-Crew", "crew-forged")
+	rr := httptest.NewRecorder()
+	s.handlePipelinesRun(rr, req, "foo")
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rr.Code, rr.Body.String())
+	}
+	for _, h := range []string{"X-Crewship-Invoking-Crew", "X-Crewship-Invoking-Agent"} {
+		if v := gotHeaders.Get(h); v != "" {
+			t.Errorf("upstream request carried %s=%q; invoker identity must not travel in headers", h, v)
+		}
+	}
+	if gotHeaders.Get("X-Internal-Token") != "t" {
+		t.Errorf("X-Internal-Token missing upstream — the proxy contract itself broke")
+	}
 }
 
 func TestHandlePipelinesRun_DryRunFlag_RoutesToDryRunPath(t *testing.T) {
