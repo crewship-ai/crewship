@@ -13,6 +13,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/pipeline"
 	"github.com/crewship-ai/crewship/internal/runverdict"
+	"github.com/crewship-ai/crewship/internal/scrubber"
 )
 
 // PipelineHandler exposes the workspace-scoped HTTP surface for
@@ -702,6 +703,8 @@ func definitionHashHex(def []byte) string {
 	return pipeline.DefinitionHash(def)
 }
 
+var pipelineErrorScrubber = scrubber.New()
+
 // truncateErrorForList sanitizes an error_message before exposing it
 // through the run-records list endpoint. Caller-supplied + executor-
 // supplied error strings can carry: file paths, stack frames, half-
@@ -710,6 +713,8 @@ func definitionHashHex(def []byte) string {
 // need that detail — operators drill into journal_entries via the
 // /runs?include_steps=1 endpoint when they want the full picture.
 func truncateErrorForList(s string) string {
+	// Redact before truncating: cutting a credential first can defeat matching.
+	s = pipelineErrorScrubber.Scrub(s)
 	if s == "" {
 		return ""
 	}

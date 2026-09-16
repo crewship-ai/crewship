@@ -26,6 +26,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 
 ### Fixed
+- Legacy routine errors are redacted in both workspace and per-routine run lists, before preview truncation can split a credential.
 - Live routine lists receive the start notification after the run row is stored, so an immediate refresh can see the new run.
 - Routine recovery passes only the run ID to chat and clipboard. Failure summaries omit free-form checker and validation diagnostics; stored errors, event previews and historical run-detail errors redact known credential patterns.
 - Pages docs: every management endpoint's status table carries the #2561 rule (an unreachable page answers 404, the 403 rows apply only to a caller who reaches it), the guide's reach rule names the owning-crew, folder-sharing and workspace-grant paths, a Custom applications section explains draft → build → review → publish → withdraw and who may publish, backups document the `page-projects/` section, export/import documents the v2 bundle, and "Studio" no longer names a surface the product does not have (#2582)

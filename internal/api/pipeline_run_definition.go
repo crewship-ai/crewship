@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/crewship-ai/crewship/internal/pipeline"
-	"github.com/crewship-ai/crewship/internal/scrubber"
 )
 
 // Run history must never resolve a slug to its current HEAD. A content hash
@@ -92,7 +91,7 @@ func (h *PipelineHandler) loadExecutedStepIDs(ctx context.Context, runID string)
 func (h *PipelineHandler) enrichRunFailure(ctx context.Context, runID, status, outcome, errorMessage, failedAtStep, currentStepID string, dsl *pipeline.DSL, stepOutputs map[string]string, resp map[string]interface{}) {
 	// Older persisted diagnostics may predate redaction at write time.
 	if raw, ok := resp["error_message"].(string); ok {
-		resp["error_message"] = scrubber.New().Scrub(raw)
+		resp["error_message"] = pipelineErrorScrubber.Scrub(raw)
 	}
 	if !runFailureApplies(status, outcome) {
 		return

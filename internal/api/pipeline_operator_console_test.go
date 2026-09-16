@@ -497,3 +497,65 @@ func TestRunFailure_RedactsLegacyDiagnostics(t *testing.T) {
 		t.Errorf("summary: %v", f)
 	}
 }
+
+func TestRunLists_RedactLegacyDiagnostics(t *testing.T) {
+	h, db, user, ws := runsHandlerRig(t)
+	h.SetRunStore(pipeline.NewRunStore(db))
+	seedRunsPipeline(t, db, ws, "pl_legacy_secret", "legacy-secret")
+	seedRunRow(t, db, ws, "pl_legacy_secret", "legacy-secret", "prn_legacy_secret", "failed")
+	testPEM := func(kind string) string {
+		border := strings.Repeat("-", 5)
+		return border + "BEGIN " + kind + border + "\nexample-key-material\n" + border + "END " + kind + border
+	}
+	// Cover the shared scrubber's credential families at both HTTP boundaries,
+	// including multiline keys and a token crossing the list's length cap.
+	cases := []string{
+		"sk-ant-exampleSecret1234567890",
+		"sk-or-exampleSecret12345678901234567890",
+		"sk-proj-exampleSecret1234567890",
+		"sk-svcacct-exampleSecret1234567890",
+		"sk-exampleSecret12345678901234567890",
+		"AIzaSy" + strings.Repeat("a", 33),
+		"cur_" + strings.Repeat("a", 24),
+		"fact_" + strings.Repeat("a", 24),
+		"factory_" + strings.Repeat("a", 24),
+		"xai-" + strings.Repeat("a", 24),
+		"gsk_" + strings.Repeat("a", 24),
+		"ghp_exampleSecret1234567890",
+		"gho_exampleSecret1234567890",
+		"ghs_exampleSecret1234567890",
+		"ghr_exampleSecret1234567890",
+		"github_pat_exampleSecret1234567890",
+		"glpat-" + strings.Repeat("a", 24),
+		"xoxb-" + strings.Repeat("a", 24),
+		"AKIA1234567890ABCDEF",
+		"Bearer exampleSecret1234567890",
+		`{"password":"` + strings.Repeat("p", 24) + `"}`, "PASSWORD=" + strings.Repeat("p", 24),
+		testPEM("PRIVATE KEY"),
+		testPEM("OPENSSH PRIVATE KEY"),
+		strings.Repeat("x", 180) + "sk-proj-exampleSecret123456789012345678901234567890",
+	}
+	for i, diagnostic := range cases {
+		execOrFatal(t, db, `UPDATE pipeline_runs SET error_message = ? WHERE id = 'prn_legacy_secret'`, diagnostic)
+		for _, endpoint := range []string{"workspace", "routine"} {
+			req := withWorkspaceUser(httptest.NewRequest("GET", "/x?limit=50", nil), user, ws, "OWNER")
+			req.SetPathValue("slug", "legacy-secret")
+			rr := httptest.NewRecorder()
+			if endpoint == "workspace" {
+				h.ListWorkspaceRuns(rr, req)
+			} else {
+				h.ListRunRecords(rr, req)
+			}
+			if rr.Code != http.StatusOK {
+				t.Fatalf("%s status %d: %s", endpoint, rr.Code, rr.Body)
+			}
+			body := rr.Body.String()
+			if !strings.Contains(body, "prn_legacy_secret") || !strings.Contains(body, "[REDACTED") {
+				t.Errorf("case %d %s did not return redacted run: %s", i, endpoint, body)
+			}
+			if strings.Contains(body, "exampleSecret") || strings.Contains(body, "example-password") || strings.Contains(body, "example-key-material") {
+				t.Errorf("case %d %s leaked credential text: %s", i, endpoint, body)
+			}
+		}
+	}
+}
