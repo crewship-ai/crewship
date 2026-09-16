@@ -82,7 +82,8 @@ describe("RoutineSchedulesTab — reliability display (read-only)", () => {
     ]
     render(<RoutineSchedulesTab workspaceId="ws-1" pipelineId="p1" slug="digest" />)
 
-    expect(screen.getByText("paused")).toBeInTheDocument()
+    expect(screen.getByRole("switch", { name: "Enable schedule Morning digest" })).not.toBeChecked()
+    expect(screen.getByTestId("schedule-uses-sch-paused")).toHaveTextContent("· off ·")
     expect(screen.queryByTestId("schedule-health-reason-sch-paused")).not.toBeInTheDocument()
     expect(screen.queryByTestId("schedule-health-sch-paused")).not.toBeInTheDocument()
   })

@@ -835,6 +835,29 @@ does not restore an older pair, and an export bundle does not carry them.
 From the CLI, `crewship page update <slug> --icon rocket --color amber` sets
 them without a document; `--icon ""` clears one.
 
+## Finding a page from the command palette
+
+Press <kbd>⌘K</kbd> (<kbd>Ctrl</kbd>+<kbd>K</kbd>) anywhere and type the
+page's name or slug: every page you reach in the workspace is a row in a
+**Pages** group, drawn with its own icon and colour, with the folder it is
+filed in — or the crew that owns it — on the right, and `app` on a page that
+carries a published application. Enter or a click opens `/pages/<slug>`. The
+generic **Pages** row under Navigation still opens the overview.
+
+The rows are the same authorised list the overview draws, fetched when the
+palette opens and never in the background: a page you cannot reach is not
+offered, and the palette searches page names and slugs, never panel data or
+application source.
+
+**Recent** — the rows at the top of the palette — is kept per signed-in user
+and per workspace in this browser. A page you opened stays there only while
+it is still in the list the server just returned, under its current name: a
+page that was deleted or whose access was revoked is dropped, and while the
+list has not answered (or answered with an error) no page row is shown at
+all. Switching workspace or signing in as somebody else shows that identity's
+history, never the previous one's. History recorded before this change was
+stored under one shared key and is cleared once rather than migrated.
+
 ## The editor
 
 **Edit** on a page opens one editor in the content column, with the Pages

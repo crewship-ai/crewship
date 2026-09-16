@@ -64,6 +64,15 @@ crewship saved-view create --name "My open issues" --filters '{"status":"open","
 crewship saved-view create --name "Team backlog" --filters '{"status":"backlog"}' --shared
 ```
 
+The web surfaces tell their views apart by a `surface` key **inside** `filters_json`, not by `--view-type` (that column is constrained to `board` or `list`). A view for the [Crew Journal](/guides/crew-journal#saved-views) wraps the journal's URL parameters:
+
+```bash
+crewship saved-view create --name "Failed CRON runs" --shared \
+  --filters '{"surface":"journal","params":{"tab":"runs","run_status":"FAILED","run_trigger":"CRON","run_window":"7d"}}'
+```
+
+A view without `surface` belongs to the issue tracker, whose filter keys are the flat shape in the first example.
+
 ---
 
 ## `crewship saved-view update <view-id>`

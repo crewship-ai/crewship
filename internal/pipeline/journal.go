@@ -285,7 +285,7 @@ func (c *pipelineEmitContext) emitStepFailed(ctx context.Context, step Step, err
 	p := map[string]any{
 		"step_id":               step.ID,
 		"error_class":           errorClass,
-		"error_message_preview": truncateForPreview(errorMessage),
+		"error_message_preview": truncateForPreview(scrubStepOutput(errorMessage)),
 	}
 	_, _ = c.emitter.Emit(ctx, journal.Entry{
 		WorkspaceID: c.workspaceID,
@@ -339,7 +339,7 @@ func (c *pipelineEmitContext) emitStepRetry(ctx context.Context, step Step, atte
 		"step_id":               step.ID,
 		"attempt":               attempt,
 		"max":                   maxAttempts,
-		"error_message_preview": truncateForPreview(errorMessage),
+		"error_message_preview": truncateForPreview(scrubStepOutput(errorMessage)),
 		"sleep_ms":              sleepFor.Milliseconds(),
 	}
 	_, _ = c.emitter.Emit(ctx, journal.Entry{
@@ -383,7 +383,7 @@ func (c *pipelineEmitContext) emitValidationFailed(ctx context.Context, step Ste
 	}
 	p := map[string]any{
 		"step_id": step.ID,
-		"reason":  reason,
+		"reason":  scrubStepOutput(reason),
 		"action":  string(action),
 	}
 	_, _ = c.emitter.Emit(ctx, journal.Entry{
@@ -482,7 +482,7 @@ func (c *pipelineEmitContext) emitRunFailed(ctx context.Context, failedStepID, e
 	}
 	p := map[string]any{
 		"failed_at_step": failedStepID,
-		"error_message":  truncateForPreview(errorMessage),
+		"error_message":  truncateForPreview(scrubStepOutput(errorMessage)),
 		"status":         status,
 	}
 	_, _ = c.emitter.Emit(ctx, journal.Entry{

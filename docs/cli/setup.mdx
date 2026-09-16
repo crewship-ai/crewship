@@ -26,7 +26,7 @@ Requires an authenticated session (`crewship login`). Errors with `not logged in
 | `--language <name>` | `""` | Language for agent replies (e.g. `English`, `Čeština`, `Deutsch`). Injected into every agent's system prompt. |
 | `--crew <slug>` | (prompted) | Crew template — one of `software-development`, `devops-sre`, `content-marketing`, `accounting-finance`, `blank`. |
 | `--adapter <key>` | (prompted) | CLI adapter — one of `CLAUDE_CODE`, `OPENCODE`, `CODEX_CLI`, `GEMINI_CLI`, `CURSOR_CLI`, `FACTORY_DROID`. |
-| `--model <model>` | (adapter default) | LLM model. Defaults to the adapter's recommended model (`claude-sonnet-4-6`, `gemini-2.5-pro`, `gpt-5.5`, `composer`, …). |
+| `--model <model>` | (catalog default) | LLM model. Defaults to the adapter's default in the model catalog (`config/models.json`) — the same model the web wizard starts on. At the time of writing: `claude-sonnet-5` for Claude Code and OpenCode, `gpt-5.5` for Codex, `gemini-2.5-pro` for Gemini, `composer` for Cursor. See [Model discovery](/guides/model-discovery). |
 | `--token <token>` | (prompted, hidden input) | The **CLI token** for the chosen adapter — output of `claude setup-token`, `gemini auth print-token`, etc. **Not** the vendor's account-level API key. |
 | `--api-key <token>` | `""` | Deprecated alias for `--token`. Will be removed. |
 | `--telemetry` | (server default) | Enable anonymous crash reporting; `--telemetry=false` opts out. Omitted, the server's version-based default is kept (prerelease on, stable off); interactive runs always ask. |

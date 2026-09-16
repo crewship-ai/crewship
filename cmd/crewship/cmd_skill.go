@@ -703,7 +703,7 @@ func init() {
 
 	skillCreateCmd.Flags().String("slug", "", "Skill slug (kebab-case identifier)")
 	skillCreateCmd.Flags().String("prompt", "", "Free-form description of what the skill should do")
-	skillCreateCmd.Flags().String("model", "", "Override LLM model (default: claude-sonnet-4-6)")
+	skillCreateCmd.Flags().String("model", "", "Override LLM model (default: the catalog's Anthropic default)")
 	skillCreateCmd.Flags().Bool("print", false, "Print generated SKILL.md to stdout instead of summary")
 
 	skillCmd.AddCommand(skillListCmd)

@@ -36,9 +36,7 @@ import { CrewIcon } from "@/components/ui/crew-icon"
 import { resolveRoutineIcon, resolveRoutineColor } from "@/lib/routine-identity"
 import type { Pipeline } from "@/hooks/use-pipelines"
 import { isAwaitingApproval, useActiveRoutineRuns } from "@/hooks/use-active-routine-runs"
-import { useTick } from "@/hooks/use-tick"
 import type { RoutineFilters } from "@/components/features/routines/routines-filter-sidebar"
-import { formatElapsedSince } from "./routine-cost-format"
 
 // RoutinesExplorer — the /routines left sidebar, built on the shared
 // sidebar-kit primitives (SidebarToolbar/Search/FilterButton/Section/
@@ -79,11 +77,11 @@ const STATUS_BUCKETS: {
   // Live buckets first. A routine parked on a human is the only state on
   // this page that is waiting for the person reading it — burying that
   // under three historical outcomes gets it found last.
-  { id: "awaiting", label: "Awaiting approval", icon: PauseCircle, tone: "text-warn" },
+  { id: "awaiting", label: "Waiting for you", icon: PauseCircle, tone: "text-warn" },
   { id: "running", label: "Running", icon: Activity, tone: "text-primary" },
   { id: "completed", label: "Completed", icon: CheckCircle2, tone: "text-success" },
-  { id: "failed", label: "Failed", icon: XCircle, tone: "text-destructive" },
-  { id: "never", label: "Never invoked", icon: CircleDashed, tone: "text-muted-foreground" },
+  { id: "failed", label: "Could not finish", icon: XCircle, tone: "text-destructive" },
+  { id: "never", label: "Never run", icon: CircleDashed, tone: "text-muted-foreground" },
 ]
 
 export function RoutinesExplorer({
@@ -183,11 +181,6 @@ export function RoutinesExplorer({
     [routines, search, filters, liveBySlug],
   )
 
-  // 1s re-render tick ONLY while a displayed routine has a live run,
-  // so the "· 0:12" elapsed segment counts up. Idle sidebar = no
-  // interval at all (useTick treats <=0 as off).
-  const hasLiveRow = displayed.some((p) => liveBySlug.has(p.slug))
-  useTick(hasLiveRow ? 1000 : 0)
 
   return (
     <div className="flex flex-col h-full">
@@ -458,7 +451,7 @@ export function RoutinesExplorer({
                             the detail header uses — two surfaces showing
                             a different icon for one routine would be
                             worse than showing none. */}
-                        <span className="relative shrink-0">
+                        <span className="relative shrink-0 self-center">
                           {/* A halo, not a moved icon. While a run is
                               live the icon keeps its place — a row
                               whose contents shift position is harder
@@ -497,41 +490,38 @@ export function RoutinesExplorer({
                             )}
                           />
                         </span>
-                        <span className="min-w-0 flex-1 text-foreground/80">
-                          <span className="block truncate">{routine.name || routine.slug}</span>
-                          <span className="block truncate text-[11px] text-muted-foreground">
-                            {routine.description}
-                          </span>
-                          {/* The sub-line grows the row from one line to
-                              two. Popping that in doubles the row's
-                              height between two frames and shoves every
-                              row below it down a step; animating the
-                              height reads as the row opening rather
-                              than the list jumping. */}
-                          <AnimatePresence initial={false}>
-                            {liveRun && (
-                              <motion.span
-                                key="live"
-                                initial={{ height: 0, opacity: 0 }}
-                                animate={{ height: "auto", opacity: 1 }}
-                                exit={{ height: 0, opacity: 0 }}
-                                transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
-                                className={cn(
-                                  "block overflow-hidden truncate text-[10px]",
-                                  liveAwaiting ? "text-warn" : "text-primary",
-                                )}
-                              >
-                                {liveAwaiting
-                                  ? `⏸ awaiting approval · ${formatElapsedSince(liveRun.started_at)}`
-                                  : `▶ Running · ${formatElapsedSince(liveRun.started_at)}`}
-                              </motion.span>
-                            )}
-                          </AnimatePresence>
+                        {/* One line per routine. The purpose lives in the
+                            tooltip and on the page; a second line under
+                            every name made thirty rows read as sixty, and
+                            a live-run line that grew and ticked under one
+                            of them broke the column. */}
+                        <span className="min-w-0 flex-1 truncate text-foreground/80">
+                          {routine.name || routine.slug}
                         </span>
-                        {routine.invocation_count > 0 && (
-                          <span className="text-[10px] font-mono tabular-nums text-muted-foreground-soft shrink-0">
-                            {routine.invocation_count}
+                        {/* While a run is live the row's right edge says
+                            so, in place of the run count and without a
+                            timer: the halo already pulses, and a number
+                            changing every second is what made it messy. */}
+                        {liveRun ? (
+                          <span
+                            data-testid="routine-live-chip"
+                            className={cn(
+                              "inline-flex shrink-0 items-center gap-1 rounded-full px-1.5 py-px text-[10px] font-medium",
+                              liveAwaiting ? "bg-warn/15 text-warn" : "bg-primary/15 text-primary",
+                            )}
+                          >
+                            <span
+                              aria-hidden
+                              className={cn("h-1.5 w-1.5 rounded-full", liveAwaiting ? "bg-warn" : "bg-primary animate-pulse")}
+                            />
+                            {liveAwaiting ? "Waiting" : "Running"}
                           </span>
+                        ) : (
+                          routine.invocation_count > 0 && (
+                            <span className="text-[10px] font-mono tabular-nums text-muted-foreground-soft shrink-0">
+                              {routine.invocation_count}
+                            </span>
+                          )
                         )}
                         {routine.author_agent_id && (
                           <img

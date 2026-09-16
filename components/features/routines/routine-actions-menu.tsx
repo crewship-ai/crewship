@@ -7,22 +7,15 @@
 // real — nothing is listed that the API cannot perform, because a menu
 // item that no-ops is the same lie as a save button that saves nothing.
 //
-// Rename and Duplicate go through /pipelines/save, the same path the
-// code editor uses, because `display_name` and `description` live in
-// the definition rather than in columns of their own. Export hits the
-// export endpoint that already existed and was unreachable from the UI.
+// Copy goes through /pipelines/save, because `display_name` and
+// `description` live in the definition rather than in columns of their
+// own. Rename lives in the Edit dialog's Identity tab now, and the recipe
+// itself is edited with the CLI or by the lead — so the menu carries Copy,
+// Export and Enable/Disable, and nothing that opens an editor. Export hits
+// the export endpoint that already existed and was unreachable from the UI.
 
 import * as React from "react"
-import {
-  Copy,
-  Download,
-  MoreHorizontal,
-  Pencil,
-  Power,
-  PowerOff,
-  Type,
-  X,
-} from "lucide-react"
+import { Copy, Download, MoreHorizontal, Power, PowerOff, X } from "lucide-react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
@@ -44,11 +37,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { apiFetch } from "@/lib/api-fetch"
 import { extractProblemDetail } from "@/lib/problem-details"
-import {
-  duplicatePayload,
-  renamePayload,
-  type RoutineSaveBody,
-} from "@/lib/routine-save-payload"
+import { duplicatePayload, type RoutineSaveBody } from "@/lib/routine-save-payload"
 import type { RoutineDetail } from "./routines-detail-panel"
 
 /**
@@ -69,7 +58,6 @@ async function problemMessage(res: Response, fallback: string): Promise<string> 
 interface Props {
   routine: RoutineDetail
   workspaceId: string
-  onEditCode: () => void
   onChanged: () => void
   onClose: () => void
   /** Enable / Disable, when the viewer's role allows it. */
@@ -79,12 +67,11 @@ interface Props {
   governanceBusy?: boolean
 }
 
-type OpenDialog = "rename" | "duplicate" | null
+type OpenDialog = "duplicate" | null
 
 export function RoutineActionsMenu({
   routine,
   workspaceId,
-  onEditCode,
   onChanged,
   onClose,
   lifecycle = "active",
@@ -96,19 +83,11 @@ export function RoutineActionsMenu({
   const [busy, setBusy] = React.useState(false)
 
   const definition = routine.definition as Record<string, unknown>
-  const [displayName, setDisplayName] = React.useState(
-    (definition?.display_name as string) ?? routine.name ?? "",
-  )
-  const [description, setDescription] = React.useState(routine.description ?? "")
   const [copyName, setCopyName] = React.useState(`${routine.name ?? routine.slug} (copy)`)
 
-  // Re-seed the drafts whenever the dialog opens, so a cancelled edit
-  // does not survive into the next one.
+  // Re-seed the name whenever the dialog opens, so a cancelled edit does
+  // not survive into the next one.
   const openDialog = (which: OpenDialog) => {
-    if (which === "rename") {
-      setDisplayName((definition?.display_name as string) ?? routine.name ?? "")
-      setDescription(routine.description ?? "")
-    }
     if (which === "duplicate") setCopyName(`${routine.name ?? routine.slug} (copy)`)
     setDialog(which)
   }
@@ -149,12 +128,9 @@ export function RoutineActionsMenu({
     author_crew_id: routine.author_crew_id,
   }
 
-  const submitRename = () =>
-    post(renamePayload(source, { name: displayName, description }), "Renamed")
-
   const submitDuplicate = () => {
     if (!copyName.trim()) return
-    return post(duplicatePayload(source, { name: copyName }), "Duplicated")
+    return post(duplicatePayload(source, { name: copyName }), "Copied · schedules and history stay with the original")
   }
 
   const exportBundle = async () => {
@@ -195,22 +171,13 @@ export function RoutineActionsMenu({
           </button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-56">
-          <DropdownMenuItem onSelect={onEditCode}>
-            <Pencil className="h-3.5 w-3.5" />
-            Edit definition
-          </DropdownMenuItem>
-          <DropdownMenuItem onSelect={() => openDialog("rename")}>
-            <Type className="h-3.5 w-3.5" />
-            Rename &amp; description
-          </DropdownMenuItem>
-          <DropdownMenuSeparator />
           <DropdownMenuItem onSelect={() => openDialog("duplicate")}>
             <Copy className="h-3.5 w-3.5" />
-            Duplicate
+            Copy
           </DropdownMenuItem>
           <DropdownMenuItem onSelect={exportBundle}>
             <Download className="h-3.5 w-3.5" />
-            Export bundle
+            Export
           </DropdownMenuItem>
           {showKillControl && lifecycle !== "proposed" && onGovernance && (
             <>
@@ -243,49 +210,10 @@ export function RoutineActionsMenu({
         </DropdownMenuContent>
       </DropdownMenu>
 
-      <Dialog open={dialog === "rename"} onOpenChange={(o) => !o && setDialog(null)}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Rename &amp; description</DialogTitle>
-            <DialogDescription>
-              The slug <span className="font-mono">{routine.slug}</span> does not change — every
-              reference to this routine keeps working.
-            </DialogDescription>
-          </DialogHeader>
-          <label className="block space-y-1.5">
-            <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Name</span>
-            <input
-              value={displayName}
-              onChange={(e) => setDisplayName(e.target.value)}
-              className="w-full rounded-md border border-white/[0.1] bg-background px-2.5 py-2 text-[13px]"
-            />
-          </label>
-          <label className="block space-y-1.5">
-            <span className="text-[11px] uppercase tracking-wider text-muted-foreground">
-              Description
-            </span>
-            <textarea
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              className="h-20 w-full resize-none rounded-md border border-white/[0.1] bg-background px-2.5 py-2 text-[13px] leading-relaxed"
-            />
-          </label>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setDialog(null)} disabled={busy}>
-              Cancel
-            </Button>
-            <Button onClick={submitRename} disabled={busy || !displayName.trim()} className="gap-1.5">
-              {busy && <Spinner className="h-3.5 w-3.5" />}
-              Save
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
       <Dialog open={dialog === "duplicate"} onOpenChange={(o) => !o && setDialog(null)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Duplicate routine</DialogTitle>
+            <DialogTitle>Copy this routine</DialogTitle>
             <DialogDescription>
               Copies the definition under a new name. Schedules, webhooks and run history stay with
               the original.
@@ -307,7 +235,7 @@ export function RoutineActionsMenu({
             </Button>
             <Button onClick={submitDuplicate} disabled={busy || !copyName.trim()} className="gap-1.5">
               {busy && <Spinner className="h-3.5 w-3.5" />}
-              Duplicate
+              Copy
             </Button>
           </DialogFooter>
         </DialogContent>
