@@ -16,7 +16,6 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"net/http"
 	"net/url"
 	"os"
 	"strings"
@@ -73,9 +72,16 @@ var routineWebhooksCmd = &cobra.Command{
 	Short: "Manage event-driven webhook triggers",
 	Long: `Webhooks fire saved routines when external services POST to
 /api/v1/webhooks/{token}. Each webhook is named, targets one routine,
-HMAC-signed for delivery integrity, and rate-limited per
-token. The signing secret is revealed only once on create — to rotate,
-delete + recreate.
+HMAC-signed for delivery integrity, and rate-limited per token. The
+signing secret is revealed only once on create; rotate it in place with
+"update <webhook_id> --rotate-secret" (the URL survives — only delete +
+recreate mints a new token).
+
+An endpoint's ingress profile fixes how a delivery is signed and shaped:
+"crewship" (the default) verifies X-Crewship-Signature over the raw body;
+"github" verifies X-Hub-Signature-256 and accepts only pull_request
+events, at the public URL's /github-pull-request suffix. The profile is
+chosen at create time and cannot be changed afterwards.
 
 Examples:
   crewship routine webhooks list
@@ -84,6 +90,9 @@ Examples:
       --name "github-pr-reviews" --hmac-secret "$(openssl rand -hex 32)" \
       --rate-limit 30
   crewship routine webhooks create --slug summarize-text  # generate and show HMAC secret
+  crewship routine webhooks create --slug pr-review --ingress-profile github
+  crewship routine webhooks fire <public_url> --secret <signing_secret> --body @event.json
+  crewship routine webhooks update <webhook_id> --rotate-secret
   crewship routine webhooks delete <webhook_id>
   crewship routine webhooks url <webhook_id>     # print public URL
 `,
@@ -157,8 +166,14 @@ var routineWebhooksListCmd = &cobra.Command{
 			return nil
 		}
 		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(w, "ID\tNAME\tROUTINE\tHMAC\tFIRES\tLAST STATUS\tRATE/MIN\tENABLED")
+		fmt.Fprintln(w, "ID\tNAME\tROUTINE\tPROFILE\tHMAC\tFIRES\tLAST STATUS\tRATE/MIN\tENABLED")
 		for _, h := range rows {
+			// Rows written before the profile column existed carry an
+			// empty value; the store treats that as the default.
+			profile := h.IngressProfile
+			if profile == "" {
+				profile = "crewship"
+			}
 			hmac := "no"
 			if h.SigningSecretSet {
 				hmac = "yes"
@@ -171,8 +186,8 @@ var routineWebhooksListCmd = &cobra.Command{
 			if h.Enabled {
 				enabled = "yes"
 			}
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%d\t%s\t%d\t%s\n",
-				shortID(h.ID), h.Name, routineCell(h.TargetPipelineSlug, h.TargetPipelineVersion), hmac, h.FireCount, lastStatus, h.RateLimitPerMin, enabled)
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%d\t%s\t%d\t%s\n",
+				shortID(h.ID), h.Name, routineCell(h.TargetPipelineSlug, h.TargetPipelineVersion), profile, hmac, h.FireCount, lastStatus, h.RateLimitPerMin, enabled)
 		}
 		return w.Flush()
 	},
@@ -211,6 +226,16 @@ var routineWebhooksCreateCmd = &cobra.Command{
 		}
 		if hmac != "" {
 			body["signing_secret"] = hmac
+		}
+		// Validated here against the same enum CreateWebhook enforces, so a
+		// typo is a flag error and never a round trip. Absent means the
+		// server default (crewship); the profile cannot be changed by
+		// `update`, so this is the one place it is chosen.
+		if profile, _ := cmd.Flags().GetString("ingress-profile"); profile != "" {
+			if profile != webhookProfileCrewship && profile != webhookProfileGitHub {
+				return fmt.Errorf("--ingress-profile must be %s or %s", webhookProfileCrewship, webhookProfileGitHub)
+			}
+			body["ingress_profile"] = profile
 		}
 		if inputsTpl != "" {
 			var tpl map[string]interface{}
@@ -274,13 +299,20 @@ var routineWebhooksCreateCmd = &cobra.Command{
 			fmt.Printf("  ID:        %s\n", w.ID)
 			fmt.Printf("  Name:      %s\n", w.Name)
 			fmt.Printf("  Routine:   %s\n", routineCell(w.TargetPipelineSlug, w.TargetPipelineVersion))
+			if w.IngressProfile == webhookProfileGitHub {
+				fmt.Printf("  Profile:   %s\n", w.IngressProfile)
+			}
 			fmt.Printf("  Public URL: %s\n", publicURL)
 			fmt.Printf("  Rate limit: %d / minute\n", w.RateLimitPerMin)
 			if w.SigningSecret != "" {
 				fmt.Println()
 				fmt.Println("== HMAC signing secret (shown once, copy now) ==")
 				fmt.Println(w.SigningSecret)
-				fmt.Println("== Senders MUST include header: X-Crewship-Signature: sha256=<hex_hmac_of_body>")
+				if w.IngressProfile == webhookProfileGitHub {
+					fmt.Println("== Paste it as the GitHub webhook secret; GitHub signs each delivery as X-Hub-Signature-256: sha256=<hex_hmac_of_body>")
+				} else {
+					fmt.Println("== Senders MUST include header: X-Crewship-Signature: sha256=<hex_hmac_of_body>")
+				}
 			}
 		})
 	},
@@ -523,9 +555,6 @@ func clientBaseURL(c *cli.Client) string {
 	return "http://localhost:8080"
 }
 
-// _ = http.NoBody // (kept for future force-fire endpoint)
-var _ = http.NoBody
-
 // redactedShort returns the last 4 chars of s prefixed with "***" for
 // log-safe display of secret-bearing identifiers (webhook tokens,
 // API keys, etc.). Short enough that operators recognize the value
@@ -549,6 +578,7 @@ func init() {
 	routineWebhooksCreateCmd.Flags().String("inputs-template", "", "JSON template merged with the request body to form routine inputs")
 	routineWebhooksCreateCmd.Flags().String("base-url", "", "override the public base URL printed in the response (defaults to server URL)")
 	routineWebhooksCreateCmd.Flags().Int("pin-version", 0, "pin the webhook to a specific routine version — every fire executes that immutable version instead of head; if the version is later deleted the fire FAILS (409) rather than silently running head")
+	routineWebhooksCreateCmd.Flags().String("ingress-profile", "", "signature profile: crewship (default; X-Crewship-Signature over the body) or github (X-Hub-Signature-256, pull_request events only, public URL ends in /github-pull-request); fixed for the webhook's lifetime")
 
 	routineWebhooksUpdateCmd.Flags().String("name", "", "new webhook name")
 	routineWebhooksUpdateCmd.Flags().String("slug", "", "retarget to a different routine slug")
@@ -562,19 +592,37 @@ func init() {
 	routineWebhooksUrlCmd.Flags().String("base-url", "", "override the public base URL")
 	routineWebhooksDeleteCmd.Flags().Bool("yes", false, "skip the interactive confirmation prompt")
 
+	routineWebhooksFireCmd.Flags().String("secret", "", "the webhook's HMAC signing secret, as revealed by create / update --rotate-secret (REQUIRED)")
+	routineWebhooksFireCmd.Flags().String("body", "", "request body: inline text, @file, or - for stdin (REQUIRED)")
+	routineWebhooksFireCmd.Flags().String("profile", "", "signature profile to sign with: crewship or github (default: github when the URL ends in /github-pull-request, else crewship)")
+	routineWebhooksFireCmd.Flags().String("event", "pull_request", "github profile only: the X-GitHub-Event header")
+	routineWebhooksFireCmd.Flags().String("delivery-id", "", "the sender's delivery id — X-GitHub-Delivery on the github profile, X-Crewship-Event-ID on crewship (default: a fresh random id)")
+	routineWebhooksFireCmd.Flags().Bool("timestamp", false, "crewship profile only: send X-Crewship-Timestamp and sign \"<timestamp>.<body>\" (the replay-safe scheme)")
+	routineWebhooksFireCmd.Flags().String("base-url", "", "public base URL to prepend when the argument is a bare token (defaults to the configured server URL)")
+
 	routineWebhooksCmd.AddCommand(routineWebhooksListCmd)
 	routineWebhooksCmd.AddCommand(routineWebhooksCreateCmd)
 	routineWebhooksCmd.AddCommand(routineWebhooksUpdateCmd)
 	routineWebhooksCmd.AddCommand(routineWebhooksUrlCmd)
 	routineWebhooksCmd.AddCommand(routineWebhooksDeleteCmd)
+	routineWebhooksCmd.AddCommand(routineWebhooksFireCmd)
 
 	pipelineCmd.AddCommand(routineWebhooksCmd)
 }
 
+// The two ingress profiles CreateWebhook accepts (internal/api/pipeline_webhooks.go)
+// and the public-URL suffix that selects the GitHub verifier
+// (internal/api/router_pipelines.go).
+const (
+	webhookProfileCrewship = "crewship"
+	webhookProfileGitHub   = "github"
+	webhookGitHubURLSuffix = "/github-pull-request"
+)
+
 func routineWebhookPublicURL(baseURL string, w WebhookRow) string {
 	suffix := ""
-	if w.IngressProfile == "github" {
-		suffix = "/github-pull-request"
+	if w.IngressProfile == webhookProfileGitHub {
+		suffix = webhookGitHubURLSuffix
 	}
 	return strings.TrimRight(baseURL, "/") + "/api/v1/webhooks/" + url.PathEscape(w.Token) + suffix
 }

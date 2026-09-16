@@ -16,18 +16,31 @@ crewship routine webhooks <subcommand> [flags]
 ```
 
 Webhooks are token-addressed triggers. An external sender POSTs the request
-body to `/api/v1/webhooks/{token}`; the body is delivered as the routine's
-`event` input. A configured HMAC secret requires the sender to provide
-`X-Crewship-Signature: sha256=<hex HMAC of the raw body>`.
+body to the webhook's public URL; the body is delivered as the routine's
+`event` input. Every webhook has an HMAC signing secret (generated when you
+do not supply one) and every delivery must be signed. Which header carries
+the signature, and what the public URL looks like, is the webhook's
+**ingress profile**, chosen once at `create`:
+
+| Profile | Public URL | Signature the sender provides |
+|---|---|---|
+| `crewship` (default) | `/api/v1/webhooks/{token}` | `X-Crewship-Signature: sha256=<hex HMAC-SHA256 of the raw body>`; with `X-Crewship-Timestamp` the HMAC covers `<timestamp>.<body>` |
+| `github` | `/api/v1/webhooks/{token}/github-pull-request` | `X-Hub-Signature-256: sha256=<hex HMAC-SHA256 of the raw body>` — GitHub's own; only `pull_request` `opened`/`synchronize`/`reopened` start a run |
 
 ## Subcommands
 
 | Command | API behavior |
 |---|---|
-| `list` | `GET /api/v1/workspaces/{workspace}/pipeline-webhooks`; human output is `ID NAME ROUTINE HMAC FIRES LAST STATUS RATE/MIN ENABLED`. |
+| `list` | `GET /api/v1/workspaces/{workspace}/pipeline-webhooks`; human output is `ID NAME ROUTINE PROFILE HMAC FIRES LAST STATUS RATE/MIN ENABLED`. |
 | `create` | `POST /api/v1/workspaces/{workspace}/pipeline-webhooks`; prints the public URL and reveals the signing secret only in the successful create response. |
+| `update <webhook_id>` | `PATCH /api/v1/workspaces/{workspace}/pipeline-webhooks/{webhook_id}`; edits name, target, rate limit, inputs template, enabled state and version pin in place, `--rotate-secret` mints a new secret shown once. The token (URL) and the ingress profile never change. |
 | `url <webhook_id>` | Lists webhooks, finds the exact ID, and prints the public URL without revealing the secret. |
 | `delete <webhook_id>` | `DELETE /api/v1/workspaces/{workspace}/pipeline-webhooks/{webhook_id}` after confirmation. Existing senders receive 404 after deletion. |
+| `receipts list` / `receipts get <receipt_id>` | `GET /api/v1/workspaces/{workspace}/routine-webhook-receipts[/{receipt_id}]`; the receipts deliveries leave behind — identity, body fingerprint, run. |
+| `fire <public_url\|token>` | `POST` to the public URL (`/api/v1/webhooks/{token}` or its `/github-pull-request` sibling), signed with `--secret` the way the profile's sender signs; prints the dispatch receipt. No CLI token is involved. |
+
+The full reference for every subcommand — flag tables, output columns and
+the receipts pages — is in [`crewship routine webhooks`](/cli/routine#crewship-routine-webhooks).
 
 ### `list`
 
@@ -56,22 +69,72 @@ crewship routine webhooks create \
 |---|---|---|
 | `--slug` | required | Target routine slug. |
 | `--name` | `<slug> webhook` | Human-readable name. |
-| `--hmac-secret` | empty | Enables signature verification when set. |
+| `--hmac-secret` | generated | The signing secret. Signature verification is always on: leave it empty and the server generates one, shown once in the response. |
+| `--ingress-profile` | `crewship` | `crewship` or `github`. Fixed for the webhook's lifetime; `github` gives the URL its `/github-pull-request` suffix and verifies GitHub's `X-Hub-Signature-256`. |
 | `--rate-limit` | `60` | Maximum fires per minute for this webhook. |
 | `--inputs-template` | empty | JSON object merged with the request body to form routine inputs. |
 | `--base-url` | server URL | Overrides the public base URL printed in the response. |
 | `--pin-version` | `0` | Positive routine version to execute on every fire instead of head. A deleted pinned version causes the fire to fail with 409. |
 
-The default human response prints the webhook ID, public URL, and rate limit.
-If an HMAC secret was configured, it is printed once; save it immediately.
-With `--format json|yaml|ndjson`, the create response includes the full API row
-and `public_url`, including the secret returned by the server.
+The default human response prints the webhook ID, public URL (with the
+`/github-pull-request` suffix for the `github` profile), and rate limit, then
+the signing secret once; save it immediately. With `--format json|yaml|ndjson`,
+the create response includes the full API row (`ingress_profile` included) and
+`public_url`, including the secret returned by the server.
+
+### `update`
+
+```bash
+crewship routine webhooks update <webhook_id> --name "github-pr-v2" --rate-limit 120
+crewship routine webhooks update <webhook_id> --rotate-secret
+```
+
+Flags: `--name`, `--slug`, `--rate-limit`, `--inputs-template`, `--enabled`
+/ `--enabled=false`, `--pin-version`, `--unpin`, `--rotate-secret`. At least
+one is required. The URL never changes; the profile cannot be changed (the
+server answers `400`) — create a new webhook for a different sender format.
 
 ### `url` and `delete`
 
 `url` accepts only the exact webhook ID and has one flag, `--base-url`, which
-overrides the server URL. `delete` accepts `--yes` to skip its interactive
-confirmation prompt. Both commands require authentication and a workspace.
+overrides the server URL; it prints `<base-url>/api/v1/webhooks/<token>` for a
+`crewship` webhook and `<base-url>/api/v1/webhooks/<token>/github-pull-request`
+for a `github` one. It only works while the server still returns the token —
+tokens are hashed at rest and shown once, at create. `delete` accepts `--yes`
+to skip its interactive confirmation prompt. Both commands require
+authentication and a workspace.
+
+### `fire`
+
+```bash
+crewship routine webhooks fire https://crewship.example.com/api/v1/webhooks/<token> \
+  --secret "$SECRET" --body '{"event":"deploy"}' --delivery-id deploy-1
+crewship routine webhooks fire <token> --base-url https://crewship.example.com \
+  --profile github --secret "$SECRET" --body @pull_request.json --delivery-id 72d3162e
+```
+
+| Flag | Default | Behavior |
+|---|---|---|
+| `--secret` | required | The signing secret from `create` or `update --rotate-secret`. |
+| `--body` | required | Inline text, `@file`, or `-` for stdin. |
+| `--profile` | from the URL | `crewship` or `github`; a bare token fired as `github` gets the suffix. |
+| `--delivery-id` | `cli-<random>` | Sent as `X-Crewship-Event-ID` or `X-GitHub-Delivery`; the receipt's source id (`github:<id>` on the GitHub profile). |
+| `--event` | `pull_request` | `github` only: `X-GitHub-Event`. |
+| `--timestamp` | off | `crewship` only: `X-Crewship-Timestamp` + HMAC over `<timestamp>.<body>`. |
+| `--base-url` | server URL | Prepended when the argument is a bare token. |
+
+Prints `Accepted (202)` with the run and receipt ids, `Already received (202)`
+for a redelivery (the original run), or `Ignored (200)` with the reason. Any
+other status is the server's error and a non-zero exit — `401` wrong secret,
+`404` unknown token or wrong profile, `409` delivery id reused with a
+different body, `413` too large, `429`/`503` retry. The secret and token are
+never echoed.
+
+### `receipts`
+
+`receipts list [--webhook <id>] [--source-id <id>] [--after <cursor>]` and
+`receipts get <receipt_id>` read the receipts deliveries leave behind; see
+[`webhooks receipts list`](/cli/routine#webhooks-receipts-list).
 
 All webhook commands honor the global `-f/--format` where the command emits a
 machine-readable response; `list` additionally supports `table|json|yaml|ndjson`
