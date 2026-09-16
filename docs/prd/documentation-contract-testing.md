@@ -182,19 +182,39 @@ deterministic layer is the part that is actually enforced:
 | Schemathesis live layers | `ci.yml` → *Run deterministic API contract gate*; the same ephemeral seeded server/build as the PR harness | yes |
 | CLI runtime golden smoke | `ci.yml` → Harness PR subset + CLI command breadth smoke | yes |
 
-`-strict` enforces six invariants and names the offending rows rather than only
-counting them: operations with no documentation, operations missing structural
+`-strict` enforces fourteen gates. The following eight cover documentation and
+CLI contracts, reporting offending rows rather than only counting them: operations with no documentation, operations missing structural
 contract evidence (auth/request/response/statuses), generic response schemas,
-generic JSON request schemas, CLI commands with no page, and CLI commands with
-undocumented flags. `make docs-inventory` remains the non-failing form for
-regenerating the reports locally; `make docs-inventory:strict` is what CI runs.
+generic JSON request schemas, CLI commands with no page, CLI commands with
+undocumented flags, and — since the 2026-09-15 audit — API paths with no
+`crewship` command and CLI flags documented only under another command's
+heading. `make docs-inventory` remains the non-failing form for regenerating
+the reports locally; `make docs-inventory:strict` is what CI runs.
 
-`docs-surface-check` runs six hermetic passes over the tree, in the order it
+The two newer gates measure what the older ones only implied. **CLI parity**
+reads every request path the CLI can build out of the Go source of
+`cmd/crewship` and `internal/cli` — literals, `+` chains, `fmt.Sprintf`
+formats, const bases, helpers with the caller's suffix bound to their parameter
+— and diffs the shapes against every path in the OpenAPI document; a path with
+no caller fails unless `scripts/docs-inventory/cli-parity-exemptions.txt` names
+it with a reason (the file's three sections: not a CLI surface, in flight on
+another branch, pre-existing gap). **Section-scoped flags** count a flag as
+documented for a command only inside that command's own heading section or on
+a line that invokes it; the 184 misses that existed on the day the check landed
+are in `scripts/docs-inventory/flag-section-baseline.txt`, `-strict` fails on
+any miss not listed there, and a line whose miss is gone is reported for
+deletion. Both files can only shrink.
+
+`docs-surface-check` runs eight hermetic passes over the tree, in the order it
 prints them: description quality, stability labels, navigation reachability in
 *both* directions (nav→file, and file→nav since #2086), every internal link
 written *inside* a page body — in both the Markdown `](/guides/routines)` and
 the JSX `href="/guides/routines"` form, since #1774 — deprecated terminology,
-and the contextual surface. Links inside fenced blocks are transcripts, not
+code spans wrapped onto a `<` line, headings with an unescaped `{param}`
+(MDX evaluates it and renders nothing, so the parameter vanishes from the
+published heading; the nineteen headings broken on 2026-09-15 are allowlisted
+in `allowedUnescapedHeadings` and the list can only shrink), and MDX tag
+safety, plus the contextual surface. Links inside fenced blocks are transcripts, not
 navigation, and are skipped. A dead link names the page and the target it points
 at — and, for a dead anchor, the anchor the page actually publishes — so the fix
 does not start with a search.

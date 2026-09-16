@@ -145,6 +145,12 @@ func TestStrictGatesFailAndNameTheOffender(t *testing.T) {
 			want: "GET /api/v1/vague",
 		},
 		{
+			name: "API path with no CLI command",
+			r: report{API: []apiRecord{{Method: "GET", Path: "/api/v1/uncalled", Status: "documented_exact",
+				ConcreteResponseSchema: true, CLIParity: cliParityMissing}}},
+			want: "/api/v1/uncalled",
+		},
+		{
 			name: "undocumented CLI flag",
 			r: report{CLI: []cliRecord{{Path: "crewship token create", Status: "documented_exact",
 				Flags: []string{"quiet", "output-file"}, DocumentedFlags: []string{"quiet"},
@@ -193,8 +199,8 @@ func TestTokenMentionedRejectsSubstringCollision(t *testing.T) {
 func TestStrictGatesPassWhenClean(t *testing.T) {
 	r := report{
 		API: []apiRecord{{Method: "GET", Path: "/api/v1/items", Status: "documented_exact",
-			ConcreteResponseSchema: true,
-			Contract:               contractChecks{Structural: structuralChecks{CanonicalMethodPath: true, Auth: true, Request: true, Response: true, Statuses: true}}}},
+			ConcreteResponseSchema: true, CLIParity: cliParityCovered,
+			Contract: contractChecks{Structural: structuralChecks{CanonicalMethodPath: true, Auth: true, Request: true, Response: true, Statuses: true}}}},
 		CLI: []cliRecord{{Path: "crewship items list", Status: "documented_exact", ExactDocs: []string{"docs/cli/items.mdx"}}},
 	}
 	r.Summary = summarize(r)
