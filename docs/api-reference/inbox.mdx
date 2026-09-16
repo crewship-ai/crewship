@@ -89,8 +89,10 @@ An item addressed to OWNER never appears for a MEMBER, even if both belong to th
   **when the row is read** — not stored on the item at raise time. Both inputs change
   afterwards (the workspace toggle, and the credential's tier), so a stored answer would
   promise a resolve that then `403`s. Omitted means the server said nothing, not that a
-  single approver will do: an agent with **no recorded owner** has no identity for the rule
-  to compare against, so it cannot be enforced and nothing is claimed. See
+  single approver will do. When the rule applies and the raising agent has **no recorded
+  owner**, the fields still say it applies, and the resolve fails closed with a `403`
+  ("the initiating identity is unknown") — an unknown initiator is never treated as a
+  different person. See
   [Keeper → The switch is a floor, not a master switch](/guides/keeper#the-switch-is-a-floor-not-a-master-switch).
 </Note>
 
