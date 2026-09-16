@@ -1,6 +1,6 @@
 ---
 title: "Chat & Sessions"
-description: "Full-page chat with sessions, attachments, message reactions, live terminal, and the right-panel artefact tabs."
+description: "Full-page chat with agent sessions, direct messages, groups and channels, attachments with previews, message feedback, and the Files / Team side panels."
 icon: "message-square"
 stability: experimental
 tag: Experimental
@@ -10,20 +10,20 @@ tag: Experimental
 
 ## Overview
 
-Chatting with an agent is a first-class surface in Crewship. PRs #213, #214, #223, and #225 re-shaped it from a side drawer into a full-page experience with session history, attachments, message reactions, and a right-panel that exposes the agent's working files, artefacts, and a live terminal. The split-screen layout from PR #314 finished the job — chat on the left, the agent's workspace surfaces on the right, both live and both deep-linkable.
+Chatting with an agent is a first-class surface in Crewship. PRs #213, #214, #223, and #225 re-shaped it from a side drawer into a full-page experience with session history, attachments, message reactions, and a right-hand drawer that exposes the agent's files and its crew. The split-screen layout from PR #314 finished the job — chat on the left, the agent's files and team on the right, both live. Since #2458 the same page also carries the conversations between *people* — direct messages, groups and workspace channels — in one column with the agent sessions; see [People, groups and channels](#people-groups-and-channels).
 
 A "session" in Crewship is intentionally durable. It's a `chats` row scoped to one agent, with a stable ID that survives page reloads, browser restarts, and operator hand-off — anyone with read access to the agent can resume the same conversation history. The schema has grown alongside the UI: PR #225 added `chat_branches` (edit-and-resend trees), `message_reactions`, `chat_attachments`, and `workspace_files`, plus `chats.origin` (migration v59) for grouping in the Sessions sidebar by where the conversation started — one of `UI / CLI / WEBHOOK / CRON / AGENT`, written by `POST /api/v1/agents/{agentId}/chats`. The point of the breadth: a chat is more than text — it's a typed transcript backed by structured tables so search, audit, and replay all work the same way no matter which surface produced the message.
 
-This guide covers the model, the URL state, and the surfaces a power user (or integrator) cares about. The component reference lives in the frontend codebase (`app/(chat)/chat/`) and the persistence layer lives in `internal/api/agent_chats.go` + the Go migrations under `internal/database/migrate.go`; here we focus on what the platform persists and how the URL state composes with it.
+This guide covers the model, the URL state, and the surfaces a power user (or integrator) cares about. The component reference lives in the frontend codebase (`app/(dashboard)/chat/chat-client.tsx`, with the column in `components/features/chat/conversations-sidebar.tsx` and the rooms in `components/features/conversations/`) and the persistence layer lives in `internal/api/agent_chats.go` + the Go migrations under `internal/database/migrate.go`; here we focus on what the platform persists and how the URL state composes with it.
 
 ## When to use it
 
 Most chat surface usage is self-evident — "talk to the agent" — but the durable-session design unlocks several flows worth reaching for explicitly:
 
-- **Resume a multi-day conversation.** A session ID survives reloads and operator hand-off, so `/chat/<agent>?session=<chatId>` is the canonical "where we left off" URL. Bookmark it, paste it into Linear, share it on Slack — the recipient lands on the same transcript, the same right-panel state, and (with `&panel=files`) the same artefact tab.
+- **Resume a multi-day conversation.** A session ID survives reloads and operator hand-off, so `/chat/<agent>?session=<chatId>` is the canonical "where we left off" URL. Bookmark it, paste it into Linear, share it on Slack — the recipient lands on the same transcript.
 - **Reroll a bad agent response without abandoning context.** Hover-edit the user message and the conversation truncates from that point; the new edit sends as a fresh turn. The transcript before the edit is preserved as a [chat branch](#sessions) so the alternate timeline isn't lost — useful when you discover the original direction was right after all.
 - **Triage what an agent has been doing.** `chats.origin` (`UI / CLI / WEBHOOK / CRON / AGENT`) records whether a conversation was started by a user, by automation, or by a peer agent. The open conversation reports its own origin as a chip in the chat header. The conversations column does not group or filter by it — to audit what an integration has been driving through your agents across many conversations, use `crewship chat list`, which carries the column.
-- **Watch an agent work in real time without opening the journal.** The right-panel **Files**, **Artifacts**, **Terminal**, and **Diff** tabs stream the live state of the agent's container while the chat is open. Faster than tailing logs, and the URL deep-links to a specific tab via `&panel=files` / `&panel=terminal`.
+- **See what the agent made without opening the journal.** The **Files** drawer lists the agent's files while the chat is open — click one to preview an image or a PDF in place, or to open it in the editor. Crewship's own scaffolding (system prompts, adapter config) is hidden behind **Show N internal files** so the list answers "what has this agent made for me" first.
 - **Programmatic chat creation from CLI / webhook / cron.** `POST /api/v1/agents/{agentId}/chats` accepts an `origin` enum on the body, which the chat header renders as a coloured chip and `crewship chat list` prints as its `ORIGIN` column. Use `CLI` for `crewship run`-style invocations, `WEBHOOK` for trigger-handlers, `CRON` for scheduled routines, `AGENT` for peer-to-peer assignments — it is how an operator tells at a glance whether a conversation was driven by a person or by automation.
 
 For one-off "ask the agent a question" use, just open `/chat/<agent>` and start typing — the session row gets created automatically on first send.
@@ -41,8 +41,8 @@ For one-off "ask the agent a question" use, just open `/chat/<agent>` and start 
 | **Model picker** | Per-turn override of the agent's `llm_model`. Lives next to the send button. The override applies only to the current send — the agent's default model is unchanged for subsequent turns. |
 | **Attachment** | A file uploaded into a chat — image, document, log, anything ≤25 MB. Written to the server's storage provider as a blob; the agent's container sees it under `/output/<agentSlug>/attachments/<chatId>/<attachmentId>/<filename>`. That tree belongs to the crew runtime (uid 1001) once the crew is provisioned, so the server writes the blob *through the running crew container* — attaching to a stopped crew returns `409` telling you to start it (#922). Since #1768 the upload also records a row in `attachments` (`owner_type = 'chat'`) with the size, SHA-256, content type and uploader; the dead `chat_attachments` table it was meant to use is gone. The row is written *before* the bytes and promoted after they land, so a `201` always means both exist. Each upload gets its own `<attachmentId>` directory, so two files of the same name never overwrite each other, and both listing and deletion exist (`crewship chat attachments list|delete`). There is still no download endpoint — the agent reads the file from its own filesystem. |
 | **Reaction** | A workspace-shared emoji vote on a single assistant message. Persisted in `message_reactions` (migration v57) with `UNIQUE(chat, message, emoji, user)` so POST is idempotent. Aggregated counts (`{emoji, count, mine}`) returned by List. |
-| **Right-panel tab** | One of **Files** (F1), **Artifacts** (F2), **Diff** (F3), or **Terminal** (F4). Each tab streams independently; switching tabs doesn't retrigger inactive streams. URL state `&panel=…` deep-links to a tab. |
-| **Shallow router state** | Browser-only URL params written via `window.history.replaceState` (helper: `useShallowSearchParam`). Used for which panel is open, which message is being edited, slash-palette state — none of which justify a full Next.js navigation but all of which should appear in copy-pasted URLs. |
+| **Right drawer** | The rail on the right edge of the chat — **Files** (`⌘1` / `Ctrl+1`) and **Team** (`⌘2` / `Ctrl+2`), `⌘B` / `Ctrl+B` to open or close. A **Triggers** panel (the agent's webhook trigger and its signing secret) sits behind the `AGENT_EXTERNAL_TRIGGERS` gate and is off by default. Which panel is open is remembered per browser, not carried in the URL. |
+| **Shallow router state** | Browser-only URL params written via `window.history.replaceState` (helper: `useShallowSearchParam`). Used for which message is being edited and slash-palette state — none of which justify a full Next.js navigation but all of which should appear in copy-pasted URLs. |
 | **`request_id`** | A client-generated UUID stamped on every send. The server idempotently dedupes by `request_id` so a retry after a WS reconnect never duplicates the user turn. Surfaced on outbound messages so clients can correlate sent-vs-acknowledged. |
 | **Presence chip** | The small status indicator in the composer footer — `online` / `thinking` / `blocked` / `offline`. Driven by the [Watch Roster](/guides/watch-roster); not a guess from idle timers. |
 | **Pinned session** | A session with a per-user pin flag set. Pinned sessions float to the top of the sidebar regardless of last-message timestamp. Useful for "the conversation I always come back to". |
@@ -62,7 +62,7 @@ The end-to-end loop from "I have an agent" to "we had a productive conversation 
 https://crewship.example.com/chat/viktor
 ```
 
-Drops you into Viktor's most recent session. To start fresh, click **New conversation** in the left column. To jump to a specific past conversation, paste the deep-link URL `?session=<chatId>`. To approach from the canvas instead, use `/crews?crew=<slug>&agent=viktor` — see [Routes](#routes).
+Drops you into Viktor's most recent session. To start fresh, open **New chat** at the top of the left column and pick **Chat with an agent** (the same menu starts a direct message, a group or a channel — see [People, groups and channels](#people-groups-and-channels)). To jump to a specific past conversation, paste the deep-link URL `?session=<chatId>`. To approach from the canvas instead, use `/crews?crew=<slug>&agent=viktor` — see [Routes](#routes).
 
 </Step>
 
@@ -76,16 +76,14 @@ Type into the composer and hit **Enter**. The agent's response streams back via 
 
 </Step>
 
-<Step title="Watch the agent work">
+<Step title="See what the agent made">
 
-While the agent is acting, flip the right panel to the relevant tab — see [Right panel](#right-panel) for the full tab map:
+While the agent is acting, open the right drawer — see [Right drawer](#right-drawer) for the two panels:
 
-- **F1 / Files** — live working tree under `/workspace`.
-- **F2 / Artifacts** — generated reports, screenshots, downloads.
-- **F3 / Diff** — live diff vs. the workspace's last commit, while the agent is mid-edit.
-- **F4 / Terminal** — read-only tmux attach (OWNER/ADMIN can flip to read-write).
+- **Files** (`⌘1`) — the agent's files, with Crewship's own scaffolding hidden by default; an image or a PDF previews in place, anything else opens in the editor. The crew's shared files are a collapsed section underneath.
+- **Team** (`⌘2`) — the crew's agents and the people assigned to it, plus the agent-to-agent questions this agent has asked or answered.
 
-Each tab is its own URL query param (`&panel=files`, etc.), so you can share the exact view you're staring at.
+`⌘B` toggles the drawer. What the agent is running lives in the [Crew Journal](/guides/crew-journal) and on the crew page, not in the chat.
 
 </Step>
 
@@ -97,7 +95,7 @@ Hover an assistant message to surface its action row: **Copy**, and the 👍 / �
 
 <Step title="Resume later">
 
-Just copy the URL. The session ID is in `?session=<chatId>`, the right-panel state is in `&panel=…`. Bookmark, paste into Linear, share over Slack — anyone with read access on the agent lands on exactly the same view (their reactions are scoped to *them*, the session itself is shared). Pin the session in the sidebar if it's a long-running thread you want to surface above the timestamp-sorted list.
+Just copy the URL (**Copy link** in the header does the same). The session ID is in `?session=<chatId>`. Bookmark, paste into Linear, share over Slack — anyone with read access on the agent lands on exactly the same view (their reactions are scoped to *them*, the session itself is shared). Pin the session in the sidebar if it's a long-running thread you want to surface above the timestamp-sorted list.
 
 </Step>
 
@@ -115,7 +113,7 @@ A test is red in CI and you want the agent's eyes on it. Open the agent and star
 https://crewship.example.com/chat/viktor
 ```
 
-Drag the failing test's snapshot file into the composer — it lands at `/output/viktor/attachments/<chatId>/snapshot.txt` inside the container; the agent opens it via the **Files** tab (F1). As the agent edits the test, flip to **Diff** (F3) to watch the patch take shape against `HEAD`; when it wants to run the suite, switch to **Terminal** (F4) and watch the output stream live. Each tab is its own URL param (`&panel=files` / `&panel=diff` / `&panel=terminal`), so the link you share with a teammate drops them onto the exact view you're looking at.
+Drag the failing test's snapshot file into the composer — it lands at `/output/viktor/attachments/<chatId>/snapshot.txt` inside the container, and the agent reads it from its own filesystem. As the agent works, its commands and tool calls stream into the [Crew Journal](/guides/crew-journal) (filter by the agent, or by the run's `trace_id`); when it writes a report or a patch, the **Files** drawer (`⌘1`) is where you open it.
 
 When the suite goes green, 👍 the assistant's final message — the reaction surfaces back to the agent on the next turn as positive signal and shows up in [Quartermaster](/guides/quartermaster) replays as coarse human feedback.
 
@@ -137,13 +135,13 @@ The new session shows up in the agent's sidebar with a coloured `WEBHOOK` chip, 
 
 ### Cross-operator escalation
 
-You're chatting with `viktor` about a production outage and realise this needs an SRE's eyes. Pin the session in the sidebar so you can come back to it, copy the URL with the right panel set to **Terminal**:
+You're chatting with `viktor` about a production outage and realise this needs an SRE's eyes. Pin the session in the sidebar so you can come back to it and copy the URL:
 
 ```text
-/chat/viktor?session=cht_abc123&panel=terminal
+/chat/viktor?session=cht_abc123
 ```
 
-Paste into the SRE channel on Slack with one line: "Live terminal on the agent's repro — viktor's pinned this for me." The SRE clicks, lands on the same chat session with the same active right-panel tab (terminal) and the same live exec stream — though their own reactions are scoped to *them*. They reply in the chat; their messages join the same transcript, visible to both of you and to anyone else who opens the URL.
+Paste it into the SRE's direct message — **New chat ▸ Message a person** opens one inside Crewship, or use Slack — with one line: "viktor's repro is in here." The SRE clicks and lands on the same chat session — though their own reactions are scoped to *them*. They reply in the chat; their messages join the same transcript, visible to both of you and to anyone else who opens the URL.
 
 When the incident closes, the session row survives — it stays as a permanent record of what was said, what was tried, and what fixed it. The webhook-triggered originals from step 2 and the human-driven escalation here live in the same `chats` table, distinguishable only by their `origin` chip in the sidebar.
 
@@ -302,7 +300,8 @@ Three top-level routes serve chat:
 
 | Route | Purpose |
 |---|---|
-| `/chat` | The chat surface, and the **Chat** entry in the left rail and the mobile nav sheet. It is **not an index** — it opens straight into your freshest conversation and rewrites the address bar to that conversation's `/chat/<agentSlug>?session=<chatId>` shape, so it holds a live WebSocket from the moment it loads. The left column lists conversations across every agent, merged client-side from `GET /agents` plus a capped fan-out of `GET /agents/{id}/chats`, newest activity first. Agents are an attribute of a conversation here, not a level above it. |
+| `/chat` | The chat surface, and the **Chat** entry in the left rail and the mobile nav sheet. It is **not an index** — it opens straight into your freshest **agent session** (rooms are never auto-selected; open them with `?conversation=<id>`) and rewrites the address bar to that conversation's `/chat/<agentSlug>?session=<chatId>` shape, so it holds a live WebSocket from the moment it loads. The left column is one list for everything you can talk in: **New chat** on top, search, then **People** (your direct messages), **Agents** (each agent with its sessions folded under it, merged client-side from `GET /agents` plus a capped fan-out of `GET /agents/{id}/chats`) and **Team spaces** (groups and channels). An **Activity & filters** foot switches the agent sessions between Direct, Routines and Issues and narrows to unread sessions or running agents. |
+| `/chat?conversation=<id>` | A direct message, group or channel, open in the same page — see [People, groups and channels](#people-groups-and-channels). |
 | `/crews?crew=<slug>&agent=<slug>` | Selection-driven canvas. Click an agent in the canvas to open a chat panel inline. |
 | `/chat/<agentSlug>?session=<chatId>` | Full-page chat — the same agent, the same session model, the whole viewport for messages + composer + right panel. |
 
@@ -310,7 +309,7 @@ The session is a **query parameter, never a path segment**. The static export se
 
 The `/chat/<agentSlug>` URL is **deep-linkable** — the `session` query parameter scopes to a specific chat history. Without `?session`, the route opens the agent's most recent chat. With a `session` ID, it scrolls to that chat's history and resumes the conversation in place.
 
-The state of which tab is open in the right panel, which message is being edited, whether the slash palette is open, and the like is held in **shallow router** state — `useShallowSearchParam` writes to `window.history.replaceState` directly without triggering a Next.js navigation. This keeps the page interactive (no rerender on tab switch) while still giving you a copyable URL for any state.
+The state of which message is being edited, whether the slash palette is open, and the like is held in **shallow router** state — `useShallowSearchParam` writes to `window.history.replaceState` directly without triggering a Next.js navigation. This keeps the page interactive (no rerender on tab switch) while still giving you a copyable URL for any state.
 
 ## Sessions
 
@@ -453,18 +452,17 @@ The List response is **aggregated** (one row per emoji, with `count` and `mine` 
 
 Reactions are surfaced to the agent on the next turn as part of the conversation context: the model sees that a previous response was 👎'd by an operator and can adjust. They are also surfaced in [Quartermaster](/guides/quartermaster) replays as a coarse human-feedback signal.
 
-## Right panel
+## Right drawer
 
-The right side of the chat surface is a tab strip. Tabs are sticky — switching agents preserves which tab was open, but switching tabs does not retrigger the SSE/WS streams from the inactive tabs.
+The right edge of the chat is a labelled rail; a button opens its panel in a drawer beside the conversation (`⌘B` toggles it, the shortcut number is the button's position). Which panel is open is remembered per browser — it is not part of the URL.
 
-| Tab | Hotkey | Purpose |
+| Panel | Shortcut | Purpose |
 |---|---|---|
-| **Files** | F1 | Live view of the agent's working tree under `/workspace`. Click a path to preview; double-click to open in the in-page editor. |
-| **Artifacts** | F2 | Generated outputs — markdown reports, screenshots, downloads. Pulled from `output/` mount. |
-| **Terminal** | F4 | Live tmux attach to the agent's session via the sidecar's interactive exec endpoint. Read-only by default; OWNER/ADMIN can flip to read-write. |
-| **Diff** | F3 | (When the agent is mid-edit) live diff against the workspace's last commit. |
+| **Files** | `⌘1` | The agent's files. Crewship's own scaffolding (system prompts, adapter config, `AGENTS.md`) is hidden by default and comes back with **Show N internal files** at the foot of the list — hidden, never deleted, because "why is my agent behaving like that" is answered by exactly those files. Click a PNG, JPEG, WebP or PDF to preview it in place (page through and zoom a PDF; **Download** for the original); anything else opens in the in-page editor. The crew's shared files are a collapsed section underneath, loaded on demand. |
+| **Team** | `⌘2` | The crew this agent belongs to: its agents with their status, the people assigned to the crew, and the agent-to-agent questions (peer queries) this agent has asked or answered. |
+| **Triggers** | — | The agent's inbound webhook trigger and its signing secret. Behind the `AGENT_EXTERNAL_TRIGGERS` feature gate, which is off by default, so neither the rail button nor the panel is rendered in a stock build. |
 
-The terminal tab reads from the sidecar's exec stream and writes back through the same socket; latency is bounded by the WS round-trip. Closing the tab does **not** kill the agent's tmux session — re-opening reattaches.
+There is no terminal, diff or artifacts panel in the chat: what an agent is running is the [Crew Journal](/guides/crew-journal)'s job (`exec.command` entries carry the command), and the agent's configuration lives on the crew page, not in the per-session drawer.
 
 ## Presence and reconnect
 
@@ -478,33 +476,56 @@ Network blips do not lose messages. Sends that were in-flight at disconnect time
 |---|---|
 | `/chat/viktor` | Most recent session for `viktor`. |
 | `/chat/viktor?session=cht_a1b2c3` | Specific session; deep-linkable. |
-| `/chat/viktor?session=cht_a1b2c3&panel=files` | Open the Files tab on load. |
-| `/chat/viktor?session=cht_a1b2c3&panel=terminal` | Open the Terminal tab on load. |
+| `/chat?conversation=<roomId>` | A direct message, group or channel. |
 | `/crews?crew=backend&agent=viktor` | Canvas view, viktor selected. |
 
 These query params are stable. Do not link to the Next.js internal route segments; those are subject to refactoring.
 
 ## Common pitfalls
 
-<Accordion title="Footguns and surprising behaviour (14)">
+<Accordion title="Footguns and surprising behaviour (11)">
 
 - **Edit-and-resend truncates the active branch — but the tail isn't gone.** Editing a user message moves every message after it into `chat_branches`. The UI shows a small "view earlier branches" affordance, but a hurried operator may believe they've lost the alternate response. Train the muscle of opening the branch picker before assuming work is unrecoverable.
 - **Reactions are workspace-shared, not per-user-private.** An emoji reaction added with `crewship chat react` is visible to every other operator in the same workspace, and is also surfaced to the agent on the next turn. Use reactions as a deliberate signal — not as a private bookmark. If you need a private flag, use the [Inbox](/guides/inbox) pin instead. (The 👍 / 👎 in the message action row are `message_feedback`, a separate table — see [Message reactions](#message-reactions).)
 - **`chats.origin` silently NULLs unrecognised values.** Anything outside the `UI / CLI / WEBHOOK / CRON / AGENT` allow-list gets stored as `NULL` to keep the UI chip safe from injection. A webhook handler that posts `origin: "github"` will succeed (200 OK) but show no chip — the silent failure is by design. Validate the enum on your side before posting.
 - **Prisma TypeScript schema is intentionally stale on `chats.origin`.** Prisma is types-only in this project; the v59 migration was applied to SQLite but the `prisma/schema.prisma` was deliberately not regenerated. TS callers must query `origin` via the Go-typed API surface, not via Prisma Client.
 - **Attachment cap is 25 MB, with different error surfaces by client.** Uploads larger than 25 MB return a 413 from `ProxyHandler.AgentChatAttachment`. The browser composer surfaces this as a toast, while a programmatic uploader (CLI, webhook) sees only the HTTP error — check status codes before assuming the file landed.
-- **The Files right-panel shows mid-edit state, not committed state.** It reads `workspace_files`, which tracks the agent's live working tree. If you want to see what was actually committed by the agent, look at the **Diff** tab against `HEAD`, or run `git log` in the **Terminal** tab — the Files view is intentionally optimistic.
-- **Closing the Terminal tab does NOT kill the agent's tmux session.** Re-opening reattaches to the same shell. This is a feature (long-running commands survive a tab close) but operators sometimes assume "close" means "stop". To actually stop, kill the process inside the terminal first.
+- **The Files drawer shows the agent's files as they are now, not a commit.** It lists the live storage tree; a file the agent is mid-way through writing is what you get. To see what was committed, ask the agent, or read the `exec.command` entries in the [Crew Journal](/guides/crew-journal).
 - **`request_id` must be stable per logical send, not per React render.** Generate the UUID once when the user hits **Send**, not in the render function. A re-render-derived ID lets the server treat a retry as a new turn — defeating the dedupe contract.
 - **Slash palette commands must be registered server-side.** `/foo` in the composer where `foo` isn't a registered command sends the literal text as a chat message — there's no client-side "unknown command" error. Commands are served from `GET /api/v1/slash-commands` (handler `internal/api/slash_commands_handler.go`) rather than discovered by the UI.
-- **Shallow router state evaporates on hard navigation.** `panel=files` survives in-app tab switches and back/forward, but a hard reload that hits a 3xx redirect (e.g. auth expiry → login → bounce) loses everything past `?session=…`. Bookmark with intent, not panic.
+- **Shallow router state evaporates on hard navigation.** The editing and palette state survives in-app navigation and back/forward, but a hard reload that hits a 3xx redirect (e.g. auth expiry → login → bounce) loses everything past `?session=…`. Bookmark with intent, not panic.
 - **WS reconnect dedupes by `request_id`, not by content.** Two genuinely different sends that collide on a re-used `request_id` will silently merge into one turn server-side. Use a fresh UUID per logical send.
-- **Right-panel tabs don't unsubscribe on inactive.** Switching from Terminal to Files stops the *render* of the terminal stream but the WS subscription stays live in the background. This is intentional (re-opening the tab is instant) but means a workspace with many open chat tabs holds many parallel sidecar exec streams — heavy for the sidecar.
 - **A turn never ends in silence — two explicit error states cover the edge cases.** A run that finishes without producing any output (a swallowed safety refusal, prompt-budget pressure, or the agent CLI exiting cleanly with no stdout) shows *"The agent returned no output — try again"* as an error bubble, and the run is recorded as FAILED. A reply cut off by a hard server stop (OOM/SIGKILL/power loss) gains *"The agent's reply was interrupted by a server restart — try again"* on the next boot. Both turns are persisted, so they appear on reload as well as live; use **Regenerate** (or resend) to retry.
 
 </Accordion>
 
-## Group chats (multiple humans + the agent)
+## People, groups and channels
+
+The same `/chat` page carries the conversations between *people* — with or without an agent in the room. They live in the left column beside the agent sessions (**People** for direct messages, **Team spaces** for groups and channels) and open at `/chat?conversation=<roomId>`. Three kinds:
+
+| Kind | Who can read it | How it starts |
+|---|---|---|
+| **Direct message** | The two of you. Fixed pair — to include a third person, continue it as a group. | **New chat ▸ Message a person**, pick a colleague; your existing DM with them opens if there is one. |
+| **Group** | The people you chose, and its history stays private to them. | **New chat ▸ Create a group**, pick the participants. The creator manages the roster from the **people** dialog on the room. |
+| **Channel** | Everyone in the workspace can read and write. Agents can be invited with explicit access to the channel's history. | **New chat ▸ Create a channel**. In a channel, type `@` to mention an agent (autocomplete offers the crew's agents, and a row of **Ask agents to respond to this message** checkboxes sits above the composer); a mentioned agent answers in the channel. |
+
+A DM or a private group can be **continued** into a new room without exposing its history: **Add people** turns a DM into a fresh private group with the same two people plus whoever you add; **Invite agent** starts a workspace channel with the selected agent. The new room begins empty (a channel carries only the agent's join notice) — the private messages stay where they were. Unread counts sit on each room row, and a room's message pane marks it read as you open it.
+
+Rooms are a separate table from agent sessions: their IDs and message sequences never mix with `chats`, and the CLI reaches them through [`crewship chat room …`](/cli/chat) (`list`, `create --kind group|channel`, `direct <user-id>`, `get`, `messages`, `send`, `participants add|remove|list`, `agents add|remove|list`). The API contract — including the required `client_id` retry key on create and continue — is in [Workspace rooms](/api-reference/conversations#workspace-rooms).
+
+### Notification sounds
+
+**Settings → Notification sounds** (`/settings?tab=sounds`, also in the user menu) chooses a per-browser sound for two categories: **Chat** — a new message in one of your rooms, or an agent finished a reply in a session you have open — and **Inbox** — a new inbox item, escalation or waitpoint arrived. Five presets (Soft pop, Glass, Chime, Inbox drop, Attention) or **Off** per category, one volume slider, a **Do not disturb** switch that silences everything but the **Preview** buttons, and **Enable sounds** as the master switch. Browsers only play audio after a click, so the page asks you to **Activate audio** once per session; a reply that lands in several open tabs plays once, not once per tab (the tabs coordinate through shared storage — a browser without it can still preview but will not play automatically). The setting is saved in the browser for this account and workspace, not on the server.
+
+### Image and PDF previews
+
+A PNG, JPEG, WebP or PDF opened from the **Files** drawer previews inside the panel instead of downloading: an image fits to the pane; a PDF pages through with zoom (50–300 %). A password-protected or damaged PDF says so and offers the original file. **Download** is on the preview header for every previewable file; other file types open in the editor or download directly.
+
+## Group chats on an agent session (legacy)
+
+<Note>
+This is the older way of putting several people in front of one agent: extra participants on an **agent session** (`chats` row), managed from the CLI only. The web UI creates shared conversations as [groups and channels](#people-groups-and-channels) instead, which have their own rooms, rosters and history. Both keep working; new shared conversations should be rooms.
+</Note>
 
 A chat starts as a **private 1:1** conversation between you and the agent. Add a
 second person and it becomes a **group chat** — several teammates and the agent
@@ -530,7 +551,7 @@ crewship chat participants remove <chat-id> <user-id>             # remove
 The `--role` flag accepts `member` (default) or `owner`; it maps to the `role`
 field of the `POST /api/v1/chats/{chatId}/participants` body, and the same values
 appear in `GET` responses. `DELETE` takes no role. The label is informational —
-it does not by itself grant manage-participants rights (see [Group chats](#group-chats)).
+it does not by itself grant manage-participants rights.
 
 **Attribution & live sync.** Each human message is broadcast to the other
 participants in real time and labelled with its author (avatar + name); your own
@@ -561,5 +582,5 @@ participant count.
 - [Files and output](/guides/files-and-output) — the `workspace_files` blob index that the Files right-panel reads from; same view the agent's container sees.
 - [Keeper](/guides/keeper) — credential injection for tools the agent invokes from inside a chat; keeps secrets out of message bodies.
 - [User preferences API](/api-reference/preferences) — composer settings (default model, slash-palette behaviour).
-- [Conversations API](/api-reference/conversations) — message reactions, attachments, crew messaging.
+- [Conversations API](/api-reference/conversations) — message reactions, attachments, crew messaging, and the workspace rooms behind direct messages, groups and channels.
 - [Webhooks](/api-reference/webhooks) — programmatic chat-session creation (`origin=WEBHOOK`).

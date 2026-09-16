@@ -2,7 +2,8 @@
 
 Sources: `audit-conversations.md` (A), `audit-work.md` (B), `audit-fleet.md`
 (C), and the dashboard/onboarding work already on `onboarding-client-redesign`
-(D). Analysis only; nothing below is implemented. Numbers in brackets are the
+(D). Written as analysis before any of it was implemented; see **Status
+2026-09-15** below for what has landed since. Numbers in brackets are the
 audit's own item numbers.
 
 ## 0. What every audit found independently — fix once, system-wide
@@ -67,6 +68,32 @@ a per-page polish pass would not hold; they go first, as shared work.
 2. Inbox v1 vs v2: which one survives (D4)?
 3. Light theme: supported or not (D5)?
 4. Order of wave 1: A (client-facing decisions) first, or C (the fleet is what a client buys)?
+
+## Status 2026-09-15
+
+Waves 0–1 landed on `main` between 2026-09-04 and 2026-09-06: wave 0 as
+#2305 (onboarding redesign, model catalog, Guide overview tool, dashboard),
+cluster A as #2314, cluster B as #2325, cluster C as #2318; the dashboard
+followed as #2434 (client overview) and #2540 (one-screen compaction), the
+phone layer as #2484/#2487, and chat unification as #2458.
+
+| # | Landed | Still holds |
+|---|---|---|
+| S1 | `q/limit/offset` on `/crews`, `/agents`, `/credentials`, `/issues`, `/missions`, `/agents/{id}/chats`; `X-Total-Count`; SubBar counts from the header; explorers fold and "Show all". | No shared `usePagedList` hook — each explorer pages on its own. `openapi.gen.json` still omits the params on `/crews`, `/agents`, `/credentials`, `/agents/{id}/chats`. |
+| S2 | `lib/entity-links.ts` (`entityHref`) is the one map; DTOs carry `agent_slug`, `run_id`, `trace_id`, `mission_id`; inbox detail has "Where this came from". | — |
+| S3 | `components/ui/status-pill.tsx` + `formatStatus()`; the local maps are gone. | Raw `llm_model` ids still render on the crew roster (`roster-tab.tsx:66-68`) and agent canvas (`agent-canvas.tsx:460-465`) — no `getModelLabel` there (fleet P2 15). |
+| S4 | Routines (`?slug`, `?view`), Activity (`pushState` in `activity-stream-view.tsx`), Inbox (`?view`, `?kind`, `?item`), Journal (`?tab`, `?mission_id`, …), Chat (`?session`, `?conversation`), Crews (`?crew`, `?agent`) all write the URL. | The crew canvas tab and the bottom dock (`?tab`, `?dock`, C19) are still component state. |
+| S5 | `lib/fleet-visibility.ts` hides the Guide (`kind=setup`) from rosters, facets and breadcrumbs; the chat breadcrumb is names. | Copy review per screen was never done as a pass; internal words remain in places (Routines/Activity vocabulary, work P2 15). |
+| S6 | Error-with-Retry distinct from empty in the chat column (`ScopeFailure`), inbox (source banner), crews, journal. | Not audited again per list shell; treat as partial. |
+| S7 | Sidebar-kit targets, one-column stacks, overlay drawers (#2484, #2487). | — |
+| S8 | `AlertDialog` for crew/agent delete, sessions, hire deny. | `window.confirm` remains in nine components (routine draft discard in `routine-create-dialog.tsx:838`, room roster removals in `conversations/`, backup list, template gallery, connections, chat right panel, `run-needs-human-actions.tsx`). |
+| A1–A7 | All landed in #2314 and the inbox rebuild that followed: kind pills, names not ids, triage card, LINK/CREDENTIAL "What you are approving", hire Deny (via the approvals-queue twin), agent strip in the chat header, breadcrumb by name. | The verb is not on the list row — it is the triage row's "Review →" and the card's buttons. |
+| B1–B7 | Server paging and search on issues; routines and activity write the URL; `/agents/<id>` fixed to `entityHref`; `mission_id` in the journal URL and issue → runs rows with `run_id`/`trace_id`; journal two-line rows below `md`. | Board column fit at 1440 (B7) not re-verified. |
+| C1–C8 | True totals; the Needs-you strip (Build / Install / Connect / Inspect / Review); the agent banner's buttons (`onOpenInbox`); Issues cell → `/issues?assignee=`; one-column roster; Guide hidden; crew tools on Settings → Integrations. | C7 (Integrations rail at 390) not re-verified. |
+| D1–D5 | D4 resolved: `/inbox` **is** the redesigned inbox; `/inbox-v2` is a redirect to it and the v1 components under `components/features/inbox/` are imported by no page. D2: Settings → Sessions has "Sign out everywhere else" behind an `AlertDialog`. D1: pages show "never produced" with the producer. | D3 (bulk rebuild from the top bar) and D5 (`app/layout.tsx` still pins `className="dark"`; light is not supported) are open. Dead v1 inbox components are still in the tree. |
+
+The §3 decisions: S1 was taken (server paging); inbox v2 survived; light
+theme was never decided and stays off; wave 1 ran A, B and C in parallel.
 
 ## 4. Design canvases (visual proposals, 2026-09-03)
 

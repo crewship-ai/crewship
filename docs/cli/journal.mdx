@@ -27,7 +27,7 @@ The top-level command is the list view. `--follow` opens an SSE connection to `/
 | `--lines` | `int` | `50` | Max entries to fetch (1-500). |
 | `--crew` | `string` | | Filter by crew name, slug or ID. |
 | `--agent` | `string` | | Filter by agent name, slug or ID. |
-| `--mission` | `string` | | Filter by mission ID. |
+| `--mission` | `string` | | Filter by issue — the id or the identifier (`ENG-4`), resolved in the current workspace; an unknown reference matches nothing. |
 | `--trace-id` | `string` | | Narrow to entries whose `trace_id` column matches. Reaches ad-hoc **agent** runs only — routine runs never set it. |
 | `--run-id` | `string` | | Narrow to one run whichever engine ran it. Matches `trace_id`, `actor_id` and `payload.run_id`, so it reaches both agent runs and routine runs. Prefer this over `--trace-id`. |
 | `--type` | `string` | | Comma-separated entry types (e.g. `peer.escalation,keeper.decision`). Matched **exactly** — no prefix or glob syntax. |
