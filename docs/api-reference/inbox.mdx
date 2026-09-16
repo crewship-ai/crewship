@@ -82,6 +82,7 @@ An item addressed to OWNER never appears for a MEMBER, even if both belong to th
 | `second_approver_by_workspace` | bool \| omitted | Because the workspace `require_second_approver` toggle is on. |
 | `second_approver_by_tier` | bool \| omitted | Because the linked credential's tier forces it, whatever the toggle says. |
 | `security_level_label` | string \| omitted | The linked credential's tier, e.g. `"L4 · critical"`. |
+| `source_missing` | bool \| omitted | **Detail read only** (`GET /api/v1/inbox/{id}`), `kind` ∈ `{ waitpoint, escalation }` only. Whether the row that would decide this item is gone: `true` when no pending waitpoint token, `PENDING_REVIEW` hire or pending approval backs a waitpoint (or no `escalations` row backs an escalation), `false` when the source is live. Omitted on list rows and on every other kind — absent means "not probed", never "live". It is the same probe the PATCH guard runs, so it predicts whether `state: "resolved"` will be accepted or answer `409`. |
 
 <Note>
   The four `second_approver_*` / `security_level_label` fields are the same ones
@@ -162,7 +163,12 @@ workspace, or one targeted at another user/role, returns `404` (never a
 leak of an item you can't see).
 
 **Response:** `200 OK` — a single [item object](#item-shape) (same shape
-as one `rows[]` entry from List).
+as one `rows[]` entry from List), plus the detail-only fields: the keeper
+evidence block, the four-eyes `second_approver_*` fields, and — for a
+`waitpoint` or `escalation` — `source_missing`, which says whether a
+[source-managed row](#source-managed-kinds--409-conflict) can still be
+decided at its source (`false`) or may be dismissed from the inbox (`true`).
+`crewship inbox get <id> --format json` passes it through unchanged.
 
 | Status | Condition |
 |---|---|
@@ -202,7 +208,9 @@ Returns `200`:
 
 #### Source-managed kinds — `409 Conflict`
 
-For `kind` in `{ waitpoint, escalation }`, the inbox row is a mirror of an authoritative source row (the waitpoint token, the escalation row). PATCH only supports `state: "read"` for these — `unread` and `resolved` would desync the inbox row from the source, because the user expects the flip to *also* approve the waitpoint / close the escalation, and the inbox PATCH doesn't do that.
+For `kind` in `{ waitpoint, escalation }`, the inbox row is a mirror of an authoritative source row (the waitpoint token, the escalation row). PATCH only supports `state: "read"` for these while that source row is live — `unread` and `resolved` would desync the inbox row from the source, because the user expects the flip to *also* approve the waitpoint / close the escalation, and the inbox PATCH doesn't do that.
+
+**Exception — the source is gone.** `state: "resolved"` is accepted on a source-managed row whose backing record no longer exists, because there is no source endpoint left to drive it and the row would otherwise sit in *Needs action* forever. The server probes before refusing: a `waitpoint` is source-less when no `pipeline_waitpoints` token is still `pending`, no staged hire is in `PENDING_REVIEW`, and no pending approval names it as `target_id`; an `escalation` is source-less when no `escalations` row exists (a keeper-synthetic escalation — Skill review, memory health — never had one). `state: "unread"` stays refused either way. The detail read reports the same probe as [`source_missing`](#item-shape), so a client can offer the dismiss only where it will succeed.
 
 `failed_run` (and `message`) are **not** source-managed — they resolve freely between all three states via PATCH or the bulk endpoint, because there is no source row whose state the inbox flip would contradict.
 
@@ -316,7 +324,7 @@ More than 500 ids → `400 too many ids (max 500)`, matching the list `LIMIT` ce
 
 **Decision-item protection (partial skip, never whole-batch fail).** Decision items are skipped individually rather than failing the request:
 
-- On `state: "resolved"`, rows are **skipped** when `kind` ∈ `{ waitpoint, escalation }` **or** `blocking = true` (any kind) — these need their source endpoint to resolve.
+- On `state: "resolved"`, rows are **skipped** when `kind` ∈ `{ waitpoint, escalation }` **or** `blocking = true` (any kind) — these need their source endpoint to resolve. Same exception as PATCH: a `waitpoint` / `escalation` whose [source is gone](#source-managed-kinds--409-conflict) resolves rather than being skipped, so "select all → archive" does not leave the orphans behind.
 - On `state: "unread"`, `waitpoint` / `escalation` rows are skipped (flipping them would desync the source).
 - Non-blocking `message` / `failed_run` rows resolve freely.
 - `state: "read"` is always harmless and applies to all rows.

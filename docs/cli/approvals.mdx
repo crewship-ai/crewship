@@ -123,7 +123,7 @@ crewship approvals get apr_abc123
 crewship approvals get apr_abc123 --format json | jq .args
 ```
 
-Text mode prints canonical fields (`id`, `status`, `kind`, `reason`, `crew_id`, `agent_id`, `mission_id`, `requested_by`, `decided_by`, `decided_at`, `comment`, `created_at`, `updated_at`) up top, then any extra keys verbatim so an evolving server payload still renders something useful.
+Text mode prints canonical fields (`id`, `status`, `kind`, `reason`, `crew_id`, `agent_id`, `mission_id`, `requested_by`, `decided_by`, `decided_at`, `decision_comment`, `timeout_at`, `routine_version` when set, `created_at`) up top, then any extra keys verbatim so an evolving server payload still renders something useful. The names are the row's own (see the [API reference](/api-reference/approvals#list-approvals)): the decision comment is `decision_comment`, not `comment`, and there is no `updated_at`.
 
 ---
 

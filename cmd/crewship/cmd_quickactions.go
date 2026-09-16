@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -56,40 +58,31 @@ Equivalent to running 'mission list --assignee=me' + 'approvals list
 		}
 		fetch := func(path string, into *[]map[string]any, label string, optional bool) {
 			defer wg.Done()
-			var body struct {
-				Data []map[string]any `json:"data" yaml:"data"`
-			}
-			err := getJSON(client, path, &body)
-			if err == nil {
-				mu.Lock()
-				*into = body.Data
-				mu.Unlock()
-				return
-			}
-			// GET /api/v1/approvals now requires roleManage (OWNER/ADMIN,
-			// #2233) — a MEMBER/MANAGER gets 403 here, same as they would on
-			// the web Inbox, which gates the fetch on role client-side
-			// rather than showing an error for it. `optional` mirrors that:
-			// no approvals visible to you is absence, not a fetch failure,
-			// so it must not land in errs and render as a [partial] error
-			// line on every `crewship me`/`now` a non-admin runs.
-			if optional && isForbidden(err) {
-				return
-			}
-			// Fallback: endpoint may return a bare array.
-			var alt []map[string]any
-			if err2 := getJSON(client, path, &alt); err2 != nil {
+			rows, err := fetchRows(client, path)
+			if err != nil {
+				// GET /api/v1/approvals now requires roleManage (OWNER/ADMIN,
+				// #2233) — a MEMBER/MANAGER gets 403 here, same as they would on
+				// the web Inbox, which gates the fetch on role client-side
+				// rather than showing an error for it. `optional` mirrors that:
+				// no approvals visible to you is absence, not a fetch failure,
+				// so it must not land in errs and render as a [partial] error
+				// line on every `crewship me`/`now` a non-admin runs.
+				if optional && isForbidden(err) {
+					return
+				}
 				recordErr(label, err)
 				return
 			}
 			mu.Lock()
-			*into = alt
+			*into = rows
 			mu.Unlock()
 		}
 		const fanout = 3
 		wg.Add(fanout)
 		go fetch("/api/v1/missions?assignee=me", &missions, "missions", false)
-		go fetch("/api/v1/approvals?status=pending&assignee=me", &approvals, "approvals", true)
+		// No assignee filter: the handler has none. The section is role-gated
+		// server-side (OWNER/ADMIN see the workspace queue), not per user.
+		go fetch("/api/v1/approvals?status=pending", &approvals, "approvals", true)
 		go fetch("/api/v1/runs?actor=me&limit=10", &runs, "runs", false)
 		wg.Wait()
 		// Bail with a real error (and non-zero exit) when every fetch
@@ -184,31 +177,21 @@ var nowCmd = &cobra.Command{
 		)
 		fetchData := func(path string, into *[]map[string]any, label string, optional bool) {
 			defer wg.Done()
-			var body struct {
-				Data []map[string]any `json:"data" yaml:"data"`
-			}
-			err := getJSON(client, path, &body)
-			if err == nil {
-				mu.Lock()
-				*into = body.Data
-				mu.Unlock()
-				return
-			}
-			// See the matching comment in meCmd's fetch: GET /api/v1/approvals
-			// is roleManage-gated (#2233), and a MEMBER/MANAGER's 403 there is
-			// absence — nothing visible to you — not a fetch failure.
-			if optional && isForbidden(err) {
-				return
-			}
-			var alt []map[string]any
-			if err2 := getJSON(client, path, &alt); err2 != nil {
+			rows, err := fetchRows(client, path)
+			if err != nil {
+				// See the matching comment in meCmd's fetch: GET /api/v1/approvals
+				// is roleManage-gated (#2233), and a MEMBER/MANAGER's 403 there is
+				// absence — nothing visible to you — not a fetch failure.
+				if optional && isForbidden(err) {
+					return
+				}
 				mu.Lock()
 				errs = append(errs, label+": "+err.Error())
 				mu.Unlock()
 				return
 			}
 			mu.Lock()
-			*into = alt
+			*into = rows
 			mu.Unlock()
 		}
 		// Host admission control (#1668). Without this, a run held because
@@ -271,7 +254,9 @@ func renderMe(missions, approvals, runs []map[string]any, errs []string) error {
 	}
 	fmt.Printf("\n%s━━ Approvals waiting on you ━━%s  (%d)\n", cli.Bold, cli.Reset, len(approvals))
 	for _, a := range approvals {
-		fmt.Printf("  %s • %s  %s%s%s\n", str(a["id"]), str(a["title"]), cli.Yellow, str(a["status"]), cli.Reset)
+		// An approvals_queue row (harbormaster.Request) carries kind and
+		// reason, not a title; print what it has.
+		fmt.Printf("  %s • %s: %s  %s%s%s\n", str(a["id"]), str(a["kind"]), str(a["reason"]), cli.Yellow, str(a["status"]), cli.Reset)
 	}
 	fmt.Printf("\n%s━━ Your recent runs ━━%s  (%d)\n", cli.Bold, cli.Reset, len(runs))
 	for _, r := range runs {
@@ -341,7 +326,7 @@ func renderNow(runs, agents, approvals []map[string]any, capacity runtimeCapacit
 	fmt.Printf("\n%sAgents:%s %d idle, %d busy\n", cli.Bold, cli.Reset, idle, busy)
 	fmt.Printf("\n%sPending approvals:%s %d\n", cli.Bold, cli.Reset, len(approvals))
 	for _, a := range approvals {
-		fmt.Printf("  %s • %s\n", str(a["id"]), str(a["title"]))
+		fmt.Printf("  %s • %s: %s\n", str(a["id"]), str(a["kind"]), str(a["reason"]))
 	}
 
 	// Held-for-capacity goes LAST and loud when non-empty: it is the one
@@ -359,6 +344,48 @@ func renderNow(runs, agents, approvals []map[string]any, capacity runtimeCapacit
 		fmt.Fprintf(os.Stderr, "%s[partial]%s %s\n", cli.Dim, cli.Reset, e)
 	}
 	return nil
+}
+
+// fetchRows GETs a list endpoint and returns its rows whatever envelope
+// the server used. The quick-action screens fan out to endpoints that do
+// not share one: /missions and /agents answer a bare array, /runs wraps
+// its page in {"data": [...]}, and /approvals in {"rows": [...]}. Decoding
+// into a struct with a single `data` field succeeded silently for the
+// approvals shape and left the section empty for every workspace
+// (#2584), so the body is read once and the envelope chosen from what is
+// actually there. An unrecognised object is an error, not an empty list —
+// an empty section must mean the server said so.
+func fetchRows(client *cli.Client, path string) ([]map[string]any, error) {
+	var raw json.RawMessage
+	if err := getJSON(client, path, &raw); err != nil {
+		return nil, err
+	}
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) > 0 && trimmed[0] == '[' {
+		var rows []map[string]any
+		if err := json.Unmarshal(trimmed, &rows); err != nil {
+			return nil, fmt.Errorf("decode %s: %w", path, err)
+		}
+		return rows, nil
+	}
+	var body map[string]json.RawMessage
+	if err := json.Unmarshal(trimmed, &body); err != nil {
+		return nil, fmt.Errorf("decode %s: %w", path, err)
+	}
+	for _, key := range []string{"data", "rows"} {
+		page, ok := body[key]
+		if !ok {
+			continue
+		}
+		// Presence decides, not content: an empty page is `[]` or `null`
+		// under the key, and both mean "nothing to show".
+		var rows []map[string]any
+		if err := json.Unmarshal(page, &rows); err != nil {
+			return nil, fmt.Errorf("decode %s: %w", path, err)
+		}
+		return rows, nil
+	}
+	return nil, fmt.Errorf("decode %s: response carries neither data nor rows", path)
 }
 
 // isForbidden reports whether err is a 403 from the API — used by the

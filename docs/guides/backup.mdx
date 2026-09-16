@@ -57,7 +57,7 @@ The whole backup surface is the `crewship backup` command group — twelve subco
 | `crewship backup create` | Produce a new bundle for a workspace or crew. | [Create a workspace backup](#create-a-workspace-backup) / [Back up a single crew](#back-up-a-single-crew) |
 | `crewship backup list` | List bundles on disk. | [List, inspect, verify](#list-inspect-verify) |
 | `crewship backup inspect` | Print a bundle's manifest without decrypting the payload. | [List, inspect, verify](#list-inspect-verify) |
-| `crewship backup verify` | Decrypt + checksum a bundle end-to-end (no DB writes). | [List, inspect, verify](#list-inspect-verify) |
+| `crewship backup verify` | Checksum a bundle and, when unencrypted, its row-count completeness (no DB writes, never decrypts). | [List, inspect, verify](#list-inspect-verify) |
 | `crewship backup restore` | Restore a bundle (supports `--dry-run`). | [Restore](#restore) |
 | `crewship backup delete` | Remove a single bundle (interactive confirm or `--force`). | [Delete & rotate](#delete--rotate) |
 | `crewship backup rotate` | Retention sweep — `--keep-last N` / `--keep-days D`. | [Delete & rotate](#delete--rotate) |

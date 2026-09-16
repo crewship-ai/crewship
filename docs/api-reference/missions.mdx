@@ -307,6 +307,7 @@ Validates the task dependency DAG before starting. Uses atomic compare-and-swap 
 | Status | Condition |
 |---|---|
 | `400` | Mission not in PLANNING state, or invalid task DAG |
+| `403` | Mission was created under an [autonomy hold](/api-reference/internal#autonomy-gate-on-agent-driven-creation) and the hold is undecided or denied. Body: `{"error": "Mission start rejected by policy", "reason", "mission_id", "remedy"}` — an OWNER/ADMIN approves the `autonomy_gate` row (`crewship approvals approve <id>`) and the start is retried. Same helper as the internal start route, so a held mission cannot be started from either. |
 | `404` | Mission not found |
 | `409` | Mission was already started by another request |
 | `500` | MissionEngine failed to start (rolls back to PLANNING) |

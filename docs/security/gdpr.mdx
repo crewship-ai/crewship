@@ -48,6 +48,7 @@ The response is a single JSON bundle containing every row from the four tables t
     "peer_cards": 23,
     "memory_versions": 117,
     "inbox_items": 4,
+    "inbox_item_reads": 9,
     "user_models": 1,
     "user_model_provenance": 3,
     "gdpr_actions": 2
@@ -55,6 +56,7 @@ The response is a single JSON bundle containing every row from the four tables t
   "peer_cards": [ {...}, {...} ],
   "memory_versions": [ {...}, {...} ],
   "inbox_items": [ {...}, {...} ],
+  "inbox_item_reads": [ { "inbox_item_id": "ibx_…", "title": "…", "kind": "escalation", "read_at": "…" } ],
   "user_models": [ {...} ],
   "user_model_provenance": [ {...}, {...}, {...} ],
   "gdpr_actions": [ {...}, {...} ]
@@ -72,6 +74,12 @@ The export only covers tables that carry a `data_subject_id` foreign key:
 - `peer_cards` — agent-authored peer cards mentioning the subject
 - `memory_versions` — versioned memory blobs the agent wrote about the subject
 - `inbox_items` — inbox rows whose payload references the subject (e.g. persona-suggestion proposals about the subject)
+- `inbox_item_reads` — the subject's **own** per-item read markers ("I read
+  inbox item X at time Y"), the one table here keyed on `user_id` rather than
+  `data_subject_id`. The items themselves may be anyone's — a role-targeted
+  escalation the subject happened to open — so each entry carries the item's
+  `title` and `kind` beside its id, and the list is scoped to this workspace's
+  items
 - `user_models` — the operator model: the subject's role, ownership and stated
   working constraints. **Exported with its body**, not just the index row —
   it is the one surface here holding facts the subject stated about themselves,
@@ -175,6 +183,7 @@ Two consequences an operator should expect on the receipt:
 | `memory_versions` (DB) | rows WHERE `data_subject_id = $USER_ID` | Hard delete |
 | `memory_versions` (blob store) | content-addressed blobs deduplicated across the workspace | **NOT** auto-deleted in v107 — rows go but blobs left for cross-tenant dedup safety; tracked as PR-F16 for a separate orphan-GC sweep |
 | `inbox_items` (DB) | rows WHERE `data_subject_id = $USER_ID` | Hard delete |
+| `inbox_item_reads` (DB) | rows WHERE `user_id = $USER_ID`, on items in this workspace | Hard delete (A7, per-user read state). This is the subject's *activity* — their record of having read items that may belong to anyone — not items about them. Markers on items the row above deleted are already gone by `ON DELETE CASCADE`; this catches the rest. Counted in `rows_deleted`, reported as `inbox_item_reads`. Read markers in a different workspace are a separate SAR ticket. |
 | `user_models` (DB) | row WHERE `user_id = $USER_ID` in this workspace | Hard delete — UNLESS the on-disk delete below failed for that model, in which case the row is left in place (see the disk-file row) |
 | `user_models` (disk file) | `/crew/shared/.memory/users/{user_slug}.md` **and its `.lock` sentinel**, in EVERY crew directory found under `outputBasePath` — not just the subject's current most-active crew. The index row only ever names the CURRENT crew, and an operator's most-active crew changes over time, so a delete keyed on that one row would leave every earlier copy an unreachable orphan. | `outputBasePath` must be configured. A directory that fails to delete is NOT masked: the cascade reports a partial failure (`207 Multi-Status`) instead of `202`, and the `user_models` row for that model is left in place — deleting it would make the surviving copy unfindable by any retry, since this cascade (and the self-service delete) locates a model by looking up that same row. |
 | `approvals_queue` (DB) | rows WHERE `requested_by = $USER_ID` OR `decided_by = $USER_ID` | Hard delete (#2233). No `data_subject_id` column exists on this table, so it is matched on the two columns that ARE user-attributable instead — `requested_by` (a user id for an interactively-triggered approval gate, an agent id for an autonomously-triggered one) and `decided_by` (always a user id; only a human decides). Its own accountability trail (who decided what, when) survives regardless in `journal_entries`, which is excluded below. |
