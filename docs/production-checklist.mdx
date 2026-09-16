@@ -117,6 +117,13 @@ glue code:
   persistent volumes, AGE-encrypted backup
 - **Self-hosted by default** — Apache-2.0, no enterprise tier
   gating, marketplace and federation features on the v0.2 roadmap
+- **Verifiable releases** — binaries ship with a Sigstore-signed
+  `checksums.txt` that `crewship self-update` checks before swapping
+  anything; packages are GPG-signed; every Docker tag is applied only
+  to a digest that passed a Critical-CVE scan, a two-platform boot
+  smoke and a keyless cosign signature. Before a production rollout,
+  `cosign verify` the image and pin the digest — the recipe is in
+  [Install → Published images and how to verify one](/guides/install#published-images-and-how-to-verify-one)
 
 ## Stability matrix
 
