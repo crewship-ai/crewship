@@ -153,11 +153,14 @@ A `kind: "pipeline"` row also carries `pipeline_slug`, the routine it ran (empty
 GET /api/v1/runs/insights
 ```
 
-Returns a fleet-operations aggregate over **all** runs in the workspace for a
-time window — including ad-hoc agent/chat runs, not just routine invocations.
-Backed by `journal.RunInsights`; the handler resolves per-agent counts into a
-crew rollup and a display-named top-agents leaderboard (one workspace-scoped
-`agents`→`crews` join).
+Returns a fleet-operations aggregate over the workspace's **ad-hoc agent runs**
+for a time window — every chat, CLI, webhook and cron invocation of an agent.
+Routine/pipeline runs are **not** included: the aggregate reads `run.started`
+traces only (`journal.RunInsights`, `trace_id IS NOT NULL AND entry_type LIKE
+'run.%'`), and #2284 deliberately left it that way — see the note at the top of
+this page. The handler resolves per-agent counts into a crew rollup and a
+display-named top-agents leaderboard (one workspace-scoped `agents`→`crews`
+join).
 
 **Query parameters:**
 
