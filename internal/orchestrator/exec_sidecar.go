@@ -1216,6 +1216,15 @@ type sidecarCred struct {
 	// before), and sidecarConfigFingerprint — which hashes this same struct —
 	// does not move for any crew that has no per-agent grant.
 	AgentIDs []string `json:"agent_ids,omitempty"`
+	// GraceToken / GraceExpiresAt / GraceRotationID carry a rotation's grace
+	// value (#1882) into the CredStore. omitempty keeps the payload
+	// byte-identical for a credential with no open rotation. They are
+	// EXCLUDED from sidecarConfigFingerprint (see there): the fingerprint
+	// already moves when the token does, and a grace window closing must not
+	// restart a shared sidecar.
+	GraceToken      string `json:"grace_token,omitempty"`
+	GraceExpiresAt  string `json:"grace_expires_at,omitempty"`
+	GraceRotationID string `json:"grace_rotation_id,omitempty"`
 }
 
 // sidecarConfigFingerprint returns a secret-safe identity for the exact
@@ -1235,6 +1244,14 @@ func sidecarConfigFingerprint(key string, creds []Credential) string {
 		return ""
 	}
 	sc := buildSidecarCreds(creds, nil)
+	// A rotation's grace value is not part of the configuration identity
+	// (#1882). Rotation itself already moves the fingerprint — the token
+	// changed — and the grace window closing (expiry, or the operator ending
+	// it) must not: nothing a run needs changed, and a sidecar shared by
+	// concurrent runs would otherwise be restarted for it.
+	for i := range sc {
+		sc[i].GraceToken, sc[i].GraceExpiresAt, sc[i].GraceRotationID = "", "", ""
+	}
 	sort.SliceStable(sc, func(i, j int) bool {
 		if sc[i].ID != sc[j].ID {
 			return sc[i].ID < sc[j].ID
@@ -1327,14 +1344,17 @@ func buildSidecarCreds(creds []Credential, logger *slog.Logger) []sidecarCred {
 			continue
 		}
 		sc = append(sc, sidecarCred{
-			ID:             c.ID,
-			Provider:       prov,
-			Token:          c.PlainValue,
-			Priority:       c.Priority,
-			LeaseExpiresAt: c.LeaseExpiresAt,
-			BaseURL:        c.BaseURL,
-			Headers:        c.Headers,
-			AgentIDs:       sortedGranteeIDs(c.AgentIDs),
+			ID:              c.ID,
+			Provider:        prov,
+			Token:           c.PlainValue,
+			Priority:        c.Priority,
+			LeaseExpiresAt:  c.LeaseExpiresAt,
+			BaseURL:         c.BaseURL,
+			Headers:         c.Headers,
+			AgentIDs:        sortedGranteeIDs(c.AgentIDs),
+			GraceToken:      c.GraceToken,
+			GraceExpiresAt:  c.GraceExpiresAt,
+			GraceRotationID: c.GraceRotationID,
 		})
 	}
 	return sc

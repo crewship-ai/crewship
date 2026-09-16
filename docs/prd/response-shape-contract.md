@@ -97,7 +97,8 @@ happen first, in a place a reader will find it:
 - `WorkspacePipelineResponseV1` — 9 declared properties against a 27-field
   struct with different names. A rewrite, not a required list.
 - `SkillDetail` — orphaned while `GET /skills/{skillId}` `$ref`s the wrong
-  component.
+  component. (Resolved by #1849: the route now `$ref`s `SkillDetail`, which
+  has a pair.)
 
 Left as prose in a report, those four findings would be read once. As
 exclusions they are read by anyone who touches the route, and they disappear
@@ -194,7 +195,9 @@ defines `Workspace`, `Crew`, `Agent`, `Project`, `Issue` and `Skill` shapes that
 `schemas_core.go` overwrites in the same merge loop. They are inert. Anyone
 editing them changes nothing and is not told. Three components
 (`CrewIssueCommentsResponseV1`, `RemainingCrewIssueCommentCreatedV1`,
-`LabelList`) are defined and referenced by no path at all.
+`LabelList`) are defined and referenced by no path at all. (#1849 removed the
+unreachable components and added a reachability gate in `cmd/gen-openapi`;
+`LabelList` now backs `GET /labels`.)
 
 ## 5c. A near-miss worth keeping
 
