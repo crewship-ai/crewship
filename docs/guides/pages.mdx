@@ -835,6 +835,23 @@ does not restore an older pair, and an export bundle does not carry them.
 From the CLI, `crewship page update <slug> --icon rocket --color amber` sets
 them without a document; `--icon ""` clears one.
 
+## The editor
+
+**Edit** on a page opens one editor in the content column, with the Pages
+list still beside it, and a rail of four sections:
+
+| Section | What it holds |
+|---|---|
+| **Content** | Name, description, icon and colour, the panels — and, on a page with a custom application, the review of any change an agent has submitted ([below](#custom-applications)). |
+| **Data & actions** | Where each panel's data comes from, and the actions it offers. |
+| **Access** | Who reads the page, who may push data to it, the folder it inherits from, public links and webhook tokens. |
+| **History** | Panel versions, application source revisions and publications. |
+
+The address carries the section: `/pages/<slug>?mode=edit&section=access`
+opens the editor on Access, and `content`, `data` and `history` name the
+others, so a reload, Back, Forward and a pasted link all land where they
+should. A section holding unsaved changes asks before the address moves.
+
 ## Folders
 
 A **folder** is a named group of pages owned by one crew, with an icon from
@@ -881,11 +898,14 @@ third state; then **Everyone in this workspace**, off until you turn it on.
 *Can edit* means renaming the folder, changing its icon and colour, editing
 the pages in it, and removing pages from it — which takes the inherited
 access away from everyone else, and the sentence above the table says so.
+*Can edit* is `write` on every page in the folder with no workspace-role
+floor: a member whose workspace role is VIEWER edits those pages through it,
+exactly as a page `write` grant would let them, and the dialog says so.
 Nobody edits a folder's sharing but the owning crew's managers and admins;
 anyone who needs to becomes a manager in that crew. An entry stays until a
 manager changes it, even after the person who set it has left.
 
-Everyone else sees, instead of the table, which of three things the folder
+Everyone else sees, instead of the table, which of five things the folder
 is — *Only the owning crew and workspace admins*, *Shared with named people*,
 *Shared with named crews*, *Shared with named people and crews*, *Shared with
 everyone in this workspace* — the product's own sentence about who may see more, and,
@@ -928,23 +948,33 @@ different viewers.
 Two questions, decided separately, and the confusion between them is the one
 thing worth reading this section slowly for:
 
-- **Can you open the page?** You can if you own it, if you are a workspace
-  ADMIN/OWNER, if one of your crews owns a panel on it, or if a grant names
-  you. Otherwise the page is not in your `crewship page list` and opening it
-  by slug answers *not found* — the same answer as a page that was never
-  created, so the endpoint cannot be walked to learn what exists.
+- **Can you open the page?** You can if you own it or belong to the crew
+  that owns it, if you are a workspace ADMIN/OWNER, if one of your crews owns
+  a panel on it, if the [folder](#folders) it is in is shared with you, one
+  of your crews or the whole workspace, or if a grant names you, one of your
+  crews or everyone in the workspace. Otherwise the page is not in your
+  `crewship page list` and opening it by slug answers *not found* — the same
+  answer as a page that was never created, so the endpoint cannot be walked
+  to learn what exists. `crewship page list` reports which of these paths
+  reach you in its REACH column (`owner`, `role`, `crew:<slug>`,
+  `panel_crew:<slug>`, `folder:<slug>`, `grant`), and
+  `crewship page access <slug> --me` spells them out for one page.
 - **Can you read a panel on it?** Only if you are in that panel's owning crew
   (or are an admin). Nothing else opens a panel — not ownership of the page,
   and not any grant.
 
 The Pages list in the browser is drawn from the first answer. It is grouped by
-owner — **Mine**, then the crews you belong to, then the other crews, then
-**Owned by others** for the personal pages of other people that reach you —
-with the owner named once in each group's header. Groups fold and remember it
-per user and workspace; a search opens every group that has a match and hides the
-rest; the arrow keys walk the rows, and Left and Right fold and unfold. When
-the server reports *how* you reach each page, the filter also offers **Shared
-with me**: the pages you reach through a grant and nothing else.
+[folder](#folders) by default — one section per folder you may read, then
+**Unfiled** — and the filter panel's **Group by: Owner** switches it to
+**Mine**, then the crews you belong to, then the other crews, then **Owned by
+others** for the personal pages of other people that reach you, with the owner
+named once in each group's header. Owner grouping is also what you get on a
+server without folders. Groups fold and remember it per user and workspace,
+as does the grouping choice; a search opens every group that has a match and
+hides the rest; the arrow keys walk the rows, and Left and Right fold and
+unfold. When the server reports *how* you reach each page, the filter also
+offers **Shared with me**: the pages you reach through a grant and nothing
+else.
 
 ### Panel visibility is crew membership
 
@@ -1020,9 +1050,12 @@ Two consequences worth knowing:
   as it would for any other viewer, and the agent sees the same sealed
   placeholder a human without access would see.
 - **An unauthorised `produce` attempt is treated as a signal, not noise.** It
-  returns `403`, writes a journal entry, and notifies the page owner — it is
-  equally likely to be a misconfiguration or an injection, and either way it
-  deserves attention on the first occurrence, not the hundredth.
+  writes a journal entry and notifies the page owner — it is equally likely
+  to be a misconfiguration or an injection, and either way it deserves
+  attention on the first occurrence, not the hundredth. The caller gets `403`
+  if they can reach the page some other way, and `404` if they cannot: the
+  refusal never confirms that a page exists to somebody who may not see it,
+  and the journal entry is written either way.
 
 An agent's authority is always a **subset** of the authorising human's, never
 a superset, and it is evaluated at use time — if that human later loses
@@ -1330,9 +1363,12 @@ their `page list` entirely.
 crewship page grant moje --user someone@example.com --level read
 crewship page grant moje --crew quality --level read
 crewship page grant moje --agent devops-bot --level produce --panels moje-vec
+crewship page grant moje --workspace --level read
 ```
 
-Three verbs, three kinds of subject (`--user`, `--crew`, `--agent`):
+Three verbs, four kinds of subject (`--user`, `--crew`, `--agent`, and
+`--workspace` for every current human member — `read` or `write` only, since
+everyone is not a producer):
 
 | Level | Means |
 |---|---|
@@ -1478,6 +1514,8 @@ crews deleted.
 - [Crew Journal](/guides/crew-journal) — where a page's history actually lives.
 - [Roles & Permissions](/security/rbac) — the workspace-role layer a page's
   grants sit on top of.
+- [Operate Pages applications](/guides/pages-apps-operations) — installing the
+  compiler and runtime origin a custom application needs, backups and upgrades.
 
 
 ### Writing a complete collector payload from a routine
@@ -1490,6 +1528,61 @@ before the write. Normal authored data objects remain supported. This conversion
 is limited to the complete `page.write` data template; other verbs keep ordinary
 string interpolation. See `examples/pages-apps/custom-operations.routine.yaml`.
 
+
+## Custom applications
+
+A page can carry a **custom application**: a small React/TypeScript program,
+compiled offline on the server, that draws the page's panels its own way and
+dispatches the actions they declare. The panels, their producers and their
+grants are unchanged by it — the application is a different way of showing
+the same data, and withdrawing it leaves the panel page exactly as it was.
+It is optional and needs an operator to have installed the compiler and the
+runtime origin; see [Operate Pages applications](/guides/pages-apps-operations).
+
+The lifecycle has five steps, and writing and publishing are deliberately
+separate acts, usually by separate parties:
+
+1. **Draft.** An agent in the page's owning crew writes the source through
+   its `page_project` tool — or a person does the same by hand:
+   `crewship page project init` prints the starter, and
+   `crewship page project set <slug> --file …` saves it against the page.
+   Every save is a **revision**, checkpointed in Git; the live page does not
+   move.
+2. **Build.** The revision is compiled by the pinned compiler image; a build
+   is `running`, `ready`, `failed` or `interrupted`. A ready build of the
+   current draft is a **candidate** — the exact thing that would go live.
+3. **Review.** In the editor's **Content** section, the **Application** card
+   says whether a candidate is waiting. When one is, the card becomes the
+   review: what the candidate changes in the page's definition (derived by
+   the server, never the agent's own summary), the routines each `call`
+   action would run and whether their definitions moved, the source diff,
+   and the build. **Open preview** runs the candidate against the page's live
+   data in the isolated runtime. Panels owned by crews you are not in are
+   withheld from the comparison and the review says how many; if one of
+   them differs, publishing is blocked for you — ask an administrator or a
+   member of that crew.
+4. **Publish.** Ticking *I reviewed this candidate's code, definition changes
+   and behaviour* and pressing **Publish application** makes it live for
+   every reader and pins the page's definition to it. Only the page's owner
+   — the user, or a member of the owning crew — or a workspace ADMIN/OWNER
+   may publish; a `write` grant lets someone draft, build and review, never
+   ship code to other people's browsers. The publication is fenced on what
+   you were shown: if the page's definition or a routine changed between
+   the review and the click, the server refuses and the card says what
+   moved. Each publication is a numbered, immutable receipt.
+5. **Withdraw.** **History → Application publications → Withdraw
+   application** hides the application again and returns readers to the
+   panel page. Nothing is deleted: the receipts stay, the draft stays, and
+   publishing the identical candidate is how a withdrawal is undone.
+   **Publish this version** on an older receipt republishes it under a new
+   number — a rollback goes forward, never back.
+
+There is no *Reject*. A review that finds the candidate wrong is closed
+without publishing, and the disagreement goes to the agent in chat; the
+draft is retained. The same five steps are available from the CLI as
+`crewship page project build|review|check|publish|unpublish|rollback` — the
+[Page commands](/cli/page#custom-react-projects-experimental) reference has the
+flags and the fence values a scripted publication must send.
 
 ## Shared company colors
 
@@ -1510,7 +1603,7 @@ Operations Lab does.
 
 ### Opening custom applications
 
-Studio keeps a loading surface in the workspace background color until the
+The page keeps a loading surface in the workspace background color until the
 runtime has received the first snapshot and had two rendering opportunities.
 The application then fades in over 300 ms. Normal data updates do not replay
 this transition, and reduced-motion preferences disable it. If initialization
