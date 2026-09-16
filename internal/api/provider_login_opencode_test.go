@@ -68,7 +68,7 @@ func TestAgentUpdateOpenCodeGateway(t *testing.T) {
 				t.Fatalf("update %d: %s", rr.Code, rr.Body.String())
 			}
 			var provider, model, adapter string
-			if err := h.db.QueryRow(`SELECT llm_provider,llm_model,cli_adapter FROM agents WHERE id = 'gateway-agent'`).Scan(&provider, &model, &adapter); err != nil {
+			if err := h.db.QueryRowContext(t.Context(), `SELECT llm_provider,llm_model,cli_adapter FROM agents WHERE id = 'gateway-agent'`).Scan(&provider, &model, &adapter); err != nil {
 				t.Fatal(err)
 			}
 			if provider != tc.provider || model != tc.model || adapter != "OPENCODE" {

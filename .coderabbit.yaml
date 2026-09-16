@@ -166,7 +166,7 @@ reviews:
       instructions: |
         Review React components for:
         - ONLY shadcn/ui components (components/ui/) -- no external UI libraries
-        - ONLY lucide-react for icons
+        - Use lucide-react for interface/action icons. Provider brands may reuse existing official logo components from components/icons/provider-icons.tsx or the credential brand registry; do not invent new logo paths.
         - Tailwind CSS only (no inline styles)
         - Proper TypeScript interfaces for props
         - Accessibility: aria labels, keyboard navigation
