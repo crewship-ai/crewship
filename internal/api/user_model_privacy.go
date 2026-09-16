@@ -33,15 +33,19 @@ import (
 // (consolidate.MergeUserModel). Forgetting one field is a line removal;
 // it needs no parser and no schema.
 //
-// # The one thing this cannot do yet
+// # Where each entry came from
 //
-// It shows the person WHAT is stored, not WHERE it came from. The
-// extraction verifies each fact against a verbatim span of the person's
-// own words, but that span is not persisted — the file has a 1.5 KB cap
-// read into every prompt, and carrying provenance inline would halve how
-// much can be known. Per-fact provenance ("you said this on the 12th,
-// here is the message") needs a store beside the file. Filed rather than
-// bolted on.
+// The read also says WHERE each fact came from (#1693): the verbatim span
+// of the person's own words the extraction verified it against, the
+// message it was found in, the source type and when it was recorded. That
+// is not in the file — the file has a 1.5 KB cap read into every prompt,
+// and carrying provenance inline would halve how much can be known — but
+// in user_model_provenance beside it (consolidate.LoadUserModelProvenance).
+// Every delete below purges that table with the file: the per-field forget
+// takes the field's rows, the whole-model delete and the opt-out purge take
+// them all, and the Art. 17 cascade (admin_gdpr_erase_identity.go) has its
+// own step. Four paths, all four — or this becomes the fifth place a SAR
+// erase misses.
 //
 // # A hole this closes on the way past
 //
@@ -95,10 +99,49 @@ func (h *UserPeerPrivacyHandler) loadMyUserModelRow(r *http.Request, userID, wsI
 }
 
 // userModelFact is one "- key: value" bullet, exposed as a field so the
-// caller can name the one they want forgotten.
+// caller can name the one they want forgotten — and, when the store beside
+// the file has a row for it, where it came from.
 type userModelFact struct {
 	Key   string `json:"key"`
 	Value string `json:"value"`
+	// Provenance is absent (not null, not empty) for a fact written before
+	// the store existed; the client shows the fact without inventing an
+	// origin for it.
+	Provenance *userModelProvenance `json:"provenance,omitempty"`
+}
+
+// userModelProvenance is the newest evidence row for one fact (#1693).
+type userModelProvenance struct {
+	// Quote is the verbatim span of the person's own words the fact was
+	// verified against.
+	Quote string `json:"quote"`
+	// MessageID is the conversation_messages.id the quote was found in.
+	// Empty when the turn had none.
+	MessageID string `json:"message_id"`
+	// SourceType is usermodel.SourceType — "stated" under every shipped
+	// profile.
+	SourceType string `json:"source_type"`
+	// At is when this evidence was recorded, fixed-width ISO millis UTC.
+	At string `json:"at"`
+}
+
+// attachUserModelProvenance decorates each fact with the newest evidence
+// row for its key and value. The file can change before evidence is written;
+// stale evidence must never be presented as support for the new value.
+func attachUserModelProvenance(facts []userModelFact, rows map[string]consolidate.UserModelProvenance) {
+	for i := range facts {
+		p, ok := rows[facts[i].Key]
+		facts[i].Provenance = nil
+		if !ok || p.Value != facts[i].Value {
+			continue
+		}
+		facts[i].Provenance = &userModelProvenance{
+			Quote:      p.Quote,
+			MessageID:  p.MessageID,
+			SourceType: p.SourceType,
+			At:         p.RecordedAt,
+		}
+	}
 }
 
 // parseUserModelFacts splits a model body into its bullets, preserving
@@ -172,8 +215,20 @@ func (h *UserPeerPrivacyHandler) GetMyUserModel(w http.ResponseWriter, r *http.R
 				replyError(w, http.StatusServiceUnavailable, "saved preferences could not be read")
 				return
 			}
+			facts := parseUserModelFacts(body)
+			// Where each fact came from (#1693). A failed read here is a
+			// failed read of the person's own record, not a degraded one:
+			// answering with facts and no origins would look exactly like
+			// a model written before provenance existed.
+			prov, err := consolidate.LoadUserModelProvenance(r.Context(), h.db, wsID, row.userSlug)
+			if err != nil {
+				h.logger.Error("user model provenance read failed", "user_id", userID, "workspace_id", wsID, "error", err)
+				replyError(w, http.StatusInternalServerError, "internal server error")
+				return
+			}
+			attachUserModelProvenance(facts, prov)
 			payload["content"] = body
-			payload["facts"] = parseUserModelFacts(body)
+			payload["facts"] = facts
 		}
 		// Auditing the read keyed on the actor — who here IS the data
 		// subject — keeps "everything logged about this user" one query,
@@ -277,6 +332,21 @@ func (h *UserPeerPrivacyHandler) ForgetUserModelFact(w http.ResponseWriter, r *h
 		return
 	}
 
+	// Delete path 3 of 4 (#1693): the field's evidence goes with the
+	// field — every row for the key, not only the newest. Forgetting a
+	// field is the person saying the record about it is wrong, and how it
+	// got there is part of that record.
+	//
+	// BEFORE the file is rewritten, so a failure here is a clean 500 with
+	// nothing changed, and a failure of the write after it leaves a fact
+	// with no origin rather than an origin with no fact. Once the file has
+	// lost the field a retry answers 404 and never reaches this line, so
+	// the order is what makes the purge retryable at all.
+	if _, err := consolidate.PurgeUserModelProvenanceKey(r.Context(), h.db, wsID, row.userSlug, key); err != nil {
+		h.logger.Error("user model provenance purge failed", "user_id", userID, "workspace_id", wsID, "field", key, "error", err)
+		replyError(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
 	if err := memory.WriteUserModel(paths, userID, wsID, kept); err != nil {
 		h.logger.Error("user model write failed", "user_id", userID, "error", err)
 		replyError(w, http.StatusInternalServerError, "internal server error")
@@ -346,12 +416,23 @@ func dropUserModelField(body, key string) (string, bool) {
 //     sweep. Leaving the row in place means a second DELETE call retries
 //     the file cleanup (DeleteUserModelEverywhere is idempotent: crews it
 //     already cleared are silent no-ops) instead of silently giving up.
+//
+// The provenance store (#1693) is purged here too — delete paths 1 and 2
+// of 4, the opt-out purge and the self-service delete, both arrive here.
+// It goes AFTER the index row for the same reason the row goes after the
+// files: a failed file delete keeps everything findable for a retry. And
+// it goes even when there is no index row, keyed on the slug the row
+// would have carried: evidence with no model is still evidence about a
+// person who asked for it gone.
 func (h *UserPeerPrivacyHandler) purgeUserModel(r *http.Request, userID, wsID, reason string) (int, error) {
 	row, found, err := h.loadMyUserModelRow(r, userID, wsID)
 	if err != nil {
 		return 0, err
 	}
 	if !found {
+		if _, err := consolidate.PurgeUserModelProvenance(r.Context(), h.db, wsID, memory.UserSlug(userID, wsID)); err != nil {
+			return 0, err
+		}
 		return 0, nil
 	}
 	if h.outputBasePath != "" {
@@ -369,6 +450,9 @@ func (h *UserPeerPrivacyHandler) purgeUserModel(r *http.Request, userID, wsID, r
 	}
 	if _, err := h.db.ExecContext(r.Context(),
 		`DELETE FROM user_models WHERE id = ?`, row.id); err != nil {
+		return 0, err
+	}
+	if _, err := consolidate.PurgeUserModelProvenance(r.Context(), h.db, wsID, row.userSlug); err != nil {
 		return 0, err
 	}
 	insertPeerAudit(r.Context(), h.db, h.logger, peerAuditInsert{

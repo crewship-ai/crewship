@@ -1,8 +1,10 @@
 package sidecar
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -65,6 +67,25 @@ type EgressObserver func(host, method, provider string, statusCode int, denied b
 // goroutine, blocking the response to the agent.
 type LLMCallObserver func(usage LLMUsage, quota QuotaInfo, mode, plan string)
 
+// GraceFallback describes one replay of an upstream request with a
+// credential rotation's grace value after the current value drew a 401
+// (#1882). Status is the upstream's answer to the replay, 0 for a transport
+// error. It carries identifiers only — never a value.
+type GraceFallback struct {
+	CredentialID string
+	RotationID   string
+	Provider     string
+	AgentID      string
+	Host         string
+	Method       string
+	Status       int
+}
+
+// GraceFallbackObserver is invoked once per grace replay, after the replay
+// has been answered. Same contract as EgressObserver: return quickly, the
+// call runs on the proxy goroutine.
+type GraceFallbackObserver func(GraceFallback)
+
 // Proxy is an HTTP forward proxy that intercepts agent outbound requests,
 // injects LLM API credentials, and blocks non-allowed domains.
 type Proxy struct {
@@ -77,6 +98,7 @@ type Proxy struct {
 	allowPrivate       bool // #961: permit RFC1918/loopback dial targets (crew opt-in); link-local/metadata always blocked
 	onEgress           EgressObserver
 	onLLMCall          LLMCallObserver
+	onGraceFallback    GraceFallbackObserver
 	resolveLLMIdentity func(*http.Request) (agentID, configFingerprint string, present, ok bool)
 	billingMode        string // "metered" | "flat_rate" | "" — set from env at startup
 	subPlan            string // human label for flat-rate (e.g. "Anthropic Max 20×")
@@ -134,6 +156,9 @@ type ProxyConfig struct {
 	// OnLLMCall is invoked after a successful LLM-provider call, with the
 	// parsed usage and quota signal. Optional. See LLMCallObserver.
 	OnLLMCall LLMCallObserver
+	// OnGraceFallback is invoked after a request was replayed with a
+	// rotation's grace value (#1882). Optional. See GraceFallbackObserver.
+	OnGraceFallback GraceFallbackObserver
 	// ResolveLLMIdentity authenticates the per-agent token embedded in the
 	// disposable provider key before that key is overwritten. The returned
 	// fingerprint must match this sidecar's keyed credential-set fingerprint.
@@ -183,6 +208,7 @@ func NewProxy(cfg ProxyConfig) *Proxy {
 		allowPrivate:       cfg.AllowPrivate,
 		onEgress:           cfg.OnEgress,
 		onLLMCall:          cfg.OnLLMCall,
+		onGraceFallback:    cfg.OnGraceFallback,
 		resolveLLMIdentity: cfg.ResolveLLMIdentity,
 		billingMode:        cfg.BillingMode,
 		subPlan:            cfg.SubscriptionPlan,
@@ -424,6 +450,8 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 	provider := ""
 	actorID := ""
 	credentialID := ""
+	var cred *Credential
+	var replay *graceReplay
 	if isLLM {
 		var allowed bool
 		actorID, allowed = p.authorizeLLMRoute(w, r)
@@ -435,10 +463,14 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 		// (#2052): the store is crew-wide, and a credential an operator granted
 		// to one member must not be handed to a sibling because a round-robin
 		// counter landed on it.
-		cred := p.credStore.Select(ProviderType(spec.ID), actorID)
+		cred = p.credStore.Select(ProviderType(spec.ID), actorID)
 		if cred == nil {
 			p.logger.Error("no credential available", "provider", provider, "agent_id", actorID)
 			http.Error(w, "no credential available for "+provider, http.StatusServiceUnavailable)
+			return
+		}
+		var ok bool
+		if replay, ok = captureGraceReplay(w, r, cred); !ok {
 			return
 		}
 		llmroute.ApplyAuth(r, spec, cred.Token, cred.Headers)
@@ -458,21 +490,26 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 		r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
 	}
 
-	// Forward the request
+	// Forward the request. The outbound rewrite is a closure because a
+	// rotation grace replay (#1882) has to build a second outbound request
+	// from the same inbound one.
+	prepare := func(outReq *http.Request) {
+		outReq.RequestURI = ""
+		if outReq.URL.Scheme == "" {
+			outReq.URL.Scheme = "https"
+		}
+		outReq.URL.Host = host
+
+		// SECURITY: Strip hop-by-hop headers per RFC 2616 Section 13.5.1.
+		// Proxy-Authorization is especially dangerous (data exfiltration vector).
+		for _, h := range hopByHopHeaders {
+			outReq.Header.Del(h)
+		}
+	}
 	outReq := r.Clone(r.Context())
-	outReq.RequestURI = ""
-	if outReq.URL.Scheme == "" {
-		outReq.URL.Scheme = "https"
-	}
-	outReq.URL.Host = host
+	prepare(outReq)
 
-	// SECURITY: Strip hop-by-hop headers per RFC 2616 Section 13.5.1.
-	// Proxy-Authorization is especially dangerous (data exfiltration vector).
-	for _, h := range hopByHopHeaders {
-		outReq.Header.Del(h)
-	}
-
-	resp, err := p.transport.RoundTrip(outReq)
+	resp, replayed, err := p.forwardWithGraceRetry(r, outReq, spec, cred, replay, prepare, actorID, host)
 	if err != nil {
 		p.logger.Error("upstream request failed", "host", host, "error", err)
 		http.Error(w, "upstream request failed", http.StatusBadGateway)
@@ -480,7 +517,9 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 		// too — otherwise a flapping outbound endpoint looks like silent
 		// success from the journal's perspective. statusCode 0 marks the
 		// "transport error" case distinctly from any HTTP 5xx response.
-		if p.onEgress != nil {
+		// A failed grace replay was already journaled by its own observer,
+		// so it is not reported a second time here.
+		if p.onEgress != nil && !replayed {
 			p.onEgress(host, r.Method, provider, 0, false)
 		}
 		return
@@ -490,8 +529,9 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 	// Fire the egress observer BEFORE streaming the body so a slow
 	// upstream doesn't delay the Crow's Nest event. Passing only host /
 	// method / provider / status keeps PII and credentials out of the
-	// journal — path and body are deliberately excluded.
-	if p.onEgress != nil {
+	// journal — path and body are deliberately excluded. A grace replay
+	// has already been reported, annotated, by the fallback observer.
+	if p.onEgress != nil && !replayed {
 		p.onEgress(host, r.Method, provider, resp.StatusCode, false)
 	}
 
@@ -757,7 +797,12 @@ func (p *Proxy) reverseProxyToProvider(w http.ResponseWriter, r *http.Request, s
 		return
 	}
 
+	var replay *graceReplay
 	if cred != nil {
+		var ok bool
+		if replay, ok = captureGraceReplay(w, r, cred); !ok {
+			return
+		}
 		llmroute.ApplyAuth(r, s, cred.Token, credHeaders)
 		p.logger.Debug("api key injected for reverse proxy",
 			"provider", s.ID,
@@ -770,38 +815,47 @@ func (p *Proxy) reverseProxyToProvider(w http.ResponseWriter, r *http.Request, s
 		r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
 	}
 
+	// The outbound rewrite is a closure because a rotation grace replay
+	// (#1882) has to build a second outbound request from the same inbound
+	// one; it reads only the inbound request's own path and query, which the
+	// first outbound clone did not touch.
+	prepare := func(outReq *http.Request) {
+		outReq.RequestURI = ""
+		outReq.URL.Scheme = up.Scheme
+		outReq.URL.Host = up.Host
+		outReq.Host = up.Host
+		outReq.URL.Path = llmroute.OutboundPath(s, up, outReq.URL.Path)
+		outReq.URL.RawQuery = llmroute.OutboundQuery(up.BaseQuery, outReq.URL.RawQuery)
+		if s.StripPrefix || up.BasePath != "" {
+			// RawPath is an optional escaped hint; clearing it makes URL.String()
+			// re-derive the request-target from the (now-rewritten) Path so the
+			// prefix can't survive via a stale RawPath. Left alone when the path
+			// passes through verbatim (Anthropic), because clearing it there would
+			// silently un-escape a path the old code forwarded byte-for-byte.
+			outReq.URL.RawPath = ""
+		}
+
+		for _, h := range hopByHopHeaders {
+			outReq.Header.Del(h)
+		}
+	}
 	outReq := r.Clone(r.Context())
-	outReq.RequestURI = ""
-	outReq.URL.Scheme = up.Scheme
-	outReq.URL.Host = up.Host
-	outReq.Host = up.Host
-	outReq.URL.Path = llmroute.OutboundPath(s, up, outReq.URL.Path)
-	outReq.URL.RawQuery = llmroute.OutboundQuery(up.BaseQuery, outReq.URL.RawQuery)
-	if s.StripPrefix || up.BasePath != "" {
-		// RawPath is an optional escaped hint; clearing it makes URL.String()
-		// re-derive the request-target from the (now-rewritten) Path so the
-		// prefix can't survive via a stale RawPath. Left alone when the path
-		// passes through verbatim (Anthropic), because clearing it there would
-		// silently un-escape a path the old code forwarded byte-for-byte.
-		outReq.URL.RawPath = ""
-	}
+	prepare(outReq)
 
-	for _, h := range hopByHopHeaders {
-		outReq.Header.Del(h)
-	}
-
-	resp, err := p.transport.RoundTrip(outReq)
+	resp, replayed, err := p.forwardWithGraceRetry(r, outReq, s, cred, replay, prepare, actorID, up.Host)
 	if err != nil {
 		p.logger.Error("reverse proxy upstream failed", "provider", s.ID, "host", up.Host, "path", r.URL.Path, "error", err)
 		http.Error(w, "upstream request failed", http.StatusBadGateway)
-		if p.onEgress != nil {
+		if p.onEgress != nil && !replayed {
 			p.onEgress(up.Host, r.Method, s.ID, 0, false)
 		}
 		return
 	}
 	defer resp.Body.Close()
 
-	if p.onEgress != nil {
+	// One egress entry per upstream attempt: a grace replay has already been
+	// reported, annotated, by the fallback observer.
+	if p.onEgress != nil && !replayed {
 		p.onEgress(up.Host, r.Method, s.ID, resp.StatusCode, false)
 	}
 
@@ -816,6 +870,122 @@ func (p *Proxy) reverseProxyToProvider(w http.ResponseWriter, r *http.Request, s
 		credentialID = cred.ID
 	}
 	p.copyAndObserveLLM(w, resp, s.BodyCodec, s.LedgerProvider, actorID, credentialID)
+}
+
+// graceReplay is what a request looked like BEFORE the current credential was
+// injected, kept so the same call can be replayed once with the rotation's
+// grace value (#1882). Captured only when the selected credential carries a
+// grace value — for every other request the body streams through untouched,
+// exactly as before.
+type graceReplay struct {
+	header   http.Header
+	rawQuery string
+	body     []byte
+}
+
+// captureGraceReplay snapshots r for a possible grace replay. It buffers the
+// body (bounded by maxRequestBodyBytes, the same cap the streaming path
+// enforces) and hands r a replayable copy. The second return is false when
+// the request was already answered (body over the cap), and the caller must
+// return.
+func captureGraceReplay(w http.ResponseWriter, r *http.Request, cred *Credential) (*graceReplay, bool) {
+	if cred == nil || cred.GraceToken == "" {
+		return nil, true
+	}
+	g := &graceReplay{header: r.Header.Clone(), rawQuery: r.URL.RawQuery}
+	if r.Body != nil && r.Body != http.NoBody {
+		body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxRequestBodyBytes))
+		if err != nil {
+			// Only the cap is a 413; a client that aborted mid-body or a
+			// transport read error is a bad request, the same answer the
+			// streaming path would give it.
+			var tooLarge *http.MaxBytesError
+			if errors.As(err, &tooLarge) {
+				http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
+			} else {
+				http.Error(w, "request body could not be read", http.StatusBadRequest)
+			}
+			return nil, false
+		}
+		g.body = body
+		r.Body = io.NopCloser(bytes.NewReader(body))
+		r.ContentLength = int64(len(body))
+	}
+	return g, true
+}
+
+// forwardWithGraceRetry sends outReq upstream and, when the answer is a 401
+// and the credential's rotation grace value is still usable, replays the
+// request EXACTLY once with that value (#1882).
+//
+// The gate is deliberately narrow. Only a 401 qualifies — a 403 is a
+// permission answer about a key that authenticated, a 429 or 5xx says nothing
+// about the key at all. Only THIS credential's grace value is consulted, read
+// from the store at retry time so a reaper scrub or expiry that landed during
+// the first attempt is honoured. A grace value equal to the value that just
+// failed is not re-sent. And the replay's answer is returned as-is: a second
+// 401 surfaces to the agent, there is no third attempt.
+//
+// prepare applies the caller's outbound rewrite to a fresh clone of the
+// inbound request, so the replay reaches the same upstream the same way.
+//
+// replayed reports whether the returned response came from a grace replay.
+// Every upstream attempt is journaled exactly once: the first attempt's 401
+// here through the egress observer, the replay through the fallback observer
+// — so a caller must not report a replayed RESPONSE again. A replay that
+// fails at the transport returns err, and the caller's transport-error path
+// reports that one as it always has.
+func (p *Proxy) forwardWithGraceRetry(r, outReq *http.Request, spec llmroute.Spec, cred *Credential,
+	replay *graceReplay, prepare func(*http.Request), actorID, host string) (resp *http.Response, replayed bool, err error) {
+	resp, err = p.transport.RoundTrip(outReq)
+	if err != nil || resp.StatusCode != http.StatusUnauthorized || replay == nil || cred == nil {
+		return resp, false, err
+	}
+	grace, rotationID, ok := p.credStore.GraceFor(cred.ID, time.Now())
+	if !ok || grace == cred.Token {
+		return resp, false, nil
+	}
+
+	// The 401 is consumed here: record it as the egress it was, then drain
+	// and close so the connection can be reused for the replay.
+	if p.onEgress != nil {
+		p.onEgress(host, r.Method, spec.ID, resp.StatusCode, false)
+	}
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 64<<10))
+	_ = resp.Body.Close()
+
+	retry := r.Clone(r.Context())
+	// Pre-injection headers and query: the current value's auth slot must be
+	// REPLACED, not joined by a second one, and a token an auth rule placed
+	// in the query (Gemini's ?key=) must not survive next to the new one.
+	retry.Header = replay.header.Clone()
+	retry.URL.RawQuery = replay.rawQuery
+	if len(replay.body) > 0 {
+		retry.Body = io.NopCloser(bytes.NewReader(replay.body))
+		retry.ContentLength = int64(len(replay.body))
+	} else {
+		retry.Body = http.NoBody
+		retry.ContentLength = 0
+	}
+	llmroute.ApplyAuth(retry, spec, grace, cred.Headers)
+	prepare(retry)
+
+	resp, err = p.transport.RoundTrip(retry)
+	status := 0
+	if err == nil {
+		status = resp.StatusCode
+	}
+	// Identifiers only. The value is never logged.
+	p.logger.Info("credential rotation grace: replayed after upstream 401",
+		"provider", spec.ID, "credential_id", cred.ID, "rotation_id", rotationID,
+		"agent_id", actorID, "host", host, "status", status)
+	if p.onGraceFallback != nil {
+		p.onGraceFallback(GraceFallback{
+			CredentialID: cred.ID, RotationID: rotationID, Provider: spec.ID,
+			AgentID: actorID, Host: host, Method: r.Method, Status: status,
+		})
+	}
+	return resp, true, err
 }
 
 // authorizeLLMRoute authenticates the disposable provider key before the
