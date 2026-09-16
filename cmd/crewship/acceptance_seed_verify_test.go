@@ -21,6 +21,8 @@ import (
 	"testing"
 	"time"
 
+	"gopkg.in/yaml.v3"
+
 	"github.com/crewship-ai/crewship/cmd/crewship/seeddata"
 )
 
@@ -160,5 +162,81 @@ func TestAcceptance_SeedVerify_UnknownPackIsAUsageError(t *testing.T) {
 	out, err := runSeedVerifyCLI(t, srv.URL, nil, "seed", "verify", "--pack", "no-such-pack")
 	if err == nil || !strings.Contains(out, "unknown pack") {
 		t.Fatalf("err=%v out=%s", err, out)
+	}
+}
+
+// runSeedVerifyCLIStdout is runSeedVerifyCLI with stdout on its own: the
+// verifier's progress lines go to stderr, and a structured render on stdout
+// has to parse without them.
+func runSeedVerifyCLIStdout(t *testing.T, serverURL string, env []string, args ...string) (string, error) {
+	t.Helper()
+	cfgPath := filepath.Join(t.TempDir(), "cli-config.yaml")
+	cfg := "server: " + serverURL + "\nworkspace: ws_test\ntoken: fake-token\nformat: table\n"
+	if err := os.WriteFile(cfgPath, []byte(cfg), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	cmd := exec.Command(buildCrewshipBinary(t), args...)
+	cmd.Dir = t.TempDir()
+	cmd.Env = append(os.Environ(),
+		"CREWSHIP_CONFIG="+cfgPath,
+		"NO_COLOR=1",
+		"CREWSHIP_SERVER=", "CREWSHIP_PROFILE=", "CREWSHIP_TOKEN=", "CREWSHIP_WORKSPACE=")
+	cmd.Env = append(cmd.Env, env...)
+	var stdout, stderr strings.Builder
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	err := cmd.Run()
+	if err != nil {
+		return stdout.String() + stderr.String(), err
+	}
+	return stdout.String(), nil
+}
+
+// TestAcceptance_SeedVerify_YAMLAndNDJSONAreHonoured pins the uniform
+// --format contract (docs/cli/overview.mdx) on the verifier: `yaml` and
+// `ndjson` must render the same verdict object `json` does, not fall
+// through to the human table.
+func TestAcceptance_SeedVerify_YAMLAndNDJSONAreHonoured(t *testing.T) {
+	srv := seedVerifyAcceptanceStub(t)
+	env := []string{
+		"SEED_GITHUB_TOKEN=ghp_acceptance_00000000000000000000",
+		"CREWSHIP_SEED_VERIFY_GITHUB_API=" + srv.URL,
+	}
+
+	out, err := runSeedVerifyCLIStdout(t, srv.URL, env, "seed", "verify", "--pack", "ci-watch", "--timeout", "30s", "--format", "yaml")
+	if err != nil {
+		t.Fatalf("seed verify --format yaml: %v\n%s", err, out)
+	}
+	if strings.Contains(out, "PACK") || strings.Contains(out, "passed,") {
+		t.Fatalf("--format yaml fell through to the human table:\n%s", out)
+	}
+	var yamlVerdict struct {
+		Checks []verifyCheck `yaml:"checks"`
+		Failed int           `yaml:"failed"`
+		Passed int           `yaml:"passed"`
+	}
+	if err := yaml.Unmarshal([]byte(out), &yamlVerdict); err != nil {
+		t.Fatalf("yaml: %v\n%s", err, out)
+	}
+	if yamlVerdict.Failed != 0 || yamlVerdict.Passed == 0 || len(yamlVerdict.Checks) != yamlVerdict.Passed {
+		t.Errorf("yaml verdict = %+v, want every check passed\n%s", yamlVerdict, out)
+	}
+
+	out, err = runSeedVerifyCLIStdout(t, srv.URL, env, "seed", "verify", "--pack", "ci-watch", "--timeout", "30s", "--format", "ndjson")
+	if err != nil {
+		t.Fatalf("seed verify --format ndjson: %v\n%s", err, out)
+	}
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	if len(lines) != 1 {
+		t.Fatalf("--format ndjson must print the verdict as one line, got %d:\n%s", len(lines), out)
+	}
+	var ndVerdict struct {
+		Checks []verifyCheck `json:"checks"`
+		Failed int           `json:"failed"`
+	}
+	if err := json.Unmarshal([]byte(lines[0]), &ndVerdict); err != nil {
+		t.Fatalf("ndjson: %v\n%s", err, out)
+	}
+	if ndVerdict.Failed != 0 || len(ndVerdict.Checks) == 0 {
+		t.Errorf("ndjson verdict = %+v\n%s", ndVerdict, out)
 	}
 }
