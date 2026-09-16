@@ -47,6 +47,16 @@ send/receive or even the chat-shell runtime path: those require a provider-backe
 agent fixture and remain in the nightly/runtime bucket until one exists. The remaining browser specs likewise stay nightly with their explicit
 gate/drift classification.
 
+One step needs data no provider-free server produces on its own: acting on a
+`run_needs_human` inbox card, which only a run reporting `NEEDS_HUMAN` writes.
+`ci.yml` starts the PR browser server with `CREWSHIP_E2E_FIXTURES=1`, which
+registers a seed door (`internal/api/e2e_fixtures.go`) that plants the session,
+the run and the card through the real producer; the spec then answers the card
+in the browser and reads the `inbox_acted` receipt off the issue's History tab
+(#2403). The door does not exist without that variable — a 404 from it means
+the server was started the ordinary way. Locally, export the same variable on
+the server you point `PLAYWRIGHT_BASE_URL` at.
+
 `visual.spec.ts` is in neither: every baseline in `visual.spec.ts-snapshots` is
 `*-chromium-darwin.png`, and Playwright resolves snapshots per platform — on a
 Linux runner it looks for `*-chromium-linux.png`, finds nothing and fails with

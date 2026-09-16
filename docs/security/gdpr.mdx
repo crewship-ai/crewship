@@ -50,6 +50,7 @@ The response is a single JSON bundle containing every row from the four tables t
     "inbox_items": 4,
     "inbox_item_reads": 9,
     "user_models": 1,
+    "user_model_provenance": 3,
     "gdpr_actions": 2
   },
   "peer_cards": [ {...}, {...} ],
@@ -57,6 +58,7 @@ The response is a single JSON bundle containing every row from the four tables t
   "inbox_items": [ {...}, {...} ],
   "inbox_item_reads": [ { "inbox_item_id": "ibx_…", "title": "…", "kind": "escalation", "read_at": "…" } ],
   "user_models": [ {...} ],
+  "user_model_provenance": [ {...}, {...}, {...} ],
   "gdpr_actions": [ {...}, {...} ]
 }
 ```
@@ -82,6 +84,10 @@ The export only covers tables that carry a `data_subject_id` foreign key:
   working constraints. **Exported with its body**, not just the index row —
   it is the one surface here holding facts the subject stated about themselves,
   so a row count would not answer the access request
+- `user_model_provenance` — the evidence behind each of those facts (#1693):
+  the subject's own quoted words, the message they were found in, and when
+  each was recorded, newest first. Every row, not only the newest per field —
+  the history of what was recorded is part of what is held about them
 - `gdpr_actions` — the audit history itself (always included)
 
 Content the operator may also need to surface manually:
@@ -186,6 +192,7 @@ Two consequences an operator should expect on the receipt:
 | `page_grants` (DB) | rows on pages in this workspace WHERE `granted_by_user_id = $USER_ID`, **or** the grant's subject is that user (`subject_type='user'`) | **Removed** (#1976). A grant is authority, not a record: `docs/prd/pages.md` §7.1b rule 1 is that only a human issues one and that it narrows with its issuer, and `granted_by_user_id` is `NOT NULL … ON DELETE CASCADE` precisely so a grant delegated by nobody cannot exist. Grants *naming* the subject go with them for the same reason the contract above gives. Reported as `page_grants_removed`. |
 | `page_public_tokens` (DB) | rows WHERE `created_by_user_id = $USER_ID`, on pages in this workspace | **Revoked by removal** (#1976). Every `/p/{token}` link the subject published stops resolving at once. The ordinary revoke path marks `revoked_at` and keeps the row, but a kept row still carries `created_by_user_id NOT NULL` — i.e. still names the subject — which an erasure may not leave behind. Reported as `page_public_tokens_revoked`. |
 | `page_webhooks` (DB) | rows WHERE `created_by_user_id = $USER_ID`, on panels of pages in this workspace | **Revoked by removal** (#1976). Any cron, Zapier step or gateway holding one of the subject's inbound tokens gets `404` on its next push. Same reasoning as public tokens. Reported as `page_webhooks_revoked`. |
+| `user_model_provenance` (DB) | rows WHERE `user_id = $USER_ID` in this workspace | Hard delete (#1693). The evidence behind the operator model — the subject's own quoted words, one row per fact per sync, kept beside the model file so `crewship privacy user-model list --provenance` can say where each entry came from. Erased by the identity step unconditionally: unlike `user_models` there is no disk copy whose failure would have to keep the row findable. Reported as `user_model_provenance_removed`. The same rows go on the self-service delete, the per-field forget and the opt-out purge. |
 | `saved_views`, `user_notification_prefs`, `notification_deliveries`, `notification_channels` (`scope='user'`), `onboarding_proposals` | rows WHERE `user_id` / `owner_user_id` / `created_by` `= $USER_ID` in this workspace | **Removed** (#2308). The subject's own records — a personal channel carries their own address, an onboarding proposal is the draft the Guide wrote in their session. Reported as `saved_views_removed`, `user_notification_prefs_removed`, `notification_deliveries_removed`, `notification_channels_removed`, `onboarding_proposals_removed`. |
 | `waitpoint_trust_grants` | rows WHERE `granted_by_user_id = $USER_ID` | **Revoked by removal** (#2308). A standing approval on a routine gate is `page_grants`' twin — a human delegating authority, with a `NOT NULL` issuer. The gate starts asking again; each live grant that went is journalled as `approval.trust_revoked` exactly as the ordinary revoke path does it. Grants the subject merely *withdrew* stay, with `revoked_by_user_id` cleared. Reported as `trust_grants_revoked` and `trust_grants_anonymised`. |
 | `workspace_invitations` | rows WHERE `invited_by = $USER_ID` | **Revoked by removal** (#2308). A pending invitation is a live capability to join the workspace in the subject's name; `invited_by` is `NOT NULL`. Reported as `workspace_invitations_revoked`. |
@@ -282,6 +289,7 @@ person who filed the request:
     "memory_versions": 117,
     "inbox_items": 4,
     "user_models": 1,
+    "user_model_provenance_removed": 3,
     "approvals_queue": 2,
     "pages_transferred": 1,
     "page_versions_anonymised": 12,
