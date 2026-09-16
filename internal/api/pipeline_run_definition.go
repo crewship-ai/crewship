@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/crewship-ai/crewship/internal/pipeline"
+	"github.com/crewship-ai/crewship/internal/scrubber"
 )
 
 // Run history must never resolve a slug to its current HEAD. A content hash
@@ -87,8 +88,12 @@ func (h *PipelineHandler) loadExecutedStepIDs(ctx context.Context, runID string)
 // enrichRunFailure attaches the `failure` projection (#2560) to a run that
 // did not finish: the kind classified from the engine's own error text, a
 // templated summary, and the kept / not-done step lists. The raw
-// error_message and failed_at_step already on resp stay untouched.
+// failed_at_step stays untouched; credential patterns in error_message are redacted.
 func (h *PipelineHandler) enrichRunFailure(ctx context.Context, runID, status, outcome, errorMessage, failedAtStep, currentStepID string, dsl *pipeline.DSL, stepOutputs map[string]string, resp map[string]interface{}) {
+	// Older persisted diagnostics may predate redaction at write time.
+	if raw, ok := resp["error_message"].(string); ok {
+		resp["error_message"] = scrubber.New().Scrub(raw)
+	}
 	if !runFailureApplies(status, outcome) {
 		return
 	}

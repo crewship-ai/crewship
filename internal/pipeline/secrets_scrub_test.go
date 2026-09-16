@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -90,5 +91,63 @@ func TestExecutor_StepOutput_ScrubbedBeforePersistAndBroadcast(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("expected a pipeline.step.completed journal entry")
+	}
+}
+
+func TestExecutor_ScriptFailure_ScrubbedBeforePersistAndBroadcast(t *testing.T) {
+	db := openStoreTestDB(t)
+	defer db.Close()
+	if _, err := db.Exec(runsProjectionDDL); err != nil {
+		t.Fatal(err)
+	}
+	store, runStore := NewStore(db), NewRunStore(db)
+	secrets := []string{"sk-proj-exampleSecret1234567890", "opaqueToken123456789", "example-password-123"}
+	stderr := secrets[0] + " Authorization: Bearer " + secrets[1] + " PASSWORD=" + secrets[2]
+	runner := &fakeScriptRunner{result: ScriptRunResult{Stderr: stderr, ExitCode: 1}}
+	emitter, ws := &captureEmitter{}, &captureWS{}
+	exec := NewExecutor(store, NewResolver(db), nil, emitter).WithRunStore(runStore).WithScriptRunner(runner).WithWSBroadcaster(ws)
+	in := validSaveInput("scrub-script-failure")
+	in.DefinitionJSON = `{"name":"scrub-script-failure","steps":[{"id":"fail","type":"script","script":{"path":"scripts/fail.sh"}}]}`
+	p, err := store.Save(context.Background(), in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := exec.Run(context.Background(), RunInput{PipelineID: p.ID, WorkspaceID: "ws_test", Mode: ModeRun})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Status != "FAILED" {
+		t.Fatalf("status = %s", res.Status)
+	}
+	persisted, err := runStore.Get(context.Background(), res.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(emitter.entries)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ws.mu.Lock()
+	defer ws.mu.Unlock()
+	surfaces := []string{persisted.ErrorMessage, string(encoded)}
+	for _, event := range ws.events {
+		b, err := json.Marshal(event.payload)
+		if err != nil {
+			t.Fatal(err)
+		}
+		surfaces = append(surfaces, string(b))
+	}
+	if len(emitter.entries) == 0 || len(ws.events) == 0 {
+		t.Fatal("missing journal or broadcast evidence")
+	}
+	for _, surface := range surfaces {
+		for _, secret := range secrets {
+			if strings.Contains(surface, secret) {
+				t.Errorf("secret leaked: %s", surface)
+			}
+		}
+	}
+	if !strings.Contains(persisted.ErrorMessage, "[REDACTED") {
+		t.Fatalf("missing redaction: %s", persisted.ErrorMessage)
 	}
 }

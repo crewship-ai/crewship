@@ -367,7 +367,7 @@ func TestRunFailure_OnRunDetail(t *testing.T) {
 	got := getRunDetail(t, h, user, ws, "prn_failed")
 	want := map[string]any{
 		"kind": "checker_rejected", "step_id": "verify", "step_name": "Check the extraction",
-		"summary":       "The checker rejected the result after exhausting the allowed model tiers: total_equals_lines.",
+		"summary":       "The checker rejected the result after exhausting the allowed model tiers.",
 		"kept_step_ids": []any{"extract"}, "not_done_step_ids": []any{"decide", "post", "notify"},
 	}
 	if !reflect.DeepEqual(got["failure"], want) {
@@ -472,5 +472,28 @@ func TestScheduleEffectiveVersion_OnListAndCreate(t *testing.T) {
 	created := decodeJSONMap(t, rr.Body.String())
 	if created["effective_version"] != float64(3) || created["version_pinned"] != false {
 		t.Errorf("create: %v / %v", created["effective_version"], created["version_pinned"])
+	}
+}
+
+func TestRunFailure_RedactsLegacyDiagnostics(t *testing.T) {
+	h, db, user, ws := runsHandlerRig(t)
+	seedRunsPipeline(t, db, ws, "pl_secret", "secret-failure")
+	seedRunRow(t, db, ws, "pl_secret", "secret-failure", "prn_secret", "failed")
+	secrets := []string{"sk-proj-exampleSecret1234567890", "opaqueToken123456789", "example-password-123"}
+	msg := "unknown script failure: " + secrets[0] + " Bearer " + secrets[1] + " PASSWORD=" + secrets[2]
+	execOrFatal(t, db, `UPDATE pipeline_runs SET error_message = ? WHERE id = 'prn_secret'`, msg)
+	got := getRunDetail(t, h, user, ws, "prn_secret")
+	data, err := json.Marshal(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, secret := range secrets {
+		if strings.Contains(string(data), secret) {
+			t.Errorf("API leaked diagnostic: %s", data)
+		}
+	}
+	f := got["failure"].(map[string]any)
+	if f["summary"] != "The run did not finish." {
+		t.Errorf("summary: %v", f)
 	}
 }

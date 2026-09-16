@@ -383,7 +383,7 @@ describe("routine run detail — one page, one order (#2519)", () => {
     expect(screen.getByRole("link", { name: "Ask the lead to fix it" }).getAttribute("href")).toBe("/chat")
   })
 
-  it("sends Ask the lead to the crew lead's chat with the run and the step in the prompt", () => {
+  it("sends only the run reference to the crew lead without diagnostic text", () => {
     h.agents = [
       { id: "a1", slug: "worker", name: "Worker", crew_id: "crew_fin", agent_role: "AGENT" },
       { id: "a2", slug: "nora-lead", name: "Nora", crew_id: "crew_fin", agent_role: "LEAD" },
@@ -404,9 +404,28 @@ describe("routine run detail — one page, one order (#2519)", () => {
     expect(href.startsWith("/chat/nora-lead?prompt=")).toBe(true)
     const prompt = decodeURIComponent(href.split("?prompt=")[1])
     expect(prompt).toContain("Run run_1")
-    expect(prompt).toContain('step "Write the report"')
-    expect(prompt).toContain("The step did not finish within 10 minutes.")
+    expect(prompt).not.toContain('Write the report')
+    expect(prompt).not.toContain("The step did not finish within 10 minutes.")
     expect(prompt).toContain("save_routine_draft")
+  })
+
+  it("copies only the run reference when no lead is available", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    const original = Object.getOwnPropertyDescriptor(navigator, "clipboard")
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } })
+    try {
+      h.run = baseRun({ status: "failed", error_message: "Bearer private-token-value", failure: { kind: "unknown", summary: "customer-private-diagnostic", step_name: "private-step" } })
+      render(<RoutineRunDetail workspaceId="ws" runId="run_1" />)
+      fireEvent.click(screen.getByRole("link", { name: "Ask the lead to fix it" }))
+      await waitFor(() => expect(writeText).toHaveBeenCalledOnce())
+      const prompt = writeText.mock.calls[0][0]
+      expect(prompt).toContain("Run run_1")
+      expect(prompt).not.toMatch(/private|Bearer|customer/)
+      expect(prompt).toContain("save_routine_draft")
+    } finally {
+      if (original) Object.defineProperty(navigator, "clipboard", original)
+      else Reflect.deleteProperty(navigator, "clipboard")
+    }
   })
 
   it("names who needs to decide, why, and when it expires while a run waits", () => {

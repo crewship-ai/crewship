@@ -44,7 +44,7 @@ func TestClassifyFailure(t *testing.T) {
 			wantKind:    FailureCheckerRejected,
 			wantStep:    "verify",
 			wantName:    "Check the extraction",
-			wantSummary: "The checker rejected the result after exhausting the allowed model tiers: total_equals_lines.",
+			wantSummary: "The checker rejected the result after exhausting the allowed model tiers.",
 			wantKept:    []string{"extract"},
 			wantNotDone: []string{"decide", "post", "notify"},
 		},
@@ -53,21 +53,21 @@ func TestClassifyFailure(t *testing.T) {
 			msg:         "outcomes failed: outcomes failed: missing signature",
 			step:        "verify",
 			wantKind:    FailureCheckerRejected,
-			wantSummary: "The checker rejected the result: missing signature.",
+			wantSummary: "The checker rejected the result.",
 		},
 		{
 			name:        "validation failed on abort",
 			msg:         `validation failed: output must contain "total"`,
 			step:        "verify",
 			wantKind:    FailureValidationFailed,
-			wantSummary: `The output failed a structural check: output must contain "total".`,
+			wantSummary: `The output failed a structural check.`,
 		},
 		{
 			name:        "validation failed after tiers",
 			msg:         "step failed after exhausting tiers: output shorter than min_length 10",
 			step:        "verify",
 			wantKind:    FailureValidationFailed,
-			wantSummary: "The output failed a structural check after exhausting the allowed model tiers: output shorter than min_length 10.",
+			wantSummary: "The output failed a structural check after exhausting the allowed model tiers.",
 		},
 		{
 			name:        "transform input not JSON",
@@ -185,11 +185,11 @@ func TestClassifyFailure(t *testing.T) {
 			wantSummary: `The HTTP call in step "Post to the ledger" returned status 404.`,
 		},
 		{
-			name:        "unknown keeps the raw message",
+			name:        "unknown uses a generic summary",
 			msg:         "tier resolver: workspace not found",
 			step:        "verify",
 			wantKind:    FailureUnknown,
-			wantSummary: "tier resolver: workspace not found",
+			wantSummary: "The run did not finish.",
 		},
 		{
 			name:        "unknown with an empty message",
@@ -271,8 +271,21 @@ func TestClassifyFailure_DoesNotTreatIterationLimitAsAttemptCount(t *testing.T) 
 		t.Fatal(err)
 	}
 	got := ClassifyFailure("step failed after exhausting tiers: outcomes failed: total_equals_lines", "verify", dsl, nil, nil)
-	want := "The checker rejected the result after exhausting the allowed model tiers: total_equals_lines."
+	want := "The checker rejected the result after exhausting the allowed model tiers."
 	if got.Summary != want {
 		t.Fatalf("summary = %q, want %q", got.Summary, want)
+	}
+}
+
+// Arbitrary diagnostics must not become a portable summary, even when they
+// resemble an engine message. Secrets are not always recognizable by regex.
+func TestClassifyFailureDoesNotProjectDiagnostics(t *testing.T) {
+	for _, prefix := range []string{"", "outcomes failed: ", "validation failed: ", "exhausting tiers: "} {
+		for _, secret := range []string{"sk-proj-exampleSecret1234567890", "Bearer opaqueToken123456789", "private-customer-credential"} {
+			got := ClassifyFailure(prefix+secret, "verify", nil, nil, nil)
+			if strings.Contains(got.Summary, secret) {
+				t.Errorf("diagnostic propagated: %q", got.Summary)
+			}
+		}
 	}
 }

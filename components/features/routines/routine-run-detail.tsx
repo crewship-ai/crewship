@@ -326,7 +326,7 @@ export function RoutineRunDetail({ workspaceId, runId }: RoutineRunDetailProps) 
       null
     )
   })()
-  const fixPrompt = `Run ${run.id} of routine "${run.pipeline_name || run.pipeline_slug}" could not finish${run.failure?.step_name || failedStepName || run.failed_at_step ? ` at step "${run.failure?.step_name || failedStepName || run.failed_at_step}"` : ""}.${run.failure?.summary ? ` ${run.failure.summary}` : run.error_message ? ` Error: ${run.error_message}` : ""} Look at the run, tell me what to change in the routine, and save the change as a draft with save_routine_draft — do not publish.`
+  const fixPrompt = `Run ${run.id} could not finish. Retrieve the run diagnostics using your authorized tools, tell me what to change in the routine, and save the change as a draft with save_routine_draft — do not publish.`
   const askLeadHref = lead
     ? `/chat/${encodeURIComponent(lead.slug)}?prompt=${encodeURIComponent(fixPrompt)}`
     : "/chat"
@@ -335,7 +335,7 @@ export function RoutineRunDetail({ workspaceId, runId }: RoutineRunDetailProps) 
     // No lead to hand the prompt to: the reader picks the agent in chat and
     // pastes what we copied.
     void navigator.clipboard?.writeText(fixPrompt).then(
-      () => toast.success("Copied the run and the step — paste it to the agent you choose."),
+      () => toast.success("Copied the run reference — paste it to the agent you choose."),
       () => toast.error("Could not copy. Open the chat and describe the run by its id."),
     )
   }

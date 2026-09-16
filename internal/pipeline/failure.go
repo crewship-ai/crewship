@@ -27,8 +27,8 @@ const (
 
 // Failure is the run detail's `failure` member: where a run stopped, why in
 // one templated sentence (never model-generated), and which top-level steps
-// kept their output versus never ran. The raw error_message stays on the run
-// untouched; this is a projection over it.
+// kept their output versus never ran. Free-form diagnostic text is kept out
+// of this summary; protected technical details retain the redacted error.
 type Failure struct {
 	Kind           string   `json:"kind"`
 	StepID         string   `json:"step_id"`
@@ -39,14 +39,13 @@ type Failure struct {
 }
 
 var (
-	failureHTTPStatusPattern    = regexp.MustCompile(`got http (\d{3})`)
-	failureExitCodePattern      = regexp.MustCompile(`exit code (-?\d+)`)
-	failureCostExceededPattern  = regexp.MustCompile(`\$([0-9.]+) > \$([0-9.]+)`)
-	failureCostRetryCapPattern  = regexp.MustCompile(`breach cap \$([0-9.]+)`)
-	failureCredentialPattern    = regexp.MustCompile(`credential of type "([^"]+)"`)
-	failureIntegrationPattern   = regexp.MustCompile(`integration "([^"]+)"`)
-	failureExpressionPattern    = regexp.MustCompile(`expression ("(?:[^"\\]|\\.)*")`)
-	failureAfterMarkerMaxLength = 300
+	failureHTTPStatusPattern   = regexp.MustCompile(`got http (\d{3})`)
+	failureExitCodePattern     = regexp.MustCompile(`exit code (-?\d+)`)
+	failureCostExceededPattern = regexp.MustCompile(`\$([0-9.]+) > \$([0-9.]+)`)
+	failureCostRetryCapPattern = regexp.MustCompile(`breach cap \$([0-9.]+)`)
+	failureCredentialPattern   = regexp.MustCompile(`credential of type "([^"]+)"`)
+	failureIntegrationPattern  = regexp.MustCompile(`integration "([^"]+)"`)
+	failureExpressionPattern   = regexp.MustCompile(`expression ("(?:[^"\\]|\\.)*")`)
 )
 
 // ClassifyFailure maps a failed run's error_message onto a Failure. dsl is
@@ -66,7 +65,7 @@ func ClassifyFailure(errorMessage, failedStepID string, dsl *DSL, stepOutputs ma
 		Kind:           FailureUnknown,
 		StepID:         failedStepID,
 		StepName:       stepName,
-		Summary:        msg,
+		Summary:        "The run did not finish.",
 		KeptStepIDs:    []string{},
 		NotDoneStepIDs: []string{},
 	}
@@ -88,24 +87,20 @@ func ClassifyFailure(errorMessage, failedStepID string, dsl *DSL, stepOutputs ma
 		}
 	case strings.Contains(lower, "outcomes failed:"):
 		f.Kind = FailureCheckerRejected
-		feedback := afterLastMarker(msg, "outcomes failed:")
 		tiers := ""
 		if strings.Contains(lower, "exhausting tiers") {
 			// The configured ceiling does not reveal the available fallback
 			// count or the number of attempts recorded by this run.
 			tiers = " after exhausting the allowed model tiers"
 		}
-		f.Summary = sentence("The checker rejected the result"+tiers, feedback)
+		f.Summary = "The checker rejected the result" + tiers + "."
 	case strings.Contains(lower, "validation failed:") || strings.Contains(lower, "exhausting tiers"):
 		f.Kind = FailureValidationFailed
-		var reason, tiers string
-		if strings.Contains(lower, "validation failed:") {
-			reason = afterLastMarker(msg, "validation failed:")
-		} else {
-			reason = afterLastMarker(msg, "exhausting tiers:")
+		tiers := ""
+		if strings.Contains(lower, "exhausting tiers") {
 			tiers = " after exhausting the allowed model tiers"
 		}
-		f.Summary = sentence("The output failed a structural check"+tiers, reason)
+		f.Summary = "The output failed a structural check" + tiers + "."
 	case strings.Contains(lower, "input is not json"):
 		f.Kind = FailureTransformInput
 		f.Summary = fmt.Sprintf("%s received input that is not JSON.", upperFirst(stepRef()))
@@ -189,6 +184,7 @@ func ClassifyFailure(errorMessage, failedStepID string, dsl *DSL, stepOutputs ma
 			}
 		}
 	}
+	f.Summary = scrubStepOutput(f.Summary)
 	return f
 }
 
@@ -233,32 +229,6 @@ func findStep(dsl *DSL, id string) *Step {
 		visit(dsl.Hooks.OnFailure)
 	}
 	return found
-}
-
-// afterLastMarker returns the text after the last (case-insensitive)
-// occurrence of marker, trimmed and bounded — the engine nests reasons
-// ("… exhausting tiers: outcomes failed: outcomes failed: <feedback>"), and
-// the innermost one is the feedback a person wants.
-func afterLastMarker(msg, marker string) string {
-	idx := strings.LastIndex(strings.ToLower(msg), strings.ToLower(marker))
-	if idx < 0 {
-		return strings.TrimSpace(msg)
-	}
-	rest := strings.TrimSpace(msg[idx+len(marker):])
-	return truncateRunes(rest, failureAfterMarkerMaxLength)
-}
-
-// sentence joins a lead-in and a detail as "Lead-in: detail." — with the
-// terminal period added only when the detail does not already end one.
-func sentence(lead, detail string) string {
-	detail = strings.TrimSpace(detail)
-	if detail == "" {
-		return lead + "."
-	}
-	if strings.HasSuffix(detail, ".") || strings.HasSuffix(detail, "!") || strings.HasSuffix(detail, "?") {
-		return lead + ": " + detail
-	}
-	return lead + ": " + detail + "."
 }
 
 func upperFirst(s string) string {
