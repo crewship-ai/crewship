@@ -91,10 +91,9 @@ func ClassifyFailure(errorMessage, failedStepID string, dsl *DSL, stepOutputs ma
 		feedback := afterLastMarker(msg, "outcomes failed:")
 		tiers := ""
 		if strings.Contains(lower, "exhausting tiers") {
-			tiers = " after every model tier"
-			if step != nil && step.Outcomes != nil && step.Outcomes.MaxIterations > 0 {
-				tiers = fmt.Sprintf(" after %d model tiers", step.Outcomes.MaxIterations)
-			}
+			// The configured ceiling does not reveal the available fallback
+			// count or the number of attempts recorded by this run.
+			tiers = " after exhausting the allowed model tiers"
 		}
 		f.Summary = sentence("The checker rejected the result"+tiers, feedback)
 	case strings.Contains(lower, "validation failed:") || strings.Contains(lower, "exhausting tiers"):
@@ -104,7 +103,7 @@ func ClassifyFailure(errorMessage, failedStepID string, dsl *DSL, stepOutputs ma
 			reason = afterLastMarker(msg, "validation failed:")
 		} else {
 			reason = afterLastMarker(msg, "exhausting tiers:")
-			tiers = " after every model tier"
+			tiers = " after exhausting the allowed model tiers"
 		}
 		f.Summary = sentence("The output failed a structural check"+tiers, reason)
 	case strings.Contains(lower, "input is not json"):

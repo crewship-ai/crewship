@@ -367,7 +367,7 @@ func TestRunFailure_OnRunDetail(t *testing.T) {
 	got := getRunDetail(t, h, user, ws, "prn_failed")
 	want := map[string]any{
 		"kind": "checker_rejected", "step_id": "verify", "step_name": "Check the extraction",
-		"summary":       "The checker rejected the result after 3 model tiers: total_equals_lines.",
+		"summary":       "The checker rejected the result after exhausting the allowed model tiers: total_equals_lines.",
 		"kept_step_ids": []any{"extract"}, "not_done_step_ids": []any{"decide", "post", "notify"},
 	}
 	if !reflect.DeepEqual(got["failure"], want) {

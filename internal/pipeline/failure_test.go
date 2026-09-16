@@ -44,7 +44,7 @@ func TestClassifyFailure(t *testing.T) {
 			wantKind:    FailureCheckerRejected,
 			wantStep:    "verify",
 			wantName:    "Check the extraction",
-			wantSummary: "The checker rejected the result after 3 model tiers: total_equals_lines.",
+			wantSummary: "The checker rejected the result after exhausting the allowed model tiers: total_equals_lines.",
 			wantKept:    []string{"extract"},
 			wantNotDone: []string{"decide", "post", "notify"},
 		},
@@ -67,7 +67,7 @@ func TestClassifyFailure(t *testing.T) {
 			msg:         "step failed after exhausting tiers: output shorter than min_length 10",
 			step:        "verify",
 			wantKind:    FailureValidationFailed,
-			wantSummary: "The output failed a structural check after every model tier: output shorter than min_length 10.",
+			wantSummary: "The output failed a structural check after exhausting the allowed model tiers: output shorter than min_length 10.",
 		},
 		{
 			name:        "transform input not JSON",
@@ -260,5 +260,19 @@ func TestClassifyFailure_HookStepLeavesEverythingNotDone(t *testing.T) {
 	want := []string{"extract", "verify", "decide", "post", "notify"}
 	if !reflect.DeepEqual(got.NotDoneStepIDs, want) {
 		t.Fatalf("not_done = %v, want %v", got.NotDoneStepIDs, want)
+	}
+}
+
+// MaxIterations is a ceiling, not recorded evidence of how many tiers ran.
+// A recipe can allow ten tiers while the worker has only one available model.
+func TestClassifyFailure_DoesNotTreatIterationLimitAsAttemptCount(t *testing.T) {
+	dsl, err := Parse([]byte(strings.Replace(classifyFailureDef, `"max_iterations":3`, `"max_iterations":10`, 1)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := ClassifyFailure("step failed after exhausting tiers: outcomes failed: total_equals_lines", "verify", dsl, nil, nil)
+	want := "The checker rejected the result after exhausting the allowed model tiers: total_equals_lines."
+	if got.Summary != want {
+		t.Fatalf("summary = %q, want %q", got.Summary, want)
 	}
 }

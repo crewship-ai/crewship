@@ -26,6 +26,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 
 ### Fixed
+
+- Routine failure summaries describe exhausted model tiers without presenting the configured iteration ceiling as an observed attempt count.
 - **Routine Edit keeps combined changes in the draft.** Editing a name and inputs together no longer changes the published recipe before saving the draft. Unavailable draft baselines block saves visibly; input edits preserve identity already authored in the draft, and unverified script files are labelled consistently in Edit. Draft conflicts are recognized by HTTP 409 rather than English error wording. Name, purpose and appearance changes to an unpublished copy remain in its draft until explicit publication.
 
 - Rotation grace reconciliation checks exact active rotation IDs, including overlapping rotations. Operator-model evidence is shown only when it matches the current value; the provenance user foreign key has its own index.

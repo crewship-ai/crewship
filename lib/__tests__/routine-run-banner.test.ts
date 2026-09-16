@@ -61,7 +61,7 @@ describe("routineRunBanner", () => {
           kind: "checker_rejected",
           step_id: "verify",
           step_name: "Check the extraction",
-          summary: "The checker rejected the result after 3 model tiers: total_equals_lines.",
+          summary: "The checker rejected the result after exhausting the allowed model tiers: total_equals_lines.",
           kept_step_ids: ["extract"],
           not_done_step_ids: ["decide", "post", "notify"],
         },
@@ -70,7 +70,7 @@ describe("routineRunBanner", () => {
     })
     expect(banner.tone).toBe("destructive")
     expect(banner.title).toBe("Stopped at step 2, “Check the extraction”")
-    expect(banner.detail).toBe("The checker rejected the result after 3 model tiers: total_equals_lines.")
+    expect(banner.detail).toBe("The checker rejected the result after exhausting the allowed model tiers: total_equals_lines.")
     expect(banner.kept).toBe("Read the invoice")
     expect(banner.notDone).toBe("Ask Finance when over the limit, Post to the ledger, Tell #finance")
     // The raw engine message never leads the banner.

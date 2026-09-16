@@ -361,7 +361,7 @@ describe("routine run detail — one page, one order (#2519)", () => {
         kind: "checker_rejected",
         step_id: "verify",
         step_name: "Check the extraction",
-        summary: "The checker rejected the result after 3 model tiers: total_equals_lines.",
+        summary: "The checker rejected the result after exhausting the allowed model tiers: total_equals_lines.",
         kept_step_ids: ["extract"],
         not_done_step_ids: ["post"],
       },
@@ -371,7 +371,7 @@ describe("routine run detail — one page, one order (#2519)", () => {
     const banner = screen.getByTestId("run-banner")
     expect(banner).toHaveAttribute("data-tone", "destructive")
     expect(within(banner).getByRole("heading").textContent).toBe("Stopped at step 2, “Check the extraction”")
-    expect(banner.textContent).toContain("The checker rejected the result after 3 model tiers: total_equals_lines.")
+    expect(banner.textContent).toContain("The checker rejected the result after exhausting the allowed model tiers: total_equals_lines.")
     expect(banner.textContent).toContain("Kept: Read the invoice. Not done: Post to the ledger.")
     // The engine's message is not in the banner, but it is kept in Technical details.
     expect(banner.textContent).not.toContain("criterion")
