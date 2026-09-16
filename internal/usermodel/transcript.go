@@ -75,7 +75,8 @@ func LoadTranscript(
 	// the oldest ones instead — which for a chatty operator means
 	// extracting from a fortnight-old conversation forever.
 	rows, err := db.QueryContext(ctx, `
-		SELECT m.role,
+		SELECT m.id,
+		       m.role,
 		       m.content,
 		       COALESCE(m.author_user_id, ''),
 		       COALESCE(c.visibility, 'private')
@@ -94,8 +95,8 @@ func LoadTranscript(
 
 	var rev []Turn
 	for rows.Next() {
-		var role, content, author, visibility string
-		if err := rows.Scan(&role, &content, &author, &visibility); err != nil {
+		var id, role, content, author, visibility string
+		if err := rows.Scan(&id, &role, &content, &author, &visibility); err != nil {
 			return nil, fmt.Errorf("usermodel: scan transcript row: %w", err)
 		}
 		if strings.TrimSpace(content) == "" {
@@ -104,7 +105,7 @@ func LoadTranscript(
 		isUser := strings.EqualFold(role, "user")
 		bySubject := isUser && (author == userID ||
 			(author == "" && !strings.EqualFold(visibility, "group")))
-		rev = append(rev, Turn{Role: role, BySubject: bySubject, Content: content})
+		rev = append(rev, Turn{Role: role, BySubject: bySubject, Content: content, MessageID: id})
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("usermodel: iterate transcript: %w", err)

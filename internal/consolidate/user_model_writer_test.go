@@ -66,7 +66,7 @@ func TestSyncUserModel_Write(t *testing.T) {
 			MessageCount: 12, SessionDuration: time.Minute,
 		},
 		"Prefers concise answers.",
-		paths, dir, time.Now(),
+		nil, paths, dir, time.Now(),
 	)
 	if out.Err != nil {
 		t.Fatalf("write outcome err: %v", out.Err)
@@ -100,9 +100,9 @@ func TestSyncUserModel_WriteIsUpsert(t *testing.T) {
 		MessageCount: 12, SessionDuration: time.Minute,
 	}
 	SyncUserModel(context.Background(), db, logger, DefaultUserModelThreshold,
-		cand, "v1 content", paths, dir, time.Now())
+		cand, "v1 content", nil, paths, dir, time.Now())
 	SyncUserModel(context.Background(), db, logger, DefaultUserModelThreshold,
-		cand, "v2 longer content here", paths, dir, time.Now())
+		cand, "v2 longer content here", nil, paths, dir, time.Now())
 
 	var cnt int
 	if err := db.QueryRow(`SELECT COUNT(*) FROM user_models`).Scan(&cnt); err != nil {
@@ -129,7 +129,7 @@ func TestSyncUserModel_SkipThreshold(t *testing.T) {
 			WorkspaceID: wsID, UserID: userID,
 			MessageCount: 2, SessionDuration: 30 * time.Second,
 		},
-		"would be content", paths, dir, time.Now(),
+		"would be content", nil, paths, dir, time.Now(),
 	)
 	if out.Action != "skip_threshold" {
 		t.Errorf("expected skip_threshold; got %q (%+v)", out.Action, out)
@@ -157,14 +157,14 @@ func TestSyncUserModel_OptOutPurges(t *testing.T) {
 		MessageCount: 30, SessionDuration: 10 * time.Minute,
 	}
 	SyncUserModel(context.Background(), db, logger, DefaultUserModelThreshold,
-		cand, "Pavel notes", paths, dir, time.Now())
+		cand, "Pavel notes", nil, paths, dir, time.Now())
 
 	if _, err := db.Exec(`INSERT INTO user_peer_consent (user_id, workspace_id, opted_out, opted_out_at)
 		VALUES (?, ?, 1, ?)`, userID, wsID, time.Now().UTC().Format(time.RFC3339)); err != nil {
 		t.Fatalf("set opt out: %v", err)
 	}
 	out := SyncUserModel(context.Background(), db, logger, DefaultUserModelThreshold,
-		cand, "fresh would-be content", paths, dir, time.Now())
+		cand, "fresh would-be content", nil, paths, dir, time.Now())
 	if out.Action != "delete_opt_out" {
 		t.Errorf("expected delete_opt_out; got %q", out.Action)
 	}
@@ -200,7 +200,7 @@ func TestSyncUserModel_SkipEmptyContent(t *testing.T) {
 			WorkspaceID: wsID, UserID: userID,
 			MessageCount: 100, SessionDuration: time.Hour,
 		},
-		"   \n\t", paths, dir, time.Now(),
+		"   \n\t", nil, paths, dir, time.Now(),
 	)
 	if out.Action != "skip_empty_content" {
 		t.Errorf("expected skip_empty_content; got %q", out.Action)
@@ -296,7 +296,7 @@ func TestSyncUserModel_ConsentProbeError(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	out := SyncUserModel(context.Background(), db, logger, DefaultUserModelThreshold,
 		UserModelCandidate{WorkspaceID: wsID, UserID: userID, MessageCount: 20},
-		"body", paths, dir, time.Now())
+		"body", nil, paths, dir, time.Now())
 	if out.Action != "skip_opt_out" || out.Err == nil {
 		t.Errorf("expected skip_opt_out with error; got %+v", out)
 	}
@@ -327,7 +327,7 @@ func TestSyncUserModel_OptOutDeleteFileError(t *testing.T) {
 	}
 	out := SyncUserModel(context.Background(), db, logger, DefaultUserModelThreshold,
 		UserModelCandidate{WorkspaceID: wsID, UserID: userID, MessageCount: 20},
-		"body", paths, dir, time.Now())
+		"body", nil, paths, dir, time.Now())
 	if out.Action != "delete_opt_out" || out.Err == nil {
 		t.Errorf("expected delete_opt_out with error; got %+v", out)
 	}
@@ -354,7 +354,7 @@ func TestSyncUserModel_OptOutIndexDeleteError(t *testing.T) {
 	}
 	out := SyncUserModel(context.Background(), db, logger, DefaultUserModelThreshold,
 		UserModelCandidate{WorkspaceID: wsID, UserID: userID, MessageCount: 20},
-		"body", paths, dir, time.Now())
+		"body", nil, paths, dir, time.Now())
 	if out.Action != "delete_opt_out" || out.Err == nil {
 		t.Errorf("expected delete_opt_out with index error; got %+v", out)
 	}
@@ -372,7 +372,7 @@ func TestSyncUserModel_OptOutNoExistingCard(t *testing.T) {
 	}
 	out := SyncUserModel(context.Background(), db, logger, DefaultUserModelThreshold,
 		UserModelCandidate{WorkspaceID: wsID, UserID: userID, MessageCount: 20},
-		"body", paths, dir, time.Now())
+		"body", nil, paths, dir, time.Now())
 	if out.Action != "delete_opt_out" || out.Err != nil {
 		t.Errorf("expected clean delete_opt_out; got %+v", out)
 	}
@@ -411,7 +411,7 @@ func TestSyncUserModel_OptOutPurgesOrphanFromPriorCrew(t *testing.T) {
 		t.Fatalf("set opt out: %v", err)
 	}
 	out := SyncUserModel(context.Background(), db, logger, DefaultUserModelThreshold,
-		cand, "would-be content", newPaths, dir, time.Now())
+		cand, "would-be content", nil, newPaths, dir, time.Now())
 	if out.Action != "delete_opt_out" || out.Err != nil {
 		t.Errorf("expected clean delete_opt_out; got %+v", out)
 	}
@@ -436,7 +436,7 @@ func TestSyncUserModel_UpsertError(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	out := SyncUserModel(context.Background(), db, logger, DefaultUserModelThreshold,
 		UserModelCandidate{WorkspaceID: wsID, UserID: userID, MessageCount: 20},
-		"body", paths, dir, time.Now())
+		"body", nil, paths, dir, time.Now())
 	if out.Action != "write" || out.Err == nil {
 		t.Errorf("expected write action with upsert error; got %+v", out)
 	}
@@ -455,7 +455,7 @@ func TestSyncUserModel_DiskWriteError(t *testing.T) {
 	}
 	out := SyncUserModel(context.Background(), db, logger, DefaultUserModelThreshold,
 		UserModelCandidate{WorkspaceID: wsID, UserID: userID, MessageCount: 20},
-		"body", paths, dir, time.Now())
+		"body", nil, paths, dir, time.Now())
 	if out.Action != "write" || out.Err == nil {
 		t.Errorf("expected write action with disk error; got %+v", out)
 	}
@@ -473,7 +473,7 @@ func TestSyncUserModel_WriteWithCrewID(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	out := SyncUserModel(context.Background(), db, logger, DefaultUserModelThreshold,
 		UserModelCandidate{WorkspaceID: wsID, CrewID: "cr1", UserID: userID, MessageCount: 20},
-		"body", paths, dir, time.Now())
+		"body", nil, paths, dir, time.Now())
 	if out.Action != "write" || out.Err != nil {
 		t.Errorf("expected clean write; got %+v", out)
 	}

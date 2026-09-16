@@ -109,3 +109,29 @@ func TestPathParametersRemainRequired(t *testing.T) {
 		t.Fatalf("parameters = %#v", params)
 	}
 }
+
+// TestAddRouteExcludesTheGatedFixtureSurface pins the /api/v1/e2e/ exclusion
+// (#2403): the browser-test fixture routes exist only on a server started
+// with CREWSHIP_E2E_FIXTURES, so the public spec must not list them. RED
+// before the exclusion: the route lands in the table like any other.
+func TestAddRouteExcludesTheGatedFixtureSurface(t *testing.T) {
+	seen := map[route]bool{}
+	var routes []route
+	src := `r.authedMut("POST", "/api/v1/e2e/fixtures/run-needs-human", roleManage, h.RunNeedsHuman)`
+	addRoute(seen, &routes, "POST", "/api/v1/e2e/fixtures/run-needs-human", "e2e_fixtures.go", 0, src)
+	if len(routes) != 0 {
+		t.Fatalf("the gated fixture route was added to the public spec: %+v", routes)
+	}
+	// The exclusion is by prefix, not by the one path: a sibling fixture
+	// added later is excluded the same way.
+	addRoute(seen, &routes, "POST", "/api/v1/e2e/fixtures/other", "e2e_fixtures.go", 0, src)
+	if len(routes) != 0 {
+		t.Fatalf("a second route under %s was added to the public spec: %+v", e2eFixturePrefix, routes)
+	}
+	// And an ordinary route still lands.
+	addRoute(seen, &routes, "POST", "/api/v1/inbox/{id}/act", "router_orchestration.go", 0,
+		`r.authedMut("POST", "/api/v1/inbox/{id}/act", roleSelf, ih.Act)`)
+	if len(routes) != 1 {
+		t.Fatalf("an ordinary route was not added: %+v", routes)
+	}
+}

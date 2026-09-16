@@ -176,6 +176,12 @@ func scopeForRoute(pattern string) string {
 		// pages:write scope arrives with the grant surface, which is what
 		// would make it mean something.
 		return "workspace:admin"
+	case "e2e":
+		// The browser-test fixture surface (e2e_fixtures.go): registered
+		// only behind WithE2EFixtures, and it writes runs, sessions and
+		// inbox rows across the workspace — administration, not a resource
+		// write a narrowly scoped token should reach.
+		return "workspace:admin"
 	case "admin", "integrations", "connectors", "recipes", "templates",
 		"projects", "milestones", "labels", "relations", "feature-flags",
 		"instance", "issues", "journal", "checkpoints", "missions",
