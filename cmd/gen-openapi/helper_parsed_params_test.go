@@ -53,16 +53,18 @@ var helperParsedQueryParameters = []struct {
 	{"GET", "/api/v1/paymaster/top-spenders", "parseWindow", []string{"limit", "range", "since"}},
 
 	// parseJournalQuery (journal_handler.go) is the whole filter grammar of the
-	// journal. GET /api/v1/journal documented none of it.
+	// journal. GET /api/v1/journal documented none of it. run_id (2026-08-08)
+	// reaches a run by trace_id, actor_id or payload.run_id, whichever engine
+	// ran it; it was read for a month before the annotation named it.
 	{"GET", "/api/v1/journal", "parseJournalQuery", []string{
 		"actor_type", "agent_id", "agent_ids", "crew_id", "crew_ids", "cursor",
 		"entry_type", "exclude_entry_type", "limit", "mission_id", "priority",
-		"q", "severity", "since", "trace_id", "until",
+		"q", "run_id", "severity", "since", "trace_id", "until",
 	}},
 	{"GET", "/api/v1/journal/stream", "parseJournalQuery", []string{
 		"actor_type", "agent_id", "agent_ids", "crew_id", "crew_ids", "cursor",
 		"entry_type", "exclude_entry_type", "limit", "mission_id", "priority",
-		"q", "severity", "since", "trace_id", "until",
+		"q", "run_id", "severity", "since", "trace_id", "until",
 	}},
 	// Count parses the same grammar, but off a clone with ?limit and ?cursor
 	// deleted first — a count has no use for either, and parseJournalQuery
@@ -75,7 +77,7 @@ var helperParsedQueryParameters = []struct {
 	{"GET", "/api/v1/journal/count", "parseJournalQuery", []string{
 		"actor_type", "agent_id", "agent_ids", "crew_id", "crew_ids", "cursor",
 		"entry_type", "exclude_entry_type", "limit", "mission_id", "priority",
-		"q", "severity", "since", "trace_id", "until",
+		"q", "run_id", "severity", "since", "trace_id", "until",
 	}},
 
 	// parseTimeseriesParams (metrics_handler.go). ?metric is required — see
@@ -88,6 +90,17 @@ var helperParsedQueryParameters = []struct {
 	// parsePagination (helpers.go) for limit/offset.
 	{"GET", "/api/v1/mcp-registry", "parseRegistryFilters", []string{"featured", "limit", "offset", "trust_tier"}},
 	{"GET", "/api/v1/mcp-registry/search", "parseRegistryFilters", []string{"featured", "limit", "offset", "q", "trust_tier"}},
+
+	// parsePagination (helpers.go) and listSearchClause (list_count.go) — the
+	// #2318/#2314 paging and search helpers. `order`, `crew_id`,
+	// `include_setup`, `counts`, `kind` and the credential filters are read
+	// inline and inferred; only q/limit/offset come from the annotation.
+	// Credentials reads ?q itself (credentials.go:189) and ?limit/?offset
+	// through the helper; chats reads no ?q at all.
+	{"GET", "/api/v1/crews", "parsePagination+listSearchClause", []string{"limit", "offset", "order", "q"}},
+	{"GET", "/api/v1/agents", "parsePagination+listSearchClause", []string{"crew_id", "include_setup", "limit", "offset", "q"}},
+	{"GET", "/api/v1/credentials", "parsePagination", []string{"kind", "limit", "offset", "paginate", "q", "search", "tag"}},
+	{"GET", "/api/v1/agents/{agentId}/chats", "parsePagination", []string{"counts", "kind", "limit", "offset"}},
 
 	// resolveIOStep (pipeline_runs.go) — the #863 sub-span I/O gate.
 	{"GET", "/api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}", "resolveIOStep", []string{"include_io", "io_step"}},

@@ -366,29 +366,34 @@ func (h *AssignmentHandler) loadAgentCredentials(ctx context.Context, agentID st
 
 // runAssignment executes the sub-agent for an assignment in a goroutine.
 
+// assignmentListItem is one row of GET /api/v1/crews/{crewId}/assignments.
+// Package-level rather than declared inside List so the OpenAPI key test
+// (openapi_schema_keys_test.go) can reflect on it: the spec's
+// CrewAssignmentsResponseV1 described issue_id/agent_id/updated_at, three
+// fields this row has never carried, for as long as the type was local.
+type assignmentListItem struct {
+	ID             string  `json:"id"`
+	Task           string  `json:"task"`
+	Status         string  `json:"status"`
+	AssignedByName string  `json:"assigned_by_name"`
+	AssignedBySlug string  `json:"assigned_by_slug"`
+	AssignedToName string  `json:"assigned_to_name"`
+	AssignedToSlug string  `json:"assigned_to_slug"`
+	ResultSummary  *string `json:"result_summary"`
+	ErrorMessage   *string `json:"error_message"`
+	// QueuedReason says why a QUEUED row waits: crew_budget or agent_busy
+	// (#2269). NULL unless the row is QUEUED.
+	QueuedReason *string `json:"queued_reason,omitempty"`
+	StartedAt    *string `json:"started_at"`
+	FinishedAt   *string `json:"finished_at"`
+	CreatedAt    string  `json:"created_at"`
+}
+
 func (h *AssignmentHandler) List(w http.ResponseWriter, r *http.Request) {
 	crewID := r.PathValue("crewId")
 	workspaceID := WorkspaceIDFromContext(r.Context())
 
 	limit, offset := parsePagination(r, 50, 100)
-
-	type assignmentListItem struct {
-		ID             string  `json:"id"`
-		Task           string  `json:"task"`
-		Status         string  `json:"status"`
-		AssignedByName string  `json:"assigned_by_name"`
-		AssignedBySlug string  `json:"assigned_by_slug"`
-		AssignedToName string  `json:"assigned_to_name"`
-		AssignedToSlug string  `json:"assigned_to_slug"`
-		ResultSummary  *string `json:"result_summary"`
-		ErrorMessage   *string `json:"error_message"`
-		// QueuedReason says why a QUEUED row waits: crew_budget or agent_busy
-		// (#2269). NULL unless the row is QUEUED.
-		QueuedReason *string `json:"queued_reason,omitempty"`
-		StartedAt    *string `json:"started_at"`
-		FinishedAt   *string `json:"finished_at"`
-		CreatedAt    string  `json:"created_at"`
-	}
 
 	rows, err := h.db.QueryContext(r.Context(), `
 		SELECT a.id, a.task, a.status, a.result_summary, a.error_message, a.queued_reason,

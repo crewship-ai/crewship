@@ -58,9 +58,9 @@ var responseShapeExclusions = map[string]string{
 func TestOpenAPIResponseComponents_AreGradedOrExcused(t *testing.T) {
 	// Measured, not chosen. Lower it in the same commit that adds pairs; a rise
 	// means a route shipped a response shape nothing can check.
-	// 199 → 190 (#1849): SkillDetail, HireResponse, CredentialPage, RunResult
-	// gained pairs; the list components whose rows are graded stopped counting.
-	const budget = 190
+	// Measured after combining #1849’s reachability cleanup with the
+	// audit’s additional response-shape contracts.
+	const budget = 183
 
 	raw, err := os.ReadFile("openapi.gen.json")
 	if err != nil {
@@ -99,6 +99,7 @@ func TestOpenAPIResponseComponents_AreGradedOrExcused(t *testing.T) {
 		ungraded = append(ungraded, name)
 	}
 	sort.Strings(ungraded)
+	t.Logf("ungraded response components: %d (budget %d)", len(ungraded), budget)
 
 	if len(ungraded) > budget {
 		shown := ungraded

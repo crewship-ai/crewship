@@ -128,6 +128,9 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/invitations", roleManage, ws.CreateInvitation)
 
 	// Crews (require workspace context)
+	// List pages through parsePagination and searches through
+	// listSearchClause (#2318); the body scan sees neither helper.
+	// openapi: query q:string limit:integer offset:integer
 	r.mux.Handle("GET /api/v1/crews", authed(wsCtx(http.HandlerFunc(crews.List))))
 	r.authedMut("POST", "/api/v1/crews", roleCreate, crews.Create)
 	r.mux.Handle("GET /api/v1/crews/{crewId}", authed(wsCtx(http.HandlerFunc(crews.Get))))
@@ -321,6 +324,7 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	// Agents (require workspace context)
 	r.mux.Handle("GET /api/v1/agents/crews-status", authed(wsCtx(http.HandlerFunc(agents.CrewsStatus))))
 	r.mux.Handle("GET /api/v1/agent-load", authed(wsCtx(http.HandlerFunc(agents.Load))))
+	// openapi: query q:string limit:integer offset:integer
 	r.mux.Handle("GET /api/v1/agents", authed(wsCtx(http.HandlerFunc(agents.List))))
 	r.authedMut("POST", "/api/v1/agents", roleInline, agents.Create)
 	// PR-D F5 ephemeral lifecycle endpoints. Hire creates a new
@@ -365,6 +369,7 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	r.mux.Handle("GET /api/v1/agents/{agentId}/credential-readiness", authed(wsCtx(http.HandlerFunc(agents.CredentialReadiness))))
 
 	// Agent chats & runs
+	// openapi: query limit:integer offset:integer
 	r.mux.Handle("GET /api/v1/agents/{agentId}/chats", authed(wsCtx(http.HandlerFunc(agents.ListChats))))
 	r.authedMut("POST", "/api/v1/agents/{agentId}/chats", roleSelf, agents.CreateChat)
 	// Mark-read: advances the caller's per-chat read cursor (unread badge
@@ -433,6 +438,7 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	r.authedMut("DELETE", "/api/v1/users/me/user-model/facts/{key}", roleSelf, privacy.ForgetUserModelFact)
 
 	// Credentials (require workspace context + manage role for create)
+	// openapi: query limit:integer offset:integer
 	r.mux.Handle("GET /api/v1/credentials", authed(wsCtx(http.HandlerFunc(creds.List))))
 	r.authedMut("POST", "/api/v1/credentials", roleInline, creds.Create)
 	r.authedSelfMut("POST", "/api/v1/credentials/test", creds.Test)
