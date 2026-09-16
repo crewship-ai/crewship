@@ -198,7 +198,7 @@ var browserOrInboundNoCLI = map[string]string{
 	// never issued as a CLI request.
 	"POST /api/v1/webhooks/{}":            "pipeline webhook dispatch: the {token} path segment is the auth, external caller",
 	"POST /api/v1/waitpoint-tokens/{}":    "waitpoint completion callback: external system resumes a paused run via a high-entropy token",
-	"POST /api/v1/page-webhooks/{}":       "page webhook dispatch — router_pages_webhooks.go: \"the inbound surface, no auth wrapper, by design\"",
+	"POST /api/v1/page-webhooks/{}":       "page webhook dispatch — public token-authenticated entry in router_pages_webhooks.go",
 	"POST /api/v1/webhooks/{}/{}/trigger": "agent-webhook trigger: internal loopback caller (chatbridge/IPC), not an interactive CLI request",
 
 	// Public share-link surface — no Crewship account, no bearer token; the

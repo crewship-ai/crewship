@@ -17,7 +17,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Fixed
 
-- Keep daily-compaction and run-count test fixtures valid across UTC midnight.
+- Keep daily-compaction, run-count and wake-scheduler test fixtures valid across clock boundaries, and avoid a false CI error annotation in route-parity diagnostics.
 - **GDPR:** the Art. 17 erasure now unnames the subject on every workspace-scoped table the schema sweep found (~40 columns): credentials the subject created pass to a custodian with a `REATTRIBUTED` audit event, their trust grants and pending invitations are revoked, history columns are anonymised, and their saved views, notification preferences and deliveries are removed — one receipt key per table on the audit row. Chats, membership, peer consent and the accountability tables stay excluded and are listed as such. (#2308)
 - **CLI:** `-f yaml` emits the same keys as `-f json` for every command — all 3,058 json-tagged fields in `cmd/crewship` carry a mirroring yaml tag, five tests that asserted the old lowercased keys are corrected, and a source-level guard fails on any new field without one. (#2119, closes the #1211 remainder)
 - Four class-triaged non-atomic writes (Apple `CopyToContainer` bind-mount, `prompt save`, `eval baseline save`, seeded memory files) now go through the durable write helper; every remaining allowlist entry names its function and reader, and the crash-safe guard also sees `os.Create` / `os.CreateTemp`, which it had never matched. (#2124)
