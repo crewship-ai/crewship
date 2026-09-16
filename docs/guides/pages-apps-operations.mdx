@@ -47,7 +47,8 @@ DNS/CA are acceptable when clients are configured to trust and reach them.
 Point the runtime reverse proxy at the same Crewship Go listener, preserving its
 runtime Host header. Route only `/api/v1/pages/runtime/bootstrap` on that host and
 return 404 for other paths. Do not strip or weaken Crewship's CSP/frame headers.
-The Studio origin uses the existing authenticated application proxy configuration.
+The browser origin (`CREWSHIP_PAGE_STUDIO_ORIGIN`) uses the existing
+authenticated application proxy configuration.
 
 A hosts-file entry on the server is not browser DNS. Verify from a viewer machine:
 
@@ -60,7 +61,7 @@ its requests are confined, and the Stop control remains usable with a broken
 preview. A 200 on `/pages/{slug}` alone only proves the static shell is served.
 
 `CREWSHIP_PAGE_RUNTIME_DEVELOPMENT_SAME_ORIGIN=true` is a deliberate development
-exception, off by default. It must use exactly the Studio origin and shows an
+exception, off by default. It must use exactly the browser origin and shows an
 isolation warning. It is not a production substitute for the second site.
 
 ## Verify a clean installation
@@ -68,7 +69,8 @@ isolation warning. It is not a production substitute for the second site.
 Start with a fresh Crewship data directory and the normal administrator setup.
 Using an authorized owner/crew, create a Page with an existing local producer and
 a declared harmless routine. Then initialize the shipped starter, pack/save it,
-build it and explicitly review/publish it with the CLI or Studio. Commands and
+build it and explicitly review/publish it with the CLI or the page editor's
+review (**Edit → Content**). Commands and
 expected-revision flags are documented in [Page CLI](/cli/page).
 
 Run these checks before accepting the installation:
@@ -143,3 +145,15 @@ Publishing a Page freezes its UI and declared action binding, not a routine's co
 The confirmation dialog and receipt expose definition drift. The routine runner
 continues to use the routine's current definition and scripts, so sensitive operation
 approval must also follow that routine's own governance.
+
+What a publication *is* fenced on is the routine definitions the reviewer was
+shown: the review snapshot lists a digest for every routine a `call` action
+would run, the publication sends them back as `expected_routine_digests`, and
+the server recomputes and compares them inside the publishing transaction. A
+routine that changed between the review and the click — an upgrade that
+rewrote its script, a maintainer editing it — refuses the publication with
+`409` and `conflict: "routines"`, naming the routines that moved. So when you
+upgrade or edit routines that Pages call, expect in-flight reviews to be
+refused and re-reviewed; that is the fence working, not a failure to work
+around. `crewship page project review <slug>` shows each routine's current
+state (`unchanged`, `changed`, `unknown`) before anyone publishes.

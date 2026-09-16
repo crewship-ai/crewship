@@ -18,6 +18,7 @@ import { TraceCanvas } from "@/components/features/activity/trace-canvas"
 import { RunActivityTimeline } from "@/components/features/activity/run-activity-timeline"
 import { RoutineRunArtifacts } from "./routine-run-artifacts"
 import { RoutineExecutionHistory } from "./routine-execution-history"
+import { RoutineExecutionInsights } from "./routine-execution-insights"
 import { RoutineStepSpine } from "./routine-step-spine"
 import { useRunExecutions } from "@/hooks/use-run-executions"
 import { RoutineApprovalBanner } from "./routine-approval-banner"
@@ -228,11 +229,7 @@ export function RoutineRunDetail({ workspaceId, runId }: RoutineRunDetailProps) 
       if (!res.ok) throw new Error("The selected recipe version is unavailable.")
       const routine = await res.json()
       if (request !== preparation.current) return
-      const specs = routineInputSpecs(routine.definition).map((spec) =>
-        Object.hasOwn(run.inputs ?? {}, spec.name)
-          ? { ...spec, default: run.inputs![spec.name] }
-          : spec,
-      )
+      const specs = routineInputSpecs(routine.definition)
       setRunDefinition(routine.definition ?? null)
       setSelectedVersion(version)
       setInputSpecs(specs)
@@ -394,8 +391,7 @@ export function RoutineRunDetail({ workspaceId, runId }: RoutineRunDetailProps) 
           {triggerLabel}
           {!active && run.duration_ms != null && (
             <>
-              {" · "}took{" "}
-              <span className="font-mono">{formatDurationMs(run.duration_ms)}</span>
+              {" · "}took <span className="font-mono">{formatDurationMs(run.duration_ms)}</span>
             </>
           )}
           {" · "}
@@ -459,9 +455,18 @@ export function RoutineRunDetail({ workspaceId, runId }: RoutineRunDetailProps) 
             )}
           </div>
         )}
+        {(failed || run.status === "cancelled" || run.status === "interrupted") && (
+          <p className="text-xs text-muted-foreground">
+            Before repeating work,{" "}
+            <a href="#routine-recorded-evidence" className="text-primary underline">
+              inspect retained results and recorded steps
+            </a>
+            . Confirm any external changes before retrying a write.
+          </p>
+        )}
         {failed && (
           <p className="text-xs text-muted-foreground" data-testid="run-next-step">
-            What you can do: fix the step in{" "}
+            If the recipe caused the problem, review it in{" "}
             {roleAtLeast(role, "MANAGER") ? (
               <Link
                 className="text-primary hover:underline"
@@ -560,6 +565,7 @@ export function RoutineRunDetail({ workspaceId, runId }: RoutineRunDetailProps) 
         selectedVersion={selectedVersion}
         onVersionChange={(v) => void prepareAgain(v)}
         inputs={inputSpecs}
+        initialInputs={run.inputs}
         routineName={run.pipeline_name || run.pipeline_slug}
         submitting={starting}
         onCancel={() => {
@@ -592,6 +598,7 @@ export function RoutineRunDetail({ workspaceId, runId }: RoutineRunDetailProps) 
           </button>
         </p>
       )}
+      <div id="routine-recorded-evidence" className="scroll-mt-4" tabIndex={-1} />
       {resultPanel}
       <RoutineRunArtifacts
         key={`artifacts-${runId}`}
@@ -602,8 +609,14 @@ export function RoutineRunDetail({ workspaceId, runId }: RoutineRunDetailProps) 
         noFinalResult={!run.output && run.step_outputs_available !== false}
       />
 
+      <RoutineExecutionInsights
+        rows={executions.error ? null : executions.rows}
+        partial={executions.truncated}
+        definition={dsl}
+      />
       {dsl ? (
         <RoutineStepSpine
+          behavior={run.behavior}
           workspaceId={workspaceId}
           definition={dsl}
           record={spineRecord}
