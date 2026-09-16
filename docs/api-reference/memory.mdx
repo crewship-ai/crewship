@@ -44,6 +44,7 @@ not start or provision a container. Requires an authenticated workspace member;
 `workspace_id` query parameter or `X-Workspace-ID` header. No request body.
 
 Both routes also include workspace knowledge when its storage root is configured.
+The CLI for both is [`crewship memory inventory --agent|--crew`](/cli/memory#inventory-server-api).
 Personal `users/` and `peers/` files are excluded: read your preferences through
 the `/api/v1/users/me/user-model` and `/api/v1/users/me/peer-cards` endpoints.
 Persona is edited through the agent or crew persona API.

@@ -8,7 +8,7 @@ tag: Experimental
 
 # crewship memory
 
-Access memory FTS5 indexes on the local filesystem without a running server. Useful for development, debugging, and scripting.
+Access memory FTS5 indexes on the local filesystem without a running server — useful for development, debugging, and scripting — plus the server-side reads that work from any machine: [`inventory`](#inventory-server-api), [`health`](#health), [`hybrid`](#hybrid) and [`versions`](#versions-server-api).
 
 ## Subcommands
 
@@ -181,6 +181,62 @@ crewship memory hybrid "API key rotation" --limit 5 --scope crew_shared --crew b
 | `--limit` | `10` | Maximum hits. |
 | `--scope` | _(all visible)_ | `own` (agent-only) or `crew_shared` (crew-bound). |
 | `--crew` | | Crew slug or id for `crew_shared` scope. |
+
+### inventory (server API)
+
+List the **current** knowledge documents of one agent or one crew, as the
+server reads them right now — the same read the crew **Memory** tab makes,
+over `GET /api/v1/agents/{agentId}/memory` or `GET /api/v1/crews/{crewId}/memory`.
+Requires a login token and a workspace; works from any machine. It never
+starts or provisions a container.
+
+```bash
+crewship memory inventory --agent martin
+crewship memory inventory --crew backend
+crewship memory inventory --agent martin --format json \
+  | jq -r '.documents[] | select(.id=="agent:AGENT.md") | .content'
+```
+
+| Flag | Default | Description |
+|---|---|---|
+| `--agent` | — | Agent slug or id. Lists the agent's own documents **and** its crew's shared ones. |
+| `--crew` | — | Crew slug or id. Lists the crew's shared documents. |
+
+Exactly one of the two is required. Both add the workspace-wide documents
+when the server has a workspace memory root configured.
+
+What is listed: `AGENT.md`, `CREW.md`, `BRIEF.md`, `LEAD.md`, `pins.md`,
+`lessons.md`, `learned-*.md` and `daily/*.md` (workspace scope: every `.md`
+except `PERSONA.md`). Personal `users/` and `peers/` files are never included
+— read your own through `crewship privacy`; personas have `crewship persona`.
+
+Human output leads with one line of per-scope states and then one row per
+document:
+
+```bash
+crewship memory inventory --agent martin
+# Scopes: agent=available crew=empty workspace=unavailable
+# ID                          STATE      BYTES  UPDATED               REVISION
+# agent:AGENT.md              available  412    2026-09-15T08:12:40Z  9f2a1c7d4b30
+# agent:daily/2026-09-15.md   available  88     2026-09-15T09:00:02Z  1d77e0a95c62
+```
+
+| Scope state | Meaning |
+|---|---|
+| `available` | The directory was read; its documents are the rows with that scope. |
+| `empty` | The directory does not exist or holds no knowledge document. An empty crew is `empty`, not an error. |
+| `unavailable` | The directory could not be read, or holds more entries than the server will inventory — it refuses a partial list rather than pretend it is whole. `workspace` is `unavailable` whenever no workspace memory root is configured. |
+
+A document row's `STATE` is `available` or `unavailable`: an unreadable or
+oversized file (over 64 KiB, or past the 512 KiB per-scope budget) is listed
+with no content, which is not the same as empty content. `REVISION` is the
+first 12 hex characters of the content's SHA-256; the full digest, the
+content itself and the `history_path` to pass to
+[`memory versions list`](#versions-server-api) are in `--format json`.
+`--format quiet` prints the bare document ids.
+
+Exit codes: `3` when the agent or crew does not resolve in the workspace;
+non-zero with the server's sentence on `503 memory storage unavailable`.
 
 ### versions (server API)
 
