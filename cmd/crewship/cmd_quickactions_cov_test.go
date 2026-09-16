@@ -299,8 +299,14 @@ func TestMeCmdRunE_HappyPath(t *testing.T) {
 	stub.OnGet("/api/v1/missions", clitest.JSONResponse(200, map[string]any{
 		"data": []map[string]any{{"id": "mis_1", "title": "Ship it"}},
 	}))
+	// The approvals handler answers {"rows", "status", "count", "has_more"},
+	// never {"data"}: stubbing the shape the CLI wished for is how the
+	// always-empty section shipped (#2584).
 	stub.OnGet("/api/v1/approvals", clitest.JSONResponse(200, map[string]any{
-		"data": []map[string]any{{"id": "apr_1", "title": "Approve", "status": "pending"}},
+		"rows":     []map[string]any{{"id": "apr_1", "title": "Approve", "status": "pending"}},
+		"status":   "pending",
+		"count":    1,
+		"has_more": false,
 	}))
 	stub.OnGet("/api/v1/runs", clitest.JSONResponse(200, map[string]any{
 		"data": []map[string]any{{"id": "run_1", "agent_slug": "eva", "status": "DONE"}},
@@ -327,10 +333,10 @@ func TestMeCmdRunE_BareArrayFallback(t *testing.T) {
 	stub := covSetupCli5(t)
 	flagFormat = "json"
 
-	// missions returns a bare array — exercises the second-decode fallback.
+	// missions returns a bare array — exercises fetchRows's bare-array arm.
 	stub.OnGet("/api/v1/missions", clitest.JSONResponse(200,
 		[]map[string]any{{"id": "mis_bare", "title": "Bare"}}))
-	stub.OnGet("/api/v1/approvals", clitest.JSONResponse(200, map[string]any{"data": []map[string]any{}}))
+	stub.OnGet("/api/v1/approvals", clitest.JSONResponse(200, map[string]any{"rows": []map[string]any{}}))
 	stub.OnGet("/api/v1/runs", clitest.JSONResponse(200, map[string]any{"data": []map[string]any{}}))
 
 	var err error
@@ -533,7 +539,7 @@ func TestNowCmdRunE_HappyPath(t *testing.T) {
 	stub.OnGet("/api/v1/agents", clitest.JSONResponse(200,
 		[]map[string]any{{"slug": "eva", "status": "running"}}))
 	stub.OnGet("/api/v1/approvals", clitest.JSONResponse(200, map[string]any{
-		"data": []map[string]any{{"id": "apr_2", "title": "Cap"}},
+		"rows": []map[string]any{{"id": "apr_2", "title": "Cap"}}, "status": "pending", "count": 1, "has_more": false,
 	}))
 
 	var err error
