@@ -121,11 +121,13 @@ the event type matches.
   Check the payload before you match on it, even now that `--payload-equals`
   is checked at save time. The check only covers a curated set of event
   types (`mission.status_change`, `mission.created`, `mission.assigned`,
-  `mission.comment`, `automation.throttled`, `automation.depth_exceeded`,
+  `automation.throttled`, `automation.depth_exceeded`,
   `pipeline.schedule.circuit_breaker_tripped`,
   `pipeline.schedule.missed_occurrences`, `page.wake.fired` — see
   [Automations → Payload key validation](/guides/automations#payload-key-validation));
-  for any other event type a key no emitter writes is still accepted, saved,
+  `mission.comment` is deliberately not in that set (its two emitters write
+  disjoint payloads), and for it or any other event type a key no emitter
+  writes is still accepted, saved,
   listed — and matches nothing, forever, with no error anywhere:
 
   ```bash
