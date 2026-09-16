@@ -1,15 +1,24 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 
+	"github.com/crewship-ai/crewship/internal/cli"
 	"github.com/crewship-ai/crewship/internal/pipeline"
 	"github.com/spf13/cobra"
 )
 
+// The default is in-process — the command's documented promise is "without
+// contacting Crewship", and like `validate` it must work with no token and
+// no server. --remote sends the identical FixtureStepInput to
+// POST /api/v1/workspaces/{ws}/pipelines/fixture_test instead, which is what
+// an agent in a container (a token, no local Go build) needs, and what proves
+// the server's build reaches the same verdict as this binary's.
 func newRoutineFixtureTestCmd() *cobra.Command {
 	var stepID, input, outputs, outputFile, env, metadata, secrets string
+	var remote bool
 	cmd := &cobra.Command{Use: "fixture-test <recipe.json|recipe.yaml>", Short: "Test one step offline using explicit fixtures, without external actions", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		raw, err := os.ReadFile(args[0])
 		if err != nil {
@@ -48,7 +57,12 @@ func newRoutineFixtureTestCmd() *cobra.Command {
 			value := string(raw)
 			in.FixtureOutput = &value
 		}
-		result, err := pipeline.TestStepWithFixtures(cmd.Context(), in)
+		var result *pipeline.FixtureStepResult
+		if remote {
+			result, err = remoteFixtureTest(in)
+		} else {
+			result, err = pipeline.TestStepWithFixtures(cmd.Context(), in)
+		}
 		if err != nil {
 			return err
 		}
@@ -76,8 +90,36 @@ func newRoutineFixtureTestCmd() *cobra.Command {
 	cmd.Flags().StringVar(&env, "env", "", "sample env/run values: string-valued JSON object inline or @file.json")
 	cmd.Flags().StringVar(&metadata, "metadata", "", "sample run metadata: JSON object inline or @file.json")
 	cmd.Flags().StringVar(&secrets, "secrets", "", "fake secret samples: string-valued JSON object inline or @file.json; never real credentials")
+	cmd.Flags().BoolVar(&remote, "remote", false, "run the fixture test on the configured server (needs login + workspace) instead of in this binary; same input, same report")
 	_ = cmd.MarkFlagRequired("step")
 	return cmd
+}
+
+// remoteFixtureTest is the --remote path: the same FixtureStepInput the
+// in-process call takes, sent as the endpoint's request body. The server
+// answers 400 for a recipe or step it cannot test (the in-process error),
+// and 403 below the create tier — both surface as the CLI's usual API error.
+func remoteFixtureTest(in pipeline.FixtureStepInput) (*pipeline.FixtureStepResult, error) {
+	if err := requireAuth(); err != nil {
+		return nil, err
+	}
+	if err := requireWorkspace(); err != nil {
+		return nil, err
+	}
+	client := newAPIClient()
+	resp, err := client.Post(fmt.Sprintf("/api/v1/workspaces/%s/pipelines/fixture_test", client.GetWorkspaceID()), in)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if err := cli.CheckError(resp); err != nil {
+		return nil, err
+	}
+	var result pipeline.FixtureStepResult
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("decode fixture test response: %w", err)
+	}
+	return &result, nil
 }
 
 func init() { pipelineCmd.AddCommand(newRoutineFixtureTestCmd()) }

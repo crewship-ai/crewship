@@ -348,6 +348,7 @@ belong to --author-crew.`,
 		maxConsecutiveFailures, _ := cmd.Flags().GetInt("max-consecutive-failures")
 		triggerManual, _ := cmd.Flags().GetBool("trigger-manual")
 		draft, _ := cmd.Flags().GetBool("draft")
+		triggerInputPairs, _ := cmd.Flags().GetStringArray("trigger-inputs")
 
 		if definitionPath == "" {
 			return fmt.Errorf("--definition <path> required")
@@ -363,6 +364,17 @@ belong to --author-crew.`,
 		}
 		if draft && cronExpr == "" {
 			return fmt.Errorf("--draft requires --cron (there is nothing to hold back activating otherwise)")
+		}
+		if len(triggerInputPairs) > 0 && cronExpr == "" {
+			return fmt.Errorf("--trigger-inputs requires --cron (the preset belongs to the schedule the save creates)")
+		}
+		// The preset the schedule fires with. Parsed before any request so a
+		// malformed pair is a usage error, not a half-done save. Values that
+		// parse as JSON keep their type (count=3 is a number); quote to
+		// force text (who='"3"').
+		triggerInputs, err := parseKeyValues(triggerInputPairs, "--trigger-inputs")
+		if err != nil {
+			return err
 		}
 
 		definitionRaw, err := os.ReadFile(definitionPath)
@@ -490,6 +502,14 @@ belong to --author-crew.`,
 			if maxConsecutiveFailures > 0 {
 				trigger["max_consecutive_failures"] = maxConsecutiveFailures
 			}
+			// trigger.inputs is also the escape hatch the 409
+			// schedule_conflict hint names: a recipe change that a plan's
+			// stored preset can no longer satisfy lands only when the same
+			// save carries the repaired preset (the plan is upserted before
+			// the preset gate runs, internal/pipeline/store.go).
+			if len(triggerInputs) > 0 {
+				trigger["inputs"] = triggerInputs
+			}
 			saveBody["trigger"] = trigger
 			if draft {
 				saveBody["activation"] = "draft"
@@ -503,6 +523,14 @@ belong to --author-crew.`,
 		}
 		defer saveResp.Body.Close()
 		if err := cli.CheckError(saveResp); err != nil {
+			// The schedule preset gate (#2495) answers 409 with a `hint`
+			// naming the way out. Relay it, and name the CLI spelling of
+			// that way out — the flag pair below is the only door.
+			var apiErr *cli.APIError
+			if errors.As(err, &apiErr) && apiErr.Extensions["schedule_conflict"] != nil {
+				hint, _ := apiErr.Extensions["hint"].(string)
+				return fmt.Errorf("%w\n  %s\n  From the CLI: re-run this save with --cron <expr> --trigger-inputs key=value (repeatable) so the plan's preset moves with the recipe", err, hint)
+			}
 			return err
 		}
 		var saved pipelineRowJSON
@@ -646,6 +674,20 @@ var pipelineRunCmd = &cobra.Command{
 		if v, _ := cmd.Flags().GetInt("priority"); v != 0 {
 			runBody["priority"] = v
 		}
+		// One-time start (#2460/#2501): fire_at parks the trigger like
+		// --delay does, but at an absolute instant, pinned to the archive
+		// that passed preflight — so the run that fires later is the recipe
+		// the caller pressed Run on, not whatever HEAD became meanwhile.
+		// pinned_version runs an archived recipe NOW (immediate or fire_at;
+		// the server refuses it with delay/debounce). Both are validated
+		// server-side; a bad value comes back as its 400/404 verbatim.
+		if v, _ := cmd.Flags().GetString("fire-at"); v != "" {
+			runBody["fire_at"] = v
+		}
+		if cmd.Flags().Changed("pinned-version") {
+			v, _ := cmd.Flags().GetInt("pinned-version")
+			runBody["pinned_version"] = v
+		}
 		// Idempotency: the key rides the standard Idempotency-Key header
 		// (same contract as webhook dispatch); the TTL bounds the dedupe
 		// window server-side. A duplicate key within the window returns
@@ -656,6 +698,14 @@ var pipelineRunCmd = &cobra.Command{
 			if ttl, _ := cmd.Flags().GetInt("idempotency-ttl"); ttl > 0 {
 				runBody["idempotency_key_ttl_seconds"] = ttl
 			}
+		}
+		// --async: `Prefer: respond-async` makes the server answer 202
+		// {run_id, status: IN_PROGRESS} as soon as the run row is durable,
+		// instead of holding the connection for the whole run. The receipt
+		// is what Inbox Retry and slash runs use; --wait can follow it.
+		async, _ := cmd.Flags().GetBool("async")
+		if async {
+			runClient = runClient.WithHeader("Prefer", "respond-async")
 		}
 		// Synchronous run — blocks on the agent (and grader loop); lift the
 		// per-call timeout above the 30s default.
@@ -668,12 +718,19 @@ var pipelineRunCmd = &cobra.Command{
 		// suggestions. Listing the workspace's routines costs
 		// one extra round-trip but only on the slow / failing
 		// path, which is exactly when the user wants help.
-		if resp.StatusCode == http.StatusNotFound {
-			if hint := suggestSimilarRoutineSlugs(client, ws, args[0]); hint != "" {
-				return cli.NotFoundf("routine %q not found — %s", args[0], hint)
-			}
-		}
 		if err := cli.CheckError(resp); err != nil {
+			// Only a 404 about the ROUTINE gets the did-you-mean treatment —
+			// the two strings the handler emits for a missing slug. The same
+			// status also answers "recipe version not found" for
+			// --pinned-version, and rewriting that into a slug hint would
+			// suggest the very slug the caller typed.
+			var apiErr *cli.APIError
+			if errors.As(err, &apiErr) && apiErr.Status == http.StatusNotFound &&
+				(apiErr.Detail == "pipeline not found" || apiErr.Detail == "routine not found") {
+				if hint := suggestSimilarRoutineSlugs(client, ws, args[0]); hint != "" {
+					return cli.NotFoundf("routine %q not found — %s", args[0], hint)
+				}
+			}
 			return err
 		}
 		// Pretty-print run result. Status colour is best done by the
@@ -711,6 +768,17 @@ var pipelineRunCmd = &cobra.Command{
 				// A deferred trigger has no run id yet — nothing to poll.
 				cli.PrintWarning("--wait ignored: a deferred run has no run id until it fires. Watch with: crewship routine watch " + args[0])
 			}
+			return nil
+		}
+		if result.Status == "IN_PROGRESS" {
+			// The async receipt: the run is durable and executing in the
+			// background; nothing about its outcome is known yet.
+			fmt.Printf("Run %s: IN_PROGRESS (started in the background)\n", result.RunID)
+			if waitForRun {
+				return waitForPipelineRun(cmd, client, result.RunID, waitTimeout)
+			}
+			fmt.Printf("  follow: crewship wait --routine %s\n", result.RunID)
+			fmt.Printf("  result: crewship routine result %s\n", result.RunID)
 			return nil
 		}
 		if result.Status == "DEDUPED" {
@@ -762,6 +830,35 @@ var pipelineRunCmd = &cobra.Command{
 	},
 }
 
+// printWaitpointHints prints the "paused at approval step" block the sync
+// run path prints, for a run seen parking while --wait polled it. The
+// token comes from the workspace waitpoint list filtered to this run;
+// best-effort — a lookup failure still names the step and the list
+// command, never hides the pause.
+func printWaitpointHints(client *cli.Client, runID, stepID string) {
+	fmt.Printf("  paused at approval step: %s\n", stepID)
+	token := ""
+	resp, err := client.Get(fmt.Sprintf("/api/v1/workspaces/%s/pipelines/waitpoints", client.GetWorkspaceID()))
+	if err == nil {
+		defer resp.Body.Close()
+		var rows []waitpointRow
+		if cli.CheckError(resp) == nil && json.NewDecoder(resp.Body).Decode(&rows) == nil {
+			for _, r := range rows {
+				if r.PipelineRunID == runID {
+					token = r.Token
+					break
+				}
+			}
+		}
+	}
+	if token == "" {
+		fmt.Println("  find the token: crewship routine waitpoints list")
+		return
+	}
+	fmt.Printf("  approve: crewship routine waitpoints approve %s --comment \"LGTM\"\n", token)
+	fmt.Printf("  reject:  crewship routine waitpoints reject %s\n", token)
+}
+
 // waitForPipelineRun blocks until the routine run reaches a terminal
 // status, printing status transitions to stderr and the final outcome to
 // stdout. Backs `routine run --wait` for the two receipts that used to
@@ -785,6 +882,15 @@ func waitForPipelineRun(cmd *cobra.Command, client *cli.Client, runID string, ti
 			lastStatus = d.Status
 			fmt.Fprintf(os.Stderr, "%s[wait]%s %s status=%s elapsed=%s\n",
 				cli.Dim, cli.Reset, runID, d.Status, time.Since(start).Truncate(time.Second))
+			if strings.EqualFold(d.Status, "waiting") {
+				// The run parked on an approval while we were polling (an
+				// --async start, or a DEDUPED original). The sync path
+				// prints the token and the approve/reject commands from
+				// the run response; a polled detail has no token, so look
+				// it up — the operator watching this terminal is the one
+				// who has to act.
+				printWaitpointHints(client, runID, d.CurrentStep)
+			}
 		}
 	})
 	if err != nil {
@@ -1143,6 +1249,9 @@ func init() {
 	pipelineSaveCmd.Flags().Int("max-consecutive-failures", 0, "circuit-breaker trip threshold for the schedule (default 5)")
 	pipelineSaveCmd.Flags().Bool("trigger-manual", false, "explicitly declare the routine has no trigger, instead of just omitting one")
 	pipelineSaveCmd.Flags().Bool("draft", false, "create the trigger disabled and raise one approval item instead of activating it immediately")
+	// StringArray, not StringSlice: a slice flag comma-splits its value,
+	// which would tear apart a JSON list or a comma-bearing string preset.
+	pipelineSaveCmd.Flags().StringArray("trigger-inputs", nil, "preset input for the --cron schedule as key=value (repeatable); the same save is how a 409 schedule_conflict on re-save is escaped")
 
 	pipelineRunCmd.Flags().String("inputs", "", "JSON inputs for the run (e.g. '{\"since\":\"yesterday\"}')")
 	pipelineRunCmd.Flags().String("invoking-crew", "", "crew_id to record as the invoker (cross-crew reuse audit)")
@@ -1156,6 +1265,9 @@ func init() {
 	pipelineRunCmd.Flags().Int("debounce-window", 0, "debounce window in seconds (default 30) — fires this long after the last trigger")
 	pipelineRunCmd.Flags().Int("debounce-max", 0, "max debounce extension in seconds (a continuously-retriggered key still fires by then)")
 	pipelineRunCmd.Flags().Int("priority", 0, "dispatch priority for deferred runs (higher fires first)")
+	pipelineRunCmd.Flags().String("fire-at", "", "one-time start: park the run until this RFC3339 instant (with offset), pinned to the recipe version that passed preflight; returns SCHEDULED. Cannot be combined with --delay/--ttl/--debounce-key")
+	pipelineRunCmd.Flags().Int("pinned-version", 0, "run this archived recipe version instead of HEAD (immediate or --fire-at starts only; 404 if the version does not exist)")
+	pipelineRunCmd.Flags().Bool("async", false, "send Prefer: respond-async — return the 202 {run_id, status: IN_PROGRESS} receipt as soon as the run is durable instead of waiting for it to finish; combine with --wait to poll it to a terminal status")
 	pipelineRunCmd.Flags().String("idempotency-key", "", "dedupe key — a duplicate key within the TTL window returns the original run as DEDUPED instead of executing again (sent as the Idempotency-Key header)")
 	pipelineRunCmd.Flags().Int("idempotency-ttl", 0, "dedupe window in seconds for --idempotency-key (0 = server default, 24h)")
 	pipelineRunCmd.Flags().Bool("wait", false, "block until the run reaches a terminal status — polls through WAITING approvals and DEDUPED originals instead of returning the receipt")
