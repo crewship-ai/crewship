@@ -136,32 +136,44 @@ const maxCompletionTokens = 1200
 // no new durable fact about themselves. An error is returned only when
 // something that should have worked did not.
 func (e *Extractor) Extract(ctx context.Context, cand consolidate.UserModelCandidate, prior string) (string, error) {
+	body, _, err := e.ExtractWithEvidence(ctx, cand, prior)
+	return body, err
+}
+
+// ExtractWithEvidence satisfies consolidate.UserModelEvidenceExtractor:
+// Extract, plus where each fact in the body came from (#1693).
+//
+// The evidence is exactly what Verify admitted — the quote it found in
+// the subject's own turn, the id of that turn, and the source the profile
+// admitted — one entry per rendered bullet. Render still drops it from the
+// file; the sweep records it beside the file instead.
+func (e *Extractor) ExtractWithEvidence(ctx context.Context, cand consolidate.UserModelCandidate, prior string) (string, []consolidate.UserModelEvidence, error) {
 	if e == nil || e.db == nil || e.resolve == nil || e.profile == nil {
-		return "", nil
+		return "", nil, nil
 	}
 	p := e.profile(ctx)
 	if !p.Writes() {
-		return "", nil
+		return "", nil, nil
 	}
 
 	turns, err := LoadTranscript(ctx, e.db, cand.WorkspaceID, cand.UserID,
 		e.now().Add(-e.lookback), e.maxTurns)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	if !HasSubjectTurns(turns) {
 		// Nothing the person said, so nothing is admissible. Skipping the
 		// model call here is not an optimisation for its own sake: it is
 		// the only answer a stated-only policy can give, and paying a
 		// model to produce it daily for every quiet operator is waste.
-		return "", nil
+		return "", nil, nil
 	}
 
 	provider, model, budget := e.resolve()
 	if provider == nil {
 		// The slot is unconfigured or unbuildable. "Feature off", not an
 		// error — a later fix to the wiring is picked up on the next sweep.
-		return "", nil
+		return "", nil, nil
 	}
 
 	// Bound the call. The sweep is one goroutine walking every operator in
@@ -181,12 +193,12 @@ func (e *Extractor) Extract(ctx context.Context, cand consolidate.UserModelCandi
 		Messages:  []llm.Message{{Role: llm.RoleUser, Content: BuildUserMessage(prior, turns)}},
 	})
 	if err != nil {
-		return "", fmt.Errorf("usermodel: complete: %w", err)
+		return "", nil, fmt.Errorf("usermodel: complete: %w", err)
 	}
 
 	cands, err := ParseCandidates(resp.Content)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	facts, refused := Verify(p, turns, cands)
 
@@ -213,7 +225,27 @@ func (e *Extractor) Extract(ctx context.Context, cand consolidate.UserModelCandi
 			"refused", len(refused),
 			"reasons", refusalReasons(refused))
 	}
-	return Render(p, facts), nil
+	return Render(p, facts), Evidence(facts), nil
+}
+
+// Evidence turns verified facts into the provenance the sweep stores
+// beside the file, in the same order Verify accepted them. It is the
+// part of a Fact that Render discards.
+func Evidence(facts []Fact) []consolidate.UserModelEvidence {
+	if len(facts) == 0 {
+		return nil
+	}
+	out := make([]consolidate.UserModelEvidence, 0, len(facts))
+	for _, f := range facts {
+		out = append(out, consolidate.UserModelEvidence{
+			Key:       f.Key,
+			Value:     f.Value,
+			Quote:     f.Quote,
+			MessageID: f.MessageID,
+			Source:    string(f.Source),
+		})
+	}
+	return out
 }
 
 // refusalReasons collapses refusals to a reason→count map for one log
@@ -239,7 +271,8 @@ func refusalReasons(rs []Refusal) map[string]int {
 // content: the file has a 1.5 KB cap read into every prompt, and doubling
 // each fact to carry its own provenance would halve how much a person can
 // be known by. That provenance is worth surfacing to the PERSON, which is
-// a store this file cannot be — see the user-model read/correct surface.
+// a store this file cannot be — Evidence hands it to the sweep, which
+// keeps it beside the file (#1693).
 func Render(p Profile, facts []Fact) string {
 	if len(facts) == 0 {
 		return ""
