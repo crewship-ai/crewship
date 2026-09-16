@@ -419,6 +419,7 @@ type pipelineResponse struct {
 	// (it parses the definition); list responses omit it. Best-effort: a
 	// malformed definition leaves it nil.
 	Manifest *pipeline.Manifest `json:"manifest,omitempty"`
+	Behavior *pipeline.Behavior `json:"behavior,omitempty"`
 	// Definition is included on the detail endpoint only — list
 	// responses omit it to keep payloads small.
 	Definition json.RawMessage `json:"definition,omitempty"`
@@ -462,6 +463,7 @@ func toPipelineResponse(p *pipeline.Pipeline, includeDefinition bool) pipelineRe
 		// already paying to parse + return the full definition.
 		if includeDefinition {
 			out.Manifest = dsl.ExtractManifest()
+			out.Behavior = pipeline.DescribeBehavior(dsl)
 		}
 	}
 	if includeDefinition {

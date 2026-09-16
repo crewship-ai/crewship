@@ -269,6 +269,64 @@ healthcheck (`/healthz`) reports healthy — typically within 10 seconds.
 `.env` and they persist across restarts because Compose reads `.env`
 each time the stack starts.
 
+### How the image is built
+
+The root `Dockerfile` is three stages: `frontend` (Node, builds the
+Next.js export), `backend` (Go, embeds that export into the `crewship`
+binary) and `runtime` (Alpine, the binary plus the `ENV` defaults in the
+table above). Both the compose file and the published images build the
+same file; the only inputs are five build-args — `VERSION`, `COMMIT` and
+`DATE` (what `crewship version` reports), and `SENTRY_DSN` /
+`NEXT_PUBLIC_SENTRY_DSN` (crash reporting, empty by default so a local
+build ships telemetry-disabled). A local build therefore reports
+`version: dev`, and `crewship self-update` refuses such a build.
+
+### Published images and how to verify one
+
+Published images live only at `ghcr.io/crewship-ai/crewship` (no Docker
+Hub mirror), in three channels:
+
+| Tag | Moves when | Use |
+|---|---|---|
+| `:vX.Y.Z`, `:vX.Y`, `:latest` | a clean release tag | production; `:latest` never points at a pre-release |
+| `:vX.Y.Z-beta.N` | a pre-release tag | opt-in testing |
+| `:nightly`, `:main-<sha>` | every verified `main` build | trunk testing; `:main-<sha>` is immutable, `:nightly` follows the newest |
+
+Every one of those tags is applied **after** the image passed the same
+gate: a Critical-severity CVE scan of the built image, a boot smoke of
+both `linux/amd64` and `linux/arm64` (the container starts, reports the
+expected commit and serves the embedded UI), and a keyless cosign
+signature over the multi-platform digest. A tag is only ever pointed at
+a digest that was scanned, smoked and signed.
+
+To check that yourself before deploying, verify the signature and pin
+the digest it names:
+
+```bash
+IMAGE=ghcr.io/crewship-ai/crewship:v0.1.0
+
+# 1. Signature: signed by this repo's release workflow via GitHub Actions OIDC.
+#    For :nightly / :main-<sha> use nightly\.yml in place of release\.yml.
+cosign verify "$IMAGE" \
+  --certificate-identity-regexp '^https://github\.com/crewship-ai/crewship/\.github/workflows/release\.yml@' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+
+# 2. Pin what was verified: the index digest, with one manifest per platform.
+docker buildx imagetools inspect "$IMAGE"      # prints Digest: sha256:… and the platform list
+DIGEST=$(docker buildx imagetools inspect "$IMAGE" --format '{{.Manifest.Digest}}')
+
+# 3. Smoke it the way CI did: the image knows which commit it is.
+docker run --rm "ghcr.io/crewship-ai/crewship@$DIGEST" version --format json
+```
+
+Deploy `ghcr.io/crewship-ai/crewship@sha256:…` rather than the tag, so a
+later re-tag cannot change what runs. The published SBOM and provenance
+attestations ride on the same digest (`docker buildx imagetools inspect
+--format '{{json .SBOM}}'`). Binaries and packages are verified
+differently — see [Verifying package signatures](#verifying-package-signatures)
+and, for tarballs, the `checksums.txt` cosign bundle in
+[Air-gapped installs](#air-gapped-offline-installs).
+
 ### PostgreSQL
 
 <Note>
@@ -388,10 +446,12 @@ copy the binary to your target host. The binary has no runtime fetch
 behavior — no embedded analytics, no auto-update — so once it's on
 disk you're done.
 
-For air-gapped Docker hosts, `docker save ghcr.io/crewship-ai/crewship:v0.1.0-beta.1`
-into a tarball on a connected machine, transfer, then `docker load`
-on the target. (The image publishes only to GHCR — there is no Docker Hub
-mirror, so the `ghcr.io/` prefix is required.)
+For air-gapped Docker hosts, verify the image on the connected machine
+first ([Published images and how to verify one](#published-images-and-how-to-verify-one)),
+then `docker save ghcr.io/crewship-ai/crewship@sha256:…` into a tarball,
+transfer, and `docker load` on the target. (The image publishes only to
+GHCR — there is no Docker Hub mirror, so the `ghcr.io/` prefix is
+required.)
 
 ## Related
 

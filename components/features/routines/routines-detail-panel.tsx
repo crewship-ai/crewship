@@ -46,6 +46,7 @@ import { isAgentless, type RoutineManifest } from "@/lib/routine-flow"
 // covered by usePipelines' WS subscription in the layout.
 
 export interface RoutineDetail {
+  behavior?: import("@/lib/routine-behavior").RoutineBehavior
   id: string
   slug: string
   name: string

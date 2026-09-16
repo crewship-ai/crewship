@@ -71,7 +71,12 @@ export function RoutineInputFormBuilder({
     while (inputs.some((i) => i.name === `input_${number}`)) number++
     onChange([
       ...inputs,
-      { name: `input_${number}`, label: "New question", type: "string", widget: "text" },
+      {
+        name: `input_${number}`,
+        label: "New question",
+        type: "string",
+        widget: "text",
+      },
     ])
     setEditing(inputs.length)
   }
@@ -162,6 +167,9 @@ export function RoutineInputFormBuilder({
                               : undefined,
                           allow_custom: undefined,
                           default: undefined,
+                          min: undefined,
+                          max: undefined,
+                          format: undefined,
                         })
                       }}
                     >
@@ -190,6 +198,22 @@ export function RoutineInputFormBuilder({
                     </>
                   )}
                 </p>
+                {input.type === "string" && !input.options?.length && (
+                  <label className="block space-y-1 text-sm">
+                    <span>Input format</span>
+                    <select
+                      className="w-full rounded-xl border bg-card p-2"
+                      value={input.format ?? ""}
+                      onChange={(e) => update(index, { format: e.target.value || undefined })}
+                    >
+                      <option value="">Any text</option>
+                      <option value="absolute_path">Absolute path (syntax only)</option>
+                    </select>
+                    <span className="text-xs text-muted-foreground">
+                      A path format does not check whether files exist or grant access.
+                    </span>
+                  </label>
+                )}
                 <label className="block space-y-1 text-sm">
                   <span>Help text</span>
                   <Input

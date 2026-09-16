@@ -105,6 +105,18 @@ Create a new backup bundle. Runs inline (seconds to minutes); no async job queue
   New bundles are written at `format_version` **3** (`backup.FormatVersion`, bumped v2→v3 on 2026-08-03 when the payload gained the `crew/<slug>` section carrying the crew and per-agent memory trees). Restore enforces an N-2 compatibility window: this binary reads `format_version` in `[MinSupportedFormatVersion, FormatVersion]` = `[1, 3]`. A bundle newer than the reader returns `ErrFormatTooNew` (400); older than the window returns `ErrFormatTooOld` (400).
 </Note>
 
+### Page projects
+
+A workspace-scope bundle whose `page_project_*` rows reference source
+projects, compiled artifacts or Git checkpoints carries them in a
+`page-projects/` section of the sealed payload — see the
+[bundle layout](/guides/backup#bundle-layout). It is collected under the page
+project store's shared lease, so the rows and the files agree; a referenced
+source or artifact missing on disk, or an instance without
+`CREWSHIP_PAGE_PROJECTS_PATH` while the rows reference one, fails the create
+with `500` rather than writing a bundle that cannot be restored. The section
+is absent, not empty, when nothing references it.
+
 ### Errors
 
 | Status | Condition |
@@ -113,7 +125,7 @@ Create a new backup bundle. Runs inline (seconds to minutes); no async job queue
 | `401` | Missing or invalid auth. |
 | `403` | Role < ADMIN. |
 | `409` | Another backup already holds the lock (`ErrLockHeld`) or an agent run is active (`ErrAgentRunning`). |
-| `500` | DB dump, tar, or encryption failure. |
+| `500` | DB dump, tar, or encryption failure — including a Page project source or artifact the rows reference and the disk does not hold. |
 
 Audit action: `backup.create`.
 
@@ -414,7 +426,7 @@ Neither field causes the restore to fail or roll back; both are reported so the 
 | `403` | Bundle is not bound to the caller's current workspace (by id or slug) and the instance already has at least one workspace. The cross-tenant write guard (`allowRestore`) refuses the restore; restore on the source instance or use a fresh instance for cross-tenant DR. |
 | `404` | Bundle file does not exist on disk (`ErrBundleNotFound`). |
 | `409` | `ErrNoOpRestore` — bundle would insert zero rows; treated as "nothing to do". |
-| `500` | Unexpected failure during extraction / replay, or the cross-tenant authorization probe failed. |
+| `500` | Unexpected failure during extraction / replay, or the cross-tenant authorization probe failed. Also a Page projects section that does not verify: `page_project_*` rows with no `page-projects/` section behind them (an incomplete bundle), a section the rows do not reference, a checksum or checkpoint mismatch, or no `CREWSHIP_PAGE_PROJECTS_PATH` on this instance. The section is verified in a staging directory before the database transaction, on a `dry_run` too, and applied under an exclusive lease before the commit. |
 
 Audit action: `backup.restore` (or `backup.restore.dry_run` for `dry_run: true`).
 
