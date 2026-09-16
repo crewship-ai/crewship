@@ -170,6 +170,7 @@ func slashFormSchemaForInputs(inputs []pipeline.InputSpec) []slashFormField {
 			Label:       in.Label,
 			Type:        routineInputWidget(in),
 			Min:         in.Min,
+			Format:      in.Format,
 			Max:         in.Max,
 			Options:     in.Options,
 			AllowCustom: in.AllowCustom,

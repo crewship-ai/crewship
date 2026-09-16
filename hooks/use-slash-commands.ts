@@ -14,6 +14,7 @@ import { apiFetch } from "@/lib/api-fetch"
  */
 
 export interface SlashFormField {
+  format?: string
   options?: string[]
   allow_custom?: boolean
   placeholder?: string

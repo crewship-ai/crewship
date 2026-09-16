@@ -319,7 +319,7 @@ describe("routine run detail — one page, one order (#2519)", () => {
     expect(order(error, screen.getByTestId("run-technical-details"))).toBe(-1)
 
     const next = screen.getByTestId("run-next-step")
-    expect(next.textContent).toBe("What you can do: fix the step in Edit recipe, then run again.")
+    expect(next.textContent).toBe("If the recipe caused the problem, review it in Edit recipe, then run again.")
     expect(order(error, next)).toBe(-1)
     expect(screen.getByRole("link", { name: "Edit recipe" }).getAttribute("href")).toBe(
       "/routines?slug=monthly-billing&view=edit",
