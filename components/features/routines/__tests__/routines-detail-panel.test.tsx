@@ -147,29 +147,49 @@ async function renderPanel() {
   await waitFor(() => expect(screen.getByText("Daily report")).toBeInTheDocument())
 }
 
-describe("<RoutinesDetailPanel> — header Cancel button", () => {
+/** Stop lives in the live-run banner and asks first. */
+async function stopFromBanner() {
+  fireEvent.click(screen.getByRole("button", { name: "Stop" }))
+  expect(await screen.findByText("Stop this run?")).toBeInTheDocument()
+  fireEvent.click(screen.getByRole("button", { name: "Stop run" }))
+}
+
+describe("<RoutinesDetailPanel> — live-run banner and Stop", () => {
   beforeEach(() => {
     h.records = []
     mockApi()
   })
 
-  it("keeps Cancel disabled when no run is active", async () => {
+  it("shows no banner and no Stop when no run is active", async () => {
     await renderPanel()
-    expect(screen.getByRole("button", { name: "Cancel" })).toBeDisabled()
+    expect(screen.queryByTestId("routine-live-run-banner")).toBeNull()
+    expect(screen.queryByRole("button", { name: "Stop" })).toBeNull()
+    expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull()
   })
 
-  it("cancels the single active run and toasts success", async () => {
+  it("names a waiting run and offers Decide, which opens the run", async () => {
+    h.records = [{ ...activeRecord("run-wait-1"), status: "waiting" }]
+    const onRunStarted = vi.fn()
+    render(<RoutinesDetailPanel {...defaultProps} onRunStarted={onRunStarted} />)
+    await waitFor(() => expect(screen.getByText("Daily report")).toBeInTheDocument())
+    const banner = screen.getByTestId("routine-live-run-banner")
+    expect(banner).toHaveTextContent("A run is waiting for your decision")
+    fireEvent.click(screen.getByRole("button", { name: "Decide" }))
+    expect(onRunStarted).toHaveBeenCalledWith("run-wait-1")
+  })
+
+  it("stops the active run after confirming and toasts Stop requested", async () => {
     h.records = [activeRecord("run-live-1")]
     await renderPanel()
-    const btn = screen.getByRole("button", { name: "Cancel" })
-    expect(btn).not.toBeDisabled()
-    fireEvent.click(btn)
+    expect(screen.getByTestId("routine-live-run-banner")).toHaveTextContent("A run is in progress")
+    expect(screen.getByRole("button", { name: "Watch" })).toBeInTheDocument()
+    await stopFromBanner()
     await waitFor(() => {
       expect(apiFetch).toHaveBeenCalledWith(
         "/api/v1/workspaces/ws-1/pipelines/runs/run-live-1/cancel",
         expect.objectContaining({ method: "POST" }),
       )
-      expect(toast.success).toHaveBeenCalled()
+      expect(toast.success).toHaveBeenCalledWith("Stop requested", expect.anything())
       expect(h.refreshRecords).toHaveBeenCalled()
     })
   })
@@ -186,10 +206,10 @@ describe("<RoutinesDetailPanel> — header Cancel button", () => {
       } as unknown as Response,
     })
     await renderPanel()
-    fireEvent.click(screen.getByRole("button", { name: "Cancel" }))
+    await stopFromBanner()
     await waitFor(() => {
       expect(toast.error).toHaveBeenCalledWith(
-        "Cancel failed",
+        "Stop failed",
         expect.objectContaining({
           description: expect.stringMatching(/permission/i),
         }),
@@ -486,3 +506,71 @@ it.each(["missing run ID", "unreadable JSON"])(
     expect(key(1)).toBe(key(0))
   },
 )
+
+describe("<RoutinesDetailPanel> — a slug with a draft and no published routine", () => {
+  // A copy, a draft the lead saved, or one saved from the CLI: the routine
+  // does not exist yet (404), but its draft does. The page is built from the
+  // draft so it can be read and published; Run waits for the first version.
+  const notFound = () =>
+    ({ ok: false, status: 404, json: async () => ({ error: "not found" }), text: async () => "not found" }) as unknown as Response
+  const DRAFT = {
+    id: "drf_copy",
+    slug: "daily-report-copy",
+    revision: 1,
+    base_pipeline_id: "",
+    base_revision: 0,
+    updated_at: "2026-09-15T10:00:00Z",
+    document: {
+      slug: "daily-report-copy",
+      name: "Daily report (copy)",
+      description: "Copied from Daily report.",
+      definition: { name: "daily-report-copy", display_name: "Daily report (copy)", steps: [{ id: "a", type: "transform", transform: { input: "x", expression: "." } }] },
+      author_crew_id: "crew-1",
+    },
+  }
+
+  beforeEach(() => {
+    h.records = []
+    vi.mocked(apiFetch).mockImplementation(async (url) => {
+      const u = String(url)
+      if (u.endsWith("/pipelines/daily-report-copy/draft")) return okJSON(DRAFT)
+      if (u.endsWith("/pipelines/daily-report-copy")) return notFound()
+      return okJSON([])
+    })
+  })
+
+  it("renders the draft as the routine, disables Run and offers Publish", async () => {
+    render(<RoutinesDetailPanel {...defaultProps} slug="daily-report-copy" />)
+    expect(await screen.findByText("Daily report (copy)")).toBeInTheDocument()
+    expect(screen.queryByText(/fetch routine: 404/)).toBeNull()
+    const run = screen.getByRole("button", { name: /^Run$/ })
+    expect(run).toBeDisabled()
+    expect(run.closest("span")).toHaveAttribute("title", expect.stringMatching(/Publish the draft first/))
+    expect(screen.getByRole("button", { name: /Publish draft r1/ })).toBeInTheDocument()
+  })
+
+  it("still reports a real 404 when there is no draft either", async () => {
+    vi.mocked(apiFetch).mockImplementation(async (url) => {
+      const u = String(url)
+      if (u.endsWith("/draft")) return okJSON({ id: "", slug: "gone", revision: 0, base_pipeline_id: "", base_revision: 0, document: {} })
+      if (u.endsWith("/pipelines/gone")) return notFound()
+      return okJSON([])
+    })
+    render(<RoutinesDetailPanel {...defaultProps} slug="gone" />)
+    expect(await screen.findByText(/fetch routine: 404/)).toBeInTheDocument()
+  })
+
+  it.each([403, 500, "network"])("preserves a draft lookup failure (%s) instead of reporting not found", async (status) => {
+    vi.mocked(apiFetch).mockImplementation(async (url) => {
+      if (String(url).endsWith("/draft")) {
+        if (status === "network") throw new Error("Draft network unavailable")
+        return { ok: false, status, json: async () => ({ error: `Draft request failed: ${status}` }) } as Response
+      }
+      if (String(url).endsWith("/pipelines/gone")) return notFound()
+      return okJSON([])
+    })
+    render(<RoutinesDetailPanel {...defaultProps} slug="gone" />)
+    expect(await screen.findByText(status === "network" ? "Draft network unavailable" : `Draft request failed: ${status}`)).toBeInTheDocument()
+    expect(screen.queryByText(/fetch routine: 404/)).toBeNull()
+  })
+})

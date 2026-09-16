@@ -13,6 +13,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/pipeline"
 	"github.com/crewship-ai/crewship/internal/runverdict"
+	"github.com/crewship-ai/crewship/internal/scrubber"
 )
 
 // PipelineHandler exposes the workspace-scoped HTTP surface for
@@ -42,6 +43,10 @@ type PipelineHandler struct {
 	// internal token are known; nil → crewship steps fail closed with a
 	// wiring hint (they are pure side effect — silence would be worse).
 	crewshipActions pipeline.CrewshipActions
+	// crewFiles reads the author crew's shared volume for the routine
+	// detail's `files` member (pipeline_files.go). nil → every declared
+	// file is reported present:false; the detail never fails on it.
+	crewFiles crewFileReader
 	// trustGrantStore backs the standing-approval endpoints. Assigned by
 	// NewPipelineHandler before the handler serves anything; nil only in
 	// tests that build this struct as a literal, where trustGrants()
@@ -420,9 +425,72 @@ type pipelineResponse struct {
 	// malformed definition leaves it nil.
 	Manifest *pipeline.Manifest `json:"manifest,omitempty"`
 	Behavior *pipeline.Behavior `json:"behavior,omitempty"`
+	// Draft is the unpublished revision held in pipeline_drafts for this
+	// slug (#2560). Present on list and detail only while a draft row
+	// exists, so the UI can say "Published v3 · Draft r2" and tell an
+	// operator that Run will not use the draft. UpdatedBy is the stored
+	// value — the client renders "you" when it matches the viewer.
+	Draft *pipelineDraftRef `json:"draft,omitempty"`
+	// Files lists what the routine runs — every script path plus file
+	// paths under /crew/shared in script args/env — with presence, size,
+	// timestamp and header comment read from the author crew's share when
+	// reachable (pipeline_files.go). Detail only; `[]` when nothing is
+	// declared. A pointer so the list can omit it while the detail always
+	// carries an array, never null.
+	Files *[]pipeline.FileRef `json:"files,omitempty"`
 	// Definition is included on the detail endpoint only — list
 	// responses omit it to keep payloads small.
 	Definition json.RawMessage `json:"definition,omitempty"`
+}
+
+// pipelineDraftRef is the `draft` member of a routine response — the
+// identity of the pending draft, not its document.
+type pipelineDraftRef struct {
+	ID        string `json:"id"`
+	Revision  int    `json:"revision"`
+	UpdatedAt string `json:"updated_at"`
+	UpdatedBy string `json:"updated_by"`
+}
+
+// enrichPipelineDrafts attaches the pending draft (if any) to each row from
+// one pipeline_drafts query for the workspace — narrowed to the slug when
+// there is a single row, as on the detail path. Best-effort: a query error
+// logs and leaves every row without a draft.
+func enrichPipelineDrafts(ctx context.Context, db *sql.DB, logger *slog.Logger, workspaceID string, rows []pipelineResponse) {
+	if len(rows) == 0 || db == nil {
+		return
+	}
+	q := `SELECT slug, id, revision, updated_at, updated_by FROM pipeline_drafts WHERE workspace_id = ?`
+	args := []any{workspaceID}
+	if len(rows) == 1 {
+		q += ` AND slug = ?`
+		args = append(args, rows[0].Slug)
+	}
+	res, err := db.QueryContext(ctx, q, args...)
+	if err != nil {
+		logger.Warn("pipeline drafts lookup", "error", err)
+		return
+	}
+	defer res.Close()
+	bySlug := map[string]pipelineDraftRef{}
+	for res.Next() {
+		var slug string
+		var d pipelineDraftRef
+		if err := res.Scan(&slug, &d.ID, &d.Revision, &d.UpdatedAt, &d.UpdatedBy); err != nil {
+			logger.Warn("pipeline drafts lookup: scan", "error", err)
+			continue
+		}
+		bySlug[slug] = d
+	}
+	if err := res.Err(); err != nil {
+		logger.Warn("pipeline drafts lookup: rows", "error", err)
+	}
+	for i := range rows {
+		if d, ok := bySlug[rows[i].Slug]; ok {
+			ref := d
+			rows[i].Draft = &ref
+		}
+	}
 }
 
 func toPipelineResponse(p *pipeline.Pipeline, includeDefinition bool) pipelineResponse {
@@ -635,6 +703,8 @@ func definitionHashHex(def []byte) string {
 	return pipeline.DefinitionHash(def)
 }
 
+var pipelineErrorScrubber = scrubber.New()
+
 // truncateErrorForList sanitizes an error_message before exposing it
 // through the run-records list endpoint. Caller-supplied + executor-
 // supplied error strings can carry: file paths, stack frames, half-
@@ -643,6 +713,8 @@ func definitionHashHex(def []byte) string {
 // need that detail — operators drill into journal_entries via the
 // /runs?include_steps=1 endpoint when they want the full picture.
 func truncateErrorForList(s string) string {
+	// Redact before truncating: cutting a credential first can defeat matching.
+	s = pipelineErrorScrubber.Scrub(s)
 	if s == "" {
 		return ""
 	}

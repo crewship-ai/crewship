@@ -131,30 +131,37 @@ describe("<RoutinesExplorer> live rows", () => {
     h.runs = []
   })
 
-  it("shows no live sub-line when the routine has no active run", () => {
+  it("shows the run count and no live chip when the routine has no active run", () => {
     render(<RoutinesExplorer routines={[pipeline({})]} {...EXPLORER_PROPS} />)
-    expect(screen.queryByText(/ask-casey/)).not.toBeInTheDocument()
-    expect(screen.queryByText(/awaiting approval/)).not.toBeInTheDocument()
+    expect(screen.queryByTestId("routine-live-chip")).toBeNull()
+    expect(screen.queryByText(/Waiting for your decision/)).not.toBeInTheDocument()
   })
 
-  it("renders the current step + elapsed sub-line for a running routine", () => {
+  it("keeps the row on one line: no purpose under the name", () => {
+    render(<RoutinesExplorer routines={[pipeline({ description: "Asks Casey for a daily report." })]} {...EXPLORER_PROPS} />)
+    // The purpose lives in the tooltip and on the page, not under every name.
+    expect(screen.queryByText("Asks Casey for a daily report.")).toBeNull()
+  })
+
+  it("replaces the run count with a Running chip, without a stopwatch", () => {
     h.runs = [activeRun({})]
-    // Real time passes between fixture and render. Against a live clock
-    // this alone flips "12.0s" to "12.1s"; the frozen clock absorbs it.
     sleepRealMs(60)
     render(<RoutinesExplorer routines={[pipeline({})]} {...EXPLORER_PROPS} />)
-    const sub = screen.getByText(/▶ Running/)
-    expect(sub).toBeInTheDocument()
-    // Elapsed rides along in the same sub-line (12s → "12.0s").
-    expect(sub.textContent).toMatch(/·\s*12\.0s/)
+    const chip = screen.getByTestId("routine-live-chip")
+    expect(chip).toHaveTextContent("Running")
+    // No elapsed time: a number changing every second beside the name is
+    // what made the column messy.
+    expect(chip.textContent).not.toMatch(/\d+(\.\d+)?\s*s$/)
+    expect(screen.queryByText(/ask-casey/)).not.toBeInTheDocument()
   })
 
-  it("renders the amber awaiting-approval sub-line for a parked routine", () => {
-    h.runs = [activeRun({ status: "waiting" })]
+  it("shows a Waiting chip for a parked routine", () => {
+    h.runs = [activeRun({ status: "waiting", started_at: new Date(NOW - 4 * 60_000 - 500).toISOString() })]
     render(<RoutinesExplorer routines={[pipeline({})]} {...EXPLORER_PROPS} />)
-    expect(screen.getByText(/awaiting approval/)).toBeInTheDocument()
-    // The running-step form must not render for a parked run.
-    expect(screen.queryByText(/ask-casey/)).not.toBeInTheDocument()
+    const chip = screen.getByTestId("routine-live-chip")
+    expect(chip).toHaveTextContent("Waiting")
+    expect(chip.textContent).not.toMatch(/ago|\d\.\ds/)
+    expect(screen.queryByText(/awaiting approval/)).not.toBeInTheDocument()
   })
 
   it("only marks the routine whose slug matches the active run", () => {

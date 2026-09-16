@@ -1025,7 +1025,8 @@ Invokes a saved pipeline. Returns synchronously with the full `RunResult`; for l
 | Header | Description |
 |---|---|
 | `Idempotency-Key` | Dedupes redeliveries within 24h -- a second request with the same key returns the original run with `status="DEDUPED"`. Falls through silently when the idempotency store isn't wired. |
-| `X-Crewship-Invoking-Crew` / `X-Crewship-Invoking-Agent` | Injected by the sidecar when an in-container agent triggers the run |
+
+Runs started on this route are recorded as user-driven: `invoking_user_id` is the authenticated caller and `invoking_crew_id` / `invoking_agent_id` are empty. The route does not read any `X-Crewship-Invoking-*` header -- a JWT or CLI-token caller has no verified crew or agent identity, and a header would only let a member attribute the run (and the "From" crew on any approval card it raises) to a crew of their choosing. Agent-invoked runs are attributed through the sidecar's `run_routine` tool, whose identity fields are checked server-side against the internal token's crew binding and the agents table.
 
 **Response:** `200 OK` -- `RunResult`.
 

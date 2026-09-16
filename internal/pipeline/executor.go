@@ -1361,7 +1361,6 @@ func (e *Executor) runDSL(ctx context.Context, in RunInput, depth int) (result *
 			// resumed marker instead of a second run.started.
 			emit.emitRunResumed(ctx, in.Mode, len(in.restoredOutputs), len(dsl.Steps), in.resumeReason)
 		} else {
-			emit.emitRunStarted(ctx, in.Mode, fmt.Sprintf("%v", inputsForCtx), len(dsl.Steps))
 			// Persist the run row alongside the journal event when
 			// the RunStore is wired. Top-level only — nested
 			// call_pipeline runs reuse the parent's row id rather
@@ -1373,6 +1372,8 @@ func (e *Executor) runDSL(ctx context.Context, in RunInput, depth int) (result *
 			if startErr := e.persistRunStart(ctx, in, runID, pipelineID, pipelineSlug, inputsForCtx, startedAt); startErr != nil {
 				return nil, startErr
 			}
+			// Live consumers refetch immediately; publish only after the row is readable.
+			emit.emitRunStarted(ctx, in.Mode, fmt.Sprintf("%v", inputsForCtx), len(dsl.Steps))
 		}
 		// Deferred terminal write — captures result via closure so
 		// every return path (linear / DAG / cost-cap / retry-

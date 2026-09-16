@@ -229,7 +229,7 @@ test.describe("Run a routine with its inputs — routines detail page", () => {
     await expect(dialog).toBeVisible({ timeout: TIMEOUT })
 
     await dialog.getByLabel(/obdobi/i).fill(period)
-    await dialog.getByRole("button", { name: /^Run$/ }).click()
+    await dialog.getByRole("button", { name: /^Run now$/ }).click()
     await expect(dialog).toBeHidden({ timeout: TIMEOUT })
 
     // The run's own output is the assertion. The routine echoes
@@ -259,7 +259,7 @@ test.describe("Run a routine with its inputs — routines detail page", () => {
     const dialog = page.getByRole("dialog")
     await expect(dialog).toBeVisible({ timeout: TIMEOUT })
     await dialog.getByLabel(/obdobi/i).fill(uniquePeriod())
-    await dialog.getByRole("button", { name: /^Run$/ }).click()
+    await dialog.getByRole("button", { name: /^Run now$/ }).click()
     await expect(dialog).toBeHidden({ timeout: TIMEOUT })
 
     // Starting now opens the run detail. Follow its actual Activity link so

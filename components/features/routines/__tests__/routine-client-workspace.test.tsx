@@ -81,10 +81,12 @@ describe("client routine workspace", () => {
     }
     h.dsl = null
     render(<RoutineRunDetail workspaceId="ws" runId="run_1" />)
-    expect(screen.getByText("Connection lost").parentElement).toHaveTextContent(
-      "Name unavailable",
-    )
-    expect(screen.getByText("original_step")).toBeVisible()
+    // The raw error leads the banner (no server projection to replace it)
+    // and is repeated in Technical details.
+    const error = screen.getByRole("alert")
+    expect(error).toHaveTextContent("Connection lost")
+    expect(error.parentElement).toHaveTextContent("Name unavailable")
+    expect(screen.getAllByText("original_step")[0]).toBeVisible()
     expect(screen.queryByText("new-head")).not.toBeInTheDocument()
   })
   it("shows the error and named failed step together without opening technical details", () => {
@@ -98,7 +100,8 @@ describe("client routine workspace", () => {
       steps: [{ id: "internal_probe", name: "Check the customer service", type: "http" }],
     }
     render(<RoutineRunDetail workspaceId="ws" runId="run_1" />)
-    const error = screen.getByText("Service did not answer")
+    const error = screen.getByRole("alert")
+    expect(error).toHaveTextContent("Service did not answer")
     expect(error).toBeVisible()
     expect(error.closest("details")).toBeNull()
     expect(error.parentElement).toHaveTextContent("Check the customer service")
@@ -115,7 +118,7 @@ describe("client routine workspace", () => {
     expect(await screen.findByRole("heading", { name: "Service report" })).toBeInTheDocument()
     expect(screen.getByText("Recorded files")).toBeInTheDocument()
     expect(screen.queryByTestId("map")).not.toBeInTheDocument()
-    fireEvent.click(screen.getByRole("button", { name: "map" }))
+    fireEvent.click(screen.getByRole("button", { name: /^map$/ }))
     expect(screen.getByTestId("map")).toHaveTextContent("historical-step")
     expect(screen.getByTestId("map")).not.toHaveTextContent("new-head")
   })
@@ -128,12 +131,12 @@ describe("client routine workspace", () => {
       error_message: "",
     }
     render(<RoutineRunDetail workspaceId="ws" runId="run_1" />)
-    fireEvent.click(screen.getByRole("button", { name: "Stop run" }))
+    fireEvent.click(screen.getAllByRole("button", { name: /^Stop$/ })[0])
     expect(
       screen.getByText(/Actions that already happened are not rolled back/),
     ).toBeInTheDocument()
     expect(h.api.mock.calls.filter(([, options]) => options?.method === "POST")).toHaveLength(0)
-    fireEvent.click(screen.getByRole("button", { name: "Stop this run" }))
+    fireEvent.click(screen.getByRole("button", { name: /^Stop this run$/ }))
     await waitFor(() =>
       expect(h.api).toHaveBeenCalledWith("/api/v1/workspaces/ws/pipelines/runs/run_1/cancel", {
         method: "POST",
@@ -155,7 +158,7 @@ describe("client routine workspace", () => {
     expect(
       document.querySelector('[data-step-id="historical-step"] > summary'),
     ).toHaveTextContent("Ask an agent")
-    fireEvent.click(screen.getByRole("button", { name: "map" }))
+    fireEvent.click(screen.getByRole("button", { name: /^map$/ }))
     expect(screen.getByTestId("map")).toHaveTextContent("historical-step")
   })
   it("keeps unavailable step evidence distinct from no output", () => {
@@ -186,7 +189,7 @@ describe("client routine workspace", () => {
         }}
       />,
     )
-    expect(screen.getByText("Only if")).toBeInTheDocument()
+    expect(screen.getByTestId("routine-step-only")).toHaveTextContent("Only when inputs.enabled")
     expect(screen.getAllByText("Runs after: fetch").length).toBeGreaterThan(0)
     expect(screen.queryByText(/Ready to run/)).not.toBeInTheDocument()
   })

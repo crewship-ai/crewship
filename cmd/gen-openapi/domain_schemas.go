@@ -65,7 +65,19 @@ func executionSchemaComponents() map[string]any {
 		// outcome (§9.6, work package B6, #2349) — the routing decision, empty
 		// for a non-terminal run or one that predates the column.
 		"outcome": str(),
+		// failure (#2560) — present only on a failed/interrupted run or a
+		// FAILED outcome: the engine error classified into a kind with a
+		// templated summary, plus which top-level steps kept an output and
+		// which never ran. error_message / failed_at_step stay raw.
+		"failure": refOrString("RunFailure"),
 	})
+	runFailure := obj(map[string]any{
+		"kind": map[string]any{"type": "string", "enum": []string{
+			"checker_rejected", "validation_failed", "transform_input", "timeout", "cancelled",
+			"missing_credential", "missing_integration", "http_status", "script_exit", "cost_cap", "unknown"}},
+		"step_id": str(), "step_name": str(), "summary": str(),
+		"kept_step_ids": arr(str()), "not_done_step_ids": arr(str()),
+	}, "kind", "step_id", "step_name", "summary", "kept_step_ids", "not_done_step_ids")
 	runRecord := obj(map[string]any{
 		"id": str(), "pipeline_id": str(), "pipeline_slug": str(), "status": str(), "mode": str(),
 		"started_at": timeString(), "ended_at": timeString(), "current_step_id": str(), "output": str(),
@@ -84,7 +96,12 @@ func executionSchemaComponents() map[string]any {
 	})
 	schedule := obj(map[string]any{
 		"id": str(), "workspace_id": str(), "name": str(), "target_pipeline_id": str(), "target_pipeline_slug": str(),
-		"target_pipeline_version": integer(), "cron_expr": str(), "timezone": str(), "inputs": anyMap, "enabled": boolean(),
+		"target_pipeline_version": integer(),
+		// effective_version / version_pinned (#2560): the version a fire
+		// would run now — the pin, else the target's head, null when the
+		// target is gone — and whether it comes from a pin.
+		"effective_version": map[string]any{"type": "integer", "nullable": true}, "version_pinned": boolean(),
+		"cron_expr": str(), "timezone": str(), "inputs": anyMap, "enabled": boolean(),
 		"last_run_at": timeString(), "last_status": str(), "last_run_id": str(), "next_run_at": timeString(),
 		"wake_pipeline_id": str(), "wake_pipeline_slug": str(), "wake_inputs": anyMap, "wake_fail_closed": boolean(),
 		"wake_check_count": integer(), "wake_fire_count": integer(), "last_wake_at": timeString(), "last_wake_status": str(),
@@ -134,7 +151,7 @@ func executionSchemaComponents() map[string]any {
 	}}
 
 	return map[string]any{
-		"RunResult": runResult, "DryRunStep": dryRunStep, "DryRunResult": dryRunResult, "PipelineRun": pipelineRun, "PipelineRunList": obj(map[string]any{"rows": arr(refOrString("PipelineRun")), "count": integer()}), "ActiveRunList": arr(activeRun),
+		"RunResult": runResult, "DryRunStep": dryRunStep, "DryRunResult": dryRunResult, "PipelineRun": pipelineRun, "RunFailure": runFailure, "PipelineRunList": obj(map[string]any{"rows": arr(refOrString("PipelineRun")), "count": integer()}), "ActiveRunList": arr(activeRun),
 		"RunRecord": runRecord, "RunRecordList": arr(refOrString("RunRecord")), "PipelineRunTree": arr(obj(map[string]any{"id": str(), "parent_id": str(), "pipeline_slug": str(), "status": str(), "triggered_via": str(), "cost_usd": number()})),
 		"RunLogEntry": obj(map[string]any{"ts": timeString(), "level": str(), "message": str(), "type": str()}), "RunLogList": arr(refOrString("RunLogEntry")),
 		"Schedule": schedule, "ScheduleList": arr(refOrString("Schedule")), "SchedulePreview": schedulePreview, "RoutineState": obj(map[string]any{"slug": str(), "buckets": arr(refOrString("StateBucket"))}),

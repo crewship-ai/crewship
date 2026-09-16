@@ -603,6 +603,8 @@ func deriveRunOutcome(status RunStatus, output, errorMessage string, hasOutcomeC
 // MarkTerminal commits the final state. Validates the status is
 // actually terminal so a programmer can't accidentally pass "running".
 func (s *RunStore) MarkTerminal(ctx context.Context, in MarkTerminalInput) error {
+	// Persist a redacted diagnostic; leave the caller's in-memory result intact.
+	in.ErrorMessage = scrubStepOutput(in.ErrorMessage)
 	switch in.Status {
 	case RunStatusCompleted, RunStatusFailed, RunStatusCancelled, RunStatusInterrupted, RunStatusDryRunOK:
 	default:

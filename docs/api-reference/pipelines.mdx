@@ -108,6 +108,44 @@ configured signing secret adds HMAC verification. Accepted dispatches return
 `202`; invalid signatures return `401`, rate limits return `429`, and an
 inactive target returns `409`.
 
+## Draft and files
+
+List rows and the single-routine detail carry a `draft` object while an
+unpublished revision exists in the drafts store for the slug — absent
+otherwise, so a client can test for the key. `updated_by` is the stored user
+id; there is no lookup.
+
+```json
+"draft": { "id": "drf_…", "revision": 2, "updated_at": "2026-09-15T10:31:00Z", "updated_by": "usr_…" }
+```
+
+The detail alone carries `files`: what the routine runs, always an array
+(`[]` when nothing is declared). Sources, in order: every `script.path`
+(routine hooks, step hooks and `foreach` bodies included), then paths under
+`/crew/shared` found in `script.args` / `script.env` values that name a file.
+
+```json
+"files": [
+  { "path": "scripts/ledger-post.go", "language": "go", "interpreter": "go run",
+    "step_ids": ["post"], "description": "Posts one invoice to the ERP ledger",
+    "size_bytes": 4120, "updated_at": "2026-09-15T09:30:00Z", "present": true,
+    "status": "present" }
+]
+```
+
+`language` is the extension when it is one of `go py ts js sh bash yaml yml
+json md sql`, else empty; `interpreter` is `script.interpreter` or the one the
+runner infers from the extension. `present`, `size_bytes`, `updated_at` and
+`description` (the file's first comment lines, at most 200 characters) come
+from the author crew's shared volume through the same reader the crew Files
+panel uses. `status` says what that check established: `present` (listed on
+the share), `missing` (the share was listed and the path is not on it) or
+`unverified` (the share could not be listed — no author crew, container or
+volume unavailable — or the per-request budget of 25 checked files ran out
+first). `present` is the boolean shorthand of `status: "present"`. Only
+`missing` means the file has to be put on the share; `unverified` rows carry
+no size, time or description, and a file can never fail the detail request.
+
 ## Run payload
 
 `run` and `dry_run` accept:
@@ -262,6 +300,33 @@ at all — an `agentless: true` probe, or one whose steps are only `script` / `t
 recorded `SUCCEEDED` with an empty `error_message` instead of being flagged for a
 hand-off it was never able to make. Empty on a non-terminal run, or one that predates
 the `outcome` column.
+
+## Failure
+
+`GET /api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}` adds a `failure`
+object to a run whose status is `failed` or `interrupted`, or whose `outcome`
+is `FAILED`. It is a projection over the raw `error_message` and
+`failed_at_step`, which stay exactly as the engine wrote them; every other run
+has no `failure` key at all.
+
+```json
+"failure": {
+  "kind": "checker_rejected",
+  "step_id": "verify",
+  "step_name": "Check the extraction",
+  "summary": "The checker rejected the result after 3 model tiers: total_equals_lines.",
+  "kept_step_ids": ["extract"],
+  "not_done_step_ids": ["decide", "post", "notify"]
+}
+```
+
+| Field | Meaning |
+|-------|---------|
+| `kind` | One of `checker_rejected`, `validation_failed`, `transform_input`, `timeout`, `cancelled`, `missing_credential`, `missing_integration`, `http_status`, `script_exit`, `cost_cap`, `unknown` — classified by matching the engine's own error wording, never by a model. |
+| `step_id`, `step_name` | The step the run stopped at (`failed_at_step`, or the cursor step for an interrupted run) and its declared name, falling back to the id. |
+| `summary` | One sentence templated per kind with the concrete values (status code, exit code, cost, credential type) substituted. `unknown` carries the raw `error_message`. |
+| `kept_step_ids` | Top-level steps that recorded an output — their results survive. |
+| `not_done_step_ids` | Top-level steps declared after the failed one, in recipe order, with no execution record. Empty when the executed definition is no longer archived. |
 
 ## Save and validation
 

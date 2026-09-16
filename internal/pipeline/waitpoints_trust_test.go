@@ -73,6 +73,15 @@ func seedTrustRun(t *testing.T, db *sql.DB, runID, hash, autonomy string) {
 			t.Fatalf("seed crew: %v", err)
 		}
 	}
+	// routineTrust fails closed when the routine row cannot be read, so
+	// the run needs a routine to belong to; one without an author crew
+	// leaves the invoking crew's dial in charge, which is what these
+	// cases exercise.
+	if _, err := db.ExecContext(t.Context(), `
+INSERT OR IGNORE INTO pipelines (id, workspace_id, slug, name, definition_json, definition_hash)
+VALUES ('pl1', 'ws_test', 'triage', 'Triage', '{}', ?)`, hash); err != nil {
+		t.Fatalf("seed pipeline: %v", err)
+	}
 	if _, err := db.ExecContext(t.Context(), `
 INSERT INTO pipeline_runs (id, workspace_id, pipeline_id, pipeline_slug, definition_hash, status, started_at, invoking_crew_id)
 VALUES (?, 'ws_test', 'pl1', 'triage', ?, 'running', datetime('now'), ?)`,

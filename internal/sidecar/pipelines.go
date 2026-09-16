@@ -383,11 +383,18 @@ func (s *Server) handlePipelinesGet(w http.ResponseWriter, r *http.Request, slug
 	s.proxyIPCJSON(w, r, http.MethodGet, path, "pipeline-get", nil)
 }
 
-// handlePipelinesRun invokes a saved pipeline. Sidecar injects
-// X-Crewship-Invoking-{Crew,Agent} headers so the journal entries
-// the executor emits record who triggered the run — that's how the
-// Graph view distinguishes Crew B → Crew A's pipeline from a
-// user-driven run from the UI.
+// handlePipelinesRun invokes a saved pipeline through the PUBLIC run
+// route with the internal token.
+//
+// It used to stamp X-Crewship-Invoking-{Crew,Agent} on the request so the
+// executor could record who triggered the run. That never carried
+// identity anywhere: proxyIPCJSON builds a fresh upstream request and
+// forwards only X-Internal-Token, and crewshipd no longer reads those
+// headers at all — on a JWT route they were only ever a way for a caller
+// to invent a crew. Agent-invoked runs that need attribution go through
+// the run_routine MCP tool (runPipeline → /api/v1/internal/pipelines/run),
+// where the identity travels in the body and is verified server-side
+// against the token's crew binding and the agents table.
 //
 // POST /pipelines/{slug}/run
 func (s *Server) handlePipelinesRun(w http.ResponseWriter, r *http.Request, slug string) {
@@ -410,20 +417,14 @@ func (s *Server) handlePipelinesRun(w http.ResponseWriter, r *http.Request, slug
 	if body.DryRun {
 		suffix = "/dry_run"
 	}
-	// #812: attribute the run to the ACTING agent (per-agent token), not the
-	// boot agent of the shared sidecar. Forged token → 403.
-	invokingAgentID, ok := s.actingAgentID(r)
-	if !ok {
+	// #812: a forged per-agent token is still refused here, even though this
+	// route has no channel to carry the acting agent upstream (see the doc
+	// comment) — the run_routine MCP tool is the attributed path.
+	if _, ok := s.actingAgentID(r); !ok {
 		writeJSONResponse(w, http.StatusForbidden, map[string]string{"error": "unrecognized agent token"})
 		return
 	}
 	path := "/api/v1/workspaces/" + s.ipc.WorkspaceID + "/pipelines/" + slug + suffix
-	// Inject invoker identity headers — captured by the public Run
-	// handler and threaded into RunInput.InvokingCrewID /
-	// InvokingAgentID. Without them, the executor records the run
-	// as "user-driven" which loses the cross-crew-reuse signal.
-	r.Header.Set("X-Crewship-Invoking-Crew", s.ipc.CrewID)
-	r.Header.Set("X-Crewship-Invoking-Agent", invokingAgentID)
 	s.proxyIPCJSON(w, r, http.MethodPost, path, "pipeline-run", bodyJSON)
 }
 

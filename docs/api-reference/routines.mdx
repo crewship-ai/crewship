@@ -121,8 +121,10 @@ rejects, or a pin to a version the routine never archived, on create, on a
 PATCH that changes inputs, target, pin or enables the plan, and on activate
 (see [Schedules](/api-reference/schedules)). The schedule representation
 includes `next_run_at`, `last_run_at`, `last_status`, `last_run_id`, failure
-breaker counters, and wake telemetry. A circuit-breaker disable sets
-`disabled_reason` to `circuit_breaker`.
+breaker counters, wake telemetry, and the version a fire would use
+(`effective_version`, `null` when the target is gone) with `version_pinned`
+saying whether it comes from `target_pipeline_version`. A circuit-breaker
+disable sets `disabled_reason` to `circuit_breaker`.
 
 ## Run detail
 

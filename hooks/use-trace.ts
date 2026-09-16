@@ -40,6 +40,11 @@ interface RunDetailResponse extends PipelineRun {
   step_outputs_available?: boolean
   output?: string
   outcome?: string
+  // The server's classification of why a run could not finish (operator
+  // console contract, "Run detail"): only on failed/interrupted runs and on
+  // outcome FAILED, absent on older servers — the page falls back to the raw
+  // error_message when it is missing.
+  failure?: import("@/lib/routine-run-presentation").RunFailure | null
 }
 
 export function useTrace(workspaceId: string | null | undefined, runId: string | null) {

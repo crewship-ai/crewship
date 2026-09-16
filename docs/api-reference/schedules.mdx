@@ -136,12 +136,19 @@ Each successful list/create/update response contains an object with these
 fields (nullable/empty telemetry fields are omitted when unset):
 
 `id`, `workspace_id`, `name`, `target_pipeline_id`, `target_pipeline_slug`,
-`target_pipeline_version`, `cron_expr`, `timezone`, `inputs`, `enabled`,
+`target_pipeline_version`, `effective_version`, `version_pinned`, `cron_expr`,
+`timezone`, `inputs`, `enabled`,
 `last_run_at`, `last_status`, `last_run_id`, `next_run_at`, `wake_pipeline_id`,
 `wake_pipeline_slug`, `wake_inputs`, `wake_fail_closed`, `wake_check_count`,
 `wake_fire_count`, `last_wake_at`, `last_wake_status`, `catchup_policy`,
 `last_missed_count`, `consecutive_failures`, `max_consecutive_failures`,
 `disabled_reason`, `activation`, `created_at`, and `updated_at`.
+
+`version_pinned` is `true` when `target_pipeline_version` is set.
+`effective_version` is the version a fire would run right now — the pin when
+there is one, otherwise the target routine's current head — and `null` when
+the target routine no longer exists. Both are always present, so a client can
+say "Uses latest (now v3)" or "Pinned to v2" without a second request.
 
 `last_status` can be `COMPLETED`, `FAILED`, `SKIPPED`, `WAITING`, or `DEDUPED`.
 Wake telemetry uses `WOKE`, `SKIPPED`, `ERROR`, or `HELD`. A circuit breaker
