@@ -141,7 +141,7 @@ A bare gate (`must_contain: ["- "]`) catches the bullet marker but not "did the 
 
 ### Gotchas
 
-- **`max_iterations: 3`** — the loop is bounded so a stubborn worker can't burn unbounded tokens. After 3 attempts, `on_fail: abort` lets the run fail honestly rather than ship a bad summary.
+- **`max_iterations: 3`** caps worker/checker model tiers per execution attempt. With `on_fail: abort`, the first rejected verdict stops the step. With `escalate_tier`, configured fallback tiers receive feedback, up to this cap; no additional same-tier revisions are created. Omitted or zero retains the configured tier chain. Step and transport retries have separate budgets.
 - **`max_cost_usd: 1.50`** — outcomes loops can iterate up to 3× the worker cost + 1 grader call per iteration. Budget accordingly.
 - **Don't put more than ~10 criteria in one rubric** — the grader's verdict gets noisy. Split into two graded steps if you need finer-grained rubric.
 
