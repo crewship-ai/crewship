@@ -7,6 +7,7 @@ package main
 
 import (
 	"fmt"
+	"net/url"
 
 	"github.com/spf13/cobra"
 
@@ -201,6 +202,17 @@ var crewPeerConvsCmd = &cobra.Command{
 
 		limit, _ := cmd.Flags().GetInt("limit")
 		path := fmt.Sprintf("/api/v1/crews/%s/peer-conversations?limit=%d", crewID, limit)
+		// `agent_id` is matched on either side of the conversation and
+		// applied before the page is cut, so it is sent as a query parameter
+		// rather than filtered out of the rows that came back — a page of 50
+		// filtered client-side can be 50 rows about somebody else.
+		if agentRef, _ := cmd.Flags().GetString("agent"); agentRef != "" {
+			agentID, err := resolveAgentID(client, agentRef)
+			if err != nil {
+				return err
+			}
+			path += "&agent_id=" + url.QueryEscape(agentID)
+		}
 
 		resp, err := client.Get(path)
 		if err != nil {

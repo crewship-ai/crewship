@@ -505,11 +505,13 @@ List peer conversations in a crew.
 ```bash
 crewship crew peer-conversations <slug-or-id>
 crewship crew peer-conversations backend-team --limit 20
+crewship crew peer-conversations backend-team --agent ava
 ```
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
-| `--limit` | `int` | `50` | Number of conversations to show. |
+| `--limit` | `int` | `50` | Number of conversations to show (the server caps it at 100). |
+| `--agent` | `string` | _(all agents)_ | Only conversations this agent (slug or id) asked **or** answered. Sent as the route's `agent_id` and applied before the page is cut, so `--agent ava --limit 1` is Ava's newest conversation, not the crew's newest row filtered to nothing. |
 
 **Output columns:** ID, FROM, TO, QUESTION, STATUS, ESCALATED, CREATED
 
