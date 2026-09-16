@@ -45,6 +45,7 @@ import { RoutineNavigation, ROUTINE_VIEWS } from "./routine-navigation"
 import { useUrlSelection } from "@/hooks/use-issue-detail"
 import { brandIconForType, BrandGlyph } from "./brand-icons"
 import { RoutineStepDefinition } from "./routine-step-definition"
+import { RoutineBehaviorSummary } from "./routine-behavior"
 import { RoutineStepSpine } from "./routine-step-spine"
 import { routineInputSpecs } from "@/lib/routine-inputs"
 import { routineEffects } from "@/lib/routine-effects"
@@ -338,6 +339,7 @@ export function RoutineCardDetail({
       )}
       {view === "definition" && (
         <>
+          <RoutineBehaviorSummary behavior={routine.behavior} />
           {/* Three answers, in the order a reader brings them: what it does,
               how it went last time, what I need before I run it. Everything
               that used to compete with them — status chrome, access, the
@@ -347,6 +349,7 @@ export function RoutineCardDetail({
               <RoutineStepSpine
                 workspaceId={workspaceId}
                 definition={routine.definition}
+                behavior={routine.behavior}
                 onEdit={canEdit ? openEditor : undefined}
                 map={() => (
                   <div className="flex flex-col md:flex-row" style={{ height: mapHeight }}>

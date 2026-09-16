@@ -258,6 +258,14 @@ binary** (the package manager owns it) and prints the matching `apt`/`dnf`/
 `docker` command instead — so you never end up with a binary your package
 database doesn't know about.
 
+For Docker the verification `self-update` does for you is yours to do: every
+published tag (`:vX.Y.Z`, `:latest`, `:vX.Y.Z-beta.N`, and the trunk channel
+`:nightly` / `:main-<sha>`) is applied only after the digest passed a
+Critical-CVE scan, a boot smoke on both platforms and a keyless cosign
+signature, so `cosign verify` the tag and deploy the digest it resolves to.
+The recipe, and which workflow identity signs which channel, is in
+[Install → Published images and how to verify one](/guides/install#published-images-and-how-to-verify-one).
+
 ### Debian / RPM packages + systemd
 
 The `.deb` and `.rpm` install:
