@@ -53,14 +53,14 @@ var responseShapeExclusions = map[string]string{
 	"StatusResponse": "five DELETE routes share it and one disagrees: DELETE /credentials/{id} writes " +
 		"{\"success\": true} where the schema says {\"status\": string} — wrong key and wrong type. " +
 		"Every writer is a map literal, so there are no tags to derive from either.",
-	"SkillDetail": "orphaned — no path references it, while GET /skills/{skillId} wrongly $refs Skill. " +
-		"Fix the $ref before grading either.",
 }
 
 func TestOpenAPIResponseComponents_AreGradedOrExcused(t *testing.T) {
 	// Measured, not chosen. Lower it in the same commit that adds pairs; a rise
 	// means a route shipped a response shape nothing can check.
-	const budget = 193
+	// Measured after combining #1849’s reachability cleanup with the
+	// audit’s additional response-shape contracts.
+	const budget = 183
 
 	raw, err := os.ReadFile("openapi.gen.json")
 	if err != nil {
@@ -78,14 +78,28 @@ func TestOpenAPIResponseComponents_AreGradedOrExcused(t *testing.T) {
 		}
 	}
 
+	// A named list component (`AgentList` = array of `$ref Agent`) has no
+	// fields of its own to grade; it is as graded as its rows are.
+	schemas, _ := doc["components"].(map[string]any)["schemas"].(map[string]any)
+	gradedList := func(name string) bool {
+		schema, _ := schemas[name].(map[string]any)
+		if schema == nil || schema["type"] != "array" {
+			return false
+		}
+		items, _ := schema["items"].(map[string]any)
+		item, ok := refName(items)
+		return ok && graded[item]
+	}
+
 	var ungraded []string
 	for name := range responseRootComponents(doc) {
-		if graded[name] || responseShapeExclusions[name] != "" {
+		if graded[name] || gradedList(name) || responseShapeExclusions[name] != "" {
 			continue
 		}
 		ungraded = append(ungraded, name)
 	}
 	sort.Strings(ungraded)
+	t.Logf("ungraded response components: %d (budget %d)", len(ungraded), budget)
 
 	if len(ungraded) > budget {
 		shown := ungraded

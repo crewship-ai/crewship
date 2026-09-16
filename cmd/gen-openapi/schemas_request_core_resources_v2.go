@@ -43,8 +43,8 @@ func coreResourceRequestSchemaCatalogV2() (map[string]DomainSchema, map[string]a
 		"credential_audit_retention_days": nullable(integer()), "audit_log_retention_days": nullable(integer()),
 		// #2233 — approvals_queue sweep window; 0 is keep-forever, as for
 		// the audit pair. This is the component PATCH /workspaces/{id}
-		// references; WorkspaceUpdateRequest in schemas_core.go is the
-		// legacy fallback nothing points at.
+		// references, rather than the former unreferenced
+		// WorkspaceUpdateRequest component.
 		"approvals_retention_days": nullable(integer()),
 	}))
 
@@ -121,6 +121,9 @@ func coreResourceRequestSchemaCatalogV2() (map[string]DomainSchema, map[string]a
 		"account_label": nullable(str()), "account_email": nullable(str()), "refresh_token": nullable(str()), "token_expires_at": nullable(str()), "security_level": nullable(integer()),
 		"created_by_actor_type": nullable(enum("user", "agent", "system")), "created_by_actor_id": nullable(str()), "provisioned_for_service": nullable(str()), "username": nullable(str()),
 		"oauth_client_id": nullable(str()), "oauth_client_secret": nullable(str()), "oauth_auth_url": nullable(str()), "oauth_token_url": nullable(str()), "oauth_scopes": nullable(str()), "pending": boolean(),
+		// PROVIDER_LOGIN only: subscription | api_key. Inferred from the
+		// value's shape when omitted (createCredentialRequest.Mode).
+		"mode": nullable(enum("subscription", "api_key")),
 	}, "name", "value"))
 	request("CoreCredentialUpdateRequestV2", object(map[string]any{
 		"name": nullable(str()), "description": nullable(str()), "type": nullable(str()), "provider": nullable(str()), "scope": nullable(str()), "crew_id": nullable(str()), "crew_ids": nullable(stringArray), "account_label": nullable(str()), "account_email": nullable(str()), "token_expires_at": nullable(str()), "security_level": nullable(integer()), "username": nullable(str()),

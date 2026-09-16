@@ -340,6 +340,11 @@ func (h *AssignmentHandler) loadAgentCredentials(ctx context.Context, agentID st
 			}
 			c.PlainValue, c.BaseURL, c.Headers = token, baseURL, headers
 		}
+		// The previous value while a rotation's grace window is open (#1882).
+		// Optional: nothing usable delivers nothing.
+		if grace := deliveredGraceToken(d, c.BaseURL, encryption.Decrypt); grace != "" {
+			c.GraceToken, c.GraceExpiresAt, c.GraceRotationID = grace, d.GraceExpiresAt, d.GraceRotationID
+		}
 		// The credential's parts (PRD §2.2), opened with the same helper the
 		// value was. A failure drops the whole credential — a sub-agent handed
 		// an AWS key with no secret fails at the point of use, blaming the

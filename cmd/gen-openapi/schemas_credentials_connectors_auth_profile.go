@@ -73,14 +73,6 @@ func credentialsConnectorsAuthProfileSchemaCatalog() (map[string]map[string]Doma
 		"ConnectorVerifyResponse":  object(map[string]any{"ok": boolean(), "message": nullableString()}, "ok"),
 		"ConnectorInstallRequest":  request(map[string]any{"crew_id": nullableString(), "name": nullableString(), "fields": stringMap}, "fields"),
 		"ConnectorInstallResponse": object(map[string]any{"integration_id": str(), "next_step": nullableString(), "oauth_url": nullableString()}, "integration_id"),
-		"IntegrationCreateRequest": request(map[string]any{
-			"workspace_mcp_server_id": nullableString(), "name": str(), "display_name": str(), "transport": str(), "endpoint": nullableString(),
-			"command": nullableString(), "args_json": nullableString(), "env_json": nullableString(), "config_json": nullableString(), "icon": nullableString(),
-		}, "name"),
-		"IntegrationUpdateRequest": object(map[string]any{
-			"display_name": nullableString(), "transport": nullableString(), "endpoint": nullableString(), "command": nullableString(),
-			"args_json": nullableString(), "env_json": nullableString(), "config_json": nullableString(), "icon": nullableString(), "enabled": map[string]any{"type": "boolean", "nullable": true},
-		}),
 		"AgentIntegrationBinding": object(map[string]any{
 			"id": str(), "agent_id": str(), "mcp_server_id": str(), "mcp_server_scope": str(), "credential_id": nullableString(),
 			"cred_type": nullableString(), "cred_header": nullableString(), "enabled": boolean(), "config_override_json": nullableString(),
@@ -100,7 +92,6 @@ func credentialsConnectorsAuthProfileSchemaCatalog() (map[string]map[string]Doma
 			"id", "tool_name", "description", "enabled", "created_at", "updated_at"),
 		"IntegrationToolUpdateRequest": object(map[string]any{"enabled": map[string]any{"type": "boolean", "nullable": true}, "description": nullableString()}),
 		"CLIToken":                     cliToken, "CLITokenList": object(map[string]any{"data": array(cliToken)}),
-		"CLITokenCreateRequest":    request(map[string]any{"name": str(), "tier": nullableString(), "expires_in_seconds": integer(), "scopes": array(str())}, "name"),
 		"CLITokenValidateResponse": object(map[string]any{"valid": boolean(), "user_id": str(), "user_email": str()}),
 		"Profile":                  profile, "ProfileUpdateRequest": request(map[string]any{"full_name": str()}, "full_name"),
 		"PasswordChangeRequest":  request(map[string]any{"current_password": str(), "new_password": str()}, "current_password", "new_password"),
@@ -108,32 +99,36 @@ func credentialsConnectorsAuthProfileSchemaCatalog() (map[string]map[string]Doma
 		"StatusResponse":         object(map[string]any{"status": str()}),
 	}
 
+	// Request bodies for these routes are owned by schemas_request_core_resources_v2.go
+	// and schemas_integrations_auth_request_bodies.go; only responses are declared here.
 	credentialRoutes := map[string]DomainSchema{
-		"GET /api/v1/credentials": {Response: ref("CredentialList")}, "POST /api/v1/credentials": {Request: ref("CredentialCreateRequest"), Response: credential},
-		"GET /api/v1/credentials/{credentialId}": {Response: credential}, "PATCH /api/v1/credentials/{credentialId}": {Request: ref("CredentialCreateRequest"), Response: credential},
-		"PUT /api/v1/credentials/{credentialId}":          {Request: ref("CredentialCreateRequest"), Response: credential},
+		// Bare array by default; `?paginate=true` switches to the
+		// {credentials, next_cursor, limit} envelope (credentials.go:217).
+		"GET /api/v1/credentials": {Response: map[string]any{"oneOf": []any{ref("CredentialList"), ref("CredentialPage")}}}, "POST /api/v1/credentials": {Response: credential},
+		"GET /api/v1/credentials/{credentialId}": {Response: credential}, "PATCH /api/v1/credentials/{credentialId}": {Response: credential},
+		"PUT /api/v1/credentials/{credentialId}":          {Response: credential},
 		"DELETE /api/v1/credentials/{credentialId}":       {Response: ref("StatusResponse")},
-		"POST /api/v1/credentials/test":                   {Request: ref("CredentialCreateRequest"), Response: ref("CredentialProbeResponse")},
+		"POST /api/v1/credentials/test":                   {Response: ref("CredentialProbeResponse")},
 		"POST /api/v1/credentials/{credentialId}/test":    {Response: ref("CredentialProbeResponse")},
 		"POST /api/v1/credentials/{credentialId}/refresh": {Request: object(map[string]any{}), Response: ref("ProviderLoginRefreshResponse")},
-		"GET /api/v1/credentials/{credentialId}/fields":   {Response: ref("CredentialFieldList")}, "POST /api/v1/credentials/{credentialId}/fields": {Request: ref("CredentialFieldRequest"), Response: ref("CredentialField")},
-		"GET /api/v1/credentials/bindings": {Response: ref("CredentialBindingList")}, "POST /api/v1/credentials/bindings": {Request: ref("CredentialBindingRequest"), Response: ref("CredentialBinding")},
-		"GET /api/v1/credentials/{credentialId}/rotations": {Response: array(ref("CredentialRotation"))}, "POST /api/v1/credentials/{credentialId}/rotate": {Request: ref("CredentialRotationRequest"), Response: ref("CredentialRotation")},
+		"GET /api/v1/credentials/{credentialId}/fields":   {Response: ref("CredentialFieldList")}, "POST /api/v1/credentials/{credentialId}/fields": {Response: ref("CredentialField")},
+		"GET /api/v1/credentials/bindings": {Response: ref("CredentialBindingList")}, "POST /api/v1/credentials/bindings": {Response: ref("CredentialBinding")},
+		"GET /api/v1/credentials/{credentialId}/rotations": {Response: array(ref("CredentialRotation"))}, "POST /api/v1/credentials/{credentialId}/rotate": {Response: ref("CredentialRotation")},
 	}
 	integrationRoutes := map[string]DomainSchema{
 		"GET /api/v1/connectors": {Response: ref("ConnectorList")}, "GET /api/v1/connectors/{connectorId}": {Response: ref("Connector")},
 		"POST /api/v1/connectors/{connectorId}/verify": {Request: ref("ConnectorVerifyRequest"), Response: ref("ConnectorVerifyResponse")}, "POST /api/v1/connectors/{connectorId}/install": {Request: ref("ConnectorInstallRequest"), Response: ref("ConnectorInstallResponse")},
-		"GET /api/v1/integrations": {Response: ref("IntegrationList")}, "POST /api/v1/integrations": {Request: ref("IntegrationCreateRequest"), Response: ref("Integration")},
-		"GET /api/v1/integrations/{integrationId}": {Response: ref("Integration")}, "PATCH /api/v1/integrations/{integrationId}": {Request: ref("IntegrationUpdateRequest"), Response: ref("Integration")}, "DELETE /api/v1/integrations/{integrationId}": {Response: ref("StatusResponse")},
-		"GET /api/v1/integrations/crews": {Response: ref("IntegrationList")}, "GET /api/v1/crews/{crewId}/integrations": {Response: ref("IntegrationList")}, "POST /api/v1/crews/{crewId}/integrations": {Request: ref("IntegrationCreateRequest"), Response: ref("Integration")},
-		"PATCH /api/v1/crews/{crewId}/integrations/{integrationId}": {Request: ref("IntegrationUpdateRequest"), Response: ref("Integration")}, "DELETE /api/v1/crews/{crewId}/integrations/{integrationId}": {Response: ref("StatusResponse")},
+		"GET /api/v1/integrations": {Response: ref("IntegrationList")}, "POST /api/v1/integrations": {Response: ref("Integration")},
+		"GET /api/v1/integrations/{integrationId}": {Response: ref("Integration")}, "PATCH /api/v1/integrations/{integrationId}": {Response: ref("Integration")}, "DELETE /api/v1/integrations/{integrationId}": {Response: ref("StatusResponse")},
+		"GET /api/v1/integrations/crews": {Response: ref("IntegrationList")}, "GET /api/v1/crews/{crewId}/integrations": {Response: ref("IntegrationList")}, "POST /api/v1/crews/{crewId}/integrations": {Response: ref("Integration")},
+		"PATCH /api/v1/crews/{crewId}/integrations/{integrationId}": {Response: ref("Integration")}, "DELETE /api/v1/crews/{crewId}/integrations/{integrationId}": {Response: ref("StatusResponse")},
 		"GET /api/v1/agents/{agentId}/integrations": {Response: array(ref("AgentIntegrationBinding"))}, "POST /api/v1/agents/{agentId}/integrations": {Request: ref("AgentIntegrationBindingRequest"), Response: ref("AgentIntegrationBinding")},
 		"PATCH /api/v1/agents/{agentId}/integrations/{integrationId}": {Request: ref("AgentIntegrationBindingUpdateRequest"), Response: ref("AgentIntegrationBinding")}, "DELETE /api/v1/agents/{agentId}/integrations/{integrationId}": {Response: ref("StatusResponse")},
 		"GET /api/v1/crews/{crewId}/integrations/{integrationId}/tools": {Response: array(ref("IntegrationTool"))}, "PATCH /api/v1/crews/{crewId}/integrations/{integrationId}/tools/{toolName}": {Request: ref("IntegrationToolUpdateRequest"), Response: ref("IntegrationTool")},
 		"POST /api/v1/integrations/{integrationId}/test": {Response: ref("CredentialTestResponse")}, "POST /api/v1/crews/{crewId}/integrations/{integrationId}/test": {Response: ref("CredentialTestResponse")},
 	}
 	authProfileRoutes := map[string]DomainSchema{
-		"POST /api/v1/auth/cli-token": {Request: ref("CLITokenCreateRequest"), Response: ref("CLIToken")}, "GET /api/v1/auth/cli-token/validate": {Response: ref("CLITokenValidateResponse")},
+		"POST /api/v1/auth/cli-token": {Response: ref("CLIToken")}, "GET /api/v1/auth/cli-token/validate": {Response: ref("CLITokenValidateResponse")},
 		"GET /api/v1/auth/cli-tokens": {Response: ref("CLITokenList")}, "DELETE /api/v1/auth/cli-tokens/{tokenId}": {Response: ref("StatusResponse")},
 		"PATCH /api/v1/users/me": {Request: ref("ProfileUpdateRequest"), Response: ref("Profile")}, "POST /api/v1/users/me/password": {Request: ref("PasswordChangeRequest"), Response: ref("PasswordChangeResponse")},
 		// Both avatar mutations end in writeProfile (internal/api/users_avatar.go:171,

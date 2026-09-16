@@ -107,7 +107,6 @@ func finalAdminPlatformSchemaCatalog() (map[string]DomainSchema, map[string]any)
 		"workspace_id": str(), "crew_id": str(), "agent_id": str(), "credential_id": str(),
 		"agent_ids": array(str()), "agent_count": integer(),
 	})
-	oauthProvider := object(map[string]any{"auth_url": str(), "token_url": str(), "default_scopes": str()})
 	oauthDiscovery := object(map[string]any{
 		"auth_url": str(), "token_url": str(), "registration_endpoint": str(), "scopes": str(),
 		"supports_dcr": boolean(), "supports_pkce": boolean(), "source": str(),
@@ -127,7 +126,6 @@ func finalAdminPlatformSchemaCatalog() (map[string]DomainSchema, map[string]any)
 		"FinalAdminPlatformBackupSelfTest":  backupSelfTest,
 		"FinalAdminPlatformBackupMetrics":   backupMetrics,
 		"FinalAdminPlatformOnboardingSetup": setup,
-		"FinalAdminPlatformOAuthProvider":   oauthProvider,
 		"FinalAdminPlatformOAuthDiscovery":  oauthDiscovery,
 		"FinalAdminPlatformOAuthInitiate":   object(map[string]any{"auth_url": str(), "state": str()}),
 		"FinalAdminPlatformOAuthExchange":   object(map[string]any{"status": str(), "credential_id": str()}),
@@ -184,7 +182,6 @@ func finalAdminPlatformSchemaCatalog() (map[string]DomainSchema, map[string]any)
 		"GET /api/v1/instance/settings":            {Response: array(ref("FinalAdminPlatformInstanceSetting"))},
 		"GET /api/v1/instance/settings/{key}":      {Response: ref("FinalAdminPlatformInstanceSetting")},
 		"PUT /api/v1/instance/settings/{key}":      {Response: ref("FinalAdminPlatformInstanceSetting")},
-		"GET /api/v1/oauth/providers":              {Response: map[string]any{"type": "object", "additionalProperties": ref("FinalAdminPlatformOAuthProvider")}},
 		"POST /api/v1/oauth/initiate":              {Response: ref("FinalAdminPlatformOAuthInitiate")},
 		"POST /api/v1/oauth/exchange":              {Response: ref("FinalAdminPlatformOAuthExchange")},
 		"POST /api/v1/oauth/loopback":              {Response: ref("FinalAdminPlatformOAuthLoopback")},
