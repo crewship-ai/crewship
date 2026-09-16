@@ -11,7 +11,7 @@ tag: Experimental
 Crewship can be configured via a YAML file passed at startup. Environment variables override YAML values. The config is loaded and validated in `internal/config/config.go`.
 
 <Info>
-  The config file has twelve top-level sections: `server`, `ipc`, `container`, `storage`, `state`, `logging`, `auth`, `llm_proxy`, `keeper`, `license`, `composio`, and `local_models`. The [Complete Reference](#complete-reference) below shows every field with its default; [Section Details](#section-details) explains the load-bearing ones.
+  The config file has thirteen top-level sections: `server`, `ipc`, `container`, `storage`, `state`, `logging`, `auth`, `llm_proxy`, `keeper`, `license`, `composio`, `local_models`, and `orchestrator`. The [Complete Reference](#complete-reference) below shows every field with its default; [Section Details](#section-details) explains the load-bearing ones.
 </Info>
 
 ## Loading Order
@@ -53,6 +53,14 @@ container:
   default_memory_mb: 8192       # Default container memory limit
   default_cpus: 2.0             # Default container CPU limit
   sidecar_enabled: false        # Enable sidecar proxy for credential injection
+  sidecar_binary_path: ""       # Host path to crewship-sidecar, bind-mounted into
+                                # every crew container. Empty = autodetect next to
+                                # the crewship binary, then /usr/local/bin.
+                                # Env override: CREWSHIP_SIDECAR_PATH
+  entrypoint_path: ""           # Host path to entrypoint.sh, bind-mounted the same
+                                # way; when set, the container entrypoint is forced
+                                # to /usr/local/bin/entrypoint.sh. Empty = autodetect.
+                                # Env override: CREWSHIP_ENTRYPOINT_PATH
 
 # Note: Crewship injects the sidecar binary and entrypoint script into the
 # container at runtime via bind mount from the host. Any glibc-based Linux
@@ -64,6 +72,26 @@ storage:
   provider: "localfs"           # "localfs" | "s3"
   base_path: "/var/lib/crewship"
   log_path: "/var/log/crewship"
+  memory_root: ""               # Parent directory of the workspace memory tier
+                                # (<memory_root>/{workspace_id}). Empty disables the
+                                # tier and memory versioning. `crewship start` derives
+                                # <dataDir>/memory only when DATABASE_URL is unset.
+                                # Env override: CREWSHIP_STORAGE_MEMORY_ROOT
+  # Custom Page applications (all five map 1:1 to the CREWSHIP_PAGE_* env vars)
+  page_projects_path: ""        # Protected host directory for Page sources, Git and
+                                # artifacts; must not overlap base_path. Empty
+                                # disables custom Page projects.
+  page_build_image: ""          # Immutable image ID or repository@sha256:… digest of
+                                # the offline Page compiler. Tags are refused; empty
+                                # disables builds. Requires page_projects_path.
+  page_studio_origin: ""        # Public browser origin allowed to initialize Page
+                                # applications. Empty = auth.nextjs_url.
+  page_runtime_origin: ""       # Separate-site public origin that serves published
+                                # Page applications (bootstrap route only). Required
+                                # to preview, publish or serve custom applications.
+  page_runtime_development_same_origin: false
+                                # Reviewed development demos only: lets the runtime
+                                # share the Studio origin. No process isolation.
 
 # State store (agent run states)
 state:
@@ -121,6 +149,13 @@ local_models:
                                 # Distinct from keeper.ollama_url (daemon-internal).
                                 # Empty = local-model path disabled.
                                 # Env override: CREWSHIP_LOCAL_MODEL_BASE_URL
+
+# Agent-run orchestrator admission control
+orchestrator:
+  max_concurrent_runs: 8        # Server-wide cap on agent runs executing at once;
+                                # excess runs queue. Must be > 0. Sized once at
+                                # startup, so a change needs a restart.
+                                # Env override: CREWSHIP_MAX_CONCURRENT_RUNS
 ```
 
 ## Section Details
@@ -182,7 +217,9 @@ storage:
   log_path: "/var/log/crewship"
 ```
 
-The `base_path` stores crew workspace files, agent output, and persistent data. The `log_path` stores agent execution logs.
+The `base_path` stores crew workspace files, agent output, and persistent data. The `log_path` stores agent execution logs. `memory_root` is the parent of the per-workspace memory tier; leave it empty and that tier (and memory versioning) is off.
+
+The five `page_*` keys configure custom [Page applications](/guides/pages-apps-operations). They are the file-config form of `CREWSHIP_PAGE_PROJECTS_PATH`, `CREWSHIP_PAGE_BUILD_IMAGE`, `CREWSHIP_PAGE_STUDIO_ORIGIN`, `CREWSHIP_PAGE_RUNTIME_ORIGIN` and `CREWSHIP_PAGE_RUNTIME_DEVELOPMENT_SAME_ORIGIN`, and the env var wins when both are set. Validation is the same on both paths: `page_projects_path` must be absolute and must not sit inside (or contain) `base_path`; `page_build_image` needs `page_projects_path` and an immutable `sha256:…` ID or `repository@sha256:…` digest; `page_runtime_origin` must be a different site from the Studio origin unless `page_runtime_development_same_origin` is `true`. See the [Environment Reference](/configuration/environment#storage) for what each one guards.
 
 ### State
 
@@ -221,6 +258,15 @@ llm_proxy:
 ```
 
 The LLM proxy manages token usage tracking and provider health monitoring.
+
+### Orchestrator
+
+```yaml
+orchestrator:
+  max_concurrent_runs: 8
+```
+
+`max_concurrent_runs` bounds how many agent runs the orchestrator executes at once; the rest wait in its queue. It must be greater than zero (validation refuses `0` or a negative value), and `CREWSHIP_MAX_CONCURRENT_RUNS` overrides it. The cap is read once when the orchestrator is built, so changing either takes effect on the next restart.
 
 ### Keeper
 

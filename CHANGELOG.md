@@ -25,6 +25,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 
 ### Fixed
+- **Docs:** the configuration reference lists every YAML key (`storage.page_*`, `orchestrator`, `memory_root`, sidecar paths) and the three sidecar-side env vars; `internal.mdx` catalogues all 72 registered internal IPC routes including `/pipelines/drafts/*`, `/workspace/overview`, `/issues/{id}/work`, `/issues/{id}/comments` and `/pages/project`; the sidecar verb tables carry `/work` and `/comments`; `services_json` redaction and its effect on `crewship export` / `apply` are documented; and operators get a cosign recipe for published Docker images and the `:nightly` / `:main-<sha>` channels (#2586)
 
 - Routine rule summaries explicitly mark checker outcomes on legacy non-agent steps as unenforced, matching the live runner.
 
