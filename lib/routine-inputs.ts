@@ -19,13 +19,9 @@
  * Why a conversion at all: a form field holds a string, but a routine's
  * inputs reach a `code` step with their ORIGINAL types (the CEL runner
  * exposes them as the `inputs` map so expressions can do typed
- * arithmetic). A routine declaring `{"name":"limit","type":"integer"}`
- * and comparing `inputs.limit > 20` FAILS the run outright when 42
- * arrives as the string "42" — verified against a live routine, not
- * assumed. Nothing rejects it earlier: run-time input validation does
- * not exist, so `type` is honoured by whatever consumes the value and by
- * nothing before it. That is what makes this conversion load-bearing
- * rather than tidy.
+ * arithmetic). Form-annotated inputs are also checked server-side. Legacy
+ * type-only definitions retain their historical server contract; conversion
+ * here must still preserve types and refuse values the browser cannot carry.
  */
 
 import type { SlashFormField } from "@/hooks/use-slash-commands"
@@ -36,6 +32,7 @@ export const SLASH_ROUTINE_ID_PREFIX = "routine.run:"
 
 /** One declared input, as it appears in a routine's definition JSON. */
 export interface RoutineInputSpec {
+  format?: string
   widget?: string
   options?: string[]
   allow_custom?: boolean
@@ -165,6 +162,7 @@ export function slashFieldsFromRoutineInputs(
           : undefined,
         allow_custom: i.allow_custom,
         placeholder: i.placeholder,
+        format: i.format,
         min: i.min,
         max: i.max,
         required: Boolean(i.required),
@@ -242,7 +240,13 @@ export function coerceRoutineInput(
       return n
     }
     case "number": {
-      const n = Number(raw.trim())
+      const text = raw.trim()
+      if (!/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/.test(text))
+        throw new RoutineInputError(
+          field,
+          `"${raw}" is not a number. Use a decimal point, for example 0.7`,
+        )
+      const n = Number(text)
       if (raw.trim() === "" || !Number.isFinite(n)) {
         throw new RoutineInputError(field, `"${raw}" is not a number`)
       }
@@ -357,6 +361,7 @@ export function routineInputsFromValues(
 ): Record<string, unknown> {
   for (const field of fields ?? []) {
     if (
+      (field.format != null && field.format !== "" && field.format !== "absolute_path") ||
       widgetForInputType(field.value_type) === "unsupported" ||
       !supportedRoutineWidget(field.type)
     )
@@ -371,6 +376,18 @@ export function routineInputsFromValues(
     const field = byName.get(name)
     if (raw === "" && field?.value_type !== "boolean") continue
     const parsed = field ? coerceRoutineInput(field.value_type, raw, name) : raw
+    if (
+      field?.format &&
+      (field.format !== "absolute_path" ||
+        typeof parsed !== "string" ||
+        !validAbsoluteInputPath(parsed))
+    )
+      throw new RoutineInputError(
+        name,
+        field.format === "absolute_path"
+          ? "Use an absolute path starting with /, without . or .. segments or control characters"
+          : `Unsupported input format: ${field.format}`,
+      )
     if (field?.options?.length && !field.allow_custom) {
       const chosen = Array.isArray(parsed) ? parsed : [parsed]
       if (chosen.some((v) => typeof v !== "string" || !field.options!.includes(v)))
@@ -385,4 +402,73 @@ export function routineInputsFromValues(
     out[name] = parsed
   }
   return out
+}
+
+/** Lexical contract only: the server/consuming step owns filesystem access. */
+export function validAbsoluteInputPath(value: string): boolean {
+  return (
+    value.startsWith("/") &&
+    !value.includes("\\") &&
+    !Array.from(value).some((c) => c.charCodeAt(0) < 32 || c.charCodeAt(0) === 127) &&
+    !value.split("/").some((part) => part === "." || part === "..")
+  )
+}
+
+export function routineInputHint(field: SlashFormField): string {
+  if (field.format === "absolute_path")
+    return "Absolute path, for example /crew/shared/project. Syntax only; existence and access are checked when used."
+  if (field.format)
+    return `Unsupported format: ${field.format}. Review the recipe before starting.`
+  if (field.options?.length)
+    return field.allow_custom
+      ? "Choose a prepared answer or enter your own."
+      : field.type === "multiselect"
+        ? "Choose one or more available answers."
+        : "Choose one available answer."
+  const type = field.value_type
+  if (type === "number" || type === "integer") {
+    const bounds =
+      field.min != null && field.max != null
+        ? ` From ${field.min} to ${field.max}, inclusive.`
+        : field.min != null
+          ? ` Minimum ${field.min}.`
+          : field.max != null
+            ? ` Maximum ${field.max}.`
+            : ""
+    return (
+      (type === "integer"
+        ? "Whole number, for example 3."
+        : "Number using a decimal point, for example 0.7.") + bounds
+    )
+  }
+  if (type === "array") return 'JSON list, for example ["a", "b"].'
+  if (type === "object") return 'JSON object, for example {"key": "value"}.'
+  if (type === "boolean") return "Checked means true; unchecked means false."
+  return field.required
+    ? "Text. An answer is required."
+    : "Text. Optional; leaving it empty uses the recipe default when available."
+}
+
+/** Collect all errors before dispatch, rather than making the user submit repeatedly. */
+export function routineInputErrors(
+  fields: SlashFormField[],
+  values: Record<string, string>,
+): Record<string, string> {
+  const errors: Record<string, string> = {}
+  for (const field of fields) {
+    if (isMissingRequired(field, values[field.name])) {
+      errors[field.name] = "An answer is required"
+      continue
+    }
+    try {
+      routineInputsFromValues([field], {
+        [field.name]: values[field.name] ?? "",
+      })
+    } catch (error) {
+      if (error instanceof RoutineInputError)
+        errors[field.name] = error.message.replace(`${field.name}: `, "")
+      else throw error
+    }
+  }
+  return errors
 }
