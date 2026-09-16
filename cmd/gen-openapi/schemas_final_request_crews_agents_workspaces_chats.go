@@ -40,10 +40,7 @@ func finalRequestCrewsAgentsWorkspacesChatsSchemaCatalog() (map[string]DomainSch
 		}, "full_name", "email", "password"),
 		"FinalCoreChatSteerRequest":       object(map[string]any{"message": str()}, "message"),
 		"FinalCoreCrewAvatarStyleRequest": object(map[string]any{"avatar_style": str(), "reset_overrides": boolean()}),
-		"FinalCoreRefreshToolsRequest": object(map[string]any{
-			"tools": array(object(map[string]any{"name": str(), "description": nullableString()})),
-		}),
-		"FinalCoreIssueCommentRequest": object(map[string]any{"body": str()}, "body"),
+		"FinalCoreIssueCommentRequest":    object(map[string]any{"body": str()}, "body"),
 		"FinalCoreIssueRelationRequest": object(map[string]any{
 			"target_identifier": str(), "relation_type": enum("blocks", "blocked_by", "relates_to", "duplicate_of"),
 		}, "target_identifier", "relation_type"),
@@ -78,7 +75,6 @@ func finalRequestCrewsAgentsWorkspacesChatsSchemaCatalog() (map[string]DomainSch
 	add("POST", "/api/v1/bootstrap", "FinalCoreBootstrapRequest")
 	add("POST", "/api/v1/chats/{chatId}/steer", "FinalCoreChatSteerRequest")
 	add("POST", "/api/v1/crews/{crewId}/apply-avatar-style", "FinalCoreCrewAvatarStyleRequest")
-	add("POST", "/api/v1/crews/{crewId}/integrations/{integrationId}/tools/refresh", "FinalCoreRefreshToolsRequest")
 	add("POST", "/api/v1/crews/{crewId}/issues/{identifier}/comments", "FinalCoreIssueCommentRequest")
 	add("POST", "/api/v1/crews/{crewId}/issues/{identifier}/relations", "FinalCoreIssueRelationRequest")
 	add("POST", "/api/v1/crews/{crewId}/issues/{identifier}/review", "FinalCoreIssueReviewRequest")
