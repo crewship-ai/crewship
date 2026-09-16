@@ -31,7 +31,6 @@ func crewWorkspaceGETSchemaCatalogV1() (map[string]map[string]DomainSchema, map[
 	addList := func(path, name string, item map[string]any) { add(path, name, array(item)) }
 
 	member := object(map[string]any{"user_id": str(), "user_name": str(), "email": str(), "role": str(), "capabilities": array(str()), "created_at": str()})
-	issue := object(map[string]any{"id": str(), "identifier": str(), "title": str(), "status": str(), "priority": str(), "description": str(), "created_at": str(), "updated_at": str(), "brief_revision": integer(), "client_review_required": boolean(), "execution": anyObject()})
 	pipeline := object(map[string]any{
 		"step_count":   integer(),
 		"id":           str(),
@@ -65,20 +64,17 @@ func crewWorkspaceGETSchemaCatalogV1() (map[string]map[string]DomainSchema, map[
 	addList("/api/v1/crews/{crewId}/integrations/{integrationId}/tools", "CrewIntegrationToolsResponseV1", object(map[string]any{"name": str(), "description": str(), "enabled": boolean(), "input_schema": anyObject()}))
 	addList("/api/v1/crews/{crewId}/assignments", "CrewAssignmentsResponseV1", object(map[string]any{"id": str(), "issue_id": str(), "agent_id": str(), "status": str(), "created_at": str(), "updated_at": str()}))
 	addList("/api/v1/crews/{crewId}/missions", "CrewMissionsResponseV1", object(map[string]any{"id": str(), "title": str(), "description": str(), "status": str(), "created_at": str(), "updated_at": str()}))
+	// The crew issue sub-resources (GET .../issues/{identifier}, /activity,
+	// /runs, /comments, /relations, /subtasks), /escalations and /provision
+	// are described by schemas_final_workflow_issues.go and
+	// schemas_remaining_crew_agent.go, which win the merge; the V1 entries
+	// that used to sit here were unreachable (#1849).
 	add("/api/v1/crews/{crewId}/missions/{missionId}", "CrewMissionResponseV1", object(map[string]any{"id": str(), "title": str(), "description": str(), "status": str(), "tasks": array(anyObject()), "created_at": str(), "updated_at": str()}))
-	addList("/api/v1/crews/{crewId}/issues/{identifier}/activity", "CrewIssueActivityResponseV1", object(map[string]any{"id": str(), "type": str(), "message": str(), "actor_id": str(), "created_at": str()}))
-	addList("/api/v1/crews/{crewId}/issues/{identifier}/runs", "CrewIssueRunsResponseV1", object(map[string]any{"id": str(), "status": str(), "agent_id": str(), "started_at": str(), "finished_at": str(), "error_message": str()}))
-	addList("/api/v1/crews/{crewId}/issues/{identifier}/comments", "CrewIssueCommentsResponseV1", object(map[string]any{"id": str(), "body": str(), "author_id": str(), "author_name": str(), "created_at": str(), "updated_at": str()}))
-	addList("/api/v1/crews/{crewId}/issues/{identifier}/relations", "CrewIssueRelationsResponseV1", object(map[string]any{"id": str(), "relation_type": str(), "issue_id": str(), "related_issue_id": str()}))
-	addList("/api/v1/crews/{crewId}/issues/{identifier}/subtasks", "CrewIssueSubtasksResponseV1", issue)
-	add("/api/v1/crews/{crewId}/issues/{identifier}", "CrewIssueResponseV1", issue)
 	add("/api/v1/crews/{crewId}/persona", "CrewPersonaResponseV1", object(map[string]any{"crew_id": str(), "content": str(), "version": integer(), "created_at": str(), "updated_at": str()}))
 	add("/api/v1/crews/{crewId}/policy", "CrewPolicyResponseV1", object(map[string]any{"crew_id": str(), "autonomy": str(), "execution": str(), "approval_required": boolean(), "updated_at": str()}))
 	add("/api/v1/crews/{crewId}/peer-conversations", "CrewPeerConversationsResponseV1", object(map[string]any{"conversations": array(anyObject()), "count": integer()}))
 	add("/api/v1/crews/{crewId}/standup", "CrewStandupResponseV1", object(map[string]any{"crew_id": str(), "date": str(), "summary": str(), "items": array(anyObject())}))
-	add("/api/v1/crews/{crewId}/escalations", "CrewEscalationsResponseV1", object(map[string]any{"escalations": array(anyObject()), "count": integer()}))
 	add("/api/v1/crews/{crewId}/port-expose", "CrewPortExposeResponseV1", object(map[string]any{"ports": array(object(map[string]any{"id": str(), "port": integer(), "host": str(), "status": str(), "created_at": str()}))}))
-	add("/api/v1/crews/{crewId}/provision", "CrewProvisionResponseV1", object(map[string]any{"crew_id": str(), "status": str(), "phase": str(), "message": str(), "updated_at": str()}))
 	add("/api/v1/crews/{crewId}/git-diff", "CrewGitDiffResponseV1", object(map[string]any{"diff": str(), "base_ref": str(), "head_ref": str(), "files": array(anyObject())}))
 
 	addList("/api/v1/workspaces/{workspaceId}/members", "WorkspaceMembersResponseV1", member)

@@ -15,6 +15,7 @@ test.describe.configure({ mode: "serial" })
 
 const TIMEOUT = 20_000
 const SLUG = "e2e-reliability-editor-probe"
+const SCHEDULE_NAME = "e2e reliability schedule"
 
 function probeDefinition() {
   return {
@@ -37,7 +38,7 @@ interface Seeded {
 
 async function seedRoutineAndSchedule(page: Page): Promise<Seeded> {
   await page.goto("/")
-  const seeded = await page.evaluate(async (def) => {
+  const seeded = await page.evaluate(async ({ def, schedName }) => {
     const workspaces = await (await fetch("/api/v1/workspaces")).json()
     for (const ws of Array.isArray(workspaces) ? workspaces : []) {
       const crews = await (await fetch(`/api/v1/crews?workspace_id=${ws.id}`)).json()
@@ -68,11 +69,23 @@ async function seedRoutineAndSchedule(page: Page): Promise<Seeded> {
       })
       if (!save.ok) continue
 
+      // Sweep schedules a previous attempt left behind. Deleting the probe
+      // routine (afterAll) soft-deletes the routine only — its schedules
+      // survive, still enabled, still listed under the slug — so a retried
+      // worker used to find two "e2e reliability schedule" rows and every
+      // page-wide locator hit both (#2532).
+      const existing = await (await fetch(`/api/v1/workspaces/${ws.id}/pipeline-schedules`)).json()
+      for (const row of Array.isArray(existing) ? existing : []) {
+        if (row?.name === schedName) {
+          await fetch(`/api/v1/workspaces/${ws.id}/pipeline-schedules/${row.id}`, { method: "DELETE" })
+        }
+      }
+
       const sched = await fetch(`/api/v1/workspaces/${ws.id}/pipeline-schedules`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          name: "e2e reliability schedule",
+          name: schedName,
           target_pipeline_slug: def.name,
           cron_expr: "0 9 * * *",
           timezone: "UTC",
@@ -85,7 +98,7 @@ async function seedRoutineAndSchedule(page: Page): Promise<Seeded> {
       return { workspaceId: ws.id as string, crewId: crewId as string, scheduleId: schedRow.id as string }
     }
     return null
-  }, probeDefinition())
+  }, { def: probeDefinition(), schedName: SCHEDULE_NAME })
 
   expect(
     seeded,
@@ -122,10 +135,14 @@ test.afterAll(async ({ browser }) => {
   try {
     await page.goto("/")
     await page.evaluate(
-      async ([ws, slug]) => {
+      async ([ws, slug, scheduleId]) => {
+        // The schedule first: routine delete does not cascade to it.
+        if (scheduleId) {
+          await fetch(`/api/v1/workspaces/${ws}/pipeline-schedules/${scheduleId}`, { method: "DELETE" })
+        }
         await fetch(`/api/v1/workspaces/${ws}/pipelines/${slug}`, { method: "DELETE" })
       },
-      [seeded?.workspaceId ?? "", SLUG] as const,
+      [seeded?.workspaceId ?? "", SLUG, seeded?.scheduleId ?? ""] as const,
     )
   } finally {
     await page.close()
@@ -138,7 +155,14 @@ test.describe("Reliability editor — edit, preview, save (B9)", () => {
 
     await page.getByRole("button", { name: "Plan", exact: true }).click()
 
-    const editButton = page.getByRole("button", { name: /Edit schedule e2e reliability schedule/i })
+    // Every locator is scoped to the row of the schedule this run seeded —
+    // the tab renders one <li id="schedule-{id}"> per schedule (the deep-link
+    // anchor), and a page-wide "Edit schedule <name>" button lookup breaks
+    // the moment a second schedule carries the same name (#2532).
+    const row = page.locator(`#schedule-${seeded.scheduleId}`)
+    await expect(row).toBeVisible({ timeout: TIMEOUT })
+
+    const editButton = row.getByRole("button", { name: `Edit schedule ${SCHEDULE_NAME}`, exact: true })
     await expect(editButton).toBeVisible({ timeout: TIMEOUT })
     await editButton.click()
 
@@ -167,8 +191,11 @@ test.describe("Reliability editor — edit, preview, save (B9)", () => {
     await expect(dialog).toBeHidden({ timeout: TIMEOUT })
 
     // The read-only row (a6) reflects the edit — this is the whole loop:
-    // edit -> preview -> save -> the display everyone else reads.
-    await expect(page.getByText("Every day at 03:15")).toBeVisible({ timeout: TIMEOUT })
-    await expect(page.getByText(/Europe\/Prague/)).toBeVisible({ timeout: TIMEOUT })
+    // edit -> preview -> save -> the display everyone else reads. The
+    // recurrence line is asserted as one string: since #2514 the row's
+    // "Next:" line also carries the schedule's timezone, so a bare
+    // /Europe\/Prague/ is ambiguous by design, not by accident.
+    await expect(row.getByText("Every day at 03:15 · Europe/Prague")).toBeVisible({ timeout: TIMEOUT })
+    await expect(row.getByText(/^Next: .+ · Europe\/Prague$/)).toBeVisible({ timeout: TIMEOUT })
   })
 })

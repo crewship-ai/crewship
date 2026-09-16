@@ -32,14 +32,28 @@ func executionSchemaComponents() map[string]any {
 		return map[string]any{"type": "string", "format": "date-time"}
 	}
 
+	// pipeline.RunResult — what POST .../runs/{runId}/replay answers with, and
+	// the body a dry run wraps. The required list is graded against the
+	// struct's json tags by TestOpenAPIRequired_MatchesTheStructsOwnJSONTags.
 	runResult := obj(map[string]any{
 		"run_id": str(), "pipeline_id": str(), "pipeline_slug": str(),
 		"status": map[string]any{"type": "string", "enum": []string{"COMPLETED", "FAILED", "CANCELLED", "DEDUPED", "WAITING", "DRY_RUN_OK"}},
 		"output": str(), "step_outputs": stringMap, "would_execute": arr(refOrString("DryRunStep")),
 		"duration_ms": integer(), "cost_usd": number(), "failed_at_step": str(),
 		"error_message": str(), "deduped": boolean(), "waitpoint_token": str(), "current_step": str(),
-	})
-	dryRunStep := obj(map[string]any{"step_id": str(), "type": str(), "agent_slug": str(), "tier": str(), "prompt": str()})
+	}, "run_id", "pipeline_id", "pipeline_slug", "status", "output", "step_outputs", "duration_ms", "cost_usd")
+	// pipeline.DryRunStep: one planned step of a dry run.
+	dryRunStep := obj(map[string]any{
+		"step_id": str(), "step_type": str(), "would_call_agent": str(), "would_call_pipeline": str(),
+		"would_pass": str(), "tier_adapter": str(), "tier_model": str(), "estimated_cost_usd": number(),
+	}, "step_id", "step_type")
+	// POST .../pipelines/{slug}/dry_run answers dryRunResponse: the RunResult
+	// plus the planned manifest, null when the stored definition no longer
+	// parses (pipelines_exec.go).
+	dryRunResult := map[string]any{"allOf": []any{
+		refOrString("RunResult"),
+		obj(map[string]any{"manifest": map[string]any{"type": "object", "additionalProperties": true, "nullable": true}}, "manifest"),
+	}}
 	pipelineRun := obj(map[string]any{
 		"id": str(), "workspace_id": str(), "pipeline_id": str(), "pipeline_slug": str(), "pipeline_name": str(),
 		"status": str(), "mode": str(), "current_step_id": str(), "step_outputs": stringMap, "output": str(),
@@ -99,28 +113,18 @@ func executionSchemaComponents() map[string]any {
 	stateEntry := obj(map[string]any{"key": str(), "value": str(), "updated_at": timeString()})
 	stateBucket := obj(map[string]any{"schedule_id": str(), "entries": arr(refOrString("StateEntry"))})
 	waitpoint := obj(map[string]any{"decision_form": obj(map[string]any{"fields": arr(map[string]any{"type": "object", "additionalProperties": true}), "actions": arr(obj(map[string]any{"id": str(), "label": str(), "approved": map[string]any{"type": "boolean"}}))}), "token": str(), "pipeline_run_id": str(), "step_id": str(), "kind": str(), "prompt": str(), "invoking_crew_id": str(), "timeout_at": timeString(), "created_at": timeString(), "callback_url": str()})
-	replayOutcome := obj(map[string]any{"source_run_id": str(), "new_run_id": str(), "status": str(), "error": str()})
+	// pipeline_runs_replay.go's replayOutcome: only source_run_id is
+	// unconditional; the other three carry omitempty.
+	replayOutcome := obj(map[string]any{"source_run_id": str(), "new_run_id": str(), "status": str(), "error": str()}, "source_run_id")
 	failureGroup := obj(map[string]any{"fingerprint": str(), "count": integer(), "pipeline_slug": str(), "failed_at_step": str(), "sample_error": str(), "run_ids": arr(str())})
 	activeRun := obj(map[string]any{"run_id": str(), "workspace_id": str(), "pipeline_id": str(), "pipeline_slug": str(), "status": str(), "concurrency_key": str(), "started_at": timeString(), "cancel_requested": boolean()})
-	runRequest := obj(map[string]any{
-		"inputs": anyMap, "tier_override": str(), "triggered_via": str(), "triggered_by_id": str(), "idempotency_key": str(),
-		"tags": arr(str()), "metadata": anyMap, "delay_seconds": integer(), "ttl_seconds": integer(), "debounce_key": str(),
-		"debounce_window_seconds": integer(), "debounce_max_seconds": integer(), "priority": integer(), "idempotency_key_ttl_seconds": integer(),
-	})
-	scheduleRequest := obj(map[string]any{
-		"name": str(), "target_pipeline_slug": str(), "target_pipeline_id": str(), "target_pipeline_version": integer(),
-		"cron_expr": str(), "timezone": str(), "inputs": anyMap, "enabled": boolean(), "wake_pipeline_slug": str(),
-		"wake_pipeline_id": str(), "wake_inputs": anyMap, "wake_fail_closed": boolean(), "catchup_policy": str(), "max_consecutive_failures": integer(),
-	})
 	// SchedulePreview — B9 (#2362), §13.2 "When". Stateless: no schedule id,
 	// just the cron/timezone/count that produced the occurrences.
 	schedulePreview := obj(map[string]any{
 		"cron_expr": str(), "timezone": str(), "occurrences": arr(timeString()),
 	})
-	replayRequest := obj(map[string]any{"pinned_version": integer()})
 	bulkReplayRequest := obj(map[string]any{"run_ids": arr(str()), "fingerprint": str(), "limit": integer()})
 	stateWriteRequest := obj(map[string]any{"value": str(), "schedule_id": str()})
-	waitpointApprovalRequest := obj(map[string]any{"approved": boolean(), "comment": str(), "action_id": str(), "data": anyMap})
 	// Appearance is a two-column write, so both fields are optional and an
 	// explicit "" clears the stored value while an absent field keeps it —
 	// the distinction the handler's pointer fields exist for.
@@ -147,15 +151,16 @@ func executionSchemaComponents() map[string]any {
 	}}
 
 	return map[string]any{
-		"RunResult": runResult, "DryRunStep": dryRunStep, "PipelineRun": pipelineRun, "RunFailure": runFailure, "PipelineRunList": obj(map[string]any{"rows": arr(refOrString("PipelineRun")), "count": integer()}), "ActiveRunList": arr(activeRun),
+		"RunResult": runResult, "DryRunStep": dryRunStep, "DryRunResult": dryRunResult, "PipelineRun": pipelineRun, "RunFailure": runFailure, "PipelineRunList": obj(map[string]any{"rows": arr(refOrString("PipelineRun")), "count": integer()}), "ActiveRunList": arr(activeRun),
 		"RunRecord": runRecord, "RunRecordList": arr(refOrString("RunRecord")), "PipelineRunTree": arr(obj(map[string]any{"id": str(), "parent_id": str(), "pipeline_slug": str(), "status": str(), "triggered_via": str(), "cost_usd": number()})),
 		"RunLogEntry": obj(map[string]any{"ts": timeString(), "level": str(), "message": str(), "type": str()}), "RunLogList": arr(refOrString("RunLogEntry")),
 		"Schedule": schedule, "ScheduleList": arr(refOrString("Schedule")), "SchedulePreview": schedulePreview, "RoutineState": obj(map[string]any{"slug": str(), "buckets": arr(refOrString("StateBucket"))}),
 		"StateEntry": stateEntry, "StateBucket": stateBucket, "Waitpoint": waitpoint, "WaitpointList": arr(refOrString("Waitpoint")),
-		"ReplayOutcome": replayOutcome, "BulkReplayResult": obj(map[string]any{"requested": integer(), "replayed": integer(), "results": arr(refOrString("ReplayOutcome"))}),
+		"ReplayOutcome": replayOutcome, "BulkReplayResult": obj(map[string]any{"requested": integer(), "replayed": integer(), "results": arr(refOrString("ReplayOutcome"))}, "requested", "replayed", "results"),
 		"FailureGroup": failureGroup, "FailureGroupList": obj(map[string]any{"groups": arr(refOrString("FailureGroup"))}), "RunWarning": warning, "AgentSubSpan": span,
-		"PipelineRunRequest": runRequest, "ScheduleRequest": scheduleRequest, "ReplayRequest": replayRequest, "BulkReplayRequest": bulkReplayRequest,
-		"StateWriteRequest": stateWriteRequest, "WaitpointApprovalRequest": waitpointApprovalRequest,
+		// The run, schedule, replay and waitpoint-approval request bodies are
+		// owned by schemas_workflow_request_audit.go (Workflow…Request).
+		"BulkReplayRequest": bulkReplayRequest, "StateWriteRequest": stateWriteRequest,
 		"PipelineAppearanceRequest": appearanceRequest, "PipelineAppearanceRoutine": appearanceRoutine,
 		"PipelineAppearanceResponse": appearanceResponse,
 	}
@@ -180,20 +185,20 @@ func executionResponseSchemas() map[string]string {
 		"GET /api/v1/workspaces/{workspaceId}/pipelines/{slug}/state":       "RoutineState",
 
 		"PATCH /api/v1/workspaces/{workspaceId}/pipelines/{slug}/appearance": "PipelineAppearanceResponse",
+
+		// Mutations that answer with an execution result rather than a
+		// status envelope (pipelines_exec.go, pipeline_runs_replay.go).
+		"POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/dry_run":      "DryRunResult",
+		"POST /api/v1/workspaces/{workspaceId}/pipelines/runs/{runId}/replay": "RunResult",
+		"POST /api/v1/workspaces/{workspaceId}/pipelines/runs/bulk_replay":    "BulkReplayResult",
 	}
 }
 
 // DomainRequestSchemas maps mutation endpoints to their JSON request schema.
 func executionRequestSchemas() map[string]string {
 	return map[string]string{
-		"POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/run":                 "PipelineRunRequest",
-		"POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/run_batch":           "PipelineRunRequest",
-		"POST /api/v1/workspaces/{workspaceId}/pipeline-schedules":                   "ScheduleRequest",
-		"PATCH /api/v1/workspaces/{workspaceId}/pipeline-schedules/{scheduleId}":     "ScheduleRequest",
-		"POST /api/v1/workspaces/{workspaceId}/pipelines/runs/bulk_replay":           "BulkReplayRequest",
-		"POST /api/v1/workspaces/{workspaceId}/pipelines/runs/{runId}/replay":        "ReplayRequest",
-		"PUT /api/v1/workspaces/{workspaceId}/pipelines/{slug}/state/{key}":          "StateWriteRequest",
-		"POST /api/v1/workspaces/{workspaceId}/pipelines/waitpoints/{token}/approve": "WaitpointApprovalRequest",
-		"PATCH /api/v1/workspaces/{workspaceId}/pipelines/{slug}/appearance":         "PipelineAppearanceRequest",
+		"POST /api/v1/workspaces/{workspaceId}/pipelines/runs/bulk_replay":   "BulkReplayRequest",
+		"PUT /api/v1/workspaces/{workspaceId}/pipelines/{slug}/state/{key}":  "StateWriteRequest",
+		"PATCH /api/v1/workspaces/{workspaceId}/pipelines/{slug}/appearance": "PipelineAppearanceRequest",
 	}
 }
