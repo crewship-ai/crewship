@@ -27,12 +27,12 @@ A mission progresses through these states:
 1. **PLANNING** -- Mission created, tasks defined (or waiting for Lead to plan)
 2. **IN_PROGRESS** -- Tasks being scheduled and executed
 3. **REVIEW** -- All tasks finished (none failed). The mission enters review before final completion, allowing humans to inspect results
-4. **COMPLETED** -- Mission accepted after review
+4. **DONE** -- Mission accepted after review (`COMPLETED` is the retired name; the mission API still accepts it as input and normalises it to `DONE`)
 5. **FAILED** -- A task failed and could not recover, or deadlock/timeout detected
 6. **CANCELLED** -- Manually stopped by user or system
 
 <Note>
-  The REVIEW state is inserted between IN_PROGRESS and COMPLETED. When all tasks reach a terminal state (COMPLETED, FAILED, or SKIPPED) and none have failed, the mission transitions to REVIEW rather than directly to COMPLETED. If any task failed, the mission transitions to FAILED instead.
+  The REVIEW state is inserted between IN_PROGRESS and DONE. When all tasks reach a terminal state (a *task* still finishes as COMPLETED, FAILED, or SKIPPED) and none have failed, the mission transitions to REVIEW rather than directly to DONE. If any task failed, the mission transitions to FAILED instead.
 </Note>
 
 ## The Mission Engine
@@ -63,6 +63,8 @@ The `runMissionLoop` function runs as a goroutine for each active mission. Every
 ### Restart Durability
 
 Mission loops are in-memory goroutines, but missions survive server restarts. At boot — right after orphaned-run recovery — the server scans the database for missions still in `IN_PROGRESS` and re-attaches an orchestration loop to each one. Tasks the previous process never dispatched are picked up on the next tick, and `BLOCKED` tasks whose dependencies already completed are self-healed back to `PENDING`. No operator action is needed after a restart or crash; the 2-hour mission timeout restarts from the moment of re-attach.
+
+Recovery of the runs themselves is keyed on a **lease**, not on when the recovering process booted. Every `RUNNING` assignment carries `lease_owner` (the `hostname:pid` driving it) and `lease_expires_at`, stamped at dispatch with a 90-second TTL and renewed by a 20-second heartbeat for as long as the run is in flight — a single missed renewal cannot expire a healthy run, only an owner that has stopped renewing entirely. A sweeper ticks every 15 seconds and fails any `RUNNING` row whose lease has lapsed, through the same path a stuck-run sweep uses, so a crashed process's runs are reaped within roughly two minutes rather than after the old two-hour floor. A row whose lease another, still-live process keeps renewing is never touched, which is what makes two replicas safe; the boot-time scan honours the same rule for the window before the sweeper's first tick.
 
 ## Scaling / Concurrency
 
@@ -627,6 +629,8 @@ file descriptor 3 — never on a command line), the `GET`s included.
 | `/issue/{identifier}/attachments` | GET | List the files attached to the issue (metadata only) |
 | `/issue/{identifier}/attachments/{id}` | GET | Read one attachment — text arrives fenced, everything else base64 |
 | `/issue/{identifier}/attachments` | POST | Attach a file the agent produced (`filename` + `content_base64`, max 6 MiB) |
+| `/issue/{identifier}/comments` | GET | Read the comment thread, oldest first — comment bodies arrive fenced as untrusted text |
+| `/issue/{identifier}/work` | POST | Hand the issue's work off (`operation_id`, `revision`, `action`, `target_id`, `note`). An agent may only `handoff_agent` or `handoff_human`, and only while it is the issue's current delegate; `take_over` and `submit` are refused as human-only |
 
 Identifiers are the human-readable ones (`ENG-42`), not row ids.
 
