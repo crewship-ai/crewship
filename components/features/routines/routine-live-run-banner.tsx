@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { Eye, Gavel, Square } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
@@ -32,7 +32,10 @@ export function RoutineLiveRunBanner({
   onOpen: (runId: string) => void
   onStop: (runId: string) => void | Promise<void>
 }) {
-  const [confirming, setConfirming] = useState(false)
+  const [selectedRunId, setSelectedRunId] = useState<string | null>(null)
+  useEffect(() => {
+    if (!canStop || !runs.some((run) => run.id === selectedRunId)) setSelectedRunId(null)
+  }, [runs, canStop, selectedRunId])
   if (!runs.length) return null
   const run = runs[0]
   const waiting = run.status === "waiting"
@@ -73,21 +76,23 @@ export function RoutineLiveRunBanner({
           {waiting ? "Decide" : "Watch"}
         </Button>
         {canStop && (
-          <Button size="sm" variant="ghost" disabled={stopping} onClick={() => setConfirming(true)} className="h-8 gap-1.5 text-muted-foreground hover:text-destructive">
+          <Button size="sm" variant="ghost" disabled={stopping} onClick={() => setSelectedRunId(run.id)} className="h-8 gap-1.5 text-muted-foreground hover:text-destructive">
             {stopping ? <Spinner className="h-3.5 w-3.5" /> : <Square className="h-3.5 w-3.5" />}
             Stop
           </Button>
         )}
       </div>
       <ConfirmDialog
-        open={confirming}
-        onOpenChange={setConfirming}
+        open={selectedRunId !== null}
+        onOpenChange={(open) => { if (!open) setSelectedRunId(null) }}
         title="Stop this run?"
         description="Pending work is asked to stop. What already happened — a ledger write, a message — is not undone. Recorded results stay in History."
         confirmLabel="Stop run"
         cancelLabel="Keep running"
         destructive
-        onConfirm={() => onStop(run.id)}
+        onConfirm={() => {
+          if (canStop && selectedRunId && runs.some((run) => run.id === selectedRunId)) return onStop(selectedRunId)
+        }}
       />
     </div>
   )

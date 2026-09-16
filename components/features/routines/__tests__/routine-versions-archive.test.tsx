@@ -1,4 +1,5 @@
 import { useState } from "react"
+import { toast } from "sonner"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { RoutineVersionsTab } from "../routine-versions-tab"
@@ -74,5 +75,49 @@ describe("historical recipe inspection", () => {
     const del = fetcher.mock.calls.find(([, init]) => init?.method === "DELETE")!
     expect(del[0]).toBe("/api/v1/workspaces/ws/pipelines/recipe/draft")
     expect(JSON.parse(String(del[1].body))).toEqual({ id: "drf_1", revision: 3 })
+  })
+})
+
+describe("restore draft concurrency", () => {
+  it.each([
+    { name: "a newer revision", seen: { id: "draft-old", revision: 3 }, loaded: { id: "draft-old", revision: 5 } },
+    { name: "a draft created since rendering", seen: undefined, loaded: { id: "draft-new", revision: 1 } },
+    { name: "a replacement draft with the same revision", seen: { id: "draft-old", revision: 3 }, loaded: { id: "draft-new", revision: 3 } },
+  ])("refuses to overwrite $name that the operator did not confirm", async ({ seen, loaded }) => {
+    vi.mocked(toast.error).mockClear()
+    const changed = vi.fn()
+    fetcher.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url.endsWith("/versions")) return json([{ version: 2, is_head: true }, { version: 1 }])
+      if (url.endsWith("/versions/1")) return json({ version: 1, definition })
+      if (url.endsWith("/recipe/draft")) return json({ ...loaded, slug: "recipe", base_pipeline_id: "pipe-1", base_revision: 2, document: { definition: { steps: [] } } })
+      if (init?.method === "POST") return json({ ...loaded, revision: loaded.revision + 1, document: {} })
+      throw new Error(`unexpected ${url}`)
+    })
+    render(<RoutineVersionsTab workspaceId="ws" slug="recipe" draft={seen ? { ...seen, updated_at: "2026-09-16T00:00:00Z", updated_by: "someone" } : undefined} onChanged={changed} />)
+    fireEvent.click(await screen.findByRole("button", { name: "Restore as draft" }))
+    await waitFor(() => expect(toast.error).toHaveBeenCalled())
+    expect(fetcher.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false)
+    expect(changed).not.toHaveBeenCalled()
+  })
+
+  it.each([200, 409])("saves the confirmed revision with server CAS (HTTP %i)", async (status) => {
+    vi.mocked(toast.error).mockClear()
+    const changed = vi.fn()
+    fetcher.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url.endsWith("/versions")) return json([{ version: 2, is_head: true }, { version: 1 }])
+      if (url.endsWith("/versions/1")) return json({ version: 1, definition })
+      if (url.endsWith("/recipe/draft")) return json({ id: "draft-old", slug: "recipe", revision: 3, base_pipeline_id: "pipe-1", base_revision: 2, document: {} })
+      if (init?.method === "POST") return status === 409
+        ? { ok: false, status, json: async () => ({ error: "Draft changed during save" }) }
+        : json({ id: "draft-old", revision: 4, document: {} })
+      throw new Error(`unexpected ${url}`)
+    })
+    render(<RoutineVersionsTab workspaceId="ws" slug="recipe" draft={{ id: "draft-old", revision: 3, updated_at: "2026-09-16T00:00:00Z" }} onChanged={changed} />)
+    fireEvent.click(await screen.findByRole("button", { name: "Restore as draft" }))
+    await waitFor(() => expect(status === 409 ? toast.error : changed).toHaveBeenCalled())
+    const writes = fetcher.mock.calls.filter(([, init]) => init?.method === "POST")
+    expect(writes).toHaveLength(1)
+    expect(JSON.parse(String(writes[0][1].body))).toMatchObject({ id: "draft-old", revision: 3, base_pipeline_id: "pipe-1", base_revision: 2, document: { definition } })
+    if (status === 409) expect(changed).not.toHaveBeenCalled()
   })
 })

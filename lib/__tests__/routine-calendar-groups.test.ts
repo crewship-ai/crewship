@@ -7,7 +7,6 @@ import {
   daySummary,
   groupByRoutine,
   matchesCalendarFilter,
-  monthCell,
   timeRange,
   type CalendarEntry,
 } from "../routine-calendar-groups"
@@ -32,60 +31,6 @@ describe("calendarOutcome", () => {
     expect(calendarOutcome(ran("a", 8, "waiting"))).toBe("waiting")
     expect(calendarOutcome(ran("a", 8, "running"))).toBe("running")
     expect(calendarOutcome(ran("a", 8, "cancelled"))).toBe("stopped")
-  })
-})
-
-describe("month cell density", () => {
-  it("lists one entry as a row", () => {
-    const cell = monthCell([planned("invoice", 8)])
-    expect(cell.mode).toBe("rows")
-    if (cell.mode === "rows") expect(cell.entries).toHaveLength(1)
-  })
-
-  it("lists three entries as rows, sorted by time", () => {
-    const cell = monthCell([planned("b", 9), ran("a", 7, "completed"), planned("c", 8)])
-    expect(cell.mode).toBe("rows")
-    if (cell.mode === "rows") expect(cell.entries.map((e) => e.slug)).toEqual(["a", "c", "b"])
-  })
-
-  it("folds four entries into one row per routine with counts and a time range", () => {
-    const cell = monthCell([
-      ran("classify", 9, "completed"),
-      ran("classify", 11, "failed"),
-      ran("classify", 15, "waiting"),
-      planned("invoice", 8),
-    ])
-    expect(cell.mode).toBe("groups")
-    if (cell.mode !== "groups") return
-    expect(cell.groups.map((g) => g.slug)).toEqual(["invoice", "classify"])
-    const classify = cell.groups[1]
-    expect(classify.entries).toHaveLength(3)
-    expect(classify.first).toBe("09:00")
-    expect(classify.last).toBe("15:00")
-    expect(classify.counts).toEqual({ completed: 1, failed: 1, waiting: 1 })
-    expect(classify.allPlanned).toBe(false)
-    expect(cell.groups[0].allPlanned).toBe(true)
-    expect(cell.hidden).toBe(0)
-    expect(cell.summary).toBe("1 planned · 3 ran · 1 failed · 1 waiting")
-  })
-
-  it("shows at most three routines for a day with fifty starts and says how many more", () => {
-    const entries: CalendarEntry[] = []
-    for (let i = 0; i < 38; i++) entries.push(planned("classify", 8 + Math.floor(i / 4), (i % 4) * 15))
-    for (let i = 0; i < 6; i++) entries.push(planned("digest", 6 + i))
-    for (let i = 0; i < 4; i++) entries.push(ran("audit", 1 + i, "completed"))
-    entries.push(planned("renewal", 12), planned("briefing", 7))
-    expect(entries).toHaveLength(50)
-    const cell = monthCell(entries)
-    expect(cell.mode).toBe("groups")
-    if (cell.mode !== "groups") return
-    expect(cell.groups).toHaveLength(3)
-    // Earliest first: the audit runs at 01:00, the digest at 06:00, the briefing at 07:00.
-    expect(cell.groups.map((g) => g.slug)).toEqual(["audit", "digest", "briefing"])
-    expect(cell.hidden).toBe(2)
-    expect(cell.total).toBe(50)
-    expect(cell.density).toBe(100)
-    expect(cell.summary).toBe("46 planned · 4 ran")
   })
 })
 

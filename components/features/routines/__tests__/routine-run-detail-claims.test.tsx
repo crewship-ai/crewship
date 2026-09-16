@@ -329,7 +329,7 @@ describe("routine run detail — one page, one order (#2519)", () => {
     expect(next.textContent).toContain("If the input was wrong")
     expect(next.textContent).toContain("If a rule is too strict")
     expect(next.textContent).toContain("Keeps failing?")
-    expect(next.textContent).toContain("crewship routine draft monthly-billing")
+    expect(next.textContent).toContain("crewship routine draft get monthly-billing")
     expect(order(error, next)).toBe(-1)
     expect(screen.queryByRole("link", { name: "Edit recipe" })).toBeNull()
     expect(within(next).getByRole("link", { name: "History" }).getAttribute("href")).toBe(

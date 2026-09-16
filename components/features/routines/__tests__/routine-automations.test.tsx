@@ -114,7 +114,7 @@ vi.mock("@/hooks/use-automations", () => ({
   }),
 }))
 
-import { RoutineCardDetail } from "../routine-card-detail"
+import { inOneLook, RoutineCardDetail } from "../routine-card-detail"
 
 function routine(over: Partial<RoutineDetail> = {}): RoutineDetail {
   return {
@@ -453,5 +453,15 @@ describe("routine access and starting points", () => {
     expect(host.closest("details")).not.toHaveAttribute("open")
     fireEvent.click(screen.getByText("Allowed network hosts"))
     expect(host.closest("details")).toHaveAttribute("open")
+  })
+})
+
+
+describe("human decision summary", () => {
+  it.each([3600, 0, undefined])("uses the engine step timeout (%s), not a wait-specific field", (timeout_seconds) => {
+    const rows = inOneLook(routine({ definition: { steps: [{ id: "approve", name: "Finance approval", type: "wait", timeout_seconds, wait: { kind: "approval", timeout_sec: 30 } }] } }), [])
+    expect(rows.find((row) => row.label === "When it needs you")?.text).toBe(
+      `At “Finance approval”${timeout_seconds ? " · answer within 1 h" : ""}`,
+    )
   })
 })

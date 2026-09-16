@@ -154,10 +154,10 @@ function FileRow({
         aria-current={!node.is_dir && selected === node.path ? "true" : undefined}
         onClick={() => (node.is_dir ? onToggle(node.path) : file && onOpen(file))}
         className={cn(
-          "flex w-full items-center gap-1.5 rounded-md py-1 pr-2 text-left text-xs transition-colors",
+          "flex w-full items-center gap-1.5 rounded-md py-1 pr-2 pl-[var(--row-indent)] text-left text-xs transition-colors",
           !node.is_dir && selected === node.path ? "bg-primary/10 text-primary" : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
         )}
-        style={{ paddingLeft: `${depth * 14 + 8}px` }}
+        style={{ "--row-indent": `${depth * 14 + 8}px` } as React.CSSProperties}
       >
         {node.is_dir ? (
           isOpen ? <ChevronDown className="h-3 w-3 shrink-0" /> : <ChevronRight className="h-3 w-3 shrink-0" />

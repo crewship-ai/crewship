@@ -29,7 +29,7 @@ current user id, otherwise as the raw id (no lookup).
 "files": [
   { "path": "scripts/ledger-post.go", "language": "go", "interpreter": "go",
     "step_ids": ["post"], "description": "Posts one invoice to the ERP ledger",
-    "size_bytes": 4120, "updated_at": "…", "present": true }
+    "size_bytes": 4120, "updated_at": "…", "present": true, "status": "present" }
 ]
 ```
 
@@ -40,8 +40,12 @@ extension (`go py ts js sh bash yaml yml json md sql`), `interpreter` from
 `script.interpreter` or the extension. `present`, `size_bytes`, `updated_at`
 come from the author crew's shared volume via the existing crew files
 reader (the same path `routine export --scripts` uses); when the crew or the
-volume is unavailable, `present` is `false` and the size/time are omitted —
-never fail the detail request because of a file. `description` = the first
+volume is unavailable, `status` is `unverified` and the size/time are omitted.
+`status` is authoritative: `present` means verified present, `missing` means
+verified absent, and `unverified` means the share could not be checked. The
+compatibility boolean `present` is false for both missing and unverified files;
+never infer absence from it when `status` is available. A file lookup failure
+does not fail the detail request. `description` = the first
 comment line(s) of the file (`//`, `#`, `/* */`, `<!-- -->`, max 200 chars),
 empty when unreadable. `files` is `[]` when nothing is declared.
 
@@ -51,7 +55,7 @@ empty when unreadable. `files` is `[]` when nothing is declared.
 "failure": {
   "kind": "checker_rejected",
   "step_id": "verify", "step_name": "Check the extraction",
-  "summary": "The checker rejected the result after 3 model tiers: total_equals_lines.",
+  "summary": "The checker rejected the result after exhausting the allowed model tiers: total_equals_lines.",
   "kept_step_ids": ["extract"], "not_done_step_ids": ["decide", "post", "notify"]
 }
 ```

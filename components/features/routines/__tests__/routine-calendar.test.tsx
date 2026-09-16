@@ -11,7 +11,7 @@ vi.mock("@/components/ui/crew-icon", () => ({ CrewIcon: ({ icon }: { icon: strin
 vi.mock("next/link", () => ({ default: ({ children, ...props }: React.AnchorHTMLAttributes<HTMLAnchorElement>) => <a {...props}>{children}</a> }))
 
 describe("full routine calendar", () => {
-  it("loads every month of the year with bounded intervals, marks density per day and plans from leap day", async () => {
+  it("loads every month of the year with bounded intervals, marks density per day and plans from the selected day", async () => {
     fetcher.mockImplementation(async (url: string) => {
       const params = new URL(url, "https://example.test").searchParams
       const from = params.get("from")!

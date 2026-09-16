@@ -514,7 +514,7 @@ export function RoutineSchedulesTab({
                 "No overlap limit is configured. Runs can start at the same time."
               )}{" "}
               Change it with the CLI (
-              <span className="font-mono">crewship routine draft {slug}</span>).
+              <span className="font-mono">crewship routine draft get {slug}</span>).
               <details className="mt-2">
                 <summary className="cursor-pointer">Technical details</summary>
                 <span className="font-mono">concurrency_key</span> /{" "}

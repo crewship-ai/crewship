@@ -128,6 +128,7 @@ export function RoutineVersionsTab({ workspaceId, slug, draft, routine, onPublis
   /** Load the archived definition and save it as the routine's draft. */
   const restoreAsDraft = async (version: number) => {
     if (busy) return
+    const expectedDraft = draft ? { id: draft.id, revision: draft.revision } : null
     if (draft && !window.confirm(`Replace draft r${draft.revision} with the recipe of v${version}? The draft's current content is lost; nothing published changes.`)) return
     setBusy(`restore:${version}`)
     try {
@@ -135,6 +136,11 @@ export function RoutineVersionsTab({ workspaceId, slug, draft, routine, onPublis
       if (!res.ok) throw new Error("This historical version could not be loaded.")
       const archived: VersionDetail = await res.json()
       const baseline = await loadRoutineDraft(workspaceId, slug)
+      if (expectedDraft
+        ? baseline.id !== expectedDraft.id || baseline.revision !== expectedDraft.revision
+        : !!baseline.id) {
+        throw new Error("The draft changed while you were restoring this version. Refresh and review the current draft before trying again.")
+      }
       const definition = archived.definition
       const document: Record<string, unknown> = {
         ...(baseline.id ? baseline.document : {}),

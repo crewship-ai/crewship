@@ -24,6 +24,16 @@ describe("formatAgo / formatUntil", () => {
 })
 
 describe("routineRunBanner", () => {
+  it.each([
+    { status: "success" },
+    { status: "succeeded" },
+    { status: "recorded", outcome: "NO_CHANGE" },
+  ])("keeps successful terminal aliases green without inventing skipped steps: %j", (run) => {
+    const banner = routineRunBanner({ run: { ...run, step_outputs: {} }, steps })
+    expect(banner.tone).toBe("success")
+    expect(banner.detail).not.toMatch(/Skipped:|Notified/)
+  })
+
   it("names who needs to decide, why, and when the decision expires", () => {
     const banner = routineRunBanner({
       run: { status: "waiting", current_step_id: "decide" },

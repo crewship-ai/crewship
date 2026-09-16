@@ -11,7 +11,7 @@ import { STATUS_BADGE_CLASSES, STATUS_DOT_CLASSES } from "@/lib/colors"
 import { AgentlessBadge } from "./routine-agentless-badge"
 import { toast } from "sonner"
 import { apiFetch } from "@/lib/api-fetch"
-import { loadRoutineDraft } from "@/lib/routine-drafts"
+import { loadRoutineDraft, RoutineDraftError } from "@/lib/routine-drafts"
 import { RoutineStartIntent } from "@/lib/routine-start-intent"
 import { useAbilities } from "@/hooks/use-abilities"
 import {
@@ -838,8 +838,9 @@ async function routineFromDraftOnly(
   let draft
   try {
     draft = await loadRoutineDraft(workspaceId, slug, signal)
-  } catch {
-    return null
+  } catch (error) {
+    if (error instanceof RoutineDraftError && error.status === 404) return null
+    throw error
   }
   if (!draft?.id) return null
   const doc = draft.document ?? {}

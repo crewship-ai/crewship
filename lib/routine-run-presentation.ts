@@ -341,6 +341,8 @@ export function routineRunBanner(input: RunBannerInput): RunBanner {
     }
   }
 
+  if (presentation.tone === "success") return { tone: "success", ...explanation }
+
   return {
     tone: presentation.tone === "warn" ? "warn" : presentation.tone === "blue" ? "blue" : "default",
     ...explanation,

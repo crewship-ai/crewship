@@ -609,7 +609,7 @@ export function RoutineRunDetail({ workspaceId, runId }: RoutineRunDetailProps) 
               )}
               , or edit it with the CLI (
               <code className="font-mono text-[11px]">
-                crewship routine draft {run.pipeline_slug}
+                crewship routine draft get {run.pipeline_slug}
               </code>
               ). Either way you get a draft to publish.
             </li>

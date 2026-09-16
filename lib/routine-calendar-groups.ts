@@ -1,11 +1,8 @@
 import { routineRunPresentation } from "./routine-run-presentation"
 
-// The calendar's density rules (docs/ux/routines-operator-console-2026-09-15.md
-// §3, screen 1b). A month cell has a fixed height and never scrolls: up to
-// three entries are rows, more than three fold into one row per routine with
-// a count and a time range; the day agenda keeps routines with one or two
-// entries as rows and collapses the rest. Everything here is pure so the
-// thresholds are tested without a DOM.
+// Pure grouping and filtering for the calendar's day agenda. Routines with
+// one or two entries stay as rows; larger groups can be expanded. Month-cell
+// truncation belongs to RoutineCalendar, which displays two entries plus overflow.
 
 export interface CalendarEntry {
   id: string
@@ -165,35 +162,6 @@ export function daySummary(entries: CalendarEntry[]): string {
   ]
     .filter(Boolean)
     .join(" · ")
-}
-
-export const MONTH_CELL_ROW_LIMIT = 3
-export const MONTH_CELL_GROUP_LIMIT = 3
-
-export type MonthCell =
-  | { mode: "rows"; entries: CalendarEntry[] }
-  | {
-      mode: "groups"
-      groups: RoutineGroup[]
-      /** Routines beyond the first three. */
-      hidden: number
-      total: number
-      summary: string
-      /** 0–100, the width of the density bar. */
-      density: number
-    }
-
-export function monthCell(entries: CalendarEntry[]): MonthCell {
-  if (entries.length <= MONTH_CELL_ROW_LIMIT) return { mode: "rows", entries: sortByTime(entries) }
-  const groups = groupByRoutine(entries)
-  return {
-    mode: "groups",
-    groups: groups.slice(0, MONTH_CELL_GROUP_LIMIT),
-    hidden: Math.max(0, groups.length - MONTH_CELL_GROUP_LIMIT),
-    total: entries.length,
-    summary: daySummary(entries),
-    density: Math.min(100, entries.length * 2),
-  }
 }
 
 export const AGENDA_COLLAPSE_ABOVE = 2

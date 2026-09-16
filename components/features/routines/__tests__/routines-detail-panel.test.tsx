@@ -559,4 +559,18 @@ describe("<RoutinesDetailPanel> — a slug with a draft and no published routine
     render(<RoutinesDetailPanel {...defaultProps} slug="gone" />)
     expect(await screen.findByText(/fetch routine: 404/)).toBeInTheDocument()
   })
+
+  it.each([403, 500, "network"])("preserves a draft lookup failure (%s) instead of reporting not found", async (status) => {
+    vi.mocked(apiFetch).mockImplementation(async (url) => {
+      if (String(url).endsWith("/draft")) {
+        if (status === "network") throw new Error("Draft network unavailable")
+        return { ok: false, status, json: async () => ({ error: `Draft request failed: ${status}` }) } as Response
+      }
+      if (String(url).endsWith("/pipelines/gone")) return notFound()
+      return okJSON([])
+    })
+    render(<RoutinesDetailPanel {...defaultProps} slug="gone" />)
+    expect(await screen.findByText(status === "network" ? "Draft network unavailable" : `Draft request failed: ${status}`)).toBeInTheDocument()
+    expect(screen.queryByText(/fetch routine: 404/)).toBeNull()
+  })
 })

@@ -3,8 +3,8 @@
 // pages read as one. The tests pin the numbers and the wiring; the pieces
 // themselves are covered where they live.
 
-import { describe, it, expect, vi } from "vitest"
-import { render, screen, within, fireEvent } from "@testing-library/react"
+import { afterEach, beforeEach, describe, it, expect, vi } from "vitest"
+import { render, screen, fireEvent } from "@testing-library/react"
 import type { Pipeline } from "@/hooks/use-pipelines"
 import type { PipelineSchedule } from "@/hooks/use-pipeline-schedules"
 import { RoutinesDashboard, outcomeKpis, runOutcomesByDay, type DashboardRun } from "../routines-dashboard"
@@ -18,7 +18,10 @@ vi.mock("@/components/features/dashboard/run-volume-chart", () => ({
   ),
 }))
 
-const hoursAgo = (h: number) => new Date(Date.now() - h * 3_600_000).toISOString()
+const NOW = new Date(2026, 8, 16, 12).getTime()
+beforeEach(() => { vi.useFakeTimers({ toFake: ["Date"] }); vi.setSystemTime(NOW) })
+afterEach(() => vi.useRealTimers())
+const hoursAgo = (h: number) => new Date(NOW - h * 3_600_000).toISOString()
 const routines = [
   { id: "1", slug: "invoice", name: "Invoice intake", head_version: 3, invocation_count: 9, draft: { id: "d", revision: 2, updated_at: hoursAgo(1) } },
   { id: "2", slug: "briefing", name: "Morning briefing", head_version: 5, invocation_count: 4, last_invocation_status: "failed", last_invoked_at: hoursAgo(3) },
@@ -33,8 +36,8 @@ const runs: DashboardRun[] = [
   { id: "other", pipeline_slug: "not-mine", pipeline_name: "Elsewhere", status: "failed", started_at: hoursAgo(1) },
 ]
 const schedules = [
-  { id: "s1", name: "x", enabled: true, cron_expr: "0 8 * * 1-5", timezone: "Europe/Prague", target_pipeline_slug: "invoice", next_run_at: new Date(Date.now() + 3_600_000).toISOString() },
-  { id: "s2", name: "y", enabled: false, cron_expr: "0 9 * * *", timezone: "UTC", target_pipeline_slug: "briefing", next_run_at: new Date(Date.now() + 7_200_000).toISOString() },
+  { id: "s1", name: "x", enabled: true, cron_expr: "0 8 * * 1-5", timezone: "Europe/Prague", target_pipeline_slug: "invoice", next_run_at: new Date(NOW + 3_600_000).toISOString() },
+  { id: "s2", name: "y", enabled: false, cron_expr: "0 9 * * *", timezone: "UTC", target_pipeline_slug: "briefing", next_run_at: new Date(NOW + 7_200_000).toISOString() },
 ] as unknown as PipelineSchedule[]
 const mine = runs.filter((r) => r.pipeline_slug !== "not-mine")
 

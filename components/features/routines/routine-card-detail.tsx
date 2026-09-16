@@ -546,9 +546,8 @@ export function inOneLook(
   const checkedText = checked.length ? checked.join("; ") + "." : "No checks declared — completion alone does not prove quality."
 
   const needs = people.map((s) => {
-    const wait = isRecord(s.wait) ? s.wait : {}
     const when = typeof s.if === "string" && s.if.trim() ? `Only when ${s.if.trim()}` : `At “${nameOf(String(s.id))}”`
-    const timeout = typeof wait.timeout_sec === "number" && wait.timeout_sec > 0 ? ` · answer within ${describeTimeout(wait.timeout_sec)}` : ""
+    const timeout = typeof s.timeout_seconds === "number" && s.timeout_seconds > 0 ? ` · answer within ${describeTimeout(s.timeout_seconds)}` : ""
     return when + timeout
   })
   const needsText = needs.length ? needs.join("; ") : "Never — it runs without a decision."

@@ -217,11 +217,10 @@ export function RoutineCalendar({
 
   /** One entry in the hour grid: time, icon, name, state. */
   const eventLink = (event: CalendarEntry) => {
-    const routine = bySlug.get(event.slug)!
     const label =
       event.kind === "run"
         ? routineRunPresentation(event).label
-        : `${event.kind === "pending" ? "Scheduled once" : "Planned"} · ${event.pinned_version ? `v${event.pinned_version}` : event.kind === "pending" ? "legacy live version" : "published at start"}`
+        : `${event.kind === "pending" ? "Scheduled once" : "Planned"} · ${calendarVersionLabel(event)}`
     return (
       <Link
         key={`${event.kind}:${event.id}`}
@@ -237,7 +236,7 @@ export function RoutineCalendar({
         {icon(event.slug)}
         <span className="min-w-0">
           <span className="block font-medium">{calendarClock(event.at)}</span>
-          <span className="block truncate">{routine.name || event.name}</span>
+          <span className="block truncate">{nameOf(event.slug, event.name)}</span>
           <span className="block text-muted-foreground">{label}</span>
           {event.kind !== "run" && (
             <span className="block truncate text-muted-foreground">
