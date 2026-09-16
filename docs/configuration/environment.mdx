@@ -149,6 +149,16 @@ These are not configuration — Crewship sets them on the crew container itself,
 |----------|-------------|
 | `CREWSHIP_CREW_ID` | The crew's id. Set on every crew container by both providers, and the one variable the Apple provider guarantees regardless of what the devcontainer's own `containerEnv` asks for. Useful for a hook or script that needs to know which crew it is running in. |
 
+### Read by the sidecar inside the container
+
+These are read by the **sidecar process** in the crew container, not by `crewshipd`. They only take effect when they are present in the crew container's environment (set by whatever launches the container — nothing inside the container can change them), and none of them is set by a normal deployment.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CREWSHIP_MEMORY_REQUIRE_GUARANTEED` | (unset — off) | `1`/`true`/`yes`/`on` makes the guaranteed memory-write profile mandatory for every agent-side write, whatever profile the caller asked for; a write the host path cannot serve is then refused (`503` / `memory_guaranteed_unavailable`) instead of being performed locally. Leave it off where agents run without a per-run capability. Read by `internal/sidecar/memory_write.go`; details in [Agent memory](/guides/agent-memory). |
+| `CREWSHIP_SIDECAR_STATE_DIR` | `/tmp/crewship-sidecar-state` | Directory of the sidecar's durable run journal (which per-run tokens are still live). The default is created `0700` under the sticky `/tmp` so the agent UID cannot unlink it; pointing it at a weaker directory drops that protection. Exists for tests. Read by `internal/sidecar/run_registry.go`; details in [Orchestration](/guides/orchestration#crewship_sidecar_state_dir). |
+| `CREWSHIP_SIDECAR_RUN_AUTHORITY` | (unset — off) | `1` makes the sidecar ask `crewshipd` whether a run is still an active attempt in the work ledger instead of trusting local evidence alone. **Must stay off** until every run producer dispatches through the ledger: today only webhook-triggered runs do, and with it on every other run is locked out of every sidecar route on its first call. Read by `internal/sidecar/run_registry.go`; details in [Orchestration](/guides/orchestration#crewship_sidecar_run_authority). |
+
 <Note>
   `CREWSHIP_CONTAINER_PREFIX` is essential for multi-instance deployments. Without it, multiple Crewship instances will create containers with colliding names like `crewship-team-engineering`.
 </Note>
