@@ -6,8 +6,7 @@ func TestCoreResourceSchemasCoverHandlerContracts(t *testing.T) {
 	schemas := coreResourceSchemas()
 	for _, name := range []string{
 		"Workspace", "WorkspaceList", "Crew", "CrewList", "Agent", "AgentList", "Project", "ProjectList",
-		"WorkspaceCreateRequest", "WorkspaceUpdateRequest", "CrewCreateRequest", "CrewUpdateRequest",
-		"AgentCreateRequest", "AgentUpdateRequest", "ProjectCreateRequest", "ProjectUpdateRequest", "HireRequest", "HireResponse",
+		"HireRequest", "HireResponse",
 	} {
 		if _, ok := schemas[name]; !ok {
 			t.Errorf("missing core schema %q", name)
@@ -26,25 +25,26 @@ func TestCoreResourceSchemasUseNullablePointersAndRequiredValues(t *testing.T) {
 		t.Error("Workspace.id must be required")
 	}
 
-	projectCreate := schemas["ProjectCreateRequest"].(map[string]any)
+	_, requests := coreResourceRequestSchemaCatalogV2()
+	projectCreate := requests["CoreProjectCreateRequestV2"].(map[string]any)
 	if !containsString(projectCreate["required"].([]string), "name") {
-		t.Error("ProjectCreateRequest.name must be required")
+		t.Error("CoreProjectCreateRequestV2.name must be required")
 	}
 	projectProps := projectCreate["properties"].(map[string]any)
 	if projectProps["lead_type"].(map[string]any)["enum"].([]string)[0] != "user" {
-		t.Error("ProjectCreateRequest.lead_type must constrain the handler enum")
+		t.Error("CoreProjectCreateRequestV2.lead_type must constrain the handler enum")
 	}
 }
 
 func TestCoreResourceSchemasSeparateCreateAndUpdateFields(t *testing.T) {
-	schemas := coreResourceSchemas()
-	create := schemas["CrewCreateRequest"].(map[string]any)["properties"].(map[string]any)
-	update := schemas["CrewUpdateRequest"].(map[string]any)["properties"].(map[string]any)
+	_, schemas := coreResourceRequestSchemaCatalogV2()
+	create := schemas["CoreCrewCreateRequestV2"].(map[string]any)["properties"].(map[string]any)
+	update := schemas["CoreCrewUpdateRequestV2"].(map[string]any)["properties"].(map[string]any)
 	if _, ok := create["max_ephemeral_agents"]; ok {
-		t.Error("CrewCreateRequest must not advertise update-only max_ephemeral_agents")
+		t.Error("CoreCrewCreateRequestV2 must not advertise update-only max_ephemeral_agents")
 	}
 	if _, ok := update["max_ephemeral_agents"]; !ok {
-		t.Error("CrewUpdateRequest must advertise max_ephemeral_agents")
+		t.Error("CoreCrewUpdateRequestV2 must advertise max_ephemeral_agents")
 	}
 }
 

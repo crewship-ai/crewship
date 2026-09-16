@@ -618,6 +618,13 @@ func (s *Server) mountAPIRouter(
 			"fix", "export CREWSHIP_PUBLIC_URL=http://<reachable-host>:8080")
 	}
 	opts = append(opts, goapi.WithPortExposePublicURL(publicURL))
+	// Browser-test fixtures (#2403): a seed door the Playwright PR gate uses
+	// to plant a run_needs_human card without a live agent run. Registered
+	// only when CREWSHIP_E2E_FIXTURES asks for it, and never in production —
+	// goapi.E2EFixturesEnabled owns both halves of that decision.
+	if goapi.E2EFixturesEnabled(os.Getenv) {
+		opts = append(opts, goapi.WithE2EFixtures())
+	}
 	// Pages' embed.v1 allow-list (docs/prd/pages.md §3.1). Installed once, here,
 	// because internal/pages deliberately reads no environment of its own — a
 	// validator whose answer depends on an ambient variable cannot be tested at
