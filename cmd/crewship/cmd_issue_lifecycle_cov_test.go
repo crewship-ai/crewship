@@ -228,6 +228,24 @@ func TestIssueUpdateRunE_ReassignResolvesAgent(t *testing.T) {
 	}
 }
 
+func TestIssueCreateRunE_AssigneeTypeAlone(t *testing.T) {
+	for _, kind := range []string{"user", "agent", "team", " "} {
+		t.Run(kind, func(t *testing.T) {
+			stub := covSetupCli4(t)
+			stubIssueDirectory(stub)
+			c := covFreshCmd(issueCreateCmd, declareIssueCreateFlags)
+			covSetFlagsCli4(t, c, map[string]string{"crew": "engineering", "title": "Fix flaky test", "assignee-type": kind})
+			err := c.RunE(c, nil)
+			if err == nil || !strings.Contains(err.Error(), "--assignee-type requires --assignee") {
+				t.Fatalf("want missing assignee error, got %v", err)
+			}
+			if calls := stub.CallsFor("POST", "/api/v1/crews/"+covCrewIDCli4+"/issues"); len(calls) != 0 {
+				t.Fatalf("type-only usage error sent %d POST requests", len(calls))
+			}
+		})
+	}
+}
+
 func TestIssueUpdateRunE_AssigneeTypeAlone(t *testing.T) {
 	for _, kind := range []string{"user", "agent", "team", " "} {
 		t.Run(kind, func(t *testing.T) {

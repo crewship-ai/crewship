@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -59,7 +60,7 @@ func newRoutineFixtureTestCmd() *cobra.Command {
 		}
 		var result *pipeline.FixtureStepResult
 		if remote {
-			result, err = remoteFixtureTest(in)
+			result, err = remoteFixtureTest(cmd.Context(), in)
 		} else {
 			result, err = pipeline.TestStepWithFixtures(cmd.Context(), in)
 		}
@@ -99,14 +100,16 @@ func newRoutineFixtureTestCmd() *cobra.Command {
 // in-process call takes, sent as the endpoint's request body. The server
 // answers 400 for a recipe or step it cannot test (the in-process error),
 // and 403 below the create tier — both surface as the CLI's usual API error.
-func remoteFixtureTest(in pipeline.FixtureStepInput) (*pipeline.FixtureStepResult, error) {
+// ctx is the command's context so Ctrl-C interrupts the in-flight POST like
+// it does the in-process path, instead of waiting out the client timeout.
+func remoteFixtureTest(ctx context.Context, in pipeline.FixtureStepInput) (*pipeline.FixtureStepResult, error) {
 	if err := requireAuth(); err != nil {
 		return nil, err
 	}
 	if err := requireWorkspace(); err != nil {
 		return nil, err
 	}
-	client := newAPIClient()
+	client := newAPIClient().WithContext(ctx)
 	resp, err := client.Post(fmt.Sprintf("/api/v1/workspaces/%s/pipelines/fixture_test", client.GetWorkspaceID()), in)
 	if err != nil {
 		return nil, err

@@ -33,11 +33,13 @@ import (
 
 const inboxSourceMissingWorkspaceID = "cibxsrc0000000000001"
 
-// startInboxSourceMissingServer seeds two waitpoint inbox rows: one whose
-// source is gone (no backing row anywhere) and one still backed by a pending
+// startInboxSourceMissingServer seeds three waitpoint inbox rows: one whose
+// source is gone (no backing row anywhere), one still backed by a pending
 // approvals_queue row whose payload target_id is the item's source_id —
-// the third arm of the server's waitpointHasBackingRow probe.
-func startInboxSourceMissingServer(t *testing.T) (cfgPath, orphanID, liveID string) {
+// the third arm of the server's waitpointHasBackingRow probe — and one
+// orphan dismissed in place (`inbox resolve <id>` with no action), the
+// shape that made the CLI's resolve guidance fire on a decided row.
+func startInboxSourceMissingServer(t *testing.T) (cfgPath, orphanID, liveID, resolvedID string) {
 	t.Helper()
 	dbh := testutil.MigratedDB(t)
 	db := dbh.DB
@@ -70,6 +72,9 @@ func startInboxSourceMissingServer(t *testing.T) (cfgPath, orphanID, liveID stri
 	}
 	orphanID = write("wp-orphan-token", "Gate whose run was pruned")
 	liveID = write("wp-live-token", "Gate still waiting for a decision")
+	resolvedID = write("wp-resolved-token", "Gate dismissed from the feed")
+	mustExec(`UPDATE inbox_items SET state = 'resolved', resolved_at = datetime('now'),
+		resolved_by_user_id = 'ibs-owner', updated_at = datetime('now') WHERE id = ?`, resolvedID)
 	if _, err := harbormaster.Enqueue(ctx, db, nil, harbormaster.Request{
 		WorkspaceID: ws, RequestedBy: "ibs-owner", Kind: harbormaster.KindAutonomyGate,
 		Reason:  "acceptance: backing row for the live waitpoint",
@@ -94,7 +99,7 @@ func startInboxSourceMissingServer(t *testing.T) (cfgPath, orphanID, liveID stri
 	if err := os.WriteFile(cfgPath, []byte(cfg), 0o600); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
-	return cfgPath, orphanID, liveID
+	return cfgPath, orphanID, liveID, resolvedID
 }
 
 func runInboxSourceMissingCLI(t *testing.T, cfgPath string, args ...string) (string, error) {
@@ -112,7 +117,7 @@ func runInboxSourceMissingCLI(t *testing.T, cfgPath string, args ...string) (str
 // reaches the caller in both arms: `true` for the orphan, `false` (present,
 // not omitted) for the backed row.
 func TestAcceptance_InboxGet_SourceMissingIsPassedThrough(t *testing.T) {
-	cfgPath, orphanID, liveID := startInboxSourceMissingServer(t)
+	cfgPath, orphanID, liveID, resolvedID := startInboxSourceMissingServer(t)
 
 	for _, tc := range []struct {
 		id   string
@@ -152,13 +157,28 @@ func TestAcceptance_InboxGet_SourceMissingIsPassedThrough(t *testing.T) {
 	if !strings.Contains(human, "source live") {
 		t.Errorf("human view of a backed row does not say the source is live:\n%s", human)
 	}
+
+	// The dismissed orphan is the shape `inbox resolve <id>` leaves behind:
+	// state resolved, resolved_action empty, source still gone. The detail
+	// hint answered "nothing left to decide" on a row that was decided —
+	// guidance belongs to "read" and "unread" rows only.
+	human, err = runInboxSourceMissingCLI(t, cfgPath, "inbox", "get", resolvedID)
+	if err != nil {
+		t.Fatalf("inbox get (human, resolved): %v\n%s", err, human)
+	}
+	if strings.Contains(human, "source gone") || strings.Contains(human, "source live") {
+		t.Errorf("human view of a resolved item prints resolve guidance:\n%s", human)
+	}
+	if !strings.Contains(human, "resolved") {
+		t.Errorf("human view of a resolved item does not say it is resolved:\n%s", human)
+	}
 }
 
 // TestAcceptance_InboxResolve_LiveWaitpointIsRefusedWithTheRemedy pins the
 // behaviour the field predicts: resolving the backed row is refused and the
 // CLI prints the source command with the real token; the orphan resolves.
 func TestAcceptance_InboxResolve_LiveWaitpointIsRefusedWithTheRemedy(t *testing.T) {
-	cfgPath, orphanID, liveID := startInboxSourceMissingServer(t)
+	cfgPath, orphanID, liveID, _ := startInboxSourceMissingServer(t)
 
 	out, err := runInboxSourceMissingCLI(t, cfgPath, "inbox", "resolve", liveID, "--action", "approved")
 	if err == nil {

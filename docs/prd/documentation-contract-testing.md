@@ -182,7 +182,7 @@ deterministic layer is the part that is actually enforced:
 | Schemathesis live layers | `ci.yml` → *Run deterministic API contract gate*; the same ephemeral seeded server/build as the PR harness | yes |
 | CLI runtime golden smoke | `ci.yml` → Harness PR subset + CLI command breadth smoke | yes |
 
-`-strict` enforces fourteen gates. The following eight cover documentation and
+`-strict` enforces fifteen gates. The following eight cover documentation and
 CLI contracts, reporting offending rows rather than only counting them: operations with no documentation, operations missing structural
 contract evidence (auth/request/response/statuses), generic response schemas,
 generic JSON request schemas, CLI commands with no page, CLI commands with

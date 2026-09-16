@@ -7,6 +7,7 @@ import (
 	"go/parser"
 	"go/token"
 	"os"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
@@ -29,10 +30,14 @@ import (
 // format, a helper that returns one of those. Each becomes a SHAPE — the path
 // with every non-literal part replaced by a placeholder that matches exactly
 // one segment — and a route is covered when some shape matches it segment for
-// segment. Methods are not compared: a path the CLI reaches for GET but not for
-// DELETE would need the request wrappers (getJSON, client.Post, chatRoomRequest
-// with a method argument) traced too, and a path-level diff already catches the
-// failure the audit found, which was a path nobody called at all.
+// segment. A shape is only collected from the argument position of a call that
+// actually sends a request — the client methods (Get/Post/Do/…) and any
+// wrapper, package-level or closure, discovered to hand one of its parameters
+// into that position — so a "/api/…" string in help text, a log message or a
+// comparison cannot claim a route no request ever names. Methods are not
+// compared: a path the CLI reaches for GET but not for DELETE would need the
+// request wrappers traced per method too, and a path-level diff already
+// catches the failure the audit found, which was a path nobody called at all.
 //
 // A route can be exempted, with a reason, in cliParityExemptionsPath. The file
 // is the record the audit asked for: the one endpoint that serves iframe HTML,
@@ -83,6 +88,177 @@ type cliPathShape struct {
 	Source string
 }
 
+// cliSinkMethods are the client methods that send an HTTP request, and the
+// argument position that carries the request path. Matched by method name on
+// any receiver: a getter with one of these names whose argument is a query
+// key or a map key produces no shape, because such an argument never starts
+// with /api/.
+var cliSinkMethods = map[string]int{
+	"Get": 0, "Post": 0, "Patch": 0, "Put": 0, "Delete": 0,
+	"Do": 1, "NewRequest": 2,
+}
+
+// sinkSet names the calls a shape may be collected from: client methods
+// directly, plus wrappers — functions, methods and closures discovered to
+// pass one of their parameters into the path position of such a call — as
+// name → path-argument index. A set is built per package (a name in
+// internal/cli must not match a call in cmd/crewship) and copied per
+// declaration so a closure's name stays scoped to its own declaration.
+type sinkSet struct {
+	methods map[string]int
+	funcs   map[string]int
+}
+
+// forDecl returns an independent copy, safe for per-declaration additions.
+// The method map is shared: method sinks bind wherever their receiver goes.
+func (s *sinkSet) forDecl() *sinkSet {
+	return &sinkSet{
+		methods: s.methods,
+		funcs:   cloneIntMap(s.funcs),
+	}
+}
+
+func cloneIntMap(src map[string]int) map[string]int {
+	out := make(map[string]int, len(src))
+	for k, v := range src {
+		out[k] = v
+	}
+	return out
+}
+
+// pathArg reports which argument of call carries the request path.
+func (s *sinkSet) pathArg(call *ast.CallExpr) (int, bool) {
+	switch fn := call.Fun.(type) {
+	case *ast.SelectorExpr:
+		idx, ok := s.methods[fn.Sel.Name]
+		return idx, ok
+	case *ast.Ident:
+		idx, ok := s.funcs[fn.Name]
+		return idx, ok
+	}
+	return 0, false
+}
+
+// discoverDeclSinks adds closure wrappers (`fetch := func(path string)
+// {…}`) to the declaration's own sink set, to a fixpoint so a closure
+// calling an earlier-discovered closure is found too.
+func discoverDeclSinks(decl ast.Node, sinks *sinkSet) {
+	for {
+		changed := false
+		ast.Inspect(decl, func(n ast.Node) bool {
+			assign, ok := n.(*ast.AssignStmt)
+			if !ok || len(assign.Lhs) != len(assign.Rhs) {
+				return true
+			}
+			for j, lhs := range assign.Lhs {
+				name, ok := lhs.(*ast.Ident)
+				if !ok {
+					continue
+				}
+				lit, ok := assign.Rhs[j].(*ast.FuncLit)
+				if !ok || lit.Body == nil {
+					continue
+				}
+				if _, dup := sinks.funcs[name.Name]; dup {
+					continue
+				}
+				if idx, ok := funcLitPathParam(lit, sinks); ok {
+					sinks.funcs[name.Name] = idx
+					changed = true
+				}
+			}
+			return true
+		})
+		if !changed {
+			return
+		}
+	}
+}
+
+// wrapperPathParam reports which parameter of fn reaches the path position of
+// a request call in its body, if any. A parameter reaches the path position
+// when it is passed there directly (`client.Get(path)`) or through a plain
+// local alias (`p := path; client.Get(p)`); anything more convoluted is not
+// how these wrappers are written.
+func wrapperPathParam(fn *ast.FuncDecl, sinks *sinkSet) (int, bool) {
+	return bodyPathParam(fn.Body, paramIndex(fn.Type.Params), sinks)
+}
+
+// funcLitPathParam is wrapperPathParam for a function literal.
+func funcLitPathParam(lit *ast.FuncLit, sinks *sinkSet) (int, bool) {
+	return bodyPathParam(lit.Body, paramIndex(lit.Type.Params), sinks)
+}
+
+// bodyPathParam walks body and reports the lowest parameter index that
+// reaches a request call's path argument. The lowest, because a wrapper
+// with two path-passing parameters would be ambiguous and the CLI does not
+// write those.
+func bodyPathParam(body ast.Node, params map[string]int, sinks *sinkSet) (int, bool) {
+	if len(params) == 0 {
+		return 0, false
+	}
+	names := cloneIntMap(params)
+	ast.Inspect(body, func(n ast.Node) bool {
+		assign, ok := n.(*ast.AssignStmt)
+		if !ok || len(assign.Lhs) != len(assign.Rhs) {
+			return true
+		}
+		for j, lhs := range assign.Lhs {
+			id, ok := lhs.(*ast.Ident)
+			if !ok {
+				continue
+			}
+			src, ok := assign.Rhs[j].(*ast.Ident)
+			if !ok {
+				continue
+			}
+			if pi, ok := names[src.Name]; ok {
+				names[id.Name] = pi
+			}
+		}
+		return true
+	})
+	found := -1
+	ast.Inspect(body, func(n ast.Node) bool {
+		call, ok := n.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		arg, ok := sinks.pathArg(call)
+		if !ok || arg >= len(call.Args) {
+			return true
+		}
+		id, ok := call.Args[arg].(*ast.Ident)
+		if !ok {
+			return true
+		}
+		if pi, ok := names[id.Name]; ok && (found < 0 || pi < found) {
+			found = pi
+		}
+		return true
+	})
+	return found, found >= 0
+}
+
+// paramIndex maps a function's parameter names to their positions.
+func paramIndex(fields *ast.FieldList) map[string]int {
+	names := map[string]int{}
+	if fields == nil {
+		return names
+	}
+	pos := 0
+	for _, field := range fields.List {
+		for _, name := range field.Names {
+			names[name.Name] = pos
+			pos++
+		}
+		if len(field.Names) == 0 {
+			pos++
+		}
+	}
+	return names
+}
+
 // cliPathShapes reads every non-test Go file under cliSourceRoots out of
 // sources and returns the request-path shapes it can build.
 func cliPathShapes(sources []docFile) ([]cliPathShape, error) {
@@ -104,14 +280,34 @@ func cliPathShapes(sources []docFile) ([]cliPathShape, error) {
 		return nil, fmt.Errorf("no Go source under %s — the CLI moved, so this gate has nothing to compare routes against", strings.Join(cliSourceRoots, ", "))
 	}
 
-	pkg := newShapeEnv(nil)
-	// Pass one: package-level names. Constants and variables holding a path
-	// prefix (`const chatRoomBase = "/api/v1/conversations"`) and helpers that
-	// return one (`func chatRoomPath(id string) string { return chatRoomBase +
-	// "/" + url.PathEscape(id) }`) are how the CLI avoids repeating prefixes,
-	// and a caller that writes `chatRoomPath(id) + "/messages"` only resolves
+	pkgs := map[string]*shapeEnv{}
+	pkgSinks := map[string]*sinkSet{}
+	pkgFiles := map[string][]*ast.File{}
+	// methodSinks is shared by every package: a method wrapper (StreamSSE)
+	// is declared in one package (internal/cli) but called from the others
+	// (cmd/crewship, internal/cli/tui), and a call site matches it by name
+	// wherever the receiver comes from. Ident-named wrappers stay
+	// package-local — that is the resolution rule for plain names.
+	methodSinks := cloneIntMap(cliSinkMethods)
+	for i, file := range files {
+		dir := filepath.Dir(paths[i])
+		if pkgs[dir] == nil {
+			pkgs[dir] = newShapeEnv(nil)
+			pkgSinks[dir] = &sinkSet{methods: methodSinks, funcs: map[string]int{}}
+		}
+		pkgFiles[dir] = append(pkgFiles[dir], file)
+	}
+	// Pass one: package-level names, per Go package — cmd/crewship (main)
+	// and internal/cli (cli) share no identifiers, and resolving a name
+	// across the two could build a shape no real caller can. Constants and
+	// variables holding a path prefix (`const chatRoomBase =
+	// "/api/v1/conversations"`) and helpers that return one (`func
+	// chatRoomPath(id string) string { return chatRoomBase + "/" +
+	// url.PathEscape(id) }`) are how the CLI avoids repeating prefixes, and
+	// a caller that writes `chatRoomPath(id) + "/messages"` only resolves
 	// to a route once those are known.
-	for _, file := range files {
+	for i, file := range files {
+		pkg := pkgs[filepath.Dir(paths[i])]
 		for _, decl := range file.Decls {
 			switch d := decl.(type) {
 			case *ast.GenDecl:
@@ -120,9 +316,9 @@ func cliPathShapes(sources []docFile) ([]cliPathShape, error) {
 					if !ok {
 						continue
 					}
-					for i, name := range value.Names {
-						if i < len(value.Values) {
-							pkg.bind(name.Name, value.Values[i])
+					for j, name := range value.Names {
+						if j < len(value.Values) {
+							pkg.bind(name.Name, value.Values[j])
 						}
 					}
 				}
@@ -133,24 +329,70 @@ func cliPathShapes(sources []docFile) ([]cliPathShape, error) {
 			}
 		}
 	}
+	// Pass one and a half: which functions and methods are request wrappers —
+	// pass one of their parameters into the path position of a request call.
+	// One fixpoint across every package: an ident wrapper binds in its own
+	// package only, a method wrapper binds everywhere its receiver travels.
+	for {
+		changed := false
+		for dir, sinks := range pkgSinks {
+			for _, file := range pkgFiles[dir] {
+				for _, decl := range file.Decls {
+					fn, ok := decl.(*ast.FuncDecl)
+					if !ok || fn.Body == nil {
+						continue
+					}
+					idx, ok := wrapperPathParam(fn, sinks)
+					if !ok {
+						continue
+					}
+					if fn.Recv == nil {
+						if _, dup := sinks.funcs[fn.Name.Name]; !dup {
+							sinks.funcs[fn.Name.Name] = idx
+							changed = true
+						}
+					} else if _, dup := sinks.methods[fn.Name.Name]; !dup {
+						sinks.methods[fn.Name.Name] = idx
+						changed = true
+					}
+				}
+			}
+		}
+		if !changed {
+			break
+		}
+	}
 
 	seen := map[string]bool{}
 	var shapes []cliPathShape
 	for i, file := range files {
+		dir := filepath.Dir(paths[i])
+		pkg := pkgs[dir]
 		for _, decl := range file.Decls {
-			// Pass two, per top-level declaration: local assignments first, then
-			// every expression in it rendered against local + package names.
-			// Declarations rather than functions because most of the CLI is
-			// `var xCmd = &cobra.Command{RunE: func(...) error {...}}` — the
-			// request is built inside a function literal in a var block.
+			// Pass two, per top-level declaration: local assignments first,
+			// then the request calls in it rendered against local + package
+			// names. Declarations rather than functions because most of the
+			// CLI is `var xCmd = &cobra.Command{RunE: func(...) error
+			// {...}}` — the request is built inside a function literal in a
+			// var block. Closure wrappers assigned inside the declaration
+			// (`fetch := func(path string) {…}`) are discovered the same way
+			// package-level ones were, against this declaration's calls; the
+			// copy is per declaration so a closure's name never matches a
+			// call in a declaration it does not belong to.
 			local := newShapeEnv(pkg)
 			local.bindAssignments(decl)
+			sinks := pkgSinks[dir].forDecl()
+			discoverDeclSinks(decl, sinks)
 			ast.Inspect(decl, func(n ast.Node) bool {
-				expr, ok := n.(ast.Expr)
+				call, ok := n.(*ast.CallExpr)
 				if !ok {
 					return true
 				}
-				for _, shape := range local.shapes(expr, 0) {
+				arg, ok := sinks.pathArg(call)
+				if !ok || arg >= len(call.Args) {
+					return true
+				}
+				for _, shape := range local.shapes(call.Args[arg], 0) {
 					shape = normalizeShape(shape)
 					if shape == "" {
 						continue

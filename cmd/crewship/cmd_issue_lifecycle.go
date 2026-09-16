@@ -54,6 +54,9 @@ var issueCreateCmd = &cobra.Command{
 		if v, _ := flags.GetString("status"); v != "" {
 			body["status"] = v
 		}
+		if flags.Changed("assignee-type") && !flags.Changed("assignee") {
+			return fmt.Errorf("--assignee-type requires --assignee")
+		}
 		if v, _ := flags.GetString("assignee"); v != "" {
 			atype, _ := flags.GetString("assignee-type")
 			assigneeID, atype, err := resolveIssueAssignee(client, atype, v)

@@ -454,8 +454,11 @@ Examples:
 			// Same placement and reason as the four-eyes notice below: this
 			// decides whether `inbox resolve` will work on this row at all.
 			// Silent when the server did not run the probe (a list-only kind,
-			// or a pre-#2225 server) rather than guessing.
-			if item.SourceMissing != nil && item.ResolvedAction == "" {
+			// or a pre-#2225 server) rather than guessing, and silent for
+			// resolved items — `inbox resolve <id>` writes state "resolved"
+			// with an empty resolved_action, so ResolvedAction alone cannot
+			// distinguish them from fresh rows.
+			if item.SourceMissing != nil && item.State != "resolved" {
 				if *item.SourceMissing {
 					fmt.Printf("%ssource gone · nothing left to decide this — `crewship inbox resolve %s` dismisses it%s\n",
 						cli.Yellow, item.ID, cli.Reset)

@@ -38,7 +38,7 @@ curl -X GET \
   > sar-export-$USER_ID-$(date +%Y%m%d).json
 ```
 
-The response is a single JSON bundle containing every row from the four tables that carry `data_subject_id` (the three data tables below plus `gdpr_actions`, the audit history — see "What's NOT in the export" for the boundary):
+The response is a single JSON bundle containing every row from the four tables that carry `data_subject_id` (the three data tables below plus `gdpr_actions`, the audit history — see "What's in the export" for the boundary):
 
 ```json
 {
@@ -67,9 +67,9 @@ The handler returns **`500 Internal Server Error` on ANY query failure** — eve
 
 The export is the **canonical artefact** the operator hands the subject. The format is JSON because it's machine-readable for downstream redaction tooling; the operator is responsible for translating it into whatever the subject requested (PDF, CSV, etc.) if a specific format was named.
 
-### What's NOT in the export
+### What's in the export
 
-The export only covers tables that carry a `data_subject_id` foreign key:
+The export covers tables that carry a `data_subject_id` foreign key, plus the subject's own read markers and the audit history itself:
 
 - `peer_cards` — agent-authored peer cards mentioning the subject
 - `memory_versions` — versioned memory blobs the agent wrote about the subject
@@ -89,6 +89,8 @@ The export only covers tables that carry a `data_subject_id` foreign key:
   each was recorded, newest first. Every row, not only the newest per field —
   the history of what was recorded is part of what is held about them
 - `gdpr_actions` — the audit history itself (always included)
+
+### What's NOT in the export
 
 Content the operator may also need to surface manually:
 

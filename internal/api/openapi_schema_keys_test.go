@@ -2,7 +2,6 @@ package api
 
 import (
 	"encoding/json"
-	"os"
 	"reflect"
 	"sort"
 	"strings"
@@ -65,12 +64,8 @@ var schemaKeyContracts = []struct {
 }
 
 func TestOpenAPIProperties_MatchTheStructsOwnJSONTags(t *testing.T) {
-	raw, err := os.ReadFile("openapi.gen.json")
-	if err != nil {
-		t.Fatalf("read spec: %v", err)
-	}
 	var doc any
-	if err := json.Unmarshal(raw, &doc); err != nil {
+	if err := json.Unmarshal(OpenAPISpecJSON(), &doc); err != nil {
 		t.Fatalf("parse spec: %v", err)
 	}
 

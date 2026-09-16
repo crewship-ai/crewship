@@ -169,8 +169,8 @@ func TestAcceptance_OnboardingProposalCreate_UnknownLookIsDroppedNotRefused(t *t
 	if created.ID == "" {
 		t.Fatalf("proposal should still be created:\n%s", out)
 	}
-	if created.Payload.CrewIcon != nil && *created.Payload.CrewIcon == "not-an-icon" {
-		t.Errorf("an unknown icon must not be stored as typed: %v", *created.Payload.CrewIcon)
+	if created.Payload.CrewIcon != nil {
+		t.Errorf("an unknown icon must be dropped, got %q", *created.Payload.CrewIcon)
 	}
 	if created.Payload.CrewColor != nil {
 		t.Errorf("an unknown colour must be dropped, got %q", *created.Payload.CrewColor)
