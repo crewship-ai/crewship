@@ -108,19 +108,13 @@ var allowedDeprecatedOccurrences = map[string][]string{
 // here, and prints a notice for every entry that is no longer needed, so this
 // list can only shrink. Do not add to it; escape the heading instead.
 //
-// The two September entries (webhooks.mdx, pages.mdx) are being fixed by the
-// audit follow-up PRs for those pages; the rest predate the audit.
+// The September webhook and Pages entries were removed after their headings
+// were fixed by the integrated audit; the remaining entries predate it.
 var allowedUnescapedHeadings = map[string][]string{
 	"docs/api-reference/admin.mdx": {
 		"## PUT /api/v1/admin/rate-limits/{key}",
 		"## DELETE /api/v1/admin/rate-limits/{key}",
 		"## GET /api/v1/admin/keeper/requests/{requestId}/events",
-	},
-	"docs/api-reference/pages.mdx": {
-		"### GET /api/v1/pages/{slug}/project/fsck",
-	},
-	"docs/api-reference/webhooks.mdx": {
-		"### POST /api/v1/webhooks/{token}/github-pull-request",
 	},
 	"docs/configuration/devcontainers.mdx": {
 		"#### GET /api/v1/crews/{crewId}/provision",

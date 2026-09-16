@@ -25,6 +25,9 @@ The integration starts at main `fc2ebb8410bb8bb7a0a7d6828468f840ff50d01e`
 
 Original branches and other sessions' worktrees are retained. Merge ancestry,
 rather than copied patches, lets the integration incorporate the original PRs.
+The parallel integration #2616 is also retained as a merge parent, including its
+heading-baseline cleanup and report. The source PRs were closed as superseded
+before merge; their closed status is not evidence of delivery.
 
 ## Additional corrections
 
@@ -52,7 +55,7 @@ results must be read with their exact commit in the integration PR.
 The human usability acceptance in the original Routines PRD §11 remains open.
 Merging this integration does not establish acceptance by representative users.
 
-Draft #2572 is outside this candidate. Its GitHub review pilot still has review
+Draft #2572 was closed as deferred by its owning session and is outside this candidate. Its GitHub review pilot still has review
 questions about reviewer-profile restrictions, concurrent publication and the
 attribution of historical status/outcome evidence. Its operator-assisted probe
 does not validate an unattended production workflow.

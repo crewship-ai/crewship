@@ -854,17 +854,17 @@ func TestUnescapedHeadingExpressionsNamesPageLineAndFix(t *testing.T) {
 // be removed, and a new offender fails regardless of the allowlist.
 func TestPartitionHeadingExpressionsTolerateOnlyTheAllowlist(t *testing.T) {
 	found := []headingExpression{
-		{page: "docs/api-reference/webhooks.mdx", line: 375, expression: "{token}", text: "### POST /api/v1/webhooks/{token}/github-pull-request"},
+		{page: "docs/api-reference/admin.mdx", line: 1, expression: "{key}", text: "## PUT /api/v1/admin/rate-limits/{key}"},
 		{page: "docs/guides/new.mdx", line: 1, expression: "{id}", text: "## GET /api/v1/things/{id}"},
 	}
 	unlisted, stale := partitionHeadingExpressions(found)
 	if len(unlisted) != 1 || unlisted[0].page != "docs/guides/new.mdx" {
 		t.Fatalf("unlisted = %+v, want only the new page", unlisted)
 	}
-	if !slices.Contains(stale, "docs/api-reference/pages.mdx: ### GET /api/v1/pages/{slug}/project/fsck") {
+	if !slices.Contains(stale, "docs/api-reference/admin.mdx: ## DELETE /api/v1/admin/rate-limits/{key}") {
 		t.Errorf("an allowlist entry with no matching heading must be reported stale; got %v", stale)
 	}
-	if slices.Contains(stale, "docs/api-reference/webhooks.mdx: ### POST /api/v1/webhooks/{token}/github-pull-request") {
+	if slices.Contains(stale, "docs/api-reference/admin.mdx: ## PUT /api/v1/admin/rate-limits/{key}") {
 		t.Error("a matched allowlist entry is not stale")
 	}
 }
