@@ -440,9 +440,11 @@ producer script always calls the same command wherever it runs.
 The server, not the script, attaches provenance (`producer`, `run_id`,
 `produced_at`) and the freshness clock. A payload the caller cannot prove they
 own — the caller is not the panel's declared `producer` — is refused with
-**403**, and the refusal itself writes a journal entry and notifies the page
-owner (§7.1b rule 3): treat a 403 here as a signal to investigate, not noise
-to retry past.
+**403** (exit 4) when the caller can otherwise reach the page, and with
+**404** (exit 3) when they cannot, so the refusal never confirms a page exists
+to someone who may not see it. Either way the refusal itself writes a journal
+entry and notifies the page owner (§7.1b rule 3): treat it as a signal to
+investigate, not noise to retry past.
 
 ### A working producer script
 
@@ -495,7 +497,7 @@ jq -n '{
 | Two payloads stored for one panel less than **2 s** apart | `429` with `Retry-After` |
 | More than 12 pushes/min sustained (burst 30) to one panel | `429` with `Retry-After` |
 | More than 600 pushes/min across the workspace | `429` with `Retry-After` |
-| Caller is not the panel's declared producer | `403`, journalled, page owner notified |
+| Caller is not the panel's declared producer | `403` — or `404` when the caller cannot reach the page at all — journalled, page owner notified |
 
 The 2 s floor is the one a `--loop 1` producer meets first, and it is not a
 token bucket: it is enforced inside the write itself, so it holds across
@@ -1240,8 +1242,8 @@ needs to branch on:
 |---|---|---|
 | `0` | The push or dispatch was accepted | For `page action`, accepted is not finished |
 | `2` | Payload invalid, over the 64 KiB cap, or the spec/flags did not validate | Fix it; retrying unchanged fails identically |
-| `3` | No such page or panel — or none you may see | Do not retry |
-| `4` | You are not the panel's declared producer and hold no `produce` grant, or you are not authenticated | A 403 here is journalled and notifies the page owner |
+| `3` | No such page or panel — or none you may see, including an unauthorised push to a page you cannot reach (journalled all the same) | Do not retry |
+| `4` | You are not the panel's declared producer and hold no `produce` grant — answered only when you can reach the page; otherwise it is exit 3 — or you are not authenticated | A producer 403 is journalled and notifies the page owner |
 | `5` | An idempotency key was replayed with different inputs, or the routine is missing, unapproved or disabled | Do not retry with the same key |
 | `6` | Rate limited | Sleep for the interval the message names, then retry |
 | `7` / `8` | Server error, or the request never got an answer | Safe to retry a `page set` — it is last-write-wins |
@@ -1402,6 +1404,7 @@ destination. Export is not a backup of the complete project history.
 - [`crewship routine`](/cli/routine) — the usual producer behind a panel.
 - [`crewship automation`](/cli/automation) — what a panel's `wake` gate compiles to.
 - [Internal IPC API](/api-reference/internal) — the sidecar trust boundary `page set` uses inside a container.
+- [Operate Pages applications](/guides/pages-apps-operations) — installing the compiler and runtime origin the `page project` commands need, backups and upgrades.
 
 ## Agent chat: custom Page sources
 
@@ -1415,7 +1418,8 @@ optional pinned build image described in the Pages Apps build profile.
 2. Call `page_project` with `operation: "init"`, `slug` and
    `expected_revision: 0` to create the supported React/TypeScript starter.
 3. Use `operation: "read"` to inspect the current revision, file list, Page
-   definition, Studio path and exact `@crewship/pages` SDK source. Add `path`
+   definition, the page's path in the browser (`page_path`) and exact
+   `@crewship/pages` SDK source. Add `path`
    to read one source file. The starter imports `src/style.css`; arbitrary
    design can be written in TSX/CSS within the supported dependency profile.
 4. Save a batch of whole-file replacements with the revision just read:
@@ -1443,7 +1447,8 @@ published Page is unchanged.
    a busy worker refuses another request. Status returns diagnostics and build
    identity without retransmitting compiled JavaScript.
 6. Call `check` with the returned `build_id` and source `expected_revision`.
-   Report the revision/build and Studio path to the user for preview and review.
+   Report the revision/build and `page_path` to the user: the review, with
+   its preview, is in the page editor's **Content** section.
    A successful static check does not replace browser or source security review.
 
 Source initialization, saving and builds obey `page_create` autonomy policy;
@@ -1454,7 +1459,8 @@ The onboarding setup crew must explicitly name the target `crew`, following
 target owner separately. Run attribution is not inferred from an unverified ID.
 
 There is no publish operation in this agent tool. An authorized user publishes
-the reviewed build through Studio or `crewship page project publish`.
+the reviewed build through the page editor (**Edit → Content**, or **History**
+for a retained version) or `crewship page project publish`.
 After a transport timeout the outcome can be unknown; inspect the current
 revision and build status before retrying. Data producers keep pushing through
 the existing panel API/`page.write` path independently of source edits.
