@@ -10,7 +10,16 @@ vi.mock("@/hooks/use-workspace", () => ({
   useWorkspace: () => ({ workspaceId: "ws-test", role: h.role }),
 }))
 
-vi.mock("@/lib/api-fetch", () => ({ apiFetch: vi.fn() }))
+// Recent is keyed by the signed-in user and the workspace; without a user
+// there is no history to read or write.
+vi.mock("@/hooks/use-auth", () => ({
+  useSessionSafe: () => ({ data: { user: { id: "u-test" } }, status: "authenticated" }),
+}))
+
+// broadcastSessionExpired: the palette reaches hooks/use-pages for the page
+// normalisers, and that module loads the realtime hook, which binds the
+// session-expiry broadcast at import time.
+vi.mock("@/lib/api-fetch", () => ({ apiFetch: vi.fn(), broadcastSessionExpired: vi.fn() }))
 
 import { CommandPalette } from "../command-palette"
 
@@ -259,6 +268,17 @@ describe("CommandPalette — recent", () => {
   it("stays out of the way when nothing has been opened yet", () => {
     openPalette()
     expect(screen.queryByRole("group", { name: /recent/i })).not.toBeInTheDocument()
+  })
+
+  it("reads the history of this user in this workspace, and drops the old shared key", async () => {
+    openPalette()
+    await group(/navigation/i)
+    // One key per identity: a shared browser profile, a workspace switch or
+    // a different login must not be offered somebody else's rows.
+    expect(vi.mocked(localStorage.getItem)).toHaveBeenCalledWith("crewship.palette.recent:u-test:ws-test")
+    expect(vi.mocked(localStorage.getItem)).not.toHaveBeenCalledWith("crewship.palette.recent")
+    // The unscoped history is dropped once, not migrated — nobody knows whose it was.
+    expect(vi.mocked(localStorage.removeItem)).toHaveBeenCalledWith("crewship.palette.recent")
   })
 
   it("survives a corrupted store rather than blanking the palette", async () => {

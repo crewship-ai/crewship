@@ -25,6 +25,9 @@ import {
 } from "@/lib/conversation-search"
 import { formatRelativeShort } from "@/lib/time"
 import { useAbilities } from "@/hooks/use-abilities"
+import { useSessionSafe } from "@/hooks/use-auth"
+import { normalizePageList, toPageView, type PageView } from "@/hooks/use-pages"
+import { PageGlyph } from "@/components/features/pages/page-glyph"
 import { UserAvatar } from "@/components/ui/user-avatar"
 import {
   CommandDialog,
@@ -39,6 +42,7 @@ import { getCrewDotColor } from "@/lib/entities"
 import { apiFetch } from "@/lib/api-fetch"
 import { AgentAvatar } from "@/components/ui/agent-avatar"
 import { CrewIcon } from "@/components/ui/crew-icon"
+import { cn } from "@/lib/utils"
 
 interface AgentResult {
   id: string
@@ -121,6 +125,57 @@ interface IntegrationResult {
   icon: string | null
   crew_name?: string
   enabled: boolean
+}
+
+/**
+ * A page row as the palette draws it: the shared view every Pages surface
+ * consumes, plus the one index flag `toPageView` does not carry. The list is
+ * the same RBAC-filtered index /pages renders (pages_handler.go List), so a
+ * row is here because the caller reaches the page — a Pages App and a page
+ * with only a project draft are ordinary rows, exactly as on the overview.
+ */
+interface PageResult {
+  view: PageView
+  hasApplication: boolean
+}
+
+/**
+ * The rows of a list body, or null when the body is not a list at all — a
+ * bare array or one of the envelopes `normalizePageList` reads. The
+ * distinction matters here and nowhere else: an empty list is a verified
+ * answer ("you reach no page"), an unrecognised body is no answer, and only
+ * the first may certify a Recent row.
+ */
+function toPageResults(body: unknown): PageResult[] | null {
+  const isList =
+    Array.isArray(body) ||
+    (!!body && typeof body === "object" &&
+      ["pages", "rows", "items", "data"].some((k) => Array.isArray((body as Record<string, unknown>)[k])))
+  if (!isList) return null
+  return normalizePageList(body)
+    .filter((raw) => !!raw && typeof raw === "object")
+    .map((raw) => ({ view: toPageView(raw), hasApplication: raw.has_application === true }))
+    .filter((p) => p.view.slug !== "")
+}
+
+/** `/pages/<slug>` for a page, the same encoding the Pages surfaces use. */
+function pageHref(slug: string): string {
+  return `/pages/${encodeURIComponent(slug)}`
+}
+
+/**
+ * The slug a Recent row points at, or null when the row is not a page deep
+ * link. Anything under `/pages/<slug>` counts, a `?tab=` included; the
+ * Navigation row's `/pages` is the index, not a page, and is not checked.
+ */
+function pageSlugOfHref(href: string): string | null {
+  const m = /^\/pages\/([^/?#]+)/.exec(href)
+  if (!m) return null
+  try {
+    return decodeURIComponent(m[1])
+  } catch {
+    return null
+  }
 }
 
 const PROVIDER_LABELS: Record<string, string> = {
@@ -249,7 +304,12 @@ const PALETTE_ITEM_CLASS =
 // state, and shipping it to the server would mean a table, a migration and a
 // sync story for something a user would not miss on a new machine.
 
-const RECENT_KEY = "crewship.palette.recent"
+// Scoped to the person AND the workspace: one shared browser profile, a
+// workspace switch or a different login must not be offered the previous
+// identity's rows. History written under the old unscoped key is dropped
+// once rather than migrated — there is no telling whose it was.
+const LEGACY_RECENT_KEY = "crewship.palette.recent"
+const RECENT_KEY_PREFIX = "crewship.palette.recent:"
 const RECENT_MAX = 5
 
 interface RecentEntry {
@@ -258,10 +318,25 @@ interface RecentEntry {
   group: string
 }
 
-function readRecent(): RecentEntry[] {
-  if (typeof window === "undefined") return []
+/** The storage key for one identity, or null when there is no identity to key on. */
+function recentKeyFor(userId: string | null, workspaceId: string | null | undefined): string | null {
+  if (!userId || !workspaceId) return null
+  return `${RECENT_KEY_PREFIX}${userId}:${workspaceId}`
+}
+
+function dropLegacyRecent() {
+  if (typeof window === "undefined") return
   try {
-    const raw = window.localStorage.getItem(RECENT_KEY)
+    window.localStorage.removeItem(LEGACY_RECENT_KEY)
+  } catch {
+    // Nothing to do: a store that cannot be written cannot hold the old key either.
+  }
+}
+
+function readRecent(key: string | null): RecentEntry[] {
+  if (typeof window === "undefined" || !key) return []
+  try {
+    const raw = window.localStorage.getItem(key)
     if (!raw) return []
     const parsed: unknown = JSON.parse(raw)
     if (!Array.isArray(parsed)) return []
@@ -282,11 +357,11 @@ function readRecent(): RecentEntry[] {
   }
 }
 
-function pushRecent(entry: RecentEntry) {
-  if (typeof window === "undefined") return
+function pushRecent(key: string | null, entry: RecentEntry) {
+  if (typeof window === "undefined" || !key) return
   try {
-    const next = [entry, ...readRecent().filter((e) => e.href !== entry.href)].slice(0, RECENT_MAX)
-    window.localStorage.setItem(RECENT_KEY, JSON.stringify(next))
+    const next = [entry, ...readRecent(key).filter((e) => e.href !== entry.href)].slice(0, RECENT_MAX)
+    window.localStorage.setItem(key, JSON.stringify(next))
   } catch {
     // A full or blocked store costs the history, never the navigation.
   }
@@ -316,6 +391,11 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
   const router = useRouter()
   const { workspaceId, role } = useWorkspace()
   const { abilities } = useAbilities()
+  // Who is looking, for the Recent key only. The lists need no gate on it:
+  // every fetch is RBAC-filtered server-side against the session cookie.
+  const { data: session, status: authStatus } = useSessionSafe()
+  const userId = session?.user.id ?? null
+  const recentKey = recentKeyFor(userId, workspaceId)
   // The Admin console is ADMIN+ (#865); the sidebar/toolbar already filter it,
   // so the palette must too — otherwise a MEMBER sees an "Admin" command that
   // just bounces them off /admin.
@@ -330,6 +410,12 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
   const [routines, setRoutines] = useState<RoutineResult[]>([])
   const [members, setMembers] = useState<MemberResult[]>([])
   const [integrations, setIntegrations] = useState<IntegrationResult[]>([])
+  const [pages, setPages] = useState<PageResult[]>([])
+  // Whether the Pages list of THIS open answered. A Recent row that names a
+  // page is shown only against a list that did: while it is pending, or
+  // after a 403/500/unreadable body, the row's stored name could be a page
+  // the caller no longer reaches, and an old name on screen is a leak.
+  const [pagesLoaded, setPagesLoaded] = useState(false)
   const [recent, setRecent] = useState<RecentEntry[]>([])
   // ── Conversations ───────────────────────────────────────────────────────
   //
@@ -359,10 +445,56 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
   )
 
   // Read once per open, not on every render: the list must not reshuffle
-  // under the cursor while the palette is up.
+  // under the cursor while the palette is up. Re-read when the identity
+  // changes under an open palette, so the rows are always that identity's.
   useEffect(() => {
-    if (open) setRecent(readRecent())
-  }, [open])
+    if (!open) return
+    dropLegacyRecent()
+    setRecent(readRecent(recentKey))
+  }, [open, recentKey])
+
+  // The crew names the index does not carry (it sends `owner_crew_slug`),
+  // from the crews list already in hand — no second request.
+  const crewNameBySlug = useMemo(() => {
+    const m = new Map<string, string>()
+    for (const c of crews) m.set(c.slug, c.name)
+    return m
+  }, [crews])
+
+  // What a page row says on the right: the folder it is filed in, else the
+  // crew that owns it. Both come from lists the caller is already allowed
+  // to see, so the label can never say more than the index does.
+  const pageContextOf = (p: PageResult): string | null => {
+    if (p.view.folder) return p.view.folder.name
+    const ref = p.view.ownerRef
+    if (ref?.startsWith("crew/")) {
+      const slug = ref.slice("crew/".length)
+      return crewNameBySlug.get(slug) ?? slug
+    }
+    return null
+  }
+
+  // Recent, with every page row checked against the authorised list this
+  // open fetched — by slug, no per-row request. A page that was deleted or
+  // whose access was revoked is simply not in the list, and its row goes
+  // with it; a verified row wears the page's CURRENT name, not the one it
+  // was opened under. Nothing else in Recent is affected.
+  const recentRows = useMemo(() => {
+    const bySlug = new Map(pages.map((p) => [p.view.slug, p]))
+    const rows: RecentEntry[] = []
+    for (const entry of recent) {
+      const slug = pageSlugOfHref(entry.href)
+      if (slug === null) {
+        rows.push(entry)
+        continue
+      }
+      if (!pagesLoaded) continue
+      const page = bySlug.get(slug)
+      if (!page) continue
+      rows.push({ ...entry, label: page.view.name })
+    }
+    return rows
+  }, [recent, pages, pagesLoaded])
 
   // A closed palette keeps no query: the next ⌘K opens on a clean field, and
   // the group it drew does not flash back before the first keystroke.
@@ -417,11 +549,10 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
   )
 
   useEffect(() => {
-    if (!open || !workspaceId) return
-    const ac = new AbortController()
-    const qs = `workspace_id=${workspaceId}`
-    const ws = encodeURIComponent(workspaceId)
-
+    // Cleared FIRST, on every run: a workspace that changed or went away and
+    // a user who signed out both leave the previous identity's rows on
+    // screen otherwise, and the abort below only stops the LATE answer from
+    // bringing them back. The `!workspaceId` branch used to skip this.
     setAgents([])
     setCrews([])
     setSkills([])
@@ -431,6 +562,12 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
     setRoutines([])
     setMembers([])
     setIntegrations([])
+    setPages([])
+    setPagesLoaded(false)
+    if (!open || !workspaceId || authStatus === "unauthenticated") return
+    const ac = new AbortController()
+    const qs = `workspace_id=${workspaceId}`
+    const ws = encodeURIComponent(workspaceId)
 
     const opts = { signal: ac.signal }
     // Every list is RBAC-filtered server-side, so what comes back is already
@@ -445,11 +582,17 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
       apiFetch(`/api/v1/workspaces/${ws}/pipelines`, opts),
       apiFetch(`/api/v1/workspaces/${ws}/members`, opts),
       apiFetch(`/api/v1/integrations?${qs}`, opts),
+      // No `limit`: the page index is unpaginated and complete by contract
+      // (pages.MaxPagesPerWorkspace caps a workspace at 100), so the palette
+      // searches every page the caller reaches. Metadata only — no panel
+      // payloads, no application source.
+      apiFetch(`/api/v1/pages?${qs}`, opts),
     ]).then(async (settled) => {
       if (ac.signal.aborted) return
+      // A body that is not JSON is a failed list, never a thrown palette.
       const safeJson = async (r: PromiseSettledResult<Response>) =>
-        r.status === "fulfilled" && r.value.ok ? r.value.json() : null
-      const [agentsData, crewsData, skillsData, credsData, issuesData, projectsData, routinesData, membersData, integrationsData] =
+        r.status === "fulfilled" && r.value.ok ? r.value.json().catch(() => null) : null
+      const [agentsData, crewsData, skillsData, credsData, issuesData, projectsData, routinesData, membersData, integrationsData, pagesData] =
         await Promise.all(settled.map(safeJson))
       if (ac.signal.aborted) return
       if (agentsData) setAgents(agentsData)
@@ -461,10 +604,17 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
       if (routinesData) setRoutines(routinesData)
       if (membersData) setMembers(membersData)
       if (integrationsData) setIntegrations(integrationsData)
+      // A body the normaliser does not recognise yields no rows AND no
+      // verified list: a malformed answer must not certify anyone's Recent.
+      const pageRows = pagesData ? toPageResults(pagesData) : null
+      if (pageRows) {
+        setPages(pageRows)
+        setPagesLoaded(true)
+      }
     })
 
     return () => ac.abort()
-  }, [open, workspaceId])
+  }, [open, workspaceId, userId, authStatus])
 
   function runCommand(fn: () => void) {
     onOpenChange(false)
@@ -473,7 +623,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
 
   /** Navigate, and remember it for the Recent section. */
   function go(href: string, label: string, group: string) {
-    pushRecent({ href, label, group })
+    pushRecent(recentKey, { href, label, group })
     runCommand(() => router.push(href))
   }
 
@@ -507,9 +657,9 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
           </CommandEmpty>
         )}
 
-        {recent.length > 0 && (
+        {recentRows.length > 0 && (
           <CommandGroup heading={<GroupLabel>Recent</GroupLabel>} className={PALETTE_GROUP_CLASS}>
-            {recent.map((entry) => (
+            {recentRows.map((entry) => (
               <CommandItem
                 key={entry.href}
                 value={`${entry.label} ${entry.group} recent`}
@@ -641,6 +791,45 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                 <span className="type-meta text-muted-foreground-soft">{project.issue_count} issues</span>
               </CommandItem>
             ))}
+          </CommandGroup>
+        )}
+
+        {pages.length > 0 && (
+          <CommandGroup heading={<GroupLabel>Pages</GroupLabel>} className={PALETTE_GROUP_CLASS}>
+            {pages.map((p) => {
+              const context = pageContextOf(p)
+              const href = pageHref(p.view.slug)
+              return (
+                <CommandItem
+                  key={p.view.id}
+                  // The slug trails the name so two pages called the same
+                  // thing in different folders or crews stay two rows.
+                  value={`${p.view.name} ${p.view.slug} page`}
+                  keywords={[context ?? "", p.hasApplication ? "app application" : ""]}
+                  className={PALETTE_ITEM_CLASS}
+                  data-href={href}
+                  onSelect={() => go(href, p.view.name, "Pages")}
+                >
+                  {/* The page's own avatar (#2563), as the rail draws it: its
+                      colour when it has one, the muted text colour otherwise —
+                      a class here would override the palette's. */}
+                  <PageGlyph
+                    icon={p.view.icon}
+                    color={p.view.color}
+                    className={cn("h-4 w-4", !p.view.color && "text-muted-foreground")}
+                  />
+                  <span className="type-row flex-1 truncate">{p.view.name}</span>
+                  {p.hasApplication && (
+                    <span className="type-meta rounded border border-border/60 px-1 leading-4 text-muted-foreground-soft">
+                      app
+                    </span>
+                  )}
+                  {context && (
+                    <span className="type-meta max-w-[140px] truncate text-muted-foreground-soft">{context}</span>
+                  )}
+                </CommandItem>
+              )
+            })}
           </CommandGroup>
         )}
 
