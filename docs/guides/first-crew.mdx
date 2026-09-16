@@ -57,6 +57,7 @@ Every agent has one of two roles that determines their capabilities:
     - **Name and slug:** Identity (e.g., "Viktor" / `viktor`)
     - **Role title:** Human-readable role (e.g., "Backend Engineer")
     - **Agent role:** `AGENT` or `LEAD`
+    - **Crew:** Optional for an `AGENT` — leave it empty for a **workspace-wide agent** (no crew; you can assign one later). A `LEAD` must belong to a crew.
     - **CLI adapter:** Which coding CLI to use (`CLAUDE_CODE`, `CODEX_CLI`, `GEMINI_CLI`, `OPENCODE`, `CURSOR_CLI`, `FACTORY_DROID`)
     - **Tool profile:** Controls available tools:
       - `MINIMAL` -- Read-only: Read, Glob, Grep (plus MCP discovery)
@@ -100,6 +101,16 @@ right.
   and auth state, with Connect beside a gap.
 - **The roster** (no selection) is a table on a desktop and a one-column list
   on a phone; the onboarding guide agent is never listed.
+- **A selected crew** opens on four tabs: **Overview** (the crew at a
+  glance — its team, health and what needs a person; settings and delete live
+  behind **Crew administration**), **Team** (its agents, and the people
+  assigned to it), **Work** (the crew's issues, missions and shared routines) and **Memory** — the
+  knowledge the crew and its agents have retained, by scope (*Agent knowledge*,
+  *Shared with crew*, *Shared with workspace*), with **Refresh**, an export for
+  the agent and crew scopes, a link to the pending **Knowledge proposals** in
+  the inbox, and an **About me** view of what agents have saved about *you*
+  (saved preferences and per-agent notes, each with a **Forget**). See
+  [Agent memory](/guides/agent-memory).
 
 Lists are windowed at 500 rows; when a fleet is larger the explorer says how
 many rows are not loaded and loads them on ask.

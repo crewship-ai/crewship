@@ -1,6 +1,6 @@
 ---
 title: "Bottom dock — context-aware inspector"
-description: "The collapsible panel at the bottom of the dashboard adapts its tabs to whatever entity you're looking at — an agent, crew, issue, routine, or run — so the live, hands-on layer is always one click away."
+description: "The collapsible panel at the bottom of the Crews page adapts its tabs to the selected agent or crew — terminal, files, messages, logs — so the live, hands-on layer is always one click away. Issues carry their own drawer."
 icon: "panel-bottom"
 stability: experimental
 tag: Experimental
@@ -8,9 +8,11 @@ tag: Experimental
 
 # Bottom dock
 
-Every primary dashboard surface has a **collapsible dock** pinned to the bottom of the viewport. It's collapsed to a thin tab strip by default — click any tab to expand it, drag the top edge to resize, and it remembers your height.
+The **Crews** page (`/crews`) has a **collapsible dock** pinned to the bottom of the viewport. It's collapsed to a thin tab strip by default — click any tab to expand it (320 px), drag the top edge to resize between 160 and 900 px, and it remembers your height.
 
-The dock is **context-aware**: the tabs it shows depend on the entity in focus, so what you see is always the live layer of *that* thing — not a fixed set that's half-empty. Selecting a different agent / issue / routine / run re-scopes every tab.
+The dock is **context-aware**: its tabs are scoped to the agent or crew selected in the explorer or on the canvas — workspace-wide when nothing is selected — so what you see is always the live layer of *that* thing. Selecting a different agent or crew re-scopes every tab.
+
+The dock is mounted on the Crews page only. **Issues** has a drawer of its own with the same chrome (below); Routines and Activity have none — a routine's runs live in its **History** view and its schedule in its **Overview** (see [Routines](/guides/routines)), and a run's log is the **Runs** tab of the [Crew Journal](/guides/crew-journal) (`/journal?tab=runs`).
 
 ## What each page shows
 
@@ -28,7 +30,7 @@ The dock is **context-aware**: the tabs it shows depend on the entity in focus, 
     | **YAML** | Read-only projection of the agent/crew record |
   </Tab>
   <Tab title="Issues">
-    Scoped to the issue (mission) in focus:
+    The bottom drawer of `/issues`, scoped to the issue in focus:
 
     | Tab | What it shows |
     |-----|----------------|
@@ -41,30 +43,11 @@ The dock is **context-aware**: the tabs it shows depend on the entity in focus, 
 
     The old agent-scoped **Messages / Exec Log** tabs were removed from issues — they showed nothing when no agent was selected. Comments (issue discussion) is a different thing from Messages (an agent's peer inbox).
   </Tab>
-  <Tab title="Routines">
-    Appears when you select a routine — pair the definition editor above with its run console below:
-
-    | Tab | What it shows |
-    |-----|----------------|
-    | **Runs** | Run history for the routine (status, duration, trigger) |
-    | **Logs** | Exec log of the routine's most recent run. CLI: `crewship routine logs <run> --full` |
-    | **Schedule** | Cron, timezone, next + last run, enabled state, and a **Run now** button |
-    | **Spec** | The routine's YAML definition |
-  </Tab>
-  <Tab title="Activity">
-    Appears for a **run** context — the raw run console:
-
-    | Tab | What it shows |
-    |-----|----------------|
-    | **Logs** | The run's exec log, oldest-first |
-    | **Trace** | Step-by-step output of the run |
-    | **Changes** | Diff produced by the run (see [Changes](#changes-tab)) |
-  </Tab>
 </Tabs>
 
 ## Changes tab
 
-The **Changes** tab shows the diff a run or issue produced. It's computed on demand — there's no stored snapshot — and degrades to a calm "not wired up for this workspace yet" note when the diff source isn't available, rather than erroring.
+The **Changes** tab on the issues drawer shows the diff the issue's work produced. It's computed on demand — there's no stored snapshot — and degrades to a calm "not wired up for this workspace yet" note when the diff source isn't available, rather than erroring.
 
 <Note>
 The diff source (working-tree changes vs. a diff against the base branch) is a workspace-level decision. Until it's configured the tab stays in its idle state; the rest of the dock is unaffected.
@@ -78,7 +61,7 @@ The dock's read tabs have matching CLI commands, so an agent can pull the same d
 crewship issue runs CRE-142          # runs triggered by an issue
 crewship issue comments CRE-142      # issue discussion thread
 crewship issue activity CRE-142      # issue timeline
-crewship routine logs run_abc123 --full   # full per-run journal timeline
+crewship routine logs run_abc123 --full   # full per-run journal timeline (the routine's Logs, no longer a dock tab)
 ```
 
 See [Issues & triage](/api-reference/issues) and [Routines](/guides/routines) for the underlying endpoints.
