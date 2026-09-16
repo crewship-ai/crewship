@@ -12,7 +12,9 @@ var inputFormNameRE = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`)
 
 // Existing unannotated inputs retain their historical contract. Declaring a
 // form opts into validation at authoring and execution, across every producer.
-func hasInputForm(in InputSpec) bool { return in.Widget != "" || len(in.Options) > 0 || in.AllowCustom }
+func hasInputForm(in InputSpec) bool {
+	return in.Widget != "" || len(in.Options) > 0 || in.AllowCustom || in.Format != "" || in.Min != nil || in.Max != nil
+}
 
 func validateInputForms(dsl *DSL) error {
 	seen := map[string]int{}
@@ -25,6 +27,9 @@ func validateInputForms(dsl *DSL) error {
 		}
 		if !inputFormNameRE.MatchString(in.Name) || seen[in.Name] > 1 {
 			return fmt.Errorf("input %q needs a unique variable name", in.Name)
+		}
+		if in.Format != "" && (in.Format != "absolute_path" || in.Type != "string") {
+			return fmt.Errorf("input %q: format must be absolute_path on a string", in.Name)
 		}
 		valid := map[string]string{"text": "string", "select": "string", "multiselect": "array", "boolean": "boolean"}
 		if t, ok := valid[in.Widget]; ok && t != in.Type {
@@ -118,6 +123,9 @@ func validateFormValue(in InputSpec, value any) error {
 		if !ok {
 			return fail("expected text")
 		}
+		if in.Format == "absolute_path" && !validAbsoluteInputPath(s) {
+			return fail("use an absolute path starting with /, without . or .. segments or control characters; file existence and access are checked by the consuming step")
+		}
 		if in.Required && strings.TrimSpace(s) == "" {
 			return fail("an answer is required")
 		}
@@ -176,4 +184,22 @@ func validateFormValue(in InputSpec, value any) error {
 		return fail("unsupported value type")
 	}
 	return nil
+}
+
+// Lexical contract shared with the browser; this is not filesystem authorization.
+func validAbsoluteInputPath(s string) bool {
+	if !strings.HasPrefix(s, "/") || strings.Contains(s, "\\") {
+		return false
+	}
+	for _, c := range s {
+		if c < 32 || c == 127 {
+			return false
+		}
+	}
+	for _, segment := range strings.Split(s, "/") {
+		if segment == "." || segment == ".." {
+			return false
+		}
+	}
+	return true
 }

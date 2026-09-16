@@ -109,7 +109,7 @@ describe("routine run inputs dialog", () => {
     fireEvent.click(screen.getByRole("button", { name: "Run" }))
 
     expect(onRun).not.toHaveBeenCalled()
-    expect(screen.getByTestId("routine-input-error-obdobi")).toHaveTextContent("Required")
+    expect(screen.getByTestId("routine-input-error-obdobi")).toHaveTextContent(/required/i)
   })
 
   it("lets a required boolean be submitted as false", () => {
