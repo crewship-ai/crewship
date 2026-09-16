@@ -229,33 +229,20 @@ func TestIssueUpdateRunE_ReassignResolvesAgent(t *testing.T) {
 }
 
 func TestIssueUpdateRunE_AssigneeTypeAlone(t *testing.T) {
-	stub := covSetupCli4(t)
-	stubIssueDirectory(stub)
-
-	// A value that is neither agent nor user errors out.
-	c := covFreshCmd(issueUpdateCmd, declareIssueUpdateFlags)
-	covSetFlagsCli4(t, c, map[string]string{"assignee-type": "team"})
-	err := c.RunE(c, []string{"ENG-7"})
-	if err == nil || !strings.Contains(err.Error(), "not supported") {
-		t.Fatalf("want unsupported error, got %v", err)
-	}
-
-	// Blank value clears the column.
-	patchPath := "/api/v1/crews/" + covCrewIDCli4 + "/issues/ENG-7"
-	stub.OnPatch(patchPath, clitest.JSONResponse(200, map[string]string{"id": "ciss"}))
-	c2 := covFreshCmd(issueUpdateCmd, declareIssueUpdateFlags)
-	covSetFlagsCli4(t, c2, map[string]string{"assignee-type": " "})
-	if _, err := covCaptureStdoutCli4(t, func() error { return c2.RunE(c2, []string{"ENG-7"}) }); err != nil {
-		t.Fatalf("RunE: %v", err)
-	}
-	calls := stub.CallsFor("PATCH", patchPath)
-	if len(calls) != 1 {
-		t.Fatalf("PATCH calls = %d", len(calls))
-	}
-	var body map[string]any
-	_ = json.Unmarshal(calls[0].Body, &body)
-	if v, present := body["assignee_type"]; !present || v != nil {
-		t.Errorf("assignee_type = %v (present=%v), want explicit null", v, present)
+	for _, kind := range []string{"user", "agent", "team", " "} {
+		t.Run(kind, func(t *testing.T) {
+			stub := covSetupCli4(t)
+			stubIssueDirectory(stub)
+			c := covFreshCmd(issueUpdateCmd, declareIssueUpdateFlags)
+			covSetFlagsCli4(t, c, map[string]string{"assignee-type": kind})
+			err := c.RunE(c, []string{"ENG-7"})
+			if err == nil || !strings.Contains(err.Error(), "--assignee-type requires --assignee") {
+				t.Fatalf("want missing assignee error, got %v", err)
+			}
+			if calls := stub.CallsFor("PATCH", "/api/v1/crews/"+covCrewIDCli4+"/issues/ENG-7"); len(calls) != 0 {
+				t.Fatalf("type-only usage error sent %d PATCH requests", len(calls))
+			}
+		})
 	}
 }
 
@@ -394,7 +381,6 @@ func TestIssueUpdateRunE_AllScalarFlags(t *testing.T) {
 		"parent-issue-id": "ENG-1",
 		"estimate":        "5",
 		"sort-order":      "2.5",
-		"assignee-type":   "agent", // alone, valid value → forwarded as-is
 	})
 	if _, err := covCaptureStdoutCli4(t, func() error { return c.RunE(c, []string{"ENG-7"}) }); err != nil {
 		t.Fatalf("RunE: %v", err)
@@ -410,7 +396,7 @@ func TestIssueUpdateRunE_AllScalarFlags(t *testing.T) {
 	want := map[string]any{
 		"description": "new desc", "priority": "urgent", "due_date": "2026-08-01",
 		"project_id": "p1", "milestone_id": "m1", "parent_issue_id": "ENG-1",
-		"estimate": float64(5), "sort_order": 2.5, "assignee_type": "agent",
+		"estimate": float64(5), "sort_order": 2.5,
 	}
 	for k, v := range want {
 		if body[k] != v {

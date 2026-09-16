@@ -22,13 +22,6 @@
 /api/v1/webhooks/{crewId}/{agentId}/trigger        public dispatch route signed with the agent webhook secret; `crewship agent rotate-webhook-secret` manages it
 
 # --- In flight: a CLI is being added on another branch. Remove after it merges.
-/api/v1/agents/{agentId}/memory                    in flight (#2464 memory inventory, audit H2) — remove after the CLI PR merges
-/api/v1/crews/{crewId}/memory                      in flight (#2464 memory inventory, audit H2) — remove after the CLI PR merges
-/api/v1/pages/{slug}/application/panels/{panelId}/history   in flight (#2477 panel history, audit H6) — remove after the CLI PR merges
-/api/v1/workspaces/{workspaceId}/pipelines/calendar         in flight (#2460, audit H1) — remove after the CLI PR merges
-/api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}/executions   in flight (#2460, audit H1) — remove after the CLI PR merges
-/api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}/artifacts    in flight (#2460, audit H1) — remove after the CLI PR merges
-/api/v1/workspaces/{workspaceId}/pipelines/fixture_test     in flight (#2476, audit H9: `routine fixture-test` runs in-process) — remove after the CLI PR merges
 
 # --- Pre-existing gaps: authenticated routes with no command when this gate was
 # introduced (2026-09-15). Listed so the count can only go down; each needs a

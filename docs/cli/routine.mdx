@@ -336,8 +336,9 @@ returned the original run. A delayed, debounced or `--fire-at` invocation
 returns `SCHEDULED` with `pending_id`, `fire_at`, `priority`, and `coalesced`
 instead of a run id (a `--fire-at` start also appears in
 [`pending list`](#pending-list) with its pinned `RECIPE VERSION`). With
-`--async` the receipt is `IN_PROGRESS` plus the run id. The API uses `200` for
-immediate results and `202` for the deferred and async receipts.
+`--async` an in-flight run returns `IN_PROGRESS` plus the run id. A run that
+finishes before the asynchronous acknowledgement may still return its ordinary
+`200` result. The API uses `202` for deferred and in-flight async receipts.
 
 <Note>
 If the routine hits a `kind: approval` gate, `run` terminates with **`status: WAITING`** (exit 0, not a failure): it prints `paused at approval step: <id>` plus the waitpoint token and the `approve`/`reject` command hints, then releases its execution slot. Resume it with [`crewship routine waitpoints approve|reject <token>`](#crewship-routine-waitpoints). See [HITL waitpoints](/guides/routines#hitl-waitpoints).
@@ -1011,8 +1012,7 @@ crewship routine schema -o routine.schema.json
 
 Test a selected top-level step without contacting Crewship or executing external
 work. This is separate from `validate` (no step computation) and `step-run`
-(real execution). The editor exposes the same implementation under **Test →
-Test with fixtures**. The HTTP API exposes it at
+(real execution). The HTTP API exposes the same implementation at
 `POST /api/v1/workspaces/{workspaceId}/pipelines/fixture_test`, and `--remote`
 sends this command's input there instead of running it in the binary — the
 same request body, the same report, and the server's `400` (untestable recipe

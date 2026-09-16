@@ -131,6 +131,9 @@ var issueUpdateCmd = &cobra.Command{
 		if err := requireWorkspace(); err != nil {
 			return err
 		}
+		if cmd.Flags().Changed("assignee-type") && !cmd.Flags().Changed("assignee") {
+			return fmt.Errorf("--assignee-type requires --assignee; use --assignee '' to clear the assignment")
+		}
 
 		client := newAPIClient()
 
@@ -178,15 +181,6 @@ var issueUpdateCmd = &cobra.Command{
 				}
 				body["assignee_id"] = assigneeID
 				body["assignee_type"] = atype
-			}
-		} else if flags.Changed("assignee-type") {
-			v, _ := flags.GetString("assignee-type")
-			if strings.TrimSpace(v) == "" {
-				body["assignee_type"] = nil
-			} else if v != "agent" && v != "user" {
-				return fmt.Errorf("--assignee-type %q is not supported (agent or user)", v)
-			} else {
-				body["assignee_type"] = v
 			}
 		}
 		if flags.Changed("due-date") {

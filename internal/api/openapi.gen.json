@@ -3901,12 +3901,14 @@
               },
               "type": "object"
             },
+            "nullable": true,
             "type": "array"
           },
           "dropped_crew_filesystems": {
             "items": {
               "type": "string"
             },
+            "nullable": true,
             "type": "array"
           },
           "issue_counters_migrated": {
@@ -3982,6 +3984,7 @@
               ],
               "type": "object"
             },
+            "nullable": true,
             "type": "array"
           },
           "restored_workspace_id": {
@@ -4013,6 +4016,7 @@
               ],
               "type": "object"
             },
+            "nullable": true,
             "type": "array"
           },
           "security_level_clamped": {
@@ -4036,6 +4040,7 @@
               },
               "type": "object"
             },
+            "nullable": true,
             "type": "array"
           }
         },
@@ -4201,6 +4206,7 @@
               ],
               "type": "object"
             },
+            "nullable": true,
             "type": "array"
           },
           "valid": {

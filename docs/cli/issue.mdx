@@ -176,7 +176,7 @@ crewship issue update BE-42 --priority urgent --assignee franta
 | `--status` | `string` | | New status: `BACKLOG`, `TODO`, `IN_PROGRESS`, `REVIEW`, `DONE`, `FAILED`, `CANCELLED`, `DUPLICATE`. |
 | `--priority` | `string` | | New priority: `none`, `low`, `medium`, `high`, `urgent`. |
 | `--assignee` | `string` | | New assignee: an agent slug or ID (sets the delegate), or with `--assignee-type user` a member's email or user ID (sets the human owner). Empty string clears **both** owner and delegate. |
-| `--assignee-type` | `string` | | `agent` or `user`; defaults to `agent` when `--assignee` is given. Any other value is rejected. |
+| `--assignee-type` | `string` | | `agent` or `user`; requires `--assignee` and defaults to `agent` when it is given. A type alone is refused without changing the assignment. Use `--assignee ""` to clear both slots. |
 | `--due-date` | `string` | | Due date (ISO 8601). |
 | `--project-id` | `string` | | Project ID (empty string = unlink). |
 | `--milestone-id` | `string` | | Milestone ID (empty string = unlink). |

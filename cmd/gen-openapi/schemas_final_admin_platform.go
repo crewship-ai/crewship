@@ -69,7 +69,7 @@ func finalAdminPlatformSchemaCatalog() (map[string]DomainSchema, map[string]any)
 	// "confirmed complete".
 	backupVerify := object(map[string]any{
 		"valid": boolean(), "size_bytes": integer(), "manifest": manifest, "error": str(),
-		"completeness_checked": boolean(), "completeness_skip_reason": str(), "table_row_count_mismatches": array(rowCountMismatch),
+		"completeness_checked": boolean(), "completeness_skip_reason": str(), "table_row_count_mismatches": nullable(array(rowCountMismatch)),
 	}, "valid", "size_bytes", "manifest", "error", "completeness_checked", "completeness_skip_reason", "table_row_count_mismatches")
 	backupCreate := object(map[string]any{"path": str(), "size_bytes": integer(), "payload_sha256": str(), "format_version": integer(), "scope": str(), "scope_level": str(), "created_at": str(), "encrypted": boolean()})
 	backupRotate := object(map[string]any{"deleted": array(str()), "dry_run": boolean()})
@@ -80,20 +80,20 @@ func finalAdminPlatformSchemaCatalog() (map[string]DomainSchema, map[string]any)
 	// operator actually reads wrong.
 	backupRestore := object(map[string]any{
 		"manifest": manifest, "restored_ws": str(), "restored_workspace_id": str(), "crews_count": integer(), "crews_restored": integer(),
-		"rows_inserted": integer(), "docker_phase_skipped": boolean(), "dropped_crew_filesystems": array(str()),
+		"rows_inserted": integer(), "docker_phase_skipped": boolean(), "dropped_crew_filesystems": nullable(array(str())),
 		"security_level_clamped": integer(),
-		"security_level_clamps":  array(object(map[string]any{"credential_id": str(), "name": str(), "from": str(), "to": integer()})),
+		"security_level_clamps":  nullable(array(object(map[string]any{"credential_id": str(), "name": str(), "from": str(), "to": integer()}))),
 		// Schema skew: values discarded because the bundle named a column
 		// this instance's schema does not have (#2034). Spelled out rather
 		// than left as a bare object — the whole point of the field is that
 		// a client can act on WHICH table lost WHAT.
 		"columns_dropped": integer(),
-		"dropped_columns": array(object(map[string]any{"table": str(), "column": str(), "rows": integer()})),
+		"dropped_columns": nullable(array(object(map[string]any{"table": str(), "column": str(), "rows": integer()}))),
 		// Pre-#1797 issue_counters rows translated instead of lost (#2034).
 		"issue_counters_migrated": integer(),
 		// #2009: payload-vs-manifest and inserted-vs-manifest comparisons.
-		"payload_row_count_mismatches": array(rowCountMismatch),
-		"rows_inserted_shortfalls":     array(rowCountMismatch),
+		"payload_row_count_mismatches": nullable(array(rowCountMismatch)),
+		"rows_inserted_shortfalls":     nullable(array(rowCountMismatch)),
 		// #2226: a forked restore re-signs the journal chain; zero on a
 		// plain restore.
 		"journal_entries_resigned":     integer(),
