@@ -503,17 +503,18 @@ The `/keeper/execute` flow has the most stringent security because it runs shell
 1. **Sidecar validation:**
    - Intent and command length limits (4096 chars)
    - Null byte rejection
-   - Shell metacharacter blocking (`;`, `|`, `` ` ``, `>`, `&&`, `||`, `$(`)
+   - Shell metacharacter blocking outside single quotes (`;`, `|`, `>`, `&`, `<`, `` ` ``, `$(`, newlines)
    - Content inside single quotes is exempt
-   - Container ID always from IPC config (agent cannot override)
+   - Container ID and requesting agent always from IPC config and the agent's bearer token (agent cannot override)
 
 2. **crewshipd validation:**
-   - Same shell metacharacter checks (defense in depth)
-   - Keeper LLM evaluates the command
+   - A stricter second denylist (defense in depth): the operators above plus `${`, `<(`, `<<`, ANSI-C `$'…'`, every control character including U+2028/U+2029, interpreter re-invocation (`sh -c`, `python -c`, `node -e`, …) and `awk`/`sed`, with real quote-state tracking — see [Shell injection protection](/guides/keeper#shell-injection-protection)
+   - The credential must be `ACTIVE`, granted to the requesting agent and inside its lease, or the request is `404` before the judge runs
+   - The Keeper judge evaluates the command; the L1 fast path never applies to execute
 
 3. **Execution:**
-   - Credential injected as environment variable for the command only
-   - Output scrubbed of credential values before returning to agent
+   - Credential injected as environment variable for the command only, run as the container's resolved non-root user (refused if that user is empty, undeterminable or root)
+   - Output scrubbed of the credential value and a fixed set of its encodings (base64 variants, base32, URL-escaped, hex, reversed) before returning to agent — a denylist of transforms, not a boundary
 
 ## Output Scrubbing
 
