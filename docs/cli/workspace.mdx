@@ -52,9 +52,12 @@ crewship workspace get acme-platform
 ```
 
 The command takes no command-specific flags. It prints `Name`, `Slug`,
-`Language`, `Allow privileged credentials`, `ID`, and `Created`; machine
-formats use the corresponding API fields `id`, `name`, `slug`, `created_at`,
-`preferred_language`, and `allow_privileged_credentials`.
+`Language`, `Allow privileged credentials`, `Pages theme`, `ID`, and
+`Created`; machine formats use the corresponding API fields `id`, `name`,
+`slug`, `created_at`, `preferred_language`, `allow_privileged_credentials`
+and `pages_theme`. `Pages theme` lists the shared Page colours as
+`key=#RRGGBB` pairs, or `(SDK defaults)` when none is set — see
+[`workspace update --pages-theme`](#workspace-update).
 
 ## Flags
 
@@ -79,6 +82,7 @@ Only flags you actually set are sent — passing nothing returns `no fields to u
 | `--credential-audit-retention-days` | Days of `credential_audit` history to keep. `0` means keep forever. Leave unset to use the 90-day default. |
 | `--audit-log-retention-days` | Days of `audit_logs` history to keep. `0` means keep forever, which is the default — `audit_logs` is the compliance trail and its retention obligation is yours to declare. |
 | `--approvals-retention-days` | Days of decided `approvals_queue` history (approved/denied/timeout/cancelled) to keep. `0` means keep forever. Leave unset to use the 90-day default. A pending approval is never swept regardless of age. Rejected above `106751` days (~292 years) — past that the day count overflows the retention sweep's `int64`-nanosecond cutoff arithmetic. |
+| `--pages-theme <json\|@file>` | The shared colours every custom [Page application](/guides/pages#shared-company-colors) reads through the `--crewship-page-*` design tokens: a JSON object whose keys are `accent`, `background`, `surface`, `text`, `muted` and `border` and whose values are `#RRGGBB` colours. Inline (`'{"accent":"#0f766e"}'`) or `@theme.json`. The object **replaces** the stored one — omitted keys fall back to the SDK defaults — and `{}` resets it. Any other key, any other colour form, or more than 1 KiB is refused by the server. This is the same setting as **Settings → General → Pages appearance**; `OWNER`/`ADMIN` only, and audited. |
 
 <Warning>
 Only flags you actually pass are sent, and that matters here: `0` is a
@@ -355,7 +359,8 @@ The shortcut form (`invite <email>`) and the explicit form (`invite create <emai
 
 - **`workspace "X" not found or not accessible`** — `workspace use` validated against `/api/v1/workspaces` and your token has no membership.
 - **`--name is required`** — `create` needs at least a name.
-- **`no fields to update`** — `update` was called without any of `--name` / `--slug` / `--language` / `--allow-privileged-credentials` / `--credential-audit-retention-days` / `--audit-log-retention-days` / `--approvals-retention-days`.
+- **`no fields to update`** — `update` was called without any of `--name` / `--slug` / `--language` / `--allow-privileged-credentials` / `--credential-audit-retention-days` / `--audit-log-retention-days` / `--approvals-retention-days` / `--pages-theme`.
+- **`--pages-theme must be a JSON object …`** — the value (or the `@file`) did not parse as a JSON object of strings. The colour vocabulary itself is checked by the server: `pages_theme supports accent, background, surface, text, muted and border as #RRGGBB colors` is its answer to an unknown key or a named colour.
 - **`no workspace selected`** — `update` ran without an active workspace. Run `crewship workspace use` first or pass `--workspace`.
 
 </Accordion>
