@@ -253,6 +253,15 @@ func registerCredentialLiterals(s *scrubber.Scrubber, creds []Credential, logger
 				logger.Error("failed to register credential scrubber pattern", "credential_id", c.ID, "error", err)
 			}
 		}
+		// A rotation's grace value (#1882) is the credential's previous
+		// value, held for exactly the same reason the current one is, and
+		// it leaks the same way: a self-hosted gateway's old token has no
+		// shape the built-ins recognise.
+		if len(c.GraceToken) >= minScrubbableTokenBytes {
+			if err := s.AddPattern("credential_"+c.ID+"_grace", regexp.QuoteMeta(c.GraceToken)); err != nil {
+				logger.Error("failed to register credential grace scrubber pattern", "credential_id", c.ID, "error", err)
+			}
+		}
 		// Custom headers are credential material by the same argument the
 		// comment above makes for the token. A self-hosted gateway that
 		// authenticates with `X-Api-Key: 9f2c…` instead of a bearer puts the
@@ -424,6 +433,7 @@ func NewServer(cfg ServerConfig) *Server {
 		AllowPrivate:       allowPrivateEndpoints,
 		OnEgress:           s.buildEgressObserver(),
 		OnLLMCall:          s.buildLLMCallObserver(),
+		OnGraceFallback:    s.buildGraceFallbackObserver(),
 		ResolveLLMIdentity: s.llmRouteIdentity,
 		BillingMode:        billingMode,
 		SubscriptionPlan:   subscriptionPlan,

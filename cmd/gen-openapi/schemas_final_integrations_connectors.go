@@ -80,14 +80,16 @@ func finalIntegrationsConnectorsSchemaCatalog() (map[string]DomainSchema, map[st
 			// Named by TestOpenAPIRequired_MatchesTheStructsOwnJSONTags, which
 			// reads inboxListResponse's json tags rather than anyone's memory.
 			"rows", "count", "unread_count", "has_more"),
-		"FinalInboxItem":         inboxItem,
-		"FinalInboxBulk":         object(map[string]any{"updated": integer(), "skipped": integer(), "skipped_ids": array(str()), "state": str()}),
-		"FinalWebhookFire":       object(map[string]any{"run_id": str(), "status": str(), "deduped": boolean()}),
-		"FinalUserModel":         object(map[string]any{"user_id": str(), "workspace_id": str(), "exists": boolean(), "user_slug": str(), "bytes": integer(), "created_at": str(), "updated_at": str(), "content": str(), "facts": array(object(map[string]any{"key": str(), "value": str()}))}),
-		"FinalUserModelMutation": object(map[string]any{"user_id": str(), "forgot": str(), "exists": boolean(), "remaining": array(object(map[string]any{"key": str(), "value": str()}))}),
-		"FinalPeerConsent":       object(map[string]any{"user_id": str(), "workspace_id": str(), "opted_out": boolean(), "opted_out_at": str(), "purged": integer(), "purged_models": integer()}),
-		"FinalPreferences":       map[string]any{"type": "object", "additionalProperties": anyJSON()},
-		"FinalStatus":            object(map[string]any{"status": str()}),
+		"FinalInboxItem":   inboxItem,
+		"FinalInboxBulk":   object(map[string]any{"updated": integer(), "skipped": integer(), "skipped_ids": array(str()), "state": str()}),
+		"FinalWebhookFire": object(map[string]any{"run_id": str(), "status": str(), "deduped": boolean()}),
+		"FinalUserModel":   object(map[string]any{"user_id": str(), "workspace_id": str(), "exists": boolean(), "user_slug": str(), "bytes": integer(), "created_at": str(), "updated_at": str(), "content": str(), "facts": array(ref("FinalUserModelFact"))}),
+		// provenance (#1693) is absent for a fact recorded before the
+		// evidence store existed — never null, never an empty object.
+		"FinalUserModelFact":       object(map[string]any{"key": str(), "value": str(), "provenance": ref("FinalUserModelProvenance")}),
+		"FinalUserModelProvenance": object(map[string]any{"quote": str(), "message_id": str(), "source_type": str(), "at": str()}),
+		"FinalPeerConsent":         object(map[string]any{"user_id": str(), "workspace_id": str(), "opted_out": boolean(), "opted_out_at": str(), "purged": integer(), "purged_models": integer()}),
+		"FinalPreferences":         map[string]any{"type": "object", "additionalProperties": anyJSON()},
 	}
 
 	routes := map[string]DomainSchema{
@@ -121,7 +123,6 @@ func finalIntegrationsConnectorsSchemaCatalog() (map[string]DomainSchema, map[st
 		"GET /api/v1/users/me/user-model":                          {Response: ref("FinalUserModel")},
 		"PUT /api/v1/users/me/peer-consent":                        {Response: ref("FinalPeerConsent")},
 		"GET /api/v1/me/preferences":                               {Response: ref("FinalPreferences")},
-		"DELETE /api/v1/me/preferences/{key}":                      {Response: ref("FinalStatus")},
 	}
 	return routes, components
 }
