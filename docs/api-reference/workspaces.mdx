@@ -469,7 +469,7 @@ Drive it from the CLI with [`crewship workspace member role`](/cli/workspace).
 
 **Capabilities** are per-member string grants layered *on top of* a member's RBAC role. They let a workspace admin hand an individual user a specific higher-tier action -- "let this `MEMBER` create routines" -- without promoting them to `MANAGER`. The role still sets the baseline; capabilities only ever widen it.
 
-The closed set of eight capabilities:
+The closed set of ten capabilities (`allCapabilities` in `internal/api/capabilities.go`):
 
 | Capability | Gates |
 |---|---|
@@ -477,9 +477,11 @@ The closed set of eight capabilities:
 | `routine.create` | Create pipeline schedules (cron-driven routines) |
 | `routine.run` | Invoke an existing routine, and see it in the slash palette. Distinct from `routine.create`: authoring a routine writes a definition somebody still has to approve, while running one executes inside the author crew's container with its credentials, now. |
 | `skill.create` | Generate / import skills |
-| `credential.create` | Create credential rows (fresh secret material in the vault) |
+| `credential.create` | Create credential rows (fresh secret material in the vault). Does not extend to provider accounts, which stay OWNER/ADMIN-only. |
 | `credential.rotate` | Rotate an existing credential's value |
+| `credentials:reveal` | Disclose a stored secret's plaintext to a human through [reveal](/api-reference/credentials#reveal). Spelled with a colon, as the security document names it. Necessary but not sufficient: the workspace switch, an interactive fresh sign-in, scope, classification and the audit write still gate every disclosure. |
 | `issue.create` | File issues |
+| `page.create` | Author a Page (`POST /api/v1/pages`); a MANAGER+ action by default, this lets a specific MEMBER do it. In no preset. |
 | `memory.write` | Write to agent / crew / workspace memory via `/remember` |
 
 **Presets** are named bundles for the common combinations:
@@ -488,9 +490,9 @@ The closed set of eight capabilities:
 |---|---|
 | `chat` | `chat` |
 | `power` | `chat`, `routine.create`, `routine.run`, `issue.create`, `memory.write` |
-| `admin` | all eight |
+| `admin` | `chat`, `routine.create`, `routine.run`, `skill.create`, `credential.create`, `credential.rotate`, `credentials:reveal`, `issue.create`, `memory.write` (everything but `page.create`) |
 
-A member with no explicit set falls back to a role-derived default (`OWNER`/`ADMIN` → the admin set, `MANAGER` → chat + `routine.create` + `issue.create` + `memory.write`, others → `chat`).
+A member with no explicit set falls back to a role-derived default (`OWNER`/`ADMIN` → the v109 admin set (no `routine.run`) **plus `credentials:reveal`**, `MANAGER` → chat + `routine.create` + `issue.create` + `memory.write`, others → `chat`). An explicit set is always authoritative, so revoking `credentials:reveal` from an ADMIN sticks.
 
 That fallback is **not** the preset of the same name. It reproduces what the
 v109 migration wrote into the capability column, so a row the migration filled
@@ -603,7 +605,7 @@ Returns the resolved capabilities for **every** member of the workspace in one r
     {
       "user_id": "user_jdoe42",
       "role": "OWNER",
-      "capabilities": ["chat", "credential.create", "credential.rotate", "issue.create", "memory.write", "routine.create", "skill.create"]
+      "capabilities": ["chat", "credential.create", "credential.rotate", "credentials:reveal", "issue.create", "memory.write", "routine.create", "skill.create"]
     },
     {
       "user_id": "user_asmith7",
