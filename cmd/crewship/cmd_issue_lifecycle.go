@@ -56,19 +56,11 @@ var issueCreateCmd = &cobra.Command{
 		}
 		if v, _ := flags.GetString("assignee"); v != "" {
 			atype, _ := flags.GetString("assignee-type")
-			if atype == "" {
-				atype = "agent"
+			assigneeID, atype, err := resolveIssueAssignee(client, atype, v)
+			if err != nil {
+				return err
 			}
-			switch atype {
-			case "agent":
-				agentID, err := resolveAgentID(client, v)
-				if err != nil {
-					return fmt.Errorf("cannot resolve assignee %q: %w", v, err)
-				}
-				body["assignee_id"] = agentID
-			default:
-				return fmt.Errorf("--assignee-type %q is not supported (only 'agent')", atype)
-			}
+			body["assignee_id"] = assigneeID
 			body["assignee_type"] = atype
 		}
 		if v, _ := flags.GetString("labels"); v != "" {
@@ -170,31 +162,29 @@ var issueUpdateCmd = &cobra.Command{
 		if flags.Changed("assignee") {
 			v, _ := flags.GetString("assignee")
 			if v == "" {
-				body["assignee_id"] = nil
-				body["assignee_type"] = nil
+				// The explicit unassign is assignee_id: "" — the server's
+				// clear branch (issue_handler_update.go) tests for the
+				// empty string, and a JSON null decodes to a nil pointer
+				// that reaches neither branch: alone it was "No fields to
+				// update", beside other flags it was silently ignored.
+				// The server clears both typed slots and the legacy type
+				// itself, so assignee_type is not sent.
+				body["assignee_id"] = ""
 			} else {
 				atype, _ := flags.GetString("assignee-type")
-				if atype == "" {
-					atype = "agent"
+				assigneeID, atype, err := resolveIssueAssignee(client, atype, v)
+				if err != nil {
+					return err
 				}
-				switch atype {
-				case "agent":
-					agentID, err := resolveAgentID(client, v)
-					if err != nil {
-						return fmt.Errorf("cannot resolve assignee %q: %w", v, err)
-					}
-					body["assignee_id"] = agentID
-				default:
-					return fmt.Errorf("--assignee-type %q is not supported (only 'agent')", atype)
-				}
+				body["assignee_id"] = assigneeID
 				body["assignee_type"] = atype
 			}
 		} else if flags.Changed("assignee-type") {
 			v, _ := flags.GetString("assignee-type")
 			if strings.TrimSpace(v) == "" {
 				body["assignee_type"] = nil
-			} else if v != "agent" {
-				return fmt.Errorf("--assignee-type %q is not supported (only 'agent')", v)
+			} else if v != "agent" && v != "user" {
+				return fmt.Errorf("--assignee-type %q is not supported (agent or user)", v)
 			} else {
 				body["assignee_type"] = v
 			}
@@ -324,4 +314,56 @@ type issueDeleteResult struct {
 	Identifier string `json:"identifier" yaml:"identifier"`
 	ID         string `json:"id" yaml:"id"`
 	Deleted    bool   `json:"deleted" yaml:"deleted"`
+}
+
+// resolveIssueAssignee turns the --assignee / --assignee-type pair into the
+// assignee_id / assignee_type the API wants. The server routes the write by
+// type — "user" fills the issue's human owner (owner_user_id), "agent" its
+// delegate (delegate_agent_id) — and never touches the other slot (#2297,
+// invariant I5), so the CLI only has to hand it the right id: an agent by
+// slug or id, a person by workspace-member email or user id. The audit
+// (#2587) found the CLI refusing "user" outright even though the API had
+// accepted it since #2297, which left the human owner settable only from
+// the browser.
+func resolveIssueAssignee(client *cli.Client, atype, ref string) (id, resolvedType string, err error) {
+	if atype == "" {
+		atype = "agent"
+	}
+	switch atype {
+	case "agent":
+		id, err = resolveAgentID(client, ref)
+		if err != nil {
+			return "", "", fmt.Errorf("cannot resolve assignee %q: %w", ref, err)
+		}
+	case "user":
+		id, err = resolveIssueOwnerUserID(client, ref)
+		if err != nil {
+			return "", "", err
+		}
+	default:
+		return "", "", fmt.Errorf("--assignee-type %q is not supported (agent or user)", atype)
+	}
+	return id, atype, nil
+}
+
+// resolveIssueOwnerUserID accepts a user id as-is and resolves an email
+// against the workspace member roster — the same rule `crewship audit
+// --user` follows, because an email is the only human identifier the CLI
+// shows anywhere.
+func resolveIssueOwnerUserID(client *cli.Client, ref string) (string, error) {
+	ref = strings.TrimSpace(ref)
+	if looksLikeCUID(ref) {
+		return ref, nil
+	}
+	if strings.Contains(ref, "@") {
+		id, err := findWorkspaceMemberUserIDByEmail(client, client.GetWorkspaceID(), ref)
+		if err != nil {
+			return "", fmt.Errorf("cannot resolve assignee %q: %w", ref, err)
+		}
+		if id == "" {
+			return "", fmt.Errorf("cannot resolve assignee %q: no workspace member with this email", ref)
+		}
+		return id, nil
+	}
+	return "", fmt.Errorf("--assignee %q: with --assignee-type user pass a member's email or user ID (a cuid — see `crewship workspace member list`)", ref)
 }
