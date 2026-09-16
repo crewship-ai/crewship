@@ -492,7 +492,7 @@ The closed set of ten capabilities (`allCapabilities` in `internal/api/capabilit
 | `power` | `chat`, `routine.create`, `routine.run`, `issue.create`, `memory.write` |
 | `admin` | `chat`, `routine.create`, `routine.run`, `skill.create`, `credential.create`, `credential.rotate`, `credentials:reveal`, `issue.create`, `memory.write` (everything but `page.create`) |
 
-A member with no explicit set falls back to a role-derived default (`OWNER`/`ADMIN` → the admin set **plus `credentials:reveal`**, `MANAGER` → chat + `routine.create` + `issue.create` + `memory.write`, others → `chat`). An explicit set is always authoritative, so revoking `credentials:reveal` from an ADMIN sticks.
+A member with no explicit set falls back to a role-derived default (`OWNER`/`ADMIN` → the v109 admin set (no `routine.run`) **plus `credentials:reveal`**, `MANAGER` → chat + `routine.create` + `issue.create` + `memory.write`, others → `chat`). An explicit set is always authoritative, so revoking `credentials:reveal` from an ADMIN sticks.
 
 That fallback is **not** the preset of the same name. It reproduces what the
 v109 migration wrote into the capability column, so a row the migration filled

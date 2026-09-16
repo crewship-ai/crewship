@@ -32,6 +32,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -349,15 +350,25 @@ func codexAuthJSON(access string) string {
 }
 
 // acceptanceTokens is the provider's token endpoint, faked: it hands back a
-// rotated pair and records what it was given.
+// rotated pair and records what it was given. Refresh runs on the server's
+// handler goroutine and the test reads afterwards, so the record is locked.
 type acceptanceTokens struct {
+	mu     sync.Mutex
 	gotOld string
 	next   providerlogin.RefreshResult
 }
 
 func (f *acceptanceTokens) Refresh(_ context.Context, refreshToken string) (providerlogin.RefreshResult, error) {
+	f.mu.Lock()
 	f.gotOld = refreshToken
+	f.mu.Unlock()
 	return f.next, nil
+}
+
+func (f *acceptanceTokens) handed() string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.gotOld
 }
 
 func TestAcceptance_CredentialRefresh_RenewsThroughProvider(t *testing.T) {
@@ -385,8 +396,8 @@ func TestAcceptance_CredentialRefresh_RenewsThroughProvider(t *testing.T) {
 	if !strings.Contains(out, "Login refreshed: "+seat) || !strings.Contains(out, "Refresh:") {
 		t.Errorf("refresh should report the renewed login:\n%s", out)
 	}
-	if tokens.gotOld != "rt.REAL-SECRET" {
-		t.Errorf("the provider was handed %q, want the stored refresh token", tokens.gotOld)
+	if got := tokens.handed(); got != "rt.REAL-SECRET" {
+		t.Errorf("the provider was handed %q, want the stored refresh token", got)
 	}
 	var refreshStatus string
 	if err := rig.db.DB.QueryRow(`SELECT status FROM provider_login_refresh WHERE credential_id = ?`, seat).Scan(&refreshStatus); err != nil || refreshStatus != "ok" {

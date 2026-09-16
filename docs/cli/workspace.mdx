@@ -324,7 +324,7 @@ Bundles map to common combinations:
 | --- | --- |
 | `chat` | chat-only baseline (default for new MEMBERs). |
 | `power` | chat + `routine.create` + `routine.run` + `issue.create` + `memory.write` (trusted team members). |
-| `admin` | full set, including `credential.create`, `credential.rotate` and `credentials:reveal` (everything but `page.create`). An OWNER/ADMIN with no explicit set already holds this. |
+| `admin` | full set, including `credential.create`, `credential.rotate` and `credentials:reveal` (everything but `page.create`). An OWNER/ADMIN with no explicit set holds the admin preset minus `routine.run` (the role clears that gate on its own). |
 
 ```bash
 crewship workspace member capabilities list usr_abc123

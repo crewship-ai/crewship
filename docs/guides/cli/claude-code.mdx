@@ -30,7 +30,7 @@ Two modes, both supported:
 A setup-token is a **seat**, stored as a provider login with an owner, a plan
 and an expiry, and shown on the Providers tab; it has no refresh flow, so
 Crewship warns before it expires and you paste a new one
-([Provider logins](/guides/credentials#provider-logins)). Crewship's sidecar
+([Provider logins](/guides/credentials#provider-logins-2)). Crewship's sidecar
 reverse-proxy injects the API key into `api.anthropic.com` requests so the
 agent container never sees the raw token. Setup-tokens flow through the HTTPS
 CONNECT tunnel directly (sidecar passes through, Claude Code sets
