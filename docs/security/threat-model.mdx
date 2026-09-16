@@ -352,15 +352,12 @@ hitting a paid API endpoint.
 default**, and it sits on exactly two agent-facing sidecar routes
 (`internal/sidecar/server.go`):
 
-- **`POST /keeper/request`** — the agent asks whether it may use a
-  credential, and receives a verdict. The value is never returned on this
-  route, whatever the verdict.
+- **`POST /keeper/request`** — the agent asks for a credential's value.
 - **`POST /keeper/execute`** — the agent asks for a command to be run
   *with* a credential injected, and receives only the scrubbed output.
 
-On those two routes the gate is genuinely pre-action: nothing is executed
-until the decision settles, and a human's later ruling on an `ESCALATE`
-records the verdict without running anything. The decision space is
+On those two routes the gate is genuinely pre-action: nothing is handed
+over or executed until the decision settles. The decision space is
 `ALLOW` / `DENY` / `ESCALATE`. There is **no YAML ruleset and no
 per-tool rule matching** — the judge is a model, and the tier carried by
 the credential (L1–L4) decides how far it is trusted. In the default
@@ -384,9 +381,8 @@ wire-protocol interception point none of the driven CLIs expose today.
 The behaviour monitor built on `post_tool_call` is therefore
 **detection, not prevention**. It is opt-in, it samples one call in five
 per crew by default, and a `BLOCK` verdict cannot undo the call that
-triggered it — on the sampled path the verdict is journalled as
-`hook.blocked` and nothing else happens; the driven CLI is not stopped.
-Never read it as an authorization boundary.
+triggered it — the verdict is journalled and can interrupt the *next*
+call. Never read it as an authorization boundary.
 </Warning>
 
 Keeper decisions are first-class journal entries (`entry_type =

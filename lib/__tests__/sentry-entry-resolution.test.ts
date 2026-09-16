@@ -1,17 +1,13 @@
 // The suite runs under happy-dom. That makes the SDK's Node entry the wrong
-// one to load — and in @sentry/nextjs 10.72–10.73 it was not merely wrong in
-// principle: `index.server.js` pulled in a vendored bundler plugin that
-// decided Node-vs-browser on `typeof document === 'undefined'`, saw
-// happy-dom's document, resolved its loader against `document.baseURI` and
-// handed the resulting `http:` URL to `fileURLToPath`, which threw at module
-// scope. On #2444 that killed twelve unrelated suites at import time with
-// every assertion inside them still passing, and the version pin that was
-// supposed to prevent it (a `pnpm.overrides` ceiling on `@sentry/nextjs`) did
-// not, because the throwing package is `@sentry/server-utils` and it floats
-// on its own. Upstream fixed the guard in 10.74.0 (#2235,
-// getsentry/sentry-javascript#23789); the Node entry loads under happy-dom
-// again, so the first test below no longer fails on its own — the second one
-// is what keeps the alias honest.
+// one to load — and not merely wrong in principle: `index.server.js` pulls in
+// a vendored bundler plugin that decides Node-vs-browser on
+// `typeof document === 'undefined'`, sees happy-dom's document, resolves its
+// loader against `document.baseURI` and hands the resulting `http:` URL to
+// `fileURLToPath`, which throws at module scope. On #2444 that killed twelve
+// unrelated suites at import time with every assertion inside them still
+// passing, and the version pin that was supposed to prevent it (a
+// `pnpm.overrides` ceiling on `@sentry/nextjs`) did not, because the throwing
+// package is `@sentry/server-utils` and it floats on its own.
 //
 // So the thing worth asserting is not "Sentry works" but "tests resolve the
 // browser build", which is what `vitest.config.ts` aliases. This file fails
