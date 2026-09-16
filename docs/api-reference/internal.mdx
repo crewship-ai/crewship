@@ -39,9 +39,12 @@ One row per documented internal route, grouped by family. See [Route catalog](#r
 | `POST` | [/api/v1/internal/agents](#agents-and-crews) | Create an agent programmatically |
 | `POST` | [/api/v1/internal/agents/hire](#agents-and-crews) | LEAD-initiated ephemeral hire |
 | `GET` | [/api/v1/internal/crew-connections](#agents-and-crews) | List crew connections |
+| `GET` | [/api/v1/internal/workspace/overview](#agents-and-crews) | Read-only inventory of the workspace (the Guide's `workspace_overview` MCP tool) |
 | `POST` | [/api/v1/internal/pipelines/test_run](#pipelines-routines-and-skills) | Test-run an agent-authored pipeline (step 1 of save) |
 | `POST` | [/api/v1/internal/pipelines/save](#pipelines-routines-and-skills) | Save an agent-authored pipeline definition |
 | `POST` | [/api/v1/internal/pipelines/run](#pipelines-routines-and-skills) | Run a saved routine (the `run_routine` MCP tool) |
+| `POST` | [/api/v1/internal/pipelines/drafts/get](#pipelines-routines-and-skills) | Read a crew's unpublished routine draft (the `get_routine_draft` MCP tool) |
+| `POST` | [/api/v1/internal/pipelines/drafts/save](#pipelines-routines-and-skills) | Save a routine draft without publishing (the `save_routine_draft` MCP tool) |
 | `GET` | [/api/v1/internal/pipelines](#pipelines-routines-and-skills) | List the workspace's routines (the `list_routines` MCP tool) |
 | `GET` | [/api/v1/internal/crews/{crewId}/capabilities](#pipelines-routines-and-skills) | The crew's authoring surface (the `discover_capabilities` MCP tool) |
 | `POST` | [/api/v1/internal/routines/schedules](#pipelines-routines-and-skills) | Slash-action mirror — create a pipeline schedule |
@@ -49,6 +52,10 @@ One row per documented internal route, grouped by family. See [Route catalog](#r
 | `POST` | [/api/v1/internal/skills/author](#pipelines-routines-and-skills) | Slash-action mirror — propose/author a skill |
 | `POST` | [/api/v1/internal/runs](#runs) | Create a run row |
 | `PATCH` | [/api/v1/internal/runs/\{runId\}](#runs) | Update run status / metrics |
+| `GET` | [/api/v1/internal/runs/\{runId\}/status](#runs) | Is this run still the live attempt of live work? (sidecar run authority) |
+| `POST` | [/api/v1/internal/memory/mutation](#memory) | Guaranteed-profile memory write against the host ledger |
+| `GET` | [/api/v1/internal/memory/canonical](#memory) | Read a memory file with its current revision |
+| `POST` | [/api/v1/internal/memory/search/hybrid](#memory) | Hybrid memory search scoped to the acting agent |
 | `POST` | [/api/v1/internal/crew-messages](#crew-messaging-and-files) | Send a peer message |
 | `GET` | [/api/v1/internal/crew-messages](#crew-messaging-and-files) | List peer messages |
 | `GET` | [/api/v1/internal/crew-files/\{crewId\}](#crew-messaging-and-files) | Read a file in the crew's shared volume |
@@ -67,8 +74,13 @@ One row per documented internal route, grouped by family. See [Route catalog](#r
 | `GET` | [/api/v1/internal/issues/\{identifier\}](#missions-and-issues) | Get a specific issue |
 | `POST` | [/api/v1/internal/issues](#missions-and-issues) | Create issue |
 | `PATCH` | [/api/v1/internal/issues/\{identifier\}](#missions-and-issues) | Update an issue (status, priority, assignee, labels, estimate, due date) |
+| `POST` | [/api/v1/internal/issues/\{identifier\}/work](#missions-and-issues) | Hand issue work off to a person or another agent |
 | `POST` | [/api/v1/internal/issues/\{identifier\}/comments](#missions-and-issues) | Comment on issue |
+| `GET` | [/api/v1/internal/issues/\{identifier\}/comments](#missions-and-issues) | Read the issue's comment thread |
 | `POST` | [/api/v1/internal/issues/\{identifier\}/relations](#missions-and-issues) | Relate or re-parent an issue |
+| `GET` | [/api/v1/internal/issues/\{identifier\}/attachments](#missions-and-issues) | List the issue's attachments (metadata only) |
+| `GET` | [/api/v1/internal/issues/\{identifier\}/attachments/\{attachmentId\}](#missions-and-issues) | Read one attachment, fenced and size-capped |
+| `POST` | [/api/v1/internal/issues/\{identifier\}/attachments](#missions-and-issues) | Attach a file to the issue |
 | `POST` | [/api/v1/internal/keeper/request](#keeper) | Sidecar forwards a credential read request |
 | `GET` | [/api/v1/internal/keeper/request/\{requestId\}](#keeper) | Fetch a previously submitted request's decision |
 | `POST` | [/api/v1/internal/keeper/execute](#keeper) | Sidecar forwards a sealed credential-use request |
@@ -80,7 +92,9 @@ One row per documented internal route, grouped by family. See [Route catalog](#r
 | `POST` | [/api/v1/internal/port-expose](#port-expose) | Request a capability URL for an internal port |
 | `GET` | [/api/v1/internal/notifications/channels](#agent-notifications) | List channels the calling agent may post to |
 | `POST` | [/api/v1/internal/notifications/send](#agent-notifications) | Agent sends a message to a channel it is paired with |
+| `PUT` | [/api/v1/internal/pages/\{page\}/data](#pages) | Write one panel's payload on behalf of a routine run or a container agent |
 | `POST` | [/api/v1/internal/pages/save](#pages) | Agent-authored page creation (name + panels) |
+| `POST` | [/api/v1/internal/pages/project](#pages) | Draft-only source edits and builds of a custom Page application (the `page_project` MCP tool) |
 
 ## Authentication
 
@@ -198,6 +212,7 @@ The `POST` create/rotate routes are registered only when the public `CredentialH
 | `POST` | `/api/v1/internal/agents` | Create an agent programmatically. Gated on the caller's crew `autonomy_level` — see [Autonomy gate](#autonomy-gate-on-agent-driven-creation). |
 | `POST` | `/api/v1/internal/agents/hire` | LEAD-initiated ephemeral hire — sidecar `/spawn` proxies here. See [Ephemeral hire](#ephemeral-hire). |
 | `GET` | `/api/v1/internal/crew-connections` | List crew connections. |
+| `GET` | `/api/v1/internal/workspace/overview?workspace_id=…` | One read-only bundle of what the workspace holds — the forward for the Guide's `workspace_overview` MCP tool, so it can advise about the workspace it can see rather than one it remembers. Returns `{crews[], routines[], pages[], open_issues, credentials[]}`: each crew carries `id`, `name`, `slug`, `icon`, `color` and its `agents[]` (`name`, `slug`, `role_title`, `cli_adapter`, `llm_model`, `status`); routines and pages are `name` + `slug` (+ routine `status`); credentials are `name`, `provider`, `status` — **names only, never a value**. The reserved setup crew is filtered out. `workspace_id` is required (`400`). |
 
 The `POST .../agents/hire` route is registered only when the public `AgentHandler` is wired (`router_internal.go:75-78`); the nil-safe adapter returns `500` otherwise.
 
@@ -210,13 +225,15 @@ These are the trusted forward-targets for agent-authored pipelines and the sidec
 | `POST` | `/api/v1/internal/pipelines/test_run` | Test-run an agent-authored pipeline before save (step 1 of the agent save flow). Same internal-token trust as save; the public `test_run` is JWT-authed. |
 | `POST` | `/api/v1/internal/pipelines/save` | Save an agent-authored pipeline definition. See [Pipeline save](#pipeline-save). |
 | `POST` | `/api/v1/internal/pipelines/run` | Run a saved routine — the sidecar→main forward for the `run_routine` MCP tool. The public run route rejects the internal token, so agents invoke saved routines through this surface (workspace + invoker identity injected from IPC). |
+| `POST` | `/api/v1/internal/pipelines/drafts/get` | Read the crew's unpublished draft of one routine — the forward for the `get_routine_draft` MCP tool. Body: `workspace_id`, `slug` (both required, `400`), `author_crew_id`, `author_agent_id`, optional `target_crew_slug` (setup-crew delegation only). The same draft CAS the user editor uses, scoped to the crew the token is bound to: a draft or published recipe owned by another crew is `403` ("draft belongs to another crew" / "published recipe belongs to another crew"). Returns `{"draft": {id, workspace_id, slug, revision, base_pipeline_id, base_revision, document, updated_by, created_at, updated_at}, "editor_url": "/routines?draft=…&draft_id=…&workspace=…", "published": false}`. |
+| `POST` | `/api/v1/internal/pipelines/drafts/save` | Save that draft — the forward for `save_routine_draft`. Same body plus `draft` (`slug` must equal the top-level `slug`, `revision` ≥ 0 is the CAS base, `document` must carry the same `slug` and an object `definition`). `save_token`, `skip_test_gate`, `skip_governance_gate`, `last_test_run_at` and `last_test_run_passed` are stripped from the document; `author_crew_id` / `author_agent_id` are stamped from the proven identity and `updated_by` is `agent:<id>` (or `crew:<id>`). **Never publishes** and mints no publication proof — a person publishes from the editor. `409` when the revision is stale or `draft.id` names a different draft; `400` on a malformed draft. Same response shape as `drafts/get`. |
 | `GET` | `/api/v1/internal/pipelines?workspace_id=…` | List the workspace's routines — the sidecar→main forward for the `list_routines` MCP tool. Wrapped in `internalWsCtx`, so `workspace_id` is **required** (`400`) and must match the token's binding (`403`). |
 | `GET` | `/api/v1/internal/crews/{crewId}/capabilities?workspace_id=…` | The crew's authoring surface — the forward for `discover_capabilities`. Same `internalWsCtx` wrapping, **plus** `assertBoundCrewWorkspaceDB` on the path's `crewId`: a crew-bound (`crwv1`) sidecar may introspect only its own crew. Without that a sidecar could pull a **sibling crew's** integrations, agents and runtimes — same workspace, so the workspace check alone waves it through. |
 | `POST` | `/api/v1/internal/routines/schedules` | Slash-action mirror — create a pipeline schedule (routine). See [Slash-action mirrors](#slash-action-mirrors). |
 | `POST` | `/api/v1/internal/skills/generate` | Slash-action mirror — LLM-author a SKILL.md. See [Slash-action mirrors](#slash-action-mirrors). |
 | `POST` | `/api/v1/internal/skills/author` | Slash-action mirror — propose/author a skill via the skill-proposal handler. Registered only when the `SkillProposedHandler` is wired (`router_internal.go:95-98`). |
 
-`routines/schedules` and the two read routes are registered only when the `PipelineHandler` is wired; `skills/generate` only when the `SkillGenerateHandler` is wired. `pipelines/test_run` / `save` / `run` are always registered on the `PipelineHandler`.
+`routines/schedules` and the two read routes are registered only when the `PipelineHandler` is wired; `skills/generate` only when the `SkillGenerateHandler` is wired. `pipelines/test_run` / `save` / `run` and the two `drafts/*` routes are always registered on the `PipelineHandler`.
 
 <Warning>
 **Why the read tools need an internal route at all** (#1763). The sidecar authenticates with `X-Internal-Token`, and `extractToken` reads only `Authorization: Bearer` and the session cookies. `list_routines` and `discover_capabilities` forwarded to the **public**, JWT-authed routes, so both answered `401` — every in-container agent asked to author a routine could see neither what its crew can reach nor what routines already existed, and wrote from memory instead. `save_routine` and `run_routine` were never affected because they already targeted this surface.
@@ -230,8 +247,21 @@ The fix is a second door onto the same handlers, **not** teaching `extractToken`
 |---|---|---|
 | `POST` | `/api/v1/internal/runs` | Create a run row. Idempotent on `(workspace_id, trace_id)`. |
 | `PATCH` | `/api/v1/internal/runs/{runId}` | Update run status / metrics. |
+| `GET` | `/api/v1/internal/runs/{runId}/status` | Answers whether `runId` is the current, open attempt of live work in the durable work ledger: `200 {"run_id", "active": bool, "reason"}`. A run absent from the ledger is `200 active:false`, deliberately **not** `404` — on this surface a 404 is byte-identical to "unregistered path or refused caller". `503` when the ledger cannot answer. This is the host half of the sidecar's opt-in run authority (`CREWSHIP_SIDECAR_RUN_AUTHORITY`, see [Environment Reference](/configuration/environment#read-by-the-sidecar-inside-the-container)). |
 
 Since PR #234, runs are reconstructed from journal entries; these endpoints exist for transitional callers and emit a `run.*` journal entry as a side effect. New integrations should emit journal entries directly via `/api/v1/internal/journal/emit` instead.
+
+### Memory
+
+The host side of the agent memory contract. `X-Internal-Token` authenticates the sidecar; `X-Acting-Agent-Slug` narrows it to one agent and is re-proved against the token's workspace/crew binding, so the header can only narrow the token's authority, never widen it.
+
+| Method | Path | Purpose |
+|---|---|---|
+| `POST` | `/api/v1/internal/memory/mutation` | Perform a memory write against the real ledger on the host side of the crew bind mount — the only route that can satisfy the **guaranteed** profile (caller-supplied `operation_id`, `expected_revision` + declared removals on a replace, durable ledger). Also requires the original per-run bearer capability, matched against workspace, agent and run; a live sibling run of the same agent does not authorize the caller. |
+| `GET` | `/api/v1/internal/memory/canonical?scope=agent\|crew&file=…` | Read one memory file with its current revision — the other half of the same contract, since a client cannot supply `expected_revision` without having been told the revision. |
+| `POST` | `/api/v1/internal/memory/search/hybrid` | Hybrid (lexical + embedding) memory search resolved strictly inside the acting agent's workspace/crew. Registered only when the hybrid search handler is wired. |
+
+See [Agent memory](/guides/agent-memory) for the profiles and conflict vocabulary.
 
 ### Crew messaging and files
 
@@ -265,7 +295,12 @@ Since PR #234, runs are reconstructed from journal entries; these endpoints exis
 | `GET` | `/api/v1/internal/issues/{identifier}` | Get a specific issue. |
 | `POST` | `/api/v1/internal/issues` | Create issue. `author_agent_id` (validated against the crew/workspace) is persisted as the creator with `authored_via = agent_tool_call`; optional `author_chat_id` / `author_run_id` record provenance. If `assignee_id` is set, `assignee_type` must be `user` or `agent` and the assignee must belong to `workspace_id` — otherwise `400` (`assignee_type must be 'user' or 'agent' when assignee_id is set` / `assignee_id does not exist in this workspace`). |
 | `PATCH` | `/api/v1/internal/issues/{identifier}` | Update an issue: `status`, `priority`, `assignee_type`/`assignee_id`, `labels`, `estimate`, `due_date`, plus an optional `comment`. Writes a `mission_activity` audit row **and a Crew Journal entry** attributed to `agent_id` (or `system` when absent) — the journal entry is what notification routing keys off, so an agent's change is subscribable exactly like a human's. A `comment` requires `agent_id`. `assignee_id` is validated against `workspace_id` (`400` when it names another tenant's user/agent); `labels` is a full replacement whose insert is workspace-scoped, so a foreign label id attaches nothing. An empty-string `assignee_id` / `due_date` clears the field. `title`, `description`, `project_id`, `milestone_id`, `routine_id`, `sort_order` and `parent_issue_id` are **not** accepted here. |
+| `POST` | `/api/v1/internal/issues/{identifier}/work` | Hand issue work off from inside the container — the forward for the sidecar's `POST /issue/{identifier}/work` verb. Body: `workspace_id`, `agent_id` (both required, `400`; the agent must belong to the workspace and the issue's crew to the token binding), then the same fields as the public [Transfer Issue Work](/api-reference/issues#transfer-issue-work) route: `operation_id`, `revision` (the issue's current `work_revision`), `action`, `target_id`, `note`. **Agents may only `handoff_agent` or `handoff_human`** — `take_over` and `submit` answer `403` ("human takeover and submission require a person"), and only the issue's current agent delegate may hand off (`403` otherwise). `200 {"revision", "status"}`; a replay of the same `operation_id` returns `{"revision", "replayed": true}`. `404` unknown issue; `409` stale revision, reused `operation_id` with different content, closed issue, held target agent, or active runs still stopping. |
 | `POST` | `/api/v1/internal/issues/{identifier}/comments` | Comment on issue. Requires `agent_id` — unattributed comments are rejected with `400`. |
+| `GET` | `/api/v1/internal/issues/{identifier}/comments?workspace_id=…` | Read the issue's comment thread, oldest first — the forward for the sidecar's `GET /issue/{identifier}/comments` verb, so an agent that wants history no longer has to be handed all of it in the brief. Each row is `{id, mission_id, author_type, author_id, author_name, body, created_at, updated_at}`. Scoped exactly like `GET .../issues/{identifier}` (workspace only). `400` without `workspace_id`, `404` unknown issue. |
+| `GET` | `/api/v1/internal/issues/{identifier}/attachments` | List the issue's attachments as **metadata only** — `{id, filename, content_type, size_bytes, sha256, created_at, uploaded_by}` where `uploaded_by` is the kind (`user` / `agent`), not an identity, and `filename` is already fenced as untrusted content. Listing is cheap; reading is a decision the agent makes per file. |
+| `GET` | `/api/v1/internal/issues/{identifier}/attachments/{attachmentId}` | Read one attachment: the metadata row plus `encoding` (`text` / `base64`), `content` (fenced text, or raw base64) and `truncated`, which is always present. |
+| `POST` | `/api/v1/internal/issues/{identifier}/attachments` | Attach a file. Body: `workspace_id` (required and proven against the token), `agent_id` (set by the sidecar from the per-agent token), `filename`, `content_base64`. `413` past the upload cap. Wraps the public attachment handler, so filename sanitisation, the content-type allowlist and de-duplication are the same on both doors; the three routes are registered only when that handler is wired. |
 | `POST` | `/api/v1/internal/issues/{identifier}/relations` | Relate two issues. Body: `target_identifier`, `relation_type` ∈ `blocks` \| `blocked_by` \| `relates_to` \| `duplicate_of` \| `sub_issue_of`. `blocked_by` is normalised to a swapped `blocks` row; `sub_issue_of` writes `parent_issue_id` on the issue named in the path instead of a `mission_relations` row. The path issue is crew-gated like every other mutation; the target only has to live in the bound workspace, and a foreign-tenant target is a `404` rather than a `403` so the endpoint is not an existence oracle. Duplicate relation → `409`. |
 
 ### Keeper
@@ -297,6 +332,7 @@ Keeper Phase 2 (aux-LLM evaluators, PR-C / PRD §6 F4). All four are wrapped in 
 |---|---|---|
 | `PUT` | `/api/v1/internal/pages/{page}/data` | Write one panel's payload on behalf of a routine run or a container agent. |
 | `POST` | `/api/v1/internal/pages/save` | Agent-authored page **creation** — build a new page's metadata + panels from inside a container. See [Pages: agent creation](#pages-agent-creation) below. |
+| `POST` | `/api/v1/internal/pages/project` | Draft-only source edits and builds of a custom Page application — the forward for the `page_project` MCP tool. See [Pages: project source](#pages-project-source) below. |
 
 The body of `PUT .../data` is an **envelope**, not the payload: `workspace_id`, `crew_id`,
 `agent_id` and `author_run_id` are injected by the caller (the dispatcher for
@@ -515,12 +551,15 @@ The trusted endpoint the sidecar forwards to when an agent emits a new pipeline 
 | `name` | string | Optional metadata. |
 | `description` | string | Optional. On re-save of an existing slug, omitting the key preserves the stored description; an explicit `""` clears it. |
 | `author_crew_id`, `author_agent_id`, `author_chat_id`, `author_run_id` | string | Author attribution; recorded with `authored_via = agent`. `author_crew_id` also scopes the agent-slug validation set. |
-| `last_test_run_at` | string | RFC 3339. Feeds the test-run gate. |
-| `last_test_run_passed` | bool | Feeds the test-run gate. |
+| `target_crew_slug` | string | Optional. Re-points ownership at the crew the routine is built FOR — accepted only from the onboarding setup crew (see `internal_delegated_crew.go`). |
+| `save_token` | string | The HMAC-signed proof minted by `POST /api/v1/internal/pipelines/test_run` that **this** crew just dry-ran **this** `definition_hash`. It is the only thing that clears the test-run gate on this path; there is no OWNER/ADMIN skip here because an agent has no such role. The former `last_test_run_at` / `last_test_run_passed` body fields are no longer read — a caller claiming "it passed" is not proof it did. |
+| `change_summary` | string | Optional one-line provenance note recorded on the version row. |
+| `trigger` | object | Optional. `{kind: "schedule" \| "manual" \| "once", cron, timezone, catchup_policy, max_consecutive_failures, fire_at, inputs}` — created in the **same transaction** as the routine and its version, so a bad cron or timezone rolls the whole save back. Same block as the public save; see [Atomic trigger authoring](/api-reference/pipelines#atomic-trigger-authoring). |
+| `activation` | string | Optional, top-level next to `trigger`. `"draft"` creates the trigger disabled and raises exactly one inbox item asking a MANAGER+ to activate it; omitted means live at once. Requires `trigger`; sending it with `kind: "manual"` or `"once"` is refused as `422`, the same as any other trigger validation failure. |
 
-**Response:** `201 Created` — the saved pipeline object (`toPipelineResponse`).
+**Response:** `201 Created` — the saved pipeline object (`toPipelineResponse`), plus a `trigger` block (`kind`, `schedule_id`, `cron_expr`, `timezone`, `enabled`, `first_fire_at`, `approval_required`, `inbox_item_id`) when the save requested one. A risky definition lands as `proposed` with an inbox review item, exactly as on the user path.
 
-**Errors:** `400` (invalid JSON, or missing `workspace_id` / `slug` / `definition`), `409` (slug already exists in the workspace), `422` (DSL parse / validation / cycle-detection failure, or the test-run gate was not satisfied), `500` (DB error).
+**Errors:** `400` (invalid JSON, or missing `workspace_id` / `slug` / `definition`), `409` — either `slug already exists in workspace`, or the **schedule-preset gate**: when the new definition renames or adds a required input that an active plan's preset no longer satisfies, the answer is `409 {"error", "hint", "schedule_conflict"}` where `schedule_conflict` is `{schedule_id, name, reason}` so a client can open the named plan and repair its preset, and `hint` spells out the way out (send a `trigger` block with the plan's inputs in the same save, repair the plan first, or disable it, publish, then re-enable). `422` (DSL parse / validation / cycle-detection failure, an invalid `save_token`, the test-run gate not satisfied — `save requires a fresh, passing test_run (within 5 minutes)` — or a `trigger` / `activation` that fails validation, which also rolls back the routine), `500` (DB error).
 
 ## Pages: agent creation
 
@@ -581,6 +620,49 @@ for the general model this follows.
 | 409 | A page with the resolved slug already exists in the workspace. |
 | 422 | Panel spec validation, reference resolution, or gate-expression resolution failed, or the workspace's page cap (`pages.MaxPagesPerWorkspace`) was reached. |
 | 500 | DB error. |
+
+## Pages: project source
+
+```
+POST /api/v1/internal/pages/project
+```
+
+The trusted endpoint the sidecar's `page_project` MCP tool forwards to: an
+agent edits the **source project** of a custom Page application and builds it,
+without ever publishing. The route is draft-only by construction — its private
+principal is minted only after the internal token, the acting agent, the exact
+owner crew and the `page_create` autonomy gate all agree, and no header or body
+field can produce a user identity or a publication. A person publishes the
+reviewed build through the editor or `crewship page project publish`.
+(`internal/api/pages_project_internal.go`)
+
+**Request body:** capped at 1 MiB plus the identity envelope.
+
+| Field | Type | Notes |
+|---|---|---|
+| `workspace_id`, `crew_id`, `agent_id` | string | **Required.** Injected by the sidecar from IPC; proven against the token binding and the agent must be a live member of `crew_id`. |
+| `target_crew_slug` | string | Optional. Setup-crew delegation, as on `pages/save`. |
+| `operation` | string | **Required.** One of `init`, `read`, `save`, `build`, `status`, `check`. Anything else — including any form of publish — is `400`. |
+| `slug` | string | **Required.** The Page whose project is addressed; the crew must be its exact owner. |
+| `expected_revision` | integer | CAS base. `init` requires `0`; `save`, `build` and `check` require the revision last read. |
+| `files` | array | `save` only: whole-file replacements `{path, encoding, content}`. At most `pages.MaxProjectFiles`, no duplicate paths. |
+| `delete_paths` | array | `save` only: paths to remove; deleting a missing file is `400`. |
+| `definition` | object | `save` only: optionally replaces the complete portable Page definition in the draft. |
+| `path` | string | `read` only: return one file instead of the file list. |
+| `build_id` | string | `check` only: the build to verify. |
+
+A field sent with an operation it does not apply to is `400` ("fields do not apply to this project operation").
+
+| Operation | Effect | Response |
+|---|---|---|
+| `init` | Creates the supported React/TypeScript starter as revision 1. `409` on an existing project — never use it to reset one. | The project write result. |
+| `read` | Inspect the draft. | `{revision, digest, git_commit, files[{path, encoding, bytes}], profile, sdk{module, source}, pages_theme, definition, page_path}`; with `path`, `{revision, file}`. `404` when the Page has no project yet or the file does not exist. |
+| `save` | Apply replacements and deletions atomically as a new revision, with a Git checkpoint. | The project write result. `409` when `expected_revision` is stale. |
+| `build` | Start the offline compiler on the current revision. One build runs per instance; a busy worker refuses. | Build identity. |
+| `status` | Poll the build: `running`, `ready`, `failed` or `interrupted`, with diagnostics but without the compiled JavaScript. | The preview/status document. |
+| `check` | Static verification of `build_id` against the source revision. A pass does not replace browser or security review. | The check result. |
+
+`init`, `save` and `build` are gated on the acting crew's `autonomy_level` for `page_create`; a held request is `403` and changes no draft and starts no build. `read`, `status` and `check` need the owning crew and a current agent in it. Every operation takes the Page's lease, so an agent and the editor cannot write the same draft concurrently. The operator-side prerequisites (`page_projects_path`, Git, the pinned `page_build_image`) are in the [YAML configuration](/configuration/yaml-config#storage) and [Pages apps operations](/guides/pages-apps-operations).
 
 ## Slash-action mirrors
 

@@ -28,6 +28,8 @@ import { formatDurationMs } from "@/lib/activity-stream"
 import { mapSubSpans } from "@/lib/trace/sub-spans"
 import { useWorkspaceAgentDirectory } from "@/hooks/use-workspace-agent-directory"
 import { RoutineAgentLink } from "./routine-agent-link"
+import type { RoutineBehavior, RoutineStepBehavior } from "@/lib/routine-behavior"
+import { RoutineStepChecks } from "./routine-behavior"
 import { RoutineStepDefinition } from "./routine-step-definition"
 import { RoutineRecordedValue, readableFieldName } from "./routine-saved-inputs"
 import type { StepExecutionSummary } from "@/hooks/use-run-executions"
@@ -105,6 +107,7 @@ export interface StepSpineRecord {
 }
 
 export interface RoutineStepSpineProps {
+  behavior?: RoutineBehavior
   workspaceId?: string
   /** The recipe to list — the saved one, or the version a run executed. */
   definition: unknown
@@ -141,6 +144,7 @@ export interface RoutineStepSpineProps {
 }
 
 export function RoutineStepSpine({
+  behavior,
   workspaceId,
   definition,
   record,
@@ -269,6 +273,7 @@ export function RoutineStepSpine({
             <SpineRow
               key={String(step.id || index)}
               step={step}
+              behavior={behavior?.steps.find((s) => s.id === step.id)}
               index={steps.indexOf(step)}
               sourceOrder={sourceOrder}
               workspaceId={workspaceId}
@@ -314,6 +319,7 @@ type AgentDirectory = ReturnType<typeof useWorkspaceAgentDirectory>["agents"]
 
 function SpineRow({
   step,
+  behavior,
   index,
   sourceOrder,
   workspaceId,
@@ -325,6 +331,7 @@ function SpineRow({
   onOpenChange,
 }: {
   step: Record<string, unknown>
+  behavior?: RoutineStepBehavior
   index: number
   sourceOrder: boolean
   workspaceId?: string
@@ -533,6 +540,7 @@ function SpineRow({
             </ul>
           </details>
         )}
+        <RoutineStepChecks behavior={behavior} />
         {typeof step.agent_slug === "string" && (
           <RoutineAgentLink slug={step.agent_slug} agent={agent} workspaceId={workspaceId} />
         )}

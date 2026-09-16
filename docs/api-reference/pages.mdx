@@ -74,8 +74,61 @@ validation.
 | GET | [`/api/v1/public/pages/{token}`](#view-a-public-page) | Public read, no account |
 | POST | [`/api/v1/public/pages/{token}/unlock`](#unlock-a-public-page) | Submit a public link's password |
 
+A page may carry a [custom application](/guides/pages#custom-applications);
+its source, build, review and publication routes are the
+[custom application contract](#custom-application-contract) at the end of
+this page:
+
+| Method | Endpoint | Purpose |
+|---|---|---|
+| GET | [`/api/v1/pages/{slug}/project`](#read-custom-source) | The current source draft and its definition |
+| PUT | [`/api/v1/pages/{slug}/project`](#save-custom-source) | Save a source revision |
+| GET | [`/api/v1/pages/{slug}/project/source`](#read-candidate-source-evidence) | The draft's files without the definition |
+| POST | [`/api/v1/pages/{slug}/project/build`](#build-custom-source) | Compile a revision |
+| GET | [`/api/v1/pages/{slug}/project/preview`](#read-build-preview) | The latest build and its artifact |
+| GET | [`/api/v1/pages/{slug}/project/history`](#list-source-history) | Source revisions |
+| GET | [`/api/v1/pages/{slug}/project/history/{revision}`](#read-historical-source) | One archived revision with its definition |
+| GET | [`/api/v1/pages/{slug}/project/history/{revision}/source`](#read-archived-source-evidence) | One archived revision's files only |
+| POST | [`/api/v1/pages/{slug}/project/restore`](#restore-source-draft) | Make an archived revision the new draft |
+| POST | [`/api/v1/pages/{slug}/project/check`](#check-a-publication-candidate) | Verify a built candidate |
+| GET | [`/api/v1/pages/{slug}/project/review`](#review-a-publication-candidate) | The snapshot a publication is fenced on |
+| POST | [`/api/v1/pages/{slug}/project/publish`](#publish-or-roll-back-an-application) | Publish a candidate, or republish a retained version |
+| GET | [`/api/v1/pages/{slug}/project/publications`](#publication-history-and-withdrawal) | Publication receipts |
+| POST | [`/api/v1/pages/{slug}/project/unpublish`](#publication-history-and-withdrawal) | Withdraw the live application |
+| GET | `/api/v1/pages/{slug}/project/fsck` | Verify one page's source, checkpoint and artifact integrity |
+| POST | [`/api/v1/pages/maintenance`](#post-/api/v1/pages/maintenance) | Reclaim project storage across the workspace |
+| GET | [`/api/v1/pages/{slug}/application`](#read-the-live-application) | The live application and its artifact |
+| POST | [`/api/v1/pages/{slug}/application/actions/{panelId}/{actionId}`](#dispatch-a-published-action) | Dispatch an action from the published application |
+| GET | [`/api/v1/pages/{slug}/application/actions/{pendingId}`](#read-own-application-action-status) | The caller's own pending action |
+| GET | [`/api/v1/pages/{slug}/application/panels/{panelId}/history`](#application-panel-history) | A panel's recent payloads, for the application |
+| GET | [`/api/v1/pages/runtime/bootstrap`](#bootstrap-the-isolated-runtime) | The isolated runtime's bootstrap document |
+
 Routes are workspace-unscoped; the workspace comes from the session context or
 the `workspace_id` query parameter, the same shape saved views and routines use.
+
+## Unreachable pages are not found
+
+When a management endpoint on a page — update, delete, push, grants, access,
+versions, rollback, export, project sources, public links or webhook tokens —
+refuses a request, it answers **404** if the caller cannot reach the page.
+Successful actions by authorized producers are unaffected. The `403` rows in
+the status tables below apply only to a caller
+who reaches the page — as its owner or a member of its owning crew, a workspace
+ADMIN/OWNER, a member of a crew that owns a panel on it, through the sharing of
+the folder it is in, or by a grant; the `reach` vocabulary under
+[List pages](#list-pages) — and lacks the standing the endpoint needs. A `403`
+therefore always says "this page exists and you may open it, but not do this";
+a `404` never says which of "does not exist" and "not yours to see" it is, so
+no management endpoint can be walked to learn which pages exist. The same rule
+covers a wrong panel id on the push path: *page "x" has no panel "y"* is
+answered only to a caller who reaches the page.
+
+The concealment is decided after the endpoint's own gate has refused, so it
+never gates a successful action: a declared producer or an agent whose
+authority is crew-bound pushes or writes sources without holding any human
+read path to the page. An agent working through its `page_project` tool
+(the internal path, not these routes) is refused with `404` whenever its
+crew-bound gate fails, since no human viewer stands behind it.
 
 ---
 
@@ -339,8 +392,8 @@ modification time; the optimistic lock (409) still applies.
 | 200 | Updated. A new structural version is recorded. |
 | 400 | Malformed spec, or an unresolvable owner/producer/routine reference. |
 | 401 | No session or token. |
-| 403 | No write authority, a panel replacement includes unreadable current/target panels, or a hidden reference no longer validates. |
-| 404 | No such page. |
+| 403 | No write authority, a panel replacement includes unreadable current/target panels, or a hidden reference no longer validates. Only for a caller who reaches the page. |
+| 404 | No such page, or one the caller [cannot reach](#unreachable-pages-are-not-found). |
 | 409 | The live definition changed before the update; reload before saving. |
 
 ---
@@ -362,8 +415,8 @@ ADMIN/OWNER.
 |---|---|
 | 204 | Deleted, with its panels, payload history, grants, webhook tokens and public links. |
 | 401 | No session or token. |
-| 403 | Not the owner and not an admin. A `write` grant is not enough to delete. |
-| 404 | No such page. |
+| 403 | Not the owner and not an admin. A `write` grant is not enough to delete. Only for a caller who reaches the page. |
+| 404 | No such page, or one the caller [cannot reach](#unreachable-pages-are-not-found). |
 
 ---
 
@@ -422,8 +475,8 @@ push's own server-side reference `push:<panel>:<seq>` in place of a run id.
 | 200 | Stored. Connected viewers are notified over the page's websocket channel. |
 | 400 | The payload does not satisfy the panel's schema. The message names the field and why. |
 | 401 | No session or token. |
-| 403 | The caller is not the panel's declared producer and holds no `produce` grant. The refusal writes a journal entry and notifies the page owner — treat it as a signal to investigate, not noise to retry past. |
-| 404 | No such page, or the page has no such panel. |
+| 403 | The caller is not the panel's declared producer and holds no `produce` grant, and reaches the page some other way. The refusal writes a journal entry and notifies the page owner — treat it as a signal to investigate, not noise to retry past. |
+| 404 | No such page, or one the caller [cannot reach](#unreachable-pages-are-not-found), or the page has no such panel. A caller who cannot reach the page gets this answer for an unauthorised push too — still journalled, and the owner still notified. |
 | 422 | The payload exceeds 64 KiB. The rejection names the bytes attempted and the limit. |
 | 429 | Faster than one push per two seconds for this panel, or over the per-minute budget. |
 
@@ -473,7 +526,8 @@ decides something while its issuer still stands behind it.
 | 200 | Listed. |
 | 400 | No workspace in context and none supplied. |
 | 401 | No session or token. |
-| 403 | Not the owner and not an admin. |
+| 403 | Not the owner and not an admin. Only for a caller who reaches the page. |
+| 404 | No such page, or one the caller [cannot reach](#unreachable-pages-are-not-found). |
 
 ---
 
@@ -538,7 +592,8 @@ and by members of the crews that own its panels.
 | 200 | Issued, or updated in place if the subject already held one. |
 | 400 | Unknown `subject_type` or `level`, missing subject, `produce` for the `workspace` subject, or `panels` naming a panel the page does not have. |
 | 401 | No session. |
-| 403 | Not the owner and not an admin, or the caller is an agent rather than a human. |
+| 403 | Not the owner and not an admin, or the caller is an agent rather than a human. Only for a caller who reaches the page. |
+| 404 | No such page, or one the caller [cannot reach](#unreachable-pages-are-not-found). |
 
 ---
 
@@ -564,8 +619,8 @@ answers **400** rather than reporting a success it did not perform.
 | 200 | Revoked. `changed` is 0 when the subject held no grant. |
 | 400 | No subject named on the query string. |
 | 401 | No session or token. |
-| 403 | Not the owner and not an admin. |
-| 404 | No such page. |
+| 403 | Not the owner and not an admin. Only for a caller who reaches the page. |
+| 404 | No such page, or one the caller [cannot reach](#unreachable-pages-are-not-found). |
 
 ---
 
@@ -638,8 +693,8 @@ An administrator sees every crew named.
 | 200 | Listed. |
 | 400 | `limit` is not a positive integer, or `cursor` is not one this endpoint issued. |
 | 401 | No session or token. |
-| 403 | Not the owner and not an admin. A grant of any level is not enough. |
-| 404 | No such page. |
+| 403 | Not the owner and not an admin. A grant of any level is not enough — but a caller who reaches the page by one gets this answer rather than the 404 below. |
+| 404 | No such page, or one the caller [cannot reach](#unreachable-pages-are-not-found). |
 
 ---
 
@@ -699,7 +754,10 @@ everyone in the workspace — as *can view* or *can edit*, and they apply
 continuously to whatever is in the folder: filing a page in a shared folder
 shares it, taking it out unshares it. A page's own grants add to that and never
 take from it. *Can edit* implies *can view*; the server stores both and refuses
-a request that says otherwise. Neither ever opens a panel owned by another
+a request that says otherwise. *Can edit* is page `write` for every page in
+the folder, with no workspace-role floor — a VIEWER-role member named by it
+edits those pages, subject to the same whole-document check as a page `write`
+grant. Neither ever opens a panel owned by another
 crew: a panel is sealed by its owning crew's membership whatever the folder
 says. Agents are never a folder subject; an agent reaches a page only by a
 grant on that page.
@@ -1273,7 +1331,11 @@ GET /api/v1/pages/{slug}/versions
 The page's **structural** history — which panels existed, their layout, owners
 and producers. Panel data is not versioned.
 
-**Authentication:** session cookie or CLI token; any caller who can see the page.
+**Authentication:** session cookie or CLI token; page edit permission — the
+owner, a workspace ADMIN/OWNER, a `write` grantee, or a holder of *can edit*
+on the page's [folder](#folders). A version row carries the whole
+arrangement, panels sealed to a reader included, so seeing the page is not
+enough.
 
 **Response 200:**
 
@@ -1296,8 +1358,8 @@ and producers. Panel data is not versioned.
 | 200 | Listed. |
 | 400 | No workspace in context and none supplied. |
 | 401 | No session or token. |
-| 403 | Caller cannot see the page. |
-| 404 | No such page. |
+| 403 | No edit permission — a version carries the whole arrangement, sealed panels included. Only for a caller who reaches the page. |
+| 404 | No such page, or one the caller [cannot reach](#unreachable-pages-are-not-found). |
 
 ---
 
@@ -1349,8 +1411,8 @@ five minutes later.
 | 200 | Rolled back. |
 | 400 | `to` missing, invalid request, or a stored definition that no longer validates. |
 | 401 | No session or token. |
-| 403 | No write authority, or the current/archived definition contains panels the caller cannot read. |
-| 404 | No such page or retained version. |
+| 403 | No write authority, or the current/archived definition contains panels the caller cannot read. Only for a caller who reaches the page. |
+| 404 | No such page, or one the caller [cannot reach](#unreachable-pages-are-not-found), or no such retained version. |
 | 409 | The live definition changed before rollback; reload before restoring. |
 
 ---
@@ -1363,7 +1425,10 @@ GET /api/v1/pages/{slug}/export
 
 **Path parameters:** `slug`. **Query parameters:** `workspace_id` when the caller's context supplies none. No request body.
 
-**Authentication:** session cookie or CLI token; a caller who can see the page.
+**Authentication:** session cookie or CLI token; a caller with page edit
+permission — the owner, a workspace ADMIN/OWNER, a `write` grantee, or a
+holder of *can edit* on the page's [folder](#folders) — who can also read
+every panel in it.
 
 **Response 200** — a portable bundle: the spec, plus every reference it makes
 to something outside itself, listed so the importer must bind them explicitly:
@@ -1382,6 +1447,21 @@ to something outside itself, listed so the importer must bind them explicitly:
 The bundle carries no data, no grants and no tokens — an export is a shape, not
 a snapshot of what the page was showing.
 
+**A page with a custom application exports as `crewship-page-bundle/v2`.**
+The bundle then carries `project` — the current draft's source project, the
+same `crewship-page-source/v1` document `PUT …/project` accepts: source
+files, lockfile and small assets (`base64` entries) — and `page` is the
+draft's authored definition rather than the live one, with each panel's
+`actions`, `wake`, `on_failure` and `refresh` and with every `public` flag
+cleared. Every routine a `call` action names joins `references` as
+`routine/<slug>`, beside the crews, so the importer binds them the same way.
+A draft that declares a `link` or `custom` action is not yet portable and
+answers **422**, as does a bundle whose encoded size exceeds the transfer cap
+(the project document limit plus the spec cap plus 64 KiB). The v2 bundle
+does not carry builds, publications, Git history, grants, credentials or
+data; it is one revision's source and definition, never the application's
+trusted state. An export does not need the compiler.
+
 **Statuses:**
 
 | Status | Condition |
@@ -1389,8 +1469,10 @@ a snapshot of what the page was showing.
 | 200 | Exported. |
 | 400 | No workspace in context and none supplied. |
 | 401 | No session or token. |
-| 403 | Caller cannot see the page. |
-| 404 | No such page. |
+| 403 | No edit permission, or a panel in the definition the caller cannot read — the bundle would otherwise carry declarations an ordinary read withholds. Only for a caller who reaches the page. |
+| 404 | No such page, or one the caller [cannot reach](#unreachable-pages-are-not-found). |
+| 422 | The draft declares a `link` or `custom` action, which a v2 bundle cannot carry yet, or the encoded bundle exceeds the transfer cap. |
+| 503 | The page has a draft and project storage is not configured on this server. |
 
 ---
 
@@ -1419,6 +1501,20 @@ An unbound reference is a **422**, not a guess. Importing a bundle that names
 `crew/ops` into a workspace that happens to have a crew called `ops` would
 otherwise hand a page to whoever holds that name.
 
+A `crewship-page-bundle/v2` body — `format` set to that and `project`
+present — is accepted by the same endpoint and goes through the same binding:
+every crew *and* every routine the actions name must be bound to one that
+exists here, or the import is a **422** listing them. It creates an **inert
+draft**: the page is created with its panels, the
+bundle's `project` is stored as source revision 1 with a Git checkpoint, and
+the bundle's authored definition (actions, wake gates, `on_failure`,
+`refresh`) becomes the draft's definition — but the **live** page is written
+without them, nothing is built and nothing is published. Whoever imports it
+builds, reviews and publishes it here, as for any candidate. A v1 body that
+carries `project`, and a v2 body without one, are refused with **400**;
+`public` flags are never read from either. The v2 size cap is the project
+document's plus the spec cap plus 64 KiB, in place of the v1 envelope.
+
 **Response 201:** the created page.
 
 **Statuses:**
@@ -1426,11 +1522,12 @@ otherwise hand a page to whoever holds that name.
 | Status | Condition |
 |---|---|
 | 201 | Imported. |
-| 400 | Unknown bundle format. |
-| 422 | A reference left unbound, or a binding naming something that does not exist. The response lists each one and what would satisfy it. |
+| 400 | Unknown bundle format, a v1 bundle carrying `project`, or a v2 bundle whose `project` does not parse. |
+| 422 | A reference left unbound — a crew, or a routine a v2 bundle's actions name — or a binding naming something that does not exist; the response lists each one and what would satisfy it. Also a v2 definition that declares a `link`/`custom` action. |
 | 401 | No session or token. |
 | 403 | Caller lacks `page.create`, or bound a reference to a crew they do not belong to. |
 | 409 | A page with the requested slug already exists. |
+| 503 | A v2 bundle on a server without project storage configured. |
 
 ---
 
@@ -1456,8 +1553,8 @@ and whether it shows provenance. It cannot show the link itself — see
 | 200 | Listed. |
 | 400 | No workspace in context and none supplied. |
 | 401 | No session or token. |
-| 403 | Not the owner and not an admin. |
-| 404 | No such page. |
+| 403 | Not the owner and not an admin. Only for a caller who reaches the page. |
+| 404 | No such page, or one the caller [cannot reach](#unreachable-pages-are-not-found). |
 
 ---
 
@@ -1498,8 +1595,8 @@ panels explicitly marked public appear on it.
 | 201 | Published. |
 | 400 | `expires_in_days` out of range, or a password shorter than 8 or longer than 72 bytes. |
 | 401 | No session. |
-| 403 | Not the owner and not an admin. |
-| 404 | No such page. |
+| 403 | Not the owner and not an admin. Only for a caller who reaches the page. |
+| 404 | No such page, or one the caller [cannot reach](#unreachable-pages-are-not-found). |
 
 ---
 
@@ -1525,8 +1622,8 @@ working — several links per page is the intended shape.
 |---|---|
 | 200 | Withdrawn. |
 | 401 | No session or token. |
-| 403 | Not the owner and not an admin. |
-| 404 | No such page, or no such link on it. |
+| 403 | Not the owner and not an admin. Only for a caller who reaches the page. |
+| 404 | No such page, or one the caller [cannot reach](#unreachable-pages-are-not-found), or no such link on it. |
 
 ---
 
@@ -1570,8 +1667,8 @@ No `token` field: it is stored as a digest and cannot be re-read.
 | 200 | Listed. |
 | 400 | No workspace in context and none supplied. |
 | 401 | No session or token. |
-| 403 | Not the owner and not an admin. |
-| 404 | No such page. |
+| 403 | Not the owner and not an admin. Only for a caller who reaches the page. |
+| 404 | No such page, or one the caller [cannot reach](#unreachable-pages-are-not-found). |
 
 ---
 
@@ -1610,8 +1707,8 @@ shape, so revoking the PLC's does not break the CI job's.
 | 201 | Minted. |
 | 400 | `panel` missing, or naming a panel the page does not have. |
 | 401 | No session. |
-| 403 | Not the owner and not an admin. |
-| 404 | No such page. |
+| 403 | Not the owner and not an admin. Only for a caller who reaches the page. |
+| 404 | No such page, or one the caller [cannot reach](#unreachable-pages-are-not-found). |
 
 ---
 
@@ -1635,8 +1732,8 @@ when it was already revoked.
 |---|---|
 | 200 | Revoked. Further pushes with that token answer 403. |
 | 401 | No session or token. |
-| 403 | Not the owner and not an admin. |
-| 404 | No such page, or no such token on it. |
+| 403 | Not the owner and not an admin. Only for a caller who reaches the page. |
+| 404 | No such page, or one the caller [cannot reach](#unreachable-pages-are-not-found), or no such token on it. |
 
 ---
 
@@ -1813,8 +1910,10 @@ request, `429` compiler busy, `507` build-record quota, plus common errors.
 `GET /api/v1/pages/{slug}/project/preview`
 
 **Request:** path `slug`; authenticated Page editor, no body.
-**Response 200:** `{revision, build, runtime_url, artifact?}`. `build` is null
-before the first build. A ready build includes the immutable artifact
+**Response 200:** `{revision, build, runtime_url, development_same_origin, artifact?}`.
+`build` is null before the first build; `development_same_origin` is `true`
+only when the operator has enabled
+`CREWSHIP_PAGE_RUNTIME_DEVELOPMENT_SAME_ORIGIN`. A ready build includes the immutable artifact
 `{format:"crewship-page-preview/v1", javascript, css, toolchain}`. This response
 is `no-store`; execute only through the configured separate-site bootstrap.
 **Statuses:** `404` missing draft, common errors including `503` if the worker
@@ -2076,13 +2175,19 @@ also lists the routines that moved.
 
 **Authentication:** current Page reach. **Request:** path `slug`; optional
 `If-None-Match` header containing the previously returned `ETag`.
-**Response 200:** `{publication, can_publish, artifact?, runtime_url?}`. An
+**Response 200:** `{publication, publication_version, can_publish, artifact?, runtime_url?, development_same_origin?}`. An
 unpublished Page returns `publication:null`. A published response includes the
 immutable receipt and compiled artifact, never the source project. **304** is
 returned for an unchanged ETag only after current authorization is checked;
 no artifact bytes are read or retransmitted. The tag includes publication,
-runtime and publishing authority. Responses are `no-store`; Studio explicitly
-keeps the active artifact in memory and sends its ETag for revalidation.
+runtime and publishing authority. Responses are `no-store`; the page in the
+browser keeps the active artifact in memory and sends its ETag for
+revalidation. The response also carries `publication_version` — the live
+publication's number, `0` before any — and, when a publication is running,
+`development_same_origin`: `true` only when the operator has enabled
+`CREWSHIP_PAGE_RUNTIME_DEVELOPMENT_SAME_ORIGIN`, so a client can show the
+isolation warning. A withdrawn application answers `publication: null` with
+its `publication_version` kept.
 **Statuses:** common errors; `404` also conceals a Page outside viewer reach.
 Reading published artifacts works with the compiler disabled.
 
@@ -2093,8 +2198,8 @@ Reading published artifacts works with the compiler disabled.
 **Authentication:** existing action-dispatch role, current Page/panel access
 and routine policy. **Request:** `Idempotency-Key` header (1–128 bytes), JSON
 `{publication, inputs}` at most 32 KiB. Only a stored `call` action is accepted;
-there is no shell, arbitrary URL or routine-name parameter. The Studio SDK
-broker obtains confirmation in the trusted host before sending this request.
+there is no shell, arbitrary URL or routine-name parameter. The SDK broker in
+the page obtains confirmation in the trusted host before sending this request.
 **Response 202:** existing action queue receipt including `pending_id`; this
 does not mean the routine completed. Keys/debounce are scoped by viewer and
 publication. Publication/declaration checks and enqueue share a transaction.
@@ -2119,9 +2224,10 @@ panel or another viewer's pending action, `500` storage failure.
 `GET /api/v1/pages/runtime/bootstrap`
 
 **Authentication:** none. **Request:** no body; serve on the configured origin
-on a different site from Studio. **Response 200:** fixed `text/html` bootstrap
-with sandbox/CSP protections. It contains no user data, code artifacts, source
-or credentials; the authorized Studio host initializes a private MessagePort.
+on a different site from the browser origin (`CREWSHIP_PAGE_STUDIO_ORIGIN`).
+**Response 200:** fixed `text/html` bootstrap with sandbox/CSP protections. It
+contains no user data, code artifacts, source or credentials; the authorized
+page host initializes a private MessagePort.
 **Status 404:** runtime origin is not configured. This is the only route that
 needs exposure on the runtime reverse-proxy alias. A separate site does not
 provide a portable hard browser CPU/memory limit or complete anti-exfiltration

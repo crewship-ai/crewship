@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+
+	"github.com/crewship-ai/crewship/internal/pipeline"
 )
 
 // Run history must never resolve a slug to its current HEAD. A content hash
@@ -33,5 +35,8 @@ func (h *PipelineHandler) enrichRunDefinition(ctx context.Context, workspaceID, 
 	if definition.Valid && json.Valid([]byte(definition.String)) {
 		resp["definition"] = json.RawMessage(definition.String)
 		resp["definition_status"] = "available"
+		if dsl, err := pipeline.Parse([]byte(definition.String)); err == nil {
+			resp["behavior"] = pipeline.DescribeBehavior(dsl)
+		}
 	}
 }
