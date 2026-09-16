@@ -216,7 +216,7 @@ crewship skill create --slug pdf-cleanup \
 |------|---|---|
 | `--slug` | _required_ | Kebab-case identifier. |
 | `--prompt` | _required_ | Free-form description of the skill's behaviour. |
-| `--model` | `claude-sonnet-4-6` | LLM model override. |
+| `--model` | (catalog default) | LLM model override. Unset, the server drafts with the Anthropic default from the model catalog (`config/models.json`; `claude-sonnet-5` at the time of writing). |
 | `--print` | `false` | Print generated SKILL.md to stdout instead of summary. |
 
 ---

@@ -12,6 +12,41 @@ the PNGs carries the measured horizontal overflow, elements wider than the
 viewport, sub-32px tap targets at 390px, and the identifiers found in page
 text.
 
+## Status 2026-09-15
+
+Cluster A shipped as #2314 (2026-09-05); the inbox column was then rebuilt on
+the shared sidebar-kit and chat was unified with people rooms in #2458
+(2026-09-10). Against §3:
+
+- **P1 1–7 landed.** Rows carry a kind pill and the title without the server
+  prefix, crew · agent · age or expiry; the detail is names and links with a
+  "Where this came from" row; the reading pane carries the triage card when
+  nothing is open and says what lands here when empty; LINK and CREDENTIAL
+  escalations show the URL / credential name under "What you are approving";
+  the hire card has **Deny** (wired through the approvals-queue twin) and
+  **Open crew**; the chat header is the agent strip (face, status, role, crew,
+  model label, skills · credentials · runs, origin pill); the breadcrumb is
+  names and the Guide is hidden by `lib/fleet-visibility.ts`.
+  One deviation from 1: the verb is not on the list row (`inbox-v2-explorer.tsx`
+  rows end in the age or expiry); it is on the triage row ("Review →") and on
+  the card.
+- **P2 landed:** 8 crew facet (the triage's "By crew" sets it) — but Needs
+  action is one "Waiting for you" section, no Expiring / Approvals / by-crew
+  fold; 9 column fold ("More on the server · Show all"); 10 routine-step
+  origin words and the "This step has not written anything yet" empty state;
+  12 outcome words on History rows and "An owner or admin decides this";
+  15 `?view=`, `?kind=`, `?item=`, `?agent=` in the URL; 16 the Inbox SubBar
+  with counts and a Live pill. 14 is moot: the unified column lists every
+  agent under **Agents** and "Not started yet" is gone.
+- **Still open:** 11 the filter popover is still `max-h-[360px]`
+  (`sidebar-kit.tsx:244`); 13 `answer_deadline_at` is written to the
+  escalation payload but the inbox row still derives its countdown from
+  `timeout_at` only; 16 chat has no SubBar of its own; P3 17–23 not
+  re-verified (21 landed — the session id left the header for "Copy link").
+- `/inbox-v2` is now the redirect and `/inbox` the redesigned page; the v1
+  components under `components/features/inbox/` are imported by no page but
+  are still in the tree.
+
 ## 0. Method and assumptions
 
 - Server: `crewship-shot start --no-docker` on `:8094` (8095–8099 were taken
