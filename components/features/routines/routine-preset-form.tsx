@@ -45,7 +45,9 @@ export function RoutinePresetForm({
       try {
         const base = `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/pipelines/${encodeURIComponent(slug)}`
         const suffix = version ? `/versions/${version}` : source === "draft" ? "/draft" : ""
-        const res = await apiFetch(base + suffix, { signal: controller.signal })
+        const res = await apiFetch(base + suffix, {
+          signal: controller.signal,
+        })
         if (!res.ok)
           throw new Error(
             "Could not load the recipe's input schema. Retry before saving this preset.",
@@ -71,11 +73,6 @@ export function RoutinePresetForm({
   }, [workspaceId, slug, version, source, key, retry])
 
   const specs = loaded?.key === key ? loaded.specs : null
-  const withSavedValues = specs?.map((spec) =>
-    Object.hasOwn(initialInputs ?? {}, spec.name)
-      ? { ...spec, default: initialInputs![spec.name] }
-      : spec,
-  )
   const save = (inputs: Record<string, unknown>) => {
     // Keep legacy keys that this schema does not describe. Editing a preset
     // must not silently erase information consumed by advanced expressions.
@@ -128,17 +125,18 @@ export function RoutinePresetForm({
           </p>
         )
       )}
-      {withSavedValues && (
+      {specs && (
         <InputsForm
           key={key}
-          inputs={withSavedValues}
+          inputs={specs}
+          initialInputs={initialInputs}
           submitting={submitting}
           onCancel={onCancel}
           onRun={save}
           submitLabel={submitLabel}
         />
       )}
-      {!withSavedValues && (
+      {!specs && (
         <button
           type="button"
           disabled={submitting}
