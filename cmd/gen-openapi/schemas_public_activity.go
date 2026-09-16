@@ -192,7 +192,6 @@ func publicActivitySchemaCatalog() map[string]map[string]DomainSchema {
 		"POST /api/v1/workspaces/{workspaceId}/pipeline-webhooks":              {Request: webhookRequest, Response: webhook},
 		"PATCH /api/v1/workspaces/{workspaceId}/pipeline-webhooks/{webhookId}": {Request: webhookUpdateRequest, Response: webhook},
 		"POST /api/v1/webhooks/{token}":                                        {Response: object(map[string]any{"run_id": str(), "status": str()})},
-		"POST /api/v1/webhooks/{crewId}/{agentId}/trigger":                     {Response: anyObject()},
 	}
 	return map[string]map[string]DomainSchema{
 		"public-activity-chats": chatDomain, "public-activity-conversations": conversations,

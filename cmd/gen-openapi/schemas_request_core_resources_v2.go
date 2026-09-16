@@ -41,6 +41,11 @@ func coreResourceRequestSchemaCatalogV2() (map[string]DomainSchema, map[string]a
 		"name": nullable(str()), "slug": nullable(str()), "preferred_language": nullable(str()), "pages_theme": pagesThemeSchema(),
 		"allow_privileged_credentials": nullable(boolean()), "run_retention_days": nullable(integer()),
 		"credential_audit_retention_days": nullable(integer()), "audit_log_retention_days": nullable(integer()),
+		// #2233 — approvals_queue sweep window; 0 is keep-forever, as for
+		// the audit pair. This is the component PATCH /workspaces/{id}
+		// references; WorkspaceUpdateRequest in schemas_core.go is the
+		// legacy fallback nothing points at.
+		"approvals_retention_days": nullable(integer()),
 	}))
 
 	request("CoreCrewCreateRequestV2", object(map[string]any{

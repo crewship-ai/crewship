@@ -53,23 +53,54 @@ func finalAdminPlatformSchemaCatalog() (map[string]DomainSchema, map[string]any)
 		"encrypted": boolean(), "created_at": str(), "format_version": integer(),
 	})
 	backupStatus := object(map[string]any{"held": boolean(), "workspace_id": str(), "acquired_by": str(), "acquired_at": str(), "expires_at": str()})
-	backupVerify := object(map[string]any{"valid": boolean(), "size_bytes": integer(), "manifest": object(map[string]any{
+	// One table whose recorded row count disagrees with what was actually
+	// found (backup.TableRowCountMismatch). Shared by verify and restore.
+	rowCountMismatch := object(map[string]any{"table": str(), "recorded": integer(), "actual": integer()}, "table", "recorded", "actual")
+	// manifest is backup.Manifest; only the fields a client acts on are
+	// spelled out. contents.table_row_counts is the per-table count the
+	// completeness check compares against (#2009).
+	manifest := nullable(object(map[string]any{
 		"format_version": integer(), "crewship_version_at_backup": str(), "schema_migration_versions": array(integer()),
 		"scope": str(), "scope_level": str(), "compatible_targets": array(str()), "created_at": str(),
-	}), "error": str()})
+		"contents": object(map[string]any{"table_row_counts": map[string]any{"type": "object", "additionalProperties": integer()}}),
+	}))
+	// backupVerifyResponse (internal/api/backup_query.go). completeness_checked
+	// false means "not evaluated" — see completeness_skip_reason — never
+	// "confirmed complete".
+	backupVerify := object(map[string]any{
+		"valid": boolean(), "size_bytes": integer(), "manifest": manifest, "error": str(),
+		"completeness_checked": boolean(), "completeness_skip_reason": str(), "table_row_count_mismatches": array(rowCountMismatch),
+	}, "valid", "size_bytes", "manifest", "error", "completeness_checked", "completeness_skip_reason", "table_row_count_mismatches")
 	backupCreate := object(map[string]any{"path": str(), "size_bytes": integer(), "payload_sha256": str(), "format_version": integer(), "scope": str(), "scope_level": str(), "created_at": str(), "encrypted": boolean()})
 	backupRotate := object(map[string]any{"deleted": array(str()), "dry_run": boolean()})
-	// restored_ws is the restored workspace's SLUG — it is what the CLI
-	// prints as `workspace=`, and RestoreResult.RestoredWs is a string.
-	// It was declared boolean here, so every client generated from this
-	// spec typed the one field an operator actually reads wrong.
-	backupRestore := object(map[string]any{"manifest": object(map[string]any{}), "restored_ws": str(), "restored_workspace_id": str(), "crews_count": integer(), "crews_restored": integer(), "rows_inserted": integer(), "docker_phase_skipped": boolean(), "dropped_crew_filesystems": array(str()), "security_level_clamped": integer(), "security_level_clamps": array(object(map[string]any{})),
+	// backupRestoreResponse (internal/api/backup.go). restored_ws is the
+	// restored workspace's SLUG — it is what the CLI prints as `workspace=`,
+	// and RestoreResult.RestoredWs is a string. It was declared boolean
+	// here, so every client generated from this spec typed the one field an
+	// operator actually reads wrong.
+	backupRestore := object(map[string]any{
+		"manifest": manifest, "restored_ws": str(), "restored_workspace_id": str(), "crews_count": integer(), "crews_restored": integer(),
+		"rows_inserted": integer(), "docker_phase_skipped": boolean(), "dropped_crew_filesystems": array(str()),
+		"security_level_clamped": integer(),
+		"security_level_clamps":  array(object(map[string]any{"credential_id": str(), "name": str(), "from": str(), "to": integer()})),
 		// Schema skew: values discarded because the bundle named a column
 		// this instance's schema does not have (#2034). Spelled out rather
 		// than left as a bare object — the whole point of the field is that
 		// a client can act on WHICH table lost WHAT.
 		"columns_dropped": integer(),
-		"dropped_columns": array(object(map[string]any{"table": str(), "column": str(), "rows": integer()}))})
+		"dropped_columns": array(object(map[string]any{"table": str(), "column": str(), "rows": integer()})),
+		// Pre-#1797 issue_counters rows translated instead of lost (#2034).
+		"issue_counters_migrated": integer(),
+		// #2009: payload-vs-manifest and inserted-vs-manifest comparisons.
+		"payload_row_count_mismatches": array(rowCountMismatch),
+		"rows_inserted_shortfalls":     array(rowCountMismatch),
+		// #2226: a forked restore re-signs the journal chain; zero on a
+		// plain restore.
+		"journal_entries_resigned":     integer(),
+		"journal_checkpoints_resigned": integer(),
+	}, "manifest", "restored_ws", "restored_workspace_id", "crews_count", "crews_restored", "rows_inserted", "docker_phase_skipped",
+		"dropped_crew_filesystems", "security_level_clamped", "security_level_clamps", "columns_dropped", "dropped_columns",
+		"issue_counters_migrated", "payload_row_count_mismatches", "rows_inserted_shortfalls", "journal_entries_resigned", "journal_checkpoints_resigned")
 	backupSelfTest := object(map[string]any{"ok": boolean(), "crew_id": str(), "crew_slug": str(), "canary_path": str(), "canary_bytes": integer(), "bundle_bytes": integer(), "elapsed_ms": integer(), "error": str()})
 	backupMetrics := object(map[string]any{"created_total": integer(), "created_by_scope": map[string]any{"type": "object", "additionalProperties": integer()}, "failed_total": integer(), "failed_by_reason": map[string]any{"type": "object", "additionalProperties": integer()}, "restored_total": integer(), "size_bytes_total": integer(), "duration_seconds_p50": numberSchema(), "duration_seconds_p95": numberSchema(), "duration_seconds_mean": numberSchema(), "lock_held_seconds_by_workspace": map[string]any{"type": "object", "additionalProperties": integer()}})
 	setup := object(map[string]any{

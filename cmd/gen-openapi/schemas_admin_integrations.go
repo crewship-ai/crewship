@@ -23,6 +23,15 @@ type DomainSchema struct {
 	// success path is deliberately no-content (for example DELETE → 204).
 	// A non-nil slice is significant; an empty slice means no success status.
 	SuccessStatuses []string
+	// ErrorMedia and ErrorResponse describe the non-2xx bodies of an
+	// operation whose errors do NOT go through writeJSON. The generator
+	// otherwise declares application/json with the {"error"} or RFC 7807
+	// envelope for every error status, which is right for the two helpers
+	// the package uses and wrong for a handler that writes http.Error —
+	// text/plain, no envelope. The agent-webhook trigger is one. When
+	// ErrorMedia is nil the default applies.
+	ErrorMedia    []string
+	ErrorResponse map[string]any
 }
 
 // DomainSchemaMap returns the audited schemas for the API's operational
