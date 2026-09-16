@@ -47,7 +47,11 @@ var schemaKeyContracts = []struct {
 	{name: "Run", pointer: "/components/schemas/Run", value: runResponse{}},
 	{name: "RunList", pointer: "/components/schemas/RunList", value: runListResponse{}},
 	{name: "Workspace", pointer: "/components/schemas/Workspace", value: workspaceResponse{}},
-	{name: "WorkspaceUpdateRequest", pointer: "/components/schemas/WorkspaceUpdateRequest", value: updateWorkspaceRequest{}},
+	// PATCH /workspaces/{id} references CoreWorkspaceUpdateRequestV2, not
+	// the legacy WorkspaceUpdateRequest (0 $refs) — the pointer names the
+	// component the operation uses, or the test grades a schema no client
+	// ever sees.
+	{name: "PATCH /api/v1/workspaces/{workspaceId} body", pointer: "/components/schemas/CoreWorkspaceUpdateRequestV2", value: updateWorkspaceRequest{}},
 	{name: "CrewAssignmentsResponseV1[]", pointer: "/components/schemas/CrewAssignmentsResponseV1/items", value: assignmentListItem{}},
 	{name: "GET /api/v1/admin/backups/verify", pointer: "/components/schemas/FinalAdminPlatformBackupVerify", value: backupVerifyResponse{}},
 	{name: "POST /api/v1/admin/backups/restore", pointer: "/components/schemas/FinalAdminPlatformBackupRestore", value: backupRestoreResponse{}},

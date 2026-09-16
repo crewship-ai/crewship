@@ -2654,6 +2654,10 @@
             "nullable": true,
             "type": "boolean"
           },
+          "approvals_retention_days": {
+            "nullable": true,
+            "type": "integer"
+          },
           "audit_log_retention_days": {
             "nullable": true,
             "type": "integer"
@@ -6671,6 +6675,7 @@
             "type": "object"
           },
           {
+            "additionalProperties": false,
             "properties": {
               "delivery_id": {
                 "type": "string"
@@ -6679,6 +6684,9 @@
                 "type": "string"
               },
               "status": {
+                "enum": [
+                  "ignored"
+                ],
                 "type": "string"
               }
             },
@@ -10273,8 +10281,7 @@
       },
       "RemainingAgentRunsV1": {
         "items": {
-          "additionalProperties": true,
-          "type": "object"
+          "$ref": "#/components/schemas/Run"
         },
         "type": "array"
       },

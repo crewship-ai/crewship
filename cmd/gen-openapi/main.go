@@ -1588,17 +1588,18 @@ func packageSource() string {
 	return cachedPackageSrc
 }
 
-// inlineStatusPattern finds a status written as a numeric literal.
-//
-// The two error helpers are matched by argument POSITION (`writeProblem(w, r,
-// 409, …)`, `replyError(w, 400, …)`), not by "any three digits on the line" as
-// writeJSON and WriteHeader are: their last argument is a message, and
+// inlineStatusPattern finds a status written as a numeric literal, matched by
+// argument POSITION — `WriteHeader(409)`, `writeJSON(w, 202, …)`,
+// `replyError(w, 400, …)`, `writeProblem(w, r, 409, …)` — never by "any three
+// digits on the line": the helpers' last argument is a message or a body, and
 // "name must be 2-100 characters" would otherwise publish a 100 Continue.
-// They are here because the issue-workflow handlers write the literal rather
-// than `http.StatusConflict`; with only writeJSON and WriteHeader recognised,
-// POST …/work documented 200/401/403 and none of the 400/404/409 it actually
-// answers (2026-09-15 audit).
-var inlineStatusPattern = regexp.MustCompile(`(?:writeJSON|WriteHeader)\([^\n]*?\b(\d{3})\b|writeProblem\(\s*\w+\s*,\s*\w+\s*,\s*(\d{3})\b|replyError\(\s*\w+\s*,\s*(\d{3})\b`)
+//
+// The two error helpers are here because the issue-workflow handlers write
+// the literal rather than `http.StatusConflict`; with only writeJSON and
+// WriteHeader recognised, POST …/work documented 200/401/403 and none of the
+// 400/404/409 it actually answers (2026-09-15 audit). Pinned by
+// TestAbsorbHandlerBody_StatusLiterals.
+var inlineStatusPattern = regexp.MustCompile(`WriteHeader\(\s*(\d{3})\b|writeJSON\(\s*\w+\s*,\s*(\d{3})\b|replyError\(\s*\w+\s*,\s*(\d{3})\b|writeProblem\(\s*\w+\s*,\s*\w+\s*,\s*(\d{3})\b`)
 
 // inlineStatus returns the status a match of inlineStatusPattern captured,
 // whichever alternative fired.

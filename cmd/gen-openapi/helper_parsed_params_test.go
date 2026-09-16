@@ -91,6 +91,17 @@ var helperParsedQueryParameters = []struct {
 	{"GET", "/api/v1/mcp-registry", "parseRegistryFilters", []string{"featured", "limit", "offset", "trust_tier"}},
 	{"GET", "/api/v1/mcp-registry/search", "parseRegistryFilters", []string{"featured", "limit", "offset", "q", "trust_tier"}},
 
+	// parsePagination (helpers.go) and listSearchClause (list_count.go) — the
+	// #2318/#2314 paging and search helpers. `order`, `crew_id`,
+	// `include_setup`, `counts`, `kind` and the credential filters are read
+	// inline and inferred; only q/limit/offset come from the annotation.
+	// Credentials reads ?q itself (credentials.go:189) and ?limit/?offset
+	// through the helper; chats reads no ?q at all.
+	{"GET", "/api/v1/crews", "parsePagination+listSearchClause", []string{"limit", "offset", "order", "q"}},
+	{"GET", "/api/v1/agents", "parsePagination+listSearchClause", []string{"crew_id", "include_setup", "limit", "offset", "q"}},
+	{"GET", "/api/v1/credentials", "parsePagination", []string{"kind", "limit", "offset", "paginate", "q", "search", "tag"}},
+	{"GET", "/api/v1/agents/{agentId}/chats", "parsePagination", []string{"counts", "kind", "limit", "offset"}},
+
 	// resolveIOStep (pipeline_runs.go) — the #863 sub-span I/O gate.
 	{"GET", "/api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}", "resolveIOStep", []string{"include_io", "io_step"}},
 }

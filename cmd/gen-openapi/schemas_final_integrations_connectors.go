@@ -24,6 +24,7 @@ func finalIntegrationsConnectorsSchemaCatalog() (map[string]DomainSchema, map[st
 	}
 	array := func(items map[string]any) map[string]any { return map[string]any{"type": "array", "items": items} }
 	ref := func(name string) map[string]any { return map[string]any{"$ref": "#/components/schemas/" + name} }
+	closed := func(s map[string]any) map[string]any { s["additionalProperties"] = false; return s }
 
 	composioPage := func(item map[string]any, field string) map[string]any {
 		return object(map[string]any{"enabled": boolean(), "total": integer(), field: array(item)})
@@ -88,10 +89,16 @@ func finalIntegrationsConnectorsSchemaCatalog() (map[string]DomainSchema, map[st
 		// valid ping or an event the endpoint's filter dropped. The old
 		// {run_id, status, deduped} shape predates the work ledger (#2490)
 		// and was never emitted again after it.
+		//
+		// oneOf needs the branches to be disjoint: with `status` an open
+		// string, every accepted receipt also satisfied the ignored branch
+		// (status + delivery_id, additional properties allowed) and was
+		// therefore INVALID under oneOf. The ignored branch pins status to
+		// the constant handler.go writes and closes its property set.
 		"FinalWebhookFire": map[string]any{"oneOf": []any{
 			object(map[string]any{"delivery_id": str(), "work_id": str(), "status": str(), "duplicate": boolean()},
 				"delivery_id", "work_id", "status", "duplicate"),
-			object(map[string]any{"status": str(), "delivery_id": str(), "reason": str()}, "status", "delivery_id"),
+			closed(object(map[string]any{"status": map[string]any{"type": "string", "enum": []string{"ignored"}}, "delivery_id": str(), "reason": str()}, "status", "delivery_id")),
 		}},
 		"FinalUserModel":         object(map[string]any{"user_id": str(), "workspace_id": str(), "exists": boolean(), "user_slug": str(), "bytes": integer(), "created_at": str(), "updated_at": str(), "content": str(), "facts": array(object(map[string]any{"key": str(), "value": str()}))}),
 		"FinalUserModelMutation": object(map[string]any{"user_id": str(), "forgot": str(), "exists": boolean(), "remaining": array(object(map[string]any{"key": str(), "value": str()}))}),
