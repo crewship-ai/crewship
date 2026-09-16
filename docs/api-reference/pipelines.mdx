@@ -164,9 +164,7 @@ no size, time or description, and a file can never fail the detail request.
   "debounce_window_seconds": 60,
   "debounce_max_seconds": 300,
   "priority": 10,
-  "idempotency_key_ttl_seconds": 86400,
-  "fire_at": "2026-09-20T07:00:00Z",
-  "pinned_version": 3
+  "idempotency_key_ttl_seconds": 86400
 }
 ```
 
@@ -194,8 +192,20 @@ future and within two years, parked in the same pending queue as a delayed
 run and fired by the dispatcher when the time arrives. It cannot be combined
 with `delay_seconds`, `debounce_key` or `ttl_seconds` (`400`).
 
+For a one-time start, use a separate request without the delay/debounce
+fields above. Choose a future instant and an existing published version:
+
+```json
+{
+  "inputs": {"customer_id": "cus_123"},
+  "fire_at": "2026-09-20T07:00:00Z",
+  "pinned_version": 3
+}
+```
+
 `pinned_version` runs an archived version instead of head. It must be a
-positive version the routine has published (`404` otherwise) and is accepted
+positive integer (`400` for zero or a negative value); a positive version
+the routine has not published returns `404`. It is accepted
 only on an immediate or `fire_at` start; a delayed or debounced start answers
 `400`, because those keep their own version policy. Every deferred start is
 pinned: when the body names no version, the server pins the version whose
@@ -229,7 +239,9 @@ response is `202 Accepted` with `Preference-Applied: respond-async` and
 `{ "run_id", "status": "IN_PROGRESS" }` as soon as the run row exists, and
 the run continues on the server's own lifecycle context rather than the
 request's -- so a closed connection no longer cancels it. Poll
-`GET .../pipeline-runs/{runId}` for the terminal status. A run that fails
+`GET .../pipeline-runs/{runId}` for the terminal status. If a fast run finishes
+before the handler observes its start notification, the handler may return
+the ordinary `200` result instead. A run that fails
 before it is even registered (a refused preflight, a concurrency conflict)
 still answers synchronously with the usual status code. Every manual start
 in the UI uses this header -- the detail panel's Run, a run detail's Retry,

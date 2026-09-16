@@ -1337,11 +1337,13 @@ The economic value-prop: an Opus-class authoring model designs the routine, a Ha
 }
 ```
 
-Only a workspace whose map is empty (`""` or `{}`) or unreadable resolves each
-tier through the model catalog's Anthropic roles instead: `trivial` and `fast`
+A workspace whose map is empty (`""` or `{}`) or unreadable, or whose map
+does not contain the requested tier, resolves that tier through the model
+catalog's Anthropic roles instead: `trivial` and `fast`
 run the `cheap` role, `moderate` the provider default and `smart` the `top`
 role — today `claude-haiku-4-5`, `claude-sonnet-5` and `claude-opus-5`
-(`config/models.json`). A seeded workspace never takes that path.
+(`config/models.json`). An unchanged seeded map contains all four named tiers
+and uses its stored model IDs for them.
 
 Per-step `complexity` annotation drives the resolver. With `on_fail: "escalate_tier"`, a failed validation walks the fallback chain — practically: Haiku tries first, Sonnet on validation fail, Opus on second fail.
 
