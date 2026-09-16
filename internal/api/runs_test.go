@@ -131,7 +131,9 @@ func TestRunHandler_List_HappyPath(t *testing.T) {
 	req := httptest.NewRequest("GET", "/api/v1/runs", nil)
 	req = withWorkspaceUser(req, f.user, f.wsID, "OWNER")
 	rr := httptest.NewRecorder()
+	beforeList := time.Now().UTC()
 	f.h.List(rr, req)
+	afterList := time.Now().UTC()
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
 	}
@@ -146,8 +148,21 @@ func TestRunHandler_List_HappyPath(t *testing.T) {
 	if resp.Data[0].ID != "run_c" || resp.Data[0].Status != "RUNNING" {
 		t.Errorf("first row: %+v", resp.Data[0])
 	}
-	if resp.Stats.Running != 1 || resp.Stats.Today != 3 || resp.Stats.Failed != 1 {
-		t.Errorf("stats: %+v want running=1 today=3 failed=1", resp.Stats)
+	// The three starts can straddle UTC midnight. Count the actual fixtures,
+	// and allow either observed day only if midnight occurred during the call.
+	countToday := func(at time.Time) int {
+		day := at.Truncate(24 * time.Hour)
+		count := 0
+		for _, age := range []time.Duration{3 * time.Minute, 2 * time.Minute, time.Minute} {
+			if !now.Add(-age).Before(day) {
+				count++
+			}
+		}
+		return count
+	}
+	beforeToday, afterToday := countToday(beforeList), countToday(afterList)
+	if resp.Stats.Running != 1 || (resp.Stats.Today != beforeToday && resp.Stats.Today != afterToday) || resp.Stats.Failed != 1 {
+		t.Errorf("stats: %+v want running=1 today=%d (or %d across midnight) failed=1", resp.Stats, beforeToday, afterToday)
 	}
 	if resp.Pagination.Total != 3 {
 		t.Errorf("pagination.total=%d want 3", resp.Pagination.Total)
