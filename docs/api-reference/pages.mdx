@@ -108,10 +108,11 @@ the `workspace_id` query parameter, the same shape saved views and routines use.
 
 ## Unreachable pages are not found
 
-Every management endpoint on a page — update, delete, push, grants, access,
-versions, rollback, export, project sources, public links and webhook tokens —
-answers **404** for a page the caller cannot reach, whatever the caller was
-trying to do. The `403` rows in the status tables below apply only to a caller
+When a management endpoint on a page — update, delete, push, grants, access,
+versions, rollback, export, project sources, public links or webhook tokens —
+refuses a request, it answers **404** if the caller cannot reach the page.
+Successful actions by authorized producers are unaffected. The `403` rows in
+the status tables below apply only to a caller
 who reaches the page — as its owner or a member of its owning crew, a workspace
 ADMIN/OWNER, a member of a crew that owns a panel on it, through the sharing of
 the folder it is in, or by a grant; the `reach` vocabulary under
@@ -2174,7 +2175,7 @@ also lists the routines that moved.
 
 **Authentication:** current Page reach. **Request:** path `slug`; optional
 `If-None-Match` header containing the previously returned `ETag`.
-**Response 200:** `{publication, can_publish, artifact?, runtime_url?}`. An
+**Response 200:** `{publication, publication_version, can_publish, artifact?, runtime_url?, development_same_origin?}`. An
 unpublished Page returns `publication:null`. A published response includes the
 immutable receipt and compiled artifact, never the source project. **304** is
 returned for an unchanged ETag only after current authorization is checked;
