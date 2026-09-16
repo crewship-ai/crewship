@@ -37,14 +37,6 @@ automation preview --mission
 automation preview --name
 automation preview --routine
 automation preview --severity
-chat room create --kind
-chat room create --member
-chat room create --title
-chat room list --limit
-chat room list --offset
-chat room send --client-id
-chat room send --mention-agent
-chat room send --message
 commands --no-color
 commands --profile
 commands --server
@@ -115,7 +107,6 @@ integration crew update --transport
 integration remove --yes
 integration unbind --agent
 integration unbind --binding-id
-issue update --force
 journal count --actor-type
 journal count --agent
 journal count --crew
@@ -157,15 +148,6 @@ notifychannel test-draft --field
 notifychannel test-draft --secret
 notifychannel test-draft --to
 notifychannel test-draft --url
-page project publish --acknowledge-unavailable-baseline
-page project publish --expected-definition-digest
-page project publish --expected-routine-digest
-page project review --publication
-page project rollback --acknowledge-unavailable-baseline
-page project rollback --expected-definition-digest
-page project rollback --expected-routine-digest
-page project set --definition
-page project unpack --file
 privacy peer-cards delete --yes
 privacy peer-consent set --yes
 privacy user-model delete --yes
