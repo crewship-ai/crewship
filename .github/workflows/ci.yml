@@ -774,6 +774,11 @@ jobs:
           DATABASE_URL: file:${{ github.workspace }}/.crewship-data/crewship.db
           CREWSHIP_NEXTJS_URL: http://localhost:8080
           CREWSHIP_SKIP_SIDECAR: "1"
+          # #2403: registers the browser-test seed door under /api/v1/e2e/
+          # (internal/api/e2e_fixtures.go) so pr-contract.spec.ts can plant
+          # a real run_needs_human card and act on it without a provider.
+          # Test-only — the route does not exist without this variable.
+          CREWSHIP_E2E_FIXTURES: "1"
         run: |
           set -euo pipefail
           mkdir -p "$CREWSHIP_STORAGE_BASE_PATH" "$CREWSHIP_LOG_PATH"

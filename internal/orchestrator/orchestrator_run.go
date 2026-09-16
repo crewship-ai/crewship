@@ -1864,6 +1864,9 @@ func collectSecretValues(req AgentRunRequest) []string {
 	}
 	for _, c := range req.Credentials {
 		addSecret(c.PlainValue)
+		// A rotation's grace value (#1882) is the previous secret, held for
+		// the sidecar's 401 replay; it is exactly as secret as the current one.
+		addSecret(c.GraceToken)
 		for _, k := range sortedKeys(c.Headers) {
 			addHeaderSecret(c.Headers[k])
 		}

@@ -302,6 +302,16 @@ type Credential struct {
 	// alternation, and restart the shared sidecar each time (the thrash #1160
 	// removed). See internal/api/credential_delivery.go.
 	AgentIDs []string `json:"agent_ids,omitempty"`
+	// GraceToken is the credential's PREVIOUS value while a rotation's grace
+	// window is open (#1882), GraceExpiresAt that window's end (RFC3339 UTC)
+	// and GraceRotationID the rotation it came from. Delivered to the sidecar
+	// CredStore beside PlainValue and nowhere else — never an env var, never
+	// a file — so the proxy can replay a request once with it after the
+	// upstream answers 401 to PlainValue. Empty for every credential with no
+	// open rotation.
+	GraceToken      string `json:"grace_token,omitempty"`
+	GraceExpiresAt  string `json:"grace_expires_at,omitempty"`
+	GraceRotationID string `json:"grace_rotation_id,omitempty"`
 	// Fields are the credential's additional named parts (PRD-CREDENTIALS-V2
 	// §2.2): AWS = access key id + secret + region, a service account = blob +
 	// filename. Nil for every credential that has none, which is the shape the
