@@ -1,6 +1,12 @@
 # Routines: srozumitelná obsluha a spolehlivé autorování
 
-**Navazující inkrement 15. září:** [vstupy, pravidla práce a řešení problémů](ROUTINES-CLARITY-PRD-2026-09-15.md), issue #2555. Níže uvedený úvod je historický stav z 12. září. Opravy #2553 uzavírá [protokol po mergi](https://github.com/crewship-ai/crewship/pull/2553#issuecomment-5672592832); lidská přejímka zůstává otevřená.
+**Navigace ve stavu k 16. září:** Tento PRD drží původní rozsah R1–R10 a lidskou přejímku §11. Navazující změny mají vlastní zadání a důkazy:
+
+- [Vstupy, pravidla práce a řešení problémů](ROUTINES-CLARITY-PRD-2026-09-15.md): [PR #2556](https://github.com/crewship-ai/crewship/pull/2556), issue #2555.
+- [Operator console, Edit a New routine](../ux/routines-operator-console-2026-09-15.md): [PR #2562](https://github.com/crewship-ai/crewship/pull/2562), issue #2560. [Integrační ověření DEV1 z 16. září](https://github.com/crewship-ai/crewship/pull/2562#issuecomment-5696159682) zaznamenává nasazenou větev, browser důkazy a stav merge v okamžiku ověření.
+- Opravy #2553 uzavírá [protokol po mergi](https://github.com/crewship-ai/crewship/pull/2553#issuecomment-5672592832). Novější merge, CI a identitu nasazení uvádějí validační protokoly v navazujících PR; starší důkazy nejsou nové přeměření serveru.
+
+**Úvod níže je historický stav z 12. září. Lidská přejímka §11 zůstává otevřená; technické testy ani merge ji neuzavírají.**
 
 Datum zadání: 2026-09-08. Aktualizace stavu: 2026-09-12.
 Toto je živý dokument rozsahu, akceptace a důkazů Routines. Historická předání

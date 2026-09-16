@@ -3,6 +3,8 @@
 PR: [#2562](https://github.com/crewship-ai/crewship/pull/2562), issue #2560.
 Branch: `feat/routines-operator-console`.
 
+This report records the September 15 recovery. The [September 16 integration protocol](https://github.com/crewship-ai/crewship/pull/2562#issuecomment-5696159682) records newer fixes, the exact DEV1 build, browser acceptance and pending merge gates. Consult subsequent validation comments in PR #2562 for later CI/merge/deployment results; the build identity below is historical.
+
 ## Scope and actual changes
 
 The four initial review findings already had committed fixes when this verification resumed:
