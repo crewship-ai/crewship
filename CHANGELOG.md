@@ -20,6 +20,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 
 ### Fixed
+- Test collector accounting failures by their actual exit code and diagnostic; distinguish subprocess timeouts from expected input rejection instead of accepting any killed process. (#2610)
 
 - Rotation grace reconciliation checks exact active rotation IDs, including overlapping rotations. Operator-model evidence is shown only when it matches the current value; the provenance user foreign key has its own index.
 - **Keeper documentation matches the code.** `docs/guides/keeper.mdx`, `architecture.mdx` and four sibling pages no longer claim more containment than exists: Keeper is off by default, gates two sidecar routes for `SECRET` credentials only, replies with a decision (never a value), L4's human step is the default profile rather than a law (`--escalate-from`), the behaviour watchdog is sampled detection that cannot undo a call, and a ruled escalation does not run anything. Two product defects the audit surfaced are filed as #2574 and #2575. (#2242)
