@@ -99,7 +99,7 @@ func TestProxy_GraceFallback(t *testing.T) {
 	tests := []struct {
 		name      string
 		creds     []Credential
-		scrub     map[string]struct{} // nil = no scrub; non-nil = ScrubGrace(keep) before the request
+		scrub     map[string][]string // nil = no scrub; non-nil = ScrubGrace(keep) before the request
 		statuses  []int
 		wantCode  int
 		wantCalls []string // auth value each upstream attempt must carry
@@ -147,11 +147,18 @@ func TestProxy_GraceFallback(t *testing.T) {
 		{
 			name:       "cancelled rotation (scrubbed by the reaper): no retry",
 			creds:      []Credential{anthropicCred("c1", "sk-new", "sk-old", future)},
-			scrub:      map[string]struct{}{},
+			scrub:      map[string][]string{},
 			statuses:   []int{401, 200},
 			wantCode:   401,
 			wantCalls:  []string{"sk-new"},
 			wantEgress: []int{401},
+		},
+		{
+			name:     "another active rotation cannot keep cancelled grace usable",
+			creds:    []Credential{anthropicCred("c1", "sk-new", "sk-old", future)},
+			scrub:    map[string][]string{"c1": {"different-rotation"}},
+			statuses: []int{401, 200}, wantCode: 401,
+			wantCalls: []string{"sk-new"}, wantEgress: []int{401},
 		},
 		{
 			name: "another credential's rotation is never used",

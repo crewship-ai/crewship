@@ -150,11 +150,11 @@ func TestCredStore_ScrubGrace(t *testing.T) {
 	now := time.Now()
 	cs := NewCredStore()
 	cs.Load([]Credential{
-		{ID: "kept", Provider: ProviderAnthropic, Token: "t", GraceToken: "g", GraceExpiresAt: rfc3339(now.Add(time.Hour))},
+		{ID: "kept", Provider: ProviderAnthropic, Token: "t", GraceToken: "g", GraceRotationID: "rot-kept", GraceExpiresAt: rfc3339(now.Add(time.Hour))},
 		{ID: "cancelled", Provider: ProviderAnthropic, Token: "t", GraceToken: "g", GraceExpiresAt: rfc3339(now.Add(time.Hour))},
 		{ID: "plain", Provider: ProviderAnthropic, Token: "t"},
 	})
-	if n := cs.ScrubGrace(map[string]struct{}{"kept": {}}); n != 1 {
+	if n := cs.ScrubGrace(map[string][]string{"kept": {"rot-kept"}}); n != 1 {
 		t.Fatalf("ScrubGrace dropped %d, want 1", n)
 	}
 	if _, _, ok := cs.GraceFor("cancelled", now); ok {
@@ -198,7 +198,7 @@ func TestSidecar_ReapRevokedCredentials_ScrubsCancelledGrace(t *testing.T) {
 			_, _ = w.Write([]byte(`[{"id":"a","status":"ACTIVE"},{"id":"b","status":"ACTIVE"}]`))
 			return
 		}
-		_, _ = w.Write([]byte(`[{"id":"a","status":"ACTIVE","rotation_grace_until":"` +
+		_, _ = w.Write([]byte(`[{"id":"a","status":"ACTIVE","rotation_grace_ids":["rot-a"],"rotation_grace_until":"` +
 			rfc3339(time.Now().Add(time.Hour)) + `"},{"id":"b","status":"ACTIVE"}]`))
 	}))
 	defer backend.Close()
@@ -288,5 +288,32 @@ func TestSidecar_GraceFallbackObserver_EmitsAnnotatedEgress(t *testing.T) {
 	}
 	if strings.Contains(req.Summary, "sk-") {
 		t.Errorf("summary carries what looks like a key: %q", req.Summary)
+	}
+}
+
+func TestSidecar_ReapRevokedCredentials_ExactRotation(t *testing.T) {
+	for _, tc := range []struct {
+		name, metadata string
+		want           bool
+	}{
+		{"held rotation survives alongside another", `[{"id":"a","rotation_grace_ids":["rot-old","rot-held"]}]`, true},
+		{"cancelled rotation not masked by older active rotation", `[{"id":"a","rotation_grace_ids":["rot-old"],"rotation_grace_until":"2099-01-01T00:00:00Z"}]`, false},
+		{"another credential cannot keep rotation alive", `[{"id":"a"},{"id":"b","rotation_grace_ids":["rot-held"]}]`, false},
+		{"legacy metadata cannot establish rotation identity", `[{"id":"a","rotation_grace_until":"2099-01-01T00:00:00Z"}]`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte(tc.metadata)) }))
+			defer backend.Close()
+			s := newJournalTestServer(backend.URL)
+			s.credStore = NewCredStore()
+			s.credStore.Load([]Credential{{ID: "a", Provider: ProviderAnthropic, Token: "current", GraceToken: "previous", GraceRotationID: "rot-held", GraceExpiresAt: rfc3339(time.Now().Add(time.Hour))}})
+			s.reapRevokedCredentials(context.Background())
+			if _, _, ok := s.credStore.GraceFor("a", time.Now()); ok != tc.want {
+				t.Fatalf("grace usable=%v, want %v", ok, tc.want)
+			}
+			if c := s.credStore.Select(ProviderAnthropic, ""); c == nil || c.Token != "current" {
+				t.Fatal("current credential was disturbed")
+			}
+		})
 	}
 }

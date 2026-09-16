@@ -126,11 +126,13 @@ type userModelProvenance struct {
 }
 
 // attachUserModelProvenance decorates each fact with the newest evidence
-// row for its key. Facts without a row are left as they are.
+// row for its key and value. The file can change before evidence is written;
+// stale evidence must never be presented as support for the new value.
 func attachUserModelProvenance(facts []userModelFact, rows map[string]consolidate.UserModelProvenance) {
 	for i := range facts {
 		p, ok := rows[facts[i].Key]
-		if !ok {
+		facts[i].Provenance = nil
+		if !ok || p.Value != facts[i].Value {
 			continue
 		}
 		facts[i].Provenance = &userModelProvenance{

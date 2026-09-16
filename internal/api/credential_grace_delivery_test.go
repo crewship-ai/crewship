@@ -297,3 +297,46 @@ func TestGrace_BootResolverCarriesRotationGrace(t *testing.T) {
 		}
 	}
 }
+
+func TestListCredentials_GraceIdentitiesTrackOverlappingRotations(t *testing.T) {
+	h, db, userID, wsID := covICRig(t)
+	covICSeedCredScoped(t, db, wsID, userID, "overlap", "WORKSPACE")
+	now := time.Now()
+	seedRotation(t, db, "older-active", "overlap", "old-a", "ACTIVE", now.Add(time.Hour), now.Add(-2*time.Minute), userID)
+	seedRotation(t, db, "held-newer", "overlap", "old-b", "ACTIVE", now.Add(time.Hour), now.Add(-time.Minute), userID)
+	readIDs := func() map[string]bool {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/internal/credentials?workspace_id="+wsID, nil)
+		req.RemoteAddr = "127.0.0.1:9999"
+		rec := httptest.NewRecorder()
+		h.ListCredentials(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("read: %d %s", rec.Code, rec.Body.String())
+		}
+		var rows []struct {
+			ID        string   `json:"id"`
+			Rotations []string `json:"rotation_grace_ids"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &rows); err != nil {
+			t.Fatal(err)
+		}
+		ids := map[string]bool{}
+		for _, row := range rows {
+			if row.ID == "overlap" {
+				for _, id := range row.Rotations {
+					ids[id] = true
+				}
+			}
+		}
+		return ids
+	}
+	if ids := readIDs(); len(ids) != 2 || !ids["older-active"] || !ids["held-newer"] {
+		t.Fatalf("active identities: %v", ids)
+	}
+	if _, err := db.Exec(`UPDATE credential_rotations SET status='CANCELLED',old_value='' WHERE id='held-newer'`); err != nil {
+		t.Fatal(err)
+	}
+	if ids := readIDs(); len(ids) != 1 || !ids["older-active"] || ids["held-newer"] {
+		t.Fatalf("cancelled identity retained: %v", ids)
+	}
+}

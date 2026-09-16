@@ -78,12 +78,12 @@ func (s *Server) reapRevokedCredentials(ctx context.Context) {
 		return
 	}
 	// Metadata shape (values withheld for the non-loopback sidecar): we only
-	// need the live IDs, and — for #1882 — whether each still has an ACTIVE
-	// rotation. rotation_grace_until is the open window's deadline or absent;
+	// need the live IDs, and — for #1882 — which rotations are still ACTIVE.
+	// A different rotation must not keep a cancelled value usable;
 	// it is metadata the public rotation listing already shows, never a value.
 	var live []struct {
-		ID                 string `json:"id"`
-		RotationGraceUntil string `json:"rotation_grace_until,omitempty"`
+		ID               string   `json:"id"`
+		RotationGraceIDs []string `json:"rotation_grace_ids,omitempty"`
 	}
 	if err := json.Unmarshal(body, &live); err != nil {
 		s.logger.Warn("credential reap: decode failed, keeping current creds", "error", err)
@@ -91,13 +91,11 @@ func (s *Server) reapRevokedCredentials(ctx context.Context) {
 	}
 
 	keep := make(map[string]struct{}, len(live))
-	keepGrace := make(map[string]struct{})
+	keepGrace := make(map[string][]string)
 	for _, c := range live {
 		if c.ID != "" {
 			keep[c.ID] = struct{}{}
-			if c.RotationGraceUntil != "" {
-				keepGrace[c.ID] = struct{}{}
-			}
+			keepGrace[c.ID] = c.RotationGraceIDs
 		}
 	}
 	if removed := s.credStore.Reap(keep); removed > 0 {

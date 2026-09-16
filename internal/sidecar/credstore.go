@@ -1,6 +1,7 @@
 package sidecar
 
 import (
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -427,13 +428,13 @@ func (cs *CredStore) ExpireGrace(now time.Time) int {
 	return dropped
 }
 
-// ScrubGrace forgets the grace value of every credential NOT in keep, returning
-// how many were dropped (#1882). keep is the set of credential ids whose
-// rotation crewshipd still lists as ACTIVE — the reaper's answer to an operator
+// ScrubGrace forgets grace values whose exact rotation is no longer ACTIVE,
+// returning how many were dropped (#1882). keep maps credential IDs to their
+// active rotation IDs — the reaper's answer to an operator
 // ending a grace window early, which the boot-time deadline cannot see. Same
 // contract as Reap: a nil or empty set is taken literally, so callers must only
 // invoke this after a SUCCESSFUL metadata fetch. The credentials stay.
-func (cs *CredStore) ScrubGrace(keep map[string]struct{}) int {
+func (cs *CredStore) ScrubGrace(keep map[string][]string) int {
 	cs.mu.Lock()
 	defer cs.mu.Unlock()
 	dropped := 0
@@ -442,7 +443,7 @@ func (cs *CredStore) ScrubGrace(keep map[string]struct{}) int {
 		if c.GraceToken == "" {
 			continue
 		}
-		if _, ok := keep[c.ID]; ok {
+		if c.GraceRotationID != "" && slices.Contains(keep[c.ID], c.GraceRotationID) {
 			continue
 		}
 		c.dropGrace()

@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/crewship-ai/crewship/internal/consolidate"
 	"github.com/crewship-ai/crewship/internal/memory"
 )
 
@@ -71,6 +72,11 @@ func TestGetMyUserModel_ReturnsProvenancePerFact(t *testing.T) {
 		[3]string{"role", "I lead the platform team now", "msg-9"}, // newer: wins
 		[3]string{"timezone", "I'm on UTC+1", "msg-2"},
 	)
+
+	// Seed evidence values that actually match the file, not placeholder values.
+	if _, err := r.db.Exec(`UPDATE user_model_provenance SET value = CASE key WHEN 'role' THEN 'runs the platform team' WHEN 'timezone' THEN 'UTC+1' END`); err != nil {
+		t.Fatal(err)
+	}
 
 	rec := httptest.NewRecorder()
 	r.privacy.GetMyUserModel(rec, r.req(t, http.MethodGet, "", nil))
@@ -341,5 +347,43 @@ func TestGDPRExport_IncludesTheOperatorModelProvenance(t *testing.T) {
 	}
 	if got, _ := scope["user_model_provenance"].(float64); got != 2 {
 		t.Errorf("scope_json reports user_model_provenance=%v, want 2 (%s)", scope["user_model_provenance"], scopeJSON)
+	}
+}
+
+func TestUserModelProvenance_MustMatchCurrentValue(t *testing.T) {
+	for _, tc := range []struct {
+		name, value string
+		want        bool
+	}{
+		{"same value", "UTC+1", true}, {"changed value", "UTC+2", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			facts := []userModelFact{{Key: "timezone", Value: tc.value}}
+			rows := map[string]consolidate.UserModelProvenance{"timezone": {Key: "timezone", Value: "UTC+1", Quote: "I work in UTC+1"}}
+			attachUserModelProvenance(facts, rows)
+			if (facts[0].Provenance != nil) != tc.want {
+				t.Fatalf("provenance presence does not match value %q", tc.value)
+			}
+		})
+	}
+}
+func TestGetMyUserModel_DoesNotAttachStaleProvenance(t *testing.T) {
+	r := peerTestSetup(t)
+	r.seedUserModel(t, "u1", "- timezone: UTC+2")
+	seedUserModelProvenance(t, r, "u1", [3]string{"timezone", "I work in UTC+1", "old-message"})
+	if _, err := r.db.Exec(`UPDATE user_model_provenance SET value='UTC+1'`); err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	r.privacy.GetMyUserModel(rec, r.req(t, http.MethodGet, "", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("read: %d %s", rec.Code, rec.Body.String())
+	}
+	var got userModelReadBody
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Facts) != 1 || got.Facts[0].Value != "UTC+2" || got.Facts[0].Provenance != nil {
+		t.Fatalf("stale provenance: %s", rec.Body.String())
 	}
 }

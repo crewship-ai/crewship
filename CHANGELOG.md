@@ -19,6 +19,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 
 ### Fixed
+
+- Rotation grace reconciliation checks exact active rotation IDs, including overlapping rotations. Operator-model evidence is shown only when it matches the current value; the provenance user foreign key has its own index.
 - **Keeper documentation matches the code.** `docs/guides/keeper.mdx`, `architecture.mdx` and four sibling pages no longer claim more containment than exists: Keeper is off by default, gates two sidecar routes for `SECRET` credentials only, replies with a decision (never a value), L4's human step is the default profile rather than a law (`--escalate-from`), the behaviour watchdog is sampled detection that cannot undo a call, and a ruled escalation does not run anything. Two product defects the audit surfaced are filed as #2574 and #2575. (#2242)
 - OpenAPI: the 53 component schemas no operation referenced are removed (547 → 494) behind a reachability gate, and ten routes now reference the accurate schema that had been orphaned (`SkillDetail`, `HireResponse`, `AgentCredentialList`, `LabelList`, `CredentialPage`, `RunResult`, `BulkReplayResult`, `DryRunResult`); DELETE routes that read a body now document it. (#1849)
 - The `@sentry/nextjs` test-load crash is fixed upstream in 10.74.0 (getsentry/sentry-javascript#23789); the ceiling had already left `pnpm.overrides`, and the `vitest.config.ts` alias's docs now say it stays on its own merits. (#2235)

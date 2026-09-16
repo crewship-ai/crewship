@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"log/slog"
 	"net"
 	"net/http"
@@ -143,12 +144,16 @@ func (h *InternalHandler) ListCredentials(w http.ResponseWriter, r *http.Request
 		(SELECT cr.expires_at FROM credential_rotations cr
 		  WHERE cr.credential_id = credentials.id AND cr.status = 'ACTIVE'
 		    AND cr.expires_at > ? AND cr.old_value != ''
-		  ORDER BY cr.rotated_at DESC LIMIT 1) AS rotation_grace_until
+		  ORDER BY cr.rotated_at DESC LIMIT 1) AS rotation_grace_until,
+		(SELECT json_group_array(cr.id) FROM credential_rotations cr
+		  WHERE cr.credential_id = credentials.id AND cr.status = 'ACTIVE'
+		    AND cr.expires_at > ? AND cr.old_value != '') AS rotation_grace_ids
 		FROM credentials
 		WHERE ` + statusClause + ` AND deleted_at IS NULL
 		AND type IN ('AI_CLI_TOKEN', 'API_KEY') AND provider != 'NONE'`
 
-	args := []any{leaseComparisonNow()}
+	now := leaseComparisonNow()
+	args := []any{now, now}
 	if workspaceID != "" {
 		query += " AND workspace_id = ?"
 		args = append(args, workspaceID)
@@ -301,16 +306,22 @@ func (h *InternalHandler) ListCredentials(w http.ResponseWriter, r *http.Request
 		// is open (#1882); omitted otherwise so an older sidecar sees the
 		// row it always saw.
 		RotationGraceUntil *string `json:"rotation_grace_until,omitempty"`
+		// Exact active rotations, so cancelling one cannot be masked by another.
+		RotationGraceIDs []string `json:"rotation_grace_ids,omitempty"`
 	}
 
 	var result []credResult
 	for rows.Next() {
 		var c credResult
-		var encValue string
+		var encValue, graceIDs string
 		var encRefresh, accountEmail, graceUntil sql.NullString
 		if err := rows.Scan(&c.ID, &c.WorkspaceID, &c.Name, &c.Type, &c.Provider,
-			&encValue, &encRefresh, &c.TokenExpires, &c.AccountLabel, &accountEmail, &c.Status, &graceUntil); err != nil {
+			&encValue, &encRefresh, &c.TokenExpires, &c.AccountLabel, &accountEmail, &c.Status, &graceUntil, &graceIDs); err != nil {
 			replyInternalError(w, h.logger, "scan internal credential", err)
+			return
+		}
+		if err := json.Unmarshal([]byte(graceIDs), &c.RotationGraceIDs); err != nil {
+			replyInternalError(w, h.logger, "decode active credential rotations", err)
 			return
 		}
 		if graceUntil.Valid && graceUntil.String != "" {
