@@ -102,6 +102,8 @@ credential is created.** The response is what the approval card renders.
 | `agents` | array | see note | The roster, 1–6 entries of `{name, role}`. |
 | `template_slug` | string | see note | A builtin crew template to derive the roster from. |
 | `crew_slug` | string | no | Slug override; derived from `crew_name` otherwise. |
+| `crew_icon` | string | no | Icon for the crew card and row — a name from the web icon set (`lib/crew-icons.ts`, mirrored server-side). Overrides the template's default. Checked against that vocabulary and **dropped when unknown** — never stored as typed, and never a `400`: a runnable crew with the default look beats a refused proposal mid-onboarding. |
+| `crew_color` | string | no | Colour for the crew card: a palette id (`blue`, `emerald`, `violet`, `amber`, `rose`, `cyan`, `lime`, `fuchsia`) or a 6-digit hex, with or without `#` (stored with it). Same drop-when-unknown rule. |
 | `llm_provider` | string | no | Provider for the model override. |
 | `llm_model` | string | no | Model id, validated against the provider's curated catalogue. An id outside it is replaced with the workspace default rather than creating an unrunnable crew. |
 | `tools` | array | no | Up to five runtime tool names from the curated catalogue. |
@@ -129,6 +131,8 @@ the resolved roster under `payload.agents`.
   "payload": {
     "crew_name": "Hlídač dostupnosti",
     "crew_slug": "hlidac-dostupnosti",
+    "crew_icon": "shield",
+    "crew_color": "emerald",
     "template_slug": "",
     "agents": [
       {
@@ -143,6 +147,11 @@ the resolved roster under `payload.agents`.
   }
 }
 ```
+
+`payload.crew_icon` / `payload.crew_color` are present only when the proposal
+carries a look — from the request or from the template — and are what
+`apply` writes onto the crew row. `crewship onboarding proposal create
+--crew-icon --crew-color` sets them.
 
 **Status:** `201` stored, `400` missing `crew_name` or neither roster source,
 `401` unauthenticated, `403` no membership, `500` storage failure.
