@@ -219,11 +219,15 @@ Written down on purpose (they are release conditions, not footnotes):
 - **A chat message to an agent busy on an issue bounces.** The chat reports
   `agent_busy` rather than starting a second run into the same container.
   Wait for the run to finish, or watch it from the issue.
-- **The queue covers the doors that run an agent for an issue** — `/assign`,
-  @mentions, mission tasks, lead planning and the chat — but not a routine's
-  webhook route or a direct agent-run route. Those can still start an agent
-  that is already running; keep routines that target an agent off its busy
-  hours until this closes.
+- **The lock covers the doors that run an agent for an issue** — `/assign`,
+  @mentions, mission tasks, lead planning, the chat, the agent cron and a
+  routine's `agent_run` step — but not the inbound agent webhook
+  (`POST /api/v1/webhooks/{crewId}/{agentId}/trigger`), the direct agent-start
+  route on the IPC socket, or a peer query. Those three can still start an
+  agent that is already running. A routine's `agent_run` step against a busy
+  agent does not queue: the step fails with `target agent has a live run in
+  progress elsewhere` and follows the step's [retry policy](/guides/routines#retry-transient-failures),
+  then `on_fail`, like any other execution error.
 
 And one that is not a limit but a hold:
 

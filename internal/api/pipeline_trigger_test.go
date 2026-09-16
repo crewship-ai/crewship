@@ -349,3 +349,35 @@ func TestPipelineSchedules_List_SurfacesActivation(t *testing.T) {
 		t.Fatalf("expected the draft schedule to still be disabled")
 	}
 }
+
+// The kind gate names every kind it accepts. "once" (#2460) joined schedule
+// and manual, and the two refusals kept quoting the old pair — a caller who
+// mistyped a one-time start was told the kind it wanted does not exist.
+func TestTriggerInputFromBody_KindErrorsNameEveryKind(t *testing.T) {
+	cases := []struct {
+		name    string
+		trigger *triggerRequestBody
+		wantErr string
+	}{
+		{"missing kind", &triggerRequestBody{}, `trigger.kind is required ("schedule", "manual" or "once")`},
+		{"unknown kind", &triggerRequestBody{Kind: "webhook"}, `unsupported trigger.kind "webhook" (must be "schedule", "manual" or "once")`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := triggerInputFromBody(tc.trigger, "")
+			if got != nil {
+				t.Fatalf("trigger=%+v, want nil", got)
+			}
+			if err == nil || err.Error() != tc.wantErr {
+				t.Fatalf("err=%v\nwant %s", err, tc.wantErr)
+			}
+		})
+	}
+	// The accepted kinds are unchanged by the message fix.
+	for _, kind := range []string{"schedule", "manual", "once"} {
+		body := &triggerRequestBody{Kind: kind, CronExpr: "0 9 * * 1-5", FireAt: "2030-01-01T09:00:00Z"}
+		if _, err := triggerInputFromBody(body, ""); err != nil {
+			t.Fatalf("kind %q: unexpected error %v", kind, err)
+		}
+	}
+}

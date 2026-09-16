@@ -67,6 +67,7 @@ See [Routines guide](/guides/routines) for the conceptual overview.
 | Authoring | `tag <slug> ...` | Add or remove discovery tags on a routine definition |
 | Authoring | `step-override <slug> ...` | Override a step's prompt/model without bumping the routine version |
 | Authoring | `iterate <slug>` | Scored improvement loop: run → grade → optimize → save new version |
+| Authoring | `draft list/get/save/publish/discard` | Work on an unpublished draft of a routine; nothing is live until `publish` |
 | Bundles | `export <slug>` | Export bundle JSON to stdout |
 | Bundles | `import [bundle.json] --crew <slug>` | Import bundle from file or stdin into an author crew |
 | Triggers | `schedules ...` | Cron schedule CRUD |
@@ -1485,7 +1486,7 @@ crewship routine schedules create \
 | `--wake-inputs` | | JSON object passed to the wake probe on each tick (requires `--wake-slug`). |
 | `--fail-closed` | | Wake gate: **hold** the run when the probe errors, times out, or finishes non-`COMPLETED`, instead of failing open (requires `--wake-slug`). Default off — a broken probe fires the main run and records `last_wake_status: ERROR`. With this on, that outcome records `HELD` and no main run fires. Use it when the gate must *suppress* an autonomous run, not just save tokens. |
 | `--catchup` | | Missed-run catch-up policy for when the schedule falls overdue by more than one occurrence: `skip` / `once` (default) / `all`. See [Missed-run catch-up](/guides/routines#missed-run-catch-up). Ignored by wake-gated schedules, which always behave like `once`. |
-| `--max-failures` | `0` | Circuit breaker: consecutive failed fires before the schedule auto-disables. The CLI sends an explicitly supplied positive value; when omitted, the server default is `5`. |
+| `--max-failures` | | Circuit breaker: consecutive failed fires before the schedule auto-disables. The CLI sends an explicitly supplied positive value; when omitted, the server default is `5`. |
 
 `create` is the only command that mints a schedule ID, and every other
 schedule command takes that ID with no prefix-matching fallback — so to
@@ -1524,22 +1525,23 @@ exactly: a spring-forward day with no valid local time for the cron's
 minute/hour is skipped, and a fall-back day's ambiguous local time can
 appear twice, one hour apart in UTC.
 
-### `schedules enable <id>` / `schedules disable <id>`
-
-Toggle without altering the cron expression.
-
 ## `crewship routine schedules enable <schedule_id>`
 
 Enable a schedule. The next scheduler tick can fire it; the cron expression
-and other schedule settings are unchanged.
+and other schedule settings are unchanged. `schedules disable <schedule_id>`
+is the mirror image: it stops future ticks without altering anything else.
 
 ```bash
 crewship routine schedules enable psched_abc123
+crewship routine schedules disable psched_abc123
 ```
 
-The command takes exactly one schedule ID and has no command-specific flags.
-Human output is `Schedule <schedule-id> enabled.` With `--format json`, the
-acknowledgement contains the schedule `id` and `enabled: true`.
+Each command takes exactly one schedule ID and has no command-specific flags.
+Human output is `Schedule <schedule-id> enabled.` (or `disabled.`). With
+`--format json`, the acknowledgement contains the schedule `id` and
+`enabled: true` / `false`. Enabling re-validates the plan's saved inputs
+against the recipe it will run and answers `400` naming the input when they
+no longer fit; disabling is never judged.
 
 ### `schedules now <id>`
 
@@ -1711,11 +1713,6 @@ At least one flag is required. `--format json` on an ordinary edit (no
 does, exactly once, in that response. There is no `--ingress-profile` here:
 the server answers `400` to a profile change, so switching a sender between
 the `crewship` and `github` formats means a new webhook.
-
-### `webhooks url <id>`
-
-Print the public URL without re-revealing the signing secret. Fails if the
-token is no longer retrievable — see below.
 
 ## `crewship routine webhooks url <webhook_id>`
 
@@ -1902,8 +1899,11 @@ continuing branch such as revision. Legacy waits keep `waited:approval:approved`
 
 The same form is available in the run detail and Inbox. A rich decision never
 uses standing trust and cannot be completed by a legacy body-only approval.
-External token callbacks use their existing `payload` object, containing
-`action_id` and `data`; they undergo the same validation. Expiry and the first
+The public token callback cannot answer it either: a waitpoint that carries a
+`decision_form` refuses the callback with `403` (typed decisions require an
+authenticated workspace member) and the attempt is recorded as
+`waitpoint.decision_refused`; such rows list no `callback_url`. Legacy binary
+approvals keep the callback. Expiry and the first
 accepted verdict are enforced by the waitpoint store.
 
 ## `crewship routine trust`
