@@ -42,6 +42,29 @@ type UserModelExtractor interface {
 	Extract(ctx context.Context, cand UserModelCandidate, prior string) (string, error)
 }
 
+// UserModelEvidenceExtractor is a UserModelExtractor that can also say
+// where each fact in the body came from (#1693). The sweep prefers it when
+// the extractor implements it and records the evidence beside the file;
+// an extractor that only implements Extract still works and simply leaves
+// the provenance store untouched.
+//
+// Optional rather than a change to UserModelExtractor so a deterministic
+// or test extractor that has no evidence to offer does not have to invent
+// a nil to satisfy the interface.
+type UserModelEvidenceExtractor interface {
+	UserModelExtractor
+	ExtractWithEvidence(ctx context.Context, cand UserModelCandidate, prior string) (string, []UserModelEvidence, error)
+}
+
+// extractUserModel runs the extractor, with evidence when it can give any.
+func extractUserModel(ctx context.Context, x UserModelExtractor, cand UserModelCandidate, prior string) (string, []UserModelEvidence, error) {
+	if ex, ok := x.(UserModelEvidenceExtractor); ok {
+		return ex.ExtractWithEvidence(ctx, cand, prior)
+	}
+	body, err := x.Extract(ctx, cand, prior)
+	return body, nil, err
+}
+
 // NoopUserModelExtractor is the MVP placeholder: returns empty content
 // so the sweep purges opted-out users + indexes threshold-crossers
 // without writing new bodies. Wire a real aux-LLM-driven extractor via
@@ -122,7 +145,7 @@ func RunUserModelSync(
 	for _, cand := range cands {
 		paths := UserModelPathsFor(opts.OutputBasePath, cand.CrewID)
 		prior, _ := memory.LoadUserModel(paths, cand.UserID, cand.WorkspaceID)
-		extracted, eerr := opts.Extractor.Extract(ctx, cand, prior)
+		extracted, evidence, eerr := extractUserModel(ctx, opts.Extractor, cand, prior)
 		if eerr != nil {
 			logger.Warn("user model extractor failed",
 				"user_id", cand.UserID, "workspace_id", cand.WorkspaceID, "err", eerr)
@@ -145,12 +168,17 @@ func RunUserModelSync(
 				"cap_bytes", memory.UserModelCapBytes)
 			content = trimmed
 		}
-		out := syncUserModel(ctx, db, logger, opts.Threshold, cand, content, paths, opts.OutputBasePath, now, opts.DryRun)
+		out := syncUserModel(ctx, db, logger, opts.Threshold, cand, content, evidence, paths, opts.OutputBasePath, now, opts.DryRun)
 		if out.Err != nil {
 			sum.Errors++
 			logger.Warn("user model sync candidate failed",
 				"user_id", cand.UserID, "action", out.Action, "err", out.Err)
-			continue
+			// A write whose only failure was the provenance row still wrote
+			// the model; count it as both so the summary does not read
+			// "nothing written" for a file that exists.
+			if out.Action != "write" {
+				continue
+			}
 		}
 		switch out.Action {
 		case "write":

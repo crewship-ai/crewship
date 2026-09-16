@@ -206,19 +206,40 @@ func TestSchemaPageResolvesRefs(t *testing.T) {
 	}
 }
 
-// TestSchemaIndexFlagsUnreferencedSchemas — 87 of the 461 component schemas
-// are not reachable from any operation. Rendering them silently alongside the
-// live ones would present dead weight as contract.
+// TestSchemaIndexFlagsUnreferencedSchemas — a component schema no operation
+// reaches is dead weight rendered as contract, so the index must say so. The
+// real spec has none since #1849 (cmd/gen-openapi gates it), so the fixture
+// carries one reachable schema and one orphan; the real spec is checked for
+// the opposite: the index must NOT cry wolf when every schema is live.
 func TestSchemaIndexFlagsUnreferencedSchemas(t *testing.T) {
 	t.Parallel()
-	h := NewHandler(realSpec(t))
-
+	spec := `{
+	  "openapi": "3.0.3",
+	  "info": {"title": "t", "version": "1"},
+	  "paths": {
+	    "/x": {"get": {"operationId": "get_x", "security": [], "responses": {"200": {"description": "ok",
+	      "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Live"}}}}}}}
+	  },
+	  "components": {"schemas": {
+	    "Live":   {"type": "object", "properties": {"id": {"type": "string"}}},
+	    "Orphan": {"type": "object", "properties": {"id": {"type": "string"}}}
+	  }}
+	}`
+	h := NewHandler([]byte(spec))
 	rec := get(t, h, "/openapi/schemas")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("schema index = %d, want 200", rec.Code)
 	}
 	if !strings.Contains(rec.Body.String(), "unreferenced") {
 		t.Error("schema index does not distinguish unreferenced schemas")
+	}
+
+	real := get(t, NewHandler(realSpec(t)), "/openapi/schemas")
+	if real.Code != http.StatusOK {
+		t.Fatalf("real schema index = %d, want 200", real.Code)
+	}
+	if strings.Contains(real.Body.String(), "unreferenced") {
+		t.Error("the generated spec carries an unreferenced schema; cmd/gen-openapi's reachability test should have caught it")
 	}
 }
 

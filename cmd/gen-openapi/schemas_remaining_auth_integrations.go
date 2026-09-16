@@ -45,7 +45,6 @@ func remainingAuthIntegrationsSchemaCatalog() (map[string]DomainSchema, map[stri
 	})
 	session := object(map[string]any{"id": str(), "created_at": str(), "last_used_at": str(), "user_agent": str(), "ip": str(), "is_current": boolean()})
 	credentialAudit := object(map[string]any{"id": str(), "event_type": str(), "agent_id": nullable(str()), "ip_address": nullable(str()), "metadata": anyObject(), "occurred_at": str(), "actor_kind": str(), "actor_id": str(), "actor_name": str()})
-	credentialBinding := object(map[string]any{"id": str(), "credential_id": str(), "credential_name": str(), "scope": str(), "crew_id": nullable(str()), "agent_id": nullable(str()), "slot": str(), "created_at": str()})
 	field := object(map[string]any{"key": str(), "is_secret": boolean(), "ordinal": integer(), "value": nullable(str()), "created_at": str(), "updated_at": str()})
 	pair := object(map[string]any{"code": str(), "expires_at": str()})
 	pairPoll := object(map[string]any{"status": str(), "adapter_hint": nullable(str()), "expires_at": str()})
@@ -53,27 +52,25 @@ func remainingAuthIntegrationsSchemaCatalog() (map[string]DomainSchema, map[stri
 	components := map[string]any{
 		"RemainingLabel": label, "RemainingFeedback": feedback,
 		"RemainingHook": hook, "RemainingSavedView": savedView, "RemainingSession": session,
-		"RemainingCredentialAudit": credentialAudit, "RemainingCredentialBinding": credentialBinding,
+		"RemainingCredentialAudit": credentialAudit,
 		"RemainingCredentialField": field, "RemainingPairStart": pair, "RemainingPairPoll": pairPoll,
-		"RemainingFeedbackCreateRequest":        request(map[string]any{"message_id": str(), "chat_id": str(), "trace_id": str(), "signal": feedback["properties"].(map[string]any)["signal"], "reason": str()}, "message_id", "signal"),
-		"RemainingLabelCreateRequest":           request(map[string]any{"name": str(), "color": str(), "label_group": nullable(str())}, "name", "color"),
-		"RemainingLabelUpdateRequest":           object(map[string]any{"name": nullable(str()), "color": nullable(str()), "label_group": nullable(str())}),
 		"RemainingSavedViewCreateRequest":       request(map[string]any{"name": str(), "filters_json": str(), "sort_json": nullable(str()), "view_type": str(), "shared": boolean()}, "name", "filters_json"),
 		"RemainingSavedViewUpdateRequest":       object(map[string]any{"name": nullable(str()), "filters_json": nullable(str()), "sort_json": nullable(str()), "view_type": nullable(str()), "is_default": nullable(boolean()), "shared": nullable(boolean())}),
 		"RemainingPairStartRequest":             object(map[string]any{"adapter_hint": str()}),
 		"RemainingPairRedeemRequest":            request(map[string]any{"code": str(), "adapter_hint": str()}, "code"),
 		"RemainingPairRedeemResponse":           object(map[string]any{"cli_token": str(), "user_id": str(), "email": str()}),
-		"RemainingCredentialFieldRequest":       request(map[string]any{"key": str(), "label": str(), "value": str(), "secret": boolean()}, "key", "label", "value"),
 		"RemainingCredentialSensitivityRequest": request(map[string]any{"sensitivity": str()}, "sensitivity"),
 		"RemainingRevealPolicyRequest":          object(map[string]any{"enabled": nullable(boolean())}),
 	}
 
 	routes := map[string]DomainSchema{
-		"GET /api/v1/labels":                                          {Response: array(ref("RemainingLabel"))},
-		"POST /api/v1/labels":                                         {Request: ref("RemainingLabelCreateRequest"), Response: ref("RemainingLabel")},
-		"PATCH /api/v1/labels/{labelId}":                              {Request: ref("RemainingLabelUpdateRequest"), Response: ref("RemainingLabel")},
+		// ListLabels writes []labelResponse — the same rows Issue.labels
+		// carries, so the list is LabelList (required derived from the struct).
+		"GET /api/v1/labels":                                          {Response: ref("LabelList")},
+		"POST /api/v1/labels":                                         {Response: ref("RemainingLabel")},
+		"PATCH /api/v1/labels/{labelId}":                              {Response: ref("RemainingLabel")},
 		"DELETE /api/v1/labels/{labelId}":                             {Response: map[string]any{"type": "object", "properties": map[string]any{}}},
-		"POST /api/v1/feedback":                                       {Request: ref("RemainingFeedbackCreateRequest"), Response: object(map[string]any{"id": str()})},
+		"POST /api/v1/feedback":                                       {Response: object(map[string]any{"id": str()})},
 		"GET /api/v1/feedback":                                        {Response: object(map[string]any{"feedback": array(ref("RemainingFeedback"))})},
 		"DELETE /api/v1/feedback":                                     {Response: map[string]any{"type": "object", "properties": map[string]any{}}},
 		"GET /api/v1/hooks":                                           {Response: object(map[string]any{"rows": array(ref("RemainingHook")), "count": integer()})},
@@ -98,9 +95,8 @@ func remainingAuthIntegrationsSchemaCatalog() (map[string]DomainSchema, map[stri
 		"GET /api/v1/credentials/{credentialId}/audit":                {Response: array(ref("RemainingCredentialAudit"))},
 		"GET /api/v1/credentials/{credentialId}/rotations":            {Response: array(ref("CredentialRotation"))},
 		"DELETE /api/v1/credential-rotations/{rotationId}":            {Response: status},
-		"GET /api/v1/agents/{agentId}/credential-bindings":            {Response: object(map[string]any{"bindings": array(ref("RemainingCredentialBinding"))})},
 		"DELETE /api/v1/credentials/bindings/{bindingId}":             {Response: status},
-		"PUT /api/v1/credentials/{credentialId}/fields/{fieldKey}":    {Request: ref("RemainingCredentialFieldRequest"), Response: ref("RemainingCredentialField")},
+		"PUT /api/v1/credentials/{credentialId}/fields/{fieldKey}":    {Response: ref("RemainingCredentialField")},
 		"DELETE /api/v1/credentials/{credentialId}/fields/{fieldKey}": {Response: status},
 		"GET /api/v1/credentials/default-env-var":                     {Response: object(map[string]any{"env_var": nullable(str()), "testable": boolean()})},
 		"GET /api/v1/credentials/reveal-policy":                       {Response: object(map[string]any{"workspace_id": str(), "enabled": boolean()})},

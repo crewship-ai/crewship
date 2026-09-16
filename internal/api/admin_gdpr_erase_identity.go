@@ -202,6 +202,15 @@ var identitySteps = []identityStep{
 	{key: "onboarding_proposals_removed", deletes: true,
 		sql:  `DELETE FROM onboarding_proposals WHERE workspace_id = ? AND created_by = ?`,
 		args: []identityArg{argWorkspace, argSubject}},
+	// The evidence behind the operator model (#1693): the subject's own
+	// quoted words, one row per fact per sync. The model itself goes in
+	// step 5 of the cascade (admin_gdpr.go), which walks user_models and
+	// keeps the row when a disk copy could not be removed; the evidence
+	// has no disk copy and no such reason to wait, so it is erased here
+	// unconditionally — delete path 4 of 4 for this table.
+	{key: "user_model_provenance_removed", deletes: true,
+		sql:  `DELETE FROM user_model_provenance WHERE workspace_id = ? AND user_id = ?`,
+		args: []identityArg{argWorkspace, argSubject}},
 
 	// ── Capabilities — revoked ─────────────────────────────────────────
 	// invited_by is NOT NULL REFERENCES users(id): a pending invitation is
