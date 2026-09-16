@@ -224,6 +224,13 @@ type credentialResponse struct {
 	// credential crew-wide, and the sidecar's CredStore would go back to
 	// serving one member's endpoint credential to another with nothing said.
 	AgentIDs []string `json:"agent_ids,omitempty"`
+	// GraceToken / GraceExpiresAt / GraceRotationID mirror mcpCredEntry's
+	// rotation grace (#1882): the previous value while a rotation's window is
+	// open. Dropped here, the sidecar would boot with nothing to replay a 401
+	// with and the documented grace overlap would silently not exist.
+	GraceToken      string `json:"grace_token,omitempty"`
+	GraceExpiresAt  string `json:"grace_expires_at,omitempty"`
+	GraceRotationID string `json:"grace_rotation_id,omitempty"`
 	// Fields are the credential's additional named parts (PRD-CREDENTIALS-V2
 	// §2.2). Absent for every credential that has none, so an unchanged
 	// credential decodes to an unchanged struct. Dropping this key here would
@@ -497,17 +504,20 @@ func (r *IPCResolver) resolve(ctx context.Context, resolveURL string) (*ChatInfo
 	creds := make([]orchestrator.Credential, len(data.Credentials))
 	for i, c := range data.Credentials {
 		creds[i] = orchestrator.Credential{
-			ID:             c.ID,
-			EnvVarName:     c.EnvVar,
-			PlainValue:     c.Value,
-			Priority:       c.Priority,
-			Type:           c.Type,
-			Provider:       c.Provider,
-			BaseURL:        c.BaseURL,
-			Headers:        c.Headers,
-			Username:       c.Username,
-			LeaseExpiresAt: c.LeaseExpiresAt,
-			AgentIDs:       c.AgentIDs,
+			ID:              c.ID,
+			EnvVarName:      c.EnvVar,
+			PlainValue:      c.Value,
+			Priority:        c.Priority,
+			Type:            c.Type,
+			Provider:        c.Provider,
+			BaseURL:         c.BaseURL,
+			Headers:         c.Headers,
+			Username:        c.Username,
+			LeaseExpiresAt:  c.LeaseExpiresAt,
+			AgentIDs:        c.AgentIDs,
+			GraceToken:      c.GraceToken,
+			GraceExpiresAt:  c.GraceExpiresAt,
+			GraceRotationID: c.GraceRotationID,
 		}
 		for _, f := range c.Fields {
 			creds[i].Fields = append(creds[i].Fields, orchestrator.CredentialField{

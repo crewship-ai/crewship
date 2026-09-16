@@ -262,12 +262,18 @@ func (h *AdminGDPRHandler) adminContext(w http.ResponseWriter, r *http.Request) 
 // gdpr_actions.scope_json. Open shape — extensible without a schema
 // migration when a new cascadable table is added.
 type gdprActionScope struct {
-	PeerCards       int `json:"peer_cards"`
-	MemoryVersions  int `json:"memory_versions"`
-	InboxItems      int `json:"inbox_items"`
-	InboxItemReads  int `json:"inbox_item_reads"`
-	UserModels      int `json:"user_models"`
-	PeerCardsOnDisk int `json:"peer_cards_on_disk,omitempty"`
+	PeerCards      int `json:"peer_cards"`
+	MemoryVersions int `json:"memory_versions"`
+	InboxItems     int `json:"inbox_items"`
+	InboxItemReads int `json:"inbox_item_reads"`
+	UserModels     int `json:"user_models"`
+	// UserModelProvenance is the export-side count of the evidence rows
+	// behind the operator model (#1693). Export only: on the delete path the
+	// same table is reported by the identity step as
+	// user_model_provenance_removed, so omitempty keeps the erase receipt to
+	// one key for it.
+	UserModelProvenance int `json:"user_model_provenance,omitempty"`
+	PeerCardsOnDisk     int `json:"peer_cards_on_disk,omitempty"`
 	// ApprovalsQueue (#2233) counts rows deleted because the subject was
 	// either the requester or the decider — see the file header "Why erase
 	// approvals_queue rather than add it to the excluded list".
@@ -837,6 +843,23 @@ type gdprExportBundle struct {
 	InboxItems     []exportInboxItem     `json:"inbox_items"`
 	InboxItemReads []exportInboxItemRead `json:"inbox_item_reads"`
 	UserModels     []exportUserModel     `json:"user_models"`
+	// UserModelProvenance is every evidence row behind the operator model
+	// (#1693), newest first — the subject's own quoted words and where they
+	// were found. The model body says what is held; this says why.
+	UserModelProvenance []exportUserModelProvenance `json:"user_model_provenance"`
+}
+
+// exportUserModelProvenance is one user_model_provenance row: the whole
+// row, because every column is either the subject's words or a pointer to
+// where they said them.
+type exportUserModelProvenance struct {
+	ID         string `json:"id"`
+	Key        string `json:"key"`
+	Value      string `json:"value"`
+	Quote      string `json:"quote"`
+	MessageID  string `json:"message_id"`
+	SourceType string `json:"source_type"`
+	RecordedAt string `json:"recorded_at"`
 }
 
 // exportInboxItemRead is the subject's own per-item read marker (A7):
@@ -1136,6 +1159,47 @@ func (h *AdminGDPRHandler) ExportUserData(w http.ResponseWriter, r *http.Request
 		}
 		_ = umRows.Close()
 		scope.UserModels = len(bundle.UserModels)
+	}
+
+	// user_model_provenance — the evidence behind the model (#1693). Not
+	// gated on a user_models row: the evidence outlives nothing by design,
+	// but an export that read only what the index row still pointed at
+	// would be the erase cascade's #1701 shape in reverse.
+	bundle.UserModelProvenance = []exportUserModelProvenance{}
+	provRows, err := h.db.QueryContext(r.Context(), `
+		SELECT id, key, value, quote, message_id, source_type, recorded_at
+		FROM user_model_provenance
+		WHERE workspace_id = ? AND user_id = ?
+		ORDER BY recorded_at DESC, rowid DESC
+	`, wsID, targetID)
+	if err != nil {
+		if firstErr == nil {
+			firstErr = err
+		}
+		h.logger.Warn("gdpr export: user_model_provenance query failed",
+			"action_id", actionID, "err", err)
+	} else {
+		for provRows.Next() {
+			var e exportUserModelProvenance
+			if scanErr := provRows.Scan(&e.ID, &e.Key, &e.Value, &e.Quote, &e.MessageID, &e.SourceType, &e.RecordedAt); scanErr != nil {
+				h.logger.Error("gdpr export: user_model_provenance scan failed",
+					"action_id", actionID, "err", scanErr)
+				if firstErr == nil {
+					firstErr = scanErr
+				}
+				continue
+			}
+			bundle.UserModelProvenance = append(bundle.UserModelProvenance, e)
+		}
+		if iterErr := provRows.Err(); iterErr != nil {
+			h.logger.Warn("gdpr export: user_model_provenance iteration error",
+				"action_id", actionID, "err", iterErr)
+			if firstErr == nil {
+				firstErr = iterErr
+			}
+		}
+		_ = provRows.Close()
+		scope.UserModelProvenance = len(bundle.UserModelProvenance)
 	}
 
 	h.finalizeGDPRAction(r.Context(), actionID, scope, firstErr)

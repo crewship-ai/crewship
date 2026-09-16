@@ -80,9 +80,6 @@ func integrationsAuthRequestBodySchemaCatalog() (map[string]DomainSchema, map[st
 		}),
 		"IntegrationsAuthNotificationChannelTestRequest": object(channelFields, "type"),
 		"IntegrationsAuthNotificationPairAgentRequest":   object(map[string]any{"agent_id": str()}, "agent_id"),
-		"IntegrationsAuthNotificationTemplateRequest": object(map[string]any{
-			"category": str(), "channel_id": str(), "title": str(), "body": str(),
-		}, "category", "channel_id", "title", "body"),
 		"IntegrationsAuthNotificationPreferencesRequest": object(map[string]any{"cells": array(ref("IntegrationsAuthNotificationPreferenceCell"))}),
 		"IntegrationsAuthNotificationPreferenceCell":     prefCell,
 		"IntegrationsAuthEmptyRequest":                   object(map[string]any{}),
@@ -117,7 +114,6 @@ func integrationsAuthRequestBodySchemaCatalog() (map[string]DomainSchema, map[st
 		"POST /api/v1/notification-channels/test":                   {Request: ref("IntegrationsAuthNotificationChannelTestRequest")},
 		"POST /api/v1/notification-channels/{id}/test":              {Request: ref("IntegrationsAuthEmptyRequest")},
 		"POST /api/v1/notification-channels/{id}/agents":            {Request: ref("IntegrationsAuthNotificationPairAgentRequest")},
-		"PUT /api/v1/notification-templates":                        {Request: ref("IntegrationsAuthNotificationTemplateRequest")},
 		"PUT /api/v1/me/notification-prefs":                         {Request: ref("IntegrationsAuthNotificationPreferencesRequest")},
 		"POST /api/v1/auth/cli-token":                               {Request: ref("IntegrationsAuthCLITokenRequest")},
 		"POST /api/v1/workspaces/{workspaceId}/pipeline-webhooks":   {Request: ref("PipelineWebhookCreateRequest")},

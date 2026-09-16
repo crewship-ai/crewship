@@ -8,7 +8,6 @@ package main
 //
 // The returned value is a fresh map and may be changed by callers.
 func issueSkillCredentialSchemaComponents() map[string]any {
-	stringMap := map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"}}
 	stringArray := func() map[string]any {
 		return map[string]any{"type": "array", "items": map[string]any{"type": "string"}}
 	}
@@ -101,7 +100,9 @@ func issueSkillCredentialSchemaComponents() map[string]any {
 		"mcp_server_image": nullable("string"), "mcp_transport": nullable("string"), "dependencies": nullable("string"),
 		"license": nullable("string"), "agent_count": integer(), "security_score": nullable("integer"),
 		"allowed_domains": nullable("string"), "changelog": nullable("string"),
-	}, "id", "name", "slug", "display_name", "version", "category", "source", "verification", "downloads", "rating_count", "featured", "pricing_tier", "runtime", "maturity", "scan_status", "created_at", "updated_at", "agent_count")
+	}, "id", "name", "slug", "display_name", "version", "category", "source", "verification", "downloads", "rating_count", "featured", "pricing_tier", "runtime", "maturity", "scan_status", "created_at", "updated_at",
+		"description", "author", "icon", "rating_avg", "tags", "tool_count", "vendor", "homepage", "spdx_license", "description_quality",
+		"content", "credential_requirements", "mcp_server_command", "mcp_server_image", "mcp_transport", "dependencies", "license", "agent_count", "security_score", "allowed_domains", "changelog")
 
 	credential := obj(map[string]any{
 		"id": str(), "name": str(), "description": nullable("string"), "type": str(), "provider": str(), "status": str(), "scope": str(),
@@ -147,38 +148,6 @@ func issueSkillCredentialSchemaComponents() map[string]any {
 		"expires_at": str(), "expired": boolean(), "lease_source": str(), "lease_issued_at": str(), "grant_source": str(),
 	}, "id", "agent_id", "credential_id", "credential_name", "credential_type", "credential_provider", "credential_status", "env_var_name", "priority", "created_at", "expired", "grant_source")
 
-	request := func(properties map[string]any, required ...string) map[string]any {
-		return obj(properties, required...)
-	}
-	issueCreate := request(map[string]any{
-		"title": str(), "description": nullable("string"), "priority": str(), "assignee_type": nullable("string"), "assignee_id": nullable("string"),
-		"due_date": nullable("string"), "project_id": nullable("string"), "estimate": nullable("integer"), "parent_issue_id": nullable("string"),
-		"milestone_id": nullable("string"), "labels": stringArray(), "routine_id": nullable("string"), "routine_inputs": stringMap,
-	}, "title")
-	issueUpdate := request(map[string]any{
-		"title": nullable("string"), "description": nullable("string"), "status": nullable("string"), "priority": nullable("string"),
-		"assignee_type": nullable("string"), "assignee_id": nullable("string"), "due_date": nullable("string"), "project_id": nullable("string"),
-		"estimate": nullable("integer"), "parent_issue_id": nullable("string"), "milestone_id": nullable("string"), "sort_order": nullable("number"),
-		"labels": arrayOf(stringArray()["items"].(map[string]any)), "routine_id": nullable("string"), "routine_inputs": stringMap,
-	})
-	issueBulk := request(map[string]any{
-		"ids": stringArray(), "updates": obj(map[string]any{"status": nullable("string"), "priority": nullable("string"), "assignee_type": nullable("string"), "assignee_id": nullable("string"), "project_id": nullable("string"), "labels": stringArray()}, "status", "priority", "assignee_type", "assignee_id", "project_id", "labels"),
-	}, "ids", "updates")
-	labelCreate := request(map[string]any{"name": str(), "color": str(), "label_group": nullable("string")}, "name", "color")
-	labelUpdate := request(map[string]any{"name": nullable("string"), "color": nullable("string"), "label_group": nullable("string")})
-	credentialCreate := request(map[string]any{
-		"name": str(), "description": nullable("string"), "value": str(), "type": str(), "provider": str(), "scope": str(), "crew_id": nullable("string"),
-		"crew_ids": stringArray(), "tags": stringArray(), "account_label": nullable("string"), "account_email": nullable("string"), "refresh_token": nullable("string"),
-		"token_expires_at": nullable("string"), "security_level": nullable("integer"), "created_by_actor_type": nullable("string"), "created_by_actor_id": nullable("string"),
-		"provisioned_for_service": nullable("string"), "username": nullable("string"), "oauth_client_id": nullable("string"), "oauth_client_secret": nullable("string"),
-		"oauth_auth_url": nullable("string"), "oauth_token_url": nullable("string"), "oauth_scopes": nullable("string"), "pending": boolean(),
-		"mode": nullable("string"),
-	}, "name", "value")
-	credentialFieldRequest := request(map[string]any{"key": str(), "value": str(), "is_secret": boolean(), "ordinal": integer()}, "value")
-	credentialBindingRequest := request(map[string]any{"credential_id": str(), "scope": str(), "crew_id": str(), "agent_id": str(), "slot": str()}, "credential_id", "scope", "slot")
-	rotationRequest := request(map[string]any{"value": str(), "grace_seconds": integer(), "endpoint_base_url": str(), "endpoint_auth_token": str(), "endpoint_headers": map[string]any{"type": "object", "additionalProperties": str()}}, "value")
-	skillImport := request(map[string]any{"url": str(), "content": str(), "allow_unsafe_license": boolean()})
-
 	return map[string]any{
 		"Issue": issue, "IssueList": arrayOf(ref("Issue")), "IssueCreator": creator,
 		"IssueOwner": issueOwner, "IssueDelegate": issueDelegate,
@@ -186,14 +155,11 @@ func issueSkillCredentialSchemaComponents() map[string]any {
 		"Skill": skill, "SkillDetail": skillDetail, "SkillList": arrayOf(ref("Skill")), "InstalledSkillAgent": installedAgent,
 		"Credential": credential, "CredentialList": arrayOf(ref("Credential")),
 		"ProviderLogin": providerLogin, "ProviderLoginRefreshResponse": providerLoginRefreshResponse,
-		"CredentialPage":  obj(map[string]any{"credentials": arrayOf(ref("Credential")), "next_cursor": nullable("string"), "limit": integer()}, "credentials", "limit"),
+		"CredentialPage":  obj(map[string]any{"credentials": arrayOf(ref("Credential")), "next_cursor": nullable("string"), "limit": integer()}, "credentials", "next_cursor", "limit"),
 		"CredentialField": credentialField, "CredentialFieldList": arrayOf(ref("CredentialField")),
 		"CredentialBinding": credentialBinding, "CredentialBindingList": obj(map[string]any{"bindings": arrayOf(ref("CredentialBinding"))}, "bindings"),
 		"AgentCredential": agentCredential, "AgentCredentialList": arrayOf(ref("AgentCredential")),
-		"IssueCreateRequest": issueCreate, "IssueUpdateRequest": issueUpdate, "IssueBulkUpdateRequest": issueBulk,
-		"LabelCreateRequest": labelCreate, "LabelUpdateRequest": labelUpdate,
-		"CredentialCreateRequest": credentialCreate, "CredentialFieldRequest": credentialFieldRequest,
-		"CredentialBindingRequest": credentialBindingRequest, "CredentialRotationRequest": rotationRequest,
-		"SkillImportRequest": skillImport,
+		// The issue, label, credential and skill request bodies are owned by
+		// schemas_request_core_resources_v2.go (Core…RequestV2).
 	}
 }

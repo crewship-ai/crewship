@@ -6,9 +6,7 @@ func TestDomainSchemaMapCoversDomainResourcesAndRequests(t *testing.T) {
 	schemas := issueSkillCredentialSchemaComponents()
 	for _, name := range []string{
 		"Issue", "IssueList", "Label", "LabelList", "Skill", "SkillDetail", "SkillList",
-		"Credential", "CredentialList", "CredentialPage", "CredentialField", "CredentialBinding", "AgentCredential",
-		"IssueCreateRequest", "IssueUpdateRequest", "IssueBulkUpdateRequest", "LabelCreateRequest", "LabelUpdateRequest",
-		"CredentialCreateRequest", "CredentialFieldRequest", "CredentialBindingRequest", "CredentialRotationRequest", "SkillImportRequest",
+		"Credential", "CredentialList", "CredentialPage", "CredentialField", "CredentialBinding", "AgentCredential", "AgentCredentialList",
 	} {
 		if _, ok := schemas[name]; !ok {
 			t.Errorf("missing schema %q", name)
@@ -32,8 +30,9 @@ func TestDomainSchemaMapIssueAndLabelShapes(t *testing.T) {
 	if got := schemas["Label"].(map[string]any)["properties"].(map[string]any)["label_group"].(map[string]any)["nullable"]; got != true {
 		t.Fatalf("Label.label_group nullable = %v, want true", got)
 	}
-	assertRequired(t, schemas["IssueCreateRequest"], "title")
-	assertRequired(t, schemas["LabelCreateRequest"], "name", "color")
+	_, requests := coreResourceRequestSchemaCatalogV2()
+	assertRequired(t, requests["CoreIssueCreateRequestV2"], "title")
+	assertRequired(t, requests["CoreLabelCreateRequestV2"], "name", "color")
 }
 
 func TestDomainSchemaMapCredentialNeverExposesSecretValue(t *testing.T) {
@@ -47,9 +46,13 @@ func TestDomainSchemaMapCredentialNeverExposesSecretValue(t *testing.T) {
 			t.Errorf("Credential missing metadata property %q", field)
 		}
 	}
-	request := schemas["CredentialCreateRequest"].(map[string]any)["properties"].(map[string]any)
+	_, requests := coreResourceRequestSchemaCatalogV2()
+	request := requests["CoreCredentialCreateRequestV2"].(map[string]any)["properties"].(map[string]any)
 	if _, ok := request["value"]; !ok {
-		t.Fatal("CredentialCreateRequest must describe value input")
+		t.Fatal("CoreCredentialCreateRequestV2 must describe value input")
+	}
+	if _, ok := request["mode"]; !ok {
+		t.Fatal("CoreCredentialCreateRequestV2 must describe the PROVIDER_LOGIN mode input")
 	}
 }
 
@@ -65,6 +68,11 @@ func TestDomainSchemaMapSkillDetailAddsHandlerFields(t *testing.T) {
 	if _, ok := base["content"]; ok {
 		t.Fatal("Skill list schema must not claim detail-only content")
 	}
+	// Every field the handler emits is emitted unconditionally, so the
+	// detail-only fields are required too — the pair in
+	// internal/api/openapi_response_shape_test.go derives this from the
+	// struct tags; this only pins that the list is not the base one.
+	assertRequired(t, schemas["SkillDetail"], "content", "agent_count", "changelog", "description")
 }
 
 func assertRequired(t *testing.T, raw any, fields ...string) {

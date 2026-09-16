@@ -1,0 +1,208 @@
+name: Dependency drift
+
+# Surfaces what a lockfile change actually did to the DIRECT dependencies,
+# and fails on the one thing nobody asked for (#2237).
+#
+# #2218 and #2219 both moved `@sentry/nextjs` 10.71.0 → 10.72.0 — a version
+# that does not import under a DOM test environment (#2235). Neither PR
+# requested it; `package.json` said `^10.70.0` on both and still did after.
+# It moved because Dependabot regenerates the whole lockfile per branch, and
+# nothing in the review path could see it: CodeRabbit is configured to ignore
+# `dependabot[bot]` AND `pnpm-lock.yaml`, the PR title names the declared
+# group only, and a 12,000-line generated file is not a thing a person reads.
+# CI caught it as eleven suites failing to import with every assertion inside
+# them passing, which reads like anything but a dependency problem.
+#
+# So this is a machine-produced table with a machine-enforced rule, on
+# purpose: a bot PR may have no independent reviewer at all (see the second
+# comment on #2237), and a check that only fires when someone looks is not a
+# check.
+#
+# What it does: `scripts/deps-drift` reads `pnpm-lock.yaml`'s `importers`
+# section and `go.mod` at the merge base and at HEAD — no install, no build,
+# no network — and diffs the resolved version of every direct dependency
+# against the spec that asked for it. The table lands in the job summary and
+# in ONE PR comment that is updated in place (found by the marker below,
+# same containment idiom as the nightly alert issues: bot author + marker,
+# never a human's comment).
+#
+# The rule, and the only failing verdict:
+#
+#   A direct dependency's resolved version changed while its spec in
+#   `package.json` / `go.mod` did not.
+#
+# Declared bumps (spec and resolution move together), added and removed
+# dependencies, and a widened spec that resolved to nothing new are all
+# printed and pass. A normal Dependabot group stays green; undeclared drift
+# is the anomaly.
+#
+# Escape hatch: the `deps-drift-ok` label turns the failure into a warning.
+# The table still posts. `labeled`/`unlabeled` are trigger types, so applying
+# it re-runs this check without a push — the same shape as `skip-changelog`
+# on the Changelog Guard.
+#
+# `paths:` filtered, unlike the Changelog Guard: the decision here is
+# entirely "did a manifest move", and GitHub can make it before spending a
+# runner. The cost is that this check cannot be a required status (it would
+# leave unrelated PRs pending forever); it is meant to be read, not to gate
+# every PR. The script and this file are in the list so a change to the guard
+# exercises the guard.
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+    paths:
+      - 'pnpm-lock.yaml'
+      - 'go.mod'
+      - 'go.sum'
+      - 'scripts/deps-drift/**'
+      - '.github/workflows/deps-drift.yml'
+
+# Default least-privilege. The one job widens to pull-requests: write for the
+# sticky comment, nothing else.
+permissions:
+  contents: read
+
+# PR runs supersede each other; this never runs on `main`, so the
+# `github.sha` special-case ci.yml carries has nothing to guard against here.
+concurrency:
+  group: deps-drift-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  drift:
+    name: Resolved direct dependencies match their specs
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: write
+    env:
+      # Written at the top of the comment body so the next run can find and
+      # edit it instead of posting another.
+      MARKER: "<!-- crewship:deps-drift -->"
+    steps:
+      # fetch-depth: 0 so the merge base with the PR's target is resolvable.
+      # persist-credentials: false — this job runs code from the pull request
+      # (`go run ./scripts/...`), and checkout otherwise leaves the workflow
+      # token in the local git config where that code can read it. The
+      # comment step gets the token through env, on its own.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      - name: Diff resolved direct dependencies against their specs
+        id: drift
+        env:
+          # GitHub expressions are never interpolated straight into a shell
+          # script; everything crosses via env (the CodeQL
+          # js/actions/code-injection pattern).
+          BASE_REF: ${{ github.base_ref }}
+          HAS_OK_LABEL: ${{ contains(github.event.pull_request.labels.*.name, 'deps-drift-ok') }}
+        run: |
+          set -euo pipefail
+
+          # HEAD is `refs/pull/N/merge` — the PR merged into the base tip as
+          # it stood when that ref was built. The base side is the MERGE BASE,
+          # not `origin/$BASE_REF`'s tip: the tip moves under an open PR, and
+          # what it moves by is other people's lockfile changes, which would
+          # land on the base side of a comparison this PR had nothing to do
+          # with. Bare assignment: `set -e` kills the step if the base cannot
+          # be resolved, rather than comparing against nothing and reporting
+          # "no drift" — the fail-green shape this guard exists to remove.
+          merge_base="$(git merge-base "origin/$BASE_REF" HEAD)"
+          echo "base: $merge_base (merge base with origin/$BASE_REF)"
+          echo "head: $(git rev-parse HEAD)"
+
+          # Built rather than `go run`: the exit code is the verdict, and
+          # `go run` prefixes every non-zero exit with its own "exit status"
+          # line on stderr, in between the tool's annotations.
+          go build -o "$RUNNER_TEMP/deps-drift" ./scripts/deps-drift
+
+          flags=()
+          if [ "$HAS_OK_LABEL" = "true" ]; then
+            flags+=(-allow-drift)
+          fi
+
+          # The exit code is captured, not acted on here: the table has to
+          # reach the PR comment whether or not the verdict is red, and the
+          # verdict step below is what turns the square red. Exit 2 is a
+          # tool failure (unparseable manifest, unresolvable revision) and
+          # fails the step straight away — a tool that could not read the
+          # lockfile has no table to post and no verdict to report.
+          set +e
+          "$RUNNER_TEMP/deps-drift" \
+            -base "$merge_base" -head HEAD \
+            -marker "$MARKER" \
+            -summary "$GITHUB_STEP_SUMMARY" \
+            ${flags[@]+"${flags[@]}"} \
+            > "$RUNNER_TEMP/deps-drift.md"
+          status=$?
+          set -e
+          if [ "$status" -eq 2 ]; then
+            echo "::error::deps-drift could not compute the table (exit 2) — see the log above."
+            exit 2
+          fi
+          cat "$RUNNER_TEMP/deps-drift.md"
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+
+      # One comment per PR, updated in place. Only a comment THIS workflow
+      # posted is ever edited: bot author + our marker, the same containment
+      # rule the nightly alert issues apply before commenting on or closing an
+      # issue. A human comment that happens to quote the marker is not a bot
+      # comment and is left alone.
+      #
+      # Best effort, deliberately: on a fork PR the token is read-only and the
+      # POST is a 403. That must not turn a green table red — the summary
+      # above has already been written and the verdict step is independent.
+      - name: Post or update the PR comment
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          body="$RUNNER_TEMP/deps-drift.md"
+          printf '\n<sub>Posted by <a href="%s">Dependency drift</a>. Rule and escape hatch: CONTRIBUTING.md § Dependency drift.</sub>\n' "$RUN_URL" >> "$body"
+
+          # `--paginate` applies `--jq` per page, so this can print one id per
+          # page that matched; the first is the one to edit. Read to EOF (a
+          # bare `$(…)`), never `| head`: under `pipefail`, head closing the
+          # pipe early SIGPIPEs the producer and fails the step.
+          # lookup:begin
+          ids="$(gh api "repos/$REPO/issues/$PR_NUMBER/comments" --paginate \
+            --jq "[ .[]
+                    | select(.user.type == \"Bot\")
+                    | select(.body // \"\" | contains(\$ENV.MARKER))
+                  ] | .[0].id // empty")"
+          # lookup:end
+          existing="${ids%%$'\n'*}"
+
+          if [ -n "$existing" ]; then
+            echo "updating comment $existing"
+            gh api -X PATCH "repos/$REPO/issues/comments/$existing" -F "body=@$body" --silent \
+              || echo "::warning::could not update the drift comment (read-only token on a fork PR?) — the table is in the job summary."
+          else
+            echo "posting a new comment"
+            gh api -X POST "repos/$REPO/issues/$PR_NUMBER/comments" -F "body=@$body" --silent \
+              || echo "::warning::could not post the drift comment (read-only token on a fork PR?) — the table is in the job summary."
+          fi
+
+      - name: Verdict
+        env:
+          STATUS: ${{ steps.drift.outputs.status }}
+        run: |
+          set -euo pipefail
+          case "$STATUS" in
+            0) echo "No undeclared drift (or drift allowed by the deps-drift-ok label)." ;;
+            1) echo "::error::A direct dependency's resolved version moved while its spec did not — see the table above. Declare the bump in package.json / go.mod, regenerate the lockfile without it, or apply the deps-drift-ok label if the drift is wanted." ;;
+            *) echo "::error::deps-drift reported no verdict (status='$STATUS')." ;;
+          esac
+          exit "${STATUS:-2}"

@@ -188,8 +188,9 @@ GET /api/v1/users/me/user-model?workspace_id={workspaceId}
 ```
 
 Returns the operator model stored about the requesting user in this workspace:
-the raw file plus each `- key: value` bullet split into a field. A read is
-recorded in the peer-card audit log with `action='read'`.
+the raw file plus each `- key: value` bullet split into a field, and for each
+field where it came from. A read is recorded in the peer-card audit log with
+`action='read'`.
 
 **Auth:** Any authenticated user (own data only)
 
@@ -204,10 +205,29 @@ recorded in the peer-card audit log with `action='read'`.
   "bytes": 118,
   "created_at": "2026-08-01T05:00:00.000Z",
   "updated_at": "2026-08-02T05:00:00.000Z",
-  "content": "- role: runs the platform team\n- timezone: UTC+1",
+  "content": "- role: runs the platform team\n- timezone: UTC+1\n- language: Czech",
   "facts": [
-    { "key": "role", "value": "runs the platform team" },
-    { "key": "timezone", "value": "UTC+1" }
+    {
+      "key": "role",
+      "value": "runs the platform team",
+      "provenance": {
+        "quote": "I run the platform team here",
+        "message_id": "msg_1757912400123_9f2c1a4e7b3d0518",
+        "source_type": "stated",
+        "at": "2026-08-02T05:00:00.000Z"
+      }
+    },
+    {
+      "key": "timezone",
+      "value": "UTC+1",
+      "provenance": {
+        "quote": "I'm on UTC+1",
+        "message_id": "msg_1757912455771_0a1b2c3d4e5f6071",
+        "source_type": "stated",
+        "at": "2026-08-02T05:00:00.000Z"
+      }
+    },
+    { "key": "language", "value": "Czech" }
   ]
 }
 ```
@@ -215,6 +235,16 @@ recorded in the peer-card audit log with `action='read'`.
 `exists: false` with an empty `facts` array means nothing has been recorded
 about this person in this workspace yet. `content` and `facts` are omitted when
 the server has no memory storage path configured.
+
+`provenance` is where the fact came from: `quote` is the verbatim span of the
+person's own words the extraction verified it against, `message_id` the id of
+the message it was found in, `source_type` the origin the extraction profile
+admitted (`stated` under every shipped profile), and `at` when it was recorded
+(ISO 8601, UTC, milliseconds). Provenance is stored beside the model file, never
+inside it, and every sync appends: a field changed or restated in a later
+message gets a new row and the response shows the newest (the same sentence
+re-found by the next day's sweep is not recorded twice). A fact recorded before provenance
+was kept has no `provenance` key at all — never `null`, never an empty object.
 
 | Status | Condition |
 |---|---|
@@ -232,7 +262,8 @@ DELETE /api/v1/users/me/user-model/facts/{key}?workspace_id={workspaceId}
 Removes a single field from the operator model and leaves the rest standing --
 the answer to "an agent recorded something wrong about me" that does not cost
 the person everything it recorded correctly. `{key}` is a field name from the
-`facts` array above; matching is case-insensitive.
+`facts` array above; matching is case-insensitive. The field's provenance rows
+go with it — every one, not only the newest.
 
 Removing the last remaining field removes the model entirely (an empty model is
 not a model), which the response reports as `exists: false`.
@@ -267,9 +298,10 @@ not a model), which the response reports as `exists: false`.
 DELETE /api/v1/users/me/user-model?workspace_id={workspaceId}
 ```
 
-Forgets the whole operator model. Does **not** opt the caller out: new facts may
-be recorded again from things they state later. Use `PUT /users/me/peer-consent`
-with `opted_out: true` to stop recording altogether.
+Forgets the whole operator model and every provenance row behind it. Does
+**not** opt the caller out: new facts may be recorded again from things they
+state later. Use `PUT /users/me/peer-consent` with `opted_out: true` to stop
+recording altogether — that purges the model and its provenance too.
 
 **Auth:** Any authenticated user (own data only)
 
