@@ -23,6 +23,13 @@ type Turn struct {
 	BySubject bool
 
 	Content string
+
+	// MessageID is the conversation_messages.id this turn was loaded from.
+	// Verify carries it onto the Fact whose quote it matched, so the
+	// evidence can be pointed at later (#1693). Empty for a turn built
+	// without one (tests, or a transcript from somewhere other than the
+	// mirror); nothing downstream requires it.
+	MessageID string
 }
 
 // Candidate is one fact as the model proposed it, before verification.
@@ -43,6 +50,17 @@ type Fact struct {
 	Key   string
 	Value string
 	Quote string
+
+	// MessageID names the subject's turn the Quote was found in — the
+	// FIRST such turn when the person said it more than once. It is the
+	// provenance pointer the store beside the model file keeps (#1693).
+	MessageID string
+
+	// Source is the origin the model declared and the profile admitted.
+	// Under every shipped profile that is SourceStated; it is carried
+	// rather than assumed so the provenance row records what was actually
+	// admitted, not what the policy happened to be.
+	Source SourceType
 }
 
 // Refusal records a candidate that was not written, and why. Refusals
@@ -156,6 +174,9 @@ func Verify(p Profile, turns []Turn, cands []Candidate) (accepted []Fact, refuse
 	// difference between a model that is quoting and a model that is
 	// writing.
 	var subject, others []string
+	// subjectIDs runs parallel to subject: the message id of each subject
+	// turn, so a match can say WHICH turn it was found in (#1693).
+	var subjectIDs []string
 	// subjectSentences is the same text cut at sentence boundaries, used
 	// only by the short-answer exemption below. Built from the subject's
 	// turns alone, so the exemption can never readmit an agent's or a
@@ -168,6 +189,7 @@ func Verify(p Profile, turns []Turn, cands []Candidate) (accepted []Fact, refuse
 		}
 		if t.BySubject && strings.EqualFold(t.Role, "user") {
 			subject = append(subject, n)
+			subjectIDs = append(subjectIDs, t.MessageID)
 			if p.AllowShortCompleteSentence {
 				subjectSentences = append(subjectSentences, sentences(n)...)
 			}
@@ -181,6 +203,8 @@ func Verify(p Profile, turns []Turn, cands []Candidate) (accepted []Fact, refuse
 		key := strings.ToLower(strings.TrimSpace(c.Key))
 		val := strings.TrimSpace(c.Value)
 		quote := strings.TrimSpace(c.Quote)
+		source := SourceType(strings.ToLower(strings.TrimSpace(c.Source)))
+		messageID := ""
 
 		reason := ""
 		if _, ok := p.hasKey(key); !ok {
@@ -190,7 +214,7 @@ func Verify(p Profile, turns []Turn, cands []Candidate) (accepted []Fact, refuse
 		if reason == "" && taken[key] {
 			reason = ReasonDuplicateKey
 		}
-		if reason == "" && !p.admits(SourceType(strings.ToLower(strings.TrimSpace(c.Source)))) {
+		if reason == "" && !p.admits(source) {
 			reason = ReasonSourceNotAdmissible
 		}
 		if reason == "" && val == "" {
@@ -217,9 +241,10 @@ func Verify(p Profile, turns []Turn, cands []Candidate) (accepted []Fact, refuse
 		}
 		if reason == "" {
 			needle := collapseSpaces(quote)
-			switch {
-			case containsSpan(subject, needle):
+			switch at := indexSpan(subject, needle); {
+			case at >= 0:
 				// Stated by the subject — the only admissible origin.
+				messageID = subjectIDs[at]
 			case containsSpan(others, needle):
 				reason = originRefusal(turns, needle)
 			default:
@@ -238,7 +263,7 @@ func Verify(p Profile, turns []Turn, cands []Candidate) (accepted []Fact, refuse
 			continue
 		}
 		taken[key] = true
-		accepted = append(accepted, Fact{Key: key, Value: val, Quote: quote})
+		accepted = append(accepted, Fact{Key: key, Value: val, Quote: quote, MessageID: messageID, Source: source})
 	}
 	return accepted, refused
 }
@@ -268,15 +293,22 @@ func originRefusal(turns []Turn, needle string) string {
 // cannot author replacement prose. It is the strongest guarantee in the
 // field survey and the reason it is strong is that it is not a prompt.
 func containsSpan(haystacks []string, needle string) bool {
+	return indexSpan(haystacks, needle) >= 0
+}
+
+// indexSpan is containsSpan that says which haystack entry matched: the
+// index of the FIRST one, or -1. Turns arrive oldest-first, so the first
+// match is the earliest time the person said it.
+func indexSpan(haystacks []string, needle string) int {
 	if needle == "" {
-		return false
+		return -1
 	}
-	for _, h := range haystacks {
+	for i, h := range haystacks {
 		if strings.Contains(h, needle) {
-			return true
+			return i
 		}
 	}
-	return false
+	return -1
 }
 
 // sentenceEnders terminate a sentence. Deliberately short: this is a cut
