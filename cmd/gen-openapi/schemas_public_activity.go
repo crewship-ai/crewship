@@ -75,7 +75,7 @@ func publicActivitySchemaCatalog() map[string]map[string]DomainSchema {
 	})
 	pagination := object(map[string]any{"page": integer(), "limit": integer(), "total": integer(), "total_pages": integer()})
 	webhook := object(map[string]any{
-		"ingress_profile": map[string]any{"type": "string", "enum": []string{"crewship", "github"}},
+		"ingress_profile": map[string]any{"type": "string", "enum": []string{"crewship", "github", "unsigned"}},
 		"id":              str(), "workspace_id": str(), "name": str(), "target_pipeline_id": str(),
 		"target_pipeline_slug": str(), "target_pipeline_version": nullable(integer()), "token": str(),
 		"signing_secret_set": boolean(), "signing_secret": str(), "inputs_template": anyObject(),
@@ -105,7 +105,7 @@ func publicActivitySchemaCatalog() map[string]map[string]DomainSchema {
 	participantAdd := request(map[string]any{"user_id": str(), "role": str()}, "user_id")
 	reactionAdd := request(map[string]any{"emoji": str()}, "emoji")
 	webhookRequest := request(map[string]any{
-		"ingress_profile": map[string]any{"type": "string", "enum": []string{"crewship", "github"}, "default": "crewship"},
+		"ingress_profile": map[string]any{"type": "string", "enum": []string{"crewship", "github", "unsigned"}, "default": "crewship"},
 		"name":            str(), "target_pipeline_slug": str(), "target_pipeline_id": str(),
 		"target_pipeline_version": nullable(integer()), "signing_secret": str(), "inputs_template": anyObject(),
 		"enabled": nullable(boolean()), "rate_limit_per_min": integer(),

@@ -32,8 +32,8 @@ func TestWebhookProfileSurvivesFinalDocumentCatalogs(t *testing.T) {
 			if !ok {
 				t.Fatal("final operation schema omits ingress_profile")
 			}
-			if profile["type"] != "string" || !reflect.DeepEqual(profile["enum"], []string{"crewship", "github"}) {
-				t.Fatalf("ingress_profile must model both supported signature profiles: %#v", profile)
+			if profile["type"] != "string" || !reflect.DeepEqual(profile["enum"], []string{"crewship", "github", "unsigned"}) {
+				t.Fatalf("ingress_profile must model all supported signature profiles: %#v", profile)
 			}
 			if name == "create request" && profile["default"] != "crewship" {
 				t.Fatalf("create default = %v, want crewship", profile["default"])
