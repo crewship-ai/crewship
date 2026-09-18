@@ -56,7 +56,7 @@ Important test limits: dummy-key CLI probes intentionally returned local HTTP 40
 
 ## Deployment caveat
 
-`crewship-ws@3` has a `pages-demo.conf` override. Its reload terminates the process and the configured launcher rebuilds clone 3 (`/srv/crewship/dev3-pages-release/start.sh`), embeds the frontend and rebuilds Go/sidecar before serving port 8083. Therefore a reload deploys **whatever clone 3 currently has checked out**, not automatically PR #2619. Inspect `systemctl cat crewship-ws@3`, checkout, marker and served assets first. The current task did not redeploy, alter billing, merge, or create real credentials.
+`crewship-ws@3` originally used `pages-demo.conf` and a rebuild-on-start launcher, but **September 18 inspection found an additional `zz-unsigned.conf` override** setting ExecStart to `/srv/crewship/dev3-pages-release/start-unsigned.sh`. The running executable is `/srv/crewship/dev3-pages-release/crewship.unsigned`. The marker and live assets match the expected frontend, but the backend commit has not been independently established from that executable. Do not infer backend identity solely from `.web-build-marker` or the working tree. Before further acceptance, inspect the current effective unit/launcher and confirm the running backend build through authenticated version information. A reload terminates the process and invokes the current launcher; do not assume it rebuilds or deploys PR #2619. Coordinate checkout and deployment on instance 3, then verify both frontend and backend identity. The current task did not redeploy, alter billing, merge, or create real credentials.
 
 ## Deliberate exclusions, not unfinished promised features
 
