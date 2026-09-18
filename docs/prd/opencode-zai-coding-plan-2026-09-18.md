@@ -56,7 +56,7 @@ grants → agent/model selection → OpenCode run → streaming → usage/errors
 
 ## Automated evidence
 
-Executed on the stacked branch after the changes (head as of this section;
+Executed on the stacked branch after the changes (commit f67ed83a1; the binary's version string renders it with git-describe's g prefix as nightly-…-gf67ed83a1;
 local log for the full suite: `/tmp/opencode/zai-coding-plan` worktree,
 `/tmp/opencode/zai-full-go.log` on the build host):
 
@@ -116,7 +116,7 @@ conflict on instance 3, not a defect in this slice:
   config changes require `systemctl restart caddy`, and the new block
   deliberately has no custom access log because `/var/log/caddy` is not
   writable for new files by the caddy user).
-- Runs build gf67ed83a1 (`crewship.zai` + `crewship-sidecar.zai` in the
+- Runs build of commit f67ed83a1 (`crewship.zai` + `crewship-sidecar.zai` in the
   release dir) on port 8093, socket `/tmp/crewship-zai.sock`, isolated
   `CREWSHIP_DATA_DIR=/tmp/opencode/zai-data`, against
   `/tmp/opencode/zai-acceptance.db` — a copy of the pre-migrate snapshot
@@ -137,13 +137,12 @@ completion with `zai-coding-plan/glm-5.3`; a tool-calling run; custom model
 ID; invalid key → actionable error without secret leakage; second
 same-product account → explicit selection; grant revocation → next run fails
 closed; concurrent run on the live metered product if available; mobile
-viewport pass. Record observed results, deployed commit (gf67ed83a1), CLI
+viewport pass. Record observed results, deployed commit (f67ed83a1), CLI
 version and nonsecret run IDs back into this document and the PR.
 
 ## Not done here (explicitly)
 
-- Live acceptance with the real subscription key — NOT PERFORMED (see the
-  checklist above; the side-instance is ready and waiting on the user).
+- Live acceptance with the real subscription key — NOT PERFORMED (see the checklist above; the side-instance is ready and waiting on the user). After the console-link fix the instance was rebuilt from commit 943e3bd24.
 - Zhipu/BigModel regional variants (`zhipuai`, `zhipuai-coding-plan`) —
   separate products, out of scope until an account exists.
 - Z.AI vision/search/reader MCP services — a separate tools decision.

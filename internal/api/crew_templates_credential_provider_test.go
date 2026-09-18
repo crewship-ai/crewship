@@ -265,3 +265,69 @@ func TestDeployCrewTemplateModelOverride(t *testing.T) {
 		})
 	}
 }
+
+// TestAutoAssignCredentialsLinksProviderLoginUnderItsSlot pins the
+// PROVIDER_LOGIN arm: a workspace whose only credential is a provider login
+// (here a Z.AI Coding Plan key) must link it to a matching agent, and the
+// link must carry the provider's delivery slot — the auth-file renderer and
+// the env-delivery resolver key off that slot, not off the display name the
+// API_KEY arm historically stored.
+func TestAutoAssignCredentialsLinksProviderLoginUnderItsSlot(t *testing.T) {
+	for _, tc := range []struct{ provider, mode, slot string }{
+		{"ZAI_CODING_PLAN", "api_key", "ZAI_CODING_PLAN_API_KEY"},
+		{"OPENCODE_GO", "api_key", "OPENCODE_GO_API_KEY"},
+		// Empty mode field reads as api_key — the same default Split applies.
+		{"ZAI_CODING_PLAN", "", "ZAI_CODING_PLAN_API_KEY"},
+	} {
+		t.Run(tc.provider+"/"+tc.mode, func(t *testing.T) {
+			db := setupTestDB(t)
+			userID := seedTestUser(t, db)
+			wsID := seedTestWorkspace(t, db, userID)
+			h := NewCrewTemplateHandler(db, newTestLogger())
+
+			if _, err := db.Exec(`INSERT INTO crew_templates
+				(id, name, slug, category, agents_json, is_builtin, workspace_id)
+				VALUES ('ctp-2', 'Login Tmpl', 'ctp-login', 'CUSTOM', ?, 0, ?)`,
+				ctpAgentsJSON(t, tc.provider, "solo"), wsID); err != nil {
+				t.Fatalf("seed template: %v", err)
+			}
+			if _, err := db.Exec(`INSERT INTO credentials
+				(id, workspace_id, name, encrypted_value, type, provider, created_by)
+				VALUES ('ctp-login-cred', ?, 'My plan key', 'enc', 'PROVIDER_LOGIN', ?, ?)`,
+				wsID, tc.provider, userID); err != nil {
+				t.Fatalf("seed login: %v", err)
+			}
+			if tc.mode != "" {
+				if _, err := db.Exec(`INSERT INTO credential_fields (credential_id, key, value, is_secret)
+					VALUES ('ctp-login-cred', 'mode', ?, 0)`, tc.mode); err != nil {
+					t.Fatalf("seed mode: %v", err)
+				}
+			}
+
+			req := httptest.NewRequest("POST", "/api/v1/crew-templates/ctp-login/deploy",
+				bytes.NewBufferString(`{"crew_name":"Login Crew"}`))
+			req.SetPathValue("slug", "ctp-login")
+			req = withWorkspaceUser(req, userID, wsID, "OWNER")
+			rr := httptest.NewRecorder()
+			h.Deploy(rr, req)
+			if rr.Code != http.StatusCreated {
+				t.Fatalf("deploy = %d, body: %s", rr.Code, rr.Body.String())
+			}
+			var dep deployCrewResult
+			if err := json.Unmarshal(rr.Body.Bytes(), &dep); err != nil {
+				t.Fatal(err)
+			}
+
+			var slot string
+			if err := db.QueryRow(`
+				SELECT ac.env_var_name FROM agent_credentials ac
+				JOIN agents a ON a.id = ac.agent_id
+				WHERE a.crew_id = ? AND ac.credential_id = 'ctp-login-cred'`, dep.CrewID).Scan(&slot); err != nil {
+				t.Fatalf("provider login was not linked: %v", err)
+			}
+			if slot != tc.slot {
+				t.Fatalf("link stored %q; the delivery slot is %q", slot, tc.slot)
+			}
+		})
+	}
+}

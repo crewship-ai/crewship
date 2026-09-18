@@ -3,7 +3,7 @@
   "retrieved_at": "2026-09-18T13:12:00.678401+00:00",
   "source_sha256": "809a568840434fb28b8e621f5109849cfd5961a4cfb300dadc0ac65ac35530a8",
   "provider_count": 222,
-  "meaning": "Catalog inventory only; not Crewship support, account entitlement or successful inference. npm is upstream metadata, not an install instruction.",
+  "meaning": "Catalog inventory only; not Crewship support, account entitlement or successful inference. npm is upstream metadata, not an install instruction. Every id and name is a VERBATIM identifier from the fetched upstream catalog (see source and source_sha256) kept as retrieval evidence; none is a Crewship product claim, endorsement or recommendation, and none is altered or renamed here.",
   "providers": [
     {
       "id": "302ai",
