@@ -97,6 +97,10 @@ func coreResourceSchemas() map[string]any {
 		"created_at": stringSchema(), "updated_at": stringSchema(), "crew": ref("AgentCrew"), "_count": ref("AgentCounts"),
 		"created_by_user_id": stringSchema(), "ephemeral": boolSchema(), "expires_at": nullableString(), "expired_at": nullableString(),
 		"parent_lead_id": nullableString(), "hire_reason": nullableString(),
+		// ask_forms / suggested_prompts are *string WITHOUT omitempty on
+		// agentResponse, so every row carries them (null when unset) —
+		// the schema must admit both (#2623).
+		"ask_forms": nullableString(), "suggested_prompts": nullableString(),
 		// pays_with (docs/prd/provider-logins.md §10.3): the provider login
 		// this agent's model is paid with, null when none. GET only.
 		"pays_with": map[string]any{"type": "object", "nullable": true, "properties": map[string]any{
@@ -106,7 +110,8 @@ func coreResourceSchemas() map[string]any {
 		"memory_enabled", "schedule_enabled", "webhook_require_timestamp", "created_at", "updated_at", "crew", "_count", "ephemeral",
 		"crew_id", "description", "role_title", "lead_mode", "llm_provider", "llm_model", "system_prompt",
 		"avatar_seed", "avatar_style", "avatar_url", "cli_tools", "schedule_cron", "schedule_prompt",
-		"schedule_last_run", "schedule_next_run", "expires_at", "expired_at", "parent_lead_id", "hire_reason")
+		"schedule_last_run", "schedule_next_run", "expires_at", "expired_at", "parent_lead_id", "hire_reason",
+		"ask_forms", "suggested_prompts")
 
 	project := object(map[string]any{
 		"id": stringSchema(), "workspace_id": stringSchema(), "name": stringSchema(), "slug": stringSchema(),
