@@ -7,13 +7,22 @@ import (
 )
 
 func TestOpenCodeGatewaysRouteWithoutExposingKeys(t *testing.T) {
+	// The vendor-mixed list doubles as the explicit-payer guard: a bare
+	// cross-vendor name on a gateway/coding-plan agent must still land on
+	// that product. ZAI_CODING_PLAN additionally carries its real catalog
+	// models so the GLM path itself is what the assertions walk.
+	nativeModels := map[string][]string{
+		"OPENCODE":        {"gpt-5.6-luna", "minimax-m3", "gemini-3.1-pro"},
+		"OPENCODE_GO":     {"gpt-5.6-luna", "minimax-m3", "gemini-3.1-pro"},
+		"ZAI_CODING_PLAN": {"glm-5.3", "glm-5.3-flash", "glm-5.2", "gpt-5.6-luna"},
+	}
 	for _, tc := range []struct{ provider, native, slot string }{
 		{"OPENCODE", "opencode", "OPENCODE_API_KEY"},
 		{"OPENCODE_GO", "opencode-go", "OPENCODE_GO_API_KEY"},
 		{"ZAI_CODING_PLAN", "zai-coding-plan", "ZAI_CODING_PLAN_API_KEY"},
 	} {
 		t.Run(tc.provider, func(t *testing.T) {
-			for _, model := range []string{"gpt-5.6-luna", "minimax-m3", "gemini-3.1-pro"} {
+			for _, model := range nativeModels[tc.provider] {
 				req := AgentRunRequest{CLIAdapter: "OPENCODE", LLMProvider: tc.provider, LLMModel: model, sidecarActive: true,
 					Credentials: []Credential{{ID: "gateway-key", Type: "PROVIDER_LOGIN", Provider: tc.provider, EnvVarName: tc.slot, PlainValue: "private-gateway-key"}},
 				}

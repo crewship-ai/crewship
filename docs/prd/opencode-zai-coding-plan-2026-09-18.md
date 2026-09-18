@@ -56,21 +56,34 @@ grants → agent/model selection → OpenCode run → streaming → usage/errors
 
 ## Automated evidence
 
-Executed on the stacked branch after the changes:
+Executed on the stacked branch after the changes (head as of this section;
+local log for the full suite: `/tmp/opencode/zai-coding-plan` worktree,
+`/tmp/opencode/zai-full-go.log` on the build host):
 
-- `go test ./internal/llmroute ./internal/providerlogin ./internal/credprovider ./internal/paymaster -count=1` — ok.
-- `go test ./internal/orchestrator ./internal/sidecar -count=1` — ok (incl.
-  `TestOpenCodeGatewaysRouteWithoutExposingKeys` with the ZAI case and
-  `TestOpenCodeZAIMeteredKeyDoesNotRouteCodingPlan`,
-  `TestZAICodingPlanProxy`).
-- `go test ./internal/api -count=1` — ok (incl. the extended
-  provider-login/agent-update tables).
-- `go vet` on all touched packages — clean.
-- Targeted vitest: add-credential-wizard, provider-logins-sidebar,
-  credentials page-readiness, agent-model-settings — 89 passed.
+- `go test ./... -count=1 -timeout 40m` — **exit 0, 146 packages `ok`, zero
+  `FAIL` lines**, verified with `set -o pipefail` and `${PIPESTATUS[0]}`
+  (an unpiped echo of `$?` after a `| head` would report `head`'s status,
+  not the suite's — earlier summaries in the PR thread were corrected to
+  this form).
+- `go vet ./...` — clean. `scripts/agents-invariants` — 4/4 hold.
+- `go test ./internal/orchestrator ./internal/sidecar` — ok, including the
+  GLM-catalog model set (`glm-5.3`, `glm-5.3-flash`, `glm-5.2`) walked by
+  `TestOpenCodeGatewaysRouteWithoutExposingKeys` for `ZAI_CODING_PLAN` plus
+  one bare cross-vendor name pinning the explicit-payer guard;
+  `TestOpenCodeZAIMeteredKeyDoesNotRouteCodingPlan`;
+  `TestZAICodingPlanProxyChatCompletions` (JSON and SSE chat-completions
+  bodies passed through verbatim, usage observed on the `zai-coding-plan`
+  ledger; the Responses API is deliberately not exercised — the coding
+  endpoint is openai-compatible chat completions and nothing claims more);
+  `TestZAICodingPlanProxyRejectsOtherProductKey` (503, nothing forwarded).
+- `go test ./internal/api -count=1` — ok, including the extended
+  provider-login/agent-update tables (encrypted storage, slot
+  `ZAI_CODING_PLAN_API_KEY`, plan label, custom model IDs).
+- `pnpm test` — 772 files, 9219 tests passed. `pnpm lint` — 0 errors
+  (30 pre-existing warnings). `pnpm build` — static export ok.
 
-Full-suite, lint and build results are recorded in the PR after CI; the
-authoritative record is the checks on the pushed commit.
+The authoritative record remains the checks on the pushed commit; CI for the
+final head is linked in the PR.
 
 ## Not done here (explicitly)
 
