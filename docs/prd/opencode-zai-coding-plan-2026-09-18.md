@@ -85,12 +85,65 @@ local log for the full suite: `/tmp/opencode/zai-coding-plan` worktree,
 The authoritative record remains the checks on the pushed commit; CI for the
 final head is linked in the PR.
 
+## dev3 deployment findings (2026-09-18)
+
+An attempt to deploy this build through the standard unsigned launcher
+**failed and was rolled back within ~2 minutes**; the cause is a live
+conflict on instance 3, not a defect in this slice:
+
+- `crewship-ws@3` runs prebuilt binaries from
+  `/srv/crewship/dev3-pages-release/start-unsigned.sh` (drop-in
+  `zz-unsigned.conf`), against `/srv/crewship/crewship_3/crewship.db`.
+- That database is at migration **v20260916140000** — the incoming-webhooks
+  work (#2558, branches `dev3/webhook-receiver` / `feat/webhook-unsigned-opt-in`)
+  deployed on Sep 17 and migrated the shared DB. `origin/main` (a99a82122)
+- This branch's base (fc2ebb841, via #2619) only knows migrations to
+  v20260916090151, so the binary refused to start (forward-only guard —
+  correct behaviour). Rollback: `.revert-907c57e-20260918` binary copies in
+  the release dir, `systemctl reload`, service verified active; the staged
+  sidecar under `/tmp/crewship-3-data/.runtime` was also restored to the
+  live binary's copy after the aborted start had overwritten it.
+- Consequence: **no PR #2619-based build can run on dev3's current DB** until
+  the webhook migration reaches main and the branch is rebased (or the
+  webhook session hands the instance over). The prior handoff's acceptance
+  plan ("deploy #2619 on dev3") silently assumed the Sep-16 DB state.
+
+### Acceptance side-instance (no impact on the live service)
+
+- `https://crewship-dev3.unifylab.cz:8443` (Caddy block appended to
+  `/etc/caddy/Caddyfile`, backup `Caddyfile.bak-zai-acceptance-20260918`;
+  note: `caddy reload` is broken on this host — admin API disabled — so
+  config changes require `systemctl restart caddy`, and the new block
+  deliberately has no custom access log because `/var/log/caddy` is not
+  writable for new files by the caddy user).
+- Runs build gf67ed83a1 (`crewship.zai` + `crewship-sidecar.zai` in the
+  release dir) on port 8093, socket `/tmp/crewship-zai.sock`, isolated
+  `CREWSHIP_DATA_DIR=/tmp/opencode/zai-data`, against
+  `/tmp/opencode/zai-acceptance.db` — a copy of the pre-migrate snapshot
+  `crewship.db.pre-migrate-v20260916090151-to-v20260916140000-*.bak`
+  (schema exactly at this build's head version; dev3 data as of Sep 17
+  08:43). Launcher: `/tmp/opencode/zai-run.sh`; log:
+  `/tmp/opencode/zai-instance.log`. One pre-existing credential in the
+  snapshot copy fails to decrypt under the current key — harmless for
+  acceptance; new credentials are written with the current key.
+- The live `crewship-ws@3` (webhook build) was untouched and verified
+  serving before and after.
+
+## Live acceptance checklist (owed — needs the user's key via UI)
+
+On `https://crewship-dev3.unifylab.cz:8443`: add provider **Z.AI Coding
+Plan** (key entered by the user in the UI — never via chat), then: streamed
+completion with `zai-coding-plan/glm-5.3`; a tool-calling run; custom model
+ID; invalid key → actionable error without secret leakage; second
+same-product account → explicit selection; grant revocation → next run fails
+closed; concurrent run on the live metered product if available; mobile
+viewport pass. Record observed results, deployed commit (gf67ed83a1), CLI
+version and nonsecret run IDs back into this document and the PR.
+
 ## Not done here (explicitly)
 
-- Live acceptance with the real subscription key on dev3 — NOT PERFORMED.
-  Keys must be entered through the UI by the user; no key was requested,
-  stored or committed. Live checks owed: streamed completion, tool call,
-  invalid-key error text, quota-denied error, both desktop and phone.
+- Live acceptance with the real subscription key — NOT PERFORMED (see the
+  checklist above; the side-instance is ready and waiting on the user).
 - Zhipu/BigModel regional variants (`zhipuai`, `zhipuai-coding-plan`) —
   separate products, out of scope until an account exists.
 - Z.AI vision/search/reader MCP services — a separate tools decision.
