@@ -346,6 +346,7 @@ export function providerLoginPresentation(provider: string, mode: ProviderLoginM
       GROQ: { placeholder: "Paste the Groq API key", slot: "GROQ_API_KEY" },
       OPENCODE: { placeholder: "Paste the OpenCode Zen API key", slot: "OPENCODE_API_KEY" },
       OPENCODE_GO: { placeholder: "Paste the OpenCode Go API key", slot: "OPENCODE_GO_API_KEY" },
+      ZAI_CODING_PLAN: { placeholder: "Paste the GLM Coding Plan API key", slot: "ZAI_CODING_PLAN_API_KEY" },
       OPENROUTER: { placeholder: "Paste the OpenRouter API key", slot: "OPENROUTER_API_KEY" },
       DEEPSEEK: { placeholder: "Paste the DeepSeek API key", slot: "DEEPSEEK_API_KEY" },
       MOONSHOT: { placeholder: "Paste the Moonshot API key", slot: "MOONSHOT_API_KEY" },

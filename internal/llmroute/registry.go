@@ -488,6 +488,18 @@ func init() {
 			KeyEnvVars: []string{gateway.env},
 		})
 	}
+	// The Z.AI GLM Coding Plan subscription. Same vendor as the metered ZAI
+	// route would have, but a different product with its own endpoint
+	// (…/api/coding/paas/v4) and its own account limits — never a fallback
+	// payer for metered traffic or the reverse. The openai-compatible SDK
+	// sends one Authorization header; that is the only slot to replace.
+	register(Spec{
+		ID: "ZAI_CODING_PLAN", DisplayName: "Z.AI Coding Plan", LedgerProvider: "zai-coding-plan",
+		BodyCodec: "openai", PathPrefix: "/llm/zai-coding-plan", StripPrefix: true,
+		UpstreamHost: "api.z.ai", UpstreamBasePath: "/api/coding/paas/v4", RequireCredential: true,
+		AuthRules:  []AuthRule{{Slots: []AuthSlot{{Placement: PlaceHeader, Name: "Authorization", Prefix: "Bearer "}}}},
+		KeyEnvVars: []string{"ZAI_CODING_PLAN_API_KEY"},
+	})
 	register(Spec{
 		ID:          "OPENAI_COMPAT",
 		DisplayName: "OpenAI-compatible endpoint",

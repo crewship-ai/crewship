@@ -1,5 +1,6 @@
 import { Terminal } from "lucide-react"
 import type { SVGProps } from "react"
+import { ZAIIcon } from "@/lib/credential-providers/grok-groq-icons"
 
 type IconProps = SVGProps<SVGSVGElement>
 
@@ -117,6 +118,7 @@ export const CustomCLIIcon = Terminal
 export const PROVIDER_ICONS: Record<string, React.ComponentType<IconProps>> = {
   OPENCODE: OpenCodeIcon,
   OPENCODE_GO: OpenCodeIcon,
+  ZAI_CODING_PLAN: ZAIIcon,
   ANTHROPIC: AnthropicIcon,
   OPENAI: OpenAIIcon,
   GOOGLE: GeminiIcon,

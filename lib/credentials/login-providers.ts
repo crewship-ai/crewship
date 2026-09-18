@@ -5,6 +5,7 @@ export const LOGIN_PROVIDERS = [
   { key: "GOOGLE", label: "Gemini / Google", detail: "Gemini login file or API key", subscription: true },
   { key: "OPENCODE_GO", label: "OpenCode Go", detail: "Subscription · connect with API key", subscription: false },
   { key: "OPENCODE", label: "OpenCode Zen", detail: "Pay-as-you-go API key", subscription: false },
+  { key: "ZAI_CODING_PLAN", label: "Z.AI Coding Plan", detail: "GLM subscription · connect with API key", subscription: false },
   { key: "XAI", label: "Grok / xAI", detail: "API key · via OpenCode", subscription: false },
   { key: "CURSOR", label: "Cursor", detail: "Cursor API key", subscription: false },
   { key: "FACTORY", label: "Factory Droid", detail: "Factory API key", subscription: false },

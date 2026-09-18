@@ -238,7 +238,10 @@ describe("provider login (#2428)", () => {
 
   it.each(LOGIN_PROVIDERS)("prepares $key with its own key instructions and account name", (p) => {
     renderWizard()
-    fireEvent.click(screen.getByRole("button", { name: new RegExp(`^${p.label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`) }))
+    // Label AND detail: "Z.AI" and "Z.AI Coding Plan" are sibling products, so
+    // a label-only prefix regex would hit both buttons.
+    const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+    fireEvent.click(screen.getByRole("button", { name: new RegExp(`^${esc(p.label)}\\s${esc(p.detail)}`) }))
     if (p.key === "OPENAI") fireEvent.click(screen.getByRole("button", { name: /import from codex cli/i }))
     if (p.key === "OPENAI" || p.key === "ANTHROPIC") fireEvent.click(screen.getByRole("button", { name: /^api key/i }))
     expect(screen.queryByLabelText(/^provider$/i)).not.toBeInTheDocument()
@@ -302,13 +305,14 @@ describe("provider login (#2428)", () => {
   })
 
   it.each([
-    ["OpenCode Go", "OPENCODE_GO"],
-    ["OpenCode Zen", "OPENCODE"],
-  ])("connects %s with its own API-key slot", async (label, provider) => {
+    ["OpenCode Go", "OPENCODE_GO", "https://opencode.ai/auth"],
+    ["OpenCode Zen", "OPENCODE", "https://opencode.ai/auth"],
+    ["Z.AI Coding Plan", "ZAI_CODING_PLAN", "https://z.ai/manage-apikey/apikey-download"],
+  ])("connects %s with its own API-key slot", async (label, provider, consoleHref) => {
     const { onSuccess } = renderWizard()
     fireEvent.click(screen.getByRole("button", { name: new RegExp(`^${label}`) }))
     expect(screen.queryByRole("button", { name: /Sign in with a code/i })).not.toBeInTheDocument()
-    expect(screen.getByRole("link", { name: /Get API key/ })).toHaveAttribute("href", "https://opencode.ai/auth")
+    expect(screen.getByRole("link", { name: /Get API key/ })).toHaveAttribute("href", consoleHref)
     fireEvent.change(screen.getByLabelText(/^API key$/i), { target: { value: "fixture-opencode-key" } })
     fireEvent.change(screen.getByLabelText(/^name$/i), { target: { value: label } })
     fireEvent.click(screen.getByRole("button", { name: /^continue$/i }))

@@ -32,6 +32,7 @@ describe("Agent model settings", () => {
   it.each([
     ["OpenCode Go", "OPENCODE_GO", "opencode-go/"],
     ["OpenCode Zen", "OPENCODE", "opencode/"],
+    ["Z.AI Coding Plan", "ZAI_CODING_PLAN", "zai-coding-plan/"],
   ])("selects the correct runner and billing namespace for %s", (label, provider, prefix) => {
     render(<Harness />)
     fireEvent.click(within(screen.getByRole("radiogroup", { name: "Model provider" })).getByRole("radio", { name: label }))

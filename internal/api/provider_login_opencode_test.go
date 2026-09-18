@@ -8,7 +8,7 @@ import (
 )
 
 func TestProviderLoginOpenCode(t *testing.T) {
-	for _, tc := range []struct{ provider, slot string }{{"OPENCODE", "OPENCODE_API_KEY"}, {"OPENCODE_GO", "OPENCODE_GO_API_KEY"}} {
+	for _, tc := range []struct{ provider, slot string }{{"OPENCODE", "OPENCODE_API_KEY"}, {"OPENCODE_GO", "OPENCODE_GO_API_KEY"}, {"ZAI_CODING_PLAN", "ZAI_CODING_PLAN_API_KEY"}} {
 		t.Run(tc.provider, func(t *testing.T) {
 			h, db := newCredHandler(t)
 			user := seedTestUser(t, db)
@@ -35,6 +35,9 @@ func TestProviderLoginOpenCode(t *testing.T) {
 			if tc.provider == "OPENCODE_GO" && (login.PlanLabel == nil || *login.PlanLabel != "Go subscription") {
 				t.Fatal("Go must not be labelled metered")
 			}
+			if tc.provider == "ZAI_CODING_PLAN" && (login.PlanLabel == nil || *login.PlanLabel != "GLM Coding Plan") {
+				t.Fatal("Coding Plan must not be labelled metered")
+			}
 
 			models := NewModelsHandler(db, nil, "")
 			if _, authoritative := models.providerModelIDs(t.Context(), ws, tc.provider); authoritative {
@@ -54,9 +57,11 @@ func TestAgentUpdateOpenCodeGateway(t *testing.T) {
 	for _, tc := range []struct{ provider, model string }{
 		{"OPENCODE", "opencode/claude-sonnet-5"},
 		{"OPENCODE_GO", "opencode-go/kimi-k3"},
+		{"ZAI_CODING_PLAN", "zai-coding-plan/glm-5.3"},
 		// Custom native IDs remain accepted; the server's suggestions are not
 		// an authoritative inventory of the upstream account.
 		{"OPENCODE_GO", "opencode-go/custom-model"},
+		{"ZAI_CODING_PLAN", "zai-coding-plan/custom-model"},
 	} {
 		t.Run(tc.model, func(t *testing.T) {
 			h, user, ws := covAUHandler(t)

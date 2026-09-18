@@ -289,6 +289,7 @@ export const BRAND_REGISTRY: BrandEntry[] = [
   { key: "DEEPSEEK", label: "DeepSeek", hex: "#5786FE", Icon: SiDeepseek as IconComponent, category: "AI", keywords: ["deepseek"] },
   { key: "OPENCODE_GO", label: "OpenCode Go", hex: "#FFFFFF", Icon: OpenCodeIcon, category: "AI", keywords: ["opencode go", "opencode-go", "opencode_go"], cli: true },
   { key: "OPENCODE", label: "OpenCode Zen", hex: "#FFFFFF", Icon: OpenCodeIcon, category: "AI", keywords: ["opencode"], cli: true },
+  { key: "ZAI_CODING_PLAN", label: "Z.AI Coding Plan", hex: "#3E4AC8", Icon: ZAIIcon, category: "AI", keywords: ["z.ai coding plan", "glm coding plan", "zai-coding-plan", "zai_coding_plan"], cli: true },
   { key: "OPENROUTER", label: "OpenRouter", hex: "#94A3B8", Icon: SiOpenrouter as IconComponent, category: "AI", keywords: ["openrouter"], prefixes: ["sk-or-"] },
   // No "grok" keyword: "ngrok" contains it, and AI is walked before
   // DevOps, so every ngrok token would arrive wearing an xAI badge.

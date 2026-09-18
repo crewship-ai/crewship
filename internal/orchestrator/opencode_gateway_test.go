@@ -10,6 +10,7 @@ func TestOpenCodeGatewaysRouteWithoutExposingKeys(t *testing.T) {
 	for _, tc := range []struct{ provider, native, slot string }{
 		{"OPENCODE", "opencode", "OPENCODE_API_KEY"},
 		{"OPENCODE_GO", "opencode-go", "OPENCODE_GO_API_KEY"},
+		{"ZAI_CODING_PLAN", "zai-coding-plan", "ZAI_CODING_PLAN_API_KEY"},
 	} {
 		t.Run(tc.provider, func(t *testing.T) {
 			for _, model := range []string{"gpt-5.6-luna", "minimax-m3", "gemini-3.1-pro"} {
@@ -58,5 +59,28 @@ func TestOpenCodeGatewaysRouteWithoutExposingKeys(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// A metered Z.AI key must never pay for Coding Plan traffic: upstream shares
+// the ZHIPU_API_KEY variable across four z.ai/zhipu products, so the products
+// are told apart by Crewship's own slot, not by the key's shape.
+func TestOpenCodeZAIMeteredKeyDoesNotRouteCodingPlan(t *testing.T) {
+	req := AgentRunRequest{CLIAdapter: "OPENCODE", LLMProvider: "ZAI_CODING_PLAN", LLMModel: "zai-coding-plan/glm-5.3", sidecarActive: true,
+		Credentials: []Credential{{ID: "metered-zai", Type: "PROVIDER_LOGIN", Provider: "ZAI", EnvVarName: "ZAI_API_KEY", PlainValue: "metered-key"}},
+	}
+	if _, ok := resolveRoutedProvider(req, true); ok {
+		t.Fatal("metered ZAI credential routed the Coding Plan product")
+	}
+	report := ModelCredentialReadiness("OPENCODE", "ZAI_CODING_PLAN", "zai-coding-plan/glm-5.3", req.Credentials)
+	if report.State == ModelCredentialReady {
+		t.Fatalf("metered ZAI reported ready for the Coding Plan: %+v", report)
+	}
+	auth, err := renderOpenCodeAuth(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(auth), "zai-coding-plan") {
+		t.Fatalf("Coding Plan auth written from a metered key: %s", auth)
 	}
 }

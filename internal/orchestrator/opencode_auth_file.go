@@ -15,6 +15,9 @@ func renderOpenCodeAuth(req AgentRunRequest) ([]byte, error) {
 		"MOONSHOT_API_KEY": "moonshotai", "ZAI_API_KEY": "zai",
 		"MINIMAX_API_KEY":  "minimax",
 		"OPENCODE_API_KEY": "opencode", "OPENCODE_GO_API_KEY": "opencode-go",
+		// Crewship's own slot: upstream calls the variable ZHIPU_API_KEY for
+		// every z.ai/zhipu product, so the native id comes from the slot name.
+		"ZAI_CODING_PLAN_API_KEY": "zai-coding-plan",
 	}
 	type apiAuth struct {
 		Type string `json:"type"`

@@ -155,7 +155,7 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 	if v, ok := body["llm_provider"]; ok {
 		s, isStr := v.(string)
 		if !isStr || s == "" {
-			replyError(w, http.StatusBadRequest, "llm_provider must be ANTHROPIC, OPENAI, GOOGLE, CURSOR, FACTORY, OLLAMA, OPENCODE, or OPENCODE_GO")
+			replyError(w, http.StatusBadRequest, "llm_provider must be ANTHROPIC, OPENAI, GOOGLE, CURSOR, FACTORY, OLLAMA, OPENCODE, OPENCODE_GO, or ZAI_CODING_PLAN")
 			return
 		}
 		if !validLLMProviders[s] {

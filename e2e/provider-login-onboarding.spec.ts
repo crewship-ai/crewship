@@ -85,7 +85,7 @@ for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 
     if (viewport.width > 640) {
       // Pin global navigation so its hover overlay cannot cover the vault rail.
       await expect(page.getByText("All providers", { exact: true })).toBeVisible()
-      await expect(page.getByLabel("0 connected accounts")).toHaveCount(14)
+      await expect(page.getByLabel("0 connected accounts")).toHaveCount(15)
       await page.getByText("Grok / xAI", { exact: true }).click()
     }
     await page.getByRole("button", { name: "Add provider", exact: true }).first().click()
@@ -98,6 +98,12 @@ for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 
       await page.screenshot({ path: `/tmp/opencode-${product.toLowerCase()}-${viewport.width}.png` })
       await page.getByRole("button", { name: "Back", exact: true }).click()
     }
+    await page.getByRole("button", { name: /^Z\.AI Coding Plan/ }).click()
+    await expect(page.getByLabel("API key", { exact: true })).toBeVisible()
+    await expect(page.getByRole("link", { name: /Get API key/ })).toHaveAttribute("href", "https://z.ai/manage-apikey/apikey-download")
+    await expect(page.getByText(/not metered Z\.AI API credit/)).toBeVisible()
+    await page.screenshot({ path: `/tmp/zai-coding-plan-${viewport.width}.png` })
+    await page.getByRole("button", { name: "Back", exact: true }).click()
     await page.getByRole("button", { name: /^ChatGPT \/ OpenAI/ }).click()
     await expect(page.getByLabel("Provider", { exact: true })).toHaveCount(0)
     await expect(page.getByTestId("device-user-code")).toHaveText("TEST-CODE")

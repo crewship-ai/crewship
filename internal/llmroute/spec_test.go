@@ -137,6 +137,11 @@ func TestSpecs_Table(t *testing.T) {
 			requireCred: true, ledger: "opencode-go", codec: "openai", keyEnvVars: []string{"OPENCODE_GO_API_KEY"},
 		},
 		{
+			id: "ZAI_CODING_PLAN", pathPrefix: "/llm/zai-coding-plan", strip: true,
+			upstreamHost: "api.z.ai", basePath: "/api/coding/paas/v4",
+			requireCred: true, ledger: "zai-coding-plan", codec: "openai", keyEnvVars: []string{"ZAI_CODING_PLAN_API_KEY"},
+		},
+		{
 			id: "OPENAI_COMPAT", pathPrefix: "/llm/openai-compat", strip: true,
 			hosts: nil, fromCred: true,
 			requireCred: true, ledger: "openai-compat", codec: "openai",

@@ -11,7 +11,7 @@ export type ToolProfile = "MINIMAL" | "CODING" | "FULL"
 export type AgentRole = "AGENT" | "LEAD"
 // CURSOR + FACTORY are first-class providers for credential routing — see
 // the comment on createAgentSchema.llm_provider in lib/validations.ts.
-export type LLMProvider = "OPENAI" | "ANTHROPIC" | "GOOGLE" | "CURSOR" | "FACTORY" | "OLLAMA" | "OPENCODE" | "OPENCODE_GO"
+export type LLMProvider = "OPENAI" | "ANTHROPIC" | "GOOGLE" | "CURSOR" | "FACTORY" | "OLLAMA" | "OPENCODE" | "OPENCODE_GO" | "ZAI_CODING_PLAN"
 export type CLIAdapter = "CLAUDE_CODE" | "OPENCODE" | "CODEX_CLI" | "GEMINI_CLI" | "CURSOR_CLI" | "FACTORY_DROID"
 export type PersonaCategory = "engineering" | "research" | "quality" | "writing" | "devops" | "custom"
 

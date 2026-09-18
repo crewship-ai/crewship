@@ -1142,6 +1142,9 @@ func resolveRoutedProvider(req AgentRunRequest, viaSidecar bool) (routedProvider
 	if s.ID == "OPENCODE" {
 		prefix = "opencode"
 	}
+	if s.ID == "ZAI_CODING_PLAN" {
+		prefix = "zai-coding-plan"
+	}
 	rp := routedProvider{Spec: s, ProviderID: prefix, ModelID: model, Label: s.DisplayName}
 	if s.UpstreamFromCredential {
 		rp.UpstreamHost = cred.BaseURL
@@ -1263,7 +1266,7 @@ func localModelConfigEnv(req AgentRunRequest, viaSidecar bool) (string, bool) {
 		return "", false
 	}
 
-	if isRouted && (routed.Spec.ID == "OPENCODE" || routed.Spec.ID == "OPENCODE_GO") {
+	if isRouted && (routed.Spec.ID == "OPENCODE" || routed.Spec.ID == "OPENCODE_GO" || routed.Spec.ID == "ZAI_CODING_PLAN") {
 		// An options-only override preserves OpenCode's per-model SDK, model
 		// metadata and native session headers. Forcing openai-compatible here
 		// breaks Anthropic messages, Google models and OpenAI Responses models.

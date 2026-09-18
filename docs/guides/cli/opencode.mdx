@@ -142,3 +142,31 @@ other models your OpenCode version supports. Transport verified with OpenCode
 1.18.31; update older crew installations if the provider or model is unknown.
 See the official [Go](https://opencode.ai/docs/go/) and
 [Zen](https://opencode.ai/docs/zen/) documentation.
+
+## Z.AI GLM Coding Plan
+
+In **Credentials → Add provider**, choose **Z.AI Coding Plan**, subscribe to
+the [GLM Coding Plan](https://docs.z.ai/devpack/tool/opencode) at Z.AI, create
+an API key and paste it below. Name the account and assign it to the crew or
+agent that will use it. The runner is **OpenCode** and models use the
+`zai-coding-plan/` prefix (for example `zai-coding-plan/glm-5.3`).
+
+This is a **subscription product, not metered Z.AI API credit**: a different
+endpoint (`api.z.ai/api/coding/paas/v4`), a different key and its own usage
+limits. The two are separate accounts in Crewship even if the same vendor
+issued both keys, and one is never used as a fallback payer for the other. A
+metered Z.AI key stored under **Z.AI** does not authenticate Coding Plan
+models — the run fails closed instead of switching products.
+
+The selected key stays in the sidecar; OpenCode receives dummy auth and keeps
+its native openai-compatible protocol. Crewship's credential slot is
+`ZAI_CODING_PLAN_API_KEY`, mapped to `zai-coding-plan` in OpenCode's auth
+file; upstream itself reads `ZHIPU_API_KEY` for every z.ai/zhipu product, so
+that shared name is not used as an account identity here. Crewship does not
+infer remaining plan quota or overage pricing from token counts; the Z.AI
+console is authoritative for limits and billing.
+
+Model suggestions are the catalog entries of the deployed OpenCode version
+(verified against 1.18.31); use a custom native model ID for others your plan
+supports. Zhipu/BigModel regional variants are separate products and are not
+configured by this connection.

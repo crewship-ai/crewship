@@ -204,7 +204,7 @@ export function loginSubtitle(c: LoginCredential): string {
   if (login?.delivery?.target) {
     parts.push(login.delivery.kind === "file" ? `file ${login.delivery.target}` : login.delivery.target)
   }
-  if (login?.mode === "api_key") parts.push(login.provider === "OPENCODE_GO" ? "Go subscription" : "metered")
+  if (login?.mode === "api_key") parts.push(login.provider === "OPENCODE_GO" ? "Go subscription" : login.provider === "ZAI_CODING_PLAN" ? "GLM Coding Plan" : "metered")
   return parts.join(" · ")
 }
 
@@ -212,6 +212,7 @@ export function loginSubtitle(c: LoginCredential): string {
 export function planLabel(login: ProviderLogin | null | undefined): string {
   if (!login) return "—"
   if (login.provider === "OPENCODE_GO") return "Go subscription"
+  if (login.provider === "ZAI_CODING_PLAN") return "GLM Coding Plan"
   if (login.plan_label) return login.plan_label
   if (login.plan) return login.plan
   return login.mode === "api_key" ? "pay-as-you-go" : "—"

@@ -232,14 +232,15 @@ var validCLIAdapters = map[string]bool{
 // comment) — their CLI adapters auth via CURSOR_API_KEY / FACTORY_API_KEY
 // rather than the underlying model provider's key.
 var validLLMProviders = map[string]bool{
-	"ANTHROPIC":   true,
-	"OPENAI":      true,
-	"GOOGLE":      true,
-	"CURSOR":      true,
-	"FACTORY":     true,
-	"OLLAMA":      true,
-	"OPENCODE":    true,
-	"OPENCODE_GO": true,
+	"ANTHROPIC":       true,
+	"OPENAI":          true,
+	"GOOGLE":          true,
+	"CURSOR":          true,
+	"FACTORY":         true,
+	"OLLAMA":          true,
+	"OPENCODE":        true,
+	"OPENCODE_GO":     true,
+	"ZAI_CODING_PLAN": true,
 }
 
 // validToolProfiles mirrors lib/validations.ts tool_profile enum.

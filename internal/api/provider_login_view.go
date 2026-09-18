@@ -216,6 +216,10 @@ func buildLoginView(src loginSource, parts map[string]string, state *refreshStat
 		label := "Go subscription"
 		v.PlanLabel = &label
 	}
+	if provider == "ZAI_CODING_PLAN" {
+		label := "GLM Coding Plan"
+		v.PlanLabel = &label
+	}
 	if expires != "" {
 		e := expires
 		v.ExpiresAt = &e

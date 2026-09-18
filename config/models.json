@@ -54,6 +54,33 @@
         }
       ]
     },
+    "zai_coding_plan": {
+      "label": "Z.AI Coding Plan",
+      "default": "zai-coding-plan/glm-5.3",
+      "$comment": "GLM Coding Plan subscription endpoint (api.z.ai/api/coding/paas/v4) — not metered Z.AI credit and not Zhipu/BigModel. Models verified against the OpenCode 1.18.31 catalog; account entitlement is the plan's, not the catalog's.",
+      "models": [
+        {
+          "id": "zai-coding-plan/glm-5.3",
+          "label": "GLM 5.3 (Coding Plan)",
+          "category": "frontier"
+        },
+        {
+          "id": "zai-coding-plan/glm-5.3-flash",
+          "label": "GLM 5.3 Flash (Coding Plan)",
+          "category": "frontier"
+        },
+        {
+          "id": "zai-coding-plan/glm-5.3-highspeed",
+          "label": "GLM 5.3 Highspeed (Coding Plan)",
+          "category": "frontier"
+        },
+        {
+          "id": "zai-coding-plan/glm-5.2",
+          "label": "GLM 5.2 (Coding Plan)",
+          "category": "frontier"
+        }
+      ]
+    },
     "anthropic": {
       "label": "Anthropic",
       "default": "claude-sonnet-5",
@@ -224,6 +251,10 @@
         {"id": "opencode-go/glm-5.3-flash", "label": "GLM 5.3 Flash (OpenCode Go)", "category": "frontier"},
         {"id": "opencode-go/minimax-m3", "label": "MiniMax M3 (OpenCode Go)", "category": "frontier"},
         {"id": "opencode-go/gpt-5.6-luna", "label": "GPT-5.6 Luna (OpenCode Go)", "category": "frontier"},
+        {"id": "zai-coding-plan/glm-5.3", "label": "GLM 5.3 (Z.AI Coding Plan)", "category": "frontier"},
+        {"id": "zai-coding-plan/glm-5.3-flash", "label": "GLM 5.3 Flash (Z.AI Coding Plan)", "category": "frontier"},
+        {"id": "zai-coding-plan/glm-5.3-highspeed", "label": "GLM 5.3 Highspeed (Z.AI Coding Plan)", "category": "frontier"},
+        {"id": "zai-coding-plan/glm-5.2", "label": "GLM 5.2 (Z.AI Coding Plan)", "category": "frontier"},
         { "id": "anthropic/claude-fable-5", "label": "Anthropic / Claude Fable 5", "category": "frontier" },
         { "id": "anthropic/claude-opus-4-8", "label": "Anthropic / Claude Opus 4.8", "category": "frontier" },
         { "id": "anthropic/claude-sonnet-5", "label": "Anthropic / Claude Sonnet 5", "category": "frontier" },

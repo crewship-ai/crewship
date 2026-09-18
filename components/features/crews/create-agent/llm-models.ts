@@ -54,6 +54,7 @@ export const MODELS_BY_PROVIDER: Record<LLMProvider, readonly string[]> = {
   // OpenCode is ollama/<tag>.
   OPENCODE: providerModels("opencode").map((m) => m.id),
   OPENCODE_GO: providerModels("opencode_go").map((m) => m.id),
+  ZAI_CODING_PLAN: providerModels("zai_coding_plan").map((m) => m.id),
   OLLAMA: providerModels("ollama").map((m) => m.id),
 }
 
