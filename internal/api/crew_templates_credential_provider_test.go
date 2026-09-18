@@ -280,25 +280,26 @@ func TestAutoAssignCredentialsLinksProviderLoginUnderItsSlot(t *testing.T) {
 		{"ZAI_CODING_PLAN", "", "ZAI_CODING_PLAN_API_KEY"},
 	} {
 		t.Run(tc.provider+"/"+tc.mode, func(t *testing.T) {
+			ctx := t.Context()
 			db := setupTestDB(t)
 			userID := seedTestUser(t, db)
 			wsID := seedTestWorkspace(t, db, userID)
 			h := NewCrewTemplateHandler(db, newTestLogger())
 
-			if _, err := db.Exec(`INSERT INTO crew_templates
+			if _, err := db.ExecContext(ctx, `INSERT INTO crew_templates
 				(id, name, slug, category, agents_json, is_builtin, workspace_id)
 				VALUES ('ctp-2', 'Login Tmpl', 'ctp-login', 'CUSTOM', ?, 0, ?)`,
 				ctpAgentsJSON(t, tc.provider, "solo"), wsID); err != nil {
 				t.Fatalf("seed template: %v", err)
 			}
-			if _, err := db.Exec(`INSERT INTO credentials
+			if _, err := db.ExecContext(ctx, `INSERT INTO credentials
 				(id, workspace_id, name, encrypted_value, type, provider, created_by)
 				VALUES ('ctp-login-cred', ?, 'My plan key', 'enc', 'PROVIDER_LOGIN', ?, ?)`,
 				wsID, tc.provider, userID); err != nil {
 				t.Fatalf("seed login: %v", err)
 			}
 			if tc.mode != "" {
-				if _, err := db.Exec(`INSERT INTO credential_fields (credential_id, key, value, is_secret)
+				if _, err := db.ExecContext(ctx, `INSERT INTO credential_fields (credential_id, key, value, is_secret)
 					VALUES ('ctp-login-cred', 'mode', ?, 0)`, tc.mode); err != nil {
 					t.Fatalf("seed mode: %v", err)
 				}
@@ -319,7 +320,7 @@ func TestAutoAssignCredentialsLinksProviderLoginUnderItsSlot(t *testing.T) {
 			}
 
 			var slot string
-			if err := db.QueryRow(`
+			if err := db.QueryRowContext(ctx, `
 				SELECT ac.env_var_name FROM agent_credentials ac
 				JOIN agents a ON a.id = ac.agent_id
 				WHERE a.crew_id = ? AND ac.credential_id = 'ctp-login-cred'`, dep.CrewID).Scan(&slot); err != nil {
