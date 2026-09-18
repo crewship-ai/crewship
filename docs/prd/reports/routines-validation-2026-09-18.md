@@ -143,18 +143,43 @@ Interní browser automatizace (14.–16. 9. i dnes) jej nenahrazuje.
 
 ## Známá omezení a otevřené položky
 
-- #2620 (kaskáda #2573): před merge — čeká CI a skutečné CodeRabbit review
-  (první pokus byl rate-limited; sloučeno až po review).
+- #2620 (kaskáda #2573): před merge — čeká výhradně na rate-limited
+  CodeRabbit re-review (viz Zbývající kroky).
 - #2569 GitHub Review Pilot: záměrně neimplementován — draft #2572 byl
   odložen vlastníkem s třemi nevyřešenými připomínkami (reviewer-profile
   omezení, souběžná publikace, evidence historických statusů).
 - #2609/#2610: flaky macOS watcher / Node collector v CI — nezávislé na
   Routines, sledované samostatně.
 - #2612 backup export na zastaveném crew kontejneru (ops).
+- #2619/#2622 (OpenCode Go/Zen, Z.AI GLM): cizí feature PR vlastněné
+  crewship_3 — nejsou součástí Routines PRD ani této přejímky.
 - Editor vazeb podřízené rutiny nenabízí pole dle schématu dítěte — odloženo
   v §11; runtime validace vstupů existuje.
 - DEV1 hlásí `dirty=true` kvůli 17 chraněným WIP souborům (viz výše); čistý
   build pro releasovou evidenci vyžaduje build bez WIP (jako 15./16. 9.).
+
+## Zbývající kroky (přesný stav na konci relace 18. 9.)
+
+PR #2620 (head `d1d4fe1e0`): produkční kód i testy dokončeny, **CI plně zelené
+na finálním headu** (34 kontrol pass, 0 fail, Go + tři Race sady, Frontend
+Test, CodeQL, gitleaks, surface, changelog guard), review nález z `30fb9c18`
+vypořádán v `d1d4fe1e0` (4řádková změna přesně v dotčeném souboru) s odpovědí
+ve threadu. Merge blokuje výhradně rate-limit CodeRabbit (CHANGES_REQUESTED
+stojí na předchozím commitu; 5 retriggerů za ~2,5 h bez výsledku, sloty
+spotřebovávají souběžné PR #2619/#2622). Fallback dle CONTRIBUTING proběhl:
+manuální review celého diffu zdokumentovaná v PR; admin merge ani dismissal
+review se nepoužily.
+
+Po mergi (kdokoli, jedním příkazem, až review proběhne):
+
+1. `make build` + `sudo systemctl reload crewship-ws@1` na DEV1 (jen DEV1).
+2. Živě: vytvořit cron schedule na vlastní rutině → smazat rutinu přes
+   DELETE → ověřit 204, schedules list prázdný (kaskáda), pending seznam
+   čistý; GET by id řádek vrátí (audit).
+3. Smazat vlastní testovací rutiny `validation-inputs-mtw9f2k3`,
+   `validation-fail-mtw9f2k3` (auditní historie běhů zůstává).
+4. Znovu ověřit 17 WIP hashů; `dirty=true` je očekávaný (WIP soubory).
+
 
 ## Ochrana práce
 
