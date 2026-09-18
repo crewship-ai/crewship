@@ -300,6 +300,107 @@ func TestScheduleStore_List_OrdersByNextRun(t *testing.T) {
 	}
 }
 
+// TestStore_SoftDelete_CascadesToSchedules reproduces #2573: deleting a
+// routine used to leave its schedules enabled and orphaned — still due,
+// still listed (with an empty routine column), firing into the
+// load-failure/alert path every tick until the circuit breaker tripped.
+// The delete must disable and soft-delete the schedules in the SAME
+// transaction, and must not touch schedules targeting other routines.
+func TestStore_SoftDelete_CascadesToSchedules(t *testing.T) {
+	db := openScheduleTestDB(t)
+	defer db.Close()
+	seedPipeline(t, db, "pipe_victim", "victim-routine")
+	seedPipeline(t, db, "pipe_keep", "survivor-routine")
+	schedStore := NewScheduleStore(db)
+	pipeStore := NewStore(db)
+	ctx := context.Background()
+
+	victim, err := schedStore.Save(ctx, SaveScheduleInput{
+		WorkspaceID: "ws_test", Name: "victim sched",
+		TargetPipelineID: "pipe_victim", CronExpr: "* * * * *", Enabled: true,
+	})
+	if err != nil {
+		t.Fatalf("save victim schedule: %v", err)
+	}
+	keeper, err := schedStore.Save(ctx, SaveScheduleInput{
+		WorkspaceID: "ws_test", Name: "survivor sched",
+		TargetPipelineID: "pipe_keep", CronExpr: "* * * * *", Enabled: true,
+	})
+	if err != nil {
+		t.Fatalf("save survivor schedule: %v", err)
+	}
+
+	if err := pipeStore.SoftDelete(ctx, "pipe_victim"); err != nil {
+		t.Fatalf("soft delete pipeline: %v", err)
+	}
+
+	if _, err := schedStore.GetByID(ctx, victim.ID); !errors.Is(err, ErrNotFound) {
+		t.Errorf("victim schedule should be soft-deleted with its routine, got %v", err)
+	}
+	got, err := schedStore.GetByID(ctx, keeper.ID)
+	if err != nil {
+		t.Fatalf("survivor schedule must be untouched: %v", err)
+	}
+	if !got.Enabled {
+		t.Error("survivor schedule must stay enabled")
+	}
+
+	listed, err := schedStore.List(ctx, "ws_test")
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(listed) != 1 || listed[0].ID != keeper.ID {
+		t.Errorf("list must show only the survivor schedule, got %d rows", len(listed))
+	}
+}
+
+// TestScheduleStore_List_HidesLegacyOrphanedSchedules covers rows
+// orphaned BEFORE the #2573 cascade existed (deployed databases): a
+// schedule whose target routine was soft-deleted by the old code stays
+// enabled in the table, but the list must not present it as a live plan.
+func TestScheduleStore_List_HidesLegacyOrphanedSchedules(t *testing.T) {
+	db := openScheduleTestDB(t)
+	defer db.Close()
+	seedPipeline(t, db, "pipe_orphan", "orphaned-routine")
+	seedPipeline(t, db, "pipe_ok", "live-routine")
+	store := NewScheduleStore(db)
+	ctx := context.Background()
+
+	orphan, err := store.Save(ctx, SaveScheduleInput{
+		WorkspaceID: "ws_test", Name: "orphan sched",
+		TargetPipelineID: "pipe_orphan", CronExpr: "0 8 * * *", Enabled: true,
+	})
+	if err != nil {
+		t.Fatalf("save orphan schedule: %v", err)
+	}
+	live, err := store.Save(ctx, SaveScheduleInput{
+		WorkspaceID: "ws_test", Name: "live sched",
+		TargetPipelineID: "pipe_ok", CronExpr: "0 9 * * *", Enabled: true,
+	})
+	if err != nil {
+		t.Fatalf("save live schedule: %v", err)
+	}
+	// Pre-fix deletion shape: pipeline row tombstoned, schedule untouched.
+	if _, err := db.ExecContext(ctx,
+		`UPDATE pipelines SET deleted_at = ? WHERE id = 'pipe_orphan'`,
+		time.Now().UTC().Format(time.RFC3339)); err != nil {
+		t.Fatalf("tombstone pipeline: %v", err)
+	}
+
+	listed, err := store.List(ctx, "ws_test")
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(listed) != 1 || listed[0].ID != live.ID {
+		t.Fatalf("list must hide the orphan, got %d rows", len(listed))
+	}
+	// Hidden from the list, not silently erased: the row itself remains
+	// (audit trail) and is still reachable by id.
+	if _, err := store.GetByID(ctx, orphan.ID); err != nil {
+		t.Errorf("orphan row must remain readable by id, got %v", err)
+	}
+}
+
 func TestScheduleStore_SoftDelete(t *testing.T) {
 	db := openScheduleTestDB(t)
 	defer db.Close()
