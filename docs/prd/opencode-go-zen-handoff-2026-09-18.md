@@ -61,3 +61,7 @@ Important test limits: dummy-key CLI probes intentionally returned local HTTP 40
 ## Deliberate exclusions, not unfinished promised features
 
 No upstream workspace provisioning/member synchronization, subscription purchase, live balance/quota API, automatic quota failover, or Go token-derived rate card. No gateway-specific support for Claude Code/Codex/Gemini runners or Keeper's own LLM. Models are curated plus custom IDs, not live account entitlement discovery. If product acceptance requires any of these, define a separate explicit scope before implementing it.
+
+## Newly requested expansion
+
+The user subsequently requested broad OpenCode provider coverage, especially a newly purchased Z.AI product. Read [the supplemental provider analysis](opencode-provider-expansion-2026-09-18.md) and its complete catalog inventory. This is follow-up scope, not part of the completed Go/Zen implementation. The user confirmed GLM Coding Plan subscription; prioritize integrating `zai-coding-plan`; preserve Codex and Claude Code.
