@@ -1,6 +1,9 @@
 # Routines — validace a stav uzavření, 18 September 2026
 
-**Verdikt: technicky hotovo a nasazeno; lidská přejímka §11 zůstává NOT VERIFIED.**
+**Verdikt: integrace #2617 je technicky hotová a nasazená na DEV1 (binárka
+`22ed292cd`). Oprava #2573 (PR #2620) v tomto verdiktu nasazená NENÍ — její
+deploy a živé ověření kaskády teprve následují po mergi. Lidská přejímka §11
+zůstává NOT VERIFIED.**
 Tato zpráva ověřuje merge stav PR #2617/#2619, aktuální main, DEV1 nasazení
 a R1–R10 proti čerstvým průchodům. Nenahrazuje uživatelskou přejímku.
 
