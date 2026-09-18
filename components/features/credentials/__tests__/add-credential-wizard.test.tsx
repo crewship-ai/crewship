@@ -307,7 +307,7 @@ describe("provider login (#2428)", () => {
   it.each([
     ["OpenCode Go", "OPENCODE_GO", "https://opencode.ai/auth"],
     ["OpenCode Zen", "OPENCODE", "https://opencode.ai/auth"],
-    ["Z.AI Coding Plan", "ZAI_CODING_PLAN", "https://z.ai/manage-apikey/apikey-download"],
+    ["Z.AI Coding Plan", "ZAI_CODING_PLAN", "https://z.ai/manage-apikey/apikey-list"],
   ])("connects %s with its own API-key slot", async (label, provider, consoleHref) => {
     const { onSuccess } = renderWizard()
     fireEvent.click(screen.getByRole("button", { name: new RegExp(`^${label}`) }))

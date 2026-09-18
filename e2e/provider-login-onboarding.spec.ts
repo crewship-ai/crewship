@@ -100,7 +100,7 @@ for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 
     }
     await page.getByRole("button", { name: /^Z\.AI Coding Plan/ }).click()
     await expect(page.getByLabel("API key", { exact: true })).toBeVisible()
-    await expect(page.getByRole("link", { name: /Get API key/ })).toHaveAttribute("href", "https://z.ai/manage-apikey/apikey-download")
+    await expect(page.getByRole("link", { name: /Get API key/ })).toHaveAttribute("href", "https://z.ai/manage-apikey/apikey-list")
     await expect(page.getByText(/not metered Z\.AI API credit/)).toBeVisible()
     await page.screenshot({ path: `/tmp/zai-coding-plan-${viewport.width}.png` })
     await page.getByRole("button", { name: "Back", exact: true }).click()
