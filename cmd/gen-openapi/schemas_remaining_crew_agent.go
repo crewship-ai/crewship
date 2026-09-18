@@ -77,7 +77,8 @@ func remainingCrewAgentSchemaCatalogV1() (map[string]DomainSchema, map[string]an
 	add("GET", "/api/v1/agents/{agentId}/persona/history", "RemainingAgentPersonaHistoryV1", array(anyObject()))
 	add("GET", "/api/v1/agents/{agentId}/peers", "RemainingAgentPeersV1", array(anyObject()))
 	add("GET", "/api/v1/agents/{agentId}/peers/{userId}", "RemainingAgentPeerV1", object(map[string]any{"agent_id": str(), "user_id": str(), "consent": boolean(), "facts": array(anyObject()), "created_at": str(), "updated_at": str()}))
-	add("GET", "/api/v1/agents/{agentId}/runs", "RemainingAgentRunsV1", array(anyObject()))
+	// AgentHandler.ListRuns writes []runResponse — the same row as GET /runs.
+	add("GET", "/api/v1/agents/{agentId}/runs", "RemainingAgentRunsV1", array(ref("Run")))
 	add("GET", "/api/v1/agents/{agentId}/skills", "RemainingAgentSkillsV1", array(anyObject()))
 	add("GET", "/api/v1/agents/{agentId}/persona", "RemainingAgentPersonaV1", object(map[string]any{"agent_id": str(), "content": str(), "version": integer(), "created_at": str(), "updated_at": str()}))
 

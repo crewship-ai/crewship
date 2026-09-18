@@ -165,6 +165,12 @@ export type RealtimeEventType =
   // out of it (#2527). Carries `{slug}` and no folder body: the client re-reads
   // the folder list and the page list through the authorised path.
   | "page.folder.updated"
+  // An action button's click was accepted and its run scheduled
+  // (internal/api/pages_actions.go, the 202 SCHEDULED receipt). Carries
+  // `{page_id, slug, panel, action, pending_id}` so every open copy of the
+  // page can show the button as running; the run's progress then arrives as
+  // pipeline.run.* on this same channel.
+  | "page.action.dispatched"
   // Feed-relevant journal rows forwarded by the journal→WS bridge
   // (internal/server/journal_ws_bridge.go), carrying the same serialized shape
   // the SSE stream serves (lib/types/journal.ts). NOTE: this is opt-in
@@ -306,6 +312,7 @@ export const VALID_REALTIME_TYPES: Set<string> = new Set([
   "page.deleted",
   "page.panel.updated",
   "page.folder.updated",
+  "page.action.dispatched",
   // Journal entries forwarded by the journal→WS bridge on the opt-in
   // `journal:{workspaceId}` channel. Allowlisted so a future consumer's
   // subscription dispatches them; nothing subscribes to that channel yet, so

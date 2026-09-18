@@ -1,0 +1,182 @@
+# Section-scoped flag baseline — read by `go run ./scripts/docs-inventory`
+# (flagsections.go).
+#
+# Each line is `<command> --<flag>`: a flag that the command's docs/cli page
+# mentions, but not in the section headed by the command (`## crewship <cmd>
+# <sub>`, `### <sub> …` under it) nor on a line that invokes the command. The
+# flag string is on the page because a sibling command documents the same
+# name; the reader looking under this command's heading does not find it.
+#
+# -strict fails on a miss that is NOT listed here, so this list can only get
+# shorter. Fix one by moving the flag row under the command's heading, or by
+# giving the command a heading of its own, then delete the line — the tool
+# prints a notice for every line whose miss is gone. Never add a line to make a
+# new command pass; give it a section instead.
+#
+# Baseline taken 2026-09-15 (184 lines, audit gates-global.md).
+admin memory sync peer-cards --all
+admin memory sync peer-cards --dry-run
+admin memory sync peer-cards --timeout
+admin memory sync user-model --timeout
+agent mcp add --cred-type
+agent mcp add --credential
+agent mcp add --enabled
+agent mcp add --env-var
+agent mcp add --scope
+agent mcp update --cred-type
+agent mcp update --credential
+agent mcp update --enabled
+agent mcp update --env-var
+agent mcp update --tools
+automation preview --agent
+automation preview --crew
+automation preview --debounce-seconds
+automation preview --input
+automation preview --max-per-hour
+automation preview --mission
+automation preview --name
+automation preview --routine
+automation preview --severity
+commands --no-color
+commands --profile
+commands --server
+commands --server-allow-mismatch
+commands --verbose
+commands --workspace
+consolidate proposed approve --yes
+consolidate proposed reject --yes
+credential create --oauth-auth-url
+credential create --oauth-client-id
+credential create --oauth-client-secret
+credential create --oauth-client-secret-stdin
+credential create --oauth-provider
+credential create --oauth-scopes
+credential create --oauth-token-url
+credential field set --ordinal
+crew stop --timeout
+hooks update --command
+hooks update --crew
+hooks update --event
+hooks update --handler-config
+hooks update --matcher
+hooks update --matcher-agents
+hooks update --matcher-crews
+hooks update --matcher-severities
+hooks update --subagent
+integration add --access
+integration add --command
+integration add --endpoint
+integration add --icon
+integration agent update-binding --cred-header
+integration agent update-binding --cred-type
+integration agent update-binding --credential
+integration agent update-binding --enabled
+integration agent update-binding --env-var-name
+integration bind --cred-header
+integration bind --cred-type
+integration bind --credential
+integration composio bind --app
+integration composio bind --toolkits
+integration composio key set --key
+integration composio key set --label
+integration composio toolkits --category
+integration composio toolkits --limit
+integration composio toolkits --search
+integration composio tools --limit
+integration composio tools --search
+integration composio triggers enable --user
+integration composio triggers types --limit
+integration composio triggers types --search
+integration composio triggers types --toolkit
+integration composio unbind --app
+integration crew create --access
+integration crew create --command
+integration crew create --display
+integration crew create --endpoint
+integration crew create --icon
+integration crew create --link-workspace-server
+integration crew create --transport
+integration crew delete --yes
+integration crew update --access
+integration crew update --command
+integration crew update --display
+integration crew update --enabled
+integration crew update --endpoint
+integration crew update --icon
+integration crew update --transport
+integration remove --yes
+integration unbind --agent
+integration unbind --binding-id
+journal count --actor-type
+journal count --agent
+journal count --crew
+journal count --exclude-type
+journal count --mission
+journal count --priority
+journal count --run-id
+journal count --trace-id
+journal count --until
+keeper config set --judge-timeout
+keeper contact --clear
+keeper eval --endpoint
+keeper eval --explain
+keeper eval --incumbent
+keeper eval --limit
+keeper eval --passes
+keeper eval --tolerance
+keeper profile set --consistency-samples
+keeper profile set --escalate-from
+keeper profile set --evidence
+keeper profile set --hard-gate
+keeper profile set --precedent
+keeper profile set --precedent-n
+keeper requests --limit
+keeper requests --offset
+keeper resolve --adjudicator
+keeper review run --agent
+keeper review run --crew
+keeper review run --failure
+keeper review run --skill
+keeper review run --tool
+keeper review run --tool-args
+keeper review run --trigger
+memory versions restore --yes
+notify templates rm --channel
+notify templates set --body
+notify templates set --title
+notifychannel test-draft --field
+notifychannel test-draft --secret
+notifychannel test-draft --to
+notifychannel test-draft --url
+privacy peer-cards delete --yes
+privacy peer-consent set --yes
+privacy user-model delete --yes
+project milestone create --description
+project milestone create --name
+project milestone create --status
+project milestone create --target-date
+project milestone update --description
+project milestone update --name
+project milestone update --position
+project milestone update --status
+project milestone update --target-date
+recurring create --filter
+recurring update --assignee
+recurring update --assignee-type
+recurring update --crew
+recurring update --description
+recurring update --filter
+recurring update --labels
+recurring update --milestone
+recurring update --priority
+recurring update --project
+recurring update --title
+routine waitpoints reject --input
+saved-view create --filter
+saved-view update --filter
+saved-view update --shared
+saved-view update --view-type
+session list --warn-stale-days
+session revoke --yes
+triage create --filter
+triage update --filter

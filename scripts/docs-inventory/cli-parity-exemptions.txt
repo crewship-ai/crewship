@@ -1,0 +1,33 @@
+# CLI parity exemptions — read by `go run ./scripts/docs-inventory` (cliparity.go).
+#
+# One public API path per line, then whitespace, then the reason it has no
+# `crewship` command. A line with no reason is a parse error. Paths are matched
+# by shape ({crewId} and {id} are the same segment), so spell them as the
+# OpenAPI document does. The tool prints a notice for every line here whose
+# path has since gained a CLI caller or left the spec; delete those lines.
+#
+# Three kinds of line live here, and only the first kind is meant to stay.
+
+# --- Not a CLI surface ------------------------------------------------------
+/api/health                                        unauthenticated liveness probe; `crewship doctor` reads /healthz
+/api/v1/auth/forgot                                password-reset e-mail flow, driven from the login page
+/api/v1/oauth/callback                             provider redirect target; the browser lands here, `crewship oauth` only names it
+/api/v1/pages/runtime/bootstrap                    serves the page-runtime iframe HTML (#2472)
+/api/v1/public/pages/{token}                       anonymous share-link viewer, authenticated by the URL token
+/api/v1/public/pages/{token}/unlock                anonymous share-link viewer, password step
+/api/v1/waitpoint-tokens/{token}                   one-click approve/reject link sent by notifications; `crewship routine waitpoints` covers the authenticated path
+/api/v1/page-webhooks/{token}                      public dispatch route: the external sender drives it, `crewship page webhook` manages it
+/api/v1/webhooks/{token}                           public dispatch route: the external sender drives it, `crewship routine webhooks` manages it
+/api/v1/webhooks/{token}/github-pull-request       public dispatch route for GitHub's PR events (#2558); management is `crewship routine webhooks`
+/api/v1/webhooks/{crewId}/{agentId}/trigger        public dispatch route signed with the agent webhook secret; `crewship agent rotate-webhook-secret` manages it
+
+# --- Pre-existing gaps: authenticated routes with no command when this gate was
+# introduced (2026-09-15). Listed so the count can only go down; each needs a
+# command, and the line goes when it lands.
+/api/v1/agents/{agentId}/container-files           no command as of 2026-09-15; `crewship agent files` reads the workspace proxy, not the container listing
+/api/v1/agents/{agentId}/peers                     no command as of 2026-09-15 (peer-card index)
+/api/v1/agents/{agentId}/peers/{userId}            no command as of 2026-09-15 (peer card get/delete)
+/api/v1/agents/{agentId}/persona/suggest           no command as of 2026-09-15 (agent-initiated persona proposal)
+/api/v1/templates                                  no command as of 2026-09-15 (`crewship template` drives /crew-templates, not /templates)
+/api/v1/templates/{templateId}                     no command as of 2026-09-15 (`crewship template` drives /crew-templates, not /templates)
+/api/v1/workspaces/{workspaceId}/members/capabilities   no command as of 2026-09-15 (bulk variant; `workspace member capabilities` drives the per-member route)

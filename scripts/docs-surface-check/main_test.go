@@ -790,3 +790,99 @@ func TestServedCheckNamesTheMissingPages(t *testing.T) {
 		t.Errorf("error names a page that is actually served: %v", err)
 	}
 }
+
+// A heading's `{param}` is an MDX expression, and an undefined one renders
+// as nothing: `### POST /api/v1/webhooks/{token}/github-pull-request`
+// published as `POST /api/v1/webhooks//github-pull-request`. The anchor
+// check has modelled that since #1794 (renderProseSegment) and used it only
+// to compute slugs; two September headings shipped with the defect because
+// nothing said the heading itself was wrong.
+func TestUnescapedExpressionInHeadings(t *testing.T) {
+	tests := []struct {
+		name, heading, want string
+	}{
+		{"bare path parameter", "POST /api/v1/webhooks/{token}/github-pull-request", "{token}"},
+		{"escaped braces render", `GET /api/v1/admin/users/\{userId\}/data`, ""},
+		{"inside a code span braces are literal", "`GET /api/v1/pages/{slug}/project/fsck`", ""},
+		{"custom anchor id is not an expression", "Rate limits {#rate-limits}", ""},
+		{"expression before a custom id", "Limits for {key} {#rate-limits}", "{key}"},
+		{"code span then bare prose", "`{ok}` and {bad}", "{bad}"},
+		{"template braces", "Secrets ({{ secrets.<type> }})", "{{ secrets.<type> }}"},
+		{"no braces", "Plain heading", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := unescapedExpression(tt.heading); got != tt.want {
+				t.Fatalf("unescapedExpression(%q) = %q, want %q", tt.heading, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestUnescapedHeadingExpressionsNamesPageLineAndFix(t *testing.T) {
+	root := t.TempDir()
+	writeDocsPage(t, root, "docs/api-reference/webhooks.mdx", ""+
+		"---\ntitle: Webhooks\n---\n"+
+		"### POST /api/v1/webhooks/{token}/github-pull-request\n"+
+		"Prose with {braces} is not a heading.\n"+
+		"```bash\n# {not} a heading either\n```\n"+
+		"### GET /api/v1/webhooks/\\{token\\}\n"+
+		"### `GET /api/v1/pages/{slug}`\n")
+	// prd/ is working material, not the published site.
+	writeDocsPage(t, root, "docs/prd/plan.md", "## Proposal {draft}\n")
+
+	got, err := unescapedHeadingExpressions(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []headingExpression{{
+		page:       "docs/api-reference/webhooks.mdx",
+		line:       4,
+		expression: "{token}",
+		text:       "### POST /api/v1/webhooks/{token}/github-pull-request",
+	}}
+	if !slices.Equal(got, want) {
+		t.Fatalf("unescapedHeadingExpressions() = %+v\nwant %+v", got, want)
+	}
+	if fix := escapeExpression(got[0].expression); fix != `\{token\}` {
+		t.Errorf("escapeExpression(%q) = %q, want the spelling that renders", got[0].expression, fix)
+	}
+}
+
+// The allowlist tolerates the headings that were broken on the day the gate
+// landed and nothing else; an entry that has been fixed is reported so it can
+// be removed, and a new offender fails regardless of the allowlist.
+func TestPartitionHeadingExpressionsTolerateOnlyTheAllowlist(t *testing.T) {
+	found := []headingExpression{
+		{page: "docs/api-reference/admin.mdx", line: 1, expression: "{key}", text: "## PUT /api/v1/admin/rate-limits/{key}"},
+		{page: "docs/guides/new.mdx", line: 1, expression: "{id}", text: "## GET /api/v1/things/{id}"},
+	}
+	unlisted, stale := partitionHeadingExpressions(found)
+	if len(unlisted) != 1 || unlisted[0].page != "docs/guides/new.mdx" {
+		t.Fatalf("unlisted = %+v, want only the new page", unlisted)
+	}
+	if !slices.Contains(stale, "docs/api-reference/admin.mdx: ## DELETE /api/v1/admin/rate-limits/{key}") {
+		t.Errorf("an allowlist entry with no matching heading must be reported stale; got %v", stale)
+	}
+	if slices.Contains(stale, "docs/api-reference/admin.mdx: ## PUT /api/v1/admin/rate-limits/{key}") {
+		t.Error("a matched allowlist entry is not stale")
+	}
+}
+
+// The gate holds on the tree it ships with: every unescaped heading in the
+// repository is in the allowlist, and every allowlist entry still exists.
+// The second half is what keeps the list honest as the pages get fixed.
+func TestRepositoryDocsHaveNoUnescapedHeadingsOutsideTheAllowlist(t *testing.T) {
+	root := filepath.Join("..", "..")
+	found, err := unescapedHeadingExpressions(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	unlisted, stale := partitionHeadingExpressions(found)
+	for _, h := range unlisted {
+		t.Errorf("%s:%d: %s — MDX renders %s as nothing; write %s", h.page, h.line, h.text, h.expression, escapeExpression(h.expression))
+	}
+	for _, entry := range stale {
+		t.Logf("allowlist entry no longer needed, remove it from allowedUnescapedHeadings: %s", entry)
+	}
+}

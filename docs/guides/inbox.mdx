@@ -49,8 +49,8 @@ In the web inbox, `attention_class` is the small badge beside a card's title and
 A `run_needs_human` card renders its `actions[]` as buttons in the detail pane, where a waitpoint shows Approve / Deny. Each one calls `POST /api/v1/inbox/{id}/act` — the same door as [`crewship inbox act`](/cli/inbox#inbox-act) — and the card resolves **in place**:
 
 - **Answer** opens a text box. Send posts your text as a comment on the issue, authored by you, and delivers it to the **same agent session** that asked; the run resumes from its checkpoint with your answer as its next delivery (queued behind the current run if the session is mid-run). Send stays disabled until there is text.
-- **Take over** — you continue the work yourself. The agent's session goes idle.
-- **Dismiss** — no further work now. Same session transition.
+- **Take over** — you continue the work yourself. This is the issue's take-over (see [Work, hand-offs and Lead review](/guides/issue-detail#work-hand-offs-and-lead-review)): agent runs are stopped, waiting work is cancelled, the issue goes back to `TODO` held by you, and the agent's session goes idle.
+- **Dismiss** — no further work now. The session goes idle; nothing else changes.
 
 An action the server marks `irreversible` asks for confirmation first; none of the three does today. After a successful action the card flips to resolved without a reload and shows the receipt where the buttons were — the run the answer resumed, its position on the issue's event log (`event #<seq>`, the same `inbox_acted` row `GET .../events` lists) and the agent version that answered. The receipt is read back from the card's `payload.receipt` whenever the resolved card is opened from History.
 
@@ -64,6 +64,8 @@ A decision about a *routine's authored definition* — not just its inbox card �
 - `internal/pipeline/waitpoints.go` — a `wait: approval` step, at the run's actually-executing pipeline version.
 
 Both columns are nullable: most approvals and waitpoints (a credential use, an ordinary production-change gate) have nothing to do with a routine's definition and stay `NULL`.
+
+Where you can read it back differs by table. An **approval** row returns `routine_version` on `GET /api/v1/approvals` (omitted when `NULL`) and `crewship approval list` prints it beside the other decision fields. A **waitpoint**'s column is stored but not returned: the pending-waitpoints list omits it, and a decided waitpoint is not listed at all. For a waitpoint, the version *before* deciding is on the schedule-activation card's `payload.routine_version`, and the version that *then ran* is `pipeline_version` on every run record (`crewship routine records`, [Pipelines API](/api-reference/pipelines)) — compare those two if the question is "did the same version run".
 
 ### Digest
 
@@ -155,7 +157,7 @@ The inbox is the one surface that aggregates messages from every agent, routine,
 Advisory escalations without an `escalation_type` (curator sweeps, service incidents) are **grouped** in Updates: one row per sender and title prefix, opening on a *Grouped system incident* card that lists the related notices and offers **Archive N updates** plus a link to System Health. That button, and **Mark all read** on the Updates section, are the two callers of `POST /api/v1/inbox/bulk` — there are no checkboxes or per-row multi-select on the page; a decision item is still resolved one at a time from its own card.
 
 <Warning>
-Bulk **Resolve** never silently closes a decision item. If the selection contains any `waitpoint` / `escalation` row or any `blocking=true` row, a confirmation dialog spells out how many items will be left open and resolves only the dismissable remainder. If the *entire* selection is decision items, there is no **Resolve** action at all — open each one individually and act on its source. **Mark read** is always one click and closes nothing. Even if a client bypasses these guards, the [server backstop](/api-reference/inbox#post-/api/v1/inbox/bulk) skips the same rows, so a real decision item can never be resolved by the bulk path. The one exception, applied identically client- and server-side, is a keeper-synthetic escalation (`kind=escalation`, no backing `escalations` row): it has no source to defer to, so bulk **Resolve** clears it instead of skipping it.
+Bulk **Resolve** never silently closes a decision item. If the selection contains any `waitpoint` / `escalation` row or any `blocking=true` row, a confirmation dialog spells out how many items will be left open and resolves only the dismissable remainder. If the *entire* selection is decision items, there is no **Resolve** action at all — open each one individually and act on its source. **Mark read** is always one click and closes nothing. Even if a client bypasses these guards, the [server backstop](/api-reference/inbox#post-/api/v1/inbox/bulk) skips the same rows, so a real decision item can never be resolved by the bulk path. The one exception, applied identically client- and server-side, is a row whose **source is gone**: a keeper-synthetic escalation (`kind=escalation`, no backing `escalations` row), or a `waitpoint` whose pending `pipeline_waitpoints` token, staged `PENDING_REVIEW` hire or pending approval has already been swept. Those have no source left to defer to, so bulk **Resolve** (and a single-row resolve) clears them instead of skipping them; the detail read exposes the same probe as `source_missing`.
 </Warning>
 
 A row whose `kind` is an unknown value renders as a generic notification (hardened fallback) instead of crashing the row — new server-side kinds degrade gracefully in an older UI.

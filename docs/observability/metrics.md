@@ -55,6 +55,7 @@ Every series carries a `hostname` label.
 | Metric | Type | Labels | Description |
 | --- | --- | --- | --- |
 | `crewshipd_assignments` | gauge | `status` | Assignments currently in each status. Statuses: `pending`, `queued`, `running`, `completed`, `failed`, `cancelled`; anything unrecognized folds into `other`. All label values are always emitted (zero-filled). |
+| `crewshipd_issue_agent_sessions` | gauge | `state` | Issue agent sessions (`issue_agent_sessions`, one per issue × agent a mention opened) currently in each state: `pending`, `active`, `awaiting_input`, `idle`, `error`, `stale`, `closed`; anything unrecognized folds into `other`. Zero-filled like `crewshipd_assignments`. A growing `awaiting_input` is unanswered NEEDS_HUMAN inbox cards; `error` is runs that ended FAILED. |
 | `crewshipd_assignment_queue_depth` | gauge | — | `QUEUED` assignments across all crews |
 | `crewshipd_assignment_queue_crews` | gauge | — | Crews with at least one queued assignment |
 | `crewshipd_assignment_queue_depth_max` | gauge | — | Queued assignments in the most backlogged crew |

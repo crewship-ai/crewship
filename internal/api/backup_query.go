@@ -242,19 +242,33 @@ func (h *BackupHandler) Verify(w http.ResponseWriter, r *http.Request) {
 	if res.Err != nil {
 		errStr = res.Err.Error()
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"valid":      res.Valid,
-		"size_bytes": res.Size,
-		"manifest":   res.Manifest,
-		"error":      errStr,
-		// #2009: whether the payload's row counts were compared against
-		// the manifest, and what came of it. See this handler's doc
-		// comment — completeness_checked=false is "not evaluated", never
-		// "confirmed complete".
-		"completeness_checked":       res.CompletenessChecked,
-		"completeness_skip_reason":   res.CompletenessSkipReason,
-		"table_row_count_mismatches": res.TableRowCountMismatches,
+	writeJSON(w, http.StatusOK, backupVerifyResponse{
+		Valid:                   res.Valid,
+		SizeBytes:               res.Size,
+		Manifest:                res.Manifest,
+		Error:                   errStr,
+		CompletenessChecked:     res.CompletenessChecked,
+		CompletenessSkipReason:  res.CompletenessSkipReason,
+		TableRowCountMismatches: res.TableRowCountMismatches,
 	})
+}
+
+// backupVerifyResponse is the body of GET /api/v1/admin/backups/verify — a
+// struct rather than the map literal it replaced so that
+// openapi_schema_keys_test.go can hold FinalAdminPlatformBackupVerify to it.
+// Every field is emitted unconditionally, as the map's were.
+type backupVerifyResponse struct {
+	Valid     bool             `json:"valid"`
+	SizeBytes int64            `json:"size_bytes"`
+	Manifest  *backup.Manifest `json:"manifest"`
+	Error     string           `json:"error"`
+	// #2009: whether the payload's row counts were compared against the
+	// manifest, and what came of it. See Verify's doc comment —
+	// completeness_checked=false is "not evaluated", never "confirmed
+	// complete".
+	CompletenessChecked     bool                           `json:"completeness_checked"`
+	CompletenessSkipReason  string                         `json:"completeness_skip_reason"`
+	TableRowCountMismatches []backup.TableRowCountMismatch `json:"table_row_count_mismatches"`
 }
 
 // Unlock handles DELETE /api/v1/admin/backups/status. Force-releases

@@ -102,12 +102,14 @@ Examples:
 
 		q := url.Values{}
 		q.Set("limit", fmt.Sprintf("%d", lines))
+		// Both references go to the server as typed. Since #2206 the
+		// journal handler resolves an id, a slug or a display name itself
+		// (resolveJournalRefs), which is the contract the help text
+		// promises. --crew used to be resolved here first, by slug only,
+		// so `--crew Backend` answered "crew not found" for a name the
+		// server would have matched.
 		if crewFlag != "" {
-			crewID, err := resolveCrewID(client, crewFlag)
-			if err != nil {
-				return err
-			}
-			q.Set("crew_id", crewID)
+			q.Set("crew_id", crewFlag)
 		}
 		if agentID != "" {
 			q.Set("agent_id", agentID)
@@ -622,7 +624,7 @@ Examples:
 		}
 		client := newAPIClient()
 
-		q, err := buildCountQuery(cmd, client)
+		q, err := buildCountQuery(cmd)
 		if err != nil {
 			return err
 		}
@@ -653,7 +655,7 @@ Examples:
 // buildCountQuery shares filter parsing between the list view and the
 // count subcommand. Mirrors the parseJournalQuery surface on the server,
 // kept narrow because the count endpoint has no use for cursor/limit.
-func buildCountQuery(cmd *cobra.Command, client *cli.Client) (url.Values, error) {
+func buildCountQuery(cmd *cobra.Command) (url.Values, error) {
 	crewFlag, _ := cmd.Flags().GetString("crew")
 	agentID, _ := cmd.Flags().GetString("agent")
 	missionID, _ := cmd.Flags().GetString("mission")
@@ -689,12 +691,10 @@ func buildCountQuery(cmd *cobra.Command, client *cli.Client) (url.Values, error)
 	}
 
 	q := url.Values{}
+	// As typed — the server resolves id, slug or display name (see the
+	// list command).
 	if crewFlag != "" {
-		crewID, err := resolveCrewID(client, crewFlag)
-		if err != nil {
-			return nil, err
-		}
-		q.Set("crew_id", crewID)
+		q.Set("crew_id", crewFlag)
 	}
 	if agentID != "" {
 		q.Set("agent_id", agentID)

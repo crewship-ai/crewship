@@ -17,8 +17,15 @@ tag: Experimental
 | Endpoint | Used for |
 |---|---|
 | `GET /api/v1/missions?assignee=me` | Missions assigned to you |
-| `GET /api/v1/approvals?status=pending&assignee=me` | Approvals waiting on you |
+| `GET /api/v1/approvals?status=pending` | Pending approvals in the workspace (see the note below) |
 | `GET /api/v1/runs?actor=me&limit=10` | Your recent runs |
+
+The approvals section is role-gated rather than filtered per user: the
+endpoint answers only for OWNER and ADMIN, and there is no `assignee`
+parameter. An OWNER or ADMIN sees every pending approval in the workspace;
+a MEMBER or MANAGER gets an empty section (the server's 403 is treated as
+"nothing visible to you", not reported as a `[partial]` error). The CLI reads
+the `rows` array of the [approvals list](/api-reference/approvals) response.
 
 ```bash
 crewship me
@@ -58,7 +65,7 @@ Live status board.
 |---|---|
 | `GET /api/v1/runs?status=RUNNING&limit=20` | Currently-running runs |
 | `GET /api/v1/agents` | Agent inventory; classified into idle vs busy by `status` |
-| `GET /api/v1/approvals?status=pending` | Pending approvals across the workspace |
+| `GET /api/v1/approvals?status=pending` | Pending approvals across the workspace (OWNER/ADMIN only; empty for other roles, same as `me`) |
 | `GET /api/v1/runtime/capacity` | Container starts held by host admission control |
 
 ```bash

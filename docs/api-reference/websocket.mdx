@@ -290,6 +290,7 @@ REST. The shapes below reflect what the server actually sends.
 | `container.stats` | Live container resource metrics (~5s cadence) | `{ container_id, crew_id, cpu_percent, memory_used, memory_limit, memory_percent, net_rx_bytes, net_tx_bytes, pids, timestamp }` |
 | `provision.started` | Crew container provisioning started | `{ ... }` |
 | `provision.progress` | Provisioning progress update | `{ ... }` |
+| `provision.event` | One structured provisioning step — image resolve, build, each feature install, container create, ready, or a failure — emitted by both the explicit provisioning job and the agent-run container prep, so every container preparation lands in the same vocabulary. Richer than `provision.progress`; the Activity Bar prefers it for the per-feature view. The same row is persisted to the journal. | `{ crew_id, phase, step }` plus, when set, `feature`, `status`, `detail`, `reason`, `error`, `tag`, `duration_ms`, and `digest` with `pinned` (always written together — `pinned: false` is a claim, not an omission) |
 | `provision.completed` | Provisioning finished | `{ ... }` |
 | `provision.failed` | Provisioning failed | `{ ... }` |
 | `port_expose.created` | A container port was exposed | `{ ... }` |
@@ -327,12 +328,14 @@ filter lives in one place — and carries no page data of its own.
 | `page.deleted` | A page was deleted | `{ page_id, slug }` |
 | `page.panel.updated` | A producer pushed one panel's payload | `{ page_id, slug, panel_id }` |
 | `page.folder.updated` | A folder itself changed — created, renamed, re-iconed or recoloured, deleted, or its sharing set or removed. A page moved into or out of the folder broadcasts that page's `page.updated` instead | `{ slug, folder_id }` |
+| `page.action.dispatched` | An action button was clicked and its routine run accepted and scheduled (the `202 SCHEDULED` receipt of the dispatch endpoint). Fires once per accepted click, so every open copy of the page can show the button as running; the run's own progress arrives as `pipeline.run.*` on this channel | `{ page_id, slug, panel, action, pending_id }` |
 
 #### Configuration & inbox
 
 | Event Type | Description | Payload |
 |---|---|---|
 | `workspace.updated` | Workspace settings changed; refresh the authorized workspace settings, including Pages appearance | `{ workspace_id }` |
+| `workspace.deleted` | The workspace was soft-deleted — the last frame this channel carries, after one `crew.deleted` per removed crew. Connected tabs redirect out instead of hammering dead endpoints. See [Delete workspace](/api-reference/workspaces#delete-workspace) | `{ id, slug }` |
 | `inbox.updated` | Unified inbox changed | `{ ... }` |
 | `instance_setting.updated` | An instance-level setting changed | `{ key }` |
 | `feature_flag.created` | A feature flag was created | `{ key }` |
@@ -401,6 +404,15 @@ shares its access rule with `crew`. File-change events are broadcast on the
 | `mission.status` | Mission status changed | `{ id, title, status }` |
 | `task.status` | A task within the mission changed status | `{ id, status }` |
 
+<Note>
+  These two are **mission-channel only** and are not part of the workspace
+  allowlist: the web client subscribes to `workspace:{id}` and reads the
+  `mission.updated` / `task.updated` counterparts there, so `VALID_REALTIME_TYPES`
+  does not register `mission.status` / `task.status` and the docs-parity gate
+  (which reads only the Workspace Channel tables) does not cover them. A custom
+  client that wants them subscribes to `mission:{id}` and handles them itself.
+</Note>
+
 ### Session Channel (`session:{chatId}`)
 
 #### Chat streaming events from the agent ChatHandler
@@ -412,7 +424,8 @@ shares its access rule with `crew`. File-change events are broadcast on the
 | `tool_result` | Tool call result |
 | `thinking` | Agent thinking/reasoning |
 | `status` | Status update |
-| `done` | Agent finished responding |
+| `done` | Agent finished responding — the terminal frame of a normal exchange. Its `metadata` carries the durable id of the reply: `message_id` (the persisted assistant message, which a live turn rendered under a client-generated id until now — reactions and feedback should target this one), `replied_at` (the persist timestamp, RFC3339 UTC with millisecond precision, e.g. `2026-09-15T22:41:07.123Z`), and `trace_id` when telemetry is on. A `done` with `no_reply: true` and no `message_id` closes a group-chat turn the agent was not @mentioned in: the user message was persisted, nothing replied, and this is not an error. |
+| `agent_busy` | **Sender-only, and terminal with no `done` after it.** The agent already had a live run, so this message was rejected and never reached it — nothing ran and nothing was persisted. Sent only to the socket that posted; not broadcast to other subscribers of the session. A client that waits for `done` after this frame waits forever: treat `agent_busy` as the end of the exchange and retry once the live run finishes (`crewship run` / `ask` exit non-zero on it). Assignment dispatches do not bounce this way — an `/assign` or `@mention` of a busy agent is queued with `queued_reason: agent_busy` instead. `content` is the user-facing notice; `metadata.chat_id` names the session. |
 | `error` | Error occurred |
 | `result` | Final result (includes metadata: `total_cost_usd`, `num_turns`, `usage`) |
 | `system` | System message |
