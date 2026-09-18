@@ -89,3 +89,10 @@ entitlement or actual billed amounts.
 - Full Go-suite outcome is recorded in the PR after completion; log:
   `/tmp/opencode-full-go.log`. No deployment or successful paid inference is
   implied by this verification.
+
+## Acceptance handoff (2026-09-18)
+
+See [PRD validation and next-agent checklist](opencode-go-zen-handoff-2026-09-18.md)
+for requirement coverage, completed CI, actual dev3 deployment evidence and the
+remaining real-account acceptance/review gates. Implementation coverage is not
+proof of successful paid inference.
