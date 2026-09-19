@@ -207,3 +207,20 @@ zůstává; vlastní dočasné rutiny `validation-*-mtw9f2k3` budou smazány po
 - CI #2620 na prvním commitu `7af373542` selhal (Go linux-arm64/macOS — též
   tři testy výše); head `a2771660e` dostává čerstvý běh; výsledek se čte až
   z něj, ne z zastaralého runu.
+- **Go Shuffle flake na `f3cfaf62d` — diagnóza a oprava (`921c9cb1b`).**
+  CI Shuffle (seed `1789753438799008216`) shodil
+  `TestSlugCacheSkipsPreflightAcrossProcesses` v `internal/cli` (balík můj
+  diff nedotýká). Reprodukce: selhal 1× lokálně se stejným seedem, dále 0/13 —
+  závod, ne pořadí. Kořen: `TestClientResolve_CancelledWaiterDoesNotBlock…`
+  záměrně nechává resolver goroutine přežít cleanup testu; její
+  `storeSlugCache` (load-modify-write bez zámku nad celým souborem) běží
+  PO obnově env — tedy do HOME náhodného následujícího testu a může vymazat
+  zápis první fáze testu slug cache mezi jeho fázemi. Nezávisle
+  `TestClientConcurrentRequests_ClonesShareTheMemo` bez izolace zapisoval
+  reálný `~/.crewship/cache` (doloženo 27 nahromaděnými záznamy; pozor -
+  některé záznamy v souboru patří souběžným sessions sdíleného hostitele,
+  ne testům). Oprava je čistě testová: join goroutine s ohrazeným čekáním +
+  `CREWSHIP_NO_SLUG_CACHE=1` u obou testů dle vzoru sesterských testů.
+  Důkaz: 5/5 běhů přesného CI seedu i neběhaný plný balík procházejí a
+  reálný cache soubor se netvoří. Produkční kód nezměněn.
+
