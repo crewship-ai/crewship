@@ -149,7 +149,18 @@ func TestClientConcurrentRequests_DefinitiveMiss(t *testing.T) {
 // rather than returning; the bound below is what turns that into a failure
 // instead of a hung suite.
 func TestClientResolve_CancelledWaiterDoesNotBlockOnPreflight(t *testing.T) {
+	// The resolver goroutine deliberately outlives this test: `defer
+	// close(release)` unblocks it at cleanup, and its storeSlugCache then
+	// runs while whatever test the runner starts next is already going —
+	// into whichever HOME that test installed. Disabling the disk cache
+	// keeps the leak from writing a foreign test's cache file (and from
+	// racing its load-modify-write into a lost update, which is exactly
+	// what made TestSlugCacheSkipsPreflightAcrossProcesses flake in CI
+	// Shuffle: the leaked write erased the first client's entry between
+	// the two phases).
+	t.Setenv("CREWSHIP_NO_SLUG_CACHE", "1")
 	release := make(chan struct{})
+	resolverDone := make(chan struct{})
 	var preflights atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/v1/workspaces" {
@@ -162,13 +173,27 @@ func TestClientResolve_CancelledWaiterDoesNotBlockOnPreflight(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer srv.Close()
-	defer close(release)
+	// Join the resolver before the test ends. Its storeSlugCache fires when
+	// the round-trip completes; letting the goroutine outlive the test meant
+	// the write ran after t.Setenv restored the environment — i.e. into the
+	// HOME of whichever test ran next (and racing its load-modify-write into
+	// a lost update: that is what flaked TestSlugCacheSkipsPreflightAcrossProcesses
+	// in CI Shuffle). Registered AFTER srv.Close so release+wait run first.
+	defer func() {
+		close(release)
+		select {
+		case <-resolverDone:
+		case <-time.After(5 * time.Second):
+			t.Error("resolver goroutine did not finish after release")
+		}
+	}()
 
 	c := NewClient(srv.URL, "", "alpha")
 
 	// Resolver: parks inside the preflight until release is closed.
 	resolverIn := make(chan struct{})
 	go func() {
+		defer close(resolverDone)
 		close(resolverIn)
 		if resp, err := c.Get("/api/v1/agents"); err == nil {
 			resp.Body.Close()
@@ -218,6 +243,11 @@ func TestClientResolve_CancelledWaiterDoesNotBlockOnPreflight(t *testing.T) {
 // allocates a fresh memo would reintroduce N preflights — and, before the
 // pointer, N racing writers — with every existing test still green.
 func TestClientConcurrentRequests_ClonesShareTheMemo(t *testing.T) {
+	// No HOME isolation here otherwise: without this disable every run
+	// resolves "alpha" against the real ~/.crewship — the suite was
+	// observed leaving dozens of dead-server entries in the developer's
+	// cache file (see the #2620 validation notes).
+	t.Setenv("CREWSHIP_NO_SLUG_CACHE", "1")
 	var preflights atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/v1/workspaces" {
