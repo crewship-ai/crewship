@@ -475,10 +475,18 @@ func (r *OrchestratorRunner) RunStep(ctx context.Context, req AgentStepRequest) 
 		if errors.Is(runErr, orchestrator.ErrDetachedStillRunning) {
 			// Nonterminal (#2626): the agent's exec is still alive, so the
 			// step has no result to record — neither its output nor a
-			// success. Failing the step surfaces an operator-visible state
-			// without a retry: pipeline steps are not auto-retried, and a
+			// success. Stop the wedged exec before this step releases the
+			// agent's run lock (a retry or the next step must not start a
+			// second CLI beside it), then fail the step so the state is
+			// operator-visible: pipeline steps are not auto-retried, and a
 			// replay is an explicit new authorization, so nothing runs the
 			// agent twice from here.
+			if r.orch != nil {
+				if _, stopErr := r.orch.StopDetachedRun(context.WithoutCancel(ctx), runReq.RunID); stopErr != nil {
+					r.logger.Warn("could not stop a detached agent step before releasing the agent",
+						"pipeline_run_id", req.PipelineRunID, "step_id", req.StepID, "run_id", runReq.RunID, "error", stopErr)
+				}
+			}
 			r.recordChatTurn(ctx, chatID, agentID, acc.Text(), partAcc.Parts(), promptPersisted)
 			return AgentStepResult{
 				Output:     acc.Text(),

@@ -1325,3 +1325,43 @@ func TestVertical_DetachedAttemptHoldsWhileTheRuntimeLives(t *testing.T) {
 		t.Errorf("%d runtimes created, want 1", got)
 	}
 }
+
+// 14. A superseded detached attempt stops its runtime (#2626 review): the
+// newer generation owning the work must not share the agent with a detached
+// process the old attempt left behind.
+func TestAwaitDetachedThenSettle_SupersededStopsTheRuntime(t *testing.T) {
+	h := newHarness(t)
+	h.cfg.ConfirmPollInterval = 10 * time.Millisecond
+	d := New(h.store, h.rt, nil, h.cfg, quiet())
+
+	a := Assignment{Item: &work.Item{ID: "w-sup", WorkspaceID: "ws1", AgentID: "jamie"}, RunID: "run-sup-1", Generation: 1}
+	// Register the runtime so Alive answers true until Stop lands.
+	h.rt.mu.Lock()
+	h.rt.locators = append(h.rt.locators, h.rt.Locator(a))
+	h.rt.stopCh[h.rt.Locator(a)] = make(chan struct{})
+	h.rt.mu.Unlock()
+
+	live := &liveAttempt{assignment: a, locator: h.rt.Locator(a), cancel: func() {}, shutdown: make(chan struct{}), done: make(chan struct{})}
+	superseded := make(chan struct{})
+	abandoned := make(chan struct{})
+	runDone := make(chan error, 1)
+	detached := errors.New("orchestrator: exec detached and still running: exec-1")
+
+	done := make(chan struct{})
+	go func() {
+		d.awaitDetachedThenSettle(context.Background(), live, superseded, abandoned, runDone, detached)
+		close(done)
+	}()
+
+	// Let at least one Alive probe see the runtime alive, then supersede.
+	time.Sleep(3 * h.cfg.ConfirmPollInterval)
+	close(superseded)
+	<-done
+
+	h.rt.mu.Lock()
+	_, stopped := h.rt.stopped[h.rt.Locator(a)]
+	h.rt.mu.Unlock()
+	if !stopped {
+		t.Fatal("a superseded detached runtime was never stopped — the new attempt could share the agent with a live process")
+	}
+}

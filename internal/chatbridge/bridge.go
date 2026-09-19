@@ -1148,8 +1148,9 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 			// orchestrator holds the run at `running`. Neither FAILED nor
 			// CANCELLED is true, and a COMPLETED was the old lie. Persist
 			// whatever streamed so far — the turn is visible in the chat —
-			// and close the turn without a terminal status; the run row
-			// keeps `running` until the exec's own timeout settles it.
+			// stop the wedged exec before this turn releases the agent's
+			// run lock (a second turn must not start beside a live CLI),
+			// and close without a terminal status.
 			if acc.Text() != "" || len(partAcc.Parts()) > 0 {
 				cleanCtx, cleanCancel := context.WithTimeout(context.Background(), ledgerWriteTimeout)
 				_ = b.convStore.Append(cleanCtx, chatID, conversation.Message{
@@ -1162,6 +1163,10 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 				})
 				_ = b.resolver.IncrementMessageCount(cleanCtx, chatID, 2)
 				cleanCancel()
+			}
+			if _, stopErr := b.orch.StopDetachedRun(context.WithoutCancel(ctx), runID); stopErr != nil {
+				b.logger.Warn("could not stop a detached chat run before releasing the agent",
+					"chat_id", chatID, "run_id", runID, "error", stopErr)
 			}
 			b.logger.Warn("chat turn's exec detached and is still running; leaving the run nonterminal",
 				"chat_id", chatID, "run_id", runID, "error", runErr)

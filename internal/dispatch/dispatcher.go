@@ -514,7 +514,15 @@ func (d *Dispatcher) awaitDetachedThenSettle(ctx context.Context, live *liveAtte
 			d.settle(ctx, live, runErr)
 			return
 		case <-superseded:
-			// A newer attempt owns this work; not ours to settle.
+			// A newer attempt owns this work. Stop EXECUTING, not merely
+			// stop renewing a lease we no longer hold — the same rule the
+			// live branch below enforces: a detached runtime that outlives
+			// its supersession would be two runtimes for one work item
+			// (#2626 review finding).
+			if _, err := d.runtime.Stop(ctx, live.locator); err != nil {
+				d.logger.Warn("dispatch: could not stop a superseded detached attempt",
+					"run_id", live.assignment.RunID, "locator", live.locator, "error", err)
+			}
 			return
 		case <-abandoned:
 			d.park(ctx, live.assignment, "cancel requested and the runtime at "+live.locator+
