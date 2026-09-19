@@ -290,7 +290,7 @@ describe("left rail filtering", () => {
     expect(await screen.findByText("No credentials yet")).toBeInTheDocument()
     expect(screen.getByPlaceholderText(/search a secret or tool/i)).toBeInTheDocument()
     expect(screen.getByText("All providers", { exact: true })).toBeInTheDocument()
-    expect(screen.getAllByLabelText("0 connected accounts")).toHaveLength(12)
+    expect(screen.getAllByLabelText("0 connected accounts")).toHaveLength(15)
   })
 
   it("collapses to a rail that can be reopened", async () => {

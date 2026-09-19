@@ -17,6 +17,10 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Added
 
+- Credentials: connect OpenCode Go and OpenCode Zen with separate encrypted API-key accounts, existing access assignments, and OpenCode model selection. Gateway calls use the sidecar with native model protocols; setup explains Go subscription limits and optional Zen balance overage. (#2618)
+
+- Credentials: connect a Z.AI GLM Coding Plan subscription with its own encrypted API-key account, sidecar route and `zai-coding-plan/` model selection on the OpenCode runner. The plan is kept separate from metered Z.AI credit — no shared payer, no fallback — and remaining quota is never inferred from token counts. (#2621)
+
 - Command palette: pages are searchable by name or slug in a **Pages** group — each row wears the page's icon and colour, names its folder or owning crew, marks a published application, and opens `/pages/<slug>`; the list is the same authorised index the overview draws, fetched on open. **Recent** is now kept per user and per workspace, and a page row is offered only while that page is still in the list just returned. History stored under the old shared key is cleared once, not migrated. (#2570)
 
 - **CLI:** the routines run-detail and scheduling surface the UI had and agents did not — `crewship routine calendar [--from --to]`, `routine executions <run_id> [--after | --execution-id]`, `routine artifacts <run_id> [--after | --artifact-id | --download --out]`; `routine run --fire-at <RFC3339>`, `--pinned-version <n>` and `--async` (`Prefer: respond-async`, understands the `202 IN_PROGRESS` receipt, `--wait` follows it); `routine save --trigger-inputs key=value` (the `trigger.inputs` block the `409 schedule_conflict` hint names, which the CLI now prints); and `routine fixture-test --remote` to drive `POST …/pipelines/fixture_test` instead of the in-process test. A `routine run` 404 about a missing archive (`--pinned-version`) is no longer rewritten into a did-you-mean hint for the slug that was typed. (#2577)

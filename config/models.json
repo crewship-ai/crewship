@@ -1,7 +1,86 @@
 {
-  "$comment": "The one list of models Crewship offers. Read by the Go binary (config.ModelsJSON → internal/llm.CuratedModels, the /api/v1/models fallback, `crewship model list`, the Guide's proposal validation) and by the web bundle (lib/model-catalog.ts → every picker, including onboarding). Edit here, nowhere else. `providers` are vendors the server can talk to directly; each model may carry a `role` (cheap | default | top) the Guide uses to size a crew, and `category` for grouping in pickers. `adapters` are the CLI toolchains; an adapter entry that is a plain string refers to a provider model by id (label and category come from there), an object is the adapter's own id/label. Order is most-capable-and-most-recent first — pickers render top to bottom.",
+  "$comment": "The one list of models Crewship offers. Read by the Go binary (config.ModelsJSON → internal/llm.CuratedModels, the /api/v1/models fallback, `crewship model list`, the Guide's proposal validation) and by the web bundle (lib/model-catalog.ts → every picker, including onboarding). Edit here, nowhere else. `providers` are model providers available to server clients or their native CLI runners; each model may carry a `role` (cheap | default | top) the Guide uses to size a crew, and `category` for grouping in pickers. `adapters` are the CLI toolchains; an adapter entry that is a plain string refers to a provider model by id (label and category come from there), an object is the adapter's own id/label. Order is most-capable-and-most-recent first — pickers render top to bottom.",
   "version": 1,
   "providers": {
+    "opencode": {
+      "label": "OpenCode Zen",
+      "default": "opencode/claude-sonnet-5",
+      "models": [
+        {
+          "id": "opencode/claude-sonnet-5",
+          "label": "Claude Sonnet 5 (OpenCode Zen)",
+          "category": "frontier"
+        },
+        {
+          "id": "opencode/gpt-5.5",
+          "label": "GPT-5.5 (OpenCode Zen)",
+          "category": "frontier"
+        },
+        {
+          "id": "opencode/gemini-3.1-pro",
+          "label": "Gemini 3.1 Pro (OpenCode Zen)",
+          "category": "frontier"
+        },
+        {
+          "id": "opencode/kimi-k3",
+          "label": "Kimi K3 (OpenCode Zen)",
+          "category": "frontier"
+        }
+      ]
+    },
+    "opencode_go": {
+      "label": "OpenCode Go",
+      "default": "opencode-go/kimi-k3",
+      "models": [
+        {
+          "id": "opencode-go/kimi-k3",
+          "label": "Kimi K3 (OpenCode Go)",
+          "category": "frontier"
+        },
+        {
+          "id": "opencode-go/glm-5.3-flash",
+          "label": "GLM 5.3 Flash (OpenCode Go)",
+          "category": "frontier"
+        },
+        {
+          "id": "opencode-go/minimax-m3",
+          "label": "MiniMax M3 (OpenCode Go)",
+          "category": "frontier"
+        },
+        {
+          "id": "opencode-go/gpt-5.6-luna",
+          "label": "GPT-5.6 Luna (OpenCode Go)",
+          "category": "frontier"
+        }
+      ]
+    },
+    "zai_coding_plan": {
+      "label": "Z.AI Coding Plan",
+      "default": "zai-coding-plan/glm-5.3",
+      "$comment": "GLM Coding Plan subscription endpoint (api.z.ai/api/coding/paas/v4) — not metered Z.AI credit and not Zhipu/BigModel. Models verified against the OpenCode 1.18.31 catalog; account entitlement is the plan's, not the catalog's.",
+      "models": [
+        {
+          "id": "zai-coding-plan/glm-5.3",
+          "label": "GLM 5.3 (Coding Plan)",
+          "category": "frontier"
+        },
+        {
+          "id": "zai-coding-plan/glm-5.3-flash",
+          "label": "GLM 5.3 Flash (Coding Plan)",
+          "category": "frontier"
+        },
+        {
+          "id": "zai-coding-plan/glm-5.3-highspeed",
+          "label": "GLM 5.3 Highspeed (Coding Plan)",
+          "category": "frontier"
+        },
+        {
+          "id": "zai-coding-plan/glm-5.2",
+          "label": "GLM 5.2 (Coding Plan)",
+          "category": "frontier"
+        }
+      ]
+    },
     "anthropic": {
       "label": "Anthropic",
       "default": "claude-sonnet-5",
@@ -164,6 +243,18 @@
       "default": "anthropic/claude-sonnet-5",
       "$comment": "OpenCode takes provider/model strings across 75+ providers (opencode.ai/docs/providers, models.dev). Curated to the most-deployed combinations. ollama/* rows are local: they need CREWSHIP_LOCAL_MODEL_BASE_URL on the server and no API key; the shortlist is deliberate — tool calling degrades sharply below this tier (anomalyco/opencode#1034, #4428).",
       "models": [
+        {"id": "opencode/claude-sonnet-5", "label": "Claude Sonnet 5 (OpenCode Zen)", "category": "frontier"},
+        {"id": "opencode/gpt-5.5", "label": "GPT-5.5 (OpenCode Zen)", "category": "frontier"},
+        {"id": "opencode/gemini-3.1-pro", "label": "Gemini 3.1 Pro (OpenCode Zen)", "category": "frontier"},
+        {"id": "opencode/kimi-k3", "label": "Kimi K3 (OpenCode Zen)", "category": "frontier"},
+        {"id": "opencode-go/kimi-k3", "label": "Kimi K3 (OpenCode Go)", "category": "frontier"},
+        {"id": "opencode-go/glm-5.3-flash", "label": "GLM 5.3 Flash (OpenCode Go)", "category": "frontier"},
+        {"id": "opencode-go/minimax-m3", "label": "MiniMax M3 (OpenCode Go)", "category": "frontier"},
+        {"id": "opencode-go/gpt-5.6-luna", "label": "GPT-5.6 Luna (OpenCode Go)", "category": "frontier"},
+        {"id": "zai-coding-plan/glm-5.3", "label": "GLM 5.3 (Z.AI Coding Plan)", "category": "frontier"},
+        {"id": "zai-coding-plan/glm-5.3-flash", "label": "GLM 5.3 Flash (Z.AI Coding Plan)", "category": "frontier"},
+        {"id": "zai-coding-plan/glm-5.3-highspeed", "label": "GLM 5.3 Highspeed (Z.AI Coding Plan)", "category": "frontier"},
+        {"id": "zai-coding-plan/glm-5.2", "label": "GLM 5.2 (Z.AI Coding Plan)", "category": "frontier"},
         { "id": "anthropic/claude-fable-5", "label": "Anthropic / Claude Fable 5", "category": "frontier" },
         { "id": "anthropic/claude-opus-4-8", "label": "Anthropic / Claude Opus 4.8", "category": "frontier" },
         { "id": "anthropic/claude-sonnet-5", "label": "Anthropic / Claude Sonnet 5", "category": "frontier" },

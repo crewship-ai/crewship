@@ -7,6 +7,7 @@ import {
   CursorIcon,
   FactoryIcon,
 } from "@/components/icons/provider-icons"
+import { ZAIIcon } from "@/lib/credential-providers/grok-groq-icons"
 import type { ComponentType, SVGProps } from "react"
 import { adapterDefaultModel, adapterModels, catalogModelLabel } from "@/lib/model-catalog"
 
@@ -190,6 +191,9 @@ export function getProviderLabel(provider: string): string {
     CURSOR: "Cursor",
     FACTORY: "Factory",
     OLLAMA: "Ollama",
+    OPENCODE: "OpenCode Zen",
+    OPENCODE_GO: "OpenCode Go",
+    ZAI_CODING_PLAN: "Z.AI Coding Plan",
     NONE: "--",
   }
   return labels[provider] ?? provider
@@ -220,5 +224,7 @@ export function getModelLabel(value: string): string {
  * unknown providers (matches PROVIDER_ICONS map default).
  */
 export function getProviderIcon(provider: string): ComponentType<SVGProps<SVGSVGElement>> {
+  if (provider === "OPENCODE" || provider === "OPENCODE_GO") return OpenCodeIcon
+  if (provider === "ZAI_CODING_PLAN") return ZAIIcon
   return CLI_ADAPTERS[Object.keys(CLI_ADAPTERS).find((k) => CLI_ADAPTERS[k].provider === provider) ?? ""]?.icon ?? AnthropicIcon
 }

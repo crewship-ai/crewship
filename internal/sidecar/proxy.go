@@ -869,7 +869,7 @@ func (p *Proxy) reverseProxyToProvider(w http.ResponseWriter, r *http.Request, s
 	if cred != nil {
 		credentialID = cred.ID
 	}
-	p.copyAndObserveLLM(w, resp, s.BodyCodec, s.LedgerProvider, actorID, credentialID)
+	p.copyAndObserveLLM(w, resp, s.ResponseCodec(r.URL.Path), s.LedgerProvider, actorID, credentialID)
 }
 
 // graceReplay is what a request looked like BEFORE the current credential was
