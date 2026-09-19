@@ -622,17 +622,12 @@ func (s *Scheduler) triggerAgent(ag scheduledAgent) {
 	if runErr != nil {
 		if errors.Is(runErr, orchestrator.ErrDetachedStillRunning) {
 			// Nonterminal (#2626): the exec is still alive and the
-			// orchestrator holds the run at `running`. Neither FAILED nor
-			// COMPLETED is true. Stop the wedged exec before this
-			// goroutine releases its dispatch slot and run lock — releasing
-			// with the process alive is what would let the next scheduled
-			// run start beside it — then leave the run nonterminal for an
-			// operator to reconcile.
-			if _, stopErr := s.orch.StopDetachedRun(context.WithoutCancel(ctx), runID); stopErr != nil {
-				s.logger.Warn("could not stop a detached scheduled run before releasing its slot",
-					"agent", ag.Slug, "run_id", runID, "error", stopErr)
-			}
-			s.logger.Warn("scheduled run's exec detached and is still running; leaving the run nonterminal",
+			// orchestrator holds the run at `running` — it also already
+			// attempted to stop the wedged exec inside RunAgent's own
+			// ownership boundary, before any slot this goroutine holds was
+			// at risk. Neither FAILED nor COMPLETED is true; leave the run
+			// nonterminal for an operator to reconcile.
+			s.logger.Warn("scheduled run's exec detached after RunAgent's stop attempt; leaving the run nonterminal",
 				"agent", ag.Slug, "error", runErr, "duration_ms", completedMeta["duration_ms"])
 		} else {
 			errMsg := runErr.Error()

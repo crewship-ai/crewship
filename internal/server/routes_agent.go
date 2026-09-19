@@ -177,15 +177,11 @@ func (s *Server) handleAgentStart(w http.ResponseWriter, r *http.Request) {
 		}
 		if err := s.orchestrator.RunAgent(ctx, runReq, handler); err != nil {
 			if errors.Is(err, orchestrator.ErrDetachedStillRunning) {
-				// Nonterminal (#2626): the exec lives on and the run stays
-				// at `running`. Stop it before this goroutine's deferred
-				// cleanup releases the run semaphore — otherwise a second
-				// POST /agents/{id}/start could launch beside a live CLI.
-				if _, stopErr := s.orchestrator.StopDetachedRun(context.WithoutCancel(ctx), runReq.RunID); stopErr != nil {
-					s.logger.Warn("could not stop a detached direct run before releasing its slot",
-						"agent_id", agentID, "run_id", runReq.RunID, "error", stopErr)
-				}
-				s.logger.Warn("agent run's exec detached and is still running", "agent_id", agentID, "error", err)
+				// Nonterminal (#2626): the run stays at `running`, and
+				// RunAgent already attempted to stop the wedged exec inside
+				// its own ownership boundary — before the run semaphore this
+				// goroutine's cleanup releases could be re-acquired.
+				s.logger.Warn("agent run's exec detached after RunAgent's stop attempt", "agent_id", agentID, "error", err)
 			} else {
 				s.logger.Error("agent run failed", "agent_id", agentID, "error", err)
 			}

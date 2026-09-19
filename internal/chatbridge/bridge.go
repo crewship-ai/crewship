@@ -1145,14 +1145,17 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	if runErr != nil {
 		if errors.Is(runErr, orchestrator.ErrDetachedStillRunning) {
 			// Nonterminal (#2626): the CLI exec is still alive and the
-			// orchestrator holds the run at `running`. Neither FAILED nor
-			// CANCELLED is true, and a COMPLETED was the old lie. Persist
-			// whatever streamed so far — the turn is visible in the chat —
-			// stop the wedged exec before this turn releases the agent's
-			// run lock (a second turn must not start beside a live CLI),
-			// and close without a terminal status.
+			// orchestrator holds the run at `running` — and already
+			// attempted to stop the wedged exec inside RunAgent's own
+			// ownership boundary, before the agent's run lock this turn
+			// releases could be re-acquired. Neither FAILED nor CANCELLED
+			// is true, and a COMPLETED was the old lie. Persist whatever
+			// streamed so far, count the user message when nothing did (the
+			// cancelled branch's own shape), and close without a terminal
+			// status.
+			cleanCtx, cleanCancel := context.WithTimeout(context.Background(), ledgerWriteTimeout)
+			defer cleanCancel()
 			if acc.Text() != "" || len(partAcc.Parts()) > 0 {
-				cleanCtx, cleanCancel := context.WithTimeout(context.Background(), ledgerWriteTimeout)
 				_ = b.convStore.Append(cleanCtx, chatID, conversation.Message{
 					ID:        generateMsgID(),
 					AgentID:   info.AgentID,
@@ -1162,13 +1165,10 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 					Timestamp: time.Now().UTC(),
 				})
 				_ = b.resolver.IncrementMessageCount(cleanCtx, chatID, 2)
-				cleanCancel()
+			} else {
+				_ = b.resolver.IncrementMessageCount(cleanCtx, chatID, 1)
 			}
-			if _, stopErr := b.orch.StopDetachedRun(context.WithoutCancel(ctx), runID); stopErr != nil {
-				b.logger.Warn("could not stop a detached chat run before releasing the agent",
-					"chat_id", chatID, "run_id", runID, "error", stopErr)
-			}
-			b.logger.Warn("chat turn's exec detached and is still running; leaving the run nonterminal",
+			b.logger.Warn("chat turn's exec detached after RunAgent's stop attempt; leaving the run nonterminal",
 				"chat_id", chatID, "run_id", runID, "error", runErr)
 			return nil
 		}

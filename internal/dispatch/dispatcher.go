@@ -502,6 +502,10 @@ func (d *Dispatcher) awaitDetachedThenSettle(ctx context.Context, live *liveAtte
 			d.logger.Warn("dispatch: could not probe a detached runtime",
 				"run_id", live.assignment.RunID, "locator", live.locator, "error", err)
 			if probeErrors >= maxProbeErrors {
+				// Cannot answer "is it gone?" — so make it gone (#2626
+				// review): settle must not end ownership over a runtime
+				// whose absence was never confirmed. Bounded, best-effort.
+				d.stopDetachedBestEffort(ctx, live)
 				d.settle(ctx, live, runErr)
 				return
 			}
@@ -509,8 +513,9 @@ func (d *Dispatcher) awaitDetachedThenSettle(ctx context.Context, live *liveAtte
 		select {
 		case <-t.C:
 		case <-watch.C:
-			d.logger.Warn("dispatch: detached runtime outlived the monitoring watch; settling into reconciliation",
+			d.logger.Warn("dispatch: detached runtime outlived the monitoring watch; stopping it and settling into reconciliation",
 				"run_id", live.assignment.RunID, "locator", live.locator)
+			d.stopDetachedBestEffort(ctx, live)
 			d.settle(ctx, live, runErr)
 			return
 		case <-superseded:
@@ -518,9 +523,12 @@ func (d *Dispatcher) awaitDetachedThenSettle(ctx context.Context, live *liveAtte
 			// stop renewing a lease we no longer hold — the same rule the
 			// live branch below enforces: a detached runtime that outlives
 			// its supersession would be two runtimes for one work item
-			// (#2626 review finding).
-			if _, err := d.runtime.Stop(ctx, live.locator); err != nil {
-				d.logger.Warn("dispatch: could not stop a superseded detached attempt",
+			// (#2626 review). "Asked, still there" is not a stop, so it
+			// gets one escalation after the grace before this attempt
+			// gives up the supervision; a runtime that survives both is an
+			// operational anomaly the ERROR names for reconciliation.
+			if err := d.stopDetachedConfirmed(ctx, live); err != nil {
+				d.logger.Error("dispatch: a superseded detached runtime did not stop; the newer attempt may share its agent",
 					"run_id", live.assignment.RunID, "locator", live.locator, "error", err)
 			}
 			return
@@ -541,6 +549,47 @@ func (d *Dispatcher) awaitDetachedThenSettle(ctx context.Context, live *liveAtte
 			return
 		}
 	}
+}
+
+// stopDetachedBestEffort signals a detached runtime once, bounded, and logs
+// when it cannot. Used where the dispatcher is about to end its ownership
+// without a confirmed absence (#2626 review): a settle must not leave a live
+// process unsupervised behind it.
+func (d *Dispatcher) stopDetachedBestEffort(ctx context.Context, live *liveAttempt) {
+	stopCtx, cancel := context.WithTimeout(ctx, d.cfg.StopGrace)
+	defer cancel()
+	if _, err := d.runtime.Stop(stopCtx, live.locator); err != nil {
+		d.logger.Warn("dispatch: could not signal a detached runtime before settling",
+			"run_id", live.assignment.RunID, "locator", live.locator, "error", err)
+	}
+}
+
+// stopDetachedConfirmed signals a detached runtime, waits out the grace, and
+// escalates once — returning nil only when the runtime is confirmed gone
+// (#2626 review). Mirrors enforceCancel's shape; an unstoppable process is
+// an error the caller reports for reconciliation rather than silently
+// releasing supervision over it.
+func (d *Dispatcher) stopDetachedConfirmed(ctx context.Context, live *liveAttempt) error {
+	stopped, err := d.runtime.Stop(ctx, live.locator)
+	if err != nil {
+		return fmt.Errorf("signal: %w", err)
+	}
+	if stopped {
+		return nil
+	}
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(d.cfg.StopGrace):
+	}
+	stopped, err = d.runtime.Stop(ctx, live.locator)
+	if err != nil {
+		return fmt.Errorf("escalated signal: %w", err)
+	}
+	if stopped {
+		return nil
+	}
+	return fmt.Errorf("runtime at %s ignored the escalated stop signal", live.locator)
 }
 
 // finish records an attempt's outcome, and refuses to lose it quietly.

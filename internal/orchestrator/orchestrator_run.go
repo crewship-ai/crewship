@@ -44,18 +44,6 @@ const preflightExecTimeout = 30 * time.Second
 // and released capacity while the CLI was still working.
 var ErrDetachedStillRunning = errors.New("orchestrator: exec detached and still running")
 
-// StopDetachedRun stops a run whose exec outlived RunAgent's monitoring
-// budget (#2626). Synchronous callers — scheduler, chat, pipeline steps, the
-// direct-run route — release their per-agent locks and slots when RunAgent
-// returns; a sentinel returned with the process still alive would let the
-// next run start beside it. Stopping the wedged exec before releasing is the
-// honest handoff: bounded, best-effort, and logged when it cannot be done.
-func (o *Orchestrator) StopDetachedRun(ctx context.Context, runID string) (stopped bool, err error) {
-	stopCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
-	return o.StopRun(stopCtx, runID)
-}
-
 // awaitExecTerminal inspects an exec whose stream has ended and, when the
 // process is still alive, keeps inspecting until it terminates (#2626).
 //
@@ -1019,6 +1007,28 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 		// this deferred cleanup nor a later run's removes /secrets/<slug>.
 		agentExecStillRunning = true
 		o.updateRunStatus(ctx, runState.ID, "running")
+		// Terminate the wedged exec INSIDE this ownership boundary (#2626
+		// review): every caller releases its own locks and slots when
+		// RunAgent returns, so a stop attempted after the return races the
+		// next run acquiring them. Best-effort and bounded; a stop that
+		// cannot be confirmed is logged here and the sentinel still names
+		// a possibly-live process, so no caller may read success into it.
+		stopCtx, stopCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		stopped, stopErr := o.StopRunAt(stopCtx, RunLocation{
+			ContainerID: req.ContainerID, AgentSlug: req.AgentSlug, RunID: req.RunID,
+		})
+		stopCancel()
+		switch {
+		case stopErr != nil:
+			o.logger.Error("detached exec outlived its monitoring budget and could not be stopped; the process may still be running",
+				"agent_id", req.AgentID, "run_id", req.RunID, "exec_id", result.ExecID, "error", stopErr)
+		case !stopped:
+			o.logger.Error("detached exec outlived its monitoring budget and ignored the stop signal; the process may still be running",
+				"agent_id", req.AgentID, "run_id", req.RunID, "exec_id", result.ExecID)
+		default:
+			o.logger.Warn("detached exec outlived its monitoring budget and was stopped; the run stays nonterminal for reconciliation",
+				"agent_id", req.AgentID, "run_id", req.RunID, "exec_id", result.ExecID)
+		}
 		return fmt.Errorf("%w: exec %s still running after %s", ErrDetachedStillRunning, result.ExecID, o.detachedWaitBudget)
 	}
 
