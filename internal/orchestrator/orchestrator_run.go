@@ -34,6 +34,54 @@ import (
 // M2 in the 2026-06 audit — cheap, so applied here alongside the P1 cap.
 const preflightExecTimeout = 30 * time.Second
 
+// ErrDetachedStillRunning is RunAgent's explicit NONTERMINAL outcome: the
+// exec's stream ended, the monitoring budget (or the run's context) ran out,
+// and ExecInspect still reports the process alive. The run is left at
+// `running`; nothing about it is finished, succeeded or failed.
+//
+// Until #2626 this case returned nil, and every caller read that nil as
+// "completed" — the webhook vertical promoted it to a succeeded work item
+// and released capacity while the CLI was still working.
+var ErrDetachedStillRunning = errors.New("orchestrator: exec detached and still running")
+
+// awaitExecTerminal inspects an exec whose stream has ended and, when the
+// process is still alive, keeps inspecting until it terminates (#2626).
+//
+// The synchronous path already trusted ExecInspect's answer for exit codes;
+// a stream that ends while the exec lives (a detached session) is not a
+// terminal outcome, so the honest move is to keep asking — the exec's own
+// timeout is expected to settle it, which resolves the run with the real
+// exit code and no duplicate execution. Only when the budget or the context
+// runs out first does this give up and leave `running` true for the caller
+// to handle as ErrDetachedStillRunning.
+func (o *Orchestrator) awaitExecTerminal(ctx context.Context, execID string) (running bool, exitCode int, inspErr error) {
+	running, exitCode, inspErr = o.container.ExecInspect(ctx, execID)
+	if inspErr != nil || !running {
+		return running, exitCode, inspErr
+	}
+	budget := time.NewTimer(o.detachedWaitBudget)
+	defer budget.Stop()
+	interval := o.detachedPollInterval
+	if interval <= 0 {
+		interval = defaultDetachedPollInterval
+	}
+	for {
+		o.logger.Info("exec stream ended while the process is alive; monitoring until it terminates",
+			"exec_id", execID)
+		select {
+		case <-ctx.Done():
+			return true, exitCode, nil
+		case <-budget.C:
+			return true, exitCode, nil
+		case <-time.After(interval):
+		}
+		running, exitCode, inspErr = o.container.ExecInspect(ctx, execID)
+		if inspErr != nil || !running {
+			return running, exitCode, inspErr
+		}
+	}
+}
+
 // execPreflight runs a single pre-flight setup exec under a bounded per-op
 // deadline derived from ctx, draining and closing the result reader. Errors
 // (including deadline) are returned for the caller's existing warn-and-continue
@@ -873,7 +921,7 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 		return fmt.Errorf("run cancelled: %w", ctx.Err())
 	}
 
-	running, exitCode, inspErr := o.container.ExecInspect(ctx, result.ExecID)
+	running, exitCode, inspErr := o.awaitExecTerminal(ctx, result.ExecID)
 	if inspErr != nil {
 		// ExecInspect itself failed — daemon unreachable, exec id already
 		// reaped, whatever — so `running` and `exitCode` above are their zero
@@ -947,12 +995,19 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 	o.markAgentOnline(ctx, req, nil)
 
 	if running {
-		// The CLI exec outlives this call (detached session) and may still
-		// read its credential files — keep the secrets hold so neither this
-		// deferred cleanup nor a later run's removes /secrets/<slug>.
+		// The exec outlived the monitoring budget (or the run's context
+		// ended) while still alive. This is NOT a terminal outcome, and
+		// returning nil here — the pre-#2626 contract — let every caller
+		// record COMPLETED/exit 0 for a process that was still working,
+		// which the webhook vertical then promoted to a succeeded work
+		// item and released capacity on. The typed error is the explicit
+		// nonterminal outcome: the run stays at `running`, and the caller
+		// decides what supervision it can offer. The CLI exec may still
+		// read its credential files — keep the secrets hold so neither
+		// this deferred cleanup nor a later run's removes /secrets/<slug>.
 		agentExecStillRunning = true
 		o.updateRunStatus(ctx, runState.ID, "running")
-		return nil
+		return fmt.Errorf("%w: exec %s still running after %s", ErrDetachedStillRunning, result.ExecID, o.detachedWaitBudget)
 	}
 
 	status := "completed"

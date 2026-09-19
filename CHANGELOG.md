@@ -10,6 +10,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 ## [Unreleased]
 
 ### Fixed
+- A detached still-running exec is no longer reported as a successful run and a succeeded work item. When the agent CLI's stream ends while the process lives on, RunAgent now monitors `ExecInspect` until the exec really terminates (resolving the run with its true exit code) and, only if monitoring exceeds its budget or the context ends, returns a typed `ErrDetachedStillRunning` that leaves the run at `running`. The webhook wrapper no longer rewrites that into `COMPLETED`; the dispatcher holds the attempt (heartbeat, lease, capacity) and polls the runtime until it is confirmed gone, then settles into reconciliation — never a manufactured success and never an automatic retry. Scheduler, chat, pipeline and direct-run callers treat the sentinel as nonterminal instead of FAILED. (#2626)
 - The published OpenAPI document now names the fields the issue and agent list rows actually carry: `client_review_required` (emitted on every issue row since the durable Lead review landed) plus the optional `assignee_slug`, `code_links` and `execution` projections, and the agents' `ask_forms` / `suggested_prompts` (nullable, always encoded). `issueResponse` and `agentResponse` are pinned in the schema-keys contract test so a struct field without schema coverage fails the generator gate again. (#2623)
 
 ### Security

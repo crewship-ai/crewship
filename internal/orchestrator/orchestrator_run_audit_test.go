@@ -10,10 +10,12 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"io"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/provider"
 )
@@ -166,14 +168,61 @@ func TestRunAgent_NoAuditOnDetachedStillRunning(t *testing.T) {
 	rec := &recordingAudit{}
 	o := New(covNewRunContainer(covRunOpts{stream: "{}\n", agentRunning: true}), newMemState(), covQuietLogger())
 	o.SetAuditLog(rec)
+	// Shrink the monitoring budget so the always-alive fake reaches the
+	// detached outcome in milliseconds instead of the 30-minute default.
+	o.SetDetachedExecMonitoring(50*time.Millisecond, 5*time.Millisecond)
 
 	req := covRunReq()
-	if err := o.RunAgent(context.Background(), req, nil); err != nil {
-		t.Fatalf("still-running exec must return nil: %v", err)
+	err := o.RunAgent(context.Background(), req, nil)
+	if err == nil {
+		t.Fatal("still-running exec must not read as success: RunAgent returned nil for a live process (#2626)")
+	}
+	if !errors.Is(err, ErrDetachedStillRunning) {
+		t.Fatalf("still-running exec must return ErrDetachedStillRunning, got: %v", err)
 	}
 
 	if calls := rec.snapshot(); len(calls) != 0 {
 		t.Errorf("audit calls = %d, want 0 for a still-running detached exec: %+v", len(calls), calls)
+	}
+}
+
+// TestRunAgent_DetachedExecThatEndsResolvesItsRealOutcome pins the monitoring
+// half of #2626: a stream that ends while the exec lives is followed until
+// the process terminates, and the run then resolves with the exit code the
+// synchronous path would have used — no caller invention, no second exec.
+func TestRunAgent_DetachedExecThatEndsResolvesItsRealOutcome(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name     string
+		exit     int
+		wantErr  bool
+		wantStat string
+	}{
+		{"ends clean reads as completed", 0, false, "completed"},
+		{"ends non-zero reads as error", 1, true, "error"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			st := newMemState()
+			o := New(covNewRunContainer(covRunOpts{
+				stream:                 "{}\n",
+				agentExit:              tc.exit,
+				agentRunningFlipsAfter: 2, // alive for two inspects, then terminal
+			}), st, covQuietLogger())
+			o.SetDetachedExecMonitoring(5*time.Second, time.Millisecond)
+
+			req := covRunReq()
+			err := o.RunAgent(context.Background(), req, nil)
+			if tc.wantErr && err == nil {
+				t.Fatal("a detached exec that exited non-zero must surface an error")
+			}
+			if !tc.wantErr && err != nil {
+				t.Fatalf("a detached exec that exited 0 must complete: %v", err)
+			}
+			if got := covRunStatus(t, st, covRunID); got != tc.wantStat {
+				t.Errorf("run status = %q, want %q", got, tc.wantStat)
+			}
+		})
 	}
 }
 

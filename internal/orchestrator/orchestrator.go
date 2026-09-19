@@ -498,6 +498,13 @@ type Orchestrator struct {
 	// (provisioned image, declared sidecars, limits) for the crew-start
 	// contract — see SetCrewCompleter. nil in tests/headless.
 	crewCompleter crewstart.Completer
+	// detachedWaitBudget and detachedPollInterval parameterise the
+	// detached-exec monitoring loop in RunAgent (see
+	// SetDetachedExecMonitoring). A stream that ends while ExecInspect still
+	// reports the exec alive is monitored for up to the budget before
+	// RunAgent returns ErrDetachedStillRunning.
+	detachedWaitBudget   time.Duration
+	detachedPollInterval time.Duration
 	// sessionPublisher publishes a run's events on its chat's session channel
 	// so routine/webhook/pipeline/IPC runs are watchable, not just WebSocket
 	// ones (#1823). nil in tests/headless — see session_stream.go.
@@ -1351,22 +1358,47 @@ func New(
 			"warn_threshold", runSemCapWarnThreshold)
 	}
 	return &Orchestrator{
-		container:          container,
-		state:              state,
-		scrubber:           scrubber.New(),
-		logger:             logger,
-		cooldown:           NewCooldownManager(),
-		accepting:          true,
-		crews:              make(map[string]*crewState),
-		tmuxCache:          make(map[string]bool),
-		snapshotHashCache:  make(map[string]string),
-		snapshotPending:    make(map[string]string),
-		snapshotInFlight:   make(map[string]*sync.Mutex),
-		postToolCallSem:    make(chan struct{}, postToolCallSemCap),
-		skillInvocationSem: make(chan struct{}, skillInvocationSemCap),
-		runSem:             make(chan struct{}, runSemCap),
-		runSemCap:          runSemCap,
+		container:            container,
+		state:                state,
+		scrubber:             scrubber.New(),
+		logger:               logger,
+		cooldown:             NewCooldownManager(),
+		accepting:            true,
+		crews:                make(map[string]*crewState),
+		tmuxCache:            make(map[string]bool),
+		snapshotHashCache:    make(map[string]string),
+		snapshotPending:      make(map[string]string),
+		snapshotInFlight:     make(map[string]*sync.Mutex),
+		postToolCallSem:      make(chan struct{}, postToolCallSemCap),
+		skillInvocationSem:   make(chan struct{}, skillInvocationSemCap),
+		runSem:               make(chan struct{}, runSemCap),
+		runSemCap:            runSemCap,
+		detachedWaitBudget:   defaultDetachedWaitBudget,
+		detachedPollInterval: defaultDetachedPollInterval,
 	}
+}
+
+// Defaults for the detached-exec monitoring loop in RunAgent. The budget only
+// bounds how long RunAgent stays synchronous past a stream that ended while
+// the exec lives on; the exec's own timeout is expected to terminate it first.
+// Tests shrink both through the exported setters.
+const (
+	defaultDetachedWaitBudget   = 30 * time.Minute
+	defaultDetachedPollInterval = 2 * time.Second
+)
+
+// SetDetachedExecMonitoring configures the detached-exec monitoring loop.
+// Zero values restore the defaults. Exposed for tests; production keeps the
+// defaults.
+func (o *Orchestrator) SetDetachedExecMonitoring(budget, poll time.Duration) {
+	if budget <= 0 {
+		budget = defaultDetachedWaitBudget
+	}
+	if poll <= 0 {
+		poll = defaultDetachedPollInterval
+	}
+	o.detachedWaitBudget = budget
+	o.detachedPollInterval = poll
 }
 
 // SetStatsRegisterCallback wires a callback invoked on every crew container
