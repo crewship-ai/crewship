@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strconv"
@@ -619,11 +620,23 @@ func (s *Scheduler) triggerAgent(ag scheduledAgent) {
 	}
 
 	if runErr != nil {
-		errMsg := runErr.Error()
-		if err := s.resolver.UpdateRun(ctx, runID, "FAILED", nil, &errMsg, completedMeta); err != nil {
-			s.logger.Warn("failed to update run status", "run_id", runID, "status", "FAILED", "error", err)
+		if errors.Is(runErr, orchestrator.ErrDetachedStillRunning) {
+			// Nonterminal (#2626): the exec is still alive and the
+			// orchestrator holds the run at `running`. Neither FAILED nor
+			// COMPLETED is true; the meta is written without a terminal
+			// status so what the run produced so far stays visible.
+			if err := s.resolver.UpdateRun(ctx, runID, "RUNNING", nil, nil, completedMeta); err != nil {
+				s.logger.Warn("failed to refresh a detached run's metadata", "run_id", runID, "error", err)
+			}
+			s.logger.Warn("scheduled run's exec detached and is still running; leaving the run nonterminal",
+				"agent", ag.Slug, "error", runErr, "duration_ms", completedMeta["duration_ms"])
+		} else {
+			errMsg := runErr.Error()
+			if err := s.resolver.UpdateRun(ctx, runID, "FAILED", nil, &errMsg, completedMeta); err != nil {
+				s.logger.Warn("failed to update run status", "run_id", runID, "status", "FAILED", "error", err)
+			}
+			s.logger.Error("scheduled run failed", "agent", ag.Slug, "error", runErr, "duration_ms", completedMeta["duration_ms"])
 		}
-		s.logger.Error("scheduled run failed", "agent", ag.Slug, "error", runErr, "duration_ms", completedMeta["duration_ms"])
 	} else {
 		exitCode := 0
 		if err := s.resolver.UpdateRun(ctx, runID, "COMPLETED", &exitCode, nil, completedMeta); err != nil {

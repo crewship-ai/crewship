@@ -1059,6 +1059,15 @@ func (h *WebhookHandler) runWebhookAgent(
 		exitCode := 0
 		status := "COMPLETED"
 		var errMsg *string
+		if errors.Is(err, orchestrator.ErrDetachedStillRunning) {
+			// Nonterminal (#2626): the exec is still alive and the
+			// orchestrator holds the run at `running`. Writing COMPLETED
+			// here is how a succeeded work item used to be manufactured
+			// for a process that was still working. No terminal record,
+			// no invented exit code — the sentinel propagates so the
+			// dispatcher keeps the attempt supervised.
+			return err
+		}
 		if err != nil {
 			status = "FAILED"
 			s := err.Error()

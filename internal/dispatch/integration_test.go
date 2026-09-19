@@ -1213,3 +1213,115 @@ func TestVertical_ACancelDuringAPausedAuthorizationSurvivesTheDeferral(t *testin
 		t.Errorf("state = %q after further polls, want cancelled", again.State)
 	}
 }
+
+// 11. A detached return is not a success (#2626).
+//
+// Run hands the exec back while it is still alive and Classify says
+// OutcomeDetached. While the runtime lives, the work must stay nonterminal —
+// the pre-fix behaviour promoted exactly this shape to StateSucceeded and
+// released capacity. Only when the runtime is confirmed gone does the work
+// settle, into reconciliation: nothing captured the detached process's real
+// result, and a blind retry would repeat whatever it did.
+func TestVertical_DetachedReturnIsNotASuccessAndSettlesToReconciliation(t *testing.T) {
+	h := newHarness(t)
+	h.cfg.ConfirmPollInterval = 25 * time.Millisecond
+	detached := errors.New("orchestrator: exec detached and still running: exec-1")
+	h.rt.failWith = detached
+	h.rt.classifyAs = OutcomeDetached
+
+	r := h.accept("dlv-detached-1")
+	_, stop := h.runDispatcher(nil)
+	defer stop()
+
+	// The attempt has returned from Run; the runtime it described is alive.
+	// Poll until the attempt is running, then assert it does NOT become
+	// succeeded while that is true.
+	h.waitForState(r.WorkID, work.StateRunning)
+	if got := h.rt.starts.Load(); got != 1 {
+		t.Fatalf("%d runtimes created, want exactly 1", got)
+	}
+
+	// The process finally ends on its own (the fake's Stop marks the locator
+	// gone, which is what Alive reports).
+	h.rt.mu.Lock()
+	locs := append([]string(nil), h.rt.locators...)
+	h.rt.mu.Unlock()
+	for _, loc := range locs {
+		if _, err := h.rt.Stop(context.Background(), loc); err != nil {
+			t.Fatalf("stop the detached runtime at %s: %v", loc, err)
+		}
+	}
+
+	it := h.waitForState(r.WorkID, work.StateNeedsReconciliation)
+	if !strings.Contains(it.StateReason, "detached") {
+		t.Errorf("reason = %q, want it to name the detached runtime", it.StateReason)
+	}
+	if got := h.rt.starts.Load(); got != 1 {
+		t.Errorf("%d runtimes created in total, want 1 — a detached outcome must not re-run the work", got)
+	}
+}
+
+// 12. A cancel arriving while a detached runtime lives is a cancellation once
+// the runtime is confirmed gone — the same contract as a live run, reached
+// through the detached gate (#2626).
+func TestVertical_CancelDuringADetachedRuntimeIsCancelledOnceGone(t *testing.T) {
+	h := newHarness(t)
+	h.cfg.ConfirmPollInterval = 25 * time.Millisecond
+	h.cfg.CancelPollInterval = 25 * time.Millisecond
+	detached := errors.New("orchestrator: exec detached and still running: exec-1")
+	h.rt.failWith = detached
+	h.rt.classifyAs = OutcomeDetached
+
+	r := h.accept("dlv-detached-2")
+	_, stop := h.runDispatcher(nil)
+	defer stop()
+
+	h.waitForState(r.WorkID, work.StateRunning)
+
+	// The operator cancels; the enforcement path signals the runtime, and the
+	// fake honours it (Stop marks the locator gone).
+	if _, err := h.store.RequestCancel(context.Background(), r.WorkID, "operator", "stop the detached run"); err != nil {
+		t.Fatalf("cancel: %v", err)
+	}
+
+	it := h.waitForState(r.WorkID, work.StateCancelled)
+	_ = it
+	if got := h.rt.starts.Load(); got != 1 {
+		t.Errorf("%d runtimes created, want 1 — a cancelled detached attempt must not re-run", got)
+	}
+}
+
+// 13. The detached gate holds the attempt, not just the row: while Alive
+// answers true the work stays running even though Run already returned, and
+// no second runtime is created for it (#2626).
+func TestVertical_DetachedAttemptHoldsWhileTheRuntimeLives(t *testing.T) {
+	h := newHarness(t)
+	h.cfg.ConfirmPollInterval = 25 * time.Millisecond
+	detached := errors.New("orchestrator: exec detached and still running: exec-1")
+	h.rt.failWith = detached
+	h.rt.classifyAs = OutcomeDetached
+
+	r := h.accept("dlv-detached-3")
+	_, stop := h.runDispatcher(nil)
+	defer stop()
+
+	h.waitForState(r.WorkID, work.StateRunning)
+
+	// Run has returned (the fake returns failWith immediately after
+	// started()); give the dispatcher several poll cycles. With the runtime
+	// alive the work must not leave the running state.
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		it, err := h.store.Get(context.Background(), r.WorkID)
+		if err != nil {
+			t.Fatalf("get: %v", err)
+		}
+		if it.State != work.StateRunning {
+			t.Fatalf("work left the running state (%q) while its detached runtime was still alive", it.State)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if got := h.rt.starts.Load(); got != 1 {
+		t.Errorf("%d runtimes created, want 1", got)
+	}
+}

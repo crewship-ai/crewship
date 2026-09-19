@@ -15,6 +15,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/conversation"
 	"github.com/crewship-ai/crewship/internal/harbormaster"
@@ -134,9 +135,14 @@ type covRunOpts struct {
 	agentExit       int    // agent exit code
 	agentRunning    bool   // ExecInspect "still running"
 	agentInspectErr error  // ExecInspect error on the terminal agent-exec inspect
-	health          string // checkSidecar reply ("" → not running)
-	sidecarExit     int    // startSidecar health script exit code
-	failMCPWrite    bool   // fail the .mcp.json write exec
+	// agentRunningFlipsAfter, when > 0, reports the exec still running for
+	// the first N terminal inspects and terminal (agentExit) afterwards —
+	// the detached exec that finally ends while RunAgent is monitoring it
+	// (#2626).
+	agentRunningFlipsAfter int
+	health                 string // checkSidecar reply ("" → not running)
+	sidecarExit            int    // startSidecar health script exit code
+	failMCPWrite           bool   // fail the .mcp.json write exec
 }
 
 func covNewRunContainer(opts covRunOpts) *covContainer {
@@ -173,6 +179,13 @@ func covNewRunContainer(opts covRunOpts) *covContainer {
 		case "agent-exec":
 			if opts.agentInspectErr != nil {
 				return false, 0, opts.agentInspectErr
+			}
+			if opts.agentRunningFlipsAfter > 0 {
+				c.agentInspects.Add(1)
+				if int(c.agentInspects.Load()) <= opts.agentRunningFlipsAfter {
+					return true, 0, nil
+				}
+				return false, opts.agentExit, nil
 			}
 			return opts.agentRunning, opts.agentExit, nil
 		case "sidecar-start":
@@ -953,8 +966,10 @@ func TestRunAgent_ExitCodeMapping(t *testing.T) {
 		j := &covJournal{}
 		o := New(covNewRunContainer(covRunOpts{stream: "{}\n", agentRunning: true}), st, covQuietLogger())
 		o.SetJournal(j)
-		if err := o.RunAgent(context.Background(), covRunReq(), nil); err != nil {
-			t.Fatalf("still-running exec must return nil: %v", err)
+		o.SetDetachedExecMonitoring(50*time.Millisecond, 5*time.Millisecond)
+		err := o.RunAgent(context.Background(), covRunReq(), nil)
+		if err == nil || !errors.Is(err, ErrDetachedStillRunning) {
+			t.Fatalf("still-running exec must return ErrDetachedStillRunning (#2626), got: %v", err)
 		}
 		if got := covRunStatus(t, st, covRunID); got != "running" {
 			t.Errorf("run status = %q, want running", got)

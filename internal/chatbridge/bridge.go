@@ -1143,6 +1143,30 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		costCancel()
 	}
 	if runErr != nil {
+		if errors.Is(runErr, orchestrator.ErrDetachedStillRunning) {
+			// Nonterminal (#2626): the CLI exec is still alive and the
+			// orchestrator holds the run at `running`. Neither FAILED nor
+			// CANCELLED is true, and a COMPLETED was the old lie. Persist
+			// whatever streamed so far — the turn is visible in the chat —
+			// and close the turn without a terminal status; the run row
+			// keeps `running` until the exec's own timeout settles it.
+			if acc.Text() != "" || len(partAcc.Parts()) > 0 {
+				cleanCtx, cleanCancel := context.WithTimeout(context.Background(), ledgerWriteTimeout)
+				_ = b.convStore.Append(cleanCtx, chatID, conversation.Message{
+					ID:        generateMsgID(),
+					AgentID:   info.AgentID,
+					Role:      conversation.RoleAssistant,
+					Content:   acc.Text(),
+					Parts:     partAcc.Parts(),
+					Timestamp: time.Now().UTC(),
+				})
+				_ = b.resolver.IncrementMessageCount(cleanCtx, chatID, 2)
+				cleanCancel()
+			}
+			b.logger.Warn("chat turn's exec detached and is still running; leaving the run nonterminal",
+				"chat_id", chatID, "run_id", runID, "error", runErr)
+			return nil
+		}
 		// If context was cancelled (user pressed stop), don't emit error -- the hub
 		// sends a clean "done" event. Emitting error here would cause an error flash.
 		if ctx.Err() == context.Canceled || errors.Is(runErr, orchestrator.ErrAgentStopped) {

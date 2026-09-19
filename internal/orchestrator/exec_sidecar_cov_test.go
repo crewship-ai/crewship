@@ -15,6 +15,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/crewship-ai/crewship/internal/provider"
@@ -27,6 +28,9 @@ import (
 type covContainer struct {
 	mu    sync.Mutex
 	calls []provider.ExecConfig
+	// agentInspects counts the terminal agent-exec inspections, for the
+	// detached-then-flips tests (#2626).
+	agentInspects atomic.Int64
 	// stdins holds each call's drained stdin, parallel to calls. The merged
 	// preflight script (#1646) rides stdin rather than argv, so a fake that
 	// only recorded Cmd would see an exec that says nothing about its work.
