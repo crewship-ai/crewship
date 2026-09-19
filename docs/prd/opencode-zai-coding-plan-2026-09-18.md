@@ -110,10 +110,11 @@ conflict on instance 3, not a defect in this slice:
 
 ### Acceptance side-instance (no impact on the live service)
 
-- **Currently deployed: commit `75343b541`** (final PR head; started
-  2026-09-18 ~20:4x UTC, version string
-  `nightly-20260915-r127101-118-g75343b541`). Earlier mentions of f67ed83a1 /
-  943e3bd24 / a89e09bbe below are deployment history, not the current state.
+- **Currently deployed: commit `75343b541`** (the code head; docs-only
+  commits after it change no binary. Started 2026-09-18 ~20:4x UTC, version
+  string `nightly-20260915-r127101-118-g75343b541`). Earlier mentions of
+  f67ed83a1 / 943e3bd24 / a89e09bbe below are deployment history, not the
+  current state.
 - `https://crewship-dev3.unifylab.cz:8443` (Caddy block appended to
   `/etc/caddy/Caddyfile`, backup `Caddyfile.bak-zai-acceptance-20260918`;
   note: `caddy reload` is broken on this host — admin API disabled — so
