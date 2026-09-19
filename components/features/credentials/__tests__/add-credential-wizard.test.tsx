@@ -301,6 +301,23 @@ describe("provider login (#2428)", () => {
     expect(bodyOf(createCall)).toMatchObject({ provider: "XAI", type: "PROVIDER_LOGIN", mode: "api_key", value: "fixture-xai-key" })
   })
 
+  it.each([
+    ["OpenCode Go", "OPENCODE_GO"],
+    ["OpenCode Zen", "OPENCODE"],
+  ])("connects %s with its own API-key slot", async (label, provider) => {
+    const { onSuccess } = renderWizard()
+    fireEvent.click(screen.getByRole("button", { name: new RegExp(`^${label}`) }))
+    expect(screen.queryByRole("button", { name: /Sign in with a code/i })).not.toBeInTheDocument()
+    expect(screen.getByRole("link", { name: /Get API key/ })).toHaveAttribute("href", "https://opencode.ai/auth")
+    fireEvent.change(screen.getByLabelText(/^API key$/i), { target: { value: "fixture-opencode-key" } })
+    fireEvent.change(screen.getByLabelText(/^name$/i), { target: { value: label } })
+    fireEvent.click(screen.getByRole("button", { name: /^continue$/i }))
+    fireEvent.click(screen.getByRole("button", { name: /save provider|finish setup/i }))
+    await waitFor(() => expect(onSuccess).toHaveBeenCalled())
+    const call = h.apiFetch.mock.calls.find(([url]) => String(url).startsWith("/api/v1/credentials?"))!
+    expect(bodyOf(call)).toMatchObject({ provider, type: "PROVIDER_LOGIN", mode: "api_key", value: "fixture-opencode-key" })
+  })
+
   function pickOpenAI() {
     fireEvent.click(screen.getByRole("button", { name: /^ChatGPT \/ OpenAI/i }))
     fireEvent.click(screen.getByRole("button", { name: /import from codex cli/i }))

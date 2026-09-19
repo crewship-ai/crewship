@@ -203,7 +203,7 @@ func (h *AgentHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.LLMProvider != nil && *req.LLMProvider != "" && !validLLMProviders[*req.LLMProvider] {
-		replyError(w, http.StatusBadRequest, "llm_provider must be ANTHROPIC, OPENAI, GOOGLE, CURSOR, FACTORY, or OLLAMA")
+		replyError(w, http.StatusBadRequest, "llm_provider must be ANTHROPIC, OPENAI, GOOGLE, CURSOR, FACTORY, OLLAMA, OPENCODE, or OPENCODE_GO")
 		return
 	}
 	if req.ToolProfile == "" {

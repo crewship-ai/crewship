@@ -52,6 +52,8 @@ export const MODELS_BY_PROVIDER: Record<LLMProvider, readonly string[]> = {
   // Ollama is served via OpenCode (provider/model paths). The tags come from
   // the catalog's live_only ollama provider; the string Crewship sends to
   // OpenCode is ollama/<tag>.
+  OPENCODE: providerModels("opencode").map((m) => m.id),
+  OPENCODE_GO: providerModels("opencode_go").map((m) => m.id),
   OLLAMA: providerModels("ollama").map((m) => m.id),
 }
 

@@ -115,6 +115,8 @@ export function AWSIcon(props: IconProps) {
 export const CustomCLIIcon = Terminal
 
 export const PROVIDER_ICONS: Record<string, React.ComponentType<IconProps>> = {
+  OPENCODE: OpenCodeIcon,
+  OPENCODE_GO: OpenCodeIcon,
   ANTHROPIC: AnthropicIcon,
   OPENAI: OpenAIIcon,
   GOOGLE: GeminiIcon,

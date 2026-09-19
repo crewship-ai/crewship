@@ -113,3 +113,32 @@ Note `type` IS the part type at top level — NOT a nested `message.part.updated
 **Bare model rejected** — use `provider/model` form (`anthropic/claude-sonnet-4-6` not `claude-sonnet-4-6`).
 
 **MCP server uses literal `${VAR}` token** — Cursor/Claude `${VAR}` syntax incompatible; ensure Crewship's writer translated to `{env:VAR}`. Check by `cat /output/<slug>/opencode.json`.
+
+## OpenCode Go and Zen
+
+In **Credentials → Add provider**, choose **OpenCode Go** or **OpenCode Zen**,
+follow the console link and paste an API key. Name the account and assign it to
+the crew or agent that will use it. Then select the matching model provider in
+the agent's model settings; the runner is **OpenCode**.
+
+- Go models use `opencode-go/<model>` and the Go subscription endpoint.
+- Zen models use `opencode/<model>` and the metered Zen endpoint.
+
+These are separate accounts in Crewship even if you reuse the same upstream
+key. The selected key stays in the sidecar; OpenCode receives dummy auth and
+keeps its native per-model protocol. Go's Crewship credential slot is
+`OPENCODE_GO_API_KEY`, mapped to `opencode-go` in OpenCode's auth file; it is
+not an upstream environment-variable convention.
+
+Go connects using an API key, but has subscription usage limits. Its optional
+**Use balance** setting can consume Zen credit after those limits; manage it
+in the [OpenCode console](https://opencode.ai/auth). Crewship does not infer
+remaining subscription quota or balance-overage charges from token counts.
+Zen usage estimates use Zen's model prices. The console is authoritative for
+both products' actual billing, limits and model access.
+
+Model suggestions are a curated subset; use a custom native model ID for
+other models your OpenCode version supports. Transport verified with OpenCode
+1.18.31; update older crew installations if the provider or model is unknown.
+See the official [Go](https://opencode.ai/docs/go/) and
+[Zen](https://opencode.ai/docs/zen/) documentation.

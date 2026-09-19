@@ -55,7 +55,7 @@ describe("provider, mode and owner", () => {
       providers={[]} modes={[]} owners={[]} onToggleCollapse={() => {}} />)
     fireEvent.click(screen.getByText("Grok / xAI"))
     expect(change).toHaveBeenCalledWith({ ...EMPTY_LOGIN_FILTERS, provider: ["XAI"] })
-    expect(screen.getAllByLabelText("0 connected accounts")).toHaveLength(12)
+    expect(screen.getAllByLabelText("0 connected accounts")).toHaveLength(14)
   })
 
   it("toggle values in and out of a list without touching the other facets", () => {

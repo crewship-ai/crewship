@@ -38,7 +38,8 @@ const (
 	// ModeSubscription: a seat (Claude Max setup-token, ChatGPT auth.json).
 	// Traffic goes through the CONNECT tunnel, billed flat-rate.
 	ModeSubscription = "subscription"
-	// ModeAPIKey: a metered key. Delivered exactly like an API_KEY — through
+	// ModeAPIKey: API-key authentication (including OpenCode Go subscription
+	// keys). Delivered exactly like an API_KEY — through
 	// the sidecar CredStore where the adapter has a route, env otherwise.
 	ModeAPIKey = "api_key"
 
@@ -88,12 +89,16 @@ const (
 var providers = map[string]struct{}{
 	"ANTHROPIC": {}, "OPENAI": {}, "GOOGLE": {}, "CURSOR": {}, "FACTORY": {},
 	"XAI": {}, "GROQ": {}, "OPENROUTER": {}, "DEEPSEEK": {},
-	"MOONSHOT": {}, "ZAI": {}, "MINIMAX": {},
+	"MOONSHOT": {}, "ZAI": {}, "MINIMAX": {}, "OPENCODE": {}, "OPENCODE_GO": {},
 }
 
 // Canonical folds a provider onto its stored spelling.
 func Canonical(provider string) string {
-	return strings.ToUpper(strings.TrimSpace(provider))
+	p := strings.ToUpper(strings.TrimSpace(provider))
+	if p == "OPENCODE-GO" {
+		return "OPENCODE_GO"
+	}
+	return p
 }
 
 // IsProvider reports whether provider is one a login can pay for.
@@ -104,7 +109,7 @@ func IsProvider(provider string) bool {
 
 // Providers lists the accepted providers, for error messages and help text.
 func Providers() []string {
-	return []string{"ANTHROPIC", "OPENAI", "GOOGLE", "CURSOR", "FACTORY", "XAI", "GROQ", "OPENROUTER", "DEEPSEEK", "MOONSHOT", "ZAI", "MINIMAX"}
+	return []string{"ANTHROPIC", "OPENAI", "GOOGLE", "CURSOR", "FACTORY", "XAI", "GROQ", "OPENROUTER", "DEEPSEEK", "MOONSHOT", "ZAI", "MINIMAX", "OPENCODE", "OPENCODE_GO"}
 }
 
 // ValidMode reports whether mode is one of the two.
@@ -227,6 +232,10 @@ var apiKeyEnvVar = map[string]string{
 	"MOONSHOT":   "MOONSHOT_API_KEY",
 	"ZAI":        "ZAI_API_KEY",
 	"MINIMAX":    "MINIMAX_API_KEY",
+	"OPENCODE":   "OPENCODE_API_KEY",
+	// Separate Crewship slot: OpenCode itself shares OPENCODE_API_KEY across Go and Zen.
+	// The auth.json renderer maps this slot to the native opencode-go provider.
+	"OPENCODE_GO": "OPENCODE_GO_API_KEY",
 }
 
 // DeliveryFor returns the delivery shape for a (provider, mode) pair.

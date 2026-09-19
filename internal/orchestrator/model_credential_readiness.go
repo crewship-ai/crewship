@@ -153,6 +153,14 @@ func ModelCredentialReadiness(adapter, llmProvider, llmModel string, creds []Cre
 			continue
 		}
 		if len(allowed) > 0 {
+			// The routed exception: an OpenCode run whose provider owns a
+			// /llm/… route is served from the CredStore instead.
+			if adapter == "OPENCODE" && proxyRoutableProvider(want) && credTypeToProvider(cred) == want {
+				report.State = ModelCredentialReady
+				report.CredentialID = cred.ID
+				report.Delivery = DeliverySidecar
+				return report
+			}
 			// BuildEnvVarsSidecar's allowed-override loop: the variable must
 			// be one the adapter reads AND the type must have a delivery
 			// channel. gemini-cli reads either Google spelling; the runtime
@@ -161,14 +169,6 @@ func ModelCredentialReadiness(adapter, llmProvider, llmModel string, creds []Cre
 				report.State = ModelCredentialReady
 				report.CredentialID = cred.ID
 				report.Delivery = DeliveryEnv
-				return report
-			}
-			// The routed exception: an OpenCode run whose provider owns a
-			// /llm/… route is served from the CredStore instead.
-			if adapter == "OPENCODE" && proxyRoutableProvider(want) && credTypeToProvider(cred) == want {
-				report.State = ModelCredentialReady
-				report.CredentialID = cred.ID
-				report.Delivery = DeliverySidecar
 				return report
 			}
 			continue

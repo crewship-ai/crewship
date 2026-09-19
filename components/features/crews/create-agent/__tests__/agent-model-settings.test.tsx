@@ -23,10 +23,20 @@ describe("Agent model settings", () => {
 
   it("keeps OpenCode when changing its provider and converts minutes only at the API boundary", () => {
     render(<Harness />)
-    fireEvent.click(screen.getByRole("radio", { name: /^OpenCode/ }))
+    fireEvent.click(within(screen.getByRole("radiogroup", { name: "Agent runner" })).getByRole("radio", { name: /^OpenCode/ }))
     fireEvent.click(within(screen.getByRole("radiogroup", { name: "Model provider" })).getByRole("radio", { name: "OpenAI" }))
     fireEvent.change(screen.getByLabelText("Maximum run duration"), { target: { value: "15" } })
     expect(draft()).toMatchObject({ cliAdapter: "OPENCODE", llmProvider: "OPENAI", timeoutSeconds: 900 })
+  })
+
+  it.each([
+    ["OpenCode Go", "OPENCODE_GO", "opencode-go/"],
+    ["OpenCode Zen", "OPENCODE", "opencode/"],
+  ])("selects the correct runner and billing namespace for %s", (label, provider, prefix) => {
+    render(<Harness />)
+    fireEvent.click(within(screen.getByRole("radiogroup", { name: "Model provider" })).getByRole("radio", { name: label }))
+    expect(draft()).toMatchObject({ cliAdapter: "OPENCODE", llmProvider: provider })
+    expect(draft().llmModel.startsWith(prefix)).toBe(true)
   })
 
   it("supports arrow-key selection with a single radio tab stop", () => {

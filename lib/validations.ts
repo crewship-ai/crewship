@@ -46,7 +46,7 @@ export const createAgentSchema = z.object({
   // OpenAI model. Without distinct provider values the credential dialog
   // can't surface the right env-var preset and the sidecar would mis-route
   // the bearer token.
-  llm_provider: z.enum(["OPENAI", "ANTHROPIC", "GOOGLE", "CURSOR", "FACTORY", "OLLAMA"]).optional(),
+  llm_provider: z.enum(["OPENAI", "ANTHROPIC", "GOOGLE", "CURSOR", "FACTORY", "OLLAMA", "OPENCODE", "OPENCODE_GO"]).optional(),
   llm_model: z.string().max(100).optional(),
   system_prompt: z.string().max(10000).optional(),
   timeout_seconds: z.number().int().min(30).max(7200).default(1800),
@@ -85,7 +85,7 @@ export const updateAgentSchema = z.object({
   cli_adapter: z.enum(["CLAUDE_CODE", "OPENCODE", "CODEX_CLI", "GEMINI_CLI", "CURSOR_CLI", "FACTORY_DROID"]).optional(),
   // Mirror of createAgentSchema.llm_provider — CURSOR + FACTORY kept for
   // credential routing parity (see comment above).
-  llm_provider: z.enum(["OPENAI", "ANTHROPIC", "GOOGLE", "CURSOR", "FACTORY", "OLLAMA"]).optional(),
+  llm_provider: z.enum(["OPENAI", "ANTHROPIC", "GOOGLE", "CURSOR", "FACTORY", "OLLAMA", "OPENCODE", "OPENCODE_GO"]).optional(),
   llm_model: z.string().max(100).optional(),
   system_prompt: z.string().max(10000).optional(),
   timeout_seconds: z.number().int().min(30).max(7200).optional(),

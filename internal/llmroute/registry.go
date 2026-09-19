@@ -469,6 +469,25 @@ func init() {
 		AuthRules:         []AuthRule{{Slots: []AuthSlot{{Placement: PlaceHeader, Name: "Authorization", Prefix: "Bearer "}}}},
 		KeyEnvVars:        []string{"OPENROUTER_API_KEY"},
 	})
+	// Native OpenCode gateways share a host but must never share a credential slot.
+	for _, gateway := range []struct{ id, name, prefix, base, env string }{
+		{"OPENCODE", "OpenCode Zen", "opencode", "/zen/v1", "OPENCODE_API_KEY"},
+		{"OPENCODE_GO", "OpenCode Go", "opencode-go", "/zen/go/v1", "OPENCODE_GO_API_KEY"},
+	} {
+		register(Spec{
+			ID: gateway.id, DisplayName: gateway.name, LedgerProvider: gateway.prefix,
+			BodyCodec: "openai", PathPrefix: "/llm/" + gateway.prefix, StripPrefix: true,
+			UpstreamHost: "opencode.ai", UpstreamBasePath: gateway.base, RequireCredential: true,
+			// Each model retains its native SDK. Replace every SDK auth header;
+			// no dummy may reach an Anthropic or Google endpoint.
+			AuthRules: []AuthRule{{Slots: []AuthSlot{
+				{Placement: PlaceHeader, Name: "Authorization", Prefix: "Bearer "},
+				{Placement: PlaceHeader, Name: "x-api-key"},
+				{Placement: PlaceHeader, Name: "x-goog-api-key"},
+			}}},
+			KeyEnvVars: []string{gateway.env},
+		})
+	}
 	register(Spec{
 		ID:          "OPENAI_COMPAT",
 		DisplayName: "OpenAI-compatible endpoint",

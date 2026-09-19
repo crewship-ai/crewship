@@ -212,6 +212,10 @@ func buildLoginView(src loginSource, parts map[string]string, state *refreshStat
 		}
 		v.PlanLabel = &label
 	}
+	if provider == "OPENCODE_GO" {
+		label := "Go subscription"
+		v.PlanLabel = &label
+	}
 	if expires != "" {
 		e := expires
 		v.ExpiresAt = &e

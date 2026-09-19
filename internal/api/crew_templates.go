@@ -527,7 +527,7 @@ func (h *CrewTemplateHandler) Deploy(w http.ResponseWriter, r *http.Request) {
 	var overrides deployOverrides
 	if body.Provider != "" || body.CLIAdapter != "" || body.LLMModel != "" {
 		provider, ok := resolveLLMProvider(body.Provider)
-		matching := map[string]string{"ANTHROPIC": "CLAUDE_CODE", "OPENAI": "CODEX_CLI", "GOOGLE": "GEMINI_CLI", "CURSOR": "CURSOR_CLI", "FACTORY": "FACTORY_DROID", "OLLAMA": "OPENCODE"}
+		matching := map[string]string{"ANTHROPIC": "CLAUDE_CODE", "OPENAI": "CODEX_CLI", "GOOGLE": "GEMINI_CLI", "CURSOR": "CURSOR_CLI", "FACTORY": "FACTORY_DROID", "OLLAMA": "OPENCODE", "OPENCODE": "OPENCODE", "OPENCODE_GO": "OPENCODE"}
 		if !ok || strings.TrimSpace(body.Provider) == "" || matching[provider.provider] != body.CLIAdapter || strings.TrimSpace(body.LLMModel) == "" {
 			writeProblem(w, r, http.StatusBadRequest, "Choose a provider, its matching runner and a model")
 			return

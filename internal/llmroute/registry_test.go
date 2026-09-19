@@ -120,8 +120,8 @@ func TestRegister_PanicIsAtomic(t *testing.T) {
 	if s, ok := MatchPath("/testprovider/chat"); ok {
 		t.Errorf("MatchPath found %q from a rejected registration", s.ID)
 	}
-	if got := len(Specs()); got != 5 {
-		t.Errorf("Specs() has %d rows; the built-in table should still have 5", got)
+	if got := len(Specs()); got != 7 {
+		t.Errorf("Specs() has %d rows; the built-in table should still have 7", got)
 	}
 }
 
