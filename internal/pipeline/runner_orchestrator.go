@@ -472,6 +472,19 @@ func (r *OrchestratorRunner) RunStep(ctx context.Context, req AgentStepRequest) 
 			"dropped", recorder.Dropped(), "truncated", recorder.Truncated())
 	}
 	if runErr != nil {
+		if errors.Is(runErr, orchestrator.ErrDetachedStillRunning) {
+			// Nonterminal (#2626): the agent's exec is still alive, so the
+			// step has no result to record — neither its output nor a
+			// success. Failing the step surfaces an operator-visible state
+			// without a retry: pipeline steps are not auto-retried, and a
+			// replay is an explicit new authorization, so nothing runs the
+			// agent twice from here.
+			r.recordChatTurn(ctx, chatID, agentID, acc.Text(), partAcc.Parts(), promptPersisted)
+			return AgentStepResult{
+				Output:     acc.Text(),
+				DurationMs: time.Since(startedAt).Milliseconds(),
+			}, fmt.Errorf("agent exec detached and still running; the step has no confirmed result: %w", runErr)
+		}
 		// Partial-usage on error (#1426, 3.4). A cancelled or killed stream
 		// may still have surfaced usage metadata for the tokens already
 		// spent; report it so a cancel mid-agent-step records the real

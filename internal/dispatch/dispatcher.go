@@ -321,8 +321,21 @@ func (d *Dispatcher) supervise(ctx context.Context, live *liveAttempt) {
 	settleCtx := context.WithoutCancel(ctx)
 	select {
 	case runErr := <-runDone:
-		live.cancel()
-		d.settle(settleCtx, live, runErr)
+		if d.runtime.Classify(a, runErr) == OutcomeDetached {
+			// A detached return is not a result (#2626): Run handed the
+			// exec back while it was still alive. Holding the attempt —
+			// heartbeat, lease, capacity — and asking the runtime whether
+			// it is gone yet is the only honest thing to do until the
+			// process terminates; settling before that is how a succeeded
+			// work item used to be manufactured for a run that had not
+			// finished. live.cancel() is deliberately NOT taken here: the
+			// supervision goroutines (heartbeat, cancel watch) are the
+			// things keeping this attempt coherent while it waits.
+			d.awaitDetachedThenSettle(settleCtx, live, superseded, abandoned, runDone, runErr)
+		} else {
+			live.cancel()
+			d.settle(settleCtx, live, runErr)
+		}
 
 	case <-superseded:
 		// A newer attempt owns this work. Stop EXECUTING, not merely stop
@@ -431,12 +444,94 @@ func (d *Dispatcher) settle(ctx context.Context, live *liveAttempt, runErr error
 		d.finish(ctx, a, work.StateRetryWait, runErr.Error())
 	case OutcomeFailed:
 		d.finish(ctx, a, work.StateFailed, runErr.Error())
+	case OutcomeDetached:
+		// The detached runtime is confirmed gone, but nothing captured its
+		// terminal result — the stream ended before the process did. The
+		// work is not a success and must not be retried blind: reconciliation
+		// carries it, with the reason saying exactly what is unknown (#2626).
+		d.park(ctx, a, "detached runtime ended without a captured terminal result: "+runErr.Error())
 	case OutcomeSucceeded:
 		// A runtime that reports success alongside an error is confused, and
 		// the work is not the place to resolve that.
 		d.park(ctx, a, "the runtime classified a failure as success: "+runErr.Error())
 	default:
 		d.park(ctx, a, "the runtime's outcome is unclear: "+runErr.Error())
+	}
+}
+
+// awaitDetachedThenSettle supervises an attempt whose Run returned the
+// detached sentinel (#2626): the exec is still alive and nobody is streaming
+// it. The heartbeat goroutine keeps the lease renewed and the capacity held
+// while this waits — which is the point — and every way an attempt can end
+// (superseded, abandoned by cancel enforcement, shutdown) is selected on, so
+// the wait cannot outlive the supervisor that owns it.
+//
+// When the provider confirms the runtime is gone (or the watch budget
+// expires, or probes stay broken), the attempt settles through the ordinary
+// path: the cancel-aware branch first, then the OutcomeDetached case, which
+// parks in reconciliation — the detached process's real result was never
+// captured, and a blind retry would repeat whatever it did.
+func (d *Dispatcher) awaitDetachedThenSettle(ctx context.Context, live *liveAttempt, superseded, abandoned <-chan struct{}, runDone <-chan error, runErr error) {
+	interval := d.cfg.ConfirmPollInterval
+	if interval <= 0 {
+		interval = time.Second
+	}
+	const (
+		maxProbeErrors = 5
+		// maxDetachedWatch deliberately exceeds the orchestrator's
+		// detachedWaitBudget: the sentinel only appears once that budget is
+		// spent, so this is the outer bound on holding capacity for a
+		// runtime nobody can see the end of.
+		maxDetachedWatch = 90 * time.Minute
+	)
+	watch := time.NewTimer(maxDetachedWatch)
+	defer watch.Stop()
+	t := time.NewTicker(interval)
+	defer t.Stop()
+	probeErrors := 0
+	for {
+		alive, err := d.runtime.Alive(ctx, live.locator)
+		switch {
+		case err == nil && !alive:
+			d.settle(ctx, live, runErr)
+			return
+		case err == nil:
+			probeErrors = 0
+		default:
+			probeErrors++
+			d.logger.Warn("dispatch: could not probe a detached runtime",
+				"run_id", live.assignment.RunID, "locator", live.locator, "error", err)
+			if probeErrors >= maxProbeErrors {
+				d.settle(ctx, live, runErr)
+				return
+			}
+		}
+		select {
+		case <-t.C:
+		case <-watch.C:
+			d.logger.Warn("dispatch: detached runtime outlived the monitoring watch; settling into reconciliation",
+				"run_id", live.assignment.RunID, "locator", live.locator)
+			d.settle(ctx, live, runErr)
+			return
+		case <-superseded:
+			// A newer attempt owns this work; not ours to settle.
+			return
+		case <-abandoned:
+			d.park(ctx, live.assignment, "cancel requested and the runtime at "+live.locator+
+				" did not stop within the grace period")
+			return
+		case <-live.shutdown:
+			// runDone was drained to get here; hand shutdownAttempt a
+			// channel that replays the same error so it settles rather
+			// than waiting for a return that already happened.
+			replay := make(chan error, 1)
+			replay <- runErr
+			close(replay)
+			d.shutdownAttempt(live, replay)
+			return
+		case <-ctx.Done():
+			return
+		}
 	}
 }
 

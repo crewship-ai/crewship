@@ -7,6 +7,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 	"time"
@@ -175,7 +176,13 @@ func (s *Server) handleAgentStart(w http.ResponseWriter, r *http.Request) {
 				})
 		}
 		if err := s.orchestrator.RunAgent(ctx, runReq, handler); err != nil {
-			s.logger.Error("agent run failed", "agent_id", agentID, "error", err)
+			if errors.Is(err, orchestrator.ErrDetachedStillRunning) {
+				// Nonterminal (#2626): the exec lives on and the run stays
+				// at `running` — not a failure, and nothing to report yet.
+				s.logger.Warn("agent run's exec detached and is still running", "agent_id", agentID, "error", err)
+			} else {
+				s.logger.Error("agent run failed", "agent_id", agentID, "error", err)
+			}
 		}
 	}()
 
