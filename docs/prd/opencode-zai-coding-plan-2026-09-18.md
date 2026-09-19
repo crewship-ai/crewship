@@ -110,24 +110,40 @@ conflict on instance 3, not a defect in this slice:
 
 ### Acceptance side-instance (no impact on the live service)
 
+- **Currently deployed: commit `75343b541`** (final PR head; started
+  2026-09-18 ~20:4x UTC, version string
+  `nightly-20260915-r127101-118-g75343b541`). Earlier mentions of f67ed83a1 /
+  943e3bd24 / a89e09bbe below are deployment history, not the current state.
 - `https://crewship-dev3.unifylab.cz:8443` (Caddy block appended to
   `/etc/caddy/Caddyfile`, backup `Caddyfile.bak-zai-acceptance-20260918`;
   note: `caddy reload` is broken on this host — admin API disabled — so
   config changes require `systemctl restart caddy`, and the new block
   deliberately has no custom access log because `/var/log/caddy` is not
   writable for new files by the caddy user).
-- Runs build of commit f67ed83a1 (`crewship.zai` + `crewship-sidecar.zai` in the
+- Runs build 75343b541 (`crewship.zai` + `crewship-sidecar.zai` in the
   release dir) on port 8093, socket `/tmp/crewship-zai.sock`, isolated
-  `CREWSHIP_DATA_DIR=/tmp/opencode/zai-data`, against
-  `/tmp/opencode/zai-acceptance.db` — a copy of the pre-migrate snapshot
-  `crewship.db.pre-migrate-v20260916090151-to-v20260916140000-*.bak`
+  `CREWSHIP_DATA_DIR=/tmp/opencode/zai-data`, isolated
+  `CREWSHIP_STORAGE_BASE_PATH`/`CREWSHIP_LOG_PATH`/`CREWSHIP_BOLT_PATH`,
+  own container network `crewship-zai-agents` and prefix `crewship-zai`,
+  against `/tmp/opencode/zai-acceptance.db` — a copy of the pre-migrate
+  snapshot `crewship.db.pre-migrate-v20260916090151-to-v20260916140000-*.bak`
   (schema exactly at this build's head version; dev3 data as of Sep 17
   08:43). Launcher: `/tmp/opencode/zai-run.sh`; log:
-  `/tmp/opencode/zai-instance.log`. One pre-existing credential in the
-  snapshot copy fails to decrypt under the current key — harmless for
-  acceptance; new credentials are written with the current key.
+  `/tmp/opencode/zai-instance.log`.
+- **Isolation is partial by design**: database, storage, logs, state and
+  container network are separate, but the instance shares dev3's persisted
+  ENCRYPTION_KEY (deliberately — the snapshot copy's credentials must
+  decrypt; the first boot minted a fresh key under the isolated data dir and
+  broke the Keeper secrets store: 7 credentials failed to decrypt and
+  `/keeper/execute` would have returned 500 at ALLOW. The launcher now
+  sources `/home/ubuntu/.crewship/secrets.env` explicitly; boot logs show
+  zero decrypt errors and a healthy secrets store). Pages origins are set to
+  `https://crewship-dev3.unifylab.cz:8443` (studio and runtime), so generated
+  page URLs point back at this instance, not at main dev3.
 - The live `crewship-ws@3` (webhook build) was untouched and verified
-  serving before and after.
+  serving before and after; its staged sidecar under
+  `/tmp/crewship-3-data/.runtime` was restored twice after aborted starts
+  had overwritten it and verified byte-identical after the final deploy.
 
 ## Live acceptance checklist (owed — needs the user's key via UI)
 
@@ -142,7 +158,7 @@ version and nonsecret run IDs back into this document and the PR.
 
 ## Not done here (explicitly)
 
-- Live acceptance with the real subscription key — NOT PERFORMED (see the checklist above; the side-instance is ready and waiting on the user). After the console-link fix the instance was rebuilt from commit 943e3bd24.
+- Live acceptance with the real subscription key — NOT PERFORMED (see the checklist above; the side-instance is ready and waiting on the user, currently serving commit 75343b541).
 - Zhipu/BigModel regional variants (`zhipuai`, `zhipuai-coding-plan`) —
   separate products, out of scope until an account exists.
 - Z.AI vision/search/reader MCP services — a separate tools decision.
