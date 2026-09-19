@@ -62,3 +62,17 @@ does not validate an unattended production workflow.
 
 Only DEV1 is in this takeover's deployment scope. DEV2 and DEV3 are not covered
 by its deployment evidence. Existing untracked work is preserved separately.
+
+## Closing state — 18 September 2026
+
+The candidate described above landed as [PR #2617](https://github.com/crewship-ai/crewship/pull/2617),
+merged `a99a8212235a34f7996a2ebe620c3f57675eb81e` at 2026-09-18T13:05:05Z with
+a completed CodeRabbit review of head `22ed292` and green CI. Merge ancestry of
+all ten source PRs and of #2616 was re-verified post-merge; both additional
+corrections (assignee-type refusal, nullable backup diagnostics) are in main.
+DEV1 runs the merged content (`22ed292cd`, content-identical to post-merge
+main). Full verification and the R1–R10 status live in
+[routines-validation-2026-09-18](reports/routines-validation-2026-09-18.md);
+the follow-up fix for #2573 (routine deletion cascades to its schedules) is
+[PR #2620](https://github.com/crewship-ai/crewship/pull/2620). Human
+acceptance §11 remains open, as the boundaries below require.

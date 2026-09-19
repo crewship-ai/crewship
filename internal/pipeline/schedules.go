@@ -559,9 +559,20 @@ func getScheduleByID(ctx context.Context, x sqlExecQuerier, id string) (*Schedul
 
 // List returns workspace schedules ordered by next_run_at ascending
 // so "what fires next" is visually obvious in the UI.
+//
+// Rows whose target routine is soft-deleted are excluded: the delete
+// path cascades since #2573, but schedules orphaned before that fix
+// would otherwise keep appearing (with an empty routine column) in the
+// API, CLI and calendar.
 func (s *ScheduleStore) List(ctx context.Context, workspaceID string) ([]*Schedule, error) {
 	rows, err := s.db.QueryContext(ctx,
-		scheduleSelect+` WHERE workspace_id = ? AND deleted_at IS NULL ORDER BY next_run_at ASC`,
+		scheduleSelect+` WHERE workspace_id = ? AND deleted_at IS NULL
+		  AND NOT EXISTS (
+		      SELECT 1 FROM pipelines p
+		       WHERE p.id = pipeline_schedules.target_pipeline_id
+		         AND p.deleted_at IS NOT NULL
+		  )
+		  ORDER BY next_run_at ASC`,
 		workspaceID,
 	)
 	if err != nil {
