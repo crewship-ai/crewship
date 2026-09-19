@@ -412,6 +412,10 @@
           "agent_role": {
             "type": "string"
           },
+          "ask_forms": {
+            "nullable": true,
+            "type": "string"
+          },
           "avatar_seed": {
             "nullable": true,
             "type": "string"
@@ -541,6 +545,10 @@
           "status": {
             "type": "string"
           },
+          "suggested_prompts": {
+            "nullable": true,
+            "type": "string"
+          },
           "system_prompt": {
             "nullable": true,
             "type": "string"
@@ -603,7 +611,9 @@
           "expires_at",
           "expired_at",
           "parent_lead_id",
-          "hire_reason"
+          "hire_reason",
+          "ask_forms",
+          "suggested_prompts"
         ],
         "type": "object"
       },
@@ -6780,6 +6790,10 @@
             "nullable": true,
             "type": "string"
           },
+          "assignee_slug": {
+            "nullable": true,
+            "type": "string"
+          },
           "assignee_type": {
             "nullable": true,
             "type": "string"
@@ -6787,6 +6801,36 @@
           "authored_via": {
             "nullable": true,
             "type": "string"
+          },
+          "brief_revision": {
+            "type": "integer"
+          },
+          "client_review_required": {
+            "type": "boolean"
+          },
+          "code_links": {
+            "items": {
+              "properties": {
+                "details": {
+                  "type": "string"
+                },
+                "provider": {
+                  "type": "string"
+                },
+                "state": {
+                  "type": "string"
+                },
+                "url": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "url",
+                "provider"
+              ],
+              "type": "object"
+            },
+            "type": "array"
           },
           "comment_count": {
             "type": "integer"
@@ -6824,6 +6868,60 @@
           "estimate": {
             "nullable": true,
             "type": "integer"
+          },
+          "execution": {
+            "nullable": true,
+            "properties": {
+              "attempt": {
+                "type": "integer"
+              },
+              "id": {
+                "type": "string"
+              },
+              "note": {
+                "type": "string"
+              },
+              "reviewer": {
+                "type": "string"
+              },
+              "routine_run_id": {
+                "type": "string"
+              },
+              "stage": {
+                "type": "string"
+              },
+              "workers": {
+                "items": {
+                  "properties": {
+                    "assignment_id": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "assignment_id",
+                    "name",
+                    "status"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "id",
+              "stage",
+              "attempt",
+              "reviewer",
+              "note",
+              "workers"
+            ],
+            "type": "object"
           },
           "id": {
             "type": "string"
@@ -6950,7 +7048,8 @@
           "work_mode",
           "work_revision",
           "work_note",
-          "work_stopping"
+          "work_stopping",
+          "client_review_required"
         ],
         "type": "object"
       },

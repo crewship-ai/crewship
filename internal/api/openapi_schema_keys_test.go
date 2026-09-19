@@ -45,6 +45,12 @@ var schemaKeyContracts = []struct {
 }{
 	{name: "Run", pointer: "/components/schemas/Run", value: runResponse{}},
 	{name: "RunList", pointer: "/components/schemas/RunList", value: runListResponse{}},
+	// #2623: issueResponse and agentResponse are the two widest list rows in
+	// the API, and both had drifted — always-emitted fields the published
+	// schema never named (client_review_required since #2448; ask_forms /
+	// suggested_prompts). Grading them here pins the whole field set.
+	{name: "Issue", pointer: "/components/schemas/Issue", value: issueResponse{}},
+	{name: "Agent", pointer: "/components/schemas/Agent", value: agentResponse{}},
 	{name: "Workspace", pointer: "/components/schemas/Workspace", value: workspaceResponse{}},
 	// PATCH /workspaces/{id} references CoreWorkspaceUpdateRequestV2, not
 	// the legacy WorkspaceUpdateRequest (0 $refs) — the pointer names the
