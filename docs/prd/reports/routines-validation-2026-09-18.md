@@ -1,9 +1,9 @@
 # Routines — validace a stav uzavření, 18 September 2026
 
-**Verdikt: integrace #2617 je technicky hotová a nasazená na DEV1 (binárka
-`22ed292cd`). Oprava #2573 (PR #2620) v tomto verdiktu nasazená NENÍ — její
-deploy a živé ověření kaskády teprve následují po mergi. Lidská přejímka §11
-zůstává NOT VERIFIED.**
+**Verdikt (aktualizováno 19. 9.): technická část uzavřena — #2617 i oprava
+#2573 (PR #2620) jsou sloučeny a nasazeny na DEV1 (`00bc0cb50`), kaskáda
+ověřena živě. Lidská přejímka §11 zůstává NOT VERIFIED — tím zůstává PRD
+otevřený v uživatelské rovině.**
 Tato zpráva ověřuje merge stav PR #2617/#2619, aktuální main, DEV1 nasazení
 a R1–R10 proti čerstvým průchodům. Nenahrazuje uživatelskou přejímku.
 
@@ -158,7 +158,28 @@ Interní browser automatizace (14.–16. 9. i dnes) jej nenahrazuje.
 - DEV1 hlásí `dirty=true` kvůli 17 chraněným WIP souborům (viz výše); čistý
   build pro releasovou evidenci vyžaduje build bez WIP (jako 15./16. 9.).
 
-## Zbývající kroky (přesný stav na konci relace 18. 9.)
+## Závěr relace — #2620 merged a nasazeno (19. 9.)
+
+- **Review**: CodeRabbit APPROVED finální věcný head `5741440` (walkthrough
+  jmenuje tento commit, 0 findings); nález z `30fb9c18` byl vypořádán v
+  `d1d4fe1e0`. Poslední commit větve je pouze sync s main (#2624).
+- **CI**: plně zelené na `5741440b9` včetně Go Shuffle — po opravě závodu,
+  nikoli šťastným opakováním.
+- **Merge**: `00bc0cb50`, issue #2573 uzavřeno automaticky (COMPLETED).
+- **DEV1 deploy**: `./dev.sh deploy main` → API hlásí `00bc0cb50`,
+  build `2026-09-19T09:41Z`, `dirty=false` (WIP byl během buildu
+  v auto-stashi). Po ověření WIP obnoven (17 souborů byte-identických,
+  SHA-256), služba vrácena pod systemd (`active`, MainPID 2352078,
+  rebuild `00bc0cb50`, `dirty=true` z přítomných WIP souborů — dokumentovaný
+  kosmetický stav, binárka obsahově ≡ main).
+- **Živé ověření kaskády na DEV1**: schedule `psched_cmu879e4w…` vytvořen na
+  vlastní rutině (201, enabled, viditelný v seznamu); rutina smazána →
+  **204**; schedule ze seznamu zmizel (0 řádků), pending seznam čistý.
+- **Úklid**: `validation-inputs-mtw9f2k3` i `validation-fail-mtw9f2k3`
+  smazány (204); rutiny `work-order-*` předchozích relací zachovány (5);
+  auditní historie běhů zůstává.
+
+### Historický stav z konce 18. 9. (před merge)
 
 PR #2620 (head `d1d4fe1e0`): produkční kód i testy dokončeny, **CI plně zelené
 na finálním headu** (34 kontrol pass, 0 fail, Go + tři Race sady, Frontend
