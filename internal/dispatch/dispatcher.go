@@ -570,7 +570,12 @@ func (d *Dispatcher) stopDetachedBestEffort(ctx context.Context, live *liveAttem
 // an error the caller reports for reconciliation rather than silently
 // releasing supervision over it.
 func (d *Dispatcher) stopDetachedConfirmed(ctx context.Context, live *liveAttempt) error {
-	stopped, err := d.runtime.Stop(ctx, live.locator)
+	// Each signal gets its own bounded context: ctx here derives from
+	// WithoutCancel and carries no deadline, and a provider Stop that
+	// blocks would hold this supervisor — and its capacity — forever.
+	signalCtx, cancel := context.WithTimeout(ctx, d.cfg.StopGrace)
+	defer cancel()
+	stopped, err := d.runtime.Stop(signalCtx, live.locator)
 	if err != nil {
 		return fmt.Errorf("signal: %w", err)
 	}
@@ -582,7 +587,9 @@ func (d *Dispatcher) stopDetachedConfirmed(ctx context.Context, live *liveAttemp
 		return ctx.Err()
 	case <-time.After(d.cfg.StopGrace):
 	}
-	stopped, err = d.runtime.Stop(ctx, live.locator)
+	escalateCtx, escalateCancel := context.WithTimeout(ctx, d.cfg.StopGrace)
+	defer escalateCancel()
+	stopped, err = d.runtime.Stop(escalateCtx, live.locator)
 	if err != nil {
 		return fmt.Errorf("escalated signal: %w", err)
 	}
