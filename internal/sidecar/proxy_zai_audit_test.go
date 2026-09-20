@@ -21,6 +21,7 @@ func TestZAICodingPlanFlushesBeforeUpstreamEOF(t *testing.T) {
 }
 
 func testZAIFlush(t *testing.T, observed bool) {
+	t.Helper()
 	cs := NewCredStore()
 	cs.Load([]Credential{{ID: "plan", Provider: "ZAI_CODING_PLAN", Token: "test-key"}})
 	p := NewProxy(ProxyConfig{CredStore: cs, Logger: covLogger(), FreeMode: true, OnLLMCall: func(LLMUsage, QuotaInfo, string, string) {}})
@@ -108,16 +109,18 @@ func TestZAICodingPlanAccountScopeAndPriority(t *testing.T) {
 		{ID: "b", Provider: "ZAI_CODING_PLAN", Token: "b", Priority: 1, AgentIDs: []string{"alice", "bob"}},
 	})
 	for _, tc := range []struct{ agent, want string }{{"alice", "a"}, {"bob", "b"}, {"mallory", ""}} {
-		for i := 0; i < 10; i++ {
-			c := cs.Select("ZAI_CODING_PLAN", tc.agent)
-			got := ""
-			if c != nil {
-				got = c.ID
+		t.Run(tc.agent, func(t *testing.T) {
+			for i := 0; i < 10; i++ {
+				c := cs.Select("ZAI_CODING_PLAN", tc.agent)
+				got := ""
+				if c != nil {
+					got = c.ID
+				}
+				if got != tc.want {
+					t.Fatalf("%s selects %s want %s", tc.agent, got, tc.want)
+				}
 			}
-			if got != tc.want {
-				t.Fatalf("%s selects %s want %s", tc.agent, got, tc.want)
-			}
-		}
+		})
 	}
 }
 

@@ -95,7 +95,7 @@ explicit: proxy response headers are canonicalized to `text/event-stream` with
 writer maintains that invariant at its byte-write boundary. A regression sends
 HTML/script text as SSE data and verifies unchanged bytes plus inert headers;
 the real-HTTP first-event test checks the headers as received by a client.
-No CodeQL suppression was added. Final scan results must still be checked.
+No CodeQL suppression was added. On `a27858dbd`, both CodeQL language analyses passed and the CodeQL result reported "No new alerts in code changed by this pull request" (check `106048459157`, zero annotations). Subsequent changes only improve test diagnostics and this report; their final CI/review remains a separate gate.
 
 A serial read-only live availability sample (20 HTTPS GETs to the acceptance
 credentials page) measured median 4.09 ms, p95 5.85 ms, max 18.46 ms. This measures
@@ -103,3 +103,11 @@ static UI availability from the same host, not inference or authenticated API
 performance. SQLite EXPLAIN of auto-assignment on the acceptance copy used
 `idx_credentials_ws_created` and the credential-fields unique index; no full
 credentials-table scan was observed.
+
+## Final verification details
+
+The production-code head `a27858dbd` passed the complete sidecar suite (80.765 s), focused race tests and vet. Current-main integration also passed `go vet ./...` plus focused API/orchestrator/sidecar tests. The full local repository suite began before integration with current main and before the final MIME hardening; its result must not be described as a complete final-SHA run. Final-SHA repository-wide CI is the separate authoritative gate.
+
+After MIME hardening, repeated synthetic benchmarks measured 13.6–20.3 microseconds/op, 42.8 KB/op and 79 allocations/op for the small proxy request, ~21.63 MB for 1 MiB observation and ~217.43 MB for 12 MiB observation. The earlier table records the parser-change comparison; the final figures still support approximately 13% less cumulative allocation, not a throughput claim.
+
+CodeRabbit posted a real review for `55af87b2c` with two trivial test-quality notes (helper annotation and named subtests); both were addressed. No newer completed review is claimed. Final-head rate-limit status is not approval.
