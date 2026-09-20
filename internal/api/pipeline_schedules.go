@@ -416,7 +416,6 @@ func (h *PipelineHandler) ListSchedules(w http.ResponseWriter, r *http.Request) 
 		replyError(w, http.StatusInternalServerError, "failed to list schedules")
 		return
 	}
-	setRoutineListNextOffset(w, offset, limit, len(rows))
 	out := make([]scheduleResponse, 0, len(rows))
 	ids := make([]string, 0, len(rows)*2)
 	for _, s := range rows {
@@ -438,6 +437,7 @@ func (h *PipelineHandler) ListSchedules(w http.ResponseWriter, r *http.Request) 
 		}
 		out = append(out, row)
 	}
+	setRoutineListNextOffset(w, offset, limit, len(rows))
 	writeJSON(w, http.StatusOK, out)
 }
 
