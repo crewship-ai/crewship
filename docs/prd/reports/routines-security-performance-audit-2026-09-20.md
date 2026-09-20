@@ -107,12 +107,15 @@ workspace a zkontrolovat dopad indexu na zápisovou zátěž SQLite.
 
 ### P1 — Benchmark PRD §8 není srovnatelný
 
-Historický baseline uvádí 470 ms, 32 API požadavků a 158 433 přenesených bajtů.
-Pozdější test uvádí první zobrazení 770 ms pro jinou velikost/detail dat a
-stránkování. Není doloženo měření obou verzí nad totožným datasetem a stejným
-postupem; chybí aktuální počet requestů/přenesených bytů, opakování a rozptyl.
-To není důkaz zpomalení, ale ani splnění požadavku §8 „baseline a změnu na
-stejných datech“.
+PRD obsahuje jednorázový pár pro detail: před 470 ms / 32 požadavků / 158 433 B,
+po 387 ms / 33 požadavků / 161 857 B. Výslovně ale uvádí nekontrolovanou cache
+a zátěž. Validační report z 14. září zaznamenává jiné první zobrazení (810 ms,
+35 API odpovědí); dřívější předání uvádí 770 ms pro jiný rozsah dat/detailu.
+Tyto výsledky nelze sloučit do jednoho trendu a nehodnotí změny z této větve,
+které zatím nejsou nasazené. Dokládají, že historické jednorázové měření
+existuje; nedokládají opakovatelný benchmark, kontrolované stejné podmínky,
+rozptyl ani aktuální chování po dnešních změnách. Není to důkaz zpomalení ani
+validní důkaz cílového zlepšení podle §8.
 
 Scénář §9 #16 doložil 100 kroků a 1 100 execution záznamů/stránkování a UI
 lazy-load. Protokol výslovně upozorňuje, že šlo o foreach exekuce, nikoli 1 000
@@ -174,8 +177,10 @@ Go test proces s 40min timeoutem; příčinu timeoutu nelze bezpečně připsat 
 této konkurenci, ale log neukazuje pád nových rutina testů. Cílené testy
 změněných cest jsou zelené.
 
-Tyto změny napravují konkrétní statické škálovací mezery. PRD §8 však dál
-vyžaduje srovnatelné měření baseline a současné verze na totožném datasetu,
-včetně počtu požadavků, přenesených bytů a času do použitelného detailu. To
-dosud nebylo provedeno. Stejně tak živá autentizovaná security matice je v tomto
-auditu historickým důkazem, nikoli novým měřením z 20. září.
+Tyto změny napravují konkrétní statické škálovací mezery. PRD §8 má historický
+jednorázový before/after záznam, ale podmínky nejsou kontrolované a současná
+verze po těchto opravách změřena nebyla. Pro uzavření výkonové brány je třeba
+benchmark zopakovat nad stejným reprezentativním datasetem a postupem, ideálně
+s opakováním; zaznamenat request count, bajty a čas do použitelného detailu.
+Stejně tak živá autentizovaná security matice je v tomto auditu historickým
+důkazem, nikoli novým měřením z 20. září.
