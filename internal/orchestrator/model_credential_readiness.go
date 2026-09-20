@@ -26,6 +26,7 @@ package orchestrator
 // nothing.
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/crewship-ai/crewship/internal/llmroute"
@@ -204,4 +205,20 @@ func sameKeyVariable(have, want string) bool {
 	}
 	google := map[string]bool{"GOOGLE_API_KEY": true, "GEMINI_API_KEY": true}
 	return google[have] && google[want]
+}
+
+// Managed OpenCode products cannot fall back to an unmanaged payer. Report
+// a missing grant before OpenCode turns absent native auth into UnknownError.
+func validateManagedOpenCodeCredential(req AgentRunRequest) error {
+	if req.CLIAdapter != "OPENCODE" {
+		return nil
+	}
+	r := ModelCredentialReadiness(req.CLIAdapter, req.LLMProvider, req.LLMModel, req.Credentials)
+	switch r.Provider {
+	case "OPENCODE", "OPENCODE_GO", "ZAI_CODING_PLAN":
+		if r.State == ModelCredentialMissing {
+			return fmt.Errorf("no assigned %s credential for this agent; connect the provider in Credentials and grant this agent access", r.Provider)
+		}
+	}
+	return nil
 }

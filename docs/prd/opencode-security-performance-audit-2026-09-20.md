@@ -111,3 +111,46 @@ The production-code head `a27858dbd` passed the complete sidecar suite (80.765 s
 After MIME hardening, repeated synthetic benchmarks measured 13.6–20.3 microseconds/op, 42.8 KB/op and 79 allocations/op for the small proxy request, ~21.63 MB for 1 MiB observation and ~217.43 MB for 12 MiB observation. The earlier table records the parser-change comparison; the final figures still support approximately 13% less cumulative allocation, not a throughput claim.
 
 CodeRabbit posted a real review for `55af87b2c` with two trivial test-quality notes (helper annotation and named subtests); both were addressed. No newer completed review is claimed. Final-head rate-limit status is not approval.
+
+## Continuation: deployed acceptance and runtime defects (2026-09-20)
+
+User authorized deployment and continued integration testing. A complete `make build`
+of `bbc7ea0b9` was deployed to the isolated :8443 / :8093 service at 08:46 UTC.
+The main `crewship-ws@3` remained active; SHA-256 of its server and staged sidecar
+matched before and after. A SQLite online backup and both previous binaries are
+retained under `/tmp/opencode/zai-deploy-bbc7ea0b9/` (directory mode 0700).
+
+Playwright against that deployed UI passed desktop and 390×844 touch wizard
+checks: blank-key validation, masked input, honest unverified-connection label,
+save, visible mobile actions and cancel. A dedicated `zai-audit-20260920` workspace
+was created through the CLI using an existing `.invalid` audit account whose
+password was reset **only in the acceptance copy**. No operator password changed.
+Two deliberately invalid test credentials demonstrated encrypted persistence,
+redacted list responses, separate grants for agents A/B, and slot removal on
+unassignment. These checks do not prove vendor authentication.
+
+Actual runtime testing uncovered two defects hidden by an empty acceptance setup:
+
+1. UFW did not allow the new Docker bridge to reach the acceptance backend.
+   Sidecar IPC timed out, including credential reaping. Added only:
+   `ufw allow in on br-cd3f08b97944 proto tcp from 172.26.0.0/16 to 172.17.0.1 port 8093`
+   (comment `ZAI acceptance sidecar IPC #2621`). Container-to-backend health now
+   returns 200. Remove this exact rule when retiring the acceptance network.
+2. On account/configuration changes, sidecar stop ran as UID 0 despite containers
+   dropping all capabilities. A live signal-0 probe failed with `Operation not
+   permitted` as root and succeeded as UID 1002. Replacement then failed to bind
+   port 9119, while health mistakenly accepted the old process. The fix stops
+   as UID 1002, waits for a confirmed successful exit, and aborts on failure.
+   A regression verifies both the owner identity and refusal to launch after
+   a failed stop. This is a shared lifecycle defect, not a vendor outage.
+
+Managed OpenCode products now reject a missing model credential before any CLI
+exec, with instructions to connect and grant the provider. This avoids the
+native CLI's unhelpful UnknownError when authentication is absent. Other
+adapters and unmanaged/custom OpenCode products retain their existing behavior.
+
+The actual fresh QA runtime contains **OpenCode 1.18.30**, not the earlier
+agent's reported 1.18.31. Every future live result must name the runtime actually
+used. The latest lifecycle fixes require a subsequent acceptance deployment and
+repeat negative runs; the earlier failed runs are not PASS evidence. Successful
+paid stream/tool/usage checks still require the user's real Coding Plan key.

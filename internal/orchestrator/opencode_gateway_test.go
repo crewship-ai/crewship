@@ -93,3 +93,24 @@ func TestOpenCodeZAIMeteredKeyDoesNotRouteCodingPlan(t *testing.T) {
 		t.Fatalf("Coding Plan auth written from a metered key: %s", auth)
 	}
 }
+
+func TestManagedOpenCodeMissingGrantStopsBeforeExec(t *testing.T) {
+	for _, provider := range []string{"OPENCODE", "OPENCODE_GO", "ZAI_CODING_PLAN"} {
+		t.Run(provider, func(t *testing.T) {
+			c := covNewRunContainer(covRunOpts{})
+			o := New(c, newMemState(), covQuietLogger())
+			req := covRunReq()
+			req.CLIAdapter = "OPENCODE"
+			req.LLMProvider = provider
+			req.LLMModel = ""
+			req.Credentials = nil
+			err := o.RunAgent(t.Context(), req, nil)
+			if err == nil || !strings.Contains(err.Error(), "no assigned "+provider+" credential") {
+				t.Fatalf("missing grant must be actionable: %v", err)
+			}
+			if len(c.snapshotScripts()) != 0 {
+				t.Fatal("missing grant launched container exec")
+			}
+		})
+	}
+}

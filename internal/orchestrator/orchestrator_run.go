@@ -135,6 +135,10 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 		span.End()
 	}()
 
+	if err := validateManagedOpenCodeCredential(req); err != nil {
+		return err
+	}
+
 	// journalUserMessage scrubs the message against this run's credential
 	// values and the built-in patterns, then bounds it to
 	// journalUserMessageMaxChars. Its one remaining consumer is the
