@@ -203,7 +203,7 @@ reviews:
         - Context propagation on all functions
         - Error wrapping with fmt.Errorf("context: %w", err)
         - No frameworks -- stdlib + minimal dependencies
-        - Security: container isolation, non-root UID 1001
+        - Security: container isolation; agent execs use non-root UID 1001. Sidecar start/stop intentionally uses its separate owner UID:GID 1002:1002; preserve that credential boundary.
 
     - path: "lib/encryption.ts"
       instructions: |

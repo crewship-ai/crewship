@@ -190,15 +190,15 @@ func (o *Orchestrator) execSidecarStop(ctx context.Context, cfg provider.ExecCon
 	defer cancel()
 	res, err := o.container.Exec(ctx, cfg)
 	if err != nil {
-		return err
+		return fmt.Errorf("exec stop command: %w", err)
 	}
 	defer res.Reader.Close()
 	if _, err := io.Copy(io.Discard, res.Reader); err != nil {
-		return err
+		return fmt.Errorf("drain stop output: %w", err)
 	}
 	code, err := provider.WaitExecExit(ctx, o.container, res.ExecID, execProbeTimeout)
 	if err != nil {
-		return err
+		return fmt.Errorf("wait for stop command: %w", err)
 	}
 	if code != 0 {
 		return fmt.Errorf("sidecar stop exited %d", code)
