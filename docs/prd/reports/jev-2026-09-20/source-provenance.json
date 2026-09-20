@@ -1,0 +1,33 @@
+{
+  "at": "2026-09-20T08:12:22.631621+00:00",
+  "sources": [
+    {
+      "source": "openrouter-sdk",
+      "url": "https://raw.githubusercontent.com/OpenRouterTeam/typescript-sdk/1f6a0db9e21d77b75c21d820afb43591443f4328/src/funcs/alphaDecisionsCreate.ts",
+      "commit": "1f6a0db9e21d77b75c21d820afb43591443f4328",
+      "sha256": "27d97bdefbb72495864b62726db9a7ee1172d76ddc60a8d027b17f6ddefebf8d",
+      "bytes": 8223
+    },
+    {
+      "source": "jevbench",
+      "url": "https://raw.githubusercontent.com/fstandhartinger/jevbench/9194081409fd129282123b3990a6f61b6bdf318c/RESULTS-v1.2.md",
+      "commit": "9194081409fd129282123b3990a6f61b6bdf318c",
+      "sha256": "f53474f691dc6388a0d8024ecbe5714c715c325464a2a1d21db5aff021fdbccb",
+      "bytes": 34856
+    },
+    {
+      "source": "phishing",
+      "url": "https://raw.githubusercontent.com/anisselbd/jev-phishing-bench/8093a0ee219972cda1aa6e568d408f3531b1ceb3/README.md",
+      "commit": "8093a0ee219972cda1aa6e568d408f3531b1ceb3",
+      "sha256": "1413f21181d1083ae2bf4b2c3d319e98c488d1681f7a16489ff24295c79c40ff",
+      "bytes": 11447
+    },
+    {
+      "source": "rerank",
+      "url": "https://raw.githubusercontent.com/anessbelbati/jev-rerank-bench/cd9a35b22aeb4187334f7018a0ee1960a7470586/README.md",
+      "commit": "cd9a35b22aeb4187334f7018a0ee1960a7470586",
+      "sha256": "e8f05c1a17a70bceed084a35b833c1ce3d49513a6b96b2bb150af46fad1d1f2c",
+      "bytes": 21045
+    }
+  ]
+}

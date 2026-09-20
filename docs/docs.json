@@ -259,6 +259,7 @@
               "cli/doctor",
               "cli/telemetry",
               "cli/ai-workflows",
+              "cli/decisions",
               "cli/apply",
               "cli/export"
             ]

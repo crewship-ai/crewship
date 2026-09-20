@@ -1,0 +1,115 @@
+---
+title: "crewship decisions"
+description: "Opt-in Jev typed decisions for triage and retrieval experiments."
+icon: "split"
+stability: experimental
+tag: Experimental
+---
+
+# crewship decisions
+
+Evaluate explicitly supplied text using Jev through TypeSafe or OpenRouter.
+This local pilot needs no running Crewship server. It returns suggestions and
+never assigns work, executes actions, changes permissions, or deletes memory.
+All output is JSON, regardless of the global `--format` setting.
+
+Set `TYPESAFE_API_KEY` or `OPENROUTER_API_KEY` securely in the environment.
+Credentials are not read from the server vault. Calls are billed directly to
+that key and are not recorded in server Paymaster accounting.
+
+## Shared flags
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--provider` | `typesafe` | `typesafe` or `openrouter` |
+| `--model` | versioned Jev 1.13 | Override `jev-1.13.0` (TypeSafe) or `typesafe/jev-1.13` (OpenRouter) |
+| `--input` | `-` | Input file, or stdin |
+| `--timeout` | `5s` | Per-call timeout, greater than zero and at most `1m` |
+| `--threshold` | `0.9` | Experimental triage confidence threshold, `0.5` to `1` |
+| `--dry-run` | `false` | Print the validated request; no network or credential needed |
+
+The input/request limit is 96 KiB and the question limit is 64. These local
+bounds do not guarantee compliance with the provider's token limits. There
+are no automatic retries; errors exit nonzero without printing upstream bodies.
+
+## evaluate
+
+`crewship decisions evaluate` accepts a JSON object with `state`, `questions`,
+and an optional `model`. Instructions must be strings. Questions support
+`noul`, `choice` (2–255 options), and `score` (2–10 text levels).
+
+```bash
+crewship decisions evaluate --input request.json --provider typesafe \
+  --model jev-1.13.0 --timeout 5s --dry-run
+```
+
+Example `request.json`:
+
+```json
+{
+  "state": "The browser navigation button is invisible.",
+  "questions": {
+    "is_ui": {"type": "noul", "instructions": "Does the text describe a browser UI problem?"}
+  }
+}
+```
+
+Remove `--dry-run` to send the supplied state and questions. The response
+includes model version, answers, probabilities where applicable, token usage,
+and elapsed latency. Provider-reported cost may be absent, meaning unknown.
+The shared `--threshold` is accepted but only affects `triage`.
+
+## triage
+
+`crewship decisions triage` accepts plain text. One request asks about the
+primary subsystem, reproduction evidence, explicit production impact, and
+requested destructive actions.
+
+```bash
+printf '%s' 'The mobile navigation close button is invisible.' \
+  | crewship decisions triage --provider openrouter --input - \
+      --model typesafe/jev-1.13 --timeout 5s --threshold 0.9 --dry-run
+```
+
+The result preserves all answers and reports `needs_review` and its reason.
+Unknown categories, low confidence, or production/destructive signals request
+review. Even `needs_review=false` is only an advisory category suggestion,
+never permission to execute the request. The threshold is not calibrated on
+production Crewship data or Czech input.
+
+## rerank
+
+`crewship decisions rerank` accepts a query and 1–30 already-authorized
+candidates. Each candidate needs a unique ID and nonempty text. The caller
+owns access control; the command does not fetch memory or validate tenant scope.
+
+```bash
+crewship decisions rerank --input candidates.json --provider openrouter \
+  --model typesafe/jev-1.13 --timeout 5s --dry-run
+```
+
+Example `candidates.json`:
+
+```json
+{
+  "query": "How can I stop a run while preserving memory?",
+  "candidates": [
+    {"id": "a", "text": "Cancel the active run; its saved memory is retained."},
+    {"id": "b", "text": "Delete memory files to erase learned lessons."}
+  ]
+}
+```
+
+The four-level relevance rubric evaluates all candidates in one call. Output
+retains every candidate ID and original position; ties preserve input order.
+Scores are rubric values, not BM25 scores or calibrated relevance probabilities.
+On API failure, the command exits nonzero: callers should retain original
+retrieval order. The shared `--threshold` does not affect reranking.
+
+## Reproducible probe
+
+The repository's `scripts/jev-eval/run.py` invokes this CLI against 24 synthetic
+English/Czech triage cases. Default mode validates requests locally. `--live`
+makes up to 24 calls and records accuracy, coverage, calibration, latency and
+usage in a new output directory. This is a smoke corpus, not a production
+benchmark. No live inference is claimed without an authenticated response.

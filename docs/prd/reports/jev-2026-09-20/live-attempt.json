@@ -1,0 +1,38 @@
+{
+  "at": "2026-09-20T08:10:57.468126+00:00",
+  "status": "blocked",
+  "error": "OPENROUTER_API_KEY is missing; no API requests attempted",
+  "provider": "openrouter",
+  "dataset_sha256": "879eda1a380a0e45754320264496b97b205f1a5317e09e70305396b2c35e33b0",
+  "binary_sha256": "513d2738b857676fab39726705e823ae45d51c5e8be707cdb8eb6bed9c2216ec",
+  "dataset_size": 24,
+  "planned": 24,
+  "local_requests_validated": 0,
+  "successful_api_calls": 0,
+  "unmeasured": 24,
+  "all": {
+    "n": 0,
+    "accuracy": null,
+    "coverage": null,
+    "selective_accuracy": null
+  },
+  "by_language": {
+    "cs": {
+      "n": 0,
+      "accuracy": null,
+      "coverage": null,
+      "selective_accuracy": null
+    },
+    "en": {
+      "n": 0,
+      "accuracy": null,
+      "coverage": null,
+      "selective_accuracy": null
+    }
+  },
+  "majority_class_baseline": 0.25,
+  "reported_cost_usd": null,
+  "estimated_list_cost_usd": null,
+  "cost_basis": "Estimate uses Jev list input price as checked 2026-09-20; reported cost is separate; failed calls may still be charged.",
+  "limitations": "24 synthetic bilingual examples, not independent paired samples or held-out production data. No LLM baseline; no accuracy claim from dry run. Threshold 0.9 is uncalibrated. No automatic actions."
+}
