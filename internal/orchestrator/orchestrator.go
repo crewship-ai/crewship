@@ -505,6 +505,13 @@ type Orchestrator struct {
 	// RunAgent returns ErrDetachedStillRunning.
 	detachedWaitBudget   time.Duration
 	detachedPollInterval time.Duration
+	// detached holds one entry per agent whose run returned the sentinel
+	// with a stop that could not be confirmed: the process may still be
+	// alive, so the agent's admission is refused and the departed run's
+	// slot stays held until the hold's watcher confirms the runtime gone
+	// (#2626). See detached_hold.go.
+	detachedMu sync.Mutex
+	detached   map[string]*detachedHold
 	// sessionPublisher publishes a run's events on its chat's session channel
 	// so routine/webhook/pipeline/IPC runs are watchable, not just WebSocket
 	// ones (#1823). nil in tests/headless — see session_stream.go.
@@ -1375,6 +1382,7 @@ func New(
 		runSemCap:            runSemCap,
 		detachedWaitBudget:   defaultDetachedWaitBudget,
 		detachedPollInterval: defaultDetachedPollInterval,
+		detached:             map[string]*detachedHold{},
 	}
 }
 

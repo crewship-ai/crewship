@@ -140,9 +140,15 @@ type covRunOpts struct {
 	// the detached exec that finally ends while RunAgent is monitoring it
 	// (#2626).
 	agentRunningFlipsAfter int
-	health                 string // checkSidecar reply ("" → not running)
-	sidecarExit            int    // startSidecar health script exit code
-	failMCPWrite           bool   // fail the .mcp.json write exec
+	// tmuxAliveOut / tmuxStopOut are the outputs the fake answers for the
+	// RunIsAliveAt has-session probe and the StopRunAt kill probe
+	// ("PRESENT"/"ABSENT"; "" keeps the historical unparseable empty that
+	// both treat as an error).
+	tmuxAliveOut string
+	tmuxStopOut  string
+	health       string // checkSidecar reply ("" → not running)
+	sidecarExit  int    // startSidecar health script exit code
+	failMCPWrite bool   // fail the .mcp.json write exec
 }
 
 func covNewRunContainer(opts covRunOpts) *covContainer {
@@ -152,8 +158,22 @@ func covNewRunContainer(opts covRunOpts) *covContainer {
 		// look at both halves of what the exec was asked to do.
 		script := covScript(cfg) + "\n" + covStdin(cfg)
 		switch {
+		case strings.Contains(script, "kill-session"):
+			c.tmuxMu.Lock()
+			out := c.tmuxStopOut
+			c.tmuxMu.Unlock()
+			if out == "" {
+				out = opts.tmuxStopOut
+			}
+			return covResult("tmux-stop", out), nil
 		case strings.Contains(script, "command -v tmux"):
-			return covResult("tmux-check", ""), nil
+			c.tmuxMu.Lock()
+			out := c.tmuxAliveOut
+			c.tmuxMu.Unlock()
+			if out == "" {
+				out = opts.tmuxAliveOut
+			}
+			return covResult("tmux-check", out), nil
 		case opts.failMCPWrite && strings.Contains(script, ".mcp.json"):
 			// A merged script reports a step failure by name rather than by
 			// failing the whole exec.
@@ -174,6 +194,8 @@ func covNewRunContainer(opts covRunOpts) *covContainer {
 		switch execID {
 		case "preflight-fail":
 			return false, 1, nil
+		case "tmux-stop":
+			return false, 0, nil
 		case "tmux-check":
 			return false, 1, nil // tmux missing → stdbuf fallback
 		case "agent-exec":

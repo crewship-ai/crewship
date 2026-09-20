@@ -236,3 +236,115 @@ func TestRunAgent_NoAuditEmitterConfigured_DoesNotPanic(t *testing.T) {
 		t.Fatalf("RunAgent: %v", err)
 	}
 }
+
+// TestRunAgent_UnconfirmedStopHoldsAgentAndCapacity pins the ownership rule
+// from #2626's review: a stop ATTEMPT is not a stop CONFIRMATION. When the
+// bounded stop inside the detached branch cannot confirm the process is gone,
+// the run slot transfers to a detached hold and the agent's admission is
+// refused — a second run for the same agent must not start beside a process
+// nobody has confirmed dead. When the hold's watcher later confirms the
+// runtime gone, the hold lifts and a new run is admitted again.
+func TestRunAgent_UnconfirmedStopHoldsAgentAndCapacity(t *testing.T) {
+	t.Parallel()
+	st := newMemState()
+	c := covNewRunContainer(covRunOpts{
+		stream:       "{}\n",
+		agentRunning: true,      // the exec never terminates on its own
+		tmuxAliveOut: "PRESENT", // RunIsAliveAt: alive
+		tmuxStopOut:  "PRESENT", // StopRunAt: asked, still there
+	})
+	o := New(c, st, covQuietLogger())
+	o.SetDetachedExecMonitoring(50*time.Millisecond, 5*time.Millisecond)
+
+	req := covRunReq()
+	err := o.RunAgent(context.Background(), req, nil)
+	if !errors.Is(err, ErrDetachedStillRunning) {
+		t.Fatalf("first run: want ErrDetachedStillRunning, got %v", err)
+	}
+
+	// The hold exists and refuses a second run for the agent.
+	if _, held := o.detachedHoldRunID(req.AgentID); !held {
+		t.Fatal("no detached hold registered for an unconfirmed stop")
+	}
+	second := covRunReq()
+	second.RunID = "run-cov2"
+	err2 := o.RunAgent(context.Background(), second, nil)
+	if !errors.Is(err2, ErrAgentDetachedBusy) {
+		t.Fatalf("second run must be refused with ErrAgentDetachedBusy while the detached exec is unconfirmed, got %v", err2)
+	}
+
+	// A later stop answering "gone" must also settle the hold on its own
+	// (the watcher's periodic re-stop path), not only the Alive probe.
+	c.setTmuxStop("ABSENT")
+
+	// The runtime finally ends: the watcher must lift the hold.
+	c.setTmuxAlive("ABSENT")
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, held := o.detachedHoldRunID(req.AgentID); !held {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if _, held := o.detachedHoldRunID(req.AgentID); held {
+		t.Fatal("the detached hold did not lift after the runtime was confirmed gone")
+	}
+
+	// And admission works again (this run detaches too — the fake still
+	// reports a live exec — which is fine: the assertion is that it is NOT
+	// refused as busy).
+	third := covRunReq()
+	third.RunID = "run-cov3"
+	err3 := o.RunAgent(context.Background(), third, nil)
+	if errors.Is(err3, ErrAgentDetachedBusy) {
+		t.Fatal("admission still refused after the hold lifted")
+	}
+}
+
+// TestRunAgent_DetachedAliveEmitsNoTerminalEvents pins the journal ordering
+// rule from #2626's review: while the detached runtime is alive, no
+// exec.command END entry may be emitted and the agent must not be marked
+// online — a running agent is not "available". The terminal entry appears
+// only after the end is confirmed (here: by the hold's watcher).
+func TestRunAgent_DetachedAliveEmitsNoTerminalEvents(t *testing.T) {
+	t.Parallel()
+	st := newMemState()
+	j := &covJournal{}
+	c := covNewRunContainer(covRunOpts{
+		stream:       "{}\n",
+		agentRunning: true,
+		tmuxAliveOut: "PRESENT",
+		tmuxStopOut:  "PRESENT",
+	})
+	o := New(c, st, covQuietLogger())
+	o.SetJournal(j)
+	o.SetDetachedExecMonitoring(50*time.Millisecond, 5*time.Millisecond)
+
+	req := covRunReq()
+	if err := o.RunAgent(context.Background(), req, nil); !errors.Is(err, ErrDetachedStillRunning) {
+		t.Fatalf("want ErrDetachedStillRunning, got %v", err)
+	}
+	if n := covExecEndEntries(j); n != 0 {
+		t.Fatalf("exec.command end emitted %d time(s) while the detached runtime was still alive — terminal events must wait for a confirmed end", n)
+	}
+
+	c.setTmuxAlive("ABSENT")
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) && covExecEndEntries(j) == 0 {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if n := covExecEndEntries(j); n == 0 {
+		t.Fatal("no exec.command end after the runtime was confirmed gone — the watcher must emit the terminal entry")
+	}
+}
+
+// covExecEndEntries counts exec.command journal entries in their end phase.
+func covExecEndEntries(j *covJournal) int {
+	n := 0
+	for _, e := range j.byType("exec.command") {
+		if phase, _ := e.Payload["phase"].(string); phase == "end" {
+			n++
+		}
+	}
+	return n
+}

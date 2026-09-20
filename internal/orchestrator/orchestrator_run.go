@@ -368,6 +368,16 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 		return fmt.Errorf("pre_agent_start hook dispatch failed: %w", hookErr)
 	}
 
+	// #2626 admission: an agent whose previous run ended detached with an
+	// unconfirmed stop still has a process that may be alive. Starting this
+	// run would be two CLIs for one agent — the exact shape the dispatcher's
+	// supersede rule exists to prevent — so the request is refused until the
+	// hold's watcher confirms the runtime is gone. This is the load-bearing
+	// half of "a stop attempt is not a stop confirmation".
+	if heldRun, held := o.detachedHoldRunID(req.AgentID); held {
+		return fmt.Errorf("%w: run %s", ErrAgentDetachedBusy, heldRun)
+	}
+
 	// P1 (HIGH, 2026-06 audit): bound concurrent agent-run exec fan-outs.
 	// Acquire a runSem token before any container.Exec (sidecar start, the
 	// mkdir/setup pass, and the heavy agent CLI exec). Deliberately AFTER the
@@ -380,7 +390,16 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 	if slotErr != nil {
 		return fmt.Errorf("acquire run slot: %w", slotErr)
 	}
-	defer releaseRunSlot()
+	// slotTransferredToHold is set when a detached exec whose stop could not
+	// be confirmed hands the slot to a detached hold (#2626): the watcher
+	// owns the release from there, because capacity must stay occupied for
+	// as long as the process that consumes it may still be alive.
+	slotTransferredToHold := false
+	defer func() {
+		if !slotTransferredToHold {
+			releaseRunSlot()
+		}
+	}()
 
 	// Always fire post_agent_stop on return so logging and cleanup
 	// hooks observe every run regardless of exit path.
@@ -986,14 +1005,6 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 			endPayload["error_message"] = diagnosticScrub.Scrub(cause.Error())
 		}
 	}
-	o.emitExecEnd(ctx, req, result.ExecID, journalCmd, endSeverity,
-		fmt.Sprintf("%s: exit %d (%dms)", req.AgentSlug, exitCode, time.Since(execStart).Milliseconds()),
-		execStart, endPayload)
-	// Flip agent back to online for the Watch Roster now that the run
-	// is done. If the agent stays in-session, the presence sweeper
-	// still tracks idleness separately.
-	o.markAgentOnline(ctx, req, nil)
-
 	if running {
 		// The exec outlived the monitoring budget (or the run's context
 		// ended) while still alive. This is NOT a terminal outcome, and
@@ -1005,14 +1016,19 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 		// decides what supervision it can offer. The CLI exec may still
 		// read its credential files — keep the secrets hold so neither
 		// this deferred cleanup nor a later run's removes /secrets/<slug>.
+		//
+		// TERMINAL EVENTS ARE EMITTED NOWHERE IN THIS BRANCH (#2626
+		// review): no exec.command end, no markAgentOnline — a live
+		// process has no exit code to journal and an agent whose CLI is
+		// still working is not "available". Both happen only after the
+		// runtime's end is CONFIRMED: here by a confirmed stop, or later
+		// by the detached hold's watcher.
 		agentExecStillRunning = true
 		o.updateRunStatus(ctx, runState.ID, "running")
 		// Terminate the wedged exec INSIDE this ownership boundary (#2626
 		// review): every caller releases its own locks and slots when
 		// RunAgent returns, so a stop attempted after the return races the
-		// next run acquiring them. Best-effort and bounded; a stop that
-		// cannot be confirmed is logged here and the sentinel still names
-		// a possibly-live process, so no caller may read success into it.
+		// next run acquiring them. Best-effort and bounded.
 		stopCtx, stopCancel := context.WithTimeout(context.Background(), 30*time.Second)
 		stopped, stopErr := o.StopRunAt(stopCtx, RunLocation{
 			ContainerID: req.ContainerID, AgentSlug: req.AgentSlug, RunID: req.RunID,
@@ -1020,17 +1036,52 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 		stopCancel()
 		switch {
 		case stopErr != nil:
-			o.logger.Error("detached exec outlived its monitoring budget and could not be stopped; the process may still be running",
+			o.logger.Error("detached exec outlived its monitoring budget and could not be stopped; holding the agent and its capacity until the runtime is confirmed gone",
 				"agent_id", req.AgentID, "run_id", req.RunID, "exec_id", result.ExecID, "error", stopErr)
 		case !stopped:
-			o.logger.Error("detached exec outlived its monitoring budget and ignored the stop signal; the process may still be running",
+			o.logger.Error("detached exec outlived its monitoring budget and ignored the stop signal; holding the agent and its capacity until the runtime is confirmed gone",
 				"agent_id", req.AgentID, "run_id", req.RunID, "exec_id", result.ExecID)
 		default:
-			o.logger.Warn("detached exec outlived its monitoring budget and was stopped; the run stays nonterminal for reconciliation",
-				"agent_id", req.AgentID, "run_id", req.RunID, "exec_id", result.ExecID)
+			// A stop that ANSWERED "gone" is a confirmed end: emit the
+			// terminal journal entry and return the agent to online now,
+			// then release normally. No live process remains.
+			o.emitExecEnd(ctx, req, result.ExecID, journalCmd, "warn",
+				fmt.Sprintf("%s: detached exec stopped after the monitoring budget (%s)", req.AgentSlug, o.detachedWaitBudget),
+				execStart, map[string]any{"detached": true, "stopped": true})
+			o.markAgentOnline(ctx, req, map[string]any{"reason": "detached_exec_stopped"})
+		}
+		if stopErr != nil || !stopped {
+			// Unconfirmed end (#2626 review): a stop attempt is not a stop
+			// confirmation. The run slot is handed to a hold instead of
+			// being released — capacity stays occupied because the process
+			// may still occupy it — and the agent's admission is refused
+			// until the hold's watcher confirms the runtime gone (or the
+			// hold's cap expires with an operator-visible ERROR).
+			if err := o.registerDetachedHold(&detachedHold{
+				runID:       req.RunID,
+				containerID: req.ContainerID,
+				agentSlug:   req.AgentSlug,
+				execID:      result.ExecID,
+				req:         req,
+				release:     releaseRunSlot,
+				startedAt:   time.Now(),
+			}, o.detachedPollInterval); err != nil {
+				o.logger.Error("could not register a detached hold; releasing the slot as the lesser failure",
+					"agent_id", req.AgentID, "run_id", req.RunID, "error", err)
+			} else {
+				slotTransferredToHold = true
+			}
 		}
 		return fmt.Errorf("%w: exec %s still running after %s", ErrDetachedStillRunning, result.ExecID, o.detachedWaitBudget)
 	}
+
+	o.emitExecEnd(ctx, req, result.ExecID, journalCmd, endSeverity,
+		fmt.Sprintf("%s: exit %d (%dms)", req.AgentSlug, exitCode, time.Since(execStart).Milliseconds()),
+		execStart, endPayload)
+	// Flip agent back to online for the Watch Roster now that the run
+	// is done. If the agent stays in-session, the presence sweeper
+	// still tracks idleness separately.
+	o.markAgentOnline(ctx, req, nil)
 
 	status := "completed"
 	var execErr error
