@@ -1,0 +1,47 @@
+{
+  "date": "2026-09-20",
+  "endpoint": "https://crewship-dev3.unifylab.cz:8443",
+  "deployed_code": "a695a6dd3",
+  "ui_build": "bbc7ea0b9",
+  "runtime_opencode": "1.18.30",
+  "workspace_id": "cmu9kraxh000161288449",
+  "crew_id": "cmu9kua0l0005fe59c455",
+  "pass": [
+    "desktop connect wizard",
+    "390x844 touch connect wizard",
+    "empty credential blocked",
+    "password input masking",
+    "unverified connection label",
+    "encrypted persistence",
+    "no key in list response",
+    "distinct account grants",
+    "missing grant rejected before CLI exec",
+    "invalid key reaches Z.AI and returns token expired or incorrect",
+    "B-to-A sidecar replacement",
+    "selected key absent from live auth.json",
+    "custom native model ID persisted through update API",
+    "unassigned credential reaped by existing sidecar",
+    "new run rejected after unassignment"
+  ],
+  "revocation_observed_seconds": 55.45,
+  "vendor_error_run": "msg_1789894951315831350_b41fb11fea80c1fc",
+  "account_switch_run": "msg_1789895044352701885_2c572020a91154d3",
+  "blocked": [
+    "successful account-backed completion stream",
+    "real tool execution",
+    "real usage and plan entitlement/quota"
+  ],
+  "cleanup": {
+    "dummy_credentials_deleted": true,
+    "qa_crew_stopped": true,
+    "active_credentials_total": 0,
+    "main_dev3_artifact_hashes_unchanged": true
+  },
+  "limits": [
+    "invalid keys prove error path, not purchased entitlement",
+    "UI screenshots were taken on bbc7ea0b9; UI unchanged by Go-only a695a6dd3",
+    "grant reaping observed after completed run, not cancellation of an already-forwarded provider request",
+    "equal-priority multi-account pooling unchanged",
+    "usage observer still caps response capture at 10 MiB"
+  ]
+}

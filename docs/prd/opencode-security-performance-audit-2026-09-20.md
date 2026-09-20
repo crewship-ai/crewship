@@ -151,6 +151,16 @@ adapters and unmanaged/custom OpenCode products retain their existing behavior.
 
 The actual fresh QA runtime contains **OpenCode 1.18.30**, not the earlier
 agent's reported 1.18.31. Every future live result must name the runtime actually
-used. The latest lifecycle fixes require a subsequent acceptance deployment and
-repeat negative runs; the earlier failed runs are not PASS evidence. Successful
-paid stream/tool/usage checks still require the user's real Coding Plan key.
+used. Lifecycle fixes were deployed as `a695a6dd3` at 09:02 UTC. Repeat live runs
+passed: missing grant returned an actionable error before CLI exec; an invalid
+key reached the real Z.AI endpoint and returned `token expired or incorrect`;
+B→A account switching selected the expected credential ID without a bind error.
+The real test key was absent from the run's auth.json and backend log.
+After unassignment, the running sidecar dropped the key within 55.45 seconds,
+and the next run failed closed. This measures revocation after a completed run,
+not cancellation of a request already forwarded to the vendor. Custom native
+model IDs persisted through the update API (verified with a read-only DB query).
+All dummy credentials were deleted and the QA runtime stopped. Evidence and
+screenshots: [acceptance report](reports/zai-acceptance-2026-09-20/results.json).
+Successful paid stream/tool/usage checks still require the user's real Coding
+Plan key. The earlier failed runs remain failed diagnostic evidence.

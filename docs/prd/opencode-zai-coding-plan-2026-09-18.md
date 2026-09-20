@@ -110,18 +110,18 @@ conflict on instance 3, not a defect in this slice:
 
 ### Acceptance side-instance (no impact on the live service)
 
-- **Currently deployed: commit `75343b541`** (the code head; docs-only
-  commits after it change no binary. Started 2026-09-18 ~20:4x UTC, version
-  string `nightly-20260915-r127101-118-g75343b541`). Earlier mentions of
-  f67ed83a1 / 943e3bd24 / a89e09bbe below are deployment history, not the
-  current state.
+- **Currently deployed code: `a695a6dd3`**, restarted 2026-09-20 09:02 UTC
+  after the takeover audit and real-container lifecycle fixes. UI/static export
+  was rebuilt on `bbc7ea0b9`; subsequent changes are Go-only. The observed QA
+  container runs OpenCode **1.18.30**. Older `75343b541` / `f67ed83a1` references
+  describe deployment history, not current state.
 - `https://crewship-dev3.unifylab.cz:8443` (Caddy block appended to
   `/etc/caddy/Caddyfile`, backup `Caddyfile.bak-zai-acceptance-20260918`;
   note: `caddy reload` is broken on this host — admin API disabled — so
   config changes require `systemctl restart caddy`, and the new block
   deliberately has no custom access log because `/var/log/caddy` is not
   writable for new files by the caddy user).
-- Runs build 75343b541 (`crewship.zai` + `crewship-sidecar.zai` in the
+- Runs build a695a6dd3 (`crewship.zai` + `crewship-sidecar.zai` in the
   release dir) on port 8093, socket `/tmp/crewship-zai.sock`, isolated
   `CREWSHIP_DATA_DIR=/tmp/opencode/zai-data`, isolated
   `CREWSHIP_STORAGE_BASE_PATH`/`CREWSHIP_LOG_PATH`/`CREWSHIP_BOLT_PATH`,
@@ -130,7 +130,7 @@ conflict on instance 3, not a defect in this slice:
   snapshot `crewship.db.pre-migrate-v20260916090151-to-v20260916140000-*.bak`
   (schema exactly at this build's head version; dev3 data as of Sep 17
   08:43). Launcher: `/tmp/opencode/zai-run.sh`; log:
-  `/tmp/opencode/zai-instance.log`.
+  `/tmp/opencode/zai-instance-a695a6dd3.log`.
 - **Isolation is partial by design**: database, storage, logs, state and
   container network are separate, but the instance shares dev3's persisted
   ENCRYPTION_KEY (deliberately — the snapshot copy's credentials must
@@ -154,12 +154,12 @@ completion with `zai-coding-plan/glm-5.3`; a tool-calling run; custom model
 ID; invalid key → actionable error without secret leakage; second
 same-product account → explicit selection; grant revocation → next run fails
 closed; concurrent run on the live metered product if available; mobile
-viewport pass. Record observed results, deployed commit (f67ed83a1), CLI
+viewport pass. Record observed results, deployed code commit, CLI
 version and nonsecret run IDs back into this document and the PR.
 
 ## Not done here (explicitly)
 
-- Live acceptance with the real subscription key — NOT PERFORMED (see the checklist above; the side-instance is ready and waiting on the user, currently serving commit 75343b541).
+- Live acceptance with the real subscription key — NOT PERFORMED (see the checklist above; the side-instance is ready and waiting on the user, currently serving code commit a695a6dd3).
 - Zhipu/BigModel regional variants (`zhipuai`, `zhipuai-coding-plan`) —
   separate products, out of scope until an account exists.
 - Z.AI vision/search/reader MCP services — a separate tools decision.
@@ -174,3 +174,21 @@ It reproduces and fixes delayed SSE delivery with a real HTTP regression,
 adds scoped-account/revocation/cancellation coverage, measures parsing allocations,
 and records remaining live acceptance and broader P2–P6 gaps. These source fixes
 are not yet deployed to the acceptance instance.
+
+## Live continuation results (2026-09-20)
+
+See [acceptance evidence](reports/zai-acceptance-2026-09-20/results.json) and the
+[audit continuation](opencode-security-performance-audit-2026-09-20.md#continuation-deployed-acceptance-and-runtime-defects-2026-09-20).
+
+PASS on isolated dev3: desktop/mobile connection wizard, empty-key rejection,
+masked entry, honest unverified label, encrypted persistence, list redaction,
+separate account grants, account B→A restart, selected key absent from auth.json,
+real Z.AI rejection of deliberately invalid key, custom native ID persistence,
+removal of a grant from the running sidecar (55.45 s), and next-run refusal.
+The sidecar restart failed before the owner-UID fix and passed afterward.
+
+Still BLOCKED: successful paid GLM stream, actual tool execution, real token usage
+and subscription entitlement/quota. No real Z.AI credential has been supplied.
+All dummy credentials were deleted and the QA crew stopped; the acceptance UI
+remains available. Account equality still uses existing pooling semantics; the
+verified selection contract is one explicitly granted account per agent.
