@@ -44,6 +44,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Fixed
 
+- Sidecar: observe SSE usage per event so long streams retain their final token totals; bound individual events and omit billing observations when an oversized event makes usage incomplete. (#2621)
 - OpenCode: report missing managed-provider grants before launching the CLI; restart the credential sidecar as its owning UID and reject failed stops instead of accepting stale credentials. (#2621)
 - Sidecar: flush small SSE chunks immediately so OpenCode and other streaming model responses arrive before upstream completion; reduce temporary allocations when parsing SSE usage. (#2621)
 - **Deleting a routine now deletes its schedules with it (#2573).** The delete used to tombstone only the pipeline row: its schedules stayed enabled, kept a `next_run_at`, appeared in the plans list and calendar with an empty routine column, and fired into a load-failure alert every tick until the circuit breaker tripped. The soft-delete now disables and soft-deletes the routine's schedules in the same transaction (a schedule's optional wake probe is untouched — its absence has its own fail-open/fail-closed semantics), and the schedules list hides rows orphaned before this fix rather than presenting them as live plans.

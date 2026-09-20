@@ -14,7 +14,7 @@ A new regression uses a real `httptest.Server` and an upstream pipe that remains
 
 The usage parser split the entire retained response into a slice of strings before parsing events. It now iterates lines using `strings.SplitSeq`, trimming a terminal CR per line. This preserves multiline event and CRLF handling without allocating the whole line-index array. Existing parser tests and the new proxy tests pass.
 
-### Open limitation: large-stream usage capture and parsing cost
+### Original finding: large-stream usage capture and parsing cost (subsequently fixed below)
 
 Observation retains only the first 10 MiB and parses after EOF. If final usage is later than that boundary, the ledger can miss it. The cap limits retained payload, not cumulative allocations or the sum over concurrent requests. Many tiny JSON events cause substantial parser allocation churn. These behaviors predate Z.AI and are not solved by adding a provider card or by the flush fix.
 
@@ -164,3 +164,36 @@ All dummy credentials were deleted and the QA runtime stopped. Evidence and
 screenshots: [acceptance report](reports/zai-acceptance-2026-09-20/results.json).
 Successful paid stream/tool/usage checks still require the user's real Coding
 Plan key. The earlier failed runs remain failed diagnostic evidence.
+
+## Incremental SSE usage follow-up
+
+Replaced first-10-MiB capture with a bounded per-event observer. Delivery/flush
+happens before observing each chunk. Completed events are parsed incrementally
+with reusable line scratch and cumulative usage state, so a final usage event
+after more than 10 MiB is still observed, including Anthropic input-at-start and
+output-at-end. Chunk boundaries, multiline CRLF and an unterminated final event
+are covered. The individual event limit remains 10 MiB; oversized events are
+drained without retaining more payload or interrupting response delivery. If any
+event is skipped, the observer logs a warning and omits the usage/billing callback
+(including quota-triggered callbacks), rather than recording incomplete usage as
+a zero-token bill. Quota headers/status still reach the client; their usual
+observer update is also omitted in this exceptional oversized-event case.
+
+Focused race tests passed, as did the complete sidecar suite (65.939 s) and vet.
+The final oversized/quota suppression branch was additionally race-tested.
+A new regression preserves initial and final usage across a >10-MiB stream.
+This closes the total-response capture limitation; malformed/oversized individual
+events still cannot provide verified usage and remain explicitly unknown.
+
+Updated synthetic benchmark (same shared host; no network): 1 MiB tiny events
+allocate ~17.84 MB cumulatively, versus ~21.63 MB before this change (~17.5% less).
+Allocation **count increases** (~629k versus ~525k); elapsed time does not establish
+a throughput gain. The 12 MiB test allocates ~213.94 MB while now parsing all 12 MiB
+instead of the old first 10 MiB, so those timings/counts are not like-for-like.
+The small mocked proxy uses ~11.25 KB/op; its string-reader fast path differs from
+a real HTTP response, so this is not a claim of equivalent production savings.
+Retained event bytes are bounded in tests; no production peak-RSS claim is made.
+
+The previous full repository Go run covers the lifecycle fix; this additional
+sidecar change has its own full package/race/vet checks and requires final-head CI.
+Paid streaming acceptance is still blocked on the user's key.

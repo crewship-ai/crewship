@@ -1037,12 +1037,9 @@ func (p *Proxy) authorizeLLMRoute(w http.ResponseWriter, r *http.Request) (strin
 // when the upstream is a known LLM provider returning JSON or SSE, also parses
 // usage / quota and fires the OnLLMCall observer.
 //
-// SSE is tee'd while it streams, so the client receives each byte immediately;
-// parsing happens only after EOF. Non-LLM hosts skip the buffer path entirely.
-//
-// Body buffering is bounded by maxRequestBodyBytes (10 MB) — the same cap
-// that protects the request path, applied here to the response so a
-// pathological upstream can't OOM the sidecar.
+// SSE usage is observed incrementally after each client write/flush, retaining
+// at most one bounded event. JSON response capture remains bounded by
+// maxRequestBodyBytes. Non-LLM hosts skip observation entirely.
 //
 // The two provider-ish arguments are NOT interchangeable. `codec` is the
 // response body SHAPE (llmroute.Spec.BodyCodec) the parser switches on;
@@ -1066,9 +1063,18 @@ func (p *Proxy) copyAndObserveLLM(w http.ResponseWriter, resp *http.Response, co
 	if !isJSONResponse(contentType) {
 		var usage LLMUsage
 		if strings.HasPrefix(strings.ToLower(contentType), "text/event-stream") {
-			buf := &boundedBuffer{cap: maxRequestBodyBytes}
-			_, _ = io.Copy(dst, io.TeeReader(resp.Body, buf))
-			usage = parseLLMUsageSSE(codec, buf.String())
+			observer := &sseUsageObserver{codec: codec, limit: maxRequestBodyBytes}
+			// Deliver and flush each chunk before observing its events.
+			_, _ = io.Copy(io.MultiWriter(dst, observer), resp.Body)
+			usage = observer.finish()
+			if observer.skipped > 0 {
+				if p.logger != nil {
+					p.logger.Warn("SSE usage unavailable: oversized events", "provider", ledgerProvider, "skipped_events", observer.skipped)
+				}
+				// Do not turn unknown usage into a zero-token billing row,
+				// even if quota headers would otherwise trigger the callback.
+				return
+			}
 		} else {
 			_, _ = io.Copy(dst, resp.Body)
 		}

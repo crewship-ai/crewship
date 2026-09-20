@@ -42,6 +42,6 @@
     "UI screenshots were taken on bbc7ea0b9; UI unchanged by Go-only a695a6dd3",
     "grant reaping observed after completed run, not cancellation of an already-forwarded provider request",
     "equal-priority multi-account pooling unchanged",
-    "usage observer still caps response capture at 10 MiB"
+    "a695a6dd3 live evidence predates the incremental usage fix; subsequent usage verification is fixture-based until a real key is supplied"
   ]
 }
