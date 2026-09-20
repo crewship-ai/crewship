@@ -541,6 +541,10 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 			w.Header().Add(k, v)
 		}
 	}
+	if strings.HasPrefix(strings.ToLower(resp.Header.Get("Content-Type")), "text/event-stream") {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+	}
 	w.WriteHeader(resp.StatusCode)
 	p.copyAndObserveLLM(w, resp, spec.BodyCodec, spec.LedgerProvider, actorID, credentialID)
 }
@@ -864,6 +868,10 @@ func (p *Proxy) reverseProxyToProvider(w http.ResponseWriter, r *http.Request, s
 			w.Header().Add(k, v)
 		}
 	}
+	if strings.HasPrefix(strings.ToLower(resp.Header.Get("Content-Type")), "text/event-stream") {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+	}
 	w.WriteHeader(resp.StatusCode)
 	credentialID := ""
 	if cred != nil {
@@ -1105,6 +1113,10 @@ type sseFlushWriter struct {
 }
 
 func (w sseFlushWriter) Write(p []byte) (int, error) {
+	// The proxy sets these before WriteHeader too. Keep the MIME invariant
+	// explicit at this raw-byte sink and when used without a committed header.
+	w.w.Header().Set("Content-Type", "text/event-stream")
+	w.w.Header().Set("X-Content-Type-Options", "nosniff")
 	n, err := w.w.Write(p)
 	if err == nil {
 		err = w.controller.Flush()

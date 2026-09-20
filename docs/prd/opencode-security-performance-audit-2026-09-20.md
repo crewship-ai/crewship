@@ -85,3 +85,21 @@ These are cumulative allocations, **not peak RSS**. Observed timing ranges did n
 4. Resolve the account-binding and large-stream usage limitations according to acceptance scope; preserve them explicitly if deferred. Do not claim the whole expanded PRD is complete.
 5. Merge order remains #2619 then #2622 only after permission and review. Retest the final integration with current main as required.
 6. Keep acceptance available while the user tests. Retire only its resources after agreed completion, preserving main dev3 and the shared key. Release issue claims on handoff.
+
+## CI security follow-up
+
+CodeQL on integrated head `9f1c707e7` flagged the new raw SSE Write as a possible
+XSS sink. The path is intended for event-stream data, but this invariant is now
+explicit: proxy response headers are canonicalized to `text/event-stream` with
+`X-Content-Type-Options: nosniff` before committing the status, and the flush
+writer maintains that invariant at its byte-write boundary. A regression sends
+HTML/script text as SSE data and verifies unchanged bytes plus inert headers;
+the real-HTTP first-event test checks the headers as received by a client.
+No CodeQL suppression was added. Final scan results must still be checked.
+
+A serial read-only live availability sample (20 HTTPS GETs to the acceptance
+credentials page) measured median 4.09 ms, p95 5.85 ms, max 18.46 ms. This measures
+static UI availability from the same host, not inference or authenticated API
+performance. SQLite EXPLAIN of auto-assignment on the acceptance copy used
+`idx_credentials_ws_created` and the credential-fields unique index; no full
+credentials-table scan was observed.

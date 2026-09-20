@@ -44,6 +44,9 @@ func testZAIFlush(t *testing.T, observed bool) {
 		t.Fatalf("first event was buffered until upstream EOF: %v", err)
 	}
 	defer resp.Body.Close()
+	if resp.Header.Get("Content-Type") != "text/event-stream" || resp.Header.Get("X-Content-Type-Options") != "nosniff" {
+		t.Fatalf("unsafe stream headers: %v", resp.Header)
+	}
 	line, err := bufio.NewReader(resp.Body).ReadString('\n')
 	if err != nil || !strings.Contains(line, "hello") {
 		t.Fatalf("first event: %q, %v", line, err)
@@ -177,5 +180,19 @@ func TestZAICodingPlanUsageCRLFMultiline(t *testing.T) {
 	got := parseLLMUsageSSE("openai", body)
 	if got.Model != "glm-5.3" || got.InputTokens != 9 || got.OutputTokens != 2 {
 		t.Fatalf("multiline CRLF usage: %+v", got)
+	}
+}
+
+func TestZAIStreamHTMLRemainsData(t *testing.T) {
+	w := httptest.NewRecorder()
+	writer := sseFlushWriter{w: w, controller: http.NewResponseController(w)}
+	payload := []byte("data: <script>alert(1)</script>\n\n")
+	if _, err := writer.Write(payload); err != nil {
+		t.Fatal(err)
+	}
+	resp := w.Result()
+	defer resp.Body.Close()
+	if resp.Header.Get("Content-Type") != "text/event-stream" || resp.Header.Get("X-Content-Type-Options") != "nosniff" || w.Body.String() != string(payload) {
+		t.Fatal("SSE must retain data bytes with an inert MIME type")
 	}
 }
