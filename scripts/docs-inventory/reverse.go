@@ -240,6 +240,21 @@ func commandInventory(manifest commandManifest) (map[string]bool, map[string]boo
 	for _, flag := range manifest.GlobalFlags {
 		flags[flag.Name] = true
 	}
+	walkCommandVariants(manifest, func(node commandNode, variants []string) {
+		for _, variant := range variants {
+			commands[variant] = true
+		}
+		for _, flag := range node.Flags {
+			flags[flag.Name] = true
+		}
+	})
+	return commands, flags
+}
+
+// walkCommandVariants visits every command with each spelling a document may
+// use for it: the canonical path, and the same path through every alias of
+// every ancestor and of the command itself (`routine list`, `pipeline list`).
+func walkCommandVariants(manifest commandManifest, visit func(node commandNode, variants []string)) {
 	var walk func([]commandNode, string, []string)
 	walk = func(nodes []commandNode, parent string, parentVariants []string) {
 		for _, node := range nodes {
@@ -261,17 +276,20 @@ func commandInventory(manifest commandManifest) (map[string]bool, map[string]boo
 					}
 				}
 			}
-			for _, variant := range variants {
-				commands[variant] = true
-			}
-			for _, flag := range node.Flags {
-				flags[flag.Name] = true
-			}
+			visit(node, variants)
 			walk(node.Commands, full, variants)
 		}
 	}
 	walk(manifest.Commands, "", nil)
-	return commands, flags
+}
+
+// commandVariants is walkCommandVariants as a lookup by canonical path.
+func commandVariants(manifest commandManifest) map[string][]string {
+	out := map[string][]string{}
+	walkCommandVariants(manifest, func(node commandNode, variants []string) {
+		out[node.Path] = variants
+	})
+	return out
 }
 
 func longestCommandPrefix(parts []string, commands map[string]bool) string {

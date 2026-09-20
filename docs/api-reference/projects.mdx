@@ -45,7 +45,7 @@ Read routes require an authenticated workspace member.
 | `start_date` | string \| null | Stored date value. |
 | `target_date` | string \| null | Stored target date value. |
 | `issue_count` | integer | Issues with `mission_type = 'issue'`. |
-| `done_count` | integer | Issues whose status is `DONE`, `COMPLETED`, or `REVIEW`. |
+| `done_count` | integer | Issues whose status is `DONE` or `REVIEW` (`status IN ('DONE','REVIEW')`). |
 | `progress` | integer | Integer percentage, `done_count * 100 / issue_count`; `0` when empty. |
 | `created_at`, `updated_at` | string | RFC 3339 timestamps. |
 

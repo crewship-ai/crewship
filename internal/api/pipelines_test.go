@@ -181,6 +181,43 @@ CREATE TABLE IF NOT EXISTS inbox_item_reads (
     PRIMARY KEY (inbox_item_id, user_id)
 );
 
+-- pipeline_schedules mirrors the real migration shape (see
+-- internal/pipeline/schedules_test.go's scheduleSchemaSQL). The delete
+-- handler's cascade (#2573) writes here in the same transaction as the
+-- pipeline soft-delete, so a rig without the table turns every Delete
+-- into a 500 that production could never produce.
+CREATE TABLE IF NOT EXISTS pipeline_schedules (
+    id                      TEXT PRIMARY KEY,
+    workspace_id            TEXT NOT NULL,
+    name                    TEXT NOT NULL,
+    target_pipeline_id      TEXT NOT NULL,
+    target_pipeline_version INTEGER,
+    cron_expr               TEXT NOT NULL,
+    timezone                TEXT NOT NULL DEFAULT 'UTC',
+    inputs_json             TEXT NOT NULL DEFAULT '{}',
+    enabled                 INTEGER NOT NULL DEFAULT 1,
+    last_run_at             TEXT,
+    last_status             TEXT,
+    last_run_id             TEXT,
+    next_run_at             TEXT,
+    created_at              TEXT NOT NULL DEFAULT (datetime('now','subsec')),
+    updated_at              TEXT NOT NULL DEFAULT (datetime('now','subsec')),
+    deleted_at              TEXT,
+    wake_pipeline_id        TEXT,
+    wake_inputs_json        TEXT NOT NULL DEFAULT '{}',
+    wake_check_count        INTEGER NOT NULL DEFAULT 0,
+    wake_fire_count         INTEGER NOT NULL DEFAULT 0,
+    last_wake_at            TEXT,
+    last_wake_status        TEXT,
+    wake_fail_closed        INTEGER NOT NULL DEFAULT 0,
+    catchup_policy          TEXT NOT NULL DEFAULT 'once',
+    last_missed_count       INTEGER NOT NULL DEFAULT 0,
+    consecutive_failures    INTEGER NOT NULL DEFAULT 0,
+    max_consecutive_failures INTEGER NOT NULL DEFAULT 5,
+    disabled_reason         TEXT,
+    activation              TEXT
+);
+
 `
 
 func openSmokeDB(t *testing.T) *sql.DB {

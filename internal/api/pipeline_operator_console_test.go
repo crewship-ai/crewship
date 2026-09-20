@@ -415,6 +415,11 @@ func TestScheduleEffectiveVersion_OnListAndCreate(t *testing.T) {
 	h, db, user, ws := scheduleHandlerRig(t)
 	seedPipelineRow(t, db, ws, "pl_s", "nightly")
 	execOrFatal(t, db, `UPDATE pipelines SET head_version = 3 WHERE id = 'pl_s'`)
+	// #2573: a schedule whose target routine was soft-deleted is hidden
+	// from the list (deleted WITH its routine by the delete cascade; rows
+	// orphaned before that fix are filtered here). The FK + target
+	// validation mean an unresolvable target can only be a deleted
+	// routine — there is no "never existed" shape to keep visible.
 	seedPipelineRow(t, db, ws, "pl_gone", "gone")
 	store := pipeline.NewScheduleStore(db)
 	ctx := context.Background()
@@ -428,6 +433,8 @@ func TestScheduleEffectiveVersion_OnListAndCreate(t *testing.T) {
 			t.Fatalf("save %s: %v", in.Name, err)
 		}
 	}
+	// Soft-delete pl_gone the way the pre-#2573 code did (no cascade):
+	// the orphaned row must disappear from the list.
 	execOrFatal(t, db, `UPDATE pipelines SET deleted_at = ? WHERE id = 'pl_gone'`, time.Now().UTC().Format(time.RFC3339))
 
 	req := withWorkspaceUser(httptest.NewRequest("GET", "/api/v1/workspaces/"+ws+"/pipeline-schedules", nil), user, ws, "OWNER")
@@ -459,7 +466,9 @@ func TestScheduleEffectiveVersion_OnListAndCreate(t *testing.T) {
 	}
 	check("latest", float64(3), false)
 	check("pinned", float64(2), true)
-	check("orphan", nil, false)
+	if _, still := byName["orphan"]; still {
+		t.Errorf("schedule of a soft-deleted routine must be hidden from the list (#2573), got row: %v", byName["orphan"])
+	}
 
 	// Single-row responses carry the same fields.
 	body := `{"target_pipeline_slug":"nightly","cron_expr":"*/5 * * * *"}`

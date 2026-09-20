@@ -1,10 +1,11 @@
 # Routines: srozumitelná obsluha a spolehlivé autorování
 
-**Navigace ve stavu k 16. září:** Tento PRD drží původní rozsah R1–R10 a lidskou přejímku §11. Navazující změny mají vlastní zadání a důkazy:
+**Navigace ve stavu k 18. září:** Tento PRD drží původní rozsah R1–R10 a lidskou přejímku §11. Navazující změny mají vlastní zadání a důkazy:
 
 - [Vstupy, pravidla práce a řešení problémů](ROUTINES-CLARITY-PRD-2026-09-15.md): [PR #2556](https://github.com/crewship-ai/crewship/pull/2556), issue #2555.
 - [Operator console, Edit a New routine](../ux/routines-operator-console-2026-09-15.md): [PR #2562](https://github.com/crewship-ai/crewship/pull/2562), issue #2560. [Integrační ověření DEV1 z 16. září](https://github.com/crewship-ai/crewship/pull/2562#issuecomment-5696159682) zaznamenává nasazenou větev, browser důkazy a stav merge v okamžiku ověření.
 - Opravy #2553 uzavírá [protokol po mergi](https://github.com/crewship-ai/crewship/pull/2553#issuecomment-5672592832). Novější merge, CI a identitu nasazení uvádějí validační protokoly v navazujících PR; starší důkazy nejsou nové přeměření serveru.
+- Integrační PR [#2617](https://github.com/crewship-ai/crewship/pull/2617) (CLI audit #2594–#2611 + #2616, opravy assignee-type a nullable backup schémat) je od 18. září sloučen; [validace 18. září](reports/routines-validation-2026-09-18.md) potvrzuje merge ancestry, DEV1 identitu i denní živé průchody R1–R10 a opravuje defekt #2573 (kaskáda mazání rutiny na plány, PR [#2620](https://github.com/crewship-ai/crewship/pull/2620)).
 
 **Úvod níže je historický stav z 12. září. Lidská přejímka §11 zůstává otevřená; technické testy ani merge ji neuzavírají.**
 

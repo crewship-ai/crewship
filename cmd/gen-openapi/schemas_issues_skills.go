@@ -53,6 +53,10 @@ func issueSkillCredentialSchemaComponents() map[string]any {
 	}, "id")
 	issue := obj(map[string]any{
 		"work_mode": str(), "work_revision": integer(), "worker_user_id": nullable("string"), "worker_name": nullable("string"), "work_note": str(), "work_stopping": boolean(),
+		// brief_revision / client_review_required ride every issue row
+		// (no omitempty on issueResponse since #2448); the schema has to
+		// admit them or every response violates the contract (#2623).
+		"brief_revision": integer(), "client_review_required": boolean(),
 		"id": str(), "workspace_id": str(), "crew_id": str(),
 		"crew_name": str(), "crew_slug": str(), "number": nullable("integer"),
 		"identifier": nullable("string"), "title": str(), "description": nullable("string"),
@@ -68,9 +72,28 @@ func issueSkillCredentialSchemaComponents() map[string]any {
 		"comment_count": integer(), "routine_id": nullable("string"),
 		"routine_slug": nullable("string"), "routine_name": nullable("string"),
 		"created_by": ref("IssueCreator"), "authored_via": nullable("string"),
+		// Optional projections on issueResponse: assignee_slug (agent
+		// assignee's page key), code_links (agent-facing internal read
+		// only — browsers read …/code-links), execution (#2448 durable
+		// execution snapshot). All omitempty, none required.
+		"assignee_slug": nullable("string"),
+		"code_links": arrayOf(object(map[string]any{
+			"url": str(), "provider": str(), "state": str(), "details": str(),
+		}, "url", "provider")),
+		"execution": func() map[string]any {
+			s := object(map[string]any{
+				"id": str(), "stage": str(), "attempt": integer(), "reviewer": str(), "note": str(),
+				"routine_run_id": str(),
+				"workers": arrayOf(object(map[string]any{
+					"assignment_id": str(), "name": str(), "status": str(),
+				}, "assignment_id", "name", "status")),
+			}, "id", "stage", "attempt", "reviewer", "note", "workers")
+			s["nullable"] = true
+			return s
+		}(),
 	}, "id", "workspace_id", "crew_id", "title", "status", "priority", "sort_order", "mission_type", "lead_agent_id", "created_at", "updated_at", "labels",
 		"number", "identifier", "description", "assignee_type", "assignee_id", "due_date", "completed_at",
-		"project_id", "estimate", "parent_issue_id", "milestone_id", "sub_issues_count", "comment_count", "work_mode", "work_revision", "work_note", "work_stopping")
+		"project_id", "estimate", "parent_issue_id", "milestone_id", "sub_issues_count", "comment_count", "work_mode", "work_revision", "work_note", "work_stopping", "client_review_required")
 
 	installedAgent := obj(map[string]any{
 		"agent_id": str(), "agent_slug": str(), "agent_name": str(),

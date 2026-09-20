@@ -103,6 +103,12 @@ reviews:
   # ─────────────────────────────────────────────────────────────────────────────
   path_filters:
     - "!pnpm-lock.yaml"
+    # Generated docs: docs/api-reference is emitted by cmd/gen-openapi and
+    # docs/cli by the CLI help extraction — CI (docs-surface-check) validates
+    # their freshness; reviewing generated mdx is noise and pushes large
+    # integration PRs over the 100-file review cap.
+    - "!docs/api-reference/**"
+    - "!docs/cli/**"
     - "!package-lock.json"
     - "!.next/**"
     - "!dist/**"

@@ -681,7 +681,18 @@ LIMIT %d`, pipelineColumns, strings.Join(conds, " AND "), orderBy, limit)
 // GetByID via the deleted_at IS NULL guard.
 func (s *Store) SoftDelete(ctx context.Context, id string) error {
 	now := tsformat.Format(s.now())
-	res, err := s.db.ExecContext(ctx,
+	// One transaction, both tables: the routine's schedules are part of
+	// what "deleted" means (#2573). Committing the pipeline soft-delete
+	// alone would leave enabled rows in pipeline_schedules pointing at a
+	// deleted routine — the scheduler would fire them, fail to load the
+	// target and alert every tick until the circuit breaker tripped, and
+	// the schedules list would show a row with an empty routine column.
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("pipeline: soft delete: %w", err)
+	}
+	defer tx.Rollback()
+	res, err := tx.ExecContext(ctx,
 		`UPDATE pipelines SET deleted_at = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL`,
 		now, now, id)
 	if err != nil {
@@ -689,6 +700,19 @@ func (s *Store) SoftDelete(ctx context.Context, id string) error {
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
 		return ErrNotFound
+	}
+	// Cascade on target_pipeline_id only. wake_pipeline_id is a probe
+	// whose absence has its own fail-open/fail-closed semantics in
+	// runWakeCheck — deleting the probe is not deleting the schedule.
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE pipeline_schedules
+		    SET deleted_at = ?, updated_at = ?, enabled = 0
+		  WHERE target_pipeline_id = ? AND deleted_at IS NULL`,
+		now, now, id); err != nil {
+		return fmt.Errorf("pipeline: soft delete schedules: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("pipeline: soft delete: %w", err)
 	}
 	return nil
 }

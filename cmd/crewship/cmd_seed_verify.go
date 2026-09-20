@@ -1101,7 +1101,7 @@ var githubFailureConclusions = map[string]bool{
 func githubScheduledTruth(ctx context.Context, repo, token string, maxStale time.Duration, now time.Time) (scheduledTruth, error) {
 	var truth scheduledTruth
 	if token == "" {
-		return truth, fmt.Errorf("no GitHub token in %s / GH_TOKEN", packGitHubEnv)
+		return truth, fmt.Errorf("no GitHub token in %s / GH_TOKEN / GITHUB_TOKEN", packGitHubEnv)
 	}
 	var wfs struct {
 		Workflows []struct {
@@ -1186,19 +1186,17 @@ func printVerify(checks []verifyCheck, strict bool) error {
 			skipped++
 		}
 	}
-	if flagFormat == "json" {
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		if err := enc.Encode(map[string]any{
-			"checks":  checks,
-			"failed":  failed,
-			"skipped": skipped,
-			"passed":  len(checks) - failed - skipped,
-			"strict":  strict,
-		}); err != nil {
-			return err
-		}
-	} else {
+	// The shared formatter, so yaml and ndjson render the same verdict
+	// object json does instead of falling through to the table — the
+	// uniform --format contract every other command keeps.
+	verdict := map[string]any{
+		"checks":  checks,
+		"failed":  failed,
+		"skipped": skipped,
+		"passed":  len(checks) - failed - skipped,
+		"strict":  strict,
+	}
+	if err := newFormatter().AutoHuman(verdict, func() {
 		fmt.Println()
 		fmt.Printf("%-14s %-12s %-6s %s\n", "PACK", "STEP", "RESULT", "DETAIL")
 		for _, c := range checks {
@@ -1206,6 +1204,8 @@ func printVerify(checks []verifyCheck, strict bool) error {
 		}
 		fmt.Println()
 		fmt.Printf("%d passed, %d failed, %d skipped\n", len(checks)-failed-skipped, failed, skipped)
+	}); err != nil {
+		return err
 	}
 	if failed > 0 {
 		return fmt.Errorf("seed verify: %d check(s) failed", failed)

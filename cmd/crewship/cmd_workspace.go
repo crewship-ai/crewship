@@ -1,7 +1,10 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
+	"os"
+	"sort"
 	"strings"
 
 	"github.com/crewship-ai/crewship/internal/cli"
@@ -217,6 +220,10 @@ var workspaceGetCmd = &cobra.Command{
 			LogoURL                    *string `json:"logo_url" yaml:"logo_url"`
 			PreferredLanguage          *string `json:"preferred_language" yaml:"preferred_language"`
 			AllowPrivilegedCredentials bool    `json:"allow_privileged_credentials" yaml:"allow_privileged_credentials"`
+			// PagesTheme is the colour object `workspace update --pages-theme`
+			// writes; decoded rather than kept raw so YAML output renders it
+			// as a mapping and the human line can name the SDK defaults for `{}`.
+			PagesTheme map[string]string `json:"pages_theme" yaml:"pages_theme"`
 		}
 		if err := cli.ReadJSON(resp, &ws); err != nil {
 			return err
@@ -233,6 +240,7 @@ var workspaceGetCmd = &cobra.Command{
 			{"Slug", ws.Slug},
 			{"Language", lang},
 			{"Allow privileged credentials", fmt.Sprintf("%t", ws.AllowPrivilegedCredentials)},
+			{"Pages theme", formatPagesTheme(ws.PagesTheme)},
 			{"ID", ws.ID},
 			{"Created", ws.CreatedAt},
 		}
@@ -285,6 +293,14 @@ var workspaceUpdateCmd = &cobra.Command{
 		if flags.Changed("approvals-retention-days") {
 			v, _ := flags.GetInt("approvals-retention-days")
 			body["approvals_retention_days"] = v
+		}
+		if flags.Changed("pages-theme") {
+			v, _ := flags.GetString("pages-theme")
+			theme, err := parsePagesThemeFlag(v)
+			if err != nil {
+				return err
+			}
+			body["pages_theme"] = theme
 		}
 
 		if len(body) == 0 {
@@ -760,6 +776,54 @@ var workspaceInviteCreateCmd = &cobra.Command{
 	},
 }
 
+// parsePagesThemeFlag reads `--pages-theme` as inline JSON or `@file`.
+//
+// Only the shape is checked here — a JSON object of string values — and the
+// colour vocabulary is left to the server (internal/api/workspace_pages_theme.go),
+// so a key the server learns later does not need a CLI release to be settable.
+// The object is sent decoded rather than as raw text so a `--pages-theme
+// '{"accent": "#112233"}'` and the same document from a file produce the same
+// PATCH body byte for byte.
+func parsePagesThemeFlag(value string) (map[string]string, error) {
+	raw := strings.TrimSpace(value)
+	if strings.HasPrefix(raw, "@") {
+		path := strings.TrimPrefix(raw, "@")
+		if path == "" {
+			return nil, fmt.Errorf("--pages-theme @file needs a path")
+		}
+		b, err := os.ReadFile(path)
+		if err != nil {
+			return nil, fmt.Errorf("read --pages-theme file: %w", err)
+		}
+		raw = strings.TrimSpace(string(b))
+	}
+	if raw == "" {
+		return nil, fmt.Errorf("--pages-theme expects a JSON object such as '{\"accent\": \"#0f766e\"}' or {} to reset")
+	}
+	var theme map[string]string
+	if err := json.Unmarshal([]byte(raw), &theme); err != nil || theme == nil {
+		return nil, fmt.Errorf("--pages-theme must be a JSON object of #RRGGBB colours keyed accent, background, surface, text, muted, border")
+	}
+	return theme, nil
+}
+
+// formatPagesTheme renders the theme object for the human detail view.
+func formatPagesTheme(theme map[string]string) string {
+	if len(theme) == 0 {
+		return "(SDK defaults)"
+	}
+	keys := make([]string, 0, len(theme))
+	for key := range theme {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	parts := make([]string, 0, len(keys))
+	for _, key := range keys {
+		parts = append(parts, key+"="+theme[key])
+	}
+	return strings.Join(parts, " ")
+}
+
 func init() {
 	workspaceCreateCmd.Flags().String("name", "", "Workspace name (required)")
 	workspaceCreateCmd.Flags().String("slug", "", "Workspace slug (auto-generated from name)")
@@ -776,6 +840,8 @@ func init() {
 		"Days of audit_logs history to keep; 0 means keep forever, which is the default — audit_logs is the compliance trail (#1887)")
 	workspaceUpdateCmd.Flags().Int("approvals-retention-days", 0,
 		"Days of decided approvals_queue history to keep; 0 means keep forever. Unset uses the 90-day default (#2233)")
+	workspaceUpdateCmd.Flags().String("pages-theme", "",
+		"Shared Page colours as a JSON object of #RRGGBB values keyed accent, background, surface, text, muted, border; @file reads it from a file, {} resets to the SDK defaults")
 
 	workspaceMemberAddCmd.Flags().String("role", "MEMBER", "Role: MEMBER|ADMIN")
 	workspaceMemberRemoveCmd.Flags().BoolP("yes", "y", false, "Skip confirmation")

@@ -149,7 +149,9 @@ For each pack it reports one row per step:
 | `page` | Every panel of the pack's Page carries this run's id. |
 
 Exit status is 1 when any check fails; with `--strict`, when any is skipped
-too. `--format json` prints the rows and the totals for a script to read.
+too. `--format json` (or `yaml` / `ndjson`, the same object) prints the rows
+under `checks` plus the `passed` / `failed` / `skipped` / `strict` totals for
+a script to read; the progress lines stay on stderr.
 
 ```bash
 crewship seed verify --pack ci-watch --timeout 20m
@@ -157,7 +159,9 @@ crewship seed verify --format json --strict
 ```
 
 The probe comparison is only as independent as its token: `verify` reads
-GitHub with `SEED_GITHUB_TOKEN` (or `GH_TOKEN`) from its own environment.
+GitHub with the first of `SEED_GITHUB_TOKEN`, `GH_TOKEN`, `GITHUB_TOKEN` set
+in its own environment. Only `SEED_GITHUB_TOKEN` satisfies the `env` gate —
+the other two are fallbacks for the read, not the pack's requirement.
 
 ## Seed phases (in order)
 

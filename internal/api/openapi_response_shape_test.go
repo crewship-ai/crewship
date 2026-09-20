@@ -6,12 +6,14 @@ import (
 	"os"
 	"reflect"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/crewship-ai/crewship/internal/groupchat"
 	"github.com/crewship-ai/crewship/internal/harbormaster"
 	"github.com/crewship-ai/crewship/internal/pipeline"
+	"github.com/crewship-ai/crewship/internal/webhook"
 )
 
 // The spec's `required` list must be DERIVED from the response struct, not
@@ -274,6 +276,17 @@ var responseShapeContracts = []struct {
 	{name: "WebhookDeliveryPage", pointer: "/components/schemas/WebhookDeliveryPage", value: webhookDeliveryPage{}},
 	{name: "RoutineWebhookReceipt", pointer: "/components/schemas/RoutineWebhookReceipt", value: routineReceiptView{}},
 	{name: "RoutineWebhookReceiptPage", pointer: "/components/schemas/RoutineWebhookReceiptPage", value: routineReceiptPage{}},
+	// ── 2026-09-15 audit (#2583) ───────────────────────────────────────────
+	// Schemas the audit found drifted from their structs. The field SET is
+	// graded by openapi_schema_keys_test.go; this table adds the required
+	// list, which Run had never carried at all.
+	{name: "Run", pointer: "/components/schemas/Run", value: runResponse{}},
+	{name: "RunList", pointer: "/components/schemas/RunList", value: runListResponse{}},
+	{name: "CrewAssignmentsResponseV1[]", pointer: "/components/schemas/CrewAssignmentsResponseV1/items", value: assignmentListItem{}},
+	{name: "GET /api/v1/admin/backups/verify", pointer: "/components/schemas/FinalAdminPlatformBackupVerify", value: backupVerifyResponse{}},
+	{name: "POST /api/v1/admin/backups/restore", pointer: "/components/schemas/FinalAdminPlatformBackupRestore", value: backupRestoreResponse{}},
+	{name: "POST .../trigger 202", pointer: "/components/schemas/FinalWebhookFire/oneOf/0", value: webhook.AcceptedReceipt{}},
+	{name: "POST .../trigger 200", pointer: "/components/schemas/FinalWebhookFire/oneOf/1", value: webhook.IgnoredReceipt{}},
 }
 
 func TestOpenAPIRequired_MatchesTheStructsOwnJSONTags(t *testing.T) {
@@ -381,17 +394,25 @@ func jsonFieldsOf(t reflect.Type) (always []string, sometimes map[string]bool) {
 }
 
 // resolvePointer walks an RFC 6901 JSON pointer, with the usual ~1 / ~0
-// unescaping, over a decoded document.
+// unescaping, over a decoded document. A numeric token indexes an array, so a
+// pointer can reach one branch of a oneOf.
 func resolvePointer(doc any, pointer string) any {
 	cur := doc
 	for _, token := range strings.Split(strings.TrimPrefix(pointer, "/"), "/") {
 		token = strings.ReplaceAll(token, "~1", "/")
 		token = strings.ReplaceAll(token, "~0", "~")
-		m, ok := cur.(map[string]any)
-		if !ok {
+		switch node := cur.(type) {
+		case map[string]any:
+			cur = node[token]
+		case []any:
+			i, err := strconv.Atoi(token)
+			if err != nil || i < 0 || i >= len(node) {
+				return nil
+			}
+			cur = node[i]
+		default:
 			return nil
 		}
-		cur = m[token]
 	}
 	return cur
 }
