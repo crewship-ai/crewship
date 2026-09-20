@@ -1,7 +1,6 @@
 {
   "date": "2026-09-20",
   "endpoint": "https://crewship-dev3.unifylab.cz:8443",
-  "deployed_code": "a695a6dd3",
   "ui_build": "bbc7ea0b9",
   "runtime_opencode": "1.18.30",
   "workspace_id": "cmu9kraxh000161288449",
@@ -43,5 +42,14 @@
     "grant reaping observed after completed run, not cancellation of an already-forwarded provider request",
     "equal-priority multi-account pooling unchanged",
     "a695a6dd3 live evidence predates the incremental usage fix; subsequent usage verification is fixture-based until a real key is supplied"
-  ]
+  ],
+  "scenario_code": "a695a6dd3",
+  "current_deployed_code": "f31318aa4",
+  "deployment_checks": {
+    "running_binary_matches_build": true,
+    "released_sidecar_matches_build": true,
+    "public_credentials_http": 200,
+    "boot_error_events": 0,
+    "main_dev3_unchanged": true
+  }
 }

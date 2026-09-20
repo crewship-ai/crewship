@@ -110,7 +110,7 @@ conflict on instance 3, not a defect in this slice:
 
 ### Acceptance side-instance (no impact on the live service)
 
-- **Currently deployed code: `a695a6dd3`**, restarted 2026-09-20 09:02 UTC
+- **Currently deployed code: `f31318aa4`**, restarted 2026-09-20 09:24 UTC
   after the takeover audit and real-container lifecycle fixes. UI/static export
   was rebuilt on `bbc7ea0b9`; subsequent changes are Go-only. The observed QA
   container runs OpenCode **1.18.30**. Older `75343b541` / `f67ed83a1` references
@@ -121,7 +121,7 @@ conflict on instance 3, not a defect in this slice:
   config changes require `systemctl restart caddy`, and the new block
   deliberately has no custom access log because `/var/log/caddy` is not
   writable for new files by the caddy user).
-- Runs build a695a6dd3 (`crewship.zai` + `crewship-sidecar.zai` in the
+- Runs build f31318aa4 (`crewship.zai` + `crewship-sidecar.zai` in the
   release dir) on port 8093, socket `/tmp/crewship-zai.sock`, isolated
   `CREWSHIP_DATA_DIR=/tmp/opencode/zai-data`, isolated
   `CREWSHIP_STORAGE_BASE_PATH`/`CREWSHIP_LOG_PATH`/`CREWSHIP_BOLT_PATH`,
@@ -130,7 +130,7 @@ conflict on instance 3, not a defect in this slice:
   snapshot `crewship.db.pre-migrate-v20260916090151-to-v20260916140000-*.bak`
   (schema exactly at this build's head version; dev3 data as of Sep 17
   08:43). Launcher: `/tmp/opencode/zai-run.sh`; log:
-  `/tmp/opencode/zai-instance-a695a6dd3.log`.
+  `/tmp/opencode/zai-instance-f31318aa4.log`.
 - **Isolation is partial by design**: database, storage, logs, state and
   container network are separate, but the instance shares dev3's persisted
   ENCRYPTION_KEY (deliberately — the snapshot copy's credentials must
@@ -159,7 +159,7 @@ version and nonsecret run IDs back into this document and the PR.
 
 ## Not done here (explicitly)
 
-- Live acceptance with the real subscription key — NOT PERFORMED (see the checklist above; the side-instance is ready and waiting on the user, currently serving code commit a695a6dd3).
+- Live acceptance with the real subscription key — NOT PERFORMED (see the checklist above; the side-instance is ready and waiting on the user, currently serving code commit f31318aa4).
 - Zhipu/BigModel regional variants (`zhipuai`, `zhipuai-coding-plan`) —
   separate products, out of scope until an account exists.
 - Z.AI vision/search/reader MCP services — a separate tools decision.
@@ -192,3 +192,10 @@ and subscription entitlement/quota. No real Z.AI credential has been supplied.
 All dummy credentials were deleted and the QA crew stopped; the acceptance UI
 remains available. Account equality still uses existing pooling semantics; the
 verified selection contract is one explicitly granted account per agent.
+
+The final `f31318aa4` deployment also contains incremental SSE usage observation
+and the two resolved CodeRabbit notes on stop diagnostics/UID guidance. Binary
+and released-sidecar hashes match the build; public credentials page returns 200,
+boot has zero ERROR events, and main dev3 artifact hashes remain unchanged.
+The account-backed negative scenarios above ran on `a695a6dd3`; incremental usage
+is verified by real-HTTP fixture/race/package tests, not a paid live stream.

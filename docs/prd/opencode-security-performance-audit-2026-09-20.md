@@ -45,7 +45,7 @@ The new direct proxy test distinguishes actual metered `ZAI` from Coding Plan, t
 | Billing | Subscription remains unpriced; provider ledger is distinct | UI unknown-cost semantics and real usage still need live acceptance |
 | Acceptance environment | Read-only status checks; no ACTIVE/nondeleted credentials at audit start | Copy retains ciphertext plus shared decryption key; not physical secret separation |
 
-No production account was accessed, no secret printed, no billing/subscription changed and no service restarted by this audit. The running acceptance build remains the earlier `75343b541` until an explicit controlled deployment of these audit fixes; passing source tests is not proof they are deployed.
+At the initial audit stage no production account was accessed, no secret printed, no billing/subscription changed and no service restarted. Acceptance then served `75343b541`. The user subsequently authorized the isolated deployments recorded below; these do not alter the main dev3 service.
 
 ## Performance measurements
 
@@ -197,3 +197,22 @@ Retained event bytes are bounded in tests; no production peak-RSS claim is made.
 The previous full repository Go run covers the lifecycle fix; this additional
 sidecar change has its own full package/race/vet checks and requires final-head CI.
 Paid streaming acceptance is still blocked on the user's key.
+
+## Current deployment and review
+
+Current code deployment is `f31318aa4` (2026-09-20 09:24 UTC), including the
+incremental observer and CodeRabbit follow-ups. Public :8443 returns 200; the
+running binary and released sidecar match their build hashes. Main dev3 server
+and staged sidecar hashes remain unchanged and its service is active. Acceptance
+boot has zero ERROR events; there are zero active credentials after dummy-key
+cleanup. Paid completion/tool acceptance remains BLOCKED.
+
+Final complete sidecar package: PASS (17.554 s); focused SSE race tests PASS
+(1.616 s); lifecycle/guard race tests after review PASS (1.096 s); full vet PASS.
+The full repository run started before the incremental observer; its result is
+reported separately in the PR. Final-SHA CI is a separate gate.
+
+Actual CodeRabbit review `5260205800` covers `51c980121` (posted 09:20:53 UTC):
+one minor error-context finding and one UID-guidance nitpick, both addressed.
+It does not cover the subsequently added incremental observer. Do not infer
+final approval from that review or from a rate-limited green check.
