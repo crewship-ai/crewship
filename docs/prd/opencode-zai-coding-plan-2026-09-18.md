@@ -166,3 +166,11 @@ version and nonsecret run IDs back into this document and the PR.
 - The P2+ shared provider registry — this slice stays a vertical cut that the
   registry can later absorb; `zai-coding-plan` is one declarative identity
   away from it, not a precedent for unbounded enum growth.
+
+## Takeover audit (2026-09-20)
+
+See [security, performance and PRD audit](opencode-security-performance-audit-2026-09-20.md).
+It reproduces and fixes delayed SSE delivery with a real HTTP regression,
+adds scoped-account/revocation/cancellation coverage, measures parsing allocations,
+and records remaining live acceptance and broader P2–P6 gaps. These source fixes
+are not yet deployed to the acceptance instance.

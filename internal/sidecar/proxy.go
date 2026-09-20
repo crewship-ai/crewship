@@ -1042,9 +1042,15 @@ func (p *Proxy) authorizeLLMRoute(w http.ResponseWriter, r *http.Request) (strin
 // (Spec.LedgerProvider) stamped onto the usage row. OpenRouter is why they
 // are separate — OpenAI-shaped bodies, its own rate card.
 func (p *Proxy) copyAndObserveLLM(w http.ResponseWriter, resp *http.Response, codec, ledgerProvider, actorID, credentialID string) {
+	// net/http buffers small writes. SSE must reach the caller while upstream
+	// remains open, including when usage observation is disabled.
+	var dst io.Writer = w
+	if strings.HasPrefix(strings.ToLower(resp.Header.Get("Content-Type")), "text/event-stream") {
+		dst = sseFlushWriter{w: w, controller: http.NewResponseController(w)}
+	}
 	// Bail out fast for non-LLM traffic or when nobody's listening for usage.
 	if ledgerProvider == "" || p.onLLMCall == nil {
-		_, _ = io.Copy(w, resp.Body)
+		_, _ = io.Copy(dst, resp.Body)
 		return
 	}
 
@@ -1053,10 +1059,10 @@ func (p *Proxy) copyAndObserveLLM(w http.ResponseWriter, resp *http.Response, co
 		var usage LLMUsage
 		if strings.HasPrefix(strings.ToLower(contentType), "text/event-stream") {
 			buf := &boundedBuffer{cap: maxRequestBodyBytes}
-			_, _ = io.Copy(w, io.TeeReader(resp.Body, buf))
+			_, _ = io.Copy(dst, io.TeeReader(resp.Body, buf))
 			usage = parseLLMUsageSSE(codec, buf.String())
 		} else {
-			_, _ = io.Copy(w, resp.Body)
+			_, _ = io.Copy(dst, resp.Body)
 		}
 		usage.AgentID = actorID
 		usage.CredentialID = credentialID
@@ -1076,7 +1082,7 @@ func (p *Proxy) copyAndObserveLLM(w http.ResponseWriter, resp *http.Response, co
 	// shape: read once, write twice.
 	buf := &boundedBuffer{cap: maxRequestBodyBytes}
 	tee := io.TeeReader(resp.Body, buf)
-	if _, err := io.Copy(w, tee); err != nil {
+	if _, err := io.Copy(dst, tee); err != nil {
 		// Client disconnected or upstream cut off mid-stream. We still try
 		// to parse whatever we've got — partial JSON returns zero usage,
 		// which is fine.
@@ -1089,6 +1095,24 @@ func (p *Proxy) copyAndObserveLLM(w http.ResponseWriter, resp *http.Response, co
 	usage.Provider = ledgerProvider
 	quota := parseQuotaInfo(resp.Header, resp.StatusCode)
 	p.onLLMCall(usage, quota, p.billingMode, p.subPlan)
+}
+
+// sseFlushWriter deliberately exposes only Write, keeping io.Copy from
+// bypassing the flush through an optimized ReaderFrom implementation.
+type sseFlushWriter struct {
+	w          http.ResponseWriter
+	controller *http.ResponseController
+}
+
+func (w sseFlushWriter) Write(p []byte) (int, error) {
+	n, err := w.w.Write(p)
+	if err == nil {
+		err = w.controller.Flush()
+		if errors.Is(err, http.ErrNotSupported) {
+			err = nil
+		}
+	}
+	return n, err
 }
 
 // boundedBuffer is a Write target that drops bytes once it hits cap. We use

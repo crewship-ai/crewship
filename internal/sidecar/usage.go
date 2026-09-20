@@ -244,7 +244,9 @@ func parseLLMUsageSSE(codec, body string) LLMUsage {
 		}
 	}
 
-	for _, line := range strings.Split(strings.ReplaceAll(body, "\r\n", "\n"), "\n") {
+	// Iterate without allocating a slice entry for every SSE line.
+	for line := range strings.SplitSeq(body, "\n") {
+		line = strings.TrimSuffix(line, "\r")
 		if line == "" {
 			flush()
 			continue

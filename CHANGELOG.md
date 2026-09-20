@@ -35,6 +35,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - ⚠️ **Behaviour change:** explicit routine input bounds now opt into server validation even without a widget; the optional `absolute_path` format validates path syntax across run producers. Legacy type-only inputs retain their existing server contract. Explicit positive `outcomes.max_iterations` now caps worker/checker model-tier attempts instead of being ignored; zero/omitted preserves configured fallback traversal.
 
 ### Fixed
+
+- Sidecar: flush small SSE chunks immediately so OpenCode and other streaming model responses arrive before upstream completion; reduce temporary allocations when parsing SSE usage. (#2621)
 - **Routines docs:** the api-reference now states the `409 schedule_conflict` + `hint` envelope on save, import and rollback, the `400` preset / never-archived-pin / activate re-validation on plans, `trigger.kind: "once"` with `fire_at` and `trigger.inputs`, the run body's `fire_at` / `pinned_version`, the `Prefer: respond-async` `202 IN_PROGRESS` answer, `execution_mode` on step_run and the list row's `step_count` / `head_version` / `status` / `last_run_outcome`; the guide's resume, tier-map, Plan-view, receipt-window and recipe wording match HEAD, and the busy-agent known-limit names the three uncovered producers. The `trigger.kind` refusals now name `once`. (#2578)
 - Legacy routine errors are redacted in both workspace and per-routine run lists, before preview truncation can split a credential.
 - Live routine lists receive the start notification after the run row is stored, so an immediate refresh can see the new run.
