@@ -565,16 +565,29 @@ func getScheduleByID(ctx context.Context, x sqlExecQuerier, id string) (*Schedul
 // would otherwise keep appearing (with an empty routine column) in the
 // API, CLI and calendar.
 func (s *ScheduleStore) List(ctx context.Context, workspaceID string) ([]*Schedule, error) {
-	rows, err := s.db.QueryContext(ctx,
-		scheduleSelect+` WHERE workspace_id = ? AND deleted_at IS NULL
+	return s.ListPage(ctx, workspaceID, 0, 0)
+}
+
+// ListPage returns a stable page of workspace schedules. A zero limit keeps
+// the legacy unbounded behavior for internal callers; HTTP callers should
+// provide a bounded limit.
+func (s *ScheduleStore) ListPage(ctx context.Context, workspaceID string, limit, offset int) ([]*Schedule, error) {
+	query := scheduleSelect + ` WHERE workspace_id = ? AND deleted_at IS NULL
 		  AND NOT EXISTS (
 		      SELECT 1 FROM pipelines p
 		       WHERE p.id = pipeline_schedules.target_pipeline_id
 		         AND p.deleted_at IS NOT NULL
 		  )
-		  ORDER BY next_run_at ASC`,
-		workspaceID,
-	)
+		  ORDER BY next_run_at ASC, id ASC`
+	args := []any{workspaceID}
+	if limit > 0 {
+		query += ` LIMIT ? OFFSET ?`
+		args = append(args, limit, max(offset, 0))
+	} else if offset > 0 {
+		query += ` LIMIT -1 OFFSET ?`
+		args = append(args, offset)
+	}
+	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}

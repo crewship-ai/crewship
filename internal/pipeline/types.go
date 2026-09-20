@@ -1046,6 +1046,7 @@ type ListFilters struct {
 	// (active | proposed | disabled). Empty = all states.
 	Status  string
 	Limit   int
+	Offset  int
 	OrderBy ListOrder
 }
 

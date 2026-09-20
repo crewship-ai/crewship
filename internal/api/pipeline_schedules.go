@@ -405,34 +405,39 @@ func (h *PipelineHandler) ListSchedules(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	workspaceID := WorkspaceIDFromContext(r.Context())
-	rows, err := h.schedules.List(r.Context(), workspaceID)
+	q := r.URL.Query()
+	limit, offset, ok := routineListPage(w, q.Get("limit"), q.Get("offset"), 0)
+	if !ok {
+		return
+	}
+	rows, err := h.schedules.ListPage(r.Context(), workspaceID, limit, offset)
 	if err != nil {
 		h.logger.Warn("list pipeline schedules", "error", err)
 		replyError(w, http.StatusInternalServerError, "failed to list schedules")
 		return
 	}
+	setRoutineListNextOffset(w, offset, limit, len(rows))
 	out := make([]scheduleResponse, 0, len(rows))
-	// Resolve pipeline slugs once per unique target so the UI can
-	// render the schedule next to the pipeline name. Avoid N+1 with
-	// a small in-memory cache.
-	slugCache := map[string]string{}
-	lookupSlug := func(pipelineID string) string {
-		if pipelineID == "" {
-			return ""
-		}
-		slug, ok := slugCache[pipelineID]
-		if !ok {
-			if p, perr := h.store.GetByID(r.Context(), pipelineID); perr == nil {
-				slug = p.Slug
-			}
-			slugCache[pipelineID] = slug
-		}
-		return slug
+	ids := make([]string, 0, len(rows)*2)
+	for _, s := range rows {
+		ids = append(ids, s.TargetPipelineID, s.WakePipelineID)
+	}
+	projections, err := loadRoutineProjections(r.Context(), h.db, workspaceID, ids)
+	if err != nil {
+		h.logger.Warn("project pipeline schedules", "error", err)
+		replyError(w, http.StatusInternalServerError, "failed to load schedule routines")
+		return
 	}
 	for _, s := range rows {
-		out = append(out, h.toScheduleResponse(s, lookupSlug(s.TargetPipelineID), lookupSlug(s.WakePipelineID)))
+		target := projections[s.TargetPipelineID]
+		wake := projections[s.WakePipelineID]
+		row := h.toScheduleResponse(s, target.Slug, wake.Slug)
+		if !row.VersionPinned && target.HeadVersion > 0 {
+			version := target.HeadVersion
+			row.EffectiveVersion = &version
+		}
+		out = append(out, row)
 	}
-	h.applyEffectiveVersions(r.Context(), out)
 	writeJSON(w, http.StatusOK, out)
 }
 
