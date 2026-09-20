@@ -79,6 +79,8 @@ PrimeLine uvádí výrazný rozdíl podle typu otázky. Na stejných 600 sentime
 
 ## Kde jsou hranice
 
+Ve zkoumaných oficiálních podkladech jsem nenašel veřejné váhy ani reprodukovatelný trénovací postup; pilot proto používá vzdálené API. Dostupné ukázky a komunitní napodobeniny nelze považovat za otevřenou verzi Jev. Běžný coding benchmark také neodpovídá jeho rozhraní: model neumí generovat opravu programu. Pro Crewship jsou rozhodovací a retrieval benchmarky přímo relevantnější.
+
 „Nemůže halucinovat“ je zavádějící, pokud tím myslíme pravdivost. I dokonale typově správná odpověď může vybrat špatného agenta nebo nesprávně označit nebezpečnou operaci za bezpečnou. Výrobce veřejně popisuje slabiny: počítání, přesná čísla, porovnávání dat, víceúrovňové odvozování, dlouhý nerelevantní kontext, doslovné čtení a adversariální obsah. Upozorňuje i na rozpory mezi nezávislými otázkami. [Seznam omezení Jev 1.13](https://docs.typesafe.ai/model-jaggedness/jev-1.13).
 
 Pro náš návrh z toho plyne: peníze, datumy, závislosti, scope workspace a oprávnění ověřuje kód; z modelu přichází pouze sémantické signály. Ztracené nebo nevalidní odpovědi nesmějí v Go spadnout na nulové hodnoty a být vyhodnoceny jako jisté „ne“.
@@ -139,7 +141,7 @@ Případně `--provider typesafe` a `TYPESAFE_API_KEY`. Výstupní adresář mus
 
 24/24 lokálních požadavků prošlo sestavením a validací přes CLI; byl ověřen i OpenRouter rerank dry-run. [Doklad](reports/jev-2026-09-20/dry-run.json). **Úspěšných autentizovaných inferencí: 0.** Měřicí skript ukončil živý pokus před voláním kvůli chybějícímu `OPENROUTER_API_KEY`; přesnost a cena jsou správně `null`. [Doklad](reports/jev-2026-09-20/live-attempt.json).
 
-Ověřil jsem názvy credential proměnných shellu, odpovídající položky lokálních env souborů a metadata credentialů aktuálního workspace přes CLI na `localhost:8083`: OpenRouter ani TypeSafe zde nebyly dostupné. Kontrola veřejného endpointu bez autentizace vrátila TypeSafe HTTP 403 a OpenRouter HTTP 401; nevypovídá o kvalitě modelu. Uživatel dostal průběžnou žádost o umístění klíče, nikoli o jeho zveřejnění.
+Ověřil jsem názvy credential proměnných shellu, odpovídající položky lokálních env souborů, prostředí běžícího procesu dev3 a metadata credentialů aktuálního workspace přes CLI na `localhost:8083`: OpenRouter ani TypeSafe zde nebyly dostupné. Kontrola veřejného endpointu bez autentizace vrátila TypeSafe HTTP 403 a OpenRouter HTTP 401; nevypovídá o kvalitě modelu. Uživatel dostal průběžnou žádost o umístění klíče, nikoli o jeho zveřejnění.
 
 Testy a úplná verifikace jsou zaznamenány v [verification.md](reports/jev-2026-09-20/verification.md).
 

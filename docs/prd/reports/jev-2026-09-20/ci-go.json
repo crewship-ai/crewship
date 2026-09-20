@@ -1,0 +1,97 @@
+{
+  "id": 106048550848,
+  "run_id": 35499448165,
+  "head_sha": "c4e340dcc176c08e1c92ad101277d428404da345",
+  "html_url": "https://github.com/crewship-ai/crewship/actions/runs/35499448165/job/106048550848",
+  "name": "Go",
+  "conclusion": "success",
+  "started_at": "2026-09-20T08:24:46Z",
+  "completed_at": "2026-09-20T08:35:30Z",
+  "command": "go test ./... -count=1 -timeout 15m",
+  "steps": [
+    {
+      "name": "Set up job",
+      "conclusion": "success",
+      "started_at": "2026-09-20T08:24:46Z",
+      "completed_at": "2026-09-20T08:24:47Z"
+    },
+    {
+      "name": "Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+      "conclusion": "success",
+      "started_at": "2026-09-20T08:24:47Z",
+      "completed_at": "2026-09-20T08:24:52Z"
+    },
+    {
+      "name": "Run ./.github/actions/setup-go-embed",
+      "conclusion": "success",
+      "started_at": "2026-09-20T08:24:52Z",
+      "completed_at": "2026-09-20T08:25:05Z"
+    },
+    {
+      "name": "Go vet",
+      "conclusion": "success",
+      "started_at": "2026-09-20T08:25:05Z",
+      "completed_at": "2026-09-20T08:26:26Z"
+    },
+    {
+      "name": "Go vet (conformance build tag)",
+      "conclusion": "success",
+      "started_at": "2026-09-20T08:26:26Z",
+      "completed_at": "2026-09-20T08:26:47Z"
+    },
+    {
+      "name": "Go vet (conformance build tag, darwin)",
+      "conclusion": "success",
+      "started_at": "2026-09-20T08:26:47Z",
+      "completed_at": "2026-09-20T08:27:16Z"
+    },
+    {
+      "name": "Go build",
+      "conclusion": "success",
+      "started_at": "2026-09-20T08:27:16Z",
+      "completed_at": "2026-09-20T08:27:23Z"
+    },
+    {
+      "name": "Go build (windows clionly cross-compile)",
+      "conclusion": "success",
+      "started_at": "2026-09-20T08:27:23Z",
+      "completed_at": "2026-09-20T08:28:30Z"
+    },
+    {
+      "name": "Go build (clionly, host OS)",
+      "conclusion": "success",
+      "started_at": "2026-09-20T08:28:30Z",
+      "completed_at": "2026-09-20T08:28:36Z"
+    },
+    {
+      "name": "Go build (windows full-daemon cross-compile)",
+      "conclusion": "success",
+      "started_at": "2026-09-20T08:28:36Z",
+      "completed_at": "2026-09-20T08:28:49Z"
+    },
+    {
+      "name": "Go test",
+      "conclusion": "success",
+      "started_at": "2026-09-20T08:28:49Z",
+      "completed_at": "2026-09-20T08:35:27Z"
+    },
+    {
+      "name": "Post Run ./.github/actions/setup-go-embed",
+      "conclusion": "success",
+      "started_at": "2026-09-20T08:35:27Z",
+      "completed_at": "2026-09-20T08:35:28Z"
+    },
+    {
+      "name": "Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+      "conclusion": "success",
+      "started_at": "2026-09-20T08:35:28Z",
+      "completed_at": "2026-09-20T08:35:28Z"
+    },
+    {
+      "name": "Complete job",
+      "conclusion": "success",
+      "started_at": "2026-09-20T08:35:28Z",
+      "completed_at": "2026-09-20T08:35:28Z"
+    }
+  ]
+}
