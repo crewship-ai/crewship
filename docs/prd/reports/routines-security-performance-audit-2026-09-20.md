@@ -1,6 +1,17 @@
 # Routines — security, performance a PRD audit (20. září 2026)
 
-## Shrnutí
+## Aktuální stav (21. září)
+
+Historické části níže popisují audit 20. září. Opravy jsou v PR #2631
+(výkon), #2638 (Work v Activity), #2640 (R8) a #2641 (credentials); jejich
+existence není doklad sloučení nebo společného nasazení. DEV1 při dnešní
+autentizované kontrole vracel `2836a43d3`, build `2026-09-21T08:13:18Z`,
+`dirty=true`. R8 byl skutečný produktový nedostatek: builder neměl cestu
+z aktivního editoru. Nové živé ověření opravy proběhlo z produkčního exportu
+opravné větve proti API DEV1, nikoli v nasazeném veřejném frontendu.
+§11 zůstává NOT VERIFIED.
+
+## Původní shrnutí (20. září)
 
 Audit zdrojů vychází z `main` `8a1ca5fc3`; produktový kód odpovídá nasazenému
 `00bc0cb50` a rozdíl je dokumentační merge #2625. Cílené bezpečnostní testy
@@ -217,3 +228,57 @@ povinný preflight nesmí považovat chybu DB za dostupnost.
 Přesun Work do Activity má samostatné PR #2638. §11 je nadále NOT VERIFIED;
 žádné výsledky reprezentativních uživatelů nejsou doložené. Opravy a technický
 walkthrough tyto výsledky nenahrazují.
+
+## Browserové porovnání stejného datasetu (21. září)
+
+Dva lokální produkční exporty (před `8a1ca5fc3`, po `2836a43d3`) volaly
+skutečné Go API odpovídajících verzí nad samostatnými migrovanými SQLite DB.
+Každá obsahovala 300 rutin/plánů, cílový recept se 100 kroky, 1 000 uložených
+execution záznamů (10 pokusů na krok) a 10 000 journal událostí. Záznamy byly
+synteticky vložené: toto je zkouška čtení a vykreslování historie, nikoli důkaz
+1 000 skutečně provedených retry nebo obnovy po pádu.
+
+Chromium 1440×1000, reduced motion, nový kontext/cache pro každý vzorek.
+Po jednom zahřívacím průchodu následovalo pět střídavých měření každé varianty.
+První použitelné zobrazení znamená viditelný banner běhu a název prvního kroku.
+
+| Metrika | Před | Po |
+| --- | --- | --- |
+| Medián do prvního použitelného detailu | 827 ms | 596 ms |
+| Rozsah pěti měření | 624–1 072 ms | 547–708 ms |
+| Dokončené API odpovědi při prvním detailu | 21 | 21–22 |
+| Jejich encoded body bytes | 272 318 | 231 193–272 320 |
+| API odpovědi po načtení celého katalogu | 21 | 22–23 |
+| Jejich encoded body bytes | 272 318 | 272 320–272 764 |
+
+Po změně se 300 rutin stáhne ve dvou stránkách; detail může být použitelný
+před dokončením druhé stránky. Rozdíl jednoho dalšího požadavku/444 B vzniká
+obnovou ws-token. Byte metrika je Resource Timing encodedBodySize, nikoli
+veškerý síťový provoz včetně hlaviček nebo frontendových assetů. První stránka
+exekucí měla 30 301 B; nenačítaly se všechny výstupy ani celý journal.
+
+Sdílený host současně provozoval další testy. Předchozí zkušební série dala
+mediány 548/556 ms; při ní měl pomocný static server 404 na přednačtení `/`,
+což bylo před finální sérií opraveno. Z těchto malých a hlučných vzorků nelze
+odvozovat garantované zrychlení UI. Obě varianty měly očekávané 503 na
+`/api/v1/crewshipd` (fixture nezapojuje daemon), žádnou JS výjimku a žádnou
+chybu datových endpointů Routines. WebSocket reconnect nebyl tímto proxy
+benchmarkem testován. Samotné vložení dlouhého journalu neověřuje jeho
+procházení až do konce.
+
+Zdroj fixture, browserový postup a vzorky: lokální evidence
+`/srv/crewship/backups/crewship_1/routines-performance-20260921/`.
+Dočasné API servery byly ukončeny a jejich zdrojové soubory i tokeny odstraněny.
+
+## Nová živá kontrola hranic účtů (21. září)
+
+Na DEV1 proběhlo deset autentizovaných HTTP kontrol vlastníka, druhého účtu
+a anonymního klienta. Vlastník dostal detail/exekuce 200; anonymní přístup 401;
+čtení, spuštění, draft a smazání cizí rutiny 403; cizí slug/run pod vlastním
+workspace 404. Report je v
+`/srv/crewship/backups/crewship_1/routines-security-live-20260921/report.json`.
+Jde o podmnožinu hranic, nikoli úplnou matici rolí nebo penetrační test.
+Testovací rutina byla smazána, auditní historie zachována. Nový dedikovaný
+prázdný bezpečnostní účet/workspace zůstává: pokus o smazání workspace bez
+potvrzovacího slug byl odmítnut 400; ochrana posledního workspace se neobcházela.
+Přístupové údaje jsou pouze v chráněné lokální evidenci, nikoli v repozitáři.
