@@ -14,10 +14,19 @@ changes and executable regressions are:
 | Confirmed termination left credential-refresh HOME registration and credential cleanup behind | Transfer cleanup ownership to the watcher; notify run end, remove HOME, and release/clean file credentials before reopening admission. An immediately confirmed stop uses normal cleanup defers. | `TestDetachedHold_HoldCleansRunHome`, `TestDetachedHold_ConfirmedStopCleansImmediately` |
 | Successful periodic stop left its watcher polling | Return from the watcher after stop confirmation and cancel the watcher on finalization. Finalization is idempotent. | `TestDetachedHold_RestopEndsWatcher` |
 
-The monitoring loop's per-poll log is DEBUG rather than INFO. Polling after the
+The monitoring loop logs once at DEBUG when monitoring begins. Polling after the
 24-hour alert backs off to one minute without treating an unavailable provider
 as evidence of termination. The finalizer does not invent an exit code for a
 run whose terminal result was lost.
+
+The follow-up CodeRabbit review identified three further observable gaps:
+an immediately confirmed stop left the run record running, a persisted partial
+chat reply did not notify the inbox, and a detached routine step discarded
+observed usage. Each was reproduced with a failing regression before correction.
+Confirmed stop bookkeeping uses a fresh bounded context so cancellation of the
+original request does not prevent writing the terminal status. The test
+transport also distinguishes stop probes from launch scripts by the stop-only
+signal command, rather than the shared tmux cleanup command.
 
 This remains process-local admission protection, not shared admission across
 all producers or durable hold recovery across daemon restart. Previously

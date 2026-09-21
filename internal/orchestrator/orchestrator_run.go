@@ -65,9 +65,9 @@ func (o *Orchestrator) awaitExecTerminal(ctx context.Context, execID string) (ru
 	if interval <= 0 {
 		interval = defaultDetachedPollInterval
 	}
+	o.logger.Debug("exec stream ended while the process is alive; monitoring until it terminates",
+		"exec_id", execID)
 	for {
-		o.logger.Debug("exec stream ended while the process is alive; monitoring until it terminates",
-			"exec_id", execID)
 		select {
 		case <-ctx.Done():
 			return true, exitCode, nil
@@ -1047,21 +1047,24 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 				"agent_id", req.AgentID, "run_id", req.RunID, "exec_id", result.ExecID)
 		default:
 			agentExecStillRunning = false // normal defers now revoke and clean credentials
+			terminalCtx, terminalCancel := context.WithTimeout(context.Background(), preflightExecTimeout)
+			defer terminalCancel()
+			o.updateRunStatus(terminalCtx, runState.ID, "error") // confirmed end, unknown exit result
 			// A stop that ANSWERED "gone" is a confirmed end: emit the
 			// terminal journal entry and return the agent to online now,
 			// then release normally. No live process remains.
-			o.emitExecEnd(ctx, req, result.ExecID, journalCmd, "warn",
+			o.emitExecEnd(terminalCtx, req, result.ExecID, journalCmd, "warn",
 				fmt.Sprintf("%s: detached exec stopped after the monitoring budget (%s)", req.AgentSlug, o.detachedWaitBudget),
 				execStart, map[string]any{"detached": true, "stopped": true})
-			o.markAgentOnline(ctx, req, map[string]any{"reason": "detached_exec_stopped"})
+			o.markAgentOnline(terminalCtx, req, map[string]any{"reason": "detached_exec_stopped"})
 		}
 		if stopErr != nil || !stopped {
 			// Unconfirmed end (#2626 review): a stop attempt is not a stop
 			// confirmation. The run slot is handed to a hold instead of
 			// being released — capacity stays occupied because the process
 			// may still occupy it — and the agent's admission is refused
-			// until the hold's watcher confirms the runtime gone (or the
-			// hold's cap expires with an operator-visible ERROR).
+			// until the hold's watcher confirms the runtime gone. Its
+			// alert deadline never releases unconfirmed ownership.
 			if err := o.registerDetachedHold(&detachedHold{
 				runID:       req.RunID,
 				containerID: req.ContainerID,

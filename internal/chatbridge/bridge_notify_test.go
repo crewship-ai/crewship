@@ -2,9 +2,13 @@ package chatbridge
 
 import (
 	"context"
+	"io"
+	"strings"
 	"sync"
 	"testing"
+	"time"
 
+	"github.com/crewship-ai/crewship/internal/provider"
 	"github.com/crewship-ai/crewship/internal/ws"
 )
 
@@ -95,5 +99,34 @@ func TestHandleChatMessage_NilNotifierSafe(t *testing.T) {
 
 	if err := b.HandleChatMessage(context.Background(), "user-1", "sess-notify-nil", "hello", func(ws.ChatEvent) {}); err != nil {
 		t.Fatalf("expected success without notifier, got: %v", err)
+	}
+}
+
+// The provider confirms stop, but RunAgent still returns the detached sentinel:
+// a partial reply must reach the inbox without inventing task success.
+type detachedReplyContainer struct{ scriptedContainer }
+
+func (c *detachedReplyContainer) ExecInspect(_ context.Context, id string) (bool, int, error) {
+	return id == "agent-exec", 0, nil
+}
+func (c *detachedReplyContainer) Exec(ctx context.Context, cfg provider.ExecConfig) (*provider.ExecResult, error) {
+	if strings.Contains(strings.Join(cfg.Cmd, " "), "/bin/kill -TERM --") {
+		return &provider.ExecResult{ExecID: "stop", Reader: io.NopCloser(strings.NewReader("ABSENT"))}, nil
+	}
+	return c.scriptedContainer.Exec(ctx, cfg)
+}
+func TestHandleChatMessage_NotifiesOnDetachedPartialReply(t *testing.T) {
+	resolver := &capResolver{info: baseInfo()}
+	ctr := &detachedReplyContainer{scriptedContainer: scriptedContainer{agentOutput: claudeSuccessOutput(0)}}
+	b := testBridgeWithContainer(t, resolver, ctr)
+	b.orch.SetDetachedExecMonitoring(time.Millisecond, time.Millisecond)
+	fn := &fakeReplyNotifier{}
+	b.SetReplyNotifier(fn)
+	if err := b.HandleChatMessage(context.Background(), "user-1", "sess-detached-notify", "hello", func(ws.ChatEvent) {}); err != nil {
+		t.Fatal(err)
+	}
+	calls := fn.snapshot()
+	if len(calls) != 1 || calls[0].ReplyText != "Hello world" || calls[0].RepliedAt.IsZero() {
+		t.Fatalf("partial reply notifications: %+v", calls)
 	}
 }

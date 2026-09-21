@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"runtime"
 	"strings"
@@ -195,5 +196,16 @@ func TestDetachedHold_ConfirmedStopCleansImmediately(t *testing.T) {
 	}
 	if len(o.runSem) != 0 {
 		t.Fatal("confirmed stop retained capacity")
+	}
+	data, err := o.state.Get(context.Background(), "agent_runs", req.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var run RunState
+	if err := json.Unmarshal(data, &run); err != nil {
+		t.Fatal(err)
+	}
+	if run.Status != "error" {
+		t.Fatalf("confirmed stop left run status %q, want error", run.Status)
 	}
 }

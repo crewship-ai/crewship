@@ -158,7 +158,7 @@ func covNewRunContainer(opts covRunOpts) *covContainer {
 		// look at both halves of what the exec was asked to do.
 		script := covScript(cfg) + "\n" + covStdin(cfg)
 		switch {
-		case strings.Contains(script, "kill-session"):
+		case strings.Contains(script, "/bin/kill -TERM --"):
 			c.tmuxMu.Lock()
 			out := c.tmuxStopOut
 			c.tmuxMu.Unlock()

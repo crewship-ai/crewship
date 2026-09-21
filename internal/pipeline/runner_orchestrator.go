@@ -483,9 +483,13 @@ func (r *OrchestratorRunner) RunStep(ctx context.Context, req AgentStepRequest) 
 			// explicit new authorization, so nothing runs the agent twice
 			// from here.
 			r.recordChatTurn(ctx, chatID, agentID, acc.Text(), partAcc.Parts(), promptPersisted)
+			costUSD, tokIn, tokOut := orchestrator.ParseResultUsage(acc.ResultMeta())
 			return AgentStepResult{
 				Output:     acc.Text(),
 				DurationMs: time.Since(startedAt).Milliseconds(),
+				CostUSD:    costUSD,
+				TokensIn:   tokIn,
+				TokensOut:  tokOut,
 			}, fmt.Errorf("agent exec detached and still running; the step has no confirmed result: %w", runErr)
 		}
 		// Partial-usage on error (#1426, 3.4). A cancelled or killed stream

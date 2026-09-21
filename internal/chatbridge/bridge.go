@@ -1156,15 +1156,17 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 			cleanCtx, cleanCancel := context.WithTimeout(context.Background(), ledgerWriteTimeout)
 			defer cleanCancel()
 			if acc.Text() != "" || len(partAcc.Parts()) > 0 {
+				repliedAt := time.Now().UTC()
 				_ = b.convStore.Append(cleanCtx, chatID, conversation.Message{
 					ID:        generateMsgID(),
 					AgentID:   info.AgentID,
 					Role:      conversation.RoleAssistant,
 					Content:   acc.Text(),
 					Parts:     partAcc.Parts(),
-					Timestamp: time.Now().UTC(),
+					Timestamp: repliedAt,
 				})
 				_ = b.resolver.IncrementMessageCount(cleanCtx, chatID, 2)
+				b.notifyReply(cleanCtx, chatID, userID, info, acc.Text(), repliedAt)
 			} else {
 				_ = b.resolver.IncrementMessageCount(cleanCtx, chatID, 1)
 			}
