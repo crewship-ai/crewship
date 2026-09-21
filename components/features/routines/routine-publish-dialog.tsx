@@ -18,6 +18,8 @@ import { apiFetch } from "@/lib/api-fetch"
 import { relTime } from "@/lib/time"
 import { discardRoutineDraft, loadRoutineDraft, type RoutineDraft } from "@/lib/routine-drafts"
 import { routinePublicationChanges } from "@/lib/routine-publication-changes"
+import { approvalSteps } from "@/lib/routine-approval-steps"
+import { stepDisplayName } from "@/lib/routine-steps-layout"
 import { routineEffects } from "@/lib/routine-effects"
 import { isRecord } from "@/lib/routine-step-describe"
 import { usePipelineSchedules, type PipelineSchedule } from "@/hooks/use-pipeline-schedules"
@@ -73,21 +75,17 @@ export function publicationSummary(published: Record<string, unknown>, draft: Re
     if (g.reordered) parts.push("Order changed")
     return parts.length ? parts.join(" · ") : "Unchanged"
   }
-  const people = (definition: Record<string, unknown>) => {
-    const steps = Array.isArray(definition.steps) ? definition.steps.filter(isRecord) : []
-    return steps
-      .filter((s) => s.type === "wait")
-      .map((s) => String(s.name || s.id))
-      .sort()
-  }
+  const people = (definition: Record<string, unknown>) => approvalSteps(definition).map(({ step, path }) => ({
+    path, name: stepDisplayName(step, 0), wait: step.wait,
+  }))
   const before = people(published)
   const after = people(draft)
   const peopleLine =
     JSON.stringify(before) === JSON.stringify(after)
       ? after.length
-        ? `Unchanged · ${after.join(", ")}`
+        ? `Unchanged · ${after.map((p) => p.name).join(", ")}`
         : "Unchanged · no decisions by a person"
-      : `Changed · ${after.length ? after.join(", ") : "no decisions by a person"}`
+      : `Changed · ${after.length ? after.map((p) => p.name).join(", ") : "no decisions by a person"}`
   const effectsOf = (definition: Record<string, unknown>) => {
     const e = routineEffects(definition)
     return { hosts: [...e.hosts].sort(), credentials: [...e.credentials].sort(), agents: [...e.agents].sort(), indirect: e.indirect, http: e.http }
