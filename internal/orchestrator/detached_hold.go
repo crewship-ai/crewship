@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 )
 
@@ -35,32 +36,30 @@ type detachedHold struct {
 	execID      string
 	req         AgentRunRequest
 	release     func()
+	finalize    func()
+	once        sync.Once
+	alertAfter  time.Duration
+	done        chan struct{}
 	startedAt   time.Time
 }
 
-// detachedWatchCap bounds how long a hold may live. The exec's own timeout is
-// expected to settle it long before this; the cap exists so a runtime on an
-// unreachable container cannot pin a run slot and an agent forever. On the
-// cap the slot is released and the hold dropped with an ERROR — a second run
-// becoming possible again is then an operator-visible decision, not a silent
-// one.
+// detachedWatchCap is an alert deadline, never permission to reopen admission.
+// After the alert, polling backs off while the safety fence stays in place.
 const detachedWatchCap = 24 * time.Hour
 
-// registerDetachedHold records the hold and starts its watcher. The caller
-// has already transferred the run-slot release into h; from here on the
-// watcher owns both. It returns an error (and does not take ownership) if the
-// agent already carries a hold — the admission check makes that unreachable
-// in practice, and this is the fence for the day it is not.
+// Holds are keyed by run: runs admitted concurrently before a hold appeared
+// must each retain their capacity and cleanup ownership when they detach.
 func (o *Orchestrator) registerDetachedHold(h *detachedHold, poll time.Duration) error {
 	if poll <= 0 {
 		poll = defaultDetachedPollInterval
 	}
 	o.detachedMu.Lock()
-	if _, exists := o.detached[h.req.AgentID]; exists {
+	if _, exists := o.detached[h.runID]; exists {
 		o.detachedMu.Unlock()
-		return fmt.Errorf("agent %s already carries a detached hold", h.req.AgentID)
+		return fmt.Errorf("run %s already carries a detached hold", h.runID)
 	}
-	o.detached[h.req.AgentID] = h
+	h.done = make(chan struct{})
+	o.detached[h.runID] = h
 	o.detachedMu.Unlock()
 	go o.watchDetachedHold(h, poll)
 	return nil
@@ -71,11 +70,12 @@ func (o *Orchestrator) registerDetachedHold(h *detachedHold, poll time.Duration)
 func (o *Orchestrator) detachedHoldRunID(agentID string) (string, bool) {
 	o.detachedMu.Lock()
 	defer o.detachedMu.Unlock()
-	h, ok := o.detached[agentID]
-	if !ok {
-		return "", false
+	for _, h := range o.detached {
+		if h.req.AgentID == agentID {
+			return h.runID, true
+		}
 	}
-	return h.runID, true
+	return "", false
 }
 
 // watchDetachedHold polls the runtime until the provider confirms it is gone,
@@ -89,17 +89,23 @@ func (o *Orchestrator) detachedHoldRunID(agentID string) (string, bool) {
 func (o *Orchestrator) watchDetachedHold(h *detachedHold, poll time.Duration) {
 	t := time.NewTicker(poll)
 	defer t.Stop()
-	capTimer := time.NewTimer(detachedWatchCap)
+	alertAfter := h.alertAfter
+	if alertAfter <= 0 {
+		alertAfter = detachedWatchCap
+	}
+	capTimer := time.NewTimer(alertAfter)
 	defer capTimer.Stop()
 	ticks := 0
 	for {
 		select {
-		case <-capTimer.C:
-			o.logger.Error("detached exec outlived the hold's watch cap; releasing the slot and lifting the agent hold — an operator must verify the process is gone",
-				"agent_id", h.req.AgentID, "run_id", h.runID, "exec_id", h.execID,
-				"held_for", time.Since(h.startedAt).Round(time.Second))
-			o.closeDetachedHold(h, false)
+		case <-h.done:
 			return
+		case <-capTimer.C:
+			o.logger.Error("detached runtime still unconfirmed; retaining admission and capacity, backing off probes", "agent_id", h.req.AgentID, "run_id", h.runID)
+			if poll < time.Minute {
+				t.Reset(time.Minute)
+			}
+			capTimer.Reset(detachedWatchCap)
 		case <-t.C:
 			ticks++
 			ctx, cancel := context.WithTimeout(context.Background(), preflightExecTimeout)
@@ -113,7 +119,9 @@ func (o *Orchestrator) watchDetachedHold(h *detachedHold, poll time.Duration) {
 				return
 			case err == nil && alive:
 				if ticks%10 == 0 {
-					o.restopDetachedHold(h)
+					if o.restopDetachedHold(h) {
+						return
+					}
 				}
 			default:
 				// Unanswerable, not gone. Throttled: an unreachable
@@ -129,7 +137,7 @@ func (o *Orchestrator) watchDetachedHold(h *detachedHold, poll time.Duration) {
 }
 
 // restopDetachedHold re-sends the stop signal to a hold's runtime, bounded.
-func (o *Orchestrator) restopDetachedHold(h *detachedHold) {
+func (o *Orchestrator) restopDetachedHold(h *detachedHold) bool {
 	ctx, cancel := context.WithTimeout(context.Background(), preflightExecTimeout)
 	defer cancel()
 	stopped, err := o.StopRunAt(ctx, RunLocation{
@@ -142,45 +150,50 @@ func (o *Orchestrator) restopDetachedHold(h *detachedHold) {
 		// Confirmed gone by the stop itself; the next tick's Alive probe
 		// would see it too, but the bookkeeping does not need to wait.
 		o.closeDetachedHold(h, true)
+		return true
 	case !stopped:
 		o.logger.Warn("detached hold: runtime ignored the re-stop signal", "agent_id", h.req.AgentID, "run_id", h.runID)
 	}
+	return false
 }
 
 // closeDetachedHold performs the terminal bookkeeping, exactly once per hold:
 // the exec.command end journal entry (confirmed, with how the watch ended),
 // the agent's return to online, the unregister, and the run-slot release.
 func (o *Orchestrator) closeDetachedHold(h *detachedHold, confirmedGone bool) {
-	o.detachedMu.Lock()
-	if cur, ok := o.detached[h.req.AgentID]; !ok || cur != h {
-		o.detachedMu.Unlock()
-		// Already closed by another path (a re-stop that confirmed between
-		// ticks, the cap firing twice); nothing to do twice.
+	// Uncertainty must never become a terminal event or free capacity.
+	if !confirmedGone {
 		return
 	}
-	delete(o.detached, h.req.AgentID)
-	o.detachedMu.Unlock()
-
-	ctx, cancel := context.WithTimeout(context.Background(), preflightExecTimeout)
-	defer cancel()
-	payload := map[string]any{"detached": true, "confirmed_gone": confirmedGone}
-	if confirmedGone {
-		o.emitExecEnd(ctx, h.req, h.execID, journalCmdView{argv: []string{"<detached exec>"}},
-			"info",
+	h.once.Do(func() {
+		// Keep the admission fence through cleanup and terminal bookkeeping.
+		if h.finalize != nil {
+			h.finalize()
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), preflightExecTimeout)
+		defer cancel()
+		o.emitExecEnd(ctx, h.req, h.execID, journalCmdView{argv: []string{"<detached exec>"}}, "info",
 			fmt.Sprintf("%s: detached exec confirmed gone (%s)", h.agentSlug, time.Since(h.startedAt).Round(time.Second)),
-			h.startedAt, payload)
-	} else {
-		o.emitExecEnd(ctx, h.req, h.execID, journalCmdView{argv: []string{"<detached exec>"}},
-			"error",
-			fmt.Sprintf("%s: detached exec NOT confirmed gone; hold expired by cap", h.agentSlug),
-			h.startedAt, payload)
-	}
-	if confirmedGone {
-		// Only a runtime nobody can find anymore earns the agent its
-		// `online` back. The cap path leaves presence alone on purpose:
-		// the process may be alive, and "available" would be the same lie
-		// this file exists to stop (#2626 review).
-		o.markAgentOnline(ctx, h.req, map[string]any{"reason": "detached_exec_confirmed_gone"})
-	}
-	h.release()
+			h.startedAt, map[string]any{"detached": true, "confirmed_gone": true})
+		o.updateRunStatus(ctx, h.runID, "error") // no trustworthy exit result survived detachment
+		o.detachedMu.Lock()
+		other := false
+		for _, hold := range o.detached {
+			if hold != h && hold.req.AgentID == h.req.AgentID {
+				other = true
+				break
+			}
+		}
+		o.detachedMu.Unlock()
+		if !other {
+			o.markAgentOnline(ctx, h.req, map[string]any{"reason": "detached_exec_confirmed_gone"})
+		}
+		o.detachedMu.Lock()
+		delete(o.detached, h.runID)
+		o.detachedMu.Unlock()
+		h.release()
+		if h.done != nil {
+			close(h.done)
+		}
+	})
 }

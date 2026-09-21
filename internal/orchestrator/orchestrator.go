@@ -505,7 +505,7 @@ type Orchestrator struct {
 	// RunAgent returns ErrDetachedStillRunning.
 	detachedWaitBudget   time.Duration
 	detachedPollInterval time.Duration
-	// detached holds one entry per agent whose run returned the sentinel
+	// detached holds one entry per run that returned the sentinel
 	// with a stop that could not be confirmed: the process may still be
 	// alive, so the agent's admission is refused and the departed run's
 	// slot stays held until the hold's watcher confirms the runtime gone

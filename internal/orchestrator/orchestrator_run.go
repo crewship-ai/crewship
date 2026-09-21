@@ -66,7 +66,7 @@ func (o *Orchestrator) awaitExecTerminal(ctx context.Context, execID string) (ru
 		interval = defaultDetachedPollInterval
 	}
 	for {
-		o.logger.Info("exec stream ended while the process is alive; monitoring until it terminates",
+		o.logger.Debug("exec stream ended while the process is alive; monitoring until it terminates",
 			"exec_id", execID)
 		select {
 		case <-ctx.Done():
@@ -401,6 +401,14 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 		}
 	}()
 
+	// Capacity waiting is not admission. A previously admitted run may have
+	// published a detached hold while this request waited; registration and
+	// this final admission check use the same mutex. Concurrent runs already
+	// admitted before that transition retain independent run-keyed holds.
+	if heldRun, held := o.detachedHoldRunID(req.AgentID); held {
+		return fmt.Errorf("%w: run %s", ErrAgentDetachedBusy, heldRun)
+	}
+
 	// Always fire post_agent_stop on return so logging and cleanup
 	// hooks observe every run regardless of exit path.
 	defer func() {
@@ -543,11 +551,7 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 			// its OAuth goes stale mid-flight and the failure looks like a
 			// provider outage.
 			//
-			// The entry then leaks for the life of the process. That is the
-			// same trade the secrets hold makes one block up ("keeps its hold
-			// forever; that fails safe"), for the same reason and with the
-			// same shape — bounded by agents × containers, not by run count,
-			// because only runs that detach reach it.
+			// The detached watcher owns eventual cleanup after confirmation.
 			return
 		}
 		// Release and cleanup move together on purpose. Releasing without
@@ -1042,6 +1046,7 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 			o.logger.Error("detached exec outlived its monitoring budget and ignored the stop signal; holding the agent and its capacity until the runtime is confirmed gone",
 				"agent_id", req.AgentID, "run_id", req.RunID, "exec_id", result.ExecID)
 		default:
+			agentExecStillRunning = false // normal defers now revoke and clean credentials
 			// A stop that ANSWERED "gone" is a confirmed end: emit the
 			// terminal journal entry and return the agent to online now,
 			// then release normally. No live process remains.
@@ -1064,7 +1069,14 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 				execID:      result.ExecID,
 				req:         req,
 				release:     releaseRunSlot,
-				startedAt:   time.Now(),
+				finalize: func() {
+					releaseRunHome(req.ContainerID, req.AgentSlug, req.RunID)
+					o.cleanupRunHome(req.ContainerID, req.AgentSlug, req.RunID, runEndToken)
+					if fileCreds && o.releaseAgentSecrets(req.ContainerID, req.AgentSlug, req.RunID) {
+						o.cleanupAgentSecrets(req.ContainerID, req.AgentSlug, req.RunID)
+					}
+				},
+				startedAt: execStart,
 			}, o.detachedPollInterval); err != nil {
 				o.logger.Error("could not register a detached hold; releasing the slot as the lesser failure",
 					"agent_id", req.AgentID, "run_id", req.RunID, "error", err)
