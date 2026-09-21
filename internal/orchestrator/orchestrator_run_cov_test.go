@@ -1182,3 +1182,39 @@ func TestRunAgent_EmptySlugRejectedBeforeSidecarMemoryConfig(t *testing.T) {
 		}
 	}
 }
+
+// A lone non-lead still needs IPC for usage accounting and credential reaping.
+func TestRunAgent_SoloAgentCarriesIPC(t *testing.T) {
+	t.Parallel()
+	c := covNewRunContainer(covRunOpts{stream: "{}\n", health: `{"status":"ok","network_mode":"free"}`})
+	o := New(c, newMemState(), covQuietLogger())
+	o.SetSidecarEnabled(true)
+	o.SetIPCConfig("http://gw:9000", "master-secret")
+	req := covRunReq()
+	req.AgentRole = "AGENT"
+	req.CrewMembers = nil
+	req.NetworkMode = "restricted"
+	req.AllowedDomains = []string{"api.z.ai"}
+	if err := o.RunAgent(context.Background(), req, nil); err != nil {
+		t.Fatal(err)
+	}
+	for _, script := range c.snapshotScripts() {
+		if !strings.Contains(script, "crewship-sidecar --addr") {
+			continue
+		}
+		input := covDecodeSidecarInput(t, script)
+		ipc, _ := input["ipc"].(map[string]any)
+		if ipc == nil {
+			t.Fatal("solo agent must carry IPC for usage and credential reaping")
+		}
+		if ipc["agent_id"] != req.AgentID || ipc["workspace_id"] != req.WorkspaceID {
+			t.Fatalf("incorrect IPC scope: %v", ipc)
+		}
+		token, _ := ipc["token"].(string)
+		if token == "" || token == "master-secret" {
+			t.Fatal("IPC must use a nonempty scope-bound token")
+		}
+		return
+	}
+	t.Fatal("sidecar launch was not captured")
+}

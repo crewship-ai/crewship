@@ -216,3 +216,33 @@ Actual CodeRabbit review `5260205800` covers `51c980121` (posted 09:20:53 UTC):
 one minor error-context finding and one UID-guidance nitpick, both addressed.
 It does not cover the subsequently added incremental observer. Do not infer
 final approval from that review or from a rate-limited green check.
+
+
+## Paid acceptance follow-up, 2026-09-21
+
+The user supplied a real Coding Plan key on main dev3 as `ZAI`, bound to
+Správce záloh while that agent still selected OpenCode Go/Kimi. At the user's
+explicit request to use the saved key, the operator migrated only that key
+in memory into the isolated acceptance API as `ZAI_CODING_PLAN` (stdin, no
+plaintext file/argv/output). Main credentials, binding, agent and DB remain
+unchanged. The acceptance copy uses its own at-rest encryption key.
+
+Acceptance workspace `zai-acceptance`, crew `zai-verification`, agent
+`spravce-zaloh-glm-test` (regular AGENT, OPENCODE,
+`zai-coding-plan/glm-5.3`). The original credential owner has ADMIN membership
+in this test workspace. The separate QA login was reset only in the acceptance
+DB; no human login was reset.
+
+On f31318aa4, real runs completed with exit 0:
+- `msg_1789986117576327952_bd8ca6d877975c39`: "GLM připojení funguje."
+- `msg_1789986145336788019_ed8c2e36248d664d`: journal captured an actual bash
+  tool call `printf GLM_TOOL_OK`, output GLM_TOOL_OK, exit 0.
+The reverse proxy log confirms the ZAI_CODING_PLAN credential and coding route.
+
+These runs exposed a real gap: solo non-lead agents omitted IPC at sidecar boot.
+Consequently usage was silently discarded and credential reaping lacked its
+internal API configuration. The new regression
+`TestRunAgent_SoloAgentCarriesIPC` failed before the fix, and passes with race
+instrumentation after it. Initialize IPC for every agent when its base URL is
+configured; role-specific action authorization and scoped tokens remain intact.
+Post-fix deployment and paid usage/revocation results will be recorded separately.
