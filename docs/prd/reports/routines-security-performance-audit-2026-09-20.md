@@ -184,3 +184,36 @@ benchmark zopakovat nad stejným reprezentativním datasetem a postupem, ideáln
 s opakováním; zaznamenat request count, bajty a čas do použitelného detailu.
 Stejně tak živá autentizovaná security matice je v tomto auditu historickým
 důkazem, nikoli novým měřením z 20. září.
+
+## Následné měření a nalezené mezery (21. září)
+
+Stejný dočasný Go test vytvořil v nové migrované testovací DB 300 rutin a 300
+plánů, ověřil všech 300 řádků odpovědi a změřil handler seznamu plánů. Každá
+ze tří dávek měla 5 zahřívacích a 30 měřených požadavků. Před: Go zdroje main
+`8a1ca5fc3` (checkout Activity má navíc pouze frontend/docs změny); po:
+`2836a43d3`. Žádná produkční databáze nebyla benchmarkem změněna.
+
+| Varianta | p50 jednotlivých dávek | p95 jednotlivých dávek | Odpověď |
+| --- | --- | --- | --- |
+| Před | 15,167 / 15,509 / 14,803 ms | 23,561 / 21,150 / 17,908 ms | 1 požadavek, přibližně 144,5 kB, 300 plánů |
+| Po | 3,083 / 2,994 / 2,992 ms | 4,485 / 4,364 / 5,969 ms | 1 požadavek, přibližně 144,5 kB, 300 plánů |
+
+Medián handleru byl v tomto vzorku přibližně o 80 % nižší. Test běžel na
+sdíleném hostu vedle dalších testů; dvě opakované dávky obou variant běžely
+souběžně. Nejde o izolovaný kapacitní benchmark, měření přes síť ani čas
+prvního použitelného UI. Bajty mírně kolísají kvůli generovaným identitám a
+časům. Výsledek dokládá přínos dávkových lookupů pro tento dotaz, **neuzavírá
+celou bránu §8** (100 kroků / 1 000 pokusů / dlouhý journal a browser baseline).
+Zdroj testu a kompletní logy jsou v
+`/srv/crewship/backups/crewship_1/routines-performance-20260921/`.
+
+Další kontrola opravila předchozí předpoklad o R8: builder byl zachovaný jako
+soubor a test, ale neměl cestu z produkčního editoru. #2637 / PR #2640 jej
+obnovuje v Edit a má živé autorování → draft → publish → rozhodnutí; detail
+v `routines-r8-authoring-2026-09-21.md` na této opravné větvi. S1 řeší #2639:
+explicitní HTTP reference credentialu nesmí tiše pokračovat anonymně a
+povinný preflight nesmí považovat chybu DB za dostupnost.
+
+Přesun Work do Activity má samostatné PR #2638. §11 je nadále NOT VERIFIED;
+žádné výsledky reprezentativních uživatelů nejsou doložené. Opravy a technický
+walkthrough tyto výsledky nenahrazují.
