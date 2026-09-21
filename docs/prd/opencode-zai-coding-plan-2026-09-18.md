@@ -199,3 +199,31 @@ and released-sidecar hashes match the build; public credentials page returns 200
 boot has zero ERROR events, and main dev3 artifact hashes remain unchanged.
 The account-backed negative scenarios above ran on `a695a6dd3`; incremental usage
 is verified by real-HTTP fixture/race/package tests, not a paid live stream.
+
+
+## Current acceptance state — 2026-09-21
+
+This section supersedes earlier current-deployment and key-missing statements.
+The saved key was used with the user's explicit authorization; no re-entry is
+needed. Current server code f4bd6b45c, sidecar hash ce3457d4ad83, public :8443
+HTTP200. Persistent acceptance service/data live under
+`/srv/crewship/zai-acceptance` (not /tmp). Workspace ZAI acceptance, crew
+ZAI ověření, agent Správce záloh — test GLM (`spravce-zaloh-glm-test`).
+The original credential owner has ADMIN access to this isolated workspace.
+Main dev3 still has its original agent/configuration; no backup job was executed.
+
+Real model response and bash tool call PASS. Token usage attributed to the
+correct provider/credential PASS; billing flat_rate / GLM Coding Plan with
+unknown monetary confidence (not a fabricated per-token price). Key retention
+across a 66-second reaper watch PASS; grant removal reaped key in45.26s and
+blocked the next run PASS; regrant automatically refreshed the sidecar and
+completed another paid run PASS. Final binding is restored and readiness ready.
+See [machine-readable evidence](reports/zai-paid-acceptance-2026-09-21.json).
+
+Four live-discovered bugs were fixed in separate commits: solo-agent IPC,
+subscription classification, provider-login reaper metadata, and replenishing
+an empty sidecar after regrant. Each has a red-before/green-after regression.
+Full affected sidecar/paymaster/orchestrator packages, targeted API race tests,
+final vet and static frontend export passed. The broad Go run began before the
+later fixes; final CI and posted review remain gates. Two-account and real quota
+exhaustion tests are not claimed. P2–P6 remain separate backlog. No merge yet.

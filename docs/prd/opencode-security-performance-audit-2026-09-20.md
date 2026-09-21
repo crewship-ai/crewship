@@ -288,3 +288,16 @@ provider counts against the currently delivered credential IDs and restarts when
 a reaped credential must be restored. It never restores a key absent from current
 delivery. Regression covers missing vs intact stores with identical fingerprints;
 it failed before the fix. Final post-fix live restoration is recorded separately.
+
+
+Final restoration run `msg_1789987797293269922_5c314adab25792de` completed
+on server f4bd6b45c with output OBNOVENO after automatic sidecar replacement.
+The runtime was then recreated to bind the final ce3457d4ad83 sidecar; readiness
+is ready via agent_binding. Public UI200, main service active, main server and
+staged sidecar hashes unchanged. No plaintext key match in checked application
+and sidecar logs. Auth files were already cleaned up when inspected (zero files),
+so that inspection is NOT proof of secret absence during execution.
+
+Current evidence and scope are in reports/zai-paid-acceptance-2026-09-21.json.
+Historical metered/precise test ledger rows and failed diagnostic runs were not
+rewritten or deleted; successful post-fix rows are flat_rate/unknown.
