@@ -263,3 +263,15 @@ UID/GID1001. Corrected only the isolated unit to UMask0002 plus supplementary
 GID1001, and made only its crew directories group-accessible. The top-level
 acceptance directory remains0700; DB and secrets remain0600. Agent1001 and
 sidecar1002 UIDs are unchanged. No shared main-dev3 directories were changed.
+
+
+A >60-second inspection exposed another pre-existing gap: the internal
+credential metadata listing excluded PROVIDER_LOGIN entirely. The reaper
+therefore removed the still-granted key at its first tick. The first attempted
+revocation measurement is INVALID (key was already gone); it is not evidence
+of revocation latency. Added provider-login metadata, scoped to live legacy
+grants or workspace/crew/agent bindings. Plaintext include_values/global pool
+keeps its previous type filter. Workspace visibility alone does not keep a
+provider login after its grant is removed. Tests cover both grant mechanisms,
+soft-deleted agents, other crews, workspace bindings, revocation, and exclusion
+from the plaintext global pool. Existing legacy credential scoping is unchanged.
