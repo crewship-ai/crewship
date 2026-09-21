@@ -79,3 +79,16 @@ Interní walkthrough (§14, 10. 9.) proběhl a je doložený, ale je to procház
 Technické dokončení §9 a přijetí celého PRD jsou proto v protokolu vedené
 odděleně a tenhle dokument zůstává nezaškrtnutý, dokud na něj neodpoví
 uživatel.
+
+## Záznam výsledků (doplněno 21. září)
+
+[Samostatný formulář přejímky](../wireframes/routines-acceptance-recorder.html)
+obsahuje pět úloh, matici pěti anonymně označených účastníků, poznámky a export
+JSON. Vyžaduje identitu testovaného buildu a všechny výsledky; výchozí stav je
+NOT VERIFIED. PASS znamená pouze dosažení cíle lidské brány podle zadaných
+výsledků, nikoli potvrzení technické připravenosti releasu.
+
+Historické odkazy na fixture rutiny výše je třeba před studií ověřit v účtu
+účastníka. Pokud už nejsou dostupné, moderátor připraví nové vyhrazené rutiny
+a zaznamená jejich identitu vedle exportu; použití skutečných provozních rutin
+není předpokladem tohoto testu. Žádné uživatelské výsledky zatím nebyly dodány.
