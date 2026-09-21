@@ -90,7 +90,13 @@
     "api_targeted_race_seconds": 62.308,
     "orchestrator_package_seconds": 23.804,
     "final_vet": "PASS",
-    "full_go": "started on e66da9a3b snapshot; still running at report time; later fixes covered separately",
+    "full_go": {
+      "snapshot": "e66da9a3b",
+      "exit_code": 0,
+      "packages_ok": 146,
+      "failures": 0,
+      "scope": "started before later fixes; final affected-package/race tests and vet recorded separately"
+    },
     "frontend": "webpack static export PASS; default Turbopack failed because shared node_modules symlink leaves project root"
   },
   "pending": [

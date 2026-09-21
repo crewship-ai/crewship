@@ -224,6 +224,6 @@ Four live-discovered bugs were fixed in separate commits: solo-agent IPC,
 subscription classification, provider-login reaper metadata, and replenishing
 an empty sidecar after regrant. Each has a red-before/green-after regression.
 Full affected sidecar/paymaster/orchestrator packages, targeted API race tests,
-final vet and static frontend export passed. The broad Go run began before the
-later fixes; final CI and posted review remain gates. Two-account and real quota
+final vet and static frontend export passed. The broad Go run on the earlier e66da9a3b snapshot completed with exit0,
+146 packages OK and0 FAIL; final CI and posted review remain gates. Two-account and real quota
 exhaustion tests are not claimed. P2–P6 remain separate backlog. No merge yet.

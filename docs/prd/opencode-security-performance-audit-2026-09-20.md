@@ -301,3 +301,7 @@ so that inspection is NOT proof of secret absence during execution.
 Current evidence and scope are in reports/zai-paid-acceptance-2026-09-21.json.
 Historical metered/precise test ledger rows and failed diagnostic runs were not
 rewritten or deleted; successful post-fix rows are flat_rate/unknown.
+
+Broad Go suite completion: exit0,146 packages OK,0 FAIL. This run started on
+e66da9a3b before subsequent corrections; final affected-package/race tests and
+vet provide the separately reported coverage of later changes.
