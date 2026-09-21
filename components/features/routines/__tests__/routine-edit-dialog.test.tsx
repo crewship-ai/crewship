@@ -245,3 +245,42 @@ describe("<RoutineEditDialog>", () => {
     expect(screen.getByRole("button", { name: "Save" })).toBeDisabled()
   })
 })
+
+it("authors typed questions and custom decisions through the active editor's draft path", async () => {
+  mockServer()
+  const approval = { id: "review", type: "wait", name: "Review invoice", wait: { kind: "approval", timeout_seconds: 86400, approval_title: "Review" } }
+  const editable = { ...routine, definition: { ...definition, steps: [approval] } } as unknown as RoutineDetail
+  render(<RoutineEditDialog open onOpenChange={() => {}} workspaceId="ws" routine={editable} onChanged={() => {}} />)
+  await waitFor(() => expect(screen.queryByText(/Loading the current draft/)).toBeNull())
+  fireEvent.click(screen.getByRole("tab", { name: "Decisions · 1" }))
+  fireEvent.click(screen.getByRole("button", { name: "Customize decision" }))
+  fireEvent.click(screen.getByRole("button", { name: "+ Add question" }))
+  fireEvent.change(screen.getByLabelText("Question"), { target: { value: "Approved amount" } })
+  fireEvent.change(screen.getByLabelText("Answer type"), { target: { value: "number" } })
+  fireEvent.change(screen.getByLabelText("Variable name"), { target: { value: "amount" } })
+  fireEvent.change(screen.getByLabelText("Decision 1"), { target: { value: "Pay invoice" } })
+  fireEvent.click(screen.getByRole("button", { name: "Save draft" }))
+  await waitFor(() => expect(h.fetcher.mock.calls.some(([url, init]) => String(url).endsWith("/pipelines/drafts") && init?.method === "POST")).toBe(true))
+  const save = h.fetcher.mock.calls.find(([url, init]) => String(url).endsWith("/pipelines/drafts") && init?.method === "POST")!
+  const body = JSON.parse(String(save[1].body))
+  expect(body).toMatchObject({ revision: 0, base_revision: 3, document: { definition: { steps: [{ wait: {
+    kind: "approval", timeout_seconds: 86400, decision_form: {
+      fields: [{ name: "amount", label: "Approved amount", type: "number" }],
+      actions: [{ id: "continue", label: "Pay invoice", approved: true }, { id: "reject", approved: false }],
+    },
+  } }] } } })
+  expect(h.fetcher.mock.calls.some(([url]) => String(url).endsWith("/pipelines/save"))).toBe(false)
+  expect(approval.wait).not.toHaveProperty("decision_form")
+})
+
+it("routes unsupported forms to real editing instructions without discarding their definition", async () => {
+  mockServer()
+  const editable = { ...routine, definition: { ...definition, steps: [{ id: "review", type: "wait", wait: { kind: "approval", decision_form: { future: true } } }] } } as unknown as RoutineDetail
+  render(<RoutineEditDialog open onOpenChange={() => {}} workspaceId="ws" routine={editable} onChanged={() => {}} />)
+  await waitFor(() => expect(screen.queryByText(/Loading the current draft/)).toBeNull())
+  fireEvent.click(screen.getByRole("tab", { name: "Decisions · 1" }))
+  expect(screen.getByText(/Its definition is preserved/)).toBeVisible()
+  fireEvent.click(screen.getByRole("button", { name: "View editing instructions" }))
+  expect(screen.getByText(/crewship routine draft get invoice-intake/)).toBeVisible()
+  expect(screen.getByRole("button", { name: "Save" })).toBeDisabled()
+})

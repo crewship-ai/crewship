@@ -31,23 +31,25 @@ import { isRecord, asString } from "@/lib/routine-step-describe"
 import { foreachBody, routineHooks, stepDisplayName, type Step } from "@/lib/routine-steps-layout"
 import { routineFilesFromDefinition, routineFileStatus, type RoutineFile } from "@/lib/routine-files"
 import { useWorkspaceAgentDirectory } from "@/hooks/use-workspace-agent-directory"
+import { approvalSteps } from "@/lib/routine-approval-steps"
+import { RoutineDecisionFormBuilder } from "./routine-decision-form-builder"
 import { StepFileChip } from "./routine-step-spine"
 import type { RoutineDetail } from "./routines-detail-panel"
 
 // routine-edit-dialog — exactly what the DSL lets a person change without
-// files, in six tabs.
+// files, in seven tabs.
 //
 // Identity (icon, name, purpose) applies at once: it does not change how the
 // routine runs. Everything else — inputs, agent prompts, limits, the slash
 // command — is a definition change, so saving it creates a draft through the
 // same drafts API the CLI and the lead use (POST …/pipelines/drafts with the
 // modified document, CAS on the current draft revision), and the published
-// version keeps running until the draft is published. Steps, checks, hooks,
-// scripts and the agents themselves stay read-only here: the web cannot carry
+// version keeps running until the draft is published. Decision forms are editable for existing approval steps. Step structure, checks,
+// hooks, scripts and the agents themselves stay read-only here: the web cannot carry
 // the files they need.
 
-type Tab = "identity" | "inputs" | "prompts" | "limits" | "slash" | "steps"
-const TABS: Tab[] = ["identity", "inputs", "prompts", "limits", "slash", "steps"]
+type Tab = "identity" | "inputs" | "prompts" | "limits" | "slash" | "steps" | "decisions"
+const TABS: Tab[] = ["identity", "inputs", "prompts", "decisions", "limits", "slash", "steps"]
 const TIERS = ["trivial", "fast", "moderate", "smart"] as const
 
 interface Props {
@@ -76,6 +78,7 @@ export function agentSteps(definition: Record<string, unknown>): { step: Step; p
   })
   return out
 }
+
 
 function setAt(root: Record<string, unknown>, path: (number | string)[], key: string, value: unknown) {
   let node: unknown = root
@@ -240,6 +243,7 @@ export function RoutineEditDialog({ open, onOpenChange, workspaceId, routine, fi
 
   const inputs = routineInputSpecs(doc)
   const prompts = agentSteps(doc)
+  const decisions = approvalSteps(doc)
   const routineFiles = files ?? routineFilesFromDefinition(routine.definition)
   const steps = Array.isArray(doc.steps) ? doc.steps.filter(isRecord) : []
   const hooks = routineHooks(doc)
@@ -260,6 +264,7 @@ export function RoutineEditDialog({ open, onOpenChange, workspaceId, routine, fi
     identity: "Identity",
     inputs: `Inputs · ${inputs.length}`,
     prompts: `Agent prompts · ${prompts.length}`,
+    decisions: `Decisions · ${decisions.length}`,
     limits: "Limits",
     slash: "Slash command",
     steps: "Steps & files",
@@ -434,10 +439,34 @@ export function RoutineEditDialog({ open, onOpenChange, workspaceId, routine, fi
           </div>
         )}
 
+        {tab === "decisions" && (
+          <div className="space-y-4">
+            <p className="text-xs text-muted-foreground">Edit the questions and decision buttons for existing approval steps. Save a draft, then publish it to use the form in new runs.</p>
+            {decisions.length === 0 && <p className="text-sm text-muted-foreground">This recipe has no approval steps. Add an approval step through the CLI or ask the lead to prepare one, then edit its form here.</p>}
+            {decisions.map(({ step, path }) => {
+              const wait = isRecord(step.wait) ? step.wait : {}
+              const patchWait = (patch: Record<string, unknown>) => update((next) => setAt(next, path, "wait", { ...wait, ...patch }))
+              const id = `routine-decision-${path.join("-")}`
+              return (
+                <section key={path.join(".")} className="space-y-3 rounded-lg border border-hairline p-3" aria-label={`Decision: ${stepDisplayName(step, 0)}`}>
+                  <h3 className="text-sm font-medium">{stepDisplayName(step, 0)}</h3>
+                  <CreateSurfaceField label="Decision title" htmlFor={`${id}-title`}>
+                    <Input id={`${id}-title`} value={asString(wait.approval_title)} onChange={(e) => patchWait({ approval_title: e.target.value })} />
+                  </CreateSurfaceField>
+                  <CreateSurfaceField label="What should the reviewer decide?" htmlFor={`${id}-prompt`}>
+                    <Textarea id={`${id}-prompt`} value={asString(wait.approval_prompt)} onChange={(e) => patchWait({ approval_prompt: e.target.value })} />
+                  </CreateSurfaceField>
+                  <RoutineDecisionFormBuilder value={wait.decision_form} onChange={(decision_form) => patchWait({ decision_form })} onOpenCode={() => setTab("steps")} codeActionLabel="View editing instructions" />
+                </section>
+              )
+            })}
+          </div>
+        )}
+
         {tab === "steps" && (
           <div className="flex flex-col gap-3 text-xs">
             <div className="rounded-lg border border-hairline p-3">
-              <p className="mb-1 text-[13px] font-medium">Steps, checks, hooks, scripts, agent prompts</p>
+              <p className="mb-1 text-[13px] font-medium">Step structure, checks, hooks and scripts</p>
               <p className="text-muted-foreground">
                 Read-only in the web. {steps.length} {steps.length === 1 ? "step" : "steps"}
                 {hooks.length ? `, ${hooks.length} ${hooks.length === 1 ? "hook" : "hooks"}` : ""}, {routineFiles.length} {routineFiles.length === 1 ? "file" : "files"}. Change them with the CLI or by asking the lead agent; the result arrives here as a draft to publish.
