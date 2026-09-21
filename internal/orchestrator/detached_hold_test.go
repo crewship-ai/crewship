@@ -115,9 +115,15 @@ func TestDetachedHold_AdmissionRechecksHoldAfterWaiting(t *testing.T) {
 	// Wait for the admission to actually block in acquireRunSlot, not a timing guess.
 	blocked := false
 	deadline := time.Now().Add(time.Second)
+	buf := make([]byte, 65536)
 	for time.Now().Before(deadline) {
-		buf := make([]byte, 65536)
 		n := runtime.Stack(buf, true)
+		// Other tests can leave enough live goroutines to truncate a fixed
+		// buffer before the newly started admission goroutine appears.
+		for n == len(buf) {
+			buf = make([]byte, 2*len(buf))
+			n = runtime.Stack(buf, true)
+		}
 		if strings.Contains(string(buf[:n]), ".(*Orchestrator).acquireRunSlot(") {
 			blocked = true
 			break
