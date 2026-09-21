@@ -11,6 +11,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Fixed
 
+- **Z.AI Coding Plan usage is marked as subscription usage.** API-key authentication no longer labels Coding Plan calls as metered or their zero per-call price as a precise monetary estimate.
+
 - **Solo agents now report model usage and observe credential revocation.** Initialize sidecar IPC for non-lead agents with no peers, preserving scope-bound authentication.
 - The published OpenAPI document now names the fields the issue and agent list rows actually carry: `client_review_required` (emitted on every issue row since the durable Lead review landed) plus the optional `assignee_slug`, `code_links` and `execution` projections, and the agents' `ask_forms` / `suggested_prompts` (nullable, always encoded). `issueResponse` and `agentResponse` are pinned in the schema-keys contract test so a struct field without schema coverage fails the generator gate again. (#2623)
 

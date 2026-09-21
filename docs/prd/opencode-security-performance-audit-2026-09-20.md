@@ -246,3 +246,20 @@ internal API configuration. The new regression
 instrumentation after it. Initialize IPC for every agent when its base URL is
 configured; role-specific action authorization and scoped tokens remain intact.
 Post-fix deployment and paid usage/revocation results will be recorded separately.
+
+
+Post-IPC live run `msg_1789986828345723275_0e30ac511a349f4b` completed
+with a real bash tool call and three usage rows attributed to the correct
+credential. Those rows exposed a second issue: API-key auth inherited metered
+billing defaults, yielding precise $0 instead of subscription/unknown cost.
+The ZAI coding route now emits flat_rate / GLM Coding Plan for both JSON and
+SSE observations; ordinary ZAI remains metered. The new table-driven billing
+regression failed before the correction for both coding response formats.
+
+Deployment requires recreation of existing crew containers to replace their
+bind-mounted sidecar. The acceptance systemd unit's overly restrictive umask
+also prevented server access after Docker changed crew directory ownership to
+UID/GID1001. Corrected only the isolated unit to UMask0002 plus supplementary
+GID1001, and made only its crew directories group-accessible. The top-level
+acceptance directory remains0700; DB and secrets remain0600. Agent1001 and
+sidecar1002 UIDs are unchanged. No shared main-dev3 directories were changed.

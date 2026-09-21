@@ -199,3 +199,35 @@ func TestZAIStreamHTMLRemainsData(t *testing.T) {
 		t.Fatal("SSE must retain data bytes with an inert MIME type")
 	}
 }
+
+func TestZAICodingPlanBillingIsSubscription(t *testing.T) {
+	for _, contentType := range []string{"application/json", "text/event-stream"} {
+		for _, provider := range []string{"zai-coding-plan", "zai"} {
+			t.Run(contentType+"/"+provider, func(t *testing.T) {
+				body := `{"model":"glm-5.3","usage":{"prompt_tokens":10,"completion_tokens":2}}`
+				if contentType == "text/event-stream" {
+					body = "data: " + body + "\n\n"
+				}
+				calls := 0
+				p := NewProxy(ProxyConfig{Logger: covLogger(), BillingMode: "metered", OnLLMCall: func(u LLMUsage, q QuotaInfo, mode, plan string) {
+					calls++
+					if u.InputTokens != 10 || u.OutputTokens != 2 {
+						t.Fatalf("usage lost: %+v", u)
+					}
+					if provider == "zai-coding-plan" {
+						if mode != "flat_rate" || plan != "GLM Coding Plan" {
+							t.Errorf("subscription reported as %q / %q", mode, plan)
+						}
+					} else if mode != "metered" || plan != "" {
+						t.Errorf("metered ZAI changed: %q / %q", mode, plan)
+					}
+				}})
+				resp := &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": []string{contentType}}, Body: io.NopCloser(strings.NewReader(body))}
+				p.copyAndObserveLLM(httptest.NewRecorder(), resp, "openai", provider, "agent", "credential")
+				if calls != 1 {
+					t.Fatalf("observer called %d times", calls)
+				}
+			})
+		}
+	}
+}

@@ -1059,6 +1059,12 @@ func (p *Proxy) copyAndObserveLLM(w http.ResponseWriter, resp *http.Response, co
 		return
 	}
 
+	// Authentication with an API key does not imply metered billing. This
+	// route is the Coding Plan product, regardless of the process default.
+	billingMode, subPlan := p.billingMode, p.subPlan
+	if ledgerProvider == "zai-coding-plan" {
+		billingMode, subPlan = "flat_rate", "GLM Coding Plan"
+	}
 	contentType := resp.Header.Get("Content-Type")
 	if !isJSONResponse(contentType) {
 		var usage LLMUsage
@@ -1084,7 +1090,7 @@ func (p *Proxy) copyAndObserveLLM(w http.ResponseWriter, resp *http.Response, co
 		quota := parseQuotaInfo(resp.Header, resp.StatusCode)
 		if usage.InputTokens != 0 || usage.OutputTokens != 0 || usage.CachedInputTokens != 0 ||
 			usage.CacheCreationTokens != 0 || quota.Window != "" || quota.HadStatus429 {
-			p.onLLMCall(usage, quota, p.billingMode, p.subPlan)
+			p.onLLMCall(usage, quota, billingMode, subPlan)
 		}
 		return
 	}
@@ -1108,7 +1114,7 @@ func (p *Proxy) copyAndObserveLLM(w http.ResponseWriter, resp *http.Response, co
 	usage.CredentialID = credentialID
 	usage.Provider = ledgerProvider
 	quota := parseQuotaInfo(resp.Header, resp.StatusCode)
-	p.onLLMCall(usage, quota, p.billingMode, p.subPlan)
+	p.onLLMCall(usage, quota, billingMode, subPlan)
 }
 
 // sseFlushWriter deliberately exposes only Write, keeping io.Copy from
