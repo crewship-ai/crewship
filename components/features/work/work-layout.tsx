@@ -1,19 +1,6 @@
 "use client"
 
-/**
- * /work — the durable work ledger and the deliveries that produced it
- * (docs/prd/WEBHOOKS-AGENT-PARALLELISM-IMPLEMENTATION-1-0.md §9).
- *
- * Two tabs, because they answer two different questions. "What happened to my
- * work" is the work ledger; "did you receive this one" is the delivery ledger,
- * and a delivery that was ignored has no work to be about. Joining them into
- * one list would have to invent a row for the ignored ones or hide them, and
- * hiding them is the thing the delivery ledger was built to stop.
- *
- * Layout keys on width, touch sizing on the pointer: the detail is a docked
- * panel from `md:` up and a full-height sheet below it, since a 420px panel on
- * a phone is the whole screen anyway — better to say so than to squeeze.
- */
+// Durable work and webhook deliveries are views inside Activity.
 
 import * as React from "react"
 import { RefreshCw } from "lucide-react"
@@ -21,7 +8,6 @@ import { RefreshCw } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import { Skeleton } from "@/components/ui/skeleton"
-import { TabBar } from "@/components/ui/tab-bar"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { cn } from "@/lib/utils"
 import {
@@ -42,10 +28,11 @@ type WorkTab = "work" | "deliveries"
 
 export interface WorkLayoutProps {
   workspaceId: string
+  tab: WorkTab
+  onTabChange: (tab: WorkTab) => void
 }
 
-export function WorkLayout({ workspaceId }: WorkLayoutProps) {
-  const [tab, setTab] = React.useState<WorkTab>("work")
+export function WorkLayout({ workspaceId, tab, onTabChange }: WorkLayoutProps) {
   const [stateFilter, setStateFilter] = React.useState<WorkState | null>(null)
   const [decisionFilter, setDecisionFilter] = React.useState<DeliveryDecision | null>(null)
   const [selectedWorkId, setSelectedWorkId] = React.useState<string | null>(null)
@@ -55,9 +42,9 @@ export function WorkLayout({ workspaceId }: WorkLayoutProps) {
   const deliveries = useWebhookDeliveries(workspaceId, { decision: decisionFilter })
 
   const openWork = React.useCallback((id: string) => {
-    setTab("work")
+    onTabChange("work")
     setSelectedWorkId(id)
-  }, [])
+  }, [onTabChange])
 
   const refresh = tab === "work" ? work.refetch : deliveries.refetch
   const loading = tab === "work" ? work.loading : deliveries.loading
@@ -72,12 +59,11 @@ export function WorkLayout({ workspaceId }: WorkLayoutProps) {
   ) : null
 
   return (
-    <div className="flex h-[calc(100dvh-var(--app-header-h)-var(--mobile-tab-bar-h))] min-h-0 flex-col">
+    <div className="flex h-full min-h-0 flex-col">
       <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-hairline px-2">
-        <TabBar value={tab} onValueChange={(v) => setTab(v as WorkTab)} ariaLabel="Work ledger" layoutId="work-tabs">
-          <TabBar.Item value="work" count={work.items.length}>Work</TabBar.Item>
-          <TabBar.Item value="deliveries" count={deliveries.deliveries.length}>Deliveries</TabBar.Item>
-        </TabBar>
+        <p className="min-w-0 flex-1 py-2 text-xs text-muted-foreground">
+          {tab === "work" ? "Accepted work, its attempts and results." : "Received webhooks, including ignored deliveries."}
+        </p>
         <Button
           variant="outline"
           size="sm"
@@ -140,7 +126,7 @@ export function WorkLayout({ workspaceId }: WorkLayoutProps) {
           )}
         </div>
 
-        {!isMobile && selectedWorkId && (
+        {!isMobile && tab === "work" && selectedWorkId && (
           <aside
             aria-label="Work item detail"
             className="hidden w-[440px] shrink-0 overflow-y-auto border-l border-hairline md:block"
@@ -151,7 +137,7 @@ export function WorkLayout({ workspaceId }: WorkLayoutProps) {
       </div>
 
       {isMobile && (
-        <Sheet open={Boolean(selectedWorkId)} onOpenChange={(open) => !open && setSelectedWorkId(null)}>
+        <Sheet open={tab === "work" && Boolean(selectedWorkId)} onOpenChange={(open) => !open && setSelectedWorkId(null)}>
           <SheetContent side="right" className="w-full overflow-y-auto sm:max-w-md">
             <SheetHeader>
               <SheetTitle>Work item</SheetTitle>
