@@ -139,7 +139,8 @@ func (o *Orchestrator) settleSidecar(ctx context.Context, spec sidecarSettleSpec
 			spec.onStale(health.SidecarHash)
 		}
 		restart := sidecarNeedsRestart(health, spec.desiredMode, spec.desiredDomains, spec.restartFingerprint) ||
-			crewOnlySidecarMustBeReplaced(health, spec.crewOnly)
+			crewOnlySidecarMustBeReplaced(health, spec.crewOnly) ||
+			sidecarMissingGrantedCredentials(health, spec.creds)
 		if !restart {
 			// #1160: restricted mode used to restart UNCONDITIONALLY here
 			// ("the domain allowlist may differ between agents, so we always
@@ -331,4 +332,23 @@ func (o *Orchestrator) EnsureCrewSidecar(ctx context.Context, spec CrewSidecarSp
 			"crew_id", spec.CrewID, "container_id", shortID(spec.ContainerID), "network_mode", desiredMode)
 	}
 	return nil
+}
+
+// A regranted key has the same boot fingerprint as before revocation. Compare
+// live provider counts too, so a reaped store is replenished on the next run.
+// Older sidecars without counts keep their existing fingerprint behavior.
+func sidecarMissingGrantedCredentials(health *sidecarHealth, creds []Credential) bool {
+	expected := make(map[string]map[string]struct{})
+	for _, c := range buildSidecarCreds(creds, nil) {
+		if expected[c.Provider] == nil {
+			expected[c.Provider] = make(map[string]struct{})
+		}
+		expected[c.Provider][c.ID] = struct{}{}
+	}
+	for provider, ids := range expected {
+		if count, reported := health.ProviderCreds[provider]; reported && count < len(ids) {
+			return true
+		}
+	}
+	return false
 }

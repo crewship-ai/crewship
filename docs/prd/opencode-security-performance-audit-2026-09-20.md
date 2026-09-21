@@ -275,3 +275,16 @@ keeps its previous type filter. Workspace visibility alone does not keep a
 provider login after its grant is removed. Tests cover both grant mechanisms,
 soft-deleted agents, other crews, workspace bindings, revocation, and exclusion
 from the plaintext global pool. Existing legacy credential scoping is unchanged.
+
+
+On 56c75de21, the real GLM tool run completed and three ledger rows recorded
+flat_rate / GLM Coding Plan / unknown monetary confidence, with real token counts
+and the correct credential ID. The active credential survived a 66-second watch
+across reaper ticks. Removing its grant dropped the credential from count1 to0
+in45.26 seconds; the next run was refused before CLI execution. A restored UI-style
+agent binding exposed a fourth gap: the empty sidecar was reused because its boot
+fingerprint still matched. The run was stopped. Sidecar reuse now compares live
+provider counts against the currently delivered credential IDs and restarts when
+a reaped credential must be restored. It never restores a key absent from current
+delivery. Regression covers missing vs intact stores with identical fingerprints;
+it failed before the fix. Final post-fix live restoration is recorded separately.

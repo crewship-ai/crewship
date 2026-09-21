@@ -1218,3 +1218,32 @@ func TestRunAgent_SoloAgentCarriesIPC(t *testing.T) {
 	}
 	t.Fatal("sidecar launch was not captured")
 }
+
+func TestRunAgent_RegrantedCredentialRestartsReapedSidecar(t *testing.T) {
+	t.Parallel()
+	creds := []Credential{{ID: "plan", Type: "PROVIDER_LOGIN", Provider: "ZAI_CODING_PLAN", EnvVarName: "ZAI_CODING_PLAN_API_KEY", PlainValue: "fixture"}}
+	fp := sidecarConfigFingerprint("master-secret", creds)
+	for _, count := range []int{0, 1} {
+		t.Run(fmt.Sprint(count), func(t *testing.T) {
+			health := fmt.Sprintf(`{"status":"ok","network_mode":"free","config_fingerprint":%q,"provider_creds":{"ZAI_CODING_PLAN":%d}}`, fp, count)
+			c := covNewRunContainer(covRunOpts{stream: "{}\n", health: health})
+			o := New(c, newMemState(), covQuietLogger())
+			o.SetSidecarEnabled(true)
+			o.SetIPCConfig("http://gw:9000", "master-secret")
+			req := covRunReq()
+			req.Credentials = creds
+			if err := o.RunAgent(context.Background(), req, nil); err != nil {
+				t.Fatal(err)
+			}
+			restarted := false
+			for _, script := range c.snapshotScripts() {
+				if strings.Contains(script, "crewship-sidecar --addr") {
+					restarted = true
+				}
+			}
+			if restarted != (count == 0) {
+				t.Fatalf("count=%d restarted=%v", count, restarted)
+			}
+		})
+	}
+}

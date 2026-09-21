@@ -11,6 +11,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Fixed
 
+- **Reassigning a previously removed provider key works without a manual runtime restart.** Sidecar reuse now checks live credential counts as well as the original configuration fingerprint.
+
 - **Provider logins remain usable after the sidecar’s periodic credential check.** The metadata endpoint now includes explicitly granted provider logins and drops them when access is removed, without adding them to the global plaintext token pool.
 
 - **Z.AI Coding Plan usage is marked as subscription usage.** API-key authentication no longer labels Coding Plan calls as metered or their zero per-call price as a precise monetary estimate.
