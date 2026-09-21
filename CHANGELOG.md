@@ -11,6 +11,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Improved
 - Routine and schedule catalogs now page through large workspaces without truncating results; schedule lists and the calendar resolve routine details in batches.
+- Activity now includes the accepted work ledger and webhook deliveries. The separate Work navigation item is removed; existing `/work` bookmarks open the corresponding Activity view. (#2636)
 
 ### Fixed
 - The published OpenAPI document now names the fields the issue and agent list rows actually carry: `client_review_required` (emitted on every issue row since the durable Lead review landed) plus the optional `assignee_slug`, `code_links` and `execution` projections, and the agents' `ask_forms` / `suggested_prompts` (nullable, always encoded). `issueResponse` and `agentResponse` are pinned in the schema-keys contract test so a struct field without schema coverage fails the generator gate again. (#2623)
