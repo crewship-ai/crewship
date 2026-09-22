@@ -23,6 +23,9 @@ type TransitionRequest struct {
 	// provider's own status. Never credentials.
 	ExitEvidence string
 	CostUSD      float64
+	// StoppedRunFailed records a confirmed failed process while external effects
+	// still require reconciliation. It must not be set on a stop request alone.
+	StoppedRunFailed bool
 }
 
 // Transition applies a fenced state change and its event in one transaction.
@@ -69,6 +72,9 @@ func (s *Store) Transition(ctx context.Context, req TransitionRequest) error {
 		return fmt.Errorf("%w: %s -> %s", ErrIllegalTransition, it.State, req.To)
 	}
 
+	if req.StoppedRunFailed && req.To != StateNeedsReconciliation {
+		return fmt.Errorf("%w: stopped failure is only for reconciliation", ErrIllegalTransition)
+	}
 	now := s.now().UTC()
 	to := req.To
 	reason := req.Reason
@@ -97,11 +103,15 @@ func (s *Store) Transition(ctx context.Context, req TransitionRequest) error {
 	// deliberately does not close it: the runtime is parked, not finished, and
 	// §4 requires the slot to be released only once that parking is confirmed.
 	if to.Terminal() || to == StateRetryWait || to == StateQueued || to == StateNeedsReconciliation {
+		runStatus := runStatusForState(to)
+		if req.StoppedRunFailed {
+			runStatus = "FAILED"
+		}
 		res, err := tx.ExecContext(ctx, `
 			UPDATE work_attempts
-			SET ended_at = ?, end_reason = ?, exit_evidence = ?, cost_usd = ?
+			SET ended_at = ?, end_reason = ?, exit_evidence = ?, cost_usd = ?, run_status = ?
 			WHERE run_id = ? AND work_id = ? AND generation = ? AND ended_at IS NULL`,
-			tsformat.Format(now), reason, req.ExitEvidence, req.CostUSD,
+			tsformat.Format(now), reason, req.ExitEvidence, req.CostUSD, runStatus,
 			req.RunID, req.WorkID, req.Generation)
 		if err != nil {
 			return fmt.Errorf("work: close attempt: %w", err)
@@ -713,6 +723,11 @@ func (s *Store) Resolve(ctx context.Context, workID string, generation int64, to
 	if err := s.setStateTx(ctx, tx, it, to, "", it.Generation,
 		fmt.Sprintf("resolved by %s: %s", resolvedBy, reason), now); err != nil {
 		return err
+	}
+	if status := runStatusForState(to); status != "" {
+		if _, err := tx.ExecContext(ctx, `UPDATE work_attempts SET run_status = ? WHERE work_id = ? AND generation = ? AND ended_at IS NOT NULL AND run_status = ''`, status, workID, generation); err != nil {
+			return fmt.Errorf("work: resolve run projection: %w", err)
+		}
 	}
 	return tx.Commit()
 }

@@ -1058,15 +1058,8 @@ func (h *WebhookHandler) runWebhookAgent(
 		exitCodePtr := &exitCode
 		status := "COMPLETED"
 		var errMsg *string
-		if errors.Is(err, orchestrator.ErrDetachedStillRunning) {
-			// Nonterminal (#2626): the exec is still alive and the
-			// orchestrator holds the run at `running`. Writing COMPLETED
-			// here is how a succeeded work item used to be manufactured
-			// for a process that was still working. No terminal record,
-			// no invented exit code — the sentinel propagates so the
-			// dispatcher keeps the attempt supervised.
-			return err
-		}
+		detached := errors.Is(err, orchestrator.ErrDetachedStillRunning)
+
 		if err != nil {
 			status = "FAILED"
 			s := err.Error()
@@ -1095,8 +1088,26 @@ func (h *WebhookHandler) runWebhookAgent(
 		// Settlement must survive cancellation of execution. Keep identity and
 		// tracing values, but give this IPC write its own bounded deadline.
 		// Otherwise a cancelled wait leaves the run record RUNNING forever.
-		settleCtx, settleCancel := context.WithTimeout(context.WithoutCancel(runCtx), 10*time.Second)
+		settleCtx, settleCancel := context.WithTimeout(context.WithoutCancel(runCtx), 30*time.Second)
 		defer settleCancel()
+		// A work-owned run captures its output now, but only the dispatcher can
+		// decide its terminal status after checking cancel intent and stop proof.
+		for _, g := range launch {
+			if recorder, ok := g.(interface {
+				RecordResult(context.Context, work.RunResult) error
+			}); ok {
+				if detached {
+					exitCodePtr = nil
+				}
+				if storeErr := recorder.RecordResult(settleCtx, work.RunResult{ExitCode: exitCodePtr, ErrorMessage: errMsg, Metadata: completedMeta}); storeErr != nil {
+					return fmt.Errorf("webhook: preserve result for settlement: %w: %w", work.ErrRunResultUnstored, storeErr)
+				}
+				return err
+			}
+		}
+		if detached {
+			return err
+		}
 		if updateErr := h.resolver.UpdateRun(settleCtx, runID, status, exitCodePtr, errMsg, completedMeta); updateErr != nil {
 			h.logger.Warn("failed to update run status", "run_id", runID, "status", status, "error", updateErr)
 		}

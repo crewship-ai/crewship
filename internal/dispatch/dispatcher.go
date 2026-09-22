@@ -110,6 +110,7 @@ func (d *Dispatcher) Run(ctx context.Context) error {
 	defer recovery.Stop()
 
 	for {
+		d.flushRunOutcomes(ctx)
 		// Drain as much as capacity allows before waiting again.
 		for ctx.Err() == nil {
 			claimed, err := d.claimOne(ctx)
@@ -125,6 +126,7 @@ func (d *Dispatcher) Run(ctx context.Context) error {
 		select {
 		case <-ctx.Done():
 			d.drain()
+			d.flushRunOutcomes(context.WithoutCancel(ctx))
 			return nil
 		case <-recovery.C:
 			if err := d.recover(ctx); err != nil {
@@ -396,6 +398,14 @@ func (d *Dispatcher) confirmByProbe(ctx context.Context, live *liveAttempt, conf
 func (d *Dispatcher) settle(ctx context.Context, live *liveAttempt, runErr error) {
 	a := live.assignment
 
+	// A result-persistence error says nothing about execution success. In
+	// particular a late cancel must not turn a completed action into CANCELLED
+	// merely because its durable capture acknowledgement was lost.
+	if errors.Is(runErr, work.ErrRunResultUnstored) {
+		d.park(ctx, a, "execution result requires reconciliation: "+runErr.Error())
+		return
+	}
+
 	// A cancel that was asked for is only a cancellation once the runtime is
 	// confirmed gone. Anything less is reconciliation — §4 is explicit that an
 	// unstoppable or unclear process is not a cancelled one.
@@ -455,7 +465,17 @@ func (d *Dispatcher) settle(ctx context.Context, live *liveAttempt, runErr error
 		// the work is not the place to resolve that.
 		d.park(ctx, a, "the runtime classified a failure as success: "+runErr.Error())
 	default:
-		d.park(ctx, a, "the runtime's outcome is unclear: "+runErr.Error())
+		// Failed execution and uncertain external effects are different facts.
+		// Preserve a failed run only if the provider confirms it is gone; the
+		// accepted work still requires reconciliation, never automatic replay.
+		probeCtx, probeCancel := context.WithTimeout(ctx, d.cfg.StopGrace)
+		alive, probeErr := d.runtime.Alive(probeCtx, live.locator)
+		probeCancel()
+		// Give persistence its own bound even if the provider exhausted the
+		// caller's deadline (notably the shutdown settlement context).
+		persistCtx, persistCancel := context.WithTimeout(context.WithoutCancel(ctx), d.cfg.StopGrace)
+		defer persistCancel()
+		d.finishWithRunProof(persistCtx, a, work.StateNeedsReconciliation, "the runtime's outcome is unclear: "+runErr.Error(), probeErr == nil && !alive)
 	}
 }
 
@@ -613,8 +633,12 @@ func (d *Dispatcher) stopDetachedConfirmed(ctx context.Context, live *liveAttemp
 // backstop for the next one: an outcome that cannot be written lands in
 // reconciliation immediately, carrying what it was trying to say.
 func (d *Dispatcher) finish(ctx context.Context, a Assignment, to work.State, reason string) {
+	d.finishWithRunProof(ctx, a, to, reason, false)
+}
+
+func (d *Dispatcher) finishWithRunProof(ctx context.Context, a Assignment, to work.State, reason string, stoppedFailed bool) {
 	err := d.store.Transition(ctx, work.TransitionRequest{
-		WorkID: a.Item.ID, RunID: a.RunID, Generation: a.Generation, To: to, Reason: reason,
+		WorkID: a.Item.ID, RunID: a.RunID, Generation: a.Generation, To: to, Reason: reason, StoppedRunFailed: stoppedFailed,
 	})
 	if err == nil {
 		return
@@ -755,21 +779,14 @@ func (d *Dispatcher) shutdownAttempt(live *liveAttempt, runDone <-chan error) {
 	// The stop deadline may be exhausted. Persist with a fresh bounded context.
 	ctx, cancel := context.WithTimeout(context.Background(), d.cfg.StopGrace)
 	defer cancel()
-	requested, err := d.store.CancelRequested(ctx, live.assignment.RunID)
-	if err != nil {
-		d.park(ctx, live.assignment, "shutdown could not check user cancellation: "+err.Error())
-		return
-	}
 	if stopErr != nil || !stopped {
 		d.park(ctx, live.assignment, "server shutdown: runtime stop could not be confirmed at "+live.locator)
 		return
 	}
-	if requested {
-		d.finish(ctx, live.assignment, work.StateCancelled, "runtime confirmed stopped after user cancellation during shutdown")
-		return
-	}
-	// Stopping a process is not proof its external effects can be repeated.
-	// Let the runtime classify a completed result; otherwise retain the accepted
+	// Stopping a process is not proof its external effects can be repeated,
+	// nor that a late user cancel beat its completed result. Use the same
+	// result-before-cancel ordering as normal settlement, including when a
+	// capture acknowledgement failed. Otherwise retain the accepted
 	// work for explicit reconciliation, never invent a user cancellation.
 	select {
 	case runErr := <-runDone:
@@ -778,5 +795,15 @@ func (d *Dispatcher) shutdownAttempt(live *liveAttempt, runDone <-chan error) {
 		persistCtx, persistCancel := context.WithTimeout(context.Background(), d.cfg.StopGrace)
 		defer persistCancel()
 		d.park(persistCtx, live.assignment, "server shutdown: runtime stopped but its outcome was not returned")
+	}
+}
+
+// Projection failures do not restart work or prevent unrelated admission. The
+// runtime owns its bounded durable outbox and can retry it on the next poll.
+func (d *Dispatcher) flushRunOutcomes(ctx context.Context) {
+	if flusher, ok := d.runtime.(interface{ FlushRunOutcomes(context.Context) error }); ok {
+		if err := flusher.FlushRunOutcomes(ctx); err != nil {
+			d.logger.Error("dispatch: run outcome projection pending", "error", err)
+		}
 	}
 }

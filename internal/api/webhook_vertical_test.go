@@ -74,7 +74,8 @@ type fakeAgentProcess struct {
 	// emitEvent makes the run produce one stream event, which is the FAST
 	// confirmation hint. Off by default, so the default run in these tests is a
 	// silent one and confirmation has to come from the probe.
-	emitEvent bool
+	emitEvent  bool
+	resultMeta map[string]any
 }
 
 func newFakeAgentProcess() *fakeAgentProcess {
@@ -94,7 +95,7 @@ func (f *fakeAgentProcess) RunAgent(ctx context.Context, req orchestrator.AgentR
 	f.started = append(f.started, req.RunID)
 	gone := make(chan struct{})
 	f.live[req.RunID] = gone
-	hold, emit, fail := f.hold, f.emitEvent, f.failWith
+	hold, emit, fail, resultMeta := f.hold, f.emitEvent, f.failWith, f.resultMeta
 	f.mu.Unlock()
 
 	defer func() {
@@ -105,6 +106,9 @@ func (f *fakeAgentProcess) RunAgent(ctx context.Context, req orchestrator.AgentR
 
 	if emit && handler != nil {
 		handler(orchestrator.AgentEvent{Type: "text", Content: "working"})
+	}
+	if resultMeta != nil && handler != nil {
+		handler(orchestrator.AgentEvent{Type: "result", Metadata: resultMeta})
 	}
 	if hold != nil {
 		select {
@@ -627,6 +631,8 @@ func TestVerticalServer_CancelBeforeAnyStartPreventsExecution(t *testing.T) {
 func TestVerticalServer_CancelDuringARunStopsThatRuntime(t *testing.T) {
 	rig := newVerticalRig(t)
 	rig.proc.hold = make(chan struct{})
+	rig.proc.emitEvent = true
+	rig.proc.resultMeta = map[string]any{"total_cost_usd": 0.125, "usage": map[string]any{"input_tokens": float64(12)}}
 	rig.startDispatcher()
 
 	rec := rig.deliver(verticalBody)
@@ -647,6 +653,28 @@ func TestVerticalServer_CancelDuringARunStopsThatRuntime(t *testing.T) {
 		t.Errorf("run %s was never stopped; some other runtime was signalled", runID)
 	}
 	close(rig.proc.hold)
+	assertUncreatedRunCancelled(t, rig, runID)
+	if n := rig.count(`SELECT COUNT(*) FROM journal_entries WHERE trace_id = ? AND entry_type = 'run.failed'`, runID); n != 0 {
+		t.Fatalf("cancelled run has %d false failures", n)
+	}
+	var payload string
+	if err := rig.db.QueryRowContext(t.Context(), `SELECT payload FROM journal_entries WHERE trace_id = ? AND entry_type = 'run.cancelled'`, runID).Scan(&payload); err != nil {
+		t.Fatal(err)
+	}
+	var result struct {
+		ExitCode *int           `json:"exit_code"`
+		Metadata map[string]any `json:"metadata"`
+	}
+	if err := json.Unmarshal([]byte(payload), &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.ExitCode != nil {
+		t.Fatalf("cancel invented an exit code: %v", *result.ExitCode)
+	}
+	if result.Metadata["total_cost_usd"] != 0.125 {
+		t.Fatalf("cancel lost captured usage: %s", payload)
+	}
+
 }
 
 // A runtime that will not stop is not a cancelled one.
@@ -1276,5 +1304,26 @@ func TestVerticalServer_CancelUsesLaunchLocationWithoutHomeRegistry(t *testing.T
 	rig.waitForState(rec.WorkID, work.StateCancelled)
 	if !rig.proc.wasStopped(runID) {
 		t.Fatal("production probe did not stop the launched runtime")
+	}
+}
+
+func TestVerticalServer_ResultCaptureFailureParksWithoutInventedTerminal(t *testing.T) {
+	rig := newVerticalRig(t)
+	if _, err := rig.db.ExecContext(t.Context(), `CREATE TRIGGER reject_run_capture BEFORE UPDATE OF run_result_json ON work_attempts BEGIN SELECT RAISE(ABORT,'injected capture failure'); END`); err != nil {
+		t.Fatal(err)
+	}
+	rig.startDispatcher()
+	rec := rig.deliver(verticalBody)
+	rig.waitForState(rec.WorkID, work.StateNeedsReconciliation)
+	runID := rig.attemptRunID(rec.WorkID)
+	p, owned, err := rig.store.RunProjection(t.Context(), runID)
+	if err != nil || !owned || p.Ready || p.Status != "" {
+		t.Fatalf("capture failure invented outcome: %+v %v", p, err)
+	}
+	if n := rig.count(`SELECT COUNT(*) FROM journal_entries WHERE trace_id=? AND entry_type IN ('run.completed','run.failed','run.cancelled')`, runID); n != 0 {
+		t.Fatalf("capture failure emitted %d terminal events", n)
+	}
+	if got := rig.proc.runsStarted(); len(got) != 1 {
+		t.Fatalf("capture failure restarted action: %v", got)
 	}
 }

@@ -2,6 +2,7 @@ package dispatch
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -81,6 +82,14 @@ func testShutdownUnconfirmedStop(t *testing.T, blockStop bool) {
 	if item.State != work.StateNeedsReconciliation {
 		t.Fatalf("shutdown left work %q after an unconfirmed stop, want needs_reconciliation", item.State)
 	}
+	var runStatus string
+	if err := h.db.QueryRowContext(t.Context(), `SELECT run_status FROM work_attempts WHERE work_id = ? ORDER BY attempt DESC LIMIT 1`, r.WorkID).Scan(&runStatus); err != nil {
+		t.Fatal(err)
+	}
+	if runStatus != "" {
+		t.Fatalf("unconfirmed shutdown projected terminal %q", runStatus)
+	}
+
 	select {
 	case <-runtime.returned:
 	case <-time.After(time.Second):
@@ -145,5 +154,132 @@ func TestSettle_CompletionThatBeatsACancelIsRecordedAsSucceeded(t *testing.T) {
 	}
 	if cancelled != 0 {
 		t.Fatalf("%d cancelled transitions recorded over a completed run", cancelled)
+	}
+	var runStatus string
+	if err := h.db.QueryRowContext(t.Context(), `SELECT run_status FROM work_attempts WHERE work_id = ? ORDER BY attempt DESC LIMIT 1`, r.WorkID).Scan(&runStatus); err != nil {
+		t.Fatal(err)
+	}
+	if runStatus != "COMPLETED" {
+		t.Fatalf("late cancel changed run projection to %q", runStatus)
+	}
+
+}
+
+func TestSettle_ResultStorageFailureCannotInventFailureOrCancellation(t *testing.T) {
+	for _, cancelRequested := range []bool{false, true} {
+		t.Run(map[bool]string{false: "no cancel", true: "late cancel"}[cancelRequested], func(t *testing.T) {
+			h := newHarness(t)
+			r := h.accept("result-storage-uncertain")
+			a, err := h.store.Claim(t.Context(), work.ClaimOptions{LeaseOwner: "owner"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			// Model a successful capture whose acknowledgement was lost. The runtime
+			// returned successfully before storage failed; neither FAILED nor CANCELLED
+			// may be inferred from that storage error, even with a late stop request.
+			zero := 0
+			if err := h.store.StageRunResult(t.Context(), r.WorkID, a.RunID, a.Generation, work.RunResult{ExitCode: &zero}); err != nil {
+				t.Fatal(err)
+			}
+			if cancelRequested {
+				if _, err := h.store.RequestCancel(t.Context(), r.WorkID, "operator", "late stop"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			d := New(h.store, h.rt, nil, h.cfg, quiet())
+			d.settle(t.Context(), &liveAttempt{assignment: Assignment{Item: a.Item, RunID: a.RunID, Generation: a.Generation}}, work.ErrRunResultUnstored)
+			it, err := h.store.Get(t.Context(), r.WorkID)
+			if err != nil || it.State != work.StateNeedsReconciliation {
+				t.Fatalf("state=%v err=%v", it, err)
+			}
+			p, _, err := h.store.RunProjection(t.Context(), a.RunID)
+			if err != nil || p.Ready || p.Status != "" {
+				t.Fatalf("storage failure invented execution outcome: %+v %v", p, err)
+			}
+		})
+	}
+}
+
+func TestShutdown_ResultBeforeLateCancellation(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		runErr error
+		state  work.State
+		status string
+	}{
+		{"unconfirmed capture", work.ErrRunResultUnstored, work.StateNeedsReconciliation, ""},
+		{"completed execution", nil, work.StateSucceeded, "COMPLETED"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t)
+			r := h.accept("shutdown-late-cancel")
+			a, err := h.store.Claim(t.Context(), work.ClaimOptions{LeaseOwner: "owner"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			assignment := Assignment{Item: a.Item, RunID: a.RunID, Generation: a.Generation}
+			if err := h.store.Transition(t.Context(), work.TransitionRequest{WorkID: r.WorkID, RunID: a.RunID, Generation: a.Generation, To: work.StateRunning}); err != nil {
+				t.Fatal(err)
+			}
+			if err := h.rt.Run(t.Context(), assignment, func() {}); err != nil {
+				t.Fatal(err)
+			}
+			zero := 0
+			if err := h.store.StageRunResult(t.Context(), r.WorkID, a.RunID, a.Generation, work.RunResult{ExitCode: &zero}); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := h.store.RequestCancel(t.Context(), r.WorkID, "operator", "late stop"); err != nil {
+				t.Fatal(err)
+			}
+			runDone := make(chan error, 1)
+			runDone <- tc.runErr
+			close(runDone)
+			d := New(h.store, h.rt, nil, h.cfg, quiet())
+			d.shutdownAttempt(&liveAttempt{assignment: assignment, locator: h.rt.Locator(assignment), cancel: func() {}}, runDone)
+			it, err := h.store.Get(t.Context(), r.WorkID)
+			if err != nil || it.State != tc.state {
+				t.Fatalf("shutdown state=%v err=%v", it, err)
+			}
+			p, _, err := h.store.RunProjection(t.Context(), a.RunID)
+			if err != nil || p.Status != tc.status {
+				t.Fatalf("shutdown invented outcome: %+v %v", p, err)
+			}
+			if h.rt.starts.Load() != 1 {
+				t.Fatal("shutdown repeated execution")
+			}
+		})
+	}
+}
+
+// A provider outage must not keep settlement (and shutdown drain) blocked
+// indefinitely after execution has returned.
+type stalledOutcomeProbe struct{ *fakeRuntime }
+
+func (r stalledOutcomeProbe) Alive(ctx context.Context, _ string) (bool, error) {
+	<-ctx.Done()
+	return false, ctx.Err()
+}
+func TestSettle_OutcomeProbeTimeoutStillPersistsReconciliation(t *testing.T) {
+	h := newHarness(t)
+	r := h.accept("stalled-outcome-probe")
+	a, err := h.store.Claim(t.Context(), work.ClaimOptions{LeaseOwner: "owner"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.cfg.StopGrace = 200 * time.Millisecond
+	d := New(h.store, stalledOutcomeProbe{h.rt}, nil, h.cfg, quiet())
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+	defer cancel()
+	d.settle(ctx, &liveAttempt{assignment: Assignment{Item: a.Item, RunID: a.RunID, Generation: a.Generation}}, errors.New("execution failed"))
+	if ctx.Err() != nil {
+		t.Fatal("provider probe consumed the parent settlement deadline")
+	}
+	it, err := h.store.Get(t.Context(), r.WorkID)
+	if err != nil || it.State != work.StateNeedsReconciliation {
+		t.Fatalf("state=%v err=%v", it, err)
+	}
+	p, _, err := h.store.RunProjection(t.Context(), a.RunID)
+	if err != nil || p.Status != "" {
+		t.Fatalf("timeout fabricated terminal: %+v %v", p, err)
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/dispatch"
 	"github.com/crewship-ai/crewship/internal/journal"
@@ -34,8 +35,9 @@ type webhookRunInput struct {
 // agent now. The handler used to return a closure that did this directly, which
 // made it a second owner of work the ledger already owned — review finding R3.
 type WebhookRuntime struct {
-	h        *WebhookHandler
-	launches sync.Map // run id -> *webhookLaunch
+	h            *WebhookHandler
+	launches     sync.Map // run id -> *webhookLaunch
+	projectionMu sync.Mutex
 }
 
 // NewWebhookRuntime wires the handler's runtime dependencies to the dispatcher.
@@ -497,3 +499,51 @@ func (h *WebhookHandler) runRecordAbsent(ctx context.Context, runID string) (boo
 // Forget releases launch state only after the dispatcher has recorded the
 // outcome. It is separate from RunAgent's cleanup of credential-refresh HOMEs.
 func (rt *WebhookRuntime) Forget(locator string) { rt.launches.Delete(runIDFromLocator(locator)) }
+
+// RecordResult preserves output independently of cancellation of execution.
+func (l *webhookLaunch) RecordResult(ctx context.Context, result work.RunResult) error {
+	return l.store.StageRunResult(ctx, l.workID, l.runID, l.generation, result)
+}
+
+// FlushRunOutcomes retries journal projection, never agent execution. Status and
+// output survive a restart in the attempt row; an IPC acknowledgement is durable
+// for these owned runs because UpdateRun uses synchronous journal persistence.
+func (rt *WebhookRuntime) FlushRunOutcomes(ctx context.Context) error {
+	if !rt.projectionMu.TryLock() {
+		return nil
+	}
+	defer rt.projectionMu.Unlock()
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	store := work.NewStore(rt.h.db)
+	ids, err := store.PendingRunProjections(ctx, 100)
+	if err != nil {
+		return err
+	}
+	var failures []error
+	for _, id := range ids {
+		if err := ctx.Err(); err != nil {
+			return errors.Join(append(failures, err)...)
+		}
+		if err := store.MarkRunProjectionAttempt(ctx, id); err != nil {
+			failures = append(failures, err)
+			continue
+		}
+		p, owned, err := store.RunProjection(ctx, id)
+		if err != nil {
+			failures = append(failures, err)
+			continue
+		}
+		if !owned || !p.Ready {
+			continue
+		}
+		err = rt.h.resolver.UpdateRun(ctx, id, p.Status, p.Result.ExitCode, p.Result.ErrorMessage, p.Result.Metadata)
+		if err == nil {
+			err = store.MarkRunProjected(ctx, id, p.Status)
+		}
+		if err != nil {
+			failures = append(failures, fmt.Errorf("project run %s: %w", id, err))
+		}
+	}
+	return errors.Join(failures...)
+}
