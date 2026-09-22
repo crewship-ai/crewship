@@ -61,6 +61,10 @@ type AgentRunRequest struct {
 	// needs to know whether a process could exist needs to be told at the
 	// boundary, not to look for evidence afterwards.
 	ExecGate func(ctx context.Context) error
+	// NoAdmissionWait is for synchronous child queries: the caller may hold
+	// the capacity being requested. Return ErrAdmissionBusy rather than wait
+	// on the parent. This does not bypass either admission limit.
+	NoAdmissionWait bool
 
 	AgentID   string
 	AgentSlug string

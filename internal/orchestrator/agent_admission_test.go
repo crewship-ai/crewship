@@ -62,3 +62,51 @@ func TestRunAgent_SameAgentWaitsWithoutTakingServerCapacity(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestRunAgent_SynchronousChildRefusesBusyAdmission(t *testing.T) {
+	for _, sameAgent := range []bool{true, false} {
+		name := "server-capacity"
+		if sameAgent {
+			name = "parent-agent"
+		}
+		t.Run(name, func(t *testing.T) {
+			probe := &concProbeContainer{arrived: make(chan struct{}, 4), release: make(chan struct{})}
+			o := New(probe, newLockedMemState(), covQuietLogger(), WithMaxConcurrentRuns(1))
+			parent := covRunReq()
+			parent.RunID = "admission-parent-" + name
+			done := make(chan error, 1)
+			go func() { done <- o.RunAgent(context.Background(), parent, nil) }()
+			defer func() { close(probe.release); <-done }()
+			select {
+			case <-probe.arrived:
+			case <-time.After(5 * time.Second):
+				t.Fatal("parent never started")
+			}
+			child := parent
+			child.RunID = "admission-child-" + name
+			child.NoAdmissionWait = true
+			if !sameAgent {
+				child.AgentID = "different-child-agent"
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+			if err := o.RunAgent(ctx, child, nil); !errors.Is(err, ErrAdmissionBusy) {
+				t.Fatalf("child must refuse busy capacity without waiting for parent: %v", err)
+			}
+			select {
+			case <-probe.arrived:
+				t.Fatal("busy child started a runtime")
+			default:
+			}
+			if !sameAgent {
+				// Failure to acquire server capacity must return the child's
+				// agent reservation, even while the parent remains alive.
+				release, err := o.acquireAgentAdmission(ctx, child.AgentID)
+				if err != nil {
+					t.Fatalf("child leaked agent reservation: %v", err)
+				}
+				release()
+			}
+		})
+	}
+}

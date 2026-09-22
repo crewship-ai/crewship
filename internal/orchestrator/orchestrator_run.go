@@ -389,11 +389,11 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 	// Enforce the current serial adapter profile at the common runtime
 	// boundary, including producers not yet migrated to the work ledger.
 	// Wait for the agent BEFORE consuming server execution capacity.
-	releaseAgent, slotErr := o.acquireAgentAdmission(ctx, req.AgentID)
+	releaseAgent, slotErr := o.acquireAgentAdmissionMode(ctx, req.AgentID, req.NoAdmissionWait)
 	if slotErr != nil {
 		return fmt.Errorf("acquire agent admission: %w", slotErr)
 	}
-	releaseServer, slotErr := o.acquireRunSlot(ctx)
+	releaseServer, slotErr := o.acquireServerAdmission(ctx, req.NoAdmissionWait)
 	if slotErr != nil {
 		releaseAgent()
 		return fmt.Errorf("acquire run slot: %w", slotErr)

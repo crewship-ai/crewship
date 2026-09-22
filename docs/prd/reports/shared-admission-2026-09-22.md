@@ -28,6 +28,10 @@ This is evidence of a serial-profile bypass, not T06/T07 acceptance.
   durable recovery still applies only to producers already using it.
 - Existing producer-side busy checks remain. There is no new public flag that
   enables unverified parallel execution.
+- Synchronous peer queries request immediate admission and return HTTP 409 if
+  either the agent or server capacity is occupied. They must not wait for a
+  reservation potentially owned by their waiting parent. This refusal is not
+  the eventual durable parent/child scheduling contract.
 
 ## Verification evidence
 
@@ -42,11 +46,42 @@ reservation remains unavailable while the detached process is alive and is
 released after confirmed termination. Its targeted race run and the serial
 admission test passed ten repetitions together.
 
+`TestRunAgent_SynchronousChildRefusesBusyAdmission` covers both a child asking
+for its parent's agent and a different agent blocked by server capacity. Both
+must return `ErrAdmissionBusy`, launch no child process, and release any partial
+reservation. Ignoring `NoAdmissionWait` made both cases fail on their context
+deadline; the fixed targeted race run passed five repetitions. The peer-query
+request builder test pins the production selection of this mode.
+
+On `6a8228698`, complete race runs of `internal/orchestrator`, `internal/dispatch`,
+`internal/chatbridge` and `internal/pipeline` passed, as did whole-tree `go vet`.
+The subsequent peer-query change also passed whole-tree `go vet`; full-suite
+and final HTTP verification results must be recorded separately.
+
 The transport in these regression tests is substituted. The initial live probe
 used a real Codex process; a live probe of the fixed build must be recorded
 separately before claiming deployed behavior. Test logs and the initial live
 probe are under `/srv/crewship/backups/crewship_2/i7-20260922/` on the test host;
 credentials and webhook secrets are excluded from this report.
+
+### Live fixed-build probe
+
+Dev2 ran `6a8228698c5a9e9fedf63ef9e0a6da6995786695` for the probe. Health returned
+OK; binary VCS stamping and the rebuilt frontend identified this revision.
+`vcs.modified=true` reflected the preserved untracked session files; tracked
+diff was empty.
+
+- Chat `msg_1790080523321962400_87ec1966aa2210b7`: actual exec start
+  12:35:23.884Z, end 12:35:42.732Z, exit 0, running false.
+- Webhook run `cmucnq4co0003153b9f69`: exec start 12:35:44.488Z, end
+  12:35:52.100Z, exit 0, running false.
+- Work `cmucnq4ao000245a4a81a`: observed starting, running, succeeded. The
+  webhook's real exec started 1.756 seconds after the chat's exec ended.
+
+These actual process intervals establish serial execution on the fixed build,
+not just non-overlapping work statuses. Evidence is in the `fixed/` subdirectory.
+The subsequent synchronous-peer-query refusal is a separate change; this live
+probe does not test it.
 
 ## Remaining release work
 

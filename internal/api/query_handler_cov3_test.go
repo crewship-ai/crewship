@@ -162,3 +162,43 @@ func TestQH3_Create_BackupGuard409(t *testing.T) {
 		t.Errorf("body = %q", rr.Body.String())
 	}
 }
+
+func TestQH3_Create_BusyParentReturns409WithoutLaunchingChild(t *testing.T) {
+	h, wsID, crewID, _, targetID, chatID := covQH3Rig(t)
+	h.orch = orchestrator.New(inbandAsgProvider{}, newInbandAsgState(), newTestLogger())
+	ctx, cancel := context.WithCancel(context.Background())
+	ready := make(chan struct{})
+	done := make(chan error, 1)
+	parent := orchestrator.AgentRunRequest{
+		AgentID: targetID, AgentSlug: "qh3-to", CrewID: crewID, CrewSlug: "qh3",
+		WorkspaceID: wsID, ContainerID: "cid-parent", CLIAdapter: "CLAUDE_CODE",
+		RunID: "query-busy-parent", ChatID: chatID, SkipSidecar: true,
+		ExecGate: func(ctx context.Context) error {
+			close(ready)
+			<-ctx.Done()
+			return ctx.Err()
+		},
+	}
+	go func() { done <- h.orch.RunAgent(ctx, parent, nil) }()
+	defer func() { cancel(); <-done }()
+	select {
+	case <-ready:
+	case <-time.After(5 * time.Second):
+		t.Fatal("parent never acquired admission")
+	}
+	requestCtx, requestCancel := context.WithTimeout(context.Background(), time.Second)
+	defer requestCancel()
+	req := httptest.NewRequest("POST", "/api/v1/internal/queries", strings.NewReader(covQH3Body(wsID, crewID, chatID))).WithContext(requestCtx)
+	rr := httptest.NewRecorder()
+	h.Create(rr, req)
+	if rr.Code != http.StatusConflict || !strings.Contains(rr.Body.String(), "execution capacity is busy") {
+		t.Fatalf("busy synchronous query: status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	select {
+	case <-done:
+		// Preserve the cleanup receive if a regression ended the parent.
+		done <- nil
+		t.Fatal("query ended its parent")
+	default:
+	}
+}

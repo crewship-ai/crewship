@@ -278,7 +278,7 @@ See [Agent memory](/guides/agent-memory) for the profiles and conflict vocabular
 |---|---|---|
 | `POST` | `/api/v1/internal/assignments` | Create an assignment from inside a container. |
 | `GET` | `/api/v1/internal/assignments/{assignmentId}` | Fetch assignment status. |
-| `POST` | `/api/v1/internal/queries` | Free-form sub-query (e.g. agent asking another agent). |
+| `POST` | `/api/v1/internal/queries` | Free-form sub-query (e.g. agent asking another agent). Synchronous queries return `409` when the target agent or server execution capacity is busy, rather than waiting for a slot that may belong to the waiting parent. Retry after the active run finishes. |
 | `GET` | `/api/v1/internal/standup` | Fetch the standup digest the agent should read. |
 | `POST` | `/api/v1/internal/escalations` | Open an escalation. |
 | `GET` | `/api/v1/internal/escalations/{escalationId}/wait` | Long-poll for response. |

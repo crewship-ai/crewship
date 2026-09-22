@@ -401,6 +401,13 @@ Question: %s`, body.FromSlug, body.Question)
 		h.logger.Error("peer query execution failed", "error", err, "query_id", convID)
 		h.finishQuery(r.Context(), convID, runID, body.ChatID, body.FromSlug, body.TargetSlug, body.WorkspaceID, body.CrewID, target.ID, "",
 			fmt.Sprintf("execution error: %v", err), startTime, acc)
+		if errors.Is(err, orchestrator.ErrAdmissionBusy) || errors.Is(err, orchestrator.ErrAgentDetachedBusy) {
+			writeJSON(w, http.StatusConflict, map[string]string{
+				"error":    "query target or execution capacity is busy; retry after the active run finishes",
+				"query_id": convID,
+			})
+			return
+		}
 		writeJSON(w, http.StatusInternalServerError, map[string]string{
 			"error":    "query execution failed",
 			"query_id": convID,
@@ -474,7 +481,8 @@ func (h *QueryHandler) buildPeerQueryRequest(
 		MemoryMB:    info.MemoryMB,
 		CPUs:        info.CPUs,
 	})
-	req.RunID = runID // E0 run identity — see the doc comment above.
+	req.RunID = runID          // E0 run identity — see the doc comment above.
+	req.NoAdmissionWait = true // a synchronous parent may own the requested slot
 	req.AgentRole = "AGENT"
 	req.SkipSidecar = true     // Sidecar already running on 9119 in this container
 	req.SkipConvHistory = true // Fresh context for peer queries
