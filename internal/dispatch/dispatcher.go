@@ -773,21 +773,14 @@ func (d *Dispatcher) shutdownAttempt(live *liveAttempt, runDone <-chan error) {
 	// The stop deadline may be exhausted. Persist with a fresh bounded context.
 	ctx, cancel := context.WithTimeout(context.Background(), d.cfg.StopGrace)
 	defer cancel()
-	requested, err := d.store.CancelRequested(ctx, live.assignment.RunID)
-	if err != nil {
-		d.park(ctx, live.assignment, "shutdown could not check user cancellation: "+err.Error())
-		return
-	}
 	if stopErr != nil || !stopped {
 		d.park(ctx, live.assignment, "server shutdown: runtime stop could not be confirmed at "+live.locator)
 		return
 	}
-	if requested {
-		d.finish(ctx, live.assignment, work.StateCancelled, "runtime confirmed stopped after user cancellation during shutdown")
-		return
-	}
-	// Stopping a process is not proof its external effects can be repeated.
-	// Let the runtime classify a completed result; otherwise retain the accepted
+	// Stopping a process is not proof its external effects can be repeated,
+	// nor that a late user cancel beat its completed result. Use the same
+	// result-before-cancel ordering as normal settlement, including when a
+	// capture acknowledgement failed. Otherwise retain the accepted
 	// work for explicit reconciliation, never invent a user cancellation.
 	select {
 	case runErr := <-runDone:

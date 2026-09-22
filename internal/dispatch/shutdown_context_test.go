@@ -198,3 +198,54 @@ func TestSettle_ResultStorageFailureCannotInventFailureOrCancellation(t *testing
 		})
 	}
 }
+
+func TestShutdown_ResultBeforeLateCancellation(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		runErr error
+		state  work.State
+		status string
+	}{
+		{"unconfirmed capture", work.ErrRunResultUnstored, work.StateNeedsReconciliation, ""},
+		{"completed execution", nil, work.StateSucceeded, "COMPLETED"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t)
+			r := h.accept("shutdown-late-cancel")
+			a, err := h.store.Claim(t.Context(), work.ClaimOptions{LeaseOwner: "owner"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			assignment := Assignment{Item: a.Item, RunID: a.RunID, Generation: a.Generation}
+			if err := h.store.Transition(t.Context(), work.TransitionRequest{WorkID: r.WorkID, RunID: a.RunID, Generation: a.Generation, To: work.StateRunning}); err != nil {
+				t.Fatal(err)
+			}
+			if err := h.rt.Run(t.Context(), assignment, func() {}); err != nil {
+				t.Fatal(err)
+			}
+			zero := 0
+			if err := h.store.StageRunResult(t.Context(), r.WorkID, a.RunID, a.Generation, work.RunResult{ExitCode: &zero}); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := h.store.RequestCancel(t.Context(), r.WorkID, "operator", "late stop"); err != nil {
+				t.Fatal(err)
+			}
+			runDone := make(chan error, 1)
+			runDone <- tc.runErr
+			close(runDone)
+			d := New(h.store, h.rt, nil, h.cfg, quiet())
+			d.shutdownAttempt(&liveAttempt{assignment: assignment, locator: h.rt.Locator(assignment), cancel: func() {}}, runDone)
+			it, err := h.store.Get(t.Context(), r.WorkID)
+			if err != nil || it.State != tc.state {
+				t.Fatalf("shutdown state=%v err=%v", it, err)
+			}
+			p, _, err := h.store.RunProjection(t.Context(), a.RunID)
+			if err != nil || p.Status != tc.status {
+				t.Fatalf("shutdown invented outcome: %+v %v", p, err)
+			}
+			if h.rt.starts.Load() != 1 {
+				t.Fatal("shutdown repeated execution")
+			}
+		})
+	}
+}

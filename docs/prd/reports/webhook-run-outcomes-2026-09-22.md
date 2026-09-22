@@ -59,7 +59,9 @@ other pending outcomes continue progressing. A storage failure while capturing
 output parks the work rather than repeating external actions. It cannot be
 interpreted as a failed execution or a cancellation, even when a late stop request
 arrives; a failing-first regression covers a lost capture acknowledgement after
-successful execution. This cannot recover
+successful execution. Shutdown uses the same result-before-cancel ordering;
+review found and regressions reproduced the earlier shutdown bypass for both
+unconfirmed capture and an already successful execution. This cannot recover
 an output never durably captured before a hard process crash.
 
 No new frontend design is included. This fixes the data consumed by existing
