@@ -227,3 +227,9 @@ Full affected sidecar/paymaster/orchestrator packages, targeted API race tests,
 final vet and static frontend export passed. The broad Go run on the earlier e66da9a3b snapshot completed with exit0,
 146 packages OK and0 FAIL; final CI and posted review remain gates. Two-account and real quota
 exhaustion tests are not claimed. P2–P6 remain separate backlog. No merge yet.
+
+### 2026-09-22 — connected-provider sidebar follow-up
+
+The main dev3 screenshot shows the supported-provider catalogue inside a five-row, independently scrolling sidebar viewport. Z.AI was below the visible rows; Gemini and Zen were supported catalogue entries with zero connections. The filter now uses workspace provider facets with positive account counts and relies on the outer sidebar scroll. Add provider keeps the supported catalogue. The facet source is the complete provider-login list, before user filters. Regression coverage verifies connected Z.AI selection, exclusion of unused providers, and an empty workspace.
+
+The GLM test agent remains in the separate `ZAI acceptance` workspace on `https://crewship-dev3.unifylab.cz:8443/chat/spravce-zaloh-glm-test`; the main dev3 database contains the original backup agent. Browser verification on September 22 confirmed the test agent name and Coding Plan credential are visible on the acceptance instance. This source change does not by itself update main dev3. Do not deploy the integration binary against main dev3's newer webhook schema.
