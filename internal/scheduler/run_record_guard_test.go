@@ -46,14 +46,14 @@ func TestTriggerAgent_RunRecordFailurePreventsExecutionAndPreservesReservation(t
 	}
 	var next string
 	var last sql.NullString
-	if err := db.QueryRow(`SELECT schedule_next_run, schedule_last_run FROM agents WHERE id = 'a1'`).Scan(&next, &last); err != nil {
+	if err := db.QueryRowContext(t.Context(), `SELECT schedule_next_run, schedule_last_run FROM agents WHERE id = 'a1'`).Scan(&next, &last); err != nil {
 		t.Fatal(err)
 	}
 	if next != due || last.Valid {
 		t.Fatalf("failed run creation advanced schedule: next=%q last=%v", next, last)
 	}
 	var reserved string
-	if err := db.QueryRow(`SELECT run_id FROM pipeline_run_idempotency WHERE workspace_id = 'ws1' AND pipeline_id = 'a1'`).Scan(&reserved); err != nil {
+	if err := db.QueryRowContext(t.Context(), `SELECT run_id FROM pipeline_run_idempotency WHERE workspace_id = 'ws1' AND pipeline_id = 'a1'`).Scan(&reserved); err != nil {
 		t.Fatal(err)
 	}
 	if len(resolver.createdRuns) != 1 || reserved != resolver.createdRuns[0].RunID {

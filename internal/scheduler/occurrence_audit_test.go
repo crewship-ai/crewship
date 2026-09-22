@@ -35,7 +35,7 @@ func occurrenceAgent() scheduledAgent {
 func idemRowCount(t *testing.T, db *sql.DB, workspace string) int {
 	t.Helper()
 	var n int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM pipeline_run_idempotency WHERE workspace_id = ?`, workspace).Scan(&n); err != nil {
+	if err := db.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM pipeline_run_idempotency WHERE workspace_id = ?`, workspace).Scan(&n); err != nil {
 		t.Fatalf("count idem rows: %v", err)
 	}
 	return n
@@ -44,7 +44,7 @@ func idemRowCount(t *testing.T, db *sql.DB, workspace string) int {
 // agentSchedule reads schedule_last_run / schedule_next_run for the agent.
 func agentSchedule(t *testing.T, db *sql.DB, agentID string) (lastRun, nextRun sql.NullString) {
 	t.Helper()
-	if err := db.QueryRow(`SELECT schedule_last_run, schedule_next_run FROM agents WHERE id = ?`, agentID).
+	if err := db.QueryRowContext(t.Context(), `SELECT schedule_last_run, schedule_next_run FROM agents WHERE id = ?`, agentID).
 		Scan(&lastRun, &nextRun); err != nil {
 		t.Fatalf("read agent schedule: %v", err)
 	}
@@ -149,7 +149,7 @@ func TestOccurrenceAudit_BucketIdentityMatrix(t *testing.T) {
 			if tc.stored.Valid {
 				v = tc.stored.String
 			}
-			if _, err := db.Exec(`UPDATE agents SET schedule_next_run = ? WHERE id = 'a1'`, v); err != nil {
+			if _, err := db.ExecContext(t.Context(), `UPDATE agents SET schedule_next_run = ? WHERE id = 'a1'`, v); err != nil {
 				t.Fatalf("seed schedule_next_run: %v", err)
 			}
 			if got, err := s.occurrenceBucket(ctx, "a1"); err != nil || got != tc.want {
@@ -172,14 +172,14 @@ func fileDB(t *testing.T) (*sql.DB, string) {
 		t.Fatalf("open file db: %v", err)
 	}
 	t.Cleanup(func() { db.Close() })
-	if _, err := db.Exec(`CREATE TABLE agents (
+	if _, err := db.ExecContext(t.Context(), `CREATE TABLE agents (
 		id TEXT PRIMARY KEY, workspace_id TEXT, crew_id TEXT, name TEXT, slug TEXT,
 		agent_role TEXT DEFAULT 'AGENT', deleted_at TEXT, schedule_cron TEXT,
 		schedule_prompt TEXT, schedule_enabled INTEGER DEFAULT 0,
 		schedule_last_run TEXT, schedule_next_run TEXT)`); err != nil {
 		t.Fatalf("create agents: %v", err)
 	}
-	if _, err := db.Exec(`CREATE TABLE pipeline_run_idempotency (
+	if _, err := db.ExecContext(t.Context(), `CREATE TABLE pipeline_run_idempotency (
 		workspace_id TEXT NOT NULL, idempotency_key TEXT NOT NULL, run_id TEXT NOT NULL,
 		pipeline_id TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT (datetime('now','subsec')),
 		expires_at TEXT NOT NULL, PRIMARY KEY (workspace_id, idempotency_key))`); err != nil {
@@ -220,7 +220,7 @@ func TestOccurrenceAudit_ReadError_SQLITE_BUSY_RefusesNewIdentity(t *testing.T) 
 	defer conn.ExecContext(ctx, "ROLLBACK")
 
 	var value sql.NullString
-	err = db.QueryRow(`SELECT schedule_next_run FROM agents WHERE id = 'a1'`).Scan(&value)
+	err = db.QueryRowContext(t.Context(), `SELECT schedule_next_run FROM agents WHERE id = 'a1'`).Scan(&value)
 	var coded interface{ Code() int }
 	if !errors.As(err, &coded) || coded.Code() != 5 {
 		t.Fatalf("expected SQLITE_BUSY, got %v", err)
@@ -267,7 +267,7 @@ func TestOccurrenceAudit_MissingAgentDoesNotManufactureSecondRun(t *testing.T) {
 	// A duplicate tick for the SAME occurrence, whose bucket read errors.
 	setNextRun(t, db, "a1", "2026-07-06T08:00:00Z") // replica/restart still holds 08:00
 	s.nowFn = func() time.Time { return time.Date(2026, 7, 6, 8, 7, 30, 0, time.UTC) }
-	if _, err := db.Exec(`DELETE FROM agents WHERE id = 'a1'`); err != nil {
+	if _, err := db.ExecContext(t.Context(), `DELETE FROM agents WHERE id = 'a1'`); err != nil {
 		t.Fatalf("delete agent row (read-error stand-in): %v", err)
 	}
 	s.triggerAgent(ag)
@@ -299,7 +299,7 @@ func TestOccurrenceAudit_ReserveErrorKeepsOccurrenceUnconsumed(t *testing.T) {
 
 	// The idem store is wired (New saw the table) but the table is gone:
 	// occurrenceBucket reads fine, LookupOrReserve errors.
-	if _, err := db.Exec(`DROP TABLE pipeline_run_idempotency`); err != nil {
+	if _, err := db.ExecContext(t.Context(), `DROP TABLE pipeline_run_idempotency`); err != nil {
 		t.Fatalf("drop idem table: %v", err)
 	}
 

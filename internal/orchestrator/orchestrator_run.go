@@ -259,6 +259,25 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 		})
 	}
 
+	// Synchronous child queries must refuse already occupied capacity before
+	// approval or hooks can block behind their waiting parent. This is only
+	// an early probe: release immediately so human approval holds no slots,
+	// then acquire authoritatively again at the runtime boundary below.
+	if req.NoAdmissionWait {
+		releaseAgent, admissionErr := o.acquireAgentAdmissionMode(ctx, req.AgentID, true)
+		if admissionErr != nil {
+			return fmt.Errorf("check agent admission: %w", admissionErr)
+		}
+		releaseServer, admissionErr := o.acquireServerAdmission(ctx, true)
+		if admissionErr == nil {
+			releaseServer()
+		}
+		releaseAgent()
+		if admissionErr != nil {
+			return fmt.Errorf("check server admission: %w", admissionErr)
+		}
+	}
+
 	// Harbor Master: gate the run before we spend containers/tokens on
 	// something a human should approve. ApprovalMode comes off the
 	// request — ModeNone short-circuits with Approved, ModeSync blocks

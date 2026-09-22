@@ -101,3 +101,19 @@ Dnešní UI kontrola a dependency inventura:
 Regresní logy integrace jsou při práci pod `/tmp/admission-integration-*-20260922.log`;
 před předáním budou archivované u závěrečného protokolu PR. DEV2/DEV3 nebyly
 měněné; původních 17 WIP souborů v hlavním checkoutu zůstává zachovaných.
+
+## Následné nezávislé nálezy
+
+- Review hlavy `848faa5e1` odhalilo, že synchronní peer query může vstoupit
+  do approval/hook ještě před odmítnutím obsazené kapacity. Doplněna časná
+  nezablokující kontrola agenta i serveru; rezervace ihned uvolní a autoritativní
+  získání zůstává před vytvořením procesu. Nový test před opravou selhal v obou
+  případech na zavolání approval gate. DB operace v scheduler testech mají kontext.
+- Rozšířená zkouška zrušení běžícího webhooku odhalila rozpor: work je cancelled,
+  journal běhu je failed. Reprodukováno také na čistém main `c2f8fa054`
+  (51,813 s, jeden run.failed, žádný run.cancelled). Není to nová regrese této
+  integrace; oprava před vytvořením procesu ji neřeší. Sledováno jako #2652.
+  R5/R6 proto nelze vydávat za bezvýhradně uzavřené napříč všemi producenty.
+- GitHub automaticky označil stacked #2648 za MERGED do jeho základní větve
+  při pushi integračního `848faa5e1` v 16:43:07 UTC. To není merge do main ani
+  nasazení; obojí stále závisí na schválení a merge #2646.

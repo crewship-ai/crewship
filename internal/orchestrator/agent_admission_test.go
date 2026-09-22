@@ -126,3 +126,40 @@ func TestRunAgent_SynchronousChildRefusesBusyAdmission(t *testing.T) {
 		})
 	}
 }
+
+// A synchronous query must refuse occupied capacity before approval or hooks
+// can block, enqueue a request, or perform side effects.
+func TestRunAgent_NoWaitBusyPrecedesApprovalAndHooks(t *testing.T) {
+	for _, busy := range []string{"agent", "server"} {
+		t.Run(busy, func(t *testing.T) {
+			o := New(&concProbeContainer{}, newLockedMemState(), covQuietLogger(), WithMaxConcurrentRuns(1))
+			req := covRunReq()
+			req.NoAdmissionWait = true
+			req.ApprovalMode = "sync"
+			gate := &covGate{err: errors.New("approval must not be called")}
+			hooks := &covHooks{failOn: "pre_agent_start"}
+			o.SetApprovalGate(gate)
+			o.SetHooksDispatcher(hooks)
+			var release func()
+			var err error
+			if busy == "agent" {
+				release, err = o.acquireAgentAdmission(t.Context(), req.AgentID)
+			} else {
+				release, err = o.acquireServerAdmission(t.Context(), true)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer release()
+			if err := o.RunAgent(t.Context(), req, nil); !errors.Is(err, ErrAdmissionBusy) {
+				t.Fatalf("busy query reached a blocking gate: %v", err)
+			}
+			if len(gate.got) != 0 {
+				t.Fatal("busy query requested approval")
+			}
+			if len(hooks.events) != 0 {
+				t.Fatalf("busy query dispatched hooks: %v", hooks.events)
+			}
+		})
+	}
+}
