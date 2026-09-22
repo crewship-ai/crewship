@@ -56,7 +56,10 @@ Historical incorrect terminal events are not rewritten. Legacy finished-run
 retries acknowledge their existing event. A newly authoritative outcome conflicting
 with an existing terminal event returns 409 and stays pending for investigation;
 other pending outcomes continue progressing. A storage failure while capturing
-output parks the work rather than repeating external actions. This cannot recover
+output parks the work rather than repeating external actions. It cannot be
+interpreted as a failed execution or a cancellation, even when a late stop request
+arrives; a failing-first regression covers a lost capture acknowledgement after
+successful execution. This cannot recover
 an output never durably captured before a hard process crash.
 
 No new frontend design is included. This fixes the data consumed by existing

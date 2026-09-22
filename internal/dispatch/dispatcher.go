@@ -398,6 +398,14 @@ func (d *Dispatcher) confirmByProbe(ctx context.Context, live *liveAttempt, conf
 func (d *Dispatcher) settle(ctx context.Context, live *liveAttempt, runErr error) {
 	a := live.assignment
 
+	// A result-persistence error says nothing about execution success. In
+	// particular a late cancel must not turn a completed action into CANCELLED
+	// merely because its durable capture acknowledgement was lost.
+	if errors.Is(runErr, work.ErrRunResultUnstored) {
+		d.park(ctx, a, "execution result requires reconciliation: "+runErr.Error())
+		return
+	}
+
 	// A cancel that was asked for is only a cancellation once the runtime is
 	// confirmed gone. Anything less is reconciliation — §4 is explicit that an
 	// unstoppable or unclear process is not a cancelled one.

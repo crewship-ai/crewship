@@ -4,10 +4,15 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/crewship-ai/crewship/internal/tsformat"
 )
+
+// ErrRunResultUnstored means execution returned but its result could not be
+// acknowledged durably. It is not evidence of execution failure or cancellation.
+var ErrRunResultUnstored = errors.New("run result persistence unconfirmed")
 
 // RunResult is captured output, not an authority to mark execution terminal.
 // Its final status comes only from the fenced dispatcher transition.

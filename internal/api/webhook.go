@@ -1100,7 +1100,7 @@ func (h *WebhookHandler) runWebhookAgent(
 					exitCodePtr = nil
 				}
 				if storeErr := recorder.RecordResult(settleCtx, work.RunResult{ExitCode: exitCodePtr, ErrorMessage: errMsg, Metadata: completedMeta}); storeErr != nil {
-					return fmt.Errorf("webhook: preserve result for settlement: %w", storeErr)
+					return fmt.Errorf("webhook: preserve result for settlement: %w: %w", work.ErrRunResultUnstored, storeErr)
 				}
 				return err
 			}

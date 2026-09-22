@@ -1306,3 +1306,24 @@ func TestVerticalServer_CancelUsesLaunchLocationWithoutHomeRegistry(t *testing.T
 		t.Fatal("production probe did not stop the launched runtime")
 	}
 }
+
+func TestVerticalServer_ResultCaptureFailureParksWithoutInventedTerminal(t *testing.T) {
+	rig := newVerticalRig(t)
+	if _, err := rig.db.ExecContext(t.Context(), `CREATE TRIGGER reject_run_capture BEFORE UPDATE OF run_result_json ON work_attempts BEGIN SELECT RAISE(ABORT,'injected capture failure'); END`); err != nil {
+		t.Fatal(err)
+	}
+	rig.startDispatcher()
+	rec := rig.deliver(verticalBody)
+	rig.waitForState(rec.WorkID, work.StateNeedsReconciliation)
+	runID := rig.attemptRunID(rec.WorkID)
+	p, owned, err := rig.store.RunProjection(t.Context(), runID)
+	if err != nil || !owned || p.Ready || p.Status != "" {
+		t.Fatalf("capture failure invented outcome: %+v %v", p, err)
+	}
+	if n := rig.count(`SELECT COUNT(*) FROM journal_entries WHERE trace_id=? AND entry_type IN ('run.completed','run.failed','run.cancelled')`, runID); n != 0 {
+		t.Fatalf("capture failure emitted %d terminal events", n)
+	}
+	if got := rig.proc.runsStarted(); len(got) != 1 {
+		t.Fatalf("capture failure restarted action: %v", got)
+	}
+}

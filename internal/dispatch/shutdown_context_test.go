@@ -163,3 +163,38 @@ func TestSettle_CompletionThatBeatsACancelIsRecordedAsSucceeded(t *testing.T) {
 	}
 
 }
+
+func TestSettle_ResultStorageFailureCannotInventFailureOrCancellation(t *testing.T) {
+	for _, cancelRequested := range []bool{false, true} {
+		t.Run(map[bool]string{false: "no cancel", true: "late cancel"}[cancelRequested], func(t *testing.T) {
+			h := newHarness(t)
+			r := h.accept("result-storage-uncertain")
+			a, err := h.store.Claim(t.Context(), work.ClaimOptions{LeaseOwner: "owner"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			// Model a successful capture whose acknowledgement was lost. The runtime
+			// returned successfully before storage failed; neither FAILED nor CANCELLED
+			// may be inferred from that storage error, even with a late stop request.
+			zero := 0
+			if err := h.store.StageRunResult(t.Context(), r.WorkID, a.RunID, a.Generation, work.RunResult{ExitCode: &zero}); err != nil {
+				t.Fatal(err)
+			}
+			if cancelRequested {
+				if _, err := h.store.RequestCancel(t.Context(), r.WorkID, "operator", "late stop"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			d := New(h.store, h.rt, nil, h.cfg, quiet())
+			d.settle(t.Context(), &liveAttempt{assignment: Assignment{Item: a.Item, RunID: a.RunID, Generation: a.Generation}}, work.ErrRunResultUnstored)
+			it, err := h.store.Get(t.Context(), r.WorkID)
+			if err != nil || it.State != work.StateNeedsReconciliation {
+				t.Fatalf("state=%v err=%v", it, err)
+			}
+			p, _, err := h.store.RunProjection(t.Context(), a.RunID)
+			if err != nil || p.Ready || p.Status != "" {
+				t.Fatalf("storage failure invented execution outcome: %+v %v", p, err)
+			}
+		})
+	}
+}
