@@ -195,10 +195,38 @@ func TestVerticalServer_CancelBeforeTheGateRefusesTheCreation(t *testing.T) {
 	if phase := attemptPhase(t, rig, rec.WorkID); phase != "starting" {
 		t.Fatalf("attempt phase = %q, want starting — no creation was ever requested", phase)
 	}
+	assertUncreatedRunCancelled(t, rig, rig.attemptRunID(rec.WorkID))
 	time.Sleep(3 * time.Second)
 	if got := rig.proc.runsStarted(); len(got) != 0 {
 		t.Fatalf("%d agent runtimes started later for cancelled work", len(got))
 	}
+}
+
+func assertUncreatedRunCancelled(t *testing.T, rig *verticalRig, runID string) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if rig.count(`SELECT COUNT(*) FROM journal_entries WHERE trace_id = ? AND entry_type = 'run.cancelled'`, runID) == 1 {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("work was cancelled but run %s has no durable run.cancelled event", runID)
+}
+
+func TestVerticalServer_CancelBeforeCreationClosesRunRecordAfterContextCancellation(t *testing.T) {
+	rig, runner, _ := newPreflightRig(t, true)
+	rig.startDispatcher()
+	rec := rig.deliver(verticalBody)
+	awaitSignal(t, runner.entered, "the launch preflight")
+	if got := rig.cancelOverHTTP(t, rec.WorkID); got != string(work.CancelOutcomeRequested) {
+		t.Fatalf("cancel outcome = %q, want requested", got)
+	}
+	rig.waitForState(rec.WorkID, work.StateCancelled)
+	if got := rig.proc.runsStarted(); len(got) != 0 {
+		t.Fatalf("%d runtimes created after pre-creation cancel", len(got))
+	}
+	assertUncreatedRunCancelled(t, rig, rig.attemptRunID(rec.WorkID))
 }
 
 // Shutdown before the gate: nothing was requested, the gate refuses, and the

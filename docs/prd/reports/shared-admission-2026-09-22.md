@@ -118,6 +118,30 @@ full suite. The PR remains a draft until final checks/review are complete.
 
 ## Remaining release work
 
+### Follow-up: the run projection also needs settlement
+
+Read-only verification of the live cancelled work's run
+`cmuco6qyq000381ba9b11` found `status=RUNNING`, `finished_at=null` despite the
+correctly cancelled work item. The previous live check covered work state and
+the unaffected parent, but did not assert this run projection. The wrapper
+called `UpdateRun` with its already-cancelled execution context, so the IPC
+write could not reach the server.
+
+The fix gives the terminal write a separate 10-second deadline while preserving
+context values. `CANCELLED` is used only when the launch gate proves a stop
+preceded any requested or observed process; cancellation of a context alone is
+insufficient. Such an uncreated process has no exit code. Detached live runs
+still return before any terminal update.
+
+The new HTTP/real-SQLite regression
+`TestVerticalServer_CancelBeforeCreationClosesRunRecordAfterContextCancellation`
+failed before the fix with no durable run.cancelled event. The fixed targeted
+API race run (70.631s) also covered cancellation at the gate, shutdown before
+the gate, and uncreated-runtime probes. Whole-tree go vet passed. These are
+targeted checks, not the final full suite for this additional production fix.
+
+### Still outstanding
+
 #2643 remains open: migrate all producer queues to one durable claim/retry/
 recovery owner, retain dispatch-time authorization, implement ordered durable
 chat mailbox and parent/child admission without slot deadlocks, enforce R7

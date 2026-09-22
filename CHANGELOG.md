@@ -10,6 +10,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 ## [Unreleased]
 
 ### Fixed
+- Webhook settlement writes the terminal run record with a bounded context independent of execution cancellation. A stop proven to precede process creation records `CANCELLED` without an invented exit code, instead of leaving a `RUNNING` record behind an already-cancelled work item. (#2643)
 - **Agents return to online after simultaneous detached-run completions.** The last-hold decision now retires completed peers atomically, so two finishing runs cannot both skip the final presence update. (#2626)
 - All `RunAgent` callers now share the current per-agent serial runtime limit, including chat and webhook runs with different sessions. Waiting for an agent does not consume server execution capacity, cancellation abandons the wait, and unconfirmed detached processes retain both reservations until confirmed stopped. This process-local fence does not replace durable producer admission or the chat mailbox. (#2643)
 - Synchronous peer queries return `409` when agent or server execution capacity is occupied, instead of waiting for a reservation that may be held by their waiting parent. (#2643)
