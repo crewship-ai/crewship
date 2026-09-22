@@ -32,6 +32,7 @@ import { foreachBody, routineHooks, stepDisplayName, type Step } from "@/lib/rou
 import { routineFilesFromDefinition, routineFileStatus, type RoutineFile } from "@/lib/routine-files"
 import { useWorkspaceAgentDirectory } from "@/hooks/use-workspace-agent-directory"
 import { approvalSteps } from "@/lib/routine-approval-steps"
+import { useUnsavedNavigationGuard } from "@/hooks/use-unsaved-navigation-guard"
 import { RoutineDecisionFormBuilder } from "./routine-decision-form-builder"
 import { StepFileChip } from "./routine-step-spine"
 import type { RoutineDetail } from "./routines-detail-panel"
@@ -147,6 +148,7 @@ export function RoutineEditDialog({ open, onOpenChange, workspaceId, routine, fi
   const published = (routine.head_version ?? 0) > 0
   const appearanceDirty = !published && !same(appearance, { icon: resolveRoutineIcon(routine), color: resolveRoutineColor(routine) })
   const dirty = identityDirty || definitionDirty || appearanceDirty
+  useUnsavedNavigationGuard(open && dirty, "Leave without saving? Your unsaved changes will be lost. Any saved draft stays available.")
   const saveAsDraft = definitionDirty || (!published && dirty)
   const nextRevision = (envelope?.revision ?? routine.draft?.revision ?? 0) + 1
   const update = (patch: (next: Record<string, unknown>) => void) =>
@@ -277,6 +279,7 @@ export function RoutineEditDialog({ open, onOpenChange, workspaceId, routine, fi
       size="lg"
       dirty={dirty}
       discardLabel="your changes"
+      discardDescription="Only your unsaved changes will be discarded. Any saved draft stays available."
       onSubmit={() => void save()}
       ariaLabel={`Edit ${routine.name || slug}`}
     >

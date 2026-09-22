@@ -10,9 +10,16 @@
   z #2638 + autorování rozhodovacích formulářů z #2640. Zachovává jejich původní
   commity. Po jeho sloučení budou tyto hlavy obsažené v main; zdrojová PR
   není třeba zavírat jako neprovedenou práci nebo jejich změny kopírovat.
-- Produkční strom integrace odpovídá již ověřenému `d4dfae3b7`; rozdíl vůči
+- Při spojení produkční strom integrace odpovídal ověřenému `d4dfae3b7`; rozdíl vůči
   původní integrační větvi při spojení tvořily pouze dva dokumenty z #2631.
   Nová hlava má přesto vlastní CI a musí mít skutečné review před merge.
+- Následně byl nalezen a opraven #2644: současný Edit při reloadu bez
+  varování ztratil neuložený text. Browserový negativní důkaz i tři negativní
+  komponentové regrese jsou zaznamenané; dialog nyní registruje existující
+  ochranu navigace pouze při `open && dirty`. Zahození jasně zachovává
+  serverový draft. Nové cílené kontroly mají 392 úspěšných testů; tato změna
+  není pokrytá pouhou shodou se včerejším integračním stromem a vyžaduje
+  nový build/browserové ověření a finální CI.
 - Původní finální CI #2631 selhalo při získávání BuildKitu: spojení na
   `auth.docker.io` bylo resetované před buildem aplikace. Neúspěšné joby byly
   zopakovány; nejde o doloženou chybu produktových testů. Další integrační

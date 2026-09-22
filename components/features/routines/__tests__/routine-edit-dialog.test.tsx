@@ -284,3 +284,56 @@ it("routes unsupported forms to real editing instructions without discarding the
   expect(screen.getByText(/crewship routine draft get invoice-intake/)).toBeVisible()
   expect(screen.getByRole("button", { name: "Save" })).toBeDisabled()
 })
+
+it.each([false, true])("guards unsaved edits without treating an existing draft as dirty (%s)", async (existingDraft) => {
+  mockServer(existingDraft)
+  const view = render(<RoutineEditDialog open onOpenChange={() => {}} workspaceId="ws" routine={routine} onChanged={() => {}} />)
+  await waitFor(() => expect(screen.queryByText(/Loading the current draft/)).toBeNull())
+  const clean = new Event("beforeunload", { cancelable: true })
+  window.dispatchEvent(clean)
+  expect(clean.defaultPrevented).toBe(false)
+  fireEvent.change(screen.getByLabelText(/^Name/), { target: { value: "Unsaved invoice name" } })
+  const dirty = new Event("beforeunload", { cancelable: true })
+  window.dispatchEvent(dirty)
+  expect(dirty.defaultPrevented).toBe(true)
+  view.rerender(<RoutineEditDialog open={false} onOpenChange={() => {}} workspaceId="ws" routine={routine} onChanged={() => {}} />)
+  const closed = new Event("beforeunload", { cancelable: true })
+  window.dispatchEvent(closed)
+  expect(closed.defaultPrevented).toBe(false)
+})
+
+it("retains input when application navigation is declined", async () => {
+  mockServer()
+  const previousConfirm = window.confirm
+  const confirm = vi.fn(() => false)
+  window.confirm = confirm
+  const anchor = document.createElement("a")
+  anchor.href = "/activity"
+  document.body.append(anchor)
+  try {
+    render(<RoutineEditDialog open onOpenChange={() => {}} workspaceId="ws" routine={routine} onChanged={() => {}} />)
+    await waitFor(() => expect(screen.queryByText(/Loading the current draft/)).toBeNull())
+    fireEvent.change(screen.getByLabelText(/^Name/), { target: { value: "Retain this name" } })
+    const click = new MouseEvent("click", { bubbles: true, cancelable: true, button: 0 })
+    anchor.dispatchEvent(click)
+    expect(click.defaultPrevented).toBe(true)
+    expect(confirm).toHaveBeenCalledOnce()
+    expect(screen.getByLabelText(/^Name/)).toHaveValue("Retain this name")
+  } finally {
+    anchor.remove()
+    window.confirm = previousConfirm
+  }
+})
+
+it("discards only local edits while preserving a saved server draft", async () => {
+  mockServer(true)
+  const close = vi.fn()
+  render(<RoutineEditDialog open onOpenChange={close} workspaceId="ws" routine={routine} onChanged={() => {}} />)
+  await waitFor(() => expect(screen.queryByText(/Loading the current draft/)).toBeNull())
+  fireEvent.change(screen.getByLabelText(/^Name/), { target: { value: "Discard local name" } })
+  fireEvent.click(screen.getByRole("button", { name: "Cancel" }))
+  expect(screen.getByText("Only your unsaved changes will be discarded. Any saved draft stays available.")).toBeVisible()
+  fireEvent.click(screen.getByRole("button", { name: "Discard" }))
+  expect(close).toHaveBeenCalledWith(false)
+  expect(h.fetcher.mock.calls.some(([, init]) => init?.method && init.method !== "GET")).toBe(false)
+})
