@@ -26,6 +26,14 @@ func TestDetachedHold_HoldCleansRunHome(t *testing.T) {
 	if o.secretsHoldCount(req.ContainerID, req.AgentSlug, req.RunID) != 1 {
 		t.Fatal("live runtime lost its secret hold")
 	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	if release, err := o.acquireAgentAdmission(ctx, req.AgentID); err == nil {
+		release()
+		t.Fatal("detached live runtime lost its agent reservation")
+	} else if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatal(err)
+	}
 	c.setTmuxAlive("ABSENT")
 	deadline := time.Now().Add(time.Second)
 	for time.Now().Before(deadline) {
@@ -37,6 +45,13 @@ func TestDetachedHold_HoldCleansRunHome(t *testing.T) {
 	if _, held := o.detachedHoldRunID(req.AgentID); held {
 		t.Fatal("hold did not settle")
 	}
+	ctx, cancel = context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	release, err := o.acquireAgentAdmission(ctx, req.AgentID)
+	if err != nil {
+		t.Fatalf("confirmed termination did not release agent reservation: %v", err)
+	}
+	release()
 	if _, _, found := runHomeLocation(req.RunID); found {
 		t.Fatal("ended detached run remains in credential-refresh HOME registry")
 	}
