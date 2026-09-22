@@ -59,7 +59,7 @@ export function RoutineWebhooksTab({ workspaceId, pipelineId, slug }: Props) {
   }
 
   const [formOpen, setFormOpen] = useState(false)
-  const [profile, setProfile] = useState<"crewship" | "github">("crewship")
+  const [profile, setProfile] = useState<"crewship" | "github" | "unsigned">("crewship")
   const [name, setName] = useState("")
   const [signingSecret, setSigningSecret] = useState("")
   const [rateLimit, setRateLimit] = useState(60)
@@ -132,7 +132,7 @@ export function RoutineWebhooksTab({ workspaceId, pipelineId, slug }: Props) {
           <EmptyState
             icon={Webhook}
             title="No webhooks yet"
-            description="Create a webhook endpoint that triggers this routine on HTTP POST. Every endpoint is HMAC-signed: supply a secret or one is generated for you, and it is shown once at creation."
+            description="Create a webhook endpoint that triggers this routine on HTTP POST. Endpoints authenticate: unlike profile selection, an HMAC-signed profile is mandatory, so supply a secret or one is generated for you; it is shown once at creation. Choose the Secret URL profile for senders who cannot sign."
             action={
               <Button
                 size="sm"
@@ -187,7 +187,7 @@ export function RoutineWebhooksTab({ workspaceId, pipelineId, slug }: Props) {
                       <Pill tone="success">Signing configured</Pill>
                     )}
                   </div>
-                  <p className="text-xs text-muted-foreground">{w.ingress_profile === "github" ? "GitHub pull requests" : "Crewship signature"} · Receiving URL shown once when created</p>
+                  <p className="text-xs text-muted-foreground">{w.ingress_profile === "github" ? "GitHub pull requests" : w.ingress_profile === "unsigned" ? "Secret URL (bearer token, no HMAC)" : "Crewship signature"} · Receiving URL shown once when created</p>
                   <div className="font-mono text-[12px] text-muted-foreground">
                     Endpoint <span className="text-foreground/85">{w.id}</span>
                   </div>
@@ -264,11 +264,20 @@ export function RoutineWebhooksTab({ workspaceId, pipelineId, slug }: Props) {
                   whether there is one. */}
               <div className="mb-3">
                 <FieldLabel>Sender</FieldLabel>
-                <Select value={profile} onValueChange={value=>setProfile(value as "crewship" | "github")}>
+                <Select value={profile} onValueChange={value=>setProfile(value as "crewship" | "github" | "unsigned")}>
                   <SelectTrigger aria-label="Webhook sender" className="mt-1.5 w-full"><SelectValue/></SelectTrigger>
-                  <SelectContent><SelectItem value="crewship">Crewship signature</SelectItem><SelectItem value="github">GitHub pull requests</SelectItem></SelectContent>
+                  <SelectContent><SelectItem value="crewship">Crewship signature</SelectItem><SelectItem value="github">GitHub pull requests</SelectItem><SelectItem value="unsigned">Secret URL (no HMAC)</SelectItem></SelectContent>
                 </Select>
               </div>
+              {profile === "unsigned" ? (
+                <>
+                  <p className="mt-1.5 text-[11px] text-muted-foreground">
+                    No HMAC header is expected. The 256-bit random token in the receiving URL is the whole credential —
+                    keep it secret; anyone with the URL can fire the routine. Rotate or revoke it by recreating the endpoint.
+                  </p>
+                </>
+              ) : (
+              <>
               <FieldLabel>Signing secret</FieldLabel>
               <Input
                 type="password"
@@ -282,6 +291,8 @@ export function RoutineWebhooksTab({ workspaceId, pipelineId, slug }: Props) {
                 <span className="font-mono">{profile === "github" ? "X-Hub-Signature-256: sha256=<hmac>" : "X-Crewship-Signature: sha256=<hmac>"}</span>, and a
                 generated secret is shown once when the webhook is created.
               </p>
+              </>
+              )}
             </div>
             <div>
               <FieldLabel>Rate limit per minute</FieldLabel>

@@ -8028,7 +8028,8 @@
             "default": "crewship",
             "enum": [
               "crewship",
-              "github"
+              "github",
+              "unsigned"
             ],
             "type": "string"
           },
@@ -14382,7 +14383,8 @@
             "ingress_profile": {
               "enum": [
                 "crewship",
-                "github"
+                "github",
+                "unsigned"
               ],
               "type": "string"
             },
@@ -118408,7 +118410,8 @@
                     "ingress_profile": {
                       "enum": [
                         "crewship",
-                        "github"
+                        "github",
+                        "unsigned"
                       ],
                       "type": "string"
                     },
@@ -118484,7 +118487,8 @@
                     "ingress_profile": {
                       "enum": [
                         "crewship",
-                        "github"
+                        "github",
+                        "unsigned"
                       ],
                       "type": "string"
                     },
@@ -118885,7 +118889,8 @@
                     "ingress_profile": {
                       "enum": [
                         "crewship",
-                        "github"
+                        "github",
+                        "unsigned"
                       ],
                       "type": "string"
                     },
