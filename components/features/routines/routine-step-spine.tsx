@@ -563,6 +563,8 @@ function SpineRow({
   const chips = stepChips(step, layout.nameOf)
   const stored = record?.lookup(stepId)
   const execution = stored?.execution
+  const executionStatus = execution?.latest.status.toLowerCase()
+  const waitingForDecision = executionStatus === "waiting" || executionStatus === "paused"
   const spans = record?.subSpans ? mapSubSpans(record.subSpans[stepId]) : []
   const performer =
     step.type === "agent_run"
@@ -668,7 +670,15 @@ function SpineRow({
       </summary>
       <div className="mt-3 space-y-3 md:ml-[48px]">
         {execution?.error && (
-          <p role="alert" className="whitespace-pre-wrap break-words rounded-lg border border-destructive/20 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+          <p
+            role={waitingForDecision ? "status" : "alert"}
+            className={cn(
+              "whitespace-pre-wrap break-words rounded-lg border px-3 py-2 text-xs",
+              waitingForDecision
+                ? "border-warn/20 bg-warn/5 text-warn"
+                : "border-destructive/20 bg-destructive/5 text-destructive",
+            )}
+          >
             {execution.error}
           </p>
         )}
