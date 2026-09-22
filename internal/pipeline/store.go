@@ -640,11 +640,11 @@ func (s *Store) List(ctx context.Context, f ListFilters) ([]*Pipeline, error) {
 	var orderBy string
 	switch f.OrderBy {
 	case OrderByRecent:
-		orderBy = "ORDER BY COALESCE(last_invoked_at, created_at) DESC, name ASC"
+		orderBy = "ORDER BY COALESCE(last_invoked_at, created_at) DESC, name ASC, id ASC"
 	case OrderByName:
-		orderBy = "ORDER BY name ASC"
+		orderBy = "ORDER BY name ASC, id ASC"
 	default:
-		orderBy = "ORDER BY invocation_count DESC, name ASC"
+		orderBy = "ORDER BY invocation_count DESC, name ASC, id ASC"
 	}
 
 	limit := f.Limit
@@ -657,6 +657,9 @@ SELECT %s FROM pipelines
 WHERE %s
 %s
 LIMIT %d`, pipelineColumns, strings.Join(conds, " AND "), orderBy, limit)
+	if f.Offset > 0 {
+		q += fmt.Sprintf(" OFFSET %d", f.Offset)
+	}
 
 	rows, err := s.db.QueryContext(ctx, q, args...)
 	if err != nil {

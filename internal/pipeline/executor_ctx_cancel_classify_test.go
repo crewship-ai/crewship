@@ -363,12 +363,14 @@ func TestClassify_RunDeadlineExceededStaysFailed(t *testing.T) {
 // outcome, the fingerprint, the notifier, the hook and the emitted entry must
 // all describe the same event.
 func TestClassify_CancelledRunSuppressesFailureMachinery(t *testing.T) {
-	runner := runnerFunc(func(ctx context.Context, _ AgentStepRequest) (AgentStepResult, error) {
-		<-ctx.Done()
-		return AgentStepResult{}, ctx.Err()
-	})
 	ctx, cancel := context.WithCancel(context.Background())
-	go func() { time.Sleep(150 * time.Millisecond); cancel() }()
+	defer cancel()
+	runner := runnerFunc(func(stepCtx context.Context, _ AgentStepRequest) (AgentStepResult, error) {
+		// Cancel after execution starts, never while the fixture creates its run row.
+		cancel()
+		<-stepCtx.Done()
+		return AgentStepResult{}, stepCtx.Err()
+	})
 	got := runToTerminal(t, "classify-cancelled",
 		failingStepDSL("classify-cancelled", `{"id":"s1","type":"agent_run","agent_slug":"agent_lead","prompt":"go"}`),
 		runner, ctx)

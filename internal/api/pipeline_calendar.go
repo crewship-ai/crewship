@@ -37,6 +37,16 @@ func (h *PipelineHandler) RoutineCalendar(w http.ResponseWriter, r *http.Request
 		replyError(w, 500, "load schedules")
 		return
 	}
+	ids := make([]string, 0, len(schedules))
+	for _, s := range schedules {
+		ids = append(ids, s.TargetPipelineID)
+	}
+	projections, err := loadRoutineProjections(r.Context(), h.db, ws, ids)
+	if err != nil {
+		h.logger.Error("project calendar schedules", "error", err)
+		replyError(w, 500, "load schedule routines")
+		return
+	}
 	now := time.Now()
 	from := start.Add(-time.Second)
 	if from.Before(now) {
@@ -46,8 +56,8 @@ func (h *PipelineHandler) RoutineCalendar(w http.ResponseWriter, r *http.Request
 		if !s.Enabled {
 			continue
 		}
-		p, err := h.store.GetByID(r.Context(), s.TargetPipelineID)
-		if err != nil || p.Status == "disabled" || p.Status == "proposed" {
+		p, ok := projections[s.TargetPipelineID]
+		if !ok || p.Status == "disabled" || p.Status == "proposed" {
 			continue
 		}
 		inputs, err := planPresetInputs(s.InputsJSON)

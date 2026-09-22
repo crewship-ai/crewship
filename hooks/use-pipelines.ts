@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { useRealtimeEvent } from "@/hooks/use-realtime"
 import { apiFetch } from "@/lib/api-fetch"
+import { fetchAllRoutinePages } from "@/lib/routine-list"
 
 // Pipeline mirrors the wire shape returned by GET
 // /api/v1/workspaces/{ws}/pipelines (list endpoint, no definition).
@@ -104,25 +105,15 @@ export function usePipelines(workspaceId: string | null | undefined) {
     setLoading(true)
     setError(null)
     try {
-      const res = await apiFetch(`/api/v1/workspaces/${workspaceId}/pipelines`, {
-        signal: controller.signal,
-      })
+      const data = await fetchAllRoutinePages<Pipeline>(
+        `/api/v1/workspaces/${workspaceId}/pipelines`,
+        controller.signal,
+      )
       if (controller.signal.aborted) return
-      if (!res.ok) {
-        // 4xx/5xx — keep prior list rather than wiping it; just
-        // surface the error in case the caller wants to render a
-        // banner. Wiping on every transient error makes the graph
-        // flicker.
-        setError(`pipelines list: ${res.status}`)
-        setLoading(false)
-        return
-      }
-      const data: Pipeline[] = await res.json()
-      if (controller.signal.aborted) return
-      setPipelines(Array.isArray(data) ? data : [])
+      setPipelines(data)
     } catch (e) {
       if (controller.signal.aborted) return
-      setError(e instanceof Error ? e.message : String(e))
+      setError(e instanceof Error ? e.message.replace(/^routine list:/, "pipelines list:") : String(e))
     } finally {
       if (!controller.signal.aborted) setLoading(false)
     }

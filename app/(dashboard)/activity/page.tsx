@@ -4,7 +4,7 @@ import { Suspense } from "react"
 
 import { Skeleton } from "@/components/ui/skeleton"
 import { useWorkspace } from "@/hooks/use-workspace"
-import { ActivityStreamView } from "@/components/features/activity-stream/activity-stream-view"
+import { ActivityWorkspace } from "@/components/features/activity-stream/activity-workspace"
 
 // /activity — the activity stream.
 //
@@ -42,7 +42,7 @@ export default function ActivityPage() {
 
   return (
     <Suspense fallback={null}>
-      <ActivityStreamView workspaceId={workspaceId} />
+      <ActivityWorkspace key={workspaceId} workspaceId={workspaceId} />
     </Suspense>
   )
 }

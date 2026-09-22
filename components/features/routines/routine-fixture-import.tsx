@@ -59,14 +59,14 @@ export function RoutineFixtureImport({
       <label className="block text-sm font-medium" htmlFor="fixture-source-run">
         Use captured run data
       </label>
-      <div className="flex gap-2">
+      <div className="flex flex-col gap-2 sm:flex-row">
         <input
           id="fixture-source-run"
           value={runId}
           disabled={loading || disabled}
           onChange={(e) => setRunId(e.target.value)}
           placeholder="Run ID"
-          className="min-w-0 flex-1 rounded-md border bg-card p-2 text-sm"
+          className="min-w-0 flex-1 rounded-md border bg-card p-2 text-sm coarse:min-h-12"
         />
         <Button
           type="button"
