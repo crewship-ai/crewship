@@ -44,6 +44,9 @@ const preflightExecTimeout = 30 * time.Second
 // and released capacity while the CLI was still working.
 var ErrDetachedStillRunning = errors.New("orchestrator: exec detached and still running")
 
+// ErrDetachedExecStopped is terminal: the process was stopped, but its exit result is unknown.
+var ErrDetachedExecStopped = errors.New("orchestrator: detached exec stopped after the monitoring budget")
+
 // awaitExecTerminal inspects an exec whose stream has ended and, when the
 // process is still alive, keeps inspecting until it terminates (#2626).
 //
@@ -1090,6 +1093,9 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 			} else {
 				slotTransferredToHold = true
 			}
+		}
+		if stopErr == nil && stopped {
+			return fmt.Errorf("%w: exec %s", ErrDetachedExecStopped, result.ExecID)
 		}
 		return fmt.Errorf("%w: exec %s still running after %s", ErrDetachedStillRunning, result.ExecID, o.detachedWaitBudget)
 	}

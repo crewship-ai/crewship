@@ -147,3 +147,33 @@ Kombinované testy, negativní důkazy a test s frontendovými závislostmi:
 `/srv/crewship/backups/crewship_1/routines-combined-20260922/`.
 Předchozí nasazení `6a236506f` má vlastní nezměněný adresář
 `routines-public-closeout-20260922/`; není označené za aktuální deploy.
+
+## Doplnění po nezávislém review (22. září, 14:36 UTC)
+
+CodeRabbit skutečně dokončil review headu `21f3433df` (78 souborů) a vrátil
+šest nálezů. Nejde již o rate-limited zelený status. Regrese potvrdily:
+
+- Potvrzeně zastavený detached proces vracel stále nonterminal sentinel.
+  Samostatná terminální chyba teď vede do existujícího failure/cancel zpracování.
+  Částečná odpověď a usage zůstávají zachované. Webhook dispatcher ponechává
+  výsledek externích účinků `unclear`, bez automatického retry; potvrzený konec
+  procesu nedokazuje úspěch ani neprovedení externího zápisu.
+- Neověřený konec procesu neukončoval chatový stream. `done` nyní uzavírá pouze
+  tento stream s důvodem `detached_still_running`; běh zůstává neterminální.
+- Index plánů nepokrýval ID tie-breaker. Test skutečného filtru a řazení před
+  opravou doložil `USE TEMP B-TREE`. Doplněna nová migrace, původní již nasazená
+  migrace se nemění.
+
+Upřesněn odkaz issue #2639 / PR #2641, EXPLAIN používá kontext testu a chyby
+seznamu plánů mají kontext operace. Doporučení změnit výchozí seznam na 500
+bez migrace klientů není přijato: CLI list/doctor/digest dosud nečtou paging
+hlavičku a tiše by ztratily další plány. Explicitní stránkování UI zůstává
+omezené. Nepoužitý context parametr se do čistých parser/header helperů nepřidává.
+
+Během review se main posunul na `2317c32ee` (providerová integrace #2622).
+Nový základ je lokálně začleněný; jediný textový konflikt byl CHANGELOG a oba
+záznamy jsou zachované. Probíhá nové ověření kombinace; předchozí testy ani
+DEV1 `6981d1527` nejsou důkazem nasazení těchto nových změn. PR #2633 má také
+nový základ (head `42e22ce75`); jeho předchozí head `561f1d99f` měl všechna CI
+zelená, ale nikoli nezávislé schválení. Ruční review bylo vyžádáno a zatím
+nepřišla odpověď. Zdrojová PR zůstávají otevřená do skutečného začlenění.

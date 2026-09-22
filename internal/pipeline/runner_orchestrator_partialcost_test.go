@@ -121,13 +121,13 @@ func (c *detachedUsageContainer) Exec(ctx context.Context, cfg provider.ExecConf
 	}
 	return c.orchCovContainer.Exec(ctx, cfg)
 }
-func TestOrchestratorRunner_RunStep_PartialCostOnDetach(t *testing.T) {
+func TestOrchestratorRunner_RunStep_PartialCostOnConfirmedDetachedStop(t *testing.T) {
 	c := &detachedUsageContainer{orchCovContainer: orchCovContainer{agentStream: `{"type":"result","subtype":"success","total_cost_usd":0.42,"usage":{"input_tokens":7,"output_tokens":13}}` + "\n"}}
 	r := newOrchRunnerRigProvider(t, c, &orchCovResolver{info: covChatInfo()})
 	r.orch.SetDetachedExecMonitoring(time.Millisecond, time.Millisecond)
 	res, err := r.RunStep(context.Background(), AgentStepRequest{WorkspaceID: "ws_cov", AuthorCrewID: "crew_cov", AgentSlug: "cov-agent", Prompt: "do work", TimeoutSec: 30, PipelineID: "pln_cov", StepID: "s1"})
-	if !errors.Is(err, orchestrator.ErrDetachedStillRunning) {
-		t.Fatalf("want detached error, got %v", err)
+	if !errors.Is(err, orchestrator.ErrDetachedExecStopped) {
+		t.Fatalf("want confirmed detached-stop error, got %v", err)
 	}
 	if res.CostUSD != 0.42 || res.TokensIn != 7 || res.TokensOut != 13 {
 		t.Fatalf("lost partial usage: %+v", res)

@@ -589,18 +589,21 @@ func (s *ScheduleStore) ListPage(ctx context.Context, workspaceID string, limit,
 	}
 	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("list schedules: %w", err)
 	}
 	defer rows.Close()
 	var out []*Schedule
 	for rows.Next() {
 		s, err := scanSchedule(rows)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("list schedules: %w", err)
 		}
 		out = append(out, s)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate schedules: %w", err)
+	}
+	return out, nil
 }
 
 // SoftDelete marks a schedule deleted; the scheduler skips

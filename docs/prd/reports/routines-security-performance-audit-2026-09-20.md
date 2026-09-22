@@ -221,7 +221,7 @@ Zdroj testu a kompletní logy jsou v
 Další kontrola opravila předchozí předpoklad o R8: builder byl zachovaný jako
 soubor a test, ale neměl cestu z produkčního editoru. #2637 / PR #2640 jej
 obnovuje v Edit a má živé autorování → draft → publish → rozhodnutí; detail
-v `routines-r8-authoring-2026-09-21.md` na této opravné větvi. S1 řeší #2639:
+v `routines-r8-authoring-2026-09-21.md` na této opravné větvi. S1 řeší issue #2639 a oprava je v PR #2641:
 explicitní HTTP reference credentialu nesmí tiše pokračovat anonymně a
 povinný preflight nesmí považovat chybu DB za dostupnost.
 

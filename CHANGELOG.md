@@ -14,6 +14,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - Activity now includes the accepted work ledger and webhook deliveries. The separate Work navigation item is removed; existing `/work` bookmarks open the corresponding Activity view. (#2636)
 
 ### Fixed
+- Confirmed stops of detached agent processes now return a terminal failure instead of claiming the process is still running. Partial chat replies remain available; unconfirmed detached turns close their WebSocket stream without claiming execution completion. (#2626)
+- Schedule-list indexes now cover the ID tie-breaker, avoiding temporary sorting for equal start times.
 - Routine step details again offer Test with captured run data. Folded transforms and map selection reach the same testing surface; external steps still require explicit replacement outputs. (#2647)
 - **Routines Run and Plan controls follow your actual permissions.** Explicit Run grants allow one-time starts even for viewers; creating repeating schedules uses its separate grant. Existing plans require an admin to change, and removing a one-time start requires a manager. Unavailable Run explains the missing permission. (#2645)
 - **Unsaved routine edits survive declined reloads and navigation.** The active Edit dialog now reuses the existing navigation guard; loading a saved draft alone does not warn, and discarding local edits preserves that draft. (#2644)
