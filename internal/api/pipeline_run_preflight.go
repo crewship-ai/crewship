@@ -63,7 +63,11 @@ func (p *routinePreflight) Check(ctx context.Context, req pipeline.PreflightRequ
 		return p.blocked(ctx, req, missingResourcesDetail(missing, p.crewName(ctx, req)))
 	}
 
-	if missing := h.findMissingCredentials(ctx, req.WorkspaceID, req.AuthorCrewID, req.DSL); len(missing) > 0 {
+	missing, err := h.findMissingCredentials(ctx, req.WorkspaceID, req.AuthorCrewID, req.DSL)
+	if err != nil {
+		return p.blocked(ctx, req, err.Error())
+	}
+	if len(missing) > 0 {
 		return p.blocked(ctx, req, missingCredentialsDetail(missing, p.crewName(ctx, req)))
 	}
 	return nil

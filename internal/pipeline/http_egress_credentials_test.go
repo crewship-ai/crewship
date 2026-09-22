@@ -471,8 +471,8 @@ func TestWiredHTTPStep_FreeCrew_UndeclaredEgressRequiresDefaultAllowedDomains(t 
 
 // TestWiredHTTPStep_CredentialInjection pins the vault → header path on
 // a factory-built executor: declared credential_ref of a matching type
-// injects the decrypted value; no declaration (or no matching vault
-// row) leaves the request untouched and still succeeds.
+// injects the decrypted value; no declaration allows a public request;
+// an explicit reference with no matching vault row blocks the request.
 func TestWiredHTTPStep_CredentialInjection(t *testing.T) {
 	t.Setenv("ENCRYPTION_KEY", testEncryptionKey)
 	db := openPolicyTestDB(t)
@@ -518,7 +518,7 @@ func TestWiredHTTPStep_CredentialInjection(t *testing.T) {
 			t.Errorf("Authorization = %q, want empty (no credential declared)", seenAuth)
 		}
 	})
-	t.Run("unmatched type skips injection but still sends", func(t *testing.T) {
+	t.Run("unmatched type blocks the request", func(t *testing.T) {
 		step := Step{ID: "call", Type: StepHTTP, HTTP: &HTTPStep{
 			Method: "GET", URL: srv.URL,
 			CredentialRef: &CredentialRef{Type: "CERTIFICATE"},
@@ -527,11 +527,12 @@ func TestWiredHTTPStep_CredentialInjection(t *testing.T) {
 		// test isn't tripped by the free-mode crew-layer floor (#1416 item
 		// 3) — that floor is pinned separately in
 		// TestWiredHTTPStep_FreeCrew_UndeclaredEgressRequiresDefaultAllowedDomains.
-		if _, _, _, err := exec.runHTTPStep(context.Background(), step, RenderContext{EgressTargets: []string{"127.0.0.1"}}, in); err != nil {
-			t.Fatalf("step: %v", err)
+		seenAuth = "no request"
+		if _, _, _, err := exec.runHTTPStep(context.Background(), step, RenderContext{EgressTargets: []string{"127.0.0.1"}}, in); err == nil {
+			t.Fatal("unresolved credential must block the request")
 		}
-		if seenAuth != "" {
-			t.Errorf("Authorization = %q, want empty (no vault match)", seenAuth)
+		if seenAuth != "no request" {
+			t.Errorf("Authorization = %q, want no request (no vault match)", seenAuth)
 		}
 	})
 }
