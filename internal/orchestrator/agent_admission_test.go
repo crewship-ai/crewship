@@ -35,10 +35,26 @@ func TestRunAgent_SameAgentWaitsWithoutTakingServerCapacity(t *testing.T) {
 	second := make(chan error, 1)
 	wg.Add(1)
 	go func() { defer wg.Done(); second <- o.RunAgent(ctx, secondReq, nil) }()
-	select {
-	case <-probe.arrived:
-		t.Fatal("same agent started a second runtime")
-	case <-time.After(100 * time.Millisecond):
+	deadline := time.NewTimer(5 * time.Second)
+	defer deadline.Stop()
+	tick := time.NewTicker(time.Millisecond)
+	defer tick.Stop()
+waiting:
+	for {
+		select {
+		case <-probe.arrived:
+			t.Fatal("same agent started a second runtime")
+		case <-deadline.C:
+			t.Fatal("second caller never reached admission")
+		case <-tick.C:
+			o.agentAdmissionMu.Lock()
+			a := o.agentAdmissions[req.AgentID]
+			registered := a != nil && a.refs == 2
+			o.agentAdmissionMu.Unlock()
+			if registered {
+				break waiting
+			}
+		}
 	}
 	if len(o.runSem) != 1 {
 		t.Fatalf("waiting agent consumed server capacity: %d", len(o.runSem))
