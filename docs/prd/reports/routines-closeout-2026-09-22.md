@@ -7,7 +7,8 @@
   Celé finální CI prošlo, včetně Race; CodeRabbit skutečně schválil přesný
   head `98a651d35`. Sloučení proběhlo běžnou cestou, bez administrátorského bypassu.
 - **#2631 je nyní společné integrační PR**: katalog/performance + Work v Activity
-  z #2638 + autorování rozhodovacích formulářů z #2640. Zachovává jejich původní
+  z #2638 + autorování rozhodovacích formulářů z #2640 + pravdivé výsledky
+  odpojených agentích běhů z #2628. Zachovává jejich původní
   commity v integrační větvi. Aktivní pravidlo main vyžaduje lineární historii,
   proto při squash merge uzavřeme zdrojová PR s odkazem na skutečně začleněnou
   změnu; nebudeme tvrdit, že jejich původní hlavy jsou předky squash commitu.
@@ -58,8 +59,8 @@ Veřejný DEV1 byl 22. září aktualizován **nesloučeným kandidátem `6a2365
 pro uživatelem zadané testování společné větve. Build 12:37:09 UTC; autentizované
 API, frontendový marker, tři veřejně stažené JS assety a SHA-256 běžící binárky
 souhlasí. `dirty=true` je ponecháno; 17 původních WIP souborů je byte-identických.
-Následná synchronizace s main po #2635 mění pouze CI workflow; funkční kód tohoto
-kandidáta se tím nemění. Předchozí identitu `2836a43d3` neoznačujeme za aktuální.
+Synchronizace s main po #2635 měnila pouze CI workflow. Následné začlenění
+#2628 už mění backend: tato oprava dosud na DEV1 nasazena není. Předchozí identitu `2836a43d3` neoznačujeme za aktuální.
 
 Veřejné browserové sady prošly: Work → Activity (včetně 390 px, klávesnice,
 reloadu a historie), R8 author → draft → publish → číselná odpověď → dokončení,
@@ -95,7 +96,12 @@ veřejné endpointy nejsou tímto čerstvě kompletně ověřené.
 - #2628: převzatá oprava dalšího závodu při současném ukončení dvou odpojených
   běhů. Negativní regrese selhala na předchozím kódu; všech 146 Go balíků a vet
   na `7b2514396` prošlo, cílené Race testy desetkrát (30 000 souběžných párů).
-  Finální CI a nezávislé schválení zůstávají samostatné merge brány.
+  Finální CI samostatného PR na tomto headu prošlo. Změna je nyní začleněna
+  do #2631; společný strom vyžaduje vlastní CI a nezávislé schválení. Po squash
+  merge bude zdrojové PR uzavřeno jako začleněné. Ochrana odpojených běhů je
+  procesová, ne trvalá přes restart serveru.
+- #2646: nově otevřený draft jiného vlastníka navazující na #2628; řeší
+  sdílené přijímání běhů. Není součástí této integrace a není označen za hotový.
 - #2619/#2622: oddělené providerové změny. #2622 drží aktivně crewship_3;
   do jeho větve tato relace nezasahuje. Otevřené review nálezy zůstávají vlastníku.
 - #2630: draft pilotu Jev; chybějící živé inference není doplněno cizími
