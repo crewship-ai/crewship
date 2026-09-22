@@ -233,8 +233,8 @@ func (s *Store) countEndpointNonTerminalTx(ctx context.Context, tx *sql.Tx, work
 //
 // The count is over work_items, so work accepted through a path that is not a
 // webhook still counts against the workspace cap. The bytes are over the
-// deliveries that fed them, because raw input is the thing being bounded and
-// only a delivery has any.
+// deliveries that fed them, plus immutable input for non-webhook work. Scheduled
+// prompts must consume the same shared byte budget as inbound webhook bodies.
 func (s *Store) countWorkspaceNonTerminalTx(ctx context.Context, tx *sql.Tx, workspaceID string) (int, int64, error) {
 	var n int
 	var bytes int64
@@ -244,8 +244,10 @@ func (s *Store) countWorkspaceNonTerminalTx(ctx context.Context, tx *sql.Tx, wor
 		     WHERE w.workspace_id = ? AND w.state IN (`+sqlNonTerminal+`)),
 		  (SELECT COALESCE(SUM(d.body_bytes), 0) FROM webhook_deliveries d
 		     JOIN work_items w2 ON w2.id = d.work_id
-		     WHERE d.workspace_id = ? AND w2.state IN (`+sqlNonTerminal+`))`,
-		workspaceID, workspaceID).Scan(&n, &bytes)
+		     WHERE d.workspace_id = ? AND w2.state IN (`+sqlNonTerminal+`)) +
+		  (SELECT COALESCE(SUM(LENGTH(CAST(w3.input_json AS BLOB))), 0) FROM work_items w3
+		     WHERE w3.workspace_id = ? AND w3.source != 'webhook' AND w3.state IN (`+sqlNonTerminal+`))`,
+		workspaceID, workspaceID, workspaceID).Scan(&n, &bytes)
 	if err != nil {
 		return 0, 0, fmt.Errorf("work: count workspace ingress: %w", err)
 	}
