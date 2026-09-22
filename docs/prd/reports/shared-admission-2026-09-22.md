@@ -55,8 +55,12 @@ request builder test pins the production selection of this mode.
 
 On `6a8228698`, complete race runs of `internal/orchestrator`, `internal/dispatch`,
 `internal/chatbridge` and `internal/pipeline` passed, as did whole-tree `go vet`.
-The subsequent peer-query change also passed whole-tree `go vet`; full-suite
-and final HTTP verification results must be recorded separately.
+The subsequent peer-query and cancellation changes also passed whole-tree
+`go vet`. The final targeted API race run (114.537 seconds) covered the new
+uncreated-runtime regression, the vertical HTTP cancel/shutdown family, the
+request builder, and a real query-handler test returning 409 while its parent
+retains admission. Final orchestrator regression tests passed ten race-enabled
+repetitions. Full-tree testing/CI is separate from these filtered runs.
 
 The transport in these regression tests is substituted. The initial live probe
 used a real Codex process; a live probe of the fixed build must be recorded
@@ -97,8 +101,20 @@ and completed with exit 0. Durable `runtime_phase` remained `starting`, never
 The added regression `TestWebhookRuntime_ReturnBeforeCreationNeedsNoProviderProbe`
 failed with “probe run uncreated-run: no exec in tests”. The fix retains the
 declared phase after a return if creation was never requested or confirmed.
-Once creation was requested, provider errors still mean uncertainty. The live
-cancel scenario must be repeated on this fix before claiming success.
+Once creation was requested, provider errors still mean uncertainty.
+
+The repeat on dev2 build `b0594d4b335b900b181b3773dd47c9eca960fd49` passed:
+work `cmuco6qxa0002d53065b7` received cancel while `starting` (`requested`), then
+settled automatically to `cancelled`, without manual resolution. Chat
+`msg_1790081299734185650_e96ef94492c85532` continued: actual exec interval
+12:48:20.454Z–12:48:42.262Z, exit 0, running false, followed by run.completed.
+Evidence: `fixed-cancel-b0594d4b3/` in the local evidence directory.
+
+The production code in this build is also in PR #2646; later commits tighten
+test synchronization or update this report. Full CI is explicitly dispatched
+for the PR branch because its feature-branch base does not trigger automatic
+pull-request CI. Do not treat targeted passes or a started CI run as a passed
+full suite. The PR remains a draft until final checks/review are complete.
 
 ## Remaining release work
 
