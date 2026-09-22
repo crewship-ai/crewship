@@ -302,3 +302,36 @@ func mustParseHost(t *testing.T, raw string) string {
 	}
 	return rest
 }
+
+func TestHTTPStep_UnavailableCredentialDoesNotSend(t *testing.T) {
+	for _, kind := range []string{"no_resolver", "empty", "error"} {
+		t.Run(kind, func(t *testing.T) {
+			calls := 0
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { calls++; w.WriteHeader(http.StatusOK) }))
+			defer srv.Close()
+			store, resolver, cleanup := openExecutorTestDB(t)
+			defer cleanup()
+			exec := NewExecutor(store, resolver, nil, nil)
+			exec.SetAllowPrivateHTTPForTesting(true)
+			if kind != "no_resolver" {
+				exec.WithCredentialResolver(func(context.Context, RunScope, string) (string, error) {
+					if kind == "error" {
+						return "", errors.New("private resolver diagnostic")
+					}
+					return "", nil
+				})
+			}
+			step := Step{ID: "send", Type: StepHTTP, HTTP: &HTTPStep{Method: "POST", URL: srv.URL, CredentialRef: &CredentialRef{Type: "stripe"}}}
+			_, _, _, err := exec.runHTTPStep(context.Background(), step, RenderContext{}, RunInput{})
+			if err == nil {
+				t.Fatal("credential-bound request must fail before sending")
+			}
+			if calls != 0 {
+				t.Fatalf("sent %d unauthenticated requests", calls)
+			}
+			if strings.Contains(err.Error(), "private resolver diagnostic") {
+				t.Fatal("resolver diagnostics leaked into step error")
+			}
+		})
+	}
+}

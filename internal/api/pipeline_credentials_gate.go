@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -12,17 +13,14 @@ import (
 
 // gateMissingCredentials enforces a routine's declared credentials_required
 // against the credentials its author crew's workspace vault actually holds
-// (#1418). It returns true — HAVING ALREADY written a 422 Problem Details
-// with a machine-readable `missing_credentials` array — when the run MUST
+// (#1418). It returns true after writing a 422 for confirmed absence (with
+// `missing_credentials`) or a 503 for unknown availability when the run MUST
 // be blocked; the caller returns immediately. It parallels
 // gateMissingIntegrations / gateMissingResources and shares their contract:
 //
 //   - empty required → fast path, returns false (no DB work).
-//   - no db to probe against → FAIL-OPEN (log + allow): an infra hiccup
-//     must never wedge every run of every routine. A genuinely missing
-//     credential still surfaces below via the explicit-missing path.
-//   - probe error on a type → FAIL-OPEN for that type (treated as present):
-//     same bias to availability as the sibling gates.
+//   - unavailable DB or probe error → block with 503; availability is unknown.
+//   - confirmed absence → block with 422 and the missing credential types.
 //
 // Declaring a credential is always allowed at persist/save time — a
 // definition may name a credential the vault doesn't hold yet. Enforcement
@@ -34,7 +32,11 @@ import (
 // {{ secrets.* }} resolver never fails deep in a runner with an opaque auth
 // error instead of a clear, actionable 422.
 func (h *PipelineHandler) gateMissingCredentials(w http.ResponseWriter, r *http.Request, workspaceID, crewID, crewName string, dsl *pipeline.DSL) bool {
-	missing := h.findMissingCredentials(r.Context(), workspaceID, crewID, dsl)
+	missing, err := h.findMissingCredentials(r.Context(), workspaceID, crewID, dsl)
+	if err != nil {
+		writeProblem(w, r, http.StatusServiceUnavailable, err.Error())
+		return true
+	}
 	if len(missing) == 0 {
 		return false
 	}
@@ -59,18 +61,18 @@ func (h *PipelineHandler) gateMissingCredentials(w http.ResponseWriter, r *http.
 	return true
 }
 
-// findMissingCredentials is the gate's DECISION with no HTTP in it — see
-// findMissingIntegrations for why the split exists. The fail-open contract
-// lives here so both renderings inherit it identically.
-func (h *PipelineHandler) findMissingCredentials(ctx context.Context, workspaceID, crewID string, dsl *pipeline.DSL) []string {
+var errCredentialCheckUnavailable = errors.New("required credentials could not be checked; retry when the credential store is available")
+
+// findMissingCredentials shares the fail-closed decision with in-process runs.
+func (h *PipelineHandler) findMissingCredentials(ctx context.Context, workspaceID, crewID string, dsl *pipeline.DSL) ([]string, error) {
 	required := pipeline.RequiredCredentialTypes(dsl)
 	if len(required) == 0 {
-		return nil // no-op fast path
+		return nil, nil // no-op fast path
 	}
 	if h.db == nil {
-		h.logger.Warn("credential gate: no db to probe against, allowing run (fail-open)",
+		h.logger.Warn("credential gate: no db to probe against, blocking run",
 			"workspace_id", workspaceID, "crew_id", crewID)
-		return nil
+		return nil, errCredentialCheckUnavailable
 	}
 	probe := pipeline.NewVaultCredentialProbe(h.db)
 	llmProbe := pipeline.NewAnthropicLLMCredentialProbe(h.db)
@@ -79,10 +81,10 @@ func (h *PipelineHandler) findMissingCredentials(ctx context.Context, workspaceI
 	for _, credType := range required {
 		ok, err := probe(ctx, scope, credType)
 		if err != nil {
-			// FAIL-OPEN — a probe bug must not block runs; bias to availability.
-			h.logger.Warn("credential gate: probe failed, treating as available (fail-open)",
+			// Unknown availability must not satisfy a declared requirement.
+			h.logger.Warn("credential gate: probe failed, blocking run",
 				"workspace_id", workspaceID, "crew_id", crewID, "type", credType, "error", err)
-			continue
+			return nil, errCredentialCheckUnavailable
 		}
 		if ok {
 			continue
@@ -99,10 +101,10 @@ func (h *PipelineHandler) findMissingCredentials(ctx context.Context, workspaceI
 		if pipeline.IsAnthropicLLMCredentialType(credType) {
 			llmOK, llmErr := llmProbe(ctx, workspaceID)
 			if llmErr != nil {
-				// FAIL-OPEN, same bias to availability as the primary probe.
-				h.logger.Warn("credential gate: anthropic probe failed, treating as available (fail-open)",
+				// Apply the same rule to the provider-aware fallback.
+				h.logger.Warn("credential gate: anthropic probe failed, blocking run",
 					"workspace_id", workspaceID, "crew_id", crewID, "type", credType, "error", llmErr)
-				continue
+				return nil, errCredentialCheckUnavailable
 			}
 			if llmOK {
 				continue
@@ -110,7 +112,7 @@ func (h *PipelineHandler) findMissingCredentials(ctx context.Context, workspaceI
 		}
 		missing = append(missing, credType)
 	}
-	return missing
+	return missing, nil
 }
 
 // missingCredentialsDetail is the human sentence both renderings use.

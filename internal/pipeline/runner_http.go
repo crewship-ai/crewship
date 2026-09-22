@@ -168,18 +168,19 @@ func (e *Executor) runHTTPStep(ctx context.Context, step Step, parentRender Rend
 		req.Header.Set("Content-Type", "application/json")
 	}
 
-	// Credential injection. Resolution is best-effort — if no
-	// resolver wired, we skip; if the resolver errors or returns
-	// empty (no ACTIVE credential of the declared type in the
-	// workspace vault), we skip. Failing here would block legitimate
-	// requests against public endpoints that don't need auth. The
-	// resolved value is injected into the outbound request ONLY —
-	// never logged, journaled, or surfaced in the step output.
-	if step.HTTP.CredentialRef != nil && e.credentialByType != nil {
-		credValue, credErr := e.credentialByType(rctx, scope, step.HTTP.CredentialRef.Type)
-		if credErr == nil && credValue != "" {
-			injectCredential(req, step.HTTP.CredentialRef, credValue)
+	// An explicit credential reference is required. Never downgrade an
+	// authenticated write to an anonymous request if the vault is unavailable.
+	// Public requests omit credential_ref. Resolver errors can contain sensitive
+	// diagnostics, so only the declared type reaches the step's recorded error.
+	if ref := step.HTTP.CredentialRef; ref != nil {
+		if e.credentialByType == nil {
+			return "", 0, 0, fmt.Errorf("http step %q: required credential %q cannot be resolved; no request was sent", step.ID, ref.Type)
 		}
+		credValue, credErr := e.credentialByType(rctx, scope, ref.Type)
+		if credErr != nil || credValue == "" {
+			return "", 0, 0, fmt.Errorf("http step %q: required credential %q is unavailable; no request was sent", step.ID, ref.Type)
+		}
+		injectCredential(req, ref, credValue)
 	}
 
 	// The redirect gate is the shared egresspolicy.Client — the SAME
