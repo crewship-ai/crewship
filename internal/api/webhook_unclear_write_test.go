@@ -8,6 +8,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/chatbridge"
 	"github.com/crewship-ai/crewship/internal/dispatch"
 	"github.com/crewship-ai/crewship/internal/journal"
+	"github.com/crewship-ai/crewship/internal/orchestrator"
 	"github.com/crewship-ai/crewship/internal/webhook"
 )
 
@@ -133,4 +134,12 @@ func TestWebhookRun_AnUnclearRunRecordWriteIsNotRetried(t *testing.T) {
 			t.Errorf("outcome = %v, want unclear — the record is there, so a retry would make a second", got)
 		}
 	})
+}
+
+// A confirmed stop ends supervision but does not prove its external writes failed.
+func TestWebhookRuntime_ConfirmedDetachedStopIsNotRetryable(t *testing.T) {
+	rt := &WebhookRuntime{}
+	if got := rt.Classify(dispatch.Assignment{}, orchestrator.ErrDetachedExecStopped); got != dispatch.OutcomeUnclear {
+		t.Fatalf("confirmed stop outcome = %v, want unclear (no automatic retry)", got)
+	}
 }

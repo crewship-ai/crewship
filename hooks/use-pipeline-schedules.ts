@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { apiFetch } from "@/lib/api-fetch"
+import { fetchAllRoutinePages } from "@/lib/routine-list"
 import { useRealtimeEvent } from "@/hooks/use-realtime"
 
 // PipelineSchedule mirrors the wire shape returned by the
@@ -128,22 +129,15 @@ export function usePipelineSchedules(workspaceId: string | null | undefined) {
     setLoading(true)
     setError(null)
     try {
-      const res = await apiFetch(
+      const data = await fetchAllRoutinePages<PipelineSchedule>(
         `/api/v1/workspaces/${workspaceId}/pipeline-schedules`,
-        { signal: controller.signal },
+        controller.signal,
       )
       if (controller.signal.aborted) return
-      if (!res.ok) {
-        setError(`pipeline schedules: ${res.status}`)
-        setLoading(false)
-        return
-      }
-      const data: PipelineSchedule[] = await res.json()
-      if (controller.signal.aborted) return
-      setSchedules(Array.isArray(data) ? data : [])
+      setSchedules(data)
     } catch (e) {
       if (controller.signal.aborted) return
-      setError(e instanceof Error ? e.message : String(e))
+      setError(e instanceof Error ? e.message.replace(/^routine list:/, "pipeline schedules:") : String(e))
     } finally {
       if (!controller.signal.aborted) setLoading(false)
     }

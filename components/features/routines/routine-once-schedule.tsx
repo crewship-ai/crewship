@@ -1,5 +1,8 @@
 "use client"
 
+import { useAbilities } from "@/hooks/use-abilities"
+import { routinePermissions } from "@/lib/routine-governance"
+
 import { formatRoutineTime } from "@/lib/routine-time"
 
 import { routinePresetSummary } from "@/lib/routine-preset-summary"
@@ -32,6 +35,8 @@ export function RoutineOnceSchedule({
   headVersion?: number | null
   draft?: { revision: number } | null
 }) {
+  const { role, capabilities } = useAbilities()
+  const permissions = routinePermissions(role, capabilities)
   const [at, setAt] = useState("")
   const [pending, setPending] = useState<Pending[]>([])
   const [error, setError] = useState<string | null>(null)
@@ -118,7 +123,8 @@ export function RoutineOnceSchedule({
             size="sm"
             variant="outline"
             className="h-8 gap-1.5 text-xs"
-            disabled={busy}
+            disabled={busy || !permissions.run}
+            title={!permissions.run ? "Scheduling a start requires permission to run routines" : undefined}
             onClick={() => setPicking(true)}
           >
             <Plus className="h-3 w-3" />
@@ -166,7 +172,8 @@ export function RoutineOnceSchedule({
                 size="sm"
                 variant="ghost"
                 className="h-8 text-xs"
-                disabled={busy}
+                disabled={busy || !permissions.author}
+                title={!permissions.author ? "Removing a planned start requires a manager role" : undefined}
                 onClick={() => cancel(p.id)}
               >
                 Remove

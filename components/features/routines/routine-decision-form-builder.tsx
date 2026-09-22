@@ -12,10 +12,12 @@ export function RoutineDecisionFormBuilder({
   value,
   onChange,
   onOpenCode,
+  codeActionLabel = "Review in Code",
 }: {
   value: unknown
   onChange: (value: DecisionForm | undefined) => void
   onOpenCode: () => void
+  codeActionLabel?: string
 }) {
   if (value == null)
     return (
@@ -55,7 +57,7 @@ export function RoutineDecisionFormBuilder({
           This decision uses a form the visual editor cannot read. Its definition is preserved.
         </p>
         <Button type="button" variant="link" onClick={onOpenCode}>
-          Review in Code
+          {codeActionLabel}
         </Button>
       </section>
     )

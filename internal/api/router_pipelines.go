@@ -41,6 +41,7 @@ func (r *Router) registerPipelineRoutes() *PipelineHandler {
 	// loopback URL and token are known here. A deployment without a loopback
 	// URL gets nil and crewship steps fail closed with a wiring hint.
 	pipes.SetCrewshipActions(newCrewshipActions(r.internalLoopbackURL, r.internalToken, r.PolicyResolver(), r.db, r.logger))
+	// openapi: query author_crew_id:string include_ephemeral:string include_hidden:string limit:integer offset:integer order:string status:string tag:string; responses 200,400
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipelines", authed(wsCtx(http.HandlerFunc(pipes.List))))
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipelines/{slug}", authed(wsCtx(http.HandlerFunc(pipes.Get))))
 	// roleInline: Run enforces its own layered gate (MANAGER+ role OR an
@@ -134,6 +135,7 @@ func (r *Router) registerPipelineRoutes() *PipelineHandler {
 	// Pipeline schedules — cron triggers for saved pipelines (the
 	// Routines integration). CRUD-only; the scheduler runs in-process
 	// in cmd_start and reads the table directly.
+	// openapi: query limit:integer offset:integer; responses 200,400
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipeline-schedules", authed(wsCtx(http.HandlerFunc(pipes.ListSchedules))))
 	// Next-five-fire-times preview (B9, #2362, §13.2 "When"). Registered
 	// before the create route reads naturally but ordering doesn't matter

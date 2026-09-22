@@ -21,6 +21,7 @@ import {
   canKillRoutine,
   normalizeRoutineStatus,
   roleAtLeast,
+  routinePermissions,
 } from "@/lib/routine-governance"
 import { buildPipelineActionRequest } from "@/lib/pipeline-actions"
 import { routineInputSpecs, type RoutineInputSpec } from "@/lib/routine-inputs"
@@ -130,7 +131,8 @@ export function RoutinesDetailPanel({
 }: Props) {
   const router = useRouter()
   const startIntent = useRef(new RoutineStartIntent())
-  const { role } = useAbilities()
+  const { role, capabilities } = useAbilities()
+  const permissions = routinePermissions(role, capabilities)
   const [routine, setRoutine] = useState<RoutineDetail | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -248,6 +250,7 @@ export function RoutinesDetailPanel({
   // form; one without runs immediately, which is what that button has
   // always done and must go on doing.
   const startRun = () => {
+    if (!permissions.run) return
     // The loaded routine and the selected slug can disagree. `fetchRoutine`
     // sets `loading` but leaves `routine` on the PREVIOUS one until the new
     // response lands, and the toolbar renders under `{routine && …}` — so
@@ -461,7 +464,9 @@ export function RoutinesDetailPanel({
 
   const lifecycle = normalizeRoutineStatus(routine?.status)
   const lifecycleBadge = routineStatusBadge(routine?.status)
-  const runGuard = routine?.draft_only
+  const runGuard = !permissions.run
+    ? "Running requires a manager role or an explicit Run routines permission"
+    : routine?.draft_only
     ? "Publish the draft first — nothing can run until then"
     : runDisabledReason(routine?.status)
   const showApprovalBanner = lifecycle === "proposed" && canApproveRoutine(role)

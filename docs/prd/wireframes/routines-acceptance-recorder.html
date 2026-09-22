@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="cs">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Routines — lidská přejímka</title>
+<style>
+body{font:16px/1.5 system-ui,sans-serif;max-width:1080px;margin:32px auto;padding:0 20px;color:#20252c;background:#f6f8fa}h1{font-size:26px}label{display:block}input,select,textarea,button{font:inherit;padding:8px;border:1px solid #a8b2c0;border-radius:6px;background:white}button{cursor:pointer}table{border-collapse:collapse;width:100%;background:white}th,td{padding:10px;text-align:left;border-bottom:1px solid #d8dee7}select{max-width:160px;font-size:14px}textarea{width:95%;min-height:52px}#verdict{padding:16px;border-radius:8px;background:#e5ecf7;font-weight:600}.scroll{overflow-x:auto}section{margin:24px 0}small{display:block;color:#505966}a{color:#165eb5}
+</style>
+<h1>Routines: záznam lidské přejímky</h1>
+<p>Pět reprezentativních uživatelů zkusí každou úlohu bez nápovědy. Cíl PRD: alespoň čtyři z pěti uspějí u <strong>každé</strong> úlohy. Interní průchod autora produktu je samostatný důkaz a do tohoto cíle se nepočítá.</p>
+<p>Moderátor nejprve připraví vyhrazené rutiny se vstupy, řízenou chybou, rozhodnutím a plánem. Účastníkům zadá cíl úlohy; nevysvětluje, kam kliknout. Po pomoci zaznamená „S pomocí“, i když účastník nakonec úlohu dokončí.</p>
+<label>Testovaný commit / identita buildu <input id="build" placeholder="Ověřený commit na DEV1"></label>
+<section>
+<ol>
+<li><strong>Vysvětlit recept:</strong> bez spuštění vlastními slovy popsat účel a kroky.</li>
+<li><strong>Změnit vstup a spustit:</strong> zadat jinou hodnotu a najít přesně odeslanou hodnotu v historii.</li>
+<li><strong>Najít chybu:</strong> u připraveného selhání určit krok, důvod a další postup.</li>
+<li><strong>Vyřešit rozhodnutí:</strong> najít čekající běh, odpovědět a dohledat přijatý verdikt; najít jej z Inbox i Routines.</li>
+<li><strong>Změnit plán:</strong> nastavit denní běh ve 2:30 Europe/Prague, ověřit příští termín v detailu a kalendáři a zkušební plán zrušit.</li>
+</ol>
+<a href="https://crewship-dev1.unifylab.cz/routines" target="_blank" rel="noopener">Otevřít Routines na DEV1</a>
+</section>
+<div class="scroll"><table><thead><tr><th>Účastník</th><th>1. Recept</th><th>2. Vstup</th><th>3. Chyba</th><th>4. Rozhodnutí</th><th>5. Plán</th></tr></thead><tbody id="results"></tbody></table></div>
+<section id="notes"></section>
+<p id="verdict" role="status" aria-live="polite">NOT VERIFIED — výsledky nejsou vyplněné.</p>
+<p id="counts"></p>
+<button id="export" type="button">Exportovat záznam JSON</button>
+<small>Formulář nic neposílá na server. Export si uložte před zavřením stránky. Hodnotí pouze lidskou bránu §11; neoznačuje technické testy, review ani celý release za hotové.</small>
+<script>
+const tasks=['Recept','Vstup','Chyba','Rozhodnutí','Plán'];
+const participants=Array.from({length:5},(_,i)=>({id:`P${i+1}`,representative:false,results:Array(5).fill('not_verified'),notes:''}));
+const options=[['not_verified','Nezkoušeno'],['passed','Bez pomoci'],['assisted','S pomocí'],['failed','Nedokončeno']];
+participants.forEach(p=>{
+ const tr=document.createElement('tr'),head=document.createElement('th');
+ const label=document.createElement('label'),check=document.createElement('input');check.type='checkbox';check.setAttribute('aria-label',`${p.id}: reprezentativní uživatel`);check.onchange=()=>{p.representative=check.checked;update()};label.append(check,` ${p.id}`);head.append(label);const help=document.createElement('small');help.textContent='Reprezentativní uživatel';head.append(help);tr.append(head);
+ tasks.forEach((task,i)=>{const td=document.createElement('td'),select=document.createElement('select');select.setAttribute('aria-label',`${p.id}: ${task}`);options.forEach(([value,text])=>{const o=document.createElement('option');o.value=value;o.textContent=text;select.append(o)});select.onchange=()=>{p.results[i]=select.value;update()};td.append(select);tr.append(td)});document.getElementById('results').append(tr);
+ const noteLabel=document.createElement('label');noteLabel.textContent=`${p.id}: kde uživatel zaváhal, jaká pomoc byla potřeba, Edit / Test / Run srozumitelné?`;const note=document.createElement('textarea');note.oninput=()=>{p.notes=note.value};noteLabel.append(note);document.getElementById('notes').append(noteLabel);
+});
+function result(){const successes=tasks.map((_,i)=>participants.filter(p=>p.representative&&p.results[i]==='passed').length);const complete=participants.every(p=>p.representative&&p.results.every(r=>r!=='not_verified'));const build=document.getElementById('build').value.trim();return {build,successes,status:!complete||!build?'NOT VERIFIED':successes.every(n=>n>=4)?'PASS':'FAIL'}}
+function update(){const r=result();document.getElementById('verdict').textContent=`${r.status} — ${r.status==='NOT VERIFIED'?'chybí identita buildu nebo všech 25 výsledků pěti reprezentativních uživatelů':r.status==='PASS'?'každou úlohu zvládli alespoň 4 z 5 bez pomoci':'alespoň jedna úloha nedosáhla cíle 4 z 5 bez pomoci'}.`;document.getElementById('counts').textContent=tasks.map((t,i)=>`${t}: ${r.successes[i]}/5`).join(' · ')}
+document.getElementById('build').oninput=update;
+document.getElementById('export').onclick=()=>{const blob=new Blob([JSON.stringify({schema_version:1,recorded_at:new Date().toISOString(),...result(),participants},null,2)],{type:'application/json'});const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='routines-human-acceptance.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000)};
+update();
+</script>
+</html>

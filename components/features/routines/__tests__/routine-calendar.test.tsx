@@ -1,11 +1,11 @@
 import { useState } from "react"
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react"
-import { describe, it, expect, vi } from "vitest"
+import { beforeEach, describe, it, expect, vi } from "vitest"
 import { RoutineCalendar } from "../routine-calendar"
 import type { Pipeline } from "@/hooks/use-pipelines"
-const { fetcher } = vi.hoisted(() => ({ fetcher: vi.fn() }))
+const { fetcher, access } = vi.hoisted(() => ({ fetcher: vi.fn(), access: { role: "OWNER", capabilities: [] as string[] } }))
 vi.mock("@/lib/api-fetch", () => ({ apiFetch: fetcher }))
-vi.mock("@/hooks/use-abilities", () => ({ useAbilities: () => ({ role: "OWNER" }) }))
+vi.mock("@/hooks/use-abilities", () => ({ useAbilities: () => access }))
 vi.mock("@/hooks/use-issue-detail", () => ({ useUrlSelection: (key: string) => useState(key === "calendar" ? "year" : "2028-01-01") }))
 vi.mock("@/components/ui/crew-icon", () => ({ CrewIcon: ({ icon }: { icon: string }) => <span data-testid="routine-icon">{icon}</span> }))
 vi.mock("next/link", () => ({ default: ({ children, ...props }: React.AnchorHTMLAttributes<HTMLAnchorElement>) => <a {...props}>{children}</a> }))
@@ -39,4 +39,20 @@ describe("full routine calendar", () => {
     fireEvent.click(within(agenda).getByRole("button", { name: "‹ Year" }))
     expect(screen.queryByRole("region", { name: "Day agenda" })).toBeNull()
   })
+})
+
+
+beforeEach(() => { access.role = "OWNER"; access.capabilities = [] })
+it.each([
+  ["MEMBER", [], false],
+  ["VIEWER", ["routine.run"], true],
+  ["MEMBER", ["routine.create"], false],
+] as const)("calendar one-time start: %s %j", async (role, caps, allowed) => {
+  access.role = role; access.capabilities = [...caps]
+  fetcher.mockResolvedValue({ok:true,json:async()=>({events:[],truncated:false})})
+  render(<RoutineCalendar workspaceId="ws" routines={[]} />)
+  await waitFor(() => expect(screen.getByRole("button", {name:"Open 2028-02-01, 0 entries"})).toBeEnabled())
+  fireEvent.click(screen.getByRole("button", {name:"Open 2028-02-01, 0 entries"}))
+  const start=within(screen.getByRole("region", {name:"Day agenda"})).queryByRole("button", {name:/Schedule a start/})
+  expect(!!start).toBe(allowed)
 })

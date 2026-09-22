@@ -45,6 +45,11 @@ const (
 	// the container would not start, the run record could not be written, the
 	// agent never ran. Retrying repeats nothing because nothing happened.
 	OutcomeRetryable
+	// OutcomeDetached: Run gave the exec back while it was still alive
+	// (orchestrator.ErrDetachedStillRunning). Nothing is finished — not
+	// success, not failure — so the dispatcher keeps the attempt supervised
+	// and waits for the runtime's own termination before settling (#2626).
+	OutcomeDetached
 )
 
 func (o Outcome) String() string {
@@ -55,6 +60,8 @@ func (o Outcome) String() string {
 		return "failed"
 	case OutcomeRetryable:
 		return "retryable"
+	case OutcomeDetached:
+		return "detached"
 	default:
 		return "unclear"
 	}

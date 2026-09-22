@@ -7,6 +7,7 @@ import type { PipelineRunRecord } from "@/hooks/use-pipeline-run-records"
 
 // Hoisted holder so vi.mock factories can read per-test state.
 const h = vi.hoisted(() => ({
+  access: { role: "OWNER", capabilities: [] as string[] },
   records: [] as unknown[],
   refreshRecords: vi.fn(),
 }))
@@ -24,7 +25,7 @@ vi.mock("@/hooks/use-realtime", () => ({
 }))
 
 vi.mock("@/hooks/use-abilities", () => ({
-  useAbilities: () => ({ abilities: {}, role: "OWNER", loading: false }),
+  useAbilities: () => ({ abilities: {}, ...h.access, loading: false }),
 }))
 
 vi.mock("@/hooks/use-pending-approval", () => ({
@@ -106,6 +107,8 @@ function activeRecord(id: string): PipelineRunRecord {
     triggered_via: "manual",
   }
 }
+
+beforeEach(() => { h.access.role = "OWNER"; h.access.capabilities = [] })
 
 const okJSON = (body: unknown) =>
   ({
@@ -572,5 +575,68 @@ describe("<RoutinesDetailPanel> — a slug with a draft and no published routine
     render(<RoutinesDetailPanel {...defaultProps} slug="gone" />)
     expect(await screen.findByText(status === "network" ? "Draft network unavailable" : `Draft request failed: ${status}`)).toBeInTheDocument()
     expect(screen.queryByText(/fetch routine: 404/)).toBeNull()
+  })
+})
+
+
+describe("routine Run permission", () => {
+  it.each([
+    ["MEMBER", [], false],
+    ["VIEWER", [], false],
+    ["VIEWER", ["routine.run"], true],
+    ["MEMBER", ["routine.create"], false],
+    ["MANAGER", [], true],
+  ] as const)("%s with %j", async (role, caps, allowed) => {
+    h.access.role = role; h.access.capabilities = [...caps]; h.records = []
+    mockApi(); await renderPanel()
+    const run = screen.getByRole("button", { name: "Run" })
+    expect(run).toHaveProperty("disabled", !allowed)
+    if (!allowed) {
+      expect(run.parentElement).toHaveAttribute("title", expect.stringContaining("permission"))
+      fireEvent.click(run)
+      expect(vi.mocked(apiFetch).mock.calls.some(([, init]) => init?.method === "POST")).toBe(false)
+    }
+  })
+})
+
+describe("active recipe sample testing", () => {
+  beforeEach(() => { h.records = [] })
+  function sampleRoutine() {
+    vi.mocked(apiFetch).mockResolvedValue(okJSON({ ...ROUTINE, definition: {
+      dsl_version: "1.0", name: "daily-report", agentless: true,
+      steps: [{ id: "value", name: "Prepare value", type: "transform", transform: { input: "1", expression: "." } }],
+    } }))
+  }
+  it("opens captured-data testing from the actual recipe step without starting a run", async () => {
+    sampleRoutine()
+    await renderPanel()
+    const details = document.querySelector('[data-step-id="value"]') as HTMLDetailsElement
+    details.open = true
+    fireEvent(details, new Event("toggle"))
+    fireEvent.click(screen.getByRole("button", { name: "Test step" }))
+    expect(details).toHaveAttribute("open")
+    expect(screen.getByLabelText("Use captured run data")).toBeInTheDocument()
+    expect(screen.getByText("Sample data · no external actions")).toBeInTheDocument()
+    expect(apiFetch).not.toHaveBeenCalledWith(expect.stringMatching(/\/run$/), expect.anything())
+    vi.mocked(apiFetch).mockResolvedValueOnce(okJSON({ status: "DRY_RUN_OK" }))
+    fireEvent.click(screen.getByRole("button", { name: "Test routine" }))
+    await screen.findByText("Test passed")
+    const check = vi.mocked(apiFetch).mock.calls.find(([url]) => String(url).endsWith("/test_run"))!
+    expect(JSON.parse(String(check[1]?.body))).toMatchObject({
+      definition: { steps: [{ id: "value", transform: { input: "1", expression: "." } }] },
+      sample_inputs: {},
+    })
+    vi.mocked(apiFetch).mockResolvedValueOnce(okJSON({ status: "RUNNING" }))
+    fireEvent.click(screen.getByRole("button", { name: "Test routine" }))
+    await screen.findByText("Test needs attention")
+  })
+  it("does not offer author-only sample testing to a MEMBER", async () => {
+    h.access.role = "MEMBER"
+    sampleRoutine()
+    await renderPanel()
+    const details = document.querySelector('[data-step-id="value"]') as HTMLDetailsElement
+    details.open = true
+    fireEvent(details, new Event("toggle"))
+    expect(screen.queryByRole("button", { name: "Test step" })).toBeNull()
   })
 })

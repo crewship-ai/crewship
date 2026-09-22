@@ -1143,6 +1143,35 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		costCancel()
 	}
 	if runErr != nil {
+		if errors.Is(runErr, orchestrator.ErrDetachedStillRunning) || (errors.Is(runErr, orchestrator.ErrDetachedExecStopped) && ctx.Err() != context.Canceled) {
+			// Preserve partial replies for both detached outcomes. Only an
+			// unconfirmed stop remains nonterminal; a confirmed stop falls
+			// through to normal failure/cancellation bookkeeping below.
+			cleanCtx, cleanCancel := context.WithTimeout(context.Background(), ledgerWriteTimeout)
+			defer cleanCancel()
+			if acc.Text() != "" || len(partAcc.Parts()) > 0 {
+				repliedAt := time.Now().UTC()
+				_ = b.convStore.Append(cleanCtx, chatID, conversation.Message{
+					ID:        generateMsgID(),
+					AgentID:   info.AgentID,
+					Role:      conversation.RoleAssistant,
+					Content:   acc.Text(),
+					Parts:     partAcc.Parts(),
+					Timestamp: repliedAt,
+				})
+				_ = b.resolver.IncrementMessageCount(cleanCtx, chatID, 2)
+				b.notifyReply(cleanCtx, chatID, userID, info, acc.Text(), repliedAt)
+			} else {
+				_ = b.resolver.IncrementMessageCount(cleanCtx, chatID, 1)
+			}
+			if errors.Is(runErr, orchestrator.ErrDetachedStillRunning) {
+				b.logger.Warn("chat turn's exec detached after RunAgent's stop attempt; leaving the run nonterminal",
+					"chat_id", chatID, "run_id", runID, "error", runErr)
+				// End this WebSocket stream, not the still-running execution.
+				streamFn(ws.ChatEvent{Type: "done", Metadata: map[string]any{"reason": "detached_still_running"}})
+				return nil
+			}
+		}
 		// If context was cancelled (user pressed stop), don't emit error -- the hub
 		// sends a clean "done" event. Emitting error here would cause an error flash.
 		if ctx.Err() == context.Canceled || errors.Is(runErr, orchestrator.ErrAgentStopped) {

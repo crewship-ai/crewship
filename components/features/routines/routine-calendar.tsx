@@ -10,7 +10,7 @@ import { AlertCircle, ChevronRight, Plus } from "lucide-react"
 import { useUrlSelection } from "@/hooks/use-issue-detail"
 import { useAbilities } from "@/hooks/use-abilities"
 import type { Pipeline } from "@/hooks/use-pipelines"
-import { roleAtLeast } from "@/lib/routine-governance"
+import { routinePermissions } from "@/lib/routine-governance"
 import { apiFetch } from "@/lib/api-fetch"
 import {
   CALENDAR_VIEWS,
@@ -106,8 +106,8 @@ export function RoutineCalendar({
   const [revision, setRevision] = useState(0)
   const [filter, setFilter] = useState<CalendarFilter>("all")
   const [scheduleDate, setScheduleDate] = useState<Date | null>(null)
-  const { role } = useAbilities()
-  const canSchedule = roleAtLeast(role, "MEMBER")
+  const { role, capabilities } = useAbilities()
+  const canSchedule = routinePermissions(role, capabilities).run
   const timeGrid = useRef<HTMLDivElement>(null)
   useEffect(() => {
     const grid = timeGrid.current

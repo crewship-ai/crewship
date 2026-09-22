@@ -321,6 +321,39 @@ func TestPipelinesAPI_List_HappyPath(t *testing.T) {
 	}
 }
 
+func TestPipelinesAPI_List_PaginatesWithStableOffset(t *testing.T) {
+	db := openSmokeDB(t)
+	defer db.Close()
+	seedSmokePipeline(t, db, "first")
+	seedSmokePipeline(t, db, "second")
+	h := NewPipelineHandler(db, slog.Default(), nil, nil)
+	page := func(offset string) (*httptest.ResponseRecorder, []pipelineResponse) {
+		req := withWorkspaceCtx(httptest.NewRequest("GET", "/api/v1/workspaces/ws_smoke/pipelines?limit=1&offset="+offset, nil), "ws_smoke")
+		w := httptest.NewRecorder()
+		h.List(w, req)
+		var out []pipelineResponse
+		if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil {
+			t.Fatalf("decode page: %v (%s)", err, w.Body.String())
+		}
+		return w, out
+	}
+	first, firstRows := page("0")
+	if first.Code != http.StatusOK || len(firstRows) != 1 || first.Header().Get("X-Next-Offset") != "1" {
+		t.Fatalf("first page: status=%d rows=%d next=%q", first.Code, len(firstRows), first.Header().Get("X-Next-Offset"))
+	}
+	second, secondRows := page(first.Header().Get("X-Next-Offset"))
+	if second.Code != http.StatusOK || len(secondRows) != 1 || second.Header().Get("X-Next-Offset") != "2" {
+		t.Fatalf("second page: status=%d rows=%d next=%q", second.Code, len(secondRows), second.Header().Get("X-Next-Offset"))
+	}
+	if firstRows[0].ID == secondRows[0].ID {
+		t.Fatalf("pages repeated pipeline %q", firstRows[0].ID)
+	}
+	third, thirdRows := page(second.Header().Get("X-Next-Offset"))
+	if third.Code != http.StatusOK || len(thirdRows) != 0 || third.Header().Get("X-Next-Offset") != "" {
+		t.Fatalf("terminal page: status=%d rows=%d next=%q", third.Code, len(thirdRows), third.Header().Get("X-Next-Offset"))
+	}
+}
+
 func TestPipelinesAPI_Get_IncludesDefinition(t *testing.T) {
 	db := openSmokeDB(t)
 	defer db.Close()

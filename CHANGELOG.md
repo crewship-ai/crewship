@@ -9,7 +9,21 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+### Improved
+- Routine and schedule catalogs now page through large workspaces without truncating results; schedule lists and the calendar resolve routine details in batches.
+- Activity now includes the accepted work ledger and webhook deliveries. The separate Work navigation item is removed; existing `/work` bookmarks open the corresponding Activity view. (#2636)
+
 ### Fixed
+- Confirmed stops of detached agent processes now return a terminal failure instead of claiming the process is still running. Partial chat replies remain available; unconfirmed detached turns close their WebSocket stream without claiming execution completion. (#2626)
+- Schedule-list indexes now cover the ID tie-breaker, avoiding temporary sorting for equal start times.
+- Routine step details again offer Test with captured run data. Folded transforms and map selection reach the same testing surface; external steps still require explicit replacement outputs. (#2647)
+- **Routines Run and Plan controls follow your actual permissions.** Explicit Run grants allow one-time starts even for viewers; creating repeating schedules uses its separate grant. Existing plans require an admin to change, and removing a one-time start requires a manager. Unavailable Run explains the missing permission. (#2645)
+- **Unsaved routine edits survive declined reloads and navigation.** The active Edit dialog now reuses the existing navigation guard; loading a saved draft alone does not warn, and discarding local edits preserves that draft. (#2644)
+- Routine Edit again exposes approval questions and named decision actions, including approvals in nested loops and hooks. Changes remain drafts until publication. (#2637)
+- **Agents return to online after simultaneous detached-run completions.** The last-hold decision now retires completed peers atomically, so two finishing runs cannot both skip the final presence update. (#2626)
+- Detached runs retain admission and capacity until confirmed stopped, including after the monitoring deadline. Waiting admissions recheck the fence; each already-admitted run retains its own hold. Confirmed termination revokes and cleans per-run credentials and ends the watcher. (#2626)
+- Confirmed detached stops close the run record; partial chat replies reach the inbox, and routine steps retain observed token usage and cost after detachment. (#2626)
+- A detached still-running exec is no longer reported as a successful run and a succeeded work item. When the agent CLI's stream ends while the process lives on, RunAgent now monitors `ExecInspect` until the exec really terminates (resolving the run with its true exit code) and, only if monitoring exceeds its budget or the context ends, returns a typed `ErrDetachedStillRunning` that leaves the run at `running`. A bounded stop runs inside RunAgent's ownership boundary; when the stop cannot be CONFIRMED, the run slot transfers to a per-agent detached hold that refuses new runs for that agent (`ErrAgentDetachedBusy`) and keeps capacity occupied until its watcher confirms the runtime gone — a stop attempt is not a stop confirmation. Terminal events (the exec.command end journal entry, the agent's return to `online`) are emitted only after a confirmed end, never while the process may be alive. The webhook wrapper no longer rewrites the sentinel into `COMPLETED`; the dispatcher holds the attempt (heartbeat, lease, capacity) and polls the runtime until it is confirmed gone, stopping it before settling into reconciliation on the probe-limit and watch-expiry paths. Scheduler, chat, pipeline and direct-run callers treat the sentinel as nonterminal instead of FAILED. (#2626)
 
 - **Reassigning a previously removed provider key works without a manual runtime restart.** Sidecar reuse now checks live credential counts as well as the original configuration fingerprint.
 

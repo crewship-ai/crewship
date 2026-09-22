@@ -47,7 +47,7 @@ import { RoutineIdentityHeader } from "./routine-identity-header"
 import { RoutineNavigation, ROUTINE_VIEWS } from "./routine-navigation"
 import { useUrlSelection } from "@/hooks/use-issue-detail"
 import { brandIconForType, BrandGlyph } from "./brand-icons"
-import { RoutineStepDefinition } from "./routine-step-definition"
+import { RoutinePublishedStepTest } from "./routine-published-step-test"
 import { RoutineBehaviorSummary } from "./routine-behavior"
 import { RoutineStepSpine } from "./routine-step-spine"
 import { routineInputSpecs } from "@/lib/routine-inputs"
@@ -139,15 +139,7 @@ export function RoutineCardDetail({
   const closeDialog = React.useCallback(() => {
     setView(null, { replace: true })
   }, [setView])
-  const [selected, setSelected] = React.useState<string | null>(null)
-  // Separate from `selected`: selection is a persistent choice, focus a
-  // one-shot "bring this into view". Merged, a re-render could yank the
-  // viewport back after the reader had panned away from it.
-  const [focus, setFocus] = React.useState<string | null>(null)
-  const handleSelect = React.useCallback((id: string | null) => {
-    setSelected(id)
-    setFocus(null)
-  }, [])
+  const [testedStep, setTestedStep] = React.useState<string | null>(null)
   // Cancelling a specific run lives in RoutineRunsTab, which has the
   // per-row buttons and the RBAC handling. Dropping the tab must not
   // drop the capability, so Manage mounts the real thing rather than a
@@ -192,7 +184,7 @@ export function RoutineCardDetail({
   }, [routine.definition])
   const steps = React.useMemo(() => {
     const raw = (routine.definition as { steps?: unknown })?.steps
-    return Array.isArray(raw) ? (raw as { type?: string }[]) : []
+    return Array.isArray(raw) ? raw.filter(isRecord) : []
   }, [routine.definition])
 
   const lastRun = records[0] ?? null
@@ -340,35 +332,44 @@ export function RoutineCardDetail({
               definition={routine.definition}
               behavior={routine.behavior}
               slug={routine.slug}
-              map={() => (
+              renderStepTools={canEdit ? (step) => {
+                // The fixture endpoint addresses top-level steps by ID. Do not
+                // accidentally test a same-named nested step against that ID.
+                if (!steps.includes(step) ||
+                    !["transform", "agent_run", "http", "script"].includes(String(step.type))) return null
+                const id = String(step.id)
+                return (
+                  <div className="min-w-0 space-y-3">
+                    <Button
+                      type="button" variant="outline" size="sm"
+                      aria-expanded={testedStep === id}
+                      onClick={() => setTestedStep(testedStep === id ? null : id)}
+                    >
+                      {testedStep === id ? "Close step test" : "Test step"}
+                    </Button>
+                    {testedStep === id && (
+                      <RoutinePublishedStepTest
+                        key={`${workspaceId}:${routine.slug}:${routine.definition_hash}:${id}`}
+                        workspaceId={workspaceId}
+                        definition={routine.definition}
+                        stepId={id}
+                        authorCrewId={routine.author_crew_id}
+                      />
+                    )}
+                  </div>
+                )
+              } : undefined}
+              map={({ openStep }) => (
                 <div className="flex flex-col md:flex-row" style={{ height: mapHeight }}>
                   <div className="relative min-h-[240px] w-full min-w-0 flex-1 md:min-w-[380px]">
                     <RoutineDefinitionCanvas
                       definition={routine.definition}
                       slug={routine.slug}
                       name={routine.name}
-                      selectedStepId={selected}
-                      onStepSelect={handleSelect}
-                      focusStepId={focus}
+                      onStepSelect={(id) => { if (id) openStep(id) }}
                     />
                   </div>
-                  {selected && (
-                    <aside className="h-[45%] max-h-[45%] w-full shrink-0 overflow-auto border-t p-4 md:h-auto md:max-h-none md:w-[320px] md:border-l md:border-t-0">
-                      <button
-                        onClick={() => setSelected(null)}
-                        className="mb-3 text-xs text-muted-foreground"
-                      >
-                        Close step detail
-                      </button>
-                      <RoutineStepDefinition
-                        step={(
-                          routine.definition.steps as
-                            | Record<string, unknown>[]
-                            | undefined
-                        )?.find((s) => s.id === selected)}
-                      />
-                    </aside>
-                  )}
+
                 </div>
               )}
             />
