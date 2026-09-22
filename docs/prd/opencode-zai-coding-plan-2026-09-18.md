@@ -1,5 +1,7 @@
 # Z.AI GLM Coding Plan — P1 implementation record
 
+> **Current status — 2026-09-22:** deployed and tested on the main dev3 origin, including the original Správce záloh agent and the user’s stored Coding Plan key. The `:8443` acceptance service is retired. See the [current deployment, acceptance and rollback report](reports/opencode-main-dev3-2026-09-22.md). Older deployment/checklist sections below are historical and do not request another key from the user. Required CI remains pending; CodeRabbit waiting was explicitly waived by the user.
+
 Date: 2026-09-18. Issue: #2621 (created per the expansion analysis's
 one-issue-per-slice rule). Branch `feat/opencode-zai-coding-plan`, based on
 `feat/opencode-go-zen` at `555ab2573` — a stacked slice, because the OpenCode
