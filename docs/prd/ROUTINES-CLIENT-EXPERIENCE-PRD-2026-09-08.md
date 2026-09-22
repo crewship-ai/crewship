@@ -1,5 +1,7 @@
 # Routines: srozumitelná obsluha a spolehlivé autorování
 
+> Aktuální převzetí a otevřené brány (21. září): [opravy, důkazy a navazující přejímka](reports/routines-takeover-2026-09-21.md). Připravené PR nejsou společně nasazené; §11 je NOT VERIFIED.
+
 **Navigace ve stavu k 18. září:** Tento PRD drží původní rozsah R1–R10 a lidskou přejímku §11. Navazující změny mají vlastní zadání a důkazy:
 
 - [Vstupy, pravidla práce a řešení problémů](ROUTINES-CLARITY-PRD-2026-09-15.md): [PR #2556](https://github.com/crewship-ai/crewship/pull/2556), issue #2555.
