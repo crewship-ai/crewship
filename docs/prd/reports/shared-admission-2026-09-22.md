@@ -83,6 +83,23 @@ not just non-overlapping work statuses. Evidence is in the `fixed/` subdirectory
 The subsequent synchronous-peer-query refusal is a separate change; this live
 probe does not test it.
 
+### Cancellation exposed an additional settlement bug
+
+On the same build, cancelling waiting work `cmucnyath0005507ab6c0` returned
+`requested`, but settled into `needs_reconciliation`: after RunAgent returned,
+`phaseLocked` treated the launch as settled despite its creation gate never
+having admitted a process. The provider probe then failed on the direct-exec
+container without tmux. Chat `msg_1790080905602894031_1e3eb051f330a876` continued
+and completed with exit 0. Durable `runtime_phase` remained `starting`, never
+`requested`. This test work was manually resolved as cancelled using generation
+1 and a recorded explanation; that manual action is not a passing cancel test.
+
+The added regression `TestWebhookRuntime_ReturnBeforeCreationNeedsNoProviderProbe`
+failed with “probe run uncreated-run: no exec in tests”. The fix retains the
+declared phase after a return if creation was never requested or confirmed.
+Once creation was requested, provider errors still mean uncertainty. The live
+cancel scenario must be repeated on this fix before claiming success.
+
 ## Remaining release work
 
 #2643 remains open: migrate all producer queues to one durable claim/retry/
