@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strconv"
@@ -619,11 +620,22 @@ func (s *Scheduler) triggerAgent(ag scheduledAgent) {
 	}
 
 	if runErr != nil {
-		errMsg := runErr.Error()
-		if err := s.resolver.UpdateRun(ctx, runID, "FAILED", nil, &errMsg, completedMeta); err != nil {
-			s.logger.Warn("failed to update run status", "run_id", runID, "status", "FAILED", "error", err)
+		if errors.Is(runErr, orchestrator.ErrDetachedStillRunning) {
+			// Nonterminal (#2626): the exec is still alive and the
+			// orchestrator holds the run at `running` — it also already
+			// attempted to stop the wedged exec inside RunAgent's own
+			// ownership boundary, before any slot this goroutine holds was
+			// at risk. Neither FAILED nor COMPLETED is true; leave the run
+			// nonterminal for an operator to reconcile.
+			s.logger.Warn("scheduled run's exec detached after RunAgent's stop attempt; leaving the run nonterminal",
+				"agent", ag.Slug, "error", runErr, "duration_ms", completedMeta["duration_ms"])
+		} else {
+			errMsg := runErr.Error()
+			if err := s.resolver.UpdateRun(ctx, runID, "FAILED", nil, &errMsg, completedMeta); err != nil {
+				s.logger.Warn("failed to update run status", "run_id", runID, "status", "FAILED", "error", err)
+			}
+			s.logger.Error("scheduled run failed", "agent", ag.Slug, "error", runErr, "duration_ms", completedMeta["duration_ms"])
 		}
-		s.logger.Error("scheduled run failed", "agent", ag.Slug, "error", runErr, "duration_ms", completedMeta["duration_ms"])
 	} else {
 		exitCode := 0
 		if err := s.resolver.UpdateRun(ctx, runID, "COMPLETED", &exitCode, nil, completedMeta); err != nil {

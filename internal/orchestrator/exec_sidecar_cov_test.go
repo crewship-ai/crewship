@@ -15,6 +15,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/crewship-ai/crewship/internal/provider"
@@ -27,6 +28,15 @@ import (
 type covContainer struct {
 	mu    sync.Mutex
 	calls []provider.ExecConfig
+	// agentInspects counts the terminal agent-exec inspections, for the
+	// detached-then-flips tests (#2626).
+	agentInspects atomic.Int64
+	// tmuxAliveOut / tmuxStopOut let a test flip the runtime-probe answers
+	// after construction (#2626 detached-hold tests): the watcher must see
+	// the runtime alive, then gone.
+	tmuxMu       sync.Mutex
+	tmuxAliveOut string
+	tmuxStopOut  string
 	// stdins holds each call's drained stdin, parallel to calls. The merged
 	// preflight script (#1646) rides stdin rather than argv, so a fake that
 	// only recorded Cmd would see an exec that says nothing about its work.
@@ -542,4 +552,18 @@ func covHealthySidecar(cfg provider.ExecConfig) (*provider.ExecResult, error) {
 		}, nil
 	}
 	return nil, nil
+}
+
+// setTmuxAlive flips the has-session probe answer ("PRESENT"/"ABSENT").
+func (c *covContainer) setTmuxAlive(out string) {
+	c.tmuxMu.Lock()
+	c.tmuxAliveOut = out
+	c.tmuxMu.Unlock()
+}
+
+// setTmuxStop flips the kill probe answer.
+func (c *covContainer) setTmuxStop(out string) {
+	c.tmuxMu.Lock()
+	c.tmuxStopOut = out
+	c.tmuxMu.Unlock()
 }

@@ -7,6 +7,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 	"time"
@@ -175,7 +176,15 @@ func (s *Server) handleAgentStart(w http.ResponseWriter, r *http.Request) {
 				})
 		}
 		if err := s.orchestrator.RunAgent(ctx, runReq, handler); err != nil {
-			s.logger.Error("agent run failed", "agent_id", agentID, "error", err)
+			if errors.Is(err, orchestrator.ErrDetachedStillRunning) {
+				// Nonterminal (#2626): the run stays at `running`, and
+				// RunAgent already attempted to stop the wedged exec inside
+				// its own ownership boundary — before the run semaphore this
+				// goroutine's cleanup releases could be re-acquired.
+				s.logger.Warn("agent run's exec detached after RunAgent's stop attempt", "agent_id", agentID, "error", err)
+			} else {
+				s.logger.Error("agent run failed", "agent_id", agentID, "error", err)
+			}
 		}
 	}()
 
