@@ -566,7 +566,15 @@ func (s *Scheduler) triggerAgent(ag scheduledAgent) {
 		"tags":        []string{"scheduled", info.CLIAdapter},
 	}
 	if err := s.resolver.CreateRun(ctx, runID, ag.ID, chatID, ag.Workspace, "SCHEDULED", runMeta); err != nil {
-		s.logger.Warn("scheduled: create run failed", "error", err)
+		// The IPC response can be lost after the record committed. Do not
+		// execute an unrecorded run, or release the occurrence reservation
+		// and mint a second identity for a potentially committed record.
+		// Keep the due timestamp unchanged: no run has executed. The legacy
+		// scheduler has no reconciliation queue; durable migration must give
+		// this ambiguous write an explicit operator-visible state.
+		s.logger.Error("scheduled: run record write failed; not starting agent; occurrence reservation retained",
+			"agent_id", ag.ID, "run_id", runID, "idempotency_key", idemKey, "error", err)
+		return
 	}
 	// Put the run on the context so every journal entry emitted beneath it
 	// inherits trace_id = runID — the orchestrator's JournalEntry has no
