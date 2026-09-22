@@ -282,15 +282,15 @@ describe("left rail filtering", () => {
     expect(list().getByText(/nothing matches these filters/i)).toBeInTheDocument()
   })
 
-  // Providers with zero accounts remain discoverable from the empty vault.
-  it("keeps provider discovery available for an empty vault", async () => {
+  // An empty vault has no connected-provider facets; onboarding stays available.
+  it("does not invent connected providers for an empty vault", async () => {
     routeApi({ credentials: [] })
     render(<CredentialsPage />)
 
     expect(await screen.findByText("No credentials yet")).toBeInTheDocument()
     expect(screen.getByPlaceholderText(/search a secret or tool/i)).toBeInTheDocument()
     expect(screen.getByText("All providers", { exact: true })).toBeInTheDocument()
-    expect(screen.getAllByLabelText("0 connected accounts")).toHaveLength(12)
+    expect(screen.queryByLabelText(/connected accounts/)).not.toBeInTheDocument()
   })
 
   it("collapses to a rail that can be reopened", async () => {

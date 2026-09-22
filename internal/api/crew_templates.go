@@ -20,6 +20,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/encryption"
 	"github.com/crewship-ai/crewship/internal/journal"
+	"github.com/crewship-ai/crewship/internal/providerlogin"
 )
 
 // errTemplateNotFound is returned by deployCrewTemplate when the slug doesn't exist.
@@ -284,10 +285,12 @@ func autoAssignCredentials(ctx context.Context, db *sql.DB, logger *slog.Logger,
 	}
 
 	rows, err := db.QueryContext(ctx, `
-		SELECT id, name FROM credentials
-		WHERE workspace_id = ? AND type IN ('API_KEY', 'AI_CLI_TOKEN')
-		  AND provider = ? AND deleted_at IS NULL AND status = 'ACTIVE'
-		ORDER BY created_at ASC`, wsID, agentProvider)
+		SELECT c.id, c.name, c.type, COALESCE(f.value, '')
+		FROM credentials c
+		LEFT JOIN credential_fields f ON f.credential_id = c.id AND f.key = 'mode'
+		WHERE c.workspace_id = ? AND c.type IN ('API_KEY', 'AI_CLI_TOKEN', 'PROVIDER_LOGIN')
+		  AND c.provider = ? AND c.deleted_at IS NULL AND c.status = 'ACTIVE'
+		ORDER BY c.created_at ASC`, wsID, agentProvider)
 	if err != nil {
 		if logger != nil {
 			logger.Warn("autoAssignCredentials: list query failed",
@@ -306,8 +309,8 @@ func autoAssignCredentials(ctx context.Context, db *sql.DB, logger *slog.Logger,
 	// when really there were credentials we just couldn't link.
 	credentialsFound := false
 	for rows.Next() {
-		var credID, credName string
-		if err := rows.Scan(&credID, &credName); err != nil {
+		var credID, credName, credType, credMode string
+		if err := rows.Scan(&credID, &credName, &credType, &credMode); err != nil {
 			if logger != nil {
 				logger.Warn("autoAssignCredentials: scan failed",
 					"workspace_id", wsID, "agent_id", agentID, "error", err)
@@ -316,9 +319,24 @@ func autoAssignCredentials(ctx context.Context, db *sql.DB, logger *slog.Logger,
 			continue
 		}
 		credentialsFound = true
+		// A PROVIDER_LOGIN (an OpenCode gateway or coding-plan account, a
+		// pasted key login) delivers under its provider's slot, not under
+		// the credential's display name: the delivery resolver keys env
+		// delivery off the slot, and the sidecar's auth-file renderer maps
+		// the slot to the native provider id. An empty mode field reads as
+		// api_key — the same default providerlogin.Split applies on store.
+		slot := credName
+		if credType == "PROVIDER_LOGIN" {
+			slot = providerlogin.DeliveryFor(agentProvider, credMode).Target
+			if slot == "" {
+				// No known slot for this provider/mode: skip rather than
+				// invent a name the delivery layer would misread.
+				continue
+			}
+		}
 		if _, err := db.ExecContext(ctx, `
 			INSERT OR IGNORE INTO agent_credentials (agent_id, credential_id, env_var_name, created_at)
-			VALUES (?, ?, ?, ?)`, agentID, credID, credName, now); err != nil {
+			VALUES (?, ?, ?, ?)`, agentID, credID, slot, now); err != nil {
 			if logger != nil {
 				logger.Warn("autoAssignCredentials: insert failed",
 					"workspace_id", wsID, "agent_id", agentID,
@@ -527,7 +545,7 @@ func (h *CrewTemplateHandler) Deploy(w http.ResponseWriter, r *http.Request) {
 	var overrides deployOverrides
 	if body.Provider != "" || body.CLIAdapter != "" || body.LLMModel != "" {
 		provider, ok := resolveLLMProvider(body.Provider)
-		matching := map[string]string{"ANTHROPIC": "CLAUDE_CODE", "OPENAI": "CODEX_CLI", "GOOGLE": "GEMINI_CLI", "CURSOR": "CURSOR_CLI", "FACTORY": "FACTORY_DROID", "OLLAMA": "OPENCODE"}
+		matching := map[string]string{"ANTHROPIC": "CLAUDE_CODE", "OPENAI": "CODEX_CLI", "GOOGLE": "GEMINI_CLI", "CURSOR": "CURSOR_CLI", "FACTORY": "FACTORY_DROID", "OLLAMA": "OPENCODE", "OPENCODE": "OPENCODE", "OPENCODE_GO": "OPENCODE", "ZAI_CODING_PLAN": "OPENCODE"}
 		if !ok || strings.TrimSpace(body.Provider) == "" || matching[provider.provider] != body.CLIAdapter || strings.TrimSpace(body.LLMModel) == "" {
 			writeProblem(w, r, http.StatusBadRequest, "Choose a provider, its matching runner and a model")
 			return

@@ -172,7 +172,7 @@ reviews:
       instructions: |
         Review React components for:
         - ONLY shadcn/ui components (components/ui/) -- no external UI libraries
-        - ONLY lucide-react for icons
+        - Use lucide-react for interface/action icons. Provider brands may reuse existing official logo components from components/icons/provider-icons.tsx or the credential brand registry; do not invent new logo paths.
         - Tailwind CSS only (no inline styles)
         - Proper TypeScript interfaces for props
         - Accessibility: aria labels, keyboard navigation
@@ -203,7 +203,7 @@ reviews:
         - Context propagation on all functions
         - Error wrapping with fmt.Errorf("context: %w", err)
         - No frameworks -- stdlib + minimal dependencies
-        - Security: container isolation, non-root UID 1001
+        - Security: container isolation; agent execs use non-root UID 1001. Sidecar start/stop intentionally uses its separate owner UID:GID 1002:1002; preserve that credential boundary.
 
     - path: "lib/encryption.ts"
       instructions: |

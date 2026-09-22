@@ -134,6 +134,13 @@ func (h *InternalHandler) ListCredentials(w http.ResponseWriter, r *http.Request
 		statusClause = "status = 'ACTIVE'"
 	}
 
+	// Provider logins are delivered through the per-agent path. Include their
+	// IDs for reaping, without adding them to the global plaintext token pool.
+	typeClause := "type IN ('AI_CLI_TOKEN', 'API_KEY', 'PROVIDER_LOGIN')"
+	if includeValues {
+		typeClause = "type IN ('AI_CLI_TOKEN', 'API_KEY')"
+	}
+
 	// rotation_grace_until (#1882): the end of this credential's open
 	// rotation window, or NULL. The crew sidecar's reaper reads it to drop
 	// its boot-time copy of the previous value once the operator ends the
@@ -150,7 +157,7 @@ func (h *InternalHandler) ListCredentials(w http.ResponseWriter, r *http.Request
 		    AND cr.expires_at > ? AND cr.old_value != '') AS rotation_grace_ids
 		FROM credentials
 		WHERE ` + statusClause + ` AND deleted_at IS NULL
-		AND type IN ('AI_CLI_TOKEN', 'API_KEY') AND provider != 'NONE'`
+		AND ` + typeClause + ` AND provider != 'NONE'`
 
 	now := leaseComparisonNow()
 	args := []any{now, now}
@@ -162,7 +169,8 @@ func (h *InternalHandler) ListCredentials(w http.ResponseWriter, r *http.Request
 		query += " AND provider = ?"
 		args = append(args, provider)
 	}
-	// KNOWN LIMITATION — binding-blind. This listing is the metadata source for
+	// Provider-login metadata follows explicit grants, including bindings.
+	// KNOWN LIMITATION — binding-blind for legacy API_KEY/AI_CLI_TOKEN. This listing is the metadata source for
 	// the sidecar CredStore (proxy-injected API_KEY / AI_CLI_TOKEN keys) and its
 	// reaper, and it does NOT consult credential_bindings, unlike the env/file
 	// delivery path (loadDeliveredCredentials). A credential reachable ONLY
@@ -224,16 +232,27 @@ func (h *InternalHandler) ListCredentials(w http.ResponseWriter, r *http.Request
 		// the per-agent grant is lease-gated.
 		leaseNow := time.Now().UTC().Format(time.RFC3339)
 		query += ` AND (
-			credentials.scope = 'WORKSPACE'
+			(credentials.type != 'PROVIDER_LOGIN' AND credentials.scope = 'WORKSPACE')
 			OR EXISTS (SELECT 1 FROM agent_credentials ac
 			        JOIN agents a ON a.id = ac.agent_id
 			        WHERE ac.credential_id = credentials.id
 			          AND a.crew_id = ? AND a.deleted_at IS NULL
 			          AND (ac.expires_at IS NULL OR ac.expires_at > ?))
-			OR EXISTS (SELECT 1 FROM credential_crews cc
-			           WHERE cc.credential_id = credentials.id AND cc.crew_id = ?)
-		)`
-		args = append(args, crewID, leaseNow, crewID)
+			OR (credentials.type != 'PROVIDER_LOGIN' AND EXISTS (
+                SELECT 1 FROM credential_crews cc
+                WHERE cc.credential_id = credentials.id AND cc.crew_id = ?))
+            OR (credentials.type = 'PROVIDER_LOGIN' AND EXISTS (
+                SELECT 1 FROM credential_bindings cb
+                WHERE cb.credential_id = credentials.id
+                  AND cb.workspace_id = credentials.workspace_id
+                  AND (cb.scope = 'WORKSPACE'
+                    OR (cb.scope = 'CREW' AND cb.crew_id = ?)
+                    OR (cb.scope = 'AGENT' AND EXISTS (
+                        SELECT 1 FROM agents a WHERE a.id = cb.agent_id
+                        AND a.workspace_id = credentials.workspace_id
+                        AND a.crew_id = ? AND a.deleted_at IS NULL)))))
+        )`
+		args = append(args, crewID, leaseNow, crewID, crewID, crewID)
 	} else if !requestIsLoopback(r) {
 		// This branch used to carry a "fail-open, needs crew-bound internal
 		// tokens" tombstone. That blocker is RESOLVED and the closure shipped:

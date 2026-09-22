@@ -8,7 +8,7 @@
  * of questions, because a seat is asked different things than a secret:
  * "which are paused?", "whose are these?", "does anything pay with a key?".
  * All four facets sit in the rail rather than behind the Filter button: each
- * is bounded (five statuses, five providers, two modes, one owner per person)
+ * lists workspace facets (five statuses, connected providers, two modes, owners)
  * and each is asked on arrival, which is the test the secrets rail applies to
  * its Status and Tier sections.
  *
