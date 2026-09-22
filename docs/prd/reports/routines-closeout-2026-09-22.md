@@ -31,6 +31,24 @@
 
 ## Nasazení a přejímka
 
+Dodatečně prošlo 60 živých API kontrol v novém vyhrazeném workspace na
+dosavadním DEV1 `2836a43d3`: pět rolí, čtení/autorství/publikace/spuštění,
+vytváření a správa plánů, explicitní `routine.run`, okamžité odvolání a
+odmítnutí vlastního povýšení. Testovací workspace, rutiny a plány jsou uklizené.
+Nejde o úplnou matici všech endpointů nebo agentích tokenů. První verze
+pomocného skriptu nesprávně očekávala čtení draftu pro MEMBER; opraveno na
+správné serverové pravidlo MANAGER+. Tento harness omyl není produktový nález.
+
+Navazující kontrola UI ale našla #2645: Run/Run again a kalendář používaly
+jiná pravidla než API a Plan nabízel změny všem rolím. Oprava sdílí explicitní
+mapování skutečných oprávnění: run včetně odloženého startu, samostatné
+vytvoření opakovaného plánu, MANAGER+ pro autorování/zrušení odkladu a ADMIN+
+pro správu existujících plánů. Copy nadále používá administrátorský
+`skip_test_gate`, proto se také řídí ADMIN+. Pět nových případů Plan před
+opravou selhalo; po opravě prošlo 400 komponentových/pomocných testů v 55
+souborech, včetně výslovně delegovaného VIEWER. Toto jsou nové změny, které
+musí zahrnout finální CI, review a následující browserové ověření.
+
 Veřejný DEV1 dosud nebyl aktualizován společnou integrací. Předchozí ověřená
 identita `2836a43d3` a browserové preview důkazy jsou popsány v
 [předání z 21. září](routines-takeover-2026-09-21.md).

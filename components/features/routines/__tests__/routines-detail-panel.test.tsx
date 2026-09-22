@@ -7,6 +7,7 @@ import type { PipelineRunRecord } from "@/hooks/use-pipeline-run-records"
 
 // Hoisted holder so vi.mock factories can read per-test state.
 const h = vi.hoisted(() => ({
+  access: { role: "OWNER", capabilities: [] as string[] },
   records: [] as unknown[],
   refreshRecords: vi.fn(),
 }))
@@ -24,7 +25,7 @@ vi.mock("@/hooks/use-realtime", () => ({
 }))
 
 vi.mock("@/hooks/use-abilities", () => ({
-  useAbilities: () => ({ abilities: {}, role: "OWNER", loading: false }),
+  useAbilities: () => ({ abilities: {}, ...h.access, loading: false }),
 }))
 
 vi.mock("@/hooks/use-pending-approval", () => ({
@@ -106,6 +107,8 @@ function activeRecord(id: string): PipelineRunRecord {
     triggered_via: "manual",
   }
 }
+
+beforeEach(() => { h.access.role = "OWNER"; h.access.capabilities = [] })
 
 const okJSON = (body: unknown) =>
   ({
@@ -572,5 +575,26 @@ describe("<RoutinesDetailPanel> — a slug with a draft and no published routine
     render(<RoutinesDetailPanel {...defaultProps} slug="gone" />)
     expect(await screen.findByText(status === "network" ? "Draft network unavailable" : `Draft request failed: ${status}`)).toBeInTheDocument()
     expect(screen.queryByText(/fetch routine: 404/)).toBeNull()
+  })
+})
+
+
+describe("routine Run permission", () => {
+  it.each([
+    ["MEMBER", [], false],
+    ["VIEWER", [], false],
+    ["VIEWER", ["routine.run"], true],
+    ["MEMBER", ["routine.create"], false],
+    ["MANAGER", [], true],
+  ] as const)("%s with %j", async (role, caps, allowed) => {
+    h.access.role = role; h.access.capabilities = [...caps]; h.records = []
+    mockApi(); await renderPanel()
+    const run = screen.getByRole("button", { name: "Run" })
+    expect(run).toHaveProperty("disabled", !allowed)
+    if (!allowed) {
+      expect(run.parentElement).toHaveAttribute("title", expect.stringContaining("permission"))
+      fireEvent.click(run)
+      expect(vi.mocked(apiFetch).mock.calls.some(([, init]) => init?.method === "POST")).toBe(false)
+    }
   })
 })

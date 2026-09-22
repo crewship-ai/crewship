@@ -13,7 +13,7 @@ import { apiFetch } from "@/lib/api-fetch"
 import { RoutineStartIntent } from "@/lib/routine-start-intent"
 import { useAbilities } from "@/hooks/use-abilities"
 import { useWorkspaceAgentDirectory } from "@/hooks/use-workspace-agent-directory"
-import { canApproveRoutine, roleAtLeast } from "@/lib/routine-governance"
+import { canApproveRoutine, roleAtLeast, routinePermissions } from "@/lib/routine-governance"
 import { useTrace } from "@/hooks/use-trace"
 import { usePendingApproval } from "@/hooks/use-pending-approval"
 import { TraceCanvas } from "@/components/features/activity/trace-canvas"
@@ -106,7 +106,8 @@ export function RoutineRunDetail({ workspaceId, runId }: RoutineRunDetailProps) 
     ["queued", "running", "waiting", "paused"].includes(run?.status ?? ""),
   )
   const [selectedStep, setSelectedStep] = useState<string | null>(null)
-  const { role } = useAbilities()
+  const { role, capabilities } = useAbilities()
+  const canRun = routinePermissions(role, capabilities).run
   // "Ask the lead to fix it" opens the crew lead's chat with the run pinned
   // in the prompt (the chat page reads ?prompt= and sends it once). The
   // directory rows carry crew_id and agent_role beyond the typed identity.
@@ -450,7 +451,7 @@ export function RoutineRunDetail({ workspaceId, runId }: RoutineRunDetailProps) 
                 {stopping ? "Stopping…" : "Stop"}
               </Button>
             )}
-            {roleAtLeast(role, "MEMBER") && !active && (
+            {canRun && !active && (
               <Button
                 variant="outline"
                 size="sm"
@@ -584,7 +585,7 @@ export function RoutineRunDetail({ workspaceId, runId }: RoutineRunDetailProps) 
           <ul className="space-y-1.5 text-xs leading-relaxed">
             <li>
               <span className="font-medium">If the input was wrong</span>: fix or replace it, then{" "}
-              {roleAtLeast(role, "MEMBER") ? (
+              {canRun ? (
                 <button
                   type="button"
                   className="text-primary hover:underline disabled:opacity-60"
