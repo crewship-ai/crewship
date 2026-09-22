@@ -227,8 +227,8 @@ func TestTriggerAgent_StreamsEventsAndPersistsConversation(t *testing.T) {
 			CLIAdapter:  "CLAUDE_CODE",
 			WorkspaceID: "ws1",
 		},
-		// Both warn-only error paths must not abort the run.
-		createRunErr: fmt.Errorf("create run unavailable"),
+		// A failed terminal update must not discard the streamed response.
+		// Initial run creation failures are guarded by run_record_guard_test.
 		updateRunErr: fmt.Errorf("update run unavailable"),
 	}
 	container := &streamContainer{streamOutput: claudeStreamJSON, exitCode: 0}

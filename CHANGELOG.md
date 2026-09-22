@@ -14,6 +14,12 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - Activity now includes the accepted work ledger and webhook deliveries. The separate Work navigation item is removed; existing `/work` bookmarks open the corresponding Activity view. (#2636)
 
 ### Fixed
+- Scheduled fires stop when their occurrence identity cannot be read, instead of falling back to a new wall-clock dedup key that can bypass an existing reservation. (#2643)
+- Scheduled agents do not execute after a failed run-record write. The occurrence reservation and due timestamp remain intact because a lost response does not prove the write failed. (#2643)
+- Webhook settlement writes the terminal run record with a bounded context independent of execution cancellation. A stop proven to precede process creation records `CANCELLED` without an invented exit code, instead of leaving a `RUNNING` record behind an already-cancelled work item. (#2643)
+- All `RunAgent` callers now share the current per-agent serial runtime limit, including chat and webhook runs with different sessions. Waiting for an agent does not consume server execution capacity, cancellation abandons the wait, and unconfirmed detached processes retain both reservations until confirmed stopped. This process-local fence does not replace durable producer admission or the chat mailbox. (#2643)
+- ⚠️ **Behaviour change:** Synchronous peer queries return `409` when agent or server execution capacity is occupied, instead of waiting for a reservation that may be held by their waiting parent. (#2643)
+- Cancelling a webhook before its process creation gate has opened no longer needs a provider probe after `RunAgent` returns. This preserves proof that no process was created, including while waiting for the same agent's active chat. (#2643)
 - Normal routine approval waiting now displays its explanation as a waiting status instead of a red failure alert; actual failures retain their diagnostics. (#2650)
 - Confirmed stops of detached agent processes now return a terminal failure instead of claiming the process is still running. Partial chat replies remain available; unconfirmed detached turns close their WebSocket stream without claiming execution completion. (#2626)
 - Schedule-list indexes now cover the ID tie-breaker, avoiding temporary sorting for equal start times.

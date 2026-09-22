@@ -107,7 +107,9 @@ const (
 	// launchRequested: the gate admitted a creation and Run has not returned.
 	// A process may exist; an absent probe proves nothing yet.
 	launchRequested
-	// launchSettled: the process was confirmed, or Run has returned. The
+	// launchSettled: the process was confirmed, or Run has returned after
+	// creation was requested. A return before creation keeps the declared
+	// phase: no provider probe is needed to prove that nothing was created. The
 	// provider's probe is the truth, with one reservation: a process that was
 	// requested and never confirmed is, when absent, an unknown outcome.
 	launchSettled
@@ -117,7 +119,7 @@ func (l *webhookLaunch) phaseLocked() launchPhase {
 	switch {
 	case l.location == nil:
 		return launchPreparing
-	case l.confirmed || l.returned:
+	case l.confirmed || (l.returned && l.requested):
 		return launchSettled
 	case l.requested:
 		return launchRequested
@@ -145,6 +147,15 @@ type webhookLaunchGate interface {
 	// both cases no process is created. Success means a process may exist
 	// from now on.
 	RequestCreation(ctx context.Context) error
+	// StoppedBeforeCreation proves a stop closed the gate before any process
+	// was requested or observed. A cancelled context alone proves neither.
+	StoppedBeforeCreation() bool
+}
+
+func (l *webhookLaunch) StoppedBeforeCreation() bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.stopped && !l.requested && !l.confirmed
 }
 
 func (l *webhookLaunch) Enter(step string) error {

@@ -61,6 +61,10 @@ type AgentRunRequest struct {
 	// needs to know whether a process could exist needs to be told at the
 	// boundary, not to look for evidence afterwards.
 	ExecGate func(ctx context.Context) error
+	// NoAdmissionWait is for synchronous child queries: the caller may hold
+	// the capacity being requested. Return ErrAdmissionBusy rather than wait
+	// on the parent. This does not bypass either admission limit.
+	NoAdmissionWait bool
 
 	AgentID   string
 	AgentSlug string
@@ -510,8 +514,10 @@ type Orchestrator struct {
 	// alive, so the agent's admission is refused and the departed run's
 	// slot stays held until the hold's watcher confirms the runtime gone
 	// (#2626). See detached_hold.go.
-	detachedMu sync.Mutex
-	detached   map[string]*detachedHold
+	detachedMu       sync.Mutex
+	detached         map[string]*detachedHold
+	agentAdmissionMu sync.Mutex
+	agentAdmissions  map[string]*agentAdmission
 	// sessionPublisher publishes a run's events on its chat's session channel
 	// so routine/webhook/pipeline/IPC runs are watchable, not just WebSocket
 	// ones (#1823). nil in tests/headless — see session_stream.go.

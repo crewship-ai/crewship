@@ -136,6 +136,9 @@ func TestBuildPeerQueryRequest_ThroughBuilder(t *testing.T) {
 	if err != nil {
 		t.Fatalf("builder returned error: %v", err)
 	}
+	if !req.NoAdmissionWait {
+		t.Fatal("synchronous peer query must not wait on its parent's admission")
+	}
 
 	// E0: same for the peer path, which also reuses the caller's ChatID.
 	if req.RunID != "run-peer-1" {

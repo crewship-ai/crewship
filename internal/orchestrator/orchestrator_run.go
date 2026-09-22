@@ -259,6 +259,25 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 		})
 	}
 
+	// Synchronous child queries must refuse already occupied capacity before
+	// approval or hooks can block behind their waiting parent. This is only
+	// an early probe: release immediately so human approval holds no slots,
+	// then acquire authoritatively again at the runtime boundary below.
+	if req.NoAdmissionWait {
+		releaseAgent, admissionErr := o.acquireAgentAdmissionMode(ctx, req.AgentID, true)
+		if admissionErr != nil {
+			return fmt.Errorf("check agent admission: %w", admissionErr)
+		}
+		releaseServer, admissionErr := o.acquireServerAdmission(ctx, true)
+		if admissionErr == nil {
+			releaseServer()
+		}
+		releaseAgent()
+		if admissionErr != nil {
+			return fmt.Errorf("check server admission: %w", admissionErr)
+		}
+	}
+
 	// Harbor Master: gate the run before we spend containers/tokens on
 	// something a human should approve. ApprovalMode comes off the
 	// request — ModeNone short-circuits with Approved, ModeSync blocks
@@ -393,10 +412,20 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 	// `accepting` drain check so a draining orchestrator rejects without
 	// consuming one. The acquire honours ctx cancellation, so a stopped or
 	// timed-out caller backs out of a full pool instead of deadlocking.
-	releaseRunSlot, slotErr := o.acquireRunSlot(ctx)
+	// Enforce the current serial adapter profile at the common runtime
+	// boundary, including producers not yet migrated to the work ledger.
+	// Wait for the agent BEFORE consuming server execution capacity.
+	releaseAgent, slotErr := o.acquireAgentAdmissionMode(ctx, req.AgentID, req.NoAdmissionWait)
 	if slotErr != nil {
+		return fmt.Errorf("acquire agent admission: %w", slotErr)
+	}
+	releaseServer, slotErr := o.acquireServerAdmission(ctx, req.NoAdmissionWait)
+	if slotErr != nil {
+		releaseAgent()
 		return fmt.Errorf("acquire run slot: %w", slotErr)
 	}
+	// A detached hold owns both reservations until confirmed termination.
+	releaseRunSlot := func() { releaseServer(); releaseAgent() }
 	// slotTransferredToHold is set when a detached exec whose stop could not
 	// be confirmed hands the slot to a detached hold (#2626): the watcher
 	// owns the release from there, because capacity must stay occupied for

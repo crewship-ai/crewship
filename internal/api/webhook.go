@@ -573,12 +573,10 @@ func (h *WebhookHandler) acceptDelivery(ctx context.Context, crewID, agentID str
 			"%w: no delivery ledger for agent %s", webhook.ErrUnavailable, agentID)
 	}
 
-	// Mint the run id ONCE, up front. It is the work item's domain id, the id
-	// handed to CreateRun, the id stamped on every journal entry beneath the
-	// run, and the id the orchestrator derives this attempt's tmux session and
-	// /tmp paths from. generateCUID (not UnixNano) — two webhooks landing in
-	// the same nanosecond tick would otherwise mint identical ids and collide
-	// on the runs PK.
+	// Mint the stable logical domain identity at acceptance. Despite this
+	// legacy variable name, it is NOT the attempt's runtime run_id: Claim
+	// mints a fresh run_id per attempt, and that id reaches CreateRun and
+	// runtime paths through WebhookRuntime.Run. Retries keep this domain id.
 	runID := generateCUID()
 
 	// Delivery identity is (workspace, endpoint, source delivery id), and for
@@ -1057,6 +1055,7 @@ func (h *WebhookHandler) runWebhookAgent(
 		}
 
 		exitCode := 0
+		exitCodePtr := &exitCode
 		status := "COMPLETED"
 		var errMsg *string
 		if errors.Is(err, orchestrator.ErrDetachedStillRunning) {
@@ -1073,6 +1072,13 @@ func (h *WebhookHandler) runWebhookAgent(
 			s := err.Error()
 			errMsg = &s
 			exitCode = 1
+			for _, g := range launch {
+				if g != nil && g.StoppedBeforeCreation() {
+					status = "CANCELLED"
+					exitCodePtr = nil // no process existed, so no exit code exists
+					break
+				}
+			}
 		}
 
 		// One metadata map for both outcomes, so the FAILED run carries the
@@ -1086,7 +1092,12 @@ func (h *WebhookHandler) runWebhookAgent(
 		// later applies to every dispatch path rather than to whichever
 		// copies someone remembered to edit (#1949).
 		orchestrator.MergeRunAccumulator(completedMeta, acc, "")
-		if updateErr := h.resolver.UpdateRun(runCtx, runID, status, &exitCode, errMsg, completedMeta); updateErr != nil {
+		// Settlement must survive cancellation of execution. Keep identity and
+		// tracing values, but give this IPC write its own bounded deadline.
+		// Otherwise a cancelled wait leaves the run record RUNNING forever.
+		settleCtx, settleCancel := context.WithTimeout(context.WithoutCancel(runCtx), 10*time.Second)
+		defer settleCancel()
+		if updateErr := h.resolver.UpdateRun(settleCtx, runID, status, exitCodePtr, errMsg, completedMeta); updateErr != nil {
 			h.logger.Warn("failed to update run status", "run_id", runID, "status", status, "error", updateErr)
 		}
 		return err
