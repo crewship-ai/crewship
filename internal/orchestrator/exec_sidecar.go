@@ -793,8 +793,10 @@ func writeCredentialFiles(
 
 // sidecarHealth holds the parsed health response from a running sidecar.
 type sidecarHealth struct {
-	Status      string `json:"status"`
-	NetworkMode string `json:"network_mode"`
+	// Live counts can shrink after a reaper pass even if the boot fingerprint stays the same.
+	ProviderCreds map[string]int `json:"provider_creds"`
+	Status        string         `json:"status"`
+	NetworkMode   string         `json:"network_mode"`
 	// SidecarHash is the content hash of the binary the running sidecar is
 	// executing (#1008). Empty on pre-#1008 sidecars.
 	SidecarHash string `json:"sidecar_hash"`

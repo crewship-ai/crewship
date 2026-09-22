@@ -210,18 +210,24 @@ func parseLLMUsage(codec, body string) LLMUsage {
 }
 
 // parseLLMUsageSSE extracts the last/cumulative usage values from Server-Sent
-// Events without delaying delivery: the proxy tees bytes to the client while
-// retaining only a bounded copy, then calls this after EOF. Providers use
+// Events. The streaming observer calls it per event with reusable scratch;
+// callers with a complete response can use it directly. Providers use
 // three common event shapes: a normal response object in data:, OpenAI
 // Responses' {response:{...}}, and Anthropic's {message:{...}} start event.
 func parseLLMUsageSSE(codec, body string) LLMUsage {
+	var lines []string
+	return parseLLMUsageSSEWithScratch(codec, body, &lines)
+}
+
+func parseLLMUsageSSEWithScratch(codec, body string, scratch *[]string) LLMUsage {
 	var out LLMUsage
-	var dataLines []string
+	dataLines := (*scratch)[:0]
 	flush := func() {
 		if len(dataLines) == 0 {
 			return
 		}
 		data := strings.Join(dataLines, "\n")
+		clear(dataLines)
 		dataLines = dataLines[:0]
 		if data == "[DONE]" {
 			return
@@ -244,7 +250,9 @@ func parseLLMUsageSSE(codec, body string) LLMUsage {
 		}
 	}
 
-	for _, line := range strings.Split(strings.ReplaceAll(body, "\r\n", "\n"), "\n") {
+	// Iterate without allocating a slice entry for every SSE line.
+	for line := range strings.SplitSeq(body, "\n") {
+		line = strings.TrimSuffix(line, "\r")
 		if line == "" {
 			flush()
 			continue
@@ -254,6 +262,7 @@ func parseLLMUsageSSE(codec, body string) LLMUsage {
 		}
 	}
 	flush()
+	*scratch = dataLines
 	return out
 }
 

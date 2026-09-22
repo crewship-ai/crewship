@@ -26,6 +26,7 @@ package orchestrator
 // nothing.
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/crewship-ai/crewship/internal/llmroute"
@@ -153,6 +154,14 @@ func ModelCredentialReadiness(adapter, llmProvider, llmModel string, creds []Cre
 			continue
 		}
 		if len(allowed) > 0 {
+			// The routed exception: an OpenCode run whose provider owns a
+			// /llm/… route is served from the CredStore instead.
+			if adapter == "OPENCODE" && proxyRoutableProvider(want) && credTypeToProvider(cred) == want {
+				report.State = ModelCredentialReady
+				report.CredentialID = cred.ID
+				report.Delivery = DeliverySidecar
+				return report
+			}
 			// BuildEnvVarsSidecar's allowed-override loop: the variable must
 			// be one the adapter reads AND the type must have a delivery
 			// channel. gemini-cli reads either Google spelling; the runtime
@@ -161,14 +170,6 @@ func ModelCredentialReadiness(adapter, llmProvider, llmModel string, creds []Cre
 				report.State = ModelCredentialReady
 				report.CredentialID = cred.ID
 				report.Delivery = DeliveryEnv
-				return report
-			}
-			// The routed exception: an OpenCode run whose provider owns a
-			// /llm/… route is served from the CredStore instead.
-			if adapter == "OPENCODE" && proxyRoutableProvider(want) && credTypeToProvider(cred) == want {
-				report.State = ModelCredentialReady
-				report.CredentialID = cred.ID
-				report.Delivery = DeliverySidecar
 				return report
 			}
 			continue
@@ -204,4 +205,20 @@ func sameKeyVariable(have, want string) bool {
 	}
 	google := map[string]bool{"GOOGLE_API_KEY": true, "GEMINI_API_KEY": true}
 	return google[have] && google[want]
+}
+
+// Managed OpenCode products cannot fall back to an unmanaged payer. Report
+// a missing grant before OpenCode turns absent native auth into UnknownError.
+func validateManagedOpenCodeCredential(req AgentRunRequest) error {
+	if req.CLIAdapter != "OPENCODE" {
+		return nil
+	}
+	r := ModelCredentialReadiness(req.CLIAdapter, req.LLMProvider, req.LLMModel, req.Credentials)
+	switch r.Provider {
+	case "OPENCODE", "OPENCODE_GO", "ZAI_CODING_PLAN":
+		if r.State == ModelCredentialMissing {
+			return fmt.Errorf("no assigned %s credential for this agent; connect the provider in Credentials and grant this agent access", r.Provider)
+		}
+	}
+	return nil
 }

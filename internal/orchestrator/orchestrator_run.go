@@ -183,6 +183,10 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 		span.End()
 	}()
 
+	if err := validateManagedOpenCodeCredential(req); err != nil {
+		return err
+	}
+
 	// journalUserMessage scrubs the message against this run's credential
 	// values and the built-in patterns, then bounds it to
 	// journalUserMessageMaxChars. Its one remaining consumer is the
@@ -1447,13 +1451,14 @@ func (o *Orchestrator) ensureSidecar(ctx context.Context, req *AgentRunRequest, 
 				memoryCfg.CrewMemoryPath = memory.ContainerCrewMemoryRoot
 			}
 		}
-		// Build IPC config for agents in a crew so the sidecar can forward
-		// assignment requests (LEAD), peer queries, and escalations (all roles).
+		// Every agent needs IPC for usage accounting and credential reaping,
+		// including a lone non-lead without peers. Role-specific handlers still
+		// authorize assignment requests independently.
 		// The token handed to the sidecar is crew-bound (#1159; workspace-bound
 		// when the run has no crew), never the raw master internal token —
 		// see sidecarIPCToken.
 		var ipcCfg *SidecarIPCConfig
-		if ipcBaseURL != "" && (req.AgentRole == "LEAD" || len(req.CrewMembers) > 0) {
+		if ipcBaseURL != "" {
 			ipcCfg = &SidecarIPCConfig{
 				BaseURL:     ipcBaseURL,
 				Token:       internalAPIToken,

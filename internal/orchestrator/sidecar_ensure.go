@@ -46,6 +46,7 @@ package orchestrator
 import (
 	"context"
 	"fmt"
+	"io"
 	"strings"
 
 	"github.com/crewship-ai/crewship/internal/auth/internaltoken"
@@ -138,7 +139,8 @@ func (o *Orchestrator) settleSidecar(ctx context.Context, spec sidecarSettleSpec
 			spec.onStale(health.SidecarHash)
 		}
 		restart := sidecarNeedsRestart(health, spec.desiredMode, spec.desiredDomains, spec.restartFingerprint) ||
-			crewOnlySidecarMustBeReplaced(health, spec.crewOnly)
+			crewOnlySidecarMustBeReplaced(health, spec.crewOnly) ||
+			sidecarMissingGrantedCredentials(health, spec.creds)
 		if !restart {
 			// #1160: restricted mode used to restart UNCONDITIONALLY here
 			// ("the domain allowlist may differ between agents, so we always
@@ -156,39 +158,19 @@ func (o *Orchestrator) settleSidecar(ctx context.Context, spec sidecarSettleSpec
 		} else {
 			o.logger.Warn("sidecar runtime configuration changed, restarting",
 				"running_mode", health.NetworkMode, "desired_mode", spec.desiredMode)
-			// Kill the existing sidecar and WAIT for it to actually exit before
-			// startSidecar launches a replacement (#1160): pkill only sends the
-			// signal and returns immediately, so without this wait a concurrent
-			// exec's checkSidecar could sample the container mid-restart —
-			// momentarily seeing the dying old process (or a not-yet-bound new
-			// one) and misreporting staleness or network-mode drift on a
-			// container that was never actually stale. Bounded to ~2s; falls
-			// through to startSidecar regardless (best-effort).
-			//
-			// The pattern is anchored with `^` — this whole command runs as
-			// `sh -c "<script>"`, and that wrapping shell's OWN
-			// /proc/<pid>/cmdline contains the literal substring
-			// "crewship-sidecar" (it's part of the script text passed to -c).
-			// An UNANCHORED `pkill -f crewship-sidecar` matches that substring
-			// anywhere in a process's command line — including its own parent
-			// shell — so it self-SIGTERMs before ever reaching the wait loop
-			// (verified live: exit code 143, i.e. killed by signal, with zero
-			// loop iterations run). The real sidecar is launched as the bare
-			// command `crewship-sidecar --addr 127.0.0.1:9119`
-			// (startSidecar), so its cmdline STARTS WITH the pattern; the
-			// wrapping shell's never does (it starts with "sh"). `^` excludes
-			// exactly the self-match case while still catching the real target.
-			_ = o.execPreflight(ctx, provider.ExecConfig{
+			// Containers drop all capabilities: UID 0 cannot signal UID 1002
+			// without CAP_KILL. Stop as the sidecar owner, and refuse to launch
+			// a replacement if the old listener did not exit. Otherwise the
+			// health probe can falsely accept the stale process on the port.
+			// Anchor the pattern so pkill does not match its own sh -c wrapper.
+			if err := o.execSidecarStop(ctx, provider.ExecConfig{
 				ContainerID: spec.containerID,
 				Cmd: []string{"sh", "-c",
-					`pkill -f '^crewship-sidecar' 2>/dev/null; i=0; while [ $i -lt 20 ]; do pkill -0 -f '^crewship-sidecar' 2>/dev/null || exit 0; sleep 0.1; i=$((i+1)); done; exit 0`},
-				User: "0:0",
-				// Killing the stale sidecar to reset the network policy
-				// legitimately needs root; #1158 opt-in (see ExecConfig).
-				// Failing this closed would leave the stale egress policy in
-				// place — a worse security outcome than the root exec.
-				AllowPrivileged: true,
-			})
+					`command -v pkill >/dev/null 2>&1 || exit 1; pkill -f '^crewship-sidecar' 2>/dev/null; i=0; while [ $i -lt 20 ]; do pkill -0 -f '^crewship-sidecar' 2>/dev/null || exit 0; sleep 0.1; i=$((i+1)); done; echo "sidecar did not stop" >&2; exit 1`},
+				User: "1002:1002",
+			}); err != nil {
+				return false, fmt.Errorf("stop stale sidecar: %w", err)
+			}
 		}
 	}
 	if !needStart {
@@ -200,6 +182,29 @@ func (o *Orchestrator) settleSidecar(ctx context.Context, spec sidecarSettleSpec
 		return false, err
 	}
 	return true, nil
+}
+
+// execSidecarStop requires a confirmed zero exit status. A health response
+// after an unconfirmed stop may still be the old listener.
+func (o *Orchestrator) execSidecarStop(ctx context.Context, cfg provider.ExecConfig) error {
+	ctx, cancel := context.WithTimeout(ctx, preflightExecTimeout)
+	defer cancel()
+	res, err := o.container.Exec(ctx, cfg)
+	if err != nil {
+		return fmt.Errorf("exec stop command: %w", err)
+	}
+	defer res.Reader.Close()
+	if _, err := io.Copy(io.Discard, res.Reader); err != nil {
+		return fmt.Errorf("drain stop output: %w", err)
+	}
+	code, err := provider.WaitExecExit(ctx, o.container, res.ExecID, execProbeTimeout)
+	if err != nil {
+		return fmt.Errorf("wait for stop command: %w", err)
+	}
+	if code != 0 {
+		return fmt.Errorf("sidecar stop exited %d", code)
+	}
+	return nil
 }
 
 // CrewSidecarSpec addresses one crew's shared sidecar without an agent. Every
@@ -327,4 +332,23 @@ func (o *Orchestrator) EnsureCrewSidecar(ctx context.Context, spec CrewSidecarSp
 			"crew_id", spec.CrewID, "container_id", shortID(spec.ContainerID), "network_mode", desiredMode)
 	}
 	return nil
+}
+
+// A regranted key has the same boot fingerprint as before revocation. Compare
+// live provider counts too, so a reaped store is replenished on the next run.
+// Older sidecars without counts keep their existing fingerprint behavior.
+func sidecarMissingGrantedCredentials(health *sidecarHealth, creds []Credential) bool {
+	expected := make(map[string]map[string]struct{})
+	for _, c := range buildSidecarCreds(creds, nil) {
+		if expected[c.Provider] == nil {
+			expected[c.Provider] = make(map[string]struct{})
+		}
+		expected[c.Provider][c.ID] = struct{}{}
+	}
+	for provider, ids := range expected {
+		if count, reported := health.ProviderCreds[provider]; reported && count < len(ids) {
+			return true
+		}
+	}
+	return false
 }

@@ -127,6 +127,21 @@ func TestSpecs_Table(t *testing.T) {
 			legacyHealth: "", keyEnvVars: []string{"OPENROUTER_API_KEY"},
 		},
 		{
+			id: "OPENCODE", pathPrefix: "/llm/opencode", strip: true,
+			upstreamHost: "opencode.ai", basePath: "/zen/v1",
+			requireCred: true, ledger: "opencode", codec: "openai", keyEnvVars: []string{"OPENCODE_API_KEY"},
+		},
+		{
+			id: "OPENCODE_GO", pathPrefix: "/llm/opencode-go", strip: true,
+			upstreamHost: "opencode.ai", basePath: "/zen/go/v1",
+			requireCred: true, ledger: "opencode-go", codec: "openai", keyEnvVars: []string{"OPENCODE_GO_API_KEY"},
+		},
+		{
+			id: "ZAI_CODING_PLAN", pathPrefix: "/llm/zai-coding-plan", strip: true,
+			upstreamHost: "api.z.ai", basePath: "/api/coding/paas/v4",
+			requireCred: true, ledger: "zai-coding-plan", codec: "openai", keyEnvVars: []string{"ZAI_CODING_PLAN_API_KEY"},
+		},
+		{
 			id: "OPENAI_COMPAT", pathPrefix: "/llm/openai-compat", strip: true,
 			hosts: nil, fromCred: true,
 			requireCred: true, ledger: "openai-compat", codec: "openai",
