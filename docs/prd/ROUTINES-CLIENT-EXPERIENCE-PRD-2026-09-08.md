@@ -1,6 +1,6 @@
 # Routines: srozumitelná obsluha a spolehlivé autorování
 
-> Aktuální integrace (22. září): [sloučená bezpečnostní oprava, společné PR a zbývající přejímka](reports/routines-closeout-2026-09-22.md). DEV1 má ověřený testovací kandidát `6981d1527`; integrační PR čeká na CI/review a §11 je NOT VERIFIED.
+> Integrační opravy #2631 jsou sloučené a ověřené na DEV1. [Datovaný závěrečný stav, testy a zbývající přejímka](reports/routines-closeout-2026-09-22.md) uvádí přesný commit nasazení a hranice důkazů. §11 zůstává NOT VERIFIED; technické testy nejsou lidská přejímka.
 
 **Navigace ve stavu k 18. září:** Tento PRD drží původní rozsah R1–R10 a lidskou přejímku §11. Navazující změny mají vlastní zadání a důkazy:
 
