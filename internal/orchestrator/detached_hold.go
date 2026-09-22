@@ -184,13 +184,23 @@ func (o *Orchestrator) closeDetachedHold(h *detachedHold, confirmedGone bool) {
 				break
 			}
 		}
+		if other {
+			// Retire this completed hold in the same critical section as
+			// checking its peers. Otherwise two simultaneous completions can
+			// both see the other and neither restores the agent's presence.
+			// The remaining hold still fences admission until its own cleanup
+			// and terminal bookkeeping finish.
+			delete(o.detached, h.runID)
+		}
 		o.detachedMu.Unlock()
 		if !other {
+			// Keep the last hold registered through the presence update, but
+			// do not hold detachedMu across external tracker I/O.
 			o.markAgentOnline(ctx, h.req, map[string]any{"reason": "detached_exec_confirmed_gone"})
+			o.detachedMu.Lock()
+			delete(o.detached, h.runID)
+			o.detachedMu.Unlock()
 		}
-		o.detachedMu.Lock()
-		delete(o.detached, h.runID)
-		o.detachedMu.Unlock()
 		h.release()
 		if h.done != nil {
 			close(h.done)

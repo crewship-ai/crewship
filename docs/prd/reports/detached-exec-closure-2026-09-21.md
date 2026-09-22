@@ -40,3 +40,18 @@ under `/srv/crewship/backups/crewship_2/detached-fix-20260921/` and the earlier
 `security-perf-20260920/` directory. Final command results and exact CI HEAD are
 recorded on the PR so this document does not conflate an earlier successful
 run with a later revision.
+
+## Additional independent review (2026-09-22)
+
+Two simultaneous hold closures could each observe the other before either
+removed its map entry. Both then skipped `markAgentOnline`, leaving the roster
+busy after all detached processes had ended. The added concurrency regression
+failed on the prior head at iteration 64 with zero online transitions. A
+completed non-last hold is now removed under the same lock that checks its
+peers; the last hold stays registered through its presence update. Tracker I/O
+still runs outside the mutex. The detached-hold suite, including 3,000 paired
+closures per invocation, passed ten repetitions under the race detector.
+
+This proves the in-process completion race correction, not durable recovery
+across daemon restart. The broader final-head verification remains recorded
+on PR #2628; earlier green CI is not evidence for this new change.
