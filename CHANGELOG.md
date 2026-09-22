@@ -10,6 +10,14 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 ## [Unreleased]
 
 ### Fixed
+
+- **Reassigning a previously removed provider key works without a manual runtime restart.** Sidecar reuse now checks live credential counts as well as the original configuration fingerprint.
+
+- **Provider logins remain usable after the sidecar’s periodic credential check.** The metadata endpoint now includes explicitly granted provider logins and drops them when access is removed, without adding them to the global plaintext token pool.
+
+- **Z.AI Coding Plan usage is marked as subscription usage.** API-key authentication no longer labels Coding Plan calls as metered or their zero per-call price as a precise monetary estimate.
+
+- **Solo agents now report model usage and observe credential revocation.** Initialize sidecar IPC for non-lead agents with no peers, preserving scope-bound authentication.
 - The published OpenAPI document now names the fields the issue and agent list rows actually carry: `client_review_required` (emitted on every issue row since the durable Lead review landed) plus the optional `assignee_slug`, `code_links` and `execution` projections, and the agents' `ask_forms` / `suggested_prompts` (nullable, always encoded). `issueResponse` and `agentResponse` are pinned in the schema-keys contract test so a struct field without schema coverage fails the generator gate again. (#2623)
 
 ### Security
@@ -17,6 +25,10 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - A routine run's invoking crew and agent now come only from a verified identity. `POST …/pipelines/{slug}/run` (JWT / CLI token) no longer reads `X-Crewship-Invoking-Crew` / `-Agent` — any member could stamp a run, the "From" crew on its approval card and the autonomy posture consulted before a standing trust grant fires with a crew of their choosing; such runs are recorded as user-driven with `invoking_user_id` set. The sidecar's internal run route additionally verifies that `invoking_agent_id` is a live agent of the invoking crew and that the crew belongs to the run's workspace, whatever token presented them (a master or workspace-bound token could previously name a crew from another tenant). Before a trust grant fires, the routine's author crew posture is honoured regardless of who invoked the run: a strict author's gate always waits for a human. Provenance stored before this change remains as recorded and is not retroactively verified.
 
 ### Added
+
+- Credentials: connect OpenCode Go and OpenCode Zen with separate encrypted API-key accounts, existing access assignments, and OpenCode model selection. Gateway calls use the sidecar with native model protocols; setup explains Go subscription limits and optional Zen balance overage. (#2618)
+
+- Credentials: connect a Z.AI GLM Coding Plan subscription with its own encrypted API-key account, sidecar route and `zai-coding-plan/` model selection on the OpenCode runner. The plan is kept separate from metered Z.AI credit — no shared payer, no fallback — and remaining quota is never inferred from token counts. (#2621)
 
 - Command palette: pages are searchable by name or slug in a **Pages** group — each row wears the page's icon and colour, names its folder or owning crew, marks a published application, and opens `/pages/<slug>`; the list is the same authorised index the overview draws, fetched on open. **Recent** is now kept per user and per workspace, and a page row is offered only while that page is still in the list just returned. History stored under the old shared key is cleared once, not migrated. (#2570)
 
@@ -40,6 +52,10 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - ⚠️ **Behaviour change:** explicit routine input bounds now opt into server validation even without a widget; the optional `absolute_path` format validates path syntax across run producers. Legacy type-only inputs retain their existing server contract. Explicit positive `outcomes.max_iterations` now caps worker/checker model-tier attempts instead of being ignored; zero/omitted preserves configured fallback traversal.
 
 ### Fixed
+
+- Sidecar: observe SSE usage per event so long streams retain their final token totals; bound individual events and omit billing observations when an oversized event makes usage incomplete. (#2621)
+- OpenCode: report missing managed-provider grants before launching the CLI; restart the credential sidecar as its owning UID and reject failed stops instead of accepting stale credentials. (#2621)
+- Sidecar: flush small SSE chunks immediately so OpenCode and other streaming model responses arrive before upstream completion; reduce temporary allocations when parsing SSE usage. (#2621)
 - **Deleting a routine now deletes its schedules with it (#2573).** The delete used to tombstone only the pipeline row: its schedules stayed enabled, kept a `next_run_at`, appeared in the plans list and calendar with an empty routine column, and fired into a load-failure alert every tick until the circuit breaker tripped. The soft-delete now disables and soft-deletes the routine's schedules in the same transaction (a schedule's optional wake probe is untouched — its absence has its own fail-open/fail-closed semantics), and the schedules list hides rows orphaned before this fix rather than presenting them as live plans.
 - Integration validation: issue updates reject an assignee type without an assignee (and `issue create` refuses `--assignee-type` without `--assignee` the same way), preserving owner/delegate identity; backup response schemas accept the nullable diagnostic lists the server actually emits. (#2615)
 - CLI: `inbox show` no longer prints resolve guidance for an item already in the `resolved` state — `inbox resolve <id>` can leave `resolved_action` empty, which the old hint condition mistook for an unresolved row.

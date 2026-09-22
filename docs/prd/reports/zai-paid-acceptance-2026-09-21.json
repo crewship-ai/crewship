@@ -1,0 +1,109 @@
+{
+  "deployed_code": "f4bd6b45c",
+  "sidecar_sha256": "ce3457d4ad8360a816e48e3895b2cf685b891ef898515fdb78144083cb430244",
+  "url": "https://crewship-dev3.unifylab.cz:8443",
+  "workspace": "zai-acceptance",
+  "agent": "spravce-zaloh-glm-test",
+  "successful_tool_run": "msg_1789987405432877544_43b02c3528b86f0d",
+  "successful_restoration_run": "msg_1789987797293269922_5c314adab25792de",
+  "usage": [
+    {
+      "ts": "2026-09-21T10:43:39.951Z",
+      "provider": "zai-coding-plan",
+      "model": "glm-5.3",
+      "input_tokens": 87,
+      "output_tokens": 6,
+      "cost_usd": 0.0,
+      "billing_mode": "flat_rate",
+      "cost_confidence": "unknown",
+      "credential_id": "cmub3i5x400042e6c0304",
+      "subscription_plan": "GLM Coding Plan"
+    },
+    {
+      "ts": "2026-09-21T10:43:35.385Z",
+      "provider": "zai-coding-plan",
+      "model": "glm-5.3",
+      "input_tokens": 9419,
+      "output_tokens": 68,
+      "cost_usd": 0.0,
+      "billing_mode": "flat_rate",
+      "cost_confidence": "unknown",
+      "credential_id": "cmub3i5x400042e6c0304",
+      "subscription_plan": "GLM Coding Plan"
+    },
+    {
+      "ts": "2026-09-21T10:43:30.952Z",
+      "provider": "zai-coding-plan",
+      "model": "glm-5.3",
+      "input_tokens": 4818,
+      "output_tokens": 7,
+      "cost_usd": 0.0,
+      "billing_mode": "flat_rate",
+      "cost_confidence": "unknown",
+      "credential_id": "cmub3i5x400042e6c0304",
+      "subscription_plan": "GLM Coding Plan"
+    }
+  ],
+  "active_key_survival": {
+    "seconds": 67.13,
+    "samples": [
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1
+    ]
+  },
+  "grant_removal": {
+    "seconds": 45.26,
+    "initial_count": 1,
+    "final_count": 0
+  },
+  "plaintext_log_matches": 0,
+  "runtime_auth_file_inspection": "not established: zero auth files found after run cleanup; do not count as PASS",
+  "readiness": "ready via agent_binding / sidecar / ZAI_CODING_PLAN",
+  "main_dev3_binary_hashes_unchanged": true,
+  "tests": {
+    "solo_red_then_race_green": true,
+    "billing_red_then_race_green": true,
+    "reaper_red_then_race_green": true,
+    "regrant_red_then_race_green": true,
+    "sidecar_package_seconds": 64.824,
+    "paymaster_package_seconds": 0.45,
+    "api_targeted_race_seconds": 62.308,
+    "orchestrator_package_seconds": 23.804,
+    "final_vet": "PASS",
+    "full_go": {
+      "snapshot": "e66da9a3b",
+      "exit_code": 0,
+      "packages_ok": 146,
+      "failures": 0,
+      "scope": "started before later fixes; final affected-package/race tests and vet recorded separately"
+    },
+    "frontend": "webpack static export PASS; default Turbopack failed because shared node_modules symlink leaves project root"
+  },
+  "pending": [
+    "final CI",
+    "posted final-head review",
+    "merge authorization and dependency order",
+    "two real accounts/quota exhaustion not tested"
+  ],
+  "note": "Early failed diagnostic runs remain in the journal. First attempted revocation timing was invalid because key was prematurely reaped; only final 45.26-second measurement had a confirmed initial count of one. Restoration proved on existing container; runtime was then recreated to mount final sidecar hash."
+}

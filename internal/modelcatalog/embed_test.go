@@ -39,6 +39,7 @@ func TestDefault_ProviderCoverage(t *testing.T) {
 		"google",
 		"mistral",
 		"openai",
+		"opencode",
 		"openrouter",
 		"xai",
 	}

@@ -9,8 +9,9 @@ import (
 //
 //	Source:  https://models.dev/api.json
 //	Fetched: 2026-09-06
-//	Trim:    8 of 192 providers kept — amazon-bedrock, anthropic, deepseek,
-//	         google, mistral, openai, openrouter, xai. Every model those
+//	Zen added: 2026-09-16 (other provider snapshots unchanged).
+//	Trim:    9 providers kept — amazon-bedrock, anthropic, deepseek,
+//	         google, mistral, openai, opencode, openrouter, xai. Every model those
 //	         providers publish is kept verbatim, including fields this package
 //	         does not decode, so a refresh is a pure re-fetch with no editing.
 //
@@ -24,7 +25,7 @@ import (
 //
 //	curl -fsS https://models.dev/api.json | jq -S 'with_entries(select(.key |
 //	  IN("amazon-bedrock","anthropic","deepseek","google","mistral","openai",
-//	     "openrouter","xai")))' > internal/modelcatalog/data/models.dev.json
+//	     "opencode","openrouter","xai")))' > internal/modelcatalog/data/models.dev.json
 //
 // `jq -S` sorts keys so a refresh produces a reviewable diff rather than a
 // reshuffle. After refreshing, run the package tests: embed_test.go pins the
@@ -42,7 +43,7 @@ import (
 // a gap-filler that sits *below* the hand-verified table in the lookup order,
 // never above it.
 //
-//go:generate sh -c "curl -fsS https://models.dev/api.json | jq -S 'with_entries(select(.key | IN(\"amazon-bedrock\",\"anthropic\",\"deepseek\",\"google\",\"mistral\",\"openai\",\"openrouter\",\"xai\")))' > data/models.dev.json"
+//go:generate sh -c "curl -fsS https://models.dev/api.json | jq -S 'with_entries(select(.key | IN(\"amazon-bedrock\",\"anthropic\",\"deepseek\",\"google\",\"mistral\",\"openai\",\"opencode\",\"openrouter\",\"xai\")))' > data/models.dev.json"
 //go:embed data/models.dev.json
 var snapshotJSON []byte
 
