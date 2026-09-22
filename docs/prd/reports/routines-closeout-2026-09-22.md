@@ -1,137 +1,149 @@
 # Routines — integrační uzavírání PR (22. září 2026)
 
-## Aktuální stav
+## Verdikt a rozsah tohoto záznamu
 
-- **#2641 MERGED**, merge `ff0c8b95601643e7141a1e3d7ca06d34c764a149`.
-  Povinné HTTP credentials se nesmějí tiše změnit na anonymní volání.
-  Celé finální CI prošlo, včetně Race; CodeRabbit skutečně schválil přesný
-  head `98a651d35`. Sloučení proběhlo běžnou cestou, bez administrátorského bypassu.
-- **#2631 je nyní společné integrační PR**: katalog/performance + Work v Activity
-  z #2638 + autorování rozhodovacích formulářů z #2640 + pravdivé výsledky
-  odpojených agentích běhů z #2628. Zachovává jejich původní
-  commity v integrační větvi. Aktivní pravidlo main vyžaduje lineární historii,
-  proto při squash merge uzavřeme zdrojová PR s odkazem na skutečně začleněnou
-  změnu; nebudeme tvrdit, že jejich původní hlavy jsou předky squash commitu.
-- **#2635 MERGED**, squash `6ceddb52dbaab2048075a7638f2a03531f0f49f6`.
-  Aktualizace připnutých CI akcí má věcné manuální review přesného headu
-  `d18c20aeb` a celé zelené CI, včetně image buildu a release packaging rehearsal.
-  Změny upstream zdrojů byly prohlédnuté; nejde o CodeRabbit review.
-- Při spojení produkční strom integrace odpovídal ověřenému `d4dfae3b7`; rozdíl vůči
-  původní integrační větvi při spojení tvořily pouze dva dokumenty z #2631.
-  Nová hlava má přesto vlastní CI a musí mít skutečné review před merge.
-- Následně byl nalezen a opraven #2644: současný Edit při reloadu bez
-  varování ztratil neuložený text. Browserový negativní důkaz i tři negativní
-  komponentové regrese jsou zaznamenané; dialog nyní registruje existující
-  ochranu navigace pouze při `open && dirty`. Zahození jasně zachovává
-  serverový draft. Nové cílené kontroly mají 392 úspěšných testů; tato změna
-  není pokrytá pouhou shodou se včerejším integračním stromem. Nový produkční
-  build, typová kontrola a lint (0 chyb) prošly. Browser potvrdil reload bez
-  varování pro čistý draft, zachování textu při odmítnutém reloadu, zachování
-  serverového draftu a návrat fokusu při zahození, odmítnuté Back/Forward i
-  následné povolené Forward na původní cíl. Vlastní rutina smazána 204; žádné
-  JS chyby. Finální CI a review musí pokrýt novou hlavu.
-- Nová kontrola R9 našla #2647: Test ze zachycených dat měl komponenty,
-  ale žádnou cestu z aktivní stránky. Nový test skutečného panelu i veřejný
-  browser na `6a236506f` selhaly na chybějícím Test step. Oprava vrací Test do
-  detailu kroku, včetně sbalených transformací a mapy. Kontroluje právě
-  zobrazený publikovaný recept; vzorky se importují bez obnovení zdrojového
-  běhu. Externí kroky nadále vyžadují explicitní náhradu výstupu. Podporované
-  jsou existující top-level transform/agent/HTTP/script kontrakty, nikoli
-  nová simulace vnořených kroků. Opravený export `0522f5d41` proti DEV1 API
-  prošel skutečným importem, výpočtem 42 bez nového běhu, 390px kontrolou,
-  porovnáním publikovaných v1/v2 s dokončeným exportem 42/84 a explicitní
-  náhradou HTTP výstupu. Bez JS chyb, vlastní rutina smazána 204. První
-  porovnávací fixture použila nepodporovanou aritmetiku; po opravě testovacích
-  dat prošla celá sada. Veřejný frontend ještě čeká na nasazení této opravy.
-- Společná Go sada na `65cc5f721` prošla: 146 testovaných balíků, 10 bez testů,
-  API 1083,476 s, database 1219,649 s; následné `go vet ./...` také exit 0.
-  Go zdroje na frontendovém `0522f5d41` jsou identické. Následný merge #2632
-  mění závislosti Go, proto finální společné CI znovu ověřuje tento nový základ.
-- Původní finální CI #2631 selhalo při získávání BuildKitu: spojení na
-  `auth.docker.io` bylo resetované před buildem aplikace. Neúspěšné joby byly
-  zopakovány; nejde o doloženou chybu produktových testů. Další integrační
-  push vytváří novou CI evidenci, stará zelená kontrola ji nenahrazuje.
+Stav k 14:00 UTC: tři PR jsou sloučená; společný kandidát Routines je ověřený
+na veřejném DEV1. **Integrační PR ještě není sloučené a PRD není přijaté.**
+Chybí nezávislé schválení a finální CI posledního headu; §11 nemá žádný doložený
+průchod reprezentativního uživatele. Pozdější stav merge určuje příslušné PR,
+nikoli tato časově vymezená zpráva. Procenta dokončení nejsou měřená.
 
-## Nasazení a přejímka
+## Co je sloučené
 
-Dodatečně prošlo 60 živých API kontrol v novém vyhrazeném workspace na
-dosavadním DEV1 `2836a43d3`: pět rolí, čtení/autorství/publikace/spuštění,
-vytváření a správa plánů, explicitní `routine.run`, okamžité odvolání a
-odmítnutí vlastního povýšení. Testovací workspace, rutiny a plány jsou uklizené.
-Nejde o úplnou matici všech endpointů nebo agentích tokenů. První verze
-pomocného skriptu nesprávně očekávala čtení draftu pro MEMBER; opraveno na
-správné serverové pravidlo MANAGER+. Tento harness omyl není produktový nález.
+| PR | Výsledek | Commit v main |
+| --- | --- | --- |
+| [#2641](https://github.com/crewship-ai/crewship/pull/2641) | Povinné HTTP credentials selžou uzavřeně před odchozím požadavkem; chyba credential probe blokuje start | `ff0c8b95601643e7141a1e3d7ca06d34c764a149` |
+| [#2635](https://github.com/crewship-ai/crewship/pull/2635) | Aktualizace připnutých CI akcí | `6ceddb52dbaab2048075a7638f2a03531f0f49f6` |
+| [#2632](https://github.com/crewship-ai/crewship/pull/2632) | Deklarované Go závislosti; SQLite 1.59 používá stejný SQLite engine a odpovídající libc | `ef36bbfe166084da9ac60196cd2336d5603871b7` |
 
-Navazující kontrola UI ale našla #2645: Run/Run again a kalendář používaly
-jiná pravidla než API a Plan nabízel změny všem rolím. Oprava sdílí explicitní
-mapování skutečných oprávnění: run včetně odloženého startu, samostatné
-vytvoření opakovaného plánu, MANAGER+ pro autorování/zrušení odkladu a ADMIN+
-pro správu existujících plánů. Copy nadále používá administrátorský
-`skip_test_gate`, proto se také řídí ADMIN+. Pět nových případů Plan před
-opravou selhalo; po opravě prošlo 400 komponentových/pomocných testů v 55
-souborech, včetně výslovně delegovaného VIEWER. Toto jsou nové změny, které
-musí zahrnout finální CI, review a následující browserové ověření.
+Všechny tři měly celé zelené CI a skutečné review přesného headu: CodeRabbit
+u #2641, nezávislé manuální review původních botích změn u #2635/#2632.
+Nebyl použit přepínač `--admin`. Další merge používají squash podle aktivního
+pravidla lineární historie.
 
-Veřejný DEV1 byl 22. září aktualizován **nesloučeným kandidátem `6a236506f`**
-pro uživatelem zadané testování společné větve. Build 12:37:09 UTC; autentizované
-API, frontendový marker, tři veřejně stažené JS assety a SHA-256 běžící binárky
-souhlasí. `dirty=true` je ponecháno; 17 původních WIP souborů je byte-identických.
-Synchronizace s main po #2635 měnila pouze CI workflow. Následné začlenění
-#2628 už mění backend: tato oprava dosud na DEV1 nasazena není. Předchozí identitu `2836a43d3` neoznačujeme za aktuální.
+## Společné Routines PR #2631
 
-Veřejné browserové sady prošly: Work → Activity (včetně 390 px, klávesnice,
-reloadu a historie), R8 author → draft → publish → číselná odpověď → dokončení,
-ochrana draftu a navigace a pět kombinací rolí/oprávnění. R8 běh
-`run_cmucnubme00095522ada1` uložil `action_id=continue`, `amount=42.5`.
-Také všech 60 API kontrol bylo zopakováno na novém nasazení. Bez JS chyb;
-vlastní rutiny/plány smazané 204 a workspace 200, auditní historie zachována.
-První navigační harness nezafixoval workspace při souběžném vytváření jiného;
-po explicitním výběru vlastního workspace prošel celý test. Tento opravný
-průchod je rozlišený od negativního produktového důkazu #2644.
+[#2631](https://github.com/crewship-ai/crewship/pull/2631) zahrnuje:
 
-[Veřejný protokol](https://github.com/crewship-ai/crewship/pull/2631#issuecomment-5776697448)
-obsahuje identitu a přesné vymezení. **#2631 stále potřebuje finální CI a
-nezávislé schválení.** CodeRabbit odmítl re-review znovu v 12:34 UTC a posunul
-okno přibližně na 13:34. Vlastní review nenahrazuje pravidlo GitHubu vyžadující
-schválení jiným účtem po posledním pushi. Kandidátní deploy není merge.
+- Stránkování katalogů, dávkové lookupy plánů/kalendáře a indexy feedů.
+- Work a Deliveries v Activity, přesměrování starého `/work` (#2638/#2636).
+- Autorování typovaných otázek a pojmenovaných rozhodnutí existujících approval
+  kroků v Edit, přes draft a explicitní publish (#2640/#2637). Nejde o obecný
+  vizuální editor grafu nebo vytváření libovolného nového kroku.
+- Ochranu neuloženého textu při reloadu a navigaci, čisté otevření uloženého
+  draftu a zachování serverového draftu při zahození (#2644).
+- Run/Plan podle skutečných rolí a capabilities: delegovaný Run i pro VIEWER,
+  samostatné vytváření recurrence, MANAGER+ pro zrušení odkladu a ADMIN+ pro
+  změnu existujícího plánu (#2645).
+- Obnovený Test v aktivním detailu kroku: kontrolu zobrazeného publikovaného
+  receptu, import zachycených dat a výpočet vzorku bez obnovení zdrojového běhu.
+  Podporované jsou stávající top-level transform/agent/HTTP/script kontrakty;
+  externí kroky vyžadují explicitní náhradu výstupu. Sbalené transformace a
+  výběr z mapy vedou ke stejnému Testu. Mobilní pole pro zdrojový run se už
+  nesmrskne vedle tlačítka (#2647).
+- Pravdivé výsledky odpojených agentích procesů z #2628/#2626: proces bez
+  potvrzeného ukončení není úspěšný, kapacita a dohled se nezahazují; po
+  současném dokončení dvou držených běhů se agent vrátí online právě jednou.
+  Tyto pojistky jsou procesové, ne trvalá obnova přes restart serveru.
 
-Dodatečně prošel čerstvý R6 browserový test oběma skutečnými formuláři:
-Routines `run_cmucp64gu00333594a37e`, Inbox `run_cmucp65xu003694936f97` zachovaly
-0/false. Nad `run_cmucp67ad00395315bacc` se současně odeslaly dvě různé odpovědi;
-HTTP 409/200, jediná dokončená execution a uložená vítězná hodnota 202.
-Vlastní rutiny smazány 204, bez JS chyb. První harness nesprávně použil přesný
-label bez hvězdičky povinného pole; po opravě selektoru prošla celá sada.
-[Protokol R6](https://github.com/crewship-ai/crewship/pull/2631#issuecomment-5777218634).
+Zdrojová PR #2638/#2640/#2628 zůstávají otevřená, dokud se integrace skutečně
+nesloučí. Po squash merge budou uzavřena jako začleněná s odkazem na výsledný
+commit; původní hlavy nelze označit za předky squash commitu. Větev #2628 musí
+zůstat dostupná pro cizí navazující draft #2646.
 
-§11 zůstává **NOT VERIFIED**: žádná nová data od pěti reprezentativních lidí
-nejsou dodána. [Recorder výsledků](../wireframes/routines-acceptance-recorder.html)
-slouží k zaznamenání skutečných průchodů; automatické a interní testy nejsou
-jejich náhradou. Tvrdý restart, nejistý externí zápis a oprávnění mimo vybrané
-veřejné endpointy nejsou tímto čerstvě kompletně ověřené.
+## Skutečně nasazený a ověřený DEV1
 
-## Další otevřená PR
+**Nesloučený testovací kandidát `6981d152738a98c05bac14b960b1acd457100e23`**, build
+`2026-09-22T13:57:54Z`. Autentizované API, frontendový marker a tři veřejně
+stažené JS assety souhlasí. PID 2281811 a `/tmp/crewship-1-dev` mají stejný
+SHA-256 `ae788645b4c4e6e67a33140cacb972e847fb89401f9e2ccdc8c8875fd5c61585`.
+`dirty=true` je ponecháno; všech 17 původních WIP souborů je byte-identických
+oproti původnímu SHA-256 baseline. DEV2/DEV3 nebyly měněny.
+[Veřejný protokol nasazení a přejímky](https://github.com/crewship-ai/crewship/pull/2631#issuecomment-5777896347).
 
-- #2633/#2634: opravená příčina červeného drift gate v izolovaných checkoutech.
-  #2634 nyní řeší pouze požadované @types/node 26.6.1; #2633 deklaruje přesných
-  14 zamýšlených aktualizací a zachovává ostatní přímé závislosti. Obě finální
-  CI prošla; zbývá aktuální základ a nezávislé schválení. Evidence pod #2642.
-- **#2632 MERGED**, squash `ef36bbfe166084da9ac60196cd2336d5603871b7`.
-  Celé CI a věcné nezávislé manuální review přesného headu `d31c3c423` prošly.
-  SQLite 1.59 ponechává stejný SQLite engine a správně páruje libc. Upstream
-  výkonové údaje nejsou náš benchmark. Nový základ je v integrační větvi.
-- #2628: převzatá oprava dalšího závodu při současném ukončení dvou odpojených
-  běhů. Negativní regrese selhala na předchozím kódu; všech 146 Go balíků a vet
-  na `7b2514396` prošlo, cílené Race testy desetkrát (30 000 souběžných párů).
-  Finální CI samostatného PR na tomto headu prošlo. Změna je nyní začleněna
-  do #2631; společný strom vyžaduje vlastní CI a nezávislé schválení. Po squash
-  merge bude zdrojové PR uzavřeno jako začleněné. Ochrana odpojených běhů je
-  procesová, ne trvalá přes restart serveru.
-- #2646: nově otevřený draft jiného vlastníka navazující na #2628; řeší
-  sdílené přijímání běhů. Není součástí této integrace a není označen za hotový.
-- #2619/#2622: oddělené providerové změny. #2622 drží aktivně crewship_3;
-  do jeho větve tato relace nezasahuje. Otevřené review nálezy zůstávají vlastníku.
-- #2630: draft pilotu Jev; chybějící živé inference není doplněno cizími
-  credentials ani odhadnutými výsledky. Není to otevřený bod Routines PRD.
+Šest veřejných browserových sad prošlo s exit 0 a bez JS chyb (23 skupin
+kontrol). Nejde o 23 reprezentativních uživatelů:
 
-Původních 17 WIP souborů zůstává byte-identických dle SHA-256. DEV2/DEV3
-nebyly měněny. Tato zpráva je stav integrace, nikoli vyhlášení Release 1.0.
+| Oblast | Čerstvý důkaz |
+| --- | --- |
+| Activity/Work | Redirect, taby, klávesnice, historie, reload a 390 px bez přetečení |
+| R8 | Autorování → draft → publish → číselná odpověď 42.5 → dokončení; `run_cmucqprdx003065b8ba76` |
+| Draft/navigace | Čistý draft bez varování; odmítnutý reload/Back/Forward zachová text i původní cíl Vpřed; zahození zachová draft a vrátí fokus |
+| Role v UI | Pět výchozích/delegovaných kombinací pro Run a Plan |
+| R6 | Routines `run_cmucqpo8n0007493ff453` a Inbox `run_cmucqpr24002d83557bec` zachovaly 0/false; souběh na `run_cmucqpswc00372dc89528` vrátil 409/200 a uložil jedinou vítěznou odpověď 202 |
+| R4/R9 | Kontrola publikovaného receptu, import `run_cmucqpowz000c0dea4104`, výpočet 42 bez nového běhu; mobilní pole 246.89 px a dokončený import; HTTP vyžaduje náhradu |
+| R10 | Dokončený export v1/v2 s výstupy 42/84; `run_cmucqpsda00331454d123`, `run_cmucqpso2003497829334` |
+
+Znovu prošlo všech 60 vybraných API kontrol rolí/capabilities na stejném
+nasazení, včetně grant/revoke a odmítnutého vlastního povýšení. Nejde o úplnou
+matici všech endpointů a tokenů. Vlastní rutiny/plány smazané 204, vyhrazené
+workspace 200; auditní historie zachována. Kandidátní deploy není merge.
+
+## Automatické, negativní a výkonové důkazy
+
+- Celý čistý Go strom s posledními Go závislostmi: 146 testovaných balíků,
+  10 bez testů, `go test ./... -count=1 -timeout=45m` a následné `go vet ./...`
+  exit 0. API 1106,453 s, database 1224,516 s. Go zdroje a dependency soubory
+  testovaného `393b1e639` jsou shodné s nasazeným `6981d1527`; poslední rozdíl
+  je pouze responsive CSS.
+- Routines frontend: 382 testů / 54 souborů, čisté testové typy, lint 0 chyb
+  (30 stávajících varování), produkční build. Mobilní změna navíc 45 cílených
+  testů a skutečný browserový negativní/pozitivní průchod.
+- Regrese selhaly před opravou: ztracený text při reloadu, pět nesouladů
+  oprávnění, nedostupný Test a příliš úzké mobilní pole; souběžné zavření
+  detached holdů selhalo bez závěrečného návratu online. Původní opravy R8,
+  přesměrování a credential guard také mají zaznamenaný negativní důkaz.
+- Předchozí plné Go běhy a nové browserové průchody nenahrazují finální CI
+  posledního headu. Skipped/neutral ani rate-limited green neznamená provedenou
+  kontrolu. Zaznamenané CI annotations byly warnings, ne nový potvrzený nález.
+- Výkon z řízeného měření: handler 300 plánů přibližně 15 → 3 ms medián;
+  historie 100 kroků, 1 000 uložených pokusů a 10 000 journal událostí bez
+  duplicit/chybějících ID. Jde o omezené měření, ne o 1 000 skutečných retry,
+  crash test nebo certifikaci výkonu celého produktu. Podrobnosti v
+  [auditu](routines-security-performance-audit-2026-09-20.md).
+
+Opravy testovacích postupů jsou zachované odděleně: očekávání MEMBER draft
+read, explicitní workspace při souběhu, required-label selektor, nepodporovaná
+aritmetika v porovnávací fixture a cleanup lokálního proxy serveru. Tyto
+případy nebyly vydávány za produktové chyby. Opravené celé průchody prošly.
+
+## Závislosti a další PR
+
+- #2633 nyní spojuje 14 frontendových/tooling aktualizací s Node typy #2634.
+  Head `561f1d99f`: frozen install, přesně 15 deklarovaných přímých změn bez
+  drift override, 9 213 testů / 772 souborů, typy, lint a build prošly.
+  Zbývá finální CI a nezávislé schválení. #2634 uzavřít až po začlenění.
+- Prospektivní kombinace #2631 + #2633 má izolovanou větev, finální head
+  `edf7770cd`. Celá frontendová sada 9 246 / 775 prošla před poslední CSS
+  úpravou; finální typy, build a browser Activity/R8/navigace/R9/R10 i mobilní
+  import prošly po ní. Čerstvý checkout nejprve postrádal generované Prisma
+  typy; `pnpm exec prisma generate` doplnil předpoklad, bez migrace.
+  **Frontendové závislosti #2633 nejsou nasazené na DEV1.**
+- #2619/#2622 jsou aktivní oddělené providerové změny crewship_3; #2646 je
+  draft sdíleného admission crewship_2. Jejich kód ani instance tato relace
+  nemění a jejich dokončení nepředstírá.
+- #2630 je draft pilotu Jev; skutečná inference není doložená. Není součástí
+  původního Routines PRD.
+
+## Zbývající brány
+
+1. Dokončit CI a skutečné nezávislé review finálního #2631 a #2633. CodeRabbit
+   při kontrole v 13:36 opět hlásil limit; jedna žádost pro #2631 je zařazená
+   přibližně na 14:35 UTC. GitHub vyžaduje schválení posledního reviewable push
+   jiným účtem; vlastní review změn tuto podmínku nenahrazuje.
+2. Po skutečném squash merge uzavřít začleněná zdrojová PR a uvolnit jejich
+   claims. Nepovažovat testovací deploy za uzavření PR.
+3. **§11 NOT VERIFIED**: nula doložených průchodů pěti reprezentativních lidí.
+   Každou z pěti úloh musí bez nápovědy zvládnout alespoň čtyři. Připravený
+   [recorder](../wireframes/routines-acceptance-recorder.html) výsledek pouze
+   zaznamená; automatizace a interní walkthrough jej nenahrazují.
+4. Tvrdý pád serveru, živý nejistý externí zápis, autorizace mimo vybranou
+   matici a kompletní zátěžový benchmark nejsou tímto čerstvě plně prokázané.
+   Dřívější/serverové důkazy jsou zachované s omezeným rozsahem.
+
+Čerstvá evidence a opakovatelné skripty:
+`/srv/crewship/backups/crewship_1/routines-public-final-20260922/`.
+Kombinované testy, negativní důkazy a test s frontendovými závislostmi:
+`/srv/crewship/backups/crewship_1/routines-combined-20260922/`.
+Předchozí nasazení `6a236506f` má vlastní nezměněný adresář
+`routines-public-closeout-20260922/`; není označené za aktuální deploy.
