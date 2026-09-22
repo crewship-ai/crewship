@@ -14,6 +14,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - Activity now includes the accepted work ledger and webhook deliveries. The separate Work navigation item is removed; existing `/work` bookmarks open the corresponding Activity view. (#2636)
 
 ### Fixed
+- Normal routine approval waiting now displays its explanation as a waiting status instead of a red failure alert; actual failures retain their diagnostics. (#2650)
 - Confirmed stops of detached agent processes now return a terminal failure instead of claiming the process is still running. Partial chat replies remain available; unconfirmed detached turns close their WebSocket stream without claiming execution completion. (#2626)
 - Schedule-list indexes now cover the ID tie-breaker, avoiding temporary sorting for equal start times.
 - Routine step details again offer Test with captured run data. Folded transforms and map selection reach the same testing surface; external steps still require explicit replacement outputs. (#2647)
