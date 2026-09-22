@@ -9,7 +9,7 @@ export interface RoutineTestWorkspaceProps {
   busy: boolean
   result: { passed: boolean; details: string } | null
   onValidate: () => void
-  onOpenCode: () => void
+  onOpenCode?: () => void
   parseError: string | null
   stepId: string
 }
@@ -57,7 +57,7 @@ export function RoutineTestWorkspace({
         definition={definition}
         selectedStepId={stepId}
       />
-      {parseError && (
+      {parseError && onOpenCode && (
         <Button
           type="button"
           variant="outline"

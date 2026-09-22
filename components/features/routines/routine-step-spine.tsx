@@ -138,6 +138,8 @@ export interface RoutineStepSpineProps {
   initialLimit?: number
   /** Slug of the routine, for the "Change it" hint. */
   slug?: string
+  /** Author tools for an individual recipe step; never rendered for recorded runs. */
+  renderStepTools?: (step: Step) => React.ReactNode
   /** Overrides the card title. Defaults to the mode's wording. */
   title?: string
 }
@@ -151,6 +153,7 @@ export function RoutineStepSpine({
   initialLimit = 9,
   slug,
   title,
+  renderStepTools,
 }: RoutineStepSpineProps) {
   const { agents } = useWorkspaceAgentDirectory(workspaceId)
   const [expanded, setExpanded] = React.useState(false)
@@ -359,7 +362,23 @@ export function RoutineStepSpine({
             }
             if (row.kind === "fold")
               return (
-                <details key={row.key} data-testid={`routine-fold-${row.level}`} className="border-t border-border/60 py-2.5 first:border-t-0">
+                <details
+                  key={row.key}
+                  data-testid={`routine-fold-${row.level}`}
+                  open={row.steps.some((step) => openIds.has(String(step.id)))}
+                  onToggle={(event) => {
+                    const open = event.currentTarget.open
+                    setOpenIds((previous) => {
+                      const next = new Set(previous)
+                      for (const step of row.steps) {
+                        if (open) next.add(String(step.id))
+                        else next.delete(String(step.id))
+                      }
+                      return next
+                    })
+                  }}
+                  className="border-t border-border/60 py-2.5 first:border-t-0"
+                >
                   <summary className="flex cursor-pointer list-none items-start gap-3">
                     <span className={cn("flex h-9 w-9 shrink-0 items-center justify-center rounded-xl", STEP_VISUALS.transform.tone)}>
                       <ArrowLeftRight className="h-4 w-4" aria-hidden="true" />
@@ -377,9 +396,10 @@ export function RoutineStepSpine({
                   </summary>
                   <ul className="ml-[48px] mt-2 space-y-1 text-xs">
                     {row.steps.map((s, i) => (
-                      <li key={String(s.id)} className="flex flex-wrap items-baseline gap-2">
+                      <li key={String(s.id)} className="space-y-2">
                         <span>{describeStep(s, i + 1).title}</span>
-                        <span className="font-mono text-[10px] text-muted-foreground">{String(s.id)}</span>
+                        <span className="ml-2 font-mono text-[10px] text-muted-foreground">{String(s.id)}</span>
+                        {!record && renderStepTools?.(s)}
                       </li>
                     ))}
                   </ul>
@@ -429,6 +449,7 @@ export function RoutineStepSpine({
                 slug={slug}
                 open={openIds.has(row.id)}
                 onOpenChange={toggleOpen}
+                tools={!record ? renderStepTools?.(row.step) : undefined}
               />
             )
           })}
@@ -518,6 +539,7 @@ function SpineRow({
   slug,
   open,
   onOpenChange,
+  tools,
 }: {
   row: Extract<LayoutRow, { kind: "step" }>
   layout: RoutineStepsLayout
@@ -529,6 +551,7 @@ function SpineRow({
   slug?: string
   open: boolean
   onOpenChange: (stepId: string, open: boolean) => void
+  tools?: React.ReactNode
 }) {
   const step = row.step
   const stepId = row.id
@@ -712,6 +735,7 @@ function SpineRow({
         {Array.isArray(step.needs) && step.needs.length > 0 && (
           <p className="text-xs text-muted-foreground">Runs after: {step.needs.map(String).join(", ")}</p>
         )}
+        {tools}
         {!record && (
           <p className="text-xs text-muted-foreground">
             <span className="font-medium text-foreground">Change it:</span> with the CLI (

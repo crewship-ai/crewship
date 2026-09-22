@@ -598,3 +598,45 @@ describe("routine Run permission", () => {
     }
   })
 })
+
+describe("active recipe sample testing", () => {
+  beforeEach(() => { h.records = [] })
+  function sampleRoutine() {
+    vi.mocked(apiFetch).mockResolvedValue(okJSON({ ...ROUTINE, definition: {
+      dsl_version: "1.0", name: "daily-report", agentless: true,
+      steps: [{ id: "value", name: "Prepare value", type: "transform", transform: { input: "1", expression: "." } }],
+    } }))
+  }
+  it("opens captured-data testing from the actual recipe step without starting a run", async () => {
+    sampleRoutine()
+    await renderPanel()
+    const details = document.querySelector('[data-step-id="value"]') as HTMLDetailsElement
+    details.open = true
+    fireEvent(details, new Event("toggle"))
+    fireEvent.click(screen.getByRole("button", { name: "Test step" }))
+    expect(details).toHaveAttribute("open")
+    expect(screen.getByLabelText("Use captured run data")).toBeInTheDocument()
+    expect(screen.getByText("Sample data · no external actions")).toBeInTheDocument()
+    expect(apiFetch).not.toHaveBeenCalledWith(expect.stringMatching(/\/run$/), expect.anything())
+    vi.mocked(apiFetch).mockResolvedValueOnce(okJSON({ status: "DRY_RUN_OK" }))
+    fireEvent.click(screen.getByRole("button", { name: "Test routine" }))
+    await screen.findByText("Test passed")
+    const check = vi.mocked(apiFetch).mock.calls.find(([url]) => String(url).endsWith("/test_run"))!
+    expect(JSON.parse(String(check[1]?.body))).toMatchObject({
+      definition: { steps: [{ id: "value", transform: { input: "1", expression: "." } }] },
+      sample_inputs: {},
+    })
+    vi.mocked(apiFetch).mockResolvedValueOnce(okJSON({ status: "RUNNING" }))
+    fireEvent.click(screen.getByRole("button", { name: "Test routine" }))
+    await screen.findByText("Test needs attention")
+  })
+  it("does not offer author-only sample testing to a MEMBER", async () => {
+    h.access.role = "MEMBER"
+    sampleRoutine()
+    await renderPanel()
+    const details = document.querySelector('[data-step-id="value"]') as HTMLDetailsElement
+    details.open = true
+    fireEvent(details, new Event("toggle"))
+    expect(screen.queryByRole("button", { name: "Test step" })).toBeNull()
+  })
+})

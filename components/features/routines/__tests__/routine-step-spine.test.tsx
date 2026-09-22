@@ -290,3 +290,19 @@ describe("routine step spine", () => {
     expect(open[0].textContent).toContain("Ask morgan")
   })
 })
+
+
+it("keeps sample tools reachable for folded transforms and absent from run records", () => {
+  const recipe = { steps: [
+    { id: "source", type: "http", name: "Source", http: { url: "https://example.com" } },
+    ...Array.from({ length: 4 }, (_, i) => ({ id: `prepare_${i}`, type: "transform", needs: ["source"], transform: { input: "{{ steps.source.output }}", expression: "." } })),
+  ] }
+  const renderTools = (step: Record<string, unknown>) => <button>Test {String(step.id)}</button>
+  const view = render(<RoutineStepSpine definition={recipe} renderStepTools={renderTools}
+    map={({ openStep }) => <button onClick={() => openStep("prepare_3")}>Select folded preparation</button>} />)
+  fireEvent.click(screen.getByRole("button", { name: /^map$/ }))
+  fireEvent.click(screen.getByRole("button", { name: "Select folded preparation" }))
+  expect(screen.getByRole("button", { name: "Test prepare_3" })).toBeVisible()
+  view.rerender(<RoutineStepSpine definition={recipe} renderStepTools={renderTools} record={runRecord()} />)
+  expect(screen.queryByRole("button", { name: "Test prepare_3" })).toBeNull()
+})

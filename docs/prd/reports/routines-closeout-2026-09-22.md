@@ -30,6 +30,14 @@
   serverového draftu a návrat fokusu při zahození, odmítnuté Back/Forward i
   následné povolené Forward na původní cíl. Vlastní rutina smazána 204; žádné
   JS chyby. Finální CI a review musí pokrýt novou hlavu.
+- Nová kontrola R9 našla #2647: Test ze zachycených dat měl komponenty,
+  ale žádnou cestu z aktivní stránky. Nový test skutečného panelu i veřejný
+  browser na `6a236506f` selhaly na chybějícím Test step. Oprava vrací Test do
+  detailu kroku, včetně sbalených transformací a mapy. Kontroluje právě
+  zobrazený publikovaný recept; vzorky se importují bez obnovení zdrojového
+  běhu. Externí kroky nadále vyžadují explicitní náhradu výstupu. Podporované
+  jsou existující top-level transform/agent/HTTP/script kontrakty, nikoli
+  nová simulace vnořených kroků. Browserový průchod opravy ještě čeká na deploy.
 - Původní finální CI #2631 selhalo při získávání BuildKitu: spojení na
   `auth.docker.io` bylo resetované před buildem aplikace. Neúspěšné joby byly
   zopakovány; nejde o doloženou chybu produktových testů. Další integrační
@@ -77,6 +85,14 @@ obsahuje identitu a přesné vymezení. **#2631 stále potřebuje finální CI a
 nezávislé schválení.** CodeRabbit odmítl re-review znovu v 12:34 UTC a posunul
 okno přibližně na 13:34. Vlastní review nenahrazuje pravidlo GitHubu vyžadující
 schválení jiným účtem po posledním pushi. Kandidátní deploy není merge.
+
+Dodatečně prošel čerstvý R6 browserový test oběma skutečnými formuláři:
+Routines `run_cmucp64gu00333594a37e`, Inbox `run_cmucp65xu003694936f97` zachovaly
+0/false. Nad `run_cmucp67ad00395315bacc` se současně odeslaly dvě různé odpovědi;
+HTTP 409/200, jediná dokončená execution a uložená vítězná hodnota 202.
+Vlastní rutiny smazány 204, bez JS chyb. První harness nesprávně použil přesný
+label bez hvězdičky povinného pole; po opravě selektoru prošla celá sada.
+[Protokol R6](https://github.com/crewship-ai/crewship/pull/2631#issuecomment-5777218634).
 
 §11 zůstává **NOT VERIFIED**: žádná nová data od pěti reprezentativních lidí
 nejsou dodána. [Recorder výsledků](../wireframes/routines-acceptance-recorder.html)
