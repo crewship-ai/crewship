@@ -394,7 +394,7 @@ export function RoutineStepSpine({
                       </span>
                     </span>
                   </summary>
-                  <ul className="ml-[48px] mt-2 space-y-1 text-xs">
+                  <ul className="mt-2 space-y-1 text-xs md:ml-[48px]">
                     {row.steps.map((s, i) => (
                       <li key={String(s.id)} className="space-y-2">
                         <span>{describeStep(s, i + 1).title}</span>
@@ -666,7 +666,7 @@ function SpineRow({
         {state && <span className="hidden shrink-0 sm:inline-flex">{state}</span>}
         <span className="shrink-0 text-xs text-primary group-open:hidden">Details</span>
       </summary>
-      <div className="ml-[48px] mt-3 space-y-3">
+      <div className="mt-3 space-y-3 md:ml-[48px]">
         {execution?.error && (
           <p role="alert" className="whitespace-pre-wrap break-words rounded-lg border border-destructive/20 bg-destructive/5 px-3 py-2 text-xs text-destructive">
             {execution.error}
