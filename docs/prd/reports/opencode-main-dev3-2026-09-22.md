@@ -28,7 +28,7 @@ After successful inference and checking that no other agent or broader binding c
 
 19 affected frontend tests passed. Webpack static export, Go build, go vet and targeted provider-login/Z.AI/unsigned-webhook/orchestrator/sidecar tests passed. The full release Go suite and required CI were started separately; consult issue #2621 for their final result. Do not infer all-green checks from the successful live run.
 
-PR #2619 review is approved on `7acd72ec7`; its old icon exception was already implemented and the factual provider inventory was retained to satisfy the user's all-provider inventory request. PR #2622's remaining invalid-provider error message was fixed in `284853a8d`, and its inline thread resolved. The user explicitly waived waiting for another CodeRabbit review on September 22. Required CI remains a merge gate. Merge order: #2619 → #2622. Repository auto-merge is disabled; the review waiver does not authorize bypassing incomplete or failing CI.
+PR #2619 review is approved on `7acd72ec7`; its old icon exception was already implemented and the factual provider inventory was retained to satisfy the user's all-provider inventory request. PR #2622's remaining invalid-provider error message was fixed in `284853a8d`, and its inline thread resolved. The user explicitly waived waiting for another CodeRabbit review on September 22. Required CI remains a merge gate. Final merge strategy: consolidate both providers PRs into #2622, then close #2619 as included. The full #2619 head is an ancestor of #2622; merging it into #2622 changed no files. This avoids artificial conflicts and duplicate CI after a separate squash merge. Repository auto-merge is disabled; the review waiver does not authorize bypassing incomplete or failing CI.
 
 ## Retired acceptance environment and rollback
 
@@ -45,3 +45,5 @@ CodeRabbit's full-review request at 12:53 UTC was rate-limited, explicitly namin
 ## Merge preparation update
 
 Both provider branches were updated to main `6ceddb52d` (workflow action digest updates) on September 22. Required checks are rerunning. The earlier review queue and pending-job counts above are historical observations; consult GitHub for current checks. No merge is claimed by this document.
+
+The base moved again to `ef36bbfe1` (Go dependency updates, including SQLite). Both branches incorporated it; #2622 also contains the complete #2619 head `57ec38b5b`. Required checks will run against that combined state before the atomic merge. Review waiting alone is waived.
