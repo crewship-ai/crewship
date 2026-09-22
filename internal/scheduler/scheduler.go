@@ -349,22 +349,27 @@ func (s *Scheduler) UpdateSchedule(ctx context.Context, agentID, cronExpr, promp
 // the same occurrence derive the same idempotency key regardless of local
 // clock, and it is stable across a mid-run restart. Normalized to UTC RFC3339
 // so equivalent spellings collapse to one key. Falls back to the current
-// wall-clock minute only when schedule_next_run is absent (e.g. a force-fired
+// wall-clock minute only when a successful read finds schedule_next_run absent (e.g. a force-fired
 // agent with no persisted schedule), which still dedupes a same-minute
 // duplicate on a single instance.
-func (s *Scheduler) occurrenceBucket(ctx context.Context, agentID string) string {
+func (s *Scheduler) occurrenceBucket(ctx context.Context, agentID string) (string, error) {
 	if s.db != nil {
 		var nextRun sql.NullString
 		if err := s.db.QueryRowContext(ctx,
-			`SELECT schedule_next_run FROM agents WHERE id = ?`, agentID).Scan(&nextRun); err == nil &&
-			nextRun.Valid && nextRun.String != "" {
+			`SELECT schedule_next_run FROM agents WHERE id = ?`, agentID).Scan(&nextRun); err != nil {
+			// A missing agent or unreadable DB is not a missing schedule value.
+			// Inventing a wall-clock key here can bypass an existing reservation
+			// if the following write succeeds after a transient read failure.
+			return "", fmt.Errorf("read scheduled occurrence for %s: %w", agentID, err)
+		}
+		if nextRun.Valid && nextRun.String != "" {
 			if t, perr := time.Parse(time.RFC3339, nextRun.String); perr == nil {
-				return t.UTC().Format(time.RFC3339)
+				return t.UTC().Format(time.RFC3339), nil
 			}
-			return nextRun.String
+			return nextRun.String, nil
 		}
 	}
-	return s.nowFn().UTC().Truncate(time.Minute).Format(time.RFC3339)
+	return s.nowFn().UTC().Truncate(time.Minute).Format(time.RFC3339), nil
 }
 
 func (s *Scheduler) triggerAgent(ag scheduledAgent) {
@@ -421,7 +426,11 @@ func (s *Scheduler) triggerAgent(ag scheduledAgent) {
 	// key scheme with the three other firing paths (#788).
 	var idemKey string
 	if s.idem != nil && ag.Workspace != "" {
-		bucket := s.occurrenceBucket(ctx, ag.ID)
+		bucket, err := s.occurrenceBucket(ctx, ag.ID)
+		if err != nil {
+			s.logger.Error("scheduled: occurrence could not be read; not starting agent", "agent_id", ag.ID, "error", err)
+			return
+		}
 		idemKey = pipeline.ScheduledFireIdempotencyKey("agent-sched", ag.ID, bucket)
 		_, isNew, err := s.idem.LookupOrReserve(ctx, ag.Workspace, idemKey, runID, ag.ID, pipeline.DefaultIdempotencyTTL)
 		if err != nil {

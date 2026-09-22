@@ -10,6 +10,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 ## [Unreleased]
 
 ### Fixed
+- Scheduled fires stop when their occurrence identity cannot be read, instead of falling back to a new wall-clock dedup key that can bypass an existing reservation. (#2643)
 - Scheduled agents do not execute after a failed run-record write. The occurrence reservation and due timestamp remain intact because a lost response does not prove the write failed. (#2643)
 - Webhook settlement writes the terminal run record with a bounded context independent of execution cancellation. A stop proven to precede process creation records `CANCELLED` without an invented exit code, instead of leaving a `RUNNING` record behind an already-cancelled work item. (#2643)
 - **Agents return to online after simultaneous detached-run completions.** The last-hold decision now retires completed peers atomically, so two finishing runs cannot both skip the final presence update. (#2626)

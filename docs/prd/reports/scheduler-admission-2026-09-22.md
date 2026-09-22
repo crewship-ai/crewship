@@ -36,11 +36,45 @@ SQLite is real and temporary; resolver and container transport are test
 doubles. No live scheduler or real CLI claim is made for this change. No
 deployment was performed for this guard.
 
+## Occurrence audit independently reproduced and fixed
+
+The GLM audit from `/tmp/opencode/sched-audit` was copied (original preserved)
+and rerun on `a3ba343f6` before changes: exit 1, four audit tests passed and the
+missing-agent reproducer failed with two CreateRun calls. The two existing
+same/distinct-occurrence tests were explicitly included and passed. The
+original audit's listed `-run TestOccurrenceAudit` command alone would not
+have executed those two existing tests.
+
+The read-error fallback is a real defect: a failed occurrence lookup generated
+a wall-clock key unrelated to the persisted due timestamp. The function now
+returns an error, and triggerAgent stops before reservation, chat or run
+creation. A successful read of NULL/empty still uses the legacy force-fire
+fallback; a missing agent row is an error, not a NULL schedule value.
+
+Evidence limits matter: the original whole-path reproducer deletes the agent
+while its mock resolver continues to resolve that agent. It proves scheduler
+fail-open behavior, not a full production transient-lock double execution.
+Its run count is a CreateRun count, not proof of two live CLI processes. The
+real SQLITE_BUSY test deliberately uses rollback-journal mode to force a read
+error; production WAL lock behavior is not inferred from it.
+
+The retained regression checks the concrete SQLite error code (5), no invented
+identity, no chat/run creation while locked, then an unlocked retry deduping
+against the original reservation with the due timestamp untouched. The
+missing-agent regression remains, with its harness limitation documented.
+Busy-skip state and reserve-error schedule preservation tests were retained.
+
+Validation: entire scheduler package with `-race` passed (5.359s, exit 0),
+whole-tree `go vet` passed. Logs in the same evidence directory:
+`occurrence-audit-original.log`, `occurrence-fixed.log`, `occurrence-vet.log`.
+An overlay restoring only the read-error wall-clock fallback made both the
+SQLITE_BUSY and missing-agent regressions fail (exit 1), while leaving tracked
+production code intact: `occurrence-mutation.log`.
+
 ## Next ownership change
 
-The GLM task is limited to occurrence identity and legacy behavior tests in
-`internal/scheduler/occurrence_audit_test.go`; production ownership remains
-with the main session. Do not overlap those edits.
+The GLM task is complete and its tests have been taken over by the main session
+in `internal/scheduler/occurrence_audit_test.go`. Its original worktree is intact.
 
 The actual migration must implement and verify all of these together before
 production wiring changes:
