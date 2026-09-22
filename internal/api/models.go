@@ -64,10 +64,13 @@ type modelsListResponse struct {
 // either a live lister or a curated fallback — CURSOR / FACTORY route through
 // CLI adapters and have no model-discovery surface of their own.
 var supportedModelProviders = map[string]bool{
-	"ANTHROPIC": true,
-	"OPENAI":    true,
-	"GOOGLE":    true,
-	"OLLAMA":    true,
+	"ANTHROPIC":       true,
+	"OPENAI":          true,
+	"GOOGLE":          true,
+	"OLLAMA":          true,
+	"OPENCODE":        true,
+	"OPENCODE_GO":     true,
+	"ZAI_CODING_PLAN": true,
 }
 
 // NewModelsHandler builds a ModelsHandler. ollamaURL is the daemon URL used
@@ -129,7 +132,7 @@ func (h *ModelsHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 	if !supportedModelProviders[provider] {
 		writeProblem(w, r, http.StatusBadRequest,
-			"unsupported provider; expected one of ANTHROPIC, OPENAI, GOOGLE, OLLAMA")
+			"unsupported provider; expected one of ANTHROPIC, OPENAI, GOOGLE, OLLAMA, OPENCODE, OPENCODE_GO, ZAI_CODING_PLAN")
 		return
 	}
 
@@ -255,6 +258,11 @@ func (h *ModelsHandler) activeCredential(ctx context.Context, wsID, provider str
 // model invalid. Used by the agent update path to validate llm_model.
 func (h *ModelsHandler) providerModelIDs(ctx context.Context, wsID, provider string) (map[string]bool, bool) {
 	provider = strings.ToUpper(strings.TrimSpace(provider))
+	// Gateway suggestions are deliberately partial. OpenCode's current native
+	// catalog decides availability; a curated subset cannot reject custom IDs.
+	if provider == "OPENCODE" || provider == "OPENCODE_GO" || provider == "ZAI_CODING_PLAN" {
+		return nil, false
+	}
 	if !supportedModelProviders[provider] {
 		return nil, false
 	}

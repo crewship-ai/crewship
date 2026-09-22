@@ -541,6 +541,10 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 			w.Header().Add(k, v)
 		}
 	}
+	if strings.HasPrefix(strings.ToLower(resp.Header.Get("Content-Type")), "text/event-stream") {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+	}
 	w.WriteHeader(resp.StatusCode)
 	p.copyAndObserveLLM(w, resp, spec.BodyCodec, spec.LedgerProvider, actorID, credentialID)
 }
@@ -864,12 +868,16 @@ func (p *Proxy) reverseProxyToProvider(w http.ResponseWriter, r *http.Request, s
 			w.Header().Add(k, v)
 		}
 	}
+	if strings.HasPrefix(strings.ToLower(resp.Header.Get("Content-Type")), "text/event-stream") {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+	}
 	w.WriteHeader(resp.StatusCode)
 	credentialID := ""
 	if cred != nil {
 		credentialID = cred.ID
 	}
-	p.copyAndObserveLLM(w, resp, s.BodyCodec, s.LedgerProvider, actorID, credentialID)
+	p.copyAndObserveLLM(w, resp, s.ResponseCodec(r.URL.Path), s.LedgerProvider, actorID, credentialID)
 }
 
 // graceReplay is what a request looked like BEFORE the current credential was
@@ -1029,12 +1037,9 @@ func (p *Proxy) authorizeLLMRoute(w http.ResponseWriter, r *http.Request) (strin
 // when the upstream is a known LLM provider returning JSON or SSE, also parses
 // usage / quota and fires the OnLLMCall observer.
 //
-// SSE is tee'd while it streams, so the client receives each byte immediately;
-// parsing happens only after EOF. Non-LLM hosts skip the buffer path entirely.
-//
-// Body buffering is bounded by maxRequestBodyBytes (10 MB) — the same cap
-// that protects the request path, applied here to the response so a
-// pathological upstream can't OOM the sidecar.
+// SSE usage is observed incrementally after each client write/flush, retaining
+// at most one bounded event. JSON response capture remains bounded by
+// maxRequestBodyBytes. Non-LLM hosts skip observation entirely.
 //
 // The two provider-ish arguments are NOT interchangeable. `codec` is the
 // response body SHAPE (llmroute.Spec.BodyCodec) the parser switches on;
@@ -1042,21 +1047,42 @@ func (p *Proxy) authorizeLLMRoute(w http.ResponseWriter, r *http.Request) (strin
 // (Spec.LedgerProvider) stamped onto the usage row. OpenRouter is why they
 // are separate — OpenAI-shaped bodies, its own rate card.
 func (p *Proxy) copyAndObserveLLM(w http.ResponseWriter, resp *http.Response, codec, ledgerProvider, actorID, credentialID string) {
+	// net/http buffers small writes. SSE must reach the caller while upstream
+	// remains open, including when usage observation is disabled.
+	var dst io.Writer = w
+	if strings.HasPrefix(strings.ToLower(resp.Header.Get("Content-Type")), "text/event-stream") {
+		dst = sseFlushWriter{w: w, controller: http.NewResponseController(w)}
+	}
 	// Bail out fast for non-LLM traffic or when nobody's listening for usage.
 	if ledgerProvider == "" || p.onLLMCall == nil {
-		_, _ = io.Copy(w, resp.Body)
+		_, _ = io.Copy(dst, resp.Body)
 		return
 	}
 
+	// Authentication with an API key does not imply metered billing. This
+	// route is the Coding Plan product, regardless of the process default.
+	billingMode, subPlan := p.billingMode, p.subPlan
+	if ledgerProvider == "zai-coding-plan" {
+		billingMode, subPlan = "flat_rate", "GLM Coding Plan"
+	}
 	contentType := resp.Header.Get("Content-Type")
 	if !isJSONResponse(contentType) {
 		var usage LLMUsage
 		if strings.HasPrefix(strings.ToLower(contentType), "text/event-stream") {
-			buf := &boundedBuffer{cap: maxRequestBodyBytes}
-			_, _ = io.Copy(w, io.TeeReader(resp.Body, buf))
-			usage = parseLLMUsageSSE(codec, buf.String())
+			observer := &sseUsageObserver{codec: codec, limit: maxRequestBodyBytes}
+			// Deliver and flush each chunk before observing its events.
+			_, _ = io.Copy(io.MultiWriter(dst, observer), resp.Body)
+			usage = observer.finish()
+			if observer.skipped > 0 {
+				if p.logger != nil {
+					p.logger.Warn("SSE usage unavailable: oversized events", "provider", ledgerProvider, "skipped_events", observer.skipped)
+				}
+				// Do not turn unknown usage into a zero-token billing row,
+				// even if quota headers would otherwise trigger the callback.
+				return
+			}
 		} else {
-			_, _ = io.Copy(w, resp.Body)
+			_, _ = io.Copy(dst, resp.Body)
 		}
 		usage.AgentID = actorID
 		usage.CredentialID = credentialID
@@ -1064,7 +1090,7 @@ func (p *Proxy) copyAndObserveLLM(w http.ResponseWriter, resp *http.Response, co
 		quota := parseQuotaInfo(resp.Header, resp.StatusCode)
 		if usage.InputTokens != 0 || usage.OutputTokens != 0 || usage.CachedInputTokens != 0 ||
 			usage.CacheCreationTokens != 0 || quota.Window != "" || quota.HadStatus429 {
-			p.onLLMCall(usage, quota, p.billingMode, p.subPlan)
+			p.onLLMCall(usage, quota, billingMode, subPlan)
 		}
 		return
 	}
@@ -1076,7 +1102,7 @@ func (p *Proxy) copyAndObserveLLM(w http.ResponseWriter, resp *http.Response, co
 	// shape: read once, write twice.
 	buf := &boundedBuffer{cap: maxRequestBodyBytes}
 	tee := io.TeeReader(resp.Body, buf)
-	if _, err := io.Copy(w, tee); err != nil {
+	if _, err := io.Copy(dst, tee); err != nil {
 		// Client disconnected or upstream cut off mid-stream. We still try
 		// to parse whatever we've got — partial JSON returns zero usage,
 		// which is fine.
@@ -1088,7 +1114,29 @@ func (p *Proxy) copyAndObserveLLM(w http.ResponseWriter, resp *http.Response, co
 	usage.CredentialID = credentialID
 	usage.Provider = ledgerProvider
 	quota := parseQuotaInfo(resp.Header, resp.StatusCode)
-	p.onLLMCall(usage, quota, p.billingMode, p.subPlan)
+	p.onLLMCall(usage, quota, billingMode, subPlan)
+}
+
+// sseFlushWriter deliberately exposes only Write, keeping io.Copy from
+// bypassing the flush through an optimized ReaderFrom implementation.
+type sseFlushWriter struct {
+	w          http.ResponseWriter
+	controller *http.ResponseController
+}
+
+func (w sseFlushWriter) Write(p []byte) (int, error) {
+	// The proxy sets these before WriteHeader too. Keep the MIME invariant
+	// explicit at this raw-byte sink and when used without a committed header.
+	w.w.Header().Set("Content-Type", "text/event-stream")
+	w.w.Header().Set("X-Content-Type-Options", "nosniff")
+	n, err := w.w.Write(p)
+	if err == nil {
+		err = w.controller.Flush()
+		if errors.Is(err, http.ErrNotSupported) {
+			err = nil
+		}
+	}
+	return n, err
 }
 
 // boundedBuffer is a Write target that drops bytes once it hits cap. We use

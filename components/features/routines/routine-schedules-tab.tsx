@@ -1,5 +1,8 @@
 "use client"
 
+import { useAbilities } from "@/hooks/use-abilities"
+import { routinePermissions } from "@/lib/routine-governance"
+
 import { formatRoutineTime } from "@/lib/routine-time"
 
 import { routinePresetSummary } from "@/lib/routine-preset-summary"
@@ -91,6 +94,8 @@ export function RoutineSchedulesTab({
   maxConcurrent,
   otherWays,
 }: Props) {
+  const { role, capabilities } = useAbilities()
+  const permissions = routinePermissions(role, capabilities)
   const { schedules, loading, error, create, update, remove, preview } =
     usePipelineSchedules(workspaceId)
   const ours = useMemo(
@@ -206,6 +211,8 @@ export function RoutineSchedulesTab({
     <Button
       size="sm"
       variant="outline"
+      disabled={!permissions.createSchedule}
+      title={!permissions.createSchedule ? "Creating a repeating plan requires permission to create routines" : undefined}
       onClick={() => setFormOpen(true)}
       className="h-8 gap-1.5 text-xs"
     >
@@ -247,7 +254,7 @@ export function RoutineSchedulesTab({
                   >
                     <Switch
                       checked={s.enabled}
-                      disabled={isDraft}
+                      disabled={isDraft || !permissions.manage}
                       aria-label={`${s.enabled ? "Disable" : "Enable"} schedule ${s.name}`}
                       title={
                         isDraft
@@ -367,6 +374,8 @@ export function RoutineSchedulesTab({
                       <Button
                         size="sm"
                         variant="outline"
+                        disabled={!permissions.manage}
+                        title={!permissions.manage ? "Managing existing plans requires an admin role" : undefined}
                         onClick={() => setEditing(s)}
                         className="h-8 text-xs"
                         aria-label={`Edit schedule ${s.name}`}
@@ -377,6 +386,8 @@ export function RoutineSchedulesTab({
                       <Button
                         size="sm"
                         variant="ghost"
+                        disabled={!permissions.manage}
+                        title={!permissions.manage ? "Managing existing plans requires an admin role" : undefined}
                         onClick={() => setEditingInputs(s)}
                         className="h-8 text-xs"
                         aria-label={`Edit inputs for ${s.name}`}
@@ -386,9 +397,10 @@ export function RoutineSchedulesTab({
                       <Button
                         size="sm"
                         variant="ghost"
+                        disabled={!permissions.manage}
+                        title={!permissions.manage ? "Managing existing plans requires an admin role" : undefined}
                         onClick={() => del(s)}
                         className="h-8 w-8 p-0 text-muted-foreground hover:text-destructive"
-                        title="Delete"
                         aria-label={`Delete schedule ${s.name}`}
                       >
                         <Trash2 className="h-3.5 w-3.5" />

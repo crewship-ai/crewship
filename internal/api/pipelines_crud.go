@@ -24,17 +24,24 @@ import (
 //	include_ephemeral=1      include auto-generated delegation wraps
 //	include_hidden=1         include workspace_visible=0 entries
 //	author_crew_id=crew_xyz  filter to one author crew
-//	limit=50                 cap at 500 hard
+//	limit=50                 defaults to 500; cap at 500
+//	offset=0                 row offset, capped at 1000000
 //	order=popularity|recent|name
 func (h *PipelineHandler) List(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	q := r.URL.Query()
+	limit, offset, ok := routineListPage(w, q.Get("limit"), q.Get("offset"), 500)
+	if !ok {
+		return
+	}
 	f := pipeline.ListFilters{
 		WorkspaceID:      workspaceID,
 		IncludeEphemeral: q.Get("include_ephemeral") == "1",
 		IncludeHidden:    q.Get("include_hidden") == "1",
 		AuthorCrewID:     q.Get("author_crew_id"),
 		Status:           q.Get("status"),
+		Limit:            limit,
+		Offset:           offset,
 	}
 	switch q.Get("order") {
 	case "recent":
@@ -51,6 +58,7 @@ func (h *PipelineHandler) List(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusInternalServerError, "list pipelines")
 		return
 	}
+	setRoutineListNextOffset(w, offset, limit, len(rows))
 	// Routine-definition tag filter (v123): browse routines by tag for
 	// cross-crew discovery. Best-effort — a tag-store error degrades to
 	// the unfiltered list rather than failing.

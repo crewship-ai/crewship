@@ -206,7 +206,7 @@ func TestDetachedHold_ConfirmedStopCleansImmediately(t *testing.T) {
 	req := covRunReq()
 	req.RunID = "confirmed-stop-cleanup"
 	req.Credentials = []Credential{{Type: "SECRET", EnvVarName: "AUDIT_TOKEN", PlainValue: "test-value"}}
-	if err := o.RunAgent(context.Background(), req, nil); !errors.Is(err, ErrDetachedStillRunning) {
+	if err := o.RunAgent(context.Background(), req, nil); !errors.Is(err, ErrDetachedExecStopped) {
 		t.Fatal(err)
 	}
 	if _, _, found := runHomeLocation(req.RunID); found {

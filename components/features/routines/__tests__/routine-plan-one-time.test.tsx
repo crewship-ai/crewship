@@ -1,12 +1,15 @@
 import { fireEvent, render, screen, within } from "@testing-library/react"
-import { describe, expect, it, vi } from "vitest"
+import { beforeEach, describe, expect, it, vi } from "vitest"
 import { RoutineSchedulesTab, defaultScheduleName, scheduleVersionLine } from "../routine-schedules-tab"
 const h = vi.hoisted(() => ({
+  access: { role: "OWNER", capabilities: [] as string[] },
   mode: { recurring: false, message: "Daily summary" },
   update: vi.fn(async () => null),
   create: vi.fn(async () => null),
   extra: [] as Record<string, unknown>[],
 }))
+vi.mock("@/hooks/use-abilities", () => ({ useAbilities: () => h.access }))
+beforeEach(() => { h.access.role = "OWNER"; h.access.capabilities = [] })
 vi.mock("@/hooks/use-pipeline-schedules", () => ({
   usePipelineSchedules: () => ({
     schedules: [
@@ -160,5 +163,28 @@ describe("scheduleVersionLine", () => {
     expect(scheduleVersionLine({ target_pipeline_version: 2 }, 3)).toEqual({ pinned: true, version: 2 })
     expect(scheduleVersionLine({}, 3)).toEqual({ pinned: false, version: 3 })
     expect(scheduleVersionLine({}, undefined)).toEqual({ pinned: false, version: null })
+  })
+})
+
+
+describe("Plan respects server permission gates", () => {
+  it.each([
+    ["VIEWER", [], false, false, false, false],
+    ["MEMBER", [], false, false, false, false],
+    ["VIEWER", ["routine.run"], true, false, false, false],
+    ["MEMBER", ["routine.create"], false, true, false, false],
+    ["MANAGER", [], true, true, false, true],
+    ["ADMIN", [], true, true, true, true],
+  ] as const)("%s with %j", async (role, caps, run, create, manage, cancel) => {
+    h.access.role = role; h.access.capabilities = [...caps]
+    h.mode.recurring = true; h.mode.message = "Daily summary"; h.extra = []
+    renderPlan()
+    expect(await screen.findByTestId("pending-uses-from-calendar")).toBeVisible()
+    expect(screen.getByRole("button", { name: "Schedule a start" })).toHaveProperty("disabled", !run)
+    expect(screen.getByRole("button", { name: "Add" })).toHaveProperty("disabled", !create)
+    expect(screen.getByRole("switch", { name: "Disable schedule Daily" })).toHaveProperty("disabled", !manage)
+    expect(screen.getByRole("button", { name: "Edit schedule Daily" })).toHaveProperty("disabled", !manage)
+    expect(screen.getByRole("button", { name: "Delete schedule Daily" })).toHaveProperty("disabled", !manage)
+    expect(screen.getByRole("button", { name: "Remove" })).toHaveProperty("disabled", !cancel)
   })
 })

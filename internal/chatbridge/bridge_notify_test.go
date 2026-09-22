@@ -2,6 +2,7 @@ package chatbridge
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"strings"
 	"sync"
@@ -102,31 +103,84 @@ func TestHandleChatMessage_NilNotifierSafe(t *testing.T) {
 	}
 }
 
-// The provider confirms stop, but RunAgent still returns the detached sentinel:
-// a partial reply must reach the inbox without inventing task success.
-type detachedReplyContainer struct{ scriptedContainer }
+// Partial replies survive both confirmed and unconfirmed detached stops.
+type detachedReplyContainer struct {
+	scriptedContainer
+	confirmed bool
+	onStop    func()
+}
 
 func (c *detachedReplyContainer) ExecInspect(_ context.Context, id string) (bool, int, error) {
 	return id == "agent-exec", 0, nil
 }
 func (c *detachedReplyContainer) Exec(ctx context.Context, cfg provider.ExecConfig) (*provider.ExecResult, error) {
 	if strings.Contains(strings.Join(cfg.Cmd, " "), "/bin/kill -TERM --") {
-		return &provider.ExecResult{ExecID: "stop", Reader: io.NopCloser(strings.NewReader("ABSENT"))}, nil
+		if c.onStop != nil {
+			c.onStop()
+		}
+		out := "PRESENT"
+		if c.confirmed {
+			out = "ABSENT"
+		}
+		return &provider.ExecResult{ExecID: "stop", Reader: io.NopCloser(strings.NewReader(out))}, nil
+	}
+	// The runtime exits on the first subsequent watcher probe.
+	if strings.Contains(strings.Join(cfg.Cmd, " "), "command -v tmux") {
+		return &provider.ExecResult{ExecID: "probe", Reader: io.NopCloser(strings.NewReader("ABSENT"))}, nil
 	}
 	return c.scriptedContainer.Exec(ctx, cfg)
 }
+
 func TestHandleChatMessage_NotifiesOnDetachedPartialReply(t *testing.T) {
-	resolver := &capResolver{info: baseInfo()}
-	ctr := &detachedReplyContainer{scriptedContainer: scriptedContainer{agentOutput: claudeSuccessOutput(0)}}
-	b := testBridgeWithContainer(t, resolver, ctr)
-	b.orch.SetDetachedExecMonitoring(time.Millisecond, time.Millisecond)
-	fn := &fakeReplyNotifier{}
-	b.SetReplyNotifier(fn)
-	if err := b.HandleChatMessage(context.Background(), "user-1", "sess-detached-notify", "hello", func(ws.ChatEvent) {}); err != nil {
-		t.Fatal(err)
-	}
-	calls := fn.snapshot()
-	if len(calls) != 1 || calls[0].ReplyText != "Hello world" || calls[0].RepliedAt.IsZero() {
-		t.Fatalf("partial reply notifications: %+v", calls)
+	for _, tc := range []struct{ confirmed, cancel bool }{{false, false}, {true, false}, {true, true}} {
+		t.Run(fmt.Sprintf("confirmed=%v/cancel=%v", tc.confirmed, tc.cancel), func(t *testing.T) {
+			confirmed := tc.confirmed
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			resolver := &capResolver{info: baseInfo()}
+			ctr := &detachedReplyContainer{scriptedContainer: scriptedContainer{agentOutput: claudeSuccessOutput(0)}, confirmed: confirmed}
+			if tc.cancel {
+				ctr.onStop = cancel
+			}
+			b := testBridgeWithContainer(t, resolver, ctr)
+			b.orch.SetDetachedExecMonitoring(time.Millisecond, time.Millisecond)
+			fn := &fakeReplyNotifier{}
+			b.SetReplyNotifier(fn)
+			var events []ws.ChatEvent
+			err := b.HandleChatMessage(ctx, "user-1", "sess-detached-notify", "hello", func(e ws.ChatEvent) { events = append(events, e) })
+			if confirmed {
+				if err == nil {
+					t.Error("confirmed stop must surface a terminal failure")
+				}
+				wantStatus := "FAILED"
+				if tc.cancel {
+					wantStatus = "CANCELLED"
+				}
+				if len(resolver.runUpdates) != 1 || resolver.runUpdates[0].status != wantStatus {
+					t.Errorf("confirmed stop updates: %+v", resolver.runUpdates)
+				}
+			} else {
+				if err != nil {
+					t.Fatal(err)
+				}
+				if len(resolver.runUpdates) != 0 {
+					t.Errorf("unconfirmed stop must stay nonterminal: %+v", resolver.runUpdates)
+				}
+				done := 0
+				for _, e := range events {
+					meta, _ := e.Metadata.(map[string]any)
+					if e.Type == "done" && meta["reason"] == "detached_still_running" {
+						done++
+					}
+				}
+				if done != 1 {
+					t.Errorf("detached stream closes=%d, want 1", done)
+				}
+			}
+			calls := fn.snapshot()
+			if len(calls) != 1 || calls[0].ReplyText != "Hello world" || calls[0].RepliedAt.IsZero() {
+				t.Fatalf("partial reply notifications: %+v", calls)
+			}
+		})
 	}
 }

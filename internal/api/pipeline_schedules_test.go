@@ -316,6 +316,47 @@ func TestPipelineSchedules_List_Empty_Returns200WithEmptyArray(t *testing.T) {
 	}
 }
 
+func TestPipelineSchedules_List_Paginates(t *testing.T) {
+	h, db, userID, wsID := scheduleHandlerRig(t)
+	seedPipelineRow(t, db, wsID, "pln_page", "page-target")
+	store := pipeline.NewScheduleStore(db)
+	for _, name := range []string{"First", "Second"} {
+		if _, err := store.Save(t.Context(), pipeline.SaveScheduleInput{
+			WorkspaceID: wsID, Name: name, TargetPipelineID: "pln_page",
+			CronExpr: "*/15 * * * *", Timezone: "UTC", Enabled: true,
+		}); err != nil {
+			t.Fatalf("seed schedule %s: %v", name, err)
+		}
+	}
+	page := func(offset string) (*httptest.ResponseRecorder, []scheduleResponse) {
+		req := withWorkspaceUser(httptest.NewRequest("GET",
+			"/api/v1/workspaces/"+wsID+"/pipeline-schedules?limit=1&offset="+offset, nil),
+			userID, wsID, "OWNER")
+		rr := httptest.NewRecorder()
+		h.ListSchedules(rr, req)
+		var out []scheduleResponse
+		if err := json.Unmarshal(rr.Body.Bytes(), &out); err != nil {
+			t.Fatalf("decode schedule page: %v (%s)", err, rr.Body.String())
+		}
+		return rr, out
+	}
+	first, firstRows := page("0")
+	if first.Code != http.StatusOK || len(firstRows) != 1 || first.Header().Get("X-Next-Offset") != "1" {
+		t.Fatalf("first page: status=%d rows=%d next=%q", first.Code, len(firstRows), first.Header().Get("X-Next-Offset"))
+	}
+	second, secondRows := page(first.Header().Get("X-Next-Offset"))
+	if second.Code != http.StatusOK || len(secondRows) != 1 || second.Header().Get("X-Next-Offset") != "2" {
+		t.Fatalf("second page: status=%d rows=%d next=%q", second.Code, len(secondRows), second.Header().Get("X-Next-Offset"))
+	}
+	if firstRows[0].ID == secondRows[0].ID {
+		t.Fatalf("pages repeated schedule %q", firstRows[0].ID)
+	}
+	third, thirdRows := page(second.Header().Get("X-Next-Offset"))
+	if third.Code != http.StatusOK || len(thirdRows) != 0 || third.Header().Get("X-Next-Offset") != "" {
+		t.Fatalf("terminal page: status=%d rows=%d next=%q", third.Code, len(thirdRows), third.Header().Get("X-Next-Offset"))
+	}
+}
+
 func TestPipelineSchedules_List_HidesOtherWorkspaces(t *testing.T) {
 	h, db, userID, wsID := scheduleHandlerRig(t)
 	seedPipelineRow(t, db, wsID, "pln_a", "ours")

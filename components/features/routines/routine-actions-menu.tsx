@@ -1,5 +1,8 @@
 "use client"
 
+import { useAbilities } from "@/hooks/use-abilities"
+import { routinePermissions } from "@/lib/routine-governance"
+
 // The routine kebab: the verbs.
 //
 // It shipped carrying Disable and Close, which is a button that promises
@@ -79,6 +82,8 @@ export function RoutineActionsMenu({
   onGovernance,
   governanceBusy,
 }: Props) {
+  const { role, capabilities } = useAbilities()
+  const permissions = routinePermissions(role, capabilities)
   const [dialog, setDialog] = React.useState<OpenDialog>(null)
   const [busy, setBusy] = React.useState(false)
 
@@ -171,7 +176,7 @@ export function RoutineActionsMenu({
           </button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-56">
-          <DropdownMenuItem onSelect={() => openDialog("duplicate")}>
+          <DropdownMenuItem disabled={!permissions.manage} onSelect={() => openDialog("duplicate")}>
             <Copy className="h-3.5 w-3.5" />
             Copy
           </DropdownMenuItem>

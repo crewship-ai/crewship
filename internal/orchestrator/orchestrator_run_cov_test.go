@@ -1219,3 +1219,68 @@ func TestRunAgent_EmptySlugRejectedBeforeSidecarMemoryConfig(t *testing.T) {
 		}
 	}
 }
+
+// A lone non-lead still needs IPC for usage accounting and credential reaping.
+func TestRunAgent_SoloAgentCarriesIPC(t *testing.T) {
+	t.Parallel()
+	c := covNewRunContainer(covRunOpts{stream: "{}\n", health: `{"status":"ok","network_mode":"free"}`})
+	o := New(c, newMemState(), covQuietLogger())
+	o.SetSidecarEnabled(true)
+	o.SetIPCConfig("http://gw:9000", "master-secret")
+	req := covRunReq()
+	req.AgentRole = "AGENT"
+	req.CrewMembers = nil
+	req.NetworkMode = "restricted"
+	req.AllowedDomains = []string{"api.z.ai"}
+	if err := o.RunAgent(context.Background(), req, nil); err != nil {
+		t.Fatal(err)
+	}
+	for _, script := range c.snapshotScripts() {
+		if !strings.Contains(script, "crewship-sidecar --addr") {
+			continue
+		}
+		input := covDecodeSidecarInput(t, script)
+		ipc, _ := input["ipc"].(map[string]any)
+		if ipc == nil {
+			t.Fatal("solo agent must carry IPC for usage and credential reaping")
+		}
+		if ipc["agent_id"] != req.AgentID || ipc["workspace_id"] != req.WorkspaceID {
+			t.Fatalf("incorrect IPC scope: %v", ipc)
+		}
+		token, _ := ipc["token"].(string)
+		if token == "" || token == "master-secret" {
+			t.Fatal("IPC must use a nonempty scope-bound token")
+		}
+		return
+	}
+	t.Fatal("sidecar launch was not captured")
+}
+
+func TestRunAgent_RegrantedCredentialRestartsReapedSidecar(t *testing.T) {
+	t.Parallel()
+	creds := []Credential{{ID: "plan", Type: "PROVIDER_LOGIN", Provider: "ZAI_CODING_PLAN", EnvVarName: "ZAI_CODING_PLAN_API_KEY", PlainValue: "fixture"}}
+	fp := sidecarConfigFingerprint("master-secret", creds)
+	for _, count := range []int{0, 1} {
+		t.Run(fmt.Sprint(count), func(t *testing.T) {
+			health := fmt.Sprintf(`{"status":"ok","network_mode":"free","config_fingerprint":%q,"provider_creds":{"ZAI_CODING_PLAN":%d}}`, fp, count)
+			c := covNewRunContainer(covRunOpts{stream: "{}\n", health: health})
+			o := New(c, newMemState(), covQuietLogger())
+			o.SetSidecarEnabled(true)
+			o.SetIPCConfig("http://gw:9000", "master-secret")
+			req := covRunReq()
+			req.Credentials = creds
+			if err := o.RunAgent(context.Background(), req, nil); err != nil {
+				t.Fatal(err)
+			}
+			restarted := false
+			for _, script := range c.snapshotScripts() {
+				if strings.Contains(script, "crewship-sidecar --addr") {
+					restarted = true
+				}
+			}
+			if restarted != (count == 0) {
+				t.Fatalf("count=%d restarted=%v", count, restarted)
+			}
+		})
+	}
+}

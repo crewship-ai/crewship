@@ -348,3 +348,17 @@ func covExecEndEntries(j *covJournal) int {
 	}
 	return n
 }
+
+func TestRunAgent_ConfirmedDetachedStopIsTerminal(t *testing.T) {
+	c := covNewRunContainer(covRunOpts{stream: "{}\n", agentRunning: true, tmuxStopOut: "ABSENT"})
+	o := New(c, newMemState(), covQuietLogger())
+	o.SetDetachedExecMonitoring(time.Millisecond, time.Millisecond)
+	req := covRunReq()
+	err := o.RunAgent(t.Context(), req, nil)
+	if err == nil || errors.Is(err, ErrDetachedStillRunning) {
+		t.Fatalf("confirmed stop must return a terminal failure, got %v", err)
+	}
+	if _, held := o.detachedHoldRunID(req.AgentID); held {
+		t.Fatal("confirmed stop retained a detached hold")
+	}
+}

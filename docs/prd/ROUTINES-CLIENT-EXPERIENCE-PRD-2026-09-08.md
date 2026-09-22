@@ -1,5 +1,7 @@
 # Routines: srozumitelná obsluha a spolehlivé autorování
 
+> Integrační opravy #2631 jsou sloučené a ověřené na DEV1. [Datovaný závěrečný stav, testy a zbývající přejímka](reports/routines-closeout-2026-09-22.md) uvádí přesný commit nasazení a hranice důkazů. §11 zůstává NOT VERIFIED; technické testy nejsou lidská přejímka.
+
 **Navigace ve stavu k 18. září:** Tento PRD drží původní rozsah R1–R10 a lidskou přejímku §11. Navazující změny mají vlastní zadání a důkazy:
 
 - [Vstupy, pravidla práce a řešení problémů](ROUTINES-CLARITY-PRD-2026-09-15.md): [PR #2556](https://github.com/crewship-ai/crewship/pull/2556), issue #2555.

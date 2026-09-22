@@ -149,3 +149,10 @@ describe("<RoutinePublishDialog>", () => {
     expect(JSON.parse(String(call[1].body))).toEqual({ id: "drf_1", revision: 2 })
   })
 })
+
+it("marks People changed when a decision form changes inside a nested loop", () => {
+  const before = { steps: [{ id: "loop", type: "foreach", foreach: { steps: [{ id: "review", type: "wait", name: "Review invoice", wait: { kind: "approval" } }] } }] }
+  const after = structuredClone(before)
+  Object.assign(after.steps[0].foreach.steps[0].wait, { decision_form: { fields: [{ name: "amount", type: "number" }], actions: [{ id: "pay", label: "Pay invoice", approved: true }] } })
+  expect(publicationSummary(before, after).rows).toContainEqual(["People", "Changed · Review invoice"])
+})

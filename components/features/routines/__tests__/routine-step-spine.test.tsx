@@ -155,6 +155,42 @@ describe("routine step spine", () => {
     expect(screen.queryByText(/No response recorded/)).not.toBeInTheDocument()
   })
 
+  it.each(["waiting", "paused", "WAITING"])("shows a %s suspension as status rather than failure", (status) => {
+    const reason = 'run suspended awaiting approval at step "probe"'
+    render(
+      <RoutineStepSpine
+        definition={definition}
+        record={runRecord({
+          active: true,
+          currentStepId: "probe",
+          lookup: (stepId) => stepId === "probe"
+            ? { hasOutput: false, execution: execution({ status, error: reason }) }
+            : { hasOutput: false },
+        })}
+      />,
+    )
+    const explanation = screen.getByText(reason)
+    expect(explanation).toHaveAttribute("role", "status")
+    expect(explanation).not.toHaveClass("text-destructive")
+  })
+
+  it("keeps a failed approval diagnostic as an alert even when its text mentions waiting", () => {
+    const reason = "Failed while waiting for approval: storage unavailable"
+    render(
+      <RoutineStepSpine
+        definition={definition}
+        record={runRecord({
+          failedStepId: "probe",
+          lookup: (stepId) => stepId === "probe"
+            ? { hasOutput: false, execution: execution({ status: "failed", error: reason }) }
+            : { hasOutput: false },
+        })}
+      />,
+    )
+    expect(screen.getByText(reason)).toHaveAttribute("role", "alert")
+    expect(screen.getByText(reason)).toHaveClass("text-destructive")
+  })
+
   it("flags a finished step that stored nothing, and never calls it skipped", () => {
     render(
       <RoutineStepSpine
@@ -289,4 +325,20 @@ describe("routine step spine", () => {
     expect(open).toHaveLength(1)
     expect(open[0].textContent).toContain("Ask morgan")
   })
+})
+
+
+it("keeps sample tools reachable for folded transforms and absent from run records", () => {
+  const recipe = { steps: [
+    { id: "source", type: "http", name: "Source", http: { url: "https://example.com" } },
+    ...Array.from({ length: 4 }, (_, i) => ({ id: `prepare_${i}`, type: "transform", needs: ["source"], transform: { input: "{{ steps.source.output }}", expression: "." } })),
+  ] }
+  const renderTools = (step: Record<string, unknown>) => <button>Test {String(step.id)}</button>
+  const view = render(<RoutineStepSpine definition={recipe} renderStepTools={renderTools}
+    map={({ openStep }) => <button onClick={() => openStep("prepare_3")}>Select folded preparation</button>} />)
+  fireEvent.click(screen.getByRole("button", { name: /^map$/ }))
+  fireEvent.click(screen.getByRole("button", { name: "Select folded preparation" }))
+  expect(screen.getByRole("button", { name: "Test prepare_3" })).toBeVisible()
+  view.rerender(<RoutineStepSpine definition={recipe} renderStepTools={renderTools} record={runRecord()} />)
+  expect(screen.queryByRole("button", { name: "Test prepare_3" })).toBeNull()
 })

@@ -15,7 +15,7 @@ Problem Details shape (`error` is the human-readable message).
 
 | Method | Path | Access | Purpose |
 |---|---|---|---|
-| GET | `/api/v1/workspaces/{workspaceId}/pipelines` | member | List; `status`, `author_crew_id`, `tag`, `order` (`popularity`, `recent`, `name`), `limit`, `include_ephemeral=1`, `include_hidden=1` |
+| GET | `/api/v1/workspaces/{workspaceId}/pipelines` | member | List; `status`, `author_crew_id`, `tag`, `order` (`popularity`, `recent`, `name`), `limit` (1–500), `offset` (0–1000000), `include_ephemeral=1`, `include_hidden=1` |
 | GET | `/api/v1/workspaces/{workspaceId}/pipelines/{slug}` | member | Get definition |
 | DELETE | `/api/v1/workspaces/{workspaceId}/pipelines/{slug}` | delete | Soft-delete |
 | POST | `/api/v1/workspaces/{workspaceId}/pipelines/save` | create | Create/update a definition |
@@ -72,6 +72,12 @@ Problem Details shape (`error` is the human-readable message).
 | GET | `/api/v1/workspaces/{workspaceId}/pipeline-webhooks` | member | List webhook triggers |
 | DELETE | `/api/v1/workspaces/{workspaceId}/pipeline-webhooks/{webhookId}` | manage | Delete a webhook trigger |
 | POST | `/api/v1/webhooks/{token}` | token | Public webhook dispatch; no workspace session |
+
+Pipeline and schedule list endpoints accept `limit` (1–500) and `offset`
+(0–1000000). The response remains a JSON array; when a full page may have a
+successor, `X-Next-Offset` gives the offset for the next request. An exact-size
+last page can therefore be followed by one empty request. Omitting both
+parameters preserves each endpoint's legacy behavior.
 
 `create`, `manage`, and `delete` are the server's role-action gates (normally
 MANAGER+, OWNER/ADMIN, and OWNER/ADMIN respectively). A missing pipeline is

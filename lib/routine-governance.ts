@@ -13,6 +13,7 @@
  */
 
 import { STATUS_BADGE_CLASSES, STATUS_DOT_CLASSES } from "@/lib/colors"
+import { Capability, hasCapability } from "@/lib/capabilities"
 
 export type RoutineStatus = "active" | "proposed" | "disabled"
 
@@ -82,6 +83,20 @@ export function canApproveRoutine(role: string | null | undefined): boolean {
 /** OWNER / ADMIN may disable (kill) or re-enable a routine. */
 export function canKillRoutine(role: string | null | undefined): boolean {
   return roleAtLeast(role, "ADMIN")
+}
+
+/** Public API permissions: a deferred start is a run, while a recurring
+ * schedule has a separate creation grant. Grants do not allow authoring,
+ * cancelling starts, or managing existing schedules. */
+export function routinePermissions(role: string | null | undefined, capabilities: string[] | null = null) {
+  const author = roleAtLeast(role, "MANAGER")
+  const member = roleAtLeast(role, "VIEWER")
+  return {
+    run: author || (member && hasCapability(capabilities, Capability.RoutineRun)),
+    createSchedule: author || (member && hasCapability(capabilities, Capability.RoutineCreate)),
+    author,
+    manage: roleAtLeast(role, "ADMIN"),
+  }
 }
 
 /** The reason a routine's Run / Test run / Dry run controls are disabled,

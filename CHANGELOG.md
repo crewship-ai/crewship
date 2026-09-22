@@ -9,17 +9,36 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+### Improved
+- Routine and schedule catalogs now page through large workspaces without truncating results; schedule lists and the calendar resolve routine details in batches.
+- Activity now includes the accepted work ledger and webhook deliveries. The separate Work navigation item is removed; existing `/work` bookmarks open the corresponding Activity view. (#2636)
+
 ### Fixed
 - Scheduled fires stop when their occurrence identity cannot be read, instead of falling back to a new wall-clock dedup key that can bypass an existing reservation. (#2643)
 - Scheduled agents do not execute after a failed run-record write. The occurrence reservation and due timestamp remain intact because a lost response does not prove the write failed. (#2643)
 - Webhook settlement writes the terminal run record with a bounded context independent of execution cancellation. A stop proven to precede process creation records `CANCELLED` without an invented exit code, instead of leaving a `RUNNING` record behind an already-cancelled work item. (#2643)
-- **Agents return to online after simultaneous detached-run completions.** The last-hold decision now retires completed peers atomically, so two finishing runs cannot both skip the final presence update. (#2626)
 - All `RunAgent` callers now share the current per-agent serial runtime limit, including chat and webhook runs with different sessions. Waiting for an agent does not consume server execution capacity, cancellation abandons the wait, and unconfirmed detached processes retain both reservations until confirmed stopped. This process-local fence does not replace durable producer admission or the chat mailbox. (#2643)
-- Synchronous peer queries return `409` when agent or server execution capacity is occupied, instead of waiting for a reservation that may be held by their waiting parent. (#2643)
+- ⚠️ **Behaviour change:** Synchronous peer queries return `409` when agent or server execution capacity is occupied, instead of waiting for a reservation that may be held by their waiting parent. (#2643)
 - Cancelling a webhook before its process creation gate has opened no longer needs a provider probe after `RunAgent` returns. This preserves proof that no process was created, including while waiting for the same agent's active chat. (#2643)
+- Normal routine approval waiting now displays its explanation as a waiting status instead of a red failure alert; actual failures retain their diagnostics. (#2650)
+- Confirmed stops of detached agent processes now return a terminal failure instead of claiming the process is still running. Partial chat replies remain available; unconfirmed detached turns close their WebSocket stream without claiming execution completion. (#2626)
+- Schedule-list indexes now cover the ID tie-breaker, avoiding temporary sorting for equal start times.
+- Routine step details again offer Test with captured run data. Folded transforms and map selection reach the same testing surface; external steps still require explicit replacement outputs. (#2647)
+- **Routines Run and Plan controls follow your actual permissions.** Explicit Run grants allow one-time starts even for viewers; creating repeating schedules uses its separate grant. Existing plans require an admin to change, and removing a one-time start requires a manager. Unavailable Run explains the missing permission. (#2645)
+- **Unsaved routine edits survive declined reloads and navigation.** The active Edit dialog now reuses the existing navigation guard; loading a saved draft alone does not warn, and discarding local edits preserves that draft. (#2644)
+- Routine Edit again exposes approval questions and named decision actions, including approvals in nested loops and hooks. Changes remain drafts until publication. (#2637)
+- **Agents return to online after simultaneous detached-run completions.** The last-hold decision now retires completed peers atomically, so two finishing runs cannot both skip the final presence update. (#2626)
 - Detached runs retain admission and capacity until confirmed stopped, including after the monitoring deadline. Waiting admissions recheck the fence; each already-admitted run retains its own hold. Confirmed termination revokes and cleans per-run credentials and ends the watcher. (#2626)
 - Confirmed detached stops close the run record; partial chat replies reach the inbox, and routine steps retain observed token usage and cost after detachment. (#2626)
 - A detached still-running exec is no longer reported as a successful run and a succeeded work item. When the agent CLI's stream ends while the process lives on, RunAgent now monitors `ExecInspect` until the exec really terminates (resolving the run with its true exit code) and, only if monitoring exceeds its budget or the context ends, returns a typed `ErrDetachedStillRunning` that leaves the run at `running`. A bounded stop runs inside RunAgent's ownership boundary; when the stop cannot be CONFIRMED, the run slot transfers to a per-agent detached hold that refuses new runs for that agent (`ErrAgentDetachedBusy`) and keeps capacity occupied until its watcher confirms the runtime gone — a stop attempt is not a stop confirmation. Terminal events (the exec.command end journal entry, the agent's return to `online`) are emitted only after a confirmed end, never while the process may be alive. The webhook wrapper no longer rewrites the sentinel into `COMPLETED`; the dispatcher holds the attempt (heartbeat, lease, capacity) and polls the runtime until it is confirmed gone, stopping it before settling into reconciliation on the probe-limit and watch-expiry paths. Scheduler, chat, pipeline and direct-run callers treat the sentinel as nonterminal instead of FAILED. (#2626)
+
+- **Reassigning a previously removed provider key works without a manual runtime restart.** Sidecar reuse now checks live credential counts as well as the original configuration fingerprint.
+
+- **Provider logins remain usable after the sidecar’s periodic credential check.** The metadata endpoint now includes explicitly granted provider logins and drops them when access is removed, without adding them to the global plaintext token pool.
+
+- **Z.AI Coding Plan usage is marked as subscription usage.** API-key authentication no longer labels Coding Plan calls as metered or their zero per-call price as a precise monetary estimate.
+
+- **Solo agents now report model usage and observe credential revocation.** Initialize sidecar IPC for non-lead agents with no peers, preserving scope-bound authentication.
 - The published OpenAPI document now names the fields the issue and agent list rows actually carry: `client_review_required` (emitted on every issue row since the durable Lead review landed) plus the optional `assignee_slug`, `code_links` and `execution` projections, and the agents' `ask_forms` / `suggested_prompts` (nullable, always encoded). `issueResponse` and `agentResponse` are pinned in the schema-keys contract test so a struct field without schema coverage fails the generator gate again. (#2623)
 
 ### Security
@@ -27,6 +46,10 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - A routine run's invoking crew and agent now come only from a verified identity. `POST …/pipelines/{slug}/run` (JWT / CLI token) no longer reads `X-Crewship-Invoking-Crew` / `-Agent` — any member could stamp a run, the "From" crew on its approval card and the autonomy posture consulted before a standing trust grant fires with a crew of their choosing; such runs are recorded as user-driven with `invoking_user_id` set. The sidecar's internal run route additionally verifies that `invoking_agent_id` is a live agent of the invoking crew and that the crew belongs to the run's workspace, whatever token presented them (a master or workspace-bound token could previously name a crew from another tenant). Before a trust grant fires, the routine's author crew posture is honoured regardless of who invoked the run: a strict author's gate always waits for a human. Provenance stored before this change remains as recorded and is not retroactively verified.
 
 ### Added
+
+- Credentials: connect OpenCode Go and OpenCode Zen with separate encrypted API-key accounts, existing access assignments, and OpenCode model selection. Gateway calls use the sidecar with native model protocols; setup explains Go subscription limits and optional Zen balance overage. (#2618)
+
+- Credentials: connect a Z.AI GLM Coding Plan subscription with its own encrypted API-key account, sidecar route and `zai-coding-plan/` model selection on the OpenCode runner. The plan is kept separate from metered Z.AI credit — no shared payer, no fallback — and remaining quota is never inferred from token counts. (#2621)
 
 - Command palette: pages are searchable by name or slug in a **Pages** group — each row wears the page's icon and colour, names its folder or owning crew, marks a published application, and opens `/pages/<slug>`; the list is the same authorised index the overview draws, fetched on open. **Recent** is now kept per user and per workspace, and a page row is offered only while that page is still in the list just returned. History stored under the old shared key is cleared once, not migrated. (#2570)
 
@@ -50,6 +73,10 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - ⚠️ **Behaviour change:** explicit routine input bounds now opt into server validation even without a widget; the optional `absolute_path` format validates path syntax across run producers. Legacy type-only inputs retain their existing server contract. Explicit positive `outcomes.max_iterations` now caps worker/checker model-tier attempts instead of being ignored; zero/omitted preserves configured fallback traversal.
 
 ### Fixed
+
+- Sidecar: observe SSE usage per event so long streams retain their final token totals; bound individual events and omit billing observations when an oversized event makes usage incomplete. (#2621)
+- OpenCode: report missing managed-provider grants before launching the CLI; restart the credential sidecar as its owning UID and reject failed stops instead of accepting stale credentials. (#2621)
+- Sidecar: flush small SSE chunks immediately so OpenCode and other streaming model responses arrive before upstream completion; reduce temporary allocations when parsing SSE usage. (#2621)
 - **Deleting a routine now deletes its schedules with it (#2573).** The delete used to tombstone only the pipeline row: its schedules stayed enabled, kept a `next_run_at`, appeared in the plans list and calendar with an empty routine column, and fired into a load-failure alert every tick until the circuit breaker tripped. The soft-delete now disables and soft-deletes the routine's schedules in the same transaction (a schedule's optional wake probe is untouched — its absence has its own fail-open/fail-closed semantics), and the schedules list hides rows orphaned before this fix rather than presenting them as live plans.
 - Integration validation: issue updates reject an assignee type without an assignee (and `issue create` refuses `--assignee-type` without `--assignee` the same way), preserving owner/delegate identity; backup response schemas accept the nullable diagnostic lists the server actually emits. (#2615)
 - CLI: `inbox show` no longer prints resolve guidance for an item already in the `resolved` state — `inbox resolve <id>` can leave `resolved_action` empty, which the old hint condition mistook for an unresolved row.

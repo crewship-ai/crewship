@@ -127,7 +127,7 @@ export function RoutineFixtureTest({
     }
   }
   return (
-    <section className="space-y-4 rounded-2xl border border-hairline p-5">
+    <section className="space-y-4 rounded-2xl border border-hairline p-3 sm:p-5">
       <div>
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h3 className="font-medium">Test this step</h3>

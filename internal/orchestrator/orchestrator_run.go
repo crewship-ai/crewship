@@ -44,6 +44,9 @@ const preflightExecTimeout = 30 * time.Second
 // and released capacity while the CLI was still working.
 var ErrDetachedStillRunning = errors.New("orchestrator: exec detached and still running")
 
+// ErrDetachedExecStopped is terminal: the process was stopped, but its exit result is unknown.
+var ErrDetachedExecStopped = errors.New("orchestrator: detached exec stopped after the monitoring budget")
+
 // awaitExecTerminal inspects an exec whose stream has ended and, when the
 // process is still alive, keeps inspecting until it terminates (#2626).
 //
@@ -182,6 +185,10 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 		telemetry.RecordError(span, err)
 		span.End()
 	}()
+
+	if err := validateManagedOpenCodeCredential(req); err != nil {
+		return err
+	}
 
 	// journalUserMessage scrubs the message against this run's credential
 	// values and the built-in patterns, then bounds it to
@@ -1097,6 +1104,9 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 				slotTransferredToHold = true
 			}
 		}
+		if stopErr == nil && stopped {
+			return fmt.Errorf("%w: exec %s", ErrDetachedExecStopped, result.ExecID)
+		}
 		return fmt.Errorf("%w: exec %s still running after %s", ErrDetachedStillRunning, result.ExecID, o.detachedWaitBudget)
 	}
 
@@ -1457,13 +1467,14 @@ func (o *Orchestrator) ensureSidecar(ctx context.Context, req *AgentRunRequest, 
 				memoryCfg.CrewMemoryPath = memory.ContainerCrewMemoryRoot
 			}
 		}
-		// Build IPC config for agents in a crew so the sidecar can forward
-		// assignment requests (LEAD), peer queries, and escalations (all roles).
+		// Every agent needs IPC for usage accounting and credential reaping,
+		// including a lone non-lead without peers. Role-specific handlers still
+		// authorize assignment requests independently.
 		// The token handed to the sidecar is crew-bound (#1159; workspace-bound
 		// when the run has no crew), never the raw master internal token —
 		// see sidecarIPCToken.
 		var ipcCfg *SidecarIPCConfig
-		if ipcBaseURL != "" && (req.AgentRole == "LEAD" || len(req.CrewMembers) > 0) {
+		if ipcBaseURL != "" {
 			ipcCfg = &SidecarIPCConfig{
 				BaseURL:     ipcBaseURL,
 				Token:       internalAPIToken,

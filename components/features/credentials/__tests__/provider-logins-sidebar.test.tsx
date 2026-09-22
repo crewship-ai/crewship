@@ -48,14 +48,27 @@ describe("status", () => {
 })
 
 describe("provider, mode and owner", () => {
-  it("keeps providers visible and selectable when no accounts exist", () => {
+  it("shows connected providers including Z.AI without adding unused catalog entries", () => {
     const change = vi.fn()
     render(<ProviderLoginsSidebar filters={EMPTY_LOGIN_FILTERS} onFiltersChange={change}
+      counts={{ all: 1, at_limit: 0, expiring: 0, needs_relogin: 0, unassigned: 0 }}
+      providers={[
+        { value: "ZAI", label: "Z.AI", count: 1 },
+        { value: "GEMINI", label: "Gemini / Google", count: 0 },
+      ]} modes={[]} owners={[]} onToggleCollapse={() => {}} />)
+    fireEvent.click(screen.getByText("Z.AI"))
+    expect(change).toHaveBeenCalledWith({ ...EMPTY_LOGIN_FILTERS, provider: ["ZAI"] })
+    expect(screen.getByLabelText("1 connected accounts")).toBeVisible()
+    expect(screen.queryByText("Gemini / Google")).not.toBeInTheDocument()
+    expect(screen.queryByText("OpenCode Zen")).not.toBeInTheDocument()
+  })
+
+  it("does not invent provider filters for an empty workspace", () => {
+    render(<ProviderLoginsSidebar filters={EMPTY_LOGIN_FILTERS} onFiltersChange={vi.fn()}
       counts={{ all: 0, at_limit: 0, expiring: 0, needs_relogin: 0, unassigned: 0 }}
       providers={[]} modes={[]} owners={[]} onToggleCollapse={() => {}} />)
-    fireEvent.click(screen.getByText("Grok / xAI"))
-    expect(change).toHaveBeenCalledWith({ ...EMPTY_LOGIN_FILTERS, provider: ["XAI"] })
-    expect(screen.getAllByLabelText("0 connected accounts")).toHaveLength(12)
+    expect(screen.getByText("All providers")).toBeVisible()
+    expect(screen.queryByLabelText(/connected accounts/)).not.toBeInTheDocument()
   })
 
   it("toggle values in and out of a list without touching the other facets", () => {

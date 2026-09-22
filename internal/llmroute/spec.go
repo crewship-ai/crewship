@@ -1,5 +1,7 @@
 package llmroute
 
+import "strings"
+
 // AuthPlacement names where in the outbound request a token is written.
 type AuthPlacement string
 
@@ -140,4 +142,17 @@ type Spec struct {
 	// is every provider added from here on: /health reports those under the
 	// provider_creds map instead of growing a fourth top-level count.
 	LegacyHealthKey string
+}
+
+// ResponseCodec follows the native protocol used by an OpenCode gateway model.
+func (s Spec) ResponseCodec(path string) string {
+	if s.ID == "OPENCODE" || s.ID == "OPENCODE_GO" {
+		if strings.HasSuffix(path, "/messages") {
+			return "anthropic"
+		}
+		if strings.Contains(path, "/models/") {
+			return "google"
+		}
+	}
+	return s.BodyCodec
 }

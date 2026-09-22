@@ -14,6 +14,7 @@ package orchestrator
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -336,5 +337,50 @@ func TestEnsureCrewSidecar_ConcurrentCallersStartOne(t *testing.T) {
 	defer mu.Unlock()
 	if started != 1 {
 		t.Errorf("%d concurrent EnsureCrewSidecar calls started %d sidecars, want 1", len(errs), started)
+	}
+}
+
+// Runtime containers drop CAP_KILL: even root cannot stop the UID-1002
+// listener. A failed stop must not be mistaken for a healthy replacement.
+func TestSettleSidecar_StopUsesOwnerAndFailurePreventsLaunch(t *testing.T) {
+	for _, stopExit := range []int{0, 1} {
+		t.Run(fmt.Sprint(stopExit), func(t *testing.T) {
+			stopped := false
+			c := &covContainer{}
+			c.route = func(cfg provider.ExecConfig) (*provider.ExecResult, error) {
+				if strings.Contains(covScript(cfg), "pkill -f '^crewship-sidecar'") {
+					stopped = true
+					if cfg.User != "1002:1002" || cfg.AllowPrivileged {
+						t.Errorf("stop must run as sidecar owner without privilege: user=%s privileged=%v", cfg.User, cfg.AllowPrivileged)
+					}
+					return covResult("stop", ""), nil
+				}
+				if strings.Contains(covScript(cfg), "127.0.0.1:9119/health") {
+					return covResult("health", `{"status":"ok","network_mode":"free","config_fingerprint":"old"}`), nil
+				}
+				return nil, nil
+			}
+			c.inspect = func(id string) (bool, int, error) {
+				if id == "stop" {
+					return false, stopExit, nil
+				}
+				return false, 0, nil
+			}
+			o := &Orchestrator{container: c, logger: covQuietLogger(), sidecarEnabled: true}
+			started, err := o.settleSidecar(t.Context(), sidecarSettleSpec{
+				containerID: "ctr", desiredMode: "free", restartFingerprint: "new",
+			})
+			if !stopped {
+				t.Fatal("replacement did not stop old sidecar")
+			}
+			_, launched := sidecarWasLaunched(c.snapshotScripts())
+			if stopExit != 0 {
+				if err == nil || !strings.Contains(err.Error(), "stop stale sidecar") || started || launched {
+					t.Fatalf("failed stop allowed replacement: started=%v launched=%v err=%v", started, launched, err)
+				}
+			} else if err != nil || !started || !launched {
+				t.Fatalf("successful stop did not launch: started=%v err=%v", started, err)
+			}
+		})
 	}
 }
