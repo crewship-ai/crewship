@@ -8,8 +8,13 @@
   head `98a651d35`. Sloučení proběhlo běžnou cestou, bez administrátorského bypassu.
 - **#2631 je nyní společné integrační PR**: katalog/performance + Work v Activity
   z #2638 + autorování rozhodovacích formulářů z #2640. Zachovává jejich původní
-  commity. Po jeho sloučení budou tyto hlavy obsažené v main; zdrojová PR
-  není třeba zavírat jako neprovedenou práci nebo jejich změny kopírovat.
+  commity v integrační větvi. Aktivní pravidlo main vyžaduje lineární historii,
+  proto při squash merge uzavřeme zdrojová PR s odkazem na skutečně začleněnou
+  změnu; nebudeme tvrdit, že jejich původní hlavy jsou předky squash commitu.
+- **#2635 MERGED**, squash `6ceddb52dbaab2048075a7638f2a03531f0f49f6`.
+  Aktualizace připnutých CI akcí má věcné manuální review přesného headu
+  `d18c20aeb` a celé zelené CI, včetně image buildu a release packaging rehearsal.
+  Změny upstream zdrojů byly prohlédnuté; nejde o CodeRabbit review.
 - Při spojení produkční strom integrace odpovídal ověřenému `d4dfae3b7`; rozdíl vůči
   původní integrační větvi při spojení tvořily pouze dva dokumenty z #2631.
   Nová hlava má přesto vlastní CI a musí mít skutečné review před merge.
@@ -49,29 +54,50 @@ opravou selhalo; po opravě prošlo 400 komponentových/pomocných testů v 55
 souborech, včetně výslovně delegovaného VIEWER. Toto jsou nové změny, které
 musí zahrnout finální CI, review a následující browserové ověření.
 
-Veřejný DEV1 dosud nebyl aktualizován společnou integrací. Předchozí ověřená
-identita `2836a43d3` a browserové preview důkazy jsou popsány v
-[předání z 21. září](routines-takeover-2026-09-21.md).
-Po schváleném merge následuje DEV1 deploy, kontrola identity a veřejný browser
-průchod Work → Activity a formuláře author → draft → publish → odpověď.
+Veřejný DEV1 byl 22. září aktualizován **nesloučeným kandidátem `6a236506f`**
+pro uživatelem zadané testování společné větve. Build 12:37:09 UTC; autentizované
+API, frontendový marker, tři veřejně stažené JS assety a SHA-256 běžící binárky
+souhlasí. `dirty=true` je ponecháno; 17 původních WIP souborů je byte-identických.
+Následná synchronizace s main po #2635 mění pouze CI workflow; funkční kód tohoto
+kandidáta se tím nemění. Předchozí identitu `2836a43d3` neoznačujeme za aktuální.
+
+Veřejné browserové sady prošly: Work → Activity (včetně 390 px, klávesnice,
+reloadu a historie), R8 author → draft → publish → číselná odpověď → dokončení,
+ochrana draftu a navigace a pět kombinací rolí/oprávnění. R8 běh
+`run_cmucnubme00095522ada1` uložil `action_id=continue`, `amount=42.5`.
+Také všech 60 API kontrol bylo zopakováno na novém nasazení. Bez JS chyb;
+vlastní rutiny/plány smazané 204 a workspace 200, auditní historie zachována.
+První navigační harness nezafixoval workspace při souběžném vytváření jiného;
+po explicitním výběru vlastního workspace prošel celý test. Tento opravný
+průchod je rozlišený od negativního produktového důkazu #2644.
+
+[Veřejný protokol](https://github.com/crewship-ai/crewship/pull/2631#issuecomment-5776697448)
+obsahuje identitu a přesné vymezení. **#2631 stále potřebuje finální CI a
+nezávislé schválení.** CodeRabbit odmítl re-review znovu v 12:34 UTC a posunul
+okno přibližně na 13:34. Vlastní review nenahrazuje pravidlo GitHubu vyžadující
+schválení jiným účtem po posledním pushi. Kandidátní deploy není merge.
 
 §11 zůstává **NOT VERIFIED**: žádná nová data od pěti reprezentativních lidí
 nejsou dodána. [Recorder výsledků](../wireframes/routines-acceptance-recorder.html)
 slouží k zaznamenání skutečných průchodů; automatické a interní testy nejsou
-jejich náhradou. Historická omezení crash/externího zápisu/full role matrix
-zůstávají uvedena v předání, nikoli odškrtnuta dnešním merge.
+jejich náhradou. Tvrdý restart, nejistý externí zápis a oprávnění mimo vybrané
+veřejné endpointy nejsou tímto čerstvě kompletně ověřené.
 
 ## Další otevřená PR
 
 - #2633/#2634: opravená příčina červeného drift gate v izolovaných checkoutech.
   #2634 nyní řeší pouze požadované @types/node 26.6.1; #2633 deklaruje přesných
-  14 zamýšlených aktualizací a zachovává ostatní přímé závislosti. Samostatná
-  evidence a navazující ověření jsou vedené pod #2642.
-- #2632/#2635: hlavní CI prošlo, dodatečné zrušené kontroly byly obnoveny.
-  Aktualizace SQLite a release workflow nebudou označené za bezvýznamné ani
-  sloučené jen proto, že jde o Dependabot.
-- #2628/#2619/#2622: CI zelené, GitHub nadále eviduje CHANGES_REQUESTED.
-  Je třeba uzavřít nálezy a skutečné review finálního headu.
+  14 zamýšlených aktualizací a zachovává ostatní přímé závislosti. Obě finální
+  CI prošla; zbývá aktuální základ a nezávislé schválení. Evidence pod #2642.
+- #2632: celé CI a věcné manuální review původního headu prošly; čeká aktualizace
+  základu a finální kontrola. SQLite 1.59 ponechává stejný SQLite engine a
+  správně páruje libc. Upstream výkonové údaje nejsou náš benchmark.
+- #2628: převzatá oprava dalšího závodu při současném ukončení dvou odpojených
+  běhů. Negativní regrese selhala na předchozím kódu; všech 146 Go balíků a vet
+  na `7b2514396` prošlo, cílené Race testy desetkrát (30 000 souběžných párů).
+  Finální CI a nezávislé schválení zůstávají samostatné merge brány.
+- #2619/#2622: oddělené providerové změny. #2622 drží aktivně crewship_3;
+  do jeho větve tato relace nezasahuje. Otevřené review nálezy zůstávají vlastníku.
 - #2630: draft pilotu Jev; chybějící živé inference není doplněno cizími
   credentials ani odhadnutými výsledky. Není to otevřený bod Routines PRD.
 
