@@ -18,8 +18,12 @@
   komponentové regrese jsou zaznamenané; dialog nyní registruje existující
   ochranu navigace pouze při `open && dirty`. Zahození jasně zachovává
   serverový draft. Nové cílené kontroly mají 392 úspěšných testů; tato změna
-  není pokrytá pouhou shodou se včerejším integračním stromem a vyžaduje
-  nový build/browserové ověření a finální CI.
+  není pokrytá pouhou shodou se včerejším integračním stromem. Nový produkční
+  build, typová kontrola a lint (0 chyb) prošly. Browser potvrdil reload bez
+  varování pro čistý draft, zachování textu při odmítnutém reloadu, zachování
+  serverového draftu a návrat fokusu při zahození, odmítnuté Back/Forward i
+  následné povolené Forward na původní cíl. Vlastní rutina smazána 204; žádné
+  JS chyby. Finální CI a review musí pokrýt novou hlavu.
 - Původní finální CI #2631 selhalo při získávání BuildKitu: spojení na
   `auth.docker.io` bylo resetované před buildem aplikace. Neúspěšné joby byly
   zopakovány; nejde o doloženou chybu produktových testů. Další integrační
