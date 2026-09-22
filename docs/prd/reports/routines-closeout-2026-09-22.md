@@ -37,7 +37,16 @@
   zobrazený publikovaný recept; vzorky se importují bez obnovení zdrojového
   běhu. Externí kroky nadále vyžadují explicitní náhradu výstupu. Podporované
   jsou existující top-level transform/agent/HTTP/script kontrakty, nikoli
-  nová simulace vnořených kroků. Browserový průchod opravy ještě čeká na deploy.
+  nová simulace vnořených kroků. Opravený export `0522f5d41` proti DEV1 API
+  prošel skutečným importem, výpočtem 42 bez nového běhu, 390px kontrolou,
+  porovnáním publikovaných v1/v2 s dokončeným exportem 42/84 a explicitní
+  náhradou HTTP výstupu. Bez JS chyb, vlastní rutina smazána 204. První
+  porovnávací fixture použila nepodporovanou aritmetiku; po opravě testovacích
+  dat prošla celá sada. Veřejný frontend ještě čeká na nasazení této opravy.
+- Společná Go sada na `65cc5f721` prošla: 146 testovaných balíků, 10 bez testů,
+  API 1083,476 s, database 1219,649 s; následné `go vet ./...` také exit 0.
+  Go zdroje na frontendovém `0522f5d41` jsou identické. Následný merge #2632
+  mění závislosti Go, proto finální společné CI znovu ověřuje tento nový základ.
 - Původní finální CI #2631 selhalo při získávání BuildKitu: spojení na
   `auth.docker.io` bylo resetované před buildem aplikace. Neúspěšné joby byly
   zopakovány; nejde o doloženou chybu produktových testů. Další integrační
@@ -106,9 +115,10 @@ veřejné endpointy nejsou tímto čerstvě kompletně ověřené.
   #2634 nyní řeší pouze požadované @types/node 26.6.1; #2633 deklaruje přesných
   14 zamýšlených aktualizací a zachovává ostatní přímé závislosti. Obě finální
   CI prošla; zbývá aktuální základ a nezávislé schválení. Evidence pod #2642.
-- #2632: celé CI a věcné manuální review původního headu prošly; čeká aktualizace
-  základu a finální kontrola. SQLite 1.59 ponechává stejný SQLite engine a
-  správně páruje libc. Upstream výkonové údaje nejsou náš benchmark.
+- **#2632 MERGED**, squash `ef36bbfe166084da9ac60196cd2336d5603871b7`.
+  Celé CI a věcné nezávislé manuální review přesného headu `d31c3c423` prošly.
+  SQLite 1.59 ponechává stejný SQLite engine a správně páruje libc. Upstream
+  výkonové údaje nejsou náš benchmark. Nový základ je v integrační větvi.
 - #2628: převzatá oprava dalšího závodu při současném ukončení dvou odpojených
   běhů. Negativní regrese selhala na předchozím kódu; všech 146 Go balíků a vet
   na `7b2514396` prošlo, cílené Race testy desetkrát (30 000 souběžných párů).
