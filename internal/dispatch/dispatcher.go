@@ -110,6 +110,7 @@ func (d *Dispatcher) Run(ctx context.Context) error {
 	defer recovery.Stop()
 
 	for {
+		d.flushRunOutcomes(ctx)
 		// Drain as much as capacity allows before waiting again.
 		for ctx.Err() == nil {
 			claimed, err := d.claimOne(ctx)
@@ -125,6 +126,7 @@ func (d *Dispatcher) Run(ctx context.Context) error {
 		select {
 		case <-ctx.Done():
 			d.drain()
+			d.flushRunOutcomes(context.WithoutCancel(ctx))
 			return nil
 		case <-recovery.C:
 			if err := d.recover(ctx); err != nil {
@@ -455,7 +457,11 @@ func (d *Dispatcher) settle(ctx context.Context, live *liveAttempt, runErr error
 		// the work is not the place to resolve that.
 		d.park(ctx, a, "the runtime classified a failure as success: "+runErr.Error())
 	default:
-		d.park(ctx, a, "the runtime's outcome is unclear: "+runErr.Error())
+		// Failed execution and uncertain external effects are different facts.
+		// Preserve a failed run only if the provider confirms it is gone; the
+		// accepted work still requires reconciliation, never automatic replay.
+		alive, probeErr := d.runtime.Alive(ctx, live.locator)
+		d.finishWithRunProof(ctx, a, work.StateNeedsReconciliation, "the runtime's outcome is unclear: "+runErr.Error(), probeErr == nil && !alive)
 	}
 }
 
@@ -613,8 +619,12 @@ func (d *Dispatcher) stopDetachedConfirmed(ctx context.Context, live *liveAttemp
 // backstop for the next one: an outcome that cannot be written lands in
 // reconciliation immediately, carrying what it was trying to say.
 func (d *Dispatcher) finish(ctx context.Context, a Assignment, to work.State, reason string) {
+	d.finishWithRunProof(ctx, a, to, reason, false)
+}
+
+func (d *Dispatcher) finishWithRunProof(ctx context.Context, a Assignment, to work.State, reason string, stoppedFailed bool) {
 	err := d.store.Transition(ctx, work.TransitionRequest{
-		WorkID: a.Item.ID, RunID: a.RunID, Generation: a.Generation, To: to, Reason: reason,
+		WorkID: a.Item.ID, RunID: a.RunID, Generation: a.Generation, To: to, Reason: reason, StoppedRunFailed: stoppedFailed,
 	})
 	if err == nil {
 		return
@@ -778,5 +788,15 @@ func (d *Dispatcher) shutdownAttempt(live *liveAttempt, runDone <-chan error) {
 		persistCtx, persistCancel := context.WithTimeout(context.Background(), d.cfg.StopGrace)
 		defer persistCancel()
 		d.park(persistCtx, live.assignment, "server shutdown: runtime stopped but its outcome was not returned")
+	}
+}
+
+// Projection failures do not restart work or prevent unrelated admission. The
+// runtime owns its bounded durable outbox and can retry it on the next poll.
+func (d *Dispatcher) flushRunOutcomes(ctx context.Context) {
+	if flusher, ok := d.runtime.(interface{ FlushRunOutcomes(context.Context) error }); ok {
+		if err := flusher.FlushRunOutcomes(ctx); err != nil {
+			d.logger.Error("dispatch: run outcome projection pending", "error", err)
+		}
 	}
 }

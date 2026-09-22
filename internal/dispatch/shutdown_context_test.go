@@ -81,6 +81,14 @@ func testShutdownUnconfirmedStop(t *testing.T, blockStop bool) {
 	if item.State != work.StateNeedsReconciliation {
 		t.Fatalf("shutdown left work %q after an unconfirmed stop, want needs_reconciliation", item.State)
 	}
+	var runStatus string
+	if err := h.db.QueryRowContext(t.Context(), `SELECT run_status FROM work_attempts WHERE work_id = ? ORDER BY attempt DESC LIMIT 1`, r.WorkID).Scan(&runStatus); err != nil {
+		t.Fatal(err)
+	}
+	if runStatus != "" {
+		t.Fatalf("unconfirmed shutdown projected terminal %q", runStatus)
+	}
+
 	select {
 	case <-runtime.returned:
 	case <-time.After(time.Second):
@@ -146,4 +154,12 @@ func TestSettle_CompletionThatBeatsACancelIsRecordedAsSucceeded(t *testing.T) {
 	if cancelled != 0 {
 		t.Fatalf("%d cancelled transitions recorded over a completed run", cancelled)
 	}
+	var runStatus string
+	if err := h.db.QueryRowContext(t.Context(), `SELECT run_status FROM work_attempts WHERE work_id = ? ORDER BY attempt DESC LIMIT 1`, r.WorkID).Scan(&runStatus); err != nil {
+		t.Fatal(err)
+	}
+	if runStatus != "COMPLETED" {
+		t.Fatalf("late cancel changed run projection to %q", runStatus)
+	}
+
 }

@@ -12,6 +12,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/featureflags"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/runverdict"
+	"github.com/crewship-ai/crewship/internal/work"
 )
 
 // runVerdictFlagKey is the feature_flags row seeded by migration v164
@@ -195,6 +196,27 @@ func (h *InternalHandler) UpdateRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// A durable work attempt has one settlement owner. Ignore caller-supplied
+	// terminal status/output and project only its fenced, persisted outcome.
+	projection, workOwned, projectionErr := work.NewStore(h.db).RunProjection(r.Context(), runID)
+	if projectionErr != nil {
+		h.logger.Error("update run: read work outcome", "run_id", runID, "error", projectionErr)
+		replyError(w, http.StatusInternalServerError, "Could not read work outcome")
+		return
+	}
+	if workOwned {
+		if projection.WorkspaceID != workspaceID {
+			replyError(w, http.StatusConflict, "Work outcome is not confirmed")
+			return
+		}
+		if projection.Ready {
+			body.Status = projection.Status
+			body.ExitCode = projection.Result.ExitCode
+			body.ErrorMessage = projection.Result.ErrorMessage
+			body.Metadata, _ = json.Marshal(projection.Result.Metadata)
+		}
+	}
+
 	// Idempotency guard: if a terminal run.* entry already exists for this
 	// trace, treat the call as a no-op success. Sidecar retries (network
 	// blip, 503 retry) would otherwise append duplicate run.completed/
@@ -210,11 +232,23 @@ func (h *InternalHandler) UpdateRun(w http.ResponseWriter, r *http.Request) {
 		// rather than the new one, so retries don't appear to "succeed"
 		// at flipping a finished run.
 		statusFromEntry := strings.ToUpper(strings.TrimPrefix(existingTerminal.String, "run."))
+		if workOwned && projection.Ready && statusFromEntry != body.Status {
+			replyError(w, http.StatusConflict, "Run history disagrees with confirmed work outcome")
+			return
+		}
 		writeJSON(w, http.StatusOK, map[string]string{"id": runID, "status": statusFromEntry})
 		return
 	} else if err != nil && err != sql.ErrNoRows {
 		h.logger.Error("update run: terminal-exists check", "error", err, "run_id", runID)
 		replyError(w, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+
+	// Older attempts have no staged result. Their existing terminal event is
+	// still an idempotent acknowledgement above; without one they must wait
+	// for an authoritative result, never accept a caller's invented terminal.
+	if workOwned && !projection.Ready {
+		replyError(w, http.StatusConflict, "Work outcome is not confirmed")
 		return
 	}
 
@@ -237,7 +271,21 @@ func (h *InternalHandler) UpdateRun(w http.ResponseWriter, r *http.Request) {
 			payload["metadata"] = md
 		}
 	}
-	if _, err := h.journal.Emit(r.Context(), journal.Entry{
+	emit := h.journal.Emit
+	entryID := ""
+	if workOwned {
+		synchronous, ok := h.journal.(journal.SyncEmitter)
+		if !ok {
+			replyError(w, http.StatusServiceUnavailable, "Durable run journal unavailable")
+			return
+		}
+		emit = synchronous.EmitSync
+		// Stable identity prevents two concurrent projectors from appending
+		// duplicate terminal entries, including across server processes.
+		entryID = "work-terminal:" + runID
+	}
+	if _, err := emit(r.Context(), journal.Entry{
+		ID:          entryID,
 		WorkspaceID: workspaceID,
 		AgentID:     agentID,
 		Type:        entryType,
