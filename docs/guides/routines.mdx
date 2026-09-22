@@ -415,8 +415,10 @@ Semantics (mirroring [Required integrations](#required-integrations)):
   no half-run with an opaque auth failure deep in a step.
 - **No-op fast path.** An empty / absent `credentials_required` does zero
   probe work.
-- **Fail-open on infra, fail-closed on absence.** A probe *error* (DB hiccup)
-  allows the run with a warning; a *confirmed-missing* credential blocks it.
+- **Unavailable is not available.** A credential probe error (including an
+  unavailable database) blocks dispatch with HTTP **503**. Retry after the
+  store recovers. A confirmed missing credential remains HTTP **422**.
+  In-process child calls and scheduled dispatch use the same blocking gate.
 - **Enforced wherever `integrations_required` is.** Live `run`, `run_batch`,
   internal runs, and the `test_run` save-preview gate all check it — the same
   precondition boundary that already probes for required integrations and
@@ -729,8 +731,12 @@ type. Only `ACTIVE` credentials resolve; credentials pinned to another crew
 are invisible; when several match, the authoring crew's own credential wins
 over workspace-shared ones and the newest wins within each group (rotation).
 The decrypted value goes into the outbound request only — never into logs,
-the journal, or step output. If nothing matches, the request is sent without
-credentials (public endpoints keep working). Injection schemes: `bearer`
+the journal, or step output. An explicit `credential_ref` is required: no
+matching credential, a missing resolver, an empty value or a resolver error
+fails the step **before sending the request**. For a public endpoint that
+requires no authentication, omit `credential_ref`. This also prevents a vault
+failure between preflight and execution from sending an anonymous write.
+Injection schemes: `bearer`
 (default), `header` with explicit name, `query` with explicit name.
 
 ### `wait`

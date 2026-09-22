@@ -66,6 +66,10 @@ func schemaCatalogAdminApprovalsCheckpointsCacheMemoryProjectsResources() map[st
 		"requested_by": str(), "kind": str(), "reason": str(), "payload": anyObject(), "status": str(),
 		"decided_by": nullable(str()), "decided_at": nullable(str()), "decision_comment": str(),
 		"timeout_at": nullable(str()), "created_at": str(),
+		// routine_version (#2364): the authored routine version this approval
+		// gated, present only when the request came from one — omitempty on
+		// the struct, so it is not required.
+		"routine_version": integer(),
 	},
 		// harbormaster.Request has no omitempty on any of these, so the server
 		// emits all fifteen on every row. Naming them is what lets the contract

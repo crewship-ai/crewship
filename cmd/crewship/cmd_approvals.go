@@ -76,8 +76,12 @@ Examples:
 			// Text mode: print canonical fields up top, then dump any extra
 			// keys verbatim so an evolving server payload still renders
 			// something useful without code changes here.
+			// The row's real names (harbormaster.Request): the decision
+			// comment is decision_comment and the deadline is timeout_at.
+			// Anything else the server adds still prints via the loop below.
 			canon := []string{"id", "status", "kind", "reason", "crew_id", "agent_id", "mission_id",
-				"requested_by", "decided_by", "decided_at", "comment", "created_at", "updated_at"}
+				"requested_by", "decided_by", "decided_at", "decision_comment", "timeout_at",
+				"routine_version", "created_at"}
 			printed := map[string]bool{}
 			for _, k := range canon {
 				if v, ok := entry[k]; ok && v != nil && fmt.Sprintf("%v", v) != "" {

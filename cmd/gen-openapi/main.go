@@ -400,7 +400,7 @@ func buildDocument(routes []route) map[string]any {
 		// until endpoint-specific schemas are added.
 		for status, response := range responses {
 			if status[0] != '2' && status != "304" {
-				response.(map[string]any)["content"] = map[string]any{"application/json": map[string]any{"schema": errorBodySchema(info)}}
+				response.(map[string]any)["content"] = errorContentForRoute(rt, info)
 			}
 			if status[0] == '2' {
 				if headers := routeSchemaCatalog()[rt.method+" "+rt.path].SuccessHeaders; headers != nil {
@@ -639,6 +639,10 @@ func mergeDomainSchema(existing, incoming DomainSchema) DomainSchema {
 	if incoming.SuccessStatuses != nil {
 		existing.SuccessStatuses = incoming.SuccessStatuses
 	}
+	if incoming.ErrorMedia != nil {
+		existing.ErrorMedia = incoming.ErrorMedia
+		existing.ErrorResponse = incoming.ErrorResponse
+	}
 	return existing
 }
 
@@ -841,9 +845,19 @@ func responseComponents() map[string]any {
 	})
 	run := object(map[string]any{
 		"id": scalar("string"), "agent_id": scalar("string"), "chat_id": nullable("string"), "workspace_id": scalar("string"), "triggered_by": nullable("string"),
+		// kind discriminates the engine: "agent" for an ad-hoc agent/chat
+		// execution, "pipeline" for a routine run (#2284). Always present.
+		"kind":         scalar("string"),
 		"trigger_type": scalar("string"), "status": scalar("string"), "started_at": nullable("string"), "finished_at": nullable("string"), "error_message": nullable("string"),
 		"exit_code": nullable("integer"), "metadata": map[string]any{"type": "object", "additionalProperties": true}, "model": nullable("string"), "created_at": scalar("string"),
-		"agent_name": nullable("string"), "agent_slug": nullable("string"), "crew_name": nullable("string"),
+		// The issue the run worked on — id for filtering, identifier (ENG-4)
+		// for a link. Both omitted for chat-only runs, which have no issue.
+		"mission_id": nullable("string"), "mission_identifier": nullable("string"),
+		"agent_name": nullable("string"), "agent_slug": nullable("string"), "crew_name": nullable("string"), "crew_slug": nullable("string"),
+		// pipeline_slug names the routine a kind=="pipeline" run executed —
+		// such a run has no agent, so agent_slug is null and this is the
+		// field that lets the row name itself. Absent for agent runs.
+		"pipeline_slug": nullable("string"),
 		// Session provenance: omitted entirely for runs that recorded none
 		// (older runs, adapters with no session-init), which is why every one
 		// of these is nullable rather than a guaranteed scalar.
@@ -860,7 +874,12 @@ func responseComponents() map[string]any {
 		// hammering a wall it cannot see.
 		"permission_denials":           array(ref("DeniedTool")),
 		"permission_denials_truncated": scalar("boolean"),
-	})
+	},
+		// runResponse's fields without `,omitempty` — derived, not chosen:
+		// TestOpenAPIRequired_MatchesTheStructsOwnJSONTags fails naming the
+		// difference if this list and the struct disagree.
+		"id", "agent_id", "chat_id", "workspace_id", "triggered_by", "trigger_type", "kind", "status",
+		"started_at", "finished_at", "error_message", "exit_code", "metadata", "created_at")
 	schemas := map[string]any{
 		"Workspace": workspace, "WorkspaceList": array(ref("Workspace")), "WorkspaceCounts": object(map[string]any{"crews": scalar("integer"), "agents": scalar("integer"), "members": scalar("integer")}),
 		"Crew": crew, "CrewList": array(ref("Crew")), "CrewCounts": object(map[string]any{"agents": scalar("integer"), "members": scalar("integer")}),
@@ -869,7 +888,7 @@ func responseComponents() map[string]any {
 		"Label":        object(map[string]any{"id": scalar("string"), "name": scalar("string"), "color": scalar("string"), "label_group": nullable("string")}),
 		"IssueCreator": object(map[string]any{"type": scalar("string"), "id": scalar("string"), "name": scalar("string")}),
 		"Skill":        skill, "SkillList": array(ref("Skill")), "InstalledSkillAgent": object(stringProps("agent_id", "agent_slug", "agent_name", "avatar_url", "crew_id", "crew_slug", "crew_name", "crew_color", "crew_icon", "crew_avatar_style")),
-		"Run": run, "RunList": object(map[string]any{"data": array(ref("Run")), "stats": ref("RunStats"), "pagination": ref("Pagination")}),
+		"Run": run, "RunList": object(map[string]any{"data": array(ref("Run")), "stats": ref("RunStats"), "pagination": ref("Pagination")}, "data", "stats", "pagination"),
 		"MCPServerError": object(stringProps("name", "type", "message")),
 		// tool_name carries the failure CATEGORY when the CLI named no tool, so
 		// a refusal nobody could name still renders. count is absent on records
@@ -879,6 +898,26 @@ func responseComponents() map[string]any {
 		"Pagination": object(map[string]any{"page": scalar("integer"), "limit": scalar("integer"), "total": scalar("integer"), "total_pages": scalar("integer")}),
 	}
 	return map[string]any{"schemas": schemas}
+}
+
+// errorContentForRoute is the content map for one of an operation's error
+// statuses: the envelope the handler's helper writes, as application/json,
+// unless the route's catalog entry says its errors are written some other
+// way (DomainSchema.ErrorMedia).
+func errorContentForRoute(rt route, info handlerInfo) map[string]any {
+	schema := routeSchemaCatalog()[rt.method+" "+rt.path]
+	if schema.ErrorMedia == nil {
+		return map[string]any{"application/json": map[string]any{"schema": errorBodySchema(info)}}
+	}
+	body := schema.ErrorResponse
+	if body == nil {
+		body = map[string]any{"type": "string"}
+	}
+	content := make(map[string]any, len(schema.ErrorMedia))
+	for _, media := range schema.ErrorMedia {
+		content[media] = map[string]any{"schema": body}
+	}
+	return content
 }
 
 // errorBodySchema picks the envelope an operation's error responses actually
@@ -1262,7 +1301,7 @@ func rejects4xx(block string) bool {
 		}
 	}
 	for _, m := range inlineStatusPattern.FindAllStringSubmatch(block, -1) {
-		if m[1][0] == '4' {
+		if inlineStatus(m)[0] == '4' {
 			return true
 		}
 	}
@@ -1558,7 +1597,33 @@ func packageSource() string {
 	return cachedPackageSrc
 }
 
-var inlineStatusPattern = regexp.MustCompile(`(?:writeJSON|WriteHeader)\([^\n]*?\b(\d{3})\b`)
+// inlineStatusPattern finds a status written as a numeric literal, matched by
+// argument POSITION — `WriteHeader(409)`, `writeJSON(w, 202, …)`,
+// `replyError(w, 400, …)`, `writeProblem(w, r, 409, …)` — never by "any three
+// digits on the line": the helpers' last argument is a message or a body, and
+// "name must be 2-100 characters" would otherwise publish a 100 Continue.
+//
+// The two error helpers are here because the issue-workflow handlers write
+// the literal rather than `http.StatusConflict`; with only writeJSON and
+// WriteHeader recognised, POST …/work documented 200/401/403 and none of the
+// 400/404/409 it actually answers (2026-09-15 audit). Pinned by
+// TestAbsorbHandlerBody_StatusLiterals.
+var inlineStatusPattern = regexp.MustCompile(`WriteHeader\(\s*(\d{3})\b|writeJSON\(\s*\w+\s*,\s*(\d{3})\b|replyError\(\s*\w+\s*,\s*(\d{3})\b|writeProblem\(\s*\w+\s*,\s*\w+\s*,\s*(\d{3})\b`)
+
+// inlineStatus returns the status a match of inlineStatusPattern captured,
+// whichever alternative fired.
+func inlineStatus(m []string) string {
+	for _, code := range m[1:] {
+		if code != "" {
+			return code
+		}
+	}
+	return ""
+}
+
+// internalErrorPattern matches the two "log it, answer 500" helpers, which
+// name no status at their call site at all.
+var internalErrorPattern = regexp.MustCompile(`\b(?:internalError|replyInternalError)\(`)
 
 // absorbHandlerBody folds one handler body's query reads and status branches
 // into the operation being built.
@@ -1580,13 +1645,16 @@ func absorbHandlerBody(info *handlerInfo, signature, body string) {
 	if strings.Contains(body, "writeProblem(") || strings.Contains(body, "internalError(") {
 		info.repliesProblem = true
 	}
+	if internalErrorPattern.MatchString(body) {
+		info.statuses["500"] = true
+	}
 	for name, code := range statusNames {
 		if strings.Contains(body, "http."+name) {
 			info.statuses[code] = true
 		}
 	}
-	for _, n := range inlineStatusPattern.FindAllStringSubmatch(body, -1) {
-		info.statuses[n[1]] = true
+	for _, m := range inlineStatusPattern.FindAllStringSubmatch(body, -1) {
+		info.statuses[inlineStatus(m)] = true
 	}
 }
 

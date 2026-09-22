@@ -22,12 +22,19 @@ npm install -g @anthropic-ai/claude-code
 
 Two modes, both supported:
 
-| Type | Env var | Format |
-|---|---|---|
-| API key | `ANTHROPIC_API_KEY` | `sk-ant-api03-…` |
-| OAuth (Claude Pro / Max) | `CLAUDE_CODE_OAUTH_TOKEN` | `sk-ant-oat01-…` |
+| Credential | Type · provider | Env var the agent receives | Format |
+|---|---|---|---|
+| API key | `API_KEY` · `ANTHROPIC`, or `PROVIDER_LOGIN` · `ANTHROPIC` · mode `api_key` | `ANTHROPIC_API_KEY` | `sk-ant-api03-…` |
+| Setup-token (Claude Pro / Max) | `PROVIDER_LOGIN` · `ANTHROPIC` · mode `subscription` (or the older `AI_CLI_TOKEN` · `ANTHROPIC`) | `CLAUDE_CODE_OAUTH_TOKEN` | `sk-ant-oat01-…`, the output of `claude setup-token` |
 
-Crewship's sidecar reverse-proxy injects the API key into `api.anthropic.com` requests so the agent container never sees the raw token. OAuth tokens flow through the HTTPS CONNECT tunnel directly (sidecar passes through, Claude Code sets `Authorization: Bearer` itself).
+A setup-token is a **seat**, stored as a provider login with an owner, a plan
+and an expiry, and shown on the Providers tab; it has no refresh flow, so
+Crewship warns before it expires and you paste a new one
+([Provider logins](/guides/credentials#provider-logins-2)). Crewship's sidecar
+reverse-proxy injects the API key into `api.anthropic.com` requests so the
+agent container never sees the raw token. Setup-tokens flow through the HTTPS
+CONNECT tunnel directly (sidecar passes through, Claude Code sets
+`Authorization: Bearer` itself).
 
 ## Models
 
@@ -155,6 +162,6 @@ Two deliberate asymmetries in what gets stored:
 
 **`claude: not found`** — devcontainer feature didn't install; check crew `devcontainer_config` for `ghcr.io/devcontainers-extra/features/claude-code:2`.
 
-**401 from Anthropic** — credential not assigned to agent. Check `crewship credential assign <name> <agent>` and verify the credential has `type=API_KEY` or `type=AI_CLI_TOKEN` with `provider=ANTHROPIC`.
+**401 from Anthropic** — credential not assigned to agent. Check `crewship credential assign <name> <agent>` and verify the credential has `type=API_KEY`, `type=AI_CLI_TOKEN`, or `type=PROVIDER_LOGIN` with `provider=ANTHROPIC` (for `PROVIDER_LOGIN`, `mode=subscription`).
 
 **Model retires 2026-06-15** — UI shows a badge on retiring models (claude-3.5-*, claude-*-4-20250514). Migrate to `claude-sonnet-4-6` or `claude-opus-4-7`.

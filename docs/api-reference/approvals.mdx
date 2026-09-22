@@ -101,6 +101,8 @@ For `?status=all`, the `status` envelope key echoes back as an empty string (`""
 | `rows[].status` | string | See Status values above. |
 | `rows[].payload` | object | Tool call context (`tool`, `args`, plus any rule-specific fields). `args` doubles as the gate's reward-tuning fingerprint (see [Harbor Master → Reward-adjusted gating](/guides/harbormaster#reward-adjusted-gating)), so callers keep it to values stable across repeated calls; per-invocation human context (e.g. `agent_run`'s scrubbed prompt preview) rides in a sibling `review` key instead, omitted when the caller passes none. For `ephemeral_hire` it carries `inbox_item_id`, the inbox waitpoint projecting the same decision. |
 | `rows[].timeout_at` | string? | RFC3339 deadline; the sweeper flips past-due rows to `timeout`. |
+| `rows[].decision_comment` | string | The comment passed with the decision (`comment` in the [decide](#decide) body). Empty while pending. |
+| `rows[].routine_version` | int, omitted when 0 | For an `autonomy_gate` raised by a routine's autonomy-gated schedule (§9.8, #2364): the `pipeline_versions.version` the approval was requested against — "was it the same version that then ran?". Omitted (stored as NULL, not 0) on every approval that has nothing to do with a routine's authored definition. |
 
 ---
 
@@ -114,10 +116,9 @@ GET /api/v1/approvals/{id}
 `X-Workspace-ID` header selects the workspace when it is not already present in
 the request context.
 
-**Response:** `200 OK` — the full approval request object, with the same fields
-and Go field-name JSON serialization as a `rows[]` item from List.
-
-Returns the full request object (same schema as list rows).
+**Response:** `200 OK` — the full approval request object, with the same
+snake_case fields as a `rows[]` item from List (including `decision_comment`,
+`timeout_at` and, when set, `routine_version`).
 
 **Errors:**
 

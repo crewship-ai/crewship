@@ -24,6 +24,7 @@ func finalIntegrationsConnectorsSchemaCatalog() (map[string]DomainSchema, map[st
 	}
 	array := func(items map[string]any) map[string]any { return map[string]any{"type": "array", "items": items} }
 	ref := func(name string) map[string]any { return map[string]any{"$ref": "#/components/schemas/" + name} }
+	closed := func(s map[string]any) map[string]any { s["additionalProperties"] = false; return s }
 
 	composioPage := func(item map[string]any, field string) map[string]any {
 		return object(map[string]any{"enabled": boolean(), "total": integer(), field: array(item)})
@@ -80,10 +81,26 @@ func finalIntegrationsConnectorsSchemaCatalog() (map[string]DomainSchema, map[st
 			// Named by TestOpenAPIRequired_MatchesTheStructsOwnJSONTags, which
 			// reads inboxListResponse's json tags rather than anyone's memory.
 			"rows", "count", "unread_count", "has_more"),
-		"FinalInboxItem":   inboxItem,
-		"FinalInboxBulk":   object(map[string]any{"updated": integer(), "skipped": integer(), "skipped_ids": array(str()), "state": str()}),
-		"FinalWebhookFire": object(map[string]any{"run_id": str(), "status": str(), "deduped": boolean()}),
-		"FinalUserModel":   object(map[string]any{"user_id": str(), "workspace_id": str(), "exists": boolean(), "user_slug": str(), "bytes": integer(), "created_at": str(), "updated_at": str(), "content": str(), "facts": array(ref("FinalUserModelFact"))}),
+		"FinalInboxItem": inboxItem,
+		"FinalInboxBulk": object(map[string]any{"updated": integer(), "skipped": integer(), "skipped_ids": array(str()), "state": str()}),
+		// POST /webhooks/{crewId}/{agentId}/trigger answers §5's durable
+		// receipt (internal/webhook.AcceptedReceipt / IgnoredReceipt):
+		// 202 for a delivery that produced or re-identified work, 200 for a
+		// valid ping or an event the endpoint's filter dropped. The old
+		// {run_id, status, deduped} shape predates the work ledger (#2490)
+		// and was never emitted again after it.
+		//
+		// oneOf needs the branches to be disjoint: with `status` an open
+		// string, every accepted receipt also satisfied the ignored branch
+		// (status + delivery_id, additional properties allowed) and was
+		// therefore INVALID under oneOf. The ignored branch pins status to
+		// the constant handler.go writes and closes its property set.
+		"FinalWebhookFire": map[string]any{"oneOf": []any{
+			object(map[string]any{"delivery_id": str(), "work_id": str(), "status": str(), "duplicate": boolean()},
+				"delivery_id", "work_id", "status", "duplicate"),
+			closed(object(map[string]any{"status": map[string]any{"type": "string", "enum": []string{"ignored"}}, "delivery_id": str(), "reason": str()}, "status", "delivery_id")),
+		}},
+		"FinalUserModel": object(map[string]any{"user_id": str(), "workspace_id": str(), "exists": boolean(), "user_slug": str(), "bytes": integer(), "created_at": str(), "updated_at": str(), "content": str(), "facts": array(ref("FinalUserModelFact"))}),
 		// provenance (#1693) is absent for a fact recorded before the
 		// evidence store existed — never null, never an empty object.
 		"FinalUserModelFact":       object(map[string]any{"key": str(), "value": str(), "provenance": ref("FinalUserModelProvenance")}),
@@ -119,10 +136,17 @@ func finalIntegrationsConnectorsSchemaCatalog() (map[string]DomainSchema, map[st
 		"GET /api/v1/inbox":                                        {Response: ref("FinalInboxList")},
 		"GET /api/v1/inbox/{id}":                                   {Response: ref("FinalInboxItem")},
 		"POST /api/v1/inbox/bulk":                                  {Response: ref("FinalInboxBulk")},
-		"POST /api/v1/webhooks/{crewId}/{agentId}/trigger":         {Response: ref("FinalWebhookFire")},
-		"GET /api/v1/users/me/user-model":                          {Response: ref("FinalUserModel")},
-		"PUT /api/v1/users/me/peer-consent":                        {Response: ref("FinalPeerConsent")},
-		"GET /api/v1/me/preferences":                               {Response: ref("FinalPreferences")},
+		// Errors are http.Error text, not a JSON envelope: 400/401/404/413
+		// from internal/webhook's request checks, 409/429/503 from
+		// statusForAcceptError (429 and 503 carry Retry-After). Statuses are
+		// declared by the `// openapi: responses` annotation on the route.
+		"POST /api/v1/webhooks/{crewId}/{agentId}/trigger": {
+			Response: ref("FinalWebhookFire"), SuccessStatuses: []string{"200", "202"},
+			ErrorMedia: []string{"text/plain"},
+		},
+		"GET /api/v1/users/me/user-model":   {Response: ref("FinalUserModel")},
+		"PUT /api/v1/users/me/peer-consent": {Response: ref("FinalPeerConsent")},
+		"GET /api/v1/me/preferences":        {Response: ref("FinalPreferences")},
 	}
 	return routes, components
 }

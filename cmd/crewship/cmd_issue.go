@@ -1,8 +1,11 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
+	"net/http"
 	"net/url"
+	"sort"
 	"strings"
 	"time"
 
@@ -274,6 +277,10 @@ var issueListCmd = &cobra.Command{
 		limit, _ := flags.GetInt("limit")
 		offset, _ := flags.GetInt("offset")
 		setListPaging(params, limit, offset)
+		wantCounts, _ := flags.GetBool("counts")
+		if wantCounts {
+			params.Set("counts", "1")
+		}
 
 		path := "/api/v1/issues"
 		if q := params.Encode(); q != "" {
@@ -289,6 +296,10 @@ var issueListCmd = &cobra.Command{
 		}
 
 		meta := readListMeta(resp)
+		counts, err := readStatusCounts(resp, wantCounts)
+		if err != nil {
+			return err
+		}
 		var issues []issueItem
 		if err := cli.ReadJSON(resp, &issues); err != nil {
 			return err
@@ -296,6 +307,13 @@ var issueListCmd = &cobra.Command{
 
 		f := newFormatter()
 		defer printListFooter(f, meta, len(issues))
+		// --counts changes the machine shape on purpose: the totals live in
+		// a response header, which is invisible to a `jq` reader of the bare
+		// array, so they are carried next to the rows. Opt-in, so every
+		// pipeline that reads the array today keeps getting the array.
+		if wantCounts && !f.RoutesToHuman() {
+			return f.AutoHuman(issueListWithCounts{Issues: issues, StatusCounts: counts}, func() {})
+		}
 		headers := []string{"ID", "TITLE", "STATUS", "PRIORITY", "ASSIGNEE", "CREATOR", "CREW", "LABELS", "UPDATED"}
 		var rows [][]string
 		for _, iss := range issues {
@@ -325,9 +343,70 @@ var issueListCmd = &cobra.Command{
 		if err := f.Auto(issues, headers, rows); err != nil {
 			return err
 		}
+		if wantCounts && f.Format != "quiet" {
+			fmt.Fprintln(f.Writer, "status counts: "+formatStatusCounts(counts))
+		}
 
 		return nil
 	},
+}
+
+// issueListWithCounts is the `--counts` machine shape: the page plus the
+// per-status totals the server sent in X-Status-Counts.
+type issueListWithCounts struct {
+	Issues       []issueItem    `json:"issues" yaml:"issues"`
+	StatusCounts map[string]int `json:"status_counts" yaml:"status_counts"`
+}
+
+// readStatusCounts decodes the X-Status-Counts header the server sets when
+// asked with ?counts=1. Absent when not asked; an older server that ignores
+// the parameter answers an empty map rather than an error, so the listing
+// still prints and the footer shows nothing to count.
+func readStatusCounts(resp *http.Response, asked bool) (map[string]int, error) {
+	if !asked {
+		return nil, nil
+	}
+	counts := map[string]int{}
+	raw := resp.Header.Get("X-Status-Counts")
+	if raw == "" {
+		return counts, nil
+	}
+	if err := json.Unmarshal([]byte(raw), &counts); err != nil {
+		return nil, fmt.Errorf("decode X-Status-Counts header: %w", err)
+	}
+	return counts, nil
+}
+
+// issueStatusOrder is the board's column order — how a person expects the
+// counts to read, rather than the map's arbitrary order.
+var issueStatusOrder = []string{"BACKLOG", "TODO", "IN_PROGRESS", "REVIEW", "DONE", "FAILED", "CANCELLED", "DUPLICATE"}
+
+// formatStatusCounts renders "BACKLOG 2 · TODO 1 · DONE 4" in workflow order,
+// with any status the CLI does not know appended alphabetically so a server
+// that grows a status is still reported in full.
+func formatStatusCounts(counts map[string]int) string {
+	if len(counts) == 0 {
+		return "none"
+	}
+	seen := make(map[string]bool, len(counts))
+	parts := make([]string, 0, len(counts))
+	for _, st := range issueStatusOrder {
+		if n, ok := counts[st]; ok {
+			parts = append(parts, fmt.Sprintf("%s %d", st, n))
+			seen[st] = true
+		}
+	}
+	var extra []string
+	for st := range counts {
+		if !seen[st] {
+			extra = append(extra, st)
+		}
+	}
+	sort.Strings(extra)
+	for _, st := range extra {
+		parts = append(parts, fmt.Sprintf("%s %d", st, counts[st]))
+	}
+	return strings.Join(parts, " · ")
 }
 
 var issueGetCmd = &cobra.Command{
@@ -435,6 +514,7 @@ func init() {
 	issueListCmd.Flags().String("label", "", "Filter by label name")
 	issueListCmd.Flags().String("search", "", "Search issues by title or identifier (server-side)")
 	addListPagingFlags(issueListCmd.Flags(), 50)
+	issueListCmd.Flags().Bool("counts", false, "Also report how many issues sit in each status under the same filter (?counts=1, X-Status-Counts)")
 
 	// issue create flags
 	issueCreateCmd.Flags().String("crew", "", "Crew slug or ID (required)")
@@ -442,8 +522,8 @@ func init() {
 	issueCreateCmd.Flags().String("description", "", "Issue description")
 	issueCreateCmd.Flags().String("priority", "none", "Priority: none, low, medium, high, urgent")
 	issueCreateCmd.Flags().String("status", "", "Starting status: BACKLOG (default), TODO, IN_PROGRESS, CANCELLED, DUPLICATE")
-	issueCreateCmd.Flags().String("assignee", "", "Assignee agent slug")
-	issueCreateCmd.Flags().String("assignee-type", "agent", "Assignee type: agent or user")
+	issueCreateCmd.Flags().String("assignee", "", "Assignee: an agent slug or ID (delegate), or with --assignee-type user a member's email or user ID (owner)")
+	issueCreateCmd.Flags().String("assignee-type", "agent", "Assignee type: agent (sets the delegate) or user (sets the human owner)")
 	issueCreateCmd.Flags().String("labels", "", "Comma-separated label IDs")
 	issueCreateCmd.Flags().String("due-date", "", "Due date (ISO 8601)")
 	// PR #292 panel parity: project/milestone/parent/estimate/sort-order/routine-id
@@ -459,8 +539,8 @@ func init() {
 	issueUpdateCmd.Flags().String("description", "", "New description")
 	issueUpdateCmd.Flags().String("status", "", "New status: BACKLOG, TODO, IN_PROGRESS, REVIEW, DONE, FAILED, CANCELLED, DUPLICATE")
 	issueUpdateCmd.Flags().String("priority", "", "New priority: none, low, medium, high, urgent")
-	issueUpdateCmd.Flags().String("assignee", "", "Assignee agent slug")
-	issueUpdateCmd.Flags().String("assignee-type", "", "Assignee type: agent or user")
+	issueUpdateCmd.Flags().String("assignee", "", "Assignee: an agent slug or ID (delegate), or with --assignee-type user a member's email or user ID (owner); empty string clears both")
+	issueUpdateCmd.Flags().String("assignee-type", "", "Assignee type: agent (sets the delegate) or user (sets the human owner)")
 	issueUpdateCmd.Flags().String("due-date", "", "Due date (ISO 8601)")
 	// PR #292 panel parity. Empty string on project/milestone/parent/routine clears it.
 	issueUpdateCmd.Flags().String("project-id", "", "Project ID (empty string = unlink)")
@@ -475,14 +555,20 @@ func init() {
 	issueReviewCmd.Flags().String("action", "", "Review action: approve or request_changes (required)")
 	issueReviewCmd.Flags().String("comment", "", "Review comment")
 	issueReviewCmd.Flags().String("reassign", "", "Agent slug to reassign to (for request_changes)")
+	// #2448's compare-and-set: the command fills both revisions in from the
+	// issue it just read, so a plain call is safe; pinning them refuses a
+	// review of work that changed since the caller looked (409).
+	issueReviewCmd.Flags().Int("revision", 0, "Expected work revision (defaults to the issue's current one)")
+	issueReviewCmd.Flags().Int("brief-revision", 0, "Expected brief revision (defaults to the issue's current one)")
 
 	// issue delete flags
 	issueDeleteCmd.Flags().BoolP("yes", "y", false, "Skip confirmation")
 
-	// issue stop flags (§10.3 Tier 2, B7, #2356): --hard signals the run's
-	// own process (TERM then, after a grace period, KILL) from inside its
-	// container, bounded to a few seconds, on top of plain stop's Tier 1
-	// cooperative cancel. Never affects a sibling agent on the same crew.
+	// issue stop flags (§10.3 Tier 2, B7, #2356/#2366): --hard kills the
+	// run's tmux session and then KILLs the pane's process group inside
+	// its container, bounded to a few seconds, on top of plain stop's
+	// Tier 1 cooperative cancel. Never affects a sibling agent on the same
+	// crew.
 	issueStopCmd.Flags().Bool("hard", false, "also terminate the running process (Tier 2); cooperative stop alone only prevents further work from starting")
 
 	// issue comment flags

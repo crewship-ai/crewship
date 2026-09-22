@@ -1295,7 +1295,10 @@ No authentication required — this endpoint uses the state token for validation
 returned by the provider.
 
 **Response:** `200 OK` is an HTML success page that closes the authorization
-window. It is not a JSON endpoint.
+window — the success path is not JSON. Every **error** status below, however,
+is a JSON body in the standard `{"error": "<message>"}` shape (e.g.
+`{"error": "Invalid or expired state token"}`), so a client that lands on a
+non-200 can read the reason instead of parsing HTML.
 
 | Status | Condition |
 |---|---|

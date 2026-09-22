@@ -50,7 +50,10 @@ Prints token, run ID, step, kind, optional invoking crew, created/timeout
 timestamps, optional callback URL, and the full prompt. A missing, expired, or
 already-decided token returns a not-found error. If the server supplied a
 callback URL, the command also prints the unauthenticated external completion
-example; treat that URL as a secret.
+example; treat that URL as a secret. The server omits the callback URL for a
+waitpoint that declares a `decision_form` — a typed decision is made through
+`approve`/`reject` only — and `--format json` then carries the form and the
+`inbox_item_id` of the card that shows it.
 
 ### `approve` and `reject`
 
@@ -65,3 +68,11 @@ rejection signal. Human output is `Approved waitpoint <short-token>.` or
 `Rejected waitpoint <short-token>.` Decisions require authentication and a
 workspace and return the server's Problem Details error for an invalid or
 already-resolved token.
+
+The decision is attributed to the person whose CLI token made it. An agent
+cannot decide a waitpoint: a call made with an agent's internal token is
+refused (`401` before the route; `403` with
+`reason: waitpoint_decider_not_allowed` from the resolve door if it ever got
+that far), the waitpoint stays pending, and the attempt is listed by
+`crewship audit --action waitpoint.decision_refused`. Full rule:
+[Waitpoints → Who may decide](/api-reference/waitpoints#who-may-decide).

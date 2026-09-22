@@ -1225,8 +1225,15 @@ not about approvals.
 
 The rule compares the approver against the **recorded owner of the agent that
 raised the escalation** (`agents.created_by_user_id`). An agent with no recorded
-owner (a legacy row) has no identity to compare against, so the rule cannot be
-enforced for its escalations and resolution proceeds as before.
+owner (a legacy row) has no identity to compare against, and the rule **fails
+closed**: while it is in force, resolving or supplying that agent's `CREDENTIAL`
+escalations is refused with a `403` naming the unknown initiator — never waved
+through as if a second person had looked.
+
+Whether an ask reaches a human at all is decided earlier, by the judge: see
+[Asking a human for a credential](/guides/credentials#asking-a-human-for-a-credential)
+for the ALLOW / DENY / ESCALATE gate on a credential ask and what a `DENIED`
+answer to the sidecar's `/escalate` looks like.
 
 Every surface that offers you a resolve tells you which of the two applies, so
 you find out before you are refused rather than from the `403`:

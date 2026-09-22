@@ -529,8 +529,9 @@ Answers the two requests a person can make about their own data.
 crewship admin gdpr export someone@example.com
 crewship admin gdpr export someone@example.com --out subject-access.json
 
-# Right to erasure — irreversible
+# Right to erasure — irreversible (`erase` is an alias of `delete`)
 crewship admin gdpr delete someone@example.com --reason "SAR #1234" --yes
+crewship admin gdpr erase  someone@example.com --reason "SAR #1234" --yes
 ```
 
 Either a user id or an **email** is accepted; the email is resolved against the
@@ -552,6 +553,7 @@ the **verb**, because the erasure does two different things:
 ```
 ✓ Erased 151 rows. Audit action: gdpr_act_…
   approvals_queue              2
+  inbox_item_reads             9
   inbox_items                  4
   memory_versions              117
   page_grants_removed          3
@@ -566,8 +568,16 @@ the **verb**, because the erasure does two different things:
 is still there to roll back to); *removed* / *revoked* rows are gone, and any
 capability they carried — a grant, a public `/p/{token}` link, an inbound webhook
 token — stops working immediately. Only the second kind is counted in the row
-total. What the erasure promises, and the accountability records it deliberately
-leaves behind, are in [GDPR](/security/gdpr).
+total. `inbox_item_reads` is the subject's own read markers on this workspace's
+inbox items — activity, not items about them. What the erasure promises, and the
+accountability records it deliberately leaves behind, are in [GDPR](/security/gdpr).
+
+An erasure that only partly happened — one table refused or a disk copy could
+not be removed — comes back as `207 Multi-Status`. The receipt is still printed,
+but the command **exits non-zero** with `erasure incomplete: <first error>` and
+the audit action id, so a scripted SAR queue cannot record it as done; re-run
+after fixing the cause (the cascade is idempotent, a second run reports zero for
+what already went).
 
 ---
 
