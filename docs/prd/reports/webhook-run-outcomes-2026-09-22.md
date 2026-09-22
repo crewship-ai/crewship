@@ -26,7 +26,9 @@ concurrent deliveries idempotent. Failed deliveries rotate behind other pending
 results, avoiding starvation by a batch of conflicting old histories. Each flush
 is capped at 100 records and five seconds; its partial index excludes acknowledged
 and unconfirmed attempts. A flush can delay admission by up to that bound;
-active-run supervision continues independently.
+active-run supervision continues independently. The added outcome probe has its
+own stop-grace timeout and a separate persistence deadline, so an unavailable
+provider cannot block settlement indefinitely.
 
 Migration `20260922182944_work_run_outcomes.sql` adds nullable result/acknowledgement/
 attempt timestamps, a default-empty constrained status, and the pending index.

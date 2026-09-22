@@ -468,8 +468,14 @@ func (d *Dispatcher) settle(ctx context.Context, live *liveAttempt, runErr error
 		// Failed execution and uncertain external effects are different facts.
 		// Preserve a failed run only if the provider confirms it is gone; the
 		// accepted work still requires reconciliation, never automatic replay.
-		alive, probeErr := d.runtime.Alive(ctx, live.locator)
-		d.finishWithRunProof(ctx, a, work.StateNeedsReconciliation, "the runtime's outcome is unclear: "+runErr.Error(), probeErr == nil && !alive)
+		probeCtx, probeCancel := context.WithTimeout(ctx, d.cfg.StopGrace)
+		alive, probeErr := d.runtime.Alive(probeCtx, live.locator)
+		probeCancel()
+		// Give persistence its own bound even if the provider exhausted the
+		// caller's deadline (notably the shutdown settlement context).
+		persistCtx, persistCancel := context.WithTimeout(context.WithoutCancel(ctx), d.cfg.StopGrace)
+		defer persistCancel()
+		d.finishWithRunProof(persistCtx, a, work.StateNeedsReconciliation, "the runtime's outcome is unclear: "+runErr.Error(), probeErr == nil && !alive)
 	}
 }
 

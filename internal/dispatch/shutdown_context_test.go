@@ -2,6 +2,7 @@ package dispatch
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -247,5 +248,38 @@ func TestShutdown_ResultBeforeLateCancellation(t *testing.T) {
 				t.Fatal("shutdown repeated execution")
 			}
 		})
+	}
+}
+
+// A provider outage must not keep settlement (and shutdown drain) blocked
+// indefinitely after execution has returned.
+type stalledOutcomeProbe struct{ *fakeRuntime }
+
+func (r stalledOutcomeProbe) Alive(ctx context.Context, _ string) (bool, error) {
+	<-ctx.Done()
+	return false, ctx.Err()
+}
+func TestSettle_OutcomeProbeTimeoutStillPersistsReconciliation(t *testing.T) {
+	h := newHarness(t)
+	r := h.accept("stalled-outcome-probe")
+	a, err := h.store.Claim(t.Context(), work.ClaimOptions{LeaseOwner: "owner"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.cfg.StopGrace = 200 * time.Millisecond
+	d := New(h.store, stalledOutcomeProbe{h.rt}, nil, h.cfg, quiet())
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+	defer cancel()
+	d.settle(ctx, &liveAttempt{assignment: Assignment{Item: a.Item, RunID: a.RunID, Generation: a.Generation}}, errors.New("execution failed"))
+	if ctx.Err() != nil {
+		t.Fatal("provider probe consumed the parent settlement deadline")
+	}
+	it, err := h.store.Get(t.Context(), r.WorkID)
+	if err != nil || it.State != work.StateNeedsReconciliation {
+		t.Fatalf("state=%v err=%v", it, err)
+	}
+	p, _, err := h.store.RunProjection(t.Context(), a.RunID)
+	if err != nil || p.Status != "" {
+		t.Fatalf("timeout fabricated terminal: %+v %v", p, err)
 	}
 }
