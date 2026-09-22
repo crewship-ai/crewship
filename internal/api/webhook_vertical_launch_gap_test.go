@@ -308,6 +308,9 @@ func TestVerticalServer_AdmittedCreationIsUnknownWhateverTheJournalDid(t *testin
 			if !it.State.HoldsExecutionSlot() {
 				t.Fatal("an unknown outcome released its execution slot")
 			}
+			if n := rig.count(`SELECT COUNT(*) FROM journal_entries WHERE trace_id = ? AND entry_type = 'run.cancelled'`, rig.attemptRunID(rec.WorkID)); n != 0 {
+				t.Fatal("an admitted, uncertain creation was falsely recorded as cancelled")
+			}
 		})
 		t.Run("shutdown/"+tc.name, func(t *testing.T) {
 			rig, runner, _ := newPreflightRig(t, true)

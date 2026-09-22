@@ -140,6 +140,22 @@ API race run (70.631s) also covered cancellation at the gate, shutdown before
 the gate, and uncreated-runtime probes. Whole-tree go vet passed. These are
 targeted checks, not the final full suite for this additional production fix.
 
+The live repeat on dev2 build `bbc64cc177b82bae3c41ce3d3e386c93b7feb8d5`
+passed all three independent assertions: work `cmucpbgnn00020f1723ae` cancelled,
+run `cmucpbgox000364e8efa4` CANCELLED with finished_at populated and exit_code
+null, and parent `msg_1790083198643763556_0951e976fa596777` COMPLETED with exit 0.
+The probe waited for the parent's actual exec boundary before sending the
+webhook. Evidence: `fixed-run-record/` and `verify-cancel-run-record.log` in the
+local evidence directory. No manual resolution was used for this repeat.
+
+The external read-only producer inventory on `6d833556a` is a useful input to
+the next scheduler migration, with two corrections: acceptance's legacy
+`runID` variable is the stable domain identity, while Claim mints the actual
+attempt run_id; and replacing scheduler busy-skip with queued execution is a
+behavior change requiring explicit overdue-occurrence and backlog handling.
+Durable ledger recovery must not be described as proof that every runtime can
+be resumed after restart. The misleading acceptance comment is corrected.
+
 ### Still outstanding
 
 #2643 remains open: migrate all producer queues to one durable claim/retry/
