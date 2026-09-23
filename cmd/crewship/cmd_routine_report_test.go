@@ -149,3 +149,27 @@ func TestBuildReport_FailedRunShowsError(t *testing.T) {
 		t.Errorf("failed report missing status/error:\n%s", md)
 	}
 }
+
+func TestReconcileFailedReportStep(t *testing.T) {
+	// A transform can fail after step.started without a terminal step.failed
+	// journal event. The persisted run still names the failed step.
+	steps := []reportStep{{ID: "parse", Status: "completed"}, {ID: "check", Status: "running"}}
+	got := reconcileFailedReportStep(steps, "failed", "check")
+	if got[0].Status != "completed" || got[1].Status != "failed" {
+		t.Fatalf("terminal failure not reflected in step status: %+v", got)
+	}
+	if strings.Contains(buildReport(reportData{Status: "failed", Steps: got}, "md"), "check — Running") {
+		t.Fatal("failed step is still rendered as running")
+	}
+
+	// Do not invent a failure for a cancelled run or a run with no failed step.
+	if cancelled := reconcileFailedReportStep(steps, "cancelled", "check"); cancelled[1].Status != "running" {
+		t.Fatalf("cancelled run was labelled as failed: %+v", cancelled)
+	}
+	if unknown := reconcileFailedReportStep(steps, "failed", ""); unknown[1].Status != "running" {
+		t.Fatalf("failure without a step was assigned to a step: %+v", unknown)
+	}
+	if missing := reconcileFailedReportStep(nil, "failed", "check"); len(missing) != 1 || missing[0].Status != "failed" {
+		t.Fatalf("failure missing from the journal was omitted: %+v", missing)
+	}
+}

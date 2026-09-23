@@ -14,6 +14,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - Activity now includes the accepted work ledger and webhook deliveries. The separate Work navigation item is removed; existing `/work` bookmarks open the corresponding Activity view. (#2636)
 
 ### Fixed
+- **Routine reports show the failed step as failed when its final journal event is missing.** The persisted run outcome resolves a step left at “Running” in Markdown and HTML reports. (#2473)
 - **Confirmed webhook stops appear as cancelled in run history.** Captured usage survives settlement and journal-write retries; only the dispatcher’s confirmed outcome can finish a work-owned run. Retrying a history write never reruns the agent. Existing contradictory historical records are left intact for investigation. (#2652)
 - Scheduled fires stop when their occurrence identity cannot be read, instead of falling back to a new wall-clock dedup key that can bypass an existing reservation. (#2643)
 - Scheduled agents do not execute after a failed run-record write. The occurrence reservation and due timestamp remain intact because a lost response does not prove the write failed. (#2643)

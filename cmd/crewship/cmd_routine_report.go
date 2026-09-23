@@ -294,8 +294,28 @@ func gatherReport(client *cli.Client, ctx context.Context, runID string, clientM
 		Client:          clientMode,
 	}
 	rows := fetchRunEvents(client, detail.PipelineSlug)
-	d.Steps = reportStepsFromEvents(rows, runID, stringifyOutputs(detail.StepOutputs))
+	d.Steps = reconcileFailedReportStep(
+		reportStepsFromEvents(rows, runID, stringifyOutputs(detail.StepOutputs)),
+		detail.Status, detail.FailedAtStep,
+	)
 	return d, nil
+}
+
+// The persisted run is authoritative when a terminal step event is missing
+// from the journal page. In particular, a failed transform may have only a
+// step.started event there, while the run and execution rows name its failure.
+func reconcileFailedReportStep(steps []reportStep, runStatus, failedAtStep string) []reportStep {
+	if runStatus != "failed" || failedAtStep == "" {
+		return steps
+	}
+	result := append([]reportStep(nil), steps...)
+	for i := range result {
+		if result[i].ID == failedAtStep {
+			result[i].Status = "failed"
+			return result
+		}
+	}
+	return append(result, reportStep{ID: failedAtStep, Status: "failed"})
 }
 
 // stringifyOutputs coerces the loosely-typed step_outputs map (string values
