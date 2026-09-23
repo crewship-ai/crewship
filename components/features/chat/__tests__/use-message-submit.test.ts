@@ -43,7 +43,7 @@ describe("checkChatMessageSize", () => {
     const sessionId = "s"
     const envelopeBytes = (content: string) =>
       new TextEncoder().encode(
-        JSON.stringify({ type: "send_message", payload: JSON.stringify({ session_id: sessionId, content }) }),
+        JSON.stringify({ type: "send_message", channel: "session:" + sessionId, payload: JSON.stringify({ session_id: sessionId, content }) }),
       ).length
 
     // ASCII "a" contributes exactly one UTF-8 byte to the encoded envelope
@@ -94,6 +94,15 @@ describe("useMessageSubmit", () => {
     expect(onSend).toHaveBeenCalledWith("session-1", "hello")
     expect(onSent).toHaveBeenCalledTimes(1)
     expect(toastError).not.toHaveBeenCalled()
+  })
+
+  it("keeps the draft when a final metadata-aware send guard refuses it", async () => {
+    const sendMessage = vi.fn(() => false)
+    const { result, onSend, onSent } = setup({ sendMessage })
+    await act(async () => { await result.current({ text: "Inspect the Page", files: [] }) })
+    expect(sendMessage).toHaveBeenCalledWith("Inspect the Page")
+    expect(onSend).not.toHaveBeenCalled()
+    expect(onSent).not.toHaveBeenCalled()
   })
 
   it("does not send when the session's row could not be created", async () => {
@@ -352,6 +361,7 @@ describe("useMessageSubmit — attachments ride along with the message", () => {
       new TextEncoder().encode(
         JSON.stringify({
           type: "send_message",
+          channel: "session:session-1",
           payload: JSON.stringify({ session_id: "session-1", content }),
         }),
       ).length

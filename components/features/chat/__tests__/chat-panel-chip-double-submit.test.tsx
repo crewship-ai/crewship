@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen, waitFor, fireEvent } from "@testing-library/react"
+import { render, screen, waitFor, fireEvent, act } from "@testing-library/react"
 
 // =============================================================================
 // #2121 — two chip clicks during one session-create window both send.
@@ -22,6 +22,7 @@ import { render, screen, waitFor, fireEvent } from "@testing-library/react"
 
 const resubscribeSession = vi.fn()
 const sendMessage = vi.fn()
+let ownMessageSaved: ((content: string, metadata?: Record<string, unknown>) => void) | undefined
 const chatStub = {
   turns: [] as unknown[],
   sendMessage,
@@ -35,7 +36,12 @@ const chatStub = {
   connectionStatus: "connected",
 }
 
-vi.mock("@/hooks/use-chat", () => ({ useChat: () => chatStub }))
+vi.mock("@/hooks/use-chat", () => ({
+  useChat: (options: { onOwnMessageSaved?: (content: string, metadata?: Record<string, unknown>) => void }) => {
+    ownMessageSaved = options.onOwnMessageSaved
+    return chatStub
+  },
+}))
 vi.mock("@/hooks/use-auth", () => ({
   useSessionSafe: () => ({ data: { user: { id: "user-1" } } }), useSession: () => ({ data: { user: { id: "user-1" } } }),
 }))
@@ -60,6 +66,8 @@ vi.mock("sonner", () => ({
 }))
 
 import { ChatPanel } from "../chat-panel"
+import { checkChatMessageSize } from "../hooks/use-message-submit"
+import { WS_MAX_OUTBOUND_FRAME_BYTES } from "@/hooks/use-websocket"
 
 const panelProps = {
   agentId: "agent-1",
@@ -108,15 +116,21 @@ describe("ChatPanel — chip double-click during session create (#2121)", () => 
     vi.clearAllMocks()
     creates = []
     holdCreate = null
+    ownMessageSaved = undefined
     installFetch()
   })
 
-  it("sends a Page reference once and removes it when asked", async () => {
+  it("keeps the Page reference until the server confirms the message was saved", async () => {
     render(<ChatPanel {...panelProps} pageContextSlug="fleet" />)
     expect(await screen.findByText(/Page: Fleet/)).toBeInTheDocument()
     fireEvent.click(await firstChip())
     await waitFor(() => expect(sendMessage).toHaveBeenCalledTimes(1))
     expect(sendMessage.mock.calls[0][1]).toEqual({ page_context: { slug: "fleet" } })
+    expect(screen.getByTestId("page-context-chip")).toBeInTheDocument()
+    fireEvent.click(await firstChip()) // first send was refused; retry the same Page request
+    await waitFor(() => expect(sendMessage).toHaveBeenCalledTimes(2))
+    expect(sendMessage.mock.calls[1][1]).toEqual({ page_context: { slug: "fleet" } })
+    act(() => ownMessageSaved?.(`${sendMessage.mock.calls[1][0]}\n\n[Page context]`, { page_context: { slug: "fleet" } }))
     expect(screen.queryByTestId("page-context-chip")).not.toBeInTheDocument()
   })
 
@@ -127,6 +141,27 @@ describe("ChatPanel — chip double-click during session create (#2121)", () => 
     fireEvent.click(await firstChip())
     await waitFor(() => expect(sendMessage).toHaveBeenCalledTimes(1))
     expect(sendMessage.mock.calls[0]).toHaveLength(1)
+  })
+
+  it("retains the Page chip when the transport refuses a send", async () => {
+    sendMessage.mockReturnValueOnce(false)
+    render(<ChatPanel {...panelProps} pageContextSlug="fleet" />)
+    expect(await screen.findByText(/Page: Fleet/)).toBeInTheDocument()
+    fireEvent.click(await firstChip())
+    await waitFor(() => expect(sendMessage).toHaveBeenCalledTimes(1))
+    expect(screen.getByTestId("page-context-chip")).toBeInTheDocument()
+    expect(toastError).toHaveBeenCalledWith(expect.stringMatching(/not connected/i))
+  })
+
+  it("keeps an auto-send prompt when Page metadata would exceed the socket limit", async () => {
+    const text = "x".repeat(WS_MAX_OUTBOUND_FRAME_BYTES - checkChatMessageSize("draft-1", "").sizeBytes - 8)
+    expect(checkChatMessageSize("draft-1", text).ok).toBe(true)
+    expect(checkChatMessageSize("draft-1", text, { page_context: { slug: "fleet" } }).ok).toBe(false)
+    render(<ChatPanel {...panelProps} pageContextSlug="fleet" autoSendInitial initialInput={text} />)
+    await waitFor(() => expect(toastError).toHaveBeenCalledWith(expect.stringMatching(/too large/i)))
+    expect(sendMessage).not.toHaveBeenCalled()
+    expect(screen.getByTestId("page-context-chip")).toBeInTheDocument()
+    expect(screen.getByRole("textbox")).toHaveValue(text)
   })
 
   it("sends exactly once when a chip is clicked twice while the create is still in flight", async () => {

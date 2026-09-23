@@ -35,6 +35,7 @@ function wireFrameBytes(sessionId: string, content: string, metadata?: Record<st
   return new TextEncoder().encode(
     JSON.stringify({
       type: "send_message",
+      channel: "session:" + sessionId,
       payload: JSON.stringify(
         metadata ? { session_id: sessionId, content, metadata } : { session_id: sessionId, content },
       ),
@@ -43,6 +44,13 @@ function wireFrameBytes(sessionId: string, content: string, metadata?: Record<st
 }
 
 describe("checkChatMessageSize measures what actually goes on the wire", () => {
+  it("counts the session channel at the transport boundary", () => {
+    const sessionId = "chat-1"
+    const content = "a".repeat(WS_MAX_OUTBOUND_FRAME_BYTES - wireFrameBytes(sessionId, ""))
+    expect(checkChatMessageSize(sessionId, content).sizeBytes).toBe(WS_MAX_OUTBOUND_FRAME_BYTES)
+    expect(checkChatMessageSize(sessionId, content + "a").ok).toBe(false)
+  })
+
   it("counts the envelope's bytes, not just the text's", () => {
     const env = envelope({ values: { notes: "n".repeat(4000) } })
     const metadata = { [ASK_SUBMISSION_METADATA_KEY]: env }
