@@ -63,12 +63,17 @@ func (h *InternalHandler) CreateRun(w http.ResponseWriter, r *http.Request) {
 
 	now := time.Now().UTC().Format(time.RFC3339)
 
-	// Emit run.started FIRST — this is the source of truth for runs
-	// (post-J migration). If we flip the agent to RUNNING before the
-	// journal entry is durable and the emit then fails, the agent is
-	// stuck in RUNNING with no trace anywhere; nothing in the recovery
-	// loop knows about it.
+	// Persist run.started FIRST — this is the source of truth for runs
+	// (post-J migration). The IPC acknowledgement permits the caller to
+	// launch an agent, so an asynchronous journal enqueue is insufficient:
+	// a process crash could leave an executed run with no durable identity.
+	// If the journal cannot commit, do not flip the agent to RUNNING.
 	{
+		synchronous, ok := h.journal.(journal.SyncEmitter)
+		if !ok {
+			replyError(w, http.StatusServiceUnavailable, "Durable run journal unavailable")
+			return
+		}
 		payload := map[string]any{"trigger_type": body.TriggerType}
 		if body.ChatID != "" {
 			payload["chat_id"] = body.ChatID
@@ -79,7 +84,7 @@ func (h *InternalHandler) CreateRun(w http.ResponseWriter, r *http.Request) {
 				payload["metadata"] = md
 			}
 		}
-		if _, err := h.journal.Emit(r.Context(), journal.Entry{
+		if _, err := synchronous.EmitSync(r.Context(), journal.Entry{
 			WorkspaceID: body.WorkspaceID,
 			AgentID:     body.AgentID,
 			Type:        journal.EntryRunStarted,

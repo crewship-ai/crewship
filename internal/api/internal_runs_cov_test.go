@@ -39,18 +39,18 @@ func TestCovIRun_CreateRun_AgentCheckDBError_500(t *testing.T) {
 	}
 }
 
-// TestCovIRun_CreateRun_JournalNotWired_500 — without SetJournal the
-// noopEmitter refuses run.* entries, and CreateRun must fail loudly
+// TestCovIRun_CreateRun_JournalNotWired_503 — without SetJournal the
+// noopEmitter cannot commit run.* entries, and CreateRun must fail loudly
 // rather than flip the agent to RUNNING with no trace.
-func TestCovIRun_CreateRun_JournalNotWired_500(t *testing.T) {
+func TestCovIRun_CreateRun_JournalNotWired_503(t *testing.T) {
 	h, wsID, agentID := covIRunFixture(t)
 	req := httptest.NewRequest("POST", "/api/v1/internal/runs", jsonBody(map[string]any{
 		"id": "covirun-r2", "agent_id": agentID, "workspace_id": wsID,
 	}))
 	rr := httptest.NewRecorder()
 	h.CreateRun(rr, req)
-	if rr.Code != http.StatusInternalServerError {
-		t.Fatalf("status = %d, want 500; body=%s", rr.Code, rr.Body.String())
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503; body=%s", rr.Code, rr.Body.String())
 	}
 	var status string
 	if err := h.db.QueryRow(`SELECT status FROM agents WHERE id = ?`, agentID).Scan(&status); err != nil {
