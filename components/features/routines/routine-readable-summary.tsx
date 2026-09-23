@@ -14,6 +14,7 @@ import { describeRoutine, type ReadableStep } from "@/lib/routine-readable"
 const STEP_TONE: Record<ReadableStep["kind"], string> = {
   trigger: "bg-warn/15 text-warn",
   agent_run: "bg-purple/15 text-purple",
+  decision: "bg-purple/15 text-purple",
   http: "bg-notice/15 text-notice",
   transform: "bg-blue-500/15 text-blue-300",
   wait: "bg-warn/15 text-warn",
