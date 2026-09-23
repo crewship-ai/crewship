@@ -490,6 +490,34 @@ describe("used by", () => {
     expect(screen.queryByText("Old secret job")).not.toBeInTheDocument()
   })
 
+  it("does not show the previous provider account when the next fields read fails", async () => {
+    h.apiFetch.mockImplementation((url: unknown) => {
+      const path = String(url)
+      if (path.includes("/cred_2/fields")) return Promise.resolve({ ok: false, status: 500 })
+      return Promise.resolve({
+        ok: true, status: 200,
+        json: async () => path.includes("/cred_1/fields")
+          ? [{ key: "account_id", value: "acct-first", is_secret: false }]
+          : [],
+      })
+    })
+    const login = {
+      mode: "subscription", provider: "OPENAI", plan: "plus", plan_label: "ChatGPT Plus",
+      owner_user_id: "u1", owner_email: "fixture@example.test", expires_at: null,
+      refresh: { supported: false, status: "none", last_at: null, next_at: null, error: null },
+      quota: null, delivery: { kind: "file", target: ".codex/auth.json" }, pays_for: { agents: 0, crews: 0 },
+    }
+    const props = { workspaceId: "ws1", open: true, onOpenChange: () => {}, onRefresh: () => {}, onRotate: () => {}, onEdit: () => {} }
+    const view = render(<CredentialDetailSheet {...props} credential={{ ...credential, login }} />)
+    expect((await screen.findAllByText("acct-first")).length).toBeGreaterThan(0)
+
+    view.rerender(<CredentialDetailSheet {...props} credential={{ ...credential, id: "cred_2", name: "SECOND", login }} />)
+    expect(screen.queryByText("acct-first")).not.toBeInTheDocument()
+    expect(await screen.findByText(/Fields could not be checked/)).toBeInTheDocument()
+    expect(screen.queryByText("acct-first")).not.toBeInTheDocument()
+    expect(screen.getByText("not reported")).toBeInTheDocument()
+  })
+
   it("lists every assigned agent and carries the count on the section", () => {
     h.role = "OWNER"
     renderSheet({ agent_names: ["agent-a", "agent-b"], _count_agent_credentials: 2 })

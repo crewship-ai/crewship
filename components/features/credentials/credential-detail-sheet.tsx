@@ -248,7 +248,8 @@ export function CredentialDetailSheet({
   // probe must never render as a green verification result.
   const testUnknown = Boolean(testResult && (testResult.supported === false || (testResult.valid && testResult.supported !== true)))
   const testPassed = Boolean(testResult?.valid && !testUnknown)
-  const [fields, setFields] = React.useState<CredentialFieldRow[]>([])
+  const [fieldsRead, setFieldsRead] = React.useState<{ credentialId: string; rows: CredentialFieldRow[] } | null>(null)
+  const fields = fieldsRead && fieldsRead.credentialId === credential?.id ? fieldsRead.rows : []
   const [fieldsLoading, setFieldsLoading] = React.useState(false)
   const [fieldsError, setFieldsError] = React.useState(false)
   const [dependentsRead, setDependentsRead] = React.useState<{
@@ -314,7 +315,7 @@ export function CredentialDetailSheet({
       setAudit([])
       setAuditExpanded(false)
       setTestResult(null)
-      setFields([])
+      setFieldsRead(null)
       setBindings([])
       setAssignments([])
       setSensitivity(null)
@@ -357,12 +358,13 @@ export function CredentialDetailSheet({
         .finally(() => !cancelled && setAuditLoading(false))
     }
 
+    setFieldsRead(null)
     setFieldsLoading(true)
     setFieldsError(false)
     apiFetch(`/api/v1/credentials/${cid}/fields?workspace_id=${ws}`)
 	      .then((r) => { if (!r.ok) throw new Error(); return r.json() })
-      .then((data: CredentialFieldRow[]) => { if (!Array.isArray(data)) throw new Error(); if (!cancelled) setFields(data) })
-	      .catch(() => !cancelled && setFieldsError(true))
+      .then((data: CredentialFieldRow[]) => { if (!Array.isArray(data)) throw new Error(); if (!cancelled) setFieldsRead({ credentialId: cid, rows: data }) })
+	      .catch(() => { if (!cancelled) { setFieldsRead(null); setFieldsError(true) } })
       .finally(() => !cancelled && setFieldsLoading(false))
 
     setDependentsRead({ credentialId: cid, status: "loading" })
@@ -844,7 +846,7 @@ export function CredentialDetailSheet({
                         <Spinner className="inline h-4 w-4 text-muted-foreground" />
                       </div>
                     ) : fieldsError ? (
-                      <p role="alert" className="text-[12px] text-warn">Fields could not be checked. Previously loaded values may be stale.</p>
+                      <p role="alert" className="text-[12px] text-warn">Fields could not be checked. No values are shown until this credential's fields can be checked.</p>
                     ) : fields.length === 0 ? (
                       <p className="text-[12px] text-muted-foreground">
                         This credential is a single value — no extra parts.
