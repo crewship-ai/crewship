@@ -329,15 +329,16 @@ const (
 	// previews are truncated server-side to keep payload size bounded.
 	// invoking_crew_id and author_crew_id are duplicated into the
 	// payload so cross-crew reuse is queryable without a join.
-	EntryPipelineRunStarted     EntryType = "pipeline.run.started"
-	EntryPipelineRunCompleted   EntryType = "pipeline.run.completed"
-	EntryPipelineRunFailed      EntryType = "pipeline.run.failed"
-	EntryPipelineStepStarted    EntryType = "pipeline.step.started"
-	EntryPipelineStepCompleted  EntryType = "pipeline.step.completed"
-	EntryPipelineStepFailed     EntryType = "pipeline.step.failed"
-	EntryPipelineStepValidation EntryType = "pipeline.step.validation_failed"
-	EntryPipelineDryRun         EntryType = "pipeline.dry_run"
-	EntryPipelinePublished      EntryType = "pipeline.published"
+	EntryPipelineRunStarted        EntryType = "pipeline.run.started"
+	EntryPipelineRunCompleted      EntryType = "pipeline.run.completed"
+	EntryPipelineRunFailed         EntryType = "pipeline.run.failed"
+	EntryPipelineStepStarted       EntryType = "pipeline.step.started"
+	EntryPipelineStepCompleted     EntryType = "pipeline.step.completed"
+	EntryPipelineDecisionEvaluated EntryType = "pipeline.decision.evaluated"
+	EntryPipelineStepFailed        EntryType = "pipeline.step.failed"
+	EntryPipelineStepValidation    EntryType = "pipeline.step.validation_failed"
+	EntryPipelineDryRun            EntryType = "pipeline.dry_run"
+	EntryPipelinePublished         EntryType = "pipeline.published"
 
 	// EntryPipelineStepSkipped / EntryPipelineStepRetrying make the two
 	// non-terminal step outcomes first-class instead of overloading

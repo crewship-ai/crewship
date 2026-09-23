@@ -332,6 +332,11 @@ type Step struct {
 	AgentSlug string `json:"agent_slug,omitempty"`
 	Prompt    string `json:"prompt,omitempty"`
 
+	// decision evaluates a bounded choice before later conditional steps.
+	// It never starts an agent by itself; routine authors enumerate every
+	// possible downstream action as a separate, statically validated step.
+	Decision *DecisionStep `json:"decision,omitempty"`
+
 	// call_pipeline fields (only populated when Type == StepCallPipeline)
 	PipelineSlug string         `json:"pipeline_slug,omitempty"`
 	NestedInputs map[string]any `json:"inputs,omitempty"`
@@ -697,7 +702,18 @@ const (
 	StepQuery        StepType = "query"
 	StepForeach      StepType = "foreach"
 	StepCrewship     StepType = "crewship"
+	StepDecision     StepType = "decision"
 )
+
+// DecisionStep selects one configured label. The rendered state is the only
+// run data sent to the decision provider. "review" is always required so
+// uncertain answers have an explicit, non-executing route.
+type DecisionStep struct {
+	State        string            `json:"state"`
+	Instructions string            `json:"instructions"`
+	Options      map[string]string `json:"options"`
+	Threshold    float64           `json:"threshold,omitempty"`
+}
 
 // Complexity tags a step's reasoning depth, mapping to a workspace-
 // configured adapter+model pair. Workspace defaults: trivial→Haiku,

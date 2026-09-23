@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/decisions"
 	"github.com/crewship-ai/crewship/internal/journal"
 )
 
@@ -276,6 +277,37 @@ func (c *pipelineEmitContext) emitStepCompleted(ctx context.Context, step Step, 
 		Payload:     mergePayload(p, "pipeline_id", c.pipelineID, "pipeline_slug", c.pipelineSlug, "run_id", c.runID),
 	})
 	c.broadcast("pipeline.step.completed", p)
+}
+
+// emitDecisionEvaluated records the model's bounded choice evidence without
+// copying webhook content into the journal. The selected route may be review
+// even when the model suggested an agent: both facts are needed for evals.
+func (c *pipelineEmitContext) emitDecisionEvaluated(ctx context.Context, stepID, selected, suggested string, probs map[string]*float64, threshold float64, model, provider string, usage decisions.Usage) {
+	if c == nil {
+		return
+	}
+	probabilities := make(map[string]float64, len(probs))
+	for option, p := range probs {
+		if p != nil {
+			probabilities[option] = *p
+		}
+	}
+	payload := map[string]any{
+		"step_id": stepID, "selected": selected, "suggested": suggested,
+		"probabilities": probabilities, "threshold": threshold,
+		"model": model, "provider": provider,
+		"input_tokens": usage.InputTokens, "output_tokens": usage.OutputTokens,
+	}
+	if usage.Cost != nil {
+		payload["cost_usd"] = *usage.Cost
+	}
+	_, _ = c.emitter.Emit(ctx, journal.Entry{
+		WorkspaceID: c.workspaceID, CrewID: c.authorCrewID,
+		Type: journal.EntryPipelineDecisionEvaluated, Severity: journal.SeverityInfo,
+		ActorType: journal.ActorOrchestrator, ActorID: c.runID,
+		Summary: "Pipeline " + c.pipelineSlug + " step " + stepID + " selected " + selected,
+		Payload: mergePayload(payload, "pipeline_id", c.pipelineID, "pipeline_slug", c.pipelineSlug, "run_id", c.runID),
+	})
 }
 
 func (c *pipelineEmitContext) emitStepFailed(ctx context.Context, step Step, errorClass, errorMessage string) {

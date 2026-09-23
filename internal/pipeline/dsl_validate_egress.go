@@ -22,6 +22,37 @@ func validateStepEgress(st Step) error {
 	case StepAgentRun, StepCallPipeline:
 		// Bodies validated in validateStepSlugs.
 		return nil
+	case StepDecision:
+		if st.Decision == nil {
+			return fmt.Errorf("pipeline: step %q (decision) missing decision body", st.ID)
+		}
+		d := st.Decision
+		if strings.TrimSpace(d.State) == "" || strings.TrimSpace(d.Instructions) == "" {
+			return fmt.Errorf("pipeline: step %q (decision) needs state and instructions", st.ID)
+		}
+		if len(d.State) > 8192 || len(d.Instructions) > 2048 {
+			return fmt.Errorf("pipeline: step %q (decision) state or instructions too long", st.ID)
+		}
+		for _, match := range templateRE.FindAllStringSubmatch(d.State, -1) {
+			ref := strings.TrimSpace(match[1])
+			if ref == "inputs.raw" || strings.HasPrefix(ref, "inputs.raw.") || ref == "inputs.headers" || strings.HasPrefix(ref, "inputs.headers.") {
+				return fmt.Errorf("pipeline: step %q (decision) cannot send raw webhook bytes or headers to the provider", st.ID)
+			}
+		}
+		if len(d.Options) < 2 || len(d.Options) > 16 {
+			return fmt.Errorf("pipeline: step %q (decision) needs 2 to 16 options", st.ID)
+		}
+		if _, ok := d.Options[decisionReviewOption]; !ok {
+			return fmt.Errorf("pipeline: step %q (decision) needs a review option", st.ID)
+		}
+		for label, description := range d.Options {
+			if !stepIDRE.MatchString(label) || strings.TrimSpace(description) == "" || len(description) > 512 {
+				return fmt.Errorf("pipeline: step %q (decision) has invalid option %q", st.ID, label)
+			}
+		}
+		if d.Threshold != 0 && (d.Threshold < 0.5 || d.Threshold > 1) {
+			return fmt.Errorf("pipeline: step %q (decision) threshold must be 0.5 to 1", st.ID)
+		}
 	case StepHTTP:
 		if st.HTTP == nil {
 			return fmt.Errorf("pipeline: step %q (http) missing http body", st.ID)
@@ -184,7 +215,7 @@ func validateStepEgress(st Step) error {
 			return err
 		}
 	default:
-		return fmt.Errorf("pipeline: step %q has unsupported type %q (allowed: agent_run, call_pipeline, http, code, wait, transform, notify, script, query, foreach, crewship)", st.ID, st.Type)
+		return fmt.Errorf("pipeline: step %q has unsupported type %q (allowed: agent_run, call_pipeline, http, code, wait, transform, notify, script, query, foreach, crewship, decision)", st.ID, st.Type)
 	}
 	return nil
 }

@@ -121,6 +121,7 @@ var AllEntryTypes = []EntryType{
 	EntryType("page.webhook_revoked"), // journalPageWebhookRevoked, internal/api/pages_webhooks.go:452:2
 	EntryPeerConversation,
 	EntryPeerEscalation,
+	EntryPipelineDecisionEvaluated,
 	EntryPipelineDryRun,
 	EntryPipelinePublished,
 	EntryPipelineRunCompleted,

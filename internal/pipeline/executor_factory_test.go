@@ -115,8 +115,10 @@ func fullExecutorDeps(t *testing.T, db *sql.DB, runner AgentRunner) ExecutorDeps
 		// The dispatch-gate seam (integrations / resources / credentials).
 		// A stub here, the api-side implementation in production — what the
 		// factory has to prove is that SOMETHING lands on every executor.
-		Preflight: &stubPreflight{},
-		Crewship:  &recordingCrewship{},
+		Preflight:    &stubPreflight{},
+		Crewship:     &recordingCrewship{},
+		Decisions:    &fakeDecisionEvaluator{choice: "review", p: 1},
+		DecisionHost: "api.typesafe.ai",
 		RunVerdict: func() (llm.Provider, string, time.Duration) {
 			return &stubVerdictProviderForFactoryTest{}, "claude-haiku-4-5", 0
 		},

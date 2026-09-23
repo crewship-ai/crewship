@@ -59,7 +59,7 @@ spec:
       description: <optional>
   steps:                                # required — at least one step
     - id: <unique within routine>
-      type: agent_run|call_pipeline|http|code|wait|transform|notify|script|query
+      type: agent_run|call_pipeline|http|code|wait|transform|notify|script|query|foreach|crewship|decision
       # agent_run-specific:
       agent_slug: <agent-slug-in-parent-crew>
       prompt: <template-substitutable string>

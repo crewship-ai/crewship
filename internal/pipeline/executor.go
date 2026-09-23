@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/decisions"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/scrubber"
 	"github.com/crewship-ai/crewship/internal/telemetry"
@@ -98,11 +99,14 @@ var ErrConcurrencyKeyEmpty = errors.New("pipeline: concurrency_key rendered to e
 // emitter are all injected so the executor can be unit-tested with
 // in-memory fakes and deployed in production with the real wires.
 type Executor struct {
-	store    *Store
-	resolver *Resolver
-	pipes    PipelineResolver // for call_pipeline lookups; usually == store
-	runner   AgentRunner
-	emitter  Emitter
+	store               *Store
+	resolver            *Resolver
+	pipes               PipelineResolver // for call_pipeline lookups; usually == store
+	runner              AgentRunner
+	emitter             Emitter
+	decisionEvaluator   decisions.Evaluator
+	decisionHost        string
+	decisionWorkspaceID string
 
 	// egressAllowed gates the host of HTTP steps at the crew/workspace
 	// policy layer. Production wiring (NewWiredExecutor with a DB)
@@ -443,6 +447,14 @@ func (e *Executor) WithSignalRegistry(s *SignalRegistry) *Executor {
 // Without it, crewship steps fail closed with a wiring hint.
 func (e *Executor) WithCrewshipActions(a CrewshipActions) *Executor {
 	e.crewship = a
+	return e
+}
+
+// WithDecisionEvaluator enables explicit decision steps. Without it these
+// steps fail closed; no general chat provider is used as a fallback.
+func (e *Executor) WithDecisionEvaluator(v decisions.Evaluator, host string) *Executor {
+	e.decisionEvaluator = v
+	e.decisionHost = host
 	return e
 }
 
@@ -1697,6 +1709,10 @@ func (e *Executor) runLinearStep(
 			ds.WouldCallAgent = step.AgentSlug
 			ds.EstimatedCost = estimateStepCost(step, renderedPrompt)
 			result.CostUSD += ds.EstimatedCost
+		case StepDecision:
+			if step.Decision != nil {
+				ds.WouldPass = Render(step.Decision.State, ctxRender)
+			}
 		case StepCallPipeline:
 			ds.WouldCallSlug = step.PipelineSlug
 			// For dry-run we do not recurse into nested pipelines
@@ -1909,6 +1925,8 @@ func (e *Executor) dispatchStep(
 		return e.runForeachStep(ctx, step, in, parentRender, runID, pipelineID, emit, depth)
 	case StepCrewship:
 		return e.runCrewshipStep(ctx, step, parentRender, in, runID)
+	case StepDecision:
+		return e.runDecisionStep(ctx, step, parentRender, in, emit)
 	default:
 		return "", 0, 0, fmt.Errorf("unsupported step type %q", step.Type)
 	}

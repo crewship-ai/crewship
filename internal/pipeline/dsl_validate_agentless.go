@@ -63,6 +63,8 @@ func agentlessSteps(steps []Step, where string) error {
 			return fmt.Errorf("pipeline: step %q%s is call_pipeline — not allowed in an agentless routine (nested target resolves at runtime, guarantee can't be enforced)", st.ID, in)
 		case StepCrewship:
 			return fmt.Errorf("pipeline: step %q%s is crewship — not allowed in an agentless routine (an issue mention or an assignment can wake an agent, so token-zero can't be enforced)", st.ID, in)
+		case StepDecision:
+			return fmt.Errorf("pipeline: step %q%s is decision — not allowed in an agentless routine (it spends model tokens)", st.ID, in)
 		case StepForeach:
 			// A foreach is agentless only if its whole body is — an agent_run
 			// inside the fan-out is token spend all the same, and so is a

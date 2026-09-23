@@ -3,8 +3,11 @@ package pipeline
 import (
 	"database/sql"
 	"log/slog"
+	"os"
 	"sync"
+	"time"
 
+	"github.com/crewship-ai/crewship/internal/decisions"
 	"github.com/crewship-ai/crewship/internal/runverdict"
 )
 
@@ -80,6 +83,12 @@ type ExecutorDeps struct {
 	// CodeRunner / ScriptRunner. Silently doing nothing would be worse: the
 	// whole point of the kind is a side effect.
 	Crewship CrewshipActions
+
+	// Decisions is an opt-in typed decision provider. When nil, the
+	// factory checks the server operator's decision-provider environment.
+	// Absence leaves decision steps disabled and fail-closed.
+	Decisions    decisions.Evaluator
+	DecisionHost string
 
 	// ScriptRunner execs type:script steps (bundled scripts) in the crew
 	// container. nil → script steps fail closed with a wiring hint. In
@@ -186,6 +195,20 @@ func NewWiredExecutor(d ExecutorDeps) *Executor {
 	}
 	if d.Crewship != nil {
 		exec = exec.WithCrewshipActions(d.Crewship)
+	}
+	if d.Decisions != nil {
+		exec = exec.WithDecisionEvaluator(d.Decisions, d.DecisionHost)
+	} else if provider, workspaceID := os.Getenv("CREWSHIP_DECISIONS_PROVIDER"), os.Getenv("CREWSHIP_DECISIONS_WORKSPACE_ID"); provider != "" && workspaceID != "" {
+		keyName := "TYPESAFE_API_KEY"
+		host := "api.typesafe.ai"
+		if provider == "openrouter" {
+			keyName = "OPENROUTER_API_KEY"
+			host = "openrouter.ai"
+		}
+		if client, err := decisions.NewClient(provider, os.Getenv(keyName), 5*time.Second); err == nil {
+			exec = exec.WithDecisionEvaluator(client, host)
+			exec.decisionWorkspaceID = workspaceID
+		}
 	}
 	// Post-run outcome verdict (#1403) — needs both a DB (feature flag
 	// + journal entries) and a way to reach the run_summary aux slot's

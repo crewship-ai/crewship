@@ -3,6 +3,8 @@
 Stav k 20. 9. 2026. Issue [#2629](https://github.com/crewship-ai/crewship/issues/2629).
 Výchozí revize Crewshipu: `8a1ca5fc3`. Implementace: `feat/jev-decisions`.
 
+> Následné rozšíření z 23. 9. přidává opt-in rozhodovací krok pro rutiny spouštěné webhookem. Aktuální hranice a evidence jsou v [předání webhook routeru](jev-webhook-router-2026-09-23.md). Níže popsaný stav je původní CLI pilot z 20. 9.
+
 ## Doporučení
 
 **Jev má pro Crewship smysl jako levná vrstva sémantických rozhodnutí před dražším agentem.** Nejzajímavější jsou třídění příchozí práce, výběr relevantních pasáží a výběr skillů. Velké úspory vzniknou, když zabrání zbytečnému spuštění drahého agenta nebo omezí jeho kontext. Samotná výměna jednoho malého klasifikátoru pravděpodobně přinese menší absolutní úsporu.

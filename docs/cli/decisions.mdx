@@ -113,3 +113,45 @@ English/Czech triage cases. Default mode validates requests locally. `--live`
 makes up to 24 calls and records accuracy, coverage, calibration, latency and
 usage in a new output directory. This is a smoke corpus, not a production
 benchmark. No live inference is claimed without an authenticated response.
+
+## Experimental webhook router routine
+
+An incoming signed routine webhook can trigger a routine with a `decision`
+step. The step outputs one of its declared option labels. Later `agent_run`
+steps use CEL conditions such as `steps.route == 'sre'`; the model cannot name
+an arbitrary agent or acquire permissions. The example
+[`webhook-router.routine.json`](https://github.com/crewship-ai/crewship/blob/main/scripts/jev-eval/webhook-router.routine.json)
+contains `sre`, `developer`, `review` and `ignore` paths. Replace the example
+agent slugs with real members of the author crew before saving it.
+
+```bash
+crewship routine validate scripts/jev-eval/webhook-router.routine.json \
+  --agents sre,developer
+crewship routine save --name webhook-decision-router \
+  --definition scripts/jev-eval/webhook-router.routine.json --author-crew ops
+crewship routine webhooks create --slug webhook-decision-router \
+  --name event-router --rate-limit 30
+```
+
+The server operator enables execution by setting
+`CREWSHIP_DECISIONS_PROVIDER=typesafe` with `TYPESAFE_API_KEY`, or
+`CREWSHIP_DECISIONS_PROVIDER=openrouter` with `OPENROUTER_API_KEY`, in the
+server process environment. `CREWSHIP_DECISIONS_WORKSPACE_ID` must also name
+the single workspace allowed for this pilot. Without all three values the
+decision step fails closed. Only its rendered `decision.state` is sent to the provider: keep this
+template to the minimum useful fields and do not include raw headers, tokens,
+or secrets. The routine must explicitly include `api.typesafe.ai` in
+`egress_targets`, or `openrouter.ai` when using OpenRouter. The author crew's
+network policy must also permit that host. The server uses a five-second call
+timeout and does not retry.
+
+The `review` option is mandatory. A top-option probability below the configured
+threshold (default 0.9) outputs `review`; it is an experimental threshold, not
+a calibrated accuracy guarantee. Provider errors fail the run and do not wake
+an agent. A webhook should be tested with a dedicated, low-privilege crew and
+labelled event fixtures before its agent branches are used for live work.
+
+This server pilot uses the operator's environment key, not workspace vault
+credentials. Provider usage is not integrated into Paymaster and absent
+provider-reported cost cannot be interpreted as free. The local SemIf model on
+MacBook Air is a different runtime and is not connected by this adapter.

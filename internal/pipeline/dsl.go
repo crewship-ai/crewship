@@ -231,6 +231,8 @@ func stepBodyField(t StepType) string {
 		// The verb is what a crewship step's body checks are about; args
 		// errors name themselves in the message.
 		return "action"
+	case StepDecision:
+		return "decision"
 	default:
 		return "type"
 	}
@@ -449,6 +451,9 @@ func validateTemplatesInStep(i int, st Step, inputs, earlier map[string]struct{}
 	// so every bad ref found inside it points at the shared "/inputs"
 	// bucket rather than a specific leaf.
 	walk(base+"/prompt", st.Prompt)
+	if st.Decision != nil {
+		walk(base+"/decision/state", st.Decision.State)
+	}
 	_ = walkNestedTemplates(st.NestedInputs, func(s string) error {
 		walk(base+"/inputs", s)
 		return nil // never short-circuit — we want every bad ref, not just the first
