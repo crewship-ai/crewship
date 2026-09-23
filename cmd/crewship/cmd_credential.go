@@ -714,9 +714,13 @@ var credTestStoredCmd = &cobra.Command{
 		// way, to "not checked", which is the safe direction: never a false
 		// green.
 		if result.Valid && !result.Supported {
+			reason := result.Error
+			if reason == "" {
+				reason = "Crewship has no upstream probe for this provider"
+			}
 			cli.PrintWarning(fmt.Sprintf(
-				"Credential %s was not checked — Crewship has no upstream probe for this provider. "+
-					"It is stored and will be delivered to agents as configured.", args[0]))
+				"Credential %s was not checked — %s. It is stored and will be delivered to agents as configured.",
+				args[0], reason))
 			return nil
 		}
 		if result.Valid {

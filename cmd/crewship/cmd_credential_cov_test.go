@@ -428,6 +428,20 @@ func TestCredDefaultEnvVarCmd(t *testing.T) {
 func TestCredTestStoredCmd_UnsupportedProviderIsNotReportedValid(t *testing.T) {
 	path := "/api/v1/credentials/" + covCredIDCli3 + "/test"
 
+	t.Run("provider login explains why it was not checked", func(t *testing.T) {
+		stub := covStub(t)
+		stub.OnPost(path, clitest.JSONResponse(200, map[string]any{
+			"valid": true, "supported": false,
+			"error": "Provider login is delivered to the CLI; an API-key probe cannot validate it",
+		}))
+		out, err := captureStderrCov(t, func() error {
+			return credTestStoredCmd.RunE(credTestStoredCmd, []string{covCredIDCli3})
+		})
+		if err != nil || !strings.Contains(out, "not checked") || !strings.Contains(out, "API-key probe") || strings.Contains(out, "is valid") {
+			t.Fatalf("CLI gave a false login verdict: output=%q err=%v", out, err)
+		}
+	})
+
 	t.Run("unsupported provider reports not checked", func(t *testing.T) {
 		stub := covStub(t)
 		stub.OnPost(path, clitest.JSONResponse(200, map[string]any{

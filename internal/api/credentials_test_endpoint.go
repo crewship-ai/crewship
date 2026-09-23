@@ -90,6 +90,13 @@ const probeNoValidationMsg = "No validation available for this provider"
 // Support is a function of both: an ENDPOINT_URL is probeable whatever the
 // provider, because the stored value IS the target being dialled.
 func probeSupported(provider, credType string) bool {
+	// A PROVIDER_LOGIN is a CLI login artifact (for Codex, auth.json), not
+	// an API key. The OPENAI probe below sends its value as a bearer token to
+	// /v1/models, which tests the wrong credential shape and can report a
+	// perfectly usable login as invalid. Its validity needs a CLI run.
+	if credType == string(CredTypeProviderLogin) {
+		return false
+	}
 	if credType == string(CredTypeEndpointURL) {
 		return true
 	}
@@ -110,6 +117,13 @@ func probeSupported(provider, credType string) bool {
 // other provider dials a FIXED vendor host (api.anthropic.com, …), never a
 // user-chosen one, so they are unaffected by this flag.
 func probeProvider(ctx context.Context, provider, ctype, value string, dialEndpoint bool) testResult {
+	if ctype == string(CredTypeProviderLogin) {
+		// Preserve the existing unprobeable-provider wire convention: valid
+		// means no check failed, supported=false says no upstream check ran.
+		// The CLI and UI use supported to avoid claiming a working login.
+		return testResult{Valid: true, Supported: false,
+			Error: "Provider login is delivered to the CLI; an API-key probe cannot validate it"}
+	}
 	// Stamp Supported once, from the same table the client is told about, rather
 	// than at each of the ~30 returns below — a per-return flag is a field
 	// somebody eventually forgets on a new branch.

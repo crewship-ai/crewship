@@ -13,6 +13,23 @@ import (
 	"testing"
 )
 
+func TestProviderLoginIsNotSentToAPIKeyProbe(t *testing.T) {
+	// A cancelled context makes an accidental HTTP call fail immediately.
+	// A login artifact is an auth.json payload, not a bearer API key.
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	got := probeProvider(ctx, "OPENAI", string(CredTypeProviderLogin), `{"tokens":{"access_token":"fixture"}}`, false)
+	if !got.Valid || got.Supported || got.Status != 0 || !strings.Contains(got.Error, "API-key probe") {
+		t.Fatalf("provider login was treated as an API key: %+v", got)
+	}
+	if probeSupported("OPENAI", string(CredTypeProviderLogin)) {
+		t.Fatal("provider login must not advertise the API-key probe")
+	}
+	if !probeSupported("OPENAI", string(CredTypeAPIKey)) {
+		t.Fatal("ordinary OpenAI API keys must keep their real upstream probe")
+	}
+}
+
 // The "Test value" button in the credential form was gated on a FRONTEND flag,
 // `BrandEntry.cli` in lib/credential-providers/registry.ts, which marks the five
 // brands Crewship drives inside agent containers (Anthropic, OpenAI, Google,
