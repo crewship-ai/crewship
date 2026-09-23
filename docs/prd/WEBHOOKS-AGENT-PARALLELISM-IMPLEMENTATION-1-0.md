@@ -8,7 +8,7 @@ Jamie zpracovává rozhovor a zároveň jeden background úkol. GitHub pošle ud
 
 Oba běhy mohou přidávat do společné, oprávněním vymezené paměti. Jestliže oba přepisují stejnou revizi, uspěje jeden; druhý dostane konflikt, načte nový podklad a připraví nový návrh. Nikdo tiše neztratí potvrzený zápis přes podporované memory API. Pád serveru neztratí potvrzenou práci; nejasný výsledek externího volání vyžaduje ověření místo slepého opakování.
 
-**Release profil:** pouze ověřený Claude adaptér, jeden chat + jeden background na agenta, jeden aktivní tah na session, jeden server. Ostatní adaptéry mají celkový limit jednoho běhu. E0 odděluje runtime a cesty, neposkytuje bezpečnostní izolaci procesů stejného UID. Přímé shell zápisy do společné paměti zůstávají mimo garanci CAS; UI toto omezení zobrazí při zapnutí profilu.
+**Release profil:** kandidátem je `CODEX_CLI` s OpenAI; Claude není pro tento release testovací provider (změna zadání 2026-09-23). Jeden chat + jeden background na agenta, jeden aktivní tah na session, jeden server smí být zapnuty **jen pro adaptér, který projde reálnými T06/T07**. Do té doby mají všechny adaptéry celkový limit jednoho běhu. [Oficiální dokumentace OpenAI](https://learn.chatgpt.com/docs/auth) potvrzuje přihlášení Codex CLI přes ChatGPT i API key; to samo nedokazuje bezpečný souběh ani platnost credential na dané instanci. E0 odděluje runtime a cesty, neposkytuje bezpečnostní izolaci procesů stejného UID. Přímé shell zápisy do společné paměti zůstávají mimo garanci CAS; UI toto omezení zobrazí při zapnutí profilu.
 
 ## 2. Technologie a hranice odpovědnosti
 
@@ -86,7 +86,7 @@ Receipt není bearer oprávnění ke čtení. Raw webhook odpověď neobsahuje t
 
 ## 6. Kapacita a pořadí
 
-Výchozí profil referenčního deploymentu: 8 aktivních executions na server, z toho background nejvýše 6, 2 místa rezervovaná pro chat. Workspace i crew mohou využít server cap, explicitní nižší limit má přednost. Agent Claude má chat ≤1, background ≤1, celkem ≤2; ostatní celkem ≤1. Provider start admission a resource gate zůstávají dalšími podmínkami. Konfigurace nevhodná pro 1+1 nesmí UI deklarovat podporu tohoto profilu.
+Výchozí profil referenčního deploymentu: 8 aktivních executions na server, z toho background nejvýše 6, 2 místa rezervovaná pro chat. Workspace i crew mohou využít server cap, explicitní nižší limit má přednost. Agent s **ověřeným** paralelním adaptérem má chat ≤1, background ≤1, celkem ≤2; každý neověřený adaptér celkem ≤1. Kandidát `CODEX_CLI` zůstává neověřený, dokud neprojde T06/T07. Provider start admission a resource gate zůstávají dalšími podmínkami. Konfigurace nevhodná pro 1+1 nesmí UI deklarovat podporu tohoto profilu.
 
 V každé třídě round-robin mezi workspace a agenty, uvnitř FIFO podle eligible_at a přijetí; aging po 60 s posune dlouho čekající eligible práci před mladší v téže třídě. Chat rezervace se nepůjčuje backgroundu v 1.0. Požadavek na kapacitu není záruka času dokončení při dlouhé práci, nedostupném provideru či vyčerpaném rozpočtu. UI ukazuje konkrétní queue reason.
 
@@ -102,7 +102,7 @@ Povinně převést: chatbridge, direct agent start/query, assignments a jejich p
 
 Mailbox má unikátní client_message_id scoped na workspace/uživatele/session. Retry odeslání vrátí stejnou zprávu, pořadí určuje server sequence v transakci. Další zpráva v 1.0 nepřerušuje tah a nevstupuje do něj jako steering. Nová session stejného Jamieho také nedostane druhý chat slot; čeká. Background používá samostatnou session, nepřimíchává soukromý transcript chatu.
 
-Claude parallel capability zapnout až po testu start A → start B → cancel/cleanup B → pokračování A. Zahrnout sidecar policy, memory scope a nákladovou/credential attribution, ne jen tmux. Codex/Gemini zůstanou sériové, dokud projdou stejnou sadou včetně souběžného write/remove login souboru v odlišných HOME. Zakázané UID změny se touto specifikací nepovolují.
+Paralelní capability zapnout pouze pro přesně otestovaný adaptér po testu start A → start B → cancel/cleanup B → pokračování A. Pro `CODEX_CLI` zahrnout souběžný write/remove login souboru v odlišných HOME, sidecar policy, memory scope a nákladovou/credential attribution, ne jen tmux. Každý další adaptér zůstane sériový do stejného důkazu. Zakázané UID změny se touto specifikací nepovolují.
 
 ## 8. Přesný memory kontrakt
 
@@ -159,8 +159,8 @@ Metriky exportovat bez raw payloadu, credentials a high-cardinality run IDs v la
 | T03 | Pád před commitem, po commitu před response, rollback enqueue | Žádný orphan; resend vrátí správné ID i při ztracené odpovědi. |
 | T04 | Write lock jiným connection/pool, checkpoint, FULL všechny connections | Budget/503 bez falešného ack; žádné překvapivé 30s čekání; žádný nested pool deadlock. |
 | T05 | Všichni producenti zároveň, session mailbox, parent/child, budget a permissions revoked | Limity atomické; pořadí a zprávy zachované; žádný bypass či slot deadlock. |
-| T06 | Skutečný Claude: chat + background Jamie současně, třetí práce queued | Prokázaný překryv dvou aktivních runtime, samostatné odpovědi/output/HOME a náklady; sériový průchod FAIL. |
-| T07 | Start/cleanup/cancel B během A; auth write/remove; attach/logs | A pokračuje, credentials/policy/memory attribution A beze změny. Ostatní adaptéry zůstávají sériové do PASS. |
+| T06 | Skutečný `CODEX_CLI` s funkčním OpenAI přihlášením: chat + background Jamie současně, třetí práce queued | Prokázaný překryv dvou aktivních runtime, samostatné odpovědi/output/HOME a náklady; sériový průchod FAIL. Zaznamenat přesnou verzi CLI, model a způsob přihlášení bez tajných hodnot. |
+| T07 | Na témže reálném adaptéru start/cleanup/cancel B během A; souběžný auth write/remove; attach/logs | A pokračuje, credentials/policy/memory attribution A beze změny. Ostatní adaptéry zůstávají sériové do vlastního PASS. |
 | T08 | Lost heartbeat, zombie runtime, late completion, server restart | Žádný nekontrolovaný druhý runtime, generation fencing, viditelná reconciliace. |
 | T09 | Externí úspěch a pád před receipt, s provider idempotency i bez ní | Žádný slepý retry; reuse stabilního key nebo explicitní unknown. |
 | T10 | CAS, append retry, duplicate operation s jiným obsahem, cap závod, repeated lines/CRLF/newline/Unicode | Přesné chybové kódy, žádný lost update či automatická resurrection. |
@@ -169,7 +169,7 @@ Metriky exportovat bez raw payloadu, credentials a high-cardinality run IDs v la
 | T13 | Retence, endpoint disable/delete, plná ingress kapacita, disk full | Accepted práce zůstane evidovaná; žádné tiché zahazování, přístup dle práv a replay dle dostupnosti payloadu. |
 | T14 | Crash OS/VM nebo storage fault harness | Oddělený důkaz od kill -9 procesu; zaznamenat fsync/storage předpoklady a nepodporované konfigurace. |
 
-Unit testy pro state machine, diff, normalizaci, podpisy a policy; integration nad skutečnou modernc SQLite a dočasným filesystemem; process crash harness; Docker E0 E2E s mocky a samostatný reálný Claude test; frontend behavior testy. Použít deterministické bariéry a fault hooks místo náhodného sleep v race testech. Pro concurrency změny cílené `go test -race`, dále repo `go test ./... -count=1`, `go vet ./...`, migrační lint; pro UI `pnpm lint` a statický `pnpm build`. Timeout/skipped nutného scénáře není PASS.
+Unit testy pro state machine, diff, normalizaci, podpisy a policy; integration nad skutečnou modernc SQLite a dočasným filesystemem; process crash harness; Docker E0 E2E s mocky a samostatný reálný `CODEX_CLI`/OpenAI test; frontend behavior testy. Použít deterministické bariéry a fault hooks místo náhodného sleep v race testech. Pro concurrency změny cílené `go test -race`, dále repo `go test ./... -count=1`, `go vet ./...`, migrační lint; pro UI `pnpm lint` a statický `pnpm build`. Timeout/skipped nutného scénáře není PASS.
 
 Release artefakt musí obsahovat commit SHA, konfiguraci/verze/hardware, příkazy a exit codes, JSON/CSV metriky, ledger bilanci, fault body, anonymizované logs a T01–T14 PASS/FAIL s odkazy. Žádné skutečné credentials či soukromé transcript fixtures. Reálný CLI test uvádí model/adapter verzi a náklady. Neověřená platforma nedostane označení podporovaného parallel profilu.
 
@@ -187,6 +187,6 @@ Každá implementační issue odkazuje na invarianty a T IDs, uvede vlastníka, 
 
 Migrations pouze append podle repo konvencí. Před změnou ownership existujících front pozastavit dispatch, nechat aktivní běhy dokončit/reconcile a transakčně převést pending položky se stabilním mapováním ID. Otestovat upgrade fixture ze stávajícího schématu bez dvojího spuštění. Staré webhook URL/signature profily zůstávají přes legacy adaptér; nepřevádět podpisové chování bez explicitní změny konfigurace.
 
-Zapínání po workspace: nový durable ingress → scheduler v sériovém režimu pro ověření → ověřený Claude 1+1. Shadow scheduler smí jen počítat rozhodnutí, nikdy spouštět práci. Vypnutí parallel flagu zastaví nové paralelní claims a drainuje současné běhy; nesmaže frontu ani receipts. Downgrade na starý binár bez podpory nových pending stavů není online rollback: vyžaduje drain/export a ověřený restore postup. Záloha DB bez kanonických memory souborů a intents není konzistentní záloha celé funkce.
+Zapínání po workspace: nový durable ingress → scheduler v sériovém režimu pro ověření → `CODEX_CLI` 1+1 teprve po reálném T06/T07 PASS. Shadow scheduler smí jen počítat rozhodnutí, nikdy spouštět práci. Vypnutí parallel flagu zastaví nové paralelní claims a drainuje současné běhy; nesmaže frontu ani receipts. Downgrade na starý binár bez podpory nových pending stavů není online rollback: vyžaduje drain/export a ověřený restore postup. Záloha DB bez kanonických memory souborů a intents není konzistentní záloha celé funkce.
 
 **Dokument je dokončené zadání, ne osvědčení hotové implementace.** River/E1 spiky, nové schéma, API, zátěž a fault-injection sada zůstávají implementační prací. Výzkum E1/E2 a op-log memory neblokuje popsaný omezený profil, ale nesmí maskovat jeho explicitní hranice.
