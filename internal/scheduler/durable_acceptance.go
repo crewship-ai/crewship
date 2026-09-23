@@ -31,6 +31,33 @@ type ScheduledInput struct {
 	Occurrence string `json:"occurrence"`
 }
 
+// AcceptDue bounds the scheduler's write transaction with the same dedicated
+// SQLite handle used by webhook acceptance. A disk-pressure refusal leaves the
+// persisted occurrence untouched; the caller may retry on the next tick.
+// The receipt becomes visible only after Acceptor.Do has committed.
+func AcceptDue(ctx context.Context, acceptor *work.Acceptor, disk *work.DiskGuard,
+	workspaceID, agentID string, now time.Time, limits work.IngressLimits) (work.Receipt, error) {
+	if acceptor == nil {
+		return work.Receipt{}, errors.New("scheduler: durable acceptor is not configured")
+	}
+	if disk == nil {
+		return work.Receipt{}, errors.New("scheduler: disk guard is not configured")
+	}
+	if err := disk.Check(); err != nil {
+		return work.Receipt{}, fmt.Errorf("scheduler: check disk before acceptance: %w", err)
+	}
+	var receipt work.Receipt
+	err := acceptor.Do(ctx, func(txCtx context.Context, tx *sql.Tx) error {
+		var acceptErr error
+		receipt, acceptErr = AcceptDueTx(txCtx, tx, acceptor.Store(), workspaceID, agentID, now, limits)
+		return acceptErr
+	})
+	if err != nil {
+		return work.Receipt{}, err
+	}
+	return receipt, nil
+}
+
 // AcceptDueTx prepares one scheduled occurrence in the caller's transaction.
 // The caller must commit before sending a dispatcher hint and roll back on ANY
 // error. Use the bounded work.Acceptor; do not perform runtime/IPC operations

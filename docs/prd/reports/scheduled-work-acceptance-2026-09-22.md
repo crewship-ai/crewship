@@ -22,6 +22,9 @@ legacy executor. Do not merge/deploy this as a completed scheduler migration.
 - Preserve an unaccepted due instant on capacity/error rollback. Enforce per-agent
   scheduled backlog and common workspace count/byte limits. Non-webhook input is
   now included as UTF-8 bytes in the shared ingress budget, not just webhook bodies.
+- `AcceptDue` runs the transaction through the dedicated bounded work.Acceptor
+  after a disk guard. This wrapper also has test callers only; the cron producer
+  has not switched to it.
 - Refuse a live legacy occurrence reservation. This is an extra guard, not proof
   that old executors have drained: the legacy TTL is not process liveness evidence.
 
@@ -42,7 +45,7 @@ that per-agent/workspace limits leave the rejected due instant unchanged.
 
 ## Still required before enabling this producer
 
-1. Supply bounded acceptance via work.Acceptor and disk guard. Initialize missing
+1. Wire the bounded acceptance wrapper to the cron producer. Initialize missing
    schedule cursors explicitly; never silently derive occurrence identity on a
    read failure. Decide operator treatment of legacy ambiguous reservations.
 2. Adapt scheduled execution to dispatch.Runtime while preserving prompt,

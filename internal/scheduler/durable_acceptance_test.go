@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"math"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -249,5 +251,41 @@ func TestAcceptDueTx_BacklogLimitsPreserveUnacceptedOccurrence(t *testing.T) {
 				t.Fatalf("full queue accepted new work: %d", n)
 			}
 		})
+	}
+}
+
+func TestAcceptDue_BoundedHandleAndDiskRefusal(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "scheduled.db")
+	db := testutil.MigratedDBAt(t, path).DB
+	if _, err := db.ExecContext(t.Context(), `INSERT INTO workspaces (id,name,slug) VALUES ('ws1','Test','test')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(t.Context(), `INSERT INTO crews (id,workspace_id,name,slug) VALUES ('crew1','ws1','Test','test')`); err != nil {
+		t.Fatal(err)
+	}
+	seedAgent(t, db, "a1", "bob", "Bob", "crew1", "ws1", "* * * * *", "prompt", true)
+	setNextRun(t, db, "a1", acceptanceDue)
+	acceptor, err := work.OpenAcceptor(path, work.DefaultAcceptanceBudget)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = acceptor.Close() })
+	guard := work.NewDiskGuard(path)
+	guard.MinFree = math.MaxInt64
+	if _, err := AcceptDue(t.Context(), acceptor, guard, "ws1", "a1", acceptanceNow, work.IngressLimits{}); !errors.Is(err, work.ErrDiskPressure) {
+		t.Fatalf("disk-pressure acceptance = %v, want ErrDiskPressure", err)
+	}
+	_, due := agentSchedule(t, db, "a1")
+	if due.String != acceptanceDue {
+		t.Fatalf("disk refusal consumed occurrence: %v", due)
+	}
+	guard.MinFree = 1
+	receipt, err := AcceptDue(t.Context(), acceptor, guard, "ws1", "a1", acceptanceNow, work.IngressLimits{})
+	if err != nil || receipt.WorkID == "" {
+		t.Fatalf("bounded acceptance = %+v, %v", receipt, err)
+	}
+	item, err := work.NewStore(db).Get(t.Context(), receipt.WorkID)
+	if err != nil || item.Source != work.SourceSchedule {
+		t.Fatalf("committed scheduled work = %+v, %v", item, err)
 	}
 }
