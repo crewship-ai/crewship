@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/crewship-ai/crewship/internal/encryption"
 )
 
 func TestProviderLoginIsNotSentToAPIKeyProbe(t *testing.T) {
@@ -27,6 +29,52 @@ func TestProviderLoginIsNotSentToAPIKeyProbe(t *testing.T) {
 	}
 	if !probeSupported("OPENAI", string(CredTypeAPIKey)) {
 		t.Fatal("ordinary OpenAI API keys must keep their real upstream probe")
+	}
+}
+
+func TestStoredProviderLoginReportsUncheckedWithoutAuditingSuccess(t *testing.T) {
+	setTestEncryptionKeyParallelSafe(t)
+	db := setupTestDB(t)
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+	enc, err := encryption.Encrypt(`{"tokens":{"access_token":"fixture"}}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO credentials
+		(id, workspace_id, name, encrypted_value, type, provider, scope, status, created_by, created_at, updated_at)
+		VALUES ('login-probe-fixture', ?, 'Codex login', ?, 'PROVIDER_LOGIN', 'OPENAI', 'WORKSPACE', 'ACTIVE', ?, datetime('now'), datetime('now'))`,
+		wsID, enc, userID); err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/credentials/login-probe-fixture/test", nil)
+	req.SetPathValue("credentialId", "login-probe-fixture")
+	req = withWorkspaceUser(req, userID, wsID, "OWNER")
+	rr := httptest.NewRecorder()
+	NewCredentialHandler(db, newTestLogger()).TestStored(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	var result testResult
+	if err := json.Unmarshal(rr.Body.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Supported || !result.Valid || result.Status != 0 {
+		t.Fatalf("provider login should be unverified, got %+v", result)
+	}
+	var auditJSON string
+	if err := db.QueryRow(`SELECT metadata_json FROM credential_audit WHERE credential_id='login-probe-fixture' AND event_type='TEST'`).Scan(&auditJSON); err != nil {
+		t.Fatal(err)
+	}
+	var audit map[string]any
+	if err := json.Unmarshal([]byte(auditJSON), &audit); err != nil {
+		t.Fatal(err)
+	}
+	if audit["supported"] != false {
+		t.Fatalf("audit should record that no check ran: %v", audit)
+	}
+	if _, claimedValid := audit["valid"]; claimedValid {
+		t.Fatalf("audit must not claim a valid login without a check: %v", audit)
 	}
 }
 

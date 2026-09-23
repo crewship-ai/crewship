@@ -524,7 +524,10 @@ func (h *CredentialHandler) TestStored(w http.ResponseWriter, r *http.Request) {
 
 	// Audit goes outside the request path failure mode — log warn but
 	// don't fail the test if the audit insert hiccups.
-	meta := map[string]any{"valid": res.Valid}
+	meta := map[string]any{"supported": res.Supported}
+	if res.Supported {
+		meta["valid"] = res.Valid
+	}
 	if res.Error != "" {
 		meta["error"] = res.Error
 	}
