@@ -15,6 +15,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - Activity now includes the accepted work ledger and webhook deliveries. The separate Work navigation item is removed; existing `/work` bookmarks open the corresponding Activity view. (#2636)
 
 ### Fixed
+- Testing a stored OpenAI Codex subscription or legacy CLI auth blob no longer sends its OAuth credential to an API-key probe or reports the resulting 403 as an invalid login. The API, CLI and credential detail show that this login was not checked; metered provider logins retain their API-key probe. A controlled CLI run is still needed for a subscription login. (#2643)
 - **Routine reports show the failed step as failed when its final journal event is missing.** The persisted run outcome resolves a step left at “Running” in Markdown and HTML reports. (#2473)
 - Pending guaranteed-memory writes are reconciled after database migration and before the server accepts requests. Recovery pins the configured storage root and rejects stale paths outside it; startup fails if an intent cannot be recovered, instead of admitting another writer over an unresolved file. (#2643)
 - Agent webhook delivery receipts and raw payloads now receive their documented retention sweep on boot and daily. A non-terminal work item keeps its receipt and payload regardless of age. (#2643)

@@ -15,6 +15,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/credprovider"
 	"github.com/crewship-ai/crewship/internal/keeper"
 	"github.com/crewship-ai/crewship/internal/provider"
+	"github.com/crewship-ai/crewship/internal/providerlogin"
 )
 
 // CredentialHandler provides CRUD endpoints for managing encrypted credentials (API keys, tokens, OAuth).
@@ -371,7 +372,22 @@ func (h *CredentialHandler) scanCredentialRows(ctx context.Context, query string
 	// serialises against an open cursor (see loadDeliveredCredentials).
 	rows.Close()
 	attachLoginViews(ctx, h.db, h.logger, result, sources)
+	for i := range result {
+		result[i].Testable = credentialTestable(result[i])
+	}
 	return result, nil
+}
+
+func credentialTestable(c credentialResponse) bool {
+	if c.Type == string(CredTypeProviderLogin) && c.Login != nil {
+		switch {
+		case c.Login.Mode == providerlogin.ModeAPIKey:
+			return probeSupported(c.Provider, string(CredTypeAPIKey))
+		case c.Provider == "ANTHROPIC" && c.Login.Mode == providerlogin.ModeSubscription:
+			return probeSupported(c.Provider, string(CredTypeAICLIToken))
+		}
+	}
+	return probeSupported(c.Provider, c.Type)
 }
 
 // enrichCredentials batch-loads the crew_ids / agent names / mcp-used columns
@@ -490,6 +506,7 @@ func (h *CredentialHandler) Get(w http.ResponseWriter, r *http.Request) {
 		attachLoginViews(r.Context(), h.db, h.logger, one, map[string]loginSource{c.ID: src})
 		c.Login = one[0].Login
 	}
+	c.Testable = credentialTestable(c)
 
 	c.CrewIDs = h.loadCrewIDs(r.Context(), c.ID)
 	c.AgentNames, c.AgentIDs = splitAgentRefs(h.loadAgentRefsBatch(r.Context(), []string{c.ID})[c.ID])

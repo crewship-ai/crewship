@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/encryption"
+	"github.com/crewship-ai/crewship/internal/providerlogin"
 )
 
 // testResult is the JSON shape both Test and TestStored return.
@@ -90,6 +91,18 @@ const probeNoValidationMsg = "No validation available for this provider"
 // Support is a function of both: an ENDPOINT_URL is probeable whatever the
 // provider, because the stored value IS the target being dialled.
 func probeSupported(provider, credType string) bool {
+	// A PROVIDER_LOGIN is a CLI login artifact (for Codex, auth.json), not
+	// an API key. The OPENAI probe below sends its value as a bearer token to
+	// /v1/models, which tests the wrong credential shape and can report a
+	// perfectly usable login as invalid. Its validity needs a CLI run.
+	if credType == string(CredTypeProviderLogin) {
+		return false
+	}
+	if provider == "OPENAI" && credType == string(CredTypeAICLIToken) {
+		// Legacy Codex auth blobs carry ChatGPT OAuth credentials, not an
+		// OpenAI API key. They predate PROVIDER_LOGIN but need the same guard.
+		return false
+	}
 	if credType == string(CredTypeEndpointURL) {
 		return true
 	}
@@ -110,12 +123,34 @@ func probeSupported(provider, credType string) bool {
 // other provider dials a FIXED vendor host (api.anthropic.com, …), never a
 // user-chosen one, so they are unaffected by this flag.
 func probeProvider(ctx context.Context, provider, ctype, value string, dialEndpoint bool) testResult {
+	if ctype == string(CredTypeProviderLogin) || (provider == "OPENAI" && ctype == string(CredTypeAICLIToken)) {
+		// Preserve the existing unprobeable-provider wire convention: valid
+		// means no check failed, supported=false says no upstream check ran.
+		// The CLI and UI use supported to avoid claiming a working login.
+		return testResult{Valid: true, Supported: false,
+			Error: "CLI login is delivered to the agent; an API-key probe cannot validate it"}
+	}
 	// Stamp Supported once, from the same table the client is told about, rather
 	// than at each of the ~30 returns below — a per-return flag is a field
 	// somebody eventually forgets on a new branch.
 	res := probeProviderInner(ctx, provider, ctype, value, dialEndpoint)
 	res.Supported = probeSupported(provider, ctype)
 	return res
+}
+
+// A provider login's stored mode, not its type alone, determines whether the
+// value is an API key. Subscription access tokens must never be sent to the
+// API-key probe; metered API-key logins retain their existing check.
+func probeProviderLogin(ctx context.Context, provider, mode, value string, dialEndpoint bool) testResult {
+	if mode == providerlogin.ModeAPIKey {
+		return probeProvider(ctx, provider, string(CredTypeAPIKey), value, dialEndpoint)
+	}
+	if provider == "ANTHROPIC" && mode == providerlogin.ModeSubscription {
+		// A Claude setup-token has a dedicated OAuth probe. Preserve that
+		// check; only ChatGPT/Google subscription tokens lack one here.
+		return probeProvider(ctx, provider, string(CredTypeAICLIToken), value, dialEndpoint)
+	}
+	return probeProvider(ctx, provider, string(CredTypeProviderLogin), value, dialEndpoint)
 }
 
 func probeProviderInner(ctx context.Context, provider, ctype, value string, dialEndpoint bool) testResult {
@@ -434,6 +469,7 @@ func (h *CredentialHandler) Test(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Provider string `json:"provider"`
 		Type     string `json:"type"`
+		Mode     string `json:"mode"`
 		Value    string `json:"value"`
 	}
 	if err := readJSON(r, &body); err != nil {
@@ -448,6 +484,16 @@ func (h *CredentialHandler) Test(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	// dialEndpoint=false: this path is RequireAuth-only (no workspace/role
 	// floor), so it must NOT dial a caller-supplied ENDPOINT_URL host.
+	if body.Type == string(CredTypeProviderLogin) {
+		mode := body.Mode
+		if mode == "" {
+			if login, err := providerlogin.Split(body.Provider, "", body.Value); err == nil {
+				mode = login.Mode
+			}
+		}
+		writeJSON(w, http.StatusOK, probeProviderLogin(ctx, body.Provider, mode, body.Value, false))
+		return
+	}
 	writeJSON(w, http.StatusOK, probeProvider(ctx, body.Provider, body.Type, body.Value, false))
 }
 
@@ -479,12 +525,14 @@ func (h *CredentialHandler) TestStored(w http.ResponseWriter, r *http.Request) {
 
 	var (
 		provider, ctype, encValue string
+		loginMode                 sql.NullString
 	)
 	err := h.db.QueryRowContext(r.Context(), `
-		SELECT provider, type, encrypted_value
-		FROM credentials
-		WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL `+visFilter+`
-	`, args...).Scan(&provider, &ctype, &encValue)
+		SELECT c.provider, c.type, c.encrypted_value,
+			(SELECT f.value FROM credential_fields f WHERE f.credential_id = c.id AND f.key = 'mode' LIMIT 1)
+		FROM credentials c
+		WHERE c.id = ? AND c.workspace_id = ? AND c.deleted_at IS NULL `+visFilter+`
+	`, args...).Scan(&provider, &ctype, &encValue, &loginMode)
 	if err == sql.ErrNoRows {
 		replyError(w, http.StatusNotFound, "Credential not found")
 		return
@@ -506,11 +554,19 @@ func (h *CredentialHandler) TestStored(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	// dialEndpoint=true: role-gated (canRole "update") + workspace-visible, and
 	// the value was vetted at create/update, so reachability-dialing is safe.
-	res := probeProvider(ctx, provider, ctype, value, true)
+	var res testResult
+	if ctype == string(CredTypeProviderLogin) {
+		res = probeProviderLogin(ctx, provider, loginMode.String, value, true)
+	} else {
+		res = probeProvider(ctx, provider, ctype, value, true)
+	}
 
 	// Audit goes outside the request path failure mode — log warn but
 	// don't fail the test if the audit insert hiccups.
-	meta := map[string]any{"valid": res.Valid}
+	meta := map[string]any{"supported": res.Supported}
+	if res.Supported {
+		meta["valid"] = res.Valid
+	}
 	if res.Error != "" {
 		meta["error"] = res.Error
 	}
