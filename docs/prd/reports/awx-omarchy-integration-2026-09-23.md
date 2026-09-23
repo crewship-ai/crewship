@@ -1,6 +1,6 @@
 # Integrační ověření AWX/Omarchy balíků — 2026-09-23
 
-Ověřovací větev `test/awx-omarchy-integration` v izolovaném worktree skládá otevřené PR #2661, #2663, #2666, #2669, #2670, #2673, #2677, #2675 a dokumentační #2660. Po testech byla doplněna oprava izolace podkladu z #2661 a aktuální `main` (`4dd046c69`, proti předchozímu základu pouze nesouvisející změna dokumentace paralelismu). Větev se neposílá k mergi; je to reprodukovatelný společný kontrolní strom.
+Ověřovací větev `test/awx-omarchy-integration` v izolovaném worktree skládá otevřené PR #2661, #2663, #2666, #2669, #2670, #2673, #2677, #2675 a dokumentační #2660. Základ pro plný integrační průchod byl `main` @ `4dd046c69`. Následně byla doplněna oprava izolace podkladu z #2661 a novější `main` @ `5a7ce9d65` s oprávněními scheduleru a opravou testu Codex loginu. Větev se neposílá k mergi; je to reprodukovatelný společný kontrolní strom.
 
 ## Výsledek
 
@@ -8,6 +8,7 @@ Ověřovací větev `test/awx-omarchy-integration` v izolovaném worktree sklád
 - Kompletní frontend Vitest na společném stromu: 783 souborů, 9 304 testů prošlo. Po poslední opravě přímo na jejím PR prošlo 26 cílených testů včetně přepnutí workspace, clipboardu a journal 404; na doplněném společném stromu prošlo 27 cílených testů.
 - Na společném stromu prošly `go vet ./...`, `pnpm lint` (0 chyb, 30 již existujících varování), obě kontroly TypeScriptu a `pnpm build`. `go run ./cmd/gen-openapi` zachoval vygenerovaný soubor beze změny; inventura uvádí 687 API operací a 937 CLI příkazů. `docs-inventory -strict`, `docs-surface-check` a `agents-invariants` prošly. Po doplnění posledního dokumentačního commitu byly dokumentační brány zopakovány.
 - Cílené integrační Go testy pokrývají korelaci journalu, deklarovaný původ, očekávaný hash Run again, access/me, více crew u credentialu, náhled závislostí a metadata chat handoffu. Každý PR má také vlastní CI; výsledek společného stromu nenahrazuje jejich kontroly ani code review.
+- Po začlenění `main` @ `5a7ce9d65` prošlo na společném stromu 92 cílených frontendových testů (credential, přístup, evidence a Page handoff), cílené Go testy v API/pipeline/CLI, `go vet ./...`, produkční `pnpm build` a obě dokumentační brány. Samostatně na rebased větvích prošlo 84 credential UI a příslušné Go testy a 86 access/credential UI a příslušné Go testy. Plný Go/Vitest soubor se po těchto dvou nových commitech v `main` neopakoval; nové CI běhy běží nad jednotlivými PR.
 
 ## Co je a není tím prokázáno
 
