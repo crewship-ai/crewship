@@ -177,7 +177,7 @@ func (h *PipelineHandler) CreateWebhook(w http.ResponseWriter, r *http.Request) 
 		replyError(w, http.StatusBadRequest, "invalid JSON body: "+err.Error())
 		return
 	}
-	if body.IngressProfile != "" && body.IngressProfile != "crewship" && body.IngressProfile != "github" {
+	if body.IngressProfile != "" && body.IngressProfile != "crewship" && body.IngressProfile != "github" && body.IngressProfile != "unsigned" {
 		replyError(w, http.StatusBadRequest, "unsupported ingress_profile")
 		return
 	}
@@ -192,16 +192,30 @@ func (h *PipelineHandler) CreateWebhook(w http.ResponseWriter, r *http.Request) 
 		enabled = *body.Enabled
 	}
 
-	// Force HMAC signing on every webhook -- if the caller didn't
-	// supply a secret, mint a 32-byte hex one server-side. The legacy
-	// path accepted empty here and pipeline.Webhook.Verify silently
-	// returned nil for empty SigningSecret (see pipeline/webhooks.go:222),
-	// which meant any unsigned POST to the public webhook URL passed
-	// the verification step. The create response surfaces the secret
-	// once (Stripe/GitHub pattern below) so callers can configure
-	// their sender even when they don't pre-generate. Audit M2.
+	// For signed profiles (crewship, the default; github), force HMAC
+	// signing on every webhook -- if the caller didn't supply a secret,
+	// mint a 32-byte hex one server-side. The legacy path accepted
+	// empty here and pipeline.Webhook.Verify silently returned nil for
+	// empty SigningSecret (see pipeline/webhooks.go:222), which meant
+	// any unsigned POST to the public webhook URL passed the
+	// verification step. The create response surfaces the secret once
+	// (Stripe/GitHub pattern below) so callers can configure their
+	// sender even when they don't pre-generate. Audit M2.
+	//
+	// The "unsigned" profile flips the contract the other way: dispatch
+	// authenticates ONLY via the 256-bit random token in the URL, no
+	// HMAC header is expected, and the signing secret is stored empty.
+	// Never combined with a caller-supplied secret — a hybrid would
+	// create a "signing optional" downgrade path into the same
+	// endpoint. Every profile that is not explicitly "unsigned" keeps
+	// the always-signed fail-closed default.
 	signingSecret := body.SigningSecret
-	if signingSecret == "" {
+	if body.IngressProfile == "unsigned" {
+		if signingSecret != "" {
+			replyError(w, http.StatusBadRequest, "signing_secret cannot be set on an unsigned webhook — choose one mode")
+			return
+		}
+	} else if signingSecret == "" {
 		gen, err := generateWebhookSigningSecret()
 		if err != nil {
 			h.logger.Error("create pipeline webhook: generate signing secret", "error", err)
@@ -676,7 +690,14 @@ func (h *PipelineHandler) FireWebhook(w http.ResponseWriter, r *http.Request) {
 			replyError(w, http.StatusBadRequest, "X-GitHub-Delivery is required")
 			return
 		}
-	} else {
+	} else if wh.IngressProfile != "unsigned" {
+		// profile "unsigned" is the explicit create-time opt-in that
+		// makes the 256-bit random token in the URL the whole
+		// authentication surface — no HMAC header is expected or
+		// validated. Every webhook that did not opt in keeps the
+		// fail-closed checks below: ValidateSignature still returns
+		// false for an empty SigningSecret, so a row that never opted
+		// in cannot be talked into accepting an unsigned body.
 		sig := r.Header.Get("X-Crewship-Signature")
 		if ts := r.Header.Get("X-Crewship-Timestamp"); ts != "" {
 			if !wh.ValidateTimestampedSignature(body, ts, sig, time.Now(), 0) {

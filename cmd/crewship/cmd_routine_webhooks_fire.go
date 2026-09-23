@@ -90,7 +90,13 @@ Examples:
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		secret, _ := cmd.Flags().GetString("secret")
-		if secret == "" {
+		profile, _ := cmd.Flags().GetString("profile")
+		if profile == webhookProfileUnsigned {
+			// The bearer token is already inside the URL; no secret.
+			if secret != "" {
+				return cli.WithExitCode(fmt.Errorf("--secret applies to signed profiles only; an unsigned (bearer-token-URL) endpoint sends no signature"), cli.ExitValidation)
+			}
+		} else if secret == "" {
 			return cli.WithExitCode(fmt.Errorf("--secret is required: the signing secret revealed by create or update --rotate-secret"), cli.ExitValidation)
 		}
 		bodySpec, _ := cmd.Flags().GetString("body")
@@ -110,16 +116,15 @@ Examples:
 		if err != nil {
 			return cli.WithExitCode(err, cli.ExitValidation)
 		}
-		profile, _ := cmd.Flags().GetString("profile")
 		switch profile {
 		case "":
 			profile = webhookProfileCrewship
 			if strings.HasSuffix(target.Path, webhookGitHubURLSuffix) {
 				profile = webhookProfileGitHub
 			}
-		case webhookProfileCrewship, webhookProfileGitHub:
+		case webhookProfileCrewship, webhookProfileGitHub, webhookProfileUnsigned:
 		default:
-			return cli.WithExitCode(fmt.Errorf("--profile must be %s or %s", webhookProfileCrewship, webhookProfileGitHub), cli.ExitValidation)
+			return cli.WithExitCode(fmt.Errorf("--profile must be %s, %s or %s", webhookProfileCrewship, webhookProfileGitHub, webhookProfileUnsigned), cli.ExitValidation)
 		}
 		// The github suffix and the github profile select each other on the
 		// server: a bare token asked to fire as github needs the suffix, and
@@ -127,6 +132,13 @@ Examples:
 		// than let the user learn that from an "unknown webhook".
 		if profile == webhookProfileGitHub && !strings.HasSuffix(target.Path, webhookGitHubURLSuffix) {
 			target.Path = strings.TrimRight(target.Path, "/") + webhookGitHubURLSuffix
+		}
+
+		// An unsigned profile sends NO signature headers — that is the
+		// whole point of the profile. A --secret on it is a mistake; the
+		// URL's bearer token already authenticates.
+		if profile == webhookProfileUnsigned && cmd.Flags().Changed("secret") {
+			return cli.WithExitCode(fmt.Errorf("--secret applies to signed profiles only; an unsigned (bearer-token-URL) endpoint sends no signature"), cli.ExitValidation)
 		}
 
 		deliveryID, _ := cmd.Flags().GetString("delivery-id")
@@ -167,9 +179,13 @@ Examples:
 			req.Header.Set("X-Crewship-Timestamp", ts)
 			req.Header.Set("X-Crewship-Signature", "sha256="+hmacHex(secret, append([]byte(ts+"."), body...)))
 			req.Header.Set("X-Crewship-Event-ID", deliveryID)
-		} else {
+		} else if profile != webhookProfileUnsigned {
 			// pipeline.Webhook.ValidateSignature: HMAC over the body alone.
 			req.Header.Set("X-Crewship-Signature", "sha256="+hmacHex(secret, body))
+			req.Header.Set("X-Crewship-Event-ID", deliveryID)
+		} else {
+			// unsigned profile: bearer-token URL only, no signature
+			// headers. Keep the delivery id so the receipt is traceable.
 			req.Header.Set("X-Crewship-Event-ID", deliveryID)
 		}
 

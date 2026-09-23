@@ -80,8 +80,11 @@ recreate mints a new token).
 An endpoint's ingress profile fixes how a delivery is signed and shaped:
 "crewship" (the default) verifies X-Crewship-Signature over the raw body;
 "github" verifies X-Hub-Signature-256 and accepts only pull_request
-events, at the public URL's /github-pull-request suffix. The profile is
-chosen at create time and cannot be changed afterwards.
+events, at the public URL's /github-pull-request suffix; "unsigned"
+dispatches with no HMAC at all — the 256-bit random token in the URL is
+the whole credential, intended for senders who cannot sign (e.g. Coolify
+notifications). The profile is chosen at create time and cannot be
+changed afterwards.
 
 Examples:
   crewship routine webhooks list
@@ -232,8 +235,8 @@ var routineWebhooksCreateCmd = &cobra.Command{
 		// server default (crewship); the profile cannot be changed by
 		// `update`, so this is the one place it is chosen.
 		if profile, _ := cmd.Flags().GetString("ingress-profile"); profile != "" {
-			if profile != webhookProfileCrewship && profile != webhookProfileGitHub {
-				return fmt.Errorf("--ingress-profile must be %s or %s", webhookProfileCrewship, webhookProfileGitHub)
+			if profile != webhookProfileCrewship && profile != webhookProfileGitHub && profile != webhookProfileUnsigned {
+				return fmt.Errorf("--ingress-profile must be %s, %s or %s", webhookProfileCrewship, webhookProfileGitHub, webhookProfileUnsigned)
 			}
 			body["ingress_profile"] = profile
 		}
@@ -578,7 +581,7 @@ func init() {
 	routineWebhooksCreateCmd.Flags().String("inputs-template", "", "JSON template merged with the request body to form routine inputs")
 	routineWebhooksCreateCmd.Flags().String("base-url", "", "override the public base URL printed in the response (defaults to server URL)")
 	routineWebhooksCreateCmd.Flags().Int("pin-version", 0, "pin the webhook to a specific routine version — every fire executes that immutable version instead of head; if the version is later deleted the fire FAILS (409) rather than silently running head")
-	routineWebhooksCreateCmd.Flags().String("ingress-profile", "", "signature profile: crewship (default; X-Crewship-Signature over the body) or github (X-Hub-Signature-256, pull_request events only, public URL ends in /github-pull-request); fixed for the webhook's lifetime")
+	routineWebhooksCreateCmd.Flags().String("ingress-profile", "", "signature profile: crewship (default; X-Crewship-Signature over the body), github (X-Hub-Signature-256, pull_request events only, public URL ends in /github-pull-request), or unsigned (no HMAC at all — bearer token in the URL is the credential); fixed for the webhook's lifetime")
 
 	routineWebhooksUpdateCmd.Flags().String("name", "", "new webhook name")
 	routineWebhooksUpdateCmd.Flags().String("slug", "", "retarget to a different routine slug")
@@ -616,6 +619,7 @@ func init() {
 const (
 	webhookProfileCrewship = "crewship"
 	webhookProfileGitHub   = "github"
+	webhookProfileUnsigned = "unsigned"
 	webhookGitHubURLSuffix = "/github-pull-request"
 )
 

@@ -1,5 +1,5 @@
 /**
- * The signing secret is not optional, and this screen used to say it was.
+ * Signed profiles require HMAC, and this screen used to say it was optional.
  *
  * Three strings described the LEGACY behaviour: "Optionally protect it with an
  * HMAC signing secret", a field labelled "Signing secret (optional)", and a
@@ -65,7 +65,8 @@ describe("the webhook signing-secret copy", () => {
 
   it("tells the empty state the same thing the form does", () => {
     const { baseElement } = renderTab()
-    expect(baseElement.textContent).toContain("Every endpoint is HMAC-signed")
+    expect(baseElement.textContent).toContain("Signed profiles use HMAC")
+    expect(baseElement.textContent).toContain("Secret URL, which authenticates with the receiving URL's bearer token")
     expect(baseElement.textContent).toContain("shown once at creation")
   })
 })

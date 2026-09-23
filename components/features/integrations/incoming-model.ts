@@ -72,7 +72,12 @@ export function incomingRows(
       name: h.target_pipeline_slug ?? h.target_pipeline_id,
       kind: "routine",
     },
-    sender: h.ingress_profile === "github" ? "GitHub" : "Crewship",
+    sender:
+      h.ingress_profile === "github"
+        ? "GitHub"
+        : h.ingress_profile === "unsigned"
+          ? "Secret URL"
+          : "Crewship",
     signed: h.signing_secret_set,
     enabled: h.enabled,
     fired: h.fire_count,

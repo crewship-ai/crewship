@@ -88,7 +88,7 @@ func integrationsAuthRequestBodySchemaCatalog() (map[string]DomainSchema, map[st
 			"expires_in_seconds": integer(), "scopes": array(str()),
 		}),
 		"PipelineWebhookCreateRequest": object(map[string]any{
-			"ingress_profile": map[string]any{"type": "string", "enum": []string{"crewship", "github"}, "default": "crewship"},
+			"ingress_profile": map[string]any{"type": "string", "enum": []string{"crewship", "github", "unsigned"}, "default": "crewship"},
 			"name":            str(), "target_pipeline_slug": str(), "target_pipeline_id": str(), "target_pipeline_version": map[string]any{"type": "integer", "nullable": true},
 			"signing_secret": str(), "inputs_template": anyObject(), "enabled": map[string]any{"type": "boolean", "nullable": true}, "rate_limit_per_min": integer(),
 		}, "name"),
