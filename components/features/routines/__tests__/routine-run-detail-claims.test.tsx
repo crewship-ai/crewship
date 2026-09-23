@@ -138,12 +138,25 @@ describe("routine run detail — handoff presentation", () => {
 })
 
 describe("routine run detail — unavailable history", () => {
+  it("uses the run's archived recipe and never claims that a declaration was used", () => {
+    h.run = baseRun({ pipeline_version: 2, definition_hash: "a".repeat(64), triggered_via: "schedule", metadata: { automation_name: "Triage" }, invoking_user_id: "possibly-forged" })
+    h.dsl = { credentials_required: [{ type: "github" }], steps: [{ id: "request", type: "http", http: { credential_ref: { type: "stripe" } } }] }
+    render(<RoutineRunDetail workspaceId="ws" runId="run_1" />)
+    expect(screen.getByTestId("run-facts").textContent).toContain("Automation")
+    expect(screen.getByText("Automation · Triage")).toBeTruthy()
+    expect(screen.getByText("github, stripe")).toBeTruthy()
+    expect(screen.getByText("Credential use in this run: not recorded. Declarations do not prove use.")).toBeTruthy()
+    expect(screen.getByText("Not independently verified in this run record")).toBeTruthy()
+    expect(screen.queryByText("possibly-forged")).toBeNull()
+  })
+
   // "Old runs without an archive say so."
   it("says the historical recipe is unavailable instead of drawing a graph", () => {
     h.dsl = null
     render(<RoutineRunDetail workspaceId="ws" runId="run_1" />)
 
     expect(screen.getByText(/historical recipe is unavailable/i)).toBeTruthy()
+    expect(screen.getByText("Historical recipe unavailable")).toBeTruthy()
     expect(screen.queryByTestId("trace-canvas")).toBeNull()
   })
 
