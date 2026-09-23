@@ -85,4 +85,34 @@ func TestRecoverPendingUnderRoot_UsesPinnedStorageBoundary(t *testing.T) {
 		}
 		assertPending(t, f, 1)
 	})
+
+	t.Run("ignores an absolute blob reference outside the configured root", func(t *testing.T) {
+		f := newMutateFixture(t)
+		f.mustMutate(t, f.req("seed", OpReplace, "base\n"))
+		req := f.req("crash", OpReplace, "target\n")
+		req.ExpectedRevision = 1
+		req.testHook = crashAt("after_intent")
+		if _, err := f.mutate(t, req); !errors.Is(err, errSimulatedCrash) {
+			t.Fatalf("create pending intent: %v", err)
+		}
+		sha := sha256Hex([]byte("target\n"))
+		outside := filepath.Join(t.TempDir(), "parked-blob")
+		if err := os.WriteFile(outside, []byte("target\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := f.db.ExecContext(t.Context(),
+			`UPDATE memory_mutations SET target_blob_ref = ? WHERE state = ?`, outside, mutationStateIntent); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Remove(blobPathFor(f.blobRoot, sha)); err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := RecoverPendingUnderRoot(t.Context(), f.db, f.blobRoot, f.dir); err == nil {
+			t.Fatal("recovery read the external blob reference")
+		}
+		if got := f.onDisk(t); got != "base\n" {
+			t.Fatalf("external blob reference changed canonical file: %q", got)
+		}
+		assertPending(t, f, 1)
+	})
 }

@@ -302,7 +302,7 @@ func recoverPending(ctx context.Context, db *sql.DB, blobRoot, storageRoot strin
 			file.close()
 			return recovered, conflicted, fmt.Errorf("recovery lock %s: %w", k.canonical, lerr)
 		}
-		n, rerr := recoverFileLocked(ctx, db, k.ws, k.auditPath, file, blobRoot)
+		n, rerr := recoverFileLocked(ctx, db, k.ws, k.auditPath, file, blobRoot, confined)
 		_ = lk.Unlock()
 		file.close()
 		if rerr != nil {
@@ -317,7 +317,7 @@ func recoverPending(ctx context.Context, db *sql.DB, blobRoot, storageRoot strin
 	return recovered, conflicted, nil
 }
 
-// recoverKeyLocked runs §8's recovery hash protocol for ONE key. The caller
+// recoverFileLocked runs §8's recovery hash protocol for ONE key. The caller
 // must already hold that key's file lock.
 //
 //	file matches the TARGET hash -> the rename happened, the confirmation did
@@ -333,11 +333,7 @@ func recoverPending(ctx context.Context, db *sql.DB, blobRoot, storageRoot strin
 // The anchor is deliberately left stale on the drift path. That is what makes
 // the NEXT write of this key fail its drift check too, instead of the file
 // quietly rejoining the contract at whatever a third party left behind.
-func recoverKeyLocked(ctx context.Context, db *sql.DB, workspaceID, auditPath, canonicalPath, blobRoot string) (int, error) {
-	return recoverFileLocked(ctx, db, workspaceID, auditPath, &mutationFile{path: canonicalPath}, blobRoot)
-}
-
-func recoverFileLocked(ctx context.Context, db *sql.DB, workspaceID, auditPath string, file *mutationFile, blobRoot string) (int, error) {
+func recoverFileLocked(ctx context.Context, db *sql.DB, workspaceID, auditPath string, file *mutationFile, blobRoot string, confined bool) (int, error) {
 	canonicalPath := file.path
 	rows, err := db.QueryContext(ctx, `
 		SELECT id, operation_id, state, base_sha256, target_sha256, target_blob_ref,
@@ -397,7 +393,15 @@ func recoverFileLocked(ctx context.Context, db *sql.DB, workspaceID, auditPath s
 		case p.baseSHA:
 			// The rename never happened. The parked blob is the durable data
 			// §8 requires the intent to carry; redo the write from it.
-			blob, berr := readIntentBlob(p.blobRef, blobRoot, p.targetSHA)
+			var blob []byte
+			var berr error
+			if confined {
+				// The persisted absolute ref may point outside this instance after
+				// a restore. Rebuild the location from the configured blob root.
+				blob, berr = readRootedIntentBlob(blobRoot, p.targetSHA)
+			} else {
+				blob, berr = readIntentBlob(p.blobRef, blobRoot, p.targetSHA)
+			}
 			if berr != nil {
 				return recovered, fmt.Errorf("recovery blob for mutation %s: %w", p.id, berr)
 			}
@@ -427,6 +431,18 @@ func recoverFileLocked(ctx context.Context, db *sql.DB, workspaceID, auditPath s
 		}
 	}
 	return recovered, nil
+}
+
+func readRootedIntentBlob(blobRoot, sha string) ([]byte, error) {
+	if blobRoot == "" || len(sha) != 64 {
+		return nil, fmt.Errorf("invalid rooted intent blob location")
+	}
+	for _, c := range sha {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return nil, fmt.Errorf("invalid rooted intent blob hash")
+		}
+	}
+	return os.ReadFile(blobPathFor(blobRoot, sha))
 }
 
 // readIntentBlob reads the parked target content. It prefers the absolute
