@@ -59,7 +59,7 @@ export function RoutineWebhooksTab({ workspaceId, pipelineId, slug }: Props) {
   }
 
   const [formOpen, setFormOpen] = useState(false)
-  const [profile, setProfile] = useState<"crewship" | "github">("crewship")
+  const [profile, setProfile] = useState<"crewship" | "github" | "unsigned">("crewship")
   const [name, setName] = useState("")
   const [signingSecret, setSigningSecret] = useState("")
   const [rateLimit, setRateLimit] = useState(60)
@@ -132,7 +132,7 @@ export function RoutineWebhooksTab({ workspaceId, pipelineId, slug }: Props) {
           <EmptyState
             icon={Webhook}
             title="No webhooks yet"
-            description="Create a webhook endpoint that triggers this routine on HTTP POST. Every endpoint is HMAC-signed: supply a secret or one is generated for you, and it is shown once at creation."
+            description="Create a webhook endpoint that triggers this routine on HTTP POST. Signed profiles use HMAC; leave the secret blank to generate one, shown once at creation. For senders that cannot sign, choose Secret URL, which authenticates with the receiving URL's bearer token."
             action={
               <Button
                 size="sm"
@@ -187,7 +187,7 @@ export function RoutineWebhooksTab({ workspaceId, pipelineId, slug }: Props) {
                       <Pill tone="success">Signing configured</Pill>
                     )}
                   </div>
-                  <p className="text-xs text-muted-foreground">{w.ingress_profile === "github" ? "GitHub pull requests" : "Crewship signature"} · Receiving URL shown once when created</p>
+                  <p className="text-xs text-muted-foreground">{w.ingress_profile === "github" ? "GitHub pull requests" : w.ingress_profile === "unsigned" ? "Secret URL (bearer token, no HMAC)" : "Crewship signature"} · Receiving URL shown once when created</p>
                   <div className="font-mono text-[12px] text-muted-foreground">
                     Endpoint <span className="text-foreground/85">{w.id}</span>
                   </div>
@@ -253,22 +253,30 @@ export function RoutineWebhooksTab({ workspaceId, pipelineId, slug }: Props) {
               />
             </div>
             <div>
-              {/* Not optional, and it never was in the only sense that
-                  matters: internal/api/pipeline_webhooks.go mints a 32-byte
-                  secret server-side when the caller supplies none. The field
+              {/* Signed profiles always use HMAC: internal/api/pipeline_webhooks.go
+                  mints a 32-byte secret when the caller supplies none. The field
                   used to say "optional" / "leave empty to skip HMAC
                   verification", which described the LEGACY behaviour — an
                   empty secret made pipeline.Webhook.Verify return nil and any
                   unsigned POST to the public URL passed. That hole is closed;
-                  leaving this blank chooses who generates the secret, not
-                  whether there is one. */}
+                  leaving this blank chooses who generates the secret. The
+                  explicit Secret URL profile instead uses its bearer token. */}
               <div className="mb-3">
                 <FieldLabel>Sender</FieldLabel>
-                <Select value={profile} onValueChange={value=>setProfile(value as "crewship" | "github")}>
+                <Select value={profile} onValueChange={value=>setProfile(value as "crewship" | "github" | "unsigned")}>
                   <SelectTrigger aria-label="Webhook sender" className="mt-1.5 w-full"><SelectValue/></SelectTrigger>
-                  <SelectContent><SelectItem value="crewship">Crewship signature</SelectItem><SelectItem value="github">GitHub pull requests</SelectItem></SelectContent>
+                  <SelectContent><SelectItem value="crewship">Crewship signature</SelectItem><SelectItem value="github">GitHub pull requests</SelectItem><SelectItem value="unsigned">Secret URL (no HMAC)</SelectItem></SelectContent>
                 </Select>
               </div>
+              {profile === "unsigned" ? (
+                <>
+                  <p className="mt-1.5 text-[11px] text-muted-foreground">
+                    No HMAC header is expected. The 256-bit random token in the receiving URL is the whole credential —
+                    keep it secret; anyone with the URL can fire the routine. Rotate or revoke it by recreating the endpoint.
+                  </p>
+                </>
+              ) : (
+              <>
               <FieldLabel>Signing secret</FieldLabel>
               <Input
                 type="password"
@@ -282,6 +290,8 @@ export function RoutineWebhooksTab({ workspaceId, pipelineId, slug }: Props) {
                 <span className="font-mono">{profile === "github" ? "X-Hub-Signature-256: sha256=<hmac>" : "X-Crewship-Signature: sha256=<hmac>"}</span>, and a
                 generated secret is shown once when the webhook is created.
               </p>
+              </>
+              )}
             </div>
             <div>
               <FieldLabel>Rate limit per minute</FieldLabel>

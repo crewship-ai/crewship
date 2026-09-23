@@ -46,7 +46,7 @@ func TestAcceptance_RoutineWebhooksFire_GitHubProfile(t *testing.T) {
 	if out, err := runReliabilityCLI(t, cfgPath, "routine", "webhooks", "create",
 		"--slug", "rel-routine", "--ingress-profile", "bitbucket"); err == nil {
 		t.Fatalf("an unknown ingress profile must be refused client-side, got:\n%s", out)
-	} else if !strings.Contains(out, "--ingress-profile must be crewship or github") {
+	} else if !strings.Contains(out, "--ingress-profile must be crewship, github or unsigned") {
 		t.Fatalf("unknown profile refused without naming the enum:\n%s", out)
 	}
 

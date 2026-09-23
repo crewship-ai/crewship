@@ -143,7 +143,7 @@ export function IncomingCreateDialog({
   )
   const [targetId, setTargetId] = React.useState(initialTarget?.id ?? "")
   const [name, setName] = React.useState("")
-  const [profile, setProfile] = React.useState<"crewship" | "github">(
+  const [profile, setProfile] = React.useState<"crewship" | "github" | "unsigned">(
     "crewship",
   )
   const [panel, setPanel] = React.useState("")
@@ -314,19 +314,20 @@ export function IncomingCreateDialog({
                   <CreateSurfaceField
                     label="Webhook format"
                     hint="Use the default for signed JSON requests. For GitHub pull requests, select GitHub and copy the secret into GitHub's webhook settings."
-                  >
-                    <Select
-                      value={profile}
-                      onValueChange={(v) => setProfile(v as "crewship" | "github")}
                     >
-                      <SelectTrigger aria-label="Webhook format">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="crewship">Signed JSON (default)</SelectItem>
-                        <SelectItem value="github">GitHub pull requests</SelectItem>
-                      </SelectContent>
-                    </Select>
+                      <Select
+                        value={profile}
+                        onValueChange={(v) => setProfile(v as "crewship" | "github" | "unsigned")}
+                      >
+                        <SelectTrigger aria-label="Webhook format">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="crewship">Signed JSON (default)</SelectItem>
+                          <SelectItem value="github">GitHub pull requests</SelectItem>
+                          <SelectItem value="unsigned">Secret URL (no HMAC)</SelectItem>
+                        </SelectContent>
+                      </Select>
                   </CreateSurfaceField>
                 </CollapsibleContent>
               </Collapsible>

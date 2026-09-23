@@ -374,8 +374,16 @@ func (s *WebhookStore) Save(ctx context.Context, in SaveWebhookInput) (*Webhook,
 	if in.IngressProfile == "" {
 		in.IngressProfile = "crewship"
 	}
-	if in.IngressProfile != "crewship" && in.IngressProfile != "github" {
+	if in.IngressProfile != "crewship" && in.IngressProfile != "github" && in.IngressProfile != "unsigned" {
 		return nil, errors.New("unsupported webhook ingress profile")
+	}
+	// unsigned is bearer-token-only (explicit opt-in for senders who
+	// cannot sign, e.g. Coolify SendWebhookJob): an HMAC secret would
+	// make "which check applies?" ambiguous, so the combination is
+	// refused and the row carries an empty signing secret by
+	// construction.
+	if in.IngressProfile == "unsigned" && in.SigningSecret != "" {
+		return nil, errors.New("signing_secret cannot be set on an unsigned webhook — choose one mode")
 	}
 	if in.WorkspaceID == "" || in.TargetPipelineID == "" {
 		return nil, errors.New("pipeline_webhooks: workspace_id + target_pipeline_id required")
@@ -396,9 +404,20 @@ func (s *WebhookStore) Save(ctx context.Context, in SaveWebhookInput) (*Webhook,
 	// in plaintext (opt back in with CREWSHIP_ALLOW_PLAINTEXT_SECRETS=true).
 	// The read/verify path still decrypts only enveloped values, so rows
 	// written in plaintext by older builds keep working.
-	storedSigning, _, err := encryption.EncryptAtRest(in.SigningSecret)
-	if err != nil {
-		return nil, fmt.Errorf("encrypt signing_secret: %w", err)
+	// Encrypt the optional HMAC signing secret at rest (the v82 schema
+	// documents this column as encrypted). An EMPTY secret needs no
+	// envelope: unsigned-profile rows carry one by construction, and
+	// asking the key manager to envelope "" would fail closed on
+	// instances without an encryption key — making the unsigned
+	// opt-in unusable exactly where it is least protected anyway
+	// (bearer-token-only).
+	storedSigning := ""
+	var encErr error
+	if in.SigningSecret != "" {
+		storedSigning, _, encErr = encryption.EncryptAtRest(in.SigningSecret)
+	}
+	if encErr != nil {
+		return nil, fmt.Errorf("encrypt signing_secret: %w", encErr)
 	}
 
 	if in.ID == "" {
