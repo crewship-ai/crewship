@@ -11,8 +11,10 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/encryption"
+	"github.com/crewship-ai/crewship/internal/providerlogin"
 )
 
 func TestProviderLoginIsNotSentToAPIKeyProbe(t *testing.T) {
@@ -30,6 +32,23 @@ func TestProviderLoginIsNotSentToAPIKeyProbe(t *testing.T) {
 	if !probeSupported("OPENAI", string(CredTypeAPIKey)) {
 		t.Fatal("ordinary OpenAI API keys must keep their real upstream probe")
 	}
+	apiKey := probeProviderLogin(ctx, "OPENAI", providerlogin.ModeAPIKey, "sk-proj-fixture", false)
+	if !apiKey.Supported || apiKey.Valid || !strings.Contains(apiKey.Error, "context canceled") {
+		t.Fatalf("metered provider login lost its API-key probe: %+v", apiKey)
+	}
+	if credentialTestable(credentialResponse{Provider: "OPENAI", Type: string(CredTypeProviderLogin), Login: &loginView{Mode: providerlogin.ModeSubscription}}) {
+		t.Fatal("subscription login must not offer an API-key test button")
+	}
+	if !credentialTestable(credentialResponse{Provider: "OPENAI", Type: string(CredTypeProviderLogin), Login: &loginView{Mode: providerlogin.ModeAPIKey}}) {
+		t.Fatal("metered provider login must keep its API-key test button")
+	}
+	claude := probeProviderLogin(ctx, "ANTHROPIC", providerlogin.ModeSubscription, "sk-ant-oat01-fixture", false)
+	if !claude.Supported || claude.Valid || claude.Status != 0 || claude.Error == "" {
+		t.Fatalf("Anthropic setup-token lost its OAuth probe: %+v", claude)
+	}
+	if !credentialTestable(credentialResponse{Provider: "ANTHROPIC", Type: string(CredTypeProviderLogin), Login: &loginView{Mode: providerlogin.ModeSubscription}}) {
+		t.Fatal("Anthropic subscription login must keep its OAuth test button")
+	}
 }
 
 func TestStoredProviderLoginReportsUncheckedWithoutAuditingSuccess(t *testing.T) {
@@ -37,7 +56,8 @@ func TestStoredProviderLoginReportsUncheckedWithoutAuditingSuccess(t *testing.T)
 	db := setupTestDB(t)
 	userID := seedTestUser(t, db)
 	wsID := seedTestWorkspace(t, db, userID)
-	enc, err := encryption.Encrypt(`{"tokens":{"access_token":"fixture"}}`)
+	// The credentials row stores the extracted access token, not auth.json.
+	enc, err := encryption.Encrypt("oauth-access-token-fixture")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -45,6 +65,10 @@ func TestStoredProviderLoginReportsUncheckedWithoutAuditingSuccess(t *testing.T)
 		(id, workspace_id, name, encrypted_value, type, provider, scope, status, created_by, created_at, updated_at)
 		VALUES ('login-probe-fixture', ?, 'Codex login', ?, 'PROVIDER_LOGIN', 'OPENAI', 'WORKSPACE', 'ACTIVE', ?, datetime('now'), datetime('now'))`,
 		wsID, enc, userID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO credential_fields(credential_id, key, value, is_secret, ordinal)
+		VALUES ('login-probe-fixture', 'mode', 'subscription', 0, 0)`); err != nil {
 		t.Fatal(err)
 	}
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/credentials/login-probe-fixture/test", nil)
@@ -75,6 +99,43 @@ func TestStoredProviderLoginReportsUncheckedWithoutAuditingSuccess(t *testing.T)
 	}
 	if _, claimedValid := audit["valid"]; claimedValid {
 		t.Fatalf("audit must not claim a valid login without a check: %v", audit)
+	}
+}
+
+func TestProviderLoginTestableFollowsPersistedMode(t *testing.T) {
+	h, db := newCredHandler(t)
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+	for _, tc := range []struct {
+		name, mode, value string
+		want              bool
+	}{
+		{"subscription", "subscription", plCodexAuthJSON(t, plFakeJWT(t, "plus", time.Now().Add(time.Hour))), false},
+		{"api-key", "api_key", "sk-proj-fixture", true},
+	} {
+		status, created := plCreate(t, h, userID, wsID, map[string]any{
+			"name": tc.name, "type": "PROVIDER_LOGIN", "provider": "OPENAI", "mode": tc.mode, "value": tc.value,
+		})
+		if status != http.StatusCreated {
+			t.Fatalf("create %s: status=%d body=%v", tc.name, status, created)
+		}
+		id, _ := created["id"].(string)
+		req := plRequest(t, http.MethodGet, "/api/v1/credentials/"+id, "", userID, wsID, "OWNER")
+		req.SetPathValue("credentialId", id)
+		rr := httptest.NewRecorder()
+		h.Get(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("get %s: status=%d body=%s", tc.name, rr.Code, rr.Body.String())
+		}
+		var got struct {
+			Testable bool `json:"testable"`
+		}
+		if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+			t.Fatal(err)
+		}
+		if got.Testable != tc.want {
+			t.Errorf("%s testable=%t, want %t", tc.name, got.Testable, tc.want)
+		}
 	}
 }
 
