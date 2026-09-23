@@ -25,6 +25,7 @@ import { arrival } from "@/lib/motion"
 import { fieldText } from "@/lib/adapter-field"
 import type { ChatTurn } from "@/hooks/use-chat"
 import { askProvenanceForTurn } from "./asks/ask-provenance"
+import { pageProvenanceForTurn } from "./page-provenance"
 import { AssistantTurn } from "./assistant-turn"
 import { EditableUserMessage } from "./messages/editable-user-message"
 import { CrewProvisioningCard } from "./crew-provisioning-card"
@@ -193,6 +194,7 @@ function TurnBody({ turn, onCopy, onFileClick, isLastAssistant, onRegenerate, on
     const askProvenance = turn.authorUserId
       ? null
       : askProvenanceForTurn(chatId ?? "", turn) ?? resolveAskProvenance?.(textContent) ?? null
+    const pageProvenance = pageProvenanceForTurn(turn)
     const userBody = (
       <>
         {askProvenance && (
@@ -202,6 +204,12 @@ function TurnBody({ turn, onCopy, onFileClick, isLastAssistant, onRegenerate, on
           >
             <ClipboardList className="h-3 w-3" aria-hidden="true" />
             <span>via {askProvenance}</span>
+          </div>
+        )}
+        {pageProvenance && (
+          <div data-testid="page-provenance" className="ml-auto mb-0.5 text-micro text-muted-foreground">
+            Page: <a className="underline" href={`/pages/${encodeURIComponent(pageProvenance.slug)}`}>{pageProvenance.name}</a>
+            {" · "}snapshot {new Date(pageProvenance.snapshotAt).toLocaleString()}
           </div>
         )}
         {/* The name only. Every author's face is drawn in the gutter, this

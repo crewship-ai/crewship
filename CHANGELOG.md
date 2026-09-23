@@ -11,6 +11,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Improved
 - Prepared a dispatch-time permission check for queued scheduled agent work. It validates the accepted input and rechecks the current agent, workspace, crew and schedule state; the cron producer still uses its existing execution path until the durable cutover is complete. (#2643)
+- Pages can open an unsent agent chat draft. The Page reference is removable, and sending it rechecks both readers' live access before adding a bounded identity snapshot and durable provenance.
 - Chat links can open a new unsent draft with `?new=1&draft=1`; prefilled text no longer overwrites a person's existing composer draft. Existing `?prompt=` auto-send links retain their behavior.
 - Routine and schedule catalogs now page through large workspaces without truncating results; schedule lists and the calendar resolve routine details in batches.
 - Activity now includes the accepted work ledger and webhook deliveries. The separate Work navigation item is removed; existing `/work` bookmarks open the corresponding Activity view. (#2636)
