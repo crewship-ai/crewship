@@ -37,6 +37,46 @@ func TestRoutineSchema_ValidJSON(t *testing.T) {
 	}
 }
 
+func TestRoutineSchema_DecisionConstraintsMatchRuntime(t *testing.T) {
+	raw, err := os.ReadFile(schemaPath(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc struct {
+		Defs struct {
+			DecisionStep struct {
+				Properties struct {
+					Options struct {
+						PropertyNames struct {
+							Pattern string `json:"pattern"`
+						} `json:"propertyNames"`
+					} `json:"options"`
+					Threshold struct {
+						AnyOf []struct {
+							Const   *float64 `json:"const"`
+							Minimum *float64 `json:"minimum"`
+							Maximum *float64 `json:"maximum"`
+						} `json:"anyOf"`
+					} `json:"threshold"`
+				} `json:"properties"`
+			} `json:"DecisionStep"`
+		} `json:"$defs"`
+	}
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatal(err)
+	}
+	properties := doc.Defs.DecisionStep.Properties
+	if got := properties.Options.PropertyNames.Pattern; got != stepIDRE.String() {
+		t.Fatalf("decision option pattern = %q, runtime = %q", got, stepIDRE.String())
+	}
+	branches := properties.Threshold.AnyOf
+	if len(branches) != 2 || branches[0].Const == nil || *branches[0].Const != 0 ||
+		branches[1].Minimum == nil || *branches[1].Minimum != 0.5 ||
+		branches[1].Maximum == nil || *branches[1].Maximum != 1 {
+		t.Fatalf("decision threshold schema does not match the runtime default and range: %+v", branches)
+	}
+}
+
 // TestRoutineSchema_AllStepTypesCovered ensures the schema's step
 // type enum stays in sync with the StepType constants. If we add a
 // new step kind to the runtime without updating the schema, IDE

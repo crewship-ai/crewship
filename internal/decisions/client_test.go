@@ -37,7 +37,9 @@ func TestClientWire(t *testing.T) {
 				}
 				var got Request
 				if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
-					t.Fatal(err)
+					t.Errorf("decode request: %v", err)
+					http.Error(w, "bad request", http.StatusBadRequest)
+					return
 				}
 				model := "jev-1.13.0"
 				if provider == "openrouter" {

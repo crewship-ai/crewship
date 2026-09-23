@@ -563,8 +563,8 @@
       "properties": {
         "state": { "type": "string", "minLength": 1, "maxLength": 8192, "description": "Only this rendered text is sent as state.event to the decision provider." },
         "instructions": { "type": "string", "minLength": 1, "maxLength": 2048 },
-        "options": { "type": "object", "minProperties": 2, "maxProperties": 16, "required": ["review"], "additionalProperties": { "type": "string", "minLength": 1, "maxLength": 512 } },
-        "threshold": { "type": "number", "minimum": 0.5, "maximum": 1, "description": "Minimum chosen-option probability; default 0.9. Below it the output is review." }
+        "options": { "type": "object", "minProperties": 2, "maxProperties": 16, "required": ["review"], "propertyNames": { "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$" }, "additionalProperties": { "type": "string", "minLength": 1, "maxLength": 512 } },
+        "threshold": { "type": "number", "anyOf": [{ "const": 0 }, { "minimum": 0.5, "maximum": 1 }], "description": "Minimum chosen-option probability; 0 uses the default of 0.9. Below it the output is review." }
       }
     },
     "TransformStep": {

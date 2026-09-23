@@ -43,5 +43,6 @@ review evidence. No merge was attempted.
 
 CI evidence: [Go job 106048550848](https://github.com/crewship-ai/crewship/actions/runs/35499448165/job/106048550848).
 Go vet, cross-platform builds and Go test steps all executed and concluded
-success. Subsequent changes only update these research/verification documents;
-the tested implementation is unchanged. Other PR jobs may still be running.
+success for commit `c4e340dc`. Later commits changed implementation and
+dependencies; their verification is tracked in PR #2630 rather than inferred
+from this earlier CI run.

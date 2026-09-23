@@ -203,7 +203,10 @@ func NewWiredExecutor(d ExecutorDeps) *Executor {
 		if provider == "openrouter" {
 			keyName = "OPENROUTER_API_KEY"
 		}
-		if client, err := decisions.NewClient(provider, os.Getenv(keyName), 5*time.Second); err == nil {
+		client, err := decisions.NewClient(provider, os.Getenv(keyName), 5*time.Second)
+		if err != nil {
+			slog.Default().Warn("decision provider not enabled", "provider", provider, "key_env", keyName, "error", err)
+		} else {
 			exec = exec.WithDecisionEvaluator(client, client.DestinationHost())
 			exec.decisionWorkspaceID = workspaceID
 		}
