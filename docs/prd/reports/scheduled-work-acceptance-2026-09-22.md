@@ -1,6 +1,7 @@
 # Scheduled work acceptance — #2643
 
-Base: main `9ff8da55a`. Earlier guards (#2648) are integrated through #2646.
+Base: main `ce7710274` after rebasing the draft PR on 2026-09-23.
+Earlier guards (#2648) are integrated through #2646.
 This is the acceptance part of the migration, **not enabled in production**.
 `AcceptDueTx` currently has test callers only. The cron producer still uses its
 legacy executor. Do not merge/deploy this as a completed scheduler migration.
