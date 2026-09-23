@@ -1,6 +1,6 @@
 # Integrační ověření AWX/Omarchy balíků — 2026-09-23
 
-Ověřovací větev `test/awx-omarchy-integration` v izolovaném worktree skládá otevřené PR #2661, #2663, #2666, #2669, #2670, #2673, #2677, #2675 a dokumentační #2660. Základ pro plný integrační průchod byl `main` @ `4dd046c69`. Následně byla doplněna oprava izolace podkladu z #2661 a novější `main` @ `5a7ce9d65` s oprávněními scheduleru a opravou testu Codex loginu. Větev se neposílá k mergi; je to reprodukovatelný společný kontrolní strom.
+Ověřovací větev `test/awx-omarchy-integration` v izolovaném worktree skládá otevřené PR #2661, #2663, #2666, #2669, #2673, #2677, #2675 a dokumentační #2660. Chat draft #2670 je už v `main`. Základ pro plný integrační průchod byl `main` @ `4dd046c69`. Následně byla doplněna oprava izolace podkladu z #2661 a novější `main` @ `5a7ce9d65` s oprávněními scheduleru a opravou testu Codex loginu. Nakonec byl začleněn `main` @ `a3d4eed7f` včetně #2670. Větev se neposílá k mergi; je to reprodukovatelný společný kontrolní strom.
 
 ## Výsledek
 
@@ -10,6 +10,7 @@ Ověřovací větev `test/awx-omarchy-integration` v izolovaném worktree sklád
 - Cílené integrační Go testy pokrývají korelaci journalu, deklarovaný původ, očekávaný hash Run again, access/me, více crew u credentialu, náhled závislostí a metadata chat handoffu. Každý PR má také vlastní CI; výsledek společného stromu nenahrazuje jejich kontroly ani code review.
 - Po začlenění `main` @ `5a7ce9d65` prošlo na společném stromu 92 cílených frontendových testů (credential, přístup, evidence a Page handoff), cílené Go testy v API/pipeline/CLI, `go vet ./...`, produkční `pnpm build` a obě dokumentační brány. Samostatně na rebased větvích prošlo 84 credential UI a příslušné Go testy a 86 access/credential UI a příslušné Go testy. Plný Go/Vitest soubor se po těchto dvou nových commitech v `main` neopakoval; nové CI běhy běží nad jednotlivými PR.
 - Po opravě připomínek k #2661 prošlo dalších 32 cílených frontendových testů na jeho větvi i na společném stromu: při 404 detailu zůstane časová osa journalu dostupná a dlouhý identifikátor assignmentu je celý viditelný. Prošla také obě ověření typů, lint a produkční build. Navazující PR #2663 a #2666 byla přebasována na opravený commit.
+- Po začlenění `main` @ `a3d4eed7f` prošlo 38 cílených testů chatu, Page handoffu a diagnostiky, TypeScript kontrola a `go vet ./...`. Samostatné větve #2661, #2663, #2666 a #2673 jsou přebasované; jejich nové CI běhy byly spuštěny nad aktuálními hlavami a v době zápisu ještě čekají ve frontě.
 - Na čerstvé lokální instanci sestavené ze společného stromu (samostatná databáze, port 18118, Docker vypnutý) prošel skutečný HTTP průchod dvěma přihlášenými účty. OWNER vytvořil crew, Page a pozvánku; MEMBER před grantem dostal na Page 404, po grantu `read` dostal 200 a na pokus o zápis 403, po změně na `write` zapsal úpravu (200), kterou OWNER přečetl, a po revokaci dostal znovu 404. To ověřuje autentizaci, přidělení a odebrání přístupu na nové instalaci, nikoli běžící dev3.
 
 ## Co je a není tím prokázáno
