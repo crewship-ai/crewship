@@ -780,7 +780,7 @@ func (e *Executor) Run(ctx context.Context, in RunInput) (*RunResult, error) {
 	// Apply per-step prompt/model overrides (v121) over the versioned
 	// DSL. No-op when the store isn't wired or has no rows for this
 	// pipeline — the run then executes exactly as authored.
-	if e.stepOverrides != nil && !(in.resume && in.resumeDefinitionJSON != "") {
+	if e.stepOverrides != nil && !in.UseReviewedDefinition && !(in.resume && in.resumeDefinitionJSON != "") {
 		if ov, oerr := e.stepOverrides.OverridesFor(ctx, in.PipelineID); oerr == nil {
 			applyStepOverrides(dsl.Steps, ov)
 		} else {
@@ -1029,6 +1029,11 @@ type RunInput struct {
 	// Per-step operator overrides (v121) still apply on top of the
 	// pinned definition, same as they do on head.
 	PinnedVersion *int
+	// UseReviewedDefinition opts out of mutable operator step overrides after
+	// the API has checked an expected definition hash and pinned its version.
+	// Otherwise a live override could change execution without changing the
+	// hash the user reviewed. The zero value preserves all existing paths.
+	UseReviewedDefinition bool
 	// TriggeredVia / TriggeredByID feed the run-record's audit
 	// trail so dashboards can answer "which runs came from a
 	// schedule vs a webhook vs a manual click." Default empty =

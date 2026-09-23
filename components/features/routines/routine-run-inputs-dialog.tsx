@@ -61,6 +61,8 @@ export interface RoutineRunInputsDialogProps {
   /** The crew whose agents do the work, for the chip row. */
   crewName?: string | null
   submitting?: boolean
+  error?: string | null
+  onReload?: () => void
   onCancel: () => void
   /** Receives the typed `inputs` map, ready to post. */
   onRun: (inputs: Record<string, unknown>) => void
@@ -79,6 +81,8 @@ export function RoutineRunInputsDialog({
   draft,
   crewName,
   submitting,
+  error,
+  onReload,
   onCancel,
   onRun,
 }: RoutineRunInputsDialogProps) {
@@ -117,6 +121,7 @@ export function RoutineRunInputsDialog({
               : "a new run is added to History."}
           </DialogDescription>
         </DialogHeader>
+        {error && <p role="alert" className="text-sm text-destructive">{error}{onReload && <Button type="button" variant="outline" size="sm" className="ml-2" onClick={onReload}>Reload recipe</Button>}</p>}
         {chips.length > 0 && (
           <ul aria-label="Run facts" className="flex flex-wrap gap-1.5">
             {chips.map((chip) => (
@@ -156,6 +161,7 @@ export function RoutineRunInputsDialog({
             <p className="text-xs text-muted-foreground">
               Values below are copied from the earlier run where names match. A new run
               repeats the work; it does not resume the earlier one or undo its actions.
+              Inputs are stored as entered and this form has no secret input type.
             </p>
           </div>
         )}

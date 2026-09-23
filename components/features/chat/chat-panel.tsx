@@ -117,6 +117,8 @@ interface ChatPanelProps {
    *  a Lead's chat and fire the authoring prompt without a manual click).
    *  Fires at most once per mount. */
   autoSendInitial?: boolean
+  /** A Page reference is resolved and authorized by the server on send. */
+  pageContextSlug?: string
   /** Mobile-only: which panel to show full-screen. Undefined = desktop mode. */
   mobilePanel?: "chat" | "files" | "files-only" | "more"
   /** Fired when the user sends a message — lets the parent optimistically
@@ -143,12 +145,28 @@ const CHAT_PALETTE_SHORTCUT = "⌘/"
 const EMPTY_STATE_CHIP_LIMIT = 6
 
 /** Chat panel with split view: conversation on the left, tabbed panel on the right. */
-export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole, suggestedPrompts, askForms, sessionOrigin, agentMeta, sessionKind = "direct", initialInput, autoSendInitial, mobilePanel, onSend, onReplySettled, onNewConversation, onMobilePanelChange }: ChatPanelProps) {
+export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole, suggestedPrompts, askForms, sessionOrigin, agentMeta, sessionKind = "direct", initialInput, autoSendInitial, pageContextSlug, mobilePanel, onSend, onReplySettled, onNewConversation, onMobilePanelChange }: ChatPanelProps) {
   const suggestionPack = getSuggestions(agentRole, suggestedPrompts)
   const defaultSuggestions = suggestionPack.empty
   const followUpPrompts = suggestionPack.followUps
   const { workspaceId } = useWorkspace()
   const chatAgent = useChatAgent()
+  const [pageContext, setPageContext] = useState<{ name: string; slug: string } | null>(null)
+  const [pageContextError, setPageContextError] = useState(false)
+  const [pageContextRemoved, setPageContextRemoved] = useState(false)
+  useEffect(() => {
+    if (!pageContextSlug || !workspaceId) return
+    const controller = new AbortController()
+    apiFetch(`/api/v1/pages/${encodeURIComponent(pageContextSlug)}?workspace_id=${encodeURIComponent(workspaceId)}`, { signal: controller.signal })
+      .then((r) => r.ok ? r.json() : Promise.reject(new Error(`Page ${r.status}`)))
+      .then((page: { name?: string; slug?: string }) => {
+        if (controller.signal.aborted) return
+        if (page.slug !== pageContextSlug || !page.name) throw new Error("Page unavailable")
+        setPageContext({ name: page.name, slug: page.slug })
+      })
+      .catch(() => { if (!controller.signal.aborted) { setPageContext(null); setPageContextError(true) } })
+    return () => controller.abort()
+  }, [pageContextSlug, workspaceId])
 
   // Does the composer currently hold a file the user has not sent yet?
   //
@@ -279,6 +297,16 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
     onStreamReset: requestHistoryReload,
     onReplyCompleted: onAgentReplyCompleted,
   })
+  const sendMessageWithPage = useCallback((text: string, metadata?: Record<string, unknown>) => {
+    if (pageContextSlug && !pageContextRemoved && !pageContextError) {
+      sendMessage(text, { ...metadata, page_context: { slug: pageContextSlug } })
+      setPageContextRemoved(true)
+    } else if (metadata) {
+      sendMessage(text, metadata)
+    } else {
+      sendMessage(text)
+    }
+  }, [sendMessage, pageContextSlug, pageContextRemoved, pageContextError])
 
   // Reply-settled hook: when a stream the user watched in THIS session
   // finishes (isStreaming true→false), tell the parent so it can re-fire
@@ -604,25 +632,34 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
       // of failure this whole change is about. The toast tells the user; the
       // ref stays set so a failed handoff does not retry itself in a loop.
       if (!(await ensureSessionForSend())) return
-      sendMessage(text)
+      sendMessageWithPage(text)
       onSend?.(sessionId, text)
     })()
-  }, [autoSendInitial, initialInput, connectionStatus, isStreaming, ensureSessionForSend, sendMessage, onSend, sessionId])
+  }, [autoSendInitial, initialInput, connectionStatus, isStreaming, ensureSessionForSend, sendMessageWithPage, onSend, sessionId])
 
   const composerInitialInput = autoSendInitial ? undefined : initialInput
+  const pageContextChip = pageContextSlug && !pageContextRemoved ? (
+    <div className="mx-auto flex w-full max-w-3xl items-center gap-2 px-4 py-1 text-xs" data-testid="page-context-chip">
+      <span className="min-w-0 flex-1 truncate">
+        {pageContextError ? "This Page is no longer accessible; it will not be included" :
+          pageContext ? `Page: ${pageContext.name} · access rechecked when sent` : "Checking Page…"}
+      </span>
+      <button type="button" className="rounded px-2 py-1 text-muted-foreground hover:text-foreground coarse:min-h-11" onClick={() => setPageContextRemoved(true)} aria-label="Remove Page context">Remove</button>
+    </div>
+  ) : null
 
   const handleSuggestionClick = useCallback(async (suggestion: string) => {
     if (isStreaming || creatingSession) return
     setCreatingSession(true)
     try {
       if (!(await ensureSessionForSend())) return
-      sendMessage(suggestion)
+      sendMessageWithPage(suggestion)
       setPinNonce((n) => n + 1)
       onSend?.(sessionId, suggestion)
     } finally {
       setCreatingSession(false)
     }
-  }, [isStreaming, creatingSession, sendMessage, ensureSessionForSend, sessionId, onSend])
+  }, [isStreaming, creatingSession, sendMessageWithPage, ensureSessionForSend, sessionId, onSend])
 
   // This agent's questionnaire forms. Empty for every agent nobody has
   // configured — which is to say for almost all of them — and an empty list
@@ -935,6 +972,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
             />
           </div>
         )}
+        {pageContextChip}
         <ChatComposer
           agentId={agentId}
           sessionId={sessionId}
@@ -945,7 +983,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
           connectionStatus={connectionStatus}
           stopGeneration={stopGeneration}
           ensureSession={ensureSessionForSend}
-          sendMessage={sendMessage}
+          sendMessage={sendMessageWithPage}
           onSend={onSend}
           onSent={handleSent}
           initialInput={composerInitialInput}
@@ -1055,6 +1093,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
           }
         />
         </div>
+        {pageContextChip}
         <ChatComposer
           agentId={agentId}
           sessionId={sessionId}
@@ -1064,7 +1103,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
           connectionStatus={connectionStatus}
           stopGeneration={stopGeneration}
           ensureSession={ensureSessionForSend}
-          sendMessage={sendMessage}
+          sendMessage={sendMessageWithPage}
           onSend={onSend}
           onSent={handleSent}
           initialInput={composerInitialInput}

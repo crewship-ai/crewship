@@ -19,6 +19,7 @@ import { usePendingApproval } from "@/hooks/use-pending-approval"
 import { TraceCanvas } from "@/components/features/activity/trace-canvas"
 import { RunActivityTimeline } from "@/components/features/activity/run-activity-timeline"
 import { RunEvidencePanel } from "@/components/features/activity/run-evidence-panel"
+import { declaredCredentialTypes, routineRunOrigin } from "@/lib/routine-run-provenance"
 import { RoutineRunArtifacts } from "./routine-run-artifacts"
 import { RoutineExecutionHistory } from "./routine-execution-history"
 import { RoutineExecutionInsights } from "./routine-execution-insights"
@@ -126,6 +127,8 @@ export function RoutineRunDetail({ workspaceId, runId }: RoutineRunDetailProps) 
   )
   const [starting, setStarting] = useState(false)
   const [selectedVersion, setSelectedVersion] = useState("current")
+  const [selectedHash, setSelectedHash] = useState<string | null>(null)
+  const [previewVersion, setPreviewVersion] = useState<number | null>(null)
   const [runDefinition, setRunDefinition] = useState<Record<string, unknown> | null>(null)
   const [inputSpecs, setInputSpecs] = useState<RoutineInputSpec[] | null>(null)
   const [stopping, setStopping] = useState(false)
@@ -199,9 +202,14 @@ export function RoutineRunDetail({ workspaceId, runId }: RoutineRunDetailProps) 
     }
   }
   const startAgain = async (inputs: Record<string, unknown>) => {
+    if (!selectedHash) {
+      setActionError("The selected recipe could not be verified. Reload it before running.")
+      return
+    }
     const url = `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/pipelines/${encodeURIComponent(run.pipeline_slug)}/run`
     const body = {
       inputs,
+      expected_definition_hash: selectedHash,
       ...(selectedVersion !== "current"
         ? { pinned_version: Number(selectedVersion) }
         : {}),
@@ -221,6 +229,7 @@ export function RoutineRunDetail({ workspaceId, runId }: RoutineRunDetailProps) 
         },
         body: JSON.stringify(body),
       })
+      if (res.status === 409) throw new Error("The recipe changed since you opened this form. Reload the recipe before running.")
       const data = await res.json()
       if (!res.ok || typeof data.run_id !== "string" || !data.run_id)
         throw new Error(data.error || data.detail || "Could not start a new run.")
@@ -245,11 +254,28 @@ export function RoutineRunDetail({ workspaceId, runId }: RoutineRunDetailProps) 
         `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/pipelines/${encodeURIComponent(run.pipeline_slug)}${version === "current" ? "" : `/versions/${encodeURIComponent(version)}`}`,
       )
       if (!res.ok) throw new Error("The selected recipe version is unavailable.")
-      const routine = await res.json()
+      let routine = await res.json()
       if (request !== preparation.current) return
+      if (typeof routine.definition_hash !== "string" || !/^[0-9a-fA-F]{64}$/.test(routine.definition_hash))
+        throw new Error("The selected recipe has no verifiable definition hash.")
+      if (version === "current") {
+        if (!Number.isInteger(routine.head_version) || routine.head_version <= 0)
+          throw new Error("The current recipe version is unavailable. Reload before running.")
+        const versionRes = await apiFetch(
+          `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/pipelines/${encodeURIComponent(run.pipeline_slug)}/versions/${routine.head_version}`,
+        )
+        if (!versionRes.ok) throw new Error("The current recipe changed while loading. Reload before running.")
+        const archived = await versionRes.json()
+        if (request !== preparation.current) return
+        if (archived.definition_hash !== routine.definition_hash)
+          throw new Error("The current recipe changed while loading. Reload before running.")
+        routine = { ...routine, definition: archived.definition }
+      }
       const specs = routineInputSpecs(routine.definition)
       setRunDefinition(routine.definition ?? null)
       setSelectedVersion(version)
+      setSelectedHash(routine.definition_hash)
+      setPreviewVersion(version === "current" && Number.isInteger(routine.head_version) ? routine.head_version : null)
       setInputSpecs(specs)
     } catch (e) {
       if (request === preparation.current)
@@ -349,6 +375,8 @@ export function RoutineRunDetail({ workspaceId, runId }: RoutineRunDetailProps) 
           name: run.pipeline_name || run.pipeline_slug,
         }
   const activityHref = `/activity?${new URLSearchParams({ pipeline: run.pipeline_slug, run: runId })}`
+  const origin = routineRunOrigin(run)
+  const credentialTypes = declaredCredentialTypes(dsl)
   const StatusIcon =
     banner.tone === "destructive"
       ? XCircle
@@ -359,7 +387,7 @@ export function RoutineRunDetail({ workspaceId, runId }: RoutineRunDetailProps) 
           : banner.tone === "success"
             ? CheckCircle2
             : Square
-  const triggerLabel =
+  const triggerLabel = origin.label === "automation" ? "Automation" :
     (
       {
         manual: "Manual start",
@@ -368,7 +396,7 @@ export function RoutineRunDetail({ workspaceId, runId }: RoutineRunDetailProps) 
         event: "Event",
         issue: "Issue",
       } as Record<string, string>
-    )[run.triggered_via] || readableFieldName(run.triggered_via || "Unknown trigger")
+    )[origin.label] || readableFieldName(origin.label || "Unknown trigger")
   const resultPanel = run.output && (
     <DetailCard title="Results" icon={FileText}>
       {declaredResult && <p className="mb-3 text-sm font-medium">{declaredResult}</p>}
@@ -581,6 +609,15 @@ export function RoutineRunDetail({ workspaceId, runId }: RoutineRunDetailProps) 
           </Link>
         )}
       </div>
+      <DetailCard title="Run provenance" icon={History}>
+        <dl className="grid gap-2 text-xs sm:grid-cols-2">
+          <div><dt className="text-muted-foreground">Started by</dt><dd>{triggerLabel}{origin.source ? ` · ${origin.source}` : ""}</dd></div>
+          <div><dt className="text-muted-foreground">Executed recipe</dt><dd>{run.pipeline_version != null ? `v${run.pipeline_version}` : "Version unavailable"}{run.definition_hash ? <span className="ml-1 font-mono" title={run.definition_hash}>· {run.definition_hash.slice(0, 12)}</span> : null}</dd></div>
+          <div><dt className="text-muted-foreground">Human initiator</dt><dd>Not independently verified in this run record</dd></div>
+          <div><dt className="text-muted-foreground">Credentials declared in executed recipe</dt><dd>{dsl ? credentialTypes.length ? credentialTypes.join(", ") : "None declared" : "Historical recipe unavailable"}</dd></div>
+        </dl>
+        <p className="mt-2 text-xs text-muted-foreground">Credential use in this run: not recorded. Declarations do not prove use.</p>
+      </DetailCard>
       <RunEvidencePanel
         key={runId}
         workspaceId={workspaceId}
@@ -593,7 +630,7 @@ export function RoutineRunDetail({ workspaceId, runId }: RoutineRunDetailProps) 
           endedAt: run.ended_at,
           stepId: run.failed_at_step || run.current_step_id,
           failureKind: run.failure?.kind,
-          trigger: run.triggered_via,
+          trigger: origin.label,
           version: run.pipeline_version,
           definitionHash: run.definition_hash,
         }}
@@ -708,20 +745,21 @@ export function RoutineRunDetail({ workspaceId, runId }: RoutineRunDetailProps) 
         inputs={inputSpecs}
         initialInputs={run.inputs}
         routineName={run.pipeline_name || run.pipeline_slug}
-        headVersion={routine?.slug === run.pipeline_slug ? routine.head_version : undefined}
+        headVersion={previewVersion}
         draft={routine?.slug === run.pipeline_slug ? routine.draft : undefined}
         submitting={starting}
+        error={actionError}
+        onReload={() => void prepareAgain(selectedVersion)}
         onCancel={() => {
           preparation.current += 1
           setInputSpecs(null)
+          setSelectedHash(null)
           setStarting(false)
         }}
         onRun={startAgain}
       />
-      {actionError && (
-        <p role="alert" className="text-sm text-destructive">
-          {actionError}
-        </p>
+      {actionError && !inputSpecs && (
+        <p role="alert" className="text-sm text-destructive">{actionError}</p>
       )}
       {error && (
         <p role="alert" className="text-sm text-destructive">

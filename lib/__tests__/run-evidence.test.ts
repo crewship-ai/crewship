@@ -52,6 +52,12 @@ describe("run evidence contract", () => {
     expect(() => buildRunEvidence({ ...base, runId: "bad?prompt=SECRET_IN_URL" })).toThrow("Invalid run reference")
   })
 
+  it("exports an automation trigger without exporting its free-text name or metadata", () => {
+    const view = buildRunEvidence({ ...base, trigger: "automation", entries: [] })
+    expect(view.trigger).toBe("automation")
+    expect(formatRunEvidence(view)).not.toContain("automation_name")
+  })
+
   it("acknowledges journal gaps without claiming the agent never ran", () => {
     const view = buildRunEvidence({ ...base, entries: [], journalUnavailable: true })
     expect(view.unavailableReasons).toContain("Journal could not be read")

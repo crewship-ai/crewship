@@ -1021,6 +1021,8 @@ Invokes a saved pipeline. Returns synchronously with the full `RunResult`; for l
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `inputs` | object | `{}` | Input map -- defaults from the pipeline's input spec are applied for missing keys |
+| `pinned_version` | integer | -- | Run an archived version; the routine must still pass current governance and dependency gates. |
+| `expected_definition_hash` | string | -- | SHA-256 hash of the reviewed definition. For HEAD, a changed hash returns `409`; an accepted immediate start pins that archived version before dispatch. With `pinned_version`, checks the selected archive. Not supported for delayed, debounced or one-time starts. Mutable step overrides are skipped for this reviewed start. |
 | `tier_override` | string | -- | One of `trivial` / `fast` / `moderate` / `smart` -- replaces every `agent_run` step's complexity for this run only. Unknown values are silently ignored. |
 | `triggered_via` | string | `manual` | Closed enum: `manual`, `schedule`, `webhook`, `call_pipeline`, `issue` |
 | `triggered_by_id` | string | -- | Free-form attribution id (e.g. an issue identifier when `triggered_via=issue`) |
@@ -1038,6 +1040,8 @@ Runs started on this route are recorded as user-driven: `invoking_user_id` is th
 | Status | Condition |
 |---|---|
 | `404` | Pipeline not found |
+| `409` | The recipe changed since preview; refresh it before starting. |
+| `422` | A required credential, integration or resource is unavailable. |
 | `429` | A run with the same `concurrency_key` is already in flight (sets `Retry-After: 5`) |
 | `503` | Runner not wired |
 

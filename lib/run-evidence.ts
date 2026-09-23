@@ -65,7 +65,7 @@ const oneOf = (value: unknown, options: readonly string[]): string | undefined =
 
 const statusValues = ["queued", "running", "waiting", "paused", "completed", "failed", "cancelled", "interrupted", "timeout", "PENDING", "QUEUED", "RUNNING", "COMPLETED", "FAILED", "CANCELLED", "TIMEOUT"]
 const outcomeValues = ["SUCCEEDED", "NO_CHANGE", "WORK_CREATED", "PARTIAL", "NEEDS_HUMAN", "FAILED", "CANCELLED"]
-const triggerValues = ["manual", "schedule", "webhook", "event", "issue", "call_pipeline", "task", "mention", "delegation"]
+const triggerValues = ["manual", "schedule", "automation", "webhook", "event", "issue", "call_pipeline", "task", "mention", "delegation"]
 const failureValues = ["checker_rejected", "validation_failed", "transform_input", "timeout", "cancelled", "missing_credential", "missing_integration", "http_status", "script_exit", "cost_cap", "unknown"]
 
 // No journal summary, payload, detail, error_message, command, path, URL,

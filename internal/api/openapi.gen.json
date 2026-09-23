@@ -12830,6 +12830,12 @@
           "delay_seconds": {
             "type": "integer"
           },
+          "expected_definition_hash": {
+            "type": "string"
+          },
+          "fire_at": {
+            "type": "string"
+          },
           "idempotency_key_ttl_seconds": {
             "type": "integer"
           },
@@ -12840,6 +12846,9 @@
           "metadata": {
             "additionalProperties": true,
             "type": "object"
+          },
+          "pinned_version": {
+            "type": "integer"
           },
           "priority": {
             "type": "integer"
@@ -124777,6 +124786,24 @@
               }
             },
             "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
           },
           "429": {
             "content": {

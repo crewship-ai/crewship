@@ -2,6 +2,8 @@ package api
 
 import (
 	"context"
+	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -29,9 +31,10 @@ const maxExecBodyBytes = 1 << 20 // 1 MiB
 // any other value is silently ignored (treat as no override) so a
 // future tier name added to the executor doesn't break old clients.
 type runRequestBody struct {
-	PinnedVersion *int           `json:"pinned_version,omitempty"`
-	Inputs        map[string]any `json:"inputs"`
-	TierOverride  string         `json:"tier_override,omitempty"`
+	PinnedVersion          *int           `json:"pinned_version,omitempty"`
+	ExpectedDefinitionHash string         `json:"expected_definition_hash,omitempty"`
+	Inputs                 map[string]any `json:"inputs"`
+	TierOverride           string         `json:"tier_override,omitempty"`
 	// TriggeredVia + TriggeredByID let the caller (UI button, issue
 	// detail panel, etc.) attribute the run for the dashboards. Server
 	// validates against the closed enum so a malicious / typo'd value
@@ -133,10 +136,42 @@ func (h *PipelineHandler) Run(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if body.ExpectedDefinitionHash != "" {
+		decoded, decodeErr := hex.DecodeString(body.ExpectedDefinitionHash)
+		if decodeErr != nil || len(decoded) != 32 {
+			replyError(w, http.StatusBadRequest, "expected_definition_hash must be a SHA-256 hex digest")
+			return
+		}
+		if body.DelaySeconds > 0 || body.DebounceKey != "" || body.FireAt != "" {
+			replyError(w, http.StatusBadRequest, "expected_definition_hash is supported only for immediate starts")
+			return
+		}
+	}
+
 	// Historical manual starts still pass current governance and the selected
 	// recipe's integration/resource/credential preflight. Never gate HEAD and
 	// then execute a different archived definition.
-	if body.PinnedVersion != nil {
+	if body.PinnedVersion != nil || body.ExpectedDefinitionHash != "" {
+		if body.PinnedVersion == nil {
+			// Resolve HEAD and its hash in one DB read, then pin the immutable
+			// version. A later publish cannot change what this request executes.
+			var head int
+			var headHash string
+			headErr := h.db.QueryRowContext(r.Context(), `SELECT head_version, definition_hash FROM pipelines WHERE id=? AND workspace_id=? AND deleted_at IS NULL`, p.ID, workspaceID).Scan(&head, &headHash)
+			if headErr != nil {
+				replyError(w, http.StatusInternalServerError, "load current recipe version")
+				return
+			}
+			if !strings.EqualFold(headHash, body.ExpectedDefinitionHash) {
+				if existing := h.existingIdempotentRun(r.Context(), workspaceID, p.ID, r.Header.Get("Idempotency-Key")); existing != "" {
+					writeJSON(w, http.StatusOK, map[string]any{"run_id": existing, "status": "DEDUPED", "deduped": true})
+					return
+				}
+				replyError(w, http.StatusConflict, "recipe changed since preview; reload before running")
+				return
+			}
+			body.PinnedVersion = &head
+		}
 		if *body.PinnedVersion <= 0 {
 			replyError(w, http.StatusBadRequest, "pinned_version must be positive")
 			return
@@ -147,11 +182,25 @@ func (h *PipelineHandler) Run(w http.ResponseWriter, r *http.Request) {
 		}
 		v, verr := h.store.GetVersion(r.Context(), p.ID, *body.PinnedVersion)
 		if errors.Is(verr, pipeline.ErrNotFound) {
+			if body.ExpectedDefinitionHash != "" {
+				if existing := h.existingIdempotentRun(r.Context(), workspaceID, p.ID, r.Header.Get("Idempotency-Key")); existing != "" {
+					writeJSON(w, http.StatusOK, map[string]any{"run_id": existing, "status": "DEDUPED", "deduped": true})
+					return
+				}
+			}
 			replyError(w, http.StatusNotFound, "recipe version not found")
 			return
 		}
 		if verr != nil {
 			replyError(w, http.StatusInternalServerError, "load recipe version")
+			return
+		}
+		if body.ExpectedDefinitionHash != "" && !strings.EqualFold(v.DefinitionHash, body.ExpectedDefinitionHash) {
+			if existing := h.existingIdempotentRun(r.Context(), workspaceID, p.ID, r.Header.Get("Idempotency-Key")); existing != "" {
+				writeJSON(w, http.StatusOK, map[string]any{"run_id": existing, "status": "DEDUPED", "deduped": true})
+				return
+			}
+			replyError(w, http.StatusConflict, "recipe changed since preview; reload before running")
 			return
 		}
 		p.DefinitionJSON = v.DefinitionJSON
@@ -257,21 +306,22 @@ func (h *PipelineHandler) Run(w http.ResponseWriter, r *http.Request) {
 
 	exec := h.newExecutor()
 	input := pipeline.RunInput{
-		PinnedVersion:     body.PinnedVersion,
-		PipelineID:        p.ID,
-		WorkspaceID:       workspaceID,
-		InvokingCrewID:    invokingCrew,
-		InvokingAgentID:   invokingAgent,
-		InvokingUserID:    invokingUser,
-		Inputs:            body.Inputs,
-		Mode:              pipeline.ModeRun,
-		IdempotencyKey:    idempotencyKey,
-		TierOverride:      tierOverride,
-		TriggeredVia:      triggeredVia,
-		TriggeredByID:     body.TriggeredByID,
-		Tags:              body.Tags,
-		MetadataJSON:      marshalMetadata(body.Metadata),
-		IdempotencyKeyTTL: time.Duration(body.IdempotencyKeyTTLSeconds) * time.Second,
+		PinnedVersion:         body.PinnedVersion,
+		UseReviewedDefinition: body.ExpectedDefinitionHash != "",
+		PipelineID:            p.ID,
+		WorkspaceID:           workspaceID,
+		InvokingCrewID:        invokingCrew,
+		InvokingAgentID:       invokingAgent,
+		InvokingUserID:        invokingUser,
+		Inputs:                body.Inputs,
+		Mode:                  pipeline.ModeRun,
+		IdempotencyKey:        idempotencyKey,
+		TierOverride:          tierOverride,
+		TriggeredVia:          triggeredVia,
+		TriggeredByID:         body.TriggeredByID,
+		Tags:                  body.Tags,
+		MetadataJSON:          marshalMetadata(body.Metadata),
+		IdempotencyKeyTTL:     time.Duration(body.IdempotencyKeyTTLSeconds) * time.Second,
 	}
 	if dispatch, ok := r.Context().Value(issueRoutineDispatchKey{}).(issueRoutineDispatch); ok {
 		input.RunIDOverride = dispatch.RunID
@@ -372,6 +422,23 @@ func (h *PipelineHandler) Run(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, res)
+}
+
+// A retry after an uncertain response must recover the original run even if
+// HEAD changed since the first request. The key has the same workspace and
+// pipeline scope and TTL as the executor's idempotency reservation.
+func (h *PipelineHandler) existingIdempotentRun(ctx context.Context, workspaceID, pipelineID, key string) string {
+	if key == "" || h.db == nil {
+		return ""
+	}
+	var runID string
+	err := h.db.QueryRowContext(ctx, `SELECT run_id FROM pipeline_run_idempotency
+		WHERE workspace_id=? AND pipeline_id=? AND idempotency_key=? AND expires_at>?`,
+		workspaceID, pipelineID, key, time.Now().UTC().Format(time.RFC3339Nano)).Scan(&runID)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		h.logger.Warn("lookup idempotent routine run", "error", err)
+	}
+	return runID
 }
 
 // internalRunRequest is the sidecar→main body for an agent-invoked routine

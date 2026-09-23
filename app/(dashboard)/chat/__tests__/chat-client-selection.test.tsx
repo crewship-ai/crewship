@@ -47,11 +47,13 @@ vi.mock("@/components/features/chat/chat-panel", () => ({
     sessionId,
     initialInput,
     autoSendInitial,
+    pageContextSlug,
   }: {
     agentSlug: string
     sessionId: string
     initialInput?: string
     autoSendInitial?: boolean
+    pageContextSlug?: string
   }) => (
     <div
       data-testid="chat-panel"
@@ -59,6 +61,7 @@ vi.mock("@/components/features/chat/chat-panel", () => ({
       data-session={sessionId}
       data-initial={initialInput ?? "(none)"}
       data-autosend={String(!!autoSendInitial)}
+      data-page={pageContextSlug ?? "(none)"}
     />
   ),
 }))
@@ -239,6 +242,20 @@ describe("<ChatClient> — the ?prompt= handoff belongs to one conversation", ()
     await waitFor(() => expect(screen.getByTestId("chat-panel").getAttribute("data-session")).toBe("morgan-1"))
     expect(screen.getByTestId("chat-panel").getAttribute("data-initial")).toBe("(none)")
     expect(screen.getByTestId("chat-panel").getAttribute("data-autosend")).toBe("false")
+  })
+
+  it("keeps a Page handoff in its new session and never auto-sends it", async () => {
+    setUrl("/chat/riley", "?new=1&page=fleet-201")
+    const view = render(<ChatClient />)
+    const p = await panel()
+    expect(p.getAttribute("data-session")).not.toBe("riley-1")
+    expect(p.getAttribute("data-page")).toBe("fleet-201")
+    expect(p.getAttribute("data-autosend")).toBe("false")
+    setUrl("/chat/morgan", "?session=morgan-1")
+    view.rerender(<ChatClient />)
+    window.dispatchEvent(new Event("popstate"))
+    await waitFor(() => expect(screen.getByTestId("chat-panel").getAttribute("data-agent")).toBe("morgan"))
+    expect(screen.getByTestId("chat-panel").getAttribute("data-page")).toBe("(none)")
   })
 
   it("gives new=1 precedence over a stale session query", async () => {

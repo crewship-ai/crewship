@@ -294,13 +294,16 @@ export function ChatClient() {
    * that survives a re-render would send twice.
    */
   const [handoff, setHandoff] = useState<{ prompt: string; draft: boolean } | null>(null)
+  const [pageHandoff, setPageHandoff] = useState<string | null>(null)
   const handoffConsumedRef = useRef(false)
   useEffect(() => {
     if (handoffConsumedRef.current) return
+    const page = searchParams.get("page")
     const p = searchParams.get("prompt")
-    if (!p) return
+    if (!p && !page) return
     handoffConsumedRef.current = true
-    setHandoff({ prompt: p, draft: searchParams.get("draft") === "1" })
+    if (page && page.length <= 128) setPageHandoff(page)
+    if (p) setHandoff({ prompt: p, draft: searchParams.get("draft") === "1" })
   }, [searchParams])
 
   /**
@@ -319,11 +322,16 @@ export function ChatClient() {
    * is idempotent — same session, same value — so a double render is safe.
    */
   const handoffSessionRef = useRef<string | null>(null)
+  const pageHandoffSessionRef = useRef<string | null>(null)
   if (handoff !== null && handoffSessionRef.current === null && sessionId) {
     handoffSessionRef.current = sessionId
   }
   const handoffForThisSession =
     handoff !== null && handoffSessionRef.current === sessionId
+  if (pageHandoff !== null && pageHandoffSessionRef.current === null && sessionId) {
+    pageHandoffSessionRef.current = sessionId
+  }
+  const pageHandoffForThisSession = pageHandoff !== null && pageHandoffSessionRef.current === sessionId
 
   const agent = useMemo(
     () => tree.roster?.find((a) => a.slug === agentSlug) ?? null,
@@ -782,6 +790,7 @@ export function ChatClient() {
           sessionId={sessionId}
           initialInput={handoffForThisSession ? handoff?.prompt : undefined}
           autoSendInitial={handoffForThisSession && !handoff?.draft}
+          pageContextSlug={pageHandoffForThisSession ? pageHandoff : undefined}
           mobilePanel={isMobile ? mobilePanel : undefined}
           onMobilePanelChange={setMobilePanel}
           onNewConversation={() => startConversation(agent)}
