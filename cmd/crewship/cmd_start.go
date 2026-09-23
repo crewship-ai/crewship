@@ -52,6 +52,7 @@ import (
 	bundledSkills "github.com/crewship-ai/crewship/internal/skills/bundled"
 	"github.com/crewship-ai/crewship/internal/update"
 	"github.com/crewship-ai/crewship/internal/usermodel"
+	"github.com/crewship-ai/crewship/internal/work"
 	"github.com/crewship-ai/crewship/internal/ws"
 	"github.com/crewship-ai/crewship/web"
 	"github.com/spf13/cobra"
@@ -1106,6 +1107,11 @@ var startCmd = &cobra.Command{
 				// again, and this is the sweeper that makes it so. See
 				// internal/pipeline/webhook_receipts.go.
 				go pipeline.StartRoutineReceiptRetentionSweeper(ctx, deps.DB, logger, 24*time.Hour)
+
+				// Agent webhook delivery receipts and raw payloads have separate
+				// 30-day and 7-day retention clocks. Non-terminal work keeps both
+				// regardless of age; Sweep enforces that predicate in each write.
+				go work.StartRetentionSweeper(ctx, work.NewStore(deps.DB), logger, 24*time.Hour)
 			}
 
 			// Pipeline schedules — cron triggers for saved pipelines.

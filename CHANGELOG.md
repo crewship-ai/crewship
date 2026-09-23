@@ -16,6 +16,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 ### Fixed
 - **Routine reports show the failed step as failed when its final journal event is missing.** The persisted run outcome resolves a step left at “Running” in Markdown and HTML reports. (#2473)
 - Pending guaranteed-memory writes are reconciled after database migration and before the server accepts requests. Recovery pins the configured storage root and rejects stale paths outside it; startup fails if an intent cannot be recovered, instead of admitting another writer over an unresolved file. (#2643)
+- Agent webhook delivery receipts and raw payloads now receive their documented retention sweep on boot and daily. A non-terminal work item keeps its receipt and payload regardless of age. (#2643)
 - **Confirmed webhook stops appear as cancelled in run history.** Captured usage survives settlement and journal-write retries; only the dispatcher’s confirmed outcome can finish a work-owned run. Retrying a history write never reruns the agent. Existing contradictory historical records are left intact for investigation. (#2652)
 - Shared ingress byte limits include immutable input from non-webhook work, so scheduled prompts cannot bypass the workspace budget. (#2643)
 - Scheduled fires stop when their occurrence identity cannot be read, instead of falling back to a new wall-clock dedup key that can bypass an existing reservation. (#2643)
