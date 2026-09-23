@@ -371,11 +371,11 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		defer tx.Rollback()
-		var storedCron sql.NullString
+		var storedCron, storedNext sql.NullString
 		var storedEnabled int
 		if err := tx.QueryRowContext(r.Context(),
-			`SELECT schedule_cron, schedule_enabled FROM agents WHERE id=? AND workspace_id=?`,
-			agentID, workspaceID).Scan(&storedCron, &storedEnabled); err != nil {
+			`SELECT schedule_cron, schedule_enabled, schedule_next_run FROM agents WHERE id=? AND workspace_id=?`,
+			agentID, workspaceID).Scan(&storedCron, &storedEnabled, &storedNext); err != nil {
 			replyInternalError(w, h.logger, "read agent schedule for update", err)
 			return
 		}
@@ -409,12 +409,18 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 				replyError(w, http.StatusBadRequest, "Invalid schedule_cron: "+err.Error())
 				return
 			}
-			next := plan.Next(time.Now().UTC())
-			if next.IsZero() {
-				replyError(w, http.StatusBadRequest, "schedule_cron has no next occurrence")
-				return
+			// A repeated PATCH is not a new occurrence. Keep a due cursor
+			// that durable acceptance has not yet advanced. Only a changed
+			// plan, a disabled->enabled transition, or a missing cursor
+			// establishes a new future identity.
+			if storedEnabled != 1 || storedCron.String != cronExpr || !storedNext.Valid || storedNext.String == "" {
+				next := plan.Next(time.Now().UTC())
+				if next.IsZero() {
+					replyError(w, http.StatusBadRequest, "schedule_cron has no next occurrence")
+					return
+				}
+				ub.Set("schedule_next_run", next.UTC().Format(time.RFC3339))
 			}
-			ub.Set("schedule_next_run", next.UTC().Format(time.RFC3339))
 		}
 		query, args := ub.Build("agents", "id = ? AND workspace_id = ? AND deleted_at IS NULL", agentID, workspaceID)
 		if _, err := tx.ExecContext(r.Context(), query, args...); err != nil {

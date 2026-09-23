@@ -101,3 +101,23 @@ func TestAgentScheduleCursor_InvalidEnabledCronDoesNotPersist(t *testing.T) {
 		t.Fatalf("invalid cron persisted schedule_enabled=%d", enabled)
 	}
 }
+
+func TestAgentScheduleCursor_IdempotentPatchKeepsPendingOccurrence(t *testing.T) {
+	h, userID, wsID, _, agentID := covAU2Fixture(t)
+	const due = "2020-01-01T00:00:00Z"
+	execOrFatal(t, h.db, `UPDATE agents SET schedule_cron='* * * * *', schedule_enabled=1,
+		schedule_next_run=? WHERE id=?`, due, agentID)
+	h.SetScheduler(&covAU2Sched{})
+
+	rr := covAU2Patch(h, userID, wsID, agentID, "OWNER", map[string]any{"schedule_enabled": true})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("idempotent patch status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	var next string
+	if err := h.db.QueryRow(`SELECT schedule_next_run FROM agents WHERE id=?`, agentID).Scan(&next); err != nil {
+		t.Fatal(err)
+	}
+	if next != due {
+		t.Fatalf("no-op patch skipped pending occurrence: due=%q, want %q", next, due)
+	}
+}
