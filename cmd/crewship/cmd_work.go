@@ -231,11 +231,25 @@ a typo.`,
 		query := url.Values{}
 		for flag, param := range map[string]string{
 			"state": "state", "class": "class", "source": "source",
-			"agent": "agent_id", "after": "after",
+			"after": "after",
 		} {
 			if value, _ := cmd.Flags().GetString(flag); value != "" {
 				query.Set(param, value)
 			}
+		}
+		if agentRef, _ := cmd.Flags().GetString("agent"); agentRef != "" {
+			agentID, err := resolveAgentID(client, agentRef)
+			if err != nil {
+				// Historical work remains queryable after its agent is deleted.
+				// A CUID-shaped reference that no longer resolves can still be
+				// the immutable ID on those ledger rows. Other failures (auth,
+				// network, server) must not masquerade as an empty work page.
+				if !looksLikeCUID(agentRef) || cli.ExitCodeFor(err) != cli.ExitNotFound {
+					return err
+				}
+				agentID = agentRef
+			}
+			query.Set("agent_id", agentID)
 		}
 		path := workspacePath(client, "/work-items")
 		if encoded := query.Encode(); encoded != "" {
@@ -612,7 +626,7 @@ func init() {
 	workListCmd.Flags().String("state", "", "Filter by state: queued, starting, running, waiting, retry_wait, succeeded, failed, expired, cancelled, needs_reconciliation")
 	workListCmd.Flags().String("class", "", "Filter by capacity class: chat or background")
 	workListCmd.Flags().String("source", "", "Filter by producer: webhook, chat, assignment, schedule, pipeline_step, manual")
-	workListCmd.Flags().String("agent", "", "Filter by the agent the work runs as")
+	workListCmd.Flags().String("agent", "", "Filter by agent slug or ID")
 	workListCmd.Flags().String("after", "", "Resume from a previous page's cursor")
 
 	workReplayCmd.Flags().String("reason", "", "Why this is being replayed; recorded on the new work item")

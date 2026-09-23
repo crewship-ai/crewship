@@ -123,6 +123,17 @@ Output: human header (slug, name, author, invocations) + pretty-printed DSL JSON
   renders the human report.
 </Note>
 
+## `crewship routine access <slug>`
+
+Ask the server which routine actions your current workspace membership permits.
+`run` is conditional even when your role or `routine.run` grant qualifies: status,
+inputs, dependencies, budget and concurrency are checked when you start it.
+
+```bash
+crewship routine access summarize-text
+crewship routine access summarize-text -f json
+```
+
 ---
 
 ## `crewship routine save`

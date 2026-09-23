@@ -29,6 +29,10 @@ for (const scenario of [
       else if (path === "/api/v1/credentials") body = [credential]
       else if (path === "/api/v1/credentials/reveal-policy") body = { enabled }
       else if (path === "/api/v1/credentials/demo/sensitivity") body = { sensitivity: credential.sensitivity }
+      else if (path === "/api/v1/credentials/demo/access/me") body = {
+        credential_id: credential.id,
+        actions: { reveal: { state: allowed ? "conditional" : "denied", reason: allowed ? "fresh_login_reason_and_audit_required" : "missing_role_or_capability" } },
+      }
       else if (path === "/api/v1/credentials/demo") body = credential
       else if (path === "/api/v1/credentials/demo/reveal") { reveals++; body = { value: "dummy-not-a-real-secret-browser" } }
       else if (/settings|config|health/.test(path)) body = {}

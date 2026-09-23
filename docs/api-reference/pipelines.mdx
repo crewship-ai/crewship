@@ -21,6 +21,7 @@ Problem Details shape (`error` is the human-readable message).
 | POST | `/api/v1/workspaces/{workspaceId}/pipelines/save` | create | Create/update a definition |
 | POST | `/api/v1/workspaces/{workspaceId}/pipelines/test_run` | create | Validate an unsaved definition and mint `save_token` |
 | POST | `/api/v1/workspaces/{workspaceId}/pipelines/{slug}/run` | create **or** `routine.run` | Execute a saved, active pipeline |
+| GET | `/api/v1/workspaces/{workspaceId}/pipelines/{slug}/access/me` | member | Explain your own read, run, edit, approve, disable, replay and schedule rights; run eligibility remains conditional on dispatch checks |
 | POST | `/api/v1/workspaces/{workspaceId}/pipelines/{slug}/run_batch` | create | Execute multiple input items |
 | POST | `/api/v1/workspaces/{workspaceId}/pipelines/{slug}/dry_run` | create | Static WouldExecute preview; no agent invocation |
 | POST | `/api/v1/workspaces/{workspaceId}/pipelines/{slug}/step_run` | create | Execute one step against a fixture |

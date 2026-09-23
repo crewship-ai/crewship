@@ -10,14 +10,17 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 ## [Unreleased]
 
 ### Improved
-- Prepared a dispatch-time permission check for queued scheduled agent work. It validates the accepted input and rechecks the current agent, workspace, crew and schedule state; the cron producer still uses its existing execution path until the durable cutover is complete. (#2643)
 - Pages can open an unsent agent chat draft. The Page reference is removable, and sending it rechecks both readers' live access before adding a bounded identity snapshot and durable provenance.
+- Scheduled agent runs now enter the durable work queue alongside agent webhooks. Cron accepts a due occurrence and advances its cursor atomically; the shared dispatcher checks current permissions, serial capacity and cancellation before execution. Restart catches overdue occurrences, and the old direct cron executor is no longer in the production build. The release parallel profile remains disabled. (#2643)
 - Chat links can open a new unsent draft with `?new=1&draft=1`; prefilled text no longer overwrites a person's existing composer draft. Existing `?prompt=` auto-send links retain their behavior.
+- Routine and credential details now explain the caller's effective actions using server-calculated role, capability, workspace policy and scope gates. Run and secret reveal show conditional eligibility rather than promising that live preflight, fresh login and audit checks will pass. The same answers are available through `crewship routine access` and `crewship credential access`.
 - Routine and schedule catalogs now page through large workspaces without truncating results; schedule lists and the calendar resolve routine details in batches.
 - Activity now includes the accepted work ledger and webhook deliveries. The separate Work navigation item is removed; existing `/work` bookmarks open the corresponding Activity view. (#2636)
 
 ### Fixed
+- **`crewship work list --agent <slug>` showed no work for an agent that had work.** The CLI now resolves the slug to an ID before applying the server's ID filter, and reports an unknown slug instead of an empty page. Historical work remains filterable by its agent ID. (#2643)
 - Testing a stored OpenAI Codex subscription or legacy CLI auth blob no longer sends its OAuth credential to an API-key probe or reports the resulting 403 as an invalid login. The API, CLI and credential detail show that this login was not checked; metered provider logins retain their API-key probe. A controlled CLI run is still needed for a subscription login. (#2643)
+- Routine credential lookup and `credentials_required` now honor every live crew grant in `credential_crews`, not only the legacy first `crew_id`. The availability check and actual injection share one selection rule; older single-crew credential updates keep the grants in sync. (#2676)
 - **Routine reports show the failed step as failed when its final journal event is missing.** The persisted run outcome resolves a step left at “Running” in Markdown and HTML reports. (#2473)
 - Pending guaranteed-memory writes are reconciled after database migration and before the server accepts requests. Recovery pins the configured storage root and rejects stale paths outside it; startup fails if an intent cannot be recovered, instead of admitting another writer over an unresolved file. (#2643)
 - Agent webhook delivery receipts and raw payloads now receive their documented retention sweep on boot and daily. A non-terminal work item keeps its receipt and payload regardless of age. (#2643)

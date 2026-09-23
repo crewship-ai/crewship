@@ -44,6 +44,7 @@ func (r *Router) registerPipelineRoutes() *PipelineHandler {
 	// openapi: query author_crew_id:string include_ephemeral:string include_hidden:string limit:integer offset:integer order:string status:string tag:string; responses 200,400
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipelines", authed(wsCtx(http.HandlerFunc(pipes.List))))
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipelines/{slug}", authed(wsCtx(http.HandlerFunc(pipes.Get))))
+	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipelines/{slug}/access/me", authed(wsCtx(http.HandlerFunc(pipes.MyRoutineAccess))))
 	// roleInline: Run enforces its own layered gate (MANAGER+ role OR an
 	// explicit routine.run capability), the same arrangement
 	// POST /pipeline-schedules uses below. Leaving roleCreate here would

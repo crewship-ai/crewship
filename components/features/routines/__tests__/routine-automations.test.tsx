@@ -57,6 +57,15 @@ vi.mock("@/hooks/use-abilities", () => ({
   useAbilities: () => ({ role: "OWNER" }),
 }))
 
+vi.mock("@/hooks/use-access-me", () => ({
+  useAccessMe: () => ({
+    access: { actions: { read: { state: "allowed", reason: "workspace_visible" }, run: { state: "conditional", reason: "runtime_preflight_required" } } },
+    loading: false,
+    error: false,
+    refresh: vi.fn(),
+  }),
+}))
+
 // The graph and the code editor are heavy, unrelated, and mocked everywhere
 // else this card is exercised.
 vi.mock("../routine-definition-canvas", () => ({

@@ -590,13 +590,24 @@ var startCmd = &cobra.Command{
 				},
 				logger,
 			)
-			// Cross-surface exclusivity (#2269 follow-up, defect 6): a
-			// scheduled routine firing for an agent that's mid-assignment
-			// deletes the assignment's live tmux session otherwise — same
-			// lock the chat/assignment doors already share.
-			sched.SetAgentRunLock(bridge.AgentRunLock())
 			if schedulerLease != nil {
 				sched.SetLeaderGate(schedulerLease)
+			}
+			// A scheduled occurrence must reach the same durable admission
+			// transaction as webhook work. Open its bounded write handle before
+			// cron starts; a missing handle is a startup error, never permission
+			// to fall back to the old direct RunAgent path.
+			dbFile, pathErr := mainDatabaseFile(deps.DB)
+			if pathErr != nil {
+				return fmt.Errorf("scheduled work database path: %w", pathErr)
+			}
+			scheduleAcceptor, acceptErr := work.OpenAcceptor(dbFile, work.DefaultAcceptanceBudget)
+			if acceptErr != nil {
+				return fmt.Errorf("scheduled work acceptance handle: %w", acceptErr)
+			}
+			defer scheduleAcceptor.Close()
+			if err := sched.InitializeMissingCursors(ctx, time.Now()); err != nil {
+				return fmt.Errorf("initialize scheduled occurrence cursors: %w", err)
 			}
 			// The one dispatcher that EXECUTES accepted webhook work.
 			//
@@ -611,14 +622,18 @@ var startCmd = &cobra.Command{
 			// verified against a real Claude runtime, and a dispatcher that
 			// quietly permitted two concurrent runs would be enabling it by
 			// omission.
-			if apiRouter := srv.APIRouter(); apiRouter != nil {
-				stopDispatcher, derr := apiRouter.StartWebhookDispatcher(ctx, logger)
-				if derr != nil {
-					logger.Error("webhook dispatcher did not start; accepted webhook work will sit "+
-						"queued until one does", "error", derr)
-				} else {
-					defer stopDispatcher()
-				}
+			apiRouter := srv.APIRouter()
+			if apiRouter == nil {
+				return fmt.Errorf("scheduled work requires an API router for shared dispatch")
+			}
+			stopDispatcher, scheduleHint, derr := apiRouter.StartAgentWorkDispatcher(ctx, logger,
+				srv.ConversationStore(), cfg.Container.DefaultMemoryMB, cfg.Container.DefaultCPUs)
+			if derr != nil {
+				return fmt.Errorf("shared agent work dispatcher: %w", derr)
+			}
+			defer stopDispatcher()
+			if err := sched.SetDurableAcceptance(scheduleAcceptor, work.NewDiskGuard(filepath.Dir(dbFile)), scheduleHint); err != nil {
+				return err
 			}
 
 			if err := sched.Start(ctx); err != nil {

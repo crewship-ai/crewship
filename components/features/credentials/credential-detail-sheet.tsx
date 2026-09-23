@@ -56,8 +56,6 @@ import { EXPIRY_WARNING_DAYS, daysUntilExpiry } from "@/lib/credentials/facets"
 import { tierMeta, tierOf, type CredentialTierLevel } from "@/lib/credentials/tiers"
 import type { CredentialCrewRef, CredentialToolGap } from "@/hooks/use-credential-readiness"
 import { CrewIcon } from "@/components/ui/crew-icon"
-import { Capability } from "@/lib/capabilities"
-import { useAbilities } from "@/hooks/use-abilities"
 import { cn } from "@/lib/utils"
 import { apiFetch } from "@/lib/api-fetch"
 import { hasLogin, paysForLabel, type ProviderLogin } from "@/lib/credentials/provider-logins"
@@ -65,6 +63,8 @@ import { RevealDialog } from "./reveal-dialog"
 import { AssignLoginDialog } from "./assign-login-dialog"
 import { ProviderLoginActions, ProviderLoginCards } from "./provider-login-detail"
 import { DetailDisclosure } from "./detail-disclosure"
+import { YourAccess } from "@/components/features/access/your-access"
+import { useAccessMe } from "@/hooks/use-access-me"
 
 interface CredentialSummary {
   id: string
@@ -246,7 +246,6 @@ export function CredentialDetailSheet({
   const [accessLoading, setAccessLoading] = React.useState(false)
   const [accessError, setAccessError] = React.useState(false)
   const [accessCoverage, setAccessCoverage] = React.useState({ checked: 0, total: 0, unavailable: 0 })
-  const [revealEnabled, setRevealEnabled] = React.useState(false)
   const [revealOpen, setRevealOpen] = React.useState(false)
   // The classification a PUT .../sensitivity last returned. Starts unset and
   // takes precedence over the value the list/get payload carried, so the pill
@@ -259,48 +258,24 @@ export function CredentialDetailSheet({
   const [loginOverride, setLoginOverride] = React.useState<ProviderLogin | null>(null)
   const [assignOpen, setAssignOpen] = React.useState(false)
 
-  // Hide affordances users can't perform rather than letting them
-  // click through to a 403. Mirrors the backend gating exactly:
-  //   * Test + value update (PATCH)  → MANAGER+  → CASL "update"
-  //   * Rotate w/ grace overlap      → OWNER/ADMIN via role OR any
-  //     member holding the credential.rotate capability
-  //     (requireRoleOrCapabilityOrForbid in credential_rotation.go,
-  //     #1028) → CASL "manage" OR hasCapability
-  //   * Delete                       → OWNER/ADMIN (credentials.go)
-  //     → CASL "delete"
-  // MANAGER has update but neither manage nor delete, so they keep
-  // the value-update flow — and see Rotate only when explicitly
-  // granted credential.rotate (#1034).
-  const { abilities, hasCapability } = useAbilities()
-  const canUpdate = abilities.can("update", "Credential") && (!credential?.login || abilities.can("manage", "Credential"))
-  const canRotate = abilities.can("manage", "Credential") || hasCapability(Capability.CredentialRotate)
-  const canDelete = abilities.can("delete", "Credential")
-  // Lowering a classification is OWNER/ADMIN (credentials_reveal.go
-  // SetSensitivity: the lower branch re-checks with "manage"); raising is
-  // MANAGER+. Two gates because the server has two.
-  const canLowerSensitivity = abilities.can("manage", "Credential")
-  // POST /credentials/bindings is roleManage, like the wizard's slot step.
-  const canBind = abilities.can("manage", "Credential")
+  // The server answers each action using its own scope, role and capability
+  // gates. Until that answer arrives (or if it fails), actions stay hidden.
+  const { access: effectiveAccess, loading: effectiveAccessLoading, error: effectiveAccessError, refresh: refreshEffectiveAccess } = useAccessMe(open && credential
+    ? `/api/v1/credentials/${encodeURIComponent(credential.id)}/access/me?workspace_id=${encodeURIComponent(workspaceId)}`
+    : undefined)
+  const canAct = (key: string) => {
+    const state = effectiveAccess?.actions[key]?.state
+    return state === "allowed" || state === "conditional"
+  }
+  const canUpdate = canAct("edit")
+  const canRotate = canAct("rotate")
+  const canDelete = canAct("delete")
+  const canLowerSensitivity = canAct("lower_sensitivity")
+  const canBind = canAct("manage_bindings")
 
   const effectiveSensitivity = sensitivity ?? credential?.sensitivity ?? null
 
-  /**
-   * Reveal, gated exactly the way credentials_reveal.go gates it:
-   *
-   *   L1 the workspace switch  → GET /credentials/reveal-policy
-   *   L2 role floor MANAGER+   → CASL "update" (revealRoleFloor = "update")
-   *   L2 the capability        → credentials:reveal, which no role implies
-   *   L0 classification        → SEALED never, by anyone
-   *
-   * All four, not any of them. The capability is the one people expect to be
-   * implied by being an OWNER and is deliberately not — so an OWNER without
-   * it must not see this button.
-   */
-  const canReveal =
-    canUpdate &&
-    hasCapability(Capability.CredentialReveal) &&
-    revealEnabled &&
-    effectiveSensitivity !== "SEALED"
+  const canReveal = canAct("reveal") && effectiveSensitivity !== "SEALED"
 
   /**
    * Which of the four gates is shut, in the order they bind.
@@ -310,12 +285,14 @@ export function CredentialDetailSheet({
    * that tier does. SEALED is checked first because it is the one no
    * configuration can open: the answer there is rotation, not a setting.
    */
-  const revealBlockedReason =
-    effectiveSensitivity === "SEALED"
-      ? "SEALED values cannot be revealed. Obtain a replacement from the provider to change this secret."
-      : !revealEnabled
-        ? "Reveal is switched off for this workspace. An owner can turn it on under Settings → Access & secrets."
-        : "Revealing a value needs the credentials:reveal capability, which no role grants on its own."
+  const revealBlockedReason = ({
+    sealed: "SEALED values cannot be revealed. Obtain a replacement from the provider to change this secret.",
+    workspace_switch_off: "Reveal is switched off for this workspace. An owner can turn it on under Settings → Access & secrets.",
+    missing_capability: "Revealing a value needs the credentials:reveal capability, which no role grants on its own.",
+    below_role_floor: "Revealing a value requires at least a manager role.",
+    outside_crew_scope: "This credential is outside your crew scope.",
+    non_interactive_auth: "Revealing a value requires an interactive session.",
+  } as Record<string, string>)[effectiveAccess?.actions.reveal?.reason ?? ""] ?? "Reveal access could not be determined."
 
   React.useEffect(() => {
     if (!open || !credential) {
@@ -327,7 +304,6 @@ export function CredentialDetailSheet({
       setAssignments([])
       setSensitivity(null)
       setSensitivityError(null)
-      setRevealEnabled(false)
       setRevealOpen(false)
       setAssignOpen(false)
     }
@@ -336,25 +312,6 @@ export function CredentialDetailSheet({
     setLoginOverride(null)
     if (open && credential && assignOnOpen && hasLogin(credential)) setAssignOpen(true)
   }, [open, credential, assignOnOpen])
-
-  // The workspace reveal switch. MANAGER+ may read it (GetPolicy's own gate),
-  // so anyone below "update" is never asked — a 403 here would be read as
-  // "disabled", which happens to be right, but asking is still noise.
-  React.useEffect(() => {
-    if (!open || !credential || !canUpdate) return
-    let cancelled = false
-    apiFetch(`/api/v1/credentials/reveal-policy?workspace_id=${encodeURIComponent(workspaceId)}`)
-      .then((r) => (r.ok ? r.json() : null))
-      .then((body: { enabled?: boolean } | null) => {
-        if (!cancelled) setRevealEnabled(Boolean(body?.enabled))
-      })
-      .catch(() => {
-        // Unreachable server → treat reveal as off. Failing closed on a
-        // disclosure control is the only acceptable direction.
-        if (!cancelled) setRevealEnabled(false)
-      })
-    return () => { cancelled = true }
-  }, [open, credential, canUpdate, workspaceId])
 
   // Every sub-resource, on open.
   //
@@ -532,6 +489,7 @@ export function CredentialDetailSheet({
         return
       }
       setSensitivity(data.sensitivity ?? next)
+      void refreshEffectiveAccess()
     } catch {
       setSensitivityError("Network error")
     } finally {
@@ -930,7 +888,10 @@ export function CredentialDetailSheet({
                       <summary className="cursor-pointer text-xs font-medium text-muted-foreground">Delivery bindings & access details</summary>
                     <div className="my-4 space-y-2 text-xs" data-testid="credential-access-summary">
                       <p><span className="font-medium">Management:</span> {seat ? "only workspace owners and admins can view and manage provider accounts." : "owners and admins manage credentials; managers can edit them. Reading a secret requires separate reveal permission and workspace policy."}</p>
-                      <p><span className="font-medium">Your access:</span> {canUpdate ? "Edit details" : "Read visible metadata"}{canBind ? " · Manage assignments" : ""}{canReveal ? " · Reveal permitted" : " · Secret hidden"}.</p>
+                      <YourAccess
+                        provided={{ access: effectiveAccess, loading: effectiveAccessLoading, error: effectiveAccessError }}
+                        actions={[{ key: "read", label: "Read" }, { key: "edit", label: "Edit" }, { key: "manage_bindings", label: "Manage assignments" }, { key: "reveal", label: "Reveal" }]}
+                      />
                       <p><span className="font-medium">Credential scope:</span> {credential.scope === "CREW" ? "Selected crews" : "Workspace"}. Scope is not a successful connection check; runtime access also depends on assignments, Keeper and policy.</p>
                       {accessLoading ? <p role="status">Checking visible assignments…</p>
                         : accessError ? <p role="alert" className="text-warn">Access could not be fully loaded. An empty list does not mean nobody has access.</p>
