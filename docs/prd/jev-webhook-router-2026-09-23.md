@@ -6,6 +6,8 @@ Continuation of [#2629](https://github.com/crewship-ai/crewship/issues/2629) and
 
 An existing signed routine webhook still authenticates, deduplicates and persists its delivery through the established routine-webhook path. The targeted routine can now include a `decision` step. It sends only the author's rendered `decision.state` to the operator-configured TypeSafe or OpenRouter Decisions endpoint and returns one author-declared option label. Later `agent_run` steps use ordinary `if`/`needs` gates; the model cannot invent a target or bypass the agent's normal admission and policy gates.
 
+A `steps.*` CEL condition whose dependency is missing or whose expression cannot be evaluated now skips its step. This matters for routing: a malformed condition must never turn into a truthy string and wake an agent.
+
 The `review` option is mandatory. A selected probability below the per-step threshold (default 0.9) returns `review`. An absent provider, foreign workspace, undeclared provider host, crew-network denial, invalid model response or provider failure fails the step before any downstream agent starts. Provider calls have the original client's fixed destination, bounded request/response, five-second timeout and no implicit retry. The pilot is enabled only with `CREWSHIP_DECISIONS_PROVIDER`, the corresponding key and `CREWSHIP_DECISIONS_WORKSPACE_ID` in the server environment. No default route changes.
 
 `pipeline.decision.evaluated` records the selected and suggested labels, probability distribution, threshold, model, provider and usage, correlated to the routine run and step. It does not copy the webhook state. This gives Keeper and offline evals evidence without treating a model score as authorization.

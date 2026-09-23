@@ -171,6 +171,8 @@ func TestEvalStepCondition_Units(t *testing.T) {
 		{`inputs.x == "z"`, false},
 		{`steps.classify == "spam"`, true},
 		{`steps.classify == "ham"`, false},
+		{`steps.missing == "sre"`, false},
+		{`steps.classify ==`, false},
 		{`run.is_replay`, true},
 		{"", true},       // no condition ⇒ run
 		{"yes", true},    // bare truthy fallback

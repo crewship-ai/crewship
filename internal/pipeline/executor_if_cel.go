@@ -40,6 +40,13 @@ func evalStepCondition(rawIf string, ctx RenderContext) bool {
 	if res, ok := evalIfCEL(rawIf, ctx); ok {
 		return res
 	}
+	// A branch on a prior step's result controls whether later work runs.
+	// Treat a missing step or malformed expression as a false condition;
+	// the historical truthy-string fallback would wake an agent on e.g.
+	// `steps.route == 'sre'` if the route output were unavailable.
+	if strings.Contains(rawIf, "steps.") {
+		return false
+	}
 	// Not compilable/evaluable CEL (a bare word like "yes", or a lone "0"):
 	// fall back to the historical truthy check on the raw literal.
 	return evalIfCondition(rawIf)
