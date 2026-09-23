@@ -8,8 +8,9 @@ callbacks no longer call `RunAgent`; the former direct executor lives only in
 `legacy_direct_audit_test.go` to retain its historical regression tests.
 
 At boot, schedules with no cursor receive their next future due instant;
-existing overdue instants are preserved. An asynchronous boot sweep accepts
-overdue work rather than waiting for the next daily cron tick. Each cron fire
+existing overdue instants are preserved. A periodic leader-gated sweep accepts
+overdue work at boot and after a follower becomes leader, rather than waiting
+for the next daily cron tick. Each cron fire
 uses the bounded acceptance handle and disk guard. Failure leaves the due
 instant unchanged. The source/domain pair is checked at claim and routed to
 the scheduled authorizer and runtime; the authorizer rechecks current agent,
@@ -20,7 +21,7 @@ projection protocol.
 
 The new vertical tests substitute only the container and agent process. They
 exercise actual SQLite, the real HTTP resolver and run-record routes, the
-cron boot sweep, dispatcher and both source kinds: one scheduled run/record, shared agent slot
+cron overdue sweep, dispatcher and both source kinds: one scheduled run/record, shared agent slot
 with a webhook, disable while queued, cancel before dispatch and cancel while
 running. Scheduler tests cover boot catch-up, missing-cursor initialization,
 cron acceptance without direct execution and fail-closed startup without

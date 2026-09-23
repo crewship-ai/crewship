@@ -44,12 +44,30 @@ func (s *Scheduler) acceptScheduled(ag scheduledAgent) {
 	}
 }
 
-// acceptOverdueAtBoot closes the gap between a persisted due instant and the
-// next wall-clock cron tick. A daily schedule missed during downtime must not
-// wait until tomorrow merely because robfig/cron starts from the current time.
-// Claiming remains atomic in AcceptDue, so this sweep and a simultaneous cron
-// tick or replica can race without creating two work items.
-func (s *Scheduler) acceptOverdueAtBoot() {
+// runOverdueSweep checks at boot and after leadership changes. A follower can
+// become leader long after its own Start; a one-shot boot check would leave a
+// missed daily occurrence untouched until tomorrow's cron tick.
+func (s *Scheduler) runOverdueSweep() {
+	interval := s.overdueSweepInterval
+	if interval <= 0 {
+		interval = 30 * time.Second
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		s.acceptOverdue()
+		select {
+		case <-s.ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
+// acceptOverdue closes the gap between a persisted due instant and the next
+// wall-clock cron tick. Claiming remains atomic in AcceptDue, so this sweep
+// and a simultaneous cron tick or replica cannot create two work items.
+func (s *Scheduler) acceptOverdue() {
 	if !s.isLeader() || s.acceptor == nil {
 		return
 	}

@@ -52,9 +52,11 @@ type Scheduler struct {
 	// defaults to time.Now.
 	nowFn func() time.Time
 
-	ctx       context.Context
-	cancel    context.CancelFunc
-	bootSweep sync.WaitGroup
+	ctx          context.Context
+	cancel       context.CancelFunc
+	overdueSweep sync.WaitGroup
+	// Override only in tests that exercise leader failover without 30s waits.
+	overdueSweepInterval time.Duration
 
 	// leaderGate, when non-nil, gates every fire (scheduled agents and
 	// platform routines) on holding the scheduler lease, so a multi-replica
@@ -136,21 +138,22 @@ func New(
 		idem = pipeline.NewIdempotencyStore(db)
 	}
 	s := &Scheduler{
-		c:         cron.New(cron.WithParser(parser)),
-		db:        db,
-		resolver:  resolver,
-		orch:      orch,
-		container: container,
-		logWriter: logWriter,
-		convStore: convStore,
-		logger:    logger,
-		cfg:       cfg,
-		parser:    parser,
-		idem:      idem,
-		nowFn:     time.Now,
-		ctx:       ctx,
-		cancel:    cancel,
-		entryMap:  make(map[string]cron.EntryID),
+		c:                    cron.New(cron.WithParser(parser)),
+		db:                   db,
+		resolver:             resolver,
+		orch:                 orch,
+		container:            container,
+		logWriter:            logWriter,
+		convStore:            convStore,
+		logger:               logger,
+		cfg:                  cfg,
+		parser:               parser,
+		idem:                 idem,
+		nowFn:                time.Now,
+		overdueSweepInterval: 30 * time.Second,
+		ctx:                  ctx,
+		cancel:               cancel,
+		entryMap:             make(map[string]cron.EntryID),
 	}
 	s.initDispatchBound(cfg.MaxConcurrentDispatches)
 	return s
@@ -176,10 +179,10 @@ func (s *Scheduler) Start(ctx context.Context) error {
 		return errors.New("scheduler: enabled agent schedules require durable acceptance; refusing to start without a dispatcher-owned path")
 	}
 	s.c.Start()
-	s.bootSweep.Add(1)
+	s.overdueSweep.Add(1)
 	go func() {
-		defer s.bootSweep.Done()
-		s.acceptOverdueAtBoot()
+		defer s.overdueSweep.Done()
+		s.runOverdueSweep()
 	}()
 	s.logger.Info("scheduler started", "jobs", len(s.entryMap))
 	return nil
@@ -190,7 +193,7 @@ func (s *Scheduler) Stop() {
 	s.cancel() // stop in-flight acceptance and platform routines
 	stopCtx := s.c.Stop()
 	<-stopCtx.Done()
-	s.bootSweep.Wait()
+	s.overdueSweep.Wait()
 	s.logger.Info("scheduler stopped")
 }
 

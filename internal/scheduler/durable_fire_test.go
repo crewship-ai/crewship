@@ -2,11 +2,55 @@ package scheduler
 
 import (
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/work"
 )
+
+type mutableScheduleLeader struct{ yes atomic.Bool }
+
+func (m *mutableScheduleLeader) IsLeader() bool { return m.yes.Load() }
+
+func TestOverdueSweep_AcceptsWhenFollowerBecomesLeader(t *testing.T) {
+	db, _ := dueFixture(t)
+	if _, err := db.Exec(`UPDATE agents SET schedule_cron='0 8 * * *' WHERE id='a1'`); err != nil {
+		t.Fatal(err)
+	}
+	s := newTestScheduler(db, &mockResolver{}, nil, nil)
+	configureDurableCron(t, s, db)
+	s.nowFn = func() time.Time { return acceptanceNow }
+	s.overdueSweepInterval = 20 * time.Millisecond
+	gate := &mutableScheduleLeader{}
+	s.SetLeaderGate(gate)
+	if err := s.Start(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	defer s.Stop()
+	time.Sleep(100 * time.Millisecond)
+	var count int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM work_items WHERE source='schedule'`).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatalf("follower accepted %d scheduled items", count)
+	}
+	gate.yes.Store(true)
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if err := db.QueryRow(`SELECT COUNT(*) FROM work_items WHERE source='schedule'`).Scan(&count); err != nil {
+			t.Fatal(err)
+		}
+		if count == 1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("new leader left overdue schedule unaccepted until next daily tick")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
 
 func TestInitializeMissingCursors_OnlyMissingValues(t *testing.T) {
 	db, _ := dueFixture(t)
