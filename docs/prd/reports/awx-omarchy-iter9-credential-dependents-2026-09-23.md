@@ -1,6 +1,6 @@
 # Iteration 9 handoff: credential dependents
 
-Issue #2674 implements A2 on `main` at `3f0efa4d8`. It adds a read-only
+Issue #2674 implements A2 on top of R3 (#2676). It adds a read-only
 `GET /api/v1/credentials/{credentialId}/dependents` route and
 `crewship credential dependents <name-or-id>`. The scanner includes declared
 `credentials_required`, HTTP `credential_ref.type`, and supported
@@ -17,11 +17,11 @@ Dynamic agent and script lookups remain outside static analysis. Non-managers
 only receive workspace-visible routine names. Hidden routines cannot be
 counted in their response and `visibility_limited` says so.
 
-The resolver still uses legacy `credentials.crew_id`; the separate
-`credential_crews` delivery model is not silently substituted. R3 must decide
-the desired multi-crew semantics and then change resolver, probe, visibility
-and sidecar together with parity tests. This iteration reports the current
-runtime behavior, including its limit, and does not change secret delivery.
+R3 makes `credential_crews` authoritative for the resolver, probe, and this
+read-only selection preview. The preview therefore includes any live crew
+grant, including a second crew, and does not treat legacy `crew_id` alone as
+access. Agent delivery and human visibility already used the junction; R3
+tests the parity on a migrated database.
 
 Validation: targeted Go tests cover scanner nesting, resolver/preview parity,
 visible versus hidden routines, selection precedence, and deleted credential;

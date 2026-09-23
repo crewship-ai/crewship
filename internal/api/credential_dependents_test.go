@@ -74,3 +74,48 @@ func TestCredentialDependentsVisibilityAndSelection(t *testing.T) {
 		t.Fatalf("deleted credential status=%d, want 404", status)
 	}
 }
+
+func TestCredentialDependents_SecondCrewGrantMatchesRuntime(t *testing.T) {
+	rig := newFieldRig(t)
+	for _, crew := range []string{"dependent-a", "dependent-b"} {
+		if _, err := rig.db.Exec(`INSERT INTO crews (id,workspace_id,name,slug) VALUES (?,?,?,?)`, crew, rig.wsID, crew, crew); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := rig.db.Exec(`INSERT INTO credential_crews (credential_id,crew_id) VALUES (?,?)`, rig.credID, crew); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := rig.db.Exec(`UPDATE credentials SET scope='CREW', crew_id='dependent-a' WHERE id=?`, rig.credID); err != nil {
+		t.Fatal(err)
+	}
+	definition := `{"dsl_version":"1.0","name":"Second crew","credentials_required":[{"type":"userpass"}],"steps":[]}`
+	if _, err := rig.db.Exec(`INSERT INTO pipelines (id,workspace_id,slug,name,definition_json,definition_hash,dsl_version,head_version,workspace_visible,author_crew_id,created_at,updated_at)
+		VALUES ('dependent-routine',?,?,?,?, 'hash','1.0',1,1,'dependent-b',datetime('now'),datetime('now'))`, rig.wsID, "dependent-routine", "Second crew", definition); err != nil {
+		t.Fatal(err)
+	}
+	read := func() credentialDependentsResponse {
+		t.Helper()
+		req := httptest.NewRequest("GET", "/api/v1/credentials/"+rig.credID+"/dependents", nil)
+		req.SetPathValue("credentialId", rig.credID)
+		req = withWorkspaceUser(req, rig.userID, rig.wsID, "OWNER")
+		rec := httptest.NewRecorder()
+		rig.creds.Dependents(rec, req)
+		if rec.Code != 200 {
+			t.Fatalf("dependents: %d %s", rec.Code, rec.Body.String())
+		}
+		var result credentialDependentsResponse
+		if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
+			t.Fatal(err)
+		}
+		return result
+	}
+	if got := read(); len(got.Routines) != 1 || got.Routines[0].Resolution != "would_resolve" {
+		t.Fatalf("second crew grant: %+v", got)
+	}
+	if _, err := rig.db.Exec(`DELETE FROM credential_crews WHERE credential_id=? AND crew_id='dependent-b'`, rig.credID); err != nil {
+		t.Fatal(err)
+	}
+	if got := read(); len(got.Routines) != 1 || got.Routines[0].Resolution != "unavailable" {
+		t.Fatalf("revoked second crew: %+v", got)
+	}
+}
