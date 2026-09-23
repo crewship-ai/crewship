@@ -335,7 +335,7 @@ func TestCovIICreateRun(t *testing.T) {
 			t.Fatalf("code=%d want 201; body=%s", rec.Code, rec.Body.String())
 		}
 		var started int
-		if err := db.QueryRow(`SELECT COUNT(*) FROM journal_entries WHERE trace_id='run1' AND entry_type='run.started'`).Scan(&started); err != nil {
+		if err := db.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM journal_entries WHERE trace_id='run1' AND entry_type='run.started'`).Scan(&started); err != nil {
 			t.Fatal(err)
 		}
 		if started != 1 {

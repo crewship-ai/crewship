@@ -102,6 +102,28 @@ func TestAgentScheduleCursor_InvalidEnabledCronDoesNotPersist(t *testing.T) {
 	}
 }
 
+func TestAgentScheduleCursor_InvalidCronDoesNotDemoteLead(t *testing.T) {
+	h, userID, wsID := covAUHandler(t)
+	crewID := seedCrewRow(t, h.db, "crew-schedule-lead", wsID, "Crew", "crew-schedule-lead")
+	seedAgentRow(t, h.db, "ag-schedule-oldlead", wsID, crewID, "Old", "schedule-oldlead", "LEAD")
+	seedAgentRow(t, h.db, "ag-schedule-newlead", wsID, crewID, "New", "schedule-newlead", "AGENT")
+	rr := covAUPatch(t, h, userID, wsID, "OWNER", "ag-schedule-newlead",
+		`{"agent_role":"LEAD","schedule_enabled":true,"schedule_cron":"not-a-cron"}`)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("invalid cron status=%d, want 400; body=%s", rr.Code, rr.Body.String())
+	}
+	var oldRole, newRole string
+	if err := h.db.QueryRowContext(t.Context(), `SELECT agent_role FROM agents WHERE id='ag-schedule-oldlead'`).Scan(&oldRole); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.db.QueryRowContext(t.Context(), `SELECT agent_role FROM agents WHERE id='ag-schedule-newlead'`).Scan(&newRole); err != nil {
+		t.Fatal(err)
+	}
+	if oldRole != "LEAD" || newRole != "AGENT" {
+		t.Fatalf("failed PATCH changed crew leadership: old=%q new=%q", oldRole, newRole)
+	}
+}
+
 func TestAgentScheduleCursor_IdempotentPatchKeepsPendingOccurrence(t *testing.T) {
 	h, userID, wsID, _, agentID := covAU2Fixture(t)
 	const due = "2020-01-01T00:00:00Z"

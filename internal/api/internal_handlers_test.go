@@ -706,7 +706,7 @@ func TestInternalCreateRun_AcknowledgementMeansStartedRecordIsCommitted(t *testi
 		t.Fatalf("status = %d, body=%s", w.Code, w.Body.String())
 	}
 	var count int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM journal_entries WHERE trace_id='run-sync' AND entry_type='run.started'`).Scan(&count); err != nil {
+	if err := db.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM journal_entries WHERE trace_id='run-sync' AND entry_type='run.started'`).Scan(&count); err != nil {
 		t.Fatal(err)
 	}
 	if count != 1 {
@@ -730,7 +730,7 @@ func TestInternalCreateRun_NonDurableJournalFailsClosed(t *testing.T) {
 		t.Fatalf("non-durable journal status=%d, want 503", w.Code)
 	}
 	var status string
-	if err := db.QueryRow(`SELECT status FROM agents WHERE id='ag-closed'`).Scan(&status); err != nil {
+	if err := db.QueryRowContext(t.Context(), `SELECT status FROM agents WHERE id='ag-closed'`).Scan(&status); err != nil {
 		t.Fatal(err)
 	}
 	if status != "IDLE" {

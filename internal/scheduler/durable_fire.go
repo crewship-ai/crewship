@@ -140,17 +140,13 @@ func (s *Scheduler) InitializeMissingCursors(ctx context.Context, now time.Time)
 		return err
 	}
 	for _, m := range pending {
-		plan, err := s.parser.Parse(m.expr)
+		next, err := NextOccurrence(m.expr, now)
 		if err != nil {
 			// A malformed stored schedule must not take the entire API down.
 			// loadSchedules also refuses to register it; leave its cursor
 			// absent and make the individual defect visible in the log.
 			s.logger.Error("scheduled cursor not initialized: invalid cron", "agent_id", m.id, "error", err)
 			continue
-		}
-		next := plan.Next(now).UTC()
-		if next.IsZero() {
-			return fmt.Errorf("scheduler: schedule %s has no next occurrence", m.id)
 		}
 		if _, err := s.db.ExecContext(ctx, `UPDATE agents SET schedule_next_run = ?
 			WHERE id = ? AND COALESCE(schedule_next_run, '') = '' AND schedule_cron = ? AND schedule_enabled = 1`,
