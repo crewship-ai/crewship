@@ -24,8 +24,10 @@ The current `dry-run` does not invoke the decision provider or predict which bra
 
 ## Dev1 verification on `d0ec80757` (2026-09-23)
 
-`crewship version --remote` reported the same commit for the CLI and server, schema `20260922182944`; `crewship-ws@1` was active and `/health` returned 200. The build was marked dirty because this shared dev1 clone contains pre-existing untracked files; those files were preserved.
+`crewship version --remote` reported schema `20260922182944`; `crewship-ws@1` was active and `/api/health` returned `{"status":"ok"}`. The server build was marked dirty because this shared dev1 clone contains pre-existing untracked files; those files were preserved.
 
 A disposable `jev-webhook-probe-20260923` routine with a `decision` step saved, passed server-side validation and was approved. A signed POST to its disposable webhook returned 202 with run `run_cmuedg4rl000384510b70`. Repeating the identical delivery returned 202 with `duplicate=true` and the same run ID. The run was recorded as webhook-triggered and failed at `route` with `decision evaluator is not configured`, as expected: no TypeSafe/OpenRouter key and provider scope were configured on dev1. No agent was in this probe routine. The disposable webhook was deleted and the routine soft-deleted; the run and receipt remain as evidence. The one-time signing secret was not copied into this report and its temporary file was removed.
 
 This verifies deployed ingress, persistence, deduplication and the missing-provider refusal. It does **not** verify live model routing or its accuracy.
+
+The UI-enabled build `376446119` was also built and started on dev1; its server version matched that commit and the public `/api/health` returned `{"status":"ok"}`. The temporary probe was not repeated because the provider remains unconfigured.
