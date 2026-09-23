@@ -27,7 +27,9 @@ Každý handoff obsahuje: HEAD, implementované požadavky, soubory, výsledky t
 | Recent | Klíč user+workspace, jednorázové opuštění staré historie; Page recent filtrovat autorizovaným listem | Technické řešení, zmínit změnu historie v release handoffu |
 | O5 role/zdroj | Zvolit skutečnou cílovou agendu a zdroj | Obsahový pack čeká; nevydávat fiktivní objednávkový konektor za hotový |
 
-## Iterace 1 — bezpečnost původu běhu a inventura spouštěcích oprávnění
+## Iterace 1 — bezpečnost původu běhu a inventura spouštěcích oprávnění (dokončeno v #2567)
+
+**Stav:** dokončeno a sloučeno v #2567. Následující rozsah a testy jsou historickým zadáním, nikoli otevřenou prací.
 
 **Vstup:** klastr S, nález K1; pipelines_exec, auth context, waitpoints a existující triggered_by forge testy.
 
@@ -140,6 +142,8 @@ Závěrečná integrovaná akceptace je povinná pro celý scénář: paleta →
 O3 scoped diagnostika a desktopové směry zůstávají Later. Odhad oponenta 15–22 dní pro desítku není garance a nezahrnuje všechny tyto další balíky, čekání na review ani nové auth mezery.
 
 ## Prompt pro první Claude Code relaci
+
+Tento prompt byl použit pro dokončenou iteraci 1; je zachován pro dohledatelnost a nesmí být znovu zadán jako nový úkol.
 
 ```text
 Implementuj pouze bezpečnostní část iterace 1 podle:

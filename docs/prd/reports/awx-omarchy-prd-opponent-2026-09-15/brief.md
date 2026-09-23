@@ -29,7 +29,7 @@ Připomeň si gate-y repozitáře, které implementaci ovlivní (uveď v odhadu)
 Zapiš do souboru: `/tmp/claude-1000/-srv-crewship-crewship-3/a0261745-a8be-4057-9c64-1286f3bee302/scratchpad/opp-<klastr>.md`
 
 Struktura:
-```
+```text
 # Klastr <X>: <funkce>
 ## 0. Ověření prostředí (branch, HEAD, git status – jednou větou)
 ## 1. Verdikt per funkce (implementovat / upravit / odložit + proč, 2–4 věty)

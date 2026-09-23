@@ -117,7 +117,7 @@ Technicky rozhodnuto mnou: `expected_definition_hash` místo `expected_head_vers
 ## 7. Příloha: dočasné testy a spuštěné příkazy
 
 ### Spuštěné příkazy (výběr)
-```
+```text
 go test ./internal/api -count=1 -timeout 8m -v -run 'TestReplayRun_|TestReplayPreservesPin|TestReplayRejectsCorrupt|TestSchedulePresetGate_RollbackDoor|TestPresetValidation_ReenableRequiresCompatiblePreset'
 --- PASS: TestReplayPreservesPinWithoutContentLength (6.87s)
 --- PASS: TestReplayRejectsCorruptInputsAndAmbiguousRequestBeforeDispatch (1.94s)
@@ -140,7 +140,7 @@ gh pr diff 2562 → HTTP 406 (diff > 20000 řádků); použit `git diff 0122583b
 
 První běh s rolí MEMBER: všech 5 sond 403 Forbidden (→ nález V2); poté role MANAGER + přidána sonda T6.
 
-```
+```text
 go test ./internal/api -count=1 -timeout 8m -v -run 'TestOppR_'
 === RUN   TestOppR_HeadMovesBetweenDialogAndSubmit_UnpinnedRunsNewHeadSilently
     zz_opp_R_test.go:76: unpinned submit after head moved: pipeline_version=<nil> executed v3step=true outputs=map[v3step:v3-out]

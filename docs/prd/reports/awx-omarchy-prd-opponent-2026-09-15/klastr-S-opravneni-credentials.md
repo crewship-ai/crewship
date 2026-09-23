@@ -18,8 +18,8 @@ Branch `main`, HEAD `5a0ad11f`, git status jen untracked `docs/prd/*` (cizí WIP
 | A1-b: effective access per resource | Workspace-level: `GET /workspaces` → `currentUserRole`+`currentUserCapabilities`; per-page `GET /pages/{slug}/access/me`; per-member admin-only `GET .../members/{id}/capabilities` (manage) | žádný | Nový `GET /workspaces/{ws}/pipelines/{slug}/access/me` a `GET /credentials/{id}/access/me` vracející boolean rozhodnutí spočtená TÝMIŽ funkcemi jako handlery (canRole, CapabilitiesForMemberE, gateRoutineStatus, reveal gate L0–L3 bez L9/fresh-login) + `reasons[]` | A1-a | 2–3 dny (2 endpointy + gen-openapi + openapi.mdx totals + 2 CLI příkazy + docs-inventory + CHANGELOG) | `workspaces.go:252`, `pages_folder_acl.go:784-820`, `workspaces_member_capabilities.go:133-165`, `credentials_reveal.go:258-335` |
 | A1-c: UI vysvětlení | Routine detail: `canEdit = roleAtLeast(role,"MANAGER")`, Run button gated jen statusem (VIEWER vidí aktivní Run → 403); credential sheet: `canUpdate/canReveal` z CASL+capability+reveal-policy (4 z 9 gate) | **#2562** přepisuje `routine-card-detail.tsx`, `routine-identity-header.tsx`, `routines-detail-panel.tsx` (stejná roleAtLeast logika) | Jedna komponenta „Your access“ (routine + credential) nad `access/me`; do merge #2562 neupravovat tyto soubory | A1-b, merge #2562 | 1–2 dny | `routine-card-detail.tsx:113`, `routines-detail-panel.tsx:454`, `credential-detail-sheet.tsx:277-311,927`, `lib/permissions/tiers.ts:1-30` (dokumentovaný drift CASL vs server) |
 | A1-d: sémantika revokace za běhu | Executor lidskou identitu nekonzultuje (InvokingUserID jen pro `notify to: trigger`); deferred run dispatcher nepřeověřuje roli; sidecar reaper 60 s pro proxy-injektované klíče; env-delivered tajemství v běžícím kontejneru neodvolatelná | žádný | Jen dokumentovat (docs/security) | — | 0,25 dne | `pipelines_exec.go:170-175`, `pending_dispatcher.go:163-235`, `credstore_reap.go:16,112-130`, `executor.go:811-821` |
-| A2-a: závislé rutiny (konfigurace) | Neexistuje endpoint ani UI; `pipeline.RequiredCredentialTypes` pokrývá jen `credentials_required`; `secretTypesInStep` neexportovaný | #2556 mění `internal/pipeline/executor.go`, `types.go` (bez kolize s resolverem) | `GET /credentials/{id}/dependents` → `{configured:[{slug,name,version,refs:[declared|http_ref|template],resolves_to_this:bool}], dynamic:{agent_run_routines:n}, recorded:{...}}` + CLI `crewship credential dependents` | rozhodnutí o crew scope (nález K2) | 2–3 dny | `pipeline/dsl_validate_credentials.go:45-66`, `pipeline/executor_render.go:68-120`, `pipeline/credential_resolver.go:106-127,159-175` |
-| A2-b: zaznamenané použití | `credential_audit USE` jen ze sidecar fetch (meta crew_id, bez run_id) a issue code links; executor nic nezapisuje | žádný | Minimálně: v odpovědi A2-a `recorded: {last_used_at, source:"sidecar_fetch"|null, run_attributable:false}`; volitelně USE event z `resolveStepSecrets` s run_id (nová schopnost, samostatně) | A2-a | 0,5 dne (jen přiznat) / +1,5 dne (USE z executoru s debounce a scrub) | `internal_credentials.go:44-86`, `credential_audit.go:17-26`, grep `RecordCredentialEvent` v `internal/pipeline` = 0 výskytů |
+| A2-a: závislé rutiny (konfigurace) | Neexistuje endpoint ani UI; `pipeline.RequiredCredentialTypes` pokrývá jen `credentials_required`; `secretTypesInStep` neexportovaný | #2556 mění `internal/pipeline/executor.go`, `types.go` (bez kolize s resolverem) | `GET /credentials/{id}/dependents` → konfigurace s referencemi declared, http_ref a template, údaj `resolves_to_this`, dynamické vazby a evidence; CLI `crewship credential dependents` | rozhodnutí o crew scope (nález K2) | 2–3 dny | `pipeline/dsl_validate_credentials.go:45-66`, `pipeline/executor_render.go:68-120`, `pipeline/credential_resolver.go:106-127,159-175` |
+| A2-b: zaznamenané použití | `credential_audit USE` jen ze sidecar fetch (meta crew_id, bez run_id) a issue code links; executor nic nezapisuje | žádný | Minimálně: v odpovědi A2-a `recorded` s `last_used_at`, zdrojem sidecar_fetch nebo null a `run_attributable: false`; volitelně USE event z `resolveStepSecrets` s run_id (nová schopnost, samostatně) | A2-a | 0,5 dne (jen přiznat) / +1,5 dne (USE z executoru s debounce a scrub) | `internal_credentials.go:44-86`, `credential_audit.go:17-26`, grep `RecordCredentialEvent` v `internal/pipeline` = 0 výskytů |
 | A2-c: sheet – error vs empty | Access: `accessError` + coverage OK a testováno; Audit/Fields: `.catch → []` → „Nothing has happened“; ne React Query, ruční `useEffect` | žádný | `auditError`/`fieldsError` stavy s viditelným alertem | — | 0,5 dne | `credential-detail-sheet.tsx:372-390,1089-1092`, test `credential-detail-sheet.test.tsx:427-448` |
 | A2-d: rotace zachová vazby | Rotace = UPDATE in place (stejné id) → bindings/assignments zůstávají. Ale „nový credential stejného typu“ přebírá `{{ secrets.<type> }}` (newest wins) bez ohledu na vazby | žádný | Dokumentovat v dependents odpovědi `resolves_to_this` | A2-a | 0 | `credential_rotation.go:267`, `credential_resolver.go:119-121` |
 
@@ -116,7 +116,7 @@ Technicky rozhodnuto mnou: `access/me` endpointy počítají z týchž funkcí j
 ## 7. Příloha: dočasné testy (zdroj + výstup), spuštěné příkazy
 
 Spuštěno (popředí, 1 go test najednou):
-```
+```text
 go test ./internal/api -run 'TestOppS_|TestRunEndpoint_CapabilityGate|TestPageAction_AuthorisationHasTwoHalves' -count=1 -timeout 300s -v
 go test ./internal/api -run 'TestOppS_' -count=1 -timeout 300s -v
 ```
@@ -209,7 +209,7 @@ func TestOppS_RunHeaderForgesInvokingCrew(t *testing.T) {
 ```
 
 ### Výstup, běh 1
-```
+```text
 --- PASS: TestPageAction_AuthorisationHasTwoHalves (4.58s)
 --- PASS: TestRunEndpoint_CapabilityGate (1.11s)
     --- PASS: .../member_with_routine.run_runs (0.11s)
@@ -269,7 +269,7 @@ func TestOppS_MultiCrewCredentialResolvesForSecondCrew(t *testing.T) {
 ```
 
 ### Výstup, běh 2
-```
+```text
     zz_opp_S_test.go:35: probe API_KEY for author crew crew-A: ok=true err=<nil>
     zz_opp_S_test.go:35: probe API_KEY for author crew crew-B: ok=false err=<nil>
     zz_opp_S_test.go:37: routine authored by crew-B cannot resolve a credential the UI shows as scoped to it (ok=false err=<nil>)

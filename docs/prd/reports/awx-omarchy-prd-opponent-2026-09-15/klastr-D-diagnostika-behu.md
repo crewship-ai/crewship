@@ -141,7 +141,7 @@ func TestZZOppD_ExecutorCtxCarriesRunID(t *testing.T) {
 ```
 Příkaz: `go test ./internal/pipeline/ -run TestZZOppD_ExecutorCtxCarriesRunID -count=1 -timeout 300s -v`
 Výstup:
-```
+```text
 === RUN   TestZZOppD_ExecutorCtxCarriesRunID
     zz_opp_D_test.go:31: pipeline run id="run_cmu2yphef00020680b11a" req.PipelineRunID="run_cmu2yphef00020680b11a" journal.RunIDFromContext(ctx)=""
     zz_opp_D_test.go:33: ctx handed to the agent runner carries journal run id "", want pipeline run id "run_cmu2yphef00020680b11a"
@@ -216,7 +216,7 @@ func TestZZOppD_ViewerReadsPipelineRunDetailWithInputsAndIO(t *testing.T) {
 ```
 Příkaz: `go test ./internal/api/ -run TestZZOppD_ViewerReadsPipelineRunDetailWithInputsAndIO -count=1 -timeout 300s -v`
 Výstup:
-```
+```text
     zz_opp_D_test.go:55: [VIEWER] status=200 has inputs sentinel=true metadata sentinel=true tool input sentinel=true tool output sentinel=true
     zz_opp_D_test.go:63: [VIEWER] top-level keys: [triggered_by_id step_outputs_available sub_spans ended_at status warnings workspace_id definition_hash idempotency_key current_step_id inputs metadata outcome error_message output cost_usd definition_status id is_replay pipeline_name step_outputs definition failed_at_step issue_identifier mode replay_of duration_ms pipeline_id pipeline_slug tags triggered_via started_at]
     zz_opp_D_test.go:55: [MEMBER] status=200 has inputs sentinel=true metadata sentinel=true tool input sentinel=true tool output sentinel=true
