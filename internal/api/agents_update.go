@@ -397,11 +397,15 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 		}
 		if promoteToLead {
 			var crewID sql.NullString
-			if err := tx.QueryRowContext(r.Context(),
-				"SELECT crew_id FROM agents WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
-				agentID, workspaceID).Scan(&crewID); err != nil {
-				replyInternalError(w, h.logger, "query agent crew_id for promotion", err)
-				return
+			if newCrew, changingCrew := body["crew_id"].(string); changingCrew {
+				crewID = sql.NullString{String: newCrew, Valid: newCrew != ""}
+			} else {
+				if err := tx.QueryRowContext(r.Context(),
+					"SELECT crew_id FROM agents WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
+					agentID, workspaceID).Scan(&crewID); err != nil {
+					replyInternalError(w, h.logger, "query agent crew_id for promotion", err)
+					return
+				}
 			}
 			if !crewID.Valid || crewID.String == "" {
 				replyError(w, http.StatusBadRequest, "LEAD role requires crew_id")

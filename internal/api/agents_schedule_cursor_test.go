@@ -124,6 +124,29 @@ func TestAgentScheduleCursor_InvalidCronDoesNotDemoteLead(t *testing.T) {
 	}
 }
 
+func TestAgentScheduleCursor_LeadMoveDemotesDestinationCrew(t *testing.T) {
+	h, userID, wsID := covAUHandler(t)
+	oldCrew := seedCrewRow(t, h.db, "crew-schedule-origin", wsID, "Origin", "crew-schedule-origin")
+	newCrew := seedCrewRow(t, h.db, "crew-schedule-destination", wsID, "Destination", "crew-schedule-destination")
+	seedAgentRow(t, h.db, "ag-schedule-moved", wsID, oldCrew, "Moved", "schedule-moved", "AGENT")
+	seedAgentRow(t, h.db, "ag-schedule-destination-lead", wsID, newCrew, "Old Lead", "schedule-destination-lead", "LEAD")
+	rr := covAUPatch(t, h, userID, wsID, "OWNER", "ag-schedule-moved",
+		`{"crew_id":"crew-schedule-destination","agent_role":"LEAD","schedule_cron":"0 9 * * *","schedule_enabled":true}`)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("promotion status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	var oldRole, newRole string
+	if err := h.db.QueryRowContext(t.Context(), `SELECT agent_role FROM agents WHERE id='ag-schedule-destination-lead'`).Scan(&oldRole); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.db.QueryRowContext(t.Context(), `SELECT agent_role FROM agents WHERE id='ag-schedule-moved'`).Scan(&newRole); err != nil {
+		t.Fatal(err)
+	}
+	if oldRole != "AGENT" || newRole != "LEAD" {
+		t.Fatalf("destination crew leadership old=%q new=%q", oldRole, newRole)
+	}
+}
+
 func TestAgentScheduleCursor_IdempotentPatchKeepsPendingOccurrence(t *testing.T) {
 	h, userID, wsID, _, agentID := covAU2Fixture(t)
 	const due = "2020-01-01T00:00:00Z"
