@@ -594,6 +594,15 @@ var pipelineRunCmd = &cobra.Command{
 		tags, _ := cmd.Flags().GetStringSlice("tag")
 		metadataRaw, _ := cmd.Flags().GetString("metadata")
 		batchFile, _ := cmd.Flags().GetString("batch")
+		version, _ := cmd.Flags().GetInt("version")
+		pinnedVersion, _ := cmd.Flags().GetInt("pinned-version")
+		expectedHash, _ := cmd.Flags().GetString("expected-hash")
+		if cmd.Flags().Changed("version") && cmd.Flags().Changed("pinned-version") {
+			return fmt.Errorf("use either --version or --pinned-version, not both")
+		}
+		if batchFile != "" && (cmd.Flags().Changed("version") || cmd.Flags().Changed("pinned-version") || expectedHash != "") {
+			return fmt.Errorf("--version and --expected-hash are not supported with --batch")
+		}
 		client := newAPIClient()
 		ws := client.GetWorkspaceID()
 
@@ -684,9 +693,13 @@ var pipelineRunCmd = &cobra.Command{
 		if v, _ := cmd.Flags().GetString("fire-at"); v != "" {
 			runBody["fire_at"] = v
 		}
-		if cmd.Flags().Changed("pinned-version") {
-			v, _ := cmd.Flags().GetInt("pinned-version")
-			runBody["pinned_version"] = v
+		if cmd.Flags().Changed("version") {
+			runBody["pinned_version"] = version
+		} else if cmd.Flags().Changed("pinned-version") {
+			runBody["pinned_version"] = pinnedVersion
+		}
+		if expectedHash != "" {
+			runBody["expected_definition_hash"] = expectedHash
 		}
 		// Idempotency: the key rides the standard Idempotency-Key header
 		// (same contract as webhook dispatch); the TTL bounds the dedupe
@@ -1267,6 +1280,8 @@ func init() {
 	pipelineRunCmd.Flags().Int("priority", 0, "dispatch priority for deferred runs (higher fires first)")
 	pipelineRunCmd.Flags().String("fire-at", "", "one-time start: park the run until this RFC3339 instant (with offset), pinned to the recipe version that passed preflight; returns SCHEDULED. Cannot be combined with --delay/--ttl/--debounce-key")
 	pipelineRunCmd.Flags().Int("pinned-version", 0, "run this archived recipe version instead of HEAD (immediate or --fire-at starts only; 404 if the version does not exist)")
+	pipelineRunCmd.Flags().Int("version", 0, "run an archived recipe version; alias of --pinned-version")
+	pipelineRunCmd.Flags().String("expected-hash", "", "require this SHA-256 definition hash and pin the verified recipe (immediate starts only; 409 if HEAD changed)")
 	pipelineRunCmd.Flags().Bool("async", false, "send Prefer: respond-async — return the 202 {run_id, status: IN_PROGRESS} receipt as soon as the run is durable instead of waiting for it to finish; combine with --wait to poll it to a terminal status")
 	pipelineRunCmd.Flags().String("idempotency-key", "", "dedupe key — a duplicate key within the TTL window returns the original run as DEDUPED instead of executing again (sent as the Idempotency-Key header)")
 	pipelineRunCmd.Flags().Int("idempotency-ttl", 0, "dedupe window in seconds for --idempotency-key (0 = server default, 24h)")

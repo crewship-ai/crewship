@@ -491,6 +491,28 @@ func TestPipelineRunRunE(t *testing.T) {
 	})
 }
 
+func TestPipelineRunVersionAndExpectedHashFlags(t *testing.T) {
+	stub := clitest.NewStubServer()
+	defer stub.Close()
+	setupStubCLICov(t, stub)
+	path := pipelinesPathCov() + "/email-fetch/run"
+	stub.OnPost(path, clitest.JSONResponse(200, map[string]any{"run_id": "run_reviewed", "status": "COMPLETED"}))
+	setFlagCov(t, pipelineRunCmd, "version", "3")
+	setFlagCov(t, pipelineRunCmd, "expected-hash", strings.Repeat("a", 64))
+	if _, err := captureStdoutCov(t, func() error { return pipelineRunCmd.RunE(pipelineRunCmd, []string{"email-fetch"}) }); err != nil {
+		t.Fatal(err)
+	}
+	calls := stub.CallsFor("POST", path)
+	if len(calls) != 1 {
+		t.Fatalf("POST count = %d", len(calls))
+	}
+	var body map[string]any
+	clitest.MustDecodeJSONBody(calls[0].Body, &body)
+	if body["pinned_version"] != float64(3) || body["expected_definition_hash"] != strings.Repeat("a", 64) {
+		t.Fatalf("run body = %#v", body)
+	}
+}
+
 func TestPipelineDryRunRunE(t *testing.T) {
 	dryPath := pipelinesPathCov() + "/email-fetch/dry_run"
 
