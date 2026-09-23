@@ -9,11 +9,10 @@ package journal
 //     journal entries (run.started + one terminal
 //     run.{completed|failed|cancelled|timeout}) reconstruct the equivalent
 //     of the legacy agent_runs row via GROUP BY trace_id.
-//   - A pipeline/routine run never sets trace_id
-//     (internal/pipeline/journal.go); its entries
-//     (pipeline.run.started + one terminal
-//     pipeline.run.{completed|failed}) are grouped by actor_id instead,
-//     which that package stamps to the run's own id on every emit.
+//   - A pipeline/routine run's own entries stamp actor_id to the run id.
+//     Agent/tool entries emitted from its run context also inherit that id
+//     as trace_id (internal/pipeline/executor.go); older rows may have only
+//     actor_id or payload.run_id. All three resolve to the same run id.
 //
 // runAggregatesCTE's grouping key is COALESCE(trace_id, actor_id) so both
 // shapes fall out of one query; RunAggregated.Kind says which engine

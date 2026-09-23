@@ -7,6 +7,8 @@ import { apiFetch } from "@/lib/api-fetch"
 interface UseJournalListOptions {
   workspaceId: string | null
   params?: Record<string, string | undefined>
+  /** A missing journal endpoint is unavailable evidence, not an empty run. */
+  notFoundAsError?: boolean
   /** Page size; backend caps at 500. */
   limit?: number
   enabled?: boolean
@@ -50,7 +52,7 @@ export function useJournalList(opts: UseJournalListOptions): UseJournalListResul
   // Grafana / Elastic Discover behaviour: pick a time range, fetch
   // everything in it. 500 per request × eager pagination at the page
   // level → user sees all events for the active window.
-  const { workspaceId, params, limit = 500, enabled = true, maxEntries } = opts
+  const { workspaceId, params, limit = 500, enabled = true, maxEntries, notFoundAsError = false } = opts
   const [entries, setEntries] = useState<JournalEntry[]>([])
   const [nextCursor, setNextCursor] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
@@ -95,7 +97,7 @@ export function useJournalList(opts: UseJournalListOptions): UseJournalListResul
         if (reqIdRef.current !== requestId) return
         // 404 before handler ships — treat as empty rather than surfacing an
         // error the user can't act on.
-        if (res.status === 404) {
+        if (res.status === 404 && !notFoundAsError) {
           setEntries([])
           setNextCursor(null)
           return
@@ -129,7 +131,7 @@ export function useJournalList(opts: UseJournalListOptions): UseJournalListResul
     } finally {
       if (reqIdRef.current === requestId) setLoading(false)
     }
-  }, [enabled, workspaceId, buildParams])
+  }, [enabled, workspaceId, buildParams, notFoundAsError])
 
   const loadMore = useCallback(async () => {
     if (!nextCursor || loadingMore || !workspaceId) return

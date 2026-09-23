@@ -18,6 +18,7 @@ import { useTrace } from "@/hooks/use-trace"
 import { usePendingApproval } from "@/hooks/use-pending-approval"
 import { TraceCanvas } from "@/components/features/activity/trace-canvas"
 import { RunActivityTimeline } from "@/components/features/activity/run-activity-timeline"
+import { RunEvidencePanel } from "@/components/features/activity/run-evidence-panel"
 import { RoutineRunArtifacts } from "./routine-run-artifacts"
 import { RoutineExecutionHistory } from "./routine-execution-history"
 import { RoutineExecutionInsights } from "./routine-execution-insights"
@@ -580,6 +581,23 @@ export function RoutineRunDetail({ workspaceId, runId }: RoutineRunDetailProps) 
           </Link>
         )}
       </div>
+      <RunEvidencePanel
+        key={runId}
+        workspaceId={workspaceId}
+        run={{
+          kind: "routine",
+          runId: run.id,
+          status: run.status,
+          outcome: run.outcome,
+          startedAt: run.started_at,
+          endedAt: run.ended_at,
+          stepId: run.failed_at_step || run.current_step_id,
+          failureKind: run.failure?.kind,
+          trigger: run.triggered_via,
+          version: run.pipeline_version,
+          definitionHash: run.definition_hash,
+        }}
+      />
       {failed && (
         <DetailCard title="What to do next" icon={Lightbulb} data-testid="run-next-step">
           <ul className="space-y-1.5 text-xs leading-relaxed">
