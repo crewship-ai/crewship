@@ -242,7 +242,7 @@
         "timeout_seconds": {
           "type": "integer",
           "minimum": 1,
-          "description": "Step-level timeout. Tighter of (agent default, this) wins."
+          "description": "Step-level timeout. For an approval wait, expires the pending approval after this many seconds."
         },
         "if": {
           "type": "string",
@@ -553,8 +553,7 @@
         },
         "until": { "type": "string", "description": "RFC3339 timestamp or template (datetime kind)." },
         "event_type": { "type": "string" },
-        "event_filter": { "type": "string", "description": "Simple equality match on payload." },
-        "timeout_sec": { "type": "integer", "minimum": 1, "description": "Hard timeout. 0 = no timeout (wait forever; not recommended)." }
+        "event_filter": { "type": "string", "description": "Simple equality match on payload." }
       }
     },
     "DecisionStep": {

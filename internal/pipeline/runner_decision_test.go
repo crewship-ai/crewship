@@ -73,6 +73,58 @@ func TestDecisionStep_ExampleWebhookRoutine(t *testing.T) {
 	}
 }
 
+func TestDecisionStep_ExampleWebhookReviewWaitsForApproval(t *testing.T) {
+	raw, err := os.ReadFile("../../scripts/jev-eval/webhook-router.routine.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	db := openResumeTestDB(t)
+	defer db.Close()
+	store := NewStore(db)
+	input := validSaveInput("webhook-decision-router")
+	input.DefinitionJSON = string(raw)
+	pipeline, err := store.Save(t.Context(), input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitpoints := NewSQLWaitpointStore(db)
+	defer waitpoints.Close()
+	runner := newMockRunner()
+	model := &fakeDecisionEvaluator{choice: "sre", p: .6}
+	exec := NewExecutor(store, NewResolver(db), runner, &captureEmitter{}).
+		WithRunStore(NewRunStore(db)).
+		WithWaitpointStore(waitpoints).
+		WithDecisionEvaluator(model, "api.typesafe.ai")
+	res, err := exec.Run(t.Context(), RunInput{
+		PipelineID: pipeline.ID, WorkspaceID: "ws_test", Mode: ModeRun,
+		TriggeredVia: TriggeredViaWebhook,
+		Inputs: map[string]any{"event": map[string]any{
+			"type": "alert", "service": "api", "summary": "unclear incident", "secret": "never-forward-this",
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Status != "WAITING" || res.CurrentStep != "request_review" || res.WaitpointToken == "" {
+		t.Fatalf("review did not park on approval: status=%s step=%s token=%q", res.Status, res.CurrentStep, res.WaitpointToken)
+	}
+	if res.StepOutputs["route"] != "review" || len(runner.calls) != 0 {
+		t.Fatalf("uncertain webhook woke an agent: outputs=%v calls=%v", res.StepOutputs, runner.calls)
+	}
+	if strings.Contains(string(model.seen.State), "never-forward-this") {
+		t.Fatal("decision state forwarded an unselected event field")
+	}
+	var status, stepID string
+	if err := db.QueryRowContext(t.Context(),
+		`SELECT status, step_id FROM pipeline_waitpoints WHERE token = ?`, res.WaitpointToken,
+	).Scan(&status, &stepID); err != nil {
+		t.Fatal(err)
+	}
+	if status != "pending" || stepID != "request_review" {
+		t.Fatalf("approval status=%q step=%q", status, stepID)
+	}
+}
+
 func decisionTestDSL() *DSL {
 	return &DSL{Name: "webhook-router", EgressTargets: []string{"api.typesafe.ai"}, Inputs: []InputSpec{{Name: "event", Type: "object"}}, Steps: []Step{
 		{ID: "route", Type: StepDecision, Decision: &DecisionStep{

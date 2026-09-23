@@ -200,13 +200,11 @@ func NewWiredExecutor(d ExecutorDeps) *Executor {
 		exec = exec.WithDecisionEvaluator(d.Decisions, d.DecisionHost)
 	} else if provider, workspaceID := os.Getenv("CREWSHIP_DECISIONS_PROVIDER"), os.Getenv("CREWSHIP_DECISIONS_WORKSPACE_ID"); provider != "" && workspaceID != "" {
 		keyName := "TYPESAFE_API_KEY"
-		host := "api.typesafe.ai"
 		if provider == "openrouter" {
 			keyName = "OPENROUTER_API_KEY"
-			host = "openrouter.ai"
 		}
 		if client, err := decisions.NewClient(provider, os.Getenv(keyName), 5*time.Second); err == nil {
-			exec = exec.WithDecisionEvaluator(client, host)
+			exec = exec.WithDecisionEvaluator(client, client.DestinationHost())
 			exec.decisionWorkspaceID = workspaceID
 		}
 	}

@@ -11,6 +11,7 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -67,6 +68,17 @@ type Evaluator interface {
 type Client struct {
 	endpoint, key, model string
 	http                 *http.Client
+}
+
+// DestinationHost reports the fixed endpoint host used by Evaluate. Routine
+// egress policy derives its target from the client instead of maintaining a
+// second provider-to-host table that could drift from the actual endpoint.
+func (c *Client) DestinationHost() string {
+	u, err := url.Parse(c.endpoint)
+	if err != nil {
+		return ""
+	}
+	return u.Hostname()
 }
 
 func NewClient(provider, key string, timeout time.Duration) (*Client, error) {

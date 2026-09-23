@@ -122,7 +122,9 @@ steps use CEL conditions such as `steps.route == 'sre'`; the model cannot name
 an arbitrary agent or acquire permissions. The example
 [`webhook-router.routine.json`](https://github.com/crewship-ai/crewship/blob/main/scripts/jev-eval/webhook-router.routine.json)
 contains `sre`, `developer`, `review` and `ignore` paths. Replace the example
-agent slugs with real members of the author crew before saving it.
+agent slugs with real members of the author crew before saving it. The
+`review` path parks at a durable human approval; `ignore` completes without
+waking an agent.
 
 ```bash
 crewship routine validate scripts/jev-eval/webhook-router.routine.json \

@@ -60,6 +60,13 @@ func TestClientWire(t *testing.T) {
 			if c.endpoint != expectedEndpoint {
 				t.Fatal(c.endpoint)
 			}
+			expectedHost := "api.typesafe.ai"
+			if provider == "openrouter" {
+				expectedHost = "openrouter.ai"
+			}
+			if host := c.DestinationHost(); host != expectedHost {
+				t.Fatalf("destination host = %q, want %q", host, expectedHost)
+			}
 			c.endpoint = srv.URL
 			got, err := c.Evaluate(context.Background(), req)
 			if err != nil {

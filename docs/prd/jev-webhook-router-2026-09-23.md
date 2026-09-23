@@ -14,6 +14,8 @@ The `review` option is mandatory. A selected probability below the per-step thre
 
 The runnable [example](../../scripts/jev-eval/webhook-router.routine.json) has `sre`, `developer`, `review` and `ignore` choices. Its state template selects three event fields rather than forwarding the raw body or signature headers. The routine must declare the provider host in `egress_targets`; the author crew's network policy still applies. Instructions and setup are in [the decisions CLI guide](../cli/decisions.mdx#experimental-webhook-router-routine).
 
+The example's `review` branch is a durable approval waitpoint; `ignore` completes with an auditable decision and no agent call.
+
 ## Limits
 
 This is a server pilot, not production-wide routing. The server uses an operator environment key scoped to one workspace; it does not use workspace vault credentials or record provider charges in Paymaster. No live Jev inference or calibration is claimed without a test key. The local SemIf on MacBook Air needs a separate evaluator adapter. A `decision` step is not allowed in a token-zero `agentless` routine. The sample agent slugs must be replaced with agents that actually exist in the author crew.
