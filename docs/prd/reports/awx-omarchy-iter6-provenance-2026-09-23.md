@@ -8,6 +8,6 @@ Detail běhu ukazuje trigger, dostupný zdroj, číslo verze a zkrácený hash. 
 
 Starší `invoking_*` pole nemají spolehlivý marker, že prošla opravou #2567, proto je UI neoznačuje za ověřeného lidského iniciátora. Existující cesta k inputs zůstává oddělená a exportovaný evidence JSON je neobsahuje.
 
-Ověření: čistý extractor a test historické v2 proti odlišné v3, nested HTTP/hook, stará identita, chybějící archiv a schedule-vs-automation; cílené frontendové testy, tsc, eslint, build a Go pipeline/journal. Kompletní frontend suite s omezeným počtem workerů byla spuštěna samostatně; výsledek je nutné doplnit po dokončení. Živý průchod druhým účtem zatím neproběhl.
+Ověření: čistý extractor a test historické v2 proti odlišné v3, nested HTTP/hook, stará identita, chybějící archiv a schedule-vs-automation; 779 frontendových souborů / 9280 testů s `--maxWorkers=4`, tsc, lint, build, Go pipeline/journal, go vet a dokumentační gates zelené. Výchozí neomezenou paralelizaci bylo nutné zastavit kvůli přetížení sdíleného stroje. Živý průchod druhým účtem zatím neproběhl.
 
 Další práce: iterace 7 (atomický očekávaný hash při Run again), 8–10 a celková akceptace. Tento report netvrdí dokončení celého PRD.
