@@ -1,6 +1,26 @@
 {
   "components": {
     "schemas": {
+      "AccessMeDecision": {
+        "properties": {
+          "reason": {
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "allowed",
+              "conditional",
+              "denied"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "state",
+          "reason"
+        ],
+        "type": "object"
+      },
       "ActiveRunList": {
         "items": {
           "properties": {
@@ -2695,6 +2715,53 @@
           "created_by_actor_type",
           "created_by_actor_id",
           "provisioned_for_service"
+        ],
+        "type": "object"
+      },
+      "CredentialAccessMe": {
+        "properties": {
+          "actions": {
+            "properties": {
+              "delete": {
+                "$ref": "#/components/schemas/AccessMeDecision"
+              },
+              "edit": {
+                "$ref": "#/components/schemas/AccessMeDecision"
+              },
+              "lower_sensitivity": {
+                "$ref": "#/components/schemas/AccessMeDecision"
+              },
+              "manage_bindings": {
+                "$ref": "#/components/schemas/AccessMeDecision"
+              },
+              "read": {
+                "$ref": "#/components/schemas/AccessMeDecision"
+              },
+              "reveal": {
+                "$ref": "#/components/schemas/AccessMeDecision"
+              },
+              "rotate": {
+                "$ref": "#/components/schemas/AccessMeDecision"
+              }
+            },
+            "required": [
+              "read",
+              "edit",
+              "rotate",
+              "manage_bindings",
+              "reveal",
+              "delete",
+              "lower_sensitivity"
+            ],
+            "type": "object"
+          },
+          "credential_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "credential_id",
+          "actions"
         ],
         "type": "object"
       },
@@ -10223,6 +10290,53 @@
         },
         "required": [
           "source_run_id"
+        ],
+        "type": "object"
+      },
+      "RoutineAccessMe": {
+        "properties": {
+          "actions": {
+            "properties": {
+              "approve": {
+                "$ref": "#/components/schemas/AccessMeDecision"
+              },
+              "disable": {
+                "$ref": "#/components/schemas/AccessMeDecision"
+              },
+              "edit": {
+                "$ref": "#/components/schemas/AccessMeDecision"
+              },
+              "manage_schedules": {
+                "$ref": "#/components/schemas/AccessMeDecision"
+              },
+              "read": {
+                "$ref": "#/components/schemas/AccessMeDecision"
+              },
+              "replay": {
+                "$ref": "#/components/schemas/AccessMeDecision"
+              },
+              "run": {
+                "$ref": "#/components/schemas/AccessMeDecision"
+              }
+            },
+            "required": [
+              "read",
+              "run",
+              "edit",
+              "approve",
+              "disable",
+              "replay",
+              "manage_schedules"
+            ],
+            "type": "object"
+          },
+          "routine": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "routine",
+          "actions"
         ],
         "type": "object"
       },
@@ -43496,6 +43610,146 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Credential"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "tags": [
+          "credentials"
+        ]
+      }
+    },
+    "/api/v1/credentials/{credentialId}/access/me": {
+      "get": {
+        "operationId": "get_api_v1_credentials_credentialId_access_me",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "credentialId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CredentialAccessMe"
                 }
               }
             },
@@ -121709,6 +121963,154 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/WorkspacePipelineResponseV1"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "tags": [
+          "workspaces"
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspaceId}/pipelines/{slug}/access/me": {
+      "get": {
+        "operationId": "get_api_v1_workspaces_workspaceId_pipelines_slug_access_me",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "workspaceId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RoutineAccessMe"
                 }
               }
             },

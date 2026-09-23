@@ -69,6 +69,7 @@ import { RoutineComparison } from "./routine-comparison"
 import { RoutineVersionsTab } from "./routine-versions-tab"
 import { RoutineRunsTab } from "./routine-runs-tab"
 import { RoutineReachCard } from "./routine-reach-card"
+import { YourAccess } from "@/components/features/access/your-access"
 import type { RoutineDetail } from "./routines-detail-panel"
 
 interface Props {
@@ -830,6 +831,10 @@ function AccessCard({
       tone="warn"
     >
       <div className="space-y-4">
+        <YourAccess
+          url={`/api/v1/workspaces/${encodeURIComponent(workspaceId)}/pipelines/${encodeURIComponent(routine.slug)}/access/me`}
+          actions={[{ key: "read", label: "Read" }, { key: "run", label: "Run" }, { key: "manage", label: "Manage" }]}
+        />
         {agentSlugs.length > 0 && (
           <div>
             <h3 className="mb-2 text-xs font-medium text-muted-foreground">
@@ -1120,4 +1125,3 @@ function RunsList({ slug, workspaceId }: { slug: string; workspaceId: string }) 
     </>
   )
 }
-

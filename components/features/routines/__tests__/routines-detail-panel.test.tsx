@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen, fireEvent, waitFor, act } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor, act, cleanup } from "@testing-library/react"
 import { toast } from "sonner"
 import { apiFetch } from "@/lib/api-fetch"
 import { RoutinesDetailPanel } from "../routines-detail-panel"
@@ -10,6 +10,7 @@ const h = vi.hoisted(() => ({
   access: { role: "OWNER", capabilities: [] as string[] },
   records: [] as unknown[],
   refreshRecords: vi.fn(),
+  serverRun: null as null | "conditional" | "denied",
 }))
 
 vi.mock("sonner", () => ({
@@ -26,6 +27,21 @@ vi.mock("@/hooks/use-realtime", () => ({
 
 vi.mock("@/hooks/use-abilities", () => ({
   useAbilities: () => ({ abilities: {}, ...h.access, loading: false }),
+}))
+
+// The toolbar now consumes the server's access verdict. Keep these existing
+// toolbar tests focused on run/form behavior; the real fetch lifecycle has
+// its own useAccessMe tests.
+vi.mock("@/hooks/use-access-me", () => ({
+  useAccessMe: () => ({
+    access: { actions: { run: {
+      state: h.serverRun ?? (["OWNER", "ADMIN", "MANAGER"].includes(h.access.role) || h.access.capabilities.includes("routine.run") ? "conditional" : "denied"),
+      reason: "missing_role_or_capability",
+    } } },
+    loading: false,
+    error: false,
+    refresh: vi.fn(),
+  }),
 }))
 
 vi.mock("@/hooks/use-pending-approval", () => ({
@@ -108,7 +124,7 @@ function activeRecord(id: string): PipelineRunRecord {
   }
 }
 
-beforeEach(() => { h.access.role = "OWNER"; h.access.capabilities = [] })
+beforeEach(() => { h.access.role = "OWNER"; h.access.capabilities = []; h.serverRun = null })
 
 const okJSON = (body: unknown) =>
   ({
@@ -580,6 +596,17 @@ describe("<RoutinesDetailPanel> — a slug with a draft and no published routine
 
 
 describe("routine Run permission", () => {
+  it("uses the server verdict even when the local role suggests otherwise", async () => {
+    h.access.role = "OWNER"
+    h.serverRun = "denied"
+    mockApi(); await renderPanel()
+    expect(screen.getByRole("button", { name: "Run" })).toBeDisabled()
+    cleanup()
+    h.access.role = "VIEWER"
+    h.serverRun = "conditional"
+    mockApi(); await renderPanel()
+    expect(screen.getByRole("button", { name: "Run" })).toBeEnabled()
+  })
   it.each([
     ["MEMBER", [], false],
     ["VIEWER", [], false],
