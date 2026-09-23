@@ -7,6 +7,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react"
 import { CredentialDetailSheet } from "../credential-detail-sheet"
+import type { ProviderLogin } from "@/lib/credentials/provider-logins"
 
 const h = vi.hoisted(() => ({
   role: "OWNER" as string,
@@ -501,7 +502,7 @@ describe("used by", () => {
           : [],
       })
     })
-    const login = {
+    const login: ProviderLogin = {
       mode: "subscription", provider: "OPENAI", plan: "plus", plan_label: "ChatGPT Plus",
       owner_user_id: "u1", owner_email: "fixture@example.test", expires_at: null,
       refresh: { supported: false, status: "none", last_at: null, next_at: null, error: null },
