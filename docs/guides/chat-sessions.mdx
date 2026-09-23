@@ -316,8 +316,16 @@ local draft ID and creates no server row until the first message is sent. A
 it**; an existing unsent draft in the selected session takes precedence. The
 legacy `?prompt=<text>` link still sends once automatically, so use the draft
 form when a person must review the message. Query text is visible in browser
-history and should not contain secrets; future Page handoffs use a Page
-reference instead of putting Page data in the URL.
+history and should not contain secrets. **Ask about this Page** opens a new,
+unsent agent session with `?new=1&page=<slug>`; the URL contains only the Page
+reference. The Page chip can be removed before sending. At send time the server
+rechecks that both the person and selected agent can reach the Page through a
+current grant. It then appends a bounded, explicitly untrusted snapshot of the
+Page's identity (name, slug and ID) to the message and records server-derived
+`page_context` provenance. Panel payloads and application data are not copied.
+If either reader loses access, the send is refused without persisting the
+message. The recipient needs an explicit Page grant; opening the draft does
+not issue one. The transcript shows the Page provenance after history reload.
 
 The state of which message is being edited, whether the slash palette is open, and the like is held in **shallow router** state — `useShallowSearchParam` writes to `window.history.replaceState` directly without triggering a Next.js navigation. This keeps the page interactive (no rerender on tab switch) while still giving you a copyable URL for any state.
 

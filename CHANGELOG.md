@@ -10,6 +10,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 ## [Unreleased]
 
 ### Improved
+- Pages can open an unsent agent chat draft. The Page reference is removable, and sending it rechecks both readers' live access before adding a bounded identity snapshot and durable provenance.
 - Scheduled agent runs now enter the durable work queue alongside agent webhooks. Cron accepts a due occurrence and advances its cursor atomically; the shared dispatcher checks current permissions, serial capacity and cancellation before execution. Restart catches overdue occurrences, and the old direct cron executor is no longer in the production build. The release parallel profile remains disabled. (#2643)
 - Chat links can open a new unsent draft with `?new=1&draft=1`; prefilled text no longer overwrites a person's existing composer draft. Existing `?prompt=` auto-send links retain their behavior.
 - Routine and credential details now explain the caller's effective actions using server-calculated role, capability, workspace policy and scope gates. Run and secret reveal show conditional eligibility rather than promising that live preflight, fresh login and audit checks will pass. The same answers are available through `crewship routine access` and `crewship credential access`.

@@ -39,7 +39,7 @@ import * as React from "react"
 import { AnimatePresence, motion } from "motion/react"
 
 import { duration } from "@/lib/motion"
-import { AppWindow, FilePlus2, LayoutGrid, Pencil, Share2, Upload } from "lucide-react"
+import { AppWindow, FilePlus2, LayoutGrid, MessageSquare, Pencil, Share2, Upload } from "lucide-react"
 
 import { SubBar, SubBarPrimary, SubBarSecondary } from "@/components/layout/sub-bar"
 import { SidebarCollapseButton, SIDEBAR_WIDTH } from "@/components/layout/sidebar-kit"
@@ -69,6 +69,7 @@ import { PageEditorShell } from "@/components/features/pages/editor/page-editor-
 import { usePageFolderMutations, usePageFolders } from "@/hooks/use-page-folders"
 import { FolderDeleteDialog, FolderEditDialog, MoveToFolderDialog } from "@/components/features/pages/folder-dialogs"
 import { FolderSharingDialog } from "@/components/features/pages/folder-sharing-dialog"
+import { PageChatHandoff } from "@/components/features/pages/page-chat-handoff"
 import { toast } from "sonner"
 
 export interface PagesLayoutProps {
@@ -97,6 +98,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
   // unsaved-work question before the address is allowed to move.
   const nav = useEditorRoute(slug ?? null)
   const selectedSlug = nav.slug
+  const [chatHandoffOpen, setChatHandoffOpen] = React.useState(false)
 
   const [collapsed, setCollapsed] = React.useState(false)
   // On a phone the rail is 280px of a 390px screen — it does not sit BESIDE
@@ -318,6 +320,11 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
               </div>
             )}
             {selectedSlug && !editing && (
+              <SubBarSecondary icon={MessageSquare} onClick={() => setChatHandoffOpen(true)} disabled={detail.page == null}>
+                Ask about this Page
+              </SubBarSecondary>
+            )}
+            {selectedSlug && !editing && (
               <SubBarSecondary
                 icon={Share2}
                 onClick={() => nav.openEditor("access")}
@@ -349,6 +356,12 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
           </>
         }
       />
+
+      {chatHandoffOpen && selectedSlug && <PageChatHandoff
+        open={chatHandoffOpen} onOpenChange={setChatHandoffOpen}
+        workspaceId={workspaceId} pageSlug={selectedSlug}
+        ownerCrewSlug={detail.raw?.owner_crew_slug}
+      />}
 
       <div className="relative flex flex-1 overflow-hidden">
         {isMobile && !collapsed && (

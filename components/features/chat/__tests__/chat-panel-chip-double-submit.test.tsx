@@ -86,6 +86,9 @@ function installFetch() {
     if (u.includes("/participants")) {
       return { ok: true, status: 200, json: async () => ({ participants: [] }) } as unknown as Response
     }
+    if (u.includes("/pages/fleet")) {
+      return { ok: true, status: 200, json: async () => ({ slug: "fleet", name: "Fleet" }) } as unknown as Response
+    }
     if (u.includes("/chats") && method === "POST") {
       const body = JSON.parse(String(init?.body ?? "{}"))
       creates.push({ url: u, body })
@@ -106,6 +109,24 @@ describe("ChatPanel — chip double-click during session create (#2121)", () => 
     creates = []
     holdCreate = null
     installFetch()
+  })
+
+  it("sends a Page reference once and removes it when asked", async () => {
+    render(<ChatPanel {...panelProps} pageContextSlug="fleet" />)
+    expect(await screen.findByText(/Page: Fleet/)).toBeInTheDocument()
+    fireEvent.click(await firstChip())
+    await waitFor(() => expect(sendMessage).toHaveBeenCalledTimes(1))
+    expect(sendMessage.mock.calls[0][1]).toEqual({ page_context: { slug: "fleet" } })
+    expect(screen.queryByTestId("page-context-chip")).not.toBeInTheDocument()
+  })
+
+  it("does not send Page metadata after the context is removed", async () => {
+    render(<ChatPanel {...panelProps} pageContextSlug="fleet" />)
+    expect(await screen.findByText(/Page: Fleet/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Remove Page context" }))
+    fireEvent.click(await firstChip())
+    await waitFor(() => expect(sendMessage).toHaveBeenCalledTimes(1))
+    expect(sendMessage.mock.calls[0]).toHaveLength(1)
   })
 
   it("sends exactly once when a chip is clicked twice while the create is still in flight", async () => {

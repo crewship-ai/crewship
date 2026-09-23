@@ -304,7 +304,14 @@ type Bridge struct {
 	// unified inbox for users who aren't watching the session live.
 	// Optional (nil = disabled); wired via SetReplyNotifier. See
 	// notify.go.
-	replyNotifier ReplyNotifier
+	replyNotifier       ReplyNotifier
+	pageContextResolver PageChatContextResolver
+}
+
+// SetPageChatContextResolver enables server-verified Page references in chat.
+// Without it a requested Page context is refused rather than trusted.
+func (b *Bridge) SetPageChatContextResolver(resolver PageChatContextResolver) {
+	b.pageContextResolver = resolver
 }
 
 // SetProvisioningEnqueuer wires the auto-provision trigger after Bridge
@@ -509,6 +516,30 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		return fmt.Errorf("resolve chat: %w", err)
 	}
 	b.logger.Debug("chat resolved", "agent_id", info.AgentID, "crew_id", info.CrewID)
+	pageSlug, hasPage, pageErr := requestedPageSlug(msgOpt.Metadata)
+	if pageErr != nil {
+		streamFn(ws.ChatEvent{Type: "error", Content: "Page context is invalid"})
+		return pageErr
+	}
+	var pageContext *PageChatContext
+	if hasPage {
+		if b.pageContextResolver == nil {
+			streamFn(ws.ChatEvent{Type: "error", Content: "Page context is unavailable"})
+			return ErrPageChatAccess
+		}
+		page, err := b.pageContextResolver.ResolvePageChatContext(ctx, info.WorkspaceID, userID, info.AgentID, pageSlug)
+		if err != nil {
+			streamFn(ws.ChatEvent{Type: "error", Content: "This Page is no longer available to you and this agent"})
+			return fmt.Errorf("resolve Page chat context: %w", err)
+		}
+		pageContext = &page
+		block := pageContextBlock(page)
+		if len(content)+len(block) > 64*1024 {
+			streamFn(ws.ChatEvent{Type: "error", Content: "Message with Page context is too long"})
+			return fmt.Errorf("Page chat message exceeds 64 KiB limit")
+		}
+		content += block
+	}
 
 	// PR-D F5: refuse to start an agent whose hire is still awaiting
 	// operator approval (guided autonomy lands the row with
@@ -548,6 +579,12 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	var userMsgMetadata any
 	if env, ok := askforms.EnvelopeFromMetadata(msgOpt.Metadata); ok {
 		userMsgMetadata = map[string]any{askforms.EnvelopeMetadataKey: env}
+	}
+	if pageContext != nil {
+		if userMsgMetadata == nil {
+			userMsgMetadata = map[string]any{}
+		}
+		userMsgMetadata.(map[string]any)["page_context"] = pageContext
 	}
 
 	// The human turn is recorded and fanned out to the other participants
