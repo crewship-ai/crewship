@@ -2,10 +2,80 @@ package api
 
 import (
 	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/crewship-ai/crewship/internal/encryption"
+	"github.com/crewship-ai/crewship/internal/pipeline"
 )
+
+func TestCredentialMultiCrew_RoutineAndAgentDeliveryParity(t *testing.T) {
+	db := setupTestDB(t)
+	ensureEncryptionKey(t)
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+	for _, crew := range []string{"parity-a", "parity-b", "parity-c"} {
+		execOrFatal(t, db, `INSERT INTO crews (id, workspace_id, name, slug) VALUES (?, ?, ?, ?)`, crew, wsID, crew, crew)
+		execOrFatal(t, db, `INSERT INTO agents (id, crew_id, workspace_id, name, slug) VALUES (?, ?, ?, ?, ?)`, "agent-"+crew, crew, wsID, crew, crew)
+	}
+	seedCredentialEnc(t, db, wsID, userID, "parity-secret", "PARITY_SECRET", "secret-for-two-crews")
+	execOrFatal(t, db, `UPDATE credentials SET type = 'GENERIC_SECRET', scope = 'CREW', crew_id = 'parity-a' WHERE id = 'parity-secret'`)
+	for _, crew := range []string{"parity-a", "parity-b"} {
+		execOrFatal(t, db, `INSERT INTO credential_crews (credential_id, crew_id) VALUES ('parity-secret', ?)`, crew)
+	}
+	resolve, probe := pipeline.NewVaultCredentialResolver(db), pipeline.NewVaultCredentialProbe(db)
+	for _, tc := range []struct {
+		crew string
+		want bool
+	}{
+		{"parity-a", true}, {"parity-b", true}, {"parity-c", false},
+	} {
+		scope := pipeline.RunScope{WorkspaceID: wsID, AuthorCrewID: tc.crew}
+		available, err := probe(context.Background(), scope, "GENERIC_SECRET")
+		if err != nil || available != tc.want {
+			t.Errorf("%s probe=%v, %v; want %v", tc.crew, available, err, tc.want)
+		}
+		value, err := resolve(context.Background(), scope, "GENERIC_SECRET")
+		if tc.want && (err != nil || value != "secret-for-two-crews") {
+			t.Errorf("%s routine value=%q err=%v", tc.crew, value, err)
+		}
+		if !tc.want && err == nil {
+			t.Errorf("%s resolved ungranted value %q", tc.crew, value)
+		}
+		delivered, _, err := loadDeliveredCredentials(context.Background(), db, "agent-"+tc.crew)
+		if err != nil {
+			t.Fatal(err)
+		}
+		found := false
+		for _, d := range delivered {
+			if d.ID == "parity-secret" {
+				found = true
+			}
+		}
+		if found != tc.want {
+			t.Errorf("%s agent delivery=%v; want %v", tc.crew, found, tc.want)
+		}
+	}
+	memberID := "parity-member"
+	execOrFatal(t, db, `INSERT INTO users (id, email, full_name) VALUES (?, 'parity-member@example.test', 'Parity Member')`, memberID)
+	execOrFatal(t, db, `INSERT INTO workspace_members (id, workspace_id, user_id, role) VALUES ('parity-membership', ?, ?, 'MEMBER')`, wsID, memberID)
+	execOrFatal(t, db, `INSERT INTO crew_members (crew_id, user_id) VALUES ('parity-b', ?)`, memberID)
+	req := withWorkspaceUser(httptest.NewRequest(http.MethodGet, "/api/v1/credentials", nil), memberID, wsID, "MEMBER")
+	rr := httptest.NewRecorder()
+	NewCredentialHandler(db, nil).List(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("member list: %d %s", rr.Code, rr.Body.String())
+	}
+	var visible []credentialResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &visible); err != nil {
+		t.Fatal(err)
+	}
+	if len(visible) != 1 || visible[0].ID != "parity-secret" {
+		t.Errorf("second crew member visibility: %+v", visible)
+	}
+}
 
 // TestDeliveredCredentials_CarryProviderColumn drives loadDeliveredCredentials
 // against all THREE arms of agentDeliveredCredentialsSQL.

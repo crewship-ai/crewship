@@ -49,6 +49,7 @@ CREATE TABLE IF NOT EXISTS credentials (
 	id TEXT PRIMARY KEY,
 	workspace_id TEXT NOT NULL,
 	crew_id TEXT,
+	scope TEXT NOT NULL DEFAULT 'WORKSPACE',
 	name TEXT NOT NULL,
 	encrypted_value TEXT NOT NULL,
 	type TEXT NOT NULL DEFAULT 'SECRET',
@@ -56,7 +57,8 @@ CREATE TABLE IF NOT EXISTS credentials (
 	status TEXT NOT NULL DEFAULT 'ACTIVE',
 	deleted_at TEXT,
 	created_at TEXT NOT NULL DEFAULT (datetime('now'))
-);`); err != nil {
+);
+CREATE TABLE credential_crews (credential_id TEXT NOT NULL, crew_id TEXT NOT NULL, PRIMARY KEY (credential_id, crew_id));`); err != nil {
 		_ = db.Close()
 		t.Fatalf("policy schema: %v", err)
 	}
@@ -85,11 +87,23 @@ func seedCredential(t *testing.T, db *sql.DB, id, wsID, crewID, credType, status
 	var crew any
 	if crewID != "" {
 		crew = crewID
+		if _, err := db.ExecContext(context.Background(), `INSERT OR IGNORE INTO crews (id, workspace_id) VALUES (?, ?)`, crewID, wsID); err != nil {
+			t.Fatalf("seed credential crew: %v", err)
+		}
+	}
+	scope := "WORKSPACE"
+	if crewID != "" {
+		scope = "CREW"
 	}
 	if _, err := db.ExecContext(context.Background(),
-		`INSERT INTO credentials (id, workspace_id, crew_id, name, encrypted_value, type, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		id, wsID, crew, id, enc, credType, status, createdAt); err != nil {
+		`INSERT INTO credentials (id, workspace_id, crew_id, scope, name, encrypted_value, type, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		id, wsID, crew, scope, id, enc, credType, status, createdAt); err != nil {
 		t.Fatalf("seed credential: %v", err)
+	}
+	if crewID != "" {
+		if _, err := db.ExecContext(context.Background(), `INSERT INTO credential_crews (credential_id, crew_id) VALUES (?, ?)`, id, crewID); err != nil {
+			t.Fatalf("seed credential link: %v", err)
+		}
 	}
 }
 
@@ -105,11 +119,23 @@ func seedCredentialWithProvider(t *testing.T, db *sql.DB, id, wsID, crewID, cred
 	var crew any
 	if crewID != "" {
 		crew = crewID
+		if _, err := db.ExecContext(context.Background(), `INSERT OR IGNORE INTO crews (id, workspace_id) VALUES (?, ?)`, crewID, wsID); err != nil {
+			t.Fatalf("seed credential crew: %v", err)
+		}
+	}
+	scope := "WORKSPACE"
+	if crewID != "" {
+		scope = "CREW"
 	}
 	if _, err := db.ExecContext(context.Background(),
-		`INSERT INTO credentials (id, workspace_id, crew_id, name, encrypted_value, type, provider, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		id, wsID, crew, id, enc, credType, provider, status, createdAt); err != nil {
+		`INSERT INTO credentials (id, workspace_id, crew_id, scope, name, encrypted_value, type, provider, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		id, wsID, crew, scope, id, enc, credType, provider, status, createdAt); err != nil {
 		t.Fatalf("seed credential: %v", err)
+	}
+	if crewID != "" {
+		if _, err := db.ExecContext(context.Background(), `INSERT INTO credential_crews (credential_id, crew_id) VALUES (?, ?)`, id, crewID); err != nil {
+			t.Fatalf("seed credential link: %v", err)
+		}
 	}
 }
 
@@ -266,6 +292,70 @@ func TestVaultCredentialResolver_Semantics(t *testing.T) {
 			t.Error("expected error for empty workspace scope")
 		}
 	})
+}
+
+func TestVaultCredentialResolver_MultiCrewLinksAndProbeAgree(t *testing.T) {
+	t.Setenv("ENCRYPTION_KEY", testEncryptionKey)
+	db := openPolicyTestDB(t)
+	defer db.Close()
+	seedCredential(t, db, "multi", "ws_test", "crew_a", "API_KEY", "ACTIVE", "shared-crew-secret", "2026-01-02T00:00:00Z")
+	seedCredential(t, db, "fallback", "ws_test", "", "API_KEY", "ACTIVE", "workspace-secret", "2026-01-01T00:00:00Z")
+	for _, crew := range []string{"crew_b", "crew_c"} {
+		if _, err := db.Exec(`INSERT OR IGNORE INTO crews (id, workspace_id) VALUES (?, 'ws_test')`, crew); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := db.Exec(`INSERT INTO credential_crews (credential_id, crew_id) VALUES ('multi', 'crew_b')`); err != nil {
+		t.Fatal(err)
+	}
+	resolve, probe := NewVaultCredentialResolver(db), NewVaultCredentialProbe(db)
+	selectID := NewVaultCredentialIDResolver(db)
+	check := func(crew, want string) {
+		t.Helper()
+		scope := RunScope{WorkspaceID: "ws_test", AuthorCrewID: crew}
+		got, err := resolve(context.Background(), scope, "API_KEY")
+		if err != nil || got != want {
+			t.Fatalf("crew %s: got %q, %v; want %q", crew, got, err, want)
+		}
+		ok, err := probe(context.Background(), scope, "API_KEY")
+		if err != nil || !ok {
+			t.Fatalf("crew %s: probe %v, %v", crew, ok, err)
+		}
+		id, err := selectID(context.Background(), scope, "API_KEY")
+		wantID := "fallback"
+		if want == "shared-crew-secret" {
+			wantID = "multi"
+		}
+		if err != nil || id != wantID {
+			t.Fatalf("crew %s: selected ID %q, %v; want %q", crew, id, err, wantID)
+		}
+	}
+	check("crew_a", "shared-crew-secret")
+	check("crew_b", "shared-crew-secret")
+	check("crew_c", "workspace-secret")
+	if _, err := db.Exec(`DELETE FROM credential_crews WHERE credential_id = 'multi' AND crew_id = 'crew_a'`); err != nil {
+		t.Fatal(err)
+	}
+	check("crew_a", "workspace-secret") // legacy crew_id alone grants nothing
+	if _, err := db.Exec(`UPDATE crews SET deleted_at = '2026-01-01' WHERE id = 'crew_b'`); err != nil {
+		t.Fatal(err)
+	}
+	check("crew_b", "workspace-secret")
+	if _, err := db.Exec(`DELETE FROM credentials WHERE id = 'fallback'`); err != nil {
+		t.Fatal(err)
+	}
+	for _, crew := range []string{"crew_a", "crew_b", "crew_c"} {
+		scope := RunScope{WorkspaceID: "ws_test", AuthorCrewID: crew}
+		if got, err := resolve(context.Background(), scope, "API_KEY"); err == nil {
+			t.Errorf("crew %s resolved ungranted secret %q", crew, got)
+		}
+		if ok, err := probe(context.Background(), scope, "API_KEY"); err != nil || ok {
+			t.Errorf("crew %s probe: %v, %v", crew, ok, err)
+		}
+		if id, err := selectID(context.Background(), scope, "API_KEY"); err != nil || id != "" {
+			t.Errorf("crew %s selected ID: %q, %v", crew, id, err)
+		}
+	}
 }
 
 // An endpoint-backed credential is stored with type API_KEY, but its value is a

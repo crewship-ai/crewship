@@ -779,6 +779,54 @@ func TestCovCMDUpdate_CrewIDsClearedResetsToWorkspace(t *testing.T) {
 	}
 }
 
+func TestCredentialUpdate_LegacyCrewIDKeepsGrantsInSync(t *testing.T) {
+	h, db := newCredHandler(t)
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+	for _, crew := range []string{"legacy-a", "legacy-b"} {
+		if _, err := db.Exec(`INSERT INTO crews (id, workspace_id, name, slug, created_at, updated_at) VALUES (?, ?, ?, ?, datetime('now'), datetime('now'))`, crew, wsID, crew, crew); err != nil {
+			t.Fatal(err)
+		}
+	}
+	seedCredentialEnc(t, db, wsID, userID, "legacy-update", "n", "v")
+	for _, tc := range []struct{ body, wantScope, wantCrew string }{
+		{`{"crew_id":"legacy-a"}`, "CREW", "legacy-a"},
+		{`{"crew_id":"legacy-b"}`, "CREW", "legacy-b"},
+		{`{"crew_id":null}`, "WORKSPACE", ""},
+	} {
+		rr := covCMDupdate(t, h, userID, wsID, "legacy-update", "OWNER", tc.body)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("PATCH %s: %d %s", tc.body, rr.Code, rr.Body.String())
+		}
+		var scope string
+		var crewID sql.NullString
+		if err := db.QueryRow(`SELECT scope, crew_id FROM credentials WHERE id = 'legacy-update'`).Scan(&scope, &crewID); err != nil {
+			t.Fatal(err)
+		}
+		if scope != tc.wantScope || crewID.String != tc.wantCrew {
+			t.Errorf("PATCH %s: scope=%s crew=%s", tc.body, scope, crewID.String)
+		}
+		rows, err := db.Query(`SELECT crew_id FROM credential_crews WHERE credential_id = 'legacy-update'`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var links []string
+		for rows.Next() {
+			var crew string
+			if err := rows.Scan(&crew); err != nil {
+				t.Fatal(err)
+			}
+			links = append(links, crew)
+		}
+		if err := rows.Close(); err != nil {
+			t.Fatal(err)
+		}
+		if tc.wantCrew == "" && len(links) != 0 || tc.wantCrew != "" && (len(links) != 1 || links[0] != tc.wantCrew) {
+			t.Errorf("PATCH %s: links=%v", tc.body, links)
+		}
+	}
+}
+
 // ---- List: crew-scoped MEMBER visibility ----
 
 func TestCovCMDList_MemberCrewScopedVisibility(t *testing.T) {

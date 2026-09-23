@@ -884,14 +884,14 @@ func (h *CredentialHandler) Update(w http.ResponseWriter, r *http.Request) {
 			body["crew_id"] = nil
 		}
 		delete(body, "crew_ids")
-	} else if crewIDVal, ok := body["crew_id"]; ok && crewIDVal != nil {
+	} else if crewIDVal, ok := body["crew_id"]; ok {
 		// Legacy single-crew patch path. Mirror the new shape-loop's
 		// strictness so a non-string crew_id fails closed here rather
 		// than silently being caught by the downstream loop — keeps
 		// behaviour stable if a future refactor moves the loop and
 		// makes the failure mode discoverable from the right call site.
-		crewIDStr, ok := crewIDVal.(string)
-		if !ok {
+		crewIDStr, isString := crewIDVal.(string)
+		if crewIDVal != nil && !isString {
 			replyError(w, http.StatusBadRequest, "crew_id must be a string")
 			return
 		}
@@ -905,6 +905,17 @@ func (h *CredentialHandler) Update(w http.ResponseWriter, r *http.Request) {
 				replyError(w, http.StatusBadRequest, "Invalid crew_id")
 				return
 			}
+		}
+		// The junction table is the grant source used by both agents and
+		// routines. A legacy PATCH must update it atomically too, including
+		// clearing all grants when crew_id is null or empty.
+		updateCrewIDs = true
+		if crewIDStr != "" {
+			crewIDs = []string{crewIDStr}
+			body["scope"] = "CREW"
+		} else {
+			body["crew_id"] = nil
+			body["scope"] = "WORKSPACE"
 		}
 	}
 
