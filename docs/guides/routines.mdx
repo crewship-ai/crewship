@@ -250,7 +250,7 @@ Save-time validator walks **every** template-bearing field (prompt, nested input
 
 ### Secrets (`{{ secrets.<type> }}`)
 
-A `code` / `script` / `notify` / `http` step that needs an API key, token, or password references it as `{{ secrets.<type> }}` — **never** by pasting the value into an `env:` map (which is versioned, exported, and diffed in **plaintext**). At run time the placeholder resolves to the decrypted value of a matching **ACTIVE** credential in the workspace vault, resolved **by type** exactly like an `http` step's [`credential_ref`](#http): workspace-scoped, author-crew isolated, newest-active-wins on rotation.
+A `code` / `script` / `notify` / `http` step that needs an API key, token, or password references it as `{{ secrets.<type> }}` — **never** by pasting the value into an `env:` map (which is versioned, exported, and diffed in **plaintext**). At run time the placeholder resolves to the decrypted value of a matching **ACTIVE** credential in the workspace vault, resolved **by type** exactly like an `http` step's [`credential_ref`](#http): workspace-scoped, author-crew isolated through `credential_crews`, newest-active-wins on rotation.
 
 ```json
 {
@@ -728,7 +728,8 @@ against the workspace credential vault by **type** (case-insensitive match
 on the vault type, e.g. `API_KEY`, `GENERIC_SECRET`), never by ID — so a
 shared routine runs against any workspace holding a credential of the right
 type. Only `ACTIVE` credentials resolve; credentials pinned to another crew
-are invisible; when several match, the authoring crew's own credential wins
+are invisible. Crew grants come from `credential_crews`, including a second
+or later crew; the legacy `crew_id` field alone grants no access. When several match, the authoring crew's own credential wins
 over workspace-shared ones and the newest wins within each group (rotation).
 The decrypted value goes into the outbound request only — never into logs,
 the journal, or step output. An explicit `credential_ref` is required: no

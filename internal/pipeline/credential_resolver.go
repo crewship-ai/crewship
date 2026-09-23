@@ -76,9 +76,8 @@ func excludeEndpointProviders() (string, []any) {
 //
 //   - workspace-scoped: only rows of the run's workspace are ever
 //     considered — a routine can never read another workspace's vault.
-//   - crew isolation: rows pinned to a crew (crew_id set) match only
-//     when that crew is the routine's author crew; unpinned rows are
-//     workspace-shared and always eligible.
+//   - crew isolation: credential_crews is authoritative for crew grants;
+//     unlinked WORKSPACE rows are shared. The legacy crew_id is not a grant.
 //   - status = 'ACTIVE' + not deleted: PENDING rows carry encrypted
 //     placeholder sentinels (see internal/api/credentials_types.go) —
 //     the status filter here is the load-bearing guard that keeps a
@@ -101,20 +100,8 @@ func NewVaultCredentialResolver(db *sql.DB) func(ctx context.Context, scope RunS
 		if credType == "" {
 			return "", fmt.Errorf("credential_ref.type is empty")
 		}
-		notEndpoint, notEndpointArgs := excludeEndpointProviders()
-		args := append([]any{scope.WorkspaceID, credType}, notEndpointArgs...)
-		args = append(args, scope.AuthorCrewID, scope.AuthorCrewID)
 		var encryptedValue string
-		err := db.QueryRowContext(ctx, `
-SELECT encrypted_value FROM credentials
-WHERE workspace_id = ?
-  AND UPPER(type) = UPPER(?)
-`+notEndpoint+`  AND status = 'ACTIVE'
-  AND deleted_at IS NULL
-  AND (crew_id IS NULL OR crew_id = '' OR crew_id = ?)
-ORDER BY CASE WHEN crew_id = ? THEN 0 ELSE 1 END, created_at DESC, id
-LIMIT 1`, args...,
-		).Scan(&encryptedValue)
+		err := selectedVaultCredential(db, ctx, scope, credType, true).Scan(new(string), &encryptedValue)
 		if errors.Is(err, sql.ErrNoRows) {
 			return "", fmt.Errorf("no active credential of type %q in workspace vault", credType)
 		}
@@ -129,6 +116,39 @@ LIMIT 1`, args...,
 		}
 		return plain, nil
 	}
+}
+
+// NewVaultCredentialIDResolver previews the exact runtime selection without
+// reading or decrypting its value. A selected ID is not proof of past use.
+func NewVaultCredentialIDResolver(db *sql.DB) func(context.Context, RunScope, string) (string, error) {
+	return func(ctx context.Context, scope RunScope, credType string) (string, error) {
+		if scope.WorkspaceID == "" || strings.TrimSpace(credType) == "" {
+			return "", fmt.Errorf("credential selection requires workspace and type")
+		}
+		var id string
+		err := selectedVaultCredential(db, ctx, scope, credType, false).Scan(&id)
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", nil
+		}
+		if err != nil {
+			return "", fmt.Errorf("credential selection: %w", err)
+		}
+		return id, nil
+	}
+}
+
+func selectedVaultCredential(db *sql.DB, ctx context.Context, scope RunScope, credType string, includeValue bool) *sql.Row {
+	query, args := vaultCredentialCandidates(scope, credType)
+	projection := "v.id"
+	join := ""
+	if includeValue {
+		projection += ", c.encrypted_value"
+		join = " JOIN credentials c ON c.id = v.id"
+	}
+	return db.QueryRowContext(ctx, query+`SELECT `+projection+` FROM candidates v`+join+`
+WHERE v.crew_linked OR (v.scope = 'WORKSPACE' AND NOT v.has_links AND COALESCE(v.crew_id, '') = '')
+ORDER BY v.crew_linked DESC, v.created_at DESC, v.id
+LIMIT 1`, args...)
 }
 
 // NewVaultCredentialProbe builds the availability check behind
@@ -156,17 +176,11 @@ func NewVaultCredentialProbe(db *sql.DB) func(ctx context.Context, scope RunScop
 		// runtime would inject it". A probe that counted an endpoint-backed row
 		// the resolver now skips would report a credentials_required gate
 		// satisfied by a credential the step will never receive.
-		notEndpoint, notEndpointArgs := excludeEndpointProviders()
-		args := append([]any{scope.WorkspaceID, credType}, notEndpointArgs...)
-		args = append(args, scope.AuthorCrewID)
+		query, args := vaultCredentialCandidates(scope, credType)
 		var one int
-		err := db.QueryRowContext(ctx, `
-SELECT 1 FROM credentials
-WHERE workspace_id = ?
-  AND UPPER(type) = UPPER(?)
-`+notEndpoint+`  AND status = 'ACTIVE'
-  AND deleted_at IS NULL
-  AND (crew_id IS NULL OR crew_id = '' OR crew_id = ?)
+		err := db.QueryRowContext(ctx, query+`
+SELECT 1 FROM candidates
+WHERE crew_linked OR (scope = 'WORKSPACE' AND NOT has_links AND COALESCE(crew_id, '') = '')
 LIMIT 1`, args...,
 		).Scan(&one)
 		if errors.Is(err, sql.ErrNoRows) {
@@ -177,4 +191,26 @@ LIMIT 1`, args...,
 		}
 		return true, nil
 	}
+}
+
+// vaultCredentialCandidates keeps the resolver and availability probe on the
+// same selection contract. A crew link must point to a live crew in the run's
+// workspace; stale or foreign links cannot grant a routine access. A row with
+// any crew links cannot silently fall back to workspace scope.
+func vaultCredentialCandidates(scope RunScope, credType string) (string, []any) {
+	notEndpoint, endpointArgs := excludeEndpointProviders()
+	args := append([]any{scope.AuthorCrewID, scope.WorkspaceID, credType}, endpointArgs...)
+	return `WITH candidates AS (
+SELECT c.created_at, c.id, c.scope, c.crew_id,
+  EXISTS (
+    SELECT 1 FROM credential_crews cc
+    JOIN crews cr ON cr.id = cc.crew_id AND cr.workspace_id = c.workspace_id AND cr.deleted_at IS NULL
+    WHERE cc.credential_id = c.id AND cc.crew_id = ?
+  ) AS crew_linked,
+  EXISTS (SELECT 1 FROM credential_crews cc WHERE cc.credential_id = c.id) AS has_links
+FROM credentials c
+WHERE c.workspace_id = ? AND UPPER(c.type) = UPPER(?)
+` + notEndpoint + `  AND c.status = 'ACTIVE' AND c.deleted_at IS NULL
+)
+`, args
 }
