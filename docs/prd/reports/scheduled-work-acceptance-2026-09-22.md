@@ -1,5 +1,8 @@
 # Scheduled work acceptance — #2643
 
+Historical acceptance-stage report. The subsequent production cutover is
+recorded in [scheduled-work-cutover-2026-09-23.md](scheduled-work-cutover-2026-09-23.md).
+
 Base: main `ce7710274` after rebasing the draft PR on 2026-09-23.
 Earlier guards (#2648) are integrated through #2646.
 This is the acceptance part of the migration, **not enabled in production**.
