@@ -3,14 +3,19 @@
 package main
 
 import (
+	"context"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
+	"fmt"
 	"log/slog"
+	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/testutil"
 )
@@ -69,5 +74,44 @@ func TestRecoverMemoryBeforeServe_RefusesMissingDurableBlob(t *testing.T) {
 	}
 	if state != "intent" {
 		t.Fatalf("failed recovery changed mutation state to %q", state)
+	}
+}
+
+func TestStart_RefusesUnrecoverableMemoryBeforeServing(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "crewship.db")
+	db := testutil.MigratedDBAt(t, path).DB
+	pendingBootMutation(t, db, filepath.Join(root, "AGENT.md"), hashBootContent([]byte("missing\n")), len("missing\n"))
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := listener.Addr().(*net.TCPAddr).Port
+	_ = listener.Close()
+	configPath := filepath.Join(root, "server.yaml")
+	config := fmt.Sprintf("server:\n  host: 127.0.0.1\n  port: %d\n", port)
+	if err := os.WriteFile(configPath, []byte(config), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	binary := buildCrewshipBinary(t)
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
+	defer cancel()
+	child := exec.CommandContext(ctx, binary, "start", "--no-docker", "--config", configPath, "--db", path)
+	child.Dir = root
+	for _, entry := range os.Environ() {
+		key, _, _ := strings.Cut(entry, "=")
+		if strings.HasPrefix(key, "CREWSHIP_") || key == "DATABASE_URL" || key == "NEXTAUTH_SECRET" || strings.HasPrefix(key, "ENCRYPTION_KEY") {
+			continue
+		}
+		child.Env = append(child.Env, entry)
+	}
+	child.Env = append(child.Env, "CREWSHIP_DATA_DIR="+root, "CREWSHIP_SKIP_SIDECAR=1")
+	output, err := child.CombinedOutput()
+	if ctx.Err() != nil {
+		t.Fatalf("server did not refuse the pending mutation before serving: %v", ctx.Err())
+	}
+	if err == nil || !strings.Contains(string(output), "recover pending memory mutations before serving") {
+		t.Fatalf("boot error = %v; expected memory recovery failure, output: %s", err, output)
 	}
 }
