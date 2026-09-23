@@ -13,6 +13,16 @@ type accessMeDecision struct {
 	Reason string `json:"reason"`
 }
 
+type routineAccessMeResponse struct {
+	Routine string                      `json:"routine"`
+	Actions map[string]accessMeDecision `json:"actions"`
+}
+
+type credentialAccessMeResponse struct {
+	CredentialID string                      `json:"credential_id"`
+	Actions      map[string]accessMeDecision `json:"actions"`
+}
+
 func accessDecision(state, reason string) accessMeDecision {
 	return accessMeDecision{State: state, Reason: reason}
 }
@@ -56,9 +66,9 @@ func (h *PipelineHandler) MyRoutineAccess(w http.ResponseWriter, r *http.Request
 		}
 		return accessDecision("denied", "missing_role")
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"routine": slug,
-		"actions": map[string]accessMeDecision{
+	writeJSON(w, http.StatusOK, routineAccessMeResponse{
+		Routine: slug,
+		Actions: map[string]accessMeDecision{
 			"read":             accessDecision("allowed", "workspace_visible"),
 			"run":              run,
 			"edit":             roleDecision("create"),
@@ -153,9 +163,9 @@ func (h *CredentialHandler) MyCredentialAccess(w http.ResponseWriter, r *http.Re
 		}
 	}
 	w.Header().Set("Cache-Control", "no-store")
-	writeJSON(w, http.StatusOK, map[string]any{
-		"credential_id": id,
-		"actions": map[string]accessMeDecision{
+	writeJSON(w, http.StatusOK, credentialAccessMeResponse{
+		CredentialID: id,
+		Actions: map[string]accessMeDecision{
 			"read":              accessDecision("allowed", "visible_metadata"),
 			"edit":              edit,
 			"manage_bindings":   bind,
