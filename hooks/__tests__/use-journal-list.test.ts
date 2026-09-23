@@ -85,6 +85,16 @@ describe("useJournalList", () => {
     expect(result.current.error).toBeNull()
   })
 
+  it("can treat 404 as unavailable evidence for a run detail", async () => {
+    ;(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(err(404))
+
+    const { result } = renderHook(() => useJournalList({ workspaceId: "ws_test", notFoundAsError: true }))
+    await waitFor(() => expect(result.current.loading).toBe(false))
+
+    expect(result.current.entries).toEqual([])
+    expect(result.current.error).toMatch(/404/)
+  })
+
   it("5xx sets error message", async () => {
     ;(global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(err(500))
 

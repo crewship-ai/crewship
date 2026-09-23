@@ -19,16 +19,18 @@ interface Props {
 export function RunEvidencePanel({ workspaceId, run }: Props) {
   const params = useMemo(() => ({ run_id: run.runId }), [run.runId])
   const { entries, loading, error, nextCursor, refresh } = useJournalList({
-    workspaceId, params, limit: 100, maxEntries: 100,
+    workspaceId, params, limit: 100, maxEntries: 100, notFoundAsError: true,
   })
   const capturedAt = new Date().toISOString()
   const view = useMemo(() => buildRunEvidence({
     ...run,
     capturedAt,
-    entries: error ? [] : entries,
+    // The journal hook retains its previous page while a new workspace is
+    // loading. Never include those rows in a preview for another workspace.
+    entries: error ? [] : entries.filter((entry) => entry.workspace_id === workspaceId),
     journalUnavailable: !!error,
     journalIncomplete: !!nextCursor,
-  }), [run, capturedAt, entries, error, nextCursor])
+  }), [run, workspaceId, capturedAt, entries, error, nextCursor])
   const text = useMemo(() => formatRunEvidence(view), [view])
 
   async function copy(value: string, label: string) {

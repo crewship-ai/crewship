@@ -42,6 +42,19 @@ describe("RunEvidencePanel", () => {
     expect(screen.getByTestId("run-evidence-preview").textContent).toContain("Journal could not be read")
   })
 
+  it("does not preview or copy cached events from the previous workspace while switching", async () => {
+    const { rerender } = render(<RunEvidencePanel workspaceId="ws" run={run} />)
+    fireEvent.click(screen.getByText("Preview evidence"))
+    expect(screen.getByTestId("run-evidence-preview").textContent).toContain("evt_a")
+
+    // The journal hook has not yet replaced its old page after the prop switch.
+    rerender(<RunEvidencePanel workspaceId="other_ws" run={run} />)
+    expect(screen.getByTestId("run-evidence-preview").textContent).not.toContain("evt_a")
+    fireEvent.click(screen.getByRole("button", { name: /copy evidence/i }))
+    await waitFor(() => expect(h.copied).toHaveBeenCalledTimes(1))
+    expect(h.copied.mock.calls[0]?.[0]).not.toContain("evt_a")
+  })
+
   it("reports clipboard refusal", async () => {
     h.copied.mockRejectedValueOnce(new Error("denied"))
     const { toast } = await import("sonner")
