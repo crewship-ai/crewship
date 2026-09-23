@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 )
@@ -442,7 +443,24 @@ func readRootedIntentBlob(blobRoot, sha string) ([]byte, error) {
 			return nil, fmt.Errorf("invalid rooted intent blob hash")
 		}
 	}
-	return os.ReadFile(blobPathFor(blobRoot, sha))
+	root, err := os.OpenRoot(blobRoot)
+	if err != nil {
+		return nil, err
+	}
+	defer root.Close()
+	file, err := openRootNoFollow(root, sha[:2]+string(os.PathSeparator)+sha)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("intent blob is not a regular file")
+	}
+	return io.ReadAll(file)
 }
 
 // readIntentBlob reads the parked target content. It prefers the absolute

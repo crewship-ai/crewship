@@ -115,4 +115,34 @@ func TestRecoverPendingUnderRoot_UsesPinnedStorageBoundary(t *testing.T) {
 		}
 		assertPending(t, f, 1)
 	})
+
+	t.Run("rejects a blob symlink escaping the configured root", func(t *testing.T) {
+		f := newMutateFixture(t)
+		f.mustMutate(t, f.req("seed", OpReplace, "base\n"))
+		req := f.req("crash", OpReplace, "target\n")
+		req.ExpectedRevision = 1
+		req.testHook = crashAt("after_intent")
+		if _, err := f.mutate(t, req); !errors.Is(err, errSimulatedCrash) {
+			t.Fatalf("create pending intent: %v", err)
+		}
+		sha := sha256Hex([]byte("target\n"))
+		blobPath := blobPathFor(f.blobRoot, sha)
+		outside := filepath.Join(t.TempDir(), "external-blob")
+		if err := os.WriteFile(outside, []byte("target\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Remove(blobPath); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(outside, blobPath); err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := RecoverPendingUnderRoot(t.Context(), f.db, f.blobRoot, f.dir); err == nil {
+			t.Fatal("recovery followed a blob symlink outside the configured root")
+		}
+		if got := f.onDisk(t); got != "base\n" {
+			t.Fatalf("external blob symlink changed canonical file: %q", got)
+		}
+		assertPending(t, f, 1)
+	})
 }
