@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -17,6 +18,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/logcollector"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
 	"github.com/crewship-ai/crewship/internal/provider"
+	"github.com/crewship-ai/crewship/internal/work"
 	_ "modernc.org/sqlite"
 )
 
@@ -151,54 +153,89 @@ func TestRegisterPlatformRoutine_NilFn(t *testing.T) {
 // Cron entry closures actually fire
 // ---------------------------------------------------------------------------
 
-// The closure registered by addEntry must invoke triggerAgent when cron fires.
-func TestLoadSchedules_EntryFiresTriggerAgent(t *testing.T) {
-	db := testDB(t)
-	db.SetMaxOpenConns(1)
-	seedAgent(t, db, "a1", "bob", "Bob", "", "ws1", "@every 25ms", "", true)
-
-	resolver := &mockResolver{createChatErr: fmt.Errorf("stop early")}
-	s := newTestScheduler(db, resolver, nil, nil)
-	if err := s.Start(context.Background()); err != nil {
-		t.Fatalf("Start: %v", err)
+func configureDurableCron(t *testing.T, s *Scheduler, db *sql.DB) {
+	t.Helper()
+	var seq int
+	var name, path string
+	if err := db.QueryRow(`PRAGMA database_list`).Scan(&seq, &name, &path); err != nil || path == "" {
+		t.Fatalf("database file: %q %v", path, err)
 	}
-	t.Cleanup(s.Stop)
-
-	waitUntil(t, func() bool {
-		resolver.mu.Lock()
-		defer resolver.mu.Unlock()
-		return len(resolver.createdChats) >= 1
-	}, "cron entry to fire triggerAgent")
-
-	resolver.mu.Lock()
-	defer resolver.mu.Unlock()
-	if resolver.createdChats[0].AgentID != "a1" {
-		t.Errorf("fired chat agent = %q, want a1", resolver.createdChats[0].AgentID)
+	acceptor, err := work.OpenAcceptor(path, work.DefaultAcceptanceBudget)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = acceptor.Close() })
+	guard := work.NewDiskGuard(filepath.Dir(path))
+	guard.MinFree = 1
+	if err := s.SetDurableAcceptance(acceptor, guard, nil); err != nil {
+		t.Fatal(err)
 	}
 }
 
-// The closure registered by UpdateSchedule must also fire.
-func TestUpdateSchedule_EntryFiresTriggerAgent(t *testing.T) {
-	db := testDB(t)
-	db.SetMaxOpenConns(1)
-	seedAgent(t, db, "a1", "bob", "Bob", "", "ws1", "", "", false)
-
-	resolver := &mockResolver{createChatErr: fmt.Errorf("stop early")}
+// The registered closure accepts work; it does not execute an agent directly.
+func TestLoadSchedules_EntryAcceptsWork(t *testing.T) {
+	db, _ := dueFixture(t)
+	if _, err := db.Exec(`UPDATE agents SET schedule_cron='@every 25ms' WHERE id='a1'`); err != nil {
+		t.Fatal(err)
+	}
+	resolver := &mockResolver{createChatErr: fmt.Errorf("direct execution forbidden")}
 	s := newTestScheduler(db, resolver, nil, nil)
+	configureDurableCron(t, s, db)
+	s.nowFn = func() time.Time { return acceptanceNow }
 	if err := s.Start(context.Background()); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 	t.Cleanup(s.Stop)
 
+	waitUntil(t, func() bool {
+		var n int
+		_ = db.QueryRow(`SELECT COUNT(*) FROM work_items WHERE source='schedule'`).Scan(&n)
+		return n == 1
+	}, "cron entry to accept scheduled work")
+	resolver.mu.Lock()
+	defer resolver.mu.Unlock()
+	if len(resolver.createdChats) != 0 {
+		t.Fatal("cron executed an agent outside the dispatcher")
+	}
+}
+
+// A live schedule edit must use the same acceptance-only callback.
+func TestUpdateSchedule_EntryAcceptsWork(t *testing.T) {
+	db, _ := dueFixture(t)
+	if _, err := db.Exec(`UPDATE agents SET schedule_enabled=0, schedule_cron=NULL WHERE id='a1'`); err != nil {
+		t.Fatal(err)
+	}
+	resolver := &mockResolver{createChatErr: fmt.Errorf("direct execution forbidden")}
+	s := newTestScheduler(db, resolver, nil, nil)
+	configureDurableCron(t, s, db)
+	if err := s.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	t.Cleanup(s.Stop)
+
+	if _, err := db.Exec(`UPDATE agents SET schedule_enabled=1, schedule_cron='@every 25ms', schedule_next_run=? WHERE id='a1'`, acceptanceDue); err != nil {
+		t.Fatal(err)
+	}
+	s.nowFn = func() time.Time { return acceptanceNow }
 	if err := s.UpdateSchedule(context.Background(), "a1", "@every 25ms", "go", true); err != nil {
 		t.Fatalf("UpdateSchedule: %v", err)
 	}
+	// UpdateSchedule resets the cursor to a future tick. Force one due instant
+	// to make the acceptance path observable without waiting for wall time.
+	if _, err := db.Exec(`UPDATE agents SET schedule_next_run=? WHERE id='a1'`, acceptanceDue); err != nil {
+		t.Fatal(err)
+	}
 
 	waitUntil(t, func() bool {
-		resolver.mu.Lock()
-		defer resolver.mu.Unlock()
-		return len(resolver.createdChats) >= 1
-	}, "updated cron entry to fire")
+		var n int
+		_ = db.QueryRow(`SELECT COUNT(*) FROM work_items WHERE source='schedule'`).Scan(&n)
+		return n == 1
+	}, "updated cron entry to accept")
+	resolver.mu.Lock()
+	defer resolver.mu.Unlock()
+	if len(resolver.createdChats) != 0 {
+		t.Fatal("edited schedule executed outside dispatcher")
+	}
 }
 
 // ---------------------------------------------------------------------------
