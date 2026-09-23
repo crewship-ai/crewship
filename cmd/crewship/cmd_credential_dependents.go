@@ -34,9 +34,12 @@ var credDependentsCmd = &cobra.Command{
 			Routines []struct {
 				Slug       string `json:"slug" yaml:"slug"`
 				Name       string `json:"name" yaml:"name"`
+				Type       string `json:"type" yaml:"type"`
 				Resolution string `json:"resolution" yaml:"resolution"`
 			} `json:"routines" yaml:"routines"`
-			VisibilityLimited bool `json:"visibility_limited" yaml:"visibility_limited"`
+			RecordedUse          string `json:"recorded_use" yaml:"recorded_use"`
+			VisibilityLimited    bool   `json:"visibility_limited" yaml:"visibility_limited"`
+			DynamicUsesUntracked bool   `json:"dynamic_uses_untracked" yaml:"dynamic_uses_untracked"`
 		}
 		if err := cli.ReadJSON(resp, &body); err != nil {
 			return err
