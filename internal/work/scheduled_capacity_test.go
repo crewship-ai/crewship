@@ -22,7 +22,7 @@ func TestCheckIngress_ScheduledInputSharesWebhookByteBudget(t *testing.T) {
 	if err := checkIngress(t, s, db, lim, IngressRequest{WorkspaceID: "ws1", EndpointID: "ep", BodyBytes: 1}); err != nil {
 		t.Fatalf("exact boundary refused: %v", err)
 	}
-	if _, err := db.Exec(`UPDATE work_items SET state='cancelled', terminal_at=updated_at WHERE id=?`, r.WorkID); err != nil {
+	if _, err := db.ExecContext(t.Context(), `UPDATE work_items SET state='cancelled', terminal_at=updated_at WHERE id=?`, r.WorkID); err != nil {
 		t.Fatal(err)
 	}
 	if err := checkIngress(t, s, db, lim, IngressRequest{WorkspaceID: "ws1", EndpointID: "ep", BodyBytes: 2}); err != nil {

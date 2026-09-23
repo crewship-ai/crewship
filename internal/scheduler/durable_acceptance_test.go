@@ -25,7 +25,7 @@ func dueFixture(t *testing.T) (*sql.DB, *work.Store) {
 		`INSERT INTO workspaces (id,name,slug) VALUES ('ws1','Test','test')`,
 		`INSERT INTO crews (id,workspace_id,name,slug) VALUES ('crew1','ws1','Test','test')`,
 	} {
-		if _, err := db.Exec(q); err != nil {
+		if _, err := db.ExecContext(t.Context(), q); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -34,8 +34,7 @@ func dueFixture(t *testing.T) (*sql.DB, *work.Store) {
 	return db, work.NewStore(db).WithClock(func() time.Time { return acceptanceNow })
 }
 
-func acceptDue(db *sql.DB, store *work.Store, workspace string, limits work.IngressLimits) (work.Receipt, error) {
-	ctx := context.Background()
+func acceptDue(ctx context.Context, db *sql.DB, store *work.Store, workspace string, limits work.IngressLimits) (work.Receipt, error) {
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return work.Receipt{}, err
@@ -50,11 +49,11 @@ func acceptDue(db *sql.DB, store *work.Store, workspace string, limits work.Ingr
 
 func TestAcceptDueTx_AtomicCursorAndImmutableInput(t *testing.T) {
 	db, store := dueFixture(t)
-	r, err := acceptDue(db, store, "ws1", work.IngressLimits{})
+	r, err := acceptDue(t.Context(), db, store, "ws1", work.IngressLimits{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	it, err := store.Get(context.Background(), r.WorkID)
+	it, err := store.Get(t.Context(), r.WorkID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,20 +71,20 @@ func TestAcceptDueTx_AtomicCursorAndImmutableInput(t *testing.T) {
 	if last.Valid || next.String != "2026-09-22T12:08:00Z" {
 		t.Fatalf("last=%v next=%v", last, next)
 	}
-	if _, err := acceptDue(db, store, "ws1", work.IngressLimits{}); !errors.Is(err, ErrScheduleNotDue) {
+	if _, err := acceptDue(t.Context(), db, store, "ws1", work.IngressLimits{}); !errors.Is(err, ErrScheduleNotDue) {
 		t.Fatalf("duplicate tick: %v", err)
 	}
 	// A stale cursor cannot change the accepted prompt or create another work,
 	// even when the queue is full (duplicate lookup precedes admission checks).
 	setNextRun(t, db, "a1", acceptanceDue)
-	if _, err := db.Exec(`UPDATE agents SET schedule_prompt='changed' WHERE id='a1'`); err != nil {
+	if _, err := db.ExecContext(t.Context(), `UPDATE agents SET schedule_prompt='changed' WHERE id='a1'`); err != nil {
 		t.Fatal(err)
 	}
-	dup, err := acceptDue(db, store, "ws1", work.IngressLimits{WorkspaceNonTerminal: 1, WorkspaceRawBytes: 1})
+	dup, err := acceptDue(t.Context(), db, store, "ws1", work.IngressLimits{WorkspaceNonTerminal: 1, WorkspaceRawBytes: 1})
 	if err != nil || !dup.Duplicate || dup.WorkID != r.WorkID {
 		t.Fatalf("duplicate=%+v err=%v", dup, err)
 	}
-	original, err := store.Get(context.Background(), r.WorkID)
+	original, err := store.Get(t.Context(), r.WorkID)
 	if err != nil || original.InputJSON != it.InputJSON {
 		t.Fatalf("input changed: %v", err)
 	}
@@ -94,15 +93,15 @@ func TestAcceptDueTx_AtomicCursorAndImmutableInput(t *testing.T) {
 func TestAcceptDueTx_RollbackIncludesWorkAndCursor(t *testing.T) {
 	db, store := dueFixture(t)
 	// Fail the final statement after AcceptTx inserted work and its event.
-	if _, err := db.Exec(`CREATE TRIGGER reject_cursor BEFORE UPDATE OF schedule_next_run ON agents BEGIN SELECT RAISE(ABORT, 'cursor failure'); END`); err != nil {
+	if _, err := db.ExecContext(t.Context(), `CREATE TRIGGER reject_cursor BEFORE UPDATE OF schedule_next_run ON agents BEGIN SELECT RAISE(ABORT, 'cursor failure'); END`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := acceptDue(db, store, "ws1", work.IngressLimits{}); err == nil {
+	if _, err := acceptDue(t.Context(), db, store, "ws1", work.IngressLimits{}); err == nil {
 		t.Fatal("expected cursor failure")
 	}
 	for _, table := range []string{"work_items", "work_events"} {
 		var count int
-		if err := db.QueryRow(`SELECT COUNT(*) FROM ` + table).Scan(&count); err != nil {
+		if err := db.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM `+table).Scan(&count); err != nil {
 			t.Fatal(err)
 		}
 		if count != 0 {
@@ -125,7 +124,7 @@ func TestAcceptDueTx_ConcurrentTicksAcceptOnce(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			<-start
-			_, err := acceptDue(db, store, "ws1", work.IngressLimits{})
+			_, err := acceptDue(t.Context(), db, store, "ws1", work.IngressLimits{})
 			errs <- err
 		}()
 	}
@@ -144,7 +143,7 @@ func TestAcceptDueTx_ConcurrentTicksAcceptOnce(t *testing.T) {
 		t.Fatalf("accepted %d ticks", accepted)
 	}
 	var count int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM work_items`).Scan(&count); err != nil {
+	if err := db.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM work_items`).Scan(&count); err != nil {
 		t.Fatal(err)
 	}
 	if count != 1 {
@@ -168,11 +167,11 @@ func TestAcceptDueTx_RefusalDoesNotAdvance(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			db, store := dueFixture(t)
 			if tc.change != "" {
-				if _, err := db.Exec(tc.change); err != nil {
+				if _, err := db.ExecContext(t.Context(), tc.change); err != nil {
 					t.Fatal(err)
 				}
 			}
-			if _, err := acceptDue(db, store, tc.workspace, tc.limits); !errors.Is(err, tc.want) {
+			if _, err := acceptDue(t.Context(), db, store, tc.workspace, tc.limits); !errors.Is(err, tc.want) {
 				t.Fatalf("got %v want %v", err, tc.want)
 			}
 			_, next := agentSchedule(t, db, "a1")
@@ -186,10 +185,10 @@ func TestAcceptDueTx_RefusalDoesNotAdvance(t *testing.T) {
 func TestAcceptDueTx_LegacyReservationBlocksNewOwner(t *testing.T) {
 	db, store := dueFixture(t)
 	key := pipeline.ScheduledFireIdempotencyKey("agent-sched", "a1", acceptanceDue)
-	if _, err := db.Exec(`INSERT INTO pipeline_run_idempotency (workspace_id,pipeline_id,idempotency_key,run_id,expires_at) VALUES ('ws1','a1',?,'old-run','2026-09-23T12:00:00Z')`, key); err != nil {
+	if _, err := db.ExecContext(t.Context(), `INSERT INTO pipeline_run_idempotency (workspace_id,pipeline_id,idempotency_key,run_id,expires_at) VALUES ('ws1','a1',?,'old-run','2026-09-23T12:00:00Z')`, key); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := acceptDue(db, store, "ws1", work.IngressLimits{}); !errors.Is(err, ErrLegacyOccurrence) {
+	if _, err := acceptDue(t.Context(), db, store, "ws1", work.IngressLimits{}); !errors.Is(err, ErrLegacyOccurrence) {
 		t.Fatalf("legacy owner ignored: %v", err)
 	}
 	_, next := agentSchedule(t, db, "a1")
@@ -200,20 +199,20 @@ func TestAcceptDueTx_LegacyReservationBlocksNewOwner(t *testing.T) {
 
 func TestAcceptDueTx_UniqueIndexRejectsBypass(t *testing.T) {
 	db, store := dueFixture(t)
-	r, err := acceptDue(db, store, "ws1", work.IngressLimits{})
+	r, err := acceptDue(t.Context(), db, store, "ws1", work.IngressLimits{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	it, err := store.Get(context.Background(), r.WorkID)
+	it, err := store.Get(t.Context(), r.WorkID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	tx, err := db.Begin()
+	tx, err := db.BeginTx(t.Context(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer tx.Rollback()
-	_, err = store.AcceptTx(context.Background(), tx, work.AcceptRequest{WorkspaceID: "ws1", Source: work.SourceSchedule, SourceRef: it.SourceRef, AgentID: "a1", DomainKind: work.DomainAgentRun, Class: work.ClassBackground})
+	_, err = store.AcceptTx(t.Context(), tx, work.AcceptRequest{WorkspaceID: "ws1", Source: work.SourceSchedule, SourceRef: it.SourceRef, AgentID: "a1", DomainKind: work.DomainAgentRun, Class: work.ClassBackground})
 	if err == nil {
 		t.Fatal("unique occurrence index allowed a second automatic work")
 	}
@@ -230,12 +229,12 @@ func TestAcceptDueTx_BacklogLimitsPreserveUnacceptedOccurrence(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			db, store := dueFixture(t)
-			if _, err := acceptDue(db, store, "ws1", work.IngressLimits{}); err != nil {
+			if _, err := acceptDue(t.Context(), db, store, "ws1", work.IngressLimits{}); err != nil {
 				t.Fatal(err)
 			}
 			const second = "2026-09-22T12:01:00Z"
 			setNextRun(t, db, "a1", second)
-			if _, err := acceptDue(db, store, "ws1", tc.limits); !errors.Is(err, tc.want) {
+			if _, err := acceptDue(t.Context(), db, store, "ws1", tc.limits); !errors.Is(err, tc.want) {
 				t.Fatalf("got %v want %v", err, tc.want)
 			}
 			_, next := agentSchedule(t, db, "a1")
@@ -243,7 +242,7 @@ func TestAcceptDueTx_BacklogLimitsPreserveUnacceptedOccurrence(t *testing.T) {
 				t.Fatalf("rejected occurrence consumed: %v", next)
 			}
 			var n int
-			if err := db.QueryRow(`SELECT COUNT(*) FROM work_items`).Scan(&n); err != nil {
+			if err := db.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM work_items`).Scan(&n); err != nil {
 				t.Fatal(err)
 			}
 			if n != 1 {

@@ -106,7 +106,7 @@ func AcceptDueTx(ctx context.Context, tx *sql.Tx, store *work.Store, workspaceID
 		}
 		input, err := json.Marshal(ScheduledInput{Version: 1, AgentID: agentID, Cron: expr, Prompt: prompt, Occurrence: dueKey})
 		if err != nil {
-			return work.Receipt{}, err
+			return work.Receipt{}, fmt.Errorf("scheduler: count pending scheduled work: %w", err)
 		}
 		// Schedules have no webhook delivery row. Count their per-agent backlog
 		// explicitly, then apply the common workspace count/byte budget.
@@ -125,7 +125,7 @@ func AcceptDueTx(ctx context.Context, tx *sql.Tx, store *work.Store, workspaceID
 			return work.Receipt{}, work.ErrEndpointFull
 		}
 		if err := store.CheckIngressTx(ctx, tx, limits, work.IngressRequest{WorkspaceID: workspaceID, BodyBytes: int64(len(input))}); err != nil {
-			return work.Receipt{}, err
+			return work.Receipt{}, fmt.Errorf("scheduler: check ingress capacity: %w", err)
 		}
 		hash := sha256.Sum256(input)
 		identity := sha256.Sum256([]byte(workspaceID + "\x00" + agentID + "\x00" + dueKey))
@@ -137,7 +137,7 @@ func AcceptDueTx(ctx context.Context, tx *sql.Tx, store *work.Store, workspaceID
 			InputJSON: string(input), InputSHA256: hex.EncodeToString(hash[:]), EligibleAt: due,
 		})
 		if err != nil {
-			return work.Receipt{}, err
+			return work.Receipt{}, fmt.Errorf("scheduler: accept due work: %w", err)
 		}
 	}
 	// Advancing the cursor commits with the work and its event, never before.
