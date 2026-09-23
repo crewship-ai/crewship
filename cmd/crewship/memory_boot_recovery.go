@@ -15,12 +15,12 @@ import (
 // recoverMemoryBeforeServe runs after migration and before server construction.
 // If an intent cannot be settled, admitting another writer would make the
 // filesystem/ledger disagreement harder to repair, so boot fails closed.
-func recoverMemoryBeforeServe(ctx context.Context, db *sql.DB, memoryRoot string, logger *slog.Logger) error {
+func recoverMemoryBeforeServe(ctx context.Context, db *sql.DB, memoryRoot, storageRoot string, logger *slog.Logger) error {
 	blobRoot := ""
 	if memoryRoot != "" {
 		blobRoot = filepath.Join(memoryRoot, "versions")
 	}
-	recovered, conflicted, err := memory.RecoverPending(ctx, db, blobRoot)
+	recovered, conflicted, err := memory.RecoverPendingUnderRoot(ctx, db, blobRoot, storageRoot)
 	if err != nil {
 		return fmt.Errorf("recover pending memory mutations before serving: %w", err)
 	}

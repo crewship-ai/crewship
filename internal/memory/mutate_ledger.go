@@ -235,12 +235,27 @@ func upsertAnchorTx(ctx context.Context, tx *sql.Tx, workspaceID, auditPath, sco
 }
 
 // RecoverPending completes or conflicts every unconfirmed mutation intent in
-// the ledger. Call it at boot, before any writer is admitted.
+// the ledger for trusted in-process callers. Host boot must use
+// RecoverPendingUnderRoot so persisted paths cannot escape the configured
+// storage boundary after a restore or path change.
 //
 // It returns how many intents it settled into a confirmed write and how many it
 // declared drifted. A conflicted intent is NOT an error: it means a third party
 // changed the file, and §8 forbids resolving that by overwriting.
 func RecoverPending(ctx context.Context, db *sql.DB, blobRoot string) (recovered, conflicted int, err error) {
+	return recoverPending(ctx, db, blobRoot, "", false)
+}
+
+// RecoverPendingUnderRoot is the host boot path. The ledger stores absolute
+// canonical paths, which may be stale after a database restore or a storage
+// move. Never trust them as filesystem authority: each path must resolve below
+// the currently configured storage root, with its parent pinned through
+// os.Root, before recovery may read, lock, or write it.
+func RecoverPendingUnderRoot(ctx context.Context, db *sql.DB, blobRoot, storageRoot string) (recovered, conflicted int, err error) {
+	return recoverPending(ctx, db, blobRoot, storageRoot, true)
+}
+
+func recoverPending(ctx context.Context, db *sql.DB, blobRoot, storageRoot string, confined bool) (recovered, conflicted int, err error) {
 	if db == nil {
 		return 0, 0, fmt.Errorf("%w: recovery needs the mutation ledger", ErrLedgerRequired)
 	}
@@ -269,12 +284,27 @@ func RecoverPending(ctx context.Context, db *sql.DB, blobRoot string) (recovered
 	}
 
 	for _, k := range keys {
-		lk := NewFileLock(k.canonical + ".lock")
+		file := &mutationFile{path: k.canonical}
+		if confined {
+			if storageRoot == "" {
+				return recovered, conflicted, fmt.Errorf("memory recovery storage root is not configured for %s", k.auditPath)
+			}
+			file, err = openMutationFile(storageRoot, k.canonical, false)
+			if err != nil {
+				return recovered, conflicted, fmt.Errorf("open memory recovery path %s under storage root: %w", k.auditPath, err)
+			}
+			if file.missing {
+				return recovered, conflicted, fmt.Errorf("memory recovery parent is missing for %s under storage root", k.auditPath)
+			}
+		}
+		lk := file.lock()
 		if lerr := lk.Lock(); lerr != nil {
+			file.close()
 			return recovered, conflicted, fmt.Errorf("recovery lock %s: %w", k.canonical, lerr)
 		}
-		n, rerr := recoverKeyLocked(ctx, db, k.ws, k.auditPath, k.canonical, blobRoot)
+		n, rerr := recoverFileLocked(ctx, db, k.ws, k.auditPath, file, blobRoot)
 		_ = lk.Unlock()
+		file.close()
 		if rerr != nil {
 			if errors.Is(rerr, ErrMemoryConflict) {
 				conflicted++

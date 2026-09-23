@@ -219,7 +219,7 @@ var startCmd = &cobra.Command{
 		// the previous process stopped. Settle those intents before constructing
 		// the server: its routes must not admit another writer over an unresolved
 		// file. A failed recovery is a startup error, not a warning.
-		if err := recoverMemoryBeforeServe(context.Background(), db.DB, cfg.Storage.MemoryRoot, logger); err != nil {
+		if err := recoverMemoryBeforeServe(context.Background(), db.DB, cfg.Storage.MemoryRoot, cfg.Storage.BasePath, logger); err != nil {
 			return err
 		}
 		if err := database.SeedBundledSkills(context.Background(), db.DB, logger); err != nil {

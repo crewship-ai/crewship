@@ -47,7 +47,7 @@ func TestRecoverMemoryBeforeServe_ConfirmsExistingTarget(t *testing.T) {
 		t.Fatal(err)
 	}
 	pendingBootMutation(t, db, target, hashBootContent(content), len(content))
-	if err := recoverMemoryBeforeServe(t.Context(), db, root, slog.Default()); err != nil {
+	if err := recoverMemoryBeforeServe(t.Context(), db, root, root, slog.Default()); err != nil {
 		t.Fatal(err)
 	}
 	var state string
@@ -64,7 +64,7 @@ func TestRecoverMemoryBeforeServe_RefusesMissingDurableBlob(t *testing.T) {
 	root := t.TempDir()
 	target := filepath.Join(root, "AGENT.md")
 	pendingBootMutation(t, db, target, hashBootContent([]byte("missing blob\n")), len("missing blob\n"))
-	err := recoverMemoryBeforeServe(t.Context(), db, root, slog.Default())
+	err := recoverMemoryBeforeServe(t.Context(), db, root, root, slog.Default())
 	if err == nil || !strings.Contains(err.Error(), "recover pending memory mutations before serving") {
 		t.Fatalf("startup accepted an unrecoverable intent: %v", err)
 	}
@@ -78,40 +78,63 @@ func TestRecoverMemoryBeforeServe_RefusesMissingDurableBlob(t *testing.T) {
 }
 
 func TestStart_RefusesUnrecoverableMemoryBeforeServing(t *testing.T) {
-	root := t.TempDir()
-	path := filepath.Join(root, "crewship.db")
-	db := testutil.MigratedDBAt(t, path).DB
-	pendingBootMutation(t, db, filepath.Join(root, "AGENT.md"), hashBootContent([]byte("missing\n")), len("missing\n"))
-
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	port := listener.Addr().(*net.TCPAddr).Port
-	_ = listener.Close()
-	configPath := filepath.Join(root, "server.yaml")
-	config := fmt.Sprintf("server:\n  host: 127.0.0.1\n  port: %d\n", port)
-	if err := os.WriteFile(configPath, []byte(config), 0o600); err != nil {
-		t.Fatal(err)
-	}
 	binary := buildCrewshipBinary(t)
-	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
-	defer cancel()
-	child := exec.CommandContext(ctx, binary, "start", "--no-docker", "--config", configPath, "--db", path)
-	child.Dir = root
-	for _, entry := range os.Environ() {
-		key, _, _ := strings.Cut(entry, "=")
-		if strings.HasPrefix(key, "CREWSHIP_") || key == "DATABASE_URL" || key == "NEXTAUTH_SECRET" || strings.HasPrefix(key, "ENCRYPTION_KEY") {
-			continue
-		}
-		child.Env = append(child.Env, entry)
-	}
-	child.Env = append(child.Env, "CREWSHIP_DATA_DIR="+root, "CREWSHIP_SKIP_SIDECAR=1")
-	output, err := child.CombinedOutput()
-	if ctx.Err() != nil {
-		t.Fatalf("server did not refuse the pending mutation before serving: %v", ctx.Err())
-	}
-	if err == nil || !strings.Contains(string(output), "recover pending memory mutations before serving") {
-		t.Fatalf("boot error = %v; expected memory recovery failure, output: %s", err, output)
+	for _, tc := range []struct {
+		name    string
+		outside bool
+	}{
+		{name: "missing durable blob"},
+		{name: "restored path outside current storage", outside: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			storageRoot := filepath.Join(root, "storage")
+			if err := os.MkdirAll(storageRoot, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			path := filepath.Join(root, "crewship.db")
+			db := testutil.MigratedDBAt(t, path).DB
+			content := []byte("missing\n")
+			target := filepath.Join(storageRoot, "AGENT.md")
+			if tc.outside {
+				content = []byte("already on disk\n")
+				target = filepath.Join(t.TempDir(), "AGENT.md")
+				if err := os.WriteFile(target, content, 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			pendingBootMutation(t, db, target, hashBootContent(content), len(content))
+
+			listener, err := net.Listen("tcp", "127.0.0.1:0")
+			if err != nil {
+				t.Fatal(err)
+			}
+			port := listener.Addr().(*net.TCPAddr).Port
+			_ = listener.Close()
+			configPath := filepath.Join(root, "server.yaml")
+			config := fmt.Sprintf("server:\n  host: 127.0.0.1\n  port: %d\nstorage:\n  base_path: %s\n  memory_root: %s\n", port, storageRoot, filepath.Join(root, "memory"))
+			if err := os.WriteFile(configPath, []byte(config), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
+			defer cancel()
+			child := exec.CommandContext(ctx, binary, "start", "--no-docker", "--config", configPath, "--db", path)
+			child.Dir = root
+			for _, entry := range os.Environ() {
+				key, _, _ := strings.Cut(entry, "=")
+				if strings.HasPrefix(key, "CREWSHIP_") || key == "DATABASE_URL" || key == "NEXTAUTH_SECRET" || strings.HasPrefix(key, "ENCRYPTION_KEY") {
+					continue
+				}
+				child.Env = append(child.Env, entry)
+			}
+			child.Env = append(child.Env, "CREWSHIP_DATA_DIR="+root, "CREWSHIP_SKIP_SIDECAR=1")
+			output, err := child.CombinedOutput()
+			if ctx.Err() != nil {
+				t.Fatalf("server did not refuse the pending mutation before serving: %v", ctx.Err())
+			}
+			if err == nil || !strings.Contains(string(output), "recover pending memory mutations before serving") {
+				t.Fatalf("boot error = %v; expected memory recovery failure, output: %s", err, output)
+			}
+		})
 	}
 }
