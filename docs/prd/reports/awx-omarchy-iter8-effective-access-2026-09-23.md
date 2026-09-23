@@ -1,7 +1,7 @@
 # Iterace 8: vlastní přístup k rutině a credentialu
 
-Větev `feat/access-me-routines-credentials`, issue #2667. Implementace vychází z
-`main` po merge #2654; před PR se rebasuje na nejnovější `origin/main`.
+Větev `feat/access-me-routines-credentials`, issue #2667. Implementace je
+rebasovaná na `origin/main` `42b4b9ac8` (2026-09-23).
 
 ## Kontrakt
 
@@ -32,9 +32,12 @@ kontroluje shodu s autorizační bránou skutečného `/run`. Credential testy
 pokrývají viditelnost, SEALED, workspace switch, scope, capability, CLI token
 a nepřítomnost tajemství v odpovědi. Frontend testy pokrývají success →
 refetch failure → recovery, závod při změně URL, malformed response, neznámý
-stav a serverový verdikt odlišný od lokální role. Cílené testy, Go vet,
-TypeScript, lint, build a dokumentační gate byly spuštěny; úplné sady a CI
-budou doplněny po dokončení.
+stav a serverový verdikt odlišný od lokální role. Cílené Go testy, Go vet,
+TypeScript, lint, statický build, dokumentační gate a celá frontend sada
+(`777` souborů, `9266` testů) prošly. Úplné `go test ./... -count=1 -p 2`
+narazilo po deseti minutách na defaultní timeout obrovského balíku
+`internal/api`; cílená matice a existující capability/reveal testy prošly.
+Celá Go sada proto není prohlášena za zelenou. CI bude ověřeno samostatně.
 
 ## Zbývající limity pro iteraci 9
 
