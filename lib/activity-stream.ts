@@ -78,6 +78,7 @@ export const ACTIVITY_SOURCES: ActivitySourceMeta[] = [
     token: "--notice",
     types: [
       "pipeline.published",
+      "pipeline.decision.evaluated",
       "pipeline.run.started",
       "pipeline.run.completed",
       "pipeline.run.failed",

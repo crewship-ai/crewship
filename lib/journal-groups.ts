@@ -44,6 +44,7 @@ export const ENTRY_TYPES_BY_GROUP: Record<EntryGroup, string[]> = {
   ],
   routine: [
     "pipeline.published",
+    "pipeline.decision.evaluated",
     "pipeline.run.started",
     "pipeline.run.completed",
     "pipeline.run.failed",

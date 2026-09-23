@@ -180,8 +180,9 @@ describe("brandIconKey", () => {
 })
 
 describe("stepDeterminism", () => {
-  it("classifies agent_run as AI, everything else as script", () => {
+  it("classifies agent_run and decision as AI", () => {
     expect(stepDeterminism("agent_run")).toBe("ai")
+    expect(stepDeterminism("decision")).toBe("ai")
     expect(stepDeterminism("http")).toBe("script")
     expect(stepDeterminism("code")).toBe("script")
     expect(stepDeterminism("transform")).toBe("script")

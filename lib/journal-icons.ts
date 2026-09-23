@@ -191,6 +191,7 @@ export const JOURNAL_ENTRY_ICONS: Partial<Record<JournalEntryType, LucideIcon>> 
   // it", and giving the pipeline engine its own vocabulary would make
   // one product concept read as two.
   "pipeline.published": CheckCircle,
+  "pipeline.decision.evaluated": Sparkles,
   "pipeline.run.started": Play,
   "pipeline.run.completed": CheckCircle,
   "pipeline.run.failed": XCircle,

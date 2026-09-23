@@ -43,6 +43,7 @@ const doc = schema as unknown as {
 /** What each step kind is for, in one line. Authored, not derived. */
 const KIND_DETAIL: Record<string, string> = {
   agent_run: "An agent decides — unpredictable from the definition, auditable only after the fact",
+  decision: "Chooses one declared option from event data; uncertain results go to review",
   call_pipeline: "Calls another routine as a sub-process",
   http: "One HTTP call to a known endpoint — deterministic",
   code: "Runs inline code in a sandbox",
@@ -57,6 +58,7 @@ const KIND_DETAIL: Record<string, string> = {
 
 /** Sub-object each kind carries its body in, when it has one. */
 const KIND_BODY_DEF: Record<string, string> = {
+  decision: "DecisionStep",
   http: "HTTPStep",
   code: "CodeStep",
   wait: "WaitStep",

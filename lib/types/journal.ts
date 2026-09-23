@@ -104,6 +104,7 @@ export const JOURNAL_ENTRY_TYPES = [
   // again.
   // Routines
   "pipeline.published",
+  "pipeline.decision.evaluated",
   "pipeline.run.started",
   "pipeline.run.completed",
   "pipeline.run.failed",

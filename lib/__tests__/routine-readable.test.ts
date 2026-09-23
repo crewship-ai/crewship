@@ -2,6 +2,17 @@ import { describe, it, expect } from "vitest"
 import { describeRoutine, describeStep } from "@/lib/routine-readable"
 
 describe("describeStep", () => {
+  it("shows the declared destinations of a decision step", () => {
+    const step = describeStep({
+      id: "route",
+      type: "decision",
+      decision: { options: { sre: "Outage", review: "Unclear" } },
+    }, 1)
+    expect(step.kind).toBe("decision")
+    expect(step.title).toBe("Choose a route")
+    expect(step.detail).toBe("Options: sre, review")
+  })
+
   it("renders an agent_run step in plain language", () => {
     const step = describeStep(
       {

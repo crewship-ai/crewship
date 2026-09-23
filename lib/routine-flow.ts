@@ -233,6 +233,17 @@ function stepToNode(raw: unknown, i: number): FlowNode | null {
         detail: str(s["agent_slug"]) || truncate(str(s["prompt"])) || "AI step",
         iconKey: "agent",
       }
+    case "decision": {
+      const decision = asRecord(s["decision"])
+      const options = asRecord(decision?.["options"])
+      return {
+        id,
+        kind: "step",
+        label: "Decision",
+        detail: options ? `${Object.keys(options).length} options` : "choose a route",
+        iconKey: "agent",
+      }
+    }
     case "transform": {
       const t = asRecord(s["transform"])
       return {
@@ -359,11 +370,10 @@ export type StepDeterminism = "ai" | "script"
 
 /**
  * stepDeterminism classifies a step as AI (non-deterministic LLM call) or
- * script (deterministic). Only `agent_run` invokes a model; everything else
- * — http, code, transform, wait, call_pipeline — is deterministic.
+ * script (deterministic). Agent and decision steps invoke models.
  */
 export function stepDeterminism(type: string): StepDeterminism {
-  return type === "agent_run" ? "ai" : "script"
+  return type === "agent_run" || type === "decision" ? "ai" : "script"
 }
 
 export interface PlainStep {

@@ -15,6 +15,7 @@
 export type ReadableStepKind =
   | "trigger"
   | "agent_run"
+  | "decision"
   | "http"
   | "transform"
   | "wait"
@@ -140,6 +141,18 @@ function describeStepAction(step: unknown, position: number): ReadableStep {
         title: agent ? `Ask ${agent}` : "Ask an agent",
         detail: prompt || undefined,
         technical: `agent_run · ${tier}`,
+      }
+    }
+
+    case "decision": {
+      const decision = isRecord(step["decision"]) ? step["decision"] : {}
+      const options = isRecord(decision["options"]) ? Object.keys(decision["options"]) : []
+      return {
+        position,
+        kind: "decision",
+        title: "Choose a route",
+        detail: options.length > 0 ? `Options: ${options.join(", ")}` : undefined,
+        technical: "decision",
       }
     }
 

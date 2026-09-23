@@ -33,6 +33,7 @@ export const FOLD_MIN_TRANSFORMS = 3
 /** The performer/role word for a step kind, as the prototype names them. */
 export const STEP_ROLE_LABEL: Record<string, string> = {
   agent_run: "Agent",
+  decision: "Decision model",
   script: "Script",
   transform: "Prepare data",
   http: "Call a service",

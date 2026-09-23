@@ -277,6 +277,7 @@ export const TYPE_TO_GROUP: Record<string, EntryGroup> = {
   // System where they would be filed and forgotten. Same call
   // lib/activity-stream.ts's "Routines" facet already makes.
   "pipeline.published": "routine",
+  "pipeline.decision.evaluated": "routine",
   "pipeline.run.started": "routine",
   "pipeline.run.completed": "routine",
   "pipeline.run.failed": "routine",

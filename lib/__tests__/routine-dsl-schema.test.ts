@@ -15,6 +15,7 @@ describe("stepKinds", () => {
     expect(kinds.map((k) => k.kind).sort()).toEqual(
       [
         "agent_run",
+        "decision",
         "call_pipeline",
         "code",
         "foreach",
@@ -79,6 +80,7 @@ describe("keysForKind", () => {
     expect(keysForKind("http").map((k) => k.key)).toContain("url")
     expect(keysForKind("foreach").map((k) => k.key)).toContain("items")
     expect(keysForKind("query").map((k) => k.key)).toContain("source")
+    expect(keysForKind("decision").map((k) => k.key)).toContain("options")
   })
 
   it("does not offer another kind's fields", () => {
