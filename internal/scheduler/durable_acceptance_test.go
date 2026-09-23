@@ -101,14 +101,13 @@ func TestAcceptDueTx_RollbackIncludesWorkAndCursor(t *testing.T) {
 	if _, err := acceptDue(t.Context(), db, store, "ws1", work.IngressLimits{}); err == nil {
 		t.Fatal("expected cursor failure")
 	}
-	for _, table := range []string{"work_items", "work_events"} {
-		var count int
-		if err := db.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM `+table).Scan(&count); err != nil {
-			t.Fatal(err)
-		}
-		if count != 0 {
-			t.Fatalf("%s has %d rows after rollback", table, count)
-		}
+	var workCount, eventCount int
+	if err := db.QueryRowContext(t.Context(), `SELECT
+		(SELECT COUNT(*) FROM work_items), (SELECT COUNT(*) FROM work_events)`).Scan(&workCount, &eventCount); err != nil {
+		t.Fatal(err)
+	}
+	if workCount != 0 || eventCount != 0 {
+		t.Fatalf("rollback left %d work items and %d events", workCount, eventCount)
 	}
 	_, next := agentSchedule(t, db, "a1")
 	if next.String != acceptanceDue {
