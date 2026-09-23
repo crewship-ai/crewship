@@ -450,6 +450,46 @@ describe("Test now request lifecycle", () => {
 })
 
 describe("used by", () => {
+  it("shows configured routine references separately from recorded use", async () => {
+    h.apiFetch.mockImplementation((url: unknown) => Promise.resolve({
+      ok: true, status: 200,
+      json: async () => String(url).includes("/dependents") ? {
+        routines: [{ slug: "billing-check", name: "Billing check", type: "api_key", resolution: "would_resolve" }],
+        recorded_use: "not_attributed", visibility_limited: false, dynamic_uses_untracked: true,
+      } : [],
+    }))
+    renderSheet()
+    expect(await screen.findByRole("link", { name: "Billing check" })).toHaveAttribute("href", "/routines?slug=billing-check")
+    expect(screen.getByText("Would select this credential")).toBeInTheDocument()
+    expect(screen.getByText(/not recorded run use/i)).toBeInTheDocument()
+  })
+
+  it("treats failed dependency and field reads as unknown even after old data", async () => {
+    h.apiFetch.mockImplementation((url: unknown) => Promise.resolve({
+      ok: !String(url).includes("/dependents") && !String(url).includes("/fields"),
+      status: 500, json: async () => [],
+    }))
+    renderSheet()
+    expect(await screen.findByText(/Routine dependencies could not be checked/i)).toBeInTheDocument()
+    expect(await screen.findByText(/Fields could not be checked/i)).toBeInTheDocument()
+    expect(screen.queryByText(/No visible routine declares/i)).not.toBeInTheDocument()
+  })
+
+  it("never flashes a previous credential's routine names while switching", async () => {
+    h.apiFetch.mockImplementation((url: unknown) => Promise.resolve({
+      ok: true, status: 200,
+      json: async () => String(url).includes("/dependents") ? {
+        routines: [{ slug: "old-secret-job", name: "Old secret job", type: "api_key", resolution: "would_resolve" }],
+        recorded_use: "not_attributed", visibility_limited: false, dynamic_uses_untracked: true,
+      } : [],
+    }))
+    const props = { workspaceId: "ws1", open: true, onOpenChange: () => {}, onRefresh: () => {}, onRotate: () => {}, onEdit: () => {} }
+    const view = render(<CredentialDetailSheet {...props} credential={credential} />)
+    expect(await screen.findByText("Old secret job")).toBeInTheDocument()
+    view.rerender(<CredentialDetailSheet {...props} credential={{ ...credential, id: "cred_2", name: "OTHER" }} />)
+    expect(screen.queryByText("Old secret job")).not.toBeInTheDocument()
+  })
+
   it("lists every assigned agent and carries the count on the section", () => {
     h.role = "OWNER"
     renderSheet({ agent_names: ["agent-a", "agent-b"], _count_agent_credentials: 2 })
@@ -576,9 +616,8 @@ describe("Audit tab", () => {
     expect(await screen.findByText(/nothing has happened to this credential yet/i)).toBeInTheDocument()
   })
 
-  // A 500 or network blip on the audit fetch must degrade to the empty
-  // state, not an unhandled rejection or a stuck spinner.
-  it("degrades to the empty state (not a crash) when the audit fetch rejects", async () => {
+  // A failed audit fetch must not claim that no activity happened.
+  it("marks the audit as unavailable when the fetch rejects", async () => {
     h.role = "OWNER"
     h.apiFetch.mockImplementation((url: unknown) => {
       if (String(url).includes("/audit")) {
@@ -588,7 +627,7 @@ describe("Audit tab", () => {
     })
     renderSheet()
     openTab(/audit/i)
-    expect(await screen.findByText(/nothing has happened to this credential yet/i)).toBeInTheDocument()
+    expect(await screen.findByText(/Activity could not be checked/i)).toBeInTheDocument()
   })
 
   it("shows a loading spinner while the audit fetch is in flight", () => {

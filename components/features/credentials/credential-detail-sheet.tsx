@@ -2,6 +2,7 @@
 
 import { credentialTagClassName } from "@/lib/credentials/tag-accent"
 import * as React from "react"
+import Link from "next/link"
 import { motion } from "motion/react"
 import {
   Activity,
@@ -173,6 +174,13 @@ interface AssignmentRow {
   expired: boolean
 }
 
+interface CredentialDependents {
+  routines: { slug: string; name: string; type: string; resolution: "would_resolve" | "another_credential" | "unavailable" }[]
+  recorded_use: "not_attributed"
+  visibility_limited: boolean
+  dynamic_uses_untracked: boolean
+}
+
 /** Reveal classifications, weakest first — the order is the rank comparison
  *  that decides whether a change is a raise (MANAGER+) or a lower (admin). */
 const SENSITIVITY_LEVELS = ["STANDARD", "RESTRICTED", "SEALED"] as const
@@ -231,6 +239,7 @@ export function CredentialDetailSheet({
 }: CredentialDetailSheetProps) {
   const [audit, setAudit] = React.useState<AuditEvent[]>([])
   const [auditLoading, setAuditLoading] = React.useState(false)
+  const [auditError, setAuditError] = React.useState(false)
   const [auditExpanded, setAuditExpanded] = React.useState(false)
   const [confirmDelete, setConfirmDelete] = React.useState(false)
   const [testing, setTesting] = React.useState(false)
@@ -241,6 +250,12 @@ export function CredentialDetailSheet({
   const testPassed = Boolean(testResult?.valid && !testUnknown)
   const [fields, setFields] = React.useState<CredentialFieldRow[]>([])
   const [fieldsLoading, setFieldsLoading] = React.useState(false)
+  const [fieldsError, setFieldsError] = React.useState(false)
+  const [dependentsRead, setDependentsRead] = React.useState<{
+    credentialId: string
+    status: "loading" | "ready" | "error"
+    data?: CredentialDependents
+  } | null>(null)
   const [bindings, setBindings] = React.useState<BindingRow[]>([])
   const [assignments, setAssignments] = React.useState<AssignmentRow[]>([])
   const [accessLoading, setAccessLoading] = React.useState(false)
@@ -334,19 +349,30 @@ export function CredentialDetailSheet({
 
     if (canUpdate) {
       setAuditLoading(true)
+      setAuditError(false)
       apiFetch(`/api/v1/credentials/${cid}/audit?workspace_id=${ws}&limit=${AUDIT_FETCH_LIMIT}`)
-        .then((r) => (r.ok ? r.json() : []))
-        .then((data: AuditEvent[]) => !cancelled && setAudit(Array.isArray(data) ? data : []))
-        .catch(() => !cancelled && setAudit([]))
+	        .then((r) => { if (!r.ok) throw new Error(); return r.json() })
+        .then((data: AuditEvent[]) => { if (!Array.isArray(data)) throw new Error(); if (!cancelled) setAudit(data) })
+	        .catch(() => !cancelled && setAuditError(true))
         .finally(() => !cancelled && setAuditLoading(false))
     }
 
     setFieldsLoading(true)
+    setFieldsError(false)
     apiFetch(`/api/v1/credentials/${cid}/fields?workspace_id=${ws}`)
-      .then((r) => (r.ok ? r.json() : []))
-      .then((data: CredentialFieldRow[]) => !cancelled && setFields(Array.isArray(data) ? data : []))
-      .catch(() => !cancelled && setFields([]))
+	      .then((r) => { if (!r.ok) throw new Error(); return r.json() })
+      .then((data: CredentialFieldRow[]) => { if (!Array.isArray(data)) throw new Error(); if (!cancelled) setFields(data) })
+	      .catch(() => !cancelled && setFieldsError(true))
       .finally(() => !cancelled && setFieldsLoading(false))
+
+    setDependentsRead({ credentialId: cid, status: "loading" })
+    apiFetch(`/api/v1/credentials/${cid}/dependents?workspace_id=${ws}`)
+      .then((r) => { if (!r.ok) throw new Error(); return r.json() })
+      .then((body: CredentialDependents) => {
+        if (!Array.isArray(body?.routines)) throw new Error()
+        if (!cancelled) setDependentsRead({ credentialId: cid, status: "ready", data: body })
+      })
+      .catch(() => { if (!cancelled) setDependentsRead({ credentialId: cid, status: "error" }) })
 
     setAccessLoading(true); setAccessError(false); setBindings([]); setAssignments([])
     apiFetch(`/api/v1/credentials/bindings?workspace_id=${ws}&credential_id=${cid}`)
@@ -366,6 +392,12 @@ export function CredentialDetailSheet({
   }, [open, credential, workspaceId, canRotate, canUpdate])
 
   if (!credential) return null
+
+  // Keep a previous credential's routine names out of the next sheet even
+  // for the render before its effect starts a new request.
+  const dependentsLoading = dependentsRead?.credentialId !== credential.id || dependentsRead.status === "loading"
+  const dependentsError = dependentsRead?.credentialId === credential.id && dependentsRead.status === "error"
+  const dependents = dependentsRead?.credentialId === credential.id && dependentsRead.status === "ready" ? dependentsRead.data : null
 
   // The seat view. `loginOverride` is what the last Refresh-now returned.
   const loginRow = loginOverride ? { ...credential, login: loginOverride } : credential
@@ -801,7 +833,7 @@ export function CredentialDetailSheet({
                   (region, account id) ARE shown, which is the entire reason
                   they are stored in the clear.
                 */}
-                {(fieldsLoading || fields.length > 0) && <Appear order={4}>
+                {(fieldsLoading || fieldsError || fields.length > 0) && <Appear order={4}>
                   <DetailCard
                     title="Fields"
                     icon={ListTree}
@@ -811,6 +843,8 @@ export function CredentialDetailSheet({
                       <div className="py-6 text-center">
                         <Spinner className="inline h-4 w-4 text-muted-foreground" />
                       </div>
+                    ) : fieldsError ? (
+                      <p role="alert" className="text-[12px] text-warn">Fields could not be checked. Previously loaded values may be stale.</p>
                     ) : fields.length === 0 ? (
                       <p className="text-[12px] text-muted-foreground">
                         This credential is a single value — no extra parts.
@@ -1011,6 +1045,23 @@ export function CredentialDetailSheet({
                     ) : null}
 
                     </details>
+                    <div className="mt-4 space-y-2 border-t border-border/60 pt-4" aria-label="Routine dependencies">
+                      <p className="text-xs font-medium">Routine references</p>
+                      {dependentsLoading && <p role="status" className="text-xs text-muted-foreground">Checking routine definitions…</p>}
+                      {dependentsError && <p role="alert" className="text-xs text-warn">Routine dependencies could not be checked. The list may be incomplete.</p>}
+                      {!dependentsLoading && !dependentsError && dependents?.routines.length === 0 &&
+                        <p className="text-xs text-muted-foreground">No visible routine declares this credential type. Dynamic agent and script use is not tracked here.</p>}
+                      {!dependentsLoading && !dependentsError && dependents && dependents.routines.length > 0 && (
+                        <ul className="space-y-1 text-xs">
+                          {dependents.routines.map((item) => <li key={item.slug} className="flex items-center justify-between gap-2">
+                            <Link href={`/routines?slug=${encodeURIComponent(item.slug)}`} className="truncate text-primary hover:underline">{item.name || item.slug}</Link>
+                            <span className="shrink-0 text-muted-foreground">{item.resolution === "would_resolve" ? "Would select this credential" : item.resolution === "another_credential" ? "Selects another credential" : "No active match"}</span>
+                          </li>)}
+                        </ul>
+                      )}
+                      {dependents?.visibility_limited && <p className="text-xs text-muted-foreground">Hidden routines are excluded from your view.</p>}
+                      <p className="text-xs text-muted-foreground">Configured references and current selection are estimates, not recorded run use. Dynamic lookups are not included.</p>
+                    </div>
                     {credential.mcp_used && (
                       <p className="mt-3 rounded-md border border-info/25 bg-info/[0.05] px-3 py-2 text-[11px]">
                         Also referenced by one or more MCP server integrations.
@@ -1053,6 +1104,8 @@ export function CredentialDetailSheet({
                         <div className="py-6 text-center">
                           <Spinner className="inline h-4 w-4 text-muted-foreground" />
                         </div>
+                      ) : auditError ? (
+                        <p role="alert" className="text-[12px] text-warn">Activity could not be checked. Previously loaded events may be stale.</p>
                       ) : audit.length === 0 ? (
                         <p className="text-[12px] text-muted-foreground">
                           Nothing has happened to this credential yet.
@@ -1384,6 +1437,9 @@ export function CredentialDetailSheet({
             <AlertDialogDescription>
               <span className="font-mono">{credential.name}</span> will be permanently deleted.
               Agents that use this credential will start failing immediately. This cannot be undone.
+              {dependentsLoading && <span className="mt-2 block">Checking routine dependencies…</span>}
+              {dependentsError && <span className="mt-2 block text-warn">Routine dependencies could not be checked. Deletion may affect routines not shown here.</span>}
+              {dependents && dependents.routines.length > 0 && <span className="mt-2 block">{dependents.routines.length} visible routine{dependents.routines.length === 1 ? "" : "s"} reference this credential type; {dependents.routines.filter((item) => item.resolution === "would_resolve").length} would currently select this credential.</span>}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

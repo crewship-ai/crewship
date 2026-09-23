@@ -457,6 +457,15 @@ describe("crew scope", () => {
     Element.prototype.scrollIntoView = vi.fn()
   })
 
+  it("shows the routine impact only when changing scope", async () => {
+    renderForm({ mode: "edit", surface: true, initial: { name: "STRIPE_API_KEY", scope: "WORKSPACE", crewIds: [] }, impactSummary: "2 visible routines may be affected." })
+    expect(screen.queryByText(/2 visible routines may be affected/i)).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: /access & security/i }))
+    openScopeSelect()
+    fireEvent.click(await screen.findByRole("option", { name: /specific crews only/i }))
+    expect(screen.getByText(/2 visible routines may be affected/i)).toBeInTheDocument()
+  })
+
   it("blocks submit when CREW scope has no crews selected", async () => {
     const { onSubmit } = renderForm()
     fireEvent.change(nameInput(), { target: { value: "STRIPE_API_KEY" } })
