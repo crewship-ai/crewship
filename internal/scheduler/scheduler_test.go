@@ -455,10 +455,10 @@ func TestUpdateSchedule_AgentNotFound(t *testing.T) {
 }
 
 func TestStartAndStop(t *testing.T) {
-	db := testDB(t)
-	seedAgent(t, db, "a1", "bob", "Bob", "", "ws1", "0 8 * * MON", "", true)
+	db, _ := dueFixture(t)
 
 	s := newTestScheduler(db, &mockResolver{}, nil, nil)
+	configureDurableCron(t, s, db)
 	if err := s.Start(context.Background()); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
