@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/scrubber"
 	"github.com/crewship-ai/crewship/internal/telemetry"
 )
@@ -1298,6 +1299,11 @@ func (e *Executor) runDSL(ctx context.Context, in RunInput, depth int) (result *
 			runSpan.End()
 		}()
 	}
+	// Journal events emitted by agent tools during this routine step inherit
+	// this context. Without the run id, two runs of the same agent cannot be
+	// separated by the run_id journal filter. A nested call_pipeline stamps
+	// its own id when it enters runDSL, so its events stay on the child run.
+	ctx = journal.WithRunID(ctx, runID)
 
 	emit := &pipelineEmitContext{
 		emitter:         e.emitter,

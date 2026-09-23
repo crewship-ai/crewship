@@ -46,9 +46,10 @@ describe("IssueRunsCard", () => {
     const openRun = screen.getAllByRole("link", { name: /open run/i })
     expect(openRun.map((a) => a.getAttribute("href"))).toEqual(["/activity?run=run_aaaa", "/activity?run=run_bbbb"])
     expect(screen.getByRole("link", { name: "Robin" })).toHaveAttribute("href", "/crews?agent=robin")
+    expect(screen.getByText("asg_a")).toBeInTheDocument()
     expect(screen.getByRole("link", { name: /journal for ENG-1/i })).toHaveAttribute("href", "/journal?mission_id=ENG-1")
     expect(screen.getByRole("link", { name: /all runs in activity/i })).toHaveAttribute("href", "/activity?mission=m_eng1")
-    expect(screen.getByText("no run")).toBeInTheDocument()
+    expect(screen.getByText("run not recorded")).toHaveAttribute("title", expect.stringContaining("does not prove"))
   })
 
   it("says what will appear and how when nothing has run", () => {

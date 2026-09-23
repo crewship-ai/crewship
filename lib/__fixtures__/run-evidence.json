@@ -1,0 +1,62 @@
+{
+  "input": {
+    "kind": "routine",
+    "runId": "run_123",
+    "status": "failed",
+    "outcome": "FAILED",
+    "startedAt": "2026-09-23T07:00:00Z",
+    "endedAt": "2026-09-23T07:01:00Z",
+    "stepId": "verify",
+    "failureKind": "checker_rejected",
+    "trigger": "schedule",
+    "version": 4,
+    "definitionHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "capturedAt": "2026-09-23T07:02:00Z",
+    "entries": [
+      {
+        "id": "evt_start",
+        "workspace_id": "ws_1",
+        "ts": "2026-09-23T07:00:00Z",
+        "entry_type": "pipeline.run.started",
+        "severity": "info",
+        "actor_type": "orchestrator",
+        "actor_id": "run_123",
+        "summary": "SECRET_IN_SUMMARY",
+        "payload": { "prompt": "SECRET_IN_PROMPT", "run_id": "run_123" }
+      },
+      {
+        "id": "evt_failed",
+        "workspace_id": "ws_1",
+        "ts": "2026-09-23T07:01:00Z",
+        "entry_type": "pipeline.run.failed",
+        "severity": "error",
+        "actor_type": "orchestrator",
+        "actor_id": "run_123",
+        "summary": "SECRET_IN_ERROR",
+        "payload": { "error_message": "SECRET_IN_PAYLOAD", "run_id": "run_123" }
+      }
+    ]
+  },
+  "expected": {
+    "schemaVersion": 1,
+    "reference": { "kind": "routine", "id": "run_123" },
+    "sourceLinks": ["/activity?run=run_123"],
+    "status": "failed",
+    "outcome": "FAILED",
+    "startedAt": "2026-09-23T07:00:00Z",
+    "endedAt": "2026-09-23T07:01:00Z",
+    "capturedAt": "2026-09-23T07:02:00Z",
+    "lastRecordedAt": "2026-09-23T07:01:00Z",
+    "stepId": "verify",
+    "failureKind": "checker_rejected",
+    "trigger": "schedule",
+    "version": 4,
+    "definitionHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "evidence": [
+      { "reference": "evt_start", "at": "2026-09-23T07:00:00Z", "type": "pipeline.run.started", "fact": "Routine execution started" },
+      { "reference": "evt_failed", "at": "2026-09-23T07:01:00Z", "type": "pipeline.run.failed", "fact": "Routine execution failed" }
+    ],
+    "unavailableReasons": [],
+    "truncated": false
+  }
+}

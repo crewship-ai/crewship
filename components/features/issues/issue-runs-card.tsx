@@ -152,6 +152,7 @@ export function IssueRunsCard({ issue, runs, unavailable = false }: { issue: Mis
                     {run.started_at && <> · started {relTime(run.started_at)}</>}
                     {run.duration_ms > 0 && <> · {formatDurationDecimal(run.duration_ms)}</>}
                     {source && <> · {source}</>}
+                    {run.id && <> · assignment <span className="font-mono">{run.id}</span></>}
                   </p>
                 </div>
                 <StatusPill label={result.label} tone={result.tone} live={run.status === "RUNNING"} className="col-start-2 w-fit md:col-start-auto" />
@@ -164,8 +165,8 @@ export function IssueRunsCard({ issue, runs, unavailable = false }: { issue: Mis
                     <ArrowUpRight className="h-3 w-3" />
                   </Link>
                 ) : (
-                  <span className="col-start-2 text-[11px] text-muted-foreground-soft md:col-start-auto" title="This assignment never reached a run">
-                    no run
+                  <span className="col-start-2 text-[11px] text-muted-foreground-soft md:col-start-auto" title="No run ID was recorded; this alone does not prove the agent never started">
+                    run not recorded
                   </span>
                 )}
                 <div className="col-start-2 col-end-[-1] min-w-0 text-[11px]">
