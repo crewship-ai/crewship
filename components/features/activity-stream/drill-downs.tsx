@@ -27,7 +27,7 @@ import { Bot, CircleDot, Clock, ListTree } from "lucide-react"
 
 import { Appear, DetailCard, EmptyState, Pill, StatStrip, type StatItem } from "@/components/ui/detail"
 import { AgentAvatar } from "@/components/ui/agent-avatar"
-import { RoutineRunDetail } from "@/components/features/routines/routine-run-detail"
+import { TypedRunDetail } from "@/components/features/activity/typed-run-detail"
 import { entityHref } from "@/lib/entity-links"
 import { formatDurationMs } from "@/lib/activity-stream"
 import { relTime } from "@/lib/time"
@@ -228,7 +228,7 @@ export function runRelatedLinks(runID: string, routineSlug: string | undefined, 
 }
 
 export function RunDrillDown({ workspaceId, runID }: RunDrillDownProps) {
-  return <RoutineRunDetail key={`${workspaceId}:${runID}`} workspaceId={workspaceId} runId={runID} />
+  return <TypedRunDetail key={`${workspaceId}:${runID}`} workspaceId={workspaceId} runId={runID} />
 }
 
 /* ------------------------------------------------------------------ *

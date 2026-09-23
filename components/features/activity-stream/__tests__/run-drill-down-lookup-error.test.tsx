@@ -11,13 +11,13 @@ const apiFetch = vi.fn()
 vi.mock("@/lib/api-fetch", () => ({ apiFetch: (...args: unknown[]) => apiFetch(...args) }))
 import { RunDrillDown } from "../drill-downs"
 describe("Shared run detail", () => {
-  it("loads the run directly and offers a retry when its endpoint fails", async () => {
+  it("does not widen a failed run lookup and offers a retry", async () => {
     apiFetch.mockResolvedValue({ ok: false, status: 503 })
     render(<RunDrillDown workspaceId="ws_1" runID="old_run" />)
-    await screen.findByText("Could not load this run.")
-    expect(apiFetch.mock.calls.every(([url]) => String(url).includes("/pipeline-runs/old_run"))).toBe(true)
+    await screen.findByText(/Could not load this run \(503\)/)
+    expect(apiFetch.mock.calls.every(([url]) => String(url).includes("/runs/old_run"))).toBe(true)
     const before = apiFetch.mock.calls.length
-    fireEvent.click(screen.getByRole("button", { name: "Try again" }))
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }))
     await waitFor(() => expect(apiFetch.mock.calls.length).toBe(before + 1))
   })
 })

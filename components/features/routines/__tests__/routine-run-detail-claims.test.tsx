@@ -59,6 +59,9 @@ vi.mock("@/components/features/activity/trace-canvas", () => ({
 vi.mock("@/components/features/activity/run-activity-timeline", () => ({
   RunActivityTimeline: () => <div data-testid="run-activity" />,
 }))
+vi.mock("@/components/features/activity/run-evidence-panel", () => ({
+  RunEvidencePanel: () => <div data-testid="run-evidence-panel" />,
+}))
 vi.mock("../routine-execution-history", () => ({
   RoutineExecutionHistory: () => <div data-testid="execution-history" />,
 }))
