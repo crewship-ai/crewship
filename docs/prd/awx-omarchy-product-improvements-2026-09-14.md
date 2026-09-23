@@ -2,7 +2,7 @@
 
 Datum: 2026-09-14; revize po oponentuře: 2026-09-15. Stav: zadání produktových rozšíření; implementace ani splnění akceptace nejsou tímto dokumentem potvrzeny. Uživatel požádal o začlenění obou inspirací do PRD. Priority níže jsou doporučeným pořadím realizace, nikoli novým příslibem, že všechny funkce blokují release 1.0.
 
-**Stav k 2026-09-23:** iterace 1 (#2567) a 2 (#2571) jsou sloučené do `main`. Iterace 3–5 se řeší pod issue #2656; jejich rozsah, testy a limity jsou v [handoffu diagnostiky](reports/awx-omarchy-iter3-5-diagnostics-2026-09-23.md). Sloučení implementace ani dokončení celého PRD se tímto zápisem netvrdí. Iterace 6–10 a závěrečná integrovaná akceptace zůstávají otevřené.
+**Stav k 2026-09-23:** iterace 1 (#2567) a 2 (#2571) jsou sloučené do `main`. Diagnostika rutin a detail agentního běhu jsou v [#2661](https://github.com/crewship-ai/crewship/pull/2661), původ v [#2663](https://github.com/crewship-ai/crewship/pull/2663), závod při opakování v [#2666](https://github.com/crewship-ai/crewship/pull/2666), efektivní přístup v [#2669](https://github.com/crewship-ai/crewship/pull/2669), handoff chatu a Page v [#2670](https://github.com/crewship-ai/crewship/pull/2670) a [#2673](https://github.com/crewship-ai/crewship/pull/2673), a závislosti credentialu v [#2677](https://github.com/crewship-ai/crewship/pull/2677) → [#2675](https://github.com/crewship-ai/crewship/pull/2675). Tyto PR zůstávají otevřené; jejich místní a CI testy jsou důkazem jednotlivých změn, ne integrovanou akceptací celého PRD. O3 je Later, O5 čeká na roli/datový zdroj a závěrečný průchod cílového scénáře zůstává otevřený.
 
 ## Revize 2026-09-15: stav rozhodnutí a zdroj důkazů
 
@@ -12,7 +12,7 @@ Prováděcí pořadí a prompty: [10 iterací po oponentuře](awx-omarchy-implem
 
 Potvrzené mezery zahrnují podvržitelný invoking původ, chybějící issue run detail, chybějící per-run credential evidenci, rozdílné spouštěcí autorizace, nedostatečnou korelaci některých journal událostí a závod verze při Run again. To nejsou všechno nové produktové funkce; bezpečnostní opravy mají samostatnou první iteraci.
 
-**Nevyřešená produktová rozhodnutí:** rozšíření routine.run na Page action/replay/schedule-run; sjednocení multi-crew credential scope; cílový agent a oprávněný rozsah Page kontextu; zákaznická role/datový zdroj O5. Doporučení oponenta nejsou autorizací rozšířit přístup. Lze pokračovat nezávislými částmi plánu bez těchto rozhodnutí.
+**Nevyřešená produktová rozhodnutí:** rozšíření routine.run na Page action/replay/schedule-run; cílový agent a oprávněný rozsah Page kontextu; zákaznická role/datový zdroj O5. Multi-crew credential scope je technicky rozhodnut pro `credential_crews` a implementován v [#2677](https://github.com/crewship-ai/crewship/pull/2677), dosud však není mergnutý. Doporučení oponenta nejsou autorizací rozšířit přístup. Lze pokračovat nezávislými částmi plánu bez těchto rozhodnutí.
 
 Zachované požadavky: žádný raw error v URL, žádné mutující auto-send pod označením diagnostika, žádné automatické rozšíření lidských práv na agenta. Kolize s #2562 se musí vypořádat v jeho review; tato revize nic neposílá jeho autorovi a nic nemerguje. Per-rutinové execute granty i desktopy zůstávají mimo 1.0. O5 je obsahový balík, nikoli nový formulářový systém.
 
@@ -60,7 +60,7 @@ P1 = doporučený první balík pro 1.0, P2 = navazující doplnění podle kapa
 | O2 | Kontrakt, podklad rutin a nový detail issue runu | Obě | po bezpečnostní/korelační kontrole | 3,5–4,5 dne |
 | A1a | Opravy důvěryhodnosti identity; matice spouštěcích cest | AWX | první bezpečnostní iterace | 1–1,5 dne, širší nálezy zvlášť |
 | A1b | access/me rutiny a credentialu + Your access | AWX | po A1a a rozhodnutí matice | 3–5 dní |
-| A2 | Závislosti podle typu a současného resolveru | AWX | po rozhodnutí crew scope | 2,5–3,5 dne |
+| A2 | Závislosti podle typu a současného resolveru | AWX | po rozhodnutí crew scope; #2675 stojí na #2677 | 2,5–3,5 dne |
 | A3 | Původ běhu; credential použití „nezaznamenáno“ | AWX | po O2 a A1a | 1 den |
 | A4 | Verze při Run again, očekávaný hash a CLI | AWX | backend samostatně, UI dle souběžných PR | 1,5–2,5 dne |
 | O4 | Nová session, draft, metadata Page kontextu | Omarchy | po vyřešení identity a přístupu cílového agenta | 2–3,5 dne bez nové agentní read cesty |
@@ -126,7 +126,7 @@ Rozšířit existující Used by o strukturovaně dohledatelné rutiny s odkazy.
 
 Stávající `components/features/credentials/credential-detail-sheet.tsx` již má Used by, assignment coverage, Your access a readiness. Nový přehled staví na nich. Vazby nejsou přímo uložené; odvodit sjednocením credentials_required, credential_ref.type a šablon secrets podle typu. Ověřený resolver preferuje crew-specific kandidáta před workspace fallbackem a teprve v této prioritě vybírá nejnovější ACTIVE; nekopírovat zjednodušení „nejnovější ve workspace“. Sdílet stejnou rozhodovací logiku, ale pro náhled nedekryptovat hodnoty. Rozlišit configured, would-resolve (odhad při současné konfiguraci) a recorded pouze s jeho skutečnou úrovní důkazu, dnes bez run attribution.
 
-Audit odhalil rozdíl credential_crews versus legacy crew_id. Přechod na jiný scope mění dostupnost tajemství; je samostatným rozhodnutím R3 a opravou s parity testy resolver/probe/visibility/sidecar. Do vyřešení neslibovat správnou mapu multi-crew závislostí. A2 zahrne error≠empty i v auditu/fields credential sheetu. Pokud runtime vybírá credential dynamicky, uvést neúplnost; nepředstírat statickou analýzu libovolných skriptů.
+Audit odhalil rozdíl `credential_crews` versus legacy `crew_id`. R3 v #2677 volí junction jako pravdu pro výběr rutiny; parity test na migrované databázi porovnává resolver, probe, viditelnost člena a doručení agentovi. #2675 na něm stojí a používá stejný výběr pro náhled závislostí. Dokud oba PR nejsou mergnuté, není tato mapa chováním `main`. A2 zahrne error≠empty i v auditu/fields credential sheetu. Pokud runtime vybírá credential dynamicky, uvést neúplnost; nepředstírat statickou analýzu libovolných skriptů.
 
 Akceptace: konfigurační vazba bez běhu se nezobrazuje jako skutečné použití; nedostupné zdroje či omezená oprávnění nejsou „nikdo nepoužívá“. Názvy skrytých rutin se neprozradí. Rotace stejné identity zachová vazby, zrušené vazby zmizí po obnově. Chyba refetche označí údaje jako neověřené, i když cache zachovala předchozí hodnoty.
 
