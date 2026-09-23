@@ -352,7 +352,7 @@ describe("Test now request lifecycle", () => {
     h.role = "OWNER"
     h.apiFetch.mockImplementation((url: unknown) => {
       if (String(url).includes("/test")) {
-        return Promise.resolve({ ok: true, status: 200, json: async () => ({ valid: true, supported: false, error: "Provider login is delivered to the CLI" }) })
+        return Promise.resolve({ ok: true, status: 200, json: async () => ({ valid: true, supported: false, error: "CLI login is delivered to the agent" }) })
       }
       return Promise.resolve({ ok: true, status: 200, json: async () => [] })
     })

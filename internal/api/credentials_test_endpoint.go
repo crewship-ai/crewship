@@ -98,6 +98,11 @@ func probeSupported(provider, credType string) bool {
 	if credType == string(CredTypeProviderLogin) {
 		return false
 	}
+	if provider == "OPENAI" && credType == string(CredTypeAICLIToken) {
+		// Legacy Codex auth blobs carry ChatGPT OAuth credentials, not an
+		// OpenAI API key. They predate PROVIDER_LOGIN but need the same guard.
+		return false
+	}
 	if credType == string(CredTypeEndpointURL) {
 		return true
 	}
@@ -118,12 +123,12 @@ func probeSupported(provider, credType string) bool {
 // other provider dials a FIXED vendor host (api.anthropic.com, …), never a
 // user-chosen one, so they are unaffected by this flag.
 func probeProvider(ctx context.Context, provider, ctype, value string, dialEndpoint bool) testResult {
-	if ctype == string(CredTypeProviderLogin) {
+	if ctype == string(CredTypeProviderLogin) || (provider == "OPENAI" && ctype == string(CredTypeAICLIToken)) {
 		// Preserve the existing unprobeable-provider wire convention: valid
 		// means no check failed, supported=false says no upstream check ran.
 		// The CLI and UI use supported to avoid claiming a working login.
 		return testResult{Valid: true, Supported: false,
-			Error: "Provider login is delivered to the CLI; an API-key probe cannot validate it"}
+			Error: "CLI login is delivered to the agent; an API-key probe cannot validate it"}
 	}
 	// Stamp Supported once, from the same table the client is told about, rather
 	// than at each of the ~30 returns below — a per-return flag is a field

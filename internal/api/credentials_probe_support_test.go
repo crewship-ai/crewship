@@ -32,6 +32,13 @@ func TestProviderLoginIsNotSentToAPIKeyProbe(t *testing.T) {
 	if !probeSupported("OPENAI", string(CredTypeAPIKey)) {
 		t.Fatal("ordinary OpenAI API keys must keep their real upstream probe")
 	}
+	legacy := probeProvider(ctx, "OPENAI", string(CredTypeAICLIToken), `{"tokens":{"access_token":"fixture"}}`, false)
+	if !legacy.Valid || legacy.Supported || legacy.Status != 0 {
+		t.Fatalf("legacy Codex auth blob was treated as an API key: %+v", legacy)
+	}
+	if credentialTestable(credentialResponse{Provider: "OPENAI", Type: string(CredTypeAICLIToken)}) {
+		t.Fatal("legacy Codex auth blob must not offer an API-key test button")
+	}
 	apiKey := probeProviderLogin(ctx, "OPENAI", providerlogin.ModeAPIKey, "sk-proj-fixture", false)
 	if !apiKey.Supported || apiKey.Valid || !strings.Contains(apiKey.Error, "context canceled") {
 		t.Fatalf("metered provider login lost its API-key probe: %+v", apiKey)

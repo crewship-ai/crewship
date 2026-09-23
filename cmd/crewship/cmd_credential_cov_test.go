@@ -432,7 +432,7 @@ func TestCredTestStoredCmd_UnsupportedProviderIsNotReportedValid(t *testing.T) {
 		stub := covStub(t)
 		stub.OnPost(path, clitest.JSONResponse(200, map[string]any{
 			"valid": true, "supported": false,
-			"error": "Provider login is delivered to the CLI; an API-key probe cannot validate it",
+			"error": "CLI login is delivered to the agent; an API-key probe cannot validate it",
 		}))
 		out, err := captureStderrCov(t, func() error {
 			return credTestStoredCmd.RunE(credTestStoredCmd, []string{covCredIDCli3})
