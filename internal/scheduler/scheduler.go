@@ -344,13 +344,8 @@ func (s *Scheduler) UpdateSchedule(ctx context.Context, agentID, cronExpr, promp
 
 	s.logger.Info("schedule updated", "agent", ag.Slug, "cron", cronExpr)
 
-	// Update next_run in DB
-	if sched, err := s.parser.Parse(cronExpr); err == nil {
-		next := sched.Next(time.Now())
-		if _, err := s.db.ExecContext(ctx, "UPDATE agents SET schedule_next_run = ? WHERE id = ?",
-			next.UTC().Format(time.RFC3339), agentID); err != nil {
-			s.logger.Warn("update schedule_next_run", "agent_id", agentID, "error", err)
-		}
-	}
+	// The API committed the due cursor with schedule_enabled/cron before this
+	// callback. Writing it here could overwrite an occurrence already advanced
+	// by AcceptDue while this callback was being registered.
 	return nil
 }
