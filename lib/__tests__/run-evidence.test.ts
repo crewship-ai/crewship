@@ -64,4 +64,13 @@ describe("run evidence contract", () => {
     const stillRunning = buildRunEvidence({ ...base, status: "running", entries: [entry("evt_done", "pipeline.run.completed")] })
     expect(stillRunning.unavailableReasons).toContain("Journal has a terminal event while the run record remains active")
   })
+
+  it("orders whole-second and fractional RFC3339 timestamps by instant", () => {
+    const view = buildRunEvidence({ ...base, entries: [
+      entry("evt_later", "run.completed", "2026-09-23T07:00:00.500Z"),
+      entry("evt_first", "run.started", "2026-09-23T07:00:00Z"),
+    ] })
+    expect(view.evidence.map((e) => e.reference)).toEqual(["evt_first", "evt_later"])
+    expect(view.lastRecordedAt).toBe("2026-09-23T07:00:00.500Z")
+  })
 })

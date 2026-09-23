@@ -63,7 +63,7 @@ const safeTime = (value: unknown): value is string =>
 const oneOf = (value: unknown, options: readonly string[]): string | undefined =>
   typeof value === "string" && options.includes(value) ? value : undefined
 
-const statusValues = ["queued", "running", "waiting", "paused", "completed", "failed", "cancelled", "interrupted", "PENDING", "QUEUED", "RUNNING", "COMPLETED", "FAILED", "CANCELLED"]
+const statusValues = ["queued", "running", "waiting", "paused", "completed", "failed", "cancelled", "interrupted", "timeout", "PENDING", "QUEUED", "RUNNING", "COMPLETED", "FAILED", "CANCELLED", "TIMEOUT"]
 const outcomeValues = ["SUCCEEDED", "NO_CHANGE", "WORK_CREATED", "PARTIAL", "NEEDS_HUMAN", "FAILED", "CANCELLED"]
 const triggerValues = ["manual", "schedule", "webhook", "event", "issue", "call_pipeline", "task", "mention", "delegation"]
 const failureValues = ["checker_rejected", "validation_failed", "transform_input", "timeout", "cancelled", "missing_credential", "missing_integration", "http_status", "script_exit", "cost_cap", "unknown"]
@@ -103,6 +103,12 @@ function render(view: RunEvidenceView): string {
   return JSON.stringify(view, null, 2)
 }
 
+// RFC3339Nano may omit zero fractions: lexical comparison places .500Z
+// before Z within the same second, which reverses time. Compare instants.
+function compareEvents(a: RunEvidenceEvent, b: RunEvidenceEvent): number {
+  return Date.parse(a.at) - Date.parse(b.at) || a.reference.localeCompare(b.reference)
+}
+
 export function buildRunEvidence(input: RunEvidenceInput): RunEvidenceView {
   if (!safeRef(input.runId)) throw new Error("Invalid run reference")
   const url = `/activity?run=${encodeURIComponent(input.runId)}`
@@ -133,14 +139,14 @@ export function buildRunEvidence(input: RunEvidenceInput): RunEvidenceView {
   const candidates = (input.entries ?? [])
     .filter((e) => safeRef(e.id) && safeTime(e.ts) && belongsToRun(e, input.runId) && Object.hasOwn(eventFacts, e.entry_type))
     .map((e): RunEvidenceEvent => ({ reference: e.id, at: e.ts, type: e.entry_type, fact: eventFacts[e.entry_type] }))
-    .sort((a, b) => a.at.localeCompare(b.at) || a.reference.localeCompare(b.reference))
+    .sort(compareEvents)
   if (!input.entries?.length && !input.journalUnavailable) view.unavailableReasons.push("No correlated journal events were recorded")
   if (candidates.length > RUN_EVIDENCE_MAX_EVENTS) {
     // Preserve the latest terminal event and the most recent other evidence.
     const lastTerminal = [...candidates].reverse().find((e) => terminal.has(e.type))
     const selected = candidates.slice(-(RUN_EVIDENCE_MAX_EVENTS - (lastTerminal ? 1 : 0)))
     if (lastTerminal && !selected.includes(lastTerminal)) selected.push(lastTerminal)
-    view.evidence = selected.sort((a, b) => a.at.localeCompare(b.at) || a.reference.localeCompare(b.reference))
+    view.evidence = selected.sort(compareEvents)
     view.truncated = true
   } else {
     view.evidence = candidates
@@ -149,7 +155,7 @@ export function buildRunEvidence(input: RunEvidenceInput): RunEvidenceView {
   if (!input.journalUnavailable && candidates.length) {
     const hasTerminal = candidates.some((e) => terminal.has(e.type))
     const status = view.status.toLowerCase()
-    if (["completed", "failed", "cancelled", "interrupted"].includes(status) && !hasTerminal)
+    if (["completed", "failed", "cancelled", "interrupted", "timeout"].includes(status) && !hasTerminal)
       view.unavailableReasons.push("Run record is terminal, but no terminal journal event was recorded")
     if (["queued", "running", "waiting", "paused", "pending"].includes(status) && hasTerminal)
       view.unavailableReasons.push("Journal has a terminal event while the run record remains active")

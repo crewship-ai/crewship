@@ -21,7 +21,7 @@ export function RunEvidencePanel({ workspaceId, run }: Props) {
   const { entries, loading, error, nextCursor, refresh } = useJournalList({
     workspaceId, params, limit: 100, maxEntries: 100,
   })
-  const capturedAt = useMemo(() => new Date().toISOString(), [entries, error, nextCursor, run.runId, run.status, run.outcome])
+  const capturedAt = new Date().toISOString()
   const view = useMemo(() => buildRunEvidence({
     ...run,
     capturedAt,
