@@ -16,6 +16,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"net/http/httptest"
 	"os"
@@ -56,6 +57,14 @@ func startWorkAcceptanceServer(t *testing.T, withReconciliation ...bool) string 
 	mustExec(`INSERT INTO users (id, email, full_name) VALUES ('work-owner', 'owner@work-ex.com', 'Owner')`)
 	mustExec(`INSERT INTO workspace_members (id, workspace_id, user_id, role) VALUES ('wkm-owner', ?, 'work-owner', 'OWNER')`,
 		workAcceptanceWorkspaceID)
+	mustExec(`INSERT INTO crews (id, workspace_id, name, slug, network_mode, container_memory_mb, container_cpus)
+		VALUES ('work-crew', ?, 'Work crew', 'work-crew', 'free', 4096, 2.0)`, workAcceptanceWorkspaceID)
+	for _, agent := range []struct{ id, slug string }{{"agent-a", "work-agent-a"}, {"agent-b", "work-agent-b"}} {
+		mustExec(`INSERT INTO agents (id, workspace_id, crew_id, name, slug, agent_role, status,
+			cli_adapter, tool_profile, timeout_seconds, memory_enabled)
+			VALUES (?, ?, 'work-crew', ?, ?, 'AGENT', 'IDLE', 'CODEX_CLI', 'MINIMAL', 90, 0)`,
+			agent.id, workAcceptanceWorkspaceID, agent.slug, agent.slug)
+	}
 
 	const ownerToken = "crewship_cli_workowner000000000000000000"
 	mustExec(`INSERT INTO cli_tokens (id, user_id, name, token_hash, created_at) VALUES ('clt-work-owner', 'work-owner', 't', ?, datetime('now'))`,
@@ -86,6 +95,7 @@ func startWorkAcceptanceServer(t *testing.T, withReconciliation ...bool) string 
 		seed("wk-reconcile-1", "needs_reconciliation", "manual", "", "agent-c", `{}`, false)
 	}
 	seed("wk-queued-0001", "queued", "manual", "", "agent-a", `{}`, false)
+	seed("wk-historical-1", "succeeded", "schedule", "2026-01-01T00:00:00Z", "cmucdeletedagent000000001", `{}`, true)
 	seed("wk-replay-0001", "failed", "webhook", "dlv-held-00001", "agent-b", `{"payload":"kept"}`, true)
 	seed("wk-expired-001", "failed", "webhook", "dlv-expired-01", "agent-b", `{"payload":"gone"}`, true)
 
@@ -188,6 +198,36 @@ func TestAcceptance_WorkListAndGet_ShowTheLedgerWithoutThePayload(t *testing.T) 
 	}
 	if strings.Contains(getOut, workAcceptanceChatSecret) {
 		t.Fatalf("work get printed the accepted input:\n%s", getOut)
+	}
+}
+
+func TestAcceptance_WorkListAgentSlugFiltersTheLedger(t *testing.T) {
+	cfgPath := startWorkAcceptanceServer(t)
+	out, err := runWorkCLI(t, cfgPath, "work", "list", "--agent", "work-agent-a", "-f", "json")
+	if err != nil {
+		t.Fatalf("work list --agent slug failed: %v\n%s", err, out)
+	}
+	var page workItemPageBody
+	if err := json.Unmarshal([]byte(out), &page); err != nil {
+		t.Fatalf("decode work list: %v\n%s", err, out)
+	}
+	if len(page.Items) != 2 || page.Items[0].AgentID != "agent-a" || page.Items[1].AgentID != "agent-a" {
+		t.Fatalf("work list --agent slug returned %+v, want two agent-a items", page.Items)
+	}
+	unknown, err := runWorkCLI(t, cfgPath, "work", "list", "--agent", "work-agent-missing")
+	if err == nil {
+		t.Fatalf("unknown agent silently produced an empty page: %s", unknown)
+	}
+	historical, err := runWorkCLI(t, cfgPath, "work", "list", "--agent", "cmucdeletedagent000000001", "-f", "json")
+	if err != nil {
+		t.Fatalf("deleted agent ID should still filter historical work: %v\n%s", err, historical)
+	}
+	var historicalPage workItemPageBody
+	if err := json.Unmarshal([]byte(historical), &historicalPage); err != nil {
+		t.Fatalf("decode historical work list: %v\n%s", err, historical)
+	}
+	if len(historicalPage.Items) != 1 || historicalPage.Items[0].ID != "wk-historical-1" {
+		t.Fatalf("historical agent ID returned %+v, want its completed item", historicalPage.Items)
 	}
 }
 
