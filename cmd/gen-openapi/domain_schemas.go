@@ -149,9 +149,23 @@ func executionSchemaComponents() map[string]any {
 		refOrString("PipelineAppearanceRoutine"),
 		obj(map[string]any{"icon": str(), "color": str()}),
 	}}
+	accessDecision := obj(map[string]any{
+		"state":  map[string]any{"type": "string", "enum": []string{"allowed", "conditional", "denied"}},
+		"reason": str(),
+	}, "state", "reason")
+	accessActions := func(names ...string) map[string]any {
+		props := make(map[string]any, len(names))
+		for _, name := range names {
+			props[name] = refOrString("AccessMeDecision")
+		}
+		return obj(props, names...)
+	}
 
 	return map[string]any{
-		"RunResult": runResult, "DryRunStep": dryRunStep, "DryRunResult": dryRunResult, "PipelineRun": pipelineRun, "RunFailure": runFailure, "PipelineRunList": obj(map[string]any{"rows": arr(refOrString("PipelineRun")), "count": integer()}), "ActiveRunList": arr(activeRun),
+		"AccessMeDecision":   accessDecision,
+		"RoutineAccessMe":    obj(map[string]any{"routine": str(), "actions": accessActions("read", "run", "edit", "approve", "disable", "replay", "manage_schedules")}, "routine", "actions"),
+		"CredentialAccessMe": obj(map[string]any{"credential_id": str(), "actions": accessActions("read", "edit", "rotate", "manage_bindings", "reveal", "delete", "lower_sensitivity")}, "credential_id", "actions"),
+		"RunResult":          runResult, "DryRunStep": dryRunStep, "DryRunResult": dryRunResult, "PipelineRun": pipelineRun, "RunFailure": runFailure, "PipelineRunList": obj(map[string]any{"rows": arr(refOrString("PipelineRun")), "count": integer()}), "ActiveRunList": arr(activeRun),
 		"RunRecord": runRecord, "RunRecordList": arr(refOrString("RunRecord")), "PipelineRunTree": arr(obj(map[string]any{"id": str(), "parent_id": str(), "pipeline_slug": str(), "status": str(), "triggered_via": str(), "cost_usd": number()})),
 		"RunLogEntry": obj(map[string]any{"ts": timeString(), "level": str(), "message": str(), "type": str()}), "RunLogList": arr(refOrString("RunLogEntry")),
 		"Schedule": schedule, "ScheduleList": arr(refOrString("Schedule")), "SchedulePreview": schedulePreview, "RoutineState": obj(map[string]any{"slug": str(), "buckets": arr(refOrString("StateBucket"))}),
@@ -171,6 +185,8 @@ func executionSchemaComponents() map[string]any {
 // operations from their mutation counterparts.
 func executionResponseSchemas() map[string]string {
 	return map[string]string{
+		"GET /api/v1/workspaces/{workspaceId}/pipelines/{slug}/access/me":   "RoutineAccessMe",
+		"GET /api/v1/credentials/{credentialId}/access/me":                  "CredentialAccessMe",
 		"GET /api/v1/workspaces/{workspaceId}/pipelines/{slug}/runs":        "RunRecordList",
 		"GET /api/v1/workspaces/{workspaceId}/pipelines/{slug}/run-records": "RunRecordList",
 		"GET /api/v1/workspaces/{workspaceId}/pipelines/waitpoints":         "WaitpointList",

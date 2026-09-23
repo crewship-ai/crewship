@@ -16,6 +16,23 @@ const h = vi.hoisted(() => ({
   role: "OWNER" as string,
   capabilities: [] as string[],
   apiFetch: vi.fn(),
+  revealEnabled: false,
+  sensitivity: "STANDARD",
+  isLogin: false,
+}))
+
+vi.mock("@/hooks/use-access-me", () => ({
+  useAccessMe: () => {
+    const manage = ["OWNER", "ADMIN"].includes(h.role)
+    const edit = manage || (h.role === "MANAGER" && !h.isLogin)
+    const reason = h.sensitivity === "SEALED" ? "sealed" : !h.revealEnabled ? "workspace_switch_off" : !edit ? "below_role_floor" : !h.capabilities.includes("credentials:reveal") ? "missing_capability" : "fresh_login_reason_and_audit_required"
+    const decision = (allowed: boolean, why = "role") => ({ state: allowed ? "allowed" : "denied", reason: why })
+    return { access: { actions: {
+      read: decision(true), edit: decision(edit), rotate: decision(manage || h.capabilities.includes("credential.rotate")),
+      delete: decision(manage), manage_bindings: decision(manage), lower_sensitivity: decision(manage),
+      reveal: decision(reason === "fresh_login_reason_and_audit_required", reason),
+    } }, loading: false, error: false, refresh: vi.fn() }
+  },
 }))
 
 vi.mock("@/lib/api-fetch", () => ({ apiFetch: (...args: unknown[]) => h.apiFetch(...args) }))
@@ -71,6 +88,7 @@ interface Routes {
 }
 
 function route({ revealEnabled = false, fields = [], bindings = [], agents = [], agentCredentials = {} }: Routes = {}) {
+  h.revealEnabled = revealEnabled
   h.apiFetch.mockImplementation(async (url: string) => {
     const u = String(url)
     if (u.includes("/credentials/reveal-policy")) return ok({ workspace_id: "ws1", enabled: revealEnabled })
@@ -90,6 +108,8 @@ function renderSheet(
   onRotate = vi.fn(),
   onBack = vi.fn(),
 ) {
+  h.sensitivity = typeof overrides.sensitivity === "string" ? overrides.sensitivity : "STANDARD"
+  h.isLogin = Boolean(overrides.login)
   render(
     <CredentialDetailSheet
       workspaceId="ws1"
@@ -158,9 +178,7 @@ describe("reveal needs all four layers, not any of them", () => {
   it("is withheld from an OWNER who does not hold credentials:reveal", async () => {
     route(enabled)
     renderSheet()
-    await waitFor(() =>
-      expect(h.apiFetch.mock.calls.some(([u]) => String(u).includes("reveal-policy"))).toBe(true),
-    )
+    expect(h.apiFetch.mock.calls.some(([u]) => String(u).includes("reveal-policy"))).toBe(false)
     expect(screen.queryByRole("button", { name: /reveal the existing value/i })).not.toBeInTheDocument()
   })
 
@@ -168,9 +186,7 @@ describe("reveal needs all four layers, not any of them", () => {
     h.capabilities = ["chat", "credentials:reveal"]
     route({ revealEnabled: false })
     renderSheet()
-    await waitFor(() =>
-      expect(h.apiFetch.mock.calls.some(([u]) => String(u).includes("reveal-policy"))).toBe(true),
-    )
+    expect(h.apiFetch.mock.calls.some(([u]) => String(u).includes("reveal-policy"))).toBe(false)
     expect(screen.queryByRole("button", { name: /reveal the existing value/i })).not.toBeInTheDocument()
   })
 
@@ -193,9 +209,7 @@ describe("reveal needs all four layers, not any of them", () => {
     h.capabilities = ["chat", "credentials:reveal"]
     route(enabled)
     renderSheet({ sensitivity: "SEALED" })
-    await waitFor(() =>
-      expect(h.apiFetch.mock.calls.some(([u]) => String(u).includes("reveal-policy"))).toBe(true),
-    )
+    expect(h.apiFetch.mock.calls.some(([u]) => String(u).includes("reveal-policy"))).toBe(false)
     expect(screen.queryByRole("button", { name: /reveal the existing value/i })).not.toBeInTheDocument()
   })
 

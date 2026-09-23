@@ -21,7 +21,6 @@ import {
   canKillRoutine,
   normalizeRoutineStatus,
   roleAtLeast,
-  routinePermissions,
 } from "@/lib/routine-governance"
 import { buildPipelineActionRequest } from "@/lib/pipeline-actions"
 import { routineInputSpecs, type RoutineInputSpec } from "@/lib/routine-inputs"
@@ -41,6 +40,7 @@ import { RoutineProposalAsk, type RoutineAskDefinition } from "./routine-proposa
 import { RoutineCardDetail } from "./routine-card-detail"
 import { RoutineLiveRunBanner } from "./routine-live-run-banner"
 import { isAgentless, type RoutineManifest } from "@/lib/routine-flow"
+import { useAccessMe } from "@/hooks/use-access-me"
 
 // RoutinesDetailPanel — right-side detail for the selected routine.
 // Hosts the seven sub-tabs (Overview, Editor, Runs, Versions,
@@ -131,8 +131,12 @@ export function RoutinesDetailPanel({
 }: Props) {
   const router = useRouter()
   const startIntent = useRef(new RoutineStartIntent())
-  const { role, capabilities } = useAbilities()
-  const permissions = routinePermissions(role, capabilities)
+  const { role } = useAbilities()
+  const { access: effectiveAccess, loading: accessLoading, error: accessError, refresh: refreshAccess } = useAccessMe(
+    workspaceId && slug ? `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/pipelines/${encodeURIComponent(slug)}/access/me` : undefined,
+  )
+  const runAccess = effectiveAccess?.actions.run
+  const mayRun = runAccess?.state === "allowed" || runAccess?.state === "conditional"
   const [routine, setRoutine] = useState<RoutineDetail | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -250,7 +254,7 @@ export function RoutinesDetailPanel({
   // form; one without runs immediately, which is what that button has
   // always done and must go on doing.
   const startRun = () => {
-    if (!permissions.run) return
+    if (!mayRun) return
     // The loaded routine and the selected slug can disagree. `fetchRoutine`
     // sets `loading` but leaves `routine` on the PREVIOUS one until the new
     // response lands, and the toolbar renders under `{routine && …}` — so
@@ -419,6 +423,7 @@ export function RoutinesDetailPanel({
       toast.success(governanceLabel(action))
       onChanged()
       fetchRoutine()
+      void refreshAccess()
     } catch (e) {
       toast.error(`${governanceLabel(action)} failed`, {
         description: e instanceof Error ? e.message : String(e),
@@ -464,8 +469,12 @@ export function RoutinesDetailPanel({
 
   const lifecycle = normalizeRoutineStatus(routine?.status)
   const lifecycleBadge = routineStatusBadge(routine?.status)
-  const runGuard = !permissions.run
-    ? "Running requires a manager role or an explicit Run routines permission"
+  const runGuard = accessLoading || !runAccess
+    ? accessError ? "Your access could not be determined" : "Checking your access…"
+    : runAccess.state === "denied"
+    ? runAccess.reason === "missing_role_or_capability"
+      ? "Running requires a manager role or an explicit Run routines permission"
+      : `Run unavailable: ${runAccess.reason.replaceAll("_", " ")}`
     : routine?.draft_only
     ? "Publish the draft first — nothing can run until then"
     : runDisabledReason(routine?.status)

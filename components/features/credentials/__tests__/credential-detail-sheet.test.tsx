@@ -12,6 +12,23 @@ const h = vi.hoisted(() => ({
   role: "OWNER" as string,
   capabilities: [] as string[],
   apiFetch: vi.fn(),
+  revealEnabled: false,
+  sensitivity: "STANDARD",
+  isLogin: false,
+}))
+
+vi.mock("@/hooks/use-access-me", () => ({
+  useAccessMe: () => {
+    const manage = ["OWNER", "ADMIN"].includes(h.role)
+    const edit = manage || (h.role === "MANAGER" && !h.isLogin)
+    const revealReason = h.sensitivity === "SEALED" ? "sealed" : !h.revealEnabled ? "workspace_switch_off" : !edit ? "below_role_floor" : !h.capabilities.includes("credentials:reveal") ? "missing_capability" : "fresh_login_reason_and_audit_required"
+    const decision = (allowed: boolean, reason = "role") => ({ state: allowed ? "allowed" : "denied", reason })
+    return { access: { actions: {
+      read: decision(true), edit: decision(edit), rotate: decision(manage || h.capabilities.includes("credential.rotate")),
+      delete: decision(manage), manage_bindings: decision(manage), lower_sensitivity: decision(manage),
+      reveal: decision(revealReason === "fresh_login_reason_and_audit_required", revealReason),
+    } }, loading: false, error: false, refresh: vi.fn() }
+  },
 }))
 
 vi.mock("@/lib/api-fetch", () => ({
@@ -59,6 +76,8 @@ const credential = {
 }
 
 function renderSheet(overrides: Record<string, unknown> = {}) {
+  h.sensitivity = typeof overrides.sensitivity === "string" ? overrides.sensitivity : "STANDARD"
+  h.isLogin = Boolean(overrides.login)
   return render(
     <CredentialDetailSheet
       workspaceId="ws1"
@@ -97,6 +116,7 @@ beforeEach(() => {
   h.role = "OWNER"
   h.capabilities = []
   h.apiFetch.mockReset()
+  h.revealEnabled = false
   h.apiFetch.mockResolvedValue({ ok: true, status: 200, json: async () => [] })
 })
 
@@ -1069,6 +1089,7 @@ describe("deleting the credential", () => {
 // a different fix, so each one says which.
 describe("why reveal is unavailable", () => {
   function renderReveal(over: Record<string, unknown> = {}, policyEnabled = true) {
+    h.revealEnabled = policyEnabled
     h.apiFetch.mockImplementation(async (url: string) =>
       String(url).includes("/reveal-policy")
         ? { ok: true, status: 200, json: async () => ({ enabled: policyEnabled }) }

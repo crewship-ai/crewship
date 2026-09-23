@@ -275,35 +275,41 @@ func requireRoleOrCapabilityOrForbid(
 	workspaceID, callerUserID, role, capability, action, resource string,
 	requiredRoleActions ...string,
 ) bool {
-	// Role check first — preserves existing behaviour exactly for
-	// MANAGER+ callers and skips the DB lookup on their hot path.
-	if canRole(role, requiredRoleActions...) {
-		return true
+	allowed, err := roleOrCapability(r.Context(), db, workspaceID, callerUserID, role, capability, requiredRoleActions...)
+	if err != nil {
+		if logger != nil {
+			logger.Warn("rbac: capability lookup failed",
+				"user_id", callerUserID,
+				"workspace_id", workspaceID,
+				"action", action,
+				"resource", resource,
+				"error", err.Error(),
+			)
+		}
+		replyError(w, http.StatusInternalServerError, "Internal server error")
+		return false
 	}
-	// Role check failed. If we have a caller id, try the capability
-	// path. Autonomous calls (no caller id) fall straight through
-	// to the existing forbid emit.
-	if callerUserID != "" {
-		caps, _, err, ok := CapabilitiesForMemberE(r.Context(), db, workspaceID, callerUserID)
-		if err != nil {
-			if logger != nil {
-				logger.Warn("rbac: capability lookup failed",
-					"user_id", callerUserID,
-					"workspace_id", workspaceID,
-					"action", action,
-					"resource", resource,
-					"error", err.Error(),
-				)
-			}
-			replyError(w, http.StatusInternalServerError, "Internal server error")
-			return false
-		}
-		if ok && HasCapability(caps, capability) {
-			return true
-		}
+	if allowed {
+		return true
 	}
 	replyForbidden(w, logger, callerUserID, role, action, resource)
 	return false
+}
+
+// roleOrCapability is the common decision behind an action's layered gate
+// and its /access/me explanation. Runtime preflight remains action-specific.
+func roleOrCapability(ctx context.Context, db *sql.DB, workspaceID, callerUserID, role, capability string, requiredRoleActions ...string) (bool, error) {
+	if canRole(role, requiredRoleActions...) {
+		return true, nil
+	}
+	if callerUserID == "" {
+		return false, nil
+	}
+	caps, _, err, member := CapabilitiesForMemberE(ctx, db, workspaceID, callerUserID)
+	if err != nil {
+		return false, err
+	}
+	return member && HasCapability(caps, capability), nil
 }
 
 // requireCapabilityOrForbid is the capability-gate variant of
