@@ -152,8 +152,8 @@ export function IssueRunsCard({ issue, runs, unavailable = false }: { issue: Mis
                     {run.started_at && <> · started {relTime(run.started_at)}</>}
                     {run.duration_ms > 0 && <> · {formatDurationDecimal(run.duration_ms)}</>}
                     {source && <> · {source}</>}
-                    {run.id && <> · assignment <span className="font-mono">{run.id}</span></>}
                   </p>
+                  {run.id && <p className="text-[11px] text-muted-foreground">Assignment <span className="break-all font-mono">{run.id}</span></p>}
                 </div>
                 <StatusPill label={result.label} tone={result.tone} live={run.status === "RUNNING"} className="col-start-2 w-fit md:col-start-auto" />
                 {l.run ? (

@@ -5,7 +5,7 @@ import { TypedRunDetail } from "../typed-run-detail"
 
 vi.mock("@/lib/api-fetch", () => ({ apiFetch: vi.fn() }))
 vi.mock("@/components/features/routines/routine-run-detail", () => ({ RoutineRunDetail: () => <div data-testid="routine-detail" /> }))
-vi.mock("@/components/features/activity/run-activity-timeline", () => ({ RunActivityTimeline: () => <div data-testid="agent-timeline" /> }))
+vi.mock("@/components/features/activity/run-activity-timeline", () => ({ RunActivityTimeline: ({ workspaceId, params }: { workspaceId: string; params: { run_id?: string } }) => <div data-testid="agent-timeline" data-workspace-id={workspaceId} data-run-id={params.run_id} /> }))
 vi.mock("@/components/features/activity/run-evidence-panel", () => ({ RunEvidencePanel: () => <div data-testid="agent-evidence" /> }))
 
 beforeEach(() => vi.mocked(apiFetch).mockReset())
@@ -33,6 +33,8 @@ describe("TypedRunDetail", () => {
     render(<TypedRunDetail workspaceId="ws" runId="run_missing" />)
     await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("does not prove"))
     expect(screen.queryByTestId("routine-detail")).toBeNull()
+    expect(screen.getByTestId("agent-timeline")).toHaveAttribute("data-workspace-id", "ws")
+    expect(screen.getByTestId("agent-timeline")).toHaveAttribute("data-run-id", "run_missing")
   })
 
   it.each([403, 500])("does not try a broader fallback after %i", async (status) => {

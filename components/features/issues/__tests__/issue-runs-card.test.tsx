@@ -47,9 +47,18 @@ describe("IssueRunsCard", () => {
     expect(openRun.map((a) => a.getAttribute("href"))).toEqual(["/activity?run=run_aaaa", "/activity?run=run_bbbb"])
     expect(screen.getByRole("link", { name: "Robin" })).toHaveAttribute("href", "/crews?agent=robin")
     expect(screen.getByText("asg_a")).toBeInTheDocument()
+    expect(screen.getByText("asg_a").closest("p")).not.toHaveClass("truncate")
     expect(screen.getByRole("link", { name: /journal for ENG-1/i })).toHaveAttribute("href", "/journal?mission_id=ENG-1")
     expect(screen.getByRole("link", { name: /all runs in activity/i })).toHaveAttribute("href", "/activity?mission=m_eng1")
     expect(screen.getByText("run not recorded")).toHaveAttribute("title", expect.stringContaining("does not prove"))
+  })
+
+  it("keeps a long assignment reference readable outside clipped metadata", () => {
+    const longId = `asg_${"a".repeat(90)}`
+    render(<IssueRunsCard issue={issue} runs={[{ ...runs[0], id: longId, agent_name: "Long agent name ".repeat(12) }]} />)
+    const id = screen.getByText(longId)
+    expect(id).toHaveClass("break-all")
+    expect(id.closest("p")).not.toHaveClass("truncate")
   })
 
   it("says what will appear and how when nothing has run", () => {

@@ -66,7 +66,10 @@ export function TypedRunDetail({ workspaceId, runId }: { workspaceId: string; ru
 
   if (state === "loading") return <p role="status" className="p-6 text-sm">Loading run…</p>
   if (state === "error") return <div role="alert" className="p-6 text-sm">Could not load this run{code ? ` (${code})` : ""}. <Button type="button" variant="outline" size="sm" onClick={retry}><RotateCcw className="mr-1 h-3 w-3" />Retry</Button></div>
-  if (state === "missing") return <p role="status" className="p-6 text-sm">No execution record is available for this run ID. A missing journal record does not prove that the agent never started.</p>
+  if (state === "missing") return <div className="space-y-4 p-6">
+    <p role="status" className="text-sm">No execution record is available for this run ID. A missing execution record does not prove that the agent never started.</p>
+    <RunActivityTimeline workspaceId={workspaceId} params={{ run_id: runId }} title="Run activity" hideWhenEmpty={false} showControls card />
+  </div>
   if (state === "pipeline" || state === "routine-fallback") return <RoutineRunDetail workspaceId={workspaceId} runId={runId} />
   if (!run) return null
 
