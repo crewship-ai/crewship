@@ -234,7 +234,11 @@ export function CredentialDetailSheet({
   const [auditExpanded, setAuditExpanded] = React.useState(false)
   const [confirmDelete, setConfirmDelete] = React.useState(false)
   const [testing, setTesting] = React.useState(false)
-  const [testResult, setTestResult] = React.useState<{ valid: boolean; error?: string } | null>(null)
+  const [testResult, setTestResult] = React.useState<{ valid: boolean; supported?: boolean; error?: string } | null>(null)
+  // Older servers may omit `supported`; a positive `valid` without proof of a
+  // probe must never render as a green verification result.
+  const testUnknown = Boolean(testResult && (testResult.supported === false || (testResult.valid && testResult.supported !== true)))
+  const testPassed = Boolean(testResult?.valid && !testUnknown)
   const [fields, setFields] = React.useState<CredentialFieldRow[]>([])
   const [fieldsLoading, setFieldsLoading] = React.useState(false)
   const [bindings, setBindings] = React.useState<BindingRow[]>([])
@@ -466,7 +470,7 @@ export function CredentialDetailSheet({
         return
       }
       const data = await res.json()
-      setTestResult({ valid: data.valid, error: data.error })
+      setTestResult({ valid: data.valid, supported: data.supported, error: data.error })
     } catch {
       setTestResult({ valid: false, error: "Network error" })
     } finally {
@@ -654,8 +658,8 @@ export function CredentialDetailSheet({
                   <p className="flex items-center gap-2 text-xs text-muted-foreground" data-testid="connection-verification">
                     <FlaskConical className="h-3.5 w-3.5 shrink-0" />
                     {testResult
-                      ? testResult.valid ? "Connection check passed just now." : "Connection check did not pass. See the test result."
-                      : credential.testable && (!seat || seat.login.mode !== "subscription") && credential.last_checked_at && credential.status === "ACTIVE" && !credential.last_error
+                      ? testUnknown ? "Connection was not checked by this test." : testPassed ? "Connection check passed just now." : "Connection check did not pass. See the test result."
+                      : credential.testable && !seat && credential.last_checked_at && credential.status === "ACTIVE" && !credential.last_error
                         ? `Last connection check passed ${formatRelativeTime(credential.last_checked_at)}. This does not guarantee the next request will succeed.`
                         : "Connection not verified."}
                   </p>
@@ -677,11 +681,11 @@ export function CredentialDetailSheet({
                     <span
                       className={cn(
                         "inline-flex items-center gap-1 text-[11px]",
-                        testResult.valid ? "text-success" : "text-destructive",
+                        testUnknown ? "text-muted-foreground" : testPassed ? "text-success" : "text-destructive",
                       )}
                     >
-                      {testResult.valid ? <CheckCircle2 className="h-3 w-3" /> : <XCircle className="h-3 w-3" />}
-                      {testResult.valid ? "Valid" : testResult.error || "Invalid"}
+                      {testUnknown ? <Info className="h-3 w-3" /> : testPassed ? <CheckCircle2 className="h-3 w-3" /> : <XCircle className="h-3 w-3" />}
+                      {testUnknown ? "Not checked" : testPassed ? "Valid" : testResult.error || "Invalid"}
                     </span>
                   )}
                 </div>
@@ -748,15 +752,17 @@ export function CredentialDetailSheet({
                             <span
                               className={cn(
                                 "inline-flex items-center gap-1 text-[11px]",
-                                testResult.valid ? "text-success" : "text-destructive",
+                                testUnknown ? "text-muted-foreground" : testPassed ? "text-success" : "text-destructive",
                               )}
                             >
-                              {testResult.valid ? (
+                              {testUnknown ? (
+                                <Info className="h-3 w-3" />
+                              ) : testPassed ? (
                                 <CheckCircle2 className="h-3 w-3" />
                               ) : (
                                 <XCircle className="h-3 w-3" />
                               )}
-                              {testResult.valid ? "Valid" : testResult.error || "Invalid"}
+                              {testUnknown ? "Not checked" : testPassed ? "Valid" : testResult.error || "Invalid"}
                             </span>
                           )}
                           <Button size="sm" variant="outline" onClick={handleTest} disabled={testing}>

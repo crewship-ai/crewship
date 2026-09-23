@@ -342,10 +342,38 @@ describe("Test now request lifecycle", () => {
     expect(button).toBeDisabled()
 
     await Promise.resolve().then(() =>
-      resolveTest({ ok: true, status: 200, json: async () => ({ valid: true }) }),
+      resolveTest({ ok: true, status: 200, json: async () => ({ valid: true, supported: true }) }),
     )
     expect(await screen.findByText("Valid")).toBeInTheDocument()
     expect(screen.getByRole("button", { name: /test now/i })).not.toBeDisabled()
+  })
+
+  it("does not show a green result when the server did not probe the credential", async () => {
+    h.role = "OWNER"
+    h.apiFetch.mockImplementation((url: unknown) => {
+      if (String(url).includes("/test")) {
+        return Promise.resolve({ ok: true, status: 200, json: async () => ({ valid: true, supported: false, error: "Provider login is delivered to the CLI" }) })
+      }
+      return Promise.resolve({ ok: true, status: 200, json: async () => [] })
+    })
+    renderSheet({ provider: "OPENAI", testable: true })
+    fireEvent.click(screen.getByRole("button", { name: /test now/i }))
+    expect(await screen.findByText("Not checked")).toBeInTheDocument()
+    expect(screen.getByTestId("connection-verification")).toHaveTextContent("not checked")
+    expect(screen.queryByText("Valid")).not.toBeInTheDocument()
+  })
+
+  it("does not infer verification from an older server response without supported", async () => {
+    h.role = "OWNER"
+    h.apiFetch.mockImplementation((url: unknown) =>
+      String(url).includes("/test")
+        ? Promise.resolve({ ok: true, status: 200, json: async () => ({ valid: true }) })
+        : Promise.resolve({ ok: true, status: 200, json: async () => [] }),
+    )
+    renderSheet({ testable: true })
+    fireEvent.click(screen.getByRole("button", { name: /test now/i }))
+    expect(await screen.findByText("Not checked")).toBeInTheDocument()
+    expect(screen.queryByText("Valid")).not.toBeInTheDocument()
   })
 
   it("renders the server-provided error message when the probe reports invalid", async () => {
@@ -828,7 +856,7 @@ describe("Sheet close/reopen resets transient state", () => {
     const base = { ...credential, testable: true }
     h.apiFetch.mockImplementation(async (url: string) =>
       String(url).includes("/test")
-        ? { ok: true, status: 200, json: async () => ({ valid: true }) }
+        ? { ok: true, status: 200, json: async () => ({ valid: true, supported: true }) }
         : { ok: true, status: 200, json: async () => [] },
     )
     const view = (open: boolean) => (
