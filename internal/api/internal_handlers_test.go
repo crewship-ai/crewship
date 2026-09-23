@@ -12,9 +12,11 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/auth/internaltoken"
 	"github.com/crewship-ai/crewship/internal/encryption"
+	"github.com/crewship-ai/crewship/internal/journal"
 )
 
 // testLogger returns a logger that drops messages below WARN.
@@ -680,6 +682,60 @@ func TestInternalCreateRun(t *testing.T) {
 			t.Errorf("status = %d", w.Code)
 		}
 	})
+}
+
+func TestInternalCreateRun_AcknowledgementMeansStartedRecordIsCommitted(t *testing.T) {
+	setTestEncryptionKey(t)
+	db := setupTestDB(t)
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+	execOrFatal(t, db, `INSERT INTO crews (id, workspace_id, name, slug) VALUES ('cr-sync', ?, 'Crew', 'crew-sync')`, wsID)
+	execOrFatal(t, db, `INSERT INTO agents (id, crew_id, workspace_id, name, slug, status) VALUES ('ag-sync', 'cr-sync', ?, 'A', 'a-sync', 'IDLE')`, wsID)
+
+	h := NewInternalHandler(db, "tok", testLogger())
+	// Keep the asynchronous worker from flushing before the assertion. A
+	// successful IPC response is the gate to starting a real process, so it
+	// must imply that run.started is already durable without a later flush.
+	jw := journal.NewWriter(db, testLogger(), journal.WriterOptions{FlushSize: 64, FlushInterval: time.Hour})
+	t.Cleanup(func() { _ = jw.Close() })
+	h.SetJournal(jw)
+	body := `{"id":"run-sync","agent_id":"ag-sync","workspace_id":"` + wsID + `","trigger_type":"SCHEDULED"}`
+	w := httptest.NewRecorder()
+	h.CreateRun(w, httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body)))
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status = %d, body=%s", w.Code, w.Body.String())
+	}
+	var count int
+	if err := db.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM journal_entries WHERE trace_id='run-sync' AND entry_type='run.started'`).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("CreateRun acknowledged before run.started committed: count=%d", count)
+	}
+}
+
+func TestInternalCreateRun_NonDurableJournalFailsClosed(t *testing.T) {
+	setTestEncryptionKey(t)
+	db := setupTestDB(t)
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+	execOrFatal(t, db, `INSERT INTO crews (id, workspace_id, name, slug) VALUES ('cr-closed', ?, 'Crew', 'crew-closed')`, wsID)
+	execOrFatal(t, db, `INSERT INTO agents (id, crew_id, workspace_id, name, slug, status) VALUES ('ag-closed', 'cr-closed', ?, 'A', 'a-closed', 'IDLE')`, wsID)
+	h := NewInternalHandler(db, "tok", testLogger())
+	h.SetJournal(noopEmitter{}) // no EmitSync capability
+	body := `{"id":"run-closed","agent_id":"ag-closed","workspace_id":"` + wsID + `","trigger_type":"SCHEDULED"}`
+	w := httptest.NewRecorder()
+	h.CreateRun(w, httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body)))
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("non-durable journal status=%d, want 503", w.Code)
+	}
+	var status string
+	if err := db.QueryRowContext(t.Context(), `SELECT status FROM agents WHERE id='ag-closed'`).Scan(&status); err != nil {
+		t.Fatal(err)
+	}
+	if status != "IDLE" {
+		t.Fatalf("non-durable journal changed agent status to %q", status)
+	}
 }
 
 func TestInternalUpdateRun(t *testing.T) {

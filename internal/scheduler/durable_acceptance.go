@@ -12,7 +12,6 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/pipeline"
 	"github.com/crewship-ai/crewship/internal/work"
-	"github.com/robfig/cron/v3"
 )
 
 var (
@@ -90,13 +89,11 @@ func AcceptDueTx(ctx context.Context, tx *sql.Tx, store *work.Store, workspaceID
 		return work.Receipt{}, ErrScheduleNotDue
 	}
 	dueKey := due.UTC().Format(time.RFC3339Nano)
-	parser := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor)
-	plan, err := parser.Parse(expr)
+	next, err := NextOccurrence(expr, now)
 	if err != nil {
 		return work.Receipt{}, fmt.Errorf("scheduler: invalid stored cron: %w", err)
 	}
-	next := plan.Next(now).UTC()
-	if next.IsZero() || !next.After(now) {
+	if !next.After(now) {
 		return work.Receipt{}, errors.New("scheduler: cron has no next occurrence")
 	}
 
