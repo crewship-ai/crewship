@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 )
@@ -235,12 +236,27 @@ func upsertAnchorTx(ctx context.Context, tx *sql.Tx, workspaceID, auditPath, sco
 }
 
 // RecoverPending completes or conflicts every unconfirmed mutation intent in
-// the ledger. Call it at boot, before any writer is admitted.
+// the ledger for trusted in-process callers. Host boot must use
+// RecoverPendingUnderRoot so persisted paths cannot escape the configured
+// storage boundary after a restore or path change.
 //
 // It returns how many intents it settled into a confirmed write and how many it
 // declared drifted. A conflicted intent is NOT an error: it means a third party
 // changed the file, and §8 forbids resolving that by overwriting.
 func RecoverPending(ctx context.Context, db *sql.DB, blobRoot string) (recovered, conflicted int, err error) {
+	return recoverPending(ctx, db, blobRoot, "", false)
+}
+
+// RecoverPendingUnderRoot is the host boot path. The ledger stores absolute
+// canonical paths, which may be stale after a database restore or a storage
+// move. Never trust them as filesystem authority: each path must resolve below
+// the currently configured storage root, with its parent pinned through
+// os.Root, before recovery may read, lock, or write it.
+func RecoverPendingUnderRoot(ctx context.Context, db *sql.DB, blobRoot, storageRoot string) (recovered, conflicted int, err error) {
+	return recoverPending(ctx, db, blobRoot, storageRoot, true)
+}
+
+func recoverPending(ctx context.Context, db *sql.DB, blobRoot, storageRoot string, confined bool) (recovered, conflicted int, err error) {
 	if db == nil {
 		return 0, 0, fmt.Errorf("%w: recovery needs the mutation ledger", ErrLedgerRequired)
 	}
@@ -269,12 +285,27 @@ func RecoverPending(ctx context.Context, db *sql.DB, blobRoot string) (recovered
 	}
 
 	for _, k := range keys {
-		lk := NewFileLock(k.canonical + ".lock")
+		file := &mutationFile{path: k.canonical}
+		if confined {
+			if storageRoot == "" {
+				return recovered, conflicted, fmt.Errorf("memory recovery storage root is not configured for %s", k.auditPath)
+			}
+			file, err = openMutationFile(storageRoot, k.canonical, false)
+			if err != nil {
+				return recovered, conflicted, fmt.Errorf("open memory recovery path %s under storage root: %w", k.auditPath, err)
+			}
+			if file.missing {
+				return recovered, conflicted, fmt.Errorf("memory recovery parent is missing for %s under storage root", k.auditPath)
+			}
+		}
+		lk := file.lock()
 		if lerr := lk.Lock(); lerr != nil {
+			file.close()
 			return recovered, conflicted, fmt.Errorf("recovery lock %s: %w", k.canonical, lerr)
 		}
-		n, rerr := recoverKeyLocked(ctx, db, k.ws, k.auditPath, k.canonical, blobRoot)
+		n, rerr := recoverFileLocked(ctx, db, k.ws, k.auditPath, file, blobRoot, confined)
 		_ = lk.Unlock()
+		file.close()
 		if rerr != nil {
 			if errors.Is(rerr, ErrMemoryConflict) {
 				conflicted++
@@ -287,7 +318,7 @@ func RecoverPending(ctx context.Context, db *sql.DB, blobRoot string) (recovered
 	return recovered, conflicted, nil
 }
 
-// recoverKeyLocked runs §8's recovery hash protocol for ONE key. The caller
+// recoverFileLocked runs §8's recovery hash protocol for ONE key. The caller
 // must already hold that key's file lock.
 //
 //	file matches the TARGET hash -> the rename happened, the confirmation did
@@ -303,11 +334,7 @@ func RecoverPending(ctx context.Context, db *sql.DB, blobRoot string) (recovered
 // The anchor is deliberately left stale on the drift path. That is what makes
 // the NEXT write of this key fail its drift check too, instead of the file
 // quietly rejoining the contract at whatever a third party left behind.
-func recoverKeyLocked(ctx context.Context, db *sql.DB, workspaceID, auditPath, canonicalPath, blobRoot string) (int, error) {
-	return recoverFileLocked(ctx, db, workspaceID, auditPath, &mutationFile{path: canonicalPath}, blobRoot)
-}
-
-func recoverFileLocked(ctx context.Context, db *sql.DB, workspaceID, auditPath string, file *mutationFile, blobRoot string) (int, error) {
+func recoverFileLocked(ctx context.Context, db *sql.DB, workspaceID, auditPath string, file *mutationFile, blobRoot string, confined bool) (int, error) {
 	canonicalPath := file.path
 	rows, err := db.QueryContext(ctx, `
 		SELECT id, operation_id, state, base_sha256, target_sha256, target_blob_ref,
@@ -367,7 +394,15 @@ func recoverFileLocked(ctx context.Context, db *sql.DB, workspaceID, auditPath s
 		case p.baseSHA:
 			// The rename never happened. The parked blob is the durable data
 			// §8 requires the intent to carry; redo the write from it.
-			blob, berr := readIntentBlob(p.blobRef, blobRoot, p.targetSHA)
+			var blob []byte
+			var berr error
+			if confined {
+				// The persisted absolute ref may point outside this instance after
+				// a restore. Rebuild the location from the configured blob root.
+				blob, berr = readRootedIntentBlob(blobRoot, p.targetSHA)
+			} else {
+				blob, berr = readIntentBlob(p.blobRef, blobRoot, p.targetSHA)
+			}
 			if berr != nil {
 				return recovered, fmt.Errorf("recovery blob for mutation %s: %w", p.id, berr)
 			}
@@ -397,6 +432,35 @@ func recoverFileLocked(ctx context.Context, db *sql.DB, workspaceID, auditPath s
 		}
 	}
 	return recovered, nil
+}
+
+func readRootedIntentBlob(blobRoot, sha string) ([]byte, error) {
+	if blobRoot == "" || len(sha) != 64 {
+		return nil, fmt.Errorf("invalid rooted intent blob location")
+	}
+	for _, c := range sha {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return nil, fmt.Errorf("invalid rooted intent blob hash")
+		}
+	}
+	root, err := os.OpenRoot(blobRoot)
+	if err != nil {
+		return nil, err
+	}
+	defer root.Close()
+	file, err := openRootNoFollow(root, sha[:2]+string(os.PathSeparator)+sha)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("intent blob is not a regular file")
+	}
+	return io.ReadAll(file)
 }
 
 // readIntentBlob reads the parked target content. It prefers the absolute

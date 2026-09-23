@@ -532,7 +532,7 @@ func Mutate(ctx context.Context, db *sql.DB, req MutateRequest) (MutateResult, e
 
 	// 2. Recovery, before serving any new write for this key.
 	if db != nil {
-		recovered, err := recoverFileLocked(ctx, db, req.WorkspaceID, req.AuditPath, file, req.BlobRoot)
+		recovered, err := recoverFileLocked(ctx, db, req.WorkspaceID, req.AuditPath, file, req.BlobRoot, true)
 		if err != nil {
 			return res, err
 		}
