@@ -37,6 +37,7 @@ interface RunDetailResponse extends PipelineRun {
   definition_status?: "available" | "unavailable" | "error"
   pipeline_version?: number | null
   definition_hash?: string
+  metadata?: Record<string, unknown> | null
   step_outputs_available?: boolean
   output?: string
   outcome?: string
