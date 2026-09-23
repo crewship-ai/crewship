@@ -40,7 +40,7 @@ func AcceptDue(ctx context.Context, acceptor *work.Acceptor, disk *work.DiskGuar
 	if acceptor == nil {
 		return work.Receipt{}, errors.New("scheduler: durable acceptor is not configured")
 	}
-	if disk == nil {
+	if disk == nil || disk.Path == "" {
 		return work.Receipt{}, errors.New("scheduler: disk guard is not configured")
 	}
 	if err := disk.Check(); err != nil {

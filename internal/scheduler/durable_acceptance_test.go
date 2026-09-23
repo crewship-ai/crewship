@@ -269,6 +269,9 @@ func TestAcceptDue_BoundedHandleAndDiskRefusal(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = acceptor.Close() })
+	if _, err := AcceptDue(t.Context(), acceptor, &work.DiskGuard{}, "ws1", "a1", acceptanceNow, work.IngressLimits{}); err == nil {
+		t.Fatal("accepted scheduled work without a disk guard path")
+	}
 	guard := work.NewDiskGuard(path)
 	guard.MinFree = math.MaxInt64
 	if _, err := AcceptDue(t.Context(), acceptor, guard, "ws1", "a1", acceptanceNow, work.IngressLimits{}); !errors.Is(err, work.ErrDiskPressure) {
