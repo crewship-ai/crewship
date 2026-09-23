@@ -32,11 +32,11 @@ var credDependentsCmd = &cobra.Command{
 		}
 		var body struct {
 			Routines []struct {
-				Slug       string `json:"slug"`
-				Name       string `json:"name"`
-				Resolution string `json:"resolution"`
-			} `json:"routines"`
-			VisibilityLimited bool `json:"visibility_limited"`
+				Slug       string `json:"slug" yaml:"slug"`
+				Name       string `json:"name" yaml:"name"`
+				Resolution string `json:"resolution" yaml:"resolution"`
+			} `json:"routines" yaml:"routines"`
+			VisibilityLimited bool `json:"visibility_limited" yaml:"visibility_limited"`
 		}
 		if err := cli.ReadJSON(resp, &body); err != nil {
 			return err
