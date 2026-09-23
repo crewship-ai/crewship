@@ -208,6 +208,7 @@ func TestUpdateSchedule_EntryAcceptsWork(t *testing.T) {
 	resolver := &mockResolver{createChatErr: fmt.Errorf("direct execution forbidden")}
 	s := newTestScheduler(db, resolver, nil, nil)
 	configureDurableCron(t, s, db)
+	s.nowFn = func() time.Time { return acceptanceNow }
 	if err := s.Start(context.Background()); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
@@ -216,7 +217,6 @@ func TestUpdateSchedule_EntryAcceptsWork(t *testing.T) {
 	if _, err := db.Exec(`UPDATE agents SET schedule_enabled=1, schedule_cron='@every 25ms', schedule_next_run=? WHERE id='a1'`, acceptanceDue); err != nil {
 		t.Fatal(err)
 	}
-	s.nowFn = func() time.Time { return acceptanceNow }
 	if err := s.UpdateSchedule(context.Background(), "a1", "@every 25ms", "go", true); err != nil {
 		t.Fatalf("UpdateSchedule: %v", err)
 	}

@@ -8,6 +8,9 @@ import (
 	"database/sql"
 	"encoding/json"
 	"net/http"
+	"time"
+
+	"github.com/crewship-ai/crewship/internal/scheduler"
 )
 
 func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
@@ -91,30 +94,6 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// If promoting to LEAD, auto-demote existing lead in the same crew (transactional)
-		if roleStr == "LEAD" {
-			// Find the agent's crew_id
-			var crewIDNull sql.NullString
-			if err := h.db.QueryRowContext(r.Context(),
-				"SELECT crew_id FROM agents WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
-				agentID, workspaceID).Scan(&crewIDNull); err != nil {
-				replyInternalError(w, h.logger, "query agent crew_id for promotion", err)
-				return
-			}
-
-			if !crewIDNull.Valid || crewIDNull.String == "" {
-				replyError(w, http.StatusBadRequest, "LEAD role requires crew_id")
-				return
-			}
-
-			// Demote existing lead in the same crew
-			if _, err := h.db.ExecContext(r.Context(),
-				"UPDATE agents SET agent_role = 'AGENT' WHERE crew_id = ? AND agent_role = 'LEAD' AND deleted_at IS NULL AND id != ?",
-				crewIDNull.String, agentID); err != nil {
-				replyInternalError(w, h.logger, "demote existing lead", err)
-				return
-			}
-		}
 	}
 
 	// Validate lead_mode if being updated. The presence of the key
@@ -315,6 +294,9 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 			ub.Set(col, val)
 		}
 	}
+	_, hasCron := body["schedule_cron"]
+	_, hasEnabled := body["schedule_enabled"]
+	promoteToLead := body["agent_role"] == "LEAD"
 
 	// The stored avatar (#1297) is a render of (avatar_seed, avatar_style).
 	// Repointing either one makes those bytes depict something the agent is
@@ -353,10 +335,104 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 			agentID, workspaceID).Scan(&c, &a)
 		beforeCrewID, beforeAdapter = c.String, a.String
 	}
-	query, args := ub.Build("agents", "id = ? AND workspace_id = ? AND deleted_at IS NULL", agentID, workspaceID)
-	if _, err := h.db.ExecContext(r.Context(), query, args...); err != nil {
-		replyInternalError(w, h.logger, "update agent", err)
-		return
+	if hasCron || hasEnabled || promoteToLead {
+		// A schedule PATCH reads the existing cron/enabled pair, merges the
+		// request and writes the new due cursor. Take SQLite's writer lock
+		// before that read: two partial PATCHes must not compute a cursor
+		// against one another's stale configuration. The overdue sweep sees
+		// either the old whole row or the new whole row, never an enabled
+		// schedule paired with the previous due identity.
+		tx, err := h.db.BeginTx(r.Context(), &sql.TxOptions{Isolation: sql.LevelSerializable})
+		if err != nil {
+			replyInternalError(w, h.logger, "begin agent schedule update", err)
+			return
+		}
+		defer tx.Rollback()
+		if hasCron || hasEnabled {
+			var storedCron, storedNext sql.NullString
+			var storedEnabled int
+			if err := tx.QueryRowContext(r.Context(),
+				`SELECT schedule_cron, schedule_enabled, schedule_next_run FROM agents WHERE id=? AND workspace_id=?`,
+				agentID, workspaceID).Scan(&storedCron, &storedEnabled, &storedNext); err != nil {
+				replyInternalError(w, h.logger, "read agent schedule for update", err)
+				return
+			}
+			cronExpr := storedCron.String
+			if hasCron {
+				switch v := body["schedule_cron"].(type) {
+				case string:
+					cronExpr = v
+				case nil:
+					cronExpr = ""
+				default:
+					replyError(w, http.StatusBadRequest, "schedule_cron must be a cron expression or null")
+					return
+				}
+			}
+			enabled := storedEnabled == 1
+			if hasEnabled {
+				v, ok := body["schedule_enabled"].(bool)
+				if !ok {
+					replyError(w, http.StatusBadRequest, "schedule_enabled must be a boolean")
+					return
+				}
+				enabled = v
+			}
+			if !enabled || cronExpr == "" {
+				ub.Set("schedule_next_run", nil)
+			} else {
+				next, err := scheduler.NextOccurrence(cronExpr, time.Now())
+				if err != nil {
+					replyError(w, http.StatusBadRequest, "Invalid schedule_cron: "+err.Error())
+					return
+				}
+				// A repeated PATCH is not a new occurrence. Keep a due cursor
+				// that durable acceptance has not yet advanced. Only a changed
+				// plan, a disabled->enabled transition, or a missing cursor
+				// establishes a new future identity.
+				if storedEnabled != 1 || storedCron.String != cronExpr || !storedNext.Valid || storedNext.String == "" {
+					ub.Set("schedule_next_run", next.UTC().Format(time.RFC3339))
+				}
+			}
+		}
+		if promoteToLead {
+			var crewID sql.NullString
+			if newCrew, changingCrew := body["crew_id"].(string); changingCrew {
+				crewID = sql.NullString{String: newCrew, Valid: newCrew != ""}
+			} else {
+				if err := tx.QueryRowContext(r.Context(),
+					"SELECT crew_id FROM agents WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
+					agentID, workspaceID).Scan(&crewID); err != nil {
+					replyInternalError(w, h.logger, "query agent crew_id for promotion", err)
+					return
+				}
+			}
+			if !crewID.Valid || crewID.String == "" {
+				replyError(w, http.StatusBadRequest, "LEAD role requires crew_id")
+				return
+			}
+			if _, err := tx.ExecContext(r.Context(),
+				"UPDATE agents SET agent_role = 'AGENT' WHERE crew_id = ? AND workspace_id = ? AND agent_role = 'LEAD' AND deleted_at IS NULL AND id != ?",
+				crewID.String, workspaceID, agentID); err != nil {
+				replyInternalError(w, h.logger, "demote existing lead", err)
+				return
+			}
+		}
+		query, args := ub.Build("agents", "id = ? AND workspace_id = ? AND deleted_at IS NULL", agentID, workspaceID)
+		if _, err := tx.ExecContext(r.Context(), query, args...); err != nil {
+			replyInternalError(w, h.logger, "update agent schedule", err)
+			return
+		}
+		if err := tx.Commit(); err != nil {
+			replyInternalError(w, h.logger, "commit agent schedule update", err)
+			return
+		}
+	} else {
+		query, args := ub.Build("agents", "id = ? AND workspace_id = ? AND deleted_at IS NULL", agentID, workspaceID)
+		if _, err := h.db.ExecContext(r.Context(), query, args...); err != nil {
+			replyInternalError(w, h.logger, "update agent", err)
+			return
+		}
 	}
 
 	userID := callerUserID
@@ -381,55 +457,18 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Notify scheduler of schedule changes
-	if h.scheduleUpdater != nil {
-		if _, hasCron := body["schedule_cron"]; hasCron {
-			cronStr, _ := body["schedule_cron"].(string)
-			promptStr, _ := body["schedule_prompt"].(string)
-			enabledVal, hasEnabled := body["schedule_enabled"]
-			enabled := false
-			if hasEnabled {
-				switch v := enabledVal.(type) {
-				case bool:
-					enabled = v
-				case float64:
-					enabled = v == 1
-				}
-			} else {
-				// schedule_cron changed but schedule_enabled wasn't in body — read from DB
-				var e int
-				if err := h.db.QueryRowContext(r.Context(), "SELECT schedule_enabled FROM agents WHERE id = ?", agentID).Scan(&e); err != nil {
-					h.logger.Warn("read schedule_enabled", "agent_id", agentID, "error", err)
-				}
-				enabled = e == 1
-			}
-			if err := h.scheduleUpdater.UpdateSchedule(r.Context(), agentID, cronStr, promptStr, enabled); err != nil {
-				h.logger.Warn("schedule update callback failed", "agent_id", agentID, "error", err)
-			}
-		} else if _, hasEnabled := body["schedule_enabled"]; hasEnabled {
-			var cronStr, promptStr sql.NullString
-			if err := h.db.QueryRowContext(r.Context(), "SELECT schedule_cron, schedule_prompt FROM agents WHERE id = ?", agentID).Scan(&cronStr, &promptStr); err != nil {
-				h.logger.Warn("read schedule fields", "agent_id", agentID, "error", err)
-			}
-			enabledVal := body["schedule_enabled"]
-			enabled := false
-			switch v := enabledVal.(type) {
-			case bool:
-				enabled = v
-			case float64:
-				enabled = v == 1
-			}
-			cron := ""
-			if cronStr.Valid {
-				cron = cronStr.String
-			}
-			prompt := ""
-			if promptStr.Valid {
-				prompt = promptStr.String
-			}
-			if err := h.scheduleUpdater.UpdateSchedule(r.Context(), agentID, cron, prompt, enabled); err != nil {
-				h.logger.Warn("schedule update callback failed", "agent_id", agentID, "error", err)
-			}
+	// Notify the in-process scheduler using the committed values. A partial
+	// PATCH need not include the prompt or enabled flag, and the request body
+	// is not an authoritative snapshot of the whole schedule.
+	if h.scheduleUpdater != nil && (hasCron || hasEnabled) {
+		var cronStr, promptStr sql.NullString
+		var enabled int
+		if err := h.db.QueryRowContext(r.Context(),
+			`SELECT schedule_cron, schedule_prompt, schedule_enabled FROM agents WHERE id=? AND workspace_id=?`,
+			agentID, workspaceID).Scan(&cronStr, &promptStr, &enabled); err != nil {
+			h.logger.Warn("read committed schedule", "agent_id", agentID, "error", err)
+		} else if err := h.scheduleUpdater.UpdateSchedule(r.Context(), agentID, cronStr.String, promptStr.String, enabled == 1); err != nil {
+			h.logger.Warn("schedule update callback failed", "agent_id", agentID, "error", err)
 		}
 	}
 

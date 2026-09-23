@@ -301,8 +301,8 @@ func TestCovIICreateRun(t *testing.T) {
 	seedCrewRow(t, db, "crewR", wsID, "Crew", "crew")
 	seedAgentRow(t, db, "agentR", wsID, "crewR", "Rob", "rob", "AGENT")
 
-	em := &emitRecorder{}
-	h := &InternalHandler{db: db, logger: newTestLogger(), journal: em}
+	h := &InternalHandler{db: db, logger: newTestLogger()}
+	wireTestJournalForHandler(t, db, h)
 
 	t.Run("invalid JSON → 400", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "/x", strings.NewReader("{"))
@@ -334,8 +334,12 @@ func TestCovIICreateRun(t *testing.T) {
 		if rec.Code != http.StatusCreated {
 			t.Fatalf("code=%d want 201; body=%s", rec.Code, rec.Body.String())
 		}
-		if len(em.entries) != 1 {
-			t.Fatalf("expected 1 journal entry, got %d", len(em.entries))
+		var started int
+		if err := db.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM journal_entries WHERE trace_id='run1' AND entry_type='run.started'`).Scan(&started); err != nil {
+			t.Fatal(err)
+		}
+		if started != 1 {
+			t.Fatalf("expected 1 committed run.started, got %d", started)
 		}
 		var status string
 		if err := db.QueryRow("SELECT status FROM agents WHERE id = 'agentR'").Scan(&status); err != nil {
