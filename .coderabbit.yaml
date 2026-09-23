@@ -147,7 +147,12 @@ reviews:
         first-party CLI adapter names the codebase implements
         (CLAUDE_CODE, CODEX_CLI, GEMINI_CLI, OPENCODE, CURSOR_CLI,
         FACTORY_DROID); recognised standards (BM25, RRF, OTel
-        GenAI semconv). When in doubt, flag it.
+        GenAI semconv). Comparative research and product requirements
+        under docs/prd/ may name the products they actually evaluate;
+        check factual accuracy and source attribution there rather than
+        asking to erase the subject of the research. This exception does
+        not apply to marketing copy or implementation comments. When in
+        doubt elsewhere, flag it.
 
     - path: "app/api/**"
       instructions: |
