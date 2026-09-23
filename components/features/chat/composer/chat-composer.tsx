@@ -58,7 +58,7 @@ interface ChatComposerProps {
    *  one-parameter function here either way, so a narrower prop type would
    *  typecheck a caller that silently drops the envelope — which is exactly
    *  the failure this feature is fixing, one layer up. */
-  sendMessage: (text: string, metadata?: Record<string, unknown>) => void
+  sendMessage: (text: string, metadata?: Record<string, unknown>) => void | boolean
   onSend?: (sessionId: string, text: string) => void
   /** Called after a message actually went out (size guard passed) — the
    *  parent bumps its pin-to-top nonce. Input/draft/attachment clearing is

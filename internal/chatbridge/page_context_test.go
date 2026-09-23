@@ -26,8 +26,29 @@ func TestPageChatContextIsServerBuiltAndRecheckedBeforePersist(t *testing.T) {
 	resolver := &pageResolverStub{page: PageChatContext{WorkspaceID: "ws-1", PageID: "page-1", Slug: "fleet", Name: "Fleet", SnapshotAt: "2026-09-23T00:00:00Z"}}
 	b.SetPageChatContextResolver(resolver)
 	opt := ws.ChatMessageOption{Metadata: map[string]any{"page_context": map[string]any{"slug": "fleet"}, "forged": "ignored"}}
-	if err := b.HandleChatMessage(context.Background(), "user-1", "sess-page", "What changed?", func(ws.ChatEvent) {}, opt); err != nil {
+	var events []ws.ChatEvent
+	if err := b.HandleChatMessage(context.Background(), "user-1", "sess-page", "What changed?", func(event ws.ChatEvent) {
+		events = append(events, event)
+	}, opt); err != nil {
 		t.Fatal(err)
+	}
+	var saved *ws.ChatEvent
+	for i := range events {
+		if events[i].Type == "user_message" {
+			saved = &events[i]
+			break
+		}
+	}
+	if saved == nil {
+		t.Fatal("no persisted user_message acknowledgement")
+	}
+	ack, ok := saved.Metadata.(map[string]any)
+	if !ok {
+		t.Fatalf("user_message metadata = %T", saved.Metadata)
+	}
+	pageAck, ok := ack["page_context"].(PageChatContext)
+	if !ok || pageAck.Slug != "fleet" || pageAck.PageID != "page-1" {
+		t.Fatalf("persisted Page acknowledgement = %#v", ack)
 	}
 	messages, err := b.convStore.Read(context.Background(), "sess-page", 0, 0)
 	if err != nil {
@@ -57,8 +78,16 @@ func TestPageChatContextIsServerBuiltAndRecheckedBeforePersist(t *testing.T) {
 		t.Fatalf("combined provenance = %#v", formMessages[0].Metadata)
 	}
 	resolver.err = ErrPageChatAccess
-	if err := b.HandleChatMessage(context.Background(), "user-1", "sess-revoked", "What changed?", func(ws.ChatEvent) {}, opt); !errors.Is(err, ErrPageChatAccess) {
+	var rejectedEvents []ws.ChatEvent
+	if err := b.HandleChatMessage(context.Background(), "user-1", "sess-revoked", "What changed?", func(event ws.ChatEvent) {
+		rejectedEvents = append(rejectedEvents, event)
+	}, opt); !errors.Is(err, ErrPageChatAccess) {
 		t.Fatalf("revoked send = %v", err)
+	}
+	for _, event := range rejectedEvents {
+		if event.Type == "user_message" {
+			t.Fatalf("rejected Page send emitted a persistence acknowledgement: %+v", event)
+		}
 	}
 	messages, err = b.convStore.Read(context.Background(), "sess-revoked", 0, 0)
 	if err != nil {

@@ -22,6 +22,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - Activity now includes the accepted work ledger and webhook deliveries. The separate Work navigation item is removed; existing `/work` bookmarks open the corresponding Activity view. (#2636)
 
 ### Fixed
+- Run evidence orders RFC3339Nano events correctly within the same millisecond. A Page chat reference stays available after a rejected or disconnected send and is consumed only when the message is saved; regenerating a Page message requests a fresh snapshot without copying the old one. Chat send sizing now counts the full WebSocket frame. (#2684)
 - **`crewship work list --agent <slug>` showed no work for an agent that had work.** The CLI now resolves the slug to an ID before applying the server's ID filter, and reports an unknown slug instead of an empty page. Historical work remains filterable by its agent ID. (#2643)
 - **Editing or re-enabling an agent schedule could run an old due occurrence.** Schedule settings and the next due cursor now commit together; disabling clears the cursor, enabling chooses a future occurrence, and invalid enabled cron expressions are refused before any write. (#2643)
 - **A run could be acknowledged before its start record reached durable storage.** Internal run creation now commits `run.started` before allowing the agent to start; an unavailable durable journal fails closed. (#2643)

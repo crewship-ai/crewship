@@ -79,4 +79,13 @@ describe("run evidence contract", () => {
     expect(view.evidence.map((e) => e.reference)).toEqual(["evt_first", "evt_later"])
     expect(view.lastRecordedAt).toBe("2026-09-23T07:00:00.500Z")
   })
+
+  it("orders nanosecond events within one millisecond across timezone spellings", () => {
+    const view = buildRunEvidence({ ...base, entries: [
+      entry("evt_a_first_alphabetically", "run.completed", "2026-09-23T08:00:00.000000900+01:00"),
+      entry("evt_z_last_alphabetically", "run.started", "2026-09-23T07:00:00.000000100Z"),
+    ] })
+    expect(view.evidence.map((e) => e.reference)).toEqual(["evt_z_last_alphabetically", "evt_a_first_alphabetically"])
+    expect(view.lastRecordedAt).toBe("2026-09-23T08:00:00.000000900+01:00")
+  })
 })

@@ -55,6 +55,7 @@ export function checkChatMessageSize(
 ): MessageSizeCheck {
   const frame = JSON.stringify({
     type: "send_message",
+    channel: "session:" + sessionId,
     payload: JSON.stringify({
       session_id: sessionId,
       content,
@@ -106,7 +107,8 @@ export interface UseMessageSubmitOptions {
   /** useWebSocket-backed send, exposed via useChat's sendMessage. Receives
    *  the COMPOSED content — the user's text plus the attachment block — and,
    *  when the submission carried one, the metadata that rides beside it. */
-  sendMessage: (text: string, metadata?: Record<string, unknown>) => void
+  /** `false` means a final send guard refused the message; keep the draft. */
+  sendMessage: (text: string, metadata?: Record<string, unknown>) => void | boolean
   /** This session's composer attachments, in the order the user added them.
    *  Passed in rather than read from the store here so the hook stays a pure
    *  function of its inputs and the store stays the composer's business. */
@@ -226,11 +228,8 @@ export function useMessageSubmit({
         // `?prompt=` all come through here, and "the send path is untouched for
         // them" has to mean the call itself too — `arguments.length` is
         // observable, to a spy in a test and to any wrapper a caller passes in.
-        if (metadata) {
-          sendMessage(content, metadata)
-        } else {
-          sendMessage(content)
-        }
+        const sent = metadata ? sendMessage(content, metadata) : sendMessage(content)
+        if (sent === false) return
         onSend?.(sessionId, text)
         onSent()
       } finally {
