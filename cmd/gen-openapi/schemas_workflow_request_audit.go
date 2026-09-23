@@ -45,6 +45,7 @@ func workflowRequestSchemaCatalog() (map[string]DomainSchema, map[string]any) {
 
 	pipelineRun := obj(map[string]any{
 		"inputs": anyObject(), "tier_override": str(), "triggered_via": str(), "triggered_by_id": str(),
+		"pinned_version": integer(), "expected_definition_hash": str(), "fire_at": str(),
 		"tags": arr(str()), "metadata": anyObject(), "delay_seconds": integer(), "ttl_seconds": integer(),
 		"debounce_key": str(), "debounce_window_seconds": integer(), "debounce_max_seconds": integer(),
 		"priority": integer(), "idempotency_key_ttl_seconds": integer(),

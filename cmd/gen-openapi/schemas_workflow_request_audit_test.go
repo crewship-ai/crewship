@@ -2,6 +2,22 @@ package main
 
 import "testing"
 
+func TestRunRequestDocumentsReviewedDefinitionAndConflict(t *testing.T) {
+	_, components := workflowRequestSchemaCatalog()
+	request := components["WorkflowPipelineRunRequest"].(map[string]any)
+	properties := request["properties"].(map[string]any)
+	for field, kind := range map[string]string{"pinned_version": "integer", "expected_definition_hash": "string"} {
+		property, ok := properties[field].(map[string]any)
+		if !ok || property["type"] != kind {
+			t.Errorf("%s missing from run request: %v", field, property)
+		}
+	}
+	operation := loadSpecOperations(t)["/api/v1/workspaces/{workspaceId}/pipelines/{slug}/run"]["post"]
+	if len(operation.Responses["409"]) == 0 {
+		t.Fatal("run's stale-definition 409 is undocumented")
+	}
+}
+
 func TestWorkflowRequestSchemaAuditCoversNamedRoutes(t *testing.T) {
 	routes, components := workflowRequestSchemaCatalog()
 	for _, route := range []string{

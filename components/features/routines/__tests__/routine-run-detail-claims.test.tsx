@@ -3,6 +3,8 @@ import { render, screen, fireEvent, waitFor, within } from "@testing-library/rea
 import { apiFetch } from "@/lib/api-fetch"
 import { RoutineRunDetail } from "../routine-run-detail"
 
+const PREVIEW_HASH = "a".repeat(64)
+
 // Guards for the run-detail claims in
 // docs/prd/HANDOFF-2026-09-08-ROUTINES-WORKSPACE.md. The shared run surface
 // had no component test of its own; these pin the four sentences a reader of
@@ -175,6 +177,27 @@ describe("routine run detail — unavailable history", () => {
 })
 
 describe("routine run detail — run again", () => {
+  it("does not open an unverified recipe when its hash is unavailable", async () => {
+    vi.mocked(apiFetch).mockResolvedValue({ ok: true, json: async () => ({ definition: { steps: [] } }) } as Response)
+    render(<RoutineRunDetail workspaceId="ws" runId="run_1" />)
+    fireEvent.click(screen.getByRole("button", { name: "Run again" }))
+    expect(await screen.findByText(/no verifiable definition hash/i)).toBeTruthy()
+    expect(screen.queryByRole("button", { name: "Run now" })).toBeNull()
+  })
+
+  it("rejects a current catalog row whose archived head has a different hash", async () => {
+    vi.mocked(apiFetch).mockImplementation(async (url) => ({
+      ok: true,
+      json: async () => String(url).includes("/versions/4")
+        ? { definition_hash: "b".repeat(64), definition: { steps: [] } }
+        : { slug: "monthly-billing", head_version: 4, definition_hash: PREVIEW_HASH, definition: { steps: [] } },
+    } as Response))
+    render(<RoutineRunDetail workspaceId="ws" runId="run_1" />)
+    fireEvent.click(screen.getByRole("button", { name: "Run again" }))
+    expect(await screen.findByText(/current recipe changed while loading/i)).toBeTruthy()
+    expect(screen.queryByRole("button", { name: "Run now" })).toBeNull()
+  })
+
   // "Run again creates a new manual run using the current recipe and asks for
   // its declared inputs, initially populated from the historical run."
   it("asks for the current recipe's inputs, prefilled from the historical run", async () => {
@@ -183,6 +206,8 @@ describe("routine run detail — run again", () => {
       ok: true,
       json: async () => ({
         slug: "monthly-billing",
+        head_version: 4,
+        definition_hash: PREVIEW_HASH,
         definition: { inputs: [{ name: "month", type: "string", default: "2026-09" }] },
       }),
     } as Response)
@@ -197,6 +222,7 @@ describe("routine run detail — run again", () => {
     expect(vi.mocked(apiFetch).mock.calls[0][0]).not.toContain("/pipeline-runs/")
     // The historical value wins over the recipe default as the starting point.
     expect(await screen.findByDisplayValue("2026-08")).toBeTruthy()
+    expect(screen.getByText(/Uses/).textContent).toContain("v4")
   })
 
   it("does not offer Run again while the run is still going", () => {
@@ -221,6 +247,8 @@ it.each(["current", "3"])("Run again retries an uncertain start with the same ke
       ok: true,
       json: async () => ({
         slug: "monthly-billing",
+        head_version: 4,
+        definition_hash: PREVIEW_HASH,
         definition: { inputs: [{ name: "month", type: "string" }] },
       }),
     } as Response
@@ -247,8 +275,27 @@ it.each(["current", "3"])("Run again retries an uncertain start with the same ke
   )
   expect(JSON.parse(retry.body)).toEqual({
     inputs: { month: "2026-08" },
+    expected_definition_hash: PREVIEW_HASH,
     ...(selectedVersion === "current" ? {} : { pinned_version: 3 }),
   })
+})
+
+it("shows a 409 as a stale preview and offers to reload without a second start", async () => {
+  h.run = baseRun({ pipeline_version: 3, inputs: { month: "2026-08" } })
+  const post = vi.fn().mockResolvedValue({ ok: false, status: 409 } as Response)
+  vi.mocked(apiFetch).mockImplementation(async (_url, init) => init?.method === "POST" ? post() : {
+    ok: true,
+    json: async () => ({ slug: "monthly-billing", head_version: 4, definition_hash: PREVIEW_HASH, definition: { inputs: [{ name: "month", type: "string" }] } }),
+  } as Response)
+  render(<RoutineRunDetail workspaceId="ws" runId="run_1" />)
+  fireEvent.click(screen.getByRole("button", { name: "Run again" }))
+  await screen.findByDisplayValue("2026-08")
+  fireEvent.click(screen.getByRole("button", { name: "Run now" }))
+  expect(await screen.findByText(/recipe changed since you opened this form/i)).toBeTruthy()
+  const beforeReload = vi.mocked(apiFetch).mock.calls.length
+  fireEvent.click(screen.getByRole("button", { name: "Reload recipe" }))
+  await waitFor(() => expect(vi.mocked(apiFetch).mock.calls.length).toBeGreaterThan(beforeReload))
+  expect(post).toHaveBeenCalledTimes(1)
 })
 
 describe("routine run detail — one page, one order (#2519)", () => {

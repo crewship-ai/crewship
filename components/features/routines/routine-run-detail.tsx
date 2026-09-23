@@ -127,6 +127,8 @@ export function RoutineRunDetail({ workspaceId, runId }: RoutineRunDetailProps) 
   )
   const [starting, setStarting] = useState(false)
   const [selectedVersion, setSelectedVersion] = useState("current")
+  const [selectedHash, setSelectedHash] = useState<string | null>(null)
+  const [previewVersion, setPreviewVersion] = useState<number | null>(null)
   const [runDefinition, setRunDefinition] = useState<Record<string, unknown> | null>(null)
   const [inputSpecs, setInputSpecs] = useState<RoutineInputSpec[] | null>(null)
   const [stopping, setStopping] = useState(false)
@@ -200,9 +202,14 @@ export function RoutineRunDetail({ workspaceId, runId }: RoutineRunDetailProps) 
     }
   }
   const startAgain = async (inputs: Record<string, unknown>) => {
+    if (!selectedHash) {
+      setActionError("The selected recipe could not be verified. Reload it before running.")
+      return
+    }
     const url = `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/pipelines/${encodeURIComponent(run.pipeline_slug)}/run`
     const body = {
       inputs,
+      expected_definition_hash: selectedHash,
       ...(selectedVersion !== "current"
         ? { pinned_version: Number(selectedVersion) }
         : {}),
@@ -222,6 +229,7 @@ export function RoutineRunDetail({ workspaceId, runId }: RoutineRunDetailProps) 
         },
         body: JSON.stringify(body),
       })
+      if (res.status === 409) throw new Error("The recipe changed since you opened this form. Reload the recipe before running.")
       const data = await res.json()
       if (!res.ok || typeof data.run_id !== "string" || !data.run_id)
         throw new Error(data.error || data.detail || "Could not start a new run.")
@@ -246,11 +254,28 @@ export function RoutineRunDetail({ workspaceId, runId }: RoutineRunDetailProps) 
         `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/pipelines/${encodeURIComponent(run.pipeline_slug)}${version === "current" ? "" : `/versions/${encodeURIComponent(version)}`}`,
       )
       if (!res.ok) throw new Error("The selected recipe version is unavailable.")
-      const routine = await res.json()
+      let routine = await res.json()
       if (request !== preparation.current) return
+      if (typeof routine.definition_hash !== "string" || !/^[0-9a-fA-F]{64}$/.test(routine.definition_hash))
+        throw new Error("The selected recipe has no verifiable definition hash.")
+      if (version === "current") {
+        if (!Number.isInteger(routine.head_version) || routine.head_version <= 0)
+          throw new Error("The current recipe version is unavailable. Reload before running.")
+        const versionRes = await apiFetch(
+          `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/pipelines/${encodeURIComponent(run.pipeline_slug)}/versions/${routine.head_version}`,
+        )
+        if (!versionRes.ok) throw new Error("The current recipe changed while loading. Reload before running.")
+        const archived = await versionRes.json()
+        if (request !== preparation.current) return
+        if (archived.definition_hash !== routine.definition_hash)
+          throw new Error("The current recipe changed while loading. Reload before running.")
+        routine = { ...routine, definition: archived.definition }
+      }
       const specs = routineInputSpecs(routine.definition)
       setRunDefinition(routine.definition ?? null)
       setSelectedVersion(version)
+      setSelectedHash(routine.definition_hash)
+      setPreviewVersion(version === "current" && Number.isInteger(routine.head_version) ? routine.head_version : null)
       setInputSpecs(specs)
     } catch (e) {
       if (request === preparation.current)
@@ -720,20 +745,21 @@ export function RoutineRunDetail({ workspaceId, runId }: RoutineRunDetailProps) 
         inputs={inputSpecs}
         initialInputs={run.inputs}
         routineName={run.pipeline_name || run.pipeline_slug}
-        headVersion={routine?.slug === run.pipeline_slug ? routine.head_version : undefined}
+        headVersion={previewVersion}
         draft={routine?.slug === run.pipeline_slug ? routine.draft : undefined}
         submitting={starting}
+        error={actionError}
+        onReload={() => void prepareAgain(selectedVersion)}
         onCancel={() => {
           preparation.current += 1
           setInputSpecs(null)
+          setSelectedHash(null)
           setStarting(false)
         }}
         onRun={startAgain}
       />
-      {actionError && (
-        <p role="alert" className="text-sm text-destructive">
-          {actionError}
-        </p>
+      {actionError && !inputSpecs && (
+        <p role="alert" className="text-sm text-destructive">{actionError}</p>
       )}
       {error && (
         <p role="alert" className="text-sm text-destructive">
