@@ -51,8 +51,13 @@ that per-agent/workspace limits leave the rejected due instant unchanged.
 2. Adapt scheduled execution to dispatch.Runtime while preserving prompt,
    unattended turn cap, conversation history, billing, metadata and run IDs.
    Use the existing creation/stop/unknown-outcome protocol, including detached holds.
-3. Fresh dispatch authorization of schedule and scope; accepted input remains
-   immutable. Define schedule-edit/disable handling without silently rewriting it.
+3. `ScheduledAuthorizer` now implements the dispatch-side recheck as a
+   separately tested primitive: disabled/deleted/moved schedules are refused,
+   `PENDING_REVIEW` is deferred, and a prompt or cadence edit leaves an already
+   accepted immutable input unchanged. It is **not wired to a dispatcher** yet;
+   execution must not be enabled until it is wired with the runtime. The
+   authorizer validates the accepted input checksum and source/agent/occurrence
+   identity before consulting current scope.
 4. Wire one dispatcher for both source/domain pairs. Switch cron to acceptance
    only, with no direct-execution fallback. Drain/reconcile legacy executions.
 5. Prove actual bootstrap wiring, cross-source slot sharing, recovery after

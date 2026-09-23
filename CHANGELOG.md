@@ -10,6 +10,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 ## [Unreleased]
 
 ### Improved
+- Prepared a dispatch-time permission check for queued scheduled agent work. It validates the accepted input and rechecks the current agent, workspace, crew and schedule state; the cron producer still uses its existing execution path until the durable cutover is complete. (#2643)
 - Routine and schedule catalogs now page through large workspaces without truncating results; schedule lists and the calendar resolve routine details in batches.
 - Activity now includes the accepted work ledger and webhook deliveries. The separate Work navigation item is removed; existing `/work` bookmarks open the corresponding Activity view. (#2636)
 
