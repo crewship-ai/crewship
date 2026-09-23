@@ -2820,6 +2820,35 @@
         ],
         "type": "object"
       },
+      "CredentialDependents": {
+        "properties": {
+          "dynamic_uses_untracked": {
+            "type": "boolean"
+          },
+          "recorded_use": {
+            "enum": [
+              "not_attributed"
+            ],
+            "type": "string"
+          },
+          "routines": {
+            "items": {
+              "$ref": "#/components/schemas/CredentialRoutineDependent"
+            },
+            "type": "array"
+          },
+          "visibility_limited": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "routines",
+          "recorded_use",
+          "visibility_limited",
+          "dynamic_uses_untracked"
+        ],
+        "type": "object"
+      },
       "CredentialField": {
         "properties": {
           "created_at": {
@@ -2950,6 +2979,34 @@
           "rotated_by",
           "status",
           "old_value_gone"
+        ],
+        "type": "object"
+      },
+      "CredentialRoutineDependent": {
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "resolution": {
+            "enum": [
+              "would_resolve",
+              "another_credential",
+              "unavailable"
+            ],
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "slug",
+          "name",
+          "type",
+          "resolution"
         ],
         "type": "object"
       },
@@ -43910,6 +43967,146 @@
                     "$ref": "#/components/schemas/RemainingCredentialAudit"
                   },
                   "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "tags": [
+          "credentials"
+        ]
+      }
+    },
+    "/api/v1/credentials/{credentialId}/dependents": {
+      "get": {
+        "operationId": "get_api_v1_credentials_credentialId_dependents",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "credentialId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CredentialDependents"
                 }
               }
             },

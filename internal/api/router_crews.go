@@ -543,6 +543,7 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	r.mux.Handle("GET /api/v1/credentials/default-env-var", authed(wsCtx(http.HandlerFunc(creds.DefaultEnvVar))))
 	r.mux.Handle("GET /api/v1/credentials/{credentialId}", authed(wsCtx(http.HandlerFunc(creds.Get))))
 	r.mux.Handle("GET /api/v1/credentials/{credentialId}/access/me", authed(wsCtx(http.HandlerFunc(creds.MyCredentialAccess))))
+	r.mux.Handle("GET /api/v1/credentials/{credentialId}/dependents", authed(wsCtx(http.HandlerFunc(creds.Dependents))))
 	r.authedMut("PATCH", "/api/v1/credentials/{credentialId}", roleCreate, creds.Update)
 	r.authedMut("PUT", "/api/v1/credentials/{credentialId}", roleCreate, creds.Update)
 	r.authedMut("DELETE", "/api/v1/credentials/{credentialId}", roleManage, creds.Delete)

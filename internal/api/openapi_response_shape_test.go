@@ -207,6 +207,8 @@ var responseShapeContracts = []struct {
 		pointer: "/components/schemas/Credential",
 		value:   credentialResponse{},
 	},
+	{name: "CredentialDependents", pointer: "/components/schemas/CredentialDependents", value: credentialDependentsResponse{}},
+	{name: "CredentialRoutineDependent", pointer: "/components/schemas/CredentialRoutineDependent", value: credentialRoutineDependent{}},
 	{
 		name:    "CredentialField",
 		pointer: "/components/schemas/CredentialField",

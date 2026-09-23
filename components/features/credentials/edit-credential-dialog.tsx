@@ -46,6 +46,8 @@ export function EditCredentialDialog({
   const [fields, setFields] = React.useState<EditableCredentialField[]>([])
   const [fieldsError, setFieldsError] = React.useState(false)
   const [fieldsVersion, setFieldsVersion] = React.useState(0)
+  const [dependentSnapshot, setDependentSnapshot] = React.useState<{ credentialId: string; count: number } | null>(null)
+  const [dependentsChecking, setDependentsChecking] = React.useState(false)
   React.useEffect(() => { setFields([]); setFieldsDirty(false) }, [open, credential.id])
   React.useEffect(() => {
     if (!open || credential.isProviderLogin) return
@@ -58,6 +60,20 @@ export function EditCredentialDialog({
     return () => { cancelled = true }
   }, [open, credential.id, credential.isProviderLogin, workspaceId, fieldsVersion])
   React.useEffect(() => { if (!open) setDirty(false) }, [open])
+  React.useEffect(() => {
+    if (!open || credential.isProviderLogin) return
+    let cancelled = false
+    setDependentSnapshot(null); setDependentsChecking(true)
+    apiFetch(`/api/v1/credentials/${encodeURIComponent(credential.id)}/dependents?workspace_id=${encodeURIComponent(workspaceId)}`)
+      .then(async (r) => { if (!r.ok) throw new Error(); return r.json() })
+      .then((body: { routines?: unknown[] }) => {
+        if (!cancelled && Array.isArray(body?.routines)) setDependentSnapshot({ credentialId: credential.id, count: body.routines.length })
+      })
+      .catch(() => { if (!cancelled) setDependentSnapshot(null) })
+      .finally(() => { if (!cancelled) setDependentsChecking(false) })
+    return () => { cancelled = true }
+  }, [open, credential.id, credential.isProviderLogin, workspaceId])
+  const dependentCount = dependentSnapshot?.credentialId === credential.id ? dependentSnapshot.count : null
   const initial = React.useMemo<Partial<CredentialFormValues>>(() => ({
     name: credential.name,
     description: credential.description ?? "",
@@ -137,6 +153,7 @@ export function EditCredentialDialog({
               {fieldsError && <p role="alert" className="text-xs text-warn">Additional fields could not be refreshed. Previously loaded fields may be out of date.</p>}
               <CredentialExtraFieldsEditor fields={fields} credentialId={credential.id} workspaceId={workspaceId} onDirtyChange={setFieldsDirty} onSaved={() => { setFieldsVersion((v) => v + 1); onSuccess() }} />
             </>}
+            impactSummary={credential.isProviderLogin ? undefined : dependentsChecking ? "Checking routine dependencies…" : dependentCount == null ? "Routine dependencies could not be checked; impact is unknown." : `${dependentCount} visible routine${dependentCount === 1 ? "" : "s"} statically reference this credential type. Dynamic uses are not tracked.`}
             onDirtyChange={setDirty}
             workspaceId={workspaceId}
             mode="edit"

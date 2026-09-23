@@ -89,6 +89,8 @@ export interface CredentialFormProps {
   lockProvider?: boolean
   fieldKeys?: string[]
   additionalFields?: React.ReactNode
+  /** Read-only dependency impact, shown only when edit changes scope/crews. */
+  impactSummary?: React.ReactNode
   /** Submit handler — return a string error message to surface, or null on success. */
   onSubmit: (values: CredentialFormValues) => Promise<string | null>
   onCancel: () => void
@@ -110,6 +112,7 @@ export function CredentialForm({
   lockProvider = false,
   fieldKeys = [],
   additionalFields,
+  impactSummary,
   onSubmit,
   onCancel,
   submitLabel,
@@ -582,7 +585,7 @@ export function CredentialForm({
       {advancedOpen && (
         <div id="credential-access-settings" className="space-y-4 rounded-xl border border-border/60 p-4">
           {surface && (values.scope !== initial?.scope || JSON.stringify(values.crewIds) !== JSON.stringify(initial?.crewIds ?? [])) &&
-            <p role="status" className="rounded-lg border border-warn/30 p-3 text-xs text-warn">Access will change to {values.scope === "WORKSPACE" ? "workspace scope" : `${values.crewIds.length} selected crews`}. Agents relying on inherited access may gain or lose this credential. Existing direct grants and delivery bindings must be reviewed separately.</p>}
+            <p role="status" className="rounded-lg border border-warn/30 p-3 text-xs text-warn">Access will change to {values.scope === "WORKSPACE" ? "workspace scope" : `${values.crewIds.length} selected crews`}. Agents relying on inherited access may gain or lose this credential. Existing direct grants and delivery bindings must be reviewed separately. {impactSummary}</p>}
           {/* Description */}
           {!surface && <div className="space-y-1">
             <Label htmlFor="cred-desc" className="text-xs">Description</Label>

@@ -61,6 +61,15 @@ func credentialsConnectorsAuthProfileSchemaCatalog() (map[string]map[string]Doma
 	})
 
 	components := map[string]any{
+		"CredentialRoutineDependent": object(map[string]any{
+			"slug": str(), "name": str(), "type": str(),
+			"resolution": map[string]any{"type": "string", "enum": []string{"would_resolve", "another_credential", "unavailable"}},
+		}, "slug", "name", "type", "resolution"),
+		"CredentialDependents": object(map[string]any{
+			"routines":           array(ref("CredentialRoutineDependent")),
+			"recorded_use":       map[string]any{"type": "string", "enum": []string{"not_attributed"}},
+			"visibility_limited": boolean(), "dynamic_uses_untracked": boolean(),
+		}, "routines", "recorded_use", "visibility_limited", "dynamic_uses_untracked"),
 		"ConnectorListItem": object(map[string]any{"id": str(), "name": str(), "description": str(), "category": str(), "auth_mode": str(), "brand_logo": str(), "brand_color": str()},
 			"id", "name", "description", "category", "auth_mode", "brand_logo", "brand_color"),
 		"Connector": connector, "ConnectorList": array(ref("ConnectorListItem")),
@@ -106,12 +115,13 @@ func credentialsConnectorsAuthProfileSchemaCatalog() (map[string]map[string]Doma
 		// {credentials, next_cursor, limit} envelope (credentials.go:217).
 		"GET /api/v1/credentials": {Response: map[string]any{"oneOf": []any{ref("CredentialList"), ref("CredentialPage")}}}, "POST /api/v1/credentials": {Response: credential},
 		"GET /api/v1/credentials/{credentialId}": {Response: credential}, "PATCH /api/v1/credentials/{credentialId}": {Response: credential},
-		"PUT /api/v1/credentials/{credentialId}":          {Response: credential},
-		"DELETE /api/v1/credentials/{credentialId}":       {Response: ref("StatusResponse")},
-		"POST /api/v1/credentials/test":                   {Response: ref("CredentialProbeResponse")},
-		"POST /api/v1/credentials/{credentialId}/test":    {Response: ref("CredentialProbeResponse")},
-		"POST /api/v1/credentials/{credentialId}/refresh": {Request: object(map[string]any{}), Response: ref("ProviderLoginRefreshResponse")},
-		"GET /api/v1/credentials/{credentialId}/fields":   {Response: ref("CredentialFieldList")}, "POST /api/v1/credentials/{credentialId}/fields": {Response: ref("CredentialField")},
+		"GET /api/v1/credentials/{credentialId}/dependents": {Response: ref("CredentialDependents")},
+		"PUT /api/v1/credentials/{credentialId}":            {Response: credential},
+		"DELETE /api/v1/credentials/{credentialId}":         {Response: ref("StatusResponse")},
+		"POST /api/v1/credentials/test":                     {Response: ref("CredentialProbeResponse")},
+		"POST /api/v1/credentials/{credentialId}/test":      {Response: ref("CredentialProbeResponse")},
+		"POST /api/v1/credentials/{credentialId}/refresh":   {Request: object(map[string]any{}), Response: ref("ProviderLoginRefreshResponse")},
+		"GET /api/v1/credentials/{credentialId}/fields":     {Response: ref("CredentialFieldList")}, "POST /api/v1/credentials/{credentialId}/fields": {Response: ref("CredentialField")},
 		"GET /api/v1/credentials/bindings": {Response: ref("CredentialBindingList")}, "POST /api/v1/credentials/bindings": {Response: ref("CredentialBinding")},
 		"GET /api/v1/credentials/{credentialId}/rotations": {Response: array(ref("CredentialRotation"))}, "POST /api/v1/credentials/{credentialId}/rotate": {Response: ref("CredentialRotation")},
 	}
