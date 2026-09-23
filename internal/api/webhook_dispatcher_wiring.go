@@ -6,9 +6,37 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/conversation"
 	"github.com/crewship-ai/crewship/internal/dispatch"
+	"github.com/crewship-ai/crewship/internal/scheduler"
 	"github.com/crewship-ai/crewship/internal/work"
 )
+
+// agentWorkRuntime routes only declared source/domain pairs. Stop, Alive and
+// projection share one launch registry across sources.
+type agentWorkRuntime struct {
+	*WebhookRuntime
+	scheduled *ScheduledRuntime
+}
+
+func (rt *agentWorkRuntime) Run(ctx context.Context, a dispatch.Assignment, started func()) error {
+	if a.Item != nil && a.Item.Source == work.SourceSchedule && a.Item.DomainKind == work.DomainAgentRun {
+		return rt.scheduled.Run(ctx, a, started)
+	}
+	return rt.WebhookRuntime.Run(ctx, a, started)
+}
+
+type agentWorkAuthorizer struct {
+	webhook   dispatch.Authorizer
+	scheduled dispatch.Authorizer
+}
+
+func (a agentWorkAuthorizer) Authorize(ctx context.Context, assignment dispatch.Assignment) (dispatch.Decision, error) {
+	if assignment.Item != nil && assignment.Item.Source == work.SourceSchedule && assignment.Item.DomainKind == work.DomainAgentRun {
+		return a.scheduled.Authorize(ctx, assignment)
+	}
+	return a.webhook.Authorize(ctx, assignment)
+}
 
 // ErrNoWebhookRoute means the agent-webhook route was never registered, so
 // there is nothing to execute for and no dispatcher to build.
@@ -42,8 +70,22 @@ var ErrNoWebhookRoute = errors.New("api: the agent-webhook route is not register
 //   - recovery and shutdown live in the same lifecycle as the loop, so a stop
 //     is a drain rather than an abandonment.
 func (r *Router) StartWebhookDispatcher(ctx context.Context, logger *slog.Logger) (stop func(), err error) {
+	stop, _, err = r.startAgentWorkDispatcher(ctx, logger, nil, 0, 0, false)
+	return stop, err
+}
+
+// StartAgentWorkDispatcher starts one dispatcher for webhook and scheduled
+// agent work. The returned hint is optional; polling and recovery are the
+// guarantee if a producer crashes after commit.
+func (r *Router) StartAgentWorkDispatcher(ctx context.Context, logger *slog.Logger,
+	conv *conversation.Store, memoryMB int, cpus float64) (stop func(), hint func(string), err error) {
+	return r.startAgentWorkDispatcher(ctx, logger, conv, memoryMB, cpus, true)
+}
+
+func (r *Router) startAgentWorkDispatcher(ctx context.Context, logger *slog.Logger,
+	conv *conversation.Store, memoryMB int, cpus float64, scheduled bool) (stop func(), hint func(string), err error) {
 	if r.webhookHandler == nil {
-		return nil, ErrNoWebhookRoute
+		return nil, nil, ErrNoWebhookRoute
 	}
 	if logger == nil {
 		logger = r.logger
@@ -53,13 +95,21 @@ func (r *Router) StartWebhookDispatcher(ctx context.Context, logger *slog.Logger
 	if r.webhookAuthorizer == nil {
 		r.webhookAuthorizer = NewWebhookAuthorizer(r.db)
 	}
-	authz := r.webhookAuthorizer
+	var authz dispatch.Authorizer = r.webhookAuthorizer
+	var executable dispatch.Runtime = runtime
+	kinds := []work.Kind{{Source: work.SourceWebhook, DomainKind: work.DomainAgentRun}}
+	if scheduled {
+		executable = &agentWorkRuntime{WebhookRuntime: runtime,
+			scheduled: NewScheduledRuntime(runtime, conv, memoryMB, cpus)}
+		authz = agentWorkAuthorizer{webhook: authz, scheduled: scheduler.NewScheduledAuthorizer(r.db)}
+		kinds = append(kinds, work.Kind{Source: work.SourceSchedule, DomainKind: work.DomainAgentRun})
+	}
 
 	limits := work.SerialAgentLimits()
-	d := dispatch.New(work.NewStore(r.db), runtime, authz, dispatch.Config{
+	d := dispatch.New(work.NewStore(r.db), executable, authz, dispatch.Config{
 		Owner:  "webhook-dispatcher",
 		Limits: limits,
-		Kinds:  []work.Kind{{Source: work.SourceWebhook, DomainKind: work.DomainAgentRun}},
+		Kinds:  kinds,
 		// Modest, because the hint carries the common case and the poll is
 		// only the guarantee behind it.
 		PollInterval:        2 * time.Second,
@@ -76,13 +126,13 @@ func (r *Router) StartWebhookDispatcher(ctx context.Context, logger *slog.Logger
 	go func() {
 		defer close(done)
 		if err := d.Run(runCtx); err != nil {
-			logger.Error("webhook dispatcher stopped with an error", "error", err)
+			logger.Error("agent work dispatcher stopped with an error", "error", err)
 		}
 	}()
 
-	logger.Info("webhook dispatcher started",
+	logger.Info("agent work dispatcher started",
 		"limits", "serial (parallel profile not enabled)",
-		"kinds", work.Kind{Source: work.SourceWebhook, DomainKind: work.DomainAgentRun}.String(),
+		"kinds", kinds,
 		"agent_total", limits.AgentTotal)
 
 	var stopped bool
@@ -93,5 +143,5 @@ func (r *Router) StartWebhookDispatcher(ctx context.Context, logger *slog.Logger
 		stopped = true
 		cancel()
 		<-done
-	}, nil
+	}, d.Hint, nil
 }

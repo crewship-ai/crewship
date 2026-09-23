@@ -39,7 +39,7 @@ var unregisteredSpawnSites = map[string]string{
 	"ratelimit.go:NewRateLimiter":                                "daemon: bucket cleanup loop, lives with the limiter",
 	"recurring_issue_dispatcher.go:Start":                        "daemon: dispatcher loop, stopped via ctx",
 	"crew_provisioning.go:NewProvisioningHandler":                "daemons: job-cleanup + startup/periodic GC loops, stopped via the handler's ctx",
-	"webhook_dispatcher_wiring.go:StartWebhookDispatcher": "boot daemon, and one that must not be drained by a " +
+	"webhook_dispatcher_wiring.go:startAgentWorkDispatcher": "boot daemon for webhook and scheduled agent work, and one that must not be drained by a " +
 		"test fixture: it owns live agent runs. Its stop function cancels the loop's context and then " +
 		"BLOCKS until Run returns, and Run's last act is drain() — every live attempt is stopped or " +
 		"parked for reconciliation before it comes back. So the join already exists and is stricter " +
