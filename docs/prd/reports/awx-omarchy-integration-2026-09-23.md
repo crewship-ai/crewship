@@ -1,0 +1,16 @@
+# Integrační ověření AWX/Omarchy balíků — 2026-09-23
+
+Ověřovací větev `test/awx-omarchy-integration` v izolovaném worktree skládá otevřené PR #2661, #2663, #2666, #2669, #2670, #2673, #2677, #2675 a dokumentační #2660. Po testech byla doplněna oprava izolace podkladu z #2661 a aktuální `main` (`4dd046c69`, proti předchozímu základu pouze nesouvisející změna dokumentace paralelismu). Větev se neposílá k mergi; je to reprodukovatelný společný kontrolní strom.
+
+## Výsledek
+
+- Společný Go průchod před poslední čistě frontendovou opravou: `go test ./internal/api ./internal/pipeline ./internal/chatbridge ./cmd/crewship -count=1 -p 4 -timeout 35m` prošel. Časy balíků: API 1 374 s, pipeline 31 s, chatbridge <1 s, CLI 539 s. Nová frontendová oprava Go kód nemění.
+- Kompletní frontend Vitest na společném stromu: 783 souborů, 9 304 testů prošlo. Po poslední opravě přímo na jejím PR prošlo 26 cílených testů včetně přepnutí workspace, clipboardu a journal 404; na doplněném společném stromu prošlo 27 cílených testů.
+- Na společném stromu prošly `go vet ./...`, `pnpm lint` (0 chyb, 30 již existujících varování), obě kontroly TypeScriptu a `pnpm build`. `go run ./cmd/gen-openapi` zachoval vygenerovaný soubor beze změny; inventura uvádí 687 API operací a 937 CLI příkazů. `docs-inventory -strict`, `docs-surface-check` a `agents-invariants` prošly. Po doplnění posledního dokumentačního commitu byly dokumentační brány zopakovány.
+- Cílené integrační Go testy pokrývají korelaci journalu, deklarovaný původ, očekávaný hash Run again, access/me, více crew u credentialu, náhled závislostí a metadata chat handoffu. Každý PR má také vlastní CI; výsledek společného stromu nenahrazuje jejich kontroly ani code review.
+
+## Co je a není tím prokázáno
+
+Je prokázáno, že tyto změny lze zkombinovat nad aktuálním produktovým kódem bez konfliktu ve funkcích, že se API/CLI/UI sestaví a že výše uvedené testy procházejí. Oprava #2661 navíc zamezuje tomu, aby kopírovaný podklad krátce obsahoval cached journal řádky předchozího workspace; 404 journalu se v diagnostice zobrazuje jako nedostupnost, nikoli jako prázdný běh.
+
+Není tím prokázána živá akceptace druhým účtem (read/write/revoke), ani celý operátorský průchod Page → run → evidence → Run again. Page action zatím vyžaduje vyšší roli než `routine.run`; rozšíření je otevřené rozhodnutí R2. O5 čeká na cílovou roli a datový zdroj. O3 je v PRD označené jako pozdější rozšíření. Žádný z těchto otevřených bodů se nesmí označit za hotový jen podle zelených testů. PR jsou otevřené a čekají na skutečné review; zelený CodeRabbit check při rate limitu není review.
