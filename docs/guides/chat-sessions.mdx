@@ -309,6 +309,16 @@ The session is a **query parameter, never a path segment**. The static export se
 
 The `/chat/<agentSlug>` URL is **deep-linkable** — the `session` query parameter scopes to a specific chat history. Without `?session`, the route opens the agent's most recent chat. With a `session` ID, it scrolls to that chat's history and resumes the conversation in place.
 
+For an explicit new conversation, use `/chat/<agentSlug>?new=1`. This mints a
+local draft ID and creates no server row until the first message is sent. A
+`session` parameter does not override `new=1`. A handoff with
+`?new=1&draft=1&prompt=<text>` puts text into the composer **without sending
+it**; an existing unsent draft in the selected session takes precedence. The
+legacy `?prompt=<text>` link still sends once automatically, so use the draft
+form when a person must review the message. Query text is visible in browser
+history and should not contain secrets; future Page handoffs use a Page
+reference instead of putting Page data in the URL.
+
 The state of which message is being edited, whether the slash palette is open, and the like is held in **shallow router** state — `useShallowSearchParam` writes to `window.history.replaceState` directly without triggering a Next.js navigation. This keeps the page interactive (no rerender on tab switch) while still giving you a copyable URL for any state.
 
 ## Sessions

@@ -120,7 +120,10 @@ export function ChatComposer({
   // them in this browser. Anonymous/embedded composers keep text in memory.
   const draftKey = userId ? JSON.stringify(["user", userId, sessionId]) : null
   const inputScope = draftKey ?? JSON.stringify(["anonymous", sessionId])
-  const restoreInput = () => initialInput ?? (draftKey ? useComposerStore.getState().drafts[draftKey] : undefined) ?? ""
+  const restoreInput = () => {
+    const saved = draftKey ? useComposerStore.getState().drafts[draftKey] : undefined
+    return saved?.trim() ? saved : initialInput ?? ""
+  }
   const [inputState, setInputState] = useState(() => ({ scope: inputScope, text: restoreInput() }))
   // Resolve the new identity immediately rather than showing the previous
   // person's text for a render while an effect catches up.
@@ -132,10 +135,16 @@ export function ChatComposer({
     if (draftKey) setDraft(draftKey, text)
   }, [draftKey, setDraft, setInput])
 
-  // Pre-populate input when a new session is started with a prefill value.
+  // A handoff may arrive after the composer mounts. Preserve anything the
+  // person already typed, including a restored draft for this identity.
   useEffect(() => {
-    if (initialInput) setInput(initialInput)
-  }, [initialInput, setInput])
+    if (!initialInput) return
+    const saved = draftKey ? useComposerStore.getState().drafts[draftKey] : undefined
+    if (saved?.trim()) return
+    setInputState((current) => current.scope === inputScope && current.text.trim()
+      ? current
+      : { scope: inputScope, text: initialInput })
+  }, [initialInput, draftKey, inputScope])
 
   // Narrow selectors: this component only ever calls the two clear actions;
   // subscribing to the whole store would re-render the composer on every

@@ -265,7 +265,8 @@ export function ChatClient() {
     const currentParams = hasUnifiedChat ? new URLSearchParams(window.location.search) : searchParams
     const actualSlug = hasUnifiedChat ? window.location.pathname.match(/^\/chat\/([^/]+)\/?$/)?.[1] : null
     const a = actualSlug ? decodeURIComponent(actualSlug) : pathAgentSlug ?? currentParams.get("agent")
-    const s = currentParams.get("session")
+    const newConversation = currentParams.get("new") === "1"
+    const s = newConversation ? null : currentParams.get("session")
     // A URL that names a DIFFERENT agent and no session drops the old
     // selection. Without this the auto-open effect below sees a `sessionId`
     // that is still set, returns early, and the page renders the previous
@@ -278,12 +279,13 @@ export function ChatClient() {
       urlAgentRef.current = a
       setAgentSlug(a)
     }
-    if (s) setSessionId(s)
+    if (newConversation) setSessionId(null)
+    else if (s) setSessionId(s)
     else if (namedAnotherAgent) setSessionId(null)
   }, [searchParams, pathAgentSlug, humanConversationId, urlRevision, hasUnifiedChat])
 
   /**
-   * The one-shot `?prompt=` handoff.
+   * The one-shot `?prompt=` handoff. `?draft=1` makes it an unsent prefill.
    *
    * `routine-create-dialog` navigates to `/chat/<lead>?prompt=<goal>` and
    * expects the message to send itself — describe-first routine authoring is
@@ -291,14 +293,14 @@ export function ChatClient() {
    * render, because the panel auto-sends whatever it is handed and a value
    * that survives a re-render would send twice.
    */
-  const [handoffPrompt, setHandoffPrompt] = useState<string | null>(null)
+  const [handoff, setHandoff] = useState<{ prompt: string; draft: boolean } | null>(null)
   const handoffConsumedRef = useRef(false)
   useEffect(() => {
     if (handoffConsumedRef.current) return
     const p = searchParams.get("prompt")
     if (!p) return
     handoffConsumedRef.current = true
-    setHandoffPrompt(p)
+    setHandoff({ prompt: p, draft: searchParams.get("draft") === "1" })
   }, [searchParams])
 
   /**
@@ -317,11 +319,11 @@ export function ChatClient() {
    * is idempotent — same session, same value — so a double render is safe.
    */
   const handoffSessionRef = useRef<string | null>(null)
-  if (handoffPrompt !== null && handoffSessionRef.current === null && sessionId) {
+  if (handoff !== null && handoffSessionRef.current === null && sessionId) {
     handoffSessionRef.current = sessionId
   }
   const handoffForThisSession =
-    handoffPrompt !== null && handoffSessionRef.current === sessionId
+    handoff !== null && handoffSessionRef.current === sessionId
 
   const agent = useMemo(
     () => tree.roster?.find((a) => a.slug === agentSlug) ?? null,
@@ -551,6 +553,12 @@ export function ChatClient() {
     if (agentSlug) {
       const named = agents.find((a) => a.slug === agentSlug)
       if (!named) return
+      // This explicit request does not depend on loading old history. A
+      // failed history fetch must not turn `new=1` into a silent no-op.
+      if (new URLSearchParams(window.location.search).get("new") === "1") {
+        startConversation(named, false)
+        return
+      }
       // The `ensureSlug` bug's twin, and it survives the cap fix: when THIS
       // agent's thread request failed, its list is absent for a reason that
       // has nothing to do with it being empty. Minting a draft here writes a
@@ -772,8 +780,8 @@ export function ChatClient() {
           agentMeta={agent}
           sessionKind={activeThread ? classifyThread(activeThread) : "direct"}
           sessionId={sessionId}
-          initialInput={handoffForThisSession ? handoffPrompt ?? undefined : undefined}
-          autoSendInitial={handoffForThisSession}
+          initialInput={handoffForThisSession ? handoff?.prompt : undefined}
+          autoSendInitial={handoffForThisSession && !handoff?.draft}
           mobilePanel={isMobile ? mobilePanel : undefined}
           onMobilePanelChange={setMobilePanel}
           onNewConversation={() => startConversation(agent)}

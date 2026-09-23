@@ -87,6 +87,23 @@ describe("a form submit leaves the composer's own draft alone", () => {
     expect(sendMessage).not.toHaveBeenCalled()
   })
 
+  it("keeps an existing draft when a new handoff prefill arrives", () => {
+    const key = JSON.stringify(["user", "user-a", "sess-1"])
+    useComposerStore.getState().setDraft(key, "My unfinished message")
+    const view = render(<ChatComposer {...baseProps} initialInput="Handoff suggestion" />)
+    expect(screen.getByPlaceholderText("Message Riley...")).toHaveValue("My unfinished message")
+    view.rerender(<ChatComposer {...baseProps} initialInput="A later suggestion" />)
+    expect(screen.getByPlaceholderText("Message Riley...")).toHaveValue("My unfinished message")
+    expect(sendMessage).not.toHaveBeenCalled()
+  })
+
+  it("does not replace text typed before a delayed handoff arrives", () => {
+    const view = render(<ChatComposer {...baseProps} />)
+    fireEvent.change(screen.getByPlaceholderText("Message Riley..."), { target: { value: "Typed before link resolved" } })
+    view.rerender(<ChatComposer {...baseProps} initialInput="Suggested text" />)
+    expect(screen.getByPlaceholderText("Message Riley...")).toHaveValue("Typed before link resolved")
+  })
+
   it("isolates drafts across account switches, including without a remount", () => {
     useComposerStore.getState().setDraft("sess-1", "legacy private text")
     const view = render(<ChatComposer {...baseProps} />)
