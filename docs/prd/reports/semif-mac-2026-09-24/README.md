@@ -50,3 +50,7 @@ The [extended feature assessment](extended/README.md) adds Keeper tool-call
 cases, option-order stress, a Laya comparison, and state-length/multi-question
 measurements. It supersedes the simple first impression that a 0.9 threshold
 alone is enough for automatic routing.
+
+The [dev1 webhook pilot](dev1-webhook-pilot.md) follows the local model's
+choice through signed webhook receipts and real agent-run attempts, and
+records the dev1 provider-authentication failure that prevented agent replies.

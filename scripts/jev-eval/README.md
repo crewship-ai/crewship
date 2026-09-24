@@ -54,6 +54,15 @@ Add `--mlx-bits none` to the first or stress command to use source precision.
 The Laya command requires its separate `laya_mlx` Python environment. The
 length script intentionally sends one oversized input and records its failure.
 
+The [dev1 webhook pilot](../../docs/prd/reports/semif-mac-2026-09-24/dev1-webhook-pilot.md)
+uses two small routine fixtures, a local MLX bridge, and signed webhook
+deliveries to Riley and Jamie. The bridge accepts only simulated events and
+uses two option orders before sending a webhook. Its signing secrets live in
+a private dev1 file outside the repository. The webhook and agent step were
+reached, but both agent responses failed on dev1's Claude subscription access
+error; the report records the run and receipt IDs. The bridge does not make
+the server's `decision` step local.
+
 ## Hosted Jev pilot
 
 The integrated commands are `crewship decisions evaluate`, `triage`, and
