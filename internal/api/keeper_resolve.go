@@ -229,11 +229,17 @@ func (h *KeeperHandler) HandleResolve(w http.ResponseWriter, r *http.Request) {
 	// zero and roll back. That matters more here than in most places — this row is
 	// what eval.LoadCorpus reads as ground truth, and a verdict that can be
 	// rewritten is not one.
+	//
+	// resolved_by_user_id is the provenance marker for consumable approvals
+	// (#2574): non-NULL says this decision came off the human resolve surface,
+	// which is the one fact consumeKeeperApproval cannot infer from decision and
+	// decided_at — a judge ALLOW carries both. It also answers "who resolved
+	// this" on the projection, which previously only the ledger recorded.
 	res, err := tx.ExecContext(r.Context(), `
 		UPDATE keeper_requests
-		   SET decision = ?, reason = ?, decided_at = ?
+		   SET decision = ?, reason = ?, decided_at = ?, resolved_by_user_id = ?
 		 WHERE id = ? AND decision = ?`,
-		decision, reason, now, reqID, string(keeper.DecisionEscalate))
+		decision, reason, now, actorID, reqID, string(keeper.DecisionEscalate))
 	if err != nil {
 		replyInternalError(w, h.logger, "keeper resolve: record decision", err)
 		return

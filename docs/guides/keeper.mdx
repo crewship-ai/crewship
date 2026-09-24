@@ -471,18 +471,31 @@ Your ruling lands in three places: the request's decision, the inbox item
 `user` as the actor, so the audit trail records that a **person** decided rather
 than the model.
 
-<Warning>
-  **That is all a ruling does.** Approving an escalation records the verdict; it
-  does not run the command the agent asked to execute, does not deliver the
-  credential, and is not pushed back to the agent — the sidecar exposes no route
-  for an agent to read a request's later state. The agent's next
-  `/keeper/request` or `/keeper/execute` is judged afresh: your `ALLOW` is one
-  more line in the evidence block, and at a human-approval tier the judge's
-  `ALLOW` is turned into a new `ESCALATE` all the same. With the default profile
-  an L4 credential therefore never executes through Keeper; a person does the
-  work the agent asked for, or lowers the floor with `--escalate-from`. The
-  ruling's durable value is the ground truth it gives `keeper eval`.
-</Warning>
+<Note>
+  **An `ALLOW` ruling is consumable — exactly once.** The agent that raised the
+  escalation can learn your ruling and act on it: it polls
+  `GET /keeper/request/{id}` on its sidecar until the decision moves off
+  `ESCALATE`, then presents the request id on the retry
+  (`approval_request_id` field, or the `X-Keeper-Approval` header). A valid
+  approval is honoured **instead of** re-judging — the command runs, the
+  credential is delivered — under these bindings:
+
+  - **Same request.** The same agent, the same credential, the same request
+    type, and for `/execute` the *identical* command. Anything else is a
+    `403` and the request is judged afresh.
+  - **Single use.** The first retry that presents the approval consumes it
+    (`409` for every later one). The row the retry creates is itself never
+    spendable, so approvals cannot chain.
+  - **15-minute window.** The clock starts at your ruling; after it the
+    approval is `410 Gone` and the agent's only path is a fresh escalation.
+  - **Consumption precedes execution.** If the exec later fails (container
+    down), the approval is spent — refunding it would turn a flaky container
+    into an unlimited retry oracle.
+
+  The retry's audit row credits the **approver** (`user` actor in the ledger)
+  and its journal entry references the escalation it consumed, so the chain
+  from your click to the executed command stays readable.
+</Note>
 
 ### Ask the judge yourself
 
