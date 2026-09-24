@@ -27,7 +27,9 @@ import (
 	"encoding/hex"
 	"fmt"
 	"reflect"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/backup"
 	"github.com/crewship-ai/crewship/internal/pipeline"
@@ -77,9 +79,12 @@ func seedCapabilityRows(t *testing.T, db *sql.DB, workspaceID string) forkCapabi
 		t.Fatalf("seed invitation: %v", err)
 	}
 	// port_exposures / pipeline_webhooks: #1888 leaves the dead marker
-	// in the cleartext column and the real secret only as a digest.
+	// in the cleartext column and the real secret only as a digest. The
+	// exposure is seeded ACTIVE — a live capability, as on a real
+	// source — so the fork's REVOKED carry-over below is a state change
+	// the operator can see, not a no-op.
 	if _, err := db.ExecContext(ctx,
-		`UPDATE port_exposures SET token = 'redacted:' || id, token_hash = ? WHERE workspace_id = ?`,
+		`UPDATE port_exposures SET token = 'redacted:' || id, token_hash = ?, status = 'ACTIVE' WHERE workspace_id = ?`,
 		pipeline.HashCapabilityToken(f.exposeToken), workspaceID); err != nil {
 		t.Fatalf("seed exposure: %v", err)
 	}
@@ -118,6 +123,15 @@ func threeStrings(t *testing.T, db *sql.DB, q string, args ...any) (string, stri
 		t.Fatalf("query %q: %v", q, err)
 	}
 	return a.String, b.String, c.String
+}
+
+func twoStrings(t *testing.T, db *sql.DB, q string, args ...any) (string, string) {
+	t.Helper()
+	var a, b sql.NullString
+	if err := db.QueryRowContext(context.Background(), q, args...).Scan(&a, &b); err != nil {
+		t.Fatalf("query %q: %v", q, err)
+	}
+	return a.String, b.String
 }
 
 func TestForkedRestore_CapabilityTokens(t *testing.T) {
@@ -181,8 +195,11 @@ func TestForkedRestore_CapabilityTokens(t *testing.T) {
 	}
 
 	// --- port_exposures / pipeline_webhooks: row lands with the dead
-	// redaction marker (self-consistent with its NEW row id) and a
-	// digest that resolves no token the source ever published.
+	// redaction marker (self-consistent with its NEW row id), a digest
+	// that resolves no token the source ever published, and the
+	// operator-visible state that says the capability is OFF — a row
+	// claiming ACTIVE/enabled while holding an unusable secret is the
+	// silently-non-functional access #2274 forbids.
 	for _, table := range []string{"port_exposures", "pipeline_webhooks"} {
 		rowID, forkToken, forkHash := threeStrings(t, source,
 			fmt.Sprintf(`SELECT id, token, COALESCE(token_hash, '') FROM %s WHERE workspace_id = ?`, table), forkID)
@@ -206,16 +223,88 @@ func TestForkedRestore_CapabilityTokens(t *testing.T) {
 		if forkHash == pipeline.HashCapabilityToken(sourcePreimage) {
 			t.Errorf("%s: the source's live token still works against the fork — the fork inherited a live capability", table)
 		}
-		// The source row is untouched.
-		srcHash := queryStringValue(t, source,
-			fmt.Sprintf(`SELECT COALESCE(token_hash, '') FROM %s WHERE workspace_id = ?`, table), workspaceID)
-		if srcHash != pipeline.HashCapabilityToken(sourcePreimage) {
-			t.Errorf("%s: source row's digest changed during the fork", table)
+		// Operator-visible state: REVOKED for exposures (the proxy routes
+		// only status='ACTIVE'), disabled for webhooks (the store's own
+		// dead-state — its delete path sets exactly this).
+		if table == "port_exposures" {
+			status, revokedAt, reason := threeStrings(t, source,
+				`SELECT status, COALESCE(revoked_at, ''), COALESCE(revoked_reason, '') FROM port_exposures WHERE id = ?`, rowID)
+			if status != "REVOKED" || revokedAt == "" || !strings.Contains(reason, "re-keyed by forked restore") {
+				t.Errorf("fork exposure carried as (%q, %q, %q) — want REVOKED with revoked_at and a fork reason", status, revokedAt, reason)
+			}
+		} else {
+			var enabled int64
+			if err := source.QueryRowContext(ctx,
+				`SELECT enabled FROM pipeline_webhooks WHERE id = ?`, rowID).Scan(&enabled); err != nil {
+				t.Fatalf("read fork webhook enabled: %v", err)
+			}
+			if enabled != 0 {
+				t.Errorf("fork webhook enabled = %d, want 0 — a live-looking webhook with an unusable secret", enabled)
+			}
+		}
+		// The source row is untouched — still ACTIVE/enabled with its own
+		// working secret.
+		if table == "port_exposures" {
+			srcStatus, srcHash := twoStrings(t, source,
+				`SELECT status, COALESCE(token_hash, '') FROM port_exposures WHERE workspace_id = ?`, workspaceID)
+			if srcStatus != "ACTIVE" || srcHash != pipeline.HashCapabilityToken(sourcePreimage) {
+				t.Errorf("source exposure changed during the fork: (%q, %q)", srcStatus, srcHash)
+			}
+		} else {
+			var srcEnabled int64
+			var srcHash string
+			if err := source.QueryRowContext(ctx,
+				`SELECT enabled, COALESCE(token_hash, '') FROM pipeline_webhooks WHERE workspace_id = ?`, workspaceID).
+				Scan(&srcEnabled, &srcHash); err != nil {
+				t.Fatalf("read source webhook: %v", err)
+			}
+			if srcEnabled != 1 || srcHash != pipeline.HashCapabilityToken(sourcePreimage) {
+				t.Errorf("source webhook changed during the fork: (enabled=%d)", srcEnabled)
+			}
+		}
+	}
+
+	// --- the path to a working token on the fork: the store's own
+	// create mints a fresh token that resolves through the production
+	// lookup (#1888's GetByToken). This is the operator's re-issue path.
+	{
+		store := pipeline.NewWebhookStore(source)
+		var targetPipelineID string
+		if err := source.QueryRowContext(ctx,
+			`SELECT id FROM pipelines WHERE workspace_id = ? LIMIT 1`, forkID).Scan(&targetPipelineID); err != nil {
+			t.Fatalf("resolve fork pipeline: %v", err)
+		}
+		created, err := store.Save(ctx, pipeline.SaveWebhookInput{
+			WorkspaceID:      forkID,
+			Name:             "fork re-issue",
+			TargetPipelineID: targetPipelineID,
+			Enabled:          true,
+		})
+		if err != nil {
+			t.Fatalf("re-issue webhook on the fork: %v", err)
+		}
+		if created.Token == "" {
+			t.Fatal("store did not return the show-once token")
+		}
+		got, err := store.GetByToken(ctx, created.Token)
+		if err != nil {
+			t.Fatalf("re-issued token does not resolve through the production lookup: %v", err)
+		}
+		if got.WorkspaceID != forkID || !got.Enabled {
+			t.Errorf("re-issued webhook = (ws=%s, enabled=%v), want the fork's workspace and enabled", got.WorkspaceID, got.Enabled)
+		}
+		// ...and the source's token still resolves only to the source.
+		srcByToken, err := store.GetByToken(ctx, fixture.webhookToken)
+		if err != nil || srcByToken.WorkspaceID != workspaceID {
+			t.Errorf("source token lookup = (%v, %v), want the source workspace", srcByToken, err)
 		}
 	}
 
 	// --- page_public_tokens / page_webhooks: hash-only rows land with
-	// digests that resolve nothing.
+	// digests that resolve nothing, marked revoked — both public paths
+	// resolve only revoked_at IS NULL, and both list views surface
+	// revocation, so the operator sees a revoked link to re-mint rather
+	// than an open one nobody can use.
 	pageChecks := []struct {
 		table     string
 		preimage  string
@@ -248,6 +337,50 @@ func TestForkedRestore_CapabilityTokens(t *testing.T) {
 		}
 		if srcHash := queryStringValue(t, source, c.srcQuery, workspaceID); srcHash != pipeline.HashCapabilityToken(c.preimage) {
 			t.Errorf("%s: source row's digest changed during the fork", c.table)
+		}
+		// Operator-visible state: revoked_at set. The production lookups
+		// (pages_public.go, pages_webhooks.go) filter revoked_at IS NULL,
+		// so the carried row answers as no-token — and the list views
+		// show it revoked rather than open.
+		var forkRevokedAt sql.NullString
+		if err := source.QueryRowContext(ctx,
+			fmt.Sprintf(`SELECT r.revoked_at FROM %s r WHERE r.token_hash = ?`, c.table), forkHash).Scan(&forkRevokedAt); err != nil {
+			t.Fatalf("%s: read fork revoked_at: %v", c.table, err)
+		}
+		if !forkRevokedAt.Valid || forkRevokedAt.String == "" {
+			t.Errorf("%s: fork row has no revoked_at — it presents as an open capability nobody can use", c.table)
+		}
+		// The path to a working token: a freshly minted row (the way the
+		// page API mints one — random token, only its digest stored) on
+		// the fork's page resolves through the production predicate,
+		// while the fork's carried row does not.
+		freshToken := "fresh_" + mintTestToken(t, 16)
+		freshDigest := pipeline.HashCapabilityToken(freshToken)
+		var freshTable, freshInsert string
+		var freshArgs []any
+		if c.table == "page_public_tokens" {
+			freshTable = "page_public_tokens"
+			freshInsert = `INSERT INTO page_public_tokens (id, page_id, token_hash, expires_at, created_by_user_id, created_at) SELECT 'pt_fresh', p.id, ?, datetime('now', '+30 days'), 'u_admin', ? FROM pages p WHERE p.workspace_id = ?`
+			freshArgs = []any{freshDigest, time.Now().UTC().Format(time.RFC3339), forkID}
+		} else {
+			freshTable = "page_webhooks"
+			freshInsert = `INSERT INTO page_webhooks (id, panel_id, token_hash, name, created_by_user_id, created_at) SELECT 'pw_fresh', pan.id, ?, 'fork re-issue', 'u_admin', ? FROM page_panels pan JOIN pages p ON p.id = pan.page_id WHERE p.workspace_id = ?`
+			freshArgs = []any{freshDigest, time.Now().UTC().Format(time.RFC3339), forkID}
+		}
+		if _, err := source.ExecContext(ctx, freshInsert, freshArgs...); err != nil {
+			t.Fatalf("%s: mint fresh token on the fork: %v", freshTable, err)
+		}
+		var freshResolves, carriedResolves int
+		if err := source.QueryRowContext(ctx,
+			fmt.Sprintf(`SELECT COUNT(*) FROM %s WHERE token_hash = ? AND revoked_at IS NULL`, freshTable), freshDigest).Scan(&freshResolves); err != nil {
+			t.Fatal(err)
+		}
+		if err := source.QueryRowContext(ctx,
+			fmt.Sprintf(`SELECT COUNT(*) FROM %s WHERE token_hash = ? AND revoked_at IS NULL`, freshTable), forkHash).Scan(&carriedResolves); err != nil {
+			t.Fatal(err)
+		}
+		if freshResolves != 1 || carriedResolves != 0 {
+			t.Errorf("%s: production predicate resolves fresh=%d carried=%d, want 1 and 0 — the operator must have a working re-issue path", freshTable, freshResolves, carriedResolves)
 		}
 	}
 

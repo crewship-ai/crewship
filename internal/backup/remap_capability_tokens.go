@@ -36,9 +36,11 @@ package backup
 //   - pipeline_webhooks / port_exposures / page_* store only a digest
 //     (#1888 — the cleartext is gone by design, on the source and
 //     therefore in any bundle of it), so their re-minted digests match
-//     no token anybody holds: the capability is carried across REVOKED,
-//     and the restore result says so, by table and count. Re-issuing is
-//     the normal rotate/re-create flow on the fork.
+//     no token anybody holds. Those capabilities are carried across
+//     REVOKED — revoked_at / status='REVOKED' / enabled=0, the exact
+//     states their own list views and public paths already understand —
+//     and the restore result says so, by table and count. Re-issuing
+//     from the fork is the normal create/rotate flow on it.
 //
 // Either way nothing points at access that silently differs from what
 // the row claims: the fork's digests are real digests of tokens that
@@ -50,6 +52,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/pipeline"
 )
@@ -61,12 +64,22 @@ import (
 // pipeline_webhooks.token embed the row's NEW id, matching what the
 // #1888 write path would have left there.
 //
+// Rows whose re-minted secret can never be presented (every table but
+// workspace_invitations — see the file comment) also get their
+// OPERATOR-VISIBLE state moved to revoked/disabled, because a row that
+// still claims an active capability while holding a dead secret is the
+// "silently non-functional access" #2274 forbids: the list views would
+// show a working webhook / live exposure / open public link that no
+// request can ever satisfy.
+//
 // Returns the per-table count of re-keyed rows for the restore result.
 // Rows whose secret column is empty are left alone and not counted:
 // an empty token is not a capability, and minting one would invent
 // access the source never granted.
 func rekeyForkedCapabilityTokens(dump *DBDump) (map[string]int, error) {
 	counts := map[string]int{}
+	now := time.Now().UTC().Format(time.RFC3339)
+	const forkRevokedReason = "capability token re-keyed by forked restore (#2274): the source's token no longer works here; re-issue this capability from this workspace"
 
 	// workspace_invitations: the one table whose cleartext token is
 	// stored and re-displayed. Mint a fresh token of the exact shape
@@ -87,7 +100,10 @@ func rekeyForkedCapabilityTokens(dump *DBDump) (map[string]int, error) {
 
 	// port_exposures: cleartext column gets the dead redaction marker
 	// (its NOT NULL UNIQUE demands a value; the real secret lives in the
-	// digest), digest gets a fresh mint nobody can present.
+	// digest), digest gets a fresh mint nobody can present, and the row
+	// is carried as REVOKED — the proxy path only routes status='ACTIVE',
+	// so the fork's list shows a revoked exposure, not a live one that
+	// 404s.
 	for _, row := range dump.Tables["port_exposures"] {
 		if !hasNonEmptyString(row, "token") {
 			continue
@@ -99,10 +115,17 @@ func rekeyForkedCapabilityTokens(dump *DBDump) (map[string]int, error) {
 		}
 		row["token"] = pipeline.RedactedCapabilityToken(id)
 		row["token_hash"] = digest
+		row["status"] = "REVOKED"
+		row["revoked_at"] = now
+		row["revoked_reason"] = forkRevokedReason
 		counts["port_exposures"]++
 	}
 
-	// pipeline_webhooks: same arrangement as port_exposures.
+	// pipeline_webhooks: same arrangement for the secret; the row is
+	// carried DISABLED (enabled=0), which is the store's own dead-state
+	// — its delete path sets exactly this — so the fork's webhook list
+	// shows an off switch, not a live URL that never fires. Re-creating
+	// the webhook (or a future rotate path) mints a working token.
 	for _, row := range dump.Tables["pipeline_webhooks"] {
 		if !hasNonEmptyString(row, "token") {
 			continue
@@ -114,12 +137,17 @@ func rekeyForkedCapabilityTokens(dump *DBDump) (map[string]int, error) {
 		}
 		row["token"] = pipeline.RedactedCapabilityToken(id)
 		row["token_hash"] = digest
+		row["enabled"] = int64(0)
 		counts["pipeline_webhooks"]++
 	}
 
 	// page_public_tokens / page_webhooks: hash-only tables. The digest is
 	// the lookup key; a fresh mint of an unpublished token leaves the
 	// row structurally intact and its capability carried-across-revoked.
+	// revoked_at is set to match: both public paths resolve only
+	// revoked_at IS NULL, and both list views surface revocation, so the
+	// operator sees a revoked link/webhook they can re-mint — not an
+	// open one nobody can use.
 	for _, row := range dump.Tables["page_public_tokens"] {
 		if !hasNonEmptyString(row, "token_hash") {
 			continue
@@ -129,6 +157,7 @@ func rekeyForkedCapabilityTokens(dump *DBDump) (map[string]int, error) {
 			return nil, fmt.Errorf("backup: re-mint page public token: %w", err)
 		}
 		row["token_hash"] = digest
+		row["revoked_at"] = now
 		counts["page_public_tokens"]++
 	}
 	for _, row := range dump.Tables["page_webhooks"] {
@@ -140,6 +169,7 @@ func rekeyForkedCapabilityTokens(dump *DBDump) (map[string]int, error) {
 			return nil, fmt.Errorf("backup: re-mint page webhook token: %w", err)
 		}
 		row["token_hash"] = digest
+		row["revoked_at"] = now
 		counts["page_webhooks"]++
 	}
 
