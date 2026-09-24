@@ -312,8 +312,58 @@ const RouteFingerprintDelimiter = "~cfp~"
 // than trusted, and the HMAC binds it.
 const LLMRoutePrefix = "llmrv1"
 
+// LLMRunRoutePrefix identifies a provider token bound to one execution. The
+// sidecar must check the run registry before forwarding a request carrying it.
+const LLMRunRoutePrefix = "llmrv2"
+
 const llmRouteKeyContext = "crewship llm route key v1\x00"
 const llmRouteContext = "crewship llm route identity v1\x00"
+const llmRunRouteContext = "crewship llm route identity v2\x00"
+
+// DeriveLLMRunRouteToken binds a disposable provider key to both the agent
+// and the run. Neither value can be substituted without the crew route key.
+func DeriveLLMRunRouteToken(routeKey, agentID, runID string) string {
+	if routeKey == "" || agentID == "" || runID == "" {
+		return ""
+	}
+	agent := base64.RawURLEncoding.EncodeToString([]byte(agentID))
+	run := base64.RawURLEncoding.EncodeToString([]byte(runID))
+	m := hmac.New(sha256.New, []byte(routeKey))
+	m.Write([]byte(llmRunRouteContext))
+	m.Write([]byte(agentID))
+	m.Write([]byte{0})
+	m.Write([]byte(runID))
+	return LLMRunRoutePrefix + "." + agent + "." + run + "." + hex.EncodeToString(m.Sum(nil))
+}
+
+// ValidateLLMRunRouteToken verifies the MAC and returns its immutable identity.
+func ValidateLLMRunRouteToken(routeKey, value string) (agentID, runID string, ok bool) {
+	if routeKey == "" {
+		return "", "", false
+	}
+	rest, found := strings.CutPrefix(value, LLMRunRoutePrefix+".")
+	if !found {
+		return "", "", false
+	}
+	parts := strings.Split(rest, ".")
+	if len(parts) != 3 || parts[0] == "" || parts[1] == "" || parts[2] == "" {
+		return "", "", false
+	}
+	decodedAgent, err := base64.RawURLEncoding.DecodeString(parts[0])
+	if err != nil || len(decodedAgent) == 0 {
+		return "", "", false
+	}
+	decodedRun, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil || len(decodedRun) == 0 {
+		return "", "", false
+	}
+	agentID, runID = string(decodedAgent), string(decodedRun)
+	expected := DeriveLLMRunRouteToken(routeKey, agentID, runID)
+	if subtle.ConstantTimeCompare([]byte(value), []byte(expected)) != 1 {
+		return "", "", false
+	}
+	return agentID, runID, true
+}
 
 // DeriveLLMRouteKey returns a purpose-limited key for validating disposable
 // provider-route tokens in one workspace/crew sidecar. It is deliberately not
@@ -332,9 +382,9 @@ func DeriveLLMRouteKey(master, workspaceID, crewID string) string {
 	return hex.EncodeToString(m.Sum(nil))
 }
 
-// DeriveLLMRouteToken creates an agent identity for disposable provider keys.
-// routeKey stays in crewshipd + the UID-1002 sidecar; only the derived token is
-// placed in the UID-1001 agent environment.
+// DeriveLLMRouteToken is the v1 agent-only format. New agent processes use
+// DeriveLLMRunRouteToken; the sidecar refuses v1 provider requests because an
+// agent-only token cannot be revoked when one of that agent's runs ends.
 func DeriveLLMRouteToken(routeKey, agentID string) string {
 	if routeKey == "" || agentID == "" {
 		return ""
@@ -343,8 +393,8 @@ func DeriveLLMRouteToken(routeKey, agentID string) string {
 	return LLMRoutePrefix + "." + encodedID + "." + llmRouteMAC(routeKey, agentID)
 }
 
-// ValidateLLMRouteToken verifies a derived route token and returns its bound
-// agent id. It fails closed on malformed input or an empty route key.
+// ValidateLLMRouteToken verifies the legacy format. It is retained for format
+// tests and older callers, not for provider admission.
 func ValidateLLMRouteToken(routeKey, routeValue string) (string, bool) {
 	if routeKey == "" {
 		return "", false
