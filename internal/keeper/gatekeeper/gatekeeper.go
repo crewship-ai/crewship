@@ -13,6 +13,7 @@ import (
 	"log/slog"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/crewship-ai/crewship/internal/keeper"
 	"github.com/crewship-ai/crewship/internal/keeper/evidence"
@@ -40,10 +41,14 @@ const llmCallTimeout = 20 * time.Second
 // non-whitespace runes. Used by the L1 intent check below — `len >= 10`
 // alone accepted "aaaaaaaaaa" as a valid stated intent, which let the
 // auto-allow shortcut be used as a free-pass for any L1 credential.
+//
+// unicode.IsSpace, not an ASCII allowlist: an internal U+00A0 (NBSP) or any
+// other Unicode space would otherwise count toward the distinct-rune total,
+// letting filler with four real runes clear a five-rune floor.
 func hasMinDistinctChars(s string, min int) bool {
 	seen := make(map[rune]struct{}, min)
 	for _, r := range s {
-		if r == ' ' || r == '\t' || r == '\n' || r == '\r' {
+		if unicode.IsSpace(r) {
 			continue
 		}
 		seen[r] = struct{}{}
@@ -422,10 +427,11 @@ func effectiveRequestType(req EvalRequest) keeper.RequestType {
 // Evaluate submits the request to the Keeper LLM and returns a structured decision.
 // For L1 credentials with a sufficiently descriptive intent, it short-circuits to ALLOW.
 func (g *Gatekeeper) Evaluate(ctx context.Context, req EvalRequest) (keeper.GatekeeperResponse, error) {
-	// L1 credentials with a meaningful intent (≥10 chars AND ≥3 distinct
-	// non-whitespace chars): allow automatically (fast path). Single-char or
-	// whitespace-only intents are rejected to prevent trivial bypasses, and
-	// the distinct-char check (audit M3) blocks "aaaaaaaaaa" -style filler.
+	// L1 credentials with a meaningful intent (≥10 chars AND ≥5 distinct
+	// non-whitespace chars — l1MinDistinctChars): allow automatically (fast
+	// path). Single-char or whitespace-only intents are rejected to prevent
+	// trivial bypasses, and the distinct-char check (audit M3, raised 3→5)
+	// blocks "aaaaaaaaaa" -style filler.
 	// SECURITY: L1 auto-allow NEVER applies to /execute requests (Command != "").
 	// The command must always be evaluated by the LLM to prevent exfiltration attacks
 	// like "echo $TOKEN | base64" that bypass output scrubbing.

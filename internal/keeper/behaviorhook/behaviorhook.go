@@ -8,15 +8,19 @@
 // Usage from the orchestrator's tool-call site:
 //
 //	if h := behaviorhook.Get(); h != nil {
-//	    if be, ok := h.MaybeEvaluate(ctx, ec); ok && be != nil {
-//	        return be // bubbles up; caller treats as a tool-call abort
+//	    sample, err := h.MaybeEvaluate(ctx, ec)
+//	    if err == nil && sample != nil {
+//	        routeSampledVerdict(sample, ec) // persist + surface per PolicyDecision
+//	        if sample.Blocked != nil {
+//	            return sample.Blocked // bubbles up; caller treats as a tool-call abort
+//	        }
 //	    }
 //	}
 //
-// MaybeEvaluate is the sampling gate: it returns (nil, false) for
-// most calls (the bulk of tool calls are NOT sampled) and only fires
-// the LLM when the per-crew counter wraps around the sampling
-// interval. The default sampling rate is 1 in DefaultSampleEvery.
+// MaybeEvaluate is the sampling gate: it returns nil for most calls (the
+// bulk of tool calls are NOT sampled) and only fires the LLM when the
+// per-crew counter wraps around the sampling interval. The default sampling
+// rate is 1 in DefaultSampleEvery.
 //
 // A caller that knows the workspace's own cadence — the post-tool-call
 // observer, which reads the governance row per observation anyway —
@@ -107,21 +111,41 @@ func (h *Hook) SetSampleEvery(every int64) {
 // monitoring" rather than "abort the tool call".
 var ErrNotConfigured = errors.New("behaviorhook: evaluator or policy resolver not configured")
 
-// MaybeEvaluate is the sampling gate. Returns:
+// Sample is the outcome of one SAMPLED evaluation — everything the caller
+// needs to route the verdict, not just the block signal.
 //
-//	(nil, false)              — not sampled this call (the common case)
-//	(*BlockedError, true)     — sampled + DENY in block mode + strict/guided
-//	(nil, true)               — sampled + LLM verdict was non-blocking
-//	(nil, true) + err logged  — sampled + evaluator hit an error (fail-soft)
+// Before #2575 the hook answered (*BlockedError, fired) and nothing else, so
+// the only verdict the sampled path could act on was a block-mode DENY. WARN
+// and ESCALATE — verdicts the evaluator produced, with a PolicyDecision that
+// said "inbox item" or "journal" — were returned and discarded: no inbox row,
+// no notification, no journal entry. The watchdog sampled traffic and then
+// dropped most of what it learned.
 //
-// The boolean indicates whether the hook fired the evaluator at all;
-// callers can log it for telemetry without inferring from a nil error.
+// Verdict is nil when the evaluator itself failed (fail-soft: nothing was
+// learned, so there is nothing to route); Blocked is non-nil exactly when the
+// next tool call must be interrupted.
+type Sample struct {
+	// Verdict is the evaluator's full result — decision, reason, risk, and the
+	// pre-computed PolicyDecision that says where the verdict belongs
+	// (journal-only, inbox, or blocking inbox). Nil on an evaluator error.
+	Verdict *gatekeeper.BehaviorReviewResult
+	// Blocked is the interrupt for the next tool call: DENY in block mode ×
+	// strict/guided, or ESCALATE in block mode × strict/guided, or the
+	// fail-closed policy-resolve error.
+	Blocked *hooks.BlockedError
+}
+
+// MaybeEvaluate is the sampling gate. Returns a nil Sample for the common
+// case (this call was not sampled). A non-nil Sample means the evaluator ran
+// (or the policy resolve failed closed): route Verdict to the journal/inbox
+// per its PolicyDecision, and treat a non-nil Blocked as an interrupt for the
+// next tool call.
 //
 // The block path returns a *hooks.BlockedError so the orchestrator
 // can reuse its existing errors.As(*hooks.BlockedError) detection
 // without a parallel error type — keeps the "what does the agent see"
 // surface uniform across operator-authored hooks and platform hooks.
-func (h *Hook) MaybeEvaluate(ctx context.Context, ec hooks.EventContext) (*hooks.BlockedError, bool) {
+func (h *Hook) MaybeEvaluate(ctx context.Context, ec hooks.EventContext) (*Sample, error) {
 	return h.MaybeEvaluateEvery(ctx, ec, 0)
 }
 
@@ -142,21 +166,26 @@ func (h *Hook) MaybeEvaluate(ctx context.Context, ec hooks.EventContext) (*hooks
 // every <= 0 means "the caller has no workspace cadence": the hook's own
 // instance-wide fallback applies (DefaultSampleEvery unless SetSampleEvery
 // changed it, and a fallback of <=0 still disables the hook).
-func (h *Hook) MaybeEvaluateEvery(ctx context.Context, ec hooks.EventContext, every int64) (*hooks.BlockedError, bool) {
+//
+// The returned error is ErrNotConfigured when the hook's dependencies are
+// missing — kept as an error (rather than a Sample field) because it
+// describes the HOOK, not the sample, and the caller's correct reaction is
+// to skip monitoring entirely rather than to route anything.
+func (h *Hook) MaybeEvaluateEvery(ctx context.Context, ec hooks.EventContext, every int64) (*Sample, error) {
 	if h.ev == nil || h.policy == nil {
-		return nil, false
+		return nil, ErrNotConfigured
 	}
 	if every <= 0 {
 		every = h.sampleEvery.Load()
 	}
 	if every <= 0 {
-		return nil, false
+		return nil, nil
 	}
 
 	counter := h.counterFor(ec.CrewID)
 	count := counter.Add(1)
 	if count%every != 0 {
-		return nil, false
+		return nil, nil
 	}
 
 	// Resolve policy (cached per crew for cacheTTL by the resolver).
@@ -173,14 +202,16 @@ func (h *Hook) MaybeEvaluateEvery(ctx context.Context, ec hooks.EventContext, ev
 		// availability hazard. The agent retries once the resolver recovers.
 		h.logger.Error("behaviorhook: policy resolve failed; blocking sample (fail-closed)",
 			"crew_id", ec.CrewID, "error", err)
-		return &hooks.BlockedError{
-			HookID: "behavior_monitor",
-			Event:  hooks.EventPostToolCall,
-			Result: hooks.Result{
-				Outcome: hooks.OutcomeBlock,
-				Message: "F4.2 behavior monitor: policy temporarily unavailable; deferring this action (retry shortly)",
+		return &Sample{
+			Blocked: &hooks.BlockedError{
+				HookID: "behavior_monitor",
+				Event:  hooks.EventPostToolCall,
+				Result: hooks.Result{
+					Outcome: hooks.OutcomeBlock,
+					Message: "F4.2 behavior monitor: policy temporarily unavailable; deferring this action (retry shortly)",
+				},
 			},
-		}, true
+		}, nil
 	}
 
 	res, err := h.ev.Evaluate(ctx, gatekeeper.BehaviorReviewRequest{
@@ -194,13 +225,19 @@ func (h *Hook) MaybeEvaluateEvery(ctx context.Context, ec hooks.EventContext, ev
 		ToolArgsSnippet: payloadSnippet(ec.Payload),
 	})
 	if err != nil {
+		// Fail-soft, and nothing to route: the evaluator produced no verdict,
+		// so inventing one (an inbox item saying "error") would be noise the
+		// operator cannot act on beyond what this log line already says.
 		h.logger.Warn("behaviorhook: evaluator error; treating as non-blocking",
 			"crew_id", ec.CrewID, "agent_id", ec.AgentID, "tool", ec.ToolName, "error", err)
-		return nil, true
+		return &Sample{}, nil
 	}
 
 	if !res.ShouldBlock {
-		return nil, true
+		// Still a real verdict with a PolicyDecision to honour — WARN and
+		// ESCALATE land here, and they are exactly the verdicts #2575 found
+		// being dropped. The caller routes them; this hook only interrupts.
+		return &Sample{Verdict: &res}, nil
 	}
 
 	be := &hooks.BlockedError{
@@ -211,7 +248,7 @@ func (h *Hook) MaybeEvaluateEvery(ctx context.Context, ec hooks.EventContext, ev
 			Message: fmt.Sprintf("F4.2 behavior monitor: %s", res.Reason),
 		},
 	}
-	return be, true
+	return &Sample{Verdict: &res, Blocked: be}, nil
 }
 
 // counterFor returns the per-crew counter, creating it lazily under

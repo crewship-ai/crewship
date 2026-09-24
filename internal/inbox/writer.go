@@ -259,10 +259,71 @@ type Item struct {
 // envelope (nil db, empty workspace_id/kind/source_id) return nil
 // because they're caller bugs not transient SQL issues — callers can
 // guard themselves; we just silently no-op rather than panic.
+//
+// For callers that must not persist a source-of-truth row without its
+// inbox projection (or vice versa), InsertTx rides the caller's
+// transaction — see its doc.
 func Insert(ctx context.Context, db *sql.DB, logger *slog.Logger, in Item) error {
 	if db == nil || in.WorkspaceID == "" || in.Kind == "" || in.SourceID == "" {
 		return nil
 	}
+	res, err := insertItem(ctx, db, logger, in)
+	if err != nil {
+		return err
+	}
+	// Fan out to external channels ONLY when a NEW row was actually
+	// written — INSERT OR IGNORE makes a retried/duplicate source_id a
+	// no-op, and a no-op must not re-push a notification that already
+	// went out on the first call (mirrors the dedup contract the (kind,
+	// source_id) unique index already gives the in-product inbox).
+	if n, _ := res.RowsAffected(); n > 0 {
+		notifyExternal(ctx, in)
+	}
+	return nil
+}
+
+// InsertTx is Insert on the CALLER's transaction, for the #1247 pattern one
+// level down: a source-of-truth row and its inbox projection must commit
+// together or not at all, and a plain Insert-after-write leaves the
+// recorded-but-never-delivered state when the second write fails.
+//
+// Two deliberate differences from Insert:
+//
+//   - No external-notification fan-out. notifyExternal fires on the writer's
+//     hot path, but this row is not durable until the caller COMMITS — a
+//     notification for a row that rolls back would tell a human about
+//     something that never happened. Call NotifyExternalChannels after a
+//     successful commit.
+//   - The validation no-op does not apply: an empty envelope inside an
+//     explicit transaction is a caller bug worth failing loudly, and
+//     swallowing it here would let the surrounding commit succeed with half
+//     its payload missing.
+//
+// RowsAffected is not consulted: INSERT OR IGNORE's duplicate case is a
+// commitable state (the projection already exists), not a failure.
+func InsertTx(ctx context.Context, tx *sql.Tx, logger *slog.Logger, in Item) error {
+	if tx == nil {
+		return errors.New("inbox: InsertTx requires a transaction")
+	}
+	if in.WorkspaceID == "" || in.Kind == "" || in.SourceID == "" {
+		return errors.New("inbox: InsertTx requires workspace_id, kind and source_id")
+	}
+	_, err := insertItem(ctx, tx, logger, in)
+	return err
+}
+
+// NotifyExternalChannels fans a COMMITTED inbox item out to the recipient's
+// external notification channels. The seam callers of InsertTx owe the row
+// after commit; Insert fires it inline. No-op when nothing is wired.
+func NotifyExternalChannels(ctx context.Context, in Item) { notifyExternal(ctx, in) }
+
+// insertItem is the single INSERT statement every write path shares, against
+// whichever executor the caller chose (autocommit *sql.DB via Insert, or the
+// caller's *sql.Tx via InsertTx). Encoding, defaults and the id scheme live
+// here once so the two paths cannot drift. Returns the statement's result so
+// Insert can gate the external-notification fan-out on a row actually being
+// new; the tx path commits the duplicate case as-is instead.
+func insertItem(ctx context.Context, db execContext, logger *slog.Logger, in Item) (sql.Result, error) {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -313,17 +374,15 @@ func Insert(ctx context.Context, db *sql.DB, logger *slog.Logger, in Item) error
 	)
 	if err != nil {
 		logger.Warn("inbox insert", "error", err, "kind", in.Kind, "source_id", in.SourceID)
-		return err
 	}
-	// Fan out to external channels ONLY when a NEW row was actually
-	// written — INSERT OR IGNORE makes a retried/duplicate source_id a
-	// no-op, and a no-op must not re-push a notification that already
-	// went out on the first call (mirrors the dedup contract the (kind,
-	// source_id) unique index already gives the in-product inbox).
-	if n, _ := res.RowsAffected(); n > 0 {
-		notifyExternal(ctx, in)
-	}
-	return nil
+	return res, err
+}
+
+// execContext is the write surface *sql.DB and *sql.Tx share — kept local so
+// the package stays a leaf with no interest in the caller's transaction
+// machinery beyond executing one statement inside it.
+type execContext interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
 }
 
 // UpsertMessage inserts a message-kind inbox row, refreshing an

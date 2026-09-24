@@ -36,6 +36,12 @@ func TestGatekeeper_L1AutoAllow_RejectsLowDistinctFiller(t *testing.T) {
 		"aaabbbcccddd", // 3 distinct
 		"abababababab", // 2 distinct
 		"xyxyxyxyxyxy", // 2 distinct
+		// 4 real distinct runes + an NBSP. Unicode whitespace must not count
+		// toward the distinct total — an ASCII-only skip list let filler with
+		// four real runes clear the five-rune floor.
+		"aaabbbccc ddd",
+		// Same via a thin space (U+2009): a,b,c,d are the only real runes.
+		"aaabbbcc ddd",
 	}
 	for _, intent := range cases {
 		if resp := l1Eval(t, intent); resp.Decision == string(keeper.DecisionAllow) {

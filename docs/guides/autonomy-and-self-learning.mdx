@@ -133,18 +133,22 @@ The F4.2 behavior monitor (Keeper Phase 2) samples tool calls — one in every N
 - **`block`** — `DENY` is a *block* verdict. Recommended for crews with established behavior-monitor confidence (the operator has seen the warn-mode signal pattern for weeks and is ready to trust DENY as a real signal).
 
 <Warning>
-  **What a verdict actually does depends on which path produced it.** The
+  **Detection, not authorization — but every verdict is recorded.** The
   monitor sees a tool call *after* it has executed (Crewship parses the driven
   CLI's stream; there is no pre-dispatch hook), so no verdict can undo the call
-  it sampled. On the **live sampled path** the only effect of any verdict is a
-  `hook.blocked` journal entry for a `block`-mode `DENY`; `WARN` and `ESCALATE`
-  from the sampler are not written anywhere, no inbox item is opened, and the
-  agent's next tool call is not held. The inbox rows described in the Phase 2
-  docs — a non-blocking warning, a blocking approval that pauses the crew — are
-  written by the synchronous review endpoint, which is what
-  `crewship keeper review run behavior` and an operator-authored hook call. Read
-  the monitor as detection and an audit signal, not as an authorization
-  boundary; see [Keeper → Watchdog governance](/guides/keeper#watchdog-governance-per-workspace).
+  it sampled, and on the live sampled path the agent's next tool call is not
+  held either — even a `block`-mode `DENY` only records the interrupt
+  (a `hook.blocked` journal entry).
+
+  What the sampler sees **is** persisted, on both trigger paths alike: every
+  fired sample writes a `keeper_requests` row, and the inbox fan-out below is
+  the same whether the verdict came from the live sampler or from
+  `crewship keeper review run behavior` — `WARN` → non-blocking inbox item,
+  `ESCALATE` → operator review (blocking in `block` mode at strict/guided),
+  `DENY` in `block` mode → blocking inbox item, `ALLOW` → journal telemetry.
+  Read the monitor as detection with a full audit trail, not as an
+  authorization boundary; see
+  [Keeper → Watchdog governance](/guides/keeper#watchdog-governance-per-workspace).
 </Warning>
 
 ### Forbidden combination

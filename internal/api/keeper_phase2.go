@@ -578,46 +578,18 @@ func (h *KeeperPhase2Handler) HandleBehavior(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	reqID, recErr := h.recordKeeperRequest(r.Context(), keeper.RequestTypeBehavior,
-		body.AgentID, body.CrewID, "F4.2 behavior check on "+body.ToolName,
-		string(res.Decision), res.Reason, res.RiskScore, res.Prompt, res.RawLLMResponse)
-	if recErr != nil {
-		h.logger.Error("keeper_phase2: behavior record failed", "error", recErr)
-		replyError(w, http.StatusInternalServerError, "persistence error")
+	// Persist + surface through the SAME half the sampled path uses
+	// (#2575), so the two trigger paths cannot drift into writing different
+	// rows for the same verdict. The write is atomic: on error NOTHING was
+	// persisted — no verdict row, no inbox item — so the platform's retry
+	// starts clean instead of resurrecting a recorded-but-undelivered
+	// verdict (#1048: fail loud, not silently-behind-a-200).
+	reqID, perr := h.persistBehaviorVerdict(r.Context(), res,
+		body.WorkspaceID, body.CrewID, body.AgentID, body.ToolName, body.AgentName)
+	if perr != nil {
+		h.logger.Error("keeper_phase2: behavior persist failed (nothing written)", "error", perr)
+		replyError(w, http.StatusInternalServerError, "failed to record the behavior verdict and surface it to the operator inbox")
 		return
-	}
-
-	// Write to inbox when the PolicyDecision says inbox / block_inbox.
-	switch res.PolicyDecision {
-	case policy.DecisionInboxApprove, policy.DecisionAutoLogInbox,
-		policy.DecisionBlockInbox:
-		gov := governance.Resolve(r.Context(), h.db, h.logger, body.WorkspaceID)
-		title := fmt.Sprintf("Behavior monitor: %s on %s (%s)", body.AgentName, body.ToolName, res.Decision)
-		if !h.insertKeeperInbox(w, r.Context(), reqID, body.WorkspaceID, inbox.Item{
-			WorkspaceID:  body.WorkspaceID,
-			Kind:         inbox.KindEscalation,
-			SourceID:     reqID,
-			TargetUserID: gov.SecurityContactUserID,
-			TargetRole:   "MANAGER",
-			Title:        title,
-			BodyMD:       res.Reason,
-			SenderType:   "system",
-			SenderID:     "keeper_behavior",
-			SenderName:   "Behavior Monitor",
-			Priority:     behaviorPriorityForDecision(res.Decision),
-			Blocking:     res.PolicyDecision == policy.DecisionBlockInbox,
-			Payload: map[string]interface{}{
-				"request_id":      reqID,
-				"request_type":    string(keeper.RequestTypeBehavior),
-				"agent_id":        body.AgentID,
-				"tool_name":       body.ToolName,
-				"decision":        string(res.Decision),
-				"policy_decision": string(res.PolicyDecision),
-				"should_block":    res.ShouldBlock,
-			},
-		}) {
-			return
-		}
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -628,6 +600,181 @@ func (h *KeeperPhase2Handler) HandleBehavior(w http.ResponseWriter, r *http.Requ
 		"should_block":    res.ShouldBlock,
 		"policy_decision": string(res.PolicyDecision),
 	})
+}
+
+// behaviorInboxItem builds the operator-facing inbox item for a behavior
+// verdict — shared by the synchronous POST /api/v1/keeper/behavior endpoint
+// and the sampled hook path (#2575), so the two trigger paths surface the
+// SAME row for the same verdict instead of near-duplicates.
+func behaviorInboxItem(
+	reqID, workspaceID string,
+	gov governance.Settings,
+	agentID, toolName string,
+	res gatekeeper.BehaviorReviewResult,
+	title string,
+) inbox.Item {
+	return inbox.Item{
+		WorkspaceID:  workspaceID,
+		Kind:         inbox.KindEscalation,
+		SourceID:     reqID,
+		TargetUserID: gov.SecurityContactUserID,
+		TargetRole:   "MANAGER",
+		Title:        title,
+		BodyMD:       res.Reason,
+		SenderType:   "system",
+		SenderID:     "keeper_behavior",
+		SenderName:   "Behavior Monitor",
+		Priority:     behaviorPriorityForDecision(res.Decision),
+		Blocking:     res.PolicyDecision == policy.DecisionBlockInbox,
+		Payload: map[string]interface{}{
+			"request_id":      reqID,
+			"request_type":    string(keeper.RequestTypeBehavior),
+			"agent_id":        agentID,
+			"tool_name":       toolName,
+			"decision":        string(res.Decision),
+			"policy_decision": string(res.PolicyDecision),
+			"should_block":    res.ShouldBlock,
+		},
+	}
+}
+
+// persistBehaviorVerdict records a behavior verdict in keeper_requests and
+// its operator inbox row in ONE transaction — the two commit together or
+// not at all (#1247's pattern, demanded by #2575's delivery contract).
+//
+// The transaction is the load-bearing part. The previous shape — verdict
+// row first, inbox insert second — left the recorded-but-never-delivered
+// state when the second write failed: the audit said a WARN/ESCALATE
+// happened, and no human ever saw it, with no retry that could deliver
+// THAT verdict (the next sampled call produces a new one). Atomicity turns
+// that half-state into a clean loss the caller can report: on error,
+// nothing exists — no row, no inbox item, no divergence between them.
+//
+// Returns the request id. An error means NOTHING was written; the two
+// callers answer it differently — the endpoint 500s so the platform
+// retries (#1048), the async sampled path logs at Error and moves on (a
+// later sample is a fresh verdict, not a redelivery).
+func (h *KeeperPhase2Handler) persistBehaviorVerdict(
+	ctx context.Context,
+	res gatekeeper.BehaviorReviewResult,
+	workspaceID, crewID, agentID, toolName, agentDisplayName string,
+) (string, error) {
+	// Scrub the prompt and the raw response before they are persisted. The
+	// prompt embeds ToolArgsSnippet — agent-authored text, exactly like the
+	// intent the credential path scrubs before anything copies it — and an
+	// agent that echoes a token into its tool args would otherwise have it
+	// durably recorded in keeper_requests.ollama_prompt (and shipped to a
+	// hosted judge before that). The generic pattern set and its limits are
+	// the judge scrubber's own (see scrubJudgeText); the verdict fields the
+	// operator needs (decision, reason, risk) are not touched. Applied here so
+	// the synchronous endpoint and the sampled path (#2575) cannot diverge.
+	res.Prompt = scrubJudgeText(res.Prompt)
+	res.RawLLMResponse = scrubJudgeText(res.RawLLMResponse)
+
+	suffix, err := randHexID()
+	if err != nil {
+		return "", fmt.Errorf("keeper_phase2: generate request id: %w", err)
+	}
+	reqID := "kpr_" + shortPrefix(keeper.RequestTypeBehavior) + "_" + suffix
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	// #1369: a behavior verdict is written already-decided, so its ledger
+	// entry is a single terminal transition at seq 1 — recorded in the SAME
+	// transaction as the projection row and the inbox item below. See
+	// recordKeeperRequest for the workspace-resolution rationale.
+	ws := keeperRequestWorkspace(ctx, h.db, h.logger, agentID, crewID)
+	tr := keeperTransition{
+		RequestID:   reqID,
+		WorkspaceID: ws,
+		State:       string(res.Decision),
+		RequestType: string(keeper.RequestTypeBehavior),
+		AgentID:     agentID,
+		CrewID:      crewID,
+		Intent:      "F4.2 behavior check on " + toolName,
+		Reason:      res.Reason,
+		RiskScore:   &res.RiskScore,
+		ActorType:   keeperActorKeeper,
+		ActorID:     "keeper",
+	}
+
+	// The inbox item is built BEFORE the transaction opens: what gets
+	// delivered must be decided by the same verdict the row records, not
+	// re-resolved against a governance row that could change mid-write.
+	var item *inbox.Item
+	switch res.PolicyDecision {
+	case policy.DecisionInboxApprove, policy.DecisionAutoLogInbox,
+		policy.DecisionBlockInbox:
+		gov := governance.Resolve(ctx, h.db, h.logger, workspaceID)
+		title := fmt.Sprintf("Behavior monitor: %s on %s (%s)", agentDisplayName, toolName, res.Decision)
+		built := behaviorInboxItem(reqID, workspaceID, gov, agentID, toolName, res, title)
+		item = &built
+	}
+
+	tx, err := h.db.BeginTx(ctx, nil)
+	if err != nil {
+		return "", fmt.Errorf("keeper_phase2: begin behavior persist: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck // no-op after a successful Commit
+
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO keeper_requests (
+			id, requesting_agent_id, requesting_crew_id, credential_id,
+			intent, decision, reason, risk_score, created_at, decided_at,
+			request_type, ollama_prompt, ollama_raw_response
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		reqID, nullIfEmpty(agentID), nullIfEmpty(crewID), nullIfEmpty(""),
+		tr.Intent, nullIfEmpty(string(res.Decision)), nullIfEmpty(res.Reason), res.RiskScore, now, now,
+		string(keeper.RequestTypeBehavior), nullIfEmpty(res.Prompt), nullIfEmpty(res.RawLLMResponse),
+	); err != nil {
+		return "", fmt.Errorf("keeper_phase2: insert keeper_requests (behavior): %w", err)
+	}
+	if err := appendKeeperTransitionTx(ctx, tx, tr); err != nil {
+		return "", err
+	}
+	if item != nil {
+		if err := inbox.InsertTx(ctx, tx, h.logger, *item); err != nil {
+			// The whole transaction rolls back: no verdict row without its
+			// delivery, and no delivery without the verdict it belongs to.
+			return "", fmt.Errorf("keeper_phase2: behavior inbox insert (rolled back with the verdict): %w", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return "", fmt.Errorf("keeper_phase2: commit behavior persist: %w", err)
+	}
+
+	// Post-commit only: a notification for rows that might still roll back
+	// would tell a human about something that never happened.
+	if item != nil {
+		inbox.NotifyExternalChannels(ctx, *item)
+		h.notifyKeeperInbox(workspaceID)
+	}
+	return reqID, nil
+}
+
+// SampledBehaviorInput is what the sampled post-tool-call path (#2575) hands
+// the recorder: where the sample came from plus the verdict the evaluator
+// produced. The observer has no evaluator of its own — the verdict was
+// computed by the behaviorhook singleton this same server installed.
+type SampledBehaviorInput struct {
+	WorkspaceID string
+	CrewID      string
+	AgentID     string
+	ToolName    string
+	Verdict     gatekeeper.BehaviorReviewResult
+}
+
+// RecordSampledBehavior is the sampled path's half of HandleBehavior: the
+// same keeper_requests row, the same inbox fan-out per PolicyDecision, the
+// same realtime push. Until #2575 the sampled path only ever produced a
+// journal entry on a block-mode DENY — WARN and ESCALATE verdicts were
+// computed and dropped, and no sampled verdict reached the operator inbox
+// or the keeper log at all.
+//
+// Fire-and-forget by contract (the observer runs off the tool-call hot
+// path); errors are returned so the caller can log them, not retried —
+// the next sampled tool call is the retry.
+func (h *KeeperPhase2Handler) RecordSampledBehavior(ctx context.Context, in SampledBehaviorInput) (string, error) {
+	return h.persistBehaviorVerdict(ctx, in.Verdict,
+		in.WorkspaceID, in.CrewID, in.AgentID, in.ToolName, in.AgentID)
 }
 
 func behaviorPriorityForDecision(d gatekeeper.BehaviorDecision) string {
