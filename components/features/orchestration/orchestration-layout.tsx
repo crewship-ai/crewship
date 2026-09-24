@@ -275,7 +275,7 @@ export function OrchestrationLayout({
       const query = search.toString()
       // replaceState, not router.replace: this is URL hygiene, not
       // navigation — no re-render, no history entry, nothing remounts.
-      window.history.replaceState(null, "", `${window.location.pathname}${query ? `?${query}` : ""}`)
+      window.history.replaceState(null, "", `${window.location.pathname}${query ? `?${query}` : ""}${window.location.hash}`)
     }
   }, [mode])
 

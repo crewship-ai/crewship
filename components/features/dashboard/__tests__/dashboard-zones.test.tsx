@@ -170,6 +170,11 @@ describe("crewColor", () => {
     expect(crewColor("not-a-color")).toBe("rgb(148, 163, 184)")
   })
 
+  it("does not treat inherited object keys as palette colours", () => {
+    expect(crewColor("constructor", 1)).toBe(Object.values(CREW_PALETTE)[1])
+    expect(crewColor("__proto__", 2)).toBe(Object.values(CREW_PALETTE)[2])
+  })
+
   it("rotates the palette by index for colourless crews (#2187)", () => {
     // A workspace of default-coloured crews gets distinguishable segments
     // instead of N identical greys.

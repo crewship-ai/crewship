@@ -186,13 +186,16 @@ export default function DashboardPage() {
     // which unmounts the whole dashboard rather than the one chart. The line
     // above already tolerates a missing bucket.series for the same reason.
     if (!volumeQ.data?.series_labels) return []
-    return Object.entries(volumeQ.data.series_labels).map(([key, label], seriesIndex) => ({
-      key,
-      label,
-      // seriesIndex rotates the fallback so default-coloured crews get
-      // distinguishable segments instead of identical greys (#2187).
-      color: crewColor(crews.find((crew) => crew.id === key)?.color, seriesIndex),
-    }))
+    return Object.entries(volumeQ.data.series_labels).map(([key, label]) => {
+      const crewIndex = crews.findIndex((crew) => crew.id === key)
+      return {
+        key,
+        label,
+        // Match the bridge indicators' crew order. Unknown series keep the
+        // neutral fallback instead of borrowing an unrelated crew's colour.
+        color: crewColor(crewIndex >= 0 ? crews[crewIndex].color : null, crewIndex >= 0 ? crewIndex : undefined),
+      }
+    })
   }, [volumeQ.data, crews])
 
   const runVolume = useMemo(
