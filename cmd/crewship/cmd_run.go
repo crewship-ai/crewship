@@ -1111,7 +1111,7 @@ func init() {
 	runCmd.Flags().Bool("markdown", false, "Render markdown ANSI styling (overrides config)")
 	runCmd.Flags().Bool("no-markdown", false, "Disable markdown ANSI styling (overrides config)")
 	runCmd.Flags().String("save", "", "Also write the agent's text response (no ANSI) to this path")
-	runCmd.Flags().Bool("plan", false, "Plan mode: output a step-by-step plan without executing tools")
+	runCmd.Flags().Bool("plan", false, "Ask for a step-by-step plan (prompt-guided; tools remain available)")
 	runCmd.Flags().String("effort", "", "Reasoning effort: minimal|low|medium|high|xhigh")
 	runCmd.Flags().Bool("show-thinking", false, "Surface reasoning blocks on stdout (not truncated)")
 
