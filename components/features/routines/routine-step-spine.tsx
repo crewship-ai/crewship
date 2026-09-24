@@ -285,7 +285,7 @@ export function RoutineStepSpine({
                   aria-pressed={view === option}
                   className={cn(
                     "inline-flex items-center gap-1.5 rounded px-2 py-1 text-[11px] font-medium capitalize transition-colors",
-                    view === option ? "bg-primary/15 text-primary" : "text-muted-foreground hover:text-foreground",
+                    view === option ? "bg-primary/15 text-primary-hover" : "text-muted-foreground hover:text-foreground",
                   )}
                 >
                   {option === "list" ? <List className="h-3 w-3" aria-hidden="true" /> : <Network className="h-3 w-3" aria-hidden="true" />}

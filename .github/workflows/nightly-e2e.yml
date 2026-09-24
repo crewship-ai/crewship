@@ -32,9 +32,11 @@ name: Nightly E2E
 #     catalog on /integrations, which now sits behind
 #     `NEXT_PUBLIC_LEGACY_MCP_INTEGRATIONS` (default off) — the buttons it
 #     clicks are not rendered in a stock build at all.
-#   * `a11y.spec.ts` (1/8) reports live WCAG failures. Its own header says the
-#     historic violations were fixed; with nothing running the scan, they came
-#     back.
+#   * `a11y.spec.ts` was a DRIFT finding until #1617's fixes landed (the
+#     toolbar badge tints, the alpha-muted text pattern, brand-tinted chips
+#     on bg-primary/15). It measures 9/9 green against a freshly seeded
+#     instance under this config and sits in GATE_SPECS now — a guard
+#     nobody executes is how those fixes regressed the first time.
 #   * the seven specs in the main config's own `testIgnore` list
 #     (`smoke`, `manual-crews-walkthrough`, `crews-unification`,
 #     `full-integration`, `edge-cases`, `visual`, `mobile-crews`) walk the
@@ -139,6 +141,7 @@ env:
   # `playwright.nightly.config.ts`, standalone and again alongside
   # create-crew-wizard at the nightly's own `CI=1 --workers=2`.
   GATE_SPECS: >-
+    e2e/a11y.spec.ts
     e2e/command-palette.spec.ts
     e2e/routine-reliability-editor.spec.ts
     e2e/provider-login-onboarding.spec.ts
@@ -152,12 +155,14 @@ env:
   #
   #   create-crew-wizard          7 /  0   ← gate bucket (with the two #1987
   #                                          specs measured separately above)
-  #   feedback                    4 /  2
+  #   feedback                    4 /  2   ← the 2 failures are the spec's own
+  #                                          synthetic message_id (the handler's
+  #                                          correct 404 — see the spec header);
+  #                                          tracked in #1617 for harness work
   #   crews-redesign              5 / 11
   #   crew-journal                3 /  1
   #   connectors                  3 / 10
-  #   feedback-ui                 1 /  1
-  #   a11y                        1 /  8
+  #   feedback-ui                 1 /  1   ← same synthetic-id 404 as feedback
   #   crew-privilege-controls     0 /  6
   #   crew-provisioning           0 /  1
   #   crews-real-workflow         0 / 12
@@ -165,21 +170,20 @@ env:
   #   crew-image-freshness        0 /  1
   #   pr-contract                 0 /  1   ← MOVED to EXCLUDED, see below
   #                              ──────────
-  #                              29 / 61   of the 90 tests selected here
+  #                              30 / 61   of the 90 tests selected here
   #
   # plus crews-unification / edge-cases / full-integration /
   # manual-crews-walkthrough / mobile-crews / smoke, which the main config
   # does not even attempt (its `testIgnore`) because they walk deleted routes.
   #
-  # a11y.spec.ts sits here, not in the gate, and that is a finding rather than
-  # a shortcut: its own header documents that every historic violation was
-  # fixed, and the scan now reports live aria-command-name, button-name,
-  # aria-allowed-attr, link-in-text-block and color-contrast failures on
-  # /crews, /routines, /credentials, /settings, /admin and the chat surface.
-  # Nothing has been running it, so the fixes silently regressed. The tracking
-  # issue this job files is where that gets an owner.
+  # a11y.spec.ts was moved to GATE_SPECS with the #1617 contrast fixes: it
+  # measures 9/9 green against a freshly seeded instance under this exact
+  # config (CI=1, workers=2, full seed), first standalone and then alongside
+  # the rest of the gate. While it sat here unread, the documented fixes
+  # regressed underneath it — a drift bucket is where coverage goes to be
+  # ignored, and WCAG regressions are exactly the thing this gate exists to
+  # catch the day they land rather than the month after.
   DRIFT_SPECS: >-
-    e2e/a11y.spec.ts
     e2e/connectors.spec.ts
     e2e/crew-image-freshness.spec.ts
     e2e/crew-journal.spec.ts

@@ -190,7 +190,7 @@ export function RateLimitsTab({ workspaceId }: { workspaceId: string | null }) {
                       <Badge variant="outline" className="text-[10px] px-1.5 py-0">Default</Badge>
                     )}
                   </div>
-                  <p className="text-[11px] text-muted-foreground/80 mt-0.5 leading-snug" title={l.description}>
+                  <p className="text-[11px] text-muted-foreground-soft mt-0.5 leading-snug" title={l.description}>
                     {l.description}
                   </p>
                 </div>
@@ -213,7 +213,7 @@ export function RateLimitsTab({ workspaceId }: { workspaceId: string | null }) {
                       />
                       <span className="text-[11px] text-muted-foreground w-14 shrink-0">{l.unit}</span>
                     </div>
-                    <span className="text-[10px] text-muted-foreground/70 mt-0.5">
+                    <span className="text-[10px] text-muted-foreground-soft mt-0.5">
                       {inRange
                         ? `default ${l.default} · range ${l.min}–${l.max}`
                         : `must be between ${l.min} and ${l.max}`}

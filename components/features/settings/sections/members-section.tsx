@@ -393,7 +393,7 @@ function MemberRow({
             <span className="min-w-0">
               <span className="block truncate text-xs text-foreground">{label}</span>
               {(member.user.full_name ?? "").trim() && (
-                <span className="mt-0.5 block truncate font-mono text-[10px] text-muted-foreground/80">
+                <span className="mt-0.5 block truncate font-mono text-[10px] text-muted-foreground-soft">
                   {member.user.email}
                 </span>
               )}
@@ -460,7 +460,7 @@ function MemberRow({
             <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
               Role
             </span>
-            <span className="text-[10px] text-muted-foreground/80">
+            <span className="text-[10px] text-muted-foreground-soft">
               what the tier grants before any per-person capability
             </span>
           </div>
@@ -477,7 +477,7 @@ function MemberRow({
                 <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
                   Capabilities
                 </span>
-                <span className="text-[10px] text-muted-foreground/80">
+                <span className="text-[10px] text-muted-foreground-soft">
                   granted individually on top of the role · applies immediately
                 </span>
               </div>
