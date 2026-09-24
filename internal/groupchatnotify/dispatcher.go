@@ -165,7 +165,11 @@ func (d *Dispatcher) projectInTransaction(ctx context.Context, conn *sql.Conn, e
 			return nil, err
 		}
 		if changed > 0 {
-			if _, err := conn.ExecContext(ctx, `DELETE FROM inbox_item_reads WHERE inbox_item_id=(SELECT id FROM inbox_items WHERE kind='message' AND source_id=?)`, source); err != nil {
+			// Scoped by workspace like the upsert above it: the dedupe
+			// key is (workspace_id, kind, source_id), and an unscoped
+			// scalar subquery could resolve another workspace's item and
+			// delete ITS markers (#2274).
+			if _, err := conn.ExecContext(ctx, `DELETE FROM inbox_item_reads WHERE inbox_item_id=(SELECT id FROM inbox_items WHERE workspace_id=? AND kind='message' AND source_id=?)`, workspaceID, source); err != nil {
 				return nil, err
 			}
 		}
