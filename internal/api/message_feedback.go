@@ -283,10 +283,10 @@ func (h *MessageFeedbackHandler) Create(w http.ResponseWriter, r *http.Request) 
 		reasonPtr = &body.Reason
 	}
 
-	// UNIQUE(message_id, user_id, signal) — UPSERT keeps the row id
-	// stable when a user updates their reason text, and re-writes
-	// workspace_id/chat_id on every POST so the row always matches the
-	// message's current resolution above.
+	// UNIQUE(workspace_id, message_id, user_id, signal) (#2274) —
+	// UPSERT keeps the row id stable when a user updates their reason
+	// text, and re-writes workspace_id/chat_id on every POST so the row
+	// always matches the message's current resolution above.
 	id := generateCUID()
 	_, err = h.db.ExecContext(r.Context(), `
 INSERT INTO message_feedback (id, workspace_id, chat_id, message_id, trace_id, signal, reason, user_id)
