@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest"
 
 import { deriveBridge } from "../bridge-strip"
 import { deriveFleetBoard, prioritiseFleet, FLEET_CARD_LIMIT, type FleetCard } from "../fleet-board"
-import { foldRunVolumeSeries, RUN_VOLUME_OTHER_KEY } from "@/app/(dashboard)/dashboard-helpers"
+import { foldRunVolumeSeries, RUN_VOLUME_OTHER_KEY, crewColor, CREW_PALETTE } from "@/app/(dashboard)/dashboard-helpers"
 import { issueBoardCounts } from "../work-snapshot"
 import { sparklinePoints } from "../sparkline"
 import { tickerTone } from "../activity-ticker"
@@ -155,5 +155,32 @@ describe("a fleet of a hundred crews stays readable", () => {
     const out = foldRunVolumeSeries([{ ts: "t", a: 3 }], series)
     expect(out.series).toBe(series)
     expect(out.folded).toBe(0)
+  })
+})
+
+describe("crewColor", () => {
+  it("resolves palette ids and raw hex values", () => {
+    expect(crewColor("blue")).toBe(CREW_PALETTE.blue)
+    expect(crewColor("1E7BFE")).toBe("#1E7BFE")
+    expect(crewColor("#ff8800")).toBe("#ff8800")
+  })
+
+  it("greys out an unknown colour when no index is offered", () => {
+    expect(crewColor(null)).toBe("rgb(148, 163, 184)")
+    expect(crewColor("not-a-color")).toBe("rgb(148, 163, 184)")
+  })
+
+  it("rotates the palette by index for colourless crews (#2187)", () => {
+    // A workspace of default-coloured crews gets distinguishable segments
+    // instead of N identical greys.
+    const first = crewColor(null, 0)
+    const second = crewColor(null, 1)
+    expect(first).toBe(Object.values(CREW_PALETTE)[0])
+    expect(second).toBe(Object.values(CREW_PALETTE)[1])
+    expect(first).not.toBe(second)
+    // Wraps around the palette rather than running off the end.
+    expect(crewColor(null, Object.keys(CREW_PALETTE).length)).toBe(first)
+    // A real colour always wins over the rotation.
+    expect(crewColor("blue", 3)).toBe(CREW_PALETTE.blue)
   })
 })

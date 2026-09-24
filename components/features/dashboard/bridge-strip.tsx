@@ -128,8 +128,8 @@ export function BridgeStrip({
           </span>
           <span className="flex items-center gap-1.5 text-label text-muted-foreground">
             <span className="flex items-center gap-1">
-              {data.crews.slice(0, 6).map((crew) => (
-                <span key={crew.id} className="h-2 w-2 rounded-full" style={{ backgroundColor: crewColor(crew.color) }} aria-hidden />
+              {data.crews.slice(0, 6).map((crew, crewIndex) => (
+                <span key={crew.id} className="h-2 w-2 rounded-full" style={{ backgroundColor: crewColor(crew.color, crewIndex) }} aria-hidden />
               ))}
             </span>
             <span className="truncate">{data.crews.map((c) => c.name).slice(0, 3).join(" · ")}{data.crews.length > 3 ? ` · +${data.crews.length - 3}` : ""}</span>

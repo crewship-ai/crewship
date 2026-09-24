@@ -1,11 +1,15 @@
 package api
 
 import (
+	"context"
 	"database/sql"
+	"database/sql/driver"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -182,6 +186,152 @@ func TestInboxHandler_List_VisibilityAndFilters(t *testing.T) {
 	h.List(rr7, req7)
 	if rr7.Code != http.StatusOK {
 		t.Errorf("limit=99999 status = %d, want 200 (silently clamp)", rr7.Code)
+	}
+}
+
+// TestInboxHandler_List_ActiveByKind pins the exact per-kind aggregate the
+// dashboard's "Needs your attention" strip counts from (#2187): the rows are
+// LIMIT-windowed and plateau at 100, the aggregate must not. It is the
+// caller's visible not-resolved items per kind — independent of the list's
+// own state/kind filters, and blind to other users' targeted rows.
+func TestInboxHandler_List_ActiveByKind(t *testing.T) {
+	db := setupTestDB(t)
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+	h := NewInboxHandler(db, newTestLogger(), nil)
+
+	otherUser := "user-other-" + fmt.Sprint(time.Now().UnixNano())
+	if _, err := db.Exec(`INSERT INTO users (id, email, full_name) VALUES (?, ?, 'Other')`,
+		otherUser, otherUser+"@example.com"); err != nil {
+		t.Fatalf("seed other user: %v", err)
+	}
+
+	now := time.Now().UTC()
+	seedInboxItem(t, h, wsID, "k-wp-1", "waitpoint", "unread", "", "", "approve", now)
+	seedInboxItem(t, h, wsID, "k-wp-2", "waitpoint", "read", "", "", "approve too", now)
+	seedInboxItem(t, h, wsID, "k-fail-1", "failed_run", "read", "", "", "boom", now)
+	seedInboxItem(t, h, wsID, "k-fail-resolved", "failed_run", "resolved", "", "", "done", now)
+	seedInboxItem(t, h, wsID, "k-missed", "schedule_missed", "unread", "", "", "cron", now)
+	// Targeted at another user: invisible to the caller, must not be counted.
+	seedInboxItem(t, h, wsID, "k-fail-hidden", "failed_run", "unread", otherUser, "", "not mine", now)
+
+	// Ask for a narrow window AND a state filter: the aggregate is neither
+	// windowed nor filtered — a dashboard counting from len(rows) would read
+	// 1 failed run while 1 more active one exists past the filter.
+	req := httptest.NewRequest("GET", "/api/v1/inbox?state=unread&limit=1", nil)
+	req = withWorkspaceUser(req, userID, wsID, "OWNER")
+	rr := httptest.NewRecorder()
+	h.List(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("list status = %d body=%s", rr.Code, rr.Body.String())
+	}
+	var resp inboxListResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v body=%s", err, rr.Body.String())
+	}
+	if resp.Count != 1 {
+		t.Errorf("windowed count = %d, want 1", resp.Count)
+	}
+	want := map[string]int{"waitpoint": 2, "failed_run": 1, "schedule_missed": 1}
+	if !reflect.DeepEqual(resp.ActiveByKind, want) {
+		t.Errorf("active_by_kind = %v, want %v (resolved excluded, other-user rows excluded, read still active)", resp.ActiveByKind, want)
+	}
+}
+
+// kindFailConnector lets every statement through except the active_by_kind
+// aggregate, whose Prepare fails — the review-shaped seam from
+// pages_project_review_consistency_test.go, pointed at one query.
+type kindFailConnector struct {
+	dsn   string
+	inner driver.Driver
+}
+
+func (c *kindFailConnector) Connect(ctx context.Context) (driver.Conn, error) {
+	conn, err := c.inner.Open(c.dsn)
+	if err != nil {
+		return nil, err
+	}
+	return &kindFailConn{inner: conn}, nil
+}
+
+func (c *kindFailConnector) Driver() driver.Driver { return c.inner }
+
+type kindFailConn struct {
+	inner driver.Conn
+}
+
+func (c *kindFailConn) Prepare(query string) (driver.Stmt, error) {
+	if strings.Contains(query, "GROUP BY kind") {
+		return nil, errors.New("forced aggregate failure")
+	}
+	return c.inner.Prepare(query)
+}
+
+func (c *kindFailConn) PrepareContext(ctx context.Context, query string) (driver.Stmt, error) {
+	if strings.Contains(query, "GROUP BY kind") {
+		return nil, errors.New("forced aggregate failure")
+	}
+	if p, ok := c.inner.(driver.ConnPrepareContext); ok {
+		return p.PrepareContext(ctx, query)
+	}
+	return c.inner.Prepare(query)
+}
+
+func (c *kindFailConn) Close() error { return c.inner.Close() }
+
+func (c *kindFailConn) Begin() (driver.Tx, error) { return c.inner.Begin() } //nolint:staticcheck // driver.Conn requires it.
+
+// TestInboxHandler_List_ActiveByKind_Failure_OmitsField pins the failure
+// contract of #2187's aggregate: when the counts query fails, the response
+// must NOT carry an empty active_by_kind — that would read as "no attention
+// needed" on the dashboard and hide real alerts behind a counts bug. The
+// field is omitted entirely so the client falls back to counting its
+// windowed rows, and the list itself still succeeds.
+func TestInboxHandler_List_ActiveByKind_Failure_OmitsField(t *testing.T) {
+	db := setupTestDB(t)
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+	h := NewInboxHandler(db, newTestLogger(), nil)
+
+	now := time.Now().UTC()
+	seedInboxItem(t, h, wsID, "kf-wp", "waitpoint", "unread", "", "", "approve me", now)
+
+	// Second pool on the same file, failing only the aggregate statement.
+	var path string
+	if err := db.QueryRow(`SELECT file FROM pragma_database_list WHERE name='main'`).Scan(&path); err != nil {
+		t.Fatalf("read database path: %v", err)
+	}
+	probe, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatalf("open probe handle: %v", err)
+	}
+	base := probe.Driver()
+	if err := probe.Close(); err != nil {
+		t.Fatalf("close probe handle: %v", err)
+	}
+	dsn := path + "?_pragma=busy_timeout(10000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(ON)&_txlock=immediate"
+	hooked := sql.OpenDB(&kindFailConnector{dsn: dsn, inner: base})
+	t.Cleanup(func() { _ = hooked.Close() })
+
+	failing := NewInboxHandler(hooked, newTestLogger(), nil)
+	req := httptest.NewRequest("GET", "/api/v1/inbox", nil)
+	req = withWorkspaceUser(req, userID, wsID, "OWNER")
+	rr := httptest.NewRecorder()
+	failing.List(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("list status = %d body=%s — the list itself must survive a counts failure", rr.Code, rr.Body.String())
+	}
+	if strings.Contains(rr.Body.String(), "active_by_kind") {
+		t.Errorf("body carries active_by_kind despite the forced aggregate failure: %s — an empty map would read as zero alerts", rr.Body.String())
+	}
+	var resp struct {
+		Rows []inboxItemResponse `json:"rows"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(resp.Rows) != 1 || resp.Rows[0].ID != "kf-wp" {
+		t.Errorf("rows = %+v, want the seeded waitpoint to still be listed", resp.Rows)
 	}
 }
 

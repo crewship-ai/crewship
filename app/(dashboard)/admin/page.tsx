@@ -442,7 +442,7 @@ export default function AdminPage() {
           ) : undefined
         }
         meta={
-          <span className="text-[10px] font-mono uppercase tracking-wide text-muted-foreground/60">{role ?? ""}</span>
+          <span className="text-[10px] font-mono uppercase tracking-wide text-muted-foreground-soft">{role ?? ""}</span>
         }
       />
 

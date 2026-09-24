@@ -608,3 +608,15 @@ func TestKeeperGovernance_SecondApproverWarnsWhenTooFewApprovers(t *testing.T) {
 		}
 	})
 }
+
+// TestL4MinRiskMeetsDefaultDenyNotifyThreshold pins the #2575 mismatch fix:
+// L4's MinRisk sat at 6 while the default DENY-notify threshold is 7, so an
+// L4 DENY floored to 6 never reached the inbox on an unconfigured workspace
+// — the tier comment claimed the opposite. A tier floor below the notify
+// default silences exactly the decisions a human most needs to hear about.
+func TestL4MinRiskMeetsDefaultDenyNotifyThreshold(t *testing.T) {
+	if floor := keeper.SecurityLevelL4.Tier().MinRisk; floor < governance.DefaultDenyNotifyMinRisk {
+		t.Fatalf("L4 MinRisk = %d, below governance.DefaultDenyNotifyMinRisk = %d — a critical DENY floored to %d never notifies on a default workspace",
+			floor, governance.DefaultDenyNotifyMinRisk, floor)
+	}
+}

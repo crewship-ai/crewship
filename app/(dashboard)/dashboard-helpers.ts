@@ -10,16 +10,30 @@ export const CREW_PALETTE: Record<string, string> = {
   lime: "rgb(163, 230, 53)",
   fuchsia: "rgb(232, 121, 249)",
 }
+const CREW_FALLBACK_GREY = "rgb(148, 163, 184)"
+const CREW_PALETTE_ORDER = Object.values(CREW_PALETTE)
+
 // A crew's colour is EITHER a palette id ("blue") or a raw hex — the same
 // rule lib/crew-icons.ts's crewColorHex documents. Only the ids were handled
 // here, so every hex-coloured crew (most of them) drew its dots and its run
 // series in the fallback grey.
-export function crewColor(color: string | null | undefined): string {
-  if (!color) return "rgb(148, 163, 184)"
-  const palette = CREW_PALETTE[color]
-  if (palette) return palette
-  const hex = color.startsWith("#") ? color : `#${color}`
-  return /^#[0-9a-fA-F]{6}$/.test(hex) ? hex : "rgb(148, 163, 184)"
+//
+// A crew with NO colour (or an unparseable one) falls back to the grey —
+// unless the caller supplies its index among the crews being drawn. Then the
+// fallback rotates through the palette, so a workspace of default-coloured
+// crews still gets distinguishable chart segments and swatches instead of N
+// identical greys (#2187).
+export function crewColor(color: string | null | undefined, index?: number): string {
+  const resolved = (() => {
+    if (!color) return null
+    const palette = CREW_PALETTE[color]
+    if (palette) return palette
+    const hex = color.startsWith("#") ? color : `#${color}`
+    return /^#[0-9a-fA-F]{6}$/.test(hex) ? hex : null
+  })()
+  if (resolved) return resolved
+  if (index === undefined || !Number.isFinite(index) || index < 0) return CREW_FALLBACK_GREY
+  return CREW_PALETTE_ORDER[Math.floor(index) % CREW_PALETTE_ORDER.length]
 }
 
 export const STATUS_PALETTE = {

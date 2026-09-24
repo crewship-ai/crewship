@@ -264,10 +264,18 @@ export function OrchestrationLayout({
   // Cross-surface create affordance. The dashboard's "New issue" CTA lands
   // here with ?create=1 so it opens the existing full composer instead of
   // dropping the user on the board and making them click a second time.
+  // The param is consumed once: without the strip-back, a plain reload (or
+  // dismissing the composer and navigating back) reopens it forever (#2187).
   useEffect(() => {
     if (mode !== "issues" || typeof window === "undefined") return
-    if (new URLSearchParams(window.location.search).get("create") === "1") {
+    const search = new URLSearchParams(window.location.search)
+    if (search.get("create") === "1") {
       setShowCreateIssue(true)
+      search.delete("create")
+      const query = search.toString()
+      // replaceState, not router.replace: this is URL hygiene, not
+      // navigation — no re-render, no history entry, nothing remounts.
+      window.history.replaceState(null, "", `${window.location.pathname}${query ? `?${query}` : ""}`)
     }
   }, [mode])
 

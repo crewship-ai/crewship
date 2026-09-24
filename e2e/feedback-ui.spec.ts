@@ -9,13 +9,13 @@ import { test, expect } from "@playwright/test"
 // UI coverage.
 //
 // A gated E2E fixture supplies a real assistant message for the HTTP roundtrip.
-test.describe("Feedback store via real browser", () => {
+test.describe("Feedback HTTP via real browser", () => {
   test.beforeEach(async ({ page, baseURL }) => {
     await page.goto(`${baseURL}/`)
     await page.waitForLoadState("domcontentloaded")
   })
 
-  test("submit() POSTs feedback + sets optimistic state, then reset() DELETEs", async ({ page, context, baseURL }) => {
+  test("browser POSTs feedback and then DELETEs it", async ({ page, context, baseURL }) => {
     const workspaces = await (await context.request.get(`${baseURL}/api/v1/workspaces`)).json()
     const workspaceID: string = Array.isArray(workspaces) ? workspaces[0]?.id : workspaces.id
     expect(workspaceID).toBeTruthy()

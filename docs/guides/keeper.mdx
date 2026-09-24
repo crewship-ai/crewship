@@ -53,7 +53,7 @@ it — not just what the request is labelled.
 | **L1 · low** | Read-only or low-value: npm read token, public API key | Auto-allowed when the agent states an intent (≥10 chars, ≥5 distinct, not injection-shaped), on `/keeper/request` only, and only while the workspace has no active [watch policy](#watch-rules). No model call, no cost. An intent under 10 chars, or any `/keeper/execute`, goes to the judge instead. |
 | **L2 · medium** | Write access to a non-production system: GitHub write, staging DB | Judged by the model. An intent under 15 chars is refused before the model is called. |
 | **L3 · high** | Admin access to real infrastructure: SSH, database admin, cloud account | Judged with four extra checks. Intent under 25 chars refused without a model call. Risk score floored at 4. [Auto-leases](#approval-issues-a-lease) when the workspace has opted in, rather than granting standing access. |
-| **L4 · critical** | Production administration, payments, customer data at scale | **In the default profile the model cannot grant it.** An `ALLOW` is turned into an `ESCALATE`, so a person rules on every request — unless the operator has set `--escalate-from 5`, which removes that step ([below](#…and-taking-the-human-out-entirely)). Five extra checks. Intent under 35 chars refused without a model call. Risk floored at 6. Four-eyes forced on resolution whatever the workspace toggle says. |
+| **L4 · critical** | Production administration, payments, customer data at scale | **In the default profile the model cannot grant it.** An `ALLOW` is turned into an `ESCALATE`, so a person rules on every request — unless the operator has set `--escalate-from 5`, which removes that step ([below](#…and-taking-the-human-out-entirely)). Five extra checks. Intent under 35 chars refused without a model call. Risk floored at 7 — the default DENY-notify threshold, so a critical refusal always clears it. Four-eyes forced on resolution whatever the workspace toggle says. |
 
 <Note>
   The tier decides what Keeper does with a request **that reaches it**. Whether a
@@ -471,18 +471,31 @@ Your ruling lands in three places: the request's decision, the inbox item
 `user` as the actor, so the audit trail records that a **person** decided rather
 than the model.
 
-<Warning>
-  **That is all a ruling does.** Approving an escalation records the verdict; it
-  does not run the command the agent asked to execute, does not deliver the
-  credential, and is not pushed back to the agent — the sidecar exposes no route
-  for an agent to read a request's later state. The agent's next
-  `/keeper/request` or `/keeper/execute` is judged afresh: your `ALLOW` is one
-  more line in the evidence block, and at a human-approval tier the judge's
-  `ALLOW` is turned into a new `ESCALATE` all the same. With the default profile
-  an L4 credential therefore never executes through Keeper; a person does the
-  work the agent asked for, or lowers the floor with `--escalate-from`. The
-  ruling's durable value is the ground truth it gives `keeper eval`.
-</Warning>
+<Note>
+  **An `ALLOW` ruling is consumable — exactly once.** The agent that raised the
+  escalation can learn your ruling and act on it: it polls
+  `GET /keeper/request/{id}` on its sidecar until the decision moves off
+  `ESCALATE`, then presents the request id on the retry
+  (`approval_request_id` field, or the `X-Keeper-Approval` header). A valid
+  approval is honoured **instead of** re-judging — the command runs, the
+  credential is delivered — under these bindings:
+
+  - **Same request.** The same agent, the same credential, the same request
+    type, and for `/execute` the *identical* command. Anything else is a
+    `403` and the request is judged afresh.
+  - **Single use.** The first retry that presents the approval consumes it
+    (`409` for every later one). The row the retry creates is itself never
+    spendable, so approvals cannot chain.
+  - **15-minute window.** The clock starts at your ruling; after it the
+    approval is `410 Gone` and the agent's only path is a fresh escalation.
+  - **Consumption precedes execution.** If the exec later fails (container
+    down), the approval is spent — refunding it would turn a flaky container
+    into an unlimited retry oracle.
+
+  The retry's audit row credits the **approver** (`user` actor in the ledger)
+  and its journal entry references the escalation it consumed, so the chain
+  from your click to the executed command stays readable.
+</Note>
 
 ### Ask the judge yourself
 
@@ -1143,15 +1156,21 @@ server restart needed:
   **Detection, not prevention.** The watchdog sees a tool call *after* it has
   run — Crewship drives an external CLI and parses its stream, and there is no
   pre-dispatch hook (`pre_tool_call` is retired in `internal/hooks/types.go` for
-  that reason). Nothing it decides can undo the call it sampled, and on the live
-  sampled path nothing stops the next one either: a `DENY` in `block` mode is
-  recorded as a `hook.blocked` journal entry (severity warn) and the driven CLI
-  carries on. The inbox rows and `keeper_requests` records the [behaviour
+  that reason). Nothing it decides can undo the call it sampled, and on the
+  live sampled path nothing stops the next one either: even a `DENY` in
+  `block` mode is recorded (a `hook.blocked` journal entry, severity warn, plus
+  the inbox row below) and the driven CLI carries on.
+
+  Every fired sample **is** persisted, though — the sampled path and the
+  synchronous review endpoint (`crewship keeper review run behavior`) write the
+  same `keeper_requests` row and the same inbox fan-out: `WARN` → non-blocking
+  inbox item, `ESCALATE` → operator review (blocking in `block` mode at
+  strict/guided autonomy), `DENY` in `block` mode → blocking inbox item,
+  `ALLOW` → journal telemetry only. What each mode/autonomy combination
+  produces is the [behaviour
   evaluator](/guides/autonomy-and-self-learning#behavior_mode-—-what-happens-when-the-monitor-fires)
-  describes are written by the synchronous review endpoint — what
-  `crewship keeper review run behavior` calls — not by the sampled hook, whose
-  `WARN` and `ESCALATE` verdicts are currently discarded. Read the journal, not
-  the inbox, for what the sampler saw.
+  matrix, and the sampled path honours it — the journal and the inbox both
+  carry what the sampler saw.
 </Warning>
 
 | Setting | What it does | Default |
@@ -1806,7 +1825,7 @@ and timestamps.
 |----------|---------|-----------------|
 | `ALLOW` | Request approved | `/keeper/request`: a `200` carrying the verdict and nothing else — no value is returned. `/keeper/execute`: the command runs with the credential injected and the agent receives the scrubbed output and exit code. |
 | `DENY` | Request rejected | `200` with the decision and reason; the agent is told not to retry |
-| `ESCALATE` | A person rules on it in the inbox | `200` with the decision; the agent is told it is pending. The ruling is not pushed back to the agent and does not run the command — see [Rule on an escalation](#rule-on-an-escalation) |
+| `ESCALATE` | A person rules on it in the inbox | `200` with the decision; the agent is told it is pending. An `ALLOW` ruling becomes a consumable approval the agent can present once on its retry — see [Rule on an escalation](#rule-on-an-escalation) |
 | `PENDING` | The audit row's initial state, before the judge answers | Never returned to an agent |
 
 ## Keeper watches its own decisions

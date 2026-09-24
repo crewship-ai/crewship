@@ -341,7 +341,6 @@ describe("use-dashboard-data", () => {
       expect(keys).toContainEqual(dashboardKeys.timeseries("ws-1", DASHBOARD_THROUGHPUT_PARAMS))
       expect(keys).toContainEqual(dashboardKeys.timeseries("ws-1", DASHBOARD_COST_PARAMS))
       expect(keys).toContainEqual(["runs-insights", "ws-1"])
-      expect(keys).toContainEqual(["crew-services", "ws-1"])
       // The run-volume chart mounts under a window-dependent params object,
       // and invalidateQueries compares that object by deep equality — so the
       // two fixed-param timeseries keys above can never match it. Without the
@@ -351,6 +350,12 @@ describe("use-dashboard-data", () => {
       // tile was removed, and invalidating a key no query uses is noise that
       // reads as coverage.
       expect(keys).not.toContainEqual(["crew-spend", "ws-1"])
+      // crew-services is deliberately absent too (#2187): it is a live
+      // provider (Docker) listing per crew, this callback fires on every
+      // debounced realtime burst, and invalidation refetches active queries
+      // unconditionally — staleTime offers no protection. The mounted
+      // queries refresh under their own 15s staleTime instead.
+      expect(keys).not.toContainEqual(["crew-services", "ws-1"])
     })
 
     it("is a no-op without a workspaceId", () => {
