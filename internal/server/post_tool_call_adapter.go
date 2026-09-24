@@ -4,42 +4,70 @@
 // the behavior hook expects, then forwards to
 // behaviorhook.Get().MaybeEvaluate.
 //
-// Block decisions (DENY in block mode + strict/guided) come back as a
-// *hooks.BlockedError. For MVP we log + journal them — the tool call
-// has already executed (this is EventPostToolCall, not pre), so
-// hard-aborting the in-flight CLI process would require a wider
-// orchestrator-stdin refactor. The block surfaces operator-visibly via
-// the inbox row the keeper_phase2 endpoint handler creates when the
-// same evaluator runs through the synchronous /api/v1/keeper/behavior
-// route — i.e. the inbox carries the same audit row regardless of
-// trigger path.
+// #2575: the sampled verdict is ROUTED, not just watched. The hook returns
+// the evaluator's full result, and this adapter persists it through the same
+// half the synchronous POST /api/v1/keeper/behavior endpoint uses
+// (KeeperPhase2Handler.RecordSampledBehavior): a keeper_requests row for
+// every fired sample, an inbox item when the verdict's PolicyDecision says
+// so (WARN → non-blocking, ESCALATE → operator review, DENY/ESCALATE in
+// block mode × strict/guided → blocking), and a journal entry for the
+// timeline. Before this, only a block-mode DENY left any trace — WARN and
+// ESCALATE verdicts were computed and silently dropped.
+//
+// Block decisions (DENY in block mode + strict/guided) also come back as a
+// *hooks.BlockedError. We log + journal them — the tool call has already
+// executed (this is EventPostToolCall, not pre), so hard-aborting the
+// in-flight CLI process would require a wider orchestrator-stdin refactor.
+// The block interrupts the NEXT tool call.
 package server
 
 import (
 	"context"
 	"database/sql"
-	"errors"
+
 	"log/slog"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/api"
 	"github.com/crewship-ai/crewship/internal/hooks"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/keeper/behaviorhook"
+	"github.com/crewship-ai/crewship/internal/keeper/gatekeeper"
 	"github.com/crewship-ai/crewship/internal/keeper/governance"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
 )
+
+// behaviorRecorder persists a sampled behavior verdict the way the
+// synchronous /api/v1/keeper/behavior endpoint would have — implemented by
+// *api.KeeperPhase2Handler (RecordSampledBehavior). An interface so the
+// observer stays testable and internal/server does not need the whole
+// KeeperPhase2Handler surface.
+type behaviorRecorder interface {
+	RecordSampledBehavior(ctx context.Context, in api.SampledBehaviorInput) (string, error)
+}
 
 // postToolCallObserver implements orchestrator.PostToolCallObserver by
 // forwarding to behaviorhook.Get(). nil-safe: when no hook is installed
 // (e.g. dev build without ANTHROPIC_API_KEY), Observe is a no-op.
 type postToolCallObserver struct {
-	logger *slog.Logger
-	journ  journal.Emitter
-	db     *sql.DB
+	logger   *slog.Logger
+	journ    journal.Emitter
+	db       *sql.DB
+	recorder behaviorRecorder
 }
 
 func newPostToolCallObserver(logger *slog.Logger, j journal.Emitter, db *sql.DB) *postToolCallObserver {
 	return &postToolCallObserver{logger: logger, journ: j, db: db}
+}
+
+// withRecorder wires the sampled-verdict persistence surface (#2575).
+// Without it the observer degrades to the pre-#2575 behaviour (block-only
+// journaling) rather than dropping samples entirely — the recorder is what
+// turns a sampled verdict into an inbox item, and a nil one is only
+// expected in tests and partial bootstraps.
+func (o *postToolCallObserver) withRecorder(r behaviorRecorder) *postToolCallObserver {
+	o.recorder = r
+	return o
 }
 
 // Observe is called from the orchestrator's tool_call event tap. The
@@ -117,21 +145,31 @@ func (o *postToolCallObserver) Observe(obs orchestrator.ToolCallObservation) {
 	// applied to every workspace, and it would need a restart to change (#1556,
 	// the same trap one subsystem over). A workspace that never set one resolves
 	// to 0 here and the hook keeps its built-in default.
-	blocked, fired := hook.MaybeEvaluateEvery(ctx, ec, int64(gov.BehaviorSampleEvery))
-	if !fired {
+	sample, err := hook.MaybeEvaluateEvery(ctx, ec, int64(gov.BehaviorSampleEvery))
+	if err != nil {
+		// ErrNotConfigured — the hook's own dependency state, not this sample.
+		o.logger.Debug("post_tool_call observer: behavior hook not configured", "error", err)
+		return
+	}
+	if sample == nil {
 		// Not sampled this call; common case.
 		return
 	}
-	if blocked == nil {
-		return
+
+	// #2575: route the verdict. Every fired sample becomes a keeper_requests
+	// row and (when the PolicyDecision says so) an operator inbox item —
+	// the same persistence the /api/v1/keeper/behavior endpoint applies, so
+	// the sampled and synchronous paths surface one shape of finding.
+	if sample.Verdict != nil {
+		o.routeSampledVerdict(ctx, obs, *sample.Verdict)
 	}
 
-	// A block fired. Log + journal so the operator's inbox doesn't
-	// silently drop it (the synchronous endpoint path writes the inbox
-	// row; this path is invoked asynchronously from the orchestrator
-	// hot path, so the journal entry is the audit trail).
-	var be *hooks.BlockedError
-	if errors.As(blocked, &be) {
+	// The interrupt, kept exactly as before: a block fires a hook.blocked
+	// journal entry so the operator sees the tool sequence was cut short.
+	// Direct nil check, NOT errors.As: Sample.Blocked is a concrete
+	// *hooks.BlockedError, and a typed-nil error interface would make As
+	// return true while handing back a nil pointer.
+	if be := sample.Blocked; be != nil {
 		o.logger.Warn("behaviorhook: PostToolCall sample returned BLOCK",
 			"workspace_id", obs.WorkspaceID,
 			"crew_id", obs.CrewID,
@@ -157,6 +195,66 @@ func (o *postToolCallObserver) Observe(obs orchestrator.ToolCallObservation) {
 					"agent_id": obs.AgentID,
 					"crew_id":  obs.CrewID,
 				},
+			})
+		}
+	}
+}
+
+// routeSampledVerdict persists one sampled verdict (#2575): the audit row +
+// inbox fan-out through the shared recorder, plus a journal entry so the
+// timeline carries every fired sample the way the credential path carries
+// every decision.
+//
+// Severity follows the credential path's convention: DENY and ESCALATE are
+// what an operator wants to see without scrolling; WARN and ALLOW are
+// telemetry.
+func (o *postToolCallObserver) routeSampledVerdict(ctx context.Context, obs orchestrator.ToolCallObservation, res gatekeeper.BehaviorReviewResult) {
+	if o.recorder != nil {
+		reqID, rerr := o.recorder.RecordSampledBehavior(ctx, api.SampledBehaviorInput{
+			WorkspaceID: obs.WorkspaceID,
+			CrewID:      obs.CrewID,
+			AgentID:     obs.AgentID,
+			ToolName:    obs.ToolName,
+			Verdict:     res,
+		})
+		if rerr != nil {
+			// Error, not Warn: this is exactly the silent-governance-failure
+			// #1048 made the endpoint refuse — the difference is there is no
+			// HTTP caller here to refuse. The next sampled tool call retries.
+			o.logger.Error("post_tool_call observer: persisting sampled behavior verdict failed",
+				"workspace_id", obs.WorkspaceID, "crew_id", obs.CrewID,
+				"agent_id", obs.AgentID, "decision", string(res.Decision), "error", rerr)
+		}
+		if o.journ != nil {
+			severity := journal.SeverityNotice
+			switch res.Decision {
+			case gatekeeper.BehaviorDeny, gatekeeper.BehaviorEscalate:
+				severity = journal.SeverityWarn
+			}
+			payload := map[string]any{
+				"tool":            obs.ToolName,
+				"decision":        string(res.Decision),
+				"reason":          res.Reason,
+				"risk_score":      res.RiskScore,
+				"policy_decision": string(res.PolicyDecision),
+				"source":          "behaviorhook_sampled",
+				"agent_id":        obs.AgentID,
+				"crew_id":         obs.CrewID,
+			}
+			if reqID != "" {
+				payload["request_id"] = reqID
+			}
+			_, _ = o.journ.Emit(ctx, journal.Entry{
+				WorkspaceID: obs.WorkspaceID,
+				CrewID:      obs.CrewID,
+				AgentID:     obs.AgentID,
+				MissionID:   obs.MissionID,
+				Type:        journal.EntryKeeperDecision,
+				Severity:    severity,
+				ActorType:   journal.ActorKeeper,
+				ActorID:     "keeper_behavior",
+				Summary:     "behavior monitor sampled " + string(res.Decision) + " on " + obs.ToolName,
+				Payload:     payload,
 			})
 		}
 	}

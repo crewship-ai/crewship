@@ -53,7 +53,7 @@ it — not just what the request is labelled.
 | **L1 · low** | Read-only or low-value: npm read token, public API key | Auto-allowed when the agent states an intent (≥10 chars, ≥5 distinct, not injection-shaped), on `/keeper/request` only, and only while the workspace has no active [watch policy](#watch-rules). No model call, no cost. An intent under 10 chars, or any `/keeper/execute`, goes to the judge instead. |
 | **L2 · medium** | Write access to a non-production system: GitHub write, staging DB | Judged by the model. An intent under 15 chars is refused before the model is called. |
 | **L3 · high** | Admin access to real infrastructure: SSH, database admin, cloud account | Judged with four extra checks. Intent under 25 chars refused without a model call. Risk score floored at 4. [Auto-leases](#approval-issues-a-lease) when the workspace has opted in, rather than granting standing access. |
-| **L4 · critical** | Production administration, payments, customer data at scale | **In the default profile the model cannot grant it.** An `ALLOW` is turned into an `ESCALATE`, so a person rules on every request — unless the operator has set `--escalate-from 5`, which removes that step ([below](#…and-taking-the-human-out-entirely)). Five extra checks. Intent under 35 chars refused without a model call. Risk floored at 6. Four-eyes forced on resolution whatever the workspace toggle says. |
+| **L4 · critical** | Production administration, payments, customer data at scale | **In the default profile the model cannot grant it.** An `ALLOW` is turned into an `ESCALATE`, so a person rules on every request — unless the operator has set `--escalate-from 5`, which removes that step ([below](#…and-taking-the-human-out-entirely)). Five extra checks. Intent under 35 chars refused without a model call. Risk floored at 7 — the default DENY-notify threshold, so a critical refusal always clears it. Four-eyes forced on resolution whatever the workspace toggle says. |
 
 <Note>
   The tier decides what Keeper does with a request **that reaches it**. Whether a
@@ -1156,15 +1156,21 @@ server restart needed:
   **Detection, not prevention.** The watchdog sees a tool call *after* it has
   run — Crewship drives an external CLI and parses its stream, and there is no
   pre-dispatch hook (`pre_tool_call` is retired in `internal/hooks/types.go` for
-  that reason). Nothing it decides can undo the call it sampled, and on the live
-  sampled path nothing stops the next one either: a `DENY` in `block` mode is
-  recorded as a `hook.blocked` journal entry (severity warn) and the driven CLI
-  carries on. The inbox rows and `keeper_requests` records the [behaviour
+  that reason). Nothing it decides can undo the call it sampled, and on the
+  live sampled path nothing stops the next one either: even a `DENY` in
+  `block` mode is recorded (a `hook.blocked` journal entry, severity warn, plus
+  the inbox row below) and the driven CLI carries on.
+
+  Every fired sample **is** persisted, though — the sampled path and the
+  synchronous review endpoint (`crewship keeper review run behavior`) write the
+  same `keeper_requests` row and the same inbox fan-out: `WARN` → non-blocking
+  inbox item, `ESCALATE` → operator review (blocking in `block` mode at
+  strict/guided autonomy), `DENY` in `block` mode → blocking inbox item,
+  `ALLOW` → journal telemetry only. What each mode/autonomy combination
+  produces is the [behaviour
   evaluator](/guides/autonomy-and-self-learning#behavior_mode-—-what-happens-when-the-monitor-fires)
-  describes are written by the synchronous review endpoint — what
-  `crewship keeper review run behavior` calls — not by the sampled hook, whose
-  `WARN` and `ESCALATE` verdicts are currently discarded. Read the journal, not
-  the inbox, for what the sampler saw.
+  matrix, and the sampled path honours it — the journal and the inbox both
+  carry what the sampler saw.
 </Warning>
 
 | Setting | What it does | Default |

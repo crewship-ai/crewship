@@ -1026,8 +1026,16 @@ func (s *Server) mountAPIRouter(
 		// itself is nil-safe (no-op when behaviorhook isn't
 		// installed) but skipping the wire when the evaluator was
 		// dropped during bootstrap keeps the boot logs honest.
+		//
+		// #2575: the recorder routes every fired sample through the
+		// Phase-2 persistence (keeper_requests row + inbox per the
+		// verdict's PolicyDecision) — the same half the synchronous
+		// /api/v1/keeper/behavior endpoint uses, so sampled WARN and
+		// ESCALATE verdicts stop being computed-and-dropped.
 		if evals.behavior != nil {
-			orch.SetPostToolCallObserver(newPostToolCallObserver(logger, s.journalWriter, deps.DB))
+			orch.SetPostToolCallObserver(
+				newPostToolCallObserver(logger, s.journalWriter, deps.DB).
+					withRecorder(apiRouter.BehaviorRecorder()))
 			logger.Info("keeper: orchestrator tool-call observer wired to behaviorhook")
 		}
 

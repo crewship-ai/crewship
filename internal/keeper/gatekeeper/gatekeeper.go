@@ -422,10 +422,11 @@ func effectiveRequestType(req EvalRequest) keeper.RequestType {
 // Evaluate submits the request to the Keeper LLM and returns a structured decision.
 // For L1 credentials with a sufficiently descriptive intent, it short-circuits to ALLOW.
 func (g *Gatekeeper) Evaluate(ctx context.Context, req EvalRequest) (keeper.GatekeeperResponse, error) {
-	// L1 credentials with a meaningful intent (≥10 chars AND ≥3 distinct
-	// non-whitespace chars): allow automatically (fast path). Single-char or
-	// whitespace-only intents are rejected to prevent trivial bypasses, and
-	// the distinct-char check (audit M3) blocks "aaaaaaaaaa" -style filler.
+	// L1 credentials with a meaningful intent (≥10 chars AND ≥5 distinct
+	// non-whitespace chars — l1MinDistinctChars): allow automatically (fast
+	// path). Single-char or whitespace-only intents are rejected to prevent
+	// trivial bypasses, and the distinct-char check (audit M3, raised 3→5)
+	// blocks "aaaaaaaaaa" -style filler.
 	// SECURITY: L1 auto-allow NEVER applies to /execute requests (Command != "").
 	// The command must always be evaluated by the LLM to prevent exfiltration attacks
 	// like "echo $TOKEN | base64" that bypass output scrubbing.

@@ -58,13 +58,16 @@ func TestHook_Samples_Every_N(t *testing.T) {
 
 	fires := 0
 	for i := 0; i < 10; i++ {
-		_, fired := h.MaybeEvaluate(context.Background(), hooks.EventContext{
+		sample, err := h.MaybeEvaluate(context.Background(), hooks.EventContext{
 			Event:    hooks.EventPostToolCall,
 			CrewID:   "cr1",
 			AgentID:  "agent-a",
 			ToolName: "shell_exec",
 		})
-		if fired {
+		if err != nil {
+			t.Fatalf("call %d: %v", i, err)
+		}
+		if sample != nil {
 			fires++
 		}
 	}
@@ -83,25 +86,39 @@ func TestHook_BlocksInBlockMode(t *testing.T) {
 	h := behaviorhook.New(ev, res, newLogger())
 	h.SetSampleEvery(1) // fire every call
 
-	be, fired := h.MaybeEvaluate(context.Background(), hooks.EventContext{
+	sample, err := h.MaybeEvaluate(context.Background(), hooks.EventContext{
 		Event:    hooks.EventPostToolCall,
 		CrewID:   "cr1",
 		AgentID:  "agent-a",
 		ToolName: "shell_exec",
 		Payload:  map[string]any{"cmd": "rm -rf /"},
 	})
-	if !fired {
-		t.Fatal("expected fired=true with SampleEvery=1")
+	if err != nil {
+		t.Fatal(err)
 	}
-	if be == nil {
+	if sample == nil {
+		t.Fatal("expected a fired sample with SampleEvery=1")
+	}
+	if sample.Blocked == nil {
 		t.Fatal("expected BlockedError in block mode + DENY")
 	}
 	var typed *hooks.BlockedError
-	if !errors.As(be, &typed) {
-		t.Fatalf("expected *hooks.BlockedError, got %T", be)
+	if !errors.As(sample.Blocked, &typed) {
+		t.Fatalf("expected *hooks.BlockedError, got %T", sample.Blocked)
 	}
 	if typed.Event != hooks.EventPostToolCall {
 		t.Errorf("Event = %q, want post_tool_call", typed.Event)
+	}
+	// #2575: the verdict rides along for routing even (especially) when it
+	// blocks — a block-mode DENY also owes the operator an inbox item.
+	if sample.Verdict == nil {
+		t.Fatal("expected the verdict to ride along with the block")
+	}
+	if sample.Verdict.Decision != gatekeeper.BehaviorDeny {
+		t.Errorf("verdict = %q, want DENY", sample.Verdict.Decision)
+	}
+	if string(sample.Verdict.PolicyDecision) != "block_inbox" {
+		t.Errorf("policy decision = %q, want block_inbox", string(sample.Verdict.PolicyDecision))
 	}
 }
 
@@ -114,17 +131,56 @@ func TestHook_WarnMode_NeverBlocks(t *testing.T) {
 	h := behaviorhook.New(ev, res, newLogger())
 	h.SetSampleEvery(1)
 
-	be, fired := h.MaybeEvaluate(context.Background(), hooks.EventContext{
+	sample, err := h.MaybeEvaluate(context.Background(), hooks.EventContext{
 		Event:    hooks.EventPostToolCall,
 		CrewID:   "cr1",
 		AgentID:  "agent-a",
 		ToolName: "shell_exec",
 	})
-	if !fired {
-		t.Fatal("expected fired=true")
+	if err != nil {
+		t.Fatal(err)
 	}
-	if be != nil {
-		t.Errorf("expected no block in warn mode; got %+v", be)
+	if sample == nil {
+		t.Fatal("expected a fired sample")
+	}
+	if sample.Blocked != nil {
+		t.Errorf("expected no block in warn mode; got %+v", sample.Blocked)
+	}
+}
+
+// #2575: a WARN verdict must come back on the Sample for the caller to
+// route. Before the Sample return type, a non-blocking verdict was
+// indistinguishable from "nothing happened" — the adapter could not have
+// persisted it even if it had wanted to.
+func TestHook_WarnVerdictRidesTheSample(t *testing.T) {
+	res := setupDB(t, "cr1", "guided", "warn")
+	gk := gatekeeper.New(&cannedProvider{content: `{"decision":"WARN","reason":"tight loop suspicion","risk":4}`}, "claude-haiku-4-5", newLogger())
+	ev := gatekeeper.NewBehaviorEvaluator(gk, newLogger())
+
+	h := behaviorhook.New(ev, res, newLogger())
+	h.SetSampleEvery(1)
+
+	sample, err := h.MaybeEvaluate(context.Background(), hooks.EventContext{
+		Event:    hooks.EventPostToolCall,
+		CrewID:   "cr1",
+		AgentID:  "agent-a",
+		ToolName: "shell_exec",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sample == nil || sample.Verdict == nil {
+		t.Fatal("expected a fired sample with a verdict")
+	}
+	if sample.Verdict.Decision != gatekeeper.BehaviorWarn {
+		t.Errorf("verdict = %q, want WARN", sample.Verdict.Decision)
+	}
+	if sample.Blocked != nil {
+		t.Errorf("WARN must never block; got %+v", sample.Blocked)
+	}
+	if string(sample.Verdict.PolicyDecision) != "auto_log_inbox" {
+		t.Errorf("policy decision = %q, want auto_log_inbox at guided/warn",
+			string(sample.Verdict.PolicyDecision))
 	}
 }
 
@@ -136,10 +192,13 @@ func TestHook_Disabled_WithZeroSampleEvery(t *testing.T) {
 	h.SetSampleEvery(0)
 
 	for i := 0; i < 5; i++ {
-		_, fired := h.MaybeEvaluate(context.Background(), hooks.EventContext{
+		sample, err := h.MaybeEvaluate(context.Background(), hooks.EventContext{
 			CrewID: "cr1", AgentID: "a", ToolName: "t",
 		})
-		if fired {
+		if err != nil {
+			t.Fatalf("call %d: %v", i, err)
+		}
+		if sample != nil {
 			t.Fatalf("fire on call %d with SampleEvery=0", i)
 		}
 	}
@@ -147,9 +206,12 @@ func TestHook_Disabled_WithZeroSampleEvery(t *testing.T) {
 
 func TestHook_NilDependencies_SkipsSilently(t *testing.T) {
 	h := behaviorhook.New(nil, nil, newLogger())
-	_, fired := h.MaybeEvaluate(context.Background(), hooks.EventContext{CrewID: "x"})
-	if fired {
+	sample, err := h.MaybeEvaluate(context.Background(), hooks.EventContext{CrewID: "x"})
+	if sample != nil {
 		t.Error("fire with nil ev + resolver; expected skip")
+	}
+	if !errors.Is(err, behaviorhook.ErrNotConfigured) {
+		t.Errorf("err = %v, want ErrNotConfigured", err)
 	}
 }
 
