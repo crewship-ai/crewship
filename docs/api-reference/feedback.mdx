@@ -32,7 +32,7 @@ Create, read, and clear per-message feedback rows scoped to the authoring user.
 POST /api/v1/feedback
 ```
 
-Idempotent at the `(message_id, user_id, signal)` tuple. A re-submit with the same triple replaces `reason`, `trace_id`, `chat_id`, and `workspace_id` on the existing row rather than producing a duplicate.
+Idempotent at the `(workspace_id, message_id, user_id, signal)` tuple. A re-submit in the same workspace replaces `reason`, `trace_id`, and `chat_id` on the existing row rather than producing a duplicate. A forked workspace can retain its own feedback row for the same source message id.
 
 **Request body:**
 
@@ -106,6 +106,7 @@ The request has no body. Supplying both filters is rejected with `400`.
   "feedback": [
     {
       "id":          "fb_abc123",
+      "workspace_id": "ws_example",
       "message_id":  "turn_4f3a2c",
       "chat_id":     "chat_8d1e9b",
       "trace_id":    "4f3a2c1b8d1e9b00000000000000abcd",
@@ -136,7 +137,7 @@ Ordered by `created_at DESC`. Empty array when no matching rows visible to the c
 DELETE /api/v1/feedback?message_id=<id>&signal=<signal>
 ```
 
-Removes the caller's row for the given `(message_id, signal)` tuple. Other users' rows on the same message are untouched.
+Removes the caller's row for the given `(message_id, signal)` tuple in one workspace. Other users' rows and copies in other workspaces are untouched. Existing clients can omit `workspace_id` when exactly one visible row matches. If a fork leaves matching rows in two workspaces, the server returns `409`; use the `workspace_id` from GET to choose which one to clear.
 
 **Query parameters:**
 
@@ -144,6 +145,7 @@ Removes the caller's row for the given `(message_id, signal)` tuple. Other users
 |---|---|---|---|
 | `message_id` | string | yes | The message the feedback was attached to. |
 | `signal` | enum | yes | Which signal to clear. Same enum as POST. |
+| `workspace_id` | string | no | Required when matching feedback exists in multiple workspaces. The caller must still be a member of this workspace. |
 
 **Response:** `204 No Content`
 
@@ -155,13 +157,14 @@ Idempotent: returns 204 even when no row matched, so a client can fire DELETE on
 |---|---|
 | `400` | Missing `message_id` or `signal`; unknown `signal`. |
 | `401` | No authenticated user. |
+| `409` | Matching feedback exists in multiple visible workspaces; supply `workspace_id`. |
 | `500` | DB write failure. |
 
 ---
 
 ## Schema
 
-`message_feedback` table (added in migration v96):
+`message_feedback` table (added in migration v96; unique key scoped to a workspace by #2274):
 
 ```sql
 CREATE TABLE message_feedback (
@@ -176,7 +179,7 @@ CREATE TABLE message_feedback (
     reason       TEXT,
     user_id      TEXT REFERENCES users(id) ON DELETE SET NULL,
     created_at   TEXT NOT NULL DEFAULT (datetime('now')),
-    UNIQUE(message_id, user_id, signal)
+    UNIQUE(workspace_id, message_id, user_id, signal)
 );
 
 CREATE INDEX idx_feedback_trace
