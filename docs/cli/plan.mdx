@@ -1,6 +1,6 @@
 ---
 title: "Plan"
-description: "Architect mode — read-only step-by-step plan before executing. Agent outputs plan + file list, no tools."
+description: "Ask an agent for a step-by-step plan; tool use is not technically restricted."
 icon: "list-ordered"
 stability: experimental
 tag: Experimental
@@ -8,9 +8,9 @@ tag: Experimental
 
 # Plan
 
-`cmd/crewship/cmd_plan.go` runs the default agent in PLAN mode. The agent outputs a step-by-step plan plus the files it would touch, without calling any tools or modifying anything. Useful before kicking off a long autonomous run — review, adjust, then re-run with [`crewship run`](/cli/run) or [`crewship ask`](/cli/ask).
+`crewship plan` asks the default agent for a step-by-step plan plus the files it would touch. Review and adjust the answer before starting work with [`crewship run`](/cli/run) or [`crewship ask`](/cli/ask).
 
-The agent stays a normal CHAT agent server-side — plan mode is achieved by prompting alone, not by a separate API mode. This keeps the feature shippable in one PR at the cost of relying on instruction-following: if the agent ignores "do not call tools," output degrades gracefully into a verbose preview.
+The agent stays a normal CHAT agent server-side. Plan mode only prepends an instruction; it does **not** disable tools or prevent changes. Use a separately enforced permission boundary when tool use must be prohibited. `--with-cmd` runs the given local command to collect context before the agent starts.
 
 ## Prompt template
 
