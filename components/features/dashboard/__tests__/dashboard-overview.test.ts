@@ -43,6 +43,22 @@ describe("dashboard overview derivations", () => {
     expect(items[0].label).toBe("1 approval waiting")
   })
 
+  it("counts attention labels from the server aggregate when provided (#2187)", () => {
+    // One failed run in the windowed rows, 6 active ones past it: the label
+    // must read the aggregate, not the window, or the headline plateaus.
+    const inbox = [{ id: "f1", kind: "failed_run", state: "read" }] as InboxItem[]
+    const items = buildAttentionItems({
+      inbox,
+      heldCrews: [],
+      credentialGapCount: 0,
+      activeByKind: { failed_run: 6, schedule_missed: 2, waitpoint: 1 },
+    })
+    expect(items.map((item) => item.id)).toEqual(["approvals", "failures", "schedules"])
+    expect(items[0].label).toBe("1 approval waiting")
+    expect(items[1].label).toBe("6 failed runs")
+    expect(items[2].label).toBe("2 schedule alerts")
+  })
+
   it("never calls an empty crew 100% healthy and gives concrete failures precedence", () => {
     const empty = deriveFleetHealth({ crews: [crew], agents: [], gapsByCrew: new Map(), servicesByCrew: new Map() })
     expect(empty[0]).toMatchObject({ status: "Empty", tone: "muted", agents: 0 })

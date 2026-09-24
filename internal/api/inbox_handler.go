@@ -211,6 +211,12 @@ type inboxListResponse struct {
 	Count       int                 `json:"count"`
 	UnreadCount int                 `json:"unread_count"`
 	HasMore     bool                `json:"has_more"`
+	// ActiveByKind counts the caller's visible NOT-resolved items per kind,
+	// independent of the request's own state/kind filters. "Needs your
+	// attention" headlines count from this instead of len(Rows): the rows are
+	// LIMIT-windowed (default 100) and silently plateau there (#2187), while
+	// this aggregate is exact for the same visibility the caller sees.
+	ActiveByKind map[string]int `json:"active_by_kind"`
 }
 
 // List serves GET /api/v1/inbox. Filter by ?state=unread|read|resolved|all
@@ -353,11 +359,37 @@ func (h *InboxHandler) List(w http.ResponseWriter, r *http.Request) {
 		unreadCount = 0
 	}
 
+	// Exact per-kind counts of the caller's visible active items, for the
+	// "Needs your attention" aggregates that must not plateau at the LIMIT
+	// window (#2187). Same visibility predicate as the list; "active" is the
+	// same definition the state=active filter uses (shared resolved column),
+	// so the two can never disagree about what counts as settled.
+	activeByKind := map[string]int{}
+	kindQuery := `SELECT kind, COUNT(*) FROM inbox_items` + inboxReadsJoinClause + ` WHERE workspace_id = ?` + visClause +
+		` AND state != 'resolved' GROUP BY kind`
+	kindArgs := append([]interface{}{user.ID, workspaceID}, visArgs...)
+	kindRows, kindErr := h.db.QueryContext(r.Context(), kindQuery, kindArgs...)
+	if kindErr != nil {
+		h.logger.Warn("inbox active-by-kind counts", "error", kindErr)
+	} else {
+		for kindRows.Next() {
+			var kind string
+			var n int
+			if err := kindRows.Scan(&kind, &n); err != nil {
+				h.logger.Warn("inbox active-by-kind scan", "error", err)
+				continue
+			}
+			activeByKind[kind] = n
+		}
+		kindRows.Close()
+	}
+
 	writeJSON(w, http.StatusOK, inboxListResponse{
-		Rows:        out,
-		Count:       len(out),
-		UnreadCount: unreadCount,
-		HasMore:     hasMore,
+		Rows:         out,
+		Count:        len(out),
+		UnreadCount:  unreadCount,
+		HasMore:      hasMore,
+		ActiveByKind: activeByKind,
 	})
 }
 

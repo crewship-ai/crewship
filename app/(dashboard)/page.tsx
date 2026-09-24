@@ -158,8 +158,8 @@ export default function DashboardPage() {
   )
 
   const attentionItems = useMemo(
-    () => buildAttentionItems({ inbox: inbox.items, heldCrews, credentialGapCount }),
-    [inbox.items, heldCrews, credentialGapCount],
+    () => buildAttentionItems({ inbox: inbox.items, heldCrews, credentialGapCount, activeByKind: inbox.activeByKind }),
+    [inbox.items, inbox.activeByKind, heldCrews, credentialGapCount],
   )
 
   const fleet = useMemo(
@@ -186,10 +186,12 @@ export default function DashboardPage() {
     // which unmounts the whole dashboard rather than the one chart. The line
     // above already tolerates a missing bucket.series for the same reason.
     if (!volumeQ.data?.series_labels) return []
-    return Object.entries(volumeQ.data.series_labels).map(([key, label]) => ({
+    return Object.entries(volumeQ.data.series_labels).map(([key, label], seriesIndex) => ({
       key,
       label,
-      color: crewColor(crews.find((crew) => crew.id === key)?.color),
+      // seriesIndex rotates the fallback so default-coloured crews get
+      // distinguishable segments instead of identical greys (#2187).
+      color: crewColor(crews.find((crew) => crew.id === key)?.color, seriesIndex),
     }))
   }, [volumeQ.data, crews])
 

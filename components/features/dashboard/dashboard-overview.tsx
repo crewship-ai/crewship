@@ -832,10 +832,16 @@ export function buildAttentionItems({
   inbox,
   heldCrews,
   credentialGapCount,
+  activeByKind,
 }: {
   inbox: InboxItem[]
   heldCrews: NonNullable<RuntimeCapacityResponse["held"]>
   credentialGapCount: number
+  /** Server-computed exact counts of visible not-resolved items per kind.
+   *  When present the labels count from it — inbox rows are windowed at 100
+   *  and the headline silently plateaued there (#2187). The windowed items
+   *  still supply the single-item deep link below. */
+  activeByKind?: Record<string, number>
 }): AttentionItem[] {
   const items: AttentionItem[] = []
   const approvals = inbox.filter((item) => item.kind === "waitpoint" || item.kind === "escalation")
@@ -843,11 +849,20 @@ export function buildAttentionItems({
   const scheduleProblems = inbox.filter((item) => item.kind === "schedule_missed")
   const held = heldCrews.length
 
-  if (approvals.length > 0) items.push({ id: "approvals", label: `${approvals.length} approval${approvals.length === 1 ? "" : "s"} waiting`, detail: "Review pending decisions", href: entityHref({ kind: "inbox", itemId: approvals.length === 1 ? approvals[0].id : undefined }), tone: "warn", icon: Clock3 })
-  if (failures.length > 0) items.push({ id: "failures", label: `${failures.length} failed run${failures.length === 1 ? "" : "s"}`, detail: "Investigate and retry", href: entityHref({ kind: "inbox", itemKind: "failed_run" }), tone: "danger", icon: XCircle })
+  // Server aggregate wins when the server sent one: exact past any window.
+  const approvalsCount = activeByKind
+    ? (activeByKind.waitpoint ?? 0) + (activeByKind.escalation ?? 0)
+    : approvals.length
+  const failuresCount = activeByKind
+    ? (activeByKind.failed_run ?? 0) + (activeByKind.schedule_circuit_breaker_tripped ?? 0)
+    : failures.length
+  const scheduleCount = activeByKind ? (activeByKind.schedule_missed ?? 0) : scheduleProblems.length
+
+  if (approvalsCount > 0) items.push({ id: "approvals", label: `${approvalsCount} approval${approvalsCount === 1 ? "" : "s"} waiting`, detail: "Review pending decisions", href: entityHref({ kind: "inbox", itemId: approvals.length === 1 ? approvals[0].id : undefined }), tone: "warn", icon: Clock3 })
+  if (failuresCount > 0) items.push({ id: "failures", label: `${failuresCount} failed run${failuresCount === 1 ? "" : "s"}`, detail: "Investigate and retry", href: entityHref({ kind: "inbox", itemKind: "failed_run" }), tone: "danger", icon: XCircle })
   if (held > 0) items.push({ id: "capacity", label: `${held} crew${held === 1 ? "" : "s"} waiting for capacity`, detail: heldCrews[0]?.detail || "View host admission details", href: "/settings", tone: "purple", icon: Gauge })
   if (credentialGapCount > 0) items.push({ id: "credentials", label: `${credentialGapCount} credential tool gap${credentialGapCount === 1 ? "" : "s"}`, detail: "Install missing crew tools", href: "/credentials", tone: "blue", icon: KeyRound })
-  if (scheduleProblems.length > 0) items.push({ id: "schedules", label: `${scheduleProblems.length} schedule alert${scheduleProblems.length === 1 ? "" : "s"}`, detail: "Review missed or disabled routines", href: entityHref({ kind: "inbox" }), tone: "warn", icon: CalendarClock })
+  if (scheduleCount > 0) items.push({ id: "schedules", label: `${scheduleCount} schedule alert${scheduleCount === 1 ? "" : "s"}`, detail: "Review missed or disabled routines", href: entityHref({ kind: "inbox" }), tone: "warn", icon: CalendarClock })
   return items
 }
 

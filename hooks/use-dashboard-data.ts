@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback } from "react"
+import { useCallback, useMemo } from "react"
 import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query"
 
 import { apiFetch } from "@/lib/api-fetch"
@@ -341,26 +341,34 @@ export function useCrewServiceSummaries(
     })),
   })
 
-  const byCrew = new Map<string, CrewServiceSummary>()
-  results.forEach((result, index) => {
-    const crew = crews[index]
-    if (!crew) return
-    const services = result.data?.services
-    if (!Array.isArray(services)) {
-      byCrew.set(crew.id, { total: 0, running: 0, degraded: 0, checked: false })
-      return
-    }
-    const running = services.filter((service) => {
-      const status = (service.status ?? "").toLowerCase()
-      return status === "running" || status === "healthy"
-    }).length
-    byCrew.set(crew.id, {
-      total: services.length,
-      running,
-      degraded: Math.max(0, services.length - running),
-      checked: true,
+  // Built in a memo, not the hook body: a fresh Map every render made
+  // `services.byCrew` referentially unstable, so the page's `fleet` memo
+  // (deriveFleetHealth, O(crews × agents)) recomputed on every render even
+  // with no new data (#2187). useQueries returns a stable array across
+  // re-renders that change nothing, which is what keys this memo.
+  const byCrew = useMemo(() => {
+    const map = new Map<string, CrewServiceSummary>()
+    results.forEach((result, index) => {
+      const crew = crews[index]
+      if (!crew) return
+      const services = result.data?.services
+      if (!Array.isArray(services)) {
+        map.set(crew.id, { total: 0, running: 0, degraded: 0, checked: false })
+        return
+      }
+      const running = services.filter((service) => {
+        const status = (service.status ?? "").toLowerCase()
+        return status === "running" || status === "healthy"
+      }).length
+      map.set(crew.id, {
+        total: services.length,
+        running,
+        degraded: Math.max(0, services.length - running),
+        checked: true,
+      })
     })
-  })
+    return map
+  }, [results, crews])
 
   return {
     byCrew,
@@ -401,7 +409,14 @@ export function useInvalidateDashboard(workspaceId: string | null) {
     // crew-spend is no longer mounted — the cost tile it fed was removed with
     // #2185, because a dollar figure on a flat-rate subscription is not a
     // number. Left out of the set rather than invalidating a key nothing reads.
-    qc.invalidateQueries({ queryKey: ["crew-services", workspaceId] })
+    //
+    // crew-services is deliberately NOT invalidated here (#2187): the query
+    // hits GET /crews/{id}/services, a live provider (Docker) listing per
+    // crew. Invalidation refetches active queries unconditionally — staleTime
+    // does not protect against it — and this callback fires on every debounced
+    // realtime burst, so an idle tab on a busy fleet would issue one Docker
+    // list per crew per burst. The queries keep their 15s staleTime and
+    // refresh on remount/refocus instead.
     // The run-volume chart mounts under ["metrics-timeseries", ws, {…}] with a
     // params object that depends on the selected window, and invalidateQueries
     // compares that object by deep equality — so the two fixed-param keys in
