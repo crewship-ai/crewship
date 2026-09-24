@@ -96,10 +96,19 @@ func (d *keeperExecuteDedup) release(key string) {
 
 // keeperExecuteDedupKey identifies "the same logical execute request" for
 // dedup purposes: same workspace, same requesting agent, same resolved
-// credential, same command. Hashed (not stored raw) so the in-memory key
-// never holds a copy of the command string for longer than necessary.
-func keeperExecuteDedupKey(workspaceID, agentID, credentialID, command string) string {
-	sum := sha256.Sum256([]byte(workspaceID + "\x00" + agentID + "\x00" + credentialID + "\x00" + command))
+// credential, same command — plus, when set, the approval being presented.
+// Hashed (not stored raw) so the in-memory key never holds a copy of the
+// command string for longer than necessary.
+//
+// The approval id joins the key because an approval-presenting retry is a
+// DIFFERENT logical request from the escalation it answers (#2574): the
+// original never executed (it was ESCALATE), so the debounce window that
+// suppresses transport retries of a command that DID run must not suppress
+// the one deliberate re-submission a human approval exists to enable. Among
+// approved retries themselves the key still collides (same approval, same
+// command), and the single-use consumption is the harder guard behind it.
+func keeperExecuteDedupKey(workspaceID, agentID, credentialID, command, approvalID string) string {
+	sum := sha256.Sum256([]byte(workspaceID + "\x00" + agentID + "\x00" + credentialID + "\x00" + command + "\x00" + approvalID))
 	return hex.EncodeToString(sum[:])
 }
 
@@ -125,6 +134,12 @@ type keeperExecuteBody struct {
 	Command           string `json:"command"`
 	EnvVar            string `json:"env_var,omitempty"`
 	ContainerID       string `json:"container_id"`
+	// ApprovalRequestID presents a human-approved escalation for consumption
+	// (#2574): the id of a keeper request resolved ALLOW by a person, which —
+	// if it binds to this agent, credential and the IDENTICAL command —
+	// spares this request a fresh judgement and executes it. See
+	// consumeKeeperApproval.
+	ApprovalRequestID string `json:"approval_request_id,omitempty"`
 }
 
 // containsDangerousShellChars, envVarNamePattern, interpreterPattern,
@@ -353,7 +368,7 @@ func (h *KeeperHandler) HandleExecute(w http.ResponseWriter, r *http.Request) {
 	// body.CredentialID is the canonical resolved id, not a name) and
 	// before ANY audit insert, gatekeeper evaluation, or container exec —
 	// this is the one point every call passes through exactly once.
-	dedupKey := keeperExecuteDedupKey(body.WorkspaceID, body.RequestingAgentID, body.CredentialID, body.Command)
+	dedupKey := keeperExecuteDedupKey(body.WorkspaceID, body.RequestingAgentID, body.CredentialID, body.Command, body.ApprovalRequestID)
 	if !h.execDedup.claim(dedupKey) {
 		h.logger.Warn("keeper execute: duplicate request suppressed",
 			"agent", agentName, "credential", credName)
@@ -393,6 +408,25 @@ func (h *KeeperHandler) HandleExecute(w http.ResponseWriter, r *http.Request) {
 	}
 	defer h.execDedup.release(dedupKey)
 
+	// A presented approval is consumed AFTER the dedup claim and BEFORE the
+	// audit insert (#2574). After the claim, because a request the dedup
+	// suppresses must not burn the approval's single use — the claim is the
+	// gate every concurrent identical retry passes through first, and the one
+	// that wins it is the one that spends. Before the insert, because the row
+	// below must be born with the spent marker (see keeper_request.go for the
+	// chain this prevents).
+	var approvedVia *consumedApproval
+	if body.ApprovalRequestID != "" {
+		ap, fail := h.consumeKeeperApproval(r.Context(), body.ApprovalRequestID,
+			body.WorkspaceID, body.RequestingAgentID, body.CredentialID,
+			keeper.RequestTypeExecute, body.Command)
+		if fail != nil {
+			fail.write(w)
+			return
+		}
+		approvedVia = ap
+	}
+
 	// Insert PENDING audit record
 	reqID := generateCUID()
 	req := keeper.Request{
@@ -419,13 +453,27 @@ func (h *KeeperHandler) HandleExecute(w http.ResponseWriter, r *http.Request) {
 	// same reason the insert is fatal at all — this is the highest-stakes keeper
 	// path, and a decision here must never exist without a durable record of the
 	// state it came from.
-	if err := insertKeeperRequestWithTransition(r.Context(), h.db, `
+	insertSQL := `
 		INSERT INTO keeper_requests
 		  (id, requesting_agent_id, requesting_crew_id, credential_id, task_id, intent,
 		   request_type, command, decision, created_at)
-		VALUES (?, ?, ?, ?, NULLIF(?,?), ?, 'execute', ?, 'PENDING', ?)`,
-		[]any{reqID, body.RequestingAgentID, body.RequestingCrewID, body.CredentialID,
-			body.TaskID, "", body.Intent, body.Command, req.CreatedAt.Format(time.RFC3339)},
+		VALUES (?, ?, ?, ?, NULLIF(?,?), ?, 'execute', ?, 'PENDING', ?)`
+	insertArgs := []any{reqID, body.RequestingAgentID, body.RequestingCrewID, body.CredentialID,
+		body.TaskID, "", body.Intent, body.Command, req.CreatedAt.Format(time.RFC3339)}
+	if approvedVia != nil {
+		// Born CONSUMED — the row this retry creates carries decision ALLOW
+		// and must not itself be spendable as an approval. See the matching
+		// branch in keeper_request.go (#2574).
+		insertSQL = `
+		INSERT INTO keeper_requests
+		  (id, requesting_agent_id, requesting_crew_id, credential_id, task_id, intent,
+		   request_type, command, decision, created_at, approval_consumed_at)
+		VALUES (?, ?, ?, ?, NULLIF(?,?), ?, 'execute', ?, 'PENDING', ?, ?)`
+		insertArgs = []any{reqID, body.RequestingAgentID, body.RequestingCrewID, body.CredentialID,
+			body.TaskID, "", body.Intent, body.Command, req.CreatedAt.Format(time.RFC3339),
+			time.Now().UTC().Format(time.RFC3339)}
+	}
+	if err := insertKeeperRequestWithTransition(r.Context(), h.db, insertSQL, insertArgs,
 		keeperTransition{
 			RequestID:    reqID,
 			WorkspaceID:  body.WorkspaceID,
@@ -444,62 +492,75 @@ func (h *KeeperHandler) HandleExecute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Load agent's recent conversation history for Keeper context
-	execConvHistory := h.loadConversationHistory(r.Context(), body.RequestingAgentID)
-
-	// Gatekeeper evaluation (include the command so the LLM can reason about it).
-	//
-	// Same evidence, gate and budget as /keeper/request. The two paths share
-	// buildAccessPrompt and differ only in that this one also RUNS something with
-	// the credential — so it is the stricter of the two, and protecting only the
-	// other one would leave the higher-consequence flow unguarded. The hard-gate
-	// branch in the gatekeeper already tests for RequestTypeExecute; without this
-	// it was a condition that could never be true.
-	execFacts, execHardGate, execFactKeys, execInPrompt := h.gatherEvidence(r.Context(), body.WorkspaceID, body.RequestingAgentID, body.CredentialID)
-	evalReq := gatekeeper.EvalRequest{
-		Request:            req,
-		CredentialName:     credName,
-		SecurityLevel:      keeper.SecurityLevel(secLevel),
-		AgentName:          agentName,
-		CrewName:           crewName,
-		Command:            body.Command,
-		ConvHistory:        execConvHistory,
-		Evidence:           execFacts,
-		HardGate:           execHardGate,
-		EvidenceFacts:      execFactKeys,
-		EvidenceInPrompt:   execInPrompt,
-		PromptBudgetTokens: h.promptBudget(),
-		EscalateFrom:       h.escalateFrom(),
-	}
-
 	var gkResp keeper.GatekeeperResponse
-	judgeStart := time.Now()
-	if h.gatekeeper != nil {
-		var evalErr error
-		gkResp, evalErr = h.gatekeeper.Evaluate(r.Context(), evalReq)
-		if evalErr != nil {
-			h.logger.Error("keeper execute: gatekeeper evaluate failed", "error", evalErr)
+	if approvedVia != nil {
+		// The human already ruled on this exact command with this exact
+		// credential — re-judging would re-escalate at L4 and turn the
+		// approval into a no-op, which is the defect #2574 describes. No
+		// model call, no evidence, no history: the approval is the verdict.
+		gkResp = keeper.GatekeeperResponse{
+			Decision: string(keeper.DecisionAllow),
+			Reason: fmt.Sprintf("human approval consumed (escalation %s): %s",
+				approvedVia.RequestID, approvedVia.Reason),
+			RiskScore: approvedVia.RiskScore,
+		}
+	} else {
+		// Load agent's recent conversation history for Keeper context
+		execConvHistory := h.loadConversationHistory(r.Context(), body.RequestingAgentID)
+
+		// Gatekeeper evaluation (include the command so the LLM can reason about it).
+		//
+		// Same evidence, gate and budget as /keeper/request. The two paths share
+		// buildAccessPrompt and differ only in that this one also RUNS something with
+		// the credential — so it is the stricter of the two, and protecting only the
+		// other one would leave the higher-consequence flow unguarded. The hard-gate
+		// branch in the gatekeeper already tests for RequestTypeExecute; without this
+		// it was a condition that could never be true.
+		execFacts, execHardGate, execFactKeys, execInPrompt := h.gatherEvidence(r.Context(), body.WorkspaceID, body.RequestingAgentID, body.CredentialID)
+		evalReq := gatekeeper.EvalRequest{
+			Request:            req,
+			CredentialName:     credName,
+			SecurityLevel:      keeper.SecurityLevel(secLevel),
+			AgentName:          agentName,
+			CrewName:           crewName,
+			Command:            body.Command,
+			ConvHistory:        execConvHistory,
+			Evidence:           execFacts,
+			HardGate:           execHardGate,
+			EvidenceFacts:      execFactKeys,
+			EvidenceInPrompt:   execInPrompt,
+			PromptBudgetTokens: h.promptBudget(),
+			EscalateFrom:       h.escalateFrom(),
+		}
+
+		judgeStart := time.Now()
+		if h.gatekeeper != nil {
+			var evalErr error
+			gkResp, evalErr = h.gatekeeper.Evaluate(r.Context(), evalReq)
+			if evalErr != nil {
+				h.logger.Error("keeper execute: gatekeeper evaluate failed", "error", evalErr)
+				gkResp = keeper.GatekeeperResponse{
+					Decision:  string(keeper.DecisionDeny),
+					Reason:    "Keeper evaluation failed — deny by default",
+					RiskScore: 10,
+				}
+			}
+			// PR-P6: /execute shares the /request window deliberately. Both flows
+			// are the same judge answering the same way, so splitting them would
+			// halve each sample count and delay the alarm on an instance that
+			// spreads its credential traffic across the two. See health.Record.
+			health.Record(r.Context(), h.db, h.logger, health.Verdict{
+				WorkspaceID: body.WorkspaceID,
+				Decision:    gkResp.Decision,
+				JudgeFailed: gkResp.InfraFailure || evalErr != nil,
+				Latency:     time.Since(judgeStart),
+			})
+		} else {
 			gkResp = keeper.GatekeeperResponse{
 				Decision:  string(keeper.DecisionDeny),
-				Reason:    "Keeper evaluation failed — deny by default",
+				Reason:    "Keeper not configured",
 				RiskScore: 10,
 			}
-		}
-		// PR-P6: /execute shares the /request window deliberately. Both flows
-		// are the same judge answering the same way, so splitting them would
-		// halve each sample count and delay the alarm on an instance that
-		// spreads its credential traffic across the two. See health.Record.
-		health.Record(r.Context(), h.db, h.logger, health.Verdict{
-			WorkspaceID: body.WorkspaceID,
-			Decision:    gkResp.Decision,
-			JudgeFailed: gkResp.InfraFailure || evalErr != nil,
-			Latency:     time.Since(judgeStart),
-		})
-	} else {
-		gkResp = keeper.GatekeeperResponse{
-			Decision:  string(keeper.DecisionDeny),
-			Reason:    "Keeper not configured",
-			RiskScore: 10,
 		}
 	}
 
@@ -512,6 +573,14 @@ func (h *KeeperHandler) HandleExecute(w http.ResponseWriter, r *http.Request) {
 	}
 
 	now := time.Now().UTC().Format(time.RFC3339)
+
+	// The ledger says WHO. An approval-consumed ALLOW is a human decision
+	// exercised by the agent's retry — the audit trail must not credit the
+	// keeper with a grant a person made (#2574).
+	decidedActorType, decidedActorID := keeperActorKeeper, "keeper"
+	if approvedVia != nil {
+		decidedActorType, decidedActorID = keeperActorUser, approvedVia.ApproverID
+	}
 
 	if gkResp.Decision != string(keeper.DecisionAllow) {
 		// DENY or ESCALATE: update audit and return without executing.
@@ -533,12 +602,12 @@ func (h *KeeperHandler) HandleExecute(w http.ResponseWriter, r *http.Request) {
 				Command:      body.Command,
 				Reason:       gkResp.Reason,
 				RiskScore:    &gkResp.RiskScore,
-				ActorType:    keeperActorKeeper,
-				ActorID:      "keeper",
+				ActorType:    decidedActorType,
+				ActorID:      decidedActorID,
 			}); err != nil {
 			h.logger.Error("keeper execute: update audit (deny)", "error", err)
 		}
-		h.emitExecuteDecision(r.Context(), body, reqID, agentName, credName, gkResp.Decision, gkResp.Reason, gkResp.RiskScore, secLevel, nil)
+		h.emitExecuteDecision(r.Context(), body, reqID, agentName, credName, gkResp.Decision, gkResp.Reason, gkResp.RiskScore, secLevel, nil, approvedVia)
 
 		h.logger.Info("keeper execute: denied",
 			"request_id", reqID, "agent", agentName, "credential", credName, "decision", gkResp.Decision)
@@ -809,14 +878,14 @@ func (h *KeeperHandler) HandleExecute(w http.ResponseWriter, r *http.Request) {
 			Reason:       gkResp.Reason,
 			RiskScore:    &gkResp.RiskScore,
 			ExitCode:     &exitCode,
-			ActorType:    keeperActorKeeper,
-			ActorID:      "keeper",
+			ActorType:    decidedActorType,
+			ActorID:      decidedActorID,
 		}); err != nil {
 		h.logger.Error("keeper execute: update audit (allow)", "error", err)
 	}
 
 	h.emitExecuteDecision(auditCtx, body, reqID, agentName, credName,
-		string(keeper.DecisionAllow), gkResp.Reason, gkResp.RiskScore, secLevel, &exitCode)
+		string(keeper.DecisionAllow), gkResp.Reason, gkResp.RiskScore, secLevel, &exitCode, approvedVia)
 
 	h.logger.Info("keeper execute: completed",
 		"request_id", reqID, "agent", agentName, "credential", credName,
@@ -872,6 +941,7 @@ func (h *KeeperHandler) emitExecuteDecision(
 	reqID, agentName, credName, decision, reason string,
 	riskScore, secLevel int,
 	exitCode *int,
+	approvedVia *consumedApproval,
 ) {
 	if h.journal == nil {
 		return
@@ -899,6 +969,13 @@ func (h *KeeperHandler) emitExecuteDecision(
 	}
 	if exitCode != nil {
 		payload["exit_code"] = *exitCode
+	}
+	if approvedVia != nil {
+		// The chain matters more than the verdict alone: this execute happened
+		// because escalation <id> was approved by a person and spent here
+		// (#2574).
+		payload["approval_request_id"] = approvedVia.RequestID
+		payload["approved_by_user_id"] = approvedVia.ApproverID
 	}
 	if _, err := h.journal.Emit(ctx, journal.Entry{
 		WorkspaceID: body.WorkspaceID,

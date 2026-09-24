@@ -244,15 +244,24 @@ func (h *KeeperHandler) GetRequest(w http.ResponseWriter, r *http.Request) {
 		RiskScore         *int    `json:"risk_score"`
 		CreatedAt         string  `json:"created_at"`
 		DecidedAt         *string `json:"decided_at"`
+		// RequestType lets a polling agent tell an access escalation from an
+		// execute one without re-submitting, and ApprovalConsumedAt is how it
+		// learns an ALLOW is still spendable: NULL means the approval (if the
+		// decision is ALLOW and a human resolved it) has not been presented
+		// yet — the retry window #2574 added.
+		RequestType        string  `json:"request_type"`
+		ApprovalConsumedAt *string `json:"approval_consumed_at"`
 	}
 
 	var row requestRow
 	err := h.db.QueryRowContext(r.Context(), `
 		SELECT id, requesting_agent_id, requesting_crew_id, credential_id,
-		       intent, decision, reason, risk_score, created_at, decided_at
+		       intent, decision, reason, risk_score, created_at, decided_at,
+		       COALESCE(request_type, 'access'), approval_consumed_at
 		FROM keeper_requests WHERE id = ?`, requestID).Scan(
 		&row.ID, &row.RequestingAgentID, &row.RequestingCrewID, &row.CredentialID,
-		&row.Intent, &row.Decision, &row.Reason, &row.RiskScore, &row.CreatedAt, &row.DecidedAt)
+		&row.Intent, &row.Decision, &row.Reason, &row.RiskScore, &row.CreatedAt, &row.DecidedAt,
+		&row.RequestType, &row.ApprovalConsumedAt)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			replyError(w, http.StatusNotFound, "request not found")
@@ -275,6 +284,16 @@ func (h *KeeperHandler) GetRequest(w http.ResponseWriter, r *http.Request) {
 			replyError(w, http.StatusNotFound, "request not found")
 			return
 		}
+	}
+
+	// Agent scoping (#2574): the sidecar's poll route passes the ACTING agent
+	// so a sibling sharing the crew container cannot read a peer's request
+	// rows — intent, decision and risk of another agent's credential asks are
+	// not crew data. 404 for the same no-oracle reason as the tenant check.
+	// Absent for master-token/internal callers that are not agent-facing.
+	if acting := r.URL.Query().Get("agent_id"); acting != "" && acting != row.RequestingAgentID {
+		replyError(w, http.StatusNotFound, "request not found")
+		return
 	}
 
 	writeJSON(w, http.StatusOK, row)
