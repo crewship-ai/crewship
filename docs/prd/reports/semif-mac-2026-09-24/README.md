@@ -5,7 +5,7 @@ existing `~/AI/SemIf-OpenJev` installation, native MLX, pinned
 `Qwen/Qwen3.5-4B` revision `851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a`,
 and `direct` scoring. The 4-bit run applies in-memory quantization; the other
 run preserves the source precision. Each process loads the model once, then
-scores all rows. Input and output hashes are recorded in the summary files.
+scores all rows. The summaries record the input dataset hash.
 
 These are **real local model inferences**, not the Jev API dry run. The data
 are authored synthetic examples, not Crewship production events. No webhook
@@ -45,3 +45,8 @@ prompt-injection resistance, a safe autonomous action rate, or server-side
 webhook latency. It is evidence for testing SemIf as an advisory route selector
 with a human review fallback. A Crewship-to-Mac evaluator adapter and an
 end-to-end signed webhook run remain separate integration work.
+
+The [extended feature assessment](extended/README.md) adds Keeper tool-call
+cases, option-order stress, a Laya comparison, and state-length/multi-question
+measurements. It supersedes the simple first impression that a 0.9 threshold
+alone is enough for automatic routing.

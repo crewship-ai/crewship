@@ -32,6 +32,28 @@ records actual MLX results for the default 22 cases and a separate 12-case
 challenge corpus (`--cases scripts/jev-eval/semif-mac-challenge.jsonl`) in both
 4-bit and source precision.
 
+The [extended feature assessment](../../docs/prd/reports/semif-mac-2026-09-24/extended/README.md)
+adds 28 synthetic Keeper tool-call cases, option-order and repeatability stress,
+a same-corpus Laya MLX baseline, journal input-length limits, and multi-question
+MLX timing. Its result files are retained next to the report. On the Mac, run
+each script from the Crewship checkout and choose a fresh output directory:
+
+```bash
+python3 scripts/jev-eval/semif-mac-eval.py --semif-root ~/AI/SemIf-OpenJev \
+  --cases scripts/jev-eval/semif-keeper-cases.jsonl --output ~/AI/semif-keeper-q4
+python3 scripts/jev-eval/semif-mac-stress.py --semif-root ~/AI/SemIf-OpenJev \
+  --output ~/AI/semif-stress-q4
+python3 scripts/jev-eval/semif-mac-multifacet.py --semif-root ~/AI/SemIf-OpenJev \
+  --output ~/AI/semif-multifacet
+python3 scripts/jev-eval/semif-mac-length.py --semif-root ~/AI/SemIf-OpenJev \
+  --output ~/AI/semif-length
+python3 scripts/jev-eval/laya-mac-baseline.py --output ~/AI/laya-crewship-baseline
+```
+
+Add `--mlx-bits none` to the first or stress command to use source precision.
+The Laya command requires its separate `laya_mlx` Python environment. The
+length script intentionally sends one oversized input and records its failure.
+
 ## Hosted Jev pilot
 
 The integrated commands are `crewship decisions evaluate`, `triage`, and

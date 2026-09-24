@@ -1,0 +1,180 @@
+{
+  "model": "Qwen/Qwen3.5-4B",
+  "revision": "851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a",
+  "mlx_bits": 4,
+  "cases": 8,
+  "modes": {
+    "direct": {
+      "choices": {
+        "mf-outage": {
+          "choice": "yes",
+          "expected": "yes",
+          "top_score": 0.9902915235185259
+        },
+        "mf-success": {
+          "choice": "no",
+          "expected": "no",
+          "top_score": 0.9993736658418905
+        },
+        "mf-impact": {
+          "choice": "yes",
+          "expected": "yes",
+          "top_score": 0.5312093733737563
+        },
+        "mf-delete": {
+          "choice": "no",
+          "expected": "no",
+          "top_score": 0.9820137900379085
+        },
+        "mf-credential": {
+          "choice": "no",
+          "expected": "no",
+          "top_score": 0.9982992775885648
+        },
+        "mf-rollback": {
+          "choice": "yes",
+          "expected": "yes",
+          "top_score": 0.9994472213630764
+        },
+        "mf-rollback-start": {
+          "choice": "no",
+          "expected": "no",
+          "top_score": 0.9975273768433653
+        },
+        "mf-multizone": {
+          "choice": "yes",
+          "expected": "yes",
+          "top_score": 0.9902915235185259
+        }
+      },
+      "correct": 8,
+      "model_scoring_seconds": 4.919582459144294,
+      "input_tokens": [
+        173,
+        167,
+        165,
+        181,
+        172,
+        164,
+        166,
+        177
+      ]
+    },
+    "serial": {
+      "choices": {
+        "mf-outage": {
+          "choice": "yes",
+          "expected": "yes",
+          "top_score": 0.9890130573694068
+        },
+        "mf-success": {
+          "choice": "no",
+          "expected": "no",
+          "top_score": 0.9994472213630764
+        },
+        "mf-impact": {
+          "choice": "yes",
+          "expected": "yes",
+          "top_score": 0.5
+        },
+        "mf-delete": {
+          "choice": "no",
+          "expected": "no",
+          "top_score": 0.9840936082881853
+        },
+        "mf-credential": {
+          "choice": "no",
+          "expected": "no",
+          "top_score": 0.9986749775827868
+        },
+        "mf-rollback": {
+          "choice": "yes",
+          "expected": "yes",
+          "top_score": 0.9994472213630764
+        },
+        "mf-rollback-start": {
+          "choice": "no",
+          "expected": "no",
+          "top_score": 0.9975273768433653
+        },
+        "mf-multizone": {
+          "choice": "yes",
+          "expected": "yes",
+          "top_score": 0.9902915235185259
+        }
+      },
+      "correct": 8,
+      "model_scoring_seconds": 2.462965751066804,
+      "input_tokens": [
+        173,
+        167,
+        165,
+        181,
+        172,
+        164,
+        166,
+        177
+      ]
+    },
+    "shared": {
+      "choices": {
+        "mf-outage": {
+          "choice": "yes",
+          "expected": "yes",
+          "top_score": 0.9902915235185259
+        },
+        "mf-success": {
+          "choice": "no",
+          "expected": "no",
+          "top_score": 0.9993736658418905
+        },
+        "mf-impact": {
+          "choice": "yes",
+          "expected": "yes",
+          "top_score": 0.5312093733737563
+        },
+        "mf-delete": {
+          "choice": "no",
+          "expected": "no",
+          "top_score": 0.9840936082881853
+        },
+        "mf-credential": {
+          "choice": "no",
+          "expected": "no",
+          "top_score": 0.9986749775827868
+        },
+        "mf-rollback": {
+          "choice": "yes",
+          "expected": "yes",
+          "top_score": 0.9994472213630764
+        },
+        "mf-rollback-start": {
+          "choice": "no",
+          "expected": "no",
+          "top_score": 0.9971990730328789
+        },
+        "mf-multizone": {
+          "choice": "yes",
+          "expected": "yes",
+          "top_score": 0.9875683491468141
+        }
+      },
+      "correct": 8,
+      "model_scoring_seconds": 2.3758965004235506,
+      "input_tokens": [
+        173,
+        167,
+        165,
+        181,
+        172,
+        164,
+        166,
+        177
+      ]
+    }
+  },
+  "choice_changes_vs_direct": {
+    "serial": [],
+    "shared": []
+  }
+}
