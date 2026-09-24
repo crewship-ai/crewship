@@ -13,6 +13,7 @@ import (
 	"log/slog"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/crewship-ai/crewship/internal/keeper"
 	"github.com/crewship-ai/crewship/internal/keeper/evidence"
@@ -40,10 +41,14 @@ const llmCallTimeout = 20 * time.Second
 // non-whitespace runes. Used by the L1 intent check below — `len >= 10`
 // alone accepted "aaaaaaaaaa" as a valid stated intent, which let the
 // auto-allow shortcut be used as a free-pass for any L1 credential.
+//
+// unicode.IsSpace, not an ASCII allowlist: an internal U+00A0 (NBSP) or any
+// other Unicode space would otherwise count toward the distinct-rune total,
+// letting filler with four real runes clear a five-rune floor.
 func hasMinDistinctChars(s string, min int) bool {
 	seen := make(map[rune]struct{}, min)
 	for _, r := range s {
-		if r == ' ' || r == '\t' || r == '\n' || r == '\r' {
+		if unicode.IsSpace(r) {
 			continue
 		}
 		seen[r] = struct{}{}

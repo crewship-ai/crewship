@@ -1825,7 +1825,7 @@ and timestamps.
 |----------|---------|-----------------|
 | `ALLOW` | Request approved | `/keeper/request`: a `200` carrying the verdict and nothing else — no value is returned. `/keeper/execute`: the command runs with the credential injected and the agent receives the scrubbed output and exit code. |
 | `DENY` | Request rejected | `200` with the decision and reason; the agent is told not to retry |
-| `ESCALATE` | A person rules on it in the inbox | `200` with the decision; the agent is told it is pending. The ruling is not pushed back to the agent and does not run the command — see [Rule on an escalation](#rule-on-an-escalation) |
+| `ESCALATE` | A person rules on it in the inbox | `200` with the decision; the agent is told it is pending. An `ALLOW` ruling becomes a consumable approval the agent can present once on its retry — see [Rule on an escalation](#rule-on-an-escalation) |
 | `PENDING` | The audit row's initial state, before the judge answers | Never returned to an agent |
 
 ## Keeper watches its own decisions

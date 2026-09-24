@@ -699,3 +699,46 @@ func TestKeeperGetRequest_AgentScopedByQuery(t *testing.T) {
 		t.Fatal("a sibling's poll leaked another agent's request — 404, not 200")
 	}
 }
+
+// TestL4Escalation_AdjudicatedAllowIsNotConsumable — an AI reference
+// adjudication resolves through the same endpoint but is NOT a person's
+// ruling, and only a person's ruling mints a consumable approval (#2574,
+// CodeRabbit: an eval/labelling workflow must not mint L4 credential
+// releases). The ledger keeps the reference actor; the projection's
+// resolved_by_user_id stays NULL.
+func TestL4Escalation_AdjudicatedAllowIsNotConsumable(t *testing.T) {
+	db := setupTestDB(t)
+	wsID, crewID, agentID, credID := seedL4Fixture(t, db)
+
+	h, _ := newL4Handler(t, db, nil, nil)
+	const cmd = "pg_dump --host prod-db --all"
+	esc, _ := escalateL4Execute(t, h, wsID, crewID, agentID, credID, cmd)
+
+	rr := httptest.NewRecorder()
+	h.HandleResolve(rr, resolveReq(t, wsID, "ADMIN", "user-approver", esc.RequestID,
+		map[string]any{"decision": "ALLOW", "adjudicator": "reference-model-v1"}))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("adjudicated resolve returned %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var resolvedBy, consumed sql.NullString
+	if err := db.QueryRow(
+		`SELECT resolved_by_user_id, approval_consumed_at FROM keeper_requests WHERE id = ?`,
+		esc.RequestID).Scan(&resolvedBy, &consumed); err != nil {
+		t.Fatalf("read approval row: %v", err)
+	}
+	if resolvedBy.Valid {
+		t.Fatalf("an adjudicated ruling recorded resolved_by_user_id=%q — the consumable-approval provenance marker is for people", resolvedBy.String)
+	}
+	_ = consumed
+
+	w := doKeeperExecute(h, keeperExecuteBody{
+		RequestingAgentID: agentID, RequestingCrewID: crewID, WorkspaceID: wsID,
+		CredentialID: credID, Intent: "rotate the production database certificates tonight",
+		Command: cmd, ContainerID: "test-container",
+		ApprovalRequestID: esc.RequestID,
+	})
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("an adjudicated ALLOW was consumed: %d %s — a model's ruling released an L4 credential", w.Code, w.Body.String())
+	}
+}

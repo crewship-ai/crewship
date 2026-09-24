@@ -235,11 +235,22 @@ func (h *KeeperHandler) HandleResolve(w http.ResponseWriter, r *http.Request) {
 	// which is the one fact consumeKeeperApproval cannot infer from decision and
 	// decided_at — a judge ALLOW carries both. It also answers "who resolved
 	// this" on the projection, which previously only the ledger recorded.
+	//
+	// An AI-ADJUDICATED ruling writes NULL on purpose. The authenticated operator
+	// still owns the action, but the judgement was the reference model's, and a
+	// consumable approval is defined as a PERSON's ruling — an eval/labeling
+	// workflow resolving escalations through the adjudicator must not mint
+	// approvals that release L4 credentials. The ledger keeps the fuller story
+	// (keeperActorReference + the model's name) either way.
+	var resolvedBy any = actorID
+	if adjudicator != "" || actorID == "" {
+		resolvedBy = nil
+	}
 	res, err := tx.ExecContext(r.Context(), `
 		UPDATE keeper_requests
 		   SET decision = ?, reason = ?, decided_at = ?, resolved_by_user_id = ?
 		 WHERE id = ? AND decision = ?`,
-		decision, reason, now, actorID, reqID, string(keeper.DecisionEscalate))
+		decision, reason, now, resolvedBy, reqID, string(keeper.DecisionEscalate))
 	if err != nil {
 		replyInternalError(w, h.logger, "keeper resolve: record decision", err)
 		return

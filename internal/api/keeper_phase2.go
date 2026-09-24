@@ -656,6 +656,18 @@ func (h *KeeperPhase2Handler) persistBehaviorVerdict(
 	res gatekeeper.BehaviorReviewResult,
 	workspaceID, crewID, agentID, toolName, agentDisplayName string,
 ) (string, error) {
+	// Scrub the prompt and the raw response before they are persisted. The
+	// prompt embeds ToolArgsSnippet — agent-authored text, exactly like the
+	// intent the credential path scrubs before anything copies it — and an
+	// agent that echoes a token into its tool args would otherwise have it
+	// durably recorded in keeper_requests.ollama_prompt (and shipped to a
+	// hosted judge before that). The generic pattern set and its limits are
+	// the judge scrubber's own (see scrubJudgeText); the verdict fields the
+	// operator needs (decision, reason, risk) are not touched. Applied here so
+	// the synchronous endpoint and the sampled path (#2575) cannot diverge.
+	res.Prompt = scrubJudgeText(res.Prompt)
+	res.RawLLMResponse = scrubJudgeText(res.RawLLMResponse)
+
 	reqID, recErr := h.recordKeeperRequest(ctx, keeper.RequestTypeBehavior,
 		agentID, crewID, "F4.2 behavior check on "+toolName,
 		string(res.Decision), res.Reason, res.RiskScore, res.Prompt, res.RawLLMResponse)

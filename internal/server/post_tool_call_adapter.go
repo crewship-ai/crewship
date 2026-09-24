@@ -156,12 +156,24 @@ func (o *postToolCallObserver) Observe(obs orchestrator.ToolCallObservation) {
 		return
 	}
 
+	// Persistence gets its OWN deadline, not the leftover of the one the LLM
+	// call spent: a slow evaluation (the aux slot allows 8s of the 12s above)
+	// would otherwise hand the DB writes a nearly-spent context, and the
+	// verdict would be lost to `context deadline exceeded` at the exact moment
+	// it exists to be recorded. The slowest evaluations are the ones most
+	// likely to return non-ALLOW verdicts — the ones that must not vanish.
+	// Fresh from Background like the parent: the observer already runs
+	// detached from the tool call, and the records must outlive a caller ctx
+	// that was never this sample's to begin with.
+	pctx, pcancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer pcancel()
+
 	// #2575: route the verdict. Every fired sample becomes a keeper_requests
 	// row and (when the PolicyDecision says so) an operator inbox item —
 	// the same persistence the /api/v1/keeper/behavior endpoint applies, so
 	// the sampled and synchronous paths surface one shape of finding.
 	if sample.Verdict != nil {
-		o.routeSampledVerdict(ctx, obs, *sample.Verdict)
+		o.routeSampledVerdict(pctx, obs, *sample.Verdict)
 	}
 
 	// The interrupt, kept exactly as before: a block fires a hook.blocked
@@ -177,7 +189,7 @@ func (o *postToolCallObserver) Observe(obs orchestrator.ToolCallObservation) {
 			"tool", obs.ToolName,
 			"message", be.Result.Message)
 		if o.journ != nil {
-			_, _ = o.journ.Emit(ctx, journal.Entry{
+			_, _ = o.journ.Emit(pctx, journal.Entry{
 				WorkspaceID: obs.WorkspaceID,
 				CrewID:      obs.CrewID,
 				AgentID:     obs.AgentID,

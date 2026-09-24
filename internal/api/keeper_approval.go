@@ -136,6 +136,11 @@ func (h *KeeperHandler) consumeKeeperApproval(
 				body:   "approval request not found",
 			}
 		}
+		// Logged, not just 500'd: an approval that fails for infrastructure
+		// reasons looks identical to the agent as one that was refused, and
+		// the operator is the only side that can tell them apart.
+		h.logger.Error("keeper approval: load failed",
+			"error", err, "approval_id", approvalID)
 		return nil, &approvalFailure{
 			status: http.StatusInternalServerError,
 			body:   "failed to load the approval",
@@ -236,12 +241,26 @@ func (h *KeeperHandler) consumeKeeperApproval(
 		   AND approval_consumed_at IS NULL`,
 		now, approvalID, string(keeper.DecisionAllow))
 	if err != nil {
+		h.logger.Error("keeper approval: consume failed",
+			"error", err, "approval_id", approvalID)
 		return nil, &approvalFailure{
 			status: http.StatusInternalServerError,
 			body:   "failed to consume the approval",
 		}
 	}
-	if n, _ := res.RowsAffected(); n == 0 {
+	n, rerr := res.RowsAffected()
+	if rerr != nil {
+		// Distinguishable from a lost race: this driver could not even say
+		// whether the row changed, and telling the agent "already used" (409)
+		// would send its retry loop down the wrong branch.
+		h.logger.Error("keeper approval: consume result unreadable",
+			"error", rerr, "approval_id", approvalID)
+		return nil, &approvalFailure{
+			status: http.StatusInternalServerError,
+			body:   "failed to consume the approval",
+		}
+	}
+	if n == 0 {
 		return nil, &approvalFailure{
 			status: http.StatusConflict,
 			body:   "the approval was consumed by another request — submit without approval_request_id to raise a fresh escalation",
