@@ -41,10 +41,10 @@ func TestActingAgentID_FailsClosedWithoutIdentity(t *testing.T) {
 
 func TestLLMRouteIdentity_AllProviderAuthShapes(t *testing.T) {
 	const routeKey = "crew-bound-route-key"
-	token := internaltoken.DeriveLLMRouteToken(routeKey, "agent-a")
+	token := internaltoken.DeriveLLMRunRouteToken(routeKey, "agent-a", "run-a")
 	const fingerprint = "abcdef123456"
 	s := &Server{
-		routeAuth: &RouteAuth{Key: routeKey},
+		routeAuth: &RouteAuth{Key: routeKey}, runs: newRunRegistry(),
 	}
 	tests := []struct {
 		name  string
@@ -79,9 +79,9 @@ func TestLLMRouteIdentity_AllProviderAuthShapes(t *testing.T) {
 
 func TestLLMRouteIdentity_DoesNotRequireIPC(t *testing.T) {
 	const routeKey = "crew-bound-route-key"
-	token := internaltoken.DeriveLLMRouteToken(routeKey, "solo")
+	token := internaltoken.DeriveLLMRunRouteToken(routeKey, "solo", "run-solo")
 	const fingerprint = "abcdef123456"
-	s := &Server{routeAuth: &RouteAuth{Key: routeKey}}
+	s := &Server{routeAuth: &RouteAuth{Key: routeKey}, runs: newRunRegistry()}
 	req := httptest.NewRequest("POST", "http://127.0.0.1/llm", nil)
 	req.Header.Set("Authorization", "Bearer dummy."+token+internaltoken.RouteFingerprintDelimiter+fingerprint)
 
@@ -95,15 +95,15 @@ func TestLLMRouteIdentity_FailsClosed(t *testing.T) {
 	t.Parallel()
 
 	const routeKey = "crew-bound-route-key"
-	token := internaltoken.DeriveLLMRouteToken(routeKey, "agent-a")
+	token := internaltoken.DeriveLLMRunRouteToken(routeKey, "agent-a", "run-a")
 	const fingerprint = "abcdef123456"
 	tests := []struct {
 		name   string
 		server *Server
 		value  string
 	}{
-		{"no fingerprint", &Server{routeAuth: &RouteAuth{Key: routeKey}}, token},
-		{"empty fingerprint", &Server{routeAuth: &RouteAuth{Key: routeKey}}, token + internaltoken.RouteFingerprintDelimiter},
+		{"no fingerprint", &Server{routeAuth: &RouteAuth{Key: routeKey}, runs: newRunRegistry()}, token},
+		{"empty fingerprint", &Server{routeAuth: &RouteAuth{Key: routeKey}, runs: newRunRegistry()}, token + internaltoken.RouteFingerprintDelimiter},
 		{"no route auth configured", &Server{}, token + internaltoken.RouteFingerprintDelimiter + fingerprint},
 		{"token signed by another key", &Server{routeAuth: &RouteAuth{Key: "other-key"}}, token + internaltoken.RouteFingerprintDelimiter + fingerprint},
 	}

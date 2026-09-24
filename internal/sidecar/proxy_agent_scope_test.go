@@ -37,7 +37,7 @@ func scopedProxy(t *testing.T, creds []Credential, capture **http.Request) *Prox
 	t.Helper()
 	cs := NewCredStore()
 	cs.Load(creds)
-	s := &Server{routeAuth: &RouteAuth{Key: scopeRouteKey}}
+	s := &Server{routeAuth: &RouteAuth{Key: scopeRouteKey}, runs: newRunRegistry()}
 	p := NewProxy(ProxyConfig{
 		CredStore:          cs,
 		Allowlist:          NewDomainAllowlist(nil),
@@ -57,7 +57,7 @@ func scopedProxy(t *testing.T, creds []Credential, capture **http.Request) *Prox
 // the dummy provider key carries this agent's route token and the fingerprint
 // of the credential set its run was launched with (bindLLMRouteToken).
 func scopeRouteRequest(agentID string) *http.Request {
-	tok := internaltoken.DeriveLLMRouteToken(scopeRouteKey, agentID)
+	tok := internaltoken.DeriveLLMRunRouteToken(scopeRouteKey, agentID, "run-"+agentID)
 	key := routedProviderDummyKeyForTest + "." + tok + internaltoken.RouteFingerprintDelimiter + scopeConfigFP
 	req := httptest.NewRequest(http.MethodPost,
 		"http://127.0.0.1:9119/llm/openai-compat/chat/completions",
@@ -66,6 +66,47 @@ func scopeRouteRequest(agentID string) *http.Request {
 	req.RemoteAddr = "127.0.0.1:54321"
 	req.Header.Set("Authorization", "Bearer "+key)
 	return req
+}
+
+func TestLLMRoute_EndedRunCannotUseProviderCredential(t *testing.T) {
+	var forwarded int
+	s := &Server{routeAuth: &RouteAuth{Key: scopeRouteKey}, runs: newRunRegistry()}
+	cs := NewCredStore()
+	cs.Load([]Credential{{ID: "compat-a", Provider: ProviderOpenAICompat,
+		Token: "sk-alpha-key", BaseURL: "https://a.example/v1", AgentIDs: []string{scopeAgentA}}})
+	p := NewProxy(ProxyConfig{CredStore: cs, Allowlist: NewDomainAllowlist(nil),
+		Logger: covLogger(), FreeMode: true, ResolveLLMIdentity: s.llmRouteIdentity,
+		ConfigFingerprint: scopeConfigFP})
+	p.transport = roundTripperFunc(func(*http.Request) (*http.Response, error) {
+		forwarded++
+		return jsonUpstreamResponse(http.StatusOK, "application/json", `{}`, nil), nil
+	})
+	request := func(token string) int {
+		req := scopeRouteRequest(scopeAgentA)
+		req.Header.Set("Authorization", "Bearer "+routedProviderDummyKeyForTest+"."+
+			token+internaltoken.RouteFingerprintDelimiter+scopeConfigFP)
+		w := httptest.NewRecorder()
+		p.ServeHTTP(w, req)
+		return w.Code
+	}
+	tokA := internaltoken.DeriveLLMRunRouteToken(scopeRouteKey, scopeAgentA, "run-a")
+	tokB := internaltoken.DeriveLLMRunRouteToken(scopeRouteKey, scopeAgentA, "run-b")
+	if code := request(tokA); code != http.StatusOK {
+		t.Fatalf("live run A status = %d", code)
+	}
+	s.runs.end("run-a")
+	if code := request(tokA); code != http.StatusForbidden {
+		t.Fatalf("ended run A status = %d, want 403", code)
+	}
+	if code := request(tokB); code != http.StatusOK {
+		t.Fatalf("live run B status = %d", code)
+	}
+	if code := request(internaltoken.DeriveLLMRouteToken(scopeRouteKey, scopeAgentA)); code != http.StatusForbidden {
+		t.Fatalf("agent-only legacy token status = %d, want 403", code)
+	}
+	if forwarded != 2 {
+		t.Fatalf("forwarded %d requests, want only the two live runs", forwarded)
+	}
 }
 
 // routedProviderDummyKeyForTest mirrors the orchestrator's dummy provider key

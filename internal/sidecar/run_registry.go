@@ -464,8 +464,8 @@ func safeStateName(s string) string {
 // ensureDurable attaches the journal and the authority, replaying the journal
 // before the registry answers its first admission question.
 //
-// Called from identityForRunToken — the ONLY caller of current() — rather than
-// from NewServer, so the replay is guaranteed to precede any decision this
+// Called from both identityForRunToken and llmRouteIdentity, the callers of
+// current(), rather than from NewServer, so replay precedes any decision this
 // registry makes for a run token, which is the ordering the requirement
 // ("restore the registry and its revocations before serving") actually asks
 // for. Once per process.

@@ -133,6 +133,57 @@ func TestRunRevocation_SurvivesSidecarRestart(t *testing.T) {
 	}
 }
 
+func TestLLMRouteRevocation_SurvivesSidecarRestart(t *testing.T) {
+	stateDir := t.TempDir()
+	before, runKey := newDurableRunServer(t, stateDir)
+	before.routeAuth = &RouteAuth{Key: scopeRouteKey}
+	routeToken := internaltoken.DeriveLLMRunRouteToken(scopeRouteKey, "agent-boot", "run-a")
+	request := func() *http.Request {
+		r := httptest.NewRequest(http.MethodPost, "/llm/openai-compat/chat/completions", nil)
+		r.Header.Set("Authorization", "Bearer dummy."+routeToken+
+			internaltoken.RouteFingerprintDelimiter+scopeConfigFP)
+		return r
+	}
+	if _, _, present, ok := before.llmRouteIdentity(request()); !present || !ok {
+		t.Fatal("live run route token was refused")
+	}
+	if code := postRunEnd(t, before, runToken(runKey, "run-a")); code != http.StatusOK {
+		t.Fatalf("end run status = %d", code)
+	}
+	after, _ := newDurableRunServer(t, stateDir)
+	after.routeAuth = &RouteAuth{Key: scopeRouteKey}
+	if _, _, present, ok := after.llmRouteIdentity(request()); !present || ok {
+		t.Fatal("ended run's provider token became valid after sidecar restart")
+	}
+}
+
+func TestLLMRoute_ConsultsHostRunAuthority(t *testing.T) {
+	const runID = "run-authority"
+	clock := time.Date(2026, 9, 24, 12, 0, 0, 0, time.UTC)
+	authority := &fakeAuthority{active: true}
+	s := &Server{routeAuth: &RouteAuth{Key: scopeRouteKey}, runs: newRunRegistry()}
+	s.runs.authority = authority
+	s.runs.now = func() time.Time { return clock }
+	tok := internaltoken.DeriveLLMRunRouteToken(scopeRouteKey, "agent-a", runID)
+	req := httptest.NewRequest(http.MethodPost, "/llm/openai-compat/chat/completions", nil)
+	req.Header.Set("Authorization", "Bearer dummy."+tok+
+		internaltoken.RouteFingerprintDelimiter+scopeConfigFP)
+	if _, _, present, ok := s.llmRouteIdentity(req); !present || !ok {
+		t.Fatal("host confirmed the run, but its provider token was refused")
+	}
+	clock = clock.Add(runAuthorityVerdictTTL + time.Second)
+	authority.set(false, nil)
+	if _, _, present, ok := s.llmRouteIdentity(req); !present || ok {
+		t.Fatal("host revoked the run after verdict TTL, but provider token was accepted")
+	}
+	unknown := internaltoken.DeriveLLMRunRouteToken(scopeRouteKey, "agent-a", "never-started")
+	req.Header.Set("Authorization", "Bearer dummy."+unknown+
+		internaltoken.RouteFingerprintDelimiter+scopeConfigFP)
+	if _, _, present, ok := s.llmRouteIdentity(req); !present || ok {
+		t.Fatal("host refused an unknown run, but its provider token was accepted")
+	}
+}
+
 // The journal is a file. If it cannot be written, the sidecar must still work
 // and must still revoke in-memory — degrading to the pre-R7 behaviour for the
 // NEXT process is bad, refusing to revoke in THIS one would be worse.

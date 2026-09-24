@@ -23,6 +23,30 @@ func TestDeriveAndValidate_RoundTrip(t *testing.T) {
 	}
 }
 
+func TestLLMRunRouteToken_BindsAgentAndRun(t *testing.T) {
+	t.Parallel()
+	const key = "crew-route-key"
+	token := DeriveLLMRunRouteToken(key, "agent.a", "run-1")
+	if agent, run, ok := ValidateLLMRunRouteToken(key, token); !ok || agent != "agent.a" || run != "run-1" {
+		t.Fatalf("validated identity = (%q,%q,%v)", agent, run, ok)
+	}
+	for _, invalid := range []string{
+		DeriveLLMRunRouteToken(key, "", "run-1"),
+		DeriveLLMRunRouteToken(key, "agent.a", ""),
+		strings.Replace(token, "cnVuLTE", "cnVuLTI", 1),
+		strings.Replace(token, "YWdlbnQuYQ", "YWdlbnQuYg", 1),
+		token[:len(token)-1] + "0",
+		DeriveLLMRouteToken(key, "agent.a"),
+	} {
+		if _, _, ok := ValidateLLMRunRouteToken(key, invalid); ok {
+			t.Fatalf("invalid run route token accepted: %q", invalid)
+		}
+	}
+	if _, _, ok := ValidateLLMRunRouteToken("different-key", token); ok {
+		t.Fatal("run route token validated with a different crew key")
+	}
+}
+
 func TestDerive_NeverEqualsMaster(t *testing.T) {
 	t.Parallel()
 	// The whole point of PR-F24: the secret handed to a sidecar must

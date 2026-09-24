@@ -840,8 +840,8 @@ const sidecarProxyOrigin = "http://127.0.0.1:9119"
 // reason as the dummy ANTHROPIC_API_KEY / GEMINI_API_KEY above.
 const routedProviderDummyKey = "dummy-crewship-sidecar"
 
-// bindLLMRouteToken embeds the already-agent-visible, HMAC-authenticated
-// CREWSHIP_AGENT_TOKEN into each provider's dummy API key. The sidecar replaces
+// bindLLMRouteToken embeds the HMAC-authenticated, run-bound provider token
+// into each provider's dummy API key. The sidecar replaces
 // the dummy before forwarding, but first uses the embedded token to attribute
 // cost and to reject a stale concurrent run whose shared sidecar has since
 // restarted for another agent's credential set.
