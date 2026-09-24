@@ -244,6 +244,81 @@ func TestCreateBackup_ContainerProbe(t *testing.T) {
 			t.Errorf("absent container must zero section flags: %+v", c)
 		}
 	})
+	t.Run("vanished provisioned container is reported as DB-rows-only", func(t *testing.T) {
+		// #2612: a crew that HAD a container (cached_image is the
+		// provisioning marker) whose container is gone from the daemon
+		// is an INCOMPLETE export. It must not read as a plain success:
+		// the result, the manifest (workspace-level and per-crew) all
+		// name it, so the operator and any restore downstream know the
+		// bundle carries DB rows and no files for that crew.
+		db := openMigratedDBCov(t)
+		wsID, _ := seedCovWorkspace(t, db, "probgone")
+		if _, err := db.ExecContext(ctx,
+			`UPDATE crews SET cached_image = 'sha256:provisioned-once' WHERE workspace_id = ?`, wsID); err != nil {
+			t.Fatal(err)
+		}
+		ops := newFakeDockerOps()
+		ops.exists = false
+		res, err := CreateBackup(ctx, db, CreateOptions{
+			Scope: ScopeWorkspace, WorkspaceID: wsID,
+			OutputDir:         t.TempDir(),
+			Actor:             covAdminActor(),
+			NoEncrypt:         true,
+			DockerOps:         ops,
+			CrewContainerName: func(_, slug string) string { return "ctr-" + slug },
+		})
+		if err != nil {
+			t.Fatalf("CreateBackup: %v — a vanished container is DB-rows-only, not a failure", err)
+		}
+		const slug = "crew-probgone"
+		if len(res.MissingContainerCrews) != 1 || res.MissingContainerCrews[0] != slug {
+			t.Errorf("result.MissingContainerCrews = %v, want [%s]", res.MissingContainerCrews, slug)
+		}
+		if len(res.Manifest.Contents.MissingContainerCrews) != 1 || res.Manifest.Contents.MissingContainerCrews[0] != slug {
+			t.Errorf("manifest.MissingContainerCrews = %v, want [%s]", res.Manifest.Contents.MissingContainerCrews, slug)
+		}
+		c := res.Manifest.Contents.Crews[0]
+		if !c.ContainerMissing {
+			t.Errorf("per-crew container_missing must be set for a vanished provisioned container: %+v", c)
+		}
+		if c.WorkspaceIncluded || c.MemoryIncluded || len(c.VolumesIncluded) != 0 {
+			t.Errorf("vanished container must zero section flags: %+v", c)
+		}
+		verify, err := Verify(ctx, res.Path)
+		if err != nil || !verify.Valid {
+			t.Fatalf("Verify = (%+v, %v)", verify, err)
+		}
+	})
+	t.Run("never-provisioned crew is not reported missing", func(t *testing.T) {
+		// The other half of the distinction: no cached_image means no
+		// container ever existed, so nothing is missing — the bundle is
+		// complete for what that crew is. Reporting it would cry wolf
+		// on every mid-onboarding workspace.
+		db := openMigratedDBCov(t)
+		wsID, _ := seedCovWorkspace(t, db, "probnever")
+		ops := newFakeDockerOps()
+		ops.exists = false
+		res, err := CreateBackup(ctx, db, CreateOptions{
+			Scope: ScopeWorkspace, WorkspaceID: wsID,
+			OutputDir:         t.TempDir(),
+			Actor:             covAdminActor(),
+			NoEncrypt:         true,
+			DockerOps:         ops,
+			CrewContainerName: func(_, slug string) string { return "ctr-" + slug },
+		})
+		if err != nil {
+			t.Fatalf("CreateBackup: %v", err)
+		}
+		if len(res.MissingContainerCrews) != 0 {
+			t.Errorf("result.MissingContainerCrews = %v, want none — a never-provisioned crew is not incomplete", res.MissingContainerCrews)
+		}
+		if len(res.Manifest.Contents.MissingContainerCrews) != 0 {
+			t.Errorf("manifest.MissingContainerCrews = %v, want none", res.Manifest.Contents.MissingContainerCrews)
+		}
+		if res.Manifest.Contents.Crews[0].ContainerMissing {
+			t.Errorf("container_missing must not be set for a never-provisioned crew")
+		}
+	})
 	t.Run("present container collects and flags sections", func(t *testing.T) {
 		db := openMigratedDBCov(t)
 		wsID, _ := seedCovWorkspace(t, db, "probelive")

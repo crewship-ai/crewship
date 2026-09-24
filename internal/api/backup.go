@@ -132,6 +132,12 @@ type createResponse struct {
 	ScopeLevel    string    `json:"scope_level,omitempty"`
 	CreatedAt     time.Time `json:"created_at"`
 	Encrypted     bool      `json:"encrypted"`
+	// MissingContainerCrews names provisioned crews whose container was
+	// absent from the daemon, so the bundle carries their DB rows and
+	// none of their files (#2612). Emitted unconditionally (nil for a
+	// complete bundle) so a client never has to distinguish absent from
+	// empty.
+	MissingContainerCrews []string `json:"missing_container_crews"`
 }
 
 // Create handles POST /api/v1/admin/backups. Runs the backup inline;
@@ -279,6 +285,10 @@ func (h *BackupHandler) Create(w http.ResponseWriter, r *http.Request) {
 		"size_bytes":     result.Size,
 		"payload_sha256": result.SHA256,
 		"encrypted":      result.Manifest.Encryption.Enabled,
+		// #2612: which provisioned crews' files this bundle does NOT
+		// carry — the audit row is where "was this backup complete?"
+		// gets answered days later.
+		"missing_container_crews": result.MissingContainerCrews,
 	})
 
 	// Index the bundle in backup_catalog so the admin UI list view
@@ -295,15 +305,20 @@ func (h *BackupHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusCreated, createResponse{
-		Path:          result.Path,
-		Size:          result.Size,
-		SHA256:        result.SHA256,
-		FormatVersion: result.Manifest.FormatVersion,
-		Scope:         string(result.Manifest.Scope),
-		ScopeLevel:    string(result.Manifest.ScopeLevel),
-		CreatedAt:     result.Manifest.CreatedAt,
-		Encrypted:     result.Manifest.Encryption.Enabled,
+		Path:                  result.Path,
+		Size:                  result.Size,
+		SHA256:                result.SHA256,
+		FormatVersion:         result.Manifest.FormatVersion,
+		Scope:                 string(result.Manifest.Scope),
+		ScopeLevel:            string(result.Manifest.ScopeLevel),
+		CreatedAt:             result.Manifest.CreatedAt,
+		Encrypted:             result.Manifest.Encryption.Enabled,
+		MissingContainerCrews: result.MissingContainerCrews,
 	})
+	if len(result.MissingContainerCrews) > 0 {
+		h.logger.Warn("backup created without files for crews whose containers are gone from the daemon",
+			"crews", result.MissingContainerCrews, "path", result.Path, "workspace_id", workspaceID, "user", user.ID)
+	}
 }
 
 // List handles GET /api/v1/admin/backups.

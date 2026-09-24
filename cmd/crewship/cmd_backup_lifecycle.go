@@ -161,11 +161,22 @@ var backupCreateCmd = &cobra.Command{
 			FormatVersion int    `json:"format_version" yaml:"format_version"`
 			Scope         string `json:"scope" yaml:"scope"`
 			Encrypted     bool   `json:"encrypted" yaml:"encrypted"`
+			// #2612: provisioned crews whose container was absent from
+			// the daemon — the bundle carries their DB rows and none of
+			// their files.
+			MissingContainerCrews []string `json:"missing_container_crews" yaml:"missing_container_crews"`
 		}
 		if err := cli.ReadJSON(resp, &out); err != nil {
 			return err
 		}
 		cli.PrintSuccess(fmt.Sprintf("Backup created: %s", out.Path))
+		if len(out.MissingContainerCrews) > 0 {
+			cli.PrintWarning(fmt.Sprintf(
+				"Bundle is DB-rows-only for %d crew(s) whose container is gone from the daemon: %s.\n"+
+					"  Their workspace, memory and volume files are NOT in this bundle. Restore the container\n"+
+					"  (re-provision the crew) and take a fresh backup before relying on it for disaster recovery.",
+				len(out.MissingContainerCrews), strings.Join(out.MissingContainerCrews, ", ")))
+		}
 		f := newFormatter()
 		headers := []string{"SCOPE", "SIZE", "ENCRYPTED", "FORMAT", "SHA256"}
 		rows := [][]string{{

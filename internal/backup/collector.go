@@ -24,6 +24,13 @@ type CrewTarget struct {
 	CachedImageDigest  string
 	ConfigHash         string
 	AgentCount         int
+	// ContainerMissing is set by CreateBackup's daemon probe when a
+	// crew that HAD a provisioned container (CachedImageDigest set)
+	// has none on the daemon. It feeds the manifest's per-crew
+	// container_missing flag so an operator reading a bundle can tell
+	// "files omitted because the container is gone" from "files
+	// omitted because this crew never had any" (#2612).
+	ContainerMissing bool
 }
 
 // WorkspaceTarget describes the workspace being backed up along with

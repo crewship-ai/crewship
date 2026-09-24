@@ -116,6 +116,18 @@ type CreateResult struct {
 	Size     int64
 	SHA256   string
 	Manifest *Manifest
+	// MissingContainerCrews names crews that had a provisioned image
+	// (cached_image set — the marker the provisioning flow leaves) but
+	// no container on the daemon at create time, so the bundle carries
+	// their DB rows and none of their files (#2612). Empty when every
+	// crew's container was present, and deliberately EMPTY for crews
+	// that were never provisioned at all: no container ever existed,
+	// so no filesystem section is missing from the bundle. Mirrored in
+	// the manifest (Contents.MissingContainerCrews), the create
+	// response and the CLI, because "success" that silently omits a
+	// provisioned crew's files is how an incomplete export reads as a
+	// complete one six weeks later.
+	MissingContainerCrews []string
 }
 
 // LockTimeout is how long CreateBackup will hold the advisory lock
@@ -211,6 +223,12 @@ func CreateBackup(ctx context.Context, db *sql.DB, opts CreateOptions) (result *
 	// crews. Probe is cheap (single Docker /containers/$name/json
 	// call per crew) and runs in serial — workspaces with hundreds of
 	// crews would want batching, but that's not a v1 concern.
+	//
+	// A crew whose container is gone while its provisioning marker
+	// (cached_image) says one existed gets ContainerMissing set below;
+	// buildContents turns that into the manifest's per-crew flag and
+	// Contents.MissingContainerCrews, and CreateResult reads it back
+	// from there — one source, three surfaces (#2612).
 	if opts.DockerOps != nil {
 		for i := range target.CrewTargets {
 			c := &target.CrewTargets[i]
@@ -229,13 +247,22 @@ func CreateBackup(ctx context.Context, db *sql.DB, opts CreateOptions) (result *
 				return nil, fmt.Errorf("backup: probe container %s for crew %s: %w", c.ContainerID, c.Slug, exErr)
 			}
 			if !exists {
-				// DB-only crew (never provisioned, or container removed):
-				// the bundle keeps its DB rows but carries no filesystem
-				// section. Say so — a bundle that silently omits a
-				// crew's files is how #2612's "incomplete export that
-				// looks successful" reads six weeks later (#2612).
-				slog.Warn("backup: crew container not found on daemon; backing up DB rows only",
-					"crew", c.Slug, "container", c.ContainerID, "workspace_id", target.ID)
+				// cached_image is what the provisioning flow sets on a
+				// crew whose container was actually built, so its
+				// presence separates "container vanished" (a provisioned
+				// crew whose files are now MISSING from this bundle) from
+				// "never provisioned" (a DB-only crew, nothing missing).
+				// The first is recorded on the result and the manifest —
+				// an incomplete export must not read as a complete one
+				// (#2612); the second is a normal state and is not.
+				if c.CachedImageDigest != "" {
+					c.ContainerMissing = true
+					slog.Warn("backup: crew's container is gone from the daemon; bundle carries DB rows only",
+						"crew", c.Slug, "container", c.ContainerID, "workspace_id", target.ID)
+				} else {
+					slog.Info("backup: crew was never provisioned; backing up DB rows only",
+						"crew", c.Slug, "workspace_id", target.ID)
+				}
 				c.ContainerID = ""
 			}
 		}
@@ -545,6 +572,9 @@ func CreateBackup(ctx context.Context, db *sql.DB, opts CreateOptions) (result *
 		Size:     info.Size(),
 		SHA256:   manifest.Checksums.PayloadSHA256,
 		Manifest: manifest,
+		// From the manifest's own contents rather than the local, so
+		// the two cannot disagree by construction.
+		MissingContainerCrews: contents.MissingContainerCrews,
 	}, nil
 }
 
@@ -606,8 +636,12 @@ func buildContents(t *WorkspaceTarget, level ScopeLevel, captures map[string]Cre
 			VolumesIncluded:            capture.Volumes(),
 			SystemIncluded:             capture.VarLibFiles > 0,
 			AgentCount:                 c.AgentCount,
+			ContainerMissing:           c.ContainerMissing,
 		}
 		contents.Crews = append(contents.Crews, summary)
+		if c.ContainerMissing {
+			contents.MissingContainerCrews = append(contents.MissingContainerCrews, c.Slug)
+		}
 	}
 	return contents
 }
