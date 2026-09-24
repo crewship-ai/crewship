@@ -68,7 +68,7 @@ func digestThreadKey(workspaceID string) string {
 
 // digestSourceID is the (kind, source_id) identity of the digest row.
 // Stable per workspace, matching the thread_key, so WriteThreaded's
-// no-existing-thread branch and its ON CONFLICT(kind, source_id) fallback
+// no-existing-thread branch and its ON CONFLICT(workspace_id, kind, source_id) fallback
 // agree on the same row across the process lifetime.
 func digestSourceID(workspaceID string) string {
 	return "digest:" + workspaceID
