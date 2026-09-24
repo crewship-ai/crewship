@@ -26,7 +26,9 @@ const CREW_PALETTE_ORDER = Object.values(CREW_PALETTE)
 export function crewColor(color: string | null | undefined, index?: number): string {
   const resolved = (() => {
     if (!color) return null
-    const palette = CREW_PALETTE[color]
+    const palette = Object.prototype.hasOwnProperty.call(CREW_PALETTE, color)
+      ? CREW_PALETTE[color]
+      : undefined
     if (palette) return palette
     const hex = color.startsWith("#") ? color : `#${color}`
     return /^#[0-9a-fA-F]{6}$/.test(hex) ? hex : null
@@ -102,4 +104,3 @@ export function formatRelativeShort(iso: string | null | undefined): string {
   if (diffSec < 86400) return `${Math.floor(diffSec / 3600)}h`
   return `${Math.floor(diffSec / 86400)}d`
 }
-

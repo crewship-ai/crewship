@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useMemo } from "react"
+import { useCallback } from "react"
 import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query"
 
 import { apiFetch } from "@/lib/api-fetch"
@@ -324,7 +324,42 @@ export function useCrewServiceSummaries(
   crews: CrewSummary[],
   opts?: DashboardQueryOpts,
 ) {
-  const results = useQueries({
+  // useQueries' ordinary result array is new on many renders. Its combine
+  // callback is memoized by React Query until a query result or the crew list
+  // changes, so byCrew stays stable while unrelated dashboard state updates.
+  const combine = useCallback((results: Array<{
+    data?: CrewServiceWireResponse
+    isPending: boolean
+    isSuccess: boolean
+  }>) => {
+    const byCrew = new Map<string, CrewServiceSummary>()
+    results.forEach((result, index) => {
+      const crew = crews[index]
+      if (!crew) return
+      const services = result.data?.services
+      if (!Array.isArray(services)) {
+        byCrew.set(crew.id, { total: 0, running: 0, degraded: 0, checked: false })
+        return
+      }
+      const running = services.filter((service) => {
+        const status = (service.status ?? "").toLowerCase()
+        return status === "running" || status === "healthy"
+      }).length
+      byCrew.set(crew.id, {
+        total: services.length,
+        running,
+        degraded: Math.max(0, services.length - running),
+        checked: true,
+      })
+    })
+    return {
+      byCrew,
+      loading: results.some((result) => result.isPending),
+      checked: results.filter((result) => result.isSuccess).length,
+    }
+  }, [crews])
+
+  return useQueries({
     queries: crews.map((crew) => ({
       queryKey: dashboardKeys.crewServices(workspaceId ?? "", crew.id),
       queryFn: async ({ signal }: { signal: AbortSignal }) => {
@@ -338,43 +373,11 @@ export function useCrewServiceSummaries(
       enabled: Boolean(workspaceId) && (opts?.enabled ?? true),
       retry: false,
       staleTime: 15_000,
+      // Staleness alone does not refetch an idle mounted query.
+      refetchInterval: 60_000,
     })),
+    combine,
   })
-
-  // Built in a memo, not the hook body: a fresh Map every render made
-  // `services.byCrew` referentially unstable, so the page's `fleet` memo
-  // (deriveFleetHealth, O(crews × agents)) recomputed on every render even
-  // with no new data (#2187). useQueries returns a stable array across
-  // re-renders that change nothing, which is what keys this memo.
-  const byCrew = useMemo(() => {
-    const map = new Map<string, CrewServiceSummary>()
-    results.forEach((result, index) => {
-      const crew = crews[index]
-      if (!crew) return
-      const services = result.data?.services
-      if (!Array.isArray(services)) {
-        map.set(crew.id, { total: 0, running: 0, degraded: 0, checked: false })
-        return
-      }
-      const running = services.filter((service) => {
-        const status = (service.status ?? "").toLowerCase()
-        return status === "running" || status === "healthy"
-      }).length
-      map.set(crew.id, {
-        total: services.length,
-        running,
-        degraded: Math.max(0, services.length - running),
-        checked: true,
-      })
-    })
-    return map
-  }, [results, crews])
-
-  return {
-    byCrew,
-    loading: results.some((result) => result.isPending),
-    checked: results.filter((result) => result.isSuccess).length,
-  }
 }
 
 /**
@@ -415,8 +418,8 @@ export function useInvalidateDashboard(workspaceId: string | null) {
     // crew. Invalidation refetches active queries unconditionally — staleTime
     // does not protect against it — and this callback fires on every debounced
     // realtime burst, so an idle tab on a busy fleet would issue one Docker
-    // list per crew per burst. The queries keep their 15s staleTime and
-    // refresh on remount/refocus instead.
+    // list per crew per burst. The queries refresh once per minute while
+    // mounted, and also on remount/refocus.
     // The run-volume chart mounts under ["metrics-timeseries", ws, {…}] with a
     // params object that depends on the selected window, and invalidateQueries
     // compares that object by deep equality — so the two fixed-param keys in

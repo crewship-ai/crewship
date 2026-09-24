@@ -613,7 +613,7 @@ jobs:
           - \`/crews\` no longer has \`Status:\` / \`Role:\` filter buttons (\`crews-redesign\`)
           - the crew explorer moved out of \`aside\` into \`main\`, so \`crew-privilege-controls\` and \`crew-provisioning\` die in shared setup
           - the legacy MCP connector catalog on \`/integrations\` is behind \`NEXT_PUBLIC_LEGACY_MCP_INTEGRATIONS\` (default off) (\`connectors\`)
-          - \`a11y.spec.ts\` reports **live** wcag2a/wcag2aa violations (aria-command-name, button-name, aria-allowed-attr, link-in-text-block, color-contrast) on /crews, /routines, /credentials, /settings, /admin and chat. Its header documents these as fixed; nothing was running the scan, so they regressed. This one is a product bug, not a stale selector.
+          - \`a11y.spec.ts\` moved to the nightly gate after its contrast fixes; it is no longer a drift finding.
           - \`POST /api/v1/feedback\` answers 404 for \`feedback\` / \`feedback-ui\` against a real seeded daemon even though the route is registered — worth its own look
 
           This issue is refreshed by every nightly run and auto-closes when the whole drift bucket is green."

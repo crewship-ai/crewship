@@ -59,6 +59,17 @@ describe("dashboard overview derivations", () => {
     expect(items[2].label).toBe("2 schedule alerts")
   })
 
+  it("links to every kind included in the failure count", () => {
+    const base = { inbox: [] as InboxItem[], heldCrews: [], credentialGapCount: 0 }
+    const circuitOnly = buildAttentionItems({ ...base, activeByKind: { schedule_circuit_breaker_tripped: 2 } })
+    expect(circuitOnly[0].label).toBe("2 run alerts")
+    expect(circuitOnly[0].href).toContain("kind=schedule_circuit_breaker_tripped")
+
+    const mixed = buildAttentionItems({ ...base, activeByKind: { failed_run: 1, schedule_circuit_breaker_tripped: 1 } })
+    expect(mixed[0].label).toBe("2 run alerts")
+    expect(mixed[0].href).toBe("/inbox")
+  })
+
   it("deep-links the single approval only when the exact total is one (#2692 review)", () => {
     // Windowed rows hold exactly one approval while the server says two
     // exist: the link must open the list, not strand the operator on the
