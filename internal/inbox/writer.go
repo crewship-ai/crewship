@@ -711,7 +711,7 @@ func upsertRow(ctx context.Context, execer DBTX, in Item) error {
 			'unread', ?, ?, ?,
 			NULLIF(?, ''), NULLIF(?, ''), ?,
 			?, ?)
-		ON CONFLICT(kind, source_id) DO UPDATE SET
+		ON CONFLICT(workspace_id, kind, source_id) DO UPDATE SET
 			title = excluded.title,
 			body_md = excluded.body_md,
 			sender_type = excluded.sender_type,

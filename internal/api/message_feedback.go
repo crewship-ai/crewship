@@ -291,7 +291,7 @@ func (h *MessageFeedbackHandler) Create(w http.ResponseWriter, r *http.Request) 
 	_, err = h.db.ExecContext(r.Context(), `
 INSERT INTO message_feedback (id, workspace_id, chat_id, message_id, trace_id, signal, reason, user_id)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-ON CONFLICT(message_id, user_id, signal) DO UPDATE SET
+ON CONFLICT(workspace_id, message_id, user_id, signal) DO UPDATE SET
     workspace_id = excluded.workspace_id,
     reason       = excluded.reason,
     trace_id     = COALESCE(excluded.trace_id, message_feedback.trace_id),
@@ -304,10 +304,14 @@ ON CONFLICT(message_id, user_id, signal) DO UPDATE SET
 	}
 
 	// Resolve the persisted id (may be the existing row's id on UPSERT).
+	// Scoped by workspace to match the conflict target: the same
+	// (message_id, user_id, signal) is theoretically resolvable in two
+	// workspaces since #2274 scoped the key, and this lookup must agree
+	// with the row the upsert just touched.
 	var persistedID string
 	if err := h.db.QueryRowContext(r.Context(),
-		`SELECT id FROM message_feedback WHERE message_id = ? AND user_id = ? AND signal = ?`,
-		body.MessageID, user.ID, body.Signal).Scan(&persistedID); err != nil {
+		`SELECT id FROM message_feedback WHERE workspace_id = ? AND message_id = ? AND user_id = ? AND signal = ?`,
+		workspaceID, body.MessageID, user.ID, body.Signal).Scan(&persistedID); err != nil {
 		// The INSERT succeeded but the lookup failed — return what we
 		// know (the generated id) rather than erroring; the row exists.
 		persistedID = id

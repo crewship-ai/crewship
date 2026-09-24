@@ -150,7 +150,7 @@ func (d *Dispatcher) projectInTransaction(ctx context.Context, conn *sql.Conn, e
 		result, err := conn.ExecContext(ctx, `INSERT INTO inbox_items
    (id,workspace_id,kind,source_id,target_user_id,title,body_md,sender_type,state,priority,blocking,payload_json,created_at,updated_at)
    VALUES (?,?,'message',?,?,'New conversation activity','Open the conversation to read new messages.','system','unread','medium',0,?,?,?)
-   ON CONFLICT(kind,source_id) DO UPDATE SET
+   ON CONFLICT(workspace_id,kind,source_id) DO UPDATE SET
     payload_json=excluded.payload_json,state='unread',read_at=NULL,read_by_user_id=NULL,
     resolved_at=NULL,resolved_by_user_id=NULL,resolved_action=NULL,created_at=excluded.created_at,updated_at=excluded.updated_at
    WHERE COALESCE(CAST(json_extract(inbox_items.payload_json,'$.last_sequence') AS INTEGER),0) < ?`,

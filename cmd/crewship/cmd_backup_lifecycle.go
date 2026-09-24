@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -308,6 +309,9 @@ var backupRestoreCmd = &cobra.Command{
 			// genesis. Zero on a plain restore.
 			JournalEntriesResigned     int `json:"journal_entries_resigned" yaml:"journal_entries_resigned"`
 			JournalCheckpointsResigned int `json:"journal_checkpoints_resigned" yaml:"journal_checkpoints_resigned"`
+			// #2274: capability token rows the fork re-keyed, per table.
+			// nil on a plain restore, which re-keys nothing.
+			CapabilityTokensReminted map[string]int `json:"capability_tokens_reminted" yaml:"capability_tokens_reminted"`
 		}
 		if err := cli.ReadJSON(resp, &out); err != nil {
 			return err
@@ -382,6 +386,30 @@ var backupRestoreCmd = &cobra.Command{
 			note += fmt.Sprintf(".\n  The fork %s a NEW chain under this instance's key — it no longer links back to the source workspace.", tense)
 			note += "\n  Recorded in the fork's own journal as a `backup.chain_resigned` entry."
 			cli.PrintSuccess(note)
+		}
+		// #2274: a fork does not inherit live capabilities. Every
+		// invitation link, /exposed/ URL, webhook and public-page token
+		// keeps working ONLY against the source; the fork's copies
+		// arrived with fresh secrets the operator has to re-issue.
+		// Printed on a dry run too, for the same reason the journal
+		// note is: "your integrations will arrive revoked" is a
+		// pre-cutover fact.
+		if len(out.CapabilityTokensReminted) > 0 {
+			tables := make([]string, 0, len(out.CapabilityTokensReminted))
+			n := 0
+			for table, count := range out.CapabilityTokensReminted {
+				tables = append(tables, fmt.Sprintf("%s (%d)", table, count))
+				n += count
+			}
+			sort.Strings(tables)
+			note := fmt.Sprintf("Capability tokens re-keyed: %d row(s) across %s.\n"+
+				"  The source's invitation links, exposed URLs, webhooks and public links keep working ONLY against the source.\n"+
+				"  Re-send the fork's invitations from its member list; re-create or rotate its webhooks, exposures and public links.",
+				n, strings.Join(tables, ", "))
+			if dryRun {
+				note = "Would " + strings.ToLower(note[:1]) + note[1:]
+			}
+			cli.PrintWarning(note)
 		}
 		// CrewsRestored, not CrewsCount: the first is what landed, the
 		// second is what the bundle describes. Printing the bundle's

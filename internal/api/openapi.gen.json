@@ -4008,6 +4008,13 @@
       },
       "FinalAdminPlatformBackupRestore": {
         "properties": {
+          "capability_tokens_reminted": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "nullable": true,
+            "type": "object"
+          },
           "columns_dropped": {
             "type": "integer"
           },
@@ -4195,7 +4202,8 @@
           "payload_row_count_mismatches",
           "rows_inserted_shortfalls",
           "journal_entries_resigned",
-          "journal_checkpoints_resigned"
+          "journal_checkpoints_resigned",
+          "capability_tokens_reminted"
         ],
         "type": "object"
       },
