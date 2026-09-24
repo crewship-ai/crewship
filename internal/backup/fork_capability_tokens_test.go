@@ -27,6 +27,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"reflect"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -411,5 +412,56 @@ func TestForkedRestore_CapabilityTokens(t *testing.T) {
 	}
 	if !reflect.DeepEqual(res.CapabilityTokensReminted, wantReminted) {
 		t.Errorf("CapabilityTokensReminted = %v, want %v", res.CapabilityTokensReminted, wantReminted)
+	}
+
+	// --- a SECOND fork of the same bundle, into the same instance: the
+	// re-minted secrets of fork 1 are values like any other, so fork 2
+	// must be able to land its own row beside BOTH the source's and
+	// fork 1's — no re-minted value may become the new collision.
+	res2, err := backup.RestoreBackup(ctx, source, backup.RestoreOptions{
+		Path:        created.Path,
+		Passphrase:  passphrase,
+		Actor:       actor,
+		AsWorkspace: "e2e-ws-capability-fork-2",
+	})
+	if err != nil {
+		t.Fatalf("second RestoreBackup --as-workspace: %v", err)
+	}
+	fork2 := res2.RestoredWorkspaceID
+	if fork2 == "" || fork2 == workspaceID || fork2 == forkID {
+		t.Fatalf("second fork did not land as its own workspace (got %q)", fork2)
+	}
+	assertNoFKViolations(t, source, "after the second capability-token fork")
+	if !reflect.DeepEqual(res2.CapabilityTokensReminted, wantReminted) {
+		t.Errorf("fork 2 CapabilityTokensReminted = %v, want %v", res2.CapabilityTokensReminted, wantReminted)
+	}
+	// Every table carries exactly one row for the SECOND fork too — the
+	// fresh/re-issued rows the earlier sections minted live under fork 1,
+	// so per-workspace counts are the honest measure.
+	fork2Counts := map[string]string{
+		"workspace_invitations": `SELECT COUNT(*) FROM workspace_invitations WHERE workspace_id = ?`,
+		"port_exposures":        `SELECT COUNT(*) FROM port_exposures WHERE workspace_id = ?`,
+		"pipeline_webhooks":     `SELECT COUNT(*) FROM pipeline_webhooks WHERE workspace_id = ?`,
+		"page_public_tokens":    `SELECT COUNT(*) FROM page_public_tokens pt JOIN pages p ON p.id = pt.page_id WHERE p.workspace_id = ?`,
+		"page_webhooks":         `SELECT COUNT(*) FROM page_webhooks wh JOIN page_panels pan ON pan.id = wh.panel_id JOIN pages p ON p.id = pan.page_id WHERE p.workspace_id = ?`,
+	}
+	tables := make([]string, 0, len(fork2Counts))
+	for table := range fork2Counts {
+		tables = append(tables, table)
+	}
+	sort.Strings(tables)
+	for _, table := range tables {
+		var n int
+		if err := source.QueryRowContext(ctx, fork2Counts[table], fork2).Scan(&n); err != nil {
+			t.Fatalf("count %s on fork 2: %v", table, err)
+		}
+		if n != 1 {
+			t.Errorf("%s: %d row(s) on the second fork, want 1 — a re-minted value became the new collision", table, n)
+		}
+	}
+	// And the source row is STILL the only one its token resolves to.
+	if got := queryStringValue(t, source,
+		`SELECT workspace_id FROM workspace_invitations WHERE token = ?`, fixture.invitationToken); got != workspaceID {
+		t.Errorf("source invitation token resolves to %q after two forks, want %q", got, workspaceID)
 	}
 }
