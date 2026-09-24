@@ -32,9 +32,11 @@ type fakeDockerOps struct {
 	// rather than what the crew's metadata implied.
 	otherPaths map[string]map[string][]byte
 
-	copyToErr   error
-	copyFromErr error
-	execErr     error
+	copyToErr    error
+	copyFromErr  error
+	execErr      error
+	pauseErr     error // returned by Pause; nil models a running container (#2612 states)
+	unpauseCalls int
 
 	// execAsCode / execAsErr drive RestoreCrew's preflight probe.
 	execAsCode  int
@@ -55,10 +57,14 @@ func newFakeDockerOps() *fakeDockerOps {
 
 func (f *fakeDockerOps) Pause(_ context.Context, _ string) error {
 	f.paused = true
+	if f.pauseErr != nil {
+		return f.pauseErr
+	}
 	return nil
 }
 
 func (f *fakeDockerOps) Unpause(_ context.Context, _ string) error {
+	f.unpauseCalls++
 	f.paused = false
 	return nil
 }

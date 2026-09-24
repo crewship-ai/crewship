@@ -106,9 +106,13 @@ func (c CrewCapture) Volumes() []string {
 	return out
 }
 
-// CollectCrew pauses the crew container, streams its workspace bind,
-// crew memory bind, named volumes and output directory into dst
-// (prefixed by the crew's slug), and unpauses. Inside dst the layout
+// CollectCrew quiesces the crew container as far as its current state
+// allows (running containers are paused for the duration and resumed;
+// already-paused ones are collected under their existing pause and
+// left paused; stopped ones are collected as-is — see WithPaused,
+// #2612), streams its workspace bind, crew memory bind, named volumes
+// and output directory into dst (prefixed by the crew's slug), and
+// restores the container's prior state. Inside dst the layout
 // looks like:
 //
 //	workspace/<slug>/…   (/workspace bind contents)

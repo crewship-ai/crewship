@@ -229,6 +229,13 @@ func CreateBackup(ctx context.Context, db *sql.DB, opts CreateOptions) (result *
 				return nil, fmt.Errorf("backup: probe container %s for crew %s: %w", c.ContainerID, c.Slug, exErr)
 			}
 			if !exists {
+				// DB-only crew (never provisioned, or container removed):
+				// the bundle keeps its DB rows but carries no filesystem
+				// section. Say so — a bundle that silently omits a
+				// crew's files is how #2612's "incomplete export that
+				// looks successful" reads six weeks later (#2612).
+				slog.Warn("backup: crew container not found on daemon; backing up DB rows only",
+					"crew", c.Slug, "container", c.ContainerID, "workspace_id", target.ID)
 				c.ContainerID = ""
 			}
 		}
