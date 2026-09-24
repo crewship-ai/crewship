@@ -9,6 +9,7 @@ import (
 	"io"
 	"path"
 	"strings"
+	"time"
 
 	"github.com/moby/moby/api/pkg/stdcopy"
 	"github.com/moby/moby/client"
@@ -422,11 +423,19 @@ func (m *MobyDockerOps) ExecAs(ctx context.Context, containerID, user string, cm
 	return inspect.ExitCode, buf.Bytes(), nil
 }
 
-// ErrPauseUnpauseLost is returned by WithPaused when unpause fails
-// after a successful tar. Callers should log it loudly — the container
-// remains paused and a human operator must intervene. The backup
-// itself is still considered complete.
+// ErrPauseUnpauseLost is returned by WithPaused when its owned unpause
+// fails — alone after a successful fn, or joined with the collection
+// error when both fail. Callers should log it loudly: the container
+// remains paused and a human operator must intervene. It is never
+// swallowed, because "collection failed" does not make "and it is also
+// still paused" less true.
 var ErrPauseUnpauseLost = errors.New("backup: container left paused; manual unpause required")
+
+// unpauseTimeout bounds the deferred cleanup unpause. It is deliberately
+// short: this runs after fn has returned, frequently on an error path,
+// and a cleanup that can itself hang would turn a failed collection
+// into a wedged backup runner.
+const unpauseTimeout = 30 * time.Second
 
 // WithPaused runs fn with the container's filesystem quiesced where
 // possible, and — the part #2612 is about — puts the container back the
@@ -447,18 +456,31 @@ var ErrPauseUnpauseLost = errors.New("backup: container left paused; manual unpa
 // returned before fn runs, so a half-collected workspace can never be
 // sealed as a complete bundle.
 //
-// If an owned unpause fails after a successful fn, the inner error is
-// returned if any; otherwise ErrPauseUnpauseLost wraps the unpause
-// error so callers can alert an operator.
+// If the owned unpause fails, ErrPauseUnpauseLost wraps the unpause
+// error: alone when fn succeeded, or errors.Join-ed with the collection
+// error when both failed — the operator is told the container is left
+// paused either way. The unpause deliberately does NOT run on fn's
+// context: a collection that failed because the request was cancelled
+// would otherwise cancel its own cleanup and leave a container paused
+// against a perfectly healthy daemon.
 func WithPaused(ctx context.Context, ops DockerOps, containerID string, fn func() error) (retErr error) {
 	switch pauseErr := ops.Pause(ctx, containerID); {
 	case pauseErr == nil:
 		// We own this pause: whatever fn does, undo it.
 		defer func() {
-			if err := ops.Unpause(ctx, containerID); err != nil {
+			unpauseCtx, cancel := context.WithTimeout(context.Background(), unpauseTimeout)
+			defer cancel()
+			if err := ops.Unpause(unpauseCtx, containerID); err != nil {
+				lost := fmt.Errorf("%w: %v", ErrPauseUnpauseLost, err)
 				if retErr == nil {
-					retErr = fmt.Errorf("%w: %v", ErrPauseUnpauseLost, err)
+					retErr = lost
+					return
 				}
+				// The collection error stays primary; the lost-unpause
+				// alarm rides along rather than being dropped — a
+				// container left paused is an operator-visible fact
+				// even when the backup itself already failed.
+				retErr = errors.Join(retErr, lost)
 			}
 		}()
 	case errors.Is(pauseErr, ErrAlreadyPaused), errors.Is(pauseErr, ErrNotRunning):

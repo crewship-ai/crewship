@@ -559,10 +559,20 @@ type pausableOps struct {
 	unpauseErr error
 	pauses     int
 	unpauses   int
+	// unpauseCtxErr is what the deferred Unpause's context looked like
+	// AT CALL TIME (nil = live), so tests can prove cleanup does not
+	// ride the (possibly cancelled) collection context. The context
+	// itself is cancelled by WithPaused's own defer before the test gets
+	// to inspect it, hence capturing Err() rather than the ctx.
+	unpauseCtxErr error
 }
 
-func (p *pausableOps) Pause(context.Context, string) error   { p.pauses++; return p.pauseErr }
-func (p *pausableOps) Unpause(context.Context, string) error { p.unpauses++; return p.unpauseErr }
+func (p *pausableOps) Pause(context.Context, string) error { p.pauses++; return p.pauseErr }
+func (p *pausableOps) Unpause(ctx context.Context, _ string) error {
+	p.unpauses++
+	p.unpauseCtxErr = ctx.Err()
+	return p.unpauseErr
+}
 func (p *pausableOps) CopyFrom(context.Context, string, string) (io.ReadCloser, error) {
 	return io.NopCloser(strings.NewReader("")), nil
 }
@@ -594,12 +604,41 @@ func TestWithPaused_Branches(t *testing.T) {
 			t.Errorf("unpause must not run after failed pause")
 		}
 	})
-	t.Run("fn error wins over unpause error", func(t *testing.T) {
+	t.Run("fn error and unpause error are both reported", func(t *testing.T) {
+		// #2612 review: a failed collection whose cleanup ALSO failed
+		// used to drop ErrPauseUnpauseLost entirely — the container
+		// stayed paused and nothing told the operator. Both facts must
+		// reach the caller now.
 		ops := &pausableOps{unpauseErr: errors.New("unpause broken")}
 		fnErr := errors.New("fn failed")
 		err := WithPaused(ctx, ops, "c1", func() error { return fnErr })
 		if !errors.Is(err, fnErr) {
-			t.Fatalf("expected fn error to win, got %v", err)
+			t.Fatalf("expected collection error to be reported, got %v", err)
+		}
+		if !errors.Is(err, ErrPauseUnpauseLost) {
+			t.Fatalf("expected ErrPauseUnpauseLost to be reported alongside, got %v", err)
+		}
+	})
+	t.Run("cleanup unpause does not inherit a cancelled collection context", func(t *testing.T) {
+		// A collection that failed because the request was cancelled
+		// must not cancel its own unpause: the daemon is healthy, and
+		// riding the dead context would leave the container paused for
+		// no reason (#2612 review).
+		ops := &pausableOps{}
+		collCtx, cancel := context.WithCancel(ctx)
+		fnErr := errors.New("collect failed after cancellation")
+		err := WithPaused(collCtx, ops, "c1", func() error {
+			cancel()
+			return fnErr
+		})
+		if !errors.Is(err, fnErr) {
+			t.Fatalf("expected fn error, got %v", err)
+		}
+		if ops.unpauses != 1 {
+			t.Fatalf("unpause calls = %d, want 1", ops.unpauses)
+		}
+		if ops.unpauseCtxErr != nil {
+			t.Fatalf("cleanup unpause ran on a %v context — the container would stay paused against a healthy daemon", ops.unpauseCtxErr)
 		}
 	})
 	t.Run("collection error under an owned pause still unpauses", func(t *testing.T) {
