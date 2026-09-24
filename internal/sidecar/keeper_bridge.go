@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strings"
 	"time"
@@ -69,6 +70,10 @@ type keeperRequestBody struct {
 	Intent         string `json:"intent"`
 	TaskID         string `json:"task_id,omitempty"`
 	AgentSlug      string `json:"agent_slug,omitempty"` // ignored; see comment above
+	// ApprovalRequestID presents a human-approved escalation for consumption
+	// (#2574) — the request id returned by an earlier ESCALATE, after a person
+	// resolved it ALLOW. Also accepted as the X-Keeper-Approval header.
+	ApprovalRequestID string `json:"approval_request_id,omitempty"`
 }
 
 // keeperExecuteBody is what the agent sends to /keeper/execute.
@@ -82,6 +87,21 @@ type keeperExecuteBody struct {
 	EnvVar         string `json:"env_var,omitempty"`
 	TaskID         string `json:"task_id,omitempty"`
 	AgentSlug      string `json:"agent_slug,omitempty"` // ignored; see keeperRequestBody comment
+	// ApprovalRequestID presents a human-approved escalation for consumption
+	// (#2574) — binds to this agent, credential and the IDENTICAL command.
+	// Also accepted as the X-Keeper-Approval header.
+	ApprovalRequestID string `json:"approval_request_id,omitempty"`
+}
+
+// keeperApprovalID resolves the approval reference for a keeper call: the
+// X-Keeper-Approval header wins over the body field, so a client library that
+// cannot add body fields can still present one. Both are validated
+// server-side (consumeKeeperApproval); the sidecar only forwards.
+func keeperApprovalID(header http.Header, bodyField string) string {
+	if h := strings.TrimSpace(header.Get("X-Keeper-Approval")); h != "" {
+		return h
+	}
+	return strings.TrimSpace(bodyField)
 }
 
 // handleKeeperRequest handles POST /keeper/request from agents (UID 1001).
@@ -171,6 +191,18 @@ func (s *Server) handleKeeperRequest(w http.ResponseWriter, r *http.Request) {
 		"requesting_crew_id":  s.ipc.CrewID,
 		"workspace_id":        s.ipc.WorkspaceID,
 		"intent":              req.Intent,
+	}
+	if approvalID := keeperApprovalID(r.Header, req.ApprovalRequestID); approvalID != "" {
+		// #2574: a retry presenting a human approval. Forwarded, never
+		// validated here — the server binds it to the agent, credential and
+		// request type, and it is single-use there.
+		if !credentialIDPattern.MatchString(approvalID) {
+			writeJSONResponse(w, http.StatusBadRequest, map[string]string{
+				"error": "approval reference contains invalid characters",
+			})
+			return
+		}
+		ipcPayload["approval_request_id"] = approvalID
 	}
 	if req.CredentialID != "" {
 		ipcPayload["credential_id"] = req.CredentialID
@@ -323,6 +355,18 @@ func (s *Server) handleKeeperExecute(w http.ResponseWriter, r *http.Request) {
 		"command":             req.Command,
 		"container_id":        s.ipc.ContainerID,
 	}
+	if approvalID := keeperApprovalID(r.Header, req.ApprovalRequestID); approvalID != "" {
+		// #2574: a retry presenting a human approval. Forwarded, never
+		// validated here — the server binds it to the agent, credential and
+		// the identical command, and it is single-use there.
+		if !credentialIDPattern.MatchString(approvalID) {
+			writeJSONResponse(w, http.StatusBadRequest, map[string]string{
+				"error": "approval reference contains invalid characters",
+			})
+			return
+		}
+		ipcPayload["approval_request_id"] = approvalID
+	}
 	if req.CredentialID != "" {
 		ipcPayload["credential_id"] = req.CredentialID
 	}
@@ -367,6 +411,77 @@ func (s *Server) handleKeeperExecute(w http.ResponseWriter, r *http.Request) {
 	var result map[string]interface{}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		writeJSONResponse(w, http.StatusBadGateway, map[string]string{"error": "invalid response from keeper execute"})
+		return
+	}
+
+	writeJSONResponse(w, resp.StatusCode, result)
+}
+
+// handleKeeperRequestStatus handles GET /keeper/request/{id} from agents
+// (#2574): the poll half of the escalation flow. An ESCALATE response carries
+// a request id, and until now the agent had no way to learn what a person
+// decided about it — the sidecar had no GET route, so the only moves were
+// "ask again" (re-escalated) or "give up". This forwards to the server's
+// GET /api/v1/internal/keeper/request/{id} with the ACTING agent pinned, so a
+// sibling cannot read a peer's requests. The response the agent needs to act:
+// decision (still ESCALATE/PENDING → keep waiting; ALLOW → retry with
+// approval_request_id; DENY → stop) and approval_consumed_at (whether the
+// approval is still spendable).
+func (s *Server) handleKeeperRequestStatus(w http.ResponseWriter, r *http.Request) {
+	if s.ipc == nil {
+		writeJSONResponse(w, http.StatusServiceUnavailable, map[string]string{
+			"error": "keeper IPC not configured",
+		})
+		return
+	}
+
+	reqID := strings.TrimPrefix(r.URL.Path, "/keeper/request/")
+	reqID = strings.TrimSpace(reqID)
+	if reqID == "" || strings.Contains(reqID, "/") {
+		writeJSONResponse(w, http.StatusBadRequest, map[string]string{"error": "request id required"})
+		return
+	}
+	// Same character class as credential ids and the CUIDs the server mints —
+	// rejects path traversal and anything else that is not a plain id before
+	// it reaches a URL.
+	if !credentialIDPattern.MatchString(reqID) {
+		writeJSONResponse(w, http.StatusBadRequest, map[string]string{"error": "request id contains invalid characters"})
+		return
+	}
+
+	// Identity is the ACTING agent derived from the per-agent bearer token
+	// (#812) — the poll must not fall back to the boot agent's identity and
+	// hand a sibling another agent's escalation state.
+	agentID, ok := s.actingAgentID(r)
+	if !ok {
+		writeJSONResponse(w, http.StatusForbidden, map[string]string{"error": "unrecognized agent token"})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet,
+		s.ipc.BaseURL+"/api/v1/internal/keeper/request/"+url.PathEscape(reqID)+"?agent_id="+url.QueryEscape(agentID), nil)
+	if err != nil {
+		writeJSONResponse(w, http.StatusInternalServerError, map[string]string{"error": "failed to create IPC request"})
+		return
+	}
+	httpReq.Header.Set("X-Internal-Token", s.ipc.Token)
+
+	resp, err := ipcClient.Do(httpReq)
+	if err != nil {
+		s.logger.Error("keeper bridge: IPC status request failed", "error", err)
+		writeJSONResponse(w, http.StatusBadGateway, map[string]string{
+			"error": "keeper request status unavailable",
+		})
+		return
+	}
+	defer resp.Body.Close()
+
+	var result map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		writeJSONResponse(w, http.StatusBadGateway, map[string]string{"error": "invalid response from keeper"})
 		return
 	}
 

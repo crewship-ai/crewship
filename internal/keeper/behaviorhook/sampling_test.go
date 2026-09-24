@@ -50,14 +50,17 @@ func TestHook_MaybeEvaluateEvery_Cadence(t *testing.T) {
 
 			fires := 0
 			for i := 0; i < tc.calls; i++ {
-				_, fired := h.MaybeEvaluateEvery(context.Background(), hooks.EventContext{
+				sample, err := h.MaybeEvaluateEvery(context.Background(), hooks.EventContext{
 					Event:       hooks.EventPostToolCall,
 					WorkspaceID: "ws1",
 					CrewID:      "cr1",
 					AgentID:     "agent-a",
 					ToolName:    "shell_exec",
 				}, tc.every)
-				if fired {
+				if err != nil {
+					t.Fatalf("call %d: %v", i, err)
+				}
+				if sample != nil {
 					fires++
 				}
 			}
@@ -85,11 +88,11 @@ func TestHook_MaybeEvaluateEvery_IsPerCall(t *testing.T) {
 	}
 
 	// Call 1 at the default cadence: not sampled (counter 1, 1%5 != 0).
-	if _, fired := h.MaybeEvaluateEvery(context.Background(), ec, behaviorhook.DefaultSampleEvery); fired {
+	if sample, _ := h.MaybeEvaluateEvery(context.Background(), ec, behaviorhook.DefaultSampleEvery); sample != nil {
 		t.Fatal("first call at the default cadence fired; want a sampling gate, not an every-call gate")
 	}
 	// Call 2, the operator having just tightened the workspace to every call.
-	if _, fired := h.MaybeEvaluateEvery(context.Background(), ec, 1); !fired {
+	if sample, _ := h.MaybeEvaluateEvery(context.Background(), ec, 1); sample == nil {
 		t.Fatal("a cadence of 1 did not fire on the very next call — the value is not read per call")
 	}
 }
@@ -105,10 +108,10 @@ func TestHook_MaybeEvaluate_KeepsHookDefault(t *testing.T) {
 
 	fires := 0
 	for i := 0; i < 10; i++ {
-		if _, fired := h.MaybeEvaluate(context.Background(), hooks.EventContext{
+		if sample, _ := h.MaybeEvaluate(context.Background(), hooks.EventContext{
 			Event: hooks.EventPostToolCall, WorkspaceID: "ws1",
 			CrewID: "cr1", AgentID: "agent-a", ToolName: "shell_exec",
-		}); fired {
+		}); sample != nil {
 			fires++
 		}
 	}
