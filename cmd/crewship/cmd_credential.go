@@ -851,7 +851,7 @@ func init() {
 	credCreateCmd.Flags().StringArray("header", nil, "Extra request header KEY=VALUE (repeatable; use for Basic/custom-header endpoints). For --type ENDPOINT_URL, or with --base-url")
 	credCreateCmd.Flags().String("env-var-name", "", "Environment variable name")
 	credCreateCmd.Flags().String("account-label", "", "Which account/instance this credential is for (e.g. \"work\", or a forge host like \"ghe.acme.internal\" — git links match a credential by host)")
-	credCreateCmd.Flags().Int("security-level", 0, "Keeper credential tier — "+securityLevelHelp()+" (0 = leave at the server default). L4 requires a human to approve every read.")
+	credCreateCmd.Flags().Int("security-level", 0, "Keeper credential tier — "+securityLevelHelp()+" (0 = leave at the server default). L4 requires a human to approve every read unless the instance sets a lower escalate-from floor (keeper config).")
 	credCreateCmd.Flags().StringSlice("crews", nil, "Crew slugs or IDs to scope this credential to (repeatable/comma-separated); sets scope=CREW. Omit for a workspace-wide credential")
 	credCreateCmd.Flags().String("scope", "", "Visibility scope: WORKSPACE (default) or CREW. Usually inferred from --crews; set explicitly to override")
 	// OAuth app fields (--type OAUTH2). The row is created empty and PENDING;
@@ -868,7 +868,7 @@ func init() {
 	credUpdateCmd.Flags().String("value", "", "New value")
 	credUpdateCmd.Flags().Bool("value-stdin", false, "Read value from stdin")
 	credUpdateCmd.Flags().String("account-label", "", "Which account/instance this credential is for; pass an empty value to clear it")
-	credUpdateCmd.Flags().Int("security-level", 0, "Keeper credential tier — "+securityLevelHelp()+". L4 requires a human to approve every read.")
+	credUpdateCmd.Flags().Int("security-level", 0, "Keeper credential tier — "+securityLevelHelp()+". L4 requires a human to approve every read unless the instance sets a lower escalate-from floor (keeper config).")
 	credUpdateCmd.Flags().StringSlice("crews", nil, "Replace the crew scoping with these crew slugs or IDs (repeatable/comma-separated); pass an empty value to clear crews and make it workspace-wide")
 	credUpdateCmd.Flags().String("scope", "", "Visibility scope: WORKSPACE or CREW. Usually inferred from --crews; set explicitly to override")
 

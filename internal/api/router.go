@@ -617,6 +617,14 @@ func (r *Router) keeperPhase2Handler() *KeeperPhase2Handler {
 	return r.keeperPhase2
 }
 
+// BehaviorRecorder exposes the shared Phase-2 handler for the sampled
+// post-tool-call path (#2575). The observer in internal/server routes every
+// sampled behavior verdict through the same persistence the synchronous
+// POST /api/v1/keeper/behavior endpoint uses; this is how it reaches that
+// half without the router handing out its internals. Returns the lazily
+// constructed handler — never nil.
+func (r *Router) BehaviorRecorder() *KeeperPhase2Handler { return r.keeperPhase2Handler() }
+
 // PolicyResolver returns (lazily constructs) the shared per-crew
 // policy resolver. Callers should always go through this rather
 // than constructing their own — sharing the cache is what makes

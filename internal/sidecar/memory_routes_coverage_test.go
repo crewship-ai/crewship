@@ -89,7 +89,10 @@ var sidecarRouteGuards = map[string]routeGuardKind{
 	"POST /expose-port":         guardHandlerIdentity,
 	"POST /keeper/request":      guardHandlerIdentity,
 	"POST /keeper/execute":      guardHandlerIdentity,
-	"POST /mcp/routines":        guardHandlerIdentity,
+	// The escalation-outcome poll (#2574). guardHandlerIdentity: the handler
+	// resolves the acting agent so a sibling cannot read a peer's request.
+	"GET /keeper/request/": guardHandlerIdentity,
+	"POST /mcp/routines":   guardHandlerIdentity,
 	// notify_send is authorised by the agent↔channel pairing on the server,
 	// which keys on the ACTING agent — so this route must resolve identity or
 	// the grant model means nothing.

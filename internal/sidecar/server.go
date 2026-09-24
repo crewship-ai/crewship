@@ -665,6 +665,12 @@ func (s *Server) buildHandler(proxy *Proxy) http.Handler {
 			case r.Method == http.MethodPost && r.URL.Path == "/keeper/execute":
 				s.handleKeeperExecute(w, r)
 				return
+			// GET /keeper/request/{id} — the agent-facing poll for an
+			// escalation's outcome (#2574). Identity-resolved inside the
+			// handler (actingAgentID) like its POST siblings.
+			case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/keeper/request/"):
+				s.handleKeeperRequestStatus(w, r)
+				return
 			case r.Method == http.MethodPost && r.URL.Path == "/expose-port":
 				s.handleExposePort(w, r)
 				return
