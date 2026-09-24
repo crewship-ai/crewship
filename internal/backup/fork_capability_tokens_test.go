@@ -93,14 +93,18 @@ func seedCapabilityRows(t *testing.T, db *sql.DB, workspaceID string) forkCapabi
 		pipeline.HashCapabilityToken(f.webhookToken), workspaceID); err != nil {
 		t.Fatalf("seed webhook: %v", err)
 	}
-	// page_*: hash-only by design.
+	// page_*: hash-only by design. The public link is seeded LIVE; the
+	// page WEBHOOK is seeded already-revoked-with-a-real-reason, so the
+	// assertions below can pin both halves of the carry policy: live
+	// capabilities arrive revoked by the fork, already-revoked ones keep
+	// the history of WHY.
 	if _, err := db.ExecContext(ctx,
 		`UPDATE page_public_tokens SET token_hash = ? WHERE id IN (SELECT pt.id FROM page_public_tokens pt JOIN pages p ON p.id = pt.page_id WHERE p.workspace_id = ?)`,
 		pipeline.HashCapabilityToken(f.pagePublicToken), workspaceID); err != nil {
 		t.Fatalf("seed page public token: %v", err)
 	}
 	if _, err := db.ExecContext(ctx,
-		`UPDATE page_webhooks SET token_hash = ? WHERE id IN (SELECT wh.id FROM page_webhooks wh JOIN page_panels pan ON pan.id = wh.panel_id JOIN pages p ON p.id = pan.page_id WHERE p.workspace_id = ?)`,
+		`UPDATE page_webhooks SET token_hash = ?, revoked_at = '2026-08-01T10:00:00Z' WHERE id IN (SELECT wh.id FROM page_webhooks wh JOIN page_panels pan ON pan.id = wh.panel_id JOIN pages p ON p.id = pan.page_id WHERE p.workspace_id = ?)`,
 		pipeline.HashCapabilityToken(f.pageWebhookTok), workspaceID); err != nil {
 		t.Fatalf("seed page webhook: %v", err)
 	}
@@ -310,6 +314,11 @@ func TestForkedRestore_CapabilityTokens(t *testing.T) {
 		preimage  string
 		forkQuery string
 		srcQuery  string
+		// wantKeptRevokedAt: for a row the SOURCE had already revoked,
+		// the fork must keep that exact timestamp (history, not a
+		// generic fork note). Empty → the source row was live, so the
+		// fork's own revocation (a fresh timestamp) is expected.
+		wantKeptRevokedAt string
 	}{
 		{
 			table:     "page_public_tokens",
@@ -318,10 +327,11 @@ func TestForkedRestore_CapabilityTokens(t *testing.T) {
 			srcQuery:  `SELECT pt.token_hash FROM page_public_tokens pt JOIN pages p ON p.id = pt.page_id WHERE p.workspace_id = ?`,
 		},
 		{
-			table:     "page_webhooks",
-			preimage:  fixture.pageWebhookTok,
-			forkQuery: `SELECT wh.token_hash FROM page_webhooks wh JOIN page_panels pan ON pan.id = wh.panel_id JOIN pages p ON p.id = pan.page_id WHERE p.workspace_id = ?`,
-			srcQuery:  `SELECT wh.token_hash FROM page_webhooks wh JOIN page_panels pan ON pan.id = wh.panel_id JOIN pages p ON p.id = pan.page_id WHERE p.workspace_id = ?`,
+			table:             "page_webhooks",
+			preimage:          fixture.pageWebhookTok,
+			forkQuery:         `SELECT wh.token_hash FROM page_webhooks wh JOIN page_panels pan ON pan.id = wh.panel_id JOIN pages p ON p.id = pan.page_id WHERE p.workspace_id = ?`,
+			srcQuery:          `SELECT wh.token_hash FROM page_webhooks wh JOIN page_panels pan ON pan.id = wh.panel_id JOIN pages p ON p.id = pan.page_id WHERE p.workspace_id = ?`,
+			wantKeptRevokedAt: "2026-08-01T10:00:00Z",
 		},
 	}
 	for _, c := range pageChecks {
@@ -341,7 +351,9 @@ func TestForkedRestore_CapabilityTokens(t *testing.T) {
 		// Operator-visible state: revoked_at set. The production lookups
 		// (pages_public.go, pages_webhooks.go) filter revoked_at IS NULL,
 		// so the carried row answers as no-token — and the list views
-		// show it revoked rather than open.
+		// show it revoked rather than open. A row the source had already
+		// revoked keeps its OWN timestamp: overwriting it would erase
+		// why the capability was pulled there.
 		var forkRevokedAt sql.NullString
 		if err := source.QueryRowContext(ctx,
 			fmt.Sprintf(`SELECT r.revoked_at FROM %s r WHERE r.token_hash = ?`, c.table), forkHash).Scan(&forkRevokedAt); err != nil {
@@ -349,6 +361,10 @@ func TestForkedRestore_CapabilityTokens(t *testing.T) {
 		}
 		if !forkRevokedAt.Valid || forkRevokedAt.String == "" {
 			t.Errorf("%s: fork row has no revoked_at — it presents as an open capability nobody can use", c.table)
+		}
+		if c.wantKeptRevokedAt != "" && forkRevokedAt.String != c.wantKeptRevokedAt {
+			t.Errorf("%s: fork overwrote the source's revocation history: revoked_at = %q, want the source's %q",
+				c.table, forkRevokedAt.String, c.wantKeptRevokedAt)
 		}
 		// The path to a working token: a freshly minted row (the way the
 		// page API mints one — random token, only its digest stored) on

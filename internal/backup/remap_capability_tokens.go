@@ -100,10 +100,14 @@ func rekeyForkedCapabilityTokens(dump *DBDump) (map[string]int, error) {
 
 	// port_exposures: cleartext column gets the dead redaction marker
 	// (its NOT NULL UNIQUE demands a value; the real secret lives in the
-	// digest), digest gets a fresh mint nobody can present, and the row
-	// is carried as REVOKED — the proxy path only routes status='ACTIVE',
-	// so the fork's list shows a revoked exposure, not a live one that
-	// 404s.
+	// digest), digest gets a fresh mint nobody can present, and a row
+	// that was still live is carried as REVOKED — the proxy path only
+	// routes status='ACTIVE', so the fork's list shows a revoked
+	// exposure, not a live one that 404s. A row that was ALREADY
+	// revoked or expired keeps its own revoked_at / revoked_reason:
+	// overwriting them would erase why the source pulled the capability
+	// (a leaked link, say) and replace the record with a generic fork
+	// note.
 	for _, row := range dump.Tables["port_exposures"] {
 		if !hasNonEmptyString(row, "token") {
 			continue
@@ -115,9 +119,11 @@ func rekeyForkedCapabilityTokens(dump *DBDump) (map[string]int, error) {
 		}
 		row["token"] = pipeline.RedactedCapabilityToken(id)
 		row["token_hash"] = digest
-		row["status"] = "REVOKED"
-		row["revoked_at"] = now
-		row["revoked_reason"] = forkRevokedReason
+		if status, _ := row["status"].(string); status == "ACTIVE" || status == "PENDING" || status == "" {
+			row["status"] = "REVOKED"
+			row["revoked_at"] = now
+			row["revoked_reason"] = forkRevokedReason
+		}
 		counts["port_exposures"]++
 	}
 
@@ -144,10 +150,12 @@ func rekeyForkedCapabilityTokens(dump *DBDump) (map[string]int, error) {
 	// page_public_tokens / page_webhooks: hash-only tables. The digest is
 	// the lookup key; a fresh mint of an unpublished token leaves the
 	// row structurally intact and its capability carried-across-revoked.
-	// revoked_at is set to match: both public paths resolve only
-	// revoked_at IS NULL, and both list views surface revocation, so the
-	// operator sees a revoked link/webhook they can re-mint — not an
-	// open one nobody can use.
+	// revoked_at is set to match — but only on a row that was still
+	// live: both public paths resolve only revoked_at IS NULL, and both
+	// list views surface revocation, so the operator sees a revoked
+	// link/webhook they can re-mint rather than an open one nobody can
+	// use. A row the source had already revoked keeps its own timestamp
+	// — that is history, not a gap to overwrite.
 	for _, row := range dump.Tables["page_public_tokens"] {
 		if !hasNonEmptyString(row, "token_hash") {
 			continue
@@ -157,7 +165,9 @@ func rekeyForkedCapabilityTokens(dump *DBDump) (map[string]int, error) {
 			return nil, fmt.Errorf("backup: re-mint page public token: %w", err)
 		}
 		row["token_hash"] = digest
-		row["revoked_at"] = now
+		if !hasNonEmptyString(row, "revoked_at") {
+			row["revoked_at"] = now
+		}
 		counts["page_public_tokens"]++
 	}
 	for _, row := range dump.Tables["page_webhooks"] {
@@ -169,7 +179,9 @@ func rekeyForkedCapabilityTokens(dump *DBDump) (map[string]int, error) {
 			return nil, fmt.Errorf("backup: re-mint page webhook token: %w", err)
 		}
 		row["token_hash"] = digest
-		row["revoked_at"] = now
+		if !hasNonEmptyString(row, "revoked_at") {
+			row["revoked_at"] = now
+		}
 		counts["page_webhooks"]++
 	}
 

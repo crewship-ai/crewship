@@ -402,13 +402,14 @@ var backupRestoreCmd = &cobra.Command{
 				n += count
 			}
 			sort.Strings(tables)
-			note := fmt.Sprintf("Capability tokens re-keyed: %d row(s) across %s.\n"+
+			verb := "re-keyed"
+			if dryRun {
+				verb = "would be re-keyed"
+			}
+			note := fmt.Sprintf("Capability tokens %s: %d row(s) across %s.\n"+
 				"  The source's invitation links, exposed URLs, webhooks and public links keep working ONLY against the source.\n"+
 				"  Re-send the fork's invitations from its member list; re-create or rotate its webhooks, exposures and public links.",
-				n, strings.Join(tables, ", "))
-			if dryRun {
-				note = "Would " + strings.ToLower(note[:1]) + note[1:]
-			}
+				verb, n, strings.Join(tables, ", "))
 			cli.PrintWarning(note)
 		}
 		// CrewsRestored, not CrewsCount: the first is what landed, the

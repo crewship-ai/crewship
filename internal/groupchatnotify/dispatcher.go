@@ -146,7 +146,9 @@ func (d *Dispatcher) projectInTransaction(ctx context.Context, conn *sql.Conn, e
 			continue
 		}
 		source := "conversation_" + event.ConversationID + "_" + recipient.id
-		id := "ibx_message_" + source
+		// Workspace-scoped like every inbox id (#2274) — see
+		// internal/inbox writer.go's Insert.
+		id := "ibx_" + workspaceID + "_message_" + source
 		result, err := conn.ExecContext(ctx, `INSERT INTO inbox_items
    (id,workspace_id,kind,source_id,target_user_id,title,body_md,sender_type,state,priority,blocking,payload_json,created_at,updated_at)
    VALUES (?,?,'message',?,?,'New conversation activity','Open the conversation to read new messages.','system','unread','medium',0,?,?,?)
