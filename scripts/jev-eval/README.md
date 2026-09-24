@@ -27,6 +27,11 @@ evaluator. This Mac test establishes local behavior before a local evaluator
 is connected to that step; a completed score run must not be presented as an
 end-to-end webhook integration.
 
+The [2026-09-24 Mac report](../../docs/prd/reports/semif-mac-2026-09-24/README.md)
+records actual MLX results for the default 22 cases and a separate 12-case
+challenge corpus (`--cases scripts/jev-eval/semif-mac-challenge.jsonl`) in both
+4-bit and source precision.
+
 ## Hosted Jev pilot
 
 The integrated commands are `crewship decisions evaluate`, `triage`, and
