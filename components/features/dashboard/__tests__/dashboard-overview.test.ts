@@ -59,6 +59,35 @@ describe("dashboard overview derivations", () => {
     expect(items[2].label).toBe("2 schedule alerts")
   })
 
+  it("deep-links the single approval only when the exact total is one (#2692 review)", () => {
+    // Windowed rows hold exactly one approval while the server says two
+    // exist: the link must open the list, not strand the operator on the
+    // one decision that happened to fit the window.
+    const inbox = [{ id: "w1", kind: "waitpoint", state: "unread" }] as InboxItem[]
+    const twoTotal = buildAttentionItems({
+      inbox,
+      heldCrews: [],
+      credentialGapCount: 0,
+      activeByKind: { waitpoint: 2 },
+    })
+    expect(twoTotal[0].label).toBe("2 approvals waiting")
+    expect(twoTotal[0].href).not.toContain("item=")
+
+    // Exact total of one (still from the server) keeps the direct link.
+    const oneTotal = buildAttentionItems({
+      inbox,
+      heldCrews: [],
+      credentialGapCount: 0,
+      activeByKind: { waitpoint: 1 },
+    })
+    expect(oneTotal[0].label).toBe("1 approval waiting")
+    expect(oneTotal[0].href).toContain("item=w1")
+
+    // No aggregate at all: the window is the truth, one row deep-links.
+    const fallback = buildAttentionItems({ inbox, heldCrews: [], credentialGapCount: 0 })
+    expect(fallback[0].href).toContain("item=w1")
+  })
+
   it("never calls an empty crew 100% healthy and gives concrete failures precedence", () => {
     const empty = deriveFleetHealth({ crews: [crew], agents: [], gapsByCrew: new Map(), servicesByCrew: new Map() })
     expect(empty[0]).toMatchObject({ status: "Empty", tone: "muted", agents: 0 })

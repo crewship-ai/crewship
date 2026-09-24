@@ -858,7 +858,15 @@ export function buildAttentionItems({
     : failures.length
   const scheduleCount = activeByKind ? (activeByKind.schedule_missed ?? 0) : scheduleProblems.length
 
-  if (approvalsCount > 0) items.push({ id: "approvals", label: `${approvalsCount} approval${approvalsCount === 1 ? "" : "s"} waiting`, detail: "Review pending decisions", href: entityHref({ kind: "inbox", itemId: approvals.length === 1 ? approvals[0].id : undefined }), tone: "warn", icon: Clock3 })
+  // Deep-link the single item only when the EXACT total is one. With the
+  // server aggregate the windowed array can hold exactly one approval while
+  // more exist past the window — linking that one would send the operator to
+  // a single decision instead of the list that shows the rest (#2692 review).
+  const singleApprovalHref = approvalsCount === 1 && approvals.length >= 1
+    ? approvals[0].id
+    : undefined
+
+  if (approvalsCount > 0) items.push({ id: "approvals", label: `${approvalsCount} approval${approvalsCount === 1 ? "" : "s"} waiting`, detail: "Review pending decisions", href: entityHref({ kind: "inbox", itemId: singleApprovalHref }), tone: "warn", icon: Clock3 })
   if (failuresCount > 0) items.push({ id: "failures", label: `${failuresCount} failed run${failuresCount === 1 ? "" : "s"}`, detail: "Investigate and retry", href: entityHref({ kind: "inbox", itemKind: "failed_run" }), tone: "danger", icon: XCircle })
   if (held > 0) items.push({ id: "capacity", label: `${held} crew${held === 1 ? "" : "s"} waiting for capacity`, detail: heldCrews[0]?.detail || "View host admission details", href: "/settings", tone: "purple", icon: Gauge })
   if (credentialGapCount > 0) items.push({ id: "credentials", label: `${credentialGapCount} credential tool gap${credentialGapCount === 1 ? "" : "s"}`, detail: "Install missing crew tools", href: "/credentials", tone: "blue", icon: KeyRound })
