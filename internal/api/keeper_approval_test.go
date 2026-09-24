@@ -742,3 +742,48 @@ func TestL4Escalation_AdjudicatedAllowIsNotConsumable(t *testing.T) {
 		t.Fatalf("an adjudicated ALLOW was consumed: %d %s — a model's ruling released an L4 credential", w.Code, w.Body.String())
 	}
 }
+
+// TestL4Escalation_ForeignWorkspaceApprovalIsRefused — the consumption-side
+// tenant scope. Through the handlers the earlier agent/workspace boundary
+// checks fire first, so this branch is defence in depth — but the helper is
+// the one chokepoint every presentation passes through, and it must hold on
+// its own: an approval from another tenant's credential is a 404, not a
+// spendable ruling and not an existence oracle.
+func TestL4Escalation_ForeignWorkspaceApprovalIsRefused(t *testing.T) {
+	db := setupTestDB(t)
+	wsID, crewID, agentID, credID := seedL4Fixture(t, db)
+
+	// A second, foreign workspace (seedTestUser/Workspace are single-shot —
+	// a distinct row pair, not a second call to the same helper).
+	execOrFatal(t, db, `INSERT INTO users (id, email, full_name) VALUES ('foreign-user', 'foreign@example.com', 'Foreign')`)
+	execOrFatal(t, db, `INSERT INTO workspaces (id, name, slug) VALUES ('foreign-ws', 'Foreign', 'foreign-ws')`)
+	const foreignWS = "foreign-ws"
+
+	h, _ := newL4Handler(t, db, nil, nil)
+	const cmd = "pg_dump --host prod-db --all"
+	esc, _ := escalateL4Execute(t, h, wsID, crewID, agentID, credID, cmd)
+	if rr := resolveDecision(t, h, wsID, esc.RequestID, "ALLOW", "user-approver"); rr.Code != http.StatusOK {
+		t.Fatalf("resolve: %d %s", rr.Code, rr.Body.String())
+	}
+
+	// Present the approval under the foreign workspace claim, straight to the
+	// chokepoint (the handler-level boundary checks would mask it).
+	ap, fail := h.consumeKeeperApproval(context.Background(), esc.RequestID,
+		foreignWS, agentID, credID, keeper.RequestTypeExecute, cmd)
+	if fail == nil {
+		t.Fatalf("an approval scoped to workspace %s was honoured under %s (verdict %+v)", wsID, foreignWS, ap)
+	}
+	if fail.status != http.StatusNotFound {
+		t.Fatalf("got %d %q, want 404 — a foreign approval must not be an existence oracle", fail.status, fail.body)
+	}
+
+	// And the approval is still unspent for its own workspace afterwards.
+	var consumed sql.NullString
+	if err := db.QueryRow(`SELECT approval_consumed_at FROM keeper_requests WHERE id = ?`, esc.RequestID).
+		Scan(&consumed); err != nil {
+		t.Fatalf("read approval row: %v", err)
+	}
+	if consumed.Valid {
+		t.Fatal("the refused foreign presentation consumed the approval")
+	}
+}

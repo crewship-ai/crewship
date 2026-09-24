@@ -26,6 +26,7 @@ import (
 	"testing"
 
 	"github.com/crewship-ai/crewship/internal/api"
+	"github.com/crewship-ai/crewship/internal/inbox"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/keeper/behaviorhook"
 	"github.com/crewship-ai/crewship/internal/keeper/gatekeeper"
@@ -275,13 +276,31 @@ func TestSampledWarn_FullAutonomy_JournalOnly(t *testing.T) {
 	}
 }
 
+// capturingNotifier records every external-notification fan-out, so a test
+// can prove a notification never fired for a row that rolled back.
+type capturingNotifier struct {
+	mu    sync.Mutex
+	items []inbox.Item
+}
+
+func (c *capturingNotifier) NotifyInboxItem(_ context.Context, item inbox.Item) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.items = append(c.items, item)
+}
+
 // TestSampledVerdict_InboxFailureRollsBackTheVerdict — the delivery contract
 // #2575 rests on: a WARN/ESCALATE that cannot reach the inbox must not linger
 // as a recorded-but-never-delivered verdict. The verdict row, its ledger
 // transition and the inbox item commit atomically; a forced inbox failure
-// leaves NONE of them. The failure is injected with a real SQLite trigger so
+// leaves NONE of them — and fires no external notification for a row that
+// never became durable. The failure is injected with a real SQLite trigger so
 // the path exercised is production code end to end.
 func TestSampledVerdict_InboxFailureRollsBackTheVerdict(t *testing.T) {
+	notif := &capturingNotifier{}
+	restore := inbox.SetExternalNotifierForTesting(notif)
+	t.Cleanup(restore)
+
 	jr, db := fanoutFixture(t, "guided", "warn",
 		`{"decision":"ESCALATE","reason":"ambiguous tool sequence","risk":6}`)
 
@@ -332,5 +351,15 @@ func TestSampledVerdict_InboxFailureRollsBackTheVerdict(t *testing.T) {
 	}
 	if events != 1 {
 		t.Fatalf("ledger rows = %d, want 1 — the rolled-back verdict left its transition behind", events)
+	}
+
+	// A notification fired for the ONE committed row and for nothing else:
+	// a rolled-back verdict that still notified would tell a human about a
+	// finding that does not exist.
+	notif.mu.Lock()
+	got := len(notif.items)
+	notif.mu.Unlock()
+	if got != 1 {
+		t.Fatalf("external notifications = %d, want exactly 1 (the committed sample) — a rolled-back verdict was notified", got)
 	}
 }
