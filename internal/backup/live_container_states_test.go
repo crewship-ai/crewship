@@ -10,11 +10,12 @@
 //     container's filesystem fine, so a stopped crew can be backed up
 //     without being started — the pause that used to gate collection is
 //     not what makes the copy possible, only what makes it consistent;
+//
 //   - an already-paused container stays paused after collection — the
 //     backup must not resume a pause it does not own (#2612: the
 //     pre-fix code unpaused unconditionally).
 //
-//	go test -tags livedocker -run TestLive_CollectCrew_ContainerStates -v ./internal/backup/
+//     go test -tags livedocker -run TestLive_CollectCrew_ContainerStates -v ./internal/backup/
 package backup
 
 import (
