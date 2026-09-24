@@ -1,58 +1,32 @@
 import { test, expect } from "@playwright/test"
 
-// Browser-side feedback UI test. Without real LLM credentials on dev1,
-// we can't get a natural assistant turn to click on — so this test
-// uses page.evaluate() to drive the zustand feedback store directly,
-// then asserts the resulting HTTP roundtrip + DB state via the API.
+// Browser-side feedback transport test. A gated fixture creates a real
+// assistant message without an LLM, then page.evaluate() drives the
+// authenticated browser fetch path and checks the HTTP roundtrip.
 //
-// This is one notch above the pure-API test in e2e/feedback.spec.ts:
-// it loads the real Next.js app, the real store module, the real
-// auth/CSRF chain, and exercises submit/reset through the same store
-// the assistant-turn.tsx UI uses. A bug in the store's chain() or
-// rollback logic would surface here even if the per-API test passes.
+// This exercises the Next.js app and real auth/CSRF chain. It does not
+// click an assistant turn or call the zustand store; those need separate
+// UI coverage.
 //
-// The "submit() POSTs feedback" test below still uses a synthetic
-// turnId for the same reason its API-only sibling did before this
-// comment existed: there is no LLM credential here to produce a real
-// assistant turn to click on. As of #1617, POST /api/v1/feedback
-// correctly 404s a message_id that was never persisted to
-// conversation_messages (#1213, closing #1208's cross-tenant
-// message-existence oracle) — that is not a router bug (see
-// internal/api/feedback_route_test.go and
-// cmd/crewship/acceptance_feedback_test.go, both green against a real
-// message through the real router). This test stays red until this
-// harness has a way to seed a real conversation_messages row without
-// a live agent turn. The Origin-spoofing test right after it does not
-// depend on message existence (EnforceOrigin rejects before the
-// handler's DB lookup) and passes today.
+// A gated E2E fixture supplies a real assistant message for the HTTP roundtrip.
 test.describe("Feedback store via real browser", () => {
-  test.beforeEach(async ({ page, context, baseURL }) => {
-    // Sign in via NextAuth credentials callback so the cookie lands
-    // before we navigate. Same pattern as the API spec but here we
-    // also need a navigated page so the store module loads.
-    const csrfRes = await context.request.get(`${baseURL}/api/auth/csrf`)
-    const { csrfToken } = await csrfRes.json()
-    await context.request.post(`${baseURL}/api/auth/callback/credentials`, {
-      form: {
-        csrfToken,
-        email: "demo@crewship.ai",
-        password: "password123",
-      },
-      maxRedirects: 0,
-    })
+  test.beforeEach(async ({ page, baseURL }) => {
     await page.goto(`${baseURL}/`)
     await page.waitForLoadState("domcontentloaded")
   })
 
   test("submit() POSTs feedback + sets optimistic state, then reset() DELETEs", async ({ page, context, baseURL }) => {
-    const turnId = `pw-ui-${Date.now()}`
+    const workspaces = await (await context.request.get(`${baseURL}/api/v1/workspaces`)).json()
+    const workspaceID: string = Array.isArray(workspaces) ? workspaces[0]?.id : workspaces.id
+    expect(workspaceID).toBeTruthy()
+    const fixture = await context.request.post(
+      `${baseURL}/api/v1/e2e/fixtures/feedback-message?workspace_id=${encodeURIComponent(workspaceID)}`,
+    )
+    expect(fixture.status()).toBe(201)
+    const { message_id: turnId } = await fixture.json()
 
-    // Drive the same fetch path the UI uses, from inside the browser
-    // page context. This exercises NextAuth session cookie + Origin
-    // header set by the browser (matches /api/v1/feedback EnforceOrigin)
-    // + the actual JSON body shape the store sends. A bug in the
-    // store's serialization or the auth cookie flow surfaces here
-    // even if the pure-request test passes.
+    // Browser fetch exercises the session cookie and Origin header that
+    // /api/v1/feedback's EnforceOrigin checks.
     const submitResult = await page.evaluate(async (turnId) => {
       const res = await fetch("/api/v1/feedback", {
         method: "POST",

@@ -146,17 +146,17 @@ env:
     e2e/routine-run-inputs.spec.ts
     e2e/shell-overflow.spec.ts
     e2e/slash-run-routine-chat.spec.ts
+    e2e/feedback.spec.ts
+    e2e/feedback-ui.spec.ts
   #
   # DRIFT: run, reported, never fatal. Measured locally against a seeded
   # instance (main config, per spec: passed / failed):
   #
   #   create-crew-wizard          7 /  0   ← gate bucket (with the two #1987
   #                                          specs measured separately above)
-  #   feedback                    4 /  2
   #   crews-redesign              5 / 11
   #   crew-journal                3 /  1
   #   connectors                  3 / 10
-  #   feedback-ui                 1 /  1
   #   a11y                        1 /  8
   #   crew-privilege-controls     0 /  6
   #   crew-provisioning           0 /  1
@@ -189,8 +189,6 @@ env:
     e2e/crews-redesign.spec.ts
     e2e/crews-unification.spec.ts
     e2e/edge-cases.spec.ts
-    e2e/feedback.spec.ts
-    e2e/feedback-ui.spec.ts
     e2e/full-integration.spec.ts
     e2e/manual-crews-walkthrough.spec.ts
     e2e/mobile-crews.spec.ts
@@ -334,6 +332,7 @@ jobs:
 
       - name: Start crewship server in background
         env:
+          CREWSHIP_E2E_FIXTURES: "1"
           CREWSHIP_STORAGE_BASE_PATH: ${{ github.workspace }}/.crewship-data
           CREWSHIP_LOG_PATH: ${{ github.workspace }}/.crewship-logs
           CREWSHIP_BOLT_PATH: ${{ github.workspace }}/.crewship-data/state.db
@@ -610,7 +609,7 @@ jobs:
           - the crew explorer moved out of \`aside\` into \`main\`, so \`crew-privilege-controls\` and \`crew-provisioning\` die in shared setup
           - the legacy MCP connector catalog on \`/integrations\` is behind \`NEXT_PUBLIC_LEGACY_MCP_INTEGRATIONS\` (default off) (\`connectors\`)
           - \`a11y.spec.ts\` reports **live** wcag2a/wcag2aa violations (aria-command-name, button-name, aria-allowed-attr, link-in-text-block, color-contrast) on /crews, /routines, /credentials, /settings, /admin and chat. Its header documents these as fixed; nothing was running the scan, so they regressed. This one is a product bug, not a stale selector.
-          - \`POST /api/v1/feedback\` answers 404 for \`feedback\` / \`feedback-ui\` against a real seeded daemon even though the route is registered — worth its own look
+          - \`feedback\` and \`feedback-ui\` now run in GATE using persisted assistant-message fixtures
 
           This issue is refreshed by every nightly run and auto-closes when the whole drift bucket is green."
 

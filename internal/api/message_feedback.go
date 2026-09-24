@@ -152,11 +152,9 @@ func (h *MessageFeedbackHandler) ensureChatVisible(r *http.Request, chatID strin
 	return owner, true, nil
 }
 
-// Create handles POST /api/v1/feedback. Returns 201 with the inserted
-// row's id on first submit; subsequent submits with the same
-// (message_id, user_id, signal) tuple return 200 with the existing id
-// and the updated reason — a no-op-friendly contract for clients that
-// retry on flaky networks.
+// Create handles POST /api/v1/feedback. Returns 201 with the persisted
+// row's id on both the first submit and a repeated submit. Repeats update
+// the reason while retaining the existing id.
 func (h *MessageFeedbackHandler) Create(w http.ResponseWriter, r *http.Request) {
 	user := UserFromContext(r.Context())
 	if user == nil {

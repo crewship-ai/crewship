@@ -57,6 +57,13 @@ in the browser and reads the `inbox_acted` receipt off the issue's History tab
 the server was started the ordinary way. Locally, export the same variable on
 the server you point `PLAYWRIGHT_BASE_URL` at.
 
+The nightly starts its ephemeral server with the same gate. The feedback specs
+use `/api/v1/e2e/fixtures/feedback-message` to create a real chat and assistant
+message in the signed-in workspace before posting feedback. This keeps the
+message existence and workspace checks in the production feedback handler
+intact while testing them without an LLM credential. The route is absent from
+ordinary servers and is refused in production even if the flag is set.
+
 `visual.spec.ts` is in neither: every baseline in `visual.spec.ts-snapshots` is
 `*-chromium-darwin.png`, and Playwright resolves snapshots per platform — on a
 Linux runner it looks for `*-chromium-linux.png`, finds nothing and fails with
