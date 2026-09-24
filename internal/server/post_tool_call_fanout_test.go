@@ -274,3 +274,63 @@ func TestSampledWarn_FullAutonomy_JournalOnly(t *testing.T) {
 		t.Errorf("keeper.decision journal entries = %d, want 1", len(entries))
 	}
 }
+
+// TestSampledVerdict_InboxFailureRollsBackTheVerdict — the delivery contract
+// #2575 rests on: a WARN/ESCALATE that cannot reach the inbox must not linger
+// as a recorded-but-never-delivered verdict. The verdict row, its ledger
+// transition and the inbox item commit atomically; a forced inbox failure
+// leaves NONE of them. The failure is injected with a real SQLite trigger so
+// the path exercised is production code end to end.
+func TestSampledVerdict_InboxFailureRollsBackTheVerdict(t *testing.T) {
+	jr, db := fanoutFixture(t, "guided", "warn",
+		`{"decision":"ESCALATE","reason":"ambiguous tool sequence","risk":6}`)
+
+	// The fixture's Observe already succeeded — prove the happy state first.
+	if n := countInbox(t, db); n != 1 {
+		t.Fatalf("setup: expected 1 inbox item from the sample, got %d", n)
+	}
+
+	// Force every subsequent inbox insert to fail, then drive another
+	// sampled ESCALATE through the real observer.
+	if _, err := db.Exec(`CREATE TRIGGER fail_inbox_insert BEFORE INSERT ON inbox_items
+		BEGIN SELECT RAISE(ABORT, 'forced inbox failure'); END`); err != nil {
+		t.Fatalf("create trigger: %v", err)
+	}
+	obs := newPostToolCallObserver(
+		slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError})),
+		jr, db).
+		withRecorder(api.NewKeeperPhase2Handler(db, "tok", policy.NewResolver(db),
+			nil, gatekeeper.NewBehaviorEvaluator(
+				gatekeeper.New(&fanoutCannedProvider{content: `{"decision":"ESCALATE","reason":"another ambiguous sequence","risk":6}`}, "fanout-judge",
+					slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))),
+				slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))),
+			nil, nil,
+			slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))))
+	obs.Observe(orchestrator.ToolCallObservation{
+		WorkspaceID: "ws1",
+		CrewID:      "cr1",
+		AgentID:     "agent-a",
+		ToolName:    "shell_exec",
+	})
+
+	// Exactly the happy-path row survives: the failed sample left NO verdict
+	// row — the recorded-but-undelivered state is what must not exist.
+	var rows int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM keeper_requests WHERE request_type = 'behavior'`).Scan(&rows); err != nil {
+		t.Fatalf("count behavior rows: %v", err)
+	}
+	if rows != 1 {
+		t.Fatalf("behavior keeper_requests rows = %d, want 1 (only the pre-failure sample) — a failed delivery persisted its verdict", rows)
+	}
+	if n := countInbox(t, db); n != 1 {
+		t.Fatalf("inbox rows = %d, want 1 (only the pre-failure sample)", n)
+	}
+	// And no partial ledger entry for the rolled-back verdict either.
+	var events int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM keeper_request_events`).Scan(&events); err != nil {
+		t.Fatalf("count ledger rows: %v", err)
+	}
+	if events != 1 {
+		t.Fatalf("ledger rows = %d, want 1 — the rolled-back verdict left its transition behind", events)
+	}
+}

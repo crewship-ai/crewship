@@ -221,53 +221,67 @@ func (o *postToolCallObserver) Observe(obs orchestrator.ToolCallObservation) {
 // what an operator wants to see without scrolling; WARN and ALLOW are
 // telemetry.
 func (o *postToolCallObserver) routeSampledVerdict(ctx context.Context, obs orchestrator.ToolCallObservation, res gatekeeper.BehaviorReviewResult) {
-	if o.recorder != nil {
-		reqID, rerr := o.recorder.RecordSampledBehavior(ctx, api.SampledBehaviorInput{
-			WorkspaceID: obs.WorkspaceID,
-			CrewID:      obs.CrewID,
-			AgentID:     obs.AgentID,
-			ToolName:    obs.ToolName,
-			Verdict:     res,
-		})
-		if rerr != nil {
-			// Error, not Warn: this is exactly the silent-governance-failure
-			// #1048 made the endpoint refuse — the difference is there is no
-			// HTTP caller here to refuse. The next sampled tool call retries.
-			o.logger.Error("post_tool_call observer: persisting sampled behavior verdict failed",
-				"workspace_id", obs.WorkspaceID, "crew_id", obs.CrewID,
-				"agent_id", obs.AgentID, "decision", string(res.Decision), "error", rerr)
-		}
-		if o.journ != nil {
-			severity := journal.SeverityNotice
-			switch res.Decision {
-			case gatekeeper.BehaviorDeny, gatekeeper.BehaviorEscalate:
-				severity = journal.SeverityWarn
-			}
-			payload := map[string]any{
-				"tool":            obs.ToolName,
-				"decision":        string(res.Decision),
-				"reason":          res.Reason,
-				"risk_score":      res.RiskScore,
-				"policy_decision": string(res.PolicyDecision),
-				"source":          "behaviorhook_sampled",
-				"agent_id":        obs.AgentID,
-				"crew_id":         obs.CrewID,
-			}
-			if reqID != "" {
-				payload["request_id"] = reqID
-			}
-			_, _ = o.journ.Emit(ctx, journal.Entry{
-				WorkspaceID: obs.WorkspaceID,
-				CrewID:      obs.CrewID,
-				AgentID:     obs.AgentID,
-				MissionID:   obs.MissionID,
-				Type:        journal.EntryKeeperDecision,
-				Severity:    severity,
-				ActorType:   journal.ActorKeeper,
-				ActorID:     "keeper_behavior",
-				Summary:     "behavior monitor sampled " + string(res.Decision) + " on " + obs.ToolName,
-				Payload:     payload,
-			})
-		}
+	if o.recorder == nil {
+		return
+	}
+	reqID, rerr := o.recorder.RecordSampledBehavior(ctx, api.SampledBehaviorInput{
+		WorkspaceID: obs.WorkspaceID,
+		CrewID:      obs.CrewID,
+		AgentID:     obs.AgentID,
+		ToolName:    obs.ToolName,
+		Verdict:     res,
+	})
+	if rerr != nil {
+		// Error, not Warn: this is exactly the silent-governance-failure
+		// #1048 made the endpoint refuse — the difference is there is no
+		// HTTP caller here to refuse. The write is ATOMIC, so the honest
+		// statement of what happened is that THIS verdict was lost whole —
+		// no row, no inbox item, nothing half-delivered. The next sampled
+		// tool call is a fresh verdict and a fresh chance for the mechanism,
+		// not a redelivery of this one.
+		o.logger.Error("post_tool_call observer: sampled behavior verdict lost (nothing persisted)",
+			"workspace_id", obs.WorkspaceID, "crew_id", obs.CrewID,
+			"agent_id", obs.AgentID, "decision", string(res.Decision), "error", rerr)
+		return
+	}
+	if o.journ == nil {
+		return
+	}
+	severity := journal.SeverityNotice
+	switch res.Decision {
+	case gatekeeper.BehaviorDeny, gatekeeper.BehaviorEscalate:
+		severity = journal.SeverityWarn
+	}
+	payload := map[string]any{
+		"tool":            obs.ToolName,
+		"decision":        string(res.Decision),
+		"reason":          res.Reason,
+		"risk_score":      res.RiskScore,
+		"policy_decision": string(res.PolicyDecision),
+		"source":          "behaviorhook_sampled",
+		"agent_id":        obs.AgentID,
+		"crew_id":         obs.CrewID,
+	}
+	if reqID != "" {
+		payload["request_id"] = reqID
+	}
+	// Best-effort by the journal's contract (the keeper_requests row and the
+	// inbox item above are the durable record), but the error is LOGGED
+	// rather than discarded: a timeline silently missing the samples the
+	// audit table says existed is its own quiet divergence.
+	if _, eerr := o.journ.Emit(ctx, journal.Entry{
+		WorkspaceID: obs.WorkspaceID,
+		CrewID:      obs.CrewID,
+		AgentID:     obs.AgentID,
+		MissionID:   obs.MissionID,
+		Type:        journal.EntryKeeperDecision,
+		Severity:    severity,
+		ActorType:   journal.ActorKeeper,
+		ActorID:     "keeper_behavior",
+		Summary:     "behavior monitor sampled " + string(res.Decision) + " on " + obs.ToolName,
+		Payload:     payload,
+	}); eerr != nil {
+		o.logger.Warn("post_tool_call observer: journal emit for sampled verdict failed",
+			"workspace_id", obs.WorkspaceID, "agent_id", obs.AgentID, "error", eerr)
 	}
 }

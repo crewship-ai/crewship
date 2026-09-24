@@ -580,19 +580,15 @@ func (h *KeeperPhase2Handler) HandleBehavior(w http.ResponseWriter, r *http.Requ
 
 	// Persist + surface through the SAME half the sampled path uses
 	// (#2575), so the two trigger paths cannot drift into writing different
-	// rows for the same verdict. Error mapping keeps the endpoint's
-	// contract: an empty reqID means the audit row itself failed; a reqID
-	// with an error means the inbox write failed and the platform should
-	// retry rather than let the verdict vanish behind a 200 (#1048).
+	// rows for the same verdict. The write is atomic: on error NOTHING was
+	// persisted — no verdict row, no inbox item — so the platform's retry
+	// starts clean instead of resurrecting a recorded-but-undelivered
+	// verdict (#1048: fail loud, not silently-behind-a-200).
 	reqID, perr := h.persistBehaviorVerdict(r.Context(), res,
 		body.WorkspaceID, body.CrewID, body.AgentID, body.ToolName, body.AgentName)
 	if perr != nil {
-		h.logger.Error("keeper_phase2: behavior persist failed", "error", perr)
-		if reqID == "" {
-			replyError(w, http.StatusInternalServerError, "persistence error")
-		} else {
-			replyError(w, http.StatusInternalServerError, "failed to surface keeper decision to operator inbox")
-		}
+		h.logger.Error("keeper_phase2: behavior persist failed (nothing written)", "error", perr)
+		replyError(w, http.StatusInternalServerError, "failed to record the behavior verdict and surface it to the operator inbox")
 		return
 	}
 
@@ -643,14 +639,21 @@ func behaviorInboxItem(
 }
 
 // persistBehaviorVerdict records a behavior verdict in keeper_requests and
-// writes the operator inbox row when the verdict's PolicyDecision says to —
-// the persistence half shared by HandleBehavior (synchronous endpoint) and
-// RecordSampledBehavior (sampled hook path, #2575).
+// its operator inbox row in ONE transaction — the two commit together or
+// not at all (#1247's pattern, demanded by #2575's delivery contract).
 //
-// Returns the request id. An inbox write failure surfaces as an error; the
-// two callers answer it differently — the endpoint 500s so the platform
-// retries (#1048), the async sampled path logs at Error and moves on (there
-// is no caller to fail).
+// The transaction is the load-bearing part. The previous shape — verdict
+// row first, inbox insert second — left the recorded-but-never-delivered
+// state when the second write failed: the audit said a WARN/ESCALATE
+// happened, and no human ever saw it, with no retry that could deliver
+// THAT verdict (the next sampled call produces a new one). Atomicity turns
+// that half-state into a clean loss the caller can report: on error,
+// nothing exists — no row, no inbox item, no divergence between them.
+//
+// Returns the request id. An error means NOTHING was written; the two
+// callers answer it differently — the endpoint 500s so the platform
+// retries (#1048), the async sampled path logs at Error and moves on (a
+// later sample is a fresh verdict, not a redelivery).
 func (h *KeeperPhase2Handler) persistBehaviorVerdict(
 	ctx context.Context,
 	res gatekeeper.BehaviorReviewResult,
@@ -668,22 +671,80 @@ func (h *KeeperPhase2Handler) persistBehaviorVerdict(
 	res.Prompt = scrubJudgeText(res.Prompt)
 	res.RawLLMResponse = scrubJudgeText(res.RawLLMResponse)
 
-	reqID, recErr := h.recordKeeperRequest(ctx, keeper.RequestTypeBehavior,
-		agentID, crewID, "F4.2 behavior check on "+toolName,
-		string(res.Decision), res.Reason, res.RiskScore, res.Prompt, res.RawLLMResponse)
-	if recErr != nil {
-		return "", recErr
+	suffix, err := randHexID()
+	if err != nil {
+		return "", fmt.Errorf("keeper_phase2: generate request id: %w", err)
+	}
+	reqID := "kpr_" + shortPrefix(keeper.RequestTypeBehavior) + "_" + suffix
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	// #1369: a behavior verdict is written already-decided, so its ledger
+	// entry is a single terminal transition at seq 1 — recorded in the SAME
+	// transaction as the projection row and the inbox item below. See
+	// recordKeeperRequest for the workspace-resolution rationale.
+	ws := keeperRequestWorkspace(ctx, h.db, h.logger, agentID, crewID)
+	tr := keeperTransition{
+		RequestID:   reqID,
+		WorkspaceID: ws,
+		State:       string(res.Decision),
+		RequestType: string(keeper.RequestTypeBehavior),
+		AgentID:     agentID,
+		CrewID:      crewID,
+		Intent:      "F4.2 behavior check on " + toolName,
+		Reason:      res.Reason,
+		RiskScore:   &res.RiskScore,
+		ActorType:   keeperActorKeeper,
+		ActorID:     "keeper",
 	}
 
+	// The inbox item is built BEFORE the transaction opens: what gets
+	// delivered must be decided by the same verdict the row records, not
+	// re-resolved against a governance row that could change mid-write.
+	var item *inbox.Item
 	switch res.PolicyDecision {
 	case policy.DecisionInboxApprove, policy.DecisionAutoLogInbox,
 		policy.DecisionBlockInbox:
 		gov := governance.Resolve(ctx, h.db, h.logger, workspaceID)
 		title := fmt.Sprintf("Behavior monitor: %s on %s (%s)", agentDisplayName, toolName, res.Decision)
-		if err := inbox.Insert(ctx, h.db, h.logger,
-			behaviorInboxItem(reqID, workspaceID, gov, agentID, toolName, res, title)); err != nil {
-			return reqID, err
+		built := behaviorInboxItem(reqID, workspaceID, gov, agentID, toolName, res, title)
+		item = &built
+	}
+
+	tx, err := h.db.BeginTx(ctx, nil)
+	if err != nil {
+		return "", fmt.Errorf("keeper_phase2: begin behavior persist: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck // no-op after a successful Commit
+
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO keeper_requests (
+			id, requesting_agent_id, requesting_crew_id, credential_id,
+			intent, decision, reason, risk_score, created_at, decided_at,
+			request_type, ollama_prompt, ollama_raw_response
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		reqID, nullIfEmpty(agentID), nullIfEmpty(crewID), nullIfEmpty(""),
+		tr.Intent, nullIfEmpty(string(res.Decision)), nullIfEmpty(res.Reason), res.RiskScore, now, now,
+		string(keeper.RequestTypeBehavior), nullIfEmpty(res.Prompt), nullIfEmpty(res.RawLLMResponse),
+	); err != nil {
+		return "", fmt.Errorf("keeper_phase2: insert keeper_requests (behavior): %w", err)
+	}
+	if err := appendKeeperTransitionTx(ctx, tx, tr); err != nil {
+		return "", err
+	}
+	if item != nil {
+		if err := inbox.InsertTx(ctx, tx, h.logger, *item); err != nil {
+			// The whole transaction rolls back: no verdict row without its
+			// delivery, and no delivery without the verdict it belongs to.
+			return "", fmt.Errorf("keeper_phase2: behavior inbox insert (rolled back with the verdict): %w", err)
 		}
+	}
+	if err := tx.Commit(); err != nil {
+		return "", fmt.Errorf("keeper_phase2: commit behavior persist: %w", err)
+	}
+
+	// Post-commit only: a notification for rows that might still roll back
+	// would tell a human about something that never happened.
+	if item != nil {
+		inbox.NotifyExternalChannels(ctx, *item)
 		h.notifyKeeperInbox(workspaceID)
 	}
 	return reqID, nil

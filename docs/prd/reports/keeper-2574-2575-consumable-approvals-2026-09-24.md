@@ -159,3 +159,45 @@ bez rebuildů; spotřeba je podle PK, bez nového indexu.
   samostatný follow-up.
 - Live ověření přes dev3 UI (klikací approve → agent poll → retry) až PR
   pojede na stage; fixturní testy pokrývají kontrakt.
+
+## Kolo 2 — CodeRabbit changes_requested + revize správce (2026-09-24 večer)
+
+CodeRabbit review na `ef29450` (6 actionable) + následná nezávislá revize správce
+našly jednu další mezeru v doručení. Vše opraveno na HEAD tohoto PR:
+
+1. **Adjudikované ALLOW nebylo konzumovatelné** (Major, CWE-863): resolve s
+   `adjudicator` zapisoval `resolved_by_user_id` a tím mínil schválení. Nyní
+   adjudikované rozhodnutí (nebo chybějící actor) zapisuje NULL — approval
+   míní jen člověk. Pin: `TestL4Escalation_AdjudicatedAllowIsNotConsumable`
+   (assertuje NULL v projekci i 403 při prezentaci).
+2. **Atomické doručení verdiktu** (revize správce): `persistBehaviorVerdict`
+   zapisoval keeper_requests a teprve potom inbox — selhání inboxu zanechalo
+   zaznamenaný, ale nedoručený WARN/ESCALATE, bez retry téhož verdiktu.
+   Nyní verdict + ledger transition + inbox item jedou v JEDNÉ transakci
+   (`inbox.InsertTx`, nová tx-kapabilní varianta Insert bez externího
+   notify před commitm — notify až po commitu přes
+   `inbox.NotifyExternalChannels`). Selhání = čistá ztráta celého vzorku,
+   žádný půlstav. Komentář „next sampled tool call retries“ nahrazen
+   pravdivým tvrzením (nový verdikt, ne doručení starého).
+   Pin: `TestSampledVerdict_InboxFailureRollsBackTheVerdict` — skutečný
+   SQLite trigger vynutí selhání inboxu; assert: 1 řádek verdictu (pouze
+   pre-failure vzorek), 1 inbox item, 1 ledger transition.
+3. **Scrub Prompt/RawLLMResponse** v persistBehaviorVerdict (Major, CWE-312):
+   prompt nese agentem authored ToolArgsSnippet; bez scrubbu by token
+   echemovaný do tool args landing do `keeper_requests.ollama_prompt`
+   sampling rychlostí. Sdílené pro endpoint i sampled cestu.
+4. **Logování chyb**: approval load/consume (Error log + RowsAffected chyba
+   je 500, ne mylné 409); journal.Emit ve sampled cestě nyní Warn místo
+   ignorování.
+5. **`unicode.IsSpace` v L1 distinct-rune checku** (Minor): NBSP/thin space
+   se už nepočítá do 5-rune prahu; regresní případy v l1_hardening_test.
+6. **Persistenci vlastní deadline** (10 s) — LLM call nesmí sežrat budget
+   DB zápisům; totéž pro hook.blocked journal entry.
+7. **Dokumentace**: Decisions tabulka v keeper.mdx odpovídá Note o
+   konzumovatelném schválení.
+
+Ověření kola 2: `go vet` čisté; `internal/inbox`, `internal/server`
+(včetně nového atomicity testu), `internal/api` (L4/resolve/behavior/inbox
+sady), `internal/keeper/...` zelené. Plná lokální sada: 145+ balíků ok,
+`internal/database` ok samostatně (1910 s; dřívější kill byl OOM boxu,
+nýbrž testový fail).
