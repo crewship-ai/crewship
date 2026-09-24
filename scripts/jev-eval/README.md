@@ -1,5 +1,34 @@
 # Crewship Jev pilot
 
+## Local SemIf on MacBook Air
+
+SemIf is an independent open implementation, not TypeSafe's Jev weights. This
+separate smoke test uses the already installed SemIf MLX backend and pinned
+Qwen3.5-4B checkpoint on Apple Silicon. It needs no TypeSafe or OpenRouter key.
+Run it from a Crewship checkout on the Mac, with `~/AI/SemIf-OpenJev` installed:
+
+```bash
+python3 scripts/jev-eval/semif-mac-eval.py \
+  --semif-root ~/AI/SemIf-OpenJev \
+  --output ~/AI/semif-crewship-run-$(date +%Y%m%d%H%M%S)
+```
+
+The script loads the model once and scores 22 synthetic Czech/English cases
+covering signed webhook routing, journal incident assessment, and Ansible /
+Terraform dry runs. Results include raw choice accuracy, route accuracy after
+the experimental review threshold, coverage, and warm per-case latency. The
+model's option scores are **not calibrated confidence**. The corpus is a smoke
+test, not a production accuracy benchmark; no agent is started. Each output
+directory must be new. `--prepare-only` validates and writes SemIf input
+without loading a model, and `--mlx-bits none` uses source precision.
+
+The current Crewship `decision` routine step still uses a TypeSafe/OpenRouter
+evaluator. This Mac test establishes local behavior before a local evaluator
+is connected to that step; a completed score run must not be presented as an
+end-to-end webhook integration.
+
+## Hosted Jev pilot
+
 The integrated commands are `crewship decisions evaluate`, `triage`, and
 `rerank`. They read explicitly supplied stdin/files, print JSON, and never
 modify server state. `--dry-run` prints a request without using a key/network.
