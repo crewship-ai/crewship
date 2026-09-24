@@ -2,16 +2,17 @@
 
 import { Toaster as Sonner, type ToasterProps } from "sonner"
 
-function Toaster({ className, ...props }: ToasterProps) {
+function Toaster({ ...props }: ToasterProps) {
   return (
     <Sonner
+      className="toaster group"
       position="bottom-right"
+      // The app root is always dark. Sonner's light error palette has
+      // insufficient text contrast and looks wrong against the shell.
+      theme="dark"
       richColors
       closeButton
       {...props}
-      // Sonner's light-theme error red is 4.34:1 against its pale red
-      // background. The app foreground token clears WCAG AA in both themes.
-      className={`${className ?? "toaster group"} ![--error-text:var(--foreground)]`}
     />
   )
 }
