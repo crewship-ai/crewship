@@ -30,15 +30,15 @@ export function ConversationDetailsPanel({ section, conversation, canManage, onC
 
   return <motion.aside aria-label={title} initial={{ x: reducedMotion ? 0 : 24, opacity: 0 }} animate={{ x: 0, opacity: 1 }} transition={{ duration: reducedMotion ? 0 : 0.18 }}
     onKeyDown={(event) => { if (event.key === "Escape" && !event.defaultPrevented) { event.stopPropagation(); onClose() } }}
-    className="absolute inset-0 z-20 flex min-h-0 flex-col border-l bg-background @min-[720px]:static @min-[720px]:w-[360px] @min-[720px]:shrink-0">
+    className="absolute inset-0 z-20 flex min-h-0 flex-col border-l bg-card @min-[720px]:static @min-[720px]:w-[360px] @min-[720px]:shrink-0">
     <div className="flex min-h-0 flex-1 flex-col bg-accent/30">
       <header className="flex shrink-0 items-start gap-2 border-b px-3 py-3">
         <div className="min-w-0 flex-1"><h2 className="text-sm font-semibold">{title}</h2><p className="mt-0.5 truncate text-xs text-muted-foreground">{conversationTitle(conversation)}</p></div>
         <Button type="button" variant="ghost" size="icon" className="size-7 coarse:size-12" aria-label="Close conversation details" onClick={onClose}><X className="size-4" /></Button>
       </header>
-      <div className="min-h-0 flex-1 space-y-5 overflow-y-auto p-3">
-        <section aria-label="General"><h3 ref={generalHeading} tabIndex={-1} className="mb-3 text-xs font-semibold outline-none">General</h3>{general}</section>
-        <section aria-label="Members" className="space-y-3 border-t pt-4"><h3 ref={membersHeading} tabIndex={-1} className="text-xs font-semibold outline-none">Members</h3>{members}</section>
+      <div className="min-h-0 flex-1 space-y-5 overflow-y-auto p-3 text-xs">
+        <section aria-label="General"><h3 ref={generalHeading} tabIndex={-1} className="mb-3 text-[10px] uppercase tracking-wider text-muted-foreground outline-none">General</h3>{general}</section>
+        <section aria-label="Members" className="space-y-3 border-t pt-4"><h3 ref={membersHeading} tabIndex={-1} className="text-[10px] uppercase tracking-wider text-muted-foreground outline-none">Members</h3>{members}</section>
         {agents}
         {activity}
       </div>
