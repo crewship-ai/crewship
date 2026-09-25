@@ -46,7 +46,7 @@ function App() {
   const fresh = panels.filter(p => p.state === 'fresh').length
   return <main className="demo">
     <div className="topline"><span className="brand"><b>C</b><strong>CREWSHIP</strong><i>/</i> DEMO</span><span className="tag">LIVE WORKSPACE PAGE</span></div>
-    <header className="hero"><div><div className="eyebrow">A WORKFLOW YOU CAN INSPECT</div><h1>{page?.name ?? 'Connecting to Crewship'}</h1><p>{page?.description ?? 'Loading the latest workspace snapshot.'}</p></div><div className="hero-signal"><span>PAGE STATUS</span><strong>{fresh === panels.length && panels.length ? 'Up to date' : 'Ready to explore'}</strong><small>{fresh} of {panels.length} panels have a fresh snapshot</small><div className="signal-line" /></div></header>
+    <header className="hero"><div><div className="eyebrow">A WORKFLOW YOU CAN INSPECT</div><h1>{page?.name ?? 'Connecting to Crewship'}</h1><p>Explore snapshots produced by the routines and agents in this workspace. Open a panel to inspect its history or run its available action.</p></div><div className="hero-signal"><span>PAGE STATUS</span><strong>{fresh === panels.length && panels.length ? 'Up to date' : 'Ready to explore'}</strong><small>{fresh} of {panels.length} panels have a fresh snapshot</small><div className="signal-line" /></div></header>
     <nav className="toolbar"><strong>Overview</strong><span>{panels.length} panels · {fresh} fresh</span></nav>
     <section className="panels">{panels.map(panel => <Panel key={panel.id} panel={panel} />)}</section>
     <footer><span>CREWSHIP PAGES <b>×</b> WORKSPACE DATA</span><span>Snapshots come from governed producers</span></footer>

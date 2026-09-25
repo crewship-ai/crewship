@@ -75,7 +75,6 @@ pages:
         # `crewship page publish operations`, and a page with no public panel is
         # refused. So this line is what makes the demo publishable at all, and
         # the panels beside it stay private when it is.
-        public: true
 
         demo:
           items:
