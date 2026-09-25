@@ -55,11 +55,13 @@ describe("<RoutinesExplorer> chrome", () => {
   it("dims a status bucket that holds nothing", () => {
     // Four of six buckets sit at zero on a fresh workspace. Rendering
     // them at the same weight as the ones with content is what made
-    // the column a wall of identical rows.
+    // the column a wall of identical rows. The dim uses the soft token,
+    // not an alpha — text-foreground/40 measured under the wcag2aa
+    // contrast floor (#1617).
     render(<RoutinesExplorer {...PROPS} routines={[pipeline({})]} />)
     const empty = screen.getByText("Could not finish").className
     const filled = screen.getByText("Completed").className
-    expect(empty).toContain("text-foreground/40")
+    expect(empty).toContain("text-muted-foreground-soft")
     expect(filled).toContain("text-foreground/80")
   })
 

@@ -43,6 +43,62 @@ describe("dashboard overview derivations", () => {
     expect(items[0].label).toBe("1 approval waiting")
   })
 
+  it("counts attention labels from the server aggregate when provided (#2187)", () => {
+    // One failed run in the windowed rows, 6 active ones past it: the label
+    // must read the aggregate, not the window, or the headline plateaus.
+    const inbox = [{ id: "f1", kind: "failed_run", state: "read" }] as InboxItem[]
+    const items = buildAttentionItems({
+      inbox,
+      heldCrews: [],
+      credentialGapCount: 0,
+      activeByKind: { failed_run: 6, schedule_missed: 2, waitpoint: 1 },
+    })
+    expect(items.map((item) => item.id)).toEqual(["approvals", "failures", "schedules"])
+    expect(items[0].label).toBe("1 approval waiting")
+    expect(items[1].label).toBe("6 failed runs")
+    expect(items[2].label).toBe("2 schedule alerts")
+  })
+
+  it("links to every kind included in the failure count", () => {
+    const base = { inbox: [] as InboxItem[], heldCrews: [], credentialGapCount: 0 }
+    const circuitOnly = buildAttentionItems({ ...base, activeByKind: { schedule_circuit_breaker_tripped: 2 } })
+    expect(circuitOnly[0].label).toBe("2 run alerts")
+    expect(circuitOnly[0].href).toContain("kind=schedule_circuit_breaker_tripped")
+
+    const mixed = buildAttentionItems({ ...base, activeByKind: { failed_run: 1, schedule_circuit_breaker_tripped: 1 } })
+    expect(mixed[0].label).toBe("2 run alerts")
+    expect(mixed[0].href).toBe("/inbox")
+  })
+
+  it("deep-links the single approval only when the exact total is one (#2692 review)", () => {
+    // Windowed rows hold exactly one approval while the server says two
+    // exist: the link must open the list, not strand the operator on the
+    // one decision that happened to fit the window.
+    const inbox = [{ id: "w1", kind: "waitpoint", state: "unread" }] as InboxItem[]
+    const twoTotal = buildAttentionItems({
+      inbox,
+      heldCrews: [],
+      credentialGapCount: 0,
+      activeByKind: { waitpoint: 2 },
+    })
+    expect(twoTotal[0].label).toBe("2 approvals waiting")
+    expect(twoTotal[0].href).not.toContain("item=")
+
+    // Exact total of one (still from the server) keeps the direct link.
+    const oneTotal = buildAttentionItems({
+      inbox,
+      heldCrews: [],
+      credentialGapCount: 0,
+      activeByKind: { waitpoint: 1 },
+    })
+    expect(oneTotal[0].label).toBe("1 approval waiting")
+    expect(oneTotal[0].href).toContain("item=w1")
+
+    // No aggregate at all: the window is the truth, one row deep-links.
+    const fallback = buildAttentionItems({ inbox, heldCrews: [], credentialGapCount: 0 })
+    expect(fallback[0].href).toContain("item=w1")
+  })
+
   it("never calls an empty crew 100% healthy and gives concrete failures precedence", () => {
     const empty = deriveFleetHealth({ crews: [crew], agents: [], gapsByCrew: new Map(), servicesByCrew: new Map() })
     expect(empty[0]).toMatchObject({ status: "Empty", tone: "muted", agents: 0 })

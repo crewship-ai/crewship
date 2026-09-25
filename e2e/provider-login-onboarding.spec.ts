@@ -1,5 +1,26 @@
 import { test, expect } from "@playwright/test"
 
+// GET /api/v1/credentials/{id}/access/me as the OWNER role sees it — the
+// same states and reasons internal/api/access_me.go answers for an owner on
+// a workspace-scoped row. The detail sheet gates every action on this
+// response (#2669), so fixture tests must serve it or the actions render
+// as if the server had failed.
+function ownerAccess(credentialId: string) {
+  const d = (state: "allowed" | "conditional" | "denied", reason: string) => ({ state, reason })
+  return {
+    credential_id: credentialId,
+    actions: {
+      read: d("allowed", "visible_metadata"),
+      edit: d("allowed", "role"),
+      manage_bindings: d("allowed", "role"),
+      rotate: d("conditional", "runtime_preflight_required"),
+      reveal: d("denied", "missing_capability"),
+      delete: d("conditional", "runtime_preflight_required"),
+      lower_sensitivity: d("allowed", "role"),
+    },
+  }
+}
+
 for (const role of ["MANAGER", "MEMBER", "VIEWER"]) {
   test(`${role} cannot open provider administration`, async ({ page }) => {
     let providerReads = 0
@@ -35,6 +56,7 @@ for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 
       if (path === "/api/auth/session") body = { user: { id: "ui-test", email: "ui@example.test" }, expires: "2099-01-01T00:00:00Z" }
       else if (path === "/api/v1/workspaces") body = [{ id: "ui-workspace", name: "Browser fixture", slug: "browser-fixture", currentUserRole: "OWNER" }]
       else if (path === "/api/v1/credentials") body = [credential]
+      else if (path === "/api/v1/credentials/fixture-provider/access/me") body = ownerAccess("fixture-provider")
       else if (path === "/api/v1/credentials/fixture-provider" && route.request().method() === "PATCH") { patch = route.request().postDataJSON(); Object.assign(credential, patch); body = credential }
       else if (path.includes("/settings") || path.includes("/config") || path.includes("/health")) body = {}
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) })
@@ -85,8 +107,11 @@ for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 
     if (viewport.width > 640) {
       // Pin global navigation so its hover overlay cannot cover the vault rail.
       await expect(page.getByText("All providers", { exact: true })).toBeVisible()
-      await expect(page.getByLabel("0 connected accounts")).toHaveCount(15)
-      await page.getByText("Grok / xAI", { exact: true }).click()
+      // Since #2622 the rail lists only CONNECTED providers — an empty
+      // workspace shows none, and the full catalog lives in Add provider
+      // (asserted below). Zero-account rows with "N connected accounts"
+      // labels must not come back.
+      await expect(page.getByLabel(/connected accounts/)).toHaveCount(0)
     }
     await page.getByRole("button", { name: "Add provider", exact: true }).first().click()
     for (const product of ["Go", "Zen"]) {
@@ -149,6 +174,7 @@ for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 
       if (path === "/api/auth/session") body = { user: { id: "ui-test", email: "ui@example.test" }, expires: "2099-01-01T00:00:00Z" }
       else if (path === "/api/v1/workspaces") body = [{ id: "ui-workspace", name: "Browser fixture", slug: "browser-fixture", currentUserRole: "OWNER" }]
       else if (path === "/api/v1/credentials") body = url.searchParams.has("kind") ? [] : [credential]
+      else if (path === "/api/v1/credentials/fixture-secret/access/me") body = ownerAccess("fixture-secret")
       else if (path === "/api/v1/credentials/fixture-secret/fields") body = fields
       else if (path === "/api/v1/credentials/fixture-secret/fields/ca_pem" && route.request().method() === "PUT") {
         fields[0].value = route.request().postDataJSON().value
@@ -171,7 +197,11 @@ for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 
     await expect(page.getByTestId("connection-verification")).toContainText("Connection not verified")
     await expect(page.locator('[aria-label="Assigned agents"]')).toContainText("Alex")
     await expect(page.locator('[aria-label="Assigned agents"]')).toContainText("Jamie")
-    await expect(page.getByTestId("credential-access-summary")).toContainText("Your access:")
+    // #2669 replaced the one-line role summary with the server's per-action
+    // answers. Assert both the section and a decision that can only come from
+    // the /access/me fixture flowing through.
+    await expect(page.getByTestId("credential-access-summary")).toContainText("Your access")
+    await expect(page.getByTestId("credential-access-summary")).toContainText("Edit: Allowed — Allowed by your workspace role")
     await expect(page.getByText("Access & security", { exact: true })).toBeVisible()
     await page.waitForTimeout(600)
     await page.screenshot({ path: `/tmp/credential-detail-${viewport.width}.png` })

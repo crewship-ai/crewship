@@ -28,14 +28,18 @@ export function timeAgo(dateStr: string): string {
 }
 
 /**
- * Format a duration in milliseconds as a compact string (e.g. "45s", "3m 12s").
+ * Format a duration in milliseconds as a compact string (e.g. "45s", "3m 12s",
+ * "2h 5m"). Rolls over to hours like formatDurationClock, so a mission open
+ * for a week reads "1w"-scale timestamps as "168h" rather than "10080m".
  */
 export function formatDuration(ms: number): string {
   const s = Math.round(ms / 1000)
   if (s < 60) return `${s}s`
   const m = Math.floor(s / 60)
   const remainder = s % 60
-  return remainder > 0 ? `${m}m ${remainder}s` : `${m}m`
+  if (m < 60) return remainder > 0 ? `${m}m ${remainder}s` : `${m}m`
+  const h = Math.floor(m / 60)
+  return m % 60 > 0 ? `${h}h ${m % 60}m` : `${h}h`
 }
 
 /**

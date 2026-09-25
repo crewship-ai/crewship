@@ -211,6 +211,14 @@ type inboxListResponse struct {
 	Count       int                 `json:"count"`
 	UnreadCount int                 `json:"unread_count"`
 	HasMore     bool                `json:"has_more"`
+	// ActiveByKind counts the caller's visible NOT-resolved items per kind,
+	// independent of the request's own state/kind filters. "Needs your
+	// attention" headlines count from this instead of len(Rows): the rows are
+	// LIMIT-windowed (default 100) and silently plateau there (#2187), while
+	// this aggregate is exact for the same visibility the caller sees.
+	// Absent (not empty) when the aggregate could not be computed completely
+	// — see the computation site above.
+	ActiveByKind map[string]int `json:"active_by_kind,omitempty"`
 }
 
 // List serves GET /api/v1/inbox. Filter by ?state=unread|read|resolved|all
@@ -353,11 +361,51 @@ func (h *InboxHandler) List(w http.ResponseWriter, r *http.Request) {
 		unreadCount = 0
 	}
 
+	// Exact per-kind counts of the caller's visible active items, for the
+	// "Needs your attention" aggregates that must not plateau at the LIMIT
+	// window (#2187). Same visibility predicate as the list; "active" is the
+	// same definition the state=active filter uses (shared resolved column),
+	// so the two can never disagree about what counts as settled.
+	//
+	// omitempty, and nil on any failure: a missing or partial aggregate must
+	// read as "counts unavailable" (the client falls back to counting its
+	// windowed rows), never as "no attention needed" — an empty object with
+	// a 200 would hide real alerts behind a counts bug (#2692 review).
+	activeByKind := map[string]int{}
+	kindQuery := `SELECT kind, COUNT(*) FROM inbox_items` + inboxReadsJoinClause + ` WHERE workspace_id = ?` + visClause +
+		` AND state != 'resolved' GROUP BY kind`
+	kindArgs := append([]interface{}{user.ID, workspaceID}, visArgs...)
+	if kindRows, kindErr := h.db.QueryContext(r.Context(), kindQuery, kindArgs...); kindErr != nil {
+		h.logger.Warn("inbox active-by-kind counts", "error", kindErr)
+		activeByKind = nil
+	} else {
+		complete := true
+		for kindRows.Next() {
+			var kind string
+			var n int
+			if err := kindRows.Scan(&kind, &n); err != nil {
+				h.logger.Warn("inbox active-by-kind scan", "error", err)
+				complete = false
+				break
+			}
+			activeByKind[kind] = n
+		}
+		if err := kindRows.Err(); err != nil {
+			h.logger.Warn("inbox active-by-kind iterate", "error", err)
+			complete = false
+		}
+		kindRows.Close()
+		if !complete {
+			activeByKind = nil
+		}
+	}
+
 	writeJSON(w, http.StatusOK, inboxListResponse{
-		Rows:        out,
-		Count:       len(out),
-		UnreadCount: unreadCount,
-		HasMore:     hasMore,
+		Rows:         out,
+		Count:        len(out),
+		UnreadCount:  unreadCount,
+		HasMore:      hasMore,
+		ActiveByKind: activeByKind,
 	})
 }
 

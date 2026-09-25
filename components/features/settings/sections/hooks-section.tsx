@@ -172,7 +172,7 @@ function OutcomeCell({ result, windowCapped }: { result?: LastResult; windowCapp
   // registry read follows for "no hooks" versus "could not ask".
   if (!result) {
     return (
-      <span className="text-muted-foreground/70">
+      <span className="text-muted-foreground-soft">
         {windowCapped ? "No recent activity" : "Never fired"}
       </span>
     )
@@ -186,7 +186,7 @@ function OutcomeCell({ result, windowCapped }: { result?: LastResult; windowCapp
   return (
     <span className="inline-flex items-baseline gap-1.5">
       <span className={cn("font-medium", tone)}>{result.outcome}</span>
-      <span className="text-muted-foreground/70">{relativeTime(result.ts)}</span>
+      <span className="text-muted-foreground-soft">{relativeTime(result.ts)}</span>
     </span>
   )
 }
@@ -353,7 +353,7 @@ export function HooksSection({ workspaceId, role }: HooksSectionProps) {
                             </Badge>
                           )}
                         </div>
-                        <div className="mt-0.5 flex items-center gap-1.5 text-[11px] text-muted-foreground/80">
+                        <div className="mt-0.5 flex items-center gap-1.5 text-[11px] text-muted-foreground-soft">
                           <span>{hook.crew_id ? hook.crew_id : "all crews"}</span>
                           <span aria-hidden>·</span>
                           {gateable && hook.blocking ? (
@@ -379,7 +379,7 @@ export function HooksSection({ workspaceId, role }: HooksSectionProps) {
                             printing the command is that someone can audit it,
                             and an ellipsis with a hover title is neither
                             readable on a touch device nor selectable. */}
-                        <span className="mt-0.5 block max-w-[22rem] break-all font-mono text-[11px] text-muted-foreground/80">
+                        <span className="mt-0.5 block max-w-[22rem] break-all font-mono text-[11px] text-muted-foreground-soft">
                           {target}
                         </span>
                       </td>
