@@ -18,7 +18,7 @@ func TestResolveSeedCodexLoginRefusesSymlink(t *testing.T) {
 	}
 	link := filepath.Join(filepath.Dir(path), "auth-link.json")
 	if err := os.Symlink(path, link); err != nil {
-		t.Skipf("symlink creation refused: %v", err)
+		t.Fatalf("symlink creation failed: %v", err)
 	}
 	defer os.Remove(link)
 	t.Setenv(seedCodexAuthFileEnv, link)
