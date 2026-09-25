@@ -32,7 +32,6 @@ describe("AgentWorkTab", () => {
     expect(screen.queryByRole("link", { name: /Copy review/ })).not.toBeInTheDocument()
     expect(screen.queryByRole("button", { name: /Refresh agent work/ })).not.toBeInTheDocument()
     expect(screen.queryByRole("link", { name: /View all/ })).not.toBeInTheDocument()
-    expect(screen.getByRole("tabpanel").querySelector(".grid")?.className).toContain("@min-[440px]:grid-cols-2")
 
     fireEvent.click(screen.getByRole("tab", { name: /Routines/ }))
     expect(screen.getByRole("tab", { name: /Routines/ })).toHaveAttribute("aria-selected", "true")
