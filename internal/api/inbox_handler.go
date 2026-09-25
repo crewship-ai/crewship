@@ -219,6 +219,10 @@ type inboxListResponse struct {
 	// Absent (not empty) when the aggregate could not be computed completely
 	// — see the computation site above.
 	ActiveByKind map[string]int `json:"active_by_kind,omitempty"`
+	// DecisionCount counts active cards that actually block on a person. It
+	// includes run_needs_human and excludes source-less keeper advisories.
+	// Nil means the aggregate failed; zero is a known empty result.
+	DecisionCount *int `json:"decision_count,omitempty"`
 }
 
 // List serves GET /api/v1/inbox. Filter by ?state=unread|read|resolved|all
@@ -372,9 +376,20 @@ func (h *InboxHandler) List(w http.ResponseWriter, r *http.Request) {
 	// windowed rows), never as "no attention needed" — an empty object with
 	// a 200 would hide real alerts behind a counts bug (#2692 review).
 	activeByKind := map[string]int{}
-	kindQuery := `SELECT kind, COUNT(*) FROM inbox_items` + inboxReadsJoinClause + ` WHERE workspace_id = ?` + visClause +
+	kindQuery := `SELECT kind, COUNT(*), SUM(CASE WHEN
+		kind = 'waitpoint' OR
+		(kind = 'escalation' AND (
+			json_extract(payload_json, '$.kind') IN ('skill_proposal', 'routine_proposal') OR
+			NULLIF(json_extract(payload_json, '$.escalation_type'), '') IS NOT NULL OR
+			(json_extract(payload_json, '$.request_type') = 'access' AND NULLIF(json_extract(payload_json, '$.request_id'), '') IS NOT NULL)
+		)) OR
+		(kind NOT IN ('escalation', 'schedule_missed', 'schedule_circuit_breaker_tripped') AND blocking = 1) OR
+		(kind = 'memory_consolidation' AND NULLIF(json_extract(payload_json, '$.proposal_id'), '') IS NOT NULL)
+		THEN 1 ELSE 0 END) FROM inbox_items` + inboxReadsJoinClause + ` WHERE workspace_id = ?` + visClause +
 		` AND state != 'resolved' GROUP BY kind`
 	kindArgs := append([]interface{}{user.ID, workspaceID}, visArgs...)
+	decisionCount := 0
+	var decisionCountPtr *int
 	if kindRows, kindErr := h.db.QueryContext(r.Context(), kindQuery, kindArgs...); kindErr != nil {
 		h.logger.Warn("inbox active-by-kind counts", "error", kindErr)
 		activeByKind = nil
@@ -382,13 +397,14 @@ func (h *InboxHandler) List(w http.ResponseWriter, r *http.Request) {
 		complete := true
 		for kindRows.Next() {
 			var kind string
-			var n int
-			if err := kindRows.Scan(&kind, &n); err != nil {
+			var n, decisions int
+			if err := kindRows.Scan(&kind, &n, &decisions); err != nil {
 				h.logger.Warn("inbox active-by-kind scan", "error", err)
 				complete = false
 				break
 			}
 			activeByKind[kind] = n
+			decisionCount += decisions
 		}
 		if err := kindRows.Err(); err != nil {
 			h.logger.Warn("inbox active-by-kind iterate", "error", err)
@@ -397,6 +413,8 @@ func (h *InboxHandler) List(w http.ResponseWriter, r *http.Request) {
 		kindRows.Close()
 		if !complete {
 			activeByKind = nil
+		} else {
+			decisionCountPtr = &decisionCount
 		}
 	}
 
@@ -406,6 +424,7 @@ func (h *InboxHandler) List(w http.ResponseWriter, r *http.Request) {
 		UnreadCount:  unreadCount,
 		HasMore:      hasMore,
 		ActiveByKind: activeByKind,
+		DecisionCount: decisionCountPtr,
 	})
 }
 

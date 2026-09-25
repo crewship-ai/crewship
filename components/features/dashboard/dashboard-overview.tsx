@@ -30,6 +30,7 @@ import type {
   RuntimeCapacityResponse,
 } from "@/app/(dashboard)/dashboard-types"
 import type { InboxItem } from "@/hooks/use-inbox"
+import { isBlockingInboxItem } from "@/components/features/inbox-v2/inbox-v2-derive"
 import type { PipelineRun } from "@/hooks/use-pipeline-runs"
 import type { PipelineSchedule } from "@/hooks/use-pipeline-schedules"
 import type { Mission } from "@/lib/types/mission"
@@ -733,6 +734,7 @@ export function buildAttentionItems({
   heldCrews,
   reviewCount = 0,
   activeByKind,
+  decisionCount,
 }: {
   inbox: InboxItem[]
   heldCrews: NonNullable<RuntimeCapacityResponse["held"]>
@@ -742,17 +744,16 @@ export function buildAttentionItems({
    *  and the headline silently plateaued there (#2187). The windowed items
    *  still supply the single-item deep link below. */
   activeByKind?: Record<string, number>
+  decisionCount?: number
 }): AttentionItem[] {
   const items: AttentionItem[] = []
-  const approvals = inbox.filter((item) => item.kind === "waitpoint" || item.kind === "escalation")
+  const decisions = inbox.filter(isBlockingInboxItem)
   const failures = inbox.filter((item) => item.kind === "failed_run" || item.kind === "schedule_circuit_breaker_tripped")
   const scheduleProblems = inbox.filter((item) => item.kind === "schedule_missed")
   const held = heldCrews.length
 
   // Server aggregate wins when the server sent one: exact past any window.
-  const approvalsCount = activeByKind
-    ? (activeByKind.waitpoint ?? 0) + (activeByKind.escalation ?? 0)
-    : approvals.length
+  const decisionsTotal = decisionCount ?? decisions.length
   const failedRunCount = activeByKind
     ? (activeByKind.failed_run ?? 0)
     : failures.filter((item) => item.kind === "failed_run").length
@@ -762,7 +763,7 @@ export function buildAttentionItems({
   const failuresCount = failedRunCount + circuitBreakerCount
   const scheduleCount = activeByKind ? (activeByKind.schedule_missed ?? 0) : scheduleProblems.length
 
-  if (approvalsCount > 0) items.push({ id: "approvals", label: `${approvalsCount} approval${approvalsCount === 1 ? "" : "s"} waiting`, detail: "Review pending decisions", href: entityHref({ kind: "inbox", attention: "approvals" }), tone: "warn", icon: Clock3 })
+  if (decisionsTotal > 0) items.push({ id: "approvals", label: `${decisionsTotal} decision${decisionsTotal === 1 ? "" : "s"} waiting`, detail: "Your input is needed", href: entityHref({ kind: "inbox", attention: "approvals" }), tone: "warn", icon: Clock3 })
   if (failuresCount > 0) items.push({ id: "failures", label: circuitBreakerCount > 0 ? `${failuresCount} run alert${failuresCount === 1 ? "" : "s"}` : `${failuresCount} failed run${failuresCount === 1 ? "" : "s"}`, detail: "Investigate and retry", href: entityHref({ kind: "inbox", attention: "run-alerts" }), tone: "danger", icon: XCircle })
   if (reviewCount > 0) items.push({ id: "reviews", label: `${reviewCount >= 12 ? "12+" : reviewCount} issue${reviewCount === 1 ? "" : "s"} for review`, detail: "Check agent work and decide", href: "/issues", tone: "blue", icon: CheckCircle2 })
   if (held > 0) items.push({ id: "capacity", label: `${held} crew${held === 1 ? "" : "s"} waiting for capacity`, detail: heldCrews[0]?.detail || "View host admission details", href: "/settings", tone: "purple", icon: Gauge })

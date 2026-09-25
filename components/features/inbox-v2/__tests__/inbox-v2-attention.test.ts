@@ -4,7 +4,7 @@ import type { InboxItem } from "@/hooks/use-inbox"
 import { matchesInboxAttention, parseInboxAttention } from "../inbox-v2-attention"
 import type { InboxV2Entry } from "../inbox-v2-types"
 
-const entry = (kind: string, historical = false): InboxV2Entry => ({
+const entry = (kind: string, historical = false, itemProps: Partial<InboxItem> = {}): InboxV2Entry => ({
   key: kind,
   source: "inbox",
   title: kind,
@@ -16,7 +16,7 @@ const entry = (kind: string, historical = false): InboxV2Entry => ({
   unread: true,
   actionable: false,
   historical,
-  inboxItem: { id: kind, kind } as InboxItem,
+  inboxItem: { id: kind, kind, state: historical ? "resolved" : "unread", ...itemProps } as InboxItem,
 })
 
 describe("dashboard attention links in Inbox", () => {
@@ -27,12 +27,15 @@ describe("dashboard attention links in Inbox", () => {
     expect(parseInboxAttention("unknown")).toBeNull()
   })
 
-  it("shows both counted kinds in each category and excludes unrelated or resolved rows", () => {
-    const rows = ["waitpoint", "escalation", "failed_run", "schedule_circuit_breaker_tripped", "schedule_missed", "message"]
+  it("shows real decisions and alerts, excluding source-less advisories and resolved rows", () => {
+    const rows = ["waitpoint", "failed_run", "schedule_circuit_breaker_tripped", "schedule_missed", "message"]
       .map((kind) => entry(kind))
+    rows.push(entry("run_needs_human", false, { blocking: true }))
+    rows.push(entry("escalation", false, { payload: { kind: "routine_proposal" } }))
+    rows.push(entry("escalation"))
     const matching = (attention: "approvals" | "run-alerts" | "schedule-alerts") =>
       rows.filter((row) => matchesInboxAttention(row, attention)).map((row) => row.key)
-    expect(matching("approvals")).toEqual(["waitpoint", "escalation"])
+    expect(matching("approvals")).toEqual(["waitpoint", "run_needs_human", "escalation"])
     expect(matching("run-alerts")).toEqual(["failed_run", "schedule_circuit_breaker_tripped"])
     expect(matching("schedule-alerts")).toEqual(["schedule_missed"])
     expect(matchesInboxAttention(entry("waitpoint", true), "approvals")).toBe(false)

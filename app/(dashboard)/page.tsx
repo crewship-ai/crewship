@@ -170,8 +170,8 @@ export default function DashboardPage() {
   )
 
   const attentionItems = useMemo(
-    () => buildAttentionItems({ inbox: inbox.items, heldCrews, reviewCount: reviewQ.data?.length ?? 0, activeByKind: inbox.activeByKind }),
-    [inbox.items, inbox.activeByKind, heldCrews, reviewQ.data],
+    () => buildAttentionItems({ inbox: inbox.items, heldCrews, reviewCount: reviewQ.data?.length ?? 0, activeByKind: inbox.activeByKind, decisionCount: inbox.decisionCount }),
+    [inbox.items, inbox.activeByKind, inbox.decisionCount, heldCrews, reviewQ.data],
   )
 
   const fleet = useMemo(

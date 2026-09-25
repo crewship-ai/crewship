@@ -224,6 +224,7 @@ interface InboxListResponse {
   has_more?: boolean
   /** Exact per-kind counts of the caller's visible not-resolved items (#2187). */
   active_by_kind?: Record<string, number>
+  decision_count?: number
 }
 
 // "active" = everything not archived (unread + read), resolved excluded
@@ -288,6 +289,7 @@ export function useInbox(
       let offset = 0
       let unreadCount = 0
       let activeByKind: Record<string, number> | undefined
+      let decisionCount: number | undefined
       do {
         const params = new URLSearchParams({
           workspace_id: workspaceId!,
@@ -304,10 +306,11 @@ export function useInbox(
         unreadCount = page.unread_count ?? unreadCount
         // Page-independent aggregate — take it from whichever page answered.
         activeByKind = page.active_by_kind ?? activeByKind
+        decisionCount = page.decision_count ?? decisionCount
         if (!loadAll || !page.has_more) break
         offset += page.rows.length
       } while (true)
-      return { rows, count: rows.length, unread_count: unreadCount, has_more: false, active_by_kind: activeByKind }
+      return { rows, count: rows.length, unread_count: unreadCount, has_more: false, active_by_kind: activeByKind, decision_count: decisionCount }
     },
     enabled: Boolean(workspaceId),
     // Single-shot like the previous hand-rolled fetch — the error
@@ -496,6 +499,7 @@ export function useInbox(
     // counts ("Needs your attention") must read this, not items.length,
     // which plateaus at the 100-row window (#2187).
     activeByKind: query.data?.active_by_kind,
+    decisionCount: query.data?.decision_count,
     // isFetching (not isLoading) mirrors the old loading flag, which
     // was set on every refresh, not just the first one.
     loading: query.isFetching,

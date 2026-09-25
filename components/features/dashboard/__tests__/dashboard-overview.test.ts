@@ -40,7 +40,7 @@ describe("dashboard overview derivations", () => {
     })
 
     expect(items.map((item) => item.id)).toEqual(["approvals", "failures", "reviews", "capacity"])
-    expect(items[0].label).toBe("1 approval waiting")
+    expect(items[0].label).toBe("1 decision waiting")
     expect(items[0].href).toBe("/inbox?attention=approvals")
   })
 
@@ -53,9 +53,10 @@ describe("dashboard overview derivations", () => {
       heldCrews: [],
       reviewCount: 0,
       activeByKind: { failed_run: 6, schedule_missed: 2, waitpoint: 1 },
+      decisionCount: 1,
     })
     expect(items.map((item) => item.id)).toEqual(["approvals", "failures", "schedules"])
-    expect(items[0].label).toBe("1 approval waiting")
+    expect(items[0].label).toBe("1 decision waiting")
     expect(items[1].label).toBe("6 failed runs")
     expect(items[2].label).toBe("2 schedule alerts")
     expect(items[2].href).toBe("/inbox?attention=schedule-alerts")
@@ -79,8 +80,9 @@ describe("dashboard overview derivations", () => {
       heldCrews: [],
       reviewCount: 0,
       activeByKind: { waitpoint: 2 },
+      decisionCount: 2,
     })
-    expect(twoTotal[0].label).toBe("2 approvals waiting")
+    expect(twoTotal[0].label).toBe("2 decisions waiting")
     expect(twoTotal[0].href).toBe("/inbox?attention=approvals")
 
     // The category remains selected when a single approval is waiting.
@@ -89,8 +91,9 @@ describe("dashboard overview derivations", () => {
       heldCrews: [],
       reviewCount: 0,
       activeByKind: { waitpoint: 1 },
+      decisionCount: 1,
     })
-    expect(oneTotal[0].label).toBe("1 approval waiting")
+    expect(oneTotal[0].label).toBe("1 decision waiting")
     expect(oneTotal[0].href).toBe("/inbox?attention=approvals")
 
     // A windowed count uses the same navigation contract.
