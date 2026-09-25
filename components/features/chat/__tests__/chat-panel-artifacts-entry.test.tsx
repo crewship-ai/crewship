@@ -40,11 +40,11 @@ afterEach(cleanup)
 
 describe("chat artifact entry points", () => {
   it("opens Artifacts on the mobile context page", () => {
-    render(<ChatPanel {...props} mobilePanel="files-only" />)
+    render(<ChatPanel {...props} mobilePanel="artifacts" />)
     expect(screen.getByTestId("context-tab")).toHaveTextContent("artifacts")
   })
-  it("opens Work through the mobile More page", () => {
-    render(<ChatPanel {...props} mobilePanel="more" />)
+  it("opens Work through the mobile Work page", () => {
+    render(<ChatPanel {...props} mobilePanel="work" />)
     expect(screen.getByTestId("context-tab")).toHaveTextContent("work")
   })
   it("opens a generated PDF in the artifact pane", async () => {

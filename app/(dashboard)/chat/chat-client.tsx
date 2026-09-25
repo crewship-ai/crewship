@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useSearchParams } from "next/navigation"
-import { Activity, FolderOpen, Menu, MessageSquare, Users } from "lucide-react"
+import { Activity, LayoutGrid, ListTodo, Menu, MessageSquare } from "lucide-react"
 
 import { UnifiedConversationPanel, UnifiedNewChatMenu, useUnifiedConversations } from "@/components/features/conversations/unified-chat"
 import { SubBar, SubBarSecondary } from "@/components/layout/sub-bar"
@@ -93,12 +93,12 @@ function useAgentSlugFromUrl(): string | null {
 
 /** Which full-screen panel the phone is showing. ChatPanel has had these
  *  branches since it was written. */
-type MobilePanel = "chat" | "files" | "more"
+type MobilePanel = "chat" | "artifacts" | "work"
 
 const MOBILE_PANELS: { id: MobilePanel; label: string; icon: typeof MessageSquare }[] = [
   { id: "chat", label: "Chat", icon: MessageSquare },
-  { id: "files", label: "Files", icon: FolderOpen },
-  { id: "more", label: "Team", icon: Users },
+  { id: "artifacts", label: "Artifacts", icon: LayoutGrid },
+  { id: "work", label: "Work", icon: ListTodo },
 ]
 
 /**
@@ -858,7 +858,7 @@ export function ChatClient() {
    * phone breakpoint: 280px of conversations beside a transcript survives an
    * 800px window and does not survive a 390px one. The column becomes an
    * overlay drawer reached from a header button, and ChatPanel is handed the
-   * `mobilePanel` prop its chat/files/more branches have always had — on
+   * `mobilePanel` prop for chat/artifacts/work — on
    * desktop those three live side by side in the panel's own right rail, so
    * the strip would be a duplicate there.
    */

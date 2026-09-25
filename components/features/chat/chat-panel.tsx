@@ -123,7 +123,7 @@ interface ChatPanelProps {
   /** A Page reference is resolved and authorized by the server on send. */
   pageContextSlug?: string
   /** Mobile-only: which panel to show full-screen. Undefined = desktop mode. */
-  mobilePanel?: "chat" | "files" | "files-only" | "more"
+  mobilePanel?: "chat" | "artifacts" | "work"
   /** Fired when the user sends a message — lets the parent optimistically
    *  title a freshly-created session in the sidebar (matching the server's
    *  auto-title) so the new entry shows its name without a manual refresh. */
@@ -133,7 +133,7 @@ interface ChatPanelProps {
    *  the user just watched doesn't linger as a server-side unread. */
   onReplySettled?: (sessionId: string) => void
   onNewConversation?: () => void
-  onMobilePanelChange?: (panel: "chat" | "files" | "more") => void
+  onMobilePanelChange?: (panel: "chat" | "artifacts" | "work") => void
 }
 
 /** How the chat palette's key is written for a human. The binding itself is
@@ -235,7 +235,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
     const title = path.split("/").pop() || path
     useArtifactStore.getState().openFile({ id: `${agentId}:${path}`, agentId, path, title })
     useDrawerStore.getState().setActiveTab("artifacts")
-    if (mobilePanel) onMobilePanelChange?.("files")
+    if (mobilePanel) onMobilePanelChange?.("artifacts")
   }, [agentId, chatAgent?.crewId, chatAgent?.slug, mobilePanel, onMobilePanelChange])
   // Narrow selectors — the panel only reads these three fields; a
   // whole-store subscription re-rendered the entire chat (message list
@@ -885,14 +885,14 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
     </Conversation>
   )
 
-  if (mobilePanel === "files-only" || mobilePanel === "files" || mobilePanel === "more") {
+  if (mobilePanel === "artifacts" || mobilePanel === "work") {
     return (
       <div className="relative h-full">
         <RightPanel
           key={`${workspaceId}:${agentId}:${sessionId}`}
           agentId={agentId}
           workspaceId={workspaceId}
-          initialTab={mobilePanel === "more" ? "work" : "artifacts"}
+          initialTab={mobilePanel}
           style={{ width: "100%", height: "100%" }}
         />
         <ArtifactPane agentId={agentId} />
