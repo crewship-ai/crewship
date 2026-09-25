@@ -41,8 +41,7 @@ the API by hand.
 | 9 | `github-injection` | github, model | A bound GitHub token reaches the container as `GH_TOKEN`; `gh auth status` inside it says so; the transcript never holds the value. |
 | 10 | `pack-ci-watch` | github | The [nightly CI watch pack](/guides/demo-packs#nightly-ci-watch): the delivered script, the token-zero probe, `crewship seed verify --pack ci-watch`. |
 | 11 | `pack-docs-drift` | github | The [docs drift pack](/guides/demo-packs#docs-drift) through `seed verify`, with this checkout as the fact-check source. |
-| 12 | `pack-site-replica` | — | The [site replica pack](/guides/demo-packs#site-replica) through `seed verify`; `NOT BUILT` until somebody asks Alex to copy the site. |
-| 13 | `chat-reply-inbox` | model | A saved reply from Morgan appears in Inbox → Messages when the recipient is not watching the chat live. |
+| 12 | `chat-reply-inbox` | model | A saved reply from Morgan appears in Inbox → Messages when the recipient is not watching the chat live. |
 
 **Needs** is what a use case cannot run without. `model` is an ACTIVE
 model-provider credential in the workspace; `github` is `SEED_GITHUB_TOKEN`
