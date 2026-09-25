@@ -242,11 +242,6 @@ func seedIssues(ctx context.Context, client *cli.Client, crewIDs, agentIDs map[s
 		sourceKey, targetKey, rtype string
 	}
 	rels := []relDef{
-		// site-replica: the hand-off order inside the engineering crew.
-		{"Map the seznam.cz home page — sections, navigation and metadata", "Build the static replica from the content map", "blocks"},
-		{"Extract the seznam.cz home page into a structured data model", "Build the static replica from the content map", "blocks"},
-		{"Build the static replica from the content map", "Run the replica acceptance checks and report PASS or FAIL", "blocks"},
-		{"Run the replica acceptance checks and report PASS or FAIL", "Replicate https://www.seznam.cz as a self-contained static page — delegate analysis, data, build and test", "blocks"},
 		// docs-drift: the fact-check gates the fix list.
 		{"Fact-check every docs-drift candidate against the file and line it cites", "Run the docs-drift audit on main and turn it into a fix list", "blocks"},
 		// ci-watch: reconciliation and the stale investigation feed the handover.

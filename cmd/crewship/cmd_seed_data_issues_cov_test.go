@@ -145,7 +145,9 @@ func TestSeedIssues_FullSeedAgainstStub(t *testing.T) {
 			t.Fatal(err)
 		}
 		if body["project_id"] == "proj-1" { // Quick Start is the first project
-			if body["routine_id"] == nil {
+			// The local extraction issue deliberately starts an agent workflow
+			// directly; the other Quick Start issues have a saved routine.
+			if body["title"] != "Extract and check action items from a sample incident note" && body["routine_id"] == nil {
 				t.Errorf("Quick Start issue %q was created without a routine", body["title"])
 			}
 			bound++
@@ -159,10 +161,10 @@ func TestSeedIssues_FullSeedAgainstStub(t *testing.T) {
 	if patched == 0 {
 		t.Error("expected at least one PATCH (transition or assignment)")
 	}
-	// The hardcoded relation defs reference 7 catalogue title pairs; with every
+	// The hardcoded relation defs reference 3 catalogue title pairs; with every
 	// issue created they all resolve.
-	if relations != 7 {
-		t.Errorf("relation POSTs = %d, want 7", relations)
+	if relations != 3 {
+		t.Errorf("relation POSTs = %d, want 3", relations)
 	}
 
 	// Spot-check an assignment body shape on one PATCH.
