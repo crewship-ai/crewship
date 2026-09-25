@@ -78,7 +78,7 @@ export function DashboardResults({ review, inProgress, completed, activeAgentRun
     const crew = crews.find((c) => c.id === issue.crew_id)
     const owner = issue.owner ? issue.owner.name || "Issue owner" : humanOwned ? issue.assignee_name || "Issue owner" : agent?.name || issue.assignee_name || issue.lead_agent_name || crew?.name || "Workspace"
     const icon = humanOwned ? <UserRound className="h-6 w-6 shrink-0 text-muted-foreground" aria-hidden /> : agent ? <AgentAvatar seed={agent.slug} agentId={agent.id} workspaceId={workspaceId} alt={agent.name} className="h-6 w-6 shrink-0 rounded-md bg-muted" /> : crew ? <CrewIcon icon={crew.icon || "users"} color={crew.color} size="sm" className="shrink-0" /> : <CircleDot className="h-6 w-6 shrink-0 text-primary-hover" aria-hidden />
-    return <WorkRow key={`issue-${issue.id}`} href={issue.identifier ? entityHref({ kind: "issue", identifier: issue.identifier }) : entityHref({ kind: "issues" })} icon={icon} kind={issue.identifier || "Issue"} status={<StatusPill status={issue.status} tone={finished ? "muted" : undefined} />} title={issue.title} meta={`${owner} · ${formatRelativeTime(issue.updated_at)}`} action={issue.status === "REVIEW" ? "Review work" : "Open issue"} />
+    return <WorkRow key={`issue-${issue.id}`} href={issue.identifier ? entityHref({ kind: "issue", identifier: issue.identifier }) : entityHref({ kind: "issues" })} icon={icon} kind={issue.identifier || "Issue"} status={<StatusPill status={issue.status} tone={finished ? "success" : undefined} />} title={issue.title} meta={`${owner} · ${formatRelativeTime(issue.updated_at)}`} action={issue.status === "REVIEW" ? "Review work" : "Open issue"} />
   }
 
   return <DashboardCard title="Results & review" icon={CheckCheck} hint={<span className="hidden sm:inline">{runningCount > 0 ? `${runningCount} live now` : "Live work and outcomes"}</span>} action={<span className="flex items-center gap-2"><ListScrollControls label="work list" controller={listScroll} /><Link href={entityHref({ kind: "issues" })} className="text-primary-hover hover:underline">All issues →</Link></span>} className="flex h-full min-h-0 flex-col border-primary/20">
@@ -101,7 +101,7 @@ export function DashboardResults({ review, inProgress, completed, activeAgentRun
       {show("review") && <WorkSection title="For review" count={review.length}>{review.map((issue) => issueRow(issue))}</WorkSection>}
       {show("finished") && <WorkSection title="Finished recently" count={completed.length + routineResults.length}>
         {completed.map((issue) => issueRow(issue, true))}
-        {routineResults.map((run) => <WorkRow key={`routine-done-${run.id}`} href={entityHref({ kind: "run", runId: run.id, pipelineSlug: run.pipeline_slug })} icon={<ScrollText className="h-6 w-6 shrink-0 text-muted-foreground" aria-hidden />} kind="Routine" status={<StatusPill status="COMPLETED" tone="muted" />} title={run.pipeline_name || run.pipeline_slug} meta={formatRelativeTime(run.ended_at || run.started_at)} action="Open result" />)}
+        {routineResults.map((run) => <WorkRow key={`routine-done-${run.id}`} href={entityHref({ kind: "run", runId: run.id, pipelineSlug: run.pipeline_slug })} icon={<ScrollText className="h-6 w-6 shrink-0 text-muted-foreground" aria-hidden />} kind="Routine" status={<StatusPill status="COMPLETED" />} title={run.pipeline_name || run.pipeline_slug} meta={formatRelativeTime(run.ended_at || run.started_at)} action="Open result" />)}
       </WorkSection>}
     </div>}
   </DashboardCard>

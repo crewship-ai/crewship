@@ -45,7 +45,7 @@ export interface AttentionItem {
   label: string
   detail: string
   href: string
-  tone: "warn" | "danger" | "purple" | "blue" | "muted"
+  tone: "warn" | "danger" | "purple" | "blue"
   icon: LucideIcon
 }
 
@@ -54,7 +54,6 @@ const ATTENTION_TONE = {
   danger: "border-destructive/25 bg-destructive/[0.07] text-destructive",
   purple: "border-purple/25 bg-purple/[0.07] text-purple-hover",
   blue: "border-primary/25 bg-primary/[0.07] text-primary-hover",
-  muted: "border-border/70 bg-foreground/[0.025] text-muted-foreground",
 } as const
 
 function MotionLink({
@@ -467,7 +466,7 @@ export function UpNext({ schedules }: { schedules: PipelineSchedule[] }) {
           {upcoming.map((schedule) => (
             <MotionLink key={schedule.id} href={`/routines?routine=${encodeURIComponent(schedule.target_pipeline_slug || "")}`}>
               <div className="group flex items-center gap-3 rounded-md border-b border-border/50 px-1 py-2 last:border-0 hover:bg-foreground/[0.025]">
-                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-border/70 bg-foreground/[0.025] text-muted-foreground">
+                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-primary/25 bg-primary/[0.07] text-primary-hover">
                   <CalendarClock className="h-3.5 w-3.5" />
                 </span>
                 <span className="min-w-0 flex-1">
@@ -534,12 +533,14 @@ export function OutcomeKpis({
     {
       label: "Completed",
       icon: CheckCircle2,
+      tone: "text-success bg-success/10 border-success/20",
       value: <MetricNumber value={data.completed} />,
       detail: `successful runs · ${window}`,
     },
     {
       label: "Success",
       icon: Gauge,
+      tone: "text-primary-hover bg-primary/10 border-primary/20",
       value: data.successPct == null ? "—" : `${data.successPct}%`,
       detail: data.successTotal > 0 ? `${data.successOk} of ${data.successTotal} finished` : "no finished runs",
     },
@@ -561,6 +562,7 @@ export function OutcomeKpis({
     {
       label: "P95 duration",
       icon: TimerReset,
+      tone: "text-purple-hover bg-purple/10 border-purple/20",
       value: data.p95Ms > 0 ? formatDuration(data.p95Ms) : "—",
       detail: data.p95Ms > 0 ? "95% finish within this" : "no duration samples",
     },
@@ -570,6 +572,7 @@ export function OutcomeKpis({
     {
       label: "Spend",
       icon: Gauge,
+      tone: "text-warn bg-warn/10 border-warn/20",
       value: typeof spendUsd === "number" ? `$${spendUsd.toFixed(2)}` : "—",
       detail: spendUsd === undefined ? "ledger unavailable" : spendUsd === null ? "not metered on this billing mode" : spendPerRun != null ? `ledger · $${spendPerRun.toFixed(3)} per run` : "metered ledger",
     },
@@ -590,9 +593,9 @@ export function OutcomeKpis({
               initial={reduce ? false : { opacity: 0, rotate: -12, scale: 0.82 }}
               animate={{ opacity: 1, rotate: 0, scale: 1 }}
               transition={{ delay: reduce ? 0 : index * 0.06 + 0.18, type: "spring", stiffness: 360, damping: 25 }}
-              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-border/70 bg-foreground/[0.025] text-muted-foreground"
+              className={cn("flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border", card.tone)}
             >
-              <Icon className="h-3.5 w-3.5" />
+              <Icon className="h-5 w-5" />
             </motion.span>
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
@@ -763,7 +766,7 @@ export function buildAttentionItems({
   if (failuresCount > 0) items.push({ id: "failures", label: circuitBreakerCount > 0 ? `${failuresCount} run alert${failuresCount === 1 ? "" : "s"}` : `${failuresCount} failed run${failuresCount === 1 ? "" : "s"}`, detail: "Investigate and retry", href: entityHref({ kind: "inbox", attention: "run-alerts" }), tone: "danger", icon: XCircle })
   if (reviewCount > 0) items.push({ id: "reviews", label: `${reviewCount >= 12 ? "12+" : reviewCount} issue${reviewCount === 1 ? "" : "s"} for review`, detail: "Check agent work and decide", href: "/issues", tone: "blue", icon: CheckCircle2 })
   if (held > 0) items.push({ id: "capacity", label: `${held} crew${held === 1 ? "" : "s"} waiting for capacity`, detail: heldCrews[0]?.detail || "View host admission details", href: "/settings", tone: "purple", icon: Gauge })
-  if (scheduleCount > 0) items.push({ id: "schedules", label: `${scheduleCount} schedule alert${scheduleCount === 1 ? "" : "s"}`, detail: "Review missed routines", href: entityHref({ kind: "inbox", attention: "schedule-alerts" }), tone: "muted", icon: CalendarClock })
+  if (scheduleCount > 0) items.push({ id: "schedules", label: `${scheduleCount} schedule alert${scheduleCount === 1 ? "" : "s"}`, detail: "Review missed routines", href: entityHref({ kind: "inbox", attention: "schedule-alerts" }), tone: "blue", icon: CalendarClock })
   return items
 }
 
