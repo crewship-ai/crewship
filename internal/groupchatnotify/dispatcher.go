@@ -146,11 +146,13 @@ func (d *Dispatcher) projectInTransaction(ctx context.Context, conn *sql.Conn, e
 			continue
 		}
 		source := "conversation_" + event.ConversationID + "_" + recipient.id
-		id := "ibx_message_" + source
+		// Workspace-scoped like every inbox id (#2274) — see
+		// internal/inbox writer.go's Insert.
+		id := "ibx_" + workspaceID + "_message_" + source
 		result, err := conn.ExecContext(ctx, `INSERT INTO inbox_items
    (id,workspace_id,kind,source_id,target_user_id,title,body_md,sender_type,state,priority,blocking,payload_json,created_at,updated_at)
    VALUES (?,?,'message',?,?,'New conversation activity','Open the conversation to read new messages.','system','unread','medium',0,?,?,?)
-   ON CONFLICT(kind,source_id) DO UPDATE SET
+   ON CONFLICT(workspace_id,kind,source_id) DO UPDATE SET
     payload_json=excluded.payload_json,state='unread',read_at=NULL,read_by_user_id=NULL,
     resolved_at=NULL,resolved_by_user_id=NULL,resolved_action=NULL,created_at=excluded.created_at,updated_at=excluded.updated_at
    WHERE COALESCE(CAST(json_extract(inbox_items.payload_json,'$.last_sequence') AS INTEGER),0) < ?`,
@@ -163,7 +165,11 @@ func (d *Dispatcher) projectInTransaction(ctx context.Context, conn *sql.Conn, e
 			return nil, err
 		}
 		if changed > 0 {
-			if _, err := conn.ExecContext(ctx, `DELETE FROM inbox_item_reads WHERE inbox_item_id=(SELECT id FROM inbox_items WHERE kind='message' AND source_id=?)`, source); err != nil {
+			// Scoped by workspace like the upsert above it: the dedupe
+			// key is (workspace_id, kind, source_id), and an unscoped
+			// scalar subquery could resolve another workspace's item and
+			// delete ITS markers (#2274).
+			if _, err := conn.ExecContext(ctx, `DELETE FROM inbox_item_reads WHERE inbox_item_id=(SELECT id FROM inbox_items WHERE workspace_id=? AND kind='message' AND source_id=?)`, workspaceID, source); err != nil {
 				return nil, err
 			}
 		}

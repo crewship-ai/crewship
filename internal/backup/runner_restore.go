@@ -170,6 +170,18 @@ type RestoreResult struct {
 	// at the moment it happens.
 	JournalEntriesResigned     int
 	JournalCheckpointsResigned int
+	// CapabilityTokensReminted counts, per table, the capability-token
+	// rows a FORKED restore (--as-workspace / --as-crew) re-keyed
+	// (#2274): workspace_invitations, port_exposures, pipeline_webhooks,
+	// page_public_tokens, page_webhooks. A fork does not inherit live
+	// capabilities — every secret that worked against the source keeps
+	// working only against the source — and each re-keyed row is a
+	// capability the fork's admin must re-issue (re-send the invitation,
+	// rotate the webhook, re-request the exposure/public link). Zero on
+	// a plain restore and on a fork whose bundle carried none of these
+	// rows. Structured rather than log-only so an API caller with no
+	// Logger still receives it.
+	CapabilityTokensReminted map[string]int
 	// PayloadRowCountMismatches lists every table whose decrypted payload
 	// row count does not match Manifest.Contents.TableRowCounts (#2009) —
 	// the same comparison Verify makes, run here because restore already
@@ -515,6 +527,10 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 	// touched, so RestoreResult can report it rather than leaving the
 	// operator to discover a new genesis by reading the journal.
 	var journalChainResigned journalRechainStats
+	// capabilityTokensReminted records, per table, how many capability
+	// token rows the fork re-keyed instead of silently losing them to a
+	// UNIQUE collision (#2274). Non-empty only on a forked restore.
+	var capabilityTokensReminted map[string]int
 	var checkpointSourceWorkspaces []string
 	if extracted.DBDump != nil && !opts.FilesOnly {
 		for _, r := range extracted.DBDump.Tables["crews"] {
@@ -570,6 +586,17 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 		// not drop the whole bundle on PK collision.
 		if opts.AsWorkspace != "" || opts.AsCrew != "" {
 			if err := RemapIDs(ctx, db, extracted.DBDump); err != nil {
+				return nil, err
+			}
+			// Capability tokens are instance-unique, so a fork that kept
+			// them would collide with the source row (INSERT OR IGNORE
+			// then dropped the fork's row in silence — #2274's whole
+			// shape). Re-mint every one through the auth layer's own
+			// digest primitive, and report: the fork does not inherit
+			// live capabilities, and the operator is the one who has to
+			// re-issue them. See remap_capability_tokens.go.
+			capabilityTokensReminted, err = rekeyForkedCapabilityTokens(extracted.DBDump)
+			if err != nil {
 				return nil, err
 			}
 			// RemapIDs just rewrote identity columns the journal's
@@ -891,6 +918,7 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 		}
 		warnDroppedColumns(opts.Logger, droppedColumns, columnsDropped, true)
 		warnIssueCountersMigrated(opts.Logger, issueCountersMigrated, true)
+		warnCapabilityTokensReminted(opts.Logger, capabilityTokensReminted, true)
 		return &RestoreResult{
 			Manifest:                  manifest,
 			RestoredWs:                firstWorkspaceSlug(extracted.DBDump),
@@ -914,6 +942,12 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 			// entire question a dry run is asked.
 			JournalEntriesResigned:     journalChainResigned.Entries,
 			JournalCheckpointsResigned: journalChainResigned.Checkpoints,
+
+			// Same reasoning for the capability re-key: the dry run has
+			// already re-minted the dump in memory, and "your webhooks and
+			// public links will arrive revoked" is exactly the kind of fact
+			// an operator wants before committing, not after.
+			CapabilityTokensReminted: capabilityTokensReminted,
 		}, nil
 	}
 
@@ -1070,6 +1104,7 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 		warnSecurityLevelClamps(opts.Logger, stats.SecurityLevelClamps, stats.SecurityLevelClamped, false)
 		warnDroppedColumns(opts.Logger, stats.DroppedColumns, stats.ColumnsDropped, false)
 		warnIssueCountersMigrated(opts.Logger, stats.IssueCountersMigrated, false)
+		warnCapabilityTokensReminted(opts.Logger, capabilityTokensReminted, false)
 	} else {
 		if err := memoryBlobsRestore(ctx); err != nil {
 			return nil, err
@@ -1173,6 +1208,7 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 
 		JournalEntriesResigned:     journalChainResigned.Entries,
 		JournalCheckpointsResigned: journalChainResigned.Checkpoints,
+		CapabilityTokensReminted:   capabilityTokensReminted,
 	}, nil
 }
 

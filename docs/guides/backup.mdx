@@ -259,6 +259,23 @@ Restoring under the ORIGINAL identity (same workspace, or a genuinely empty inst
 
 A fork regenerates **identity**, not merely primary keys: alongside every row's id it also mints a fresh value for the columns that have to be unique across the whole instance rather than within a workspace — a mission's `trace_id` is the one that exists today. Without that the fork's row would collide with the source row still holding the value and be dropped in silence, taking its children down with it (#2260). Columns that are unique only *within* a workspace are left alone on purpose: an issue identifier like `ENG-14` is scoped by the workspace id the fork already remapped, so the fork keeps the identifiers your team knows.
 
+### A fork does not inherit live capabilities
+
+Workspace invitations, port exposures, pipeline webhooks, page public links and page webhooks are authorised by a **capability token** — a secret whose knowledge is the whole of the check. A fork re-keys every one of them (#2274): the token and its digest are minted fresh, together, through the same digest primitive the auth layer verifies with, so **no secret that worked against the source works against the fork**. Anyone who ever learned a source URL — including from a leaked database file — holds nothing on the copy.
+
+What lands, and what you have to do:
+
+| Capability | On the fork |
+|---|---|
+| Pending invitations | The row lands with a fresh token and stays **fully usable**: the invitation list re-displays the link (the token is not hashed for this table), so re-send it from the fork's member list. |
+| Port exposures | The row lands with a re-keyed secret nobody can present, carried as **REVOKED** (`revoked_at` + reason naming the fork) — the same state the exposure list and proxy path already understand, so nothing shows as live that cannot route. Re-request the exposure on the fork after its crews are started. |
+| Pipeline webhooks | The row lands (name, pipeline binding, rate limit) with a re-keyed secret, carried **disabled** (`enabled = 0` — the store's own dead-state). Re-create the webhook on the fork to hand senders the new URL. |
+| Page public links / page webhooks | The rows land with re-keyed digests and **`revoked_at` set**: both public paths resolve only unrevoked tokens, and the lists show them revoked. Mint new ones from the page. |
+
+The restore **says so**, on the committed path and on a dry run alike: a `capability_tokens_reminted` note per table in the CLI output, the API response and the `backup.restore` audit row. A webhook that arrives revoked is a fact to act on, not a footnote.
+
+Two related keys stopped being instance-global at the same time: `inbox_items`' dedupe key and `message_feedback`'s feedback key are now scoped per workspace, so a fork keeps its inbox and its message feedback instead of silently losing every row to the source's (#2274). Nothing about single-workspace behaviour changed — one user still cannot file the same signal twice on the same message, and a producer still gets one open item per source.
+
 ### Forked restores re-sign the journal chain
 
 The crew journal is tamper-evident: every entry carries a keyed HMAC over its own content *and* the hash of the entry before it, so an after-the-fact edit or a mid-chain delete is detectable (see [Audit & tamper-evidence](/security/audit)).

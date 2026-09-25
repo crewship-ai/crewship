@@ -332,7 +332,12 @@ func insertItem(ctx context.Context, db execContext, logger *slog.Logger, in Ite
 	}
 	payloadJSON := marshalPayload(in.Payload)
 	actionsJSON := marshalActions(in.Actions)
-	id := "ibx_" + in.Kind + "_" + in.SourceID
+	// Workspace-scoped by design (#2274): the dedupe key is
+	// (workspace_id, kind, source_id), so two workspaces may hold the
+	// same (kind, source_id) — a fork is the guaranteed case — and an
+	// id derived without the workspace would collide on the PK,
+	// silently eating one workspace's row under INSERT OR IGNORE.
+	id := "ibx_" + in.WorkspaceID + "_" + in.Kind + "_" + in.SourceID
 	// Fixed-width sortable form: every inbox_items writer (here + the hire
 	// path in internal/api/agents_hire.go) must agree on this format so the
 	// (workspace_id, state, created_at DESC) index orders correctly across
@@ -748,7 +753,8 @@ func upsertRow(ctx context.Context, execer DBTX, in Item) error {
 	}
 	payloadJSON := marshalPayload(in.Payload)
 	actionsJSON := marshalActions(in.Actions)
-	id := "ibx_" + in.Kind + "_" + in.SourceID
+	// See Insert for why the workspace is in the derived id (#2274).
+	id := "ibx_" + in.WorkspaceID + "_" + in.Kind + "_" + in.SourceID
 	now := tsformat.Format(time.Now())
 	blocking := 0
 	if in.Blocking {
@@ -770,7 +776,7 @@ func upsertRow(ctx context.Context, execer DBTX, in Item) error {
 			'unread', ?, ?, ?,
 			NULLIF(?, ''), NULLIF(?, ''), ?,
 			?, ?)
-		ON CONFLICT(kind, source_id) DO UPDATE SET
+		ON CONFLICT(workspace_id, kind, source_id) DO UPDATE SET
 			title = excluded.title,
 			body_md = excluded.body_md,
 			sender_type = excluded.sender_type,
@@ -801,7 +807,18 @@ func upsertRow(ctx context.Context, execer DBTX, in Item) error {
 	if err != nil {
 		return err
 	}
-	_, err = execer.ExecContext(ctx, `DELETE FROM inbox_item_reads WHERE inbox_item_id = ?`, id)
+	// Resolve the row by the upsert KEY, not by the derived id: an
+	// upserted row keeps whatever id it already had — a forked row's
+	// remapped CUID, for one — so deleting by the derived id could miss
+	// the row's markers entirely, or worse delete ANOTHER workspace's
+	// markers when that workspace still holds the derived id (#2274).
+	_, err = execer.ExecContext(ctx, `
+		DELETE FROM inbox_item_reads
+		 WHERE inbox_item_id = (
+			SELECT id FROM inbox_items
+			 WHERE workspace_id = ? AND kind = ? AND source_id = ?
+		 )`,
+		in.WorkspaceID, in.Kind, in.SourceID)
 	return err
 }
 

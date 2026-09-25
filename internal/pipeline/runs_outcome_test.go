@@ -180,7 +180,7 @@ CREATE TABLE IF NOT EXISTS inbox_item_reads (
     PRIMARY KEY (inbox_item_id, user_id)
 );
 
-CREATE UNIQUE INDEX idx_inbox_items_kind_source ON inbox_items (kind, source_id);
+CREATE UNIQUE INDEX idx_inbox_items_workspace_kind_source ON inbox_items (workspace_id, kind, source_id);
 `); err != nil {
 		t.Fatalf("inbox schema: %v", err)
 	}

@@ -287,7 +287,9 @@ func TestCheckMissionCompletionWithTasks_EmptyTaskVariants(t *testing.T) {
 			t.Errorf("status = %q, want REVIEW", got)
 		}
 		var title string
-		if err := db.QueryRow(`SELECT title FROM inbox_items WHERE id = 'ibx_message_issue_review_m1'`).Scan(&title); err != nil {
+		// Resolve by the dedupe key, not a derived id — ids are an
+		// implementation detail of the writer (#2274).
+		if err := db.QueryRow(`SELECT title FROM inbox_items WHERE workspace_id = 'ws-1' AND kind = 'message' AND source_id = 'issue_review_m1'`).Scan(&title); err != nil {
 			t.Fatalf("expected inbox item for issue review: %v", err)
 		}
 		if title != "CRE-42 ready for review" {
@@ -317,7 +319,7 @@ func TestCheckMissionCompletionWithTasks_EmptyTaskVariants(t *testing.T) {
 		}
 		// No "ready for review" inbox item should be created for a failed mission.
 		var n int
-		_ = db.QueryRow(`SELECT COUNT(*) FROM inbox_items WHERE id = 'ibx_message_issue_review_m1'`).Scan(&n)
+		_ = db.QueryRow(`SELECT COUNT(*) FROM inbox_items WHERE workspace_id = 'ws-1' AND kind = 'message' AND source_id = 'issue_review_m1'`).Scan(&n)
 		if n != 0 {
 			t.Errorf("review inbox item created for a FAILED mission (count=%d)", n)
 		}

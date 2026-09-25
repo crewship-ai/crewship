@@ -497,6 +497,11 @@ func (h *BackupHandler) Restore(w http.ResponseWriter, r *http.Request) {
 		// the audit row is where that fact has to be findable later.
 		"journal_entries_resigned":     result.JournalEntriesResigned,
 		"journal_checkpoints_resigned": result.JournalCheckpointsResigned,
+		// A forked restore re-mints every capability token (#2274) — a
+		// fork does not inherit live capabilities. On the audit row for
+		// the same reason: "which of my webhooks stopped working and
+		// when" is a question asked days later.
+		"capability_tokens_reminted": result.CapabilityTokensReminted,
 	})
 	if result.ColumnsDropped > 0 {
 		h.logger.Warn("backup restore dropped columns the target schema does not have",
@@ -555,6 +560,7 @@ func (h *BackupHandler) Restore(w http.ResponseWriter, r *http.Request) {
 		RowsInsertedShortfalls:     result.RowsInsertedShortfalls,
 		JournalEntriesResigned:     result.JournalEntriesResigned,
 		JournalCheckpointsResigned: result.JournalCheckpointsResigned,
+		CapabilityTokensReminted:   result.CapabilityTokensReminted,
 	})
 }
 
@@ -609,6 +615,13 @@ type backupRestoreResponse struct {
 	// which remaps nothing.
 	JournalEntriesResigned     int `json:"journal_entries_resigned"`
 	JournalCheckpointsResigned int `json:"journal_checkpoints_resigned"`
+	// A FORKED restore re-mints every capability token row it carries
+	// (#2274): invitations, exposures, pipeline/page webhooks, public
+	// links. The source's secrets keep working only against the source;
+	// the fork's versions have to be re-issued. Per-table counts, so the
+	// operator can see WHICH capabilities arrived revoked. nil (not an
+	// empty map) on a plain restore, which re-keys nothing.
+	CapabilityTokensReminted map[string]int `json:"capability_tokens_reminted"`
 }
 
 // clampedToTier reports the tier the restore clamped to, read off the

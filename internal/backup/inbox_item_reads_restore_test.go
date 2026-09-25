@@ -68,11 +68,13 @@ func TestRestore_InboxItemReads_LandWithTheirItem(t *testing.T) {
 	}
 }
 
-// TestForkedRestore_InboxItemReads_SkippedAndReported: on a fork the item
-// itself does not land (inbox_items is UNIQUE(kind, source_id) instance-wide,
-// #2274), so its read marker has no parent. The restore must neither abort on
-// the deferred FK check nor pretend the marker landed: it is skipped, and the
-// skip shows up in rows_inserted_shortfalls.
+// TestForkedRestore_InboxItemReads_FollowTheirItem: since #2274 scoped
+// inbox_items' UNIQUE(kind, source_id) per workspace, the item — and
+// therefore its read marker — LANDS on a fork. The marker attaches to
+// the fork's remapped item id, never to the source's, and no shortfall
+// is reported because nothing was skipped. (The orphanGuardedChildren
+// insert guard remains as a safety net for bundles that carry a marker
+// without its item; this test is the proof it is a no-op on a fork.)
 func TestForkedRestore_InboxItemReads_SkippedAndReported(t *testing.T) {
 	ctx := context.Background()
 	source := openMigratedDB(t)
@@ -94,29 +96,38 @@ func TestForkedRestore_InboxItemReads_SkippedAndReported(t *testing.T) {
 		AsWorkspace: "inbox-reads-fork",
 	})
 	if err != nil {
-		t.Fatalf("RestoreBackup --as-workspace: %v (the read marker must be skipped, not abort the restore)", err)
+		t.Fatalf("RestoreBackup --as-workspace: %v", err)
 	}
-	if res.RestoredWorkspaceID == "" || res.RestoredWorkspaceID == workspaceID {
-		t.Fatalf("--as-workspace did not fork (got %q)", res.RestoredWorkspaceID)
+	forkID := res.RestoredWorkspaceID
+	if forkID == "" || forkID == workspaceID {
+		t.Fatalf("--as-workspace did not fork (got %q)", forkID)
 	}
-	// The original marker is untouched; nothing new attached to anything.
+	// The original marker is untouched, still on the source's item.
 	if got := countReadsForItem(t, source, itemID); got != 1 {
 		t.Errorf("read markers for the original item = %d, want 1", got)
 	}
+	// The fork's marker landed on the fork's remapped item, so the
+	// instance holds exactly two markers — one per workspace.
 	var total int
 	if err := source.QueryRow(`SELECT COUNT(*) FROM inbox_item_reads`).Scan(&total); err != nil {
 		t.Fatal(err)
 	}
-	if total != 1 {
-		t.Errorf("inbox_item_reads rows after the fork = %d, want 1 (the fork's marker had no item to attach to)", total)
+	if total != 2 {
+		t.Errorf("inbox_item_reads rows after the fork = %d, want 2 (source + fork)", total)
 	}
-	reported := false
+	var forkMarkers int
+	if err := source.QueryRow(`
+		SELECT COUNT(*) FROM inbox_item_reads r
+		JOIN inbox_items i ON i.id = r.inbox_item_id
+		WHERE i.workspace_id = ?`, forkID).Scan(&forkMarkers); err != nil {
+		t.Fatal(err)
+	}
+	if forkMarkers != 1 {
+		t.Errorf("markers attached to the fork's item = %d, want 1", forkMarkers)
+	}
 	for _, m := range res.RowsInsertedShortfalls {
 		if m.Table == "inbox_item_reads" {
-			reported = true
+			t.Errorf("fork reported an inbox_item_reads shortfall — the row should land: %+v", m)
 		}
-	}
-	if !reported {
-		t.Errorf("the skipped read marker was not reported in rows_inserted_shortfalls: %+v", res.RowsInsertedShortfalls)
 	}
 }

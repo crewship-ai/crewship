@@ -886,16 +886,16 @@ func quoteIdent(name string) string {
 // rows land before children and FK enforcement does not explode on
 // crew.workspace_id etc.
 // orphanGuardedChildren names the child tables whose NOT NULL parent
-// reference may point at a row that legitimately did not land. Today that
-// is one table: inbox_item_reads follows inbox_items, and inbox_items is
-// UNIQUE(kind, source_id) instance-wide, so on a fork (--as-workspace /
-// --as-crew) its rows are INSERT OR IGNOREd away (#2274). Before A7 the read
-// state lived on inbox_items itself and vanished with it; as a child row it
-// would instead fail the deferred FK check and abort the restore. The insert
-// for a table listed here is conditional on the parent existing, and a row
-// skipped that way is counted as a shortfall — reported, never silent. When
-// #2274 scopes the unique key and inbox_items lands on a fork, the guard
-// becomes a no-op and this entry can go.
+// reference may point at a row that legitimately did not land. Today
+// that is one table: inbox_item_reads follows inbox_items, whose
+// UNIQUE(kind, source_id) was instance-wide and ate every row on a
+// fork (#2274) — before the key was scoped per workspace, that is.
+// With the scoping in place inbox_items lands on forks and the guard
+// is a no-op there, but it stays: a parent can still be absent from a
+// bundle that carries its children (a partial/skewed bundle, a future
+// table the generator cannot seed), and a read marker for an item that
+// did not land is a shortfall to REPORT, not a reason to abort the
+// whole restore on the deferred FK check.
 var orphanGuardedChildren = map[string]struct {
 	column string // the child's FK column
 	parent string // the referenced table, whose PK is `id`

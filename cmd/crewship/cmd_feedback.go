@@ -16,14 +16,15 @@ import (
 
 // feedbackRow mirrors the wire shape of /api/v1/feedback rows.
 type feedbackRow struct {
-	ID        string  `json:"id" yaml:"id"`
-	MessageID string  `json:"message_id" yaml:"message_id"`
-	ChatID    *string `json:"chat_id,omitempty" yaml:"chat_id,omitempty"`
-	TraceID   *string `json:"trace_id,omitempty" yaml:"trace_id,omitempty"`
-	Signal    string  `json:"signal" yaml:"signal"`
-	Reason    *string `json:"reason,omitempty" yaml:"reason,omitempty"`
-	UserID    *string `json:"user_id,omitempty" yaml:"user_id,omitempty"`
-	CreatedAt string  `json:"created_at" yaml:"created_at"`
+	ID          string  `json:"id" yaml:"id"`
+	WorkspaceID string  `json:"workspace_id" yaml:"workspace_id"`
+	MessageID   string  `json:"message_id" yaml:"message_id"`
+	ChatID      *string `json:"chat_id,omitempty" yaml:"chat_id,omitempty"`
+	TraceID     *string `json:"trace_id,omitempty" yaml:"trace_id,omitempty"`
+	Signal      string  `json:"signal" yaml:"signal"`
+	Reason      *string `json:"reason,omitempty" yaml:"reason,omitempty"`
+	UserID      *string `json:"user_id,omitempty" yaml:"user_id,omitempty"`
+	CreatedAt   string  `json:"created_at" yaml:"created_at"`
 }
 
 var feedbackCmd = &cobra.Command{
@@ -134,14 +135,14 @@ var feedbackListCmd = &cobra.Command{
 			rows = []feedbackRow{} // "[]", never "null"
 		}
 		f := newFormatter()
-		headers := []string{"ID", "MESSAGE", "SIGNAL", "REASON", "CREATED"}
+		headers := []string{"ID", "WORKSPACE", "MESSAGE", "SIGNAL", "REASON", "CREATED"}
 		table := make([][]string, 0, len(rows))
 		for _, r := range rows {
 			reason := ""
 			if r.Reason != nil {
 				reason = *r.Reason
 			}
-			table = append(table, []string{r.ID, r.MessageID, r.Signal, reason, r.CreatedAt})
+			table = append(table, []string{r.ID, r.WorkspaceID, r.MessageID, r.Signal, reason, r.CreatedAt})
 		}
 		return f.Auto(rows, headers, table)
 	},
@@ -162,10 +163,11 @@ var feedbackDeleteCmd = &cobra.Command{
 		if messageID == "" || signal == "" {
 			return fmt.Errorf("--message and --signal are required")
 		}
+		client := newAPIClient()
 		q := url.Values{}
 		q.Set("message_id", messageID)
 		q.Set("signal", signal)
-		client := newAPIClient()
+		q.Set("workspace_id", client.GetWorkspaceID())
 		resp, err := client.Delete("/api/v1/feedback?" + q.Encode())
 		if err != nil {
 			return err

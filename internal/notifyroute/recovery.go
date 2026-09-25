@@ -61,7 +61,7 @@ func (r *Router) RecoverStuckDeliveries(ctx context.Context) (attempted, sent in
 // recoverOne re-attempts a single stuck delivery. Returns true iff it was
 // delivered this pass.
 func (r *Router) recoverOne(ctx context.Context, d Delivery) bool {
-	body, priority, payload, err := r.deriveMessage(ctx, d.SourceKind, d.SourceID)
+	body, priority, payload, err := r.deriveMessage(ctx, d.WorkspaceID, d.SourceKind, d.SourceID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			// Source inbox item is gone — nothing left to render. Bump the
@@ -120,7 +120,7 @@ func (r *Router) recoverOne(ctx context.Context, d Delivery) bool {
 // template variables is notificationFacts' job, and doing it here as well is
 // what let the live path and this one drift into reading a single hardcoded
 // key each.
-func (r *Router) deriveMessage(ctx context.Context, kind, sourceID string) (body, priority string, payload map[string]any, err error) {
+func (r *Router) deriveMessage(ctx context.Context, workspaceID, kind, sourceID string) (body, priority string, payload map[string]any, err error) {
 	// The journal bridge is a producer with NO inbox row — journalItem says
 	// so in its own comment — so re-deriving it from inbox_items could only
 	// ever return sql.ErrNoRows. Every observational category was therefore
@@ -134,10 +134,13 @@ func (r *Router) deriveMessage(ctx context.Context, kind, sourceID string) (body
 	}
 
 	var payloadJSON string
+	// Workspace-scoped like every inbox lookup since the dedupe key was
+	// scoped (#2274): an unscoped (kind, source_id) row pick could read
+	// another workspace's item.
 	err = r.db.QueryRowContext(ctx,
 		`SELECT COALESCE(body_md,''), priority, COALESCE(payload_json,'{}')
-		 FROM inbox_items WHERE kind = ? AND source_id = ?`,
-		kind, sourceID).Scan(&body, &priority, &payloadJSON)
+		 FROM inbox_items WHERE workspace_id = ? AND kind = ? AND source_id = ?`,
+		workspaceID, kind, sourceID).Scan(&body, &priority, &payloadJSON)
 	if err != nil {
 		return "", "", nil, err
 	}

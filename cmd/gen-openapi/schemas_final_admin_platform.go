@@ -102,9 +102,15 @@ func finalAdminPlatformSchemaCatalog() (map[string]DomainSchema, map[string]any)
 		// plain restore.
 		"journal_entries_resigned":     integer(),
 		"journal_checkpoints_resigned": integer(),
+		// #2274: a forked restore re-mints every capability token it
+		// carries (a fork does not inherit live capabilities); per-table
+		// counts of what arrived with a fresh secret. nullable: a plain
+		// restore re-keys nothing and reports nil, not an empty map.
+		"capability_tokens_reminted": nullable(map[string]any{"type": "object", "additionalProperties": integer()}),
 	}, "manifest", "restored_ws", "restored_workspace_id", "crews_count", "crews_restored", "rows_inserted", "docker_phase_skipped",
 		"dropped_crew_filesystems", "security_level_clamped", "security_level_clamps", "columns_dropped", "dropped_columns",
-		"issue_counters_migrated", "payload_row_count_mismatches", "rows_inserted_shortfalls", "journal_entries_resigned", "journal_checkpoints_resigned")
+		"issue_counters_migrated", "payload_row_count_mismatches", "rows_inserted_shortfalls", "journal_entries_resigned", "journal_checkpoints_resigned",
+		"capability_tokens_reminted")
 	backupSelfTest := object(map[string]any{"ok": boolean(), "crew_id": str(), "crew_slug": str(), "canary_path": str(), "canary_bytes": integer(), "bundle_bytes": integer(), "elapsed_ms": integer(), "error": str()})
 	backupMetrics := object(map[string]any{"created_total": integer(), "created_by_scope": map[string]any{"type": "object", "additionalProperties": integer()}, "failed_total": integer(), "failed_by_reason": map[string]any{"type": "object", "additionalProperties": integer()}, "restored_total": integer(), "size_bytes_total": integer(), "duration_seconds_p50": numberSchema(), "duration_seconds_p95": numberSchema(), "duration_seconds_mean": numberSchema(), "lock_held_seconds_by_workspace": map[string]any{"type": "object", "additionalProperties": integer()}})
 	setup := object(map[string]any{

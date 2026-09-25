@@ -145,6 +145,8 @@ interface TurnRendererProps {
    *  primary workspace, which on a multi-workspace user attaches the
    *  row to the wrong tenant. */
   chatId?: string
+  /** Workspace owning this rendered chat, forwarded to feedback actions. */
+  workspaceId?: string
   /** Resolves a user id to a display name for group-chat author attribution.
    *  Returns null for the local user (no label) or when no participant info is
    *  available. Optional — callers without group context omit it. */
@@ -170,7 +172,7 @@ interface TurnRendererProps {
 const TURN_GUTTER_GRID =
   "group grid grid-cols-[32px_minmax(0,1fr)_32px] items-start gap-3"
 
-function TurnBody({ turn, onCopy, onFileClick, isLastAssistant, onRegenerate, onEditUserMessage, animateAfter, agentId, chatId, resolveAuthorName, resolveAskProvenance }: TurnRendererProps) {
+function TurnBody({ turn, onCopy, onFileClick, isLastAssistant, onRegenerate, onEditUserMessage, animateAfter, agentId, chatId, workspaceId, resolveAuthorName, resolveAskProvenance }: TurnRendererProps) {
   const shouldAnimate = animateAfter == null || turn.timestamp.getTime() >= animateAfter
   const initialAnim = shouldAnimate ? arrival.initial : false
   const transition = shouldAnimate ? arrival.transition : { duration: 0 }
@@ -474,7 +476,7 @@ function TurnBody({ turn, onCopy, onFileClick, isLastAssistant, onRegenerate, on
   // Assistant turn - use the new grouped component
   const assistantBody = (
     <>
-      <AssistantTurn turn={turn} onCopy={onCopy} onFileClick={onFileClick} agentId={agentId} chatId={chatId} />
+      <AssistantTurn turn={turn} onCopy={onCopy} onFileClick={onFileClick} agentId={agentId} chatId={chatId} workspaceId={workspaceId} />
       {isLastAssistant && onRegenerate && !turn.isStreaming && (
         <div className="flex -mt-1 mb-2">
           <button

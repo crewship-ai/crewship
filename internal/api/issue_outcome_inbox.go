@@ -46,8 +46,8 @@ var outcomeInboxScrubber = scrubber.New()
 
 // createOutcomeInboxItem writes the §12 action contract for a NEEDS_HUMAN
 // run. Exactly one item per run (§18 scenario 15's "exactly one inbox
-// item"): inbox.Insert's underlying (kind, source_id) unique index is keyed
-// on assignmentID here, via id = "ibx_run_needs_human_<assignmentID>", so a
+// item"): inbox.Insert's underlying (workspace_id, kind, source_id) unique
+// index is keyed on assignmentID here, so a
 // second call for the SAME run — a duplicate terminal write that lost
 // finishAssignment's own terminal CAS and could never reach this far, or
 // any future retried caller — is silently absorbed rather than doubled.

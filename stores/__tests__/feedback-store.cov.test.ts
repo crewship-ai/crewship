@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest"
-import { useFeedbackStore } from "@/stores/feedback-store"
+import { feedbackTurnKey, useFeedbackStore } from "@/stores/feedback-store"
 
 // res.ok / res.status are the only fields the store reads.
 const ok = () => ({ ok: true, status: 200 })
@@ -144,6 +144,39 @@ describe("reset", () => {
     expect(init).toEqual({ method: "DELETE", credentials: "include" })
     // helpful cleared, sibling edit kept
     expect(useFeedbackStore.getState().byTurn["t 1/x"]).toEqual({ edit: true })
+  })
+
+  it("scopes DELETE to the active workspace when a fork copied the feedback row", async () => {
+    mockFetch.mockResolvedValue(ok())
+    const sourceKey = feedbackTurnKey("t1", "ws/a")
+    const forkKey = feedbackTurnKey("t1", "ws/b")
+    useFeedbackStore.setState({ userId: "u1", byTurn: {
+      [sourceKey]: { helpful: true },
+      [forkKey]: { helpful: true },
+    } })
+
+    await useFeedbackStore.getState().reset("t1", "helpful", { workspaceId: "ws/a" })
+
+    expect(mockFetch.mock.calls[0][0]).toBe(
+      "/api/v1/feedback?message_id=t1&signal=helpful&workspace_id=ws%2Fa",
+    )
+    expect(useFeedbackStore.getState().byTurn[sourceKey]).toEqual({})
+    expect(useFeedbackStore.getState().byTurn[forkKey]).toEqual({ helpful: true })
+  })
+
+  it("keeps copied turn votes and in-flight operations separate by workspace", async () => {
+    mockFetch.mockResolvedValue(ok())
+    useFeedbackStore.getState().setUser("u1")
+    const source = useFeedbackStore.getState().submit("t1", "helpful", { workspaceId: "ws/a", chatId: "chat-a" })
+    const fork = useFeedbackStore.getState().submit("t1", "helpful", { workspaceId: "ws/b", chatId: "chat-b" })
+    await Promise.all([source, fork])
+
+    expect(mockFetch).toHaveBeenCalledTimes(2)
+    expect(useFeedbackStore.getState().byTurn[feedbackTurnKey("t1", "ws/a")]).toEqual({ helpful: true })
+    expect(useFeedbackStore.getState().byTurn[feedbackTurnKey("t1", "ws/b")]).toEqual({ helpful: true })
+    await useFeedbackStore.getState().reset("t1", "helpful", { workspaceId: "ws/a" })
+    expect(useFeedbackStore.getState().byTurn[feedbackTurnKey("t1", "ws/a")]).toEqual({})
+    expect(useFeedbackStore.getState().byTurn[feedbackTurnKey("t1", "ws/b")]).toEqual({ helpful: true })
   })
 
   it("keeps local state when the DELETE returns non-2xx", async () => {
