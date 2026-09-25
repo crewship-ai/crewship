@@ -149,6 +149,16 @@ type Contents struct {
 	// operator can investigate via `crewship memory versions`.
 	MemoryBlobsMissing int `json:"memory_blobs_missing,omitempty" yaml:"memory_blobs_missing,omitempty"`
 
+	// MissingContainerCrews names crews that had a provisioned
+	// container (cached_image set) whose container was absent from the
+	// daemon at create time, so this bundle carries their DB rows and
+	// NONE of their files (#2612). Deliberately excludes crews that
+	// were never provisioned — a DB-only crew is complete for what it
+	// is; a provisioned crew without its container is a gap. Empty or
+	// nil on a complete bundle. Restores read this: those crews' files
+	// cannot be landed from this bundle no matter what comes after.
+	MissingContainerCrews []string `json:"missing_container_crews,omitempty" yaml:"missing_container_crews,omitempty"`
+
 	// TableRowCounts records, per table, how many rows the DB dump
 	// (DumpWorkspace / DumpCrew) wrote into this bundle's payload at
 	// create time — len(dump.Tables[table]) for every table the dump
@@ -234,6 +244,12 @@ type CrewSummary struct {
 	SystemIncluded   bool  `json:"system_included,omitempty" yaml:"system_included,omitempty"`
 	AgentCount       int   `json:"agent_count" yaml:"agent_count"`
 	PayloadSizeBytes int64 `json:"payload_size_bytes,omitempty" yaml:"payload_size_bytes,omitempty"`
+	// ContainerMissing marks a crew that HAD a provisioned container
+	// (cached_image set) but no container on the daemon at create time,
+	// so the bundle carries none of its files. Distinct from a
+	// never-provisioned crew, where no files ever existed to omit
+	// (#2612). Mirrors Contents.MissingContainerCrews per crew.
+	ContainerMissing bool `json:"container_missing,omitempty" yaml:"container_missing,omitempty"`
 }
 
 // HasCrewMemory answers the only question an operator actually asks of

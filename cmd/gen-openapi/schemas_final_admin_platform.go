@@ -71,7 +71,11 @@ func finalAdminPlatformSchemaCatalog() (map[string]DomainSchema, map[string]any)
 		"valid": boolean(), "size_bytes": integer(), "manifest": manifest, "error": str(),
 		"completeness_checked": boolean(), "completeness_skip_reason": str(), "table_row_count_mismatches": nullable(array(rowCountMismatch)),
 	}, "valid", "size_bytes", "manifest", "error", "completeness_checked", "completeness_skip_reason", "table_row_count_mismatches")
-	backupCreate := object(map[string]any{"path": str(), "size_bytes": integer(), "payload_sha256": str(), "format_version": integer(), "scope": str(), "scope_level": str(), "created_at": str(), "encrypted": boolean()})
+	backupCreate := object(map[string]any{"path": str(), "size_bytes": integer(), "payload_sha256": str(), "format_version": integer(), "scope": str(), "scope_level": str(), "created_at": str(), "encrypted": boolean(),
+		// #2612: provisioned crews whose container was absent at create
+		// time — the bundle carries DB rows only for them.
+		"missing_container_crews": nullable(array(str()))},
+		"path", "size_bytes", "payload_sha256", "format_version", "scope", "scope_level", "created_at", "encrypted", "missing_container_crews")
 	backupRotate := object(map[string]any{"deleted": array(str()), "dry_run": boolean()})
 	// backupRestoreResponse (internal/api/backup.go). restored_ws is the
 	// restored workspace's SLUG — it is what the CLI prints as `workspace=`,

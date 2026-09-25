@@ -224,13 +224,27 @@ func TestMobyDockerOps_PauseUnpause(t *testing.T) {
 			t.Fatalf("pause: %v", err)
 		}
 	})
-	t.Run("pause already paused is success", func(t *testing.T) {
+	t.Run("pause already paused returns ErrAlreadyPaused", func(t *testing.T) {
 		d := newFakeDaemon()
 		d.pauseStatus = http.StatusConflict
 		d.pauseMsg = "Container c1 is already paused"
 		ops := newMobyOps(t, d)
-		if err := ops.Pause(ctx, "c1"); err != nil {
-			t.Fatalf("expected already-paused to be treated as success, got %v", err)
+		err := ops.Pause(ctx, "c1")
+		if !errors.Is(err, ErrAlreadyPaused) {
+			t.Fatalf("expected ErrAlreadyPaused, got %v", err)
+		}
+	})
+	t.Run("pause not running returns ErrNotRunning", func(t *testing.T) {
+		d := newFakeDaemon()
+		d.pauseStatus = http.StatusConflict
+		// Wording per live daemon 29.x (#2612 reproduction); older
+		// daemons capitalise "Container c1 is not running" — matched on
+		// the shared "is not running" substring.
+		d.pauseMsg = "container c1 is not running"
+		ops := newMobyOps(t, d)
+		err := ops.Pause(ctx, "c1")
+		if !errors.Is(err, ErrNotRunning) {
+			t.Fatalf("expected ErrNotRunning, got %v", err)
 		}
 	})
 	t.Run("pause other error wrapped", func(t *testing.T) {
@@ -256,6 +270,26 @@ func TestMobyDockerOps_PauseUnpause(t *testing.T) {
 		ops := newMobyOps(t, d)
 		if err := ops.Unpause(ctx, "c1"); err != nil {
 			t.Fatalf("expected not-paused to be treated as success, got %v", err)
+		}
+	})
+	t.Run("unpause not running is success", func(t *testing.T) {
+		// A container that stopped (or was force-removed) while we held
+		// it paused cannot be left paused — see MobyDockerOps.Unpause.
+		d := newFakeDaemon()
+		d.unpauseStatus = http.StatusConflict
+		d.unpauseMsg = "container c1 is not running"
+		ops := newMobyOps(t, d)
+		if err := ops.Unpause(ctx, "c1"); err != nil {
+			t.Fatalf("expected not-running to be treated as success, got %v", err)
+		}
+	})
+	t.Run("unpause no such container is success", func(t *testing.T) {
+		d := newFakeDaemon()
+		d.unpauseStatus = http.StatusConflict
+		d.unpauseMsg = "No such container: c1"
+		ops := newMobyOps(t, d)
+		if err := ops.Unpause(ctx, "c1"); err != nil {
+			t.Fatalf("expected no-such-container to be treated as success, got %v", err)
 		}
 	})
 	t.Run("unpause other error wrapped", func(t *testing.T) {
@@ -525,10 +559,20 @@ type pausableOps struct {
 	unpauseErr error
 	pauses     int
 	unpauses   int
+	// unpauseCtxErr is what the deferred Unpause's context looked like
+	// AT CALL TIME (nil = live), so tests can prove cleanup does not
+	// ride the (possibly cancelled) collection context. The context
+	// itself is cancelled by WithPaused's own defer before the test gets
+	// to inspect it, hence capturing Err() rather than the ctx.
+	unpauseCtxErr error
 }
 
-func (p *pausableOps) Pause(context.Context, string) error   { p.pauses++; return p.pauseErr }
-func (p *pausableOps) Unpause(context.Context, string) error { p.unpauses++; return p.unpauseErr }
+func (p *pausableOps) Pause(context.Context, string) error { p.pauses++; return p.pauseErr }
+func (p *pausableOps) Unpause(ctx context.Context, _ string) error {
+	p.unpauses++
+	p.unpauseCtxErr = ctx.Err()
+	return p.unpauseErr
+}
 func (p *pausableOps) CopyFrom(context.Context, string, string) (io.ReadCloser, error) {
 	return io.NopCloser(strings.NewReader("")), nil
 }
@@ -560,12 +604,108 @@ func TestWithPaused_Branches(t *testing.T) {
 			t.Errorf("unpause must not run after failed pause")
 		}
 	})
-	t.Run("fn error wins over unpause error", func(t *testing.T) {
+	t.Run("fn error and unpause error are both reported", func(t *testing.T) {
+		// #2612 review: a failed collection whose cleanup ALSO failed
+		// used to drop ErrPauseUnpauseLost entirely — the container
+		// stayed paused and nothing told the operator. Both facts must
+		// reach the caller now.
 		ops := &pausableOps{unpauseErr: errors.New("unpause broken")}
 		fnErr := errors.New("fn failed")
 		err := WithPaused(ctx, ops, "c1", func() error { return fnErr })
 		if !errors.Is(err, fnErr) {
-			t.Fatalf("expected fn error to win, got %v", err)
+			t.Fatalf("expected collection error to be reported, got %v", err)
+		}
+		if !errors.Is(err, ErrPauseUnpauseLost) {
+			t.Fatalf("expected ErrPauseUnpauseLost to be reported alongside, got %v", err)
+		}
+	})
+	t.Run("cleanup unpause does not inherit a cancelled collection context", func(t *testing.T) {
+		// A collection that failed because the request was cancelled
+		// must not cancel its own unpause: the daemon is healthy, and
+		// riding the dead context would leave the container paused for
+		// no reason (#2612 review).
+		ops := &pausableOps{}
+		collCtx, cancel := context.WithCancel(ctx)
+		fnErr := errors.New("collect failed after cancellation")
+		err := WithPaused(collCtx, ops, "c1", func() error {
+			cancel()
+			return fnErr
+		})
+		if !errors.Is(err, fnErr) {
+			t.Fatalf("expected fn error, got %v", err)
+		}
+		if ops.unpauses != 1 {
+			t.Fatalf("unpause calls = %d, want 1", ops.unpauses)
+		}
+		if ops.unpauseCtxErr != nil {
+			t.Fatalf("cleanup unpause ran on a %v context — the container would stay paused against a healthy daemon", ops.unpauseCtxErr)
+		}
+	})
+	t.Run("collection error under an owned pause still unpauses", func(t *testing.T) {
+		// #2612: a failed collection must not leave a running container
+		// paused. The unpause runs from a defer regardless of fn's
+		// outcome; this pins that contract down where it lives.
+		ops := &pausableOps{}
+		fnErr := errors.New("collect blew up")
+		err := WithPaused(ctx, ops, "c1", func() error { return fnErr })
+		if !errors.Is(err, fnErr) {
+			t.Fatalf("expected fn error to propagate, got %v", err)
+		}
+		if ops.unpauses != 1 {
+			t.Errorf("unpause must still run after a collection error, ran %d times", ops.unpauses)
+		}
+	})
+	t.Run("already paused: fn runs and the pause is not resumed", func(t *testing.T) {
+		// #2612: the backup must not resume a pause it does not own.
+		ops := &pausableOps{pauseErr: ErrAlreadyPaused}
+		ran := false
+		if err := WithPaused(ctx, ops, "c1", func() error { ran = true; return nil }); err != nil {
+			t.Fatalf("WithPaused: %v", err)
+		}
+		if !ran {
+			t.Fatal("fn must run under a pre-existing pause")
+		}
+		if ops.unpauses != 0 {
+			t.Errorf("must not unpause a container paused by someone else, unpaused %d times", ops.unpauses)
+		}
+	})
+	t.Run("not running: fn runs without pause or unpause", func(t *testing.T) {
+		// #2612: a stopped/created container is collected as-is — the
+		// archive API reads its filesystem without it being started.
+		ops := &pausableOps{pauseErr: ErrNotRunning}
+		ran := false
+		if err := WithPaused(ctx, ops, "c1", func() error { ran = true; return nil }); err != nil {
+			t.Fatalf("WithPaused: %v", err)
+		}
+		if !ran {
+			t.Fatal("fn must run for a not-running container")
+		}
+		if ops.unpauses != 0 {
+			t.Errorf("nothing was paused, so nothing may be unpaused, unpaused %d times", ops.unpauses)
+		}
+	})
+	t.Run("not running: collection error propagates without unpause", func(t *testing.T) {
+		ops := &pausableOps{pauseErr: ErrNotRunning}
+		fnErr := errors.New("collect blew up")
+		err := WithPaused(ctx, ops, "c1", func() error { return fnErr })
+		if !errors.Is(err, fnErr) {
+			t.Fatalf("expected fn error to propagate, got %v", err)
+		}
+		if ops.unpauses != 0 {
+			t.Errorf("nothing was paused, so nothing may be unpaused, unpaused %d times", ops.unpauses)
+		}
+	})
+	t.Run("missing container fails before fn runs", func(t *testing.T) {
+		// A vanished container is an explicit failure, not a silent
+		// skip — an incomplete collection must never be sealable as a
+		// complete bundle (#2612).
+		ops := &pausableOps{pauseErr: errors.New("backup: docker pause c1: No such container")}
+		err := WithPaused(ctx, ops, "c1", func() error {
+			t.Fatal("fn must not run when the container is gone")
+			return nil
+		})
+		if err == nil || !strings.Contains(err.Error(), "No such container") {
+			t.Fatalf("expected missing-container error, got %v", err)
 		}
 	})
 	t.Run("unpause failure after success surfaces ErrPauseUnpauseLost", func(t *testing.T) {

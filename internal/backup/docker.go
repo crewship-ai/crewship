@@ -9,6 +9,7 @@ import (
 	"io"
 	"path"
 	"strings"
+	"time"
 
 	"github.com/moby/moby/api/pkg/stdcopy"
 	"github.com/moby/moby/client"
@@ -20,12 +21,18 @@ import (
 // MobyDockerOps; tests substitute an in-memory fake.
 type DockerOps interface {
 	// Pause suspends the container's processes so tar / CopyFromContainer
-	// sees a stable filesystem. Returns nil if the container is already
-	// paused (idempotent for crash-safe backup flows).
+	// sees a stable filesystem. Returns ErrAlreadyPaused when the
+	// container was already paused before this call, and ErrNotRunning
+	// when it exists but is not running (stopped/created) — the archive
+	// API still works on both, so callers can collect without a pause
+	// they own. Any other error (missing container, daemon failure) is
+	// returned as-is (#2612).
 	Pause(ctx context.Context, containerID string) error
 
 	// Unpause resumes a previously paused container. Safe to call on a
-	// container that is already running.
+	// container that is already running, and on one that stopped or was
+	// removed while paused — a container that is not running cannot be
+	// left paused, so those resolve to nil rather than a false alarm.
 	Unpause(ctx context.Context, containerID string) error
 
 	// CopyFrom streams the contents of srcPath inside the container as a
@@ -131,13 +138,37 @@ type MobyDockerOps struct {
 	Client *client.Client
 }
 
+// Pause-state sentinels (#2612). WithPaused needs to tell three
+// situations apart, and "what did Pause return" is the only signal it
+// has: nil means we now own a pause we must undo, ErrAlreadyPaused
+// means someone else's pause we must NOT undo, and ErrNotRunning means
+// there is nothing to pause — the archive API reads a stopped
+// container's filesystem fine, so collection can proceed without one.
+var (
+	// ErrAlreadyPaused: the container was already paused before our
+	// Pause call. The pause is not ours; unpausing it would resume a
+	// container someone else deliberately suspended.
+	ErrAlreadyPaused = errors.New("backup: container already paused")
+
+	// ErrNotRunning: the container exists but is not running (stopped,
+	// created, or between restarts). CopyFrom still works — docker's
+	// archive API mounts the rootfs on demand — but exec-based flows
+	// (self-test, restore) do not.
+	ErrNotRunning = errors.New("backup: container not running")
+)
+
 // Pause implements DockerOps.
 func (m *MobyDockerOps) Pause(ctx context.Context, containerID string) error {
 	if _, err := m.Client.ContainerPause(ctx, containerID, client.ContainerPauseOptions{}); err != nil {
-		// Docker returns "is already paused" with varying wording; we
-		// treat that as success so a retried backup does not double-fail.
-		if strings.Contains(err.Error(), "already paused") {
-			return nil
+		msg := err.Error()
+		// Docker returns "is already paused" with varying wording and
+		// capitalisation; a substring match on the daemon message is
+		// the only transport-independent signal available.
+		switch {
+		case strings.Contains(msg, "already paused"):
+			return fmt.Errorf("%w: %s", ErrAlreadyPaused, msg)
+		case strings.Contains(msg, "is not running"):
+			return fmt.Errorf("%w: %s", ErrNotRunning, msg)
 		}
 		return fmt.Errorf("backup: docker pause %s: %w", containerID, err)
 	}
@@ -147,7 +178,15 @@ func (m *MobyDockerOps) Pause(ctx context.Context, containerID string) error {
 // Unpause implements DockerOps.
 func (m *MobyDockerOps) Unpause(ctx context.Context, containerID string) error {
 	if _, err := m.Client.ContainerUnpause(ctx, containerID, client.ContainerUnpauseOptions{}); err != nil {
-		if strings.Contains(err.Error(), "is not paused") {
+		msg := err.Error()
+		// "is not running" / "No such container": the container stopped
+		// or was removed (force) while we held it paused. Either way it
+		// cannot be left paused, so reporting ErrPauseUnpauseLost would
+		// send an operator hunting for a stuck container that does not
+		// exist. Anything else may genuinely leave it paused.
+		if strings.Contains(msg, "is not paused") ||
+			strings.Contains(msg, "is not running") ||
+			strings.Contains(msg, "No such container") {
 			return nil
 		}
 		return fmt.Errorf("backup: docker unpause %s: %w", containerID, err)
@@ -384,27 +423,72 @@ func (m *MobyDockerOps) ExecAs(ctx context.Context, containerID, user string, cm
 	return inspect.ExitCode, buf.Bytes(), nil
 }
 
-// ErrPauseUnpauseLost is returned by WithPaused when unpause fails
-// after a successful tar. Callers should log it loudly — the container
-// remains paused and a human operator must intervene. The backup
-// itself is still considered complete.
+// ErrPauseUnpauseLost is returned by WithPaused when its owned unpause
+// fails — alone after a successful fn, or joined with the collection
+// error when both fail. Callers should log it loudly: the container
+// remains paused and a human operator must intervene. It is never
+// swallowed, because "collection failed" does not make "and it is also
+// still paused" less true.
 var ErrPauseUnpauseLost = errors.New("backup: container left paused; manual unpause required")
 
-// WithPaused runs fn while the given container is paused, unpausing
-// afterwards regardless of fn's outcome. If unpause fails, the inner
-// error is returned if any; otherwise ErrPauseUnpauseLost wraps the
-// unpause error so callers can alert an operator.
+// unpauseTimeout bounds the deferred cleanup unpause. It is deliberately
+// short: this runs after fn has returned, frequently on an error path,
+// and a cleanup that can itself hang would turn a failed collection
+// into a wedged backup runner.
+const unpauseTimeout = 30 * time.Second
+
+// WithPaused runs fn with the container's filesystem quiesced where
+// possible, and — the part #2612 is about — puts the container back the
+// way it found it:
+//
+//   - running: pause for the duration of fn, then unpause regardless of
+//     fn's outcome. A collection error still gets its unpause; only an
+//     unpause that itself fails surfaces ErrPauseUnpauseLost.
+//   - already paused: run fn under the existing pause and LEAVE IT
+//     PAUSED. Resuming a container someone else deliberately suspended
+//     is a state change the backup has no mandate for.
+//   - not running (stopped/created): run fn without pausing. The
+//     archive API mounts a stopped container's rootfs on demand, so
+//     collection works — and a stopped container is as consistent as a
+//     paused one, because nothing in it can write.
+//
+// Any other Pause error — missing container, daemon failure — is
+// returned before fn runs, so a half-collected workspace can never be
+// sealed as a complete bundle.
+//
+// If the owned unpause fails, ErrPauseUnpauseLost wraps the unpause
+// error: alone when fn succeeded, or errors.Join-ed with the collection
+// error when both failed — the operator is told the container is left
+// paused either way. The unpause deliberately does NOT run on fn's
+// context: a collection that failed because the request was cancelled
+// would otherwise cancel its own cleanup and leave a container paused
+// against a perfectly healthy daemon.
 func WithPaused(ctx context.Context, ops DockerOps, containerID string, fn func() error) (retErr error) {
-	if err := ops.Pause(ctx, containerID); err != nil {
-		return err
-	}
-	defer func() {
-		if err := ops.Unpause(ctx, containerID); err != nil {
-			if retErr == nil {
-				retErr = fmt.Errorf("%w: %v", ErrPauseUnpauseLost, err)
+	switch pauseErr := ops.Pause(ctx, containerID); {
+	case pauseErr == nil:
+		// We own this pause: whatever fn does, undo it.
+		defer func() {
+			unpauseCtx, cancel := context.WithTimeout(context.Background(), unpauseTimeout)
+			defer cancel()
+			if err := ops.Unpause(unpauseCtx, containerID); err != nil {
+				lost := fmt.Errorf("%w: %v", ErrPauseUnpauseLost, err)
+				if retErr == nil {
+					retErr = lost
+					return
+				}
+				// The collection error stays primary; the lost-unpause
+				// alarm rides along rather than being dropped — a
+				// container left paused is an operator-visible fact
+				// even when the backup itself already failed.
+				retErr = errors.Join(retErr, lost)
 			}
-		}
-	}()
+		}()
+	case errors.Is(pauseErr, ErrAlreadyPaused), errors.Is(pauseErr, ErrNotRunning):
+		// Not our pause / nothing to pause: collect under the current
+		// state and leave it exactly as it was.
+	default:
+		return pauseErr
+	}
 	return fn()
 }
 

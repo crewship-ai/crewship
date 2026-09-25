@@ -3915,6 +3915,13 @@
           "format_version": {
             "type": "integer"
           },
+          "missing_container_crews": {
+            "items": {
+              "type": "string"
+            },
+            "nullable": true,
+            "type": "array"
+          },
           "path": {
             "type": "string"
           },
@@ -3931,6 +3938,17 @@
             "type": "integer"
           }
         },
+        "required": [
+          "path",
+          "size_bytes",
+          "payload_sha256",
+          "format_version",
+          "scope",
+          "scope_level",
+          "created_at",
+          "encrypted",
+          "missing_container_crews"
+        ],
         "type": "object"
       },
       "FinalAdminPlatformBackupEntry": {

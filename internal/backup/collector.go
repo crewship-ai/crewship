@@ -24,6 +24,13 @@ type CrewTarget struct {
 	CachedImageDigest  string
 	ConfigHash         string
 	AgentCount         int
+	// ContainerMissing is set by CreateBackup's daemon probe when a
+	// crew that HAD a provisioned container (CachedImageDigest set)
+	// has none on the daemon. It feeds the manifest's per-crew
+	// container_missing flag so an operator reading a bundle can tell
+	// "files omitted because the container is gone" from "files
+	// omitted because this crew never had any" (#2612).
+	ContainerMissing bool
 }
 
 // WorkspaceTarget describes the workspace being backed up along with
@@ -106,9 +113,13 @@ func (c CrewCapture) Volumes() []string {
 	return out
 }
 
-// CollectCrew pauses the crew container, streams its workspace bind,
-// crew memory bind, named volumes and output directory into dst
-// (prefixed by the crew's slug), and unpauses. Inside dst the layout
+// CollectCrew quiesces the crew container as far as its current state
+// allows (running containers are paused for the duration and resumed;
+// already-paused ones are collected under their existing pause and
+// left paused; stopped ones are collected as-is — see WithPaused,
+// #2612), streams its workspace bind, crew memory bind, named volumes
+// and output directory into dst (prefixed by the crew's slug), and
+// restores the container's prior state. Inside dst the layout
 // looks like:
 //
 //	workspace/<slug>/…   (/workspace bind contents)

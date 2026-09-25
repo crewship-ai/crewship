@@ -160,6 +160,19 @@ crewship backup create --scope=crew --crew dev-team
 
 `--crew` accepts either a slug or a crew ID. Crew-scope bundles restore independently of their parent workspace.
 
+### What happens to the crew container
+
+A backup freezes each crew container only as far as the container's own state allows, and puts it back exactly the way it found it (#2612):
+
+| Container state during create | What the backup does |
+|---|---|
+| **running** | Pauses for the duration of the file collection, preventing writes from that container, then resumes — on success, on failure, always. Host-backed paths and mounts shared with other containers may still change during collection. If the resume itself fails, the backup is reported as failed with `container left paused; manual unpause required` rather than pretending nothing happened. |
+| **already paused** | Collects under the existing pause and **leaves it paused**. A backup does not resume a container someone else deliberately suspended. |
+| **stopped / created** | Collects as-is, without starting it. Docker's archive API reads a stopped container's filesystem fine. The stopped container cannot write, but host-backed paths and shared mounts may still change during collection. The container stays stopped. |
+| **missing from the daemon** | A crew that was **never provisioned** (no cached image) is DB-rows-only and nothing is missing. A crew whose **provisioned container is gone** is also backed up DB-rows-only — but the bundle says so everywhere an operator looks: `missing_container_crews` on the create response and in the manifest (plus a per-crew `container_missing` flag), a CLI warning, and the `backup.create` audit row. A container that vanishes *mid*-collection fails the whole backup — an incomplete export never gets sealed as a complete bundle. |
+
+Restore is the one flow with the opposite requirement: it writes through `tar` inside the container, so the target crew must be **running** — see [The target crew must be running](#the-target-crew-must-be-running).
+
 ## List, inspect, verify
 
 ```bash
