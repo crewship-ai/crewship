@@ -79,13 +79,15 @@ func seedCapabilityRows(t *testing.T, db *sql.DB, workspaceID string) forkCapabi
 		f.invitationToken, workspaceID); err != nil {
 		t.Fatalf("seed invitation: %v", err)
 	}
-	// port_exposures / pipeline_webhooks: #1888 leaves the dead marker
-	// in the cleartext column and the real secret only as a digest. The
-	// exposure is seeded ACTIVE — a live capability, as on a real
+	// port_exposures / pipeline_webhooks: #1888 normally leaves the dead
+	// marker in the cleartext column and the real secret only as a digest.
+	// Seed the exposure with an empty cleartext token to cover the older
+	// digest-only shape: its hash still authenticates and must be re-keyed.
+	// The exposure is ACTIVE — a live capability, as on a real
 	// source — so the fork's REVOKED carry-over below is a state change
 	// the operator can see, not a no-op.
 	if _, err := db.ExecContext(ctx,
-		`UPDATE port_exposures SET token = 'redacted:' || id, token_hash = ?, status = 'ACTIVE' WHERE workspace_id = ?`,
+		`UPDATE port_exposures SET token = '', token_hash = ?, status = 'ACTIVE' WHERE workspace_id = ?`,
 		pipeline.HashCapabilityToken(f.exposeToken), workspaceID); err != nil {
 		t.Fatalf("seed exposure: %v", err)
 	}
