@@ -269,7 +269,7 @@ export function RoutineCalendar({
         >
           {icon(group.slug)}
           <span className="min-w-0 flex-1 truncate">{nameOf(group.slug, group.name)}</span>
-          <span className="shrink-0 rounded bg-primary/15 px-1 font-mono text-[10px] font-semibold text-primary">
+          <span className="shrink-0 rounded bg-primary/15 px-1 font-mono text-[10px] font-semibold text-primary-hover">
             ×{group.entries.length}
           </span>
         </button>
@@ -366,7 +366,7 @@ export function RoutineCalendar({
                 onClick={() => openDay(day)}
                 className={cn(
                   "flex min-h-8 flex-col items-center rounded-md p-0.5 text-xs hover:bg-muted",
-                  today && "bg-primary/15 text-primary",
+                  today && "bg-primary/15 text-primary-hover",
                 )}
               >
                 <span>{i + 1}</span>

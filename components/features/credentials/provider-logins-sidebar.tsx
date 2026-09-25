@@ -104,7 +104,7 @@ export function ProviderLoginsSidebar({
               </span>
               <span
                 className={cn(
-                  "shrink-0 tabular-nums text-[10px] text-muted-foreground/60",
+                  "shrink-0 tabular-nums text-[10px] text-muted-foreground",
                   empty && "text-muted-foreground/35",
                 )}
               >
@@ -130,7 +130,7 @@ export function ProviderLoginsSidebar({
                 >
                   <Icon className="h-3 w-3 shrink-0 text-muted-foreground/70" aria-hidden="true" />
                   <span className="min-w-0 flex-1 truncate">{opt.label}</span>
-                  <span className="shrink-0 tabular-nums text-[10px] text-muted-foreground/60">{opt.count}</span>
+                  <span className="shrink-0 tabular-nums text-[10px] text-muted-foreground">{opt.count}</span>
                 </SidebarRow>
               )
             })}
@@ -150,7 +150,7 @@ export function ProviderLoginsSidebar({
                   aria-hidden="true"
                 />
                 <span className="min-w-0 flex-1 truncate">{opt.label}</span>
-                <span className="shrink-0 tabular-nums text-[10px] text-muted-foreground/60">{opt.count}</span>
+                <span className="shrink-0 tabular-nums text-[10px] text-muted-foreground">{opt.count}</span>
               </SidebarRow>
             ))}
           </SidebarSection>

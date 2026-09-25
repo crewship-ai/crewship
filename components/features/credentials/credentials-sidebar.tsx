@@ -345,7 +345,7 @@ export function CredentialsSidebar({
                       <Icon className="h-3.5 w-3.5 shrink-0 opacity-60" aria-hidden="true" />
                     )}
                     <span className="min-w-0 flex-1 truncate">{opt.label}</span>
-                    <span className="shrink-0 tabular-nums text-[10px] text-muted-foreground-soft">
+                    <span className="shrink-0 tabular-nums text-[10px] text-muted-foreground">
                       {opt.count}
                     </span>
                   </SidebarFacetOption>
@@ -375,7 +375,7 @@ export function CredentialsSidebar({
           <SidebarRow selected={filters.tier === null} onSelect={() => set({ tier: null })}>
             <ShieldCheck className="h-3 w-3 shrink-0 text-muted-foreground/70" aria-hidden="true" />
             <span className="min-w-0 flex-1 truncate">Any tier</span>
-            <span className="shrink-0 tabular-nums text-[10px] text-muted-foreground/60">
+            <span className="shrink-0 tabular-nums text-[10px] text-muted-foreground">
               {counts.all}
             </span>
           </SidebarRow>
@@ -397,17 +397,12 @@ export function CredentialsSidebar({
                 <span
                   className={cn(
                     "min-w-0 flex-1 truncate",
-                    empty && !selected && "text-foreground/40",
+                    empty && !selected && "text-muted-foreground-soft",
                   )}
                 >
                   {opt.label}
                 </span>
-                <span
-                  className={cn(
-                    "shrink-0 tabular-nums text-[10px] text-muted-foreground/60",
-                    empty && "text-muted-foreground/35",
-                  )}
-                >
+                <span className="shrink-0 tabular-nums text-[10px] text-muted-foreground">
                   {opt.count}
                 </span>
               </SidebarRow>
@@ -443,7 +438,7 @@ export function CredentialsSidebar({
                   aria-hidden="true"
                 />
                 <span className="min-w-0 flex-1 truncate">{row.label}</span>
-                <span className="shrink-0 tabular-nums text-[10px] text-muted-foreground/60">
+                <span className="shrink-0 tabular-nums text-[10px] text-muted-foreground">
                   {row.count}
                 </span>
               </SidebarRow>
@@ -469,8 +464,8 @@ export function CredentialsSidebar({
                   className={cn(
                     "inline-flex h-5 items-center gap-1 rounded px-1 text-[10px] transition-colors",
                     selectMode
-                      ? "bg-primary/15 text-primary"
-                      : "text-muted-foreground/70 hover:bg-white/[0.06] hover:text-foreground",
+                      ? "bg-primary/15 text-primary-hover"
+                      : "text-muted-foreground-soft hover:bg-white/[0.06] hover:text-foreground",
                   )}
                 >
                   <ListChecks className="h-3 w-3" aria-hidden="true" />
@@ -485,7 +480,7 @@ export function CredentialsSidebar({
                   title={`Sorted by ${SORT_LABELS[sort].toLowerCase()}`}
                   aria-expanded={sortOpen}
                   onClick={() => setSortOpen(!sortOpen)}
-                  className="inline-flex h-5 items-center gap-1 rounded px-1 text-[10px] text-muted-foreground/70 transition-colors hover:bg-white/[0.06] hover:text-foreground"
+                  className="inline-flex h-5 items-center gap-1 rounded px-1 text-[10px] text-muted-foreground-soft transition-colors hover:bg-white/[0.06] hover:text-foreground"
                 >
                   <ArrowUpDown className="h-3 w-3" aria-hidden="true" />
                   {SORT_LABELS[sort]}
@@ -508,7 +503,7 @@ export function CredentialsSidebar({
                             }}
                             className={cn(
                               "flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-white/[0.06]",
-                              sort === key ? "text-primary-hover" : "text-muted-foreground/80",
+                              sort === key ? "text-primary-hover" : "text-muted-foreground-soft",
                             )}
                           >
                             <span className="flex-1">{SORT_LABELS[key]}</span>
@@ -574,7 +569,7 @@ export function CredentialsSidebar({
             )
           })}
           {credentials.length === 0 && (
-            <p className="px-3 py-2 text-[11px] text-muted-foreground/60">
+            <p className="px-3 py-2 text-[11px] text-muted-foreground-soft">
               Nothing matches these filters.
             </p>
           )}

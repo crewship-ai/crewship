@@ -568,7 +568,7 @@ export function CrewAuditSection({ workspaceId }: CrewAuditSectionProps) {
                   already returns newest-first. */}
               <h3 className="sticky top-0 z-10 border-b border-border/40 bg-card/95 px-4 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground backdrop-blur">
                 {dayHeading(bucket.day)}
-                <span className="ml-2 font-mono text-[10px] font-normal normal-case tracking-normal text-muted-foreground/60">
+                <span className="ml-2 font-mono text-[10px] font-normal normal-case tracking-normal text-muted-foreground-soft">
                   {bucket.logs.length}
                 </span>
               </h3>
