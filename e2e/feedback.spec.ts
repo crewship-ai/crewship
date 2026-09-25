@@ -5,59 +5,30 @@ import { test, expect } from "@playwright/test"
 // actual HTTP stack including CSRF + session cookie + the auth
 // middleware, not just an in-process handler call. Covers the
 // contract that the chat UI relies on: POST creates, GET lists,
-// DELETE removes, signal enum is enforced, body cap fires before
-// per-field cap, cross-user privacy holds.
+// DELETE removes, signal enum is enforced, and the body cap fires before
+// the per-field cap. Cross-user privacy is covered in the Go API tests.
 //
 // The test runs against PLAYWRIGHT_BASE_URL when set (dev VM mode)
 // or the locally-spawned Next.js dev server otherwise. The frontend
 // proxies /api/v1/* to the backend so we don't need a separate
 // CREWSHIP_BACKEND_URL env.
 //
-// #1617 investigated the two "POST creates a row" / "UPSERT
-// idempotency" failures below as a possible router bug (POST/DELETE
-// register via authedSelfMut, GET via the plain r.mux.Handle beside
-// it). That theory does not hold: internal/api/feedback_route_test.go
-// and cmd/crewship/acceptance_feedback_test.go both drive the real
-// router end to end with a real message and get a clean 201 — the
-// registration is fine. The 404 these two tests see is
-// MessageFeedbackHandler.Create's own, correct "message not found"
-// response: message_id must resolve to a real row in
-// conversation_messages (added in #1213, closing #1208 — a
-// cross-tenant message-existence oracle), and these two tests POST a
-// synthetic id that was never persisted there. Creating a real one
-// needs an actual chat turn, which needs a provisioned agent and an
-// LLM credential — neither is available in this harness (nightly-e2e
-// runs the daemon with CREWSHIP_SKIP_SIDECAR=1 and no provider key).
-// Left failing pending a follow-up that gives this harness a way to
-// seed a real conversation_messages row without a live agent turn.
+// Fixture messages are persisted in the authenticated workspace without an LLM.
 test.describe("Feedback API", () => {
-  test.beforeEach(async ({ context, baseURL }) => {
-    // Hand off through NextAuth's credentials callback to land a
-    // session cookie. The global-setup that the main suite uses
-    // expects a Next.js dev server in front of the API — for this
-    // spec we sign in via the same callback the UI uses, so it
-    // works against any deployment.
-    const csrfRes = await context.request.get(`${baseURL}/api/auth/csrf`)
-    const { csrfToken } = await csrfRes.json()
-    const loginRes = await context.request.post(
-      `${baseURL}/api/auth/callback/credentials`,
-      {
-        form: {
-          csrfToken,
-          email: "demo@crewship.ai",
-          password: "password123",
-        },
-        maxRedirects: 0,
-      },
+  async function seedMessage(context: import("@playwright/test").BrowserContext, baseURL: string | undefined) {
+    const workspaces = await (await context.request.get(`${baseURL}/api/v1/workspaces`)).json()
+    const workspaceID: string = Array.isArray(workspaces) ? workspaces[0]?.id : workspaces.id
+    expect(workspaceID).toBeTruthy()
+    const response = await context.request.post(
+      `${baseURL}/api/v1/e2e/fixtures/feedback-message?workspace_id=${encodeURIComponent(workspaceID)}`,
     )
-    // Credentials callback redirects on success (HTTP 302/303). Any
-    // 4xx means demo seed is missing — failing here is more useful
-    // than every test failing with "unauthorized".
-    expect([200, 302, 303]).toContain(loginRes.status())
-  })
+    expect(response.status()).toBe(201)
+    const { message_id } = await response.json()
+    return message_id as string
+  }
 
   test("POST creates a row + GET returns it + DELETE removes it", async ({ context, baseURL }) => {
-    const messageID = `pw-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+    const messageID = await seedMessage(context, baseURL)
 
     const create = await context.request.post(`${baseURL}/api/v1/feedback`, {
       data: {
@@ -95,11 +66,12 @@ test.describe("Feedback API", () => {
   })
 
   test("UPSERT idempotency: re-POST returns same id, replaces reason", async ({ context, baseURL }) => {
-    const messageID = `pw-upsert-${Date.now()}`
+    const messageID = await seedMessage(context, baseURL)
 
     const first = await context.request.post(`${baseURL}/api/v1/feedback`, {
       data: { message_id: messageID, signal: "not_helpful", reason: "first" },
     })
+    expect(first.status()).toBe(201)
     const firstID = (await first.json()).id
 
     const second = await context.request.post(`${baseURL}/api/v1/feedback`, {
