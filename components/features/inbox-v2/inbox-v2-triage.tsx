@@ -87,15 +87,16 @@ export function InboxFocusOverview({ label, entries, lookup, onOpen, onClear }: 
   onOpen: (entry: InboxV2Entry) => void
   onClear: () => void
 }) {
+  const itemCount = entries.reduce((count, entry) => count + (entry.groupedItems?.length ?? 1), 0)
   return <div className="mx-auto flex w-full max-w-5xl flex-col gap-4 p-4 lg:p-6" data-testid="inbox-focus-overview">
     <div className="flex flex-wrap items-start justify-between gap-3">
       <div>
         <h1 className="text-xl font-semibold tracking-tight">{label}</h1>
-        <p className="mt-1 text-body text-muted-foreground">{entries.length} matching active {entries.length === 1 ? "item" : "items"}</p>
+        <p className="mt-1 text-body text-muted-foreground">{itemCount} matching active {itemCount === 1 ? "item" : "items"}</p>
       </div>
       <button type="button" onClick={onClear} className="text-label text-primary-hover hover:underline">All inbox →</button>
     </div>
-    <DashboardCard title="Matching items" icon={Inbox} hint={`${entries.length} ${entries.length === 1 ? "item" : "items"}`}>
+    <DashboardCard title="Matching items" icon={Inbox} hint={`${itemCount} ${itemCount === 1 ? "item" : "items"}`}>
       {entries.length ? <div className="flex flex-col divide-y divide-border/50">{entries.map((entry) => <OverviewRow key={entry.key} entry={entry} lookup={lookup} onOpen={onOpen} />)}</div> : <InlineEmpty icon={Inbox} text="Nothing matches this filter right now." />}
     </DashboardCard>
   </div>

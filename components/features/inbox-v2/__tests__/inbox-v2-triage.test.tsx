@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest"
 
 import type { InboxItem } from "@/hooks/use-inbox"
 
-import { inboxEntry } from "../inbox-v2-derive"
+import { groupAdvisories, inboxEntry } from "../inbox-v2-derive"
 import { InboxFocusOverview, InboxTriage } from "../inbox-v2-triage"
 import type { InboxLookup } from "../inbox-v2-types"
 
@@ -76,6 +76,16 @@ describe("InboxTriage", () => {
 })
 
 describe("InboxFocusOverview", () => {
+  it("counts the underlying items when matching notices are grouped", () => {
+    const grouped = groupAdvisories([1, 2].map((n) => inboxEntry(item(`skill-${n}`, null, {
+      kind: "escalation", blocking: false, sender_name: "Skill Curator",
+      title: `Skill check: agent ${n}`, payload: {},
+    }))))
+    render(<InboxFocusOverview label="Approvals waiting" entries={grouped} lookup={lookup} onOpen={() => {}} onClear={() => {}} />)
+    expect(screen.getByText("2 matching active items")).toBeInTheDocument()
+    expect(screen.getByText("2 items")).toBeInTheDocument()
+  })
+
   it("shows only the selected dashboard category and offers a way back", () => {
     const onClear = vi.fn()
     render(<InboxFocusOverview label="Approvals waiting" entries={[inboxEntry(item("approval", "c-ops"))]} lookup={lookup} onOpen={() => {}} onClear={onClear} />)

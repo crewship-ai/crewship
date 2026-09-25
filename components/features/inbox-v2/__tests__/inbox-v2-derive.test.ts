@@ -78,6 +78,8 @@ describe("inbox v2 aggregation", () => {
       category: "system.health",
     })
     expect(grouped[0].groupedItems?.map((row) => row.id)).toEqual(["skill-1", "skill-2", "skill-3"])
+    expect(selectEntry(grouped, `request:${grouped[0].key}`)?.key).toBe(grouped[0].key)
+    expect(selectEntry(grouped, "request:skill-2")?.key).toBe(grouped[0].key)
   })
 
   it("projects pending and decided approval queue rows into action and history", () => {
