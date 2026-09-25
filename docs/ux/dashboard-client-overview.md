@@ -40,5 +40,5 @@ same zones in one column. Everything in the paragraphs above about data
 sources, error retention and motion described the September 15 release; the tile
 *shapes* (cards, sparklines per crew) do not — see the rows-not-cards note in
 #2540. The September 25 update in #2697 places active work in Results & review,
-removes System details and the dashboard header labels/actions, and keeps only
-the sticky reporting-window selector above the content.
+removes System details and the dashboard header counts/status/actions, and
+keeps the title beside the sticky reporting-window selector.

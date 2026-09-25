@@ -92,7 +92,7 @@ export function FleetBoard({ cards: unordered, workspaceId }: { cards: FleetCard
   // runs) in a fifth of the height, so the board fits beside the results
   // instead of pushing everything below the fold (#2539).
   return (
-    <section aria-label="Your crews" data-testid="dashboard-fleet-board" className="rounded-xl border border-border/60 bg-card p-3">
+    <section aria-label="Your crews" data-testid="dashboard-fleet-board" className="rounded-xl border border-border/60 bg-card p-3 xl:flex xl:min-h-0 xl:flex-1 xl:flex-col">
       <div className="mb-2.5 flex items-center justify-between">
         <h2 className="inline-flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-foreground/70">
           <Users className="h-3.5 w-3.5 text-muted-foreground-soft" /> Your crews
@@ -102,7 +102,7 @@ export function FleetBoard({ cards: unordered, workspaceId }: { cards: FleetCard
           <Link href="/crews" className="text-primary-hover hover:underline">Crews →</Link>
         </span>
       </div>
-      <div className="flex max-h-[350px] flex-col divide-y divide-border/50 overflow-y-auto overscroll-contain pr-1 [scrollbar-color:var(--border)_transparent]" tabIndex={0} aria-label="All crews">
+      <div className="flex max-h-[350px] flex-col divide-y divide-border/50 overflow-y-auto overscroll-contain pr-1 [scrollbar-color:var(--border)_transparent] xl:min-h-0 xl:max-h-none xl:flex-1" tabIndex={0} aria-label="All crews">
         {cards.map((card) => {
           const { row } = card
           return (

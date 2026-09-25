@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
-import { Radio } from "lucide-react"
+import { LayoutDashboard, Radio } from "lucide-react"
 
 import { DashboardCard } from "@/components/features/dashboard/dashboard-card"
 import {
@@ -51,7 +51,11 @@ const WINDOW_LABELS: DashboardWindow[] = ["24h", "7d", "30d"]
 
 function DashboardPeriodBar({ value, onChange }: { value: DashboardWindow; onChange: (value: DashboardWindow) => void }) {
   return (
-    <div className="sticky top-0 z-30 flex min-h-10 items-center justify-end border-b border-border/60 bg-card px-3 shadow-sm md:px-5">
+    <div className="sticky top-0 z-30 flex min-h-10 items-center justify-between gap-3 border-b border-border/60 bg-card px-3 shadow-sm md:px-5">
+      <div className="flex min-w-0 items-center gap-2">
+        <LayoutDashboard aria-hidden="true" className="h-3.5 w-3.5 shrink-0 text-foreground/70" />
+        <h1 className="truncate text-body font-medium text-foreground">Dashboard</h1>
+      </div>
       <div className="flex items-center rounded-md border border-border/60 bg-background/50 p-0.5" role="group" aria-label="Dashboard time window">
         {WINDOW_LABELS.map((item) => (
           <Button key={item} type="button" variant="ghost" size="xs" aria-pressed={value === item}
@@ -251,15 +255,13 @@ export default function DashboardPage() {
         {crews.length === 0 && workspaceId && <RecipesEmptyState workspaceId={workspaceId} onInstalled={invalidateDashboard} />}
 
         {/* The first visible content is the work needing a person. */}
-        <h1 className="sr-only">Your workspace at a glance</h1>
-
         <Appear order={0}><AttentionStrip items={attentionItems} inboxLoading={inbox.loading} inboxError={inbox.error} /></Appear>
 
-        <div className="grid min-w-0 grid-cols-1 gap-3 xl:grid-cols-3">
-          <Appear order={1} className="min-w-0 xl:col-span-2">
+        <div className="grid min-w-0 grid-cols-1 gap-3 xl:h-[520px] xl:grid-cols-3">
+          <Appear order={1} className="min-w-0 xl:col-span-2 xl:min-h-0">
             <DashboardResults key={workspaceId} review={reviewQ.data ?? []} inProgress={inProgressQ.data ?? []} completed={completedQ.data ?? []} activeAgentRuns={agentRunsQ.data ?? []} activeRoutineRuns={activeRuns.runs} recentRoutineRuns={activeRuns.recentDashboardRuns} agents={agents} crews={crews} workspaceId={workspaceId} loading={reviewQ.isPending || inProgressQ.isPending || completedQ.isPending || agentRunsQ.isPending} error={reviewQ.isError || inProgressQ.isError || completedQ.isError || agentRunsQ.isError} routineError={activeRuns.error} routineLoading={activeRuns.loading} onRetry={() => { void reviewQ.refetch(); void inProgressQ.refetch(); void completedQ.refetch(); void agentRunsQ.refetch(); activeRuns.refresh() }} />
           </Appear>
-          <Appear order={2} className="flex min-w-0 flex-col gap-3 [&>div]:h-auto">
+          <Appear order={2} className="flex min-w-0 flex-col gap-3 xl:min-h-0 [&>div]:h-auto">
             <UpNext schedules={schedules.schedules} />
             <FleetBoard cards={fleetCards} workspaceId={workspaceId} />
           </Appear>
@@ -304,14 +306,14 @@ function DashboardSkeleton({ crews, window, onWindowChange }: { crews: number; w
       <div className="mx-auto flex w-full max-w-[1800px] flex-col gap-3 p-4 md:p-5">
         <Skeleton className="h-[52px] rounded-xl" />
         <Skeleton className="h-[110px] rounded-xl" />
-        <div className="grid grid-cols-1 gap-3 xl:grid-cols-3">
-          <Skeleton className="h-[380px] rounded-xl xl:col-span-2" />
-          <div className="flex flex-col gap-3">
+        <div className="grid grid-cols-1 gap-3 xl:h-[520px] xl:grid-cols-3">
+          <Skeleton className="h-[380px] rounded-xl xl:col-span-2 xl:h-full" />
+          <div className="flex flex-col gap-3 xl:min-h-0">
             <Skeleton className="h-[84px] rounded-xl" />
             {/* FleetBoard renders nothing for an empty workspace, so its
                 placeholder must not appear either. */}
             {crews > 0 && (
-              <Skeleton className="rounded-xl" style={{ height: 60 + 44 * Math.min(3, crews) }} />
+              <Skeleton className={cn("rounded-xl xl:h-auto xl:flex-1", crews >= 3 ? "h-[192px]" : crews === 2 ? "h-[148px]" : "h-[104px]")} />
             )}
           </div>
         </div>
