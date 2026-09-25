@@ -22,6 +22,11 @@ prompt="For the fictional incident DEMO-42, give one safe first triage step. Inc
 chat_id="$(cd "$HERE/../.." && go run ./scripts/demo/ws-send-and-leave --server "$SERVER" --agent morgan --prompt "$prompt" 2>/dev/null)"
 assert_nonempty "direct chat was created" "$chat_id"
 if [[ -n "$chat_id" ]]; then
+  # chat delete also removes the chat's projected Inbox message, so this one
+  # cleanup covers both; it runs on exit, after the assertions below.
+  demo_cleanup "cs chat delete '$chat_id' --yes"
+fi
+if [[ -n "$chat_id" ]]; then
   poll_until "Morgan's saved reply carries $MARKER" "$ASK_TIMEOUT" \
     "cs chat '$chat_id' --format json 2>/dev/null | jq -e --arg marker '$MARKER' 'any(.[]?; .role == \"assistant\" and ((.content // \"\") | contains(\$marker)))' >/dev/null"
 fi

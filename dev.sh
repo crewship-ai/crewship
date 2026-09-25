@@ -783,12 +783,28 @@ cmd_logs_next() {
 }
 
 cmd_nuke() {
+  # start_go sources .env.local before honouring CREWSHIP_PAGE_PROJECTS_PATH,
+  # so a pin there (or in the environment) wins over the slot default. Resolve
+  # the same way so the reset removes what start actually used — and shows the
+  # resolved path in the confirmation below before deleting it.
+  local page_projects_dir="${CREWSHIP_PAGE_PROJECTS_PATH:-$PAGE_PROJECTS_DIR}"
+  local pinned_page_dir
+  pinned_page_dir=$(grep -E '^CREWSHIP_PAGE_PROJECTS_PATH=' "$PROJECT_DIR/.env.local" 2>/dev/null \
+    | head -1 | cut -d'=' -f2- | tr -d '"' || true)
+  if [[ -n "$pinned_page_dir" ]]; then
+    page_projects_dir="$pinned_page_dir"
+  fi
+
   echo -e "${BOLD}${RED}Factory Reset — Crewship${S}${NC}"
   echo "This will destroy ALL local data:"
   echo "  - SQLite database (./crewship.db)"
   echo "  - Agent output, workspace, crew data ($DATA_DIR)"
   echo "  - Bolt state ($STATE_DIR)"
-  echo "  - Page project source ($PAGE_PROJECTS_DIR)"
+  if [[ "$page_projects_dir" == "$PAGE_PROJECTS_DIR" ]]; then
+    echo "  - Page project source ($page_projects_dir)"
+  else
+    echo "  - Page project source ($page_projects_dir — custom CREWSHIP_PAGE_PROJECTS_PATH)"
+  fi
   echo "  - Conversations ($DATA_DIR/conversations)"
   echo "  - Log files ($LOG_PATH)"
   echo "  - Docker containers (crewship${S}-*  — team + sidecars + init)"
@@ -887,7 +903,7 @@ cmd_nuke() {
   }
   remove_data_dir "$DATA_DIR"
   remove_data_dir "$STATE_DIR"
-  remove_data_dir "$PAGE_PROJECTS_DIR"
+  remove_data_dir "$page_projects_dir"
   remove_data_dir "$LOG_PATH"
   rm -f "$SOCKET_PATH"
   ok "Data directories removed"
