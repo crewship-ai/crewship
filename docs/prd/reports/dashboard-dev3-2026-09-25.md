@@ -18,10 +18,10 @@ System details sketch is superseded by the live implementation.
   Up next links to the routine calendar, and Your crews scrolls through all
   crews. Run-volume bars use each configured crew colour.
 - The four agent run summary cards share one height and text layout.
-- Dashboard colours now follow a quieter hierarchy: red for failed runs,
-  amber for pending decisions, blue for active work and controls, and neutral
-  for completed work, schedule icons and summary metrics. Run-volume keeps
-  crew colours because they identify chart series.
+- Dashboard colours now keep red for failed runs, amber for pending decisions,
+  blue for schedule alerts and active work, and green for Done. Routine type
+  icons stay neutral; the four summary metrics regain larger coloured icons.
+  Run-volume keeps crew colours because they identify chart series.
 - On desktop, Results & review and the Up next / Your crews column share one
   height. Results and the crew list scroll within their panels when needed;
   arrows in their headers make additional items discoverable. Narrower screens
@@ -35,8 +35,8 @@ System details sketch is superseded by the live implementation.
 Dev3: `https://crewship-dev3.unifylab.cz/`, systemd service `crewship-ws@3`.
 The service uses the prebuilt
 `/srv/crewship/dev3-pages-release/crewship.unsigned` binary. Its source is
-local deploy branch `deploy/dev3-dashboard-20260925`, commit `f38f290ff`;
-the matching PR colour commit is `645de06b1`. This deploy branch is an artifact,
+local deploy branch `deploy/dev3-dashboard-20260925`, commit `daf83bc02`;
+the matching PR colour commit is `430a847ab`. This deploy branch is an artifact,
 not the PR branch. The server build uses the installed sidecar hash
 `33ad18f2afb3`; the sidecar binary was not replaced.
 
@@ -84,6 +84,11 @@ sampler no longer writes SQLite history; the already applied
 - Colour update: 46 focused dashboard tests, lint, test typecheck and frontend
   build passed. The embedded dev3 binary built and authenticated Chromium
   found neutral finished pills and no page errors after deployment.
+- Final accent pass: Done returned to green, calendar icons to blue, and the
+  four run-summary icons regained their colours at a larger size. The same
+  46 dashboard tests, lint, test typecheck, build and Go vet passed.
+  Authenticated Chromium on dev3 found eight green Done pills, the blue
+  schedule-alert icon and four enlarged summary icons, with no page errors.
 - A full `go test ./... -count=1` run returned a failure in the shared test
   environment after about ten minutes. This dashboard increment changes no Go
   code; `go vet ./...` and the production Go build passed.
