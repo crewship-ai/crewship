@@ -39,7 +39,8 @@ was not replaced; the server was built with its installed sidecar hash.
 - Authenticated Chromium checks at 1440 px and 390 px loaded the dashboard
   without page errors. They found eight finished rows and all ten crews;
   Coolify's chart swatch resolved to `rgb(14, 165, 233)`.
-- Full `go test ./... -count=1 -p 4 -timeout 35m` was still running when this
-  handoff was written; check its final result before considering this slice
-  verified. PR CI and CodeRabbit review were also pending. Do not merge the
-  draft PR while review is absent.
+- Full `go test ./... -count=1 -p 4 -timeout 35m` passed (the API and database
+  packages took about 27 and 35 minutes on the shared host).
+  `pnpm test:types` also passed. All current PR checks passed, including Frontend
+  Test. CodeRabbit review is absent on the draft; do not merge the PR while
+  review is absent.
