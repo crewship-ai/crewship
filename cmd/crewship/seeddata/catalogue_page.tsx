@@ -34,7 +34,7 @@ function Panel({ panel }: { panel: NonNullable<ReturnType<typeof usePageSnapshot
     {data.verdict && <div className="verdict">{data.verdict}</div>}
     {data.blocks && <div className="narrative">{data.blocks.map((block, i) => <p key={i}>{block.text}</p>)}</div>}
     {data.columns && <div className="table-wrap"><table><thead><tr>{data.columns.map(c => <th key={c.key}>{c.label}</th>)}</tr></thead><tbody>{(data.rows ?? []).map((row, i) => <tr key={i}>{data.columns!.map(c => <td key={c.key}>{row[c.key] ?? '—'}</td>)}</tr>)}</tbody></table></div>}
-    {!data.items && typeof data.value !== 'number' && !data.verdict && !data.columns && !data.points && <p className="empty">This panel is ready for its first producer run.</p>}
+    {!data.items && typeof data.value !== 'number' && !data.verdict && !data.columns && !data.points && !data.sparkline && !data.blocks && <p className="empty">This panel is ready for its first producer run.</p>}
     <div className="panel-foot"><span>{panel.producedAt ? `Updated ${new Date(panel.producedAt).toLocaleString('en-US')}` : 'No snapshot yet'}</span><div><button onClick={showHistory}>History</button>{actions.map(a => <button className="action" disabled={pending} key={a.id} onClick={() => act(a.id)}>{a.label}</button>)}</div></div>
     {history && <p className="feedback" role="status">{history}</p>}
   </article>
