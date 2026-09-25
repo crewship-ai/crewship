@@ -23,8 +23,8 @@ interface FeedbackState {
    *  the new session. Null until setUser is called. */
   userId: string | null
 
-  /** Per-turn map of signals the current user has submitted. Cleared on
-   *  user switch. */
+  /** Per-(workspace, turn) map of signals the current user has submitted.
+   *  Cleared on user switch. */
   byTurn: Record<string, Partial<Record<FeedbackSignal, true>>>
 
   /** Bind the store to an authenticated user. Called from a component
@@ -41,12 +41,13 @@ interface FeedbackState {
    *  rejection — so a persisted-localStorage flag never claims a row
    *  exists on the server when it doesn't.
    *
-   *  Per-(turn, signal) sequencing: if a previous submit or reset for
-   *  the same (turn, signal) is still in flight, this call waits for
+   *  Per-(workspace, turn, signal) sequencing: if a previous submit or reset
+   *  for the same vote is still in flight, this call waits for
    *  it before issuing its own HTTP request. Without this, a fast
    *  toggle (click → click again) could race: a slow POST landing
    *  AFTER a fast DELETE creates a row the user thinks they cleared. */
   submit: (turnId: string, signal: FeedbackSignal, opts?: {
+    workspaceId?: string
     chatId?: string
     traceId?: string
     reason?: string
@@ -58,21 +59,25 @@ interface FeedbackState {
    *  local state pointing at "submitted" so a refresh reconciles.
    *  Pass the active workspace when available: a fork may retain a second
    *  row with the same message id, which DELETE must not remove by accident.
-   *  Shares the per-(turn, signal) sequencing with submit. */
+   *  Shares the per-(workspace, turn, signal) sequencing with submit. */
   reset: (turnId: string, signal: FeedbackSignal, opts?: { workspaceId?: string }) => Promise<void>
 }
 
-// Per-(turn, signal) in-flight serialization. Lives in module scope —
+// Per-(workspace, turn, signal) in-flight serialization. Lives in module scope —
 // NOT persisted to localStorage and not part of the zustand state —
 // because the in-flight promise itself cannot survive a page reload and
 // because keeping Promises in zustand state would force every consumer
 // to re-render on every chain link.
 const inflight = new Map<string, Promise<void>>()
 
-function inflightKey(userId: string, turnId: string, signal: FeedbackSignal): string {
-  // Pipe-separated; userId/turnId/signal are all CUID-shaped + enum so
-  // none of them carry the separator naturally.
-  return `${userId}|${turnId}|${signal}`
+export function feedbackTurnKey(turnId: string, workspaceId?: string): string {
+  // Keep the legacy key for callers without workspace context. Chat always
+  // supplies its workspace, so copied message IDs cannot share local votes.
+  return workspaceId ? JSON.stringify([workspaceId, turnId]) : turnId
+}
+
+function inflightKey(userId: string, turnKey: string, signal: FeedbackSignal): string {
+  return JSON.stringify([userId, turnKey, signal])
 }
 
 /** chain registers `op` after any prior promise for the same key, then
@@ -115,6 +120,7 @@ export const useFeedbackStore = create<FeedbackState>()(
 
       submit: async (turnId, signal, opts = {}) => {
         const userId = get().userId
+        const turnKey = feedbackTurnKey(turnId, opts.workspaceId)
         if (!userId) {
           // No bound user means a misconfigured caller — the chat UI
           // wraps setUser around useSession, so reaching here means
@@ -126,7 +132,7 @@ export const useFeedbackStore = create<FeedbackState>()(
           return
         }
 
-        return chain(inflightKey(userId, turnId, signal), async () => {
+        return chain(inflightKey(userId, turnKey, signal), async () => {
           // Re-check that the bound user hasn't changed between
           // scheduling and execution — a click-then-sign-out race
           // should not write the previous user's signal under the
@@ -139,15 +145,15 @@ export const useFeedbackStore = create<FeedbackState>()(
           set((s) => ({
             byTurn: {
               ...s.byTurn,
-              [turnId]: { ...(s.byTurn[turnId] ?? {}), [signal]: true },
+              [turnKey]: { ...(s.byTurn[turnKey] ?? {}), [signal]: true },
             },
           }))
 
           const rollback = () =>
             set((s) => {
-              const cur = { ...(s.byTurn[turnId] ?? {}) }
+              const cur = { ...(s.byTurn[turnKey] ?? {}) }
               delete cur[signal]
-              return { byTurn: { ...s.byTurn, [turnId]: cur } }
+              return { byTurn: { ...s.byTurn, [turnKey]: cur } }
             })
 
           try {
@@ -184,9 +190,10 @@ export const useFeedbackStore = create<FeedbackState>()(
 
       reset: async (turnId, signal, opts = {}) => {
         const userId = get().userId
+        const turnKey = feedbackTurnKey(turnId, opts.workspaceId)
         if (!userId) return
 
-        return chain(inflightKey(userId, turnId, signal), async () => {
+        return chain(inflightKey(userId, turnKey, signal), async () => {
           if (get().userId !== userId) return
 
           try {
@@ -210,9 +217,9 @@ export const useFeedbackStore = create<FeedbackState>()(
             return
           }
           set((s) => {
-            const cur = { ...(s.byTurn[turnId] ?? {}) }
+            const cur = { ...(s.byTurn[turnKey] ?? {}) }
             delete cur[signal]
-            return { byTurn: { ...s.byTurn, [turnId]: cur } }
+            return { byTurn: { ...s.byTurn, [turnKey]: cur } }
           })
         })
       },

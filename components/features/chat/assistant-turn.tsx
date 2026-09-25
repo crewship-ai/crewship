@@ -3,7 +3,7 @@
 import { Copy, ThumbsUp, ThumbsDown, AlertCircle, AlertTriangle, Crown, CheckCircle2, ChevronDown, Clock, FileText, DollarSign, Zap, CircleDot, FileCode } from "lucide-react"
 import { useArtifactStore } from "@/stores/artifact-store"
 import { useEffect } from "react"
-import { useFeedbackStore } from "@/stores/feedback-store"
+import { feedbackTurnKey, useFeedbackStore } from "@/stores/feedback-store"
 import { useSession } from "@/hooks/use-auth"
 import { useCurrentWorkspaceId } from "@/hooks/use-workspace"
 import { TurnReactions } from "./reactions/turn-reactions"
@@ -48,6 +48,8 @@ interface AssistantTurnProps {
    *  chats.workspace_id) rather than the user's primary workspace
    *  fallback. Optional; tests can omit it. */
   chatId?: string
+  /** Workspace that owns the displayed chat. */
+  workspaceId?: string
 }
 
 function formatTokens(n: number): string {
@@ -549,7 +551,7 @@ function ThinkingBlock({ part }: { part: TurnPart }) {
   )
 }
 
-export function AssistantTurn({ turn, onCopy, onFileClick, agentId, chatId }: AssistantTurnProps) {
+export function AssistantTurn({ turn, onCopy, onFileClick, agentId, chatId, workspaceId }: AssistantTurnProps) {
   // Collect all text content for copy action
   const fullText = turn.parts
     .filter((p) => p.type === "text")
@@ -657,7 +659,7 @@ export function AssistantTurn({ turn, onCopy, onFileClick, agentId, chatId }: As
 
       {/* Actions (only when done streaming and has text content) */}
       {!turn.isStreaming && fullText && !hasDelegation && (
-        <TurnFeedbackActions turn={turn} onCopy={onCopy} fullText={fullText} chatId={chatId} />
+        <TurnFeedbackActions turn={turn} onCopy={onCopy} fullText={fullText} chatId={chatId} workspaceId={workspaceId} />
       )}
     </Message>
   )
@@ -670,21 +672,21 @@ export function AssistantTurn({ turn, onCopy, onFileClick, agentId, chatId }: As
 // reactions are social/decorative. Mixing them would force the eval
 // dataset builder to filter on Unicode codepoints.
 //
-// chat_id propagation: the chat id is not on the ChatTurn shape today,
-// so we derive it from the pathname only when present. If absent the
-// POST falls back to the user's primary workspace — see the
-// MessageFeedbackHandler in internal/api/message_feedback.go for the
-// fallback semantics.
+// The parent supplies the displayed chat and its owning workspace. POST
+// uses the chat for server-side workspace derivation; the workspace scopes
+// local votes and DELETE after a fork copies message IDs.
 function TurnFeedbackActions({
   turn,
   onCopy,
   fullText,
   chatId,
+  workspaceId: chatWorkspaceId,
 }: {
   turn: ChatTurn
   onCopy: (content: string) => void
   fullText: string
   chatId?: string
+  workspaceId?: string
 }) {
   // Bind the feedback store to the authenticated user. Without this,
   // signing out and back in as a different account on the same browser
@@ -701,10 +703,12 @@ function TurnFeedbackActions({
     }
   }, [session.data?.user.id, boundUserId, setUser])
 
-  const submitted = useFeedbackStore((s) => s.byTurn[turn.id]) ?? {}
+  const selectedWorkspaceId = useCurrentWorkspaceId()
+  const workspaceId = chatWorkspaceId ?? selectedWorkspaceId ?? undefined
+  const turnKey = feedbackTurnKey(turn.id, workspaceId)
+  const submitted = useFeedbackStore((s) => s.byTurn[turnKey]) ?? {}
   const submit = useFeedbackStore((s) => s.submit)
   const reset = useFeedbackStore((s) => s.reset)
-  const workspaceId = useCurrentWorkspaceId()
 
   // trace_id is plumbed through ChatTurn.metadata when the WS event
   // for the assistant turn carries it. Backend wiring (orchestrator →
@@ -720,10 +724,10 @@ function TurnFeedbackActions({
     // click → click again can't have its DELETE land before the prior
     // POST creates the row. We don't need to gate at the call site.
     if (submitted[signal]) {
-      void reset(turn.id, signal, { workspaceId: workspaceId ?? undefined })
+      void reset(turn.id, signal, { workspaceId })
       return
     }
-    void submit(turn.id, signal, { chatId, traceId })
+    void submit(turn.id, signal, { workspaceId, chatId, traceId })
   }
 
   return (

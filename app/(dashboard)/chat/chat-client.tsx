@@ -765,7 +765,7 @@ export function ChatClient() {
     unified?.selectedId ? <UnifiedConversationPanel onBack={() => setDrawerOpen(true)} /> : agent && sessionId ? (
       <ChatAgentProvider agent={chatAgent}>
         <ChatPanel
-          key={`${agent.id}:${sessionId}`}
+          key={`${workspaceId}:${agent.id}:${sessionId}`}
           agentId={agent.id}
           agentName={agent.name}
           agentSlug={agent.slug}
