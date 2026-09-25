@@ -83,6 +83,52 @@ func (r *Router) registerE2EFixtureRoutes(oh orchestrationHandlers) {
 	h := &E2EFixtureHandler{db: r.db, logger: r.logger, assign: oh.assign}
 	r.logger.Warn("CREWSHIP_E2E_FIXTURES is enabled — browser-test fixture routes are registered under /api/v1/e2e/. DO NOT set this in production.")
 	r.authedMut("POST", "/api/v1/e2e/fixtures/run-needs-human", roleManage, h.RunNeedsHuman)
+	r.authedMut("POST", "/api/v1/e2e/fixtures/feedback-message", roleManage, h.FeedbackMessage)
+}
+
+// FeedbackMessage plants a visible assistant turn for provider-free browser
+// tests of the feedback API. The authenticated workspace and user determine
+// its scope; callers cannot supply a chat, agent, or message ID.
+func (h *E2EFixtureHandler) FeedbackMessage(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	workspaceID := WorkspaceIDFromContext(ctx)
+	user := UserFromContext(ctx)
+	if workspaceID == "" || user == nil {
+		replyError(w, http.StatusUnauthorized, "auth required")
+		return
+	}
+	var agentID string
+	err := h.db.QueryRowContext(ctx,
+		`SELECT id FROM agents WHERE workspace_id = ? AND deleted_at IS NULL ORDER BY created_at, id LIMIT 1`, workspaceID).Scan(&agentID)
+	if errors.Is(err, sql.ErrNoRows) {
+		replyError(w, http.StatusNotFound, "workspace has no agent")
+		return
+	}
+	if err != nil {
+		h.logger.Error("e2e fixture: find feedback agent", "error", err)
+		replyError(w, http.StatusInternalServerError, "agent lookup failed")
+		return
+	}
+	chatID, messageID := generateCUID(), generateCUID()
+	tx, err := h.db.BeginTx(ctx, nil)
+	if err == nil {
+		defer func() { _ = tx.Rollback() }()
+		_, err = tx.ExecContext(ctx, `INSERT INTO chats (id, agent_id, workspace_id, created_by, title) VALUES (?, ?, ?, ?, ?)`,
+			chatID, agentID, workspaceID, user.ID, "E2E feedback fixture")
+		if err == nil {
+			_, err = tx.ExecContext(ctx, `INSERT INTO conversation_messages (id, session_id, agent_id, role, content) VALUES (?, ?, ?, 'assistant', ?)`,
+				messageID, chatID, agentID, "E2E feedback fixture turn")
+		}
+		if err == nil {
+			err = tx.Commit()
+		}
+	}
+	if err != nil {
+		h.logger.Error("e2e fixture: plant feedback message", "error", err)
+		replyError(w, http.StatusInternalServerError, "could not plant feedback message")
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]string{"chat_id": chatID, "message_id": messageID})
 }
 
 // E2EFixtureHandler serves the fixture surface. See the file header.

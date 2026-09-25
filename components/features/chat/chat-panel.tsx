@@ -42,6 +42,7 @@ import { SlashActionModal } from "./composer/slash-action-modal"
 import type { SlashActionSchema as ServerSlashCommand } from "@/hooks/use-slash-commands"
 import { type CrewMember } from "./composer/mention-autocomplete"
 import { ChatComposer } from "./composer/chat-composer"
+import { checkChatMessageSize } from "./hooks/use-message-submit"
 import { VirtualConversation, virtualChatEnabled } from "./virtual-conversation"
 import { ArtifactPane } from "./artifact/artifact-pane"
 import { FollowUps } from "./suggestions/follow-ups"
@@ -154,7 +155,14 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
   const [pageContext, setPageContext] = useState<{ name: string; slug: string } | null>(null)
   const [pageContextError, setPageContextError] = useState(false)
   const [pageContextRemoved, setPageContextRemoved] = useState(false)
+  const pendingPageSendRef = useRef<string | null>(null)
   useEffect(() => {
+    pendingPageSendRef.current = null
+    setPageContextRemoved(false)
+  }, [pageContextSlug, sessionId])
+  useEffect(() => {
+    setPageContext(null)
+    setPageContextError(false)
     if (!pageContextSlug || !workspaceId) return
     const controller = new AbortController()
     apiFetch(`/api/v1/pages/${encodeURIComponent(pageContextSlug)}?workspace_id=${encodeURIComponent(workspaceId)}`, { signal: controller.signal })
@@ -166,7 +174,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
       })
       .catch(() => { if (!controller.signal.aborted) { setPageContext(null); setPageContextError(true) } })
     return () => controller.abort()
-  }, [pageContextSlug, workspaceId])
+  }, [pageContextSlug, workspaceId, sessionId])
 
   // Does the composer currently hold a file the user has not sent yet?
   //
@@ -289,6 +297,16 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
     }, () => soundScopeRef.current === soundIdentity)
   }, [soundScope, soundIdentity, sessionId, sessionKind])
 
+  const handleOwnMessageSaved = useCallback((content: string, metadata?: Record<string, unknown>) => {
+    const page = metadata?.page_context
+    const savedSlug = page && typeof page === "object" && "slug" in page ? page.slug : undefined
+    const pending = pendingPageSendRef.current
+    if (pending && savedSlug === pageContextSlug && content.startsWith(`${pending}\n\n`)) {
+      pendingPageSendRef.current = null
+      setPageContextRemoved(true)
+    }
+  }, [pageContextSlug])
+
   const { turns, sendMessage, stopGeneration, regenerateLastTurn, editAndResend, loadHistory, markHistoryUnavailable, resubscribeSession, isStreaming, connectionStatus } = useChat({
     wsUrl: getWsUrl(),
     getToken: getWsToken,
@@ -296,17 +314,28 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
     currentUserId: currentUserId ?? undefined,
     onStreamReset: requestHistoryReload,
     onReplyCompleted: onAgentReplyCompleted,
+    onOwnMessageSaved: handleOwnMessageSaved,
   })
   const sendMessageWithPage = useCallback((text: string, metadata?: Record<string, unknown>) => {
     if (pageContextSlug && !pageContextRemoved && !pageContextError) {
-      sendMessage(text, { ...metadata, page_context: { slug: pageContextSlug } })
-      setPageContextRemoved(true)
-    } else if (metadata) {
-      sendMessage(text, metadata)
+      const withPage = { ...metadata, page_context: { slug: pageContextSlug } }
+      const sizeCheck = checkChatMessageSize(sessionId, text, withPage)
+      if (!sizeCheck.ok) {
+        toast.error(sizeCheck.message)
+        return false
+      }
+      if (sendMessage(text, withPage) === false) {
+        toast.error("Not connected — your message is still here. Try again when chat reconnects.")
+        return false
+      }
+      pendingPageSendRef.current = text.trim()
+      return true
     } else {
-      sendMessage(text)
+      const sent = metadata ? sendMessage(text, metadata) : sendMessage(text)
+      if (sent === false) toast.error("Not connected — your message is still here. Try again when chat reconnects.")
+      return sent
     }
-  }, [sendMessage, pageContextSlug, pageContextRemoved, pageContextError])
+  }, [sendMessage, pageContextSlug, pageContextRemoved, pageContextError, sessionId])
 
   // Reply-settled hook: when a stream the user watched in THIS session
   // finishes (isStreaming true→false), tell the parent so it can re-fire
@@ -620,6 +649,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
   // auto-sending, the composer is NOT prefilled (the prefill used to be
   // cleared right after the send anyway — see composerInitialInput below).
   const autoSentRef = useRef(false)
+  const [autoSendRejected, setAutoSendRejected] = useState(false)
   useEffect(() => {
     if (!autoSendInitial || autoSentRef.current) return
     const text = (initialInput ?? "").trim()
@@ -631,20 +661,20 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
       // silently dropping the goal it was sent here with is exactly the shape
       // of failure this whole change is about. The toast tells the user; the
       // ref stays set so a failed handoff does not retry itself in a loop.
-      if (!(await ensureSessionForSend())) return
-      sendMessageWithPage(text)
+      if (!(await ensureSessionForSend())) { setAutoSendRejected(true); return }
+      if (sendMessageWithPage(text) === false) { setAutoSendRejected(true); return }
       onSend?.(sessionId, text)
     })()
   }, [autoSendInitial, initialInput, connectionStatus, isStreaming, ensureSessionForSend, sendMessageWithPage, onSend, sessionId])
 
-  const composerInitialInput = autoSendInitial ? undefined : initialInput
+  const composerInitialInput = autoSendInitial && !autoSendRejected ? undefined : initialInput
   const pageContextChip = pageContextSlug && !pageContextRemoved ? (
     <div className="mx-auto flex w-full max-w-3xl items-center gap-2 px-4 py-1 text-xs" data-testid="page-context-chip">
       <span className="min-w-0 flex-1 truncate">
         {pageContextError ? "This Page is no longer accessible; it will not be included" :
           pageContext ? `Page: ${pageContext.name} · access rechecked when sent` : "Checking Page…"}
       </span>
-      <button type="button" className="rounded px-2 py-1 text-muted-foreground hover:text-foreground coarse:min-h-11" onClick={() => setPageContextRemoved(true)} aria-label="Remove Page context">Remove</button>
+      <button type="button" className="rounded px-2 py-1 text-muted-foreground hover:text-foreground coarse:min-h-11" onClick={() => { pendingPageSendRef.current = null; setPageContextRemoved(true) }} aria-label="Remove Page context">Remove</button>
     </div>
   ) : null
 
@@ -653,7 +683,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
     setCreatingSession(true)
     try {
       if (!(await ensureSessionForSend())) return
-      sendMessageWithPage(suggestion)
+      if (sendMessageWithPage(suggestion) === false) return
       setPinNonce((n) => n + 1)
       onSend?.(sessionId, suggestion)
     } finally {
@@ -869,6 +899,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
               animateAfter={animateAfter}
               agentId={agentId}
               chatId={sessionId}
+              workspaceId={workspaceId ?? undefined}
               resolveAuthorName={resolveAuthorName}
               resolveAskProvenance={resolveAskProvenance}
             />

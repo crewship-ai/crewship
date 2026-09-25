@@ -12,6 +12,11 @@
 //   - DENY     — the request is refused. No credential value ever crosses
 //     into the agent process.
 //   - ESCALATE — human review is required before the request can resolve.
+//     A request resolved ALLOW by a person can be presented once on the
+//     retry (approval_request_id / X-Keeper-Approval) and is honoured
+//     instead of re-judging — an approved L4 escalation actually executes
+//     (#2574). The approval binds to the same agent, credential and (for
+//     execute) command, and expires.
 //   - PENDING  — interim state while an asynchronous decision is in flight.
 //
 // Each credential has a SecurityLevel (L1–L4) describing the blast

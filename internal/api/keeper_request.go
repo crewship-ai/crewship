@@ -27,6 +27,11 @@ type keeperRequestBody struct {
 	CredentialName    string `json:"credential_name"`
 	TaskID            string `json:"task_id,omitempty"`
 	Intent            string `json:"intent"`
+	// ApprovalRequestID presents a human-approved escalation for consumption
+	// (#2574): the id of a keeper request resolved ALLOW by a person, which —
+	// if it binds — spares this request a fresh judgement. See
+	// consumeKeeperApproval for the binding rules.
+	ApprovalRequestID string `json:"approval_request_id,omitempty"`
 }
 
 // HandleRequest handles POST /api/v1/internal/keeper/request.
@@ -189,6 +194,45 @@ func (h *KeeperHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 		CreatedAt:         time.Now().UTC(),
 	}
 
+	// A presented approval is consumed BEFORE the audit insert: spending it is
+	// what decides this request, and the row written below must be born with
+	// the outcome it will carry. The retry row is also born CONSUMED
+	// (approval_consumed_at set at insert) — it carries decision ALLOW and a
+	// resolved-looking provenance, and an approval-minting chain (retry → new
+	// ALLOW row → presented as approval → …) is exactly what resolved_by_user_id
+	// being NULL on it exists to prevent (#2574).
+	var approvedVia *consumedApproval
+	if body.ApprovalRequestID != "" {
+		ap, fail := h.consumeKeeperApproval(r.Context(), body.ApprovalRequestID,
+			body.WorkspaceID, body.RequestingAgentID, body.CredentialID,
+			keeper.RequestTypeAccess, "")
+		if fail != nil {
+			fail.write(w)
+			return
+		}
+		approvedVia = ap
+	}
+
+	insertSQL := `
+		INSERT INTO keeper_requests (id, requesting_agent_id, requesting_crew_id, credential_id, task_id, intent, decision, created_at)
+		VALUES (?, ?, ?, ?, NULLIF(?,?), ?, 'PENDING', ?)`
+	insertArgs := []any{reqID, body.RequestingAgentID, body.RequestingCrewID, body.CredentialID,
+		body.TaskID, "", body.Intent, req.CreatedAt.Format(time.RFC3339)}
+	if approvedVia != nil {
+		// Born CONSUMED: this row will carry decision ALLOW, and without the
+		// marker an approval-minting chain (retry → new ALLOW row → presented
+		// as an approval → …) would make single-use meaningless. resolved_by_
+		// user_id stays NULL on it for the same reason — only
+		// consumeKeeperApproval's provenance check reads either, and both
+		// markers must agree that this row is not spendable (#2574).
+		nowUTC := time.Now().UTC().Format(time.RFC3339)
+		insertSQL = `
+		INSERT INTO keeper_requests (id, requesting_agent_id, requesting_crew_id, credential_id, task_id, intent, decision, created_at, approval_consumed_at)
+		VALUES (?, ?, ?, ?, NULLIF(?,?), ?, 'PENDING', ?, ?)`
+		insertArgs = []any{reqID, body.RequestingAgentID, body.RequestingCrewID, body.CredentialID,
+			body.TaskID, "", body.Intent, req.CreatedAt.Format(time.RFC3339), nowUTC}
+	}
+
 	// Persist PENDING request. #1021: this is FATAL — a keeper decision
 	// (including an ALLOW that injects a credential) must never proceed with
 	// no audit row. Swallowing the insert and continuing let an attacker who
@@ -201,11 +245,7 @@ func (h *KeeperHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 	// without the ledger there would be no surviving record that this request was
 	// ever pending — and the projection and the history must never be able to
 	// disagree about that.
-	if err := insertKeeperRequestWithTransition(r.Context(), h.db, `
-		INSERT INTO keeper_requests (id, requesting_agent_id, requesting_crew_id, credential_id, task_id, intent, decision, created_at)
-		VALUES (?, ?, ?, ?, NULLIF(?,?), ?, 'PENDING', ?)`,
-		[]any{reqID, body.RequestingAgentID, body.RequestingCrewID, body.CredentialID,
-			body.TaskID, "", body.Intent, req.CreatedAt.Format(time.RFC3339)},
+	if err := insertKeeperRequestWithTransition(r.Context(), h.db, insertSQL, insertArgs,
 		keeperTransition{
 			RequestID:    reqID,
 			WorkspaceID:  body.WorkspaceID,
@@ -250,57 +290,70 @@ func (h *KeeperHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 		h.logger.Warn("keeper: journal emit request failed", "error", jerr, "request_id", reqID)
 	}
 
-	// Load agent's recent conversation history for Keeper context
-	convHistory := h.loadConversationHistory(r.Context(), body.RequestingAgentID)
-
-	// Run gatekeeper evaluation. (body.Intent was scrubbed at the top of the
-	// handler — before `req` copied it — see the note there.)
-	facts, hardGate, factKeys, inPrompt := h.gatherEvidence(r.Context(), body.WorkspaceID, body.RequestingAgentID, body.CredentialID)
-	evalReq := gatekeeper.EvalRequest{
-		Request:            req,
-		CredentialName:     credName,
-		SecurityLevel:      keeper.SecurityLevel(secLevel),
-		AgentName:          agentName,
-		CrewName:           crewName,
-		ConvHistory:        convHistory,
-		Evidence:           facts,
-		HardGate:           hardGate,
-		EvidenceFacts:      factKeys,
-		EvidenceInPrompt:   inPrompt,
-		PromptBudgetTokens: h.promptBudget(),
-		EscalateFrom:       h.escalateFrom(),
-	}
-
 	var gkResp keeper.GatekeeperResponse
-	judgeStart := time.Now()
-	if h.gatekeeper != nil {
-		var evalErr error
-		gkResp, evalErr = h.gatekeeper.Evaluate(r.Context(), evalReq)
-		if evalErr != nil {
-			h.logger.Error("keeper: gatekeeper evaluate failed", "error", evalErr)
+	if approvedVia != nil {
+		// A human already ruled on this exact ask (agent, credential, request
+		// type): the approval WAS the judgement, and re-judging would
+		// re-escalate every L4 read — the dead end #2574 exists to close. No
+		// model call, no evidence gather, no conversation history.
+		gkResp = keeper.GatekeeperResponse{
+			Decision: string(keeper.DecisionAllow),
+			Reason: fmt.Sprintf("human approval consumed (escalation %s): %s",
+				approvedVia.RequestID, approvedVia.Reason),
+			RiskScore: approvedVia.RiskScore,
+		}
+	} else {
+		// Load agent's recent conversation history for Keeper context
+		convHistory := h.loadConversationHistory(r.Context(), body.RequestingAgentID)
+
+		// Run gatekeeper evaluation. (body.Intent was scrubbed at the top of the
+		// handler — before `req` copied it — see the note there.)
+		facts, hardGate, factKeys, inPrompt := h.gatherEvidence(r.Context(), body.WorkspaceID, body.RequestingAgentID, body.CredentialID)
+		evalReq := gatekeeper.EvalRequest{
+			Request:            req,
+			CredentialName:     credName,
+			SecurityLevel:      keeper.SecurityLevel(secLevel),
+			AgentName:          agentName,
+			CrewName:           crewName,
+			ConvHistory:        convHistory,
+			Evidence:           facts,
+			HardGate:           hardGate,
+			EvidenceFacts:      factKeys,
+			EvidenceInPrompt:   inPrompt,
+			PromptBudgetTokens: h.promptBudget(),
+			EscalateFrom:       h.escalateFrom(),
+		}
+
+		judgeStart := time.Now()
+		if h.gatekeeper != nil {
+			var evalErr error
+			gkResp, evalErr = h.gatekeeper.Evaluate(r.Context(), evalReq)
+			if evalErr != nil {
+				h.logger.Error("keeper: gatekeeper evaluate failed", "error", evalErr)
+				gkResp = keeper.GatekeeperResponse{
+					Decision:  string(keeper.DecisionDeny),
+					Reason:    "Keeper evaluation failed — deny by default",
+					RiskScore: 10,
+				}
+			}
+			// PR-P6: nothing watched Keeper's own verdicts, so #1624 denied every
+			// credential request for several milestones unnoticed. Recorded only
+			// when a judge actually ran — an instance with no gatekeeper wired
+			// denies by configuration, not by malfunction, and counting that would
+			// alarm on every unconfigured install. Fire-and-forget by contract;
+			// see health.Record.
+			health.Record(r.Context(), h.db, h.logger, health.Verdict{
+				WorkspaceID: body.WorkspaceID,
+				Decision:    gkResp.Decision,
+				JudgeFailed: gkResp.InfraFailure || evalErr != nil,
+				Latency:     time.Since(judgeStart),
+			})
+		} else {
 			gkResp = keeper.GatekeeperResponse{
 				Decision:  string(keeper.DecisionDeny),
-				Reason:    "Keeper evaluation failed — deny by default",
+				Reason:    "Keeper not configured",
 				RiskScore: 10,
 			}
-		}
-		// PR-P6: nothing watched Keeper's own verdicts, so #1624 denied every
-		// credential request for several milestones unnoticed. Recorded only
-		// when a judge actually ran — an instance with no gatekeeper wired
-		// denies by configuration, not by malfunction, and counting that would
-		// alarm on every unconfigured install. Fire-and-forget by contract;
-		// see health.Record.
-		health.Record(r.Context(), h.db, h.logger, health.Verdict{
-			WorkspaceID: body.WorkspaceID,
-			Decision:    gkResp.Decision,
-			JudgeFailed: gkResp.InfraFailure || evalErr != nil,
-			Latency:     time.Since(judgeStart),
-		})
-	} else {
-		gkResp = keeper.GatekeeperResponse{
-			Decision:  string(keeper.DecisionDeny),
-			Reason:    "Keeper not configured",
-			RiskScore: 10,
 		}
 	}
 
@@ -320,6 +373,13 @@ func (h *KeeperHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 	// decision — turning a bookkeeping failure into a 500 would flip the agent's
 	// semantics from "decided" to "retry", which is the wrong recovery for an
 	// outcome that has already happened.
+	// The ledger says WHO. An approval-consumed ALLOW is a human decision
+	// exercised by the agent's retry — recording the keeper as its author
+	// would tell the audit trail the model granted what a person did.
+	decidedActorType, decidedActorID := keeperActorKeeper, "keeper"
+	if approvedVia != nil {
+		decidedActorType, decidedActorID = keeperActorUser, approvedVia.ApproverID
+	}
 	if err := updateKeeperDecisionWithTransition(r.Context(), h.db, `
 		UPDATE keeper_requests SET decision=?, reason=?, risk_score=?, decided_at=?, ollama_prompt=?, ollama_raw_response=?, judge_profile=? WHERE id=?`,
 		[]any{gkResp.Decision, gkResp.Reason, gkResp.RiskScore, now,
@@ -335,8 +395,8 @@ func (h *KeeperHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 			Intent:       body.Intent,
 			Reason:       gkResp.Reason,
 			RiskScore:    &gkResp.RiskScore,
-			ActorType:    keeperActorKeeper,
-			ActorID:      "keeper",
+			ActorType:    decidedActorType,
+			ActorID:      decidedActorID,
 		}); err != nil {
 		h.logger.Error("keeper: update request decision", "error", err)
 	}
@@ -384,15 +444,25 @@ func (h *KeeperHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 		ActorID:     "keeper",
 		Summary: fmt.Sprintf("keeper %s credential %s for %s (risk %d)",
 			gkResp.Decision, credName, agentName, gkResp.RiskScore),
-		Payload: map[string]any{
-			"request_id":      reqID,
-			"credential_id":   body.CredentialID,
-			"credential_name": credName,
-			"decision":        gkResp.Decision,
-			"reason":          gkResp.Reason,
-			"risk_score":      gkResp.RiskScore,
-			"security_level":  secLevel,
-		},
+		Payload: func() map[string]any {
+			p := map[string]any{
+				"request_id":      reqID,
+				"credential_id":   body.CredentialID,
+				"credential_name": credName,
+				"decision":        gkResp.Decision,
+				"reason":          gkResp.Reason,
+				"risk_score":      gkResp.RiskScore,
+				"security_level":  secLevel,
+			}
+			if approvedVia != nil {
+				// The chain matters more than the verdict alone: this ALLOW
+				// exists because escalation <id> was approved by a person and
+				// the approval was spent here (#2574).
+				p["approval_request_id"] = approvedVia.RequestID
+				p["approved_by_user_id"] = approvedVia.ApproverID
+			}
+			return p
+		}(),
 		Refs: map[string]any{"keeper_request_id": reqID, "credential_id": body.CredentialID},
 	}); jerr != nil {
 		h.logger.Warn("keeper: journal emit decision failed", "error", jerr, "request_id", reqID)

@@ -587,10 +587,9 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		userMsgMetadata.(map[string]any)["page_context"] = pageContext
 	}
 
-	// The human turn is recorded and fanned out to the other participants
-	// regardless of whether the agent will respond. streamFn's BroadcastExcept
-	// skips the sender (who already rendered it optimistically); harmless in a
-	// private 1:1 chat where there are no other subscribers.
+	// The human turn is recorded and emitted regardless of whether the agent
+	// will respond. The sender also receives the event, which acknowledges
+	// persistence; its UI suppresses the duplicate optimistic turn.
 	persistUserMsg := func() error {
 		return b.convStore.Append(ctx, chatID, conversation.Message{
 			ID:           generateMsgID(),
@@ -603,10 +602,17 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		})
 	}
 	broadcastUserMsg := func() {
+		metadata := map[string]any{"author_user_id": userID}
+		if pageContext != nil {
+			// This event is emitted only after Append succeeds. Echo the
+			// server-derived Page identity so the sender can consume its
+			// one-shot Page chip without treating a rejected send as saved.
+			metadata["page_context"] = *pageContext
+		}
 		streamFn(ws.ChatEvent{
 			Type:     "user_message",
 			Content:  content,
-			Metadata: map[string]interface{}{"author_user_id": userID},
+			Metadata: metadata,
 		})
 	}
 

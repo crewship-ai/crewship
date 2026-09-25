@@ -96,7 +96,7 @@ export function SettingsRow({
       <div className="min-w-0 flex-1">
         <div className="text-xs text-foreground">{label}</div>
         {description && (
-          <div className="text-[11px] text-muted-foreground/80 mt-0.5 leading-snug">{description}</div>
+          <div className="text-[11px] text-muted-foreground-soft mt-0.5 leading-snug">{description}</div>
         )}
       </div>
       <div className="flex items-center gap-2 shrink-0 justify-end">{children}</div>

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
-import { render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 
 // =============================================================================
 // Two ways the page could show you a conversation you did not ask for.
@@ -17,13 +17,14 @@ import { render, screen, waitFor } from "@testing-library/react"
 // =============================================================================
 
 let searchParams = new URLSearchParams()
+let selectedWorkspaceId = "ws-1"
 
 vi.mock("next/navigation", () => ({
   useSearchParams: () => searchParams,
 }))
 
 vi.mock("@/hooks/use-workspace", () => ({
-  useWorkspace: () => ({ workspaceId: "ws-1", loading: false }),
+  useWorkspace: () => ({ workspaceId: selectedWorkspaceId, loading: false }),
 }))
 
 vi.mock("@/hooks/use-realtime", () => ({ useRealtimeEventSafe: () => {} }))
@@ -48,12 +49,14 @@ vi.mock("@/components/features/chat/chat-panel", () => ({
     initialInput,
     autoSendInitial,
     pageContextSlug,
+    onSend,
   }: {
     agentSlug: string
     sessionId: string
     initialInput?: string
     autoSendInitial?: boolean
     pageContextSlug?: string
+    onSend?: (sessionId: string, text: string) => void
   }) => (
     <div
       data-testid="chat-panel"
@@ -62,7 +65,9 @@ vi.mock("@/components/features/chat/chat-panel", () => ({
       data-initial={initialInput ?? "(none)"}
       data-autosend={String(!!autoSendInitial)}
       data-page={pageContextSlug ?? "(none)"}
-    />
+    >
+      <button onClick={() => onSend?.(sessionId, initialInput ?? "")}>simulate sent message</button>
+    </div>
   ),
 }))
 
@@ -130,6 +135,7 @@ async function panel() {
 
 describe("<ChatClient> — the URL must not leave a stale selection behind", () => {
   beforeEach(() => {
+    selectedWorkspaceId = "ws-1"
     vi.stubGlobal(
       "matchMedia",
       vi.fn(() => ({ matches: false, addEventListener: () => {}, removeEventListener: () => {} })),
@@ -205,6 +211,19 @@ describe("<ChatClient> — the ?prompt= handoff belongs to one conversation", ()
     const p = await panel()
     expect(p.getAttribute("data-initial")).toBe("Draft the routine")
     expect(p.getAttribute("data-autosend")).toBe("true")
+  })
+
+  it("consumes a sent handoff before a workspace switch remounts the chat", async () => {
+    setUrl("/chat/riley", "?session=riley-1&prompt=Draft%20the%20routine")
+    const view = render(<ChatClient />)
+    expect((await panel()).getAttribute("data-autosend")).toBe("true")
+
+    fireEvent.click(screen.getByText("simulate sent message"))
+    await waitFor(() => expect(screen.getByTestId("chat-panel").getAttribute("data-autosend")).toBe("false"))
+    selectedWorkspaceId = "ws-2"
+    view.rerender(<ChatClient />)
+    expect(screen.getByTestId("chat-panel").getAttribute("data-initial")).toBe("(none)")
+    expect(screen.getByTestId("chat-panel").getAttribute("data-autosend")).toBe("false")
   })
 
   it("does not re-send it into a conversation the reader switches to", async () => {

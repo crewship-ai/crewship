@@ -125,9 +125,12 @@ var tierPolicies = map[SecurityLevel]TierPolicy{
 		MinIntentChars: 35,
 		HumanApproval:  true,
 		SecondApprover: true,
-		// 6 is the shipped DENY-notify default, so a critical decision clears the
-		// bar an unconfigured workspace is already using.
-		MinRisk: 6,
+		// 7 IS the shipped DENY-notify default (governance.DefaultDenyNotifyMinRisk),
+		// so a critical decision clears the bar an unconfigured workspace is
+		// already using. It sat at 6 for a while on a comment that claimed the
+		// same thing — one below the threshold it named — so an L4 DENY floored
+		// to 6 never reached the inbox on a default workspace (#2575).
+		MinRisk: 7,
 		Checks: []string{
 			"Does the conversation history independently corroborate that this work is underway? Absence of corroboration is grounds to ESCALATE, not to ALLOW.",
 			"Is this credential the narrowest one that can do the stated job?",

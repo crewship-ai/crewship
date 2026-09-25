@@ -101,7 +101,9 @@ CREATE TABLE IF NOT EXISTS inbox_items (
     resolved_action     TEXT,
     created_at          TEXT NOT NULL,
     updated_at          TEXT NOT NULL,
-    UNIQUE (kind, source_id)
+    -- Mirrors the real schema's scoped dedupe key (#2274): the inbox
+    -- writer's ON CONFLICT target must match it exactly.
+    UNIQUE (workspace_id, kind, source_id)
 );`); err != nil {
 		t.Fatalf("pinning schema: %v", err)
 	}

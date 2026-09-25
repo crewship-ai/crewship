@@ -269,7 +269,7 @@ export const OverviewTab = React.memo(function OverviewTab({
             <StatusDot status={engineStatus} />
             {engineLabel}
             {health?.log_level?.level && (
-              <span className="font-mono text-[10px] text-muted-foreground/70">
+              <span className="font-mono text-[10px] text-muted-foreground-soft">
                 · log {health.log_level.level}
                 {health.log_level.expires_at ? " (temporary)" : ""}
               </span>

@@ -59,14 +59,23 @@ async function resolveAgentSlug(page: Page): Promise<string | null> {
   })
 }
 
-for (const { name, path } of PAGES) {
-  test(`${name} page has no critical a11y violations`, async ({ page }, testInfo) => {
-    await page.goto(path)
-    await page.waitForLoadState("networkidle")
+// Desktop is the default Playwright viewport; MOBILE re-runs the six page
+// surfaces at 390×844 because a viewport-dependent miss is exactly how the
+// "New issue" CTA lost its accessible name below `sm` while this scan kept
+// passing at 1280px (#2187 finding 6). The dialog, agent-overview and chat
+// tests stay desktop-only to bound gate runtime; their surfaces carry the
+// same tokens the pages do.
+for (const { width, height } of [{ width: 1280, height: 900 }, { width: 390, height: 844 }]) {
+  for (const { name, path } of PAGES) {
+    test(`${name} page has no critical a11y violations at ${width}px`, async ({ page }, testInfo) => {
+      await page.setViewportSize({ width, height })
+      await page.goto(path)
+      await page.waitForLoadState("networkidle")
 
-    const critical = await scan(page, testInfo)
-    expect(critical).toHaveLength(0)
-  })
+      const critical = await scan(page, testInfo)
+      expect(critical).toHaveLength(0)
+    })
+  }
 }
 
 test("New Agent dialog has no critical a11y violations", async ({ page }, testInfo) => {

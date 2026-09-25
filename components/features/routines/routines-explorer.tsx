@@ -374,7 +374,10 @@ export function RoutinesExplorer({
               <span
                 className={cn(
                   "truncate flex-1",
-                  count === 0 && !isSelected ? "text-foreground/40" : "text-foreground/80",
+                  // Zero-count rows dim via the soft token, not an alpha:
+                  // foreground/40 on card measured under the wcag2aa floor
+                  // (#1617).
+                  count === 0 && !isSelected ? "text-muted-foreground-soft" : "text-foreground/80",
                 )}
               >
                 {b.label}
@@ -383,9 +386,12 @@ export function RoutinesExplorer({
                 className={cn(
                   "rounded-full px-1.5 py-px text-[10px] tabular-nums",
                   count === 0
-                    ? "text-muted-foreground-soft/50"
+                    ? "text-muted-foreground-soft"
                     : isSelected
-                      ? "bg-primary/15 text-primary"
+                      // text-primary on bg-primary/15 reads ~4.3:1; the
+                      // brighter primary-hover token is the documented
+                      // contrast-safe pair for brand-tinted chips.
+                      ? "bg-primary/15 text-primary-hover"
                       : "bg-white/[0.05] text-muted-foreground",
                 )}
               >
@@ -507,7 +513,7 @@ export function RoutinesExplorer({
                             data-testid="routine-live-chip"
                             className={cn(
                               "inline-flex shrink-0 items-center gap-1 rounded-full px-1.5 py-px text-[10px] font-medium",
-                              liveAwaiting ? "bg-warn/15 text-warn" : "bg-primary/15 text-primary",
+                              liveAwaiting ? "bg-warn/15 text-warn" : "bg-primary/15 text-primary-hover",
                             )}
                           >
                             <span

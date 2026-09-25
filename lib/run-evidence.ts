@@ -103,10 +103,18 @@ function render(view: RunEvidenceView): string {
   return JSON.stringify(view, null, 2)
 }
 
-// RFC3339Nano may omit zero fractions: lexical comparison places .500Z
-// before Z within the same second, which reverses time. Compare instants.
+// Date.parse compares the offset-adjusted milliseconds but drops the last six
+// RFC3339Nano digits. When those milliseconds tie, compare the remaining
+// fractional precision before falling back to the stable event reference.
+function fractionalNanoseconds(at: string): number {
+  const digits = /\.(\d{1,9})(?:Z|[+-]\d{2}:\d{2})$/.exec(at)?.[1] ?? ""
+  return Number(digits.padEnd(9, "0"))
+}
+
 function compareEvents(a: RunEvidenceEvent, b: RunEvidenceEvent): number {
-  return Date.parse(a.at) - Date.parse(b.at) || a.reference.localeCompare(b.reference)
+  return Date.parse(a.at) - Date.parse(b.at)
+    || fractionalNanoseconds(a.at) - fractionalNanoseconds(b.at)
+    || a.reference.localeCompare(b.reference)
 }
 
 export function buildRunEvidence(input: RunEvidenceInput): RunEvidenceView {

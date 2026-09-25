@@ -222,6 +222,8 @@ interface InboxListResponse {
   count: number
   unread_count: number
   has_more?: boolean
+  /** Exact per-kind counts of the caller's visible not-resolved items (#2187). */
+  active_by_kind?: Record<string, number>
 }
 
 // "active" = everything not archived (unread + read), resolved excluded
@@ -285,6 +287,7 @@ export function useInbox(
       const rows: InboxItem[] = []
       let offset = 0
       let unreadCount = 0
+      let activeByKind: Record<string, number> | undefined
       do {
         const params = new URLSearchParams({
           workspace_id: workspaceId!,
@@ -299,10 +302,12 @@ export function useInbox(
         const page = (await res.json()) as InboxListResponse
         rows.push(...(page.rows ?? []))
         unreadCount = page.unread_count ?? unreadCount
+        // Page-independent aggregate — take it from whichever page answered.
+        activeByKind = page.active_by_kind ?? activeByKind
         if (!loadAll || !page.has_more) break
         offset += page.rows.length
       } while (true)
-      return { rows, count: rows.length, unread_count: unreadCount, has_more: false }
+      return { rows, count: rows.length, unread_count: unreadCount, has_more: false, active_by_kind: activeByKind }
     },
     enabled: Boolean(workspaceId),
     // Single-shot like the previous hand-rolled fetch — the error
@@ -486,6 +491,11 @@ export function useInbox(
   return {
     items: query.data?.rows ?? [],
     unreadCount: query.data?.unread_count ?? 0,
+    // Exact per-kind counts of visible not-resolved items — independent of
+    // the list's own window/filters. Surfaces that aggregate attention
+    // counts ("Needs your attention") must read this, not items.length,
+    // which plateaus at the 100-row window (#2187).
+    activeByKind: query.data?.active_by_kind,
     // isFetching (not isLoading) mirrors the old loading flag, which
     // was set on every refresh, not just the first one.
     loading: query.isFetching,

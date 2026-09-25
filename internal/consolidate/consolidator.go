@@ -35,6 +35,9 @@ type Consolidator struct {
 	// Now lets tests pin the clock. Production leaves it nil and the
 	// consolidator uses time.Now().UTC().
 	Now func() time.Time
+	// proposalID lets package tests pin a proposal path without replacing
+	// crypto/rand.Reader process-wide while other tests emit journal entries.
+	proposalID func(time.Time) string
 }
 
 // candidateTypes is the set of entry types we consider semantically

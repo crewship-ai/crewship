@@ -10,7 +10,10 @@ import (
 func TestBindLLMRouteTokenCoversEveryReverseProxyAdapter(t *testing.T) {
 	t.Parallel()
 
-	const token = "llmrv1.YWdlbnQ.deadbeef"
+	token := internaltoken.DeriveLLMRunRouteToken("crew-route-key", "agent", "run-1")
+	if agentID, runID, ok := internaltoken.ValidateLLMRunRouteToken("crew-route-key", token); !ok || agentID != "agent" || runID != "run-1" {
+		t.Fatal("test provider key did not carry a valid run-bound identity")
+	}
 	const fingerprint = "abcdef123456"
 	env := []string{
 		"ANTHROPIC_API_KEY=sk-ant-dummy-crewship-sidecar",

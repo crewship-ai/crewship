@@ -832,10 +832,16 @@ export function buildAttentionItems({
   inbox,
   heldCrews,
   credentialGapCount,
+  activeByKind,
 }: {
   inbox: InboxItem[]
   heldCrews: NonNullable<RuntimeCapacityResponse["held"]>
   credentialGapCount: number
+  /** Server-computed exact counts of visible not-resolved items per kind.
+   *  When present the labels count from it — inbox rows are windowed at 100
+   *  and the headline silently plateaued there (#2187). The windowed items
+   *  still supply the single-item deep link below. */
+  activeByKind?: Record<string, number>
 }): AttentionItem[] {
   const items: AttentionItem[] = []
   const approvals = inbox.filter((item) => item.kind === "waitpoint" || item.kind === "escalation")
@@ -843,11 +849,37 @@ export function buildAttentionItems({
   const scheduleProblems = inbox.filter((item) => item.kind === "schedule_missed")
   const held = heldCrews.length
 
-  if (approvals.length > 0) items.push({ id: "approvals", label: `${approvals.length} approval${approvals.length === 1 ? "" : "s"} waiting`, detail: "Review pending decisions", href: entityHref({ kind: "inbox", itemId: approvals.length === 1 ? approvals[0].id : undefined }), tone: "warn", icon: Clock3 })
-  if (failures.length > 0) items.push({ id: "failures", label: `${failures.length} failed run${failures.length === 1 ? "" : "s"}`, detail: "Investigate and retry", href: entityHref({ kind: "inbox", itemKind: "failed_run" }), tone: "danger", icon: XCircle })
+  // Server aggregate wins when the server sent one: exact past any window.
+  const approvalsCount = activeByKind
+    ? (activeByKind.waitpoint ?? 0) + (activeByKind.escalation ?? 0)
+    : approvals.length
+  const failedRunCount = activeByKind
+    ? (activeByKind.failed_run ?? 0)
+    : failures.filter((item) => item.kind === "failed_run").length
+  const circuitBreakerCount = activeByKind
+    ? (activeByKind.schedule_circuit_breaker_tripped ?? 0)
+    : failures.filter((item) => item.kind === "schedule_circuit_breaker_tripped").length
+  const failuresCount = failedRunCount + circuitBreakerCount
+  // Inbox ?kind= accepts one kind. Open the unfiltered list when both kinds
+  // contribute, so the link never hides part of the displayed total.
+  const failureKind = failedRunCount > 0 && circuitBreakerCount > 0
+    ? undefined
+    : failedRunCount > 0 ? "failed_run" : "schedule_circuit_breaker_tripped"
+  const scheduleCount = activeByKind ? (activeByKind.schedule_missed ?? 0) : scheduleProblems.length
+
+  // Deep-link the single item only when the EXACT total is one. With the
+  // server aggregate the windowed array can hold exactly one approval while
+  // more exist past the window — linking that one would send the operator to
+  // a single decision instead of the list that shows the rest (#2692 review).
+  const singleApprovalHref = approvalsCount === 1 && approvals.length >= 1
+    ? approvals[0].id
+    : undefined
+
+  if (approvalsCount > 0) items.push({ id: "approvals", label: `${approvalsCount} approval${approvalsCount === 1 ? "" : "s"} waiting`, detail: "Review pending decisions", href: entityHref({ kind: "inbox", itemId: singleApprovalHref }), tone: "warn", icon: Clock3 })
+  if (failuresCount > 0) items.push({ id: "failures", label: circuitBreakerCount > 0 ? `${failuresCount} run alert${failuresCount === 1 ? "" : "s"}` : `${failuresCount} failed run${failuresCount === 1 ? "" : "s"}`, detail: "Investigate and retry", href: entityHref({ kind: "inbox", itemKind: failureKind }), tone: "danger", icon: XCircle })
   if (held > 0) items.push({ id: "capacity", label: `${held} crew${held === 1 ? "" : "s"} waiting for capacity`, detail: heldCrews[0]?.detail || "View host admission details", href: "/settings", tone: "purple", icon: Gauge })
   if (credentialGapCount > 0) items.push({ id: "credentials", label: `${credentialGapCount} credential tool gap${credentialGapCount === 1 ? "" : "s"}`, detail: "Install missing crew tools", href: "/credentials", tone: "blue", icon: KeyRound })
-  if (scheduleProblems.length > 0) items.push({ id: "schedules", label: `${scheduleProblems.length} schedule alert${scheduleProblems.length === 1 ? "" : "s"}`, detail: "Review missed or disabled routines", href: entityHref({ kind: "inbox" }), tone: "warn", icon: CalendarClock })
+  if (scheduleCount > 0) items.push({ id: "schedules", label: `${scheduleCount} schedule alert${scheduleCount === 1 ? "" : "s"}`, detail: "Review missed or disabled routines", href: entityHref({ kind: "inbox" }), tone: "warn", icon: CalendarClock })
   return items
 }
 

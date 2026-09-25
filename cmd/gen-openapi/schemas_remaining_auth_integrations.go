@@ -30,7 +30,7 @@ func remainingAuthIntegrationsSchemaCatalog() (map[string]DomainSchema, map[stri
 	status := object(map[string]any{"status": str()})
 	label := object(map[string]any{"id": str(), "name": str(), "color": str(), "label_group": nullable(str())})
 	feedback := object(map[string]any{
-		"id": str(), "message_id": str(), "chat_id": nullable(str()), "trace_id": nullable(str()),
+		"id": str(), "workspace_id": str(), "message_id": str(), "chat_id": nullable(str()), "trace_id": nullable(str()),
 		"signal": map[string]any{"type": "string", "enum": []string{"helpful", "not_helpful", "inaccurate", "unsafe", "edit", "regenerate"}},
 		"reason": nullable(str()), "user_id": nullable(str()), "created_at": str(),
 	})

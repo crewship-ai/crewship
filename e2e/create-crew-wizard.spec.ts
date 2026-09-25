@@ -207,6 +207,10 @@ test.describe("/crews — Create-crew wizard happy paths", () => {
   // designed as the canary you'd run after any wizard refactor.
   // ============================================================================
   test("SMOKE — fully-populated dummy crew flows through every step and creates", async ({ page }) => {
+    // This canary walks every step, including the icon picker panel; on a
+    // CI runner the plain 30s default was nearly exhausted before the final
+    // submit (nightly 35977110294 timed out mid-step-3).
+    test.setTimeout(60_000)
     const slug = uniqueSlug("smoke")
     const name = `Smoke ${slug.slice(-6)}`
 
@@ -251,8 +255,21 @@ test.describe("/crews — Create-crew wizard happy paths", () => {
     await expect(page.getByRole("button", { name: "Remove github.com", exact: true })).toBeVisible()
 
     await page.getByRole("button", { name: /^Size/ }).click()
-    await page.getByRole("button", { name: "8 GB" }).click()
-    await page.getByRole("button", { name: "24 h" }).click()
+    // Choosing 8 GB unmounts the "cannot hold a second agent" warning, which
+    // shifts every row below it — including the footer's Create-crew button —
+    // up by the warning's height. A chip click dispatched across that shift
+    // lands on whatever moved into the target point and can submit the wizard
+    // (nightly run 35977110294: the crew was created mid-test and the next
+    // click then waited on a chip inside the closing dialog forever). Assert
+    // each chip's committed state before the next click, so the layout has
+    // settled and a mis-dispatch fails HERE with a readable message.
+    const eightGb = page.getByRole("button", { name: "8 GB" })
+    await expect(eightGb).toBeVisible()
+    await eightGb.click()
+    await expect(eightGb).toHaveClass(/border-primary/)
+    const twentyFourH = page.getByRole("button", { name: "24 h" })
+    await twentyFourH.click()
+    await expect(twentyFourH).toHaveClass(/border-primary/)
 
     await page.getByRole("button", { name: /Environment and runtime/ }).click()
 

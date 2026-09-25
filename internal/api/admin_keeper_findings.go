@@ -135,7 +135,9 @@ func (h *AdminKeeperFindingsHandler) SendTest(w http.ResponseWriter, r *http.Req
 	}
 
 	resp := keeperFindingsTestResponse{
-		InboxItemID:           "ibx_" + inbox.KindEscalation + "_" + sourceID,
+		// Mirrors inbox.Insert's derived id (workspace-scoped, #2274) —
+		// the row this endpoint just wrote lives under exactly this id.
+		InboxItemID:           "ibx_" + workspaceID + "_" + inbox.KindEscalation + "_" + sourceID,
 		Recipients:            recipients,
 		SecurityContactUserID: gov.SecurityContactUserID,
 	}

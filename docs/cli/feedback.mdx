@@ -26,7 +26,7 @@ crewship feedback create --message cmsg… --signal not_helpful --reason "wrong 
 
 ## `crewship feedback list`
 
-List signals for exactly one of `--message` or `--trace`.
+List signals for exactly one of `--message` or `--trace`. Results include the workspace ID so rows copied by a fork can be distinguished.
 
 ```bash
 crewship feedback list --message cmsg…
@@ -35,7 +35,7 @@ crewship feedback list --trace tr_… --format json
 
 ## `crewship feedback delete`
 
-Remove a signal from a message.
+Remove a signal from a message in the currently selected workspace. The CLI includes its workspace ID in the DELETE request, so a fork's copy of the same feedback cannot cause an ambiguous delete.
 
 ```bash
 crewship feedback delete --message cmsg… --signal not_helpful

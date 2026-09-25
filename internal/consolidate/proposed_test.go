@@ -237,8 +237,8 @@ CREATE TABLE IF NOT EXISTS inbox_items (
     created_at          TEXT NOT NULL DEFAULT (datetime('now','subsec')),
     updated_at          TEXT NOT NULL DEFAULT (datetime('now','subsec'))
 );
-CREATE UNIQUE INDEX IF NOT EXISTS idx_inbox_items_kind_source
-    ON inbox_items (kind, source_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_inbox_items_workspace_kind_source
+    ON inbox_items (workspace_id, kind, source_id);
 CREATE TABLE IF NOT EXISTS inbox_item_reads (
     inbox_item_id TEXT NOT NULL,
     user_id       TEXT NOT NULL,

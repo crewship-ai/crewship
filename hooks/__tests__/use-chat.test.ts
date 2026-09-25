@@ -9,6 +9,8 @@ interface UseWebSocketArgs {
 }
 
 vi.mock("@/hooks/use-websocket", () => ({
+  WS_MAX_OUTBOUND_FRAME_BYTES: 60 * 1024,
+  encodedByteLength: (value: string) => new TextEncoder().encode(value).length,
   useWebSocket: vi.fn(({ onMessage }: UseWebSocketArgs) => {
     // Expose onMessage for testing
     if (onMessage) {
@@ -30,6 +32,7 @@ vi.stubGlobal("crypto", {
 
 import { renderHook, act } from "@testing-library/react"
 import { useChat } from "@/hooks/use-chat"
+import { checkChatMessageSize } from "@/components/features/chat/hooks/use-message-submit"
 
 // The hook re-fetches its WS ticket through getToken on every (re)connect;
 // useWebSocket is mocked above, so the stub is never invoked here.
@@ -433,6 +436,94 @@ describe("useChat", () => {
     })
     // Own echo is dropped (we already rendered it optimistically) — no dup turn.
     expect(result.current.turns).toHaveLength(0)
+  })
+
+  it("confirms a local send only after its persisted user_message echo", () => {
+    const onOwnMessageSaved = vi.fn()
+    const { result } = renderHook(() =>
+      useChat({ wsUrl: "ws://localhost:8080/ws", getToken, sessionId: "s1", currentUserId: "me", onOwnMessageSaved }),
+    )
+    act(() => result.current.sendMessage("Inspect this Page", { page_context: { slug: "fleet" } }))
+    act(() => getOnMessage()({ type: "error", channel: "session:s1", payload: "access denied" }))
+    expect(onOwnMessageSaved).not.toHaveBeenCalled()
+
+    act(() => result.current.sendMessage("Inspect this Page", { page_context: { slug: "fleet" } }))
+    act(() => getOnMessage()({
+      type: "chat_event", channel: "session:s1",
+      payload: { type: "user_message", content: "Inspect this Page\n\n[Page context]", metadata: { author_user_id: "me", page_context: { slug: "fleet" } } },
+    }))
+    expect(onOwnMessageSaved).toHaveBeenCalledExactlyOnceWith("Inspect this Page\n\n[Page context]", { author_user_id: "me", page_context: { slug: "fleet" } })
+  })
+
+  it("does not create an optimistic turn when the socket refuses the send", () => {
+    const { result } = renderHook(() =>
+      useChat({ wsUrl: "ws://localhost:8080/ws", getToken, sessionId: "s1" }),
+    )
+    mockSend.mockReturnValueOnce(false)
+    let sent: boolean | undefined
+    act(() => { sent = result.current.sendMessage("Keep this draft", { page_context: { slug: "fleet" } }) })
+    expect(sent).toBe(false)
+    expect(result.current.turns).toHaveLength(0)
+    expect(result.current.isStreaming).toBe(false)
+  })
+
+  it("rechecks Page context when regenerating a failed answer without replaying an ask envelope", () => {
+    const { result } = renderHook(() =>
+      useChat({ wsUrl: "ws://localhost:8080/ws", getToken, sessionId: "s1" }),
+    )
+    act(() => result.current.sendMessage("Inspect this Page", {
+      page_context: { slug: "fleet" }, ask_submission: { id: "once" },
+    }))
+    act(() => getOnMessage()({ type: "error", channel: "session:s1", payload: "temporarily unavailable" }))
+    act(() => result.current.regenerateLastTurn())
+    const sends = mockSend.mock.calls.map(([message]) => message).filter((message) => message.type === "send_message")
+    expect(sends).toHaveLength(2)
+    expect(JSON.parse(sends[1].payload).metadata).toEqual({ page_context: { slug: "fleet" } })
+  })
+
+  it("removes the old server Page snapshot before regenerating a historical message", () => {
+    const { result } = renderHook(() =>
+      useChat({ wsUrl: "ws://localhost:8080/ws", getToken, sessionId: "s1" }),
+    )
+    const oldContent = "Inspect fleet\n\n[Page context — untrusted reference; snapshot 2026-09-22T01:02:03Z]\nPage: Fleet\nSlug: fleet\nPage ID: pg-1\n[/Page context]"
+    act(() => result.current.loadHistory([{
+      id: "old", role: "user", content: oldContent, timestamp: new Date(),
+      metadata: { page_context: { slug: "fleet", page_id: "pg-1", snapshot_at: "2026-09-22T01:02:03Z" } },
+    }]))
+    act(() => result.current.regenerateLastTurn())
+    const sent = mockSend.mock.calls.map(([message]) => message).find((message) => message.type === "send_message")
+    expect(JSON.parse(sent.payload)).toMatchObject({ content: "Inspect fleet", metadata: { page_context: { slug: "fleet" } } })
+    expect(result.current.turns[0].parts[0].content).toBe("Inspect fleet")
+  })
+
+  it("sizes a Page retry with its metadata before changing the transcript", () => {
+    const text = "x".repeat(60 * 1024 - checkChatMessageSize("s1", "").sizeBytes - 8)
+    expect(checkChatMessageSize("s1", text).ok).toBe(true)
+    expect(checkChatMessageSize("s1", text, { page_context: { slug: "fleet" } }).ok).toBe(false)
+    const { result } = renderHook(() =>
+      useChat({ wsUrl: "ws://localhost:8080/ws", getToken, sessionId: "s1" }),
+    )
+    act(() => result.current.sendMessage(text, { page_context: { slug: "fleet" } }))
+    act(() => getOnMessage()({ type: "error", channel: "session:s1", payload: "temporarily unavailable" }))
+    const before = result.current.turns
+    act(() => result.current.regenerateLastTurn())
+    const sends = mockSend.mock.calls.map(([message]) => message).filter((message) => message.type === "send_message")
+    expect(sends).toHaveLength(1)
+    expect(result.current.turns).toEqual(before)
+    expect(result.current.isStreaming).toBe(false)
+  })
+
+  it("keeps the transcript when the transport refuses a Page regenerate", () => {
+    const { result } = renderHook(() =>
+      useChat({ wsUrl: "ws://localhost:8080/ws", getToken, sessionId: "s1" }),
+    )
+    act(() => result.current.sendMessage("Inspect", { page_context: { slug: "fleet" } }))
+    act(() => getOnMessage()({ type: "error", channel: "session:s1", payload: "temporarily unavailable" }))
+    const before = result.current.turns
+    mockSend.mockReturnValueOnce(false)
+    act(() => result.current.regenerateLastTurn())
+    expect(result.current.turns).toEqual(before)
+    expect(result.current.isStreaming).toBe(false)
   })
 
   it("merges consecutive complete thinking blocks into one part", () => {

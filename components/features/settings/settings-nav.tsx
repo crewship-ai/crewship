@@ -201,7 +201,7 @@ export function SettingsNav({ activeTab, onTabChange, workspaceName, role }: Set
             label={section.label}
             actions={
               section.label === "Workspace" && workspaceName ? (
-                <span className="ml-1 truncate font-mono text-[10px] normal-case tracking-normal text-sidebar-foreground/35">
+                <span className="ml-1 truncate font-mono text-[10px] normal-case tracking-normal text-sidebar-foreground/70">
                   {workspaceName}
                 </span>
               ) : undefined

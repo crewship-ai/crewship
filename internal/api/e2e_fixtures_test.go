@@ -99,6 +99,43 @@ func TestE2EFixtures_RouteAbsentWithoutTheGate(t *testing.T) {
 	}
 }
 
+func TestE2EFixtures_FeedbackMessage(t *testing.T) {
+	r, wsID, tok := newE2EFixtureRig(t, true)
+	path := "/api/v1/e2e/fixtures/feedback-message?workspace_id=" + wsID
+	rr := e2eFixturePost(r, path, tok, `{}`)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("fixture status = %d; body=%s", rr.Code, rr.Body.String())
+	}
+	var fx struct {
+		ChatID    string `json:"chat_id"`
+		MessageID string `json:"message_id"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &fx); err != nil || fx.ChatID == "" || fx.MessageID == "" {
+		t.Fatalf("fixture response = %+v, err=%v", fx, err)
+	}
+	feedback := e2eFixturePost(r, "/api/v1/feedback?workspace_id="+wsID, tok,
+		`{"message_id":"`+fx.MessageID+`","signal":"helpful"}`)
+	if feedback.Code != http.StatusCreated {
+		t.Fatalf("feedback status = %d; body=%s", feedback.Code, feedback.Body.String())
+	}
+	var ownerWS, ownerUser, role string
+	if err := r.db.QueryRow(`SELECT workspace_id, created_by FROM chats WHERE id = ?`, fx.ChatID).Scan(&ownerWS, &ownerUser); err != nil {
+		t.Fatalf("chat lookup: %v", err)
+	}
+	if err := r.db.QueryRow(`SELECT role FROM conversation_messages WHERE id = ? AND session_id = ?`, fx.MessageID, fx.ChatID).Scan(&role); err != nil {
+		t.Fatalf("message lookup: %v", err)
+	}
+	if ownerWS != wsID || ownerUser == "" || role != "assistant" {
+		t.Fatalf("fixture scope: workspace=%q user=%q role=%q", ownerWS, ownerUser, role)
+	}
+
+	ungated, _, ungatedTok := newE2EFixtureRig(t, false)
+	absent := e2eFixturePost(ungated, path, ungatedTok, `{}`)
+	if absent.Code != http.StatusNotFound {
+		t.Fatalf("ungated fixture status = %d; body=%s", absent.Code, absent.Body.String())
+	}
+}
+
 func TestE2EFixtures_EnabledFromEnv(t *testing.T) {
 	cases := []struct {
 		flag, env string

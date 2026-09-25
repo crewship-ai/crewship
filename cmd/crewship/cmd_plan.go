@@ -37,10 +37,13 @@ User request follows:
 
 var planCmd = &cobra.Command{
 	Use:   "plan [prompt]",
-	Short: "Get a read-only plan before executing (architect mode)",
-	Long: `Run the default agent in PLAN mode: the agent outputs a step-by-step
-plan plus the files it would touch, without executing any tools or
-modifying anything.
+	Short: "Ask the default agent for a plan (prompt-guided)",
+	Long: `Ask the default agent for a step-by-step plan plus the files it would
+touch. This is a prompt instruction, not an enforced read-only mode: the
+agent keeps its configured tools. Do not use it as a safety boundary.
+
+Context flags such as --with-cmd can also run local commands before the
+agent starts.
 
 Useful before kicking off a long autonomous run — review the plan,
 adjust the prompt, then re-run with 'crewship run' or 'crewship ask'

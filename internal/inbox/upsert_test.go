@@ -6,9 +6,82 @@ import (
 )
 
 // UpsertMessage is the dedupe primitive behind the "your agent replied"
-// notification: one row per (kind, source_id); a second reply refreshes
-// title/body/timestamps and resurrects the row as unread instead of
-// piling up siblings.
+// notification: one row per (workspace, kind, source_id); a second reply
+// refreshes title/body/timestamps and resurrects the row as unread
+// instead of piling up siblings.
+
+// #2274: the dedupe key is workspace-scoped, so the same (kind, source_id)
+// may exist in two workspaces — a fork is the guaranteed producer. The
+// derived row id carries the workspace too, or the second workspace's
+// INSERT OR IGNORE would eat its row on the PK collision with the first.
+func TestInsert_TwoWorkspacesSameSource_BothLand(t *testing.T) {
+	t.Parallel()
+	db := newInboxTestDB(t)
+	if _, err := db.Exec(`INSERT INTO users (id, email, full_name) VALUES ('u1', 'u1@e2e.test', 'One')`); err != nil {
+		t.Fatalf("seed user: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO workspaces (id, name, slug) VALUES ('ws2', 'Ws2', 'ws2')`); err != nil {
+		t.Fatalf("seed workspace 2: %v", err)
+	}
+	ctx := context.Background()
+
+	item := func(ws string) Item {
+		return Item{
+			WorkspaceID:  ws,
+			Kind:         KindMessage,
+			SourceID:     "chat_reply_shared_source",
+			TargetUserID: "",
+			Title:        "reply in " + ws,
+			SenderType:   "agent",
+		}
+	}
+	for _, ws := range []string{"ws1", "ws2"} {
+		if err := Insert(ctx, db, quietLogger(), item(ws)); err != nil {
+			t.Fatalf("insert into %s: %v", ws, err)
+		}
+	}
+	var n int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM inbox_items WHERE kind='message' AND source_id='chat_reply_shared_source'`).
+		Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 2 {
+		t.Fatalf("rows across both workspaces = %d, want 2 — one workspace's row was eaten by a PK collision", n)
+	}
+	// Upsert refreshes only its own workspace's row.
+	refreshed := item("ws1")
+	refreshed.Title = "refreshed in ws1"
+	if err := UpsertMessage(ctx, db, quietLogger(), refreshed); err != nil {
+		t.Fatalf("upsert ws1: %v", err)
+	}
+	var ws1Title, ws2Title string
+	if err := db.QueryRow(`SELECT title FROM inbox_items WHERE workspace_id='ws1' AND source_id='chat_reply_shared_source'`).Scan(&ws1Title); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRow(`SELECT title FROM inbox_items WHERE workspace_id='ws2' AND source_id='chat_reply_shared_source'`).Scan(&ws2Title); err != nil {
+		t.Fatal(err)
+	}
+	if ws1Title != "refreshed in ws1" || ws2Title != "reply in ws2" {
+		t.Errorf("titles = (%q, %q) — the upsert must touch only its own workspace", ws1Title, ws2Title)
+	}
+	// And the marker cleanup resolves the row by the key: markers of the
+	// OTHER workspace's item must survive an upsert here.
+	if _, err := db.Exec(`INSERT INTO inbox_item_reads (inbox_item_id, user_id, read_at)
+		SELECT id, 'u1', '2026-09-24T12:00:00Z' FROM inbox_items WHERE workspace_id='ws2'`); err != nil {
+		t.Fatal(err)
+	}
+	if err := UpsertMessage(ctx, db, quietLogger(), refreshed); err != nil {
+		t.Fatalf("upsert ws1 again: %v", err)
+	}
+	var ws2Markers int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM inbox_item_reads r JOIN inbox_items i ON i.id=r.inbox_item_id
+		WHERE i.workspace_id='ws2'`).Scan(&ws2Markers); err != nil {
+		t.Fatal(err)
+	}
+	if ws2Markers != 1 {
+		t.Errorf("ws2 read markers = %d, want 1 — the marker cleanup deleted another workspace's markers", ws2Markers)
+	}
+}
 
 func TestUpsertMessage_InsertsNewRow(t *testing.T) {
 	t.Parallel()
@@ -19,7 +92,7 @@ func TestUpsertMessage_InsertsNewRow(t *testing.T) {
 		WorkspaceID:  "ws1",
 		Kind:         KindMessage,
 		SourceID:     "chat_reply_c1_u1",
-		TargetUserID: "u1",
+		TargetUserID: "",
 		Title:        "Atlas replied",
 		BodyMD:       "first reply",
 		SenderType:   "agent",
@@ -48,7 +121,7 @@ func TestUpsertMessage_SecondCallRefreshesInsteadOfDuplicating(t *testing.T) {
 		WorkspaceID:  "ws1",
 		Kind:         KindMessage,
 		SourceID:     "chat_reply_c2_u1",
-		TargetUserID: "u1",
+		TargetUserID: "",
 		Title:        "Atlas replied",
 		BodyMD:       "first reply",
 		SenderType:   "agent",
@@ -112,7 +185,7 @@ func TestUpsertMessage_SecondCallClearsPerUserReadMarkers(t *testing.T) {
 		WorkspaceID:  "ws1",
 		Kind:         KindMessage,
 		SourceID:     "chat_reply_c3_u1",
-		TargetUserID: "u1",
+		TargetUserID: "",
 		Title:        "Atlas replied",
 		BodyMD:       "first reply",
 		SenderType:   "agent",

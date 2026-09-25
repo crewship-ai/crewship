@@ -63,8 +63,10 @@ func TestInsert_HappyPath(t *testing.T) {
 		&senderName, &blocking, &payloadJSON); err != nil {
 		t.Fatalf("read inserted row: %v", err)
 	}
-	if id != "ibx_waitpoint_wp-1" {
-		t.Errorf("id: want ibx_waitpoint_wp-1, got %q", id)
+	// Workspace-scoped derived id (#2274): the dedupe key is per
+	// workspace, so the id must be too.
+	if id != "ibx_ws1_waitpoint_wp-1" {
+		t.Errorf("id: want ibx_ws1_waitpoint_wp-1, got %q", id)
 	}
 	if kind != "waitpoint" || sourceID != "wp-1" || title != "Approve deploy" ||
 		bodyMD != "**Deploy to prod?**" || state != "unread" || priority != "high" ||

@@ -73,6 +73,12 @@ describe("formatDuration", () => {
   it("formats minutes with a seconds remainder", () => {
     expect(formatDuration(192_000)).toBe("3m 12s")
   })
+
+  it("rolls over to hours instead of rendering weeks in minutes (#2187)", () => {
+    expect(formatDuration(3_600_000)).toBe("1h")
+    expect(formatDuration(7_500_000)).toBe("2h 5m")
+    expect(formatDuration(7 * 24 * 3_600_000)).toBe("168h")
+  })
 })
 
 describe("formatTimeout", () => {

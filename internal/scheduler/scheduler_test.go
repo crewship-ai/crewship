@@ -360,6 +360,13 @@ func TestLoadSchedules_InvalidCron(t *testing.T) {
 func TestUpdateSchedule_Enable(t *testing.T) {
 	db := testDB(t)
 	seedAgent(t, db, "a1", "bob", "Bob", "", "ws1", "", "", false)
+	// The API commits configuration and cursor together before notifying the
+	// scheduler. Registration must not overwrite that durable cursor.
+	const due = "2030-01-01T08:00:00Z"
+	if _, err := db.Exec(`UPDATE agents SET schedule_enabled=1, schedule_cron='0 8 * * MON',
+		schedule_next_run=? WHERE id='a1'`, due); err != nil {
+		t.Fatal(err)
+	}
 
 	s := newTestScheduler(db, &mockResolver{}, nil, nil)
 	err := s.UpdateSchedule(context.Background(), "a1", "0 8 * * MON", "weekly report", true)
@@ -370,13 +377,14 @@ func TestUpdateSchedule_Enable(t *testing.T) {
 		t.Error("expected entry for agent a1 after enable")
 	}
 
-	// Check next_run was written to DB
+	// Check the API's cursor was preserved, not recalculated later by the
+	// callback (which could race an already accepted occurrence).
 	var nextRun sql.NullString
 	if err := db.QueryRow("SELECT schedule_next_run FROM agents WHERE id = 'a1'").Scan(&nextRun); err != nil {
 		t.Fatalf("scan schedule_next_run: %v", err)
 	}
-	if !nextRun.Valid || nextRun.String == "" {
-		t.Error("expected schedule_next_run to be set")
+	if !nextRun.Valid || nextRun.String != due {
+		t.Errorf("schedule_next_run = %q, want unchanged %q", nextRun.String, due)
 	}
 }
 

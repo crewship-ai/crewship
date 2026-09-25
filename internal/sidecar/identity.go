@@ -216,7 +216,7 @@ func (s *Server) runChatID(runID string) string {
 	return ""
 }
 
-// llmRouteIdentity extracts the per-agent token embedded in the disposable
+// llmRouteIdentity extracts the per-run token embedded in the disposable
 // provider key. The real provider credential is injected only after this
 // lookup, so these slots contain no upstream secret at this point. Supporting
 // every auth shape is necessary: Anthropic uses x-api-key, OpenAI/OpenRouter
@@ -228,8 +228,14 @@ func (s *Server) llmRouteIdentity(r *http.Request) (agentID, configFingerprint s
 		r.Header.Get("x-goog-api-key"),
 		r.URL.Query().Get("key"),
 	}
-	marker := internaltoken.LLMRoutePrefix + "."
+	marker := internaltoken.LLMRunRoutePrefix + "."
+	legacyMarker := internaltoken.LLMRoutePrefix + "."
 	for _, value := range values {
+		// A v1 route token identifies only an agent. It cannot be checked
+		// against a run's revocation, so it must never inject a credential.
+		if strings.Contains(value, legacyMarker) {
+			return "", "", true, false
+		}
 		idx := strings.Index(value, marker)
 		if idx < 0 {
 			continue
@@ -242,8 +248,18 @@ func (s *Server) llmRouteIdentity(r *http.Request) (agentID, configFingerprint s
 		if s.routeAuth == nil {
 			return "", fp, true, false
 		}
-		id, matched := internaltoken.ValidateLLMRouteToken(s.routeAuth.Key, token)
-		return id, fp, true, matched
+		id, runID, matched := internaltoken.ValidateLLMRunRouteToken(s.routeAuth.Key, token)
+		if !matched || s.runs == nil {
+			return "", fp, true, false
+		}
+		// Replay revocations before making the first admission decision. The
+		// request context also bounds an optional host authority lookup.
+		s.runs.ensureDurable(s.ipc, s.logger)
+		if !s.runs.current(r.Context(), runID) {
+			return "", fp, true, false
+		}
+		s.registerRunFromToken(runID, id)
+		return id, fp, true, true
 	}
 	return "", "", false, false
 }

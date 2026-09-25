@@ -198,6 +198,8 @@ interface UseChatOptions {
   onStreamReset?: () => void
   /** A new, successfully persisted assistant answer observed on this connection. */
   onReplyCompleted?: (reply: { sessionId: string; repliedAt: string }) => void
+  /** The server echoed our persisted user message; a rejected send has no echo. */
+  onOwnMessageSaved?: (content: string, metadata?: Record<string, unknown>) => void
 }
 
 /** Map a structured history part to a renderable TurnPart, coercing unknown
@@ -312,9 +314,11 @@ export function messagesToTurns(messages: ChatMessage[]): ChatTurn[] {
  * Handles streaming text/thinking/tool events, turn grouping, history loading,
  * message editing, regeneration, and stop/cancel.
  */
-export function useChat({ wsUrl, getToken, sessionId, currentUserId, onStreamReset, onReplyCompleted }: UseChatOptions) {
+export function useChat({ wsUrl, getToken, sessionId, currentUserId, onStreamReset, onReplyCompleted, onOwnMessageSaved }: UseChatOptions) {
   const completedReplyRef = useRef(onReplyCompleted)
   completedReplyRef.current = onReplyCompleted
+  const ownMessageSavedRef = useRef(onOwnMessageSaved)
+  ownMessageSavedRef.current = onOwnMessageSaved
   const replySoundSinceRef = useRef(Date.now())
   const replyHasTextRef = useRef(false)
   const [turns, setTurns] = useState<ChatTurn[]>([])
@@ -574,6 +578,7 @@ export function useChat({ wsUrl, getToken, sessionId, currentUserId, onStreamRes
       // rendered it optimistically in sendMessage. Without this guard the
       // sender sees their message twice.
       if (authorUserId && currentUserIdRef.current && authorUserId === currentUserIdRef.current) {
+        ownMessageSavedRef.current?.(content, metadata)
         return
       }
       const userTurn: ChatTurn = {
@@ -1370,7 +1375,20 @@ export function useChat({ wsUrl, getToken, sessionId, currentUserId, onStreamRes
    *  thing from the persisted message (messagesToTurns above). */
   const sendMessage = useCallback(
     (content: string, metadata?: Record<string, unknown>) => {
-      if (!content.trim() || isStreaming) return
+      if (!content.trim() || isStreaming) return false
+
+      const sent = send({
+        type: "send_message",
+        // Name the channel this send is about. The server echoes it on any
+        // frame-level refusal, so errors can be attributed to this chat.
+        channel: "session:" + sessionId,
+        payload: JSON.stringify({
+          session_id: sessionId,
+          content: content.trim(),
+          ...(metadata ? { metadata } : {}),
+        }),
+      })
+      if (sent === false) return false
 
       const userTurn: ChatTurn = {
         id: uuid(),
@@ -1388,20 +1406,7 @@ export function useChat({ wsUrl, getToken, sessionId, currentUserId, onStreamRes
       cancelledRef.current = false
     replyHasTextRef.current = false
 
-      send({
-        type: "send_message",
-        // Name the channel this send is about. The server echoes it on any
-        // frame-level refusal (denied session, invalid payload, chat handler
-        // unavailable — internal/ws/client.go), which is what makes those
-        // rejections addressable: handleMessage above refuses to attribute an
-        // error frame that names no channel to whatever chat happens to be open.
-        channel: "session:" + sessionId,
-        payload: JSON.stringify({
-          session_id: sessionId,
-          content: content.trim(),
-          ...(metadata ? { metadata } : {}),
-        }),
-      })
+      return true
     },
     [sessionId, send, isStreaming],
   )
@@ -1453,37 +1458,63 @@ export function useChat({ wsUrl, getToken, sessionId, currentUserId, onStreamRes
     const lastUserContent = turns[lastUserIdx].parts.find((p) => p.type === "text")?.content
     if (!lastUserContent) return
 
+    // An ask submission id belongs to the original send. A Page slug can be
+    // retried: the server checks access again and captures a fresh snapshot.
+    const page = turns[lastUserIdx].metadata?.page_context
+    const pageSlug = page && typeof page === "object" && "slug" in page ? page.slug : undefined
+    const retryMetadata = typeof pageSlug === "string" && pageSlug ? { page_context: { slug: pageSlug } } : undefined
+    // History contains the server-appended Page snapshot in the message text.
+    // Remove only a matching, server-attributed suffix before asking the server
+    // to attach a fresh snapshot; otherwise each retry would duplicate it.
+    const pageMetadata = page && typeof page === "object" ? page as Record<string, unknown> : undefined
+    const suffixStart = lastUserContent.lastIndexOf("\n\n[Page context — untrusted reference; snapshot ")
+    const suffix = suffixStart < 0 ? "" : lastUserContent.slice(suffixStart)
+    const pageSuffix = /^\n\n\[Page context — untrusted reference; snapshot ([^\]\n]+)\]\nPage: [^\n]*\nSlug: ([^\n]*)\nPage ID: ([^\n]*)\n\[\/Page context\]$/.exec(suffix)
+    const retryContent = pageSuffix && pageMetadata
+      && pageSuffix[1] === pageMetadata.snapshot_at
+      && pageSuffix[2] === pageMetadata.slug
+      && pageSuffix[3] === pageMetadata.page_id
+      ? lastUserContent.slice(0, suffixStart)
+      : lastUserContent
+
     // Same pre-send guard the composer runs (checkChatMessageSize) — checked
     // BEFORE any turn truncation or isStreaming flip. Without this, resending
     // an oversize turn truncates the transcript locally, then the server
     // kills the whole socket on the oversize frame: message gone, transcript
     // tail already removed, panel stuck streaming with no error.
-    const sizeCheck = checkChatMessageSize(sessionId, lastUserContent)
+    const sizeCheck = checkChatMessageSize(sessionId, retryContent, retryMetadata)
     if (!sizeCheck.ok) {
       toast.error(sizeCheck.message)
       return
     }
 
-    // Remove all turns after (and including) the last assistant turn. The user
-    // turn itself is kept as-is, badge and all — a regenerate re-asks the same
-    // question. What it deliberately does NOT do is put the envelope back on
-    // the wire: a submission id is minted once per press of Send, and
-    // re-sending it would record a second submission the user never made.
-    setTurns((prev) => prev.slice(0, lastUserIdx + 1))
+    const sent = send({
+      type: "send_message",
+      channel: "session:" + sessionId,
+      payload: JSON.stringify({
+        session_id: sessionId,
+        content: retryContent,
+        ...(retryMetadata ? { metadata: retryMetadata } : {}),
+      }),
+    })
+    if (sent === false) {
+      toast.error("Not connected — try again when chat reconnects.")
+      return
+    }
+
+    // Remove all turns after the last user turn only after the socket accepts
+    // the retry. The new Page snapshot will be supplied by the server.
+    setTurns((prev) => prev.slice(0, lastUserIdx).concat({
+      ...prev[lastUserIdx],
+      parts: prev[lastUserIdx].parts.map((part) => part.type === "text" ? { ...part, content: retryContent } : part),
+      metadata: retryMetadata,
+    }))
     setIsStreaming(true)
     textBufferRef.current = ""
     thinkingBufferRef.current = ""
     cancelledRef.current = false
     replyHasTextRef.current = false
 
-    send({
-      type: "send_message",
-      channel: "session:" + sessionId,
-      payload: JSON.stringify({
-        session_id: sessionId,
-        content: lastUserContent,
-      }),
-    })
   }, [turns, sessionId, send, isStreaming])
 
   // Edit a user message and resend — removes all subsequent turns.
