@@ -2,9 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
-import { LayoutDashboard, MessageSquare, Plus, Radio } from "lucide-react"
+import { Radio } from "lucide-react"
 
-import { SubBar, SubBarPrimary, SubBarSecondary } from "@/components/layout/sub-bar"
 import { DashboardCard } from "@/components/features/dashboard/dashboard-card"
 import {
   AttentionStrip,
@@ -19,7 +18,6 @@ import { RunVolumeChart, type RunVolumeBucket, type RunVolumeSeries } from "@/co
 import { RecipesEmptyState } from "@/components/features/dashboard/recipes-cards"
 import { FleetBoard, deriveFleetBoard } from "@/components/features/dashboard/fleet-board"
 import { DashboardResults } from "@/components/features/dashboard/dashboard-results"
-import { HostResources } from "@/components/features/dashboard/host-resources"
 import { PagesStrip } from "@/components/features/dashboard/pages-strip"
 import { WelcomeChecklist } from "@/components/features/dashboard/welcome-checklist"
 import { Appear } from "@/components/ui/detail"
@@ -30,7 +28,7 @@ import { useActiveRoutineRuns } from "@/hooks/use-active-routine-runs"
 import { usePipelineSchedules } from "@/hooks/use-pipeline-schedules"
 import { useCredentialReadiness } from "@/hooks/use-credential-readiness"
 import { useInbox } from "@/hooks/use-inbox"
-import { useRealtimeEvent, useRealtimeStatusSafe } from "@/hooks/use-realtime"
+import { useRealtimeEvent } from "@/hooks/use-realtime"
 import {
   useAgentSummaries,
   useCrewServiceSummaries,
@@ -38,8 +36,6 @@ import {
   useCrewSummaries,
   useDashboardResults,
   useDashboardActiveRuns,
-  useHostResourceLatest,
-  useHostResources,
   useInvalidateDashboard,
   useMetricsTimeseries,
   useRunsInsights,
@@ -52,6 +48,21 @@ import { cn } from "@/lib/utils"
 import { serverFetch } from "@/lib/server-base"
 
 const WINDOW_LABELS: DashboardWindow[] = ["24h", "7d", "30d"]
+
+function DashboardPeriodBar({ value, onChange }: { value: DashboardWindow; onChange: (value: DashboardWindow) => void }) {
+  return (
+    <div className="sticky top-0 z-30 flex min-h-10 items-center justify-end border-b border-border/60 bg-card px-3 shadow-sm md:px-5">
+      <div className="flex items-center rounded-md border border-border/60 bg-background/50 p-0.5" role="group" aria-label="Dashboard time window">
+        {WINDOW_LABELS.map((item) => (
+          <Button key={item} type="button" variant="ghost" size="xs" aria-pressed={value === item}
+            onClick={() => onChange(item)}
+            className={cn("h-6 min-w-10 px-2 font-sans text-[11px] font-semibold tracking-[0.01em] tabular-nums", value === item && "bg-primary/15 text-primary-hover")}
+          >{item}</Button>
+        ))}
+      </div>
+    </div>
+  )
+}
 
 function runVolumeParams(window: DashboardWindow): TimeseriesParams {
   return {
@@ -67,7 +78,6 @@ export default function DashboardPage() {
   const [onboardingChecked, setOnboardingChecked] = useState(false)
   const [firstAgentId, setFirstAgentId] = useState<string | null>(null)
   const [reportWindow, setReportWindow] = useState<DashboardWindow>("24h")
-  const [systemDetailsOpen, setSystemDetailsOpen] = useState(false)
 
   useEffect(() => {
     serverFetch("/api/v1/onboarding/status")
@@ -99,9 +109,6 @@ export default function DashboardPage() {
   const agentRunsQ = useDashboardActiveRuns(workspaceId, queryOpts)
   const insightsQ = useRunsInsights(workspaceId, reportWindow, queryOpts)
   const capacityQ = useRuntimeCapacity(queryOpts)
-  const hostQueryOpts = { enabled: onboardingChecked && systemDetailsOpen }
-  const hostResourcesQ = useHostResources(reportWindow, hostQueryOpts)
-  const hostLatestQ = useHostResourceLatest(hostQueryOpts)
   const volumeParams = useMemo(() => runVolumeParams(reportWindow), [reportWindow])
   const volumeQ = useMetricsTimeseries(workspaceId, volumeParams, queryOpts)
   const spendQ = useCrewSpend(workspaceId, reportWindow, queryOpts)
@@ -112,7 +119,6 @@ export default function DashboardPage() {
   const schedules = usePipelineSchedules(workspaceId)
   const readiness = useCredentialReadiness(workspaceId)
   const inbox = useInbox(workspaceId, "active")
-  const realtimeStatus = useRealtimeStatusSafe()
 
   const invalidateDashboard = useInvalidateDashboard(workspaceId)
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined)
@@ -234,77 +240,17 @@ export default function DashboardPage() {
   )
 
   const loading = workspaceLoading || !onboardingChecked || agentsQ.isPending || crewsQ.isPending
-  const realtimeMeta = (
-    <span
-      className={cn(
-        "hidden items-center gap-1.5 rounded-full border px-2 py-0.5 text-micro font-medium sm:inline-flex",
-        realtimeStatus === "connected"
-          ? "border-success/25 bg-success/10 text-success"
-          : realtimeStatus === "connecting"
-            ? "border-warn/25 bg-warn/10 text-warn"
-            : "border-destructive/25 bg-destructive/10 text-destructive",
-      )}
-    >
-      <Radio className="h-3 w-3" />
-      {realtimeStatus === "connected" ? "Live" : realtimeStatus === "connecting" ? "Connecting" : "Offline"}
-    </span>
-  )
-
-  if (loading) return <DashboardSkeleton crews={crews.length} agents={agents.length} />
+  if (loading) return <DashboardSkeleton crews={crews.length} window={reportWindow} onWindowChange={setReportWindow} />
 
   return (
     <div className="flex min-h-[calc(100dvh-var(--app-header-h)-var(--mobile-tab-bar-h))] flex-col bg-background">
-      <div className="sticky top-0 z-30 bg-card shadow-sm">
-      <SubBar
-        icon={LayoutDashboard}
-        title="Dashboard"
-        description={`${crews.length} crew${crews.length === 1 ? "" : "s"} · ${agents.length} agent${agents.length === 1 ? "" : "s"}`}
-        meta={realtimeMeta}
-        ariaLabel="Dashboard"
-        actions={
-          <>
-            <div className="hidden items-center rounded-md border border-border/60 bg-background/50 p-0.5 md:flex" role="group" aria-label="Dashboard time window">
-              {WINDOW_LABELS.map((item) => (
-                <Button
-                  key={item}
-                  type="button"
-                  variant="ghost"
-                  size="xs"
-                  aria-pressed={reportWindow === item}
-                  onClick={() => setReportWindow(item)}
-                  className={cn("h-6 min-w-10 px-2 font-mono", reportWindow === item && "bg-primary/15 text-primary-hover")}
-                >
-                  {item}
-                </Button>
-              ))}
-            </div>
-            <SubBarSecondary asChild icon={Plus}>
-              <Link href="/issues?create=1" aria-label="New issue"><span className="hidden sm:inline">New issue</span></Link>
-            </SubBarSecondary>
-            <SubBarPrimary asChild icon={MessageSquare}>
-              <Link href="/chat"><span className="hidden sm:inline">Chat with agent</span><span className="sm:hidden">Chat</span></Link>
-            </SubBarPrimary>
-          </>
-        }
-      />
-
-      <div className="flex items-center justify-between border-b border-border/60 px-3 py-1.5 md:hidden">
-        <span className="text-label font-medium text-muted-foreground">Reporting window</span>
-        <div className="flex items-center rounded-md border border-border/60 bg-background p-0.5" role="group" aria-label="Dashboard time window">
-          {WINDOW_LABELS.map((item) => (
-            <Button key={item} type="button" variant="ghost" size="xs" aria-pressed={reportWindow === item} onClick={() => setReportWindow(item)} className={cn("h-6 min-w-10 px-2 font-mono", reportWindow === item && "bg-primary/15 text-primary-hover")}>{item}</Button>
-          ))}
-        </div>
-      </div>
-      </div>
+      <DashboardPeriodBar value={reportWindow} onChange={setReportWindow} />
 
       <main className="mx-auto flex w-full max-w-[1800px] flex-1 flex-col gap-3 p-4 pb-10 md:p-5">
         <WelcomeChecklist firstAgentId={firstAgentId} />
         {crews.length === 0 && workspaceId && <RecipesEmptyState workspaceId={workspaceId} onInstalled={invalidateDashboard} />}
 
-        {/* No hero heading: the sub-bar already says Dashboard · N crews · M
-            agents, and the first thing on the page should be what needs a
-            person (docs/ux/README.md §1), not a sentence about the page. */}
+        {/* The first visible content is the work needing a person. */}
         <h1 className="sr-only">Your workspace at a glance</h1>
 
         <Appear order={0}><AttentionStrip items={attentionItems} inboxLoading={inbox.loading} inboxError={inbox.error} /></Appear>
@@ -343,21 +289,15 @@ export default function DashboardPage() {
           <Appear order={2} className="xl:col-span-2"><PagesStrip /></Appear>
         </div>
 
-        <details className="rounded-xl border border-border/60 bg-card" onToggle={(event) => setSystemDetailsOpen(event.currentTarget.open)}>
-          <summary className="cursor-pointer px-3 py-2.5 text-body font-medium text-muted-foreground transition-colors hover:text-foreground">System details <span className="ml-2 text-label font-normal">Server load and history</span></summary>
-          <div className="border-t border-border/60 p-4">
-            <HostResources data={hostResourcesQ.data ?? null} live={hostLatestQ.data?.latest ?? null} window={reportWindow} loading={hostResourcesQ.isPending || hostLatestQ.isPending} error={hostLatestQ.isError} historyError={hostResourcesQ.isError} />
-          </div>
-        </details>
       </main>
     </div>
   )
 }
 
-function DashboardSkeleton({ crews, agents }: { crews: number; agents: number }) {
+function DashboardSkeleton({ crews, window, onWindowChange }: { crews: number; window: DashboardWindow; onWindowChange: (value: DashboardWindow) => void }) {
   return (
     <div className="flex min-h-[calc(100dvh-var(--app-header-h)-var(--mobile-tab-bar-h))] flex-col">
-      <SubBar icon={LayoutDashboard} title="Dashboard" description={crews || agents ? `${crews} crews · ${agents} agents` : "Loading…"} ariaLabel="Dashboard" />
+      <DashboardPeriodBar value={window} onChange={onWindowChange} />
       {/* Same geometry as the loaded page (results beside the next agenda and
           crews, then the KPI strip), so
           nothing jumps when the data lands. */}

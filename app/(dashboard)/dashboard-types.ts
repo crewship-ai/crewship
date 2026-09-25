@@ -125,21 +125,6 @@ export interface RuntimeCapacityResponse {
   }
 }
 
-export interface HostResourceSample {
-    sampled_at: string
-    cpu_percent: number
-    memory_percent: number
-    memory_used_mb: number
-    memory_total_mb: number
-}
-
-export interface HostResourceResponse {
-  window: DashboardWindow
-  recording_since: string | null
-  latest: HostResourceSample | null
-  series: Array<{ ts: string; cpu_percent: number | null; memory_percent: number | null }>
-}
-
 export interface MemoryHealthResponse {
   workspace_id: string
   crew_id: string

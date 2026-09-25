@@ -10,16 +10,17 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/admission"
-	goapi "github.com/crewship-ai/crewship/internal/api"
 )
 
-const (
-	hostResourceInterval        = 15 * time.Second
-	hostResourcePersistInterval = time.Minute
-)
+const hostResourceInterval = 15 * time.Second
 
-// Fixed-width UTC fractions keep SQLite's TEXT range comparisons ordered.
-const hostResourceTimeFormat = "2006-01-02T15:04:05.000000000Z"
+type hostResourceSample struct {
+	SampledAt     time.Time
+	CPUPercent    float64
+	MemoryPercent float64
+	MemoryUsedMB  int64
+	MemoryTotalMB int64
+}
 
 type cpuCounters struct {
 	total uint64
@@ -101,14 +102,11 @@ func measureHostResources(ctx context.Context) (cpuPct, memoryPct float64, usedM
 	return cpuPct, memoryPct, usedMB, totalMB, nil
 }
 
-// runHostResourceSampler refreshes the in-memory reading every 15 seconds for
-// the dashboard and /metrics, but persists at most one sample per minute for
-// the bounded 30-day chart history. It runs even without dashboard viewers.
+// runHostResourceSampler refreshes in-memory host gauges for /metrics. Scrape
+// history belongs in Prometheus; this path performs no SQLite writes.
 func (s *Server) runHostResourceSampler(ctx context.Context) {
 	ticker := time.NewTicker(hostResourceInterval)
 	defer ticker.Stop()
-	var lastPrune time.Time
-	var lastPersist time.Time
 	collect := func() {
 		cpuPct, memoryPct, usedMB, totalMB, err := measureHostResources(ctx)
 		if err != nil {
@@ -117,28 +115,10 @@ func (s *Server) runHostResourceSampler(ctx context.Context) {
 			}
 			return
 		}
-		now := time.Now().UTC()
-		s.hostResourceLatest.Store(&goapi.HostResourceSample{
-			SampledAt: now.Format(hostResourceTimeFormat), CPUPercent: cpuPct,
+		s.hostResourceLatest.Store(&hostResourceSample{
+			SampledAt: time.Now().UTC(), CPUPercent: cpuPct,
 			MemoryPercent: memoryPct, MemoryUsedMB: usedMB, MemoryTotalMB: totalMB,
 		})
-		if now.Sub(lastPersist) < hostResourcePersistInterval {
-			return
-		}
-		if _, err := s.db.ExecContext(ctx,
-			`INSERT INTO host_resource_samples(ts, cpu_percent, memory_percent, memory_used_mb, memory_total_mb) VALUES(?, ?, ?, ?, ?)`,
-			now.Format(hostResourceTimeFormat), cpuPct, memoryPct, usedMB, totalMB); err != nil {
-			s.logger.Warn("host resource sample write failed", "error", err)
-			return
-		}
-		lastPersist = now
-		if now.Sub(lastPrune) >= 24*time.Hour {
-			if _, err := s.db.ExecContext(ctx, `DELETE FROM host_resource_samples WHERE ts < ?`, now.Add(-30*24*time.Hour).Format(hostResourceTimeFormat)); err != nil {
-				s.logger.Warn("host resource sample pruning failed", "error", err)
-			} else {
-				lastPrune = now
-			}
-		}
 	}
 	collect()
 	for {

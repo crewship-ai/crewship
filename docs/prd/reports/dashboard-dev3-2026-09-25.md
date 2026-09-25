@@ -17,25 +17,20 @@ The HTML wireframe is in `docs/prd/wireframes/dashboard-live-work-2026-09-25.htm
 - The four agent run summary cards share one height and text layout. The lone
   run-volume sparkline was removed because the other metrics have no comparable
   time series; the actual run-volume chart remains below.
-- System details is collapsed by default and now contains only server load;
-  the redundant Workspace status panel was removed.
-- The dashboard subbar and its 24h/7d/30d controls stay visible while the
-  content scrolls. On phones, the selector has its own compact row in that
-  sticky bar.
-- Server load shows measured host CPU and RAM gauges and a history chart using
-  the same reporting window. The sampler refreshes the in-memory reading every
-  15 seconds for the open dashboard panel and Prometheus `/metrics`, while
-  writing at most one history sample per minute to SQLite and keeping 30 days.
-  The live dashboard query does not scan chart history; chart data refreshes
-  once per minute and is not requested while System details is closed. This is
-  host load, including processes outside Crewship; it is not per-crew usage.
-  Earlier history cannot be recovered. Missing periods stay empty.
+- The sticky dashboard bar contains only the 24h/7d/30d selector. The visible
+  Dashboard title, crew/agent counts, Live badge, New issue and Chat with agent
+  actions, and the entire System details panel were removed after review.
+- `/metrics` still exposes whole-host CPU and RAM gauges, sampled in memory
+  about every 15 seconds. Prometheus owns the history. The dashboard no longer
+  requests host data, and the sampler no longer writes to SQLite. The already
+  applied `host_resource_samples` migration remains for deployed databases.
 
 The public dev3 service is `crewship-ws@3` at
 `https://crewship-dev3.unifylab.cz/`. It runs the prebuilt
 `/srv/crewship/dev3-pages-release/crewship.unsigned` binary, not the current
 `crewship_3` checkout. Its source is local deploy branch
-`deploy/dev3-dashboard-20260925`, commit `506a0c5af`: the dev3
+`deploy/dev3-dashboard-20260925`, currently at commit `506a0c5af` before the
+final simplified-header deploy: the dev3
 unsigned-webhook profile based on main, plus the dashboard code. The earlier
 `264571fb1` was the initial dashboard slice. This deploy branch is an artifact
 and is not the PR branch.
@@ -52,11 +47,10 @@ the server was built with its installed sidecar hash.
 ## Monitoring direction
 
 - Keep `/metrics` as Crewship's Prometheus scrape surface for process,
-  orchestration, queue, run and cost metrics. The new host gauges share the
-  dashboard sampler and carry a last-sample timestamp for stale-data alerts.
-- Use Prometheus for high-frequency history and Grafana for operational
-  dashboards. Keep the bounded SQLite minute history only for the built-in
-  dashboard when no external monitoring stack is installed.
+  orchestration, queue, run and cost metrics. Host gauges carry a last-sample
+  timestamp for stale-data alerts.
+- Use Prometheus for historical host data and Grafana for operational
+  dashboards. The previous SQLite minute sampler has stopped.
 - Use a host exporter for machine and disk metrics and a container exporter for
   Docker-level CPU, memory, network and filesystem metrics. Crewship should
   report application semantics and sidecar outcomes through its own `/metrics`

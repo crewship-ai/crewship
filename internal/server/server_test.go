@@ -14,7 +14,6 @@ import (
 
 	"golang.org/x/net/websocket"
 
-	goapi "github.com/crewship-ai/crewship/internal/api"
 	"github.com/crewship-ai/crewship/internal/config"
 	"github.com/crewship-ai/crewship/internal/logging"
 	"github.com/crewship-ai/crewship/internal/testutil"
@@ -242,8 +241,8 @@ func TestMetrics(t *testing.T) {
 
 func TestMetricsExposesRecentHostReading(t *testing.T) {
 	s := newTestServer()
-	s.hostResourceLatest.Store(&goapi.HostResourceSample{
-		SampledAt:  time.Unix(1000, 0).UTC().Format(time.RFC3339Nano),
+	s.hostResourceLatest.Store(&hostResourceSample{
+		SampledAt:  time.Unix(1000, 0).UTC(),
 		CPUPercent: 25, MemoryPercent: 50, MemoryUsedMB: 512, MemoryTotalMB: 1024,
 	})
 	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)

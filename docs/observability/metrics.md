@@ -52,8 +52,8 @@ scrape_configs:
 
 Every series carries a `hostname` label.
 The host series appear after the first successful reading and refresh about
-every 15 seconds. They do not create additional SQLite writes; dashboard
-history persists at most one reading per minute.
+every 15 seconds. Their history belongs in Prometheus; the sampler does not
+write to SQLite.
 
 ## Domain metrics
 

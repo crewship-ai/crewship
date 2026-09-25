@@ -222,10 +222,8 @@ func (s *Server) Start(ctx context.Context) error {
 	if s.statsCollector != nil {
 		go s.statsCollector.Run(ctx)
 	}
-	if s.db != nil {
-		s.bgWg.Add(1)
-		go func() { defer s.bgWg.Done(); s.runHostResourceSampler(ctx) }()
-	}
+	s.bgWg.Add(1)
+	go func() { defer s.bgWg.Done(); s.runHostResourceSampler(ctx) }()
 
 	if s.tokenSyncer != nil {
 		go s.tokenSyncer.Run(ctx)

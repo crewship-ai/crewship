@@ -92,7 +92,7 @@ type Server struct {
 	// domainMetrics caches the DB-derived block of /metrics (W10) for
 	// domainMetricsTTL so scrape frequency never multiplies query load.
 	domainMetrics      domainMetricsCache
-	hostResourceLatest atomic.Pointer[goapi.HostResourceSample]
+	hostResourceLatest atomic.Pointer[hostResourceSample]
 
 	// bgCtx / bgCancel scope the lifetime of goroutines launched by New()
 	// itself (rather than Start()) — currently the devcontainer catalog
@@ -977,7 +977,6 @@ func (s *Server) mountAPIRouter(
 	if deps.Admission != nil {
 		opts = append(opts, goapi.WithAdmissionController(deps.Admission))
 	}
-	opts = append(opts, goapi.WithHostResourceLatest(s.hostResourceLatest.Load))
 
 	rateLimitStore := ratelimitcfg.New(deps.DB)
 	if err := rateLimitStore.Load(context.Background()); err != nil {

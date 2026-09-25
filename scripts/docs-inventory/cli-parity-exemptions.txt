@@ -13,8 +13,6 @@
 /api/v1/auth/forgot                                password-reset e-mail flow, driven from the login page
 /api/v1/oauth/callback                             provider redirect target; the browser lands here, `crewship oauth` only names it
 /api/v1/pages/runtime/bootstrap                    serves the page-runtime iframe HTML (#2472)
-/api/v1/system/resources                            chart data for the dashboard, including empty time buckets; no independent CLI workflow
-/api/v1/system/resources/latest                     lightweight live reading for the dashboard; Prometheus exposes the same metrics for operators
 /api/v1/public/pages/{token}                       anonymous share-link viewer, authenticated by the URL token
 /api/v1/public/pages/{token}/unlock                anonymous share-link viewer, password step
 /api/v1/waitpoint-tokens/{token}                   one-click approve/reject link sent by notifications; `crewship routine waitpoints` covers the authenticated path

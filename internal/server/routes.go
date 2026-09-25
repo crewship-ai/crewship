@@ -232,12 +232,10 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 			{"crewshipd_host_memory_used_bytes", "Host memory in use, excluding reclaimable memory", float64(sample.MemoryUsedMB) * 1024 * 1024},
 			{"crewshipd_host_memory_total_bytes", "Total host memory", float64(sample.MemoryTotalMB) * 1024 * 1024},
 		}
-		if sampledAt, err := time.Parse(time.RFC3339Nano, sample.SampledAt); err == nil {
-			hostMetrics = append(hostMetrics, struct {
-				name, help string
-				value      float64
-			}{"crewshipd_host_sample_timestamp_seconds", "Unix time of the most recent host resource reading", float64(sampledAt.Unix())})
-		}
+		hostMetrics = append(hostMetrics, struct {
+			name, help string
+			value      float64
+		}{"crewshipd_host_sample_timestamp_seconds", "Unix time of the most recent host resource reading", float64(sample.SampledAt.Unix())})
 		for _, metric := range hostMetrics {
 			fmt.Fprintf(w, "# HELP %s %s\n# TYPE %s gauge\n%s{hostname=%q} %g\n", metric.name, metric.help, metric.name, metric.name, hostname, metric.value)
 		}

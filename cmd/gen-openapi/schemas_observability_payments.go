@@ -33,22 +33,6 @@ func observabilityPaymentsSchemaCatalog() map[string]DomainSchema {
 	journalList := object(map[string]any{
 		"entries": array(journalEntry), "next_cursor": str(), "count": integer(),
 	})
-	hostSample := object(map[string]any{
-		"sampled_at": dateTime(), "cpu_percent": number(), "memory_percent": number(),
-		"memory_used_mb": integer(), "memory_total_mb": integer(),
-	})
-	hostSample["nullable"] = true
-	hostSample["required"] = []string{"sampled_at", "cpu_percent", "memory_percent", "memory_used_mb", "memory_total_mb"}
-	hostBucket := object(map[string]any{
-		"ts": dateTime(), "cpu_percent": map[string]any{"type": "number", "nullable": true},
-		"memory_percent": map[string]any{"type": "number", "nullable": true},
-	})
-	hostBucket["required"] = []string{"ts", "cpu_percent", "memory_percent"}
-	hostResources := object(map[string]any{
-		"window": str(), "recording_since": map[string]any{"type": "string", "format": "date-time", "nullable": true},
-		"latest": hostSample, "series": array(hostBucket),
-	})
-	hostResources["required"] = []string{"window", "recording_since", "latest", "series"}
 	spendAgent := object(map[string]any{"date": str(), "crew_id": str(), "agent_id": str(), "cost_usd": number(), "call_count": integer()})
 	spendRoutine := object(map[string]any{"date": str(), "pipeline_id": str(), "pipeline_slug": str(), "cost_usd": number(), "run_count": integer()})
 	topJournalSpender := object(map[string]any{"kind": str(), "id": str(), "label": str(), "cost_usd": number()})
@@ -216,8 +200,6 @@ func observabilityPaymentsSchemaCatalog() map[string]DomainSchema {
 		"PUT /api/v1/feature-flags/{key}/override":           {Request: json(map[string]any{"enabled": boolean()}), Response: object(map[string]any{"key": str(), "enabled": boolean()})},
 		"GET /api/v1/presence/roster":                        {Response: object(map[string]any{"rows": array(rosterRow), "count": integer()})},
 		"GET /api/v1/system/runtime":                         {Response: runtime},
-		"GET /api/v1/system/resources":                       {Response: hostResources},
-		"GET /api/v1/system/resources/latest":                {Response: map[string]any{"type": "object", "properties": map[string]any{"latest": hostSample}, "required": []string{"latest"}}},
 		"GET /api/v1/runtime/capacity":                       {Response: capacity},
 		"GET /api/v1/notification-channels":                  {Response: object(map[string]any{"channels": array(channel)})},
 		"POST /api/v1/notification-channels":                 {Request: json(map[string]any{"type": str(), "url": str(), "to": str(), "secret": str(), "events": array(str()), "provider": str(), "fields": stringMap(), "shoutrrr_url": str(), "personal": boolean(), "categories": array(str()), "min_priority": str()}), Response: object(map[string]any{"id": str(), "workspace_id": str(), "type": str(), "url": str(), "to": str(), "events": array(str()), "enabled": boolean(), "created_by": str(), "created_at": dateTime(), "provider": str(), "scope": str(), "owner_user_id": str(), "categories": array(str()), "min_priority": str(), "secret": str()})},
