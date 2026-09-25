@@ -144,7 +144,7 @@ function ScopedChatSidebar({ props, rows, query, setQuery, stateKey }: SidebarPr
       </div>
       {!picking && <SidebarFilterPopover label="Filter chats" activeCount={filterCount} onClear={() => { setUnread(false); setLive(false); setAgentFilter(null); setSectionFilter("all") }}>
         <SidebarFacet label="Show" resetLabel="All conversations" resetActive={sectionFilter === "all" && !unread && !live && !agentFilter} onReset={() => { setSectionFilter("all"); setUnread(false); setLive(false); setAgentFilter(null) }} first>
-          <SidebarFacetOption active={sectionFilter === "agents"} onToggle={() => setSectionFilter((value) => value === "agents" ? "all" : "agents")}>Agent sessions</SidebarFacetOption>
+          <SidebarFacetOption active={sectionFilter === "agents"} onToggle={() => { if (sectionFilter === "agents") { setSectionFilter("all"); setUnread(false); setLive(false); setAgentFilter(null) } else setSectionFilter("agents") }}>Agent sessions</SidebarFacetOption>
           <SidebarFacetOption active={sectionFilter === "people"} onToggle={() => { setUnread(false); setLive(false); setAgentFilter(null); setSectionFilter((value) => value === "people" ? "all" : "people") }}>People</SidebarFacetOption>
           <SidebarFacetOption active={sectionFilter === "rooms"} onToggle={() => { setUnread(false); setLive(false); setAgentFilter(null); setSectionFilter((value) => value === "rooms" ? "all" : "rooms") }}>Team spaces</SidebarFacetOption>
         </SidebarFacet>
