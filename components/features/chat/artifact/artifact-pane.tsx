@@ -3,12 +3,14 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import dynamic from "next/dynamic"
 import { motion } from "motion/react"
-import { Eye, FileCode2, Pause, Play, X } from "lucide-react"
+import { Download, Eye, FileCode2, FileSpreadsheet, FileText, Pause, Play, X } from "lucide-react"
+import { marked } from "marked"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { cn } from "@/lib/utils"
+import { isManagerTier } from "@/lib/permissions/tiers"
 import { useArtifactStore } from "@/stores/artifact-store"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { getEditorLanguage } from "../chat-tree-row"
@@ -22,7 +24,7 @@ const FileEditor = dynamic(
 
 const BINARY = /\.(pdf|png|jpe?g|webp)$/i
 const WORKBOOK = /\.xlsx?$/i
-const PREVIEW = /\.(html?|csv|tsv)$/i
+const PREVIEW = /\.(html?|csv|tsv|md)$/i
 const INTERVAL = 5000
 
 function sameBytes(a: Uint8Array, b: Uint8Array): boolean {
@@ -64,7 +66,13 @@ function ArtifactPreview({ path, snapshot, url, revision, onClose }: { path: str
   const text = useMemo(() => new TextDecoder().decode(snapshot.bytes), [snapshot])
   if (BINARY.test(path)) {
     // Existing viewer validates signatures and renders PDFs with pdfjs.
-    return <FilePreview key={revision} url={`${url}&revision=${revision}`} name={path.split("/").pop() ?? path} onClose={onClose} />
+    return <FilePreview key={revision} url={`${url}&revision=${revision}`} name={path.split("/").pop() ?? path} onClose={onClose} showHeader={false} />
+  }
+  if (/\.md$/i.test(path)) {
+    // The opaque, script-free frame keeps agent-authored markup out of the app DOM.
+    const csp = '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; img-src data:; style-src \'unsafe-inline\'; font-src data:; form-action \'none\'; base-uri \'none\'">'
+    const style = '<style>body{box-sizing:border-box;max-width:800px;min-height:100%;margin:0 auto;padding:40px 48px;background:#fff;color:#242932;font:15px/1.6 system-ui,sans-serif}h1,h2,h3{line-height:1.25}h1{font-size:28px}h2{font-size:20px;margin-top:30px}table{border-collapse:collapse;width:100%}th,td{border:1px solid #d9dfe6;padding:7px;text-align:left}blockquote{border-left:3px solid #4c9aff;padding-left:12px;color:#526070}code{background:#f1f3f6;padding:2px 4px}a{color:#276ac2}</style>'
+    return <iframe title={`Preview ${path}`} sandbox="" referrerPolicy="no-referrer" className="h-full w-full bg-[#242629]" srcDoc={csp + style + marked.parse(text, { async: false })} />
   }
   if (/\.html?$/i.test(path)) {
     // Agent HTML has an opaque origin, no scripts and no network access.
@@ -77,7 +85,8 @@ function ArtifactPreview({ path, snapshot, url, revision, onClose }: { path: str
 
 /** Inline workspace: its parent places this beside the transcript. */
 export function ArtifactPane({ agentId, width = 540 }: { agentId: string; width?: number }) {
-  const { workspaceId } = useWorkspace()
+  const { workspaceId, role } = useWorkspace()
+  const canEdit = isManagerTier(role)
   const open = useArtifactStore((s) => s.open)
   const tabs = useArtifactStore((s) => s.tabs)
   const activeId = useArtifactStore((s) => s.activeId)
@@ -143,9 +152,10 @@ export function ArtifactPane({ agentId, width = 540 }: { agentId: string; width?
   const loaded = snapshot?.path === path ? snapshot : null
   const text = loaded && !binary ? new TextDecoder().decode(loaded.bytes) : null
   const url = active && workspaceId ? artifactDownloadUrl(agentId, workspaceId, path) : ""
+  const ArtifactIcon = /\.(csv|tsv|xlsx?)$/i.test(path) ? FileSpreadsheet : /\.html?$/i.test(path) ? FileCode2 : FileText
   const handleSave = async (next: string) => {
-    if (!active || !workspaceId || !loaded || loaded.path !== active.path) {
-      toast.error("Refused to save: this artifact was never loaded"); return
+    if (!canEdit || !active || !workspaceId || !loaded || loaded.path !== active.path) {
+      toast.error("Refused to save: no editable artifact is loaded"); return
     }
     try {
       await saveArtifactFile({ agentId, workspaceId, path: loaded.path, text: next })
@@ -160,11 +170,13 @@ export function ArtifactPane({ agentId, width = 540 }: { agentId: string; width?
   return <motion.aside
     initial={{ x: 32, opacity: 0 }} animate={{ x: 0, opacity: 1 }} transition={{ duration: 0.2 }}
     aria-label="Live artifact"
-    className="flex h-full min-h-0 min-w-0 shrink-0 flex-col border-l bg-background max-md:absolute max-md:inset-0 max-md:z-30 max-md:!w-full"
+    className="flex h-full min-h-0 min-w-0 shrink-0 flex-col border-l border-border bg-background max-md:absolute max-md:inset-0 max-md:z-30 max-md:!w-full"
     style={{ width: `min(${width}px, 42vw)` }}
   >
-    <header className="flex shrink-0 items-center gap-2 border-b px-3 py-2">
-      <div className="min-w-0 flex-1"><p className="truncate text-sm font-medium">{active?.title ?? "Artifact"}</p><p className="truncate text-xs text-muted-foreground" title={path}>{path}</p></div>
+    <header className="flex min-h-14 shrink-0 items-center gap-2 border-b border-border bg-card px-3 py-2">
+      <span className="flex size-8 shrink-0 items-center justify-center rounded-md border border-border bg-muted/40"><ArtifactIcon className="size-4 text-primary" /></span>
+      <div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold" title={active?.title}>{active?.title ?? "Artifact"}</p><p className="truncate text-[11px] text-muted-foreground" title={path}>{path}</p></div>
+      {loaded && <Button variant="outline" size="sm" asChild><a href={url} download={active?.title} aria-label="Download artifact"><Download className="size-3.5" /> Download</a></Button>}
       <Button variant="ghost" size="icon-sm" aria-label="Close artifact" onClick={() => setOpen(false)}><X className="size-4" /></Button>
     </header>
     {tabs.length > 1 && <div className="flex shrink-0 gap-1 overflow-x-auto border-b px-2 py-1">
@@ -173,14 +185,17 @@ export function ArtifactPane({ agentId, width = 540 }: { agentId: string; width?
         <button type="button" className="px-1" aria-label={`Close ${tab.title}`} onClick={() => closeTab(tab.id)}><X className="size-3" /></button>
       </div>)}
     </div>}
-    <div className="flex shrink-0 items-center gap-2 border-b px-3 py-1.5 text-xs">
+    <div className="flex shrink-0 items-center gap-2 border-b border-border bg-card/70 px-3 py-1.5 text-xs">
       <span className={cn("size-1.5 rounded-full", following ? "bg-success" : "bg-warn")} aria-hidden="true" />
       <span role="status" className="min-w-0 flex-1 truncate text-muted-foreground">{dirty ? "Editing · live updates paused" : following ? `Live · revision ${revision || "…"}` : `Paused · revision ${revision || "…"}`}{updatedAt && ` · updated ${updatedAt.toLocaleTimeString()}`}</span>
       <Button variant="ghost" size="sm" className="h-7 gap-1" onClick={() => setFollowing((v) => !v)} disabled={dirty} aria-label={following ? "Pause live updates" : "Follow live updates"}>{following ? <Pause className="size-3" /> : <Play className="size-3" />}{following ? "Pause" : "Follow"}</Button>
     </div>
-    {text !== null && <div className="flex shrink-0 gap-1 border-b px-3 py-1">
-      <Button variant={view === "preview" ? "secondary" : "ghost"} size="sm" className="h-7 gap-1" onClick={() => setView("preview")}><Eye className="size-3" />Preview</Button>
-      <Button variant={view === "editor" ? "secondary" : "ghost"} size="sm" className="h-7 gap-1" onClick={() => { setView("editor"); setFollowing(false) }}><FileCode2 className="size-3" />Editor</Button>
+    {text !== null && <div className="flex shrink-0 gap-1 border-b border-border bg-card/70 px-3 py-1">
+      <Button variant={view === "preview" ? "secondary" : "ghost"} size="sm" className="h-7 gap-1" onClick={() => {
+        if (dirty && !window.confirm("Discard unsaved artifact changes?")) return
+        setDirty(false); setView("preview")
+      }}><Eye className="size-3" />Preview</Button>
+      {canEdit && <Button variant={view === "editor" ? "secondary" : "ghost"} size="sm" className="h-7 gap-1" onClick={() => { setView("editor"); setFollowing(false) }}><FileCode2 className="size-3" />Editor</Button>}
     </div>}
     {error && <div role="alert" className="border-b px-3 py-2 text-xs text-destructive">{error}</div>}
     <div className="relative min-h-0 flex-1 overflow-hidden">

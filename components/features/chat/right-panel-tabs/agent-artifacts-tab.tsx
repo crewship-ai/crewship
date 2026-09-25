@@ -7,7 +7,7 @@ import { useArtifactStore } from "@/stores/artifact-store"
 import { classifyAgentFile, relativeToAgent } from "../files/file-scope"
 import type { FileEntry } from "../chat-tree-row"
 
-const artifactExtensions = new Set(["pdf", "html", "htm", "csv", "tsv", "xlsx", "xls"])
+const artifactExtensions = new Set(["pdf", "html", "htm", "csv", "tsv", "xlsx", "xls", "md"])
 
 function extension(name: string) {
   return name.split(".").pop()?.toLowerCase() ?? ""

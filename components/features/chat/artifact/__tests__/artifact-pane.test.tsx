@@ -17,8 +17,9 @@ import { render, screen, cleanup, fireEvent, waitFor, act } from "@testing-libra
 // =============================================================================
 
 let workspaceId: string | null = "ws-1"
+let workspaceRole = "OWNER"
 vi.mock("@/hooks/use-workspace", () => ({
-  useWorkspace: () => ({ workspaceId, loading: false }),
+  useWorkspace: () => ({ workspaceId, role: workspaceRole, loading: false }),
 }))
 
 const toastError = vi.fn()
@@ -102,6 +103,7 @@ function openTab(id: string, path: string) {
 
 beforeEach(() => {
   workspaceId = "ws-1"
+  workspaceRole = "OWNER"
   apiFetch.mockReset()
   toastError.mockReset()
   toastSuccess.mockReset()
@@ -119,6 +121,7 @@ describe("ArtifactPane — reading a file", () => {
     render(<ArtifactPane agentId="agent-1" />)
     openTab("t1", "workspace/notes.md")
 
+    fireEvent.click(await screen.findByRole("button", { name: "Editor" }))
     expect(await screen.findByTestId("editor-code")).toHaveTextContent("second line")
     expect(screen.getByTestId("editor-code").textContent).toBe("# notes\nsecond line\n")
 
@@ -177,6 +180,7 @@ describe("ArtifactPane — saving", () => {
     render(<ArtifactPane agentId="agent-1" />)
     openTab("t1", "workspace/notes.md")
 
+    fireEvent.click(await screen.findByRole("button", { name: "Editor" }))
     await screen.findByTestId("editor-code")
     fireEvent.click(screen.getByRole("button", { name: "stub-save" }))
 
@@ -199,6 +203,7 @@ describe("ArtifactPane — saving", () => {
 
     render(<ArtifactPane agentId="agent-1" />)
     openTab("t1", "workspace/one.md")
+    fireEvent.click(await screen.findByRole("button", { name: "Editor" }))
     await screen.findByTestId("editor-code")
 
     openTab("t2", "workspace/two.md")
@@ -236,5 +241,40 @@ describe("ArtifactPane — live revisions", () => {
     fireEvent.click(screen.getByRole("button", { name: "Follow live updates" }))
     await waitFor(() => expect(apiFetch.mock.calls.length).toBeGreaterThan(callsAtPause + 1))
     expect(screen.getByRole("status")).toHaveTextContent("revision 2")
+  })
+})
+
+describe("ArtifactPane — document and table editing", () => {
+  it("previews a Markdown document as a page and opens its source for editing", async () => {
+    apiFetch.mockReturnValue(response({ body: "# Copy site\n\nA draft.\n", contentType: "application/octet-stream" }))
+    render(<ArtifactPane agentId="agent-1" />)
+    openTab("doc", "reports/brief.md")
+
+    const page = await screen.findByTitle("Preview reports/brief.md") as HTMLIFrameElement
+    expect(page.srcdoc).toContain("Copy site")
+    expect(page.srcdoc).toContain("default-src 'none'")
+    expect(screen.getByRole("link", { name: "Download artifact" })).toHaveAttribute("download", "brief.md")
+    fireEvent.click(screen.getByRole("button", { name: "Editor" }))
+    expect(await screen.findByTestId("editor-code")).toHaveTextContent("A draft.")
+  })
+
+  it("lets managers edit CSV source while readers only see the table", async () => {
+    apiFetch.mockImplementation((url: string) => String(url).includes("/files/download")
+      ? response({ body: "Area,Status\nNavigation,Todo\n", contentType: "application/octet-stream" })
+      : response({ body: "{}", contentType: "application/json" }))
+    render(<ArtifactPane agentId="agent-1" />)
+    openTab("table", "reports/plan.csv")
+    expect(await screen.findByLabelText("Spreadsheet preview")).toHaveTextContent("Navigation")
+    fireEvent.click(screen.getByRole("button", { name: "Editor" }))
+    fireEvent.click(await screen.findByRole("button", { name: "stub-save" }))
+    await waitFor(() => expect(apiFetch.mock.calls.some(([url]) => String(url).includes("/files/save"))).toBe(true))
+
+    cleanup()
+    workspaceRole = "VIEWER"
+    useArtifactStore.setState({ open: false, tabs: [], activeId: null })
+    render(<ArtifactPane agentId="agent-1" />)
+    openTab("table", "reports/plan.csv")
+    expect(await screen.findByLabelText("Spreadsheet preview")).toHaveTextContent("Navigation")
+    expect(screen.queryByRole("button", { name: "Editor" })).toBeNull()
   })
 })
