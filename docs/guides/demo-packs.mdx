@@ -1,6 +1,6 @@
 ---
 title: "Demo packs"
-description: "The three real, repeatable use cases a fresh workspace ships with — what each one watches, what it costs, and how to prove it is right."
+description: "The two optional GitHub use cases a fresh workspace ships with — what each one watches, what it costs, and how to prove it is right."
 icon: "package"
 stability: experimental
 tag: Experimental
@@ -8,7 +8,7 @@ tag: Experimental
 
 # Demo packs
 
-`crewship seed` populates a fresh workspace with three **packs**. A pack is
+`crewship seed` populates a fresh workspace with two **packs**. A pack is
 one real use case, run by one crew, that reads a real public source and can
 be run again tomorrow — and checked. Each follows the same shape, which is
 the shape most repeated work has once you look at it: **a cheap probe that
@@ -17,9 +17,8 @@ a human decision before anything irreversible.**
 
 | Pack | Crew | Reads | Probe (tokens) | Report (agent) |
 | --- | --- | --- | --- | --- |
-| **Nightly CI watch** `ci-watch` | ops | the scheduled GitHub Actions workflows of `crewship-ai/crewship` | `ci-probe` — none | `ci-nightly-triage` — Morgan on `claude-sonnet-5` |
-| **Docs drift** `docs-drift` | quality | the repository's documentation and code, at `main` | — (the scan is the first step of the report) | `docs-drift-audit` — Jordan on `claude-sonnet-5` |
-| **Site replica** `site-replica` | engineering | the home page of `www.seznam.cz` | — | `site-replica-audit` — none; the build is issue-driven |
+| **Nightly CI watch** `ci-watch` | ops | the scheduled GitHub Actions workflows of `crewship-ai/crewship` | `ci-probe` — none | `ci-nightly-triage` — Morgan on `codex:gpt-5.5` |
+| **Docs drift** `docs-drift` | quality | the repository's documentation and code, at `main` | — (the scan is the first step of the report) | `docs-drift-audit` — Jordan on `codex:gpt-5.5` |
 
 Every pack ships four things to its crew: the **scripts** (under
 `/crew/shared/scripts`, with their own unit tests that `go test` runs), the
@@ -83,23 +82,6 @@ says `<repo> @ not checked out` rather than inventing a commit.
 Casey's issue carries the human boundary: a confirmed finding that is a
 **security claim** — an allowlist or validation the docs promise and the
 code does not enforce — is escalated as a DECISION, not worded alone.
-
-## Site replica
-
-Say "copy seznam.cz" to Alex, or start the lead issue. Alex delegates inside
-the crew, one hand-off at a time: Taylor inventories the live page into
-`content-map.json` (its `sections` array is the contract), Sam extracts the
-structured `data.json` with a small tested script, Robin builds a
-self-contained `index.html` — no scripts, no external assets, one `h1`, a
-viewport tag — and Jamie runs the acceptance check and reports PASS, FAIL or
-NOT BUILT. Alex writes GO or NO-GO.
-
-`replica_check.py` is the mechanical bar: it exists, it is a document, it is
-self-contained, it covers at least 70 % of the inventoried sections. Whether
-it *looks* right stays with the person who opens the file from the crew's
-files. `site-replica-audit` publishes the verdict to the Page and the inbox;
-until somebody builds the replica it reports NOT BUILT, and `verify` counts
-that as skipped rather than green.
 
 ## Credentials
 

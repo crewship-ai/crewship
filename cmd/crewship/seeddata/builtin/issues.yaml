@@ -2,13 +2,9 @@
 # Quick Start issues are short, independently runnable paths through a saved
 # routine. The larger packs below remain available for deeper demos.
 #
-# Three demo packs (seeddata/packs.go), one crew each. Every issue reads a real
-# public source, names its evidence and its output path, and stays inside its
-# crew — /crew/shared is a per-crew volume, so a hand-off through files only
-# works between agents of the same crew. Each pack exercises one thing the
-# product is for: the CI watch a silent failure, the docs audit a judgement
-# over deterministic candidates with a human decision at the boundary, the
-# site replica a lead delegating across four specialists.
+# Two optional GitHub packs remain for deeper integration demos. The local
+# extraction issue is the default delegation example: it uses only the note
+# embedded in the issue and cannot load a third-party site.
 issues:
   # ── quick start ────────────────────────────────────────────────────────
   - crew_slug: ops
@@ -49,20 +45,6 @@ issues:
     priority: medium
     project: Quick Start
     routine_slug: classify-ticket
-    labels: [Quick Start]
-    target_state: TODO
-
-  - crew_slug: engineering
-    assignee: sam
-    title: Audit our public home page
-    description: |-
-      Click Run and review the prefilled URL. The routine fetches the public
-      page and reports its title, headings, navigation, and calls to action.
-      Inspect the fetch and extraction steps in the run history. A configured
-      model login and access to crewship.ai are required.
-    priority: medium
-    project: Quick Start
-    routine_slug: website-content-audit
     labels: [Quick Start]
     target_state: TODO
 
@@ -258,117 +240,27 @@ issues:
     project: Docs Drift
     labels: [Acceptance]
 
-  # ── site-replica (engineering) ─────────────────────────────────────────
+  # ── local extraction (engineering) ───────────────────────────────────────
   - crew_slug: engineering
     assignee: alex
-    title: Replicate https://www.seznam.cz as a self-contained static page — delegate analysis, data, build and test
+    title: Extract and check action items from a sample incident note
     description: |-
-      Produce a self-contained, accessible static replica of the
-      https://www.seznam.cz home page under /crew/shared/site-replica/. This
-      is a training replica for the team, not a deployment and not a
-      pixel-perfect copy.
+      Work only with the note below. Do not browse or call an external site.
+      Delegate to Sam: write /crew/shared/demo/incident-actions.md with a
+      three-line factual summary, every explicit action item with an owner
+      and deadline, and one question for missing information. Delegate to
+      Jamie: check each extracted claim against the note and comment on this
+      issue with the verdict and file path. Then post a short final comment.
+      Never invent an owner or deadline; write "not specified" if omitted.
 
-      Coordinate the crew, one hand-off at a time:
-      1. Delegate to Taylor: fetch the live page and write
-         /crew/shared/site-replica/content-map.json (with a top-level
-         "sections" array of the visible section names, plus navigation and
-         metadata) and content-map.md.
-      2. Delegate to Sam: from the saved source, build
-         /crew/shared/site-replica/data.json — the structured model of
-         sections, headings, link counts and images — with a small
-         deterministic extraction script and its tests.
-      3. Delegate to Robin: build /crew/shared/site-replica/index.html from
-         the content map and data.json — semantic HTML, local CSS only, no
-         scripts, no external assets, one h1, a viewport meta tag.
-      4. Delegate to Jamie: run
-         `python3 /crew/shared/scripts/replica_check.py --dir /crew/shared/site-replica`
-         and write the acceptance report.
-
-      When all four return, read Jamie's report, write
-      /crew/shared/site-replica/acceptance.md with GO or NO-GO and the open
-      items with an owner each. Do not mark GO while any check fails.
-    priority: high
-    project: Site Replica
-    labels: [Delegation, Real source, Acceptance]
-    target_state: TODO
-    comment: >-
-      Demo path: say "copy seznam.cz" to Alex, or start this issue, and watch
-      one crew hand work across four specialists through its shared volume.
-
-  - crew_slug: engineering
-    assignee: taylor
-    title: Map the seznam.cz home page — sections, navigation and metadata
-    description: |-
-      Fetch https://www.seznam.cz with curl (follow redirects, 20-second
-      timeout, a plain User-Agent) and save the raw response to
-      /crew/shared/site-replica/source.html together with the final URL and
-      HTTP status.
-
-      Write /crew/shared/site-replica/content-map.json with: url, fetched_at,
-      title, meta description, a "sections" array of the visible section
-      names in document order, and a "navigation" array of {label, href}.
-      Write the same as prose in content-map.md. Report blocked or redirected
-      URLs instead of inventing content, and make no request outside
-      www.seznam.cz.
-    priority: high
-    project: Site Replica
-    labels: [Real source]
-    target_state: TODO
-
-  - crew_slug: engineering
-    assignee: sam
-    title: Extract the seznam.cz home page into a structured data model
-    description: |-
-      Read /crew/shared/site-replica/source.html (ask Taylor's issue to run
-      first if it is missing) and write
-      /crew/shared/site-replica/extract.py using only the Python standard
-      library. It must produce data.json: sections with their headings, the
-      number of links and images per section, and the navigation entries.
-
-      Run it twice and prove both outputs are byte-identical. Handle a missing
-      or malformed file with a non-zero exit and a useful stderr message. Add
-      unittest coverage that runs without network access and a short README
-      with the exact commands.
+      Sample note: "At 09:15 UTC the Ops dashboard stopped updating after a
+      routine deploy. Riley restarted the collector at 09:27 UTC. The next
+      snapshot was healthy at 09:29 UTC. Morgan will check the scheduler by
+      Friday. The team still needs to decide who owns the alert threshold."
     priority: medium
-    project: Site Replica
-    labels: [Acceptance]
-
-  - crew_slug: engineering
-    assignee: robin
-    title: Build the static replica from the content map
-    description: |-
-      Build /crew/shared/site-replica/index.html from content-map.json and
-      data.json as one self-contained file: semantic HTML, local CSS in a
-      <style> element, no <script>, no external fonts, images or trackers,
-      exactly one h1, a <meta name="viewport"> tag, a visible note that this
-      is a training replica, and every section from the content map present
-      by name. Do not copy logos or illustrations; use accessible text or CSS
-      shapes.
-
-      Before you finish, run
-      `python3 /crew/shared/scripts/replica_check.py --dir /crew/shared/site-replica`
-      and fix what it reports. Record the checks you made at 390 px and
-      1440 px in /crew/shared/site-replica/build-notes.md.
-    priority: high
-    project: Site Replica
-    labels: [Acceptance]
+    project: Quick Start
+    labels: [Quick Start]
     target_state: TODO
-
-  - crew_slug: engineering
-    assignee: jamie
-    title: Run the replica acceptance checks and report PASS or FAIL
-    description: |-
-      Run `python3 /crew/shared/scripts/replica_check.py --dir /crew/shared/site-replica`
-      and write /crew/shared/site-replica/acceptance-report.md: the exact
-      command, the JSON output, one line per check with PASS or FAIL and the
-      detail, and a single-line verdict at the end.
-
-      If index.html does not exist, the verdict is NOT BUILT — report it and
-      stop; do not build it yourself. If content-map.json is missing, say
-      that coverage could not be measured. Do not modify the replica.
-    priority: medium
-    project: Site Replica
-    labels: [Acceptance]
 
 labels:
   - name: Quick Start

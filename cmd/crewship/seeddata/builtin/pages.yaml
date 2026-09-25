@@ -1,55 +1,8 @@
-# Demo pages for `crewship seed`.
-#
-# Four pages, and the split between them is the point: ONE PRODUCER DOOR EACH.
-# `operations` is fed by a script through the CLI, `watch` by a routine through
-# the dispatcher, `from-a-container` by an agent through its sidecar, and
-# `from-outside` by a webhook token held by something that cannot run the
-# binary. Each carries its own block comment below explaining the door it
-# demonstrates and why its panels are shaped the way they are.
-#
-# `operations/services` additionally carries the half of the feature the other
-# three do not: a `wake:` gate, an `on_failure:` route, an `actions:` button and
-# `public: true`. PRD §0 calls the panel a sensor rather than a display, and a
-# demo with no gate anywhere never shows that.
-#
-# `operations` is five panels — one per schema — each on its own tab, every
-# one carrying a `demo` payload the seeder pushes itself. Seeding the spec
-# without pushing data would leave five panels reading "never produced", which
-# is the state the freshness contract uses to mean "nobody wired this up" —
-# exactly the wrong first impression, and indistinguishable from a broken seed.
-#
-# ONE PANEL PER TAB IS UNUSUAL, AND DELIBERATE HERE. Tabs exist because a page
-# past about six panels becomes a scroll (tabs.go), so a real page groups
-# several panels under one tab. This page is a CATALOGUE of the five payload
-# shapes, and the thing a reader wants is to look at exactly one shape at a
-# time; the tab bar is what gives them that.
-#
-# Its producers are all `script/…` deliberately, and that kind is the only one
-# where BOTH a script and a human may write the same panel: mayProduce
-# (pages_authz.go) admits a `script` push from the page owner or a workspace
-# admin, because — in that file's own words — "script/watch-services.sh is a
-# name, not a principal". So the seeder fills the page at seed time, the shipped
-# producer (examples/pages/operations.sh) overwrites it with live measurements of
-# whatever host it runs on, and anyone in the owning crew can hand-write a panel
-# without either of them. Three writers, one panel, no grants.
-#
-# Every panel measures something a portable shell script can actually read —
-# `free`, `uptime`, `df`, one HTTP probe. That is what lets the demo payloads
-# below and the real producer agree on what each panel MEANS, rather than the
-# seed describing a world no script could reproduce.
-#
-# `watch` is the opposite half of the same feature and is why the seed does not
-# stop at a snapshot. Its panels declare `routine/page-watch`, and a routine
-# producer is one the seeding owner CANNOT write: mayProduce admits an owner
-# push for `script` and `webhook` and refuses every other kind, so these panels
-# have no `demo` payload and could not use one. They fill when the routine runs,
-# which is what seedPageProducerRoutines makes happen — a panel written by its
-# own declared producer, through the dispatcher, exactly as it would be in a
-# real workspace.
-#
-# Owners are seeded crews (crews.yaml). Panels owned by DIFFERENT crews on one
-# page is the point, not decoration: it is what makes the sealed placeholder
-# visible to anyone who logs in as a member of only one of them.
+# English demo Pages. Every Page is published with the same responsive blue
+# application shell as Crewship Lab. Producer ownership and panel schemas stay
+# intact, so the page still shows real snapshots, freshness and history.
+# Pages backed by optional GitHub integrations show a clear waiting state until
+# the workspace supplies SEED_GITHUB_TOKEN and runs the producer.
 pages:
   - slug: operations
     name: Operations
@@ -433,7 +386,7 @@ pages:
         sla: 6h
         span: 12
 
-  # ── Demo pack pages (seeddata/packs.go) ─────────────────────────────────
+  # ── Optional integration Pages (seeddata/packs.go) ─────────────────────
   # One page per pack, every panel produced by the pack's report routine.
   # No `demo` payloads: these panels are ROUTINE-produced, so the only honest
   # way for them to hold data is the routine running — which the seeder
@@ -480,26 +433,4 @@ pages:
         owner: crew/quality
         producer: routine/docs-drift-audit
         sla: 170h
-        span: 12
-
-  - slug: site-replica
-    name: Site replica
-    description: The engineering crew's copy of a public home page, and whether it meets the mechanical bar.
-    owner: crew/engineering
-    panels:
-      - id: acceptance
-        schema: status.v1
-        title: Acceptance checks
-        icon: deploy
-        owner: crew/engineering
-        producer: routine/site-replica-audit
-        sla: 48h
-        span: 12
-      - id: verdict
-        schema: narrative.v1
-        title: Verdict
-        icon: alert
-        owner: crew/engineering
-        producer: routine/site-replica-audit
-        sla: 48h
         span: 12

@@ -30,7 +30,6 @@ scripts/demo/run.sh --all --needs none   # only the token-zero ones
 | 9 | `github-injection` | github, model | a bound token reaches the container; `gh auth status` inside it |
 | 10 | `pack-ci-watch` | github | the nightly CI watch pack through `seed verify --pack` |
 | 11 | `pack-docs-drift` | github | the docs-drift pack through `seed verify --pack` |
-| 12 | `pack-site-replica` | — | the site-replica pack through `seed verify --pack` |
 | 13 | `chat-reply-inbox` | model | Morgan's saved chat reply appears in Inbox → Messages when the user is not watching that chat live |
 
 **Needs** is what the use case cannot do without: `model` is an ACTIVE

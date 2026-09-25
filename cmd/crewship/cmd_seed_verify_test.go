@@ -75,7 +75,7 @@ func newVerifyStub(t *testing.T) *verifyStub {
 			return 404, []byte(`{"error":"not found"}`), "application/json"
 		})
 	}
-	for _, slug := range []string{"ci-probe", "ci-nightly-triage", "docs-drift-audit", "site-replica-audit"} {
+	for _, slug := range []string{"ci-probe", "ci-nightly-triage", "docs-drift-audit"} {
 		slug := slug
 		s.OnPost("/api/v1/workspaces/"+covWSCli7+"/pipelines/"+slug+"/run", func(_ *http.Request, body []byte) (int, []byte, string) {
 			atomic.AddInt64(&vs.runsPosted, 1)
@@ -417,41 +417,6 @@ func TestSeedVerify_SkipReportStopsAfterTheProbe(t *testing.T) {
 	expectResult(t, checks, "ci-watch", "report", verifySkip)
 	if got := atomic.LoadInt64(&vs.runsPosted); got != 1 {
 		t.Errorf("runs posted = %d, want 1", got)
-	}
-}
-
-func TestSeedVerify_SiteReplicaNotBuiltIsASkipNotAPass(t *testing.T) {
-	vs := newVerifyStub(t)
-	check := `{"ok":false,"built":false,"passed":0,"failed":1,"checks":[{"name":"index.html exists","ok":false}],"panel":{"state":"warning","label":"no replica built yet","verdict":"NOT BUILT"}}`
-	vs.s.OnGet("/api/v1/workspaces/"+covWSCli7+"/pipeline-runs/run-site-replica", func(_ *http.Request, _ []byte) (int, []byte, string) {
-		b, _ := json.Marshal(map[string]any{"id": "run-site-replica", "status": "completed", "step_outputs": map[string]any{"check": check}})
-		return 200, b, "application/json"
-	})
-	checks, err := seedVerify(context.Background(), covStubClient(vs.s), verifyOpts("site-replica"))
-	if err != nil {
-		t.Fatalf("seedVerify: %v", err)
-	}
-	expectResult(t, checks, "site-replica", "env", verifyPass) // no requirements
-	c := expectResult(t, checks, "site-replica", "report", verifySkip)
-	if !strings.Contains(c.Detail, "not built") && !strings.Contains(c.Detail, "no replica") {
-		t.Errorf("detail: %q", c.Detail)
-	}
-}
-
-func TestSeedVerify_SiteReplicaBuiltAndFailingIsAFail(t *testing.T) {
-	vs := newVerifyStub(t)
-	check := `{"ok":false,"built":true,"passed":6,"failed":2,"checks":[{"name":"viewport meta","ok":false},{"name":"no external runtime requests","ok":false},{"name":"title present","ok":true}]}`
-	vs.s.OnGet("/api/v1/workspaces/"+covWSCli7+"/pipeline-runs/run-site-replica", func(_ *http.Request, _ []byte) (int, []byte, string) {
-		b, _ := json.Marshal(map[string]any{"id": "run-site-replica", "status": "completed", "step_outputs": map[string]any{"check": check}})
-		return 200, b, "application/json"
-	})
-	checks, err := seedVerify(context.Background(), covStubClient(vs.s), verifyOpts("site-replica"))
-	if err != nil {
-		t.Fatalf("seedVerify: %v", err)
-	}
-	c := expectResult(t, checks, "site-replica", "report", verifyFail)
-	if !strings.Contains(c.Detail, "viewport meta") {
-		t.Errorf("detail should name the failed checks: %q", c.Detail)
 	}
 }
 

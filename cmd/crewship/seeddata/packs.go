@@ -98,21 +98,6 @@ var Packs = []PackDef{
 		PageSlug:    "docs-drift",
 		RequiresEnv: []string{"SEED_GITHUB_TOKEN"},
 	},
-	{
-		Slug: "site-replica",
-		Name: "Site replica",
-		Description: "A lead delegates the copy of a real public home page (www.seznam.cz) across an " +
-			"analyst, a data engineer, a frontend engineer and a tester in one crew. A deterministic " +
-			"acceptance check says whether the replica meets the bar; a human judges whether it looks right.",
-		CrewSlug: "engineering",
-		Files: []PackFile{
-			{Src: "packs/site-replica/scripts/replica_check.py", Dest: "shared/scripts/replica_check.py"},
-		},
-		ProbeSlug:   "",
-		ReportSlug:  "site-replica-audit",
-		PageSlug:    "site-replica",
-		RequiresEnv: nil,
-	},
 }
 
 // PackBySlug returns the pack with the given slug.

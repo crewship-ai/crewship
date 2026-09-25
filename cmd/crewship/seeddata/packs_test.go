@@ -155,8 +155,16 @@ func TestPacks_ScriptUnitTestsPass(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read packs/: %v", err)
 	}
-	if len(entries) != len(Packs) {
-		t.Errorf("packs/ has %d directories, Packs has %d entries — a pack directory with no catalogue entry (or the reverse)", len(entries), len(Packs))
+	// Archived pack fixtures can stay in source for migration tests without
+	// becoming part of every new demo workspace.
+	for _, pack := range Packs {
+		found := false
+		for _, entry := range entries {
+			found = found || entry.Name() == pack.Slug
+		}
+		if !found {
+			t.Errorf("active pack %q has no fixture directory", pack.Slug)
+		}
 	}
 	for _, e := range entries {
 		if !e.IsDir() {

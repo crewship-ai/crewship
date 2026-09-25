@@ -1322,7 +1322,6 @@ var Routines = curatedDemoRoutines(append(append([]RoutineDef{}, routineLibrary.
 func curatedDemoRoutines(library []RoutineDef) []RoutineDef {
 	wanted := map[string]bool{
 		"pages-operations-sample": true,
-		"website-content-audit":   true, // live Crewship website content audit
 		"incident-timeline":       true, // incident evidence normalisation
 		"classify-ticket":         true, // support intake with a closed taxonomy
 		"morning-briefing":        true, // lead-generated workspace briefing
@@ -1341,10 +1340,9 @@ func curatedDemoRoutines(library []RoutineDef) []RoutineDef {
 		"summarize-text":   true,
 		// Demo packs (packs.go): a real source, a deterministic core, a
 		// verifiable report.
-		"ci-probe":           true, // token-zero wake gate over GitHub Actions
-		"ci-nightly-triage":  true, // agent triage only after the gate wakes
-		"docs-drift-audit":   true, // deterministic scan + agent judgement
-		"site-replica-audit": true, // acceptance of the crew's site replica
+		"ci-probe":          true, // token-zero wake gate over GitHub Actions
+		"ci-nightly-triage": true, // agent triage only after the gate wakes
+		"docs-drift-audit":  true, // deterministic scan + agent judgement
 	}
 
 	out := make([]RoutineDef, 0, len(wanted))
