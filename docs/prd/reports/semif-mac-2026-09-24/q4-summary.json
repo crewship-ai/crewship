@@ -1,0 +1,67 @@
+{
+  "status": "local_mlx_completed",
+  "model": "Qwen/Qwen3.5-4B",
+  "revision": "851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a",
+  "mlx_bits": "4",
+  "threshold": 0.9,
+  "dataset_sha256": "cb7b3ba464158c8bd43541064d85b58e9ed21ef58d7fd16063f901716406c304",
+  "all": {
+    "count": 22,
+    "raw_accuracy": 0.9545454545454546,
+    "routed_accuracy": 0.9090909090909091,
+    "action_coverage": 0.6363636363636364,
+    "accuracy_when_acted": 1.0,
+    "p50_ms": 712.3545,
+    "p95_ms": 719.183
+  },
+  "by_area": {
+    "webhook": {
+      "count": 8,
+      "raw_accuracy": 1.0,
+      "routed_accuracy": 0.875,
+      "action_coverage": 0.625,
+      "accuracy_when_acted": 1.0,
+      "p50_ms": 713.6110000000001,
+      "p95_ms": 737.775
+    },
+    "journal": {
+      "count": 8,
+      "raw_accuracy": 0.875,
+      "routed_accuracy": 0.875,
+      "action_coverage": 0.625,
+      "accuracy_when_acted": 1.0,
+      "p50_ms": 713.1215,
+      "p95_ms": 717.276
+    },
+    "dryrun": {
+      "count": 6,
+      "raw_accuracy": 1.0,
+      "routed_accuracy": 1.0,
+      "action_coverage": 0.6666666666666666,
+      "accuracy_when_acted": 1.0,
+      "p50_ms": 616.5909999999999,
+      "p95_ms": 711.917
+    }
+  },
+  "by_language": {
+    "cs": {
+      "count": 11,
+      "raw_accuracy": 0.9090909090909091,
+      "routed_accuracy": 0.9090909090909091,
+      "action_coverage": 0.6363636363636364,
+      "accuracy_when_acted": 1.0,
+      "p50_ms": 714.32,
+      "p95_ms": 737.775
+    },
+    "en": {
+      "count": 11,
+      "raw_accuracy": 1.0,
+      "routed_accuracy": 0.9090909090909091,
+      "action_coverage": 0.6363636363636364,
+      "accuracy_when_acted": 1.0,
+      "p50_ms": 711.087,
+      "p95_ms": 713.972
+    }
+  },
+  "limitations": "Synthetic smoke cases. Option scores are conditional and uncalibrated; 0.9 is an experimental review threshold. No agents or actions were executed."
+}

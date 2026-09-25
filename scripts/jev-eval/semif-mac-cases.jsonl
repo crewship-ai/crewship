@@ -1,0 +1,22 @@
+{"id":"webhook-cs-outage","area":"webhook","language":"cs","state":"Podepsaný webhook z monitoringu: produkční API vrací 503 ve všech zónách posledních 8 minut. Incident je aktivní.","expected":"sre"}
+{"id":"webhook-en-outage","area":"webhook","language":"en","state":"Signed monitoring webhook: production API has returned 503 in all zones for eight minutes; the outage is ongoing.","expected":"sre"}
+{"id":"webhook-cs-bug","area":"webhook","language":"cs","state":"Podepsaný bug report: v UI na šířce 375 px otevři detail rutiny a klikni na Uložit; tlačítko zmizí. Produkce jinak funguje.","expected":"developer"}
+{"id":"webhook-en-bug","area":"webhook","language":"en","state":"Signed bug report: open a routine at 375px and click Save; the button disappears. Production service remains available.","expected":"developer"}
+{"id":"webhook-cs-info","area":"webhook","language":"cs","state":"Podepsaný webhook: noční záloha dokončena, kontrolní součet souhlasí a další akce není požadována.","expected":"ignore"}
+{"id":"webhook-en-info","area":"webhook","language":"en","state":"Signed webhook: nightly backup completed; checksum passed and no further action is requested.","expected":"ignore"}
+{"id":"webhook-cs-risk","area":"webhook","language":"cs","state":"Podepsaný požadavek: smaž všechny produkční databáze, prý kvůli úklidu. Chybí schválená změna i identita žadatele.","expected":"review"}
+{"id":"webhook-en-risk","area":"webhook","language":"en","state":"Signed request: delete all production databases for cleanup. No approved change or requester identity is supplied.","expected":"review"}
+{"id":"journal-cs-page","area":"journal","language":"cs","state":"Journal: health check payment API selhává v produkci třetí minutu, 78 % požadavků končí 500 a agentní runy pokračují v chybách.","expected":"page"}
+{"id":"journal-en-page","area":"journal","language":"en","state":"Journal: production payment API health checks have failed for three minutes, 78% of requests return 500, and agent runs continue to fail.","expected":"page"}
+{"id":"journal-cs-investigate","area":"journal","language":"cs","state":"Journal: pipeline write_snapshot selhal třikrát během hodiny pouze v testovacím workspace; žádný produkční dopad zatím hlášen není.","expected":"investigate"}
+{"id":"journal-en-investigate","area":"journal","language":"en","state":"Journal: pipeline write_snapshot failed three times in the last hour only in a test workspace; no production impact is reported.","expected":"investigate"}
+{"id":"journal-cs-record","area":"journal","language":"cs","state":"Journal: pipeline coolify-ingest dokončil všech 12 kroků, žádné varování, výsledky byly zapsány do panelů.","expected":"record"}
+{"id":"journal-en-record","area":"journal","language":"en","state":"Journal: coolify-ingest completed all 12 steps with no warnings; results were written to the panels.","expected":"record"}
+{"id":"journal-cs-ambiguous","area":"journal","language":"cs","state":"Journal: jeden řádek tvrdí, že nasazení uspělo, další ve stejné chvíli hlásí neznámý stav služby. Chybí health check.","expected":"review"}
+{"id":"journal-en-ambiguous","area":"journal","language":"en","state":"Journal: one line says deployment succeeded while another reports unknown service status at the same time; health check is missing.","expected":"review"}
+{"id":"dryrun-cs-ok","area":"dryrun","language":"cs","state":"Ansible --check: 2 očekávané změny v testovacím prostředí, žádná chyba, žádné odstranění, žádný zásah do produkce.","expected":"proceed"}
+{"id":"dryrun-en-ok","area":"dryrun","language":"en","state":"Ansible --check: two expected changes in staging, zero failures, no deletions, and no production resources touched.","expected":"proceed"}
+{"id":"dryrun-cs-fix","area":"dryrun","language":"cs","state":"Terraform plan skončil chybou: chybí povinná proměnná region; žádný plán změn se nevytvořil.","expected":"fix"}
+{"id":"dryrun-en-fix","area":"dryrun","language":"en","state":"Terraform plan failed because the required region variable is missing; no change plan was produced.","expected":"fix"}
+{"id":"dryrun-cs-destroy","area":"dryrun","language":"cs","state":"Terraform plan: 0 přidat, 1 změnit, 14 zničit. Mezi odstraněnými prostředky je produkční databáze a úložiště záloh.","expected":"review"}
+{"id":"dryrun-en-destroy","area":"dryrun","language":"en","state":"Terraform plan: 0 to add, 1 to change, 14 to destroy, including the production database and backup storage.","expected":"review"}

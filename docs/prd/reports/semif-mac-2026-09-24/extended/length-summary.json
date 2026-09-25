@@ -1,0 +1,31 @@
+{
+  "model": "Qwen/Qwen3.5-4B",
+  "mlx_bits": 4,
+  "max_tokens": 4096,
+  "bounded": [
+    {
+      "id": "info-1",
+      "input_tokens": 162,
+      "latency_ms": 628.6309165880084,
+      "choice": "yes",
+      "top_score": 0.9740426428022031
+    },
+    {
+      "id": "info-40",
+      "input_tokens": 1098,
+      "latency_ms": 3608.3603342995048,
+      "choice": "yes",
+      "top_score": 0.9324533088603709
+    },
+    {
+      "id": "info-120",
+      "input_tokens": 3018,
+      "latency_ms": 10254.48170863092,
+      "choice": "yes",
+      "top_score": 0.8933094060543487
+    }
+  ],
+  "oversized_rejected": true,
+  "oversized_exit_code": 1,
+  "oversized_output_rows": 0
+}
