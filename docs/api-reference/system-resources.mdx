@@ -1,0 +1,55 @@
+---
+title: "Server Resource History"
+description: "Read measured host CPU and RAM usage for the dashboard."
+icon: "cpu"
+stability: experimental
+tag: Experimental
+---
+
+Crewship records a host CPU and RAM reading approximately once per minute and
+retains up to 30 days. These are **whole-server** measurements, including
+processes outside Crewship. Collection starts when this version first runs;
+the API does not invent readings for earlier periods or collection gaps.
+
+## Get resource history
+
+```http
+GET /api/v1/system/resources?window=7d
+```
+
+**Authentication:** An authenticated session or API token is required. This
+read-only route has no workspace-role or admin gate.
+
+**Request:** No body. `window` is optional and accepts `24h` (the default),
+`7d`, or `30d`. The corresponding chart buckets are five minutes, one hour,
+and six hours. A bucket averages the readings collected within it.
+
+**Response:** `200 OK`, `application/json`:
+
+```json
+{
+  "window": "7d",
+  "recording_since": "2026-09-25T12:24:00.000000000Z",
+  "latest": {
+    "sampled_at": "2026-09-25T12:33:00.000000000Z",
+    "cpu_percent": 23.4,
+    "memory_percent": 11.5,
+    "memory_used_mb": 5472,
+    "memory_total_mb": 47722
+  },
+  "series": [
+    { "ts": "2026-09-25T12:00:00Z", "cpu_percent": 23.4, "memory_percent": 11.5 }
+  ]
+}
+```
+
+`cpu_percent` is utilization across all host CPU cores. RAM usage is based on
+Linux `MemAvailable`; the `*_mb` fields use MiB. `latest` and
+`recording_since` are `null` until the first reading. The full response
+contains one `series` entry for every bucket in the selected window; buckets
+with no reading have `null` percentages. Use `sampled_at` to detect a stale
+latest reading rather than assuming the most recent bucket is current.
+
+**Statuses:** `200` on success, `400` for an unsupported `window`, `401` when
+authentication is missing or invalid, and `500` if stored readings cannot be
+loaded.

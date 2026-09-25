@@ -200,6 +200,7 @@ var readRoutesWithoutWorkspace = map[string]string{
 	"GET /api/v1/system/license":   "instance license state",
 	"GET /api/v1/system/version":   "instance build version",
 	"GET /api/v1/system/runtime":   "instance runtime detail; the handler redacts for non-admins rather than 403-ing (see admin_authz_floor_test.go)",
+	"GET /api/v1/system/resources": "host-wide CPU and RAM samples; the table has no workspace or tenant identifiers",
 	// #1668. The handler reads ONE in-memory value: the admission controller's
 	// own snapshot. No DB, no query, no workspace column anywhere in the path
 	// — the host's free memory and the list of container starts currently held
