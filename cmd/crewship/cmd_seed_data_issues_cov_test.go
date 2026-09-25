@@ -39,6 +39,13 @@ func covSeedProjectStub(s *clitest.StubServer) {
 		b, _ := json.Marshal(map[string]string{"id": fmt.Sprintf("proj-%d", id)})
 		return 201, b, "application/json"
 	})
+	for _, issue := range seeddata.Issues {
+		if issue.RoutineSlug == "" {
+			continue
+		}
+		s.OnGet("/api/v1/workspaces/"+covWSCli7+"/pipelines/"+issue.RoutineSlug,
+			clitest.JSONResponse(200, map[string]string{"id": "pipeline-" + issue.RoutineSlug}))
+	}
 }
 
 func TestSeedIssues_UnknownCrewsSkipIssueCreation(t *testing.T) {
@@ -127,6 +134,25 @@ func TestSeedIssues_FullSeedAgainstStub(t *testing.T) {
 	}
 	if created != len(seeddata.Issues) {
 		t.Errorf("issue creates = %d, want %d", created, len(seeddata.Issues))
+	}
+	bound := 0
+	for _, call := range s.Calls() {
+		if call.Method != "POST" || !strings.HasSuffix(call.Path, "/issues") {
+			continue
+		}
+		var body map[string]any
+		if err := json.Unmarshal(call.Body, &body); err != nil {
+			t.Fatal(err)
+		}
+		if body["project_id"] == "proj-1" { // Quick Start is the first project
+			if body["routine_id"] == nil {
+				t.Errorf("Quick Start issue %q was created without a routine", body["title"])
+			}
+			bound++
+		}
+	}
+	if bound != 6 {
+		t.Errorf("bound Quick Start issues = %d, want 6", bound)
 	}
 	// The builtin catalogue has issues with non-BACKLOG target states and
 	// assignees, so transitions/assignments must have happened.

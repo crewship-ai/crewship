@@ -90,12 +90,13 @@ agents:
       timeout_seconds: 3600
       memory_enabled: true
       prompt_slug: morgan
-      # An incident commander's four: triage, blast radius, rollback, overnight.
+      # Four daily questions plus one safe Chat-to-Inbox demo prompt.
       suggested_prompts: |
         Triage the alert I'm about to paste: severity, blast radius, first safe action.
         What changed in the last deploy, and what should I watch for the next hour?
         Walk me through rolling this release back, and what breaks while I do.
         Summarise last night's incidents and what is still unresolved.
+        For fictional incident DEMO-42, give me the first safe triage step. Do not contact an external service.
     - name: Riley
       slug: riley
       crew_slug: ops

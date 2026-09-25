@@ -54,6 +54,7 @@ func TestCovBuildHandlerRoutesAllControlPlanePaths(t *testing.T) {
 		{"POST", "/keeper/execute", "", http.StatusServiceUnavailable},
 		{"POST", "/expose-port", "", http.StatusServiceUnavailable},
 		{"GET", "/crews", "", http.StatusServiceUnavailable},
+		{"GET", "/crews/telemetry", "", http.StatusServiceUnavailable},
 		{"POST", "/crew/create", "", http.StatusServiceUnavailable},
 		{"POST", "/agent/create", "", http.StatusServiceUnavailable},
 		{"POST", "/spawn", "", http.StatusServiceUnavailable},

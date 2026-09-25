@@ -33,6 +33,14 @@ func coordHandlerCases() []coordHandlerCase {
 			wantMethod: http.MethodGet,
 		},
 		{
+			name:       "CrewTelemetry",
+			handler:    func(s *Server) http.HandlerFunc { return s.handleCrewTelemetry },
+			method:     http.MethodGet,
+			wantPath:   "/api/v1/internal/crews/telemetry",
+			wantQuery:  "workspace_id=ws-1",
+			wantMethod: http.MethodGet,
+		},
+		{
 			name:       "ListCrewConnections",
 			handler:    func(s *Server) http.HandlerFunc { return s.handleListCrewConnections },
 			method:     http.MethodGet,

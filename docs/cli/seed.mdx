@@ -76,6 +76,35 @@ the authenticated credential API.
 
 ## Examples
 
+### Quick Start issues
+
+The **Quick Start** project has six issues bound to saved routines. Open an
+issue and click **Run**; Crewship shows that routine's input form, prefilled
+from its declared defaults. Values entered there apply to this run only.
+
+| Issue | What to inspect | Needs |
+| --- | --- | --- |
+| Refresh the Crewship Lab fleet dashboard | Crew containers, CPU, memory, and Ops sample in Crewship Lab | Ops crew provisioned |
+| Send a workspace activity digest to the inbox | Workspace digest message with a link to its run | Nothing external |
+| Triage an incoming billing request | Category, priority, sentiment, and review in run history | Model login |
+| Audit our public home page | HTTP fetch and structured content audit in run history | Model login and public network |
+| Check our GitHub Actions health | Scheduled workflow status and wake result in run history | `SEED_GITHUB_TOKEN` and GitHub access |
+| Review a proposed production change | Draft, human decision, and recorded outcome in run history | Model login and an approver |
+
+The CI Watch, Docs Drift, and Site Replica issues remain for longer team demos.
+
+The **Inbox Scenarios** project adds an agent-led issue, **Request a temporary
+on-call credential**. Start work to dispatch Morgan; with a working model login,
+the requested `DEMO_ONCALL_API_TOKEN` should appear under Inbox → Decisions needed as a credential escalation.
+Rejecting the request demonstrates the review path without supplying a secret.
+
+The Inbox examples have different sources: Workspace digest writes a `message`,
+Production change approval parks a `waitpoint`, and Morgan's credential request
+creates an `escalation`. `scripts/demo/run.sh chat-reply-inbox` verifies a fourth
+path: an agent's saved Chat reply becomes a `message` under Agent replies when the recipient is not
+watching that chat live. A missing integration does not currently create a
+dedicated integration-kind Inbox item; the demo must not present one as real.
+
 ### First run on a fresh dev DB
 
 ```bash
@@ -218,7 +247,7 @@ the other two are fallbacks for the read, not the pack's requirement.
 | 7b. Pack credentials | With `SEED_GITHUB_TOKEN`: a crew-scoped GitHub `CLI_TOKEN` per GitHub-backed pack, bound to that crew's `GH_TOKEN` slot — crew scope is what makes `{{ secrets.CLI_TOKEN }}` in the pack's routines resolve to the real token rather than the newest inert demo account | Non-fatal; without the variable nothing is created and the pack is reported as skipped |
 | 8–9. Integrations + bindings | MCP servers, GitHub/Slack stubs | Fatal |
 | 9b. Routines | Starter routine library + eval scenarios (deterministic recipes, a morning briefing, an agentless feed-watch probe and its wake-gated change report) | Non-fatal |
-| 9b. Schedules | Demo crons so `/activity` has data on first load — including a wake-gated feed watch whose agentless probe runs token-zero every 15 minutes | Non-fatal |
+| Schedules | The normal seed creates no cron schedules. Create one explicitly after checking a routine, or use `crewship digest enable` for the workspace digest. | — |
 | 10. Issues | Pack issues with their projects and labels (unless `--skip-issues`) | Fatal |
 | 10c. Pages | Page specs, demo payloads, then one run of every routine a panel names as producer — fired even when a pack's requirement is unmet, so the failed run record says why the panel is empty | Fatal on spec, non-fatal per run |
 | 10b. Wait for provisioning | If `--wait-provision`, blocks until images are ready | Fatal in sync mode, deferred otherwise |

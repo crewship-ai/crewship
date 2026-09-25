@@ -54,6 +54,12 @@ func (h *IssueHandler) startBoundRoutine(w http.ResponseWriter, r *http.Request,
 		writeProblem(w, r, 400, "Stored routine inputs are invalid")
 		return
 	}
+	// The issue keeps its saved defaults; a person may supply values for this
+	// run without silently changing the next run of the same issue.
+	if err := mergeIssueRunInputs(r.Body, inputs); err != nil {
+		writeProblem(w, r, http.StatusBadRequest, err.Error())
+		return
+	}
 	dsl, err := pipeline.Parse([]byte(definition))
 	if err != nil {
 		writeProblem(w, r, 400, "The bound routine definition is invalid")
@@ -138,4 +144,27 @@ func (h *IssueHandler) startBoundRoutine(w http.ResponseWriter, r *http.Request,
 	}
 	h.broadcastIssueEvent(WorkspaceIDFromContext(r.Context()), "issue.started", map[string]string{"id": missionID, "identifier": ident, "status": "IN_PROGRESS"})
 	writeJSON(w, 202, map[string]string{"identifier": ident, "status": "IN_PROGRESS", "run_id": runID})
+}
+
+func mergeIssueRunInputs(body io.Reader, inputs map[string]any) error {
+	data, err := io.ReadAll(io.LimitReader(body, 1<<20+1))
+	if err != nil {
+		return fmt.Errorf("read routine inputs: %w", err)
+	}
+	if len(data) > 1<<20 {
+		return fmt.Errorf("routine inputs exceed 1 MiB")
+	}
+	if len(bytes.TrimSpace(data)) == 0 {
+		return nil // older clients start with the issue's saved inputs
+	}
+	var request struct {
+		RoutineInputs map[string]any `json:"routine_inputs" yaml:"routine_inputs"`
+	}
+	if err := json.Unmarshal(data, &request); err != nil || request.RoutineInputs == nil {
+		return fmt.Errorf("routine_inputs must be a JSON object")
+	}
+	for name, value := range request.RoutineInputs {
+		inputs[name] = value
+	}
+	return nil
 }

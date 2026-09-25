@@ -677,6 +677,9 @@ func (s *Server) buildHandler(proxy *Proxy) http.Handler {
 			case r.Method == http.MethodGet && r.URL.Path == "/crews":
 				s.handleListCrews(w, r)
 				return
+			case r.Method == http.MethodGet && r.URL.Path == "/crews/telemetry":
+				s.handleCrewTelemetry(w, r)
+				return
 			case r.Method == http.MethodPost && r.URL.Path == "/crew/create":
 				s.handleCreateCrew(w, r)
 				return

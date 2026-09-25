@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -65,7 +67,7 @@ func TestOperationsCollectorPayloads(t *testing.T) {
 	if err = json.Unmarshal(out, &payload); err != nil {
 		t.Fatal(err)
 	}
-	for panel, schema := range map[string]pages.PanelSchema{"services": "status.v1", "memory": "metric.v1"} {
+	for panel, schema := range map[string]pages.PanelSchema{"services": "status.v1", "memory": "metric.v1", "fleet": "table.v1"} {
 		if _, err := pages.ValidatePayload(schema, payload[panel]); err != nil {
 			t.Fatal(err)
 		}
@@ -101,4 +103,47 @@ func TestOperationsCollectorPayloads(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertRejected(t)
+}
+
+func TestOperationsCollectorFleetTelemetry(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("Node required for collector test")
+	}
+	dir := t.TempDir()
+	for name, content := range map[string]string{"memory.current": "52428800", "memory.max": "4294967296", "cpu.stat": "usage_usec 100000\n", "cpu.max": "200000 100000"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"crews":[{"name":"Ops","slug":"ops","available":true,"containers":[{"name":"crew-ops","kind":"crew","status":"running","cpu_percent":1.26,"memory_mb":50}]},{"name":"Quality","slug":"quality","available":false,"containers":[]}]}`))
+	}))
+	defer server.Close()
+	source := strings.ReplaceAll(string(Collector), "/sys/fs/cgroup/", filepath.ToSlash(dir)+"/")
+	source = strings.Replace(source, "http://127.0.0.1:9119/crews/telemetry", server.URL, 1)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, node, "--input-type=module")
+	cmd.Stdin = strings.NewReader(source)
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload struct {
+		Fleet struct {
+			Rows []struct {
+				Crew   string  `json:"crew"`
+				CPU    *string `json:"cpu"`
+				Memory *string `json:"memory"`
+			} `json:"rows"`
+		} `json:"fleet"`
+	}
+	if err := json.Unmarshal(out, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(payload.Fleet.Rows) != 2 || payload.Fleet.Rows[0].Crew != "Ops" || payload.Fleet.Rows[0].CPU == nil || *payload.Fleet.Rows[0].CPU != "1.3%" || payload.Fleet.Rows[0].Memory == nil || *payload.Fleet.Rows[0].Memory != "50 MB" || payload.Fleet.Rows[1].CPU != nil {
+		t.Fatalf("fleet telemetry = %+v", payload.Fleet.Rows)
+	}
 }

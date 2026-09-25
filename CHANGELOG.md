@@ -10,6 +10,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 ## [Unreleased]
 
 ### Improved
+- Demo seed now includes six short Quick Start issues bound to working routines: Crewship Lab refresh, workspace digest, support triage, public page audit, GitHub Actions health, and production change approval. Running a bound routine from an issue asks for its declared inputs and applies the entered values to that run. Crewship Lab uses a blue palette and English content, and its fleet table shows live container CPU and memory per crew through a workspace-scoped sidecar read.
+- An Inbox Scenarios issue prepares Morgan's credential escalation, the digest and approval issues name their Inbox outcomes, and a new demo use case checks that a saved agent Chat reply appears in Inbox. Morgan has a safe prefilled Chat prompt for this check.
 - Demo seed can use a private Codex `auth.json` to configure the default agents and routines for a ChatGPT subscription login. `.env.example` now lists the seed settings; the existing Anthropic path remains available.
 - CLI help now describes `plan` and `--plan` as prompt-guided planning; they do not disable the agent's configured tools. The CLI guide also notes that `--with-cmd` runs locally while collecting context.
 - Pages can open an unsent agent chat draft. The Page reference is removable, and sending it rechecks both readers' live access before adding a bounded identity snapshot and durable provenance.

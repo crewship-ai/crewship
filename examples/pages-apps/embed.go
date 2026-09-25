@@ -1,4 +1,4 @@
-// Package pagesdemo contains the portable Operations Lab demo used by the CLI seed.
+// Package pagesdemo contains the portable Crewship Lab demo used by the CLI seed.
 // The YAML and script are the canonical examples, embedded without generated copies.
 package pagesdemo
 

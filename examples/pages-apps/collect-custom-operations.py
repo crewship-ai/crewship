@@ -38,9 +38,9 @@ def main():
     load = os.getloadavg()[0]
     status = {'items': [
         {'name': 'Crewship API', 'state': 'ok', 'label': f'200 OK · {latency} ms'},
-        {'name': 'Disk', 'state': 'ok' if disk.used / disk.total < .85 else 'warning', 'label': f'{round(disk.used / disk.total * 100)} % využito'},
-        {'name': 'Paměť', 'state': 'ok' if samples[-1] > 1024 else 'warning', 'label': f'{samples[-1]} MB volných'},
-        {'name': 'Zátěž CPU', 'state': 'ok' if load < cpus else 'warning', 'label': f'{load:.2f} / {cpus} CPU'},
+        {'name': 'Disk', 'state': 'ok' if disk.used / disk.total < .85 else 'warning', 'label': f'{round(disk.used / disk.total * 100)} % used'},
+        {'name': 'Memory', 'state': 'ok' if samples[-1] > 1024 else 'warning', 'label': f'{samples[-1]} MB free'},
+        {'name': 'CPU load', 'state': 'ok' if load < cpus else 'warning', 'label': f'{load:.2f} / {cpus} CPU'},
     ]}
     metric = {'value': samples[-1], 'unit': 'MB', 'sparkline': samples}
     for panel, payload in [('services', status), ('memory', metric)]:

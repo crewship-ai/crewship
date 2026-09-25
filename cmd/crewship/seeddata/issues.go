@@ -33,6 +33,7 @@ type IssueDef struct {
 	Description string `yaml:"description"`
 	Priority    string `yaml:"priority,omitempty"`
 	Project     string `yaml:"project,omitempty"`      // project name (resolved to ID during seed)
+	RoutineSlug string `yaml:"routine_slug,omitempty"` // saved routine to run from this issue
 	TargetState string `yaml:"target_state,omitempty"` // final status after creation (empty = BACKLOG)
 	Comment     string `yaml:"comment,omitempty"`
 	// Labels names entries of the Labels catalogue below to attach on

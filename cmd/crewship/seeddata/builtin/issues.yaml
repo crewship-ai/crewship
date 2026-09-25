@@ -1,4 +1,6 @@
 # Real work for a freshly seeded Crewship workspace.
+# Quick Start issues are short, independently runnable paths through a saved
+# routine. The larger packs below remain available for deeper demos.
 #
 # Three demo packs (seeddata/packs.go), one crew each. Every issue reads a real
 # public source, names its evidence and its output path, and stays inside its
@@ -8,6 +10,108 @@
 # over deterministic candidates with a human decision at the boundary, the
 # site replica a lead delegating across four specialists.
 issues:
+  # ── quick start ────────────────────────────────────────────────────────
+  - crew_slug: ops
+    assignee: riley
+    title: Refresh the Crewship Lab fleet dashboard
+    description: |-
+      Run the bound routine to collect fresh CPU and memory readings for each
+      crew container plus a detailed Ops sample. Open Crewship Lab afterward
+      and inspect the fleet table, summary cards, and memory chart. This run
+      needs no model, token, or external service.
+    priority: medium
+    project: Quick Start
+    routine_slug: pages-operations-sample
+    labels: [Quick Start]
+    target_state: TODO
+
+  - crew_slug: ops
+    assignee: morgan
+    title: Send a workspace activity digest to the inbox
+    description: |-
+      Run the bound routine. It counts recent routine runs without using a
+      model, then sends the result to the workspace inbox. Open Inbox and find
+      Workspace digest; its run ID links back to the run.
+    priority: medium
+    project: Quick Start
+    routine_slug: workspace-digest
+    labels: [Quick Start]
+    target_state: TODO
+
+  - crew_slug: quality
+    assignee: casey
+    title: Triage an incoming billing request
+    description: |-
+      Click Run, edit the sample customer ticket in the form, and start the
+      bound routine. Casey classifies its category, priority, and sentiment;
+      Jordan checks the result. Inspect the classification and review in the
+      run history. A configured model login is required.
+    priority: medium
+    project: Quick Start
+    routine_slug: classify-ticket
+    labels: [Quick Start]
+    target_state: TODO
+
+  - crew_slug: engineering
+    assignee: sam
+    title: Audit our public home page
+    description: |-
+      Click Run and review the prefilled URL. The routine fetches the public
+      page and reports its title, headings, navigation, and calls to action.
+      Inspect the fetch and extraction steps in the run history. A configured
+      model login and access to crewship.ai are required.
+    priority: medium
+    project: Quick Start
+    routine_slug: website-content-audit
+    labels: [Quick Start]
+    target_state: TODO
+
+  - crew_slug: ops
+    assignee: riley
+    title: Check our GitHub Actions health
+    description: |-
+      Click Run and review the prefilled repository and stale threshold. The
+      agentless probe reads scheduled GitHub Actions runs and reports whether
+      any workflow is red or has stopped running. Inspect the probe output and
+      wake result in run history. Seed SEED_GITHUB_TOKEN to grant read access;
+      no model login is needed.
+    priority: medium
+    project: Quick Start
+    routine_slug: ci-probe
+    labels: [Quick Start]
+    target_state: TODO
+
+  - crew_slug: ops
+    assignee: morgan
+    title: Review a proposed production change
+    description: |-
+      Click Run and edit the sample change request. Morgan drafts a plan and
+      rollback step, then the routine pauses for a human decision. Approve or
+      reject the resulting Inbox → Decisions needed item and inspect the recorded
+      outcome. This exercises a model-backed step and a durable approval
+      without changing production.
+    priority: medium
+    project: Quick Start
+    routine_slug: approval-gate-demo
+    labels: [Quick Start]
+    target_state: TODO
+
+  - crew_slug: ops
+    assignee: morgan
+    title: Request a temporary on-call credential
+    description: |-
+      Start work on this issue. For the fictional incident DEMO-42, Morgan
+      needs a credential named DEMO_ONCALL_API_TOKEN before paging on-call.
+      Ask for a CREDENTIAL escalation with that exact name and the reason;
+      do not invent a token, contact an external service, or mark the work
+      complete. Open Inbox → Decisions needed to review the request. Rejecting it
+      is a complete safe demo; supplying a credential is optional. This
+      scenario needs a working model login.
+    priority: medium
+    project: Inbox Scenarios
+    labels: [Escalation]
+    target_state: TODO
+
   # ── ci-watch (ops) ─────────────────────────────────────────────────────
   - crew_slug: ops
     assignee: morgan
@@ -267,6 +371,8 @@ issues:
     labels: [Acceptance]
 
 labels:
+  - name: Quick Start
+    color: '#3B82F6'
   - name: Wake gate
     color: '#3B82F6'
   - name: Silent failure
@@ -281,6 +387,16 @@ labels:
     color: '#22C55E'
 
 projects:
+  - name: Quick Start
+    color: '#3B82F6'
+    icon: play
+    status: in_progress
+    priority: medium
+  - name: Inbox Scenarios
+    color: '#4F83F8'
+    icon: inbox
+    status: in_progress
+    priority: medium
   - name: CI Watch
     color: '#EF4444'
     icon: activity

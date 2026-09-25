@@ -3,7 +3,7 @@
 One script per use case, each runnable on its own against a seeded dev
 server, narrated for an audience and verified by assertions. The second
 version of the demo scripts: `../walkthrough.sh` was one `set -e` checklist
-that stopped at its first failing line; this is twelve units you can test
+that stopped at its first failing line; this is thirteen units you can test
 one at a time.
 
 ```bash
@@ -13,7 +13,7 @@ export CREWSHIP=/tmp/crewship-2-dev   # the binary dev.sh built (default: ./crew
 scripts/demo/run.sh                   # list
 scripts/demo/run.sh memory-recall     # one, by slug …
 scripts/demo/run.sh 6 7               # … or by number, several in order
-scripts/demo/run.sh --all             # all twelve, one summary table
+scripts/demo/run.sh --all             # all thirteen, one summary table
 scripts/demo/run.sh --all --needs none   # only the token-zero ones
 ```
 
@@ -31,6 +31,7 @@ scripts/demo/run.sh --all --needs none   # only the token-zero ones
 | 10 | `pack-ci-watch` | github | the nightly CI watch pack through `seed verify --pack` |
 | 11 | `pack-docs-drift` | github | the docs-drift pack through `seed verify --pack` |
 | 12 | `pack-site-replica` | — | the site-replica pack through `seed verify --pack` |
+| 13 | `chat-reply-inbox` | model | Morgan's saved chat reply appears in Inbox → Messages when the user is not watching that chat live |
 
 **Needs** is what the use case cannot do without: `model` is an ACTIVE
 model-provider credential in the workspace, `github` is `SEED_GITHUB_TOKEN`

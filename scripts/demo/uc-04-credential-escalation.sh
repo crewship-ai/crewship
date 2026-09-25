@@ -38,7 +38,7 @@ else
   esc_id=""
 fi
 demo_show "escalation list --crew ops" cs escalation list --crew ops --status PENDING
-demo_ui "Inbox → escalations" "/inbox"
+demo_ui "Inbox → Decisions needed" "/inbox"
 
 demo_step "A human supplies the value (the step the agent cannot do)"
 if [[ -z "$esc_id" ]]; then
