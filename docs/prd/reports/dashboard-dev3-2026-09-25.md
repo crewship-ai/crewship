@@ -71,7 +71,8 @@ the server was built with its installed sidecar hash.
   shows Sep 25 as the current 7d chart endpoint and the same sticky control.
 - Full `go test ./... -count=1 -p 4 -timeout 35m` passed for the initial slice
   (the API and database packages took about 27 and 35 minutes on the shared
-  host). A fresh full Go run found a missing OpenAPI `required` declaration;
-  the declaration was added and its focused contract test passed. `pnpm
-  test:types` passed. CodeRabbit is rate limited on the draft; the PR must
-  receive an actual review before merge.
+  host). A fresh full Go run found missing OpenAPI `required`, read-route scope,
+  backup classification, and published spec-count declarations. They were
+  added and their focused tests passed. `go run ./scripts/docs-inventory
+  -strict` and `pnpm test:types` passed. CodeRabbit is rate limited on the
+  draft; the PR must receive an actual review before merge.

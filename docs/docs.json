@@ -513,6 +513,7 @@
               "api-reference/backup",
               "api-reference/provisioning",
               "api-reference/runtime",
+              "api-reference/system-resources",
               "api-reference/port-expose",
               "api-reference/journal",
               "api-reference/chains",
