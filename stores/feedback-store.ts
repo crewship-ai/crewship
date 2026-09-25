@@ -56,8 +56,10 @@ interface FeedbackState {
    *  first so the eval pipeline doesn't keep counting a retracted
    *  signal, then clear local state on success. A failed DELETE keeps
    *  local state pointing at "submitted" so a refresh reconciles.
+   *  Pass the active workspace when available: a fork may retain a second
+   *  row with the same message id, which DELETE must not remove by accident.
    *  Shares the per-(turn, signal) sequencing with submit. */
-  reset: (turnId: string, signal: FeedbackSignal) => Promise<void>
+  reset: (turnId: string, signal: FeedbackSignal, opts?: { workspaceId?: string }) => Promise<void>
 }
 
 // Per-(turn, signal) in-flight serialization. Lives in module scope —
@@ -180,7 +182,7 @@ export const useFeedbackStore = create<FeedbackState>()(
         })
       },
 
-      reset: async (turnId, signal) => {
+      reset: async (turnId, signal, opts = {}) => {
         const userId = get().userId
         if (!userId) return
 
@@ -188,8 +190,11 @@ export const useFeedbackStore = create<FeedbackState>()(
           if (get().userId !== userId) return
 
           try {
+            const workspaceParam = opts.workspaceId
+              ? `&workspace_id=${encodeURIComponent(opts.workspaceId)}`
+              : ""
             const res = await apiFetch(
-              `/api/v1/feedback?message_id=${encodeURIComponent(turnId)}&signal=${encodeURIComponent(signal)}`,
+              `/api/v1/feedback?message_id=${encodeURIComponent(turnId)}&signal=${encodeURIComponent(signal)}${workspaceParam}`,
               { method: "DELETE" },
             )
             if (!res.ok) {

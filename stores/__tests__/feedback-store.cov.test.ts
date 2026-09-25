@@ -146,6 +146,18 @@ describe("reset", () => {
     expect(useFeedbackStore.getState().byTurn["t 1/x"]).toEqual({ edit: true })
   })
 
+  it("scopes DELETE to the active workspace when a fork copied the feedback row", async () => {
+    mockFetch.mockResolvedValue(ok())
+    useFeedbackStore.setState({ userId: "u1", byTurn: { t1: { helpful: true } } })
+
+    await useFeedbackStore.getState().reset("t1", "helpful", { workspaceId: "ws/a" })
+
+    expect(mockFetch.mock.calls[0][0]).toBe(
+      "/api/v1/feedback?message_id=t1&signal=helpful&workspace_id=ws%2Fa",
+    )
+    expect(useFeedbackStore.getState().byTurn.t1).toEqual({})
+  })
+
   it("keeps local state when the DELETE returns non-2xx", async () => {
     mockFetch.mockResolvedValue(fail(404))
     useFeedbackStore.setState({ userId: "u1", byTurn: { t1: { helpful: true } } })

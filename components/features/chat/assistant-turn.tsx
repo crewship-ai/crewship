@@ -5,6 +5,7 @@ import { useArtifactStore } from "@/stores/artifact-store"
 import { useEffect } from "react"
 import { useFeedbackStore } from "@/stores/feedback-store"
 import { useSession } from "@/hooks/use-auth"
+import { useCurrentWorkspaceId } from "@/hooks/use-workspace"
 import { TurnReactions } from "./reactions/turn-reactions"
 import {
   Message,
@@ -703,6 +704,7 @@ function TurnFeedbackActions({
   const submitted = useFeedbackStore((s) => s.byTurn[turn.id]) ?? {}
   const submit = useFeedbackStore((s) => s.submit)
   const reset = useFeedbackStore((s) => s.reset)
+  const workspaceId = useCurrentWorkspaceId()
 
   // trace_id is plumbed through ChatTurn.metadata when the WS event
   // for the assistant turn carries it. Backend wiring (orchestrator →
@@ -718,7 +720,7 @@ function TurnFeedbackActions({
     // click → click again can't have its DELETE land before the prior
     // POST creates the row. We don't need to gate at the call site.
     if (submitted[signal]) {
-      void reset(turn.id, signal)
+      void reset(turn.id, signal, { workspaceId: workspaceId ?? undefined })
       return
     }
     void submit(turn.id, signal, { chatId, traceId })
