@@ -1,0 +1,53 @@
+{
+  "model": "aac6fef/laya-multilingual-mlx",
+  "runtime": "laya_mlx (independent port)",
+  "load_seconds": 0.7368599157780409,
+  "threshold": 0.9,
+  "all": {
+    "count": 62,
+    "raw_accuracy": 0.46774193548387094,
+    "routed_accuracy": 0.43548387096774194,
+    "action_coverage": 0.2903225806451613,
+    "accuracy_when_acted": 0.7222222222222222,
+    "p50_ms": 19.384,
+    "p95_ms": 21.56
+  },
+  "by_area": {
+    "webhook": {
+      "count": 12,
+      "raw_accuracy": 0.4166666666666667,
+      "routed_accuracy": 0.5,
+      "action_coverage": 0.25,
+      "accuracy_when_acted": 0.6666666666666666,
+      "p50_ms": 15.3065,
+      "p95_ms": 33.041
+    },
+    "journal": {
+      "count": 12,
+      "raw_accuracy": 0.25,
+      "routed_accuracy": 0.4166666666666667,
+      "action_coverage": 0.4166666666666667,
+      "accuracy_when_acted": 0.4,
+      "p50_ms": 15.438500000000001,
+      "p95_ms": 19.142
+    },
+    "dryrun": {
+      "count": 10,
+      "raw_accuracy": 0.4,
+      "routed_accuracy": 0.4,
+      "action_coverage": 0.2,
+      "accuracy_when_acted": 0.5,
+      "p50_ms": 14.8255,
+      "p95_ms": 15.162
+    },
+    "keeper": {
+      "count": 28,
+      "raw_accuracy": 0.6071428571428571,
+      "routed_accuracy": 0.42857142857142855,
+      "action_coverage": 0.2857142857142857,
+      "accuracy_when_acted": 1.0,
+      "p50_ms": 19.668,
+      "p95_ms": 21.573
+    }
+  }
+}
