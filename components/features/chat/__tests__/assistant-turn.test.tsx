@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from "vitest"
 import React from "react"
 import { render, screen, fireEvent, cleanup } from "@testing-library/react"
 import type { ChatTurn, TurnPart } from "@/hooks/use-chat"
+import { feedbackTurnKey, useFeedbackStore } from "@/stores/feedback-store"
 
 // AssistantTurn leans on heavy ai-elements components (motion/react inside
 // Reasoning, portal logic in Tool/CodeBlock). Replace them with thin probes
@@ -306,6 +307,19 @@ describe("AssistantTurn dispatch", () => {
   })
 
   describe("actions toolbar", () => {
+    it("does not reuse a source workspace vote for a forked turn with the same ID", () => {
+      useFeedbackStore.setState({ userId: "test-user", byTurn: {
+        [feedbackTurnKey("t-1", "ws-source")]: { helpful: true },
+      } })
+      const reply = turn([part({ type: "text", content: "answer" })])
+      const view = render(<AssistantTurn turn={reply} workspaceId="ws-source" onCopy={onCopy} onFileClick={onFileClick} />)
+      expect(screen.getByTestId("action-marked-good-—-click-to-undo")).toBeTruthy()
+
+      view.rerender(<AssistantTurn turn={reply} workspaceId="ws-fork" onCopy={onCopy} onFileClick={onFileClick} />)
+      expect(screen.getByTestId("action-good-response")).toBeTruthy()
+      expect(useFeedbackStore.getState().byTurn[feedbackTurnKey("t-1", "ws-source")]).toEqual({ helpful: true })
+    })
+
     it("renders Copy/Up/Down when not streaming and has text", () => {
       render(<AssistantTurn turn={turn([part({ type: "text", content: "answer" })])} onCopy={onCopy} onFileClick={onFileClick} />)
       expect(screen.getByTestId("action-copy")).toBeTruthy()
