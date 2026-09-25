@@ -108514,6 +108514,13 @@
                           "type": "string"
                         }
                       },
+                      "required": [
+                        "sampled_at",
+                        "cpu_percent",
+                        "memory_percent",
+                        "memory_used_mb",
+                        "memory_total_mb"
+                      ],
                       "type": "object"
                     },
                     "recording_since": {
@@ -108537,6 +108544,11 @@
                             "type": "string"
                           }
                         },
+                        "required": [
+                          "ts",
+                          "cpu_percent",
+                          "memory_percent"
+                        ],
                         "type": "object"
                       },
                       "type": "array"
@@ -108545,6 +108557,12 @@
                       "type": "string"
                     }
                   },
+                  "required": [
+                    "window",
+                    "recording_since",
+                    "latest",
+                    "series"
+                  ],
                   "type": "object"
                 }
               }
