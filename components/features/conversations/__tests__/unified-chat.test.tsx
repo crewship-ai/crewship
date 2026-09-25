@@ -5,6 +5,7 @@ import { UnifiedChatProvider } from "../unified-chat"
 import { LegacyConversationRedirect } from "../legacy-conversation-redirect"
 import { CreateConversation } from "../workspace-conversations"
 import { ChatClient } from "@/app/(dashboard)/chat/chat-client"
+import { useArtifactStore } from "@/stores/artifact-store"
 
 const fixtures = vi.hoisted(() => {
   const agent = { id: "agent", name: "Ava", slug: "ava", status: "IDLE" }
@@ -30,6 +31,7 @@ beforeEach(() => {
   fixtures.tree.threadErrors = {}
   fixtures.tree.threadsByAgent.agent = [{ id: "legacy", title: "Ava history", started_at: "2026-09-01T12:00:00Z", message_count: 1 }]
   sessionStorage.clear()
+  useArtifactStore.getState().closeAll()
   window.history.replaceState(null, "", "/chat/ava?conversation=room&workspace_id=ws")
   params = new URLSearchParams(window.location.search)
   Element.prototype.scrollIntoView = vi.fn()
@@ -54,19 +56,19 @@ describe("unified Chat", () => {
     expect(await screen.findByText("Ava · Draft")).toBeInTheDocument()
   })
 
-  it("folds the chat list for file reading and restores its prior fold", async () => {
+  it("folds the chat list for focused artifact reading and restores its prior fold", async () => {
     render(wrap(<UnifiedChatProvider><ChatClient /></UnifiedChatProvider>))
     await screen.findByRole("button", { name: "Open Ava chat" })
-    act(() => window.dispatchEvent(new CustomEvent("crewship:chat-file-workspace", { detail: { open: true } })))
+    act(() => { useArtifactStore.getState().openFile({ id: "agent:report.pdf", agentId: "agent", path: "report.pdf", title: "report.pdf" }); useArtifactStore.getState().setFocus(true) })
     expect(screen.getByRole("button", { name: "Expand sidebar" })).toBeInTheDocument()
-    act(() => window.dispatchEvent(new CustomEvent("crewship:chat-file-workspace", { detail: { open: false } })))
+    act(() => useArtifactStore.getState().setFocus(false))
     expect(screen.getByRole("button", { name: "Collapse sidebar" })).toBeInTheDocument()
   })
 
   it("keeps Activity visible and applies sidebar filters to agent rows", async () => {
     render(wrap(<UnifiedChatProvider><ChatClient /></UnifiedChatProvider>))
     await screen.findByRole("button", { name: "Open Ava chat" })
-    const activity = screen.getByRole("region", { name: "Activity" })
+    const activity = screen.getByRole("region", { name: "Agent activity" })
     fireEvent.click(within(activity).getByRole("button", { name: /^All/ }))
     expect(within(activity).getByRole("button", { name: /^All/ })).toHaveAttribute("aria-pressed", "true")
     fireEvent.click(screen.getByRole("button", { name: "Filter" }))
@@ -76,7 +78,7 @@ describe("unified Chat", () => {
     expect(screen.getByRole("button", { name: "Open Ava chat" })).toBeInTheDocument()
   })
 
-  it("shows shared rooms only in All and sizes people, agents and rooms alike", async () => {
+  it("keeps shared rooms visible across agent activity scopes and sizes rows alike", async () => {
     const teamRoom = { ...room, id: "team-room", title: "Design updates", kind: "channel", is_direct: false }
     fixtures.api.mockImplementation(async (url: string, options?: RequestInit) => {
       if (options?.method === "PUT" || url.includes("/read")) return new Response(null, { status: 204 })
@@ -91,26 +93,69 @@ describe("unified Chat", () => {
     expect(person.className).toContain("text-xs")
     expect(agent.className).toContain("min-h-9")
     expect(agent.className).toContain("text-xs")
-    expect(screen.queryByRole("region", { name: "Team spaces" })).not.toBeInTheDocument()
+    expect(screen.getByRole("region", { name: "Team spaces" })).toBeInTheDocument()
 
-    const activity = screen.getByRole("region", { name: "Activity" })
+    const activity = screen.getByRole("region", { name: "Agent activity" })
     fireEvent.click(within(activity).getByRole("button", { name: /^All/ }))
     const spaces = screen.getByRole("region", { name: "Team spaces" })
     const space = within(spaces).getByRole("button", { name: /Design updates Workspace channel/ })
     expect(space.className).toContain("h-9")
     expect(space.className).toContain("text-xs")
     fireEvent.click(within(activity).getByRole("button", { name: /^Routines/ }))
-    expect(screen.queryByRole("region", { name: "People" })).not.toBeInTheDocument()
-    expect(screen.queryByRole("region", { name: "Team spaces" })).not.toBeInTheDocument()
+    expect(screen.getByRole("region", { name: "People" })).toBeInTheDocument()
+    expect(screen.getByRole("region", { name: "Team spaces" })).toBeInTheDocument()
     fireEvent.click(within(activity).getByRole("button", { name: /^All/ }))
     fireEvent.click(screen.getByRole("button", { name: "Filter" }))
     fireEvent.click(screen.getByRole("button", { name: "Ava" }))
     expect(screen.queryByRole("region", { name: "People" })).not.toBeInTheDocument()
     expect(screen.queryByRole("region", { name: "Team spaces" })).not.toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Open Ava chat" })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Ava" }))
+    expect(screen.getByRole("button", { name: "Ava" })).toHaveAttribute("aria-pressed", "false")
+    expect(screen.getByRole("region", { name: "Team spaces" })).toBeInTheDocument()
   })
 
-  it("reveals a linked team space in All without locking a later scope choice", async () => {
+  it("searches channels from Direct and lets the section filter toggle off", async () => {
+    const teamRoom = { ...room, id: "team-room", title: "Design updates", kind: "channel", is_direct: false }
+    fixtures.api.mockImplementation(async (url: string, options?: RequestInit) => {
+      if (options?.method === "PUT" || url.includes("/read")) return new Response(null, { status: 204 })
+      if (url.includes("/messages")) return Response.json({ messages: [], has_more: false })
+      if (url.includes("/conversations/room?")) return Response.json(room)
+      return Response.json({ conversations: [room, teamRoom], next_offset: null })
+    })
+    render(wrap(<UnifiedChatProvider><ChatClient /></UnifiedChatProvider>))
+    await screen.findByRole("button", { name: /Design updates Workspace channel/ })
+    fireEvent.change(screen.getByRole("textbox", { name: "Search conversations" }), { target: { value: "Design" } })
+    expect(within(screen.getByRole("region", { name: "Team spaces" })).getByRole("button", { name: /Design updates/ })).toBeInTheDocument()
+    expect(screen.queryByRole("region", { name: "People" })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Clear search" }))
+    fireEvent.click(screen.getByRole("button", { name: "Filter" }))
+    fireEvent.click(screen.getByRole("button", { name: "Team spaces" }))
+    expect(screen.queryByRole("region", { name: "Agents" })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Team spaces" }))
+    expect(screen.getByRole("region", { name: "Agents" })).toBeInTheDocument()
+  })
+
+  it("uses All to clear filters and lets a selected agent row collapse without leaving its chat", async () => {
+    render(wrap(<UnifiedChatProvider><ChatClient /></UnifiedChatProvider>))
+    await screen.findByRole("button", { name: "Open Ava chat" })
+    fireEvent.click(screen.getByRole("button", { name: "Open Ava chat" }))
+    expect(await screen.findByTestId("agent-panel")).toHaveTextContent("ava:legacy")
+    expect(screen.getByRole("button", { name: "Hide Ava sessions" })).toHaveAttribute("aria-expanded", "true")
+    expect(screen.getByRole("button", { name: "Open Ava chat" }).parentElement?.className).toContain("bg-primary/10")
+    fireEvent.click(screen.getByRole("button", { name: "Open Ava chat" }))
+    expect(screen.getByRole("button", { name: "Show Ava sessions" })).toHaveAttribute("aria-expanded", "false")
+    expect(screen.getByRole("button", { name: "Open Ava chat" }).parentElement?.className).not.toContain("bg-primary/10")
+    expect(screen.getByTestId("agent-panel")).toHaveTextContent("ava:legacy")
+
+    fireEvent.click(screen.getByRole("button", { name: "Filter" }))
+    fireEvent.click(screen.getByRole("button", { name: "Agent sessions" }))
+    expect(screen.queryByRole("region", { name: "Team spaces" })).not.toBeInTheDocument()
+    fireEvent.click(within(screen.getByRole("region", { name: "Agent activity" })).getByRole("button", { name: /^All/ }))
+    expect(screen.getByRole("region", { name: "People" })).toBeInTheDocument()
+  })
+
+  it("reveals a linked team space without changing the agent activity scope", async () => {
     const teamRoom = { ...room, id: "team-room", title: "Design updates", kind: "channel", is_direct: false }
     window.history.replaceState(null, "", "/chat?conversation=team-room&workspace_id=ws")
     params = new URLSearchParams(window.location.search)
@@ -122,12 +167,12 @@ describe("unified Chat", () => {
       return Response.json({ conversations: [room, teamRoom], next_offset: null })
     })
     render(wrap(<UnifiedChatProvider><ChatClient /></UnifiedChatProvider>))
-    const activity = screen.getByRole("region", { name: "Activity" })
+    const activity = screen.getByRole("region", { name: "Agent activity" })
     expect(await screen.findByRole("region", { name: "Team spaces" })).toBeInTheDocument()
-    expect(within(activity).getByRole("button", { name: /^All/ })).toHaveAttribute("aria-pressed", "true")
-    fireEvent.click(within(activity).getByRole("button", { name: /^Direct/ }))
-    expect(screen.queryByRole("region", { name: "Team spaces" })).not.toBeInTheDocument()
     expect(within(activity).getByRole("button", { name: /^Direct/ })).toHaveAttribute("aria-pressed", "true")
+    fireEvent.click(within(activity).getByRole("button", { name: /^Direct/ }))
+    expect(screen.getByRole("region", { name: "Team spaces" })).toBeInTheDocument()
+    expect(within(activity).getByRole("button", { name: /^All/ })).toHaveAttribute("aria-pressed", "true")
   })
 
   it("shows people and agents in one sidebar and gives a human deep link precedence without creating an agent session", async () => {
