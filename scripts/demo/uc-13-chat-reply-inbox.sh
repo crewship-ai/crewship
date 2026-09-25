@@ -5,27 +5,33 @@
 # needs: model
 # minutes: 3
 #
-# A one-shot CLI ask does not subscribe the human to the chat's live WebSocket
-# session. The saved reply therefore exercises the real chat → inbox path.
+# `crewship ask` subscribes to the session while it waits, so it correctly
+# suppresses the bell. This case sends a message without that subscription.
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib.sh
 source "$HERE/lib.sh"
 
 preflight
 reason="$(demo_need model)" || demo_skip_all "$reason"
+have jq || demo_skip_all "jq is required to correlate the chat with its Inbox item"
+have go || demo_skip_all "Go is required for the send-and-leave WebSocket helper"
 
 MARKER="$(nonce INBOX)"
-demo_step "Ask Morgan in a fresh chat, then look for the saved reply"
-reply="$(ask_agent morgan "For the fictional incident DEMO-42, give one safe first triage step. Include this exact marker in your reply: $MARKER. Do not contact an external service.")"
-assert_nonempty "Morgan returned a saved reply" "$reply"
-assert_contains "Morgan's reply carries this run's marker" "$reply" "$MARKER"
+demo_step "Send Morgan a message, then leave the chat before the reply"
+prompt="For the fictional incident DEMO-42, give one safe first triage step. Include this exact marker in your reply: $MARKER. Do not contact an external service."
+chat_id="$(cd "$HERE/../.." && go run ./scripts/demo/ws-send-and-leave --server "$SERVER" --agent morgan --prompt "$prompt" 2>/dev/null)"
+assert_nonempty "direct chat was created" "$chat_id"
+if [[ -n "$chat_id" ]]; then
+  poll_until "Morgan's saved reply carries $MARKER" "$ASK_TIMEOUT" \
+    "cs chat '$chat_id' --format json 2>/dev/null | jq -e --arg marker '$MARKER' 'any(.[]?; .role == \"assistant\" and ((.content // \"\") | contains(\$marker)))' >/dev/null"
+fi
 
 demo_step "The agent reply is projected into Inbox → Agent replies"
-if [[ -n "$reply" ]]; then
-  poll_until "chat reply $MARKER in Inbox" 30 \
-    "cs inbox list --kind message --state all --limit 100 --format json 2>/dev/null | grep -qF '$MARKER'"
+if [[ -n "$chat_id" ]]; then
+  poll_until "agent reply for chat $chat_id in Inbox" 30 \
+    "cs inbox list --kind message --state all --limit 100 --format json 2>/dev/null | jq -e --arg id '$chat_id' 'any(.[]?; .sender_type == \"agent\" and .payload.chat_id == \$id)' >/dev/null"
 else
-  skip "chat reply in Inbox" "the agent run returned no reply, so there is no chat event to project"
+  skip "chat reply in Inbox" "the chat could not be created"
 fi
 demo_show "recent Inbox messages" cs inbox list --kind message --state all --limit 5
 demo_ui "Inbox" "/inbox"

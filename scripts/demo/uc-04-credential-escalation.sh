@@ -22,16 +22,18 @@ VALUE="demo-token-rotate-me-$(nonce V)"
 demo_cleanup "cs credential delete '$ESC_NAME' --yes"
 
 demo_step "Morgan needs a $ESC_NAME token and does not have one"
-reply="$(ask_agent morgan "You need a ${ESC_NAME} API token to page on-call but you do not have one. Raise a credential escalation that names exactly the credential you need (${ESC_NAME}) and why. Do not invent a value.")"
-printf '%s\n' "$reply" | head -5 | sed 's/^/     /'
+reply_file="$(mktemp -t cs-escalation-reply.XXXXXX)"
+(ask_agent morgan "You need a ${ESC_NAME} API token to page on-call but you do not have one. Raise a credential escalation that names exactly the credential you need (${ESC_NAME}) and why. Do not invent a value." > "$reply_file") &
+ask_pid=$!
+demo_say "Morgan's run stays open while /escalate waits for a human answer."
 
 demo_step "The escalation shows up in the ops queue"
 esc_json_cmd="\"$CREWSHIP\" --server \"$SERVER\" ${_CS_ARGS[*]+${_CS_ARGS[*]}} escalation list --crew ops --status PENDING --format json"
 if have jq; then
   poll_until "morgan's credential escalation is PENDING" 90 \
-    "$esc_json_cmd | jq -e '[.[]? | select(((.type // \"\") | test(\"credential\"; \"i\")) or (tostring | test(\"$ESC_NAME\"; \"i\")))] | length > 0'"
+    "$esc_json_cmd | jq -e --arg n '$ESC_NAME' '[.[]? | select(tostring | test(\$n; \"i\"))] | length > 0'"
   esc_id="$(cs escalation list --crew ops --status PENDING --format json 2>/dev/null \
-    | jq -r --arg n "$ESC_NAME" 'first(.[]? | select(((.type // "") | test("credential"; "i")) or (tostring | test($n; "i")))) | .id // empty' 2>/dev/null)"
+    | jq -r --arg n "$ESC_NAME" 'first(.[]? | select(tostring | test($n; "i"))) | .id // empty' 2>/dev/null)"
 else
   poll_until "morgan's credential escalation is PENDING (grep)" 90 \
     "\"$CREWSHIP\" --server \"$SERVER\" escalation list --crew ops 2>/dev/null | grep -qiE 'credential|$ESC_NAME'"
@@ -61,6 +63,12 @@ else
       || _fail "manual grant"
   fi
 fi
+
+wait "$ask_pid" || true
+reply="$(cat "$reply_file")"
+rm -f "$reply_file"
+assert_nonempty "Morgan resumes after the human decision" "$reply"
+printf '%s\n' "$reply" | head -5 | sed 's/^/     /'
 
 demo_step "The vault has it; the API never shows the value"
 demo_show "credential list" cs credential list
