@@ -173,7 +173,7 @@ export function DeviceSessions({
   return (
     <>
       <div className="flex items-center justify-between px-4 pt-2.5 pb-1.5">
-        <span className="text-[9.5px] uppercase tracking-[0.1em] text-muted-foreground/70 font-semibold">
+        <span className="text-[9.5px] uppercase tracking-[0.1em] text-muted-foreground-soft font-semibold">
           Browsers &amp; devices
         </span>
         {others.length > 0 && (
@@ -205,7 +205,7 @@ export function DeviceSessions({
                       </span>
                     )}
                   </span>
-                  <span className="block text-[11px] text-muted-foreground/80 mt-0.5">
+                  <span className="block text-[11px] text-muted-foreground-soft mt-0.5">
                     {s.ip} · {timeAgo(s.last_used_at)} · signed in {formatShortDate(s.created_at)}
                     {s.is_current && currentExpiresIn ? ` · expires in ${currentExpiresIn}` : ""}
                   </span>

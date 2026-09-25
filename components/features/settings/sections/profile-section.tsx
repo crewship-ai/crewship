@@ -718,7 +718,7 @@ export function ProfileSection({
         <DeviceSessions onSignOut={onSignOut} currentExpiresIn={expiresIn} />
 
         <div className="flex items-center justify-between px-4 pt-3 pb-1.5 border-t border-border/40">
-          <span className="text-[9.5px] uppercase tracking-[0.1em] text-muted-foreground/70 font-semibold">
+          <span className="text-[9.5px] uppercase tracking-[0.1em] text-muted-foreground-soft font-semibold">
             CLI tokens
           </span>
           {!showCreateForm && (

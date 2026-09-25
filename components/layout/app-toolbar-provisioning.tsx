@@ -37,11 +37,16 @@ function ProvisioningBadge({
     && provisioning.needsProvision === 0 && provisioning.pendingRestart === 0
     && provisioning.recentlyCompleted > 0
   const tone = provisioning.failed > 0 ? "red" : onlyRecent ? "emerald" : "amber"
+  // Dark tints sit at /20, not /30: the badge text is text-micro (11px — too
+  // small for the 3:1 large-text bracket), and destructive-on-destructive/30
+  // and warn-on-warn/30 measure 4.27:1 / 4.01:1, under the 4.5:1 wcag2aa floor
+  // the a11y scan enforces. /20 keeps the same tokens and measures 5.19:1 /
+  // 4.79:1 (#1617).
   const colors = tone === "red"
-    ? { bg: "bg-destructive dark:bg-destructive/30 border-destructive dark:border-destructive", text: "text-destructive dark:text-destructive", icon: "text-destructive" }
+    ? { bg: "bg-destructive dark:bg-destructive/20 border-destructive dark:border-destructive", text: "text-destructive dark:text-destructive", icon: "text-destructive" }
     : tone === "emerald"
-      ? { bg: "bg-success dark:bg-success/30 border-success dark:border-success", text: "text-success dark:text-success", icon: "text-success" }
-      : { bg: "bg-warn dark:bg-warn/30 border-warn dark:border-warn", text: "text-warn dark:text-warn", icon: "text-warn" }
+      ? { bg: "bg-success dark:bg-success/20 border-success dark:border-success", text: "text-success dark:text-success", icon: "text-success" }
+      : { bg: "bg-warn dark:bg-warn/20 border-warn dark:border-warn", text: "text-warn dark:text-warn", icon: "text-warn" }
 
   const verbalize = () => {
     if (provisioning.failed > 0) return `${provisioning.failed} build${provisioning.failed > 1 ? "s" : ""} failed`

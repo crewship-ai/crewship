@@ -316,6 +316,18 @@ describe("use-dashboard-data", () => {
       expect(result.current.byCrew.get("c1")).toEqual({ total: 2, running: 1, degraded: 1, checked: true })
       expect(result.current.byCrew.get("c2")?.checked).toBe(false)
     })
+
+    it("keeps the service summary map stable across unrelated rerenders", async () => {
+      mockFetch.mockResolvedValueOnce(okJSON({ services: [{ status: "running" }] }))
+      const crews = [{ id: "c1", name: "Docs", slug: "docs", color: null, icon: null }]
+      const { result, rerender } = renderHook(() => useCrewServiceSummaries("ws-1", crews), {
+        wrapper: makeWrapper(qc),
+      })
+      await waitFor(() => expect(result.current.byCrew.get("c1")?.checked).toBe(true))
+      const firstMap = result.current.byCrew
+      rerender()
+      expect(result.current.byCrew).toBe(firstMap)
+    })
   })
 
   describe("useInvalidateDashboard", () => {
@@ -341,7 +353,6 @@ describe("use-dashboard-data", () => {
       expect(keys).toContainEqual(dashboardKeys.timeseries("ws-1", DASHBOARD_THROUGHPUT_PARAMS))
       expect(keys).toContainEqual(dashboardKeys.timeseries("ws-1", DASHBOARD_COST_PARAMS))
       expect(keys).toContainEqual(["runs-insights", "ws-1"])
-      expect(keys).toContainEqual(["crew-services", "ws-1"])
       // The run-volume chart mounts under a window-dependent params object,
       // and invalidateQueries compares that object by deep equality — so the
       // two fixed-param timeseries keys above can never match it. Without the
@@ -351,6 +362,12 @@ describe("use-dashboard-data", () => {
       // tile was removed, and invalidating a key no query uses is noise that
       // reads as coverage.
       expect(keys).not.toContainEqual(["crew-spend", "ws-1"])
+      // crew-services is deliberately absent too (#2187): it is a live
+      // provider (Docker) listing per crew, this callback fires on every
+      // debounced realtime burst, and invalidation refetches active queries
+      // unconditionally — staleTime offers no protection. The mounted
+      // queries refresh under their own bounded one-minute poll instead.
+      expect(keys).not.toContainEqual(["crew-services", "ws-1"])
     })
 
     it("is a no-op without a workspaceId", () => {
