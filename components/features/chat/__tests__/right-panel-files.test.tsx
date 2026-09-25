@@ -37,10 +37,18 @@ beforeEach(() => {
 afterEach(cleanup)
 
 describe("Chat agent context", () => {
-  it("shows the selected agent and only their Files, Artifacts, and Work tabs", () => {
+  it("shows a concise section heading when the right rail supplies navigation", () => {
+    renderPanel({ hideTabs: true })
+    expect(screen.getByRole("heading", { name: "Files" })).toBeInTheDocument()
+    expect(screen.getByText("Files available to Mařena")).toBeInTheDocument()
+    expect(screen.queryByRole("link", { name: /Agent card/ })).toBeNull()
+    expect(screen.queryByRole("button", { name: "Files" })).toBeNull()
+    expect(screen.queryByRole("button", { name: "Artifacts" })).toBeNull()
+    expect(screen.queryByRole("button", { name: "Work" })).toBeNull()
+  })
+
+  it("keeps section switching available when the mobile rail is absent", () => {
     renderPanel()
-    expect(screen.getByText("Mařena")).toBeInTheDocument()
-    expect(screen.getByRole("link", { name: /Agent card/ })).toHaveAttribute("href", "/crews?agent=marena")
     expect(screen.getByRole("button", { name: "Files" })).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Artifacts" })).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Work" })).toBeInTheDocument()
@@ -89,7 +97,10 @@ describe("Chat agent context", () => {
       : [{ id: "routine-1", slug: "copy-review", name: "Copy review", author_agent_id: "agent-1" }, { id: "routine-2", slug: "other", name: "Other", author_agent_id: "agent-2" }] }))
     renderPanel({ initialTab: "work" })
     expect(await screen.findByRole("link", { name: /COPY-12/ })).toHaveAttribute("href", "/issues/COPY-12")
+    expect(screen.queryByRole("link", { name: /Copy review/ })).toBeNull()
+    fireEvent.click(screen.getByRole("tab", { name: /Routines/ }))
     expect(screen.getByRole("link", { name: /Copy review/ })).toHaveAttribute("href", "/routines?routine=copy-review")
+    expect(screen.queryByRole("link", { name: /COPY-12/ })).toBeNull()
     expect(screen.queryByText("Other")).toBeNull()
     expect(apiFetch.mock.calls.some(([url]) => String(url).includes("assignee_id=agent-1"))).toBe(true)
   })

@@ -12,8 +12,6 @@ import {
   Minimize2,
   Bot as BotIcon,
 } from "lucide-react"
-import Link from "next/link"
-import { AgentAvatar } from "@/components/ui/agent-avatar"
 import { Spinner } from "@/components/ui/spinner"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
@@ -36,8 +34,7 @@ import { FilePreview } from "./files/file-preview"
 import { ScopeSection } from "./files/scope-section"
 import { AgentArtifactsTab } from "./right-panel-tabs/agent-artifacts-tab"
 import { AgentWorkTab } from "./right-panel-tabs/agent-work-tab"
-import { DRAWER_TAB_LABELS } from "./right-rail"
-import { useDrawerStore, type DrawerTab } from "@/stores/drawer-store"
+import { useDrawerStore } from "@/stores/drawer-store"
 import { useChatAgent } from "./chat-agent-context"
 import { classifyAgentFile, relativeToAgent } from "./files/file-scope"
 
@@ -287,19 +284,19 @@ export const RightPanel = React.memo(function RightPanel({ agentId, workspaceId,
   }, [])
 
   const editorOpen = !onOpenFile && editorFile !== null && activeTab === "files"
+  const tabTitle = RIGHT_PANEL_TABS.find((tab) => tab.id === activeTab)?.label ?? "Files"
+  const agentName = chatAgent?.name || "this agent"
+  const tabDescription = activeTab === "files" ? `Files available to ${agentName}`
+    : activeTab === "artifacts" ? `Documents in ${agentName}'s files`
+    : `Issues and routines connected to ${agentName}`
 
   return (
     <div className="flex flex-col overflow-hidden bg-accent/30" style={style}>
-      <div className="shrink-0 border-b px-3 py-3">
-        <div className="mb-2 text-[10px] uppercase tracking-wider text-muted-foreground">Agent context</div>
-        <div className="flex min-w-0 items-center gap-2">
-          <AgentAvatar seed={chatAgent?.avatarSeed || chatAgent?.slug || agentId} style={chatAgent?.avatarStyle} avatarUrl={chatAgent?.avatarUrl} className="size-8 shrink-0" />
-          <div className="min-w-0 flex-1"><p className="truncate text-xs font-medium">{chatAgent?.name || "Agent"}</p><p className="text-[10px] text-muted-foreground">Agent</p></div>
-          {chatAgent?.slug && <Link className="shrink-0 text-[10px] text-primary hover:underline" href={`/crews?agent=${encodeURIComponent(chatAgent.slug)}`}>Agent card ↗</Link>}
-        </div>
-      </div>
-      {hideTabs && <h2 className="sr-only">{DRAWER_TAB_LABELS[activeTab as DrawerTab] ?? activeTab}</h2>}
-      <div className="flex items-end shrink-0 overflow-x-auto scrollbar-none border-b h-[41px]">
+      <header className="shrink-0 border-b px-3 py-3">
+        <h2 className="text-sm font-semibold">{tabTitle}</h2>
+        <p className="mt-0.5 truncate text-xs text-muted-foreground">{tabDescription}</p>
+      </header>
+      {!hideTabs && <div className="flex h-[41px] shrink-0 items-end overflow-x-auto border-b scrollbar-none">
         {RIGHT_PANEL_TABS.map((tab) => (
           <button
             key={tab.id}
@@ -315,7 +312,7 @@ export const RightPanel = React.memo(function RightPanel({ agentId, workspaceId,
             {tab.label}
           </button>
         ))}
-      </div>
+      </div>}
 
       {activeTab === "files" && downloadFile && workspaceId && (
         <div className="flex min-h-0 flex-1 flex-col">

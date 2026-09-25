@@ -955,7 +955,6 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
           files={files}
           {...filePanelProps}
           initialTab={mobilePanel === "more" ? "work" : "files"}
-          hideTabs
           style={{ width: "100%", height: "100%" }}
         />
         <ArtifactPane agentId={agentId} />
