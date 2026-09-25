@@ -9,7 +9,7 @@ import type {
   AgentSummary, CrewSummary, ProjectSummary, RunsResponse,
   MissionMetricsResponse, KeeperRequest, TimeseriesResponse,
   CrewServiceSummary, CrewSpendResponse, DashboardWindow,
-  MemoryHealthResponse, RunInsightsResponse, RuntimeCapacityResponse,
+  MemoryHealthResponse, RunInsightsResponse, RuntimeCapacityResponse, HostResourceResponse,
 } from "@/app/(dashboard)/dashboard-types"
 
 /**
@@ -73,6 +73,7 @@ export const dashboardKeys = {
   runInsights: (ws: string, window: DashboardWindow) =>
     ["runs-insights", ws, { window }] as const,
   runtimeCapacity: () => ["runtime-capacity"] as const,
+  hostResources: (window: DashboardWindow) => ["host-resources", window] as const,
   memoryHealth: (ws: string) => ["memory-health", ws] as const,
   crewSpend: (ws: string, window: DashboardWindow) =>
     ["crew-spend", ws, { window }] as const,
@@ -305,6 +306,20 @@ export function useRuntimeCapacity(opts?: DashboardQueryOpts) {
     retry: false,
     // Capacity is instance-scoped and can change without a workspace event.
     refetchInterval: 15_000,
+  })
+}
+
+export function useHostResources(window: DashboardWindow, opts?: DashboardQueryOpts) {
+  return useQuery<HostResourceResponse>({
+    queryKey: dashboardKeys.hostResources(window),
+    queryFn: async ({ signal }) => {
+      const res = await apiFetch(`/api/v1/system/resources?window=${window}`, { signal })
+      if (!res.ok) throw new Error(`Server measurements: ${res.status}`)
+      return res.json() as Promise<HostResourceResponse>
+    },
+    enabled: opts?.enabled ?? true,
+    retry: false,
+    refetchInterval: 60_000,
   })
 }
 

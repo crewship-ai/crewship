@@ -108475,6 +108475,117 @@
         ]
       }
     },
+    "/api/v1/system/resources": {
+      "get": {
+        "operationId": "get_api_v1_system_resources",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "window",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "latest": {
+                      "nullable": true,
+                      "properties": {
+                        "cpu_percent": {
+                          "type": "number"
+                        },
+                        "memory_percent": {
+                          "type": "number"
+                        },
+                        "memory_total_mb": {
+                          "type": "integer"
+                        },
+                        "memory_used_mb": {
+                          "type": "integer"
+                        },
+                        "sampled_at": {
+                          "format": "date-time",
+                          "type": "string"
+                        }
+                      },
+                      "type": "object"
+                    },
+                    "recording_since": {
+                      "format": "date-time",
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "series": {
+                      "items": {
+                        "properties": {
+                          "cpu_percent": {
+                            "nullable": true,
+                            "type": "number"
+                          },
+                          "memory_percent": {
+                            "nullable": true,
+                            "type": "number"
+                          },
+                          "ts": {
+                            "format": "date-time",
+                            "type": "string"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "window": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "tags": [
+          "system"
+        ]
+      }
+    },
     "/api/v1/system/runtime": {
       "get": {
         "operationId": "get_api_v1_system_runtime",

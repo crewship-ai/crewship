@@ -13,6 +13,7 @@ import "net/http"
 //	GET /api/v1/system/setup-status  (no auth — first-run gate)
 //	GET /api/v1/system/telemetry     (no auth — Sentry consent gate)
 //	GET /api/v1/system/runtime       (auth)
+//	GET /api/v1/system/resources     (auth)
 //	GET /api/v1/system/version       (auth)
 //	GET /api/v1/system/license       (auth)
 //	GET /api/v1/system/keeper        (auth)
@@ -65,6 +66,10 @@ func (r *Router) registerSystemRoutes() {
 	// role-less callers keep working with the redacted shape.
 	r.mux.Handle("GET /api/v1/system/runtime",
 		authed(r.authMw.OptionalWorkspaceRole(http.HandlerFunc(system.Runtime))))
+	// Instance-wide CPU/RAM history is intentionally read-only and subject to
+	// the same authentication floor as runtime capacity.
+	// openapi: query window:string
+	r.mux.Handle("GET /api/v1/system/resources", authed(http.HandlerFunc((hostResourcesHandler{db: r.db, logger: r.logger}).Resources)))
 	r.mux.Handle("GET /api/v1/system/version", authed(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		// Same re-read-per-request reason for r.build as for r.version:
 		// cmd_start calls SetBuild after construction (#1645).

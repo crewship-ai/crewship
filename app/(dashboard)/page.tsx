@@ -20,6 +20,7 @@ import { RunVolumeChart, type RunVolumeBucket, type RunVolumeSeries } from "@/co
 import { RecipesEmptyState } from "@/components/features/dashboard/recipes-cards"
 import { FleetBoard, deriveFleetBoard } from "@/components/features/dashboard/fleet-board"
 import { DashboardResults } from "@/components/features/dashboard/dashboard-results"
+import { HostResources } from "@/components/features/dashboard/host-resources"
 import { PagesStrip } from "@/components/features/dashboard/pages-strip"
 import { WelcomeChecklist } from "@/components/features/dashboard/welcome-checklist"
 import { Appear } from "@/components/ui/detail"
@@ -38,6 +39,7 @@ import {
   useCrewSummaries,
   useDashboardResults,
   useDashboardActiveRuns,
+  useHostResources,
   useInvalidateDashboard,
   useMetricsTimeseries,
   useRunsInsights,
@@ -96,6 +98,7 @@ export default function DashboardPage() {
   const agentRunsQ = useDashboardActiveRuns(workspaceId, queryOpts)
   const insightsQ = useRunsInsights(workspaceId, reportWindow, queryOpts)
   const capacityQ = useRuntimeCapacity(queryOpts)
+  const hostResourcesQ = useHostResources(reportWindow, queryOpts)
   const volumeParams = useMemo(() => runVolumeParams(reportWindow), [reportWindow])
   const volumeQ = useMetricsTimeseries(workspaceId, volumeParams, queryOpts)
   const spendQ = useCrewSpend(workspaceId, reportWindow, queryOpts)
@@ -248,6 +251,7 @@ export default function DashboardPage() {
 
   return (
     <div className="flex min-h-[calc(100dvh-var(--app-header-h)-var(--mobile-tab-bar-h))] flex-col bg-background">
+      <div className="sticky top-0 z-30 bg-card shadow-sm">
       <SubBar
         icon={LayoutDashboard}
         title="Dashboard"
@@ -281,18 +285,19 @@ export default function DashboardPage() {
         }
       />
 
+      <div className="flex items-center justify-between border-b border-border/60 px-3 py-1.5 md:hidden">
+        <span className="text-label font-medium text-muted-foreground">Reporting window</span>
+        <div className="flex items-center rounded-md border border-border/60 bg-background p-0.5" role="group" aria-label="Dashboard time window">
+          {WINDOW_LABELS.map((item) => (
+            <Button key={item} type="button" variant="ghost" size="xs" aria-pressed={reportWindow === item} onClick={() => setReportWindow(item)} className={cn("h-6 min-w-10 px-2 font-mono", reportWindow === item && "bg-primary/15 text-primary-hover")}>{item}</Button>
+          ))}
+        </div>
+      </div>
+      </div>
+
       <main className="mx-auto flex w-full max-w-[1800px] flex-1 flex-col gap-3 p-4 pb-10 md:p-5">
         <WelcomeChecklist firstAgentId={firstAgentId} />
         {crews.length === 0 && workspaceId && <RecipesEmptyState workspaceId={workspaceId} onInstalled={invalidateDashboard} />}
-
-        <div className="flex items-center justify-between md:hidden">
-          <span className="text-label font-medium text-muted-foreground">Reporting window</span>
-          <div className="flex items-center rounded-md border border-border/60 bg-card p-0.5" role="group" aria-label="Dashboard time window">
-            {WINDOW_LABELS.map((item) => (
-              <Button key={item} type="button" variant="ghost" size="xs" aria-pressed={reportWindow === item} onClick={() => setReportWindow(item)} className={cn("h-6 min-w-10 px-2 font-mono", reportWindow === item && "bg-primary/15 text-primary-hover")}>{item}</Button>
-            ))}
-          </div>
-        </div>
 
         {/* No hero heading: the sub-bar already says Dashboard · N crews · M
             agents, and the first thing on the page should be what needs a
@@ -336,8 +341,11 @@ export default function DashboardPage() {
         </div>
 
         <details className="rounded-xl border border-border/60 bg-card">
-          <summary className="cursor-pointer px-3 py-2.5 text-body font-medium text-muted-foreground transition-colors hover:text-foreground">System details <span className="ml-2 text-label font-normal">Run capacity, crews, agents and schedules</span></summary>
-          <div className="border-t border-border/60 p-4"><SystemSignals capacity={capacityQ.data ?? null} heldCrews={heldCrews} fleet={fleet} agents={agents} schedules={schedules.schedules} schedulesLoading={schedules.loading} schedulesError={schedules.error} /></div>
+          <summary className="cursor-pointer px-3 py-2.5 text-body font-medium text-muted-foreground transition-colors hover:text-foreground">System details <span className="ml-2 text-label font-normal">Server load, crews, agents and schedules</span></summary>
+          <div className="border-t border-border/60 p-4">
+            <SystemSignals capacity={capacityQ.data ?? null} heldCrews={heldCrews} fleet={fleet} agents={agents} schedules={schedules.schedules} schedulesLoading={schedules.loading} schedulesError={schedules.error} />
+            <div className="mt-3"><HostResources data={hostResourcesQ.data ?? null} window={reportWindow} loading={hostResourcesQ.isPending} error={hostResourcesQ.isError} /></div>
+          </div>
         </details>
       </main>
     </div>
