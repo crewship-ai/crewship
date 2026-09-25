@@ -36,34 +36,42 @@ The public dev3 service is `crewship-ws@3` at
 `https://crewship-dev3.unifylab.cz/`. It runs the prebuilt
 `/srv/crewship/dev3-pages-release/crewship.unsigned` binary, not the current
 `crewship_3` checkout. Its source is local deploy branch
-`deploy/dev3-dashboard-20260925`, commit `12f39cbd7`: the dev3
+`deploy/dev3-dashboard-20260925`, commit `856ce9133`: the dev3
 unsigned-webhook profile based on main, plus the dashboard code. The earlier
 `264571fb1` was the initial dashboard slice. This deploy branch is an artifact
 and is not the PR branch.
 
-The pre-deploy SQLite online backup passed `PRAGMA quick_check=ok`:
+The original dashboard backup is
 `/srv/crewship/dev3-pages-release/backups/dashboard-20260925T104951Z/`.
-That directory also holds the original server/sidecar binaries and the two
-intermediate dashboard server binaries. No migration ran. The sidecar binary
-was not replaced; the server was built with its installed sidecar hash.
-The second dashboard rollout has its prior server binaries in
-`/srv/crewship/dev3-pages-release/backups/dashboard-20260925T1200Z/`.
+Before the host-sample migration, an additional SQLite online backup passed
+`PRAGMA quick_check=ok` in
+`/srv/crewship/dev3-pages-release/backups/dashboard-20260925T1224Z/`.
+That directory also holds the previous server binaries for rollback. The
+host-sample migration applied on dev3. The sidecar binary was not replaced;
+the server was built with its installed sidecar hash.
 
 ## Verification
 
 - The deploy branch passed `pnpm build`, static export embedding and Go
   binary build. The PR branch passed TypeScript, lint (no new errors), targeted
   dashboard tests and `go vet ./...`.
-- After the final restart, local and public URLs returned HTTP 200, systemd
-  reported active and the error-priority journal had no entries.
+- After the final restart, the public URL returned HTTP 200, systemd reported
+  active and the error-priority journal had no entries.
 - Authenticated Chromium checks at 1440 px and 390 px loaded the dashboard
   without page errors. They found eight finished rows and all ten crews;
   Coolify's chart swatch resolved to `rgb(14, 165, 233)`.
 - On the current build, authenticated Chromium showed four equal-height KPI
   cards, four crew failures, one unavailable agent, no horizontal mobile
   overflow and no page errors. The public URL returned HTTP 200.
+- On deployed build `883047cc6`, authenticated Chromium returned HTTP 200 from
+  `/api/v1/system/resources?window=7d`, reported live CPU 23.4% and RAM 11.5%,
+  showed the server-load panel without page errors, and kept the 7d control at
+  y=49 px after scrolling. Build `856ce9133` adds the OpenAPI response-field
+  contract fix; the endpoint data shape is unchanged. Its authenticated page
+  shows Sep 25 as the current 7d chart endpoint and the same sticky control.
 - Full `go test ./... -count=1 -p 4 -timeout 35m` passed for the initial slice
   (the API and database packages took about 27 and 35 minutes on the shared
-  host). A fresh full Go run is in progress for this follow-up. `pnpm
+  host). A fresh full Go run found a missing OpenAPI `required` declaration;
+  the declaration was added and its focused contract test passed. `pnpm
   test:types` passed. CodeRabbit is rate limited on the draft; the PR must
   receive an actual review before merge.
