@@ -38,6 +38,8 @@ export function HostResources({ data, window, loading, error }: { data: HostReso
   const latest = data?.latest
   const stale = latest ? Date.now() - new Date(latest.sampled_at).getTime() > 3 * 60_000 : false
   const measured = data?.series.filter((bucket) => bucket.cpu_percent != null || bucket.memory_percent != null).length ?? 0
+  const tickEvery = window === "24h" ? 48 : window === "7d" ? 24 : 20
+  const ticks = data?.series.filter((_, index) => index % tickEvery === 0).map((bucket) => bucket.ts) ?? []
   const recordingSince = data?.recording_since
     ? new Date(data.recording_since).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" })
     : null
@@ -60,12 +62,12 @@ export function HostResources({ data, window, loading, error }: { data: HostReso
       </div>
       {measured > 0 ? (
         <ChartContainer config={chartConfig} className="mt-2 h-[180px] w-full aspect-auto">
-          <LineChart accessibilityLayer data={data?.series ?? []} margin={{ top: 8, right: 8, left: -22, bottom: 0 }}>
+          <LineChart accessibilityLayer data={data?.series ?? []} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
             <CartesianGrid vertical={false} strokeDasharray="2 4" stroke="rgba(255,255,255,0.055)" />
-            <XAxis dataKey="ts" tickLine={false} axisLine={false} tickMargin={8} minTickGap={28}
+            <XAxis dataKey="ts" ticks={ticks} tickLine={false} axisLine={false} tickMargin={8} minTickGap={40}
               tick={{ fontSize: 11, fill: "var(--muted-foreground-soft)", fontFamily: "var(--font-mono)" }}
               tickFormatter={(value) => window === "24h" ? new Date(value).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" }) : new Date(value).toLocaleDateString(undefined, { day: "numeric", month: "short" })} />
-            <YAxis domain={[0, 100]} ticks={[0, 25, 50, 75, 100]} tickLine={false} axisLine={false} width={38}
+            <YAxis domain={[0, 100]} ticks={[0, 25, 50, 75, 100]} tickLine={false} axisLine={false} width={42}
               tick={{ fontSize: 11, fill: "var(--muted-foreground-soft)", fontFamily: "var(--font-mono)" }} tickFormatter={(value) => `${value}%`} />
             <ChartTooltip content={<ChartTooltipContent indicator="line" labelFormatter={(value) => new Date(String(value)).toLocaleString()} />} />
             <Line type="monotone" dataKey="cpu_percent" stroke="var(--chart-1)" strokeWidth={2} connectNulls={false} dot={measured < 3} isAnimationActive={false} />
