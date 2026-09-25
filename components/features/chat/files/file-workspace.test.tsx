@@ -63,6 +63,8 @@ describe("FileWorkspace", () => {
     expect(screen.queryByRole("button", { name: "Edit" })).not.toBeInTheDocument()
     rerender(<FileWorkspace {...base} file={{ ...file, path: "crew/agent/report.pdf", name: "report.pdf" }} />)
     expect(screen.getByText("PDF or image: report.pdf")).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: "Download file" })).toHaveAttribute("href", "/api/v1/agents/agent/files/download?workspace_id=ws&path=crew%2Fagent%2Freport.pdf")
+    expect(screen.queryByRole("button", { name: "Chat alongside" })).not.toBeInTheDocument()
     expect(screen.queryByText("initial content")).not.toBeInTheDocument()
   })
 

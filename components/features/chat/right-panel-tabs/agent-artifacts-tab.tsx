@@ -45,9 +45,10 @@ export function AgentArtifactsTab({ agentId, workspaceId, crewId, agentSlug }: {
     return () => controller.abort()
   }, [agentId, workspaceId, revision])
 
-  const artifacts = files.filter((file) => !file.is_dir
+  const artifacts = [...new Map(files.filter((file) => !file.is_dir
     && artifactExtensions.has(extension(file.name))
     && classifyAgentFile(relativeToAgent(file.path, crewId, agentSlug)) !== "plumbing")
+    .map((file) => [file.path, file] as const)).values()]
 
   return <div className="p-3 text-xs">
     <div className="mb-2 flex items-center justify-between gap-2 text-[10px] uppercase tracking-wider text-muted-foreground">

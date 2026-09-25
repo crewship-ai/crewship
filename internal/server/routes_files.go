@@ -130,11 +130,10 @@ func (s *Server) handleFileList(w http.ResponseWriter, r *http.Request) {
 	// (files the agent saved to /output/ instead of /output/<agent-slug>/)
 	if agentSlug != "" {
 		var rootFiles []provider.FileInfo
-		if recursive {
-			rootFiles, err = s.storage.ListRecursive(r.Context(), crewID)
-		} else {
-			rootFiles, err = s.storage.List(r.Context(), crewID)
-		}
+		// Only direct crew-root files are shared here. A recursive crew listing
+		// would also include every agent's subtree, duplicating this agent's
+		// files and exposing sibling agents' files through its scoped endpoint.
+		rootFiles, err = s.storage.List(r.Context(), crewID)
 		if err == nil {
 			for _, f := range rootFiles {
 				if !f.IsDir {

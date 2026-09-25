@@ -2,7 +2,7 @@
 
 import { useEffect, useId, useState } from "react"
 import Link from "next/link"
-import { CircleDot, Workflow } from "lucide-react"
+import { ChevronRight, CircleDot, Workflow } from "lucide-react"
 import { StatusIcon, statusLabel } from "@/components/features/issues/status-icon"
 import { CrewIcon } from "@/components/ui/crew-icon"
 import { apiFetch } from "@/lib/api-fetch"
@@ -83,6 +83,24 @@ function IssueCard({ issue }: { issue: IssueRow }) {
   </li>
 }
 
+function IssueGroup({ status, issues }: { status: string; issues: IssueRow[] }) {
+  const [expanded, setExpanded] = useState(true)
+  const label = statusLabel[status] || status.toLowerCase().replaceAll("_", " ")
+  return <section aria-label={`${label} issues`} className="min-w-0">
+    <button type="button" aria-expanded={expanded} onClick={() => setExpanded((value) => !value)} className="kit-tap mb-1.5 flex w-full items-center gap-1.5 rounded-md px-1 py-1 text-left text-[10px] font-medium uppercase tracking-wider text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground">
+      <ChevronRight className={cn("size-3 shrink-0 transition-transform duration-200 motion-reduce:transition-none", expanded && "rotate-90")} aria-hidden />
+      <StatusIcon status={status} className="size-3" />
+      <span>{label}</span>
+      <span className="ml-auto tabular-nums">{issues.length}</span>
+    </button>
+    <div className={cn("grid transition-[grid-template-rows,opacity] duration-200 ease-out motion-reduce:transition-none", expanded ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0")} aria-hidden={!expanded} inert={!expanded}>
+      <div className="min-h-0 overflow-hidden">
+        <ul className="space-y-1.5">{issues.map((issue) => <IssueCard key={issue.id} issue={issue} />)}</ul>
+      </div>
+    </div>
+  </section>
+}
+
 function RoutineCard({ routine }: { routine: RoutineRow }) {
   const state = routineState(routine)
   const date = routine.last_invoked_at || routine.updated_at
@@ -153,10 +171,7 @@ export function AgentWorkTab({ agentId, workspaceId }: { agentId: string; worksp
       {loading && <p role="status" className="py-2 text-muted-foreground">Loading agent work…</p>}
       {error && <div role="alert" className="space-y-2 rounded-lg border border-destructive/25 p-2.5 text-muted-foreground"><p>Work could not be loaded.</p><button type="button" onClick={() => setRevision((n) => n + 1)} className="text-primary hover:underline">Try again</button></div>}
       {!workspaceId && !loading && !error && <p className="rounded-lg border border-dashed p-2.5 text-muted-foreground">Select a workspace to see agent work.</p>}
-      {workspaceId && !loading && !error && view === "issues" && (groups.length ? <div className="grid grid-cols-1 items-start gap-3">{groups.map(({ status, issues: groupIssues }) => <section key={status} aria-label={`${statusLabel[status] || status} issues`} className="min-w-0">
-        <h3 className="mb-1.5 flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground"><StatusIcon status={status} className="size-3" />{statusLabel[status] || status.toLowerCase().replaceAll("_", " ")}<span className="ml-auto tabular-nums">{groupIssues.length}</span></h3>
-        <ul className="space-y-1.5">{groupIssues.map((issue) => <IssueCard key={issue.id} issue={issue} />)}</ul>
-      </section>)}</div> : <p className="rounded-lg border border-dashed p-2.5 text-muted-foreground">No issues assigned to this agent.</p>)}
+      {workspaceId && !loading && !error && view === "issues" && (groups.length ? <div className="grid grid-cols-1 items-start gap-3">{groups.map(({ status, issues: groupIssues }) => <IssueGroup key={`${agentId}:${status}`} status={status} issues={groupIssues} />)}</div> : <p className="rounded-lg border border-dashed p-2.5 text-muted-foreground">No issues assigned to this agent.</p>)}
       {workspaceId && !loading && !error && view === "routines" && (routines.length ? <ul className="space-y-1.5">{routines.map((routine) => <RoutineCard key={routine.id} routine={routine} />)}</ul> : <p className="rounded-lg border border-dashed p-2.5 text-muted-foreground">No routines authored by this agent.</p>)}
     </div>
   </div>

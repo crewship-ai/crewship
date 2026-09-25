@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import dynamic from "next/dynamic"
 import { EditorState } from "@codemirror/state"
 import { EditorView } from "@codemirror/view"
-import { ArrowLeft, Download, MessageSquare, Pencil, Save, X } from "lucide-react"
+import { ArrowLeft, Download, Pencil, Save, X } from "lucide-react"
 import { apiFetch } from "@/lib/api-fetch"
 import { isPreviewable } from "@/lib/file-format"
 import { isManagerTier } from "@/lib/permissions/tiers"
@@ -34,8 +34,6 @@ export interface FileWorkspaceProps {
   /** Parent checks unsaved edits before changing selection or closing. */
   onDirtyChange?: (dirty: boolean) => void
   onClose: () => void
-  /** The parent owns whether conversation remains alongside this workspace. */
-  onChatAlongside?: () => void
 }
 
 const TEXT_LIMIT = 2 * 1024 * 1024
@@ -47,7 +45,7 @@ export function FileWorkspace(props: FileWorkspaceProps) {
 }
 
 function FileWorkspaceContent(props: FileWorkspaceProps) {
-  const { file, agentId, workspaceId, onDirtyChange, onClose, onChatAlongside } = props
+  const { file, agentId, workspaceId, onDirtyChange, onClose } = props
   const { role } = useWorkspace()
   const canEdit = isManagerTier(role) && isPreviewable(file.name)
   const textFile = isPreviewable(file.name)
@@ -62,7 +60,6 @@ function FileWorkspaceContent(props: FileWorkspaceProps) {
   const [saveError, setSaveError] = useState("")
   const [editorVersion, setEditorVersion] = useState(0)
   const saveRef = useRef<(() => void) | null>(null)
-  const latestBytes = useRef<Uint8Array<ArrayBuffer> | null>(null)
 
   useEffect(() => {
     setContent(null)
@@ -71,7 +68,6 @@ function FileWorkspaceContent(props: FileWorkspaceProps) {
     setEditing(false)
     setDirty(false)
     setSaveError("")
-    latestBytes.current = null
     onDirtyChange?.(false)
     if (!textFile) return
     const controller = new AbortController()
@@ -80,7 +76,6 @@ function FileWorkspaceContent(props: FileWorkspaceProps) {
       if (bytes.includes(0)) throw new Error("This file contains binary data and cannot be opened as text.")
       const decoded = new TextDecoder("utf-8", { fatal: true }).decode(bytes)
       if (!controller.signal.aborted) {
-        latestBytes.current = bytes
         setContent(decoded)
       }
     }).catch((cause: unknown) => {
@@ -113,7 +108,6 @@ function FileWorkspaceContent(props: FileWorkspaceProps) {
       })
       if (!response.ok) throw new Error(`Could not save file (${response.status}).`)
       setContent(next)
-      latestBytes.current = new TextEncoder().encode(next)
       setEditing(false)
       setDirty(false)
       onDirtyChange?.(false)
@@ -125,28 +119,16 @@ function FileWorkspaceContent(props: FileWorkspaceProps) {
     }
   }, [agentId, canEdit, file.path, file.scope, onDirtyChange, saving, workspaceId])
 
-  const download = () => {
-    const bytes = latestBytes.current
-    if (!bytes) return
-    const url = URL.createObjectURL(new Blob([bytes], { type: "application/octet-stream" }))
-    const link = document.createElement("a")
-    link.href = url
-    link.download = file.name
-    link.click()
-    window.setTimeout(() => URL.revokeObjectURL(url), 1000)
-  }
-
   return <section aria-label={`File workspace ${file.name}`} className="flex h-full min-h-0 min-w-0 flex-col bg-background">
-    <header className="flex min-h-12 shrink-0 flex-wrap items-center gap-2 border-b px-3 py-1.5">
-      <Button variant="ghost" size="icon" aria-label="Back to chat" onClick={onClose}><ArrowLeft className="size-4" /></Button>
-      {getChatFileIcon(file.name, false)}
+    <header className="flex min-h-14 shrink-0 flex-wrap items-center gap-2 border-b border-border bg-card px-3 py-2">
+      <Button variant="ghost" size="icon-sm" aria-label="Back to chat" onClick={onClose}><ArrowLeft className="size-4" /></Button>
+      <span className="flex size-8 shrink-0 items-center justify-center rounded-md border border-border bg-muted/40">{getChatFileIcon(file.name, false)}</span>
       <div className="min-w-0 flex-1">
-        <div className="truncate text-sm font-medium" title={file.path}>{file.name}</div>
-        <div className="truncate text-xs text-muted-foreground" title={file.path}>{file.path}</div>
+        <div className="truncate text-sm font-semibold text-foreground" title={file.name}>{file.name}</div>
+        <div className="truncate text-[11px] text-muted-foreground" title={file.path}>{file.path}</div>
       </div>
       {dirty && <span className="text-xs text-warn">Unsaved changes</span>}
-      {onChatAlongside && <Button variant="outline" size="sm" onClick={onChatAlongside}><MessageSquare className="size-3.5" /> Chat alongside</Button>}
-      {textFile && <Button variant="ghost" size="icon" aria-label="Download file" disabled={content === null} onClick={download}><Download className="size-4" /></Button>}
+      <Button variant="outline" size="sm" asChild><a href={route} download={file.name} aria-label="Download file"><Download className="size-3.5" /> Download</a></Button>
       {canEdit && content !== null && !editing && <Button variant="outline" size="sm" onClick={() => setEditing(true)}><Pencil className="size-3.5" /> Edit</Button>}
       {editing && <>
         <Button variant="outline" size="sm" onClick={() => {

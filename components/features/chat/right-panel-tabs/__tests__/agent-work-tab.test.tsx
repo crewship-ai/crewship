@@ -33,6 +33,13 @@ describe("AgentWorkTab", () => {
     expect(screen.queryByRole("button", { name: /Refresh agent work/ })).not.toBeInTheDocument()
     expect(screen.queryByRole("link", { name: /View all/ })).not.toBeInTheDocument()
 
+    fireEvent.click(within(backlog).getByRole("button", { name: /Backlog/ }))
+    expect(within(backlog).getByRole("button", { name: /Backlog/ })).toHaveAttribute("aria-expanded", "false")
+    expect(within(backlog).queryByRole("link", { name: /COPY-3/ })).not.toBeInTheDocument()
+    expect(within(working).getByRole("link", { name: /COPY-1/ })).toBeInTheDocument()
+    fireEvent.click(within(backlog).getByRole("button", { name: /Backlog/ }))
+    expect(within(backlog).getByRole("link", { name: /COPY-3/ })).toBeInTheDocument()
+
     fireEvent.click(screen.getByRole("tab", { name: /Routines/ }))
     expect(screen.getByRole("tab", { name: /Routines/ })).toHaveAttribute("aria-selected", "true")
     const routine = screen.getByRole("link", { name: "Routine Copy review" })

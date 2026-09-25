@@ -231,7 +231,6 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
   const [filesError, setFilesError] = useState<string | null>(null)
   const [filesRevision, setFilesRevision] = useState(0)
   const [workspaceFile, setWorkspaceFile] = useState<WorkspaceFile | null>(null)
-  const [chatAlongsideFile, setChatAlongsideFile] = useState(false)
   const fileDirtyRef = useRef(false)
   const openWorkspaceFile = useCallback((file: WorkspaceFile) => {
     if (file.scope.kind !== "agent") return false
@@ -248,7 +247,6 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
     if (fileDirtyRef.current && !window.confirm("Discard unsaved file changes?")) return
     fileDirtyRef.current = false
     setWorkspaceFile(null)
-    setChatAlongsideFile(false)
     window.dispatchEvent(new CustomEvent("crewship:chat-file-workspace", { detail: { open: false } }))
   }, [])
   const [previewFile, setPreviewFile] = useState<{ path: string } | null>(null)
@@ -1064,11 +1062,10 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
             workspaceId={workspaceId}
             onDirtyChange={(dirty) => { fileDirtyRef.current = dirty }}
             onClose={closeWorkspaceFile}
-            onChatAlongside={() => setChatAlongsideFile((open) => !open)}
           />
         </div>
       )}
-      <div className={cn("flex flex-col overflow-hidden min-w-0", showingWorkspaceFile ? chatAlongsideFile ? "w-[min(32vw,390px)] shrink-0 border-l" : "hidden" : "flex-1")}>
+      <div className={cn("flex flex-col overflow-hidden min-w-0", showingWorkspaceFile ? "hidden" : "flex-1")}>
         <ReconnectBanner status={connectionStatus} />
         {/* Who you are talking to, not the session id. The strip carries the
             agent (face, status, role, crew, model, skills, credentials); the
