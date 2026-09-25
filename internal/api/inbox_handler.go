@@ -419,11 +419,11 @@ func (h *InboxHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, inboxListResponse{
-		Rows:         out,
-		Count:        len(out),
-		UnreadCount:  unreadCount,
-		HasMore:      hasMore,
-		ActiveByKind: activeByKind,
+		Rows:          out,
+		Count:         len(out),
+		UnreadCount:   unreadCount,
+		HasMore:       hasMore,
+		ActiveByKind:  activeByKind,
 		DecisionCount: decisionCountPtr,
 	})
 }
