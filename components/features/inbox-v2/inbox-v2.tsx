@@ -27,8 +27,8 @@ import {
   type InboxV2Filters,
 } from "./inbox-v2-derive"
 import { useInboxV2DeepLink } from "./inbox-v2-deeplink"
-import { ATTENTION_LABELS, matchesInboxAttention, parseInboxAttention } from "./inbox-v2-attention"
-import { entryIdentity, filterInboxEntries } from "./inbox-entry-identity"
+import { matchesInboxAttention, parseInboxAttention } from "./inbox-v2-attention"
+import { filterInboxEntries } from "./inbox-entry-identity"
 import { InboxV2Detail } from "./inbox-v2-detail"
 import { InboxV2Explorer } from "./inbox-v2-explorer"
 import { useInboxLookup } from "@/components/features/inbox/use-inbox-lookup"
@@ -238,7 +238,11 @@ export function InboxV2() {
     if (chosenView === null && feedsSettled) setView(feeds.action.length ? "action" : "updates")
   }, [chosenView, feedsSettled, feeds.action.length])
   const selectionMissing = Boolean(selectedKey) && !selected && feedsSettled
-  const selectedInboxID = selected?.source === "inbox" ? selected.inboxItem?.id : null
+  // Preview the first visible row on desktop without opening it. `openEntry`
+  // alone marks an unread inbox row as read, so arriving at Inbox cannot do it.
+  // Explicit ?item= links never fall back to a different row.
+  const displayed = selectedKey ? selected : visible[0] ?? null
+  const selectedInboxID = displayed?.source === "inbox" ? displayed.inboxItem?.id : null
   const detailedInbox = useInboxItem(workspaceId, selectedInboxID)
   // A staged hire is one decision in two places: this waitpoint and a row in
   // the approvals queue that carries `inbox_item_id`. The queue row is the one
@@ -388,7 +392,7 @@ export function InboxV2() {
           // Full width on a phone — a fixed 340px column left a dead strip
           // beside it, because the reading pane is hidden until a row is
           // opened. Desktop gives long request titles more room.
-          collapsed ? "w-full lg:w-9" : "w-full lg:w-[320px] xl:w-[340px]",
+          collapsed ? "w-full lg:w-9" : "w-full lg:w-[350px] xl:w-[374px]",
           selectedKey && "hidden lg:block",
         )}
       >
@@ -407,8 +411,8 @@ export function InboxV2() {
             attention={attention}
             onClearAttention={() => router.push("/inbox")}
             filters={filters}
-            onFilters={setFilters}
-            selectedKey={selected?.key ?? null}
+            onFilters={(next) => { setFilters(next); if (selectedKey) closeEntry() }}
+            selectedKey={displayed?.key ?? null}
             onOpen={openEntry}
             onMarkAllRead={!attention && view === "updates" && active.unreadCount > 0 ? markVisibleRead : undefined}
             onToggleCollapse={() => setCollapsed(true)}
@@ -424,8 +428,8 @@ export function InboxV2() {
           </div>
         )}
         <InboxV2Detail
-          key={selected?.key || "overview"}
-          entry={selected}
+          key={displayed?.key || "overview"}
+          entry={displayed}
           selectionMissing={selectionMissing}
           role={(role as WorkspaceRole | null) ?? null}
           detailedInboxItem={detailedInbox.data}
@@ -449,24 +453,6 @@ export function InboxV2() {
           onArchiveGroup={archiveGroup}
           lookup={lookup}
           onDenyHire={hireTwin ? denyHire : undefined}
-          triage={{
-            incomplete: sourceState.degraded,
-            loading: sourceState.loading && allEntries.length === 0,
-            focus: attention ? { label: ATTENTION_LABELS[attention], entries: visible, onClear: () => router.push("/inbox") } : undefined,
-            action: feeds.action,
-            updates: feeds.updates,
-            history: feeds.history,
-            onOpen: (entry) => {
-              const holds = feeds.history.includes(entry) ? "history" : feeds.updates.includes(entry) ? "updates" : "action"
-              setView(holds)
-              openEntry(entry)
-            },
-            onCrew: (crewId) => {
-              const target = feeds.action.some((entry) => entryIdentity(entry, lookup).crew?.id === crewId) ? "action" : "updates"
-              showView(target)
-              setFilters({ ...EMPTY_INBOX_V2_FILTERS, crew: crewId })
-            },
-          }}
         />
       </main>
     </div>

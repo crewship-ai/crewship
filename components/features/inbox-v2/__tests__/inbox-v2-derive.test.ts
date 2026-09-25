@@ -38,6 +38,12 @@ function item(overrides: Partial<InboxItem> = {}): InboxItem {
 }
 
 describe("inbox v2 classification", () => {
+  it("offers a diagnostic type for every current trigger failure kind", () => {
+    for (const kind of ["run_needs_human", "webhook_fire_failed", "automation_enqueue_failed"] as const) {
+      expect(entryType(inboxEntry(item({ kind })))).toBe(kind)
+    }
+  })
+
   it("does not turn a source-less keeper advisory into a client decision", () => {
     expect(isActionableInboxItem(item({
       kind: "escalation",
@@ -241,6 +247,7 @@ describe("facets answer to real fields", () => {
     expect(counts.type.approval).toBe(1)
     expect(counts.type.failed_run).toBe(0)
     expect(counts.deadline.hour).toBe(1)
+    expect(counts.deadline.soon).toBe(1)
     expect(counts.deadline.none).toBe(2)
     expect(counts.unread).toBe(2)
     expect(counts.total).toBe(3)
@@ -257,6 +264,7 @@ describe("facets answer to real fields", () => {
 
     expect(keys({ type: "waitpoint" })).toEqual(["inbox:2026-08-30T12:30:00Z", "inbox:read-soon"])
     expect(keys({ deadline: "hour" })).toEqual(["inbox:2026-08-30T12:30:00Z", "inbox:read-soon"])
+    expect(keys({ deadline: "soon" })).toEqual(["inbox:2026-08-30T12:30:00Z", "inbox:read-soon"])
     expect(keys({ type: "waitpoint", unreadOnly: true })).toEqual(["inbox:2026-08-30T12:30:00Z"])
     expect(keys({ type: "message" })).toEqual([])
   })
