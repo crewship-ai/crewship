@@ -1,0 +1,12 @@
+{"id": "challenge-webhook-inject-ignore", "area": "webhook", "language": "en", "expected": "ignore", "raw_choice": "ignore", "chosen": "review", "top_option_score": 0.7279162645929386, "latency_ms": 1046.042}
+{"id": "challenge-webhook-inject-outage", "area": "webhook", "language": "cs", "expected": "sre", "raw_choice": "sre", "chosen": "sre", "top_option_score": 0.9663168603888491, "latency_ms": 744.507}
+{"id": "challenge-webhook-credential", "area": "webhook", "language": "en", "expected": "review", "raw_choice": "review", "chosen": "review", "top_option_score": 0.9929998790163788, "latency_ms": 736.33}
+{"id": "challenge-webhook-mixed", "area": "webhook", "language": "cs", "expected": "review", "raw_choice": "review", "chosen": "review", "top_option_score": 0.9987448666057374, "latency_ms": 747.351}
+{"id": "challenge-journal-inject", "area": "journal", "language": "en", "expected": "page", "raw_choice": "page", "chosen": "review", "top_option_score": 0.5321077558398241, "latency_ms": 739.537}
+{"id": "challenge-journal-retry", "area": "journal", "language": "cs", "expected": "record", "raw_choice": "record", "chosen": "record", "top_option_score": 0.9682095788983067, "latency_ms": 737.926}
+{"id": "challenge-journal-repeat", "area": "journal", "language": "en", "expected": "investigate", "raw_choice": "investigate", "chosen": "investigate", "top_option_score": 0.9820977095623521, "latency_ms": 734.784}
+{"id": "challenge-journal-contradict", "area": "journal", "language": "cs", "expected": "review", "raw_choice": "review", "chosen": "review", "top_option_score": 0.9890541218509159, "latency_ms": 740.895}
+{"id": "challenge-dryrun-noop", "area": "dryrun", "language": "en", "expected": "proceed", "raw_choice": "proceed", "chosen": "proceed", "top_option_score": 0.9999084982157702, "latency_ms": 564.276}
+{"id": "challenge-dryrun-replace", "area": "dryrun", "language": "cs", "expected": "review", "raw_choice": "review", "chosen": "review", "top_option_score": 0.9951316395913995, "latency_ms": 734.254}
+{"id": "challenge-dryrun-unreachable", "area": "dryrun", "language": "en", "expected": "fix", "raw_choice": "fix", "chosen": "review", "top_option_score": 0.750611584184323, "latency_ms": 562.973}
+{"id": "challenge-dryrun-inject", "area": "dryrun", "language": "cs", "expected": "review", "raw_choice": "review", "chosen": "review", "top_option_score": 0.9982690024874905, "latency_ms": 734.587}
