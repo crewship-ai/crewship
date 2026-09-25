@@ -73,8 +73,8 @@ import (
 // request can ever satisfy.
 //
 // Returns the per-table count of re-keyed rows for the restore result.
-// Rows whose secret column is empty are left alone and not counted:
-// an empty token is not a capability, and minting one would invent
+// Rows with neither a token nor a digest are left alone and not counted:
+// an empty credential is not a capability, and minting one would invent
 // access the source never granted.
 func rekeyForkedCapabilityTokens(dump *DBDump) (map[string]int, error) {
 	counts := map[string]int{}
@@ -109,7 +109,7 @@ func rekeyForkedCapabilityTokens(dump *DBDump) (map[string]int, error) {
 	// (a leaked link, say) and replace the record with a generic fork
 	// note.
 	for _, row := range dump.Tables["port_exposures"] {
-		if !hasNonEmptyString(row, "token") {
+		if !hasNonEmptyString(row, "token") && !hasNonEmptyString(row, "token_hash") {
 			continue
 		}
 		id, _ := row["id"].(string)
@@ -133,7 +133,7 @@ func rekeyForkedCapabilityTokens(dump *DBDump) (map[string]int, error) {
 	// shows an off switch, not a live URL that never fires. Re-creating
 	// the webhook (or a future rotate path) mints a working token.
 	for _, row := range dump.Tables["pipeline_webhooks"] {
-		if !hasNonEmptyString(row, "token") {
+		if !hasNonEmptyString(row, "token") && !hasNonEmptyString(row, "token_hash") {
 			continue
 		}
 		id, _ := row["id"].(string)
