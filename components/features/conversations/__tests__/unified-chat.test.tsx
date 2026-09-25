@@ -137,7 +137,7 @@ describe("unified Chat", () => {
   })
 
   it("uses All to clear filters and lets a selected agent row collapse without leaving its chat", async () => {
-    render(wrap(<UnifiedChatProvider><ChatClient /></UnifiedChatProvider>))
+    const view = render(wrap(<UnifiedChatProvider><ChatClient /></UnifiedChatProvider>))
     await screen.findByRole("button", { name: "Open Ava chat" })
     fireEvent.click(screen.getByRole("button", { name: "Open Ava chat" }))
     expect(await screen.findByTestId("agent-panel")).toHaveTextContent("ava:legacy")
@@ -147,6 +147,9 @@ describe("unified Chat", () => {
     expect(screen.getByRole("button", { name: "Show Ava sessions" })).toHaveAttribute("aria-expanded", "false")
     expect(screen.getByRole("button", { name: "Open Ava chat" }).parentElement?.className).not.toContain("bg-primary/10")
     expect(screen.getByTestId("agent-panel")).toHaveTextContent("ava:legacy")
+    fixtures.tree.threadsByAgent = { agent: [...fixtures.tree.threadsByAgent.agent] }
+    view.rerender(wrap(<UnifiedChatProvider><ChatClient /></UnifiedChatProvider>))
+    expect(screen.getByRole("button", { name: "Show Ava sessions" })).toHaveAttribute("aria-expanded", "false")
 
     fireEvent.click(screen.getByRole("button", { name: "Filter" }))
     fireEvent.click(screen.getByRole("button", { name: "Agent sessions" }))

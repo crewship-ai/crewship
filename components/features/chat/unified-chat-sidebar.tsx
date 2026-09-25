@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState, type ReactNode } from "react"
+import { useEffect, useRef, useState, type ReactNode } from "react"
 import { motion } from "motion/react"
 import { ChevronDown, ChevronRight, MailOpen, Plus, Radio } from "lucide-react"
 import { AgentAvatar } from "@/components/ui/agent-avatar"
@@ -95,9 +95,13 @@ function ScopedChatSidebar({ props, rows, query, setQuery, stateKey }: SidebarPr
     setExpanded((old) => ({ ...old, [draftConversation.agent.id]: true }))
     setClosed((old) => ({ ...old, agents: false }))
   }, [draftConversation?.id, draftConversation?.agent.id, setQuery])
+  const revealedThreadId = useRef<string | null>(null)
   useEffect(() => {
+    if (!activeThreadId) { revealedThreadId.current = null; return }
+    if (revealedThreadId.current === activeThreadId) return
     const selected = rows.find((row) => row.thread.id === activeThreadId)
     if (!selected) return
+    revealedThreadId.current = activeThreadId
     setExpanded((old) => old[selected.agent.id] ? old : { ...old, [selected.agent.id]: true })
     setClosed((old) => old.agents ? { ...old, agents: false } : old)
   }, [activeThreadId, rows])
