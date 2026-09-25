@@ -96,11 +96,11 @@ var helperParsedQueryParameters = []struct {
 	// `include_setup`, `counts`, `kind` and the credential filters are read
 	// inline and inferred; only q/limit/offset come from the annotation.
 	// Credentials reads ?q itself (credentials.go:189) and ?limit/?offset
-	// through the helper; chats reads no ?q at all.
+	// through the helper; chats also reads its source and title-search filters inline.
 	{"GET", "/api/v1/crews", "parsePagination+listSearchClause", []string{"limit", "offset", "order", "q"}},
 	{"GET", "/api/v1/agents", "parsePagination+listSearchClause", []string{"crew_id", "include_setup", "limit", "offset", "q"}},
 	{"GET", "/api/v1/credentials", "parsePagination", []string{"kind", "limit", "offset", "paginate", "q", "search", "tag"}},
-	{"GET", "/api/v1/agents/{agentId}/chats", "parsePagination", []string{"counts", "kind", "limit", "offset"}},
+	{"GET", "/api/v1/agents/{agentId}/chats", "parsePagination", []string{"chat_id", "counts", "kind", "limit", "offset", "q", "routine_id", "source"}},
 
 	// resolveIOStep (pipeline_runs.go) — the #863 sub-span I/O gate.
 	{"GET", "/api/v1/workspaces/{workspaceId}/pipeline-runs/{runId}", "resolveIOStep", []string{"include_io", "io_step"}},

@@ -11,6 +11,8 @@ export type DrawerTab = "files" | "artifacts" | "work" | "triggers" | "team" | "
 export type DrawerMode = "overlay" | "push"
 
 interface DrawerState {
+  workSource: { workspaceId: string; agentId: string; source: import("@/components/features/chat/chat-tree-data").ChatWorkSource } | null
+
   open: boolean
   activeTab: DrawerTab
   mode: DrawerMode
@@ -25,6 +27,7 @@ interface DrawerState {
 export const useDrawerStore = create<DrawerState>()(
   persist(
     (set, get) => ({
+      workSource: null,
       open: true,
       activeTab: "artifacts",
       mode: "push",

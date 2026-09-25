@@ -207,13 +207,24 @@ func (s *Store) List(ctx context.Context, w, u string, limit int) ([]Conversatio
 	return s.ListPage(ctx, w, u, limit, 0)
 }
 func (s *Store) ListPage(ctx context.Context, w, u string, limit, offset int) ([]Conversation, error) {
+	return s.SearchPage(ctx, w, u, "", limit, offset)
+}
+
+// SearchPage applies access and name matching before pagination.
+func (s *Store) SearchPage(ctx context.Context, w, u, query string, limit, offset int) ([]Conversation, error) {
 	if offset < 0 {
 		return nil, ErrInvalid
 	}
 	if err := workspaceMember(ctx, s.db, w, u); err != nil {
 		return nil, err
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT `+conversationCols+` FROM workspace_conversations c WHERE `+accessible+` ORDER BY c.updated_at DESC,c.id DESC LIMIT ? OFFSET ?`, u, u, u, u, u, w, u, u, boundedLimit(limit), offset)
+	where := accessible
+	args := []any{u, u, u, u, u, w, u, u}
+	if q := strings.TrimSpace(query); q != "" {
+		where += ` AND (instr(crewship_casefold(c.title),crewship_casefold(?))>0 OR (c.is_direct=1 AND EXISTS(SELECT 1 FROM workspace_conversation_members peer JOIN users usr ON usr.id=peer.user_id JOIN workspace_members wm ON wm.user_id=usr.id AND wm.workspace_id=c.workspace_id WHERE peer.conversation_id=c.id AND peer.user_id<>? AND instr(crewship_casefold(COALESCE(usr.full_name,usr.id)),crewship_casefold(?))>0)))`
+		args = append(args, q, u, q)
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT `+conversationCols+` FROM workspace_conversations c WHERE `+where+` ORDER BY c.updated_at DESC,c.id DESC LIMIT ? OFFSET ?`, append(args, boundedLimit(limit), offset)...)
 	if err != nil {
 		return nil, err
 	}

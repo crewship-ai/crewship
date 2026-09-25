@@ -353,14 +353,15 @@ func TestOrchestratorRunner_StampsRoutineOrigin(t *testing.T) {
 		resolver := &orchCovResolver{info: covChatInfo()}
 		r := newOrchRunnerRig(t, container, resolver)
 		if _, err := r.RunStep(context.Background(), AgentStepRequest{
-			WorkspaceID:  "ws_cov",
-			AuthorCrewID: "crew_cov",
-			AgentSlug:    "cov-agent",
-			Prompt:       "go",
-			TimeoutSec:   30,
-			PipelineID:   "pln_cmtem1pwz000d3e744992",
-			PipelineName: name,
-			StepID:       "summarize",
+			WorkspaceID:   "ws_cov",
+			AuthorCrewID:  "crew_cov",
+			AgentSlug:     "cov-agent",
+			Prompt:        "go",
+			TimeoutSec:    30,
+			PipelineID:    "pln_cmtem1pwz000d3e744992",
+			PipelineName:  name,
+			PipelineRunID: "routine-run",
+			StepID:        "summarize",
 		}); err != nil {
 			t.Fatalf("RunStep: %v", err)
 		}
@@ -369,6 +370,13 @@ func TestOrchestratorRunner_StampsRoutineOrigin(t *testing.T) {
 		}
 		return resolver.createChatCalls[0]
 	}
+
+	t.Run("explicit source", func(t *testing.T) {
+		got := run(t, "Daily digest")
+		if got.PipelineRunID != "routine-run" || got.PipelineStepID != "summarize" {
+			t.Fatalf("missing source: %+v", got)
+		}
+	})
 
 	t.Run("origin", func(t *testing.T) {
 		if got := run(t, "Daily digest").Origin; got != "ROUTINE" {

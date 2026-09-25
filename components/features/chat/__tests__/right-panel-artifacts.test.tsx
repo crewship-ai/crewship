@@ -70,7 +70,7 @@ describe("Chat agent context", () => {
     renderPanel({ initialTab: "work" })
     expect(await screen.findByRole("link", { name: /COPY-12/ })).toHaveAttribute("href", "/issues/COPY-12")
     fireEvent.click(screen.getByRole("tab", { name: /Routines/ }))
-    expect(screen.getByRole("link", { name: /Copy review/ })).toHaveAttribute("href", "/routines?routine=copy-review")
+    expect(screen.getByRole("link", { name: /Copy review/ })).toHaveAttribute("href", "/routines?slug=copy-review")
     expect(screen.queryByText("Other")).toBeNull()
   })
 })

@@ -45,7 +45,7 @@ export function ChatCrewPicker({ workspaceId, agents, value, onChange }: {
         value ? "border-primary/30 bg-primary/10 text-foreground" : "border-white/[0.08] bg-white/[0.03] text-muted-foreground hover:bg-white/[0.06]",
       )}>
         {selected ? <CrewIcon icon={selected.icon || "users"} color={selected.color} size="sm" className="!size-5 !rounded" /> : <AllCrewsIcon />}
-        <span className="min-w-0 flex-1 truncate">{selected?.name ?? "All crews"}</span>
+        <span className="min-w-0 flex-1 truncate">{selected?.name ?? (value ? "Selected crew" : "All crews")}</span>
         {value && <span className="text-[10px] tabular-nums text-muted-foreground">{counts.get(value) ?? 0}</span>}
         <ChevronDown className="size-3 shrink-0 opacity-60" aria-hidden />
       </button>

@@ -8,6 +8,10 @@ import { CrewIcon } from "@/components/ui/crew-icon"
 import { apiFetch } from "@/lib/api-fetch"
 import { resolveRoutineColor, resolveRoutineIcon } from "@/lib/routine-identity"
 import { formatShortDate } from "@/lib/time"
+import { useDrawerStore } from "@/stores/drawer-store"
+import { usePagedList } from "@/hooks/use-paged-list"
+import { useChatAgent } from "../chat-agent-context"
+import type { ChatTreeThread } from "../chat-tree-data"
 import { cn } from "@/lib/utils"
 
 interface IssueRow {
@@ -67,7 +71,7 @@ function routineState(routine: RoutineRow): { label: string; dot: string } {
   return { label: (routine.invocation_count ?? 0) > 0 ? "Last run unknown" : "Never run", dot: "bg-muted-foreground/40" }
 }
 
-function IssueCard({ issue }: { issue: IssueRow }) {
+function IssueCard({ issue, agentId, workspaceId }: { issue: IssueRow; agentId: string; workspaceId: string | null }) {
   const status = issue.status?.toUpperCase() || "BACKLOG"
   const updated = !!issue.updated_at && issue.updated_at !== issue.created_at
   const date = updated ? issue.updated_at : issue.created_at
@@ -80,10 +84,11 @@ function IssueCard({ issue }: { issue: IssueRow }) {
       </div>
       {date && <div className="mt-1.5 text-[10px] text-muted-foreground">{updated ? "Updated" : "Created"} {formatShortDate(date)}</div>}
     </Link>
+    <WorkConversations agentId={agentId} workspaceId={workspaceId} issueId={issue.id} />
   </li>
 }
 
-function IssueGroup({ status, issues }: { status: string; issues: IssueRow[] }) {
+function IssueGroup({ status, issues, agentId, workspaceId }: { status: string; issues: IssueRow[]; agentId: string; workspaceId: string | null }) {
   const [expanded, setExpanded] = useState(true)
   const label = statusLabel[status] || status.toLowerCase().replaceAll("_", " ")
   return <section aria-label={`${label} issues`} className="min-w-0">
@@ -95,18 +100,18 @@ function IssueGroup({ status, issues }: { status: string; issues: IssueRow[] }) 
     </button>
     <div className={cn("grid transition-[grid-template-rows,opacity] duration-200 ease-out motion-reduce:transition-none", expanded ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0")} aria-hidden={!expanded} inert={!expanded}>
       <div className="min-h-0 overflow-hidden">
-        <ul className="space-y-1.5">{issues.map((issue) => <IssueCard key={issue.id} issue={issue} />)}</ul>
+        <ul className="space-y-1.5">{issues.map((issue) => <IssueCard key={issue.id} issue={issue} agentId={agentId} workspaceId={workspaceId} />)}</ul>
       </div>
     </div>
   </section>
 }
 
-function RoutineCard({ routine }: { routine: RoutineRow }) {
+function RoutineCard({ routine, agentId, workspaceId }: { routine: RoutineRow; agentId: string; workspaceId: string | null }) {
   const state = routineState(routine)
   const date = routine.last_invoked_at || routine.updated_at
   const count = routine.invocation_count ?? 0
   return <li>
-    <Link href={`/routines?routine=${encodeURIComponent(routine.slug)}`} aria-label={`Routine ${routine.name || routine.slug}`} className="group block rounded-lg border border-border/60 bg-muted/20 px-2.5 py-2 transition-colors hover:border-primary/40 hover:bg-accent/50">
+    <Link href={`/routines?slug=${encodeURIComponent(routine.slug)}`} aria-label={`Routine ${routine.name || routine.slug}`} className="group block rounded-lg border border-border/60 bg-muted/20 px-2.5 py-2 transition-colors hover:border-primary/40 hover:bg-accent/50">
       <div className="mb-1 flex items-center justify-between gap-2 text-[10px] text-muted-foreground">
         <span className="min-w-0 truncate font-mono text-foreground/55">{routine.slug}</span>
         {date && <span className="shrink-0">{formatShortDate(date)}</span>}
@@ -123,10 +128,13 @@ function RoutineCard({ routine }: { routine: RoutineRow }) {
         {typeof routine.step_count === "number" && <><span aria-hidden="true">·</span><span>{routine.step_count} {routine.step_count === 1 ? "step" : "steps"}</span></>}
       </div>
     </Link>
+    <WorkConversations agentId={agentId} workspaceId={workspaceId} routineId={routine.id} />
   </li>
 }
 
 export function AgentWorkTab({ agentId, workspaceId }: { agentId: string; workspaceId: string | null }) {
+  const selection = useDrawerStore((state) => state.workSource)
+  const source = selection?.workspaceId === workspaceId && selection.agentId === agentId ? selection.source : null
   const [view, setView] = useState<WorkView>("issues")
   const [issues, setIssues] = useState<IssueRow[]>([])
   const [routines, setRoutines] = useState<RoutineRow[]>([])
@@ -134,6 +142,7 @@ export function AgentWorkTab({ agentId, workspaceId }: { agentId: string; worksp
   const [error, setError] = useState(false)
   const [revision, setRevision] = useState(0)
   const tabId = useId()
+  useEffect(() => { if (source) setView(source.kind === "routine" ? "routines" : "issues") }, [source])
 
   useEffect(() => {
     if (!workspaceId) { setIssues([]); setRoutines([]); return }
@@ -159,6 +168,7 @@ export function AgentWorkTab({ agentId, workspaceId }: { agentId: string; worksp
 
   const groups = issueGroups(issues)
   return <div className="@container p-3 text-xs">
+    {source && <section aria-label="Source of this conversation" className="mb-4 rounded-lg border border-primary/25 bg-primary/5 p-3"><p className="mb-1 text-[10px] text-muted-foreground">Source of this conversation</p><Link className="text-primary hover:underline" href={source.kind === "routine" ? `/routines?slug=${encodeURIComponent(source.slug || source.id)}${source.run_id ? `&run=${encodeURIComponent(source.run_id)}` : ""}` : `/issues/${encodeURIComponent(source.slug || source.id)}`}>{source.name} ↗</Link>{source.step_id && <p className="mt-1 text-[10px] text-muted-foreground">Step: {source.step_id}</p>}<WorkConversations agentId={agentId} workspaceId={workspaceId} routineId={source.kind === "routine" ? source.id : undefined} issueId={source.kind === "issue" ? source.id : undefined} /></section>}
     <div role="tablist" aria-label="Agent work type" className="mb-3 grid grid-cols-2 gap-1 rounded-lg bg-muted/40 p-1">
       {(["issues", "routines"] as const).map((kind) => {
         const Icon = kind === "issues" ? CircleDot : Workflow
@@ -171,8 +181,21 @@ export function AgentWorkTab({ agentId, workspaceId }: { agentId: string; worksp
       {loading && <p role="status" className="py-2 text-muted-foreground">Loading agent work…</p>}
       {error && <div role="alert" className="space-y-2 rounded-lg border border-destructive/25 p-2.5 text-muted-foreground"><p>Work could not be loaded.</p><button type="button" onClick={() => setRevision((n) => n + 1)} className="text-primary hover:underline">Try again</button></div>}
       {!workspaceId && !loading && !error && <p className="rounded-lg border border-dashed p-2.5 text-muted-foreground">Select a workspace to see agent work.</p>}
-      {workspaceId && !loading && !error && view === "issues" && (groups.length ? <div className="grid grid-cols-1 items-start gap-3">{groups.map(({ status, issues: groupIssues }) => <IssueGroup key={`${agentId}:${status}`} status={status} issues={groupIssues} />)}</div> : <p className="rounded-lg border border-dashed p-2.5 text-muted-foreground">No issues assigned to this agent.</p>)}
-      {workspaceId && !loading && !error && view === "routines" && (routines.length ? <ul className="space-y-1.5">{routines.map((routine) => <RoutineCard key={routine.id} routine={routine} />)}</ul> : <p className="rounded-lg border border-dashed p-2.5 text-muted-foreground">No routines authored by this agent.</p>)}
+      {workspaceId && !loading && !error && view === "issues" && (groups.length ? <div className="grid grid-cols-1 items-start gap-3">{groups.map(({ status, issues: groupIssues }) => <IssueGroup key={`${agentId}:${status}`} status={status} issues={groupIssues} agentId={agentId} workspaceId={workspaceId} />)}</div> : <p className="rounded-lg border border-dashed p-2.5 text-muted-foreground">No issues assigned to this agent.</p>)}
+      {workspaceId && !loading && !error && view === "routines" && (routines.length ? <ul className="space-y-1.5">{routines.map((routine) => <RoutineCard key={routine.id} routine={routine} agentId={agentId} workspaceId={workspaceId} />)}</ul> : <p className="rounded-lg border border-dashed p-2.5 text-muted-foreground">No routines authored by this agent.</p>)}
     </div>
   </div>
+}
+
+function WorkConversations({ agentId, workspaceId, routineId, issueId }: { agentId: string; workspaceId: string | null; routineId?: string; issueId?: string }) {
+  const [open, setOpen] = useState(false)
+  const agent = useChatAgent()
+  const list = usePagedList<ChatTreeThread>({ url: open && workspaceId ? `/api/v1/agents/${encodeURIComponent(agentId)}/chats?workspace_id=${encodeURIComponent(workspaceId)}&${routineId ? `routine_id=${encodeURIComponent(routineId)}` : `chat_id=${encodeURIComponent(issueId!)}`}` : null })
+  return <div className="mt-1"><button type="button" aria-expanded={open} onClick={() => setOpen(!open)} className="kit-tap flex items-center gap-1 px-1 py-1 text-[10px] text-muted-foreground hover:text-primary"><ChevronRight className={cn("size-3", open && "rotate-90")} />Conversations</button>{open && <div className="pl-4">
+    {list.loading && <p role="status">Loading conversations…</p>}
+    {list.error && <button type="button" onClick={() => void list.refresh()}>Could not load conversations. Retry</button>}
+    {!list.loading && !list.error && !list.items.length && <p className="py-1 text-[10px] text-muted-foreground">No linked conversations. Older runs may not have a recorded link.</p>}
+    {list.items.map((chat) => <Link key={chat.id} className="block truncate py-1 text-[11px] text-primary hover:underline" href={`/chat/${encodeURIComponent(agent?.slug || agentId)}?session=${encodeURIComponent(chat.id)}&workspace_id=${encodeURIComponent(workspaceId!)}`}>{chat.title || "Untitled session"}</Link>)}
+    {list.hasMore && <button type="button" disabled={list.loadingMore} onClick={() => void list.loadMore()} className="text-primary">Load more conversations</button>}
+  </div>}</div>
 }

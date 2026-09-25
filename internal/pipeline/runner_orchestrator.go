@@ -310,11 +310,13 @@ func (r *OrchestratorRunner) RunStep(ctx context.Context, req AgentStepRequest) 
 	}
 	chatTitle := fmt.Sprintf("%s · %s", routineLabel, req.StepID)
 	if err := r.resolver.CreateChat(ctx, chatbridge.CreateChatRequest{
-		ChatID:      chatID,
-		AgentID:     agentID,
-		WorkspaceID: req.WorkspaceID,
-		Title:       chatTitle,
-		Origin:      "ROUTINE",
+		ChatID:         chatID,
+		AgentID:        agentID,
+		WorkspaceID:    req.WorkspaceID,
+		Title:          chatTitle,
+		Origin:         "ROUTINE",
+		PipelineRunID:  req.PipelineRunID,
+		PipelineStepID: req.StepID,
 	}); err != nil {
 		// Non-fatal: a missing chat row degrades the audit trail
 		// but doesn't break the run. Log and continue.

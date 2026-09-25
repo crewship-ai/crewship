@@ -43,7 +43,7 @@ describe("AgentWorkTab", () => {
     fireEvent.click(screen.getByRole("tab", { name: /Routines/ }))
     expect(screen.getByRole("tab", { name: /Routines/ })).toHaveAttribute("aria-selected", "true")
     const routine = screen.getByRole("link", { name: "Routine Copy review" })
-    expect(routine).toHaveAttribute("href", "/routines?routine=copy-review")
+    expect(routine).toHaveAttribute("href", "/routines?slug=copy-review")
     expect(routine).toHaveTextContent("Completed")
     expect(routine).toHaveTextContent("4 runs")
     expect(routine).toHaveTextContent("3 steps")

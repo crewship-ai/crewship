@@ -1,15 +1,26 @@
 # Chat workspace UI — dev2 handoff (2026-09-25)
 
-The approved layout is captured in [the interactive wireframe](wireframes/chat-sidebar-unified-2026-09.html). This change implements its navigation and the two distinct reading modes on the existing Chat route.
+Current behavior is documented in [Chat sidebar filters](chat-sidebar-filters-dev2-2026-09.md). Earlier wireframes are design history; the current client exposes Artifacts and Work, not a Files tab.
 
-- The Chat subbar follows the Issues and Routines pattern. The left sidebar has collapsible Activity, People, Agents, and Team Spaces sections, search and filters, and a New chat menu.
-- The right agent context follows the selected agent and exposes Files, Artifacts, and Work. The old Team destination and the Crew/Workspace file scopes are absent from this chat panel. Detailed agent configuration links to the agent card.
-- Files keeps the agent tree on the right. Selecting a file collapses the left chat tree and opens a main reading workspace. Text/code is read-only until Edit, saving uses the existing scoped agent file API and role check, and PDF/images use the existing safe preview. The optional Chat alongside control returns conversation to a narrow column. Closing the file restores the prior left sidebar state.
-- Artifacts opens an inline panel beside the chat. It polls the selected agent file every five seconds while Follow is active, increments its revision only when bytes change, and supports Pause. PDF/images, sandboxed HTML, and CSV/TSV have previews. XLS/XLSX offer download until a workbook renderer is available.
-- Work displays issues assigned to the agent and routines authored by the agent, with links to their main surfaces. It does not duplicate configuration or credential management.
+- The main application rail and Chat sidebar stay separate. The sidebar contains Favorites, Team Spaces, People and Agents; agent rows have an AI label. Shared lists show four rows initially and an agent history shows five, with explicit expansion. Only one agent history opens at a time outside search.
+- Favorites can pin existing channels, people and agents. They move into Favorites without duplicates. This preference is stored in this browser, scoped to the user/workspace; it does not sync across devices.
+- Filter contains crew, conversation category, agent session kind and status. Direct is the default. Routine/issue sessions remain accessible, and their origin is visible. The separate Agent activity block and redundant Chat Activity action are removed.
+- Names and session titles are searched on the server before pagination, with Unicode-aware case matching. Agent search covers the loaded roster beyond the initial twelve-agent session sample. It does not search message bodies. Additional result pages remain explicit.
+- Artifacts opens beside the chat or in an expanded preview while its list stays on the right. Follow checks approximately every five seconds and can be paused. PDF/images, sandboxed HTML and CSV/TSV have previews; XLS/XLSX offer download. Internal agent/run files are excluded from the client list.
+- Work shows assigned issues and authored routines. A selected session's exact issue/routine source appears separately, because executing a routine does not make the agent its author. Work cards can reveal linked conversations. Source links open the actual issue or routine run.
 
 ## Data and access limits
 
-The current API has no artifact creation-provenance index, so the Artifacts tab lists previewable files in the selected agent's file namespace. Its label states that scope rather than claiming every file was created by the agent. The routines list is a recent page of workspace-visible routines filtered by `author_agent_id`; it is not a complete assignment history.
+New routine chats record a nullable run/step association through the existing internal chat creation path. The migration adds a foreign key for correct backup remapping. Older routine chats have origin labels but no guessed source links or title-based backfill. Issue sources use the existing mission/chat identity. Dispatch and memory behavior are unchanged.
 
-The Files and Artifacts UI uses agent-scoped file endpoints and no longer offers navigation into Crew or Workspace file trees from Chat. Those endpoints currently authorize workspace roles, not a future per-agent sharing policy. A client invited to talk to one agent is **not** thereby restricted to only that agent's files by this UI change; per-agent RBAC requires a separate server-side contract and enforcement before such sharing can be offered safely.
+Artifacts lists selected file types in the agent namespace, not proven agent-authored files. File endpoints authorize workspace roles; this UI does not establish per-agent RBAC. Restricting a client to one agent requires separate server-side enforcement. Work's authored-routine list remains a recent workspace-visible page, not a complete execution history.
+
+## Verification
+
+The Chat/conversation frontend suite passed 702 tests across 80 files. After the final list compaction, focused navigation tests passed 52 tests across eight files and TypeScript passed. Lint passed with existing warnings; the production export built successfully.
+
+Targeted Go suites passed for API provenance/search, chatbridge, pipeline, groupchat, backup and OpenAPI generation. Source tests cover renaming, cross-workspace rejection, issue identity and deleted routines; search tests cover pagination, private-room exclusion, literal percent signs and Czech Unicode case matching. The pipeline test checks run/step propagation. The full `go test ./... -count=1 -timeout=20m` run reached the package timeout in `internal/api` and `internal/database`; every other package passed. The active tests (`TestVerticalServer_ALostHintIsReplacedByPolling` and `TestCheckpointerLoopTruncatesOnATick`) both passed when run independently (4.0s and 32.5s). The full suite is not claimed green. `go vet ./...`, migration lint and repository invariants passed.
+
+Authenticated dev2 browser smoke verified pins for an agent/channel/person, deduplication, persistence after reload, routine-only filtering, crew selection without hiding shared conversations, live search and the sidebar at 390px. No new endpoint failures or page errors occurred. No routine/model run was started by this smoke test.
+
+Final reload used `sudo systemctl reload crewship-ws@2`; public `/health` and `/chat` returned 200. The authenticated browser smoke was repeated successfully after that reload. Changes remain on PR #2699 without merge.

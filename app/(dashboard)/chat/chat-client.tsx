@@ -2,10 +2,10 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useSearchParams } from "next/navigation"
-import { Activity, LayoutGrid, ListTodo, Menu, MessageSquare } from "lucide-react"
+import { LayoutGrid, ListTodo, Menu, MessageSquare } from "lucide-react"
 
 import { UnifiedConversationPanel, UnifiedNewChatMenu, useUnifiedConversations } from "@/components/features/conversations/unified-chat"
-import { SubBar, SubBarSecondary } from "@/components/layout/sub-bar"
+import { SubBar } from "@/components/layout/sub-bar"
 import { ChatPanel } from "@/components/features/chat/chat-panel"
 import {
   useChatCompactLayout,
@@ -432,15 +432,17 @@ export function ChatClient() {
     [workspaceId],
   )
 
+  const [pickedThread, setPickedThread] = useState<{ workspaceId: string | null; agentId: string; thread: ChatTreeThread } | null>(null)
   const selectThread = useCallback(
     (a: ChatTreeAgent, t: ChatTreeThread, push = true) => {
       setMobilePanel("chat")
       setAgentSlug(a.slug)
       setSessionId(t.id)
+      setPickedThread({ workspaceId, agentId: a.id, thread: t })
       writeUrl(a.slug, t.id, push)
       markThreadRead(a.id, t.id)
     },
-    [writeUrl, markThreadRead],
+    [writeUrl, markThreadRead, workspaceId],
   )
 
   /**
@@ -636,8 +638,8 @@ export function ChatClient() {
    * window in which it has no origin to report either.
    */
   const activeThread = useMemo(
-    () => (agent && sessionId ? threadsByAgent[agent.id]?.find((t) => t.id === sessionId) ?? null : null),
-    [agent, sessionId, threadsByAgent],
+    () => (agent && sessionId ? threadsByAgent[agent.id]?.find((t) => t.id === sessionId) ?? (pickedThread?.workspaceId === workspaceId && pickedThread.agentId === agent.id && pickedThread.thread.id === sessionId ? pickedThread.thread : null) : null),
+    [agent, sessionId, threadsByAgent, pickedThread, workspaceId],
   )
 
   /**
@@ -846,7 +848,6 @@ export function ChatClient() {
     ariaLabel="Chat"
     leading={isMobile ? <button type="button" onClick={() => setDrawerOpen(true)} aria-label="Show conversations" className="rounded p-1.5 text-muted-foreground hover:text-foreground"><Menu className="size-4" /></button> : undefined}
     actions={<>
-      <SubBarSecondary icon={Activity} asChild><a href="/activity">Activity</a></SubBarSecondary>
       <UnifiedNewChatMenu subbar onAgent={() => { setPickerSignal((value) => value + 1); setLeftCollapsed(false); if (isMobile) setDrawerOpen(true) }} />
     </>}
   />

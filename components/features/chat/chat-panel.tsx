@@ -1,5 +1,6 @@
 "use client"
 
+import { ChatSessionSource } from "./chat-session-source"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { AnimatePresence } from "motion/react"
 import {
@@ -1009,7 +1010,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
               trailing={
                 <>
                   <ConnectionBadge status={connectionStatus} />
-                  <OriginChip origin={sessionOrigin} />
+                  <OriginChip origin={sessionOrigin} kind={sessionKind} /><ChatSessionSource agentId={agentId} sessionId={sessionId} workspaceId={workspaceId} onOpenWork={() => onMobilePanelChange?.("work")} />
                   {onNewConversation && <button type="button" onClick={onNewConversation} className="rounded-md border px-2 py-1 text-xs text-foreground hover:bg-accent">New session</button>}
                   <CommandsButton onClick={() => setSlashPaletteOpen(true)} />
                   <CopyLinkButton />
@@ -1019,7 +1020,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
           ) : (
             <>
               <ConnectionBadge status={connectionStatus} />
-              <OriginChip origin={sessionOrigin} />
+              <OriginChip origin={sessionOrigin} kind={sessionKind} /><ChatSessionSource agentId={agentId} sessionId={sessionId} workspaceId={workspaceId} onOpenWork={() => onMobilePanelChange?.("work")} />
               <div className="ml-auto flex items-center gap-2">
                 {onNewConversation && <button type="button" onClick={onNewConversation} className="rounded-md border px-2 py-1 text-xs text-foreground hover:bg-accent">New session</button>}
                 <CommandsButton onClick={() => setSlashPaletteOpen(true)} />
@@ -1249,7 +1250,8 @@ function ConnectionBadge({ status }: { status: string }) {
  *  whether they're looking at a session started from the UI, the CLI,
  *  a webhook, a cron, or an agent-to-agent assignment. Hidden when
  *  origin is unknown (pre-migration sessions or legacy backends). */
-function OriginChip({ origin }: { origin?: string | null }) {
+function OriginChip({ origin, kind }: { origin?: string | null; kind?: ChatKind }) {
+  if (kind === "issue") return <StatusPill tone="purple" label="From issue" data-testid="origin-chip" />
   if (!origin) return null
   // Words a reader does not have to decode, and ROUTINE is in the map: a
   // routine step's chat carried no chip at all, so the one transcript most
@@ -1259,7 +1261,7 @@ function OriginChip({ origin }: { origin?: string | null }) {
     CLI:     { label: "From the CLI", tone: "purple" },
     WEBHOOK: { label: "Webhook",      tone: "warn" },
     CRON:    { label: "Scheduled",    tone: "warn" },
-    ROUTINE: { label: "Routine step", tone: "purple" },
+    ROUTINE: { label: "From routine", tone: "purple" },
     AGENT:   { label: "Delegated",    tone: "purple" },
   }
   const tag = map[origin]
