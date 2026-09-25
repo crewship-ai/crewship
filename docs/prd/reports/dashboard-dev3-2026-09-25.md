@@ -11,6 +11,10 @@ System details sketch is superseded by the live implementation.
   review issues, and recent completed work. Filters and bounded scrolling keep
   the panel compact.
 - Needs your attention links to approvals, run alerts and schedule alerts.
+  Each card opens Inbox with its own URL-backed category selected. Categories
+  include every active inbox kind counted by the card, including both failed
+  runs and tripped schedule circuit breakers in Run alerts. The selected chip
+  can be cleared in Inbox.
   Up next links to the routine calendar, and Your crews scrolls through all
   crews. Run-volume bars use each configured crew colour.
 - The four agent run summary cards share one height and text layout.
@@ -27,8 +31,8 @@ System details sketch is superseded by the live implementation.
 Dev3: `https://crewship-dev3.unifylab.cz/`, systemd service `crewship-ws@3`.
 The service uses the prebuilt
 `/srv/crewship/dev3-pages-release/crewship.unsigned` binary. Its source is
-local deploy branch `deploy/dev3-dashboard-20260925`, commit `1a749678d`;
-the matching PR commit is `de16f65ea`. This deploy branch is an artifact,
+local deploy branch `deploy/dev3-dashboard-20260925`, commit `a1514c197`;
+the matching PR code commit is `58e87aee5`. This deploy branch is an artifact,
 not the PR branch. The server build uses the installed sidecar hash
 `33ad18f2afb3`; the sidecar binary was not replaced.
 
@@ -68,6 +72,11 @@ sampler no longer writes SQLite history; the already applied
 - Local `/metrics` exposed the host CPU, memory and sample timestamp gauges.
   The old SQLite history stayed at 79 rows more than a minute after restart,
   confirming that the sampler stopped writing.
+- Inbox attention update: 31 focused Vitest tests, lint, test typecheck,
+  frontend build and Go vet passed. The dev3 frontend and embedded Go binary
+  built successfully. Authenticated Chromium clicked all three dashboard cards
+  and confirmed the matching URL and selected Inbox chip with no page errors.
+  Reload preserved the approval filter; removing the chip cleared the URL.
 
 Do not merge before an actual CodeRabbit review; a passing but rate-limited
 check does not count as one.
