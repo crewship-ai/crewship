@@ -41,7 +41,7 @@ func resolveSeedCodexLogin() (*seeddata.CredentialDef, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", seedCodexAuthFileEnv, err)
 	}
-	if !info.Mode().IsRegular() || info.Mode().Perm()&0077 != 0 {
+	if !info.Mode().IsRegular() || !authFilePermOK(info) {
 		return nil, fmt.Errorf("%s must name a regular auth.json readable only by its owner (mode 0600)", seedCodexAuthFileEnv)
 	}
 	if info.Size() > 1<<20 {

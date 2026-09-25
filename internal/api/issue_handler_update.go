@@ -42,8 +42,11 @@ func (h *IssueHandler) Update(w http.ResponseWriter, r *http.Request) {
 		// (RoutineID = ""), set it, or leave it untouched (nil).
 		// RoutineInputs is treated as a full replacement, not a merge,
 		// to keep the inputs schema deterministic.
-		RoutineID     *string                 `json:"routine_id"`
-		RoutineInputs *map[string]interface{} `json:"routine_inputs"`
+		RoutineID *string `json:"routine_id"`
+		// RoutineInputs is json.RawMessage rather than *map so an explicit
+		// JSON null stays distinguishable from an omitted field: null decodes
+		// to the literal "null" bytes, omitted to nil.
+		RoutineInputs json.RawMessage `json:"routine_inputs"`
 	}
 	if err := readJSON(r, &req); err != nil {
 		writeProblem(w, r, http.StatusBadRequest, "Invalid JSON body")
@@ -260,11 +263,12 @@ func (h *IssueHandler) Update(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if req.RoutineInputs != nil {
-		if *req.RoutineInputs == nil {
+		var inputs map[string]interface{}
+		if err := json.Unmarshal(req.RoutineInputs, &inputs); err != nil || inputs == nil {
 			writeProblem(w, r, http.StatusBadRequest, "routine_inputs must be a JSON object")
 			return
 		}
-		b, mErr := json.Marshal(*req.RoutineInputs)
+		b, mErr := json.Marshal(inputs)
 		if mErr != nil {
 			writeProblem(w, r, http.StatusBadRequest, "routine_inputs is not valid JSON")
 			return

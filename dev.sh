@@ -784,15 +784,18 @@ cmd_logs_next() {
 
 cmd_nuke() {
   # start_go sources .env.local before honouring CREWSHIP_PAGE_PROJECTS_PATH,
-  # so a pin there (or in the environment) wins over the slot default. Resolve
-  # the same way so the reset removes what start actually used — and shows the
+  # so a pin there (env-style or `export`-prefixed) wins over the slot
+  # default. Resolve the same way — by actually sourcing the file, not by
+  # grepping it — so the reset removes what start really used, and show the
   # resolved path in the confirmation below before deleting it.
-  local page_projects_dir="${CREWSHIP_PAGE_PROJECTS_PATH:-$PAGE_PROJECTS_DIR}"
-  local pinned_page_dir
-  pinned_page_dir=$(grep -E '^CREWSHIP_PAGE_PROJECTS_PATH=' "$PROJECT_DIR/.env.local" 2>/dev/null \
-    | head -1 | cut -d'=' -f2- | tr -d '"' || true)
-  if [[ -n "$pinned_page_dir" ]]; then
-    page_projects_dir="$pinned_page_dir"
+  local page_projects_dir
+  page_projects_dir="$(
+    cd "$PROJECT_DIR" 2>/dev/null &&
+      { set -a; . ./.env.local 2>/dev/null; set +a; } &&
+      printf '%s' "${CREWSHIP_PAGE_PROJECTS_PATH:-}"
+  )"
+  if [[ -z "$page_projects_dir" ]]; then
+    page_projects_dir="${CREWSHIP_PAGE_PROJECTS_PATH:-$PAGE_PROJECTS_DIR}"
   fi
 
   echo -e "${BOLD}${RED}Factory Reset — Crewship${S}${NC}"

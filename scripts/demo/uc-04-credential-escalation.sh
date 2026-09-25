@@ -97,7 +97,11 @@ else
   fi
 fi
 rm -f "$reply_file"
-assert_nonempty "Morgan resumes after the human decision" "$reply"
+# The no-decision branch already reported this step as skipped; only a run
+# that actually waited for the decision can be judged on its reply.
+if [[ "$decision_ok" == true ]]; then
+  assert_nonempty "Morgan resumes after the human decision" "$reply"
+fi
 if [[ -n "$reply" ]]; then
   printf '%s\n' "$reply" | head -5 | sed 's/^/     /'
 fi

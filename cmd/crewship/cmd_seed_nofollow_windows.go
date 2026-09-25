@@ -44,3 +44,15 @@ func openNoFollow(path string) (*os.File, error) {
 	}
 	return os.NewFile(uintptr(h), path), nil
 }
+
+// authFilePermOK mirrors the unix variant's owner-only check as far as
+// Windows allows. Go surfaces Windows permissions as 0444 or 0666 (the
+// read-only bit), both with group/other bits set, so the unix test would
+// reject every regular file. The real access control is the file's ACL;
+// a profile-scoped auth.json inherits the profile's protection, and a full
+// ACL audit is out of scope for the seed bootstrap (same precedent as
+// internal/sidecar's windows openNoFollow, which checks reparse points
+// only).
+func authFilePermOK(info os.FileInfo) bool {
+	return info.Mode().IsRegular()
+}
