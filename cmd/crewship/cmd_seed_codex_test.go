@@ -45,6 +45,60 @@ func TestResolveSeedCodexLogin(t *testing.T) {
 	}
 }
 
+func TestSeedCodexAuthFileFlagOverridesEnv(t *testing.T) {
+	writeLogin := func(name string) (string, string) {
+		content := `{"auth_mode":"chatgpt","OPENAI_API_KEY":null,"tokens":{"id_token":"id","access_token":"access","refresh_token":"refresh","account_id":"account"}}`
+		if name == "flag-auth.json" {
+			content = strings.Replace(content, `"account_id":"account"`, `"account_id":"flag-account"`, 1)
+		}
+		path := filepath.Join(t.TempDir(), name)
+		if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+			t.Fatal(err)
+		}
+		return path, content
+	}
+	envPath, envContent := writeLogin("env-auth.json")
+	flagPath, flagContent := writeLogin("flag-auth.json")
+	t.Setenv(seedCodexAuthFileEnv, envPath)
+	t.Cleanup(func() { seedCodexAuthFileOverride = "" })
+
+	// Without the flag the env var is the default and governs.
+	seedCodexAuthFileOverride = ""
+	login, err := resolveSeedCodexLogin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if login.Value != envContent {
+		t.Fatal("env var did not serve as the default login path")
+	}
+
+	// An explicit flag value wins over the env var.
+	seedCodexAuthFileOverride = flagPath
+	login, err = resolveSeedCodexLogin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if login.Value != flagContent || login.Value == envContent {
+		t.Fatal("--codex-auth-file did not override SEED_CODEX_AUTH_FILE")
+	}
+
+	// Errors name the knob the operator actually turned.
+	seedCodexAuthFileOverride = "relative/auth.json"
+	if _, err := resolveSeedCodexLogin(); err == nil || !strings.Contains(err.Error(), "--codex-auth-file") {
+		t.Fatalf("relative flag path must be refused in the flag's name: %v", err)
+	}
+}
+
+func TestSeedCmdCodexAuthFileFlagDefaultsFromEnv(t *testing.T) {
+	flag := seedCmd.Flags().Lookup("codex-auth-file")
+	if flag == nil {
+		t.Fatal("crewship seed has no --codex-auth-file flag")
+	}
+	if got := flag.DefValue; got != os.Getenv(seedCodexAuthFileEnv) {
+		t.Fatalf("--codex-auth-file default = %q, want the %s value %q", got, seedCodexAuthFileEnv, os.Getenv(seedCodexAuthFileEnv))
+	}
+}
+
 func TestCodexRoutineDefsLeaveOriginalsUntouched(t *testing.T) {
 	defs := []seeddata.RoutineDef{{Slug: "test", Definition: map[string]interface{}{
 		"credentials_required": []map[string]interface{}{{"type": "API_KEY", "provider": "ANTHROPIC", "scope": "any"}},

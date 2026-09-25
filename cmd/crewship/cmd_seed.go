@@ -56,6 +56,7 @@ func init() {
 	seedCmd.Flags().String("state-dir", "", "Private team-chat credential directory outside Git (isolated per server/workspace)")
 	seedCmd.AddCommand(newSeedTeamChatCmd())
 	seedCmd.Flags().Bool("with-users", false, "Add four extra users (ADMIN, MANAGER, MEMBER, VIEWER) to the workspace for RBAC matrix testing; requires CREWSHIP_ALLOW_SIGNUP=true on the server")
+	seedCmd.Flags().String("codex-auth-file", os.Getenv(seedCodexAuthFileEnv), "Absolute path to a private Codex auth.json (0600, outside the repo) that switches the demo agents to Codex CLI; overrides "+seedCodexAuthFileEnv)
 }
 
 // loadDotEnvLocal seeds os.Getenv with values from .env.local in the
@@ -145,6 +146,13 @@ func bridgeServerFromPort() {
 
 func runSeed(cmd *cobra.Command, args []string) error {
 	loadDotEnvLocal()
+	// An explicit --codex-auth-file wins over the env var; the flag's default
+	// is the init-time env value, so assigning unconditionally is equivalent
+	// to "flag if passed, env otherwise" — loadDotEnvLocal never overwrites
+	// an env var that was already set.
+	if path, err := cmd.Flags().GetString("codex-auth-file"); err == nil {
+		seedCodexAuthFileOverride = strings.TrimSpace(path)
+	}
 	if _, err := resolveSeedCodexLogin(); err != nil {
 		return err // validate before bootstrap or any workspace mutation
 	}
