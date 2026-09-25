@@ -257,7 +257,7 @@ export function ConversationThread({ conversation, workspaceId, userId, refresh,
 }
 
 function ConversationMembers({ workspaceId, userId, conversation, participants, refresh }: { workspaceId: string; userId: string; conversation: WorkspaceConversation; participants: ConversationParticipant[]; refresh: () => void }) {
-  const canManage = conversation.kind === "group" && !conversation.is_direct && conversation.created_by === userId
+  const canManage = !conversation.is_direct && conversation.created_by === userId
   const [adding, setAdding] = useState("")
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<Error | null>(null)
@@ -291,7 +291,7 @@ function ConversationMembers({ workspaceId, userId, conversation, participants, 
         </Select>
         <Button type="button" size="sm" variant="outline" disabled={!adding || busy} onClick={() => { void change() }}><UserPlus className="size-3.5" />Add</Button>
       </div>
-      <p className="text-[10px] leading-relaxed text-muted-foreground">New members can read this group’s history.</p>
+      <p className="text-[10px] leading-relaxed text-muted-foreground">{conversation.kind === "channel" ? "Membership does not restrict access: everyone in the workspace can still read and write here." : "New members can read this group’s history."}</p>
       {people.error && <ErrorNotice error={people.error} retry={() => { void people.refetch() }} />}
     </>}
     {error && <p role="alert" className="text-xs text-destructive">{error.message}</p>}

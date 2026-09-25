@@ -79,10 +79,10 @@ export function RightRail({ className }: { className?: string }) {
     [toggle],
   )
 
-  return <div className={cn("relative z-30 flex w-14 shrink-0 flex-col items-center gap-0.5 border-l bg-accent/30 py-2", className)} role="tablist" aria-label="Chat side panels">
+  return <div className={cn("relative z-30 flex w-14 shrink-0 flex-col items-center gap-0.5 border-l py-2", open ? "bg-card before:pointer-events-none before:absolute before:inset-0 before:bg-accent/30" : "bg-accent/30", className)} role="tablist" aria-label="Chat side panels">
     {ITEMS.map(({ id, label, icon: Icon, shortcut }) => {
       const isActive = open && activeTab === id
-      return <Button key={id} variant="ghost" className={cn("h-auto w-full flex-col gap-1 rounded-md px-0 py-2 text-muted-foreground hover:bg-white/[0.03] hover:text-foreground", isActive && "text-foreground")} role="tab" aria-selected={isActive} aria-controls={`drawer-panel-${id}`} aria-keyshortcuts={shortcut ? `Meta+${shortcut}` : undefined} onClick={() => toggle(id)}>
+      return <Button key={id} variant="ghost" className={cn("relative h-auto w-full flex-col gap-1 rounded-md px-0 py-2 text-muted-foreground hover:bg-white/[0.03] hover:text-foreground", isActive && "text-foreground")} role="tab" aria-selected={isActive} aria-controls={`drawer-panel-${id}`} aria-keyshortcuts={shortcut ? `Meta+${shortcut}` : undefined} onClick={() => toggle(id)}>
         <Icon className="h-4 w-4" />
         <span className="text-[11px] font-medium leading-none tracking-tight">{label}</span>
       </Button>

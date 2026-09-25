@@ -469,8 +469,7 @@ limit on who can read it.
 
 `add` and `remove` (`POST …/participants`, `DELETE …/participants/{userId}`)
 are **creator-only** — anyone else gets `404`. `add` grants the room's
-existing history and is idempotent. A DM refuses both (`400`), a channel
-refuses `remove`, and the creator cannot be removed from a group.
+existing history and is idempotent. A DM refuses both (`400`), and the creator cannot be removed. Channel removal changes membership without revoking workspace-wide access. Reading, sending or muting a channel does not rejoin it.
 
 ### `chat room agents` — list, add, remove
 

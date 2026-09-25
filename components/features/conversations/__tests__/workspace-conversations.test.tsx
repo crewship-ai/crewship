@@ -181,6 +181,7 @@ describe("workspace conversations transport", () => {
       if (url.includes("/room/agents")) return Response.json({ agents: [] })
       if (url.includes("/activity")) return Response.json({ issues: true, routines: false })
       if (url.includes("/agents?")) return Response.json([])
+      if (url.includes("/workspaces/ws/members")) return Response.json([])
       return normal(url, options)
     })
     setup()
@@ -194,11 +195,13 @@ describe("workspace conversations transport", () => {
     const issues = await within(panel).findByRole("checkbox", { name: "Issue updates" })
     if (creator) {
       expect(issues).toBeEnabled()
+      await waitFor(() => expect(within(panel).getByRole("combobox", { name: "Person to add" })).toBeEnabled())
       fireEvent.click(screen.getByRole("button", { name: "Channel settings" }))
       expect(within(panel).getByRole("heading", { name: "General" })).toHaveFocus()
       expect(within(panel).getByRole("button", { name: "Add agent" })).toBeInTheDocument()
     } else {
       expect(issues).toBeDisabled()
+      expect(within(panel).queryByRole("combobox", { name: "Person to add" })).not.toBeInTheDocument()
       expect(screen.queryByRole("button", { name: "Channel settings" })).not.toBeInTheDocument()
       expect(within(panel).queryByRole("button", { name: "Add agent" })).not.toBeInTheDocument()
     }
