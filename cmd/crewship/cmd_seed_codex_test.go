@@ -10,6 +10,7 @@ import (
 
 	"github.com/crewship-ai/crewship/cmd/crewship/seeddata"
 	"github.com/crewship-ai/crewship/internal/cli/clitest"
+	"github.com/crewship-ai/crewship/internal/llm"
 )
 
 func TestResolveSeedCodexLogin(t *testing.T) {
@@ -47,7 +48,7 @@ func TestResolveSeedCodexLogin(t *testing.T) {
 func TestCodexRoutineDefsLeaveOriginalsUntouched(t *testing.T) {
 	defs := []seeddata.RoutineDef{{Slug: "test", Definition: map[string]interface{}{
 		"credentials_required": []map[string]interface{}{{"type": "API_KEY", "provider": "ANTHROPIC", "scope": "any"}},
-		"steps":                []map[string]interface{}{{"model_override": "claude-sonnet-5"}},
+		"steps":                []map[string]interface{}{{"type": "agent_run", "model_override": "claude-sonnet-5"}},
 	}}}
 	got, err := codexRoutineDefs(defs)
 	if err != nil {
@@ -59,8 +60,8 @@ func TestCodexRoutineDefsLeaveOriginalsUntouched(t *testing.T) {
 		t.Fatalf("Codex requirement = %v", req)
 	}
 	steps := got[0].Definition["steps"].([]interface{})
-	if steps[0].(map[string]interface{})["model_override"] == "claude-sonnet-5" {
-		t.Fatal("Codex routine retained Claude model override")
+	if got := steps[0].(map[string]interface{})["model_override"]; got != "codex:"+llm.AdapterDefaultModel("CODEX_CLI") {
+		t.Fatalf("Codex routine model override = %v", got)
 	}
 	original := defs[0].Definition["credentials_required"].([]map[string]interface{})[0]
 	if original["provider"] != "ANTHROPIC" {

@@ -66,6 +66,21 @@ func TestCodexAdapter_DoesNotRouteWithoutSidecarOrCredential(t *testing.T) {
 	}
 }
 
+func TestCodexAdapter_OperatorSandboxOverride(t *testing.T) {
+	t.Setenv("CREWSHIP_CODEX_SANDBOX_MODE", "danger-full-access")
+	for _, tc := range []struct{ profile, want string }{
+		{"FULL", "danger-full-access"},
+		{"CODING", "danger-full-access"},
+		{"MINIMAL", "read-only"},
+	} {
+		cmd := (codexAdapter{}).BuildCommand(AgentRunRequest{ToolProfile: tc.profile})
+		at := slices.Index(cmd, "--sandbox")
+		if at < 0 || cmd[at+1] != tc.want {
+			t.Errorf("profile %s: sandbox = %v, want %s", tc.profile, cmd, tc.want)
+		}
+	}
+}
+
 func TestBuildEnvVarsSidecar_CodexCustomProviderKeepsRealKeyOut(t *testing.T) {
 	req := AgentRunRequest{
 		CLIAdapter:  "CODEX_CLI",

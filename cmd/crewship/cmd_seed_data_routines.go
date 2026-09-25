@@ -111,8 +111,11 @@ func rewriteCodexRoutineValues(value interface{}) {
 			v["provider"] = "OPENAI"
 			v["type"] = "PROVIDER_LOGIN"
 		}
-		if model, ok := v["model_override"].(string); ok && len(model) >= len("claude-") && model[:len("claude-")] == "claude-" {
-			v["model_override"] = llm.AdapterDefaultModel("CODEX_CLI")
+		// Workspace complexity tiers still default to Claude. Pin every
+		// agent step to the Codex adapter as well as its model; an unqualified
+		// model_override also defaults to the Claude adapter at runtime.
+		if v["type"] == "agent_run" {
+			v["model_override"] = "codex:" + llm.AdapterDefaultModel("CODEX_CLI")
 		}
 		for _, child := range v {
 			rewriteCodexRoutineValues(child)
