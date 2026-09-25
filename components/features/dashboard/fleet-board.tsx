@@ -102,7 +102,7 @@ export function FleetBoard({ cards: unordered, workspaceId }: { cards: FleetCard
           <Link href="/crews" className="text-primary-hover hover:underline">Crews →</Link>
         </span>
       </div>
-      <div className="flex max-h-[350px] flex-col divide-y divide-border/50 overflow-y-auto overscroll-contain pr-1 [scrollbar-color:var(--border)_transparent] xl:min-h-0 xl:max-h-none xl:flex-1" tabIndex={0} aria-label="All crews">
+      <div className="flex max-h-[350px] flex-col divide-y divide-border/50 overflow-y-auto overscroll-contain pr-1 xl:min-h-0 xl:max-h-none xl:flex-1" tabIndex={0} aria-label="All crews">
         {cards.map((card) => {
           const { row } = card
           return (
