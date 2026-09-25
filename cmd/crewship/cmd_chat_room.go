@@ -77,8 +77,24 @@ output preserves the API envelopes, including pagination cursors.`}
 		if limit < 1 || limit > 100 || offset < 0 {
 			return fmt.Errorf("--limit must be 1..100 and --offset nonnegative")
 		}
-		return chatRoomRequest(http.MethodGet, chatRoomBase+"?limit="+strconv.Itoa(limit)+"&offset="+strconv.Itoa(offset), nil)
+		// --q and --search spell the same server-side filter; refusing the
+		// pair outright beats silently preferring one, which would make the
+		// other flag look broken to whoever used both.
+		search, _ := c.Flags().GetString("q")
+		if alias, _ := c.Flags().GetString("search"); alias != "" {
+			if search != "" {
+				return fmt.Errorf("use only one of --q and --search")
+			}
+			search = alias
+		}
+		q := url.Values{"limit": {strconv.Itoa(limit)}, "offset": {strconv.Itoa(offset)}}
+		if search != "" {
+			q.Set("q", search)
+		}
+		return chatRoomRequest(http.MethodGet, chatRoomBase+"?"+q.Encode(), nil)
 	})
+	list.Flags().String("q", "", "Server-side search: substring of a room's title, or of the other member's name in a DM (case-insensitive)")
+	list.Flags().String("search", "", "Alias for --q")
 	list.Flags().Int("limit", 100, "Page size (1..100)")
 	list.Flags().Int("offset", 0, "Start offset; next_offset is returned in JSON")
 	create := add("create", "Create a private human group or workspace channel", 0, func(c *cobra.Command, _ []string) error {

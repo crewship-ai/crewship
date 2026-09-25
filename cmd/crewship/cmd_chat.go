@@ -540,6 +540,20 @@ func resolveChatAgent(cmd *cobra.Command, client *cli.Client, chatID string) (st
 // transcript).
 var chatListKind string
 
+// chatListSource is the provenance a chat's work came from — the routine
+// or the issue that minted it — as GET /agents/{id}/chats?source=1
+// attaches it per row. Mirrors internal/api's chatWorkSource wire shape
+// field for field (omitempty fields included), so --format json re-emits
+// exactly what the server sent instead of a reshaped guess.
+type chatListSource struct {
+	Kind   string `json:"kind" yaml:"kind"`
+	ID     string `json:"id" yaml:"id"`
+	Name   string `json:"name" yaml:"name"`
+	Slug   string `json:"slug,omitempty" yaml:"slug,omitempty"`
+	RunID  string `json:"run_id,omitempty" yaml:"run_id,omitempty"`
+	StepID string `json:"step_id,omitempty" yaml:"step_id,omitempty"`
+}
+
 var chatListCmd = &cobra.Command{
 	Use:   "list <agent-slug-or-id>",
 	Short: "List recent chats for an agent (most recent first)",
@@ -559,8 +573,18 @@ narrows to the ones you meant:
 Comma-separate to combine, e.g. --kind direct,issue. Omitted, every kind is
 listed — the filter narrows, it never reorders.
 
+Three more server-side filters narrow the same page: --search matches chat
+titles (case-insensitive), --chat pins the list to one chat id, and --routine
+keeps only the chats a given routine id minted.
+
+--with-source asks the server to attach each row's provenance — which
+routine (and step, and run) or which issue the chat works for. The table
+gains a SOURCE column; --output json gains a "source" object per row.
+
   crewship chat list casey --kind direct
-  crewship chat list casey --kind routine --output json`,
+  crewship chat list casey --kind routine --output json
+  crewship chat list casey --search rollback
+  crewship chat list casey --routine pipe_abc123 --with-source`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		client, err := requireAuthAndWorkspace()
@@ -573,17 +597,18 @@ listed — the filter narrows, it never reorders.
 		}
 
 		var chats []struct {
-			ID             string  `json:"id" yaml:"id"`
-			Title          *string `json:"title" yaml:"title"`
-			Status         string  `json:"status" yaml:"status"`
-			MessageCount   int     `json:"message_count" yaml:"message_count"`
-			StartedAt      string  `json:"started_at" yaml:"started_at"`
-			CreatedAt      string  `json:"created_at" yaml:"created_at"`
-			EndedAt        *string `json:"ended_at" yaml:"ended_at"`
-			Origin         *string `json:"origin" yaml:"origin"`
-			LastActivityAt string  `json:"last_activity_at" yaml:"last_activity_at"`
-			UnreadCount    int     `json:"unread_count" yaml:"unread_count"`
-			Kind           string  `json:"kind" yaml:"kind"`
+			ID             string          `json:"id" yaml:"id"`
+			Title          *string         `json:"title" yaml:"title"`
+			Status         string          `json:"status" yaml:"status"`
+			MessageCount   int             `json:"message_count" yaml:"message_count"`
+			StartedAt      string          `json:"started_at" yaml:"started_at"`
+			CreatedAt      string          `json:"created_at" yaml:"created_at"`
+			EndedAt        *string         `json:"ended_at" yaml:"ended_at"`
+			Origin         *string         `json:"origin" yaml:"origin"`
+			LastActivityAt string          `json:"last_activity_at" yaml:"last_activity_at"`
+			UnreadCount    int             `json:"unread_count" yaml:"unread_count"`
+			Kind           string          `json:"kind" yaml:"kind"`
+			Source         *chatListSource `json:"source,omitempty" yaml:"source,omitempty"`
 		}
 		path := "/api/v1/agents/" + agentID + "/chats"
 		// Sent only when asked. An empty `kind` and an absent one mean the
@@ -594,6 +619,21 @@ listed — the filter narrows, it never reorders.
 		q := url.Values{}
 		if k := strings.TrimSpace(chatListKind); k != "" {
 			q.Set("kind", k)
+		}
+		if search, _ := cmd.Flags().GetString("search"); strings.TrimSpace(search) != "" {
+			q.Set("q", strings.TrimSpace(search))
+		}
+		if chatID, _ := cmd.Flags().GetString("chat"); chatID != "" {
+			q.Set("chat_id", chatID)
+		}
+		if routineID, _ := cmd.Flags().GetString("routine"); routineID != "" {
+			q.Set("routine_id", routineID)
+		}
+		// `source` is the literal "1" on purpose: the server compares the
+		// query value against exactly that string, so a bool-flag-rendered
+		// "true" would silently ask for nothing.
+		if withSource, _ := cmd.Flags().GetBool("with-source"); withSource {
+			q.Set("source", "1")
 		}
 		limit, _ := cmd.Flags().GetInt("limit")
 		offset, _ := cmd.Flags().GetInt("offset")
@@ -619,7 +659,12 @@ listed — the filter narrows, it never reorders.
 		// to know mean "a machine did this"), kind is the answer to the
 		// question the column was being read for. `--output json` still
 		// carries both.
-		headers := []string{"ID", "TITLE", "KIND", "STATUS", "MSGS", "UNREAD", "LAST ACTIVITY"}
+		//
+		// SOURCE names the specific routine or issue behind a kind=routine /
+		// kind=issue row (it needs --with-source to be filled in — the
+		// server computes it only on request), because "150 routine chats"
+		// becomes navigable the moment the column says WHICH routine.
+		headers := []string{"ID", "TITLE", "KIND", "SOURCE", "STATUS", "MSGS", "UNREAD", "LAST ACTIVITY"}
 		var rows [][]string
 		for _, c := range chats {
 			title := "-"
@@ -631,6 +676,17 @@ listed — the filter narrows, it never reorders.
 				// A server older than the kind field. Say so rather than
 				// printing an empty cell that reads as "no kind".
 				kind = "-"
+			}
+			source := "-"
+			if c.Source != nil {
+				source = c.Source.Name
+				if source == "" {
+					source = c.Source.Slug
+				}
+				if source == "" {
+					source = c.Source.ID
+				}
+				source = truncateString(source, 24)
 			}
 			// Server orders by last activity and falls back to started_at
 			// when a legacy row predates the column.
@@ -646,7 +702,7 @@ listed — the filter narrows, it never reorders.
 				unread = fmt.Sprintf("%d", c.UnreadCount)
 			}
 			rows = append(rows, []string{
-				c.ID, title, kind, c.Status,
+				c.ID, title, kind, source, c.Status,
 				fmt.Sprintf("%d", c.MessageCount),
 				unread, activity,
 			})
@@ -1181,6 +1237,15 @@ func init() {
 	chatCmd.AddCommand(chatCreateCmd)
 	chatListCmd.Flags().StringVar(&chatListKind, "kind", "",
 		"only chats of these kinds: direct, routine, issue, agent (comma-separated; default all)")
+	// No shorthand collision to worry about here: the root's -q (quiet,
+	// cmd_root_headless.go) is a LOCAL root flag, so it is never merged
+	// into this subcommand's set — unlike -f, which IS persistent.
+	chatListCmd.Flags().StringP("search", "q", "",
+		"Case-insensitive search over chat titles (server-side)")
+	chatListCmd.Flags().String("chat", "", "Only the chat with this id (server-side filter)")
+	chatListCmd.Flags().String("routine", "", "Only chats minted by this routine (pipeline) id (server-side filter)")
+	chatListCmd.Flags().Bool("with-source", false,
+		"Attach each chat's work source — the routine (with run/step) or issue it belongs to — to every row")
 	addListPagingFlags(chatListCmd.Flags(), 0)
 	chatCmd.AddCommand(chatListCmd)
 	chatCmd.AddCommand(chatReadCmd)
