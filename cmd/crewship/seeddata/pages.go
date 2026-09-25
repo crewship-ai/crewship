@@ -3,6 +3,8 @@ package seeddata
 import (
 	_ "embed"
 	"fmt"
+	"strconv"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 
@@ -88,13 +90,13 @@ var cataloguePageCSS string
 
 // catalogueProject reuses the pinned, offline-buildable Crewship Lab project
 // toolchain while giving each panel Page the same blue client-facing shell.
-func catalogueProject() *pages.SourceProject {
+func catalogueProject(description string) *pages.SourceProject {
 	base := OperationsApp.Project
 	project := &pages.SourceProject{Format: base.Format, Runtime: base.Runtime, Files: append([]pages.ProjectFile(nil), base.Files...)}
 	for i := range project.Files {
 		switch project.Files[i].Path {
 		case "src/main.tsx":
-			project.Files[i].Content = cataloguePageTSX
+			project.Files[i].Content = strings.ReplaceAll(cataloguePageTSX, "__PAGE_DESCRIPTION__", strconv.Quote(description))
 		case "src/style.css":
 			project.Files[i].Content = cataloguePageCSS
 		}
@@ -122,9 +124,8 @@ func mustLoadPages() []PageDef {
 	if len(doc.Pages) == 0 {
 		panic("seeddata: builtin/pages.yaml decoded to zero pages — schema drift?")
 	}
-	project := catalogueProject()
 	for i := range doc.Pages {
-		doc.Pages[i].Project = project
+		doc.Pages[i].Project = catalogueProject(doc.Pages[i].Description)
 	}
 	return append(doc.Pages, operationsPage())
 }
