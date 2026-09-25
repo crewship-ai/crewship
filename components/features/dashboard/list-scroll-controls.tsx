@@ -55,10 +55,10 @@ export function ListScrollControls({ label, controller }: {
   if (!controller.up && !controller.down) return null
   return (
     <span className="hidden items-center gap-0.5 sm:inline-flex" role="group" aria-label={`${label} scroll controls`}>
-      <Button type="button" variant="ghost" size="icon-xs" disabled={!controller.up} onClick={() => controller.scroll(-1)} aria-label={`Scroll ${label} up`} title="Scroll up" className="border border-border/60 text-muted-foreground hover:text-foreground">
+      <Button type="button" variant="ghost" size="icon-xs" disabled={!controller.up} onClick={() => controller.scroll(-1)} aria-label={`Scroll ${label} up`} title="Scroll up" className="border border-border/60 text-primary-hover hover:bg-primary/10 disabled:text-muted-foreground">
         <ChevronUp aria-hidden="true" />
       </Button>
-      <Button type="button" variant="ghost" size="icon-xs" disabled={!controller.down} onClick={() => controller.scroll(1)} aria-label={`Scroll ${label} down`} title="Scroll down" className="border border-border/60 text-muted-foreground hover:text-foreground">
+      <Button type="button" variant="ghost" size="icon-xs" disabled={!controller.down} onClick={() => controller.scroll(1)} aria-label={`Scroll ${label} down`} title="Scroll down" className="border border-border/60 text-primary-hover hover:bg-primary/10 disabled:text-muted-foreground">
         <ChevronDown aria-hidden="true" />
       </Button>
     </span>
