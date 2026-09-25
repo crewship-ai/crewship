@@ -64,38 +64,32 @@ func forkExtraRows(dump *backup.DBDump, actorUserID string) map[string]int {
 	return out
 }
 
-// knownForkDrops names tables whose rows a forked restore still SILENTLY LOSES,
-// with the constraint that eats them. Every one is the #2260 shape — a unique
-// key the fork does not renegotiate, and INSERT OR IGNORE dropping the row
-// rather than failing — but none is the one-line fix #2260 itself was:
+// knownForkDrops names tables whose rows a forked restore still SILENTLY
+// LOSES, with the constraint that eats them. Every one is the #2260
+// shape — a unique key the fork does not renegotiate, and INSERT OR
+// IGNORE dropping the row rather than failing.
 //
-//	token / token_hash pairs (workspace_invitations, port_exposures,
-//	pipeline_webhooks, page_public_tokens, page_webhooks) cannot be handled by
-//	minting a fresh column value in isolation. The cleartext token and its
-//	digest have to be minted TOGETHER, through the same primitive the auth
-//	layer uses to check them (#1888 hashed these at rest precisely so the
-//	column is not a credential store), or the fork gets a row whose hash — the
-//	actual lookup key — matches no token anybody holds.
+// The map is EMPTY as of #2274's fix and stays in place on purpose: it
+// is the tripwire that makes the parity loop below fail the moment a
+// future schema change reintroduces the shape. The two fix families it
+// retired, and the regression tests that now pin them:
 //
-//	inbox_items UNIQUE(kind, source_id) and message_feedback
-//	UNIQUE(message_id, user_id, signal) have no token to regenerate at all:
-//	their unique keys are built from columns nothing in the bundle remaps
-//	(source_id is an opaque handle; `messages` is not even in BackupTables).
-//	Fixing those means scoping the constraint or the key, not minting a value.
+//   - capability tokens (workspace_invitations, port_exposures,
+//     pipeline_webhooks, page_public_tokens, page_webhooks) are re-minted
+//     together with their digest on every fork — a fork does not inherit
+//     live capabilities — and reported through
+//     RestoreResult.CapabilityTokensReminted. Pinned by
+//     TestForkedRestore_CapabilityTokens.
+//   - inbox_items UNIQUE(kind, source_id) and message_feedback
+//     UNIQUE(message_id, user_id, signal) were re-scoped per workspace by
+//     migration (the fork lands in a namespace of its own; the upserts'
+//     ON CONFLICT targets moved with them). Pinned by
+//     TestForkedRestore_InboxAndFeedback.
 //
-// Filed as #2274. Pinned here rather than skipped: when one is fixed, this test
-// fails on the entry that is no longer true and the entry gets deleted — that
-// is how the list shrinks instead of quietly rotting.
-var knownForkDrops = map[string]string{
-	"workspace_invitations": "UNIQUE token (v01) — instance-wide, not regenerated on fork",
-	"port_exposures":        "UNIQUE token + UNIQUE token_hash (#1888) — instance-wide",
-	"pipeline_webhooks":     "UNIQUE token + UNIQUE token_hash (v82, #1888) — instance-wide",
-	"page_public_tokens":    "UNIQUE token_hash — instance-wide by design (a shared hash is a cross-page read)",
-	"page_webhooks":         "UNIQUE token_hash — instance-wide by design",
-	"inbox_items":           "UNIQUE(kind, source_id) — neither column is remapped",
-	"inbox_item_reads":      "follows inbox_items (above): a read marker for an item that did not land is skipped by design and reported as a shortfall",
-	"message_feedback":      "UNIQUE(message_id, user_id, signal) — messages are not in BackupTables, so message_id is never remapped",
-}
+// When a new entry is needed, pin it here with the constraint that eats
+// the rows and a comment naming the issue — and delete it the day the
+// gap is fixed, exactly as the eight #2274 entries were.
+var knownForkDrops = map[string]string{}
 
 // checkInListRe pulls the first allowed literal out of a column-level
 // `CHECK(col IN ('a','b'))`, which is how this schema spells its enums. Good

@@ -459,6 +459,70 @@ func TestFeedback_Delete_RemovesOwnRow(t *testing.T) {
 	}
 }
 
+func TestFeedback_Delete_ForkedMessageNeedsWorkspace(t *testing.T) {
+	bed := setupFeedbackTestBed(t)
+	const forkWS = "ws-feedback-fork"
+	if _, err := bed.h.db.ExecContext(t.Context(), `INSERT INTO workspaces (id, name, slug) VALUES (?, 'Feedback fork', 'feedback-fork')`, forkWS); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := bed.h.db.ExecContext(t.Context(), `INSERT INTO workspace_members (id, workspace_id, user_id, role) VALUES ('member-feedback-fork', ?, ?, 'OWNER')`, forkWS, bed.userID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := bed.h.db.ExecContext(t.Context(), `INSERT INTO message_feedback (id, workspace_id, chat_id, message_id, signal, user_id)
+VALUES ('feedback-source', ?, ?, ?, 'helpful', ?), ('feedback-fork', ?, NULL, ?, 'helpful', ?)`,
+		bed.wsID, bed.chatID, bed.messageID, bed.userID, forkWS, bed.messageID, bed.userID); err != nil {
+		t.Fatal(err)
+	}
+
+	path := "/api/v1/feedback?message_id=" + bed.messageID + "&signal=helpful"
+	request := func(url string) int {
+		t.Helper()
+		rr := httptest.NewRecorder()
+		bed.h.Delete(rr, feedbackReq("DELETE", url, "", bed.userID))
+		return rr.Code
+	}
+	if got := request(path); got != http.StatusConflict {
+		t.Fatalf("ambiguous delete = %d, want 409", got)
+	}
+	var count int
+	if err := bed.h.db.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM message_feedback WHERE message_id = ?`, bed.messageID).Scan(&count); err != nil || count != 2 {
+		t.Fatalf("ambiguous delete left %d rows, err=%v; want 2", count, err)
+	}
+	list := httptest.NewRecorder()
+	bed.h.List(list, feedbackReq("GET", "/api/v1/feedback?message_id="+bed.messageID, "", bed.userID))
+	if list.Code != http.StatusOK {
+		t.Fatalf("list = %d body=%s", list.Code, list.Body.String())
+	}
+	var listed struct {
+		Feedback []feedbackRow `json:"feedback"`
+	}
+	if err := json.Unmarshal(list.Body.Bytes(), &listed); err != nil {
+		t.Fatal(err)
+	}
+	seen := map[string]bool{}
+	for _, row := range listed.Feedback {
+		seen[row.WorkspaceID] = true
+	}
+	if len(listed.Feedback) != 2 || !seen[bed.wsID] || !seen[forkWS] {
+		t.Fatalf("list did not identify both feedback workspaces: %+v", listed.Feedback)
+	}
+	if got := request(path + "&workspace_id=" + bed.wsID); got != http.StatusNoContent {
+		t.Fatalf("source workspace delete = %d, want 204", got)
+	}
+	if err := bed.h.db.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM message_feedback WHERE id = 'feedback-fork'`).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("fork row after source delete = %d, err=%v; want 1", count, err)
+	}
+	if _, err := bed.h.db.ExecContext(t.Context(), `DELETE FROM workspace_members WHERE workspace_id = ? AND user_id = ?`, forkWS, bed.userID); err != nil {
+		t.Fatal(err)
+	}
+	if got := request(path + "&workspace_id=" + forkWS); got != http.StatusNoContent {
+		t.Fatalf("removed member delete = %d, want 204", got)
+	}
+	if err := bed.h.db.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM message_feedback WHERE id = 'feedback-fork'`).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("invisible fork row after delete = %d, err=%v; want 1", count, err)
+	}
+}
+
 // TestFeedback_Delete_NonExistent_204 pins the idempotent contract:
 // DELETE against a row that doesn't exist returns 204, so a client
 // can fire DELETE on every toggle-off click without first checking

@@ -380,10 +380,9 @@ func NewRunNoticeCounter(db *sql.DB) func(ctx context.Context, workspaceID, runI
 		if db == nil || workspaceID == "" || runID == "" {
 			return 0, nil
 		}
-		// The stored id is "ibx_message_<run>:<step>"; match on source_id,
-		// which the writer sets to "<run>:<step>", via the "<run>:" prefix.
-		// LIKE metacharacters (%, _) can't appear in a cuid run id, so no
-		// escaping is needed.
+		// The stored source_id is "<run>:<step>"; match on it via the
+		// "<run>:" prefix, scoped to this workspace — ids are derived,
+		// the key is what's true (#2274).
 		prefix := runID + ":%"
 		var n int
 		err := db.QueryRowContext(ctx, `

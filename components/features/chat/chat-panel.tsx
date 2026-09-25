@@ -899,6 +899,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
               animateAfter={animateAfter}
               agentId={agentId}
               chatId={sessionId}
+              workspaceId={workspaceId ?? undefined}
               resolveAuthorName={resolveAuthorName}
               resolveAskProvenance={resolveAskProvenance}
             />

@@ -4008,6 +4008,13 @@
       },
       "FinalAdminPlatformBackupRestore": {
         "properties": {
+          "capability_tokens_reminted": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "nullable": true,
+            "type": "object"
+          },
           "columns_dropped": {
             "type": "integer"
           },
@@ -4195,7 +4202,8 @@
           "payload_row_count_mismatches",
           "rows_inserted_shortfalls",
           "journal_entries_resigned",
-          "journal_checkpoints_resigned"
+          "journal_checkpoints_resigned",
+          "capability_tokens_reminted"
         ],
         "type": "object"
       },
@@ -9923,6 +9931,9 @@
           },
           "user_id": {
             "nullable": true,
+            "type": "string"
+          },
+          "workspace_id": {
             "type": "string"
           }
         },
@@ -66707,6 +66718,14 @@
               "minLength": 1,
               "type": "string"
             }
+          },
+          {
+            "in": "query",
+            "name": "workspace_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -66777,6 +66796,24 @@
               }
             },
             "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
           },
           "500": {
             "content": {

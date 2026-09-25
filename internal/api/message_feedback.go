@@ -95,14 +95,15 @@ type feedbackCreateRequest struct {
 }
 
 type feedbackRow struct {
-	ID        string  `json:"id"`
-	MessageID string  `json:"message_id"`
-	ChatID    *string `json:"chat_id,omitempty"`
-	TraceID   *string `json:"trace_id,omitempty"`
-	Signal    string  `json:"signal"`
-	Reason    *string `json:"reason,omitempty"`
-	UserID    *string `json:"user_id,omitempty"`
-	CreatedAt string  `json:"created_at"`
+	ID          string  `json:"id"`
+	WorkspaceID string  `json:"workspace_id"`
+	MessageID   string  `json:"message_id"`
+	ChatID      *string `json:"chat_id,omitempty"`
+	TraceID     *string `json:"trace_id,omitempty"`
+	Signal      string  `json:"signal"`
+	Reason      *string `json:"reason,omitempty"`
+	UserID      *string `json:"user_id,omitempty"`
+	CreatedAt   string  `json:"created_at"`
 }
 
 // ensureChatVisible mirrors the message_reactions handler — feedback is
@@ -281,15 +282,15 @@ func (h *MessageFeedbackHandler) Create(w http.ResponseWriter, r *http.Request) 
 		reasonPtr = &body.Reason
 	}
 
-	// UNIQUE(message_id, user_id, signal) — UPSERT keeps the row id
-	// stable when a user updates their reason text, and re-writes
-	// workspace_id/chat_id on every POST so the row always matches the
-	// message's current resolution above.
+	// UNIQUE(workspace_id, message_id, user_id, signal) (#2274) —
+	// UPSERT keeps the row id stable when a user updates their reason
+	// text, and re-writes workspace_id/chat_id on every POST so the row
+	// always matches the message's current resolution above.
 	id := generateCUID()
 	_, err = h.db.ExecContext(r.Context(), `
 INSERT INTO message_feedback (id, workspace_id, chat_id, message_id, trace_id, signal, reason, user_id)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-ON CONFLICT(message_id, user_id, signal) DO UPDATE SET
+ON CONFLICT(workspace_id, message_id, user_id, signal) DO UPDATE SET
     workspace_id = excluded.workspace_id,
     reason       = excluded.reason,
     trace_id     = COALESCE(excluded.trace_id, message_feedback.trace_id),
@@ -302,10 +303,14 @@ ON CONFLICT(message_id, user_id, signal) DO UPDATE SET
 	}
 
 	// Resolve the persisted id (may be the existing row's id on UPSERT).
+	// Scoped by workspace to match the conflict target: the same
+	// (message_id, user_id, signal) is theoretically resolvable in two
+	// workspaces since #2274 scoped the key, and this lookup must agree
+	// with the row the upsert just touched.
 	var persistedID string
 	if err := h.db.QueryRowContext(r.Context(),
-		`SELECT id FROM message_feedback WHERE message_id = ? AND user_id = ? AND signal = ?`,
-		body.MessageID, user.ID, body.Signal).Scan(&persistedID); err != nil {
+		`SELECT id FROM message_feedback WHERE workspace_id = ? AND message_id = ? AND user_id = ? AND signal = ?`,
+		workspaceID, body.MessageID, user.ID, body.Signal).Scan(&persistedID); err != nil {
 		// The INSERT succeeded but the lookup failed — return what we
 		// know (the generated id) rather than erroring; the row exists.
 		persistedID = id
@@ -320,11 +325,10 @@ ON CONFLICT(message_id, user_id, signal) DO UPDATE SET
 // gets toggled off must actually remove the row so the eval pipeline
 // doesn't keep counting a retracted signal.
 //
-// Scoped via the workspace membership of the row, not chat ownership
-// — a user can only delete their OWN feedback (user_id = current
-// user), which is the strictest reasonable rule. We return 204 on
-// successful delete AND on "row didn't exist" so the client can call
-// DELETE freely without checking first.
+// Scoped to a single workspace where the caller is still a member.
+// Forked restores can preserve the same message_id and user_id in two
+// workspaces (#2274), so an unqualified DELETE must never remove both.
+// Return 204 for a missing row so clients can toggle feedback freely.
 func (h *MessageFeedbackHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	user := UserFromContext(r.Context())
 	if user == nil {
@@ -355,9 +359,58 @@ func (h *MessageFeedbackHandler) Delete(w http.ResponseWriter, r *http.Request) 
 		replyError(w, http.StatusBadRequest, "unknown signal")
 		return
 	}
+	workspaceID := strings.TrimSpace(r.URL.Query().Get("workspace_id"))
+	if len(workspaceID) > maxFeedbackIDChars {
+		replyError(w, http.StatusBadRequest, "workspace_id exceeds maximum length")
+		return
+	}
+	if workspaceID == "" {
+		// Existing clients send only message_id and signal. Preserve that
+		// contract when the user's visible row is unambiguous; a fork can
+		// give the same message id to two workspaces, which needs an
+		// explicit workspace_id rather than deleting both silently.
+		rows, err := h.db.QueryContext(r.Context(), `
+SELECT workspace_id FROM message_feedback
+WHERE message_id = ? AND user_id = ? AND signal = ?
+  AND workspace_id IN (SELECT workspace_id FROM workspace_members WHERE user_id = ?)
+LIMIT 2`, messageID, user.ID, signal, user.ID)
+		if err != nil {
+			h.logger.Error("resolve feedback workspace", "err", err)
+			replyError(w, http.StatusInternalServerError, "internal")
+			return
+		}
+		var candidates []string
+		for rows.Next() {
+			var candidate string
+			if err := rows.Scan(&candidate); err != nil {
+				rows.Close()
+				h.logger.Error("scan feedback workspace", "err", err)
+				replyError(w, http.StatusInternalServerError, "internal")
+				return
+			}
+			candidates = append(candidates, candidate)
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			h.logger.Error("iterate feedback workspace", "err", err)
+			replyError(w, http.StatusInternalServerError, "internal")
+			return
+		}
+		rows.Close()
+		if len(candidates) > 1 {
+			replyError(w, http.StatusConflict, "workspace_id required for feedback in multiple workspaces")
+			return
+		}
+		if len(candidates) == 0 {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		workspaceID = candidates[0]
+	}
 	if _, err := h.db.ExecContext(r.Context(),
-		`DELETE FROM message_feedback WHERE message_id = ? AND user_id = ? AND signal = ?`,
-		messageID, user.ID, signal); err != nil {
+		`DELETE FROM message_feedback WHERE workspace_id = ? AND message_id = ? AND user_id = ? AND signal = ?
+  AND workspace_id IN (SELECT workspace_id FROM workspace_members WHERE user_id = ?)`,
+		workspaceID, messageID, user.ID, signal, user.ID); err != nil {
 		h.logger.Error("delete feedback", "err", err)
 		replyError(w, http.StatusInternalServerError, "internal")
 		return
@@ -407,7 +460,7 @@ func (h *MessageFeedbackHandler) List(w http.ResponseWriter, r *http.Request) {
 	// or the user is removed mid-query we still don't surface stale
 	// cross-tenant data.
 	const baseQuery = `
-SELECT id, message_id, chat_id, trace_id, signal, reason, user_id, created_at
+SELECT id, workspace_id, message_id, chat_id, trace_id, signal, reason, user_id, created_at
 FROM message_feedback
 WHERE user_id = ?
   AND workspace_id IN (SELECT workspace_id FROM workspace_members WHERE user_id = ?)
@@ -436,7 +489,7 @@ WHERE user_id = ?
 	out := []feedbackRow{}
 	for rows.Next() {
 		var fr feedbackRow
-		if err := rows.Scan(&fr.ID, &fr.MessageID, &fr.ChatID, &fr.TraceID,
+		if err := rows.Scan(&fr.ID, &fr.WorkspaceID, &fr.MessageID, &fr.ChatID, &fr.TraceID,
 			&fr.Signal, &fr.Reason, &fr.UserID, &fr.CreatedAt); err != nil {
 			h.logger.Error("list feedback scan", "err", err)
 			replyError(w, http.StatusInternalServerError, "internal")

@@ -130,7 +130,8 @@ func (r *rig) seedRealInbox(t *testing.T, wsID, kind, sourceID, title string, pa
 	}); err != nil {
 		t.Fatalf("inbox.Insert(%s/%s): %v", kind, sourceID, err)
 	}
-	return "ibx_" + kind + "_" + sourceID
+	// Mirrors inbox.Insert's workspace-scoped derived id (#2274).
+	return "ibx_" + wsID + "_" + kind + "_" + sourceID
 }
 
 // ---------------------------------------------------------------------------

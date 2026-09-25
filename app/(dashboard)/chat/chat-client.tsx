@@ -508,6 +508,10 @@ export function ChatClient() {
   const handleSend = useCallback(
     (sid: string, text: string) => {
       autoTitleSession(sid, text)
+      // A successful send consumes the URL handoff. Workspace switching
+      // remounts ChatPanel, so leaving this value set could auto-send the
+      // same prompt again into the copied session.
+      if (handoffSessionRef.current === sid) setHandoff(null)
     },
     [autoTitleSession],
   )
@@ -765,7 +769,7 @@ export function ChatClient() {
     unified?.selectedId ? <UnifiedConversationPanel onBack={() => setDrawerOpen(true)} /> : agent && sessionId ? (
       <ChatAgentProvider agent={chatAgent}>
         <ChatPanel
-          key={`${agent.id}:${sessionId}`}
+          key={`${workspaceId}:${agent.id}:${sessionId}`}
           agentId={agent.id}
           agentName={agent.name}
           agentSlug={agent.slug}

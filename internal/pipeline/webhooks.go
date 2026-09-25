@@ -364,7 +364,17 @@ func NewWebhookStore(db *sql.DB) *WebhookStore {
 const redactedTokenPrefix = "redacted:"
 
 // redactedWebhookToken is what replaces the cleartext in pipeline_webhooks.
-func redactedWebhookToken(id string) string { return redactedTokenPrefix + id }
+func redactedWebhookToken(id string) string { return RedactedCapabilityToken(id) }
+
+// RedactedCapabilityToken returns the placeholder that belongs in a
+// cleartext capability column whose secret is stored only as a digest:
+// `redacted:<row id>`. The columns are NOT NULL UNIQUE, so an empty
+// string is not available for more than one row; deriving the marker
+// from the primary key keeps it unique, obviously dead, and traceable
+// back to the row it belonged to. Exported so the backup fork path can
+// mint the same marker for re-keyed rows, from the one place that
+// defines the convention (#2274).
+func RedactedCapabilityToken(id string) string { return redactedTokenPrefix + id }
 
 // Save creates or updates a webhook. On create, mints a fresh token;
 // on update, the token is preserved (changing the token would break

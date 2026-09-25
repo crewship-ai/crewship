@@ -3,9 +3,7 @@
 package consolidate
 
 import (
-	"bytes"
 	"context"
-	cryptorand "crypto/rand"
 	"database/sql"
 	"database/sql/driver"
 	"errors"
@@ -123,18 +121,14 @@ func TestWriteProposalMarshalCleanupDoesNotFollowLeafSymlink(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// newProposalID consumes the first eight bytes; WriteFileDurable uses
-	// the next eight for its temporary sibling name.
-	oldReader := cryptorand.Reader
-	cryptorand.Reader = bytes.NewReader(make([]byte, 16))
-	t.Cleanup(func() { cryptorand.Reader = oldReader })
 	now := time.Date(2026, 8, 11, 8, 0, 0, 0, time.UTC)
 	proposalPath := filepath.Join(proposedDir, "proposal-20260811080000-0000000000000000.md")
 	if err := os.Symlink(victim, proposalPath); err != nil {
 		t.Fatal(err)
 	}
 
-	c := &Consolidator{Journal: &noopEmitter{}, Logger: quietLogger()}
+	c := &Consolidator{Journal: &noopEmitter{}, Logger: quietLogger(),
+		proposalID: func(time.Time) string { return "20260811080000-0000000000000000" }}
 	_, err := c.writeProposal(context.Background(), Config{
 		WorkspaceID: "ws_test", CrewID: "crew_test", OutputDir: outputDir,
 	}, now, []LearnedRule{{
@@ -167,9 +161,6 @@ func TestWriteProposalInsertCleanupUnlinksLeafSymlinkNotVictim(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	oldReader := cryptorand.Reader
-	cryptorand.Reader = bytes.NewReader(make([]byte, 16))
-	t.Cleanup(func() { cryptorand.Reader = oldReader })
 	now := time.Date(2026, 8, 11, 8, 1, 0, 0, time.UTC)
 	proposalPath := filepath.Join(proposedDir, "proposal-20260811080100-0000000000000000.md")
 	driverName := "cleanup-swap-" + strconv.FormatUint(cleanupSwapDriverSeq.Add(1), 10)
@@ -180,7 +171,8 @@ func TestWriteProposalInsertCleanupUnlinksLeafSymlinkNotVictim(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = db.Close() })
 
-	c := &Consolidator{DB: db, Journal: &noopEmitter{}, Logger: quietLogger()}
+	c := &Consolidator{DB: db, Journal: &noopEmitter{}, Logger: quietLogger(),
+		proposalID: func(time.Time) string { return "20260811080100-0000000000000000" }}
 	_, err = c.writeProposal(context.Background(), Config{
 		WorkspaceID: "ws_test", CrewID: "crew_test", OutputDir: outputDir,
 	}, now, []LearnedRule{{Pattern: "pattern", Action: "action"}}, 1)
