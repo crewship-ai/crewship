@@ -105,12 +105,16 @@ that as skipped rather than green.
 
 The packs that read GitHub need a token. Put a **read-only** one
 (`actions:read` and repository read; the packs never write) in `.env.local`
-next to the Anthropic key:
+alongside the model login selection:
 
-```bash
-SEED_ANTHROPIC_API_KEY=sk-ant-…
-SEED_GITHUB_TOKEN=github_pat_…
+```dotenv
+SEED_CODEX_AUTH_FILE=/absolute/private/path/auth.json
+SEED_GITHUB_TOKEN=replace-with-your-read-only-token
 ```
+
+For the legacy Claude demo, set `SEED_ANTHROPIC_API_KEY` instead of
+`SEED_CODEX_AUTH_FILE`. The Codex variable is a path to a private `0600`
+file outside Git; never put the contents of `auth.json` in `.env.local`.
 
 The seed then creates the workspace `GH_TOKEN` every agent already knew, and
 additionally a **crew-scoped** `CLI_TOKEN` on each pack crew, bound to that

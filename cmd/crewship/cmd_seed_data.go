@@ -10,6 +10,7 @@ import (
 
 	"github.com/crewship-ai/crewship/cmd/crewship/seeddata"
 	"github.com/crewship-ai/crewship/internal/cli"
+	"github.com/crewship-ai/crewship/internal/llm"
 )
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -176,6 +177,11 @@ func seedAgents(ctx context.Context, client *cli.Client, crewIDs map[string]stri
 			continue
 		}
 		prompt := seeddata.AgentPrompt(a.PromptSlug)
+		if seedCodexEnabled() && a.CLIAdapter == "CLAUDE_CODE" {
+			a.CLIAdapter = "CODEX_CLI"
+			a.LLMProvider = "OPENAI"
+			a.LLMModel = llm.AdapterDefaultModel("CODEX_CLI")
+		}
 		body := map[string]interface{}{
 			"name":            a.Name,
 			"slug":            a.Slug,
@@ -199,6 +205,20 @@ func seedAgents(ctx context.Context, client *cli.Client, crewIDs map[string]stri
 		}
 		if err := applyAgentUpdateOnlyFields(client, id, a); err != nil {
 			return nil, fmt.Errorf("agent %s: %w", a.Slug, err)
+		}
+		// POST conflicts resolve an existing agent without changing its model.
+		// An opt-in Codex re-seed must convert the seeded agents as well.
+		if seedCodexEnabled() && a.CLIAdapter == "CODEX_CLI" {
+			resp, err := client.Patch("/api/v1/agents/"+id, map[string]any{
+				"cli_adapter": a.CLIAdapter, "llm_provider": a.LLMProvider, "llm_model": a.LLMModel,
+			})
+			if err != nil {
+				return nil, fmt.Errorf("agent %s Codex config: %w", a.Slug, err)
+			}
+			if err := cli.CheckError(resp); err != nil {
+				return nil, fmt.Errorf("agent %s Codex config: %w", a.Slug, err)
+			}
+			resp.Body.Close()
 		}
 		ids[a.Slug] = id
 		fmt.Fprintf(os.Stderr, "  + Agent: %s (%s, %s)\n", a.Name, a.AgentRole, a.ToolProfile)
@@ -374,41 +394,78 @@ func seedCredentials(ctx context.Context, client *cli.Client, agentIDs map[strin
 		return err
 	}
 	fmt.Fprintln(os.Stderr, "Seeding credentials...")
-
-	anthro := seeddata.ResolveAnthropicCredential()
-	isReal := os.Getenv("SEED_ANTHROPIC_API_KEY") != ""
-	if isReal {
-		fmt.Fprintf(os.Stderr, "  Using real %s from SEED_ANTHROPIC_API_KEY\n", anthro.Type)
-	} else {
-		fmt.Fprintf(os.Stderr, "  WARNING: using demo placeholder key — agents will not work. Set SEED_ANTHROPIC_API_KEY for real credentials.\n")
-	}
-
-	anthroID, err := seedOneCredential(client, anthro)
-	if err != nil {
-		return fmt.Errorf("anthropic credential: %w", err)
-	}
-
-	// Assign to all agents. Treat 409 Conflict as idempotent; surface other
-	// failures so the summary line reflects only successful assignments.
-	assigned := 0
-	for slug, agentID := range agentIDs {
-		resp, err := client.Post(
-			fmt.Sprintf("/api/v1/agents/%s/credentials", agentID),
-			map[string]string{"credential_id": anthroID, "env_var_name": anthro.EnvVarName},
-		)
+	if seedCodexEnabled() {
+		codexLogin, err := resolveSeedCodexLogin()
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "  ! Assign credential to agent %s: %v\n", slug, err)
-			continue
+			return err
 		}
-		status := resp.StatusCode
-		resp.Body.Close()
-		if status >= 400 && status != http.StatusConflict {
-			fmt.Fprintf(os.Stderr, "  ! Assign credential to agent %s: HTTP %d\n", slug, status)
-			continue
+		id, err := seedOneCredential(client, *codexLogin)
+		if err != nil {
+			return fmt.Errorf("Codex login: %w", err)
 		}
-		assigned++
+		codexAgents := map[string]bool{}
+		for _, agent := range seeddata.ActiveAgents() {
+			if agent.CLIAdapter == "CLAUDE_CODE" {
+				codexAgents[agent.Slug] = true
+			}
+		}
+		assigned := 0
+		for slug, agentID := range agentIDs {
+			if !codexAgents[slug] {
+				continue
+			}
+			resp, err := client.Post("/api/v1/agents/"+agentID+"/credentials", map[string]string{
+				"credential_id": id, "env_var_name": codexLogin.EnvVarName,
+			})
+			if err != nil {
+				return fmt.Errorf("assign Codex login to %s: %w", slug, err)
+			}
+			if resp.StatusCode != http.StatusConflict {
+				if err := cli.CheckError(resp); err != nil {
+					return fmt.Errorf("assign Codex login to %s: %w", slug, err)
+				}
+			}
+			resp.Body.Close()
+			assigned++
+		}
+		fmt.Fprintf(os.Stderr, "  + Assigned Codex login to %d agents\n", assigned)
+	} else {
+
+		anthro := seeddata.ResolveAnthropicCredential()
+		isReal := os.Getenv("SEED_ANTHROPIC_API_KEY") != ""
+		if isReal {
+			fmt.Fprintf(os.Stderr, "  Using real %s from SEED_ANTHROPIC_API_KEY\n", anthro.Type)
+		} else {
+			fmt.Fprintf(os.Stderr, "  WARNING: using demo placeholder key — agents will not work. Set SEED_ANTHROPIC_API_KEY for real credentials.\n")
+		}
+
+		anthroID, err := seedOneCredential(client, anthro)
+		if err != nil {
+			return fmt.Errorf("anthropic credential: %w", err)
+		}
+
+		// Assign to all agents. Treat 409 Conflict as idempotent; surface other
+		// failures so the summary line reflects only successful assignments.
+		assigned := 0
+		for slug, agentID := range agentIDs {
+			resp, err := client.Post(
+				fmt.Sprintf("/api/v1/agents/%s/credentials", agentID),
+				map[string]string{"credential_id": anthroID, "env_var_name": anthro.EnvVarName},
+			)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "  ! Assign credential to agent %s: %v\n", slug, err)
+				continue
+			}
+			status := resp.StatusCode
+			resp.Body.Close()
+			if status >= 400 && status != http.StatusConflict {
+				fmt.Fprintf(os.Stderr, "  ! Assign credential to agent %s: HTTP %d\n", slug, status)
+				continue
+			}
+			assigned++
+		}
+		fmt.Fprintf(os.Stderr, "  + Assigned %s to %d/%d agents\n", anthro.Name, assigned, len(agentIDs))
 	}
-	fmt.Fprintf(os.Stderr, "  + Assigned %s to %d/%d agents\n", anthro.Name, assigned, len(agentIDs))
 
 	// Google credential (optional). Same idempotent/surface-failure pattern
 	// as the Anthropic assignment above — treat 409 as already linked,
@@ -512,8 +569,27 @@ func seedScopedCredential(client *cli.Client, cred seeddata.CredentialDef, crewI
 	existingID, err := resolveByName(client, credentialsListPath, cred.Name)
 	if err == nil && existingID != "" {
 		fmt.Fprintf(os.Stderr, "  = Credential exists: %s\n", cred.Name)
+		if cred.Type == "PROVIDER_LOGIN" {
+			resp, err := client.Get("/api/v1/credentials/" + existingID)
+			if err != nil {
+				return "", err
+			}
+			var current struct {
+				Type     string `json:"type" yaml:"type"`
+				Provider string `json:"provider" yaml:"provider"`
+			}
+			if err := cli.ReadJSON(resp, &current); err != nil {
+				return "", err
+			}
+			if current.Type != cred.Type || current.Provider != cred.Provider {
+				return "", fmt.Errorf("existing credential %s has type/provider %s/%s, want %s/%s", cred.Name, current.Type, current.Provider, cred.Type, cred.Provider)
+			}
+		}
 		if cred.Value != "" && !strings.HasPrefix(cred.Value, "demo-placeholder-") {
 			if uerr := updateCredentialValue(client, existingID, cred.Value); uerr != nil {
+				if cred.Type == "PROVIDER_LOGIN" {
+					return "", fmt.Errorf("refresh %s: %w", cred.Name, uerr)
+				}
 				fmt.Fprintf(os.Stderr, "  ! %s: value not refreshed: %v\n", cred.Name, uerr)
 			}
 		}
@@ -527,6 +603,9 @@ func seedScopedCredential(client *cli.Client, cred seeddata.CredentialDef, crewI
 		"provider":    cred.Provider,
 		"value":       cred.Value,
 		"scope":       "WORKSPACE",
+	}
+	if cred.Mode != "" {
+		body["mode"] = cred.Mode
 	}
 	if crewID != "" {
 		body["scope"] = "CREW"

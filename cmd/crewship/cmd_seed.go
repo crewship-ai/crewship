@@ -145,6 +145,9 @@ func bridgeServerFromPort() {
 
 func runSeed(cmd *cobra.Command, args []string) error {
 	loadDotEnvLocal()
+	if _, err := resolveSeedCodexLogin(); err != nil {
+		return err // validate before bootstrap or any workspace mutation
+	}
 	ctx := cmd.Context()
 	nuke, _ := cmd.Flags().GetBool("nuke")
 	skipIssues, _ := cmd.Flags().GetBool("skip-issues")

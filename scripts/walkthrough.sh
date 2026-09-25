@@ -23,8 +23,9 @@
 # It's a guided checklist: run it top-to-bottom, or copy individual blocks.
 #
 # Prereqs: ./dev.sh start is up; `crewship seed --nuke --with-memory
-# --with-users --wait-provision` has completed; SEED_ANTHROPIC_API_KEY (and
-# optionally SEED_GITHUB_TOKEN) were set during seed.
+# --with-users --wait-provision` has completed; SEED_CODEX_AUTH_FILE (or the
+# legacy SEED_ANTHROPIC_API_KEY) and optionally SEED_GITHUB_TOKEN were set
+# during seed.
 set -euo pipefail
 
 CREWSHIP="${CREWSHIP:-./crewship}"

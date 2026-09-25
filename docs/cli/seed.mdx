@@ -37,6 +37,43 @@ On a fresh database, seed bootstraps the admin user (`demo@crewship.ai`) itself.
 | `--state-dir <path>` | User configuration directory | Private owned-account state outside Git, separated by server/workspace. Passwords are random and never printed. |
 | `--with-users` | `false` | Add four extra users (`ADMIN`, `MANAGER`, `MEMBER`, `VIEWER`) to the workspace for RBAC matrix testing. Requires the server to have been started with `CREWSHIP_ALLOW_SIGNUP=true` — seed checks before it starts and **fails** rather than placing nobody. |
 
+### Seed Codex agents with a ChatGPT login
+
+Set `SEED_CODEX_AUTH_FILE` to the absolute path of a Codex `auth.json` created
+by `codex login`. Keep the file outside the checkout with mode `0600`. To leave
+`.env.local` untouched, pass the path for one CLI invocation:
+
+```bash
+SEED_CODEX_AUTH_FILE=/private/path/to/auth.json crewship seed --server http://localhost:8081
+```
+
+For repeated `./dev.sh seed` runs, put only the path in `.env.local`, never
+the JSON or one of its tokens. `./dev.sh seed` loads `.env.local` and passes
+the path to the CLI:
+
+```dotenv
+# .env.local (only this path, never the auth.json contents)
+SEED_CODEX_AUTH_FILE=/private/path/to/auth.json
+```
+
+```bash
+./dev.sh seed
+```
+
+The seed checks the file before changing the workspace. It then creates an
+encrypted OpenAI `PROVIDER_LOGIN` in subscription mode, grants it to the nine
+seeded agents, configures those agents for `CODEX_CLI`, and uses an OpenAI
+login requirement and Codex model override in the model-backed routines.
+Crewship renders a per-agent `auth.json` with a placeholder refresh token at
+run time; the original refresh token stays in the server's credential store.
+Without `SEED_CODEX_AUTH_FILE`, the original Anthropic seed behavior applies.
+
+An existing routine with the same slug is retained on re-seed, so use a fresh
+demo workspace when changing its provider. An existing seeded agent is updated
+to Codex when the path is set. The path must be readable by the user running
+the seed; it is never sent to Crewship, only the file content is sent through
+the authenticated credential API.
+
 ## Examples
 
 ### First run on a fresh dev DB
@@ -49,11 +86,11 @@ crewship seed
 #   Bootstrapped admin: demo@crewship.ai
 #   Workspace: w_abc123
 # …
-# Provisioning 4 crew(s) in the background.
+# Provisioning 3 crew(s) in the background.
 #   Agents in these crews become runnable once provisioning finishes (~few minutes).
 #   Status: crewship crew provision status <slug>   (or re-run `crewship seed --wait-provision`)
 #
-# ✓ Seed complete: 4 crews, 14 agents
+# ✓ Seed complete: 3 crews, 9 agents
 # Login: demo@crewship.ai / password123
 ```
 
@@ -170,7 +207,7 @@ the other two are fallbacks for the read, not the pack's requirement.
 | 1. Bootstrap / auth | Hits `/api/v1/bootstrap` on a fresh DB; falls back to existing CLI token | Fatal |
 | 0. Nuke (if `--nuke`) | Wipes workspace contents | Fatal |
 | 1b. RBAC users (if `--with-users`) | Adds four extra members (`ADMIN`/`MANAGER`/`MEMBER`/`VIEWER`) before crews land | **Fatal if none land**; individual failures are logged and the rest of the fixture continues |
-| 2. Crews + members | Creates four crews and links the admin user | Fatal |
+| 2. Crews + members | Creates three crews (and optional Local AI) and links the admin user | Fatal |
 | 2a. Crew connections | All-pairs bidirectional `crew_connections` so missions can hand off | Non-fatal (logs and continues) |
 | 2c. Demo pack files | Delivers each pack's scripts and config to its crew's shared volume (`shared/scripts/…`, `shared/config/…`) — before provisioning, while the host can still write the tree | Non-fatal; `seed verify` compares the delivered bytes with the seed |
 | 2b. Provision crews | Triggers devcontainer image builds in parallel | Errors deferred to end |
@@ -194,7 +231,7 @@ The async-by-default model means a plain `crewship seed` returns quickly (~secon
 ## What the seeded chat surface shows
 
 A fresh workspace is meant to demonstrate the chat features, not ship them
-switched off, so three of the seven agents come pre-configured:
+switched off, so three of the nine default agents come pre-configured:
 
 | Agent | Suggested questions | Ask form |
 | --- | --- | --- |
