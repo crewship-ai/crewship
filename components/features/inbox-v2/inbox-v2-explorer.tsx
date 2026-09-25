@@ -108,7 +108,7 @@ export function InboxV2Explorer({
   const counts = useMemo(() => facetCounts(entries), [entries])
   const activeCount = (filters.type ? 1 : 0) + (filters.deadline ? 1 : 0) + (filters.unreadOnly ? 1 : 0)
   const crewChip = filters.crew ? lookup.crewById.get(filters.crew)?.name ?? "Crew" : null
-  const narrowed = Boolean(attention) || activeCount > 0 || filters.search.trim() !== ""
+  const narrowed = Boolean(attention) || activeCount > 0 || Boolean(filters.crew) || filters.search.trim() !== ""
   const set = (patch: Partial<InboxV2Filters>) => onFilters({ ...filters, ...patch })
 
   const sections = attention

@@ -6,7 +6,6 @@ import { Check, ChevronsUpDown, Users } from "lucide-react"
 import { CrewIcon } from "@/components/ui/crew-icon"
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import { cn } from "@/lib/utils"
 import { entryIdentity } from "./inbox-entry-identity"
 import type { InboxLookup, InboxV2Entry } from "./inbox-v2-types"
 
@@ -30,6 +29,22 @@ export function InboxCrewPicker({ lookup, entries, value, onChange }: {
       .sort((a, b) => b.count - a.count || a.crew.name.localeCompare(b.crew.name) || a.crew.slug.localeCompare(b.crew.slug))
   }, [entries, lookup])
   const selected = value ? lookup.crewById.get(value) : null
+  const withItems = crews.filter(({ count }) => count > 0)
+  const otherCrews = crews.filter(({ count }) => count === 0)
+  const option = ({ crew, count }: (typeof crews)[number]) => <CommandItem
+    key={crew.id}
+    value={`${crew.name} ${crew.slug} ${crew.id}`}
+    onSelect={() => { onChange(crew.id); setOpen(false) }}
+    className="min-h-11 gap-2 coarse:min-h-12"
+  >
+    <CrewIcon icon={crew.icon || "users"} color={crew.color} size="sm" className="!h-6 !w-6 !shrink-0 !rounded" />
+    <span className="min-w-0 flex-1">
+      <span className="block truncate text-xs text-foreground">{crew.name}</span>
+      <span className="block truncate text-[10px] text-muted-foreground">{crew.slug}</span>
+    </span>
+    {count > 0 && <span className="text-[10px] tabular-nums text-muted-foreground">{count}</span>}
+    {value === crew.id && <Check className="h-3.5 w-3.5 text-primary-hover" />}
+  </CommandItem>
 
   return <Popover open={open} onOpenChange={setOpen}>
     <PopoverTrigger asChild>
@@ -59,22 +74,8 @@ export function InboxCrewPicker({ lookup, entries, value, onChange }: {
               {!value && <Check className="h-3.5 w-3.5 text-primary-hover" />}
             </CommandItem>
           </CommandGroup>
-          <CommandGroup heading="Crews">
-            {crews.map(({ crew, count }) => <CommandItem
-              key={crew.id}
-              value={`${crew.name} ${crew.slug} ${crew.id}`}
-              onSelect={() => { onChange(crew.id); setOpen(false) }}
-              className="min-h-11 gap-2 coarse:min-h-12"
-            >
-              <CrewIcon icon={crew.icon || "users"} color={crew.color} size="sm" className="!h-6 !w-6 !shrink-0 !rounded" />
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-xs text-foreground">{crew.name}</span>
-                <span className="block truncate text-[10px] text-muted-foreground">{crew.slug}</span>
-              </span>
-              <span className={cn("text-[10px] tabular-nums", count ? "text-muted-foreground" : "text-muted-foreground/50")}>{count}</span>
-              {value === crew.id && <Check className="h-3.5 w-3.5 text-primary-hover" />}
-            </CommandItem>)}
-          </CommandGroup>
+          {withItems.length > 0 && <CommandGroup heading="With items in this view">{withItems.map(option)}</CommandGroup>}
+          {otherCrews.length > 0 && <CommandGroup heading={withItems.length ? "Other crews" : "Crews"}>{otherCrews.map(option)}</CommandGroup>}
         </CommandList>
       </Command>
     </PopoverContent>

@@ -89,6 +89,11 @@ describe("inbox v2 explorer", () => {
     expect(onFilters).toHaveBeenCalledWith(expect.objectContaining({ type: null }))
   })
 
+  it("explains an empty crew selection as a filter result", () => {
+    renderExplorer({ visible: [], filters: { ...EMPTY_INBOX_V2_FILTERS, crew: "empty-crew" } })
+    expect(screen.getByText("Nothing matches those filters.")).toBeInTheDocument()
+  })
+
   it("never offers a filter the server cannot answer", () => {
     renderExplorer()
     fireEvent.click(screen.getByRole("button", { name: /^Filter$/i }))
