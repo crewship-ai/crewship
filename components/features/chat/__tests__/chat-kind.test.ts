@@ -90,8 +90,9 @@ describe("classifyThread — mode first, then origin, then everything else is di
   })
 })
 
-describe("scopes — three tabs over four kinds", () => {
+describe("scopes — four activity buckets over four kinds", () => {
   it("asks the server for every kind the scope claims to show", () => {
+    expect(scopeKindParam("all")).toBe("")
     expect(scopeKindParam("direct")).toBe("direct")
     expect(scopeKindParam("issue")).toBe("issue")
     // Delegation rides with routines: from the reader's side both are work

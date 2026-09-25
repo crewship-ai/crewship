@@ -8,7 +8,7 @@ import { persist, createJSONStorage } from "zustand/middleware"
 // in the union so persisted JSON deserialises cleanly; the rail just
 // doesn't render a button for it any more, and the right-panel
 // migrate effect on mount silently rewrites context → files.
-export type DrawerTab = "files" | "triggers" | "team" | "context"
+export type DrawerTab = "files" | "artifacts" | "work" | "triggers" | "team" | "context"
 export type DrawerMode = "overlay" | "push"
 
 interface DrawerState {
@@ -26,10 +26,10 @@ interface DrawerState {
 export const useDrawerStore = create<DrawerState>()(
   persist(
     (set, get) => ({
-      open: false,
+      open: true,
       activeTab: "files",
-      mode: "overlay",
-      width: 380,
+      mode: "push",
+      width: 320,
       toggle: (tab) => {
         const { open, activeTab } = get()
         if (tab && tab !== activeTab) {

@@ -1,428 +1,96 @@
-vi.mock("../files/file-preview", () => ({ FilePreview: ({ url, name, onClose }: { url: string; name: string; onClose: () => void }) => <section aria-label="File preview"><span>{name}</span><output data-testid="preview-url">{url}</output><button onClick={onClose}>Back to files</button></section> }))
-vi.mock("../right-panel-tabs/team-tab", () => ({ TeamTab: () => null }))
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
-import { render, screen, cleanup, fireEvent, waitFor } from "@testing-library/react"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { ChatAgentProvider } from "../chat-agent-context"
+import { RightPanel } from "../right-panel"
+import { useArtifactStore } from "@/stores/artifact-store"
 
-// =============================================================================
-// The right rail's Files tab, and the four things it has to be able to say.
-//
-// The chat tree briefly grew an "AgentFilesPane" that duplicated this tab.
-// It was deleted — but it distinguished three states this tab did not, and
-// those are worth more than the pane was:
-//
-//   · in flight        — say so, do not draw an empty box
-//   · fetch failed     — say THAT, name it, and offer a retry
-//   · could not ask    — "this agent is in no crew" is not "the crew shares
-//                        nothing"
-//
-// The crew scope in particular used to swallow a failed fetch into an empty
-// array (files/three-tier-files.tsx:67) and render "No shared crew files",
-// which is a claim the UI had no standing to make. It is now the one thing
-// this file exists to prevent.
-// =============================================================================
-
-let workspaceId: string | null = "ws-1"
 vi.mock("@/hooks/use-workspace", () => ({
-  useWorkspace: () => ({ workspaceId, loading: false }),
+  useWorkspace: () => ({ workspaceId: "ws-1", loading: false }),
+  useCurrentWorkspaceId: () => "ws-1",
 }))
-
 vi.mock("@/hooks/use-user-preference", () => ({
-  useUserPreference: (_k: string, initial: unknown) => [initial, vi.fn()],
+  useUserPreference: (_key: string, initial: unknown) => [initial, vi.fn()],
 }))
-
+vi.mock("next/dynamic", () => ({ default: () => () => null }))
+vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }))
 const apiFetch = vi.fn()
 vi.mock("@/lib/api-fetch", () => ({ apiFetch: (...args: unknown[]) => apiFetch(...args) }))
 
-const toastError = vi.fn()
-const toastSuccess = vi.fn()
-vi.mock("sonner", () => ({
-  toast: {
-    error: (...a: unknown[]) => toastError(...a),
-    success: (...a: unknown[]) => toastSuccess(...a),
-  },
-}))
+const files = [
+  { path: "crew-1/marena/site", name: "site", size: 0, is_dir: true, mod_time: "", },
+  { path: "crew-1/marena/AGENTS.md", name: "AGENTS.md", size: 20, is_dir: false, mod_time: "", },
+]
 
-// The editor is code-split behind next/dynamic; the stub stands in for
-// CodeMirror and exposes the bytes it was handed plus a way to save them.
-vi.mock("next/dynamic", () => ({
-  default: () =>
-    function StubFileEditor({ code, onSave, onDirtyChange }: { code: string; onSave: (next: string) => void; onDirtyChange?: (dirty: boolean) => void }) {
-      return (
-        <div>
-          <pre data-testid="editor-code">{code}</pre>
-          <textarea aria-label="File contents" defaultValue={code} onChange={() => onDirtyChange?.(true)} />
-          <button type="button" onClick={() => onSave(`${code} EDITED`)}>
-            stub-save
-          </button>
-        </div>
-      )
-    },
-}))
-
-import { RightPanel } from "../right-panel"
-
-// ---------------------------------------------------------------- helpers
-
-function ok(body: unknown) {
-  return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(body) })
-}
-
-function fail(status: number) {
-  return Promise.resolve({ ok: false, status, json: () => Promise.resolve({}) })
-}
-
-function file(name: string, prefix = "crew-1/shared") {
-  return { path: `${prefix}/${name}`, name, size: 12, is_dir: false, mod_time: "2026-08-01T10:00:00Z" }
-}
-
-function url(args: unknown[]): string {
-  return String(args[0])
-}
-
-function panel(props: Partial<React.ComponentProps<typeof RightPanel>> = {}) {
-  return render(
-    <RightPanel agentId="agent-1" workspaceId={workspaceId} files={[]} initialTab="files" {...props} />,
-  )
-}
-
-/** The crew scope is loaded on demand — opening it is what asks. */
-async function openCrewScope() {
-  fireEvent.click(await screen.findByRole("button", { name: /crew/i }))
+function renderPanel(props: Partial<React.ComponentProps<typeof RightPanel>> = {}) {
+  return render(<ChatAgentProvider agent={{ id: "agent-1", name: "Mařena", slug: "marena", crewId: "crew-1", avatarSeed: "marena" }}>
+    <RightPanel agentId="agent-1" workspaceId="ws-1" files={files} initialTab="files" {...props} />
+  </ChatAgentProvider>)
 }
 
 beforeEach(() => {
-  workspaceId = "ws-1"
   apiFetch.mockReset()
-  toastError.mockReset()
-  toastSuccess.mockReset()
+  useArtifactStore.getState().closeAll()
+  apiFetch.mockImplementation((url: string) => Promise.resolve({ ok: true, json: async () => url.includes("subdir=")
+    ? [{ path: "crew-1/marena/site/hero.js", name: "hero.js", size: 32, is_dir: false, mod_time: "" }]
+    : [] }))
 })
-afterEach(() => cleanup())
+afterEach(cleanup)
 
-// ---------------------------------------------------------------- tests
-
-describe("RightPanel — the Files tab is honest about the crew scope", () => {
-  it("says the crew files are loading rather than drawing an empty scope", async () => {
-    apiFetch.mockImplementation(() => new Promise(() => {}))
-    panel()
-    await openCrewScope()
-
-    expect(await screen.findByTestId("crew-files-loading")).toBeInTheDocument()
-    expect(screen.queryByText(/no shared crew files/i)).toBeNull()
+describe("Chat agent context", () => {
+  it("shows the selected agent and only their Files, Artifacts, and Work tabs", () => {
+    renderPanel()
+    expect(screen.getByText("Mařena")).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: /Agent card/ })).toHaveAttribute("href", "/crews?agent=marena")
+    expect(screen.getByRole("button", { name: "Files" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Artifacts" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Work" })).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /^Team$/ })).toBeNull()
+    expect(screen.queryByRole("button", { name: /^Crew$/ })).toBeNull()
+    expect(screen.queryByRole("button", { name: /^Workspace$/ })).toBeNull()
   })
 
-  it("says a failed fetch FAILED — it does not render as an empty crew", async () => {
-    apiFetch.mockImplementation((...args: unknown[]) => {
-      if (url(args).includes("/api/v1/agents/agent-1?")) return ok({ id: "agent-1", slug: "casey", crew_id: "crew-1" })
-      return fail(502)
-    })
-    panel()
-    await openCrewScope()
-
-    const err = await screen.findByTestId("crew-files-error")
-    // The status is the one fact that tells a 403 from a 502; without it
-    // every retry after this is a guess.
-    expect(err).toHaveTextContent(/502/)
-    expect(screen.queryByText(/no shared crew files/i)).toBeNull()
+  it("keeps the agent tree visible and selects a file for the main workspace", async () => {
+    const onOpenFile = vi.fn()
+    renderPanel({ onOpenFile, selectedFile: "crew-1/marena/site/hero.js" })
+    expect(screen.queryByText("AGENTS.md")).toBeNull()
+    fireEvent.click(screen.getByRole("button", { name: /Show .* internal file/ }))
+    expect(screen.getByText("AGENTS.md")).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: /site/i }))
+    await waitFor(() => expect(screen.getByText("hero.js")).toBeInTheDocument())
+    fireEvent.click(screen.getByText("hero.js"))
+    expect(onOpenFile).toHaveBeenCalledWith({ path: "crew-1/marena/site/hero.js", name: "hero.js", scope: { kind: "agent" } })
+    expect(screen.getByText("hero.js")).toBeInTheDocument()
+    expect(screen.queryByText("Workspace-level files")).toBeNull()
   })
 
-  it("retries on demand, and the retry actually re-asks", async () => {
-    apiFetch.mockImplementation((...args: unknown[]) => {
-      if (url(args).includes("/api/v1/agents/agent-1?")) return ok({ id: "agent-1", slug: "casey", crew_id: "crew-1" })
-      return fail(502)
-    })
-    panel()
-    await openCrewScope()
-    await screen.findByTestId("crew-files-error")
-
-    apiFetch.mockImplementation((...args: unknown[]) => {
-      if (url(args).includes("/api/v1/agents/agent-1?")) return ok({ id: "agent-1", slug: "casey", crew_id: "crew-1" })
-      if (url(args).includes("/api/v1/crews/crew-1/files")) return ok([file("handbook.md")])
-      return ok([])
-    })
-    fireEvent.click(screen.getByRole("button", { name: /retry/i }))
-
-    expect(await screen.findByText("handbook.md")).toBeInTheDocument()
-    expect(screen.queryByTestId("crew-files-error")).toBeNull()
-  })
-
-  it("separates 'this agent is in no crew' from 'the crew shares nothing'", async () => {
-    apiFetch.mockImplementation((...args: unknown[]) => {
-      if (url(args).includes("/api/v1/agents/agent-1?")) return ok({ id: "agent-1", slug: "casey", crew_id: null })
-      return ok([])
-    })
-    panel()
-    await openCrewScope()
-
-    expect(await screen.findByTestId("crew-files-no-crew")).toHaveTextContent(/crew/i)
-    // The empty-list sentence is a different sentence, and must not appear.
-    expect(screen.queryByTestId("crew-files-empty")).toBeNull()
-  })
-
-  it("says the crew is empty only when the crew really answered with nothing", async () => {
-    apiFetch.mockImplementation((...args: unknown[]) => {
-      if (url(args).includes("/api/v1/agents/agent-1?")) return ok({ id: "agent-1", slug: "casey", crew_id: "crew-1" })
-      if (url(args).includes("/api/v1/crews/crew-1/files")) return ok([])
-      return ok([])
-    })
-    panel()
-    await openCrewScope()
-
-    expect(await screen.findByTestId("crew-files-empty")).toBeInTheDocument()
-    expect(screen.queryByTestId("crew-files-error")).toBeNull()
-  })
-
-  it("asks nothing until the crew scope is actually opened", async () => {
-    apiFetch.mockImplementation(() => ok([]))
-    panel()
-
-    await screen.findByRole("button", { name: /crew/i })
-    await waitFor(() =>
-      expect(apiFetch.mock.calls.some((c) => url(c).includes("/api/v1/crews/"))).toBe(false),
-    )
-  })
-})
-
-// =============================================================================
-// A file is read from a tree, and it must be written back to THAT tree.
-//
-// The crew scope lists `/crews/{crewId}/files`, whose keys are shaped
-// `<crewId>/<name>`, and used to hand the click to the AGENT editor. The read
-// was a guaranteed 403 (proxy_files.go rejects a `<crewId>/` path that is not
-// under `<crewId>/<slug>/`), and the save — had a path ever slipped past that
-// prefix test — would have PUT a crew file into the agent's own tree. The read
-// failing loudly is the mild half; the write landing in the wrong tree is not.
-// =============================================================================
-
-/** A download/save response: the editor reads bytes with .text(). */
-function okBytes(body: string) {
-  return Promise.resolve({
-    ok: true,
-    status: 200,
-    text: () => Promise.resolve(body),
-    json: () => Promise.resolve({}),
-  })
-}
-
-const agentFile = {
-  path: "crew-1/casey/main.py",
-  name: "main.py",
-  size: 20,
-  is_dir: false,
-  mod_time: "2026-08-01T10:00:00Z",
-}
-
-/** Every URL requested, in order. */
-function requested(): string[] {
-  return apiFetch.mock.calls.map((c) => url(c))
-}
-
-describe("RightPanel — a crew file is read and written in the crew's tree", () => {
-  beforeEach(() => {
-    apiFetch.mockImplementation((...args: unknown[]) => {
-      const u = url(args)
-      if (u.includes("/api/v1/agents/agent-1?")) return ok({ id: "agent-1", crew_id: "crew-1" })
-      if (u.includes("/files/download")) return okBytes("shared bytes")
-      if (u.includes("/files/save")) return okBytes("{}")
-      if (u.includes("/api/v1/crews/crew-1/files")) return ok([file("handbook.md", "crew-1")])
-      return ok([])
-    })
-  })
-
-  it("opens a shared crew file through the crew route and shows its bytes", async () => {
-    panel()
-    await openCrewScope()
-
-    fireEvent.click(await screen.findByRole("button", { name: /handbook\.md/i }))
-
-    const download = await waitFor(() => {
-      const d = requested().find((u) => u.includes("/files/download"))
-      expect(d).toBeDefined()
-      return d!
-    })
-    expect(download).toContain("/api/v1/crews/crew-1/files/download")
-    expect(download).toContain("path=crew-1%2Fhandbook.md")
-    // The agent editor is the wrong reader for this tree: it 403s on any
-    // `<crewId>/` path that is not under `<crewId>/<slug>/`.
-    expect(download).not.toContain("/api/v1/agents/")
-
-    expect(await screen.findByTestId("editor-code")).toHaveTextContent("shared bytes")
-    expect(toastError).not.toHaveBeenCalled()
-  })
-
-  it("saves it back to the crew tree — never into the agent's own", async () => {
-    panel()
-    await openCrewScope()
-    fireEvent.click(await screen.findByRole("button", { name: /handbook\.md/i }))
-    await screen.findByTestId("editor-code")
-
-    fireEvent.click(screen.getByRole("button", { name: /stub-save/i }))
-
-    const save = await waitFor(() => {
-      const s = requested().find((u) => u.includes("/files/save"))
-      expect(s).toBeDefined()
-      return s!
-    })
-    expect(save).toContain("/api/v1/crews/crew-1/files/save")
-    expect(save).toContain("path=crew-1%2Fhandbook.md")
-    expect(save).not.toContain("/api/v1/agents/")
-    // Read and write are the same tree, which is the whole assertion.
-    expect(requested().every((u) => !/\/agents\/[^/]+\/files\/(save|download)/.test(u))).toBe(true)
-  })
-
-  it("still reads and writes an agent file through the agent routes", async () => {
-    panel({ files: [agentFile] })
-
-    fireEvent.click(await screen.findByRole("button", { name: /main\.py/i }))
-    const download = await waitFor(() => {
-      const d = requested().find((u) => u.includes("/files/download"))
-      expect(d).toBeDefined()
-      return d!
-    })
-    expect(download).toContain("/api/v1/agents/agent-1/files/download")
-    expect(download).toContain("path=crew-1%2Fcasey%2Fmain.py")
-
-    await screen.findByTestId("editor-code")
-    fireEvent.click(screen.getByRole("button", { name: /stub-save/i }))
-    const save = await waitFor(() => {
-      const s = requested().find((u) => u.includes("/files/save"))
-      expect(s).toBeDefined()
-      return s!
-    })
-    expect(save).toContain("/api/v1/agents/agent-1/files/save")
-    expect(save).not.toContain("/api/v1/crews/")
-  })
-
-  it("keeps the tree straight when a crew file is opened after an agent one", async () => {
-    panel({ files: [agentFile] })
-
-    fireEvent.click(await screen.findByRole("button", { name: /main\.py/i }))
-    await screen.findByTestId("editor-code")
-
-    await openCrewScope()
-    fireEvent.click(await screen.findByRole("button", { name: /handbook\.md/i }))
-    await waitFor(() =>
-      expect(
-        requested().some((u) => u.includes("/api/v1/crews/crew-1/files/download")),
-      ).toBe(true),
-    )
-
-    fireEvent.click(screen.getByRole("button", { name: /stub-save/i }))
-
-    const saves = await waitFor(() => {
-      const s = requested().filter((u) => u.includes("/files/save"))
-      expect(s.length).toBe(1)
-      return s
-    })
-    expect(saves[0]).toContain("/api/v1/crews/crew-1/files/save")
-  })
-})
-
-describe("RightPanel — the open panel says which panel it is", () => {
-  it("names itself in a header when the rail hides the tab strip", async () => {
-    apiFetch.mockImplementation(() => ok([]))
-    panel({ hideTabs: true, initialTab: "files" })
-
-    // Opened from the rail there is no tab strip, so without this the panel
-    // is three unlabelled icons and a file tree.
-    expect(await screen.findByRole("heading", { name: /^files$/i })).toBeInTheDocument()
-  })
-})
-
-describe("RightPanel — file entry points and mobile navigation", () => {
-  it("switches from Files to Team when the mobile host changes the requested tab", async () => {
-    apiFetch.mockImplementation(() => ok([]))
-    const view = panel({ initialTab: "files", hideTabs: true })
-    expect(screen.getByRole("heading", { name: "Files" })).toBeInTheDocument()
-    view.rerender(<RightPanel agentId="agent-1" workspaceId={null} files={[]} initialTab="team" hideTabs />)
-    expect(await screen.findByRole("heading", { name: "Team" })).toBeInTheDocument()
-  })
-
-  it("falls back to Files for a disabled persisted tab", () => {
-    panel({ initialTab: "triggers", hideTabs: true })
-    expect(screen.getByRole("heading", { name: "Files" })).toBeInTheDocument()
-  })
-
-  it("distinguishes a failed request from an empty agent and offers retry", () => {
+  it("reports file list failure and offers retry", () => {
     const retry = vi.fn()
-    panel({ filesError: "Couldn't load agent files.", onRetryFiles: retry })
+    renderPanel({ files: [], filesError: "Couldn't load agent files.", onRetryFiles: retry })
     expect(screen.getByRole("alert")).toHaveTextContent("Couldn't load agent files.")
-    expect(screen.queryByText("No agent files yet")).not.toBeInTheDocument()
-    fireEvent.click(screen.getByRole("button", { name: "Retry loading files" }))
+    fireEvent.click(screen.getByRole("button", { name: /Retry loading files/ }))
     expect(retry).toHaveBeenCalledOnce()
   })
 
-  it("opens a transcript file through the scoped agent editor even before the tree arrives", async () => {
-    apiFetch.mockImplementation(() => Promise.resolve({ ok: true, text: () => Promise.resolve("generated report") }))
-    panel({ previewFile: { path: "reports/result.md" } })
-    expect(await screen.findByTestId("editor-code")).toHaveTextContent("generated report")
-    expect(apiFetch.mock.calls[0][0]).toContain("/api/v1/agents/agent-1/files/download?workspace_id=ws-1&path=reports%2Fresult.md")
+  it("lists previewable agent artifacts and opens the selected artifact", async () => {
+    apiFetch.mockResolvedValue({ ok: true, json: async () => [
+      { path: "crew-1/marena/report.pdf", name: "report.pdf", is_dir: false },
+      { path: "crew-1/marena/AGENTS.md", name: "AGENTS.md", is_dir: false },
+    ] })
+    renderPanel({ initialTab: "artifacts" })
+    fireEvent.click(await screen.findByRole("button", { name: /report.pdf/ }))
+    expect(useArtifactStore.getState().activeId).toBe("agent-1:crew-1/marena/report.pdf")
+    expect(useArtifactStore.getState().open).toBe(true)
+    expect(screen.queryByRole("button", { name: /AGENTS.md/ })).toBeNull()
   })
 
-  it("opens binary artifacts in the scoped preview instead of the text editor", () => {
-    panel({ previewFile: { path: "result.png" } })
-    expect(screen.getByTestId("preview-url")).toHaveTextContent("/api/v1/agents/agent-1/files/download?workspace_id=ws-1&path=result.png")
-    expect(apiFetch).not.toHaveBeenCalled()
-    expect(screen.queryByTestId("editor-code")).not.toBeInTheDocument()
+  it("shows only work assigned to or authored by the selected agent", async () => {
+    apiFetch.mockImplementation((url: string) => Promise.resolve({ ok: true, json: async () => url.includes("/issues?")
+      ? [{ id: "issue-1", identifier: "COPY-12", title: "Review headline", status: "IN_PROGRESS" }]
+      : [{ id: "routine-1", slug: "copy-review", name: "Copy review", author_agent_id: "agent-1" }, { id: "routine-2", slug: "other", name: "Other", author_agent_id: "agent-2" }] }))
+    renderPanel({ initialTab: "work" })
+    expect(await screen.findByRole("link", { name: /COPY-12/ })).toHaveAttribute("href", "/issues/COPY-12")
+    expect(screen.getByRole("link", { name: /Copy review/ })).toHaveAttribute("href", "/routines?routine=copy-review")
+    expect(screen.queryByText("Other")).toBeNull()
+    expect(apiFetch.mock.calls.some(([url]) => String(url).includes("assignee_id=agent-1"))).toBe(true)
   })
-})
-
-
-it("preserves the editor buffer while visiting another side panel", async () => {
-  apiFetch.mockImplementation(() => Promise.resolve({ ok: true, text: () => Promise.resolve("original") }))
-  const previewFile = { path: "report.md" }
-  const view = panel({ previewFile, initialTab: "files", hideTabs: true })
-  const editor = await screen.findByRole("textbox", { name: "File contents" })
-  fireEvent.change(editor, { target: { value: "unsaved changes" } })
-  view.rerender(<RightPanel agentId="agent-1" workspaceId="ws-1" files={[]} previewFile={previewFile} initialTab="team" hideTabs />)
-  expect(screen.queryByRole("textbox", { name: "File contents" })).not.toBeInTheDocument()
-  view.rerender(<RightPanel agentId="agent-1" workspaceId="ws-1" files={[]} previewFile={previewFile} initialTab="files" hideTabs />)
-  expect(await screen.findByRole("textbox", { name: "File contents" })).toHaveValue("unsaved changes")
-})
-
-
-it("consumes a preview request once and treats nested Dockerfile as text", async () => {
-  apiFetch.mockImplementation(() => Promise.resolve({ ok: true, text: () => Promise.resolve("FROM alpine") }))
-  const request = { path: "src/Dockerfile" }
-  const handled = vi.fn()
-  panel({ previewFile: request, onPreviewHandled: handled })
-  expect(await screen.findByTestId("editor-code")).toHaveTextContent("FROM alpine")
-  expect(handled).toHaveBeenCalledExactlyOnceWith(request)
-  expect(screen.queryByRole("button", { name: "Download file" })).not.toBeInTheDocument()
-})
-
-
-it("opens an agent PDF from the tree and returns to the same file list", () => {
-  panel({ files: [file("report.pdf", "crew-1/casey")] })
-  fireEvent.click(screen.getByRole("button", { name: /report.pdf/ }))
-  expect(screen.getByTestId("preview-url")).toHaveTextContent("path=crew-1%2Fcasey%2Freport.pdf")
-  fireEvent.click(screen.getByRole("button", { name: "Back to files" }))
-  expect(screen.getByRole("button", { name: /report.pdf/ })).toBeVisible()
-})
-
-it("opens crew binary files through crew authorization, never the agent route", async () => {
-  apiFetch.mockImplementation((url: string) => url.includes("/api/v1/agents/agent-1?")
-    ? ok({ id: "agent-1", crew_id: "crew-1" }) : ok([file("shared.png", "crew-1")]))
-  panel()
-  await openCrewScope()
-  fireEvent.click(await screen.findByRole("button", { name: /shared.png/ }))
-  expect(screen.getByTestId("preview-url")).toHaveTextContent("/api/v1/crews/crew-1/files/download?workspace_id=ws-1&path=crew-1%2Fshared.png")
-})
-
-it("clears a binary preview when workspace changes", () => {
-  const view = panel({ files: [file("report.pdf")] })
-  fireEvent.click(screen.getByRole("button", { name: /report.pdf/ }))
-  view.rerender(<RightPanel agentId="agent-1" workspaceId="ws-2" files={[]} />)
-  expect(screen.queryByTestId("preview-url")).not.toBeInTheDocument()
-})
-
-it("keeps unsaved text when opening a binary preview is cancelled", async () => {
-  apiFetch.mockImplementation(() => Promise.resolve({ ok: true, text: () => Promise.resolve("original") }))
-  panel({ files: [file("notes.txt"), file("report.pdf")] })
-  fireEvent.click(screen.getByRole("button", { name: /notes.txt/ }))
-  fireEvent.change(await screen.findByRole("textbox", { name: "File contents" }), { target: { value: "draft" } })
-  vi.stubGlobal("confirm", vi.fn(() => false))
-  fireEvent.click(screen.getByRole("button", { name: /report.pdf/ }))
-  expect(screen.queryByTestId("preview-url")).not.toBeInTheDocument()
-  expect(screen.getByRole("textbox", { name: "File contents" })).toHaveValue("draft")
-  vi.unstubAllGlobals()
 })

@@ -19,6 +19,7 @@ import { render, screen, cleanup, fireEvent, waitFor } from "@testing-library/re
 
 vi.mock("@/hooks/use-workspace", () => ({
   useWorkspace: () => ({ workspaceId: "ws-1", loading: false }),
+  useCurrentWorkspaceId: () => "ws-1",
 }))
 
 vi.mock("@/hooks/use-user-preference", () => ({

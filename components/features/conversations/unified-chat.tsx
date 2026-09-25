@@ -8,6 +8,7 @@ import { useWorkspace } from "@/hooks/use-workspace"
 import { useSessionSafe } from "@/hooks/use-auth"
 import { useWorkspaceConversations, conversationRequest, type WorkspaceConversation } from "@/hooks/use-workspace-conversations"
 import { Button } from "@/components/ui/button"
+import { SubBarPrimary } from "@/components/layout/sub-bar"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { CreateConversation, ConversationThread } from "./workspace-conversations"
@@ -79,16 +80,16 @@ function WorkspaceChatProvider({ workspaceId, userId, children }: { workspaceId:
   </UnifiedChatContext.Provider>
 }
 
-export function UnifiedNewChatMenu({ onAgent }: { onAgent: () => void }) {
+export function UnifiedNewChatMenu({ onAgent, subbar = false }: { onAgent: () => void; subbar?: boolean }) {
   const chat = useUnifiedConversations()
   if (!chat) return null
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button type="button" variant="outline" className="h-8 w-full justify-start gap-2 rounded-md bg-transparent text-xs font-medium shadow-none">
+        {subbar ? <SubBarPrimary type="button" icon={Plus}>New chat</SubBarPrimary> : <Button type="button" variant="outline" className="h-8 w-full justify-start gap-2 rounded-md bg-transparent text-xs font-medium shadow-none">
           <Plus className="size-4 text-muted-foreground" />New chat
           <ChevronDown className="ml-auto size-3.5 text-muted-foreground" />
-        </Button>
+        </Button>}
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-72 max-w-[calc(100vw-24px)]">
         <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">Direct messages</DropdownMenuLabel>

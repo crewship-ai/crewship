@@ -330,6 +330,8 @@ export interface Props {
    *  same thing at both sizes — put this column away — but "Collapse sidebar"
    *  is the wrong description of dismissing a drawer. */
   onUnifiedSelect?: () => void
+  /** Request a new agent session from the page sub-bar. */
+  pickerSignal?: number
   collapseLabel?: string
   className?: string
   /** Injected by tests so bucketing is not at the mercy of the wall clock. */
@@ -356,6 +358,7 @@ export function ConversationsSidebar({
   onToggleCollapse,
   collapseLabel,
   onUnifiedSelect,
+  pickerSignal,
   className,
   now,
 }: Props) {
@@ -421,7 +424,7 @@ export function ConversationsSidebar({
   // caller that forgot the prop) then degrades to Direct everywhere at once,
   // instead of showing the Direct list under a strip with nothing selected
   // and a roster section that silently disappeared.
-  const spec = CHAT_SCOPES.find((s) => s.id === scope) ?? CHAT_SCOPES[0]
+  const spec = CHAT_SCOPES.find((s) => s.id === scope) ?? CHAT_SCOPES.find((s) => s.id === "direct")!
   const activeScope = spec.id
 
   /**
@@ -486,7 +489,7 @@ export function ConversationsSidebar({
     .filter((a) => folds[a.id] > 0)
     .map((a) => ({ agent: a, more: folds[a.id] }))
 
-  if (unified) return <UnifiedChatSidebar props={{ agents, threadsByAgent, scope, onScopeChange, kindCounts, totalsByAgent, onShowAll, loadError, threadErrors, threadsLoaded, activeThreadId, draftConversation, onSelectThread, onStartConversation, onRetryRoster, onRetryThreads, onToggleCollapse, collapseLabel, onUnifiedSelect, className, now }} rows={rows} query={query} setQuery={setQuery} />
+  if (unified) return <UnifiedChatSidebar props={{ agents, threadsByAgent, scope, onScopeChange, kindCounts, totalsByAgent, onShowAll, loadError, threadErrors, threadsLoaded, activeThreadId, draftConversation, onSelectThread, onStartConversation, onRetryRoster, onRetryThreads, onToggleCollapse, collapseLabel, onUnifiedSelect, pickerSignal, className, now }} rows={rows} query={query} setQuery={setQuery} />
 
   return (
     // Width, border and background belong to the WRAPPER, the way

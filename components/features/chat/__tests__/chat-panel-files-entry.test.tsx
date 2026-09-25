@@ -79,9 +79,9 @@ describe("chat file entry points", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Preview generated file" }))
     await waitFor(() => expect(change).toHaveBeenCalledWith("files"))
   })
-  it("opens More on an available Team tab", () => {
+  it("opens More on the agent Work tab", () => {
     render(<ChatPanel {...props} mobilePanel="more" />)
-    expect(screen.getByText("team")).toBeInTheDocument()
+    expect(screen.getByText("work")).toBeInTheDocument()
   })
 })
 

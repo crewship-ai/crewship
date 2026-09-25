@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { UnifiedChatProvider } from "../unified-chat"
 import { LegacyConversationRedirect } from "../legacy-conversation-redirect"
@@ -43,6 +43,39 @@ beforeEach(() => {
   })
 })
 describe("unified Chat", () => {
+  it("starts an agent session from the shared Chat sub-bar", async () => {
+    render(wrap(<UnifiedChatProvider><ChatClient /></UnifiedChatProvider>))
+    await screen.findByRole("button", { name: "Open Ava chat" })
+    expect(screen.getByRole("heading", { name: "Chat" })).toBeInTheDocument()
+    fireEvent.keyDown(screen.getByRole("button", { name: "New chat" }), { key: "ArrowDown" })
+    fireEvent.click(await screen.findByRole("menuitem", { name: /Chat with an agent/ }))
+    expect(screen.getByRole("region", { name: "Choose an agent" })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Ava" }))
+    expect(await screen.findByText("Ava · Draft")).toBeInTheDocument()
+  })
+
+  it("folds the chat list for file reading and restores its prior fold", async () => {
+    render(wrap(<UnifiedChatProvider><ChatClient /></UnifiedChatProvider>))
+    await screen.findByRole("button", { name: "Open Ava chat" })
+    act(() => window.dispatchEvent(new CustomEvent("crewship:chat-file-workspace", { detail: { open: true } })))
+    expect(screen.getByRole("button", { name: "Expand sidebar" })).toBeInTheDocument()
+    act(() => window.dispatchEvent(new CustomEvent("crewship:chat-file-workspace", { detail: { open: false } })))
+    expect(screen.getByRole("button", { name: "Collapse sidebar" })).toBeInTheDocument()
+  })
+
+  it("keeps Activity visible and applies sidebar filters to agent rows", async () => {
+    render(wrap(<UnifiedChatProvider><ChatClient /></UnifiedChatProvider>))
+    await screen.findByRole("button", { name: "Open Ava chat" })
+    const activity = screen.getByRole("region", { name: "Activity" })
+    fireEvent.click(within(activity).getByRole("button", { name: /^All/ }))
+    expect(within(activity).getByRole("button", { name: /^All/ })).toHaveAttribute("aria-pressed", "true")
+    fireEvent.click(screen.getByRole("button", { name: "Filter" }))
+    fireEvent.click(screen.getByRole("button", { name: "Unread agent sessions" }))
+    expect(screen.queryByRole("button", { name: "Open Ava chat" })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Clear all" }))
+    expect(screen.getByRole("button", { name: "Open Ava chat" })).toBeInTheDocument()
+  })
+
   it("shows people and agents in one sidebar and gives a human deep link precedence without creating an agent session", async () => {
     render(wrap(<UnifiedChatProvider><ChatClient /></UnifiedChatProvider>))
     await screen.findByRole("textbox", { name: "Message Alice · Bob" })

@@ -45,6 +45,8 @@ import { ChatComposer } from "./composer/chat-composer"
 import { checkChatMessageSize } from "./hooks/use-message-submit"
 import { VirtualConversation, virtualChatEnabled } from "./virtual-conversation"
 import { ArtifactPane } from "./artifact/artifact-pane"
+import { FileWorkspace, type WorkspaceFile } from "./files/file-workspace"
+import { useArtifactStore } from "@/stores/artifact-store"
 import { FollowUps } from "./suggestions/follow-ups"
 import { AskRail } from "./asks/ask-rail"
 import { useAskForms } from "./asks/use-ask-forms"
@@ -228,21 +230,46 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
   const [filesLoading, setFilesLoading] = useState(false)
   const [filesError, setFilesError] = useState<string | null>(null)
   const [filesRevision, setFilesRevision] = useState(0)
+  const [workspaceFile, setWorkspaceFile] = useState<WorkspaceFile | null>(null)
+  const [chatAlongsideFile, setChatAlongsideFile] = useState(false)
+  const fileDirtyRef = useRef(false)
+  const openWorkspaceFile = useCallback((file: WorkspaceFile) => {
+    if (file.scope.kind !== "agent") return false
+    if (fileDirtyRef.current && !window.confirm("Discard unsaved file changes?")) return false
+    fileDirtyRef.current = false
+    setWorkspaceFile(file)
+    const drawer = useDrawerStore.getState()
+    drawer.setMode("push")
+    drawer.setActiveTab("files")
+    window.dispatchEvent(new CustomEvent("crewship:chat-file-workspace", { detail: { open: true } }))
+    return true
+  }, [])
+  const closeWorkspaceFile = useCallback(() => {
+    if (fileDirtyRef.current && !window.confirm("Discard unsaved file changes?")) return
+    fileDirtyRef.current = false
+    setWorkspaceFile(null)
+    setChatAlongsideFile(false)
+    window.dispatchEvent(new CustomEvent("crewship:chat-file-workspace", { detail: { open: false } }))
+  }, [])
   const [previewFile, setPreviewFile] = useState<{ path: string } | null>(null)
   const consumePreview = useCallback((request: { path: string }) => {
     setPreviewFile((current) => current === request ? null : current)
   }, [])
   const retryFiles = useCallback(() => setFilesRevision((n) => n + 1), [])
   const openFilePreview = useCallback((path: string) => {
+    if (!openWorkspaceFile({ path, name: path.split("/").pop() || path, scope: { kind: "agent" } })) return
     setPreviewFile({ path })
     useDrawerStore.getState().setActiveTab("files")
     if (mobilePanel) onMobilePanelChange?.("files")
-  }, [mobilePanel, onMobilePanelChange])
+  }, [mobilePanel, onMobilePanelChange, openWorkspaceFile])
 
   useEffect(() => {
     setFiles([])
     setFilesError(null)
     setPreviewFile(null)
+    setWorkspaceFile(null)
+    fileDirtyRef.current = false
+    window.dispatchEvent(new CustomEvent("crewship:chat-file-workspace", { detail: { open: false } }))
   }, [agentId, workspaceId, sessionId])
   // Narrow selectors — the panel only reads these three fields; a
   // whole-store subscription re-rendered the entire chat (message list
@@ -250,6 +277,12 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
   const drawerOpen = useDrawerStore((s) => s.open)
   const drawerActiveTab = useDrawerStore((s) => s.activeTab)
   const drawerMode = useDrawerStore((s) => s.mode)
+  const artifactOpen = useArtifactStore((s) => s.open)
+  useEffect(() => {
+    // Existing browser preferences may still say overlay. The chat context
+    // now shares space with the transcript and the file workspace.
+    if (drawerMode !== "push") useDrawerStore.getState().setMode("push")
+  }, [drawerMode])
 
   // Per-(re)connect ticket fetch. apiFetch promotes the 401 path —
   // either via silent refresh or the global session-expired event —
@@ -912,56 +945,27 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
     </Conversation>
   )
 
-  // Mobile: files-only mode -- just the file tree, no tabs
-  if (mobilePanel === "files-only") {
+  if (mobilePanel === "files-only" || mobilePanel === "files" || mobilePanel === "more") {
     return (
-      <RightPanel
-        key={`${workspaceId}:${agentId}:${sessionId}`}
-        agentId={agentId}
-        workspaceId={workspaceId}
-        files={files}
-        {...filePanelProps}
-        initialTab="files"
-        hideTabs
-        style={{ width: "100%" }}
-      />
-    )
-  }
-
-  // The page owns mobile navigation; avoid a second competing tab strip.
-  if (mobilePanel === "files") {
-    return (
-      <RightPanel
-        key={`${workspaceId}:${agentId}:${sessionId}`}
-        agentId={agentId}
-        workspaceId={workspaceId}
-        files={files}
-        {...filePanelProps}
-        initialTab="files"
-        hideTabs
-        style={{ width: "100%" }}
-      />
-    )
-  }
-
-  if (mobilePanel === "more") {
-    return (
-      <RightPanel
-        key={`${workspaceId}:${agentId}:${sessionId}`}
-        agentId={agentId}
-        workspaceId={workspaceId}
-        files={files}
-        {...filePanelProps}
-        initialTab="team"
-        hideTabs
-        style={{ width: "100%" }}
-      />
+      <div className="relative h-full">
+        <RightPanel
+          key={`${workspaceId}:${agentId}:${sessionId}`}
+          agentId={agentId}
+          workspaceId={workspaceId}
+          files={files}
+          {...filePanelProps}
+          initialTab={mobilePanel === "more" ? "work" : "files"}
+          hideTabs
+          style={{ width: "100%", height: "100%" }}
+        />
+        <ArtifactPane agentId={agentId} />
+      </div>
     )
   }
 
   if (mobilePanel === "chat") {
     return (
-      <div className="flex flex-col h-full">
+      <div className="relative flex flex-col h-full">
         <ReconnectBanner status={connectionStatus} />
         <div className="flex items-center gap-2 px-4 py-1.5 shrink-0">
           <ConnectionBadge status={connectionStatus} />
@@ -1043,15 +1047,29 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
         )}
         <ConversationSearch turns={turns} open={searchOpen} onOpenChange={setSearchOpen} />
         <ExportDialog turns={turns} agentName={agentName} open={exportOpen} onOpenChange={setExportOpen} />
+        <ArtifactPane agentId={agentId} />
       </div>
     )
   }
 
   // Desktop: chat + icon rail; drawer overlays (or pushes) when open
   const pushOpen = drawerOpen && drawerMode === "push"
+  const showingWorkspaceFile = workspaceFile !== null && !artifactOpen
   return (
     <div className="relative flex h-full">
-      <div className="flex flex-col overflow-hidden flex-1 min-w-0">
+      {showingWorkspaceFile && workspaceId && (
+        <div className="min-w-0 flex-1 overflow-hidden">
+          <FileWorkspace
+            file={workspaceFile}
+            agentId={agentId}
+            workspaceId={workspaceId}
+            onDirtyChange={(dirty) => { fileDirtyRef.current = dirty }}
+            onClose={closeWorkspaceFile}
+            onChatAlongside={() => setChatAlongsideFile((open) => !open)}
+          />
+        </div>
+      )}
+      <div className={cn("flex flex-col overflow-hidden min-w-0", showingWorkspaceFile ? chatAlongsideFile ? "w-[min(32vw,390px)] shrink-0 border-l" : "hidden" : "flex-1")}>
         <ReconnectBanner status={connectionStatus} />
         {/* Who you are talking to, not the session id. The strip carries the
             agent (face, status, role, crew, model, skills, credentials); the
@@ -1145,7 +1163,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
         />
       </div>
 
-      <RightDrawer>
+      {!artifactOpen && <RightDrawer>
         <RightPanel
           key={`${workspaceId}:${agentId}:${sessionId}`}
           agentId={agentId}
@@ -1154,11 +1172,13 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
           {...filePanelProps}
           initialTab={drawerActiveTab}
           hideTabs
+          onOpenFile={openWorkspaceFile}
+          selectedFile={workspaceFile?.path}
           style={{ width: "100%", height: "100%" }}
         />
-      </RightDrawer>
+      </RightDrawer>}
 
-      <RightRail className={cn(pushOpen && "border-l-0")} />
+      {!artifactOpen && <RightRail className={cn(pushOpen && "border-l-0")} />}
       {/* workspaceId is what makes the server-driven Actions group exist at
           all: useSlashCommands(undefined) never runs its query, so the palette
           rendered without it could only ever show the client rows. */}

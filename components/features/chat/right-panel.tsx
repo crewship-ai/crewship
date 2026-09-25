@@ -4,16 +4,16 @@ import React, { useCallback, useEffect, useMemo, useState } from "react"
 import dynamic from "next/dynamic"
 import {
   FileText,
-  Zap,
-  Users,
-  Bookmark,
+  LayoutGrid,
+  ListTodo,
   X,
   Save,
   Maximize2,
   Minimize2,
-  Globe,
   Bot as BotIcon,
 } from "lucide-react"
+import Link from "next/link"
+import { AgentAvatar } from "@/components/ui/agent-avatar"
 import { Spinner } from "@/components/ui/spinner"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
@@ -34,11 +34,8 @@ import { useFileEditor, fileRoute, type EditorScope } from "./hooks/use-file-edi
 import { useUserPreference } from "@/hooks/use-user-preference"
 import { FilePreview } from "./files/file-preview"
 import { ScopeSection } from "./files/scope-section"
-import { CrewFilesScope } from "./files/crew-files-scope"
-import { TriggersTab } from "./right-panel-tabs/triggers-tab"
-import { AGENT_EXTERNAL_TRIGGERS } from "@/lib/feature-gates"
-import { SharedContextTab } from "./right-panel-tabs/shared-context-tab"
-import { TeamTab } from "./right-panel-tabs/team-tab"
+import { AgentArtifactsTab } from "./right-panel-tabs/agent-artifacts-tab"
+import { AgentWorkTab } from "./right-panel-tabs/agent-work-tab"
 import { DRAWER_TAB_LABELS } from "./right-rail"
 import { useDrawerStore, type DrawerTab } from "@/stores/drawer-store"
 import { useChatAgent } from "./chat-agent-context"
@@ -64,9 +61,8 @@ const FileEditor = dynamic(
 // this tab is the half that hands out a live signing secret.
 const RIGHT_PANEL_TABS = [
   { id: "files", label: "Files", icon: FileText },
-  ...(AGENT_EXTERNAL_TRIGGERS ? [{ id: "triggers", label: "Triggers", icon: Zap }] : []),
-  { id: "team", label: "Team", icon: Users },
-  { id: "context", label: "Context", icon: Bookmark },
+  { id: "artifacts", label: "Artifacts", icon: LayoutGrid },
+  { id: "work", label: "Work", icon: ListTodo },
 ] as const
 
 interface RightPanelProps {
@@ -81,9 +77,11 @@ interface RightPanelProps {
   onPreviewHandled?: (request: { path: string }) => void
   hideTabs?: boolean
   style?: React.CSSProperties
+  onOpenFile?: (file: { path: string; name: string; scope: EditorScope }) => void
+  selectedFile?: string | null
 }
 
-export const RightPanel = React.memo(function RightPanel({ agentId, workspaceId, files, initialTab, hideTabs, style, filesLoading, filesError, onRetryFiles, previewFile, onPreviewHandled }: RightPanelProps) {
+export const RightPanel = React.memo(function RightPanel({ agentId, workspaceId, files, initialTab, hideTabs, style, filesLoading, filesError, onRetryFiles, previewFile, onPreviewHandled, onOpenFile, selectedFile }: RightPanelProps) {
   const chatAgent = useChatAgent()
   const crewId = chatAgent?.crewId ?? null
   const agentSlug = chatAgent?.slug ?? null
@@ -130,6 +128,10 @@ export const RightPanel = React.memo(function RightPanel({ agentId, workspaceId,
   const dirtyEditorRef = React.useRef(editorDirty)
   dirtyEditorRef.current = editorDirty
   const openScopedFile = useCallback((node: { path: string; name: string }, scope: EditorScope) => {
+    if (onOpenFile) {
+      onOpenFile({ path: node.path, name: node.name, scope })
+      return
+    }
     if (isPreviewable(node.name)) {
       if (dirtyEditorRef.current && !window.confirm("Discard unsaved file changes?")) return
       setEditorDirty(false)
@@ -146,7 +148,7 @@ export const RightPanel = React.memo(function RightPanel({ agentId, workspaceId,
         drawer.setWidth(Math.min(680, Math.max(320, window.innerWidth - 720)))
       }
     }
-  }, [setEditorDirty, openFileEditor, closeEditor])
+  }, [setEditorDirty, openFileEditor, closeEditor, onOpenFile])
 
   /**
    * What the panel lists.
@@ -211,7 +213,7 @@ export const RightPanel = React.memo(function RightPanel({ agentId, workspaceId,
     if (saved.expandedPaths.length > 0) {
       setExpanded(new Set(saved.expandedPaths))
     }
-    if (saved.lastOpenedPath && !previewFile && !editorFile) {
+    if (!onOpenFile && saved.lastOpenedPath && !previewFile && !editorFile) {
       const name = saved.lastOpenedPath.split("/").pop() ?? ""
       openFileEditor({ path: saved.lastOpenedPath, name }, AGENT_SCOPE)
     }
@@ -275,11 +277,6 @@ export const RightPanel = React.memo(function RightPanel({ agentId, workspaceId,
     (node: TreeNode) => openScopedFile(node, AGENT_SCOPE),
     [openScopedFile],
   )
-  const openCrewFile = useCallback(
-    (node: TreeNode, crewId: string) => openScopedFile(node, { kind: "crew", crewId }),
-    [openScopedFile],
-  )
-
   const toggleFolder = useCallback((path: string) => {
     setExpanded((prev) => {
       const next = new Set(prev)
@@ -289,26 +286,24 @@ export const RightPanel = React.memo(function RightPanel({ agentId, workspaceId,
     })
   }, [])
 
-  const fileCount = visibleFiles.filter((f) => !f.is_dir).length
-  const editorOpen = editorFile !== null && activeTab === "files"
-  const ActiveTabIcon = RIGHT_PANEL_TABS.find((t) => t.id === activeTab)?.icon
+  const editorOpen = !onOpenFile && editorFile !== null && activeTab === "files"
 
   return (
     <div className="flex flex-col border-l overflow-hidden" style={style}>
-      {/* Opened from the rail the tab strip is hidden, and the panel used to
-          arrive with no name on it at all — three unlabelled icons on the
-          rail, and whatever they opened. The heading is the label. */}
-      {hideTabs && (
-        <div className="flex h-[41px] shrink-0 items-center gap-2 border-b px-3">
-          {ActiveTabIcon && <ActiveTabIcon className="h-3.5 w-3.5 text-muted-foreground" aria-hidden />}
-          <h2 className="text-label font-medium text-foreground">{DRAWER_TAB_LABELS[activeTab as DrawerTab] ?? activeTab}</h2>
+      <div className="shrink-0 border-b px-3 py-3">
+        <div className="mb-2 text-[10px] uppercase tracking-wider text-muted-foreground">Agent context</div>
+        <div className="flex min-w-0 items-center gap-2">
+          <AgentAvatar seed={chatAgent?.avatarSeed || chatAgent?.slug || agentId} style={chatAgent?.avatarStyle} avatarUrl={chatAgent?.avatarUrl} className="size-8 shrink-0" />
+          <div className="min-w-0 flex-1"><p className="truncate text-xs font-medium">{chatAgent?.name || "Agent"}</p><p className="text-[10px] text-muted-foreground">Agent</p></div>
+          {chatAgent?.slug && <Link className="shrink-0 text-[10px] text-primary hover:underline" href={`/crews?agent=${encodeURIComponent(chatAgent.slug)}`}>Agent card ↗</Link>}
         </div>
-      )}
-      {!hideTabs && <div className="flex items-end shrink-0 overflow-x-auto scrollbar-none border-b h-[41px]">
+      </div>
+      {hideTabs && <h2 className="sr-only">{DRAWER_TAB_LABELS[activeTab as DrawerTab] ?? activeTab}</h2>}
+      <div className="flex items-end shrink-0 overflow-x-auto scrollbar-none border-b h-[41px]">
         {RIGHT_PANEL_TABS.map((tab) => (
           <button
             key={tab.id}
-            onClick={() => setActiveTab(tab.id)}
+            onClick={() => { setActiveTab(tab.id); useDrawerStore.getState().setActiveTab(tab.id) }}
             className={cn(
               "flex-1 flex items-center justify-center gap-1.5 pb-2.5 text-micro font-medium transition-colors shrink-0 border-b-2 mb-[-1px]",
               tab.id === activeTab
@@ -320,7 +315,7 @@ export const RightPanel = React.memo(function RightPanel({ agentId, workspaceId,
             {tab.label}
           </button>
         ))}
-      </div>}
+      </div>
 
       {activeTab === "files" && downloadFile && workspaceId && (
         <div className="flex min-h-0 flex-1 flex-col">
@@ -342,7 +337,7 @@ export const RightPanel = React.memo(function RightPanel({ agentId, workspaceId,
       <div className={cn(downloadFile && activeTab === "files" && "hidden", "overflow-y-auto", editorOpen ? "flex-1 min-h-0" : "flex-1")}>
         {activeTab === "files" && !downloadFile && (
           <div>
-            <ScopeSection icon={BotIcon} title="Agent" count={fileCount} defaultOpen>
+            <ScopeSection icon={BotIcon} title="Agent" defaultOpen>
               {filesError ? (
                 <div role="alert" className="space-y-2 p-3 text-xs text-muted-foreground">
                   <p>{filesError}</p>
@@ -361,7 +356,7 @@ export const RightPanel = React.memo(function RightPanel({ agentId, workspaceId,
                       depth={0}
                       expanded={expanded}
                       loadingDirs={loadingDirs}
-                      selectedFile={editorFile?.scope.kind === "agent" ? editorFile.path : null}
+                      selectedFile={selectedFile ?? (editorFile?.scope.kind === "agent" ? editorFile.path : null)}
                       onToggle={toggleFolder}
                       onFileClick={openAgentFile}
                     />
@@ -392,55 +387,10 @@ export const RightPanel = React.memo(function RightPanel({ agentId, workspaceId,
                 </button>
               )}
             </ScopeSection>
-            {/* Collapsed, and the section mounts its children only when open,
-                so "loaded on demand" is the mechanism rather than a caption.
-                CrewFilesScope owns its own loading / failed / no-crew / empty
-                states — see the note at the top of that file for why a failed
-                fetch must never render as an empty crew.
-                A file clicked here is opened against /crews/{crewId}/files/*:
-                its keys are `<crewId>/…`, which the agent routes reject as
-                "path not scoped to this agent" — and would, on a save, have
-                written into the agent's own tree. */}
-            <ScopeSection icon={Users} title="Crew" defaultOpen={false}>
-              <CrewFilesScope
-                agentId={agentId}
-                workspaceId={workspaceId}
-                selectedFile={editorFile?.scope.kind === "crew" ? editorFile.path : null}
-                onFileClick={openCrewFile}
-              />
-            </ScopeSection>
-            <ScopeSection
-              icon={Globe}
-              title="Workspace"
-              defaultOpen={false}
-              badge={
-                <span className="rounded bg-warn/10 dark:bg-warn/30 px-1.5 text-[10px] text-warn dark:text-warn">
-                  soon
-                </span>
-              }
-            >
-              <div className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-muted-foreground">
-                <FileText className="h-3 w-3" />
-                Workspace-level files — backend pending
-              </div>
-            </ScopeSection>
           </div>
         )}
-
-        {/* Checked here as well as in the tab list: initialTab comes from the
-            caller, so hiding the button alone still leaves the surface one
-            deep link away. */}
-        {AGENT_EXTERNAL_TRIGGERS && activeTab === "triggers" && (
-          <TriggersTab agentId={agentId} workspaceId={workspaceId} />
-        )}
-
-        {activeTab === "team" && (
-          <TeamTab agentId={agentId} workspaceId={workspaceId} />
-        )}
-
-        {activeTab === "context" && (
-          <SharedContextTab agentId={agentId} workspaceId={workspaceId} />
-        )}
+        {activeTab === "artifacts" && <AgentArtifactsTab agentId={agentId} workspaceId={workspaceId} crewId={crewId} agentSlug={agentSlug} />}
+        {activeTab === "work" && <AgentWorkTab agentId={agentId} workspaceId={workspaceId} />}
       </div>
 
       {/* Slide-up editor */}
@@ -509,12 +459,6 @@ export const RightPanel = React.memo(function RightPanel({ agentId, workspaceId,
         </div>
       )}
 
-      {/* Footer (file count) -- only when no editor */}
-      {!editorOpen && !downloadFile && activeTab === "files" && tree.length > 0 && (
-        <div className="px-3 py-1.5 border-t text-micro text-muted-foreground shrink-0">
-          {fileCount} file{fileCount !== 1 ? "s" : ""}
-        </div>
-      )}
     </div>
   )
 })

@@ -72,11 +72,18 @@ function response(init: {
 }) {
   const headers = new Headers()
   if (init.contentType) headers.set("content-type", init.contentType)
+  const bytes = new TextEncoder().encode(init.body ?? "")
   return Promise.resolve({
     ok: init.ok ?? true,
     status: init.status ?? 200,
     url: init.url ?? "",
     headers,
+    body: new ReadableStream({
+      start(controller) {
+        controller.enqueue(bytes)
+        controller.close()
+      },
+    }),
     text: async () => init.body ?? "",
     json: async () => JSON.parse(init.body ?? "null"),
   } as unknown as Response)
@@ -135,7 +142,7 @@ describe("ArtifactPane — reading a file", () => {
     render(<ArtifactPane agentId="agent-1" />)
     openTab("t1", "workspace/notes.md")
 
-    await waitFor(() => expect(toastError).toHaveBeenCalled())
+    await screen.findByRole("alert")
     expect(screen.queryByTestId("editor-code")).toBeNull()
     expect(screen.queryByText(/is_dir/)).toBeNull()
     // No editor means no save button, so the listing can never be written back.
@@ -154,7 +161,7 @@ describe("ArtifactPane — reading a file", () => {
     render(<ArtifactPane agentId="agent-1" />)
     openTab("t1", "workspace/notes.md")
 
-    await waitFor(() => expect(toastError).toHaveBeenCalled())
+    await screen.findByRole("alert")
     expect(screen.queryByTestId("editor-code")).toBeNull()
   })
 })
@@ -202,5 +209,32 @@ describe("ArtifactPane — saving", () => {
     expect(
       apiFetch.mock.calls.filter((c) => String(c[0]).includes("/files/save")).length,
     ).toBe(0)
+  })
+})
+
+describe("ArtifactPane — live revisions", () => {
+  it("increments only when scoped file bytes change and Pause stops fetching", async () => {
+    let body = "name,value\nfirst,1\n"
+    apiFetch.mockImplementation(() => response({ body, contentType: "application/octet-stream" }))
+    render(<ArtifactPane agentId="agent-1" />)
+    openTab("sheet", "reports/current.csv")
+
+    expect(await screen.findByLabelText("Spreadsheet preview")).toHaveTextContent("first")
+    expect(screen.getByRole("status")).toHaveTextContent("revision 1")
+    const callsBeforePause = apiFetch.mock.calls.length
+    fireEvent.click(screen.getByRole("button", { name: "Pause live updates" }))
+    const callsAtPause = apiFetch.mock.calls.length
+    expect(callsAtPause).toBe(callsBeforePause)
+    body = "name,value\nsecond,2\n"
+    expect(screen.getByRole("status")).toHaveTextContent("Paused")
+    expect(apiFetch).toHaveBeenCalledTimes(callsAtPause)
+
+    fireEvent.click(screen.getByRole("button", { name: "Follow live updates" }))
+    expect(await screen.findByLabelText("Spreadsheet preview")).toHaveTextContent("second")
+    expect(screen.getByRole("status")).toHaveTextContent("revision 2")
+    fireEvent.click(screen.getByRole("button", { name: "Pause live updates" }))
+    fireEvent.click(screen.getByRole("button", { name: "Follow live updates" }))
+    await waitFor(() => expect(apiFetch.mock.calls.length).toBeGreaterThan(callsAtPause + 1))
+    expect(screen.getByRole("status")).toHaveTextContent("revision 2")
   })
 })

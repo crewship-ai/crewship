@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect } from "react"
-import { FileText, Zap, Users } from "lucide-react"
+import { FileText, LayoutGrid, ListTodo } from "lucide-react"
 import { motion } from "motion/react"
 import { useHotkeys } from "react-hotkeys-hook"
 
@@ -14,7 +14,6 @@ import {
 } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import { spring } from "@/lib/motion"
-import { AGENT_EXTERNAL_TRIGGERS } from "@/lib/feature-gates"
 import { useDrawerStore, type DrawerTab } from "@/stores/drawer-store"
 
 interface RailItem {
@@ -24,26 +23,12 @@ interface RailItem {
   shortcut?: string
 }
 
-// Context tab intentionally dropped from the chat drawer — that surface
-// belongs to the agent canvas / settings page, not the per-session chat.
-// Keeping the rail tight makes the drawer feel less like a kitchen-sink and
-// more like a focused chat sidekick.
-//
-// Triggers is gated on the SAME flag the panel gates its tab on, and for the
-// obvious reason: right-panel.tsx renders the Triggers tab only when
-// AGENT_EXTERNAL_TRIGGERS is set, and the flag is currently false — so the
-// rail was offering a button (and ⌘2) that opened the drawer onto an empty
-// pane. A rail entry whose panel cannot render is not a hidden feature, it is
-// a dead control, and it was the first thing every reader clicked.
-//
 // The shortcut number is derived from the position rather than written down,
 // so removing an entry cannot leave ⌘3 pointing at the second icon.
 const RAIL_PANELS: Omit<RailItem, "shortcut">[] = [
   { id: "files", label: "Files", icon: FileText },
-  ...(AGENT_EXTERNAL_TRIGGERS
-    ? [{ id: "triggers" as DrawerTab, label: "Triggers", icon: Zap }]
-    : []),
-  { id: "team", label: "Team", icon: Users },
+  { id: "artifacts", label: "Artifacts", icon: LayoutGrid },
+  { id: "work", label: "Work", icon: ListTodo },
 ]
 
 const ITEMS: RailItem[] = RAIL_PANELS.map((item, i) => ({
@@ -65,6 +50,8 @@ const ITEMS: RailItem[] = RAIL_PANELS.map((item, i) => ({
  */
 export const DRAWER_TAB_LABELS: Record<DrawerTab, string> = {
   files: "Files",
+  artifacts: "Artifacts",
+  work: "Work",
   triggers: "Triggers",
   team: "Team",
   context: "Context",
@@ -78,11 +65,11 @@ export function RightRail({ className }: { className?: string }) {
   const toggle = useDrawerStore((s) => s.toggle)
   const setActiveTab = useDrawerStore((s) => s.setActiveTab)
 
-  // Migrate persisted "context" → "files". Depend on activeTab so this
+  // Migrate tabs removed from the chat surface. Depend on activeTab so this
   // also fires after the persist middleware hydrates with the legacy
   // value (which can land after the first render).
   useEffect(() => {
-    if (activeTab === "context") setActiveTab("files")
+    if (activeTab === "context" || activeTab === "team" || activeTab === "triggers") setActiveTab("files")
   }, [activeTab, setActiveTab])
 
   useHotkeys(

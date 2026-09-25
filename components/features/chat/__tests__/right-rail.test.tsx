@@ -29,9 +29,10 @@ describe("RightRail — the controls say what they are", () => {
   it("gives every control an accessible name", () => {
     render(<RightRail />)
 
-    for (const label of ["Files", "Team"]) {
+    for (const label of ["Files", "Artifacts", "Work"]) {
       expect(screen.getByRole("tab", { name: label })).toBeInTheDocument()
     }
+    expect(screen.queryByRole("tab", { name: "Team" })).toBeNull()
     expect(screen.getByRole("tablist", { name: /side panels/i })).toBeInTheDocument()
   })
 
@@ -48,21 +49,20 @@ describe("RightRail — the controls say what they are", () => {
   })
 
   it("numbers the shortcuts by position, so removing a control renumbers the rest", () => {
-    // Written down, "Team = ⌘3" survived Triggers leaving and left ⌘2 bound
-    // to nothing while ⌘3 opened the second icon. Derived from the index, the
-    // pair cannot drift apart.
+    // Shortcuts follow the visible order when the panel set changes.
     render(<RightRail />)
 
     expect(screen.getByRole("tab", { name: "Files" })).toHaveAttribute("aria-keyshortcuts", "Meta+1")
-    expect(screen.getByRole("tab", { name: "Team" })).toHaveAttribute("aria-keyshortcuts", "Meta+2")
+    expect(screen.getByRole("tab", { name: "Artifacts" })).toHaveAttribute("aria-keyshortcuts", "Meta+2")
+    expect(screen.getByRole("tab", { name: "Work" })).toHaveAttribute("aria-keyshortcuts", "Meta+3")
   })
 
   it("marks the open panel as the selected tab", () => {
     render(<RightRail />)
 
-    fireEvent.click(screen.getByRole("tab", { name: "Team" }))
+    fireEvent.click(screen.getByRole("tab", { name: "Artifacts" }))
 
-    expect(screen.getByRole("tab", { name: "Team" })).toHaveAttribute("aria-selected", "true")
+    expect(screen.getByRole("tab", { name: "Artifacts" })).toHaveAttribute("aria-selected", "true")
     expect(screen.getByRole("tab", { name: "Files" })).toHaveAttribute("aria-selected", "false")
   })
 })

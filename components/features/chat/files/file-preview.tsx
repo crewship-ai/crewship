@@ -6,15 +6,15 @@ import { ArrowLeft, Download, Minus, Plus } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { previewMime, readPreviewBytes } from './file-preview-data'
 
-type FilePreviewProps = { url: string; name: string; onClose: () => void }
+type FilePreviewProps = { url: string; name: string; onClose: () => void; showHeader?: boolean }
 type Loaded = { bytes: Uint8Array<ArrayBuffer>; mime: ReturnType<typeof previewMime>; blobUrl: string }
 
-export function FilePreview({ url, name, onClose }: FilePreviewProps) {
+export function FilePreview({ url, name, onClose, showHeader = true }: FilePreviewProps) {
   // Keying this boundary also protects callers that reuse the panel across files.
-  return <PreviewContent key={url} url={url} name={name} onClose={onClose} />
+  return <PreviewContent key={url} url={url} name={name} onClose={onClose} showHeader={showHeader} />
 }
 
-function PreviewContent({ url, name, onClose }: FilePreviewProps) {
+function PreviewContent({ url, name, onClose, showHeader }: FilePreviewProps) {
   const [loaded, setLoaded] = useState<Loaded | null>(null)
   const [error, setError] = useState('')
   const [attempt, setAttempt] = useState(0)
@@ -43,11 +43,14 @@ function PreviewContent({ url, name, onClose }: FilePreviewProps) {
   }
   const safeDownload = url.startsWith('/api/') && !url.includes('\\')
   return <section aria-label={`Preview ${name}`} className="flex h-full min-h-0 min-w-0 flex-col">
-    <header className="flex shrink-0 items-center gap-2 border-b p-2">
+    {showHeader && <header className="flex shrink-0 items-center gap-2 border-b p-2">
       <Button variant="ghost" size="icon" aria-label="Back to files" onClick={onClose}><ArrowLeft className="size-4" /></Button>
       <span className="min-w-0 flex-1 truncate text-sm" title={name}>{name}</span>
       <Button variant="ghost" size="icon" aria-label="Download file" disabled={!loaded} onClick={download}><Download className="size-4" /></Button>
-    </header>
+    </header>}
+    {!showHeader && <div className="flex shrink-0 justify-end border-b px-2 py-1">
+      <Button variant="ghost" size="sm" disabled={!loaded} onClick={download}><Download className="size-3.5" /> Download</Button>
+    </div>}
     {!loaded && !error && <p role="status" className="p-4 text-sm text-muted-foreground">Loading preview…</p>}
     {error && <div className="space-y-3 p-4 text-sm"><p role="alert">{error}</p><Button variant="outline" onClick={() => { setError(''); setLoaded(null); setAttempt(n => n + 1) }}>Retry preview</Button>
       {safeDownload && <p><a className="underline" href={url} download={name}>Download file</a></p>}
