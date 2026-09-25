@@ -183,3 +183,17 @@ export async function saveArtifactFile(opts: {
   )
   if (!res.ok) throw new Error(`Save failed: HTTP ${res.status}`)
 }
+
+/** Cheap directory metadata check; never use listing JSON as file contents. */
+export async function readArtifactVersion(opts: { agentId: string; workspaceId: string; relativePath: string; signal?: AbortSignal }): Promise<string | null> {
+  const slash = opts.relativePath.lastIndexOf("/")
+  const name = opts.relativePath.slice(slash + 1)
+  const params = new URLSearchParams({ workspace_id: opts.workspaceId })
+  if (slash >= 0) params.set("subdir", opts.relativePath.slice(0, slash))
+  const response = await apiFetch(`/api/v1/agents/${encodeURIComponent(opts.agentId)}/files?${params}`, { signal: opts.signal, cache: "no-store" })
+  if (!response.ok) throw new Error(`Could not check artifact (${response.status})`)
+  const rows: unknown = await response.json()
+  if (!Array.isArray(rows)) return null
+  const row = rows.find((entry) => entry?.name === name && entry?.is_dir === false)
+  return row && typeof row.mod_time === "string" && row.mod_time && typeof row.size === "number" ? JSON.stringify([row.mod_time, row.size]) : null
+}

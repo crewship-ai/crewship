@@ -57,7 +57,7 @@ export function UnifiedChatSidebar(props: SidebarProps) {
 }
 
 function ScopedChatSidebar({ props, rows: loadedRows, query, setQuery, stateKey }: SidebarProps & { stateKey: string }) {
-  const { agents, activeThreadId: previousThreadId, draftConversation: previousDraft, onStartConversation, onSelectThread, onUnifiedSelect, scope, onScopeChange, threadsByAgent, totalsByAgent, onShowAll } = props
+  const { agents, activeThreadId: previousThreadId, draftConversation: previousDraft, onStartConversation, onSelectThread, onUnifiedSelect, scope, onScopeChange, threadsByAgent, totalsByAgent, onShowAll, pickerSignal, onPickerHandled } = props
   const chat = useUnifiedConversations()
   const sessionSearch = useSidebarSessionSearch(chat?.workspaceId, props.agents ?? [], query, props.scope)
   const rows = query.trim() ? sessionSearch.rows : loadedRows
@@ -92,11 +92,12 @@ function ScopedChatSidebar({ props, rows: loadedRows, query, setQuery, stateKey 
   }, [chat?.selectedId, selectedSection])
   useEffect(() => { if (chat?.selectedId) setPicking(false) }, [chat?.selectedId, chat?.selectionVersion])
   useEffect(() => {
-    if (props.pickerSignal === undefined || props.pickerSignal === 0) return
+    if (pickerSignal === undefined || pickerSignal === 0) return
     setPicking(true)
+    onPickerHandled?.()
     setQuery("")
     setClosed((old) => ({ ...old, agents: false }))
-  }, [props.pickerSignal, setQuery])
+  }, [pickerSignal, onPickerHandled, setQuery])
   useEffect(() => {
     if (!draftConversation?.id) return
     setPicking(false)

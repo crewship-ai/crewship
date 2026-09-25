@@ -5,6 +5,7 @@ import dynamic from "next/dynamic"
 import { EditorState } from "@codemirror/state"
 import { EditorView } from "@codemirror/view"
 import { ArrowLeft, Download, Pencil, Save, X } from "lucide-react"
+import { AuthenticatedDownload } from "./authenticated-download"
 import { apiFetch } from "@/lib/api-fetch"
 import { isPreviewable } from "@/lib/file-format"
 import { isManagerTier } from "@/lib/permissions/tiers"
@@ -121,17 +122,17 @@ function FileWorkspaceContent(props: FileWorkspaceProps) {
 
   return <section aria-label={`File workspace ${file.name}`} className="flex h-full min-h-0 min-w-0 flex-col bg-background">
     <header className="flex min-h-14 shrink-0 flex-wrap items-center gap-2 border-b border-border bg-card px-3 py-2">
-      <Button variant="ghost" size="icon-sm" aria-label="Back to chat" onClick={onClose}><ArrowLeft className="size-4" /></Button>
+      <Button variant="ghost" size="icon-sm" aria-label="Back to chat" disabled={saving} onClick={onClose}><ArrowLeft className="size-4" /></Button>
       <span className="flex size-8 shrink-0 items-center justify-center rounded-md border border-border bg-muted/40">{getChatFileIcon(file.name, false)}</span>
       <div className="min-w-0 flex-1">
         <div className="truncate text-sm font-semibold text-foreground" title={file.name}>{file.name}</div>
         <div className="truncate text-[11px] text-muted-foreground" title={file.path}>{file.path}</div>
       </div>
       {dirty && <span className="text-xs text-warn">Unsaved changes</span>}
-      <Button variant="outline" size="sm" asChild><a href={route} download={file.name} aria-label="Download file"><Download className="size-3.5" /> Download</a></Button>
+      <Button variant="outline" size="sm" asChild><AuthenticatedDownload href={route} download={file.name} aria-label="Download file"><Download className="size-3.5" /> Download</AuthenticatedDownload></Button>
       {canEdit && content !== null && !editing && <Button variant="outline" size="sm" onClick={() => setEditing(true)}><Pencil className="size-3.5" /> Edit</Button>}
       {editing && <>
-        <Button variant="outline" size="sm" onClick={() => {
+        <Button variant="outline" size="sm" disabled={saving} onClick={() => {
           if (dirty && !window.confirm("Discard unsaved file changes?")) return
           setEditing(false); setDirty(false); onDirtyChange?.(false); setEditorVersion((value) => value + 1)
         }}><X className="size-3.5" /> Cancel</Button>
@@ -151,6 +152,7 @@ function FileWorkspaceContent(props: FileWorkspaceProps) {
           onSave={(next) => { if (editing) void save(next) }}
           onDirtyChange={onEditorDirty}
           saveRef={saveRef}
+          readOnly={saving}
           extraExtensions={editing ? editorExtensions : readOnlyExtensions}
         />}
       </> : <FilePreview url={route} name={file.name} onClose={onClose} showHeader={false} />}

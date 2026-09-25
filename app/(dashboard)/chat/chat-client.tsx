@@ -781,6 +781,7 @@ export function ChatClient() {
       onToggleCollapse={isMobile ? () => setDrawerOpen(false) : () => setLeftCollapsed(true)}
       collapseLabel={isMobile ? "Close conversations" : undefined}
       pickerSignal={pickerSignal}
+      onPickerHandled={() => setPickerSignal(0)}
     />
   )
 

@@ -13,9 +13,12 @@ import { cn } from "@/lib/utils"
 import { isManagerTier } from "@/lib/permissions/tiers"
 import { useArtifactStore } from "@/stores/artifact-store"
 import { useWorkspace } from "@/hooks/use-workspace"
+import { useChatAgent } from "../chat-agent-context"
+import { relativeToAgent } from "../files/file-scope"
 import { getEditorLanguage } from "../chat-tree-row"
+import { AuthenticatedDownload } from "../files/authenticated-download"
 import { FilePreview } from "../files/file-preview"
-import { ArtifactContentRefused, artifactDownloadUrl, readArtifactSnapshot, saveArtifactFile, type ArtifactSnapshot } from "./artifact-file-io"
+import { ArtifactContentRefused, artifactDownloadUrl, readArtifactSnapshot, readArtifactVersion, saveArtifactFile, type ArtifactSnapshot } from "./artifact-file-io"
 
 const FileEditor = dynamic(
   () => import("@/components/features/files/file-editor").then((m) => m.FileEditor),
@@ -66,7 +69,7 @@ function ArtifactPreview({ path, snapshot, url, revision, onClose }: { path: str
   const text = useMemo(() => new TextDecoder().decode(snapshot.bytes), [snapshot])
   if (BINARY.test(path)) {
     // Existing viewer validates signatures and renders PDFs with pdfjs.
-    return <FilePreview key={revision} url={`${url}&revision=${revision}`} name={path.split("/").pop() ?? path} onClose={onClose} showHeader={false} />
+    return <FilePreview key={revision} url={`${url}&revision=${revision}`} name={path.split("/").pop() ?? path} onClose={onClose} showHeader={false} bytes={snapshot.bytes} />
   }
   if (/\.md$/i.test(path)) {
     // The opaque, script-free frame keeps agent-authored markup out of the app DOM.
@@ -86,6 +89,7 @@ function ArtifactPreview({ path, snapshot, url, revision, onClose }: { path: str
 /** Inline workspace: its parent places this beside the transcript. */
 export function ArtifactPane({ agentId, width = 540, expanded = false }: { agentId: string; width?: number; expanded?: boolean }) {
   const { workspaceId, role } = useWorkspace()
+  const agent = useChatAgent()
   const canEdit = isManagerTier(role)
   const open = useArtifactStore((s) => s.open)
   const tabs = useArtifactStore((s) => s.tabs)
@@ -106,14 +110,16 @@ export function ArtifactPane({ agentId, width = 540, expanded = false }: { agent
   const [view, setView] = useState<"preview" | "editor">("preview")
   const [dirty, setDirty] = useState(false)
   const previousRef = useRef<ArtifactSnapshot | null>(null)
+  const versionRef = useRef<{ version: string | null; downloadedAt: number }>({ version: null, downloadedAt: 0 })
 
   useEffect(() => { pruneToAgent(agentId) }, [agentId, pruneToAgent])
   useEffect(() => {
     setSnapshot(null); setRevision(0); setUpdatedAt(null)
     previousRef.current = null
+    versionRef.current = { version: null, downloadedAt: 0 }
     setFollowing(true); setDirty(false); setError("")
     setView(BINARY.test(path) || WORKBOOK.test(path) || PREVIEW.test(path) ? "preview" : "editor")
-  }, [agentId, path])
+  }, [agentId, path, workspaceId])
 
   useEffect(() => {
     // A Pause transition re-runs this effect. Do not perform its initial
@@ -126,8 +132,16 @@ export function ArtifactPane({ agentId, width = 540, expanded = false }: { agent
       if (document.visibilityState === "hidden") { timer = setTimeout(read, INTERVAL); return }
       if (first) setLoading(true)
       try {
+        let version: string | null = null
+        if (!first && previousRef.current?.path === path) {
+          version = await readArtifactVersion({ agentId, workspaceId, relativePath: relativeToAgent(path, agent?.crewId, agent?.slug), signal: controller.signal })
+          // Metadata catches normal writes cheaply. A periodic byte read also
+          // catches writers that preserve mtime/size, or lack metadata support.
+          if (version === versionRef.current.version && Date.now() - versionRef.current.downloadedAt < 60_000) { setError(""); return }
+        }
         const next = await readArtifactSnapshot({ agentId, workspaceId, path, signal: controller.signal })
         if (controller.signal.aborted) return
+        versionRef.current = { version, downloadedAt: Date.now() }
         if (!previousRef.current || previousRef.current.path !== next.path || !sameBytes(previousRef.current.bytes, next.bytes)) {
           previousRef.current = next
           setSnapshot(next)
@@ -146,7 +160,7 @@ export function ArtifactPane({ agentId, width = 540, expanded = false }: { agent
     }
     void read()
     return () => { controller.abort(); if (timer) clearTimeout(timer) }
-  }, [open, path, agentId, workspaceId, following])
+  }, [open, path, agentId, workspaceId, following, agent?.crewId, agent?.slug])
 
   if (!open) return null
   const binary = BINARY.test(path) || WORKBOOK.test(path)
@@ -179,7 +193,7 @@ export function ArtifactPane({ agentId, width = 540, expanded = false }: { agent
       <span className="flex size-8 shrink-0 items-center justify-center rounded-md border border-border bg-muted/40"><ArtifactIcon className="size-4 text-primary" /></span>
       <div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold" title={active?.title}>{active?.title ?? "Artifact"}</p><p className="truncate text-[11px] text-muted-foreground" title={path}>{path}</p></div>
       <Button variant="outline" size="sm" aria-label={expanded ? "Show chat alongside" : "Expand artifact"} onClick={() => setFocus(!expanded)}>{expanded ? <Minimize2 className="size-3.5" /> : <Maximize2 className="size-3.5" />}<span className="hidden lg:inline">{expanded ? "Chat" : "Expand"}</span></Button>
-      {loaded && <Button variant="outline" size="sm" asChild><a href={url} download={active?.title} aria-label="Download artifact"><Download className="size-3.5" /> Download</a></Button>}
+      {loaded && <Button variant="outline" size="sm" asChild><AuthenticatedDownload href={url} download={active?.title || "artifact"} aria-label="Download artifact"><Download className="size-3.5" /> Download</AuthenticatedDownload></Button>}
     </header>
     {tabs.length > 1 && <div className="flex shrink-0 gap-1 overflow-x-auto border-b px-2 py-1">
       {tabs.filter((t) => t.agentId === agentId).map((tab) => <div key={tab.id} className={cn("flex items-center rounded text-xs", activeId === tab.id ? "bg-muted text-foreground" : "text-muted-foreground")}>
@@ -203,7 +217,7 @@ export function ArtifactPane({ agentId, width = 540, expanded = false }: { agent
     <div className="relative min-h-0 flex-1 overflow-hidden">
       {loading && !loaded && <div className="flex h-full items-center justify-center"><Spinner className="size-5" /></div>}
       {!loading && !loaded && !error && <p className="p-4 text-sm text-muted-foreground">No artifact open</p>}
-      {loaded && WORKBOOK.test(path) && <div className="p-4 text-sm text-muted-foreground">Spreadsheet preview supports CSV and TSV. <a href={url} download className="text-primary underline">Download this workbook</a> to open it.</div>}
+      {loaded && WORKBOOK.test(path) && <div className="p-4 text-sm text-muted-foreground">Spreadsheet preview supports CSV and TSV. <AuthenticatedDownload href={url} download={active?.title || "artifact"} className="text-primary underline">Download this workbook</AuthenticatedDownload> to open it.</div>}
       {loaded && !WORKBOOK.test(path) && (view === "preview" || binary) && <ArtifactPreview path={path} snapshot={loaded} url={url} revision={revision} onClose={() => setOpen(false)} />}
       {loaded && text !== null && view === "editor" && <FileEditor key={`${activeId}:${revision}`} code={text} language={active?.language ?? getEditorLanguage(active?.title ?? path)} onSave={handleSave} onDirtyChange={(v) => { setDirty(v); if (v) setFollowing(false) }} />}
     </div>

@@ -278,3 +278,29 @@ describe("ArtifactPane — document and table editing", () => {
     expect(screen.queryByRole("button", { name: "Editor" })).toBeNull()
   })
 })
+
+ it("polls metadata instead of downloading unchanged files on every tick", async () => {
+   let stamp = "v1"
+   apiFetch.mockImplementation((url: string) => String(url).includes("/files?")
+     ? response({ body: JSON.stringify([{ name: "plan.csv", is_dir: false, size: 10, mod_time: stamp }]), contentType: "application/json" })
+     : response({ body: `name,value\n${stamp},1`, contentType: "application/octet-stream" }))
+   render(<ArtifactPane agentId="agent-1" />)
+   openTab("meta", "reports/plan.csv")
+   await screen.findByLabelText("Spreadsheet preview")
+   vi.useFakeTimers()
+   try {
+     // Resume under the fake clock so the entire polling chain is controlled.
+     fireEvent.click(screen.getByRole("button", { name: "Pause live updates" }))
+     fireEvent.click(screen.getByRole("button", { name: "Follow live updates" }))
+     await act(async () => { await vi.advanceTimersByTimeAsync(10_000) })
+     const downloads = () => apiFetch.mock.calls.filter(([url]) => String(url).includes("/files/download")).length
+     const baseline = downloads()
+     await act(async () => { await vi.advanceTimersByTimeAsync(10_000) })
+     expect(downloads()).toBe(baseline)
+     stamp = "v2"
+     await act(async () => { await vi.advanceTimersByTimeAsync(5_000) })
+     expect(downloads()).toBe(baseline + 1)
+     expect(screen.getByLabelText("Spreadsheet preview")).toHaveTextContent("v2")
+     expect(apiFetch.mock.calls.some(([url]) => String(url).includes("subdir=reports"))).toBe(true)
+   } finally { cleanup(); vi.useRealTimers() }
+ })

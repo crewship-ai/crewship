@@ -44,8 +44,9 @@ report after verification.
 
 ## Chat Artifacts preview increment (September 2026)
 
-The agent-scoped Artifacts list now includes Markdown alongside PDF, HTML and
-CSV/TSV. Opening an artifact uses a push pane beside chat. Its header matches
+The agent-scoped Artifacts list includes PDF, HTML, CSV/TSV and images.
+Markdown rendering is supported by the preview component, but Markdown is
+excluded from the client Artifacts list. Opening an artifact uses a push pane beside chat. Its header matches
 the Files workspace: document icon, title, full storage path and Download.
 PDFs use that single header rather than repeating a second file toolbar.
 The live revision strip remains visible while the pane follows changes.

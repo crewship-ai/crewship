@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen, waitFor, act } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { FileWorkspace } from "./file-workspace"
 import { readPreviewBytes } from "./file-preview-data"
@@ -12,11 +12,11 @@ vi.mock("./file-preview-data", async (importOriginal) => ({
 }))
 vi.mock("@/lib/api-fetch", () => ({ apiFetch: vi.fn() }))
 vi.mock("@/components/features/files/file-editor", () => ({
-  FileEditor: ({ code, onDirtyChange, onSave, extraExtensions }: {
-    code: string; onDirtyChange: (dirty: boolean) => void; onSave: (text: string) => void; extraExtensions: unknown[]
+  FileEditor: ({ code, onDirtyChange, onSave, extraExtensions, readOnly }: {
+    code: string; onDirtyChange: (dirty: boolean) => void; onSave: (text: string) => void; extraExtensions: unknown[]; readOnly?: boolean
   }) => <div>
     <span data-testid="editor-mode">{extraExtensions.length ? "read only" : "editable"}</span>
-    <textarea aria-label="File content" defaultValue={code} onChange={() => onDirtyChange(true)} />
+    <textarea readOnly={readOnly} aria-label="File content" defaultValue={code} onChange={() => onDirtyChange(true)} />
     <button onClick={() => onSave("updated content")}>Editor save</button>
   </div>,
 }))
@@ -75,3 +75,18 @@ describe("FileWorkspace", () => {
     expect(screen.queryByRole("textbox", { name: "File content" })).not.toBeInTheDocument()
   })
 })
+
+ it("locks the editor and cancel during a pending save", async () => {
+   let resolve!: (response: Response) => void
+   fetch.mockReturnValue(new Promise<Response>((done) => { resolve = done }))
+   render(<FileWorkspace {...base} file={file} />)
+   await screen.findByDisplayValue("initial content")
+   fireEvent.click(screen.getByRole("button", { name: "Edit" }))
+   fireEvent.change(screen.getByRole("textbox"), { target: { value: "updated content" } })
+   fireEvent.click(screen.getByRole("button", { name: "Editor save" }))
+   expect(screen.getByRole("textbox")).toHaveAttribute("readonly")
+   expect(screen.getByRole("button", { name: "Cancel" })).toBeDisabled()
+   expect(screen.getByRole("button", { name: "Back to chat" })).toBeDisabled()
+   await act(async () => resolve(new Response(null, { status: 204 })))
+   expect(screen.getByRole("textbox")).toHaveValue("updated content")
+ })
