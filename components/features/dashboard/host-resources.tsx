@@ -40,6 +40,8 @@ export function HostResources({ data, window, loading, error }: { data: HostReso
   const measured = data?.series.filter((bucket) => bucket.cpu_percent != null || bucket.memory_percent != null).length ?? 0
   const tickEvery = window === "24h" ? 48 : window === "7d" ? 24 : 20
   const ticks = data?.series.filter((_, index) => index % tickEvery === 0).map((bucket) => bucket.ts) ?? []
+  const lastTick = data?.series.at(-1)?.ts
+  if (lastTick && ticks.at(-1) !== lastTick) ticks.push(lastTick)
   const recordingSince = data?.recording_since
     ? new Date(data.recording_since).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" })
     : null
