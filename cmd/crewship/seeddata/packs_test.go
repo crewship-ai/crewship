@@ -43,12 +43,8 @@ func TestPacks_ReferencesResolve(t *testing.T) {
 		crews[c.Slug] = true
 	}
 	routines := map[string]RoutineDef{}
-	for _, r := range Routines {
+	for _, r := range packRoutines {
 		routines[r.Slug] = r
-	}
-	pages := map[string]PageDef{}
-	for _, pg := range Pages {
-		pages[pg.Slug] = pg
 	}
 	seen := map[string]bool{}
 	for _, p := range Packs {
@@ -65,7 +61,7 @@ func TestPacks_ReferencesResolve(t *testing.T) {
 			}
 			r, ok := routines[slug]
 			if !ok {
-				t.Errorf("pack %s: routine %q is not in the default routine catalogue", p.Slug, slug)
+				t.Errorf("pack %s: routine %q is not in the legacy routine library", p.Slug, slug)
 				continue
 			}
 			if r.CrewSlug != p.CrewSlug {
@@ -76,17 +72,7 @@ func TestPacks_ReferencesResolve(t *testing.T) {
 		if p.ReportSlug == "" {
 			t.Errorf("pack %s: no report routine", p.Slug)
 		}
-		pg, ok := pages[p.PageSlug]
-		if !ok {
-			t.Errorf("pack %s: page %q is not seeded", p.Slug, p.PageSlug)
-			continue
-		}
-		for _, panel := range pg.Panels {
-			if panel.Producer != "routine/"+p.ReportSlug {
-				t.Errorf("pack %s: page %s panel %s producer %q, want routine/%s",
-					p.Slug, pg.Slug, panel.ID, panel.Producer, p.ReportSlug)
-			}
-		}
+
 	}
 }
 
@@ -97,7 +83,7 @@ func TestPacks_ProbeIsAgentless(t *testing.T) {
 		if p.ProbeSlug == "" {
 			continue
 		}
-		for _, r := range Routines {
+		for _, r := range packRoutines {
 			if r.Slug != p.ProbeSlug {
 				continue
 			}
@@ -119,7 +105,7 @@ func TestPacks_RoutineScriptsAreDelivered(t *testing.T) {
 		for _, f := range p.Files {
 			delivered[strings.TrimPrefix(f.Dest, "shared/")] = true
 		}
-		for _, r := range Routines {
+		for _, r := range packRoutines {
 			if r.Slug != p.ProbeSlug && r.Slug != p.ReportSlug {
 				continue
 			}
@@ -277,7 +263,7 @@ func packScriptProjections(p PackDef) map[string][]string {
 		src[strings.TrimPrefix(f.Dest, "shared/")] = f.Src
 	}
 	seen := map[string]map[string]bool{}
-	for _, r := range Routines {
+	for _, r := range packRoutines {
 		if r.Slug != p.ProbeSlug && r.Slug != p.ReportSlug {
 			continue
 		}

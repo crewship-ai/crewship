@@ -1,9 +1,0 @@
-{
-  "company": "Harbor Goods",
-  "snapshot": "A fixed demo moment; hours waiting are sample values, not live mail age.",
-  "leads": [
-    {"id": "L-101", "customer": "Maya Chen", "request": "Price for 20 storage boxes", "hours_waiting": 2, "replied": true},
-    {"id": "L-102", "customer": "Owen Patel", "request": "Delivery options for a small office", "hours_waiting": 5, "replied": true},
-    {"id": "L-103", "customer": "Ava Martin", "request": "Quote for 50 storage boxes", "hours_waiting": 26, "replied": false}
-  ]
-}

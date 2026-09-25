@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -344,5 +345,21 @@ func TestParseCodex_UnknownItemType(t *testing.T) {
 
 	if len(got) != 1 || got[0].Type != "system" {
 		t.Errorf("unknown item.type should surface as system event: %+v", got)
+	}
+}
+
+// Observed during the local MCP demo: modern Codex emits an object result.
+// Decoding it as a string made the entire envelope leak into assistant prose.
+func TestParseCodex_StructuredMCPResultIsToolResult(t *testing.T) {
+	var got []AgentEvent
+	parseCodexStreamJSON([]byte(`{"type":"item.completed","item":{"id":"item_2","type":"mcp_tool_call","server":"harbor-goods","tool":"read_demo_records","result":{"content":[{"type":"text","text":"three inquiries"}],"structured_content":null},"error":null,"status":"completed"}}`), func(e AgentEvent) { got = append(got, e) })
+	if len(got) != 1 || got[0].Type != "tool_result" {
+		t.Fatalf("MCP result leaked as prose: %+v", got)
+	}
+	if !strings.Contains(got[0].Content, "three inquiries") {
+		t.Fatal("MCP result content lost")
+	}
+	if got[0].Metadata.(map[string]interface{})["tool_use_id"] != "item_2" {
+		t.Fatal("tool result lost its call identity")
 	}
 }

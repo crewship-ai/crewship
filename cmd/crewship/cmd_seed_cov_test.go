@@ -13,6 +13,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/crewship-ai/crewship/cmd/crewship/seeddata"
 	"github.com/crewship-ai/crewship/internal/cli"
 	"github.com/crewship-ai/crewship/internal/cli/clitest"
 )
@@ -425,6 +426,16 @@ func covSeedStub(t *testing.T) *clitest.StubServer {
 		"workspace_id": covSeedWSID,
 		"cli_token":    "tok-seeded-123",
 	}))
+	covSeedAgentList(s)
+	s.OnGet("/api/v1/issues", clitest.JSONResponse(200, []map[string]any{}))
+	s.OnPost("/api/v1/workspaces/"+covSeedWSID+"/pipelines/save", clitest.JSONResponse(201, map[string]string{"id": "pipeline-demo"}))
+	for _, p := range seeddata.Pages {
+		s.OnGet("/api/v1/pages/"+p.Slug+"/project/publications", clitest.JSONResponse(200, map[string]int{"publication_version": 1}))
+		s.OnGet("/api/v1/pages/"+p.Slug, clitest.JSONResponse(200, map[string]any{"slug": p.Slug, "pages_version": 1, "folder": map[string]string{"slug": "existing-demo"}}))
+	}
+	s.OnGet("/api/v1/pages/demo-live/webhooks", clitest.JSONResponse(200, map[string]any{"webhooks": []any{}}))
+	s.OnPost("/api/v1/pages/demo-live/webhooks", clitest.JSONResponse(201, map[string]string{"token": "pgw_" + strings.Repeat("a", 64)}))
+	s.OnPost("/api/v1/crews/cseeded0123456789abcdefg/issues", clitest.JSONResponse(201, map[string]string{"id": "issue-demo", "identifier": "DEMO-1"}))
 	s.OnGet("/api/v1/skills", clitest.JSONResponse(200, []map[string]string{}))
 	s.OnGet("/api/v1/credentials", clitest.JSONResponse(200, []map[string]string{}))
 	s.SetFallback(func(r *http.Request, _ []byte) (int, []byte, string) {
@@ -437,6 +448,19 @@ func covSeedStub(t *testing.T) *clitest.StubServer {
 		return 200, []byte(`{"id":"cseeded0123456789abcdefg","skill_id":"cseeded0123456789abcdefg","updated":1}`), "application/json"
 	})
 	return s
+}
+
+func covSeedAgentList(s *clitest.StubServer) {
+	var agents []map[string]string
+	for _, a := range seeddata.Agents {
+		agents = append(agents, map[string]string{"slug": a.Slug, "id": "agent-" + a.Slug})
+	}
+	s.OnGet("/api/v1/agents", func(r *http.Request, _ []byte) (int, []byte, string) {
+		if r.URL.Query().Get("include_setup") == "1" {
+			return clitest.JSONResponse(200, agents)(r, nil)
+		}
+		return clitest.JSONResponse(200, []any{})(r, nil)
+	})
 }
 
 func covSetupRunSeed(t *testing.T, s *clitest.StubServer) {

@@ -10,11 +10,12 @@ package seeddata
 // pipeline package on save). AgentSlug + CrewSlug get resolved to IDs
 // during seed; the runtime author = the seed admin user.
 type RoutineDef struct {
-	Slug        string                 // workspace-unique kebab-case identifier
-	Name        string                 // human-readable display name
-	Description string                 // one-line summary shown in lists
-	CrewSlug    string                 // crew that owns this routine (resolves to author_crew_id)
-	Definition  map[string]interface{} // parsed DSL JSON
+	Slug            string                 // workspace-unique kebab-case identifier
+	Name            string                 // human-readable display name
+	Description     string                 // one-line summary shown in lists
+	CrewSlug        string                 // crew that owns this routine (resolves to author_crew_id)
+	AuthorAgentSlug string                 // optional acting agent for issue comments
+	Definition      map[string]interface{} // parsed DSL JSON
 }
 
 // agentSlugRef is a tiny helper marker for readability — the seeder
@@ -1317,49 +1318,7 @@ var routineLibrary = []RoutineDef{
 // older transformation recipes remain in routineLibrary as source examples,
 // while model regression coverage is available through `seed --with-evals`.
 // A fresh product demo should read like an operating team, not a test fixture.
-var Routines = curatedDemoRoutines(append(append([]RoutineDef{}, routineLibrary...), append(append(packRoutines, storyRoutines...), operationsRoutine())...))
-
-func curatedDemoRoutines(library []RoutineDef) []RoutineDef {
-	wanted := map[string]bool{
-		"harbor-leads-review":     true, // fictional inquiry → page → agent draft → human approval
-		"pages-operations-sample": true,
-		"incident-timeline":       true, // incident evidence normalisation
-		"classify-ticket":         true, // support intake with a closed taxonomy
-		"morning-briefing":        true, // lead-generated workspace briefing
-		"pr-review-structured":    true, // QA review with a semantic grader
-		"feed-watch-probe":        true, // token-zero GitHub Status wake gate
-		"feed-change-report":      true, // incident brief only after the gate wakes
-		"workspace-digest":        true, // token-zero workspace activity digest
-		"approval-gate-demo":      true, // production change plan + human decision
-		"cost-spike-probe":        true, // budget wake gate
-		"page-watch":              true, // routine-produced operational page
-		// Deterministic recipes the test harness, the walkthrough and the
-		// CLI docs address by slug (test-determinism.sh, walkthrough.sh,
-		// docs/cli/routine.mdx) — a fresh seed must keep answering them.
-		"extract-contacts": true,
-		"normalize-dates":  true,
-		"summarize-text":   true,
-		// Demo packs (packs.go): a real source, a deterministic core, a
-		// verifiable report.
-		"ci-probe":          true, // token-zero wake gate over GitHub Actions
-		"ci-nightly-triage": true, // agent triage only after the gate wakes
-		"docs-drift-audit":  true, // deterministic scan + agent judgement
-	}
-
-	out := make([]RoutineDef, 0, len(wanted))
-	for _, routine := range library {
-		if wanted[routine.Slug] {
-			out = append(out, routine)
-			delete(wanted, routine.Slug)
-		}
-	}
-	if len(wanted) != 0 {
-		for slug := range wanted {
-			panic("seeddata: curated routine missing from library: " + slug)
-		}
-	}
-	return out
-}
+var Routines = append(append(businessRoutines(), operationsRoutine()), liveRoutines()...)
 
 // WorkspaceDigestDefinition is the DSL for the "workspace-digest" seed
 // routine (#1422 item 4), exported so `crewship digest enable` can save it

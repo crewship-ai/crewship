@@ -557,7 +557,8 @@ func (s *Server) buildHandler(proxy *Proxy) http.Handler {
 		// container's network namespace.
 		if (isLocalhost(r.Host) || isLocalhost(r.URL.Host)) && remoteIsLoopback(r) {
 			if s.ipc != nil && s.ipc.CrewOnly &&
-				!(r.Method == http.MethodGet && (r.URL.Path == "/crews/telemetry" || r.URL.Path == "/health")) {
+				!(r.Method == http.MethodGet && (r.URL.Path == "/crews/telemetry" || r.URL.Path == "/health")) &&
+				!(r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/page-webhooks/")) {
 				writeJSONResponse(w, http.StatusForbidden, map[string]string{"error": "crew sidecar allows telemetry only"})
 				return
 			}
@@ -576,6 +577,9 @@ func (s *Server) buildHandler(proxy *Proxy) http.Handler {
 				return
 			}
 			switch {
+			case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/page-webhooks/"):
+				s.handlePageWebhook(w, r)
+				return
 			// E0 run lifecycle. Registered FIRST so it cannot be shadowed by a
 			// future prefix route, and handled entirely inside the sidecar —
 			// see handleRunEnd for why this is a route at all rather than a

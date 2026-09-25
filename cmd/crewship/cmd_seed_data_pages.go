@@ -82,6 +82,7 @@ func seedPages(ctx context.Context, client *cli.Client, deferCrewTelemetry bool)
 			}
 		}
 		for _, panel := range page.Panels {
+
 			if panel.Demo == nil {
 				continue
 			}
@@ -100,6 +101,9 @@ func seedPages(ctx context.Context, client *cli.Client, deferCrewTelemetry bool)
 	}
 	fmt.Fprintln(os.Stderr)
 
+	if failed > 0 {
+		return fmt.Errorf("demo seed incomplete: %d page operations failed", failed)
+	}
 	return seedPageProducerRoutines(ctx, client, wsID, deferCrewTelemetry)
 }
 

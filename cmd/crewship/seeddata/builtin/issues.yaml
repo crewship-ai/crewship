@@ -1,327 +1,122 @@
-# Real work for a freshly seeded Crewship workspace.
-# Quick Start issues are short, independently runnable paths through a saved
-# routine. The larger packs below remain available for deeper demos.
-#
-# Two optional GitHub packs remain for deeper integration demos. The local
-# extraction issue is the default delegation example: it uses only the note
-# embedded in the issue and cannot load a third-party site.
-issues:
-  - crew_slug: ops
-    assignee: morgan
-    title: Reply to Ava Martin's missed inquiry
-    description: |-
-      Harbor Goods received three sample inquiries. Ava Martin (L-103) asked
-      for a quote for 50 storage boxes and has waited 26 sample hours without
-      a reply. Open Leads at Risk and click Check inquiries, or run the bound
-      routine here. Morgan drafts a reply; Inbox asks a human to approve it.
-      Approval marks the draft ready. No email is sent and no live Gmail,
-      Google Sheets, CRM, or calendar account is connected by this demo.
-    priority: high
-    project: Harbor Goods
-    routine_slug: harbor-leads-review
-    labels: [Quick Start]
-    target_state: TODO
-
-  # ── quick start ────────────────────────────────────────────────────────
-  - crew_slug: ops
-    assignee: riley
-    title: Refresh the Crewship Lab fleet dashboard
-    description: |-
-      Run the bound routine to collect fresh CPU and memory readings for each
-      crew container plus a detailed Ops sample. Open Crewship Lab afterward
-      and inspect the fleet table, summary cards, and memory chart. This run
-      needs no model, token, or external service.
-    priority: medium
-    project: Quick Start
-    routine_slug: pages-operations-sample
-    labels: [Quick Start]
-    target_state: TODO
-
-  - crew_slug: ops
-    assignee: morgan
-    title: Send a workspace activity digest to the inbox
-    description: |-
-      Run the bound routine. It counts recent routine runs without using a
-      model, then sends the result to the workspace inbox. Open Inbox and find
-      Workspace digest; its run ID links back to the run.
-    priority: medium
-    project: Quick Start
-    routine_slug: workspace-digest
-    labels: [Quick Start]
-    target_state: TODO
-
-  - crew_slug: quality
-    assignee: casey
-    title: Triage an incoming billing request
-    description: |-
-      Click Run, edit the sample customer ticket in the form, and start the
-      bound routine. Casey classifies its category, priority, and sentiment;
-      Jordan checks the result. Inspect the classification and review in the
-      run history. A configured model login is required.
-    priority: medium
-    project: Quick Start
-    routine_slug: classify-ticket
-    labels: [Quick Start]
-    target_state: TODO
-
-  - crew_slug: ops
-    assignee: riley
-    title: Check our GitHub Actions health
-    description: |-
-      Click Run and review the prefilled repository and stale threshold. The
-      agentless probe reads scheduled GitHub Actions runs and reports whether
-      any workflow is red or has stopped running. Inspect the probe output and
-      wake result in run history. Seed SEED_GITHUB_TOKEN to grant read access;
-      no model login is needed.
-    priority: medium
-    project: Quick Start
-    routine_slug: ci-probe
-    labels: [Quick Start]
-    target_state: TODO
-
-  - crew_slug: ops
-    assignee: morgan
-    title: Review a proposed production change
-    description: |-
-      Click Run and edit the sample change request. Morgan drafts a plan and
-      rollback step, then the routine pauses for a human decision. Approve or
-      reject the resulting Inbox → Decisions needed item and inspect the recorded
-      outcome. This exercises a model-backed step and a durable approval
-      without changing production.
-    priority: medium
-    project: Quick Start
-    routine_slug: approval-gate-demo
-    labels: [Quick Start]
-    target_state: TODO
-
-  - crew_slug: ops
-    assignee: morgan
-    title: Request a temporary on-call credential
-    description: |-
-      Start work on this issue. For the fictional incident DEMO-42, Morgan
-      needs a credential named DEMO_ONCALL_API_TOKEN before paging on-call.
-      Ask for a CREDENTIAL escalation with that exact name and the reason;
-      do not invent a token, contact an external service, or mark the work
-      complete. Open Inbox → Decisions needed to review the request. Rejecting it
-      is a complete safe demo; supplying a credential is optional. This
-      scenario needs a working model login.
-    priority: medium
-    project: Inbox Scenarios
-    labels: [Escalation]
-    target_state: TODO
-
-  # ── ci-watch (ops) ─────────────────────────────────────────────────────
-  - crew_slug: ops
-    assignee: morgan
-    title: Bring the nightly CI watch live and hand me the first real report
-    description: |-
-      The ops crew now owns the nightly CI watch for crewship-ai/crewship. Get
-      it to a first real report and check it yourself before anyone schedules
-      it.
-
-      Delegate to Riley: run the probe as it runs in the routine —
-      `python3 /crew/shared/scripts/ci_probe.py --repo crewship-ai/crewship`
-      (GH_TOKEN is in the environment) — save the JSON to
-      /crew/shared/ci-watch/probe.json, then triage every RED or STALE entry
-      with the skills ci-triage and known-flaky and write
-      /crew/shared/ci-watch/report.md ending with the COUNTS line.
-
-      When Riley returns, reconcile: regressions + flaky + infra + unclear
-      must equal the probe's `red`, and stale must equal its `stale`. Write
-      /crew/shared/ci-watch/handover.md with the reconciliation, what you
-      would schedule (`ci-nightly-triage` behind the `ci-probe` wake gate, one
-      cron, Europe/Prague) and what you would not, and any flaky signature
-      Riley proposes adding to the known-flaky skill. Do not create the
-      schedule yourself.
-    priority: high
-    project: CI Watch
-    labels: [Delegation, Wake gate, Real source]
-    target_state: TODO
-    comment: >-
-      Demo path: start this issue to watch a LEAD create an assignment,
-      wait for the result, and reconcile it against the deterministic probe.
-
-  - crew_slug: ops
-    assignee: riley
-    title: Run the CI probe against crewship-ai/crewship and reconcile it with GitHub
-    description: |-
-      Run `python3 /crew/shared/scripts/ci_probe.py --repo crewship-ai/crewship`
-      and save the output to /crew/shared/ci-watch/probe.json.
-
-      Then build the same picture independently with `gh api`: list the
-      active workflows, and for each one the latest run with
-      `event=schedule` on main. Write /crew/shared/ci-watch/reconciliation.md
-      with one row per workflow — probe status, your status, and whether they
-      agree. Explain every disagreement (a run that finished between the two
-      reads is a valid explanation; "probably fine" is not). Keep the raw
-      `gh api` responses as evidence. Read only; never re-run a workflow.
-    priority: medium
-    project: CI Watch
-    labels: [Real source]
-
-  - crew_slug: ops
-    assignee: riley
-    title: Explain why a scheduled workflow went stale
-    description: |-
-      Take every entry with status STALE from /crew/shared/ci-watch/probe.json
-      (run the probe first if the file is missing). For each one find the
-      concrete cause, following the skill ci-triage: is the workflow disabled
-      (`gh api repos/crewship-ai/crewship/actions/workflows` — look at
-      `state`), did its cron change or disappear, is the YAML broken, or was
-      it renamed so the probe pairs runs under the old name?
-
-      Write /crew/shared/ci-watch/stale-<workflow-slug>.md per workflow with
-      the evidence you checked, the cause, and the one-line recommendation for
-      a human. "It did not run" is not a cause. If there is no stale entry
-      tonight, write /crew/shared/ci-watch/stale-none.md saying what you
-      checked and when.
-    priority: high
-    project: CI Watch
-    labels: [Silent failure, Real source]
-    target_state: TODO
-
-  # ── docs-drift (quality) ───────────────────────────────────────────────
-  - crew_slug: quality
-    assignee: jordan
-    title: Run the docs-drift audit on main and turn it into a fix list
-    description: |-
-      Run the scan as the routine runs it:
-      `GH_TOKEN` is in the environment; `REPO=crewship-ai/crewship BRANCH=main
-      bash /crew/shared/scripts/docs_audit.sh > /crew/shared/docs-drift/scan.json`.
-      The repository is then checked out under /crew/shared/work/crewship.
-
-      Delegate to Casey the fact-check of every candidate against the real
-      files (skill docs-drift). When Casey returns, write
-      /crew/shared/docs-drift/fix-list.md: one line per confirmed finding —
-      docs path:line, code path:line, the one-sentence fix — grouped by page,
-      followed by the rejected candidates with their reasons, and ending with
-      the line `COUNTS: candidates=<n> confirmed=<n> rejected=<n>
-      truncated=<n>`. The numbers must match Casey's report and the scan's
-      `total_candidates`. Change nothing in the repository.
-    priority: high
-    project: Docs Drift
-    labels: [Delegation, Real source]
-    target_state: TODO
-    comment: >-
-      Demo path: a LEAD hands deterministic candidates to a worker for
-      judgement and reconciles the counts before publishing.
-
-  - crew_slug: quality
-    assignee: casey
-    title: Fact-check every docs-drift candidate against the file and line it cites
-    description: |-
-      Read /crew/shared/docs-drift/scan.json (if it is missing, run
-      `REPO=crewship-ai/crewship BRANCH=main bash
-      /crew/shared/scripts/docs_audit.sh` first) and the checkout under
-      /crew/shared/work/crewship.
-
-      For every candidate decide CONFIRMED or REJECTED with the skill
-      docs-drift: open the documentation line and grep the code beyond the
-      listed package before calling anything a phantom. Write
-      /crew/shared/docs-drift/review.md with, per confirmed finding, the docs
-      path:line, the code path:line, what the page claims or omits, and why it
-      hurts a reader; per rejected candidate, one sentence.
-
-      If a confirmed finding is a SECURITY claim — the documentation promises
-      an allowlist, a validation or a restriction the code does not enforce —
-      do not decide alone how to word it: call the sidecar /escalate endpoint
-      with type DECISION, the exact sentence, the code evidence, your
-      recommended wording and a deadline, and continue with the rest while
-      the decision is pending. End the report with the COUNTS line.
-    priority: high
-    project: Docs Drift
-    labels: [Escalation, Real source]
-    target_state: TODO
-    comment: >-
-      Demo path: a worker hits a risk boundary and produces a real
-      human-decision escalation in the Inbox instead of choosing silently.
-
-  - crew_slug: quality
-    assignee: casey
-    title: Narrow the widest docs-drift pair so its report becomes readable
-    description: |-
-      The pair docs/manifest/routine.md ↔ internal/pipeline/types.go yields
-      the most candidates because types.go holds the whole DSL and the page
-      only part of it. Using /crew/shared/docs-drift/scan.json and the
-      checkout under /crew/shared/work/crewship, propose a narrower `pkg`
-      list (files, or a smaller set of structs) that keeps the fields the page
-      documents and drops the wire-only ones.
-
-      Write /crew/shared/docs-drift/narrowing-proposal.md with the proposed
-      map entry, the candidate count before and after (run docs_drift.py
-      directly with `--doc` and `--pkg` to measure), and which dropped
-      candidates were real findings, if any. Do not edit
-      /crew/shared/config/docs_map.json — the map is reviewed like code.
-    priority: medium
-    project: Docs Drift
-    labels: [Acceptance]
-
-  # ── local extraction (engineering) ───────────────────────────────────────
-  - crew_slug: engineering
-    assignee: alex
-    title: Extract and check action items from a sample incident note
-    description: |-
-      Work only with the note below. Do not browse or call an external site.
-      Delegate to Sam: write /crew/shared/demo/incident-actions.md with a
-      three-line factual summary, every explicit action item with an owner
-      and deadline, and one question for missing information. Delegate to
-      Jamie: check each extracted claim against the note and comment on this
-      issue with the verdict and file path. Then post a short final comment.
-      Never invent an owner or deadline; write "not specified" if omitted.
-
-      Sample note: "At 09:15 UTC the Ops dashboard stopped updating after a
-      routine deploy. Riley restarted the collector at 09:27 UTC. The next
-      snapshot was healthy at 09:29 UTC. Morgan will check the scheduler by
-      Friday. The team still needs to decide who owns the alert threshold."
-    priority: medium
-    project: Quick Start
-    labels: [Quick Start]
-    target_state: TODO
-
 labels:
-  - name: Quick Start
-    color: '#3B82F6'
-  - name: Wake gate
-    color: '#3B82F6'
-  - name: Silent failure
-    color: '#EF4444'
-  - name: Delegation
-    color: '#8B5CF6'
-  - name: Escalation
-    color: '#F97316'
-  - name: Real source
-    color: '#EAB308'
-  - name: Acceptance
-    color: '#22C55E'
-
+- name: Demo
+  color: '#4F83F8'
 projects:
-  - name: Quick Start
-    color: '#3B82F6'
-    icon: play
-    status: in_progress
-    priority: medium
-  - name: Harbor Goods
-    color: '#4F83F8'
-    icon: inbox
-    status: in_progress
-    priority: medium
-  - name: Inbox Scenarios
-    color: '#4F83F8'
-    icon: inbox
-    status: in_progress
-    priority: medium
-  - name: CI Watch
-    color: '#EF4444'
-    icon: activity
-    status: in_progress
-    priority: high
-  - name: Docs Drift
-    color: '#8B5CF6'
-    icon: file-search
-    status: in_progress
-    priority: high
-  - name: Site Replica
-    color: '#06B6D4'
-    icon: globe
-    status: in_progress
-    priority: high
+- name: Sales
+  color: '#4F83F8'
+  icon: inbox
+  status: in_progress
+  priority: medium
+- name: Finance
+  color: '#4F83F8'
+  icon: inbox
+  status: in_progress
+  priority: medium
+- name: Marketing
+  color: '#4F83F8'
+  icon: inbox
+  status: in_progress
+  priority: medium
+- name: Shipping
+  color: '#4F83F8'
+  icon: inbox
+  status: in_progress
+  priority: medium
+- name: Crewship Lab
+  color: '#4F83F8'
+  icon: activity
+  status: in_progress
+  priority: medium
+issues:
+- crew_slug: engineering
+  assignee: sam
+  title: Prepare a reply to Ava’s missed inquiry
+  description: 'Demo company: Harbor Goods. Ava asked for a quote for 50 storage boxes.
+    Her inquiry has been waiting for 26 hours.
+
+
+    Open Pages → Sales → Missed inquiries. Start with Check inquiries. Then Review
+    reply. You can optionally ask Sam to draft with AI. The routine updates this Issue
+    and leaves local evidence; it never contacts a real customer.
+
+
+    Real source alternative: Gmail, a CRM or Google Sheets.'
+  priority: medium
+  project: Sales
+  routine_slug: demo-sales-check
+  target_state: TODO
+  labels:
+  - Demo
+  story_slug: sales
+- crew_slug: quality
+  assignee: jordan
+  title: Review the overdue invoice for Northstar Studio
+  description: 'Demo company: Harbor Goods. Three invoices and two bank payments arrived.
+    One invoice is overdue and needs a reminder.
+
+
+    Open Pages → Finance → Unpaid invoices. Start with Match payments. Then Review
+    reminder. You can optionally ask Jordan to draft with AI. The routine updates
+    this Issue and leaves local evidence; it never contacts a real customer.
+
+
+    Real source alternative: Your accounting system and bank statement.'
+  priority: medium
+  project: Finance
+  routine_slug: demo-finance-check
+  target_state: TODO
+  labels:
+  - Demo
+  story_slug: finance
+- crew_slug: quality
+  assignee: casey
+  title: Restore delivery for the demo contact form
+  description: 'Demo company: Harbor Goods. A customer submitted the contact form.
+    The form accepted it, but the delivery log has no matching entry.
+
+
+    Open Pages → Marketing → Form delivery. Start with Check form delivery. Then Repair
+    demo delivery. You can optionally ask Casey to draft with AI. The routine updates
+    this Issue and leaves local evidence; it never contacts a real customer.
+
+
+    Real source alternative: Your form endpoint, mail delivery log or analytics events.'
+  priority: medium
+  project: Marketing
+  routine_slug: demo-marketing-check
+  target_state: TODO
+  labels:
+  - Demo
+  story_slug: marketing
+- crew_slug: engineering
+  assignee: robin
+  title: Prepare the late-delivery claim for SHIP-105
+  description: 'Demo company: Harbor Goods. Five parcels were delivered. One arrived
+    two days late and its demo claim window closes in three days.
+
+
+    Open Pages → Shipping → Refund opportunities. Start with Check deliveries. Then
+    Review claim. You can optionally ask Robin to draft with AI. The routine updates
+    this Issue and leaves local evidence; it never contacts a real customer.
+
+
+    Real source alternative: Your carrier API or shipping export.'
+  priority: medium
+  project: Shipping
+  routine_slug: demo-shipping-check
+  target_state: TODO
+  labels:
+  - Demo
+  story_slug: shipping
+- crew_slug: ops
+  assignee: riley
+  story_slug: lab
+  title: Inspect live crew CPU and memory
+  description: Open Crewship Lab and refresh the measurements. The collector reads
+    real container CPU and memory; unavailable measurements stay unknown.
+  project: Crewship Lab
+  routine_slug: pages-operations-sample
+  target_state: TODO
+  priority: low
+  labels:
+  - Demo

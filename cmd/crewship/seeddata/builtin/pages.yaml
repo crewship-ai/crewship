@@ -1,485 +1,345 @@
-# English demo Pages. Every Page is published with the same responsive blue
-# application shell as Crewship Lab. Producer ownership and panel schemas stay
-# intact, so the page still shows real snapshots, freshness and history.
-# Pages backed by optional GitHub integrations show a clear waiting state until
-# the workspace supplies SEED_GITHUB_TOKEN and runs the producer.
 pages:
-  - slug: leads-at-risk
-    name: Leads at Risk
-    description: >-
-      Harbor Goods received three inquiries. Two have a reply; Ava has waited
-      26 sample hours. Check the inquiries to see what needs attention.
-    owner: crew/ops
-    panels:
-      - id: inquiries
-        schema: status.v1
-        title: Three customer inquiries
-        icon: people
-        owner: crew/ops
-        producer: script/harbor-goods-fixture
-        sla: 168h
-        span: 12
-        actions:
-          - id: check
-            kind: call
-            label: Check inquiries
-            routine: harbor-leads-review
-        demo:
-          items:
-            - name: L-101 · Maya Chen
-              state: ok
-              label: Replied · 2 sample hours
-            - name: L-102 · Owen Patel
-              state: ok
-              label: Replied · 5 sample hours
-            - name: L-103 · Ava Martin
-              state: warning
-              label: No reply · 26 sample hours
-      - id: finding
-        schema: status.v1
-        title: What the check found
-        icon: alert
-        owner: crew/ops
-        producer: routine/harbor-leads-review
-        sla: 168h
-        span: 12
-        skip_seed_run: true
-      - id: decision
-        schema: narrative.v1
-        title: Human decision
-        icon: clock
-        owner: crew/ops
-        producer: routine/harbor-leads-review
-        sla: 168h
-        span: 12
-        skip_seed_run: true
-
-  - slug: operations
-    name: Sample telemetry
-    description: Illustrative seeded measurements in five panel shapes. Run the producer script to replace the sample with real machine data.
-    # Handed to ops, not kept by the account that ran the seed. That one line is
-    # what lets anyone in ops correct a panel by hand — isPageOwner counts crew
-    # members — instead of the page belonging to whoever happened to seed it.
-    owner: crew/ops
-    panels:
-      # ── Services ─────────────────────────────────────────────────────────
-      # status.v1 first, and first is not arbitrary: "is it working" outranks
-      # every number on the page, and this is the panel a wake gate watches.
-      - id: services
-        schema: status.v1
-        title: Is it running?
-        icon: container
-        tab: Services
-        owner: crew/ops
-        producer: script/operations.sh
-        sla: 5m
-        span: 12
-
-        # ── The sensor half ───────────────────────────────────────────────
-        # This is the claim the whole feature rests on (PRD §0): a panel is a
-        # sensor, not a display. A cheap script pushes a number, a threshold on
-        # that number wakes an agent, and a human finds an issue rather than a
-        # red square nobody was looking at.
-        #
-        # `for: 5m` is what keeps one bad scrape from waking anybody. The
-        # producer pushes `critical` only when the API stops answering or a disk
-        # passes 90 %, so this does not fire on a quiet machine — which is the
-        # point: a demo gate that fired every few minutes would teach people to
-        # ignore it.
-        #
-        # NO `writes:`, deliberately. A gate may name a panel where the answer
-        # goes, but naming one is a declaration and not a grant — the woken
-        # agent still needs produce authority on that panel, which on this page
-        # nobody has (every panel here declares a script producer). The full
-        # write-back loop is on the `from-a-container` page, where the target
-        # declares `producer: agent/riley` and the push therefore lands.
-        wake:
-          - when: any(state == "critical")
-            for: 5m
-            agent: crew/ops
-
-        # An SLA lapse is a different event from a threshold: nothing crossed,
-        # the producer simply stopped. One issue per lapse, closed when data
-        # comes back.
-        on_failure:
-          issue: crew/ops
-
-        # ── The action half ───────────────────────────────────────────────
-        # A button on a panel that runs a routine. This is the interactivity the
-        # design admits: it is not a query the panel makes — the page still
-        # holds no datasource — it is a deed a human asks for, dispatched
-        # through the same governed path a schedule uses.
-        #
-        # No `confirm:` on purpose. Friction is calibrated to blast radius
-        # (§8 rule 7), and this probe reads a public endpoint and writes
-        # nothing; a dialog in front of it would be the rubber stamp that rule
-        # is about.
-        actions:
-          - id: recheck
-            kind: call
-            label: Check GitHub incidents
-            routine: feed-watch-probe
-
-        # Opts THIS ONE panel into a published link. Nothing is published yet —
-        # publication is a runtime act a human performs with
-        # `crewship page publish operations`, and a page with no public panel is
-        # refused. So this line is what makes the demo publishable at all, and
-        # the panels beside it stay private when it is.
-
-        demo:
-          items:
-            - name: api
-              state: ok
-              label: 200 OK · 41 ms
-            - name: disk /
-              state: ok
-              label: 38 % used
-            - name: memory
-              state: warning
-              label: 11 % free — close to the ceiling
-            - name: load
-              state: ok
-              label: 0.42 across 4 cores
-
-      # ── Memory ───────────────────────────────────────────────────────────
-      - id: memory
-        schema: metric.v1
-        title: Free memory
-        icon: memory
-        tab: Memory
-        owner: crew/ops
-        producer: script/operations.sh
-        sla: 5m
-        span: 4
-        demo:
-          value: 1840
-          unit: MB
-          delta: -260
-          # More free memory is the good direction, so a falling value is bad.
-          # Without this the arrow renders muted, because only the payload knows
-          # which way is up on this particular number.
-          delta_good: up
-          sparkline: [3120, 2980, 2740, 2610, 2455, 2210, 2100, 1955, 1840]
-
-      # ── Load ─────────────────────────────────────────────────────────────
-      - id: load
-        schema: series.v1
-        title: Load average
-        icon: cpu
-        tab: Load
-        owner: crew/engineering
-        producer: script/operations.sh
-        sla: 5m
-        span: 8
-        demo:
-          unit: load
-          # Four names on nine ticks. A tick this producer does not want named
-          # is null — the renderer decides how many of the named ones it can
-          # draw, because only it knows the width.
-          labels: ["-40m", null, null, "-20m", null, null, "-10m", null, "now"]
-          series:
-            - name: 1m
-              values: [0.31, 0.44, 0.39, 0.62, 0.55, 0.48, 0.51, 0.46, 0.42]
-            - name: 5m
-              values: [0.28, 0.33, 0.36, 0.45, 0.49, 0.47, 0.48, 0.45, 0.44]
-
-      # ── Disks ────────────────────────────────────────────────────────────
-      - id: disks
-        schema: table.v1
-        title: Filesystems
-        icon: disk
-        tab: Disks
-        owner: crew/engineering
-        producer: script/operations.sh
-        sla: 15m
-        span: 12
-        demo:
-          columns:
-            - key: mount
-              label: Mount point
-            - key: size
-              label: Size
-              align: right
-            - key: free
-              label: Free
-              align: right
-            - key: used
-              label: Used
-              align: right
-            - key: fs
-              label: Filesystem
-          rows:
-            - mount: /
-              size: "218G"
-              free: "134G"
-              used: 38
-              fs: ext4
-            - mount: /srv
-              size: "1.8T"
-              free: "612G"
-              used: 66
-              fs: ext4
-            # A cell nobody could read is null — an em dash on screen. An empty
-            # string would claim we measured emptiness, which is a different and
-            # wrong statement.
-            - mount: /mnt/backup
-              size: "3.6T"
-              free: null
-              used: null
-              fs: nfs
-
-      # ── Review ───────────────────────────────────────────────────────────
-      - id: review
-        schema: narrative.v1
-        title: What follows from this
-        icon: alert
-        tab: Review
-        owner: crew/ops
-        producer: script/operations.sh
-        sla: 15m
-        span: 12
-        demo:
-          verdict: Memory is filling, everything else is quiet
-          blocks:
-            - kind: paragraph
-              text: >-
-                Free memory fell from 3120 to 1840 MB over forty minutes, and it is
-                falling evenly. Load and the disks did not move, so this does not look
-                like pressure from outside — more like something holding what it
-                should be releasing.
-            - kind: list
-              text: >-
-                What this page knows: the state of four things, free memory, the load
-                average over the last forty minutes, and three filesystems.
-            - kind: list
-              text: >-
-                What it does not know: which process is holding that memory. Somebody
-                has to look.
-            - kind: paragraph
-              text: >-
-                A script wrote this, not an agent. Had an agent written it the same
-                schemas would apply — which is why there is no field here for a link
-                or an image.
-
-  # ── The sidecar door ─────────────────────────────────────────────────────
-  #
-  # This page exists to show the ONE door the other three demo pages cannot:
-  # a producer running INSIDE a crew container. It declares
-  # `producer: agent/riley`, and that word is what makes the door work — the
-  # sidecar stamps the acting agent's id onto every push and never a run id, so
-  # `mayProduceUnattended` (internal/api/pages_internal.go) admits it on the
-  # `agent` arm. A panel declaring `script/…` is REFUSED on that door however
-  # much of a script is sitting in the container.
-  #
-  # The `report` panel therefore has NO demo payload and cannot have one: the
-  # seeding account is not riley, and an owner push to an agent-produced panel
-  # is refused. It opens on "never produced" — which is the honest state, and
-  # is what the page is teaching. The `how` panel next to it IS seeded, because
-  # it declares a script producer, and mixing the two kinds on one page is
-  # itself the lesson: authority is decided per panel, not per page.
-  - slug: from-a-container
-    name: Incident Snapshot
-    description: >-
-      An Ops-owned incident board. Riley publishes the current assessment from
-      the crew container; the empty report means no agent has reported yet.
-    owner: crew/ops
-    panels:
-      - id: how
-        schema: narrative.v1
-        title: Incident reporting contract
-        icon: container
-        owner: crew/ops
-        producer: script/explain.sh
-        sla: 168h
-        span: 12
-        demo:
-          verdict: Evidence first, then an agent-owned incident assessment
-          blocks:
-            - kind: paragraph
-              text: >-
-                Riley collects read-only evidence from the public GitHub Status API,
-                records the raw response under /crew/shared/ops, and publishes only a
-                concise operational assessment here.
-            - kind: list
-              text: >-
-                The report must distinguish provider facts from Crewship impact. A
-                GitHub incident does not prove Crewship is unavailable; it may only
-                block source, CI, or release workflows.
-            - kind: list
-              text: >-
-                Any recommendation to pause a release or change production requires a
-                human decision escalation. The page reports the recommendation; it
-                never performs the change.
-            - kind: paragraph
-              text: >-
-                The report panel is owned by Ops and declares producer agent/riley, so
-                another agent or a human cannot impersonate its evidence trail.
-
-      - id: report
-        schema: status.v1
-        title: Current incident assessment
-        icon: cpu
-        owner: crew/ops
-        producer: agent/riley
-        sla: 6h
-        span: 12
-
-  # ── The webhook door ─────────────────────────────────────────────────────
-  #
-  # The door for a producer that cannot run the binary: a cron on somebody
-  # else's box, a CI step, a hosted job runner, a PLC gateway. Nothing about it
-  # needs a routine, an agent or a container.
-  #
-  # These panels DO carry demo payloads, because §7.1 rule 4 admits an owner
-  # push for `webhook` exactly as it does for `script` — the token is a
-  # principal, the declaration is only a label. So the seed fills the page and
-  # whatever token a human later mints takes over.
-  - slug: from-outside
-    name: Release Pipeline
-    description: >-
-      CI publishes build, test, and deployment state through a panel-scoped
-      webhook. Crewship displays the evidence without holding a CI credential.
-    owner: crew/ops
-    panels:
-      - id: build
-        schema: status.v1
-        title: Release candidate
-        icon: deploy
-        owner: crew/engineering
-        producer: webhook/ci
-        sla: 6h
-        span: 12
-        demo:
-          items:
-            # Quoted: an unquoted `#` after a space starts a YAML comment, so
-            # this arrived as plain "build" and the demo lost the one detail
-            # that made it read like a real build.
-            - name: "release candidate #412"
-              state: ok
-              label: passed in 2 m 14 s
-            - name: tests
-              state: ok
-              label: 1284 green
-            - name: deploy
-              state: warning
-              label: waiting for approval
-
-      - id: how-the-token-works
-        schema: narrative.v1
-        title: CI publishing contract
-        icon: network
-        owner: crew/ops
-        producer: script/explain.sh
-        sla: 168h
-        span: 12
-        demo:
-          verdict: CI may update this panel and nothing else
-          blocks:
-            - kind: paragraph
-              text: >-
-                Mint a token with crewship page webhook create and it is bound to
-                exactly one panel. It is stored hashed and shown once. A leaked token
-                writes that one panel and nothing else.
-            - kind: list
-              text: >-
-                It narrows itself: it works only while the human who issued it still
-                holds what they granted from. If they leave the crew or are demoted,
-                the token stops working with nobody lifting a finger.
-            - kind: list
-              text: >-
-                Revoke it immediately with crewship page webhook revoke. Revoked
-                tokens stay in the listing, because the question after an incident is
-                "was it used afterwards", and a deleted row cannot answer it.
-            - kind: paragraph
-              text: >-
-                Only a human may mint one, and only the page's owner or a workspace
-                admin. An agent cannot — otherwise it could widen its own reach.
-
-  # ── The routine-produced half ────────────────────────────────────────────
-  #
-  # No `demo:` on either panel, and that is not an omission. A panel declaring
-  # `routine/…` is one the seeding OWNER may not write (pages_authz.go
-  # mayProduce admits an owner push only for `script` and `webhook`), so a demo
-  # payload here would be authored, shipped, and refused with a 403 the seeder
-  # would print and step over. These panels are filled by the routine, by the
-  # dispatcher, as their own declared producer — which is the whole point of
-  # having them.
-  #
-  # The SLA is long on purpose. The seed ships ZERO scheduled routines
-  # (routines.go's header states it), so nothing re-runs page-watch by itself;
-  # a 60s SLA would have this page reading "stale" a minute after the demo was
-  # set up, which says the feature is broken when what happened is that nobody
-  # wired a schedule.
-  - slug: watch
-    name: Release Readiness
-    description: A routine-owned release snapshot combining the current gate state and operator note.
-    # Also ops, though here it buys only spec editing: these panels are
-    # routine-produced, and no amount of page ownership lets a human push to one.
-    owner: crew/ops
-    panels:
-      - id: wiring
-        schema: status.v1
-        title: Release gate
-        icon: calendar
-        owner: crew/ops
-        producer: routine/page-watch
-        sla: 6h
-        span: 12
-
-      - id: entry
-        schema: narrative.v1
-        title: Readiness note
-        icon: alert
-        owner: crew/ops
-        producer: routine/page-watch
-        sla: 6h
-        span: 12
-
-  # ── Optional integration Pages (seeddata/packs.go) ─────────────────────
-  # One page per pack, every panel produced by the pack's report routine.
-  # No `demo` payloads: these panels are ROUTINE-produced, so the only honest
-  # way for them to hold data is the routine running — which the seeder
-  # triggers once (seedPageProducerRoutines) when the pack is runnable.
-  - slug: ci-watch
-    name: CI watch
-    description: Are the scheduled GitHub Actions workflows green, red, or silently not running?
-    owner: crew/ops
-    panels:
-      - id: status
-        schema: status.v1
-        title: Scheduled workflows
-        icon: clock
-        owner: crew/ops
-        producer: routine/ci-nightly-triage
-        sla: 30h
-        span: 12
-      - id: summary
-        schema: narrative.v1
-        title: Last triage
-        icon: alert
-        owner: crew/ops
-        producer: routine/ci-nightly-triage
-        sla: 30h
-        span: 12
-
-  - slug: docs-drift
-    name: Docs drift
-    description: Documentation against code, both directions — phantoms the code does not have, gaps the docs never mention.
+- slug: demo-sales
+  name: Missed inquiries
+  description: Ava asked for a quote for 50 storage boxes. Her inquiry has been waiting
+    for 26 hours.
+  owner: crew/engineering
+  panels:
+  - id: about
+    schema: status.v1
+    title: The story
+    icon: people
+    owner: crew/engineering
+    producer: script/demo-fixture
+    sla: 168h
+    span: 12
+    actions:
+    - id: check
+      kind: call
+      label: Check inquiries
+      routine: demo-sales-check
+    - id: resolve
+      kind: call
+      label: Review reply
+      routine: demo-sales-resolve
+    - id: draft
+      kind: call
+      label: Draft with AI
+      routine: demo-sales-draft
+    demo:
+      items:
+      - name: Local sample data
+        state: ok
+        label: Ready to check
+  - id: records
+    schema: table.v1
+    title: Sample records
+    icon: clock
+    owner: crew/engineering
+    producer: routine/demo-sales-check
+    sla: 168h
+    span: 12
+    skip_seed_run: true
+  - id: finding
+    schema: narrative.v1
+    title: What the check found
+    icon: clock
+    owner: crew/engineering
+    producer: routine/demo-sales-check
+    sla: 168h
+    span: 12
+    skip_seed_run: true
+  - id: draft
+    schema: narrative.v1
+    title: Agent draft
+    icon: clock
+    owner: crew/engineering
+    producer: routine/demo-sales-draft
+    sla: 168h
+    span: 12
+    skip_seed_run: true
+  - id: outcome
+    schema: narrative.v1
+    title: Decision and result
+    icon: clock
+    owner: crew/engineering
+    producer: routine/demo-sales-resolve
+    sla: 168h
+    span: 12
+    skip_seed_run: true
+  - id: resolved-records
+    schema: table.v1
+    title: Records after the decision
+    icon: database
+    owner: crew/engineering
+    producer: routine/demo-sales-resolve
+    sla: 168h
+    span: 12
+    skip_seed_run: true
+  - id: proposal
+    schema: narrative.v1
+    title: Prepared proposal
+    icon: clock
+    owner: crew/engineering
+    producer: routine/demo-sales-resolve
+    sla: 168h
+    span: 12
+    skip_seed_run: true
+- slug: demo-finance
+  name: Unpaid invoices
+  description: Three invoices and two bank payments arrived. One invoice is overdue
+    and needs a reminder.
+  owner: crew/quality
+  panels:
+  - id: about
+    schema: status.v1
+    title: The story
+    icon: people
     owner: crew/quality
-    panels:
-      - id: status
-        schema: status.v1
-        title: Last scan
-        icon: calendar
-        owner: crew/quality
-        producer: routine/docs-drift-audit
-        sla: 170h
-        span: 12
-      - id: summary
-        schema: narrative.v1
-        title: What the audit found
-        icon: alert
-        owner: crew/quality
-        producer: routine/docs-drift-audit
-        sla: 170h
-        span: 12
+    producer: script/demo-fixture
+    sla: 168h
+    span: 12
+    actions:
+    - id: check
+      kind: call
+      label: Match payments
+      routine: demo-finance-check
+    - id: resolve
+      kind: call
+      label: Review reminder
+      routine: demo-finance-resolve
+    - id: draft
+      kind: call
+      label: Draft with AI
+      routine: demo-finance-draft
+    demo:
+      items:
+      - name: Local sample data
+        state: ok
+        label: Ready to check
+  - id: records
+    schema: table.v1
+    title: Sample records
+    icon: clock
+    owner: crew/quality
+    producer: routine/demo-finance-check
+    sla: 168h
+    span: 12
+    skip_seed_run: true
+  - id: finding
+    schema: narrative.v1
+    title: What the check found
+    icon: clock
+    owner: crew/quality
+    producer: routine/demo-finance-check
+    sla: 168h
+    span: 12
+    skip_seed_run: true
+  - id: draft
+    schema: narrative.v1
+    title: Agent draft
+    icon: clock
+    owner: crew/quality
+    producer: routine/demo-finance-draft
+    sla: 168h
+    span: 12
+    skip_seed_run: true
+  - id: outcome
+    schema: narrative.v1
+    title: Decision and result
+    icon: clock
+    owner: crew/quality
+    producer: routine/demo-finance-resolve
+    sla: 168h
+    span: 12
+    skip_seed_run: true
+  - id: resolved-records
+    schema: table.v1
+    title: Records after the decision
+    icon: database
+    owner: crew/quality
+    producer: routine/demo-finance-resolve
+    sla: 168h
+    span: 12
+    skip_seed_run: true
+  - id: proposal
+    schema: narrative.v1
+    title: Prepared proposal
+    icon: clock
+    owner: crew/quality
+    producer: routine/demo-finance-resolve
+    sla: 168h
+    span: 12
+    skip_seed_run: true
+- slug: demo-marketing
+  name: Form delivery
+  description: A customer submitted the contact form. The form accepted it, but the
+    delivery log has no matching entry.
+  owner: crew/quality
+  panels:
+  - id: about
+    schema: status.v1
+    title: The story
+    icon: people
+    owner: crew/quality
+    producer: script/demo-fixture
+    sla: 168h
+    span: 12
+    actions:
+    - id: check
+      kind: call
+      label: Check form delivery
+      routine: demo-marketing-check
+    - id: resolve
+      kind: call
+      label: Repair demo delivery
+      routine: demo-marketing-resolve
+    - id: draft
+      kind: call
+      label: Draft with AI
+      routine: demo-marketing-draft
+    demo:
+      items:
+      - name: Local sample data
+        state: ok
+        label: Ready to check
+  - id: records
+    schema: table.v1
+    title: Sample records
+    icon: clock
+    owner: crew/quality
+    producer: routine/demo-marketing-check
+    sla: 168h
+    span: 12
+    skip_seed_run: true
+  - id: finding
+    schema: narrative.v1
+    title: What the check found
+    icon: clock
+    owner: crew/quality
+    producer: routine/demo-marketing-check
+    sla: 168h
+    span: 12
+    skip_seed_run: true
+  - id: draft
+    schema: narrative.v1
+    title: Agent draft
+    icon: clock
+    owner: crew/quality
+    producer: routine/demo-marketing-draft
+    sla: 168h
+    span: 12
+    skip_seed_run: true
+  - id: outcome
+    schema: narrative.v1
+    title: Decision and result
+    icon: clock
+    owner: crew/quality
+    producer: routine/demo-marketing-resolve
+    sla: 168h
+    span: 12
+    skip_seed_run: true
+  - id: resolved-records
+    schema: table.v1
+    title: Records after the decision
+    icon: database
+    owner: crew/quality
+    producer: routine/demo-marketing-resolve
+    sla: 168h
+    span: 12
+    skip_seed_run: true
+  - id: proposal
+    schema: narrative.v1
+    title: Prepared proposal
+    icon: clock
+    owner: crew/quality
+    producer: routine/demo-marketing-resolve
+    sla: 168h
+    span: 12
+    skip_seed_run: true
+- slug: demo-shipping
+  name: Refund opportunities
+  description: Five parcels were delivered. One arrived two days late and its demo
+    claim window closes in three days.
+  owner: crew/engineering
+  panels:
+  - id: about
+    schema: status.v1
+    title: The story
+    icon: people
+    owner: crew/engineering
+    producer: script/demo-fixture
+    sla: 168h
+    span: 12
+    actions:
+    - id: check
+      kind: call
+      label: Check deliveries
+      routine: demo-shipping-check
+    - id: resolve
+      kind: call
+      label: Review claim
+      routine: demo-shipping-resolve
+    - id: draft
+      kind: call
+      label: Draft with AI
+      routine: demo-shipping-draft
+    demo:
+      items:
+      - name: Local sample data
+        state: ok
+        label: Ready to check
+  - id: records
+    schema: table.v1
+    title: Sample records
+    icon: clock
+    owner: crew/engineering
+    producer: routine/demo-shipping-check
+    sla: 168h
+    span: 12
+    skip_seed_run: true
+  - id: finding
+    schema: narrative.v1
+    title: What the check found
+    icon: clock
+    owner: crew/engineering
+    producer: routine/demo-shipping-check
+    sla: 168h
+    span: 12
+    skip_seed_run: true
+  - id: draft
+    schema: narrative.v1
+    title: Agent draft
+    icon: clock
+    owner: crew/engineering
+    producer: routine/demo-shipping-draft
+    sla: 168h
+    span: 12
+    skip_seed_run: true
+  - id: outcome
+    schema: narrative.v1
+    title: Decision and result
+    icon: clock
+    owner: crew/engineering
+    producer: routine/demo-shipping-resolve
+    sla: 168h
+    span: 12
+    skip_seed_run: true
+  - id: resolved-records
+    schema: table.v1
+    title: Records after the decision
+    icon: database
+    owner: crew/engineering
+    producer: routine/demo-shipping-resolve
+    sla: 168h
+    span: 12
+    skip_seed_run: true
+  - id: proposal
+    schema: narrative.v1
+    title: Prepared proposal
+    icon: clock
+    owner: crew/engineering
+    producer: routine/demo-shipping-resolve
+    sla: 168h
+    span: 12
+    skip_seed_run: true

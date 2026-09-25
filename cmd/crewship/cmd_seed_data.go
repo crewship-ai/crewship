@@ -670,6 +670,9 @@ func seedDemoCredentials(ctx context.Context, client *cli.Client, crewIDs map[st
 
 	ids := map[string]string{}
 	for _, dc := range seeddata.DemoCredentials() {
+		if dc.Def.Name != "smtp-relay" && dc.Def.Name != "webhook-signing-secret" {
+			continue
+		}
 		if err := ctx.Err(); err != nil {
 			return err
 		}

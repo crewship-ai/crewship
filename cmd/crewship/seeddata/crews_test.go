@@ -47,25 +47,13 @@ func TestCrewDevcontainerConfigIsValidJSON(t *testing.T) {
 	}
 }
 
-// TestPostCreateCommandInstallsAllFiveNewCLIs pins that EVERY seeded crew's
-// postCreateCommand references each of the five CLIs we want available
-// alongside Claude Code. If a future YAML edit drops one to "save
-// provisioning time" without updating docs/UI, this test fails loudly.
-//
-// Pre-migration this test checked the shared baseCLIPostCreate const.
-// Post-migration the postCreate string is inlined per-crew in
-// builtin/crews.yaml — the test sweeps every crew so divergence between
-// crews (a future YAML edit that touches only some of them) also surfaces.
-func TestPostCreateCommandInstallsAllFiveNewCLIs(t *testing.T) {
+// Default demos need Codex and the Python fixture runtime.
+func TestPostCreateCommandInstallsDemoCLI(t *testing.T) {
 	if len(Crews) == 0 {
 		t.Fatal("Crews is empty — loader regression or stale fixture")
 	}
 	expected := []string{
 		"@openai/codex",
-		"@google/gemini-cli",
-		"opencode-ai",
-		"cursor.com/install",
-		"app.factory.ai/cli", // Droid installer
 	}
 	for _, c := range Crews {
 		// Opt-in demo crews (e.g. local-ai) are intentionally minimal — they
@@ -93,9 +81,8 @@ func TestPostCreateCommandInstallsContainerDeps(t *testing.T) {
 		t.Fatal("Crews is empty — loader regression or stale fixture")
 	}
 	expected := []string{
-		"xdg-utils", // Droid Linux requirement
-		"ripgrep",   // Cursor safety net + faster grep tool
-		"python3",   // tool-sandbox runtime
+		"ripgrep", // Cursor safety net + faster grep tool
+		"python3", // tool-sandbox runtime
 	}
 	for _, c := range Crews {
 		// Opt-in demo crews (e.g. local-ai) are intentionally minimal — they
@@ -113,38 +100,11 @@ func TestPostCreateCommandInstallsContainerDeps(t *testing.T) {
 	}
 }
 
-// TestSeedCrewsAllowDomainsTheirDemoContentNeeds guards against #1200: seeded
-// crews default to network_mode=restricted with an empty allowed_domains, but
-// the optional GitHub packs need repository/API access and the Ops wake gate
-// reads GitHub Status.
-// Without an explicit allowlist entry per host, that content fails 100% of the
-// time out of the box. httpbin.org remains for opt-in trajectory evals.
-func TestSeedCrewsAllowDomainsTheirDemoContentNeeds(t *testing.T) {
-	required := map[string][]string{
-		"engineering": {"github.com"},
-		"quality":     {"github.com", "api.github.com"},
-		"ops":         {"httpbin.org", "www.githubstatus.com", "crewship.ai", "docs.crewship.ai", "api.github.com", "github.com", "objects.githubusercontent.com"},
-	}
-	bySlug := map[string]CrewDef{}
+// Business fixtures are local; the live callback host is added at seed time.
+func TestSeedCrewsDoNotRequireExternalDemoSites(t *testing.T) {
 	for _, c := range Crews {
-		bySlug[c.Slug] = c
-	}
-	for slug, domains := range required {
-		c, ok := bySlug[slug]
-		if !ok {
-			t.Fatalf("crew %q not found in seed data", slug)
-		}
-		for _, want := range domains {
-			found := false
-			for _, got := range c.AllowedDomains {
-				if got == want {
-					found = true
-					break
-				}
-			}
-			if !found {
-				t.Errorf("crew %s: allowed_domains %v missing %q needed by seeded demo content", slug, c.AllowedDomains, want)
-			}
+		if c.RequiresEnv == "" && len(c.AllowedDomains) != 0 {
+			t.Errorf("%s: default demo allows external sites: %v", c.Slug, c.AllowedDomains)
 		}
 	}
 }

@@ -1,13 +1,19 @@
 integrations:
-    - name: linear
-      display_name: Linear
-      transport: streamable-http
-      endpoint: https://mcp.linear.app/mcp
-      crew_slug: engineering
-    - name: github
-      display_name: GitHub
-      transport: stdio
-      command: npx
-      args_json: '["-y", "@modelcontextprotocol/server-github"]'
-      env_json: '{"GITHUB_PERSONAL_ACCESS_TOKEN": ""}'
-      crew_slug: engineering
+- name: harbor-goods
+  display_name: "Harbor Goods \xB7 local demo records"
+  transport: stdio
+  command: python3
+  args_json: '["/crew/shared/demo/business/connector.py"]'
+  crew_slug: engineering
+- name: harbor-goods
+  display_name: "Harbor Goods \xB7 local demo records"
+  transport: stdio
+  command: python3
+  args_json: '["/crew/shared/demo/business/connector.py"]'
+  crew_slug: quality
+- name: harbor-goods
+  display_name: "Harbor Goods \xB7 local demo records"
+  transport: stdio
+  command: python3
+  args_json: '["/crew/shared/demo/business/connector.py"]'
+  crew_slug: ops

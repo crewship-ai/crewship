@@ -1,63 +1,82 @@
-import React, { useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
-import { usePageSnapshot, getPanelHistory, runAction } from '@crewship/pages'
+import { usePageSnapshot, runAction, getActionStatus } from '@crewship/pages'
 import './style.css'
 
-type Item = { name?: string; label?: string; state?: string }
-type Block = { kind?: string; text?: string }
-type Cell = string | number | null
-type Data = { items?: Item[]; value?: number; unit?: string; sparkline?: number[]; columns?: { key: string; label: string }[]; rows?: Record<string, Cell>[]; verdict?: string; blocks?: Block[]; points?: { value: number }[] }
-
-function Panel({ panel }: { panel: NonNullable<ReturnType<typeof usePageSnapshot>>['panels'][number] }) {
-  const data = (panel.data ?? {}) as Data
-  const [history, setHistory] = useState('')
-  const status = panel.state === 'fresh' ? 'Fresh snapshot' : panel.state === 'stale' ? 'Needs refresh' : 'Waiting for data'
-  async function showHistory() {
-    try { const result = await getPanelHistory(panel.id, { limit: 10 }); setHistory(`${result.items.length} recorded snapshots`) }
-    catch { setHistory('History is unavailable') }
-  }
-  return <article className="panel">
-    <div className="panel-head"><span className="eyebrow">{panel.schema?.replace('.v1', '').toUpperCase() ?? 'PANEL'}</span><span className={`state ${panel.state === 'fresh' ? 'fresh' : ''}`}><i />{status}</span></div>
-    <h2>{panel.title || panel.id}</h2>
-    {data.items && <div className="status-grid">{data.items.map((item, i) => <div className="status-item" key={`${item.name}-${i}`}><span>{item.name}</span><strong>{item.label || item.state || '—'}</strong><small className={item.state === 'ok' ? 'good' : 'attention'}>{item.state || 'unknown'}</small></div>)}</div>}
-    {typeof data.value === 'number' && <div className="big-value">{data.value}<small>{data.unit}</small></div>}
-    {data.sparkline && <div className="bars" aria-label="Recent measurements">{data.sparkline.map((v, i) => <i key={i} style={{height: `${Math.max(18, (v / Math.max(...data.sparkline!, 1)) * 100)}%`}} />)}</div>}
-    {data.points && <div className="bars" aria-label="Recent measurements">{data.points.map((point, i) => <i key={i} style={{height: `${Math.max(18, (point.value / Math.max(...data.points!.map(p => p.value), 1)) * 100)}%`}} />)}</div>}
-    {data.verdict && <div className="verdict">{data.verdict}</div>}
-    {data.blocks && <div className="narrative">{data.blocks.map((block, i) => <p key={i}>{block.text}</p>)}</div>}
-    {data.columns && <div className="table-wrap"><table><thead><tr>{data.columns.map(c => <th key={c.key}>{c.label}</th>)}</tr></thead><tbody>{(data.rows ?? []).map((row, i) => <tr key={i}>{data.columns!.map(c => <td key={c.key}>{row[c.key] ?? '—'}</td>)}</tr>)}</tbody></table></div>}
-    {!data.items && typeof data.value !== 'number' && !data.verdict && !data.columns && !data.points && <p className="empty">This panel is ready for its first producer run.</p>}
-    <div className="panel-foot"><span>{panel.producedAt ? `Updated ${new Date(panel.producedAt).toLocaleString('en-US')}` : 'No snapshot yet'}</span><div><button onClick={showHistory}>History</button></div></div>
-    {history && <p className="feedback" role="status">{history}</p>}
-  </article>
-}
-
+type Narrative = { verdict?: string; blocks?: { text: string }[] }
+type Table = { columns: { key: string; label: string }[]; rows: Record<string, string | number | boolean>[] }
+const story = __STORY_CONFIG__
 function App() {
-  const page = usePageSnapshot()
-  const panels = page?.panels ?? []
-  const fresh = panels.filter(p => p.state === 'fresh').length
-  const leadStory = page?.name === 'Leads at Risk'
-  const [checking, setChecking] = useState(false)
-  const [checkFeedback, setCheckFeedback] = useState('')
-  async function checkInquiries() {
-    setChecking(true)
-    try { await runAction('inquiries', 'check'); setCheckFeedback('Check queued. Watch the finding below, then open Inbox to review the draft.') }
-    catch { setCheckFeedback('The check could not start. Open Routines to see the reason.') }
-    finally { setChecking(false) }
+ const page = usePageSnapshot()
+ const panels = page?.panels ?? []
+ const panel = (id: string) => panels.find(p => p.id === id)
+ const finding = panel('finding')?.data as Narrative | undefined
+ const outcome = panel('outcome')?.data as Narrative | undefined
+ const draft = panel('draft')?.data as Narrative | undefined
+ const tablePanel = panels.filter(p => ['records','resolved-records'].includes(p.id) && p.data).sort((a,b)=>(b.producedAt ?? '').localeCompare(a.producedAt ?? ''))[0]
+ const table = tablePanel?.data as Table | undefined
+ const [busy, setBusy] = useState(false)
+ const [message, setMessage] = useState('')
+ const [receipt, setReceipt] = useState('')
+ const [runStatus, setRunStatus] = useState('')
+ const key = useRef<{action: string; value: string} | null>(null)
+ const completed = outcome?.verdict === 'Completed'
+ const waiting = runStatus === 'waiting'
+ useEffect(() => {
+  if (!receipt) return
+  let alive = true
+  const poll = async () => {
+   try {
+    const result = await getActionStatus(receipt)
+    if (!alive) return
+    const status = result.run_status?.toLowerCase() || result.pending_status?.toLowerCase()
+    setRunStatus(status)
+    if (['completed','failed','cancelled','expired','interrupted'].includes(status)) {
+     setBusy(false); setReceipt(''); key.current = null
+     setMessage(status === 'completed' ? 'Run completed. The result is shown below.' : 'This run did not finish. Its details are available in Routines → History; you can retry.')
+    } else if (status === 'waiting') setMessage('Your decision is ready in Inbox. Approve the demo action or choose Keep open.')
+    else setMessage('Working on this project. The Page updates automatically.')
+   } catch { if (alive) setMessage('Status is temporarily unavailable. Check Routines → History before starting another run.') }
   }
-  return <main className="demo">
-    <div className="topline"><span className="brand"><b>C</b><strong>CREWSHIP</strong><i>/</i> DEMO</span><span className="tag">WORKSPACE PAGE</span></div>
-    <header className="hero"><div><div className="eyebrow">A WORKFLOW YOU CAN INSPECT</div><h1>{page?.name ?? 'Connecting to Crewship'}</h1><p>{__PAGE_DESCRIPTION__}</p></div><div className="hero-signal"><span>PAGE STATUS</span><strong>{fresh === panels.length && panels.length ? 'Snapshots ready' : 'Ready to explore'}</strong><small>{fresh} of {panels.length} panels have a fresh snapshot</small><div className="signal-line" /></div></header>
-    {leadStory && <section className="story" aria-label="How this demo works">
-      <div><span className="story-step">01 · THE PROBLEM</span><strong>A customer may be lost</strong><p>Ava asked for a quote. Her inquiry is still unanswered after 26 sample hours.</p></div>
-      <div><span className="story-step">02 · TRY IT</span><strong>Check the inquiries</strong><p>Run a real Crewship routine against three sample records.</p><button className="story-action" onClick={checkInquiries} disabled={checking}>{checking ? 'Starting…' : 'Check inquiries'}</button>{checkFeedback && <p className="story-feedback" role="status">{checkFeedback}</p>}</div>
-      <div><span className="story-step">03 · YOUR DECISION</span><strong>Review the proposed reply</strong><p>The finding appears here. A draft arrives in Inbox for your approval; no email is sent.</p></div>
-    </section>}
-    <nav className="toolbar"><strong>Overview</strong><span>{panels.length} panels · {fresh} fresh</span></nav>
-    <section className="panels">{panels.map(panel => <Panel key={panel.id} panel={panel} />)}</section>
-    {leadStory && <aside className="source-note"><strong>Where does the data come from?</strong><p>This demo reads <code>/crew/shared/demo/harbor-goods/leads.json</code> inside the Ops crew. Your workspace could use a connected Gmail account, Google Sheet, CRM or form instead. A calendar could schedule the follow-up. No live account is connected to this demo.</p></aside>}
-    <footer><span>CREWSHIP PAGES <b>×</b> WORKSPACE DATA</span><span>Snapshots come from governed producers</span></footer>
-  </main>
+  void poll(); const timer = setInterval(poll,2000)
+  return () => { alive=false; clearInterval(timer) }
+ },[receipt])
+ async function act(action: string) {
+  if (busy) return
+  setBusy(true); setRunStatus(''); setMessage('Confirm the action in Crewship.')
+  // The resolve key survives a Page reload while approval is pending. A
+  // recorded outcome (including Keep open) permits the next deliberate attempt.
+  const version = panel(action === 'resolve' ? 'outcome' : action === 'draft' ? 'draft' : 'finding')?.producedAt || 'initial'
+  if (key.current?.action !== action) key.current = {action, value: `demo-${story.slug}-${action}-${version}`}
+  try {
+   const result = await runAction('about',action,{}, {idempotencyKey:key.current.value})
+   setReceipt(result.pending_id)
+   setMessage('Run accepted. Waiting for its result…')
+  } catch (error) {
+   setBusy(false)
+   setMessage(error instanceof Error ? error.message : 'The action could not start.')
+   // A dismissed confirmation never submitted a write. A timeout retains its key.
+   if (error instanceof Error && /cancel|dismiss/i.test(error.message)) key.current=null
+  }
+ }
+ const result = panels.filter(p => ['outcome','finding'].includes(p.id) && p.data).sort((a,b)=>(b.producedAt ?? '').localeCompare(a.producedAt ?? ''))[0]?.data as Narrative | undefined
+ return <main className="demo">
+  <div className="topline"><span className="brand"><b>C</b><strong>HARBOR GOODS</strong><i>/</i>{story.project.toUpperCase()}</span><span className="tag">LOCAL DEMO DATA</span></div>
+  <header className="hero"><div><div className="eyebrow">ONE SMALL TASK. A VISIBLE RESULT.</div><h1>{story.name}</h1><p>{story.problem}</p></div><div className="hero-signal"><span>PROJECT STATUS</span><strong>{busy ? (waiting ? 'Your decision' : 'Working…') : completed ? 'Completed' : finding?.verdict || 'Ready to start'}</strong><small>{completed ? 'Evidence saved in this workspace' : `${story.rows.length} sample records · ${story.agent.charAt(0).toUpperCase()+story.agent.slice(1)} is your agent`}</small><div className="signal-line" /></div></header>
+  <section className="story">
+   <div><span className="story-step">01 · CHECK</span><strong>{story.check_label}</strong><p>A local script checks the records and adds its findings to the prepared Issue.</p><button className="story-action" disabled={busy || waiting} onClick={()=>void act('check')}>{story.check_label}</button></div>
+   <div><span className="story-step">02 · OPTIONAL AI</span><strong>Ask your agent</strong><p>Generate a fresh draft using your connected AI provider. A clearly labelled sample template is ready if you skip this step.</p><button className="story-action" disabled={busy || waiting || completed || !finding || finding.verdict==='No action needed'} onClick={()=>void act('draft')}>Draft with AI</button></div>
+   <div><span className="story-step">03 · FINISH</span><strong>{story.resolve_label}</strong><p>{story.approval ? 'Review the proposal in Inbox. Approval saves a local artifact and completes the Issue.' : 'Repair the local demo delivery. Save its receipt and complete the Issue.'}</p><button className="story-action" disabled={busy || waiting || completed || !finding || finding.verdict==='No action needed'} onClick={()=>void act('resolve')}>{completed ? 'Completed' : waiting ? 'Review in Inbox' : story.resolve_label}</button></div>
+  </section>
+  {message && <p className="action-status" role="status">{message}</p>}
+  {waiting && <p className="action-status">Open Inbox to decide on this project. Another run will not create a second approval.</p>}
+  <section className="panels">
+   <article className="panel"><span className="eyebrow">{table ? 'CHECKED RECORDS' : 'PREPARED SAMPLE'}</span><h2>{story.rows.length} records to inspect</h2><div className="table-wrap"><table><thead><tr>{(table?.columns || [{key:'id',label:'Record'},{key:'detail',label:'Sample data'}]).map(c=><th key={c.key}>{c.label}</th>)}</tr></thead><tbody>{table ? table.rows.map(row=><tr key={String(row.id)}>{table.columns.map(c=><td key={c.key}>{String(row[c.key] ?? '—')}</td>)}</tr>) : story.rows.map((row: Record<string, unknown>)=><tr key={String(row.id)}><td>{String(row.id)}</td><td>{Object.entries(row).filter(([k])=>k!=='id').map(([k,v])=>`${k.replaceAll('_',' ')}: ${v}`).join(' · ')}</td></tr>)}</tbody></table></div></article>
+   <article className="panel"><span className="eyebrow">RESULT &amp; EVIDENCE</span><h2>{result?.verdict || 'Ready for the first check'}</h2><div className="narrative">{result?.blocks?.map((b,i)=><p key={i}>{b.text}</p>) || <p>Start the check above. It updates this Page and the Issue in the {story.project} project.</p>}</div></article>
+   {draft?.verdict && <article className="panel"><span className="eyebrow">GENERATED BY YOUR AGENT</span><h2>{draft.verdict}</h2><div className="narrative">{draft.blocks?.map((b,i)=><p key={i}>{b.text}</p>)}</div></article>}
+  </section>
+  <aside className="source-note"><strong>How this example connects to your business</strong><p>This example uses fictional records. Replace the sample source with {story.source}. The same flow can check the data, track the work in Issues and ask you for a decision in Inbox.</p><details><summary>Inspect the example</summary><p>Data and scripts: /crew/shared/demo/business/. Local evidence: outbox/{story.slug}.json. The related Issue is “{story.issue_title}”. Each action runs a named routine with its own history. Only one action per project runs at a time.</p></details></aside>
+  <footer><span>CREWSHIP DEMO · {story.project.toUpperCase()}</span><span>No real customer is contacted</span></footer>
+ </main>
 }
-
 createRoot(document.getElementById('root')!).render(<App />)

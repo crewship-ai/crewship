@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/crewship-ai/crewship/cmd/crewship/seeddata"
 	"github.com/crewship-ai/crewship/internal/cli"
 )
 
@@ -15,7 +16,23 @@ func seedStoryPageFolder(ctx context.Context, client *cli.Client) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	const slug = "harbor-goods"
+	for _, story := range seeddata.Stories {
+		if err := seedOneStoryFolder(ctx, client, story); err != nil {
+			return err
+		}
+	}
+	for _, slug := range []string{"custom-operations", "demo-live"} {
+		if err := seedFolderPage(ctx, client, "demo-lab", "Crewship Lab", "ops", slug); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func seedOneStoryFolder(ctx context.Context, client *cli.Client, story seeddata.StoryDef) error {
+	return seedFolderPage(ctx, client, "demo-"+story.Slug, story.Project, story.Crew, "demo-"+story.Slug)
+}
+func seedFolderPage(ctx context.Context, client *cli.Client, slug, name, crew, pageSlug string) error {
 	resp, err := client.Get("/api/v1/page-folders/" + pagePathEscape(slug))
 	if err != nil {
 		return err
@@ -23,7 +40,7 @@ func seedStoryPageFolder(ctx context.Context, client *cli.Client) error {
 	if resp.StatusCode == http.StatusNotFound {
 		resp.Body.Close()
 		resp, err = client.Post("/api/v1/page-folders", map[string]any{
-			"slug": slug, "name": "Harbor Goods", "owner": "crew/ops", "icon": "inbox", "color": "blue",
+			"slug": slug, "name": name, "owner": "crew/" + crew, "icon": "inbox", "color": "blue",
 		})
 		if err != nil {
 			return err
@@ -33,7 +50,7 @@ func seedStoryPageFolder(ctx context.Context, client *cli.Client) error {
 		return fmt.Errorf("create or read folder: %w", err)
 	}
 	resp.Body.Close()
-	page, err := pageFolderReadPage(client, "leads-at-risk")
+	page, err := pageFolderReadPage(client, pageSlug)
 	if err != nil {
 		return err
 	}

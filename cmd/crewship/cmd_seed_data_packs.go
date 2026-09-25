@@ -56,7 +56,7 @@ func seedPackFiles(ctx context.Context, client *cli.Client, crewIDs map[string]s
 	// Operations Lab is a local container example, independent of the external-service packs.
 	if crewID := crewIDs["ops"]; crewID != "" {
 		if err := putBytes(ctx, client, crewFileSavePath(crewID, "shared/scripts/pages-operations-sample.mjs"), bytes.NewReader(pagesdemo.Collector)); err != nil {
-			fmt.Fprintf(os.Stderr, "  ! Operations Lab collector: %v\n", err)
+			return fmt.Errorf("deliver Crewship Lab collector: %w", err)
 		}
 	} else {
 		fmt.Fprintln(os.Stderr, "  ! Operations Lab collector: Ops crew not seeded")
@@ -84,34 +84,8 @@ func seedPackFiles(ctx context.Context, client *cli.Client, crewIDs map[string]s
 		}
 		saved++
 	}
-	for _, p := range seeddata.Packs {
-		crewID, ok := crewIDs[p.CrewSlug]
-		if !ok {
-			fmt.Fprintf(os.Stderr, "  ! pack %s: crew %q not seeded — %d file(s) skipped\n", p.Slug, p.CrewSlug, len(p.Files))
-			failed += len(p.Files)
-			continue
-		}
-		for _, f := range p.Files {
-			if err := ctx.Err(); err != nil {
-				return err
-			}
-			content, err := seeddata.PackFileContent(f.Src)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "  ! pack %s: %v\n", p.Slug, err)
-				failed++
-				continue
-			}
-			if err := putBytes(ctx, client, crewFileSavePath(crewID, f.Dest), bytes.NewReader(content)); err != nil {
-				fmt.Fprintf(os.Stderr, "  ! pack %s: %s: %v\n", p.Slug, f.Dest, err)
-				failed++
-				continue
-			}
-			saved++
-		}
-		fmt.Fprintf(os.Stderr, "  + pack %s: %d file(s) → crew %s\n", p.Slug, len(p.Files), p.CrewSlug)
-	}
 	if failed > 0 {
-		fmt.Fprintf(os.Stderr, "  %d file(s) delivered, %d failed\n", saved, failed)
+		return fmt.Errorf("%d demo files delivered, %d failed", saved, failed)
 	}
 	return nil
 }

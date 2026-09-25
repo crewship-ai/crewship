@@ -65,6 +65,7 @@ var reservedSegments = []string{
 	"memory",
 	"mission",
 	"openai",
+	"page-webhooks",
 	"pages",
 	"pipelines",
 	"query",
