@@ -3,6 +3,7 @@
 import { useState } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { Activity } from "lucide-react"
+import { Checkbox } from "@/components/ui/checkbox"
 import { apiFetch } from "@/lib/api-fetch"
 import { conversationRequest } from "@/hooks/use-workspace-conversations"
 
@@ -23,5 +24,5 @@ export function ConversationActivity({ workspaceId, userId, conversationId, canM
     } catch { setError(true) }
     finally { setBusy(false) }
   }
-  return <section className="space-y-3 border-t pt-3"><h3 className="flex items-center gap-2 text-sm font-medium"><Activity className="size-4" />Workspace activity</h3><p className="text-xs text-muted-foreground">Post new issue updates and routine results here. Earlier activity is not imported. {canManage ? "" : "The channel creator manages these subscriptions."}</p>{settings.isPending && <p className="text-xs">Loading subscriptions…</p>}{settings.data && ([['issues', 'Issue updates'], ['routines', 'Routine results']] as const).map(([field, label]) => <label key={field} className="flex min-h-9 items-center gap-3 text-sm"><input type="checkbox" checked={settings.data[field]} disabled={!canManage || busy} onChange={(e) => { void change(field, e.target.checked) }} />{label}</label>)}{settings.error && <p role="alert" className="text-xs">Unable to load activity subscriptions. <button type="button" className="underline" onClick={() => { void settings.refetch() }}>Retry</button></p>}{error && <p role="alert" className="text-xs text-destructive">Unable to save activity subscriptions. Please try again.</p>}</section>
+  return <section className="space-y-3 border-t pt-3"><h3 className="flex items-center gap-2 text-sm font-medium"><Activity className="size-4" />Workspace activity</h3><p className="text-xs text-muted-foreground">Post new issue updates and routine results here. Earlier activity is not imported. {canManage ? "" : "The channel creator manages these subscriptions."}</p>{settings.isPending && <p className="text-xs">Loading subscriptions…</p>}{settings.data && ([['issues', 'Issue updates'], ['routines', 'Routine results']] as const).map(([field, label]) => <label key={field} className="flex min-h-9 coarse:min-h-12 items-center gap-3 text-sm"><Checkbox checked={settings.data[field]} disabled={!canManage || busy} onCheckedChange={(checked) => { void change(field, checked === true) }} aria-label={label} />{label}</label>)}{settings.error && <p role="alert" className="text-xs">Unable to load activity subscriptions. <button type="button" className="underline" onClick={() => { void settings.refetch() }}>Retry</button></p>}{error && <p role="alert" className="text-xs text-destructive">Unable to save activity subscriptions. Please try again.</p>}</section>
 }

@@ -24,3 +24,11 @@ Targeted Go suites passed for API provenance/search, chatbridge, pipeline, group
 Authenticated dev2 browser smoke verified pins for an agent/channel/person, deduplication, persistence after reload, routine-only filtering, crew selection without hiding shared conversations, live search and the sidebar at 390px. No new endpoint failures or page errors occurred. No routine/model run was started by this smoke test.
 
 Final reload used `sudo systemctl reload crewship-ws@2`; public `/health` and `/chat` returned 200. The authenticated browser smoke was repeated successfully after that reload. Changes remain on PR #2699 without merge.
+
+## Channel details panel refinement
+
+Conversation members and settings now open in a right-hand panel using the same background, borders and typography as Work/Artifacts. Members opens the member section; channel/group creators also get a settings control opening General. General shows name/access and personal notification settings, followed by Members, Channel agents and Workspace activity, without tabs. Existing creator-only management permissions and APIs remain unchanged.
+
+The panel sits beside the transcript when the chat area has at least 720px available. In narrower areas it occupies the chat area; the underlying transcript is hidden from keyboard navigation while preserving its draft. Close/Escape restores focus to the opening control. No workspace backdrop or people modal remains; separate create/expand-conversation dialogs retain their existing behavior.
+
+Validation: the 702 existing Chat/conversation tests passed, plus two new creator/member cases (focused file: 12 passed). TypeScript, lint (0 errors, 30 existing warnings), production build, go vet and the channel activity permission API test passed. Authenticated browser smoke checked desktop side-by-side layout, Members focus, Escape, draft preservation and 390px mobile without overflow or page errors. Backend code is unchanged; the previous full Go package timeout limitation above still applies.
