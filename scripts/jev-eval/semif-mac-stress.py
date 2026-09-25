@@ -100,18 +100,18 @@ def main():
     args.output.mkdir(parents=True, exist_ok=False)
     input_path = args.output / "input.jsonl"
     output_path = args.output / "output.jsonl"
-    input_path.write_text("".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rows))
+    input_path.write_text("".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rows), encoding="utf-8")
     command = [str(args.semif_root / ".venv/bin/semif-score"), "--backend", "mlx",
                "--mode", "direct", "--model", EVAL.MODEL, "--revision", EVAL.REVISION,
                "--input", str(input_path), "--output", str(output_path)]
     if args.mlx_bits != "none":
         command += ["--mlx-bits", args.mlx_bits]
     subprocess.run(command, check=True, cwd=args.semif_root)
-    outputs = [json.loads(line) for line in output_path.read_text().splitlines()]
+    outputs = [json.loads(line) for line in output_path.read_text(encoding="utf-8").splitlines()]
     detail, summary = analyze(cases, rows, outputs, args.threshold)
     summary.update(model=EVAL.MODEL, revision=EVAL.REVISION, mlx_bits=args.mlx_bits)
-    (args.output / "results.jsonl").write_text("".join(json.dumps(item, ensure_ascii=False) + "\n" for item in detail))
-    (args.output / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2) + "\n")
+    (args.output / "results.jsonl").write_text("".join(json.dumps(item, ensure_ascii=False) + "\n" for item in detail), encoding="utf-8")
+    (args.output / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(summary, ensure_ascii=False, indent=2))
 
 
