@@ -256,6 +256,7 @@ func (o *Orchestrator) EnsureCrewSidecar(ctx context.Context, spec CrewSidecarSp
 	o.mu.RLock()
 	sidecarEnabled := o.sidecarEnabled
 	ipcToken := o.ipcToken
+	ipcBaseURL := o.ipcBaseURL
 	o.mu.RUnlock()
 
 	if !sidecarEnabled {
@@ -309,6 +310,14 @@ func (o *Orchestrator) EnsureCrewSidecar(ctx context.Context, spec CrewSidecarSp
 	if key := internaltoken.DeriveLLMRouteKey(ipcToken, spec.WorkspaceID, spec.CrewID); key != "" {
 		routeAuth = &SidecarRouteAuth{Key: key}
 	}
+	var ipcCfg *SidecarIPCConfig
+	if ipcBaseURL != "" && ipcToken != "" {
+		ipcCfg = &SidecarIPCConfig{
+			CrewOnly: true, BaseURL: ipcBaseURL,
+			Token:  sidecarIPCToken(ipcToken, spec.WorkspaceID, spec.CrewID, o.logger),
+			CrewID: spec.CrewID, WorkspaceID: spec.WorkspaceID, ContainerID: spec.ContainerID,
+		}
+	}
 
 	started, err := o.settleSidecar(ctx, sidecarSettleSpec{
 		containerID:    spec.ContainerID,
@@ -322,13 +331,14 @@ func (o *Orchestrator) EnsureCrewSidecar(ctx context.Context, spec CrewSidecarSp
 		configFingerprint:  crewOnlySidecarFingerprint,
 		restartFingerprint: "",
 		crewOnly:           true,
+		ipcCfg:             ipcCfg,
 		routeAuth:          routeAuth,
 	})
 	if err != nil {
 		return fmt.Errorf("ensure crew sidecar: %w", err)
 	}
 	if started {
-		o.logger.Info("crew sidecar started for an agent-less exec (no credentials, no MCP gateway, no IPC — egress policy only)",
+		o.logger.Info("crew sidecar started for an agent-less exec (no credentials or MCP gateway; read-only telemetry IPC)",
 			"crew_id", spec.CrewID, "container_id", shortID(spec.ContainerID), "network_mode", desiredMode)
 	}
 	return nil
