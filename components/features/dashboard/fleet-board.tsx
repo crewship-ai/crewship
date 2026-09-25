@@ -14,6 +14,7 @@ import { formatStatus } from "@/lib/format-status"
 import { cn } from "@/lib/utils"
 import type { FleetHealthRow } from "./dashboard-overview"
 import type { RunVolumeBucket } from "./run-volume-chart"
+import { ListScrollControls, useListScroll } from "./list-scroll-controls"
 
 export interface FleetCard {
   row: FleetHealthRow
@@ -87,6 +88,7 @@ export function fleetAgentStatus(agents: Pick<AgentSummary, "status">[]): string
 
 export function FleetBoard({ cards: unordered, workspaceId }: { cards: FleetCard[]; workspaceId: string | null }) {
   const cards = React.useMemo(() => prioritiseFleet(unordered), [unordered])
+  const listScroll = useListScroll()
   if (cards.length === 0) return null
   // One row per crew instead of a card each: the same facts (state, agents,
   // runs) in a fifth of the height, so the board fits beside the results
@@ -99,10 +101,11 @@ export function FleetBoard({ cards: unordered, workspaceId }: { cards: FleetCard
         </h2>
         <span className="flex items-center gap-2 font-mono text-[10px] text-muted-foreground">
           {cards.length} {cards.length === 1 ? "crew" : "crews"}
+          <ListScrollControls label="crews" controller={listScroll} />
           <Link href="/crews" className="text-primary-hover hover:underline">Crews →</Link>
         </span>
       </div>
-      <div className="flex max-h-[350px] flex-col divide-y divide-border/50 overflow-y-auto overscroll-contain pr-1 xl:min-h-0 xl:max-h-none xl:flex-1" tabIndex={0} aria-label="All crews">
+      <div ref={listScroll.listRef} className="flex max-h-[350px] flex-col divide-y divide-border/50 overflow-y-auto overscroll-contain pr-1 xl:min-h-0 xl:max-h-none xl:flex-1" tabIndex={0} aria-label="All crews">
         {cards.map((card) => {
           const { row } = card
           return (
