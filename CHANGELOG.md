@@ -10,6 +10,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 ## [Unreleased]
 
 ### Improved
+- Demo seed can use a private Codex `auth.json` to configure the default agents and routines for a ChatGPT subscription login. `.env.example` now lists the seed settings; the existing Anthropic path remains available.
 - CLI help now describes `plan` and `--plan` as prompt-guided planning; they do not disable the agent's configured tools. The CLI guide also notes that `--with-cmd` runs locally while collecting context.
 - Pages can open an unsent agent chat draft. The Page reference is removable, and sending it rechecks both readers' live access before adding a bounded identity snapshot and durable provenance.
 - Scheduled agent runs now enter the durable work queue alongside agent webhooks. Cron accepts a due occurrence and advances its cursor atomically; the shared dispatcher checks current permissions, serial capacity and cancellation before execution. Restart catches overdue occurrences, and the old direct cron executor is no longer in the production build. The release parallel profile remains disabled. (#2643)
