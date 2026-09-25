@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"database/sql"
 	"log/slog"
 	"net/http"
@@ -10,11 +11,14 @@ import (
 type hostResourcesHandler struct {
 	db     *sql.DB
 	logger *slog.Logger
+	live   func() *HostResourceSample
 }
 
 const hostResourceTimeFormat = "2006-01-02T15:04:05.000000000Z"
 
-type hostResourceSample struct {
+// HostResourceSample is the latest host reading shared with the dashboard and
+// Prometheus scrape path. History remains persisted separately in SQLite.
+type HostResourceSample struct {
 	SampledAt     string  `json:"sampled_at"`
 	CPUPercent    float64 `json:"cpu_percent"`
 	MemoryPercent float64 `json:"memory_percent"`
@@ -26,6 +30,38 @@ type hostResourceBucket struct {
 	TS            string   `json:"ts"`
 	CPUPercent    *float64 `json:"cpu_percent"`
 	MemoryPercent *float64 `json:"memory_percent"`
+}
+
+func (h hostResourcesHandler) latestSample(ctx context.Context) (*HostResourceSample, error) {
+	if h.live != nil {
+		if current := h.live(); current != nil {
+			return current, nil
+		}
+	}
+	var latest HostResourceSample
+	err := h.db.QueryRowContext(ctx,
+		`SELECT ts, cpu_percent, memory_percent, memory_used_mb, memory_total_mb FROM host_resource_samples ORDER BY ts DESC LIMIT 1`,
+	).Scan(&latest.SampledAt, &latest.CPUPercent, &latest.MemoryPercent, &latest.MemoryUsedMB, &latest.MemoryTotalMB)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &latest, nil
+}
+
+// Latest serves the in-memory reading without scanning chart history. The
+// dashboard polls this inexpensive route while System details is open.
+func (h hostResourcesHandler) Latest(w http.ResponseWriter, r *http.Request) {
+	latest, err := h.latestSample(r.Context())
+	if err != nil {
+		replyInternalError(w, h.logger, "host resources: latest", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, struct {
+		Latest *HostResourceSample `json:"latest"`
+	}{Latest: latest})
 }
 
 // Resources reports real, persisted host CPU and RAM measurements. Empty
@@ -50,7 +86,7 @@ func (h hostResourcesHandler) Resources(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	var latest hostResourceSample
+	var latest HostResourceSample
 	err := h.db.QueryRowContext(r.Context(),
 		`SELECT ts, cpu_percent, memory_percent, memory_used_mb, memory_total_mb FROM host_resource_samples ORDER BY ts DESC LIMIT 1`,
 	).Scan(&latest.SampledAt, &latest.CPUPercent, &latest.MemoryPercent, &latest.MemoryUsedMB, &latest.MemoryTotalMB)
@@ -58,9 +94,14 @@ func (h hostResourcesHandler) Resources(w http.ResponseWriter, r *http.Request) 
 		replyInternalError(w, h.logger, "host resources: latest", err)
 		return
 	}
-	var latestPtr *hostResourceSample
+	var latestPtr *HostResourceSample
 	if err == nil {
 		latestPtr = &latest
+	}
+	if h.live != nil {
+		if current := h.live(); current != nil && (latestPtr == nil || current.SampledAt > latestPtr.SampledAt) {
+			latestPtr = current
+		}
 	}
 
 	var recordingSince sql.NullString
@@ -106,11 +147,13 @@ func (h hostResourcesHandler) Resources(w http.ResponseWriter, r *http.Request) 
 	var started *string
 	if recordingSince.Valid {
 		started = &recordingSince.String
+	} else if latestPtr != nil {
+		started = &latestPtr.SampledAt
 	}
 	writeJSON(w, http.StatusOK, struct {
 		Window         string               `json:"window"`
 		RecordingSince *string              `json:"recording_since"`
-		Latest         *hostResourceSample  `json:"latest"`
+		Latest         *HostResourceSample  `json:"latest"`
 		Series         []hostResourceBucket `json:"series"`
 	}{Window: window, RecordingSince: started, Latest: latestPtr, Series: series})
 }

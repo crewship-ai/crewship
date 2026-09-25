@@ -6,8 +6,10 @@ stability: experimental
 tag: Experimental
 ---
 
-Crewship records a host CPU and RAM reading approximately once per minute and
-retains up to 30 days. These are **whole-server** measurements, including
+Crewship refreshes a host CPU and RAM reading approximately every 15 seconds.
+The latest reading is shared with `/metrics` and the dashboard without a
+database write. One reading per minute is stored for chart history, retained
+for up to 30 days. These are **whole-server** measurements, including
 processes outside Crewship. Collection starts when this version first runs;
 the API does not invent readings for earlier periods or collection gaps.
 
@@ -49,6 +51,26 @@ Linux `MemAvailable`; the `*_mb` fields use MiB. `latest` and
 contains one `series` entry for every bucket in the selected window; buckets
 with no reading have `null` percentages. Use `sampled_at` to detect a stale
 latest reading rather than assuming the most recent bucket is current.
+
+## Get the latest reading
+
+```http
+GET /api/v1/system/resources/latest
+```
+
+**Authentication:** An authenticated session or API token is required. This
+route has no workspace-role or admin gate.
+
+**Request:** No body or query parameters.
+
+**Response:** `200 OK`, `application/json`, with one `latest` field containing
+the same sample object shown above. `latest` is `null` before the first
+successful reading. The endpoint reads the daemon's in-memory sample and
+falls back to the newest stored sample during startup; it does not scan or
+write chart history.
+
+**Statuses:** `200` on success, `401` without valid authentication, and `500`
+if the startup fallback cannot read the database.
 
 **Statuses:** `200` on success, `400` for an unsupported `window`, `401` when
 authentication is missing or invalid, and `500` if stored readings cannot be

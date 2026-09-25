@@ -3,7 +3,7 @@
 import { Cpu } from "lucide-react"
 import { CartesianGrid, Line, LineChart, XAxis, YAxis } from "recharts"
 
-import type { DashboardWindow, HostResourceResponse } from "@/app/(dashboard)/dashboard-types"
+import type { DashboardWindow, HostResourceResponse, HostResourceSample } from "@/app/(dashboard)/dashboard-types"
 import { DashboardCard } from "@/components/features/dashboard/dashboard-card"
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart"
 import { cn } from "@/lib/utils"
@@ -34,9 +34,9 @@ function ResourceGauge({ label, value, detail, color }: { label: string; value: 
   )
 }
 
-export function HostResources({ data, window, loading, error }: { data: HostResourceResponse | null; window: DashboardWindow; loading: boolean; error: boolean }) {
-  const latest = data?.latest
-  const stale = latest ? Date.now() - new Date(latest.sampled_at).getTime() > 3 * 60_000 : false
+export function HostResources({ data, live, window, loading, error, historyError }: { data: HostResourceResponse | null; live: HostResourceSample | null; window: DashboardWindow; loading: boolean; error: boolean; historyError: boolean }) {
+  const latest = live ?? data?.latest
+  const stale = latest ? Date.now() - new Date(latest.sampled_at).getTime() > 60_000 : false
   const measured = data?.series.filter((bucket) => bucket.cpu_percent != null || bucket.memory_percent != null).length ?? 0
   const tickEvery = window === "24h" ? 48 : window === "7d" ? 24 : 20
   const ticks = data?.series.filter((_, index) => index % tickEvery === 0).map((bucket) => bucket.ts) ?? []
@@ -47,7 +47,7 @@ export function HostResources({ data, window, loading, error }: { data: HostReso
     : null
 
   return (
-    <DashboardCard title="Server load" icon={Cpu} hint={error ? "unavailable" : latest ? stale ? "last reading is old" : "updated every minute" : loading ? "loading" : "waiting for first reading"}>
+    <DashboardCard title="Server load" icon={Cpu} hint={latest ? stale ? "last reading is old" : "updated every 15 seconds" : error ? "unavailable" : loading ? "loading" : "waiting for first reading"}>
       <p className="mb-3 text-label text-muted-foreground">CPU and RAM of the server running Crewship, including other processes.</p>
       {latest ? (
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
@@ -60,7 +60,7 @@ export function HostResources({ data, window, loading, error }: { data: HostReso
 
       <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
         <span className="text-label font-medium text-foreground/85">History · {window}</span>
-        <span className={cn("text-micro text-muted-foreground", stale && "text-warn")}>{recordingSince ? `History available since ${recordingSince}` : error ? "History unavailable" : "Recording starts with this release"}</span>
+        <span className={cn("text-micro text-muted-foreground", stale && "text-warn")}>{recordingSince ? `History available since ${recordingSince}` : historyError ? "History unavailable" : "Recording starts with this release"}</span>
       </div>
       {measured > 0 ? (
         <ChartContainer config={chartConfig} className="mt-2 h-[180px] w-full aspect-auto">
@@ -77,7 +77,7 @@ export function HostResources({ data, window, loading, error }: { data: HostReso
           </LineChart>
         </ChartContainer>
       ) : (
-        <div className="mt-2 flex h-[140px] items-center justify-center rounded-lg border border-dashed border-border/60 text-center text-label text-muted-foreground">{error ? "Historical measurements could not be loaded." : "History will appear as measurements are collected."}</div>
+        <div className="mt-2 flex h-[140px] items-center justify-center rounded-lg border border-dashed border-border/60 text-center text-label text-muted-foreground">{historyError ? "Historical measurements could not be loaded." : "History will appear as measurements are collected."}</div>
       )}
       <div className="mt-2 flex items-center justify-center gap-4 text-label text-muted-foreground">
         <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-chart-1" />CPU</span>

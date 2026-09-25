@@ -25,6 +25,12 @@ import (
 
 type RouterOption func(*Router)
 
+// WithHostResourceLatest shares the daemon's recent in-memory host reading
+// with the authenticated dashboard API. History is still read from SQLite.
+func WithHostResourceLatest(latest func() *HostResourceSample) RouterOption {
+	return func(r *Router) { r.hostResourceLatest = latest }
+}
+
 // WithSocketPath sets the Unix socket path used for IPC with the sidecar.
 func WithSocketPath(path string) RouterOption {
 	return func(r *Router) {

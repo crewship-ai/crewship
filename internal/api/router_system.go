@@ -69,7 +69,9 @@ func (r *Router) registerSystemRoutes() {
 	// Instance-wide CPU/RAM history is intentionally read-only and subject to
 	// the same authentication floor as runtime capacity.
 	// openapi: query window:string
-	r.mux.Handle("GET /api/v1/system/resources", authed(http.HandlerFunc((hostResourcesHandler{db: r.db, logger: r.logger}).Resources)))
+	resources := hostResourcesHandler{db: r.db, logger: r.logger, live: r.hostResourceLatest}
+	r.mux.Handle("GET /api/v1/system/resources", authed(http.HandlerFunc(resources.Resources)))
+	r.mux.Handle("GET /api/v1/system/resources/latest", authed(http.HandlerFunc(resources.Latest)))
 	r.mux.Handle("GET /api/v1/system/version", authed(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		// Same re-read-per-request reason for r.build as for r.version:
 		// cmd_start calls SetBuild after construction (#1645).

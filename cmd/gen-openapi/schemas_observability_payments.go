@@ -217,6 +217,7 @@ func observabilityPaymentsSchemaCatalog() map[string]DomainSchema {
 		"GET /api/v1/presence/roster":                        {Response: object(map[string]any{"rows": array(rosterRow), "count": integer()})},
 		"GET /api/v1/system/runtime":                         {Response: runtime},
 		"GET /api/v1/system/resources":                       {Response: hostResources},
+		"GET /api/v1/system/resources/latest":                {Response: map[string]any{"type": "object", "properties": map[string]any{"latest": hostSample}, "required": []string{"latest"}}},
 		"GET /api/v1/runtime/capacity":                       {Response: capacity},
 		"GET /api/v1/notification-channels":                  {Response: object(map[string]any{"channels": array(channel)})},
 		"POST /api/v1/notification-channels":                 {Request: json(map[string]any{"type": str(), "url": str(), "to": str(), "secret": str(), "events": array(str()), "provider": str(), "fields": stringMap(), "shoutrrr_url": str(), "personal": boolean(), "categories": array(str()), "min_priority": str()}), Response: object(map[string]any{"id": str(), "workspace_id": str(), "type": str(), "url": str(), "to": str(), "events": array(str()), "enabled": boolean(), "created_by": str(), "created_at": dateTime(), "provider": str(), "scope": str(), "owner_user_id": str(), "categories": array(str()), "min_priority": str(), "secret": str()})},

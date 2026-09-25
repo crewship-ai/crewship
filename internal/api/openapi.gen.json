@@ -108478,16 +108478,6 @@
     "/api/v1/system/resources": {
       "get": {
         "operationId": "get_api_v1_system_resources",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "window",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
         "responses": {
           "200": {
             "content": {
@@ -108562,6 +108552,89 @@
                     "recording_since",
                     "latest",
                     "series"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "tags": [
+          "system"
+        ]
+      }
+    },
+    "/api/v1/system/resources/latest": {
+      "get": {
+        "operationId": "get_api_v1_system_resources_latest",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "latest": {
+                      "nullable": true,
+                      "properties": {
+                        "cpu_percent": {
+                          "type": "number"
+                        },
+                        "memory_percent": {
+                          "type": "number"
+                        },
+                        "memory_total_mb": {
+                          "type": "integer"
+                        },
+                        "memory_used_mb": {
+                          "type": "integer"
+                        },
+                        "sampled_at": {
+                          "format": "date-time",
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "sampled_at",
+                        "cpu_percent",
+                        "memory_percent",
+                        "memory_used_mb",
+                        "memory_total_mb"
+                      ],
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "latest"
                   ],
                   "type": "object"
                 }

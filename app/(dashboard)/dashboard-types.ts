@@ -125,16 +125,18 @@ export interface RuntimeCapacityResponse {
   }
 }
 
-export interface HostResourceResponse {
-  window: DashboardWindow
-  recording_since: string | null
-  latest: {
+export interface HostResourceSample {
     sampled_at: string
     cpu_percent: number
     memory_percent: number
     memory_used_mb: number
     memory_total_mb: number
-  } | null
+}
+
+export interface HostResourceResponse {
+  window: DashboardWindow
+  recording_since: string | null
+  latest: HostResourceSample | null
   series: Array<{ ts: string; cpu_percent: number | null; memory_percent: number | null }>
 }
 

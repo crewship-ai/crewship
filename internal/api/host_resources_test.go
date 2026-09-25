@@ -23,7 +23,7 @@ func TestHostResourcesWindowAndMissingHistory(t *testing.T) {
 		t.Fatalf("invalid window = %d, want 400", got)
 	}
 	var empty struct {
-		Latest         *hostResourceSample `json:"latest"`
+		Latest         *HostResourceSample `json:"latest"`
 		RecordingSince *string             `json:"recording_since"`
 	}
 	if err := json.Unmarshal(request("24h").Body.Bytes(), &empty); err != nil {
@@ -43,7 +43,7 @@ func TestHostResourcesWindowAndMissingHistory(t *testing.T) {
 		}
 	}
 	var out struct {
-		Latest         *hostResourceSample  `json:"latest"`
+		Latest         *HostResourceSample  `json:"latest"`
 		RecordingSince *string              `json:"recording_since"`
 		Series         []hostResourceBucket `json:"series"`
 	}
@@ -68,5 +68,41 @@ func TestHostResourcesWindowAndMissingHistory(t *testing.T) {
 	}
 	if measured != 1 {
 		t.Fatalf("24h measured buckets = %d, want 1", measured)
+	}
+}
+
+func TestHostResourcesUsesNewerLiveReadingWithoutWritingHistory(t *testing.T) {
+	db := setupTestDB(t)
+	now := time.Now().UTC()
+	if _, err := db.Exec(`INSERT INTO host_resource_samples(ts, cpu_percent, memory_percent, memory_used_mb, memory_total_mb) VALUES(?, 20, 30, 300, 1000)`, now.Add(-time.Minute).Format(hostResourceTimeFormat)); err != nil {
+		t.Fatal(err)
+	}
+	live := &HostResourceSample{SampledAt: now.Format(hostResourceTimeFormat), CPUPercent: 42, MemoryPercent: 40, MemoryUsedMB: 400, MemoryTotalMB: 1000}
+	h := hostResourcesHandler{db: db, logger: slog.New(slog.NewTextHandler(os.Stderr, nil)), live: func() *HostResourceSample { return live }}
+	rr := httptest.NewRecorder()
+	h.Resources(rr, httptest.NewRequest(http.MethodGet, "/api/v1/system/resources?window=24h", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", rr.Code, rr.Body.String())
+	}
+	var out struct {
+		Latest *HostResourceSample `json:"latest"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if out.Latest == nil || out.Latest.CPUPercent != 42 {
+		t.Fatalf("latest = %+v, want live CPU reading", out.Latest)
+	}
+	liveResponse := httptest.NewRecorder()
+	h.Latest(liveResponse, httptest.NewRequest(http.MethodGet, "/api/v1/system/resources/latest", nil))
+	if liveResponse.Code != http.StatusOK {
+		t.Fatalf("latest status = %d: %s", liveResponse.Code, liveResponse.Body.String())
+	}
+	if err := json.Unmarshal(liveResponse.Body.Bytes(), &out); err != nil || out.Latest == nil || out.Latest.CPUPercent != 42 {
+		t.Fatalf("lightweight latest = %+v, err = %v", out.Latest, err)
+	}
+	var count int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM host_resource_samples`).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("history writes = %d, err = %v; API read should not persist", count, err)
 	}
 }

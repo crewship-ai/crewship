@@ -223,6 +223,25 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, "# TYPE %s %s\n", m.name, m.mtype)
 		fmt.Fprintf(w, "%s{hostname=%q} %v\n", m.name, hostname, m.value)
 	}
+	if sample := s.hostResourceLatest.Load(); sample != nil {
+		hostMetrics := []struct {
+			name, help string
+			value      float64
+		}{
+			{"crewshipd_host_cpu_utilization_ratio", "Host CPU utilization across all cores (0 to 1)", sample.CPUPercent / 100},
+			{"crewshipd_host_memory_used_bytes", "Host memory in use, excluding reclaimable memory", float64(sample.MemoryUsedMB) * 1024 * 1024},
+			{"crewshipd_host_memory_total_bytes", "Total host memory", float64(sample.MemoryTotalMB) * 1024 * 1024},
+		}
+		if sampledAt, err := time.Parse(time.RFC3339Nano, sample.SampledAt); err == nil {
+			hostMetrics = append(hostMetrics, struct {
+				name, help string
+				value      float64
+			}{"crewshipd_host_sample_timestamp_seconds", "Unix time of the most recent host resource reading", float64(sampledAt.Unix())})
+		}
+		for _, metric := range hostMetrics {
+			fmt.Fprintf(w, "# HELP %s %s\n# TYPE %s gauge\n%s{hostname=%q} %g\n", metric.name, metric.help, metric.name, metric.name, hostname, metric.value)
+		}
+	}
 
 	// Domain metrics (assignments, queue depth, pipeline runs, run
 	// events, LLM cost, container health, migration version) — see

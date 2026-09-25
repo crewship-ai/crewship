@@ -10,7 +10,6 @@ import {
   AttentionStrip,
   heldForWorkspace,
   OutcomeKpis,
-  SystemSignals,
   UpNext,
   buildAttentionItems,
   deriveFleetHealth,
@@ -39,6 +38,7 @@ import {
   useCrewSummaries,
   useDashboardResults,
   useDashboardActiveRuns,
+  useHostResourceLatest,
   useHostResources,
   useInvalidateDashboard,
   useMetricsTimeseries,
@@ -67,6 +67,7 @@ export default function DashboardPage() {
   const [onboardingChecked, setOnboardingChecked] = useState(false)
   const [firstAgentId, setFirstAgentId] = useState<string | null>(null)
   const [reportWindow, setReportWindow] = useState<DashboardWindow>("24h")
+  const [systemDetailsOpen, setSystemDetailsOpen] = useState(false)
 
   useEffect(() => {
     serverFetch("/api/v1/onboarding/status")
@@ -98,7 +99,9 @@ export default function DashboardPage() {
   const agentRunsQ = useDashboardActiveRuns(workspaceId, queryOpts)
   const insightsQ = useRunsInsights(workspaceId, reportWindow, queryOpts)
   const capacityQ = useRuntimeCapacity(queryOpts)
-  const hostResourcesQ = useHostResources(reportWindow, queryOpts)
+  const hostQueryOpts = { enabled: onboardingChecked && systemDetailsOpen }
+  const hostResourcesQ = useHostResources(reportWindow, hostQueryOpts)
+  const hostLatestQ = useHostResourceLatest(hostQueryOpts)
   const volumeParams = useMemo(() => runVolumeParams(reportWindow), [reportWindow])
   const volumeQ = useMetricsTimeseries(workspaceId, volumeParams, queryOpts)
   const spendQ = useCrewSpend(workspaceId, reportWindow, queryOpts)
@@ -340,11 +343,10 @@ export default function DashboardPage() {
           <Appear order={2} className="xl:col-span-2"><PagesStrip /></Appear>
         </div>
 
-        <details className="rounded-xl border border-border/60 bg-card">
-          <summary className="cursor-pointer px-3 py-2.5 text-body font-medium text-muted-foreground transition-colors hover:text-foreground">System details <span className="ml-2 text-label font-normal">Server load, crews, agents and schedules</span></summary>
+        <details className="rounded-xl border border-border/60 bg-card" onToggle={(event) => setSystemDetailsOpen(event.currentTarget.open)}>
+          <summary className="cursor-pointer px-3 py-2.5 text-body font-medium text-muted-foreground transition-colors hover:text-foreground">System details <span className="ml-2 text-label font-normal">Server load and history</span></summary>
           <div className="border-t border-border/60 p-4">
-            <SystemSignals capacity={capacityQ.data ?? null} heldCrews={heldCrews} fleet={fleet} agents={agents} schedules={schedules.schedules} schedulesLoading={schedules.loading} schedulesError={schedules.error} />
-            <div className="mt-3"><HostResources data={hostResourcesQ.data ?? null} window={reportWindow} loading={hostResourcesQ.isPending} error={hostResourcesQ.isError} /></div>
+            <HostResources data={hostResourcesQ.data ?? null} live={hostLatestQ.data?.latest ?? null} window={reportWindow} loading={hostResourcesQ.isPending || hostLatestQ.isPending} error={hostLatestQ.isError} historyError={hostResourcesQ.isError} />
           </div>
         </details>
       </main>

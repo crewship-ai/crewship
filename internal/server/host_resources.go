@@ -10,9 +10,13 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/admission"
+	goapi "github.com/crewship-ai/crewship/internal/api"
 )
 
-const hostResourceInterval = time.Minute
+const (
+	hostResourceInterval        = 15 * time.Second
+	hostResourcePersistInterval = time.Minute
+)
 
 // Fixed-width UTC fractions keep SQLite's TEXT range comparisons ordered.
 const hostResourceTimeFormat = "2006-01-02T15:04:05.000000000Z"
@@ -97,13 +101,14 @@ func measureHostResources(ctx context.Context) (cpuPct, memoryPct float64, usedM
 	return cpuPct, memoryPct, usedMB, totalMB, nil
 }
 
-// runHostResourceSampler persists one host sample per minute. It starts with
-// the server, so the dashboard's selected 24h/7d/30d range continues filling
-// even if nobody keeps the page open. Old samples are removed daily.
+// runHostResourceSampler refreshes the in-memory reading every 15 seconds for
+// the dashboard and /metrics, but persists at most one sample per minute for
+// the bounded 30-day chart history. It runs even without dashboard viewers.
 func (s *Server) runHostResourceSampler(ctx context.Context) {
 	ticker := time.NewTicker(hostResourceInterval)
 	defer ticker.Stop()
 	var lastPrune time.Time
+	var lastPersist time.Time
 	collect := func() {
 		cpuPct, memoryPct, usedMB, totalMB, err := measureHostResources(ctx)
 		if err != nil {
@@ -113,12 +118,20 @@ func (s *Server) runHostResourceSampler(ctx context.Context) {
 			return
 		}
 		now := time.Now().UTC()
+		s.hostResourceLatest.Store(&goapi.HostResourceSample{
+			SampledAt: now.Format(hostResourceTimeFormat), CPUPercent: cpuPct,
+			MemoryPercent: memoryPct, MemoryUsedMB: usedMB, MemoryTotalMB: totalMB,
+		})
+		if now.Sub(lastPersist) < hostResourcePersistInterval {
+			return
+		}
 		if _, err := s.db.ExecContext(ctx,
 			`INSERT INTO host_resource_samples(ts, cpu_percent, memory_percent, memory_used_mb, memory_total_mb) VALUES(?, ?, ?, ?, ?)`,
 			now.Format(hostResourceTimeFormat), cpuPct, memoryPct, usedMB, totalMB); err != nil {
 			s.logger.Warn("host resource sample write failed", "error", err)
 			return
 		}
+		lastPersist = now
 		if now.Sub(lastPrune) >= 24*time.Hour {
 			if _, err := s.db.ExecContext(ctx, `DELETE FROM host_resource_samples WHERE ts < ?`, now.Add(-30*24*time.Hour).Format(hostResourceTimeFormat)); err != nil {
 				s.logger.Warn("host resource sample pruning failed", "error", err)

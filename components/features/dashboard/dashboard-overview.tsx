@@ -14,7 +14,6 @@ import {
   Gauge,
   HelpCircle,
   Play,
-  ServerCog,
   ShieldAlert,
   TimerReset,
   Wrench,
@@ -716,95 +715,6 @@ export function RecentWork({ missions }: { missions: Mission[] }) {
     </DashboardCard>
   )
 }
-
-export function SystemSignals({
-  capacity,
-  heldCrews,
-  fleet,
-  agents,
-  schedules,
-  schedulesLoading,
-  schedulesError,
-}: {
-  capacity: RuntimeCapacityResponse | null
-  heldCrews: NonNullable<RuntimeCapacityResponse["held"]>
-  fleet: FleetHealthRow[]
-  agents: AgentSummary[]
-  schedules: PipelineSchedule[]
-  schedulesLoading: boolean
-  schedulesError: string | null
-}) {
-  // Fleet's warning tone also includes missing tools. Those are useful on an
-  // individual crew, but this system summary should count actual agent or
-  // service failures rather than turn every credential gap into an outage.
-  const crewAlerts = fleet.filter((row) => row.status === "Agent error" || row.status === "Service degraded").length
-  const uncheckedCrews = fleet.filter((row) => !row.services.checked).length
-  const agentErrors = agents.filter((agent) => agent.status === "ERROR").length
-  const runningAgents = agents.filter((agent) => agent.status === "RUNNING").length
-  const readyAgents = agents.filter((agent) => agent.status === "IDLE" || agent.status === "ACTIVE").length
-  const unavailableAgents = agents.length - agentErrors - runningAgents - readyAgents
-  const activeSchedules = schedules.filter((schedule) => schedule.enabled).length
-  const rows: Array<{ label: string; value: string; detail: string; href?: string; icon: LucideIcon; tone: string }> = [
-    {
-      label: "New run capacity",
-      value: capacity == null ? "Status unavailable" : heldCrews.length > 0 ? `${heldCrews.length} crew${heldCrews.length === 1 ? "" : "s"} waiting` : capacity.enabled ? "Ready" : "No admission limit",
-      detail: capacity == null ? "Could not check whether new work can start" : heldCrews.length > 0 ? "Open Activity to inspect waiting work" : capacity.enabled ? "Crewship can start new agent work" : "Run admission is not limiting starts",
-      href: heldCrews.length > 0 ? "/activity" : undefined,
-      icon: ServerCog,
-      tone: capacity == null ? "text-muted-foreground" : heldCrews.length > 0 ? "text-warn" : "text-success",
-    },
-    {
-      label: "Crew health",
-      value: fleet.length === 0 ? "No crews yet" : crewAlerts > 0 ? `${crewAlerts} need attention` : uncheckedCrews > 0 ? `${uncheckedCrews} not checked` : "No failures",
-      detail: fleet.length === 0 ? "Create a crew to start work" : crewAlerts > 0 ? "Check agent errors and crew services" : uncheckedCrews > 0 ? "Service status is unavailable for some crews" : "No agent or service problems detected",
-      href: "/crews",
-      icon: ShieldAlert,
-      tone: fleet.length === 0 ? "text-muted-foreground" : crewAlerts > 0 || uncheckedCrews > 0 ? "text-warn" : "text-success",
-    },
-    {
-      label: "Agents",
-      value: agents.length === 0 ? "No agents yet" : agentErrors > 0 ? `${agentErrors} in error` : unavailableAgents > 0 ? `${unavailableAgents} unavailable` : `${agents.length} configured`,
-      detail: agents.length === 0 ? "Add an agent to a crew" : `${readyAgents} ready · ${runningAgents} running now`,
-      href: "/agents",
-      icon: Bot,
-      tone: agents.length === 0 ? "text-muted-foreground" : agentErrors > 0 || unavailableAgents > 0 ? "text-warn" : "text-success",
-    },
-    {
-      label: "Scheduled routines",
-      value: schedulesError ? "Status unavailable" : schedulesLoading ? "Checking…" : `${activeSchedules} active`,
-      detail: schedulesError ? "Could not load routine schedules" : schedulesLoading ? "Loading the routine calendar" : schedules.length === 0 ? "Plan work in the routine calendar" : `${schedules.length - activeSchedules} inactive · open calendar`,
-      href: "/routines?tab=calendar",
-      icon: CalendarClock,
-      tone: schedulesError || schedulesLoading || activeSchedules === 0 ? "text-muted-foreground" : "text-success",
-    },
-  ]
-
-  return (
-    <DashboardCard title="Workspace status" icon={Gauge} hint="current state" className="h-full">
-      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-        {rows.map((row) => {
-          const Icon = row.icon
-          const content = (
-            <div className={cn("flex min-h-16 items-center gap-3 rounded-lg border border-border/60 px-3 py-2.5", row.href && "transition-colors hover:border-border hover:bg-foreground/[0.025]")}>
-                <Icon className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
-                <span className="min-w-0 flex-1">
-                  <span className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
-                    <span className="text-label font-medium text-foreground/85">{row.label}</span>
-                    <span className={cn("text-label font-medium", row.tone)}>{row.value}</span>
-                  </span>
-                  <span className="mt-0.5 block text-micro text-muted-foreground">{row.detail}</span>
-                </span>
-                {row.href && <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />}
-            </div>
-          )
-          return row.href ? <Link key={row.label} href={row.href}>{content}</Link> : <div key={row.label}>{content}</div>
-        })}
-      </div>
-    </DashboardCard>
-  )
-}
-
-
 
 function EmptyState({ icon: Icon, title, detail }: { icon: LucideIcon; title: string; detail: string }) {
   return (

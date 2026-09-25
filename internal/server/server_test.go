@@ -14,6 +14,7 @@ import (
 
 	"golang.org/x/net/websocket"
 
+	goapi "github.com/crewship-ai/crewship/internal/api"
 	"github.com/crewship-ai/crewship/internal/config"
 	"github.com/crewship-ai/crewship/internal/logging"
 	"github.com/crewship-ai/crewship/internal/testutil"
@@ -235,6 +236,27 @@ func TestMetrics(t *testing.T) {
 	for _, m := range expectedMetrics {
 		if !strings.Contains(output, m) {
 			t.Errorf("expected metric %s in output", m)
+		}
+	}
+}
+
+func TestMetricsExposesRecentHostReading(t *testing.T) {
+	s := newTestServer()
+	s.hostResourceLatest.Store(&goapi.HostResourceSample{
+		SampledAt:  time.Unix(1000, 0).UTC().Format(time.RFC3339Nano),
+		CPUPercent: 25, MemoryPercent: 50, MemoryUsedMB: 512, MemoryTotalMB: 1024,
+	})
+	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	req.RemoteAddr = "127.0.0.1:55555"
+	w := httptest.NewRecorder()
+	s.mux.ServeHTTP(w, req)
+	for _, want := range []string{
+		"crewshipd_host_cpu_utilization_ratio{hostname=", " 0.25\n",
+		"crewshipd_host_memory_used_bytes{hostname=", " 5.36870912e+08\n",
+		"crewshipd_host_sample_timestamp_seconds{hostname=", " 1000\n",
+	} {
+		if !strings.Contains(w.Body.String(), want) {
+			t.Errorf("/metrics missing %q", want)
 		}
 	}
 }
