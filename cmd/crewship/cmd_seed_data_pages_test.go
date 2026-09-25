@@ -377,6 +377,7 @@ func TestPageProducerRoutineSlugs(t *testing.T) {
 // The seeder must reach the same endpoint the UI's Run button does, and must
 // not abandon the remaining routines when one of them refuses to start.
 func TestSeedPageProducerRoutines_FiresEachRoutineAndSurvivesAFailure(t *testing.T) {
+	t.Setenv("SEED_GITHUB_TOKEN", "test-token")
 	s := clitest.NewStubServer()
 	defer s.Close()
 
@@ -422,6 +423,34 @@ func TestSeedPageProducerRoutines_FiresEachRoutineAndSurvivesAFailure(t *testing
 	}
 	if !strings.Contains(stderr, "1 failed") {
 		t.Errorf("the failure was not counted: %q", stderr)
+	}
+}
+
+func TestSeedPageProducerRoutines_SkipsPacksWithoutIntegration(t *testing.T) {
+	t.Setenv("SEED_GITHUB_TOKEN", "")
+	s := clitest.NewStubServer()
+	defer s.Close()
+	const ws = covWorkspaceIDCli10
+	for _, slug := range pageProducerRoutineSlugs(seeddata.Pages) {
+		s.OnPost("/api/v1/workspaces/"+ws+"/pipelines/"+slug+"/run", clitest.JSONResponse(202, map[string]string{"run_id": "r1"}))
+	}
+	client := cli.NewClient(s.URL(), "tok", ws)
+	if _, err := captureStderrCov(t, func() error {
+		return seedPageProducerRoutines(context.Background(), client, ws)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, slug := range pageProducerRoutineSlugs(seeddata.Pages) {
+		path := "/api/v1/workspaces/" + ws + "/pipelines/" + slug + "/run"
+		want := 1
+		if p, ok := seeddata.PackForRoutine(slug); ok {
+			if runnable, _ := packRunnable(p); !runnable {
+				want = 0
+			}
+		}
+		if got := len(s.CallsFor("POST", path)); got != want {
+			t.Errorf("routine %s: %d run POSTs, want %d", slug, got, want)
+		}
 	}
 }
 
