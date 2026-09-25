@@ -4,8 +4,9 @@ import { describe, expect, it, vi } from "vitest"
 import type { InboxItem } from "@/hooks/use-inbox"
 
 import { groupAdvisories, inboxEntry } from "../inbox-v2-derive"
+import { InboxV2Detail } from "../inbox-v2-detail"
 import { InboxFocusOverview, InboxTriage } from "../inbox-v2-triage"
-import type { InboxLookup } from "../inbox-v2-types"
+import type { InboxLookup, InboxV2Entry } from "../inbox-v2-types"
 
 vi.mock("@/components/ui/agent-avatar", () => ({
   AgentAvatar: ({ seed }: { seed: string }) => <span data-testid="avatar">{seed}</span>,
@@ -94,5 +95,49 @@ describe("InboxFocusOverview", () => {
     expect(screen.queryByText("Routine alerts")).toBeNull()
     fireEvent.click(screen.getByRole("button", { name: /All inbox/ }))
     expect(onClear).toHaveBeenCalledOnce()
+  })
+})
+
+describe("InboxV2Detail with an empty attention view", () => {
+  const base: Parameters<typeof InboxV2Detail>[0] = {
+    entry: null,
+    role: "OWNER",
+    confirmation: null,
+    onClearConfirmation: vi.fn(),
+    onViewReceipt: vi.fn(),
+    onInboxResolve: vi.fn(),
+    onInboxArchive: vi.fn(),
+    onInboxMarkUnread: vi.fn(),
+    onInboxRefresh: vi.fn(),
+    onInboxAct: vi.fn(),
+    onApprovalDecide: vi.fn(),
+    onArchiveGroup: vi.fn(),
+  }
+  const focusTriage = (entries: InboxV2Entry[]) => ({
+    action: [],
+    updates: [],
+    history: [],
+    onOpen: vi.fn(),
+    onCrew: vi.fn(),
+    focus: { label: "Decisions waiting", entries, onClear: vi.fn() },
+  })
+
+  it("follows the attention link with the focus overview, not a dead prompt", () => {
+    render(<InboxV2Detail {...base} triage={focusTriage([])} />)
+    expect(screen.getByTestId("inbox-focus-overview")).toBeInTheDocument()
+    expect(screen.getByRole("heading", { name: "Decisions waiting" })).toBeInTheDocument()
+    expect(screen.getByText("Nothing matches this filter right now.")).toBeInTheDocument()
+    expect(screen.queryByText("Select an item to see its context and actions.")).toBeNull()
+  })
+
+  it("still lists matching entries through the pane when none is open", () => {
+    render(<InboxV2Detail {...base} triage={focusTriage([inboxEntry(item("wait", "c-ops"))])} />)
+    expect(screen.getByText("q wait")).toBeInTheDocument()
+  })
+
+  it("keeps the plain prompt only when no triage is offered", () => {
+    render(<InboxV2Detail {...base} />)
+    expect(screen.getByText("Select an item to see its context and actions.")).toBeInTheDocument()
+    expect(screen.queryByTestId("inbox-focus-overview")).toBeNull()
   })
 })

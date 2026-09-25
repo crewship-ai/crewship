@@ -27,7 +27,7 @@ import {
   type InboxV2Filters,
 } from "./inbox-v2-derive"
 import { useInboxV2DeepLink } from "./inbox-v2-deeplink"
-import { matchesInboxAttention, parseInboxAttention } from "./inbox-v2-attention"
+import { ATTENTION_LABELS, matchesInboxAttention, parseInboxAttention } from "./inbox-v2-attention"
 import { filterInboxEntries } from "./inbox-entry-identity"
 import { InboxV2Detail } from "./inbox-v2-detail"
 import { InboxV2Explorer } from "./inbox-v2-explorer"
@@ -430,6 +430,18 @@ export function InboxV2() {
         <InboxV2Detail
           key={displayed?.key || "overview"}
           entry={displayed}
+          triage={attention && !displayed ? {
+            action: feeds.action,
+            updates: feeds.updates,
+            history: feeds.history,
+            onOpen: openEntry,
+            onCrew: (crewId) => setFilters({ ...filters, crew: crewId }),
+            focus: {
+              label: ATTENTION_LABELS[attention],
+              entries: visible,
+              onClear: () => router.push("/inbox"),
+            },
+          } : undefined}
           selectionMissing={selectionMissing}
           role={(role as WorkspaceRole | null) ?? null}
           detailedInboxItem={detailedInbox.data}
