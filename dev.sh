@@ -25,6 +25,7 @@ GO_LOG="/tmp/crewship${S}-go.log"
 DATA_DIR="/tmp/crewship${S}-data"
 LOG_PATH="/tmp/crewship${S}-logs"
 STATE_DIR="/tmp/crewship${S}-state"
+PAGE_PROJECTS_DIR="/tmp/crewship${S}-page-projects"
 SOCKET_PATH="/tmp/crewship${S}.sock"
 CONTAINER_NETWORK="crewship${S}-agents"
 
@@ -438,6 +439,9 @@ start_go() {
   (
     cd "$PROJECT_DIR"
     set -a && . ./.env.local && set +a
+    # Custom Page source must live outside crew storage. Give each dev slot
+    # its own protected store without rewriting the operator's .env.local.
+    export CREWSHIP_PAGE_PROJECTS_PATH="${CREWSHIP_PAGE_PROJECTS_PATH:-$PAGE_PROJECTS_DIR}"
     # Force the freshly-built, co-located sidecar + entrypoint (#1390). Exported
     # AFTER sourcing .env.local so a stale hardcoded pin there cannot win — the
     # server's applyEnvOverrides honours CREWSHIP_SIDECAR_PATH, so last export
@@ -784,6 +788,7 @@ cmd_nuke() {
   echo "  - SQLite database (./crewship.db)"
   echo "  - Agent output, workspace, crew data ($DATA_DIR)"
   echo "  - Bolt state ($STATE_DIR)"
+  echo "  - Page project source ($PAGE_PROJECTS_DIR)"
   echo "  - Conversations ($DATA_DIR/conversations)"
   echo "  - Log files ($LOG_PATH)"
   echo "  - Docker containers (crewship${S}-*  — team + sidecars + init)"
@@ -882,6 +887,7 @@ cmd_nuke() {
   }
   remove_data_dir "$DATA_DIR"
   remove_data_dir "$STATE_DIR"
+  remove_data_dir "$PAGE_PROJECTS_DIR"
   remove_data_dir "$LOG_PATH"
   rm -f "$SOCKET_PATH"
   ok "Data directories removed"
