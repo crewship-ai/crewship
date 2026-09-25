@@ -405,7 +405,7 @@ func TestSeedPageProducerRoutines_FiresEachRoutineAndSurvivesAFailure(t *testing
 
 	client := cli.NewClient(s.URL(), "tok", ws)
 	stderr, err := captureStderrCov(t, func() error {
-		return seedPageProducerRoutines(context.Background(), client, ws)
+		return seedPageProducerRoutines(context.Background(), client, ws, false)
 	})
 	if err != nil {
 		t.Fatalf("seedPageProducerRoutines: %v", err)
@@ -436,7 +436,7 @@ func TestSeedPageProducerRoutines_SkipsPacksWithoutIntegration(t *testing.T) {
 	}
 	client := cli.NewClient(s.URL(), "tok", ws)
 	if _, err := captureStderrCov(t, func() error {
-		return seedPageProducerRoutines(context.Background(), client, ws)
+		return seedPageProducerRoutines(context.Background(), client, ws, false)
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -451,6 +451,24 @@ func TestSeedPageProducerRoutines_SkipsPacksWithoutIntegration(t *testing.T) {
 		if got := len(s.CallsFor("POST", path)); got != want {
 			t.Errorf("routine %s: %d run POSTs, want %d", slug, got, want)
 		}
+	}
+}
+
+func TestSeedPageProducerRoutines_DefersCrewTelemetryUntilProvisioned(t *testing.T) {
+	t.Setenv("SEED_GITHUB_TOKEN", "")
+	s := clitest.NewStubServer()
+	defer s.Close()
+	const ws = covWorkspaceIDCli10
+	path := "/api/v1/workspaces/" + ws + "/pipelines/pages-operations-sample/run"
+	s.OnPost(path, clitest.JSONResponse(202, map[string]string{"run_id": "r1"}))
+	client := cli.NewClient(s.URL(), "tok", ws)
+	if _, err := captureStderrCov(t, func() error {
+		return seedPageProducerRoutines(context.Background(), client, ws, true)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got := len(s.CallsFor("POST", path)); got != 0 {
+		t.Fatalf("pre-provision collector runs = %d, want 0", got)
 	}
 }
 
@@ -601,7 +619,7 @@ func TestSeedOnePage_ExistingPageIsUpdatedRatherThanSkipped(t *testing.T) {
 
 	client := cli.NewClient(s.URL(), "tok", ws)
 	if _, err := captureStderrCov(t, func() error {
-		return seedPages(context.Background(), client)
+		return seedPages(context.Background(), client, false)
 	}); err != nil {
 		t.Fatalf("seedPages: %v", err)
 	}

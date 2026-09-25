@@ -372,7 +372,7 @@ func runSeed(cmd *cobra.Command, args []string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if err := seedPages(ctx, client); err != nil {
+	if err := seedPages(ctx, client, waitProvision); err != nil {
 		return err
 	}
 

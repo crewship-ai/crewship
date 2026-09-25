@@ -51,7 +51,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/pages"
 )
 
-func seedPages(ctx context.Context, client *cli.Client) error {
+func seedPages(ctx context.Context, client *cli.Client, deferCrewTelemetry bool) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -100,7 +100,7 @@ func seedPages(ctx context.Context, client *cli.Client) error {
 	}
 	fmt.Fprintln(os.Stderr)
 
-	return seedPageProducerRoutines(ctx, client, wsID)
+	return seedPageProducerRoutines(ctx, client, wsID, deferCrewTelemetry)
 }
 
 // seedPageProducerRoutines fires one run of every routine a seeded panel names
@@ -123,7 +123,7 @@ func seedPages(ctx context.Context, client *cli.Client) error {
 // moment after the seed prints its last line. Nothing here waits for that: the
 // seeder's job is to make the run happen, and a run that fails has a run record
 // saying so, which is a better artefact than a seed that blocks on a poll.
-func seedPageProducerRoutines(ctx context.Context, client *cli.Client, wsID string) error {
+func seedPageProducerRoutines(ctx context.Context, client *cli.Client, wsID string, deferCrewTelemetry bool) error {
 	slugs := pageProducerRoutineSlugs(seeddata.Pages)
 	if len(slugs) == 0 {
 		return nil
@@ -134,6 +134,10 @@ func seedPageProducerRoutines(ctx context.Context, client *cli.Client, wsID stri
 	for _, slug := range slugs {
 		if err := ctx.Err(); err != nil {
 			return err
+		}
+		if deferCrewTelemetry && slug == "pages-operations-sample" {
+			fmt.Fprintln(os.Stderr, "  = routine pages-operations-sample: waiting for crew provisioning")
+			continue
 		}
 		// Optional packs stay dormant until their real integration is wired.
 		// Firing them without a credential leaves a failed run in a clean demo
