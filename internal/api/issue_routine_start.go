@@ -50,7 +50,7 @@ func (h *IssueHandler) startBoundRoutine(w http.ResponseWriter, r *http.Request,
 		return
 	}
 	inputs := map[string]any{}
-	if json.Unmarshal([]byte(inputsJSON), &inputs) != nil {
+	if err := json.Unmarshal([]byte(inputsJSON), &inputs); err != nil || inputs == nil {
 		writeProblem(w, r, 400, "Stored routine inputs are invalid")
 		return
 	}

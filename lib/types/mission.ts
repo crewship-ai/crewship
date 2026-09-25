@@ -172,6 +172,8 @@ export interface Mission {
   routine_id?: string | null
   routine_slug?: string | null
   routine_name?: string | null
+  /** The issue's saved routine input values — prefills the run dialog. */
+  routine_inputs?: Record<string, unknown> | null
   // Creator attribution (migration 129). Identifies WHO created the
   // issue — a human via the API/UI or an agent via a sidecar tool call.
   // Absent on legacy issues that predate the columns.

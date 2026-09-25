@@ -7122,6 +7122,10 @@
             "nullable": true,
             "type": "string"
           },
+          "routine_inputs": {
+            "additionalProperties": true,
+            "type": "object"
+          },
           "routine_name": {
             "nullable": true,
             "type": "string"

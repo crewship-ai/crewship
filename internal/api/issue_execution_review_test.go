@@ -80,6 +80,28 @@ func TestIssueRoutineStart_ValidatesStoredInputsBeforeDispatch(t *testing.T) {
 	}
 }
 
+// A stored JSON null decodes into a nil map, which mergeIssueRunInputs
+// would then assign into — a panic, not a 400, before the nil check.
+func TestIssueRoutineStart_NullStoredInputsRejected(t *testing.T) {
+	h, user, ws, crew, lead, _ := newTestIssueHandler(t)
+	id := seedIssue(t, h.db, ws, crew, lead, "ENG-80", "TODO")
+	routine := seedTestPipeline(t, h, ws, "null-inputs")
+	if _, err := h.db.Exec(`UPDATE missions SET routine_id=?,routine_inputs_json='null' WHERE id=?`, routine, id); err != nil {
+		t.Fatal(err)
+	}
+	h.routines = &PipelineHandler{}
+	rec := httptest.NewRecorder()
+	h.Start(rec, covIWReq(user, ws, "OWNER", "POST", `{"routine_inputs":{"repository":"crewship"}}`, crew, "ENG-80"))
+	if rec.Code != 400 {
+		t.Fatal(rec.Code, rec.Body.String())
+	}
+	var status string
+	h.db.QueryRow(`SELECT status FROM missions WHERE id=?`, id).Scan(&status)
+	if status != "TODO" {
+		t.Fatal(status)
+	}
+}
+
 func TestIssueExecutionDetailReadsTheRealRunProjection(t *testing.T) {
 	h, user, ws, crew, lead, _ := newTestIssueHandler(t)
 	id := seedIssue(t, h.db, ws, crew, lead, "ENG-81", "IN_PROGRESS")

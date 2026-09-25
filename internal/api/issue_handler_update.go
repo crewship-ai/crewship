@@ -260,6 +260,10 @@ func (h *IssueHandler) Update(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if req.RoutineInputs != nil {
+		if *req.RoutineInputs == nil {
+			writeProblem(w, r, http.StatusBadRequest, "routine_inputs must be a JSON object")
+			return
+		}
 		b, mErr := json.Marshal(*req.RoutineInputs)
 		if mErr != nil {
 			writeProblem(w, r, http.StatusBadRequest, "routine_inputs is not valid JSON")
