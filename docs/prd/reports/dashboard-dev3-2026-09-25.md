@@ -14,22 +14,26 @@ System details sketch is superseded by the live implementation.
   Up next links to the routine calendar, and Your crews scrolls through all
   crews. Run-volume bars use each configured crew colour.
 - The four agent run summary cards share one height and text layout.
-- The sticky top bar contains only the 24h / 7d / 30d selector. The visible
-  Dashboard title, crew and agent counts, Live badge, New issue and Chat with
-  agent buttons, and the entire System details panel were removed after review.
+- On desktop, Results & review and the Up next / Your crews column share one
+  height. Results and the crew list scroll within their panels when needed;
+  arrows in their headers make additional items discoverable. Narrower screens
+  stack the panels at natural height.
+- The sticky top bar shows the Dashboard title and 24h / 7d / 30d selector.
+  Crew and agent counts, the Live badge, New issue and Chat with agent buttons,
+  and the entire System details panel were removed after review.
 
 ## Deployment
 
 Dev3: `https://crewship-dev3.unifylab.cz/`, systemd service `crewship-ws@3`.
 The service uses the prebuilt
 `/srv/crewship/dev3-pages-release/crewship.unsigned` binary. Its source is
-local deploy branch `deploy/dev3-dashboard-20260925`, commit `625dbd006`;
-the matching PR commit is `37ca54344`. This deploy branch is an artifact,
+local deploy branch `deploy/dev3-dashboard-20260925`, commit `1a749678d`;
+the matching PR commit is `de16f65ea`. This deploy branch is an artifact,
 not the PR branch. The server build uses the installed sidecar hash
 `33ad18f2afb3`; the sidecar binary was not replaced.
 
-The previous binary is backed up at
-`/srv/crewship/dev3-pages-release/backups/dashboard-20260925T1350Z/`.
+An earlier dashboard binary is backed up at
+`/srv/crewship/dev3-pages-release/backups/dashboard-20260925T1416Z/`.
 The earlier online SQLite backup before the host-sample migration passed
 `PRAGMA quick_check=ok` and remains in
 `/srv/crewship/dev3-pages-release/backups/dashboard-20260925T1224Z/`.
@@ -46,17 +50,21 @@ sampler no longer writes SQLite history; the already applied
 
 ## Verification
 
-- PR branch: `pnpm lint`, `pnpm test:types`, `pnpm build`, focused Go tests,
-  `go vet ./...`, docs inventory/surface checks and migration lint passed.
-  A full `go test ./... -count=1 -p 4 -timeout 35m` is running on the shared
-  host as of this handoff.
+- PR branch: `pnpm lint`, `pnpm test:types`, `pnpm build`, seven focused
+  dashboard component tests, earlier focused Go tests, `go vet ./...`, docs
+  inventory/surface checks and migration lint passed. The shared host ran out
+  of disk space during the full Go suite, causing unrelated package link and
+  SQLite test failures. No Go code changed in this frontend increment.
 - Deploy branch: `pnpm build`, static export embedding and `make build:go`
   passed. The public and local URLs returned HTTP 200, systemd was active,
   and the error-priority journal had no entries after startup.
-- Authenticated Chromium at 1440 px and 390 px found only the three reporting
-  controls in the sticky bar, no System details, no page errors, no horizontal
-  overflow, and no obsolete host-resource API requests. Switching to 7d worked;
-  the bar stayed at y=44 px after scrolling at both widths.
+- Authenticated Chromium at widths 390, 768, 1024, 1280, 1440 and 1800 px
+  found the Dashboard title and reporting controls, no System details, page
+  errors, horizontal overflow or obsolete host-resource API requests. At
+  desktop widths, Results and Your crews ended at the same y coordinate. The
+  list arrows scrolled both panels and disappeared from Results when a filter
+  had no overflow. Mobile hid the arrows and kept touch scrolling. Switching
+  to 7d worked; the sticky bar stayed at y=44 px after scrolling.
 - Local `/metrics` exposed the host CPU, memory and sample timestamp gauges.
   The old SQLite history stayed at 79 rows more than a minute after restart,
   confirming that the sampler stopped writing.
