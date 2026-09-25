@@ -734,7 +734,10 @@ export function SystemSignals({
   schedulesLoading: boolean
   schedulesError: string | null
 }) {
-  const crewAlerts = fleet.filter((row) => row.tone === "warn" || row.tone === "danger").length
+  // Fleet's warning tone also includes missing tools. Those are useful on an
+  // individual crew, but this system summary should count actual agent or
+  // service failures rather than turn every credential gap into an outage.
+  const crewAlerts = fleet.filter((row) => row.status === "Agent error" || row.status === "Service degraded").length
   const uncheckedCrews = fleet.filter((row) => !row.services.checked).length
   const agentErrors = agents.filter((agent) => agent.status === "ERROR").length
   const runningAgents = agents.filter((agent) => agent.status === "RUNNING").length
@@ -750,8 +753,8 @@ export function SystemSignals({
     },
     {
       label: "Crew health",
-      value: fleet.length === 0 ? "No crews yet" : crewAlerts > 0 ? `${crewAlerts} need attention` : uncheckedCrews > 0 ? `${uncheckedCrews} not checked` : "All clear",
-      detail: fleet.length === 0 ? "Create a crew to start work" : crewAlerts > 0 ? "Check crew setup, agents and services" : uncheckedCrews > 0 ? "Service status is unavailable for some crews" : `${fleet.length} crew${fleet.length === 1 ? "" : "s"} without alerts`,
+      value: fleet.length === 0 ? "No crews yet" : crewAlerts > 0 ? `${crewAlerts} need attention` : uncheckedCrews > 0 ? `${uncheckedCrews} not checked` : "No failures",
+      detail: fleet.length === 0 ? "Create a crew to start work" : crewAlerts > 0 ? "Check agent errors and crew services" : uncheckedCrews > 0 ? "Service status is unavailable for some crews" : "No agent or service problems detected",
       href: "/crews",
       icon: ShieldAlert,
       tone: fleet.length === 0 ? "text-muted-foreground" : crewAlerts > 0 || uncheckedCrews > 0 ? "text-warn" : "text-success",

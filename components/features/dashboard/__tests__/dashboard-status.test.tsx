@@ -18,9 +18,16 @@ describe("dashboard status", () => {
     render(<SystemSignals capacity={{ enabled: true, held: [] }} heldCrews={[]} fleet={fleet} agents={[agent]} schedules={[]} schedulesLoading={false} schedulesError={null} />)
     expect(screen.getByText("New run capacity")).toBeTruthy()
     expect(screen.getByText("1 not checked")).toBeTruthy()
-    expect(screen.queryByText("All clear")).toBeNull()
+    expect(screen.queryByText("No failures")).toBeNull()
     expect(screen.getByRole("link", { name: /Crew health/ }).getAttribute("href")).toBe("/crews")
     expect(screen.getByRole("link", { name: /Scheduled routines/ }).getAttribute("href")).toBe("/routines?tab=calendar")
     expect(screen.queryByText(/tool gap/i)).toBeNull()
+  })
+
+  it("keeps missing tools out of the crew failure count", () => {
+    const toolGap = { ...fleet[0], status: "Needs tool", tone: "warn" as const, services: { ...fleet[0].services, checked: true } }
+    render(<SystemSignals capacity={{ enabled: true, held: [] }} heldCrews={[]} fleet={[toolGap]} agents={[agent]} schedules={[]} schedulesLoading={false} schedulesError={null} />)
+    expect(screen.getByText("No failures")).toBeTruthy()
+    expect(screen.getByText("No agent or service problems detected")).toBeTruthy()
   })
 })
