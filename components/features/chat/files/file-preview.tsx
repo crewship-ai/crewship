@@ -124,7 +124,7 @@ function PdfDocument({ bytes, onRetry }: { bytes: Uint8Array<ArrayBuffer>; onRet
   const changePage = (next: number) => { setRendering(true); setPage(next) }
   const changeZoom = (next: number) => { setRendering(true); setZoom(next) }
   return <div className="flex min-h-0 flex-1 flex-col">
-    {pdf && <div className="flex flex-wrap items-center justify-center gap-1 border-b p-2">
+    {pdf && <div className="flex flex-wrap items-center justify-center gap-1 border-b border-border bg-card p-2">
       <Button variant="ghost" size="sm" disabled={page <= 1} onClick={() => changePage(page - 1)}>Previous page</Button>
       <span className="text-xs" aria-live="polite">Page {page} of {pdf.numPages}</span>
       <Button variant="ghost" size="sm" disabled={page >= pdf.numPages} onClick={() => changePage(page + 1)}>Next page</Button>

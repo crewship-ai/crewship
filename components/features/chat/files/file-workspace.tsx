@@ -155,9 +155,9 @@ function FileWorkspaceContent(props: FileWorkspaceProps) {
         />}
       </> : <FilePreview url={route} name={file.name} onClose={onClose} showHeader={false} />}
     </div>
-    <footer className="flex shrink-0 items-center justify-between border-t px-3 py-1.5 text-xs text-muted-foreground">
-      <span>{editing ? "Edit mode · Ctrl+S to save" : "Read-only preview · Select Edit to make changes"}</span>
-      <span>{getEditorLanguage(file.name)}</span>
+    <footer className="flex shrink-0 items-center justify-between border-t border-border bg-card px-3 py-1.5 text-xs text-muted-foreground">
+      <span>{editing ? "Edit mode · Ctrl+S to save" : canEdit ? "Read-only preview · Select Edit to make changes" : "Read-only preview"}</span>
+      <span>{textFile ? getEditorLanguage(file.name) : file.name.split(".").pop()?.toUpperCase()}</span>
     </footer>
     {saveError && <p role="alert" className="border-t px-3 py-1.5 text-xs text-destructive">{saveError}</p>}
   </section>
