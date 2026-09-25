@@ -396,14 +396,29 @@ export function filterEntries(
 
 export function sortEntries(entries: InboxV2Entry[]): InboxV2Entry[] {
   return [...entries].sort((a, b) => {
+    const aRank = actionRank(a)
+    const bRank = actionRank(b)
+    if (aRank !== bRank) return aRank - bRank
     if (a.actionable && b.actionable) {
       const ad = a.deadlineAt ? Date.parse(a.deadlineAt) : Number.POSITIVE_INFINITY
       const bd = b.deadlineAt ? Date.parse(b.deadlineAt) : Number.POSITIVE_INFINITY
       if (ad !== bd) return ad - bd
-      return Date.parse(a.createdAt) - Date.parse(b.createdAt)
     }
     return Date.parse(b.createdAt) - Date.parse(a.createdAt)
   })
+}
+
+/** A schedule can be acted on, but it does not block a person or agent. */
+export function needsHumanDecision(entry: InboxV2Entry): boolean {
+  if (!entry.actionable) return false
+  if (entry.source === "inbox") return Boolean(entry.inboxItem && isBlockingInboxItem(entry.inboxItem))
+  return entry.source === "approval" || entry.source === "mission"
+}
+
+function actionRank(entry: InboxV2Entry): number {
+  if (!entry.actionable) return 3
+  if (needsHumanDecision(entry) && entry.deadlineAt) return 0
+  return needsHumanDecision(entry) ? 1 : 2
 }
 
 export function filterAndSortEntries(
@@ -455,8 +470,8 @@ export function entryKindPill(entry: InboxV2Entry): EntryKindPill {
       return { label: "Notice", tone: "muted" }
     }
     case "failed_run": return { label: "Failed run", tone: "danger" }
-    case "schedule_missed": return { label: "Missed run", tone: "warn" }
-    case "schedule_circuit_breaker_tripped": return { label: "Paused schedule", tone: "warn" }
+    case "schedule_missed": return { label: "Missed run", tone: "blue" }
+    case "schedule_circuit_breaker_tripped": return { label: "Paused schedule", tone: "danger" }
     case "memory_consolidation": return { label: "Memory proposal", tone: "purple" }
     // B6's NEEDS_HUMAN card (#2349) and the a4 trigger-failure kinds were
     // written by the server long before the pill knew them, so they read as

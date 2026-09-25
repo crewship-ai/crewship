@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest"
 import type { InboxItem } from "@/hooks/use-inbox"
 
 import { inboxEntry } from "../inbox-v2-derive"
-import { InboxTriage } from "../inbox-v2-triage"
+import { InboxFocusOverview, InboxTriage } from "../inbox-v2-triage"
 import type { InboxLookup } from "../inbox-v2-types"
 
 vi.mock("@/components/ui/agent-avatar", () => ({
@@ -47,19 +47,42 @@ describe("InboxTriage", () => {
 
   it("is never blank: the zero form says what lands here", () => {
     render(<InboxTriage action={[]} updates={[]} history={[]} lookup={lookup} onOpen={() => {}} onCrew={() => {}} />)
-    expect(screen.getByText(/questions from agents, failed runs and missed schedules land here/)).toBeInTheDocument()
+    expect(screen.getByText(/No decisions are waiting for you/)).toBeInTheDocument()
     expect(screen.getByText(/Nothing has been decided yet/)).toBeInTheDocument()
   })
 
-  it("opens the oldest item and lists recent decisions with an outcome word", () => {
+  it("opens the next decision and lists recent decisions with an outcome word", () => {
     const onOpen = vi.fn()
     const old = inboxEntry(item("old", "c-ops", { created_at: "2026-09-01T10:00:00Z" }))
     const fresh = inboxEntry(item("new", "c-ops"))
     const decided = inboxEntry(item("d", "c-ops", { state: "resolved", resolved_action: "reject", resolved_at: "2026-09-03T11:00:00Z" }))
     render(<InboxTriage action={[fresh, old]} updates={[]} history={[decided]} lookup={lookup} onOpen={onOpen} onCrew={() => {}} />)
-    fireEvent.click(screen.getByRole("button", { name: /Open oldest/ }))
-    expect(onOpen).toHaveBeenCalledWith(old)
+    fireEvent.click(screen.getByRole("button", { name: /Review next/ }))
+    expect(onOpen).toHaveBeenCalledWith(fresh)
     expect(screen.getByText("Rejected")).toBeInTheDocument()
     expect(screen.queryByText("reject")).not.toBeInTheDocument()
+  })
+
+  it("separates routine alerts from decisions", () => {
+    const onOpen = vi.fn()
+    const decision = inboxEntry(item("decision", "c-ops"))
+    const missed = inboxEntry(item("missed", "c-ops", { kind: "schedule_missed", blocking: false, payload: { schedule_id: "s1", crew_id: "c-ops" } }))
+    render(<InboxTriage action={[missed, decision]} updates={[]} history={[]} lookup={lookup} onOpen={onOpen} onCrew={() => {}} />)
+    expect(screen.getByText("1 decision")).toBeInTheDocument()
+    expect(screen.getByText("Routine alerts")).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: /Review next/ }))
+    expect(onOpen).toHaveBeenCalledWith(decision)
+  })
+})
+
+describe("InboxFocusOverview", () => {
+  it("shows only the selected dashboard category and offers a way back", () => {
+    const onClear = vi.fn()
+    render(<InboxFocusOverview label="Approvals waiting" entries={[inboxEntry(item("approval", "c-ops"))]} lookup={lookup} onOpen={() => {}} onClear={onClear} />)
+    expect(screen.getByRole("heading", { name: "Approvals waiting" })).toBeInTheDocument()
+    expect(screen.getByText("q approval")).toBeInTheDocument()
+    expect(screen.queryByText("Routine alerts")).toBeNull()
+    fireEvent.click(screen.getByRole("button", { name: /All inbox/ }))
+    expect(onClear).toHaveBeenCalledOnce()
   })
 })

@@ -49,7 +49,7 @@ import { EMPTY_INBOX_LOOKUP, type InboxLookup, type InboxV2Entry, type InboxV2Vi
 const VIEWS: { key: InboxV2View; label: string; icon: LucideIcon; tone: string }[] = [
   { key: "action", label: "Needs action", icon: ListChecks, tone: "text-warn" },
   { key: "updates", label: "Updates", icon: Bell, tone: "text-primary" },
-  { key: "history", label: "History", icon: History, tone: "text-success" },
+  { key: "history", label: "History", icon: History, tone: "text-muted-foreground" },
 ]
 
 const TYPE_ICON: Record<InboxV2TypeKey, LucideIcon> = {

@@ -23,11 +23,11 @@ import { cn } from "@/lib/utils"
 
 import {
   approvalEntry, EMPTY_INBOX_V2_FILTERS, INBOX_V2_TYPES,
-  groupAdvisories, inboxEntry, missionEntries, selectEntry, suppressedApprovalIDs,
+  groupAdvisories, inboxEntry, missionEntries, needsHumanDecision, selectEntry, suppressedApprovalIDs,
   type InboxV2Filters,
 } from "./inbox-v2-derive"
 import { useInboxV2DeepLink } from "./inbox-v2-deeplink"
-import { matchesInboxAttention, parseInboxAttention } from "./inbox-v2-attention"
+import { ATTENTION_LABELS, matchesInboxAttention, parseInboxAttention } from "./inbox-v2-attention"
 import { entryIdentity, filterInboxEntries } from "./inbox-entry-identity"
 import { InboxV2Detail } from "./inbox-v2-detail"
 import { InboxV2Explorer } from "./inbox-v2-explorer"
@@ -193,6 +193,8 @@ export function InboxV2() {
   }, [active.items, approvals.rows, missions.data, resolved.items, suppressedApprovals])
 
   const allEntries = useMemo(() => [...feeds.action, ...feeds.updates, ...feeds.history], [feeds])
+  const decisionCount = feeds.action.filter(needsHumanDecision).length
+  const alertCount = feeds.action.length - decisionCount
   const selected = selectEntry(allEntries, selectedKey)
   const view: InboxV2View = selected ? selected.historical ? "history" : selected.actionable ? "action" : "updates" : chosenView ?? (feeds.action.length ? "action" : "updates")
   const currentEntries = useMemo(
@@ -218,6 +220,13 @@ export function InboxV2() {
     setSelectedKey(null)
     setConfirmation(null)
     router.push(`/inbox?view=${next}`)
+  }
+  function closeEntry() {
+    setSelectedKey(null)
+    setConfirmation(null)
+    const query = new URLSearchParams(params?.toString())
+    query.delete("item")
+    router.push(query.size ? `/inbox?${query.toString()}` : "/inbox")
   }
   // A deep link can name a row that is gone, belongs to another workspace, or
   // simply has not arrived yet — `active` and `resolved` are two independent
@@ -351,7 +360,7 @@ export function InboxV2() {
       <SubBar
         icon={Inbox}
         title="Inbox"
-        description={sourceState.loading && allEntries.length === 0 ? "Loading inbox…" : `${feeds.action.length} need you · ${feeds.updates.length} updates · ${feeds.history.length} in history`}
+        description={sourceState.loading && allEntries.length === 0 ? "Loading inbox…" : `${decisionCount} to decide${alertCount ? ` · ${alertCount} alerts` : ""} · ${feeds.updates.length} updates · ${feeds.history.length} in history`}
         meta={<StatusPill tone={live ? "success" : "muted"} label={live ? "Live" : "Not live"} className="ml-1 hidden sm:inline-flex" />}
         ariaLabel="Inbox"
 
@@ -378,8 +387,8 @@ export function InboxV2() {
           "shrink-0 overflow-hidden border-r border-border/60 bg-card",
           // Full width on a phone — a fixed 340px column left a dead strip
           // beside it, because the reading pane is hidden until a row is
-          // opened. Desktop keeps the fixed column.
-          collapsed ? "w-full lg:w-9" : "w-full lg:w-[280px]",
+          // opened. Desktop gives long request titles more room.
+          collapsed ? "w-full lg:w-9" : "w-full lg:w-[320px] xl:w-[340px]",
           selectedKey && "hidden lg:block",
         )}
       >
@@ -411,7 +420,7 @@ export function InboxV2() {
       <main ref={detailRef} tabIndex={-1} aria-label="Inbox detail" className={cn("min-w-0 flex-1 overflow-y-auto", !selectedKey && "hidden lg:block")}>
         {selectedKey && !confirmation && (
           <div className="sticky top-0 z-10 border-b border-border/60 bg-background px-3 py-2">
-            <Button variant="ghost" size="sm" onClick={() => showView(view)}>← Back to inbox</Button>
+            <Button variant="ghost" size="sm" onClick={closeEntry}>← Back to inbox</Button>
           </div>
         )}
         <InboxV2Detail
@@ -426,7 +435,7 @@ export function InboxV2() {
             count: feeds.action.filter((entry) => entry.key !== confirmation.entry.key).length,
             onOpen: () => { setView("action"); openEntry(next) },
           } : undefined}
-          onClearConfirmation={() => showView(view)}
+          onClearConfirmation={closeEntry}
           onViewReceipt={(entry) => { setConfirmation(null); setView("history"); setSelectedKey(entry.key) }}
           onInboxResolve={async (item, action) => inboxResolve(inboxEntry(item), action)}
           onInboxArchive={async (item) => inboxArchive(inboxEntry(item))}
@@ -443,6 +452,7 @@ export function InboxV2() {
           triage={{
             incomplete: sourceState.degraded,
             loading: sourceState.loading && allEntries.length === 0,
+            focus: attention ? { label: ATTENTION_LABELS[attention], entries: visible, onClear: () => router.push("/inbox") } : undefined,
             action: feeds.action,
             updates: feeds.updates,
             history: feeds.history,

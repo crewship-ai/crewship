@@ -11,6 +11,7 @@ import {
   isActionableInboxItem,
   isArchivedNotDecided,
   missionEntries,
+  needsHumanDecision,
   selectEntry,
   suppressedApprovalIDs,
   deadlineBucket,
@@ -256,6 +257,17 @@ describe("facets answer to real fields", () => {
     expect(keys({ deadline: "hour" })).toEqual(["inbox:2026-08-30T12:30:00Z", "inbox:read-soon"])
     expect(keys({ type: "waitpoint", unreadOnly: true })).toEqual(["inbox:2026-08-30T12:30:00Z"])
     expect(keys({ type: "message" })).toEqual([])
+  })
+
+  it("puts expiring decisions and current human requests before older routine alerts", () => {
+    const missed = inboxEntry(item({ id: "missed", kind: "schedule_missed", created_at: "2026-08-01T10:00:00Z", payload: { schedule_id: "schedule-1" } }))
+    const decision = inboxEntry(item({ id: "decision", kind: "waitpoint", created_at: "2026-08-30T10:00:00Z" }))
+    const expiring = inboxEntry(item({ id: "expiring", kind: "waitpoint", created_at: "2026-08-20T10:00:00Z", payload: { timeout_at: "2026-08-30T12:30:00Z" } }))
+    expect(needsHumanDecision(missed)).toBe(false)
+    expect(needsHumanDecision(decision)).toBe(true)
+    expect(filterAndSort([missed, decision, expiring], EMPTY_INBOX_V2_FILTERS).map((entry) => entry.key)).toEqual([
+      "inbox:expiring", "inbox:decision", "inbox:missed",
+    ])
   })
 })
 
