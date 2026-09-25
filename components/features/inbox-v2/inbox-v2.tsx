@@ -27,6 +27,7 @@ import {
   type InboxV2Filters,
 } from "./inbox-v2-derive"
 import { useInboxV2DeepLink } from "./inbox-v2-deeplink"
+import { matchesInboxAttention, parseInboxAttention } from "./inbox-v2-attention"
 import { entryIdentity, filterInboxEntries } from "./inbox-entry-identity"
 import { InboxV2Detail } from "./inbox-v2-detail"
 import { InboxV2Explorer } from "./inbox-v2-explorer"
@@ -40,6 +41,7 @@ export function InboxV2() {
   const detailRef = useRef<HTMLElement>(null)
   const requestedView = params?.get("view") ?? null
   const requestedKind = params?.get("kind") ?? null
+  const attention = parseInboxAttention(params?.get("attention") ?? null)
   const requestedID = params?.get("item") ?? null
   const requestedSearch = params?.get("agent") ?? params?.get("filter") ?? ""
   const [chosenView, setView] = useState<InboxV2View | null>(null)
@@ -193,7 +195,11 @@ export function InboxV2() {
   const allEntries = useMemo(() => [...feeds.action, ...feeds.updates, ...feeds.history], [feeds])
   const selected = selectEntry(allEntries, selectedKey)
   const view: InboxV2View = selected ? selected.historical ? "history" : selected.actionable ? "action" : "updates" : chosenView ?? (feeds.action.length ? "action" : "updates")
-  const visible = useMemo(() => filterInboxEntries(feeds[view], filters, lookup), [feeds, filters, view, lookup])
+  const currentEntries = useMemo(
+    () => attention ? [...feeds.action, ...feeds.updates].filter((entry) => matchesInboxAttention(entry, attention)) : feeds[view],
+    [attention, feeds, view],
+  )
+  const visible = useMemo(() => filterInboxEntries(currentEntries, filters, lookup), [currentEntries, filters, lookup])
   useEffect(() => {
     setView(requestedView === "action" || requestedView === "updates" || requestedView === "history" ? requestedView : null)
   }, [requestedView])
@@ -387,13 +393,15 @@ export function InboxV2() {
             view={view}
             onView={showView}
             viewCounts={{ action: feeds.action.length, updates: feeds.updates.length, history: feeds.history.length }}
-            entries={feeds[view]}
+            entries={currentEntries}
             visible={visible}
+            attention={attention}
+            onClearAttention={() => router.push("/inbox")}
             filters={filters}
             onFilters={setFilters}
             selectedKey={selected?.key ?? null}
             onOpen={openEntry}
-            onMarkAllRead={view === "updates" && active.unreadCount > 0 ? markVisibleRead : undefined}
+            onMarkAllRead={!attention && view === "updates" && active.unreadCount > 0 ? markVisibleRead : undefined}
             onToggleCollapse={() => setCollapsed(true)}
             lookup={lookup}
           />

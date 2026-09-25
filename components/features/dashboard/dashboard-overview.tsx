@@ -760,26 +760,13 @@ export function buildAttentionItems({
     ? (activeByKind.schedule_circuit_breaker_tripped ?? 0)
     : failures.filter((item) => item.kind === "schedule_circuit_breaker_tripped").length
   const failuresCount = failedRunCount + circuitBreakerCount
-  // Inbox ?kind= accepts one kind. Open the unfiltered list when both kinds
-  // contribute, so the link never hides part of the displayed total.
-  const failureKind = failedRunCount > 0 && circuitBreakerCount > 0
-    ? undefined
-    : failedRunCount > 0 ? "failed_run" : "schedule_circuit_breaker_tripped"
   const scheduleCount = activeByKind ? (activeByKind.schedule_missed ?? 0) : scheduleProblems.length
 
-  // Deep-link the single item only when the EXACT total is one. With the
-  // server aggregate the windowed array can hold exactly one approval while
-  // more exist past the window — linking that one would send the operator to
-  // a single decision instead of the list that shows the rest (#2692 review).
-  const singleApprovalHref = approvalsCount === 1 && approvals.length >= 1
-    ? approvals[0].id
-    : undefined
-
-  if (approvalsCount > 0) items.push({ id: "approvals", label: `${approvalsCount} approval${approvalsCount === 1 ? "" : "s"} waiting`, detail: "Review pending decisions", href: entityHref({ kind: "inbox", itemId: singleApprovalHref }), tone: "warn", icon: Clock3 })
-  if (failuresCount > 0) items.push({ id: "failures", label: circuitBreakerCount > 0 ? `${failuresCount} run alert${failuresCount === 1 ? "" : "s"}` : `${failuresCount} failed run${failuresCount === 1 ? "" : "s"}`, detail: "Investigate and retry", href: entityHref({ kind: "inbox", itemKind: failureKind }), tone: "danger", icon: XCircle })
+  if (approvalsCount > 0) items.push({ id: "approvals", label: `${approvalsCount} approval${approvalsCount === 1 ? "" : "s"} waiting`, detail: "Review pending decisions", href: entityHref({ kind: "inbox", attention: "approvals" }), tone: "warn", icon: Clock3 })
+  if (failuresCount > 0) items.push({ id: "failures", label: circuitBreakerCount > 0 ? `${failuresCount} run alert${failuresCount === 1 ? "" : "s"}` : `${failuresCount} failed run${failuresCount === 1 ? "" : "s"}`, detail: "Investigate and retry", href: entityHref({ kind: "inbox", attention: "run-alerts" }), tone: "danger", icon: XCircle })
   if (reviewCount > 0) items.push({ id: "reviews", label: `${reviewCount >= 12 ? "12+" : reviewCount} issue${reviewCount === 1 ? "" : "s"} for review`, detail: "Check agent work and decide", href: "/issues", tone: "blue", icon: CheckCircle2 })
   if (held > 0) items.push({ id: "capacity", label: `${held} crew${held === 1 ? "" : "s"} waiting for capacity`, detail: heldCrews[0]?.detail || "View host admission details", href: "/settings", tone: "purple", icon: Gauge })
-  if (scheduleCount > 0) items.push({ id: "schedules", label: `${scheduleCount} schedule alert${scheduleCount === 1 ? "" : "s"}`, detail: "Review missed or disabled routines", href: entityHref({ kind: "inbox" }), tone: "warn", icon: CalendarClock })
+  if (scheduleCount > 0) items.push({ id: "schedules", label: `${scheduleCount} schedule alert${scheduleCount === 1 ? "" : "s"}`, detail: "Review missed or disabled routines", href: entityHref({ kind: "inbox", attention: "schedule-alerts" }), tone: "warn", icon: CalendarClock })
   return items
 }
 

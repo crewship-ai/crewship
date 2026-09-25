@@ -16,6 +16,7 @@ import {
 } from "@/components/layout/sidebar-kit"
 import { CrewIcon } from "@/components/ui/crew-icon"
 import { EntryAvatar, entryIdentity } from "./inbox-entry-identity"
+import { ATTENTION_LABELS, type InboxAttention } from "./inbox-v2-attention"
 import { InlineEmpty } from "@/components/ui/inline-empty"
 import { StatusPill } from "@/components/ui/status-pill"
 import { entityHref } from "@/lib/entity-links"
@@ -81,6 +82,8 @@ interface Props {
   entries: InboxV2Entry[]
   /** Filtered and sorted; what actually renders. */
   visible: InboxV2Entry[]
+  attention?: InboxAttention | null
+  onClearAttention?: () => void
   filters: InboxV2Filters
   onFilters: (filters: InboxV2Filters) => void
   selectedKey: string | null
@@ -93,7 +96,7 @@ interface Props {
 }
 
 export function InboxV2Explorer({
-  view, onView, viewCounts, entries, visible, filters, onFilters,
+  view, onView, viewCounts, entries, visible, filters, onFilters, attention, onClearAttention,
   selectedKey, onOpen, onToggleCollapse, onMarkAllRead, lookup = EMPTY_INBOX_LOOKUP,
 }: Props) {
   // Memoised on the feed, not on the render: the explorer re-renders on every
@@ -103,10 +106,12 @@ export function InboxV2Explorer({
   const counts = useMemo(() => facetCounts(entries), [entries])
   const activeCount = (filters.type ? 1 : 0) + (filters.deadline ? 1 : 0) + (filters.unreadOnly ? 1 : 0) + (filters.crew ? 1 : 0)
   const crewChip = filters.crew ? lookup.crewById.get(filters.crew)?.name ?? "Crew" : null
-  const narrowed = activeCount > 0 || filters.search.trim() !== ""
+  const narrowed = Boolean(attention) || activeCount > 0 || filters.search.trim() !== ""
   const set = (patch: Partial<InboxV2Filters>) => onFilters({ ...filters, ...patch })
 
-  const sections = view === "updates"
+  const sections = attention
+    ? [{ label: ATTENTION_LABELS[attention], rows: visible }]
+    : view === "updates"
     ? [
         { label: "Replies & results", rows: visible.filter((e) => e.category === "chat.replies") },
         { label: "Important updates", rows: visible.filter((e) => e.category !== "chat.replies") },
@@ -196,7 +201,7 @@ export function InboxV2Explorer({
       </SidebarToolbar>
 
       <div className="shrink-0 border-b border-border/60 pb-1" aria-label="Inbox views">
-        {VIEWS.map((v) => <SidebarRow as="div" key={v.key} selected={view === v.key} onSelect={() => onView(v.key)} aria-pressed={view === v.key}>
+        {VIEWS.map((v) => <SidebarRow as="div" key={v.key} selected={!attention && view === v.key} onSelect={() => onView(v.key)} aria-pressed={!attention && view === v.key}>
           <v.icon className={cn("h-3.5 w-3.5 shrink-0", v.tone)} aria-hidden />
           <span className="flex-1">{v.label}</span>
           <span className="text-micro tabular-nums text-muted-foreground">{viewCounts[v.key]}</span>
@@ -211,6 +216,7 @@ export function InboxV2Explorer({
         </select>
       </div>
       <SidebarActiveChips className="border-b border-white/[0.06] pt-2">
+        {attention && <SidebarActiveChip onRemove={onClearAttention ?? (() => {})}>{ATTENTION_LABELS[attention]}</SidebarActiveChip>}
         {filters.type && (
           <SidebarActiveChip onRemove={() => set({ type: null })}>{TYPE_LABEL[filters.type]}</SidebarActiveChip>
         )}
@@ -260,7 +266,10 @@ export function InboxV2Explorer({
               <ExplorerEmpty
                 view={view}
                 narrowed={narrowed}
-                onClear={() => onFilters({ search: "", type: null, deadline: null, unreadOnly: false, crew: null })}
+                onClear={() => {
+                  onFilters({ search: "", type: null, deadline: null, unreadOnly: false, crew: null })
+                  onClearAttention?.()
+                }}
               />
             </div>
           )}
