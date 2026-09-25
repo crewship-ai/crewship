@@ -20,3 +20,11 @@ chevron has the same fold behavior. Section and agent folds remain animated.
 
 Team Spaces retain their existing workspace conversation permissions and
 loading behavior. This change does not change backend chat kinds or access.
+
+The crew selector is visible below search. It starts at **All crews** and uses
+the same compact `CrewIcon` identity (configured icon and colour) as the crew
+sidebar and picker. Its popover searches accessible crews and pages through
+the crew list. Choosing a crew narrows agent rows and the new-session agent
+picker; People and Team Spaces remain unassigned to crews and are hidden while
+this filter is active. Choosing All crews, or resetting All in Activity,
+restores the full sidebar. The agent facet lists only agents in the chosen crew.

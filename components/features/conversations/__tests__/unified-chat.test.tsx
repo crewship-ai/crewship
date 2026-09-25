@@ -8,7 +8,7 @@ import { ChatClient } from "@/app/(dashboard)/chat/chat-client"
 import { useArtifactStore } from "@/stores/artifact-store"
 
 const fixtures = vi.hoisted(() => {
-  const agent = { id: "agent", name: "Ava", slug: "ava", status: "IDLE" }
+  const agent = { id: "agent", name: "Ava", slug: "ava", status: "IDLE", crew_id: "crew-1" }
   return { workspaceId: "ws", userId: "alice", agent, tree: { agents: [agent], roster: [agent], threadsLoaded: true, threadErrors: {}, threadsByAgent: { agent: [{ id: "legacy", title: "Ava history", started_at: "2026-09-01T12:00:00Z", message_count: 1 }] }, retryThreads: vi.fn(), retryRoster: vi.fn(), loadAllFor: vi.fn(), totalsByAgent: {}, kindCounts: null }, api: vi.fn() }
 })
 let params = new URLSearchParams()
@@ -134,6 +134,33 @@ describe("unified Chat", () => {
     expect(screen.queryByRole("region", { name: "Agents" })).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole("button", { name: "Team spaces" }))
     expect(screen.getByRole("region", { name: "Agents" })).toBeInTheDocument()
+  })
+
+  it("filters agents with a crew picker that shows each crew's icon and restores All crews", async () => {
+    fixtures.api.mockImplementation(async (url: string, options?: RequestInit) => {
+      if (options?.method === "PUT" || url.includes("/read")) return new Response(null, { status: 204 })
+      if (url.includes("/api/v1/crews?")) return Response.json([
+        { id: "crew-1", name: "Copy site", icon: "briefcase", color: "blue" },
+        { id: "crew-2", name: "Support", icon: "users", color: "green" },
+      ])
+      if (url.includes("/messages")) return Response.json({ messages: [], has_more: false })
+      if (url.includes("/conversations/room?")) return Response.json(room)
+      return Response.json({ conversations: [room], next_offset: null })
+    })
+    render(wrap(<UnifiedChatProvider><ChatClient /></UnifiedChatProvider>))
+    const crewPicker = await screen.findByRole("combobox", { name: "Filter agents by crew" })
+    expect(crewPicker).toHaveTextContent("All crews")
+    fireEvent.click(crewPicker)
+    const copySite = await screen.findByRole("option", { name: /Copy site/ })
+    expect(copySite.querySelector("svg")).not.toBeNull()
+    fireEvent.click(copySite)
+    expect(crewPicker).toHaveTextContent("Copy site")
+    expect(screen.getByRole("button", { name: "Open Ava chat" })).toBeInTheDocument()
+    expect(screen.queryByRole("region", { name: "People" })).not.toBeInTheDocument()
+    fireEvent.click(crewPicker)
+    fireEvent.click(screen.getByRole("option", { name: /All crews/ }))
+    expect(crewPicker).toHaveTextContent("All crews")
+    expect(screen.getByRole("region", { name: "People" })).toBeInTheDocument()
   })
 
   it("uses All to clear filters and lets a selected agent row collapse without leaving its chat", async () => {

@@ -16,6 +16,7 @@ import {
 } from "@/components/layout/sidebar-kit"
 import { filterUnifiedConversationRows, UnifiedConversationSection, useUnifiedConversations } from "@/components/features/conversations/unified-chat"
 import { CHAT_SCOPES, scopeCount } from "./chat-kind"
+import { ChatCrewPicker } from "./chat-crew-picker"
 import type { Props, ConversationRow } from "./conversations-sidebar"
 import type { ChatTreeAgent } from "./chat-tree-data"
 import { cn } from "@/lib/utils"
@@ -64,6 +65,7 @@ function ScopedChatSidebar({ props, rows, query, setQuery, stateKey }: SidebarPr
   const [unread, setUnread] = useState(false)
   const [live, setLive] = useState(false)
   const [agentFilter, setAgentFilter] = useState<string | null>(null)
+  const [crewFilter, setCrewFilter] = useState<string | null>(null)
   const [sectionFilter, setSectionFilter] = useState<"all" | "agents" | "people" | "rooms">("all")
   const [loading, setLoading] = useState<string | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -109,8 +111,9 @@ function ScopedChatSidebar({ props, rows, query, setQuery, stateKey }: SidebarPr
 
   const roster = agents ?? []
   const q = query.trim().toLowerCase()
-  const pickerMatches = roster.filter((agent) => !q || agent.name.toLowerCase().includes(q))
+  const pickerMatches = roster.filter((agent) => (!crewFilter || agent.crew_id === crewFilter) && (!q || agent.name.toLowerCase().includes(q)))
   const matching = roster.filter((agent) =>
+    (!crewFilter || agent.crew_id === crewFilter) &&
     (!agentFilter || agentFilter === agent.id) &&
     (!unread || rows.some((row) => row.agent.id === agent.id && (row.thread.unread_count ?? 0) > 0) || rows.some((row) => row.agent.id === agent.id && row.thread.id === activeThreadId)) &&
     (!live || agent.status === "RUNNING" || rows.some((row) => row.agent.id === agent.id && row.thread.id === activeThreadId)) &&
@@ -119,11 +122,11 @@ function ScopedChatSidebar({ props, rows, query, setQuery, stateKey }: SidebarPr
   const rooms = chat?.list.data?.pages.flatMap((page) => page.conversations) ?? []
   const peopleCount = filterUnifiedConversationRows(rooms, query, "people").length
   const roomCount = filterUnifiedConversationRows(rooms, query, "rooms").length
-  const filterCount = Number(unread) + Number(live) + Number(!!agentFilter) + Number(sectionFilter !== "all")
+  const filterCount = Number(unread) + Number(live) + Number(!!agentFilter) + Number(!!crewFilter) + Number(sectionFilter !== "all")
   // Workspace conversations have no agent association in their list payload.
   // Agent-only predicates therefore show the agent roster alone; an empty
   // Team Spaces section would imply those conversations were actually checked.
-  const showShared = !unread && !live && !agentFilter
+  const showShared = !unread && !live && !agentFilter && !crewFilter
   const showAgents = sectionFilter === "all" || sectionFilter === "agents"
   const showPeople = showShared && (sectionFilter === "all" || sectionFilter === "people") && (!q || peopleCount > 0)
   const showTeamSpaces = showShared && (sectionFilter === "all" || sectionFilter === "rooms") && (!q || roomCount > 0)
@@ -142,22 +145,23 @@ function ScopedChatSidebar({ props, rows, query, setQuery, stateKey }: SidebarPr
       <div data-chat-search className="min-w-0 flex-1">
         <SidebarSearch value={query} onValueChange={(value) => { setQuery(value); if (value.trim() && scope !== "all") onScopeChange("all") }} aria-label={picking ? "Search agents" : "Search conversations"} placeholder={picking ? "Find an agent…" : "Search chats, channels…"} onKeyDown={(event) => { if (event.key === "Escape") { setPicking(false); setQuery("") } }} />
       </div>
-      {!picking && <SidebarFilterPopover label="Filter chats" activeCount={filterCount} onClear={() => { setUnread(false); setLive(false); setAgentFilter(null); setSectionFilter("all") }}>
-        <SidebarFacet label="Show" resetLabel="All conversations" resetActive={sectionFilter === "all" && !unread && !live && !agentFilter} onReset={() => { setSectionFilter("all"); setUnread(false); setLive(false); setAgentFilter(null) }} first>
-          <SidebarFacetOption active={sectionFilter === "agents"} onToggle={() => { if (sectionFilter === "agents") { setSectionFilter("all"); setUnread(false); setLive(false); setAgentFilter(null) } else setSectionFilter("agents") }}>Agent sessions</SidebarFacetOption>
-          <SidebarFacetOption active={sectionFilter === "people"} onToggle={() => { setUnread(false); setLive(false); setAgentFilter(null); setSectionFilter((value) => value === "people" ? "all" : "people") }}>People</SidebarFacetOption>
-          <SidebarFacetOption active={sectionFilter === "rooms"} onToggle={() => { setUnread(false); setLive(false); setAgentFilter(null); setSectionFilter((value) => value === "rooms" ? "all" : "rooms") }}>Team spaces</SidebarFacetOption>
+      {!picking && <SidebarFilterPopover label="Filter chats" activeCount={filterCount} onClear={() => { setUnread(false); setLive(false); setAgentFilter(null); setCrewFilter(null); setSectionFilter("all") }}>
+        <SidebarFacet label="Show" resetLabel="All conversations" resetActive={sectionFilter === "all" && !unread && !live && !agentFilter && !crewFilter} onReset={() => { setSectionFilter("all"); setUnread(false); setLive(false); setAgentFilter(null); setCrewFilter(null) }} first>
+          <SidebarFacetOption active={sectionFilter === "agents"} onToggle={() => { if (sectionFilter === "agents") { setSectionFilter("all"); setUnread(false); setLive(false); setAgentFilter(null); setCrewFilter(null) } else setSectionFilter("agents") }}>Agent sessions</SidebarFacetOption>
+          <SidebarFacetOption active={sectionFilter === "people"} onToggle={() => { setUnread(false); setLive(false); setAgentFilter(null); setCrewFilter(null); setSectionFilter((value) => value === "people" ? "all" : "people") }}>People</SidebarFacetOption>
+          <SidebarFacetOption active={sectionFilter === "rooms"} onToggle={() => { setUnread(false); setLive(false); setAgentFilter(null); setCrewFilter(null); setSectionFilter((value) => value === "rooms" ? "all" : "rooms") }}>Team spaces</SidebarFacetOption>
         </SidebarFacet>
-        <SidebarFacet label="Agent sessions" resetLabel="All sessions" resetActive={!unread && !live} onReset={() => { setUnread(false); setLive(false); if (!agentFilter) setSectionFilter("all") }}>
-          <SidebarFacetOption active={unread} onToggle={() => { setSectionFilter(unread && !live && !agentFilter ? "all" : "agents"); setUnread((value) => !value) }}><MailOpen className="size-3.5" /><span className="flex-1">Unread agent sessions</span></SidebarFacetOption>
-          <SidebarFacetOption active={live} onToggle={() => { setSectionFilter(live && !unread && !agentFilter ? "all" : "agents"); setLive((value) => !value) }}><Radio className="size-3.5" /><span className="flex-1">Running agents</span></SidebarFacetOption>
+        <SidebarFacet label="Agent sessions" resetLabel="All sessions" resetActive={!unread && !live} onReset={() => { setUnread(false); setLive(false); if (!agentFilter && !crewFilter) setSectionFilter("all") }}>
+          <SidebarFacetOption active={unread} onToggle={() => { setSectionFilter(unread && !live && !agentFilter && !crewFilter ? "all" : "agents"); setUnread((value) => !value) }}><MailOpen className="size-3.5" /><span className="flex-1">Unread agent sessions</span></SidebarFacetOption>
+          <SidebarFacetOption active={live} onToggle={() => { setSectionFilter(live && !unread && !agentFilter && !crewFilter ? "all" : "agents"); setLive((value) => !value) }}><Radio className="size-3.5" /><span className="flex-1">Running agents</span></SidebarFacetOption>
         </SidebarFacet>
-        <SidebarFacet label="Agent" resetLabel="All agents" resetActive={!agentFilter} onReset={() => { setAgentFilter(null); if (!unread && !live) setSectionFilter("all") }}>
-          {roster.map((agent) => <SidebarFacetOption key={agent.id} active={agentFilter === agent.id} onToggle={() => { setSectionFilter(agentFilter === agent.id && !unread && !live ? "all" : "agents"); setAgentFilter((value) => value === agent.id ? null : agent.id) }}><AgentAvatar seed={agent.avatar_seed || agent.slug} style={agent.avatar_style} avatarUrl={agent.avatar_url} agentId={agent.id} alt="" className="size-4 shrink-0" /><span className="min-w-0 flex-1 truncate">{agent.name}</span></SidebarFacetOption>)}
+        <SidebarFacet label="Agent" resetLabel="All agents" resetActive={!agentFilter} onReset={() => { setAgentFilter(null); if (!unread && !live && !crewFilter) setSectionFilter("all") }}>
+          {roster.filter((agent) => !crewFilter || agent.crew_id === crewFilter).map((agent) => <SidebarFacetOption key={agent.id} active={agentFilter === agent.id} onToggle={() => { setSectionFilter(agentFilter === agent.id && !unread && !live && !crewFilter ? "all" : "agents"); setAgentFilter((value) => value === agent.id ? null : agent.id) }}><AgentAvatar seed={agent.avatar_seed || agent.slug} style={agent.avatar_style} avatarUrl={agent.avatar_url} agentId={agent.id} alt="" className="size-4 shrink-0" /><span className="min-w-0 flex-1 truncate">{agent.name}</span></SidebarFacetOption>)}
         </SidebarFacet>
       </SidebarFilterPopover>}
       {props.onToggleCollapse && <SidebarCollapseButton collapsed={false} onToggle={props.onToggleCollapse} {...(props.collapseLabel ? { "aria-label": props.collapseLabel, title: props.collapseLabel } : {})} />}
     </SidebarToolbar>
+    <ChatCrewPicker workspaceId={chat?.workspaceId ?? null} agents={roster} value={crewFilter} onChange={(next) => { setCrewFilter(next); setAgentFilter(null); if (next) setSectionFilter("agents"); else if (!unread && !live) setSectionFilter("all") }} />
     <div className="min-h-0 flex-1 overflow-y-auto pb-3">
       {picking ? <section aria-label="Choose an agent"><div className="flex items-center justify-between px-3 py-1"><h3 className="text-[10px] font-semibold uppercase tracking-wider text-foreground/50">New session with</h3><Button variant="ghost" size="sm" onClick={() => setPicking(false)}>Cancel</Button></div>{pickerMatches.map((agent) => <button key={agent.id} type="button" onClick={() => start(agent)} className="kit-tap flex min-h-10 w-full items-center gap-2 px-3 text-left text-xs hover:bg-accent"><AgentAvatar seed={agent.avatar_seed || agent.slug} style={agent.avatar_style} avatarUrl={agent.avatar_url} agentId={agent.id} className="size-6" /><span className="truncate">{agent.name}</span></button>)}{!pickerMatches.length && <p className="p-3 text-xs text-muted-foreground">No agents found.</p>}</section> : <>
         {showAgents && <Section title="Agent activity" count={CHAT_SCOPES.length} {...sectionState("activity")}>
@@ -170,6 +174,7 @@ function ScopedChatSidebar({ props, rows, query, setQuery, stateKey }: SidebarPr
                 setUnread(false)
                 setLive(false)
                 setAgentFilter(null)
+                setCrewFilter(null)
                 setSectionFilter("all")
               }
               onScopeChange(scope === item.id && item.id !== "all" ? "all" : item.id)
