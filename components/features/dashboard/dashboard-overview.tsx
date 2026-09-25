@@ -7,14 +7,12 @@ import {
   AlertTriangle,
   ArrowRight,
   Bot,
-  Brain,
   CalendarClock,
   CheckCircle2,
   ChevronRight,
   Clock3,
   Gauge,
   HelpCircle,
-  KeyRound,
   Play,
   ServerCog,
   ShieldAlert,
@@ -29,7 +27,6 @@ import type {
   CrewServiceSummary,
   CrewSummary,
   DashboardWindow,
-  MemoryHealthResponse,
   RunInsightsResponse,
   RuntimeCapacityResponse,
 } from "@/app/(dashboard)/dashboard-types"
@@ -39,7 +36,6 @@ import type { PipelineSchedule } from "@/hooks/use-pipeline-schedules"
 import type { Mission } from "@/lib/types/mission"
 import { AnimatedNumber } from "@/components/ui/animated-number"
 import { DashboardCard } from "@/components/features/dashboard/dashboard-card"
-import { Sparkline } from "@/components/ui/sparkline"
 import { InlineEmpty } from "@/components/ui/inline-empty"
 import { entityHref } from "@/lib/entity-links"
 import { cn } from "@/lib/utils"
@@ -523,14 +519,11 @@ export interface OutcomeKpiData {
 export function OutcomeKpis({
   data,
   window,
-  runSeries = [],
   spendUsd = null,
   spendPerRun = null,
 }: {
   data: OutcomeKpiData
   window: DashboardWindow
-  /** Runs per bucket across all crews — the Completed tile's sparkline. */
-  runSeries?: number[]
   /** Metered spend for the window; null when paymaster answered with no
    *  ledger rows; undefined while pending or after a failed fetch. */
   spendUsd?: number | null | undefined
@@ -544,7 +537,6 @@ export function OutcomeKpis({
       tone: "text-success bg-success/10 border-success/20",
       value: <MetricNumber value={data.completed} />,
       detail: `successful runs · ${window}`,
-      series: runSeries,
     },
     {
       label: "Success",
@@ -591,13 +583,12 @@ export function OutcomeKpis({
     <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
       {cards.map((card, index) => {
         const Icon = card.icon
-        const series = "series" in card ? card.series : undefined
         return (
           <motion.div
             key={card.label}
             whileHover={reduce ? undefined : { y: -2 }}
             transition={{ type: "spring", stiffness: 420, damping: 32 }}
-            className="group flex items-center gap-3 rounded-xl border border-border/60 bg-card px-3 py-2.5 transition-colors hover:border-border"
+            className="group flex min-h-20 items-center gap-3 rounded-xl border border-border/60 bg-card px-3 py-3 transition-colors hover:border-border"
           >
             <motion.span
               initial={reduce ? false : { opacity: 0, rotate: -12, scale: 0.82 }}
@@ -608,13 +599,12 @@ export function OutcomeKpis({
               <Icon className="h-3.5 w-3.5" />
             </motion.span>
             <div className="min-w-0 flex-1">
-              <div className="flex items-baseline gap-2">
+              <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
                 <span className="text-[20px] font-semibold leading-none tabular-nums text-foreground">{card.value}</span>
-                <span className="truncate text-micro font-semibold uppercase tracking-wider text-muted-foreground">{card.label}</span>
+                <span className="text-micro font-semibold uppercase tracking-wider text-muted-foreground">{card.label}</span>
               </div>
-              <div className="mt-0.5 truncate text-label text-muted-foreground">{card.detail}</div>
+              <div className="mt-1 line-clamp-2 text-label leading-snug text-muted-foreground">{card.detail}</div>
             </div>
-            {series && series.length > 1 && <Sparkline values={series} color="#1E7BFE" width={64} height={20} className="shrink-0 opacity-80" />}
           </motion.div>
         )
       })}
@@ -729,91 +719,80 @@ export function RecentWork({ missions }: { missions: Mission[] }) {
 
 export function SystemSignals({
   capacity,
-  memory,
-  credentialGapCount,
   heldCrews,
-  services,
-  realtimeStatus,
+  fleet,
+  agents,
+  schedules,
+  schedulesLoading,
+  schedulesError,
 }: {
   capacity: RuntimeCapacityResponse | null
-  memory: MemoryHealthResponse | null
-  credentialGapCount: number
   heldCrews: NonNullable<RuntimeCapacityResponse["held"]>
-  services: { running: number; total: number; checked: number; unchecked: number }
-  realtimeStatus?: string
+  fleet: FleetHealthRow[]
+  agents: AgentSummary[]
+  schedules: PipelineSchedule[]
+  schedulesLoading: boolean
+  schedulesError: string | null
 }) {
-  const cap = capacitySignal(capacity, heldCrews)
-  const rows = [
+  const crewAlerts = fleet.filter((row) => row.tone === "warn" || row.tone === "danger").length
+  const uncheckedCrews = fleet.filter((row) => !row.services.checked).length
+  const agentErrors = agents.filter((agent) => agent.status === "ERROR").length
+  const runningAgents = agents.filter((agent) => agent.status === "RUNNING").length
+  const activeSchedules = schedules.filter((schedule) => schedule.enabled).length
+  const rows: Array<{ label: string; value: string; detail: string; href?: string; icon: LucideIcon; tone: string }> = [
     {
-      label: "Runtime capacity",
-      value: cap.value,
-      href: "/settings",
+      label: "New run capacity",
+      value: capacity == null ? "Status unavailable" : heldCrews.length > 0 ? `${heldCrews.length} crew${heldCrews.length === 1 ? "" : "s"} waiting` : capacity.enabled ? "Ready" : "No admission limit",
+      detail: capacity == null ? "Could not check whether new work can start" : heldCrews.length > 0 ? "Open Activity to inspect waiting work" : capacity.enabled ? "Crewship can start new agent work" : "Run admission is not limiting starts",
+      href: heldCrews.length > 0 ? "/activity" : undefined,
       icon: ServerCog,
-      tone: cap.tone,
+      tone: capacity == null ? "text-muted-foreground" : heldCrews.length > 0 ? "text-warn" : "text-success",
     },
     {
-      label: "Memory health",
-      value: memory ? `${Math.round(memory.overall)}` : "Unavailable",
+      label: "Crew health",
+      value: fleet.length === 0 ? "No crews yet" : crewAlerts > 0 ? `${crewAlerts} need attention` : uncheckedCrews > 0 ? `${uncheckedCrews} not checked` : "All clear",
+      detail: fleet.length === 0 ? "Create a crew to start work" : crewAlerts > 0 ? "Check crew setup, agents and services" : uncheckedCrews > 0 ? "Service status is unavailable for some crews" : `${fleet.length} crew${fleet.length === 1 ? "" : "s"} without alerts`,
       href: "/crews",
-      icon: Brain,
-      tone: memory == null ? "text-muted-foreground" : memory.overall >= 80 ? "text-success" : memory.overall >= 60 ? "text-warn" : "text-destructive",
+      icon: ShieldAlert,
+      tone: fleet.length === 0 ? "text-muted-foreground" : crewAlerts > 0 || uncheckedCrews > 0 ? "text-warn" : "text-success",
     },
     {
-      label: "Credentials",
-      value: credentialGapCount > 0 ? `${credentialGapCount} tool gap${credentialGapCount === 1 ? "" : "s"}` : "Ready",
-      href: "/credentials",
-      icon: KeyRound,
-      tone: credentialGapCount > 0 ? "text-warn" : "text-success",
+      label: "Agents",
+      value: agents.length === 0 ? "No agents yet" : agentErrors > 0 ? `${agentErrors} need attention` : `${agents.length} configured`,
+      detail: agents.length === 0 ? "Add an agent to a crew" : `${runningAgents} running now · ${agents.length - runningAgents} not running`,
+      href: "/agents",
+      icon: Bot,
+      tone: agents.length === 0 ? "text-muted-foreground" : agentErrors > 0 ? "text-warn" : "text-success",
     },
     {
-      label: "Services",
-      // `total` counts only the crews whose /services call answered, so an
-      // all-green "6/6 running" could be hiding two crews nobody reached.
-      // FleetHealth already renders those per-row as "—"; say so here too
-      // rather than paint success over an unknown.
-      value:
-        services.checked === 0
-          ? "Unavailable"
-          : services.unchecked > 0
-            ? `${services.running}/${services.total} running · ${services.unchecked} unchecked`
-            : `${services.running}/${services.total} running`,
-      href: "/crews",
-      icon: ServerCog,
-      tone:
-        services.checked === 0
-          ? "text-muted-foreground"
-          : services.unchecked > 0
-            ? "text-warn"
-            : services.running === services.total
-              ? "text-success"
-              : "text-warn",
+      label: "Scheduled routines",
+      value: schedulesError ? "Status unavailable" : schedulesLoading ? "Checking…" : `${activeSchedules} active`,
+      detail: schedulesError ? "Could not load routine schedules" : schedulesLoading ? "Loading the routine calendar" : schedules.length === 0 ? "Plan work in the routine calendar" : `${schedules.length - activeSchedules} paused · open calendar`,
+      href: "/routines?tab=calendar",
+      icon: CalendarClock,
+      tone: schedulesError || schedulesLoading || activeSchedules === 0 ? "text-muted-foreground" : "text-success",
     },
   ]
 
-  if (realtimeStatus) {
-    rows.push({
-      label: "Realtime",
-      value: realtimeStatus === "connected" ? "connected" : realtimeStatus,
-      href: "/activity",
-      icon: Gauge,
-      tone: realtimeStatus === "connected" ? "text-success" : realtimeStatus === "connecting" ? "text-warn" : "text-destructive",
-    })
-  }
-
   return (
-    <DashboardCard title="System" icon={Gauge} hint="live checks" className="h-full">
+    <DashboardCard title="Workspace status" icon={Gauge} hint="current state" className="h-full">
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
         {rows.map((row) => {
           const Icon = row.icon
-          return (
-            <MotionLink key={row.label} href={row.href}>
-              <div className="group flex items-center gap-2.5 rounded-lg border border-border/60 px-3 py-2 transition-colors hover:border-border hover:bg-foreground/[0.025]">
-                <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                <span className="min-w-0 flex-1 truncate text-label text-foreground/85">{row.label}</span>
-                <span className={cn("shrink-0 truncate text-label font-medium", row.tone)}>{row.value}</span>
-              </div>
-            </MotionLink>
+          const content = (
+            <div className={cn("flex min-h-16 items-center gap-3 rounded-lg border border-border/60 px-3 py-2.5", row.href && "transition-colors hover:border-border hover:bg-foreground/[0.025]")}>
+                <Icon className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+                <span className="min-w-0 flex-1">
+                  <span className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
+                    <span className="text-label font-medium text-foreground/85">{row.label}</span>
+                    <span className={cn("text-label font-medium", row.tone)}>{row.value}</span>
+                  </span>
+                  <span className="mt-0.5 block text-micro text-muted-foreground">{row.detail}</span>
+                </span>
+                {row.href && <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />}
+            </div>
           )
+          return row.href ? <Link key={row.label} href={row.href}>{content}</Link> : <div key={row.label}>{content}</div>
         })}
       </div>
     </DashboardCard>

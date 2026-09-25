@@ -39,7 +39,6 @@ import {
   useDashboardResults,
   useDashboardActiveRuns,
   useInvalidateDashboard,
-  useMemoryHealth,
   useMetricsTimeseries,
   useRunsInsights,
   useRuntimeCapacity,
@@ -97,7 +96,6 @@ export default function DashboardPage() {
   const agentRunsQ = useDashboardActiveRuns(workspaceId, queryOpts)
   const insightsQ = useRunsInsights(workspaceId, reportWindow, queryOpts)
   const capacityQ = useRuntimeCapacity(queryOpts)
-  const memoryQ = useMemoryHealth(workspaceId, queryOpts)
   const volumeParams = useMemo(() => runVolumeParams(reportWindow), [reportWindow])
   const volumeQ = useMetricsTimeseries(workspaceId, volumeParams, queryOpts)
   const spendQ = useCrewSpend(workspaceId, reportWindow, queryOpts)
@@ -146,11 +144,6 @@ export default function DashboardPage() {
     }
     return counts
   }, [readiness.gapsByCredential])
-
-  const credentialGapCount = useMemo(
-    () => Array.from(gapsByCrew.values()).reduce((total, count) => total + count, 0),
-    [gapsByCrew],
-  )
 
   // /runtime/capacity is instance-scoped by design, so its holds can belong to
   // another workspace's crews — and this page renders a hold's detail string.
@@ -229,33 +222,10 @@ export default function DashboardPage() {
     [spendByCrew, spendQ.isPending, spendQ.isError],
   )
 
-  const runSeries = useMemo(
-    () => runVolumeBuckets.map((bucket) => Object.entries(bucket).reduce((sum, [key, value]) => key === "ts" ? sum : sum + Number(value), 0)),
-    [runVolumeBuckets],
-  )
-
   const fleetCards = useMemo(
     () => deriveFleetBoard({ rows: fleet, agents, spendByCrew, buckets: runVolumeBuckets }),
     [fleet, agents, spendByCrew, runVolumeBuckets],
   )
-
-  const serviceTotals = useMemo(() => {
-    let running = 0
-    let total = 0
-    let unchecked = 0
-    for (const summary of services.byCrew.values()) {
-      // A crew whose /services call failed contributes nothing to the
-      // numerator OR the denominator, so without counting it the row can read
-      // a confident "6/6 running" over a fleet it never reached.
-      if (!summary.checked) {
-        unchecked += 1
-        continue
-      }
-      running += summary.running
-      total += summary.total
-    }
-    return { running, total, checked: services.checked, unchecked }
-  }, [services.byCrew, services.checked])
 
   const loading = workspaceLoading || !onboardingChecked || agentsQ.isPending || crewsQ.isPending
   const realtimeMeta = (
@@ -351,7 +321,6 @@ export default function DashboardPage() {
           <OutcomeKpis
             data={kpis}
             window={reportWindow}
-            runSeries={runSeries}
             spendUsd={spendTotal}
             spendPerRun={typeof spendTotal === "number" && kpis.successTotal > 0 ? spendTotal / kpis.successTotal : null}
           />
@@ -367,8 +336,8 @@ export default function DashboardPage() {
         </div>
 
         <details className="rounded-xl border border-border/60 bg-card">
-          <summary className="cursor-pointer px-3 py-2.5 text-body font-medium text-muted-foreground transition-colors hover:text-foreground">System details <span className="ml-2 text-label font-normal">Capacity, memory and services</span></summary>
-          <div className="border-t border-border/60 p-4"><SystemSignals capacity={capacityQ.data ?? null} heldCrews={heldCrews} memory={memoryQ.data ?? null} credentialGapCount={credentialGapCount} services={serviceTotals} realtimeStatus={realtimeStatus ?? undefined} /></div>
+          <summary className="cursor-pointer px-3 py-2.5 text-body font-medium text-muted-foreground transition-colors hover:text-foreground">System details <span className="ml-2 text-label font-normal">Run capacity, crews, agents and schedules</span></summary>
+          <div className="border-t border-border/60 p-4"><SystemSignals capacity={capacityQ.data ?? null} heldCrews={heldCrews} fleet={fleet} agents={agents} schedules={schedules.schedules} schedulesLoading={schedules.loading} schedulesError={schedules.error} /></div>
         </details>
       </main>
     </div>
@@ -396,7 +365,7 @@ function DashboardSkeleton({ crews, agents }: { crews: number; agents: number })
             )}
           </div>
         </div>
-        <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">{Array.from({ length: 4 }, (_, index) => <Skeleton key={index} className="h-[58px] rounded-xl" />)}</div>
+        <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">{Array.from({ length: 4 }, (_, index) => <Skeleton key={index} className="h-20 rounded-xl" />)}</div>
         <div className="grid grid-cols-1 gap-3 xl:grid-cols-5"><Skeleton className="h-[220px] rounded-xl xl:col-span-3" /><Skeleton className="h-[220px] rounded-xl xl:col-span-2" /></div>
       </div>
     </div>

@@ -10,10 +10,17 @@ The HTML wireframe is in `docs/prd/wireframes/dashboard-live-work-2026-09-25.htm
   review issues, and recent completed issues/routines. Filters and a bounded
   scroll area keep the main panel useful without stretching the page.
 - Needs your attention links to review issues instead of credential tool gaps.
-  Credential gaps remain in crew status and System details.
+  Crew setup alerts remain visible through crew health.
 - Your crews shows all ten current crews in a scroll area. Up next uses local
   day/time and links to the existing routine calendar. Run-volume bars use
   crew colours, including the legacy `sky` code observed on Coolify.
+- The four agent run summary cards share one height and text layout. The lone
+  run-volume sparkline was removed because the other metrics have no comparable
+  time series; the actual run-volume chart remains below.
+- System details now summarizes new run capacity, crew health, agents and
+  scheduled routines. The crew state does not claim all clear if service
+  checks are unavailable. Rows link to the relevant crew, agent or routine
+  view; the capacity row is informational when no work is held.
 
 The public dev3 service is `crewship-ws@3` at
 `https://crewship-dev3.unifylab.cz/`. It runs the prebuilt
