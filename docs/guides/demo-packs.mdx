@@ -98,6 +98,11 @@ For the legacy Claude demo, set `SEED_ANTHROPIC_API_KEY` instead of
 `SEED_CODEX_AUTH_FILE`. The Codex variable is a path to a private `0600`
 file outside Git; never put the contents of `auth.json` in `.env.local`.
 
+On an isolated development crew container whose Linux user-namespace sandbox
+cannot start, the operator can set `CREWSHIP_CODEX_SANDBOX_MODE=danger-full-access`
+for Codex runs. Leave it unset when the normal sandbox works; this setting
+changes Codex's isolation inside the crew container, not the seed data.
+
 The seed then creates the workspace `GH_TOKEN` every agent already knew, and
 additionally a **crew-scoped** `CLI_TOKEN` on each pack crew, bound to that
 crew's `GH_TOKEN` slot. Crew scope is not decoration: a routine's
