@@ -66,8 +66,9 @@ python3 scripts/jev-eval/local-mlx-webhook-bridge.py \
   routine logs <run-id> --full
 ```
 
-The event file must contain `type`, `service`, `summary` and
-`"simulation": true`. The script rejects longer fields, unapproved routes,
+The event file must contain a stable `event_id`, `type`, `service`, `summary` and
+`"simulation": true`. Reuse the same `event_id` when replaying an event so the
+webhook returns the existing receipt instead of starting another run. The script rejects longer fields, unapproved routes,
 world-facing URLs and hook files readable by another user. A production
 feature would need a persistent local scorer, stronger evaluation on real
 redacted events, secret minimization, health checks and a defined fallback

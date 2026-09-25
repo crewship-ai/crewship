@@ -92,6 +92,8 @@ def main():
     parser.add_argument("--mlx-bits", choices=["4", "none"], default="4")
     parser.add_argument("--threshold", type=float, default=.9)
     args = parser.parse_args()
+    args.semif_root = args.semif_root.resolve()
+    args.output = args.output.resolve()
     cases = sum((EVAL.load_cases(HERE / name) for name in
                  ("semif-mac-cases.jsonl", "semif-mac-challenge.jsonl", "semif-keeper-cases.jsonl")), [])
     rows = variants(cases)

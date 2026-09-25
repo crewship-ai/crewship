@@ -125,6 +125,9 @@ def main():
     parser.add_argument("--threshold", type=float, default=.9)
     parser.add_argument("--prepare-only", action="store_true", help="Validate and write SemIf input without loading a model")
     args = parser.parse_args()
+    args.semif_root = args.semif_root.resolve()
+    args.cases = args.cases.resolve()
+    args.output = args.output.resolve()
     if not math.isfinite(args.threshold) or not .5 <= args.threshold <= 1:
         parser.error("threshold must be between 0.5 and 1")
     cases = load_cases(args.cases)

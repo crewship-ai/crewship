@@ -8,6 +8,7 @@ import importlib.util
 import json
 import math
 from pathlib import Path
+import re
 import shlex
 import stat
 import subprocess
@@ -15,7 +16,6 @@ import time
 import urllib.error
 import urllib.request
 from urllib.parse import urlsplit
-import uuid
 
 
 HERE = Path(__file__).parent
@@ -78,7 +78,7 @@ def fire(hook, event):
     request = urllib.request.Request(hook["public_url"], body, method="POST", headers={
         "Content-Type": "application/json", "X-Crewship-Timestamp": timestamp,
         "X-Crewship-Signature": "sha256=" + signature,
-        "X-Crewship-Event-ID": "mlx-probe-" + uuid.uuid4().hex,
+        "X-Crewship-Event-ID": event["event_id"],
     })
     try:
         with urllib.request.urlopen(request, timeout=15) as response:
@@ -89,16 +89,18 @@ def fire(hook, event):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--event", type=Path, required=True, help="JSON file with type, service, summary and simulation=true")
+    parser.add_argument("--event", type=Path, required=True, help="JSON file with event_id, type, service, summary and simulation=true")
     parser.add_argument("--hooks", type=Path, help="Private JSON map of route to webhook create responses")
     parser.add_argument("--ssh-host", default="pavelsrba@192.168.1.221")
     parser.add_argument("--fire", action="store_true", help="Send a signed event to the selected dev webhook")
     args = parser.parse_args()
     event = json.loads(args.event.read_text(encoding="utf-8"))
     if (not isinstance(event, dict) or event.get("simulation") is not True or
+            not isinstance(event.get("event_id"), str) or
+            re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}", event["event_id"]) is None or
             any(not isinstance(event.get(key), str) or not event[key].strip() or len(event[key]) > 500
                 for key in ("type", "service", "summary"))):
-        parser.error("event must be a simulated object with bounded type, service and summary strings")
+        parser.error("event must be simulated with a stable event_id and bounded type, service and summary strings")
     result = score(args.ssh_host, event)
     if args.fire and result["route"] in ("sre", "developer"):
         if args.hooks is None:

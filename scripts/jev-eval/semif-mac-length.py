@@ -25,11 +25,20 @@ def row(count):
             "expected": "yes"}
 
 
+def confirm_token_limit_rejection(returncode, stderr, output_rows):
+    if (returncode == 0 or output_rows != 0 or
+            "no truncation allowed" not in stderr.lower() or "token" not in stderr.lower()):
+        raise RuntimeError(f"oversized probe did not confirm token-limit rejection: "
+                           f"exit={returncode}, output_rows={output_rows}, stderr={stderr[-500:]!r}")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--semif-root", type=Path, default=Path("~/AI/SemIf-OpenJev").expanduser())
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
+    args.semif_root = args.semif_root.resolve()
+    args.output = args.output.resolve()
     args.output.mkdir(parents=True, exist_ok=False)
     scorer = str(args.semif_root / ".venv/bin/semif-score")
     common = [scorer, "--backend", "mlx", "--mode", "direct", "--model", EVAL.MODEL,
@@ -49,11 +58,13 @@ def main():
     oversized_input.write_text(json.dumps(row(300)) + "\n")
     attempt = subprocess.run(common + ["--input", str(oversized_input), "--output", str(oversized_output)],
                              cwd=args.semif_root, capture_output=True, text=True)
+    output_rows = sum(1 for _ in oversized_output.open()) if oversized_output.exists() else 0
+    confirm_token_limit_rejection(attempt.returncode, attempt.stderr, output_rows)
     summary = {"model": EVAL.MODEL, "mlx_bits": 4, "max_tokens": 4096,
                "bounded": measured,
-               "oversized_rejected": attempt.returncode != 0,
+               "oversized_rejected": True,
                "oversized_exit_code": attempt.returncode,
-               "oversized_output_rows": sum(1 for _ in oversized_output.open()) if oversized_output.exists() else 0}
+               "oversized_output_rows": output_rows}
     (args.output / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")
     print(json.dumps(summary, indent=2))
 

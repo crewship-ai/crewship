@@ -17,7 +17,9 @@ def main():
     parser.add_argument("--semif-root", type=Path, default=Path("~/AI/SemIf-OpenJev").expanduser())
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
-    source = HERE / "semif-multifacet.jsonl"
+    args.semif_root = args.semif_root.resolve()
+    args.output = args.output.resolve()
+    source = (HERE / "semif-multifacet.jsonl").resolve()
     cases = [json.loads(line) for line in source.read_text().splitlines()]
     args.output.mkdir(parents=True, exist_ok=False)
     scores = {}
