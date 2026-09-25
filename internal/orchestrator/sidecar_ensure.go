@@ -33,8 +33,8 @@ package orchestrator
 //	    no provider auth into outbound requests. A script step does not want
 //	    that anyway: it authenticates with what its own `script.env` /
 //	    `{{ secrets.* }}` put in its environment.
-//	memory config, IPC config, MCP gateway                       NO — every one
-//	    of them is keyed by agent id/slug.
+//	memory config, MCP gateway                                   NO — both are
+//	    keyed by agent id/slug. IPC is limited to read-only telemetry.
 //
 // Because a crew-started sidecar is deliberately that thin, it must never be
 // inherited by an agent run, which needs all of the above. It is stamped with
@@ -59,19 +59,23 @@ import (
 // "no opinion" is exactly the state that must NOT be confused with "started
 // without credentials". It cannot collide with a real fingerprint, which is
 // always 24 lower-case hex characters.
-const crewOnlySidecarFingerprint = "crew-only-no-credentials"
+const crewOnlySidecarFingerprint = "crew-only-telemetry-v1"
+const legacyCrewOnlySidecarFingerprint = "crew-only-no-credentials"
 
 // crewOnlySidecarMustBeReplaced reports whether a running sidecar was brought
-// up by the crew-level path (no credentials, no MCP gateway, no IPC) and the
+// up by the crew-level path (no credentials or MCP gateway) and the
 // current caller needs more than that. Split out from sidecarNeedsRestart so
 // the credential-set comparison there keeps its "empty means no opinion"
 // contract, which the crew path relies on to REUSE a sidecar an agent run
 // already started with a fuller configuration.
 func crewOnlySidecarMustBeReplaced(health *sidecarHealth, crewOnlyCaller bool) bool {
-	if health == nil || crewOnlyCaller {
+	if health == nil {
 		return false
 	}
-	return health.ConfigFingerprint == crewOnlySidecarFingerprint
+	if health.ConfigFingerprint == legacyCrewOnlySidecarFingerprint {
+		return true // the old crew sidecar has no telemetry IPC
+	}
+	return !crewOnlyCaller && health.ConfigFingerprint == crewOnlySidecarFingerprint
 }
 
 // sidecarSettleSpec is everything settleSidecar needs to decide between reuse,
