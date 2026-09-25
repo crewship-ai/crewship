@@ -4,6 +4,7 @@ import argparse
 import contextlib
 import json
 import os
+import re
 from pathlib import Path
 import sqlite3
 import sys
@@ -91,14 +92,25 @@ def run(slug, action, draft='', decision='approve'):
         text=saved[0] if saved else s['sample_draft']
         kind='AI draft' if saved else 'Prepared sample template'
         pending=bool(findings)
+        handoff=''
+        if action=='draft-result':
+            if pending and not saved:
+                raise ValueError('No saved AI draft to report')
+            outcome='SUCCEEDED' if pending else 'NO_CHANGE'
+            detail='AI draft saved on the project Page; nothing sent.' if pending else 'No pending case; no new draft needed.'
+            handoff=f'---CHECKPOINT---\noutcome: {outcome}\ndone: {detail}\n---END CHECKPOINT---'
         if action=='draft':
-            if not draft.strip():
-                raise ValueError('Agent returned an empty draft')
+            # Agent output may include progress commentary. Only the explicit
+            # deliverable belongs in the Page, approval and customer artifact.
+            matches=re.findall(r'<demo-draft>(.*?)</demo-draft>',draft,re.DOTALL)
+            if len(matches)!=1 or len(matches[0].strip())<20:
+                raise ValueError('Agent did not return one complete draft')
+            draft=matches[0].strip()
             db.execute('INSERT INTO drafts VALUES (?,?) ON CONFLICT(story) DO UPDATE SET body=excluded.body',(slug,draft)); db.commit()
             text=draft; kind='AI draft'
         if action=='complete' and pending and decision=='approve':
             # One artifact per story, even if a run is retried after a partial failure.
-            artifact={'story':slug,'issue':identifier,'text':text,'source':kind,'delivery':'local demo only'}
+            artifact={'story':slug,'issue':identifier,'text':text,'source':kind,'evidence':findings,'delivery':'local demo only'}
             db.execute('INSERT OR IGNORE INTO outcomes VALUES (?,?)',(slug,json.dumps(artifact))); db.commit()
             out=ROOT/'outbox'; out.mkdir(exist_ok=True)
             tmp=out/(slug+'.tmp'); tmp.write_text(json.dumps(artifact,indent=2)+'\n'); tmp.replace(out/(slug+'.json'))
@@ -114,11 +126,11 @@ def run(slug, action, draft='', decision='approve'):
             summary=narrative('Waiting for your decision',kind+': '+text,'Open Inbox to approve or keep this case open. No external message will be sent.')
         else:
             summary=narrative('Needs attention' if findings else 'No action needed',f"{len(findings)} of {len(s['rows'])} records need attention.",s['problem'] if findings else 'No pending follow-up was found.',f'Related Issue: {identifier}.')
-        return dict(pending=pending,issue=identifier,records=table,summary=summary,draft=text,draft_source=kind,approved=bool(done),start_issue=bool(done) and not bool(sync[0]),finish_issue=bool(done) and not bool(sync[1]),evidence=json.dumps(findings),comment=summary['verdict']+'. '+ ' '.join(b['text'] for b in summary['blocks']))
+        return dict(handoff=handoff,pending=pending,issue=identifier,records=table,summary=summary,draft=text,draft_source=kind,approved=bool(done),start_issue=bool(done) and not bool(sync[0]),finish_issue=bool(done) and not bool(sync[1]),evidence=json.dumps(findings),comment=summary['verdict']+'. '+ ' '.join(b['text'] for b in summary['blocks']))
 
 
 if __name__=='__main__':
-    p=argparse.ArgumentParser(); p.add_argument('story'); p.add_argument('action',choices=['check','prepare','draft','complete','mark-progress','mark-done']); p.add_argument('--draft',default=''); p.add_argument('--decision',default='approve'); args=p.parse_args()
+    p=argparse.ArgumentParser(); p.add_argument('story'); p.add_argument('action',choices=['check','prepare','draft','draft-result','complete','mark-progress','mark-done']); p.add_argument('--draft',default=''); p.add_argument('--decision',default='approve'); args=p.parse_args()
     try:
         print(json.dumps(run(args.story,args.action,args.draft,args.decision)))
     except Exception as exc:

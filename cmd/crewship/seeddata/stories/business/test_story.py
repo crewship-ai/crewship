@@ -24,6 +24,8 @@ class StoryTest(unittest.TestCase):
                 result=story.run(slug,'complete');self.assertEqual(result['summary']['verdict'],'Completed')
                 again=story.run(slug,'complete');self.assertFalse(again['pending'])
                 self.assertTrue((story.ROOT/'outbox'/f'{slug}.json').exists())
+                artifact=json.loads((story.ROOT/'outbox'/f'{slug}.json').read_text())
+                self.assertEqual(artifact['evidence'],json.loads(first['evidence']))
         with sqlite3.connect(story.ROOT/'demo.sqlite') as db:
             self.assertEqual(db.execute('SELECT count(*) FROM outcomes').fetchone()[0],4)
 
@@ -59,9 +61,23 @@ class StoryTest(unittest.TestCase):
 
     def test_agent_draft_is_used_and_explicitly_labelled(self):
         text='A grounded reply for the customer.'
-        story.run('sales','draft',draft=text)
+        story.run('sales','draft',draft='Using a skill. <demo-draft>'+text+'</demo-draft>')
         prepared=story.run('sales','prepare')
         self.assertEqual(prepared['draft'],text);self.assertEqual(prepared['draft_source'],'AI draft')
+
+    def test_draft_outcome_requires_saved_work_and_handles_completed_case(self):
+        for slug in ['sales','finance','marketing','shipping']:
+            with self.subTest(slug=slug):
+                with self.assertRaises(ValueError):story.run(slug,'draft-result')
+                story.run(slug,'draft',draft='<demo-draft>A grounded draft for human review.</demo-draft>')
+                self.assertIn('outcome: SUCCEEDED',story.run(slug,'draft-result')['handoff'])
+                story.run(slug,'complete')
+                self.assertIn('outcome: NO_CHANGE',story.run(slug,'draft-result')['handoff'])
+
+    def test_unstructured_or_incomplete_draft_fails_without_saving(self):
+        for text in ['I am working on it.', '<demo-draft>Incomplete', '<demo-draft></demo-draft>', '<demo-draft>One long proposed draft.</demo-draft><demo-draft>Another long proposed draft.</demo-draft>']:
+            with self.assertRaises(ValueError):story.run('sales','draft',draft=text)
+        self.assertEqual(story.run('sales','prepare')['draft_source'],'Prepared sample template')
 
     def test_missing_bindings_fail_instead_of_writing_unlinked_evidence(self):
         (story.ROOT/'bindings.json').unlink()

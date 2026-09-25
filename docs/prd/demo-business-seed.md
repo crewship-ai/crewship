@@ -65,3 +65,33 @@ The developer's Codex subscription login was exercised successfully, but the
 previous handoff reported a refresh-token 401. Working current access is not
 proof that a copied subscription login will refresh indefinitely. Customers
 supply their own provider credentials; the basic stories work without them.
+
+## Critical acceptance follow-up
+
+The audit found that the four AI drafts published correct Page data but their
+final Page-write acknowledgement contained no structured run outcome. Technical
+`completed` therefore coexisted with outcome `FAILED`. Draft routines now report
+their result only after saving and publishing the draft. Missing saved work
+fails; a completed case returns `NO_CHANGE` without invoking the model.
+
+- A separate disposable workspace on dev1 exercised **all 15 routines**. Every
+  routine had a persisted `completed` / `SUCCEEDED` run with no error message.
+- The strengthened full verifier passed **48 checks**, including authoritative
+  outcomes, Page provenance, Issue ownership/assignment/comments, Inbox decisions,
+  DONE transitions and local receipts containing the original source finding.
+- All **9 agents** answered the real provider smoke test successfully.
+- Drafts were read for meaning, not just length: the audience is now explicit
+  per story (customer, carrier or internal marketing diagnosis); shipping
+  evidence includes EUR. Explicit draft delimiters keep agent progress commentary
+  out of Pages and approval text; malformed drafts fail instead of being saved.
+  Generated proposals are still human-reviewed text.
+- The monitor advanced timestamps, stopped publishing, and the completed Finance
+  draft path skipped the agent and reported `NO_CHANGE`.
+- API/database suites passed with temporary test data in RAM after disk-backed
+  runs timed out. The CLI/seeddata suites also passed.
+
+The customer lesson is **check → understand the finding → optionally draft →
+decide → inspect the receipt**. Finance completion records a reminder, not a
+payment. Shipping completion records claim evidence, not a paid refund.
+Marketing simulates local delivery; it does not prove a production email route.
+These distinctions must stay visible when extending the catalogue.

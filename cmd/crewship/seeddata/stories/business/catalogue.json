@@ -35,7 +35,8 @@
         "hours": 26,
         "replied": false
       }
-    ]
+    ],
+    "draft_instruction": "Write the customer-facing reply to Ava herself, not instructions to a colleague."
   },
   {
     "slug": "finance",
@@ -83,7 +84,8 @@
         "reference": "INV-102",
         "amount": 250
       }
-    ]
+    ],
+    "draft_instruction": "Write the payment reminder addressed directly to Northstar Studio. Include invoice ID, amount, currency and days overdue. Do not tell a colleague to send a reminder."
   },
   {
     "slug": "marketing",
@@ -119,7 +121,8 @@
     "delivered": [
       "FORM-101",
       "FORM-102"
-    ]
+    ],
+    "draft_instruction": "Write an internal diagnosis and a local repair plan, not a customer reply."
   },
   {
     "slug": "shipping",
@@ -140,32 +143,38 @@
         "id": "SHIP-101",
         "late_days": 0,
         "claim_days_left": 10,
-        "refund": 0
+        "refund": 0,
+        "currency": "EUR"
       },
       {
         "id": "SHIP-102",
         "late_days": 0,
         "claim_days_left": 10,
-        "refund": 0
+        "refund": 0,
+        "currency": "EUR"
       },
       {
         "id": "SHIP-103",
         "late_days": 0,
         "claim_days_left": 10,
-        "refund": 0
+        "refund": 0,
+        "currency": "EUR"
       },
       {
         "id": "SHIP-104",
         "late_days": 0,
         "claim_days_left": 10,
-        "refund": 0
+        "refund": 0,
+        "currency": "EUR"
       },
       {
         "id": "SHIP-105",
         "late_days": 2,
         "claim_days_left": 3,
-        "refund": 18
+        "refund": 18,
+        "currency": "EUR"
       }
-    ]
+    ],
+    "draft_instruction": "Write a claim proposal addressed to the carrier. Include parcel ID, lateness, claim window and refund amount with currency. Do not claim submission or payment has happened."
   }
 ]

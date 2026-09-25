@@ -29,13 +29,17 @@ func businessRoutines() []RoutineDef {
 			script("inspect", "check"), publish("records", "records", "{{ steps.inspect.output.records }}"), publish("finding", "finding", "{{ steps.inspect.output.summary }}"),
 			comment("note", "{{ steps.inspect.output.comment }}"), notify("notify", s.Project+": check completed", "{{ steps.inspect.output.comment }}"),
 		}, false))
-		draft := map[string]interface{}{"id": "agent", "type": "agent_run", "agent_slug": s.Agent, "complexity": "fast", "timeout_seconds": 120, "if": "{{ steps.inspect.output.pending }}", "prompt": "Use the demo-business skill. Prepare a short draft for a human to review. Use only this evidence: {{ steps.inspect.output.evidence }}. Task: " + s.Result + ". Do not send anything, edit files, change issues or call tools. Return only the proposed text. Never invent prices, dates or completed actions.", "validation": map[string]interface{}{"min_length": 20}, "retry": map[string]interface{}{"max_attempts": 3, "retry_on": `error.contains("live run in progress elsewhere")`, "backoff": map[string]interface{}{"min_ms": 3000, "max_ms": 5000}}}
+		draft := map[string]interface{}{"id": "agent", "type": "agent_run", "agent_slug": s.Agent, "complexity": "fast", "timeout_seconds": 120, "if": "{{ steps.inspect.output.pending }}", "prompt": "Use the demo-business skill. Prepare a short draft for a human to review. Use only this evidence: {{ steps.inspect.output.evidence }}. Task: " + s.Result + ". " + s.DraftInstruction + " Do not send anything, edit files, change issues or call tools. Do not ask the reader to approve anything: Crewship provides the decision controls separately. Wrap the final proposed text in exactly one <demo-draft>...</demo-draft> block. Keep progress commentary outside that block. Never invent prices, dates or completed actions.", "validation": map[string]interface{}{"min_length": 20}, "retry": map[string]interface{}{"max_attempts": 3, "retry_on": `error.contains("live run in progress elsewhere")`, "backoff": map[string]interface{}{"min_ms": 3000, "max_ms": 5000}}}
 		save := script("save", "draft")
 		save["if"] = "{{ steps.inspect.output.pending }}"
 		save["script"].(map[string]interface{})["args"] = []string{s.Slug, "draft", "--draft", "{{ steps.agent.output }}"}
 		pubDraft := publish("draft", "draft", "{{ steps.save.output.summary }}")
 		pubDraft["if"] = "{{ steps.inspect.output.pending }}"
-		out = append(out, base("draft", "Draft with AI · "+s.Project, []map[string]interface{}{script("inspect", "check"), draft, save, pubDraft}, true))
+		// Page write acknowledgements are not run outcomes. Report only after
+		// saving and publishing the draft; the script refuses a missing draft.
+		report := script("report", "draft-result")
+		handoff := map[string]interface{}{"id": "handoff", "type": "transform", "transform": map[string]interface{}{"input": "{{ steps.report.output }}", "expression": ".handoff"}}
+		out = append(out, base("draft", "Draft with AI · "+s.Project, []map[string]interface{}{script("inspect", "check"), draft, save, pubDraft, report, handoff}, true))
 		steps := []map[string]interface{}{script("inspect", "prepare")}
 		waiting := publish("waiting", "proposal", "{{ steps.inspect.output.summary }}")
 		steps = append(steps, waiting)

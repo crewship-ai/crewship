@@ -15,7 +15,7 @@ provider. The live monitor posts only to the current Crewship installation.
 Each story has a TODO Issue, a Page folder and three routines: check, optional
 AI draft, and resolve. The first check comments on the Issue and notifies Inbox.
 Resolve waits for a human for Sales, Finance and Shipping. `Keep open` saves no
-artifact. Approval saves a local receipt and closes the prepared Issue. Marketing
+artifact. Approval saves a local receipt with the source finding and closes the prepared Issue. Marketing
 is a deterministic local simulation, not a demonstration of a real email provider.
 
 The catalogue is `catalogue.json`; fixtures and Page storytelling use the same
@@ -65,7 +65,7 @@ Stop takes up to one network timeout plus the five-second sample interval.
 
 ## Extend
 
-1. Add a story with sample rows, crew and agent to `catalogue.json`.
+1. Add a story with sample rows, crew, agent and a clear `draft_instruction` (audience and requested text) to `catalogue.json`.
 2. Add its deterministic rule to `story.py` and a fixture test including no-finding
    and repeat-completion cases. Unknown story types must fail, not reuse a rule.
 3. Add a matching TODO Issue/project in `builtin/issues.yaml` and Page panel

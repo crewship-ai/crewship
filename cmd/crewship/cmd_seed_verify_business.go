@@ -61,6 +61,7 @@ func verifyBusiness(ctx context.Context, client *cli.Client, timeout time.Durati
 		if e != nil {
 			continue
 		}
+		add(s.Slug, "check outcome", verifyBusinessOutcome(client, run.ID))
 		add(s.Slug, "Page provenance", verifyBusinessPage(client, s.Slug, run.ID, "records", "finding"))
 		raw, ok := stepOutput(run, "inspect")
 		var output struct {
@@ -98,6 +99,7 @@ func verifyBusiness(ctx context.Context, client *cli.Client, timeout time.Durati
 			if e != nil {
 				continue
 			}
+			add(s.Slug, "resolve outcome", verifyBusinessOutcome(client, resolved.ID))
 			add(s.Slug, "resolution Page", verifyBusinessPage(client, s.Slug, resolved.ID, "outcome", "resolved-records"))
 			var issue struct {
 				Status string `json:"status" yaml:"status"`
@@ -110,18 +112,41 @@ func verifyBusiness(ctx context.Context, client *cli.Client, timeout time.Durati
 			artifact, e := verifyDownloadCrewFile(ctx, client, crewID, "shared/demo/business/outbox/"+s.Slug+".json")
 			if e == nil {
 				var a struct {
-					Story string `json:"story" yaml:"story"`
-					Issue string `json:"issue" yaml:"issue"`
+					Story    string           `json:"story" yaml:"story"`
+					Issue    string           `json:"issue" yaml:"issue"`
+					Text     string           `json:"text" yaml:"text"`
+					Delivery string           `json:"delivery" yaml:"delivery"`
+					Evidence []map[string]any `json:"evidence" yaml:"evidence"`
 				}
 				e = json.Unmarshal(artifact, &a)
 				if e == nil && (a.Story != s.Slug || a.Issue != output.Issue) {
 					e = fmt.Errorf("outbox artifact does not match story and Issue")
+				}
+				if e == nil && (a.Text == "" || a.Delivery != "local demo only" || len(a.Evidence) != 1 || a.Evidence[0]["id"] == nil) {
+					e = fmt.Errorf("outbox must contain proposed text, local-delivery label and the source finding")
 				}
 			}
 			add(s.Slug, "local evidence", e)
 		}
 	}
 	return checks, nil
+}
+
+// Technical completion alone is insufficient: a missing agent hand-off can
+// leave status=completed while the authoritative outcome is FAILED.
+func verifyBusinessOutcome(client *cli.Client, runID string) error {
+	var run struct {
+		Outcome string `json:"outcome" yaml:"outcome"`
+		Error   string `json:"error_message" yaml:"error_message"`
+	}
+	path := "/api/v1/workspaces/" + url.PathEscape(client.GetWorkspaceID()) + "/pipeline-runs/" + url.PathEscape(runID)
+	if err := verifyBusinessGet(client, path, &run); err != nil {
+		return err
+	}
+	if run.Outcome != "SUCCEEDED" || run.Error != "" {
+		return fmt.Errorf("run %s outcome=%s: %s", runID, run.Outcome, run.Error)
+	}
+	return nil
 }
 func verifyBusinessGet(client *cli.Client, path string, out any) error {
 	r, e := client.Get(path)
