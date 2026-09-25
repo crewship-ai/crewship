@@ -47,11 +47,11 @@ describe("useDrawerStore", () => {
     expect(useDrawerStore.getState().mode).toBe("overlay")
   })
 
-  it("setWidth clamps to [280, 720]", () => {
+  it("setWidth clamps to [280, 520]", () => {
     useDrawerStore.getState().setWidth(100)
     expect(useDrawerStore.getState().width).toBe(280)
     useDrawerStore.getState().setWidth(1000)
-    expect(useDrawerStore.getState().width).toBe(720)
+    expect(useDrawerStore.getState().width).toBe(520)
     useDrawerStore.getState().setWidth(450)
     expect(useDrawerStore.getState().width).toBe(450)
   })
