@@ -79,7 +79,7 @@ export function DashboardResults({ review, inProgress, completed, activeAgentRun
     return <WorkRow key={`issue-${issue.id}`} href={issue.identifier ? entityHref({ kind: "issue", identifier: issue.identifier }) : entityHref({ kind: "issues" })} icon={icon} kind={issue.identifier || "Issue"} status={<StatusPill status={issue.status} />} title={issue.title} meta={`${owner} · ${formatRelativeTime(issue.updated_at)}`} action={issue.status === "REVIEW" ? "Review work" : "Open issue"} />
   }
 
-  return <DashboardCard title="Results & review" icon={CheckCheck} hint={runningCount > 0 ? `${runningCount} live now` : "Live work and outcomes"} action={<Link href={entityHref({ kind: "issues" })} className="text-primary-hover hover:underline">All issues →</Link>} className="h-full border-primary/20">
+  return <DashboardCard title="Results & review" icon={CheckCheck} hint={<span className="hidden sm:inline">{runningCount > 0 ? `${runningCount} live now` : "Live work and outcomes"}</span>} action={<Link href={entityHref({ kind: "issues" })} className="text-primary-hover hover:underline">All issues →</Link>} className="h-full border-primary/20">
     <div className="mb-3 flex flex-wrap gap-1" role="group" aria-label="Filter dashboard work">
       {FILTERS.map(({ key, label }) => <button key={key} type="button" aria-pressed={filter === key} onClick={() => setFilter(key)} className={cn("rounded-md px-2.5 py-1.5 text-label transition-colors coarse:min-h-12", filter === key ? "bg-primary/15 font-medium text-primary-hover" : "text-muted-foreground hover:bg-muted hover:text-foreground")}>{label}<span className="ml-1.5 font-mono text-micro tabular-nums opacity-70">{counts[key]}</span></button>)}
     </div>

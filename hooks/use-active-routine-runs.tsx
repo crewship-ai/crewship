@@ -49,6 +49,8 @@ export interface ActiveRoutineRunsValue {
    * the Activity dropdown's RECENT section.
    */
   recentRuns: PipelineRun[]
+  /** Wider terminal window for the scrollable dashboard results list. */
+  recentDashboardRuns: PipelineRun[]
   loading: boolean
   error: string | null
   refresh: () => void
@@ -118,6 +120,7 @@ const EMPTY: ActiveRoutineRunsValue = {
   awaitingApproval: 0,
   bySlug: new Map(),
   recentRuns: [],
+  recentDashboardRuns: [],
   loading: false,
   error: null,
   refresh: () => {},
@@ -139,7 +142,7 @@ export function ActiveRoutineRunsProvider({ children }: { children: ReactNode })
 
   const value = useMemo<ActiveRoutineRunsValue>(() => {
     const d = deriveActiveRoutineRuns(runs)
-    return { ...d, recentRuns: deriveRecentTerminalRuns(runs), loading, error, refresh }
+    return { ...d, recentRuns: deriveRecentTerminalRuns(runs), recentDashboardRuns: deriveRecentTerminalRuns(runs, 12), loading, error, refresh }
   }, [runs, loading, error, refresh])
 
   return (
