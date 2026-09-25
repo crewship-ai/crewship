@@ -2,18 +2,10 @@
 
 import { useEffect } from "react"
 import { FileText, LayoutGrid, ListTodo } from "lucide-react"
-import { motion } from "motion/react"
 import { useHotkeys } from "react-hotkeys-hook"
 
 import { Button } from "@/components/ui/button"
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
-import { spring } from "@/lib/motion"
 import { useDrawerStore, type DrawerTab } from "@/stores/drawer-store"
 
 interface RailItem {
@@ -39,11 +31,10 @@ const ITEMS: RailItem[] = RAIL_PANELS.map((item, i) => ({
 /**
  * What each panel is called, in one place.
  *
- * The rail's button label, its tooltip, the drawer's accessible name and the
- * panel's own heading all read from here, so they cannot say four different
+ * The rail's button label, the drawer's accessible name and the
+ * panel's own heading all read from here, so they cannot say three different
  * things. The rail carried no visible label at all until the label moved onto
- * the button — before that this map fed a tooltip and an sr-only span, and a
- * reader looking at the strip had only the glyph.
+ * the button; readers no longer need to hover to learn what it opens.
  *
  * "context" is not a rail button any more (it moved to the agent canvas) but
  * survives in persisted user state, so it keeps a name.
@@ -89,78 +80,13 @@ export function RightRail({ className }: { className?: string }) {
     [toggle],
   )
 
-  return (
-    <TooltipProvider delayDuration={400}>
-      <div
-        className={cn(
-          "relative z-30 flex flex-col items-center gap-0.5 w-14 shrink-0 border-l bg-accent/30 py-2",
-          className,
-        )}
-        role="tablist"
-        aria-label="Chat side panels"
-      >
-        {ITEMS.map(({ id, label, icon: Icon, shortcut }) => {
-          const isActive = open && activeTab === id
-          return (
-            <Tooltip key={id}>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  // The rail was three unlabelled 16px glyphs on a 48px strip,
-                  // and the only affordances that named them — an sr-only
-                  // span and a hover tooltip — are exactly the two nobody
-                  // LOOKING at the screen has. So the label is on the button.
-                  //
-                  // It costs 8px of width and buys the whole strip: the icons
-                  // (a page, two people) are generic enough that a reader who
-                  // has not opened both panels cannot tell which is which, and
-                  // the first thing everybody did was click one to find out.
-                  // The tooltip stays, because it is where the shortcut lives.
-                  className={cn(
-                    "relative h-auto w-full flex-col gap-1 rounded-md px-0 py-2",
-                    isActive
-                      ? "bg-white/[0.06] text-foreground"
-                      : "text-muted-foreground hover:bg-white/[0.03] hover:text-foreground",
-                  )}
-                  role="tab"
-                  aria-selected={isActive}
-                  aria-controls={`drawer-panel-${id}`}
-                  // The shortcut is drawn in the tooltip; without this it is
-                  // visual-only, and the tooltip is the thing a keyboard user
-                  // is least likely to have seen.
-                  aria-keyshortcuts={shortcut ? `Meta+${shortcut}` : undefined}
-                  onClick={() => toggle(id)}
-                >
-                  {isActive && (
-                    <motion.span
-                      layoutId="rail-active-indicator"
-                      transition={spring.snappy}
-                      className="absolute inset-y-1 left-0 w-0.5 rounded-r bg-primary"
-                    />
-                  )}
-                  <Icon className="h-4 w-4" />
-                  {/* The button's accessible name, not a decoration beside
-                      one — there is no sr-only twin, so the two can never
-                      say different things. */}
-                  <span className="text-[11px] font-medium leading-none tracking-tight">
-                    {label}
-                  </span>
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent side="left">
-                <div className="flex items-center gap-2 text-xs">
-                  <span>{label}</span>
-                  {shortcut && (
-                    <kbd className="rounded border bg-muted px-1 font-mono text-[10px]">
-                      ⌘{shortcut}
-                    </kbd>
-                  )}
-                </div>
-              </TooltipContent>
-            </Tooltip>
-          )
-        })}
-      </div>
-    </TooltipProvider>
-  )
+  return <div className={cn("relative z-30 flex w-14 shrink-0 flex-col items-center gap-0.5 border-l bg-accent/30 py-2", className)} role="tablist" aria-label="Chat side panels">
+    {ITEMS.map(({ id, label, icon: Icon, shortcut }) => {
+      const isActive = open && activeTab === id
+      return <Button key={id} variant="ghost" className={cn("h-auto w-full flex-col gap-1 rounded-md px-0 py-2 text-muted-foreground hover:bg-white/[0.03] hover:text-foreground", isActive && "text-foreground")} role="tab" aria-selected={isActive} aria-controls={`drawer-panel-${id}`} aria-keyshortcuts={shortcut ? `Meta+${shortcut}` : undefined} onClick={() => toggle(id)}>
+        <Icon className="h-4 w-4" />
+        <span className="text-[11px] font-medium leading-none tracking-tight">{label}</span>
+      </Button>
+    })}
+  </div>
 }

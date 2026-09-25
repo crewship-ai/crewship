@@ -9,10 +9,8 @@ import { render, screen, cleanup, fireEvent, act } from "@testing-library/react"
 // icons had an sr-only label and a hover tooltip — which is exactly the set of
 // affordances nobody looking at the screen has.
 //
-// So: the name is in three places that read from ONE map (right-rail's
-// DRAWER_TAB_LABELS) — the tooltip, the drawer's accessible name, and the
-// panel's own heading — and the keyboard shortcut the tooltip draws is
-// exposed to assistive tech instead of being visual-only.
+// The label is visible on each button and the drawer reads the same name.
+// Keyboard shortcuts remain available to assistive tech without a hover popup.
 // =============================================================================
 
 import { RightRail, DRAWER_TAB_LABELS } from "../right-rail"
@@ -64,6 +62,16 @@ describe("RightRail — the controls say what they are", () => {
 
     expect(screen.getByRole("tab", { name: "Artifacts" })).toHaveAttribute("aria-selected", "true")
     expect(screen.getByRole("tab", { name: "Files" })).toHaveAttribute("aria-selected", "false")
+  })
+
+  it("keeps the labelled Work control quiet on hover and selection", () => {
+    render(<RightRail />)
+    const work = screen.getByRole("tab", { name: "Work" })
+    fireEvent.mouseEnter(work)
+    fireEvent.click(work)
+    expect(work).toHaveAttribute("aria-selected", "true")
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument()
+    expect(work.querySelector(".bg-primary")).toBeNull()
   })
 })
 
