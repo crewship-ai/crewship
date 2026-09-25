@@ -116,13 +116,32 @@ export function UnifiedChatFacets() {
   if (!chat) return null
   return <div className="border-b px-2 py-2"><h2 className="mb-2 px-1 text-sm font-semibold">Chat</h2><div aria-label="Conversation types" className="grid grid-cols-2 gap-1">{([["all", "All", MessagesSquare], ["agents", "Agents", Bot], ["people", "People", Users], ["rooms", "Groups & channels", Hash]] as const).map(([id, label, Icon]) => <button type="button" key={id} aria-pressed={chat.facet === id} onClick={() => chat.setFacet(id)} className={cn("flex min-h-9 items-center gap-2 rounded-md px-2 text-xs text-left hover:bg-accent", chat.facet === id && "bg-accent text-foreground")}><Icon aria-hidden="true" className="size-3.5 shrink-0" />{label}</button>)}</div></div>
 }
-export function UnifiedConversationSection({ query, onSelect, section }: { query: string; onSelect?: () => void; section?: "people" | "rooms" }) {
+
+export function filterUnifiedConversationRows(
+  rooms: WorkspaceConversation[],
+  query: string,
+  section?: "people" | "rooms",
+  facet: Facet = "all",
+): WorkspaceConversation[] {
+  const q = query.trim().toLowerCase()
+  return rooms.filter((room) => {
+    if (section === "people" && !room.is_direct) return false
+    if (section === "rooms" && room.is_direct) return false
+    if (!section && facet !== "all" && (facet === "people" ? !room.is_direct : room.is_direct)) return false
+    return !q || room.title.toLowerCase().includes(q) || conversationTitle(room).toLowerCase().includes(q)
+  })
+}
+
+export function UnifiedConversationSection({ query, onSelect, section, showLoadMore = true }: { query: string; onSelect?: () => void; section?: "people" | "rooms"; showLoadMore?: boolean }) {
   const chat = useUnifiedConversations()
   if (!chat || (!section && chat.facet === "agents")) return null
-  const rows = chat.list.data?.pages.flatMap((page) => page.conversations).filter((room) => room.title.toLowerCase().includes(query.toLowerCase()) && (section ? section === "people" ? room.is_direct : !room.is_direct : chat.facet === "all" || (chat.facet === "people" ? room.is_direct : !room.is_direct)))
-  return <section aria-label="People and shared conversations" className={section ? "pb-1" : "border-b pb-2"}>{!section && <h3 className="px-3 py-2 text-xs text-muted-foreground">People, groups &amp; channels</h3>}{chat.list.isPending && <p className="px-3 py-2 text-xs">Loading conversations…</p>}{chat.list.error && <div role="alert" className="p-3 text-xs">Unable to load shared conversations.<Button type="button" variant="ghost" onClick={() => { void chat.list.refetch() }}>Retry</Button></div>}{!chat.list.error && rows?.map((room) => <button key={room.id} type="button" onClick={() => { chat.select(room.id); onSelect?.() }} aria-current={chat.selectedId === room.id ? "page" : undefined} className={cn("flex min-h-12 w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm hover:bg-accent", chat.selectedId === room.id && "bg-accent")}>
-    <ConversationIcon conversation={room} className="size-8" /><span className="min-w-0 flex-1"><span className="block truncate">{conversationTitle(room)}</span><span className="block text-xs text-muted-foreground">{room.is_direct ? "Direct message" : room.kind === "channel" ? "Workspace channel" : "Group"}</span></span>{room.unread_count > 0 && <span className="rounded-full bg-primary/15 px-2 text-xs text-primary">{room.unread_count}</span>}
-  </button>)}{!chat.list.isPending && !chat.list.error && rows?.length === 0 && <p className="px-3 py-2 text-xs text-muted-foreground">{query ? "No matching conversations." : section === "people" ? "No direct messages yet." : section === "rooms" ? "No groups or channels yet." : "Use New chat to start with a person or a group."}</p>}{chat.list.hasNextPage && <Button type="button" variant="ghost" disabled={chat.list.isFetchingNextPage} onClick={() => { void chat.list.fetchNextPage() }}>Load more conversations</Button>}</section>
+  const rows = filterUnifiedConversationRows(chat.list.data?.pages.flatMap((page) => page.conversations) ?? [], query, section, chat.facet)
+  return <section aria-label={section === "people" ? "Direct messages" : section === "rooms" ? "Groups and channels" : "People and shared conversations"} className={section ? "pb-1" : "border-b pb-2"}>{!section && <h3 className="px-3 py-2 text-xs text-muted-foreground">People, groups &amp; channels</h3>}{chat.list.isPending && <p className="px-3 py-2 text-xs">Loading conversations…</p>}{chat.list.error && <div role="alert" className="p-3 text-xs">Unable to load shared conversations.<Button type="button" variant="ghost" onClick={() => { void chat.list.refetch() }}>Retry</Button></div>}{!chat.list.error && rows.map((room) => {
+    const subtitle = room.is_direct ? "Direct message" : room.kind === "channel" ? "Workspace channel" : "Group"
+    return <button key={room.id} type="button" onClick={() => { chat.select(room.id); onSelect?.() }} aria-current={chat.selectedId === room.id ? "page" : undefined} className={cn("kit-tap relative mx-1 flex h-9 w-[calc(100%-8px)] items-center gap-2 rounded-md px-2 text-left text-xs transition-colors hover:bg-white/[0.04]", chat.selectedId === room.id && "bg-primary/10 before:absolute before:inset-y-1 before:left-0 before:w-0.5 before:rounded-full before:bg-primary")}>
+      <ConversationIcon conversation={room} className="size-6 shrink-0" /><span className="min-w-0 flex-1 truncate">{conversationTitle(room)}<span className="sr-only"> {subtitle}</span></span>{room.unread_count > 0 && <span className="text-[10px] tabular-nums text-primary">{room.unread_count}</span>}
+    </button>
+  })}{!chat.list.isPending && !chat.list.error && rows.length === 0 && <p className="px-3 py-2 text-xs text-muted-foreground">{query ? "No matching conversations." : section === "people" ? "No direct messages yet." : section === "rooms" ? "No team spaces yet." : "Use New chat to start with a person or a group."}</p>}{showLoadMore && chat.list.hasNextPage && <Button type="button" variant="ghost" disabled={chat.list.isFetchingNextPage} onClick={() => { void chat.list.fetchNextPage() }}>Load more conversations</Button>}</section>
 }
 export function UnifiedConversationPanel({ onBack }: { onBack: () => void }) {
   const queryClient = useQueryClient()

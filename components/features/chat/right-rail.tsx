@@ -93,7 +93,7 @@ export function RightRail({ className }: { className?: string }) {
     <TooltipProvider delayDuration={400}>
       <div
         className={cn(
-          "relative z-30 flex flex-col items-center gap-0.5 w-14 shrink-0 border-l bg-background py-2",
+          "relative z-30 flex flex-col items-center gap-0.5 w-14 shrink-0 border-l bg-card py-2",
           className,
         )}
         role="tablist"

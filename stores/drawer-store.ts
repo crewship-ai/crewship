@@ -29,7 +29,7 @@ export const useDrawerStore = create<DrawerState>()(
       open: true,
       activeTab: "files",
       mode: "push",
-      width: 320,
+      width: 340,
       toggle: (tab) => {
         const { open, activeTab } = get()
         if (tab && tab !== activeTab) {
@@ -41,12 +41,18 @@ export const useDrawerStore = create<DrawerState>()(
       setOpen: (open) => set({ open }),
       setActiveTab: (activeTab) => set({ activeTab, open: true }),
       setMode: (mode) => set({ mode }),
-      setWidth: (width) => set({ width: Math.max(280, Math.min(720, width)) }),
+      setWidth: (width) => set({ width: Math.max(280, Math.min(520, width)) }),
     }),
     {
       name: "crewship-chat-drawer",
       storage: createJSONStorage(() => localStorage),
-      partialize: (s) => ({ mode: s.mode, width: s.width, activeTab: s.activeTab }),
+      // Width belongs to the signed-in user's server preference, not this
+      // browser-wide store. Old persisted widths are ignored on hydration.
+      partialize: (s) => ({ mode: s.mode, activeTab: s.activeTab }),
+      merge: (persisted, current) => {
+        const saved = persisted as Partial<DrawerState> | undefined
+        return { ...current, mode: saved?.mode ?? current.mode, activeTab: saved?.activeTab ?? current.activeTab }
+      },
     },
   ),
 )

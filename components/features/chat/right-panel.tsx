@@ -289,7 +289,7 @@ export const RightPanel = React.memo(function RightPanel({ agentId, workspaceId,
   const editorOpen = !onOpenFile && editorFile !== null && activeTab === "files"
 
   return (
-    <div className="flex flex-col border-l overflow-hidden" style={style}>
+    <div className="flex flex-col overflow-hidden bg-card" style={style}>
       <div className="shrink-0 border-b px-3 py-3">
         <div className="mb-2 text-[10px] uppercase tracking-wider text-muted-foreground">Agent context</div>
         <div className="flex min-w-0 items-center gap-2">

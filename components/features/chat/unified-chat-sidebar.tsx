@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState, type ReactNode } from "react"
+import { useEffect, useRef, useState, type ReactNode } from "react"
 import { motion } from "motion/react"
 import { ChevronDown, ChevronRight, MailOpen, Plus, Radio } from "lucide-react"
 import { AgentAvatar } from "@/components/ui/agent-avatar"
@@ -14,7 +14,7 @@ import {
   SidebarSearch,
   SidebarToolbar,
 } from "@/components/layout/sidebar-kit"
-import { UnifiedConversationSection, useUnifiedConversations } from "@/components/features/conversations/unified-chat"
+import { filterUnifiedConversationRows, UnifiedConversationSection, useUnifiedConversations } from "@/components/features/conversations/unified-chat"
 import { CHAT_SCOPES, scopeCount } from "./chat-kind"
 import type { Props, ConversationRow } from "./conversations-sidebar"
 import type { ChatTreeAgent } from "./chat-tree-data"
@@ -76,6 +76,14 @@ function ScopedChatSidebar({ props, rows, query, setQuery, stateKey }: SidebarPr
 
   const selectedRoom = chat?.list.data?.pages.flatMap((page) => page.conversations).find((room) => room.id === chat.selectedId)
   const selectedSection = selectedRoom ? selectedRoom.is_direct ? "people" : "rooms" : null
+  const revealedRoomId = useRef<string | null>(null)
+  useEffect(() => {
+    if (!chat?.selectedId) { revealedRoomId.current = null; return }
+    if (!selectedRoom || revealedRoomId.current === selectedRoom.id) return
+    revealedRoomId.current = selectedRoom.id
+    if (selectedRoom.is_direct && scope !== "all" && scope !== "direct") onScopeChange("direct")
+    if (!selectedRoom.is_direct && scope !== "all") onScopeChange("all")
+  }, [chat?.selectedId, selectedRoom, scope, onScopeChange])
   useEffect(() => {
     if (!chat?.selectedId || !selectedSection) return
     setClosed((old) => old[selectedSection] ? { ...old, [selectedSection]: false } : old)
@@ -106,20 +114,27 @@ function ScopedChatSidebar({ props, rows, query, setQuery, stateKey }: SidebarPr
   const q = query.trim().toLowerCase()
   const pickerMatches = roster.filter((agent) => !q || agent.name.toLowerCase().includes(q))
   const matching = roster.filter((agent) =>
-    (!agentFilter || agentFilter === agent.id || rows.some((row) => row.agent.id === agent.id && row.thread.id === activeThreadId)) &&
+    (!agentFilter || agentFilter === agent.id) &&
     (!unread || rows.some((row) => row.agent.id === agent.id && (row.thread.unread_count ?? 0) > 0) || rows.some((row) => row.agent.id === agent.id && row.thread.id === activeThreadId)) &&
     (!live || agent.status === "RUNNING" || rows.some((row) => row.agent.id === agent.id && row.thread.id === activeThreadId)) &&
     (!q || agent.name.toLowerCase().includes(q) || rows.some((row) => row.agent.id === agent.id && (row.thread.title || "").toLowerCase().includes(q))),
   )
   const rooms = chat?.list.data?.pages.flatMap((page) => page.conversations) ?? []
-  const peopleCount = rooms.filter((room) => room.is_direct).length
-  const roomCount = rooms.length - peopleCount
+  const peopleCount = filterUnifiedConversationRows(rooms, query, "people").length
+  const roomCount = filterUnifiedConversationRows(rooms, query, "rooms").length
   const filterCount = Number(unread) + Number(live) + Number(!!agentFilter)
+  // Workspace conversations have no agent association in their list payload.
+  // Agent-only predicates therefore show the agent roster alone; an empty
+  // Team Spaces section would imply those conversations were actually checked.
+  const showShared = !unread && !live && !agentFilter
+  const showPeople = showShared && (scope === "all" || scope === "direct") && (!q || peopleCount > 0)
+  const showTeamSpaces = showShared && scope === "all" && (!q || roomCount > 0)
   const sectionState = (name: string) => ({ open: !closed[name], onToggle: () => setClosed((old) => ({ ...old, [name]: !old[name] })) })
 
   function start(agent: ChatTreeAgent) {
     setPicking(false)
     setQuery("")
+    setAgentFilter(null)
     setExpanded((old) => ({ ...old, [agent.id]: true }))
     onStartConversation(agent)
   }
@@ -149,12 +164,13 @@ function ScopedChatSidebar({ props, rows, query, setQuery, stateKey }: SidebarPr
             return <SidebarRow key={item.id} selected={scope === item.id} onSelect={() => onScopeChange(item.id)}><Icon className="size-3.5 shrink-0 text-foreground/70" /><span className="min-w-0 flex-1 truncate">{item.label}</span>{count !== null && <span className="rounded-full bg-white/[0.05] px-1.5 text-[10px] tabular-nums text-muted-foreground">{count}</span>}</SidebarRow>
           })}
         </Section>
-        <Section title="People" count={peopleCount} {...sectionState("people")}><UnifiedConversationSection query={query} section="people" onSelect={onUnifiedSelect} /></Section>
+        {showPeople && <Section title="People" count={peopleCount} {...sectionState("people")}><UnifiedConversationSection query={query} section="people" showLoadMore={!showTeamSpaces} onSelect={onUnifiedSelect} /></Section>}
         <Section title="Agents" count={matching.length} {...sectionState("agents")}>
           {props.loadError && <p role="alert" className="p-3 text-xs">Agents could not be loaded. <button type="button" className="underline" onClick={props.onRetryRoster}>Retry</button></p>}
           {!props.threadsLoaded && <p className="px-3 py-2 text-xs text-muted-foreground">Loading sessions…</p>}
+          {!props.loadError && !!agents && matching.length === 0 && <p className="px-3 py-2 text-xs text-muted-foreground">No matching agents.</p>}
           {matching.map((agent) => {
-            const sessions = rows.filter((row) => row.agent.id === agent.id && (!unread || !!row.thread.unread_count || row.thread.id === activeThreadId) && (!live || agent.status === "RUNNING" || row.thread.id === activeThreadId))
+            const sessions = rows.filter((row) => row.agent.id === agent.id && (!unread || !!row.thread.unread_count || row.thread.id === activeThreadId) && (!live || agent.status === "RUNNING" || row.thread.id === activeThreadId) && (!q || agent.name.toLowerCase().includes(q) || (row.thread.title || "").toLowerCase().includes(q)))
             const isDraft = draftConversation?.agent.id === agent.id
             const selected = isDraft || sessions.some((row) => row.thread.id === activeThreadId)
             const open = expanded[agent.id] || !!query
@@ -177,7 +193,7 @@ function ScopedChatSidebar({ props, rows, query, setQuery, stateKey }: SidebarPr
           </div>
           })}
         </Section>
-        <Section title="Team spaces" count={roomCount} {...sectionState("rooms")}><UnifiedConversationSection query={query} section="rooms" onSelect={onUnifiedSelect} /></Section>
+        {showTeamSpaces && <Section title="Team spaces" count={roomCount} {...sectionState("rooms")}><UnifiedConversationSection query={query} section="rooms" onSelect={onUnifiedSelect} /></Section>}
       </>}
     </div>
   </div>

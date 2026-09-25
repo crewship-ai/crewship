@@ -76,6 +76,60 @@ describe("unified Chat", () => {
     expect(screen.getByRole("button", { name: "Open Ava chat" })).toBeInTheDocument()
   })
 
+  it("shows shared rooms only in All and sizes people, agents and rooms alike", async () => {
+    const teamRoom = { ...room, id: "team-room", title: "Design updates", kind: "channel", is_direct: false }
+    fixtures.api.mockImplementation(async (url: string, options?: RequestInit) => {
+      if (options?.method === "PUT" || url.includes("/read")) return new Response(null, { status: 204 })
+      if (url.includes("/messages")) return Response.json({ messages: [], has_more: false })
+      if (url.includes("/conversations/room?")) return Response.json(room)
+      return Response.json({ conversations: [room, teamRoom], next_offset: null })
+    })
+    render(wrap(<UnifiedChatProvider><ChatClient /></UnifiedChatProvider>))
+    const person = await screen.findByRole("button", { name: /Alice · Bob Direct message/ })
+    const agent = screen.getByRole("button", { name: "Open Ava chat" })
+    expect(person.className).toContain("h-9")
+    expect(person.className).toContain("text-xs")
+    expect(agent.className).toContain("min-h-9")
+    expect(agent.className).toContain("text-xs")
+    expect(screen.queryByRole("region", { name: "Team spaces" })).not.toBeInTheDocument()
+
+    const activity = screen.getByRole("region", { name: "Activity" })
+    fireEvent.click(within(activity).getByRole("button", { name: /^All/ }))
+    const spaces = screen.getByRole("region", { name: "Team spaces" })
+    const space = within(spaces).getByRole("button", { name: /Design updates Workspace channel/ })
+    expect(space.className).toContain("h-9")
+    expect(space.className).toContain("text-xs")
+    fireEvent.click(within(activity).getByRole("button", { name: /^Routines/ }))
+    expect(screen.queryByRole("region", { name: "People" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("region", { name: "Team spaces" })).not.toBeInTheDocument()
+    fireEvent.click(within(activity).getByRole("button", { name: /^All/ }))
+    fireEvent.click(screen.getByRole("button", { name: "Filter" }))
+    fireEvent.click(screen.getByRole("button", { name: "Ava" }))
+    expect(screen.queryByRole("region", { name: "People" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("region", { name: "Team spaces" })).not.toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Open Ava chat" })).toBeInTheDocument()
+  })
+
+  it("reveals a linked team space in All without locking a later scope choice", async () => {
+    const teamRoom = { ...room, id: "team-room", title: "Design updates", kind: "channel", is_direct: false }
+    window.history.replaceState(null, "", "/chat?conversation=team-room&workspace_id=ws")
+    params = new URLSearchParams(window.location.search)
+    fixtures.api.mockImplementation(async (url: string) => {
+      if (url.includes("/conversations/team-room?")) return Response.json(teamRoom)
+      if (url.includes("/conversations/team-room/agents")) return Response.json({ agents: [] })
+      if (url.includes("/conversations/team-room/agent-jobs")) return Response.json({ jobs: [] })
+      if (url.includes("/messages")) return Response.json({ messages: [], has_more: false })
+      return Response.json({ conversations: [room, teamRoom], next_offset: null })
+    })
+    render(wrap(<UnifiedChatProvider><ChatClient /></UnifiedChatProvider>))
+    const activity = screen.getByRole("region", { name: "Activity" })
+    expect(await screen.findByRole("region", { name: "Team spaces" })).toBeInTheDocument()
+    expect(within(activity).getByRole("button", { name: /^All/ })).toHaveAttribute("aria-pressed", "true")
+    fireEvent.click(within(activity).getByRole("button", { name: /^Direct/ }))
+    expect(screen.queryByRole("region", { name: "Team spaces" })).not.toBeInTheDocument()
+    expect(within(activity).getByRole("button", { name: /^Direct/ })).toHaveAttribute("aria-pressed", "true")
+  })
+
   it("shows people and agents in one sidebar and gives a human deep link precedence without creating an agent session", async () => {
     render(wrap(<UnifiedChatProvider><ChatClient /></UnifiedChatProvider>))
     await screen.findByRole("textbox", { name: "Message Alice · Bob" })

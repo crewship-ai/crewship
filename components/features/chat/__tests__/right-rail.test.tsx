@@ -97,7 +97,7 @@ it("lets keyboard users resize the drawer within its bounds", () => {
   expect(separator).toHaveAttribute("aria-valuenow", "280")
   fireEvent.keyDown(separator, { key: "End" })
   fireEvent.keyDown(separator, { key: "ArrowLeft" })
-  expect(separator).toHaveAttribute("aria-valuenow", "720")
+  expect(separator).toHaveAttribute("aria-valuenow", "520")
 })
 
 
