@@ -31,6 +31,7 @@ import { useSmoothText } from "@/hooks/use-smooth-text"
 import type { ChatTurn, TurnPart } from "@/hooks/use-chat"
 import { groupTurnParts, type ToolNode } from "./turn-grouping"
 import { cn } from "@/lib/utils"
+import { visibleAgentText } from "@/lib/chat-text"
 import { formatCost } from "@/lib/utils/format"
 import { formatDurationMillis } from "@/lib/time"
 
@@ -552,19 +553,22 @@ function ThinkingBlock({ part }: { part: TurnPart }) {
 }
 
 export function AssistantTurn({ turn, onCopy, onFileClick, agentId, chatId, workspaceId }: AssistantTurnProps) {
+  const visibleParts = turn.parts
+    .map((part) => part.type === "text" ? { ...part, content: visibleAgentText(part.content) } : part)
+    .filter((part) => part.type !== "text" || part.content !== "")
   // Collect all text content for copy action
-  const fullText = turn.parts
+  const fullText = visibleParts
     .filter((p) => p.type === "text")
     .map((p) => p.content)
     .join("")
 
   // Check if any text part has delegation content
-  const hasDelegation = turn.parts.some(
+  const hasDelegation = visibleParts.some(
     (p) => p.type === "text" && p.content.startsWith("[DELEGATED")
   )
 
   // Check for file creation notification
-  const fileCreationPart = turn.parts.find(
+  const fileCreationPart = visibleParts.find(
     (p) => p.type === "text" && /file (created|written|saved)/i.test(p.content)
   )
   const fileMatchRaw = fileCreationPart?.content.match(/[`"]?([a-zA-Z0-9_\-/.]+\.[a-zA-Z0-9]+)[`"]?/)
@@ -575,7 +579,7 @@ export function AssistantTurn({ turn, onCopy, onFileClick, agentId, chatId, work
 
   return (
     <Message from="assistant">
-      {groupTurnParts(turn.parts).map((node, nodeIdx) => {
+      {groupTurnParts(visibleParts).map((node, nodeIdx) => {
         if (node.kind === "activity") {
           return <ActivityGroup key={`act-${nodeIdx}`} tools={node.tools} agentId={agentId} />
         }

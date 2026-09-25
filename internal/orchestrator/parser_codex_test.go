@@ -326,6 +326,14 @@ func TestParseCodex_NotJSON(t *testing.T) {
 	}
 }
 
+func TestParseCodex_StdinProgressIsNotAssistantText(t *testing.T) {
+	var got []AgentEvent
+	parseCodexStreamJSON([]byte("Reading additional input from stdin..."), func(e AgentEvent) { got = append(got, e) })
+	if len(got) != 0 {
+		t.Fatalf("Codex startup progress reached the chat stream: %+v", got)
+	}
+}
+
 // TestParseCodex_UnknownItemType — forward-compat: unknown item subtypes
 // preserved in journal as system events so we can debug + add handling later
 // without the line being silently dropped.

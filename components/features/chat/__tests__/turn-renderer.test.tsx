@@ -273,6 +273,15 @@ describe("TurnRenderer", () => {
   })
 
   describe("assistant role", () => {
+    it("hides a legacy turn containing only Codex startup progress", () => {
+      const turn: ChatTurn = {
+        ...assistantTurn(),
+        parts: [makePart({ content: "Reading additional input from stdin...\n" })],
+      }
+      const { container } = render(<TurnRenderer turn={turn} onCopy={noop} onFileClick={noop} />)
+      expect(container.textContent).toBe("")
+      expect(screen.queryByTestId("assistant-turn-mock")).toBeNull()
+    })
     it("delegates rendering to AssistantTurn", () => {
       render(
         <TurnRenderer turn={assistantTurn("a-42")} onCopy={noop} onFileClick={noop} />,

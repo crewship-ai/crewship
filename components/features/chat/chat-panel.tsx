@@ -26,7 +26,7 @@ import {
 } from "@/components/ai-elements/conversation"
 import { renderAskTemplate } from "@/lib/ask-template"
 import { playSoundOnce } from "@/lib/notification-sound-coordinator"
-import { useChat, type HistoryPart } from "@/hooks/use-chat"
+import { useChat, type ChatTurn, type HistoryPart } from "@/hooks/use-chat"
 import { useSession } from "@/hooks/use-auth"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { useDrawerStore } from "@/stores/drawer-store"
@@ -59,6 +59,7 @@ import type { ChatKind } from "./chat-kind"
 import type { FileEntry } from "./chat-tree-row"
 import { useChatAgent } from "./chat-agent-context"
 import { ThinkingAvatar } from "./messages/thinking-avatar"
+import { visibleAgentText } from "@/lib/chat-text"
 import { useComposerStore, messageOwnAttachments } from "@/stores/composer-store"
 import { getSuggestions } from "@/lib/agent-suggestions"
 import { apiFetch } from "@/lib/api-fetch"
@@ -1329,18 +1330,24 @@ function OriginChip({ origin }: { origin?: string | null }) {
 
 interface StreamingIndicatorProps {
   isStreaming: boolean
-  turns: { role: string }[]
+  turns: Pick<ChatTurn, "role" | "parts">[]
   agentName?: string
 }
 
-/** Pre-first-token indicator: a shimmering "<name> is thinking…" label (the
- *  reasoning-shimmer pattern) instead of generic bouncing dots. Shows only in the gap
- *  between sending and the first streamed event. */
+/** Show progress until the first actual assistant reply, including after
+ *  session-start metadata arrives. CLI startup text is not a reply. */
 function StreamingIndicator({ isStreaming, turns, agentName }: StreamingIndicatorProps) {
-  if (!isStreaming || turns.length === 0 || turns[turns.length - 1]?.role !== "user") return null
+  if (!isStreaming || turns.length === 0) return null
+  const lastUserIndex = turns.findLastIndex((turn) => turn.role === "user")
+  const hasReply = turns.slice(lastUserIndex + 1).some((turn) =>
+    turn.role === "assistant" && turn.parts.some((part) =>
+      part.type === "text" && visibleAgentText(part.content).trim() !== ""
+    )
+  )
+  if (hasReply) return null
   return (
     <div className="flex items-center gap-2 px-4 py-3 text-sm animate-in fade-in">
-      <Shimmer duration={1.6}>{`${agentName ?? "Agent"} is thinking…`}</Shimmer>
+      <Shimmer duration={1.6}>{`${agentName ?? "Agent"} is working…`}</Shimmer>
     </div>
   )
 }
