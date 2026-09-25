@@ -69,7 +69,7 @@ export function AgentArtifactsTab({ agentId, workspaceId, crewId, agentSlug }: {
     </div>
     {loading ? <p role="status" className="py-3 text-muted-foreground">Loading artifacts…</p>
       : error ? <p role="alert" className="py-3 text-muted-foreground">Artifacts could not be loaded. Try refresh.</p>
-      : artifacts.length === 0 ? <p className="rounded-md border border-dashed p-3 text-muted-foreground">No previewable documents found in this agent&apos;s files yet.</p>
+      : artifacts.length === 0 ? <p className="rounded-md border border-dashed p-3 text-muted-foreground">No artifacts yet.</p>
       : <ul className="space-y-1.5">{artifacts.map((file) => {
         const ext = extension(file.name)
         const Icon = ext === "csv" || ext === "tsv" || ext === "xlsx" || ext === "xls" ? FileSpreadsheet : ext === "html" || ext === "htm" ? FileCode2 : ["png", "jpg", "jpeg", "webp"].includes(ext) ? FileImage : FileText
@@ -79,6 +79,5 @@ export function AgentArtifactsTab({ agentId, workspaceId, crewId, agentSlug }: {
           <span className="rounded border px-1 py-0.5 text-[9px] uppercase text-muted-foreground">{ext}</span>
         </button></li>
       })}</ul>}
-    <p className="mt-3 leading-relaxed text-muted-foreground">Agent configuration and run files stay out of this view.</p>
   </div>
 }
