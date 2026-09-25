@@ -39,8 +39,8 @@ function WorkRow({ href, icon, kind, status, title, meta, action }: {
     <span className="hidden w-24 shrink-0 sm:block">{status}</span>
     <span className="min-w-0 flex-1 truncate text-body font-medium">{title}</span>
     <span className="hidden max-w-[180px] shrink-0 truncate text-label text-muted-foreground md:block">{meta}</span>
-    <span className="hidden shrink-0 text-label font-medium text-primary-hover lg:block">{action}</span>
-    <ArrowUpRight className="h-3.5 w-3.5 shrink-0 text-primary-hover" aria-hidden />
+    <span className="hidden shrink-0 text-label font-medium text-muted-foreground transition-colors group-hover:text-primary-hover lg:block">{action}</span>
+    <ArrowUpRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground transition-colors group-hover:text-primary-hover" aria-hidden />
   </Link>
 }
 
@@ -72,13 +72,13 @@ export function DashboardResults({ review, inProgress, completed, activeAgentRun
   }
   const show = (section: Filter) => filter === "all" || filter === section
 
-  function issueRow(issue: Mission) {
+  function issueRow(issue: Mission, finished = false) {
     const humanOwned = Boolean(issue.owner) || issue.assignee_type === "user"
     const agent = humanOwned ? undefined : agents.find((a) => a.id === (issue.assignee_type === "agent" ? issue.assignee_id : issue.lead_agent_id))
     const crew = crews.find((c) => c.id === issue.crew_id)
     const owner = issue.owner ? issue.owner.name || "Issue owner" : humanOwned ? issue.assignee_name || "Issue owner" : agent?.name || issue.assignee_name || issue.lead_agent_name || crew?.name || "Workspace"
     const icon = humanOwned ? <UserRound className="h-6 w-6 shrink-0 text-muted-foreground" aria-hidden /> : agent ? <AgentAvatar seed={agent.slug} agentId={agent.id} workspaceId={workspaceId} alt={agent.name} className="h-6 w-6 shrink-0 rounded-md bg-muted" /> : crew ? <CrewIcon icon={crew.icon || "users"} color={crew.color} size="sm" className="shrink-0" /> : <CircleDot className="h-6 w-6 shrink-0 text-primary-hover" aria-hidden />
-    return <WorkRow key={`issue-${issue.id}`} href={issue.identifier ? entityHref({ kind: "issue", identifier: issue.identifier }) : entityHref({ kind: "issues" })} icon={icon} kind={issue.identifier || "Issue"} status={<StatusPill status={issue.status} />} title={issue.title} meta={`${owner} · ${formatRelativeTime(issue.updated_at)}`} action={issue.status === "REVIEW" ? "Review work" : "Open issue"} />
+    return <WorkRow key={`issue-${issue.id}`} href={issue.identifier ? entityHref({ kind: "issue", identifier: issue.identifier }) : entityHref({ kind: "issues" })} icon={icon} kind={issue.identifier || "Issue"} status={<StatusPill status={issue.status} tone={finished ? "muted" : undefined} />} title={issue.title} meta={`${owner} · ${formatRelativeTime(issue.updated_at)}`} action={issue.status === "REVIEW" ? "Review work" : "Open issue"} />
   }
 
   return <DashboardCard title="Results & review" icon={CheckCheck} hint={<span className="hidden sm:inline">{runningCount > 0 ? `${runningCount} live now` : "Live work and outcomes"}</span>} action={<span className="flex items-center gap-2"><ListScrollControls label="work list" controller={listScroll} /><Link href={entityHref({ kind: "issues" })} className="text-primary-hover hover:underline">All issues →</Link></span>} className="flex h-full min-h-0 flex-col border-primary/20">
@@ -97,11 +97,11 @@ export function DashboardResults({ review, inProgress, completed, activeAgentRun
         })}
         {liveRoutines.map((run) => <WorkRow key={`routine-live-${run.id}`} href={entityHref({ kind: "run", runId: run.id, pipelineSlug: run.pipeline_slug })} icon={<ScrollText className="h-6 w-6 shrink-0 text-primary-hover" aria-hidden />} kind="Routine" status={<StatusPill status={run.status.toUpperCase()} live />} title={run.pipeline_name || run.pipeline_slug} meta={formatRelativeTime(run.started_at)} action="Follow run" />)}
       </WorkSection>}
-      {show("progress") && <WorkSection title="In progress" count={inProgress.length}>{inProgress.map(issueRow)}</WorkSection>}
-      {show("review") && <WorkSection title="For review" count={review.length}>{review.map(issueRow)}</WorkSection>}
+      {show("progress") && <WorkSection title="In progress" count={inProgress.length}>{inProgress.map((issue) => issueRow(issue))}</WorkSection>}
+      {show("review") && <WorkSection title="For review" count={review.length}>{review.map((issue) => issueRow(issue))}</WorkSection>}
       {show("finished") && <WorkSection title="Finished recently" count={completed.length + routineResults.length}>
-        {completed.map(issueRow)}
-        {routineResults.map((run) => <WorkRow key={`routine-done-${run.id}`} href={entityHref({ kind: "run", runId: run.id, pipelineSlug: run.pipeline_slug })} icon={<ScrollText className="h-6 w-6 shrink-0 text-success" aria-hidden />} kind="Routine" status={<StatusPill status="COMPLETED" />} title={run.pipeline_name || run.pipeline_slug} meta={formatRelativeTime(run.ended_at || run.started_at)} action="Open result" />)}
+        {completed.map((issue) => issueRow(issue, true))}
+        {routineResults.map((run) => <WorkRow key={`routine-done-${run.id}`} href={entityHref({ kind: "run", runId: run.id, pipelineSlug: run.pipeline_slug })} icon={<ScrollText className="h-6 w-6 shrink-0 text-muted-foreground" aria-hidden />} kind="Routine" status={<StatusPill status="COMPLETED" tone="muted" />} title={run.pipeline_name || run.pipeline_slug} meta={formatRelativeTime(run.ended_at || run.started_at)} action="Open result" />)}
       </WorkSection>}
     </div>}
   </DashboardCard>

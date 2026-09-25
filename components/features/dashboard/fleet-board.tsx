@@ -73,8 +73,8 @@ export function prioritiseFleet(cards: FleetCard[]): FleetCard[] {
 const AGENT_DOT: Record<string, string> = {
   RUNNING: "bg-primary shadow-[0_0_0_3px_rgba(30,123,254,0.25)]",
   ERROR: "bg-destructive",
-  IDLE: "bg-success",
-  ACTIVE: "bg-success",
+  IDLE: "bg-muted-foreground",
+  ACTIVE: "bg-muted-foreground",
 }
 
 export function fleetAgentStatus(agents: Pick<AgentSummary, "status">[]): string {
@@ -133,7 +133,7 @@ export function FleetBoard({ cards: unordered, workspaceId }: { cards: FleetCard
                 ))}
                 {card.agents.length > 5 && <span className="text-micro text-muted-foreground">+{card.agents.length - 5}</span>}
               </span>
-              <StatusPill tone={row.tone} label={row.status} live={row.tone === "blue"} className="shrink-0" />
+              <StatusPill tone={row.tone === "success" ? "muted" : row.tone} label={row.status} live={row.tone === "blue"} className="shrink-0" />
             </div>
           )
         })}

@@ -106,7 +106,7 @@ describe("small visual helpers", () => {
 
   it("colours a schedule's last-run dot", () => {
     expect(scheduleDotClass(undefined)).toMatch(/muted/)
-    expect(scheduleDotClass("completed")).toMatch(/success/)
+    expect(scheduleDotClass("completed")).toMatch(/muted/)
     expect(scheduleDotClass("failed")).toMatch(/destructive/)
     expect(scheduleDotClass("running")).toMatch(/primary/)
   })
