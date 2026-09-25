@@ -17,12 +17,14 @@ export interface ArtifactTab {
 
 interface ArtifactState {
   open: boolean
+  focus: boolean
   tabs: ArtifactTab[]
   activeId: string | null
   openFile: (tab: ArtifactTab) => void
   closeTab: (id: string) => void
   setActive: (id: string) => void
   setOpen: (v: boolean) => void
+  setFocus: (v: boolean) => void
   closeAll: () => void
   /** Drop every tab whose agentId differs from the one passed in.
    *  Called when the active agent changes so stale tabs can't be
@@ -32,6 +34,7 @@ interface ArtifactState {
 
 export const useArtifactStore = create<ArtifactState>((set, get) => ({
   open: false,
+  focus: false,
   tabs: [],
   activeId: null,
   openFile: (tab) => {
@@ -49,11 +52,12 @@ export const useArtifactStore = create<ArtifactState>((set, get) => ({
     const next = tabs.filter((t) => t.id !== id)
     const nextActive =
       activeId === id ? next[next.length - 1]?.id ?? null : activeId
-    set({ tabs: next, activeId: nextActive, open: next.length > 0 })
+    set({ tabs: next, activeId: nextActive, open: next.length > 0, focus: next.length > 0 ? get().focus : false })
   },
   setActive: (id) => set({ activeId: id, open: true }),
-  setOpen: (open) => set({ open }),
-  closeAll: () => set({ open: false, tabs: [], activeId: null }),
+  setOpen: (open) => set({ open, focus: open ? get().focus : false }),
+  setFocus: (focus) => set({ focus }),
+  closeAll: () => set({ open: false, focus: false, tabs: [], activeId: null }),
   pruneToAgent: (agentId) => {
     const { tabs, activeId } = get()
     const kept = tabs.filter((t) => t.agentId === agentId)
@@ -63,6 +67,7 @@ export const useArtifactStore = create<ArtifactState>((set, get) => ({
       tabs: kept,
       activeId: stillActive ? activeId : (kept[kept.length - 1]?.id ?? null),
       open: kept.length > 0 ? get().open : false,
+      focus: kept.length > 0 ? get().focus : false,
     })
   },
 }))

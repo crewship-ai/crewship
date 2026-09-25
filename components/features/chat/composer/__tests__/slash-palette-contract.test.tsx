@@ -111,7 +111,7 @@ const CLIENT_EFFECT: Record<string, (onCommand: ReturnType<typeof vi.fn>) => voi
   regenerate: (onCommand) => expect(onCommand).toHaveBeenCalledWith("regenerate"),
   search: (onCommand) => expect(onCommand).toHaveBeenCalledWith("search"),
   export: (onCommand) => expect(onCommand).toHaveBeenCalledWith("export"),
-  "open-files": () => expect(toggleDrawer).toHaveBeenCalledWith("files"),
+  "open-artifacts": () => expect(toggleDrawer).toHaveBeenCalledWith("artifacts"),
   "toggle-drawer": () => expect(toggleDrawer).toHaveBeenCalled(),
 }
 

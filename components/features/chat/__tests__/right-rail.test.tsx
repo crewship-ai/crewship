@@ -19,7 +19,7 @@ import { useDrawerStore } from "@/stores/drawer-store"
 import { AGENT_EXTERNAL_TRIGGERS } from "@/lib/feature-gates"
 
 beforeEach(() => {
-  useDrawerStore.setState({ open: false, activeTab: "files", mode: "push", width: 380 })
+  useDrawerStore.setState({ open: false, activeTab: "artifacts", mode: "push", width: 380 })
 })
 afterEach(() => cleanup())
 
@@ -27,9 +27,10 @@ describe("RightRail — the controls say what they are", () => {
   it("gives every control an accessible name", () => {
     render(<RightRail />)
 
-    for (const label of ["Files", "Artifacts", "Work"]) {
+    for (const label of ["Artifacts", "Work"]) {
       expect(screen.getByRole("tab", { name: label })).toBeInTheDocument()
     }
+    expect(screen.queryByRole("tab", { name: "Files" })).toBeNull()
     expect(screen.queryByRole("tab", { name: "Team" })).toBeNull()
     expect(screen.getByRole("tablist", { name: /side panels/i })).toBeInTheDocument()
   })
@@ -50,9 +51,8 @@ describe("RightRail — the controls say what they are", () => {
     // Shortcuts follow the visible order when the panel set changes.
     render(<RightRail />)
 
-    expect(screen.getByRole("tab", { name: "Files" })).toHaveAttribute("aria-keyshortcuts", "Meta+1")
-    expect(screen.getByRole("tab", { name: "Artifacts" })).toHaveAttribute("aria-keyshortcuts", "Meta+2")
-    expect(screen.getByRole("tab", { name: "Work" })).toHaveAttribute("aria-keyshortcuts", "Meta+3")
+    expect(screen.getByRole("tab", { name: "Artifacts" })).toHaveAttribute("aria-keyshortcuts", "Meta+1")
+    expect(screen.getByRole("tab", { name: "Work" })).toHaveAttribute("aria-keyshortcuts", "Meta+2")
   })
 
   it("marks the open panel as the selected tab", () => {
@@ -61,7 +61,7 @@ describe("RightRail — the controls say what they are", () => {
     fireEvent.click(screen.getByRole("tab", { name: "Artifacts" }))
 
     expect(screen.getByRole("tab", { name: "Artifacts" })).toHaveAttribute("aria-selected", "true")
-    expect(screen.getByRole("tab", { name: "Files" })).toHaveAttribute("aria-selected", "false")
+    expect(screen.getByRole("tab", { name: "Work" })).toHaveAttribute("aria-selected", "false")
   })
 
   it("keeps the labelled Work control quiet on hover and selection", () => {

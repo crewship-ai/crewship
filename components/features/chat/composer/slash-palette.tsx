@@ -107,13 +107,13 @@ export const CLIENT_ACTION_CONTRACT: Record<string, SlashActionClassification> =
   },
   search: { state: "enabled" },
   export: { state: "enabled" },
-  "open-files": { state: "enabled" },
+  "open-artifacts": { state: "enabled" },
   // The Context tab moved to the agent canvas. The rail no longer renders a
-  // button for it and RightRail rewrites a persisted "context" tab back to
-  // "files" on mount, so this row opened the Files panel under another name.
+  // button for it and RightRail rewrites a persisted "context" tab to
+  // Artifacts on mount.
   "open-context": {
     state: "hidden",
-    reason: "The Context tab moved to the agent canvas; this opened Files",
+    reason: "The Context tab moved to the agent canvas",
   },
   "toggle-drawer": { state: "enabled" },
   // "Hand off to subagent" — chat has no subagent hand-off. Delegation
@@ -282,14 +282,14 @@ const COMMANDS: SlashCommand[] = [
     },
   },
   {
-    id: "open-files",
-    label: "Open Files panel",
+    id: "open-artifacts",
+    label: "Open Artifacts panel",
     icon: FileCode,
     shortcut: "⌘1",
     group: "view",
     handledBy: "palette",
     run: ({ drawer, close }) => {
-      drawer.toggle("files")
+      drawer.toggle("artifacts")
       close()
     },
   },

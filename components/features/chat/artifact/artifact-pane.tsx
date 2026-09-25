@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import dynamic from "next/dynamic"
 import { motion } from "motion/react"
-import { Download, Eye, FileCode2, FileSpreadsheet, FileText, Pause, Play, X } from "lucide-react"
+import { ArrowLeft, Download, Eye, FileCode2, FileSpreadsheet, FileText, Maximize2, Minimize2, Pause, Play, X } from "lucide-react"
 import { marked } from "marked"
 import { toast } from "sonner"
 
@@ -84,13 +84,14 @@ function ArtifactPreview({ path, snapshot, url, revision, onClose }: { path: str
 }
 
 /** Inline workspace: its parent places this beside the transcript. */
-export function ArtifactPane({ agentId, width = 540 }: { agentId: string; width?: number }) {
+export function ArtifactPane({ agentId, width = 540, expanded = false }: { agentId: string; width?: number; expanded?: boolean }) {
   const { workspaceId, role } = useWorkspace()
   const canEdit = isManagerTier(role)
   const open = useArtifactStore((s) => s.open)
   const tabs = useArtifactStore((s) => s.tabs)
   const activeId = useArtifactStore((s) => s.activeId)
   const setOpen = useArtifactStore((s) => s.setOpen)
+  const setFocus = useArtifactStore((s) => s.setFocus)
   const setActive = useArtifactStore((s) => s.setActive)
   const closeTab = useArtifactStore((s) => s.closeTab)
   const pruneToAgent = useArtifactStore((s) => s.pruneToAgent)
@@ -170,14 +171,15 @@ export function ArtifactPane({ agentId, width = 540 }: { agentId: string; width?
   return <motion.aside
     initial={{ x: 32, opacity: 0 }} animate={{ x: 0, opacity: 1 }} transition={{ duration: 0.2 }}
     aria-label="Live artifact"
-    className="flex h-full min-h-0 min-w-0 shrink-0 flex-col border-l border-border bg-background max-md:absolute max-md:inset-0 max-md:z-30 max-md:!w-full"
-    style={{ width: `min(${width}px, 42vw)` }}
+    className={cn("flex h-full min-h-0 min-w-0 flex-col border-l border-border bg-background max-md:absolute max-md:inset-0 max-md:z-30 max-md:!w-full", expanded ? "flex-1" : "shrink-0")}
+    style={expanded ? { width: 0 } : { width: `min(${width}px, 42vw)` }}
   >
     <header className="flex min-h-14 shrink-0 items-center gap-2 border-b border-border bg-card px-3 py-2">
+      <Button variant="ghost" size="icon-sm" aria-label="Back to artifacts" onClick={() => setOpen(false)}><ArrowLeft className="size-4" /></Button>
       <span className="flex size-8 shrink-0 items-center justify-center rounded-md border border-border bg-muted/40"><ArtifactIcon className="size-4 text-primary" /></span>
       <div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold" title={active?.title}>{active?.title ?? "Artifact"}</p><p className="truncate text-[11px] text-muted-foreground" title={path}>{path}</p></div>
+      <Button variant="outline" size="sm" aria-label={expanded ? "Show chat alongside" : "Expand artifact"} onClick={() => setFocus(!expanded)}>{expanded ? <Minimize2 className="size-3.5" /> : <Maximize2 className="size-3.5" />}<span className="hidden lg:inline">{expanded ? "Chat" : "Expand"}</span></Button>
       {loaded && <Button variant="outline" size="sm" asChild><a href={url} download={active?.title} aria-label="Download artifact"><Download className="size-3.5" /> Download</a></Button>}
-      <Button variant="ghost" size="icon-sm" aria-label="Close artifact" onClick={() => setOpen(false)}><X className="size-4" /></Button>
     </header>
     {tabs.length > 1 && <div className="flex shrink-0 gap-1 overflow-x-auto border-b px-2 py-1">
       {tabs.filter((t) => t.agentId === agentId).map((tab) => <div key={tab.id} className={cn("flex items-center rounded text-xs", activeId === tab.id ? "bg-muted text-foreground" : "text-muted-foreground")}>

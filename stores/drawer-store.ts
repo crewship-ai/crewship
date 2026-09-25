@@ -6,8 +6,7 @@ import { persist, createJSONStorage } from "zustand/middleware"
 // "context" is no longer a chat-side tab (moved to agent canvas), but
 // older persisted user state may still hold it as activeTab. Keep it
 // in the union so persisted JSON deserialises cleanly; the rail just
-// doesn't render a button for it any more, and the right-panel
-// migrate effect on mount silently rewrites context → files.
+// doesn't render a button for it any more, and the rail migrates it to Artifacts.
 export type DrawerTab = "files" | "artifacts" | "work" | "triggers" | "team" | "context"
 export type DrawerMode = "overlay" | "push"
 
@@ -27,7 +26,7 @@ export const useDrawerStore = create<DrawerState>()(
   persist(
     (set, get) => ({
       open: true,
-      activeTab: "files",
+      activeTab: "artifacts",
       mode: "push",
       width: 340,
       toggle: (tab) => {

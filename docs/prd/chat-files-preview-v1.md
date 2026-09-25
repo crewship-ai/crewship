@@ -63,3 +63,23 @@ The current save route writes files and creates parent directories as a side
 effect, but using a hidden placeholder file as a folder control would be a
 misleading storage contract. Keep the control out of the UI until that API
 exists and is covered by the same role and path checks as file save.
+
+## Chat surface consolidation (September 25, 2026)
+
+The client-facing Files tab has been removed from Chat. The right rail now has
+Artifacts and Work only. Artifacts uses the agent-scoped download and save
+routes, with the existing live polling and previewers. Its list conservatively
+accepts PDF, HTML, CSV/TSV, XLS/XLSX and raster images outside run, attachment
+and configuration folders. Markdown is currently excluded from the client
+list, including the sample brief. This is a UI filter, not an authorization
+boundary or proof that the agent authored every matching file; creation
+provenance requires a separate backend contract.
+
+Clicking an artifact opens a preview beside chat. Expand gives the preview the
+main canvas, folds the left conversation list and restores the Artifacts list
+on the right for switching outputs. Returning to chat preserves the selected
+artifact. Transcript links use the same client-facing path filter, so an
+AGENTS.md or run-scaffolding link cannot enter the former Files editor flow.
+Agent configuration remains available on the agent card through its existing
+management route. The obsolete file workspace code is retained as an internal
+component for now, but Chat no longer exposes it.

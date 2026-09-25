@@ -45,8 +45,9 @@ import { ChatComposer } from "./composer/chat-composer"
 import { checkChatMessageSize } from "./hooks/use-message-submit"
 import { VirtualConversation, virtualChatEnabled } from "./virtual-conversation"
 import { ArtifactPane } from "./artifact/artifact-pane"
-import { FileWorkspace, type WorkspaceFile } from "./files/file-workspace"
 import { useArtifactStore } from "@/stores/artifact-store"
+import { isClientArtifactPath } from "./artifact/artifact-scope"
+import { relativeToAgent } from "./files/file-scope"
 import { FollowUps } from "./suggestions/follow-ups"
 import { AskRail } from "./asks/ask-rail"
 import { useAskForms } from "./asks/use-ask-forms"
@@ -58,7 +59,6 @@ import { ReconnectBanner } from "./messages/reconnect-banner"
 import { AgentStrip, type AgentStripAgent } from "./agent-strip"
 import { ChatEmptyState } from "./chat-empty-state"
 import type { ChatKind } from "./chat-kind"
-import type { FileEntry } from "./chat-tree-row"
 import { useChatAgent } from "./chat-agent-context"
 import { ThinkingAvatar } from "./messages/thinking-avatar"
 import { useComposerStore, messageOwnAttachments } from "@/stores/composer-store"
@@ -226,49 +226,17 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
     sessionLoadedFor.current = sessionId
   }, [sessionId])
 
-  const [files, setFiles] = useState<FileEntry[]>([])
-  const [filesLoading, setFilesLoading] = useState(false)
-  const [filesError, setFilesError] = useState<string | null>(null)
-  const [filesRevision, setFilesRevision] = useState(0)
-  const [workspaceFile, setWorkspaceFile] = useState<WorkspaceFile | null>(null)
-  const fileDirtyRef = useRef(false)
-  const openWorkspaceFile = useCallback((file: WorkspaceFile) => {
-    if (file.scope.kind !== "agent") return false
-    if (fileDirtyRef.current && !window.confirm("Discard unsaved file changes?")) return false
-    fileDirtyRef.current = false
-    setWorkspaceFile(file)
-    const drawer = useDrawerStore.getState()
-    drawer.setMode("push")
-    drawer.setActiveTab("files")
-    window.dispatchEvent(new CustomEvent("crewship:chat-file-workspace", { detail: { open: true } }))
-    return true
-  }, [])
-  const closeWorkspaceFile = useCallback(() => {
-    if (fileDirtyRef.current && !window.confirm("Discard unsaved file changes?")) return
-    fileDirtyRef.current = false
-    setWorkspaceFile(null)
-    window.dispatchEvent(new CustomEvent("crewship:chat-file-workspace", { detail: { open: false } }))
-  }, [])
-  const [previewFile, setPreviewFile] = useState<{ path: string } | null>(null)
-  const consumePreview = useCallback((request: { path: string }) => {
-    setPreviewFile((current) => current === request ? null : current)
-  }, [])
-  const retryFiles = useCallback(() => setFilesRevision((n) => n + 1), [])
   const openFilePreview = useCallback((path: string) => {
-    if (!openWorkspaceFile({ path, name: path.split("/").pop() || path, scope: { kind: "agent" } })) return
-    setPreviewFile({ path })
-    useDrawerStore.getState().setActiveTab("files")
+    const relative = relativeToAgent(path, chatAgent?.crewId, chatAgent?.slug)
+    if (!isClientArtifactPath(relative)) {
+      toast.error("This file is not available in Artifacts")
+      return
+    }
+    const title = path.split("/").pop() || path
+    useArtifactStore.getState().openFile({ id: `${agentId}:${path}`, agentId, path, title })
+    useDrawerStore.getState().setActiveTab("artifacts")
     if (mobilePanel) onMobilePanelChange?.("files")
-  }, [mobilePanel, onMobilePanelChange, openWorkspaceFile])
-
-  useEffect(() => {
-    setFiles([])
-    setFilesError(null)
-    setPreviewFile(null)
-    setWorkspaceFile(null)
-    fileDirtyRef.current = false
-    window.dispatchEvent(new CustomEvent("crewship:chat-file-workspace", { detail: { open: false } }))
-  }, [agentId, workspaceId, sessionId])
+  }, [agentId, chatAgent?.crewId, chatAgent?.slug, mobilePanel, onMobilePanelChange])
   // Narrow selectors — the panel only reads these three fields; a
   // whole-store subscription re-rendered the entire chat (message list
   // included) on every drawer width drag or unrelated store write.
@@ -276,6 +244,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
   const drawerActiveTab = useDrawerStore((s) => s.activeTab)
   const drawerMode = useDrawerStore((s) => s.mode)
   const artifactOpen = useArtifactStore((s) => s.open)
+  const artifactFocus = useArtifactStore((s) => s.focus)
   useEffect(() => {
     // Existing browser preferences may still say overlay. The chat context
     // now shares space with the transcript and the file workspace.
@@ -614,33 +583,6 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
     return ok
   }, [ensureSession])
 
-  // Mobile panels do not open the desktop drawer. Both layouts own visibility.
-  const filesVisible = mobilePanel === "files" || mobilePanel === "files-only"
-    || (mobilePanel === undefined && drawerOpen && drawerActiveTab === "files")
-  useEffect(() => {
-    if (!workspaceId || !filesVisible || !sessionId) return
-    const controller = new AbortController()
-    setFilesLoading(true)
-    setFilesError(null)
-    apiFetch(`/api/v1/agents/${agentId}/files?workspace_id=${workspaceId}`, { signal: controller.signal })
-      .then((r) => {
-        if (!r.ok) throw new Error("Couldn't load agent files.")
-        return r.json()
-      })
-      .then((data: FileEntry[] | null) => {
-        if (!controller.signal.aborted) setFiles(data ?? [])
-      })
-      .catch(() => {
-        if (!controller.signal.aborted) setFilesError("Couldn't load agent files.")
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) setFilesLoading(false)
-      })
-    return () => controller.abort()
-  }, [agentId, workspaceId, filesVisible, sessionId, filesRevision, isStreaming])
-
-  const filePanelProps = { filesLoading, filesError, onRetryFiles: retryFiles, previewFile, onPreviewHandled: consumePreview }
-
   // #2121 — a suggestion/follow-up chip sends the instant it's clicked, and
   // on a draft session `ensureSessionForSend` awaits a real POST. `isStreaming`
   // cannot change until a send produces a render, so two clicks inside that
@@ -950,9 +892,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
           key={`${workspaceId}:${agentId}:${sessionId}`}
           agentId={agentId}
           workspaceId={workspaceId}
-          files={files}
-          {...filePanelProps}
-          initialTab={mobilePanel === "more" ? "work" : "files"}
+          initialTab={mobilePanel === "more" ? "work" : "artifacts"}
           style={{ width: "100%", height: "100%" }}
         />
         <ArtifactPane agentId={agentId} />
@@ -1051,21 +991,9 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
 
   // Desktop: chat + icon rail; drawer overlays (or pushes) when open
   const pushOpen = drawerOpen && drawerMode === "push"
-  const showingWorkspaceFile = workspaceFile !== null && !artifactOpen
   return (
     <div className="relative flex h-full">
-      {showingWorkspaceFile && workspaceId && (
-        <div className="min-w-0 flex-1 overflow-hidden">
-          <FileWorkspace
-            file={workspaceFile}
-            agentId={agentId}
-            workspaceId={workspaceId}
-            onDirtyChange={(dirty) => { fileDirtyRef.current = dirty }}
-            onClose={closeWorkspaceFile}
-          />
-        </div>
-      )}
-      <div className={cn("flex flex-col overflow-hidden min-w-0", showingWorkspaceFile ? "hidden" : "flex-1")}>
+      <div className={cn("flex flex-col overflow-hidden min-w-0", artifactFocus && artifactOpen ? "hidden" : "flex-1")}>
         <ReconnectBanner status={connectionStatus} />
         {/* Who you are talking to, not the session id. The strip carries the
             agent (face, status, role, crew, model, skills, credentials); the
@@ -1159,22 +1087,19 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
         />
       </div>
 
-      {!artifactOpen && <RightDrawer>
+      <ArtifactPane agentId={agentId} expanded={artifactFocus} />
+      {(!artifactOpen || artifactFocus) && <RightDrawer>
         <RightPanel
           key={`${workspaceId}:${agentId}:${sessionId}`}
           agentId={agentId}
           workspaceId={workspaceId}
-          files={files}
-          {...filePanelProps}
           initialTab={drawerActiveTab}
           hideTabs
-          onOpenFile={openWorkspaceFile}
-          selectedFile={workspaceFile?.path}
           style={{ width: "100%", height: "100%" }}
         />
       </RightDrawer>}
 
-      {!artifactOpen && <RightRail className={cn(pushOpen && "border-l-0")} />}
+      {(!artifactOpen || artifactFocus) && <RightRail className={cn(pushOpen && "border-l-0")} />}
       {/* workspaceId is what makes the server-driven Actions group exist at
           all: useSlashCommands(undefined) never runs its query, so the palette
           rendered without it could only ever show the client rows. */}
@@ -1196,7 +1121,6 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
           onClose={() => setSlashAction(null)}
         />
       )}
-      <ArtifactPane agentId={agentId} />
       <ConversationSearch turns={turns} open={searchOpen} onOpenChange={setSearchOpen} />
       <ExportDialog turns={turns} agentName={agentName} open={exportOpen} onOpenChange={setExportOpen} />
     </div>

@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect } from "react"
-import { FileText, LayoutGrid, ListTodo } from "lucide-react"
+import { LayoutGrid, ListTodo } from "lucide-react"
 import { useHotkeys } from "react-hotkeys-hook"
 
 import { Button } from "@/components/ui/button"
@@ -11,14 +11,13 @@ import { useDrawerStore, type DrawerTab } from "@/stores/drawer-store"
 interface RailItem {
   id: DrawerTab
   label: string
-  icon: typeof FileText
+  icon: typeof LayoutGrid
   shortcut?: string
 }
 
 // The shortcut number is derived from the position rather than written down,
 // so removing an entry cannot leave ⌘3 pointing at the second icon.
 const RAIL_PANELS: Omit<RailItem, "shortcut">[] = [
-  { id: "files", label: "Files", icon: FileText },
   { id: "artifacts", label: "Artifacts", icon: LayoutGrid },
   { id: "work", label: "Work", icon: ListTodo },
 ]
@@ -60,7 +59,7 @@ export function RightRail({ className }: { className?: string }) {
   // also fires after the persist middleware hydrates with the legacy
   // value (which can land after the first render).
   useEffect(() => {
-    if (activeTab === "context" || activeTab === "team" || activeTab === "triggers") setActiveTab("files")
+    if (activeTab === "files" || activeTab === "context" || activeTab === "team" || activeTab === "triggers") setActiveTab("artifacts")
   }, [activeTab, setActiveTab])
 
   useHotkeys(
@@ -71,7 +70,7 @@ export function RightRail({ className }: { className?: string }) {
   )
 
   useHotkeys(
-    ["mod+1", "mod+2", "mod+3", "mod+4"],
+    ["mod+1", "mod+2"],
     (_, info) => {
       const idx = Number(info.keys?.[0]) - 1
       if (idx >= 0 && idx < ITEMS.length) toggle(ITEMS[idx].id)

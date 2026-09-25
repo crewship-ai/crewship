@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useSearchParams } from "next/navigation"
 import { Activity, FolderOpen, Menu, MessageSquare, Users } from "lucide-react"
 
@@ -28,6 +28,7 @@ import { SidebarCollapseButton } from "@/components/layout/sidebar-kit"
 import { Skeleton } from "@/components/ui/skeleton"
 import { deriveSessionTitle } from "@/lib/chat-title"
 import { useComposerStore } from "@/stores/composer-store"
+import { useArtifactStore } from "@/stores/artifact-store"
 import { emitChatEvent } from "@/lib/telemetry"
 import { useAppStore } from "@/lib/store"
 import { chatBreadcrumbs } from "@/components/features/chat/chat-breadcrumbs"
@@ -187,26 +188,20 @@ export function ChatClient() {
    * way to arrive at a chat page with no visible way back to the list.
    */
   const [leftCollapsed, setLeftCollapsed] = useState(false)
+  const artifactFocus = useArtifactStore((s) => s.open && s.focus)
   const [pickerSignal, setPickerSignal] = useState(0)
   const leftCollapsedRef = useRef(leftCollapsed)
   useEffect(() => { leftCollapsedRef.current = leftCollapsed }, [leftCollapsed])
-  const beforeFileWorkspaceFold = useRef<boolean | null>(null)
-  useLayoutEffect(() => {
-    const onFileWorkspace = (event: Event) => {
-      const open = (event as CustomEvent<{ open?: boolean }>).detail?.open
-      if (open === true) {
-        if (beforeFileWorkspaceFold.current === null) {
-          beforeFileWorkspaceFold.current = leftCollapsedRef.current
-          setLeftCollapsed(true)
-        }
-      } else if (open === false && beforeFileWorkspaceFold.current !== null) {
-        setLeftCollapsed(beforeFileWorkspaceFold.current)
-        beforeFileWorkspaceFold.current = null
-      }
+  const beforeArtifactFocusFold = useRef<boolean | null>(null)
+  useEffect(() => {
+    if (artifactFocus && beforeArtifactFocusFold.current === null) {
+      beforeArtifactFocusFold.current = leftCollapsedRef.current
+      setLeftCollapsed(true)
+    } else if (!artifactFocus && beforeArtifactFocusFold.current !== null) {
+      setLeftCollapsed(beforeArtifactFocusFold.current)
+      beforeArtifactFocusFold.current = null
     }
-    window.addEventListener("crewship:chat-file-workspace", onFileWorkspace)
-    return () => window.removeEventListener("crewship:chat-file-workspace", onFileWorkspace)
-  }, [])
+  }, [artifactFocus])
   const tree = useChatTreeData<ChatClientAgent>({
     ensureSlug: pathAgentSlug,
     kind: scopeKindParam(scope),
