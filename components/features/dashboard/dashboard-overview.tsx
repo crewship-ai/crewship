@@ -43,7 +43,7 @@ import { Sparkline } from "@/components/ui/sparkline"
 import { InlineEmpty } from "@/components/ui/inline-empty"
 import { entityHref } from "@/lib/entity-links"
 import { cn } from "@/lib/utils"
-import { formatDuration, formatRelativeTime } from "@/lib/time"
+import { formatDuration } from "@/lib/time"
 
 export interface AttentionItem {
   id: string
@@ -186,8 +186,8 @@ export function capacitySignal(
 const ATTENTION_ACTION: Record<string, string> = {
   approvals: "Review",
   failures: "Inspect",
+  reviews: "Review",
   capacity: "Details",
-  credentials: "Install",
   schedules: "Review",
   drafts: "Publish",
 }
@@ -200,9 +200,8 @@ const ATTENTION_VISIBLE = 3
  *
  * The badge always showed `items.length`, so the count was never wrong — what
  * was wrong is that the items past the third had nowhere to go. The order is
- * fixed (approvals, failures, capacity, credentials, schedules), so on a
- * workspace with the first three a credential gap could never render, and
- * "Open Inbox" does not cover credential gaps or capacity holds.
+ * fixed (approvals, failures, reviews, capacity, schedules), so the later
+ * operational alerts still need named links when the first cards are full.
  *
  * Returned rather than dropped so the strip can name them and keep their
  * links.
@@ -301,10 +300,7 @@ export function AttentionStrip({
         </div>
       )}
 
-      {/* Named, not just counted. The order is fixed, so on a busy workspace
-          the items past the third are always the same ones — and neither a
-          credential gap nor a capacity hold is reachable through the
-          "Open Inbox" link above. */}
+      {/* Later alerts stay named and linked even when the first cards fill. */}
       {state === "items" && !inboxKnown && (
         <div className="border-t border-border/60 px-4 py-2 text-label text-muted-foreground">
           {inboxError
@@ -447,15 +443,25 @@ export function UpNext({ schedules }: { schedules: PipelineSchedule[] }) {
     return schedules
       .filter((schedule) => schedule.enabled && schedule.next_run_at && new Date(schedule.next_run_at).getTime() > now)
       .sort((a, b) => new Date(a.next_run_at!).getTime() - new Date(b.next_run_at!).getTime())
-      .slice(0, 5)
+      .slice(0, 4)
   }, [schedules])
+  const scheduleTime = (iso: string) => {
+    const date = new Date(iso)
+    const today = new Date()
+    const tomorrow = new Date(today)
+    tomorrow.setDate(today.getDate() + 1)
+    const day = date.toDateString() === today.toDateString() ? "Today"
+      : date.toDateString() === tomorrow.toDateString() ? "Tomorrow"
+        : date.toLocaleDateString(undefined, { month: "short", day: "numeric" })
+    return `${day} · ${date.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}`
+  }
 
   return (
     <DashboardCard
       title="Up next"
       icon={CalendarClock}
-      hint={upcoming.length > 0 ? `${upcoming.length} scheduled` : "none queued"}
-      action={<Link href="/routines" className="text-primary-hover hover:underline">Routines →</Link>}
+      hint={upcoming.length > 0 ? `${upcoming.length} upcoming` : "none queued"}
+      action={<Link href="/routines?tab=calendar" className="text-primary-hover hover:underline">Calendar →</Link>}
       className="h-full"
     >
       {upcoming.length === 0 ? (
@@ -475,7 +481,7 @@ export function UpNext({ schedules }: { schedules: PipelineSchedule[] }) {
                   <span className="block truncate text-label text-muted-foreground">{schedule.name}</span>
                 </span>
                 <span className="shrink-0 font-mono text-label tabular-nums text-muted-foreground">
-                  {formatRelativeTime(schedule.next_run_at!)}
+                  {scheduleTime(schedule.next_run_at!)}
                 </span>
                 <span
                   title={schedule.last_status ? `last run ${schedule.last_status}` : "never ran"}
@@ -831,12 +837,12 @@ function EmptyState({ icon: Icon, title, detail }: { icon: LucideIcon; title: st
 export function buildAttentionItems({
   inbox,
   heldCrews,
-  credentialGapCount,
+  reviewCount = 0,
   activeByKind,
 }: {
   inbox: InboxItem[]
   heldCrews: NonNullable<RuntimeCapacityResponse["held"]>
-  credentialGapCount: number
+  reviewCount?: number
   /** Server-computed exact counts of visible not-resolved items per kind.
    *  When present the labels count from it — inbox rows are windowed at 100
    *  and the headline silently plateaued there (#2187). The windowed items
@@ -877,8 +883,8 @@ export function buildAttentionItems({
 
   if (approvalsCount > 0) items.push({ id: "approvals", label: `${approvalsCount} approval${approvalsCount === 1 ? "" : "s"} waiting`, detail: "Review pending decisions", href: entityHref({ kind: "inbox", itemId: singleApprovalHref }), tone: "warn", icon: Clock3 })
   if (failuresCount > 0) items.push({ id: "failures", label: circuitBreakerCount > 0 ? `${failuresCount} run alert${failuresCount === 1 ? "" : "s"}` : `${failuresCount} failed run${failuresCount === 1 ? "" : "s"}`, detail: "Investigate and retry", href: entityHref({ kind: "inbox", itemKind: failureKind }), tone: "danger", icon: XCircle })
+  if (reviewCount > 0) items.push({ id: "reviews", label: `${reviewCount >= 12 ? "12+" : reviewCount} issue${reviewCount === 1 ? "" : "s"} for review`, detail: "Check agent work and decide", href: "/issues", tone: "blue", icon: CheckCircle2 })
   if (held > 0) items.push({ id: "capacity", label: `${held} crew${held === 1 ? "" : "s"} waiting for capacity`, detail: heldCrews[0]?.detail || "View host admission details", href: "/settings", tone: "purple", icon: Gauge })
-  if (credentialGapCount > 0) items.push({ id: "credentials", label: `${credentialGapCount} credential tool gap${credentialGapCount === 1 ? "" : "s"}`, detail: "Install missing crew tools", href: "/credentials", tone: "blue", icon: KeyRound })
   if (scheduleCount > 0) items.push({ id: "schedules", label: `${scheduleCount} schedule alert${scheduleCount === 1 ? "" : "s"}`, detail: "Review missed or disabled routines", href: entityHref({ kind: "inbox" }), tone: "warn", icon: CalendarClock })
   return items
 }

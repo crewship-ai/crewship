@@ -36,10 +36,10 @@ describe("dashboard overview derivations", () => {
     const items = buildAttentionItems({
       inbox,
       heldCrews: [{ crew_id: "crew-1", reason: "host_memory", since: "2026-01-01", waited_ms: 5000 }],
-      credentialGapCount: 2,
+      reviewCount: 2,
     })
 
-    expect(items.map((item) => item.id)).toEqual(["approvals", "failures", "capacity", "credentials"])
+    expect(items.map((item) => item.id)).toEqual(["approvals", "failures", "reviews", "capacity"])
     expect(items[0].label).toBe("1 approval waiting")
   })
 
@@ -50,7 +50,7 @@ describe("dashboard overview derivations", () => {
     const items = buildAttentionItems({
       inbox,
       heldCrews: [],
-      credentialGapCount: 0,
+      reviewCount: 0,
       activeByKind: { failed_run: 6, schedule_missed: 2, waitpoint: 1 },
     })
     expect(items.map((item) => item.id)).toEqual(["approvals", "failures", "schedules"])
@@ -60,7 +60,7 @@ describe("dashboard overview derivations", () => {
   })
 
   it("links to every kind included in the failure count", () => {
-    const base = { inbox: [] as InboxItem[], heldCrews: [], credentialGapCount: 0 }
+    const base = { inbox: [] as InboxItem[], heldCrews: [], reviewCount: 0 }
     const circuitOnly = buildAttentionItems({ ...base, activeByKind: { schedule_circuit_breaker_tripped: 2 } })
     expect(circuitOnly[0].label).toBe("2 run alerts")
     expect(circuitOnly[0].href).toContain("kind=schedule_circuit_breaker_tripped")
@@ -78,7 +78,7 @@ describe("dashboard overview derivations", () => {
     const twoTotal = buildAttentionItems({
       inbox,
       heldCrews: [],
-      credentialGapCount: 0,
+      reviewCount: 0,
       activeByKind: { waitpoint: 2 },
     })
     expect(twoTotal[0].label).toBe("2 approvals waiting")
@@ -88,14 +88,14 @@ describe("dashboard overview derivations", () => {
     const oneTotal = buildAttentionItems({
       inbox,
       heldCrews: [],
-      credentialGapCount: 0,
+      reviewCount: 0,
       activeByKind: { waitpoint: 1 },
     })
     expect(oneTotal[0].label).toBe("1 approval waiting")
     expect(oneTotal[0].href).toContain("item=w1")
 
     // No aggregate at all: the window is the truth, one row deep-links.
-    const fallback = buildAttentionItems({ inbox, heldCrews: [], credentialGapCount: 0 })
+    const fallback = buildAttentionItems({ inbox, heldCrews: [], reviewCount: 0 })
     expect(fallback[0].href).toContain("item=w1")
   })
 

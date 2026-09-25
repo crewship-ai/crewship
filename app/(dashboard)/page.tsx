@@ -10,7 +10,6 @@ import {
   AttentionStrip,
   heldForWorkspace,
   OutcomeKpis,
-  RunningNow,
   SystemSignals,
   UpNext,
   buildAttentionItems,
@@ -38,6 +37,7 @@ import {
   useCrewSpend,
   useCrewSummaries,
   useDashboardResults,
+  useDashboardActiveRuns,
   useInvalidateDashboard,
   useMemoryHealth,
   useMetricsTimeseries,
@@ -92,7 +92,9 @@ export default function DashboardPage() {
   const agentsQ = useAgentSummaries(workspaceId, queryOpts)
   const crewsQ = useCrewSummaries(workspaceId, queryOpts)
   const reviewQ = useDashboardResults(workspaceId, "REVIEW", queryOpts)
+  const inProgressQ = useDashboardResults(workspaceId, "IN_PROGRESS", queryOpts)
   const completedQ = useDashboardResults(workspaceId, "DONE,COMPLETED", queryOpts)
+  const agentRunsQ = useDashboardActiveRuns(workspaceId, queryOpts)
   const insightsQ = useRunsInsights(workspaceId, reportWindow, queryOpts)
   const capacityQ = useRuntimeCapacity(queryOpts)
   const memoryQ = useMemoryHealth(workspaceId, queryOpts)
@@ -122,6 +124,7 @@ export default function DashboardPage() {
   useRealtimeEvent("run.completed", debouncedRefresh)
   useRealtimeEvent("run.failed", debouncedRefresh)
   useRealtimeEvent("agent.status", debouncedRefresh)
+  useRealtimeEvent("assignment.updated", debouncedRefresh)
   useRealtimeEvent("mission.updated", debouncedRefresh)
   useRealtimeEvent("issue.updated", debouncedRefresh)
   // A6 (#2125): these were emitted server-side and dropped by the realtime
@@ -158,8 +161,8 @@ export default function DashboardPage() {
   )
 
   const attentionItems = useMemo(
-    () => buildAttentionItems({ inbox: inbox.items, heldCrews, credentialGapCount, activeByKind: inbox.activeByKind }),
-    [inbox.items, inbox.activeByKind, heldCrews, credentialGapCount],
+    () => buildAttentionItems({ inbox: inbox.items, heldCrews, reviewCount: reviewQ.data?.length ?? 0, activeByKind: inbox.activeByKind }),
+    [inbox.items, inbox.activeByKind, heldCrews, reviewQ.data],
   )
 
   const fleet = useMemo(
@@ -187,12 +190,12 @@ export default function DashboardPage() {
     // above already tolerates a missing bucket.series for the same reason.
     if (!volumeQ.data?.series_labels) return []
     return Object.entries(volumeQ.data.series_labels).map(([key, label]) => {
-      const crewIndex = crews.findIndex((crew) => crew.id === key)
+      const crewIndex = crews.findIndex((crew) => crew.id === key || crew.slug === key || crew.name.toLocaleLowerCase() === label.toLocaleLowerCase())
       return {
         key,
         label,
-        // Match the bridge indicators' crew order. Unknown series keep the
-        // neutral fallback instead of borrowing an unrelated crew's colour.
+        // The metrics endpoint labels by crew id. Use the same colour as its
+        // icon; a missing colour still gets the shared palette fallback.
         color: crewColor(crewIndex >= 0 ? crews[crewIndex].color : null, crewIndex >= 0 ? crewIndex : undefined),
       }
     })
@@ -330,10 +333,9 @@ export default function DashboardPage() {
 
         <div className="grid min-w-0 grid-cols-1 gap-3 xl:grid-cols-3">
           <Appear order={1} className="min-w-0 xl:col-span-2">
-            <DashboardResults key={workspaceId} review={reviewQ.data ?? []} completed={completedQ.data ?? []} runs={activeRuns.recentRuns} agents={agents} crews={crews} workspaceId={workspaceId} loading={reviewQ.isPending || completedQ.isPending} error={reviewQ.isError || completedQ.isError} routineError={activeRuns.error} routineLoading={activeRuns.loading} onRetry={() => { void reviewQ.refetch(); void completedQ.refetch(); activeRuns.refresh() }} />
+            <DashboardResults key={workspaceId} review={reviewQ.data ?? []} inProgress={inProgressQ.data ?? []} completed={completedQ.data ?? []} activeAgentRuns={agentRunsQ.data ?? []} activeRoutineRuns={activeRuns.runs} recentRoutineRuns={activeRuns.recentRuns} agents={agents} crews={crews} workspaceId={workspaceId} loading={reviewQ.isPending || inProgressQ.isPending || completedQ.isPending || agentRunsQ.isPending} error={reviewQ.isError || inProgressQ.isError || completedQ.isError || agentRunsQ.isError} routineError={activeRuns.error} routineLoading={activeRuns.loading} onRetry={() => { void reviewQ.refetch(); void inProgressQ.refetch(); void completedQ.refetch(); void agentRunsQ.refetch(); activeRuns.refresh() }} />
           </Appear>
           <Appear order={2} className="flex min-w-0 flex-col gap-3 [&>div]:h-auto">
-            <RunningNow runs={activeRuns.runs} agents={agents} crews={crews} loading={activeRuns.loading} error={activeRuns.error} />
             <UpNext schedules={schedules.schedules} />
             <FleetBoard cards={fleetCards} workspaceId={workspaceId} />
           </Appear>
@@ -377,8 +379,8 @@ function DashboardSkeleton({ crews, agents }: { crews: number; agents: number })
   return (
     <div className="flex min-h-[calc(100dvh-var(--app-header-h)-var(--mobile-tab-bar-h))] flex-col">
       <SubBar icon={LayoutDashboard} title="Dashboard" description={crews || agents ? `${crews} crews · ${agents} agents` : "Loading…"} ariaLabel="Dashboard" />
-      {/* Same geometry as the loaded page (results beside a stacked right
-          column of running / up next / crews, then the KPI strip), so
+      {/* Same geometry as the loaded page (results beside the next agenda and
+          crews, then the KPI strip), so
           nothing jumps when the data lands. */}
       <div className="mx-auto flex w-full max-w-[1800px] flex-col gap-3 p-4 md:p-5">
         <Skeleton className="h-[52px] rounded-xl" />
@@ -386,7 +388,6 @@ function DashboardSkeleton({ crews, agents }: { crews: number; agents: number })
         <div className="grid grid-cols-1 gap-3 xl:grid-cols-3">
           <Skeleton className="h-[380px] rounded-xl xl:col-span-2" />
           <div className="flex flex-col gap-3">
-            <Skeleton className="h-[84px] rounded-xl" />
             <Skeleton className="h-[84px] rounded-xl" />
             {/* FleetBoard renders nothing for an empty workspace, so its
                 placeholder must not appear either. */}

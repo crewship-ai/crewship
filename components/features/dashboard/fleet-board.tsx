@@ -2,10 +2,10 @@
 
 import * as React from "react"
 import Link from "next/link"
-import { Users, ChevronRight } from "lucide-react"
+import { Users } from "lucide-react"
 
 import type { AgentSummary } from "@/app/(dashboard)/dashboard-types"
-import { crewColor, formatCost } from "@/app/(dashboard)/dashboard-helpers"
+import { formatCost } from "@/app/(dashboard)/dashboard-helpers"
 import { AgentAvatar } from "@/components/ui/agent-avatar"
 import { CrewIcon } from "@/components/ui/crew-icon"
 import { StatusPill } from "@/components/ui/status-pill"
@@ -51,10 +51,6 @@ export function deriveFleetBoard({
   })
 }
 
-/** How many crews get a full card. Past this the board switches to a dense
- *  list, because 100 cards is a wall nobody reads. */
-export const FLEET_CARD_LIMIT = 6
-
 const TONE_RANK: Record<FleetHealthRow["tone"], number> = { danger: 0, warn: 1, blue: 2, muted: 3, success: 4 }
 
 /** Pure: the order the board shows crews in. Whatever needs a person comes
@@ -90,12 +86,8 @@ export function fleetAgentStatus(agents: Pick<AgentSummary, "status">[]): string
 }
 
 export function FleetBoard({ cards: unordered, workspaceId }: { cards: FleetCard[]; workspaceId: string | null }) {
-  const [showAll, setShowAll] = React.useState(false)
   const cards = React.useMemo(() => prioritiseFleet(unordered), [unordered])
   if (cards.length === 0) return null
-  const featured = cards.slice(0, FLEET_CARD_LIMIT)
-  const rest = cards.slice(FLEET_CARD_LIMIT)
-  const restNeedingAttention = rest.filter((c) => c.row.tone === "danger" || c.row.tone === "warn").length
   // One row per crew instead of a card each: the same facts (state, agents,
   // runs) in a fifth of the height, so the board fits beside the results
   // instead of pushing everything below the fold (#2539).
@@ -110,13 +102,13 @@ export function FleetBoard({ cards: unordered, workspaceId }: { cards: FleetCard
           <Link href="/crews" className="text-primary-hover hover:underline">Crews →</Link>
         </span>
       </div>
-      <div className="flex flex-col divide-y divide-border/50">
-        {featured.map((card) => {
+      <div className="flex max-h-[350px] flex-col divide-y divide-border/50 overflow-y-auto overscroll-contain pr-1 [scrollbar-color:var(--border)_transparent]" tabIndex={0} aria-label="All crews">
+        {cards.map((card) => {
           const { row } = card
           return (
             <div
               key={row.crew.id}
-              className="group flex items-center gap-2.5 rounded-md px-1 py-1.5 transition-colors hover:bg-foreground/[0.025]"
+              className="group flex shrink-0 items-center gap-2.5 rounded-md px-1 py-1.5 transition-colors hover:bg-foreground/[0.025] coarse:min-h-12"
               data-testid="dashboard-fleet-card"
             >
               <CrewIcon icon={row.crew.icon || "users"} color={row.crew.color} size="sm" />
@@ -144,42 +136,6 @@ export function FleetBoard({ cards: unordered, workspaceId }: { cards: FleetCard
         })}
       </div>
 
-      {rest.length > 0 && (
-        <div className="mt-2 rounded-lg border border-border/60" data-testid="dashboard-fleet-rest">
-          <button
-            type="button"
-            onClick={() => setShowAll((v) => !v)}
-            aria-expanded={showAll}
-            className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-label"
-          >
-            <span className="text-muted-foreground">
-              <span className="font-medium text-foreground/90">{rest.length} more {rest.length === 1 ? "crew" : "crews"}</span>
-              {restNeedingAttention > 0
-                ? <> · <span className="text-warn">{restNeedingAttention} need attention</span></>
-                : " · all healthy"}
-            </span>
-            <span className="inline-flex items-center gap-1 text-primary-hover">
-              {showAll ? "Hide" : "Show all"} <ChevronRight className={cn("h-3.5 w-3.5 transition-transform", showAll && "rotate-90")} />
-            </span>
-          </button>
-          {showAll && (
-            <div className="flex flex-col border-t border-border/50 px-1 py-1">
-              {rest.map((card) => (
-                <Link
-                  key={card.row.crew.id}
-                  href={entityHref({ kind: "crew", slug: card.row.crew.slug })}
-                  className="flex items-center gap-2.5 rounded-md px-2 py-1.5 text-label transition-colors hover:bg-foreground/[0.03]"
-                >
-                  <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: crewColor(card.row.crew.color) }} aria-hidden />
-                  <span className="min-w-0 flex-1 truncate text-foreground/90">{card.row.crew.name}</span>
-                  <span className="shrink-0 font-mono text-micro tabular-nums text-muted-foreground">{card.agents.length}a · {card.runsTotal}r</span>
-                  <StatusPill tone={card.row.tone} label={card.row.status} />
-                </Link>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
     </section>
   )
 }
