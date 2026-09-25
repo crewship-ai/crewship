@@ -3,27 +3,27 @@ labels:
   color: '#4F83F8'
 projects:
 - name: Sales
-  color: '#4F83F8'
-  icon: inbox
+  color: cyan
+  icon: handshake
   status: in_progress
   priority: medium
 - name: Finance
-  color: '#4F83F8'
-  icon: inbox
+  color: amber
+  icon: wallet
   status: in_progress
   priority: medium
 - name: Marketing
-  color: '#4F83F8'
-  icon: inbox
+  color: violet
+  icon: megaphone
   status: in_progress
   priority: medium
 - name: Shipping
-  color: '#4F83F8'
-  icon: inbox
+  color: blue
+  icon: truck
   status: in_progress
   priority: medium
 - name: Crewship Lab
-  color: '#4F83F8'
+  color: cyan
   icon: activity
   status: in_progress
   priority: medium

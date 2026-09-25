@@ -373,6 +373,9 @@ func runSeed(cmd *cobra.Command, args []string) error {
 	if err := seedStoryPageFolder(ctx, client); err != nil {
 		return fmt.Errorf("demo story Page folder: %w", err)
 	}
+	if err := seedDemoIdentity(ctx, client, agentIDs, crewIDs); err != nil {
+		return fmt.Errorf("demo identity: %w", err)
+	}
 
 	// ── Phase 10b: Wait for background provisioning (only if requested) ──
 	// Provisioning was triggered in Phase 2b; in async mode we skip the wait

@@ -33,6 +33,7 @@ func seedOneStoryFolder(ctx context.Context, client *cli.Client, story seeddata.
 	return seedFolderPage(ctx, client, "demo-"+story.Slug, story.Project, story.Crew, "demo-"+story.Slug)
 }
 func seedFolderPage(ctx context.Context, client *cli.Client, slug, name, crew, pageSlug string) error {
+	style := demoProjectAppearance(name)
 	resp, err := client.Get("/api/v1/page-folders/" + pagePathEscape(slug))
 	if err != nil {
 		return err
@@ -40,7 +41,7 @@ func seedFolderPage(ctx context.Context, client *cli.Client, slug, name, crew, p
 	if resp.StatusCode == http.StatusNotFound {
 		resp.Body.Close()
 		resp, err = client.Post("/api/v1/page-folders", map[string]any{
-			"slug": slug, "name": name, "owner": "crew/" + crew, "icon": "inbox", "color": "blue",
+			"slug": slug, "name": name, "owner": "crew/" + crew, "icon": style["icon"], "color": style["color"],
 		})
 		if err != nil {
 			return err
@@ -50,6 +51,9 @@ func seedFolderPage(ctx context.Context, client *cli.Client, slug, name, crew, p
 		return fmt.Errorf("create or read folder: %w", err)
 	}
 	resp.Body.Close()
+	if err := seedAppearance(client, "/api/v1/page-folders/"+pagePathEscape(slug), style); err != nil {
+		return err
+	}
 	page, err := pageFolderReadPage(client, pageSlug)
 	if err != nil {
 		return err

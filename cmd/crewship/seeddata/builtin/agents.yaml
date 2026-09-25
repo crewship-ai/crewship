@@ -2,7 +2,7 @@ agents:
 - name: Alex
   slug: alex
   crew_slug: engineering
-  role_title: Customer Team Lead
+  role_title: Sales & Shipping Lead
   agent_role: LEAD
   cli_adapter: CLAUDE_CODE
   llm_provider: ANTHROPIC

@@ -197,6 +197,7 @@ func TestSeedIssues_ProjectConflictResolvesExisting(t *testing.T) {
 	existing := make([]map[string]string, 0, len(seeddata.Projects))
 	for i, p := range seeddata.Projects {
 		existing = append(existing, map[string]string{"id": fmt.Sprintf("existing-%d", i), "name": p.Name})
+		s.OnPatch(fmt.Sprintf("/api/v1/projects/existing-%d", i), clitest.JSONResponse(200, map[string]string{}))
 	}
 	s.OnGet("/api/v1/projects", clitest.JSONResponse(200, existing))
 

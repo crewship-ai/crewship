@@ -95,3 +95,34 @@ decide → inspect the receipt**. Finance completion records a reminder, not a
 payment. Shipping completion records claim evidence, not a paid refund.
 Marketing simulates local delivery; it does not prove a production email route.
 These distinctions must stay visible when extending the catalogue.
+
+## Visual identity and agent voices
+
+Project metadata is the common palette for Issues, Page folders, Pages and
+business routines: Sales uses cyan/handshake, Finance amber/wallet, Marketing
+violet/megaphone, Shipping blue/truck and Crewship Lab cyan/activity. Routine
+icons distinguish check (search), draft (sparkles) and resolution (badge-check).
+The live controls use play/power. These are supported palette IDs, not hex
+values that crew rendering would silently replace with its fallback colour.
+
+Crews are named Sales & Shipping, Finance & Marketing and Operations, with
+descriptions explaining their actual responsibilities. Stable slugs remain
+unchanged so references and existing work survive a re-seed.
+
+Each agent has a versioned `seeddata/souls/<slug>/SOUL.md` template. The seed
+installs its contents into the supported agent `.memory/PERSONA.md` tier. It
+preserves an existing agent persona; operator edits must survive re-seeding.
+If the host persona writer cannot write container-owned memory, the existing
+memory import API places the document inside the container and the seed verifies
+the exact contents through the persona read API. Filesystem permissions and
+environment settings are not changed.
+
+Alex coordinates calmly; Sam is warm and customer-focused; Robin watches
+deadlines; Jordan is precise and tactful; Casey is curious and experimental;
+Morgan is steady under pressure; Riley explains measurements patiently; Taylor
+questions evidence; Jamie is a constructive skeptic. All retain the same
+honesty, credential handling and structured-output requirements.
+
+Dev1 verification: all nine installed personas matched their source templates;
+Sam and Jordan answered live with the expected distinct priorities. Browser
+checks rendered Issues, Routines, Pages and Crews without JavaScript errors.

@@ -1,25 +1,28 @@
 crews:
-- name: Customer Team
+- name: Sales & Shipping
+  description: Follow up on customer inquiries and prepare evidence for late-delivery claims.
   slug: engineering
-  color: '#4F83F8'
-  icon: terminal
+  color: blue
+  icon: handshake
   runtime_image: mcr.microsoft.com/devcontainers/javascript-node:22-bookworm
   devcontainer_config: '{"image":"mcr.microsoft.com/devcontainers/javascript-node:22-bookworm","containerEnv":{"PATH":"/home/agent/.local/bin:/opt/crewship/bin:/opt/mise/data/shims:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"},"features":{"ghcr.io/devcontainers/features/common-utils:2":{"username":"agent","userUid":"1001","userGid":"1001","installZsh":false,"upgradePackages":false},"ghcr.io/devcontainers-extra/features/claude-code:2":{}},"postCreateCommand":"sudo
     apt-get update -qq && sudo apt-get install -y --no-install-recommends python3
     ripgrep && mkdir -p $HOME/.local && npm config set prefix $HOME/.local && npm
     install -g @openai/codex"}'
-- name: Business Team
+- name: Finance & Marketing
+  description: Reconcile invoices and find gaps in the contact-form delivery journey.
   slug: quality
-  color: '#4F83F8'
-  icon: shield-check
+  color: violet
+  icon: briefcase
   runtime_image: mcr.microsoft.com/devcontainers/javascript-node:22-bookworm
   devcontainer_config: '{"image":"mcr.microsoft.com/devcontainers/javascript-node:22-bookworm","containerEnv":{"PATH":"/home/agent/.local/bin:/opt/crewship/bin:/opt/mise/data/shims:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"},"features":{"ghcr.io/devcontainers/features/common-utils:2":{"username":"agent","userUid":"1001","userGid":"1001","installZsh":false,"upgradePackages":false},"ghcr.io/devcontainers-extra/features/claude-code:2":{}},"postCreateCommand":"sudo
     apt-get update -qq && sudo apt-get install -y --no-install-recommends python3
     ripgrep && mkdir -p $HOME/.local && npm config set prefix $HOME/.local && npm
     install -g @openai/codex"}'
 - name: Operations
+  description: Inspect real crew resources and run the live container monitor.
   slug: ops
-  color: '#4F83F8'
+  color: cyan
   icon: server
   runtime_image: mcr.microsoft.com/devcontainers/javascript-node:22-bookworm
   devcontainer_config: '{"image":"mcr.microsoft.com/devcontainers/javascript-node:22-bookworm","containerEnv":{"PATH":"/home/agent/.local/bin:/opt/crewship/bin:/opt/mise/data/shims:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"},"features":{"ghcr.io/devcontainers/features/common-utils:2":{"username":"agent","userUid":"1001","userGid":"1001","installZsh":false,"upgradePackages":false},"ghcr.io/devcontainers-extra/features/claude-code:2":{}},"postCreateCommand":"sudo
@@ -27,8 +30,9 @@ crews:
     ripgrep && mkdir -p $HOME/.local && npm config set prefix $HOME/.local && npm
     install -g @openai/codex"}'
 - name: Local AI
+  description: Try optional local models with a resource-conscious assistant.
   slug: local-ai
-  color: '#8B5CF6'
+  color: violet
   icon: cpu
   requires_env: CREWSHIP_SEED_OLLAMA
   allow_private_endpoints: true

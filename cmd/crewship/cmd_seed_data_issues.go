@@ -77,6 +77,9 @@ func seedIssues(ctx context.Context, client *cli.Client, crewIDs, agentIDs map[s
 			existingID, err := resolveByName(client, "/api/v1/projects", p.Name)
 			if err == nil && existingID != "" {
 				projectIDs[p.Name] = existingID
+				if err := seedAppearance(client, "/api/v1/projects/"+existingID, map[string]string{"icon": p.Icon, "color": p.Color}); err != nil {
+					return err
+				}
 				fmt.Fprintf(os.Stderr, "  = Project exists: %s\n", p.Name)
 			} else {
 				return fmt.Errorf("project %s: conflict but existing record could not be resolved", p.Name)
