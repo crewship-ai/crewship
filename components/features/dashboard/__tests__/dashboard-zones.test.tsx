@@ -157,6 +157,7 @@ describe("a fleet of a hundred crews stays readable", () => {
 describe("crewColor", () => {
   it("resolves palette ids and raw hex values", () => {
     expect(crewColor("blue")).toBe(CREW_PALETTE.blue)
+    expect(crewColor("sky")).toBe("rgb(14, 165, 233)")
     expect(crewColor("1E7BFE")).toBe("#1E7BFE")
     expect(crewColor("#ff8800")).toBe("#ff8800")
   })
