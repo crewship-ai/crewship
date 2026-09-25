@@ -4,6 +4,56 @@
 # Pages backed by optional GitHub integrations show a clear waiting state until
 # the workspace supplies SEED_GITHUB_TOKEN and runs the producer.
 pages:
+  - slug: leads-at-risk
+    name: Leads at Risk
+    description: >-
+      Harbor Goods received three inquiries. Two have a reply; Ava has waited
+      26 sample hours. Check the inquiries to see what needs attention.
+    owner: crew/ops
+    panels:
+      - id: inquiries
+        schema: status.v1
+        title: Three customer inquiries
+        icon: people
+        owner: crew/ops
+        producer: script/harbor-goods-fixture
+        sla: 168h
+        span: 12
+        actions:
+          - id: check
+            kind: call
+            label: Check inquiries
+            routine: harbor-leads-review
+        demo:
+          items:
+            - name: L-101 · Maya Chen
+              state: ok
+              label: Replied · 2 sample hours
+            - name: L-102 · Owen Patel
+              state: ok
+              label: Replied · 5 sample hours
+            - name: L-103 · Ava Martin
+              state: warning
+              label: No reply · 26 sample hours
+      - id: finding
+        schema: status.v1
+        title: What the check found
+        icon: alert
+        owner: crew/ops
+        producer: routine/harbor-leads-review
+        sla: 168h
+        span: 12
+        skip_seed_run: true
+      - id: decision
+        schema: narrative.v1
+        title: Human decision
+        icon: clock
+        owner: crew/ops
+        producer: routine/harbor-leads-review
+        sla: 168h
+        span: 12
+        skip_seed_run: true
+
   - slug: operations
     name: Sample telemetry
     description: Illustrative seeded measurements in five panel shapes. Run the producer script to replace the sample with real machine data.

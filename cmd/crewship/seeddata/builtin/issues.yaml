@@ -6,6 +6,22 @@
 # extraction issue is the default delegation example: it uses only the note
 # embedded in the issue and cannot load a third-party site.
 issues:
+  - crew_slug: ops
+    assignee: morgan
+    title: Reply to Ava Martin's missed inquiry
+    description: |-
+      Harbor Goods received three sample inquiries. Ava Martin (L-103) asked
+      for a quote for 50 storage boxes and has waited 26 sample hours without
+      a reply. Open Leads at Risk and click Check inquiries, or run the bound
+      routine here. Morgan drafts a reply; Inbox asks a human to approve it.
+      Approval marks the draft ready. No email is sent and no live Gmail,
+      Google Sheets, CRM, or calendar account is connected by this demo.
+    priority: high
+    project: Harbor Goods
+    routine_slug: harbor-leads-review
+    labels: [Quick Start]
+    target_state: TODO
+
   # ── quick start ────────────────────────────────────────────────────────
   - crew_slug: ops
     assignee: riley
@@ -282,6 +298,11 @@ projects:
   - name: Quick Start
     color: '#3B82F6'
     icon: play
+    status: in_progress
+    priority: medium
+  - name: Harbor Goods
+    color: '#4F83F8'
+    icon: inbox
     status: in_progress
     priority: medium
   - name: Inbox Scenarios

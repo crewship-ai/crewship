@@ -1317,10 +1317,11 @@ var routineLibrary = []RoutineDef{
 // older transformation recipes remain in routineLibrary as source examples,
 // while model regression coverage is available through `seed --with-evals`.
 // A fresh product demo should read like an operating team, not a test fixture.
-var Routines = curatedDemoRoutines(append(append([]RoutineDef{}, routineLibrary...), append(packRoutines, operationsRoutine())...))
+var Routines = curatedDemoRoutines(append(append([]RoutineDef{}, routineLibrary...), append(append(packRoutines, storyRoutines...), operationsRoutine())...))
 
 func curatedDemoRoutines(library []RoutineDef) []RoutineDef {
 	wanted := map[string]bool{
+		"harbor-leads-review":     true, // fictional inquiry → page → agent draft → human approval
 		"pages-operations-sample": true,
 		"incident-timeline":       true, // incident evidence normalisation
 		"classify-ticket":         true, // support intake with a closed taxonomy

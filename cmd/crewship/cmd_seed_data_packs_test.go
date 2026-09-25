@@ -38,6 +38,19 @@ func TestSeedPackFiles_DeliversEveryFileToItsCrew(t *testing.T) {
 	if got := saved[crewFileSavePath("crew-ops", "shared/scripts/pages-operations-sample.mjs")]; !bytes.Equal(got, pagesdemo.Collector) {
 		t.Fatal("Operations Lab collector missing or changed")
 	}
+	for _, f := range seeddata.StoryFiles {
+		want++
+		key := crewFileSavePath(packCrewIDs()[f.CrewSlug], f.Dest)
+		got, ok := saved[key]
+		if !ok {
+			t.Errorf("story file %s not delivered", key)
+			continue
+		}
+		embedded, err := seeddata.StoryFileContent(f.Source)
+		if err != nil || !bytes.Equal(got, embedded) {
+			t.Errorf("story file %s differs from embedded source: %v", key, err)
+		}
+	}
 
 	for _, p := range seeddata.Packs {
 		for _, f := range p.Files {

@@ -180,6 +180,9 @@ func pageProducerRoutineSlugs(catalogue []seeddata.PageDef) []string {
 	seen := map[string]bool{}
 	for _, page := range catalogue {
 		for _, panel := range page.Panels {
+			if panel.SkipSeedRun {
+				continue
+			}
 			kind, slug := seedPanelProducer(panel)
 			if kind != pages.ProducerRoutine || slug == "" || seen[slug] {
 				continue

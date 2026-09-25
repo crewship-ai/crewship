@@ -58,6 +58,10 @@ type PagePanelDef struct {
 	Producer string `yaml:"producer"`
 	SLA      string `yaml:"sla"`
 	Span     int    `yaml:"span,omitempty"`
+	// An approval story runs only when a person presses its action. The
+	// routine-owned panels begin empty instead of creating a pending Inbox
+	// decision during every seed or re-seed.
+	SkipSeedRun bool `yaml:"skip_seed_run,omitempty"`
 
 	// The authored half — the sensor, the buttons and the publication flag.
 	//

@@ -63,6 +63,27 @@ func seedPackFiles(ctx context.Context, client *cli.Client, crewIDs map[string]s
 	}
 
 	saved, failed := 0, 0
+	for _, f := range seeddata.StoryFiles {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		crewID := crewIDs[f.CrewSlug]
+		if crewID == "" {
+			fmt.Fprintf(os.Stderr, "  ! story file %s: crew %s not seeded\n", f.Source, f.CrewSlug)
+			failed++
+			continue
+		}
+		content, err := seeddata.StoryFileContent(f.Source)
+		if err == nil {
+			err = putBytes(ctx, client, crewFileSavePath(crewID, f.Dest), bytes.NewReader(content))
+		}
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "  ! story file %s: %v\n", f.Source, err)
+			failed++
+			continue
+		}
+		saved++
+	}
 	for _, p := range seeddata.Packs {
 		crewID, ok := crewIDs[p.CrewSlug]
 		if !ok {
