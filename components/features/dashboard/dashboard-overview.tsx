@@ -741,6 +741,8 @@ export function SystemSignals({
   const uncheckedCrews = fleet.filter((row) => !row.services.checked).length
   const agentErrors = agents.filter((agent) => agent.status === "ERROR").length
   const runningAgents = agents.filter((agent) => agent.status === "RUNNING").length
+  const readyAgents = agents.filter((agent) => agent.status === "IDLE" || agent.status === "ACTIVE").length
+  const unavailableAgents = agents.length - agentErrors - runningAgents - readyAgents
   const activeSchedules = schedules.filter((schedule) => schedule.enabled).length
   const rows: Array<{ label: string; value: string; detail: string; href?: string; icon: LucideIcon; tone: string }> = [
     {
@@ -761,16 +763,16 @@ export function SystemSignals({
     },
     {
       label: "Agents",
-      value: agents.length === 0 ? "No agents yet" : agentErrors > 0 ? `${agentErrors} need attention` : `${agents.length} configured`,
-      detail: agents.length === 0 ? "Add an agent to a crew" : `${runningAgents} running now · ${agents.length - runningAgents} not running`,
+      value: agents.length === 0 ? "No agents yet" : agentErrors > 0 ? `${agentErrors} in error` : unavailableAgents > 0 ? `${unavailableAgents} unavailable` : `${agents.length} configured`,
+      detail: agents.length === 0 ? "Add an agent to a crew" : `${readyAgents} ready · ${runningAgents} running now`,
       href: "/agents",
       icon: Bot,
-      tone: agents.length === 0 ? "text-muted-foreground" : agentErrors > 0 ? "text-warn" : "text-success",
+      tone: agents.length === 0 ? "text-muted-foreground" : agentErrors > 0 || unavailableAgents > 0 ? "text-warn" : "text-success",
     },
     {
       label: "Scheduled routines",
       value: schedulesError ? "Status unavailable" : schedulesLoading ? "Checking…" : `${activeSchedules} active`,
-      detail: schedulesError ? "Could not load routine schedules" : schedulesLoading ? "Loading the routine calendar" : schedules.length === 0 ? "Plan work in the routine calendar" : `${schedules.length - activeSchedules} paused · open calendar`,
+      detail: schedulesError ? "Could not load routine schedules" : schedulesLoading ? "Loading the routine calendar" : schedules.length === 0 ? "Plan work in the routine calendar" : `${schedules.length - activeSchedules} inactive · open calendar`,
       href: "/routines?tab=calendar",
       icon: CalendarClock,
       tone: schedulesError || schedulesLoading || activeSchedules === 0 ? "text-muted-foreground" : "text-success",

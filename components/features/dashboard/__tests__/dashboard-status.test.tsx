@@ -30,4 +30,10 @@ describe("dashboard status", () => {
     expect(screen.getByText("No failures")).toBeTruthy()
     expect(screen.getByText("No agent or service problems detected")).toBeTruthy()
   })
+
+  it("surfaces unavailable agents instead of treating configured as healthy", () => {
+    render(<SystemSignals capacity={{ enabled: true, held: [] }} heldCrews={[]} fleet={[]} agents={[{ ...agent, status: "UNAVAILABLE" }]} schedules={[]} schedulesLoading={false} schedulesError={null} />)
+    expect(screen.getByText("1 unavailable")).toBeTruthy()
+    expect(screen.queryByText("1 configured")).toBeNull()
+  })
 })
