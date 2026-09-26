@@ -810,7 +810,16 @@ cmd_nuke() {
     err "Refusing to nuke: resolved page projects path is empty."
     exit 1
   fi
-  resolved_projects="$(cd "$page_projects_dir" 2>/dev/null && pwd -P || true)"
+  if [[ -e "$page_projects_dir" && ! -d "$page_projects_dir" ]]; then
+    # An existing non-directory would sail through the cd below and straight
+    # into rm -rf — refuse it rather than guess what the pin meant.
+    err "Refusing to nuke: page projects path '$page_projects_dir' exists but is not a directory."
+    exit 1
+  fi
+  # cd -P: physical traversal, so a `link/..` path cannot validate against one
+  # directory while rm -rf follows the symlink into another. The resolved path
+  # is what the confirmation shows and what remove_data_dir deletes.
+  resolved_projects="$(cd -P "$page_projects_dir" 2>/dev/null && pwd -P || true)"
   if [[ -z "$resolved_projects" ]]; then
     # Nothing exists at the pinned path; remove_data_dir no-ops it, so there is
     # nothing dangerous to delete. Say so instead of failing the whole reset.
@@ -822,6 +831,8 @@ cmd_nuke() {
     err "which is the checkout or one of its parents. Point CREWSHIP_PAGE_PROJECTS_PATH"
     err "at a scratch directory outside the repo and retry."
     exit 1
+  else
+    page_projects_dir="$resolved_projects"
   fi
 
   echo -e "${BOLD}${RED}Factory Reset — Crewship${S}${NC}"
