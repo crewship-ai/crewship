@@ -59,7 +59,18 @@ export interface ChatTreeAgent {
   expired_at?: string | null
 }
 
+export interface ChatWorkSource {
+  kind: "routine" | "issue"
+  id: string
+  name: string
+  slug?: string
+  run_id?: string
+  step_id?: string
+}
+
 export interface ChatTreeThread {
+  source?: ChatWorkSource
+
   id: string
   title: string | null
   status: string
@@ -305,7 +316,7 @@ export function useChatTreeData<A extends ChatTreeAgent = ChatTreeAgent>({
             // filtering OUT, so they travel beside the page rather than in
             // it. `?counts=1` because the count is over every chat the agent
             // has, and nothing else asking this endpoint wants to pay for it.
-            "&counts=1",
+            "&counts=1&source=1",
         )
           .then((r) => {
             if (!r.ok) throw httpError(r.status)
@@ -387,7 +398,7 @@ export function useChatTreeData<A extends ChatTreeAgent = ChatTreeAgent>({
       for (let offset = 0; offset < AGENT_CHAT_SHOW_ALL_CAP; offset += AGENT_CHAT_PAGE_CEILING) {
         const r = await apiFetch(
           `/api/v1/agents/${encodeURIComponent(agentId)}/chats` +
-            `?workspace_id=${encodeURIComponent(workspaceId)}&limit=${AGENT_CHAT_PAGE_CEILING}&offset=${offset}` +
+            `?workspace_id=${encodeURIComponent(workspaceId)}&limit=${AGENT_CHAT_PAGE_CEILING}&offset=${offset}&source=1` +
             (kind ? `&kind=${encodeURIComponent(kind)}` : ""),
         )
         if (!r.ok) throw httpError(r.status)

@@ -3,17 +3,19 @@
 import { useEffect, useRef, useState } from "react"
 import { useSearchParams } from "next/navigation"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { ArrowLeft, Bell, BellOff, MessageSquare, Plus, Send, Users } from "lucide-react"
+import { ArrowLeft, Bell, BellOff, MessageSquare, Plus, Send, Settings2, UserMinus, UserPlus, Users } from "lucide-react"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { useSessionSafe } from "@/hooks/use-auth"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { MentionAutocomplete, type CrewMember } from "@/components/features/chat/composer/mention-autocomplete"
 import { ConversationIdentity, ConversationIcon, conversationTitle } from "./conversation-identity"
 import { ConversationTranscript } from "./conversation-transcript"
 import { ConversationExpansion } from "./conversation-expansion"
+import { ConversationDetailsPanel } from "./conversation-details-panel"
 import { ConversationActivity } from "./conversation-activity"
 import { DirectMessagePicker } from "./direct-message-picker"
 import { ConversationAgents, type JoinedAgent } from "./conversation-agents"
@@ -136,7 +138,17 @@ export function ConversationThread({ conversation, workspaceId, userId, refresh,
   }, [draftKey, text, pending])
   const agentRoster = useQuery({ queryKey: ["workspace-conversations", workspaceId, userId, conversation.id, "agents"], enabled: conversation.kind === "channel", queryFn: ({ signal }) => conversationRequest<{ agents: JoinedAgent[] }>(workspaceId, `conversations/${encodeURIComponent(conversation.id)}/agents`, undefined, signal) })
   const jobs = useQuery({ queryKey: ["workspace-conversations", workspaceId, userId, conversation.id, "agent-jobs"], enabled: conversation.kind === "channel", queryFn: ({ signal }) => conversationRequest<{ jobs: { id: string; agent_id: string; state: string; error?: string }[] }>(workspaceId, `conversations/${encodeURIComponent(conversation.id)}/agent-jobs`, undefined, signal), refetchInterval: 120_000 })
-  const [showPeople, setShowPeople] = useState(false)
+  const [details, setDetails] = useState<"general" | "members" | null>(null)
+  const detailsTrigger = useRef<HTMLButtonElement | null>(null)
+  const canManage = conversation.created_by === userId
+  function openDetails(section: "general" | "members", trigger: HTMLButtonElement) {
+    detailsTrigger.current = trigger
+    setDetails(section)
+  }
+  function closeDetails() {
+    setDetails(null)
+  }
+  useEffect(() => { if (!details) detailsTrigger.current?.focus() }, [details])
   const [expanding, setExpanding] = useState<"group" | "channel" | null>(null)
   const [readError, setReadError] = useState(false)
   const [muting, setMuting] = useState(false)
@@ -149,7 +161,7 @@ export function ConversationThread({ conversation, workspaceId, userId, refresh,
     setSoundReadingConversation(scope, conversation.id, atBottom && !messages.isError)
     return () => setSoundReadingConversation(scope, conversation.id, false)
   }, [userId, workspaceId, conversation.id, atBottom, messages.isError])
-  const people = useQuery({ queryKey: ["workspace-conversations", workspaceId, userId, conversation.id, "participants"], queryFn: ({ signal }) => conversationRequest<{ participants: ConversationParticipant[] }>(workspaceId, `conversations/${encodeURIComponent(conversation.id)}/participants`, undefined, signal), enabled: showPeople })
+  const people = useQuery({ queryKey: ["workspace-conversations", workspaceId, userId, conversation.id, "participants"], queryFn: ({ signal }) => conversationRequest<{ participants: ConversationParticipant[] }>(workspaceId, `conversations/${encodeURIComponent(conversation.id)}/participants`, undefined, signal), enabled: details !== null })
   const history = messages.data ? [...new Map(messages.data.pages.flatMap((page) => page.messages).map((m) => [m.id, m])).values()].sort((a, b) => a.sequence - b.sequence) : undefined
   const lastSequence = history?.at(-1)?.sequence ?? 0
   useEffect(() => { if (atBottom) bottom.current?.scrollIntoView({ block: "end" }) }, [lastSequence, atBottom])
@@ -209,8 +221,9 @@ export function ConversationThread({ conversation, workspaceId, userId, refresh,
     }
     finally { setSending(false) }
   }
-  return <>
-    <header className="flex min-h-16 items-center gap-3 border-b px-4"><Button type="button" variant="ghost" size="icon" className="md:hidden" aria-label="Back to conversations" onClick={onBack}><ArrowLeft className="size-4" /></Button><ConversationIcon conversation={conversation} /><div className="min-w-0 flex-1"><h2 className="truncate font-semibold">{conversationTitle(conversation)}</h2><p className="text-xs text-muted-foreground line-clamp-2">{conversationLabel(conversation)} · {conversation.access_scope === "workspace" ? "Visible to everyone in this workspace" : conversation.is_direct ? "Only the two participants have access" : "Only conversation members can access this group"}</p></div><Button type="button" variant="ghost" disabled={muting} aria-pressed={!!conversation.muted} title="Mute inbox notifications for this conversation. Messages and unread counts remain visible." aria-label={conversation.muted ? "Unmute" : "Mute"} onClick={() => { void toggleMute() }}>{conversation.muted ? <BellOff className="size-4" /> : <Bell className="size-4" />}<span className="hidden lg:inline">{conversation.muted ? "Unmute" : "Mute"}</span></Button><Button type="button" variant="ghost" aria-label="People" onClick={() => setShowPeople(true)}><Users className="size-4" /><span className="hidden sm:inline">People</span></Button></header>
+  return <div className="@container relative flex min-h-0 flex-1 overflow-hidden">
+    <div className={cn("flex min-h-0 min-w-0 flex-1 flex-col", details && "invisible @min-[720px]:visible")}>
+    <header className="flex min-h-16 items-center gap-3 border-b px-4"><Button type="button" variant="ghost" size="icon" className="md:hidden" aria-label="Back to conversations" onClick={onBack}><ArrowLeft className="size-4" /></Button><ConversationIcon conversation={conversation} /><div className="min-w-0 flex-1"><h2 className="truncate font-semibold">{conversationTitle(conversation)}</h2><p className="text-xs text-muted-foreground line-clamp-2">{conversationLabel(conversation)} · {conversation.access_scope === "workspace" ? "Visible to everyone in this workspace" : conversation.is_direct ? "Only the two participants have access" : "Only conversation members can access this group"}</p></div><Button type="button" variant="ghost" disabled={muting} aria-pressed={!!conversation.muted} title="Mute inbox notifications for this conversation. Messages and unread counts remain visible." aria-label={conversation.muted ? "Unmute" : "Mute"} onClick={() => { void toggleMute() }}>{conversation.muted ? <BellOff className="size-4" /> : <Bell className="size-4" />}<span className="hidden lg:inline">{conversation.muted ? "Unmute" : "Mute"}</span></Button><Button type="button" variant="ghost" aria-label="Members" aria-expanded={details !== null} onClick={(e) => openDetails("members", e.currentTarget)}><Users className="size-4" /><span className="hidden sm:inline">Members</span></Button>{canManage && !conversation.is_direct && <Button type="button" variant="ghost" size="icon" aria-label={conversation.kind === "channel" ? "Channel settings" : "Group settings"} aria-expanded={details !== null} onClick={(e) => openDetails("general", e.currentTarget)}><Settings2 className="size-4" /></Button>}</header>
     <div className="min-h-0 flex-1 overflow-y-auto px-4 py-6" onScroll={(e) => { const el = e.currentTarget; setAtBottom(el.scrollHeight - el.scrollTop - el.clientHeight < 80) }}><div className="mx-auto max-w-4xl">
       {messages.isPending && <p className="text-sm">Loading messages…</p>}{messages.error && <ErrorNotice error={messages.error} retry={() => { void messages.refetch() }} />}
       {messages.hasNextPage && <Button type="button" variant="outline" disabled={messages.isFetchingNextPage} onClick={() => { void messages.fetchNextPage() }}>Load older messages</Button>}
@@ -231,16 +244,24 @@ export function ConversationThread({ conversation, workspaceId, userId, refresh,
       <div className="relative rounded-xl border bg-muted/30 p-1 shadow-sm focus-within:border-primary/50">{conversation.kind === "channel" && !sending && !pending && !messages.isError && <MentionAutocomplete text={text} textareaRef={textareaRef} members={(agentRoster.data?.agents ?? []).map((agent) => ({ id: agent.agent_id, slug: agent.slug || agent.name, name: agent.name, kind: "agent" }))} onPick={pickMention} />}<label className="sr-only" htmlFor="workspace-message">Message {conversationTitle(conversation)}</label><Textarea ref={textareaRef} id="workspace-message" className="min-h-24 resize-y border-0 bg-transparent shadow-none focus-visible:ring-0" value={text} disabled={sending || !!pending || messages.isError} maxLength={32000} placeholder={`Message ${conversation.kind === "channel" ? "#" : ""}${conversationTitle(conversation)}${conversation.kind === "channel" ? " · @ to ask an agent" : ""}`} onChange={(e) => updateText(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); void send() } }} /></div>
       <div className="flex items-center justify-between gap-3"><span className="text-xs text-muted-foreground">Enter to send · Shift+Enter for a new line</span><Button type="submit" disabled={sending || !!pending || !text.trim() || messages.isError}><Send className="mr-2 size-4" />{sending ? "Sending…" : "Send"}</Button></div>
     </form>
-    <Dialog open={showPeople} onOpenChange={setShowPeople}><DialogContent><DialogHeader><DialogTitle>{conversation.is_direct ? "Direct message participants" : "Conversation people"}</DialogTitle><DialogDescription>{conversation.access_scope === "workspace" ? "All workspace members can read and write in this channel." : conversation.is_direct ? "This direct message is between two people. To include others, create a separate group." : "These people have access to the conversation and its history."}</DialogDescription></DialogHeader>{people.isPending && <p>Loading people…</p>}{people.error && <ErrorNotice error={people.error} retry={() => { void people.refetch() }} />}<div className="max-h-72 space-y-2 overflow-y-auto">{people.data?.participants.map((person) => <div key={person.user_id} className="flex items-center gap-3 text-sm"><ConversationIdentity id={person.user_id} name={person.name || "Workspace member"} avatarUrl={person.avatar_url} className="size-8" /><span className="min-w-0 flex-1">{person.name || "Workspace member"}</span><span className="text-muted-foreground">{person.role}</span></div>)}</div>{conversation.kind === "group" && people.data && onOpenConversation && <div className="flex flex-wrap gap-2 border-t pt-3">{conversation.is_direct && <Button type="button" variant="outline" onClick={() => { setShowPeople(false); setExpanding("group") }}>Add people</Button>}<Button type="button" variant="outline" onClick={() => { setShowPeople(false); setExpanding("channel") }}>Invite agent</Button></div>}{conversation.kind === "group" && !conversation.is_direct && conversation.created_by === userId && people.data && <ManagePeople workspaceId={workspaceId} userId={userId} conversation={conversation} participants={people.data.participants} refresh={refresh} />}{conversation.kind === "channel" && <ConversationActivity workspaceId={workspaceId} userId={userId} conversationId={conversation.id} canManage={conversation.created_by === userId} />} {conversation.kind === "channel" && agentRoster.data && <ConversationAgents workspaceId={workspaceId} conversationId={conversation.id} agents={agentRoster.data.agents} canManage={conversation.created_by === userId} refresh={refresh} />}</DialogContent></Dialog>
+    </div>
+    {details && <ConversationDetailsPanel section={details} conversation={conversation} canManage={canManage} onClose={closeDetails}
+      general={<div className="space-y-3 text-xs"><div><p className="mb-1 text-muted-foreground">Name</p><p className="break-words text-xs font-medium">{conversationTitle(conversation)}</p></div><div><p className="mb-1 text-muted-foreground">Access</p><p>{conversation.access_scope === "workspace" ? "Everyone in this workspace can read and write here." : conversation.is_direct ? "Only the two participants have access." : "Only invited members have access."}</p></div><Button type="button" variant="outline" size="sm" disabled={muting} aria-pressed={!!conversation.muted} onClick={() => { void toggleMute() }}>{conversation.muted ? <Bell className="size-3.5" /> : <BellOff className="size-3.5" />}{conversation.muted ? "Unmute notifications" : "Mute notifications"}</Button>{muteError && <p role="alert" className="text-destructive">{muteError}</p>}</div>}
+      members={<>{people.isPending && <p>Loading people…</p>}{people.error && <ErrorNotice error={people.error} retry={() => { void people.refetch() }} />}{people.data && <ConversationMembers workspaceId={workspaceId} userId={userId} conversation={conversation} participants={people.data.participants} refresh={refresh} />}{conversation.kind === "group" && people.data && onOpenConversation && <div className="flex flex-wrap gap-2 border-t pt-3">{conversation.is_direct && <Button type="button" variant="outline" size="sm" className="text-xs" onClick={() => { setDetails(null); setExpanding("group") }}>Add people</Button>}<Button type="button" variant="outline" size="sm" className="text-xs" onClick={() => { setDetails(null); setExpanding("channel") }}>Invite agent</Button></div>}</>}
+      agents={conversation.kind === "channel" ? <>{agentRoster.isPending && <p role="status" className="text-xs">Loading agents…</p>}{agentRoster.error && <ErrorNotice error={agentRoster.error} retry={() => { void agentRoster.refetch() }} />}{agentRoster.data && <ConversationAgents workspaceId={workspaceId} conversationId={conversation.id} agents={agentRoster.data.agents} canManage={canManage} refresh={refresh} />}</> : undefined}
+      activity={conversation.kind === "channel" ? <ConversationActivity workspaceId={workspaceId} userId={userId} conversationId={conversation.id} canManage={canManage} /> : undefined}
+    />}
+
     <Dialog open={!!expanding} onOpenChange={(open) => { if (!open) setExpanding(null) }}><DialogContent><DialogHeader><DialogTitle>{expanding === "group" ? "Continue in a group" : "Continue with an agent"}</DialogTitle><DialogDescription>{expanding === "group" ? "Bring more people into a new private group." : "Start a workspace channel with the selected agent."}</DialogDescription></DialogHeader>{expanding && people.data && <ConversationExpansion key={expanding} workspaceId={workspaceId} userId={userId} conversation={conversation} participants={people.data.participants} kind={expanding} onCreated={(c) => { setExpanding(null); refresh(); onOpenConversation?.(c) }} />}</DialogContent></Dialog>
-  </>
+  </div>
 }
 
-function ManagePeople({ workspaceId, userId, conversation, participants, refresh }: { workspaceId: string; userId: string; conversation: WorkspaceConversation; participants: ConversationParticipant[]; refresh: () => void }) {
+function ConversationMembers({ workspaceId, userId, conversation, participants, refresh }: { workspaceId: string; userId: string; conversation: WorkspaceConversation; participants: ConversationParticipant[]; refresh: () => void }) {
+  const canManage = !conversation.is_direct && conversation.created_by === userId
   const [adding, setAdding] = useState("")
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<Error | null>(null)
-  const people = useQuery({ queryKey: ["workspace-conversation-people", workspaceId, userId], queryFn: ({ signal }) => conversationRequest<{ user: ConversationPerson }[]>(workspaceId, `workspaces/${encodeURIComponent(workspaceId)}/members`, undefined, signal) })
+  const people = useQuery({ queryKey: ["workspace-conversation-people", workspaceId, userId], enabled: canManage, queryFn: ({ signal }) => conversationRequest<{ user: ConversationPerson }[]>(workspaceId, `workspaces/${encodeURIComponent(workspaceId)}/members`, undefined, signal) })
   async function change(removeId?: string) {
     if (busy) return
     setBusy(true); setError(null)
@@ -253,7 +274,28 @@ function ManagePeople({ workspaceId, userId, conversation, participants, refresh
     } catch (e) { setError(e instanceof Error ? e : new Error("Unable to update people.")) }
     finally { setBusy(false) }
   }
-  return <section className="space-y-3 border-t pt-3"><h3 className="text-sm font-medium">Manage people</h3><p className="text-xs text-muted-foreground">Adding someone grants access to all existing history. Removing someone revokes future access to a group; workspace channels remain readable by everyone in the workspace.</p>{people.error && <ErrorNotice error={people.error} retry={() => { void people.refetch() }} />}<div className="flex gap-2"><select aria-label="Person to add" className="min-w-0 flex-1 rounded-md border bg-background p-2 text-sm" value={adding} onChange={(e) => setAdding(e.target.value)}><option value="">Choose a person…</option>{people.data?.filter(({ user }) => !participants.some((p) => p.user_id === user.id)).map(({ user }) => <option key={user.id} value={user.id}>{user.full_name || user.email}</option>)}</select><Button type="button" disabled={!adding || busy} onClick={() => { void change() }}>Add</Button></div>{participants.filter((p) => p.user_id !== conversation.created_by).map((p) => <div key={p.user_id} className="flex items-center justify-between gap-2 text-sm"><span>{p.name}</span><Button type="button" size="sm" variant="ghost" disabled={busy} onClick={() => { if (window.confirm(`Remove ${p.name} from this conversation?`)) void change(p.user_id) }}>Remove</Button></div>)}{error && <p role="alert" className="text-sm text-destructive">{error.message}</p>}</section>
+  return <div className="space-y-3 text-xs">
+    <ul className="space-y-1">
+      {participants.map((person) => <li key={person.user_id} className="flex min-h-9 items-center gap-2 rounded-md px-1 py-1 hover:bg-accent/50">
+        <ConversationIdentity id={person.user_id} name={person.name || "Workspace member"} avatarUrl={person.avatar_url} className="size-7 shrink-0" />
+        <span className="min-w-0 flex-1 truncate">{person.name || "Workspace member"}</span>
+        <span className="text-[10px] text-muted-foreground">{person.role}</span>
+        {canManage && person.user_id !== conversation.created_by && <Button type="button" size="icon" variant="ghost" className="size-7 coarse:size-12 text-muted-foreground" aria-label={`Remove ${person.name || "member"}`} title="Remove member" disabled={busy} onClick={() => { if (window.confirm(`Remove ${person.name} from this conversation?`)) void change(person.user_id) }}><UserMinus className="size-3.5" /></Button>}
+      </li>)}
+    </ul>
+    {canManage && <>
+      <div className="flex items-center gap-2">
+        <Select value={adding} onValueChange={setAdding} disabled={busy || people.isPending}>
+          <SelectTrigger aria-label="Person to add" size="sm" className="min-w-0 flex-1 text-xs coarse:min-h-12"><SelectValue placeholder="Add a member…" /></SelectTrigger>
+          <SelectContent>{people.data?.filter(({ user }) => !participants.some((person) => person.user_id === user.id)).map(({ user }) => <SelectItem key={user.id} value={user.id} className="text-xs"><span className="flex items-center gap-2"><ConversationIdentity id={user.id} name={user.full_name || user.email} avatarUrl={user.avatar_url} className="size-6 shrink-0" /><span className="truncate">{user.full_name || user.email}</span></span></SelectItem>)}</SelectContent>
+        </Select>
+        <Button type="button" size="sm" variant="outline" disabled={!adding || busy} onClick={() => { void change() }}><UserPlus className="size-3.5" />Add</Button>
+      </div>
+      <p className="text-[10px] leading-relaxed text-muted-foreground">{conversation.kind === "channel" ? "Membership does not restrict access: everyone in the workspace can still read and write here." : "New members can read this group’s history."}</p>
+      {people.error && <ErrorNotice error={people.error} retry={() => { void people.refetch() }} />}
+    </>}
+    {error && <p role="alert" className="text-xs text-destructive">{error.message}</p>}
+  </div>
 }
 
 

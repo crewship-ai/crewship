@@ -4891,6 +4891,9 @@
             "id": {
               "type": "string"
             },
+            "kind": {
+              "type": "string"
+            },
             "last_activity_at": {
               "type": "string"
             },
@@ -4902,6 +4905,35 @@
             },
             "origin": {
               "type": "string"
+            },
+            "source": {
+              "additionalProperties": false,
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "run_id": {
+                  "type": "string"
+                },
+                "slug": {
+                  "type": "string"
+                },
+                "step_id": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "kind",
+                "id",
+                "name"
+              ],
+              "type": "object"
             },
             "started_at": {
               "type": "string"
@@ -25884,6 +25916,14 @@
           },
           {
             "in": "query",
+            "name": "chat_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
             "name": "counts",
             "required": false,
             "schema": {
@@ -25912,6 +25952,30 @@
             "required": false,
             "schema": {
               "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "routine_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "source",
+            "required": false,
+            "schema": {
+              "type": "string"
             }
           },
           {
@@ -40181,6 +40245,14 @@
             "required": false,
             "schema": {
               "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "type": "string"
             }
           },
           {

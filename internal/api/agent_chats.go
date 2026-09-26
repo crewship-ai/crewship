@@ -87,6 +87,21 @@ func (h *AgentHandler) ListChats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Search runs before pagination, including matches beyond the loaded sidebar.
+	args := []any{agentID, workspaceID}
+	if q := strings.TrimSpace(r.URL.Query().Get("q")); q != "" {
+		kindWhere += " AND instr(crewship_casefold(c.title), crewship_casefold(?)) > 0"
+		args = append(args, q)
+	}
+	if chatID := r.URL.Query().Get("chat_id"); chatID != "" {
+		kindWhere += " AND c.id=?"
+		args = append(args, chatID)
+	}
+	if routineID := r.URL.Query().Get("routine_id"); routineID != "" {
+		kindWhere += " AND EXISTS (SELECT 1 FROM pipeline_runs pr WHERE pr.id=c.pipeline_run_id AND pr.workspace_id=c.workspace_id AND pr.pipeline_id=?)"
+		args = append(args, routineID)
+	}
+
 	// The per-kind totals, for the scopes this response deliberately does not
 	// contain. Opt-in: a `chat list` from the terminal has no tab strip to
 	// fill and should not pay for a count over every chat the agent has.
@@ -119,7 +134,7 @@ func (h *AgentHandler) ListChats(w http.ResponseWriter, r *http.Request) {
 	var total int
 	if err := h.db.QueryRowContext(r.Context(),
 		`SELECT COUNT(*) FROM chats c WHERE c.agent_id = ? AND c.workspace_id = ?`+kindWhere,
-		agentID, workspaceID).Scan(&total); err != nil {
+		args...).Scan(&total); err != nil {
 		replyInternalError(w, h.logger, "count agent chats", err)
 		return
 	}
@@ -135,7 +150,7 @@ func (h *AgentHandler) ListChats(w http.ResponseWriter, r *http.Request) {
 		WHERE c.agent_id = ? AND c.workspace_id = ?`+kindWhere+`
 		ORDER BY last_activity_at DESC
 		LIMIT ? OFFSET ?
-	`, agentID, workspaceID, limit, offset)
+	`, append(args, limit, offset)...)
 	if err != nil {
 		replyInternalError(w, h.logger, "list agent chats", err)
 		return
@@ -162,6 +177,14 @@ func (h *AgentHandler) ListChats(w http.ResponseWriter, r *http.Request) {
 	if err := rows.Err(); err != nil {
 		replyInternalError(w, h.logger, "rows iteration (chats)", err)
 		return
+	}
+
+	rows.Close()
+	if r.URL.Query().Get("source") == "1" {
+		if err := h.attachChatSources(r.Context(), workspaceID, result); err != nil {
+			replyInternalError(w, h.logger, "read chat sources", err)
+			return
+		}
 	}
 
 	if len(result) > 0 {

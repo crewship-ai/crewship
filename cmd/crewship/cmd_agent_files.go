@@ -35,8 +35,14 @@ var agentFilesCmd = &cobra.Command{
 Agents create artefacts in /output/{slug}/ inside their container — code,
 docs, snapshots, etc. This is the same view the web Files panel shows.
 
+The listing is one directory level by default. --subdir descends into a
+subdirectory of the agent's namespace (the names the listing shows), and
+--recursive walks the whole tree instead of a single level.
+
 Examples:
   crewship agent files viktor
+  crewship agent files viktor --subdir workspace/demo
+  crewship agent files viktor --recursive
   crewship agent files viktor --download README.md
   crewship agent files viktor --download report.txt --out /tmp/saved.txt
   crewship agent files viktor --format json --filter '.[] | .name'`,
@@ -55,8 +61,24 @@ Examples:
 			return downloadAgentFile(client, agentID, download, cmd)
 		}
 
+		// Both filters are list-only (the download path takes a `path`),
+		// and both are sent only when asked: absent and false mean the
+		// same thing to the server, and an always-sent `recursive=false`
+		// would put the default at the mercy of the parameter's parsing.
+		// `recursive` is the literal "true" because the proxy compares the
+		// query value against exactly that string (proxy_files.go).
+		q := url.Values{}
+		if recursive, _ := cmd.Flags().GetBool("recursive"); recursive {
+			q.Set("recursive", "true")
+		}
+		if subdir, _ := cmd.Flags().GetString("subdir"); subdir != "" {
+			q.Set("subdir", subdir)
+		}
 		var body any
 		path := "/api/v1/agents/" + url.PathEscape(agentID) + "/files"
+		if enc := q.Encode(); enc != "" {
+			path += "?" + enc
+		}
 		if err := getJSON(client, path, &body); err != nil {
 			return err
 		}
@@ -410,6 +432,8 @@ Examples:
 func init() {
 	agentFilesCmd.Flags().String("download", "", "Download this specific file instead of listing")
 	agentFilesCmd.Flags().String("out", "", "Output path for --download (default: basename of file, '-' for stdout)")
+	agentFilesCmd.Flags().Bool("recursive", false, "List the whole tree under the agent's namespace instead of one level")
+	agentFilesCmd.Flags().String("subdir", "", "List this subdirectory of the agent's namespace instead of its root")
 	jqExprFlag(agentFilesCmd)
 	jqExprFlag(agentInboxCmd)
 	jqExprFlag(agentGitLogCmd)

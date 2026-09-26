@@ -23,7 +23,7 @@ Auth: every subcommand requires an authenticated session (`crewship login`). All
 | --- | --- |
 | `chat <chat-id>` | Print the full message history of one chat as a rendered transcript. |
 | `chat create <agent-slug-or-id>` | Open an empty chat session on an agent without sending anything to it. Prints the new chat id on stdout. |
-| `chat list <agent-slug-or-id>` | List recent chats for an agent, ordered by last activity. Includes `KIND` (what wrote the chat) and `UNREAD` (replies you haven't seen). `--kind` narrows to one; `--limit` and `--offset` page (the server's default and ceiling are 100), and a cut page ends with `showing 1–10 of 19 · next page: --offset 10`. |
+| `chat list <agent-slug-or-id>` | List recent chats for an agent, ordered by last activity. Includes `KIND` (what wrote the chat) and `UNREAD` (replies you haven't seen). `--kind` narrows to one; `--search`/`-q` matches titles, `--chat`/`--routine` pin one chat or one routine's chats, `--with-source` attaches the work source to each row; `--limit` and `--offset` page (the server's default and ceiling are 100), and a cut page ends with `showing 1–10 of 19 · next page: --offset 10`. |
 | `chat read <chat-id>` | Mark a chat read for you: clears its unread count and the paired "agent replied" inbox notification. |
 | `chat rename <chat-id> <title>` | Give the session a name — what `chat list`, the sidebar and reply notifications call it. Alias: `title`. |
 | `chat attach <chat-id> <path>` | Upload a file into the chat (lands under `/output/<agent-slug>/attachments/<chat-id>/<attachment-id>/` in the container). |
@@ -98,6 +98,25 @@ Calls `DELETE /api/v1/agents/{agentId}/chats/{chatId}/attachments/{attachmentId}
 Idempotent: deleting an attachment that is already gone succeeds, because what you asked for is already true. This is the only way to reclaim a chat attachment's bytes short of deleting the whole chat — chat blobs are not content-addressed (the path is what the agent is told to open), so they sit outside the background reclaim sweep that collects issue attachments.
 
 Like the upload, the removal goes through the crew container, so **a stopped crew refuses it** with `failed to delete attachment: …`. Nothing is lost — the row is kept and re-running the command after starting the crew completes the deletion.
+
+### `chat list <agent-slug-or-id>`
+
+```bash
+crewship chat list daniel --search "digest"
+crewship chat list daniel --routine rtn_weekly --with-source
+crewship chat list daniel --chat c_abc123
+```
+
+| Flag | Type | Default | Description |
+|---|---|---|---|
+| `--search <text>` / `-q` | string | | Case-insensitive search over chat titles, applied server-side before the page limit. |
+| `--chat <id>` | string | | Only the chat with this id (server-side filter). |
+| `--routine <id>` | string | | Only chats minted by this routine (pipeline) id. |
+| `--with-source` | bool | `false` | Attach each chat's work source — the routine (with run/step) or issue it belongs to — to every row: a `SOURCE` column in table output, a `source` object in `--format json`. |
+| `--kind <kinds>` | string | all | Narrow to one or more kinds (`direct`, `routine`, `issue`, `agent`); comma-separates. |
+| `--limit <n>` / `--offset <n>` | int | `100` / `0` | Paging; the server's default and ceiling are 100. |
+
+See [List an agent's recent chats](#list-an-agents-recent-chats) below for what the rows mean and how to read `KIND` first.
 
 ### `chat read <chat-id>`
 
@@ -291,12 +310,14 @@ Rules that hold for every room command:
 ```bash
 crewship chat room list
 crewship chat room list --limit 20 --offset 20
+crewship chat room list --q planning
 ```
 
 | Flag | Default | Effect |
 | --- | --- | --- |
 | `--limit <n>` | `100` | Page size, `1..100`. |
 | `--offset <n>` | `0` | Start offset. A full page's envelope carries a numeric `next_offset`; follow it until it is `null`. |
+| `--q <text>` / `--search <text>` | | Case-insensitive server-side search over room titles. The two spellings are the same filter; passing both is an error rather than a silent preference. |
 
 Calls `GET /api/v1/conversations`. Only rooms you can reach are listed:
 your DMs, the private groups you are in, and every channel in the workspace.
@@ -448,8 +469,7 @@ limit on who can read it.
 
 `add` and `remove` (`POST …/participants`, `DELETE …/participants/{userId}`)
 are **creator-only** — anyone else gets `404`. `add` grants the room's
-existing history and is idempotent. A DM refuses both (`400`), a channel
-refuses `remove`, and the creator cannot be removed from a group.
+existing history and is idempotent. A DM refuses both (`400`), and the creator cannot be removed. Channel removal changes membership without revoking workspace-wide access. Reading, sending or muting a channel does not rejoin it.
 
 ### `chat room agents` — list, add, remove
 

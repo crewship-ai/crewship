@@ -7,6 +7,8 @@ import { useHotkeys } from "react-hotkeys-hook"
 import { cn } from "@/lib/utils"
 import { spring } from "@/lib/motion"
 import { useDrawerStore } from "@/stores/drawer-store"
+import { useSessionSafe } from "@/hooks/use-auth"
+import { useUserPreference } from "@/hooks/use-user-preference"
 
 import { DRAWER_TAB_LABELS } from "./right-rail"
 
@@ -15,7 +17,23 @@ interface RightDrawerProps {
   className?: string
 }
 
-export function RightDrawer({ children, className }: RightDrawerProps) {
+export function RightDrawer(props: RightDrawerProps) {
+  const { data: session } = useSessionSafe()
+  const userId = session?.user?.id
+  if (userId) return <SavedRightDrawer key={userId} userId={userId} {...props} />
+  return <DrawerBody {...props} />
+}
+
+function SavedRightDrawer({ userId, ...props }: RightDrawerProps & { userId: string }) {
+  const [preferredWidth, saveWidth] = useUserPreference<number>(`chat.drawer.width.${userId}`, 340)
+  const setWidth = useDrawerStore((s) => s.setWidth)
+  useEffect(() => {
+    setWidth(Number.isFinite(preferredWidth) ? preferredWidth : 340)
+  }, [preferredWidth, setWidth])
+  return <DrawerBody {...props} onWidthCommit={saveWidth} />
+}
+
+function DrawerBody({ children, className, onWidthCommit }: RightDrawerProps & { onWidthCommit?: (width: number) => void }) {
   // Narrow selectors — one per field actually read.
   const open = useDrawerStore((s) => s.open)
   const mode = useDrawerStore((s) => s.mode)
@@ -46,6 +64,7 @@ export function RightDrawer({ children, className }: RightDrawerProps) {
       setWidth(dragRef.current.startW + dx)
     }
     const onUp = () => {
+      if (dragRef.current) onWidthCommit?.(useDrawerStore.getState().width)
       dragRef.current = null
       document.body.style.userSelect = ""
     }
@@ -58,7 +77,7 @@ export function RightDrawer({ children, className }: RightDrawerProps) {
       // mouseup fires), we'd otherwise leave the page un-selectable.
       document.body.style.userSelect = ""
     }
-  }, [open, setWidth])
+  }, [open, setWidth, onWidthCommit])
 
   const handleDragStart = (e: React.MouseEvent) => {
     e.preventDefault()
@@ -94,9 +113,9 @@ export function RightDrawer({ children, className }: RightDrawerProps) {
             exit={{ x: width + 24, opacity: 0 }}
             transition={spring.smooth}
             hidden={!open}
-            style={{ width, display: open ? undefined : "none" }}
+            style={{ width, maxWidth: "45%", display: open ? undefined : "none" }}
             className={cn(
-              "absolute top-0 right-14 bottom-0 z-20 bg-background border-l shadow-xl flex",
+              "absolute top-0 right-14 bottom-0 z-20 bg-card border-l shadow-xl flex",
               mode === "push" && "static shadow-none",
               className,
             )}
@@ -106,21 +125,22 @@ export function RightDrawer({ children, className }: RightDrawerProps) {
               aria-orientation="vertical"
               aria-label="Resize chat side panel"
               aria-valuemin={280}
-              aria-valuemax={720}
+              aria-valuemax={520}
               aria-valuenow={width}
               tabIndex={0}
               onKeyDown={(event) => {
                 const next = event.key === "ArrowLeft" ? width + 20
                   : event.key === "ArrowRight" ? width - 20
                   : event.key === "Home" ? 280
-                  : event.key === "End" ? 720 : null
+                  : event.key === "End" ? 520 : null
                 if (next === null) return
                 event.preventDefault()
                 setWidth(next)
+                onWidthCommit?.(Math.max(280, Math.min(520, next)))
               }}
-              className="w-1 cursor-col-resize bg-transparent hover:bg-primary/30 transition-colors shrink-0"
+              className="group relative w-2 shrink-0 cursor-col-resize bg-border/50 transition-colors hover:bg-primary/20 focus-visible:bg-primary/20 focus-visible:outline-none"
               onMouseDown={handleDragStart}
-            />
+            ><span aria-hidden="true" className="absolute top-1/2 left-1/2 h-10 w-0.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-muted-foreground/45 transition-colors group-hover:bg-primary group-focus-visible:bg-primary" /></div>
             <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
               {children}
             </div>

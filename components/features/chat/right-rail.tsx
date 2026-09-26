@@ -1,49 +1,25 @@
 "use client"
 
 import { useEffect } from "react"
-import { FileText, Zap, Users } from "lucide-react"
-import { motion } from "motion/react"
+import { LayoutGrid, ListTodo } from "lucide-react"
 import { useHotkeys } from "react-hotkeys-hook"
 
 import { Button } from "@/components/ui/button"
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
-import { spring } from "@/lib/motion"
-import { AGENT_EXTERNAL_TRIGGERS } from "@/lib/feature-gates"
 import { useDrawerStore, type DrawerTab } from "@/stores/drawer-store"
 
 interface RailItem {
   id: DrawerTab
   label: string
-  icon: typeof FileText
+  icon: typeof LayoutGrid
   shortcut?: string
 }
 
-// Context tab intentionally dropped from the chat drawer — that surface
-// belongs to the agent canvas / settings page, not the per-session chat.
-// Keeping the rail tight makes the drawer feel less like a kitchen-sink and
-// more like a focused chat sidekick.
-//
-// Triggers is gated on the SAME flag the panel gates its tab on, and for the
-// obvious reason: right-panel.tsx renders the Triggers tab only when
-// AGENT_EXTERNAL_TRIGGERS is set, and the flag is currently false — so the
-// rail was offering a button (and ⌘2) that opened the drawer onto an empty
-// pane. A rail entry whose panel cannot render is not a hidden feature, it is
-// a dead control, and it was the first thing every reader clicked.
-//
 // The shortcut number is derived from the position rather than written down,
 // so removing an entry cannot leave ⌘3 pointing at the second icon.
 const RAIL_PANELS: Omit<RailItem, "shortcut">[] = [
-  { id: "files", label: "Files", icon: FileText },
-  ...(AGENT_EXTERNAL_TRIGGERS
-    ? [{ id: "triggers" as DrawerTab, label: "Triggers", icon: Zap }]
-    : []),
-  { id: "team", label: "Team", icon: Users },
+  { id: "artifacts", label: "Artifacts", icon: LayoutGrid },
+  { id: "work", label: "Work", icon: ListTodo },
 ]
 
 const ITEMS: RailItem[] = RAIL_PANELS.map((item, i) => ({
@@ -54,17 +30,18 @@ const ITEMS: RailItem[] = RAIL_PANELS.map((item, i) => ({
 /**
  * What each panel is called, in one place.
  *
- * The rail's button label, its tooltip, the drawer's accessible name and the
- * panel's own heading all read from here, so they cannot say four different
+ * The rail's button label, the drawer's accessible name and the
+ * panel's own heading all read from here, so they cannot say three different
  * things. The rail carried no visible label at all until the label moved onto
- * the button — before that this map fed a tooltip and an sr-only span, and a
- * reader looking at the strip had only the glyph.
+ * the button; readers no longer need to hover to learn what it opens.
  *
  * "context" is not a rail button any more (it moved to the agent canvas) but
  * survives in persisted user state, so it keeps a name.
  */
 export const DRAWER_TAB_LABELS: Record<DrawerTab, string> = {
   files: "Files",
+  artifacts: "Artifacts",
+  work: "Work",
   triggers: "Triggers",
   team: "Team",
   context: "Context",
@@ -78,11 +55,11 @@ export function RightRail({ className }: { className?: string }) {
   const toggle = useDrawerStore((s) => s.toggle)
   const setActiveTab = useDrawerStore((s) => s.setActiveTab)
 
-  // Migrate persisted "context" → "files". Depend on activeTab so this
+  // Migrate tabs removed from the chat surface. Depend on activeTab so this
   // also fires after the persist middleware hydrates with the legacy
   // value (which can land after the first render).
   useEffect(() => {
-    if (activeTab === "context") setActiveTab("files")
+    if (activeTab === "files" || activeTab === "context" || activeTab === "team" || activeTab === "triggers") setActiveTab("artifacts")
   }, [activeTab, setActiveTab])
 
   useHotkeys(
@@ -93,7 +70,7 @@ export function RightRail({ className }: { className?: string }) {
   )
 
   useHotkeys(
-    ["mod+1", "mod+2", "mod+3", "mod+4"],
+    ["mod+1", "mod+2"],
     (_, info) => {
       const idx = Number(info.keys?.[0]) - 1
       if (idx >= 0 && idx < ITEMS.length) toggle(ITEMS[idx].id)
@@ -102,78 +79,13 @@ export function RightRail({ className }: { className?: string }) {
     [toggle],
   )
 
-  return (
-    <TooltipProvider delayDuration={400}>
-      <div
-        className={cn(
-          "relative z-30 flex flex-col items-center gap-0.5 w-14 shrink-0 border-l bg-background py-2",
-          className,
-        )}
-        role="tablist"
-        aria-label="Chat side panels"
-      >
-        {ITEMS.map(({ id, label, icon: Icon, shortcut }) => {
-          const isActive = open && activeTab === id
-          return (
-            <Tooltip key={id}>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  // The rail was three unlabelled 16px glyphs on a 48px strip,
-                  // and the only affordances that named them — an sr-only
-                  // span and a hover tooltip — are exactly the two nobody
-                  // LOOKING at the screen has. So the label is on the button.
-                  //
-                  // It costs 8px of width and buys the whole strip: the icons
-                  // (a page, two people) are generic enough that a reader who
-                  // has not opened both panels cannot tell which is which, and
-                  // the first thing everybody did was click one to find out.
-                  // The tooltip stays, because it is where the shortcut lives.
-                  className={cn(
-                    "relative h-auto w-full flex-col gap-1 rounded-md px-0 py-2",
-                    isActive
-                      ? "bg-white/[0.06] text-foreground"
-                      : "text-muted-foreground hover:bg-white/[0.03] hover:text-foreground",
-                  )}
-                  role="tab"
-                  aria-selected={isActive}
-                  aria-controls={`drawer-panel-${id}`}
-                  // The shortcut is drawn in the tooltip; without this it is
-                  // visual-only, and the tooltip is the thing a keyboard user
-                  // is least likely to have seen.
-                  aria-keyshortcuts={shortcut ? `Meta+${shortcut}` : undefined}
-                  onClick={() => toggle(id)}
-                >
-                  {isActive && (
-                    <motion.span
-                      layoutId="rail-active-indicator"
-                      transition={spring.snappy}
-                      className="absolute inset-y-1 left-0 w-0.5 rounded-r bg-primary"
-                    />
-                  )}
-                  <Icon className="h-4 w-4" />
-                  {/* The button's accessible name, not a decoration beside
-                      one — there is no sr-only twin, so the two can never
-                      say different things. */}
-                  <span className="text-[11px] font-medium leading-none tracking-tight">
-                    {label}
-                  </span>
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent side="left">
-                <div className="flex items-center gap-2 text-xs">
-                  <span>{label}</span>
-                  {shortcut && (
-                    <kbd className="rounded border bg-muted px-1 font-mono text-[10px]">
-                      ⌘{shortcut}
-                    </kbd>
-                  )}
-                </div>
-              </TooltipContent>
-            </Tooltip>
-          )
-        })}
-      </div>
-    </TooltipProvider>
-  )
+  return <div className={cn("relative z-30 flex w-14 shrink-0 flex-col items-center gap-0.5 border-l py-2", open ? "bg-card before:pointer-events-none before:absolute before:inset-0 before:bg-accent/30" : "bg-accent/30", className)} role="tablist" aria-label="Chat side panels">
+    {ITEMS.map(({ id, label, icon: Icon, shortcut }) => {
+      const isActive = open && activeTab === id
+      return <Button key={id} variant="ghost" className={cn("relative h-auto w-full flex-col gap-1 rounded-md px-0 py-2 text-muted-foreground hover:bg-white/[0.03] hover:text-foreground", isActive && "text-foreground")} role="tab" aria-selected={isActive} aria-controls={`drawer-panel-${id}`} aria-keyshortcuts={shortcut ? `Meta+${shortcut}` : undefined} onClick={() => toggle(id)}>
+        <Icon className="h-4 w-4" />
+        <span className="text-[11px] font-medium leading-none tracking-tight">{label}</span>
+      </Button>
+    })}
+  </div>
 }
