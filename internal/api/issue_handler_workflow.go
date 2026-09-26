@@ -292,6 +292,16 @@ func (h *IssueHandler) Start(w http.ResponseWriter, r *http.Request) {
 		internalError(w, r, h.logger, "start: routine", err)
 		return
 	}
+	// The body may pin the routine its inputs were collected for. PATCH can
+	// move routine_id while the issue sits in BACKLOG/TODO, so without this
+	// check inputs filled against the displayed routine would silently run
+	// on whichever routine is bound at start time. The comparison happens
+	// inside the tx, against the same read the dispatch below uses; an empty
+	// pin keeps older clients starting exactly as before.
+	if runInputs.expectedRoutineID != "" && runInputs.expectedRoutineID != routineID {
+		writeProblem(w, r, http.StatusConflict, "The issue's routine changed. Reload the issue and start again.")
+		return
+	}
 	if routineID != "" {
 		h.startBoundRoutine(w, r, tx, missionID, ident, leadAgentID, routineID, runInputs)
 		return

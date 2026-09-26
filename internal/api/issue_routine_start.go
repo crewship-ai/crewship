@@ -32,7 +32,12 @@ type issueRoutineDispatch struct {
 // never read.
 type issueRunInputs struct {
 	values map[string]any
-	err    error
+	// expectedRoutineID is the routine the caller collected these inputs
+	// for — the binding it saw when its form loaded. Compared against
+	// missions.routine_id inside the start transaction; empty (older
+	// clients, no body) skips the check.
+	expectedRoutineID string
+	err               error
 }
 type issueRoutineResponse struct {
 	header http.Header
@@ -180,12 +185,13 @@ func readIssueRunInputs(body io.Reader) issueRunInputs {
 		return issueRunInputs{} // older clients start with the issue's saved inputs
 	}
 	var request struct {
-		RoutineInputs map[string]any `json:"routine_inputs" yaml:"routine_inputs"`
+		RoutineInputs     map[string]any `json:"routine_inputs" yaml:"routine_inputs"`
+		ExpectedRoutineID string         `json:"expected_routine_id" yaml:"expected_routine_id"`
 	}
 	if err := json.Unmarshal(data, &request); err != nil || request.RoutineInputs == nil {
 		return issueRunInputs{err: fmt.Errorf("routine_inputs must be a JSON object")}
 	}
-	return issueRunInputs{values: request.RoutineInputs}
+	return issueRunInputs{values: request.RoutineInputs, expectedRoutineID: request.ExpectedRoutineID}
 }
 
 // mergeIssueRunInputs overlays the caller's per-run values on the issue's
