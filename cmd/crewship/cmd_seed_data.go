@@ -17,19 +17,20 @@ import (
 // Phase 0: Nuke
 // ════════════════════════════════════════════════════════════════════════════
 
-func seedCrews(ctx context.Context, client *cli.Client, userID string) (map[string]string, error) {
+func seedCrews(ctx context.Context, client *cli.Client, userID string) (map[string]string, map[string]bool, error) {
 	if err := ctx.Err(); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	fmt.Fprintln(os.Stderr, "Creating crews...")
-	ids := map[string]string{} // slug → id
+	ids := map[string]string{}   // slug → id
+	created := map[string]bool{} // slug → created in this run (false = 409 resolve)
 	linked := 0
 
 	// ActiveCrews applies the env gate (opt-in demo crews like local-Ollama are
 	// excluded unless CREWSHIP_SEED_OLLAMA=1), so the default seed is unchanged.
 	for _, c := range seeddata.ActiveCrews() {
 		if err := ctx.Err(); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		body := map[string]interface{}{
 			"name":  c.Name,
@@ -52,11 +53,12 @@ func seedCrews(ctx context.Context, client *cli.Client, userID string) (map[stri
 		if len(c.AllowedDomains) > 0 {
 			body["allowed_domains"] = c.AllowedDomains
 		}
-		id, err := createOrResolve(client, "/api/v1/crews", body, "/api/v1/crews", c.Slug)
+		id, wasCreated, err := createOrResolve(client, "/api/v1/crews", body, "/api/v1/crews", c.Slug)
 		if err != nil {
-			return nil, fmt.Errorf("crew %s: %w", c.Slug, err)
+			return nil, nil, fmt.Errorf("crew %s: %w", c.Slug, err)
 		}
 		ids[c.Slug] = id
+		created[c.Slug] = wasCreated
 		fmt.Fprintf(os.Stderr, "  + Crew: %s (%s)\n", c.Name, id[:8])
 
 		// Add current user as crew member. Treat 409 Conflict as idempotent
@@ -83,7 +85,7 @@ func seedCrews(ctx context.Context, client *cli.Client, userID string) (map[stri
 	if userID != "" {
 		fmt.Fprintf(os.Stderr, "  Linked user to %d/%d crews\n", linked, len(ids))
 	}
-	return ids, nil
+	return ids, created, nil
 }
 
 // seedCrewConnections POSTs a bidirectional connection for every unordered
@@ -160,16 +162,17 @@ func seedCrewConnections(ctx context.Context, client *cli.Client, crewIDs map[st
 // Phase 3: Agents
 // ════════════════════════════════════════════════════════════════════════════
 
-func seedAgents(ctx context.Context, client *cli.Client, crewIDs map[string]string) (map[string]string, error) {
+func seedAgents(ctx context.Context, client *cli.Client, crewIDs map[string]string) (map[string]string, map[string]bool, error) {
 	if err := ctx.Err(); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	fmt.Fprintln(os.Stderr, "Creating agents...")
-	ids := map[string]string{} // slug → id
+	ids := map[string]string{}   // slug → id
+	created := map[string]bool{} // slug → created in this run (false = 409 resolve)
 
 	for _, a := range seeddata.ActiveAgents() {
 		if err := ctx.Err(); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		crewID, ok := crewIDs[a.CrewSlug]
 		if !ok {
@@ -199,12 +202,12 @@ func seedAgents(ctx context.Context, client *cli.Client, crewIDs map[string]stri
 		for k, v := range agentUpdateOnlyFields(a) {
 			body[k] = v
 		}
-		id, err := createOrResolve(client, "/api/v1/agents", body, "/api/v1/agents", a.Slug)
+		id, wasCreated, err := createOrResolve(client, "/api/v1/agents", body, "/api/v1/agents", a.Slug)
 		if err != nil {
-			return nil, fmt.Errorf("agent %s: %w", a.Slug, err)
+			return nil, nil, fmt.Errorf("agent %s: %w", a.Slug, err)
 		}
 		if err := applyAgentUpdateOnlyFields(client, id, a); err != nil {
-			return nil, fmt.Errorf("agent %s: %w", a.Slug, err)
+			return nil, nil, fmt.Errorf("agent %s: %w", a.Slug, err)
 		}
 		// POST conflicts resolve an existing agent without changing its model.
 		// An opt-in Codex re-seed must convert the seeded agents as well.
@@ -213,17 +216,18 @@ func seedAgents(ctx context.Context, client *cli.Client, crewIDs map[string]stri
 				"cli_adapter": a.CLIAdapter, "llm_provider": a.LLMProvider, "llm_model": a.LLMModel,
 			})
 			if err != nil {
-				return nil, fmt.Errorf("agent %s Codex config: %w", a.Slug, err)
+				return nil, nil, fmt.Errorf("agent %s Codex config: %w", a.Slug, err)
 			}
 			if err := cli.CheckError(resp); err != nil {
-				return nil, fmt.Errorf("agent %s Codex config: %w", a.Slug, err)
+				return nil, nil, fmt.Errorf("agent %s Codex config: %w", a.Slug, err)
 			}
 			resp.Body.Close()
 		}
 		ids[a.Slug] = id
+		created[a.Slug] = wasCreated
 		fmt.Fprintf(os.Stderr, "  + Agent: %s (%s, %s)\n", a.Name, a.AgentRole, a.ToolProfile)
 	}
-	return ids, nil
+	return ids, created, nil
 }
 
 // agentUpdateOnlyFields carries the agent columns that PATCH

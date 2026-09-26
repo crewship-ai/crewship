@@ -252,13 +252,16 @@ func TestResolveCurrentUserIDCov_Unreachable(t *testing.T) {
 func TestCreateOrResolveCov_Created(t *testing.T) {
 	s := covSetup(t)
 	s.OnPost("/api/v1/crews", clitest.JSONResponse(201, map[string]string{"id": covCrewID}))
-	id, err := createOrResolve(newAPIClient(), "/api/v1/crews",
+	id, created, err := createOrResolve(newAPIClient(), "/api/v1/crews",
 		map[string]string{"slug": "eng"}, "/api/v1/crews", "eng")
 	if err != nil {
 		t.Fatalf("createOrResolve: %v", err)
 	}
 	if id != covCrewID {
 		t.Errorf("id = %q", id)
+	}
+	if !created {
+		t.Error("created = false on a 201 create")
 	}
 }
 
@@ -269,7 +272,7 @@ func TestCreateOrResolveCov_ConflictResolvesBySlug(t *testing.T) {
 		{"id": "cother0123456789abcdefgh", "slug": "other"},
 		{"id": covCrewID, "slug": "eng"},
 	}))
-	id, err := createOrResolve(newAPIClient(), "/api/v1/crews",
+	id, created, err := createOrResolve(newAPIClient(), "/api/v1/crews",
 		map[string]string{"slug": "eng"}, "/api/v1/crews", "eng")
 	if err != nil {
 		t.Fatalf("createOrResolve on 409: %v", err)
@@ -277,12 +280,15 @@ func TestCreateOrResolveCov_ConflictResolvesBySlug(t *testing.T) {
 	if id != covCrewID {
 		t.Errorf("id = %q, want resolved existing id", id)
 	}
+	if created {
+		t.Error("created = true on a 409 resolve — identity re-seed would overwrite operator edits")
+	}
 }
 
 func TestCreateOrResolveCov_HardError(t *testing.T) {
 	s := covSetup(t)
 	s.OnPost("/api/v1/crews", clitest.ErrorResponse(422, "validation failed"))
-	_, err := createOrResolve(newAPIClient(), "/api/v1/crews",
+	_, _, err := createOrResolve(newAPIClient(), "/api/v1/crews",
 		map[string]string{}, "/api/v1/crews", "eng")
 	if err == nil || !strings.Contains(err.Error(), "validation failed") {
 		t.Errorf("want 422 surfaced; got %v", err)

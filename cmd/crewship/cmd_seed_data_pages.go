@@ -80,18 +80,19 @@ func seedPages(ctx context.Context, client *cli.Client, deferCrewTelemetry bool)
 			continue
 		}
 		created++
-		if page.Project != nil {
-			if appStoreMissing {
-				continue
-			}
+		// The app half is skipped when storage is missing, but the loop must
+		// still fall through to the panel pushes below: every catalogue page
+		// carries a Project now, so a `continue` here would leave a workspace
+		// without CREWSHIP_PAGE_PROJECTS_PATH with no demo payloads at all.
+		if page.Project != nil && !appStoreMissing {
 			if err := seedPageApp(ctx, client, page); err != nil {
 				if strings.Contains(err.Error(), "Page project storage is not configured") {
 					appStoreMissing = true
 					fmt.Fprintf(os.Stderr, "  app %s: skipped (page project storage is not configured; panel page retained)\n", page.Slug)
-					continue
+				} else {
+					fmt.Fprintf(os.Stderr, "  app %s: %v (panel page retained)\n", page.Slug, err)
+					failed++
 				}
-				fmt.Fprintf(os.Stderr, "  app %s: %v (panel page retained)\n", page.Slug, err)
-				failed++
 			}
 		}
 		for _, panel := range page.Panels {

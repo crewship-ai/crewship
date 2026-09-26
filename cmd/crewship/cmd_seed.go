@@ -220,7 +220,7 @@ func runSeed(cmd *cobra.Command, args []string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	crewIDs, err := seedCrews(ctx, client, userID)
+	crewIDs, createdCrews, err := seedCrews(ctx, client, userID)
 	if err != nil {
 		return err
 	}
@@ -275,7 +275,7 @@ func runSeed(cmd *cobra.Command, args []string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	agentIDs, err := seedAgents(ctx, client, crewIDs)
+	agentIDs, createdAgents, err := seedAgents(ctx, client, crewIDs)
 	if err != nil {
 		return err
 	}
@@ -373,7 +373,7 @@ func runSeed(cmd *cobra.Command, args []string) error {
 	if err := seedStoryPageFolder(ctx, client); err != nil {
 		return fmt.Errorf("demo story Page folder: %w", err)
 	}
-	if err := seedDemoIdentity(ctx, client, agentIDs, crewIDs); err != nil {
+	if err := seedDemoIdentity(ctx, client, agentIDs, crewIDs, createdAgents, createdCrews); err != nil {
 		return fmt.Errorf("demo identity: %w", err)
 	}
 
@@ -633,26 +633,30 @@ func resolveCurrentUserID(client *cli.Client) string {
 // ════════════════════════════════════════════════════════════════════════════
 
 // createOrResolve creates a resource via POST. On 409, resolves existing by slug.
+// The bool says which of the two happened: a re-seed must not overwrite fields
+// the operator may have edited since, so callers that PATCH identity downstream
+// gate those writes on it.
 
-func createOrResolve(client *cli.Client, createPath string, body interface{}, listPath, slug string) (string, error) {
+func createOrResolve(client *cli.Client, createPath string, body interface{}, listPath, slug string) (string, bool, error) {
 	resp, err := client.Post(createPath, body)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	if resp.StatusCode == http.StatusConflict {
 		resp.Body.Close()
-		return resolveBySlug(client, listPath, slug)
+		id, err := resolveBySlug(client, listPath, slug)
+		return id, false, err
 	}
 	if err := cli.CheckError(resp); err != nil {
-		return "", err
+		return "", false, err
 	}
 	var created struct {
 		ID string `json:"id" yaml:"id"`
 	}
 	if err := cli.ReadJSON(resp, &created); err != nil {
-		return "", err
+		return "", false, err
 	}
-	return created.ID, nil
+	return created.ID, true, nil
 }
 
 // resolveBySlug lists resources and finds one by slug.

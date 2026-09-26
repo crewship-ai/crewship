@@ -35,11 +35,17 @@ func seedAppearance(client *cli.Client, path string, body map[string]string) err
 
 // Identity is metadata: changing it must not change routine execution or
 // overwrite an operator's custom agent persona on a subsequent seed.
-func seedDemoIdentity(ctx context.Context, client *cli.Client, agentIDs, crewIDs map[string]string) error {
+//
+// Crew and agent identity fields (name/description/icon/color, role_title,
+// system_prompt) are therefore written only for entities created by THIS run,
+// exactly like the persona branch below writes only when no agent-layer
+// persona exists: a re-seed resolves the existing entity and leaves whatever
+// the operator has since renamed or edited in place.
+func seedDemoIdentity(ctx context.Context, client *cli.Client, agentIDs, crewIDs map[string]string, createdAgents, createdCrews map[string]bool) error {
 	client = client.WithContext(ctx)
 	ws := client.GetWorkspaceID()
 	for _, c := range seeddata.ActiveCrews() {
-		if id := crewIDs[c.Slug]; id != "" {
+		if id := crewIDs[c.Slug]; id != "" && createdCrews[c.Slug] {
 			if err := seedAppearance(client, "/api/v1/crews/"+id, map[string]string{"name": c.Name, "description": c.Description, "icon": c.Icon, "color": c.Color}); err != nil {
 				return err
 			}
@@ -74,8 +80,10 @@ func seedDemoIdentity(ctx context.Context, client *cli.Client, agentIDs, crewIDs
 		if id == "" {
 			continue
 		}
-		if err := seedAppearance(client, "/api/v1/agents/"+id, map[string]string{"role_title": agent.RoleTitle, "system_prompt": seeddata.AgentPrompt(agent.PromptSlug)}); err != nil {
-			return err
+		if createdAgents[agent.Slug] {
+			if err := seedAppearance(client, "/api/v1/agents/"+id, map[string]string{"role_title": agent.RoleTitle, "system_prompt": seeddata.AgentPrompt(agent.PromptSlug)}); err != nil {
+				return err
+			}
 		}
 		path := "/api/v1/agents/" + id + "/persona"
 		var current PersonaResponse

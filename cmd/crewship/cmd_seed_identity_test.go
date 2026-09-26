@@ -13,6 +13,7 @@ import (
 
 func TestSeedIdentityPreservesCustomPersonaAndInstallsSouls(t *testing.T) {
 	writes := map[string]string{}
+	patches := map[string]bool{}
 	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.Method == "GET" {
@@ -30,12 +31,29 @@ func TestSeedIdentityPreservesCustomPersonaAndInstallsSouls(t *testing.T) {
 			}
 			writes[r.URL.Path] = body["content"]
 		}
+		if r.Method == "PATCH" {
+			patches[r.URL.Path] = true
+		}
 		_, _ = w.Write([]byte(`{}`))
 	}))
 	defer s.Close()
 	ids := map[string]string{"sam": "custom", "jordan": "fresh"}
-	if err := seedDemoIdentity(context.Background(), cli.NewClient(s.URL, "test", covWSCli7), ids, nil); err != nil {
+	// "sam" resolved from a previous seed, "jordan" created by this one.
+	createdAgents := map[string]bool{"sam": false, "jordan": true}
+	// A re-seeded crew resolves by slug: its identity must not be touched either.
+	crewIDs := map[string]string{seeddata.ActiveCrews()[0].Slug: "crew-existing"}
+	createdCrews := map[string]bool{seeddata.ActiveCrews()[0].Slug: false}
+	if err := seedDemoIdentity(context.Background(), cli.NewClient(s.URL, "test", covWSCli7), ids, crewIDs, createdAgents, createdCrews); err != nil {
 		t.Fatal(err)
+	}
+	if patches["/api/v1/agents/custom"] {
+		t.Fatal("re-seed overwrote an existing agent's role_title/system_prompt")
+	}
+	if !patches["/api/v1/agents/fresh"] {
+		t.Fatal("a freshly created agent did not receive its role_title/system_prompt")
+	}
+	if patches["/api/v1/crews/crew-existing"] {
+		t.Fatal("re-seed overwrote an existing crew's name/description/icon/color")
 	}
 	if _, ok := writes["/api/v1/agents/custom/persona"]; ok {
 		t.Fatal("overwrote custom persona")

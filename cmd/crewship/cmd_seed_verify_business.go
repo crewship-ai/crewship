@@ -194,10 +194,13 @@ func verifyBusinessInbox(client *cli.Client, title, since string) error {
 	if e := verifyBusinessGet(client, "/api/v1/inbox?state=all&limit=100", &list); e != nil {
 		return e
 	}
-	start, _ := time.Parse(time.RFC3339, since)
+	start, e := time.Parse(time.RFC3339, since)
+	if e != nil {
+		return fmt.Errorf("run start time %q: %w", since, e)
+	}
 	for _, r := range list.Rows {
-		at, _ := time.Parse(time.RFC3339, r.Created)
-		if r.Title == title && !at.Before(start.Add(-time.Second)) {
+		at, pe := time.Parse(time.RFC3339, r.Created)
+		if pe == nil && r.Title == title && !at.Before(start.Add(-time.Second)) {
 			return nil
 		}
 	}

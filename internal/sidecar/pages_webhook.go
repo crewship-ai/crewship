@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/hex"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -31,7 +32,12 @@ func (s *Server) handlePageWebhook(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		writeJSONResponse(w, 413, map[string]string{"error": "Page payload too large"})
+		var maxBytes *http.MaxBytesError
+		if errors.As(err, &maxBytes) {
+			writeJSONResponse(w, 413, map[string]string{"error": "Page payload too large"})
+			return
+		}
+		writeJSONResponse(w, 400, map[string]string{"error": "Invalid Page webhook request"})
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), pagePushTimeout)

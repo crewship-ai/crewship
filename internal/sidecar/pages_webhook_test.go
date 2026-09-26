@@ -1,6 +1,7 @@
 package sidecar
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -44,5 +45,31 @@ func TestPageWebhookRelay_InvalidCapabilitiesNeverForward(t *testing.T) {
 	}
 	if got.path != "" {
 		t.Fatal("invalid capability reached upstream")
+	}
+}
+
+type failingReader struct{}
+
+func (failingReader) Read([]byte) (int, error) { return 0, errors.New("read failed") }
+
+// Only *http.MaxBytesError answers 413. A client disconnect or truncated body
+// is a read failure, not a size verdict, and must answer 400 instead.
+func TestPageWebhookRelay_ReadErrorMapping(t *testing.T) {
+	be := upstream(t, 200, `{}`, &capturedPush{})
+	defer be.Close()
+	s := newPagePushServer(t, be.URL)
+	token := "pgw_" + strings.Repeat("a", 64)
+
+	w := httptest.NewRecorder()
+	s.handlePageWebhook(w, httptest.NewRequest("POST", "/page-webhooks/"+token,
+		strings.NewReader(strings.Repeat("a", (1<<20)+1))))
+	if w.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("oversized body status %d, want 413: %s", w.Code, w.Body.String())
+	}
+
+	w = httptest.NewRecorder()
+	s.handlePageWebhook(w, httptest.NewRequest("POST", "/page-webhooks/"+token, failingReader{}))
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("generic read error status %d, want 400: %s", w.Code, w.Body.String())
 	}
 }

@@ -697,3 +697,34 @@ func TestSeedVerify_HistoryStillFailsOnARunFromThisSeed(t *testing.T) {
 		t.Errorf("the row must still name a failure from this generation: %q", c.Detail)
 	}
 }
+
+// An unparseable run start must fail the inbox check rather than degrade to
+// the zero time — the zero time lets a notification left by a PREVIOUS seed
+// pass as this run's, which is exactly the confusion the check exists to
+// catch. Rows whose own timestamp does not parse are skipped, not trusted.
+func TestVerifyBusinessInbox_UnparseableTimesNeverPass(t *testing.T) {
+	s := clitest.NewStubServer()
+	defer s.Close()
+	const title = "Ops: check completed"
+	s.OnGet("/api/v1/inbox", clitest.JSONResponse(200, map[string]any{
+		"rows": []map[string]any{
+			{"title": title, "created_at": "2020-01-01T00:00:00Z"}, // stale, from an old seed
+			{"title": title, "created_at": "not-a-timestamp"},      // unparseable — skipped
+			{"title": title, "created_at": "2030-01-01T00:00:00Z"}, // genuinely current
+		},
+	}))
+	client := covStubClient(s)
+
+	if err := verifyBusinessInbox(client, title, ""); err == nil {
+		t.Error("an empty run start passed the check — every stale row is now 'current'")
+	}
+	if err := verifyBusinessInbox(client, title, "not-a-timestamp"); err == nil {
+		t.Error("an unparseable run start passed the check")
+	}
+	if err := verifyBusinessInbox(client, title, "2029-01-01T00:00:00Z"); err != nil {
+		t.Errorf("a notification created after the run start must satisfy it: %v", err)
+	}
+	if err := verifyBusinessInbox(client, title, "2031-01-01T00:00:00Z"); err == nil {
+		t.Error("only stale rows are present after this start — the check must fail")
+	}
+}

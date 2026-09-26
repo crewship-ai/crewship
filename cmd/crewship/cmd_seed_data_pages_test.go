@@ -628,6 +628,57 @@ func TestSeedOnePage_ExistingPageIsUpdatedRatherThanSkipped(t *testing.T) {
 	}
 }
 
+// A workspace without CREWSHIP_PAGE_PROJECTS_PATH must lose the app half of
+// every page — and keep the panel payloads. mustLoadPages gives EVERY
+// catalogue page a Project, so a `continue` on the missing-store path used to
+// skip the panel pushes too: the seed printed success and the demo opened on
+// empty panels. Only the app step may be skipped.
+func TestSeedPages_PanelPayloadsSurviveMissingAppStorage(t *testing.T) {
+	s := clitest.NewStubServer()
+	defer s.Close()
+
+	const ws = covWorkspaceIDCli10
+	s.OnPost("/api/v1/pages", clitest.JSONResponse(201, map[string]any{"slug": "x"}))
+	wantPushes := 0
+	for _, page := range seeddata.Pages {
+		if page.Project != nil {
+			s.OnGet("/api/v1/pages/"+page.Slug+"/project/publications",
+				clitest.ErrorResponse(503, "Page project storage is not configured"))
+		}
+		for _, panel := range page.Panels {
+			if panel.Demo == nil {
+				continue
+			}
+			wantPushes++
+			s.OnPut("/api/v1/pages/"+page.Slug+"/panels/"+panel.ID+"/data",
+				clitest.JSONResponse(200, map[string]any{"accepted": true}))
+		}
+	}
+	for _, slug := range pageProducerRoutineSlugs(seeddata.Pages) {
+		s.OnPost("/api/v1/workspaces/"+ws+"/pipelines/"+slug+"/run",
+			clitest.JSONResponse(202, map[string]string{"run_id": "r1"}))
+	}
+
+	client := cli.NewClient(s.URL(), "tok", ws)
+	if _, err := captureStderrCov(t, func() error {
+		return seedPages(context.Background(), client, false)
+	}); err != nil {
+		t.Fatalf("seedPages: %v", err)
+	}
+	pushes := 0
+	for _, page := range seeddata.Pages {
+		for _, panel := range page.Panels {
+			if panel.Demo == nil {
+				continue
+			}
+			pushes += len(s.CallsFor("PUT", "/api/v1/pages/"+page.Slug+"/panels/"+panel.ID+"/data"))
+		}
+	}
+	if pushes != wantPushes {
+		t.Errorf("panel payload pushes = %d, want %d — missing app storage must not cost the demo payloads", pushes, wantPushes)
+	}
+}
+
 // The authored half has to reach the wire, and this is the test that would
 // have caught it not doing so.
 //
