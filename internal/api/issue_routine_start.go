@@ -20,6 +20,20 @@ type issueRoutineDispatch struct {
 	Active func(context.Context) bool
 	Failed func(error)
 }
+
+// issueRunInputs is the caller-supplied routine_inputs body, read and
+// decoded BEFORE the write transaction opens. The server's ReadTimeout
+// bounds the bytes a slow client may drip, but not the duration of a read
+// happening inside the transaction — which would hold the SQLite write
+// lock for that whole interval. The 1 MiB cap bounds bytes, not duration,
+// so the capped read and the decode both belong outside the tx. Errors
+// ride in the struct so the routine path can surface them at the same
+// point it always did, while a non-routine start keeps ignoring a body it
+// never read.
+type issueRunInputs struct {
+	values map[string]any
+	err    error
+}
 type issueRoutineResponse struct {
 	header http.Header
 	code   int
@@ -38,7 +52,7 @@ func (r *issueRoutineResponse) Write(p []byte) (int, error) {
 // Uses the routine's public execution gates under the original caller identity.
 // A private context value requests asynchronous execution; clients cannot opt
 // into it or force a run ID using JSON or headers.
-func (h *IssueHandler) startBoundRoutine(w http.ResponseWriter, r *http.Request, tx *sql.Tx, missionID, ident, leadID, routineID string) {
+func (h *IssueHandler) startBoundRoutine(w http.ResponseWriter, r *http.Request, tx *sql.Tx, missionID, ident, leadID, routineID string, runInputs issueRunInputs) {
 	if h.routines == nil {
 		writeProblem(w, r, 503, "Routine execution is unavailable")
 		return
@@ -55,11 +69,14 @@ func (h *IssueHandler) startBoundRoutine(w http.ResponseWriter, r *http.Request,
 		return
 	}
 	// The issue keeps its saved defaults; a person may supply values for this
-	// run without silently changing the next run of the same issue.
-	if err := mergeIssueRunInputs(r.Body, inputs); err != nil {
-		writeProblem(w, r, http.StatusBadRequest, err.Error())
+	// run without silently changing the next run of the same issue. The body
+	// itself was read before the transaction opened — runInputs only carries
+	// the decoded result and any error from that read.
+	if runInputs.err != nil {
+		writeProblem(w, r, http.StatusBadRequest, runInputs.err.Error())
 		return
 	}
+	mergeIssueRunInputs(inputs, runInputs)
 	dsl, err := pipeline.Parse([]byte(definition))
 	if err != nil {
 		writeProblem(w, r, 400, "The bound routine definition is invalid")
@@ -146,25 +163,37 @@ func (h *IssueHandler) startBoundRoutine(w http.ResponseWriter, r *http.Request,
 	writeJSON(w, 202, map[string]string{"identifier": ident, "status": "IN_PROGRESS", "run_id": runID})
 }
 
-func mergeIssueRunInputs(body io.Reader, inputs map[string]any) error {
+// readIssueRunInputs reads and decodes the caller-supplied run inputs, capped
+// at 1 MiB. Call it before opening a write transaction — see issueRunInputs
+// for why the read must not happen with the tx held. An empty body is the
+// older-client case and contributes no values; every other failure is carried
+// in the struct for the caller to surface.
+func readIssueRunInputs(body io.Reader) issueRunInputs {
 	data, err := io.ReadAll(io.LimitReader(body, 1<<20+1))
 	if err != nil {
-		return fmt.Errorf("read routine inputs: %w", err)
+		return issueRunInputs{err: fmt.Errorf("read routine inputs: %w", err)}
 	}
 	if len(data) > 1<<20 {
-		return fmt.Errorf("routine inputs exceed 1 MiB")
+		return issueRunInputs{err: fmt.Errorf("routine inputs exceed 1 MiB")}
 	}
 	if len(bytes.TrimSpace(data)) == 0 {
-		return nil // older clients start with the issue's saved inputs
+		return issueRunInputs{} // older clients start with the issue's saved inputs
 	}
 	var request struct {
 		RoutineInputs map[string]any `json:"routine_inputs" yaml:"routine_inputs"`
 	}
 	if err := json.Unmarshal(data, &request); err != nil || request.RoutineInputs == nil {
-		return fmt.Errorf("routine_inputs must be a JSON object")
+		return issueRunInputs{err: fmt.Errorf("routine_inputs must be a JSON object")}
 	}
-	for name, value := range request.RoutineInputs {
+	return issueRunInputs{values: request.RoutineInputs}
+}
+
+// mergeIssueRunInputs overlays the caller's per-run values on the issue's
+// saved defaults, so a person may supply values for this run without
+// silently changing the next run of the same issue. The caller surfaces
+// runInputs.err before calling this; an empty body overlays nothing.
+func mergeIssueRunInputs(inputs map[string]any, run issueRunInputs) {
+	for name, value := range run.values {
 		inputs[name] = value
 	}
-	return nil
 }

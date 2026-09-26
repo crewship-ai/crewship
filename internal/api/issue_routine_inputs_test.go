@@ -6,11 +6,13 @@ import (
 	"testing"
 )
 
-func TestMergeIssueRunInputs(t *testing.T) {
-	stored := map[string]any{"service": "api", "severity": "low"}
-	if err := mergeIssueRunInputs(strings.NewReader(`{"routine_inputs":{"severity":"high","summary":"HTTP 503"}}`), stored); err != nil {
-		t.Fatal(err)
+func TestReadAndMergeIssueRunInputs(t *testing.T) {
+	run := readIssueRunInputs(strings.NewReader(`{"routine_inputs":{"severity":"high","summary":"HTTP 503"}}`))
+	if run.err != nil {
+		t.Fatal(run.err)
 	}
+	stored := map[string]any{"service": "api", "severity": "low"}
+	mergeIssueRunInputs(stored, run)
 	if stored["service"] != "api" || stored["severity"] != "high" || stored["summary"] != "HTTP 503" {
 		t.Fatalf("merged inputs = %#v", stored)
 	}
@@ -20,22 +22,22 @@ func TestMergeIssueRunInputs(t *testing.T) {
 		{name: "truncated JSON", body: `{"routine_inputs":`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if err := mergeIssueRunInputs(strings.NewReader(tc.body), map[string]any{}); err == nil {
+			if run := readIssueRunInputs(strings.NewReader(tc.body)); run.err == nil {
 				t.Errorf("accepted invalid body %q", tc.body)
 			}
 		})
 	}
-	if err := mergeIssueRunInputs(strings.NewReader(""), map[string]any{}); err != nil {
-		t.Fatalf("legacy empty body: %v", err)
+	if run := readIssueRunInputs(strings.NewReader("")); run.err != nil || run.values != nil {
+		t.Fatalf("legacy empty body: %+v", run)
 	}
 	const wrapper = `{"routine_inputs":{"pad":""}}`
-	if err := mergeIssueRunInputs(strings.NewReader(`{"routine_inputs":{"pad":"`+strings.Repeat("x", 1<<20-len(wrapper))+`"}}`), map[string]any{}); err != nil {
-		t.Fatalf("body exactly 1 MiB: %v", err)
+	if run := readIssueRunInputs(strings.NewReader(`{"routine_inputs":{"pad":"` + strings.Repeat("x", 1<<20-len(wrapper)) + `"}}`)); run.err != nil {
+		t.Fatalf("body exactly 1 MiB: %v", run.err)
 	}
-	if err := mergeIssueRunInputs(strings.NewReader(`{"routine_inputs":{"pad":"`+strings.Repeat("x", 1<<20-len(wrapper)+1)+`"}}`), map[string]any{}); err == nil {
+	if run := readIssueRunInputs(strings.NewReader(`{"routine_inputs":{"pad":"` + strings.Repeat("x", 1<<20-len(wrapper)+1) + `"}}`)); run.err == nil {
 		t.Error("accepted a body one byte over 1 MiB")
 	}
-	if err := mergeIssueRunInputs(errReader{}, map[string]any{}); err == nil {
+	if run := readIssueRunInputs(errReader{}); run.err == nil {
 		t.Error("accepted a body whose reader fails")
 	}
 }

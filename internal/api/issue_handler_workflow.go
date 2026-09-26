@@ -241,6 +241,14 @@ func (h *IssueHandler) Start(w http.ResponseWriter, r *http.Request) {
 	ident := r.PathValue("identifier")
 	wsID := WorkspaceIDFromContext(r.Context())
 
+	// The run-inputs body is read and decoded BEFORE the write transaction
+	// opens: the server's ReadTimeout bounds the bytes a slow client may
+	// drip, but a read inside the tx would hold the SQLite write lock for
+	// that whole interval. Errors ride in the struct and surface on the
+	// routine path below, so a non-routine start with a stray body behaves
+	// exactly as it did when it never read one.
+	runInputs := readIssueRunInputs(r.Body)
+
 	tx, txErr := h.db.BeginTx(r.Context(), nil)
 	if txErr != nil {
 		internalError(w, r, h.logger, "start: begin", txErr)
@@ -285,7 +293,7 @@ func (h *IssueHandler) Start(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if routineID != "" {
-		h.startBoundRoutine(w, r, tx, missionID, ident, leadAgentID, routineID)
+		h.startBoundRoutine(w, r, tx, missionID, ident, leadAgentID, routineID, runInputs)
 		return
 	}
 
