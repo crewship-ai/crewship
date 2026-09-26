@@ -18,6 +18,6 @@ func openNoFollow(path string) (*os.File, error) {
 
 // authFilePermOK reports whether the handle's permission bits keep the auth
 // file private to its owner. Unix mode bits are the real access control.
-func authFilePermOK(info os.FileInfo) bool {
+func authFilePermOK(_ *os.File, info os.FileInfo) bool {
 	return info.Mode().Perm()&0077 == 0
 }

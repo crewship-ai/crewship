@@ -5,6 +5,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"unsafe"
 
 	"golang.org/x/sys/windows"
 )
@@ -45,14 +46,42 @@ func openNoFollow(path string) (*os.File, error) {
 	return os.NewFile(uintptr(h), path), nil
 }
 
-// authFilePermOK mirrors the unix variant's owner-only check as far as
-// Windows allows. Go surfaces Windows permissions as 0444 or 0666 (the
-// read-only bit), both with group/other bits set, so the unix test would
-// reject every regular file. The real access control is the file's ACL;
-// a profile-scoped auth.json inherits the profile's protection, and a full
-// ACL audit is out of scope for the seed bootstrap (same precedent as
-// internal/sidecar's windows openNoFollow, which checks reparse points
-// only).
-func authFilePermOK(info os.FileInfo) bool {
-	return info.Mode().IsRegular()
+// authFilePermOK enforces the owner-only contract the unix variant reads
+// off the mode bits. Windows mode bits cannot express 0600 (Go reports
+// 0444 or 0666), so the real access control is the file's DACL: this
+// rejects a file whose DACL grants read access to a principal broader
+// than the owner — Everyone, Authenticated Users or BUILTIN\Users, the
+// groups a file created in a shared location inherits. The check runs on
+// the already-open handle's security descriptor, so it cannot race with
+// a path swap. A missing or NULL DACL (no restrictions at all) refuses.
+func authFilePermOK(f *os.File, info os.FileInfo) bool {
+	sd, err := windows.GetSecurityInfo(windows.Handle(f.Fd()), windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION)
+	if err != nil {
+		return false
+	}
+	dacl, _, err := sd.DACL()
+	if err != nil || dacl == nil {
+		return false
+	}
+	broad := map[string]bool{
+		"S-1-1-0":      true, // Everyone
+		"S-1-5-11":     true, // NT AUTHORITY\Authenticated Users
+		"S-1-5-32-545": true, // BUILTIN\Users
+	}
+	const aclHeaderSize = 8
+	offset := uintptr(unsafe.Pointer(dacl)) + aclHeaderSize
+	for i := uint16(0); i < dacl.AceCount; i++ {
+		header := (*windows.ACE_HEADER)(unsafe.Pointer(offset))
+		if header.AceType == windows.ACCESS_ALLOWED_ACE_TYPE {
+			ace := (*windows.ACCESS_ALLOWED_ACE)(unsafe.Pointer(offset))
+			if ace.Mask&(windows.FILE_GENERIC_READ|windows.GENERIC_READ) != 0 {
+				sid := (*windows.SID)(unsafe.Pointer(&ace.SidStart))
+				if broad[sid.String()] {
+					return false
+				}
+			}
+		}
+		offset += uintptr(header.AceSize)
+	}
+	return true
 }
