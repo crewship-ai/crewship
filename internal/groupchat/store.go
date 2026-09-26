@@ -207,13 +207,24 @@ func (s *Store) List(ctx context.Context, w, u string, limit int) ([]Conversatio
 	return s.ListPage(ctx, w, u, limit, 0)
 }
 func (s *Store) ListPage(ctx context.Context, w, u string, limit, offset int) ([]Conversation, error) {
+	return s.SearchPage(ctx, w, u, "", limit, offset)
+}
+
+// SearchPage applies access and name matching before pagination.
+func (s *Store) SearchPage(ctx context.Context, w, u, query string, limit, offset int) ([]Conversation, error) {
 	if offset < 0 {
 		return nil, ErrInvalid
 	}
 	if err := workspaceMember(ctx, s.db, w, u); err != nil {
 		return nil, err
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT `+conversationCols+` FROM workspace_conversations c WHERE `+accessible+` ORDER BY c.updated_at DESC,c.id DESC LIMIT ? OFFSET ?`, u, u, u, u, u, w, u, u, boundedLimit(limit), offset)
+	where := accessible
+	args := []any{u, u, u, u, u, w, u, u}
+	if q := strings.TrimSpace(query); q != "" {
+		where += ` AND (instr(crewship_casefold(c.title),crewship_casefold(?))>0 OR (c.is_direct=1 AND EXISTS(SELECT 1 FROM workspace_conversation_members peer JOIN users usr ON usr.id=peer.user_id JOIN workspace_members wm ON wm.user_id=usr.id AND wm.workspace_id=c.workspace_id WHERE peer.conversation_id=c.id AND peer.user_id<>? AND instr(crewship_casefold(COALESCE(usr.full_name,usr.id)),crewship_casefold(?))>0)))`
+		args = append(args, q, u, q)
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT `+conversationCols+` FROM workspace_conversations c WHERE `+where+` ORDER BY c.updated_at DESC,c.id DESC LIMIT ? OFFSET ?`, append(args, boundedLimit(limit), offset)...)
 	if err != nil {
 		return nil, err
 	}
@@ -318,7 +329,7 @@ func (s *Store) Send(ctx context.Context, w, u, id string, in SendInput) (Messag
 		if _, err = q.ExecContext(ctx, `UPDATE workspace_conversations SET last_sequence=?,updated_at=? WHERE id=?`, m.Sequence, m.CreatedAt, id); err != nil {
 			return err
 		}
-		if _, err = q.ExecContext(ctx, `INSERT INTO workspace_conversation_members(conversation_id,user_id,joined_at,last_read_sequence) VALUES(?,?,?,?) ON CONFLICT(conversation_id,user_id) DO NOTHING`, id, u, m.CreatedAt, 0); err != nil {
+		if _, err = q.ExecContext(ctx, `INSERT INTO workspace_conversation_members(conversation_id,user_id,joined_at,last_read_sequence,is_member) VALUES(?,?,?,?,0) ON CONFLICT(conversation_id,user_id) DO NOTHING`, id, u, m.CreatedAt, 0); err != nil {
 			return err
 		}
 		for _, agentID := range in.MentionedAgentIDs {
@@ -343,7 +354,7 @@ func (s *Store) MarkRead(ctx context.Context, w, u, id string, sequence int64) e
 		if sequence > c.LastSequence {
 			return ErrInvalid
 		}
-		_, err = q.ExecContext(ctx, `INSERT INTO workspace_conversation_members(conversation_id,user_id,joined_at,last_read_sequence) VALUES(?,?,?,?) ON CONFLICT(conversation_id,user_id) DO UPDATE SET last_read_sequence=MAX(last_read_sequence,excluded.last_read_sequence)`, id, u, now(), sequence)
+		_, err = q.ExecContext(ctx, `INSERT INTO workspace_conversation_members(conversation_id,user_id,joined_at,last_read_sequence,is_member) VALUES(?,?,?,?,0) ON CONFLICT(conversation_id,user_id) DO UPDATE SET last_read_sequence=MAX(last_read_sequence,excluded.last_read_sequence)`, id, u, now(), sequence)
 		if err != nil {
 			return err
 		}
@@ -354,7 +365,7 @@ func (s *Store) Members(ctx context.Context, w, u, id string) ([]Member, error) 
 	if _, err := s.Get(ctx, w, u, id); err != nil {
 		return nil, err
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT wm.user_id,COALESCE(usr.full_name,''),COALESCE(usr.avatar_url,''),COALESCE(cm.joined_at,wm.created_at),CASE WHEN c.created_by=wm.user_id THEN 'owner' ELSE 'member' END FROM workspace_conversations c JOIN workspace_members wm ON wm.workspace_id=c.workspace_id JOIN users usr ON usr.id=wm.user_id LEFT JOIN workspace_conversation_members cm ON cm.conversation_id=c.id AND cm.user_id=wm.user_id WHERE c.id=? AND `+accessible+` AND (c.kind='channel' OR cm.user_id IS NOT NULL) ORDER BY usr.full_name,wm.user_id`, id, w, u, u)
+	rows, err := s.db.QueryContext(ctx, `SELECT wm.user_id,COALESCE(usr.full_name,''),COALESCE(usr.avatar_url,''),COALESCE(cm.joined_at,wm.created_at),CASE WHEN c.created_by=wm.user_id THEN 'owner' ELSE 'member' END FROM workspace_conversations c JOIN workspace_members wm ON wm.workspace_id=c.workspace_id JOIN users usr ON usr.id=wm.user_id LEFT JOIN workspace_conversation_members cm ON cm.conversation_id=c.id AND cm.user_id=wm.user_id WHERE c.id=? AND `+accessible+` AND cm.is_member=1 ORDER BY usr.full_name,wm.user_id`, id, w, u, u)
 	if err != nil {
 		return nil, err
 	}
@@ -398,7 +409,7 @@ func (s *Store) AcknowledgeEvent(ctx context.Context, id string) error {
 	})
 }
 
-// AddMember explicitly grants existing history to another current workspace member.
+// AddMember enrolls a workspace member. In private groups it also grants history access.
 func (s *Store) AddMember(ctx context.Context, w, u, id, target string) error {
 	return s.write(ctx, func(q querier) error {
 		c, err := getForWrite(ctx, q, w, u, id)
@@ -414,7 +425,7 @@ func (s *Store) AddMember(ctx context.Context, w, u, id, target string) error {
 		if err = workspaceMember(ctx, q, w, target); err != nil {
 			return err
 		}
-		_, err = q.ExecContext(ctx, `INSERT INTO workspace_conversation_members(conversation_id,user_id,joined_at) VALUES(?,?,?) ON CONFLICT(conversation_id,user_id) DO NOTHING`, id, target, now())
+		_, err = q.ExecContext(ctx, `INSERT INTO workspace_conversation_members(conversation_id,user_id,joined_at) VALUES(?,?,?) ON CONFLICT(conversation_id,user_id) DO UPDATE SET is_member=1, joined_at=CASE WHEN is_member=0 THEN excluded.joined_at ELSE joined_at END`, id, target, now())
 		return err
 	})
 }
@@ -432,8 +443,13 @@ func (s *Store) RemoveMember(ctx context.Context, w, u, id, target string) error
 		if c.IsDirect {
 			return ErrInvalid
 		}
-		if c.Kind != "group" || target == c.CreatedBy {
+		if target == c.CreatedBy {
 			return ErrInvalid
+		}
+		if c.Kind == "channel" {
+			// Keep read/mute state and public access; reading must not re-enroll them.
+			_, err = q.ExecContext(ctx, `UPDATE workspace_conversation_members SET is_member=0 WHERE conversation_id=? AND user_id=?`, id, target)
+			return err
 		}
 		if _, err = q.ExecContext(ctx, `DELETE FROM workspace_conversation_members WHERE conversation_id=? AND user_id=?`, id, target); err != nil {
 			return err
@@ -482,7 +498,7 @@ func (s *Store) SetMuted(ctx context.Context, w, u, id string, muted bool) error
 		if _, err := getForWrite(ctx, q, w, u, id); err != nil {
 			return err
 		}
-		_, err := q.ExecContext(ctx, `INSERT INTO workspace_conversation_members(conversation_id,user_id,joined_at,muted) VALUES(?,?,?,?) ON CONFLICT(conversation_id,user_id) DO UPDATE SET muted=excluded.muted`, id, u, now(), muted)
+		_, err := q.ExecContext(ctx, `INSERT INTO workspace_conversation_members(conversation_id,user_id,joined_at,muted,is_member) VALUES(?,?,?,?,0) ON CONFLICT(conversation_id,user_id) DO UPDATE SET muted=excluded.muted`, id, u, now(), muted)
 		return err
 	})
 }

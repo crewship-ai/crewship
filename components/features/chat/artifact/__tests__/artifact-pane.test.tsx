@@ -17,8 +17,9 @@ import { render, screen, cleanup, fireEvent, waitFor, act } from "@testing-libra
 // =============================================================================
 
 let workspaceId: string | null = "ws-1"
+let workspaceRole = "OWNER"
 vi.mock("@/hooks/use-workspace", () => ({
-  useWorkspace: () => ({ workspaceId, loading: false }),
+  useWorkspace: () => ({ workspaceId, role: workspaceRole, loading: false }),
 }))
 
 const toastError = vi.fn()
@@ -40,15 +41,20 @@ vi.mock("next/dynamic", () => ({
     function StubFileEditor({
       code,
       onSave,
+      onDirtyChange,
     }: {
       code: string
       onSave: (next: string) => void
+      onDirtyChange?: (dirty: boolean) => void
     }) {
       return (
         <div>
           <pre data-testid="editor-code">{code}</pre>
           <button type="button" onClick={() => onSave(`${code}EDIT`)}>
             stub-save
+          </button>
+          <button type="button" onClick={() => onDirtyChange?.(true)}>
+            stub-dirty
           </button>
         </div>
       )
@@ -72,11 +78,18 @@ function response(init: {
 }) {
   const headers = new Headers()
   if (init.contentType) headers.set("content-type", init.contentType)
+  const bytes = new TextEncoder().encode(init.body ?? "")
   return Promise.resolve({
     ok: init.ok ?? true,
     status: init.status ?? 200,
     url: init.url ?? "",
     headers,
+    body: new ReadableStream({
+      start(controller) {
+        controller.enqueue(bytes)
+        controller.close()
+      },
+    }),
     text: async () => init.body ?? "",
     json: async () => JSON.parse(init.body ?? "null"),
   } as unknown as Response)
@@ -95,6 +108,7 @@ function openTab(id: string, path: string) {
 
 beforeEach(() => {
   workspaceId = "ws-1"
+  workspaceRole = "OWNER"
   apiFetch.mockReset()
   toastError.mockReset()
   toastSuccess.mockReset()
@@ -112,6 +126,7 @@ describe("ArtifactPane — reading a file", () => {
     render(<ArtifactPane agentId="agent-1" />)
     openTab("t1", "workspace/notes.md")
 
+    fireEvent.click(await screen.findByRole("button", { name: "Editor" }))
     expect(await screen.findByTestId("editor-code")).toHaveTextContent("second line")
     expect(screen.getByTestId("editor-code").textContent).toBe("# notes\nsecond line\n")
 
@@ -135,7 +150,7 @@ describe("ArtifactPane — reading a file", () => {
     render(<ArtifactPane agentId="agent-1" />)
     openTab("t1", "workspace/notes.md")
 
-    await waitFor(() => expect(toastError).toHaveBeenCalled())
+    await screen.findByRole("alert")
     expect(screen.queryByTestId("editor-code")).toBeNull()
     expect(screen.queryByText(/is_dir/)).toBeNull()
     // No editor means no save button, so the listing can never be written back.
@@ -154,7 +169,7 @@ describe("ArtifactPane — reading a file", () => {
     render(<ArtifactPane agentId="agent-1" />)
     openTab("t1", "workspace/notes.md")
 
-    await waitFor(() => expect(toastError).toHaveBeenCalled())
+    await screen.findByRole("alert")
     expect(screen.queryByTestId("editor-code")).toBeNull()
   })
 })
@@ -170,6 +185,7 @@ describe("ArtifactPane — saving", () => {
     render(<ArtifactPane agentId="agent-1" />)
     openTab("t1", "workspace/notes.md")
 
+    fireEvent.click(await screen.findByRole("button", { name: "Editor" }))
     await screen.findByTestId("editor-code")
     fireEvent.click(screen.getByRole("button", { name: "stub-save" }))
 
@@ -192,6 +208,7 @@ describe("ArtifactPane — saving", () => {
 
     render(<ArtifactPane agentId="agent-1" />)
     openTab("t1", "workspace/one.md")
+    fireEvent.click(await screen.findByRole("button", { name: "Editor" }))
     await screen.findByTestId("editor-code")
 
     openTab("t2", "workspace/two.md")
@@ -202,5 +219,160 @@ describe("ArtifactPane — saving", () => {
     expect(
       apiFetch.mock.calls.filter((c) => String(c[0]).includes("/files/save")).length,
     ).toBe(0)
+  })
+})
+
+describe("ArtifactPane — live revisions", () => {
+  it("increments only when scoped file bytes change and Pause stops fetching", async () => {
+    let body = "name,value\nfirst,1\n"
+    apiFetch.mockImplementation(() => response({ body, contentType: "application/octet-stream" }))
+    render(<ArtifactPane agentId="agent-1" />)
+    openTab("sheet", "reports/current.csv")
+
+    expect(await screen.findByLabelText("Spreadsheet preview")).toHaveTextContent("first")
+    expect(screen.getByRole("status")).toHaveTextContent("revision 1")
+    const callsBeforePause = apiFetch.mock.calls.length
+    fireEvent.click(screen.getByRole("button", { name: "Pause live updates" }))
+    const callsAtPause = apiFetch.mock.calls.length
+    expect(callsAtPause).toBe(callsBeforePause)
+    body = "name,value\nsecond,2\n"
+    expect(screen.getByRole("status")).toHaveTextContent("Paused")
+    expect(apiFetch).toHaveBeenCalledTimes(callsAtPause)
+
+    fireEvent.click(screen.getByRole("button", { name: "Follow live updates" }))
+    expect(await screen.findByLabelText("Spreadsheet preview")).toHaveTextContent("second")
+    expect(screen.getByRole("status")).toHaveTextContent("revision 2")
+    fireEvent.click(screen.getByRole("button", { name: "Pause live updates" }))
+    fireEvent.click(screen.getByRole("button", { name: "Follow live updates" }))
+    await waitFor(() => expect(apiFetch.mock.calls.length).toBeGreaterThan(callsAtPause + 1))
+    expect(screen.getByRole("status")).toHaveTextContent("revision 2")
+  })
+})
+
+describe("ArtifactPane — document and table editing", () => {
+  it("previews a Markdown document as a page and opens its source for editing", async () => {
+    apiFetch.mockReturnValue(response({ body: "# Copy site\n\nA draft.\n", contentType: "application/octet-stream" }))
+    render(<ArtifactPane agentId="agent-1" />)
+    openTab("doc", "reports/brief.md")
+
+    const page = await screen.findByTitle("Preview reports/brief.md") as HTMLIFrameElement
+    expect(page.srcdoc).toContain("Copy site")
+    expect(page.srcdoc).toContain("default-src 'none'")
+    expect(screen.getByRole("link", { name: "Download artifact" })).toHaveAttribute("download", "brief.md")
+    fireEvent.click(screen.getByRole("button", { name: "Editor" }))
+    expect(await screen.findByTestId("editor-code")).toHaveTextContent("A draft.")
+  })
+
+  it("lets managers edit CSV source while readers only see the table", async () => {
+    apiFetch.mockImplementation((url: string) => String(url).includes("/files/download")
+      ? response({ body: "Area,Status\nNavigation,Todo\n", contentType: "application/octet-stream" })
+      : response({ body: "{}", contentType: "application/json" }))
+    render(<ArtifactPane agentId="agent-1" />)
+    openTab("table", "reports/plan.csv")
+    expect(await screen.findByLabelText("Spreadsheet preview")).toHaveTextContent("Navigation")
+    fireEvent.click(screen.getByRole("button", { name: "Editor" }))
+    fireEvent.click(await screen.findByRole("button", { name: "stub-save" }))
+    await waitFor(() => expect(apiFetch.mock.calls.some(([url]) => String(url).includes("/files/save"))).toBe(true))
+
+    cleanup()
+    workspaceRole = "VIEWER"
+    useArtifactStore.setState({ open: false, tabs: [], activeId: null })
+    render(<ArtifactPane agentId="agent-1" />)
+    openTab("table", "reports/plan.csv")
+    expect(await screen.findByLabelText("Spreadsheet preview")).toHaveTextContent("Navigation")
+    expect(screen.queryByRole("button", { name: "Editor" })).toBeNull()
+  })
+
+ it("polls metadata instead of downloading unchanged files on every tick", async () => {
+   let stamp = "v1"
+   apiFetch.mockImplementation((url: string) => String(url).includes("/files?")
+     ? response({ body: JSON.stringify([{ name: "plan.csv", is_dir: false, size: 10, mod_time: stamp }]), contentType: "application/json" })
+     : response({ body: `name,value\n${stamp},1`, contentType: "application/octet-stream" }))
+   render(<ArtifactPane agentId="agent-1" />)
+   openTab("meta", "reports/plan.csv")
+   await screen.findByLabelText("Spreadsheet preview")
+   vi.useFakeTimers()
+   try {
+     // Resume under the fake clock so the entire polling chain is controlled.
+     fireEvent.click(screen.getByRole("button", { name: "Pause live updates" }))
+     fireEvent.click(screen.getByRole("button", { name: "Follow live updates" }))
+     await act(async () => { await vi.advanceTimersByTimeAsync(10_000) })
+     const downloads = () => apiFetch.mock.calls.filter(([url]) => String(url).includes("/files/download")).length
+     const baseline = downloads()
+     await act(async () => { await vi.advanceTimersByTimeAsync(10_000) })
+     expect(downloads()).toBe(baseline)
+     stamp = "v2"
+     await act(async () => { await vi.advanceTimersByTimeAsync(5_000) })
+     expect(downloads()).toBe(baseline + 1)
+     expect(screen.getByLabelText("Spreadsheet preview")).toHaveTextContent("v2")
+     expect(apiFetch.mock.calls.some(([url]) => String(url).includes("subdir=reports"))).toBe(true)
+   } finally { cleanup(); vi.useRealTimers() }
+ })
+})
+
+describe("ArtifactPane — unsaved edits survive navigation attempts", () => {
+  const confirmMock = vi.fn()
+  beforeEach(() => {
+    window.confirm = confirmMock as unknown as typeof window.confirm
+    confirmMock.mockReset()
+  })
+  const openEditorWithEdits = async () => {
+    apiFetch.mockImplementation((url: string) =>
+      String(url).includes("/files/download")
+        ? response({ body: "draft\n", contentType: "application/octet-stream" })
+        : response({ body: "{}", contentType: "application/json" }),
+    )
+    render(<ArtifactPane agentId="agent-1" />)
+    openTab("t1", "workspace/one.md")
+    openTab("t2", "workspace/two.md")
+    useArtifactStore.setState({ activeId: "t1" })
+    fireEvent.click(await screen.findByRole("button", { name: "Editor" }))
+    await screen.findByTestId("editor-code")
+    fireEvent.click(screen.getByRole("button", { name: "stub-dirty" }))
+    expect(screen.getByRole("status")).toHaveTextContent("Editing")
+  }
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+    useArtifactStore.setState({ open: false, tabs: [], activeId: null })
+  })
+
+  it("keeps the current tab when a dirty switch is refused", async () => {
+    await openEditorWithEdits()
+    confirmMock.mockReturnValue(false)
+
+    fireEvent.click(screen.getByRole("button", { name: "two.md" }))
+
+    expect(confirmMock).toHaveBeenCalledWith("Discard unsaved artifact changes?")
+    expect(useArtifactStore.getState().activeId).toBe("t1")
+    expect(screen.getByTestId("editor-code")).toHaveTextContent("draft")
+  })
+
+  it("switches tabs once the discard is confirmed", async () => {
+    await openEditorWithEdits()
+    confirmMock.mockReturnValue(true)
+
+    fireEvent.click(screen.getByRole("button", { name: "two.md" }))
+
+    expect(useArtifactStore.getState().activeId).toBe("t2")
+  })
+
+  it("keeps a dirty tab open when its close is refused", async () => {
+    await openEditorWithEdits()
+    confirmMock.mockReturnValue(false)
+
+    fireEvent.click(screen.getByRole("button", { name: "Close one.md" }))
+
+    expect(useArtifactStore.getState().tabs.map((t) => t.id)).toContain("t1")
+  })
+
+  it("asks before hiding the pane with unsaved changes", async () => {
+    await openEditorWithEdits()
+    confirmMock.mockReturnValue(false)
+
+    fireEvent.click(screen.getByRole("button", { name: "Back to artifacts" }))
+
+    expect(confirmMock).toHaveBeenCalledWith("Discard unsaved artifact changes?")
+    expect(useArtifactStore.getState().open).toBe(true)
   })
 })

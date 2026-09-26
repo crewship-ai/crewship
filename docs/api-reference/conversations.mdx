@@ -47,8 +47,8 @@ Migration v57 (`add_chat_extras`) added the `message_reactions`, `chat_attachmen
 | POST | [`/api/v1/conversations/{conversationId}/read`](#mark-a-room-read) | Advance the caller's read cursor |
 | POST | [`/api/v1/conversations/{conversationId}/mute`](#mute-a-room) | Mute or unmute the room for the caller |
 | GET | [`/api/v1/conversations/{conversationId}/participants`](#list-room-participants) | List the room's human roster |
-| POST | [`/api/v1/conversations/{conversationId}/participants`](#add-a-room-participant) | Add a human to a private group (creator only) |
-| DELETE | [`/api/v1/conversations/{conversationId}/participants/{userId}`](#remove-a-room-participant) | Remove a human from a private group (creator only) |
+| POST | [`/api/v1/conversations/{conversationId}/participants`](#add-a-room-participant) | Add a human to a group or channel (creator only) |
+| DELETE | [`/api/v1/conversations/{conversationId}/participants/{userId}`](#remove-a-room-participant) | Remove a human from a group or channel (creator only) |
 | GET | [`/api/v1/conversations/{conversationId}/agents`](#list-joined-room-agents) | List the agents joined to a channel |
 | POST | [`/api/v1/conversations/{conversationId}/agents`](#join-an-agent-to-a-channel) | Join an agent to a channel (creator only) |
 | DELETE | [`/api/v1/conversations/{conversationId}/agents/{agentId}`](#remove-an-agent-from-a-channel) | Remove an agent from a channel (creator only) |
@@ -658,8 +658,7 @@ endpoint to create a separate group without exposing the private DM history.
 `DELETE /api/v1/conversations/{conversationId}/participants/{userId}`
 
 **Auth:** room creator only. **Path parameters:** `conversationId`, `userId`.
-**Response:** `204 No Content`. Supported for private groups, excluding the
-creator; fixed-pair DMs and workspace channels reject removal (`400`).
+**Response:** `204 No Content`. Supported for groups and channels, excluding the creator; fixed-pair DMs reject removal (`400`). Removing a channel member changes the roster, not workspace-wide access, read cursors or mute preferences. Reading, sending and muting do not enroll a user in the channel.
 
 ### List joined room agents
 

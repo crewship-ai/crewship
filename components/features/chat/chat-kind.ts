@@ -83,7 +83,7 @@ const KIND_ORDER: ChatKind[] = ["direct", "routine", "issue", "agent"]
  *
  * Nothing is disguised: every row carries `KIND_META[kind].label`.
  */
-export type ChatScope = "direct" | "routine" | "issue"
+export type ChatScope = "all" | "direct" | "routine" | "issue"
 
 export interface ScopeSpec {
   id: ChatScope
@@ -109,6 +109,14 @@ export interface ScopeSpec {
 }
 
 export const CHAT_SCOPES: ScopeSpec[] = [
+  {
+    id: "all",
+    label: "All",
+    kinds: ["direct", "routine", "issue", "agent"],
+    icon: CONCEPT_ICON.sessions,
+    title: "All agent sessions",
+    empty: "No agent sessions yet.",
+  },
   {
     id: "direct",
     label: "Direct",
@@ -187,11 +195,12 @@ export const KIND_META: Record<ChatKind, { label: string; icon: LucideIcon }> = 
  * bucket is worse than leaving it where the reader put it.
  */
 export function scopeForKind(kind: ChatKind | string): ChatScope | null {
-  return CHAT_SCOPES.find((s) => (s.kinds as string[]).includes(kind))?.id ?? null
+  return CHAT_SCOPES.find((s) => s.id !== "all" && (s.kinds as string[]).includes(kind))?.id ?? null
 }
 
 /** The `kind` query value for a scope, or "" for "do not narrow". */
 export function scopeKindParam(scope: ChatScope): string {
+  if (scope === "all") return ""
   return CHAT_SCOPES.find((s) => s.id === scope)?.kinds.join(",") ?? ""
 }
 

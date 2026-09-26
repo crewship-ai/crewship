@@ -68,7 +68,8 @@ type chatResponse struct {
 	// re-derive the partition and can never disagree with the `kind`
 	// filter it just used. Always one of ChatKind — never null, never
 	// empty: `direct` is the catch-all (see chat_kinds.go).
-	Kind ChatKind `json:"kind"`
+	Kind   ChatKind        `json:"kind"`
+	Source *chatWorkSource `json:"source,omitempty"`
 }
 
 // errChatTitleEmpty and errChatTitleTooLong are the two ways a title is

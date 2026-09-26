@@ -260,7 +260,9 @@ type CreateChatRequest struct {
 	// "AGENT" for a delegation). It is what lets the conversations column
 	// keep machine work out of a person's list — omitted, the row is
 	// indistinguishable from a conversation somebody opened by hand.
-	Origin string `json:"origin,omitempty"`
+	Origin         string `json:"origin,omitempty"`
+	PipelineRunID  string `json:"pipeline_run_id,omitempty"`
+	PipelineStepID string `json:"pipeline_step_id,omitempty"`
 }
 
 // CreateChat creates a new chat session via the internal API.

@@ -1,5 +1,6 @@
 "use client"
 
+import { ChatSessionSource } from "./chat-session-source"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { AnimatePresence } from "motion/react"
 import {
@@ -45,6 +46,9 @@ import { ChatComposer } from "./composer/chat-composer"
 import { checkChatMessageSize } from "./hooks/use-message-submit"
 import { VirtualConversation, virtualChatEnabled } from "./virtual-conversation"
 import { ArtifactPane } from "./artifact/artifact-pane"
+import { useArtifactStore } from "@/stores/artifact-store"
+import { isClientArtifactPath } from "./artifact/artifact-scope"
+import { relativeToAgent } from "./files/file-scope"
 import { FollowUps } from "./suggestions/follow-ups"
 import { AskRail } from "./asks/ask-rail"
 import { useAskForms } from "./asks/use-ask-forms"
@@ -56,7 +60,6 @@ import { ReconnectBanner } from "./messages/reconnect-banner"
 import { AgentStrip, type AgentStripAgent } from "./agent-strip"
 import { ChatEmptyState } from "./chat-empty-state"
 import type { ChatKind } from "./chat-kind"
-import type { FileEntry } from "./chat-tree-row"
 import { useChatAgent } from "./chat-agent-context"
 import { ThinkingAvatar } from "./messages/thinking-avatar"
 import { useComposerStore, messageOwnAttachments } from "@/stores/composer-store"
@@ -121,7 +124,7 @@ interface ChatPanelProps {
   /** A Page reference is resolved and authorized by the server on send. */
   pageContextSlug?: string
   /** Mobile-only: which panel to show full-screen. Undefined = desktop mode. */
-  mobilePanel?: "chat" | "files" | "files-only" | "more"
+  mobilePanel?: "chat" | "artifacts" | "work"
   /** Fired when the user sends a message — lets the parent optimistically
    *  title a freshly-created session in the sidebar (matching the server's
    *  auto-title) so the new entry shows its name without a manual refresh. */
@@ -131,7 +134,7 @@ interface ChatPanelProps {
    *  the user just watched doesn't linger as a server-side unread. */
   onReplySettled?: (sessionId: string) => void
   onNewConversation?: () => void
-  onMobilePanelChange?: (panel: "chat" | "files" | "more") => void
+  onMobilePanelChange?: (panel: "chat" | "artifacts" | "work") => void
 }
 
 /** How the chat palette's key is written for a human. The binding itself is
@@ -224,32 +227,30 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
     sessionLoadedFor.current = sessionId
   }, [sessionId])
 
-  const [files, setFiles] = useState<FileEntry[]>([])
-  const [filesLoading, setFilesLoading] = useState(false)
-  const [filesError, setFilesError] = useState<string | null>(null)
-  const [filesRevision, setFilesRevision] = useState(0)
-  const [previewFile, setPreviewFile] = useState<{ path: string } | null>(null)
-  const consumePreview = useCallback((request: { path: string }) => {
-    setPreviewFile((current) => current === request ? null : current)
-  }, [])
-  const retryFiles = useCallback(() => setFilesRevision((n) => n + 1), [])
   const openFilePreview = useCallback((path: string) => {
-    setPreviewFile({ path })
-    useDrawerStore.getState().setActiveTab("files")
-    if (mobilePanel) onMobilePanelChange?.("files")
-  }, [mobilePanel, onMobilePanelChange])
-
-  useEffect(() => {
-    setFiles([])
-    setFilesError(null)
-    setPreviewFile(null)
-  }, [agentId, workspaceId, sessionId])
+    const relative = relativeToAgent(path, chatAgent?.crewId, chatAgent?.slug)
+    if (!isClientArtifactPath(relative)) {
+      toast.error("This file is not available in Artifacts")
+      return
+    }
+    const title = path.split("/").pop() || path
+    useArtifactStore.getState().openFile({ id: `${agentId}:${path}`, agentId, path, title })
+    useDrawerStore.getState().setActiveTab("artifacts")
+    if (mobilePanel) onMobilePanelChange?.("artifacts")
+  }, [agentId, chatAgent?.crewId, chatAgent?.slug, mobilePanel, onMobilePanelChange])
   // Narrow selectors — the panel only reads these three fields; a
   // whole-store subscription re-rendered the entire chat (message list
   // included) on every drawer width drag or unrelated store write.
   const drawerOpen = useDrawerStore((s) => s.open)
   const drawerActiveTab = useDrawerStore((s) => s.activeTab)
   const drawerMode = useDrawerStore((s) => s.mode)
+  const artifactOpen = useArtifactStore((s) => s.open)
+  const artifactFocus = useArtifactStore((s) => s.focus)
+  useEffect(() => {
+    // Existing browser preferences may still say overlay. The chat context
+    // now shares space with the transcript and the file workspace.
+    if (drawerMode !== "push") useDrawerStore.getState().setMode("push")
+  }, [drawerMode])
 
   // Per-(re)connect ticket fetch. apiFetch promotes the 401 path —
   // either via silent refresh or the global session-expired event —
@@ -583,33 +584,6 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
     return ok
   }, [ensureSession])
 
-  // Mobile panels do not open the desktop drawer. Both layouts own visibility.
-  const filesVisible = mobilePanel === "files" || mobilePanel === "files-only"
-    || (mobilePanel === undefined && drawerOpen && drawerActiveTab === "files")
-  useEffect(() => {
-    if (!workspaceId || !filesVisible || !sessionId) return
-    const controller = new AbortController()
-    setFilesLoading(true)
-    setFilesError(null)
-    apiFetch(`/api/v1/agents/${agentId}/files?workspace_id=${workspaceId}`, { signal: controller.signal })
-      .then((r) => {
-        if (!r.ok) throw new Error("Couldn't load agent files.")
-        return r.json()
-      })
-      .then((data: FileEntry[] | null) => {
-        if (!controller.signal.aborted) setFiles(data ?? [])
-      })
-      .catch(() => {
-        if (!controller.signal.aborted) setFilesError("Couldn't load agent files.")
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) setFilesLoading(false)
-      })
-    return () => controller.abort()
-  }, [agentId, workspaceId, filesVisible, sessionId, filesRevision, isStreaming])
-
-  const filePanelProps = { filesLoading, filesError, onRetryFiles: retryFiles, previewFile, onPreviewHandled: consumePreview }
-
   // #2121 — a suggestion/follow-up chip sends the instant it's clicked, and
   // on a draft session `ensureSessionForSend` awaits a real POST. `isStreaming`
   // cannot change until a send produces a render, so two clicks inside that
@@ -912,56 +886,24 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
     </Conversation>
   )
 
-  // Mobile: files-only mode -- just the file tree, no tabs
-  if (mobilePanel === "files-only") {
+  if (mobilePanel === "artifacts" || mobilePanel === "work") {
     return (
-      <RightPanel
-        key={`${workspaceId}:${agentId}:${sessionId}`}
-        agentId={agentId}
-        workspaceId={workspaceId}
-        files={files}
-        {...filePanelProps}
-        initialTab="files"
-        hideTabs
-        style={{ width: "100%" }}
-      />
-    )
-  }
-
-  // The page owns mobile navigation; avoid a second competing tab strip.
-  if (mobilePanel === "files") {
-    return (
-      <RightPanel
-        key={`${workspaceId}:${agentId}:${sessionId}`}
-        agentId={agentId}
-        workspaceId={workspaceId}
-        files={files}
-        {...filePanelProps}
-        initialTab="files"
-        hideTabs
-        style={{ width: "100%" }}
-      />
-    )
-  }
-
-  if (mobilePanel === "more") {
-    return (
-      <RightPanel
-        key={`${workspaceId}:${agentId}:${sessionId}`}
-        agentId={agentId}
-        workspaceId={workspaceId}
-        files={files}
-        {...filePanelProps}
-        initialTab="team"
-        hideTabs
-        style={{ width: "100%" }}
-      />
+      <div className="relative h-full">
+        <RightPanel
+          key={`${workspaceId}:${agentId}:${sessionId}`}
+          agentId={agentId}
+          workspaceId={workspaceId}
+          initialTab={mobilePanel}
+          style={{ width: "100%", height: "100%" }}
+        />
+        <ArtifactPane agentId={agentId} />
+      </div>
     )
   }
 
   if (mobilePanel === "chat") {
     return (
-      <div className="flex flex-col h-full">
+      <div className="relative flex flex-col h-full">
         <ReconnectBanner status={connectionStatus} />
         <div className="flex items-center gap-2 px-4 py-1.5 shrink-0">
           <ConnectionBadge status={connectionStatus} />
@@ -1043,6 +985,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
         )}
         <ConversationSearch turns={turns} open={searchOpen} onOpenChange={setSearchOpen} />
         <ExportDialog turns={turns} agentName={agentName} open={exportOpen} onOpenChange={setExportOpen} />
+        <ArtifactPane agentId={agentId} />
       </div>
     )
   }
@@ -1051,7 +994,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
   const pushOpen = drawerOpen && drawerMode === "push"
   return (
     <div className="relative flex h-full">
-      <div className="flex flex-col overflow-hidden flex-1 min-w-0">
+      <div className={cn("flex flex-col overflow-hidden min-w-0", artifactFocus && artifactOpen ? "hidden" : "flex-1")}>
         <ReconnectBanner status={connectionStatus} />
         {/* Who you are talking to, not the session id. The strip carries the
             agent (face, status, role, crew, model, skills, credentials); the
@@ -1067,7 +1010,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
               trailing={
                 <>
                   <ConnectionBadge status={connectionStatus} />
-                  <OriginChip origin={sessionOrigin} />
+                  <OriginChip origin={sessionOrigin} kind={sessionKind} /><ChatSessionSource agentId={agentId} sessionId={sessionId} workspaceId={workspaceId} onOpenWork={() => onMobilePanelChange?.("work")} />
                   {onNewConversation && <button type="button" onClick={onNewConversation} className="rounded-md border px-2 py-1 text-xs text-foreground hover:bg-accent">New session</button>}
                   <CommandsButton onClick={() => setSlashPaletteOpen(true)} />
                   <CopyLinkButton />
@@ -1077,7 +1020,7 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
           ) : (
             <>
               <ConnectionBadge status={connectionStatus} />
-              <OriginChip origin={sessionOrigin} />
+              <OriginChip origin={sessionOrigin} kind={sessionKind} /><ChatSessionSource agentId={agentId} sessionId={sessionId} workspaceId={workspaceId} onOpenWork={() => onMobilePanelChange?.("work")} />
               <div className="ml-auto flex items-center gap-2">
                 {onNewConversation && <button type="button" onClick={onNewConversation} className="rounded-md border px-2 py-1 text-xs text-foreground hover:bg-accent">New session</button>}
                 <CommandsButton onClick={() => setSlashPaletteOpen(true)} />
@@ -1145,20 +1088,19 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
         />
       </div>
 
-      <RightDrawer>
+      <ArtifactPane agentId={agentId} expanded={artifactFocus} />
+      {(!artifactOpen || artifactFocus) && <RightDrawer>
         <RightPanel
           key={`${workspaceId}:${agentId}:${sessionId}`}
           agentId={agentId}
           workspaceId={workspaceId}
-          files={files}
-          {...filePanelProps}
           initialTab={drawerActiveTab}
           hideTabs
           style={{ width: "100%", height: "100%" }}
         />
-      </RightDrawer>
+      </RightDrawer>}
 
-      <RightRail className={cn(pushOpen && "border-l-0")} />
+      {(!artifactOpen || artifactFocus) && <RightRail className={cn(pushOpen && "border-l-0")} />}
       {/* workspaceId is what makes the server-driven Actions group exist at
           all: useSlashCommands(undefined) never runs its query, so the palette
           rendered without it could only ever show the client rows. */}
@@ -1180,7 +1122,6 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
           onClose={() => setSlashAction(null)}
         />
       )}
-      <ArtifactPane agentId={agentId} />
       <ConversationSearch turns={turns} open={searchOpen} onOpenChange={setSearchOpen} />
       <ExportDialog turns={turns} agentName={agentName} open={exportOpen} onOpenChange={setExportOpen} />
     </div>
@@ -1309,7 +1250,8 @@ function ConnectionBadge({ status }: { status: string }) {
  *  whether they're looking at a session started from the UI, the CLI,
  *  a webhook, a cron, or an agent-to-agent assignment. Hidden when
  *  origin is unknown (pre-migration sessions or legacy backends). */
-function OriginChip({ origin }: { origin?: string | null }) {
+function OriginChip({ origin, kind }: { origin?: string | null; kind?: ChatKind }) {
+  if (kind === "issue") return <StatusPill tone="purple" label="From issue" data-testid="origin-chip" />
   if (!origin) return null
   // Words a reader does not have to decode, and ROUTINE is in the map: a
   // routine step's chat carried no chip at all, so the one transcript most
@@ -1319,7 +1261,7 @@ function OriginChip({ origin }: { origin?: string | null }) {
     CLI:     { label: "From the CLI", tone: "purple" },
     WEBHOOK: { label: "Webhook",      tone: "warn" },
     CRON:    { label: "Scheduled",    tone: "warn" },
-    ROUTINE: { label: "Routine step", tone: "purple" },
+    ROUTINE: { label: "From routine", tone: "purple" },
     AGENT:   { label: "Delegated",    tone: "purple" },
   }
   const tag = map[origin]

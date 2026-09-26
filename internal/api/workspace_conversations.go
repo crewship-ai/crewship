@@ -121,7 +121,7 @@ func (h *WorkspaceConversationsHandler) List(w http.ResponseWriter, r *http.Requ
 			return
 		}
 	}
-	rows, err := h.store.ListPage(r.Context(), ws, u, limit, offset)
+	rows, err := h.store.SearchPage(r.Context(), ws, u, r.URL.Query().Get("q"), limit, offset)
 	if err != nil {
 		h.fail(w, err)
 		return

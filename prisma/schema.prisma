@@ -709,6 +709,9 @@ model AgentCredential {
 // ============================================================
 
 model Chat {
+  // Routine execution provenance; SQL migrations own the nullable FK.
+  pipeline_run_id String?
+  pipeline_step_id String?
   id            String        @id @default(cuid())
   agent_id      String
   workspace_id  String

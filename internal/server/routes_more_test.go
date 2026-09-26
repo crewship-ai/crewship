@@ -72,10 +72,13 @@ func TestHandleFileList_RecursiveAndSubdir(t *testing.T) {
 	t.Cleanup(s.StopBackground)
 	s.startedAt = time.Now()
 
-	// Seed files: crewA/agentX/notes.txt, crewA/root.txt
+	// Agent listings include their own tree and direct crew-root files, never
+	// another agent's tree (including on recursive requests).
 	for path, body := range map[string]string{
-		"crewA/agentX/notes.txt": "n1",
-		"crewA/root.txt":         "root",
+		"crewA/agentX/notes.txt":      "n1",
+		"crewA/agentX/nested/plan.md": "plan",
+		"crewA/agentY/private.txt":    "private",
+		"crewA/root.txt":              "root",
 	} {
 		_ = stor.Write(context.Background(), path, strings.NewReader(body))
 	}
@@ -99,8 +102,20 @@ func TestHandleFileList_RecursiveAndSubdir(t *testing.T) {
 		var body map[string]interface{}
 		_ = json.Unmarshal(rec.Body.Bytes(), &body)
 		files, ok := body["files"].([]interface{})
-		if !ok || len(files) == 0 {
+		if !ok {
 			t.Fatalf("expected files, got %v", body["files"])
+		}
+		paths := map[string]int{}
+		for _, file := range files {
+			paths[file.(map[string]interface{})["path"].(string)]++
+		}
+		for _, path := range []string{"crewA/agentX/notes.txt", "crewA/agentX/nested/plan.md", "crewA/root.txt"} {
+			if paths[path] != 1 {
+				t.Errorf("%s listed %d times, want once: %v", path, paths[path], paths)
+			}
+		}
+		if paths["crewA/agentY/private.txt"] != 0 {
+			t.Errorf("sibling agent's file leaked: %v", paths)
 		}
 	})
 
