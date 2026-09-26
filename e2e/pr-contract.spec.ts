@@ -64,9 +64,11 @@ test("PR browser contract subset", async ({ page }) => {
     await page.getByRole("button", { name: "New Issue", exact: true }).click()
     await expect(page.getByRole("dialog")).toBeVisible()
     // Selecting explicitly avoids relying on the modal's asynchronous
-    // auto-select when the workspace roster is still loading.
+    // auto-select when the workspace roster is still loading. The crew this
+    // test created earlier is the stable choice: seeded crew names follow
+    // the demo catalogue and change with it.
     await page.getByRole("dialog").getByRole("button").first().click()
-    await page.getByRole("option", { name: "Engineering", exact: true }).click()
+    await page.getByRole("option", { name: `E2E Crew ${slug}`, exact: true }).click()
     await page.getByPlaceholder("Issue title").fill(title)
     const createIssue = page.getByRole("button", { name: "Create issue", exact: true })
     await expect(createIssue).toBeEnabled({ timeout: 15_000 })
