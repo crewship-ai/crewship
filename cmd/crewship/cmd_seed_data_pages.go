@@ -62,6 +62,11 @@ func seedPages(ctx context.Context, client *cli.Client, deferCrewTelemetry bool)
 
 	fmt.Fprintln(os.Stderr, "Creating pages...")
 	created, pushed, failed := 0, 0, 0
+	// Apps need page project storage; where it is not configured (a light
+	// dev or CI workspace without CREWSHIP_PAGE_PROJECTS_PATH) they are
+	// skipped once, as a whole, like Keeper and the eval scenarios are —
+	// not reported as failures of a demo the host chose not to support.
+	appStoreMissing := false
 
 	for _, page := range seeddata.Pages {
 		if err := ctx.Err(); err != nil {
@@ -76,7 +81,15 @@ func seedPages(ctx context.Context, client *cli.Client, deferCrewTelemetry bool)
 		}
 		created++
 		if page.Project != nil {
+			if appStoreMissing {
+				continue
+			}
 			if err := seedPageApp(ctx, client, page); err != nil {
+				if strings.Contains(err.Error(), "Page project storage is not configured") {
+					appStoreMissing = true
+					fmt.Fprintf(os.Stderr, "  app %s: skipped (page project storage is not configured; panel page retained)\n", page.Slug)
+					continue
+				}
 				fmt.Fprintf(os.Stderr, "  app %s: %v (panel page retained)\n", page.Slug, err)
 				failed++
 			}

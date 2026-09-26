@@ -57,14 +57,6 @@ func TestSeedPackFiles_DeliversEveryFileToItsCrew(t *testing.T) {
 	}
 }
 
-func keysOf(m map[string][]byte) []string {
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
-	}
-	return out
-}
-
 // A crew that did not seed loses its files with a line saying so; the other
 // packs still get theirs.
 func TestSeedPackFiles_MissingCrewFailsSeed(t *testing.T) {

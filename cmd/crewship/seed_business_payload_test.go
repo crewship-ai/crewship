@@ -15,6 +15,8 @@ import (
 func TestBusinessScriptPayloads(t *testing.T) {
 	python, err := exec.LookPath("python3")
 	if err != nil {
+		// SKIP-WAIVER(#2472 precedent): the guard fires only where python3 is
+		// absent; the mandatory CI lanes that build the seed all carry it.
 		t.Skip("python3 unavailable")
 	}
 	root := t.TempDir()
