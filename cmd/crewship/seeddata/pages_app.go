@@ -53,5 +53,6 @@ func operationsRoutine() RoutineDef {
 		steps = append(steps, v.(map[string]interface{}))
 	}
 	d["steps"] = steps
-	return RoutineDef{Slug: "pages-operations-sample", Name: "pages-operations-sample", Description: d["description"].(string), CrewSlug: "ops", Definition: d}
+	d["display_name"] = "Refresh crew telemetry"
+	return RoutineDef{Slug: "pages-operations-sample", Name: "Refresh crew telemetry", Description: d["description"].(string), CrewSlug: "ops", Definition: d}
 }

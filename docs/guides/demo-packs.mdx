@@ -1,6 +1,6 @@
 ---
 title: "Demo packs"
-description: "The two optional GitHub use cases a fresh workspace ships with — what each one watches, what it costs, and how to prove it is right."
+description: "The legacy GitHub demo packs — what each one watched, what it cost, and how to verify one against a workspace that still carries it."
 icon: "package"
 stability: experimental
 tag: Experimental
@@ -8,19 +8,33 @@ tag: Experimental
 
 # Demo packs
 
-`crewship seed` populates a fresh workspace with two **packs**. A pack is
-one real use case, run by one crew, that reads a real public source and can
-be run again tomorrow — and checked. Each follows the same shape, which is
-the shape most repeated work has once you look at it: **a cheap probe that
-costs nothing, an expensive judgement only when there is something to judge,
-a human decision before anything irreversible.**
+`crewship seed` populates a fresh workspace with the four connected
+**Harbor Goods business stories** plus Crewship Lab — local sample data, human
+decision points, and [`crewship seed verify`](/cli/seed#crewship-seed-verify)
+as the acceptance test. See [`crewship seed`](/cli/seed) for that catalogue,
+and `cmd/crewship/seeddata/stories/business/README.md` in the repository for
+the executable contracts, extension steps and limits.
+
+The **packs** described here are the older, external-source demos the default
+seed used to install. A pack is one real use case, run by one crew, that reads
+a real public source and can be run again tomorrow — and checked. Each
+followed the same shape, which is the shape most repeated work has once you
+look at it: **a cheap probe that costs nothing, an expensive judgement only
+when there is something to judge, a human decision before anything
+irreversible.**
+
+The packs are **no longer installed** — no crew scripts, routines, Pages or
+issues are created for them, and nothing is scheduled. Their definitions,
+deterministic scripts and the `seed verify --pack` acceptance path remain in
+the source tree for regression use and for workspaces seeded before the
+business demo; they are never silently installed.
 
 | Pack | Crew | Reads | Probe (tokens) | Report (agent) |
 | --- | --- | --- | --- | --- |
-| **Nightly CI watch** `ci-watch` | ops | the scheduled GitHub Actions workflows of `crewship-ai/crewship` | `ci-probe` — none | `ci-nightly-triage` — Morgan on `codex:gpt-5.5` |
-| **Docs drift** `docs-drift` | quality | the repository's documentation and code, at `main` | — (the scan is the first step of the report) | `docs-drift-audit` — Jordan on `codex:gpt-5.5` |
+| **Nightly CI watch** `ci-watch` | ops | the scheduled GitHub Actions workflows of `crewship-ai/crewship` | `ci-probe` — none | `ci-nightly-triage` — Morgan |
+| **Docs drift** `docs-drift` | quality | the repository's documentation and code, at `main` | — (the scan is the first step of the report) | `docs-drift-audit` — Jordan |
 
-Every pack ships four things to its crew: the **scripts** (under
+Every pack shipped four things to its crew: the **scripts** (under
 `/crew/shared/scripts`, with their own unit tests that `go test` runs), the
 **routines**, a **Page** the report routine writes, and the **issues** that
 walk a person through it. One crew per pack, deliberately: `/crew/shared` is
@@ -45,11 +59,11 @@ crewship routine schedules create --slug ci-nightly-triage \
 ```
 
 When it wakes, Morgan downloads the failed jobs' logs, classifies each red
-run as REGRESSION / FLAKY / INFRA / UNCLEAR by the `ci-triage` and
-`known-flaky` skills, finds the concrete cause of each stale workflow, and
-posts one inbox notification whose last line is
+run as REGRESSION / FLAKY / INFRA / UNCLEAR, finds the concrete cause of
+each stale workflow, and posts one inbox notification whose last line is
 `COUNTS: regressions=… flaky=… infra=… stale=… unclear=…`. Those numbers
-must agree with the probe's, and `crewship seed verify` checks that they do.
+must agree with the probe's, and `crewship seed verify --pack ci-watch`
+checks that they do.
 
 The Page `ci-watch` shows the probe's verdict per failure class and the
 coverage line; the full triage with links is the notification.
@@ -79,7 +93,7 @@ transform whose field is missing does not degrade — it fails the run and
 takes the review and both page panels with it. On a failure path `sha_label`
 says `<repo> @ not checked out` rather than inventing a commit.
 
-Casey's issue carries the human boundary: a confirmed finding that is a
+Casey's issue carried the human boundary: a confirmed finding that is a
 **security claim** — an allowlist or validation the docs promise and the
 code does not enforce — is escalated as a DECISION, not worded alone.
 
@@ -103,17 +117,10 @@ cannot start, the operator can set `CREWSHIP_CODEX_SANDBOX_MODE=danger-full-acce
 for Codex runs. Leave it unset when the normal sandbox works; this setting
 changes Codex's isolation inside the crew container, not the seed data.
 
-The seed then creates the workspace `GH_TOKEN` every agent already knew, and
-additionally a **crew-scoped** `CLI_TOKEN` on each pack crew, bound to that
-crew's `GH_TOKEN` slot. Crew scope is not decoration: a routine's
-`{{ secrets.CLI_TOKEN }}` is resolved by type, preferring the author crew's
-own credential and otherwise the newest — and the demo vault's inert GitHub
-accounts are created after the real one. Without the crew scope the newest
-inert token would win and every GitHub call would fail quietly.
-
-Without `SEED_GITHUB_TOKEN` the packs are still seeded — crew, scripts,
-routines, Page, issues — and reported as **skipped** by `verify`, never as
-green.
+With `SEED_GITHUB_TOKEN` set, the seed creates a workspace `GH_TOKEN` mounted
+as a 0400 file the in-container `gh` CLI reads directly. Without it no
+GitHub credential is created, and `seed verify --pack`
+reports the pack as **skipped** with the reason, never as green.
 
 A re-seed over an existing workspace refreshes the stored value from the
 variable, so a rotated token lands on the next `crewship seed` rather than
@@ -122,16 +129,16 @@ leaving last month's token in place under the same name.
 ## Verifying
 
 ```bash
-crewship seed verify                      # every pack
-crewship seed verify --pack ci-watch      # one pack
-crewship seed verify --skip-report        # files and probes only, no tokens
+crewship seed verify                      # the business demo (default)
+crewship seed verify --pack ci-watch      # one legacy pack
+crewship seed verify --pack ci-watch --skip-report   # files and probes only, no tokens
 crewship seed verify --format json --strict
 ```
 
 See [`crewship seed`](/cli/seed#crewship-seed-verify) for the row-by-row
-contract, and [Demo use cases](/guides/demo-use-cases) for the per-pack
-script that shows the delivered files, runs the probe and calls `verify`
-as one unit (`scripts/demo/run.sh pack-ci-watch`). In short: scripts
+contract of both modes, and [Demo use cases](/guides/demo-use-cases) for the
+per-pack script that shows the delivered files, runs the probe and calls
+`verify` as one unit (`scripts/demo/run.sh pack-ci-watch`). In short: scripts
 byte-identical to the seed, no routine of the pack already FAILED in this
 workspace, the probe against an independent read of the source, the agent's
 counts against the probe, no secret in the report, the notification in the
@@ -139,10 +146,11 @@ inbox, the panels written by that run.
 
 ## Where the packs came from
 
-The two packs are the demo-sized versions of the templates kept in the
-private `crewship-manifests` catalogue, whose market research found the same
-two shapes of pain in every segment it looked at: **clocks nobody watches**
+The packs are the demo-sized versions of the templates kept in the private
+`crewship-manifests` catalogue, whose market research found the same two
+shapes of pain in every segment it looked at: **clocks nobody watches**
 (a deadline running from a moment nobody recorded) and **meters nobody
 watches** (something stops, and silence looks like calm). A wake gate is not
 an optimisation there; it is the condition under which anybody lets an agent
-run at all.
+run at all. The business stories carry the same shape indoors: a local
+record instead of a public source, so the demo needs no third-party account.

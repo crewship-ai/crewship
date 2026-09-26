@@ -1,51 +1,36 @@
 [
   {
-    "id": "bug-report",
-    "label": "Report a bug",
-    "template": "Please triage this bug.\n\nWhat went wrong: {{summary}}\n\nSteps to reproduce:\n{{steps}}\n\nSeverity: {{severity}}\nFirst seen: {{first_seen}}\nScreenshot: {{screenshot}}\n\nGive me a verdict (real bug / not a bug / needs more information), the area of the code you would look in first, and the smallest test that would have caught it.",
+    "id": "check-form",
+    "label": "Investigate a missing inquiry",
+    "template": "Investigate this demo form delivery.\nRecord: {{record}}\nExpected destination: {{destination}}\nObserved problem: {{problem}}\nUse the local marketing fixture. Explain the evidence and propose the smallest repair; do not contact external systems.\nOptional screenshot: {{screenshot}}",
     "attachment": "optional",
     "fields": [
       {
-        "name": "summary",
-        "label": "What went wrong",
+        "name": "record",
+        "label": "Submission ID",
         "type": "text",
         "required": true,
-        "placeholder": "The credential picker shows no brands on a phone",
-        "max": 120
+        "default": "FORM-103"
       },
       {
-        "name": "steps",
-        "label": "Steps to reproduce",
+        "name": "destination",
+        "label": "Expected destination",
+        "type": "text",
+        "required": true,
+        "default": "Demo sales inbox"
+      },
+      {
+        "name": "problem",
+        "label": "What happened?",
         "type": "textarea",
         "required": true,
-        "placeholder": "1. Open /credentials on a phone\n2. Tap Add a credential\n3. The brand list is empty",
-        "help": "What you did, what you expected, what happened instead."
-      },
-      {
-        "name": "severity",
-        "label": "Severity",
-        "type": "select",
-        "required": true,
-        "help": "P0 is down for everyone, P3 is cosmetic — the same ladder the seeded issues use.",
-        "default": "P2",
-        "options": [
-          "P0",
-          "P1",
-          "P2",
-          "P3"
-        ]
-      },
-      {
-        "name": "first_seen",
-        "label": "First seen",
-        "type": "date"
+        "default": "The form was accepted but the inquiry never arrived."
       },
       {
         "name": "screenshot",
-        "label": "Screenshot or recording",
+        "label": "Screenshot",
         "type": "photo",
-        "help": "A picture of the failure beats a description of it.",
-        "max": 3
+        "max": 1
       }
     ]
   }

@@ -1,7 +1,7 @@
 package seeddata
 
 // packRoutines are the routines the demo packs (packs.go) seed. They are
-// kept apart from routineLibrary because they are a different kind of thing:
+// kept apart from the business routines because they are a different kind of thing:
 // the library holds RECIPES (transformations that a fast model reproduces
 // byte-for-byte), these hold WATCHES — a deterministic script that reads a
 // real source, an agent that judges only what the script found, and a

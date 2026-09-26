@@ -10,6 +10,7 @@ import (
 // CrewDef defines a crew to seed.
 type CrewDef struct {
 	Name               string `yaml:"name"`
+	Description        string `yaml:"description,omitempty"`
 	Slug               string `yaml:"slug"`
 	Color              string `yaml:"color"`
 	Icon               string `yaml:"icon"`

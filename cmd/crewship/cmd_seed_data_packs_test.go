@@ -38,38 +38,28 @@ func TestSeedPackFiles_DeliversEveryFileToItsCrew(t *testing.T) {
 	if got := saved[crewFileSavePath("crew-ops", "shared/scripts/pages-operations-sample.mjs")]; !bytes.Equal(got, pagesdemo.Collector) {
 		t.Fatal("Operations Lab collector missing or changed")
 	}
-
-	for _, p := range seeddata.Packs {
-		for _, f := range p.Files {
-			want++
-			key := "/api/v1/crews/" + packCrewIDs()[p.CrewSlug] + "/files/save?path=" + f.Dest
-			got, ok := saved[key]
-			if !ok {
-				t.Errorf("%s not delivered (have %v)", key, keysOf(saved))
-				continue
-			}
-			embedded, _ := seeddata.PackFileContent(f.Src)
-			if string(got) != string(embedded) {
-				t.Errorf("%s: delivered %d bytes, embedded %d", key, len(got), len(embedded))
-			}
+	for _, f := range seeddata.StoryFiles {
+		want++
+		key := crewFileSavePath(packCrewIDs()[f.CrewSlug], f.Dest)
+		got, ok := saved[key]
+		if !ok {
+			t.Errorf("story file %s not delivered", key)
+			continue
+		}
+		embedded, err := seeddata.StoryFileContent(f.Source)
+		if err != nil || !bytes.Equal(got, embedded) {
+			t.Errorf("story file %s differs from embedded source: %v", key, err)
 		}
 	}
+
 	if len(saved) != want {
 		t.Errorf("saved %d files, want %d", len(saved), want)
 	}
 }
 
-func keysOf(m map[string][]byte) []string {
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
-	}
-	return out
-}
-
 // A crew that did not seed loses its files with a line saying so; the other
 // packs still get theirs.
-func TestSeedPackFiles_MissingCrewIsReportedNotFatal(t *testing.T) {
+func TestSeedPackFiles_MissingCrewFailsSeed(t *testing.T) {
 	s := clitest.NewStubServer()
 	defer s.Close()
 	puts := 0
@@ -82,13 +72,13 @@ func TestSeedPackFiles_MissingCrewIsReportedNotFatal(t *testing.T) {
 	})
 	ids := packCrewIDs()
 	delete(ids, "ops")
-	if err := seedPackFiles(context.Background(), covStubClient(s), ids); err != nil {
-		t.Fatalf("seedPackFiles: %v", err)
+	if err := seedPackFiles(context.Background(), covStubClient(s), ids); err == nil {
+		t.Fatal("missing crew files must fail seed")
 	}
 	total := 0
-	for _, p := range seeddata.Packs {
-		if p.CrewSlug != "ops" {
-			total += len(p.Files)
+	for _, f := range seeddata.StoryFiles {
+		if f.CrewSlug != "ops" {
+			total++
 		}
 	}
 	if puts != total {

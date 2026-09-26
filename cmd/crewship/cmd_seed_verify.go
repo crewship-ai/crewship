@@ -47,28 +47,18 @@ import (
 
 var seedVerifyCmd = &cobra.Command{
 	Use:   "verify",
-	Short: "Run every demo pack end to end and check the agents' output against the deterministic probes",
-	Long: `Verifies the demo packs a seed installed, against the live workspace.
-
-For every pack (or the ones named with --pack) it checks the crew and the
-delivered scripts, runs the token-zero probe and compares it with an
-independent read of the same public source, runs the report routine and
-checks the agent's COUNTS line against the probe, and confirms the inbox
-notification and the Page panels were written by that run.
-
-A pack whose requirement is missing (for example SEED_GITHUB_TOKEN for the
-GitHub-backed packs) is reported as SKIP with the reason. Exit status is 1
-when any check FAILs; with --strict a SKIP fails too.
-
-Examples:
-  crewship seed verify
-  crewship seed verify --pack ci-watch --timeout 20m
-  crewship seed verify --format json --strict`,
+	Short: "Verify the four local business demos against a running workspace",
+	Long: `Runs Sales, Finance, Marketing and Shipping checks; verifies delivered scripts,
+Page provenance, record counts and Inbox notifications. No AI credential is needed.
+With --complete-demo, approves the local demo actions and verifies DONE Issues and
+outbox artifacts. Use a disposable demo workspace for this acceptance mode.
+Legacy external packs may be selected explicitly with --pack.`,
 	Args: cobra.NoArgs,
 	RunE: runSeedVerify,
 }
 
 func init() {
+	seedVerifyCmd.Flags().Bool("complete-demo", false, "Also approve local demo actions and verify completed Issues (changes demo state)")
 	seedVerifyCmd.Flags().StringSlice("pack", nil, "Only verify these pack slugs (repeatable; default: every pack)")
 	seedVerifyCmd.Flags().Duration("timeout", 30*time.Minute, "Maximum wait per routine run")
 	seedVerifyCmd.Flags().Bool("strict", false, "Treat a skipped pack as a failure")
@@ -127,7 +117,13 @@ func runSeedVerify(cmd *cobra.Command, _ []string) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	checks, err := seedVerify(ctx, client, opts)
+	var checks []verifyCheck
+	if len(opts.packs) == 0 {
+		complete, _ := cmd.Flags().GetBool("complete-demo")
+		checks, err = verifyBusiness(ctx, client, opts.timeout, complete)
+	} else {
+		checks, err = seedVerify(ctx, client, opts)
+	}
 	if err != nil {
 		return err
 	}

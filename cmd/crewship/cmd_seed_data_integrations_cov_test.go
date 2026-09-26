@@ -328,6 +328,10 @@ func TestSeedIntegrations_CancelledContext(t *testing.T) {
 }
 
 func TestSeedIntegrations_OAuthCredentialBinding(t *testing.T) {
+	original := seeddata.Integrations
+	seeddata.Integrations = append(append([]seeddata.IntegrationDef{}, original...), seeddata.IntegrationDef{Name: "linear", CrewSlug: "engineering", Transport: "streamable-http", Endpoint: "https://example.invalid/mcp"})
+	t.Cleanup(func() { seeddata.Integrations = original })
+
 	covClearOAuthEnv(t)
 	t.Setenv("SEED_LINEAR_OAUTH_ACCESS_TOKEN", "tok-123")
 

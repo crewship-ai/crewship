@@ -33,6 +33,11 @@ func TestSeedIssues_CancelledContext(t *testing.T) {
 // covSeedProjectStub registers a POST /api/v1/projects handler that mints
 // sequential ids.
 func covSeedProjectStub(s *clitest.StubServer) {
+	s.OnGet("/api/v1/issues", clitest.JSONResponse(200, []map[string]any{}))
+	for i := range seeddata.Crews {
+		s.OnPut(fmt.Sprintf("/api/v1/crews/crew-%d/files/save", i), clitest.EmptyResponse(200))
+	}
+
 	var n int64
 	s.OnPost("/api/v1/projects", func(_ *http.Request, _ []byte) (int, []byte, string) {
 		id := atomic.AddInt64(&n, 1)
@@ -153,8 +158,8 @@ func TestSeedIssues_FullSeedAgainstStub(t *testing.T) {
 			bound++
 		}
 	}
-	if bound != 6 {
-		t.Errorf("bound Quick Start issues = %d, want 6", bound)
+	if bound != 1 {
+		t.Errorf("bound Quick Start issues = %d, want 1", bound)
 	}
 	// The builtin catalogue has issues with non-BACKLOG target states and
 	// assignees, so transitions/assignments must have happened.
@@ -163,8 +168,8 @@ func TestSeedIssues_FullSeedAgainstStub(t *testing.T) {
 	}
 	// The hardcoded relation defs reference 3 catalogue title pairs; with every
 	// issue created they all resolve.
-	if relations != 3 {
-		t.Errorf("relation POSTs = %d, want 3", relations)
+	if relations != 0 {
+		t.Errorf("relation POSTs = %d, want 0", relations)
 	}
 
 	// Spot-check an assignment body shape on one PATCH.
@@ -192,6 +197,7 @@ func TestSeedIssues_ProjectConflictResolvesExisting(t *testing.T) {
 	existing := make([]map[string]string, 0, len(seeddata.Projects))
 	for i, p := range seeddata.Projects {
 		existing = append(existing, map[string]string{"id": fmt.Sprintf("existing-%d", i), "name": p.Name})
+		s.OnPatch(fmt.Sprintf("/api/v1/projects/existing-%d", i), clitest.JSONResponse(200, map[string]string{}))
 	}
 	s.OnGet("/api/v1/projects", clitest.JSONResponse(200, existing))
 
@@ -271,7 +277,7 @@ func TestSeedIssues_CancelDuringProjectPhase(t *testing.T) {
 	}
 }
 
-func TestSeedIssues_IssueCreateFailuresAreSoft(t *testing.T) {
+func TestSeedIssues_MissingStoryIssuesFailSeed(t *testing.T) {
 	// Issue creation failing (or returning garbage) skips that issue but
 	// never aborts the whole seed; relations referencing failed issues are
 	// skipped instead of mis-wired.
@@ -296,8 +302,8 @@ func TestSeedIssues_IssueCreateFailuresAreSoft(t *testing.T) {
 		s.OnPost("/api/v1/crews/"+crewID+"/issues", clitest.TextResponse(201, "not json"))
 	}
 
-	if err := seedIssues(context.Background(), covStubClient(s), crewIDs, map[string]string{}); err != nil {
-		t.Fatalf("soft failures must not abort: %v", err)
+	if err := seedIssues(context.Background(), covStubClient(s), crewIDs, map[string]string{}); err == nil {
+		t.Fatal("missing story bindings must fail seed")
 	}
 	// Nothing was tracked → no transition/assign/comment/relation traffic.
 	for _, c := range s.Calls() {
@@ -431,47 +437,5 @@ func TestSeedIssues_UnknownAssigneeIsLoggedNotFatal(t *testing.T) {
 		if c.Method == "PATCH" && strings.Contains(string(c.Body), "assignee_type") {
 			t.Errorf("no assignment PATCH expected: %s %s", c.Path, c.Body)
 		}
-	}
-}
-
-func TestSeedIssues_CancelDuringRelationPhase(t *testing.T) {
-	s := clitest.NewStubServer()
-	defer s.Close()
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	s.OnPost("/api/v1/labels", clitest.JSONResponse(201, map[string]string{"id": "lab-1"}))
-	covSeedProjectStub(s)
-
-	crewIDs := map[string]string{}
-	for i, c := range seeddata.Crews {
-		crewIDs[c.Slug] = fmt.Sprintf("crew-%d", i)
-	}
-	var issueN int64
-	for slug := range crewIDs {
-		crewID := crewIDs[slug]
-		s.OnPost("/api/v1/crews/"+crewID+"/issues", func(_ *http.Request, _ []byte) (int, []byte, string) {
-			n := atomic.AddInt64(&issueN, 1)
-			b, _ := json.Marshal(map[string]any{"id": fmt.Sprintf("i-%d", n), "identifier": fmt.Sprintf("SEED-%d", n)})
-			return 201, b, "application/json"
-		})
-	}
-	relPosts := int64(0)
-	s.SetFallback(func(r *http.Request, _ []byte) (int, []byte, string) {
-		if r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/relations") {
-			atomic.AddInt64(&relPosts, 1)
-			cancel() // first relation cancels the seed
-			return 201, []byte(`{}`), "application/json"
-		}
-		if strings.Contains(r.URL.Path, "/issues/SEED-") {
-			return 200, []byte(`{}`), "application/json"
-		}
-		return 404, nil, ""
-	})
-
-	if err := seedIssues(ctx, covStubClient(s), crewIDs, map[string]string{}); err != context.Canceled {
-		t.Fatalf("got %v, want context.Canceled", err)
-	}
-	if got := atomic.LoadInt64(&relPosts); got != 1 {
-		t.Errorf("relation POSTs after cancel = %d, want 1", got)
 	}
 }

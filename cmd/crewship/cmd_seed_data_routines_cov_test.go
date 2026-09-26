@@ -127,6 +127,11 @@ func TestSeedRoutines_SeedsBothBatches(t *testing.T) {
 	s := clitest.NewStubServer()
 	defer s.Close()
 	s.OnPost(covPipelineSavePath, clitest.JSONResponse(201, map[string]string{"id": "p1"}))
+	var agents []map[string]string
+	for _, a := range seeddata.Agents {
+		agents = append(agents, map[string]string{"id": "agent-" + a.Slug, "slug": a.Slug})
+	}
+	s.OnGet("/api/v1/agents", clitest.JSONResponse(200, agents))
 	client := cli.NewClient(s.URL(), "tok", covWorkspaceIDCli10)
 
 	// crewIDs covering every slug the embedded seed data references so
@@ -158,6 +163,11 @@ func TestSeedRoutines_DefaultSkipsEvalFixtures(t *testing.T) {
 	s := clitest.NewStubServer()
 	defer s.Close()
 	s.OnPost(covPipelineSavePath, clitest.JSONResponse(201, map[string]string{"id": "p1"}))
+	var agents []map[string]string
+	for _, a := range seeddata.Agents {
+		agents = append(agents, map[string]string{"id": "agent-" + a.Slug, "slug": a.Slug})
+	}
+	s.OnGet("/api/v1/agents", clitest.JSONResponse(200, agents))
 	client := cli.NewClient(s.URL(), "tok", covWorkspaceIDCli10)
 
 	crewIDs := map[string]string{}

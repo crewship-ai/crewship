@@ -1,376 +1,79 @@
 skills:
-    - name: Network Probe
-      slug: network-probe
-      display_name: Network Probe
-      category: DEVOPS
-      description: 'Network diagnostics: ping, HTTP checks, DNS resolution, speed tests'
-      icon: wifi
-      content: |-
-        # Network Probe
-
-        ## When to Activate
-        - Task involves ping, HTTP requests, DNS resolution, or network diagnostics
-        - Keywords: "ping", "curl", "HTTP status", "DNS", "download", "speed"
-
-        ## Instructions
-        1. Always use -c flag with ping to limit packet count (never unlimited)
-        2. For HTTP status checks use: curl -s -o /dev/null -w "%{http_code} %{time_total}s" <url>
-        3. For DNS resolution use: nslookup <domain> or dig +short <domain> (whichever is available)
-        4. Save all results to /tmp/ with descriptive filenames including a timestamp
-        5. Include timing information in all network measurements
-        6. Report summary statistics: average, min, max for timing data
-
-        ## Output Format
-        - Save raw results to /tmp/{task-name}.txt
-        - Print a human-readable summary to stdout with key findings
-        - Use CSV format for tabular data (url,status,time)
-
-        ## Guardrails
-        - Never ping more than 10 times per host (avoid flood)
-        - Always use timeouts: curl --connect-timeout 5 --max-time 10
-        - Only probe public endpoints — never scan internal IPs or port ranges
-        - If a host is unreachable, report it and continue (don't fail the whole task)
-    - name: File Crafter
-      slug: file-crafter
-      display_name: File Crafter
-      category: CODING
-      description: File and directory creation, CSV generation, data formatting
-      icon: file-text
-      content: |-
-        # File Crafter
-
-        ## When to Activate
-        - Task involves creating files, directories, or structured data
-        - Keywords: "create", "file", "directory", "CSV", "JSON", "tree", "generate"
-
-        ## Instructions
-        1. Create parent directories with mkdir -p before writing files
-        2. Use heredoc (cat << 'EOF') for multi-line file content
-        3. For CSV files: always include a header row with column names
-        4. For JSON files: ensure valid JSON (use python3 -m json.tool to validate)
-        5. After creating files, verify they exist with ls -la and show first few lines
-        6. Use chmod appropriately (755 for scripts, 644 for data files)
-
-        ## Output Format
-        - Always show the created file tree with: find <dir> -type f | sort
-        - For generated data, show a preview: head -5 <file>
-        - Report file sizes and line counts: wc -l <file>
-
-        ## Guardrails
-        - Write only to /tmp/ — never to system directories
-        - Don't create files larger than 10MB
-        - Always use descriptive filenames (not temp1.txt, file.dat)
-        - Clean up any temporary intermediate files
-    - name: Web Scraper
-      slug: web-scraper
-      display_name: Web Scraper
-      category: RESEARCH
-      description: Web content fetching, HTML/JSON parsing, API data extraction
-      icon: globe
-      content: |-
-        # Web Scraper
-
-        ## When to Activate
-        - Task involves downloading web pages, parsing HTML, or calling APIs
-        - Keywords: "fetch", "scrape", "download", "parse", "API", "JSON", "HTML", "curl"
-
-        ## Instructions
-        1. Always use curl -s (silent) with --max-time 15 for timeouts
-        2. For HTML parsing: use grep, sed, awk pipeline — no external libraries needed
-        3. For JSON parsing: prefer python3 -c "import json,sys; ..." or jq if available
-        4. Save raw responses to /tmp/ for debugging, processed output separately
-        5. Handle HTTP errors gracefully — check status code before parsing
-        6. Extract meaningful data, not raw HTML dumps
-
-        ## Output Format
-        - Save structured results to /tmp/{descriptive-name}.txt
-        - For lists: number items (1. First item, 2. Second item)
-        - For JSON data: pretty-print with indentation
-        - Always include a summary line at the end: "Extracted N items from <source>"
-
-        ## Guardrails
-        - Only fetch from public, well-known URLs (no random IPs)
-        - Respect rate limits — add 1s sleep between multiple requests to same host
-        - Never POST data or authenticate — read-only operations only
-        - If a URL is unreachable, report it and continue with remaining URLs
-    - name: Script Runner
-      slug: script-runner
-      display_name: Script Runner
-      category: CODING
-      description: Python and Bash script creation, execution, and output capture
-      icon: terminal
-      content: |-
-        # Script Runner
-
-        ## When to Activate
-        - Task involves writing and executing Python or Bash scripts
-        - Keywords: "script", "Python", "Bash", "run", "execute", "generate", "calculate"
-
-        ## Instructions
-        1. Write scripts to /tmp/ with descriptive names (not script.sh, test.py)
-        2. Add a shebang line: #!/usr/bin/env python3 or #!/bin/bash
-        3. Always run scripts through the interpreter: bash /tmp/name.sh or python3 /tmp/name.py — /tmp is a noexec tmpfs, so chmod +x and ./name.sh fail with Permission denied
-        4. For Python: use only stdlib modules (no pip install needed)
-        5. For Bash: use set -euo pipefail at the top for error safety
-        6. Capture output to both stdout and a file with: bash /tmp/name.sh | tee /tmp/output.txt
-        7. Include comments explaining what each section does
-
-        ## Output Format
-        - Show the script content before running it
-        - Run the script and show its output
-        - Save output to /tmp/{script-name}-output.txt
-        - Report: script location, exit code, output file location
-
-        ## Guardrails
-        - Scripts must be idempotent — safe to run multiple times
-        - No infinite loops — always have exit conditions
-        - Don't install packages or modify system configuration
-        - Keep scripts under 100 lines — simple and readable
-        - If a script fails, show the error and explain what went wrong
-    - name: System Inspector
-      slug: system-inspector
-      display_name: System Inspector
-      category: DEVOPS
-      description: Container environment inspection, tool inventory, resource mapping
-      icon: cpu
-      content: |-
-        # System Inspector
-
-        ## When to Activate
-        - Task involves checking container environment, installed tools, or system resources
-        - Keywords: "inventory", "container", "system info", "resource", "environment", "inspect"
-
-        ## Instructions
-        1. Check tool availability with: command -v <tool> or which <tool>
-        2. Get versions with: <tool> --version 2>/dev/null || echo "version unknown"
-        3. Read system info from /proc/ when available (meminfo, cpuinfo)
-        4. Use standard tools: uname, df, free, nproc, id, hostname, ip/ifconfig
-        5. Handle missing tools gracefully — report as MISSING, don't fail
-
-        ## Output Format
-        - Use aligned columns for readability:
-          curl          /usr/bin/curl      7.88.1    AVAILABLE
-          wget          -                  -         MISSING
-        - Group results by category (Network tools, Dev tools, System tools)
-        - Include a summary count: "Found N/M tools available"
-        - Save to /tmp/ with clear filename
-
-        ## Guardrails
-        - Read-only inspection — never modify system configuration
-        - Don't access /etc/shadow or other sensitive files
-        - Stick to standard Linux inspection commands
-        - If /proc is not available, use alternative commands and note the limitation
-    # ── Demo pack skills (seeddata/packs.go) ─────────────────────────────
-    - name: CI Triage
-      slug: ci-triage
-      display_name: Nightly CI triage
-      category: DEVOPS
-      description: How to read a red or stale scheduled workflow — which commands, in what order, how to find the suspect commit and why a workflow stopped running. Read-only.
-      icon: search-check
-      content: |-
-        # Nightly CI triage
-
-        ## When to use
-        After the probe step, for every entry with status `RED` or `STALE`.
-        Regression-versus-flaky classification is the skill `known-flaky` —
-        this skill is about gathering the evidence.
-
-        ## The line you do not cross
-        You are a **reader and a messenger**. Never:
-        - re-run a workflow (`gh run rerun`) — it destroys the evidence,
-        - change anything in the repository, open an issue, comment on a PR,
-        - close or relabel somebody else's work.
-
-        When an intervention seems needed, **write it into the report as a
-        recommendation**. The person reading it in the morning decides.
-
-        ## RED — procedure
-        1. **Take only the failed jobs' logs**, not the whole run:
-           `gh run view <run_id> --repo <owner/name> --log-failed`
-           The full log is usually tens of MB and does not help the decision.
-        2. **Find the first real cause, not the last line.** Go tests: look for
-           the first `--- FAIL:` and `panic:`. The last lines are a summary.
-        3. **Classify** with the skill `known-flaky`: `REGRESSION` / `FLAKY` /
-           `INFRA` / `UNCLEAR`.
-        4. **For a REGRESSION find the suspect commit.** Take the time of the
-           last green and the first red run and list what landed in between:
-           `gh api "repos/<owner/name>/actions/workflows/<wf_id>/runs?event=schedule&per_page=20" --jq '.workflow_runs[] | {id, conclusion, created_at, head_sha}'`
-           `gh api "repos/<owner/name>/commits?since=<green>&until=<red>" --jq '.[] | {sha: .sha[0:8], msg: .commit.message | split("\n")[0], who: .commit.author.name}'`
-           Write it as a **suspicion with a reason** ("touches the package the
-           test fails in"), not as a verdict. If 15 commits landed and none
-           touches that package, say so — it is more useful than a forced culprit.
-        5. **If the log cannot be downloaded** (a 403 from the network policy,
-           a missing scope), say so in the report and classify `UNCLEAR`. A
-           guess dressed as a finding is worse than an admitted gap.
-
-        ## STALE — procedure
-        This is not a test that failed. This is a workflow that **did not run
-        at all**, which is the worse failure because it never turns red. Find
-        the concrete cause:
-        1. **Is the workflow disabled?**
-           `gh api repos/<owner/name>/actions/workflows --jq '.workflows[] | {name, state, path}'`
-           `state: disabled_inactivity` = GitHub switched it off after 60 days
-           without repository activity. `disabled_manually` = a person did.
-        2. **Does it still have a cron?** Open the workflow file (`path` from the
-           previous step) and check `on.schedule.cron` exists with the expected
-           value. A cron changed or dropped in a YAML refactor is the most
-           common silent cause.
-        3. **Is parsing failing?** Broken YAML never triggers and no run is created:
-           `gh api repos/<owner/name>/actions/workflows/<wf_id>/runs?per_page=1`
-           Empty result + existing file = suspect the syntax.
-        4. **Was it renamed?** The probe pairs runs by `name:`. A renamed
-           workflow looks like "no run in history" even though runs exist under
-           the new name. Check this explicitly before reporting a failure — it
-           is a false alarm worth telling apart.
-
-        ## Report format
-        The report is the body of a notification read by a person with no
-        context yet. Regressions first, so they are visible without scrolling.
-        A link to the run on every item, so one click verifies it. Leave empty
-        sections out; a three-line report beats a template full of "nothing".
-
-        ## Guardrails
-        - **Never report a regression without concrete evidence from the log.**
-          Without `--- FAIL` / `panic` / an error message it is `UNCLEAR`.
-        - **Do not invent a commit.** If the suspect cannot be determined, say so.
-        - **Do not adjust the numbers in the final COUNTS line** — they must
-          match the list above. They are how a reader decides whether to open
-          the report at all.
-    - name: Known Flaky
-      slug: known-flaky
-      display_name: Known flaky signatures
-      category: DEVOPS
-      description: Decide whether a red CI run is a real regression or a known flaky — a list of concrete signatures and the rules for when flaky is NOT an excuse. Without it every flaky is reported as a regression and the watch stops being trusted.
-      icon: alert-triangle
-      content: |-
-        # Known flaky signatures
-
-        ## When to use
-        For EVERY red run, before you call it a regression. Not for `STALE` —
-        there the question is not a test but a workflow that never ran.
-
-        ## Why this has its own list
-        A watch that reports flaky as regression stops being read after three
-        nights. A watch that hides a regression under "that is flaky" is worse
-        than none. The difference has to rest on concrete signatures, not on
-        an impression.
-
-        ## Known signatures
-
-        ### `TestPeerMemoryEngineFor_ConcurrentFirstAccessConverges`
-        - **Signature:** fails in `internal/memory`, reports an inconsistent cache
-          state after a concurrent first access. Turns PRs red that never touch memory.
-        - **Cause:** a real TOCTOU race in the cache, not a test defect.
-        - **Verdict:** `FLAKY`, but **always name it** — it is a real bug, just
-          not the one being looked for. When it appears, mention it is a known race.
-
-        ### `WARNING: DATA RACE` in a package unrelated to the diff
-        - **Signature:** the race detector shouts in a package the change did not touch.
-        - **Telling apart:** a log **without** `WARNING: DATA RACE` in an
-          unrelated package is signature #1597, i.e. flaky. A log **with** the
-          race warning is a real finding and must be reported as `REGRESSION`,
-          even if the package is unrelated to the diff.
-        - **Verdict:** by the presence of that line, not by the package name.
-
-        ### A check that ended `skipped` or `neutral`
-        - **Signature:** the job is green but never ran.
-        - **Verdict:** not a success. If another step depended on it, report
-          `INFRA` — green without a run is a silent hole, not evidence.
-
-        ### Runner timeout without a single failed test
-        - **Signature:** `timed_out`, no `--- FAIL` in the log, the last lines are
-          in the middle of normal work.
-        - **Verdict:** `INFRA`. State how long the run lasted before it was cut.
-
-        ## When flaky is NOT an excuse
-        - **The same test two nights in a row** → it stops being flaky, report
-          `REGRESSION`. Flaky does not fail deterministically.
-        - **A failure in a different test of the same package** → no longer a
-          known signature, a new finding. Do not hand it the old label because
-          of the package.
-        - **A signature not in this list** → `UNCLEAR`, never `FLAKY`. Write what
-          you saw in the log and what is missing to decide. Rather unclear than
-          reassuring.
-
-        ## Maintaining the list
-        When you confirm a new repeated signature, **propose it** in the closing
-        section of the report (test name, symptom, how to recognise it). Do not
-        edit this skill yourself — it is reviewed like any other change.
-    - name: Docs Drift
-      slug: docs-drift
-      display_name: Judging docs-drift candidates
-      category: WRITING
-      description: Decide whether a candidate from the deterministic scan is a real documentation-versus-code discrepancy or a false alarm. Holds the typical false alarms in both directions and the bar a confirmed finding must clear.
-      icon: file-search
-      content: |-
-        # Judging docs-drift candidates
-
-        ## When to use
-        For every candidate from the scan. Not for writing the fix — this pack
-        does not edit documentation, it reports.
-
-        ## What the scan can and cannot do
-        The scan compares **YAML/JSON tags in Go structs** against
-        **identifiers in backticks and YAML blocks** in the documentation. It
-        is deliberately dumb and reports candidates in both directions:
-
-        - **PHANTOM** — in the documentation, not in the code.
-        - **GAP** — in the code, not in the documentation.
-
-        A high candidate count **is not** a high defect count. On a wide pair
-        (a whole package against one page) most candidates are noise. Your job
-        is to turn that ratio around.
-
-        ## Typical false alarms — PHANTOM
-
-        | Looks like | Actually | How to check |
-        |---|---|---|
-        | `agent_run`, `call_pipeline` | an **enum value**, not a key | is it the value after `type:`? then there is no field to document |
-        | `services_json`, `config_hash` | a **database column** or a wire field between server and client | grep `internal/database` / `internal/api` |
-        | `crew_slug` | a key of **another** kind than the page describes | grep across `internal/manifest/kinds` |
-        | `skipped_too_young` | a field in a **command's output**, not in configuration | is it inside a JSON output example? |
-
-        Before you call anything a phantom, **check the whole repository**, not
-        just the listed package: `grep -rn '"key"' internal/ cmd/`. The scan
-        only sees what it was given.
-
-        ## Typical false alarms — GAP
-        - An **internal field** a manifest author never writes (state, ID, timestamp).
-        - A field documented **on another page** — `docs/manifest/workspace.md`
-          tends to be more current than `docs/configuration/manifest-schema.mdx`.
-          If the field is described elsewhere it is not a gap; at most a note
-          about duplicated pages.
-        - **A field reserved for later** — if the code comments it as reserved
-          and unwired, the documentation need not mention it.
-
-        ## The bar for a confirmed finding
-        A finding must have **all three**. Without them it is an impression:
-        1. **A path and a line** — in the documentation, in the code, or both.
-        2. **What exactly** the documentation claims or omits. Not "`files` is
-           missing", but "the crew field reference does not list `files`, so a
-           reader has no way to learn that files can be delivered declaratively".
-        3. **Why it hurts the reader** — what they do wrong when they believe it.
-           This is the most important part and the one most often missing. An
-           undocumented field nobody needs is a note; an undocumented field whose
-           absence makes people hand-work around a feature they already have is a defect.
-
-        ## Extra weight
-        Two categories weigh more than the rest:
-        - **The documentation promises behaviour the code does not have.** Worse
-          than silence — the reader builds on a claim that does not hold and
-          finds out at runtime.
-        - **A security claim with no backing in the code.** A sentence about an
-          allowlist, a validation or a restriction that the code does not
-          enforce is the most serious drift, because somebody picks their level
-          of trust from it. A finding of this kind is a decision for a human —
-          escalate it, do not word it alone.
-
-        ## Guardrails
-        - **Fix nothing.** No commit, PR, issue or page edit. The report is the
-          output; the decision is human.
-        - **Do not reject in bulk.** Every rejection gets a one-sentence reason.
-          "Noise" is not a reason — it is how a real finding gets lost.
-        - **Always admit truncation.** When a pair carries `truncated`, say so in
-          the report. A report that looks complete and is not is worse than none.
-        - **When unsure, put it in Rejected with the reason "uncertain: …".**
-          An inflated confirmed list kills trust in the whole audit.
+- name: File Crafter
+  slug: file-crafter
+  display_name: File Crafter
+  category: CODING
+  description: File and directory creation, CSV generation, data formatting
+  icon: file-text
+  content: "# File Crafter\n\n## When to Activate\n- Task involves creating files,\
+    \ directories, or structured data\n- Keywords: \"create\", \"file\", \"directory\"\
+    , \"CSV\", \"JSON\", \"tree\", \"generate\"\n\n## Instructions\n1. Create parent\
+    \ directories with mkdir -p before writing files\n2. Use heredoc (cat << 'EOF')\
+    \ for multi-line file content\n3. For CSV files: always include a header row with\
+    \ column names\n4. For JSON files: ensure valid JSON (use python3 -m json.tool\
+    \ to validate)\n5. After creating files, verify they exist with ls -la and show\
+    \ first few lines\n6. Use chmod appropriately (755 for scripts, 644 for data files)\n\
+    \n## Output Format\n- Always show the created file tree with: find <dir> -type\
+    \ f | sort\n- For generated data, show a preview: head -5 <file>\n- Report file\
+    \ sizes and line counts: wc -l <file>\n\n## Guardrails\n- Write only to /tmp/\
+    \ \u2014 never to system directories\n- Don't create files larger than 10MB\n\
+    - Always use descriptive filenames (not temp1.txt, file.dat)\n- Clean up any temporary\
+    \ intermediate files"
+- name: Script Runner
+  slug: script-runner
+  display_name: Script Runner
+  category: CODING
+  description: Python and Bash script creation, execution, and output capture
+  icon: terminal
+  content: "# Script Runner\n\n## When to Activate\n- Task involves writing and executing\
+    \ Python or Bash scripts\n- Keywords: \"script\", \"Python\", \"Bash\", \"run\"\
+    , \"execute\", \"generate\", \"calculate\"\n\n## Instructions\n1. Write scripts\
+    \ to /tmp/ with descriptive names (not script.sh, test.py)\n2. Add a shebang line:\
+    \ #!/usr/bin/env python3 or #!/bin/bash\n3. Always run scripts through the interpreter:\
+    \ bash /tmp/name.sh or python3 /tmp/name.py \u2014 /tmp is a noexec tmpfs, so\
+    \ chmod +x and ./name.sh fail with Permission denied\n4. For Python: use only\
+    \ stdlib modules (no pip install needed)\n5. For Bash: use set -euo pipefail at\
+    \ the top for error safety\n6. Capture output to both stdout and a file with:\
+    \ bash /tmp/name.sh | tee /tmp/output.txt\n7. Include comments explaining what\
+    \ each section does\n\n## Output Format\n- Show the script content before running\
+    \ it\n- Run the script and show its output\n- Save output to /tmp/{script-name}-output.txt\n\
+    - Report: script location, exit code, output file location\n\n## Guardrails\n\
+    - Scripts must be idempotent \u2014 safe to run multiple times\n- No infinite\
+    \ loops \u2014 always have exit conditions\n- Don't install packages or modify\
+    \ system configuration\n- Keep scripts under 100 lines \u2014 simple and readable\n\
+    - If a script fails, show the error and explain what went wrong"
+- name: System Inspector
+  slug: system-inspector
+  display_name: System Inspector
+  category: DEVOPS
+  description: Container environment inspection, tool inventory, resource mapping
+  icon: cpu
+  content: "# System Inspector\n\n## When to Activate\n- Task involves checking container\
+    \ environment, installed tools, or system resources\n- Keywords: \"inventory\"\
+    , \"container\", \"system info\", \"resource\", \"environment\", \"inspect\"\n\
+    \n## Instructions\n1. Check tool availability with: command -v <tool> or which\
+    \ <tool>\n2. Get versions with: <tool> --version 2>/dev/null || echo \"version\
+    \ unknown\"\n3. Read system info from /proc/ when available (meminfo, cpuinfo)\n\
+    4. Use standard tools: uname, df, free, nproc, id, hostname, ip/ifconfig\n5. Handle\
+    \ missing tools gracefully \u2014 report as MISSING, don't fail\n\n## Output Format\n\
+    - Use aligned columns for readability:\n  curl          /usr/bin/curl      7.88.1\
+    \    AVAILABLE\n  wget          -                  -         MISSING\n- Group\
+    \ results by category (Network tools, Dev tools, System tools)\n- Include a summary\
+    \ count: \"Found N/M tools available\"\n- Save to /tmp/ with clear filename\n\n\
+    ## Guardrails\n- Read-only inspection \u2014 never modify system configuration\n\
+    - Don't access /etc/shadow or other sensitive files\n- Stick to standard Linux\
+    \ inspection commands\n- If /proc is not available, use alternative commands and\
+    \ note the limitation"
+- name: Demo business workflow
+  slug: demo-business
+  display_name: Demo business workflow
+  category: general
+  description: Use local evidence, avoid duplicate work and distinguish proposals
+    from completed demo actions.
+  icon: inbox
+  content: Read the Harbor Goods records through read_demo_records or /crew/shared/demo/business/catalogue.json.
+    Preserve record identifiers, amounts and time intervals exactly. Checks are deterministic
+    scripts; use AI only for explanation and draft text. Never infer that a sample
+    message was sent externally. Reuse the existing project Issue and routine. A human
+    chooses the final action in Inbox. Evidence is written to /crew/shared/demo/business/outbox/.
+    Do not expose credentials or read another project's private files.

@@ -58,6 +58,7 @@ func TestRunSeedCov2_NukeWithExtras(t *testing.T) {
 	} {
 		s.OnGet(p, empty)
 	}
+	covSeedAgentList(s)
 	// Provision status: completed on the first poll so --wait-provision
 	// returns without ticking the 3 s poll loop.
 	s.OnGet("/api/v1/crews/cseeded0123456789abcdefg/provision",
@@ -367,7 +368,7 @@ func TestRunSeedCov2_CancelMidPhases(t *testing.T) {
 		// abort surfaces at the next enabled checkpoint, the issues
 		// phase, so skipIss must stay false here.
 		{"routines", "/api/v1/workspaces/" + covSeedWSID + "/pipelines/save", false, false,
-			"Routine seeding hit an error (continuing)"},
+			""},
 		{"issues labels", "/api/v1/labels", false, false, ""},
 	}
 	for _, tc := range cases {
@@ -406,7 +407,7 @@ func TestRunSeedCov2_CancelMidPhases(t *testing.T) {
 func TestCreateOrResolveCov2_BadJSON(t *testing.T) {
 	s := covSetup(t)
 	s.OnPost("/api/v1/crews", clitest.TextResponse(201, "nope"))
-	if _, err := createOrResolve(newAPIClient(), "/api/v1/crews",
+	if _, _, err := createOrResolve(newAPIClient(), "/api/v1/crews",
 		map[string]string{}, "/api/v1/crews", "eng"); err == nil {
 		t.Error("want decode error; got nil")
 	}
@@ -571,7 +572,7 @@ func TestResolveCurrentUserIDCov2_BadJSON(t *testing.T) {
 
 func TestCreateOrResolveCov2_TransportError(t *testing.T) {
 	covSetupDead(t)
-	if _, err := createOrResolve(newAPIClient(), "/api/v1/crews",
+	if _, _, err := createOrResolve(newAPIClient(), "/api/v1/crews",
 		map[string]string{}, "/api/v1/crews", "eng"); err == nil {
 		t.Error("want transport error; got nil")
 	}

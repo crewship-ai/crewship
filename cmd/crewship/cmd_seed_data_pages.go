@@ -62,6 +62,11 @@ func seedPages(ctx context.Context, client *cli.Client, deferCrewTelemetry bool)
 
 	fmt.Fprintln(os.Stderr, "Creating pages...")
 	created, pushed, failed := 0, 0, 0
+	// Apps need page project storage; where it is not configured (a light
+	// dev or CI workspace without CREWSHIP_PAGE_PROJECTS_PATH) they are
+	// skipped once, as a whole, like Keeper and the eval scenarios are —
+	// not reported as failures of a demo the host chose not to support.
+	appStoreMissing := false
 
 	for _, page := range seeddata.Pages {
 		if err := ctx.Err(); err != nil {
@@ -75,13 +80,23 @@ func seedPages(ctx context.Context, client *cli.Client, deferCrewTelemetry bool)
 			continue
 		}
 		created++
-		if page.Project != nil {
+		// The app half is skipped when storage is missing, but the loop must
+		// still fall through to the panel pushes below: every catalogue page
+		// carries a Project now, so a `continue` here would leave a workspace
+		// without CREWSHIP_PAGE_PROJECTS_PATH with no demo payloads at all.
+		if page.Project != nil && !appStoreMissing {
 			if err := seedPageApp(ctx, client, page); err != nil {
-				fmt.Fprintf(os.Stderr, "  app %s: %v (panel page retained)\n", page.Slug, err)
-				failed++
+				if strings.Contains(err.Error(), "Page project storage is not configured") {
+					appStoreMissing = true
+					fmt.Fprintf(os.Stderr, "  app %s: skipped (page project storage is not configured; panel page retained)\n", page.Slug)
+				} else {
+					fmt.Fprintf(os.Stderr, "  app %s: %v (panel page retained)\n", page.Slug, err)
+					failed++
+				}
 			}
 		}
 		for _, panel := range page.Panels {
+
 			if panel.Demo == nil {
 				continue
 			}
@@ -100,6 +115,9 @@ func seedPages(ctx context.Context, client *cli.Client, deferCrewTelemetry bool)
 	}
 	fmt.Fprintln(os.Stderr)
 
+	if failed > 0 {
+		return fmt.Errorf("demo seed incomplete: %d page operations failed", failed)
+	}
 	return seedPageProducerRoutines(ctx, client, wsID, deferCrewTelemetry)
 }
 
@@ -180,6 +198,9 @@ func pageProducerRoutineSlugs(catalogue []seeddata.PageDef) []string {
 	seen := map[string]bool{}
 	for _, page := range catalogue {
 		for _, panel := range page.Panels {
+			if panel.SkipSeedRun {
+				continue
+			}
 			kind, slug := seedPanelProducer(panel)
 			if kind != pages.ProducerRoutine || slug == "" || seen[slug] {
 				continue

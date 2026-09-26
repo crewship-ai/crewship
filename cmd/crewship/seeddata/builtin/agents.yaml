@@ -1,152 +1,168 @@
 agents:
-    - name: Alex
-      slug: alex
-      crew_slug: engineering
-      role_title: Engineering Lead
-      agent_role: LEAD
-      cli_adapter: CLAUDE_CODE
-      llm_provider: ANTHROPIC
-      llm_model: claude-sonnet-5
-      tool_profile: FULL
-      timeout_seconds: 3600
-      memory_enabled: true
-      prompt_slug: alex
-      # The questions a lead types every morning, not a menu of capabilities.
-      # Each one is a delegation or a status question — the two things this
-      # agent's system prompt says it is for.
-      suggested_prompts: |
-        Break the issue I'm about to paste into subtasks and say who takes each one.
-        What is blocking Sam and Robin right now, and what should I clear first?
-        Plan this change: the files to touch, the order to do them in, what to test.
-        Summarise what the engineering crew shipped yesterday, one line per change.
-    - name: Sam
-      slug: sam
-      crew_slug: engineering
-      role_title: Backend Engineer
-      agent_role: AGENT
-      cli_adapter: CLAUDE_CODE
-      llm_provider: ANTHROPIC
-      llm_model: claude-haiku-4-5
-      tool_profile: CODING
-      timeout_seconds: 1800
-      memory_enabled: true
-      prompt_slug: sam
-    - name: Robin
-      slug: robin
-      crew_slug: engineering
-      role_title: Frontend Engineer
-      agent_role: AGENT
-      cli_adapter: CLAUDE_CODE
-      llm_provider: ANTHROPIC
-      llm_model: claude-haiku-4-5
-      tool_profile: CODING
-      timeout_seconds: 1800
-      memory_enabled: true
-      prompt_slug: robin
-    - name: Jordan
-      slug: jordan
-      crew_slug: quality
-      role_title: QA Lead
-      agent_role: LEAD
-      cli_adapter: CLAUDE_CODE
-      llm_provider: ANTHROPIC
-      llm_model: claude-sonnet-5
-      tool_profile: FULL
-      timeout_seconds: 3600
-      memory_enabled: true
-      prompt_slug: jordan
-    - name: Casey
-      slug: casey
-      crew_slug: quality
-      role_title: Test & Review Engineer
-      agent_role: AGENT
-      cli_adapter: CLAUDE_CODE
-      llm_provider: ANTHROPIC
-      llm_model: claude-haiku-4-5
-      tool_profile: CODING
-      timeout_seconds: 2400
-      memory_enabled: true
-      prompt_slug: casey
-      # Three questions, because Casey also carries the ask form below and the
-      # composer's rail holds six chips in total (askforms PRD §5.1).
-      suggested_prompts: |
-        Review the diff on my branch and list findings as file, line, severity, fix.
-        Write table-driven tests for the code I'm about to paste, edge cases first.
-        These tests failed — which are real regressions and which are flakes?
-      # The one seeded questionnaire. It belongs to Casey because triaging an
-      # input into a structured finding is literally this agent's job, and
-      # because a bug report is the question that cannot be asked as one line:
-      # it needs steps, a severity and a picture before it is answerable.
-      ask_forms_slug: casey
-    - name: Morgan
-      slug: morgan
-      crew_slug: ops
-      role_title: SRE / Ops Lead
-      agent_role: LEAD
-      cli_adapter: CLAUDE_CODE
-      llm_provider: ANTHROPIC
-      llm_model: claude-sonnet-5
-      tool_profile: FULL
-      timeout_seconds: 3600
-      memory_enabled: true
-      prompt_slug: morgan
-      # Four daily questions plus one safe Chat-to-Inbox demo prompt.
-      suggested_prompts: |
-        Triage the alert I'm about to paste: severity, blast radius, first safe action.
-        What changed in the last deploy, and what should I watch for the next hour?
-        Walk me through rolling this release back, and what breaks while I do.
-        Summarise last night's incidents and what is still unresolved.
-        For fictional incident DEMO-42, give me the first safe triage step. Do not contact an external service.
-    - name: Riley
-      slug: riley
-      crew_slug: ops
-      role_title: Platform Engineer
-      agent_role: AGENT
-      cli_adapter: CLAUDE_CODE
-      llm_provider: ANTHROPIC
-      llm_model: claude-haiku-4-5
-      tool_profile: CODING
-      timeout_seconds: 2400
-      memory_enabled: true
-      prompt_slug: riley
-    - name: Taylor
-      slug: taylor
-      crew_slug: engineering
-      role_title: Analyst
-      agent_role: AGENT
-      cli_adapter: CLAUDE_CODE
-      llm_provider: ANTHROPIC
-      llm_model: claude-haiku-4-5
-      tool_profile: CODING
-      timeout_seconds: 1800
-      memory_enabled: true
-      prompt_slug: taylor
-    - name: Jamie
-      slug: jamie
-      crew_slug: engineering
-      role_title: Test Engineer
-      agent_role: AGENT
-      cli_adapter: CLAUDE_CODE
-      llm_provider: ANTHROPIC
-      llm_model: claude-haiku-4-5
-      tool_profile: CODING
-      timeout_seconds: 1800
-      memory_enabled: true
-      prompt_slug: jamie
-    # Opt-in local-model demo agent (CREWSHIP_SEED_OLLAMA=1). Runs the OpenCode
-    # CLI against a LOCAL Ollama model — no cloud API key required. Needs the
-    # local-ai crew (bakes opencode-ai) + an ENDPOINT_URL credential pointing at
-    # host.docker.internal, plus CREWSHIP_ALLOW_PRIVATE_ENDPOINTS=1 on the server.
-    - name: Ollie
-      slug: ollie
-      crew_slug: local-ai
-      role_title: Local Model Assistant
-      agent_role: AGENT
-      cli_adapter: OPENCODE
-      llm_provider: OLLAMA
-      llm_model: ollama/qwen2.5-coder:7b
-      tool_profile: CODING
-      timeout_seconds: 1800
-      memory_enabled: true
-      prompt_slug: ollie
-      requires_env: CREWSHIP_SEED_OLLAMA
+- name: Alex
+  slug: alex
+  crew_slug: engineering
+  role_title: Sales & Shipping Lead
+  agent_role: LEAD
+  cli_adapter: CLAUDE_CODE
+  llm_provider: ANTHROPIC
+  llm_model: claude-sonnet-5
+  tool_profile: FULL
+  timeout_seconds: 180
+  memory_enabled: true
+  prompt_slug: alex
+  suggested_prompts: 'Explain what the customer team lead does in this demo.
+
+    Show me the sample records and explain the next action.
+
+    What happened in the latest routine run?'
+- name: Sam
+  slug: sam
+  crew_slug: engineering
+  role_title: Sales Assistant
+  agent_role: AGENT
+  cli_adapter: CLAUDE_CODE
+  llm_provider: ANTHROPIC
+  llm_model: claude-haiku-4-5
+  tool_profile: FULL
+  timeout_seconds: 180
+  memory_enabled: true
+  prompt_slug: sam
+  suggested_prompts: 'Explain what the sales assistant does in this demo.
+
+    Show me the sample records and explain the next action.
+
+    What happened in the latest routine run?'
+- name: Robin
+  slug: robin
+  crew_slug: engineering
+  role_title: Shipping Assistant
+  agent_role: AGENT
+  cli_adapter: CLAUDE_CODE
+  llm_provider: ANTHROPIC
+  llm_model: claude-haiku-4-5
+  tool_profile: FULL
+  timeout_seconds: 180
+  memory_enabled: true
+  prompt_slug: robin
+  suggested_prompts: 'Explain what the shipping assistant does in this demo.
+
+    Show me the sample records and explain the next action.
+
+    What happened in the latest routine run?'
+- name: Jordan
+  slug: jordan
+  crew_slug: quality
+  role_title: Finance Assistant
+  agent_role: LEAD
+  cli_adapter: CLAUDE_CODE
+  llm_provider: ANTHROPIC
+  llm_model: claude-sonnet-5
+  tool_profile: FULL
+  timeout_seconds: 180
+  memory_enabled: true
+  prompt_slug: jordan
+  suggested_prompts: 'Explain what the finance assistant does in this demo.
+
+    Show me the sample records and explain the next action.
+
+    What happened in the latest routine run?'
+- name: Casey
+  slug: casey
+  crew_slug: quality
+  role_title: Marketing Assistant
+  agent_role: AGENT
+  cli_adapter: CLAUDE_CODE
+  llm_provider: ANTHROPIC
+  llm_model: claude-haiku-4-5
+  tool_profile: FULL
+  timeout_seconds: 180
+  memory_enabled: true
+  ask_forms_slug: casey
+  prompt_slug: casey
+  suggested_prompts: 'Explain what the marketing assistant does in this demo.
+
+    Show me the sample records and explain the next action.
+
+    What happened in the latest routine run?'
+- name: Morgan
+  slug: morgan
+  crew_slug: ops
+  role_title: Operations Lead
+  agent_role: LEAD
+  cli_adapter: CLAUDE_CODE
+  llm_provider: ANTHROPIC
+  llm_model: claude-sonnet-5
+  tool_profile: FULL
+  timeout_seconds: 180
+  memory_enabled: true
+  prompt_slug: morgan
+  suggested_prompts: 'Explain what the operations lead does in this demo.
+
+    Show me the sample records and explain the next action.
+
+    What happened in the latest routine run?'
+- name: Riley
+  slug: riley
+  crew_slug: ops
+  role_title: Container Monitor
+  agent_role: AGENT
+  cli_adapter: CLAUDE_CODE
+  llm_provider: ANTHROPIC
+  llm_model: claude-haiku-4-5
+  tool_profile: FULL
+  timeout_seconds: 180
+  memory_enabled: true
+  prompt_slug: riley
+  suggested_prompts: 'Explain what the container monitor does in this demo.
+
+    Show me the sample records and explain the next action.
+
+    What happened in the latest routine run?'
+- name: Taylor
+  slug: taylor
+  crew_slug: engineering
+  role_title: Customer Data Analyst
+  agent_role: AGENT
+  cli_adapter: CLAUDE_CODE
+  llm_provider: ANTHROPIC
+  llm_model: claude-haiku-4-5
+  tool_profile: FULL
+  timeout_seconds: 180
+  memory_enabled: true
+  prompt_slug: taylor
+  suggested_prompts: 'Explain what the customer data analyst does in this demo.
+
+    Show me the sample records and explain the next action.
+
+    What happened in the latest routine run?'
+- name: Jamie
+  slug: jamie
+  crew_slug: engineering
+  role_title: Workflow Tester
+  agent_role: AGENT
+  cli_adapter: CLAUDE_CODE
+  llm_provider: ANTHROPIC
+  llm_model: claude-haiku-4-5
+  tool_profile: FULL
+  timeout_seconds: 180
+  memory_enabled: true
+  prompt_slug: jamie
+  suggested_prompts: 'Explain what the workflow tester does in this demo.
+
+    Show me the sample records and explain the next action.
+
+    What happened in the latest routine run?'
+- name: Ollie
+  slug: ollie
+  crew_slug: local-ai
+  role_title: Local Model Assistant
+  agent_role: AGENT
+  cli_adapter: OPENCODE
+  llm_provider: OLLAMA
+  llm_model: ollama/qwen2.5-coder:7b
+  tool_profile: CODING
+  timeout_seconds: 1800
+  memory_enabled: true
+  prompt_slug: ollie
+  requires_env: CREWSHIP_SEED_OLLAMA
