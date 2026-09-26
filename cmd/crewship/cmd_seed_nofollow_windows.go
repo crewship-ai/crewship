@@ -76,18 +76,29 @@ func authFilePermOK(f *os.File, info os.FileInfo) bool {
 		return false
 	}
 	const aclHeaderSize = 8
-	const readMask = windows.FILE_GENERIC_READ | windows.GENERIC_READ | windows.GENERIC_ALL | windows.MAXIMUM_ALLOWED
+	const sensitiveMask = windows.FILE_GENERIC_READ | windows.GENERIC_READ | windows.GENERIC_ALL | windows.MAXIMUM_ALLOWED | windows.WRITE_DAC | windows.WRITE_OWNER
 	offset := uintptr(unsafe.Pointer(dacl)) + aclHeaderSize
 	for i := uint16(0); i < dacl.AceCount; i++ {
 		header := (*windows.ACE_HEADER)(unsafe.Pointer(offset))
-		if header.AceType == windows.ACCESS_ALLOWED_ACE_TYPE {
+		switch header.AceType {
+		case windows.ACCESS_DENIED_ACE_TYPE:
+			// A deny ACE can only remove access; nothing to enforce.
+		case windows.ACCESS_ALLOWED_ACE_TYPE:
 			ace := (*windows.ACCESS_ALLOWED_ACE)(unsafe.Pointer(offset))
-			if ace.Mask&readMask != 0 {
+			if ace.Mask&sensitiveMask != 0 {
 				sid := (*windows.SID)(unsafe.Pointer(&ace.SidStart))
 				if !windows.EqualSid(sid, owner) && !windows.EqualSid(sid, systemSID) && !windows.EqualSid(sid, adminsSID) {
 					return false
 				}
 			}
+		default:
+			// Conditional grants (ACCESS_ALLOWED_CALLBACK_ACE_TYPE and kin)
+			// and object ACEs lay their SIDs out differently than the plain
+			// allow ACE parsed above, so this check cannot evaluate them.
+			// Refuse rather than treat an unevaluated grant as no grant —
+			// a conditional read (or WRITE_DAC) grant to another principal
+			// is exactly the exposure the check exists to prevent.
+			return false
 		}
 		offset += uintptr(header.AceSize)
 	}
