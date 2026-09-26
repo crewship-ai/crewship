@@ -48,14 +48,14 @@ func openNoFollow(path string) (*os.File, error) {
 
 // authFilePermOK enforces the owner-only contract the unix variant reads
 // off the mode bits. Windows mode bits cannot express 0600 (Go reports
-// 0444 or 0666), so the real access control is the file's DACL: this
-// rejects a file whose DACL grants read access to a principal broader
-// than the owner — Everyone, Authenticated Users or BUILTIN\Users, the
-// groups a file created in a shared location inherits. The check runs on
-// the already-open handle's security descriptor, so it cannot race with
-// a path swap. A missing or NULL DACL (no restrictions at all) refuses.
+// 0444 or 0666), so the real access control is the file's DACL: read
+// access is allowed only for the file's owner, SYSTEM and the built-in
+// Administrators group — every other principal (a specific other user, a
+// custom group, Everyone, …) refuses. The check runs on the already-open
+// handle's security descriptor, so it cannot race with a path swap. A
+// missing or NULL DACL (no restrictions at all) refuses as well.
 func authFilePermOK(f *os.File, info os.FileInfo) bool {
-	sd, err := windows.GetSecurityInfo(windows.Handle(f.Fd()), windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION)
+	sd, err := windows.GetSecurityInfo(windows.Handle(f.Fd()), windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION|windows.OWNER_SECURITY_INFORMATION)
 	if err != nil {
 		return false
 	}
@@ -63,20 +63,28 @@ func authFilePermOK(f *os.File, info os.FileInfo) bool {
 	if err != nil || dacl == nil {
 		return false
 	}
-	broad := map[string]bool{
-		"S-1-1-0":      true, // Everyone
-		"S-1-5-11":     true, // NT AUTHORITY\Authenticated Users
-		"S-1-5-32-545": true, // BUILTIN\Users
+	owner, _, err := sd.Owner()
+	if err != nil {
+		return false
+	}
+	systemSID, err := windows.StringToSid("S-1-5-18")
+	if err != nil {
+		return false
+	}
+	adminsSID, err := windows.StringToSid("S-1-5-32-544")
+	if err != nil {
+		return false
 	}
 	const aclHeaderSize = 8
+	const readMask = windows.FILE_GENERIC_READ | windows.GENERIC_READ | windows.GENERIC_ALL | windows.MAXIMUM_ALLOWED
 	offset := uintptr(unsafe.Pointer(dacl)) + aclHeaderSize
 	for i := uint16(0); i < dacl.AceCount; i++ {
 		header := (*windows.ACE_HEADER)(unsafe.Pointer(offset))
 		if header.AceType == windows.ACCESS_ALLOWED_ACE_TYPE {
 			ace := (*windows.ACCESS_ALLOWED_ACE)(unsafe.Pointer(offset))
-			if ace.Mask&(windows.FILE_GENERIC_READ|windows.GENERIC_READ) != 0 {
+			if ace.Mask&readMask != 0 {
 				sid := (*windows.SID)(unsafe.Pointer(&ace.SidStart))
-				if broad[sid.String()] {
+				if !windows.EqualSid(sid, owner) && !windows.EqualSid(sid, systemSID) && !windows.EqualSid(sid, adminsSID) {
 					return false
 				}
 			}
