@@ -798,6 +798,16 @@ cmd_nuke() {
     page_projects_dir="${CREWSHIP_PAGE_PROJECTS_PATH:-$PAGE_PROJECTS_DIR}"
   fi
 
+  # start_go runs the server with the checkout as its working directory (its
+  # subshell cd's to PROJECT_DIR before sourcing .env.local and exec'ing), so
+  # the server resolves a relative CREWSHIP_PAGE_PROJECTS_PATH against the
+  # checkout. Anchor the same way here: otherwise the cd -P below resolves a
+  # relative pin against the operator's cwd, and the guard cannot vouch for a
+  # directory start never used.
+  if [[ -n "$page_projects_dir" && "$page_projects_dir" != /* ]]; then
+    page_projects_dir="$PROJECT_DIR/$page_projects_dir"
+  fi
+
   # A pinned CREWSHIP_PAGE_PROJECTS_PATH that resolves to the checkout — or to
   # any of its parents, `/` included — would feed remove_data_dir an `rm -rf`
   # aimed at the source tree or worse. The confirmation below only *displays*

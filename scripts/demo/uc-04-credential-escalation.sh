@@ -23,8 +23,26 @@ demo_cleanup "cs credential delete '$ESC_NAME' --yes"
 
 demo_step "Morgan needs a $ESC_NAME token and does not have one"
 reply_file="$(mktemp -t cs-escalation-reply.XXXXXX)"
+# ask_agent runs `cs ask` as a foreground child and forwards no signals, so a
+# plain `kill $ask_pid` can reap the subshell while the ask itself keeps
+# running. Brief monitor mode puts the backgrounded subshell in its own
+# process group ($! then also names that group — what `setsid` would give,
+# minus the missing-on-macOS fallback), so stop_ask below can signal the
+# subshell and its `cs ask` child together.
+set -m
 (ask_agent morgan "You need a ${ESC_NAME} API token to page on-call but you do not have one. Raise a credential escalation that names exactly the credential you need (${ESC_NAME}) and why. Do not invent a value." > "$reply_file") &
 ask_pid=$!
+set +m
+
+# stop_ask — terminate the backgrounded ask and reap it. `kill -- -pgid`
+# reaches the whole group when the launch above made the subshell its leader
+# (subshell + cs ask); the bare kill covers the pid itself and degrades to
+# the old subshell-only behaviour when no group with that id exists.
+stop_ask() {
+  kill -- "-$ask_pid" 2>/dev/null || true
+  kill "$ask_pid" 2>/dev/null || true
+  wait "$ask_pid" 2>/dev/null || true
+}
 demo_say "Morgan's run stays open while /escalate waits for a human answer."
 
 demo_step "The escalation shows up in the ops queue"
@@ -78,8 +96,7 @@ if [[ "$decision_ok" != true ]]; then
   if [[ -n "$esc_id" ]]; then
     cs escalation cancel "$esc_id" --reason "demo stopped: no decision was recorded" >/dev/null 2>&1 || true
   fi
-  kill "$ask_pid" 2>/dev/null || true
-  wait "$ask_pid" 2>/dev/null || true
+  stop_ask
   skip "Morgan resumes after the human decision" "run stopped — no decision was recorded"
 else
   # Decision made: bound the wait too, so a run that never lands its reply
@@ -90,8 +107,7 @@ else
   done
   if kill -0 "$ask_pid" 2>/dev/null; then
     _fail "Morgan resumes after the human decision" "no reply within ${ASK_TIMEOUT}s of the decision — stopping the run"
-    kill "$ask_pid" 2>/dev/null || true
-    wait "$ask_pid" 2>/dev/null || true
+    stop_ask
   else
     # The subshell has exited, so wait only reaps it — but its status is
     # ask_agent's, which now carries a failed `cs ask` through even when a
