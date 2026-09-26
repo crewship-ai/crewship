@@ -1,6 +1,6 @@
 ---
 title: "Demo use cases"
-description: "Thirteen product use cases as thirteen scripts — run one at a time against a seeded install, each narrated for an audience and verified by assertions."
+description: "Twelve product use cases as twelve scripts — run one at a time against a seeded install, each narrated for an audience and verified by assertions."
 icon: "list-checks"
 stability: experimental
 tag: Experimental
@@ -11,14 +11,14 @@ tag: Experimental
 The second version of the demo scripts. The first, `scripts/walkthrough.sh`,
 was one checklist under `set -e`: the first failing line ended it, and there
 was no way to run step six without steps one to five. This version is
-thirteen units under `scripts/demo/`, one script per use case, each runnable
+twelve units under `scripts/demo/`, one script per use case, each runnable
 alone and each ending in a verdict.
 
 ```bash
 export CREWSHIP_PROFILE=dev2           # or CREWSHIP_SERVER
 scripts/demo/run.sh                    # list the use cases and what each needs
 scripts/demo/run.sh memory-recall      # run one
-scripts/demo/run.sh --all              # run all thirteen, one summary table
+scripts/demo/run.sh --all              # run all twelve, one summary table
 scripts/demo/run.sh --all --needs none # only the ones that need no model and no token
 ```
 
@@ -90,7 +90,7 @@ four-line header the runner lists from, `source "$HERE/lib.sh"`,
 `demo_skip_all`, `run_routine`, `demo_cleanup`. There is no `set -e` on
 purpose: a failed assertion is a red line, and the audience still sees the
 steps after it. `scripts/demo/README.md` has the contract; the existing
-thirteen are the examples.
+twelve are the examples.
 
 ## Known limits
 

@@ -798,6 +798,32 @@ cmd_nuke() {
     page_projects_dir="${CREWSHIP_PAGE_PROJECTS_PATH:-$PAGE_PROJECTS_DIR}"
   fi
 
+  # A pinned CREWSHIP_PAGE_PROJECTS_PATH that resolves to the checkout — or to
+  # any of its parents, `/` included — would feed remove_data_dir an `rm -rf`
+  # aimed at the source tree or worse. The confirmation below only *displays*
+  # the path and --yes skips it, so validate the resolved directory here,
+  # before anything destructive, regardless of --yes. pwd -P (not realpath,
+  # which macOS lacks) matches how PROJECT_DIR itself is resolved.
+  local resolved_projects resolved_checkout
+  resolved_checkout="$(cd "$PROJECT_DIR" 2>/dev/null && pwd -P)"
+  if [[ -z "$page_projects_dir" ]]; then
+    err "Refusing to nuke: resolved page projects path is empty."
+    exit 1
+  fi
+  resolved_projects="$(cd "$page_projects_dir" 2>/dev/null && pwd -P || true)"
+  if [[ -z "$resolved_projects" ]]; then
+    # Nothing exists at the pinned path; remove_data_dir no-ops it, so there is
+    # nothing dangerous to delete. Say so instead of failing the whole reset.
+    warn "Page projects path '$page_projects_dir' does not exist — nothing to remove for it"
+  elif [[ "$resolved_projects" == "/" ||
+          "$resolved_projects" == "$resolved_checkout" ||
+          "$resolved_checkout" == "$resolved_projects"/* ]]; then
+    err "Refusing to nuke: page projects path '$page_projects_dir' resolves to '$resolved_projects',"
+    err "which is the checkout or one of its parents. Point CREWSHIP_PAGE_PROJECTS_PATH"
+    err "at a scratch directory outside the repo and retry."
+    exit 1
+  fi
+
   echo -e "${BOLD}${RED}Factory Reset — Crewship${S}${NC}"
   echo "This will destroy ALL local data:"
   echo "  - SQLite database (./crewship.db)"

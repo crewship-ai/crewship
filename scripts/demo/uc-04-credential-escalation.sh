@@ -73,6 +73,7 @@ fi
 # parked at the escalation waitpoint waiting for a human — waiting for it
 # would hang the demo. Withdraw the question and stop the run instead.
 reply=""
+ask_rc=0
 if [[ "$decision_ok" != true ]]; then
   if [[ -n "$esc_id" ]]; then
     cs escalation cancel "$esc_id" --reason "demo stopped: no decision was recorded" >/dev/null 2>&1 || true
@@ -92,14 +93,22 @@ else
     kill "$ask_pid" 2>/dev/null || true
     wait "$ask_pid" 2>/dev/null || true
   else
-    wait "$ask_pid" 2>/dev/null || true
+    # The subshell has exited, so wait only reaps it — but its status is
+    # ask_agent's, which now carries a failed `cs ask` through even when a
+    # partial reply got saved. Take it instead of discarding it.
+    wait "$ask_pid" 2>/dev/null
+    ask_rc=$?
+    if (( ask_rc != 0 )); then
+      _fail "Morgan resumes after the human decision" "agent run exited ${ask_rc}"
+    fi
     reply="$(cat "$reply_file")"
   fi
 fi
 rm -f "$reply_file"
 # The no-decision branch already reported this step as skipped; only a run
-# that actually waited for the decision can be judged on its reply.
-if [[ "$decision_ok" == true ]]; then
+# that actually waited for the decision — and whose ask exited cleanly — can
+# be judged on its reply.
+if [[ "$decision_ok" == true && "$ask_rc" -eq 0 ]]; then
   assert_nonempty "Morgan resumes after the human decision" "$reply"
 fi
 if [[ -n "$reply" ]]; then

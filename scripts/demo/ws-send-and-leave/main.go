@@ -75,22 +75,47 @@ func run(server, agentSlug, prompt string) error {
 	if chat.ID == "" {
 		return fmt.Errorf("chat creation returned no ID")
 	}
+	// Print the ID the moment the chat exists, not on the way out: the
+	// driving script captures stdout and registers its own `chat delete`
+	// cleanup from that value, so a failure in the WebSocket steps below must
+	// not take the ID with it. This stays the ONLY stdout line.
+	fmt.Println(chat.ID)
+
 	wsToken, err := cli.WSTokenFromServer(client)
 	if err != nil {
+		deleteChatBestEffort(client, agentID, chat.ID)
 		return err
 	}
 	ws, err := cli.NewWSClient(server, wsToken)
 	if err != nil {
+		deleteChatBestEffort(client, agentID, chat.ID)
 		return err
 	}
 	if err := ws.SendMessage("agent:"+agentID, chat.ID, prompt); err != nil {
 		_ = ws.Close()
+		deleteChatBestEffort(client, agentID, chat.ID)
 		return err
 	}
 	// The server handles the send asynchronously. Leave the socket open just
 	// long enough for it to accept the frame; no session subscription exists.
 	time.Sleep(time.Second)
 	_ = ws.Close()
-	fmt.Println(chat.ID)
 	return nil
+}
+
+// deleteChatBestEffort cleans up the chat on the failure paths after it was
+// created: a chat whose message never went out is an orphan the demo script
+// cannot assert on, and its projected Inbox row would linger. The delete is
+// best-effort on purpose — the original failure is the error worth returning,
+// so this one only surfaces on stderr.
+func deleteChatBestEffort(client *cli.Client, agentID, chatID string) {
+	resp, err := client.Delete("/api/v1/agents/" + agentID + "/chats/" + chatID)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "best-effort delete of chat %s failed: %v\n", chatID, err)
+		return
+	}
+	defer resp.Body.Close()
+	if err := cli.CheckError(resp); err != nil {
+		fmt.Fprintf(os.Stderr, "best-effort delete of chat %s failed: %v\n", chatID, err)
+	}
 }
