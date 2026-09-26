@@ -41,6 +41,16 @@ func (s *Server) handleListCrews(w http.ResponseWriter, r *http.Request) {
 	s.proxyToAPI(w, r, http.MethodGet, "/api/v1/internal/crews?workspace_id="+s.ipc.WorkspaceID)
 }
 
+// handleCrewTelemetry lets a crew's deterministic routine read its own
+// workspace fleet without a user session or a host Docker socket.
+func (s *Server) handleCrewTelemetry(w http.ResponseWriter, r *http.Request) {
+	if s.ipc == nil {
+		writeJSONResponse(w, http.StatusServiceUnavailable, map[string]string{"error": "IPC not configured"})
+		return
+	}
+	s.proxyToAPI(w, r, http.MethodGet, "/api/v1/internal/crews/telemetry?workspace_id="+url.QueryEscape(s.ipc.WorkspaceID))
+}
+
 // handleListCrewConnections proxies GET /crew-connections to the crewshipd API.
 // Used by AGENT and LEAD agents to discover crew connection topology.
 func (s *Server) handleListCrewConnections(w http.ResponseWriter, r *http.Request) {

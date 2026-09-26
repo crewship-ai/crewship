@@ -38,6 +38,8 @@ type MemoryConfig struct {
 // ContainerID is the Docker container where this agent is running; forwarded to
 // crewshipd so /keeper/execute can exec commands in the correct container.
 type IPCConfig struct {
+	// CrewOnly exposes only read-only fleet telemetry to agent-less scripts.
+	CrewOnly    bool   `json:"crew_only,omitempty"`
 	BaseURL     string `json:"base_url"`
 	Token       string `json:"token"`
 	AgentID     string `json:"agent_id"`
@@ -554,6 +556,11 @@ func (s *Server) buildHandler(proxy *Proxy) http.Handler {
 		// sidecar listens on that loopback port inside its own
 		// container's network namespace.
 		if (isLocalhost(r.Host) || isLocalhost(r.URL.Host)) && remoteIsLoopback(r) {
+			if s.ipc != nil && s.ipc.CrewOnly &&
+				!(r.Method == http.MethodGet && (r.URL.Path == "/crews/telemetry" || r.URL.Path == "/health")) {
+				writeJSONResponse(w, http.StatusForbidden, map[string]string{"error": "crew sidecar allows telemetry only"})
+				return
+			}
 			// #1254 item A / CRE-153: the memory surface is guarded HERE,
 			// before the route switch picks a handler, not inside the
 			// handlers. #1274 put the token check in
@@ -676,6 +683,9 @@ func (s *Server) buildHandler(proxy *Proxy) http.Handler {
 				return
 			case r.Method == http.MethodGet && r.URL.Path == "/crews":
 				s.handleListCrews(w, r)
+				return
+			case r.Method == http.MethodGet && r.URL.Path == "/crews/telemetry":
+				s.handleCrewTelemetry(w, r)
 				return
 			case r.Method == http.MethodPost && r.URL.Path == "/crew/create":
 				s.handleCreateCrew(w, r)

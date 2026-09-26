@@ -200,8 +200,8 @@ func parseNullTime(s sql.NullString) (time.Time, bool) {
 // EnsureFreshForRun is the run-start hook (§10.4): refresh when less than
 // RunStartLead remains. Returns the NEW ciphertext of the access token when a
 // refresh happened, so the caller can deliver it without a second read. A
-// transient failure allows a still-valid token; expired tokens, unknown
-// expiry on failed refresh, and needs_relogin fail closed.
+// failed refresh allows a still-valid token, even when the refresh token
+// requires a new login. Expired tokens and unknown expiry fail closed.
 func (r *ProviderLoginRefresher) EnsureFreshForRun(ctx context.Context, credID string) (string, error) {
 	var provider, expiresAt string
 	var status sql.NullString
@@ -222,12 +222,15 @@ func (r *ProviderLoginRefresher) EnsureFreshForRun(ctx context.Context, credID s
 	if err != nil {
 		return "", fmt.Errorf("check provider login freshness: %w", err)
 	}
-	if status.Valid && status.String == providerlogin.StatusNeedsRelogin {
-		return "", errNeedsRelogin
-	}
 	var exp time.Time
 	if expiresAt != "" {
 		exp, _ = time.Parse(time.RFC3339, expiresAt)
+	}
+	if status.Valid && status.String == providerlogin.StatusNeedsRelogin {
+		if exp.After(r.now()) {
+			return "", nil // the stored access token can run until it expires
+		}
+		return "", errNeedsRelogin
 	}
 	if !providerlogin.Due(exp, r.now(), providerlogin.RunStartLeadFor(provider)) {
 		return "", nil

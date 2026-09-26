@@ -113,8 +113,12 @@ func TestRunSeedCov2_NukeWithExtras(t *testing.T) {
 	// a routine-produced panel ever holds data.
 	for _, slug := range pageProducerRoutineSlugs(seeddata.Pages) {
 		path := "/api/v1/workspaces/" + covSeedWSID + "/pipelines/" + slug + "/run"
-		if n := len(s.CallsFor("POST", path)); n != 1 {
-			t.Errorf("routine %s: %d run POSTs, want exactly 1", slug, n)
+		want := 1
+		if pack, ok := seeddata.PackForRoutine(slug); ok && seeddata.MissingPackEnv(pack, os.Getenv) != "" {
+			want = 0
+		}
+		if n := len(s.CallsFor("POST", path)); n != want {
+			t.Errorf("routine %s: %d run POSTs, want %d", slug, n, want)
 		}
 	}
 	// Nuke ran (issue listing consulted) and was gated by --yes.

@@ -18,12 +18,14 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
 
 	"github.com/crewship-ai/crewship/cmd/crewship/seeddata"
 	"github.com/crewship-ai/crewship/internal/cli"
+	"github.com/crewship-ai/crewship/internal/llm"
 )
 
 func seedRoutines(ctx context.Context, client *cli.Client, crewIDs map[string]string, includeEvals bool) error {
@@ -41,9 +43,21 @@ func seedRoutines(ctx context.Context, client *cli.Client, crewIDs map[string]st
 	// seed creates an AI_CLI_TOKEN. Re-derive it now that the key is in the
 	// environment, before the definitions are POSTed. See #1485.
 	seeddata.ReresolveAnthropicRequirements(seeddata.Routines, seeddata.EvalScenarios)
+	starterDefs, evalDefs := seeddata.Routines, seeddata.EvalScenarios
+	if seedCodexEnabled() {
+		var err error
+		starterDefs, err = codexRoutineDefs(starterDefs)
+		if err != nil {
+			return err
+		}
+		evalDefs, err = codexRoutineDefs(evalDefs)
+		if err != nil {
+			return err
+		}
+	}
 
 	fmt.Fprintln(os.Stderr, "Creating routines...")
-	starterStats, err := seedRoutineSlice(ctx, client, wsID, crewIDs, "Routine", seeddata.Routines)
+	starterStats, err := seedRoutineSlice(ctx, client, wsID, crewIDs, "Routine", starterDefs)
 	if err != nil {
 		return err
 	}
@@ -60,7 +74,7 @@ func seedRoutines(ctx context.Context, client *cli.Client, crewIDs map[string]st
 	// and the same per-routine error handling; only the log prefix
 	// differs.
 	fmt.Fprintln(os.Stderr, "Creating eval scenarios...")
-	evalStats, err := seedRoutineSlice(ctx, client, wsID, crewIDs, "Eval", seeddata.EvalScenarios)
+	evalStats, err := seedRoutineSlice(ctx, client, wsID, crewIDs, "Eval", evalDefs)
 	if err != nil {
 		return err
 	}
@@ -68,6 +82,49 @@ func seedRoutines(ctx context.Context, client *cli.Client, crewIDs map[string]st
 	_ = starterStats
 	_ = evalStats
 	return nil
+}
+
+// Work on copies: package-level definitions also serve the Anthropic seed and
+// tests running in the same process. Never change their credential contract.
+func codexRoutineDefs(defs []seeddata.RoutineDef) ([]seeddata.RoutineDef, error) {
+	out := make([]seeddata.RoutineDef, len(defs))
+	for i, def := range defs {
+		b, err := json.Marshal(def.Definition)
+		if err != nil {
+			return nil, fmt.Errorf("routine %s: %w", def.Slug, err)
+		}
+		var body map[string]interface{}
+		if err := json.Unmarshal(b, &body); err != nil {
+			return nil, fmt.Errorf("routine %s: %w", def.Slug, err)
+		}
+		rewriteCodexRoutineValues(body)
+		def.Definition = body
+		out[i] = def
+	}
+	return out, nil
+}
+
+func rewriteCodexRoutineValues(value interface{}) {
+	switch v := value.(type) {
+	case map[string]interface{}:
+		if v["provider"] == "ANTHROPIC" {
+			v["provider"] = "OPENAI"
+			v["type"] = "PROVIDER_LOGIN"
+		}
+		// Workspace complexity tiers still default to Claude. Pin every
+		// agent step to the Codex adapter as well as its model; an unqualified
+		// model_override also defaults to the Claude adapter at runtime.
+		if v["type"] == "agent_run" {
+			v["model_override"] = "codex:" + llm.AdapterDefaultModel("CODEX_CLI")
+		}
+		for _, child := range v {
+			rewriteCodexRoutineValues(child)
+		}
+	case []interface{}:
+		for _, child := range v {
+			rewriteCodexRoutineValues(child)
+		}
+	}
 }
 
 // seedRoutineSlice POSTs each routine in the slice to /pipelines/save and

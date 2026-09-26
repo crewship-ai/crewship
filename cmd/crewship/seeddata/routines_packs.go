@@ -401,119 +401,14 @@ var packRoutines = []RoutineDef{
 			},
 		},
 	},
-
-	// ───────────────────────────────────────────────────────────────
-	// site-replica — deterministic acceptance of the crew's build
-	// ───────────────────────────────────────────────────────────────
-	{
-		Slug:        "site-replica-audit",
-		Name:        "Site replica — acceptance",
-		Description: "Run the deterministic acceptance checks over the crew's site replica and publish the verdict. No agent, no tokens.",
-		CrewSlug:    "engineering",
-		Definition: map[string]interface{}{
-			"dsl_version":  "1.0",
-			"name":         "site-replica-audit",
-			"display_name": "Site replica — acceptance",
-			"description": "Runs the deterministic acceptance checks (self-contained, metadata, one h1, section coverage against the analyst's " +
-				"content map) over /crew/shared/site-replica and publishes the verdict to the inbox and the page. It does not judge " +
-				"whether the replica looks right — that stays with the human who opens the file.",
-			"estimated_cost_usd": 0.0,
-			"egress_targets":     []string{},
-			"inputs": []map[string]interface{}{
-				{
-					"name":        "dir",
-					"type":        "string",
-					"required":    false,
-					"default":     "/crew/shared/site-replica",
-					"description": "Directory holding index.html and content-map.json.",
-				},
-				{
-					"name":        "min_coverage",
-					"type":        "string",
-					"required":    false,
-					"default":     "0.7",
-					"description": "Share of inventoried sections that must appear in the replica.",
-				},
-			},
-			"outputs": []map[string]interface{}{
-				{"name": "verdict", "type": "string"},
-			},
-			"steps": []map[string]interface{}{
-				{
-					"id":              "check",
-					"type":            "script",
-					"timeout_seconds": 120,
-					"script": map[string]interface{}{
-						"path":        "scripts/replica_check.py",
-						"interpreter": "python3",
-						"args":        []string{"--dir", "{{ inputs.dir }}", "--min-coverage", "{{ inputs.min_coverage }}"},
-					},
-				},
-				transformOf("state", "check", ".panel.state"),
-				transformOf("label", "check", ".panel.label"),
-				transformOf("verdict", "check", ".panel.verdict"),
-				transformOf("passed", "check", ".passed"),
-				transformOf("failed", "check", ".failed"),
-				{
-					"id":    "post",
-					"type":  "notify",
-					"needs": []string{"check", "verdict", "label"},
-					"notify": map[string]interface{}{
-						"to":       "workspace",
-						"title":    "Site replica — acceptance {{ steps.verdict.output }}",
-						"body":     "**{{ steps.label.output }}**\n\n```json\n{{ steps.check.output }}\n```",
-						"priority": "medium",
-						"category": "routines.completed",
-					},
-				},
-				{
-					"id":     "page-status",
-					"type":   "crewship",
-					"action": "page.write",
-					"needs":  []string{"check", "state", "label"},
-					"args": map[string]interface{}{
-						"page":  "site-replica",
-						"panel": "acceptance",
-						"data": map[string]interface{}{
-							"items": []map[string]interface{}{
-								{"name": "replica", "state": "{{ steps.state.output }}", "label": "{{ steps.label.output }}"},
-							},
-						},
-					},
-				},
-				{
-					"id":     "page-verdict",
-					"type":   "crewship",
-					"action": "page.write",
-					"needs":  []string{"page-status", "verdict", "passed", "failed"},
-					"args": map[string]interface{}{
-						"page":  "site-replica",
-						"panel": "verdict",
-						"data": map[string]interface{}{
-							"verdict": "{{ steps.verdict.output }} — {{ steps.label.output }}",
-							"blocks": []map[string]interface{}{
-								{"kind": "paragraph", "text": "{{ steps.passed.output }} checks passed, {{ steps.failed.output }} failed. The check reads the crew's shared volume: index.html and the analyst's content-map.json."},
-								{"kind": "list", "text": "Open index.html from the engineering crew's files to judge the look by eye; this panel only reports the mechanical bar."},
-								{"kind": "list", "text": "Start the build by asking Alex to copy the site; the lead delegates analysis, data, build and test inside the crew."},
-							},
-						},
-					},
-				},
-			},
-		},
-	},
 }
 
-// transformOf is a `.field` projection of a JSON step output into its own
-// step, so a later crewship/notify step can template the value as a string.
+// transformOf projects one JSON field from an earlier step for templates.
 func transformOf(id, from, expression string) map[string]interface{} {
 	return map[string]interface{}{
-		"id":    id,
-		"type":  "transform",
-		"needs": []string{from},
+		"id": id, "type": "transform", "needs": []string{from},
 		"transform": map[string]interface{}{
-			"input":      "{{ steps." + from + ".output }}",
-			"expression": expression,
+			"input": "{{ steps." + from + ".output }}", "expression": expression,
 		},
 	}
 }

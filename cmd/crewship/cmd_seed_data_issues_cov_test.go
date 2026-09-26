@@ -39,6 +39,13 @@ func covSeedProjectStub(s *clitest.StubServer) {
 		b, _ := json.Marshal(map[string]string{"id": fmt.Sprintf("proj-%d", id)})
 		return 201, b, "application/json"
 	})
+	for _, issue := range seeddata.Issues {
+		if issue.RoutineSlug == "" {
+			continue
+		}
+		s.OnGet("/api/v1/workspaces/"+covWSCli7+"/pipelines/"+issue.RoutineSlug,
+			clitest.JSONResponse(200, map[string]string{"id": "pipeline-" + issue.RoutineSlug}))
+	}
 }
 
 func TestSeedIssues_UnknownCrewsSkipIssueCreation(t *testing.T) {
@@ -128,15 +135,36 @@ func TestSeedIssues_FullSeedAgainstStub(t *testing.T) {
 	if created != len(seeddata.Issues) {
 		t.Errorf("issue creates = %d, want %d", created, len(seeddata.Issues))
 	}
+	bound := 0
+	for _, call := range s.Calls() {
+		if call.Method != "POST" || !strings.HasSuffix(call.Path, "/issues") {
+			continue
+		}
+		var body map[string]any
+		if err := json.Unmarshal(call.Body, &body); err != nil {
+			t.Fatal(err)
+		}
+		if body["project_id"] == "proj-1" { // Quick Start is the first project
+			// The local extraction issue deliberately starts an agent workflow
+			// directly; the other Quick Start issues have a saved routine.
+			if body["title"] != "Extract and check action items from a sample incident note" && body["routine_id"] == nil {
+				t.Errorf("Quick Start issue %q was created without a routine", body["title"])
+			}
+			bound++
+		}
+	}
+	if bound != 6 {
+		t.Errorf("bound Quick Start issues = %d, want 6", bound)
+	}
 	// The builtin catalogue has issues with non-BACKLOG target states and
 	// assignees, so transitions/assignments must have happened.
 	if patched == 0 {
 		t.Error("expected at least one PATCH (transition or assignment)")
 	}
-	// The hardcoded relation defs reference 7 catalogue title pairs; with every
+	// The hardcoded relation defs reference 3 catalogue title pairs; with every
 	// issue created they all resolve.
-	if relations != 7 {
-		t.Errorf("relation POSTs = %d, want 7", relations)
+	if relations != 3 {
+		t.Errorf("relation POSTs = %d, want 3", relations)
 	}
 
 	// Spot-check an assignment body shape on one PATCH.

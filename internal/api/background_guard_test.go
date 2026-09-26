@@ -66,6 +66,11 @@ var unregisteredSpawnSites = map[string]string{
 		"there is detached work in flight after the handler returned. The join is not left as a " +
 		"promise — TestCrewContainers_StatsAreConcurrentAndJoinedBeforeReturn asserts every read " +
 		"has finished by the time Containers returns, and fails if the fan-out is serialized.",
+	"internal_crew_telemetry.go:WorkspaceCrewTelemetry": "request-scoped fan-out, same shape as " +
+		"crew_container_inventory.go:Containers above: the fleet's stats reads are joined by the " +
+		"handler's own wg.Wait() before the response is written, so they cannot outlive the " +
+		"request, and each carries r.Context(). TestWorkspaceCrewTelemetry_StatsAreConcurrentAnd" +
+		"JoinedBeforeReturn asserts both claims and fails if the fan-out is serialized or unjoined.",
 	"issue_handler_hard_stop.go:hardStopTargets": "request-scoped fan-out, not detached work (B7, " +
 		"#2356): one goroutine per RUNNING target Stop's Tier 1 stamp reached, joined by the " +
 		"function's own wg.Wait() before Stop's handler writes its response — so N simultaneous " +

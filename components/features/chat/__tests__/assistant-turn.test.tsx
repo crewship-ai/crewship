@@ -111,6 +111,20 @@ describe("AssistantTurn dispatch", () => {
     cleanup()
   })
 
+  it("hides previously saved Codex startup progress without changing the reply or copied text", () => {
+    render(
+      <AssistantTurn
+        turn={turn([part({ type: "text", content: "Reading additional input from stdin...\nAhoj! Co pro tebe můžu udělat?" })])}
+        onCopy={onCopy}
+        onFileClick={onFileClick}
+      />,
+    )
+    expect(screen.queryByText(/Reading additional input from stdin/)).toBeNull()
+    expect(screen.getByText("Ahoj! Co pro tebe můžu udělat?")).toBeTruthy()
+    fireEvent.click(screen.getByTestId("action-copy"))
+    expect(onCopy).toHaveBeenCalledWith("Ahoj! Co pro tebe můžu udělat?")
+  })
+
   // The result footer's model badge. It used to read Object.keys(model_usage)[0],
   // and because Go's encoding/json emits map keys sorted, the CLI's small
   // housekeeping model ("claude-haiku-4-5-…") always arrived ahead of the model

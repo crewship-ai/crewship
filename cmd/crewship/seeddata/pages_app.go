@@ -11,14 +11,14 @@ import (
 	"github.com/crewship-ai/crewship/internal/pages"
 )
 
-// OperationsApp loads the same portable source bundle offered as an example.
+// OperationsApp loads the same portable Crewship Lab source bundle offered as an example.
 // Fail at startup on malformed built-in assets rather than seed half a demo.
 var OperationsApp = mustLoadOperationsApp()
 
 func mustLoadOperationsApp() *pages.TransferImport {
 	b, err := pages.ParseProjectTransfer(bytes.NewReader(pagesdemo.Bundle))
 	if err != nil {
-		panic(fmt.Sprintf("seeddata: Operations Lab: %v", err))
+		panic(fmt.Sprintf("seeddata: Crewship Lab: %v", err))
 	}
 	return b
 }

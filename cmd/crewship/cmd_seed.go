@@ -145,6 +145,9 @@ func bridgeServerFromPort() {
 
 func runSeed(cmd *cobra.Command, args []string) error {
 	loadDotEnvLocal()
+	if _, err := resolveSeedCodexLogin(); err != nil {
+		return err // validate before bootstrap or any workspace mutation
+	}
 	ctx := cmd.Context()
 	nuke, _ := cmd.Flags().GetBool("nuke")
 	skipIssues, _ := cmd.Flags().GetBool("skip-issues")
@@ -369,7 +372,7 @@ func runSeed(cmd *cobra.Command, args []string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if err := seedPages(ctx, client); err != nil {
+	if err := seedPages(ctx, client, waitProvision); err != nil {
 		return err
 	}
 
@@ -385,6 +388,17 @@ func runSeed(cmd *cobra.Command, args []string) error {
 		// Save the error and fall through; we'll combine it with any
 		// triggerErr from Phase 2b after the optional self-test runs.
 		waitErr = waitForProvisions(ctx, client, startedTargets, provisionTimeout)
+		// The Crewship Lab collector reads live fleet metrics through the Ops
+		// sidecar. Its first producer run can start before that sidecar exists,
+		// leaving the fleet panel explicitly unavailable. Refresh once all
+		// crews are ready so a synchronous demo seed opens with real values.
+		if waitErr == nil {
+			if err := seedRunRoutine(client, client.GetWorkspaceID(), "pages-operations-sample"); err != nil {
+				fmt.Fprintf(os.Stderr, "  Crewship Lab telemetry refresh: %v\n", err)
+			} else {
+				fmt.Fprintln(os.Stderr, "  + Crewship Lab telemetry refresh started")
+			}
+		}
 	} else if len(startedTargets) > 0 {
 		// Report only the crews whose triggers actually landed. Failed triggers
 		// were already logged with an "X <slug>" line by triggerProvisions, so

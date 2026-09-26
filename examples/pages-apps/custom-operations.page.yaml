@@ -1,12 +1,12 @@
 format: crewship-page-bundle/v2
 page:
-  name: Operations Lab
+  name: Crewship Lab
   slug: custom-operations
-  description: Vlastní React aplikace nad skutečnými daty z kontejneru Ops. Měření spouští routine, tlačítko nebo plán.
+  description: A live blue dashboard for your Crewship fleet, with per-container CPU and memory plus a detailed Ops resource sample.
   panels:
   - id: services
     schema: status.v1
-    title: Kontejner Ops
+    title: Crewship fleet and Ops resources
     owner: crew/ops
     producer: routine/pages-operations-sample
     sla_seconds: 180
@@ -14,14 +14,21 @@ page:
     actions:
     - id: refresh
       kind: call
-      label: Obnovit měření
+      label: Refresh metrics
       confirm:
-        title: Spustit měření kontejneru Ops?
-        body: Routine přečte paměť a CPU uvnitř kontejneru a aktualizuje tuto Page. Nemění konfiguraci ani nespouští LLM.
+        title: Refresh Crewship Lab now?
+        body: The routine reads the Ops container and workspace crew telemetry, then updates this Page. It changes no configuration and uses no model.
       routine: pages-operations-sample
   - id: memory
     schema: metric.v1
-    title: Využitá paměť kontejneru
+    title: Ops container memory used
+    owner: crew/ops
+    producer: routine/pages-operations-sample
+    sla_seconds: 180
+    span: 12
+  - id: fleet
+    schema: table.v1
+    title: Crew containers and resources
     owner: crew/ops
     producer: routine/pages-operations-sample
     sla_seconds: 180
@@ -33,15 +40,17 @@ references:
   used_by:
   - services
   - memory
+  - fleet
 - ref: routine/pages-operations-sample
   kind: routine
   bindable: true
   used_by:
   - services
   - memory
+  - fleet
 metadata:
   exported_at: '2026-09-09T10:18:30Z'
-  panel_count: 2
+  panel_count: 3
 project:
   format: crewship-page-source/v1
   runtime: react-vite-typescript/v1
@@ -771,7 +780,7 @@ project:
       type Service = { name: string; state: string; label?: string }
       function App() {
         const page = usePageSnapshot()
-        const [tab, setTab] = useState('Přehled')
+        const [tab, setTab] = useState('Overview')
         const [filter, setFilter] = useState('')
         const [history, setHistory] = useState<PanelHistory | null>(null)
         const [busy, setBusy] = useState(false)
@@ -782,72 +791,104 @@ project:
         const services = page?.panels.find(p => p.id === 'services')
         const data = services?.data as { items?: Service[] } | undefined
         const items = data?.items ?? []
+        const metric = (name: string) => items.find(item => item.name === name)
+        const fleetPanel = page?.panels.find(p => p.id === 'fleet')
+        const fleetData = fleetPanel?.data as { rows?: { crew: string; container: string | null; status: string; cpu: string | null; memory: string | null }[] } | undefined
+        const fleetRows = fleetData?.rows ?? []
         const memory = page?.panels.find(p => p.id === 'memory')
-        const metrics = memory?.data as { value?: number; unit?: string; sparkline?: number[] } | undefined
-        const values = metrics?.sparkline ?? []
+        const sample = memory?.data as { value?: number; unit?: string; sparkline?: number[] } | undefined
+        const values = sample?.sparkline ?? []
         const max = Math.max(...values, 1)
         const min = Math.min(...values, 0)
-        const points = values.map((v,i) => `${24 + i * 552 / Math.max(values.length - 1, 1)},${150 - (v-min)/(max-min || 1)*120}`).join(' ')
+        const points = values.map((v, i) => `${24 + i * 552 / Math.max(values.length - 1, 1)},${150 - (v - min) / (max - min || 1) * 120}`).join(' ')
+        const snapshotTime = services?.producedAt ? new Date(services.producedAt).toLocaleString('en-US') : null
+        const cards = [
+          { label: 'Crews in workspace', value: metric('Crews in workspace')?.label ?? '—', icon: '◫', detail: 'Live workspace inventory' },
+          { label: 'Ops memory', value: metric('Ops memory used')?.label ?? '—', icon: '▥', detail: 'Measured inside the container' },
+          { label: 'Ops CPU', value: metric('Ops CPU used')?.label ?? '—', icon: '◉', detail: 'Measured over this run' },
+          { label: 'Running containers', value: metric('Running containers')?.label ?? '—', icon: '▤', detail: 'Across workspace crews' },
+        ]
         async function loadHistory() {
           setBusy(true); setError('')
-          try { setHistory(await getPanelHistory('services', { limit: 10 })); setTab('Historie') }
-          catch(e) { setError(e instanceof Error ? e.message : 'Historii se nepodařilo načíst.') }
+          try { setHistory(await getPanelHistory('services', { limit: 10 })); setTab('History') }
+          catch (e) { setError(e instanceof Error ? e.message : 'Could not load history.') }
           finally { setBusy(false) }
         }
         async function refresh() {
           setStarting(true); setError('')
           try {
-            const receipt = await runAction('services','refresh')
+            const receipt = await runAction('services', 'refresh')
             setPending(receipt.pending_id)
-            setRunMessage('Požadavek přijat do fronty. Nová data se zobrazí po dokončení měření.')
-          } catch(e) { setError(e instanceof Error ? e.message : 'Měření se nepodařilo spustit.') }
+            setRunMessage('Collection queued. The dashboard updates when the routine finishes.')
+          } catch (e) { setError(e instanceof Error ? e.message : 'Could not start collection.') }
           finally { setStarting(false) }
         }
         async function checkRun() {
           setStarting(true); setError('')
           try {
             const result = await getActionStatus(pending)
-            setRunMessage(`Stav požadavku: ${result.pending_status}. Běh: ${result.run_status || 'čeká na spuštění'}.`)
-          } catch(e) { setError(e instanceof Error ? e.message : 'Stav není dostupný.') }
+            setRunMessage(`Request: ${result.pending_status}. Run: ${result.run_status || 'waiting to start'}.`)
+          } catch (e) { setError(e instanceof Error ? e.message : 'Run status is unavailable.') }
           finally { setStarting(false) }
         }
-        return <main>
-          <div className="topline"><span><i className="logo">C</i> CREWSHIP <b>/</b> OPERATIONS LAB</span><span className="pill">CUSTOM PAGE · OPS</span></div>
-          <header><div className="intro"><div className="eyebrow">VAŠE DATA. VAŠE APLIKACE.</div><h1>Provoz pod kontrolou<span>.</span></h1><p>Živý přehled kontejneru Ops. Routine sbírá data bez LLM; tlačítkem můžeš spustit nové měření.</p></div><div className="hero-number"><span>01</span><small>první vlastní aplikace</small></div></header>
-          <div className="toolbar"><nav>{['Přehled','Služby','Historie'].map(t => <button key={t} className={tab===t?'active':''} onClick={()=>setTab(t)}>{t}</button>)}</nav><div className="controls"><button className="secondary" disabled={busy || !services} onClick={loadHistory}>{busy?'Načítám…':'Načíst historii'}</button><button className="primary" disabled={starting || !services} onClick={refresh}>{starting?'Zpracovávám…':'Obnovit měření'} <span>↗</span></button></div></div>
-          {error && <p role="alert" className="error">{error}</p>}{pending && <div className="run-status"><p role="status">{runMessage}</p><button className="secondary" disabled={starting} onClick={checkRun}>Stav běhu</button></div>}
-          <div className="freshness"><span className={`dot ${services?.state === 'fresh'?'':'old'}`}/>{services?.producedAt ? `Snapshot · ${new Date(services.producedAt).toLocaleString('cs-CZ')}` : 'Čekáme na první snapshot'}<span>{services?.state === 'fresh' ? 'Aktuální podle SLA' : 'Data potřebují obnovit'}</span></div>
-          {tab==='Přehled' && <><section className="stats">{items.map((item,i)=><article key={item.name}><div className="stat-top"><span>{item.name}</span><span className="stat-icon">{['◈','▤','◷','↗'][i%4]}</span></div><strong>{item.label ?? 'Bez údaje'}</strong><div className="stat-bottom"><span className={`badge ${item.state}`}>{item.state==='ok'?'V pořádku':item.state==='warning'?'Pozornost':item.state}</span><small>kontejner Ops</small></div></article>)}</section>
-          <section className="lower"><article className="chart"><div className="section-title"><div><small>POSLEDNÍ MĚŘENÍ KONTEJNERU</small><h2>Využitá paměť</h2></div><span className="measure">{metrics?.value?.toLocaleString('cs-CZ') ?? '—'} <small>{metrics?.unit ?? 'MB'}</small></span></div><svg viewBox="0 0 600 180" role="img" aria-label="Vzorek využité paměti"><defs><linearGradient id="fill" x1="0" y1="0" x2="0" y2="1"><stop stopColor="var(--crewship-page-accent,#8adfbb)" stopOpacity=".28"/><stop offset="1" stopColor="var(--crewship-page-accent,#8adfbb)" stopOpacity="0"/></linearGradient></defs>{[30,75,120,165].map(y=><line key={y} x1="0" y1={y} x2="600" y2={y} stroke="var(--crewship-page-accent,#273530)" strokeDasharray="4 6"/>)}{values.length>1 && <><polygon points={`24,175 ${points} 576,175`} fill="url(#fill)"/><polyline points={points} fill="none" stroke="var(--crewship-page-accent,#8adfbb)" strokeWidth="3" strokeLinejoin="round"/></>}</svg><div className="chart-foot"><span>{values.length} vzorků z posledního běhu</span><span>Zdroj: routine v Ops</span></div></article>
-          <article className="note"><span className="eyebrow">POSTAVENO PRO VÁŠ TÝM</span><h2>Dashboard je teprve začátek.</h2><p>Účetnictví, databáze nebo nasazování. Agent vytvoří rozhraní podle toho, co váš tým potřebuje.</p><ul><li>Vlastní layout a komponenty</li><li>Data přes Crewship SDK</li><li>Verzovaný zdrojový projekt</li></ul><button onClick={()=>setTab('Služby')}>Prohlédnout data <span>→</span></button></article></section></>}
-          {tab==='Služby' && <article className="table-card"><div className="section-title"><h2>Služby a prostředky</h2><input aria-label="Filtrovat služby" placeholder="Filtrovat služby…" value={filter} onChange={e=>setFilter(e.target.value)}/></div><table><thead><tr><th>Název</th><th>Poslední hodnota</th><th>Stav vzorku</th></tr></thead><tbody>{items.filter(x=>x.name.toLowerCase().includes(filter.toLowerCase())).map(x=><tr key={x.name}><td>{x.name}</td><td>{x.label}</td><td><span className={`badge ${x.state}`}>{x.state}</span></td></tr>)}</tbody></table></article>}
-          {tab==='Historie' && <article className="table-card"><h2>Historie snapshotů</h2><p>Načtená přes autorizované SDK. Tlačítko nespouští nový sběr dat.</p>{history ? <table><thead><tr><th>Revize</th><th>Čas vytvoření</th><th>Obsah</th></tr></thead><tbody>{history.items.map(x=><tr key={x.sequence}><td>#{x.sequence}</td><td>{new Date(x.producedAt).toLocaleString('cs-CZ')}</td><td><details><summary>Zobrazit snapshot</summary><pre>{JSON.stringify(x.data,null,2)}</pre></details></td></tr>)}</tbody></table> : <button className="primary" disabled={busy} onClick={loadHistory}>Načíst historii</button>}</article>}
-          <footer><span>CREWSHIP PAGES <b>×</b> VLASTNÍ REACT APLIKACE</span><span>Ukázka · zkontrolovaný kód · žádné externí zdroje</span></footer>
+        return <main className="lab">
+          <div className="topline"><span className="brand"><i className="logo">C</i><strong>CREWSHIP</strong><b>/</b> LAB</span><span className="pill"><span className="pulse"/> LIVE WORKSPACE DEMO</span></div>
+          <header className="hero">
+            <div className="intro"><div className="eyebrow">YOUR AGENT FLEET, IN VIEW</div><h1>See your crews<br/><span>at work.</span></h1><p>A live Crewship Page showing every crew container's CPU and memory, plus a detailed sample from Ops. Refresh it with a governed routine.</p><div className="hero-tags"><span>CREWS</span><span>CONTAINERS</span><span>ROUTINES</span><span>PAGES</span></div></div>
+            <div className="hero-panel"><div className="hero-panel-top"><span>LIVE SIGNAL</span><span className="signal"><i/> OPS CREW</span></div><div className="hero-panel-value">{metric('Ops memory used')?.label ?? '—'}</div><div className="hero-panel-caption">memory used in the running Ops container</div><div className="hero-panel-bars">{values.map((value, index) => <span key={index} style={{ height: `${Math.max(12, value / max * 100)}%` }}/>)}</div><div className="hero-panel-foot">{snapshotTime ? `Last sample · ${snapshotTime}` : 'Waiting for the first sample'}</div></div>
+          </header>
+          <div className="toolbar"><nav aria-label="Dashboard view">{['Overview', 'Fleet', 'History'].map(t => <button key={t} className={tab === t ? 'active' : ''} onClick={() => setTab(t)}>{t}</button>)}</nav><div className="controls"><button className="secondary" disabled={busy || !services} onClick={loadHistory}>{busy ? 'Loading…' : 'View history'}</button><button className="primary" disabled={starting || !services} onClick={refresh}>{starting ? 'Starting…' : 'Refresh live data'} <span>↗</span></button></div></div>
+          {error && <p role="alert" className="error">{error}</p>}{pending && <div className="run-status"><p role="status">{runMessage}</p><button className="secondary" disabled={starting} onClick={checkRun}>Check run</button></div>}
+          <div className="freshness"><span><i className={`dot ${services?.state === 'fresh' ? '' : 'old'}`}/>{snapshotTime ? `Snapshot · ${snapshotTime}` : 'Waiting for the first snapshot'}</span><span>{services?.state === 'fresh' ? 'Within 3-minute freshness target' : 'Refresh to collect current values'}</span></div>
+          {tab === 'Overview' && <><section className="stats">{cards.map(card => <article key={card.label}><div className="stat-top"><span>{card.label}</span><i>{card.icon}</i></div><strong>{card.value}</strong><div className="stat-bottom">{card.detail}</div></article>)}</section><section className="lower"><article className="chart"><div className="section-title"><div><small>OPS CREW · CONTAINER</small><h2>Memory during the last collection</h2></div><span className="measure">{sample?.value?.toLocaleString('en-US') ?? '—'} <small>{sample?.unit ?? 'MB'}</small></span></div><svg viewBox="0 0 600 180" role="img" aria-label="Ops container memory readings"><defs><linearGradient id="fill" x1="0" y1="0" x2="0" y2="1"><stop stopColor="#4f8cff" stopOpacity=".30"/><stop offset="1" stopColor="#4f8cff" stopOpacity="0"/></linearGradient></defs>{[30, 75, 120, 165].map(y => <line key={y} x1="0" y1={y} x2="600" y2={y} stroke="#263856" strokeDasharray="4 6"/>)}{values.length > 1 && <><polygon points={`24,175 ${points} 576,175`} fill="url(#fill)"/><polyline points={points} fill="none" stroke="#78adff" strokeWidth="3" strokeLinejoin="round"/></>}</svg><div className="chart-foot"><span>{values.length ? `${values.length} real readings from one run` : 'No sample yet'}</span><span>Source: Ops cgroup v2</span></div></article><article className="note"><span className="eyebrow">ONE PAGE, REAL CREWSHIP DATA</span><h2>A working dashboard for your agent fleet.</h2><p>This Page is built from versioned React source. A routine collects container data, writes panel snapshots, and keeps its run history in Crewship.</p><div className="flow"><span>Ops container</span><b>→</b><span>Routine</span><b>→</b><span>Page</span></div><button onClick={() => setTab('Fleet')}>Explore the crews <span>→</span></button></article></section></>}
+          {tab === 'Fleet' && <article className="table-card"><div className="section-title"><div><small>WORKSPACE INVENTORY</small><h2>Crew containers</h2></div><input aria-label="Filter crews" placeholder="Filter crews or containers…" value={filter} onChange={e => setFilter(e.target.value)}/></div><p>Live container status, CPU and memory from the Crewship runtime. A dash means the runtime could not measure that value.</p>{fleetRows.length ? <><p className="mobile-hint">Swipe the table to see CPU and memory →</p><div className="table-scroll"><table><thead><tr><th>Crew</th><th>Container</th><th>Status</th><th>CPU</th><th>Memory</th></tr></thead><tbody>{fleetRows.filter(row => `${row.crew} ${row.container ?? ''}`.toLowerCase().includes(filter.toLowerCase())).map((row, index) => <tr key={`${row.crew}:${row.container ?? 'none'}:${index}`}><td>{row.crew}</td><td>{row.container ?? '—'}</td><td><span className={`fleet-state ${row.status === 'running' ? 'running' : ''}`}>{row.status}</span></td><td>{row.cpu ?? '—'}</td><td>{row.memory ?? '—'}</td></tr>)}</tbody></table></div></> : <div className="empty">{metric('Crews in workspace')?.label === 'Unavailable' ? 'Crew telemetry is temporarily unavailable.' : 'No crew containers were found in the last collection.'}</div>}</article>}
+          {tab === 'History' && <article className="table-card"><div className="section-title"><div><small>AUDIT TRAIL</small><h2>Snapshot history</h2></div></div><p>Snapshots are loaded through the authorized Pages SDK. Viewing history does not start a run.</p>{history ? <table><thead><tr><th>Revision</th><th>Created at</th><th>Content</th></tr></thead><tbody>{history.items.map(x => <tr key={x.sequence}><td>#{x.sequence}</td><td>{new Date(x.producedAt).toLocaleString('en-US')}</td><td><details><summary>View snapshot</summary><pre>{JSON.stringify(x.data, null, 2)}</pre></details></td></tr>)}</tbody></table> : <button className="secondary" disabled={busy} onClick={loadHistory}>Load history</button>}</article>}
+          <footer><span>CREWSHIP LAB <b>×</b> PAGES</span><span>Live samples · governed routine · versioned application</span></footer>
         </main>
       }
       createRoot(document.getElementById('root')!).render(<App />)
   - path: src/style.css
     encoding: utf8
     content: |
-      *{box-sizing:border-box}body{margin:0;background:var(--crewship-page-background,#0c1210);color:var(--crewship-page-text,#edf4ef);font-family:Inter,ui-sans-serif,system-ui,sans-serif;font-size:14px}button,input{font:inherit}button{cursor:pointer}button:disabled{opacity:.5;cursor:wait}main{max-width:1450px;margin:auto;padding:28px 38px}.topline{display:flex;align-items:center;justify-content:space-between;color:var(--crewship-page-muted,#a2b2a8);font-size:11px;letter-spacing:1.6px}.topline>span:first-child{display:flex;align-items:center;gap:14px}.topline b{color:var(--crewship-page-border,#405249)}.logo{display:grid;place-items:center;width:27px;height:27px;border:1px solid var(--crewship-page-muted,#81cdaa);border-radius:8px;font-style:normal;color:var(--crewship-page-accent,#a5ecc8)}.pill{border:1px solid var(--crewship-page-border,#34493d);border-radius:30px;padding:7px 11px;color:var(--crewship-page-accent,#a6d9bc);font-size:9px}header{display:flex;align-items:center;justify-content:space-between;padding:40px 0 30px;gap:20px}.eyebrow{font-size:10px;letter-spacing:2px;color:var(--crewship-page-accent,#a3c9b2);font-weight:600}h1{font-size:clamp(30px,4.4vw,60px);font-weight:500;letter-spacing:-2px;margin:13px 0 14px;line-height:1.05}h1 span{color:var(--crewship-page-accent,#9fe5bd)}p{color:var(--crewship-page-muted,#92a79a);line-height:1.75;max-width:560px}.hero-number{display:flex;flex-direction:column;text-align:right}.hero-number>span{font-size:84px;letter-spacing:-8px;line-height:1;color:var(--crewship-page-border,#263c2e)}.hero-number small{font-size:10px;color:var(--crewship-page-muted,#748b7c);margin-top:8px}.toolbar{display:flex;align-items:center;justify-content:space-between;border-top:1px solid var(--crewship-page-border,#27372e);border-bottom:1px solid var(--crewship-page-border,#27372e);padding:12px 0}nav{display:flex;gap:6px}nav button{border:0;background:none;padding:9px 18px;border-radius:7px;color:var(--crewship-page-muted,#94a89a)}nav .active{background:var(--crewship-page-border,#263a2d);color:var(--crewship-page-accent,#c7f5d8)}.primary{border:0;border-radius:7px;background:var(--crewship-page-accent,#beeccc);color:var(--crewship-page-surface,#183021);padding:10px 16px;font-weight:600}.primary span{margin-left:12px}.freshness{display:flex;gap:8px;align-items:center;color:var(--crewship-page-muted,#9aae9e);font-size:11px;margin:21px 0}.freshness>span:last-child{margin-left:auto;color:var(--crewship-page-muted,#6e8979)}.dot{width:6px;height:6px;border-radius:50%;background:var(--crewship-page-accent,#9be0b7)}.dot.old{background:#cda767}.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}article{background:var(--crewship-page-background,#121c16);border:1px solid var(--crewship-page-border,#2a3b30);border-radius:12px}.stats article{padding:20px}.stat-top{display:flex;align-items:center;justify-content:space-between;color:var(--crewship-page-muted,#a3b6aa);font-size:12px}.stat-icon{color:var(--crewship-page-accent,#a0c6af);font-size:20px}.stats strong{display:block;font-size:clamp(17px,2.2vw,29px);font-weight:500;margin:22px 0;letter-spacing:-.7px}.stat-bottom{display:flex;justify-content:space-between;align-items:center;gap:6px}.badge{display:inline-block;padding:4px 8px;border-radius:5px;background:var(--crewship-page-border,#283f30);color:var(--crewship-page-accent,#a5d7b6);font-size:10px}.badge.warning{background:#413826;color:#dcc08b}.stat-bottom small{color:var(--crewship-page-muted,#647e6d);font-size:10px}.lower{display:grid;grid-template-columns:1.65fr 1fr;gap:16px;margin-top:18px}.chart{padding:24px}.section-title{display:flex;justify-content:space-between;align-items:center;gap:12px}.section-title small{font-size:9px;letter-spacing:1.5px;color:var(--crewship-page-muted,#8fae9b)}h2{font-size:20px;font-weight:500;letter-spacing:-.5px;margin:8px 0 14px}.measure{font-size:24px}.measure small{font-size:12px;letter-spacing:0}.chart svg{width:100%;display:block;margin-top:22px;max-height:190px}.chart-foot{display:flex;justify-content:space-between;color:var(--crewship-page-muted,#718c7b);font-size:10px;margin-top:12px;gap:12px}.note{padding:26px;background:radial-gradient(ellipse at top right,var(--crewship-page-border,#243f2c),var(--crewship-page-surface,#142019) 70%)}.note h2{font-size:26px;max-width:270px;margin-top:18px}.note p{font-size:12px}.note ul{list-style:none;padding:0;color:var(--crewship-page-accent,#aec5b6);font-size:12px;line-height:2.2}.note li:before{content:'✓';color:var(--crewship-page-accent,#b6e2c2);margin-right:10px}.note button{background:none;color:var(--crewship-page-accent,#cdf0d8);border:0;padding:5px 0}.note button span{margin-left:20px}footer{display:flex;justify-content:space-between;border-top:1px solid var(--crewship-page-border,#25392c);margin-top:30px;padding-top:18px;color:var(--crewship-page-muted,#6d8575);font-size:9px;letter-spacing:1px}footer b{padding:0 9px}.table-card{padding:25px;min-height:300px}.table-card input{background:var(--crewship-page-background,#0d1710);border:1px solid var(--crewship-page-border,#3c5544);color:var(--crewship-page-accent,#e5f5e9);padding:10px;border-radius:7px}table{border-collapse:collapse;width:100%;text-align:left}th{color:var(--crewship-page-muted,#819e8c);font-size:11px;font-weight:400}td,th{padding:16px 10px;border-bottom:1px solid var(--crewship-page-border,#26392d)}td{font-size:12px}pre{white-space:pre-wrap;max-width:600px;overflow-wrap:anywhere}summary{cursor:pointer;color:var(--crewship-page-accent,#bce6c8)}.error{color:#f5b6a5}@media(max-width:850px){main{padding:22px}.stats{grid-template-columns:repeat(2,1fr)}.lower{grid-template-columns:1fr}.hero-number{display:none}.freshness>span:last-child{display:none}footer{gap:20px;line-height:1.8}}@media(max-width:500px){main{padding:15px}.pill{display:none}.toolbar{gap:12px;flex-wrap:wrap}nav button{padding:8px 10px}.stats article{padding:14px}.stat-bottom small{display:none}.section-title{flex-wrap:wrap}}
-
-      .controls,.run-status{display:flex;align-items:center;gap:10px}.secondary{background:transparent;color:var(--crewship-page-accent,#b4d1be);border:1px solid var(--crewship-page-border,#365440);border-radius:7px;padding:9px 12px}.run-status p{font-size:12px}.run-status{flex-wrap:wrap}
-
-      /* Shared appearance is inherited from the workspace. The layout remains local. */
-      :root {color:var(--crewship-page-text,#edf5ef);background:var(--crewship-page-background,#0c1410)}
-      .primary {background:var(--crewship-page-accent,#9fe5bd);color:var(--crewship-page-on-accent,#000)}
-      button {cursor:pointer;transition:transform 160ms ease,filter 160ms ease,background-color 160ms ease}
-      button:hover:not(:disabled) {filter:brightness(1.08);transform:translateY(-1px)}
-      button:active:not(:disabled) {transform:translateY(0)}
-      button:disabled {cursor:wait;opacity:.65}
-      button:focus-visible,input:focus-visible,summary:focus-visible {outline:2px solid var(--crewship-page-accent,#9fe5bd);outline-offset:4px}
-      @keyframes page-enter {from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
-      .hero,.toolbar,.stats article,.lower article,.table-card {animation:page-enter 320ms ease-out both}
-      .stats article:nth-child(2) {animation-delay:35ms}
-      .stats article:nth-child(3) {animation-delay:70ms}
-      .stats article:nth-child(4) {animation-delay:105ms}
-      .lower article {animation-delay:120ms}
-      @media (prefers-reduced-motion:reduce) {
-       *,*::before,*::after {animation:none!important;transition:none!important;scroll-behavior:auto!important}
-       button:hover:not(:disabled),button:active:not(:disabled) {transform:none}
-      }
+      :root{color-scheme:dark;--lab-bg:#080e1b;--lab-surface:#101a2c;--lab-surface-raised:#15213a;--lab-border:#253653;--lab-text:#eef4ff;--lab-muted:#9aabc9;--lab-blue:#528cff;--lab-blue-light:#8cb8ff;--lab-blue-soft:#1d3155}
+      *{box-sizing:border-box}
+      body{margin:0;background:var(--lab-bg);color:var(--lab-text);font-family:Inter,ui-sans-serif,system-ui,sans-serif;font-size:14px}
+      button,input{font:inherit}
+      button{cursor:pointer;transition:transform 160ms ease,filter 160ms ease,background-color 160ms ease}
+      button:hover:not(:disabled){filter:brightness(1.1);transform:translateY(-1px)}
+      button:active:not(:disabled){transform:translateY(0)}
+      button:disabled{cursor:wait;opacity:.55}
+      button:focus-visible,input:focus-visible,summary:focus-visible{outline:2px solid var(--lab-blue-light);outline-offset:4px}
+      .lab{max-width:1510px;min-height:100vh;margin:auto;padding:28px clamp(20px,4vw,58px) 38px;background:radial-gradient(ellipse 72% 480px at 91% 0%,#142853 0%,transparent 78%),var(--lab-bg)}
+      .topline,.brand,.pill,.hero-panel-top,.toolbar,.controls,.freshness,.stat-top,.section-title,.chart-foot,footer,.flow,.fleet-row{display:flex;align-items:center}
+      .topline{justify-content:space-between;color:var(--lab-muted);font-size:11px;letter-spacing:1.8px}
+      .brand{gap:14px}.brand strong{color:var(--lab-text);letter-spacing:2px}.brand b{color:#60779f;font-weight:400}
+      .logo{display:grid;place-items:center;width:30px;height:30px;border:1px solid #4e80d1;border-radius:9px;color:var(--lab-blue-light);font-style:normal;font-weight:700;box-shadow:0 0 22px #407eff25}
+      .pill{gap:9px;border:1px solid #31538a;border-radius:100px;padding:7px 12px;color:var(--lab-blue-light);background:#1424408a;font-size:10px;letter-spacing:1.3px}
+      .pulse,.dot{width:7px;height:7px;border-radius:50%;background:var(--lab-blue);box-shadow:0 0 12px #5995ff9c}
+      .hero{display:grid;grid-template-columns:minmax(0,1fr) minmax(300px,.72fr);gap:42px;align-items:end;padding:56px 0 42px}
+      .eyebrow,.section-title small{color:var(--lab-blue-light);font-size:10px;font-weight:700;letter-spacing:2.3px}
+      h1{margin:14px 0 16px;font-size:clamp(43px,6vw,83px);line-height:1.03;letter-spacing:-4px;font-weight:650}
+      h1 span{color:var(--lab-blue-light)}
+      p{color:var(--lab-muted);line-height:1.7}
+      .intro p{max-width:560px;font-size:15px}
+      .hero-tags{display:flex;flex-wrap:wrap;gap:8px;margin-top:30px}.hero-tags span{padding:7px 10px;border:1px solid #29436d;border-radius:5px;color:#8eaad5;background:#13244191;font-size:10px;letter-spacing:1.2px}
+      .hero-panel{min-height:262px;padding:23px 27px;border:1px solid #315088;border-radius:17px;background:linear-gradient(150deg,#1b3159,#101b2e 66%);box-shadow:0 22px 60px #0005,inset 0 1px #6d9cff26}
+      .hero-panel-top{justify-content:space-between;font-size:10px;color:#a9bde1;letter-spacing:1.7px}.signal{color:#b8d3ff;letter-spacing:1px}.signal i{display:inline-block;width:6px;height:6px;background:#66a2ff;border-radius:50%;margin-right:5px;box-shadow:0 0 12px #66a2ff}
+      .hero-panel-value{margin-top:19px;color:#fff;font-size:clamp(36px,4vw,54px);font-weight:600;letter-spacing:-2px}.hero-panel-caption{color:#a9bcdb;font-size:12px}.hero-panel-bars{height:54px;display:flex;gap:7px;align-items:end;margin:18px 0 16px}.hero-panel-bars span{flex:1;max-width:32px;background:linear-gradient(#87b7ff,#467de0);border-radius:3px 3px 0 0;opacity:.8}.hero-panel-foot{border-top:1px solid #3d5880;padding-top:12px;color:#8fa8ce;font-size:11px}
+      .toolbar{justify-content:space-between;gap:16px;border-top:1px solid var(--lab-border);border-bottom:1px solid var(--lab-border);padding:12px 0}
+      nav{display:flex;gap:5px}nav button{border:0;background:transparent;padding:10px 17px;border-radius:8px;color:var(--lab-muted)}nav button.active{background:var(--lab-blue-soft);color:#e8f1ff;box-shadow:inset 0 0 0 1px #41659e}
+      .controls{gap:9px}.primary,.secondary{border-radius:8px;padding:10px 14px;font-weight:600}.primary{border:1px solid #7daeff;background:var(--lab-blue);color:#fff;box-shadow:0 7px 22px #2968da3c}.primary span{margin-left:13px}.secondary{border:1px solid #3b5379;background:#111e32;color:#c5daff}
+      .freshness{justify-content:space-between;gap:12px;padding:22px 0;color:var(--lab-muted);font-size:11px}.freshness>span:first-child{display:flex;align-items:center;gap:9px}.dot{display:inline-block;flex:none}.dot.old{background:#d69a4b;box-shadow:0 0 10px #d69a4b88}
+      .error{color:#ff9eac}.run-status{display:flex;align-items:center;gap:12px;flex-wrap:wrap}.run-status p{font-size:12px}
+      .stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px}
+      article{border:1px solid var(--lab-border);border-radius:13px;background:linear-gradient(155deg,#121f34,#0f192a)}
+      .stats article{min-height:174px;padding:21px}.stat-top{justify-content:space-between;color:#a9bbd8;font-size:12px}.stat-top i{display:grid;place-items:center;width:28px;height:28px;border:1px solid #35517d;border-radius:8px;background:#1a3156;color:#9ec1ff;font-size:18px;font-style:normal}.stats strong{display:block;margin:22px 0 12px;color:#f5f8ff;font-size:clamp(22px,2.4vw,34px);font-weight:600;letter-spacing:-1px;overflow-wrap:anywhere}.stat-bottom{color:#8296b8;font-size:11px}
+      .lower{display:grid;grid-template-columns:minmax(0,1.55fr) minmax(290px,.8fr);gap:16px;margin-top:16px}.chart,.note,.table-card{padding:25px}.section-title{justify-content:space-between;gap:18px}h2{font-size:21px;font-weight:600;letter-spacing:-.5px;margin:7px 0 0}.measure{font-size:25px;white-space:nowrap}.measure small{font-size:12px;color:var(--lab-muted)}.chart svg{width:100%;display:block;margin:24px 0 12px;max-height:190px}.chart-foot{justify-content:space-between;gap:10px;color:#869cc0;font-size:11px}.note{background:linear-gradient(145deg,#1a3155,#111d32 72%)}.note h2{font-size:25px;line-height:1.18;margin:19px 0}.note p{font-size:12px}.flow{gap:9px;flex-wrap:wrap;margin:24px 0;color:#c5d7f6;font-size:11px}.flow span{border:1px solid #3c5e91;border-radius:7px;padding:8px 9px;background:#183057}.flow b{color:#7caaff}.note button{border:0;background:none;color:#9dc1ff;padding:0;font-weight:600}.note button span{margin-left:16px}
+      .table-card{min-height:270px}.table-card .section-title{align-items:end}.table-card input{border:1px solid #3a5277;border-radius:8px;background:#0b1729;color:var(--lab-text);padding:10px 12px}.table-card>p{font-size:12px}.table-scroll{overflow-x:auto}.fleet-state{display:inline-block;border:1px solid #5a4b38;border-radius:100px;padding:4px 8px;color:#edc58b;background:#392a1e;font-size:11px;white-space:nowrap}.fleet-state.running{border-color:#34558a;background:#193050;color:#a8c9ff}.empty{padding:25px 0;color:var(--lab-muted)}.mobile-hint{display:none}
+      table{width:100%;border-collapse:collapse;text-align:left;margin-top:20px}th,td{padding:13px 10px;border-bottom:1px solid var(--lab-border);font-size:12px}th{color:var(--lab-muted);font-weight:500}summary{cursor:pointer;color:#a8caff}pre{white-space:pre-wrap;overflow-wrap:anywhere;max-width:600px}
+      footer{justify-content:space-between;gap:15px;border-top:1px solid var(--lab-border);margin-top:29px;padding-top:18px;color:#6f85aa;font-size:10px;letter-spacing:1px}footer b{padding:0 8px;color:#729be0}
+      @keyframes page-enter{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}.hero,.toolbar,.stats article,.lower article,.table-card{animation:page-enter 320ms ease-out both}.stats article:nth-child(2){animation-delay:35ms}.stats article:nth-child(3){animation-delay:70ms}.stats article:nth-child(4){animation-delay:105ms}
+      @media(max-width:950px){.hero{grid-template-columns:1fr;gap:25px;padding:40px 0 30px}.hero-panel{max-width:540px}.stats{grid-template-columns:repeat(2,minmax(0,1fr))}.lower{grid-template-columns:1fr}}
+      @media(max-width:630px){.lab{padding:18px 16px 28px}.pill{display:none}h1{letter-spacing:-2px}.toolbar{align-items:stretch;flex-direction:column}.toolbar nav,.controls{justify-content:space-between}.toolbar nav button{flex:1;padding:10px 6px}.controls button{flex:1}.stats{gap:9px}.stats article{padding:15px;min-height:155px}.chart,.note,.table-card{padding:17px}.freshness>span:last-child{display:none}.chart-foot,footer{flex-wrap:wrap}.table-card .section-title{align-items:stretch;flex-direction:column}.table-card input{width:100%}.table-scroll table{min-width:630px}.mobile-hint{display:block!important;color:#a8c9ff!important}}
+      @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}button:hover:not(:disabled),button:active:not(:disabled){transform:none}}

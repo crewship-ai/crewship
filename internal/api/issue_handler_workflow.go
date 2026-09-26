@@ -241,6 +241,14 @@ func (h *IssueHandler) Start(w http.ResponseWriter, r *http.Request) {
 	ident := r.PathValue("identifier")
 	wsID := WorkspaceIDFromContext(r.Context())
 
+	// The run-inputs body is read and decoded BEFORE the write transaction
+	// opens: the server's ReadTimeout bounds the bytes a slow client may
+	// drip, but a read inside the tx would hold the SQLite write lock for
+	// that whole interval. Errors ride in the struct and surface on the
+	// routine path below, so a non-routine start with a stray body behaves
+	// exactly as it did when it never read one.
+	runInputs := readIssueRunInputs(r.Body)
+
 	tx, txErr := h.db.BeginTx(r.Context(), nil)
 	if txErr != nil {
 		internalError(w, r, h.logger, "start: begin", txErr)
@@ -284,8 +292,18 @@ func (h *IssueHandler) Start(w http.ResponseWriter, r *http.Request) {
 		internalError(w, r, h.logger, "start: routine", err)
 		return
 	}
+	// The body may pin the routine its inputs were collected for. PATCH can
+	// move routine_id while the issue sits in BACKLOG/TODO, so without this
+	// check inputs filled against the displayed routine would silently run
+	// on whichever routine is bound at start time. The comparison happens
+	// inside the tx, against the same read the dispatch below uses; an empty
+	// pin keeps older clients starting exactly as before.
+	if runInputs.expectedRoutineID != "" && runInputs.expectedRoutineID != routineID {
+		writeProblem(w, r, http.StatusConflict, "The issue's routine changed. Reload the issue and start again.")
+		return
+	}
 	if routineID != "" {
-		h.startBoundRoutine(w, r, tx, missionID, ident, leadAgentID, routineID)
+		h.startBoundRoutine(w, r, tx, missionID, ident, leadAgentID, routineID, runInputs)
 		return
 	}
 

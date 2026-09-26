@@ -1,11 +1,11 @@
 dsl_version: "1.0"
 name: pages-operations-sample
-description: Read a bounded cgroup sample inside Ops and publish it to Operations Lab. No LLM or external access.
+description: Read an Ops container resource sample and workspace crew telemetry, then publish Crewship Lab. No LLM or external service.
 concurrency_key: pages-operations-sample
 steps:
   - id: collect
     type: script
-    timeout_seconds: 10
+    timeout_seconds: 15
     script:
       path: scripts/pages-operations-sample.mjs
       interpreter: node
@@ -27,3 +27,12 @@ steps:
       page: custom-operations
       panel: memory
       data: "{{ steps.collect.output.memory }}"
+  - id: fleet
+    type: crewship
+    timeout_seconds: 10
+    needs: [memory]
+    action: page.write
+    args:
+      page: custom-operations
+      panel: fleet
+      data: "{{ steps.collect.output.fleet }}"

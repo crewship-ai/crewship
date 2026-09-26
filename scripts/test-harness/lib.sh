@@ -111,7 +111,10 @@ nonce() {
 
 # ask_agent <agent-slug> <prompt> — run a ONE-SHOT prompt (fresh session, no
 # carried history) and echo the agent's plain-text reply on stdout. Empty
-# string on transport failure (callers assert on content).
+# string on transport failure with no saved reply (callers assert on content).
+# Exit status is the captured `cs ask` status: a failed ask returns non-zero
+# EVEN when a partial reply was saved, so callers that care about the run's
+# outcome must check $?, not just whether stdout is nonempty.
 ask_agent() {
   local agent="$1" prompt="$2" out rc
   out="$(mktemp -t cs-reply.XXXXXX)"
@@ -123,6 +126,7 @@ ask_agent() {
   fi
   cat "$out"
   rm -f "$out"
+  return "$rc"
 }
 
 # ── Assertions (never abort; record pass/fail) ──────────────────────────────
