@@ -4907,6 +4907,7 @@
               "type": "string"
             },
             "source": {
+              "additionalProperties": false,
               "properties": {
                 "id": {
                   "type": "string"
