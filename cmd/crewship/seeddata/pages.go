@@ -1,7 +1,10 @@
 package seeddata
 
 import (
+	_ "embed"
 	"fmt"
+	"strconv"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 
@@ -79,6 +82,31 @@ type PagePanelDef struct {
 // Pages is the demo catalogue, loaded at package init like every other one.
 var Pages = mustLoadPages()
 
+//go:embed catalogue_page.tsx
+var cataloguePageTSX string
+
+//go:embed catalogue_page.css
+var cataloguePageCSS string
+
+// catalogueProject reuses the pinned, offline-buildable Crewship Lab project
+// toolchain while giving each panel Page the same blue client-facing shell.
+func catalogueProject(description string) *pages.SourceProject {
+	base := OperationsApp.Project
+	project := &pages.SourceProject{Format: base.Format, Runtime: base.Runtime, Files: append([]pages.ProjectFile(nil), base.Files...)}
+	for i := range project.Files {
+		switch project.Files[i].Path {
+		case "src/main.tsx":
+			project.Files[i].Content = strings.ReplaceAll(cataloguePageTSX, "__PAGE_DESCRIPTION__", strconv.Quote(description))
+		case "src/style.css":
+			project.Files[i].Content = cataloguePageCSS
+		}
+	}
+	if err := project.Validate(); err != nil {
+		panic(fmt.Sprintf("seeddata: catalogue Page source: %v", err))
+	}
+	return project
+}
+
 func mustLoadPages() []PageDef {
 	data, err := builtinFS.ReadFile("builtin/pages.yaml")
 	if err != nil {
@@ -95,6 +123,9 @@ func mustLoadPages() []PageDef {
 	// indistinguishable from "the feature is broken" to whoever opens it.
 	if len(doc.Pages) == 0 {
 		panic("seeddata: builtin/pages.yaml decoded to zero pages — schema drift?")
+	}
+	for i := range doc.Pages {
+		doc.Pages[i].Project = catalogueProject(doc.Pages[i].Description)
 	}
 	return append(doc.Pages, operationsPage())
 }

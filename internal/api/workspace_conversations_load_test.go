@@ -212,7 +212,7 @@ func TestWorkspaceConversationsHTTP100Active(t *testing.T) {
 		Participants []groupchat.Member `json:"participants"`
 	}
 	must(request("roster", "GET", base(channel.ID)+"/participants", tokens[0], workspace, nil, 200, &roster))
-	if len(roster.Participants) != 100 {
+	if len(roster.Participants) != 1 { // Only the creator joined; access still covers all 100 workspace users.
 		t.Fatalf("channel roster=%d", len(roster.Participants))
 	}
 	dispatcher := groupchatnotify.New(db, nil, newTestLogger())

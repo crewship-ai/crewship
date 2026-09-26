@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { WorkspaceConversations } from "../workspace-conversations"
 const reading = vi.hoisted(() => vi.fn())
@@ -171,6 +171,46 @@ describe("workspace conversations transport", () => {
     expect(screen.getByText("Inbox notifications are muted for you. Messages remain visible.")).toBeInTheDocument()
   })
 
+  it.each([true, false])("opens an inline channel panel, preserves the draft and respects creator permissions (%s)", async (creator) => {
+    const normal = fetcher.getMockImplementation()!
+    const channel = { ...room, kind: "channel", access_scope: "workspace", created_by: creator ? "alice" : "bob" }
+    fetcher.mockImplementation(async (url: string, options?: RequestInit) => {
+      if (url.includes("/conversations/room?")) return Response.json(channel)
+      if (url.includes("/participants")) return Response.json({ participants: [{ user_id: "alice", name: "Alice", role: "member" }] })
+      if (url.includes("/agent-jobs")) return Response.json({ jobs: [] })
+      if (url.includes("/room/agents")) return Response.json({ agents: [] })
+      if (url.includes("/activity")) return Response.json({ issues: true, routines: false })
+      if (url.includes("/agents?")) return Response.json([])
+      if (url.includes("/workspaces/ws/members")) return Response.json([])
+      return normal(url, options)
+    })
+    setup()
+    const composer = await screen.findByRole("textbox", { name: "Message Engineering" })
+    fireEvent.change(composer, { target: { value: "Unsent draft" } })
+    const members = screen.getByRole("button", { name: "Members" })
+    fireEvent.click(members)
+    const panel = screen.getByRole("complementary", { name: creator ? "Channel settings" : "Channel details" })
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
+    expect(within(panel).getByRole("heading", { name: "Members" })).toHaveFocus()
+    const issues = await within(panel).findByRole("checkbox", { name: "Issue updates" })
+    if (creator) {
+      expect(issues).toBeEnabled()
+      await waitFor(() => expect(within(panel).getByRole("combobox", { name: "Person to add" })).toBeEnabled())
+      fireEvent.click(screen.getByRole("button", { name: "Channel settings" }))
+      expect(within(panel).getByRole("heading", { name: "General" })).toHaveFocus()
+      expect(within(panel).getByRole("button", { name: "Add agent" })).toBeInTheDocument()
+    } else {
+      expect(issues).toBeDisabled()
+      expect(within(panel).queryByRole("combobox", { name: "Person to add" })).not.toBeInTheDocument()
+      expect(screen.queryByRole("button", { name: "Channel settings" })).not.toBeInTheDocument()
+      expect(within(panel).queryByRole("button", { name: "Add agent" })).not.toBeInTheDocument()
+    }
+    fireEvent.keyDown(panel, { key: "Escape" })
+    expect(screen.queryByRole("complementary", { name: /Channel/ })).not.toBeInTheDocument()
+    expect(composer).toHaveValue("Unsent draft")
+    expect(screen.getByRole("button", { name: creator ? "Channel settings" : "Members" })).toHaveFocus()
+  })
+
   it("opens a reused direct message outside the listed page and hides participant management", async () => {
     const normal = fetcher.getMockImplementation()!
     const dm = { ...room, id: "old-direct", title: "Alice · Bob", is_direct: true }
@@ -187,7 +227,7 @@ describe("workspace conversations transport", () => {
     await screen.findByRole("textbox", { name: "Message Alice · Bob" })
     expect(new URLSearchParams(window.location.search).get("conversation")).toBe("old-direct")
     expect(screen.getByText("Direct message · Only the two participants have access")).toBeInTheDocument()
-    fireEvent.click(screen.getByRole("button", { name: "People" }))
+    fireEvent.click(screen.getByRole("button", { name: "Members" }))
     await screen.findByText("Direct message participants")
     await screen.findByText("Alice")
     expect(screen.queryByText("Manage people")).not.toBeInTheDocument()

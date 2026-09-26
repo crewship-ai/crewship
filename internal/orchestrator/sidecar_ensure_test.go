@@ -225,6 +225,17 @@ func TestCrewOnlySidecarMustBeReplaced(t *testing.T) {
 			want:           false,
 		},
 		{
+			name:           "script replaces a legacy crew sidecar without telemetry",
+			health:         &sidecarHealth{ConfigFingerprint: legacyCrewOnlySidecarFingerprint},
+			crewOnlyCaller: true,
+			want:           true,
+		},
+		{
+			name:   "agent replaces a legacy crew sidecar without telemetry",
+			health: &sidecarHealth{ConfigFingerprint: legacyCrewOnlySidecarFingerprint},
+			want:   true,
+		},
+		{
 			name:   "agent run finds a normally-configured sidecar",
 			health: &sidecarHealth{ConfigFingerprint: "a1b2c3d4e5f6a1b2c3d4e5f6"},
 			want:   false,

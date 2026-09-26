@@ -30,7 +30,7 @@ scripts/demo/run.sh --all --needs none   # only the token-zero ones
 | 9 | `github-injection` | github, model | a bound token reaches the container; `gh auth status` inside it |
 | 10 | `pack-ci-watch` | github | the nightly CI watch pack through `seed verify --pack` |
 | 11 | `pack-docs-drift` | github | the docs-drift pack through `seed verify --pack` |
-| 12 | `pack-site-replica` | — | the site-replica pack through `seed verify --pack` |
+| 12 | `chat-reply-inbox` | model | Morgan's saved chat reply appears in Inbox → Messages when the user is not watching that chat live |
 
 **Needs** is what the use case cannot do without: `model` is an ACTIVE
 model-provider credential in the workspace, `github` is `SEED_GITHUB_TOKEN`
@@ -82,5 +82,3 @@ stop `--all`, `--needs` filters, a hung use case is killed and reported.
 - Use cases 2 and 4 depend on an agent doing what it was asked; each retries
   once and then SKIPs with the reason rather than reporting the model's
   phrasing as a product failure.
-- Use case 12 reports the pack as verified with `NOT BUILT` until somebody
-  asks Alex to copy the site; that is the pack's own semantics.

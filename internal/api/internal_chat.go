@@ -23,7 +23,9 @@ func (h *InternalHandler) CreateChat(w http.ResponseWriter, r *http.Request) {
 		// failing the call, because a chat row this endpoint declines
 		// to write costs the run its audit trail (the caller treats
 		// the failure as non-fatal and continues).
-		Origin string `json:"origin"`
+		Origin         string `json:"origin"`
+		PipelineRunID  string `json:"pipeline_run_id"`
+		PipelineStepID string `json:"pipeline_step_id"`
 	}
 	if err := readJSON(r, &body); err != nil {
 		replyError(w, http.StatusBadRequest, "Invalid JSON")
@@ -32,6 +34,23 @@ func (h *InternalHandler) CreateChat(w http.ResponseWriter, r *http.Request) {
 	if body.ChatID == "" || body.AgentID == "" || body.WorkspaceID == "" {
 		replyError(w, http.StatusBadRequest, "chat_id, agent_id, workspace_id required")
 		return
+	}
+
+	if body.PipelineRunID != "" {
+		// Provenance must point to a live routine in the same tenant as this agent.
+		var valid int
+		err := h.db.QueryRowContext(r.Context(), `SELECT COUNT(*) FROM pipeline_runs pr
+			JOIN pipelines p ON p.id=pr.pipeline_id AND p.workspace_id=pr.workspace_id AND p.deleted_at IS NULL
+			JOIN agents a ON a.id=? AND a.workspace_id=pr.workspace_id AND a.deleted_at IS NULL
+			WHERE pr.id=? AND pr.workspace_id=?`, body.AgentID, body.PipelineRunID, body.WorkspaceID).Scan(&valid)
+		if err != nil {
+			replyInternalError(w, h.logger, "validate chat source", err)
+			return
+		}
+		if valid != 1 || body.Origin != "ROUTINE" || body.PipelineStepID == "" {
+			replyError(w, http.StatusBadRequest, "invalid routine source")
+			return
+		}
 	}
 
 	var existingID string
@@ -46,10 +65,15 @@ func (h *InternalHandler) CreateChat(w http.ResponseWriter, r *http.Request) {
 	}
 
 	now := time.Now().UTC().Format(time.RFC3339)
-	_, err := h.db.ExecContext(r.Context(), `
-		INSERT INTO chats (id, agent_id, workspace_id, created_by, title, mode, status, origin, started_at, created_at)
-		VALUES (?, ?, ?, ?, ?, 'CHAT', 'ACTIVE', ?, ?, ?)`,
-		body.ChatID, body.AgentID, body.WorkspaceID, body.UserID, body.Title, origin, now, now)
+	query := `INSERT INTO chats (id, agent_id, workspace_id, created_by, title, mode, status, origin, started_at, created_at)
+		VALUES (?, ?, ?, ?, ?, 'CHAT', 'ACTIVE', ?, ?, ?)`
+	args := []any{body.ChatID, body.AgentID, body.WorkspaceID, body.UserID, body.Title, origin, now, now}
+	if body.PipelineRunID != "" {
+		query = `INSERT INTO chats (id, agent_id, workspace_id, created_by, title, mode, status, origin, started_at, created_at, pipeline_run_id, pipeline_step_id)
+		VALUES (?, ?, ?, ?, ?, 'CHAT', 'ACTIVE', ?, ?, ?, ?, ?)`
+		args = append(args, body.PipelineRunID, body.PipelineStepID)
+	}
+	_, err := h.db.ExecContext(r.Context(), query, args...)
 	if err != nil {
 		replyInternalError(w, h.logger, "create chat", err)
 		return

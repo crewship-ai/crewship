@@ -34,6 +34,8 @@ import { useIssueEventGapResync } from "@/hooks/use-issue-event-gap-resync"
 import { usePipelines } from "@/hooks/use-pipelines"
 import { useAutomations } from "@/hooks/use-automations"
 import { usePipelineRunRecords } from "@/hooks/use-pipeline-run-records"
+import { RoutineRunInputsDialog } from "@/components/features/routines/routine-run-inputs-dialog"
+import { routineInputSpecs, type RoutineInputSpec } from "@/lib/routine-inputs"
 import { Skeleton } from "@/components/ui/skeleton"
 import { RunActivityTimeline, RUN_WORK_ENTRY_TYPES } from "@/components/features/activity/run-activity-timeline"
 import { IssueCardDetail, type IssueRun } from "@/components/features/issues/issue-card-detail"
@@ -114,6 +116,22 @@ export function IssueDetailSurface({
   const [roster, setRoster] = React.useState<Roster>(EMPTY_ROSTER)
   const [milestones, setMilestones] = React.useState<Milestone[]>([])
   const [busy, setBusy] = React.useState(false)
+  const [routineRunBusy, setRoutineRunBusy] = React.useState(false)
+  const [routineRunError, setRoutineRunError] = React.useState<string | null>(null)
+  const [routineRunForm, setRoutineRunForm] = React.useState<{
+    issueIdentifier: string
+    slug: string
+    name: string
+    definition: Record<string, unknown>
+    inputs: RoutineInputSpec[]
+    headVersion?: number | null
+    // The bound routine's id when the form loaded. Sent back as
+    // expected_routine_id so the server can refuse the start if another
+    // operator rebound the issue to a different routine in the meantime —
+    // these inputs belong to the routine they were collected for.
+    routineId: string | null
+  } | null>(null)
+  const routineRunRequest = React.useRef(0)
 
   const { pipelines } = usePipelines(workspaceId)
   // The workspace's rules, narrowed to this issue inside the card — the
@@ -235,6 +253,10 @@ export function IssueDetailSurface({
     setMilestones([])
     setLoading(true)
     setError(null)
+    routineRunRequest.current++
+    setRoutineRunForm(null)
+    setRoutineRunError(null)
+    setRoutineRunBusy(false)
     void fetchIssue()
     // fetchIssue already depends on workspaceId + identifier.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -607,20 +629,60 @@ export function IssueDetailSurface({
 
   const runRoutine = React.useCallback(async () => {
     if (!issue?.routine_slug) return
+    const request = ++routineRunRequest.current
+    setRoutineRunBusy(true)
     try {
-      if (!base) return
-      const res = await apiFetch(`${base}/start?${qs}`, { method: "POST" })
+      const res = await apiFetch(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}/pipelines/${encodeURIComponent(issue.routine_slug)}`)
       if (!res.ok) {
-        const b = await res.json().catch(() => null)
-        toast.error(b?.detail ?? "Failed to start routine")
+        toast.error("Could not load the routine's input form")
         return
       }
-      toast.success(`Routine ${issue.routine_slug} started — progress and Lead review appear here`)
+      const routine = await res.json() as { name: string; slug: string; definition: Record<string, unknown>; head_version?: number | null }
+      if (request !== routineRunRequest.current) return
+      setRoutineRunError(null)
+      setRoutineRunForm({ issueIdentifier: identifier, slug: routine.slug, name: routine.name, definition: routine.definition,
+        inputs: routineInputSpecs(routine.definition), headVersion: routine.head_version, routineId: issue.routine_id ?? null })
+    } catch {
+      toast.error("Could not load the routine's input form")
+    } finally {
+      if (request === routineRunRequest.current) setRoutineRunBusy(false)
+    }
+  }, [issue?.routine_slug, issue?.routine_id, workspaceId, identifier])
+
+  const submitRoutineRun = React.useCallback(async (inputs: Record<string, unknown>) => {
+    if (!base || !routineRunForm || routineRunForm.issueIdentifier !== identifier || routineRunForm.slug !== issue?.routine_slug) {
+      setRoutineRunForm(null)
+      return
+    }
+    const request = routineRunRequest.current
+    setRoutineRunBusy(true)
+    setRoutineRunError(null)
+    try {
+      const res = await apiFetch(`${base}/start?${qs}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        // expected_routine_id pins the inputs to the routine the form was
+        // collected for; a null (no binding seen at load) is treated by the
+        // server as no pin.
+        body: JSON.stringify({ routine_inputs: inputs, expected_routine_id: routineRunForm.routineId }),
+      })
+      if (request !== routineRunRequest.current) return
+      if (!res.ok) {
+        const response = await res.json().catch(() => null)
+        if (request !== routineRunRequest.current) return
+        setRoutineRunError(response?.detail ?? response?.error ?? "Failed to start routine")
+        return
+      }
+      setRoutineRunForm(null)
+      toast.success(`Routine ${routineRunForm.slug} started — progress and Lead review appear here`)
       await refresh()
     } catch {
-      toast.error("Failed to start routine")
+      if (request !== routineRunRequest.current) return
+      setRoutineRunError("Failed to start routine")
+    } finally {
+      if (request === routineRunRequest.current) setRoutineRunBusy(false)
     }
-  }, [issue?.routine_slug, base, qs, refresh])
+  }, [base, qs, routineRunForm, identifier, issue?.routine_slug, refresh])
 
   const runWorkflow = React.useCallback(
     async (action: WorkflowAction, comment?: string) => {
@@ -692,7 +754,7 @@ export function IssueDetailSurface({
       addRelation,
       removeRelation,
       runRoutine: issue.routine_slug ? runRoutine : undefined,
-      busy,
+      busy: busy || routineRunBusy,
     }
   }, [
     editable,
@@ -706,6 +768,7 @@ export function IssueDetailSurface({
     removeRelation,
     runRoutine,
     busy,
+    routineRunBusy,
   ])
 
   const codeLinkEdit: CodeLinkEdit | undefined = React.useMemo(
@@ -799,6 +862,19 @@ export function IssueDetailSurface({
         />
       }
     />
+    {routineRunForm?.issueIdentifier === identifier && (
+      <RoutineRunInputsDialog
+        definition={routineRunForm.definition}
+        initialInputs={issue.routine_inputs ?? undefined}
+        inputs={routineRunForm.inputs}
+        routineName={routineRunForm.name}
+        headVersion={routineRunForm.headVersion}
+        submitting={routineRunBusy}
+        error={routineRunError}
+        onCancel={() => setRoutineRunForm(null)}
+        onRun={(inputs) => void submitRoutineRun(inputs)}
+      />
+    )}
     </>
   )
 }

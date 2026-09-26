@@ -9,10 +9,8 @@ import { render, screen, cleanup, fireEvent, act } from "@testing-library/react"
 // icons had an sr-only label and a hover tooltip — which is exactly the set of
 // affordances nobody looking at the screen has.
 //
-// So: the name is in three places that read from ONE map (right-rail's
-// DRAWER_TAB_LABELS) — the tooltip, the drawer's accessible name, and the
-// panel's own heading — and the keyboard shortcut the tooltip draws is
-// exposed to assistive tech instead of being visual-only.
+// The label is visible on each button and the drawer reads the same name.
+// Keyboard shortcuts remain available to assistive tech without a hover popup.
 // =============================================================================
 
 import { RightRail, DRAWER_TAB_LABELS } from "../right-rail"
@@ -21,7 +19,7 @@ import { useDrawerStore } from "@/stores/drawer-store"
 import { AGENT_EXTERNAL_TRIGGERS } from "@/lib/feature-gates"
 
 beforeEach(() => {
-  useDrawerStore.setState({ open: false, activeTab: "files", mode: "push", width: 380 })
+  useDrawerStore.setState({ open: false, activeTab: "artifacts", mode: "push", width: 380 })
 })
 afterEach(() => cleanup())
 
@@ -29,9 +27,11 @@ describe("RightRail — the controls say what they are", () => {
   it("gives every control an accessible name", () => {
     render(<RightRail />)
 
-    for (const label of ["Files", "Team"]) {
+    for (const label of ["Artifacts", "Work"]) {
       expect(screen.getByRole("tab", { name: label })).toBeInTheDocument()
     }
+    expect(screen.queryByRole("tab", { name: "Files" })).toBeNull()
+    expect(screen.queryByRole("tab", { name: "Team" })).toBeNull()
     expect(screen.getByRole("tablist", { name: /side panels/i })).toBeInTheDocument()
   })
 
@@ -48,22 +48,30 @@ describe("RightRail — the controls say what they are", () => {
   })
 
   it("numbers the shortcuts by position, so removing a control renumbers the rest", () => {
-    // Written down, "Team = ⌘3" survived Triggers leaving and left ⌘2 bound
-    // to nothing while ⌘3 opened the second icon. Derived from the index, the
-    // pair cannot drift apart.
+    // Shortcuts follow the visible order when the panel set changes.
     render(<RightRail />)
 
-    expect(screen.getByRole("tab", { name: "Files" })).toHaveAttribute("aria-keyshortcuts", "Meta+1")
-    expect(screen.getByRole("tab", { name: "Team" })).toHaveAttribute("aria-keyshortcuts", "Meta+2")
+    expect(screen.getByRole("tab", { name: "Artifacts" })).toHaveAttribute("aria-keyshortcuts", "Meta+1")
+    expect(screen.getByRole("tab", { name: "Work" })).toHaveAttribute("aria-keyshortcuts", "Meta+2")
   })
 
   it("marks the open panel as the selected tab", () => {
     render(<RightRail />)
 
-    fireEvent.click(screen.getByRole("tab", { name: "Team" }))
+    fireEvent.click(screen.getByRole("tab", { name: "Artifacts" }))
 
-    expect(screen.getByRole("tab", { name: "Team" })).toHaveAttribute("aria-selected", "true")
-    expect(screen.getByRole("tab", { name: "Files" })).toHaveAttribute("aria-selected", "false")
+    expect(screen.getByRole("tab", { name: "Artifacts" })).toHaveAttribute("aria-selected", "true")
+    expect(screen.getByRole("tab", { name: "Work" })).toHaveAttribute("aria-selected", "false")
+  })
+
+  it("keeps the labelled Work control quiet on hover and selection", () => {
+    render(<RightRail />)
+    const work = screen.getByRole("tab", { name: "Work" })
+    fireEvent.mouseEnter(work)
+    fireEvent.click(work)
+    expect(work).toHaveAttribute("aria-selected", "true")
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument()
+    expect(work.querySelector(".bg-primary")).toBeNull()
   })
 })
 
@@ -97,7 +105,7 @@ it("lets keyboard users resize the drawer within its bounds", () => {
   expect(separator).toHaveAttribute("aria-valuenow", "280")
   fireEvent.keyDown(separator, { key: "End" })
   fireEvent.keyDown(separator, { key: "ArrowLeft" })
-  expect(separator).toHaveAttribute("aria-valuenow", "720")
+  expect(separator).toHaveAttribute("aria-valuenow", "520")
 })
 
 

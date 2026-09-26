@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"encoding/json"
+	"strings"
 	"time"
 )
 
@@ -96,6 +97,12 @@ func parseCodexStreamJSON(line []byte, handler EventHandler) {
 
 	var msg codexEnvelope
 	if err := json.Unmarshal(line, &msg); err != nil {
+		// Codex prints this CLI progress line before its JSON events when
+		// stdin is piped. It is not an assistant answer and must not become
+		// a durable chat message.
+		if strings.TrimSpace(string(line)) == "Reading additional input from stdin..." {
+			return
+		}
 		handler(AgentEvent{Type: "text", Content: string(line) + "\n", Timestamp: time.Now()})
 		return
 	}

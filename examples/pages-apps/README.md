@@ -120,19 +120,25 @@ acceptance checks.
 `custom-operations.page.yaml` is a single-file v2 export containing the reviewed
 React/TypeScript/CSS project and Page definition. Published version 3 is deployed
 at `https://crewship-dev3.unifylab.cz/pages/custom-operations` as **Operations Lab**.
+The source in this checkout now presents it as **Crewship Lab** with a blue
+palette; the live dev3 publication stays on its previous version until reviewed
+and published again. The URL slug is retained for existing links.
 It includes a custom layout, memory chart, service filter, actual SDK history,
 `runAction` with trusted-host confirmation, and `getActionStatus` for its own run.
-The demo inherits the workspace Pages palette through SDK CSS variables and adds
-bounded entrance/button animations respecting reduced motion. No external assets
+The revised demo uses a fixed blue Crewship Lab palette and adds bounded
+entrance/button animations respecting reduced motion. No external assets
 or arbitrary shell/API endpoint are exposed to the browser.
 
 ### Real producer and schedule
 
-`scripts/collect_container.mjs` samples cgroup-v2 memory and CPU inside Ops, using
-only built-in Node modules. Eight samples take about 1.2 seconds; no subprocess,
-network request or LLM call. `custom-operations.routine.yaml` runs that script then
-publishes two JSON payloads through governed `page.write`. The routine uses a
-concurrency key, 10-second step deadlines and no author-supplied inputs.
+`scripts/collect_container.mjs` samples cgroup-v2 memory and CPU inside Ops,
+using built-in Node modules. It also asks its local sidecar for workspace-scoped
+crew container telemetry, with an eight-second timeout and explicit unavailable
+values. The fleet table shows the actual runtime status, CPU and memory per
+container; the Ops chart shows eight readings from its own container. There is
+no subprocess, external network request or LLM call.
+`custom-operations.routine.yaml` publishes three JSON payloads through governed
+`page.write`. The routine uses a concurrency key and no author-supplied inputs.
 
 On dev3 the script was installed through `crew files save` at
 `shared/scripts/pages-operations-sample.mjs`. The routine is
@@ -165,7 +171,7 @@ Dev3 uses the opt-in reviewed-code same-origin development mode described in the
 
 ## Built-in demo seed
 
-`crewship seed` now includes Operations Lab at `/pages/custom-operations`.
+`crewship seed` now includes Crewship Lab at `/pages/custom-operations`.
 `embed.go` embeds the **same** `custom-operations.page.yaml`,
 `custom-operations.routine.yaml` and `scripts/collect_container.mjs` files in the
 CLI binary. There is no runtime dependency on this checkout, `/tmp`, or dev3.
@@ -197,7 +203,7 @@ schedules, then create one only if absent:
 ```sh
 crewship routine schedules list
 crewship routine schedules create --slug pages-operations-sample \
-  --name 'Operations Lab' --cron '* * * * *' --timezone UTC \
+  --name 'Crewship Lab' --cron '* * * * *' --timezone UTC \
   --catchup skip --max-failures 3
 ```
 

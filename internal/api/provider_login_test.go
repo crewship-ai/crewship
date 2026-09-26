@@ -781,7 +781,8 @@ func TestProviderLogin_RunStartFreshnessFailures(t *testing.T) {
 	}{
 		{"valid token survives temporary outage", 40 * time.Hour, false, false},
 		{"expired token cannot start", -time.Hour, false, true},
-		{"relogin required even before expiry", 40 * time.Hour, true, true},
+		{"valid access survives failed refresh token", 40 * time.Hour, true, false},
+		{"relogin required after access expiry", -time.Hour, true, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			r := newPLRig(t)

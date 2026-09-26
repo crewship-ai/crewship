@@ -86,3 +86,9 @@ describe('FilePreview',()=>{
  })
 
 })
+
+it('uses supplied artifact bytes without downloading the file again',async()=>{
+ render(<FilePreview url="/api/file" name="cached.png" bytes={png} onClose={()=>{}} />)
+ await screen.findByAltText('cached.png')
+ expect(read).not.toHaveBeenCalled()
+})

@@ -53,7 +53,7 @@ export async function conversationRequest<T>(workspaceId: string, path: string, 
   return response.json()
 }
 
-export function useWorkspaceConversations(workspaceId: string, userId: string) {
+export function useWorkspaceConversations(workspaceId: string, userId: string, query = "") {
   const client = useQueryClient()
   const key = ["workspace-conversations", workspaceId, userId]
   const refresh = useCallback(() => {
@@ -63,9 +63,9 @@ export function useWorkspaceConversations(workspaceId: string, userId: string) {
   useRealtimeEventSafe("assignment.updated", refresh)
   useRealtimeEventSafe("realtime.reconnected", refresh)
   const list = useInfiniteQuery({
-    queryKey: [...key, "list"],
+    queryKey: [...key, "list", ...(query ? [query] : [])],
     initialPageParam: 0,
-    queryFn: ({ signal, pageParam }) => conversationRequest<{ conversations: WorkspaceConversation[]; next_offset: number | null }>(workspaceId, `conversations?offset=${pageParam}&limit=100`, undefined, signal),
+    queryFn: ({ signal, pageParam }) => conversationRequest<{ conversations: WorkspaceConversation[]; next_offset: number | null }>(workspaceId, `conversations?offset=${pageParam}&limit=100${query ? `&q=${encodeURIComponent(query)}` : ""}`, undefined, signal),
     getNextPageParam: (page) => page.next_offset ?? undefined,
     enabled: !!workspaceId && !!userId,
     refetchInterval: 120_000,

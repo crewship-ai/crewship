@@ -14,6 +14,7 @@ type CredentialDef struct {
 	Description string
 	Type        string // API_KEY, AI_CLI_TOKEN, SECRET, OAUTH2
 	Provider    string // ANTHROPIC, GOOGLE, etc.
+	Mode        string // PROVIDER_LOGIN: subscription or api_key
 	EnvVarName  string // env var name when assigning to agents
 	Value       string // plaintext value (server encrypts)
 }

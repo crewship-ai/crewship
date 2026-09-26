@@ -22,25 +22,46 @@ VALUE="demo-token-rotate-me-$(nonce V)"
 demo_cleanup "cs credential delete '$ESC_NAME' --yes"
 
 demo_step "Morgan needs a $ESC_NAME token and does not have one"
-reply="$(ask_agent morgan "You need a ${ESC_NAME} API token to page on-call but you do not have one. Raise a credential escalation that names exactly the credential you need (${ESC_NAME}) and why. Do not invent a value.")"
-printf '%s\n' "$reply" | head -5 | sed 's/^/     /'
+reply_file="$(mktemp -t cs-escalation-reply.XXXXXX)"
+# ask_agent runs `cs ask` as a foreground child and forwards no signals, so a
+# plain `kill $ask_pid` can reap the subshell while the ask itself keeps
+# running. Brief monitor mode puts the backgrounded subshell in its own
+# process group ($! then also names that group — what `setsid` would give,
+# minus the missing-on-macOS fallback), so stop_ask below can signal the
+# subshell and its `cs ask` child together.
+set -m
+(ask_agent morgan "You need a ${ESC_NAME} API token to page on-call but you do not have one. Raise a credential escalation that names exactly the credential you need (${ESC_NAME}) and why. Do not invent a value." > "$reply_file") &
+ask_pid=$!
+set +m
+
+# stop_ask — terminate the backgrounded ask and reap it. `kill -- -pgid`
+# reaches the whole group when the launch above made the subshell its leader
+# (subshell + cs ask); the bare kill covers the pid itself and degrades to
+# the old subshell-only behaviour when no group with that id exists.
+stop_ask() {
+  kill -- "-$ask_pid" 2>/dev/null || true
+  kill "$ask_pid" 2>/dev/null || true
+  wait "$ask_pid" 2>/dev/null || true
+}
+demo_say "Morgan's run stays open while /escalate waits for a human answer."
 
 demo_step "The escalation shows up in the ops queue"
 esc_json_cmd="\"$CREWSHIP\" --server \"$SERVER\" ${_CS_ARGS[*]+${_CS_ARGS[*]}} escalation list --crew ops --status PENDING --format json"
 if have jq; then
   poll_until "morgan's credential escalation is PENDING" 90 \
-    "$esc_json_cmd | jq -e '[.[]? | select(((.type // \"\") | test(\"credential\"; \"i\")) or (tostring | test(\"$ESC_NAME\"; \"i\")))] | length > 0'"
+    "$esc_json_cmd | jq -e --arg n '$ESC_NAME' '[.[]? | select(tostring | test(\$n; \"i\"))] | length > 0'"
   esc_id="$(cs escalation list --crew ops --status PENDING --format json 2>/dev/null \
-    | jq -r --arg n "$ESC_NAME" 'first(.[]? | select(((.type // "") | test("credential"; "i")) or (tostring | test($n; "i")))) | .id // empty' 2>/dev/null)"
+    | jq -r --arg n "$ESC_NAME" 'first(.[]? | select(tostring | test($n; "i"))) | .id // empty' 2>/dev/null)"
 else
   poll_until "morgan's credential escalation is PENDING (grep)" 90 \
     "\"$CREWSHIP\" --server \"$SERVER\" escalation list --crew ops 2>/dev/null | grep -qiE 'credential|$ESC_NAME'"
   esc_id=""
 fi
 demo_show "escalation list --crew ops" cs escalation list --crew ops --status PENDING
-demo_ui "Inbox → escalations" "/inbox"
+demo_ui "Inbox → Decisions needed" "/inbox"
 
 demo_step "A human supplies the value (the step the agent cannot do)"
+decision_ok=false
 if [[ -z "$esc_id" ]]; then
   skip "supply the credential" "could not read the escalation id (jq missing or no match)"
 else
@@ -49,17 +70,65 @@ else
   printf '%s\n' "$out" | sed 's/^/     /'
   if (( rc == 0 )); then
     _pass "escalation $esc_id supplied"
+    decision_ok=true
   else
     # An escalation raised as free text may want the credential created the
     # long way; do that so the demo still shows the grant.
     _fail "escalation supply" "exit $rc"
     demo_say "falling back to create + assign by hand"
-    printf '%s' "$VALUE" | cs credential create --name "$ESC_NAME" --type API_KEY --provider CUSTOM_CLI --env-var-name "$ESC_NAME" --value-stdin >/dev/null 2>&1 \
+    if printf '%s' "$VALUE" | cs credential create --name "$ESC_NAME" --type API_KEY --provider CUSTOM_CLI --env-var-name "$ESC_NAME" --value-stdin >/dev/null 2>&1 \
       && cs credential assign "$ESC_NAME" morgan --env-var-name "$ESC_NAME" >/dev/null 2>&1 \
-      && cs escalation resolve "$esc_id" --action approve --resolution "granted by hand (demo)" >/dev/null 2>&1 \
-      && _pass "credential created, assigned to morgan, escalation resolved" \
-      || _fail "manual grant"
+      && cs escalation resolve "$esc_id" --action approve --resolution "granted by hand (demo)" >/dev/null 2>&1; then
+      _pass "credential created, assigned to morgan, escalation resolved"
+      decision_ok=true
+    else
+      _fail "manual grant"
+    fi
   fi
+fi
+
+# No decision (jq missing, supply and grant both failed) means the run stays
+# parked at the escalation waitpoint waiting for a human — waiting for it
+# would hang the demo. Withdraw the question and stop the run instead.
+reply=""
+ask_rc=0
+if [[ "$decision_ok" != true ]]; then
+  if [[ -n "$esc_id" ]]; then
+    cs escalation cancel "$esc_id" --reason "demo stopped: no decision was recorded" >/dev/null 2>&1 || true
+  fi
+  stop_ask
+  skip "Morgan resumes after the human decision" "run stopped — no decision was recorded"
+else
+  # Decision made: bound the wait too, so a run that never lands its reply
+  # cannot hang the demo either.
+  waited=0
+  while kill -0 "$ask_pid" 2>/dev/null && (( waited < ASK_TIMEOUT )); do
+    sleep "$POLL_INTERVAL"; waited=$((waited + POLL_INTERVAL))
+  done
+  if kill -0 "$ask_pid" 2>/dev/null; then
+    _fail "Morgan resumes after the human decision" "no reply within ${ASK_TIMEOUT}s of the decision — stopping the run"
+    stop_ask
+  else
+    # The subshell has exited, so wait only reaps it — but its status is
+    # ask_agent's, which now carries a failed `cs ask` through even when a
+    # partial reply got saved. Take it instead of discarding it.
+    wait "$ask_pid" 2>/dev/null
+    ask_rc=$?
+    if (( ask_rc != 0 )); then
+      _fail "Morgan resumes after the human decision" "agent run exited ${ask_rc}"
+    fi
+    reply="$(cat "$reply_file")"
+  fi
+fi
+rm -f "$reply_file"
+# The no-decision branch already reported this step as skipped; only a run
+# that actually waited for the decision — and whose ask exited cleanly — can
+# be judged on its reply.
+if [[ "$decision_ok" == true && "$ask_rc" -eq 0 ]]; then
+  assert_nonempty "Morgan resumes after the human decision" "$reply"
+fi
+if [[ -n "$reply" ]]; then
+  printf '%s\n' "$reply" | head -5 | sed 's/^/     /'
 fi
 
 demo_step "The vault has it; the API never shows the value"

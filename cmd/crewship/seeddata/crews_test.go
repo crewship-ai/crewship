@@ -115,13 +115,13 @@ func TestPostCreateCommandInstallsContainerDeps(t *testing.T) {
 
 // TestSeedCrewsAllowDomainsTheirDemoContentNeeds guards against #1200: seeded
 // crews default to network_mode=restricted with an empty allowed_domains, but
-// the seed also ships demo content that needs real internet access — the
-// public Crewship website/docs, its GitHub release feed, and GitHub Status.
+// the optional GitHub packs need repository/API access and the Ops wake gate
+// reads GitHub Status.
 // Without an explicit allowlist entry per host, that content fails 100% of the
 // time out of the box. httpbin.org remains for opt-in trajectory evals.
 func TestSeedCrewsAllowDomainsTheirDemoContentNeeds(t *testing.T) {
 	required := map[string][]string{
-		"engineering": {"crewship.ai", "docs.crewship.ai", "github.com", "www.seznam.cz"},
+		"engineering": {"github.com"},
 		"quality":     {"github.com", "api.github.com"},
 		"ops":         {"httpbin.org", "www.githubstatus.com", "crewship.ai", "docs.crewship.ai", "api.github.com", "github.com", "objects.githubusercontent.com"},
 	}

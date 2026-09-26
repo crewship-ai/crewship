@@ -71,13 +71,12 @@ func mustLoadSkills() []SkillDef {
 // own routine authoring for their crew.
 var SkillAssignments = map[string][]string{
 	// Engineering — scripting, file ops, inspection (+ routine authoring for
-	// the lead). site-replica is the pack skill: how the crew hands a page
-	// copy across analyst, data, build and test through its shared volume.
-	"alex":   {"network-probe", "script-runner", "file-crafter", "routine-author", "site-replica"},
-	"sam":    {"script-runner", "file-crafter", "system-inspector", "site-replica"},
-	"robin":  {"file-crafter", "web-scraper", "site-replica"},
-	"taylor": {"web-scraper", "file-crafter", "site-replica"},
-	"jamie":  {"script-runner", "file-crafter", "site-replica"},
+	// the lead). The local extraction issue needs only file and script skills.
+	"alex":   {"network-probe", "script-runner", "file-crafter", "routine-author"},
+	"sam":    {"script-runner", "file-crafter", "system-inspector"},
+	"robin":  {"file-crafter", "web-scraper"},
+	"taylor": {"web-scraper", "file-crafter"},
+	"jamie":  {"script-runner", "file-crafter"},
 	// Quality — testing, validation, review. docs-drift is the pack skill.
 	"jordan": {"script-runner", "file-crafter", "routine-author", "docs-drift"},
 	"casey":  {"system-inspector", "script-runner", "file-crafter", "docs-drift"},

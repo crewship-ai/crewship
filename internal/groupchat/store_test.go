@@ -82,6 +82,14 @@ func fixture(t *testing.T) (*Store, *sql.DB, string) {
 	if _, err = db.Exec(string(continuationMigration)); err != nil {
 		t.Fatal(err)
 	}
+	membershipMigration, err := os.ReadFile("../database/migrations/20260925193600_channel_membership.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.Exec(string(membershipMigration)); err != nil {
+		t.Fatal(err)
+	}
+
 	for i := 0; i < 105; i++ {
 		u := fmt.Sprintf("u%d", i)
 		if _, err = db.Exec(`INSERT INTO users(id,full_name) VALUES(?,?)`, u, "User "+u); err != nil {
@@ -117,7 +125,7 @@ func TestConcurrentTenSendersWALAndReopen(t *testing.T) {
 		t.Fatalf("pool=%d", db.Stats().MaxOpenConnections)
 	}
 	members, err := s.Members(ctx, "w", "u0", c.ID)
-	if err != nil || len(members) != 104 {
+	if err != nil || len(members) != 1 {
 		t.Fatalf("members=%d err=%v", len(members), err)
 	}
 	var wg sync.WaitGroup

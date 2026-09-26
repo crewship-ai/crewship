@@ -119,6 +119,26 @@ func seedIssues(ctx context.Context, client *cli.Client, crewIDs, agentIDs map[s
 			"title":    def.Title,
 			"priority": def.Priority,
 		}
+		if def.RoutineSlug != "" {
+			path := fmt.Sprintf("/api/v1/workspaces/%s/pipelines/%s", client.GetWorkspaceID(), def.RoutineSlug)
+			resp, err := client.Get(path)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "  ! %s: resolve routine %s: %v\n", def.Title, def.RoutineSlug, err)
+				continue
+			}
+			if err := cli.CheckError(resp); err != nil {
+				fmt.Fprintf(os.Stderr, "  ! %s: resolve routine %s: %v\n", def.Title, def.RoutineSlug, err)
+				continue
+			}
+			var routine struct {
+				ID string `json:"id" yaml:"id"`
+			}
+			if err := cli.ReadJSON(resp, &routine); err != nil || routine.ID == "" {
+				fmt.Fprintf(os.Stderr, "  ! %s: routine %s has no usable ID\n", def.Title, def.RoutineSlug)
+				continue
+			}
+			body["routine_id"] = routine.ID
+		}
 		if def.Description != "" {
 			body["description"] = def.Description
 		}
@@ -222,11 +242,6 @@ func seedIssues(ctx context.Context, client *cli.Client, crewIDs, agentIDs map[s
 		sourceKey, targetKey, rtype string
 	}
 	rels := []relDef{
-		// site-replica: the hand-off order inside the engineering crew.
-		{"Map the seznam.cz home page — sections, navigation and metadata", "Build the static replica from the content map", "blocks"},
-		{"Extract the seznam.cz home page into a structured data model", "Build the static replica from the content map", "blocks"},
-		{"Build the static replica from the content map", "Run the replica acceptance checks and report PASS or FAIL", "blocks"},
-		{"Run the replica acceptance checks and report PASS or FAIL", "Replicate https://www.seznam.cz as a self-contained static page — delegate analysis, data, build and test", "blocks"},
 		// docs-drift: the fact-check gates the fix list.
 		{"Fact-check every docs-drift candidate against the file and line it cites", "Run the docs-drift audit on main and turn it into a fix list", "blocks"},
 		// ci-watch: reconciliation and the stale investigation feed the handover.

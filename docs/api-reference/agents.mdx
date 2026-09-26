@@ -1644,6 +1644,10 @@ GET /api/v1/agents/{agentId}/chats?workspace_id={workspaceId}
 |---|---|---|
 | `workspace_id` | string | Required. |
 | `kind` | string | Optional. `all` (must be supplied alone), `direct`, `routine`, `issue`, `agent` — comma-separated; filters before the page is cut. |
+| `q` | string | Optional. Server-side substring search on the session title, Unicode case-folded, applied before pagination — so it matches sessions beyond the page a caller holds. Composes with `kind`, `limit` and `offset`. |
+| `chat_id` | string | Optional. Restricts the list to that one chat id. |
+| `routine_id` | string | Optional. Only chats whose persisted pipeline run resolves to that routine (pipeline) in the workspace. |
+| `source` | `1` | Optional. Attaches a `source` object to each row naming the chat's persisted issue/routine provenance (see below). |
 | `limit`, `offset` | int | Optional. Page size 1–100 (default 100) and offset. The response carries `X-Total-Count` (chats in the same `kind` partition), `X-Limit` and `X-Offset`. |
 | `counts` | `1` | Optional. Adds `X-Chat-Kind-Counts: direct=3,routine=182,…` for every kind the agent has. |
 
@@ -1660,6 +1664,7 @@ GET /api/v1/agents/{agentId}/chats?workspace_id={workspaceId}
 | `kind` | string | The partition the row falls in, decided from `mode` and `origin` on the server: `direct` (a person talking to the agent — the catch-all), `routine` (a routine step, cron or webhook dispatch), `issue` (mode `MISSION`), `agent` (agent-to-agent delegation). Never null; always the same rule the `kind` filter uses. |
 | `message_count` | int | Messages in the session. |
 | `unread_count` | int | Messages the caller has not seen and did not write. |
+| `source` | object or null | Only with `source=1`: the chat's persisted provenance, never guessed from the title. `{kind, id, name, slug?, run_id?, step_id?}` — `kind` is `routine` (with the pipeline's id/name/slug and, when known, the `run_id` and `step_id` the chat was minted for) or `issue` (with the issue's id, title and identifier). `null` when the chat has no persisted source; the object is omitted entirely without `source=1`. |
 | `started_at`, `ended_at`, `created_at`, `last_activity_at` | string | Timestamps; `ended_at` is null while the session is open. |
 
 **Auth:** Authenticated workspace member.

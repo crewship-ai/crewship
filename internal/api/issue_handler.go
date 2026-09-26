@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"log/slog"
 	"strings"
 
@@ -326,11 +327,15 @@ type issueResponse struct {
 	// Routine binding — when set, /run-routine on this issue invokes
 	// the bound pipeline. RoutineSlug is denormalized in the response
 	// so the UI doesn't have to round-trip the pipelines list to
-	// label the chip ("Run with: triage-classifier"). Both omitempty
-	// so unbound issues don't carry empty fields.
-	RoutineID   *string `json:"routine_id,omitempty"`
-	RoutineSlug *string `json:"routine_slug,omitempty"`
-	RoutineName *string `json:"routine_name,omitempty"`
+	// label the chip ("Run with: triage-classifier"). RoutineInputs
+	// carries the issue's SAVED input values so the run dialog can
+	// prefill them — the same values pipeline run records already
+	// expose to the same audience. All omitempty so unbound issues
+	// don't carry empty fields.
+	RoutineID     *string        `json:"routine_id,omitempty"`
+	RoutineSlug   *string        `json:"routine_slug,omitempty"`
+	RoutineName   *string        `json:"routine_name,omitempty"`
+	RoutineInputs map[string]any `json:"routine_inputs,omitempty"`
 	// Creator attribution (v129). CreatedBy identifies WHO created the
 	// issue — a human (public API / slash command) or an agent (sidecar
 	// tool call). AuthoredVia is the v108 channel enum
@@ -585,7 +590,7 @@ func issueSelectQuery() string {
 		m.lead_agent_id, m.created_at, m.updated_at, m.completed_at,
 		m.project_id, m.estimate, m.parent_issue_id, m.milestone_id,
 		(SELECT COUNT(*) FROM missions sub WHERE sub.parent_issue_id = m.id) AS sub_issues_count,
-		m.routine_id, p.slug, p.name,
+		m.routine_id, p.slug, p.name, COALESCE(m.routine_inputs_json, '{}'),
 		m.author_agent_id, m.created_by_user_id, m.authored_via,
 		CASE
 			WHEN m.author_agent_id IS NOT NULL THEN (SELECT name FROM agents WHERE id = m.author_agent_id)
@@ -610,6 +615,7 @@ func scanIssueRow(row interface{ Scan(...interface{}) error }) (issueResponse, e
 	var issue issueResponse
 	var authorAgentID, createdByUserID, authoredVia, creatorName sql.NullString
 	var ownerUserID, ownerName, delegateAgentID, delegateName sql.NullString
+	var routineInputsJSON string
 	err := row.Scan(
 		&issue.ID, &issue.WorkspaceID, &issue.CrewID, &issue.CrewName, &issue.CrewSlug,
 		&issue.Number, &issue.Identifier, &issue.Title, &issue.Description, &issue.Status,
@@ -618,7 +624,7 @@ func scanIssueRow(row interface{ Scan(...interface{}) error }) (issueResponse, e
 		&issue.LeadAgentID, &issue.CreatedAt, &issue.UpdatedAt, &issue.CompletedAt,
 		&issue.ProjectID, &issue.Estimate, &issue.ParentIssueID, &issue.MilestoneID,
 		&issue.SubIssuesCount,
-		&issue.RoutineID, &issue.RoutineSlug, &issue.RoutineName,
+		&issue.RoutineID, &issue.RoutineSlug, &issue.RoutineName, &routineInputsJSON,
 		&authorAgentID, &createdByUserID, &authoredVia, &creatorName,
 		&ownerUserID, &ownerName, &delegateAgentID, &delegateName,
 		&issue.WorkMode, &issue.WorkRevision, &issue.WorkerUserID, &issue.WorkerName, &issue.WorkNote, &issue.WorkStopping,
@@ -626,6 +632,13 @@ func scanIssueRow(row interface{ Scan(...interface{}) error }) (issueResponse, e
 	if err == nil {
 		issue.Labels = []labelResponse{}
 		issue.CreatedBy = buildIssueCreator(authorAgentID, createdByUserID, creatorName)
+		// A stored value that is not a JSON object (or is empty) leaves the
+		// field unset rather than failing the read — the start endpoint is
+		// where malformed stored inputs are refused.
+		var saved map[string]any
+		if json.Unmarshal([]byte(routineInputsJSON), &saved) == nil && len(saved) > 0 {
+			issue.RoutineInputs = saved
+		}
 		if authoredVia.Valid && authoredVia.String != "" {
 			issue.AuthoredVia = &authoredVia.String
 		}

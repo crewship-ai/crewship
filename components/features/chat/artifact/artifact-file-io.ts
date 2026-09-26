@@ -45,6 +45,57 @@ export interface ArtifactFile {
   text: string
 }
 
+export interface ArtifactSnapshot {
+  path: string
+  bytes: Uint8Array<ArrayBuffer>
+}
+
+/** Bounded binary read for live previews. A changed PDF or image must be
+ * detected from its bytes; decoding it as text can miss real revisions. */
+export async function readArtifactSnapshot(opts: {
+  agentId: string
+  workspaceId: string
+  path: string
+  signal?: AbortSignal
+}): Promise<ArtifactSnapshot> {
+  const url = artifactDownloadUrl(opts.agentId, opts.workspaceId, opts.path)
+  const res = await apiFetch(url, { signal: opts.signal, cache: "no-store" })
+  if (!res.ok) throw new Error(`Failed to load: HTTP ${res.status}`)
+  assertFileResponse(res, url)
+  const maxBytes = 20 * 1024 * 1024
+  if (Number(res.headers.get("content-length")) > maxBytes) {
+    await res.body?.cancel()
+    throw new ArtifactContentRefused("Artifact exceeds the 20 MiB preview limit")
+  }
+  if (!res.body) throw new ArtifactContentRefused("File stream is unavailable")
+  const reader = res.body.getReader()
+  const chunks: Uint8Array[] = []
+  let length = 0
+  try {
+    while (true) {
+      opts.signal?.throwIfAborted()
+      const { done, value } = await reader.read()
+      if (done) break
+      length += value.byteLength
+      if (length > maxBytes) {
+        await reader.cancel()
+        throw new ArtifactContentRefused("Artifact exceeds the 20 MiB preview limit")
+      }
+      chunks.push(value)
+    }
+  } finally {
+    reader.releaseLock()
+  }
+  opts.signal?.throwIfAborted()
+  const bytes = new Uint8Array(length)
+  let offset = 0
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset)
+    offset += chunk.length
+  }
+  return { path: opts.path, bytes }
+}
+
 export function artifactDownloadUrl(
   agentId: string,
   workspaceId: string,
@@ -131,4 +182,18 @@ export async function saveArtifactFile(opts: {
     },
   )
   if (!res.ok) throw new Error(`Save failed: HTTP ${res.status}`)
+}
+
+/** Cheap directory metadata check; never use listing JSON as file contents. */
+export async function readArtifactVersion(opts: { agentId: string; workspaceId: string; relativePath: string; signal?: AbortSignal }): Promise<string | null> {
+  const slash = opts.relativePath.lastIndexOf("/")
+  const name = opts.relativePath.slice(slash + 1)
+  const params = new URLSearchParams({ workspace_id: opts.workspaceId })
+  if (slash >= 0) params.set("subdir", opts.relativePath.slice(0, slash))
+  const response = await apiFetch(`/api/v1/agents/${encodeURIComponent(opts.agentId)}/files?${params}`, { signal: opts.signal, cache: "no-store" })
+  if (!response.ok) throw new Error(`Could not check artifact (${response.status})`)
+  const rows: unknown = await response.json()
+  if (!Array.isArray(rows)) return null
+  const row = rows.find((entry) => entry?.name === name && entry?.is_dir === false)
+  return row && typeof row.mod_time === "string" && row.mod_time && typeof row.size === "number" ? JSON.stringify([row.mod_time, row.size]) : null
 }

@@ -135,6 +135,7 @@ var sidecarRouteGuards = map[string]routeGuardKind{
 	"GET /mission/templates":          guardNone,
 	"GET /mission/":                   guardNone,
 	"GET /crews":                      guardNone,
+	"GET /crews/telemetry":            guardNone,
 	"POST /crew/create":               guardNone,
 	"POST /agent/create":              guardNone,
 	"POST /spawn":                     guardNone,
