@@ -155,4 +155,11 @@
 #                    #2472 precedent. The previous shape reported PASS with
 #                    half the test unexecuted and zero skips, which the
 #                    branch's own handover had quoted as evidence.
+# 2026-09-25          #2695 adds TestOperationsCollectorFleetTelemetry with
+#                     a Node guard and removes a symlink-test skip fallback
+#                     in the same push, so the count is unchanged at 144.
+#                     FleetTelemetry carries the SKIP-WAIVER(#2472)
+#                     precedent: the mandatory pages-apps CI lane supplies
+#                     Node, so the guard is honest where it fires and
+#                     enforced where it matters.
 144

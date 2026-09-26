@@ -125,6 +125,11 @@ export function IssueDetailSurface({
     definition: Record<string, unknown>
     inputs: RoutineInputSpec[]
     headVersion?: number | null
+    // The bound routine's id when the form loaded. Sent back as
+    // expected_routine_id so the server can refuse the start if another
+    // operator rebound the issue to a different routine in the meantime —
+    // these inputs belong to the routine they were collected for.
+    routineId: string | null
   } | null>(null)
   const routineRunRequest = React.useRef(0)
 
@@ -251,6 +256,7 @@ export function IssueDetailSurface({
     routineRunRequest.current++
     setRoutineRunForm(null)
     setRoutineRunError(null)
+    setRoutineRunBusy(false)
     void fetchIssue()
     // fetchIssue already depends on workspaceId + identifier.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -635,29 +641,35 @@ export function IssueDetailSurface({
       if (request !== routineRunRequest.current) return
       setRoutineRunError(null)
       setRoutineRunForm({ issueIdentifier: identifier, slug: routine.slug, name: routine.name, definition: routine.definition,
-        inputs: routineInputSpecs(routine.definition), headVersion: routine.head_version })
+        inputs: routineInputSpecs(routine.definition), headVersion: routine.head_version, routineId: issue.routine_id ?? null })
     } catch {
       toast.error("Could not load the routine's input form")
     } finally {
       if (request === routineRunRequest.current) setRoutineRunBusy(false)
     }
-  }, [issue?.routine_slug, workspaceId, identifier])
+  }, [issue?.routine_slug, issue?.routine_id, workspaceId, identifier])
 
   const submitRoutineRun = React.useCallback(async (inputs: Record<string, unknown>) => {
     if (!base || !routineRunForm || routineRunForm.issueIdentifier !== identifier || routineRunForm.slug !== issue?.routine_slug) {
       setRoutineRunForm(null)
       return
     }
+    const request = routineRunRequest.current
     setRoutineRunBusy(true)
     setRoutineRunError(null)
     try {
       const res = await apiFetch(`${base}/start?${qs}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ routine_inputs: inputs }),
+        // expected_routine_id pins the inputs to the routine the form was
+        // collected for; a null (no binding seen at load) is treated by the
+        // server as no pin.
+        body: JSON.stringify({ routine_inputs: inputs, expected_routine_id: routineRunForm.routineId }),
       })
+      if (request !== routineRunRequest.current) return
       if (!res.ok) {
         const response = await res.json().catch(() => null)
+        if (request !== routineRunRequest.current) return
         setRoutineRunError(response?.detail ?? response?.error ?? "Failed to start routine")
         return
       }
@@ -665,9 +677,10 @@ export function IssueDetailSurface({
       toast.success(`Routine ${routineRunForm.slug} started — progress and Lead review appear here`)
       await refresh()
     } catch {
+      if (request !== routineRunRequest.current) return
       setRoutineRunError("Failed to start routine")
     } finally {
-      setRoutineRunBusy(false)
+      if (request === routineRunRequest.current) setRoutineRunBusy(false)
     }
   }, [base, qs, routineRunForm, identifier, issue?.routine_slug, refresh])
 
@@ -852,6 +865,7 @@ export function IssueDetailSurface({
     {routineRunForm?.issueIdentifier === identifier && (
       <RoutineRunInputsDialog
         definition={routineRunForm.definition}
+        initialInputs={issue.routine_inputs ?? undefined}
         inputs={routineRunForm.inputs}
         routineName={routineRunForm.name}
         headVersion={routineRunForm.headVersion}

@@ -71,7 +71,8 @@ func issueSkillCredentialSchemaComponents() map[string]any {
 		"milestone_id": nullable("string"), "sub_issues_count": integer(),
 		"comment_count": integer(), "routine_id": nullable("string"),
 		"routine_slug": nullable("string"), "routine_name": nullable("string"),
-		"created_by": ref("IssueCreator"), "authored_via": nullable("string"),
+		"routine_inputs": map[string]any{"type": "object", "additionalProperties": true},
+		"created_by":     ref("IssueCreator"), "authored_via": nullable("string"),
 		// Optional projections on issueResponse: assignee_slug (agent
 		// assignee's page key), code_links (agent-facing internal read
 		// only — browsers read …/code-links), execution (#2448 durable

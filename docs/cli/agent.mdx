@@ -656,6 +656,8 @@ List the agent's `/output/<slug>/` working-directory artefacts, or download a si
 crewship agent files viktor
 crewship agent files viktor --download README.md
 crewship agent files viktor --download report.txt --out /tmp/saved.txt
+crewship agent files viktor --recursive                  # the whole tree, not one level
+crewship agent files viktor --subdir reports/2026-09     # one subdirectory of the namespace
 crewship agent files viktor --filter '.[] | .name'      # piped through the jq binary
 ```
 
@@ -663,6 +665,8 @@ crewship agent files viktor --filter '.[] | .name'      # piped through the jq b
 |---|---|---|---|
 | `--download <name>` | string | | Download this file instead of listing. |
 | `--out <path>` | string | basename of file | Output path for `--download`. Pass `-` to stream the file body to stdout. |
+| `--recursive` | bool | `false` | List the whole tree under the agent's namespace instead of one level. |
+| `--subdir <path>` | string | | List this subdirectory of the agent's namespace instead of its root. |
 | `--filter <expr>` | string | | jq filter applied before rendering (when not downloading). Piped through the external `jq` binary on `PATH`; if `jq` is absent the raw output is shown. |
 
 Downloads stream into a tempfile next to the target and `rename(2)` only on success — Ctrl-C or transport errors mid-copy do not clobber an existing good file with a truncated one.

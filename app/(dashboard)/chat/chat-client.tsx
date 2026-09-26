@@ -2,9 +2,10 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useSearchParams } from "next/navigation"
-import { FolderOpen, Menu, MessageSquare, Users } from "lucide-react"
+import { LayoutGrid, ListTodo, Menu, MessageSquare } from "lucide-react"
 
-import { UnifiedConversationPanel, useUnifiedConversations } from "@/components/features/conversations/unified-chat"
+import { UnifiedConversationPanel, UnifiedNewChatMenu, useUnifiedConversations } from "@/components/features/conversations/unified-chat"
+import { SubBar } from "@/components/layout/sub-bar"
 import { ChatPanel } from "@/components/features/chat/chat-panel"
 import {
   useChatCompactLayout,
@@ -27,6 +28,7 @@ import { SidebarCollapseButton } from "@/components/layout/sidebar-kit"
 import { Skeleton } from "@/components/ui/skeleton"
 import { deriveSessionTitle } from "@/lib/chat-title"
 import { useComposerStore } from "@/stores/composer-store"
+import { useArtifactStore } from "@/stores/artifact-store"
 import { emitChatEvent } from "@/lib/telemetry"
 import { useAppStore } from "@/lib/store"
 import { chatBreadcrumbs } from "@/components/features/chat/chat-breadcrumbs"
@@ -91,12 +93,12 @@ function useAgentSlugFromUrl(): string | null {
 
 /** Which full-screen panel the phone is showing. ChatPanel has had these
  *  branches since it was written. */
-type MobilePanel = "chat" | "files" | "more"
+type MobilePanel = "chat" | "artifacts" | "work"
 
 const MOBILE_PANELS: { id: MobilePanel; label: string; icon: typeof MessageSquare }[] = [
   { id: "chat", label: "Chat", icon: MessageSquare },
-  { id: "files", label: "Files", icon: FolderOpen },
-  { id: "more", label: "Team", icon: Users },
+  { id: "artifacts", label: "Artifacts", icon: LayoutGrid },
+  { id: "work", label: "Work", icon: ListTodo },
 ]
 
 /**
@@ -186,6 +188,20 @@ export function ChatClient() {
    * way to arrive at a chat page with no visible way back to the list.
    */
   const [leftCollapsed, setLeftCollapsed] = useState(false)
+  const artifactFocus = useArtifactStore((s) => s.open && s.focus)
+  const [pickerSignal, setPickerSignal] = useState(0)
+  const leftCollapsedRef = useRef(leftCollapsed)
+  useEffect(() => { leftCollapsedRef.current = leftCollapsed }, [leftCollapsed])
+  const beforeArtifactFocusFold = useRef<boolean | null>(null)
+  useEffect(() => {
+    if (artifactFocus && beforeArtifactFocusFold.current === null) {
+      beforeArtifactFocusFold.current = leftCollapsedRef.current
+      setLeftCollapsed(true)
+    } else if (!artifactFocus && beforeArtifactFocusFold.current !== null) {
+      setLeftCollapsed(beforeArtifactFocusFold.current)
+      beforeArtifactFocusFold.current = null
+    }
+  }, [artifactFocus])
   const tree = useChatTreeData<ChatClientAgent>({
     ensureSlug: pathAgentSlug,
     kind: scopeKindParam(scope),
@@ -416,15 +432,17 @@ export function ChatClient() {
     [workspaceId],
   )
 
+  const [pickedThread, setPickedThread] = useState<{ workspaceId: string | null; agentId: string; thread: ChatTreeThread } | null>(null)
   const selectThread = useCallback(
     (a: ChatTreeAgent, t: ChatTreeThread, push = true) => {
       setMobilePanel("chat")
       setAgentSlug(a.slug)
       setSessionId(t.id)
+      setPickedThread({ workspaceId, agentId: a.id, thread: t })
       writeUrl(a.slug, t.id, push)
       markThreadRead(a.id, t.id)
     },
-    [writeUrl, markThreadRead],
+    [writeUrl, markThreadRead, workspaceId],
   )
 
   /**
@@ -586,7 +604,7 @@ export function ChatClient() {
       // list — and "empty" here would mint a draft on top of every one of
       // them. An empty list only means "this agent has never been talked to"
       // while the question being asked is about talking.
-      else if (scope === "direct") startConversation(named, false)
+      else if (scope === "direct" || scope === "all") startConversation(named, false)
       return
     }
 
@@ -620,8 +638,8 @@ export function ChatClient() {
    * window in which it has no origin to report either.
    */
   const activeThread = useMemo(
-    () => (agent && sessionId ? threadsByAgent[agent.id]?.find((t) => t.id === sessionId) ?? null : null),
-    [agent, sessionId, threadsByAgent],
+    () => (agent && sessionId ? threadsByAgent[agent.id]?.find((t) => t.id === sessionId) ?? (pickedThread?.workspaceId === workspaceId && pickedThread.agentId === agent.id && pickedThread.thread.id === sessionId ? pickedThread.thread : null) : null),
+    [agent, sessionId, threadsByAgent, pickedThread, workspaceId],
   )
 
   /**
@@ -720,7 +738,7 @@ export function ChatClient() {
 
   // Local drafts are not server history. Show the selected draft only in
   // Direct, and retire its placeholder as soon as the persisted row arrives.
-  const activeDraft = scope === "direct" && draftConversation?.id === sessionId &&
+  const activeDraft = (scope === "direct" || scope === "all") && draftConversation?.id === sessionId &&
     !threadsByAgent[draftConversation.agent.id]?.some((t) => t.id === sessionId)
     ? draftConversation
     : null
@@ -762,6 +780,8 @@ export function ChatClient() {
       // dismissed on a phone, where the column IS the drawer.
       onToggleCollapse={isMobile ? () => setDrawerOpen(false) : () => setLeftCollapsed(true)}
       collapseLabel={isMobile ? "Close conversations" : undefined}
+      pickerSignal={pickerSignal}
+      onPickerHandled={() => setPickerSignal(0)}
     />
   )
 
@@ -818,6 +838,21 @@ export function ChatClient() {
       </div>
     )
 
+  const sharedConversations = unified?.list.data?.pages.flatMap((page) => page.conversations).length ?? 0
+  const allSessions = tree.kindCounts
+    ? Object.values(tree.kindCounts).reduce((sum, count) => sum + count, 0)
+    : Object.values(threadsByAgent).reduce((sum, threads) => sum + threads.length, 0)
+  const subbar = <SubBar
+    icon={MessageSquare}
+    title="Chat"
+    description={`${agents?.length ?? 0} agents · ${sharedConversations} conversations · ${allSessions} sessions`}
+    ariaLabel="Chat"
+    leading={isMobile ? <button type="button" onClick={() => setDrawerOpen(true)} aria-label="Show conversations" className="rounded p-1.5 text-muted-foreground hover:text-foreground"><Menu className="size-4" /></button> : undefined}
+    actions={<>
+      <UnifiedNewChatMenu subbar onAgent={() => { setPickerSignal((value) => value + 1); setLeftCollapsed(false); if (isMobile) setDrawerOpen(true) }} />
+    </>}
+  />
+
   /**
    * Below 900px a left column is not a column.
    *
@@ -825,25 +860,14 @@ export function ChatClient() {
    * phone breakpoint: 280px of conversations beside a transcript survives an
    * 800px window and does not survive a 390px one. The column becomes an
    * overlay drawer reached from a header button, and ChatPanel is handed the
-   * `mobilePanel` prop its chat/files/more branches have always had — on
+   * `mobilePanel` prop for chat/artifacts/work — on
    * desktop those three live side by side in the panel's own right rail, so
    * the strip would be a duplicate there.
    */
   if (isMobile) {
     return (
       <div className="flex h-full min-h-0 flex-col overflow-hidden bg-card">
-        <header className="flex h-12 shrink-0 items-center gap-2 border-b border-white/[0.08] px-3">
-          <button
-            type="button"
-            onClick={() => setDrawerOpen(true)}
-            aria-label="Show conversations"
-            className="rounded p-1.5 text-muted-foreground hover:text-foreground"
-          >
-            <Menu className="h-4 w-4" />
-          </button>
-          <span className="truncate type-nav font-medium">{humanConversationId ? "Chat" : agent?.name ?? "Chat"}</span>
-
-        </header>
+        {subbar}
 
         {!humanConversationId && <div
           role="tablist"
@@ -918,7 +942,9 @@ export function ChatClient() {
      * chrome, and it is: `.surface-pane` is lifted above `--card`, so the
      * centre is a raised reading surface inside a card-coloured frame.
      */
-    <div className="flex h-full min-h-0 overflow-hidden bg-card">
+    <div className="flex h-full min-h-0 flex-col overflow-hidden bg-card">
+      {subbar}
+      <div className="flex min-h-0 flex-1 overflow-hidden">
       {/* The column's frame, matching /routines and /issues: the aside owns
           the width and the rule, the explorer inside owns the content. */}
       <aside
@@ -940,6 +966,7 @@ export function ChatClient() {
           stretches to the full document height and the top highlight, which
           is the entire point of the treatment, leaves the screen. */}
       <div className="surface-pane min-h-0 min-w-0 flex-1 overflow-hidden">{conversation}</div>
+      </div>
     </div>
   )
 }

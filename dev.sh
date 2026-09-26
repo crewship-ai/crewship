@@ -783,12 +783,78 @@ cmd_logs_next() {
 }
 
 cmd_nuke() {
+  # start_go sources .env.local before honouring CREWSHIP_PAGE_PROJECTS_PATH,
+  # so a pin there (env-style or `export`-prefixed) wins over the slot
+  # default. Resolve the same way — by actually sourcing the file, not by
+  # grepping it — so the reset removes what start really used, and show the
+  # resolved path in the confirmation below before deleting it.
+  local page_projects_dir
+  page_projects_dir="$(
+    cd "$PROJECT_DIR" 2>/dev/null &&
+      { set -a; . ./.env.local 2>/dev/null; set +a; } &&
+      printf '%s' "${CREWSHIP_PAGE_PROJECTS_PATH:-}"
+  )"
+  if [[ -z "$page_projects_dir" ]]; then
+    page_projects_dir="${CREWSHIP_PAGE_PROJECTS_PATH:-$PAGE_PROJECTS_DIR}"
+  fi
+
+  # start_go runs the server with the checkout as its working directory (its
+  # subshell cd's to PROJECT_DIR before sourcing .env.local and exec'ing), so
+  # the server resolves a relative CREWSHIP_PAGE_PROJECTS_PATH against the
+  # checkout. Anchor the same way here: otherwise the cd -P below resolves a
+  # relative pin against the operator's cwd, and the guard cannot vouch for a
+  # directory start never used.
+  if [[ -n "$page_projects_dir" && "$page_projects_dir" != /* ]]; then
+    page_projects_dir="$PROJECT_DIR/$page_projects_dir"
+  fi
+
+  # A pinned CREWSHIP_PAGE_PROJECTS_PATH that resolves to the checkout — or to
+  # any of its parents, `/` included — would feed remove_data_dir an `rm -rf`
+  # aimed at the source tree or worse. The confirmation below only *displays*
+  # the path and --yes skips it, so validate the resolved directory here,
+  # before anything destructive, regardless of --yes. pwd -P (not realpath,
+  # which macOS lacks) matches how PROJECT_DIR itself is resolved.
+  local resolved_projects resolved_checkout
+  resolved_checkout="$(cd "$PROJECT_DIR" 2>/dev/null && pwd -P)"
+  if [[ -z "$page_projects_dir" ]]; then
+    err "Refusing to nuke: resolved page projects path is empty."
+    exit 1
+  fi
+  if [[ -e "$page_projects_dir" && ! -d "$page_projects_dir" ]]; then
+    # An existing non-directory would sail through the cd below and straight
+    # into rm -rf — refuse it rather than guess what the pin meant.
+    err "Refusing to nuke: page projects path '$page_projects_dir' exists but is not a directory."
+    exit 1
+  fi
+  # cd -P: physical traversal, so a `link/..` path cannot validate against one
+  # directory while rm -rf follows the symlink into another. The resolved path
+  # is what the confirmation shows and what remove_data_dir deletes.
+  resolved_projects="$(cd -P "$page_projects_dir" 2>/dev/null && pwd -P || true)"
+  if [[ -z "$resolved_projects" ]]; then
+    # Nothing exists at the pinned path; remove_data_dir no-ops it, so there is
+    # nothing dangerous to delete. Say so instead of failing the whole reset.
+    warn "Page projects path '$page_projects_dir' does not exist — nothing to remove for it"
+  elif [[ "$resolved_projects" == "/" ||
+          "$resolved_projects" == "$resolved_checkout" ||
+          "$resolved_checkout" == "$resolved_projects"/* ]]; then
+    err "Refusing to nuke: page projects path '$page_projects_dir' resolves to '$resolved_projects',"
+    err "which is the checkout or one of its parents. Point CREWSHIP_PAGE_PROJECTS_PATH"
+    err "at a scratch directory outside the repo and retry."
+    exit 1
+  else
+    page_projects_dir="$resolved_projects"
+  fi
+
   echo -e "${BOLD}${RED}Factory Reset — Crewship${S}${NC}"
   echo "This will destroy ALL local data:"
   echo "  - SQLite database (./crewship.db)"
   echo "  - Agent output, workspace, crew data ($DATA_DIR)"
   echo "  - Bolt state ($STATE_DIR)"
-  echo "  - Page project source ($PAGE_PROJECTS_DIR)"
+  if [[ "$page_projects_dir" == "$PAGE_PROJECTS_DIR" ]]; then
+    echo "  - Page project source ($page_projects_dir)"
+  else
+    echo "  - Page project source ($page_projects_dir — custom CREWSHIP_PAGE_PROJECTS_PATH)"
+  fi
   echo "  - Conversations ($DATA_DIR/conversations)"
   echo "  - Log files ($LOG_PATH)"
   echo "  - Docker containers (crewship${S}-*  — team + sidecars + init)"
@@ -887,7 +953,7 @@ cmd_nuke() {
   }
   remove_data_dir "$DATA_DIR"
   remove_data_dir "$STATE_DIR"
-  remove_data_dir "$PAGE_PROJECTS_DIR"
+  remove_data_dir "$page_projects_dir"
   remove_data_dir "$LOG_PATH"
   rm -f "$SOCKET_PATH"
   ok "Data directories removed"

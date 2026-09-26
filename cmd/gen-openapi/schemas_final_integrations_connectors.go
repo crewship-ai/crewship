@@ -57,6 +57,10 @@ func finalIntegrationsConnectorsSchemaCatalog() (map[string]DomainSchema, map[st
 		"id", "workspace_id", "kind", "source_id", "title", "state", "priority",
 		"blocking", "created_at", "updated_at")
 
+	// source is serialized from the fixed chatWorkSource struct; its six
+	// JSON fields are the complete shape, so the schema is closed.
+	chatSource := object(map[string]any{"kind": str(), "id": str(), "name": str(), "slug": str(), "run_id": str(), "step_id": str()}, "kind", "id", "name")
+	chatSource["additionalProperties"] = false
 	components := map[string]any{
 		"FinalComposioInventory":         object(map[string]any{"enabled": boolean(), "auth_configs": array(anyObject()), "users": array(object(map[string]any{"user_id": str(), "connected_accounts": array(anyObject())}))}),
 		"FinalComposioToolkits":          composioPage(anyObject(), "toolkits"),
@@ -74,7 +78,7 @@ func finalIntegrationsConnectorsSchemaCatalog() (map[string]DomainSchema, map[st
 		"FinalNotificationTemplates":     object(map[string]any{"templates": array(object(map[string]any{"category": str(), "channel_id": str(), "title": str(), "body": str()}))}),
 		"FinalNotificationChannelAgents": object(map[string]any{"agents": array(object(map[string]any{"agent_id": str(), "agent_slug": str()}))}),
 		"FinalNotificationChannelAgent":  object(map[string]any{"channel_id": str(), "agent_id": str(), "allowed": boolean()}),
-		"FinalChatList":                  array(object(map[string]any{"id": str(), "agent_id": str(), "workspace_id": str(), "title": str(), "mode": str(), "status": str(), "message_count": integer(), "started_at": str(), "ended_at": str(), "created_at": str(), "origin": str(), "last_activity_at": str(), "unread_count": integer()})),
+		"FinalChatList":                  array(object(map[string]any{"id": str(), "agent_id": str(), "workspace_id": str(), "title": str(), "mode": str(), "status": str(), "message_count": integer(), "started_at": str(), "ended_at": str(), "created_at": str(), "origin": str(), "last_activity_at": str(), "unread_count": integer(), "kind": str(), "source": chatSource})),
 		"FinalChatSteer":                 object(map[string]any{"queued": boolean(), "in_flight": boolean()}),
 		"FinalChatParticipants":          object(map[string]any{"participants": array(participant)}),
 		"FinalInboxList": object(map[string]any{"rows": array(inboxItem), "count": integer(), "unread_count": integer(), "has_more": map[string]any{"type": "boolean"}},

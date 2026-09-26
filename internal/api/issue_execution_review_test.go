@@ -80,6 +80,77 @@ func TestIssueRoutineStart_ValidatesStoredInputsBeforeDispatch(t *testing.T) {
 	}
 }
 
+// A stored JSON null decodes into a nil map, which mergeIssueRunInputs
+// would then assign into — a panic, not a 400, before the nil check.
+func TestIssueRoutineStart_NullStoredInputsRejected(t *testing.T) {
+	h, user, ws, crew, lead, _ := newTestIssueHandler(t)
+	id := seedIssue(t, h.db, ws, crew, lead, "ENG-80", "TODO")
+	routine := seedTestPipeline(t, h, ws, "null-inputs")
+	if _, err := h.db.Exec(`UPDATE missions SET routine_id=?,routine_inputs_json='null' WHERE id=?`, routine, id); err != nil {
+		t.Fatal(err)
+	}
+	h.routines = &PipelineHandler{}
+	rec := httptest.NewRecorder()
+	h.Start(rec, covIWReq(user, ws, "OWNER", "POST", `{"routine_inputs":{"repository":"crewship"}}`, crew, "ENG-80"))
+	if rec.Code != 400 {
+		t.Fatal(rec.Code, rec.Body.String())
+	}
+	var status string
+	h.db.QueryRow(`SELECT status FROM missions WHERE id=?`, id).Scan(&status)
+	if status != "TODO" {
+		t.Fatal(status)
+	}
+}
+
+// The start body may pin the routine its inputs were collected for
+// (expected_routine_id). PATCH can move routine_id while the issue is still
+// TODO/BACKLOG, so a start carrying inputs for a routine that is no longer
+// bound must refuse inside the tx — before any write — instead of applying
+// them to whichever routine is bound now.
+func TestIssueRoutineStart_ExpectedRoutineMismatchIs409(t *testing.T) {
+	h, user, ws, crew, lead, _ := newTestIssueHandler(t)
+	id := seedIssue(t, h.db, ws, crew, lead, "ENG-83", "TODO")
+	bound := seedTestPipeline(t, h, ws, "expected-mismatch")
+	if _, err := h.db.Exec(`UPDATE missions SET routine_id=? WHERE id=?`, bound, id); err != nil {
+		t.Fatal(err)
+	}
+	h.routines = &PipelineHandler{}
+	rec := httptest.NewRecorder()
+	h.Start(rec, covIWReq(user, ws, "OWNER", "POST",
+		`{"routine_inputs":{"repository":"crewship"},"expected_routine_id":"pln_routine_rebound"}`, crew, "ENG-83"))
+	if rec.Code != 409 {
+		t.Fatal(rec.Code, rec.Body.String())
+	}
+	var status string
+	h.db.QueryRow(`SELECT status FROM missions WHERE id=?`, id).Scan(&status)
+	if status != "TODO" {
+		t.Fatal(status)
+	}
+}
+
+// The same body with the pin matching the bound routine starts: the check
+// passes, the dispatch runs, and the mission leaves TODO.
+func TestIssueRoutineStart_ExpectedRoutineMatchStarts(t *testing.T) {
+	h, user, ws, crew, lead, _ := newTestIssueHandler(t)
+	id := seedIssue(t, h.db, ws, crew, lead, "ENG-84", "TODO")
+	bound := seedTestPipeline(t, h, ws, "expected-match")
+	if _, err := h.db.Exec(`UPDATE missions SET routine_id=?,routine_inputs_json='{}' WHERE id=?`, bound, id); err != nil {
+		t.Fatal(err)
+	}
+	h.routines = NewPipelineHandler(h.db, quietLogger(), &stubRunner{output: "ok"}, nil)
+	rec := httptest.NewRecorder()
+	h.Start(rec, covIWReq(user, ws, "OWNER", "POST",
+		`{"routine_inputs":{},"expected_routine_id":"`+bound+`"}`, crew, "ENG-84"))
+	if rec.Code != 202 {
+		t.Fatal(rec.Code, rec.Body.String())
+	}
+	var status string
+	h.db.QueryRow(`SELECT status FROM missions WHERE id=?`, id).Scan(&status)
+	if status != "IN_PROGRESS" {
+		t.Fatal(status)
+	}
+}
+
 func TestIssueExecutionDetailReadsTheRealRunProjection(t *testing.T) {
 	h, user, ws, crew, lead, _ := newTestIssueHandler(t)
 	id := seedIssue(t, h.db, ws, crew, lead, "ENG-81", "IN_PROGRESS")

@@ -2,7 +2,7 @@
 
 import { useRef, useEffect, useCallback } from "react"
 import { EditorView, keymap, lineNumbers, highlightActiveLine, highlightActiveLineGutter } from "@codemirror/view"
-import { EditorState, type Extension } from "@codemirror/state"
+import { Compartment, EditorState, type Extension } from "@codemirror/state"
 import { defaultKeymap, indentWithTab, history, historyKeymap } from "@codemirror/commands"
 import { bracketMatching, indentOnInput, syntaxHighlighting, defaultHighlightStyle } from "@codemirror/language"
 import { oneDark } from "@codemirror/theme-one-dark"
@@ -63,6 +63,7 @@ interface FileEditorProps {
    * memoized array or the buffer resets on every render.
    */
   extraExtensions?: Extension[]
+  readOnly?: boolean
 }
 
 export function FileEditor({
@@ -74,7 +75,9 @@ export function FileEditor({
   onCursorLine,
   onDocChange,
   extraExtensions,
+  readOnly = false,
 }: FileEditorProps) {
+  const access = useRef(new Compartment())
   const containerRef = useRef<HTMLDivElement>(null)
   const viewRef = useRef<EditorView | null>(null)
   const onSaveRef = useRef(onSave)
@@ -125,6 +128,7 @@ export function FileEditor({
     const state = EditorState.create({
       doc: code,
       extensions: [
+        access.current.of([EditorState.readOnly.of(readOnly), EditorView.editable.of(!readOnly)]),
         lineNumbers(),
         highlightActiveLine(),
         highlightActiveLineGutter(),
@@ -153,6 +157,10 @@ export function FileEditor({
     return () => { view.destroy(); viewRef.current = null }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [code, language, extraExtensions])
+
+  useEffect(() => {
+    viewRef.current?.dispatch({ effects: access.current.reconfigure([EditorState.readOnly.of(readOnly), EditorView.editable.of(!readOnly)]) })
+  }, [readOnly])
 
   return <div ref={containerRef} className="h-full w-full overflow-hidden" />
 }

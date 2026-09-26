@@ -199,6 +199,19 @@ func TestCovIHUpdateSelfParent(t *testing.T) {
 	}
 }
 
+func TestCovIHUpdateRoutineInputsNullRejected(t *testing.T) {
+	h, userID, wsID, crewID, leadID, _ := covIHNew(t)
+	seedIssue(t, h.db, wsID, crewID, leadID, "ENG-1", "BACKLOG")
+	// Explicit JSON null must be refused, not silently ignored alongside a
+	// valid field: a *map cannot tell the two apart, which is why the field
+	// decodes as json.RawMessage.
+	req, rr := covIHReq("PATCH", `{"title":"renamed","routine_inputs":null}`, userID, wsID, "OWNER", map[string]string{"crewId": crewID, "identifier": "ENG-1"})
+	h.Update(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400 (routine_inputs null)", rr.Code)
+	}
+}
+
 func TestCovIHUpdateParentNotFound(t *testing.T) {
 	h, userID, wsID, crewID, leadID, _ := covIHNew(t)
 	seedIssue(t, h.db, wsID, crewID, leadID, "ENG-1", "BACKLOG")

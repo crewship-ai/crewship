@@ -3,25 +3,26 @@
 import { useEffect, useRef, useState } from 'react'
 import type { PDFDocumentProxy, RenderTask } from 'pdfjs-dist'
 import { ArrowLeft, Download, Minus, Plus } from 'lucide-react'
+import { AuthenticatedDownload } from "./authenticated-download"
 import { Button } from '@/components/ui/button'
 import { previewMime, readPreviewBytes } from './file-preview-data'
 
-type FilePreviewProps = { url: string; name: string; onClose: () => void }
+type FilePreviewProps = { url: string; name: string; onClose: () => void; showHeader?: boolean; bytes?: Uint8Array<ArrayBuffer> }
 type Loaded = { bytes: Uint8Array<ArrayBuffer>; mime: ReturnType<typeof previewMime>; blobUrl: string }
 
-export function FilePreview({ url, name, onClose }: FilePreviewProps) {
+export function FilePreview({ url, name, onClose, showHeader = true, bytes }: FilePreviewProps) {
   // Keying this boundary also protects callers that reuse the panel across files.
-  return <PreviewContent key={url} url={url} name={name} onClose={onClose} />
+  return <PreviewContent key={url} url={url} name={name} onClose={onClose} showHeader={showHeader} bytes={bytes} />
 }
 
-function PreviewContent({ url, name, onClose }: FilePreviewProps) {
+function PreviewContent({ url, name, onClose, showHeader, bytes: sourceBytes }: FilePreviewProps) {
   const [loaded, setLoaded] = useState<Loaded | null>(null)
   const [error, setError] = useState('')
   const [attempt, setAttempt] = useState(0)
   useEffect(() => {
     const controller = new AbortController()
     let objectUrl: string | undefined
-    void readPreviewBytes(url, controller.signal).then(bytes => {
+    void (sourceBytes ? Promise.resolve(sourceBytes) : readPreviewBytes(url, controller.signal)).then(bytes => {
       if (controller.signal.aborted) return
       const mime = previewMime(bytes)
       objectUrl = URL.createObjectURL(new Blob([bytes], { type: mime ?? 'application/octet-stream' }))
@@ -30,7 +31,7 @@ function PreviewContent({ url, name, onClose }: FilePreviewProps) {
       if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : 'Could not load this preview. Try again or download the file.')
     })
     return () => { controller.abort(); if (objectUrl) URL.revokeObjectURL(objectUrl) }
-  }, [url, attempt])
+  }, [url, attempt, sourceBytes])
 
   function download() {
     if (!loaded) return
@@ -43,14 +44,14 @@ function PreviewContent({ url, name, onClose }: FilePreviewProps) {
   }
   const safeDownload = url.startsWith('/api/') && !url.includes('\\')
   return <section aria-label={`Preview ${name}`} className="flex h-full min-h-0 min-w-0 flex-col">
-    <header className="flex shrink-0 items-center gap-2 border-b p-2">
+    {showHeader && <header className="flex shrink-0 items-center gap-2 border-b p-2">
       <Button variant="ghost" size="icon" aria-label="Back to files" onClick={onClose}><ArrowLeft className="size-4" /></Button>
       <span className="min-w-0 flex-1 truncate text-sm" title={name}>{name}</span>
       <Button variant="ghost" size="icon" aria-label="Download file" disabled={!loaded} onClick={download}><Download className="size-4" /></Button>
-    </header>
+    </header>}
     {!loaded && !error && <p role="status" className="p-4 text-sm text-muted-foreground">Loading preview…</p>}
     {error && <div className="space-y-3 p-4 text-sm"><p role="alert">{error}</p><Button variant="outline" onClick={() => { setError(''); setLoaded(null); setAttempt(n => n + 1) }}>Retry preview</Button>
-      {safeDownload && <p><a className="underline" href={url} download={name}>Download file</a></p>}
+      {safeDownload && <p><AuthenticatedDownload className="underline" href={url} download={name}>Download file</AuthenticatedDownload></p>}
     </div>}
     {loaded?.mime?.startsWith('image/') && <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto p-3">
       {/* Blob URL contains only signature-checked raster bytes, never SVG/HTML. */}
@@ -124,7 +125,7 @@ function PdfDocument({ bytes, onRetry }: { bytes: Uint8Array<ArrayBuffer>; onRet
   const changePage = (next: number) => { setRendering(true); setPage(next) }
   const changeZoom = (next: number) => { setRendering(true); setZoom(next) }
   return <div className="flex min-h-0 flex-1 flex-col">
-    {pdf && <div className="flex flex-wrap items-center justify-center gap-1 border-b p-2">
+    {pdf && <div className="flex flex-wrap items-center justify-center gap-1 border-b border-border bg-card p-2">
       <Button variant="ghost" size="sm" disabled={page <= 1} onClick={() => changePage(page - 1)}>Previous page</Button>
       <span className="text-xs" aria-live="polite">Page {page} of {pdf.numPages}</span>
       <Button variant="ghost" size="sm" disabled={page >= pdf.numPages} onClick={() => changePage(page + 1)}>Next page</Button>

@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -31,17 +32,22 @@ func resolveSeedCodexLogin() (*seeddata.CredentialDef, error) {
 			return nil, fmt.Errorf("%s must be outside the checkout", seedCodexAuthFileEnv)
 		}
 	}
-	info, err := os.Lstat(path)
+	f, err := openNoFollow(path)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", seedCodexAuthFileEnv, err)
 	}
-	if !info.Mode().IsRegular() || info.Mode().Perm()&0077 != 0 {
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", seedCodexAuthFileEnv, err)
+	}
+	if !info.Mode().IsRegular() || !authFilePermOK(f, info) {
 		return nil, fmt.Errorf("%s must name a regular auth.json readable only by its owner (mode 0600)", seedCodexAuthFileEnv)
 	}
 	if info.Size() > 1<<20 {
 		return nil, fmt.Errorf("%s auth.json exceeds 1 MiB", seedCodexAuthFileEnv)
 	}
-	data, err := os.ReadFile(path)
+	data, err := io.ReadAll(io.LimitReader(f, 1<<20+1))
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", seedCodexAuthFileEnv, err)
 	}
