@@ -166,6 +166,16 @@ export function ArtifactPane({ agentId, width = 540, expanded = false }: { agent
   const binary = BINARY.test(path) || WORKBOOK.test(path)
   const loaded = snapshot?.path === path ? snapshot : null
   const text = loaded && !binary ? new TextDecoder().decode(loaded.bytes) : null
+  // Unsaved edits survive neither a tab switch nor a pane close (the editor
+  // remounts from the snapshot), so both need the same discard confirmation.
+  const guardDirty = () => {
+    if (!dirty) return true
+    if (window.confirm("Discard unsaved artifact changes?")) {
+      setDirty(false)
+      return true
+    }
+    return false
+  }
   const url = active && workspaceId ? artifactDownloadUrl(agentId, workspaceId, path) : ""
   const ArtifactIcon = /\.(csv|tsv|xlsx?)$/i.test(path) ? FileSpreadsheet : /\.html?$/i.test(path) ? FileCode2 : FileText
   const handleSave = async (next: string) => {
@@ -189,7 +199,7 @@ export function ArtifactPane({ agentId, width = 540, expanded = false }: { agent
     style={expanded ? { width: 0 } : { width: `min(${width}px, 42vw)` }}
   >
     <header className="flex min-h-14 shrink-0 items-center gap-2 border-b border-border bg-card px-3 py-2">
-      <Button variant="ghost" size="icon-sm" aria-label="Back to artifacts" onClick={() => setOpen(false)}><ArrowLeft className="size-4" /></Button>
+      <Button variant="ghost" size="icon-sm" aria-label="Back to artifacts" onClick={() => { if (guardDirty()) setOpen(false) }}><ArrowLeft className="size-4" /></Button>
       <span className="flex size-8 shrink-0 items-center justify-center rounded-md border border-border bg-muted/40"><ArtifactIcon className="size-4 text-primary" /></span>
       <div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold" title={active?.title}>{active?.title ?? "Artifact"}</p><p className="truncate text-[11px] text-muted-foreground" title={path}>{path}</p></div>
       <Button variant="outline" size="sm" aria-label={expanded ? "Show chat alongside" : "Expand artifact"} onClick={() => setFocus(!expanded)}>{expanded ? <Minimize2 className="size-3.5" /> : <Maximize2 className="size-3.5" />}<span className="hidden lg:inline">{expanded ? "Chat" : "Expand"}</span></Button>
@@ -197,8 +207,8 @@ export function ArtifactPane({ agentId, width = 540, expanded = false }: { agent
     </header>
     {tabs.length > 1 && <div className="flex shrink-0 gap-1 overflow-x-auto border-b px-2 py-1">
       {tabs.filter((t) => t.agentId === agentId).map((tab) => <div key={tab.id} className={cn("flex items-center rounded text-xs", activeId === tab.id ? "bg-muted text-foreground" : "text-muted-foreground")}>
-        <button type="button" className="max-w-32 truncate px-2 py-1" onClick={() => setActive(tab.id)}>{tab.title}</button>
-        <button type="button" className="px-1" aria-label={`Close ${tab.title}`} onClick={() => closeTab(tab.id)}><X className="size-3" /></button>
+        <button type="button" className="max-w-32 truncate px-2 py-1" onClick={() => { if (tab.id === activeId || guardDirty()) setActive(tab.id) }}>{tab.title}</button>
+        <button type="button" className="px-1" aria-label={`Close ${tab.title}`} onClick={() => { if (tab.id !== activeId || guardDirty()) closeTab(tab.id) }}><X className="size-3" /></button>
       </div>)}
     </div>}
     <div className="flex shrink-0 items-center gap-2 border-b border-border bg-card/70 px-3 py-1.5 text-xs">
@@ -218,7 +228,7 @@ export function ArtifactPane({ agentId, width = 540, expanded = false }: { agent
       {loading && !loaded && <div className="flex h-full items-center justify-center"><Spinner className="size-5" /></div>}
       {!loading && !loaded && !error && <p className="p-4 text-sm text-muted-foreground">No artifact open</p>}
       {loaded && WORKBOOK.test(path) && <div className="p-4 text-sm text-muted-foreground">Spreadsheet preview supports CSV and TSV. <AuthenticatedDownload href={url} download={active?.title || "artifact"} className="text-primary underline">Download this workbook</AuthenticatedDownload> to open it.</div>}
-      {loaded && !WORKBOOK.test(path) && (view === "preview" || binary) && <ArtifactPreview path={path} snapshot={loaded} url={url} revision={revision} onClose={() => setOpen(false)} />}
+      {loaded && !WORKBOOK.test(path) && (view === "preview" || binary) && <ArtifactPreview path={path} snapshot={loaded} url={url} revision={revision} onClose={() => { if (guardDirty()) setOpen(false) }} />}
       {loaded && text !== null && view === "editor" && <FileEditor key={`${activeId}:${revision}`} code={text} language={active?.language ?? getEditorLanguage(active?.title ?? path)} onSave={handleSave} onDirtyChange={(v) => { setDirty(v); if (v) setFollowing(false) }} />}
     </div>
   </motion.aside>

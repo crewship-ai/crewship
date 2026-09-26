@@ -41,15 +41,20 @@ vi.mock("next/dynamic", () => ({
     function StubFileEditor({
       code,
       onSave,
+      onDirtyChange,
     }: {
       code: string
       onSave: (next: string) => void
+      onDirtyChange?: (dirty: boolean) => void
     }) {
       return (
         <div>
           <pre data-testid="editor-code">{code}</pre>
           <button type="button" onClick={() => onSave(`${code}EDIT`)}>
             stub-save
+          </button>
+          <button type="button" onClick={() => onDirtyChange?.(true)}>
+            stub-dirty
           </button>
         </div>
       )
@@ -277,7 +282,6 @@ describe("ArtifactPane — document and table editing", () => {
     expect(await screen.findByLabelText("Spreadsheet preview")).toHaveTextContent("Navigation")
     expect(screen.queryByRole("button", { name: "Editor" })).toBeNull()
   })
-})
 
  it("polls metadata instead of downloading unchanged files on every tick", async () => {
    let stamp = "v1"
@@ -304,3 +308,71 @@ describe("ArtifactPane — document and table editing", () => {
      expect(apiFetch.mock.calls.some(([url]) => String(url).includes("subdir=reports"))).toBe(true)
    } finally { cleanup(); vi.useRealTimers() }
  })
+})
+
+describe("ArtifactPane — unsaved edits survive navigation attempts", () => {
+  const confirmMock = vi.fn()
+  beforeEach(() => {
+    window.confirm = confirmMock as unknown as typeof window.confirm
+    confirmMock.mockReset()
+  })
+  const openEditorWithEdits = async () => {
+    apiFetch.mockImplementation((url: string) =>
+      String(url).includes("/files/download")
+        ? response({ body: "draft\n", contentType: "application/octet-stream" })
+        : response({ body: "{}", contentType: "application/json" }),
+    )
+    render(<ArtifactPane agentId="agent-1" />)
+    openTab("t1", "workspace/one.md")
+    openTab("t2", "workspace/two.md")
+    useArtifactStore.setState({ activeId: "t1" })
+    fireEvent.click(await screen.findByRole("button", { name: "Editor" }))
+    await screen.findByTestId("editor-code")
+    fireEvent.click(screen.getByRole("button", { name: "stub-dirty" }))
+    expect(screen.getByRole("status")).toHaveTextContent("Editing")
+  }
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+    useArtifactStore.setState({ open: false, tabs: [], activeId: null })
+  })
+
+  it("keeps the current tab when a dirty switch is refused", async () => {
+    await openEditorWithEdits()
+    confirmMock.mockReturnValue(false)
+
+    fireEvent.click(screen.getByRole("button", { name: "two.md" }))
+
+    expect(confirmMock).toHaveBeenCalledWith("Discard unsaved artifact changes?")
+    expect(useArtifactStore.getState().activeId).toBe("t1")
+    expect(screen.getByTestId("editor-code")).toHaveTextContent("draft")
+  })
+
+  it("switches tabs once the discard is confirmed", async () => {
+    await openEditorWithEdits()
+    confirmMock.mockReturnValue(true)
+
+    fireEvent.click(screen.getByRole("button", { name: "two.md" }))
+
+    expect(useArtifactStore.getState().activeId).toBe("t2")
+  })
+
+  it("keeps a dirty tab open when its close is refused", async () => {
+    await openEditorWithEdits()
+    confirmMock.mockReturnValue(false)
+
+    fireEvent.click(screen.getByRole("button", { name: "Close one.md" }))
+
+    expect(useArtifactStore.getState().tabs.map((t) => t.id)).toContain("t1")
+  })
+
+  it("asks before hiding the pane with unsaved changes", async () => {
+    await openEditorWithEdits()
+    confirmMock.mockReturnValue(false)
+
+    fireEvent.click(screen.getByRole("button", { name: "Back to artifacts" }))
+
+    expect(confirmMock).toHaveBeenCalledWith("Discard unsaved artifact changes?")
+    expect(useArtifactStore.getState().open).toBe(true)
+  })
+})
