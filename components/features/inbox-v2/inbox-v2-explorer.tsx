@@ -15,7 +15,9 @@ import {
   SidebarSection, SidebarToolbar,
 } from "@/components/layout/sidebar-kit"
 import { CrewIcon } from "@/components/ui/crew-icon"
+import { InboxCrewPicker } from "./inbox-crew-picker"
 import { EntryAvatar, entryIdentity } from "./inbox-entry-identity"
+import { ATTENTION_LABELS, type InboxAttention } from "./inbox-v2-attention"
 import { InlineEmpty } from "@/components/ui/inline-empty"
 import { StatusPill } from "@/components/ui/status-pill"
 import { entityHref } from "@/lib/entity-links"
@@ -23,7 +25,7 @@ import { cn } from "@/lib/utils"
 
 import {
   deadlineBucket, entryKindPill, entryTitle,
-  facetCounts, INBOX_V2_TYPES, isArchivedNotDecided, outcomeStatus,
+  facetCounts, INBOX_V2_TYPES, isArchivedNotDecided, needsHumanDecision, outcomeStatus,
   type InboxV2DeadlineKey, type InboxV2Filters, type InboxV2TypeKey,
 } from "./inbox-v2-derive"
 import { EMPTY_INBOX_LOOKUP, type InboxLookup, type InboxV2Entry, type InboxV2View } from "./inbox-v2-types"
@@ -46,9 +48,9 @@ import { EMPTY_INBOX_LOOKUP, type InboxLookup, type InboxV2Entry, type InboxV2Vi
  */
 
 const VIEWS: { key: InboxV2View; label: string; icon: LucideIcon; tone: string }[] = [
-  { key: "action", label: "Needs action", icon: ListChecks, tone: "text-warn" },
+  { key: "action", label: "To handle", icon: ListChecks, tone: "text-warn" },
   { key: "updates", label: "Updates", icon: Bell, tone: "text-primary" },
-  { key: "history", label: "History", icon: History, tone: "text-success" },
+  { key: "history", label: "History", icon: History, tone: "text-muted-foreground" },
 ]
 
 const TYPE_ICON: Record<InboxV2TypeKey, LucideIcon> = {
@@ -59,14 +61,15 @@ const TYPE_ICON: Record<InboxV2TypeKey, LucideIcon> = {
   memory_consolidation: Brain,
   schedule_missed: Clock3,
   schedule_circuit_breaker_tripped: CircleSlash,
+  run_needs_human: AlertCircle,
+  webhook_fire_failed: AlertTriangle,
+  automation_enqueue_failed: AlertTriangle,
   approval: ShieldCheck,
   mission: Workflow,
 }
 
 const DEADLINES: { key: InboxV2DeadlineKey; label: string }[] = [
-  { key: "hour", label: "Within the hour" },
-  { key: "today", label: "Today" },
-  { key: "none", label: "No deadline" },
+  { key: "soon", label: "Due within 24 hours" },
 ]
 
 const TYPE_LABEL: Record<string, string> = Object.fromEntries(
@@ -81,6 +84,8 @@ interface Props {
   entries: InboxV2Entry[]
   /** Filtered and sorted; what actually renders. */
   visible: InboxV2Entry[]
+  attention?: InboxAttention | null
+  onClearAttention?: () => void
   filters: InboxV2Filters
   onFilters: (filters: InboxV2Filters) => void
   selectedKey: string | null
@@ -93,7 +98,7 @@ interface Props {
 }
 
 export function InboxV2Explorer({
-  view, onView, viewCounts, entries, visible, filters, onFilters,
+  view, onView, viewCounts, entries, visible, filters, onFilters, attention, onClearAttention,
   selectedKey, onOpen, onToggleCollapse, onMarkAllRead, lookup = EMPTY_INBOX_LOOKUP,
 }: Props) {
   // Memoised on the feed, not on the render: the explorer re-renders on every
@@ -101,12 +106,14 @@ export function InboxV2Explorer({
   // With loadAll the feed is the whole history, so this was an O(n) sweep per
   // character typed.
   const counts = useMemo(() => facetCounts(entries), [entries])
-  const activeCount = (filters.type ? 1 : 0) + (filters.deadline ? 1 : 0) + (filters.unreadOnly ? 1 : 0) + (filters.crew ? 1 : 0)
+  const activeCount = (filters.type ? 1 : 0) + (filters.deadline ? 1 : 0) + (filters.unreadOnly ? 1 : 0)
   const crewChip = filters.crew ? lookup.crewById.get(filters.crew)?.name ?? "Crew" : null
-  const narrowed = activeCount > 0 || filters.search.trim() !== ""
+  const narrowed = Boolean(attention) || activeCount > 0 || Boolean(filters.crew) || filters.search.trim() !== ""
   const set = (patch: Partial<InboxV2Filters>) => onFilters({ ...filters, ...patch })
 
-  const sections = view === "updates"
+  const sections = attention
+    ? [{ label: ATTENTION_LABELS[attention], rows: visible }]
+    : view === "updates"
     ? [
         { label: "Replies & results", rows: visible.filter((e) => e.category === "chat.replies") },
         { label: "Important updates", rows: visible.filter((e) => e.category !== "chat.replies") },
@@ -116,7 +123,10 @@ export function InboxV2Explorer({
           { label: "Decisions", rows: visible.filter((e) => !isArchivedNotDecided(e)) },
           { label: "Archived", rows: visible.filter(isArchivedNotDecided) },
         ]
-      : [{ label: "Waiting for you", rows: visible }]
+      : [
+          { label: "Decision required", rows: visible.filter(needsHumanDecision) },
+          { label: "Operational alerts", rows: visible.filter((entry) => !needsHumanDecision(entry)) },
+        ]
 
   return (
     <div className="flex h-full flex-col">
@@ -125,62 +135,21 @@ export function InboxV2Explorer({
           <SidebarSearch
             value={filters.search}
             onValueChange={(search) => set({ search })}
-            placeholder="Search inbox, agents, crews…"
+            placeholder="Search inbox…"
           />
         </div>
         <SidebarFilterPopover
           label="Filter inbox"
           className="[&>button]:text-muted-foreground"
           activeCount={activeCount}
-          onClear={() => set({ type: null, deadline: null, unreadOnly: false, crew: null })}
+          onClear={() => set({ type: null, deadline: null, unreadOnly: false })}
         >
-          <SidebarFacet
-            label="Type"
-            resetLabel="Any type"
-            resetActive={!filters.type}
-            onReset={() => set({ type: null })}
-            first
-          >
-            {INBOX_V2_TYPES.map((t) => {
-              const Icon = TYPE_ICON[t.key]
-              return (
-                <SidebarFacetOption
-                  key={t.key}
-                  active={filters.type === t.key}
-                  onToggle={() => set({ type: filters.type === t.key ? null : t.key })}
-                >
-                  <Icon className="h-3.5 w-3.5 shrink-0" />
-                  {t.label}
-                  <FacetCount value={counts.type[t.key]} />
-                </SidebarFacetOption>
-              )
-            })}
-          </SidebarFacet>
-
-          <SidebarFacet
-            label="Deadline"
-            resetLabel="Any time"
-            resetActive={!filters.deadline}
-            onReset={() => set({ deadline: null })}
-          >
-            {DEADLINES.map((d) => (
-              <SidebarFacetOption
-                key={d.key}
-                active={filters.deadline === d.key}
-                onToggle={() => set({ deadline: filters.deadline === d.key ? null : d.key })}
-              >
-                <Clock3 className="h-3.5 w-3.5 shrink-0" />
-                {d.label}
-                <FacetCount value={counts.deadline[d.key]} />
-              </SidebarFacetOption>
-            ))}
-          </SidebarFacet>
-
           <SidebarFacet
             label="State"
             resetLabel="Read and unread"
             resetActive={!filters.unreadOnly}
             onReset={() => set({ unreadOnly: false })}
+            first
           >
             <SidebarFacetOption
               active={filters.unreadOnly}
@@ -191,26 +160,59 @@ export function InboxV2Explorer({
               <FacetCount value={counts.unread} />
             </SidebarFacetOption>
           </SidebarFacet>
+
+          {(counts.deadline.soon > 0 || filters.deadline) && <SidebarFacet
+            label="Deadline"
+            resetLabel="Any time"
+            resetActive={!filters.deadline}
+            onReset={() => set({ deadline: null })}
+          >
+            {DEADLINES.filter((d) => counts.deadline[d.key] > 0 || filters.deadline === d.key).map((d) => (
+              <SidebarFacetOption
+                key={d.key}
+                active={filters.deadline === d.key}
+                onToggle={() => set({ deadline: filters.deadline === d.key ? null : d.key })}
+              >
+                <Clock3 className="h-3.5 w-3.5 shrink-0" />
+                {d.label}
+                <FacetCount value={counts.deadline[d.key]} />
+              </SidebarFacetOption>
+            ))}
+          </SidebarFacet>}
+
+          <details className="border-t border-border/50 px-2 py-2" key={filters.type ? "selected-type" : "all-types"} open={filters.type ? true : undefined}>
+            <summary className="cursor-pointer text-[11px] text-muted-foreground">Advanced · source type</summary>
+            <SidebarFacet label="Source type" resetLabel="Any type" resetActive={!filters.type} onReset={() => set({ type: null })}>
+              {INBOX_V2_TYPES.filter((t) => counts.type[t.key] > 0 || filters.type === t.key).map((t) => {
+                const Icon = TYPE_ICON[t.key]
+                return <SidebarFacetOption
+                  key={t.key}
+                  active={filters.type === t.key}
+                  onToggle={() => set({ type: filters.type === t.key ? null : t.key })}
+                >
+                  <Icon className="h-3.5 w-3.5 shrink-0" />
+                  {t.label}
+                  <FacetCount value={counts.type[t.key]} />
+                </SidebarFacetOption>
+              })}
+            </SidebarFacet>
+          </details>
         </SidebarFilterPopover>
         {onToggleCollapse && <span className="hidden lg:inline-flex"><SidebarCollapseButton collapsed={false} onToggle={onToggleCollapse} /></span>}
       </SidebarToolbar>
 
       <div className="shrink-0 border-b border-border/60 pb-1" aria-label="Inbox views">
-        {VIEWS.map((v) => <SidebarRow as="div" key={v.key} selected={view === v.key} onSelect={() => onView(v.key)} aria-pressed={view === v.key}>
+        {VIEWS.map((v) => <SidebarRow as="div" key={v.key} selected={!attention && view === v.key} onSelect={() => onView(v.key)} aria-pressed={!attention && view === v.key}>
           <v.icon className={cn("h-3.5 w-3.5 shrink-0", v.tone)} aria-hidden />
           <span className="flex-1">{v.label}</span>
           <span className="text-micro tabular-nums text-muted-foreground">{viewCounts[v.key]}</span>
         </SidebarRow>)}
       </div>
-      <div className="flex shrink-0 items-center gap-1.5 px-3 py-1.5">
-        <CrewIcon icon={filters.crew ? lookup.crewById.get(filters.crew)?.icon || "users" : "users"} color={filters.crew ? lookup.crewById.get(filters.crew)?.color : null} size="sm" className="h-5 w-5 rounded" />
-        <label htmlFor="inbox-crew-filter" className="sr-only">Filter by crew</label>
-        <select id="inbox-crew-filter" value={filters.crew || ""} onChange={(event) => set({ crew: event.target.value || null })} className="h-6 min-w-0 flex-1 rounded-md border border-border/60 bg-background px-2 text-label focus-visible:outline-2 focus-visible:outline-primary">
-          <option value="">All crews</option>
-          {[...lookup.crewById.values()].map((crew) => <option key={crew.id} value={crew.id}>{crew.name}</option>)}
-        </select>
+      <div className="shrink-0 px-2 pb-2 pt-1">
+        <InboxCrewPicker lookup={lookup} entries={entries} value={filters.crew} onChange={(crew) => set({ crew })} />
       </div>
       <SidebarActiveChips className="border-b border-white/[0.06] pt-2">
+        {attention && <SidebarActiveChip onRemove={onClearAttention ?? (() => {})}>{ATTENTION_LABELS[attention]}</SidebarActiveChip>}
         {filters.type && (
           <SidebarActiveChip onRemove={() => set({ type: null })}>{TYPE_LABEL[filters.type]}</SidebarActiveChip>
         )}
@@ -260,7 +262,10 @@ export function InboxV2Explorer({
               <ExplorerEmpty
                 view={view}
                 narrowed={narrowed}
-                onClear={() => onFilters({ search: "", type: null, deadline: null, unreadOnly: false, crew: null })}
+                onClear={() => {
+                  onFilters({ search: "", type: null, deadline: null, unreadOnly: false, crew: null })
+                  onClearAttention?.()
+                }}
               />
             </div>
           )}
@@ -288,7 +293,7 @@ function ExplorerEmpty({ view, narrowed, onClear }: { view: InboxV2View; narrowe
       />
     )
   }
-  if (view === "updates") {
+    if (view === "updates") {
     return (
       <InlineEmpty
         icon={Bell}

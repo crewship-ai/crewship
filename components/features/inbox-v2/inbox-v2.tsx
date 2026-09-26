@@ -23,11 +23,12 @@ import { cn } from "@/lib/utils"
 
 import {
   approvalEntry, EMPTY_INBOX_V2_FILTERS, INBOX_V2_TYPES,
-  groupAdvisories, inboxEntry, missionEntries, selectEntry, suppressedApprovalIDs,
+  groupAdvisories, inboxEntry, missionEntries, needsHumanDecision, selectEntry, suppressedApprovalIDs,
   type InboxV2Filters,
 } from "./inbox-v2-derive"
 import { useInboxV2DeepLink } from "./inbox-v2-deeplink"
-import { entryIdentity, filterInboxEntries } from "./inbox-entry-identity"
+import { ATTENTION_LABELS, matchesInboxAttention, parseInboxAttention } from "./inbox-v2-attention"
+import { filterInboxEntries } from "./inbox-entry-identity"
 import { InboxV2Detail } from "./inbox-v2-detail"
 import { InboxV2Explorer } from "./inbox-v2-explorer"
 import { useInboxLookup } from "@/components/features/inbox/use-inbox-lookup"
@@ -40,6 +41,7 @@ export function InboxV2() {
   const detailRef = useRef<HTMLElement>(null)
   const requestedView = params?.get("view") ?? null
   const requestedKind = params?.get("kind") ?? null
+  const attention = parseInboxAttention(params?.get("attention") ?? null)
   const requestedID = params?.get("item") ?? null
   const requestedSearch = params?.get("agent") ?? params?.get("filter") ?? ""
   const [chosenView, setView] = useState<InboxV2View | null>(null)
@@ -191,9 +193,15 @@ export function InboxV2() {
   }, [active.items, approvals.rows, missions.data, resolved.items, suppressedApprovals])
 
   const allEntries = useMemo(() => [...feeds.action, ...feeds.updates, ...feeds.history], [feeds])
+  const decisionCount = feeds.action.filter(needsHumanDecision).length
+  const alertCount = feeds.action.length - decisionCount
   const selected = selectEntry(allEntries, selectedKey)
   const view: InboxV2View = selected ? selected.historical ? "history" : selected.actionable ? "action" : "updates" : chosenView ?? (feeds.action.length ? "action" : "updates")
-  const visible = useMemo(() => filterInboxEntries(feeds[view], filters, lookup), [feeds, filters, view, lookup])
+  const currentEntries = useMemo(
+    () => attention ? [...feeds.action, ...feeds.updates].filter((entry) => matchesInboxAttention(entry, attention)) : feeds[view],
+    [attention, feeds, view],
+  )
+  const visible = useMemo(() => filterInboxEntries(currentEntries, filters, lookup), [currentEntries, filters, lookup])
   useEffect(() => {
     setView(requestedView === "action" || requestedView === "updates" || requestedView === "history" ? requestedView : null)
   }, [requestedView])
@@ -213,6 +221,13 @@ export function InboxV2() {
     setConfirmation(null)
     router.push(`/inbox?view=${next}`)
   }
+  function closeEntry() {
+    setSelectedKey(null)
+    setConfirmation(null)
+    const query = new URLSearchParams(params?.toString())
+    query.delete("item")
+    router.push(query.size ? `/inbox?${query.toString()}` : "/inbox")
+  }
   // A deep link can name a row that is gone, belongs to another workspace, or
   // simply has not arrived yet — `active` and `resolved` are two independent
   // walks. Distinguish "still loading" from "not here", and never substitute
@@ -223,7 +238,11 @@ export function InboxV2() {
     if (chosenView === null && feedsSettled) setView(feeds.action.length ? "action" : "updates")
   }, [chosenView, feedsSettled, feeds.action.length])
   const selectionMissing = Boolean(selectedKey) && !selected && feedsSettled
-  const selectedInboxID = selected?.source === "inbox" ? selected.inboxItem?.id : null
+  // Preview the first visible row on desktop without opening it. `openEntry`
+  // alone marks an unread inbox row as read, so arriving at Inbox cannot do it.
+  // Explicit ?item= links never fall back to a different row.
+  const displayed = selectedKey ? selected : visible[0] ?? null
+  const selectedInboxID = displayed?.source === "inbox" ? displayed.inboxItem?.id : null
   const detailedInbox = useInboxItem(workspaceId, selectedInboxID)
   // A staged hire is one decision in two places: this waitpoint and a row in
   // the approvals queue that carries `inbox_item_id`. The queue row is the one
@@ -345,7 +364,7 @@ export function InboxV2() {
       <SubBar
         icon={Inbox}
         title="Inbox"
-        description={sourceState.loading && allEntries.length === 0 ? "Loading inbox…" : `${feeds.action.length} need you · ${feeds.updates.length} updates · ${feeds.history.length} in history`}
+        description={sourceState.loading && allEntries.length === 0 ? "Loading inbox…" : `${decisionCount} to decide${alertCount ? ` · ${alertCount} alerts` : ""} · ${feeds.updates.length} updates · ${feeds.history.length} in history`}
         meta={<StatusPill tone={live ? "success" : "muted"} label={live ? "Live" : "Not live"} className="ml-1 hidden sm:inline-flex" />}
         ariaLabel="Inbox"
 
@@ -372,8 +391,8 @@ export function InboxV2() {
           "shrink-0 overflow-hidden border-r border-border/60 bg-card",
           // Full width on a phone — a fixed 340px column left a dead strip
           // beside it, because the reading pane is hidden until a row is
-          // opened. Desktop keeps the fixed column.
-          collapsed ? "w-full lg:w-9" : "w-full lg:w-[280px]",
+          // opened. Desktop gives long request titles more room.
+          collapsed ? "w-full lg:w-9" : "w-full lg:w-[350px] xl:w-[374px]",
           selectedKey && "hidden lg:block",
         )}
       >
@@ -387,13 +406,15 @@ export function InboxV2() {
             view={view}
             onView={showView}
             viewCounts={{ action: feeds.action.length, updates: feeds.updates.length, history: feeds.history.length }}
-            entries={feeds[view]}
+            entries={currentEntries}
             visible={visible}
+            attention={attention}
+            onClearAttention={() => router.push("/inbox")}
             filters={filters}
-            onFilters={setFilters}
-            selectedKey={selected?.key ?? null}
+            onFilters={(next) => { setFilters(next); if (selectedKey) closeEntry() }}
+            selectedKey={displayed?.key ?? null}
             onOpen={openEntry}
-            onMarkAllRead={view === "updates" && active.unreadCount > 0 ? markVisibleRead : undefined}
+            onMarkAllRead={!attention && view === "updates" && active.unreadCount > 0 ? markVisibleRead : undefined}
             onToggleCollapse={() => setCollapsed(true)}
             lookup={lookup}
           />
@@ -403,12 +424,24 @@ export function InboxV2() {
       <main ref={detailRef} tabIndex={-1} aria-label="Inbox detail" className={cn("min-w-0 flex-1 overflow-y-auto", !selectedKey && "hidden lg:block")}>
         {selectedKey && !confirmation && (
           <div className="sticky top-0 z-10 border-b border-border/60 bg-background px-3 py-2">
-            <Button variant="ghost" size="sm" onClick={() => showView(view)}>← Back to inbox</Button>
+            <Button variant="ghost" size="sm" onClick={closeEntry}>← Back to inbox</Button>
           </div>
         )}
         <InboxV2Detail
-          key={selected?.key || "overview"}
-          entry={selected}
+          key={displayed?.key || "overview"}
+          entry={displayed}
+          triage={attention && !displayed ? {
+            action: feeds.action,
+            updates: feeds.updates,
+            history: feeds.history,
+            onOpen: openEntry,
+            onCrew: (crewId) => setFilters({ ...filters, crew: crewId }),
+            focus: {
+              label: ATTENTION_LABELS[attention],
+              entries: visible,
+              onClear: () => router.push("/inbox"),
+            },
+          } : undefined}
           selectionMissing={selectionMissing}
           role={(role as WorkspaceRole | null) ?? null}
           detailedInboxItem={detailedInbox.data}
@@ -418,7 +451,7 @@ export function InboxV2() {
             count: feeds.action.filter((entry) => entry.key !== confirmation.entry.key).length,
             onOpen: () => { setView("action"); openEntry(next) },
           } : undefined}
-          onClearConfirmation={() => showView(view)}
+          onClearConfirmation={closeEntry}
           onViewReceipt={(entry) => { setConfirmation(null); setView("history"); setSelectedKey(entry.key) }}
           onInboxResolve={async (item, action) => inboxResolve(inboxEntry(item), action)}
           onInboxArchive={async (item) => inboxArchive(inboxEntry(item))}
@@ -432,23 +465,6 @@ export function InboxV2() {
           onArchiveGroup={archiveGroup}
           lookup={lookup}
           onDenyHire={hireTwin ? denyHire : undefined}
-          triage={{
-            incomplete: sourceState.degraded,
-            loading: sourceState.loading && allEntries.length === 0,
-            action: feeds.action,
-            updates: feeds.updates,
-            history: feeds.history,
-            onOpen: (entry) => {
-              const holds = feeds.history.includes(entry) ? "history" : feeds.updates.includes(entry) ? "updates" : "action"
-              setView(holds)
-              openEntry(entry)
-            },
-            onCrew: (crewId) => {
-              const target = feeds.action.some((entry) => entryIdentity(entry, lookup).crew?.id === crewId) ? "action" : "updates"
-              showView(target)
-              setFilters({ ...EMPTY_INBOX_V2_FILTERS, crew: crewId })
-            },
-          }}
         />
       </main>
     </div>

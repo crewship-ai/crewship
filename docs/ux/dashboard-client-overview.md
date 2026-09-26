@@ -37,6 +37,8 @@ holds: attention strip → Results & review beside Routines running now / Up
 next / Your crews → Agent run summary and Run volume by crew, with the Pages
 strip → collapsed System details. The phone layer (#2484, #2487) stacks the
 same zones in one column. Everything in the paragraphs above about data
-sources, error retention and motion still describes HEAD; the tile *shapes*
-(cards, sparklines per crew) do not — see the rows-not-cards note in #2540.
-
+sources, error retention and motion described the September 15 release; the tile
+*shapes* (cards, sparklines per crew) do not — see the rows-not-cards note in
+#2540. The September 25 update in #2697 places active work in Results & review,
+removes System details and the dashboard header counts/status/actions, and
+keeps the title beside the sticky reporting-window selector.

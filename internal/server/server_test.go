@@ -239,6 +239,27 @@ func TestMetrics(t *testing.T) {
 	}
 }
 
+func TestMetricsExposesRecentHostReading(t *testing.T) {
+	s := newTestServer()
+	s.hostResourceLatest.Store(&hostResourceSample{
+		SampledAt:  time.Unix(1000, 0).UTC(),
+		CPUPercent: 25, MemoryPercent: 50, MemoryUsedMB: 512, MemoryTotalMB: 1024,
+	})
+	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	req.RemoteAddr = "127.0.0.1:55555"
+	w := httptest.NewRecorder()
+	s.mux.ServeHTTP(w, req)
+	for _, want := range []string{
+		"crewshipd_host_cpu_utilization_ratio{hostname=", " 0.25\n",
+		"crewshipd_host_memory_used_bytes{hostname=", " 5.36870912e+08\n",
+		"crewshipd_host_sample_timestamp_seconds{hostname=", " 1000\n",
+	} {
+		if !strings.Contains(w.Body.String(), want) {
+			t.Errorf("/metrics missing %q", want)
+		}
+	}
+}
+
 // TestMetrics_RemoteWithoutTokenIs404 is the regression guard for F-003 —
 // pre-fix any client could scrape; now non-loopback callers without
 // CREWSHIP_METRICS_TOKEN get 404 (404 not 401 to avoid confirming the

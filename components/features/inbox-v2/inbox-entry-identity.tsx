@@ -1,7 +1,7 @@
 "use client"
 
 import { resolveRoutineIcon, resolveRoutineColor } from "@/lib/routine-identity"
-import { Bell, CircleDot } from "lucide-react"
+import { Bell, CalendarClock, CircleDot } from "lucide-react"
 import { AgentAvatar } from "@/components/ui/agent-avatar"
 import { CrewIcon } from "@/components/ui/crew-icon"
 import { ActorAvatar } from "@/components/features/inbox/inbox-actor"
@@ -27,6 +27,10 @@ export function entryIdentity(entry: InboxV2Entry, lookup: InboxLookup) {
 export function EntryAvatar({ entry, lookup, compact = false }: { entry: InboxV2Entry; lookup: InboxLookup; compact?: boolean }) {
   const box = compact ? "h-5 w-5 shrink-0 rounded [&_svg]:h-3 [&_svg]:w-3" : "h-8 w-8 shrink-0 rounded-lg"
   const { agent, crew, actor, routine } = entryIdentity(entry, lookup)
+  if (entry.inboxItem?.kind === "schedule_missed" || entry.inboxItem?.kind === "schedule_circuit_breaker_tripped") {
+    const paused = entry.inboxItem.kind === "schedule_circuit_breaker_tripped"
+    return <span className={`${box} flex items-center justify-center border ${paused ? "border-destructive/25 bg-destructive/[0.07] text-destructive" : "border-primary/25 bg-primary/[0.07] text-primary-hover"}`}><CalendarClock className={compact ? "h-3 w-3" : "h-4 w-4"} aria-hidden /></span>
+  }
   if (agent) return <AgentAvatar seed={agent.avatar_seed || agent.slug} style={agent.avatar_style} agentId={agent.id} avatarUrl={agent.avatar_url} alt="" className={`${box} bg-muted`} />
   if (routine) return <CrewIcon icon={resolveRoutineIcon(routine)} color={resolveRoutineColor(routine)} size="sm" className={box} />
   if (crew && entry.inboxItem?.payload?.mission_id) return <CrewIcon icon={crew.icon || "users"} color={crew.color} size="sm" className={box} />

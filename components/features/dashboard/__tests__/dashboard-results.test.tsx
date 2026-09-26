@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest"
-import { render, screen, cleanup } from "@testing-library/react"
+import { render, screen, cleanup, fireEvent, within } from "@testing-library/react"
 import { afterEach } from "vitest"
 import { DashboardResults } from "../dashboard-results"
 import { RunningNow } from "../dashboard-overview"
@@ -10,11 +10,11 @@ import type { PipelineRun } from "@/hooks/use-pipeline-runs"
 
 vi.mock("@/components/ui/agent-avatar", () => ({ AgentAvatar: ({ alt }: { alt: string }) => <span>{alt}</span> }))
 afterEach(cleanup)
-const base = { review: [], completed: [], runs: [], agents: [], crews: [], workspaceId: "ws", loading: false, error: false, routineError: null, routineLoading: false, onRetry: vi.fn() }
+const base = { review: [], inProgress: [], completed: [], activeAgentRuns: [], activeRoutineRuns: [], recentRoutineRuns: [], agents: [], crews: [], workspaceId: "ws", loading: false, error: false, routineError: null, routineLoading: false, onRetry: vi.fn() }
 
 describe("client dashboard results", () => {
   it("opens the exact review issue and excludes failed routine outputs", () => {
-    render(<DashboardResults {...base} review={[{ id: "1", identifier: "ENG-6", title: "Review design", status: "REVIEW", updated_at: new Date().toISOString() } as Mission]} runs={[{ id: "failed", status: "failed", pipeline_name: "Broken routine" } as PipelineRun, { id: "ok", status: "completed", pipeline_slug: "digest", pipeline_name: "Workspace digest", ended_at: new Date().toISOString() } as PipelineRun]} />)
+    render(<DashboardResults {...base} review={[{ id: "1", identifier: "ENG-6", title: "Review design", status: "REVIEW", updated_at: new Date().toISOString() } as Mission]} recentRoutineRuns={[{ id: "failed", status: "failed", pipeline_name: "Broken routine" } as PipelineRun, { id: "ok", status: "completed", pipeline_slug: "digest", pipeline_name: "Workspace digest", ended_at: new Date().toISOString() } as PipelineRun]} />)
     expect(screen.getByRole("link", { name: /Review design/ }).getAttribute("href")).toBe("/issues/ENG-6")
     expect(screen.getByRole("link", { name: /Workspace digest/ }).getAttribute("href")).toBe("/activity?run=ok&pipeline=digest")
     expect(screen.queryByText("Broken routine")).toBeNull()
@@ -47,5 +47,17 @@ describe("client dashboard results", () => {
     render(<RunningNow agents={[]} crews={[]} runs={[]} error="offline" />)
     expect(screen.queryByText("No routines are running right now.")).toBeNull()
     expect(screen.getByText(/Could not refresh routine activity/)).toBeTruthy()
+  })
+  it("keeps a running execution distinct from its in-progress issue", () => {
+    const issue = { id: "issue-1", identifier: "ENG-1", title: "Prepare release", status: "IN_PROGRESS", updated_at: new Date().toISOString() } as Mission
+    render(<DashboardResults {...base} inProgress={[issue]} activeAgentRuns={[{
+      id: "run-1", kind: "agent", status: "RUNNING", mission_id: "issue-1",
+      mission_identifier: "ENG-1", agent_id: "agent-1", agent_name: "Builder",
+      created_at: new Date().toISOString(),
+    }]} />)
+    expect(within(screen.getByRole("region", { name: "Running now" })).getByText("Prepare release")).toBeTruthy()
+    expect(within(screen.getByRole("region", { name: "In progress" })).getByText("Prepare release")).toBeTruthy()
+    fireEvent.click(screen.getByRole("button", { name: /^Running/ }))
+    expect(screen.queryByRole("region", { name: "In progress" })).toBeNull()
   })
 })

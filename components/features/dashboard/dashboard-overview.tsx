@@ -7,16 +7,13 @@ import {
   AlertTriangle,
   ArrowRight,
   Bot,
-  Brain,
   CalendarClock,
   CheckCircle2,
   ChevronRight,
   Clock3,
   Gauge,
   HelpCircle,
-  KeyRound,
   Play,
-  ServerCog,
   ShieldAlert,
   TimerReset,
   Wrench,
@@ -29,21 +26,20 @@ import type {
   CrewServiceSummary,
   CrewSummary,
   DashboardWindow,
-  MemoryHealthResponse,
   RunInsightsResponse,
   RuntimeCapacityResponse,
 } from "@/app/(dashboard)/dashboard-types"
 import type { InboxItem } from "@/hooks/use-inbox"
+import { isBlockingInboxItem } from "@/components/features/inbox-v2/inbox-v2-derive"
 import type { PipelineRun } from "@/hooks/use-pipeline-runs"
 import type { PipelineSchedule } from "@/hooks/use-pipeline-schedules"
 import type { Mission } from "@/lib/types/mission"
 import { AnimatedNumber } from "@/components/ui/animated-number"
 import { DashboardCard } from "@/components/features/dashboard/dashboard-card"
-import { Sparkline } from "@/components/ui/sparkline"
 import { InlineEmpty } from "@/components/ui/inline-empty"
 import { entityHref } from "@/lib/entity-links"
 import { cn } from "@/lib/utils"
-import { formatDuration, formatRelativeTime } from "@/lib/time"
+import { formatDuration } from "@/lib/time"
 
 export interface AttentionItem {
   id: string
@@ -186,8 +182,8 @@ export function capacitySignal(
 const ATTENTION_ACTION: Record<string, string> = {
   approvals: "Review",
   failures: "Inspect",
+  reviews: "Review",
   capacity: "Details",
-  credentials: "Install",
   schedules: "Review",
   drafts: "Publish",
 }
@@ -200,9 +196,8 @@ const ATTENTION_VISIBLE = 3
  *
  * The badge always showed `items.length`, so the count was never wrong — what
  * was wrong is that the items past the third had nowhere to go. The order is
- * fixed (approvals, failures, capacity, credentials, schedules), so on a
- * workspace with the first three a credential gap could never render, and
- * "Open Inbox" does not cover credential gaps or capacity holds.
+ * fixed (approvals, failures, reviews, capacity, schedules), so the later
+ * operational alerts still need named links when the first cards are full.
  *
  * Returned rather than dropped so the strip can name them and keep their
  * links.
@@ -301,10 +296,7 @@ export function AttentionStrip({
         </div>
       )}
 
-      {/* Named, not just counted. The order is fixed, so on a busy workspace
-          the items past the third are always the same ones — and neither a
-          credential gap nor a capacity hold is reachable through the
-          "Open Inbox" link above. */}
+      {/* Later alerts stay named and linked even when the first cards fill. */}
       {state === "items" && !inboxKnown && (
         <div className="border-t border-border/60 px-4 py-2 text-label text-muted-foreground">
           {inboxError
@@ -447,15 +439,25 @@ export function UpNext({ schedules }: { schedules: PipelineSchedule[] }) {
     return schedules
       .filter((schedule) => schedule.enabled && schedule.next_run_at && new Date(schedule.next_run_at).getTime() > now)
       .sort((a, b) => new Date(a.next_run_at!).getTime() - new Date(b.next_run_at!).getTime())
-      .slice(0, 5)
+      .slice(0, 4)
   }, [schedules])
+  const scheduleTime = (iso: string) => {
+    const date = new Date(iso)
+    const today = new Date()
+    const tomorrow = new Date(today)
+    tomorrow.setDate(today.getDate() + 1)
+    const day = date.toDateString() === today.toDateString() ? "Today"
+      : date.toDateString() === tomorrow.toDateString() ? "Tomorrow"
+        : date.toLocaleDateString(undefined, { month: "short", day: "numeric" })
+    return `${day} · ${date.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}`
+  }
 
   return (
     <DashboardCard
       title="Up next"
       icon={CalendarClock}
-      hint={upcoming.length > 0 ? `${upcoming.length} scheduled` : "none queued"}
-      action={<Link href="/routines" className="text-primary-hover hover:underline">Routines →</Link>}
+      hint={upcoming.length > 0 ? `${upcoming.length} upcoming` : "none queued"}
+      action={<Link href="/routines?tab=calendar" className="text-primary-hover hover:underline">Calendar →</Link>}
       className="h-full"
     >
       {upcoming.length === 0 ? (
@@ -465,7 +467,7 @@ export function UpNext({ schedules }: { schedules: PipelineSchedule[] }) {
           {upcoming.map((schedule) => (
             <MotionLink key={schedule.id} href={`/routines?routine=${encodeURIComponent(schedule.target_pipeline_slug || "")}`}>
               <div className="group flex items-center gap-3 rounded-md border-b border-border/50 px-1 py-2 last:border-0 hover:bg-foreground/[0.025]">
-                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-purple/20 bg-purple/10 text-purple-hover">
+                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-primary/25 bg-primary/[0.07] text-primary-hover">
                   <CalendarClock className="h-3.5 w-3.5" />
                 </span>
                 <span className="min-w-0 flex-1">
@@ -475,7 +477,7 @@ export function UpNext({ schedules }: { schedules: PipelineSchedule[] }) {
                   <span className="block truncate text-label text-muted-foreground">{schedule.name}</span>
                 </span>
                 <span className="shrink-0 font-mono text-label tabular-nums text-muted-foreground">
-                  {formatRelativeTime(schedule.next_run_at!)}
+                  {scheduleTime(schedule.next_run_at!)}
                 </span>
                 <span
                   title={schedule.last_status ? `last run ${schedule.last_status}` : "never ran"}
@@ -495,7 +497,7 @@ export function UpNext({ schedules }: { schedules: PipelineSchedule[] }) {
 export function scheduleDotClass(lastStatus: string | undefined): string {
   if (!lastStatus) return "bg-muted-foreground/50"
   const s = lastStatus.toLowerCase()
-  if (s === "completed" || s === "succeeded" || s === "success" || s === "ok") return "bg-success"
+  if (s === "completed" || s === "succeeded" || s === "success" || s === "ok") return "bg-muted-foreground/50"
   if (s === "failed" || s === "error" || s === "timeout") return "bg-destructive"
   if (s === "running" || s === "queued") return "bg-primary"
   return "bg-warn"
@@ -517,14 +519,11 @@ export interface OutcomeKpiData {
 export function OutcomeKpis({
   data,
   window,
-  runSeries = [],
   spendUsd = null,
   spendPerRun = null,
 }: {
   data: OutcomeKpiData
   window: DashboardWindow
-  /** Runs per bucket across all crews — the Completed tile's sparkline. */
-  runSeries?: number[]
   /** Metered spend for the window; null when paymaster answered with no
    *  ledger rows; undefined while pending or after a failed fetch. */
   spendUsd?: number | null | undefined
@@ -538,7 +537,6 @@ export function OutcomeKpis({
       tone: "text-success bg-success/10 border-success/20",
       value: <MetricNumber value={data.completed} />,
       detail: `successful runs · ${window}`,
-      series: runSeries,
     },
     {
       label: "Success",
@@ -585,30 +583,28 @@ export function OutcomeKpis({
     <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
       {cards.map((card, index) => {
         const Icon = card.icon
-        const series = "series" in card ? card.series : undefined
         return (
           <motion.div
             key={card.label}
             whileHover={reduce ? undefined : { y: -2 }}
             transition={{ type: "spring", stiffness: 420, damping: 32 }}
-            className="group flex items-center gap-3 rounded-xl border border-border/60 bg-card px-3 py-2.5 transition-colors hover:border-border"
+            className="group flex min-h-20 items-center gap-3 rounded-xl border border-border/60 bg-card px-3 py-3 transition-colors hover:border-border"
           >
             <motion.span
               initial={reduce ? false : { opacity: 0, rotate: -12, scale: 0.82 }}
               animate={{ opacity: 1, rotate: 0, scale: 1 }}
               transition={{ delay: reduce ? 0 : index * 0.06 + 0.18, type: "spring", stiffness: 360, damping: 25 }}
-              className={cn("flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border", card.tone)}
+              className={cn("flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border", card.tone)}
             >
-              <Icon className="h-3.5 w-3.5" />
+              <Icon className="h-5 w-5" />
             </motion.span>
             <div className="min-w-0 flex-1">
-              <div className="flex items-baseline gap-2">
+              <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
                 <span className="text-[20px] font-semibold leading-none tabular-nums text-foreground">{card.value}</span>
-                <span className="truncate text-micro font-semibold uppercase tracking-wider text-muted-foreground">{card.label}</span>
+                <span className="text-micro font-semibold uppercase tracking-wider text-muted-foreground">{card.label}</span>
               </div>
-              <div className="mt-0.5 truncate text-label text-muted-foreground">{card.detail}</div>
+              <div className="mt-1 line-clamp-2 text-label leading-snug text-muted-foreground">{card.detail}</div>
             </div>
-            {series && series.length > 1 && <Sparkline values={series} color="#1E7BFE" width={64} height={20} className="shrink-0 opacity-80" />}
           </motion.div>
         )
       })}
@@ -721,101 +717,6 @@ export function RecentWork({ missions }: { missions: Mission[] }) {
   )
 }
 
-export function SystemSignals({
-  capacity,
-  memory,
-  credentialGapCount,
-  heldCrews,
-  services,
-  realtimeStatus,
-}: {
-  capacity: RuntimeCapacityResponse | null
-  memory: MemoryHealthResponse | null
-  credentialGapCount: number
-  heldCrews: NonNullable<RuntimeCapacityResponse["held"]>
-  services: { running: number; total: number; checked: number; unchecked: number }
-  realtimeStatus?: string
-}) {
-  const cap = capacitySignal(capacity, heldCrews)
-  const rows = [
-    {
-      label: "Runtime capacity",
-      value: cap.value,
-      href: "/settings",
-      icon: ServerCog,
-      tone: cap.tone,
-    },
-    {
-      label: "Memory health",
-      value: memory ? `${Math.round(memory.overall)}` : "Unavailable",
-      href: "/crews",
-      icon: Brain,
-      tone: memory == null ? "text-muted-foreground" : memory.overall >= 80 ? "text-success" : memory.overall >= 60 ? "text-warn" : "text-destructive",
-    },
-    {
-      label: "Credentials",
-      value: credentialGapCount > 0 ? `${credentialGapCount} tool gap${credentialGapCount === 1 ? "" : "s"}` : "Ready",
-      href: "/credentials",
-      icon: KeyRound,
-      tone: credentialGapCount > 0 ? "text-warn" : "text-success",
-    },
-    {
-      label: "Services",
-      // `total` counts only the crews whose /services call answered, so an
-      // all-green "6/6 running" could be hiding two crews nobody reached.
-      // FleetHealth already renders those per-row as "—"; say so here too
-      // rather than paint success over an unknown.
-      value:
-        services.checked === 0
-          ? "Unavailable"
-          : services.unchecked > 0
-            ? `${services.running}/${services.total} running · ${services.unchecked} unchecked`
-            : `${services.running}/${services.total} running`,
-      href: "/crews",
-      icon: ServerCog,
-      tone:
-        services.checked === 0
-          ? "text-muted-foreground"
-          : services.unchecked > 0
-            ? "text-warn"
-            : services.running === services.total
-              ? "text-success"
-              : "text-warn",
-    },
-  ]
-
-  if (realtimeStatus) {
-    rows.push({
-      label: "Realtime",
-      value: realtimeStatus === "connected" ? "connected" : realtimeStatus,
-      href: "/activity",
-      icon: Gauge,
-      tone: realtimeStatus === "connected" ? "text-success" : realtimeStatus === "connecting" ? "text-warn" : "text-destructive",
-    })
-  }
-
-  return (
-    <DashboardCard title="System" icon={Gauge} hint="live checks" className="h-full">
-      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-        {rows.map((row) => {
-          const Icon = row.icon
-          return (
-            <MotionLink key={row.label} href={row.href}>
-              <div className="group flex items-center gap-2.5 rounded-lg border border-border/60 px-3 py-2 transition-colors hover:border-border hover:bg-foreground/[0.025]">
-                <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                <span className="min-w-0 flex-1 truncate text-label text-foreground/85">{row.label}</span>
-                <span className={cn("shrink-0 truncate text-label font-medium", row.tone)}>{row.value}</span>
-              </div>
-            </MotionLink>
-          )
-        })}
-      </div>
-    </DashboardCard>
-  )
-}
-
-
-
 function EmptyState({ icon: Icon, title, detail }: { icon: LucideIcon; title: string; detail: string }) {
   return (
     <div className="flex min-h-[150px] flex-col items-center justify-center gap-2 px-4 text-center">
@@ -831,28 +732,28 @@ function EmptyState({ icon: Icon, title, detail }: { icon: LucideIcon; title: st
 export function buildAttentionItems({
   inbox,
   heldCrews,
-  credentialGapCount,
+  reviewCount = 0,
   activeByKind,
+  decisionCount,
 }: {
   inbox: InboxItem[]
   heldCrews: NonNullable<RuntimeCapacityResponse["held"]>
-  credentialGapCount: number
+  reviewCount?: number
   /** Server-computed exact counts of visible not-resolved items per kind.
    *  When present the labels count from it — inbox rows are windowed at 100
    *  and the headline silently plateaued there (#2187). The windowed items
    *  still supply the single-item deep link below. */
   activeByKind?: Record<string, number>
+  decisionCount?: number
 }): AttentionItem[] {
   const items: AttentionItem[] = []
-  const approvals = inbox.filter((item) => item.kind === "waitpoint" || item.kind === "escalation")
+  const decisions = inbox.filter(isBlockingInboxItem)
   const failures = inbox.filter((item) => item.kind === "failed_run" || item.kind === "schedule_circuit_breaker_tripped")
   const scheduleProblems = inbox.filter((item) => item.kind === "schedule_missed")
   const held = heldCrews.length
 
   // Server aggregate wins when the server sent one: exact past any window.
-  const approvalsCount = activeByKind
-    ? (activeByKind.waitpoint ?? 0) + (activeByKind.escalation ?? 0)
-    : approvals.length
+  const decisionsTotal = decisionCount ?? decisions.length
   const failedRunCount = activeByKind
     ? (activeByKind.failed_run ?? 0)
     : failures.filter((item) => item.kind === "failed_run").length
@@ -860,26 +761,13 @@ export function buildAttentionItems({
     ? (activeByKind.schedule_circuit_breaker_tripped ?? 0)
     : failures.filter((item) => item.kind === "schedule_circuit_breaker_tripped").length
   const failuresCount = failedRunCount + circuitBreakerCount
-  // Inbox ?kind= accepts one kind. Open the unfiltered list when both kinds
-  // contribute, so the link never hides part of the displayed total.
-  const failureKind = failedRunCount > 0 && circuitBreakerCount > 0
-    ? undefined
-    : failedRunCount > 0 ? "failed_run" : "schedule_circuit_breaker_tripped"
   const scheduleCount = activeByKind ? (activeByKind.schedule_missed ?? 0) : scheduleProblems.length
 
-  // Deep-link the single item only when the EXACT total is one. With the
-  // server aggregate the windowed array can hold exactly one approval while
-  // more exist past the window — linking that one would send the operator to
-  // a single decision instead of the list that shows the rest (#2692 review).
-  const singleApprovalHref = approvalsCount === 1 && approvals.length >= 1
-    ? approvals[0].id
-    : undefined
-
-  if (approvalsCount > 0) items.push({ id: "approvals", label: `${approvalsCount} approval${approvalsCount === 1 ? "" : "s"} waiting`, detail: "Review pending decisions", href: entityHref({ kind: "inbox", itemId: singleApprovalHref }), tone: "warn", icon: Clock3 })
-  if (failuresCount > 0) items.push({ id: "failures", label: circuitBreakerCount > 0 ? `${failuresCount} run alert${failuresCount === 1 ? "" : "s"}` : `${failuresCount} failed run${failuresCount === 1 ? "" : "s"}`, detail: "Investigate and retry", href: entityHref({ kind: "inbox", itemKind: failureKind }), tone: "danger", icon: XCircle })
+  if (decisionsTotal > 0) items.push({ id: "approvals", label: `${decisionsTotal} decision${decisionsTotal === 1 ? "" : "s"} waiting`, detail: "Your input is needed", href: entityHref({ kind: "inbox", attention: "approvals" }), tone: "warn", icon: Clock3 })
+  if (failuresCount > 0) items.push({ id: "failures", label: circuitBreakerCount > 0 ? `${failuresCount} run alert${failuresCount === 1 ? "" : "s"}` : `${failuresCount} failed run${failuresCount === 1 ? "" : "s"}`, detail: "Investigate and retry", href: entityHref({ kind: "inbox", attention: "run-alerts" }), tone: "danger", icon: XCircle })
+  if (reviewCount > 0) items.push({ id: "reviews", label: `${reviewCount >= 12 ? "12+" : reviewCount} issue${reviewCount === 1 ? "" : "s"} for review`, detail: "Check agent work and decide", href: "/issues", tone: "blue", icon: CheckCircle2 })
   if (held > 0) items.push({ id: "capacity", label: `${held} crew${held === 1 ? "" : "s"} waiting for capacity`, detail: heldCrews[0]?.detail || "View host admission details", href: "/settings", tone: "purple", icon: Gauge })
-  if (credentialGapCount > 0) items.push({ id: "credentials", label: `${credentialGapCount} credential tool gap${credentialGapCount === 1 ? "" : "s"}`, detail: "Install missing crew tools", href: "/credentials", tone: "blue", icon: KeyRound })
-  if (scheduleCount > 0) items.push({ id: "schedules", label: `${scheduleCount} schedule alert${scheduleCount === 1 ? "" : "s"}`, detail: "Review missed or disabled routines", href: entityHref({ kind: "inbox" }), tone: "warn", icon: CalendarClock })
+  if (scheduleCount > 0) items.push({ id: "schedules", label: `${scheduleCount} schedule alert${scheduleCount === 1 ? "" : "s"}`, detail: "Review missed routines", href: entityHref({ kind: "inbox", attention: "schedule-alerts" }), tone: "blue", icon: CalendarClock })
   return items
 }
 

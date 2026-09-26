@@ -2,16 +2,13 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
-import { LayoutDashboard, MessageSquare, Plus, Radio } from "lucide-react"
+import { LayoutDashboard, Radio } from "lucide-react"
 
-import { SubBar, SubBarPrimary, SubBarSecondary } from "@/components/layout/sub-bar"
 import { DashboardCard } from "@/components/features/dashboard/dashboard-card"
 import {
   AttentionStrip,
   heldForWorkspace,
   OutcomeKpis,
-  RunningNow,
-  SystemSignals,
   UpNext,
   buildAttentionItems,
   deriveFleetHealth,
@@ -31,15 +28,15 @@ import { useActiveRoutineRuns } from "@/hooks/use-active-routine-runs"
 import { usePipelineSchedules } from "@/hooks/use-pipeline-schedules"
 import { useCredentialReadiness } from "@/hooks/use-credential-readiness"
 import { useInbox } from "@/hooks/use-inbox"
-import { useRealtimeEvent, useRealtimeStatusSafe } from "@/hooks/use-realtime"
+import { useRealtimeEvent } from "@/hooks/use-realtime"
 import {
   useAgentSummaries,
   useCrewServiceSummaries,
   useCrewSpend,
   useCrewSummaries,
   useDashboardResults,
+  useDashboardActiveRuns,
   useInvalidateDashboard,
-  useMemoryHealth,
   useMetricsTimeseries,
   useRunsInsights,
   useRuntimeCapacity,
@@ -51,6 +48,25 @@ import { cn } from "@/lib/utils"
 import { serverFetch } from "@/lib/server-base"
 
 const WINDOW_LABELS: DashboardWindow[] = ["24h", "7d", "30d"]
+
+function DashboardPeriodBar({ value, onChange }: { value: DashboardWindow; onChange: (value: DashboardWindow) => void }) {
+  return (
+    <div className="sticky top-0 z-30 flex min-h-10 items-center justify-between gap-3 border-b border-border/60 bg-card px-3 shadow-sm md:px-5">
+      <div className="flex min-w-0 items-center gap-2">
+        <LayoutDashboard aria-hidden="true" className="h-3.5 w-3.5 shrink-0 text-foreground/70" />
+        <h1 className="truncate text-body font-medium text-foreground">Dashboard</h1>
+      </div>
+      <div className="flex items-center rounded-md border border-border/60 bg-background/50 p-0.5" role="group" aria-label="Dashboard time window">
+        {WINDOW_LABELS.map((item) => (
+          <Button key={item} type="button" variant="ghost" size="xs" aria-pressed={value === item}
+            onClick={() => onChange(item)}
+            className={cn("h-6 min-w-10 px-2 font-sans text-[11px] font-semibold tracking-[0.01em] tabular-nums", value === item && "bg-primary/15 text-primary-hover")}
+          >{item}</Button>
+        ))}
+      </div>
+    </div>
+  )
+}
 
 function runVolumeParams(window: DashboardWindow): TimeseriesParams {
   return {
@@ -92,10 +108,11 @@ export default function DashboardPage() {
   const agentsQ = useAgentSummaries(workspaceId, queryOpts)
   const crewsQ = useCrewSummaries(workspaceId, queryOpts)
   const reviewQ = useDashboardResults(workspaceId, "REVIEW", queryOpts)
+  const inProgressQ = useDashboardResults(workspaceId, "IN_PROGRESS", queryOpts)
   const completedQ = useDashboardResults(workspaceId, "DONE,COMPLETED", queryOpts)
+  const agentRunsQ = useDashboardActiveRuns(workspaceId, queryOpts)
   const insightsQ = useRunsInsights(workspaceId, reportWindow, queryOpts)
   const capacityQ = useRuntimeCapacity(queryOpts)
-  const memoryQ = useMemoryHealth(workspaceId, queryOpts)
   const volumeParams = useMemo(() => runVolumeParams(reportWindow), [reportWindow])
   const volumeQ = useMetricsTimeseries(workspaceId, volumeParams, queryOpts)
   const spendQ = useCrewSpend(workspaceId, reportWindow, queryOpts)
@@ -106,7 +123,6 @@ export default function DashboardPage() {
   const schedules = usePipelineSchedules(workspaceId)
   const readiness = useCredentialReadiness(workspaceId)
   const inbox = useInbox(workspaceId, "active")
-  const realtimeStatus = useRealtimeStatusSafe()
 
   const invalidateDashboard = useInvalidateDashboard(workspaceId)
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined)
@@ -122,6 +138,7 @@ export default function DashboardPage() {
   useRealtimeEvent("run.completed", debouncedRefresh)
   useRealtimeEvent("run.failed", debouncedRefresh)
   useRealtimeEvent("agent.status", debouncedRefresh)
+  useRealtimeEvent("assignment.updated", debouncedRefresh)
   useRealtimeEvent("mission.updated", debouncedRefresh)
   useRealtimeEvent("issue.updated", debouncedRefresh)
   // A6 (#2125): these were emitted server-side and dropped by the realtime
@@ -144,11 +161,6 @@ export default function DashboardPage() {
     return counts
   }, [readiness.gapsByCredential])
 
-  const credentialGapCount = useMemo(
-    () => Array.from(gapsByCrew.values()).reduce((total, count) => total + count, 0),
-    [gapsByCrew],
-  )
-
   // /runtime/capacity is instance-scoped by design, so its holds can belong to
   // another workspace's crews — and this page renders a hold's detail string.
   // Scope to ours, one entry per crew (admission appends one per held START).
@@ -158,8 +170,8 @@ export default function DashboardPage() {
   )
 
   const attentionItems = useMemo(
-    () => buildAttentionItems({ inbox: inbox.items, heldCrews, credentialGapCount, activeByKind: inbox.activeByKind }),
-    [inbox.items, inbox.activeByKind, heldCrews, credentialGapCount],
+    () => buildAttentionItems({ inbox: inbox.items, heldCrews, reviewCount: reviewQ.data?.length ?? 0, activeByKind: inbox.activeByKind, decisionCount: inbox.decisionCount }),
+    [inbox.items, inbox.activeByKind, inbox.decisionCount, heldCrews, reviewQ.data],
   )
 
   const fleet = useMemo(
@@ -187,12 +199,12 @@ export default function DashboardPage() {
     // above already tolerates a missing bucket.series for the same reason.
     if (!volumeQ.data?.series_labels) return []
     return Object.entries(volumeQ.data.series_labels).map(([key, label]) => {
-      const crewIndex = crews.findIndex((crew) => crew.id === key)
+      const crewIndex = crews.findIndex((crew) => crew.id === key || crew.slug === key || crew.name.toLocaleLowerCase() === label.toLocaleLowerCase())
       return {
         key,
         label,
-        // Match the bridge indicators' crew order. Unknown series keep the
-        // neutral fallback instead of borrowing an unrelated crew's colour.
+        // The metrics endpoint labels by crew id. Use the same colour as its
+        // icon; a missing colour still gets the shared palette fallback.
         color: crewColor(crewIndex >= 0 ? crews[crewIndex].color : null, crewIndex >= 0 ? crewIndex : undefined),
       }
     })
@@ -226,114 +238,30 @@ export default function DashboardPage() {
     [spendByCrew, spendQ.isPending, spendQ.isError],
   )
 
-  const runSeries = useMemo(
-    () => runVolumeBuckets.map((bucket) => Object.entries(bucket).reduce((sum, [key, value]) => key === "ts" ? sum : sum + Number(value), 0)),
-    [runVolumeBuckets],
-  )
-
   const fleetCards = useMemo(
     () => deriveFleetBoard({ rows: fleet, agents, spendByCrew, buckets: runVolumeBuckets }),
     [fleet, agents, spendByCrew, runVolumeBuckets],
   )
 
-  const serviceTotals = useMemo(() => {
-    let running = 0
-    let total = 0
-    let unchecked = 0
-    for (const summary of services.byCrew.values()) {
-      // A crew whose /services call failed contributes nothing to the
-      // numerator OR the denominator, so without counting it the row can read
-      // a confident "6/6 running" over a fleet it never reached.
-      if (!summary.checked) {
-        unchecked += 1
-        continue
-      }
-      running += summary.running
-      total += summary.total
-    }
-    return { running, total, checked: services.checked, unchecked }
-  }, [services.byCrew, services.checked])
-
   const loading = workspaceLoading || !onboardingChecked || agentsQ.isPending || crewsQ.isPending
-  const realtimeMeta = (
-    <span
-      className={cn(
-        "hidden items-center gap-1.5 rounded-full border px-2 py-0.5 text-micro font-medium sm:inline-flex",
-        realtimeStatus === "connected"
-          ? "border-success/25 bg-success/10 text-success"
-          : realtimeStatus === "connecting"
-            ? "border-warn/25 bg-warn/10 text-warn"
-            : "border-destructive/25 bg-destructive/10 text-destructive",
-      )}
-    >
-      <Radio className="h-3 w-3" />
-      {realtimeStatus === "connected" ? "Live" : realtimeStatus === "connecting" ? "Connecting" : "Offline"}
-    </span>
-  )
-
-  if (loading) return <DashboardSkeleton crews={crews.length} agents={agents.length} />
+  if (loading) return <DashboardSkeleton crews={crews.length} window={reportWindow} onWindowChange={setReportWindow} />
 
   return (
     <div className="flex min-h-[calc(100dvh-var(--app-header-h)-var(--mobile-tab-bar-h))] flex-col bg-background">
-      <SubBar
-        icon={LayoutDashboard}
-        title="Dashboard"
-        description={`${crews.length} crew${crews.length === 1 ? "" : "s"} · ${agents.length} agent${agents.length === 1 ? "" : "s"}`}
-        meta={realtimeMeta}
-        ariaLabel="Dashboard"
-        actions={
-          <>
-            <div className="hidden items-center rounded-md border border-border/60 bg-background/50 p-0.5 md:flex" role="group" aria-label="Dashboard time window">
-              {WINDOW_LABELS.map((item) => (
-                <Button
-                  key={item}
-                  type="button"
-                  variant="ghost"
-                  size="xs"
-                  aria-pressed={reportWindow === item}
-                  onClick={() => setReportWindow(item)}
-                  className={cn("h-6 min-w-10 px-2 font-mono", reportWindow === item && "bg-primary/15 text-primary-hover")}
-                >
-                  {item}
-                </Button>
-              ))}
-            </div>
-            <SubBarSecondary asChild icon={Plus}>
-              <Link href="/issues?create=1" aria-label="New issue"><span className="hidden sm:inline">New issue</span></Link>
-            </SubBarSecondary>
-            <SubBarPrimary asChild icon={MessageSquare}>
-              <Link href="/chat"><span className="hidden sm:inline">Chat with agent</span><span className="sm:hidden">Chat</span></Link>
-            </SubBarPrimary>
-          </>
-        }
-      />
+      <DashboardPeriodBar value={reportWindow} onChange={setReportWindow} />
 
       <main className="mx-auto flex w-full max-w-[1800px] flex-1 flex-col gap-3 p-4 pb-10 md:p-5">
         <WelcomeChecklist firstAgentId={firstAgentId} />
         {crews.length === 0 && workspaceId && <RecipesEmptyState workspaceId={workspaceId} onInstalled={invalidateDashboard} />}
 
-        <div className="flex items-center justify-between md:hidden">
-          <span className="text-label font-medium text-muted-foreground">Reporting window</span>
-          <div className="flex items-center rounded-md border border-border/60 bg-card p-0.5" role="group" aria-label="Dashboard time window">
-            {WINDOW_LABELS.map((item) => (
-              <Button key={item} type="button" variant="ghost" size="xs" aria-pressed={reportWindow === item} onClick={() => setReportWindow(item)} className={cn("h-6 min-w-10 px-2 font-mono", reportWindow === item && "bg-primary/15 text-primary-hover")}>{item}</Button>
-            ))}
-          </div>
-        </div>
-
-        {/* No hero heading: the sub-bar already says Dashboard · N crews · M
-            agents, and the first thing on the page should be what needs a
-            person (docs/ux/README.md §1), not a sentence about the page. */}
-        <h1 className="sr-only">Your workspace at a glance</h1>
-
+        {/* The first visible content is the work needing a person. */}
         <Appear order={0}><AttentionStrip items={attentionItems} inboxLoading={inbox.loading} inboxError={inbox.error} /></Appear>
 
-        <div className="grid min-w-0 grid-cols-1 gap-3 xl:grid-cols-3">
-          <Appear order={1} className="min-w-0 xl:col-span-2">
-            <DashboardResults key={workspaceId} review={reviewQ.data ?? []} completed={completedQ.data ?? []} runs={activeRuns.recentRuns} agents={agents} crews={crews} workspaceId={workspaceId} loading={reviewQ.isPending || completedQ.isPending} error={reviewQ.isError || completedQ.isError} routineError={activeRuns.error} routineLoading={activeRuns.loading} onRetry={() => { void reviewQ.refetch(); void completedQ.refetch(); activeRuns.refresh() }} />
+        <div className="grid min-w-0 grid-cols-1 gap-3 xl:h-[520px] xl:grid-cols-3">
+          <Appear order={1} className="min-w-0 xl:col-span-2 xl:min-h-0">
+            <DashboardResults key={workspaceId} review={reviewQ.data ?? []} inProgress={inProgressQ.data ?? []} completed={completedQ.data ?? []} activeAgentRuns={agentRunsQ.data ?? []} activeRoutineRuns={activeRuns.runs} recentRoutineRuns={activeRuns.recentDashboardRuns} agents={agents} crews={crews} workspaceId={workspaceId} loading={reviewQ.isPending || inProgressQ.isPending || completedQ.isPending || agentRunsQ.isPending} error={reviewQ.isError || inProgressQ.isError || completedQ.isError || agentRunsQ.isError} routineError={activeRuns.error} routineLoading={activeRuns.loading} onRetry={() => { void reviewQ.refetch(); void inProgressQ.refetch(); void completedQ.refetch(); void agentRunsQ.refetch(); activeRuns.refresh() }} />
           </Appear>
-          <Appear order={2} className="flex min-w-0 flex-col gap-3 [&>div]:h-auto">
-            <RunningNow runs={activeRuns.runs} agents={agents} crews={crews} loading={activeRuns.loading} error={activeRuns.error} />
+          <Appear order={2} className="flex min-w-0 flex-col gap-3 xl:min-h-0 [&>div]:h-auto">
             <UpNext schedules={schedules.schedules} />
             <FleetBoard cards={fleetCards} workspaceId={workspaceId} />
           </Appear>
@@ -349,7 +277,6 @@ export default function DashboardPage() {
           <OutcomeKpis
             data={kpis}
             window={reportWindow}
-            runSeries={runSeries}
             spendUsd={spendTotal}
             spendPerRun={typeof spendTotal === "number" && kpis.successTotal > 0 ? spendTotal / kpis.successTotal : null}
           />
@@ -364,38 +291,33 @@ export default function DashboardPage() {
           <Appear order={2} className="xl:col-span-2"><PagesStrip /></Appear>
         </div>
 
-        <details className="rounded-xl border border-border/60 bg-card">
-          <summary className="cursor-pointer px-3 py-2.5 text-body font-medium text-muted-foreground transition-colors hover:text-foreground">System details <span className="ml-2 text-label font-normal">Capacity, memory and services</span></summary>
-          <div className="border-t border-border/60 p-4"><SystemSignals capacity={capacityQ.data ?? null} heldCrews={heldCrews} memory={memoryQ.data ?? null} credentialGapCount={credentialGapCount} services={serviceTotals} realtimeStatus={realtimeStatus ?? undefined} /></div>
-        </details>
       </main>
     </div>
   )
 }
 
-function DashboardSkeleton({ crews, agents }: { crews: number; agents: number }) {
+function DashboardSkeleton({ crews, window, onWindowChange }: { crews: number; window: DashboardWindow; onWindowChange: (value: DashboardWindow) => void }) {
   return (
     <div className="flex min-h-[calc(100dvh-var(--app-header-h)-var(--mobile-tab-bar-h))] flex-col">
-      <SubBar icon={LayoutDashboard} title="Dashboard" description={crews || agents ? `${crews} crews · ${agents} agents` : "Loading…"} ariaLabel="Dashboard" />
-      {/* Same geometry as the loaded page (results beside a stacked right
-          column of running / up next / crews, then the KPI strip), so
+      <DashboardPeriodBar value={window} onChange={onWindowChange} />
+      {/* Same geometry as the loaded page (results beside the next agenda and
+          crews, then the KPI strip), so
           nothing jumps when the data lands. */}
       <div className="mx-auto flex w-full max-w-[1800px] flex-col gap-3 p-4 md:p-5">
         <Skeleton className="h-[52px] rounded-xl" />
         <Skeleton className="h-[110px] rounded-xl" />
-        <div className="grid grid-cols-1 gap-3 xl:grid-cols-3">
-          <Skeleton className="h-[380px] rounded-xl xl:col-span-2" />
-          <div className="flex flex-col gap-3">
-            <Skeleton className="h-[84px] rounded-xl" />
+        <div className="grid grid-cols-1 gap-3 xl:h-[520px] xl:grid-cols-3">
+          <Skeleton className="h-[380px] rounded-xl xl:col-span-2 xl:h-full" />
+          <div className="flex flex-col gap-3 xl:min-h-0">
             <Skeleton className="h-[84px] rounded-xl" />
             {/* FleetBoard renders nothing for an empty workspace, so its
                 placeholder must not appear either. */}
             {crews > 0 && (
-              <Skeleton className="rounded-xl" style={{ height: 60 + 44 * Math.min(3, crews) }} />
+              <Skeleton className={cn("rounded-xl xl:h-auto xl:flex-1", crews >= 3 ? "h-[192px]" : crews === 2 ? "h-[148px]" : "h-[104px]")} />
             )}
           </div>
         </div>
-        <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">{Array.from({ length: 4 }, (_, index) => <Skeleton key={index} className="h-[58px] rounded-xl" />)}</div>
+        <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">{Array.from({ length: 4 }, (_, index) => <Skeleton key={index} className="h-20 rounded-xl" />)}</div>
         <div className="grid grid-cols-1 gap-3 xl:grid-cols-5"><Skeleton className="h-[220px] rounded-xl xl:col-span-3" /><Skeleton className="h-[220px] rounded-xl xl:col-span-2" /></div>
       </div>
     </div>

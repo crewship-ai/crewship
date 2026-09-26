@@ -47,23 +47,35 @@ function renderExplorer(over: Partial<React.ComponentProps<typeof InboxV2Explore
 describe("inbox v2 explorer", () => {
   it("offers the three views with their counts, like the routines rail", () => {
     renderExplorer()
-    for (const [label, count] of [["Needs action", "3"], ["Updates", "2"], ["History", "7"]]) {
+    for (const [label, count] of [["To handle", "3"], ["Updates", "2"], ["History", "7"]]) {
       const row = screen.getByRole("button", { name: new RegExp(label, "i") })
       expect(within(row).getByText(count)).toBeTruthy()
     }
   })
 
+  it("separates human decisions from actionable schedule alerts", () => {
+    const decision = inboxEntry(item({ id: "decision", kind: "waitpoint", title: "Approve deployment" }))
+    const schedule = inboxEntry(item({ id: "schedule", kind: "schedule_missed", title: "Schedule missed", payload: { schedule_id: "schedule-1" } }))
+    renderExplorer({ entries: [schedule, decision], visible: [schedule, decision] })
+    const decisions = screen.getByText("Decision required")
+    const alerts = screen.getByText("Operational alerts")
+    expect(within(decisions.parentElement!.parentElement!.parentElement!).getByText("Approve deployment")).toBeInTheDocument()
+    expect(within(alerts.parentElement!.parentElement!.parentElement!).getByText("Schedule missed")).toBeInTheDocument()
+  })
+
   it("counts each type facet over the whole feed, not over what is on screen", () => {
     renderExplorer({ visible: [FEED[0]] })
-    fireEvent.click(screen.getByRole("button", { name: /filter/i }))
-    const waitpoint = screen.getByRole("button", { name: /waitpoint/i })
+    fireEvent.click(screen.getByRole("button", { name: /^Filter$/i }))
+    fireEvent.click(screen.getByText("Advanced · source type"))
+    const waitpoint = screen.getByRole("button", { name: /Approval step/i })
     expect(within(waitpoint).getByText("2")).toBeTruthy()
   })
 
   it("asks the parent to narrow when a facet is chosen", () => {
     const { onFilters } = renderExplorer()
-    fireEvent.click(screen.getByRole("button", { name: /filter/i }))
-    fireEvent.click(screen.getByRole("button", { name: /escalation/i }))
+    fireEvent.click(screen.getByRole("button", { name: /^Filter$/i }))
+    fireEvent.click(screen.getByText("Advanced · source type"))
+    fireEvent.click(screen.getByRole("button", { name: /Agent request or notice/i }))
     expect(onFilters).toHaveBeenCalledWith(expect.objectContaining({ type: "escalation" }))
   })
 
@@ -71,15 +83,20 @@ describe("inbox v2 explorer", () => {
     const { onFilters } = renderExplorer({
       filters: { ...EMPTY_INBOX_V2_FILTERS, type: "waitpoint" },
     })
-    const chip = screen.getByText(/waitpoint/i)
+    const chip = screen.getByText(/Approval step/i)
     expect(chip).toBeTruthy()
     fireEvent.click(screen.getByRole("button", { name: /remove filter/i }))
     expect(onFilters).toHaveBeenCalledWith(expect.objectContaining({ type: null }))
   })
 
+  it("explains an empty crew selection as a filter result", () => {
+    renderExplorer({ visible: [], filters: { ...EMPTY_INBOX_V2_FILTERS, crew: "empty-crew" } })
+    expect(screen.getByText("Nothing matches those filters.")).toBeInTheDocument()
+  })
+
   it("never offers a filter the server cannot answer", () => {
     renderExplorer()
-    fireEvent.click(screen.getByRole("button", { name: /filter/i }))
+    fireEvent.click(screen.getByRole("button", { name: /^Filter$/i }))
     expect(screen.queryByText(/all subjects/i)).toBeNull()
     expect(screen.queryByText(/all priorities/i)).toBeNull()
   })

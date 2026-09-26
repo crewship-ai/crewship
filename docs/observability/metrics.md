@@ -28,7 +28,7 @@ an operator alerts on.
 # prometheus.yml
 scrape_configs:
   - job_name: crewshipd
-    scrape_interval: 30s
+    scrape_interval: 15s
     authorization:
       credentials: <CREWSHIP_METRICS_TOKEN>
     static_configs:
@@ -45,8 +45,15 @@ scrape_configs:
 | `crewshipd_memory_sys_bytes` | gauge | Total bytes obtained from the OS |
 | `crewshipd_gc_runs_total` | counter | Total GC runs |
 | `crewshipd_ws_connections` | gauge | Active WebSocket connections |
+| `crewshipd_host_cpu_utilization_ratio` | gauge | Whole-host CPU utilization across all cores, from 0 to 1; includes other processes |
+| `crewshipd_host_memory_used_bytes` | gauge | Whole-host memory used, excluding reclaimable memory |
+| `crewshipd_host_memory_total_bytes` | gauge | Whole-host memory capacity |
+| `crewshipd_host_sample_timestamp_seconds` | gauge | Unix timestamp of the latest host reading; use it to detect stale sampling |
 
 Every series carries a `hostname` label.
+The host series appear after the first successful reading and refresh about
+every 15 seconds. Their history belongs in Prometheus; the sampler does not
+write to SQLite.
 
 ## Domain metrics
 

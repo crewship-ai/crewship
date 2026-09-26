@@ -184,7 +184,7 @@ export function selectEntry(entries: InboxV2Entry[], key: string | null): InboxV
   if (exact) return exact
   if (key.startsWith("request:")) {
     const id = key.slice("request:".length)
-    return entries.find((entry) => entry.key === id || entry.key.endsWith(`:${id}`)) ?? null
+    return entries.find((entry) => entry.key === id || entry.key.endsWith(`:${id}`) || entry.groupedItems?.some((item) => item.id === id)) ?? null
   }
   return null
 }
@@ -246,23 +246,24 @@ export function groupAdvisories(entries: InboxV2Entry[]): InboxV2Entry[] {
  * neither subject nor priority is offered as one.
  */
 export const INBOX_V2_TYPES = [
-  // the seven values of internal/inbox AllKinds, which the inbox_items CHECK
-  // constraint and TestInboxKindsMatchSchema keep honest…
-  { key: "waitpoint", label: "Waitpoint" },
-  { key: "escalation", label: "Escalation" },
+  // Keep this diagnostic facet aligned with internal/inbox.AllKinds.
+  { key: "waitpoint", label: "Approval step" },
+  { key: "escalation", label: "Agent request or notice" },
   { key: "failed_run", label: "Failed run" },
   { key: "message", label: "Message" },
   { key: "memory_consolidation", label: "Memory proposal" },
   { key: "schedule_missed", label: "Missed schedule" },
-  { key: "schedule_circuit_breaker_tripped", label: "Circuit breaker" },
-  // …plus the two other systems this inbox merges, named for what they are
-  // rather than for the endpoint they came from.
+  { key: "schedule_circuit_breaker_tripped", label: "Paused schedule" },
+  { key: "run_needs_human", label: "Run needs input" },
+  { key: "webhook_fire_failed", label: "Webhook failure" },
+  { key: "automation_enqueue_failed", label: "Automation failure" },
+  // These two entries are synthesized from the other Inbox sources.
   { key: "approval", label: "Approval gate" },
-  { key: "mission", label: "Mission signal" },
+  { key: "mission", label: "Issue task" },
 ] as const
 
 export type InboxV2TypeKey = (typeof INBOX_V2_TYPES)[number]["key"]
-export type InboxV2DeadlineKey = "hour" | "today" | "none"
+export type InboxV2DeadlineKey = "hour" | "today" | "none" | "soon"
 
 export interface InboxV2Filters {
   search: string
@@ -297,7 +298,7 @@ export function entryType(entry: InboxV2Entry): InboxV2TypeKey | null {
  * than today answers to neither bucket, which is the truthful answer; it is
  * not silently folded into "today".
  */
-export function deadlineBucket(entry: InboxV2Entry, now = Date.now()): InboxV2DeadlineKey | "later" {
+export function deadlineBucket(entry: InboxV2Entry, now = Date.now()): Exclude<InboxV2DeadlineKey, "soon"> | "later" {
   if (!entry.deadlineAt) return "none"
   const at = Date.parse(entry.deadlineAt)
   if (Number.isNaN(at)) return "none"
@@ -327,13 +328,15 @@ export function matchesSearch(entry: InboxV2Entry, search: string): boolean {
 export function facetCounts(entries: InboxV2Entry[], now = Date.now()) {
   const type = {} as Record<InboxV2TypeKey, number>
   for (const t of INBOX_V2_TYPES) type[t.key] = 0
-  const deadline: Record<InboxV2DeadlineKey, number> = { hour: 0, today: 0, none: 0 }
+  const deadline: Record<InboxV2DeadlineKey, number> = { hour: 0, today: 0, none: 0, soon: 0 }
   let unread = 0
   for (const entry of entries) {
     const t = entryType(entry)
     if (t) type[t] += 1
     const d = deadlineBucket(entry, now)
     if (d !== "later") deadline[d] += 1
+    const dueAt = entry.deadlineAt ? Date.parse(entry.deadlineAt) : NaN
+    if (Number.isFinite(dueAt) && dueAt >= now && dueAt - now <= 86_400_000) deadline.soon += 1
     if (entry.unread) unread += 1
   }
   return { type, deadline, unread, total: entries.length }
@@ -388,7 +391,10 @@ export function filterEntries(
   return entries.filter((entry) => {
     if (filters.unreadOnly && !entry.unread) return false
     if (filters.type && entryType(entry) !== filters.type) return false
-    if (filters.deadline && deadlineBucket(entry, now) !== filters.deadline) return false
+    if (filters.deadline === "soon") {
+      const dueAt = entry.deadlineAt ? Date.parse(entry.deadlineAt) : NaN
+      if (!Number.isFinite(dueAt) || dueAt < now || dueAt - now > 86_400_000) return false
+    } else if (filters.deadline && deadlineBucket(entry, now) !== filters.deadline) return false
     if (filters.crew && entryCrewId(entry) !== filters.crew) return false
     return matchesSearch(entry, filters.search)
   })
@@ -396,14 +402,29 @@ export function filterEntries(
 
 export function sortEntries(entries: InboxV2Entry[]): InboxV2Entry[] {
   return [...entries].sort((a, b) => {
+    const aRank = actionRank(a)
+    const bRank = actionRank(b)
+    if (aRank !== bRank) return aRank - bRank
     if (a.actionable && b.actionable) {
       const ad = a.deadlineAt ? Date.parse(a.deadlineAt) : Number.POSITIVE_INFINITY
       const bd = b.deadlineAt ? Date.parse(b.deadlineAt) : Number.POSITIVE_INFINITY
       if (ad !== bd) return ad - bd
-      return Date.parse(a.createdAt) - Date.parse(b.createdAt)
     }
     return Date.parse(b.createdAt) - Date.parse(a.createdAt)
   })
+}
+
+/** A schedule can be acted on, but it does not block a person or agent. */
+export function needsHumanDecision(entry: InboxV2Entry): boolean {
+  if (!entry.actionable) return false
+  if (entry.source === "inbox") return Boolean(entry.inboxItem && isBlockingInboxItem(entry.inboxItem))
+  return entry.source === "approval" || entry.source === "mission"
+}
+
+function actionRank(entry: InboxV2Entry): number {
+  if (!entry.actionable) return 3
+  if (needsHumanDecision(entry) && entry.deadlineAt) return 0
+  return needsHumanDecision(entry) ? 1 : 2
 }
 
 export function filterAndSortEntries(
@@ -455,8 +476,8 @@ export function entryKindPill(entry: InboxV2Entry): EntryKindPill {
       return { label: "Notice", tone: "muted" }
     }
     case "failed_run": return { label: "Failed run", tone: "danger" }
-    case "schedule_missed": return { label: "Missed run", tone: "warn" }
-    case "schedule_circuit_breaker_tripped": return { label: "Paused schedule", tone: "warn" }
+    case "schedule_missed": return { label: "Missed run", tone: "blue" }
+    case "schedule_circuit_breaker_tripped": return { label: "Paused schedule", tone: "danger" }
     case "memory_consolidation": return { label: "Memory proposal", tone: "purple" }
     // B6's NEEDS_HUMAN card (#2349) and the a4 trigger-failure kinds were
     // written by the server long before the pill knew them, so they read as

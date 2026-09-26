@@ -27,7 +27,7 @@ import { cn } from "@/lib/utils"
 import { entryKindPill, outcomeStatus } from "./inbox-v2-derive"
 import { EntryAvatar, entryIdentity } from "./inbox-entry-identity"
 import { CrewIcon } from "@/components/ui/crew-icon"
-import { InboxTriage } from "./inbox-v2-triage"
+import { InboxFocusOverview, InboxTriage } from "./inbox-v2-triage"
 import { EMPTY_INBOX_LOOKUP, type InboxLookup, type InboxV2Confirmation, type InboxV2Entry } from "./inbox-v2-types"
 
 interface Props {
@@ -62,6 +62,7 @@ interface Props {
     history: InboxV2Entry[]
     onOpen: (entry: InboxV2Entry) => void
     onCrew: (crewName: string) => void
+    focus?: { label: string; entries: InboxV2Entry[]; onClear: () => void }
   }
 }
 
@@ -88,6 +89,7 @@ export function InboxV2Detail(props: Props) {
     // Never blank (README §1, §6): with nothing open the pane carries the
     // triage — what is waiting, by crew, what is running, what was decided.
     if (props.triage) {
+      if (props.triage.focus) return <InboxFocusOverview {...props.triage.focus} lookup={props.lookup ?? EMPTY_INBOX_LOOKUP} onOpen={props.triage.onOpen} />
       return <InboxTriage {...props.triage} lookup={props.lookup ?? EMPTY_INBOX_LOOKUP} />
     }
     return (

@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest"
 
 import { deriveBridge } from "../bridge-strip"
-import { deriveFleetBoard, prioritiseFleet, FLEET_CARD_LIMIT, type FleetCard } from "../fleet-board"
+import { deriveFleetBoard, prioritiseFleet, type FleetCard } from "../fleet-board"
 import { foldRunVolumeSeries, RUN_VOLUME_OTHER_KEY, crewColor, CREW_PALETTE } from "@/app/(dashboard)/dashboard-helpers"
 import { issueBoardCounts } from "../work-snapshot"
 import { sparklinePoints } from "../sparkline"
@@ -106,7 +106,7 @@ describe("small visual helpers", () => {
 
   it("colours a schedule's last-run dot", () => {
     expect(scheduleDotClass(undefined)).toMatch(/muted/)
-    expect(scheduleDotClass("completed")).toMatch(/success/)
+    expect(scheduleDotClass("completed")).toMatch(/muted/)
     expect(scheduleDotClass("failed")).toMatch(/destructive/)
     expect(scheduleDotClass("running")).toMatch(/primary/)
   })
@@ -130,10 +130,6 @@ describe("a fleet of a hundred crews stays readable", () => {
     const staffed = { ...card("staffed", "warn", 0), agents: [agent("x", "staffed", "IDLE")] }
     const ordered = prioritiseFleet([card("aaa-empty", "warn", 0), staffed]).map((c) => c.row.crew.name)
     expect(ordered).toEqual(["staffed", "aaa-empty"])
-  })
-
-  it("keeps the card limit small enough to read", () => {
-    expect(FLEET_CARD_LIMIT).toBeLessThanOrEqual(6)
   })
 
   it("folds the run-volume chart to the busiest crews plus one Other series", () => {
@@ -161,6 +157,7 @@ describe("a fleet of a hundred crews stays readable", () => {
 describe("crewColor", () => {
   it("resolves palette ids and raw hex values", () => {
     expect(crewColor("blue")).toBe(CREW_PALETTE.blue)
+    expect(crewColor("sky")).toBe("rgb(14, 165, 233)")
     expect(crewColor("1E7BFE")).toBe("#1E7BFE")
     expect(crewColor("#ff8800")).toBe("#ff8800")
   })
