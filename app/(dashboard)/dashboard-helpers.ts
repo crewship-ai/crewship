@@ -9,6 +9,9 @@ export const CREW_PALETTE: Record<string, string> = {
   cyan: "rgb(34, 211, 238)",
   lime: "rgb(163, 230, 53)",
   fuchsia: "rgb(232, 121, 249)",
+  // Older crews may still store the Tailwind 'sky' token; its icon reads as
+  // blue, so a chart fallback must not paint the same crew pink or grey.
+  sky: "rgb(14, 165, 233)",
 }
 const CREW_FALLBACK_GREY = "rgb(148, 163, 184)"
 const CREW_PALETTE_ORDER = Object.values(CREW_PALETTE)

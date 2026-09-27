@@ -91,7 +91,7 @@ export function RunVolumeChart({
               key={item.key}
               dataKey={item.key}
               stackId="runs"
-              fill={`var(--color-${item.key})`}
+              fill={item.color}
               radius={index === series.length - 1 ? [3, 3, 0, 0] : 0}
               isAnimationActive={!reduce}
               animationBegin={index * 90}

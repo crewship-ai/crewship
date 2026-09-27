@@ -21,7 +21,7 @@ export type EntityRef =
   | { kind: "page"; slug: string }
   | { kind: "credential"; id: string }
   | { kind: "credentials"; crewSlug?: string }
-  | { kind: "inbox"; itemId?: string; itemKind?: string; agentSlug?: string }
+  | { kind: "inbox"; itemId?: string; itemKind?: string; agentSlug?: string; attention?: "approvals" | "run-alerts" | "schedule-alerts" }
   | { kind: "spend"; crewId?: string }
   | { kind: "integrations"; tab?: "notifications" | "tools"; section?: string; server?: string }
 
@@ -63,7 +63,7 @@ export function entityHref(ref: EntityRef): string {
     case "credentials":
       return withQuery("/credentials", { crew: ref.crewSlug })
     case "inbox":
-      return withQuery("/inbox", { item: ref.itemId, kind: ref.itemKind, agent: ref.agentSlug })
+      return withQuery("/inbox", { item: ref.itemId, kind: ref.itemKind, agent: ref.agentSlug, attention: ref.attention })
     case "spend":
       return withQuery("/paymaster", { crew: ref.crewId })
     case "integrations":

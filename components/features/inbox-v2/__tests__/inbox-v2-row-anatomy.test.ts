@@ -90,8 +90,8 @@ describe("entryKindPill", () => {
   })
 
   it("uses plain words for the schedule kinds", () => {
-    expect(entryKindPill(inboxEntry(item({ kind: "schedule_missed" }))).label).toBe("Missed run")
-    expect(entryKindPill(inboxEntry(item({ kind: "schedule_circuit_breaker_tripped" }))).label).toBe("Paused schedule")
+    expect(entryKindPill(inboxEntry(item({ kind: "schedule_missed" })))).toEqual({ label: "Missed run", tone: "blue" })
+    expect(entryKindPill(inboxEntry(item({ kind: "schedule_circuit_breaker_tripped" })))).toEqual({ label: "Paused schedule", tone: "danger" })
     expect(entryKindPill(inboxEntry(item({ kind: "failed_run" })))).toEqual({ label: "Failed run", tone: "danger" })
   })
 

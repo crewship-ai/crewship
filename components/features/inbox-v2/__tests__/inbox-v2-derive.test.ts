@@ -11,6 +11,7 @@ import {
   isActionableInboxItem,
   isArchivedNotDecided,
   missionEntries,
+  needsHumanDecision,
   selectEntry,
   suppressedApprovalIDs,
   deadlineBucket,
@@ -37,6 +38,12 @@ function item(overrides: Partial<InboxItem> = {}): InboxItem {
 }
 
 describe("inbox v2 classification", () => {
+  it("offers a diagnostic type for every current trigger failure kind", () => {
+    for (const kind of ["run_needs_human", "webhook_fire_failed", "automation_enqueue_failed"] as const) {
+      expect(entryType(inboxEntry(item({ kind })))).toBe(kind)
+    }
+  })
+
   it("does not turn a source-less keeper advisory into a client decision", () => {
     expect(isActionableInboxItem(item({
       kind: "escalation",
@@ -77,6 +84,8 @@ describe("inbox v2 aggregation", () => {
       category: "system.health",
     })
     expect(grouped[0].groupedItems?.map((row) => row.id)).toEqual(["skill-1", "skill-2", "skill-3"])
+    expect(selectEntry(grouped, `request:${grouped[0].key}`)?.key).toBe(grouped[0].key)
+    expect(selectEntry(grouped, "request:skill-2")?.key).toBe(grouped[0].key)
   })
 
   it("projects pending and decided approval queue rows into action and history", () => {
@@ -238,6 +247,7 @@ describe("facets answer to real fields", () => {
     expect(counts.type.approval).toBe(1)
     expect(counts.type.failed_run).toBe(0)
     expect(counts.deadline.hour).toBe(1)
+    expect(counts.deadline.soon).toBe(1)
     expect(counts.deadline.none).toBe(2)
     expect(counts.unread).toBe(2)
     expect(counts.total).toBe(3)
@@ -254,8 +264,20 @@ describe("facets answer to real fields", () => {
 
     expect(keys({ type: "waitpoint" })).toEqual(["inbox:2026-08-30T12:30:00Z", "inbox:read-soon"])
     expect(keys({ deadline: "hour" })).toEqual(["inbox:2026-08-30T12:30:00Z", "inbox:read-soon"])
+    expect(keys({ deadline: "soon" })).toEqual(["inbox:2026-08-30T12:30:00Z", "inbox:read-soon"])
     expect(keys({ type: "waitpoint", unreadOnly: true })).toEqual(["inbox:2026-08-30T12:30:00Z"])
     expect(keys({ type: "message" })).toEqual([])
+  })
+
+  it("puts expiring decisions and current human requests before older routine alerts", () => {
+    const missed = inboxEntry(item({ id: "missed", kind: "schedule_missed", created_at: "2026-08-01T10:00:00Z", payload: { schedule_id: "schedule-1" } }))
+    const decision = inboxEntry(item({ id: "decision", kind: "waitpoint", created_at: "2026-08-30T10:00:00Z" }))
+    const expiring = inboxEntry(item({ id: "expiring", kind: "waitpoint", created_at: "2026-08-20T10:00:00Z", payload: { timeout_at: "2026-08-30T12:30:00Z" } }))
+    expect(needsHumanDecision(missed)).toBe(false)
+    expect(needsHumanDecision(decision)).toBe(true)
+    expect(filterAndSort([missed, decision, expiring], EMPTY_INBOX_V2_FILTERS).map((entry) => entry.key)).toEqual([
+      "inbox:expiring", "inbox:decision", "inbox:missed",
+    ])
   })
 })
 

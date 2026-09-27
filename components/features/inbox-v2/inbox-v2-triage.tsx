@@ -1,7 +1,7 @@
 "use client"
 
 import { useMemo } from "react"
-import { Bell, CheckCheck, History, Inbox, Users } from "lucide-react"
+import { Bell, CalendarClock, CheckCheck, History, Inbox, Users } from "lucide-react"
 import { CrewIcon } from "@/components/ui/crew-icon"
 import { DashboardCard } from "@/components/features/dashboard/dashboard-card"
 import { InlineEmpty } from "@/components/ui/inline-empty"
@@ -10,7 +10,7 @@ import { StatusPill } from "@/components/ui/status-pill"
 import { Appear } from "@/components/ui/detail"
 import { since } from "@/components/features/inbox/inbox-derive"
 import { cn } from "@/lib/utils"
-import { entryTitle, entryVerb, outcomeStatus, sortEntries } from "./inbox-v2-derive"
+import { entryTitle, entryVerb, needsHumanDecision, outcomeStatus, sortEntries } from "./inbox-v2-derive"
 import { EntryAvatar, entryIdentity } from "./inbox-entry-identity"
 import type { InboxLookup, InboxV2Entry } from "./inbox-v2-types"
 
@@ -26,28 +26,37 @@ export function InboxTriage({ action, updates, history, lookup, onOpen, onCrew, 
   onCrew: (crewId: string) => void
 }) {
   const crews = useMemo(() => {
-    const buckets = new Map<string, { id: string | null; name: string; color: string | null; icon: string; requests: number; updates: number }>()
+    const buckets = new Map<string, { id: string | null; name: string; color: string | null; icon: string; requests: number; alerts: number; updates: number }>()
     for (const entry of [...action, ...updates]) {
       const { crew } = entryIdentity(entry, lookup)
       const key = crew?.id || "workspace"
-      const bucket = buckets.get(key) || { id: crew?.id || null, name: crew?.name || "Workspace", icon: crew?.icon || "users", color: crew?.color || null, requests: 0, updates: 0 }
-      if (entry.actionable) bucket.requests++
+      const bucket = buckets.get(key) || { id: crew?.id || null, name: crew?.name || "Workspace", icon: crew?.icon || "users", color: crew?.color || null, requests: 0, alerts: 0, updates: 0 }
+      if (needsHumanDecision(entry)) bucket.requests++
+      else if (entry.actionable) bucket.alerts++
       else bucket.updates++
       buckets.set(key, bucket)
     }
     return [...buckets.values()].sort((a, b) => b.requests - a.requests || a.name.localeCompare(b.name))
   }, [action, updates, lookup])
   if (loading) return <div className="space-y-4 p-4 lg:p-6" role="status" aria-label="Loading inbox"><Skeleton className="h-12 rounded-lg" /><Skeleton className="h-24 rounded-xl" /><Skeleton className="h-80 rounded-xl" /></div>
-  const oldest = [...action].sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt))[0]
+  const decisions = sortEntries(action.filter(needsHumanDecision))
+  const alerts = sortEntries(action.filter((entry) => !needsHumanDecision(entry)))
   const recent = [...history].sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt)).slice(0, 3)
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-4 p-4 lg:p-6" data-testid="inbox-triage">
       <div><h1 className="text-xl font-semibold tracking-tight">Your inbox, at a glance</h1><p className="mt-1 text-body text-muted-foreground">Decisions first. Results and updates in one place.</p></div>
-      <Appear order={0}>
-        <DashboardCard title="Waiting for you" icon={action.length ? Inbox : CheckCheck} className={action.length ? "border-warn/30 bg-warn/5" : "border-success/20 bg-success/5"} hint={action.length ? `${action.length} need action` : incomplete ? "Partial information" : "All caught up"} action={oldest ? <button type="button" onClick={() => onOpen(oldest)} className="text-primary-hover hover:underline">Open oldest →</button> : undefined}>
-          {action.length ? <div className="flex flex-col divide-y divide-border/50">{sortEntries(action).slice(0, 4).map((entry) => <OverviewRow key={entry.key} entry={entry} lookup={lookup} onOpen={onOpen} />)}</div> : <p className="text-body text-muted-foreground">{incomplete ? "Some sources could not be read. Check the notice above before assuming nothing needs you." : "Nothing needs a decision right now. Approvals, questions from agents, failed runs and missed schedules land here."}</p>}
-        </DashboardCard>
-      </Appear>
+      <div className={cn("grid min-w-0 gap-3", alerts.length > 0 && "xl:grid-cols-2")}>
+        <Appear order={0} className="min-w-0">
+          <DashboardCard title="Waiting for you" icon={decisions.length ? Inbox : CheckCheck} className={decisions.length ? "h-full border-warn/30 bg-warn/5" : "h-full border-border/60"} hint={decisions.length ? `${decisions.length} ${decisions.length === 1 ? "decision" : "decisions"}` : incomplete ? "Partial information" : "No decisions"} action={decisions[0] ? <button type="button" onClick={() => onOpen(decisions[0])} className="text-primary-hover hover:underline">Review next →</button> : undefined}>
+            {decisions.length ? <div className="flex flex-col divide-y divide-border/50">{decisions.slice(0, 4).map((entry) => <OverviewRow key={entry.key} entry={entry} lookup={lookup} onOpen={onOpen} />)}</div> : <p className="text-body text-muted-foreground">{incomplete ? "Some sources could not be read. Check the notice above before assuming nothing needs you." : "No decisions are waiting for you."}</p>}
+          </DashboardCard>
+        </Appear>
+        {alerts.length > 0 && <Appear order={1} className="min-w-0">
+          <DashboardCard title="Routine alerts" icon={CalendarClock} hint={`${alerts.length} ${alerts.length === 1 ? "alert" : "alerts"}`} className="h-full border-primary/20 bg-primary/[0.025]" action={<button type="button" onClick={() => onOpen(alerts[0])} className="text-primary-hover hover:underline">Open alert →</button>}>
+            <div className="flex flex-col divide-y divide-border/50">{alerts.slice(0, 4).map((entry) => <OverviewRow key={entry.key} entry={entry} lookup={lookup} onOpen={onOpen} />)}</div>
+          </DashboardCard>
+        </Appear>}
+      </div>
       <div className="grid min-w-0 gap-4 xl:grid-cols-[minmax(0,1fr)_260px]">
         <Appear order={1} className="min-w-0">
           <DashboardCard title="Updates" icon={Bell} hint={`${updates.length} available`} className="border-primary/20">
@@ -70,17 +79,41 @@ export function InboxTriage({ action, updates, history, lookup, onOpen, onCrew, 
   )
 }
 
+/** The right pane follows a dashboard attention link instead of showing an unrelated overview. */
+export function InboxFocusOverview({ label, entries, lookup, onOpen, onClear }: {
+  label: string
+  entries: InboxV2Entry[]
+  lookup: InboxLookup
+  onOpen: (entry: InboxV2Entry) => void
+  onClear: () => void
+}) {
+  const itemCount = entries.reduce((count, entry) => count + (entry.groupedItems?.length ?? 1), 0)
+  return <div className="mx-auto flex w-full max-w-5xl flex-col gap-4 p-4 lg:p-6" data-testid="inbox-focus-overview">
+    <div className="flex flex-wrap items-start justify-between gap-3">
+      <div>
+        <h1 className="text-xl font-semibold tracking-tight">{label}</h1>
+        <p className="mt-1 text-body text-muted-foreground">{itemCount} matching active {itemCount === 1 ? "item" : "items"}</p>
+      </div>
+      <button type="button" onClick={onClear} className="text-label text-primary-hover hover:underline">All inbox →</button>
+    </div>
+    <DashboardCard title="Matching items" icon={Inbox} hint={`${itemCount} ${itemCount === 1 ? "item" : "items"}`}>
+      {entries.length ? <div className="flex flex-col divide-y divide-border/50">{entries.map((entry) => <OverviewRow key={entry.key} entry={entry} lookup={lookup} onOpen={onOpen} />)}</div> : <InlineEmpty icon={Inbox} text="Nothing matches this filter right now." />}
+    </DashboardCard>
+  </div>
+}
+
 function OverviewRow({ entry, lookup, onOpen }: { entry: InboxV2Entry; lookup: InboxLookup; onOpen: (entry: InboxV2Entry) => void }) {
   const { crew, name } = entryIdentity(entry, lookup)
-  return <button type="button" onClick={() => onOpen(entry)} className="flex w-full min-w-0 items-center gap-3 rounded-lg py-3 text-left transition-colors duration-150 hover:bg-primary/5 focus-visible:outline-2 focus-visible:outline-primary">
+  return <button type="button" onClick={() => onOpen(entry)} className="group flex w-full min-w-0 items-center gap-3 rounded-lg py-3 text-left transition-colors duration-150 hover:bg-primary/5 focus-visible:outline-2 focus-visible:outline-primary">
     <EntryAvatar entry={entry} lookup={lookup} />
     <span className="min-w-0 flex-1"><span className="mb-1 flex flex-wrap items-center gap-2">{entry.historical && <StatusPill status={outcomeStatus(entry.outcome) || "RESOLVED"} />}<span className="line-clamp-2 text-body font-medium">{entryTitle(entry)}</span></span><span className="block truncate text-label text-muted-foreground">{crew ? `${crew.name} · ` : ""}{name} · {since(entry.createdAt)}</span></span>
-    <span className="shrink-0 text-label text-primary-hover">{entry.actionable ? "Review" : entryVerb(entry)} →</span>
+    <span className="shrink-0 text-label text-muted-foreground transition-colors group-hover:text-primary-hover">{needsHumanDecision(entry) ? "Review" : entryVerb(entry)} →</span>
   </button>
 }
 
-function CrewBucket({ crew, onSelect }: { crew: { id: string | null; name: string; icon: string; color: string | null; requests: number; updates: number }; onSelect: (id: string) => void }) {
-  const content = <><CrewIcon icon={crew.icon} color={crew.color} size="md" /><span className="min-w-0"><span className="block truncate text-body font-medium">{crew.name}</span><span className={cn("mt-1 block text-label", crew.requests ? "text-warn" : "text-muted-foreground")}>{crew.requests ? `${crew.requests} need action` : `${crew.updates} ${crew.updates === 1 ? "update" : "updates"}`}</span></span></>
+function CrewBucket({ crew, onSelect }: { crew: { id: string | null; name: string; icon: string; color: string | null; requests: number; alerts: number; updates: number }; onSelect: (id: string) => void }) {
+  const detail = crew.requests ? `${crew.requests} ${crew.requests === 1 ? "decision" : "decisions"}${crew.alerts ? ` · ${crew.alerts} alerts` : ""}` : crew.alerts ? `${crew.alerts} routine ${crew.alerts === 1 ? "alert" : "alerts"}` : `${crew.updates} ${crew.updates === 1 ? "update" : "updates"}`
+  const content = <><CrewIcon icon={crew.icon} color={crew.color} size="md" /><span className="min-w-0"><span className="block truncate text-body font-medium">{crew.name}</span><span className={cn("mt-1 block text-label", crew.requests ? "text-warn" : "text-muted-foreground")}>{detail}</span></span></>
   if (!crew.id) return <div className="flex items-center gap-2.5 rounded-xl border border-border/60 p-3">{content}</div>
   return <button type="button" aria-label={`Filter inbox by ${crew.name}`} onClick={() => onSelect(crew.id!)} className="flex items-center gap-2.5 rounded-xl border border-border/60 p-3 text-left transition-colors duration-150 hover:border-primary/30 hover:bg-primary/5">{content}</button>
 }

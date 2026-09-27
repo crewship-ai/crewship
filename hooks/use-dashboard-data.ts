@@ -153,13 +153,45 @@ export function useDashboardResults(workspaceId: string | null, status: string, 
   return useQuery<Mission[]>({
     queryKey: ["dashboard-results", workspaceId ?? "", status],
     queryFn: async ({ signal }) => {
-      const res = await apiFetch(`/api/v1/issues?workspace_id=${encodeURIComponent(workspaceId!)}&status=${encodeURIComponent(status)}&sort=updated_at&limit=4`, { signal })
+      const res = await apiFetch(`/api/v1/issues?workspace_id=${encodeURIComponent(workspaceId!)}&status=${encodeURIComponent(status)}&sort=updated_at&limit=12`, { signal })
       if (!res.ok) throw new Error("Could not load results")
       const rows: unknown = await res.json()
       if (!Array.isArray(rows)) throw new Error("Invalid results response")
       return rows as Mission[]
     },
     enabled: Boolean(workspaceId) && (opts?.enabled ?? true),
+    retry: false,
+  })
+}
+
+export interface DashboardActiveRun {
+  id: string
+  kind: string
+  status: string
+  mission_id?: string | null
+  mission_identifier?: string | null
+  agent_id: string
+  agent_name?: string | null
+  agent_slug?: string | null
+  crew_name?: string | null
+  started_at?: string | null
+  created_at: string
+}
+
+/** Agent executions are separate from issues marked IN_PROGRESS: a queued
+ * issue is work in progress, while a RUNNING row is a process alive now. */
+export function useDashboardActiveRuns(workspaceId: string | null, opts?: DashboardQueryOpts) {
+  return useQuery<DashboardActiveRun[]>({
+    queryKey: ["dashboard-active-runs", workspaceId ?? ""],
+    queryFn: async ({ signal }) => {
+      const res = await apiFetch(`/api/v1/runs?workspace_id=${encodeURIComponent(workspaceId!)}&status=RUNNING&limit=50`, { signal })
+      if (!res.ok) throw new Error("Could not load active runs")
+      const data: unknown = await res.json()
+      if (!data || typeof data !== "object" || !Array.isArray((data as { data?: unknown }).data)) throw new Error("Invalid active runs response")
+      return (data as { data: DashboardActiveRun[] }).data.filter((run) => run.kind !== "pipeline" && run.status === "RUNNING")
+    },
+    enabled: Boolean(workspaceId) && (opts?.enabled ?? true),
+    refetchInterval: 10000,
     retry: false,
   })
 }
@@ -407,6 +439,7 @@ export function useInvalidateDashboard(workspaceId: string | null) {
       qc.invalidateQueries({ queryKey })
     }
     qc.invalidateQueries({ queryKey: ["dashboard-results", workspaceId] })
+    qc.invalidateQueries({ queryKey: ["dashboard-active-runs", workspaceId] })
     // Windowed queries share these prefixes; invalidate every mounted window.
     qc.invalidateQueries({ queryKey: ["runs-insights", workspaceId] })
     // crew-spend is no longer mounted — the cost tile it fed was removed with

@@ -212,6 +212,15 @@ func TestInboxHandler_List_ActiveByKind(t *testing.T) {
 	seedInboxItem(t, h, wsID, "k-fail-1", "failed_run", "read", "", "", "boom", now)
 	seedInboxItem(t, h, wsID, "k-fail-resolved", "failed_run", "resolved", "", "", "done", now)
 	seedInboxItem(t, h, wsID, "k-missed", "schedule_missed", "unread", "", "", "cron", now)
+	seedInboxItem(t, h, wsID, "k-human", "run_needs_human", "unread", "", "", "needs input", now)
+	seedInboxItem(t, h, wsID, "k-advisory", "escalation", "unread", "", "", "system notice", now)
+	seedInboxItem(t, h, wsID, "k-proposal", "escalation", "unread", "", "", "routine proposal", now)
+	if _, err := db.Exec(`UPDATE inbox_items SET blocking = 0 WHERE id IN ('k-advisory', 'k-fail-1', 'k-missed')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`UPDATE inbox_items SET payload_json = '{"kind":"routine_proposal"}' WHERE id = 'k-proposal'`); err != nil {
+		t.Fatal(err)
+	}
 	// Targeted at another user: invisible to the caller, must not be counted.
 	seedInboxItem(t, h, wsID, "k-fail-hidden", "failed_run", "unread", otherUser, "", "not mine", now)
 
@@ -232,9 +241,16 @@ func TestInboxHandler_List_ActiveByKind(t *testing.T) {
 	if resp.Count != 1 {
 		t.Errorf("windowed count = %d, want 1", resp.Count)
 	}
-	want := map[string]int{"waitpoint": 2, "failed_run": 1, "schedule_missed": 1}
+	want := map[string]int{"waitpoint": 2, "failed_run": 1, "schedule_missed": 1, "run_needs_human": 1, "escalation": 2}
 	if !reflect.DeepEqual(resp.ActiveByKind, want) {
 		t.Errorf("active_by_kind = %v, want %v (resolved excluded, other-user rows excluded, read still active)", resp.ActiveByKind, want)
+	}
+	if resp.DecisionCount == nil || *resp.DecisionCount != 4 {
+		if resp.DecisionCount == nil {
+			t.Error("decision_count is missing, want 4")
+		} else {
+			t.Errorf("decision_count = %d, want 4 (two waitpoints, one human input, one actionable proposal)", *resp.DecisionCount)
+		}
 	}
 }
 
@@ -323,6 +339,9 @@ func TestInboxHandler_List_ActiveByKind_Failure_OmitsField(t *testing.T) {
 	}
 	if strings.Contains(rr.Body.String(), "active_by_kind") {
 		t.Errorf("body carries active_by_kind despite the forced aggregate failure: %s — an empty map would read as zero alerts", rr.Body.String())
+	}
+	if strings.Contains(rr.Body.String(), "decision_count") {
+		t.Errorf("body carries decision_count despite the forced aggregate failure: %s", rr.Body.String())
 	}
 	var resp struct {
 		Rows []inboxItemResponse `json:"rows"`
