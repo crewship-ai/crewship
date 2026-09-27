@@ -138,6 +138,7 @@ func (s *Server) startCredentialReaper(ctx context.Context) {
 			if dropped := s.credStore.ExpireGrace(tick); dropped > 0 {
 				s.logger.Info("credential reap: dropped grace values of expired rotations", "count", dropped)
 			}
+			s.refreshCredentialGrants(ctx)
 			s.reapRevokedCredentials(ctx)
 		}
 	}

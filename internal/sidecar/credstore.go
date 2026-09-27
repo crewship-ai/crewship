@@ -90,6 +90,8 @@ type Credential struct {
 	// credential must serialise byte-identically to the pre-#2052 payload, so
 	// the config fingerprint of an existing crew does not move.
 	AgentIDs []string `json:"agent_ids,omitempty"`
+	// AgentGrants is the authoritative per-agent lease map. Nil is a legacy payload.
+	AgentGrants map[string]string `json:"agent_grants,omitempty"`
 
 	// GraceToken is the credential's PREVIOUS value while a rotation's grace
 	// window is open (#1882), delivered through the same boot payload as
@@ -117,7 +119,9 @@ type Credential struct {
 	// leaseDeadline is LeaseExpiresAt parsed once at Load, so the hot Select path
 	// does no time parsing. Zero value means "no lease" (standing). Unexported,
 	// so it never round-trips through the boot JSON.
-	leaseDeadline time.Time
+	leaseDeadline       time.Time
+	agentGrantDeadlines map[string]time.Time
+	grantsValidUntil    time.Time
 	// graceDeadline is GraceExpiresAt parsed once at Load. Zero means "no
 	// grace value", never "no deadline": a grace value always has one.
 	graceDeadline time.Time
@@ -131,6 +135,11 @@ type Credential struct {
 // caller, which is the least-privilege reading of "I cannot tell who is
 // asking". See Select for where that case comes from.
 func (c *Credential) grantedTo(agentID string) bool {
+	if c.AgentGrants != nil {
+		now := time.Now()
+		deadline, ok := c.agentGrantDeadlines[agentID]
+		return agentID != "" && ok && now.Before(c.grantsValidUntil) && (deadline.IsZero() || now.Before(deadline))
+	}
 	if len(c.AgentIDs) == 0 {
 		return true
 	}
@@ -150,7 +159,7 @@ func (c *Credential) grantedTo(agentID string) bool {
 // the deadline is lapsed", mirroring the server-side gate (expires_at > now) so
 // the two sides agree on the exact instant a lease dies.
 func (c *Credential) leaseLapsed(now time.Time) bool {
-	return !c.leaseDeadline.IsZero() && !now.Before(c.leaseDeadline)
+	return c.AgentGrants == nil && !c.leaseDeadline.IsZero() && !now.Before(c.leaseDeadline)
 }
 
 // leaseEpochSentinel is the deadline assigned to a credential whose
@@ -211,6 +220,9 @@ func (cs *CredStore) Load(creds []Credential) {
 	cs.creds = make([]Credential, len(creds))
 	copy(cs.creds, creds)
 	for i := range cs.creds {
+		if cs.creds[i].AgentGrants != nil {
+			cs.creds[i].setAgentGrants(cs.creds[i].AgentGrants, time.Now())
+		}
 		raw := cs.creds[i].LeaseExpiresAt
 		if raw == "" {
 			cs.creds[i].leaseDeadline = time.Time{} // standing grant
@@ -392,13 +404,22 @@ func (cs *CredStore) HeldForAnotherAgent(provider ProviderType, agentID string) 
 // Looked up in the store rather than read off the copy Select returned so a
 // ScrubGrace or ExpireGrace that ran while the first attempt was in flight is
 // honoured by the retry.
-func (cs *CredStore) GraceFor(credID string, now time.Time) (token, rotationID string, ok bool) {
+func (cs *CredStore) GraceFor(credID string, now time.Time, agentIDs ...string) (token, rotationID string, ok bool) {
 	cs.mu.RLock()
 	defer cs.mu.RUnlock()
 	for i := range cs.creds {
 		c := &cs.creds[i]
 		if c.ID != credID {
 			continue
+		}
+		if c.AgentGrants != nil || len(agentIDs) > 0 {
+			actor := ""
+			if len(agentIDs) > 0 {
+				actor = agentIDs[0]
+			}
+			if !c.grantedTo(actor) {
+				return "", "", false
+			}
 		}
 		if !c.graceUsable(now) {
 			return "", "", false

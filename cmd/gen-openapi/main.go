@@ -427,7 +427,19 @@ func buildDocument(routes []route) map[string]any {
 				"description": "Workspace ID or slug.", "schema": map[string]any{"type": "string"},
 			})
 		}
-		params = append(params, routeSchemaCatalog()[rt.method+" "+rt.path].Parameters...)
+		for _, override := range routeSchemaCatalog()[rt.method+" "+rt.path].Parameters {
+			replaced := false
+			for i, param := range params {
+				if param["name"] == override["name"] && param["in"] == override["in"] {
+					params[i] = override
+					replaced = true
+					break
+				}
+			}
+			if !replaced {
+				params = append(params, override)
+			}
+		}
 		if len(params) > 0 {
 			op["parameters"] = params
 		}

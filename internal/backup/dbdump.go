@@ -98,6 +98,7 @@ var BackupTables = []string{
 	"skills",
 	// Depth 1: direct workspace_id children
 	"crews",
+	"service_runtime_intents",
 	"chats",
 	"workspace_files",
 	"journal_entries",
@@ -416,7 +417,7 @@ func workspaceFilterSQL(table, workspaceID string) (string, []any, bool) {
 		)`, []any{workspaceID}, true
 	case "agent_skills":
 		return "agent_id IN (SELECT a.id FROM agents a JOIN crews c ON a.crew_id = c.id WHERE c.workspace_id = ?)", []any{workspaceID}, true
-	case "crew_members":
+	case "crew_members", "service_runtime_intents":
 		return "crew_id IN (SELECT id FROM crews WHERE workspace_id = ?)", []any{workspaceID}, true
 	case "chats":
 		// chats has a direct workspace_id column. The explicit case
@@ -749,6 +750,7 @@ func DumpCrew(ctx context.Context, db *sql.DB, crewID string) (*DBDump, error) {
 		)`, []any{crewID, crewID, crewID}, ""},
 		{"workspaces", "id = ?", []any{workspaceID}, ""},
 		{"crews", "id = ?", []any{crewID}, ""},
+		{"service_runtime_intents", "crew_id = ?", []any{crewID}, ""},
 		{"agents", "crew_id = ?", []any{crewID}, ""},
 		{"skills", `id IN (SELECT skill_id FROM agent_skills WHERE agent_id IN (SELECT id FROM agents WHERE crew_id = ?))`, []any{crewID}, ""},
 		{"agent_skills", "agent_id IN (SELECT id FROM agents WHERE crew_id = ?)", []any{crewID}, ""},

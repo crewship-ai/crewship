@@ -1220,6 +1220,8 @@ type sidecarCred struct {
 	// before), and sidecarConfigFingerprint — which hashes this same struct —
 	// does not move for any crew that has no per-agent grant.
 	AgentIDs []string `json:"agent_ids,omitempty"`
+	// AgentGrants is the authoritative per-agent lease map. Nil is a legacy payload.
+	AgentGrants map[string]string `json:"agent_grants,omitempty"`
 	// GraceToken / GraceExpiresAt / GraceRotationID carry a rotation's grace
 	// value (#1882) into the CredStore. omitempty keeps the payload
 	// byte-identical for a credential with no open rotation. They are
@@ -1347,15 +1349,20 @@ func buildSidecarCreds(creds []Credential, logger *slog.Logger) []sidecarCred {
 			}
 			continue
 		}
+		lease := c.LeaseExpiresAt
+		if c.AgentGrants != nil {
+			lease = ""
+		} // Each agent's own deadline is authoritative.
 		sc = append(sc, sidecarCred{
 			ID:              c.ID,
 			Provider:        prov,
 			Token:           c.PlainValue,
 			Priority:        c.Priority,
-			LeaseExpiresAt:  c.LeaseExpiresAt,
+			LeaseExpiresAt:  lease,
 			BaseURL:         c.BaseURL,
 			Headers:         c.Headers,
 			AgentIDs:        sortedGranteeIDs(c.AgentIDs),
+			AgentGrants:     c.AgentGrants,
 			GraceToken:      c.GraceToken,
 			GraceExpiresAt:  c.GraceExpiresAt,
 			GraceRotationID: c.GraceRotationID,

@@ -182,6 +182,15 @@ func (s *Starter) StartResolved(ctx context.Context, cfg provider.CrewConfig, no
 	}
 
 	cfg = s.complete(ctx, cfg, notify)
+	if policy, ok := s.completer.(interface {
+		FilterServices(context.Context, provider.CrewConfig) (provider.CrewConfig, error)
+	}); ok {
+		var err error
+		cfg, err = policy.FilterServices(ctx, cfg)
+		if err != nil {
+			return "", cfg, fmt.Errorf("service lifecycle policy unavailable: %w", err)
+		}
+	}
 
 	containerID, err := s.container.EnsureCrewRuntime(ctx, cfg)
 	if err != nil {

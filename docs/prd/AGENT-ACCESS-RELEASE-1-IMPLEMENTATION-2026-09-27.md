@@ -12,8 +12,8 @@ Uživatel autorizoval vývoj, testy a nasazení na dev1. Základ implementace je
 | A1: směrované oprávnění sdílených souborů mezi crews | Implementováno a nasazeno na dev1, PR review/CI probíhá | Settings/API/CLI, none/read/read+delivery, stale update 409, role/workspace, odebrání dalšího requestu |
 | A2: agent→agent / projektové granty | Připravený návrh, neimplementováno | stabilní resource ID, efektivní dědění, všechny čtecí cesty, shell hranice |
 | B: omezený klientský běh a konverzace | Neimplementováno | žadatel→běh→výstup, historie, paměť a artefakty dvou klientů |
-| C: service desired state / obnova po rebootu | Doložen současný kód, chybí implementace a reboot akceptace | durable running/stopped, rekonciliace, data/identity, žádná duplicita |
-| D: credentials / revokace konkrétního grantu | Policy/proxy cílené testy z rešerše, další mezery otevřené | rozdílné lease, odebrání jedinému agentovi, výpadek autority, izolovaná delivery |
+| C: service desired state / obnova po rebootu | Implementován controller, Settings/API/CLI a testy; živá Docker/restart akceptace probíhá | durable running/stopped, rekonciliace, data/identity, žádná duplicita |
+| D: credentials / revokace konkrétního grantu | D1: per-agent proxy grant snapshot/refresh implementován; přímá delivery a izolace dále otevřené | rozdílné lease, odebrání jedinému agentovi, výpadek autority, izolovaná delivery |
 | E: Chat / Issues / Routines / Pages | Existující mechanismy inventarizované, společná omezená autorita nedokončena | negativní end-to-end matice včetně logů/streamů/delegace |
 | F: levná kontrola práce před heartbeat | Návrh, neimplementováno | žádné prázdné LLM wake, budget/dedupe/recovery bez oslabení lease |
 
@@ -129,3 +129,46 @@ počet SQL dotazů na request, cold/warm start, RAM izolovaného runtime a služ
 čas zotavení, tokeny na dokončený úkol. Bez měření uvádět pouze očekávaný směr
 dopadu. A1 nepřidává background loop; nahrazuje kontrolu linku jedním dotazem
 na link a jeho file permission. Výkonový benchmark zatím nebyl proveden.
+
+## Dodávka C a D1 — pokračování 27. 9. 2026
+
+C ukládá opt-in `running/stopped` do `service_runtime_intents`. Controller
+běží mimo agentí run, používá dvouminutovou DB lease a verzované potvrzení výsledku.
+Kontroluje až 100 splatných záznamů, nejvýše čtyři souběžné operace; zdravý stav
+obnovuje po 30 sekundách, chybu po minutě, polling každých 15 sekund. Agentí
+startup předává spravované služby výhradně controlleru. Ruční Stop celé crew
+ukládá Stop jejích spravovaných služeb. Legacy služby bez záznamu zůstávají
+on-demand. Settings rozlišují požadovaný a naposledy potvrzený stav; změnu
+smí MANAGER+, stará verze dostane 409. CLI a OpenAPI pokrývají stejný kontrakt.
+
+Při chybě konfigurace/credentials se controller pokusí službu zastavit, aby
+neponechal běžet proces se starým env. Do API ukládá pouze bezpečný kód chyby.
+Chyba jedné deklarace neblokuje ostatní. Jde o eventual reconciliation, nikoli
+atomickou revokaci právě běžícího procesu. Nedostupný Docker může zastavení
+odložit; UI musí dál ukazovat error. Proces může po odebrání oprávnění běžet do
+další kontroly a dokončení Stop. Záloha zahrnuje i durable service intent;
+obnovená nevypršená lease může rekonciliaci odložit nejvýše o původní TTL při
+synchronizovaných hodinách. Reálný host reboot vyžaduje izolované prostředí.
+
+D1 přidává do boot payloadu sidecaru explicitní mapu credential→agent→lease.
+Snapshot používá existující delivery SQL v jedné read transakci, včetně
+precedence explicitního grantu nad bindingem. Metadata endpoint je vázaný na
+crew/workspace, nedoručuje plaintext. Refresh každou minutu; snapshot starší
+než dvě minuty zakáže nové použití. Chybějící credential/agent je deny,
+rotace grace při retry respektuje aktuální autoritu stejného agenta.
+Odlišná lease agenta A již neexpiruje credential agenta B. Payload je vedený
+přes agent-config, assignment/query, chatbridge a orchestrator.
+
+Kompatibilita D1: crewless a staré payloady zachovávají legacy chování;
+existující runtime potřebuje obnovení sidecaru s novým payloadem/binary.
+Refresh nepřidává nové hodnoty credentials, pouze mění autoritu již doručených.
+Klíč může zůstat v paměti sidecaru, i když jej konkrétní agent už nesmí použít.
+Přímé env/file credentials a shared-UID shell tím nejsou izolované.
+Snapshot nyní dělá jeden delivery dotaz na každého člena crew; benchmark pro
+velké crews ještě není proveden. Žádné naměřené zlepšení výkonu netvrdíme.
+
+První celý Go průchod odhalil chybějící registraci nové tabulky v backup
+kontraktu a YAML tagy CLI; obojí doplněno. Cílené testy ověřují dvě instance
+controlleru, obnovu intentu, Stop při startu agenta, izolované chyby credentials,
+role/workspace/stale update a bezpečné chyby. Finální gate a dev1 evidence se
+zapisují až po skutečném dokončení. A2/B/E/F zůstávají otevřené.

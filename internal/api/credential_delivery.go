@@ -214,6 +214,7 @@ type deliveredCredential struct {
 	// crew sees the same value — see credential_grantees.go for why that is not
 	// optional.
 	GrantedAgentIDs []string
+	AgentGrants     map[string]string
 	// GraceEncryptedValue is the previous value of this credential, still
 	// encrypted, while a rotation's grace window is open (#1882); empty
 	// otherwise. GraceExpiresAt is that window's end (RFC3339 UTC) and
@@ -388,8 +389,16 @@ func loadDeliveredCredentialSnapshot(ctx context.Context, db sqlQuerier, agentID
 		if err != nil {
 			return nil, nil, err
 		}
+		effective, err := loadEffectiveCredentialGrants(ctx, db, agentID)
+		if err != nil {
+			return nil, nil, err
+		}
 		for i := range out {
 			out[i].GrantedAgentIDs = grantees.grantedTo(out[i].ID, agentID)
+			out[i].AgentGrants = effective[out[i].ID]
+			if effective != nil && out[i].AgentGrants == nil {
+				return nil, nil, fmt.Errorf("delivered credential missing effective agent grant")
+			}
 		}
 	}
 	return out, notices, nil

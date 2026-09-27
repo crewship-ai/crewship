@@ -40,6 +40,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/devcontainer"
 	"github.com/crewship-ai/crewship/internal/provider"
+	"github.com/crewship-ai/crewship/internal/servicelifecycle"
 )
 
 // crewNeedsProvision mirrors chatbridge.devcontainerNeedsProvision: a crew
@@ -430,4 +431,47 @@ func (h *ProvisioningHandler) imagePresentLocally(ctx context.Context, ref strin
 		return true
 	}
 	return true
+}
+
+func (c *CrewConfigCompleter) FilterServices(ctx context.Context, cfg provider.CrewConfig) (provider.CrewConfig, error) {
+	return servicelifecycle.FilterServices(ctx, c.db, cfg)
+}
+
+// ResolveManagedService resolves credentials again after restart. Missing refs
+// block startup; services never fall back to an empty/default account.
+func ResolveManagedService(ctx context.Context, db *sql.DB, crewID, wsID, name string) (provider.CrewConfig, error) {
+	var slug, body string
+	if err := db.QueryRowContext(ctx, `SELECT slug,COALESCE(services_json,'') FROM crews WHERE id=? AND workspace_id=? AND deleted_at IS NULL`, crewID, wsID).Scan(&slug, &body); err != nil {
+		return provider.CrewConfig{}, err
+	}
+	specs, err := loadServiceDeclarations(ctx, db, crewID, wsID)
+	if err != nil {
+		return provider.CrewConfig{}, err
+	}
+	for _, spec := range specs {
+		if spec.Name != name {
+			continue
+		}
+		lookup, err := crewServiceEnvLookup(ctx, db, crewID)
+		if err != nil {
+			return provider.CrewConfig{}, err
+		}
+		encoded, err := json.Marshal([]serviceWire{spec})
+		if err != nil {
+			return provider.CrewConfig{}, err
+		}
+		missing := false
+		services, err := crewstart.DecodeServices(string(encoded), func(ref string) string {
+			v := lookup(ref)
+			if v == "" {
+				missing = true
+			}
+			return v
+		})
+		if err != nil || missing {
+			return provider.CrewConfig{}, fmt.Errorf("service configuration or credentials unavailable")
+		}
+		return provider.CrewConfig{ID: crewID, Slug: slug, Services: services}, nil
+	}
+	return provider.CrewConfig{}, fmt.Errorf("service no longer declared")
 }

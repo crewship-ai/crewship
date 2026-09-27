@@ -35,7 +35,7 @@ func TestResolve_CarriesAgentIDsThroughToOrchestratorCredentials(t *testing.T) {
 				"type": "API_KEY",
 				"provider": "OPENAI_COMPAT",
 				"base_url": "https://a.example/v1",
-				"agent_ids": ["agt_a"]
+				"agent_ids": ["agt_a"], "agent_grants": {"agt_a":"2030-01-01T00:00:00Z"}
 			},
 			{
 				"id": "ant-crew",
@@ -62,6 +62,9 @@ func TestResolve_CarriesAgentIDsThroughToOrchestratorCredentials(t *testing.T) {
 	byID := map[string][]string{}
 	for _, c := range info.Credentials {
 		byID[c.ID] = c.AgentIDs
+		if c.ID == "compat-a" && c.AgentGrants["agt_a"] != "2030-01-01T00:00:00Z" {
+			t.Fatal("per-agent lease lost across resolver")
+		}
 	}
 
 	got, ok := byID["compat-a"]

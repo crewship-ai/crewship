@@ -829,6 +829,7 @@ func (h *InternalHandler) resolveAgentCredentials(r *http.Request, agentID strin
 			Username:       d.Username,
 			LeaseExpiresAt: d.LeaseExpiresAt,
 			AgentIDs:       d.GrantedAgentIDs,
+			AgentGrants:    d.AgentGrants,
 			HandleOnly:     d.HandleOnly,
 		}
 		// Handle-only (#2376): the entry travels so the [KEEPER] block can

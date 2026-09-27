@@ -224,6 +224,8 @@ type mcpCredEntry struct {
 	// per-agent grant must keep the fingerprint it has or every shared sidecar
 	// restarts once on upgrade.
 	AgentIDs []string `json:"agent_ids,omitempty"`
+	// AgentGrants is the authoritative per-agent lease map. Nil is a legacy payload.
+	AgentGrants map[string]string `json:"agent_grants,omitempty"`
 	// GraceToken is the credential's PREVIOUS value while a rotation's grace
 	// window is open (#1882), with the window's end and the rotation it came
 	// from beside it. It rides the boot payload into the sidecar's CredStore

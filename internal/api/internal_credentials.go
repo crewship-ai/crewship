@@ -169,20 +169,8 @@ func (h *InternalHandler) ListCredentials(w http.ResponseWriter, r *http.Request
 		query += " AND provider = ?"
 		args = append(args, provider)
 	}
-	// Provider-login metadata follows explicit grants, including bindings.
-	// KNOWN LIMITATION — binding-blind for legacy API_KEY/AI_CLI_TOKEN. This listing is the metadata source for
-	// the sidecar CredStore (proxy-injected API_KEY / AI_CLI_TOKEN keys) and its
-	// reaper, and it does NOT consult credential_bindings, unlike the env/file
-	// delivery path (loadDeliveredCredentials). A credential reachable ONLY
-	// through a binding is therefore absent here. This is not a reaper hazard —
-	// the reaper only drops what boot put in the store, and a binding-only key
-	// never entered it — and it is low-impact in practice: bindings are an
-	// env-var-slot mechanism (GH_TOKEN and the like), while a provider key is
-	// delivered by proxy substitution, not a slot, so binding one is already
-	// off-pattern. Left for a dedicated change rather than threaded through this
-	// #1031/#1373-sensitive query under merge pressure. Do not treat the crew
-	// scoping below as complete for the binding era without revisiting this.
-	//
+	// Binding-only credentials must remain visible to the metadata reaper.
+	// Actual use is separately constrained by the effective per-agent snapshot.
 	// #1031: when the caller identifies its crew, scope the metadata listing to
 	// credentials that crew can actually use — assigned to one of the crew's
 	// agents (agent_credentials), directly crew-scoped (credential_crews), or
@@ -241,7 +229,7 @@ func (h *InternalHandler) ListCredentials(w http.ResponseWriter, r *http.Request
 			OR (credentials.type != 'PROVIDER_LOGIN' AND EXISTS (
                 SELECT 1 FROM credential_crews cc
                 WHERE cc.credential_id = credentials.id AND cc.crew_id = ?))
-            OR (credentials.type = 'PROVIDER_LOGIN' AND EXISTS (
+            OR (EXISTS (
                 SELECT 1 FROM credential_bindings cb
                 WHERE cb.credential_id = credentials.id
                   AND cb.workspace_id = credentials.workspace_id

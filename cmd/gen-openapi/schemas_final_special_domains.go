@@ -31,6 +31,14 @@ func finalSpecialDomainSchemaCatalog() map[string]DomainSchema {
 	fileAccessRequest["required"] = []string{"requester_crew_id", "level", "expected_version"}
 	fileAccessResponse := object(map[string]any{"level": fileAccess, "access_version": integer()})
 	fileAccessResponse["required"] = []string{"level", "access_version"}
+	serviceState := object(map[string]any{"name": str(), "id": str(), "desired_state": str(), "observed_state": str(), "version": integer(), "last_error": str()})
+	serviceState["required"] = []string{"name", "desired_state", "observed_state", "version"}
+	serviceStates := object(map[string]any{"services": array(serviceState), "supported": boolean()})
+	serviceStates["required"] = []string{"services", "supported"}
+	serviceIntent := object(map[string]any{"desired_state": map[string]any{"type": "string", "enum": []string{"running", "stopped"}}, "expected_version": map[string]any{"type": "integer", "minimum": 0}})
+	serviceIntent["required"] = []string{"desired_state", "expected_version"}
+	serviceResult := object(map[string]any{"desired_state": str(), "version": integer(), "observed_state": str()})
+	serviceResult["required"] = []string{"desired_state", "version", "observed_state"}
 	connection := object(map[string]any{
 		"id": str(), "workspace_id": str(), "from_crew_id": str(), "from_crew_name": nullable(str()),
 		"from_crew_slug": nullable(str()), "to_crew_id": str(), "to_crew_name": nullable(str()),
@@ -97,10 +105,12 @@ func finalSpecialDomainSchemaCatalog() map[string]DomainSchema {
 	aiSuggestion := object(map[string]any{"crew_name": str(), "crew_slug": str(), "description": str(), "agents": array(aiAgent)})
 
 	return map[string]DomainSchema{
-		"PUT /api/v1/crew-connections/{connectionId}/file-access": {Request: fileAccessRequest, Response: fileAccessResponse},
+		"GET /api/v1/crews/{crewId}/service-states":               {Response: serviceStates},
+		"PUT /api/v1/crews/{crewId}/services/{serviceName}/state": {RequestRequired: true, Request: serviceIntent, Response: serviceResult},
+		"PUT /api/v1/crew-connections/{connectionId}/file-access": {RequestRequired: true, Request: fileAccessRequest, Response: fileAccessResponse},
 		"GET /api/v1/crew-connections":                            {Response: array(connection)},
 		"POST /api/v1/crew-connections":                           {Request: object(map[string]any{"from_crew_id": str(), "to_crew_id": str(), "direction": str(), "forward_file_access": fileAccess, "reverse_file_access": fileAccess}), Response: object(map[string]any{"id": str()})},
-		"DELETE /api/v1/crew-connections/{connectionId}":          {Response: nil},
+		"DELETE /api/v1/crew-connections/{connectionId}":          {Response: nil, Parameters: []map[string]any{{"name": "expected_version", "in": "query", "required": false, "schema": map[string]any{"type": "integer", "minimum": 1}}}},
 		"GET /api/v1/crew-templates":                              {Response: array(crewTemplate)},
 		"GET /api/v1/crew-templates/{slug}":                       {Response: crewTemplate},
 		"POST /api/v1/crew-templates/{slug}/deploy":               {Request: object(map[string]any{"crew_name": str(), "crew_slug": str()}), Response: object(map[string]any{"crew_id": str(), "crew_name": str(), "crew_slug": str(), "agent_count": integer(), "agent_ids": stringArray()})},

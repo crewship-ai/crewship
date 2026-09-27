@@ -169,8 +169,8 @@ func (h *CrewConnectionHandler) Create(w http.ResponseWriter, r *http.Request) {
 			direction = "bidirectional"
 		}
 		if _, err := h.db.ExecContext(r.Context(),
-			`UPDATE crew_connections SET direction = ?, status = 'active', access_version=access_version+1, updated_at = ? WHERE id = ?`,
-			direction, now, existingID); err != nil {
+			`UPDATE crew_connections SET access_version=access_version+CASE WHEN direction<>? OR status<>'active' THEN 1 ELSE 0 END, direction = ?, status = 'active', updated_at = ? WHERE id = ?`,
+			direction, direction, now, existingID); err != nil {
 			internalError(w, r, h.logger, "update crew connection", err)
 			return
 		}

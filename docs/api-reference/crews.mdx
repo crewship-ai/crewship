@@ -48,6 +48,8 @@ workspace ID or slug.
 | PUT | [`/api/v1/crews/{crewId}/files/save`](#crew-files-proxy) | Save/upload a file |
 | DELETE | [`/api/v1/crews/{crewId}/files/delete`](#delete-a-crew-file) | Delete a file |
 | GET | [`/api/v1/crews/{crewId}/git-diff`](#crew-git-diff) | Read the crew's base-branch diff |
+| GET | [`/api/v1/crews/{crewId}/service-states`](#list-service-states) | List desired and reconciled service state |
+| PUT | [`/api/v1/crews/{crewId}/services/{serviceName}/state`](#set-service-state) | Persist managed service intent |
 | GET | [`/api/v1/crews/{crewId}/services`](#live-service-inventory) | List live sidecar services |
 | GET | [`/api/v1/crews/{crewId}/containers`](#live-container-inventory) | List the crew's live containers |
 | GET | [`/api/v1/crews/{crewId}/assignments`](#crew-assignments) | List task assignments |
@@ -1641,3 +1643,63 @@ Filter by `crew_id` / `agent_id`, bound the window with `since=`, and page with 
 `limit` (see [Journal](/api-reference/journal)). Display names and crew colors are not part of
 the journal row (it stores ids + payload slugs); resolve them via `GET /api/v1/journal/lookup`.
 The `crewship activity` CLI command wraps this same query — see [CLI · Activity](/cli/activity).
+
+## Managed Service State
+
+Declared services can be kept running independently of agent activity. A managed service's desired
+state is durable; its last reconciliation is an observation, not a guarantee of current health.
+The controller retries after runtime failure and reconstructs intent when Crewship starts.
+Existing services remain on demand until explicitly managed. Manual crew stop persists a stopped
+intent for its managed services. Starting an agent does not override that stop.
+
+### List Service States
+
+```http
+GET /api/v1/crews/{crewId}/service-states?workspace_id={workspaceId}
+```
+
+**Auth:** Any authenticated member of the crew's workspace.
+
+**Request:** Required `crewId` path parameter and `workspace_id` query parameter. No body.
+
+**Response:** `200 OK`, with `supported` and `services`. Each service has `name`, `desired_state`,
+`observed_state`, and `version`; managed entries also have a stable `id` and optional `last_error`.
+An unmanaged declaration uses `on_demand`, `unmanaged`, and version `0` respectively. No secrets
+or service environment values are returned. Runtime support is explicit in `supported`.
+
+| Status | Condition |
+|---|---|
+| `404` | Crew missing or outside the workspace |
+| `500` | State/configuration could not be read |
+
+### Set Service State
+
+```http
+PUT /api/v1/crews/{crewId}/services/{serviceName}/state?workspace_id={workspaceId}
+```
+
+**Auth:** `OWNER`, `ADMIN`, or `MANAGER` in the crew's workspace.
+
+**Request:** Required `crewId`, `serviceName`, and `workspace_id`. Required JSON body:
+
+```json
+{"desired_state":"running","expected_version":0}
+```
+
+`desired_state` is `running` (keep running) or `stopped`; `expected_version` is the nonnegative
+version from the last list response. Zero adopts an existing declaration into managed lifecycle.
+A removed declaration can be stopped using its existing version, but cannot be started.
+
+**Response:** `202 Accepted`, for example
+`{"desired_state":"running","version":1,"observed_state":"pending"}`. This saves intent;
+it does not claim the container has started. Poll the list for reconciliation. Missing credentials
+block startup and leave a visible error; there is no fallback account. Container data volumes
+are retained through stop/start. Arbitrary agent shell background processes are not managed services.
+
+| Status | Condition |
+|---|---|
+| `400` | Invalid state, missing version, or negative version |
+| `403` | Insufficient role |
+| `404` | Crew/service not found in this workspace |
+| `409` | Stale version or unsupported runtime |
+| `500` | Intent could not be persisted |

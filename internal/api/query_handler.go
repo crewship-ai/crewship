@@ -685,6 +685,7 @@ func (h *QueryHandler) loadAgentCredentials(ctx context.Context, agentID string)
 			Provider:       d.Provider,
 			LeaseExpiresAt: d.LeaseExpiresAt,
 			AgentIDs:       d.GrantedAgentIDs,
+			AgentGrants:    d.AgentGrants,
 			HandleOnly:     d.HandleOnly,
 		}
 		// A handle-only credential is delivered as its NAME and nothing else

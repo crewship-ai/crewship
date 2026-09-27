@@ -6,7 +6,10 @@ package main
 // manifest last configured.
 
 import (
+	"fmt"
 	"github.com/spf13/cobra"
+	"net/url"
+	"strconv"
 
 	"github.com/crewship-ai/crewship/internal/cli"
 )
@@ -72,4 +75,75 @@ func formatServicePorts(ports []string) string {
 		out += ", " + p
 	}
 	return out
+}
+
+var crewServiceStatesCmd = &cobra.Command{
+	Use: "service-states <crew-slug-or-id>", Short: "Show requested and reconciled service state", Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := requireAuth(); err != nil {
+			return err
+		}
+		if err := requireWorkspace(); err != nil {
+			return err
+		}
+		client := newAPIClient()
+		id, err := resolveCrewID(client, args[0])
+		if err != nil {
+			return err
+		}
+		resp, err := client.Get("/api/v1/crews/" + url.PathEscape(id) + "/service-states")
+		if err != nil {
+			return err
+		}
+		if err := cli.CheckError(resp); err != nil {
+			return err
+		}
+		var out struct {
+			Services []struct {
+				Name          string `json:"name" yaml:"name"`
+				DesiredState  string `json:"desired_state" yaml:"desired_state"`
+				ObservedState string `json:"observed_state" yaml:"observed_state"`
+				Version       int64  `json:"version" yaml:"version"`
+				LastError     string `json:"last_error,omitempty" yaml:"last_error,omitempty"`
+			} `json:"services" yaml:"services"`
+		}
+		if err := cli.ReadJSON(resp, &out); err != nil {
+			return err
+		}
+		rows := [][]string{}
+		for _, s := range out.Services {
+			rows = append(rows, []string{s.Name, s.DesiredState, s.ObservedState, strconv.FormatInt(s.Version, 10), s.LastError})
+		}
+		return newFormatter().Auto(out.Services, []string{"NAME", "REQUESTED", "OBSERVED", "VERSION", "ERROR"}, rows)
+	},
+}
+var crewServiceStateCmd = &cobra.Command{
+	Use: "service-state <crew-slug-or-id> <service> <running|stopped> <expected-version>", Short: "Persist a service's requested state across restart", Args: cobra.ExactArgs(4),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := requireAuth(); err != nil {
+			return err
+		}
+		if err := requireWorkspace(); err != nil {
+			return err
+		}
+		version, err := strconv.ParseInt(args[3], 10, 64)
+		if err != nil || version < 0 || (args[2] != "running" && args[2] != "stopped") {
+			return fmt.Errorf("state must be running/stopped and version must be nonnegative")
+		}
+		client := newAPIClient()
+		id, err := resolveCrewID(client, args[0])
+		if err != nil {
+			return err
+		}
+		resp, err := client.Put("/api/v1/crews/"+url.PathEscape(id)+"/services/"+url.PathEscape(args[1])+"/state", map[string]any{"desired_state": args[2], "expected_version": version})
+		if err != nil {
+			return err
+		}
+		defer resp.Body.Close()
+		if err := cli.CheckError(resp); err != nil {
+			return err
+		}
+		cli.PrintSuccess("Service intent saved; use crew service-states to check reconciliation.")
+		return nil
+	},
 }

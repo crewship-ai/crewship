@@ -690,3 +690,31 @@ func (p *Provider) RemoveCrewServiceVolumes(ctx context.Context, crewID, crewSlu
 	}
 	return nil
 }
+
+// StopCrewService addresses one owned service; no name-prefix matching and no
+// volume deletion. A stopped or missing container already satisfies Stop.
+func (p *Provider) StopCrewService(ctx context.Context, crewID, crewSlug, name string) error {
+	if crewID == "" || name == "" {
+		return fmt.Errorf("crew ID and service name are required")
+	}
+	mu := p.lockForCrew(crewID)
+	mu.Lock()
+	defer mu.Unlock()
+	result, err := p.client.ContainerList(ctx, client.ContainerListOptions{All: true})
+	if err != nil {
+		return err
+	}
+	timeout := 10
+	for _, c := range result.Items {
+		if !sidecarMatchesCrew(c.Labels, crewID, sidecarKind) || c.Labels[sidecarSvcLabel] != name {
+			continue
+		}
+		if c.State != "running" && c.State != "restarting" {
+			continue
+		}
+		if _, err := p.client.ContainerStop(ctx, c.ID, client.ContainerStopOptions{Timeout: &timeout}); err != nil {
+			return err
+		}
+	}
+	return nil
+}

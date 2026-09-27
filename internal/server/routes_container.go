@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/provider"
+	"github.com/crewship-ai/crewship/internal/servicelifecycle"
 )
 
 // gitDiffSem bounds concurrent `git diff` container execs. Each exec blocks a
@@ -137,6 +138,10 @@ func (s *Server) handleContainerStop(w http.ResponseWriter, r *http.Request) {
 	// Resolve crew slug from DB so we can build the container name via
 	// provider; falls back to the raw id (works for Docker container hashes).
 	containerName, slug, _ := s.resolveCrewContainer(r.Context(), id, true)
+	if err := servicelifecycle.StopCrew(r.Context(), s.db, id); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not persist service stop"})
+		return
+	}
 
 	if err := s.container.StopCrewRuntime(r.Context(), containerName); err != nil {
 		// "There is no container" is the state the caller asked for, not a

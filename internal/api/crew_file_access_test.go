@@ -184,3 +184,26 @@ func TestCrewFileAccess_CannotImpersonateSiblingRequester(t *testing.T) {
 		}
 	}
 }
+
+func TestCrewFileAccess_RelinkVersionChangesOnlyWithAuthority(t *testing.T) {
+	h, db, user, ws, from, to := crewConnectionsRig(t)
+	insertConnection(t, db, "version-link", ws, from, to, "unidirectional")
+	for _, tc := range []struct {
+		direction string
+		version   int
+	}{{"unidirectional", 1}, {"bidirectional", 2}, {"bidirectional", 2}} {
+		r := httptest.NewRequest("POST", "/", strings.NewReader(fmt.Sprintf(`{"from_crew_id":%q,"to_crew_id":%q,"direction":%q}`, from, to, tc.direction)))
+		w := httptest.NewRecorder()
+		h.Create(w, withWorkspaceUser(r, user, ws, "MANAGER"))
+		if w.Code != 200 {
+			t.Fatal(w.Code, w.Body.String())
+		}
+		var version int
+		if err := db.QueryRow(`SELECT access_version FROM crew_connections WHERE id='version-link'`).Scan(&version); err != nil {
+			t.Fatal(err)
+		}
+		if version != tc.version {
+			t.Fatalf("version=%d want=%d", version, tc.version)
+		}
+	}
+}

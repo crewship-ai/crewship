@@ -5,6 +5,8 @@ import (
 	"errors"
 	"net/http"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
 func validCrewFileAccess(level string) bool {
@@ -52,7 +54,7 @@ func (h *CrewConnectionHandler) UpdateFileAccess(w http.ResponseWriter, r *http.
 	// The column is selected above from two constants, never request text.
 	res, err := h.db.ExecContext(r.Context(), `UPDATE crew_connections SET `+column+`=?,
 		access_version=access_version+1, updated_at=? WHERE id=? AND workspace_id=? AND access_version=?`,
-		body.Level, time.Now().UTC().Format(time.RFC3339Nano), id, ws, body.ExpectedVersion)
+		body.Level, tsformat.Format(time.Now()), id, ws, body.ExpectedVersion)
 	if err != nil {
 		internalError(w, r, h.logger, "update crew file access", err)
 		return
