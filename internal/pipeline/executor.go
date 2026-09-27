@@ -223,7 +223,8 @@ type Executor struct {
 	// member. Also revalidates the human trigger before routine dispatch.
 	// Production wiring installs NewWorkspaceMemberChecker(db).
 	// Nil = the guard is skipped (target trusted as-is).
-	memberCheck func(ctx context.Context, workspaceID, userID string) (bool, error)
+	memberCheck     func(ctx context.Context, workspaceID, userID string) (bool, error)
+	invocationCheck func(context.Context, RunInput) error
 
 	// crewAudience resolves a `crew:<slug>` notify target to the crew's
 	// human audience (its crew_members user ids) inside ONE workspace, so
@@ -998,9 +999,10 @@ type RunInput struct {
 	// against current membership at execution boundaries. Consumed by notify steps that
 	// target `to: trigger`; empty → the notification falls back to a
 	// workspace-wide notice.
-	InvokingUserID string
-	Inputs         map[string]any
-	Mode           RunMode
+	InvokingUserID      string
+	InvocationAuthority string // Server-assigned admission policy; never user metadata.
+	Inputs              map[string]any
+	Mode                RunMode
 	// IdempotencyKey, when non-empty, makes Run dedupe via the wired
 	// IdempotencyStore: a duplicate request with the same
 	// (workspace_id, key) within the TTL returns the original run id
@@ -2402,23 +2404,24 @@ func parentRunSlug(in RunInput) string {
 //     rather than starting a fresh one.
 func buildNestedRunInput(parent RunInput, target *Pipeline, dsl *DSL, nestedInputs map[string]any, parentRunID string, remaining float64, callPath []string, chainDepth int) RunInput {
 	return RunInput{
-		WorkspaceID:     parent.WorkspaceID,
-		AuthorCrewID:    target.AuthorCrewID, // nested runs in nested pipeline's author context
-		AuthorAgentID:   target.AuthorAgentID,
-		InvokingCrewID:  parent.AuthorCrewID, // parent's author IS the invoker for the nested call
-		InvokingAgentID: parent.AuthorAgentID,
-		InvokingUserID:  parent.InvokingUserID, // 3.7 — propagate the human trigger
-		TierOverride:    parent.TierOverride,   // 3.7 — propagate the batch/eval tier override
-		TriggeredVia:    TriggeredViaCallPipeline,
-		TriggeredByID:   parentRunID, // 3.8 — parentage for RunTree (once child rows persist)
-		Inputs:          nestedInputs,
-		Mode:            parent.Mode,
-		ChainDepth:      chainDepth,
-		ChainOrigin:     chainOrigin(parent, parentRunID),
-		remainingBudget: remaining,
-		callPath:        callPath,
-		pipeline:        target,
-		dsl:             dsl,
+		WorkspaceID:         parent.WorkspaceID,
+		AuthorCrewID:        target.AuthorCrewID, // nested runs in nested pipeline's author context
+		AuthorAgentID:       target.AuthorAgentID,
+		InvokingCrewID:      parent.AuthorCrewID, // parent's author IS the invoker for the nested call
+		InvokingAgentID:     parent.AuthorAgentID,
+		InvocationAuthority: parent.InvocationAuthority,
+		InvokingUserID:      parent.InvokingUserID, // 3.7 — propagate the human trigger
+		TierOverride:        parent.TierOverride,   // 3.7 — propagate the batch/eval tier override
+		TriggeredVia:        TriggeredViaCallPipeline,
+		TriggeredByID:       parentRunID, // 3.8 — parentage for RunTree (once child rows persist)
+		Inputs:              nestedInputs,
+		Mode:                parent.Mode,
+		ChainDepth:          chainDepth,
+		ChainOrigin:         chainOrigin(parent, parentRunID),
+		remainingBudget:     remaining,
+		callPath:            callPath,
+		pipeline:            target,
+		dsl:                 dsl,
 	}
 }
 
@@ -2535,25 +2538,26 @@ func (e *Executor) persistRunStart(ctx context.Context, in RunInput, runID, pipe
 		inputsRaw = []byte("{}")
 	}
 	rec := &RunRecord{
-		ID:              runID,
-		WorkspaceID:     in.WorkspaceID,
-		PipelineID:      pipelineID,
-		PipelineSlug:    pipelineSlug,
-		Status:          RunStatusRunning,
-		Mode:            in.Mode,
-		StartedAt:       startedAt,
-		InvokingCrewID:  in.InvokingCrewID,
-		InvokingAgentID: in.InvokingAgentID,
-		InvokingUserID:  in.InvokingUserID,
-		IdempotencyKey:  in.IdempotencyKey,
-		InputsJSON:      string(inputsRaw),
-		TriggeredVia:    in.TriggeredVia,
-		TriggeredByID:   in.TriggeredByID,
-		DueAt:           in.DueAt,
-		MetadataJSON:    in.MetadataJSON,
-		IsReplay:        in.IsReplay,
-		ReplayOf:        in.ReplayOf,
-		ChainDepth:      in.ChainDepth,
+		ID:                  runID,
+		WorkspaceID:         in.WorkspaceID,
+		PipelineID:          pipelineID,
+		PipelineSlug:        pipelineSlug,
+		Status:              RunStatusRunning,
+		Mode:                in.Mode,
+		StartedAt:           startedAt,
+		InvokingCrewID:      in.InvokingCrewID,
+		InvokingAgentID:     in.InvokingAgentID,
+		InvocationAuthority: in.InvocationAuthority,
+		InvokingUserID:      in.InvokingUserID,
+		IdempotencyKey:      in.IdempotencyKey,
+		InputsJSON:          string(inputsRaw),
+		TriggeredVia:        in.TriggeredVia,
+		TriggeredByID:       in.TriggeredByID,
+		DueAt:               in.DueAt,
+		MetadataJSON:        in.MetadataJSON,
+		IsReplay:            in.IsReplay,
+		ReplayOf:            in.ReplayOf,
+		ChainDepth:          in.ChainDepth,
 		// A run with no inherited origin IS the origin, so stamp its own id
 		// rather than NULL: "what set this off" then has an answer on every
 		// row, including the human-started ones a chain later grows out of.

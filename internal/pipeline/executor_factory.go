@@ -127,6 +127,7 @@ func NewWiredExecutor(d ExecutorDeps) *Executor {
 		exec = exec.WithRunRegistry(d.Runs)
 	}
 	if d.DB != nil {
+		exec.invocationCheck = NewInvocationAuthorityChecker(d.DB)
 		exec = exec.WithIdempotencyStore(NewIdempotencyStore(d.DB))
 		exec = exec.WithStepOverrides(NewStepOverrideStore(d.DB))
 		// wait:event durability (#1409) — same thin, goroutine-free DB

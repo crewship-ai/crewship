@@ -222,9 +222,10 @@ func (d *PendingRunDispatcher) fireOne(ctx context.Context, pr PendingRun) {
 		// Thread the enqueuing user through so a notify step's `to: trigger`
 		// in this deferred run resolves to them (issue #842 Phase 1); empty
 		// keeps the workspace-notice fallback.
-		InvokingUserID: pr.InvokingUserID,
-		Tags:           tags,
-		MetadataJSON:   pr.MetadataJSON,
+		InvokingUserID:      pr.InvokingUserID,
+		InvocationAuthority: pr.InvocationAuthority,
+		Tags:                tags,
+		MetadataJSON:        pr.MetadataJSON,
 		// A one-time authoring row can be rearmed for a different date. The
 		// occurrence identifies the start; redispatch of that occurrence dedupes.
 		IdempotencyKey: ScheduledFireIdempotencyKey("pending", pr.ID, pr.FireAt.UTC().Format(time.RFC3339Nano)),

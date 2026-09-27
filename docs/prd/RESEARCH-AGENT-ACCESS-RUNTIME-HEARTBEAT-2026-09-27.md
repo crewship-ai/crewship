@@ -287,3 +287,21 @@ Pages již do pending metadata zapisuje source=page_action, page_id, panel,
 action a clicked_by (`internal/api/pages_actions.go`). Navazující návrh má
 využít tato stabilní ID a doplnit execution-time resolver jejich aktuální
 autority; samotná přítomnost metadata není kontrola oprávnění.
+
+### Důvěryhodný původ oprávnění — doplnění B2/E5
+
+metadata_json nelze použít jako autorizační autoritu: ruční Run i batch je
+přijímají od uživatele. Nové serverové invocation_authority se proto ukládá
+odděleně v pending_runs a pipeline_runs. První dvě politiky zachovávají
+přesně rozdíl veřejného API: single Run = create-tier role OR routine.run;
+batch = create-tier role. Execution kontrola čte aktuální členství/role/grant
+bez cache. Přenos přes coalescing, dispatch, resume a nested call pokrývají
+testy; API test zkouší podvržené metadata a revokaci po přijetí do fronty.
+Pages musí dostat vlastní důvěryhodnou serverovou politiku a resource reference;
+jejich dnešní metadata jsou vodítko pro návrh, ne důkaz oprávnění.
+
+Konkrétní stávající Pages kontrakt pro další krok: `resolvePanelForCaller`
+načte aktuální viewer a použije canSeePanel; `resolveDispatch` vyhledá akci
+v uloženém spec_json, vyžaduje kind=call a navíc create-tier roli MANAGER+.
+Execution resolver má znovu provést tyto kontroly a ověřit vazbu akce na
+cílovou rutinu. Single-run capability routine.run tuto Pages roli nenahrazuje.

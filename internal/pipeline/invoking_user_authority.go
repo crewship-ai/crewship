@@ -18,11 +18,22 @@ var ErrInvokingUserNotMember = errors.New("routine invoking user is no longer a 
 // Bare test executors may omit memberCheck; production always wires it.
 // Revocation stops subsequent dispatches, not an already running operation.
 func (e *Executor) checkInvokingUser(ctx context.Context, in RunInput) error {
-	if in.InvokingUserID == "" || in.Mode == ModeDryRun || e.memberCheck == nil {
+	if (in.InvokingUserID == "" && in.InvocationAuthority == "") || in.Mode == ModeDryRun {
 		return nil
 	}
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
+	if in.InvocationAuthority != "" && e.invocationCheck == nil {
+		return ErrInvocationAuthorityRevoked
+	}
+	if e.invocationCheck != nil {
+		if err := e.invocationCheck(ctx, in); err != nil {
+			return err
+		}
+	}
+	if e.memberCheck == nil {
+		return nil
+	}
 	member, err := e.memberCheck(ctx, in.WorkspaceID, in.InvokingUserID)
 	if err != nil {
 		return fmt.Errorf("routine invoking user membership check: %w", err)

@@ -323,7 +323,7 @@ func TestDispatcher_ThreadsInvokingUser(t *testing.T) {
 	ctx := context.Background()
 	if _, _, err := store.Enqueue(ctx, PendingRun{
 		ID: "p1", WorkspaceID: "w", PipelineID: "pl", PipelineSlug: "s",
-		InvokingUserID: "usr_trigger", FireAt: time.Now().Add(-time.Minute),
+		InvocationAuthority: RoutineRunAuthority, InvokingUserID: "usr_trigger", FireAt: time.Now().Add(-time.Minute),
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -336,6 +336,9 @@ func TestDispatcher_ThreadsInvokingUser(t *testing.T) {
 		return exec.last.InvokingUserID != ""
 	})
 	d.Stop()
+	if exec.last.InvocationAuthority != RoutineRunAuthority {
+		t.Fatal("dispatcher dropped authority")
+	}
 	if exec.last.InvokingUserID != "usr_trigger" {
 		t.Errorf("dispatcher RunInput.InvokingUserID = %q, want usr_trigger", exec.last.InvokingUserID)
 	}

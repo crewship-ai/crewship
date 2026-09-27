@@ -11,10 +11,10 @@ Uživatel autorizoval vývoj, testy a nasazení na dev1. Základ implementace je
 |---|---|---|
 | A1: směrované oprávnění sdílených souborů mezi crews | Implementováno a nasazeno na dev1, PR review/CI probíhá | Settings/API/CLI, none/read/read+delivery, stale update 409, role/workspace, odebrání dalšího requestu |
 | A2: agent→agent / projektové granty | Připravený návrh, neimplementováno | stabilní resource ID, efektivní dědění, všechny čtecí cesty, shell hranice |
-| B: omezený klientský běh a konverzace | B1: základ revokace členství v rutinách implementován; klientská izolace neimplementována | žadatel→běh→výstup, historie, paměť a artefakty dvou klientů |
+| B: omezený klientský běh a konverzace | B1/B2: revokace členství a serverový původ oprávnění rutin implementovány; klientská izolace neimplementována | žadatel→běh→výstup, historie, paměť a artefakty dvou klientů |
 | C: service desired state / obnova po rebootu | Nasazeno na dev1; Docker ztráta kontejneru/data a server restart ověřeny; host reboot otevřený | durable running/stopped, rekonciliace, data/identity, žádná duplicita |
 | D: credentials / revokace konkrétního grantu | D1/D2: per-agent proxy grant snapshot/refresh a zachování deny-all implementovány; přímá delivery a izolace dále otevřené | rozdílné lease, odebrání jedinému agentovi, výpadek autority, izolovaná delivery |
-| E: Chat / Issues / Routines / Pages | E1/E2/E3/E4: crew-bound IPC, work authority a revokace členství v rutinách opraveny; společná omezená autorita nedokončena | negativní end-to-end matice včetně logů/streamů/delegace |
+| E: Chat / Issues / Routines / Pages | E1–E5: crew-bound IPC, work authority a revokace ručních rutin implementovány; společná omezená autorita nedokončena | negativní end-to-end matice včetně logů/streamů/delegace |
 | F: levná kontrola práce před heartbeat | F1 nasazeno a otestováno na dev1; autoritní dedupe čeká na A2/B | žádné prázdné LLM wake, budget/dedupe/recovery bez oslabení lease |
 
 Tabulka není prohlášení, že celý Release 1.0 je připraven. Každý další balík musí
@@ -445,3 +445,33 @@ Nový head zatím nemá dokončené vzdálené review/CI; lokální zelená sada
 nasazení na dev1 tuto bránu nenahrazují. PR #2704 zůstává draft a celý release
 není připraven. Další prioritou je A2/B: konkrétní klientský resource grant a
 jeho vynucení ve všech čtecích, spouštěcích a delegovaných cestách.
+
+## B2 / E5 — trvalý původ oprávnění ručně spuštěné rutiny
+
+`invocation_authority` je nové serverové pole pending_runs/pipeline_runs,
+oddělené od uživatelem zapisovatelného metadata_json. Ruční Run/defer ukládá
+routine.run, dávka routine.batch, pouze když je znám autentizovaný člověk.
+Při dispatchi platí aktuální pravidla: OWNER/ADMIN/MANAGER pro obě cesty,
+nebo explicitní capability routine.run pro jednotlivý Run. Dávka tuto
+capability jako náhradu role nepřijímá, stejně jako dnešní vstupní API.
+Ověření čte DB bez capability cache; odebrání capability či snížení role se
+proto projeví při další execution hranici, i když členství zůstalo.
+
+Pole se atomicky mění spolu s posledním žadatelem při debounce coalescing,
+čte se při ClaimDue a DueRuns, přenáší přes dispatcher, run persistence,
+resume a nested call. Neznámá neprázdná politika nebo ztracený aktér jsou
+odmítnuti. Chyba DB není oprávnění. Metadata source=page_action ani podvržené
+invocation_authority v JSON requestu nemohou přepnout serverový grant.
+
+Migrace přidává dva sloupce s prázdným defaultem. Staré běhy, Pages a dosud
+neklasifikované zdroje zůstávají na kontrole členství B1; jejich konkrétní
+policy se nevymýšlí zpětně. Pro Pages stále chybí vlastní execution resolver
+aktuálního page/panel/action oprávnění. Nové granty agent→agent/klient→agent,
+čtecí API a shell izolace rovněž nejsou touto změnou dokončeny. Již běžící
+proces se revokací neukončuje. Kontrola přidává bounded SQL lookup, žádné LLM.
+
+Další postup: (1) policy Pages svázaná se stabilní identitou akce a revokací;
+(2) A2/B společný grant na agenta/projekt a enforcement pro Files, chat,
+artefakty, historii, paměť a delegaci; (3) oddělení shell/runtime a přímých
+credentials; (4) ucelená negativní matice dvou klientů a izolovaný reboot.
+Release gate zůstává otevřený, dokud tyto části nemají vlastní akceptaci.
