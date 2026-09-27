@@ -14,7 +14,7 @@ Uživatel autorizoval vývoj, testy a nasazení na dev1. Základ implementace je
 | B: omezený klientský běh a konverzace | Neimplementováno | žadatel→běh→výstup, historie, paměť a artefakty dvou klientů |
 | C: service desired state / obnova po rebootu | Nasazeno na dev1; Docker ztráta kontejneru/data a server restart ověřeny; host reboot otevřený | durable running/stopped, rekonciliace, data/identity, žádná duplicita |
 | D: credentials / revokace konkrétního grantu | D1: per-agent proxy grant snapshot/refresh implementován; přímá delivery a izolace dále otevřené | rozdílné lease, odebrání jedinému agentovi, výpadek autority, izolovaná delivery |
-| E: Chat / Issues / Routines / Pages | E1: crew-bound chat/config IPC opraveno; společná omezená autorita nedokončena | negativní end-to-end matice včetně logů/streamů/delegace |
+| E: Chat / Issues / Routines / Pages | E1/E2: crew-bound chat/config/run IPC opraveno; společná omezená autorita nedokončena | negativní end-to-end matice včetně logů/streamů/delegace |
 | F: levná kontrola práce před heartbeat | F1 nasazeno a otestováno na dev1; autoritní dedupe čeká na A2/B | žádné prázdné LLM wake, budget/dedupe/recovery bez oslabení lease |
 
 Tabulka není prohlášení, že celý Release 1.0 je připraven. Každý další balík musí
@@ -328,5 +328,30 @@ Review předchozího commitu upozornilo na dvě potvrzené provozní chyby:
 Doplněna diagnostika DB chyb controlleru a přechodu výpadek/obnova grant
 refresh. Refresh neloguje každou minutu další stejnou chybu; logy neobsahují
 response body, URL chyby ani tajné hodnoty. Test ověřuje omezení opakovaných
-logů i obnovení hlášení po novém výpadku. Výsledek plné brány a živá dev1
-akceptace budou doplněny po doběhnutí.
+logů i obnovení hlášení po novém výpadku. Plná Go brána nakonec prošla ve všech 146 balících. První běh našel
+starší happy-path fixture odkazující na neexistující chat; fixture nyní zakládá
+skutečný chat správného agenta. `go vet`, agentí invarianty a cílené race
+testy API/server/sidecar/orchestrátor prošly. Živá akceptace je níže.
+
+### Živá akceptace E2 a review oprav — dev1 `9449b59c4`
+
+- Dvě dočasné crews, vlastní chaty a syntetické run záznamy: vlastní create
+  201, ukončení CANCELLED 200; cizí agent a cizí chat při create 404;
+  cizí RUNNING/COMPLETED/FAILED/CANCELLED/TIMEOUT update vždy 404. Nebyl spuštěn
+  agent ani model. CANCELLED záměrně nepouští post-run verdict/consolidaci.
+  Dočasné chaty, agenty a crews uklizeny; běžná auditní historie zůstává.
+- Služba alpine s vlastním svazkem běžela bez agenta. PATCH allowed_domains
+  zastavil službu přes recycle, ale desired_state zůstal running a controller
+  ji znovu spustil. Test ověřuje lifecycle, nikoli úplnost síťového firewallu.
+- Následné odstranění pouze tohoto kontejneru vyvolalo obnovu s novým Docker
+  ID a původním syntetickým obsahem svazku. Manuální service Stop přetrval
+  přes další systemd reload dev1. Crew, kontejner a svazek byly uklizeny.
+- Na novém buildu znovu prošla prázdná rutina F1 se skipnutým agentím krokem.
+  Celý Go běh: 146 balíků exit 0; API 231,505 s. Cílené race testy všech čtyř
+  dotčených vrstev exit 0. Vet, invarianty, pre-commit lint/secret scan prošly.
+
+Produktové změny: `8667073f5`; korekce starší testovací fixture: `9449b59c4`.
+Review nálezy fingerprint/recycle/diagnostika jsou v kódu řešené; schválení
+nového headu a jeho CI je samostatná otevřená brána. PR zůstává draft.
+A2/B, zbytek E (včetně end-to-end identity/delegace), přímá credential delivery
+izolace a izolovaný host reboot stále nejsou prohlášeny za dokončené.
