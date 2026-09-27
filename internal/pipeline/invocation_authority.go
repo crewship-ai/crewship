@@ -36,7 +36,8 @@ func NewInvocationAuthorityChecker(db *sql.DB) func(context.Context, RunInput) e
 		if in.InvokingUserID == "" || db == nil {
 			return ErrInvocationAuthorityRevoked
 		}
-		if in.InvocationAuthority != RoutineRunAuthority && in.InvocationAuthority != RoutineBatchAuthority {
+		isPage := strings.HasPrefix(in.InvocationAuthority, pageActionAuthorityPrefix)
+		if !isPage && in.InvocationAuthority != RoutineRunAuthority && in.InvocationAuthority != RoutineBatchAuthority {
 			return ErrInvocationAuthorityRevoked
 		}
 		var role string
@@ -52,6 +53,9 @@ func NewInvocationAuthorityChecker(db *sql.DB) func(context.Context, RunInput) e
 		// single-run additionally admits an explicit routine.run capability.
 		switch role {
 		case "OWNER", "ADMIN", "MANAGER":
+			if isPage {
+				return checkPageActionAuthority(ctx, db, in, role)
+			}
 			return nil
 		}
 		if in.InvocationAuthority == RoutineRunAuthority && caps.Valid {

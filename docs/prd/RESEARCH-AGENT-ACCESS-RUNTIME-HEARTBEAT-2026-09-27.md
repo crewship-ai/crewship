@@ -305,3 +305,13 @@ načte aktuální viewer a použije canSeePanel; `resolveDispatch` vyhledá akci
 v uloženém spec_json, vyžaduje kind=call a navíc create-tier roli MANAGER+.
 Execution resolver má znovu provést tyto kontroly a ověřit vazbu akce na
 cílovou rutinu. Single-run capability routine.run tuto Pages roli nenahrazuje.
+
+### B3/E6: Pages execution kontrola implementována
+
+Serverový kontrakt page.action.v1 v invocation_authority nyní nese ID Page,
+panelu, akce a původní rutiny, digest deklarace a případnou publikaci.
+Executor obnovuje konkrétní Page autoritu na stejných execution hranicích
+jako ruční rutiny. Panelová viditelnost je sdílená funkce HTTP/executor,
+členství a role se čtou živě. Publish withdrawal i změna deklarace akce
+zastaví následné dispatches; podrobné hranice jsou v implementačním handoffu.
+Tato dodávka nedokončuje obecné klientské granty, čtecí cesty ani shell izolaci.

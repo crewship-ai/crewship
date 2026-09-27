@@ -143,9 +143,21 @@ func TestPageApplicationActionsPublicationFenceAndOwnReceipt(t *testing.T) {
 	if err := h.db.QueryRow(`SELECT id,spec_json FROM pages WHERE workspace_id=? AND slug=?`, ws, pageActionSlug).Scan(&pageID, &spec); err != nil {
 		t.Fatal(err)
 	}
+	var authority string
+	if err := h.db.QueryRow(`SELECT invocation_authority FROM pending_runs WHERE id=?`, receipt.PendingID).Scan(&authority); err != nil {
+		t.Fatal(err)
+	}
+	invocation := pipeline.RunInput{WorkspaceID: ws, InvokingUserID: user, InvocationAuthority: authority, Mode: pipeline.ModeRun}
+	checkAuthority := pipeline.NewInvocationAuthorityChecker(h.db)
+	if err := checkAuthority(t.Context(), invocation); err != nil {
+		t.Fatalf("published authority: %v", err)
+	}
 	// Withdrawal between authorization and enqueue must also close the transaction fence.
 	if _, err := h.db.Exec(`UPDATE page_project_live SET published=0 WHERE page_id=?`, pageID); err != nil {
 		t.Fatal(err)
+	}
+	if err := checkAuthority(t.Context(), invocation); !errors.Is(err, pipeline.ErrInvocationAuthorityRevoked) {
+		t.Fatalf("withdrawn execution allowed: %v", err)
 	}
 	withdrawnCtx := context.WithValue(context.Background(), pageApplicationFenceKey{}, &pageApplicationFence{page: pageID, workspace: ws, spec: spec, version: 1})
 	if _, _, err := h.enqueuePageAction(withdrawnCtx, pipeline.PendingRun{MetadataJSON: "{}"}); !errors.Is(err, errPageApplicationChanged) {

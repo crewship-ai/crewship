@@ -11,10 +11,10 @@ Uživatel autorizoval vývoj, testy a nasazení na dev1. Základ implementace je
 |---|---|---|
 | A1: směrované oprávnění sdílených souborů mezi crews | Implementováno a nasazeno na dev1, PR review/CI probíhá | Settings/API/CLI, none/read/read+delivery, stale update 409, role/workspace, odebrání dalšího requestu |
 | A2: agent→agent / projektové granty | Připravený návrh, neimplementováno | stabilní resource ID, efektivní dědění, všechny čtecí cesty, shell hranice |
-| B: omezený klientský běh a konverzace | B1/B2: revokace členství a serverový původ oprávnění rutin implementovány; klientská izolace neimplementována | žadatel→běh→výstup, historie, paměť a artefakty dvou klientů |
+| B: omezený klientský běh a konverzace | B1–B3: revokace členství, rutin a Page akcí implementována; klientská izolace neimplementována | žadatel→běh→výstup, historie, paměť a artefakty dvou klientů |
 | C: service desired state / obnova po rebootu | Nasazeno na dev1; Docker ztráta kontejneru/data a server restart ověřeny; host reboot otevřený | durable running/stopped, rekonciliace, data/identity, žádná duplicita |
 | D: credentials / revokace konkrétního grantu | D1/D2: per-agent proxy grant snapshot/refresh a zachování deny-all implementovány; přímá delivery a izolace dále otevřené | rozdílné lease, odebrání jedinému agentovi, výpadek autority, izolovaná delivery |
-| E: Chat / Issues / Routines / Pages | E1–E5: crew-bound IPC, work authority a revokace ručních rutin implementovány; společná omezená autorita nedokončena | negativní end-to-end matice včetně logů/streamů/delegace |
+| E: Chat / Issues / Routines / Pages | E1–E6: crew-bound IPC, work authority a revokace rutin/Pages implementovány; společná omezená autorita nedokončena | negativní end-to-end matice včetně logů/streamů/delegace |
 | F: levná kontrola práce před heartbeat | F1 nasazeno a otestováno na dev1; autoritní dedupe čeká na A2/B | žádné prázdné LLM wake, budget/dedupe/recovery bez oslabení lease |
 
 Tabulka není prohlášení, že celý Release 1.0 je připraven. Každý další balík musí
@@ -500,3 +500,34 @@ statusu completed; předchozí timeouty skriptu nebyly selháním rutin.
 Revokace capability samotná je otestována izolovaně, nikoli změnou grantů
 živého uživatele. PR zůstává draft a vzdálené review/CI nového headu je
 samostatná otevřená brána. Pages resource policy a A2/B nejsou hotové.
+
+## B3 / E6 — execution autorita akcí Pages
+
+Nově přijatá Page akce ukládá do invocation_authority verzovaný serverový
+kontrakt page.action.v1: stabilní page/panel/action ID, ID původní rutiny,
+digest definice akce a případnou verzi publikované aplikace. Metadata jsou
+nadále pouze popisná. Existující durable přenos B2 zachovává tento kontrakt
+v pending/run záznamech, coalescing, dispatcheru, nested call a resume;
+není potřeba další migrace. Nested běh kontroluje původní vstupní akci,
+nikoli náhodou stejně pojmenovanou akci své cílové rutiny.
+
+Na každé execution hranici se bez cache znovu ověří workspace členství a
+create-tier role, živá crew vlastníka panelu, viditelnost panelu, existence
+call akce v aktuálním spec_json, vazba na původní živou a aktivní rutinu a
+nezměněná definice akce. HTTP a executor sdílejí funkci CanSeePanel; grant
+na Page nerozšiřuje čtení cizí crew. U publikované aplikace musí nadále být
+aktivní stejná publikace a její spec odpovídat aktuální Page. Role MEMBER
+s routine.run sama nestačí pro Page akci, stejně jako na vstupním API.
+
+Digest je konzervativní: změna libovolné deklarace akce (včetně parametrů,
+vstupů a popisku) zastaví již přijaté další kroky. Změna definice samotné
+rutiny při zachování její identity se tímto kontraktem nefixuje; Pages mají
+stávající explicitní politiku driftu definice. Odebrání nezabije právě běžící
+proces, ale další dispatch odmítne. Dřívější Page běhy bez tohoto serverového
+kontraktu zachovávají membership floor; metadata se nepovyšují na autoritu.
+
+API testy používají skutečně migrovanou DB a frontu: OWNER, MANAGER s crew,
+odebrání crew, snížení role, smazání akce/Page/crew/rutiny, přesměrování
+rutiny, změna pevných parametrů, jiný workspace, původní autorita nested
+běhu a ignorování podvržených metadat. Test publikované aplikace ověřuje
+pozitivní authority před stažením a odmítnutí po published=0.
