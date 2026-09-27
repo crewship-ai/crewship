@@ -198,7 +198,9 @@ TODO kandidát musí být delegovaný autorovi, v agentím režimu, bez otevřen
 blockeru a bez aktivní assignment/routine execution. Nepřítomná/smazaná nebo
 cizí identita a DB chyba jsou error, nikoliv false. Save gate požaduje autora.
 Query má dvousekundový timeout a nevolá model. Podmíněné runtime kroky již
-nevyvolají předběžný prewarm; kontejner se spouští až po splnění podmínky.
+nevyvolají předběžný prewarm; kontejner se spouští až po splnění podmínky. To šetří prázdné wake, ale
+kladný výsledek může zaplatit cold-start latenci až na agentím kroku; benchmark
+2,33 ms měří pouze query, nikoliv tuto latenci.
 
 Jde o signál, ne rezervaci práce. Pozitivní výsledek může během čekání/resume
 zestárnout. Agent musí použít existující atomický issue start, budget a aktuální
@@ -240,3 +242,21 @@ teprve potřeba potvrdit. CodeRabbit review je při zápisu pending; draft není
 akceptovaný: otevřené jsou A2/B, návazná matice E, přímé credentials a izolovaná
 host reboot akceptace. Žádná současná workspace role se neslibuje jako přístup
 pouze ke konkrétnímu agentovi.
+
+
+### Linux UID hranice pro sidecar — další živý experiment
+
+Na dev1 jednorázový alpine:3 kontejner, bez sítě, read-only rootfs,
+cap-drop ALL, no-new-privileges, 64 MiB/0,25 CPU/16 PID. UID 1002 vytvořilo
+v soukromém tmpfs `/secrets` (0700) soubor pod umask 077 se syntetickou
+hodnotou. Kontrolní čtení UID 1002 uspělo. `docker exec --user 1001:1001`
+obdržel Permission denied při čtení souboru i `/proc/1/environ` procesu UID
+1002. Kontejner byl odstraněn. To dokládá tuto konkrétní Linux DAC/proc hranici;
+není to test všech sidecar endpointů ani důkaz agent→agent izolace (ti sdílí
+UID 1001). Nebyla použita ani přečtena reálná credentials.
+
+Doplňující race gate `go test -race ./internal/api -run TestManagedServices
+-count=1` prošla (46,726 s): DB lease dvou controllerů, obnova, role/CAS,
+manuální Stop i ztráta credentials. Pracovní strom po dodávce obsahuje pouze
+committed změny této větve. Živý dev1 produktový build je `990bfee8c`; pozdější
+commity přidávají pouze dokumentační akceptaci.
