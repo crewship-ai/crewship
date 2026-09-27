@@ -10,6 +10,7 @@ import { incomingWebhookFlow } from "./incoming-webhook-flow"
 test("PR browser contract subset", async ({ page }) => {
   // Includes the real HTTP Incoming lifecycle and its disposable routine setup.
   test.setTimeout(90_000)
+  const slug = `e2e-crew-${Date.now().toString(36)}`
   await test.step("login flow", async () => {
     await page.goto("/crews")
     await expect(page).toHaveURL(/\/crews/)
@@ -27,7 +28,6 @@ test("PR browser contract subset", async ({ page }) => {
   })
 
   await test.step("create crew via wizard", async () => {
-    const slug = `e2e-crew-${Date.now().toString(36)}`
     await page.goto("/crews")
     await page.getByRole("button", { name: /^Crew$/ }).click()
     await expect(page.getByRole("dialog")).toBeVisible()
