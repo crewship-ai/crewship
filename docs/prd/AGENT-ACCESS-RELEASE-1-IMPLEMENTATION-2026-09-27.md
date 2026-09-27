@@ -475,3 +475,28 @@ Další postup: (1) policy Pages svázaná se stabilní identitou akce a revokac
 artefakty, historii, paměť a delegaci; (3) oddělení shell/runtime a přímých
 credentials; (4) ucelená negativní matice dvou klientů a izolovaný reboot.
 Release gate zůstává otevřený, dokud tyto části nemají vlastní akceptaci.
+
+### Akceptace B2 / E5 — dev1 `1f93c4aa6`
+
+Po opravě nové testovací fixture (odložené spuštění potřebuje publikovanou
+verzi) prošel celý opakovaný Go běh: 146 balíků. Go vet, cílené race testy
+pipeline/API, migration lint, agentí invarianty a pre-commit kontroly prošly.
+API regresní test zachovává členství, ale odebere routine.run po enqueue;
+executor odmítne běh bez vyprázdnění vstupní capability cache. Podvržená
+request/metadata autorita se do serverového pole nedostane. Další testy
+ověřují batch roli, revokaci mezi kroky, persisted resume, coalescing,
+ClaimDue, dispatcher a nested přenos.
+
+Nasazení standardním reloadem dev1 a web export ověřeny. Přímá prázdná
+rutina i odložený běh skončily completed bez modelového volání; odložený běh
+byl přes veřejné API dohledán podle konkrétního pending_id a má lidského
+žadatele. Read-only kontrola vlastní syntetické fixture navíc potvrdila
+invocation_authority=routine.run v pending i run tabulce. Živá DB nebyla
+ručně měněna. Všechny dočasné rutiny/agenti/crews odstraněny; uzavřené
+záznamy běhů podléhají normální retenci.
+
+Smoke skript bylo potřeba opravit na skutečný API obal rows a malá písmena
+statusu completed; předchozí timeouty skriptu nebyly selháním rutin.
+Revokace capability samotná je otestována izolovaně, nikoli změnou grantů
+živého uživatele. PR zůstává draft a vzdálené review/CI nového headu je
+samostatná otevřená brána. Pages resource policy a A2/B nejsou hotové.
