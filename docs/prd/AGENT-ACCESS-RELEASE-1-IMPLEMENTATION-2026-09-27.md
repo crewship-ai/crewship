@@ -13,8 +13,8 @@ Uživatel autorizoval vývoj, testy a nasazení na dev1. Základ implementace je
 | A2: agent→agent / projektové granty | Připravený návrh, neimplementováno | stabilní resource ID, efektivní dědění, všechny čtecí cesty, shell hranice |
 | B: omezený klientský běh a konverzace | Neimplementováno | žadatel→běh→výstup, historie, paměť a artefakty dvou klientů |
 | C: service desired state / obnova po rebootu | Nasazeno na dev1; Docker ztráta kontejneru/data a server restart ověřeny; host reboot otevřený | durable running/stopped, rekonciliace, data/identity, žádná duplicita |
-| D: credentials / revokace konkrétního grantu | D1: per-agent proxy grant snapshot/refresh implementován; přímá delivery a izolace dále otevřené | rozdílné lease, odebrání jedinému agentovi, výpadek autority, izolovaná delivery |
-| E: Chat / Issues / Routines / Pages | E1/E2: crew-bound chat/config/run IPC opraveno; společná omezená autorita nedokončena | negativní end-to-end matice včetně logů/streamů/delegace |
+| D: credentials / revokace konkrétního grantu | D1/D2: per-agent proxy grant snapshot/refresh a zachování deny-all implementovány; přímá delivery a izolace dále otevřené | rozdílné lease, odebrání jedinému agentovi, výpadek autority, izolovaná delivery |
+| E: Chat / Issues / Routines / Pages | E1/E2/E3: crew-bound chat/config/run IPC a work authority opraveny; společná omezená autorita nedokončena | negativní end-to-end matice včetně logů/streamů/delegace |
 | F: levná kontrola práce před heartbeat | F1 nasazeno a otestováno na dev1; autoritní dedupe čeká na A2/B | žádné prázdné LLM wake, budget/dedupe/recovery bez oslabení lease |
 
 Tabulka není prohlášení, že celý Release 1.0 je připraven. Každý další balík musí
@@ -373,3 +373,29 @@ Pět přenosových struktur nyní používá omitzero: nil se nadále vynechá, 
 orchestrátor a boot payload i skutečné rozhodnutí sidecar CredStore po JSON
 round tripu. Nepřidává se nový legacy fallback. Nejde o dokončení izolace
 přímých env/file credentials ani balíku B.
+
+### Akceptace E3 / D2 — dev1 `7d9b5e772`
+
+Celý `go test ./... -count=1`: 146 balíků, exit 0; `go vet ./...`,
+agentí invarianty a cílené race testy API/orchestrátor/chatbridge/sidecar také
+prošly. Nasazeno standardním reloadem dev1, build identity ověřena.
+
+Skutečný sidecar binár z nasazeného dev1 byl připojen read-only do dvou
+jednorázových alpine kontejnerů: network=none, UID 1002, klient UID 1001,
+read-only rootfs, cap-drop ALL, no-new-privileges, omezené CPU/RAM/PID a tmpfs.
+Použity jen syntetické credentials a lokální mock upstream ve stejném
+network namespace. Kontrolní legacy payload dovolil požadavek (HTTP 200).
+Payload s explicitním agent_grants={} vrátil HTTP 503 a upstream nedostal
+žádný request. Oba kontejnery odstraněny. Tento experiment potvrzuje startup
+semantiku skutečného bináru; nezaměňuje se za test izolace skutečných tajných
+hodnot všech agentů. JSON přenos přes všech pět DTO pokrývají regresní testy.
+
+Živé HTTP API se dvěma vlastními dočasnými crews znovu odmítlo cizí create
+run, cizí chat attribution a všechny změny cizího běhu. Journal-only záznamy
+bez work attemptu a neexistující run vrátily shodné active=false (HTTP 200).
+Pozitivní liveness, crew scope a přesun agenta byly ověřeny nad izolovanou
+testovací DB, nikoli změnou živého work ledgeru. Chaty, agenty a crews uklizeny;
+syntetické běhy uzavřeny CANCELLED bez modelu či post-run verdictu.
+
+PR zůstává draft; vzdálené CI/review tohoto commitu je samostatná brána.
+D2 zde označuje opravu přenosu grantů, nikoli hotovou přímou env/file izolaci.
