@@ -678,10 +678,11 @@ code.
 snapshot — the provider / model / capability / price index — so Crewship can
 answer "what does this model cost" without a network call.
 
-- **What is in it:** 8 of the 192 upstream providers — `amazon-bedrock`,
-  `anthropic`, `deepseek`, `google`, `mistral`, `openai`, `openrouter`, `xai` —
+- **What is in it:** 9 of the 192 upstream providers — `amazon-bedrock`,
+  `anthropic`, `deepseek`, `google`, `mistral`, `openai`, `opencode`,
+  `openrouter`, `xai` —
   with every model those providers publish kept **verbatim**, including fields
-  this package does not decode. Fetched 2026-08-19.
+  this package does not decode. Fetched 2026-09-06.
 - **Why trimmed:** the full index is ~4 MB and 92% of it is gateways we have no
   codec for. The kept set covers every provider in `priceTable` or the curated
   model lists, plus the two gateways a future provider would reach through the
@@ -726,7 +727,7 @@ rates and is what catches an upstream repricing or a renamed id.
 
 <Note>
   **Three model vocabularies, one page each.** The **curated lists** behind
-  `GET /api/v1/models` answer "which ids may I type" for four providers
+  `GET /api/v1/models` answer "which ids may I type" for seven providers
   ([Model discovery](/guides/model-discovery)). They live in one hand-edited
   file, `config/models.json`, which the Go binary embeds (`config.ModelsJSON` →
   `internal/llm.CuratedModels`) and the web bundle imports (`lib/model-catalog.ts`),

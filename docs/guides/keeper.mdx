@@ -1165,8 +1165,10 @@ server restart needed:
   synchronous review endpoint (`crewship keeper review run behavior`) write the
   same `keeper_requests` row and the same inbox fan-out: `WARN` → non-blocking
   inbox item, `ESCALATE` → operator review (blocking in `block` mode at
-  strict/guided autonomy), `DENY` in `block` mode → blocking inbox item,
-  `ALLOW` → journal telemetry only. What each mode/autonomy combination
+  strict/guided autonomy), `DENY` in `block` mode → blocking inbox item at
+  strict/guided (at `trusted` it interrupts the next call and journals,
+  without an inbox row), `ALLOW` → journal telemetry only. What each
+  mode/autonomy combination
   produces is the [behaviour
   evaluator](/guides/autonomy-and-self-learning#behavior_mode-—-what-happens-when-the-monitor-fires)
   matrix, and the sampled path honours it — the journal and the inbox both

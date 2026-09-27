@@ -52,7 +52,7 @@ crewship work list --agent research-agent -f json
 | `--state` | (unset) | Filter by state: `queued`, `starting`, `running`, `waiting`, `retry_wait`, `succeeded`, `failed`, `expired`, `cancelled`, `needs_reconciliation` |
 | `--class` | (unset) | Filter by capacity class: `chat` or `background` |
 | `--source` | (unset) | Filter by producer: `webhook`, `chat`, `assignment`, `schedule`, `pipeline_step`, `manual` |
-| `--agent` | (unset) | Filter by the agent the work runs as |
+| `--agent` | (unset) | Filter by agent slug or ID. An unknown slug is refused with suggestions rather than answered with an empty page; a CUID-shaped ID of a deleted agent still filters that agent's historical work. |
 | `--after` | (unset) | Resume from a previous page's cursor |
 
 **Output columns:** ID, STATE, CLASS, SOURCE, AGENT, ATTEMPTS, CREATED

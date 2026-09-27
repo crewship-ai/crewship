@@ -292,7 +292,7 @@ It is no longer the only rate source: an **embedded models.dev snapshot** (`inte
 |---|---|---|
 | 1 | `priceTable["<provider>/<model>"]` | Exact, hand-verified. Authoritative. |
 | 2 | `priceTable["<provider>/*"]` | The wildcard. How `ollama/*` and `local/*` stay free. |
-| 3 | The embedded **models.dev snapshot** | 8 providers, 621 models (`internal/paymaster/catalog_pricing.go`). |
+| 3 | The embedded **models.dev snapshot** | 9 providers, 737 models (`internal/paymaster/catalog_pricing.go`). |
 | 4 | `providerFallback["<provider>"]` | The per-provider ceiling. |
 | 5 | \$0 | Only when the provider itself is unknown — the operator is meant to notice. |
 
@@ -389,7 +389,7 @@ Look for the `llm.call` journal entry: if it exists, the call was metered. If yo
 
 - **Soft budgets still emit entries.** A soft budget at 120% still writes `budget.warning` to the journal -- the UI uses this to paint red. Don't filter out "soft" when looking for "who was over".
 - **Stream path is unmetered.** `wrappedProvider.Stream()` bypasses the full middleware (token counts arrive in the terminal `message_delta` event, which the sync `CallResponse` shape can't carry). Streaming callers pay through orchestrator-level accounting that predates this package.
-- **Pricing is estimated, and a "price" may be a ceiling.** A new model from a provider the snapshot covers (anthropic, openai, google, deepseek, mistral, xai, openrouter, amazon-bedrock) is priced automatically at step 3. Anything else lands on the per-provider ceiling at step 4 — a real number, deliberately high, and not the invoice. The estimate does **not** fall to \$0 unless the *provider id itself* is unknown, which is the case worth chasing: a registry row or a `Provider.Name()` with no rate row and no catalog entry bills every call at \$0. Run `crewship model price` on the pair before assuming; `pricing.go` is where a correction goes, but it is no longer the first place to look.
+- **Pricing is estimated, and a "price" may be a ceiling.** A new model from a provider the snapshot covers (anthropic, openai, google, deepseek, mistral, xai, openrouter, amazon-bedrock, opencode) is priced automatically at step 3. Anything else lands on the per-provider ceiling at step 4 — a real number, deliberately high, and not the invoice. The estimate does **not** fall to \$0 unless the *provider id itself* is unknown, which is the case worth chasing: a registry row or a `Provider.Name()` with no rate row and no catalog entry bills every call at \$0. Run `crewship model price` on the pair before assuming; `pricing.go` is where a correction goes, but it is no longer the first place to look.
 
 ## Related
 

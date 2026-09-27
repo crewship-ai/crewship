@@ -145,7 +145,8 @@ The F4.2 behavior monitor (Keeper Phase 2) samples tool calls — one in every N
   the same whether the verdict came from the live sampler or from
   `crewship keeper review run behavior` — `WARN` → non-blocking inbox item,
   `ESCALATE` → operator review (blocking in `block` mode at strict/guided),
-  `DENY` in `block` mode → blocking inbox item, `ALLOW` → journal telemetry.
+  `DENY` in `block` mode → blocking inbox item at strict/guided (at `trusted`
+  it interrupts and journals without an inbox row), `ALLOW` → journal telemetry.
   Read the monitor as detection with a full audit trail, not as an
   authorization boundary; see
   [Keeper → Watchdog governance](/guides/keeper#watchdog-governance-per-workspace).

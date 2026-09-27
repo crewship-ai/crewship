@@ -12,25 +12,34 @@ Crewship includes a built-in scheduler that triggers agent runs on a cron schedu
 
 ## How It Works
 
-The scheduler is a background goroutine that manages a pool of cron jobs, one per enabled agent schedule. On startup it loads all agents with `schedule_enabled = 1` from the database and registers their cron expressions. Each tick of a cron job triggers a full agent run cycle.
+The scheduler is a background goroutine that manages a pool of cron jobs, one per enabled agent schedule. On startup it loads all agents with `schedule_enabled = 1` from the database and registers their cron expressions. A cron tick does **not** execute the agent: it accepts the due occurrence into the **durable work queue** — the cursor advance and the immutable occurrence commit in one database transaction — and the shared dispatcher owns every execution attempt, including on a later process.
 
 ```
-Scheduler goroutine
+Scheduler goroutine (leader only)
     |
     v
 cron library fires at scheduled time
     |
     v
-triggerAgent(agent)
+AcceptDue: atomically reserve the occurrence + advance the cursor
+    |        (a duplicate tick resolves to the existing work item)
+    v
+durable work queue (work item, immutable input snapshot)
     |
-    +--> Create chat session (deterministic ID)
+    v
+dispatcher re-checks authority before execution
+    |        (schedule still enabled; agent, crew, workspace unchanged)
+    v
+ScheduledRuntime executes the agent run
+    +--> Create chat session ("scheduled-{run_id}")
     +--> Resolve chat (credentials, system prompt, skills)
     +--> Ensure crew container is running
-    +--> Create run record (trigger: SCHEDULED)
+    +--> Create run record (trigger: SCHEDULED); run.started journalled durably
     +--> Execute agent via orchestrator.RunAgent
     +--> Update run record (COMPLETED or FAILED)
-    +--> Update schedule_last_run and schedule_next_run
 ```
+
+A boot-time sweep (repeated every 30 s) accepts occurrences whose due instant already passed — downtime or a leadership change cannot silently skip a daily occurrence until tomorrow's tick.
 
 ## Enabling a Schedule
 
@@ -138,11 +147,11 @@ Examples:
 
 ## Execution Flow
 
-Each scheduled trigger follows this sequence:
+After the dispatcher claims the accepted work item (and re-checks its authority), the scheduled runtime follows this sequence:
 
 <Steps>
   <Step title="Chat Session Creation">
-    A new chat session is created with a deterministic ID (format: `sched_{unixnano}_{random_hex}`). The chat title is set to `"Scheduled: {agent_name}"`.
+    A new chat session is created with the ID `scheduled-{run_id}` and the title "Scheduled agent run".
   </Step>
 
   <Step title="Chat Resolution">
@@ -150,7 +159,7 @@ Each scheduled trigger follows this sequence:
   </Step>
 
   <Step title="Container Management">
-    If a container provider is configured, the scheduler ensures the crew container is running before execution. Default resource limits:
+    If a container provider is configured, the runtime ensures the crew container is running before execution. Default resource limits:
 
     | Resource | Default |
     |----------|---------|
@@ -159,7 +168,7 @@ Each scheduled trigger follows this sequence:
   </Step>
 
   <Step title="Run Record">
-    A run record is created with trigger type `SCHEDULED` before execution begins. Metadata includes the CLI adapter, crew info, and a `scheduled` tag.
+    A run record is created with trigger type `SCHEDULED` before execution begins — and is acknowledged only after its `run.started` entry is durably journalled; an unavailable journal fails closed rather than letting the agent start unrecorded. Metadata includes the CLI adapter, crew info, and a `scheduled` tag.
   </Step>
 
   <Step title="Agent Execution">
@@ -172,36 +181,31 @@ Each scheduled trigger follows this sequence:
     - Duration in milliseconds
     - Cost and usage metadata (if available from the LLM provider)
 
-    The assistant response is persisted to the conversation store and the message count is incremented.
+    The assistant response is persisted to the conversation store and the message count is incremented. `schedule_last_run` is stamped at execution start.
   </Step>
 </Steps>
 
 ### At-most-once firing
 
-Each scheduled *occurrence* fires **at most once**. Before any side effect
-(chat, container, run record), the scheduler reserves the occurrence in a shared
-idempotency table using a deterministic key derived from the agent id and the
-occurrence's minute bucket. A duplicate tick within the same minute — or a
-process restart that happens **after** a run started but **before** the
-schedule's `next_run` was advanced — resolves to the existing reservation and is
-**skipped** rather than run a second time. The next occurrence falls in a
-distinct minute bucket, gets a fresh key, and fires normally.
+Each scheduled *occurrence* becomes **at most one** work item. The cursor
+advance and the occurrence reservation commit together: a duplicate tick
+within the same minute — a second replica, or a tick racing the overdue sweep
+— resolves to the **existing** work item and reports it as a duplicate; it is
+never accepted twice. The next occurrence is a distinct work item with its
+own identity and fires normally.
 
-This is **at-most-once, not exactly-once**: the key is reserved *before* the run
-executes, so a crash *between* the reservation and execution drops that
-occurrence (it is not retried) rather than running it twice. If the idempotency
-store is unreachable the fire fails **closed** — the occurrence is skipped, never
-double-run. Duplicate protection is the guarantee; delivery is best-effort.
-
-The agent scheduler, the routine (pipeline) scheduler, its wake-check probe, and
-deferred (pending) runs all share **one** dedup discipline — the same
-`pipeline_run_idempotency` table and the `ScheduledFireIdempotencyKey` helper —
-so every firing path is at-most-once.
+Because acceptance *is* the durable commit, a crash after acceptance does
+not drop the occurrence: the work item is already in the queue, and the
+dispatcher — including on a later process, once the overdue sweep has run —
+executes it. If acceptance itself fails (database unavailable, disk guard),
+the occurrence **remains due** and is retried on the next tick or sweep; the
+fire fails closed, never double-runs. Duplicate protection and delivery are
+both durable.
 
 <Note>
-  This is **single-instance** protection. Running multiple replicas would still
-  double-fire (each replica runs its own in-memory cron); true multi-replica
-  exactly-once needs leader election, tracked separately.
+  This is **single-leader** protection per occurrence. Running multiple
+  replicas is safe with leader election enabled (see below); the per-item
+  atomic claim remains as a second line of defence.
 </Note>
 
 ### Missed-run catch-up (routine schedules)
@@ -218,11 +222,7 @@ guide for the full semantics and the inbox notice it raises.
 
 ## Timeout
 
-Each scheduled run has a **45-minute timeout**. If the agent does not complete within this window, the context is cancelled and the run is marked as failed.
-
-```go
-ctx, cancel := context.WithTimeout(s.ctx, 45*time.Minute)
-```
+Each scheduled run has a **45-minute hard cap** applied by the scheduled runtime, preserved even when an agent has no per-run timeout configured. If the agent does not complete within this window, the context is cancelled and the dispatcher owns the stop and reconciliation from there.
 
 <Info>
   This is separate from the per-agent `timeout_secs` setting, which controls the LLM execution timeout within the container. The 45-minute limit is the outer boundary for the entire scheduled run cycle including container startup and chat resolution.
@@ -236,10 +236,12 @@ The scheduler maintains two fields on each agent:
 
 | Field | Updated | Description |
 |-------|---------|-------------|
-| `schedule_last_run` | After each run | ISO 8601 timestamp of the last completed run |
-| `schedule_next_run` | After each run and on schedule update | ISO 8601 timestamp of the next scheduled run |
+| `schedule_next_run` | At acceptance (same transaction as the occurrence), on schedule create/update, and on cursor (re-)initialisation | ISO 8601 timestamp of the next scheduled occurrence |
+| `schedule_last_run` | At execution start | ISO 8601 timestamp of the most recent run the dispatcher actually started |
 
-These fields are updated even on error -- `schedule_next_run` always reflects the next trigger time so monitoring dashboards stay accurate.
+Because the cursor advances at acceptance, `schedule_next_run` never moves as
+a side effect of execution latency — a slow or retried run cannot make the
+schedule fall behind or double-fire.
 
 ### Run Records
 
@@ -270,13 +272,24 @@ Disabling a schedule (`schedule_enabled: false`) removes the cron entry and stop
 
 ## Error Handling
 
-If any step in the trigger pipeline fails (chat creation, resolution, container startup), the scheduler:
+Failures split by where they happen:
 
-1. Logs the error
-2. Updates `schedule_next_run` to the next trigger time
-3. Does **not** update `schedule_last_run` (only updated on successful execution start)
+- **At acceptance** (database unavailable, disk guard refusal): the occurrence
+  stays due and the next tick or the 30 s overdue sweep retries it — logged,
+  never dropped, never doubled.
+- **At dispatch** (authority re-check): if the schedule was disabled, or the
+  agent, its crew or the workspace changed or was deleted after acceptance,
+  the item is refused with the reason — an accepted occurrence is not a
+  licence to run against a world that changed. An agent staged for review is
+  re-checked after 30 s rather than refused outright.
+- **During execution** (chat creation, resolution, container startup, agent
+  failure): the work item holds its heartbeat and lease; the dispatcher's
+  stop/reconciliation discipline applies, exactly as for webhook-owned runs.
+  The cursor has already advanced at acceptance, so a failed execution does
+  not re-fire the same occurrence — the next cron tick is the next run.
 
-The next scheduled trigger will attempt the full pipeline again. There is no exponential backoff -- the cron schedule determines retry timing.
+There is no exponential backoff -- the cron schedule determines retry timing
+across occurrences.
 
 ## Running multiple replicas (leader election)
 

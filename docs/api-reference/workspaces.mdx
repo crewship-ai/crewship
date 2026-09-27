@@ -1041,9 +1041,9 @@ Runs started on this route are recorded as user-driven: `invoking_user_id` is th
 |---|---|
 | `404` | Pipeline not found |
 | `409` | The recipe changed since preview; refresh it before starting. |
-| `422` | A required credential, integration or resource is unavailable. |
+| `422` | A required credential, integration or resource is confirmed missing. During execution, an HTTP step whose `credential_ref` cannot be resolved stops before sending the request (a store error blocks with `503`). |
 | `429` | A run with the same `concurrency_key` is already in flight (sets `Retry-After: 5`) |
-| `503` | Runner not wired |
+| `503` | Runner not wired, or the credential store is unavailable so a required-credential check cannot be decided — both fail closed rather than dispatch without the check. |
 
 #### `RunResult` shape
 

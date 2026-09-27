@@ -159,7 +159,7 @@ GET /api/v1/models?provider={PROVIDER}&workspace_id={workspaceId}
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `provider` | string | Yes | Provider to enumerate. Case-insensitive; upper-cased server-side. One of `ANTHROPIC`, `OPENAI`, `GOOGLE`, `OLLAMA` (`internal/api/models.go:45-50`). |
+| `provider` | string | Yes | Provider to enumerate. Case-insensitive; upper-cased server-side. One of `ANTHROPIC`, `OPENAI`, `GOOGLE`, `OLLAMA`, `OPENCODE`, `OPENCODE_GO`, `ZAI_CODING_PLAN` (`internal/api/models.go:66-74`; the three gateway providers answer from a curated list and never reject custom ids). |
 | `workspace_id` | string | Yes | Workspace whose provider credential is used for live listing. |
 
 **Response:** `200 OK`
@@ -191,7 +191,7 @@ GET /api/v1/models?provider={PROVIDER}&workspace_id={workspaceId}
 | Status | Condition |
 |---|---|
 | `200` | Model set returned (`source` reports live vs curated). |
-| `400` | `provider` missing, or not one of `ANTHROPIC`/`OPENAI`/`GOOGLE`/`OLLAMA` (`internal/api/models.go:88-96`). |
+| `400` | `provider` missing, or not one of the supported providers (`internal/api/models.go:130-136`). |
 | `502` | `OLLAMA` daemon unreachable and no curated fallback exists (`internal/api/models.go:104`). |
 
 ---

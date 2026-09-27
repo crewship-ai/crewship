@@ -435,6 +435,18 @@ already terminal request is `409`, and a required four-eyes approval that the
 requesting agent's owner attempts to self-approve is `403`. The update of the
 Keeper request, inbox item, and journal entry is atomic.
 
+A **human** ALLOW here is not just a recorded verdict: it mints a
+**single-use, 15-minute consumable approval** bound to the same agent,
+credential and request type (and, for `/execute`, the identical command),
+which the agent can present on exactly one retry through its sidecar
+(`approval_request_id` body field or `X-Keeper-Approval` header, after polling
+the agent-facing request-status route on the [internal API](/api-reference/internal#keeper)).
+It is spent before execution, the
+retry's own row is never spendable, and races resolve to exactly one winner —
+approvals cannot chain. A resolution recorded with an `adjudicator` (a model
+reference) deliberately mints nothing. See
+[Keeper → Rule on an escalation](/guides/keeper#rule-on-an-escalation).
+
 ### `DELETE /api/v1/admin/keeper/requests`
 
 **Auth:** ADMIN or OWNER. **Request:** no body. **Response:** deletion counts.

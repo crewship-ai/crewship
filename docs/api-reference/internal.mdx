@@ -307,9 +307,20 @@ See [Agent memory](/guides/agent-memory) for the profiles and conflict vocabular
 
 | Method | Path | Purpose |
 |---|---|---|
-| `POST` | `/api/v1/internal/keeper/request` | Sidecar forwards a credential read request. |
-| `GET` | `/api/v1/internal/keeper/request/{requestId}` | Fetch the status / decision of a previously submitted request. |
-| `POST` | `/api/v1/internal/keeper/execute` | Sidecar forwards a sealed credential-use request after gatekeeper approval. See the [Keeper section](#keeper) for the full request flow. |
+| `POST` | `/api/v1/internal/keeper/request` | Sidecar forwards a credential read request. Accepts an optional `approval_request_id` (or `X-Keeper-Approval` header) to present a previously approved escalation on the retry — see below. |
+| `GET` | `/api/v1/internal/keeper/request/{requestId}` | Fetch the status / decision of a previously submitted request. Pinned to the acting agent (`?agent_id=` set by the sidecar; a mismatch answers `404`), so an agent can poll whether its escalation was approved. Carries `request_type` and, once consumed, `approval_consumed_at`. |
+| `POST` | `/api/v1/internal/keeper/execute` | Sidecar forwards a sealed credential-use request after gatekeeper approval. Accepts the same `approval_request_id` / `X-Keeper-Approval` presentation. See the [Keeper section](#keeper) for the full request flow. |
+
+**Presenting a human approval.** A request or execute retry may carry the id of
+an escalation a person resolved as ALLOW. The approval binds to the same
+agent, credential and request type — and, for `/execute`, the identical
+command — is **single-use** (races resolve to exactly one winner; the retry's
+own row is never spendable, so approvals cannot chain), expires after
+**15 minutes**, and is spent *before* execution. Only a row resolved by a
+person is consumable; an adjudicator/model ALLOW mints nothing. Binding
+mismatches answer `403`, a spent or superseded approval `409`, an expired one
+`410 Gone`. The full agent-side flow is in
+[Keeper → Rule on an escalation](/guides/keeper#rule-on-an-escalation).
 
 Keeper Phase 2 (aux-LLM evaluators, PR-C / PRD §6 F4). All four are wrapped in `internalAuth` **and** `internalWsCtx` (which reads `?workspace_id=` into the request context — see the [Authentication](#authentication) known-exception note). They are always registered, returning a deterministic `503` ("evaluator not configured") until the evaluators are wired (`router_internal.go:177-202`).
 
