@@ -15,7 +15,7 @@ Uživatel autorizoval vývoj, testy a nasazení na dev1. Základ implementace je
 | C: service desired state / obnova po rebootu | Nasazeno na dev1; Docker ztráta kontejneru/data a server restart ověřeny; host reboot otevřený | durable running/stopped, rekonciliace, data/identity, žádná duplicita |
 | D: credentials / revokace konkrétního grantu | D1: per-agent proxy grant snapshot/refresh implementován; přímá delivery a izolace dále otevřené | rozdílné lease, odebrání jedinému agentovi, výpadek autority, izolovaná delivery |
 | E: Chat / Issues / Routines / Pages | Existující mechanismy inventarizované, společná omezená autorita nedokončena | negativní end-to-end matice včetně logů/streamů/delegace |
-| F: levná kontrola práce před heartbeat | F1 query/conditional prewarm implementováno, final gate a dev1 smoke probíhá; autoritní dedupe čeká na A2/B | žádné prázdné LLM wake, budget/dedupe/recovery bez oslabení lease |
+| F: levná kontrola práce před heartbeat | F1 nasazeno a otestováno na dev1; autoritní dedupe čeká na A2/B | žádné prázdné LLM wake, budget/dedupe/recovery bez oslabení lease |
 
 Tabulka není prohlášení, že celý Release 1.0 je připraven. Každý další balík musí
 mít vlastní reproduktor a testovací bránu. Sdílené UID crew zůstává důvěrovou
@@ -218,3 +218,25 @@ Vzdálený CodeQL označil sčítání délek při rekonstrukci ciphertext+tag v
 Decrypt. Nová alokace používá `len(data)-len(iv)` po existující kontrole délky;
 copy zachovává GCM layout. Celý encryption test balík včetně layout/TS
 kompatibility prošel. Z nálezu samotného netvrdíme prokázaný exploit.
+
+
+### Dokončená verifikace F1 (`990bfee8c`)
+
+Celý `go test ./... -count=1` znovu exit 0 (146 balíků), `go vet ./...`
+exit 0, strict docs inventory a diff-scoped timestamp lint prošly. Po malé
+změně alokace v encryption samostatně prošly všechny encryption testy.
+Dev1 znovu nasazen přes systemd reload, build identity ověřena.
+
+Živý CLI smoke vytvořil vlastní crew a autora, uložil rutinu s query a
+podmíněným `agent_run`, poté ji spustil. Výsledek: COMPLETED, `has_work=false`,
+`work=<skipped>`, 61 ms za celou rutinu a $0.0000. Jde o jeden lokální smoke,
+nikoliv výkonový percentil. Dočasná rutina/agent/crew odstraněny; auditní
+historie přirozeně zůstává podle běžné retence. První harness předpokládal JSON
+stdout z `routine run -f json`; tento existující příkaz vypisuje text. Harness
+byl upraven na skutečný výstup, samotný run proběhl už při prvním pokusu.
+
+Remote CI na `990bfee8c` běží znovu; výsledek CodeQL po úpravě alokace je
+teprve potřeba potvrdit. CodeRabbit review je při zápisu pending; draft není mergovaný. Celek Release 1.0 není
+akceptovaný: otevřené jsou A2/B, návazná matice E, přímé credentials a izolovaná
+host reboot akceptace. Žádná současná workspace role se neslibuje jako přístup
+pouze ke konkrétnímu agentovi.
