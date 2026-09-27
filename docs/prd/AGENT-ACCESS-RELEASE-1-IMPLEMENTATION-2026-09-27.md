@@ -11,7 +11,7 @@ Uživatel autorizoval vývoj, testy a nasazení na dev1. Základ implementace je
 |---|---|---|
 | A1: směrované oprávnění sdílených souborů mezi crews | Implementováno a nasazeno na dev1, PR review/CI probíhá | Settings/API/CLI, none/read/read+delivery, stale update 409, role/workspace, odebrání dalšího requestu |
 | A2: agent→agent / projektové granty | Připravený návrh, neimplementováno | stabilní resource ID, efektivní dědění, všechny čtecí cesty, shell hranice |
-| B: omezený klientský běh a konverzace | B1–B3: revokace členství, rutin a Page akcí implementována; B4 read-only share implementován, finální akceptace probíhá; klientská izolace neimplementována | žadatel→běh→výstup, historie, paměť a artefakty dvou klientů |
+| B: omezený klientský běh a konverzace | B1–B3: revokace členství, rutin a Page akcí implementována; B4 read-only share nasazen a ověřen na dev1; klientská izolace neimplementována | žadatel→běh→výstup, historie, paměť a artefakty dvou klientů |
 | C: service desired state / obnova po rebootu | Nasazeno na dev1; Docker ztráta kontejneru/data a server restart ověřeny; host reboot otevřený | durable running/stopped, rekonciliace, data/identity, žádná duplicita |
 | D: credentials / revokace konkrétního grantu | D1/D2: per-agent proxy grant snapshot/refresh a zachování deny-all implementovány; přímá delivery a izolace dále otevřené | rozdílné lease, odebrání jedinému agentovi, výpadek autority, izolovaná delivery |
 | E: Chat / Issues / Routines / Pages | E1–E6: crew-bound IPC, work authority a revokace rutin/Pages implementovány; společná omezená autorita nedokončena | negativní end-to-end matice včetně logů/streamů/delegace |
@@ -624,3 +624,37 @@ Finální `go test ./... -count=1` prošel: 147 balíků, exit 0. Go vet,
 cílené race testy store/API, šest UI testů, test typecheck, lint (0 chyb;
 30 existujících varování), static export, agentí invarianty a strict docs
 inventory prošly. Živá dev1 akceptace se zapisuje až podle výsledku níže.
+
+
+### Akceptace B4 — dev1 `92450ef3f`
+
+Nasazeno standardním `systemctl reload crewship-ws@1`; Go proces i web export
+odpovídají produktovému commitu. Živý smoke vytvořil vlastní crew, agenta a dva
+prázdné lidské chaty přes CLI. Ověřil create/list/read/revoke, nepřítomnost
+hash/token materiálu ve výpisu, no-store, nesprávný token druhého chatu,
+odmítnutí cookie/query a běžného administrátorského tokenu na sdíleném readeru.
+Share token nedostal přístup k běžným agents/Files/history/ws-token cestám.
+Krátký grant po expiraci vrátil 404; odvolaný grant také 404.
+
+Během testu druhý standardní reload nahradil běžící PID dev1. Původní vydaný
+grant zůstal použitelný, bez opětovného vydání a bez zápisu do živé DB mimo
+veřejné API/migraci. To dokládá restart serveru, nikoli reboot celého hosta.
+
+Playwright otevřel `/shared-chat` v novém anonymním browser contextu. Čtení
+prošlo bez loginu; token šel pouze v Authorization, bez cookies a Referer.
+Refresh provedl druhé čtení, token nebyl v URL ani local/sessionStorage,
+Clear odstranil token i přepis z pohledu. Nebyl požadován žádný modelový běh;
+pozitivní živý přepis byl prázdný. Filtrování skutečných text/structured canary
+fixtures a limit 413 dokládají automatické izolované testy, nikoli tento smoke.
+
+Všechny syntetické chaty/agenti/crew byly uklizeny. Dev2/dev3, host a Docker
+daemon se nerestartovaly. Testované zdrojové soubory se po finálním Go průchodu
+neměnily funkčně. PR #2704 zůstává draft; vzdálené CI/review jsou další brána. Při poslední
+kontrole CodeRabbit hlásil rate limit a starší review nepokrývalo nový head;
+zelený check proto nebyl považován za review. CI nového produktového commitu
+ještě běželo.
+
+Další nezbytný celek je A2/B: stabilní granty agenta/projektu a klientský
+execution kontext s izolovaným runtime, následované enforcementem Files,
+paměti, historie, artefaktů, streamů a delegace. B4 sdílí jeden textový přepis;
+neplní slib „externí klient může bezpečně chatovat jen s jedním agentem“.
