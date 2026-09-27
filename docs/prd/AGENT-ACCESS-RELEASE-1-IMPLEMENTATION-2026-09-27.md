@@ -14,7 +14,7 @@ Uživatel autorizoval vývoj, testy a nasazení na dev1. Základ implementace je
 | B: omezený klientský běh a konverzace | Neimplementováno | žadatel→běh→výstup, historie, paměť a artefakty dvou klientů |
 | C: service desired state / obnova po rebootu | Nasazeno na dev1; Docker ztráta kontejneru/data a server restart ověřeny; host reboot otevřený | durable running/stopped, rekonciliace, data/identity, žádná duplicita |
 | D: credentials / revokace konkrétního grantu | D1: per-agent proxy grant snapshot/refresh implementován; přímá delivery a izolace dále otevřené | rozdílné lease, odebrání jedinému agentovi, výpadek autority, izolovaná delivery |
-| E: Chat / Issues / Routines / Pages | Existující mechanismy inventarizované, společná omezená autorita nedokončena | negativní end-to-end matice včetně logů/streamů/delegace |
+| E: Chat / Issues / Routines / Pages | E1: crew-bound chat/config IPC opraveno; společná omezená autorita nedokončena | negativní end-to-end matice včetně logů/streamů/delegace |
 | F: levná kontrola práce před heartbeat | F1 nasazeno a otestováno na dev1; autoritní dedupe čeká na A2/B | žádné prázdné LLM wake, budget/dedupe/recovery bez oslabení lease |
 
 Tabulka není prohlášení, že celý Release 1.0 je připraven. Každý další balík musí
@@ -260,3 +260,27 @@ Doplňující race gate `go test -race ./internal/api -run TestManagedServices
 manuální Stop i ztráta credentials. Pracovní strom po dodávce obsahuje pouze
 committed změny této větve. Živý dev1 produktový build je `990bfee8c`; pozdější
 commity přidávají pouze dokumentační akceptaci.
+
+## E1 — interní chat a konfigurace respektují crew token
+
+Regresní reproduktor `TestInternalChatCrewBoundary` před opravou doložil:
+crew-bound token vytvořil chat pro sousedního/cizího agenta (201), resolve
+vrátil konfiguraci sousední crew (200) a změny názvu/počítadla jejího chatu
+uspěly (200). Samotný middleware vkládající workspace do query tyto cesty
+nechránil. Test používá dvě workspace a dvě crews v jedné workspace, reálné
+odvozené tokeny a autentizační middleware; vše nad syntetickou testovací DB.
+
+Create nyní porovnává workspace s tokenem a ověřuje živého agenta ve zvolené
+workspace i crew. Opakované chat ID uspěje pouze při shodě agenta, workspace,
+routine run/step a zakladatele; jiná identita je konflikt 409. Čtení a změny
+chatu filtrují crew přímo v SQL. Resolve konfigurace preferuje scope z
+ověřeného kontextu před URL a filtruje crew ještě před sestavením konfigurace
+či delivery credentials. Host a workspace tokeny si zachovávají dosavadní
+rozsah; testy to výslovně ověřují.
+
+E1 opravuje hranici crew IPC. Nezavádí identitu klienta napříč delegací, nové
+agent→agent granty ani izolaci procesů sdílejících UID 1001. B, A2 a zbytek E
+zůstávají otevřené. Celý `go test ./... -count=1` i `go vet ./...` prošly; cílené
+race testy (52,905 s), doplňující test idempotence routine kroku a agentí
+invarianty také. Předchozí CodeQL kontrola PR již hlásí SUCCESS, CodeRabbit
+nových změn zůstává pending. Živá dev1 akceptace této změny následuje.

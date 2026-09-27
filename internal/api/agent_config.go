@@ -619,9 +619,17 @@ func (h *InternalHandler) loadAgentData(r *http.Request, agentID string) (*agent
 		LEFT JOIN workspaces w ON w.id = a.workspace_id
 		WHERE a.id = ?`
 	args := []any{agentID}
-	if wsID := r.URL.Query().Get("workspace_id"); wsID != "" {
+	wsID := InternalTokenWorkspaceFromContext(r.Context())
+	if wsID == "" {
+		wsID = r.URL.Query().Get("workspace_id")
+	}
+	if wsID != "" {
 		query += " AND a.workspace_id = ?"
 		args = append(args, wsID)
+	}
+	if crew := InternalTokenCrewFromContext(r.Context()); crew != "" {
+		query += " AND a.crew_id = ? AND a.deleted_at IS NULL"
+		args = append(args, crew)
 	}
 	err := h.db.QueryRowContext(r.Context(), query, args...).Scan(&d.agentSlug, &d.agentName, &d.agentStatus, &d.roleTitle, &d.agentRole, &d.cliAdapter, &d.systemPrompt,
 		&d.toolProfile, &d.timeoutSecs, &d.memoryEnabled,
