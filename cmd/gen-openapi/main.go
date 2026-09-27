@@ -304,10 +304,11 @@ func buildDocument(routes []route) map[string]any {
 	_, workspaceConversationComponents := workspaceConversationSchemaCatalog()
 	_, routinesWorkspaceComponents := routinesWorkspaceSchemaCatalog()
 	_, workLedgerComponents := workLedgerSchemaCatalog()
+	_, chatShareComponents := chatShareSchemaCatalog()
 	for _, catalog := range []map[string]any{
 		coreResourceSchemas(), issueSkillCredentialSchemaComponents(), executionSchemaComponents(), crewWorkspaceComponentsV1,
 		credentialComponents, remainingCrewAgentComponentsV1, remainingComponents, finalAdminPlatformComponents, finalComponents,
-		coreResourceRequestComponentsV2, integrationsAuthRequestComponents, adminSpecialComponents, finalCoreRequestComponents, finalAuthComponents, onboardingProposalComponents, workspaceConversationComponents, routinesWorkspaceComponents, workLedgerComponents,
+		coreResourceRequestComponentsV2, integrationsAuthRequestComponents, adminSpecialComponents, finalCoreRequestComponents, finalAuthComponents, onboardingProposalComponents, workspaceConversationComponents, routinesWorkspaceComponents, workLedgerComponents, chatShareComponents,
 	} {
 		for name, schema := range catalog {
 			// Domain catalogs are the audited source of truth.  They intentionally
@@ -325,6 +326,7 @@ func buildDocument(routes []route) map[string]any {
 	}
 	components["securitySchemes"] = map[string]any{
 		"bearerAuth":          map[string]any{"type": "http", "scheme": "bearer"},
+		"chatShareBearer":     map[string]any{"type": "http", "scheme": "bearer", "bearerFormat": "cshr_ share token", "description": "Dedicated, revocable token for reading one shared chat transcript. A workspace session or ordinary API bearer token does not satisfy this scheme."},
 		"sessionCookie":       map[string]any{"type": "apiKey", "in": "cookie", "name": "next-auth.session-token"},
 		"secureSessionCookie": map[string]any{"type": "apiKey", "in": "cookie", "name": "__Secure-authjs.session-token"},
 	}
@@ -339,6 +341,11 @@ func buildDocument(routes []route) map[string]any {
 
 		info := inferHandlerInfo(rt)
 		applyAnnotation(&info, rt.annot)
+		// This reader forwards the daemon's bounded-transcript 413. Its
+		// nested IPC status branch is not discovered by handler inference.
+		if rt.method == "GET" && rt.path == "/api/v1/shared-chats/{shareId}/messages" {
+			info.statuses["413"] = true
+		}
 		if schema, ok := routeSchemaCatalog()[rt.method+" "+rt.path]; ok && schema.SuccessStatuses != nil {
 			success := map[string]bool{}
 			for _, status := range schema.SuccessStatuses {
@@ -416,7 +423,9 @@ func buildDocument(routes []route) map[string]any {
 			"tags":        []string{tagFor(rt.path)},
 			"responses":   responses,
 		}
-		if rt.auth {
+		if rt.method == "GET" && rt.path == "/api/v1/shared-chats/{shareId}/messages" {
+			op["security"] = []map[string][]string{{"chatShareBearer": {}}}
+		} else if rt.auth {
 			op["security"] = []map[string][]string{{"bearerAuth": {}}, {"sessionCookie": {}}, {"secureSessionCookie": {}}}
 		} else {
 			op["security"] = []map[string][]string{}
@@ -623,6 +632,10 @@ func routeSchemaCatalog() map[string]DomainSchema {
 	}
 	workLedgerRoutes, _ := workLedgerSchemaCatalog()
 	for key, schema := range workLedgerRoutes {
+		result[key] = mergeDomainSchema(result[key], schema)
+	}
+	chatShareRoutes, _ := chatShareSchemaCatalog()
+	for key, schema := range chatShareRoutes {
 		result[key] = mergeDomainSchema(result[key], schema)
 	}
 	return result

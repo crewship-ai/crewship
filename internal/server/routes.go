@@ -61,6 +61,7 @@ func (s *Server) registerIPCRoutes() {
 	s.ipcMux.HandleFunc("PUT /crews/{id}/files/save", s.handleFileSave)
 	s.ipcMux.HandleFunc("DELETE /crews/{id}/files/delete", s.handleFileDelete)
 	s.ipcMux.HandleFunc("GET /chats/{id}/messages", s.handleChatMessages)
+	s.ipcMux.HandleFunc("GET /chats/{id}/shared-messages", s.handleSharedChatMessages)
 	s.ipcMux.HandleFunc("POST /credentials/sync", s.handleCredentialSync)
 	s.ipcMux.HandleFunc("GET /credentials/{workspaceId}/token", s.handleCredentialToken)
 	s.ipcMux.HandleFunc("GET /debug/logs", s.handleDebugLogs)

@@ -26,6 +26,32 @@ func TestBuildDocumentUsesAuditedReadSchemas(t *testing.T) {
 	}
 }
 
+func TestSharedChatReaderHasDedicatedBearerScheme(t *testing.T) {
+	doc := buildDocument([]route{
+		{method: "GET", path: "/api/v1/shared-chats/{shareId}/messages"},
+		{method: "GET", path: "/api/v1/chats/{chatId}/messages", auth: true},
+	})
+	paths := doc["paths"].(map[string]any)
+	shared := paths["/api/v1/shared-chats/{shareId}/messages"].(map[string]any)["get"].(map[string]any)
+	security := shared["security"].([]map[string][]string)
+	if len(security) != 1 || len(security[0]) != 1 {
+		t.Fatalf("shared chat security = %#v, want only chatShareBearer", security)
+	}
+	if _, ok := security[0]["chatShareBearer"]; !ok {
+		t.Fatalf("shared chat security = %#v, want only chatShareBearer", security)
+	}
+	ordinary := paths["/api/v1/chats/{chatId}/messages"].(map[string]any)["get"].(map[string]any)
+	for _, item := range ordinary["security"].([]map[string][]string) {
+		if _, ok := item["chatShareBearer"]; ok {
+			t.Fatalf("ordinary chat route accepts share bearer: %#v", ordinary["security"])
+		}
+	}
+	schemes := doc["components"].(map[string]any)["securitySchemes"].(map[string]any)
+	if _, ok := schemes["chatShareBearer"]; !ok {
+		t.Fatal("dedicated share security scheme missing")
+	}
+}
+
 func TestBuildDocumentUsesAccurateUploadRequestMedia(t *testing.T) {
 	doc := buildDocument([]route{
 		{method: "POST", path: "/api/v1/agents/{agentId}/chats/{chatId}/attachments"},

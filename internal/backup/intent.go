@@ -279,6 +279,7 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	// delivered ones are already in workspace_conversation_messages, which does
 	// round-trip.
 	"session_mailbox": IntentExcludeRuntime,
+	"chat_read_shares": IntentExcludeRuntime, // short-lived bearer links must not revive in a restored copy
 
 	// The memory revision anchor and mutation ledger. Excluded, and the cost is
 	// worth stating because it is not zero.

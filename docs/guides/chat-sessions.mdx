@@ -50,6 +50,64 @@ For one-off "ask the agent a question" use, just open `/chat/<agent>` and start 
 
 </Accordion>
 
+## Share one read-only transcript
+
+The creator of a direct human agent chat, or a current workspace OWNER/ADMIN,
+can issue a short-lived read token. The recipient does not need an account or
+workspace membership. This shares the ongoing user/assistant **text**, including
+future messages until expiry or revocation. Review the text before sharing;
+text can itself contain confidential information.
+
+```bash
+crewship chat share create <agent> <chat-id> --ttl 24h --format json
+crewship chat share list <agent> <chat-id> --format json
+crewship chat share revoke <agent> <chat-id> <share-id>
+```
+
+Creation returns `{share, token}`; the token is returned only once. `--ttl`
+defaults to 24 hours and accepts 1 second through 168 hours. Listing returns
+metadata without token material. Supply the normal `--server` and `--workspace`
+flags when managing shares on a specific instance.
+
+Recipients open `/shared-chat` on the same Crewship server, enter the share ID
+and token, and select **Open transcript**. The viewer renders plain text and
+supports manual refresh and clearing. It does not put the token in a URL or
+browser storage. They can also use:
+
+```bash
+crewship chat share read <share-id> --server https://crewship.example --token-stdin
+```
+
+Supply the token through standard input, then end input. `--token-stdin` and an
+explicit `--server` are required; this command does not use the normal profile
+credential. Avoid putting the token in command arguments, URLs or shell history.
+
+The corresponding API is `POST`/`GET`
+`/api/v1/agents/{agentId}/chats/{chatId}/shares` and `DELETE` on its `/{shareId}`
+child. Creation accepts `ttl_seconds`. Scoped CLI tokens need `agents:write` to create
+or revoke, and `agents:read` to list shares; the issuer must also be the chat
+creator or a current OWNER/ADMIN. The reader calls
+`GET /api/v1/shared-chats/{shareId}/messages` with the share token in the
+`Authorization: Bearer` header. Query parameters are rejected, and responses
+are marked `Cache-Control: no-store`.
+
+The reader rejects transcripts over 16 MiB of source JSONL or 1,000 stored
+rows, and encoded IPC payloads over 32 MiB, with HTTP 413. Hidden tool rows
+count toward these limits. It does not silently truncate the conversation;
+large-history pagination is not available yet.
+
+Each read checks expiration, revocation and the issuer's current sharing
+permission. Removing the issuer's membership invalidates access on the next
+request. Existing shares survive a server restart; they are excluded from
+workspace backups. Copies already received cannot be recalled.
+
+Shares do not expose structured tool calls/results, reasoning, attachments,
+Files, memory, runs, streams or agent execution. The share token cannot log into
+normal API or WebSocket routes. This does not restrict the permissions of
+existing workspace members and does not implement a client who can converse
+with only one agent. Creating and revoking shares currently uses CLI/API;
+there is no sharing-management Settings screen yet.
+
 ## Usage
 
 The end-to-end loop from "I have an agent" to "we had a productive conversation about it" is five steps. Each step has a dedicated section below with the full surface area; this is the orientation walk-through.

@@ -15,7 +15,7 @@ crewship chat <chat-id> [flags]
 crewship chat <subcommand> ...
 ```
 
-Auth: every subcommand requires an authenticated session (`crewship login`). All of them also require a selected workspace **except `chat stream`**, which resolves tenancy from the chat row itself and so needs only a token and a chat id. The transcript hits `GET /api/v1/chats/{id}/messages?limit=500` — the cap is server-side and not paged today.
+Auth: commands require an authenticated session (`crewship login`) except `chat share read`, which uses a dedicated share token. Authenticated commands also require a selected workspace **except `chat stream`**, which resolves tenancy from the chat row itself and so needs only a token and a chat id. The transcript hits `GET /api/v1/chats/{id}/messages?limit=500` — the cap is server-side and not paged today.
 
 ## Subcommands
 
@@ -644,3 +644,54 @@ Adding the first participant flips the chat to group visibility, after which the
 - [`crewship ask`](/cli/ask) — one-shot prompt (also creates a chat, tagged `origin=CLI`).
 - [`crewship session`](/cli/session) — browser session management, unrelated noun.
 - [Conversations API](/api-reference/conversations) — the underlying endpoints.
+
+## crewship chat share
+
+Read-only sharing of one direct human chat. A share grants ongoing user/assistant
+text, including future messages until expiry or revocation. It does not grant
+workspace membership, files, tool output, streams, or agent execution.
+
+### crewship chat share create
+
+```bash
+crewship chat share create <agent> <chat-id> --ttl 24h --format json
+```
+
+The chat creator or current workspace OWNER/ADMIN can create a share.
+`--ttl` is a Go duration between `1s` and `168h`, default `24h`. JSON output is
+`{share, token}` (YAML is also supported). The token is shown only once. Keep it
+private and send it separately from the share ID through a trusted channel.
+
+### crewship chat share list
+
+```bash
+crewship chat share list <agent> <chat-id> --format json
+```
+
+Lists metadata as `{shares: [...]}`, including expiry and revocation, without
+tokens. Requires the same current sharing authority as creation.
+
+### crewship chat share revoke
+
+```bash
+crewship chat share revoke <agent> <chat-id> <share-id>
+```
+
+Invalidates the token on the next read request. Already received copies cannot
+be recalled. Removing the issuer's membership also invalidates future reads.
+
+### crewship chat share read
+
+```bash
+crewship chat share read <share-id> --server https://crewship.example --token-stdin
+```
+
+`--token-stdin` is required: provide the token on standard input, then end input.
+An explicit `--server` is required. This command ignores the normal profile's
+credential and workspace. Do not put tokens in command arguments or URLs.
+Output is `{messages: [...]}` as JSON (or YAML). Only user/assistant text is
+included. Recipients can alternatively enter the ID and token at `/shared-chat`.
+
+The management API is `GET`/`POST /api/v1/agents/{agentId}/chats/{chatId}/shares`
+and `DELETE /api/v1/agents/{agentId}/chats/{chatId}/shares/{shareId}`. The reader
+uses `GET /api/v1/shared-chats/{shareId}/messages` with a dedicated share bearer.

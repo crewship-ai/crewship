@@ -11,7 +11,7 @@ Uživatel autorizoval vývoj, testy a nasazení na dev1. Základ implementace je
 |---|---|---|
 | A1: směrované oprávnění sdílených souborů mezi crews | Implementováno a nasazeno na dev1, PR review/CI probíhá | Settings/API/CLI, none/read/read+delivery, stale update 409, role/workspace, odebrání dalšího requestu |
 | A2: agent→agent / projektové granty | Připravený návrh, neimplementováno | stabilní resource ID, efektivní dědění, všechny čtecí cesty, shell hranice |
-| B: omezený klientský běh a konverzace | B1–B3: revokace členství, rutin a Page akcí implementována; klientská izolace neimplementována | žadatel→běh→výstup, historie, paměť a artefakty dvou klientů |
+| B: omezený klientský běh a konverzace | B1–B3: revokace členství, rutin a Page akcí implementována; B4 read-only share implementován, finální akceptace probíhá; klientská izolace neimplementována | žadatel→běh→výstup, historie, paměť a artefakty dvou klientů |
 | C: service desired state / obnova po rebootu | Nasazeno na dev1; Docker ztráta kontejneru/data a server restart ověřeny; host reboot otevřený | durable running/stopped, rekonciliace, data/identity, žádná duplicita |
 | D: credentials / revokace konkrétního grantu | D1/D2: per-agent proxy grant snapshot/refresh a zachování deny-all implementovány; přímá delivery a izolace dále otevřené | rozdílné lease, odebrání jedinému agentovi, výpadek autority, izolovaná delivery |
 | E: Chat / Issues / Routines / Pages | E1–E6: crew-bound IPC, work authority a revokace rutin/Pages implementovány; společná omezená autorita nedokončena | negativní end-to-end matice včetně logů/streamů/delegace |
@@ -20,6 +20,50 @@ Uživatel autorizoval vývoj, testy a nasazení na dev1. Základ implementace je
 Tabulka není prohlášení, že celý Release 1.0 je připraven. Každý další balík musí
 mít vlastní reproduktor a testovací bránu. Sdílené UID crew zůstává důvěrovou
 hranicí: A1 neizoluje libovolný shell a nepřidává klientovi právo jen na jednoho agenta.
+
+## B4 — omezené čtení jedné konverzace
+
+Nový chat share je krátkodobá, odvolatelná capability k textovému přepisu
+jednoho přímého lidského chatu s agentem. Tvůrce chatu nebo aktuální
+OWNER/ADMIN workspace vytváří, vypisuje a odvolává grant přes běžné
+autentizované API. Čtečka `GET /api/v1/shared-chats/{shareId}/messages`
+vyžaduje zvláštní `Authorization: Bearer cshr_…`; běžná session ani CLI token
+ji nenahrazují. Samotné ID grantu nestačí. Token se vrátí pouze při vytvoření,
+do databáze se ukládá hash, v URL ani query parametru není přijímán.
+Výchozí platnost je 24 hodin, maximum sedm dní. Každé čtení znovu ověřuje
+token, platnost, revokaci, živé členství a právo vydavatele i vazbu agent/chatu.
+Čte se **aktuální** přepis: nové textové zprávy se zobrazují do expirace nebo
+revokace. Výstup obsahuje jen roli, text, ID a čas uživatelských a agentích
+zpráv; strukturované tool calls/results, přílohy, interní metadata a stream
+nejsou zpřístupněny. Tento grant nepovoluje Files, paměť, běhy, WebSocket,
+agentí execution ani přístup do workspace. Není obecnou klientskou izolací B.
+
+B4 používá samostatnou veřejnou čtečku `/shared-chat` mimo dashboard. ID a
+heslo se zadávají ručně, fetch neposílá cookies a token nevkládá do URL ani
+browser storage. Zobrazuje pouze prostý text, ruční refresh a vymazání.
+Management v Settings zatím není; CLI `chat share create/list/revoke/read`
+pokrývá stejné API. Reader CLI potřebuje explicitní server a token ze stdin,
+nepoužívá přihlášení z profilu a nenásleduje přesměrování. Scoped CLI token
+potřebuje agents:write pro vytvoření/odvolání a agents:read pro výpis.
+
+Revize našla neomezené IPC načítání historie: nová dedikovaná cesta proto
+omezuje zdrojový JSONL na 16 MiB a 1 000 fyzických řádků ještě při čtení.
+Limit zahrnuje i skryté tool zprávy. Překročení nebo serializovaná IPC odpověď
+nad 32 MiB vrací 413, ne úspěch s neúplným přepisem. Chyba souboru/dekódování
+se neskrývá za prázdný chat. Běžná autentizovaná historie se nemění.
+
+Grant je durable v SQLite; veřejná odpověď obsahuje pouze text, role, ID a čas.
+Vydavatel i agent, jeho případná crew a workspace musejí být stále živí.
+Workspace bundle backup granty nepřenáší; úplný snapshot databáze je jiný
+kontrakt a přirozeně je zachovává. Obnova DB je testována. Grant nevytváří
+žádný agentí běh ani LLM volání; náklad je SQL kontrola a omezené čtení JSONL.
+
+Otevřené limity B4: stránkování dlouhé historie, správa sdílení v UI a retence
+expirovaných grantů (dnes se čistí kaskádou při hard-delete souvisejících dat).
+Kopie přepisu již doručená příjemci se revokací nevrátí. Text sám může obsahovat
+citlivá data; projekce strukturovaných polí není klasifikátor tajemství.
+Rozpracovaná A2/B matice je v
+[AGENT-ACCESS-A2-B-TEST-MATRIX-2026-09-27.md](AGENT-ACCESS-A2-B-TEST-MATRIX-2026-09-27.md).
 
 ## A1 — konečný kontrakt
 
@@ -556,3 +600,27 @@ PR zůstává draft; review/CI nového headu jsou samostatnou branou. Další
 priorita je A2/B — granty klienta a agenta pro konkrétní zdroje a vynucení
 na čtecích cestách, historii, artefaktech a delegaci. Sdílené UID a přímé
 credentials ani tato dodávka neizoluje; Release 1.0 ještě není hotový.
+
+
+### Průběžné ověření B4
+
+Tři paralelní Sol agenti dodali store/migraci, HTTP a negativní boundary testy;
+navazující revize doplnila kontrolu živé crew/workspace, CLI scopes a omezené
+IPC čtení. Orchestrace integrovala CLI, veřejnou čtečku, dokumentaci a release
+brány. První celý Go běh našel chybějící YAML tagy CLI, položky route-role
+manifestu, indexy dvou FK a zastaralou větu s počty OpenAPI; vše opraveno.
+Nové odpovědi mají pojmenované DTO a testovaný OpenAPI kontrakt bez navýšení
+výjimek. Generovaná specifikace mění pouze čtyři nové operace; starší operace
+zůstávají sémanticky shodné.
+
+Cílené testy ověřují kryptografický token, TTL, odvolání, odstranění členství,
+snížení role administrátora, smazané rodiče, jiné chaty, změnu vazby chat/agent,
+obnovu DB, CLI scope a odmítnutí tokenu na běžném API/WS/streamu. Projekce
+canary dat ověřuje nepřítomnost system/tool/thinking/attachment/metadata.
+Filesystem testy ověřují přesný limit, nadlimitní soubor/řádky, poškozený JSONL
+a cancellation bez úspěchu s částečným přepisem. UI má šest testů včetně
+kontrolovaného 413, hlavičky bez cookies, prostého textu a vymazání.
+Finální `go test ./... -count=1` prošel: 147 balíků, exit 0. Go vet,
+cílené race testy store/API, šest UI testů, test typecheck, lint (0 chyb;
+30 existujících varování), static export, agentí invarianty a strict docs
+inventory prošly. Živá dev1 akceptace se zapisuje až podle výsledku níže.
