@@ -9,7 +9,7 @@ Uživatel autorizoval vývoj, testy a nasazení na dev1. Základ implementace je
 
 | Balík | Stav | Akceptace |
 |---|---|---|
-| A1: směrované oprávnění sdílených souborů mezi crews | Implementováno, probíhá release ověření | Settings/API/CLI, none/read/read+delivery, stale update 409, role/workspace, odebrání dalšího requestu |
+| A1: směrované oprávnění sdílených souborů mezi crews | Implementováno a nasazeno na dev1, PR review/CI probíhá | Settings/API/CLI, none/read/read+delivery, stale update 409, role/workspace, odebrání dalšího requestu |
 | A2: agent→agent / projektové granty | Připravený návrh, neimplementováno | stabilní resource ID, efektivní dědění, všechny čtecí cesty, shell hranice |
 | B: omezený klientský běh a konverzace | Neimplementováno | žadatel→běh→výstup, historie, paměť a artefakty dvou klientů |
 | C: service desired state / obnova po rebootu | Doložen současný kód, chybí implementace a reboot akceptace | durable running/stopped, rekonciliace, data/identity, žádná duplicita |
@@ -72,12 +72,19 @@ test všech ochranných vrstev živé Crewship instalace.
 - Cílené backend testy A1, stávajících connections/messaging a traversal prošly.
 - Settings: 20 testů prošlo; přidána změna přesného směru/verze a chyba načítání.
 - CLI: nový příkaz a předání chyby stale verze prošly.
+- CI test-typecheck našel nepodporovaný parametr `exact` v Testing Library testu; nahrazen přesným regulárním výrazem, bez změny produktového kódu.
 - TypeScript, ESLint (0 chyb, 30 existujících varování), produkční Next export
   a Go vet prošly v průběžném ověření.
-- První celý Go průchod zachytil chybějící novou operaci v OpenAPI a role manifestu.
-  OpenAPI byl regenerován, role manifest doplněn; finální průchod probíhá.
+- Finální `go test ./... -count=1`: exit 0, 146 testovaných balíků; `go vet ./...`: exit 0.
+  Průběžné kontroly našly chybějící registraci a povinná pole OpenAPI; vše opraveno
+  a ověřeno finálním celým průchodem. Strict docs inventory, invariants a migration lint prošly.
+- Dev1 restart přes `systemctl reload crewship-ws@1` nasadil A1 a migraci. Živý
+  API smoke se dvěma novými crews ověřil none/none, read, stale PUT a DELETE 409,
+  revoke, aktuální listing i versioned delete 204. Obě dočasné crews odstraněny.
+- Draft PR: [#2704](https://github.com/crewship-ai/crewship/pull/2704); vzdálené
+  CI a review jsou samostatná zbývající brána, žádný merge nebyl proveden.
 - Reálný reboot hosta, úplná izolace klientských běhů a všechny balíky B–F nejsou
-  tímto ověřeny. Dev1 smoke a konečné výsledky doplnit po nasazení.
+  tímto ověřeny. Browser smoke prošel: Settings render i změna dropdownu A→B na read; B→A zůstalo none. Dočasná UI data odstraněna.
 
 ## Navazující implementační pořadí a release brány
 

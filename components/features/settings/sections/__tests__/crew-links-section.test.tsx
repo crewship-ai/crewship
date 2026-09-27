@@ -409,7 +409,7 @@ describe("Crew shared-file access", () => {
     render(<ConnectionsSection workspaceId="ws-1" />)
     const control = await screen.findByRole("combobox", { name: "Engineering access to Ops shared files" })
     openSelect(control)
-    fireEvent.click(await screen.findByRole("option", { name: "Can view", exact: true }))
+    fireEvent.click(await screen.findByRole("option", { name: /^Can view$/ }))
     await waitFor(() => expect(apiFetch).toHaveBeenCalledWith(
       "/api/v1/crew-connections/cc-eng-ops/file-access?workspace_id=ws-1",
       expect.objectContaining({ method: "PUT", body: JSON.stringify({ requester_crew_id: "c-eng", level: "read", expected_version: 1 }) }),
