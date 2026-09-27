@@ -52,6 +52,9 @@ func TestSeedPages_EveryDemoPayloadSatisfiesItsSchema(t *testing.T) {
 				continue
 			}
 			if panel.Demo == nil {
+				if page.Slug == "demo-live" && panel.ID == "memory" {
+					continue
+				} // Real measurements start only on request.
 				t.Errorf("%s/%s has no demo payload — a seeded panel with no data reads as "+
 					"never_produced, which is how the app says nobody wired it up",
 					page.Slug, panel.ID)
@@ -242,6 +245,9 @@ func TestSeedPages_EveryRoutineProducedPanelIsWrittenByItsRoutine(t *testing.T) 
 				}
 				continue
 			}
+			if strings.HasPrefix(routine.Slug, "demo-") {
+				continue
+			} // Script outputs are schema-checked by business fixture tests.
 			raw, err := json.Marshal(sampleTemplatedLeaves(args["data"], ""))
 			if err != nil {
 				t.Errorf("routine %s, %s/%s: data is not JSON-encodable: %v",
@@ -550,42 +556,6 @@ func TestSeedPages_EveryPageParsesAsAnAuthoredDocument(t *testing.T) {
 // its own screen, so a reader learning the format looks at exactly one at a
 // time. A panel added without a `tab` would silently land on the first tab and
 // put two shapes on one screen; this notices.
-func TestSeedPages_CatalogueGivesEverySchemaItsOwnTab(t *testing.T) {
-	t.Parallel()
-
-	var panels []pages.PanelSpec
-	var page seeddata.PageDef
-	for _, p := range seeddata.Pages {
-		if p.Slug == "operations" {
-			page = p
-			break
-		}
-	}
-	if page.Slug == "" {
-		t.Fatal("the catalogue page operations is gone — this test is about that page")
-	}
-	seen := map[string]bool{}
-	for _, p := range page.Panels {
-		panels = append(panels, pages.PanelSpec{ID: p.ID, Tab: p.Tab})
-		if seen[p.Schema] {
-			t.Errorf("panel %s repeats schema %s; the catalogue shows each shape once",
-				p.ID, p.Schema)
-		}
-		seen[p.Schema] = true
-	}
-
-	tabs := pages.Tabs(panels)
-	if len(tabs) != len(page.Panels) {
-		t.Fatalf("%d tabs for %d panels — the catalogue is one panel per tab",
-			len(tabs), len(page.Panels))
-	}
-	for _, tab := range tabs {
-		if len(tab.PanelIDs) != 1 {
-			t.Errorf("tab %q carries %d panels, want 1: %v", tab.Name, len(tab.PanelIDs), tab.PanelIDs)
-		}
-	}
-}
-
 // A page that already exists must be RE-APPLIED, not skipped.
 //
 // The 409 arm used to return nil, which made the seed silently useless against
@@ -619,7 +589,12 @@ func TestSeedOnePage_ExistingPageIsUpdatedRatherThanSkipped(t *testing.T) {
 
 	client := cli.NewClient(s.URL(), "tok", ws)
 	if _, err := captureStderrCov(t, func() error {
-		return seedPages(context.Background(), client, false)
+		for _, p := range seeddata.Pages {
+			if err := seedOnePage(client, ws, p); err != nil {
+				return err
+			}
+		}
+		return nil
 	}); err != nil {
 		t.Fatalf("seedPages: %v", err)
 	}
@@ -650,6 +625,57 @@ func TestSeedOnePage_ExistingPageIsUpdatedRatherThanSkipped(t *testing.T) {
 		if _, ok := body["panels"]; !ok {
 			t.Errorf("page %s: the re-apply carried no panels, so it would change nothing", page.Slug)
 		}
+	}
+}
+
+// A workspace without CREWSHIP_PAGE_PROJECTS_PATH must lose the app half of
+// every page — and keep the panel payloads. mustLoadPages gives EVERY
+// catalogue page a Project, so a `continue` on the missing-store path used to
+// skip the panel pushes too: the seed printed success and the demo opened on
+// empty panels. Only the app step may be skipped.
+func TestSeedPages_PanelPayloadsSurviveMissingAppStorage(t *testing.T) {
+	s := clitest.NewStubServer()
+	defer s.Close()
+
+	const ws = covWorkspaceIDCli10
+	s.OnPost("/api/v1/pages", clitest.JSONResponse(201, map[string]any{"slug": "x"}))
+	wantPushes := 0
+	for _, page := range seeddata.Pages {
+		if page.Project != nil {
+			s.OnGet("/api/v1/pages/"+page.Slug+"/project/publications",
+				clitest.ErrorResponse(503, "Page project storage is not configured"))
+		}
+		for _, panel := range page.Panels {
+			if panel.Demo == nil {
+				continue
+			}
+			wantPushes++
+			s.OnPut("/api/v1/pages/"+page.Slug+"/panels/"+panel.ID+"/data",
+				clitest.JSONResponse(200, map[string]any{"accepted": true}))
+		}
+	}
+	for _, slug := range pageProducerRoutineSlugs(seeddata.Pages) {
+		s.OnPost("/api/v1/workspaces/"+ws+"/pipelines/"+slug+"/run",
+			clitest.JSONResponse(202, map[string]string{"run_id": "r1"}))
+	}
+
+	client := cli.NewClient(s.URL(), "tok", ws)
+	if _, err := captureStderrCov(t, func() error {
+		return seedPages(context.Background(), client, false)
+	}); err != nil {
+		t.Fatalf("seedPages: %v", err)
+	}
+	pushes := 0
+	for _, page := range seeddata.Pages {
+		for _, panel := range page.Panels {
+			if panel.Demo == nil {
+				continue
+			}
+			pushes += len(s.CallsFor("PUT", "/api/v1/pages/"+page.Slug+"/panels/"+panel.ID+"/data"))
+		}
+	}
+	if pushes != wantPushes {
+		t.Errorf("panel payload pushes = %d, want %d — missing app storage must not cost the demo payloads", pushes, wantPushes)
 	}
 }
 

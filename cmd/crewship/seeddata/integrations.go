@@ -59,7 +59,7 @@ func mustLoadIntegrations() []IntegrationDef {
 // AgentBindingSlugs lists which agent slugs should be bound to engineering
 // crew integrations. Stays as a Go slice (not YAML) because it's a
 // relationship list, not a data catalogue.
-var AgentBindingSlugs = []string{"alex", "sam", "robin"}
+var AgentBindingSlugs = []string{"alex", "sam", "robin", "taylor", "jamie", "jordan", "casey", "morgan", "riley"}
 
 // ResolveOAuthCredentials returns OAuth credential definitions for MCP
 // integrations, based on available environment variables. Stays in Go

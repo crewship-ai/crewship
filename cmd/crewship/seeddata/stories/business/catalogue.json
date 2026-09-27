@@ -1,0 +1,180 @@
+[
+  {
+    "slug": "sales",
+    "project": "Sales",
+    "name": "Missed inquiries",
+    "crew": "engineering",
+    "agent": "sam",
+    "problem": "Ava asked for a quote for 50 storage boxes. Her inquiry has been waiting for 26 hours.",
+    "check_label": "Check inquiries",
+    "resolve_label": "Review reply",
+    "issue_title": "Prepare a reply to Ava\u2019s missed inquiry",
+    "source": "Gmail, a CRM or Google Sheets",
+    "result": "Save an approved reply in the demo outbox",
+    "sample_draft": "Hi Ava, sorry for the delay replying to your request for 50 storage boxes. Our team will prepare a quote and follow up with you.",
+    "approval": true,
+    "rows": [
+      {
+        "id": "L-101",
+        "customer": "Maya Chen",
+        "request": "20 storage boxes",
+        "hours": 2,
+        "replied": true
+      },
+      {
+        "id": "L-102",
+        "customer": "Owen Patel",
+        "request": "Office delivery options",
+        "hours": 5,
+        "replied": true
+      },
+      {
+        "id": "L-103",
+        "customer": "Ava Martin",
+        "request": "50 storage boxes",
+        "hours": 26,
+        "replied": false
+      }
+    ],
+    "draft_instruction": "Write the customer-facing reply to Ava herself, not instructions to a colleague."
+  },
+  {
+    "slug": "finance",
+    "project": "Finance",
+    "name": "Unpaid invoices",
+    "crew": "quality",
+    "agent": "jordan",
+    "problem": "Three invoices and two bank payments arrived. One invoice is overdue and needs a reminder.",
+    "check_label": "Match payments",
+    "resolve_label": "Review reminder",
+    "issue_title": "Review the overdue invoice for Northstar Studio",
+    "source": "Your accounting system and bank statement",
+    "result": "Save an approved reminder in the demo outbox",
+    "sample_draft": "Hello Northstar Studio, our records show invoice INV-103 for EUR 450 is still unpaid, seven days after its due date. Please let us know if payment is already on its way.",
+    "approval": true,
+    "rows": [
+      {
+        "id": "INV-101",
+        "customer": "Maya Design",
+        "amount": 120,
+        "currency": "EUR",
+        "days_overdue": 0
+      },
+      {
+        "id": "INV-102",
+        "customer": "Owen Office",
+        "amount": 250,
+        "currency": "EUR",
+        "days_overdue": 2
+      },
+      {
+        "id": "INV-103",
+        "customer": "Northstar Studio",
+        "amount": 450,
+        "currency": "EUR",
+        "days_overdue": 7
+      }
+    ],
+    "payments": [
+      {
+        "reference": "INV-101",
+        "amount": 120
+      },
+      {
+        "reference": "INV-102",
+        "amount": 250
+      }
+    ],
+    "draft_instruction": "Write the payment reminder addressed directly to Northstar Studio. Include invoice ID, amount, currency and days overdue. Do not tell a colleague to send a reminder."
+  },
+  {
+    "slug": "marketing",
+    "project": "Marketing",
+    "name": "Form delivery",
+    "crew": "quality",
+    "agent": "casey",
+    "problem": "A customer submitted the contact form. The form accepted it, but the delivery log has no matching entry.",
+    "check_label": "Check form delivery",
+    "resolve_label": "Repair demo delivery",
+    "issue_title": "Restore delivery for the demo contact form",
+    "source": "Your form endpoint, mail delivery log or analytics events",
+    "result": "Deliver the missing demo submission and verify the receipt",
+    "sample_draft": "The form accepted submission FORM-103, but it is missing from the delivery log. Repair the local demo route and verify that the submission reaches the demo inbox.",
+    "approval": false,
+    "rows": [
+      {
+        "id": "FORM-101",
+        "customer": "Maya Chen",
+        "received": true
+      },
+      {
+        "id": "FORM-102",
+        "customer": "Owen Patel",
+        "received": true
+      },
+      {
+        "id": "FORM-103",
+        "customer": "Ava Martin",
+        "received": true
+      }
+    ],
+    "delivered": [
+      "FORM-101",
+      "FORM-102"
+    ],
+    "draft_instruction": "Write an internal diagnosis and a local repair plan, not a customer reply."
+  },
+  {
+    "slug": "shipping",
+    "project": "Shipping",
+    "name": "Refund opportunities",
+    "crew": "engineering",
+    "agent": "robin",
+    "problem": "Five parcels were delivered. One arrived two days late and its demo claim window closes in three days.",
+    "check_label": "Check deliveries",
+    "resolve_label": "Review claim",
+    "issue_title": "Prepare the late-delivery claim for SHIP-105",
+    "source": "Your carrier API or shipping export",
+    "result": "Save approved claim evidence as a local file",
+    "sample_draft": "Please review parcel SHIP-105, which was delivered two days later than the promised date. The sample service guarantee allows a EUR 18 claim; delivery evidence is attached to this demo claim.",
+    "approval": true,
+    "rows": [
+      {
+        "id": "SHIP-101",
+        "late_days": 0,
+        "claim_days_left": 10,
+        "refund": 0,
+        "currency": "EUR"
+      },
+      {
+        "id": "SHIP-102",
+        "late_days": 0,
+        "claim_days_left": 10,
+        "refund": 0,
+        "currency": "EUR"
+      },
+      {
+        "id": "SHIP-103",
+        "late_days": 0,
+        "claim_days_left": 10,
+        "refund": 0,
+        "currency": "EUR"
+      },
+      {
+        "id": "SHIP-104",
+        "late_days": 0,
+        "claim_days_left": 10,
+        "refund": 0,
+        "currency": "EUR"
+      },
+      {
+        "id": "SHIP-105",
+        "late_days": 2,
+        "claim_days_left": 3,
+        "refund": 18,
+        "currency": "EUR"
+      }
+    ],
+    "draft_instruction": "Write a claim proposal addressed to the carrier. Include parcel ID, lateness, claim window and refund amount with currency. Do not claim submission or payment has happened."
+  }
+]

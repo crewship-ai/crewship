@@ -52,6 +52,8 @@ const (
 // The keys are derived mechanically from the source (see routeKeysFromSource),
 // so this table cannot drift from the router without the test failing.
 var sidecarRouteGuards = map[string]routeGuardKind{
+	// The upstream public webhook validates the one-panel capability; no internal/agent auth is attached.
+	"POST /page-webhooks/": guardNone,
 	// --- memory surface: guarded by the prefix chokepoint --------------
 	"POST /memory/search":  guardMemoryChokepoint,
 	"POST /memory/write":   guardMemoryChokepoint,

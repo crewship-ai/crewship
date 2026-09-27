@@ -72,7 +72,7 @@ type codexItem struct {
 	Server    string          `json:"server,omitempty"`
 	Tool      string          `json:"tool,omitempty"`
 	Arguments json.RawMessage `json:"arguments,omitempty"`
-	Result    string          `json:"result,omitempty"`
+	Result    json.RawMessage `json:"result,omitempty"`
 
 	// error item
 	Message string `json:"message,omitempty"`
@@ -309,8 +309,12 @@ func handleCodexItem(envelopeType string, item *codexItem, handler EventHandler)
 				Timestamp: time.Now(),
 			})
 		case "item.completed":
-			body := item.Result
-			if body == "" {
+			body := string(item.Result)
+			var legacy string
+			if json.Unmarshal(item.Result, &legacy) == nil {
+				body = legacy
+			}
+			if body == "" || body == "null" {
 				// some builds still use "output" — accept both
 				body = item.AggregatedOutput
 			}

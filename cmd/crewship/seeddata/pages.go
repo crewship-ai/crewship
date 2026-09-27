@@ -2,6 +2,7 @@ package seeddata
 
 import (
 	_ "embed"
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -58,6 +59,10 @@ type PagePanelDef struct {
 	Producer string `yaml:"producer"`
 	SLA      string `yaml:"sla"`
 	Span     int    `yaml:"span,omitempty"`
+	// An approval story runs only when a person presses its action. The
+	// routine-owned panels begin empty instead of creating a pending Inbox
+	// decision during every seed or re-seed.
+	SkipSeedRun bool `yaml:"skip_seed_run,omitempty"`
 
 	// The authored half — the sensor, the buttons and the publication flag.
 	//
@@ -126,6 +131,17 @@ func mustLoadPages() []PageDef {
 	}
 	for i := range doc.Pages {
 		doc.Pages[i].Project = catalogueProject(doc.Pages[i].Description)
+		for _, story := range Stories {
+			if doc.Pages[i].Slug == "demo-"+story.Slug {
+				b, _ := json.Marshal(story)
+				for j := range doc.Pages[i].Project.Files {
+					f := &doc.Pages[i].Project.Files[j]
+					if f.Path == "src/main.tsx" {
+						f.Content = strings.ReplaceAll(f.Content, "__STORY_CONFIG__", string(b))
+					}
+				}
+			}
+		}
 	}
-	return append(doc.Pages, operationsPage())
+	return append(doc.Pages, operationsPage(), livePage())
 }

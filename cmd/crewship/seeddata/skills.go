@@ -70,18 +70,13 @@ func mustLoadSkills() []SkillDef {
 // the three crew LEADs — they field the "make a routine that…" requests and
 // own routine authoring for their crew.
 var SkillAssignments = map[string][]string{
-	// Engineering — scripting, file ops, inspection (+ routine authoring for
-	// the lead). The local extraction issue needs only file and script skills.
-	"alex":   {"network-probe", "script-runner", "file-crafter", "routine-author"},
-	"sam":    {"script-runner", "file-crafter", "system-inspector"},
-	"robin":  {"file-crafter", "web-scraper"},
-	"taylor": {"web-scraper", "file-crafter"},
-	"jamie":  {"script-runner", "file-crafter"},
-	// Quality — testing, validation, review. docs-drift is the pack skill.
-	"jordan": {"script-runner", "file-crafter", "routine-author", "docs-drift"},
-	"casey":  {"system-inspector", "script-runner", "file-crafter", "docs-drift"},
-	// Ops — network, system inspection, automation. ci-triage + known-flaky
-	// are the pack skills: how to read a red run and when NOT to call it flaky.
-	"morgan": {"network-probe", "system-inspector", "routine-author", "ci-triage", "known-flaky"},
-	"riley":  {"web-scraper", "script-runner", "network-probe", "ci-triage", "known-flaky"},
+	"alex":   {"demo-business", "routine-author"},
+	"sam":    {"demo-business", "file-crafter"},
+	"robin":  {"demo-business", "file-crafter"},
+	"taylor": {"demo-business", "file-crafter"},
+	"jamie":  {"demo-business", "script-runner"},
+	"jordan": {"demo-business", "routine-author"},
+	"casey":  {"demo-business", "script-runner"},
+	"morgan": {"demo-business", "system-inspector", "routine-author"},
+	"riley":  {"demo-business", "system-inspector", "script-runner"},
 }

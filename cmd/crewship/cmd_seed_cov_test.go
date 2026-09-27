@@ -13,6 +13,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/crewship-ai/crewship/cmd/crewship/seeddata"
 	"github.com/crewship-ai/crewship/internal/cli"
 	"github.com/crewship-ai/crewship/internal/cli/clitest"
 )
@@ -251,13 +252,16 @@ func TestResolveCurrentUserIDCov_Unreachable(t *testing.T) {
 func TestCreateOrResolveCov_Created(t *testing.T) {
 	s := covSetup(t)
 	s.OnPost("/api/v1/crews", clitest.JSONResponse(201, map[string]string{"id": covCrewID}))
-	id, err := createOrResolve(newAPIClient(), "/api/v1/crews",
+	id, created, err := createOrResolve(newAPIClient(), "/api/v1/crews",
 		map[string]string{"slug": "eng"}, "/api/v1/crews", "eng")
 	if err != nil {
 		t.Fatalf("createOrResolve: %v", err)
 	}
 	if id != covCrewID {
 		t.Errorf("id = %q", id)
+	}
+	if !created {
+		t.Error("created = false on a 201 create")
 	}
 }
 
@@ -268,7 +272,7 @@ func TestCreateOrResolveCov_ConflictResolvesBySlug(t *testing.T) {
 		{"id": "cother0123456789abcdefgh", "slug": "other"},
 		{"id": covCrewID, "slug": "eng"},
 	}))
-	id, err := createOrResolve(newAPIClient(), "/api/v1/crews",
+	id, created, err := createOrResolve(newAPIClient(), "/api/v1/crews",
 		map[string]string{"slug": "eng"}, "/api/v1/crews", "eng")
 	if err != nil {
 		t.Fatalf("createOrResolve on 409: %v", err)
@@ -276,12 +280,15 @@ func TestCreateOrResolveCov_ConflictResolvesBySlug(t *testing.T) {
 	if id != covCrewID {
 		t.Errorf("id = %q, want resolved existing id", id)
 	}
+	if created {
+		t.Error("created = true on a 409 resolve — identity re-seed would overwrite operator edits")
+	}
 }
 
 func TestCreateOrResolveCov_HardError(t *testing.T) {
 	s := covSetup(t)
 	s.OnPost("/api/v1/crews", clitest.ErrorResponse(422, "validation failed"))
-	_, err := createOrResolve(newAPIClient(), "/api/v1/crews",
+	_, _, err := createOrResolve(newAPIClient(), "/api/v1/crews",
 		map[string]string{}, "/api/v1/crews", "eng")
 	if err == nil || !strings.Contains(err.Error(), "validation failed") {
 		t.Errorf("want 422 surfaced; got %v", err)
@@ -425,6 +432,16 @@ func covSeedStub(t *testing.T) *clitest.StubServer {
 		"workspace_id": covSeedWSID,
 		"cli_token":    "tok-seeded-123",
 	}))
+	covSeedAgentList(s)
+	s.OnGet("/api/v1/issues", clitest.JSONResponse(200, []map[string]any{}))
+	s.OnPost("/api/v1/workspaces/"+covSeedWSID+"/pipelines/save", clitest.JSONResponse(201, map[string]string{"id": "pipeline-demo"}))
+	for _, p := range seeddata.Pages {
+		s.OnGet("/api/v1/pages/"+p.Slug+"/project/publications", clitest.JSONResponse(200, map[string]int{"publication_version": 1}))
+		s.OnGet("/api/v1/pages/"+p.Slug, clitest.JSONResponse(200, map[string]any{"slug": p.Slug, "pages_version": 1, "folder": map[string]string{"slug": "existing-demo"}}))
+	}
+	s.OnGet("/api/v1/pages/demo-live/webhooks", clitest.JSONResponse(200, map[string]any{"webhooks": []any{}}))
+	s.OnPost("/api/v1/pages/demo-live/webhooks", clitest.JSONResponse(201, map[string]string{"token": "pgw_" + strings.Repeat("a", 64)}))
+	s.OnPost("/api/v1/crews/cseeded0123456789abcdefg/issues", clitest.JSONResponse(201, map[string]string{"id": "issue-demo", "identifier": "DEMO-1"}))
 	s.OnGet("/api/v1/skills", clitest.JSONResponse(200, []map[string]string{}))
 	s.OnGet("/api/v1/credentials", clitest.JSONResponse(200, []map[string]string{}))
 	s.SetFallback(func(r *http.Request, _ []byte) (int, []byte, string) {
@@ -437,6 +454,19 @@ func covSeedStub(t *testing.T) *clitest.StubServer {
 		return 200, []byte(`{"id":"cseeded0123456789abcdefg","skill_id":"cseeded0123456789abcdefg","updated":1}`), "application/json"
 	})
 	return s
+}
+
+func covSeedAgentList(s *clitest.StubServer) {
+	var agents []map[string]string
+	for _, a := range seeddata.Agents {
+		agents = append(agents, map[string]string{"slug": a.Slug, "id": "agent-" + a.Slug})
+	}
+	s.OnGet("/api/v1/agents", func(r *http.Request, _ []byte) (int, []byte, string) {
+		if r.URL.Query().Get("include_setup") == "1" {
+			return clitest.JSONResponse(200, agents)(r, nil)
+		}
+		return clitest.JSONResponse(200, []any{})(r, nil)
+	})
 }
 
 func covSetupRunSeed(t *testing.T, s *clitest.StubServer) {

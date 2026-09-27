@@ -5,6 +5,18 @@ import "embed"
 //go:embed prompts/*.md
 var promptsFS embed.FS
 
+//go:embed souls/*/SOUL.md
+var soulsFS embed.FS
+
+// AgentSoul is installed as the runtime's supported .memory/PERSONA.md layer.
+func AgentSoul(slug string) string {
+	data, err := soulsFS.ReadFile("souls/" + slug + "/SOUL.md")
+	if err != nil {
+		panic("missing soul for agent: " + slug)
+	}
+	return string(data)
+}
+
 // AgentPrompt returns the system prompt for the given agent slug.
 func AgentPrompt(slug string) string {
 	data, err := promptsFS.ReadFile("prompts/" + slug + ".md")

@@ -220,7 +220,7 @@ func runSeed(cmd *cobra.Command, args []string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	crewIDs, err := seedCrews(ctx, client, userID)
+	crewIDs, createdCrews, err := seedCrews(ctx, client, userID)
 	if err != nil {
 		return err
 	}
@@ -249,7 +249,7 @@ func runSeed(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	if err := seedPackFiles(ctx, client, crewIDs); err != nil {
-		fmt.Fprintf(os.Stderr, "Pack file delivery hit an error (continuing): %v\n", err)
+		return fmt.Errorf("demo file delivery: %w", err)
 	}
 
 	// ── Phase 2b: Provision crews with devcontainer config (parallel) ──
@@ -275,7 +275,7 @@ func runSeed(cmd *cobra.Command, args []string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	agentIDs, err := seedAgents(ctx, client, crewIDs)
+	agentIDs, createdAgents, err := seedAgents(ctx, client, crewIDs)
 	if err != nil {
 		return err
 	}
@@ -309,12 +309,7 @@ func runSeed(cmd *cobra.Command, args []string) error {
 	if err := seedCredentials(ctx, client, agentIDs); err != nil {
 		return err
 	}
-	// Crew-scoped pack credentials go between the real credentials and the
-	// demo vault: the vault's inert bindings consult packBoundSlots.
-	if err := seedPackCredentials(ctx, client, crewIDs); err != nil {
-		fmt.Fprintf(os.Stderr, "  ! Pack credentials: %v\n", err)
-	}
-	// Demo vault: one credential of every shape, all inert. Non-fatal — a
+	// Demo vault: two inert examples (SMTP and webhook signing). Non-fatal — a
 	// workspace without the demo tour is still a working workspace, and a
 	// failed demo credential is not worth aborting a seed over.
 	if err := seedDemoCredentials(ctx, client, crewIDs); err != nil {
@@ -329,18 +324,15 @@ func runSeed(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// ── Phase 9b: Routines (5 starter recipes) ──
-	// Runs BEFORE issues because routines depend only on crews and
-	// the issues phase can hit pre-existing 5xx on label/project
-	// re-creation in non-nuke seeds, aborting the entire seed before
-	// routines would land. Routines failure is non-fatal — a missing
-	// crew or DSL parse error logs but doesn't torpedo subsequent
-	// seed phases.
+	// ── Phase 9b: Business routines and Crewship Lab ──
+	// Save before Issues so their routine references resolve. Any failed
+	// starter definition aborts the seed instead of leaving broken buttons.
+
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 	if err := seedRoutines(ctx, client, crewIDs, withEvals); err != nil {
-		fmt.Fprintf(os.Stderr, "Routine seeding hit an error (continuing): %v\n", err)
+		return fmt.Errorf("demo routines: %w", err)
 	}
 
 	// ── Phase 9c: Keeper watchdog ──
@@ -374,6 +366,15 @@ func runSeed(cmd *cobra.Command, args []string) error {
 	}
 	if err := seedPages(ctx, client, waitProvision); err != nil {
 		return err
+	}
+	if err := seedLiveCallback(ctx, client, crewIDs); err != nil {
+		return err
+	}
+	if err := seedStoryPageFolder(ctx, client); err != nil {
+		return fmt.Errorf("demo story Page folder: %w", err)
+	}
+	if err := seedDemoIdentity(ctx, client, agentIDs, crewIDs, createdAgents, createdCrews); err != nil {
+		return fmt.Errorf("demo identity: %w", err)
 	}
 
 	// ── Phase 10b: Wait for background provisioning (only if requested) ──
@@ -632,26 +633,30 @@ func resolveCurrentUserID(client *cli.Client) string {
 // ════════════════════════════════════════════════════════════════════════════
 
 // createOrResolve creates a resource via POST. On 409, resolves existing by slug.
+// The bool says which of the two happened: a re-seed must not overwrite fields
+// the operator may have edited since, so callers that PATCH identity downstream
+// gate those writes on it.
 
-func createOrResolve(client *cli.Client, createPath string, body interface{}, listPath, slug string) (string, error) {
+func createOrResolve(client *cli.Client, createPath string, body interface{}, listPath, slug string) (string, bool, error) {
 	resp, err := client.Post(createPath, body)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	if resp.StatusCode == http.StatusConflict {
 		resp.Body.Close()
-		return resolveBySlug(client, listPath, slug)
+		id, err := resolveBySlug(client, listPath, slug)
+		return id, false, err
 	}
 	if err := cli.CheckError(resp); err != nil {
-		return "", err
+		return "", false, err
 	}
 	var created struct {
 		ID string `json:"id" yaml:"id"`
 	}
 	if err := cli.ReadJSON(resp, &created); err != nil {
-		return "", err
+		return "", false, err
 	}
-	return created.ID, nil
+	return created.ID, true, nil
 }
 
 // resolveBySlug lists resources and finds one by slug.

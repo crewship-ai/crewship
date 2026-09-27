@@ -27,6 +27,7 @@ type ProjectDef struct {
 // IssueDef defines an issue to seed. REAL executable tasks that agents
 // run inside containers — keep simple, idempotent, safe to run 100x.
 type IssueDef struct {
+	StorySlug   string `yaml:"story_slug,omitempty"`
 	CrewSlug    string `yaml:"crew_slug"`
 	Assignee    string `yaml:"assignee"` // agent slug — resolved to ID during seed
 	Title       string `yaml:"title"`

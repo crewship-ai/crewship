@@ -123,7 +123,7 @@ func TestSeedAgents_UpdateOnlyColumnsLandOnTheRecord(t *testing.T) {
 	defer stub.Close()
 
 	_ = captureStdoutCovCli2(t, func() {
-		if _, err := seedAgents(context.Background(), newSeedClient(stub), seedAllCrewIDs()); err != nil {
+		if _, _, err := seedAgents(context.Background(), newSeedClient(stub), seedAllCrewIDs()); err != nil {
 			t.Errorf("seedAgents: %v", err)
 		}
 	})
@@ -213,7 +213,7 @@ func TestSeedAgents_UpdateOnlyColumnsAppliedOnReSeed(t *testing.T) {
 	})
 
 	_ = captureStdoutCovCli2(t, func() {
-		if _, err := seedAgents(context.Background(), newSeedClient(stub), seedAllCrewIDs()); err != nil {
+		if _, _, err := seedAgents(context.Background(), newSeedClient(stub), seedAllCrewIDs()); err != nil {
 			t.Errorf("seedAgents: %v", err)
 		}
 	})
@@ -238,7 +238,7 @@ func TestSeedAgents_InvalidAskFormsFailsTheSeed(t *testing.T) {
 
 	var err error
 	_ = captureStdoutCovCli2(t, func() {
-		_, err = seedAgents(context.Background(), newSeedClient(stub), seedAllCrewIDs())
+		_, _, err = seedAgents(context.Background(), newSeedClient(stub), seedAllCrewIDs())
 	})
 	if err == nil {
 		t.Fatal("a rejected PATCH left the seed green — the agent is then created " +

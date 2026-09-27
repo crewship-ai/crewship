@@ -162,4 +162,11 @@
 #                     precedent: the mandatory pages-apps CI lane supplies
 #                     Node, so the guard is honest where it fires and
 #                     enforced where it matters.
-144
+# 2026-09-26          144 -> 145. #2700's business-stories seed adds
+#                     TestBusinessScriptPayloads' python3 guard — the
+#                     demo scripts it validates need a real interpreter,
+#                     and a host without one cannot run them honestly.
+#                     SKIP-WAIVER(#2472 precedent): every CI lane that
+#                     builds the seed carries python3, so the guard is
+#                     honest where it fires and enforced where it matters.
+145

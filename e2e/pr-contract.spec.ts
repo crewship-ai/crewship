@@ -10,6 +10,7 @@ import { incomingWebhookFlow } from "./incoming-webhook-flow"
 test("PR browser contract subset", async ({ page }) => {
   // Includes the real HTTP Incoming lifecycle and its disposable routine setup.
   test.setTimeout(90_000)
+  const slug = `e2e-crew-${Date.now().toString(36)}`
   await test.step("login flow", async () => {
     await page.goto("/crews")
     await expect(page).toHaveURL(/\/crews/)
@@ -27,7 +28,6 @@ test("PR browser contract subset", async ({ page }) => {
   })
 
   await test.step("create crew via wizard", async () => {
-    const slug = `e2e-crew-${Date.now().toString(36)}`
     await page.goto("/crews")
     await page.getByRole("button", { name: /^Crew$/ }).click()
     await expect(page.getByRole("dialog")).toBeVisible()
@@ -64,9 +64,16 @@ test("PR browser contract subset", async ({ page }) => {
     await page.getByRole("button", { name: "New Issue", exact: true }).click()
     await expect(page.getByRole("dialog")).toBeVisible()
     // Selecting explicitly avoids relying on the modal's asynchronous
-    // auto-select when the workspace roster is still loading.
+    // auto-select when the workspace roster is still loading. The crew this
+    // test created is empty (no lead agent) and issue creation requires a
+    // lead, so the issue goes to a seeded crew — resolved by the stable
+    // slug, because display names follow the demo catalogue and change.
+    const workspaces = await (await page.request.get("/api/v1/workspaces")).json()
+    const workspaceID = Array.isArray(workspaces) ? workspaces[0]?.id : workspaces.id
+    const crews = await (await page.request.get(`/api/v1/crews?workspace_id=${workspaceID}`)).json()
+    const seeded = crews.find((crew: { slug?: string; name?: string }) => crew.slug === "engineering")
     await page.getByRole("dialog").getByRole("button").first().click()
-    await page.getByRole("option", { name: "Engineering", exact: true }).click()
+    await page.getByRole("option", { name: seeded?.name ?? "", exact: true }).click()
     await page.getByPlaceholder("Issue title").fill(title)
     const createIssue = page.getByRole("button", { name: "Create issue", exact: true })
     await expect(createIssue).toBeEnabled({ timeout: 15_000 })
@@ -76,8 +83,6 @@ test("PR browser contract subset", async ({ page }) => {
     await createIssue.click()
     const issueResponse = await createResponse
     expect(issueResponse.status(), await issueResponse.text()).toBe(201)
-    const workspaces = await (await page.request.get("/api/v1/workspaces")).json()
-    const workspaceID = Array.isArray(workspaces) ? workspaces[0]?.id : workspaces.id
     await expect.poll(async () => {
       const data = await (await page.request.get(`/api/v1/issues?workspace_id=${workspaceID}`)).json()
       const rows = Array.isArray(data) ? data : data.rows ?? data.data ?? []

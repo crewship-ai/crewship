@@ -62,6 +62,10 @@ func seedRoutines(ctx context.Context, client *cli.Client, crewIDs map[string]st
 		return err
 	}
 
+	if starterStats.failed > 0 {
+		return fmt.Errorf("demo seed incomplete: %d starter routines failed", starterStats.failed)
+	}
+
 	if !includeEvals {
 		fmt.Fprintln(os.Stderr, "Skipping eval scenarios (pass --with-evals to install the regression catalogue).")
 		return nil
@@ -172,6 +176,13 @@ func seedRoutineSlice(ctx context.Context, client *cli.Client, wsID string, crew
 			// active-status gate. Force them live. Real users authoring through
 			// the UI still hit the gate.
 			"skip_governance_gate": true,
+		}
+		if r.AuthorAgentSlug != "" {
+			id, err := resolveAgentID(client, r.AuthorAgentSlug)
+			if err != nil {
+				return stats, fmt.Errorf("routine %s author: %w", r.Slug, err)
+			}
+			body["author_agent_id"] = id
 		}
 		path := fmt.Sprintf("/api/v1/workspaces/%s/pipelines/save", wsID)
 		resp, err := client.Post(path, body)

@@ -41,7 +41,7 @@ func TestSeedCrews_CreatesAndLinksUser(t *testing.T) {
 	var ids map[string]string
 	_ = captureStdoutCovCli2(t, func() {
 		var err error
-		ids, err = seedCrews(context.Background(), newSeedClient(stub), "cuser000000000000001")
+		ids, _, err = seedCrews(context.Background(), newSeedClient(stub), "cuser000000000000001")
 		if err != nil {
 			t.Errorf("seedCrews: %v", err)
 		}
@@ -88,7 +88,7 @@ func TestSeedCrews_ConflictResolvesBySlugAndSkipsLinkWithoutUser(t *testing.T) {
 	var ids map[string]string
 	_ = captureStdoutCovCli2(t, func() {
 		var err error
-		ids, err = seedCrews(context.Background(), newSeedClient(stub), "")
+		ids, _, err = seedCrews(context.Background(), newSeedClient(stub), "")
 		if err != nil {
 			t.Errorf("seedCrews: %v", err)
 		}
@@ -110,13 +110,13 @@ func TestSeedCrews_ErrorAndCancellation(t *testing.T) {
 	stub.OnPost("/api/v1/crews", clitest.ErrorResponse(500, "db down"))
 
 	_ = captureStdoutCovCli2(t, func() {
-		if _, err := seedCrews(context.Background(), newSeedClient(stub), ""); err == nil ||
+		if _, _, err := seedCrews(context.Background(), newSeedClient(stub), ""); err == nil ||
 			!strings.Contains(err.Error(), "crew "+seeddata.ActiveCrews()[0].Slug) {
 			t.Errorf("got %v", err)
 		}
 	})
 
-	if _, err := seedCrews(canceledCtx(), newSeedClient(stub), ""); err != context.Canceled {
+	if _, _, err := seedCrews(canceledCtx(), newSeedClient(stub), ""); err != context.Canceled {
 		t.Errorf("canceled ctx: got %v", err)
 	}
 }
@@ -204,7 +204,7 @@ func TestSeedAgents_CreatesAllAgents(t *testing.T) {
 	var ids map[string]string
 	_ = captureStdoutCovCli2(t, func() {
 		var err error
-		ids, err = seedAgents(context.Background(), newSeedClient(stub), crewIDs)
+		ids, _, err = seedAgents(context.Background(), newSeedClient(stub), crewIDs)
 		if err != nil {
 			t.Errorf("seedAgents: %v", err)
 		}
@@ -235,7 +235,7 @@ func TestSeedAgents_SkipsUnknownCrewAndPropagatesErrors(t *testing.T) {
 	var ids map[string]string
 	_ = captureStdoutCovCli2(t, func() {
 		var err error
-		ids, err = seedAgents(context.Background(), newSeedClient(stub), map[string]string{})
+		ids, _, err = seedAgents(context.Background(), newSeedClient(stub), map[string]string{})
 		if err != nil {
 			t.Errorf("seedAgents: %v", err)
 		}
@@ -251,13 +251,13 @@ func TestSeedAgents_SkipsUnknownCrewAndPropagatesErrors(t *testing.T) {
 		crewIDs[c.Slug] = covCrewIDCli2
 	}
 	_ = captureStdoutCovCli2(t, func() {
-		if _, err := seedAgents(context.Background(), newSeedClient(stub), crewIDs); err == nil ||
+		if _, _, err := seedAgents(context.Background(), newSeedClient(stub), crewIDs); err == nil ||
 			!strings.Contains(err.Error(), "agent "+seeddata.ActiveAgents()[0].Slug) {
 			t.Errorf("got %v", err)
 		}
 	})
 
-	if _, err := seedAgents(canceledCtx(), newSeedClient(stub), crewIDs); err != context.Canceled {
+	if _, _, err := seedAgents(canceledCtx(), newSeedClient(stub), crewIDs); err != context.Canceled {
 		t.Errorf("canceled: got %v", err)
 	}
 }
@@ -526,7 +526,7 @@ func TestSeedCrews_MemberLinkHTTPErrorTolerated(t *testing.T) {
 	var ids map[string]string
 	out := captureStdoutCovCli2(t, func() {
 		var err error
-		ids, err = seedCrews(context.Background(), newSeedClient(stub), "cuser000000000000001")
+		ids, _, err = seedCrews(context.Background(), newSeedClient(stub), "cuser000000000000001")
 		if err != nil {
 			t.Errorf("member failures must not abort: %v", err)
 		}
@@ -652,7 +652,7 @@ func TestSeedCrews_MemberLinkTransportErrorTolerated(t *testing.T) {
 	var ids map[string]string
 	out := captureStdoutCovCli2(t, func() {
 		var err error
-		ids, err = seedCrews(context.Background(), client, "cuser000000000000001")
+		ids, _, err = seedCrews(context.Background(), client, "cuser000000000000001")
 		if err != nil {
 			t.Errorf("member transport failures must not abort: %v", err)
 		}
@@ -678,7 +678,7 @@ func TestSeedCrews_MidLoopCancellation(t *testing.T) {
 	defer srv.Close()
 
 	_ = captureStdoutCovCli2(t, func() {
-		if _, err := seedCrews(ctx, cli.NewClient(srv.URL, "tok", covWS), ""); err != context.Canceled {
+		if _, _, err := seedCrews(ctx, cli.NewClient(srv.URL, "tok", covWS), ""); err != context.Canceled {
 			t.Errorf("got %v, want context.Canceled", err)
 		}
 	})
@@ -743,7 +743,7 @@ func TestSeedAgents_MidLoopCancellation(t *testing.T) {
 		crewIDs[c.Slug] = covCrewIDCli2
 	}
 	_ = captureStdoutCovCli2(t, func() {
-		if _, err := seedAgents(ctx, cli.NewClient(srv.URL, "tok", covWS), crewIDs); err != context.Canceled {
+		if _, _, err := seedAgents(ctx, cli.NewClient(srv.URL, "tok", covWS), crewIDs); err != context.Canceled {
 			t.Errorf("got %v, want context.Canceled", err)
 		}
 	})

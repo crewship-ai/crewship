@@ -5,10 +5,13 @@ package main
 // realistic mission/issue data once crews + agents exist.
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -74,6 +77,9 @@ func seedIssues(ctx context.Context, client *cli.Client, crewIDs, agentIDs map[s
 			existingID, err := resolveByName(client, "/api/v1/projects", p.Name)
 			if err == nil && existingID != "" {
 				projectIDs[p.Name] = existingID
+				if err := seedAppearance(client, "/api/v1/projects/"+existingID, map[string]string{"icon": p.Icon, "color": p.Color}); err != nil {
+					return err
+				}
 				fmt.Fprintf(os.Stderr, "  = Project exists: %s\n", p.Name)
 			} else {
 				return fmt.Errorf("project %s: conflict but existing record could not be resolved", p.Name)
@@ -115,6 +121,31 @@ func seedIssues(ctx context.Context, client *cli.Client, crewIDs, agentIDs map[s
 			continue
 		}
 
+		// Reuse the same seeded case on a second install; do not reset its state.
+		if def.StorySlug != "" {
+			r, err := client.Get("/api/v1/issues?q=" + url.QueryEscape(def.Title) + "&limit=100")
+			if err != nil {
+				return err
+			}
+			if err := cli.CheckError(r); err != nil {
+				return err
+			}
+			var existing []issueItem
+			if err := cli.ReadJSON(r, &existing); err != nil {
+				return err
+			}
+			found := false
+			for _, item := range existing {
+				if item.Title == def.Title && item.CrewID == crewID && item.Identifier != nil {
+					issueByKey[def.Title] = createdIssue{Identifier: *item.Identifier, CrewID: crewID}
+					found = true
+					break
+				}
+			}
+			if found {
+				continue
+			}
+		}
 		body := map[string]interface{}{
 			"title":    def.Title,
 			"priority": def.Priority,
@@ -234,39 +265,27 @@ func seedIssues(ctx context.Context, client *cli.Client, crewIDs, agentIDs map[s
 		time.Sleep(50 * time.Millisecond)
 	}
 
-	// Create relations between issues using stable seed keys (issue titles).
-	// If a referenced issue failed to create, the relation is skipped instead
-	// of being wired to the wrong target.
-	fmt.Fprintln(os.Stderr, "Creating relations...")
-	type relDef struct {
-		sourceKey, targetKey, rtype string
-	}
-	rels := []relDef{
-		// docs-drift: the fact-check gates the fix list.
-		{"Fact-check every docs-drift candidate against the file and line it cites", "Run the docs-drift audit on main and turn it into a fix list", "blocks"},
-		// ci-watch: reconciliation and the stale investigation feed the handover.
-		{"Run the CI probe against crewship-ai/crewship and reconcile it with GitHub", "Bring the nightly CI watch live and hand me the first real report", "relates_to"},
-		{"Explain why a scheduled workflow went stale", "Bring the nightly CI watch live and hand me the first real report", "relates_to"},
-	}
-	for _, rd := range rels {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		src, srcOK := issueByKey[rd.sourceKey]
-		tgt, tgtOK := issueByKey[rd.targetKey]
-		if !srcOK || !tgtOK {
-			fmt.Fprintf(os.Stderr, "  ! relation skipped (missing endpoint): %s %s %s\n", rd.sourceKey, rd.rtype, rd.targetKey)
-			continue
-		}
-		r, err := client.Post(
-			fmt.Sprintf("/api/v1/crews/%s/issues/%s/relations", src.CrewID, src.Identifier),
-			map[string]string{"target_identifier": tgt.Identifier, "relation_type": rd.rtype},
-		)
-		if err == nil {
-			if r.StatusCode < 400 {
-				fmt.Fprintf(os.Stderr, "  + %s %s %s\n", src.Identifier, rd.rtype, tgt.Identifier)
+	// Bind stable story slugs to the actual generated Issue identifiers.
+	for crewSlug, crewID := range crewIDs {
+		bindings := map[string]map[string]string{}
+		for _, story := range seeddata.Stories {
+			if story.Crew != crewSlug {
+				continue
 			}
-			r.Body.Close()
+			issue, ok := issueByKey[story.IssueTitle]
+			if !ok {
+				return fmt.Errorf("story %s has no seeded Issue", story.Slug)
+			}
+			bindings[story.Slug] = map[string]string{"identifier": issue.Identifier}
+		}
+		if len(bindings) > 0 {
+			b, err := json.Marshal(bindings)
+			if err != nil {
+				return err
+			}
+			if err := putBytes(ctx, client, crewFileSavePath(crewID, "shared/demo/business/bindings.json"), bytes.NewReader(b)); err != nil {
+				return fmt.Errorf("story bindings: %w", err)
+			}
 		}
 	}
 
