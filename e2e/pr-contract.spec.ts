@@ -65,10 +65,15 @@ test("PR browser contract subset", async ({ page }) => {
     await expect(page.getByRole("dialog")).toBeVisible()
     // Selecting explicitly avoids relying on the modal's asynchronous
     // auto-select when the workspace roster is still loading. The crew this
-    // test created earlier is the stable choice: seeded crew names follow
-    // the demo catalogue and change with it.
+    // test created is empty (no lead agent) and issue creation requires a
+    // lead, so the issue goes to a seeded crew — resolved by the stable
+    // slug, because display names follow the demo catalogue and change.
+    const workspaces = await (await page.request.get("/api/v1/workspaces")).json()
+    const workspaceID = Array.isArray(workspaces) ? workspaces[0]?.id : workspaces.id
+    const crews = await (await page.request.get(`/api/v1/crews?workspace_id=${workspaceID}`)).json()
+    const seeded = crews.find((crew: { slug?: string; name?: string }) => crew.slug === "engineering")
     await page.getByRole("dialog").getByRole("button").first().click()
-    await page.getByRole("option", { name: `E2E Crew ${slug}`, exact: true }).click()
+    await page.getByRole("option", { name: seeded?.name ?? "", exact: true }).click()
     await page.getByPlaceholder("Issue title").fill(title)
     const createIssue = page.getByRole("button", { name: "Create issue", exact: true })
     await expect(createIssue).toBeEnabled({ timeout: 15_000 })
