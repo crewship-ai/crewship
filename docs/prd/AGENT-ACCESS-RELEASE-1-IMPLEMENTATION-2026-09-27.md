@@ -531,3 +531,28 @@ odebrání crew, snížení role, smazání akce/Page/crew/rutiny, přesměrová
 rutiny, změna pevných parametrů, jiný workspace, původní autorita nested
 běhu a ignorování podvržených metadat. Test publikované aplikace ověřuje
 pozitivní authority před stažením a odmítnutí po published=0.
+
+### Akceptace B3 / E6 — dev1 `4fe554edb`
+
+Celý Go běh: 146 balíků, exit 0. Go vet, cílené race testy API/pipeline,
+agentí invarianty a pre-commit lint/secret scan prošly. Nasazeno standardním
+reloadem dev1, build identity i aktuální web export ověřeny.
+
+Živý smoke přes CLI/veřejné API vytvořil vlastní crew, agenta, rutinu a Page.
+První Page akce prošla frontou a dokončila prázdnou kontrolu práce s lidským
+žadatelem, cost_usd=0. Druhá akce spustila sekvenci wait(datetime) → query;
+při current_step_id=hold skript přes PATCH odstranil akci z vlastní Page.
+Po čekání rutina skončila failed na kroku check s invocation permission
+revoked a cost_usd=0. Tím je na skutečném daemonu doloženo odmítnutí dalšího
+kroku po změně autority, nejen kontrola před vložením do fronty.
+
+První negativní fixture obsahovala DAG závislosti a nezaručovala sledované
+sekvenční pořadí; po opravě na dva lineární kroky celý smoke prošel. Oba
+pokusy uklidily všechny své Page/routine/agent/crew objekty. Uzavřené run
+záznamy zůstávají pod běžnou retencí. Živým uživatelům se neměnila členství;
+revokace role/crew a stažení aplikace jsou pokryty izolovanými API testy.
+
+PR zůstává draft; review/CI nového headu jsou samostatnou branou. Další
+priorita je A2/B — granty klienta a agenta pro konkrétní zdroje a vynucení
+na čtecích cestách, historii, artefaktech a delegaci. Sdílené UID a přímé
+credentials ani tato dodávka neizoluje; Release 1.0 ještě není hotový.
