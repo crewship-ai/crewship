@@ -220,7 +220,8 @@ type Executor struct {
 	// memberCheck reports whether a user is a member of a workspace, so a
 	// notify step targeting `user:<id>` can degrade to a workspace notice
 	// (rather than silently black-holing the message) when the id isn't a
-	// member. Production wiring installs NewWorkspaceMemberChecker(db).
+	// member. Also revalidates the human trigger before routine dispatch.
+	// Production wiring installs NewWorkspaceMemberChecker(db).
 	// Nil = the guard is skipped (target trusted as-is).
 	memberCheck func(ctx context.Context, workspaceID, userID string) (bool, error)
 
@@ -722,6 +723,9 @@ func (e *Executor) Run(ctx context.Context, in RunInput) (*RunResult, error) {
 	if in.Mode == "" {
 		in.Mode = ModeRun
 	}
+	if err := e.checkInvokingUser(ctx, in); err != nil {
+		return nil, err
+	}
 	p, err := e.store.GetByID(ctx, in.PipelineID)
 	if err != nil {
 		return nil, fmt.Errorf("executor: load pipeline: %w", err)
@@ -990,7 +994,8 @@ type RunInput struct {
 	InvokingAgentID string
 	// InvokingUserID is the workspace user who triggered the run, when
 	// known (manual/UI/CLI triggers). Empty for unattended triggers
-	// (schedule, nested call_pipeline). Consumed by notify steps that
+	// (schedule); nested calls inherit the parent identity. Revalidated
+	// against current membership at execution boundaries. Consumed by notify steps that
 	// target `to: trigger`; empty → the notification falls back to a
 	// workspace-wide notice.
 	InvokingUserID string
@@ -1248,6 +1253,9 @@ func cancelledRunMessage(current, failedAtStep string) string {
 }
 
 func (e *Executor) runDSL(ctx context.Context, in RunInput, depth int) (result *RunResult, err error) {
+	if err := e.checkInvokingUser(ctx, in); err != nil {
+		return nil, err
+	}
 	if depth >= MaxNestedPipelineDepth {
 		return nil, ErrMaxDepthExceeded
 	}
@@ -1830,6 +1838,9 @@ func (e *Executor) runStepBody(
 	depth int,
 	priorCostUSD float64,
 ) (output string, costUSD float64, durationMs int64, err error) {
+	if err := e.checkInvokingUser(ctx, in); err != nil {
+		return "", 0, 0, err
+	}
 
 	// Wrap every step type in a routine.step span so the trace tree shows
 	// step boundaries even for transform / http / code steps that have no
@@ -1886,6 +1897,9 @@ func (e *Executor) dispatchStep(
 	depth int,
 	priorCostUSD float64,
 ) (string, float64, int64, error) {
+	if err := e.checkInvokingUser(ctx, in); err != nil {
+		return "", 0, 0, err
+	}
 	switch step.Type {
 	case StepAgentRun:
 		return e.runAgentStep(ctx, step, renderedPrompt, primary, fallback, in, runID, pipelineID, emit)
@@ -1927,6 +1941,9 @@ func (e *Executor) runStepHook(ctx context.Context, hook *Step, in RunInput, run
 // tokens. kind ("step hook" / "hook step") preserves each caller's
 // historical error wording.
 func (e *Executor) dispatchHookStep(ctx context.Context, hook *Step, in RunInput, render RenderContext, kind string) (string, error) {
+	if err := e.checkInvokingUser(ctx, in); err != nil {
+		return "", err
+	}
 	switch hook.Type {
 	case StepHTTP:
 		out, _, _, err := e.runHTTPStep(ctx, *hook, render, in)

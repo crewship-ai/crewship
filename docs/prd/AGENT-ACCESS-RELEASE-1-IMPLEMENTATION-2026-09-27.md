@@ -11,10 +11,10 @@ Uživatel autorizoval vývoj, testy a nasazení na dev1. Základ implementace je
 |---|---|---|
 | A1: směrované oprávnění sdílených souborů mezi crews | Implementováno a nasazeno na dev1, PR review/CI probíhá | Settings/API/CLI, none/read/read+delivery, stale update 409, role/workspace, odebrání dalšího requestu |
 | A2: agent→agent / projektové granty | Připravený návrh, neimplementováno | stabilní resource ID, efektivní dědění, všechny čtecí cesty, shell hranice |
-| B: omezený klientský běh a konverzace | Neimplementováno | žadatel→běh→výstup, historie, paměť a artefakty dvou klientů |
+| B: omezený klientský běh a konverzace | B1: základ revokace členství v rutinách implementován; klientská izolace neimplementována | žadatel→běh→výstup, historie, paměť a artefakty dvou klientů |
 | C: service desired state / obnova po rebootu | Nasazeno na dev1; Docker ztráta kontejneru/data a server restart ověřeny; host reboot otevřený | durable running/stopped, rekonciliace, data/identity, žádná duplicita |
 | D: credentials / revokace konkrétního grantu | D1/D2: per-agent proxy grant snapshot/refresh a zachování deny-all implementovány; přímá delivery a izolace dále otevřené | rozdílné lease, odebrání jedinému agentovi, výpadek autority, izolovaná delivery |
-| E: Chat / Issues / Routines / Pages | E1/E2/E3: crew-bound chat/config/run IPC a work authority opraveny; společná omezená autorita nedokončena | negativní end-to-end matice včetně logů/streamů/delegace |
+| E: Chat / Issues / Routines / Pages | E1/E2/E3/E4: crew-bound IPC, work authority a revokace členství v rutinách opraveny; společná omezená autorita nedokončena | negativní end-to-end matice včetně logů/streamů/delegace |
 | F: levná kontrola práce před heartbeat | F1 nasazeno a otestováno na dev1; autoritní dedupe čeká na A2/B | žádné prázdné LLM wake, budget/dedupe/recovery bez oslabení lease |
 
 Tabulka není prohlášení, že celý Release 1.0 je připraven. Každý další balík musí
@@ -399,3 +399,29 @@ syntetické běhy uzavřeny CANCELLED bez modelu či post-run verdictu.
 
 PR zůstává draft; vzdálené CI/review tohoto commitu je samostatná brána.
 D2 zde označuje opravu přenosu grantů, nikoli hotovou přímou env/file izolaci.
+
+## B1 / E4 — odebrání členství zastaví navazující rutinu
+
+Identita `InvokingUserID` se již ukládala do pending/run záznamů a přenášela
+přes restart i nested call. Dosud však nesloužila jako execution-time kontrola:
+reproduktor provedl všechny tři agentí kroky i pro odebraného člena nebo po
+odebrání mezi kroky. Produkční executor nyní ověřuje aktuální členství před
+Run, nested runDSL, krokem, dispatchí po before hooku a každým hookem. Čte bez
+cache s limitem 2 s; chybějící členství i DB chyba další dispatch zastaví.
+Sdílí existující membership checker, který produkční factory již zapojuje
+na HTTP, pending dispatcher, cron i boot resume cestách; není potřeba migrace.
+
+Testy pokrývají oprávněného člena, cizí workspace, odebrané členství, DB chybu,
+odebrání mezi kroky, skutečné obnovení uloženého run záznamu a nested/hook
+hranice. Unattended běh bez lidského aktéra zachovává dosavadní autorizační
+gates. Dry-run neprovádí tuto kontrolu. Holý testovací executor bez checkeru
+má stále původní chování; všechny produkční factory s DB jej zapojují.
+
+Tohle je **minimum členství, nikoli hotová klientská autorizace**. Změna role,
+odebrání routine.run, Pages action granty a grant konkrétního agenta vyžadují
+uložit a znovu ověřit konkrétní původ oprávnění. Pages a ruční routine run dnes
+mají odlišná pravidla; nelze na ně bez rozlišení zavést MANAGER-only podmínku.
+Odebrání členství nepřeruší již spuštěný proces ani souběžně odbavený krok;
+zastavuje další dispatch. Historické/systemové běhy bez InvokingUserID tím
+nezískávají dodatečnou lidskou identitu. Přibývají krátké indexované membership
+lookupy na execution hranicích; nejde o polling ani nové modelové volání.

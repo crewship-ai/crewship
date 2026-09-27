@@ -269,3 +269,21 @@ V tomto doplňujícím průchodu byly spuštěny existující cílené testy: `g
 ## Meze této rešerše
 
 Kód a dokumentace byly čteny; nebyly spouštěny modely, zákaznické rutiny, kontejnery ani destruktivní scénáře. Nebyl proveden živý dvouuživatelský průchod, úplný audit všech endpointů, load test ani test rebootu. Doložené cílené testy jsou výše; ostatní testové soubory nejsou důkaz jejich aktuálního průchodu. Tato změna upravuje pouze rešeršní dokument; celý Go/UI verification loop nebyl spuštěn. Implementace musí projít běžným repo verification loopem a výše uvedenou maticí. Stav běžícího exportu může být starší než zkoumaný checkout; závěry zde nejsou atestace nasazené instance ani tvrzení, že další výzkum nemůže odhalit nové nálezy.
+
+### Doplnění B/E: lidská autorita v rutinách
+
+Kód již uchovává InvokingUserID v pending_runs a pipeline_runs, přenáší jej
+přes resume i call_pipeline; nyní se na execution hranicích ověřuje živé
+workspace členství. Regresní test doložil původní pokračování po odebrání.
+Podrobnosti a limity: implementační handoff, oddíl B1 / E4.
+
+Další nezbytný návrh: oddělit původ autority manual routine / Page action /
+autonomous schedule, uložit jeho stabilní resource ID a před odloženým
+spuštěním obnovit přesně tento grant. Pouhý InvokingUserID nestačí pro změnu
+role/capability nebo pro klienta oprávněného pouze ke konkrétnímu agentovi.
+Tuto část nezaměňovat za dokončenou izolaci Files, shellu ani Pages.
+
+Pages již do pending metadata zapisuje source=page_action, page_id, panel,
+action a clicked_by (`internal/api/pages_actions.go`). Navazující návrh má
+využít tato stabilní ID a doplnit execution-time resolver jejich aktuální
+autority; samotná přítomnost metadata není kontrola oprávnění.
