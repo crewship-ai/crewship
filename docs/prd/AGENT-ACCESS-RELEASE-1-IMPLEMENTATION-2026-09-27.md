@@ -425,3 +425,23 @@ Odebrání členství nepřeruší již spuštěný proces ani souběžně odbav
 zastavuje další dispatch. Historické/systemové běhy bez InvokingUserID tím
 nezískávají dodatečnou lidskou identitu. Přibývají krátké indexované membership
 lookupy na execution hranicích; nejde o polling ani nové modelové volání.
+
+### Akceptace B1 / E4 — dev1 `a4ded6bed`
+
+Celá Go sada prošla (146 balíků), stejně jako go vet, cílené race testy
+membership/resume/hook kontrol a čtyři agentí invarianty. Původní reproduktor
+selhal u odebraného člena, cizí workspace, odebrání mezi kroky i chybějící
+membership tabulky; po opravě všechny případy prošly. Celý pipeline balík
+prošel samostatně i v plné sadě.
+
+Dev1 nasazen standardním systemd reloadem, build identity a skutečný web
+export potvrzeny. Na živém API prošlo vytvoření a spuštění vlastní testovací
+rutiny: assigned_issues vrátilo has_work=false, agentí krok se přeskočil a běh
+skončil COMPLETED bez modelového volání. Rutina, agent a crew odstraněny.
+Revokace člověka a obnova jeho uloženého běhu byly ověřeny v izolované DB;
+živým uživatelům ani jejich členství se při smoke testu nezasahovalo.
+
+Nový head zatím nemá dokončené vzdálené review/CI; lokální zelená sada ani
+nasazení na dev1 tuto bránu nenahrazují. PR #2704 zůstává draft a celý release
+není připraven. Další prioritou je A2/B: konkrétní klientský resource grant a
+jeho vynucení ve všech čtecích, spouštěcích a delegovaných cestách.
