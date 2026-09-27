@@ -1257,6 +1257,12 @@ func sidecarConfigFingerprint(key string, creds []Credential) string {
 	// concurrent runs would otherwise be restarted for it.
 	for i := range sc {
 		sc[i].GraceToken, sc[i].GraceExpiresAt, sc[i].GraceRotationID = "", "", ""
+		// Authority is refreshed in place. Preserve the protocol mode, but
+		// do not restart a shared sidecar when a grant or lease changes.
+		if sc[i].AgentGrants != nil {
+			sc[i].AgentGrants = map[string]string{"_": ""}
+			sc[i].AgentIDs = nil // Legacy fallback is unused in grant mode.
+		}
 	}
 	sort.SliceStable(sc, func(i, j int) bool {
 		if sc[i].ID != sc[j].ID {

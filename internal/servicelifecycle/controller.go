@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -54,12 +55,14 @@ func (c *Controller) Reconcile(ctx context.Context) {
  FROM service_runtime_intents i JOIN crews c ON c.id=i.crew_id
  WHERE i.next_attempt_at<=? AND i.lease_until<=? ORDER BY i.next_attempt_at,i.id LIMIT 100`, now, now)
 	if err != nil {
+		slog.WarnContext(ctx, "service intent query failed")
 		return
 	}
 	var jobs []intent
 	for rows.Next() {
 		var j intent
 		if rows.Scan(&j.id, &j.crew, &j.workspace, &j.slug, &j.name, &j.state, &j.version) != nil {
+			slog.WarnContext(ctx, "service intent scan failed")
 			rows.Close()
 			return
 		}
@@ -68,6 +71,7 @@ func (c *Controller) Reconcile(ctx context.Context) {
 	err = rows.Err()
 	rows.Close()
 	if err != nil {
+		slog.WarnContext(ctx, "service intent iteration failed")
 		return
 	}
 	sem := make(chan struct{}, 4)
@@ -95,10 +99,15 @@ func (c *Controller) reconcileOne(ctx context.Context, j intent) {
 	res, err := c.DB.ExecContext(ctx, `UPDATE service_runtime_intents SET lease_owner=?,lease_until=?
  WHERE id=? AND version=? AND lease_until<=? AND next_attempt_at<=?`, owner, tsformat.Format(now.Add(2*time.Minute)), j.id, j.version, tsformat.Format(now), tsformat.Format(now))
 	if err != nil {
+		slog.WarnContext(ctx, "service intent lease claim failed", "intent_id", j.id, "crew_id", j.crew)
 		return
 	}
 	n, err := res.RowsAffected()
-	if err != nil || n != 1 {
+	if err != nil {
+		slog.WarnContext(ctx, "service intent lease result failed", "intent_id", j.id, "crew_id", j.crew)
+		return
+	}
+	if n != 1 {
 		return
 	}
 	opCtx, cancel := context.WithTimeout(ctx, 90*time.Second)
@@ -131,8 +140,12 @@ func (c *Controller) reconcileOne(ctx context.Context, j intent) {
 	// Release our lease even when its version changed while Docker was working.
 	finishCtx, finishCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer finishCancel()
-	_, _ = c.DB.ExecContext(finishCtx, `UPDATE service_runtime_intents SET observed_state=?,last_error=?,next_attempt_at=?,updated_at=? WHERE id=? AND version=? AND lease_owner=?`, state, errorCode, tsformat.Format(time.Now().Add(delay)), tsformat.Format(time.Now()), j.id, j.version, owner)
-	_, _ = c.DB.ExecContext(finishCtx, `UPDATE service_runtime_intents SET lease_owner='',lease_until='' WHERE id=? AND lease_owner=?`, j.id, owner)
+	if _, err := c.DB.ExecContext(finishCtx, `UPDATE service_runtime_intents SET observed_state=?,last_error=?,next_attempt_at=?,updated_at=? WHERE id=? AND version=? AND lease_owner=?`, state, errorCode, tsformat.Format(time.Now().Add(delay)), tsformat.Format(time.Now()), j.id, j.version, owner); err != nil {
+		slog.WarnContext(finishCtx, "service intent state update failed", "intent_id", j.id, "crew_id", j.crew)
+	}
+	if _, err := c.DB.ExecContext(finishCtx, `UPDATE service_runtime_intents SET lease_owner='',lease_until='' WHERE id=? AND lease_owner=?`, j.id, owner); err != nil {
+		slog.WarnContext(finishCtx, "service intent lease release failed", "intent_id", j.id, "crew_id", j.crew)
+	}
 }
 
 // FilterServices leaves managed services exclusively to the controller, even

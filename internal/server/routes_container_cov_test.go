@@ -302,3 +302,22 @@ func TestHandleContainerGitLog_AgentSlugWorkDir(t *testing.T) {
 		})
 	}
 }
+
+func TestContainerRecyclePreservesServiceIntent(t *testing.T) {
+	s := newTestServerWithDeps(t)
+	s.container = &covSidecarContainer{}
+	mustExec(t, s.db, `INSERT INTO workspaces(id,name,slug) VALUES('recycle-ws','Recycle','recycle')`)
+	mustExec(t, s.db, `INSERT INTO crews(id,workspace_id,name,slug) VALUES('recycle-crew','recycle-ws','Recycle','recycle')`)
+	mustExec(t, s.db, `INSERT INTO service_runtime_intents(id,crew_id,service_name,desired_state,updated_at) VALUES('recycle-intent','recycle-crew','probe','running','2026-09-27T00:00:00Z')`)
+	for _, tc := range []struct{ path, want string }{{"recycle", "running"}, {"stop", "stopped"}} {
+		rr := httptest.NewRecorder()
+		s.ipcMux.ServeHTTP(rr, httptest.NewRequest("POST", "/crews/recycle-crew/container/"+tc.path, nil))
+		if rr.Code != 200 {
+			t.Fatalf("%s: %d %s", tc.path, rr.Code, rr.Body.String())
+		}
+		var state string
+		if err := s.db.QueryRow(`SELECT desired_state FROM service_runtime_intents WHERE id='recycle-intent'`).Scan(&state); err != nil || state != tc.want {
+			t.Fatalf("%s: state=%s err=%v", tc.path, state, err)
+		}
+	}
+}

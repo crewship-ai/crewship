@@ -63,15 +63,18 @@ func (s *Server) refreshCredentialGrants(ctx context.Context) {
 	endpoint := s.ipc.BaseURL + "/api/v1/internal/credential-grants?workspace_id=" + url.QueryEscape(s.ipc.WorkspaceID) + "&crew_id=" + url.QueryEscape(s.ipc.CrewID)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
+		s.logGrantRefreshFailure("request_build_failed")
 		return
 	}
 	req.Header.Set("X-Internal-Token", s.ipc.Token)
 	resp, err := ipcClient.Do(req)
 	if err != nil {
+		s.logGrantRefreshFailure("authority_unreachable")
 		return
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
+		s.logGrantRefreshFailure("authority_http_error")
 		return
 	}
 	var snapshot struct {
@@ -79,7 +82,18 @@ func (s *Server) refreshCredentialGrants(ctx context.Context) {
 		Grants  map[string]map[string]string `json:"grants"`
 	}
 	if err = json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&snapshot); err != nil || snapshot.Version != 1 || snapshot.Grants == nil {
+		s.logGrantRefreshFailure("invalid_snapshot")
 		return
 	}
 	s.credStore.RefreshAgentGrants(snapshot.Grants, time.Now())
+	if s.grantRefreshFailed.Swap(false) && s.logger != nil {
+		s.logger.Info("credential grant authority recovered")
+	}
+}
+
+// Log transitions only, without response bodies, tokens or URL-bearing errors.
+func (s *Server) logGrantRefreshFailure(reason string) {
+	if !s.grantRefreshFailed.Swap(true) && s.logger != nil {
+		s.logger.Warn("credential grant authority refresh failed", "reason", reason)
+	}
 }

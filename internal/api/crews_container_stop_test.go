@@ -197,3 +197,13 @@ func TestContainerStop_SucceedsWhenThereIsNoContainer(t *testing.T) {
 		t.Errorf("did not clear the reaper entry for a crew with no container")
 	}
 }
+
+func TestNetworkPolicyRecycleUsesRuntimeOnlyStop(t *testing.T) {
+	h, _, crew := startTestHandler(t, nil)
+	ipc := &stopIPCRecorder{}
+	h.SetSocketPath(startFakeIPC(t, ipc))
+	h.restartCrewContainer(context.Background(), crew)
+	if ipc.path != "/crews/"+crew+"/container/recycle" {
+		t.Fatalf("automatic recycle used %q", ipc.path)
+	}
+}

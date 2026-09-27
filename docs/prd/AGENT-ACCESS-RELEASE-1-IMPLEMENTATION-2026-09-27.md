@@ -301,3 +301,32 @@ Jejich dočasné zdroje také uklizeny. Lokální plná Go brána: 146 balíků,
 exit 0; `go vet` exit 0; pre-commit golangci-lint a secret scanner prošly.
 UI kód se v E1 neměnil; nasazení vytvořilo nový web export. Vzdálené CI a
 review commitu E1 je nutné posoudit samostatně; draft PR se nemerguje.
+
+## E2 — autorita při evidenci běhu; opravy review C/D1
+
+`TestInternalRunCrewScope` před opravou prokázal vytvoření běhu sousední crew,
+přijetí cizí workspace v těle, podvržení vazby na cizí chat (201) i přijetí
+všech změn stavu cizího běhu (200). Create nyní kontroluje workspace tokenu,
+crew agenta a případnou vazbu chat→agent→workspace před zápisem do journalu.
+Update kontroluje crew vlastníka běhu před terminal eventy i před odpovědí
+na neterminální RUNNING. Neautorizovaný request nesmí změnit stav agenta ani
+zapsat událost. Test zachovává pozitivní vytvoření a dokončení vlastního běhu.
+Toto je další uzavřená IPC cesta, ne dokončení klientské autority balíku B.
+
+Review předchozího commitu upozornilo na dvě potvrzené provozní chyby:
+
+- Změny grantů/lease měnily fingerprint sidecaru. Fingerprint nyní obsahuje
+  režim grantů, nikoliv jejich proměnlivý obsah nebo nepoužitý legacy seznam
+  příjemců. Startup payload zůstává úplný; změna skutečného tokenu se stále
+  rozlišuje. Test chrání refresh, revokaci, legacy režim i nezměněný payload.
+- Automatické zastavení při změně síťové politiky používalo explicitní Stop,
+  čímž přepisovalo službám durable intent na stopped. Samostatná IPC cesta
+  recycle zastaví runtime a služby, ale zachová desired state; controller je
+  obnoví. Uživatelský Stop nadále ukládá stopped. Testy kontrolují obě cesty
+  i volání z network-policy handleru.
+
+Doplněna diagnostika DB chyb controlleru a přechodu výpadek/obnova grant
+refresh. Refresh neloguje každou minutu další stejnou chybu; logy neobsahují
+response body, URL chyby ani tajné hodnoty. Test ověřuje omezení opakovaných
+logů i obnovení hlášení po novém výpadku. Výsledek plné brány a živá dev1
+akceptace budou doplněny po doběhnutí.

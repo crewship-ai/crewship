@@ -43,22 +43,38 @@ func (h *InternalHandler) CreateRun(w http.ResponseWriter, r *http.Request) {
 		body.TriggerType = "USER"
 	}
 
-	// Tenancy guard: the internal token authenticates the *sidecar*, not a
-	// workspace. A caller could otherwise post their own workspace_id with
-	// another workspace's agent_id and mutate that agent. Confirm the agent
-	// actually belongs to the claimed workspace BEFORE emitting any journal
-	// entry or flipping status — see proxy.go's `WHERE id=? AND workspace_id=?`.
+	if scope := InternalTokenWorkspaceFromContext(r.Context()); scope != "" && scope != body.WorkspaceID {
+		replyError(w, http.StatusForbidden, "workspace does not match internal token")
+		return
+	}
+	// Bind the agent to the authenticated crew before journaling or changing
+	// status. The workspace in the body is not an authorization boundary.
+	query := "SELECT workspace_id FROM agents WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL"
+	args := []any{body.AgentID, body.WorkspaceID}
+	if crew := InternalTokenCrewFromContext(r.Context()); crew != "" {
+		query += " AND crew_id = ?"
+		args = append(args, crew)
+	}
 	var agentWorkspaceID string
-	switch err := h.db.QueryRowContext(r.Context(),
-		"SELECT workspace_id FROM agents WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
-		body.AgentID, body.WorkspaceID).Scan(&agentWorkspaceID); {
+	switch err := h.db.QueryRowContext(r.Context(), query, args...).Scan(&agentWorkspaceID); {
 	case err == sql.ErrNoRows:
 		replyError(w, http.StatusNotFound, "Agent not found in workspace")
 		return
 	case err != nil:
-		h.logger.Error("create run: agent workspace check", "error", err, "agent_id", body.AgentID)
-		replyError(w, http.StatusInternalServerError, "Internal server error")
+		replyInternalError(w, h.logger, "create run: agent scope check", err)
 		return
+	}
+	if body.ChatID != "" {
+		var chatID string
+		err := h.db.QueryRowContext(r.Context(), `SELECT id FROM chats WHERE id = ? AND agent_id = ? AND workspace_id = ?`, body.ChatID, body.AgentID, body.WorkspaceID).Scan(&chatID)
+		if err == sql.ErrNoRows {
+			replyError(w, http.StatusNotFound, "Chat not found for agent")
+			return
+		}
+		if err != nil {
+			replyInternalError(w, h.logger, "create run: chat scope check", err)
+			return
+		}
 	}
 
 	now := time.Now().UTC().Format(time.RFC3339)
@@ -162,24 +178,18 @@ func (h *InternalHandler) UpdateRun(w http.ResponseWriter, r *http.Request) {
 	}
 
 	terminal := map[string]bool{"COMPLETED": true, "FAILED": true, "CANCELLED": true, "TIMEOUT": true}
-	if !terminal[body.Status] {
-		// Non-terminal updates (i.e. status=RUNNING) are no-ops post-J:
-		// the run is already RUNNING from CreateRun's run.started entry.
-		writeJSON(w, http.StatusOK, map[string]string{"id": runID, "status": body.Status})
-		return
-	}
 
 	// Look up workspace_id + agent_id from the run.started journal entry
 	// belonging to this trace. Without this we can't broadcast events.
 	var agentID, workspaceID string
-	var agentName sql.NullString
+	var agentName, agentCrew sql.NullString
 	if err := h.db.QueryRowContext(r.Context(),
-		`SELECT je.workspace_id, je.agent_id, a.name
+		`SELECT je.workspace_id, je.agent_id, a.name, a.crew_id
 		 FROM journal_entries je
-		 LEFT JOIN agents a ON a.id = je.agent_id
+		 LEFT JOIN agents a ON a.id = je.agent_id AND a.workspace_id = je.workspace_id
 		 WHERE je.trace_id = ? AND je.entry_type = 'run.started'
 		 LIMIT 1`, runID,
-	).Scan(&workspaceID, &agentID, &agentName); err != nil {
+	).Scan(&workspaceID, &agentID, &agentName, &agentCrew); err != nil {
 		if err == sql.ErrNoRows {
 			replyError(w, http.StatusNotFound, "run not found")
 			return
@@ -198,6 +208,18 @@ func (h *InternalHandler) UpdateRun(w http.ResponseWriter, r *http.Request) {
 	// not 403, so we don't confirm the run exists in another tenant.
 	if scope := InternalTokenWorkspaceFromContext(r.Context()); scope != "" && scope != workspaceID {
 		replyError(w, http.StatusNotFound, "run not found")
+		return
+	}
+
+	if crew := InternalTokenCrewFromContext(r.Context()); crew != "" && crew != agentCrew.String {
+		replyError(w, http.StatusNotFound, "run not found")
+		return
+	}
+
+	if !terminal[body.Status] {
+		// Non-terminal updates (i.e. status=RUNNING) are no-ops post-J:
+		// the run is already RUNNING from CreateRun's run.started entry.
+		writeJSON(w, http.StatusOK, map[string]string{"id": runID, "status": body.Status})
 		return
 	}
 

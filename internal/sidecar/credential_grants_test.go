@@ -1,9 +1,12 @@
 package sidecar
 
 import (
+	"bytes"
 	"context"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -83,5 +86,38 @@ func TestCredentialGrants_PollRejectsFailedAndMalformedResponses(t *testing.T) {
 				t.Fatal("unexpected refreshed grant")
 			}
 		})
+	}
+}
+
+func TestCredentialGrantRefreshLogsFailureAndRecovery(t *testing.T) {
+	status := http.StatusServiceUnavailable
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(status)
+		if status == 200 {
+			_, _ = w.Write([]byte(`{"version":1,"grants":{}}`))
+		} else {
+			_, _ = w.Write([]byte("synthetic-sensitive-response"))
+		}
+	}))
+	defer backend.Close()
+	s := newJournalTestServer(backend.URL)
+	s.ipc.CrewID = "crew"
+	s.credStore = NewCredStore()
+	s.credStore.Load([]Credential{{ID: "key", Provider: ProviderAnthropic, Token: "synthetic", AgentGrants: map[string]string{"a": ""}}})
+	var logs bytes.Buffer
+	s.logger = slog.New(slog.NewTextHandler(&logs, nil))
+	for range 3 {
+		s.refreshCredentialGrants(context.Background())
+	}
+	status = 200
+	s.refreshCredentialGrants(context.Background())
+	status = 503
+	s.refreshCredentialGrants(context.Background())
+	output := logs.String()
+	if strings.Count(output, "credential grant authority refresh failed") != 2 || strings.Count(output, "credential grant authority recovered") != 1 {
+		t.Fatalf("unexpected transition logs: %s", output)
+	}
+	if strings.Contains(output, "synthetic-sensitive-response") {
+		t.Fatal("response body leaked into logs")
 	}
 }
