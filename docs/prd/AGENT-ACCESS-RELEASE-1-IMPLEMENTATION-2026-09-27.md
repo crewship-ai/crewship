@@ -355,3 +355,21 @@ Review nálezy fingerprint/recycle/diagnostika jsou v kódu řešené; schválen
 nového headu a jeho CI je samostatná otevřená brána. PR zůstává draft.
 A2/B, zbytek E (včetně end-to-end identity/delegace), přímá credential delivery
 izolace a izolovaný host reboot stále nejsou prohlášeny za dokončené.
+
+## E3 / D2 — ověření živého běhu a zachování deny-all grantů
+
+Reproduktor `TestRunStatusCrewAuthority` ukázal, že crew token dostal active=true
+pro práci sousední crew i pro práci bez crew ve stejné workspace. Status nyní
+filtruje podle crew uložené v work ledgeru, ne podle aktuálního přiřazení
+agenta. Ověřený kontext workspace má přednost před URL. Chybějící, cizí a
+nepřiřazený běh vrací stejnou odpověď active=false; DB chyba zůstává 503.
+Původní kontroly ukončení a generace pokusu se nemění. Workspace/host caller
+bez crew bindingu zachovává dosavadní workspace rozsah.
+
+Druhý reproduktor doložil ztrátu prázdné mapy AgentGrants při JSON serializaci
+boot payloadu: omitempty zahodilo {}, zatímco nil znamená legacy oprávnění.
+Pět přenosových struktur nyní používá omitzero: nil se nadále vynechá, explicitní
+{} přežije a znamená zákaz všem. Testy pokrývají API DTO, chatbridge DTO,
+orchestrátor a boot payload i skutečné rozhodnutí sidecar CredStore po JSON
+round tripu. Nepřidává se nový legacy fallback. Nejde o dokončení izolace
+přímých env/file credentials ani balíku B.

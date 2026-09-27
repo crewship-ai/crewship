@@ -224,7 +224,7 @@ type credentialResponse struct {
 	// credential crew-wide, and the sidecar's CredStore would go back to
 	// serving one member's endpoint credential to another with nothing said.
 	AgentIDs    []string          `json:"agent_ids,omitempty"`
-	AgentGrants map[string]string `json:"agent_grants,omitempty"`
+	AgentGrants map[string]string `json:"agent_grants,omitzero"`
 	// GraceToken / GraceExpiresAt / GraceRotationID mirror mcpCredEntry's
 	// rotation grace (#1882): the previous value while a rotation's window is
 	// open. Dropped here, the sidecar would boot with nothing to replay a 401

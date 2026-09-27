@@ -1220,8 +1220,9 @@ type sidecarCred struct {
 	// before), and sidecarConfigFingerprint — which hashes this same struct —
 	// does not move for any crew that has no per-agent grant.
 	AgentIDs []string `json:"agent_ids,omitempty"`
-	// AgentGrants is the authoritative per-agent lease map. Nil is a legacy payload.
-	AgentGrants map[string]string `json:"agent_grants,omitempty"`
+	// AgentGrants is the authoritative per-agent lease map. Nil is legacy;
+	// an empty non-nil map denies everyone and must survive JSON serialization.
+	AgentGrants map[string]string `json:"agent_grants,omitzero"`
 	// GraceToken / GraceExpiresAt / GraceRotationID carry a rotation's grace
 	// value (#1882) into the CredStore. omitempty keeps the payload
 	// byte-identical for a credential with no open rotation. They are

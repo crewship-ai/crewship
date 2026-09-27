@@ -64,7 +64,10 @@ func (h *RunStatusHandler) Status(w http.ResponseWriter, r *http.Request) {
 	// ids are unguessable, so it was a narrow oracle rather than an open door,
 	// but it was the one place on this surface where a bound token bought no
 	// binding — and "you cannot guess the identifier" is not an access control.
-	workspaceID := r.URL.Query().Get("workspace_id")
+	workspaceID := InternalTokenWorkspaceFromContext(r.Context())
+	if workspaceID == "" {
+		workspaceID = r.URL.Query().Get("workspace_id")
+	}
 	if workspaceID == "" {
 		// A token that carries no workspace cannot be told about a run. Refusing
 		// is not a verdict on the run: 403 is distinguishable from the 200s
@@ -102,12 +105,19 @@ func runIsLiveAttempt(ctx context.Context, db *sql.DB, workspaceID, runID string
 		attemptGen     int64
 		endedAt        sql.NullString
 	)
-	err := db.QueryRowContext(ctx, `
+	query := `
 		SELECT wi.state, wi.generation, wa.generation, wa.ended_at
 		  FROM work_attempts wa
 		  JOIN work_items wi ON wi.id = wa.work_id
-		 WHERE wa.run_id = ? AND wi.workspace_id = ?`, runID, workspaceID).
-		Scan(&itemState, &itemGeneration, &attemptGen, &endedAt)
+		 WHERE wa.run_id = ? AND wi.workspace_id = ?`
+	args := []any{runID, workspaceID}
+	// The durable work identity owns the attempt; moving an agent later must
+	// not transfer authority over its previous crew's work to the new crew.
+	if crew := InternalTokenCrewFromContext(ctx); crew != "" {
+		query += " AND wi.crew_id = ?"
+		args = append(args, crew)
+	}
+	err := db.QueryRowContext(ctx, query, args...).Scan(&itemState, &itemGeneration, &attemptGen, &endedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		// Absent, or present in another workspace — deliberately the same
 		// answer, so this cannot be used to probe for runs the caller has no

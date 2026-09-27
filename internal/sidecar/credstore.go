@@ -90,8 +90,9 @@ type Credential struct {
 	// credential must serialise byte-identically to the pre-#2052 payload, so
 	// the config fingerprint of an existing crew does not move.
 	AgentIDs []string `json:"agent_ids,omitempty"`
-	// AgentGrants is the authoritative per-agent lease map. Nil is a legacy payload.
-	AgentGrants map[string]string `json:"agent_grants,omitempty"`
+	// AgentGrants is the authoritative per-agent lease map. Nil is legacy;
+	// an empty non-nil map denies everyone and must survive JSON serialization.
+	AgentGrants map[string]string `json:"agent_grants,omitzero"`
 
 	// GraceToken is the credential's PREVIOUS value while a rotation's grace
 	// window is open (#1882), delivered through the same boot payload as
