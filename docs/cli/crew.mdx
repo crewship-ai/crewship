@@ -33,6 +33,7 @@ crewship crew <subcommand> [flags]
 | `connect` | Create a connection between two crews |
 | `disconnect` | Remove a crew connection |
 | `connections` | List all crew connections in the workspace |
+| `file-access` | Change directed shared-file access using the observed version |
 | `mcp` | Show or set MCP server configuration for a crew |
 | `config` | Manage runtime configuration (devcontainer, mise, runtime image) |
 | `credential-readiness` | Report credentials whose CLI is missing from the crew's container |
@@ -580,7 +581,8 @@ crewship crew member remove <crew-slug-or-id> <member-id>
 
 Crew connections ("crew links" in the UI) are what let one crew hand work to another: with a link, a
 lead can assign to an agent in the other crew (`/assign` with a `crew` field), crews can message each
-other and share files. Without one, every attempt is refused.
+other. Shared-file access is separately restricted to none, read, or read plus delivery. Without
+a link, these cross-crew operations are refused.
 
 `--direction unidirectional` means work flows from the FIRST crew to the second only. Re-running
 `connect` on a pair that is already linked updates that link rather than creating a second one; naming
@@ -606,6 +608,19 @@ Remove a crew connection by connection ID.
 ```bash
 crewship crew disconnect <connection-id>
 ```
+
+### `crewship crew file-access`
+
+```bash
+crewship crew connections --format json
+crewship crew file-access <connection-id> <requester-crew-slug> read <access-version>
+```
+
+Levels: `none`, `read`, `read_write` (read plus delivery into the recipient’s incoming folder).
+Requires MANAGER+ and the current `access_version` from the connection. A stale version is rejected;
+reload instead of overwriting another administrator’s change. This does not grant shell or credential
+access and does not change task/message permissions. Existing connections retain their historical
+file permissions until changed.
 
 ### `crewship crew connections`
 

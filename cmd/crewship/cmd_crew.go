@@ -496,6 +496,7 @@ func init() {
 	crewCmd.AddCommand(crewConnectCmd)
 	crewCmd.AddCommand(crewDisconnectCmd)
 	crewCmd.AddCommand(crewConnectionsCmd)
+	crewCmd.AddCommand(crewFileAccessCmd)
 	crewCmd.AddCommand(crewStandupCmd)
 	crewCmd.AddCommand(crewPeerConvsCmd)
 	crewCmd.AddCommand(crewSuggestCmd)

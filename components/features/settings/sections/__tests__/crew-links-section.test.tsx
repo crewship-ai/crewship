@@ -60,6 +60,9 @@ function conn(id: string, from: string, to: string, direction = "bidirectional")
     to_crew_slug: CREWS.find((c) => c.id === to)!.slug,
     direction,
     status: "active",
+    forward_file_access: "read_write",
+    reverse_file_access: "read_write",
+    access_version: 1,
     created_at: new Date().toISOString(),
   }
 }
@@ -191,6 +194,23 @@ describe("Crew links — per-crew view", () => {
       to_crew_id: "c-ops",
       direction: "unidirectional",
     })
+  })
+
+  it("does not recreate a link from stale permissions after a concurrent edit", async () => {
+    mockApi([conn("cc-ops-eng", "c-ops", "c-eng", "unidirectional")])
+    const base = apiFetch.getMockImplementation()!
+    apiFetch.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (init?.method === "DELETE") return jsonResponse({ detail: "Connection changed" }, 409)
+      return base(url, init)
+    })
+    render(<ConnectionsSection workspaceId="ws1" />)
+    await screen.findByRole("button", { name: "Engineering" })
+    openSelect(pairControl("Ops"))
+    fireEvent.click(await screen.findByRole("option", { name: /sends work/i }))
+    await waitFor(() => expect(toast.error).toHaveBeenCalled())
+    expect(mutations()).toHaveLength(1)
+    expect(String(mutations()[0][0])).toContain("expected_version=1")
+    expect((mutations()[0][1] as RequestInit).method).toBe("DELETE")
   })
 
   it("switching the selected crew shows that crew's pairs", async () => {
@@ -377,5 +397,30 @@ describe("Crew links — a refused re-point", () => {
     expect(msg).toContain("target crew is archived")
     expect(msg).toMatch(/could not be restored/i)
     expect(msg).toMatch(/re-create the link manually/i)
+  })
+})
+
+
+describe("Crew shared-file access", () => {
+  beforeEach(() => { cleanup(); role = "MANAGER"; apiFetch.mockReset() })
+  it("changes only the chosen direction with its observed version", async () => {
+    const link = conn("cc-eng-ops", "c-eng", "c-ops")
+    mockApi([link])
+    render(<ConnectionsSection workspaceId="ws-1" />)
+    const control = await screen.findByRole("combobox", { name: "Engineering access to Ops shared files" })
+    openSelect(control)
+    fireEvent.click(await screen.findByRole("option", { name: "Can view", exact: true }))
+    await waitFor(() => expect(apiFetch).toHaveBeenCalledWith(
+      "/api/v1/crew-connections/cc-eng-ops/file-access?workspace_id=ws-1",
+      expect.objectContaining({ method: "PUT", body: JSON.stringify({ requester_crew_id: "c-eng", level: "read", expected_version: 1 }) }),
+    ))
+    expect(mutations().filter(([, init]) => (init as RequestInit).method === "DELETE")).toHaveLength(0)
+  })
+  it("does not claim an empty workspace when access loading fails", async () => {
+    apiFetch.mockResolvedValue(jsonResponse({}, 503))
+    render(<ConnectionsSection workspaceId="ws-1" />)
+    expect(await screen.findByRole("alert")).toHaveTextContent("could not be verified")
+    expect(screen.queryByText(/workspace has none/)).toBeNull()
+    expect(screen.queryByRole("combobox")).toBeNull()
   })
 })

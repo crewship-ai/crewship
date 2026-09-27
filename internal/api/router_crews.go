@@ -193,6 +193,7 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	conns := NewCrewConnectionHandler(r.db, r.logger)
 	r.mux.Handle("GET /api/v1/crew-connections", authed(wsCtx(http.HandlerFunc(conns.List))))
 	r.authedMut("POST", "/api/v1/crew-connections", roleCreate, conns.Create)
+	r.authedMut("PUT", "/api/v1/crew-connections/{connectionId}/file-access", roleCreate, conns.UpdateFileAccess)
 	r.authedMut("DELETE", "/api/v1/crew-connections/{connectionId}", roleCreate, conns.Delete)
 
 	// Integrations (MCP Gateway)
