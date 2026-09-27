@@ -284,3 +284,20 @@ zůstávají otevřené. Celý `go test ./... -count=1` i `go vet ./...` prošly
 race testy (52,905 s), doplňující test idempotence routine kroku a agentí
 invarianty také. Předchozí CodeQL kontrola PR již hlásí SUCCESS, CodeRabbit
 nových změn zůstává pending. Živá dev1 akceptace této změny následuje.
+
+### Živá akceptace E1 — dev1 `4a0edba80`
+
+Nasazeno přes `systemctl reload crewship-ws@1`; stav potvrdil nový build a
+běžící API/Next. Smoke přes skutečné interní HTTP API použil crew-bound
+tokeny dvou nově vytvořených syntetických crews. Vlastní vytvoření chatu 201,
+retry 200, resolve 200 a změna počítadla 200; cizí agent při create 404,
+cizí chat/agent resolve 404, změna cizího názvu/počítadla 404, pokus použít
+cizí chat ID pro vlastní identitu 409. Test nevypsal tokeny ani obsah
+konfigurací. Všechny testovací chaty, agenty a crews odstranil veřejným API/CLI.
+
+Na stejném buildu znovu prošly živé smoke A1 (směry, revoke, stale PUT/DELETE)
+a F1 (uložená rutina, prázdná fronta, dokončení s přeskočeným agentím krokem).
+Jejich dočasné zdroje také uklizeny. Lokální plná Go brána: 146 balíků,
+exit 0; `go vet` exit 0; pre-commit golangci-lint a secret scanner prošly.
+UI kód se v E1 neměnil; nasazení vytvořilo nový web export. Vzdálené CI a
+review commitu E1 je nutné posoudit samostatně; draft PR se nemerguje.
