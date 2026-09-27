@@ -83,8 +83,6 @@ test("PR browser contract subset", async ({ page }) => {
     await createIssue.click()
     const issueResponse = await createResponse
     expect(issueResponse.status(), await issueResponse.text()).toBe(201)
-    const workspaces = await (await page.request.get("/api/v1/workspaces")).json()
-    const workspaceID = Array.isArray(workspaces) ? workspaces[0]?.id : workspaces.id
     await expect.poll(async () => {
       const data = await (await page.request.get(`/api/v1/issues?workspace_id=${workspaceID}`)).json()
       const rows = Array.isArray(data) ? data : data.rows ?? data.data ?? []
