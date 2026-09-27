@@ -1033,12 +1033,12 @@ To reach **outside** Crewship when a run completes or fails — email or a signe
 }
 ```
 
-A deterministic, read-only aggregate query over the run's own workspace's operational data — no LLM, no network egress, agentless-compatible. `source: "pipeline_runs"` is the only source today: run counts, cost, and top failures over a trailing window (default 24h, capped at 720h/30 days regardless of what's authored). This is the data source behind the [workspace digest](#workspace-digest-template) routine template.
+A deterministic, read-only aggregate query over the run's own workspace's operational data — no LLM, no network egress, agentless-compatible. `source: "pipeline_runs"` returns run counts, cost, and top failures over a trailing window (default 24h, capped at 720h/30 days regardless of what's authored). This is the data source behind the [workspace digest](#workspace-digest-template) routine template.
 
 | Field | Notes |
 | --- | --- |
-| `source` | `"pipeline_runs"` (only value today). |
-| `window_hours` | Trailing window in hours. Default `24` when 0/absent. |
+| `source` | `"pipeline_runs"` for history, or `"assigned_issues"` for the author agent’s candidate work. |
+| `window_hours` | Trailing history window in hours. Default `24` when 0/absent; unused for `assigned_issues`. |
 
 Output is a JSON object — pipe it through a `transform` step to pull a single field for a downstream `notify`/`http` step, exactly like any other structured step output:
 
@@ -2425,3 +2425,29 @@ These are known gaps in the current MVP — none block production use, but they 
 - **No cross-run continuity** — each run starts with an empty context; the previous run's conversation is not carried forward, and `pipeline_routine_state` is a string key/value store for watermarks and counters, not memory. Give the agent what it needs in the routine's brief or in state you write explicitly.
 - **A trigger that has matched nothing is not flagged** — an automation whose event type or payload filter can never fire is now refused at save time, but one that is valid and has simply never matched is not surfaced after any interval. Check `crewship automation list` for rules with no fires.
 - **NL→cron covers a fixed phrase set** — `routine schedules create --when` (see [Cron schedules](#cron-schedules)) handles the common onboarding phrasings (`every weekday at 9`, `every day at 9am`, `every monday at 14:00`, `every hour`, `every N minutes/hours`) via a small hand-rolled parser, not a general NLP model; anything outside that set still needs a raw `--cron` expression.
+
+
+## Check for assigned work before waking an agent
+
+Use a `query` step with `source: "assigned_issues"`, followed by an agent step
+with `if: "{{ steps.check.output.has_work }}"`. The query returns
+`{"has_work": false}` or `{"has_work": true}` without calling a model or starting
+a container. The routine must have an author agent in its author crew. The
+query uses that persisted identity, never an agent named in runtime inputs.
+
+The signal considers TODO issues delegated to that agent in the same crew and
+workspace. Human-mode work, unresolved blocking relations, live assignments
+and live routine executions are excluded. Missing/deleted author identity or
+a database error fails the step; it is not reported as an empty queue.
+
+This is an advisory read, not an issue claim or execution permission. Work can
+change after the check, including while a run waits or resumes. The agent must
+use the normal issue start path, which applies current ownership and execution
+gates. Do not put unrelated recurring work behind this condition: a daily
+report can be useful even when no issues are assigned.
+
+For a routine whose container steps are all conditional, Crewship defers
+container startup until a condition actually passes. Unconditional runtime
+steps retain the existing prewarm behavior. Use the existing routine schedule,
+budget and run history; this pattern adds no independent heartbeat timer.
+See [the complete recipe](/guides/routines-cookbook#assigned-work-preflight).

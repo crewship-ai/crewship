@@ -31,6 +31,15 @@ func (e *Executor) runQueryStep(ctx context.Context, step Step, in RunInput) (st
 		return "", 0, 0, fmt.Errorf("query step: run history store not configured on this executor")
 	}
 	switch step.Query.Source {
+	case "assigned_issues":
+		hasWork, err := e.runStore.hasAssignedIssues(ctx, in.WorkspaceID, in.AuthorCrewID, in.AuthorAgentID)
+		if err != nil {
+			return "", 0, 0, err
+		}
+		out, err := json.Marshal(struct {
+			HasWork bool `json:"has_work"`
+		}{hasWork})
+		return string(out), 0, time.Since(stepStart).Milliseconds(), err
 	case "pipeline_runs":
 		windowHours := step.Query.WindowHours
 		if windowHours <= 0 {
@@ -51,6 +60,6 @@ func (e *Executor) runQueryStep(ctx context.Context, step Step, in RunInput) (st
 	default:
 		// Validation rejects this at save time; belt-and-braces for a
 		// definition that smuggled an unsupported source past it.
-		return "", 0, 0, fmt.Errorf("query step: unsupported source %q (allowed: pipeline_runs)", step.Query.Source)
+		return "", 0, 0, fmt.Errorf("query step: unsupported source %q (allowed: pipeline_runs, assigned_issues)", step.Query.Source)
 	}
 }

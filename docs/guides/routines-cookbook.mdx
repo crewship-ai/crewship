@@ -818,3 +818,34 @@ These exist in the routines documentation but aren't recipes here because they d
 - **Webhooks** — see [routine webhooks CLI](/cli/routine#crewship-routine-webhooks). HMAC-signed event triggers for any recipe above.
 
 The recipes here are the LLM-step shapes; the trigger surfaces are orthogonal.
+
+
+## Assigned work preflight {#assigned-work-preflight}
+
+Save this as a routine owned by the agent whose issue queue you want to check.
+Replace `worker` with that agent's slug and supply both `--author-crew` and
+`--author-agent` when saving. Add a schedule through the normal routine controls.
+
+```json
+{
+  "dsl_version": "1.0",
+  "name": "assigned-work-preflight",
+  "steps": [
+    {"id": "check", "type": "query", "query": {"source": "assigned_issues"}},
+    {
+      "id": "work",
+      "type": "agent_run",
+      "needs": ["check"],
+      "if": "{{ steps.check.output.has_work }}",
+      "agent_slug": "worker",
+      "prompt": "Review your assigned TODO issues. Use the normal issue start mechanism and current permissions. If another run already took the work or it is no longer eligible, finish without repeating its effects."
+    }
+  ]
+}
+```
+
+An empty queue completes with the agent step skipped and no model call. Query
+errors stop the routine. A positive result is only a candidate-work signal;
+it does not reserve an issue or bypass budgets, approval, ownership or credential
+gates. Existing routine deduplication applies to occurrences, not to the issue
+itself. Do not replace atomic issue claiming with a boolean query.

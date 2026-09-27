@@ -311,6 +311,10 @@ func ValidateCrewshipActingAgent(dsl *DSL, hasActingAgent bool) error {
 func validateStepsActingAgent(steps []Step) error {
 	for _, st := range steps {
 		switch st.Type {
+		case StepQuery:
+			if st.Query != nil && st.Query.Source == "assigned_issues" {
+				return fmt.Errorf("pipeline: step %q (assigned_issues) requires an author agent; save with --author-agent <slug|id>", st.ID)
+			}
 		case StepForeach:
 			// The loop reaches nothing; its body does. Without this, wrapping
 			// the step in a foreach would be a way past the gate.

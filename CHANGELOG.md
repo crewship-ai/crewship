@@ -10,6 +10,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 ## [Unreleased]
 
 ### Improved
+- Routines can check assigned TODO issues without an LLM call using `query: assigned_issues`; conditional runtime steps no longer prewarm an otherwise idle container. (#2703)
 - Declared crew services can opt into persistent running/stopped intent from crew Settings or the CLI. A leased controller restores services independently of agent wakeups; missing credential references block startup, and explicit stops survive restart. (#2703)
 - Crew links now expose directional shared-file permissions in Settings and `crew file-access`: deny, read, or read plus delivery. Existing links keep their permissions; new Settings links start with no file access. Version checks prevent stale access edits and stale UI link replacements. (#2703)
 - Channel settings use an inline right panel with avatar pickers and one Members list. Creators can add/remove people from public channels without changing workspace-wide access; reading and muting no longer imply membership. The open Work/Artifacts rail matches its panel background. (#2699)

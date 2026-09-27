@@ -12,10 +12,10 @@ Uživatel autorizoval vývoj, testy a nasazení na dev1. Základ implementace je
 | A1: směrované oprávnění sdílených souborů mezi crews | Implementováno a nasazeno na dev1, PR review/CI probíhá | Settings/API/CLI, none/read/read+delivery, stale update 409, role/workspace, odebrání dalšího requestu |
 | A2: agent→agent / projektové granty | Připravený návrh, neimplementováno | stabilní resource ID, efektivní dědění, všechny čtecí cesty, shell hranice |
 | B: omezený klientský běh a konverzace | Neimplementováno | žadatel→běh→výstup, historie, paměť a artefakty dvou klientů |
-| C: service desired state / obnova po rebootu | Implementován controller, Settings/API/CLI a testy; živá Docker/restart akceptace probíhá | durable running/stopped, rekonciliace, data/identity, žádná duplicita |
+| C: service desired state / obnova po rebootu | Nasazeno na dev1; Docker ztráta kontejneru/data a server restart ověřeny; host reboot otevřený | durable running/stopped, rekonciliace, data/identity, žádná duplicita |
 | D: credentials / revokace konkrétního grantu | D1: per-agent proxy grant snapshot/refresh implementován; přímá delivery a izolace dále otevřené | rozdílné lease, odebrání jedinému agentovi, výpadek autority, izolovaná delivery |
 | E: Chat / Issues / Routines / Pages | Existující mechanismy inventarizované, společná omezená autorita nedokončena | negativní end-to-end matice včetně logů/streamů/delegace |
-| F: levná kontrola práce před heartbeat | Návrh, neimplementováno | žádné prázdné LLM wake, budget/dedupe/recovery bez oslabení lease |
+| F: levná kontrola práce před heartbeat | F1 query/conditional prewarm implementováno, final gate a dev1 smoke probíhá; autoritní dedupe čeká na A2/B | žádné prázdné LLM wake, budget/dedupe/recovery bez oslabení lease |
 
 Tabulka není prohlášení, že celý Release 1.0 je připraven. Každý další balík musí
 mít vlastní reproduktor a testovací bránu. Sdílené UID crew zůstává důvěrovou
@@ -172,3 +172,49 @@ kontraktu a YAML tagy CLI; obojí doplněno. Cílené testy ověřují dvě inst
 controlleru, obnovu intentu, Stop při startu agenta, izolované chyby credentials,
 role/workspace/stale update a bezpečné chyby. Finální gate a dev1 evidence se
 zapisují až po skutečném dokončení. A2/B/E/F zůstávají otevřené.
+
+### Dokončená verifikace C/D1 (`292a1c570`)
+
+- Celý Go průchod: 146 balíků, exit 0; go vet exit 0; race testy
+  `TestCredentialGrants*` exit 0. Celý frontend: 791 souborů, 9 365 testů.
+- Test types, lint (0 chyb/30 existujících varování), Next static export,
+  strict docs inventory, migration lint a agents-invariants prošly.
+- Dev1 nasazen přes `systemctl reload crewship-ws@1`, build identity ověřena.
+- Vlastní dočasná crew se službou alpine:3: běh bez agenta, odstranění
+  kontejneru, automatická obnova do nového ID a zachování `synthetic-stable`
+  v pojmenovaném svazku. Poté verzovaný Stop a další restart dev1; služba
+  zůstala zastavená. Host/Docker daemon reboot nebyl proveden.
+- Browser ověřil Crew administration → Services, skutečný Stop a oba
+  ovladače. Dočasná crew, kontejnery a označené svazky odstraněny.
+- Remote CI/review nového commitu je samostatná neuzavřená brána; draft PR
+  se nemerguje podle starého zeleného CodeRabbit statusu.
+
+
+## F1 — levná kontrola práce v Routines
+
+Nový deterministický query source `assigned_issues` používá uloženého autora
+rutiny a jeho crew/workspace. Vrací jen `has_work`, žádný obsah cizích issues.
+TODO kandidát musí být delegovaný autorovi, v agentím režimu, bez otevřeného
+blockeru a bez aktivní assignment/routine execution. Nepřítomná/smazaná nebo
+cizí identita a DB chyba jsou error, nikoliv false. Save gate požaduje autora.
+Query má dvousekundový timeout a nevolá model. Podmíněné runtime kroky již
+nevyvolají předběžný prewarm; kontejner se spouští až po splnění podmínky.
+
+Jde o signál, ne rezervaci práce. Pozitivní výsledek může během čekání/resume
+zestárnout. Agent musí použít existující atomický issue start, budget a aktuální
+autoritu. F1 nezavádí další timer, neslučuje klientské autority a nedokončuje
+A2/B. Běžné denní reporty zůstávají nezměněné, protože gate je opt-in v DSL.
+Úplný příklad a limity jsou v Routines guide/cookbook.
+
+Cílené testy: prázdná fronta = 0 agentích volání; vlastní TODO = 1; cizí
+workspace/crew/agent, human mode, blockers (včetně legacy opačného směru),
+živá assignment/rutina, smazání autora, DB failure, chybějící autor při save,
+žádný prewarm podmíněného agenta. Query ověřená i na plném migrovaném schématu.
+Lokální `BenchmarkAssignedIssuesPreflight`, 5 000 historických DONE issues,
+Intel i7-12700, SQLite fixture v tmpfs: 2 329 127 ns/op, 3 236 B/op,
+39 allocs/op (2s benchmark). Toto je testovací průměr, nikoliv produkční p95.
+
+Vzdálený CodeQL označil sčítání délek při rekonstrukci ciphertext+tag ve starším
+Decrypt. Nová alokace používá `len(data)-len(iv)` po existující kontrole délky;
+copy zachovává GCM layout. Celý encryption test balík včetně layout/TS
+kompatibility prošel. Z nálezu samotného netvrdíme prokázaný exploit.
