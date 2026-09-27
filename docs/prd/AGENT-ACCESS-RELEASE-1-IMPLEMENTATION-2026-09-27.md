@@ -71,6 +71,7 @@ test všech ochranných vrstev živé Crewship instalace.
 
 - Cílené backend testy A1, stávajících connections/messaging a traversal prošly.
 - Settings: 20 testů prošlo; přidána změna přesného směru/verze a chyba načítání.
+- Kompletní `pnpm test`: 790 souborů, 9 361 testů prošlo; `pnpm test:types`: clean.
 - CLI: nový příkaz a předání chyby stale verze prošly.
 - CI test-typecheck našel nepodporovaný parametr `exact` v Testing Library testu; nahrazen přesným regulárním výrazem, bez změny produktového kódu.
 - TypeScript, ESLint (0 chyb, 30 existujících varování), produkční Next export
