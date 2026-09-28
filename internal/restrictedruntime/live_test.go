@@ -1,3 +1,5 @@
+//go:build restrictedruntime_live
+
 package restrictedruntime
 
 import (
@@ -21,16 +23,6 @@ import (
 	"github.com/crewship-ai/crewship/internal/auth/internaltoken"
 )
 
-type catalogMap map[string]string
-
-func (c catalogMap) Volume(_ context.Context, _ Plan, m Mount) (string, error) {
-	v, ok := c[m.Resource]
-	if !ok {
-		return "", ErrDenied
-	}
-	return v, nil
-}
-
 type liveFixture struct {
 	t                   *testing.T
 	d                   Docker
@@ -45,7 +37,7 @@ type liveFixture struct {
 func live(t *testing.T) *liveFixture {
 	t.Helper()
 	if os.Getenv("CREWSHIP_RESTRICTED_LIVE") != "1" {
-		t.Skip("opt-in disposable Docker acceptance: scripts/restricted-runtime-probe/run.sh")
+		t.Fatal("live gate requires owned disposable Docker fixtures: scripts/restricted-runtime-probe/run.sh")
 	}
 	image := os.Getenv("CREWSHIP_RESTRICTED_IMAGE")
 	if image == "" {

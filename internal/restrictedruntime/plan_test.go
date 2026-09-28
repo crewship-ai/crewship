@@ -7,6 +7,16 @@ import (
 	"time"
 )
 
+type catalogMap map[string]string
+
+func (c catalogMap) Volume(_ context.Context, _ Plan, m Mount) (string, error) {
+	v, ok := c[m.Resource]
+	if !ok {
+		return "", ErrDenied
+	}
+	return v, nil
+}
+
 func testPlan() Plan {
 	return Plan{Workspace: "w1", Principal: "h1", PrincipalKind: "human", Agent: "a", Scope: "h1-chat1", Attempt: "attempt1", Origin: "chat", OriginID: "chat1", Revision: "r1", Generation: 1, Mode: "restricted", Expires: time.Now().Add(10 * time.Second), Mounts: []Mount{{"private", "/data/private", false}, {"shared", "/data/shared", true}}, Credentials: []Credential{{"direct", "DIRECT_TOKEN", "direct"}}, Command: []string{"sh", "-c", "sleep 3600"}}
 }

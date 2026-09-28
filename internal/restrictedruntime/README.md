@@ -64,8 +64,9 @@ changing sidecar production code. Sidecar startup is harness-owned, not yet a
 production runtime adapter; it must be provisioned before untrusted agent code
 and expose only approved broker operations in the eventual connected profile.
 
-`go test ./internal/restrictedruntime` runs policy/unit tests and explicitly
-skips the live gate. The script sets `CREWSHIP_RESTRICTED_LIVE=1` and supplies
+`go test ./internal/restrictedruntime` runs policy/unit tests and
+excludes the build-tagged live gate (`restrictedruntime_live`). The script
+sets `CREWSHIP_RESTRICTED_LIVE=1` and supplies
 its image through `CREWSHIP_RESTRICTED_IMAGE`; failures are not skipped.
 Production chat/routine/webhook/queue adapters, server-selected recall,
 external network mediation, hard disk quotas, upstream credential revocation,
