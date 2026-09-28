@@ -35,6 +35,7 @@ import { AlertTriangle, CircleCheck, Clock, Gauge } from "lucide-react"
 
 import { DashboardCard } from "@/components/features/dashboard/dashboard-card"
 import { EmptyState } from "@/components/layout/empty-state"
+import { StatusPill } from "@/components/ui/status-pill"
 import { StatCard } from "@/components/layout/stat-card"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Appear } from "@/components/ui/detail"
@@ -143,7 +144,7 @@ export function PagesOverview({
         </Appear>
 
         {error && (
-          <div className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+          <div className="rounded-[12px] border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
             {error}
           </div>
         )}
@@ -246,7 +247,7 @@ export function PagesOverview({
                         disabled={empty || !onFilterState}
                         onClick={() => onFilterState?.(row.state)}
                         className={cn(
-                          "group flex items-center gap-2.5 rounded-md px-1.5 py-2 text-left transition-colors",
+                          "group flex items-center gap-2.5 rounded-[10px] px-2 py-2 text-left transition-colors",
                           !empty && onFilterState && "hover:bg-foreground/[0.03]",
                           empty && "cursor-default",
                         )}
@@ -315,15 +316,8 @@ export function PagesOverview({
                         exit={{ opacity: 0, height: 0 }}
                         type="button"
                         onClick={() => onSelect(p.slug)}
-                        className="group flex items-center gap-2.5 overflow-hidden rounded-md px-1.5 py-2 text-left transition-colors hover:bg-foreground/[0.03]"
+                        className="group flex items-center gap-2.5 overflow-hidden rounded-[10px] px-2 py-2 text-left transition-colors hover:bg-foreground/[0.03]"
                       >
-                      <span
-                        aria-hidden
-                        className={cn(
-                          "h-2 w-2 shrink-0 rounded-full",
-                          p.tally.failed > 0 ? "bg-destructive" : "bg-muted-foreground/40",
-                        )}
-                      />
                       <span className="min-w-0 flex-1">
                         <span className="type-page-value block truncate text-foreground/90">
                           {p.name}
@@ -340,10 +334,14 @@ export function PagesOverview({
                         </span>
                       </span>
                         {p.ownerLabel && (
-                          <span className="type-page-meta shrink-0 text-muted-foreground-soft">
+                          <span className="type-page-meta hidden shrink-0 font-mono text-muted-foreground-soft sm:inline">
                             {p.ownerLabel}
                           </span>
                         )}
+                        <StatusPill
+                          tone={p.tally.failed > 0 ? "danger" : "muted"}
+                          label={p.tally.failed > 0 ? "Failed" : "No data yet"}
+                        />
                       </motion.button>
                     ))}
                   </AnimatePresence>
@@ -383,7 +381,7 @@ export function PagesOverview({
                       {...listRow}
                       type="button"
                       onClick={() => onSelect(p.slug)}
-                      className="group flex items-center gap-2.5 rounded-md px-1.5 py-2 text-left transition-colors hover:bg-foreground/[0.03]"
+                      className="group flex items-center gap-2.5 rounded-[10px] px-2 py-2 text-left transition-colors hover:bg-foreground/[0.03]"
                     >
                       <Icon
                         className={cn(
@@ -426,14 +424,14 @@ function OverviewSkeleton() {
         <Skeleton className="h-9 w-48" />
         <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
           {Array.from({ length: 4 }, (_, i) => (
-            <Skeleton key={i} className="h-[104px] rounded-xl" />
+            <Skeleton key={i} className="h-[104px] rounded-[20px]" />
           ))}
         </div>
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-          <Skeleton className="h-[228px] rounded-xl" />
-          <Skeleton className="h-[228px] rounded-xl" />
+          <Skeleton className="h-[228px] rounded-[20px]" />
+          <Skeleton className="h-[228px] rounded-[20px]" />
         </div>
-        <Skeleton className="h-[240px] rounded-xl" />
+        <Skeleton className="h-[240px] rounded-[20px]" />
       </div>
     </div>
   )
