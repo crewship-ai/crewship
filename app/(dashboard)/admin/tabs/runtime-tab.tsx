@@ -1,5 +1,5 @@
 import React from "react"
-import { RefreshCw, AlertTriangle, ExternalLink } from "lucide-react"
+import { RefreshCw, AlertTriangle, ExternalLink, Container } from "lucide-react"
 import { StatusBadge } from "@/components/ui/status-badge"
 import { Button } from "@/components/ui/button"
 import { SettingsCard } from "@/components/features/settings/shared"
@@ -76,7 +76,7 @@ export const RuntimeTab = React.memo(function RuntimeTab({
 
   return (
     <div className="space-y-4">
-      <SettingsCard
+      <SettingsCard icon={Container} tint="var(--purple)"
         title="Container runtimes"
         description="Every container runtime detected on this host, and the one Crewship is driving."
         actions={

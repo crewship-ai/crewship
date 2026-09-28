@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useState } from "react"
-import { ArrowLeftRight, ArrowLeft, ArrowRight, Grid3x3, List, Minus } from "lucide-react"
+import { ArrowLeftRight, ArrowLeft, ArrowRight, Grid3x3, List, Minus, Link2 } from "lucide-react"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
@@ -364,12 +364,12 @@ export function ConnectionsSection({ workspaceId }: ConnectionsSectionProps) {
   }
 
   if (loadError && crews.length < 2) {
-    return <SettingsCard title="Crew links" description="Shared access could not be loaded"><p role="alert" className="px-4 py-4 text-sm">Current access could not be verified. <button type="button" className="underline" onClick={() => void fetchData()}>Retry</button></p></SettingsCard>
+    return <SettingsCard icon={Link2} title="Crew links" description="Shared access could not be loaded"><p role="alert" className="px-4 py-4 text-sm">Current access could not be verified. <button type="button" className="underline" onClick={() => void fetchData()}>Retry</button></p></SettingsCard>
   }
 
   if (crews.length < 2) {
     return (
-      <SettingsCard title="Crew links" description="Which crews may hand work to which">
+      <SettingsCard icon={Link2} title="Crew links" description="Which crews may hand work to which">
         <div className="px-4 py-10 text-center text-[11px] text-muted-foreground">
           A link joins two crews. This workspace has {crews.length === 0 ? "none" : "one"}.
         </div>
@@ -380,7 +380,7 @@ export function ConnectionsSection({ workspaceId }: ConnectionsSectionProps) {
   const others = crews.filter((c) => c.id !== selected?.id)
 
   return (
-    <SettingsCard
+    <SettingsCard icon={Link2}
       title="Crew links"
       description="Choose who can hand work to whom, then set shared-file access for each direction. Viewing and delivering files does not grant access to credentials or private agent homes."
       actions={

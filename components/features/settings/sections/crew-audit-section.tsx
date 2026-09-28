@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
-import { Shield, ChevronRight, ChevronLeft, Search, RefreshCw, Download } from "lucide-react"
+import { Shield, ChevronRight, ChevronLeft, Search, RefreshCw, Download, ScrollText } from "lucide-react"
 import { motion, AnimatePresence } from "motion/react"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Input } from "@/components/ui/input"
@@ -398,7 +398,7 @@ export function CrewAuditSection({ workspaceId }: CrewAuditSectionProps) {
   const rangeEnd = Math.min(page * PAGE_SIZE, total)
 
   return (
-    <SettingsCard
+    <SettingsCard icon={ScrollText}
       title="Audit log"
       description="Every state-changing action on this workspace, immutably recorded"
       actions={

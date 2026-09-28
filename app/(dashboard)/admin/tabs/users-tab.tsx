@@ -1,7 +1,7 @@
 "use client"
 
 import React from "react"
-import { ChevronRight, Search } from "lucide-react"
+import { ChevronRight, Search, Users } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import { SettingsCard } from "@/components/features/settings/shared"
@@ -41,7 +41,7 @@ export const UsersTab = React.memo(function UsersTab({ users, workspaceId, onRef
   }, [query, users])
 
   return (
-    <SettingsCard
+    <SettingsCard icon={Users} tint="var(--purple)"
       title="All users"
       description={
         users.length === 0

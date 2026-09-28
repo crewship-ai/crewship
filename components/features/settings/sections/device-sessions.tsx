@@ -1,5 +1,6 @@
 "use client"
 
+import { StatusPill } from "@/components/ui/status-pill"
 import { useCallback, useEffect, useState } from "react"
 import { Laptop, LogOut, Smartphone, Terminal, HelpCircle } from "lucide-react"
 import { toast } from "sonner"
@@ -173,7 +174,7 @@ export function DeviceSessions({
   return (
     <>
       <div className="flex items-center justify-between px-4 pt-2.5 pb-1.5">
-        <span className="text-[9.5px] uppercase tracking-[0.1em] text-muted-foreground-soft font-semibold">
+        <span className="eyebrow">
           Browsers &amp; devices
         </span>
         {others.length > 0 && (
@@ -200,9 +201,7 @@ export function DeviceSessions({
                   <span className="flex items-center gap-2">
                     <span className="truncate">{label}</span>
                     {s.is_current && (
-                      <span className="text-[10px] px-1.5 py-px rounded-full bg-success/15 text-success border border-success/30">
-                        this device
-                      </span>
+                      <StatusPill tone="success" label="This device" />
                     )}
                   </span>
                   <span className="block text-[11px] text-muted-foreground-soft mt-0.5">

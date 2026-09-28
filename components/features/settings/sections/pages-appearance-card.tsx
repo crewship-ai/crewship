@@ -1,5 +1,7 @@
 "use client"
 
+import { Palette } from "lucide-react"
+
 import { SettingsCard } from "@/components/features/settings/shared"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
@@ -18,7 +20,7 @@ export function PagesAppearanceCard({ workspaceId, role }: { workspaceId: string
   const valid = Object.values(form.draft).every(v => /^#[0-9a-f]{6}$/i.test(v))
   const contrast = valid && Math.min(colorContrast(form.draft.text, form.draft.background), colorContrast(form.draft.text, form.draft.surface))
   const labels: Record<keyof PageTheme, string> = { accent: "Brand accent", background: "Background", surface: "Cards", text: "Text", muted: "Secondary text", border: "Borders" }
-  return <SettingsCard title="Pages appearance" description="Shared company colors for custom Pages. Agents can use these colors while keeping their own layouts and components.">
+  return <SettingsCard icon={Palette} title="Pages appearance" description="Shared company colors for custom Pages. Agents can use these colors while keeping their own layouts and components.">
     <div className="grid gap-4 p-4 sm:grid-cols-2">
       {(Object.keys(labels) as (keyof PageTheme)[]).map(key => <div key={key} className="flex items-center justify-between gap-3 text-sm">
         <span>{labels[key]}</span>

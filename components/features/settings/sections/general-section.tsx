@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { Check, X, ChevronsUpDown } from "lucide-react"
+import { Check, X, ChevronsUpDown, AlertTriangle, BarChart3, Fingerprint } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
 import { Input } from "@/components/ui/input"
 import { SaveFooter } from "@/components/ui/save-footer"
@@ -129,7 +129,7 @@ export function GeneralSection({
     <div className="space-y-5">
       <PagesAppearanceCard key={workspaceId} workspaceId={workspaceId} role={role} />
       {/* ── Identity ── */}
-      <SettingsCard
+      <SettingsCard icon={Fingerprint}
         title="Identity"
         description={
           canEdit
@@ -240,7 +240,7 @@ export function GeneralSection({
       </SettingsCard>
 
       {/* ── Usage ── */}
-      <SettingsCard title="Usage" description="Resource counts for this workspace">
+      <SettingsCard icon={BarChart3} title="Usage" description="Resource counts for this workspace">
         <SettingsRow
           label={
             <span className="inline-flex items-center gap-2">
@@ -290,7 +290,7 @@ export function GeneralSection({
 
       {/* ── Danger Zone ── */}
       {isOwner(role) && (
-        <SettingsDangerCard
+        <SettingsDangerCard icon={AlertTriangle}
           title="Danger zone"
           description="Irreversible actions that affect the whole workspace"
         >

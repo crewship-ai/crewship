@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react"
 import Link from "next/link"
-import { ArrowUpRight } from "lucide-react"
+import { ArrowUpRight, Bell } from "lucide-react"
 import { toast } from "sonner"
 import { Switch } from "@/components/ui/switch"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -84,7 +84,7 @@ export function NotificationsTab({ workspaceId }: { workspaceId: string | null }
 
   return (
     <div className="space-y-4">
-      <SettingsCard
+      <SettingsCard icon={Bell} tint="var(--purple)"
         title="Notification providers"
         description="The instance-wide switch for each delivery provider. Turning one off stops delivery through it immediately — existing channels included — and refuses new ones."
       >

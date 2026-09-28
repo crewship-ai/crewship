@@ -1,5 +1,5 @@
 import React from "react"
-import { Plus } from "lucide-react"
+import { Plus, Building2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { SettingsCard } from "@/components/features/settings/shared"
 import { CreateWorkspaceDialog } from "@/components/layout/workspace-switcher"
@@ -18,7 +18,7 @@ export const WorkspacesTab = React.memo(function WorkspacesTab({ orgs, onRefresh
 
   return (
     <>
-    <SettingsCard
+    <SettingsCard icon={Building2} tint="var(--purple)"
       title="All workspaces"
       description={
         orgs.length === 0

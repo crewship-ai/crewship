@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useState } from "react"
-import { RotateCcw } from "lucide-react"
+import { RotateCcw, Gauge } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -144,7 +144,7 @@ export function RateLimitsTab({ workspaceId }: { workspaceId: string | null }) {
 
   if (error) {
     return (
-      <SettingsCard
+      <SettingsCard icon={Gauge} tint="var(--purple)"
         title="Rate limiters"
         description="Tune every configurable rate limit for this instance"
       >
@@ -246,7 +246,7 @@ export function RateLimitsTab({ workspaceId }: { workspaceId: string | null }) {
       ))}
 
       {groups.length === 0 && (
-        <SettingsCard title="Rate limiters" description="Tune every configurable rate limit for this instance">
+        <SettingsCard icon={Gauge} tint="var(--purple)" title="Rate limiters" description="Tune every configurable rate limit for this instance">
           <div className="px-4 py-6 text-center text-[11px] text-muted-foreground">
             No rate limiters configured.
           </div>

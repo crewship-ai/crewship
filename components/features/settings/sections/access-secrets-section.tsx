@@ -20,7 +20,7 @@
  */
 
 import * as React from "react"
-import { AlertTriangle, ShieldAlert } from "lucide-react"
+import { AlertTriangle, ShieldAlert, Eye, ShieldCheck, UserCheck } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Switch } from "@/components/ui/switch"
@@ -121,7 +121,7 @@ export function AccessSecretsSection({ workspaceId, role, members }: AccessSecre
 
   return (
     <div className="space-y-6">
-      <SettingsCard
+      <SettingsCard icon={Eye}
         title="Value reveal"
         description="Whether anyone in this workspace may read a stored secret back in plaintext."
       >
@@ -162,7 +162,7 @@ export function AccessSecretsSection({ workspaceId, role, members }: AccessSecre
         )}
       </SettingsCard>
 
-      <SettingsCard
+      <SettingsCard icon={UserCheck}
         title="Who may reveal"
         description="OWNER and ADMIN receive reveal by default unless their membership has an explicit capability set. Individual grants and revocations take precedence; workspace policy still applies."
       >
@@ -194,7 +194,7 @@ export function AccessSecretsSection({ workspaceId, role, members }: AccessSecre
         )}
       </SettingsCard>
 
-      <SettingsCard
+      <SettingsCard icon={ShieldCheck}
         title="Classification"
         description="What each class means, and who can move a credential between them."
       >

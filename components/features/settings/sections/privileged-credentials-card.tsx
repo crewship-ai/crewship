@@ -143,7 +143,7 @@ export const PrivilegedCredentialsCard = React.memo(function PrivilegedCredentia
 
   if (err) {
     return (
-      <SettingsCard title="Privileged credentials" description="Workspace isolation-boundary override">
+      <SettingsCard icon={ShieldAlert} title="Privileged credentials" description="Workspace isolation-boundary override">
         <div className="px-4 py-3 flex items-center justify-between gap-3">
           <span className="text-[11px] text-destructive/90">{err}</span>
           <Button
@@ -160,7 +160,7 @@ export const PrivilegedCredentialsCard = React.memo(function PrivilegedCredentia
   }
 
   return (
-    <SettingsCard
+    <SettingsCard icon={ShieldAlert}
       title="Privileged credentials"
       description="An isolation-boundary override. Off by default (fail-closed)."
     >

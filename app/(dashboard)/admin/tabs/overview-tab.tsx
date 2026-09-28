@@ -1,10 +1,10 @@
+import { StatusPill } from "@/components/ui/status-pill"
 import Link from "next/link"
 import React from "react"
 import {
   AlertTriangle, Check, Container, Cpu, Database, HardDrive, Info,
   KeyRound, Radio, ShieldCheck, Sparkles,
-  ChevronRight,
-} from "lucide-react"
+  ChevronRight, BadgeCheck, Gauge, Server } from "lucide-react"
 import { StatusDot } from "@/components/ui/status-badge"
 import { SettingsCard, SettingsRow } from "@/components/features/settings/shared"
 import { runtimeBrand } from "@/components/icons/runtime-icons"
@@ -161,7 +161,7 @@ export const OverviewTab = React.memo(function OverviewTab({
           posture was READ, not when it was bad. */}
       {posture && (
         <section aria-label="Needs attention">
-          <SettingsCard
+          <SettingsCard icon={AlertTriangle} tint="var(--purple)"
             title="Needs attention"
             description={
               warnings.length === 0
@@ -195,15 +195,12 @@ export const OverviewTab = React.memo(function OverviewTab({
                       <Info className="mt-0.5 size-3 shrink-0 text-info" />
                     )}
                     <div className="min-w-0">
-                      <span
-                        className={cn(
-                          "mr-2 font-mono text-[10px] uppercase tracking-wide",
-                          high ? "text-destructive" : medium ? "text-warn" : "text-muted-foreground",
-                        )}
-                      >
-                        {wn.severity}
-                      </span>
-                      <span className="text-[11px] text-foreground/80">{wn.message}</span>
+                      <StatusPill
+                        className="mr-2 align-middle"
+                        tone={high ? "danger" : medium ? "warn" : "muted"}
+                        label={wn.severity.charAt(0).toUpperCase() + wn.severity.slice(1)}
+                      />
+                      <span className="text-[12px] text-foreground">{wn.message}</span>
                     </div>
                     {FINDING_ACTIONS[wn.key] && (
                       <Link
@@ -224,7 +221,7 @@ export const OverviewTab = React.memo(function OverviewTab({
 
       {/* ── Instance ──
           Which build, how long, on what, with how much room left. */}
-      <SettingsCard title="Instance" description="What is running, and what it is running on">
+      <SettingsCard icon={Server} tint="var(--purple)" title="Instance" description="What is running, and what it is running on">
         <SettingsRow
           label={
             <span className="inline-flex items-center gap-2">
@@ -340,7 +337,7 @@ export const OverviewTab = React.memo(function OverviewTab({
             Counts against the ceilings that apply to them. "8 agents" is not
             something anyone acts on; "3 / 15 crews" is. */}
         <section aria-label="Capacity">
-          <SettingsCard title="Capacity" description="This workspace against its licensed limits">
+          <SettingsCard icon={Gauge} tint="var(--purple)" title="Capacity" description="This workspace against its licensed limits">
             <SettingsRow
               label="Crews"
               description={
@@ -390,7 +387,7 @@ export const OverviewTab = React.memo(function OverviewTab({
             for it. The journal chain verifies on demand and nothing rendered
             the answer anywhere. */}
         <section aria-label="Integrity">
-          <SettingsCard title="Integrity" description="Tamper-evidence and key custody">
+          <SettingsCard icon={ShieldCheck} tint="var(--purple)" title="Integrity" description="Tamper-evidence and key custody">
             <SettingsRow
               label={
                 <span className="inline-flex items-center gap-2">
@@ -466,7 +463,7 @@ export const OverviewTab = React.memo(function OverviewTab({
       </div>
 
       {/* ── Licence ── */}
-      <SettingsCard title="License" description="Edition and what it permits">
+      <SettingsCard icon={BadgeCheck} tint="var(--purple)" title="License" description="Edition and what it permits">
         <SettingsRow
           label={
             <span className="inline-flex items-center gap-2">

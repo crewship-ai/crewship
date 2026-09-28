@@ -1,18 +1,18 @@
 "use client"
 
-import type { ReactNode } from "react"
+import type { CSSProperties, ReactNode } from "react"
+import type { LucideIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 /**
- * Shared settings card shell.
+ * Shared settings card shell (Harbor).
  *
- * Every settings section renders one or more of these so the whole page
- * has a single, boring card treatment that matches the orchestration
- * dashboard cards (rounded-xl, border-border/60, tight padding, compact
- * uppercase/text-body title).
+ * One card per section: a header row inside the card — an optional icon
+ * tile, the title and a one-line description, actions on the right — and the
+ * body under a hairline. 20px radius, 1px border, no resting shadow.
  *
  * ```tsx
- * <SettingsCard title="Account" description="Your identity on this instance">
+ * <SettingsCard icon={User} title="Account" description="Your identity on this instance">
  *   <SettingsRow label="Email">{email}</SettingsRow>
  *   <SettingsRow label="Full name">{name}</SettingsRow>
  * </SettingsCard>
@@ -29,6 +29,8 @@ export function SettingsCard({
   children,
   className,
   padded = false,
+  icon,
+  tint,
 }: {
   title: string
   description?: string
@@ -36,28 +38,58 @@ export function SettingsCard({
   children: ReactNode
   className?: string
   padded?: boolean
+  /** Glyph for the header's icon tile. */
+  icon?: LucideIcon
+  /** Tile tint, a CSS colour; brand blue by default, var(--purple) for system items. */
+  tint?: string
 }) {
   return (
-    <section className="space-y-2.5">
-      <div className="flex items-end justify-between gap-3">
-        <div className="min-w-0">
-          <h3 className="text-body font-medium text-foreground/80 leading-none">{title}</h3>
-          {description && (
-            <p className="text-[11px] text-muted-foreground mt-1 leading-snug">{description}</p>
-          )}
-        </div>
-        {actions && <div className="flex items-center gap-1.5 shrink-0">{actions}</div>}
-      </div>
-      <div
-        className={cn(
-          "rounded-xl border border-border/60 bg-card overflow-hidden",
-          padded && "p-4",
-          className,
-        )}
-      >
-        {children}
-      </div>
+    <section
+      data-slot="settings-card"
+      className={cn("overflow-hidden rounded-[20px] border border-border bg-card", className)}
+    >
+      <SettingsCardHeader title={title} description={description} actions={actions} icon={icon} tint={tint} />
+      <div className={cn(padded && "p-4")}>{children}</div>
     </section>
+  )
+}
+
+function SettingsCardHeader({
+  title,
+  description,
+  actions,
+  icon: Icon,
+  tint,
+  danger = false,
+}: {
+  title: string
+  description?: string
+  actions?: ReactNode
+  icon?: LucideIcon
+  tint?: string
+  danger?: boolean
+}) {
+  return (
+    <div className="flex items-center gap-3 border-b border-border px-4 py-3">
+      {Icon && (
+        <span
+          className="icon-tile inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px]"
+          style={{ "--ic": danger ? "var(--destructive)" : (tint ?? "var(--primary)") } as CSSProperties}
+          aria-hidden
+        >
+          <Icon className="h-4 w-4" />
+        </span>
+      )}
+      <div className="min-w-0 flex-1">
+        <h3 className={cn("text-sm font-semibold leading-5 tracking-[-0.01em]", danger ? "text-destructive" : "text-foreground")}>
+          {title}
+        </h3>
+        {description && (
+          <p className="mt-0.5 text-[12px] leading-snug text-muted-foreground">{description}</p>
+        )}
+      </div>
+      {actions && <div className="flex shrink-0 items-center gap-1.5">{actions}</div>}
+    </div>
   )
 }
 
@@ -84,7 +116,7 @@ export function SettingsRow({
     <div
       className={cn(
         "flex items-center justify-between gap-4 px-4 py-2.5",
-        border && "border-b border-border/40 last:border-b-0",
+        border && "border-b border-border last:border-b-0",
         className,
       )}
     >
@@ -94,7 +126,7 @@ export function SettingsRow({
           clipped mid-word and the input sat on top of the text. A description
           is allowed to be a sentence, so the layout has to absorb one. */}
       <div className="min-w-0 flex-1">
-        <div className="text-xs text-foreground">{label}</div>
+        <div className="text-[13px] text-foreground">{label}</div>
         {description && (
           <div className="text-[11px] text-muted-foreground-soft mt-0.5 leading-snug">{description}</div>
         )}
@@ -123,26 +155,21 @@ export function SettingsDangerCard({
   description,
   actions,
   children,
+  icon,
 }: {
   title: string
   description?: string
   actions?: ReactNode
   children: ReactNode
+  icon?: LucideIcon
 }) {
   return (
-    <section className="space-y-2.5">
-      <div className="flex items-end justify-between gap-3">
-        <div>
-          <h3 className="text-body font-medium text-destructive/90 leading-none">{title}</h3>
-          {description && (
-            <p className="text-[11px] text-muted-foreground mt-1 leading-snug">{description}</p>
-          )}
-        </div>
-        {actions && <div className="flex items-center gap-1.5 shrink-0">{actions}</div>}
-      </div>
-      <div className="rounded-xl border border-destructive/30 bg-destructive/[0.02] overflow-hidden">
-        {children}
-      </div>
+    <section
+      data-slot="settings-card"
+      className="overflow-hidden rounded-[20px] border border-destructive/30 bg-card"
+    >
+      <SettingsCardHeader title={title} description={description} actions={actions} icon={icon} danger />
+      {children}
     </section>
   )
 }
