@@ -1,4 +1,4 @@
-//go:build restrictedruntime_live
+//go:build linux && restrictedruntime_live
 
 package restrictedruntime
 
