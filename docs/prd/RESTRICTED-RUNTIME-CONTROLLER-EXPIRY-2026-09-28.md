@@ -47,7 +47,33 @@ and a lease, so it correctly exited. The fixture now uses ordinary `sleep`
 and explicitly proves that service is running before stopping the Manager;
 service independence and all other acceptance cases pass again.
 
-Source-pinned final verification is recorded after the complete checks.
+Final clean-source verification at `d47b73d8ac3b43fa6a7219353ce6ae99eedbb4a8`:
+all eight live tests passed in 46.495 s with `-race`; independent stop after
+controller death was 14,969.422 ms. Warm startup p50 was 456.712 ms and p95
+497.195 ms (five samples). `go test ./... -count=1 -p 2 -parallel 4
+-timeout 25m` and `go vet ./...` both exited zero. The full suite reported
+147 passing packages and 12 packages without tests. Temporary test databases
+used a private directory in `/dev/shm`; no host mount configuration changed.
+
+Raw source-pinned evidence: [live tests](reports/restricted-runtime-controller-expiry-2026-09-28.txt)
+and [full Go tests](reports/restricted-runtime-controller-expiry-go-2026-09-28.txt).
+
+## Authorized dev2 deployment
+
+The same runtime change was cherry-picked onto the preserved dev2 application
+baseline as `e8b3572cc092783c12ae2ac1c81665d797127546` and deployed with
+`systemctl reload crewship-ws@2`. The running process reported this clean commit,
+built at 2026-09-28T12:08:40Z. CLI `whoami` and `system health` succeeded,
+the database remained connected, and the public dev2 URL returned HTTP 200.
+
+The eight live tests were repeated from this clean deployed source and passed
+with `-race` in 48.757 s. Independent container stop after killing the test's
+own controller took 15,093.872 ms, including Docker observation latency; this
+is an observed healthy-host result, not a universal 15-second stop guarantee.
+[Deployed-source raw evidence](reports/restricted-runtime-controller-expiry-deployed-2026-09-28.txt).
+Original untracked wireframe work was restored and its full status inventory
+matched the pre-deployment inventory. Recovery stashes remain available.
+No shared host, Docker daemon, dev1 or dev3 service was restarted.
 
 ## Limits and next integration boundary
 
