@@ -11,6 +11,8 @@ import { WorkspaceEmpty, WorkspaceGlyph } from "./workspace-visuals"
 import { AssignedConnected } from "./assigned-connected"
 import { Button } from "@/components/ui/button"
 import { StatusPill } from "@/components/ui/status-pill"
+import { InlineEmpty } from "@/components/ui/inline-empty"
+import { kpiStripIsEmpty } from "@/lib/kpi-strip"
 import { formatStatus } from "@/lib/format-status"
 import { useWorkspaceResource } from "./memory-workspace"
 import type { AgentRecord, ChatRow, InboxSummary, PeerMessageRow, RunRow } from "./agent-canvas-tabs/types"
@@ -24,10 +26,10 @@ export function RunMetrics({ workspaceId, agentId, crewId, revision = 0, cost }:
   const totals = data?.totals
   return <section aria-label="Runs in the last 7 days" className="space-y-3">
     <div className="flex flex-wrap items-center justify-between gap-2"><p className="text-xs text-muted-foreground">Agent runs started in the last 7 days{data?.truncated ? " · most recent 20,000 runs only" : ""}</p>{typeof cost === "number" && <span className="inline-flex items-center gap-2 rounded-lg bg-success/5 px-3 py-1.5 text-xs text-muted-foreground" title="Recorded spending in the current calendar month (UTC)"><Wallet aria-hidden="true" className="h-3.5 w-3.5 text-success" /><span className="font-medium tabular-nums text-foreground">${cost.toFixed(2)}</span> this month · UTC</span>}</div>
-    {error ? <p role="alert" className="text-sm text-muted-foreground">Run metrics are unavailable. <Button size="sm" variant="ghost" onClick={() => setRetry(n => n + 1)}>Retry metrics</Button></p> : <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-      <KpiCard label="Completed runs" value={totals?.succeeded ?? "—"} subtitle="Last 7 days" valueColor="text-success" />
-      <KpiCard label="Failed or timed out" value={totals?.failed ?? "—"} subtitle="Last 7 days" valueColor={totals?.failed ? "text-destructive" : undefined} />
-      <KpiCard label="Still running" value={totals?.running ?? "—"} subtitle="Started in the last 7 days" valueColor={totals?.running ? "text-primary" : undefined} />
+    {error ? <p role="alert" className="text-sm text-muted-foreground">Run metrics are unavailable. <Button size="sm" variant="ghost" onClick={() => setRetry(n => n + 1)}>Retry metrics</Button></p> : totals && kpiStripIsEmpty([totals.succeeded, totals.failed, totals.running]) ? <InlineEmpty icon={Play} text="No runs in the last 7 days. Start a chat or assign an issue and they will show here." /> : <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+      <KpiCard label="Completed runs" value={totals?.succeeded ?? "—"} subtitle="Last 7 days" valueColor={totals?.succeeded ? "var(--success)" : undefined} />
+      <KpiCard label="Failed or timed out" value={totals?.failed ?? "—"} subtitle="Last 7 days" valueColor={totals?.failed ? "var(--destructive)" : undefined} />
+      <KpiCard label="Still running" value={totals?.running ?? "—"} subtitle="Started in the last 7 days" valueColor={totals?.running ? "var(--primary)" : undefined} />
     </div>}
     {!error && totals && totals.succeeded + totals.failed + totals.running > 0 && <div className="grid min-w-0 gap-4 xl:grid-cols-2"><DashboardCard title="Run outcomes" icon={Activity} hint="Last 7 days" className="min-w-0"><StatusDonut centerLabel="runs" data={[
       { key: "succeeded", label: "Completed", count: totals.succeeded, color: "var(--success)" },

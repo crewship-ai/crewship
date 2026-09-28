@@ -353,7 +353,7 @@ function EmptyConnections({
           <span className="font-medium text-foreground">
             {filtered ? "Nothing matches those filters" : "No connections yet"}
           </span>
-          <span className="text-muted-foreground">
+          <span className="hidden text-muted-foreground sm:inline">
             {" — "}
             {filtered
               ? "clear a facet in the sidebar, or add a service you have not connected yet."
