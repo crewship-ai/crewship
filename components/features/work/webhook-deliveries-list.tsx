@@ -18,7 +18,10 @@
 import * as React from "react"
 import { CheckCircle2, Filter, Webhook } from "lucide-react"
 
-import { EmptyState, Pill } from "@/components/ui/detail"
+import Link from "next/link"
+
+import { Pill } from "@/components/ui/detail"
+import { InlineEmpty } from "@/components/ui/inline-empty"
 import { cn } from "@/lib/utils"
 import { relTime } from "@/lib/time"
 import type { WebhookDelivery } from "@/hooks/use-webhook-deliveries"
@@ -37,18 +40,38 @@ export interface WebhookDeliveriesListProps {
   onSelect?: (delivery: WebhookDelivery) => void
   /** Opens the work item an accepted delivery produced. */
   onOpenWork?: (workId: string) => void
+  /** The decision filter in force, when one is — an empty filtered list is not an empty ledger. */
+  filterLabel?: string
 }
 
 export function WebhookDeliveriesList({
-  deliveries, loading = false, selectedId, onSelect, onOpenWork,
+  deliveries, loading = false, selectedId, onSelect, onOpenWork, filterLabel,
 }: WebhookDeliveriesListProps) {
   if (!loading && deliveries.length === 0) {
     return (
-      <EmptyState
-        icon={Webhook}
-        title="No deliveries recorded"
-        description="Every inbound webhook is recorded here before anything is dispatched — including the ones a filter decided to ignore."
-      />
+      <div className="p-3">
+        <InlineEmpty
+          icon={Webhook}
+          text={
+            filterLabel ? (
+              <>
+                <span className="font-medium text-foreground">No {filterLabel.toLowerCase()} deliveries</span> · pick All to see every delivery.
+              </>
+            ) : (
+              <>
+                <span className="font-medium text-foreground">No deliveries recorded</span> · every inbound webhook lands here before anything is dispatched, ignored ones included.
+              </>
+            )
+          }
+          action={
+            filterLabel ? undefined : (
+              <Link href="/routines" className="shrink-0 font-medium text-primary-hover hover:underline">
+                Routines →
+              </Link>
+            )
+          }
+        />
+      </div>
     )
   }
   return (
@@ -73,6 +96,8 @@ function DeliveryRow({
   selected: boolean
   onSelect?: (delivery: WebhookDelivery) => void
   onOpenWork?: (workId: string) => void
+  /** The decision filter in force, when one is — an empty filtered list is not an empty ledger. */
+  filterLabel?: string
 }) {
   const accepted = delivery.filter_decision === "accepted"
   return (

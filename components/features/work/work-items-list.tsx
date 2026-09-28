@@ -19,7 +19,9 @@
 import * as React from "react"
 import { Webhook, MessageSquare, ClipboardList, CalendarClock, GitBranch, Hand } from "lucide-react"
 
-import { EmptyState } from "@/components/ui/detail"
+import Link from "next/link"
+
+import { InlineEmpty } from "@/components/ui/inline-empty"
 import { cn } from "@/lib/utils"
 import { relTime } from "@/lib/time"
 import {
@@ -75,10 +77,26 @@ export function WorkItemsList({
   onSelect,
   loading = false,
   emptyTitle = "No work in the ledger",
-  emptyDescription = "Nothing has been accepted for this workspace yet. A webhook, a chat turn, a schedule or an assignment all land here the moment they are accepted.",
+  emptyDescription = "a webhook, a chat turn, a schedule or an assignment lands here the moment it is accepted.",
 }: WorkItemsListProps) {
   if (!loading && items.length === 0) {
-    return <EmptyState icon={ClipboardList} title={emptyTitle} description={emptyDescription} />
+    return (
+      <div className="p-3">
+        <InlineEmpty
+          icon={ClipboardList}
+          text={
+            <>
+              <span className="font-medium text-foreground">{emptyTitle}</span> · {emptyDescription}
+            </>
+          }
+          action={
+            <Link href="/routines" className="shrink-0 font-medium text-primary-hover hover:underline">
+              Routines →
+            </Link>
+          }
+        />
+      </div>
+    )
   }
   return (
     <div role="list" aria-label="Work items" className="divide-y divide-hairline">

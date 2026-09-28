@@ -81,9 +81,22 @@ describe("WorkItemsList", () => {
     expect(picked).toEqual(["w-7"])
   })
 
-  it("says nothing has been accepted rather than showing an empty table", () => {
-    render(<WorkItemsList items={[]} onSelect={() => {}} />)
+  it("says nothing has been accepted in one line rather than showing an empty table", () => {
+    const { container } = render(<WorkItemsList items={[]} onSelect={() => {}} />)
     expect(screen.getByText("No work in the ledger")).toBeTruthy()
+    // One line with a way forward, not a centred block.
+    expect(container.querySelector('[data-slot="inline-empty"]')).not.toBeNull()
+    expect(screen.getByRole("link", { name: /Routines/ })).toHaveAttribute("href", "/routines")
+  })
+})
+
+describe("WebhookDeliveriesList empty", () => {
+  it("is one line, and names the filter when one hides everything", () => {
+    const { container, rerender } = render(<WebhookDeliveriesList deliveries={[]} />)
+    expect(container.querySelector('[data-slot="inline-empty"]')).not.toBeNull()
+    expect(screen.getByText("No deliveries recorded")).toBeTruthy()
+    rerender(<WebhookDeliveriesList deliveries={[]} filterLabel="Ignored" />)
+    expect(screen.getByText("No ignored deliveries")).toBeTruthy()
   })
 })
 
