@@ -13,6 +13,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"golang.org/x/net/dns/dnsmessage"
 )
 
 func connectedLive(t *testing.T) (*liveFixture, Plan, *atomic.Int32, *atomic.Bool) {
@@ -75,7 +77,16 @@ func TestLiveFixedOperationBroker(t *testing.T) {
 	b := f.start("b", other, "synthetic-direct-b")
 	// Neighbor service is live in B's network namespace, absent in A's.
 	f.background(b, "/opt/crewship-runner", []string{"mock"}, map[string]string{"Token": "synthetic-neighbor", "Account": "neighbor-b"}, "1002:1002")
-	if f.shell(b, `wget -q -T 2 -O - http://127.0.0.1:9120/count`) != "0" {
+	neighborReady := false
+	for until := time.Now().Add(3 * time.Second); time.Now().Before(until); {
+		out, err := f.d.call(f.ctx, nil, "exec", "--user", "1001:1001", b.ID(), "wget", "-q", "-T", "1", "-O", "-", "http://127.0.0.1:9120/count")
+		if err == nil && string(out) == "0" {
+			neighborReady = true
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if !neighborReady {
 		t.Fatal("neighbor service positive control failed")
 	}
 	f.shell(s, `if wget -q -T 2 -O /dev/null http://127.0.0.1:9120/count; then exit 97; fi`)
@@ -125,6 +136,20 @@ func TestLiveFixedOperationBroker(t *testing.T) {
 		t.Fatal("retry token count mismatch")
 	}
 	f.measure(retry)
+	f.a.mu.Lock()
+	f.a.ttl = -time.Second
+	f.a.mu.Unlock()
+	if _, err := f.d.call(f.ctx, nil, "exec", "--user", "1001:1001", retry.ID(), "sh", "-c", liveBrokerCall); err == nil {
+		t.Fatal("expired authority token succeeded")
+	}
+	if calls.Load() != 3 {
+		t.Fatal("expired authority reached upstream")
+	}
+	select {
+	case <-retry.Done():
+	case <-time.After(3 * time.Second):
+		t.Fatal("expired authority did not stop attempt")
+	}
 }
 
 func TestLiveFixedBrokerRelayFailure(t *testing.T) {
@@ -194,7 +219,7 @@ func TestLiveFixedBrokerDirectNetworkDenied(t *testing.T) {
 	hostControl.Close()
 	// A real synthetic DNS responder is reachable from the host on the gateway,
 	// but an agent cannot send it even a query through its private namespace.
-	dns, err := net.ListenPacket("udp4", "0.0.0.0:0")
+	dns, err := net.ListenPacket("udp4", net.JoinHostPort(gateway, "0"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -206,30 +231,20 @@ func TestLiveFixedBrokerDirectNetworkDenied(t *testing.T) {
 			if e != nil {
 				return
 			}
-			if n < 16 {
+			var question dnsmessage.Message
+			if question.Unpack(buf[:n]) != nil || len(question.Questions) != 1 {
 				continue
 			}
-			end := 12
-			for end < n && buf[end] != 0 {
-				end += 1 + int(buf[end])
+			q := question.Questions[0]
+			var body dnsmessage.ResourceBody = &dnsmessage.AResource{A: [4]byte{8, 8, 8, 8}}
+			if q.Type == dnsmessage.TypeAAAA {
+				body = &dnsmessage.AAAAResource{AAAA: [16]byte{0x20, 0x01, 0x48, 0x60, 0x48, 0x60, 0, 0, 0, 0, 0, 0, 0, 0, 0x88, 0x88}}
 			}
-			end += 5
-			if end > n {
+			response := dnsmessage.Message{Header: dnsmessage.Header{ID: question.ID, Response: true, RecursionDesired: true, RecursionAvailable: true}, Questions: question.Questions, Answers: []dnsmessage.Resource{{Header: dnsmessage.ResourceHeader{Name: q.Name, Type: q.Type, Class: q.Class, TTL: 60}, Body: body}}}
+			packet, err := response.Pack()
+			if err != nil {
 				continue
 			}
-			packet := append([]byte(nil), buf[:end]...)
-			packet[10], packet[11] = 0, 0
-			packet[2] = 0x81
-			packet[3] = 0x80
-			packet[6] = 0
-			packet[7] = 1
-			kind := packet[end-3]
-			value := []byte{8, 8, 8, 8}
-			if kind == 28 {
-				value = net.ParseIP("2001:4860:4860::8888").To16()
-			}
-			packet = append(packet, 0xc0, 0x0c, 0, kind, 0, 1, 0, 0, 0, 60, 0, byte(len(value)))
-			packet = append(packet, value...)
 			_, _ = dns.WriteTo(packet, addr)
 		}
 	}()
