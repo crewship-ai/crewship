@@ -9,7 +9,8 @@ or merge was performed. The existing offline branch and dev1 were not edited.
 - Red-first contract/tests: `757d774e6`.
 - Broker/relay implementation: `aea1c53b2`.
 - Parent branch update: `b9de849f2` incorporates #2710 head `e82972ad1`.
-- Final clean live-tested source: `e58a17bb3aec1ffaf2c20b4c5507513e4222cc6b`.
+- First clean live-tested source: `e58a17bb3aec1ffaf2c20b4c5507513e4222cc6b`.
+- Final clean live-tested source after independent review: `9db6c9a6a5660a589feb71f53a88b6516b2f1867`.
 - `c62b25342` fixes the delegation test's child expiry to match its parent.
   `e58a17bb3` fixes positive-control fixtures: wait for neighbor readiness,
   parse/encode DNS with dnsmessage, bind the UDP responder to the tested gateway
@@ -31,7 +32,7 @@ go run ./scripts/agents-invariants
 scripts/restricted-runtime-probe/run.sh -race
 ```
 
-- Final real-Docker gate: **11/11 pass**, 60.139 seconds, host harness race enabled,
+- First real-Docker gate: **11/11 pass**, 60.139 seconds, host harness race enabled,
   zero skips. The log begins with the exact source SHA and `dirty=false`.
 - Unit/race tests and whole-repository vet pass. All four checked invariants pass.
 - Full Go suite: **148 tested packages pass**, exit 0 (`go test ./... -count=1 -p 2 -parallel 4 -timeout 25m`, owned tmpfs scratch). The run began at `9b76496b1`; the only subsequent source change through `e58a17bb3` is the separately verified build-tagged live test fixture. Remote CI/review are separate gates and remain pending at draft creation.
@@ -108,4 +109,19 @@ Correction evidence: [red-first](reports/restricted-http-broker-subnet-red-2026-
 [exact-IP-only mutation](reports/restricted-http-broker-subnet-mutation-2026-09-28.txt).
 All four regressions fail before the fix and under the mutation; the unmutated
 package passes `go test -race ./internal/restrictedruntime -count=1` (1.867 s)
-and targeted vet. A clean live rerun follows the corrective code commit.
+and targeted vet. Final clean source `9db6c9a6a` also passes **11/11 live tests with -race in 57.251 s**, whole-repository vet and invariants. [Corrective live run](reports/restricted-http-broker-subnet-live-2026-09-28.txt). The earlier full Go result precedes this narrow fix; it was followed by these focused regressions.
+
+
+## Remote checks at handoff
+
+Draft PR #2715 targets `feat/restricted-runtime-dev2` at `e82972ad1`.
+The net diff was verified against that head and contains only the intended
+runtime/bootstrap/PRD files. Main CI does not automatically run for this stacked
+base, so workflow_dispatch was explicitly requested. Its initial run is
+[36446414773](https://github.com/crewship-ai/crewship/actions/runs/36446414773)
+on `3ffaf8fac`; the final-head run is linked from the PR body/handoff.
+CodeRabbit first skipped the non-default base, then the one explicit review
+request was rate-limited (32 minutes). **No completed CodeRabbit review is
+claimed.** Independent parent-agent review found the subnet issue above; the
+fix and red-first/mutation evidence are ready for re-review. Draft status stays;
+no deployment or merge is authorized by this work.
