@@ -186,6 +186,43 @@ func TestPrivateChatAudienceAcrossListHistoryAndSession(t *testing.T) {
 	if len(operatorRows) != 8 || operatorResponse.Header().Get("X-Total-Count") != "8" || operatorResponse.Header().Get(ChatKindCountsHeader) != "direct=3,routine=3,issue=1,agent=1" {
 		t.Errorf("operator work audience: rows=%+v total=%q counts=%q", operatorRows, operatorResponse.Header().Get("X-Total-Count"), operatorResponse.Header().Get(ChatKindCountsHeader))
 	}
+	for _, tc := range []struct {
+		user string
+		want int
+	}{{owner, 2}, {other, 2}, {operator, 8}} {
+		for _, endpoint := range []struct {
+			name  string
+			serve func(http.ResponseWriter, *http.Request)
+		}{
+			{"agent list", list.List},
+			{"agent detail", list.Get},
+		} {
+			req := httptest.NewRequest(http.MethodGet, "/api/v1/agents/chat-audience-agent", nil)
+			req.SetPathValue("agentId", "chat-audience-agent")
+			req = req.WithContext(withWorkspace(withUser(req.Context(), &AuthUser{ID: tc.user}), workspace, "MEMBER"))
+			rr := httptest.NewRecorder()
+			endpoint.serve(rr, req)
+			if rr.Code != http.StatusOK {
+				t.Errorf("%s user=%s status=%d body=%s", endpoint.name, tc.user, rr.Code, rr.Body.String())
+				continue
+			}
+			var agents []agentResponse
+			if endpoint.name == "agent list" {
+				if err := json.Unmarshal(rr.Body.Bytes(), &agents); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				var agent agentResponse
+				if err := json.Unmarshal(rr.Body.Bytes(), &agent); err != nil {
+					t.Fatal(err)
+				}
+				agents = []agentResponse{agent}
+			}
+			if len(agents) != 1 || agents[0].Count.Chats != tc.want {
+				t.Errorf("%s user=%s agents=%+v want chat count %d", endpoint.name, tc.user, agents, tc.want)
+			}
+		}
+	}
 	for _, chatID := range []string{"chat-system", "chat-cron", "chat-webhook", "chat-agent", "chat-mission", "chat-legacy", "chat-owner", "chat-other"} {
 		want := chatID != "chat-legacy"
 		allowed, err := channel.CanSubscribe(t.Context(), operator, "session:"+chatID)
