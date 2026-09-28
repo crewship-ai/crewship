@@ -115,6 +115,12 @@ func TestPrivateChatAudienceAcrossListHistoryAndSession(t *testing.T) {
 				t.Errorf("foreign chat mutation user=%s method=%s status=%d", tc.user, method, response.Code)
 			}
 		}
+		steerer := &fakeSteerer{}
+		steer := NewSteerHandler(db, steerer, newTestLogger())
+		steerResponse := steerReq(t, steer, tc.foreign, `{"message":"foreign steering"}`, tc.user)
+		if steerResponse.Code != http.StatusNotFound || steerer.calls != 0 {
+			t.Errorf("foreign steer user=%s status=%d calls=%d", tc.user, steerResponse.Code, steerer.calls)
+		}
 		for _, chatID := range []string{tc.own, tc.foreign} {
 			wantStatus := http.StatusOK
 			if chatID == tc.foreign {
