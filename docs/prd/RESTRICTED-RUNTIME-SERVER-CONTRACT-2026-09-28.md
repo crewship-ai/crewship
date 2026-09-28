@@ -5,11 +5,13 @@ Application authorization and release integration remain in
 [#2704](https://github.com/crewship-ai/crewship/pull/2704), tracking
 [#2703](https://github.com/crewship-ai/crewship/issues/2703).
 
-Status: proposed integration contract, ready for the application-authority
-owner's review. No runtime implementation, isolation acceptance or performance
-measurement is claimed by this document. Agreement with the other workstream
-has not yet been recorded. The user explicitly requires this contract before
-substantial implementation; do not silently treat publication as agreement.
+Status: the user authorized implementation from this contract on 2026-09-28
+following the contract review in PR #2710. The isolated offline prototype is
+now implemented in `internal/restrictedruntime`; see the [implementation and
+acceptance report](RESTRICTED-RUNTIME-DEV2-EVIDENCE-2026-09-28.md). This records
+permission to proceed, not a claim that production server adapters or A2/B
+integration have been accepted. The common authorization workstream remains
+separate.
 
 ## Source and ownership boundary
 
@@ -226,7 +228,8 @@ Publishing/sharing a private output requires separate application authority.
 
 ## Required executable acceptance
 
-All rows are pending. Tests use real UID-1001 shells/processes and synthetic
+The evidence report records the implemented subset and outstanding integration
+gates for each row. Tests use real UID-1001 shells/processes and synthetic
 canaries for H1/A and H2/A concurrently in the same workspace. Include another
 agent and workspace as additional controls. Denial must leave the target
 unchanged; errors, skipped Docker tests and empty output are not a pass.
@@ -271,8 +274,8 @@ explicit separate gate.
    restricted request is an error. Existing legacy crews require an explicit
    compatibility classification, not silent widening of new client runs.
 
-Open gates: agreement with the application owner; executable prototype; all
-R1–R10 evidence; production memory/prompt/output adapters; network broker
+Open integration/release gates (see the evidence report for prototype results):
+production agreement on server adapters; complete R1–R10 application evidence; production memory/prompt/output adapters; network broker
 enforcement; termination timing and failure reconciliation; disk quota;
 upstream revocation support per provider; isolated host reboot; stronger
 sandboxing if the threat model includes kernel exploits. No release claim
