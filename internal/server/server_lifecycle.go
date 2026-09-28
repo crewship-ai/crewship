@@ -958,8 +958,8 @@ func (a *convStoreAdapter) ReadTail(ctx context.Context, sessionID string, maxMe
 // SearchConversations adapts conversation.Store.Search to the
 // api.ConversationSearcher interface so POST /api/v1/conversations/search
 // can run the agent-scoped BM25 query against the v111 FTS5 mirror.
-func (a *convStoreAdapter) SearchConversations(ctx context.Context, agentID, query string, limit int) ([]goapi.ConversationSearchHit, error) {
-	hits, err := a.store.Search(ctx, agentID, query, limit)
+func (a *convStoreAdapter) SearchConversations(ctx context.Context, agentID, userID, query string, limit int) ([]goapi.ConversationSearchHit, error) {
+	hits, err := a.store.SearchAgentsForUser(ctx, []string{agentID}, userID, query, limit)
 	if err != nil {
 		return nil, err
 	}

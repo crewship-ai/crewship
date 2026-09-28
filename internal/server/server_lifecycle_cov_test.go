@@ -25,6 +25,7 @@ import (
 func TestConvStoreAdapter_SearchConversations(t *testing.T) {
 	t.Parallel()
 	db := openTestDB(t)
+	seedSearchAudience(t, db, [2]string{"sess1", "agentA"})
 	logger := logging.New("error", "json", nil)
 	store := conversation.NewStore(t.TempDir(), logger, conversation.WithDB(db))
 	t.Cleanup(store.Close)
@@ -41,7 +42,7 @@ func TestConvStoreAdapter_SearchConversations(t *testing.T) {
 	}
 
 	a := &convStoreAdapter{store: store}
-	hits, err := a.SearchConversations(context.Background(), "agentA", "deploy", 5)
+	hits, err := a.SearchConversations(context.Background(), "agentA", "search-user", "deploy", 5)
 	if err != nil {
 		t.Fatalf("SearchConversations: %v", err)
 	}
@@ -60,7 +61,7 @@ func TestConvStoreAdapter_SearchConversations(t *testing.T) {
 	}
 
 	// Wrong agent scope must not leak the other agent's messages.
-	other, err := a.SearchConversations(context.Background(), "agentB", "deploy", 5)
+	other, err := a.SearchConversations(context.Background(), "agentB", "search-user", "deploy", 5)
 	if err != nil {
 		t.Fatalf("SearchConversations (agentB): %v", err)
 	}
@@ -76,7 +77,7 @@ func TestConvStoreAdapter_SearchConversations_NoMirrorErrors(t *testing.T) {
 	t.Cleanup(store.Close)
 
 	a := &convStoreAdapter{store: store}
-	if _, err := a.SearchConversations(context.Background(), "agentA", "anything", 5); err == nil {
+	if _, err := a.SearchConversations(context.Background(), "agentA", "search-user", "anything", 5); err == nil {
 		t.Error("want error from search without a DB-backed mirror, got nil")
 	}
 }

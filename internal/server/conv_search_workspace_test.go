@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"database/sql"
 	"testing"
 	"time"
 
@@ -10,6 +11,27 @@ import (
 	"github.com/crewship-ai/crewship/internal/logging"
 )
 
+func seedSearchAudience(t *testing.T, db *sql.DB, pairs ...[2]string) {
+	t.Helper()
+	for _, stmt := range []string{
+		`INSERT INTO users(id,email) VALUES ('search-user','search-user@example.test')`,
+		`INSERT INTO workspaces(id,name,slug) VALUES ('search-ws','Search','search-ws')`,
+		`INSERT INTO workspace_members(id,workspace_id,user_id,role) VALUES ('search-member','search-ws','search-user','MEMBER')`,
+	} {
+		if _, err := db.Exec(stmt); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, pair := range pairs {
+		if _, err := db.Exec(`INSERT OR IGNORE INTO agents(id,workspace_id,name,slug,status) VALUES (?,'search-ws',?,?,'IDLE')`, pair[1], pair[1], pair[1]); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.Exec(`INSERT INTO chats(id,agent_id,workspace_id,created_by,status) VALUES (?,?,'search-ws','search-user','ACTIVE')`, pair[0], pair[1]); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
 // TestConvStoreAdapter_SearchConversationsAcross proves the adapter the
 // server wires at boot can answer a WORKSPACE-scoped query — the shape ⌘K
 // sends, where the user names no agent — and that the agent set it is given
@@ -17,6 +39,7 @@ import (
 func TestConvStoreAdapter_SearchConversationsAcross(t *testing.T) {
 	t.Parallel()
 	db := openTestDB(t)
+	seedSearchAudience(t, db, [2]string{"sess1", "agentA"}, [2]string{"sess2", "agentB"}, [2]string{"sess3", "agentC"})
 	logger := logging.New("error", "json", nil)
 	store := conversation.NewStore(t.TempDir(), logger, conversation.WithDB(db))
 	t.Cleanup(store.Close)
@@ -42,7 +65,7 @@ func TestConvStoreAdapter_SearchConversationsAcross(t *testing.T) {
 	// or the route answers 503 for every workspace-scoped query.
 	var _ goapi.MultiAgentConversationSearcher = a
 
-	hits, err := a.SearchConversationsAcross(context.Background(), []string{"agentA", "agentB"}, "deploy", 10)
+	hits, err := a.SearchConversationsAcross(context.Background(), []string{"agentA", "agentB"}, "search-user", "deploy", 10)
 	if err != nil {
 		t.Fatalf("SearchConversationsAcross: %v", err)
 	}

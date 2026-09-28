@@ -253,7 +253,7 @@ The chat surface is small — no dedicated `/api-reference/chats` page yet; the 
 
 | Method | Path | Purpose |
 |---|---|---|
-| `GET` | `/api/v1/chats/{chatId}/messages` | Paginated message history (handler `ProxyHandler.ChatMessages`). |
+| `GET` | `/api/v1/chats/{chatId}/messages` | Paginated message history for the chat audience; missing and inaccessible chats both return 404 (handler `ProxyHandler.ChatMessages`). |
 
 ### Reactions
 

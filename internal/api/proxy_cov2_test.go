@@ -3,7 +3,7 @@ package api
 // Second coverage pass for proxy.go: the ipc helper request-construction
 // failures, proxyJSON's stream-error tolerance, CrewshipdHealth's proxied
 // success, AgentDebug/AgentStop DB-error paths, the crew-less agent branch,
-// AgentLogs' unreachable-sidecar fallback, ChatMessages' non-member 403 and
+// AgentLogs' unreachable-sidecar fallback, ChatMessages' indistinguishable denial and
 // AgentGitLog's read-role gate.
 
 import (
@@ -131,7 +131,7 @@ func TestPX2_AgentStop_UpdateFails500(t *testing.T) {
 	}
 }
 
-func TestPX2_ChatMessages_NonMember403(t *testing.T) {
+func TestPX2_ChatMessages_NonMember404(t *testing.T) {
 	h, userID, wsID, _, agentID := covProxyRig(t, "/tmp/px2-no-socket-8")
 	// Chat lives in a different workspace the caller is not a member of.
 	if _, err := h.db.Exec(`INSERT INTO workspaces (id, name, slug) VALUES ('ws-px2-b', 'B', 'ws-px2-b')`); err != nil {
@@ -148,8 +148,8 @@ func TestPX2_ChatMessages_NonMember403(t *testing.T) {
 	req = withWorkspaceUser(req, userID, wsID, "OWNER")
 	rr := httptest.NewRecorder()
 	h.ChatMessages(rr, req)
-	if rr.Code != http.StatusForbidden {
-		t.Fatalf("status = %d, want 403; body=%s", rr.Code, rr.Body.String())
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404; body=%s", rr.Code, rr.Body.String())
 	}
 }
 

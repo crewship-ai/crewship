@@ -18,7 +18,7 @@ type stubConversationSearcher struct {
 	err      error
 }
 
-func (s *stubConversationSearcher) SearchConversations(_ context.Context, agentID, query string, limit int) ([]ConversationSearchHit, error) {
+func (s *stubConversationSearcher) SearchConversations(_ context.Context, agentID, userID, query string, limit int) ([]ConversationSearchHit, error) {
 	s.gotAgent = agentID
 	s.gotQuery = query
 	s.gotLimit = limit
@@ -44,6 +44,7 @@ func doSearch(t *testing.T, h *ConversationHandler, wsID, body string) *httptest
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/conversations/search", strings.NewReader(body))
 	if wsID != "" {
 		req = req.WithContext(context.WithValue(req.Context(), ctxWorkspaceID, wsID))
+		req = req.WithContext(withUser(req.Context(), &AuthUser{ID: "search-test-user"}))
 	}
 	rec := httptest.NewRecorder()
 	h.Search(rec, req)

@@ -148,10 +148,8 @@ export type RealtimeEventType =
   // overview needed a Refresh button to see an agent's work.
   | "pipeline.saved"
   | "inbox.updated"
-  // A chat session was renamed — `{agent_id, chat_id, title}`. Emitted by
-  // PATCH /agents/{id}/chats/{chatId} (internal/api/agent_chats_rename.go) so
-  // a sidebar open elsewhere repaints the row instead of polling for it.
-  // snake_case matches the backend broadcast, like the assignment_* events.
+  // A chat session changed. The workspace event carries no chat ID or title;
+  // each reader refetches through its own audience filter.
   | "chat_renamed"
   // A producer pushed a panel payload. Broadcast on the per-page channel
   // `page:{pageId}` and carrying NO payload, only "panel X changed" — the

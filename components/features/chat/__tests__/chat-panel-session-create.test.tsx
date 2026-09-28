@@ -5,17 +5,10 @@ import { render, screen, waitFor, fireEvent } from "@testing-library/react"
 // The first send must create the `chats` row — and the panel may not infer
 // that the row already exists from an empty history.
 //
-// GET /api/v1/chats/{id}/messages answers **200 with an empty message list**
-// for a chat that does not exist at all:
-//
-//     // internal/api/proxy.go, ChatMessages
-//     if errors.Is(err, sql.ErrNoRows) {
-//         // Chat doesn't exist yet (new session before first message)
-//         writeJSON(w, http.StatusOK, map[string]interface{}{"messages": []interface{}{}})
-//
-// That is deliberate and shared with the CLI (`crewship history --prompts`,
-// `export`, `recap` all read the same endpoint), so it is not moving. What
-// moved is the panel: it used to read "not a 404" as "the row exists", set its
+// A draft chat without a row now receives 404 from the history endpoint,
+// indistinguishable from an inaccessible chat. The panel must treat 404 and
+// an empty 200 alike: neither proves the row exists. It used to read "not a
+// 404" as "the row exists", set its
 // sessionReady flag, and then skip the create POST entirely on the first send.
 // The result on dev2 was silent data loss — no `chats` row, no persisted
 // messages (the WS channel authorizer refuses a send for a session with no
@@ -28,9 +21,8 @@ import { render, screen, waitFor, fireEvent } from "@testing-library/react"
 // for a row that already exists is free (INSERT OR IGNORE,
 // internal/api/agent_chats.go CreateChat).
 //
-// The mock below therefore answers exactly as proxy.go does. A mock that
-// disagrees with the server is a test that certifies a bug — this suite exists
-// because the previous one did.
+// The mock exercises both the former 200/empty response and the current 404
+// response for an uncreated draft, so either answer still creates the row.
 // =============================================================================
 
 const resubscribeSession = vi.fn()
@@ -84,10 +76,11 @@ const panelProps = {
   askForms: null,
 }
 
-/** Rows the fake server has. Anything else is an unknown chat, and an unknown
- *  chat answers 200 + `{"messages": []}` — exactly like proxy.go. */
+/** Rows the fake server has. Unknown chats use the status selected by each
+ * test to cover both history-response contracts. */
 let serverMessages: Record<string, { id: string; role: string; content: string; ts: string }[]> = {}
 let createStatus = 201
+let missingHistoryStatus = 200
 let creates: { url: string; body: Record<string, unknown> }[] = []
 /** Set to keep the create POST in flight for as long as a test needs. */
 let holdCreate: Promise<void> | null = null
@@ -100,6 +93,9 @@ function installFetch() {
 
     if (u.includes("/messages")) {
       const id = u.split("/chats/")[1].split("/")[0]
+      if (!serverMessages[id] && missingHistoryStatus === 404) {
+        return { ok: false, status: 404, json: async () => ({ error: "Chat not found" }) } as unknown as Response
+      }
       return {
         ok: true, status: 200,
         json: async () => ({ messages: serverMessages[id] ?? [] }),
@@ -134,6 +130,7 @@ describe("ChatPanel — the first send creates the row, whatever the history sai
     vi.clearAllMocks()
     serverMessages = {}
     createStatus = 201
+    missingHistoryStatus = 200
     holdCreate = null
     installFetch()
   })
@@ -193,6 +190,19 @@ describe("ChatPanel — the first send creates the row, whatever the history sai
     expect(creates[0].url).toContain("workspace_id=ws-test")
     expect(creates[0].body).toMatchObject({ session_id: "draft-1", origin: "UI" })
     await waitFor(() => expect(sendMessage).toHaveBeenCalledTimes(1))
+  })
+
+  it("POSTs the chat on the first send when the draft history returns 404", async () => {
+    missingHistoryStatus = 404
+    installFetch()
+    render(<ChatPanel {...panelProps} />)
+    await waitFor(() => expect(chatStub.loadHistory).toHaveBeenCalled())
+
+    fireEvent.click(await firstChip())
+
+    await waitFor(() => expect(creates).toHaveLength(1))
+    await waitFor(() => expect(sendMessage).toHaveBeenCalledTimes(1))
+    expect(toastError).not.toHaveBeenCalled()
   })
 
   it("creates the row once per session, not once per message", async () => {

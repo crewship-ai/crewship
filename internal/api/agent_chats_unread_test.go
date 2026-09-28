@@ -267,8 +267,11 @@ func TestListChats_UnreadIsPerUser(t *testing.T) {
 	wsID, userID := unreadTSeed(t, db)
 	otherID := "unread-other-user"
 	execOrFatal(t, db, `INSERT INTO users (id, email, full_name) VALUES (?, 'other@example.com', 'Other User')`, otherID)
+	execOrFatal(t, db, `INSERT INTO workspace_members (id, workspace_id, user_id, role) VALUES ('unread-other-member', ?, ?, 'MEMBER')`, wsID, otherID)
 
 	unreadTChat(t, db, "peruser-c1", wsID, userID)
+	execOrFatal(t, db, `UPDATE chats SET visibility='group' WHERE id='peruser-c1'`)
+	execOrFatal(t, db, `INSERT INTO chat_participants (chat_id, user_id, role) VALUES ('peruser-c1', ?, 'member')`, otherID)
 	unreadTMsg(t, db, "peruser-m1", "peruser-c1", "assistant", "2026-07-01T10:00:00.000Z", nil)
 	unreadTMsg(t, db, "peruser-m2", "peruser-c1", "assistant", "2026-07-01T10:00:05.000Z", nil)
 	// The other user has read everything; the caller has read nothing.
@@ -331,6 +334,7 @@ func TestListChats_UnreadMatchesCorrelatedReference(t *testing.T) {
 	wsID, userID := unreadTSeed(t, db)
 	otherID := "unread-ref-other"
 	execOrFatal(t, db, `INSERT INTO users (id, email, full_name) VALUES (?, 'ref-other@example.com', 'Ref Other')`, otherID)
+	execOrFatal(t, db, `INSERT INTO workspace_members (id, workspace_id, user_id, role) VALUES ('unread-ref-other-member', ?, ?, 'MEMBER')`, wsID, otherID)
 
 	// Chat 1: empty, no cursors.
 	unreadTChat(t, db, "ref-empty", wsID, userID)
@@ -364,6 +368,12 @@ func TestListChats_UnreadMatchesCorrelatedReference(t *testing.T) {
 	execOrFatal(t, db, `INSERT INTO chat_read_cursors (user_id, chat_id, last_read_at)
 		VALUES (?, 'ref-all-read', '2026-07-04T23:59:59.999Z')`, userID)
 	// userID: 0; otherID: 2.
+	// This test compares unread projection for two *authorized* readers. Share
+	// each chat explicitly; private chat audience is covered separately.
+	for _, chatID := range []string{"ref-empty", "ref-mixed", "ref-cursor-mid", "ref-all-read"} {
+		execOrFatal(t, db, `UPDATE chats SET visibility='group' WHERE id=?`, chatID)
+		execOrFatal(t, db, `INSERT INTO chat_participants (chat_id, user_id, role) VALUES (?, ?, 'member')`, chatID, otherID)
+	}
 
 	h := NewAgentHandler(sdb, newTestLogger())
 	for _, uid := range []string{userID, otherID} {

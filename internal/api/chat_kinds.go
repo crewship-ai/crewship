@@ -63,6 +63,6 @@ func formatChatKindCounts(counts map[ChatKind]int) string { return chatkind.Form
 //
 // (mode, origin) has a dozen distinct values at most, so the grouping is an
 // index scan of the agent's rows with no temp b-tree worth worrying about.
-func (h *AgentHandler) chatKindCounts(ctx context.Context, agentID, workspaceID string) (map[ChatKind]int, error) {
-	return chatkind.CountByAgent(ctx, h.db, agentID, workspaceID)
+func (h *AgentHandler) chatKindCounts(ctx context.Context, agentID, workspaceID, userID string) (map[ChatKind]int, error) {
+	return chatkind.CountByAgentForUser(ctx, h.db, agentID, workspaceID, userID)
 }

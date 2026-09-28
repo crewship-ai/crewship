@@ -18,7 +18,7 @@ type stubMultiConversationSearcher struct {
 	multiErr    error
 }
 
-func (s *stubMultiConversationSearcher) SearchConversationsAcross(_ context.Context, agentIDs []string, query string, limit int) ([]ConversationSearchHit, error) {
+func (s *stubMultiConversationSearcher) SearchConversationsAcross(_ context.Context, agentIDs []string, userID, query string, limit int) ([]ConversationSearchHit, error) {
 	s.gotAgentIDs = append([]string(nil), agentIDs...)
 	s.gotQuery = query
 	s.gotLimit = limit

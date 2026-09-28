@@ -3444,8 +3444,8 @@ func TestAgentChats_ListPopulatedFields(t *testing.T) {
 	seedAgentRow(t, db, "agent-pop", wsID, "crew-pop", "Pop", "pop", "AGENT")
 
 	// Insert chat with all optional fields filled
-	_, err := db.Exec(`INSERT INTO chats (id, agent_id, workspace_id, title, mode, status, message_count, started_at, ended_at, created_at)
-		VALUES ('cp1', 'agent-pop', ?, 'Sample', 'CHAT', 'COMPLETED', 5, datetime('now'), datetime('now'), datetime('now'))`, wsID)
+	_, err := db.Exec(`INSERT INTO chats (id, agent_id, workspace_id, created_by, title, mode, status, message_count, started_at, ended_at, created_at)
+		VALUES ('cp1', 'agent-pop', ?, ?, 'Sample', 'CHAT', 'COMPLETED', 5, datetime('now'), datetime('now'), datetime('now'))`, wsID, userID)
 	if err != nil {
 		t.Fatalf("insert chat: %v", err)
 	}

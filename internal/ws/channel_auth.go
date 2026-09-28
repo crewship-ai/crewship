@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"errors"
 	"strings"
+
+	"github.com/crewship-ai/crewship/internal/chataudience"
 )
 
 // DBChannelAuthorizer checks channel access against workspace membership in the DB.
@@ -187,12 +189,5 @@ func (a *DBChannelAuthorizer) isMemberOfPageWorkspace(ctx context.Context, userI
 }
 
 func (a *DBChannelAuthorizer) isSessionOwner(ctx context.Context, userID, chatID string) (bool, error) {
-	// Check if the chat belongs to a workspace the user is a member of
-	var wsID string
-	err := a.db.QueryRowContext(ctx,
-		"SELECT workspace_id FROM chats WHERE id = ?", chatID).Scan(&wsID)
-	if err != nil {
-		return existsRow(err)
-	}
-	return a.isMemberOfWorkspace(ctx, userID, wsID)
+	return chataudience.CanRead(ctx, a.db, chatID, userID)
 }

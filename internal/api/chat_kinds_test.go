@@ -214,8 +214,8 @@ func TestListChats_KindFilterRunsBeforeTheLimit(t *testing.T) {
 	db := setupTestDB(t)
 	wsID := chatKindSeed(t, db)
 
-	execOrFatal(t, db, `INSERT INTO chats (id, agent_id, workspace_id, title, mode, status, origin, last_activity_at)
-		VALUES ('ck-human', 'ck-ag', ?, 'Deploy rollback', 'CHAT', 'ACTIVE', 'UI', '2026-08-01T09:00:00.000Z')`, wsID)
+	execOrFatal(t, db, `INSERT INTO chats (id, agent_id, workspace_id, created_by, title, mode, status, origin, last_activity_at)
+		VALUES ('ck-human', 'ck-ag', ?, 'test-user-id', 'Deploy rollback', 'CHAT', 'ACTIVE', 'UI', '2026-08-01T09:00:00.000Z')`, wsID)
 	for i := 0; i < 200; i++ {
 		execOrFatal(t, db, `INSERT INTO chats (id, agent_id, workspace_id, title, mode, status, origin, last_activity_at)
 			VALUES (?, 'ck-ag', ?, ?, 'CHAT', 'ACTIVE', 'ROUTINE', ?)`,
@@ -249,10 +249,10 @@ func TestListChats_ReportsKindOnEveryRow(t *testing.T) {
 	// would drift from the filter that produced it.
 	db := setupTestDB(t)
 	wsID := chatKindSeed(t, db)
-	execOrFatal(t, db, `INSERT INTO chats (id, agent_id, workspace_id, mode, status, origin)
-		VALUES ('ck-a', 'ck-ag', ?, 'CHAT', 'ACTIVE', 'ROUTINE'),
-		       ('ck-b', 'ck-ag', ?, 'MISSION', 'ACTIVE', NULL),
-		       ('ck-c', 'ck-ag', ?, 'CHAT', 'ACTIVE', NULL)`, wsID, wsID, wsID)
+	execOrFatal(t, db, `INSERT INTO chats (id, agent_id, workspace_id, created_by, mode, status, origin)
+		VALUES ('ck-a', 'ck-ag', ?, NULL, 'CHAT', 'ACTIVE', 'ROUTINE'),
+		       ('ck-b', 'ck-ag', ?, NULL, 'MISSION', 'ACTIVE', NULL),
+		       ('ck-c', 'ck-ag', ?, 'test-user-id', 'CHAT', 'ACTIVE', NULL)`, wsID, wsID, wsID)
 
 	var got []chatResponse
 	decodeChats(t, listChatsRaw(t, db, wsID, ""), &got)
@@ -396,14 +396,14 @@ func TestListChats_KindCountsHeader(t *testing.T) {
 	// STATUS section.
 	db := setupTestDB(t)
 	wsID := chatKindSeed(t, db)
-	execOrFatal(t, db, `INSERT INTO chats (id, agent_id, workspace_id, mode, status, origin)
-		VALUES ('ck-d1','ck-ag',?,'CHAT','ACTIVE','UI'),
-		       ('ck-d2','ck-ag',?,'CHAT','ACTIVE',NULL),
-		       ('ck-r1','ck-ag',?,'CHAT','ACTIVE','ROUTINE'),
-		       ('ck-r2','ck-ag',?,'CHAT','ACTIVE','CRON'),
-		       ('ck-r3','ck-ag',?,'CHAT','ACTIVE','WEBHOOK'),
-		       ('ck-i1','ck-ag',?,'MISSION','ACTIVE',NULL),
-		       ('ck-g1','ck-ag',?,'CHAT','ACTIVE','AGENT')`,
+	execOrFatal(t, db, `INSERT INTO chats (id, agent_id, workspace_id, created_by, mode, status, origin)
+		VALUES ('ck-d1','ck-ag',?,'test-user-id','CHAT','ACTIVE','UI'),
+		       ('ck-d2','ck-ag',?,'test-user-id','CHAT','ACTIVE',NULL),
+		       ('ck-r1','ck-ag',?,NULL,'CHAT','ACTIVE','ROUTINE'),
+		       ('ck-r2','ck-ag',?,NULL,'CHAT','ACTIVE','CRON'),
+		       ('ck-r3','ck-ag',?,NULL,'CHAT','ACTIVE','WEBHOOK'),
+		       ('ck-i1','ck-ag',?,NULL,'MISSION','ACTIVE',NULL),
+		       ('ck-g1','ck-ag',?,NULL,'CHAT','ACTIVE','AGENT')`,
 		wsID, wsID, wsID, wsID, wsID, wsID, wsID)
 
 	t.Run("totals every kind, not just the one fetched", func(t *testing.T) {
