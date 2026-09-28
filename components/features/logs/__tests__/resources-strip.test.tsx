@@ -144,6 +144,13 @@ describe("ResourcesStrip", () => {
     expect(screen.queryByText("0 B/s")).not.toBeInTheDocument()
   })
 
+  it("names one crew in the singular", () => {
+    mocks.listEntries = [metric("m1", 12, 60_000), metric("m2", 14, 0)]
+    render(<ResourcesStrip workspaceId="ws_test" mode="aggregate" />)
+
+    expect(screen.getByText("∑ 1 crew")).toBeInTheDocument()
+  })
+
   it("does not subscribe without a workspace", () => {
     render(<ResourcesStrip workspaceId={null} />)
     act(() => {

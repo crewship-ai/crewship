@@ -111,8 +111,9 @@ export function ResourcesStrip({ workspaceId, crewId, mode = "single" }: Resourc
   return (
     <div className="grid grid-cols-1 sm:grid-cols-3 border-b border-border/50 bg-card/40 relative">
       {mode === "aggregate" && s.crewCount > 0 && (
-        <div className="absolute top-1 right-2 text-[10px] font-mono uppercase tracking-wider text-muted-foreground/70 pointer-events-none">
-          ∑ {s.crewCount} crews
+        // Bottom edge, not top: at the top it sat on the NET reading.
+        <div className="pointer-events-none absolute bottom-0.5 right-2 font-mono text-[10px] text-muted-foreground-soft">
+          ∑ {s.crewCount} {s.crewCount === 1 ? "crew" : "crews"}
         </div>
       )}
       <Cell
