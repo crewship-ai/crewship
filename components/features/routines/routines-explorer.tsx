@@ -32,8 +32,7 @@ import {
 import { cn } from "@/lib/utils"
 import { matchesRoutineFilters, routineFilterInput } from "@/lib/routine-filters"
 import { getAgentAvatarUrl } from "@/lib/agent-avatar"
-import { CrewIcon } from "@/components/ui/crew-icon"
-import { resolveRoutineIcon, resolveRoutineColor } from "@/lib/routine-identity"
+import { RoutineGlyph } from "./routine-glyph"
 import type { Pipeline } from "@/hooks/use-pipelines"
 import { isAwaitingApproval, useActiveRoutineRuns } from "@/hooks/use-active-routine-runs"
 import type { RoutineFilters } from "@/components/features/routines/routines-filter-sidebar"
@@ -475,18 +474,20 @@ export function RoutinesExplorer({
                               )}
                             />
                           )}
-                          <CrewIcon
-                            icon={resolveRoutineIcon(routine)}
-                            color={resolveRoutineColor(routine)}
-                            size="sm"
-                            className={cn(
-                              "relative !h-5 !w-5 !rounded-md transition-shadow",
-                              liveRun &&
-                                (liveAwaiting
-                                  ? "ring-2 ring-warn/60"
-                                  : "ring-2 ring-primary/60"),
-                            )}
-                          />
+                          {/* One tint for every glyph: the shape tells
+                              routines apart, the dot beside it carries the
+                              state. A hue per routine made the column a
+                              rainbow that meant nothing. */}
+                          <span className="relative flex h-5 w-5 items-center justify-center">
+                            <RoutineGlyph
+                              routine={routine}
+                              variant="bare"
+                              className={cn(
+                                liveRun && (liveAwaiting ? "text-warn" : "text-primary-hover"),
+                                isSelected && !liveRun && "text-primary-hover",
+                              )}
+                            />
+                          </span>
                           <span
                             aria-hidden
                             title={liveRun ? liveRun.status : (lastStatus ?? "never invoked")}
@@ -529,20 +530,24 @@ export function RoutinesExplorer({
                             </span>
                           )
                         )}
-                        {routine.author_agent_id && (
-                          <img
-                            alt=""
-                            src={getAgentAvatarUrl(routine.author_agent_id)}
-                            className="h-4 w-4 shrink-0 rounded-full object-cover"
-                          />
-                        )}
                       </SidebarRow>
                     </motion.div>
                   </TooltipTrigger>
                   <TooltipContent side="right" sideOffset={8}>
                     <div className="space-y-0.5">
                       <div className="font-medium">{routine.name || routine.slug}</div>
-                      <div className="text-[10px] font-mono opacity-70">{routine.slug}</div>
+                      <div className="flex items-center gap-1.5 text-[10px] font-mono opacity-70">
+                        {/* The author lives here, not on the row: a face on
+                            every row was a second icon column. */}
+                        {routine.author_agent_id && (
+                          <img
+                            alt=""
+                            src={getAgentAvatarUrl(routine.author_agent_id)}
+                            className="h-3.5 w-3.5 shrink-0 rounded-full object-cover"
+                          />
+                        )}
+                        {routine.slug}
+                      </div>
                       {routine.description && (
                         <div className="text-[10px] opacity-80 max-w-[260px]">
                           {routine.description}

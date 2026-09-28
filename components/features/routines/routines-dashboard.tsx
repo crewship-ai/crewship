@@ -6,20 +6,19 @@ import { CalendarClock, ChevronRight, FileEdit, Hourglass, Play, Radio, XCircle 
 
 import { cn } from "@/lib/utils"
 import { formatDurationMs } from "@/lib/activity-stream"
-import { CrewIcon } from "@/components/ui/crew-icon"
 import { StatusPill } from "@/components/ui/status-pill"
 import { InlineEmpty } from "@/components/ui/inline-empty"
 import { DashboardCard } from "@/components/features/dashboard/dashboard-card"
 import { RunVolumeChart, type RunVolumeBucket, type RunVolumeSeries } from "@/components/features/dashboard/run-volume-chart"
 import { AttentionStrip, OutcomeKpis, UpNext, type AttentionItem, type OutcomeKpiData } from "@/components/features/dashboard/dashboard-overview"
 import { STATUS_PALETTE } from "@/app/(dashboard)/dashboard-helpers"
-import { resolveRoutineIcon, resolveRoutineColor } from "@/lib/routine-identity"
 import { routineRunPresentation, formatAgo, formatUntil } from "@/lib/routine-run-presentation"
 import type { OverviewRun } from "@/lib/routines-overview"
 import type { Pipeline } from "@/hooks/use-pipelines"
 import type { PipelineSchedule } from "@/hooks/use-pipeline-schedules"
 import { routineRunHref } from "./routines-workspace"
 import { routineViewHref } from "./routine-navigation"
+import { RoutineGlyph } from "./routine-glyph"
 
 // routines-dashboard — what the main pane answers when no routine is
 // selected, built from the SAME pieces as /dashboard so the two read as one
@@ -65,6 +64,14 @@ function within(run: DashboardRun, sinceMs: number): boolean {
   return Number.isFinite(t) && t >= sinceMs
 }
 
+/** A success rate that never rounds a failure away: 199 of 200 is 99%, not
+ * 100%, and one pass in 300 is 1%, not 0%. */
+export function honestPct(ok: number, total: number): number | null {
+  if (total <= 0) return null
+  const pct = Math.round((ok / total) * 100)
+  return Math.min(ok < total ? 99 : 100, Math.max(ok > 0 ? 1 : 0, pct))
+}
+
 /** The outcome tiles' numbers for the window, in the shape /dashboard uses. */
 export function outcomeKpis(runs: DashboardRun[], now = new Date()): OutcomeKpiData & { spendUsd: number; total: number } {
   const since = now.getTime() - WINDOW_DAYS * 86_400_000
@@ -81,7 +88,7 @@ export function outcomeKpis(runs: DashboardRun[], now = new Date()): OutcomeKpiD
     completed,
     successOk: completed,
     successTotal: finished.length,
-    successPct: finished.length ? Math.round((completed / finished.length) * 100) : null,
+    successPct: honestPct(completed, finished.length),
     p95Ms: p95,
     spendUsd: week.reduce((sum, r) => sum + (typeof r.cost_usd === "number" ? r.cost_usd : 0), 0),
   }
@@ -123,6 +130,40 @@ export function runOutcomesByDay(runs: DashboardRun[], now = new Date()): { buck
   return { buckets, series: used }
 }
 
+/** How much of a week the run list actually covers. The list is the 200
+ * newest runs, so a busy routine can fill it inside one day — and a seven-day
+ * chart of one bar says nothing a sentence would not say better. */
+export function outcomeVolumeShape(buckets: RunVolumeBucket[], keys: string[]): "empty" | "single-day" | "chart" {
+  const days = buckets.filter((b) => keys.some((k) => Number(b[k]) > 0)).length
+  return days === 0 ? "empty" : days === 1 ? "single-day" : "chart"
+}
+
+export interface LatestResultGroup {
+  latest: DashboardRun
+  count: number
+}
+
+const SEVERITY: Record<string, number> = { destructive: 0, warn: 1 }
+
+/** Finished runs as rows: runs of one routine that ended the same way fold
+ * into one row with a count (the newest run opens), and results that need a
+ * person — failed first, then those waiting on review — sort above the rest.
+ * A routine that ingests every five minutes otherwise fills every row. */
+export function groupLatestResults(runs: DashboardRun[], limit = 8): LatestResultGroup[] {
+  const groups = new Map<string, LatestResultGroup & { order: number; severity: number }>()
+  for (const run of runs) {
+    const p = routineRunPresentation({ status: run.status, outcome: run.outcome })
+    const key = `${run.pipeline_slug}\u0000${p.label}`
+    const group = groups.get(key)
+    if (group) group.count += 1
+    else groups.set(key, { latest: run, count: 1, order: groups.size, severity: SEVERITY[p.tone] ?? 2 })
+  }
+  return [...groups.values()]
+    .sort((a, b) => a.severity - b.severity || a.order - b.order)
+    .slice(0, limit)
+    .map(({ latest, count }) => ({ latest, count }))
+}
+
 export function RoutinesDashboard({ routines, runs, runsLoading, schedules, onSelect }: Props) {
   const now = React.useMemo(() => new Date(), [])
   const visibleRuns = React.useMemo(
@@ -131,6 +172,7 @@ export function RoutinesDashboard({ routines, runs, runsLoading, schedules, onSe
   )
   const kpis = React.useMemo(() => outcomeKpis(visibleRuns, now), [visibleRuns, now])
   const volume = React.useMemo(() => runOutcomesByDay(visibleRuns, now), [visibleRuns, now])
+  const volumeShape = outcomeVolumeShape(volume.buckets, volume.series.map((s) => s.key))
   const routineOf = (slug: string) => routines.find((p) => p.slug === slug)
 
   const newest = (list: DashboardRun[]) =>
@@ -139,6 +181,7 @@ export function RoutinesDashboard({ routines, runs, runsLoading, schedules, onSe
   const running = newest(visibleRuns.filter((r) => ["running", "queued"].includes((r.status ?? "").toLowerCase())))
   const since = now.getTime() - WINDOW_DAYS * 86_400_000
   const finished = newest(visibleRuns.filter((r) => !LIVE.has((r.status ?? "").toLowerCase()) && within(r, since)))
+  const resultGroups = groupLatestResults(finished)
   const failing = routines
     .filter((r) => r.last_invocation_status === "failed" || r.last_run_outcome === "FAILED")
     .sort((a, b) => (b.last_invoked_at ?? "").localeCompare(a.last_invoked_at ?? ""))
@@ -196,8 +239,8 @@ export function RoutinesDashboard({ routines, runs, runsLoading, schedules, onSe
 
       <div className="flex flex-wrap items-center gap-2">
         <Radio className="h-3.5 w-3.5 text-primary-hover" aria-hidden />
-        <h2 className="text-[11px] font-semibold uppercase tracking-wider text-foreground/70">Routine run summary</h2>
-        <span className="font-mono text-[10px] text-muted-foreground">
+        <h2 className="eyebrow">Routine run summary</h2>
+        <span className="font-mono text-[11px] tabular-nums text-muted-foreground-soft">
           {WINDOW_DAYS}d · {kpis.total} {kpis.total === 1 ? "run" : "runs"}
           {runsLoading ? " · loading" : ""}
         </span>
@@ -231,8 +274,8 @@ export function RoutinesDashboard({ routines, runs, runsLoading, schedules, onSe
               <InlineEmpty icon={Radio} text={runsLoading ? "Loading runs…" : "Nothing finished in the last 7 days."} />
             ) : (
               <div>
-                {finished.slice(0, 8).map((run) => (
-                  <ResultRow key={run.id} run={run} routine={routineOf(run.pipeline_slug)} />
+                {resultGroups.map(({ latest, count }) => (
+                  <ResultRow key={latest.id} run={latest} count={count} routine={routineOf(latest.pipeline_slug)} />
                 ))}
               </div>
             )}
@@ -281,7 +324,7 @@ export function RoutinesDashboard({ routines, runs, runsLoading, schedules, onSe
                     onClick={() => onSelect(r.slug)}
                     className="group grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2.5 rounded-md border-b border-border/50 px-2 py-2 text-left last:border-0 hover:bg-foreground/[0.025]"
                   >
-                    <CrewIcon icon={resolveRoutineIcon(r)} color={resolveRoutineColor(r)} size="sm" />
+                    <RoutineGlyph routine={r} />
                     <span className="min-w-0">
                       <span className="block truncate text-body font-medium text-foreground/90">{r.name}</span>
                       <span className="block truncate text-label text-muted-foreground">
@@ -310,7 +353,11 @@ export function RoutinesDashboard({ routines, runs, runsLoading, schedules, onSe
           </Link>
         }
       >
-        <RunVolumeChart buckets={volume.buckets} series={volume.series} window="7d" />
+        {volumeShape === "single-day" ? (
+          <SingleDayOutcomes buckets={volume.buckets} series={volume.series} now={now} />
+        ) : (
+          <RunVolumeChart buckets={volume.buckets} series={volume.series} window="7d" />
+        )}
       </DashboardCard>
     </div>
   )
@@ -320,17 +367,28 @@ const PILL = { success: "success", destructive: "danger", warn: "warn", blue: "b
 
 /** One finished run, as the dashboard's Results & review draws a row: icon,
  * state pill, name, meta on the right, then the verb. */
-function ResultRow({ run, routine }: { run: DashboardRun; routine?: Pipeline }) {
+function ResultRow({ run, count = 1, routine }: { run: DashboardRun; count?: number; routine?: Pipeline }) {
   const p = routineRunPresentation({ status: run.status, outcome: run.outcome })
   return (
     <Link
       href={routineRunHref(run.pipeline_slug, run.id)}
-      className="group grid grid-cols-[auto_auto_minmax(0,1fr)_auto] items-center gap-2.5 rounded-md border-b border-border/50 px-2 py-2 last:border-0 hover:bg-foreground/[0.025] @3xl/overview:grid-cols-[auto_auto_minmax(0,1fr)_auto_auto]"
+      className="group grid grid-cols-[auto_auto_minmax(0,1fr)_auto] items-center gap-2.5 rounded-[10px] border-b border-border/50 px-2 py-2 transition-colors last:border-0 hover:bg-foreground/[0.03] coarse:min-h-12 @3xl/overview:grid-cols-[auto_auto_minmax(0,1fr)_auto_auto]"
     >
-      <CrewIcon icon={resolveRoutineIcon(routine ?? { slug: run.pipeline_slug })} color={resolveRoutineColor(routine ?? { slug: run.pipeline_slug })} size="sm" />
+      <RoutineGlyph routine={routine ?? { slug: run.pipeline_slug }} />
       <StatusPill tone={PILL[p.tone]} label={p.label} />
-      <span className="truncate text-body font-medium text-foreground/90">{run.pipeline_name || routine?.name || run.pipeline_slug}</span>
-      <span className="hidden font-mono text-label tabular-nums text-muted-foreground @3xl/overview:inline">
+      <span className="flex min-w-0 items-center gap-2">
+        <span className="truncate text-body font-medium text-foreground">{run.pipeline_name || routine?.name || run.pipeline_slug}</span>
+        {count > 1 && (
+          <span
+            className="shrink-0 rounded-md bg-foreground/[0.06] px-1.5 font-mono text-micro font-semibold tabular-nums text-muted-foreground"
+            title={`${count} runs with this result in the window; the newest opens`}
+          >
+            ×{count}
+          </span>
+        )}
+      </span>
+      <span className="hidden font-mono text-label tabular-nums text-muted-foreground-soft @3xl/overview:inline">
+        {count > 1 ? "latest " : ""}
         {formatAgo(run.started_at)}
         {run.duration_ms ? ` · ${formatDurationMs(run.duration_ms)}` : ""}
       </span>
@@ -349,7 +407,7 @@ function RunRow({ run, routine }: { run: DashboardRun; routine?: Pipeline }) {
       href={routineRunHref(run.pipeline_slug, run.id)}
       className="group grid grid-cols-[auto_minmax(0,1fr)_auto_auto] items-center gap-2.5 rounded-md border-b border-border/50 px-2 py-2 last:border-0 hover:bg-foreground/[0.025]"
     >
-      <CrewIcon icon={resolveRoutineIcon(routine ?? { slug: run.pipeline_slug })} color={resolveRoutineColor(routine ?? { slug: run.pipeline_slug })} size="sm" />
+      <RoutineGlyph routine={routine ?? { slug: run.pipeline_slug }} />
       <span className="min-w-0">
         <span className="block truncate text-body font-medium text-foreground/90">{run.pipeline_name || routine?.name || run.pipeline_slug}</span>
         <span className="block truncate text-label text-muted-foreground">
@@ -365,3 +423,40 @@ function RunRow({ run, routine }: { run: DashboardRun; routine?: Pipeline }) {
   )
 }
 
+/** A window whose runs all started on one day, said as a sentence with one
+ * proportion bar — the seven-day chart would draw a single slab. */
+function SingleDayOutcomes({ buckets, series, now }: { buckets: RunVolumeBucket[]; series: RunVolumeSeries[]; now: Date }) {
+  const day = buckets.find((b) => series.some((s) => Number(b[s.key]) > 0))
+  if (!day) return null
+  const counts = series.map((s) => ({ ...s, n: Number(day[s.key]) })).filter((s) => s.n > 0)
+  const total = counts.reduce((sum, s) => sum + s.n, 0)
+  const date = new Date(day.ts)
+  const yesterday = new Date(now)
+  yesterday.setDate(now.getDate() - 1)
+  const when =
+    date.toDateString() === now.toDateString()
+      ? "today"
+      : date.toDateString() === yesterday.toDateString()
+        ? "yesterday"
+        : `on ${date.toLocaleDateString(undefined, { month: "short", day: "numeric" })}`
+  return (
+    <div data-testid="run-outcomes-single-day" className="flex flex-col gap-3">
+      <p className="text-body text-muted-foreground">
+        All <span className="font-mono tabular-nums text-foreground">{total}</span> {total === 1 ? "run" : "runs"} in the window started {when}.
+      </p>
+      <div className="flex h-2 w-full overflow-hidden rounded-full bg-foreground/[0.06]" role="img" aria-label={counts.map((s) => `${s.n} ${s.label}`).join(", ")}>
+        {counts.map((s) => (
+          <span key={s.key} className="h-full" style={{ width: `${(s.n / total) * 100}%`, minWidth: 4, backgroundColor: s.color }} />
+        ))}
+      </div>
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
+        {counts.map((s) => (
+          <span key={s.key} className="inline-flex items-center gap-1.5 text-label text-muted-foreground">
+            <span className="h-2 w-2 rounded-sm" style={{ backgroundColor: s.color }} aria-hidden />
+            <span className="font-mono tabular-nums text-foreground">{s.n}</span> {s.label}
+          </span>
+        ))}
+      </div>
+    </div>
+  )
+}
