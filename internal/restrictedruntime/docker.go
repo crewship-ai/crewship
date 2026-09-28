@@ -94,12 +94,24 @@ type Limits struct {
 func (l Limits) valid() bool {
 	return l.MemoryBytes >= 32<<20 && l.MemoryBytes <= 1<<30 && l.NanoCPUs > 0 && l.NanoCPUs <= 2e9 && l.PIDs >= 8 && l.PIDs <= 256
 }
+func privateTmpfs() map[string]string {
+	return map[string]string{
+		"/home/agent": "rw,nosuid,nodev,noexec,size=8388608,uid=1001,gid=1001,mode=0700",
+		"/secrets":    "rw,nosuid,nodev,noexec,size=1048576,uid=1001,gid=1001,mode=0700",
+		"/broker":     "rw,nosuid,nodev,noexec,size=1048576,uid=1002,gid=1002,mode=0700",
+		"/tmp":        "rw,nosuid,nodev,noexec,size=4194304,mode=1777",
+	}
+}
+
 func (d Docker) create(ctx context.Context, p Plan, c Catalog, l Limits, owner string) (string, error) {
 	image, e := d.image(ctx)
 	if e != nil {
 		return "", e
 	}
-	args := []string{"create", "--pull=never", "--name", "crewship-rtest-" + owner + "-" + p.Attempt, "--label", labelPrefix + "owner=" + owner, "--label", labelPrefix + "attempt=" + p.Attempt, "--label", labelPrefix + "plan=" + p.fingerprint(), "--user", "1001:1001", "--read-only", "--network", "none", "--ipc", "private", "--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--init", "--restart", "no", "--memory", fmt.Sprint(l.MemoryBytes), "--memory-swap", fmt.Sprint(l.MemoryBytes), "--cpus", fmt.Sprintf("%.9f", float64(l.NanoCPUs)/1e9), "--pids-limit", fmt.Sprint(l.PIDs), "--shm-size", "1048576", "--log-driver", "none", "--ulimit", "nofile=256:256", "--ulimit", "core=0:0", "--tmpfs", "/home/agent:rw,nosuid,nodev,noexec,size=8388608,uid=1001,gid=1001,mode=0700", "--tmpfs", "/secrets:rw,nosuid,nodev,noexec,size=1048576,uid=1001,gid=1001,mode=0700", "--tmpfs", "/broker:rw,nosuid,nodev,noexec,size=1048576,uid=1002,gid=1002,mode=0700", "--tmpfs", "/tmp:rw,nosuid,nodev,noexec,size=4194304,mode=1777"}
+	args := []string{"create", "--pull=never", "--name", "crewship-rtest-" + owner + "-" + p.Attempt, "--label", labelPrefix + "owner=" + owner, "--label", labelPrefix + "attempt=" + p.Attempt, "--label", labelPrefix + "plan=" + p.fingerprint(), "--user", "1001:1001", "--read-only", "--network", "none", "--ipc", "private", "--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--init", "--restart", "no", "--memory", fmt.Sprint(l.MemoryBytes), "--memory-swap", fmt.Sprint(l.MemoryBytes), "--cpus", fmt.Sprintf("%.9f", float64(l.NanoCPUs)/1e9), "--pids-limit", fmt.Sprint(l.PIDs), "--shm-size", "1048576", "--log-driver", "none", "--ulimit", "nofile=256:256", "--ulimit", "core=0:0"}
+	for _, target := range []string{"/home/agent", "/secrets", "/broker", "/tmp"} {
+		args = append(args, "--tmpfs", target+":"+privateTmpfs()[target])
+	}
 	used := map[string]bool{}
 	for _, m := range p.Mounts {
 		v, e := c.Volume(ctx, p, m)

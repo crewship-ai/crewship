@@ -9,12 +9,12 @@ import (
 )
 
 func TestAuditRejectsBroadenedDaemonConfiguration(t *testing.T) {
-	for _, name := range []string{"valid", "host network", "shared pid", "shared ipc", "privileged", "writable root", "capability", "supplementary group", "host gateway", "device", "unbounded memory", "unexpected mount", "unbounded logs"} {
+	for _, name := range []string{"valid", "host network", "shared pid", "shared ipc", "privileged", "writable root", "capability", "supplementary group", "host gateway", "device", "unbounded memory", "unexpected mount", "unbounded logs", "privilege escalation", "foreign tmpfs owner", "unbounded tmpfs"} {
 		t.Run(name, func(t *testing.T) {
 			p := testPlan()
 			p.Mounts = nil
 			l := Limits{128 << 20, 500000000, 48}
-			h := map[string]any{"NetworkMode": "none", "IpcMode": "private", "ReadonlyRootfs": true, "Init": true, "Memory": l.MemoryBytes, "MemorySwap": l.MemoryBytes, "NanoCpus": l.NanoCPUs, "PidsLimit": l.PIDs, "CapDrop": []string{"ALL"}, "SecurityOpt": []string{"no-new-privileges"}, "RestartPolicy": map[string]string{"Name": "no"}, "LogConfig": map[string]string{"Type": "none"}, "Tmpfs": map[string]string{"/home/agent": "private", "/secrets": "private", "/broker": "private", "/tmp": "private"}}
+			h := map[string]any{"NetworkMode": "none", "IpcMode": "private", "ReadonlyRootfs": true, "Init": true, "Memory": l.MemoryBytes, "MemorySwap": l.MemoryBytes, "NanoCpus": l.NanoCPUs, "PidsLimit": l.PIDs, "CapDrop": []string{"ALL"}, "SecurityOpt": []string{"no-new-privileges"}, "RestartPolicy": map[string]string{"Name": "no"}, "LogConfig": map[string]string{"Type": "none"}, "Tmpfs": privateTmpfs()}
 			row := map[string]any{"Config": map[string]any{"User": "1001:1001", "Entrypoint": []string{"/opt/crewship-runner"}, "Cmd": []string{"hold"}}, "HostConfig": h}
 			switch name {
 			case "host network":
@@ -39,6 +39,12 @@ func TestAuditRejectsBroadenedDaemonConfiguration(t *testing.T) {
 				h["Memory"] = 0
 			case "unexpected mount":
 				row["Mounts"] = []map[string]any{{"Type": "bind", "Destination": "/other", "RW": true}}
+			case "privilege escalation":
+				h["SecurityOpt"] = []string{"no-new-privileges=false"}
+			case "foreign tmpfs owner":
+				h["Tmpfs"].(map[string]string)["/broker"] = "rw,uid=1001,mode=0700"
+			case "unbounded tmpfs":
+				h["Tmpfs"].(map[string]string)["/tmp"] = "rw,mode=1777"
 			case "unbounded logs":
 				h["LogConfig"] = map[string]string{"Type": "json-file"}
 			}
