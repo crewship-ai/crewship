@@ -3,6 +3,7 @@ package pipeline
 import (
 	"context"
 	"log/slog"
+	"strings"
 )
 
 // CrewPrewarmer is the optional capability an AgentRunner exposes to warm a
@@ -55,13 +56,18 @@ func (e *Executor) PrewarmForRun(ctx context.Context, pipelineID, workspaceID st
 	}
 }
 
-// dslUsesCrewContainer reports whether any step execs inside the crew's own
+// dslUsesCrewContainer reports whether an unconditional step execs inside the crew's own
 // container — agent_run and script do. Pure http/code/transform/wait routines
 // never touch it, so prewarming would waste a container start. call_pipeline is
 // excluded: it dispatches a nested run in the TARGET routine's author context,
 // not this crew's container.
 func dslUsesCrewContainer(dsl *DSL) bool {
 	for _, s := range dsl.Steps {
+		// A work preflight may skip every runtime step. Let the actual step
+		// start its container once its condition passes, avoiding idle wakes.
+		if strings.TrimSpace(s.If) != "" {
+			continue
+		}
 		switch s.Type {
 		case StepAgentRun, StepScript:
 			return true

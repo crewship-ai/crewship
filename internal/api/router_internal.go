@@ -88,6 +88,7 @@ func (r *Router) registerInternalRoutes(pipes *PipelineHandler, oh orchestration
 	runStatus := NewRunStatusHandler(r.db, r.logger)
 	r.mux.Handle("GET /api/v1/internal/runs/{runId}/status", internalAuth(http.HandlerFunc(runStatus.Status)))
 
+	r.mux.Handle("GET /api/v1/internal/credential-grants", internalAuth(http.HandlerFunc(internal.CredentialGrants)))
 	r.mux.Handle("GET /api/v1/internal/credentials", internalAuth(http.HandlerFunc(internal.ListCredentials)))
 	r.mux.Handle("PATCH /api/v1/internal/credentials/{credentialId}", internalAuth(http.HandlerFunc(internal.UpdateCredentialStatus)))
 	r.mux.Handle("POST /api/v1/internal/chats", internalAuth(http.HandlerFunc(internal.CreateChat)))

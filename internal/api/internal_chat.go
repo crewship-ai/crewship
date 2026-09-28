@@ -36,6 +36,11 @@ func (h *InternalHandler) CreateChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if scope := InternalTokenWorkspaceFromContext(r.Context()); scope != "" && scope != body.WorkspaceID {
+		replyError(w, http.StatusForbidden, "workspace does not match internal token")
+		return
+	}
+
 	if body.PipelineRunID != "" {
 		// Provenance must point to a live routine in the same tenant as this agent.
 		var valid int
@@ -53,9 +58,43 @@ func (h *InternalHandler) CreateChat(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	var existingID string
-	if err := h.db.QueryRowContext(r.Context(), "SELECT id FROM chats WHERE id = ?", body.ChatID).Scan(&existingID); err == nil {
-		writeJSON(w, http.StatusOK, map[string]string{"id": existingID, "status": "already_exists"})
+	// Validate the referenced agent, not just the caller-supplied workspace.
+	// A crew token must never create audit records for a sibling crew.
+	agentQuery := `SELECT id FROM agents WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL`
+	agentArgs := []any{body.AgentID, body.WorkspaceID}
+	if crew := InternalTokenCrewFromContext(r.Context()); crew != "" {
+		agentQuery += " AND crew_id = ?"
+		agentArgs = append(agentArgs, crew)
+	}
+	var agentID string
+	if err := h.db.QueryRowContext(r.Context(), agentQuery, agentArgs...).Scan(&agentID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			replyError(w, http.StatusNotFound, "Agent not found")
+		} else {
+			replyInternalError(w, h.logger, "validate chat agent", err)
+		}
+		return
+	}
+
+	// Idempotency cannot turn a foreign chat ID into a successful create.
+	var existingAgent, existingWorkspace string
+	var existingRun, existingStep, existingUser sql.NullString
+	err := h.db.QueryRowContext(r.Context(), `SELECT agent_id, workspace_id, pipeline_run_id, pipeline_step_id, created_by FROM chats WHERE id = ?`, body.ChatID).
+		Scan(&existingAgent, &existingWorkspace, &existingRun, &existingStep, &existingUser)
+	if err == nil {
+		userID := ""
+		if body.UserID != nil {
+			userID = *body.UserID
+		}
+		if existingAgent != body.AgentID || existingWorkspace != body.WorkspaceID || existingRun.String != body.PipelineRunID || existingStep.String != body.PipelineStepID || existingUser.String != userID {
+			replyError(w, http.StatusConflict, "chat identity conflict")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"id": body.ChatID, "status": "already_exists"})
+		return
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		replyInternalError(w, h.logger, "lookup chat", err)
 		return
 	}
 
@@ -73,7 +112,7 @@ func (h *InternalHandler) CreateChat(w http.ResponseWriter, r *http.Request) {
 		VALUES (?, ?, ?, ?, ?, 'CHAT', 'ACTIVE', ?, ?, ?, ?, ?)`
 		args = append(args, body.PipelineRunID, body.PipelineStepID)
 	}
-	_, err := h.db.ExecContext(r.Context(), query, args...)
+	_, err = h.db.ExecContext(r.Context(), query, args...)
 	if err != nil {
 		replyInternalError(w, h.logger, "create chat", err)
 		return
@@ -107,6 +146,10 @@ func (h *InternalHandler) ResolveChat(w http.ResponseWriter, r *http.Request) {
 	if scope := InternalTokenWorkspaceFromContext(r.Context()); scope != "" {
 		chatQuery += " AND workspace_id = ?"
 		chatArgs = append(chatArgs, scope)
+	}
+	if crew := InternalTokenCrewFromContext(r.Context()); crew != "" {
+		chatQuery += " AND EXISTS (SELECT 1 FROM agents a WHERE a.id = chats.agent_id AND a.workspace_id = chats.workspace_id AND a.crew_id = ? AND a.deleted_at IS NULL)"
+		chatArgs = append(chatArgs, crew)
 	}
 	err := h.db.QueryRowContext(r.Context(), chatQuery, chatArgs...).Scan(&agentID, &openedBy, &visibility)
 	if err != nil {
@@ -152,6 +195,10 @@ func (h *InternalHandler) IncrementMessageCount(w http.ResponseWriter, r *http.R
 		mcQuery += " AND workspace_id = ?"
 		mcArgs = append(mcArgs, scope)
 	}
+	if crew := InternalTokenCrewFromContext(r.Context()); crew != "" {
+		mcQuery += " AND EXISTS (SELECT 1 FROM agents a WHERE a.id = chats.agent_id AND a.workspace_id = chats.workspace_id AND a.crew_id = ? AND a.deleted_at IS NULL)"
+		mcArgs = append(mcArgs, crew)
+	}
 	res, err := h.db.ExecContext(r.Context(), mcQuery, mcArgs...)
 	if err != nil {
 		replyInternalError(w, h.logger, "increment message count", err)
@@ -191,6 +238,10 @@ func (h *InternalHandler) UpdateChatTitle(w http.ResponseWriter, r *http.Request
 	if scope := InternalTokenWorkspaceFromContext(r.Context()); scope != "" {
 		titleQuery += " AND workspace_id = ?"
 		titleArgs = append(titleArgs, scope)
+	}
+	if crew := InternalTokenCrewFromContext(r.Context()); crew != "" {
+		titleQuery += " AND EXISTS (SELECT 1 FROM agents a WHERE a.id = chats.agent_id AND a.workspace_id = chats.workspace_id AND a.crew_id = ? AND a.deleted_at IS NULL)"
+		titleArgs = append(titleArgs, crew)
 	}
 	res, err := h.db.ExecContext(r.Context(), titleQuery, titleArgs...)
 	if err != nil {

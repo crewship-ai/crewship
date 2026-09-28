@@ -166,8 +166,8 @@ func validateStepEgress(st Step) error {
 		if st.Query == nil {
 			return fmt.Errorf("pipeline: step %q (query) missing query body", st.ID)
 		}
-		if st.Query.Source != "pipeline_runs" {
-			return fmt.Errorf("pipeline: step %q (query) source %q invalid (allowed: pipeline_runs)", st.ID, st.Query.Source)
+		if st.Query.Source != "pipeline_runs" && st.Query.Source != "assigned_issues" {
+			return fmt.Errorf("pipeline: step %q (query) source %q invalid (allowed: pipeline_runs, assigned_issues)", st.ID, st.Query.Source)
 		}
 		if st.Query.WindowHours < 0 {
 			return fmt.Errorf("pipeline: step %q (query) window_hours cannot be negative", st.ID)

@@ -43,6 +43,8 @@ var responseShapeContracts = []struct {
 	// A zero value of the struct the handler serializes.
 	value any
 }{
+	{name: "ChatShareListResponse", pointer: "/components/schemas/ChatShareListResponse", value: chatShareListResponse{}},
+	{name: "ChatShareMessagesResponse", pointer: "/components/schemas/ChatShareMessagesResponse", value: chatShareMessagesResponse{}},
 	{name: "RoutineAccessMe", pointer: "/components/schemas/RoutineAccessMe", value: routineAccessMeResponse{}},
 	{name: "CredentialAccessMe", pointer: "/components/schemas/CredentialAccessMe", value: credentialAccessMeResponse{}},
 	{name: "RoutineFixtureResult", pointer: "/components/schemas/RoutineFixtureResult", value: pipeline.FixtureStepResult{}},

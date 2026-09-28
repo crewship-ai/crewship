@@ -154,6 +154,7 @@ const crewMembersSQL = `
 	FROM agents self
 	JOIN agents peer
 	  ON peer.crew_id = self.crew_id
+ AND peer.workspace_id = self.workspace_id
 	 AND peer.deleted_at IS NULL
 	WHERE self.id = ? AND self.deleted_at IS NULL AND self.crew_id IS NOT NULL
 `

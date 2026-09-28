@@ -12,6 +12,7 @@ DELETE /api/v1/agents/{agentId} roleInline
 DELETE /api/v1/agents/{agentId}/avatar roleInline
 DELETE /api/v1/agents/{agentId}/chats/{chatId} roleSelf
 DELETE /api/v1/agents/{agentId}/chats/{chatId}/attachments/{attachmentId} roleCreate
+DELETE /api/v1/agents/{agentId}/chats/{chatId}/shares/{shareId} roleSelf
 DELETE /api/v1/agents/{agentId}/credentials/{assignmentId} roleManage
 DELETE /api/v1/agents/{agentId}/integrations/{integrationId} roleCreate
 DELETE /api/v1/agents/{agentId}/peers/{userId} roleSelf
@@ -155,6 +156,7 @@ POST /api/v1/agents/hire roleCreate
 POST /api/v1/agents/{agentId}/approve-hire roleCreate
 POST /api/v1/agents/{agentId}/chats roleSelf
 POST /api/v1/agents/{agentId}/chats/{chatId}/attachments roleCreate
+POST /api/v1/agents/{agentId}/chats/{chatId}/shares roleSelf
 POST /api/v1/agents/{agentId}/credentials roleManage
 POST /api/v1/agents/{agentId}/integrations roleCreate
 POST /api/v1/agents/{agentId}/persona/suggest roleCreate
@@ -337,6 +339,8 @@ POST /api/v1/workspaces/{workspaceId}/skills/import roleCreate
 POST /api/v1/workspaces/{workspaceId}/work-items/{workItemId}/cancel roleCreate
 POST /api/v1/workspaces/{workspaceId}/work-items/{workItemId}/replay roleCreate
 POST /api/v1/workspaces/{workspaceId}/work-items/{workItemId}/resolve roleCreate
+PUT /api/v1/crews/{crewId}/services/{serviceName}/state roleCreate
+PUT /api/v1/crew-connections/{connectionId}/file-access roleCreate
 PUT /api/v1/admin/keeper/aux/{slot} roleManage
 PUT /api/v1/admin/keeper/config roleManage
 PUT /api/v1/admin/keeper/governance roleManage

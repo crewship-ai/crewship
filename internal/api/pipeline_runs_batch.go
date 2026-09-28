@@ -117,15 +117,16 @@ func (h *PipelineHandler) RunBatch(w http.ResponseWriter, r *http.Request) {
 		tags = append(tags, item.Tags...)
 		exec := h.newExecutor()
 		res, err := exec.Run(r.Context(), pipeline.RunInput{
-			PipelineID:     p.ID,
-			WorkspaceID:    workspaceID,
-			InvokingUserID: invokingUser,
-			Inputs:         item.Inputs,
-			Mode:           pipeline.ModeRun,
-			TierOverride:   tierOverride,
-			TriggeredVia:   pipeline.TriggeredViaManual,
-			Tags:           tags,
-			MetadataJSON:   marshalMetadata(item.Metadata),
+			PipelineID:          p.ID,
+			WorkspaceID:         workspaceID,
+			InvokingUserID:      invokingUser,
+			InvocationAuthority: pipeline.HumanInvocationAuthority(invokingUser, pipeline.RoutineBatchAuthority),
+			Inputs:              item.Inputs,
+			Mode:                pipeline.ModeRun,
+			TierOverride:        tierOverride,
+			TriggeredVia:        pipeline.TriggeredViaManual,
+			Tags:                tags,
+			MetadataJSON:        marshalMetadata(item.Metadata),
 		})
 		if err != nil {
 			results = append(results, itemResult{Index: i, Error: err.Error()})

@@ -48,13 +48,14 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	"workspace_conversation_outbox":        IntentInclude,
 
 	// === Core entities (round-trip) =========================
-	"crews":              IntentInclude,
-	"agents":             IntentInclude,
-	"agent_skills":       IntentInclude,
-	"crew_members":       IntentInclude,
-	"chats":              IntentInclude,
-	"agent_mcp_bindings": IntentInclude,
-	"journal_entries":    IntentInclude,
+	"crews":                   IntentInclude,
+	"service_runtime_intents": IntentInclude, // Durable user-requested service state.
+	"agents":                  IntentInclude,
+	"agent_skills":            IntentInclude,
+	"crew_members":            IntentInclude,
+	"chats":                   IntentInclude,
+	"agent_mcp_bindings":      IntentInclude,
+	"journal_entries":         IntentInclude,
 	// journal_entry_priorities (v166) is the append-only ledger of operator
 	// pin/permanent edits. It rides with journal_entries: without it a restored
 	// bundle's live `priority` values would have no ledger to reconcile against,
@@ -277,7 +278,8 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	// restored mailbox would be a queue of messages with nowhere to go. The
 	// delivered ones are already in workspace_conversation_messages, which does
 	// round-trip.
-	"session_mailbox": IntentExcludeRuntime,
+	"session_mailbox":  IntentExcludeRuntime,
+	"chat_read_shares": IntentExcludeRuntime, // short-lived bearer links must not revive in a restored copy
 
 	// The memory revision anchor and mutation ledger. Excluded, and the cost is
 	// worth stating because it is not zero.

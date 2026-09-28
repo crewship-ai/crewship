@@ -35,6 +35,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/presence"
 	"github.com/crewship-ai/crewship/internal/provider"
 	"github.com/crewship-ai/crewship/internal/scrubber"
+	"github.com/crewship-ai/crewship/internal/servicelifecycle"
 	"github.com/crewship-ai/crewship/internal/ws"
 )
 
@@ -219,6 +220,13 @@ func (s *Server) Start(ctx context.Context) error {
 		s.rehydrateContainers(ctx)
 	}
 
+	if runtime, ok := s.container.(servicelifecycle.Runtime); ok && s.db != nil {
+		controller := &servicelifecycle.Controller{DB: s.db, Runtime: runtime, Resolve: func(ctx context.Context, crew, ws, name string) (provider.CrewConfig, error) {
+			return goapi.ResolveManagedService(ctx, s.db, crew, ws, name)
+		}}
+		s.bgWg.Add(1)
+		go func() { defer s.bgWg.Done(); controller.Run(ctx) }()
+	}
 	if s.statsCollector != nil {
 		go s.statsCollector.Run(ctx)
 	}

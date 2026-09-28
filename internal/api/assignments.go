@@ -303,6 +303,7 @@ func (h *AssignmentHandler) loadAgentCredentials(ctx context.Context, agentID st
 			Provider:       d.Provider,
 			LeaseExpiresAt: d.LeaseExpiresAt,
 			AgentIDs:       d.GrantedAgentIDs,
+			AgentGrants:    d.AgentGrants,
 			HandleOnly:     d.HandleOnly,
 		}
 		// Handle-only (#2376): the name crosses the sub-agent boundary, the

@@ -300,6 +300,7 @@ func TestCovIICreateRun(t *testing.T) {
 	wsID := seedTestWorkspace(t, db, userID)
 	seedCrewRow(t, db, "crewR", wsID, "Crew", "crew")
 	seedAgentRow(t, db, "agentR", wsID, "crewR", "Rob", "rob", "AGENT")
+	execOrFatal(t, db, `INSERT INTO chats(id,agent_id,workspace_id) VALUES('chatX','agentR',?)`, wsID)
 
 	h := &InternalHandler{db: db, logger: newTestLogger()}
 	wireTestJournalForHandler(t, db, h)

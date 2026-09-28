@@ -1352,3 +1352,25 @@ func TestPullSidecarImage_DrainError(t *testing.T) {
 		t.Fatalf("expected drain error, got %v", err)
 	}
 }
+
+func TestStopCrewService_OnlyStopsExactOwnedService(t *testing.T) {
+	var stopped []string
+	p := newCovProvider(t, Config{}, func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/containers/json") {
+			_, _ = io.WriteString(w, `[{"Id":"owned","State":"running","Labels":{"crewship.crew-id":"crew-a","crewship.kind":"sidecar","crewship.svc":"redis"}},{"Id":"sibling","State":"running","Labels":{"crewship.crew-id":"crew-b","crewship.kind":"sidecar","crewship.svc":"redis"}},{"Id":"other-service","State":"running","Labels":{"crewship.crew-id":"crew-a","crewship.kind":"sidecar","crewship.svc":"postgres"}}]`)
+			return
+		}
+		if strings.HasSuffix(r.URL.Path, "/stop") {
+			stopped = append(stopped, r.URL.Path)
+			w.WriteHeader(204)
+			return
+		}
+		w.WriteHeader(404)
+	})
+	if err := p.StopCrewService(context.Background(), "crew-a", "same-slug", "redis"); err != nil {
+		t.Fatal(err)
+	}
+	if len(stopped) != 1 || !strings.Contains(stopped[0], "/owned/") {
+		t.Fatalf("foreign service stopped: %v", stopped)
+	}
+}

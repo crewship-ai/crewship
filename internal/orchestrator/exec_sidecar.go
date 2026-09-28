@@ -1220,6 +1220,9 @@ type sidecarCred struct {
 	// before), and sidecarConfigFingerprint — which hashes this same struct —
 	// does not move for any crew that has no per-agent grant.
 	AgentIDs []string `json:"agent_ids,omitempty"`
+	// AgentGrants is the authoritative per-agent lease map. Nil is legacy;
+	// an empty non-nil map denies everyone and must survive JSON serialization.
+	AgentGrants map[string]string `json:"agent_grants,omitzero"`
 	// GraceToken / GraceExpiresAt / GraceRotationID carry a rotation's grace
 	// value (#1882) into the CredStore. omitempty keeps the payload
 	// byte-identical for a credential with no open rotation. They are
@@ -1255,6 +1258,12 @@ func sidecarConfigFingerprint(key string, creds []Credential) string {
 	// concurrent runs would otherwise be restarted for it.
 	for i := range sc {
 		sc[i].GraceToken, sc[i].GraceExpiresAt, sc[i].GraceRotationID = "", "", ""
+		// Authority is refreshed in place. Preserve the protocol mode, but
+		// do not restart a shared sidecar when a grant or lease changes.
+		if sc[i].AgentGrants != nil {
+			sc[i].AgentGrants = map[string]string{"_": ""}
+			sc[i].AgentIDs = nil // Legacy fallback is unused in grant mode.
+		}
 	}
 	sort.SliceStable(sc, func(i, j int) bool {
 		if sc[i].ID != sc[j].ID {
@@ -1347,15 +1356,20 @@ func buildSidecarCreds(creds []Credential, logger *slog.Logger) []sidecarCred {
 			}
 			continue
 		}
+		lease := c.LeaseExpiresAt
+		if c.AgentGrants != nil {
+			lease = ""
+		} // Each agent's own deadline is authoritative.
 		sc = append(sc, sidecarCred{
 			ID:              c.ID,
 			Provider:        prov,
 			Token:           c.PlainValue,
 			Priority:        c.Priority,
-			LeaseExpiresAt:  c.LeaseExpiresAt,
+			LeaseExpiresAt:  lease,
 			BaseURL:         c.BaseURL,
 			Headers:         c.Headers,
 			AgentIDs:        sortedGranteeIDs(c.AgentIDs),
+			AgentGrants:     c.AgentGrants,
 			GraceToken:      c.GraceToken,
 			GraceExpiresAt:  c.GraceExpiresAt,
 			GraceRotationID: c.GraceRotationID,

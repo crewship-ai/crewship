@@ -26,10 +26,24 @@ func finalSpecialDomainSchemaCatalog() map[string]DomainSchema {
 	}
 	stringArray := func() map[string]any { return array(str()) }
 
+	fileAccess := map[string]any{"type": "string", "enum": []string{"none", "read", "read_write"}}
+	fileAccessRequest := object(map[string]any{"requester_crew_id": str(), "level": fileAccess, "expected_version": map[string]any{"type": "integer", "minimum": 1}})
+	fileAccessRequest["required"] = []string{"requester_crew_id", "level", "expected_version"}
+	fileAccessResponse := object(map[string]any{"level": fileAccess, "access_version": integer()})
+	fileAccessResponse["required"] = []string{"level", "access_version"}
+	serviceState := object(map[string]any{"name": str(), "id": str(), "desired_state": str(), "observed_state": str(), "version": integer(), "last_error": str()})
+	serviceState["required"] = []string{"name", "desired_state", "observed_state", "version"}
+	serviceStates := object(map[string]any{"services": array(serviceState), "supported": boolean()})
+	serviceStates["required"] = []string{"services", "supported"}
+	serviceIntent := object(map[string]any{"desired_state": map[string]any{"type": "string", "enum": []string{"running", "stopped"}}, "expected_version": map[string]any{"type": "integer", "minimum": 0}})
+	serviceIntent["required"] = []string{"desired_state", "expected_version"}
+	serviceResult := object(map[string]any{"desired_state": str(), "version": integer(), "observed_state": str()})
+	serviceResult["required"] = []string{"desired_state", "version", "observed_state"}
 	connection := object(map[string]any{
 		"id": str(), "workspace_id": str(), "from_crew_id": str(), "from_crew_name": nullable(str()),
 		"from_crew_slug": nullable(str()), "to_crew_id": str(), "to_crew_name": nullable(str()),
 		"to_crew_slug": nullable(str()), "direction": str(), "status": str(),
+		"forward_file_access": fileAccess, "reverse_file_access": fileAccess, "access_version": integer(),
 		"created_at": str(), "updated_at": str(),
 	})
 	crewTemplateAgent := object(map[string]any{
@@ -91,45 +105,48 @@ func finalSpecialDomainSchemaCatalog() map[string]DomainSchema {
 	aiSuggestion := object(map[string]any{"crew_name": str(), "crew_slug": str(), "description": str(), "agents": array(aiAgent)})
 
 	return map[string]DomainSchema{
-		"GET /api/v1/crew-connections":                   {Response: array(connection)},
-		"POST /api/v1/crew-connections":                  {Request: object(map[string]any{"from_crew_id": str(), "to_crew_id": str(), "direction": str()}), Response: object(map[string]any{"id": str()})},
-		"DELETE /api/v1/crew-connections/{connectionId}": {Response: nil},
-		"GET /api/v1/crew-templates":                     {Response: array(crewTemplate)},
-		"GET /api/v1/crew-templates/{slug}":              {Response: crewTemplate},
-		"POST /api/v1/crew-templates/{slug}/deploy":      {Request: object(map[string]any{"crew_name": str(), "crew_slug": str()}), Response: object(map[string]any{"crew_id": str(), "crew_name": str(), "crew_slug": str(), "agent_count": integer(), "agent_ids": stringArray()})},
-		"GET /api/v1/templates":                          {Response: array(template)},
-		"GET /api/v1/templates/{templateId}":             {Response: template},
-		"POST /api/v1/templates":                         {Request: object(map[string]any{"name": str(), "description": nullable(str()), "template_json": anyValue(), "icon": nullable(str()), "color": nullable(str())}), Response: object(map[string]any{"id": str()})},
-		"PATCH /api/v1/templates/{templateId}":           {Request: object(map[string]any{"name": nullable(str()), "description": nullable(str()), "template_json": anyValue(), "icon": nullable(str()), "color": nullable(str())}), Response: object(map[string]any{"id": str()})},
-		"DELETE /api/v1/templates/{templateId}":          {Response: object(map[string]any{"id": str()})},
-		"GET /api/v1/workflow-templates":                 {Response: array(workflowTemplate)},
-		"GET /api/v1/workflow-templates/{id}":            {Response: workflowTemplate},
-		"POST /api/v1/workflow-templates":                {Request: object(map[string]any{"name": str(), "description": nullable(str()), "template_json": str(), "icon": nullable(str()), "color": nullable(str())}), Response: workflowTemplate},
-		"PATCH /api/v1/workflow-templates/{id}":          {Request: object(map[string]any{"name": nullable(str()), "description": nullable(str()), "template_json": nullable(str()), "icon": nullable(str()), "color": nullable(str())}), Response: workflowTemplate},
-		"DELETE /api/v1/workflow-templates/{id}":         {Response: object(map[string]any{"id": str()})},
-		"POST /api/v1/consolidate/run":                   {Request: object(map[string]any{"crew_id": str(), "since": str()}), Response: object(map[string]any{"accepted": boolean(), "triggered": boolean(), "worker_id": str(), "note": str()})},
-		"POST /api/v1/consolidate/proposed/{id}/approve": {Response: object(map[string]any{"proposal_id": str(), "canonical_path": str(), "rules_merged": integer(), "workspace_id": str(), "crew_id": str(), "decided_by": str(), "version_sha": str()})},
-		"POST /api/v1/consolidate/proposed/{id}/reject":  {Request: object(map[string]any{"reason": str()}), Response: object(map[string]any{"proposal_id": str(), "status": str(), "decided_by": str(), "reason": str()})},
-		"GET /api/v1/consolidate/proposed/{id}/explain":  {Response: proposal},
-		"GET /api/v1/consolidate/proposed/{id}/diff":     {Response: object(map[string]any{"proposal_id": str(), "workspace_id": str(), "crew_id": str(), "status": str(), "canonical_path": str(), "canonical_exists": boolean(), "proposal_path": str(), "rules_count": integer(), "diff": str(), "stats": object(map[string]any{"additions": integer(), "deletions": integer(), "rules_appended": integer()})})},
-		"POST /api/v1/eval/replay":                       {Request: object(map[string]any{"mission_id": str(), "seed": integer()}), Response: evalQueued},
-		"POST /api/v1/eval/regression":                   {Request: object(map[string]any{"baseline_mission_id": str(), "candidate_mission_id": str()}), Response: evalQueued},
-		"GET /api/v1/eval/runs":                          {Response: object(map[string]any{"rows": array(evalRun), "count": integer(), "limit": integer()})},
-		"GET /api/v1/eval/runs/{id}":                     {Response: evalRun},
-		"GET /api/v1/mcp-registry":                       {Response: object(map[string]any{"servers": array(mcpServer), "total": integer(), "limit": integer(), "offset": integer()})},
-		"GET /api/v1/mcp-registry/search":                {Response: object(map[string]any{"servers": array(mcpServer), "total": integer(), "limit": integer(), "offset": integer(), "query": str()})},
-		"POST /api/v1/mcp-registry/sync":                 {Response: object(map[string]any{"status": str(), "message": str()})},
-		"GET /api/v1/mcp-tool-calls":                     {Response: array(mcpToolCall)},
-		"GET /api/v1/skills/proposed":                    {Response: array(proposedSkill)},
-		"POST /api/v1/skills/proposed/approve":           {Request: object(map[string]any{"crew_id": str(), "file_name": str()}), Response: object(map[string]any{"skill_id": str(), "slug": str(), "created": boolean(), "file_name": str()})},
-		"POST /api/v1/skills/proposed/reject":            {Request: object(map[string]any{"crew_id": str(), "file_name": str()}), Response: object(map[string]any{"file_name": str(), "removed": boolean()})},
-		"POST /api/v1/crew-ai-suggest":                   {Request: object(map[string]any{"description": str()}), Response: aiSuggestion},
-		"GET /api/v1/memory/health":                      {Response: object(map[string]any{"workspace_id": str(), "crew_id": str(), "computed_at": str(), "overall": number(), "metrics": object(map[string]any{"freshness": number(), "coverage": number(), "coherence": number(), "efficiency": number(), "reachability": number()}), "details": anyValue()})},
-		"GET /api/v1/memory/versions":                    {Response: object(map[string]any{"path": str(), "count": integer(), "entries": array(memoryVersion)})},
-		"GET /api/v1/memory/versions/{sha}":              {Response: map[string]any{"type": "string", "format": "binary"}, ResponseMedia: []string{"application/octet-stream"}},
-		"POST /api/v1/memory/versions/{sha}/restore":     {Request: object(map[string]any{"path": str(), "canonical_path": str(), "tier": str()}), Response: object(map[string]any{"workspace_id": str(), "path": str(), "canonical_path": str(), "restored_sha": str(), "new_version_id": str(), "bytes": integer(), "restored_by": str()})},
-		"GET /api/v1/memory/export":                      {Response: object(map[string]any{"format": str(), "documents": array(memoryDocument), "skipped": array(object(map[string]any{"source": str(), "reason": str()}))})},
-		"POST /api/v1/memory/import":                     {Request: object(map[string]any{"crew_id": str(), "agent_slug": str(), "documents": array(memoryDocument)}), Response: object(map[string]any{"written": integer(), "rejected": array(anyValue()), "failed": array(anyValue())})},
-		"POST /api/v1/memory/search/hybrid":              {Request: object(map[string]any{"query": str(), "limit": integer(), "scope": str(), "crew_id": str()}), Response: object(map[string]any{"query": str(), "count": integer(), "hits": array(memoryHit)})},
+		"GET /api/v1/crews/{crewId}/service-states":               {Response: serviceStates},
+		"PUT /api/v1/crews/{crewId}/services/{serviceName}/state": {RequestRequired: true, Request: serviceIntent, Response: serviceResult},
+		"PUT /api/v1/crew-connections/{connectionId}/file-access": {RequestRequired: true, Request: fileAccessRequest, Response: fileAccessResponse},
+		"GET /api/v1/crew-connections":                            {Response: array(connection)},
+		"POST /api/v1/crew-connections":                           {Request: object(map[string]any{"from_crew_id": str(), "to_crew_id": str(), "direction": str(), "forward_file_access": fileAccess, "reverse_file_access": fileAccess}), Response: object(map[string]any{"id": str()})},
+		"DELETE /api/v1/crew-connections/{connectionId}":          {Response: nil, Parameters: []map[string]any{{"name": "expected_version", "in": "query", "required": false, "schema": map[string]any{"type": "integer", "minimum": 1}}}},
+		"GET /api/v1/crew-templates":                              {Response: array(crewTemplate)},
+		"GET /api/v1/crew-templates/{slug}":                       {Response: crewTemplate},
+		"POST /api/v1/crew-templates/{slug}/deploy":               {Request: object(map[string]any{"crew_name": str(), "crew_slug": str()}), Response: object(map[string]any{"crew_id": str(), "crew_name": str(), "crew_slug": str(), "agent_count": integer(), "agent_ids": stringArray()})},
+		"GET /api/v1/templates":                                   {Response: array(template)},
+		"GET /api/v1/templates/{templateId}":                      {Response: template},
+		"POST /api/v1/templates":                                  {Request: object(map[string]any{"name": str(), "description": nullable(str()), "template_json": anyValue(), "icon": nullable(str()), "color": nullable(str())}), Response: object(map[string]any{"id": str()})},
+		"PATCH /api/v1/templates/{templateId}":                    {Request: object(map[string]any{"name": nullable(str()), "description": nullable(str()), "template_json": anyValue(), "icon": nullable(str()), "color": nullable(str())}), Response: object(map[string]any{"id": str()})},
+		"DELETE /api/v1/templates/{templateId}":                   {Response: object(map[string]any{"id": str()})},
+		"GET /api/v1/workflow-templates":                          {Response: array(workflowTemplate)},
+		"GET /api/v1/workflow-templates/{id}":                     {Response: workflowTemplate},
+		"POST /api/v1/workflow-templates":                         {Request: object(map[string]any{"name": str(), "description": nullable(str()), "template_json": str(), "icon": nullable(str()), "color": nullable(str())}), Response: workflowTemplate},
+		"PATCH /api/v1/workflow-templates/{id}":                   {Request: object(map[string]any{"name": nullable(str()), "description": nullable(str()), "template_json": nullable(str()), "icon": nullable(str()), "color": nullable(str())}), Response: workflowTemplate},
+		"DELETE /api/v1/workflow-templates/{id}":                  {Response: object(map[string]any{"id": str()})},
+		"POST /api/v1/consolidate/run":                            {Request: object(map[string]any{"crew_id": str(), "since": str()}), Response: object(map[string]any{"accepted": boolean(), "triggered": boolean(), "worker_id": str(), "note": str()})},
+		"POST /api/v1/consolidate/proposed/{id}/approve":          {Response: object(map[string]any{"proposal_id": str(), "canonical_path": str(), "rules_merged": integer(), "workspace_id": str(), "crew_id": str(), "decided_by": str(), "version_sha": str()})},
+		"POST /api/v1/consolidate/proposed/{id}/reject":           {Request: object(map[string]any{"reason": str()}), Response: object(map[string]any{"proposal_id": str(), "status": str(), "decided_by": str(), "reason": str()})},
+		"GET /api/v1/consolidate/proposed/{id}/explain":           {Response: proposal},
+		"GET /api/v1/consolidate/proposed/{id}/diff":              {Response: object(map[string]any{"proposal_id": str(), "workspace_id": str(), "crew_id": str(), "status": str(), "canonical_path": str(), "canonical_exists": boolean(), "proposal_path": str(), "rules_count": integer(), "diff": str(), "stats": object(map[string]any{"additions": integer(), "deletions": integer(), "rules_appended": integer()})})},
+		"POST /api/v1/eval/replay":                                {Request: object(map[string]any{"mission_id": str(), "seed": integer()}), Response: evalQueued},
+		"POST /api/v1/eval/regression":                            {Request: object(map[string]any{"baseline_mission_id": str(), "candidate_mission_id": str()}), Response: evalQueued},
+		"GET /api/v1/eval/runs":                                   {Response: object(map[string]any{"rows": array(evalRun), "count": integer(), "limit": integer()})},
+		"GET /api/v1/eval/runs/{id}":                              {Response: evalRun},
+		"GET /api/v1/mcp-registry":                                {Response: object(map[string]any{"servers": array(mcpServer), "total": integer(), "limit": integer(), "offset": integer()})},
+		"GET /api/v1/mcp-registry/search":                         {Response: object(map[string]any{"servers": array(mcpServer), "total": integer(), "limit": integer(), "offset": integer(), "query": str()})},
+		"POST /api/v1/mcp-registry/sync":                          {Response: object(map[string]any{"status": str(), "message": str()})},
+		"GET /api/v1/mcp-tool-calls":                              {Response: array(mcpToolCall)},
+		"GET /api/v1/skills/proposed":                             {Response: array(proposedSkill)},
+		"POST /api/v1/skills/proposed/approve":                    {Request: object(map[string]any{"crew_id": str(), "file_name": str()}), Response: object(map[string]any{"skill_id": str(), "slug": str(), "created": boolean(), "file_name": str()})},
+		"POST /api/v1/skills/proposed/reject":                     {Request: object(map[string]any{"crew_id": str(), "file_name": str()}), Response: object(map[string]any{"file_name": str(), "removed": boolean()})},
+		"POST /api/v1/crew-ai-suggest":                            {Request: object(map[string]any{"description": str()}), Response: aiSuggestion},
+		"GET /api/v1/memory/health":                               {Response: object(map[string]any{"workspace_id": str(), "crew_id": str(), "computed_at": str(), "overall": number(), "metrics": object(map[string]any{"freshness": number(), "coverage": number(), "coherence": number(), "efficiency": number(), "reachability": number()}), "details": anyValue()})},
+		"GET /api/v1/memory/versions":                             {Response: object(map[string]any{"path": str(), "count": integer(), "entries": array(memoryVersion)})},
+		"GET /api/v1/memory/versions/{sha}":                       {Response: map[string]any{"type": "string", "format": "binary"}, ResponseMedia: []string{"application/octet-stream"}},
+		"POST /api/v1/memory/versions/{sha}/restore":              {Request: object(map[string]any{"path": str(), "canonical_path": str(), "tier": str()}), Response: object(map[string]any{"workspace_id": str(), "path": str(), "canonical_path": str(), "restored_sha": str(), "new_version_id": str(), "bytes": integer(), "restored_by": str()})},
+		"GET /api/v1/memory/export":                               {Response: object(map[string]any{"format": str(), "documents": array(memoryDocument), "skipped": array(object(map[string]any{"source": str(), "reason": str()}))})},
+		"POST /api/v1/memory/import":                              {Request: object(map[string]any{"crew_id": str(), "agent_slug": str(), "documents": array(memoryDocument)}), Response: object(map[string]any{"written": integer(), "rejected": array(anyValue()), "failed": array(anyValue())})},
+		"POST /api/v1/memory/search/hybrid":                       {Request: object(map[string]any{"query": str(), "limit": integer(), "scope": str(), "crew_id": str()}), Response: object(map[string]any{"query": str(), "count": integer(), "hits": array(memoryHit)})},
 	}
 }

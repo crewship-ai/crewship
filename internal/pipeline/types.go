@@ -670,9 +670,8 @@ type NotifyStep struct {
 // scopes strictly to RunInput.WorkspaceID, so a routine can never read
 // another tenant's data regardless of what it's authored to ask for.
 type QueryStep struct {
-	// Source selects the query. Only "pipeline_runs" is supported today
-	// (run counts, cost, and top failures over a trailing window — the
-	// data source behind the workspace-digest routine template).
+	// Source selects "pipeline_runs" (workspace history) or "assigned_issues"
+	// (a boolean candidate-work signal for the persisted author agent).
 	Source string `json:"source"`
 	// WindowHours bounds the query to rows from the trailing N hours.
 	// Default 24 when zero; capped at 720 (30 days) regardless of what's

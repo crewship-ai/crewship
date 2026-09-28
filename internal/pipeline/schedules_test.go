@@ -80,6 +80,7 @@ CREATE TABLE IF NOT EXISTS pipeline_runs (
     invoking_crew_id    TEXT,
     invoking_agent_id   TEXT,
     invoking_user_id    TEXT,
+    invocation_authority TEXT NOT NULL DEFAULT '',
     triggered_via       TEXT NOT NULL DEFAULT 'manual',
     triggered_by_id     TEXT,
     idempotency_key     TEXT,

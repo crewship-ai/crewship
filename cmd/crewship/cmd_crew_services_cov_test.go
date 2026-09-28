@@ -141,3 +141,23 @@ func TestCrewServicesRunE_MalformedJSON(t *testing.T) {
 		t.Error("expected decode error")
 	}
 }
+
+func TestCrewServiceStateRunE(t *testing.T) {
+	s := clitest.NewStubServer()
+	defer s.Close()
+	covSetupCLI(t, s)
+	covCrewsList(s)
+	route := "/api/v1/crews/ccrewa1234567890123456789/services/redis/state"
+	s.OnPut(route, clitest.JSONResponse(202, map[string]any{"version": 1}))
+	if err := crewServiceStateCmd.RunE(crewServiceStateCmd, []string{"alpha", "redis", "running", "0"}); err != nil {
+		t.Fatal(err)
+	}
+	calls := s.CallsFor("PUT", route)
+	if len(calls) != 1 || !strings.Contains(string(calls[0].Body), `"expected_version":0`) {
+		t.Fatal("missing observed version")
+	}
+	s.OnPut(route, clitest.ErrorResponse(409, "Service changed"))
+	if err := crewServiceStateCmd.RunE(crewServiceStateCmd, []string{"alpha", "redis", "stopped", "0"}); err == nil {
+		t.Fatal("conflict hidden")
+	}
+}

@@ -110,12 +110,13 @@ type RunRecord struct {
 	// NO_CHANGE | SUCCEEDED | WORK_CREATED | PARTIAL | NEEDS_HUMAN | FAILED
 	// | CANCELLED, set once by MarkTerminal via orchestrator.DeriveOutcome
 	// and never touched again. Empty on a run that predates this column.
-	Outcome         string
-	InvokingCrewID  string
-	InvokingAgentID string
-	InvokingUserID  string
-	TriggeredVia    TriggeredVia
-	TriggeredByID   string
+	Outcome             string
+	InvokingCrewID      string
+	InvokingAgentID     string
+	InvokingUserID      string
+	InvocationAuthority string // Server-assigned admission policy; never user metadata.
+	TriggeredVia        TriggeredVia
+	TriggeredByID       string
 	// DueAt is the cron occurrence a scheduled run was fired FOR
 	// (v20260905172327): the schedule's next_run_at at the moment the
 	// scheduler took it, stamped by fireSingleOccurrence and nothing else.
@@ -322,16 +323,16 @@ INSERT INTO pipeline_runs (
     status, mode, started_at, ended_at, current_step_id,
     step_outputs_json, output, cost_usd, duration_ms,
     error_message, failed_at_step, error_fingerprint,
-    invoking_crew_id, invoking_agent_id, invoking_user_id,
+    invoking_crew_id, invoking_agent_id, invoking_user_id, invocation_authority,
     triggered_via, triggered_by_id, idempotency_key,
     inputs_json, concurrency_key, metadata_json, is_replay, replay_of, warnings_json,
     chain_depth, chain_origin, created_at, updated_at, due_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		r.ID, r.WorkspaceID, r.PipelineID, r.PipelineSlug, nullableIntPtr(r.PipelineVersion), nullableStr(r.DefinitionHash),
 		string(r.Status), string(r.Mode), formatRFC3339(r.StartedAt), nullableTime(r.EndedAt), nullableStr(r.CurrentStepID),
 		r.StepOutputsJSON, nullableStr(r.Output), r.CostUSD, r.DurationMs,
 		nullableStr(r.ErrorMessage), nullableStr(r.FailedAtStep), nullableStr(r.ErrorFingerprint),
-		nullableStr(r.InvokingCrewID), nullableStr(r.InvokingAgentID), nullableStr(r.InvokingUserID),
+		nullableStr(r.InvokingCrewID), nullableStr(r.InvokingAgentID), nullableStr(r.InvokingUserID), r.InvocationAuthority,
 		string(r.TriggeredVia), nullableStr(r.TriggeredByID), nullableStr(r.IdempotencyKey),
 		r.InputsJSON, nullableStr(r.ConcurrencyKey), r.MetadataJSON, boolToInt(r.IsReplay), nullableStr(r.ReplayOf), r.WarningsJSON,
 		r.ChainDepth, nullableStr(r.ChainOrigin), formatRFC3339(r.CreatedAt), formatRFC3339(r.UpdatedAt), nullableTime(r.DueAt))
@@ -947,7 +948,7 @@ SELECT id, workspace_id, pipeline_id, pipeline_slug, pipeline_version,
        status, mode, started_at, ended_at, COALESCE(current_step_id,''),
        step_outputs_json, COALESCE(output,''), cost_usd, duration_ms,
        COALESCE(error_message,''), COALESCE(failed_at_step,''), COALESCE(error_fingerprint,''),
-       COALESCE(invoking_crew_id,''), COALESCE(invoking_agent_id,''), COALESCE(invoking_user_id,''),
+       COALESCE(invoking_crew_id,''), COALESCE(invoking_agent_id,''), COALESCE(invoking_user_id,''), invocation_authority,
        triggered_via, COALESCE(triggered_by_id,''), COALESCE(idempotency_key,''),
        inputs_json, COALESCE(concurrency_key,''),
        COALESCE(metadata_json,'{}'), COALESCE(is_replay,0), COALESCE(replay_of,''),
@@ -978,7 +979,7 @@ func scanRun(row scanRunRow) (*RunRecord, error) {
 		&status, &mode, &startedAt, &endedAt, &r.CurrentStepID,
 		&r.StepOutputsJSON, &r.Output, &r.CostUSD, &r.DurationMs,
 		&r.ErrorMessage, &r.FailedAtStep, &r.ErrorFingerprint,
-		&r.InvokingCrewID, &r.InvokingAgentID, &r.InvokingUserID,
+		&r.InvokingCrewID, &r.InvokingAgentID, &r.InvokingUserID, &r.InvocationAuthority,
 		&triggeredVia, &r.TriggeredByID, &r.IdempotencyKey,
 		&r.InputsJSON, &r.ConcurrencyKey,
 		&r.MetadataJSON, &isReplay, &r.ReplayOf,

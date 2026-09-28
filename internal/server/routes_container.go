@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/provider"
+	"github.com/crewship-ai/crewship/internal/servicelifecycle"
 )
 
 // gitDiffSem bounds concurrent `git diff` container execs. Each exec blocks a
@@ -126,6 +127,16 @@ func (s *Server) handleContainerStart(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleContainerStop(w http.ResponseWriter, r *http.Request) {
+	s.stopContainer(w, r, true)
+}
+
+// Recycling applies changed runtime configuration without changing the
+// operator's durable service intent. The controller restores managed services.
+func (s *Server) handleContainerRecycle(w http.ResponseWriter, r *http.Request) {
+	s.stopContainer(w, r, false)
+}
+
+func (s *Server) stopContainer(w http.ResponseWriter, r *http.Request, persistStop bool) {
 	id := r.PathValue("id")
 	s.logger.Info("container stop request", "crew_id", id)
 
@@ -137,6 +148,12 @@ func (s *Server) handleContainerStop(w http.ResponseWriter, r *http.Request) {
 	// Resolve crew slug from DB so we can build the container name via
 	// provider; falls back to the raw id (works for Docker container hashes).
 	containerName, slug, _ := s.resolveCrewContainer(r.Context(), id, true)
+	if persistStop {
+		if err := servicelifecycle.StopCrew(r.Context(), s.db, id); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not persist service stop"})
+			return
+		}
+	}
 
 	if err := s.container.StopCrewRuntime(r.Context(), containerName); err != nil {
 		// "There is no container" is the state the caller asked for, not a

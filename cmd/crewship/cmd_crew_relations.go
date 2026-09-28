@@ -8,6 +8,7 @@ package main
 import (
 	"fmt"
 	"net/url"
+	"strconv"
 
 	"github.com/spf13/cobra"
 
@@ -111,12 +112,15 @@ var crewConnectionsCmd = &cobra.Command{
 		}
 
 		var conns []struct {
-			ID           string `json:"id" yaml:"id"`
-			FromCrewSlug string `json:"from_crew_slug" yaml:"from_crew_slug"`
-			ToCrewSlug   string `json:"to_crew_slug" yaml:"to_crew_slug"`
-			Direction    string `json:"direction" yaml:"direction"`
-			Status       string `json:"status" yaml:"status"`
-			CreatedAt    string `json:"created_at" yaml:"created_at"`
+			ID                string `json:"id" yaml:"id"`
+			FromCrewSlug      string `json:"from_crew_slug" yaml:"from_crew_slug"`
+			ToCrewSlug        string `json:"to_crew_slug" yaml:"to_crew_slug"`
+			Direction         string `json:"direction" yaml:"direction"`
+			Status            string `json:"status" yaml:"status"`
+			CreatedAt         string `json:"created_at" yaml:"created_at"`
+			ForwardFileAccess string `json:"forward_file_access" yaml:"forward_file_access"`
+			ReverseFileAccess string `json:"reverse_file_access" yaml:"reverse_file_access"`
+			AccessVersion     int64  `json:"access_version" yaml:"access_version"`
 		}
 		if err := cli.ReadJSON(resp, &conns); err != nil {
 			return err
@@ -129,6 +133,45 @@ var crewConnectionsCmd = &cobra.Command{
 			rows = append(rows, []string{c.ID, c.FromCrewSlug, c.ToCrewSlug, c.Direction, c.Status, c.CreatedAt})
 		}
 		return f.Auto(conns, headers, rows)
+	},
+}
+
+// Explicit version prevents a stale admin command from overwriting a newer grant.
+var crewFileAccessCmd = &cobra.Command{
+	Use:   "file-access <connection-id> <requester-crew> <none|read|read_write> <expected-version>",
+	Short: "Set directed access to a linked crew's shared files (read_write also allows delivery)",
+	Args:  cobra.ExactArgs(4),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := requireAuth(); err != nil {
+			return err
+		}
+		if err := requireWorkspace(); err != nil {
+			return err
+		}
+		if args[2] != "none" && args[2] != "read" && args[2] != "read_write" {
+			return fmt.Errorf("invalid file access level")
+		}
+		version, err := strconv.ParseInt(args[3], 10, 64)
+		if err != nil || version < 1 {
+			return fmt.Errorf("expected-version must be a positive integer from crew connections --format json")
+		}
+		client := newAPIClient()
+		requester, err := resolveCrewID(client, args[1])
+		if err != nil {
+			return err
+		}
+		resp, err := client.Put("/api/v1/crew-connections/"+url.PathEscape(args[0])+"/file-access", map[string]interface{}{
+			"requester_crew_id": requester, "level": args[2], "expected_version": version,
+		})
+		if err != nil {
+			return err
+		}
+		if err := cli.CheckError(resp); err != nil {
+			return err
+		}
+		defer resp.Body.Close()
+		cli.PrintSuccess("Shared-file access updated.")
+		return nil
 	},
 }
 

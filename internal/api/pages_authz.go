@@ -36,7 +36,10 @@ package api
 // a page they hold no crew membership on is served §11b decision 14's sealed
 // placeholders, which is exactly the shape §7.1b rule 2 describes.
 
-import "context"
+import (
+	"context"
+	"github.com/crewship-ai/crewship/internal/pages"
+)
 
 // pageViewer is one caller's standing in the workspace, loaded once per
 // request: their workspace role and the crews they belong to.
@@ -101,10 +104,7 @@ func (h *PageHandler) canSeePanel(viewer *pageViewer, p *panelRecord) bool {
 	if viewer == nil {
 		return true
 	}
-	if canRole(viewer.Role, "manage") {
-		return true
-	}
-	return viewer.Crews[p.OwnerCrewID]
+	return pages.CanSeePanel(viewer.Role, viewer.Crews[p.OwnerCrewID])
 }
 
 // The paths by which a caller reaches a page, as the index spells them

@@ -145,3 +145,16 @@ func TestSidecarConfigFingerprint_StableAcrossCrewMembers(t *testing.T) {
 			"the running sidecar keeps serving the credential to the member that lost it")
 	}
 }
+
+func TestSidecarCred_PerAgentDeadlinesDoNotUseBootingAgentsLease(t *testing.T) {
+	grants := map[string]string{"a": "2030-01-01T00:00:00Z", "b": "2030-01-02T00:00:00Z"}
+	creds := []Credential{{ID: "shared", Provider: "ANTHROPIC", Type: "API_KEY", EnvVarName: "ANTHROPIC_API_KEY", PlainValue: "synthetic", LeaseExpiresAt: grants["a"], AgentGrants: grants}}
+	first := buildSidecarCreds(creds, nil)
+	creds[0].LeaseExpiresAt = grants["b"]
+	second := buildSidecarCreds(creds, nil)
+	a, _ := json.Marshal(first)
+	b, _ := json.Marshal(second)
+	if len(first) != 1 || string(a) != string(b) || first[0].LeaseExpiresAt != "" || len(first[0].AgentGrants) != 2 {
+		t.Fatalf("booting member changes credential authority: %s / %s", a, b)
+	}
+}

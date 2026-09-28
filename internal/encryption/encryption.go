@@ -354,9 +354,11 @@ func Decrypt(ciphertextStr string) (string, error) {
 	}
 
 	// Reconstruct sealed data: ciphertext + authTag (Go GCM expects this format)
-	sealed := make([]byte, 0, len(ciphertext)+len(authTag))
-	sealed = append(sealed, ciphertext...)
-	sealed = append(sealed, authTag...)
+	// Derive the allocation from the already validated decoded buffer.
+	// This also makes the size bound explicit to static analysis.
+	sealed := make([]byte, len(data)-len(iv))
+	copy(sealed, ciphertext)
+	copy(sealed[len(ciphertext):], authTag)
 
 	plaintext, err := gcm.Open(nil, iv, sealed, nil)
 	if err != nil {

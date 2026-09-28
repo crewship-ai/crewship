@@ -71,3 +71,24 @@ func TestSidecarNeedsRestartOnConfigFingerprintDrift(t *testing.T) {
 		t.Fatal("pre-fingerprint sidecar reused despite a keyed desired config")
 	}
 }
+
+func TestSidecarConfigFingerprintGrantRefresh(t *testing.T) {
+	c := Credential{ID: "c", EnvVarName: "ANTHROPIC_API_KEY", Type: "API_KEY", Provider: "ANTHROPIC", PlainValue: "synthetic", AgentGrants: map[string]string{"a": "2026-10-01T00:00:00Z"}}
+	before := sidecarConfigFingerprint("test", []Credential{c})
+	if c.AgentGrants["a"] != "2026-10-01T00:00:00Z" {
+		t.Fatal("fingerprinting mutated startup grants")
+	}
+	c.AgentGrants = map[string]string{"b": ""}
+	c.AgentIDs = []string{"b"}
+	if before != sidecarConfigFingerprint("test", []Credential{c}) {
+		t.Fatal("grant refresh restarts shared sidecar")
+	}
+	c.AgentGrants = map[string]string{}
+	if before != sidecarConfigFingerprint("test", []Credential{c}) {
+		t.Fatal("revocation restarts shared sidecar")
+	}
+	c.AgentGrants = nil
+	if before == sidecarConfigFingerprint("test", []Credential{c}) {
+		t.Fatal("legacy and scoped modes collided")
+	}
+}

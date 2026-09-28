@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"time"
 )
 
@@ -23,18 +24,21 @@ func NewCrewConnectionHandler(db *sql.DB, logger *slog.Logger) *CrewConnectionHa
 }
 
 type crewConnectionResponse struct {
-	ID           string `json:"id"`
-	WorkspaceID  string `json:"workspace_id"`
-	FromCrewID   string `json:"from_crew_id"`
-	FromCrewName string `json:"from_crew_name,omitempty"`
-	FromCrewSlug string `json:"from_crew_slug,omitempty"`
-	ToCrewID     string `json:"to_crew_id"`
-	ToCrewName   string `json:"to_crew_name,omitempty"`
-	ToCrewSlug   string `json:"to_crew_slug,omitempty"`
-	Direction    string `json:"direction"`
-	Status       string `json:"status"`
-	CreatedAt    string `json:"created_at"`
-	UpdatedAt    string `json:"updated_at"`
+	ID                string `json:"id"`
+	WorkspaceID       string `json:"workspace_id"`
+	FromCrewID        string `json:"from_crew_id"`
+	FromCrewName      string `json:"from_crew_name,omitempty"`
+	FromCrewSlug      string `json:"from_crew_slug,omitempty"`
+	ToCrewID          string `json:"to_crew_id"`
+	ToCrewName        string `json:"to_crew_name,omitempty"`
+	ToCrewSlug        string `json:"to_crew_slug,omitempty"`
+	Direction         string `json:"direction"`
+	Status            string `json:"status"`
+	ForwardFileAccess string `json:"forward_file_access"`
+	ReverseFileAccess string `json:"reverse_file_access"`
+	AccessVersion     int64  `json:"access_version"`
+	CreatedAt         string `json:"created_at"`
+	UpdatedAt         string `json:"updated_at"`
 }
 
 // List handles GET /api/v1/crew-connections
@@ -48,7 +52,7 @@ func (h *CrewConnectionHandler) List(w http.ResponseWriter, r *http.Request) {
 	rows, err := h.db.QueryContext(r.Context(), `
 		SELECT cc.id, cc.workspace_id, cc.from_crew_id, cc.to_crew_id,
 		       cc.direction, cc.status, cc.created_at, cc.updated_at,
-		       fc.name, fc.slug, tc.name, tc.slug
+		       fc.name, fc.slug, tc.name, tc.slug, cc.forward_file_access, cc.reverse_file_access, cc.access_version
 		FROM crew_connections cc
 		JOIN crews fc ON fc.id = cc.from_crew_id AND fc.deleted_at IS NULL
 		JOIN crews tc ON tc.id = cc.to_crew_id  AND tc.deleted_at IS NULL
@@ -65,7 +69,7 @@ func (h *CrewConnectionHandler) List(w http.ResponseWriter, r *http.Request) {
 		var c crewConnectionResponse
 		if err := rows.Scan(&c.ID, &c.WorkspaceID, &c.FromCrewID, &c.ToCrewID,
 			&c.Direction, &c.Status, &c.CreatedAt, &c.UpdatedAt,
-			&c.FromCrewName, &c.FromCrewSlug, &c.ToCrewName, &c.ToCrewSlug); err != nil {
+			&c.FromCrewName, &c.FromCrewSlug, &c.ToCrewName, &c.ToCrewSlug, &c.ForwardFileAccess, &c.ReverseFileAccess, &c.AccessVersion); err != nil {
 			h.logger.Error("scan crew connection", "error", err)
 			continue
 		}
@@ -83,12 +87,25 @@ func (h *CrewConnectionHandler) Create(w http.ResponseWriter, r *http.Request) {
 	wsID := WorkspaceIDFromContext(r.Context())
 
 	var req struct {
-		FromCrewID string `json:"from_crew_id"`
-		ToCrewID   string `json:"to_crew_id"`
-		Direction  string `json:"direction"`
+		FromCrewID        string  `json:"from_crew_id"`
+		ToCrewID          string  `json:"to_crew_id"`
+		Direction         string  `json:"direction"`
+		ForwardFileAccess *string `json:"forward_file_access"`
+		ReverseFileAccess *string `json:"reverse_file_access"`
 	}
 	if err := readJSON(r, &req); err != nil {
 		writeProblem(w, r, http.StatusBadRequest, "Invalid JSON body")
+		return
+	}
+	forwardAccess, reverseAccess := "read_write", "read_write"
+	if req.ForwardFileAccess != nil {
+		forwardAccess = *req.ForwardFileAccess
+	}
+	if req.ReverseFileAccess != nil {
+		reverseAccess = *req.ReverseFileAccess
+	}
+	if !validCrewFileAccess(forwardAccess) || !validCrewFileAccess(reverseAccess) {
+		writeProblem(w, r, http.StatusBadRequest, "Invalid shared-file access level")
 		return
 	}
 	if req.FromCrewID == "" || req.ToCrewID == "" {
@@ -152,8 +169,8 @@ func (h *CrewConnectionHandler) Create(w http.ResponseWriter, r *http.Request) {
 			direction = "bidirectional"
 		}
 		if _, err := h.db.ExecContext(r.Context(),
-			`UPDATE crew_connections SET direction = ?, status = 'active', updated_at = ? WHERE id = ?`,
-			direction, now, existingID); err != nil {
+			`UPDATE crew_connections SET access_version=access_version+CASE WHEN direction<>? OR status<>'active' THEN 1 ELSE 0 END, direction = ?, status = 'active', updated_at = ? WHERE id = ?`,
+			direction, direction, now, existingID); err != nil {
 			internalError(w, r, h.logger, "update crew connection", err)
 			return
 		}
@@ -169,9 +186,9 @@ func (h *CrewConnectionHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 	id := generateConnID()
 	if _, err := h.db.ExecContext(r.Context(), `
-		INSERT INTO crew_connections (id, workspace_id, from_crew_id, to_crew_id, direction, status, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, 'active', ?, ?)`,
-		id, wsID, req.FromCrewID, req.ToCrewID, req.Direction, now, now); err != nil {
+		INSERT INTO crew_connections (id, workspace_id, from_crew_id, to_crew_id, direction, status, created_at, updated_at, forward_file_access, reverse_file_access)
+		VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?, ?)`,
+		id, wsID, req.FromCrewID, req.ToCrewID, req.Direction, now, now, forwardAccess, reverseAccess); err != nil {
 		h.logger.Error("create crew connection", "error", err)
 		writeProblem(w, r, http.StatusConflict, "Connection already exists or constraint violation")
 		return
@@ -193,14 +210,36 @@ func (h *CrewConnectionHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	wsID := WorkspaceIDFromContext(r.Context())
 	connID := r.PathValue("connectionId")
 
-	result, err := h.db.ExecContext(r.Context(),
-		`DELETE FROM crew_connections WHERE id = ? AND workspace_id = ?`, connID, wsID)
+	query := `DELETE FROM crew_connections WHERE id = ? AND workspace_id = ?`
+	args := []any{connID, wsID}
+	versioned := r.URL.Query().Has("expected_version")
+	if versioned {
+		version, err := strconv.Atoi(r.URL.Query().Get("expected_version"))
+		if err != nil || version < 1 {
+			writeProblem(w, r, http.StatusBadRequest, "expected_version must be a positive integer")
+			return
+		}
+		query += ` AND access_version = ?`
+		args = append(args, version)
+	}
+	result, err := h.db.ExecContext(r.Context(), query, args...)
 	if err != nil {
 		internalError(w, r, h.logger, "delete crew connection", err)
 		return
 	}
 	rows, _ := result.RowsAffected()
 	if rows == 0 {
+		if versioned {
+			var exists bool
+			if err := h.db.QueryRowContext(r.Context(), `SELECT EXISTS(SELECT 1 FROM crew_connections WHERE id=? AND workspace_id=?)`, connID, wsID).Scan(&exists); err != nil {
+				internalError(w, r, h.logger, "check crew connection version", err)
+				return
+			}
+			if exists {
+				writeProblem(w, r, http.StatusConflict, "Connection changed; reload before retrying")
+				return
+			}
+		}
 		writeProblem(w, r, http.StatusNotFound, "Connection not found")
 		return
 	}

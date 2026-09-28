@@ -306,6 +306,9 @@ type Credential struct {
 	// alternation, and restart the shared sidecar each time (the thrash #1160
 	// removed). See internal/api/credential_delivery.go.
 	AgentIDs []string `json:"agent_ids,omitempty"`
+	// AgentGrants is the authoritative per-agent lease map. Nil is legacy;
+	// an empty non-nil map denies everyone and must survive JSON serialization.
+	AgentGrants map[string]string `json:"agent_grants,omitzero"`
 	// GraceToken is the credential's PREVIOUS value while a rotation's grace
 	// window is open (#1882), GraceExpiresAt that window's end (RFC3339 UTC)
 	// and GraceRotationID the rotation it came from. Delivered to the sidecar

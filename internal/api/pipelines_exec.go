@@ -313,6 +313,7 @@ func (h *PipelineHandler) Run(w http.ResponseWriter, r *http.Request) {
 		InvokingCrewID:        invokingCrew,
 		InvokingAgentID:       invokingAgent,
 		InvokingUserID:        invokingUser,
+		InvocationAuthority:   pipeline.HumanInvocationAuthority(invokingUser, pipeline.RoutineRunAuthority),
 		Inputs:                body.Inputs,
 		Mode:                  pipeline.ModeRun,
 		IdempotencyKey:        idempotencyKey,

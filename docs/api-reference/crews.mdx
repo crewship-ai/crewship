@@ -41,12 +41,15 @@ workspace ID or slug.
 | GET | [`/api/v1/crews/{crewId}/capabilities`](#crew-capabilities) | Return the crew's authoring capabilities bundle |
 | GET | [`/api/v1/crew-connections`](#list-connections) | List crew connections |
 | POST | [`/api/v1/crew-connections`](#create-connection) | Create a crew connection |
+| PUT | `/api/v1/crew-connections/{connectionId}/file-access` | Change directed shared-file access |
 | DELETE | [`/api/v1/crew-connections/{connectionId}`](#delete-connection) | Delete a crew connection |
 | GET | [`/api/v1/crews/{crewId}/files`](#crew-files-proxy) | List files in the crew workspace |
 | GET | [`/api/v1/crews/{crewId}/files/download`](#crew-files-proxy) | Download a file |
 | PUT | [`/api/v1/crews/{crewId}/files/save`](#crew-files-proxy) | Save/upload a file |
 | DELETE | [`/api/v1/crews/{crewId}/files/delete`](#delete-a-crew-file) | Delete a file |
 | GET | [`/api/v1/crews/{crewId}/git-diff`](#crew-git-diff) | Read the crew's base-branch diff |
+| GET | [`/api/v1/crews/{crewId}/service-states`](#list-service-states) | List desired and reconciled service state |
+| PUT | [`/api/v1/crews/{crewId}/services/{serviceName}/state`](#set-service-state) | Persist managed service intent |
 | GET | [`/api/v1/crews/{crewId}/services`](#live-service-inventory) | List live sidecar services |
 | GET | [`/api/v1/crews/{crewId}/containers`](#live-container-inventory) | List the crew's live containers |
 | GET | [`/api/v1/crews/{crewId}/assignments`](#crew-assignments) | List task assignments |
@@ -1040,13 +1043,44 @@ routine DSL schema object, not a JSON-encoded string.
 ## Connections
 
 Crew connections ("crew links" in the UI) define which crews can reach each other. A link is what
-allows cross-crew **task assignment**, **messages** and **shared files**; without one every attempt is
-refused server-side.
+allows cross-crew **task assignment** and **messages**. Shared-file reads and delivery also require
+the directed file permission; a link alone is not sufficient when file access is disabled.
 
 `direction` is read from `from_crew_id`'s side: `unidirectional` means `from` may hand work to `to` and
 not the reverse; `bidirectional` means either may.
 
 Links to a soft-deleted crew are never listed and are removed when the crew is deleted.
+
+### Shared-file access
+
+Each connection returns `forward_file_access`, `reverse_file_access` and `access_version`.
+The forward value applies from `from_crew_id` to `to_crew_id`; reverse access also requires a
+bidirectional active link. Values are `none`, `read`, or `read_write`. `read_write` allows reading
+shared files and delivering files through the incoming-file API; it does not grant arbitrary edits
+to all files, credentials, private agent homes or a shell. Existing links retain their prior
+`read_write` behavior. New links created in Settings start with `none` in both directions.
+
+**Auth:** OWNER, ADMIN or MANAGER in the connection’s workspace.
+
+**Request:** Change one direction with the currently observed version:
+
+```http
+PUT /api/v1/crew-connections/{connectionId}/file-access?workspace_id={workspaceId}
+Content-Type: application/json
+
+{"requester_crew_id":"crew-A","level":"read","expected_version":1}
+```
+
+**Response:** `200 OK` with `{"level":"read","access_version":2}`.
+
+**Statuses:** Invalid level/subject/version returns 400,
+insufficient role 403, a missing or cross-workspace connection 404, and a stale version 409. Reload
+before retrying 409. Authorization is checked at request admission; an already-open read may finish.
+Changing file access does not change the communication direction. Each update is audited.
+
+POST creation accepts optional `forward_file_access` and `reverse_file_access`; omitted values
+preserve the historical API default `read_write`. On an existing link POST preserves its file
+permissions; use the versioned PUT to change them.
 
 ### List Connections
 
@@ -1127,13 +1161,15 @@ DELETE /api/v1/crew-connections/{connectionId}?workspace_id={workspaceId}
 
 **Auth:** `OWNER`, `ADMIN`, or `MANAGER` role
 
-**Request:** `connectionId` is a required path parameter and `workspace_id` is the workspace query parameter. No request body.
+**Request:** `connectionId` is a required path parameter and `workspace_id` is the workspace query parameter. Optional `expected_version` is a positive integer from the last list response. With it, deletion is conditional on that version; a concurrent edit returns 409. No request body.
 
 **Response:** `204 No Content`
 
 | Status | Condition |
 |---|---|
+| `400` | Invalid expected version |
 | `404` | Connection not found |
+| `409` | Version changed; reload before retrying |
 
 ---
 
@@ -1607,3 +1643,63 @@ Filter by `crew_id` / `agent_id`, bound the window with `since=`, and page with 
 `limit` (see [Journal](/api-reference/journal)). Display names and crew colors are not part of
 the journal row (it stores ids + payload slugs); resolve them via `GET /api/v1/journal/lookup`.
 The `crewship activity` CLI command wraps this same query — see [CLI · Activity](/cli/activity).
+
+## Managed Service State
+
+Declared services can be kept running independently of agent activity. A managed service's desired
+state is durable; its last reconciliation is an observation, not a guarantee of current health.
+The controller retries after runtime failure and reconstructs intent when Crewship starts.
+Existing services remain on demand until explicitly managed. Manual crew stop persists a stopped
+intent for its managed services. Starting an agent does not override that stop.
+
+### List Service States
+
+```http
+GET /api/v1/crews/{crewId}/service-states?workspace_id={workspaceId}
+```
+
+**Auth:** Any authenticated member of the crew's workspace.
+
+**Request:** Required `crewId` path parameter and `workspace_id` query parameter. No body.
+
+**Response:** `200 OK`, with `supported` and `services`. Each service has `name`, `desired_state`,
+`observed_state`, and `version`; managed entries also have a stable `id` and optional `last_error`.
+An unmanaged declaration uses `on_demand`, `unmanaged`, and version `0` respectively. No secrets
+or service environment values are returned. Runtime support is explicit in `supported`.
+
+| Status | Condition |
+|---|---|
+| `404` | Crew missing or outside the workspace |
+| `500` | State/configuration could not be read |
+
+### Set Service State
+
+```http
+PUT /api/v1/crews/{crewId}/services/{serviceName}/state?workspace_id={workspaceId}
+```
+
+**Auth:** `OWNER`, `ADMIN`, or `MANAGER` in the crew's workspace.
+
+**Request:** Required `crewId`, `serviceName`, and `workspace_id`. Required JSON body:
+
+```json
+{"desired_state":"running","expected_version":0}
+```
+
+`desired_state` is `running` (keep running) or `stopped`; `expected_version` is the nonnegative
+version from the last list response. Zero adopts an existing declaration into managed lifecycle.
+A removed declaration can be stopped using its existing version, but cannot be started.
+
+**Response:** `202 Accepted`, for example
+`{"desired_state":"running","version":1,"observed_state":"pending"}`. This saves intent;
+it does not claim the container has started. Poll the list for reconciliation. Missing credentials
+block startup and leave a visible error; there is no fallback account. Container data volumes
+are retained through stop/start. Arbitrary agent shell background processes are not managed services.
+
+| Status | Condition |
+|---|---|
+| `400` | Invalid state, missing version, or negative version |
+| `403` | Insufficient role |
+| `404` | Crew/service not found in this workspace |
+| `409` | Stale version or unsupported runtime |
+| `500` | Intent could not be persisted |

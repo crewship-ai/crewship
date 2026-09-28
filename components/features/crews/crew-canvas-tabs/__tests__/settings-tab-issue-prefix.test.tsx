@@ -18,6 +18,8 @@ import type { CrewRecord } from "@/components/features/crews/crew-canvas-tabs/ty
 // test.
 // =============================================================================
 
+vi.mock("@/components/features/crews/crew-service-lifecycle", () => ({ CrewServiceLifecycle: () => null }))
+
 vi.mock("@/hooks/use-abilities", () => ({
   useAbilities: () => ({ role: "ADMIN" }),
 }))

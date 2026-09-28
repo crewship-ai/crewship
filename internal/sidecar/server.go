@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/auth/internaltoken"
@@ -209,10 +210,11 @@ type Server struct {
 	// runs is per-RUN identity state (E0). The roster above is frozen at
 	// boot; this is not, because runs start and end constantly and a frozen
 	// roster of them is a contradiction. See run_registry.go.
-	runs       *runRegistry
-	mcpGateway *MCPGateway
-	logger     *slog.Logger
-	readyCh    chan struct{} // closed when the TCP listener is bound
+	runs               *runRegistry
+	mcpGateway         *MCPGateway
+	logger             *slog.Logger
+	grantRefreshFailed atomic.Bool
+	readyCh            chan struct{} // closed when the TCP listener is bound
 	// memoryExec runs post-write side effects (FTS reindex + the
 	// memory.updated journal emit) off the request hot path so a slow
 	// reindex can't delay the 201 the agent is blocked on. Strict FIFO,

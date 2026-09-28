@@ -133,7 +133,8 @@ func (h *PipelineHandler) enqueueDeferredRun(w http.ResponseWriter, r *http.Requ
 		// Carry the triggering user so a notify step's `to: trigger` in the
 		// deferred run reaches the person who scheduled it, not a workspace
 		// notice (issue #842 Phase 1). Empty for service/token triggers.
-		InvokingUserID: invokingUser,
+		InvokingUserID:      invokingUser,
+		InvocationAuthority: pipeline.HumanInvocationAuthority(invokingUser, pipeline.RoutineRunAuthority),
 	}, admit)
 	var conflict *deferredPinConflict
 	if errors.As(err, &conflict) {
