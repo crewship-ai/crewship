@@ -1,0 +1,36 @@
+['/proc/3307325/exe', 'version']
+crewship dev
+  commit:  ab11a606631b117d918cd7f4e3c0e2de552c8f0d (clean)
+  built:   2026-09-28T12:46:06Z
+  go:      go1.27.1
+  os/arch: linux/amd64
+exit=0
+['/tmp/crewship-2-dev', '--server', 'http://localhost:8082', 'whoami']
+User:      demo@crewship.ai
+Server:    http://localhost:8082
+Workspace: Demo User's Workspace (demo-cmtplws8)
+Role:      OWNER
+exit=0
+['/tmp/crewship-2-dev', '--server', 'http://localhost:8082', 'system', 'health']
+{
+  "db": {
+    "connected": true
+  },
+  "disk": {
+    "free_bytes": 29919547392,
+    "path": "/home/ubuntu/.crewship",
+    "total_bytes": 466927587328,
+    "used_bytes": 436991262720,
+    "used_pct": 93.59202084337626
+  },
+  "encryption_key_source": "external",
+  "log_level": {
+    "baseline": "debug",
+    "level": "debug"
+  },
+  "uptime_seconds": 17
+}
+exit=0
+['curl', '-fsS', '-o', '/dev/null', '-w', '%{http_code}\n', 'https://crewship-dev2.unifylab.cz']
+200
+exit=0

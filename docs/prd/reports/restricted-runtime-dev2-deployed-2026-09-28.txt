@@ -1,0 +1,61 @@
+Command: scripts/restricted-runtime-probe/run.sh -race
+Location: /srv/crewship/crewship_2 (deployed checkout)
+Source commit, dirty flag, runner/actual-sidecar SHA-256s (verbatim):
+dfb29a965e9fefbe0ba35242a98386acc621bcad
+false
+3c3f7e50ed7f560e2b63e9ebd7ff2247a1b6204006380c86af71563642cca3ec  /tmp/crewship-dev2-restricted-build.q79fY8/runner
+0b1a3ee088f302edaa04f28dc6ee229756006041369d578f05540779d86b93f5  /tmp/crewship-dev2-restricted-build.q79fY8/sidecar
+Image-build progress omitted; test output follows verbatim.
+=== RUN   TestLiveIsolationAndRecovery
+    live_test.go:151: startup_ms=577.849
+    live_test.go:152: startup_ms=896.516
+    live_test.go:161: mountinfo_entries=31
+    live_test.go:161: mountinfo_entries=31
+    live_test.go:192: startup_ms=488.328
+    live_test.go:225: docker_stats={"BlockIO":"0B / 0B","CPUPerc":"0.00%","Container":"df31cb2397d0f2061455077e5dca094ef90136738440a730365861698b256610","ID":"df31cb2397d0","MemPerc":"1.51%","MemUsage":"1.934MiB / 128MiB","Name":"crewship-rtest-1de8d5541e5fddaa-a2","NetIO":"0B / 0B","PIDs":"6"}
+    live_test.go:225: cgroup_memory=2641920
+        4526080
+--- PASS: TestLiveIsolationAndRecovery (9.44s)
+=== RUN   TestLiveRevocationAndAdmission
+    live_test.go:289: startup_ms=940.956
+    live_test.go:313: revoke_to_confirmed_stop_ms=371.555
+    live_test.go:316: startup_ms=1030.235
+    live_test.go:326: lease_expiry_stop_ms=1764.610
+--- PASS: TestLiveRevocationAndAdmission (5.34s)
+=== RUN   TestLiveNetworkAndSidecar
+    live_test.go:345: startup_ms=670.150
+    live_test.go:365: sidecar_ready_ms=293.538
+    live_test.go:371: startup_ms=468.229
+    live_test.go:372: sidecar_ready_ms=345.990
+    live_test.go:398: startup_ms=423.292
+    live_test.go:399: sidecar_ready_ms=215.929
+    live_test.go:406: docker_stats={"BlockIO":"0B / 0B","CPUPerc":"0.00%","Container":"564b590081f571fa6db5ed9869f99f7e11b68db693b1f7cece059cff90129859","ID":"564b590081f5","MemPerc":"11.73%","MemUsage":"15.01MiB / 128MiB","Name":"crewship-rtest-7dee9820b6eb702b-network-restored","NetIO":"0B / 0B","PIDs":"17"}
+    live_test.go:406: cgroup_memory=16334848
+        19165184
+--- PASS: TestLiveNetworkAndSidecar (4.76s)
+=== RUN   TestLiveStartupSamples
+    live_test.go:459: startup_ms=477.458
+    live_test.go:459: startup_ms=388.730
+    live_test.go:459: startup_ms=415.993
+    live_test.go:459: startup_ms=414.466
+    live_test.go:459: startup_ms=344.355
+    live_test.go:462: docker_stats={"BlockIO":"0B / 0B","CPUPerc":"0.00%","Container":"6eb54aa175011b23b8a202db39361cf4b51f3d10208c3c844d9a5279a09a918b","ID":"6eb54aa17501","MemPerc":"1.51%","MemUsage":"1.93MiB / 128MiB","Name":"crewship-rtest-a70468fc969f8ed2-sample4","NetIO":"0B / 0B","PIDs":"6"}
+    live_test.go:462: cgroup_memory=2625536
+        5066752
+    live_test.go:467: startup_samples=5 p50_ms=414.542 p95_nearest_rank_ms=477.535 image_cache=warm samples_ms=[344.428 388.812 414.542 416.074 477.535]
+--- PASS: TestLiveStartupSamples (4.99s)
+=== RUN   TestLiveRecoveryAndIndependentService
+    live_test.go:474: startup_ms=509.487
+    live_test.go:523: startup_ms=371.446
+--- PASS: TestLiveRecoveryAndIndependentService (1.80s)
+=== RUN   TestLiveWatchdogOutageAndUnconfirmedTermination
+    live_test.go:535: startup_ms=627.665
+    live_test.go:549: authority_loss_stop_ms=5056.366
+    live_test.go:573: startup_ms=371.458
+    live_test.go:598: startup_ms=355.820
+--- PASS: TestLiveWatchdogOutageAndUnconfirmedTermination (6.95s)
+=== RUN   TestLiveSharedUIDControl
+    live_test.go:606: startup_ms=433.448
+--- PASS: TestLiveSharedUIDControl (0.72s)
+PASS
+ok  	github.com/crewship-ai/crewship/internal/restrictedruntime	35.028s
