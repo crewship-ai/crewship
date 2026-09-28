@@ -1,7 +1,7 @@
 # Fixed-operation HTTP broker prototype
 
 Issue #2714, stacked follow-up to #2710. Application authority and
-all production entrypoints remain #2711. This work does not deploy or merge.
+all production entrypoints remain #2711. This PR does not deploy or enable the broker in application entrypoints.
 
 `brokered-http-v1` supports fixed HTTPS GET/POST operations with bounded bodies.
 It is not general provider/model networking: SSE, WebSocket, CONNECT, arbitrary
