@@ -144,7 +144,11 @@ func (m *Manager) Start(ctx context.Context, handle string) (s *Session, err err
 	if m.lock == nil || !m.reconciled {
 		return nil, ErrDenied
 	}
-	for _, old := range m.sessions {
+	for attempt, old := range m.sessions {
+		if old.Record().Status == "terminated" {
+			delete(m.sessions, attempt)
+			continue
+		}
 		if old.Record().Status == "termination_unconfirmed" {
 			return nil, ErrDenied
 		}
@@ -167,7 +171,13 @@ func (m *Manager) Start(ctx context.Context, handle string) (s *Session, err err
 				}
 				cancel()
 			} else {
-				m.reconciled = false
+				clean, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+				name := "crewship-rtest-" + m.owner + "-" + s.plan.Attempt
+				ids, lookupErr := m.Docker.call(clean, nil, "ps", "-aq", "--filter", "name=^/"+name+"$")
+				if lookupErr != nil || len(bytes.TrimSpace(ids)) != 0 {
+					m.reconciled = false
+				}
+				cancel()
 			}
 			s.record.Status = "admission_failed"
 			if !m.reconciled {
@@ -358,13 +368,19 @@ func (s *Session) Stop(reason string) {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
 		_, e := s.manager.Docker.call(ctx, nil, "kill", s.id)
-		stopped := s.manager.Docker.stopped(ctx, s.id)
+		wasStopped := s.manager.Docker.stopped(ctx, s.id)
+		// Remove only our known container ID. A lost response is not proof of absence.
+		_ = s.manager.Docker.remove(ctx, s.id)
+		_, inspectErr := s.manager.Docker.call(ctx, nil, "inspect", s.id)
+		name := "crewship-rtest-" + s.manager.owner + "-" + s.plan.Attempt
+		ids, lookupErr := s.manager.Docker.call(ctx, nil, "ps", "-aq", "--filter", "name=^/"+name+"$")
+		stopped := inspectErr != nil && lookupErr == nil && len(bytes.TrimSpace(ids)) == 0
 		s.mu.Lock()
 		s.record.Status = "termination_unconfirmed"
 		if stopped {
 			s.record.Status = "terminated"
 		}
-		if e != nil && !stopped {
+		if e != nil && !wasStopped && !stopped {
 			s.record.Reason = "docker_unavailable"
 		}
 		if s.manager.save(&s.record) != nil {

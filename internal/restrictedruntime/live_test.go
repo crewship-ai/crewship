@@ -187,7 +187,9 @@ func TestLiveIsolationAndRecovery(t *testing.T) {
 	if sa.Record().Status != "terminated" {
 		t.Fatal(sa.Record())
 	}
-	f.must(nil, "rm", sa.ID())
+	if _, err := f.d.call(f.ctx, nil, "inspect", sa.ID()); err == nil {
+		t.Fatal("Stop retained container")
+	}
 	a.Attempt = "a2"
 	a.Generation = 2
 	sa2 := f.start("handle-a2", a, "synthetic-A-fresh-b063971a")
@@ -205,6 +207,15 @@ func TestLiveIsolationAndRecovery(t *testing.T) {
 	if _, e := f.m.Start(f.ctx, "changed"); e == nil {
 		t.Fatal("broader provenance restored")
 	}
+	// A rejected catalog/provenance request must not block unrelated clients.
+	follow := a
+	follow.Attempt = "after-denial"
+	follow.Generation = 3
+	admitted := f.start("after-denial", follow, "synthetic-after-denial")
+	if _, retained := f.m.sessions["a1"]; retained {
+		t.Fatal("terminated session retained")
+	}
+	admitted.Stop("test-finished")
 	// Foreign volume with otherwise plausible target is rejected by labels.
 	if e := f.d.checkVolume(f.ctx, a, a.Mounts[0], f.cat["b"]); e == nil {
 		t.Fatal("foreign resource labels accepted")
@@ -658,8 +669,8 @@ func TestLiveControllerCrashExpiry(t *testing.T) {
 	var id string
 	for until := time.Now().Add(10 * time.Second); time.Now().Before(until); {
 		b, err := os.ReadFile(filepath.Join(dir, "ready"))
-		if err == nil {
-			id = string(b)
+		if err == nil && len(bytes.TrimSpace(b)) > 0 {
+			id = string(bytes.TrimSpace(b))
 			break
 		}
 		time.Sleep(25 * time.Millisecond)

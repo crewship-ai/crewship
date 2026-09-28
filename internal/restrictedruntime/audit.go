@@ -24,6 +24,9 @@ func (d Docker) audit(ctx context.Context, id string, p Plan, c Catalog, l Limit
 		}
 		HostConfig struct {
 			NetworkMode, PidMode, IpcMode, UTSMode, UsernsMode        string
+			CgroupnsMode, Runtime                                     string
+			DeviceCgroupRules                                         []string
+			Sysctls                                                   map[string]string
 			Privileged, ReadonlyRootfs, PublishAllPorts               bool
 			Init                                                      *bool
 			CapAdd, CapDrop, GroupAdd, ExtraHosts, SecurityOpt, Binds []string
@@ -45,6 +48,9 @@ func (d Docker) audit(ctx context.Context, id string, p Plan, c Catalog, l Limit
 	r := rows[0]
 	h := r.HostConfig
 	if r.Config.User != "1002:1002" || strings.Join(r.Config.Entrypoint, " ") != "/opt/crewship-runner" || strings.Join(r.Config.Cmd, " ") != "hold" || h.NetworkMode != "none" || h.PidMode != "" || h.IpcMode != "private" || h.UTSMode != "" || h.UsernsMode != "" || h.Privileged || !h.ReadonlyRootfs || h.PublishAllPorts || h.Init == nil || !*h.Init || len(h.CapAdd) > 0 || len(h.GroupAdd) > 0 || len(h.ExtraHosts) > 0 || len(h.Devices) > 0 || len(h.Binds) > 0 || len(h.PortBindings) > 0 || h.Memory != l.MemoryBytes || h.MemorySwap != l.MemoryBytes || h.NanoCpus != l.NanoCPUs || h.PidsLimit != l.PIDs || strings.Join(h.CapDrop, ",") != "ALL" || len(h.SecurityOpt) != 1 || (h.SecurityOpt[0] != "no-new-privileges" && h.SecurityOpt[0] != "no-new-privileges=true") || h.RestartPolicy.Name != "no" || h.LogConfig.Type != "none" {
+		return ErrDenied
+	}
+	if h.CgroupnsMode != "private" || len(h.DeviceCgroupRules) != 0 || len(h.Sysctls) != 0 || (h.Runtime != "" && h.Runtime != "runc") {
 		return ErrDenied
 	}
 	if len(h.Tmpfs) != 4 {
