@@ -125,3 +125,18 @@ request was rate-limited (32 minutes). **No completed CodeRabbit review is
 claimed.** Independent parent-agent review found the subnet issue above; the
 fix and red-first/mutation evidence are ready for re-review. Draft status stays;
 no deployment or merge is authorized by this work.
+
+## CI documentation correction
+
+CI run 36447136799 reached a real Go Lint failure: the strict documentation
+inventory did not count package README/PRD references as public documentation for
+`CREWSHIP_BROKER_URL` and `CREWSHIP_BROKER_TOKEN`. Both are now documented under
+an explicitly experimental, injected-only subsection in
+`docs/configuration/environment.mdx`; operators do not configure or mint them.
+The contract introduction now references #2710 without a stale fixed base SHA.
+
+`go run ./scripts/docs-inventory -strict` now passes every documentation gate
+([raw output](reports/restricted-http-broker-docs-strict-2026-09-28.txt)); targeted
+unit/race tests also pass (3.206 s). This correction changes documentation only.
+A fresh final-head CI workflow is requested; prior failed/cancelled runs are not
+counted as passing validation.

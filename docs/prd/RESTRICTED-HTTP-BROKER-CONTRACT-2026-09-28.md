@@ -1,6 +1,6 @@
 # Fixed-operation HTTP broker prototype
 
-Issue #2714, stacked follow-up to #2710 at 985f83001. Application authority and
+Issue #2714, stacked follow-up to #2710. Application authority and
 all production entrypoints remain #2711. This work does not deploy or merge.
 
 `brokered-http-v1` supports fixed HTTPS GET/POST operations with bounded bodies.

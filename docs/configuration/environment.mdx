@@ -149,6 +149,20 @@ These are not configuration — Crewship sets them on the crew container itself,
 |----------|-------------|
 | `CREWSHIP_CREW_ID` | The crew's id. Set on every crew container by both providers, and the one variable the Apple provider guarantees regardless of what the devcontainer's own `containerEnv` asks for. Useful for a hook or script that needs to know which crew it is running in. |
 
+### Experimental fixed-operation broker launch environment
+
+The isolated `brokered-http-v1` prototype supplies these variables to the agent
+process through its trusted private bootstrap. They are generated for each
+attempt; operators do not configure them or create tokens themselves. Setting
+these variables in the server environment does not enable the profile. The
+prototype supports bounded, fixed HTTPS operations and remains separate from
+production dispatch and general provider/model streaming.
+
+| Variable | Supplied value | Purpose |
+|----------|----------------|---------|
+| `CREWSHIP_BROKER_URL` | `http://127.0.0.1:9121` inside the attempt's private network namespace | Base address for the attempt's local fixed-operation broker. The agent submits an authorized operation ID and bounded body. |
+| `CREWSHIP_BROKER_TOKEN` | A fresh opaque capability generated at attempt admission | Authorizes that attempt's broker calls through the `Authorization: Bearer …` request header. Retry receives a new token; current authority and lease are checked for every upstream operation. Provider credentials remain in the trusted host relay. |
+
 ### Read by the sidecar inside the container
 
 These are read by the **sidecar process** in the crew container, not by `crewshipd`. They only take effect when they are present in the crew container's environment (set by whatever launches the container — nothing inside the container can change them), and none of them is set by a normal deployment.
