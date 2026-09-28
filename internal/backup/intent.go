@@ -278,7 +278,7 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	// restored mailbox would be a queue of messages with nowhere to go. The
 	// delivered ones are already in workspace_conversation_messages, which does
 	// round-trip.
-	"session_mailbox": IntentExcludeRuntime,
+	"session_mailbox":  IntentExcludeRuntime,
 	"chat_read_shares": IntentExcludeRuntime, // short-lived bearer links must not revive in a restored copy
 
 	// The memory revision anchor and mutation ledger. Excluded, and the cost is

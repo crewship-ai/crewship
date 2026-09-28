@@ -68,6 +68,45 @@ func TestInvokingUserAuthority(t *testing.T) {
 	}
 }
 
+func TestInvokingUserRevokedAfterReservationReleasesIdempotencyKey(t *testing.T) {
+	db := openExecutorGateDB(t)
+	defer db.Close()
+	store := NewStore(db)
+	p, err := store.Save(t.Context(), validSaveInput("revoked-after-reservation"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner := newMockRunner()
+	exec := NewExecutor(store, NewResolver(db), runner, nil).
+		WithIdempotencyStore(NewIdempotencyStore(db))
+	checks := 0
+	exec.memberCheck = func(context.Context, string, string) (bool, error) {
+		checks++
+		// Admission succeeds; the grant is removed before runDSL's
+		// execution-time check, after the idempotency reservation.
+		return checks != 2, nil
+	}
+	in := RunInput{
+		PipelineID: p.ID, WorkspaceID: "ws_test", InvokingUserID: "human",
+		Mode: ModeRun, IdempotencyKey: "same-request",
+	}
+	if _, err := exec.Run(t.Context(), in); !errors.Is(err, ErrInvokingUserNotMember) {
+		t.Fatalf("revoked run: %v", err)
+	}
+	var reserved int
+	if err := db.QueryRow(`SELECT count(*) FROM pipeline_run_idempotency WHERE workspace_id=? AND pipeline_id=? AND idempotency_key=?`,
+		in.WorkspaceID, in.PipelineID, in.IdempotencyKey).Scan(&reserved); err != nil {
+		t.Fatal(err)
+	}
+	if reserved != 0 {
+		t.Fatalf("revoked pre-start run left %d reservation(s)", reserved)
+	}
+	res, err := exec.Run(t.Context(), in)
+	if err != nil || res == nil || res.Deduped {
+		t.Fatalf("authorized retry must execute, got result=%+v err=%v", res, err)
+	}
+}
+
 func TestInvokingUserAuthorityResumedRun(t *testing.T) {
 	db := openFactoryTestDB(t)
 	defer db.Close()

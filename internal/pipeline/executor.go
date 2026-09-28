@@ -1256,6 +1256,12 @@ func cancelledRunMessage(current, failedAtStep string) string {
 
 func (e *Executor) runDSL(ctx context.Context, in RunInput, depth int) (result *RunResult, err error) {
 	if err := e.checkInvokingUser(ctx, in); err != nil {
+		// Run may already have reserved an idempotency key. No run row exists
+		// yet at this boundary, so a revoked caller must not leave a ghost
+		// reservation that makes a later authorized retry look DEDUPED.
+		if depth == 0 && in.pipeline != nil && in.IdempotencyKey != "" && e.idempotency != nil {
+			_ = e.idempotency.Forget(ctx, in.WorkspaceID, in.pipeline.ID, in.IdempotencyKey)
+		}
 		return nil, err
 	}
 	if depth >= MaxNestedPipelineDepth {

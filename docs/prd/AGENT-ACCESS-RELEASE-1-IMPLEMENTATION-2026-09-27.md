@@ -326,8 +326,8 @@ E1 opravuje hranici crew IPC. Nezavádí identitu klienta napříč delegací, n
 agent→agent granty ani izolaci procesů sdílejících UID 1001. B, A2 a zbytek E
 zůstávají otevřené. Celý `go test ./... -count=1` i `go vet ./...` prošly; cílené
 race testy (52,905 s), doplňující test idempotence routine kroku a agentí
-invarianty také. Předchozí CodeQL kontrola PR již hlásí SUCCESS, CodeRabbit
-nových změn zůstává pending. Živá dev1 akceptace této změny následuje.
+invarianty také. Předchozí CodeQL kontrola PR již hlásí SUCCESS; review
+nových změn v té době zůstávalo otevřené. Živá dev1 akceptace této změny následuje.
 
 ### Živá akceptace E1 — dev1 `4a0edba80`
 
