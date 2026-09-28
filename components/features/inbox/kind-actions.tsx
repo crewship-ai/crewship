@@ -132,7 +132,7 @@ export function KindActions({
               size="sm"
               disabled={disabled || busy !== null}
               onClick={() => decide(true)}
-              className="gap-1.5 bg-success/20 text-success hover:bg-success/30"
+              className="gap-1.5"
             >
               <CheckCircle2 className="h-3.5 w-3.5" />
               {busy === "approved" ? "Approving…" : "Approve"}
@@ -200,7 +200,7 @@ export function KindActions({
                   await onRefresh("approved")
                 })
               }
-              className="gap-1.5 bg-success/20 text-success hover:bg-success/30"
+              className="gap-1.5"
             >
               <CheckCircle2 className="h-3 w-3" />
               {busy === "approved" ? "Approving…" : "Approve hire"}
@@ -312,7 +312,7 @@ export function KindActions({
                 await onRefresh("approved")
               })
             }
-            className="gap-1.5 bg-success/20 text-success hover:bg-success/30"
+            className="gap-1.5"
           >
             <CheckCircle2 className="h-3 w-3" />
             {busy === "approved" ? "Approving…" : "Approve"}
@@ -390,7 +390,7 @@ export function KindActions({
               size="sm"
               disabled={disabled || busy !== null}
               onClick={() => resolveSkill("approve")}
-              className="gap-1.5 bg-success/20 text-success hover:bg-success/30"
+              className="gap-1.5"
             >
               <CheckCircle2 className="h-3 w-3" />
               {busy === "approve" ? "Approving…" : "Approve"}
@@ -466,7 +466,7 @@ export function KindActions({
               size="sm"
               disabled={disabled || busy !== null}
               onClick={() => resolveRoutine("approve")}
-              className="gap-1.5 bg-success/20 text-success hover:bg-success/30"
+              className="gap-1.5"
             >
               <CheckCircle2 className="h-3 w-3" />
               {busy === "approve" ? "Approving…" : "Approve"}
@@ -621,7 +621,7 @@ export function KindActions({
                 size="sm"
                 disabled={disabled || busy !== null}
                 onClick={() => resolveEsc("approve")}
-                className="gap-1.5 bg-success/20 text-success hover:bg-success/30"
+                className="gap-1.5"
               >
                 <CheckCircle2 className="h-3 w-3" />
                 {busy === "approve" ? "Approving…" : "Approve"}
@@ -667,7 +667,7 @@ export function KindActions({
               size="sm"
               disabled={disabled || busy !== null}
               onClick={() => resolveEsc("approve")}
-              className="gap-1.5 bg-success/20 text-success hover:bg-success/30"
+              className="gap-1.5"
             >
               <CheckCircle2 className="h-3 w-3" />
               {busy === "approve" ? "Approving…" : "Approve"}
@@ -824,7 +824,7 @@ export function KindActions({
             size="sm"
             disabled={disabled || busy !== null}
             onClick={() => decide("approve")}
-            className="gap-1.5 bg-success/20 text-success hover:bg-success/30"
+            className="gap-1.5"
           >
             <CheckCircle2 className="h-3 w-3" />
             {busy === "approve" ? "Accepting…" : "Accept"}
@@ -894,7 +894,7 @@ export function KindActions({
                 await onResolve("reenabled")
               })
             }
-            className="gap-1.5 bg-success/20 text-success hover:bg-success/30"
+            className="gap-1.5"
           >
             <Power className="h-3 w-3" />
             {busy === "reenabled" ? "Enabling…" : "Re-enable schedule"}

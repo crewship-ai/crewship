@@ -17,8 +17,8 @@ export function InboxMessageSurface({ children, className }: { children: ReactNo
     observer.observe(element, { childList: true, subtree: true })
     return () => observer.disconnect()
   }, [])
-  return <article ref={ref} className={cn("min-w-0 rounded-xl border border-border/60 bg-card [overflow-wrap:anywhere] motion-safe:animate-in motion-safe:fade-in motion-safe:duration-150 [&_button]:max-w-full [&_textarea]:max-w-full [&_pre]:max-w-full [&_table]:block [&_table]:overflow-x-auto", className)}>{children}</article>
+  return <article ref={ref} className={cn("min-w-0 rounded-[20px] border border-border bg-card [overflow-wrap:anywhere] motion-safe:animate-in motion-safe:fade-in motion-safe:duration-150 [&_button]:max-w-full [&_textarea]:max-w-full [&_pre]:max-w-full [&_table]:block [&_table]:overflow-x-auto", className)}>{children}</article>
 }
 
 export const messageSection = "min-w-0 px-4 py-4 sm:px-6 sm:py-5"
-export const messageDivider = "border-t border-border/60"
+export const messageDivider = "border-t border-border"
