@@ -66,6 +66,50 @@ func TestCovACH_CreateChat_OriginWhitelistedAndPersisted(t *testing.T) {
 	}
 }
 
+func TestCreateChat_SessionIDCannotJoinAnotherCreatorsChat(t *testing.T) {
+	db := setupTestDB(t)
+	wsID := covACHSeed(t, db)
+	otherID := "other-chat-user"
+	execOrFatal(t, db, `INSERT INTO users (id, email, full_name) VALUES (?, 'other-chat@example.com', 'Other User')`, otherID)
+	execOrFatal(t, db, `INSERT INTO workspace_members (id, workspace_id, user_id, role) VALUES ('m-other-chat', ?, ?, 'MEMBER')`, wsID, otherID)
+	h := NewAgentHandler(db, newTestLogger())
+
+	create := func(userID, chatID string) *httptest.ResponseRecorder {
+		t.Helper()
+		req := httptest.NewRequest("POST", "/api/v1/agents/covach-ag/chats",
+			bytes.NewBufferString(`{"session_id":"`+chatID+`"}`))
+		req.SetPathValue("agentId", "covach-ag")
+		ctx := withUser(req.Context(), &AuthUser{ID: userID})
+		req = req.WithContext(withWorkspace(ctx, wsID, "MEMBER"))
+		rr := httptest.NewRecorder()
+		h.CreateChat(rr, req)
+		return rr
+	}
+
+	for _, tc := range []struct {
+		name, userID string
+		want         int
+	}{
+		{"owner creates", "test-user-id", http.StatusCreated},
+		{"owner retries", "test-user-id", http.StatusCreated},
+		{"other member cannot join", otherID, http.StatusNotFound},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rr := create(tc.userID, "private-chat")
+			if rr.Code != tc.want {
+				t.Fatalf("status = %d, want %d; body=%s", rr.Code, tc.want, rr.Body.String())
+			}
+		})
+	}
+	var owner string
+	if err := db.QueryRow(`SELECT created_by FROM chats WHERE id = 'private-chat'`).Scan(&owner); err != nil {
+		t.Fatal(err)
+	}
+	if owner != "test-user-id" {
+		t.Fatalf("owner changed to %q", owner)
+	}
+}
+
 func TestCovACH_CreateChat_AgentExistsDBError(t *testing.T) {
 	db := setupTestDB(t)
 	h := NewAgentHandler(db, newTestLogger())
