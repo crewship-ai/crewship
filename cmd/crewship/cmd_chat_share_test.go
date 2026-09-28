@@ -103,3 +103,25 @@ func TestChatShareReadCLIUsesOnlyExplicitToken(t *testing.T) {
 		})
 	}
 }
+
+func TestChatShareReadServerRejectsRemoteCleartext(t *testing.T) {
+	for _, tt := range []struct {
+		server  string
+		allowed bool
+	}{
+		{"http://localhost:8080", true},
+		{"http://127.0.0.1:8080", true},
+		{"http://[::1]:8080", true},
+		{"https://crewship.example", true},
+		{"http://crewship.example", false},
+		{"http://192.0.2.10:8080", false},
+		{"http://[2001:db8::1]:8080", false},
+	} {
+		t.Run(tt.server, func(t *testing.T) {
+			err := validateChatShareReadServer(tt.server)
+			if (err == nil) != tt.allowed {
+				t.Fatalf("validateChatShareReadServer(%q) error = %v, allowed = %t", tt.server, err, tt.allowed)
+			}
+		})
+	}
+}

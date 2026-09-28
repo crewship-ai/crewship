@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -33,6 +34,21 @@ func chatShareClient(agentRef string) (*cli.Client, string, error) {
 
 func chatSharePath(agentID, chatID string) string {
 	return "/api/v1/agents/" + url.PathEscape(agentID) + "/chats/" + url.PathEscape(chatID) + "/shares"
+}
+
+func validateChatShareReadServer(raw string) error {
+	server, err := url.Parse(raw)
+	if err != nil || server.Host == "" || (server.Scheme != "http" && server.Scheme != "https") || server.User != nil || server.RawQuery != "" || server.Fragment != "" {
+		return fmt.Errorf("an explicit http(s) --server URL is required")
+	}
+	if server.Scheme == "http" {
+		host := server.Hostname()
+		ip := net.ParseIP(host)
+		if host != "localhost" && (ip == nil || !ip.IsLoopback()) {
+			return fmt.Errorf("--server must use https for a non-loopback host")
+		}
+	}
+	return nil
 }
 
 var chatShareCreateCmd = &cobra.Command{
@@ -107,9 +123,8 @@ var chatShareReadCmd = &cobra.Command{
 		if !stdin {
 			return fmt.Errorf("--token-stdin is required")
 		}
-		server, err := url.Parse(flagServer)
-		if err != nil || server.Host == "" || (server.Scheme != "http" && server.Scheme != "https") || server.User != nil || server.RawQuery != "" || server.Fragment != "" {
-			return fmt.Errorf("an explicit http(s) --server URL is required")
+		if err := validateChatShareReadServer(flagServer); err != nil {
+			return err
 		}
 		data, err := io.ReadAll(io.LimitReader(cmd.InOrStdin(), 4097))
 		if err != nil {
