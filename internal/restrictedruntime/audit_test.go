@@ -11,14 +11,22 @@ import (
 )
 
 func TestAuditRejectsBroadenedDaemonConfiguration(t *testing.T) {
-	for _, name := range []string{"valid", "host network", "shared pid", "shared ipc", "privileged", "writable root", "capability", "supplementary group", "host gateway", "device", "unbounded memory", "unexpected mount", "unbounded logs", "privilege escalation", "foreign tmpfs owner", "unbounded tmpfs"} {
+	for _, name := range []string{"valid", "host cgroup", "device rules", "sysctl", "custom runtime", "host network", "shared pid", "shared ipc", "privileged", "writable root", "capability", "supplementary group", "host gateway", "device", "unbounded memory", "unexpected mount", "unbounded logs", "privilege escalation", "foreign tmpfs owner", "unbounded tmpfs"} {
 		t.Run(name, func(t *testing.T) {
 			p := testPlan()
 			p.Mounts = nil
 			l := Limits{128 << 20, 500000000, 48}
-			h := map[string]any{"NetworkMode": "none", "IpcMode": "private", "ReadonlyRootfs": true, "Init": true, "Memory": l.MemoryBytes, "MemorySwap": l.MemoryBytes, "NanoCpus": l.NanoCPUs, "PidsLimit": l.PIDs, "CapDrop": []string{"ALL"}, "SecurityOpt": []string{"no-new-privileges"}, "RestartPolicy": map[string]string{"Name": "no"}, "LogConfig": map[string]string{"Type": "none"}, "Tmpfs": privateTmpfs()}
+			h := map[string]any{"NetworkMode": "none", "CgroupnsMode": "private", "Runtime": "runc", "IpcMode": "private", "ReadonlyRootfs": true, "Init": true, "Memory": l.MemoryBytes, "MemorySwap": l.MemoryBytes, "NanoCpus": l.NanoCPUs, "PidsLimit": l.PIDs, "CapDrop": []string{"ALL"}, "SecurityOpt": []string{"no-new-privileges"}, "RestartPolicy": map[string]string{"Name": "no"}, "LogConfig": map[string]string{"Type": "none"}, "Tmpfs": privateTmpfs()}
 			row := map[string]any{"Config": map[string]any{"User": "1002:1002", "Entrypoint": []string{"/opt/crewship-runner"}, "Cmd": []string{"hold"}}, "HostConfig": h}
 			switch name {
+			case "host cgroup":
+				h["CgroupnsMode"] = "host"
+			case "device rules":
+				h["DeviceCgroupRules"] = []string{"a *:* rwm"}
+			case "sysctl":
+				h["Sysctls"] = map[string]string{"net.ipv4.ip_forward": "1"}
+			case "custom runtime":
+				h["Runtime"] = "custom"
 			case "host network":
 				h["NetworkMode"] = "host"
 			case "shared pid":

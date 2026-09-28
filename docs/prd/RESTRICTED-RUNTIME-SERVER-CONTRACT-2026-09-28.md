@@ -2,7 +2,7 @@
 
 Date: 2026-09-28. Follow-up: [#2709](https://github.com/crewship-ai/crewship/issues/2709).
 Application authorization and release integration remain in
-[#2704](https://github.com/crewship-ai/crewship/pull/2704), tracking
+[#2711](https://github.com/crewship-ai/crewship/issues/2711) (companion PR #2704), tracking
 [#2703](https://github.com/crewship-ai/crewship/issues/2703).
 
 Status: the user authorized implementation from this contract on 2026-09-28
