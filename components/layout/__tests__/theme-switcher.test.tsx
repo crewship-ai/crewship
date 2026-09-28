@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { render, screen, cleanup, fireEvent } from "@testing-library/react"
 
-// The Harbor switcher: Day, Dusk, Night and System, one press each, and the
+// The Harbor switcher: Dark, Light and System, one press each, and the
 // pressed state follows the stored choice rather than the resolved one — a
 // user on System must see System selected, not whichever palette it produced.
 
@@ -21,17 +21,17 @@ describe("ThemeSwitcher", () => {
   })
   afterEach(cleanup)
 
-  it("offers the three Harbor themes plus System", () => {
+  it("offers Dark and Light plus System, and nothing else", () => {
     render(<ThemeSwitcher />)
-    for (const name of ["Day", "Dusk", "Night", "System"]) {
+    expect(screen.getAllByRole("radio")).toHaveLength(3)
+    for (const name of ["Dark", "Light", "System"]) {
       expect(screen.getByRole("radio", { name })).toBeTruthy()
     }
   })
 
   it.each([
-    ["Day", "light"],
-    ["Dusk", "dusk"],
-    ["Night", "dark"],
+    ["Dark", "dark"],
+    ["Light", "light"],
     ["System", "system"],
   ])("%s sets the %s theme", (label, value) => {
     render(<ThemeSwitcher />)
@@ -43,6 +43,6 @@ describe("ThemeSwitcher", () => {
     theme = "system"
     render(<ThemeSwitcher />)
     expect(screen.getByRole("radio", { name: "System" }).getAttribute("aria-checked")).toBe("true")
-    expect(screen.getByRole("radio", { name: "Night" }).getAttribute("aria-checked")).toBe("false")
+    expect(screen.getByRole("radio", { name: "Dark" }).getAttribute("aria-checked")).toBe("false")
   })
 })

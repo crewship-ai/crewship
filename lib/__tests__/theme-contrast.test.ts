@@ -78,14 +78,13 @@ function blend(
 
 // ── token extraction, per theme block ─────────────────────────────────────
 //
-// Harbor ships three palettes: :root (Day), .dark (Night, the default) and
-// .dusk. Each is a block in globals.css ending where the next one starts; a
+// Harbor ships two palettes: :root (light) and .dark (the default). Each is a
+// block in globals.css ending where the next one starts; a
 // token missing from a block is a test failure, not a silent fallback.
 
 const THEMES = {
   day: [":root {\n  /* ── Light surfaces", "\n.dark {"],
-  night: ["\n.dark {", "\n.dusk {"],
-  dusk: ["\n.dusk {", "@theme inline"],
+  night: ["\n.dark {", "@theme inline"],
 } as const
 type Theme = keyof typeof THEMES
 
@@ -117,8 +116,8 @@ function tokenRgb(theme: Theme, name: string): [number, number, number] {
 const lum = (theme: Theme, name: string) => luminanceFromRgb(tokenRgb(theme, name))
 const WHITE = luminanceFromRgb([1, 1, 1])
 
-// The dark themes carry the full axe-parity suite (the app is dark by default).
-describe.each(["night", "dusk"] as const)("%s theme WCAG AA contrast (axe color-contrast parity)", (theme) => {
+// The dark theme carries the full axe-parity suite (the app is dark by default).
+describe.each(["night"] as const)("%s theme WCAG AA contrast (axe color-contrast parity)", (theme) => {
   it("primary-foreground on primary (bg-primary fills) ≥ 4.5:1", () => {
     expect(contrast(lum(theme, "primary-foreground"), lum(theme, "primary"))).toBeGreaterThanOrEqual(4.5)
   })
@@ -164,8 +163,8 @@ describe.each(["night", "dusk"] as const)("%s theme WCAG AA contrast (axe color-
   })
 })
 
-// What every Harbor theme, Day included, must hold.
-describe.each(["day", "night", "dusk"] as const)("%s theme Harbor contrast", (theme) => {
+// What both Harbor themes must hold.
+describe.each(["day", "night"] as const)("%s theme Harbor contrast", (theme) => {
   it("muted-foreground on background and card ≥ 4.5:1", () => {
     const muted = lum(theme, "muted-foreground")
     expect(contrast(muted, lum(theme, "background"))).toBeGreaterThanOrEqual(4.5)

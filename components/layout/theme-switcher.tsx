@@ -1,21 +1,20 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { Monitor, Moon, Sun, Sunset, type LucideIcon } from "lucide-react"
+import { Monitor, Moon, Sun, type LucideIcon } from "lucide-react"
 import { useTheme } from "next-themes"
 
 import { cn } from "@/lib/utils"
 
 const OPTIONS: { value: string; label: string; icon: LucideIcon }[] = [
-  { value: "light", label: "Day", icon: Sun },
-  { value: "dusk", label: "Dusk", icon: Sunset },
-  { value: "dark", label: "Night", icon: Moon },
+  { value: "dark", label: "Dark", icon: Moon },
+  { value: "light", label: "Light", icon: Sun },
   { value: "system", label: "System", icon: Monitor },
 ]
 
 /**
- * Harbor theme picker: Day, Dusk, Night, System. A radio group rather than a
- * cycling button, because four states behind one icon hide which one you are
+ * Harbor theme picker: Dark, Light, System. A radio group rather than a
+ * cycling button, because three states behind one icon hide which one you are
  * in. The stored choice is what shows as pressed; next-themes resolves System.
  */
 export function ThemeSwitcher({ className }: { className?: string }) {
@@ -29,7 +28,7 @@ export function ThemeSwitcher({ className }: { className?: string }) {
     <div
       role="radiogroup"
       aria-label="Theme"
-      className={cn("grid grid-cols-4 gap-0.5 rounded-xl border bg-surface-subtle p-0.5", className)}
+      className={cn("grid grid-cols-3 gap-0.5 rounded-xl border bg-surface-subtle p-0.5", className)}
     >
       {OPTIONS.map(({ value, label, icon: Icon }) => {
         const checked = mounted && theme === value

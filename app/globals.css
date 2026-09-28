@@ -1,7 +1,7 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 
-@custom-variant dark (&:is(.dark *, .dusk *));
+@custom-variant dark (&:is(.dark *));
 
 /* Touch sizing belongs to the input device, not to the window width.
  *
@@ -231,8 +231,8 @@
 
   /* ── Harbor — the marketing site's design language, in app tokens ──
    *  primary-strong is the filled-button blue: white text must clear 4.5:1
-   *  on it (day 4.90, night 5.17, dusk 5.05), which --primary cannot do in
-   *  the dark themes, where it is tuned as a text colour on the ground.
+   *  on it (light 4.90, dark 5.17), which --primary cannot do in
+   *  the dark theme, where it is tuned as a text colour on the ground.
    *  --primary-hover doubles as Harbor's "primary-ink" (links, brand text on
    *  tints) — it already carries that job in 120+ call sites. */
   --primary-strong: #0E6BE8;
@@ -397,7 +397,7 @@
   --chip-active-fg: oklch(0.78 0.14 259);
   --chip-idle-fg: oklch(0.65 0.02 276);
 
-  /* ── Harbor Night ("Ink") — see the :root Harbor block for the roles ── */
+  /* ── Harbor dark ("Ink") — see the :root Harbor block for the roles ── */
   --primary-strong: #2563EB;
   --primary-strong-hover: #1D4ED8;
   --primary-glow: rgb(37 99 235 / 0.6);
@@ -420,65 +420,6 @@
   --ease-spring: cubic-bezier(.34, 1.56, .64, 1);
 }
 
-/* ── Harbor Dusk — warm violet-navy. A dark theme: `dark:` utilities apply
- *    (see the custom variant at the top), so it inherits every .dark rule and
- *    overrides only the palette. Declared after .dark so equal-specificity
- *    values here win. ── */
-.dusk {
-  color-scheme: dark;
-  --background: #16162A;
-  --foreground: #F2EEF6;
-  --scrollbar-thumb: #3A3858;
-  --scrollbar-thumb-hover: #55527A;
-  --card: #1F1E37;
-  --card-foreground: #F2EEF6;
-  --popover: #1F1E37;
-  --popover-foreground: #F2EEF6;
-  --primary: #6F8DFF;
-  --primary-foreground: #0E1030;
-  --primary-hover: #A9BCFF;
-  --secondary: #F2EEF6;
-  --secondary-foreground: #16162A;
-  --muted: #24233F;
-  --muted-foreground: #A9A0BF;
-  --muted-foreground-soft: #8E86A6;
-  --accent: #2A2947;
-  --accent-foreground: #F2EEF6;
-  --border: #2E2C4A;
-  --input: #34325A;
-  --control-border: #6E6893;
-  --ring: #6F8DFF;
-  --sidebar: #1B1A31;
-  --sidebar-foreground: #F2EEF6;
-  --sidebar-primary: #6F8DFF;
-  --sidebar-primary-foreground: #0E1030;
-  --sidebar-accent: #2A2947;
-  --sidebar-accent-foreground: #A9BCFF;
-  --sidebar-border: #2E2C4A;
-  --sidebar-ring: #6F8DFF;
-  --surface-subtle: #1B1A31;
-  --surface-raised: #24233F;
-  --selection-bg: rgb(111 141 255 / 0.12);
-  --selection-bg-hover: rgb(111 141 255 / 0.18);
-  --selection-border: #6F8DFF;
-  --chip-active-bg: rgb(111 141 255 / 0.18);
-  --chip-active-fg: #A9BCFF;
-  --chip-idle-fg: #A9A0BF;
-  --primary-strong: #4B63E0;
-  --primary-strong-hover: #4459D6;
-  --primary-glow: rgb(111 141 255 / 0.55);
-  --line-strong: #4A4670;
-  --shadow-color: rgb(8 6 20 / 0.7);
-  --page-glow: radial-gradient(70% 45% at 85% 0%, rgb(243 180 130 / 0.10), transparent 70%), radial-gradient(60% 40% at 0% 30%, rgb(148 107 138 / 0.12), transparent 70%);
-  --panel-bg: radial-gradient(120% 140% at 0% 0%, #3B2F5C 0%, #262448 50%, #1B1A33 100%);
-  --panel-node: #131E3A;
-  --chip-ok-bg: #173A31;     --chip-ok-fg: #8EE0B4;
-  --chip-warn-bg: #3A2C1C;   --chip-warn-fg: #F6C98A;
-  --chip-danger-bg: #3A1D2E; --chip-danger-fg: #FFA3B1;
-  --chip-neutral-bg: #2A2947; --chip-neutral-fg: #C3BCD6;
-  --chip-info-bg: #25295A;   --chip-info-fg: #A9BCFF;
-  --chip-violet-bg: #33254F; --chip-violet-fg: #D1B8FF;
-}
 
 @theme inline {
   --color-background: var(--background);
@@ -1070,8 +1011,7 @@ body {
   background-color: oklch(0.96 0.04 155);
   color: oklch(0.42 0.12 155);
 }
-.dark .status-success,
-.dusk .status-success {
+.dark .status-success {
   background-color: oklch(0.22 0.05 155);
   color: oklch(0.72 0.15 160);
 }
@@ -1079,8 +1019,7 @@ body {
   background-color: oklch(0.96 0.02 25);
   color: oklch(0.50 0.15 25);
 }
-.dark .status-error,
-.dusk .status-error {
+.dark .status-error {
   background-color: oklch(0.22 0.05 25);
   color: oklch(0.72 0.15 25);
 }
@@ -1088,8 +1027,7 @@ body {
   background-color: oklch(0.96 0.04 85);
   color: oklch(0.50 0.12 70);
 }
-.dark .status-warning,
-.dusk .status-warning {
+.dark .status-warning {
   background-color: oklch(0.22 0.05 70);
   color: oklch(0.72 0.12 70);
 }
@@ -1390,8 +1328,7 @@ body {
      light block at the top of this file. Only the tokens print actually
      uses (backgrounds, text, borders); --chart-1..5 excluded (see above). */
   :root,
-  html.dark,
-  html.dusk {
+  html.dark {
     color-scheme: light;
     --background: oklch(0.9911 0 0);
     --foreground: oklch(0.1994 0.0470 270.6494);

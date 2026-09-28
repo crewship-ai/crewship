@@ -19,7 +19,7 @@ import { Toaster } from "@/components/ui/sonner"
  * fetch+useState hooks migrate incrementally; a wholesale rewrite is
  * out of scope.
  */
-export const HARBOR_THEMES = ["light", "dusk", "dark"]
+export const HARBOR_THEMES = ["light", "dark"]
 
 export function Providers({ children }: { children: React.ReactNode }) {
   // useState keeps the client stable across re-renders. Creating a
@@ -37,9 +37,9 @@ export function Providers({ children }: { children: React.ReactNode }) {
       }),
   )
   return (
-    // Harbor themes: "dark" is Night (the default, unchanged for everyone who
-    // never opens the switcher), "dusk" the violet-navy dark variant, "light"
-    // Day. The class lands on <html>, where globals.css keys the palettes.
+    // Harbor themes: "dark" is the default (unchanged for everyone who never
+    // opens the switcher) and "light" the Harbor day palette. The class lands
+    // on <html>, where globals.css keys the palettes.
     <ThemeProvider attribute="class" defaultTheme="dark" themes={HARBOR_THEMES} enableSystem disableTransitionOnChange>
     <QueryClientProvider client={queryClient}>
       <MotionConfig reducedMotion="user">

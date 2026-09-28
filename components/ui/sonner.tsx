@@ -9,8 +9,8 @@ function Toaster({ ...props }: ToasterProps) {
     <Sonner
       className="toaster group"
       position="bottom-right"
-      // Night and Dusk are both dark grounds. Sonner's light palette is only
-      // used under Day, where it sits on a light shell.
+      // Sonner's light palette only under the light theme, where it sits on
+      // a light shell.
       theme={resolvedTheme === "light" ? "light" : "dark"}
       richColors
       closeButton
