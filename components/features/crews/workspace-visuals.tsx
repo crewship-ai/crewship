@@ -1,12 +1,41 @@
 "use client"
 
+import type * as React from "react"
 import type { LucideIcon } from "lucide-react"
+import { InlineEmpty } from "@/components/ui/inline-empty"
 import { cn } from "@/lib/utils"
 
-export function WorkspaceGlyph({ icon: Icon, tone = "blue", className }: { icon: LucideIcon; tone?: "blue" | "purple" | "green" | "amber"; className?: string }) {
-  return <span className={cn("inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl", { blue: "bg-primary/10 text-primary", purple: "bg-purple/10 text-purple", green: "bg-success/10 text-success", amber: "bg-warn/10 text-warn" }[tone], className)}><Icon className="h-4 w-4" aria-hidden="true" /></span>
+const TONE_INK: Record<"blue" | "purple" | "green" | "amber", string> = {
+  blue: "var(--primary)",
+  purple: "var(--purple)",
+  green: "var(--success)",
+  amber: "var(--warn)",
 }
 
-export function WorkspaceEmpty({ icon: Icon, title, description }: { icon: LucideIcon; title: string; description?: string }) {
-  return <div className="flex flex-col items-center justify-center py-4 px-3 text-center"><span className="relative mb-2 rounded-2xl border border-border/60 bg-muted/30 p-3"><Icon className="h-6 w-6 text-muted-foreground" aria-hidden="true" /></span><p className="text-sm text-muted-foreground">{title}</p>{description && <p className="mt-1 max-w-sm text-xs text-muted-foreground">{description}</p>}</div>
+/** A glyph in a Harbor icon tile, tinted by tone. */
+export function WorkspaceGlyph({ icon: Icon, tone = "blue", className }: { icon: LucideIcon; tone?: "blue" | "purple" | "green" | "amber"; className?: string }) {
+  return (
+    <span
+      className={cn("icon-tile inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px]", className)}
+      style={{ "--ic": TONE_INK[tone] } as React.CSSProperties}
+    >
+      <Icon className="h-4 w-4" aria-hidden="true" />
+    </span>
+  )
+}
+
+/** A card with nothing to show says so in one line (README §2), never a centred block. */
+export function WorkspaceEmpty({ icon, title, description }: { icon: LucideIcon; title: string; description?: string }) {
+  return (
+    <InlineEmpty
+      icon={icon}
+      className="mt-3"
+      text={
+        <>
+          <span className="text-foreground">{title}</span>
+          {description && <span className="text-muted-foreground-soft"> {description}</span>}
+        </>
+      }
+    />
+  )
 }

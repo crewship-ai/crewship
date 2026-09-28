@@ -348,6 +348,7 @@ export function CrewCanvas({
           crewId={crew.id}
           crewSlug={crew.slug}
           crewName={crew.name}
+          crewColor={crew.color}
           avatarStyle={crew.avatar_style}
           agentsForCrew={agentsForCrew}
           onSelectAgent={onSelectAgent}
