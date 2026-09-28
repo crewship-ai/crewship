@@ -44,6 +44,10 @@ type replayRequestBody struct {
 // pinnedVersion is nil for the ordinary "re-run against HEAD" replay;
 // bulk-replay always passes nil.
 func (h *PipelineHandler) replayRun(r *http.Request, workspaceID, runID string, pinnedVersion *int) (any, int, error) {
+	user := UserFromContext(r.Context())
+	if user == nil || user.ID == "" {
+		return nil, http.StatusUnauthorized, errors.New("replay requires an authenticated user")
+	}
 	if h.runStore == nil {
 		return nil, http.StatusServiceUnavailable, errors.New("run store not wired")
 	}
@@ -77,19 +81,26 @@ func (h *PipelineHandler) replayRun(r *http.Request, workspaceID, runID string, 
 
 	exec := h.newExecutor()
 	res, err := exec.Run(r.Context(), pipeline.RunInput{
-		PipelineID:    p.ID,
-		WorkspaceID:   workspaceID,
-		Inputs:        inputs,
-		Mode:          pipeline.ModeRun,
-		TriggeredVia:  pipeline.TriggeredViaManual,
-		TriggeredByID: runID,
-		Tags:          tags,
-		MetadataJSON:  orig.MetadataJSON,
-		IsReplay:      true,
-		ReplayOf:      runID,
-		PinnedVersion: pinnedVersion,
+		PipelineID:     p.ID,
+		WorkspaceID:    workspaceID,
+		InvokingUserID: user.ID,
+		// A replay is new work authorized for the operator starting it,
+		// never a continuation under the original run's principal.
+		InvocationAuthority: pipeline.RoutineBatchAuthority,
+		Inputs:              inputs,
+		Mode:                pipeline.ModeRun,
+		TriggeredVia:        pipeline.TriggeredViaManual,
+		TriggeredByID:       runID,
+		Tags:                tags,
+		MetadataJSON:        orig.MetadataJSON,
+		IsReplay:            true,
+		ReplayOf:            runID,
+		PinnedVersion:       pinnedVersion,
 	})
 	if err != nil {
+		if errors.Is(err, pipeline.ErrInvocationAuthorityRevoked) || errors.Is(err, pipeline.ErrInvokingUserNotMember) {
+			return nil, http.StatusForbidden, errors.New("replay permission no longer valid")
+		}
 		if errors.Is(err, pipeline.ErrConcurrencyLimitReached) {
 			return nil, http.StatusTooManyRequests, err
 		}

@@ -67,6 +67,10 @@ func TestReplayRun_PinnedVersion_ExecutesPinned_NotHead(t *testing.T) {
 	if rec.PipelineVersion == nil || *rec.PipelineVersion != 1 {
 		t.Errorf("replayed run pipeline_version: got %v, want 1", rec.PipelineVersion)
 	}
+	if rec.InvokingUserID != userID || rec.InvocationAuthority != pipeline.RoutineBatchAuthority {
+		t.Errorf("replay authority = user %q, policy %q; want operator %q with batch authority",
+			rec.InvokingUserID, rec.InvocationAuthority, userID)
+	}
 	// Step outputs live in the normalized pipeline_run_step_outputs table
 	// since #1411 — RunRecord.StepOutputsJSON is no longer written on the
 	// hot path, so read via GetStepOutputs (same as the sibling
