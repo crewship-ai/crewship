@@ -9,6 +9,7 @@ import { formatDurationMs } from "@/lib/activity-stream"
 import { StatusPill } from "@/components/ui/status-pill"
 import { InlineEmpty } from "@/components/ui/inline-empty"
 import { DashboardCard } from "@/components/features/dashboard/dashboard-card"
+import { honestPct } from "@/lib/honest-pct"
 import { RunVolumeChart, type RunVolumeBucket, type RunVolumeSeries } from "@/components/features/dashboard/run-volume-chart"
 import { AttentionStrip, OutcomeKpis, UpNext, type AttentionItem, type OutcomeKpiData } from "@/components/features/dashboard/dashboard-overview"
 import { STATUS_PALETTE } from "@/app/(dashboard)/dashboard-helpers"
@@ -64,13 +65,7 @@ function within(run: DashboardRun, sinceMs: number): boolean {
   return Number.isFinite(t) && t >= sinceMs
 }
 
-/** A success rate that never rounds a failure away: 199 of 200 is 99%, not
- * 100%, and one pass in 300 is 1%, not 0%. */
-export function honestPct(ok: number, total: number): number | null {
-  if (total <= 0) return null
-  const pct = Math.round((ok / total) * 100)
-  return Math.min(ok < total ? 99 : 100, Math.max(ok > 0 ? 1 : 0, pct))
-}
+export { honestPct } from "@/lib/honest-pct"
 
 /** The outcome tiles' numbers for the window, in the shape /dashboard uses. */
 export function outcomeKpis(runs: DashboardRun[], now = new Date()): OutcomeKpiData & { spendUsd: number; total: number } {

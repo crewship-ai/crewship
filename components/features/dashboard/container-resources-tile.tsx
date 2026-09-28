@@ -116,7 +116,7 @@ function CpuSparkline({ history, color }: { history: number[]; color: string }) 
   if (history.length < 2) {
     return (
       <svg width="100%" height={H} viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" aria-hidden>
-        <line x1="0" y1={H - 2} x2={W} y2={H - 2} stroke="rgba(255,255,255,0.08)" strokeWidth="1" strokeDasharray="2 3" />
+        <line x1="0" y1={H - 2} x2={W} y2={H - 2} stroke="var(--chart-grid)" strokeWidth="1" strokeDasharray="2 3" />
       </svg>
     )
   }

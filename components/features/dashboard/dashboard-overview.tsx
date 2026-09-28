@@ -40,6 +40,7 @@ import { InlineEmpty } from "@/components/ui/inline-empty"
 import { entityHref } from "@/lib/entity-links"
 import { cn } from "@/lib/utils"
 import { formatDuration } from "@/lib/time"
+import { honestPct } from "@/lib/honest-pct"
 
 export interface AttentionItem {
   id: string
@@ -837,7 +838,9 @@ export function kpisFromInsights(
   const finished = ok + failed
   return {
     completed: ok,
-    successPct: finished > 0 ? Math.round((ok / finished) * 100) : null,
+    // Never round a failure away (199 of 200 is 99%, not 100%) — same rule as
+    // the routines dashboard.
+    successPct: honestPct(ok, finished),
     successOk: ok,
     successTotal: finished,
     p95Ms: insights?.duration.p95_ms ?? 0,

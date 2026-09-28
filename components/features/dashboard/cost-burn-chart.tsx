@@ -42,7 +42,7 @@ export function CostBurnChart({ buckets, series, height = 180 }: CostBurnChartPr
             </linearGradient>
           ))}
         </defs>
-        <CartesianGrid vertical={false} strokeDasharray="2 3" stroke="rgba(255,255,255,0.04)" />
+        <CartesianGrid vertical={false} strokeDasharray="2 3" stroke="var(--chart-grid)" />
         <XAxis
           dataKey="ts"
           tickLine={false}
@@ -63,7 +63,7 @@ export function CostBurnChart({ buckets, series, height = 180 }: CostBurnChartPr
           tickFormatter={(v) => `$${Number(v).toFixed(2)}`}
         />
         <ChartTooltip
-          cursor={{ stroke: "rgba(255,255,255,0.1)", strokeWidth: 1 }}
+          cursor={{ stroke: "var(--chart-grid)", strokeWidth: 1 }}
           content={
             <ChartTooltipContent
               indicator="dot"

@@ -257,21 +257,21 @@ function ChartPanel({
                 <stop offset="100%" stopColor={color} stopOpacity={0.02} />
               </linearGradient>
             </defs>
-            <CartesianGrid stroke="rgba(255,255,255,0.06)" vertical={false} />
+            <CartesianGrid stroke="var(--chart-grid)" vertical={false} />
             <XAxis
               dataKey="ts"
               type="number"
               domain={["dataMin", "dataMax"]}
               tickFormatter={fmtClock}
-              tick={{ fontSize: 10, fill: "rgba(255,255,255,0.45)" }}
-              axisLine={{ stroke: "rgba(255,255,255,0.12)" }}
+              tick={{ fontSize: 10, fill: "var(--chart-axis)" }}
+              axisLine={{ stroke: "var(--chart-grid)" }}
               tickLine={false}
               minTickGap={32}
             />
             <YAxis
               tickFormatter={(v) => format(v as number)}
-              tick={{ fontSize: 10, fill: "rgba(255,255,255,0.45)" }}
-              axisLine={{ stroke: "rgba(255,255,255,0.12)" }}
+              tick={{ fontSize: 10, fill: "var(--chart-axis)" }}
+              axisLine={{ stroke: "var(--chart-grid)" }}
               tickLine={false}
               width={50}
               domain={max !== undefined ? [0, max] : ["auto", "auto"]}
@@ -279,7 +279,7 @@ function ChartPanel({
             <Tooltip
               contentStyle={{
                 background: "rgba(20,22,28,0.95)",
-                border: "1px solid rgba(255,255,255,0.08)",
+                border: "1px solid var(--border)",
                 borderRadius: 6,
                 fontSize: 11,
               }}

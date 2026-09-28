@@ -39,7 +39,7 @@ export function SpendChart({ data, onSelect, selectedId, height = 260, color = "
         layout="vertical"
         margin={{ top: 4, right: 12, left: 4, bottom: 0 }}
       >
-        <CartesianGrid horizontal={false} strokeDasharray="2 3" stroke="rgba(255,255,255,0.04)" />
+        <CartesianGrid horizontal={false} strokeDasharray="2 3" stroke="var(--chart-grid)" />
         <XAxis
           type="number"
           tickLine={false}
@@ -57,7 +57,7 @@ export function SpendChart({ data, onSelect, selectedId, height = 260, color = "
           tick={{ fontSize: 10, fill: "rgba(230,231,235,0.7)" }}
         />
         <ChartTooltip
-          cursor={{ fill: "rgba(255,255,255,0.04)" }}
+          cursor={{ fill: "var(--chart-cursor)" }}
           content={
             <ChartTooltipContent
               indicator="dot"

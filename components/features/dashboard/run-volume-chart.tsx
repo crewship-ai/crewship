@@ -50,7 +50,7 @@ export function RunVolumeChart({
     <div>
       <ChartContainer config={config} className="h-[160px] w-full aspect-auto">
         <BarChart accessibilityLayer data={buckets} margin={{ top: 8, right: 6, left: -22, bottom: 0 }}>
-          <CartesianGrid vertical={false} strokeDasharray="2 4" stroke="rgba(255,255,255,0.055)" />
+          <CartesianGrid vertical={false} strokeDasharray="2 4" stroke="var(--chart-grid)" />
           <XAxis
             dataKey="ts"
             tickLine={false}
@@ -72,7 +72,7 @@ export function RunVolumeChart({
             tick={{ fontSize: 11, fill: "var(--muted-foreground-soft)", fontFamily: "var(--font-mono)" }}
           />
           <ChartTooltip
-            cursor={{ fill: "rgba(255,255,255,0.035)" }}
+            cursor={{ fill: "var(--chart-cursor)" }}
             content={
               <ChartTooltipContent
                 indicator="dot"
@@ -88,6 +88,7 @@ export function RunVolumeChart({
           />
           {series.map((item, index) => (
             <Bar
+              maxBarSize={36}
               key={item.key}
               dataKey={item.key}
               stackId="runs"
