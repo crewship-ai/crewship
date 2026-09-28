@@ -1,5 +1,8 @@
 # Restricted runtime: dev2 implementation and evidence
 
+Aktuální stav a zbývající release brány: [finální předání](RESTRICTED-RUNTIME-FINAL-HANDOFF-2026-09-28.md).
+Níže je původní záznam; omezení při pádu Manageru již překonává nezávislý lease dohled.
+
 Follow-up: the user subsequently authorized dev2 deployment and CLI validation;
 see the [deployment report](RESTRICTED-RUNTIME-DEV2-DEPLOYMENT-2026-09-28.md).
 The original prototype-only observations below retain their original scope.
