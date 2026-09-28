@@ -97,7 +97,69 @@ final fixture uses `/llm/openai-compat` and real per-run route-token derivation.
 Negative shell checks use explicit failure branches, so `set -e` exemptions
 for a bare `! command` cannot silently mark an allowed attack as denied.
 
-Final validation and measurements are recorded below after the final run.
+### Measured dev2 result
+
+Source: `454abbd95ad458326659659bdb3492bea6c80430`, clean worktree.
+Host: Linux 6.8.0-139-generic, Docker 29.3.0, Go 1.27.1 linux/amd64.
+[Recorded test output and binary SHA-256s](reports/restricted-runtime-dev2-2026-09-28.txt)
+identify the exact bootstrap and actual sidecar build. The final
+`run.sh -race` gate passed all **seven** live tests in 80.641 seconds. Race
+instrumentation applies to the host test/Manager; the separately built
+bootstrap and sidecar are normal binaries.
+
+| Measurement | Observed result | Meaning / limit |
+|---|---|---|
+| Request to UID-1001 ready marker, five starts | 1231.489, 1312.396, 1357.607, 1505.314, 1651.139 ms; p50 1357.607 ms, nearest-rank p95 1651.139 ms | Cached image, synthetic shell workload, shared host under concurrent test load. No image download, real agent/model startup or provider roundtrip. Five samples are not a latency SLO. |
+| Bare runtime memory.current / memory.peak | 2,519,040 / 4,571,136 bytes (2.40 / 4.36 MiB) | Container cgroup at final startup sample. Docker stats working-set report: 1.914 MiB. |
+| Runtime + real sidecar + synthetic upstream current / peak | 16,306,176 / 18,411,520 bytes (15.55 / 17.56 MiB) | Whole fixture cgroup, not sidecar-only attribution. Docker stats working set: 14.98 MiB. |
+| Actual sidecar ready after launch | 344.447, 439.899, 303.176 ms | Three fixture starts; excludes prior container provisioning. |
+| Explicit revocation to confirmed stop | 565.887 ms | Includes the subsequent revoked-output/new-admission denial assertions; upper bound on the observed stop time. |
+| Short-lease expiry fixture to confirmed stop | 1883.126 ms | Measured after Start returns with a 1.5-second issued lease, not from the expiry instant. |
+| Authority outage to confirmed stop | 5572.394 ms | Polling renewal detects outage; healthy local Manager and Docker. |
+
+All attempts explicitly use 128 MiB RAM with memory-swap equal to RAM (no
+additional swap allowance), 0.5 CPU and 48 PIDs. HOME/secrets/broker/tmp are
+bounded at 8/1/1/4 MiB. Host Manager/Docker daemon RSS and persistent disk
+consumption were not measured. Repeated earlier source revisions also passed;
+one concurrent-load run had startup p50 3.36 s and p95 3.99 s, so this small
+final sample must not be presented as a production performance guarantee.
+
+The seventh live test is a positive control: two HOME directories in one
+UID-1001 namespace do **not** protect one client's 0700/0400 files from the
+other. The foreign-canary scan also has an injected-leak positive control.
+The final fixture cleanup left no restricted-labelled containers or volumes.
+
+Policy/unit `go test -race ./internal/restrictedruntime -count=1`,
+`go vet ./...`, `go run ./scripts/agents-invariants`, shellcheck and the
+unchanged skip budget (145) passed. The full-repository run passed **147 test
+packages**, with 12 additional packages reporting no test files, exit 0:
+
+```sh
+# Both variables point at the same owned temporary directory on existing tmpfs.
+TMPDIR="$owned_test_dir" GOTMPDIR="$owned_test_dir" GOMAXPROCS=4 \
+  go test ./... -count=1 -p 2 -parallel 4 -timeout 25m
+GOOS=windows GOARCH=amd64 go build ./...
+```
+
+[Full Go output](reports/restricted-runtime-dev2-go-2026-09-28.txt) includes API
+(217.151 s), database (84.424 s) and orchestrator (21.247 s). The test process
+returned 0; the outer temporary-directory cleanup encountered Docker-created
+UID-owned fixtures, which were subsequently removed from that exact owned
+scratch directory. Go 1.27 uses `GOTMPDIR` for `t.TempDir`; setting only
+`TMPDIR` did not move those fixtures off the shared disk. The superseded
+on-disk run was stopped after a concurrent source edit also invalidated its
+compile graph; it is not counted as a successful full run.
+
+CI exposed two prototype regressions, both corrected: the opt-in Docker gate
+now uses an explicit build tag rather than increasing the skip budget, and
+all prototype Go files carry Linux platform guards so Windows builds do not
+try to compile `syscall.Flock`. The Windows full-repository cross-build and
+current Linux package/race tests passed after that fix (`66859855f`). This
+platform-only change does not alter the Linux runtime measured above.
+
+At handoff, remote checks are still running and CodeRabbit has posted a rate
+limit notice rather than a review of the implementation. The PR remains a
+draft; its green CodeRabbit status must not be treated as approval.
 
 ## Acceptance mapping and remaining release gates
 
