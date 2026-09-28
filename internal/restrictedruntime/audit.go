@@ -42,14 +42,14 @@ func (d Docker) audit(ctx context.Context, id string, p Plan, c Catalog, l Limit
 	}
 	r := rows[0]
 	h := r.HostConfig
-	if r.Config.User != "1001:1001" || strings.Join(r.Config.Entrypoint, " ") != "/opt/crewship-runner" || strings.Join(r.Config.Cmd, " ") != "hold" || h.NetworkMode != "none" || h.PidMode != "" || h.IpcMode != "private" || h.UTSMode != "" || h.UsernsMode != "" || h.Privileged || !h.ReadonlyRootfs || h.PublishAllPorts || h.Init == nil || !*h.Init || len(h.CapAdd) > 0 || len(h.GroupAdd) > 0 || len(h.ExtraHosts) > 0 || len(h.Devices) > 0 || len(h.Binds) > 0 || len(h.PortBindings) > 0 || h.Memory != l.MemoryBytes || h.MemorySwap != l.MemoryBytes || h.NanoCpus != l.NanoCPUs || h.PidsLimit != l.PIDs || strings.Join(h.CapDrop, ",") != "ALL" || len(h.SecurityOpt) != 1 || !strings.HasPrefix(h.SecurityOpt[0], "no-new-privileges") || h.RestartPolicy.Name != "no" || h.LogConfig.Type != "none" {
+	if r.Config.User != "1001:1001" || strings.Join(r.Config.Entrypoint, " ") != "/opt/crewship-runner" || strings.Join(r.Config.Cmd, " ") != "hold" || h.NetworkMode != "none" || h.PidMode != "" || h.IpcMode != "private" || h.UTSMode != "" || h.UsernsMode != "" || h.Privileged || !h.ReadonlyRootfs || h.PublishAllPorts || h.Init == nil || !*h.Init || len(h.CapAdd) > 0 || len(h.GroupAdd) > 0 || len(h.ExtraHosts) > 0 || len(h.Devices) > 0 || len(h.Binds) > 0 || len(h.PortBindings) > 0 || h.Memory != l.MemoryBytes || h.MemorySwap != l.MemoryBytes || h.NanoCpus != l.NanoCPUs || h.PidsLimit != l.PIDs || strings.Join(h.CapDrop, ",") != "ALL" || len(h.SecurityOpt) != 1 || (h.SecurityOpt[0] != "no-new-privileges" && h.SecurityOpt[0] != "no-new-privileges=true") || h.RestartPolicy.Name != "no" || h.LogConfig.Type != "none" {
 		return ErrDenied
 	}
 	if len(h.Tmpfs) != 4 {
 		return ErrDenied
 	}
-	for _, target := range []string{"/home/agent", "/secrets", "/broker", "/tmp"} {
-		if h.Tmpfs[target] == "" {
+	for target, options := range privateTmpfs() {
+		if h.Tmpfs[target] != options {
 			return ErrDenied
 		}
 	}
