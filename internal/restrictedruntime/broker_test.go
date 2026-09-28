@@ -120,6 +120,7 @@ func TestBrokerDelegationCannotWidenOperations(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			child := connectedPlan()
+			child.Expires = parent.Expires
 			mutate(&child)
 			if Narrow(parent, child) == nil {
 				t.Fatal("delegated network authority widened")
@@ -127,6 +128,7 @@ func TestBrokerDelegationCannotWidenOperations(t *testing.T) {
 		})
 	}
 	child := connectedPlan()
+	child.Expires = parent.Expires
 	child.Network.Audience = "child-audience"
 	child.Network.Grants[0].MaxResponse = 10
 	if err := Narrow(parent, child); err != nil {
