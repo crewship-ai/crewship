@@ -244,3 +244,34 @@ describe("UnifiedExplorer — the badge and the list agree with the filters", ()
     expect(screen.queryByText("Design high")).toBeNull()
   })
 })
+
+describe("UnifiedExplorer — generated issue families fold", () => {
+  const family = [
+    issue({ id: "f1", identifier: "INF-1", title: "infra-prehled/verdikt stopped reporting" }),
+    issue({ id: "f2", identifier: "INF-2", title: "infra-prehled/verdikt: disk > 85" }),
+    issue({ id: "f3", identifier: "INF-3", title: "infra-prehled/verdikt stopped reporting" }),
+  ]
+
+  it("shows a run of generated issues as one row that opens to the rest of each title", () => {
+    setup({ issues: [...ISSUES, ...family] })
+    const row = screen.getByRole("button", { name: "infra-prehled/verdikt: 3 issues" })
+    expect(row).toHaveAttribute("aria-expanded", "false")
+    expect(screen.queryByText("INF-2")).not.toBeInTheDocument()
+    fireEvent.click(row)
+    expect(row).toHaveAttribute("aria-expanded", "true")
+    expect(screen.getByText("INF-2")).toBeInTheDocument()
+    expect(screen.getByText("disk > 85")).toBeInTheDocument()
+  })
+
+  it("never hides the selected issue inside a closed family", () => {
+    setup({ issues: family, selectedIssue: family[1] })
+    expect(screen.getByRole("button", { name: "infra-prehled/verdikt: 3 issues" })).toHaveAttribute("aria-expanded", "true")
+    expect(screen.getByText("INF-2")).toBeInTheDocument()
+  })
+
+  it("lists every hit flat while searching", () => {
+    setup({ issues: family, search: "verdikt" })
+    expect(screen.queryByRole("button", { name: /3 issues/ })).not.toBeInTheDocument()
+    expect(screen.getByText("INF-1")).toBeInTheDocument()
+  })
+})

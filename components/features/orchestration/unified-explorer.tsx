@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react"
 import { motion } from "motion/react"
-import { UserRound } from "lucide-react"
+import { ChevronRight, UserRound } from "lucide-react"
 import { getIssueWorker } from "@/lib/issue-execution"
 import { StatusIcon, statusLabel } from "@/components/features/issues/status-icon"
 import { STATUS_CHIPS } from "@/components/features/issues/issues-status-chips"
@@ -10,6 +10,7 @@ import { PriorityIcon, priorityLabel } from "@/components/features/issues/priori
 import type { IssuePriority, MissionStatus } from "@/lib/types/mission"
 import { cn } from "@/lib/utils"
 import { useFilteredIssues } from "@/hooks/use-filtered-issues"
+import { foldIssueFamilies, memberTitle } from "@/components/features/issues/issue-families"
 import { AgentAvatar } from "@/components/ui/agent-avatar"
 import { getCrewIconDef, iconColorProps } from "@/lib/entities"
 import type { Mission, MissionTask, Project } from "@/lib/types/mission"
@@ -106,6 +107,51 @@ export function UnifiedExplorer({
     filterStatuses,
     filterPriority,
   })
+
+  // Runs of generated issues ("infra-prehled/verdikt …" ×15) fold into one
+  // row each; a search shows the flat list, so a hit is never behind a fold.
+  const railEntries = useMemo(
+    () => foldIssueFamilies(displayed, { minGroup: 3, disabled: search.trim() !== "" }),
+    [displayed, search],
+  )
+  const [openFamilies, setOpenFamilies] = useState<ReadonlySet<string>>(() => new Set())
+  const toggleFamily = (key: string) =>
+    setOpenFamilies((prev) => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  // The selected issue is never hidden: its family reads as open.
+  const familyOpen = (entry: { key: string; issues: Mission[] }) =>
+    openFamilies.has(entry.key) || (selectedIssue != null && entry.issues.some((i) => i.id === selectedIssue.id))
+
+  const renderIssueRow = (issue: Mission, title: string = issue.title, indent = false) => {
+    const worker = getIssueWorker(issue)
+    return (
+      <SidebarRow
+        key={issue.id}
+        as="div"
+        indent={indent}
+        selected={selectedIssue?.id === issue.id}
+        onSelect={() => onIssueSelect(issue)}
+      >
+        <div className="relative shrink-0">
+          <StatusIcon status={issue.status} className="h-3.5 w-3.5" />
+          {issue.status === "IN_PROGRESS" && (
+            <span className="absolute -top-0.5 -right-0.5 h-1.5 w-1.5 rounded-full bg-success agent-active-dot" />
+          )}
+        </div>
+        <span className="w-[44px] shrink-0 truncate font-mono text-[11px] text-muted-foreground">{issue.identifier || "--"}</span>
+        <span className="flex-1 truncate text-foreground/85" title={issue.title}>{title}</span>
+        {worker.id && (
+          worker.isHuman
+            ? <UserRound aria-label={worker.name || "Human worker"} className="h-4 w-4 shrink-0" />
+            : <AgentAvatar seed={worker.id} alt={worker.name || ""} className="h-4 w-4 rounded-full shrink-0" />
+        )}
+      </SidebarRow>
+    )
+  }
 
   // Every facet toggles on its own value and touches nothing else. Clicking
   // the active value again clears that one facet — the cheapest "undo the
@@ -289,29 +335,34 @@ export function UnifiedExplorer({
           }
         />
         <div className="flex-1 min-h-0 overflow-y-auto px-1 pb-1">
-          {displayed.map((issue) => (
-            <SidebarRow
-              key={issue.id}
-              as="div"
-              selected={selectedIssue?.id === issue.id}
-              onSelect={() => onIssueSelect(issue)}
-            >
-              <div className="relative shrink-0">
-                <StatusIcon status={issue.status} className="h-3.5 w-3.5" />
-                {issue.status === "IN_PROGRESS" && (
-                  <span className="absolute -top-0.5 -right-0.5 h-1.5 w-1.5 rounded-full bg-success agent-active-dot" />
-                )}
+          {railEntries.map((entry) =>
+            entry.kind === "issue" ? (
+              renderIssueRow(entry.issue)
+            ) : (
+              <div key={`family:${entry.key}`} data-slot="issue-family">
+                <SidebarRow
+                  as="div"
+                  onSelect={() => toggleFamily(entry.key)}
+                  aria-pressed={undefined}
+                  aria-expanded={familyOpen(entry)}
+                  aria-label={`${entry.key}: ${entry.issues.length} issues`}
+                >
+                  <ChevronRight
+                    className={cn(
+                      "h-3.5 w-3.5 shrink-0 text-muted-foreground-soft transition-transform",
+                      familyOpen(entry) && "rotate-90",
+                    )}
+                  />
+                  <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-foreground/80">{entry.key}</span>
+                  <span className="shrink-0 font-mono text-[11px] tabular-nums text-muted-foreground-soft">
+                    {entry.issues.length}
+                  </span>
+                </SidebarRow>
+                {familyOpen(entry) &&
+                  entry.issues.map((issue) => renderIssueRow(issue, memberTitle(issue.title ?? "", entry.key), true))}
               </div>
-              <span className="text-[10px] font-mono text-foreground/50 shrink-0 w-[44px] truncate">{issue.identifier || "--"}</span>
-              <span className="text-foreground/80 truncate flex-1">{issue.title}</span>
-              {getIssueWorker(issue).id && (
-                getIssueWorker(issue).isHuman
-                  ? <UserRound aria-label={getIssueWorker(issue).name || "Human worker"} className="h-4 w-4 shrink-0" />
-                  : <AgentAvatar seed={getIssueWorker(issue).id!} alt={getIssueWorker(issue).name || ""} className="h-4 w-4 rounded-full shrink-0" />
-              )}
-              <PriorityIcon priority={issue.priority || "none"} className="h-3 w-3 shrink-0" />
-            </SidebarRow>
-          ))}
+            ),
+          )}
           {displayed.length === 0 && (
             <motion.div
               initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.1 }}

@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useMemo, useState } from "react"
+import { useCallback, useMemo, useState, type CSSProperties } from "react"
 import { IssueCard } from "./issue-card"
 import { StatusIcon, statusLabel } from "./status-icon"
 import { InlineEmpty } from "@/components/ui/inline-empty"
@@ -41,6 +41,17 @@ export function foldColumns(issues: Mission[], statuses: MissionStatus[], cap: n
   })
 }
 
+/**
+ * The wide-screen grid template: a column with cards takes a share of the
+ * width, an empty one narrows to a 9rem rail that still shows its head and
+ * count. With nothing or everything populated the columns stay equal.
+ */
+export function boardColumnTemplate(counts: number[]): string {
+  const populated = counts.filter((n) => n > 0).length
+  if (populated === 0 || populated === counts.length) return `repeat(${counts.length},minmax(0,1fr))`
+  return counts.map((n) => (n > 0 ? "minmax(0,1fr)" : "minmax(0,9rem)")).join(" ")
+}
+
 export function IssuesBoardView({ issues, onIssueClick, onCreateClick, selectedIssueId }: IssuesBoardViewProps) {
   const hasIssues = issues.length > 0
   const [open, setOpen] = useState<ReadonlySet<string>>(() => new Set())
@@ -58,6 +69,8 @@ export function IssuesBoardView({ issues, onIssueClick, onCreateClick, selectedI
     () => foldColumns(issues, SECONDARY_STATUSES, BOARD_COLUMN_CAP, open).filter((c) => c.all.length > 0),
     [issues, open],
   )
+
+  const template = useMemo(() => boardColumnTemplate(main.map((c) => c.all.length)), [main])
 
   const handleIssueClick = useCallback((issue: Mission) => onIssueClick(issue), [onIssueClick])
 
@@ -89,7 +102,7 @@ export function IssuesBoardView({ issues, onIssueClick, onCreateClick, selectedI
           "transition-all duration-200",
           width,
           isDimmed && "opacity-40",
-          isHighlighted && "ring-1 ring-primary/50 rounded-lg",
+          isHighlighted && "ring-1 ring-primary/50 rounded-2xl",
         )}
       >
         <IssueCard issue={issue} onClick={() => handleIssueClick(issue)} />
@@ -102,7 +115,7 @@ export function IssuesBoardView({ issues, onIssueClick, onCreateClick, selectedI
       <button
         type="button"
         onClick={() => toggleOpen(col.status)}
-        className="mt-1 w-full rounded-md py-2 text-center text-label text-primary-hover hover:underline"
+        className="mt-1 w-full rounded-[10px] py-2 text-center font-mono text-[11px] text-primary-hover hover:bg-foreground/[0.04]"
         data-testid={`board-fold-${col.status}`}
       >
         {col.hidden > 0 ? `${col.hidden} more · Show all` : "Show fewer"}
@@ -115,19 +128,22 @@ export function IssuesBoardView({ issues, onIssueClick, onCreateClick, selectedI
           (five fixed 280px columns hid it behind a scroller), one column
           per status stacked below md (README §6: no horizontal overflow at
           390). Each column folds at six cards. */}
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-3 lg:grid-cols-5">
+      <div
+        data-slot="issues-board-grid"
+        className="grid grid-cols-1 gap-3 md:grid-cols-3 lg:[grid-template-columns:var(--board-cols)]"
+        style={{ "--board-cols": template } as CSSProperties}
+      >
         {main.map((col) => (
-          <section key={col.status} className="flex min-w-0 flex-col" aria-label={statusLabel[col.status]}>
-            <div className="flex items-center gap-2 px-1 pb-2">
-              <StatusIcon status={col.status} className="h-3.5 w-3.5" />
-              <span className="text-sm font-medium text-foreground/80">{statusLabel[col.status]}</span>
-              <span className="text-xs text-foreground/50 tabular-nums">{col.all.length}</span>
-            </div>
+          <section
+            key={col.status}
+            className="flex min-w-0 flex-col"
+            aria-label={statusLabel[col.status]}
+            data-empty={col.all.length === 0 ? "true" : "false"}
+          >
+            <ColumnHead status={col.status} count={col.all.length} />
             <div className="flex flex-col gap-2 px-0.5">
               {col.shown.length === 0 ? (
-                <div className="flex h-14 items-center justify-center rounded-lg border border-dashed border-border/50">
-                  <span className="text-xs text-foreground/40">No issues</span>
-                </div>
+                <p className="px-1.5 font-mono text-[11px] text-muted-foreground-soft">Nothing here</p>
               ) : (
                 col.shown.map((issue) => renderCard(issue))
               )}
@@ -139,14 +155,10 @@ export function IssuesBoardView({ issues, onIssueClick, onCreateClick, selectedI
 
       {/* Failed / Cancelled / Duplicate: a second row, only when non-empty. */}
       {secondary.length > 0 && (
-        <div className="grid grid-cols-1 gap-3 border-t pt-3 md:grid-cols-3">
+        <div className="grid grid-cols-1 gap-3 border-t border-border pt-4 md:grid-cols-3">
           {secondary.map((col) => (
             <section key={col.status} className="min-w-0" aria-label={statusLabel[col.status]}>
-              <div className="mb-2 flex items-center gap-2">
-                <StatusIcon status={col.status} className="h-3.5 w-3.5" />
-                <span className="text-xs font-medium text-muted-foreground">{statusLabel[col.status]}</span>
-                <span className="text-xs text-foreground/50 tabular-nums">{col.all.length}</span>
-              </div>
+              <ColumnHead status={col.status} count={col.all.length} />
               <div className="flex flex-col gap-2">
                 {col.shown.map((issue) => renderCard(issue))}
                 {renderFold(col)}
@@ -155,6 +167,17 @@ export function IssuesBoardView({ issues, onIssueClick, onCreateClick, selectedI
           ))}
         </div>
       )}
+    </div>
+  )
+}
+
+/** Column head: status glyph, the name as an eyebrow, the count in mono. */
+function ColumnHead({ status, count }: { status: MissionStatus; count: number }) {
+  return (
+    <div className="flex items-center gap-2 px-1 pb-2.5">
+      <StatusIcon status={status} className="h-3.5 w-3.5 shrink-0" />
+      <span className="eyebrow truncate">{statusLabel[status]}</span>
+      <span className="ml-auto font-mono text-[11px] tabular-nums text-muted-foreground-soft">{count}</span>
     </div>
   )
 }
