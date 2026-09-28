@@ -31,7 +31,7 @@ func TestChatRoutineSourceAndSearch(t *testing.T) {
 	list := func(workspace, query string) []chatResponse {
 		req := httptest.NewRequest("GET", "/api/v1/agents/ck-ag/chats?"+query, nil)
 		req.SetPathValue("agentId", "ck-ag")
-		req = req.WithContext(withWorkspace(req.Context(), workspace, "OWNER"))
+		req = withWorkspaceUser(req, "test-user-id", workspace, "OWNER")
 		rr := httptest.NewRecorder()
 		NewAgentHandler(db, newTestLogger()).ListChats(rr, req)
 		var out []chatResponse
@@ -70,7 +70,7 @@ func TestChatIssueSourceUsesMissionIdentity(t *testing.T) {
 	execOrFatal(t, db, `INSERT INTO chats(id,agent_id,workspace_id,mode,title) VALUES('source-issue','ck-ag',?,'MISSION','Renamed title')`, ws)
 	req := httptest.NewRequest("GET", "/api/v1/agents/ck-ag/chats?source=1", nil)
 	req.SetPathValue("agentId", "ck-ag")
-	req = req.WithContext(withWorkspace(req.Context(), ws, "OWNER"))
+	req = withWorkspaceUser(req, "test-user-id", ws, "OWNER")
 	rr := httptest.NewRecorder()
 	NewAgentHandler(db, newTestLogger()).ListChats(rr, req)
 	var rows []chatResponse

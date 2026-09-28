@@ -165,6 +165,23 @@ func TestFeedback_Create_CrossWorkspaceChat_404(t *testing.T) {
 // fix, `feedback create --message msg_doesnotexist --signal helpful`
 // silently succeeded (201) and left an orphan row nothing could trace back
 // to a real message.
+func TestFeedback_Create_OtherPrivateChatInSameWorkspace_404(t *testing.T) {
+	bed := setupFeedbackTestBed(t)
+	memberID := "feedback-peer"
+	if _, err := bed.h.db.Exec(`INSERT INTO users (id,email,full_name) VALUES (?,'peer@fb.com','Peer')`, memberID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := bed.h.db.Exec(`INSERT INTO workspace_members (id,workspace_id,user_id,role) VALUES ('feedback-peer-member',?,?,'MEMBER')`, bed.wsID, memberID); err != nil {
+		t.Fatal(err)
+	}
+	request := feedbackReq(http.MethodPost, "/api/v1/feedback", `{"message_id":"`+bed.messageID+`","signal":"helpful"}`, memberID)
+	response := httptest.NewRecorder()
+	bed.h.Create(response, request)
+	if response.Code != http.StatusNotFound {
+		t.Fatalf("foreign private feedback status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
 func TestFeedback_Create_UnknownMessage_404(t *testing.T) {
 	bed := setupFeedbackTestBed(t)
 	req := feedbackReq("POST", "/api/v1/feedback",

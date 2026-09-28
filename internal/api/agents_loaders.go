@@ -16,13 +16,13 @@ import (
 // agent_id" query with a placeholder list matching len(ids) and
 // returns the id→count map. The caller passes the template with a
 // single "%s" where the placeholder list goes.
-func batchCountByAgentID(ctx context.Context, db *sql.DB, tmpl string, ids []string) (map[string]int, error) {
+func batchCountByAgentID(ctx context.Context, db *sql.DB, tmpl string, ids []string, extraArgs ...any) (map[string]int, error) {
 	if len(ids) == 0 {
 		return map[string]int{}, nil
 	}
 	query := fmt.Sprintf(tmpl, sqlPlaceholders(len(ids)))
 
-	args := toAnySlice(ids)
+	args := append(toAnySlice(ids), extraArgs...)
 
 	rows, err := db.QueryContext(ctx, query, args...)
 	if err != nil {

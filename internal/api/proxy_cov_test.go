@@ -284,21 +284,14 @@ func TestChatMessages_Branches(t *testing.T) {
 		}
 	})
 
-	t.Run("nonexistent chat returns empty messages", func(t *testing.T) {
+	t.Run("nonexistent chat is indistinguishable from denied chat", func(t *testing.T) {
 		req := httptest.NewRequest("GET", "/x", nil)
 		req.SetPathValue("chatId", "no-such-chat")
 		req = withWorkspaceUser(req, userID, wsID, "OWNER")
 		rr := httptest.NewRecorder()
 		h.ChatMessages(rr, req)
-		if rr.Code != http.StatusOK {
-			t.Fatalf("status = %d, want 200", rr.Code)
-		}
-		var out map[string][]any
-		if err := json.NewDecoder(rr.Body).Decode(&out); err != nil {
-			t.Fatalf("decode: %v", err)
-		}
-		if len(out["messages"]) != 0 {
-			t.Errorf("messages = %v, want empty", out["messages"])
+		if rr.Code != http.StatusNotFound {
+			t.Fatalf("status = %d, want 404", rr.Code)
 		}
 	})
 
@@ -312,8 +305,8 @@ func TestChatMessages_Branches(t *testing.T) {
 		req = withWorkspaceUser(req, stranger, wsID, "OWNER")
 		rr := httptest.NewRecorder()
 		h.ChatMessages(rr, req)
-		if rr.Code != http.StatusForbidden {
-			t.Errorf("status = %d, want 403", rr.Code)
+		if rr.Code != http.StatusNotFound {
+			t.Errorf("status = %d, want 404", rr.Code)
 		}
 	})
 

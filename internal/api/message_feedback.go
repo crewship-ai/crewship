@@ -7,6 +7,8 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+
+	"github.com/crewship-ai/crewship/internal/chataudience"
 )
 
 // MessageFeedbackHandler serves the typed feedback signal API. Sits
@@ -106,10 +108,9 @@ type feedbackRow struct {
 	CreatedAt   string  `json:"created_at"`
 }
 
-// ensureChatVisible mirrors the message_reactions handler — feedback is
-// scoped to a chat the authenticated user can already see. Workspace
-// membership comes via workspace_members because the route doesn't
-// carry workspace_id in the URL.
+// ensureChatVisible scopes feedback to the chat's current audience. The
+// predicate also checks workspace membership because this route carries no
+// workspace_id in its URL.
 //
 // Return shape distinguishes three states the caller must handle
 // separately:
@@ -132,18 +133,9 @@ func (h *MessageFeedbackHandler) ensureChatVisible(r *http.Request, chatID strin
 		return "", false, nil
 	}
 	var owner string
+	args := append([]any{chatID}, chataudience.Args(user.ID)...)
 	err = h.db.QueryRowContext(r.Context(),
-		"SELECT workspace_id FROM chats WHERE id = ?", chatID).Scan(&owner)
-	if errors.Is(err, sql.ErrNoRows) {
-		return "", false, nil
-	}
-	if err != nil {
-		return "", false, err
-	}
-	var role string
-	err = h.db.QueryRowContext(r.Context(),
-		"SELECT role FROM workspace_members WHERE workspace_id = ? AND user_id = ?",
-		owner, user.ID).Scan(&role)
+		`SELECT c.workspace_id FROM chats c WHERE c.id = ? AND (`+chataudience.VisibleSQL+`)`, args...).Scan(&owner)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", false, nil
 	}

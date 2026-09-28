@@ -13,6 +13,8 @@ import (
 	"net/url"
 	"strconv"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/chataudience"
 )
 
 // ProxyHandler proxies requests from the UI to the crewshipd sidecar over the Unix socket.
@@ -277,6 +279,10 @@ func (h *ProxyHandler) AgentStop(w http.ResponseWriter, r *http.Request) {
 func (h *ProxyHandler) ChatMessages(w http.ResponseWriter, r *http.Request) {
 	chatID := r.PathValue("chatId")
 	user := UserFromContext(r.Context())
+	if user == nil {
+		replyError(w, http.StatusUnauthorized, "Unauthorized")
+		return
+	}
 	// Audit #495 follow-up: read-tier gate. The existing workspace_member
 	// lookup tests *membership* but not *role* -- canRole(role, "read")
 	// fails closed on empty / unmapped role.
@@ -285,25 +291,13 @@ func (h *ProxyHandler) ChatMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var chatWSID string
-	err := h.db.QueryRowContext(r.Context(),
-		"SELECT workspace_id FROM chats WHERE id = ?", chatID).Scan(&chatWSID)
+	allowed, err := chataudience.CanReadInWorkspace(r.Context(), h.db, chatID, user.ID, WorkspaceIDFromContext(r.Context()))
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			// Chat doesn't exist yet (new session before first message) — return empty messages
-			writeJSON(w, http.StatusOK, map[string]interface{}{"messages": []interface{}{}})
-			return
-		}
-		replyInternalError(w, h.logger, "get chat workspace", err)
+		replyInternalError(w, h.logger, "check chat audience", err)
 		return
 	}
-
-	var memberRole string
-	err = h.db.QueryRowContext(r.Context(),
-		"SELECT role FROM workspace_members WHERE workspace_id = ? AND user_id = ?",
-		chatWSID, user.ID).Scan(&memberRole)
-	if err != nil {
-		replyError(w, http.StatusForbidden, "Forbidden")
+	if !allowed {
+		replyError(w, http.StatusNotFound, "Chat not found")
 		return
 	}
 

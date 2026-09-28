@@ -66,7 +66,8 @@ func (rt *ScheduledRuntime) Run(ctx context.Context, a dispatch.Assignment, star
 	chatID := "scheduled-" + a.RunID
 	if err := h.resolver.CreateChat(runCtx, chatbridge.CreateChatRequest{
 		ChatID: chatID, AgentID: in.AgentID, WorkspaceID: a.Item.WorkspaceID,
-		Title: "Scheduled agent run",
+		Title:  "Scheduled agent run",
+		Origin: "CRON",
 	}); err != nil {
 		return fmt.Errorf("%w: create scheduled chat: %w", errWebhookBeforeAgent, err)
 	}

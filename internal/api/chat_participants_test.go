@@ -106,16 +106,16 @@ func TestParticipants_Add_NonWorkspaceUser_400(t *testing.T) {
 	}
 }
 
-func TestParticipants_Add_PlainMemberForbidden_403(t *testing.T) {
+func TestParticipants_Add_NonAudienceMemberNotFound_404(t *testing.T) {
 	h, _, colleagueID, _, chatID := setupParticipantsTestBed(t)
-	// colleagueID is a workspace MEMBER but not the chat creator → may not
-	// mutate the roster.
+	// A workspace member outside the private chat's audience must not learn
+	// whether it exists, let alone mutate the roster.
 	req := partReq("POST", "/api/v1/chats/"+chatID+"/participants", `{"user_id":"`+colleagueID+`"}`, colleagueID)
 	req.SetPathValue("chatId", chatID)
 	rr := httptest.NewRecorder()
 	h.Add(rr, req)
-	if rr.Code != http.StatusForbidden {
-		t.Errorf("plain member add = %d, want 403", rr.Code)
+	if rr.Code != http.StatusNotFound {
+		t.Errorf("non-audience member add = %d, want 404", rr.Code)
 	}
 }
 

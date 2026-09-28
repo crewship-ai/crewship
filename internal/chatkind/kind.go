@@ -26,6 +26,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/crewship-ai/crewship/internal/chataudience"
 )
 
 // Kind is one bucket of the partition. The set is exhaustive and
@@ -242,6 +244,26 @@ func CountByAgent(ctx context.Context, db *sql.DB, agentID, workspaceID string) 
 		return nil, err
 	}
 	defer rows.Close()
+	return foldCounts(rows)
+}
+
+// CountByAgentForUser applies the same audience predicate as the chat page
+// before grouping. Counts cannot reveal a private chat hidden from that page.
+func CountByAgentForUser(ctx context.Context, db *sql.DB, agentID, workspaceID, userID string) (map[Kind]int, error) {
+	rows, err := db.QueryContext(ctx, `
+		SELECT c.mode, c.origin, COUNT(*)
+		FROM chats c
+		WHERE c.agent_id = ? AND c.workspace_id = ? AND (`+chataudience.VisibleSQL+`)
+		GROUP BY c.mode, c.origin
+	`, append([]any{agentID, workspaceID}, chataudience.Args(userID)...)...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return foldCounts(rows)
+}
+
+func foldCounts(rows *sql.Rows) (map[Kind]int, error) {
 
 	// Every kind is present with a zero rather than absent, so a client can
 	// tell "this agent has no routines" from "this server did not say".

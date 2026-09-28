@@ -38,10 +38,10 @@ type ConversationSearchHit struct {
 
 // ConversationSearcher runs an agent-scoped BM25 search over conversation
 // history. *conversation.Store satisfies it via a server-side adapter. The
-// agentID is the tenancy boundary — callers MUST pass a workspace-verified
-// agent id; the searcher itself only filters, it does not authorize.
+// agentID is workspace-verified by the handler. The production searcher must
+// also apply the supplied user's chat audience before ranking and limiting.
 type ConversationSearcher interface {
-	SearchConversations(ctx context.Context, agentID, query string, limit int) ([]ConversationSearchHit, error)
+	SearchConversations(ctx context.Context, agentID, userID, query string, limit int) ([]ConversationSearchHit, error)
 }
 
 // MultiAgentConversationSearcher is the optional widening of
@@ -49,13 +49,12 @@ type ConversationSearcher interface {
 // over a SET of agents, rather than N agent-scoped queries merged by a
 // caller that can no longer see the BM25 scores.
 //
-// The set is still the tenancy boundary and is still the caller's
-// responsibility — the handler passes exactly the agents it has just read
-// out of the caller's workspace. A searcher that does not implement this
+// The handler passes agents from the caller's workspace; the searcher still
+// must filter their individual chats to the caller's audience. A searcher that does not implement this
 // interface simply cannot answer a workspace-scoped query, and the handler
 // says so (503) instead of quietly narrowing the scope.
 type MultiAgentConversationSearcher interface {
-	SearchConversationsAcross(ctx context.Context, agentIDs []string, query string, limit int) ([]ConversationSearchHit, error)
+	SearchConversationsAcross(ctx context.Context, agentIDs []string, userID, query string, limit int) ([]ConversationSearchHit, error)
 }
 
 // maxWorkspaceSearchAgents caps how many agents one workspace-scoped query
@@ -139,11 +138,11 @@ func workspaceSearchAgents(ctx context.Context, db *sql.DB, workspaceID string) 
 // caller's workspace, which is what ⌘K asks for: the user is searching
 // everything they can see, and has no agent in mind to name.
 //
-// Both scopes derive the workspace from the request context, so a body can
-// only ever NARROW what the caller may already read, never widen it.
+// Both scopes derive the workspace and user from the authenticated request.
 func (h *ConversationHandler) Search(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
-	if workspaceID == "" {
+	user := UserFromContext(r.Context())
+	if workspaceID == "" || user == nil || user.ID == "" {
 		replyError(w, http.StatusUnauthorized, "workspace required")
 		return
 	}
@@ -170,19 +169,18 @@ func (h *ConversationHandler) Search(w http.ResponseWriter, r *http.Request) {
 		err   error
 	)
 	if agentID != "" {
-		hits, known, err = h.searchOneAgent(w, r, agentID, workspaceID, req)
+		hits, known, err = h.searchOneAgent(w, r, agentID, workspaceID, user.ID, req)
 		scope = "agent"
 	} else {
-		hits, known, err = h.searchWorkspace(w, r, workspaceID, req)
+		hits, known, err = h.searchWorkspace(w, r, workspaceID, user.ID, req)
 		scope = "workspace"
 	}
 	if err != nil {
 		return // the helper already replied
 	}
 
-	// Defence in depth. The searcher was handed only in-workspace agent ids,
-	// so a hit for anything else is a bug in the searcher, not a query the
-	// caller is entitled to see — drop it rather than render it.
+	// The production searcher checks chat audience before LIMIT. Also reject
+	// any hit for an agent outside the handler's workspace-resolved set.
 	out := make([]ConversationSearchHit, 0, len(hits))
 	for _, hit := range hits {
 		agent, ok := known[hit.AgentID]
@@ -205,7 +203,7 @@ func (h *ConversationHandler) Search(w http.ResponseWriter, r *http.Request) {
 // searchOneAgent runs the original agent-scoped search. It replies on error
 // and returns a non-nil error so the caller stops.
 func (h *ConversationHandler) searchOneAgent(
-	w http.ResponseWriter, r *http.Request, agentID, workspaceID string, req conversationSearchRequest,
+	w http.ResponseWriter, r *http.Request, agentID, workspaceID, userID string, req conversationSearchRequest,
 ) ([]ConversationSearchHit, map[string]conversationAgent, error) {
 	// Authorization: the requested agent must live in the caller's
 	// workspace. Without this, a caller could pass any agent_id and read
@@ -224,7 +222,7 @@ func (h *ConversationHandler) searchOneAgent(
 		return nil, nil, err
 	}
 
-	hits, err := h.searcher.SearchConversations(r.Context(), agentID, req.Query, req.Limit)
+	hits, err := h.searcher.SearchConversations(r.Context(), agentID, userID, req.Query, req.Limit)
 	if err != nil {
 		replyError(w, http.StatusBadRequest, err.Error())
 		return nil, nil, err
@@ -235,7 +233,7 @@ func (h *ConversationHandler) searchOneAgent(
 // searchWorkspace runs the workspace-scoped search across every agent the
 // caller's workspace owns.
 func (h *ConversationHandler) searchWorkspace(
-	w http.ResponseWriter, r *http.Request, workspaceID string, req conversationSearchRequest,
+	w http.ResponseWriter, r *http.Request, workspaceID, userID string, req conversationSearchRequest,
 ) ([]ConversationSearchHit, map[string]conversationAgent, error) {
 	multi, ok := h.searcher.(MultiAgentConversationSearcher)
 	if !ok {
@@ -262,7 +260,7 @@ func (h *ConversationHandler) searchWorkspace(
 		return nil, known, nil
 	}
 
-	hits, err := multi.SearchConversationsAcross(r.Context(), ids, req.Query, req.Limit)
+	hits, err := multi.SearchConversationsAcross(r.Context(), ids, userID, req.Query, req.Limit)
 	if err != nil {
 		replyError(w, http.StatusBadRequest, err.Error())
 		return nil, nil, err

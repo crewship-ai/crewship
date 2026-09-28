@@ -34,6 +34,37 @@ func TestSearchAgents_SpansEveryAgentInTheSet(t *testing.T) {
 	}
 }
 
+func TestSearchAgentsForUser_FiltersPrivateChatsBeforeLimit(t *testing.T) {
+	s := newSearchStore(t)
+	for _, stmt := range []string{
+		`INSERT INTO users(id,email) VALUES ('search-h1','search-h1@example.test'),('search-h2','search-h2@example.test')`,
+		`INSERT INTO workspaces(id,name,slug) VALUES ('search-ws','Search','search-ws')`,
+		`INSERT INTO workspace_members(id,workspace_id,user_id,role) VALUES ('search-m1','search-ws','search-h1','MEMBER'),('search-m2','search-ws','search-h2','MEMBER')`,
+		`INSERT INTO agents(id,workspace_id,name,slug,status) VALUES ('search-agent','search-ws','Search','search-agent','IDLE')`,
+		`INSERT INTO chats(id,agent_id,workspace_id,created_by,status) VALUES ('search-c1','search-agent','search-ws','search-h1','ACTIVE'),('search-c2','search-agent','search-ws','search-h2','ACTIVE')`,
+	} {
+		if _, err := s.db.Exec(stmt); err != nil {
+			t.Fatal(err)
+		}
+	}
+	appendMsg(t, s, "search-c1", "search-agent", RoleUser, "orion alpha private", "")
+	appendMsg(t, s, "search-c2", "search-agent", RoleUser, "orion bravo private", "")
+
+	for _, tc := range []struct{ user, own string }{{"search-h1", "search-c1"}, {"search-h2", "search-c2"}} {
+		hits, err := s.SearchAgentsForUser(t.Context(), []string{"search-agent"}, tc.user, "orion", 1)
+		if err != nil || len(hits) != 1 || hits[0].SessionID != tc.own {
+			t.Errorf("user=%s hits=%+v err=%v, want own chat %s under LIMIT 1", tc.user, hits, err, tc.own)
+		}
+	}
+	if _, err := s.db.Exec(`DELETE FROM workspace_members WHERE workspace_id='search-ws' AND user_id='search-h2'`); err != nil {
+		t.Fatal(err)
+	}
+	hits, err := s.SearchAgentsForUser(t.Context(), []string{"search-agent"}, "search-h2", "orion", 10)
+	if err != nil || len(hits) != 0 {
+		t.Errorf("revoked user retained search hits: %+v %v", hits, err)
+	}
+}
+
 // TestSearchAgents_ScopeIsTheSet: an empty set is an error, never an
 // unfiltered scan of every conversation in the database.
 func TestSearchAgents_ScopeIsTheSet(t *testing.T) {

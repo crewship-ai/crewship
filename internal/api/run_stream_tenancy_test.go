@@ -64,7 +64,7 @@ func newTwoTenantFixture(t *testing.T) twoTenantFixture {
 	exec(`INSERT INTO workspace_members (id, workspace_id, user_id, role) VALUES (?, ?, ?, 'OWNER')`, "wm-a", wsA, f.userA)
 	exec(`INSERT INTO workspace_members (id, workspace_id, user_id, role) VALUES (?, ?, ?, 'OWNER')`, "wm-b", wsB, f.userB)
 	exec(`INSERT INTO agents (id, workspace_id, name, slug) VALUES (?, ?, ?, ?)`, agentA, wsA, "Agent A", "agent-a")
-	exec(`INSERT INTO chats (id, agent_id, workspace_id, mode, status) VALUES (?, ?, ?, 'CHAT', 'ACTIVE')`, f.chatInA, agentA, wsA)
+	exec(`INSERT INTO chats (id, agent_id, workspace_id, created_by, mode, status) VALUES (?, ?, ?, ?, 'CHAT', 'ACTIVE')`, f.chatInA, agentA, wsA, f.userA)
 
 	return f
 }

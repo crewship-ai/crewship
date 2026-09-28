@@ -1511,8 +1511,8 @@ func TestProxyChatMessages_NewSession(t *testing.T) {
 	req = withWorkspaceUser(req, userID, wsID, "OWNER")
 	w := httptest.NewRecorder()
 	h.ChatMessages(w, req)
-	if w.Code != http.StatusOK {
-		t.Errorf("status = %d, want 200 (empty messages)", w.Code)
+	if w.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404 (uncreated session)", w.Code)
 	}
 }
 

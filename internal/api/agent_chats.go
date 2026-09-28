@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/chataudience"
 	"github.com/crewship-ai/crewship/internal/journal"
 )
 
@@ -88,7 +89,8 @@ func (h *AgentHandler) ListChats(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Search runs before pagination, including matches beyond the loaded sidebar.
-	args := []any{agentID, workspaceID}
+	audienceWhere := " AND (" + chataudience.VisibleSQL + ")"
+	args := append([]any{agentID, workspaceID}, chataudience.Args(userID)...)
 	if q := strings.TrimSpace(r.URL.Query().Get("q")); q != "" {
 		kindWhere += " AND instr(crewship_casefold(c.title), crewship_casefold(?)) > 0"
 		args = append(args, q)
@@ -109,7 +111,7 @@ func (h *AgentHandler) ListChats(w http.ResponseWriter, r *http.Request) {
 	// Set BEFORE the body is written — WriteHeader flushes the header map, and
 	// a header set after it is silently dropped.
 	if r.URL.Query().Get("counts") == "1" {
-		counts, err := h.chatKindCounts(r.Context(), agentID, workspaceID)
+		counts, err := h.chatKindCounts(r.Context(), agentID, workspaceID, userID)
 		if err != nil {
 			// Not fatal, and deliberately so: the counts decorate a list that
 			// is otherwise fine, and failing the whole request over a number
@@ -133,7 +135,7 @@ func (h *AgentHandler) ListChats(w http.ResponseWriter, r *http.Request) {
 	// "13 more with Riley" is the number of direct chats, not of routine steps.
 	var total int
 	if err := h.db.QueryRowContext(r.Context(),
-		`SELECT COUNT(*) FROM chats c WHERE c.agent_id = ? AND c.workspace_id = ?`+kindWhere,
+		`SELECT COUNT(*) FROM chats c WHERE c.agent_id = ? AND c.workspace_id = ?`+audienceWhere+kindWhere,
 		args...).Scan(&total); err != nil {
 		replyInternalError(w, h.logger, "count agent chats", err)
 		return
@@ -147,7 +149,7 @@ func (h *AgentHandler) ListChats(w http.ResponseWriter, r *http.Request) {
 				strftime('%Y-%m-%dT%H:%M:%fZ', c.started_at),
 				c.started_at) AS last_activity_at
 		FROM chats c
-		WHERE c.agent_id = ? AND c.workspace_id = ?`+kindWhere+`
+		WHERE c.agent_id = ? AND c.workspace_id = ?`+audienceWhere+kindWhere+`
 		ORDER BY last_activity_at DESC
 		LIMIT ? OFFSET ?
 	`, append(args, limit, offset)...)
@@ -383,8 +385,8 @@ func (h *AgentHandler) MarkChatRead(w http.ResponseWriter, r *http.Request) {
 	// existence, don't write a cursor).
 	var one int
 	err := h.db.QueryRowContext(r.Context(),
-		`SELECT 1 FROM chats WHERE id = ? AND agent_id = ? AND workspace_id = ?`,
-		chatID, agentID, workspaceID).Scan(&one)
+		`SELECT 1 FROM chats c WHERE c.id = ? AND c.agent_id = ? AND c.workspace_id = ? AND (`+chataudience.VisibleSQL+`)`,
+		append([]any{chatID, agentID, workspaceID}, chataudience.Args(user.ID)...)...).Scan(&one)
 	if errors.Is(err, sql.ErrNoRows) {
 		replyError(w, http.StatusNotFound, "Chat not found")
 		return
@@ -420,7 +422,6 @@ func (h *AgentHandler) MarkChatRead(w http.ResponseWriter, r *http.Request) {
 	} else if n, _ := res.RowsAffected(); n > 0 {
 		broadcastWorkspaceEvent(h.hub, workspaceID, "inbox.updated", map[string]string{
 			"source": "chat_read",
-			"chat":   chatID,
 		})
 	}
 
@@ -458,8 +459,8 @@ func (h *AgentHandler) DeleteChat(w http.ResponseWriter, r *http.Request) {
 	err := h.db.QueryRowContext(r.Context(),
 		`SELECT c.created_by, a.slug, a.crew_id
 		   FROM chats c LEFT JOIN agents a ON a.id = c.agent_id
-		  WHERE c.id = ? AND c.agent_id = ? AND c.workspace_id = ?`,
-		chatID, agentID, workspaceID).Scan(&createdBy, &agentSlug, &agentCrewID)
+		  WHERE c.id = ? AND c.agent_id = ? AND c.workspace_id = ? AND (`+chataudience.VisibleSQL+`)`,
+		append([]any{chatID, agentID, workspaceID}, chataudience.Args(user.ID)...)...).Scan(&createdBy, &agentSlug, &agentCrewID)
 	if errors.Is(err, sql.ErrNoRows) {
 		replyError(w, http.StatusNotFound, "Chat not found")
 		return
@@ -564,13 +565,9 @@ func (h *AgentHandler) DeleteChat(w http.ResponseWriter, r *http.Request) {
 
 	h.broadcastAgentEvent("inbox.updated", workspaceID, map[string]string{
 		"source": "chat_deleted",
-		"chat":   chatID,
 	})
 
-	h.broadcastAgentEvent("chat_deleted", workspaceID, map[string]string{
-		"agent_id": agentID,
-		"chat_id":  chatID,
-	})
+	h.broadcastAgentEvent("chat_deleted", workspaceID, map[string]string{})
 	w.WriteHeader(http.StatusNoContent)
 }
 

@@ -216,11 +216,11 @@ func covWPMSeedAttachmentAgent(t *testing.T, h *ProxyHandler, wsID, agentID, slu
 	}
 }
 
-func covWPMSeedChat(t *testing.T, h *ProxyHandler, chatID, agentID, wsID string) {
+func covWPMSeedChat(t *testing.T, h *ProxyHandler, chatID, agentID, wsID, userID string) {
 	t.Helper()
-	if _, err := h.db.Exec(`INSERT INTO chats (id, agent_id, workspace_id, title, mode, status, started_at, created_at, updated_at)
-		VALUES (?, ?, ?, 'T', 'CHAT', 'ACTIVE', datetime('now'), datetime('now'), datetime('now'))`,
-		chatID, agentID, wsID); err != nil {
+	if _, err := h.db.Exec(`INSERT INTO chats (id, agent_id, workspace_id, created_by, title, mode, status, started_at, created_at, updated_at)
+		VALUES (?, ?, ?, ?, 'T', 'CHAT', 'ACTIVE', datetime('now'), datetime('now'), datetime('now'))`,
+		chatID, agentID, wsID, userID); err != nil {
 		t.Fatalf("seed chat: %v", err)
 	}
 }
@@ -312,21 +312,21 @@ func TestCovWPMAttachmentChatNotFound(t *testing.T) {
 	}
 }
 
-func TestCovWPMAttachmentChatNotScoped403(t *testing.T) {
+func TestCovWPMAttachmentChatNotScoped404(t *testing.T) {
 	h := newProxyHandlerForTest(t, "/tmp/cov-no-socket")
 	userID := seedTestUser(t, h.db)
 	wsID := seedTestWorkspace(t, h.db, userID)
 	covWPMSeedAttachmentAgent(t, h, wsID, "ag", "ag-slug", "crew-att")
 	covWPMSeedAttachmentAgent(t, h, wsID, "other-ag", "other-slug", "crew-att2")
 	// Chat belongs to other-ag, not ag.
-	covWPMSeedChat(t, h, "ch-other", "other-ag", wsID)
+	covWPMSeedChat(t, h, "ch-other", "other-ag", wsID, userID)
 
 	body, ct := covWPMMultipartBody(t, "file", "a.txt", "x")
 	req := covWPMAttachmentRequest("ag", "ch-other", ct, body, userID, wsID, "OWNER")
 	rr := httptest.NewRecorder()
 	h.AgentChatAttachment(rr, req)
-	if rr.Code != http.StatusForbidden {
-		t.Errorf("status = %d, want 403 (chat not scoped to this agent)", rr.Code)
+	if rr.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404 (chat not scoped to this agent)", rr.Code)
 	}
 }
 
@@ -335,7 +335,7 @@ func TestCovWPMAttachmentInvalidMultipart400(t *testing.T) {
 	userID := seedTestUser(t, h.db)
 	wsID := seedTestWorkspace(t, h.db, userID)
 	covWPMSeedAttachmentAgent(t, h, wsID, "ag", "ag-slug", "crew-att")
-	covWPMSeedChat(t, h, "ch", "ag", wsID)
+	covWPMSeedChat(t, h, "ch", "ag", wsID, userID)
 
 	// Claim multipart but send a non-multipart body → ParseMultipartForm errors.
 	req := covWPMAttachmentRequest("ag", "ch", "multipart/form-data; boundary=xyz",
@@ -352,7 +352,7 @@ func TestCovWPMAttachmentMissingFileField400(t *testing.T) {
 	userID := seedTestUser(t, h.db)
 	wsID := seedTestWorkspace(t, h.db, userID)
 	covWPMSeedAttachmentAgent(t, h, wsID, "ag", "ag-slug", "crew-att")
-	covWPMSeedChat(t, h, "ch", "ag", wsID)
+	covWPMSeedChat(t, h, "ch", "ag", wsID, userID)
 
 	// Valid multipart but no "file" field → FormFile error.
 	body, ct := covWPMMultipartBody(t, "", "", "")
@@ -369,7 +369,7 @@ func TestCovWPMAttachmentInvalidFilename400(t *testing.T) {
 	userID := seedTestUser(t, h.db)
 	wsID := seedTestWorkspace(t, h.db, userID)
 	covWPMSeedAttachmentAgent(t, h, wsID, "ag", "ag-slug", "crew-att")
-	covWPMSeedChat(t, h, "ch", "ag", wsID)
+	covWPMSeedChat(t, h, "ch", "ag", wsID, userID)
 
 	// filepath.Base(".") == "." → rejected as invalid filename.
 	body, ct := covWPMMultipartBody(t, "file", ".", "x")
@@ -386,7 +386,7 @@ func TestCovWPMAttachmentFilenameTooLong400(t *testing.T) {
 	userID := seedTestUser(t, h.db)
 	wsID := seedTestWorkspace(t, h.db, userID)
 	covWPMSeedAttachmentAgent(t, h, wsID, "ag", "ag-slug", "crew-att")
-	covWPMSeedChat(t, h, "ch", "ag", wsID)
+	covWPMSeedChat(t, h, "ch", "ag", wsID, userID)
 
 	longName := strings.Repeat("a", 256) + ".txt"
 	body, ct := covWPMMultipartBody(t, "file", longName, "x")
@@ -405,7 +405,7 @@ func TestCovWPMAttachmentUnreachableIPC502(t *testing.T) {
 	userID := seedTestUser(t, h.db)
 	wsID := seedTestWorkspace(t, h.db, userID)
 	covWPMSeedAttachmentAgent(t, h, wsID, "ag", "ag-slug", "crew-att")
-	covWPMSeedChat(t, h, "ch", "ag", wsID)
+	covWPMSeedChat(t, h, "ch", "ag", wsID, userID)
 
 	body, ct := covWPMMultipartBody(t, "file", "photo.png", "binary-bytes")
 	req := covWPMAttachmentRequest("ag", "ch", ct, body, userID, wsID, "OWNER")
@@ -427,7 +427,7 @@ func TestCovWPMAttachmentIPCErrorForwarded(t *testing.T) {
 	userID := seedTestUser(t, h.db)
 	wsID := seedTestWorkspace(t, h.db, userID)
 	covWPMSeedAttachmentAgent(t, h, wsID, "ag", "ag-slug", "crew-att")
-	covWPMSeedChat(t, h, "ch", "ag", wsID)
+	covWPMSeedChat(t, h, "ch", "ag", wsID, userID)
 
 	body, ct := covWPMMultipartBody(t, "file", "photo.png", "data")
 	req := covWPMAttachmentRequest("ag", "ch", ct, body, userID, wsID, "OWNER")
@@ -455,7 +455,7 @@ func TestCovWPMAttachmentHappyPath201(t *testing.T) {
 	userID := seedTestUser(t, h.db)
 	wsID := seedTestWorkspace(t, h.db, userID)
 	covWPMSeedAttachmentAgent(t, h, wsID, "ag", "ag-slug", "crew-att")
-	covWPMSeedChat(t, h, "ch", "ag", wsID)
+	covWPMSeedChat(t, h, "ch", "ag", wsID, userID)
 
 	body, ct := covWPMMultipartBody(t, "file", "report.pdf", "pdf-bytes")
 	req := covWPMAttachmentRequest("ag", "ch", ct, body, userID, wsID, "OWNER")

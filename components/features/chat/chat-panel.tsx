@@ -194,12 +194,9 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
   // (the POST below came back ok), or the server handed us real messages for
   // it. It is never INFERRED.
   //
-  // It used to be inferred, and that was the bug: the history GET treats
-  // anything that is not a 404 as proof of existence, but
-  // GET /chats/{id}/messages answers 200 with an empty message list for a chat
-  // that does not exist at all (internal/api/proxy.go, ChatMessages — the
-  // shape the CLI's history/export/recap commands read too, so it is not
-  // moving). A draft session therefore looked "ready", the create POST was
+  // It used to be inferred, and that was the bug: the history GET treated
+  // an empty successful response as proof of existence. A draft session
+  // therefore looked "ready", the create POST was
   // skipped, and the first message went out against a chat with no row: no
   // conversation persisted, an auto-title PATCH into the void, and a WS
   // channel the authorizer could not authorise (internal/ws/channel_auth.go,
@@ -388,8 +385,9 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
     //
     // A 404 and a 200 carrying an empty list are the SAME answer here — "no
     // history" — and this panel deliberately draws no other conclusion from
-    // either. The server returns the second for a chat that does not exist
-    // (proxy.go), so "not a 404" says nothing about whether the row is there;
+    // either. The server now returns 404 for an uncreated chat, indistinguishable
+    // from a denied chat; either response must leave the draft unconfirmed.
+    // Previously, "not a 404" was read as proof that a row existed;
     // reading it as existence is what skipped the create and lost the
     // conversation. Only messages that actually came back are proof, and that
     // is recorded below.

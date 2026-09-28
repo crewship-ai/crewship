@@ -16,6 +16,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/chataudience"
 )
 
 // Chat attachments — the upload, the list and the delete.
@@ -98,12 +100,7 @@ func (h *ProxyHandler) AgentChatAttachment(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	// The upload keeps its historical 403 for a chat that exists but belongs to
-	// another agent; the list and delete below use the 404 every other chat
-	// route answers. The divergence is deliberate and narrow — the upload's 403
-	// is a pinned contract (webhook_proxy_mission_cov_test.go) and changing it
-	// is not this change's business.
-	scope, ok := h.resolveChatScope(w, r, agentID, chatID, workspaceID, http.StatusForbidden)
+	scope, ok := h.resolveChatScope(w, r, agentID, chatID, workspaceID)
 	if !ok {
 		return
 	}
@@ -221,7 +218,7 @@ func (h *ProxyHandler) ListAgentChatAttachments(w http.ResponseWriter, r *http.R
 		replyError(w, http.StatusBadRequest, "agentId and chatId required")
 		return
 	}
-	scope, ok := h.resolveChatScope(w, r, agentID, chatID, workspaceID, http.StatusNotFound)
+	scope, ok := h.resolveChatScope(w, r, agentID, chatID, workspaceID)
 	if !ok {
 		return
 	}
@@ -282,7 +279,7 @@ func (h *ProxyHandler) DeleteAgentChatAttachment(w http.ResponseWriter, r *http.
 		replyError(w, http.StatusBadRequest, "agentId, chatId and attachmentId required")
 		return
 	}
-	scope, ok := h.resolveChatScope(w, r, agentID, chatID, workspaceID, http.StatusNotFound)
+	scope, ok := h.resolveChatScope(w, r, agentID, chatID, workspaceID)
 	if !ok {
 		return
 	}
@@ -348,29 +345,31 @@ type chatAttachmentScope struct {
 // missing agent, an agent with no crew, a chat outside the workspace — is a
 // 404, indistinguishable from "never existed", so a caller cannot use this
 // route to probe another tenant's ids.
-func (h *ProxyHandler) resolveChatScope(w http.ResponseWriter, r *http.Request, agentID, chatID, workspaceID string, mismatchStatus int) (chatAttachmentScope, bool) {
-	var slug, crewID sql.NullString
-	if err := h.db.QueryRowContext(r.Context(),
-		"SELECT slug, crew_id FROM agents WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
-		agentID, workspaceID).Scan(&slug, &crewID); err != nil || !crewID.Valid {
-		replyError(w, http.StatusNotFound, "Agent not found")
+func (h *ProxyHandler) resolveChatScope(w http.ResponseWriter, r *http.Request, agentID, chatID, workspaceID string) (chatAttachmentScope, bool) {
+	user := UserFromContext(r.Context())
+	if user == nil || user.ID == "" {
+		replyError(w, http.StatusUnauthorized, "auth required")
 		return chatAttachmentScope{}, false
 	}
-
-	// Verify the chat belongs to this agent so a stray chatID can't
-	// land files in — or read files out of — another agent's namespace.
-	var ownerAgent string
-	if err := h.db.QueryRowContext(r.Context(),
-		"SELECT agent_id FROM chats WHERE id = ? AND workspace_id = ?", chatID, workspaceID).Scan(&ownerAgent); err != nil {
+	// Resolve the agent, chat and audience in one statement. An inaccessible
+	// chat and a chat under a different agent have the same 404 response, before
+	// any attachment metadata or bytes are touched.
+	var slug, crewID sql.NullString
+	err := h.db.QueryRowContext(r.Context(), `SELECT a.slug, a.crew_id
+		FROM agents a JOIN chats c ON c.agent_id=a.id AND c.workspace_id=a.workspace_id
+		WHERE a.id=? AND a.workspace_id=? AND a.deleted_at IS NULL AND c.id=?
+		  AND (`+chataudience.VisibleSQL+`)`,
+		append([]any{agentID, workspaceID, chatID}, chataudience.Args(user.ID)...)...).Scan(&slug, &crewID)
+	if errors.Is(err, sql.ErrNoRows) {
 		replyError(w, http.StatusNotFound, "Chat not found")
 		return chatAttachmentScope{}, false
 	}
-	if ownerAgent != agentID {
-		if mismatchStatus == http.StatusForbidden {
-			replyError(w, http.StatusForbidden, "chat not scoped to this agent")
-		} else {
-			replyError(w, http.StatusNotFound, "Chat not found")
-		}
+	if err != nil {
+		replyInternalError(w, h.logger, "check chat attachment audience", err)
+		return chatAttachmentScope{}, false
+	}
+	if !crewID.Valid {
+		replyError(w, http.StatusNotFound, "Chat not found")
 		return chatAttachmentScope{}, false
 	}
 	return chatAttachmentScope{crewID: crewID.String, slug: slug.String}, true

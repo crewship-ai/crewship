@@ -38,11 +38,11 @@ func TestCovAQ_List_CrewFilterWithCounts(t *testing.T) {
 		 downloads, rating_count, pricing_tier, featured, tags, credential_requirements, content)
 		VALUES ('covaq-skill', 'S', 'covaq-s', 'S', 'd', 'v', '1.0.0', 'CODING', 'CUSTOM', 'UNVERIFIED', 0, 0, 'FREE', 0, '[]', '[]', 'c')`)
 	execOrFatal(t, db, `INSERT INTO agent_skills (id, agent_id, skill_id, enabled) VALUES ('covaq-as', 'covaq-ag', 'covaq-skill', 1)`)
-	execOrFatal(t, db, `INSERT INTO chats (id, agent_id, workspace_id, mode, status) VALUES ('covaq-chat', 'covaq-ag', ?, 'CHAT', 'ACTIVE')`, wsID)
+	execOrFatal(t, db, `INSERT INTO chats (id, agent_id, workspace_id, created_by, mode, status) VALUES ('covaq-chat', 'covaq-ag', ?, ?, 'CHAT', 'ACTIVE')`, wsID, userID)
 
 	h := NewAgentHandler(db, newTestLogger())
 	req := httptest.NewRequest("GET", "/api/v1/agents?crew_id=covaq-crew", nil)
-	req = req.WithContext(withWorkspace(req.Context(), wsID, "OWNER"))
+	req = req.WithContext(withWorkspace(withUser(req.Context(), &AuthUser{ID: userID}), wsID, "OWNER"))
 	rr := httptest.NewRecorder()
 	h.List(rr, req)
 	if rr.Code != http.StatusOK {

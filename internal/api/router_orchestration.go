@@ -821,11 +821,14 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	// Multipart upload tied to a (agent, chat) pair. Lands at
 	// /output/<slug>/attachments/<chatId>/<attachmentId>/<filename> on the
 	// agent side — one upload, one identity, one location.
+	// openapi: responses 200,201,400,401,403,404,500,502
 	r.authedMut("POST", "/api/v1/agents/{agentId}/chats/{chatId}/attachments", roleCreate, proxy.AgentChatAttachment)
 	// The other half of that lifecycle. Without these the bytes could be
 	// created and never enumerated or reclaimed: chat blobs sit outside the
 	// content-addressed sweep by design, so nothing else can collect them.
+	// openapi: responses 200,400,401,403,404,500
 	r.mux.Handle("GET /api/v1/agents/{agentId}/chats/{chatId}/attachments", authed(wsCtx(http.HandlerFunc(proxy.ListAgentChatAttachments))))
+	// openapi: responses 204,400,401,403,404,500,502
 	r.authedMut("DELETE", "/api/v1/agents/{agentId}/chats/{chatId}/attachments/{attachmentId}", roleCreate, proxy.DeleteAgentChatAttachment)
 	r.mux.Handle("GET /api/v1/crews/{crewId}/files", authed(wsCtx(http.HandlerFunc(proxy.CrewFiles))))
 	r.mux.Handle("GET /api/v1/crews/{crewId}/files/download", authed(wsCtx(http.HandlerFunc(proxy.CrewFileDownload))))

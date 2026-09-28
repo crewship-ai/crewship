@@ -21,6 +21,8 @@ import (
 	"strings"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/crewship-ai/crewship/internal/chataudience"
 )
 
 // chatTitleMaxRunes caps a session title at 200 RUNES.
@@ -182,8 +184,8 @@ func (h *AgentHandler) UpdateChat(w http.ResponseWriter, r *http.Request) {
 	// mis-nested id 404s without leaking existence, and without writing.
 	var createdBy sql.NullString
 	err = h.db.QueryRowContext(r.Context(),
-		`SELECT created_by FROM chats WHERE id = ? AND agent_id = ? AND workspace_id = ?`,
-		chatID, agentID, workspaceID).Scan(&createdBy)
+		`SELECT c.created_by FROM chats c WHERE c.id = ? AND c.agent_id = ? AND c.workspace_id = ? AND (`+chataudience.VisibleSQL+`)`,
+		append([]any{chatID, agentID, workspaceID}, chataudience.Args(user.ID)...)...).Scan(&createdBy)
 	if errors.Is(err, sql.ErrNoRows) {
 		replyError(w, http.StatusNotFound, "Chat not found")
 		return
@@ -234,14 +236,9 @@ func (h *AgentHandler) UpdateChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Sidebars open elsewhere in the workspace repaint from this instead of
-	// polling. Nothing new is exposed: ListChats already serves every chat of
-	// an agent to any workspace member.
-	h.broadcastAgentEvent("chat_renamed", workspaceID, map[string]string{
-		"agent_id": agentID,
-		"chat_id":  chatID,
-		"title":    title,
-	})
+	// Workspace-wide invalidation carries no private chat metadata. Readers
+	// re-fetch through ListChats, which applies their current audience.
+	h.broadcastAgentEvent("chat_renamed", workspaceID, map[string]string{})
 
 	writeJSON(w, http.StatusOK, row)
 }

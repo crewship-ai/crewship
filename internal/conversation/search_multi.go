@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/chataudience"
 )
 
 const (
@@ -25,6 +27,20 @@ const (
 // workspace on the request context. The query is wrapped via fts5Phrase so
 // FTS5 operators in user input are matched as literal text.
 func (s *Store) SearchAgents(ctx context.Context, agentIDs []string, query string, limit int) ([]SearchHit, error) {
+	return s.searchAgents(ctx, agentIDs, "", query, limit)
+}
+
+// SearchAgentsForUser is the authenticated API search. Chat audience is
+// applied inside the ranked SQL query, before LIMIT, so another person's
+// private hits cannot leak or evict this user's own matches.
+func (s *Store) SearchAgentsForUser(ctx context.Context, agentIDs []string, userID, query string, limit int) ([]SearchHit, error) {
+	if userID == "" {
+		return nil, fmt.Errorf("user_id is required")
+	}
+	return s.searchAgents(ctx, agentIDs, userID, query, limit)
+}
+
+func (s *Store) searchAgents(ctx context.Context, agentIDs []string, userID, query string, limit int) ([]SearchHit, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -54,14 +70,23 @@ func (s *Store) SearchAgents(ctx context.Context, agentIDs []string, query strin
 	// agent_id lives only on the base table, so the bare reference stays
 	// unambiguous. ORDER BY bm25(fts) ASC puts the best (lowest) score
 	// first. The agent set is bound as parameters — never interpolated —
-	// so an id can never carry SQL of its own.
-	args := make([]any, 0, len(ids)+2)
+	// so an id can never carry SQL of its own. The authenticated API variant
+	// joins the chat audience before FTS ranking and LIMIT.
+	args := make([]any, 0, len(ids)+5)
+	audienceJoin := ""
+	if userID != "" {
+		audienceJoin = ` JOIN chats c ON c.id=cm.session_id AND c.agent_id=cm.agent_id
+			JOIN agents a ON a.id=c.agent_id AND a.workspace_id=c.workspace_id AND a.deleted_at IS NULL
+			AND (` + chataudience.VisibleSQL + `)`
+		args = append(args, chataudience.Args(userID)...)
+	}
 	args = append(args, ids...)
 	args = append(args, phrase, limit)
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT cm.id, cm.session_id, cm.agent_id, cm.role, cm.content, cm.tool_summary, cm.ts
 		FROM conversation_messages cm
 		JOIN conversation_messages_fts fts ON fts.rowid = cm.rowid
+		`+audienceJoin+`
 		WHERE cm.agent_id IN (`+placeholders(len(ids))+`) AND conversation_messages_fts MATCH ?
 		ORDER BY bm25(conversation_messages_fts) ASC, cm.ts DESC
 		LIMIT ?`, args...)

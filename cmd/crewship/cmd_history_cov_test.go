@@ -67,6 +67,22 @@ func TestHistoryRunE_PromptsPreview(t *testing.T) {
 	}
 }
 
+func TestHistoryRunE_MissingChatPreviewDoesNotHideRun(t *testing.T) {
+	s := covStubCli9(t)
+	s.OnGet("/api/v1/runs", clitest.JSONResponse(200, map[string]any{"data": covHistoryRuns(t)[:1]}))
+	s.OnGet("/api/v1/chats/ch1/messages", clitest.ErrorResponse(404, "Chat not found"))
+	covSetFlagCli9(t, historyCmd, "prompts", "true")
+
+	out := covCaptureStdoutCli9(t, func() {
+		if err := historyCmd.RunE(historyCmd, nil); err != nil {
+			t.Errorf("missing chat preview must not fail history: %v", err)
+		}
+	})
+	if !strings.Contains(out, "viktor") {
+		t.Errorf("run disappeared when its chat history returned 404:\n%s", out)
+	}
+}
+
 func TestHistoryRunE_StatusAndAgentFilters(t *testing.T) {
 	s := covStubCli9(t)
 	s.OnGet("/api/v1/runs", clitest.JSONResponse(200, map[string]any{"data": []map[string]any{}}))

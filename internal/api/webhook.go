@@ -814,6 +814,7 @@ func (h *WebhookHandler) runWebhookAgent(
 		AgentID:     agentID,
 		WorkspaceID: info.WorkspaceID,
 		Title:       fmt.Sprintf("Webhook: %s", payload.Event),
+		Origin:      "WEBHOOK",
 	}); err != nil {
 		h.logger.Warn("failed to create/ensure webhook chat session", "error", err)
 	}

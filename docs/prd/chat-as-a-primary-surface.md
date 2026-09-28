@@ -382,11 +382,11 @@ which legitimately wants a fresh session.
 first send creates exactly one row.** Both halves, or this step trades a
 sidebar full of empty threads for conversations that are never saved at all.
 
-**Watch out:** `GET /api/v1/chats/{id}/messages` answers **200 with an empty
-message list** for a chat that does not exist (`internal/api/proxy.go`,
-`ChatMessages`; the CLI's `history --prompts`, `export` and `recap` read the
-same endpoint and rely on it). It is therefore not a probe for existence, and
-the first implementation of this step read it as one — the create was skipped
+**Watch out:** The first implementation inferred chat existence from a 200
+history response, which could carry an empty list even without a chat row.
+That response is never proof of existence. An uncreated or inaccessible chat
+now returns 404; the CLI's `history --prompts`, `export` and `recap` also read
+this endpoint. The first implementation skipped the create
 for every draft session, and with no `chats` row the WS channel authorizer
 (`internal/ws/channel_auth.go`, `isSessionOwner`) refused the send outright:
 nothing persisted, nothing titled, no error on screen. The panel now confirms
@@ -395,8 +395,7 @@ messages for it — and the redundant create for a row that already exists is an
 `INSERT OR IGNORE` that writes nothing.
 
 **Test:** Go — POST count on the chats endpoint across a mount/unmount cycle.
-Vitest — the first send POSTs, against a mocked server that answers the
-history GET exactly as `proxy.go` does.
+Vitest — the first send POSTs after either an empty 200 or a 404 history GET.
 
 **Size:** hours. **Steps 1–3 are the "even if §0 says stop" set.**
 

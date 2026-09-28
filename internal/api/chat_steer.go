@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/crewship-ai/crewship/internal/chataudience"
 	"github.com/crewship-ai/crewship/internal/chatbridge"
 )
 
@@ -25,9 +26,8 @@ type Steerer interface {
 // (the chatbridge guards against racing a second run into a live turn);
 // live injection into a running turn is a deferred follow-up.
 //
-// Tenancy gate mirrors MessageReactionsHandler: the route mounts under
-// /api/v1/chats/{chatId}/... with no workspace_id, so the handler derives
-// the chat's workspace and verifies membership itself (cross-tenant → 404).
+// The route has no workspace ID; the handler checks the current chat audience
+// before passing a steering message to the bridge (inaccessible → 404).
 type SteerHandler struct {
 	db      *sql.DB
 	steerer Steerer
@@ -48,8 +48,7 @@ func (h *SteerHandler) SetSteerer(s Steerer) {
 	h.steerer = s
 }
 
-// ensureChatVisible confirms the authenticated user is a member of the
-// chat's workspace. Identical contract to the reactions handler's gate.
+// ensureChatVisible checks the same audience as direct chat reads.
 func (h *SteerHandler) ensureChatVisible(r *http.Request, chatID string) bool {
 	if chatID == "" {
 		return false
@@ -58,16 +57,8 @@ func (h *SteerHandler) ensureChatVisible(r *http.Request, chatID string) bool {
 	if user == nil {
 		return false
 	}
-	var owner string
-	if err := h.db.QueryRowContext(r.Context(),
-		"SELECT workspace_id FROM chats WHERE id = ?", chatID).Scan(&owner); err != nil {
-		return false
-	}
-	var role string
-	err := h.db.QueryRowContext(r.Context(),
-		"SELECT role FROM workspace_members WHERE workspace_id = ? AND user_id = ?",
-		owner, user.ID).Scan(&role)
-	return err == nil
+	allowed, err := chataudience.CanRead(r.Context(), h.db, chatID, user.ID)
+	return err == nil && allowed
 }
 
 type steerRequest struct {

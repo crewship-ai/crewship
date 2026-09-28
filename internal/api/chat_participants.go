@@ -6,6 +6,8 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+
+	"github.com/crewship-ai/crewship/internal/chataudience"
 )
 
 // ChatParticipantsHandler manages the humans in a multi-user group chat.
@@ -34,9 +36,9 @@ type participantRow struct {
 	JoinedAt string `json:"joined_at"`
 }
 
-// chatWorkspace returns the chat's workspace id and whether the authenticated
-// caller is a member of it. Routes carry no workspace_id, so the handler
-// enforces tenancy itself — same contract as the reactions handler.
+// chatWorkspace returns the chat's workspace id only to members of its
+// audience. Routes carry no workspace_id, so the handler checks both the
+// workspace and private/group audience itself.
 func (h *ChatParticipantsHandler) chatWorkspace(r *http.Request, chatID string) (string, bool) {
 	if chatID == "" {
 		return "", false
@@ -50,19 +52,16 @@ func (h *ChatParticipantsHandler) chatWorkspace(r *http.Request, chatID string) 
 		"SELECT workspace_id FROM chats WHERE id = ?", chatID).Scan(&ws); err != nil {
 		return "", false
 	}
-	var role string
-	if err := h.db.QueryRowContext(r.Context(),
-		"SELECT role FROM workspace_members WHERE workspace_id = ? AND user_id = ?",
-		ws, user.ID).Scan(&role); err != nil {
+	allowed, err := chataudience.CanRead(r.Context(), h.db, chatID, user.ID)
+	if err != nil || !allowed {
 		return "", false
 	}
 	return ws, true
 }
 
 // canManageChat reports whether userID may mutate the chat's roster: only the
-// chat's creator or a workspace OWNER/ADMIN. Plain workspace members can SEE a
-// chat (chatWorkspace) but must not be able to add/remove participants or flip
-// it to a group — otherwise any member could reshape any chat in the workspace.
+// chat's creator or a workspace OWNER/ADMIN. Other audience members can see
+// the chat but must not be able to reshape its roster.
 func (h *ChatParticipantsHandler) canManageChat(r *http.Request, chatID, ws, userID string) bool {
 	var createdBy sql.NullString
 	if err := h.db.QueryRowContext(r.Context(),

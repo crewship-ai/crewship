@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"net/http"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/chataudience"
 )
 
 func (h *AgentHandler) List(w http.ResponseWriter, r *http.Request) {
@@ -15,6 +17,10 @@ func (h *AgentHandler) List(w http.ResponseWriter, r *http.Request) {
 	if workspaceID == "" {
 		replyError(w, http.StatusBadRequest, "workspace_id is required")
 		return
+	}
+	userID := ""
+	if user := UserFromContext(r.Context()); user != nil {
+		userID = user.ID
 	}
 
 	crewID := r.URL.Query().Get("crew_id")
@@ -175,8 +181,8 @@ func (h *AgentHandler) List(w http.ResponseWriter, r *http.Request) {
 		// would quietly show "0 skills" for every agent until someone
 		// eventually noticed. Failing loud is the same behavior the
 		// original single-query List handler had.
-		loadCounts := func(bucket, query string, assign func(*agentResponse, int)) error {
-			counts, err := batchCountByAgentID(r.Context(), h.db, query, ids)
+		loadCounts := func(bucket, query string, assign func(*agentResponse, int), extraArgs ...any) error {
+			counts, err := batchCountByAgentID(r.Context(), h.db, query, ids, extraArgs...)
 			if err != nil {
 				return fmt.Errorf("%s batch count: %w", bucket, err)
 			}
@@ -192,18 +198,19 @@ func (h *AgentHandler) List(w http.ResponseWriter, r *http.Request) {
 			bucket string
 			query  string
 			assign func(*agentResponse, int)
+			args   []any
 		}{
 			{"skills",
 				`SELECT agent_id, COUNT(*) FROM agent_skills WHERE agent_id IN (%s) GROUP BY agent_id`,
-				func(a *agentResponse, n int) { a.Count.Skills = n }},
+				func(a *agentResponse, n int) { a.Count.Skills = n }, nil},
 			{"credentials",
 				`SELECT agent_id, COUNT(*) FROM agent_credentials WHERE agent_id IN (%s) GROUP BY agent_id`,
-				func(a *agentResponse, n int) { a.Count.Credentials = n }},
+				func(a *agentResponse, n int) { a.Count.Credentials = n }, nil},
 			{"chats",
-				`SELECT agent_id, COUNT(*) FROM chats WHERE agent_id IN (%s) GROUP BY agent_id`,
-				func(a *agentResponse, n int) { a.Count.Chats = n }},
+				`SELECT c.agent_id, COUNT(*) FROM chats c WHERE c.agent_id IN (%s) AND (` + chataudience.VisibleSQL + `) GROUP BY c.agent_id`,
+				func(a *agentResponse, n int) { a.Count.Chats = n }, chataudience.Args(userID)},
 		} {
-			if err := loadCounts(step.bucket, step.query, step.assign); err != nil {
+			if err := loadCounts(step.bucket, step.query, step.assign, step.args...); err != nil {
 				h.logger.Error("batch count", "bucket", step.bucket, "error", err)
 				replyError(w, http.StatusInternalServerError, "Internal server error")
 				return
@@ -226,6 +233,10 @@ func (h *AgentHandler) Get(w http.ResponseWriter, r *http.Request) {
 	}
 
 	workspaceID := WorkspaceIDFromContext(r.Context())
+	userID := ""
+	if user := UserFromContext(r.Context()); user != nil {
+		userID = user.ID
+	}
 
 	var a agentResponse
 	var memEnabled, schedEnabled, whRequireTS, whSecretSet int
@@ -249,12 +260,12 @@ func (h *AgentHandler) Get(w http.ResponseWriter, r *http.Request) {
 			c.name, c.slug, c.color, c.avatar_style,
 			(SELECT COUNT(*) FROM agent_skills WHERE agent_id = a.id),
 			(SELECT COUNT(*) FROM agent_credentials WHERE agent_id = a.id),
-			(SELECT COUNT(*) FROM chats WHERE agent_id = a.id),
+			(SELECT COUNT(*) FROM chats c WHERE c.agent_id = a.id AND (`+chataudience.VisibleSQL+`)),
 			a.ephemeral, a.expires_at, a.expired_at, a.parent_lead_id, a.hire_reason
 		FROM agents a
 		LEFT JOIN crews c ON c.id = a.crew_id
 		WHERE a.id = ? AND a.workspace_id = ? AND a.deleted_at IS NULL
-	`, agentID, workspaceID).Scan(&a.ID, &a.CrewID, &a.WorkspaceID, &a.Name, &a.Slug,
+	`, userID, userID, userID, agentID, workspaceID).Scan(&a.ID, &a.CrewID, &a.WorkspaceID, &a.Name, &a.Slug,
 		&a.Description, &a.RoleTitle, &a.AgentRole, &a.LeadMode, &a.Status, &a.CLIAdapter,
 		&a.LLMProvider, &a.LLMModel, &a.SystemPrompt, &a.AvatarSeed, &a.AvatarStyle,
 		&avatarSVGHash,

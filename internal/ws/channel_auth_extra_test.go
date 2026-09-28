@@ -23,7 +23,8 @@ func seededDB(t *testing.T) *sql.DB {
 	schema := `
 		CREATE TABLE workspace_members (
 			workspace_id TEXT NOT NULL,
-			user_id TEXT NOT NULL
+			user_id TEXT NOT NULL,
+			role TEXT NOT NULL DEFAULT 'MEMBER'
 		);
 		CREATE TABLE crews (
 			id TEXT PRIMARY KEY,
@@ -41,8 +42,13 @@ func seededDB(t *testing.T) *sql.DB {
 		);
 		CREATE TABLE chats (
 			id TEXT PRIMARY KEY,
-			workspace_id TEXT NOT NULL
+			workspace_id TEXT NOT NULL,
+			created_by TEXT,
+			mode TEXT NOT NULL DEFAULT 'CHAT',
+			origin TEXT,
+			visibility TEXT NOT NULL DEFAULT 'private'
 		);
+		CREATE TABLE chat_participants (chat_id TEXT NOT NULL, user_id TEXT NOT NULL);
 	`
 	if _, err := db.Exec(schema); err != nil {
 		t.Fatalf("schema: %v", err)
@@ -54,7 +60,7 @@ func seededDB(t *testing.T) *sql.DB {
 		`INSERT INTO agents(id, workspace_id, deleted_at) VALUES ('agent-live', 'ws-1', NULL)`,
 		`INSERT INTO agents(id, workspace_id, deleted_at) VALUES ('agent-deleted', 'ws-1', '2024-01-01')`,
 		`INSERT INTO missions(id, crew_id) VALUES ('mission-1', 'crew-live')`,
-		`INSERT INTO chats(id, workspace_id) VALUES ('chat-1', 'ws-1')`,
+		`INSERT INTO chats(id, workspace_id, created_by) VALUES ('chat-1', 'ws-1', 'u-good')`,
 	}
 	for _, s := range stmts {
 		if _, err := db.Exec(s); err != nil {

@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+
+	"github.com/crewship-ai/crewship/internal/chataudience"
 )
 
 // MessageReactionsHandler serves CRUD for emoji reactions on individual
@@ -31,10 +33,9 @@ type reactionRow struct {
 	Mine  bool   `json:"mine"`
 }
 
-// ensureChatVisible derives the chat's workspace from the chat row and
-// confirms the authenticated user is a member. Routes are mounted as
-// `/api/v1/chats/{chatId}/...` (no workspace_id in path/query), so we
-// can't rely on RequireWorkspace — the handler enforces tenancy itself.
+// ensureChatVisible applies the chat's audience, including private and group
+// membership. The route has no workspace_id, so the predicate also checks
+// workspace membership.
 func (h *MessageReactionsHandler) ensureChatVisible(r *http.Request, chatID string) bool {
 	if chatID == "" {
 		return false
@@ -43,17 +44,8 @@ func (h *MessageReactionsHandler) ensureChatVisible(r *http.Request, chatID stri
 	if user == nil {
 		return false
 	}
-	var owner string
-	err := h.db.QueryRowContext(r.Context(),
-		"SELECT workspace_id FROM chats WHERE id = ?", chatID).Scan(&owner)
-	if err != nil {
-		return false
-	}
-	var role string
-	err = h.db.QueryRowContext(r.Context(),
-		"SELECT role FROM workspace_members WHERE workspace_id = ? AND user_id = ?",
-		owner, user.ID).Scan(&role)
-	return err == nil
+	allowed, err := chataudience.CanRead(r.Context(), h.db, chatID, user.ID)
+	return err == nil && allowed
 }
 
 func (h *MessageReactionsHandler) List(w http.ResponseWriter, r *http.Request) {

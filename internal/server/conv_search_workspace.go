@@ -14,10 +14,10 @@ import (
 // everything the caller can see, and the API handler resolves that set from
 // the workspace on the request context before calling this.
 //
-// The agent set is the tenancy boundary and arrives already authorized —
-// this layer, like the agent-scoped one, only filters.
-func (a *convStoreAdapter) SearchConversationsAcross(ctx context.Context, agentIDs []string, query string, limit int) ([]goapi.ConversationSearchHit, error) {
-	hits, err := a.store.SearchAgents(ctx, agentIDs, query, limit)
+// The handler resolves the workspace agent set; this adapter also applies the
+// authenticated user's per-chat audience inside the ranked SQL query.
+func (a *convStoreAdapter) SearchConversationsAcross(ctx context.Context, agentIDs []string, userID, query string, limit int) ([]goapi.ConversationSearchHit, error) {
+	hits, err := a.store.SearchAgentsForUser(ctx, agentIDs, userID, query, limit)
 	if err != nil {
 		return nil, err
 	}
