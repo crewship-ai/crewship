@@ -393,7 +393,8 @@ function ResultRow({ run, count = 1, routine }: { run: DashboardRun; count?: num
         {run.duration_ms ? ` · ${formatDurationMs(run.duration_ms)}` : ""}
       </span>
       <span className="inline-flex items-center gap-1 text-label font-medium text-primary-hover">
-        Open run <ChevronRight className="h-3.5 w-3.5" />
+        {/* The verb stays for screen readers on a phone, where the name needs the width. */}
+        <span className="sr-only @3xl/overview:not-sr-only">Open run</span> <ChevronRight className="h-3.5 w-3.5" />
       </span>
     </Link>
   )

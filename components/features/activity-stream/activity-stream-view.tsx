@@ -168,6 +168,11 @@ export function ActivityStreamView({ workspaceId }: { workspaceId: string }) {
   const [pinned, setPinned] = React.useState<SpineLink | null>(null)
   const [selected, setSelected] = React.useState<JournalEntry | null>(null)
   const [railCollapsed, setRailCollapsed] = React.useState(false)
+  // On a phone the rail is a drawer over the content; open by default it hid
+  // the overview on arrival. Start it closed, as the Routines explorer does.
+  React.useEffect(() => {
+    if (isMobile) setRailCollapsed(true)
+  }, [isMobile])
   // Which catalogue the rail lists. Owned HERE rather than inside the rail so
   // it survives a drill-down: walking into an agent out of a chain graph and
   // pressing back must land the reader on the list they left, not reset them to
