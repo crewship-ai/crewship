@@ -351,9 +351,12 @@ func (h *AgentHandler) CreateChat(w http.ResponseWriter, r *http.Request) {
 	}
 	// A caller-supplied session_id is an idempotency key, not a way to join
 	// another person's chat. Hide collisions across workspaces and creators.
-	if ownerAgentID != agentID || ownerWorkspaceID != workspaceID ||
-		!createdBy.Valid || createdBy.String != userID {
+	if ownerWorkspaceID != workspaceID || !createdBy.Valid || createdBy.String != userID {
 		replyError(w, http.StatusNotFound, "Chat not found")
+		return
+	}
+	if ownerAgentID != agentID {
+		replyError(w, http.StatusConflict, "Chat belongs to a different agent")
 		return
 	}
 
