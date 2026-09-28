@@ -336,15 +336,23 @@ func (h *AgentHandler) CreateChat(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Check outcome: either inserted, already existed (IGNORE), or agent was deleted
-	var ownerAgentID string
+	var ownerAgentID, ownerWorkspaceID string
+	var createdBy sql.NullString
 	if err := h.db.QueryRowContext(r.Context(),
-		"SELECT agent_id FROM chats WHERE id = ?", chatID).Scan(&ownerAgentID); err != nil {
+		"SELECT agent_id, workspace_id, created_by FROM chats WHERE id = ?", chatID).
+		Scan(&ownerAgentID, &ownerWorkspaceID, &createdBy); err != nil {
 		if err == sql.ErrNoRows {
 			// No row: agent was deleted between preflight and INSERT (WHERE EXISTS failed)
 			replyError(w, http.StatusNotFound, "Agent not found")
 			return
 		}
 		replyInternalError(w, h.logger, "verify chat owner", err)
+		return
+	}
+	// A caller-supplied session_id is an idempotency key, not a way to join
+	// another person's chat. Hide collisions across workspaces and creators.
+	if ownerWorkspaceID != workspaceID || !createdBy.Valid || createdBy.String != userID {
+		replyError(w, http.StatusNotFound, "Chat not found")
 		return
 	}
 	if ownerAgentID != agentID {
