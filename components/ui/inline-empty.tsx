@@ -24,14 +24,14 @@ export function InlineEmpty({
     <div
       data-slot="inline-empty"
       className={cn(
-        "flex items-center gap-3 rounded-xl border border-dashed border-border bg-surface-subtle px-3 py-2.5 text-label text-muted-foreground",
+        "flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-dashed border-border bg-surface-subtle px-3 py-2.5 text-label text-muted-foreground",
         className,
       )}
     >
       <span className="icon-tile inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-[9px]" aria-hidden>
         <Icon className="h-3.5 w-3.5" />
       </span>
-      <span className="min-w-0 flex-1">{text}</span>
+      <span className="min-w-[12rem] flex-1">{text}</span>
       {action}
     </div>
   )

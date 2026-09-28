@@ -185,6 +185,7 @@ export function DetailCard({
 }: DetailCardProps) {
   return (
     <div
+      data-slot="detail-card"
       data-testid={testId}
       className={cn("overflow-hidden rounded-[20px] border bg-card", TONE_BORDER[tone], className)}
     >
@@ -301,7 +302,7 @@ export function StatStrip({ items, className }: { items: StatItem[]; className?:
     <div className={cn("flex flex-wrap overflow-hidden rounded-[20px] border border-border bg-card", className)}>
       {items.map((s) => (
         <div key={s.label} className="min-w-[120px] flex-1 border-r border-hairline px-4 py-2.5 last:border-r-0">
-          <div className="type-meta uppercase tracking-wide text-muted-foreground-soft">{s.label}</div>
+          <div className="eyebrow text-muted-foreground">{s.label}</div>
           <div
             className={cn(
               "type-row mt-0.5 truncate font-semibold tabular-nums",
