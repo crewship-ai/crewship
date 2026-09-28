@@ -131,6 +131,9 @@ func (p Plan) provenance() string {
 // Narrow enforces the runtime portion of delegation. The application must also
 // enforce its object/operation grants, origin permissions and data provenance.
 func Narrow(parent, child Plan) error {
+	if err := narrowNetwork(parent, child); err != nil {
+		return err
+	}
 	if parent.Workspace != child.Workspace || parent.Principal != child.Principal || parent.PrincipalKind != child.PrincipalKind || parent.Scope != child.Scope || parent.Origin != child.Origin || parent.OriginID != child.OriginID || child.Expires.After(parent.Expires) {
 		return ErrDenied
 	}

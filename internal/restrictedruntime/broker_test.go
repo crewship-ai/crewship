@@ -92,3 +92,53 @@ func TestBrokerRelayEOFStopsAndRemovesAttempt(t *testing.T) {
 		t.Fatal("relay failure did not kill and remove runtime")
 	}
 }
+
+func TestBrokerDNSRejectsMixedAnswersAndHostInterface(t *testing.T) {
+	public := net.ParseIP("8.8.8.8")
+	locals := func() ([]net.Addr, error) { return []net.Addr{&net.IPNet{IP: public, Mask: net.CIDRMask(32, 32)}}, nil }
+	lookup := func(context.Context, string) ([]net.IPAddr, error) { return []net.IPAddr{{IP: public}}, nil }
+	if _, err := resolveBrokerIP(context.Background(), "example.com", lookup, locals); err == nil {
+		t.Fatal("host public interface allowed")
+	}
+	locals = func() ([]net.Addr, error) { return nil, nil }
+	lookup = func(context.Context, string) ([]net.IPAddr, error) {
+		return []net.IPAddr{{IP: public}, {IP: net.ParseIP("::1")}}, nil
+	}
+	if _, err := resolveBrokerIP(context.Background(), "example.com", lookup, locals); err == nil {
+		t.Fatal("mixed DNS answer allowed")
+	}
+}
+
+func TestBrokerDelegationCannotWidenOperations(t *testing.T) {
+	parent := connectedPlan()
+	for name, mutate := range map[string]func(*Plan){
+		"destination": func(p *Plan) { p.Network.Grants[0].URL = "https://other.example/echo" },
+		"method":      func(p *Plan) { p.Network.Grants[0].Method = "GET" },
+		"size":        func(p *Plan) { p.Network.Grants[0].MaxResponse++ },
+		"timeout":     func(p *Plan) { p.Network.Grants[0].TimeoutMillis++ },
+		"credential":  func(p *Plan) { p.Network.Credentials = []BrokerCredential{{ID: "foreign"}} },
+	} {
+		t.Run(name, func(t *testing.T) {
+			child := connectedPlan()
+			mutate(&child)
+			if Narrow(parent, child) == nil {
+				t.Fatal("delegated network authority widened")
+			}
+		})
+	}
+	child := connectedPlan()
+	child.Network.Audience = "child-audience"
+	child.Network.Grants[0].MaxResponse = 10
+	if err := Narrow(parent, child); err != nil {
+		t.Fatal("narrowed child denied", err)
+	}
+}
+
+func TestBrokerFramesRejectOversizeAndUnknownFields(t *testing.T) {
+	for _, packet := range [][]byte{{0, 32, 0, 1}, {0, 0, 0, 0}, append([]byte{0, 0, 0, 14}, []byte(`{"Unknown":1} `)...)} {
+		var f brokerFrame
+		if err := readBrokerFrame(strings.NewReader(string(packet)), &f); err == nil {
+			t.Fatal("malformed frame accepted")
+		}
+	}
+}
