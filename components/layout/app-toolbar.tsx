@@ -38,6 +38,7 @@ import { useAppStore } from "@/lib/store"
 import { ProvisioningBadge } from "./app-toolbar-provisioning"
 import { SystemStatusPill } from "./status-pill"
 import { Volume2 } from "lucide-react"
+import { ThemeSwitcher } from "./theme-switcher"
 
 // External destinations for the user menu. Kept here (not env-driven) because
 // they are stable public properties; the docs site is the Mintlify source of
@@ -313,6 +314,10 @@ export function AppToolbar() {
                 <Badge variant="outline" className="shrink-0 text-micro px-1.5 py-0.5">{workspaceRole ? workspaceRole.charAt(0) + workspaceRole.slice(1).toLowerCase() : "Loading role…"}</Badge>
                 <span className="truncate text-micro text-muted-foreground" title={workspace?.name}>{workspace?.name}</span>
               </div>
+            </div>
+            <div className="px-2 pb-2">
+              <div className="eyebrow mb-1.5 text-muted-foreground">Theme</div>
+              <ThemeSwitcher />
             </div>
             <DropdownMenuSeparator />
             <DropdownMenuItem asChild className="gap-3 text-xs">

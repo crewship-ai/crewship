@@ -9,12 +9,15 @@ import { cn } from "@/lib/utils"
  * override the word while keeping the tone rule.
  */
 export const STATUS_PILL_TONE: Record<StatusTone, { pill: string; dot: string }> = {
-  success: { pill: "border-success/25 bg-success/10 text-success", dot: "bg-success" },
-  blue: { pill: "border-primary/25 bg-primary/10 text-primary-hover", dot: "bg-primary" },
-  warn: { pill: "border-warn/25 bg-warn/10 text-warn", dot: "bg-warn" },
-  danger: { pill: "border-destructive/25 bg-destructive/10 text-destructive", dot: "bg-destructive" },
-  muted: { pill: "border-border bg-muted text-muted-foreground", dot: "bg-muted-foreground" },
-  purple: { pill: "border-purple/25 bg-purple/10 text-purple-hover", dot: "bg-purple" },
+  // Harbor chips: an opaque tinted fill with a text pair measured per theme
+  // (--chip-*-bg / -fg, pinned ≥ 4.5:1 in theme-contrast.test). The dot is
+  // the text colour, so tone reads twice without depending on hue alone.
+  success: { pill: "bg-chip-ok-bg text-chip-ok-fg", dot: "bg-current" },
+  blue: { pill: "bg-chip-info-bg text-chip-info-fg", dot: "bg-current" },
+  warn: { pill: "bg-chip-warn-bg text-chip-warn-fg", dot: "bg-current" },
+  danger: { pill: "bg-chip-danger-bg text-chip-danger-fg", dot: "bg-current" },
+  muted: { pill: "bg-chip-neutral-bg text-chip-neutral-fg", dot: "bg-current" },
+  purple: { pill: "bg-chip-violet-bg text-chip-violet-fg", dot: "bg-current" },
 }
 
 export interface StatusPillProps extends Omit<React.HTMLAttributes<HTMLSpanElement>, "children"> {
@@ -37,14 +40,14 @@ export function StatusPill({ status, label, tone, live = false, size = "sm", cla
       data-slot="status-pill"
       data-tone={tone ?? meta.tone}
       className={cn(
-        "inline-flex shrink-0 items-center gap-1.5 rounded-full border font-semibold",
-        size === "sm" ? "px-2 py-0.5 text-micro" : "px-2.5 py-1 text-label",
+        "inline-flex shrink-0 items-center gap-1.5 rounded-full border border-transparent font-mono font-semibold tracking-[0.02em]",
+        size === "sm" ? "h-5 px-2 text-[0.65625rem]" : "h-6 px-2.5 text-micro",
         t.pill,
         className,
       )}
       {...rest}
     >
-      <span className={cn("h-1.5 w-1.5 rounded-full", t.dot, live && "animate-pulse motion-reduce:animate-none")} aria-hidden />
+      <span className={cn("h-1.5 w-1.5 rounded-full opacity-80", t.dot, live && "animate-pulse motion-reduce:animate-none")} aria-hidden />
       {label ?? meta.label}
     </span>
   )

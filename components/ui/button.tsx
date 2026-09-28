@@ -5,21 +5,20 @@ import { Slot } from "radix-ui"
 import { cn } from "@/lib/utils"
 
 const buttonVariants = cva(
-  "inline-flex shrink-0 items-center justify-center gap-2 rounded-md text-sm font-medium whitespace-nowrap transition-all outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+  "inline-flex shrink-0 items-center justify-center gap-2 rounded-[10px] text-sm font-semibold whitespace-nowrap transition-[color,background-color,border-color,box-shadow,transform] duration-200 ease-[cubic-bezier(.2,.7,.2,1)] outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
   {
     variants: {
       variant: {
-        // Dark hover must go LIGHTER, not translucent: primary-foreground is
-        // the page-background navy there, and bg-primary/90 composited over
-        // the dark page drops navy text to 4.37:1 (< AA 4.5:1). Solid
-        // --primary-hover #3D8FFE keeps navy text at 6.43:1. Light mode keeps
-        // the /90 dim (white-on-blue, unchanged behavior).
+        // Harbor primary: white label on --primary-strong, the one blue per
+        // theme that holds white at ≥ 4.5:1 (pinned in theme-contrast.test).
+        // Hover goes deeper, not lighter, so the label keeps its contrast,
+        // and the button lifts a pixel with a soft brand-coloured glow.
         default:
-          "bg-primary text-primary-foreground hover:bg-primary/90 dark:hover:bg-primary-hover",
+          "bg-primary-strong text-white shadow-[0_8px_20px_-10px_var(--primary-glow)] hover:bg-primary-strong-hover hover:-translate-y-px active:translate-y-0",
         destructive:
           "bg-destructive text-white hover:bg-destructive/90 focus-visible:ring-destructive/20 dark:bg-destructive/60 dark:focus-visible:ring-destructive/40",
         outline:
-          "border border-control-border bg-background shadow-xs hover:bg-accent hover:text-accent-foreground dark:border-control-border dark:bg-input/30 dark:hover:bg-input/50",
+          "border border-control-border bg-card hover:border-line-strong hover:bg-accent hover:text-accent-foreground hover:-translate-y-px active:translate-y-0",
         secondary:
           "bg-secondary text-secondary-foreground hover:bg-secondary/80",
         // Soft / tinted primary — the canonical sub-bar CTA (Style B).
@@ -36,11 +35,11 @@ const buttonVariants = cva(
       },
       size: {
         default: "h-9 px-4 py-2 has-[>svg]:px-3",
-        xs: "h-6 gap-1 rounded-md px-2 text-xs has-[>svg]:px-1.5 [&_svg:not([class*='size-'])]:size-3",
-        sm: "h-8 gap-1.5 rounded-md px-3 has-[>svg]:px-2.5",
-        lg: "h-10 rounded-md px-6 has-[>svg]:px-4",
+        xs: "h-6 gap-1 rounded-lg px-2 text-xs has-[>svg]:px-1.5 [&_svg:not([class*='size-'])]:size-3",
+        sm: "h-8 gap-1.5 rounded-[9px] px-3 has-[>svg]:px-2.5",
+        lg: "h-10 rounded-xl px-6 has-[>svg]:px-4",
         icon: "size-9",
-        "icon-xs": "size-6 rounded-md [&_svg:not([class*='size-'])]:size-3",
+        "icon-xs": "size-6 rounded-lg [&_svg:not([class*='size-'])]:size-3",
         "icon-sm": "size-8",
         "icon-lg": "size-10",
       },

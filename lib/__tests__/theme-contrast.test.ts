@@ -76,23 +76,36 @@ function blend(
   ]
 }
 
-// ── token extraction from the .dark block ────────────────────────────────
+// ── token extraction, per theme block ─────────────────────────────────────
+//
+// Harbor ships three palettes: :root (Day), .dark (Night, the default) and
+// .dusk. Each is a block in globals.css ending where the next one starts; a
+// token missing from a block is a test failure, not a silent fallback.
 
-function darkBlock(): string {
-  const start = css.indexOf(".dark {")
-  const end = css.indexOf("@theme inline")
-  expect(start).toBeGreaterThan(-1)
+const THEMES = {
+  day: [":root {\n  /* ── Light surfaces", "\n.dark {"],
+  night: ["\n.dark {", "\n.dusk {"],
+  dusk: ["\n.dusk {", "@theme inline"],
+} as const
+type Theme = keyof typeof THEMES
+
+function block(theme: Theme): string {
+  const [from, to] = THEMES[theme]
+  const start = css.indexOf(from)
+  const end = css.indexOf(to, start + 1)
+  expect(start, `${theme} block present`).toBeGreaterThan(-1)
+  expect(end, `${theme} block terminated`).toBeGreaterThan(start)
   return css.slice(start, end)
 }
 
-function token(name: string): string {
-  const m = darkBlock().match(new RegExp(`--${name}:\\s*([^;]+);`))
-  expect(m, `--${name} present in .dark theme`).toBeTruthy()
+function token(theme: Theme, name: string): string {
+  const m = block(theme).match(new RegExp(`--${name}:\\s*([^;]+);`))
+  expect(m, `--${name} present in the ${theme} theme`).toBeTruthy()
   return (m as RegExpMatchArray)[1].trim()
 }
 
-function tokenRgb(name: string): [number, number, number] {
-  const value = token(name)
+function tokenRgb(theme: Theme, name: string): [number, number, number] {
+  const value = token(theme, name)
   const hex = value.match(/^#([0-9a-fA-F]{6})$/)
   if (hex) return hexToRgb(value)
   const ok = value.match(/^oklch\(([\d.]+)\s+([\d.]+)\s+([\d.]+)\)$/)
@@ -101,71 +114,90 @@ function tokenRgb(name: string): [number, number, number] {
   return oklchToRgb(Number(l), Number(c), Number(h))
 }
 
-describe("dark theme WCAG AA contrast (axe color-contrast parity)", () => {
-  it("primary-foreground on primary (default buttons) ≥ 4.5:1", () => {
-    const ratio = contrast(
-      luminanceFromRgb(tokenRgb("primary-foreground")),
-      luminanceFromRgb(tokenRgb("primary")),
-    )
-    expect(ratio).toBeGreaterThanOrEqual(4.5)
+const lum = (theme: Theme, name: string) => luminanceFromRgb(tokenRgb(theme, name))
+const WHITE = luminanceFromRgb([1, 1, 1])
+
+// The dark themes carry the full axe-parity suite (the app is dark by default).
+describe.each(["night", "dusk"] as const)("%s theme WCAG AA contrast (axe color-contrast parity)", (theme) => {
+  it("primary-foreground on primary (bg-primary fills) ≥ 4.5:1", () => {
+    expect(contrast(lum(theme, "primary-foreground"), lum(theme, "primary"))).toBeGreaterThanOrEqual(4.5)
   })
 
   it("primary as text on background and card ≥ 4.5:1", () => {
-    const primary = luminanceFromRgb(tokenRgb("primary"))
-    expect(contrast(primary, luminanceFromRgb(tokenRgb("background")))).toBeGreaterThanOrEqual(4.5)
-    expect(contrast(primary, luminanceFromRgb(tokenRgb("card")))).toBeGreaterThanOrEqual(4.5)
+    const primary = lum(theme, "primary")
+    expect(contrast(primary, lum(theme, "background"))).toBeGreaterThanOrEqual(4.5)
+    expect(contrast(primary, lum(theme, "card"))).toBeGreaterThanOrEqual(4.5)
   })
 
   it("primary-hover as chip text on bg-primary/15 and /20 over card ≥ 4.5:1", () => {
-    const hover = luminanceFromRgb(tokenRgb("primary-hover"))
-    const primary = tokenRgb("primary")
-    const card = tokenRgb("card")
+    const hover = lum(theme, "primary-hover")
+    const primary = tokenRgb(theme, "primary")
+    const card = tokenRgb(theme, "card")
     for (const alpha of [0.15, 0.2]) {
       const tinted = luminanceFromRgb(blend(primary, alpha, card))
-      expect(
-        contrast(hover, tinted),
-        `text-primary-hover on bg-primary/${alpha * 100}`,
-      ).toBeGreaterThanOrEqual(4.5)
+      expect(contrast(hover, tinted), `text-primary-hover on bg-primary/${alpha * 100}`).toBeGreaterThanOrEqual(4.5)
     }
-  })
-
-  it("muted-foreground on background and card ≥ 4.5:1", () => {
-    const muted = luminanceFromRgb(tokenRgb("muted-foreground"))
-    expect(contrast(muted, luminanceFromRgb(tokenRgb("background")))).toBeGreaterThanOrEqual(4.5)
-    expect(contrast(muted, luminanceFromRgb(tokenRgb("card")))).toBeGreaterThanOrEqual(4.5)
   })
 
   // The dim metadata tier. Replaces text-muted-foreground/40–/70, which
   // composited to 1.74–3.21:1 on the dark background — every one of
   // those alpha variants failed AA for normal-size text.
   it("muted-foreground-soft on background and card ≥ 4.5:1", () => {
-    const soft = luminanceFromRgb(tokenRgb("muted-foreground-soft"))
-    expect(contrast(soft, luminanceFromRgb(tokenRgb("background")))).toBeGreaterThanOrEqual(4.5)
-    expect(contrast(soft, luminanceFromRgb(tokenRgb("card")))).toBeGreaterThanOrEqual(4.5)
+    const soft = lum(theme, "muted-foreground-soft")
+    expect(contrast(soft, lum(theme, "background"))).toBeGreaterThanOrEqual(4.5)
+    expect(contrast(soft, lum(theme, "card"))).toBeGreaterThanOrEqual(4.5)
   })
 
-  // Hover states must hold AA too. bg-primary/90 over the dark page bg
-  // dropped navy button text to 4.37:1, so the default button hovers to
-  // solid --primary-hover in dark mode (components/ui/button.tsx).
-  it("primary-foreground on primary-hover (button hover) ≥ 4.5:1", () => {
-    const ratio = contrast(
-      luminanceFromRgb(tokenRgb("primary-foreground")),
-      luminanceFromRgb(tokenRgb("primary-hover")),
-    )
-    expect(ratio).toBeGreaterThanOrEqual(4.5)
+  it("primary-foreground on primary-hover ≥ 4.5:1", () => {
+    expect(contrast(lum(theme, "primary-foreground"), lum(theme, "primary-hover"))).toBeGreaterThanOrEqual(4.5)
   })
 
   // crew-policy-controls save button: hover tint capped at bg-primary/25
   // (was /30 → 4.26:1 over card with text-primary-hover).
   it("primary-hover as text on bg-primary/25 over card and background ≥ 4.5:1", () => {
-    const hover = luminanceFromRgb(tokenRgb("primary-hover"))
-    const primary = tokenRgb("primary")
+    const hover = lum(theme, "primary-hover")
+    const primary = tokenRgb(theme, "primary")
     for (const surface of ["card", "background"] as const) {
-      const tinted = luminanceFromRgb(blend(primary, 0.25, tokenRgb(surface)))
-      expect(
-        contrast(hover, tinted),
-        `text-primary-hover on bg-primary/25 over ${surface}`,
-      ).toBeGreaterThanOrEqual(4.5)
+      const tinted = luminanceFromRgb(blend(primary, 0.25, tokenRgb(theme, surface)))
+      expect(contrast(hover, tinted), `text-primary-hover on bg-primary/25 over ${surface}`).toBeGreaterThanOrEqual(4.5)
     }
+  })
+})
+
+// What every Harbor theme, Day included, must hold.
+describe.each(["day", "night", "dusk"] as const)("%s theme Harbor contrast", (theme) => {
+  it("muted-foreground on background and card ≥ 4.5:1", () => {
+    const muted = lum(theme, "muted-foreground")
+    expect(contrast(muted, lum(theme, "background"))).toBeGreaterThanOrEqual(4.5)
+    expect(contrast(muted, lum(theme, "card"))).toBeGreaterThanOrEqual(4.5)
+  })
+
+  it("muted-foreground-soft on card ≥ 4.5:1", () => {
+    expect(contrast(lum(theme, "muted-foreground-soft"), lum(theme, "card"))).toBeGreaterThanOrEqual(4.5)
+  })
+
+  // The filled button: white label on primary-strong, at rest and on hover.
+  it("white on primary-strong and primary-strong-hover ≥ 4.5:1", () => {
+    expect(contrast(WHITE, lum(theme, "primary-strong"))).toBeGreaterThanOrEqual(4.5)
+    expect(contrast(WHITE, lum(theme, "primary-strong-hover"))).toBeGreaterThanOrEqual(4.5)
+  })
+
+  it("links (primary-hover) on background and card ≥ 4.5:1", () => {
+    const ink = lum(theme, "primary-hover")
+    expect(contrast(ink, lum(theme, "background"))).toBeGreaterThanOrEqual(4.5)
+    expect(contrast(ink, lum(theme, "card"))).toBeGreaterThanOrEqual(4.5)
+  })
+
+  it.each(["ok", "warn", "danger", "neutral", "info", "violet"])("chip %s text on its fill ≥ 4.5:1", (tone) => {
+    expect(contrast(lum(theme, `chip-${tone}-fg`), lum(theme, `chip-${tone}-bg`))).toBeGreaterThanOrEqual(4.5)
+  })
+})
+
+// Day is the first light palette the app shows. The semantic tokens double as
+// text colours (text-success, text-destructive …) and were tuned for a dark
+// ground, where lightness ≥ 0.72 reads; on white those fell to ~2–3:1.
+describe("day theme semantic text contrast", () => {
+  it.each(["success", "warn", "destructive", "info", "notice", "gold"])("text-%s on card ≥ 4.5:1", (name) => {
+    expect(contrast(lum("day", name), lum("day", "card"))).toBeGreaterThanOrEqual(4.5)
   })
 })

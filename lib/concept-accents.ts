@@ -56,21 +56,24 @@ export interface Accent {
   chip: string
   /** Fill only, for rows and hovers. */
   soft: string
+  /** The raw colour, as a CSS value, for the Harbor icon tile (`--ic`). */
+  tint: string
 }
 
 export const ACCENT: Record<AccentName, Accent> = {
-  blue: { fg: "text-primary-hover", chip: "bg-primary/12 border-primary/25", soft: "bg-primary/10" },
-  sky: { fg: "text-info", chip: "bg-info/12 border-info/25", soft: "bg-info/10" },
-  teal: { fg: "text-notice", chip: "bg-notice/12 border-notice/25", soft: "bg-notice/10" },
-  green: { fg: "text-success", chip: "bg-success/12 border-success/25", soft: "bg-success/10" },
-  amber: { fg: "text-warn", chip: "bg-warn/12 border-warn/25", soft: "bg-warn/10" },
-  gold: { fg: "text-gold", chip: "bg-gold/12 border-gold/25", soft: "bg-gold/10" },
-  purple: { fg: "text-purple-hover", chip: "bg-purple/12 border-purple/25", soft: "bg-purple/10" },
-  red: { fg: "text-destructive", chip: "bg-destructive/12 border-destructive/25", soft: "bg-destructive/10" },
+  blue: { fg: "text-primary-hover", chip: "bg-primary/12 border-primary/25", soft: "bg-primary/10", tint: "var(--primary)" },
+  sky: { fg: "text-info", chip: "bg-info/12 border-info/25", soft: "bg-info/10", tint: "var(--info)" },
+  teal: { fg: "text-notice", chip: "bg-notice/12 border-notice/25", soft: "bg-notice/10", tint: "var(--notice)" },
+  green: { fg: "text-success", chip: "bg-success/12 border-success/25", soft: "bg-success/10", tint: "var(--success)" },
+  amber: { fg: "text-warn", chip: "bg-warn/12 border-warn/25", soft: "bg-warn/10", tint: "var(--warn)" },
+  gold: { fg: "text-gold", chip: "bg-gold/12 border-gold/25", soft: "bg-gold/10", tint: "var(--gold)" },
+  purple: { fg: "text-purple-hover", chip: "bg-purple/12 border-purple/25", soft: "bg-purple/10", tint: "var(--purple)" },
+  red: { fg: "text-destructive", chip: "bg-destructive/12 border-destructive/25", soft: "bg-destructive/10", tint: "var(--destructive)" },
   slate: {
     fg: "text-muted-foreground",
     chip: "bg-foreground/[0.05] border-border/60",
     soft: "bg-foreground/[0.04]",
+    tint: "var(--muted-foreground)",
   },
 }
 

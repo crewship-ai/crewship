@@ -109,7 +109,8 @@ export function AnimatedMark({ variant = "swell", replayKey, className }: Props)
     let targetY = 0
 
     const readTheme = () => {
-      dark = document.documentElement.classList.contains("dark")
+      const root = document.documentElement.classList
+      dark = root.contains("dark") || root.contains("dusk")
     }
 
     const resize = () => {

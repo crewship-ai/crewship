@@ -1,7 +1,7 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 
-@custom-variant dark (&:is(.dark *));
+@custom-variant dark (&:is(.dark *, .dusk *));
 
 /* Touch sizing belongs to the input device, not to the window width.
  *
@@ -84,41 +84,41 @@
 :root {
   /* ── Light surfaces (kept from prior shadcn palette — only Philosophy /
    *    legal pages render light; main app is dark-first) ── */
-  --background: oklch(0.9911 0 0);
-  --foreground: oklch(0.1994 0.0470 270.6494);
+  --background: #F4F7FB;
+  --foreground: #0F1733;
   --scrollbar-thumb: oklch(0.80 0 0);
   --scrollbar-thumb-hover: oklch(0.66 0 0);
-  --card: oklch(0.9851 0 0);
-  --card-foreground: oklch(0.1994 0.0470 270.6494);
-  --popover: oklch(1.0000 0 0);
-  --popover-foreground: oklch(0.1994 0.0470 270.6494);
+  --card: #FFFFFF;
+  --card-foreground: #0F1733;
+  --popover: #FFFFFF;
+  --popover-foreground: #0F1733;
 
   /* Brand — #0E6BE8 is the light-mode variant of the marketing site's
    *  #1E7BFE (deeper so it stays legible on white). Same hue family. */
   --primary: #0E6BE8;
-  --primary-foreground: oklch(1.0000 0 0);
-  --primary-hover: #1E7BFE;
+  --primary-foreground: #FFFFFF;
+  --primary-hover: #0A4FB0;
 
   --secondary: oklch(0.1994 0.0470 270.6494);
   --secondary-foreground: oklch(1.0000 0 0);
-  --muted: oklch(1.0000 0 0);
-  --muted-foreground: oklch(0.1994 0.0470 270.6494);
+  --muted: #EEF2F7;
+  --muted-foreground: #566079;
   /* Dimmer-but-AA-compliant second muted level. Replaces the old
    * text-muted-foreground/40–/70 alpha pattern, which composited to
    * well under the WCAG AA 4.5:1 minimum for normal-size text.
    * Light: 5.86:1 on --background, 5.76:1 on --card. */
-  --muted-foreground-soft: oklch(0.50 0.03 270);
-  --accent: oklch(1.0000 0 0);
-  --accent-foreground: #0E6BE8;
+  --muted-foreground-soft: #646E87;
+  --accent: #EEF2F7;
+  --accent-foreground: #0F1733;
 
   /* Destructive — matches marketing-site --color-error (oklch 0.70 0.19 25,
    *  a tighter red than the previous orange-leaning oklch(0.71 0.19 39)). */
-  --destructive: oklch(0.70 0.19 25);
+  --destructive: #C0261B;
   --destructive-foreground: oklch(1.0000 0 0);
 
-  --border: oklch(0.9212 0.0033 17.2170);
-  --input: oklch(0.8452 0 0);
-  --control-border: oklch(0.56 0 0);
+  --border: #D8E0EB;
+  --input: #D8E0EB;
+  --control-border: #8792AB;
   --ring: #0E6BE8;
 
   /* Chart palette — light-ground tuning, deliberately distinct from the
@@ -149,20 +149,22 @@
   --chart-4: oklch(0.45 0.108 55);
   --chart-5: oklch(0.62 0.133 105);
 
-  --sidebar: oklch(0.9851 0 0);
-  --sidebar-foreground: oklch(0.1994 0.0470 270.6494);
+  --sidebar: #E6EEF7;
+  --sidebar-foreground: #0F1733;
   --sidebar-primary: #0E6BE8;
   --sidebar-primary-foreground: oklch(1.0000 0 0);
-  --sidebar-accent: oklch(1.0000 0 0);
-  --sidebar-accent-foreground: #0E6BE8;
-  --sidebar-border: oklch(1.0000 0 0);
+  --sidebar-accent: #FFFFFF;
+  --sidebar-accent-foreground: #0A4FB0;
+  --sidebar-border: #D8E0EB;
   --sidebar-ring: #0E6BE8;
 
-  /* ── Semantic palette (1:1 with marketing-site tokens for brand parity) ── */
-  --success: oklch(0.72 0.18 152);
-  --info: #5DA1FF;
-  --notice: oklch(0.72 0.14 200);
-  --warn: oklch(0.78 0.15 75);
+  /* ── Semantic palette — Day values. The marketing-site lightness (≥ 0.72)
+   *    reads on a dark ground only; these are the same hues taken dark enough
+   *    to be text on white (pinned in theme-contrast.test, day block). ── */
+  --success: #157A45;
+  --info: #0A63D6;
+  --notice: #0B6E7F;
+  --warn: #8A5A00;
   --purple: oklch(0.66 0.22 300);
   /* Text on a purple tint. --purple is a fill/stroke token and is not
      text-safe: measured on the LEAD badge (bg-purple/20 over the card) it
@@ -172,16 +174,16 @@
      Light needs to go darker, dark needs to go lighter; chroma is unchanged
      so the badge stays the brand purple. Measured: 5.20:1. */
   --purple-hover: oklch(0.50 0.22 300);
-  --gold: oklch(0.84 0.15 85);
+  --gold: #7A5E00;
 
-  --font-sans: "Open Sans", ui-sans-serif, sans-serif, system-ui;
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Segoe UI", "Helvetica Neue", "Noto Sans", "Liberation Sans", ui-sans-serif, system-ui, sans-serif;
   --font-serif: "Georgia", serif;
-  --font-mono: "Menlo", monospace;
-  --radius: 1.3rem;
+  --font-mono: var(--font-jetbrains, "JetBrains Mono"), ui-monospace, "SF Mono", Menlo, monospace;
+  --radius: 1.125rem;
 
   /* ── Surface tokens (for nested sections & raised elements) ── */
-  --surface-subtle: oklch(0.975 0 0);
-  --surface-raised: oklch(1 0 0);
+  --surface-subtle: #FBFCFE;
+  --surface-raised: #FFFFFF;
 
   /* ── Shadows (functional, minimal — orchestration uses borders over shadows) ── */
   --shadow-xs: 0 1px 2px 0 oklch(0 0 0 / 0.05);
@@ -226,23 +228,55 @@
   --chip-active-bg: oklch(0.5729 0.2337 264.3664 / 0.12);
   --chip-active-fg: oklch(0.5729 0.2337 264.3664);
   --chip-idle-fg: oklch(0.45 0.02 270);
+
+  /* ── Harbor — the marketing site's design language, in app tokens ──
+   *  primary-strong is the filled-button blue: white text must clear 4.5:1
+   *  on it (day 4.90, night 5.17, dusk 5.05), which --primary cannot do in
+   *  the dark themes, where it is tuned as a text colour on the ground.
+   *  --primary-hover doubles as Harbor's "primary-ink" (links, brand text on
+   *  tints) — it already carries that job in 120+ call sites. */
+  --primary-strong: #0E6BE8;
+  --primary-strong-hover: #0A5CD0;
+  --primary-glow: rgb(14 107 232 / 0.55);
+  --line-strong: #B9C8DE;
+  --shadow-color: rgb(15 23 51 / 0.35);
+  --page-glow: none;
+  /* Deep "panel" ground for heroes, terminals and graph canvases. Text on it
+   * is always --panel-foreground regardless of theme. */
+  --panel-bg: radial-gradient(120% 140% at 0% 0%, #1A2752 0%, #0F1733 55%, #0B1228 100%);
+  --panel-foreground: #E8EEF8;
+  --panel-muted: #A5B3CB;
+  --panel-node: #131E3A;
+  /* Status chips — tinted fill + text pairs, every pair ≥ 4.5:1. */
+  --chip-ok-bg: #E2F3E9;     --chip-ok-fg: #136B3C;
+  --chip-warn-bg: #FCEFD9;   --chip-warn-fg: #8A5300;
+  --chip-danger-bg: #FDE7E7; --chip-danger-fg: #B42318;
+  --chip-neutral-bg: #E9EEF5; --chip-neutral-fg: #3F4A63;
+  --chip-info-bg: #E7F0FD;   --chip-info-fg: #0A4FB0;
+  --chip-violet-bg: #EFE8FC; --chip-violet-fg: #5B35B0;
+  /* Icon tile glyph colours: the tint is the chip's own accent (--ic). */
+  --tile-inset: inset 0 1px 0 rgb(255 255 255 / 0.35);
+  --tile-text-mix: 78%;
+  --ease-harbor: cubic-bezier(.2, .7, .2, 1);
+  --ease-spring: cubic-bezier(.34, 1.56, .64, 1);
 }
 
 .dark {
+  color-scheme: dark;
   /* ── Dark surfaces — Unify-style depth from the marketing site:
    *    bg ≈ #0a0b0e (near-black, cool purple tint), card +6 lightness,
    *    border at 0.24 lightness. All in hue 285 (cool purple-blue). ── */
-  --background: oklch(0.10 0.008 285);
-  --foreground: oklch(1.0000 0 0);
+  --background: #0A0B0E;
+  --foreground: #EDEDF2;
   /* Scrollbar thumb. Well above --border (0.24) on purpose: a track hint has
      to be legible against BOTH the background (0.10) and the card (0.155),
      and a border-weight thumb disappeared on the card. */
   --scrollbar-thumb: oklch(0.38 0.010 285);
   --scrollbar-thumb-hover: oklch(0.52 0.012 285);
-  --card: oklch(0.155 0.010 285);
-  --card-foreground: oklch(0.8853 0 0);
-  --popover: oklch(0.155 0.010 285);
-  --popover-foreground: oklch(1.0000 0 0);
+  --card: #121318;
+  --card-foreground: #EDEDF2;
+  --popover: #121318;
+  --popover-foreground: #EDEDF2;
 
   /* Brand — #1E7BFE (vivid blue from Crewship logo's blue-bg variant).
    *  Hex used directly — OKLCH approximations of vivid blues can drift
@@ -250,32 +284,32 @@
    *  primary-foreground is the page-background navy, not white: white on
    *  #1E7BFE is 3.95:1 (fails WCAG AA 4.5:1 for normal text); the dark
    *  navy reads at 5.22:1 while keeping the same brand blue surface. */
-  --primary: #1E7BFE;
-  --primary-foreground: oklch(0.10 0.008 285);
-  --primary-hover: #3D8FFE;
+  --primary: #3B82F6;
+  --primary-foreground: #0A0B0E;
+  --primary-hover: #8AB4FF;
 
   --secondary: oklch(1.0000 0 0);
   --secondary-foreground: oklch(0.10 0.008 285);
-  --muted: oklch(0.155 0.006 285);
-  --muted-foreground: oklch(0.62 0.018 280);
+  --muted: #16171D;
+  --muted-foreground: #9295A3;
   /* Dimmer-but-AA-compliant second muted level (see :root note).
    * Dark: 4.99:1 on --background, 4.74:1 on --card — both above the
    * 4.5:1 AA floor, while plain muted-foreground (5.64/5.36) stays
    * the brighter tier. */
-  --muted-foreground-soft: oklch(0.59 0.018 280);
-  --accent: oklch(0.22 0.011 290);
-  --accent-foreground: oklch(1.0000 0 0);
+  --muted-foreground-soft: #7E818F;
+  --accent: #1C1E25;
+  --accent-foreground: #EDEDF2;
 
   /* Destructive — same red as light mode for brand consistency. */
   --destructive: oklch(0.70 0.19 25);
   --destructive-foreground: oklch(1.0000 0 0);
 
-  --border: oklch(0.24 0.010 285);
-  --input: oklch(0.30 0.010 285);
+  --border: #24262E;
+  --input: #2A2C35;
   /* Operable form boundaries need more contrast than decorative separators.
    * Keep --input as the existing fill; brightening it also lifts backgrounds. */
   --control-border: oklch(0.54 0.010 285);
-  --ring: #1E7BFE;
+  --ring: #3B82F6;
 
   /* Chart palette — dark-ground tuning. Was byte-identical to the :root
    *  block above (same 5 values reused on a near-black ground as on
@@ -313,15 +347,15 @@
   --chart-4: oklch(0.63 0.145 55);
   --chart-5: oklch(0.82 0.13 105);
 
-  --sidebar: oklch(0.155 0.010 285);
-  --sidebar-foreground: oklch(1.0000 0 0);
+  --sidebar: #0D0E12;
+  --sidebar-foreground: #EDEDF2;
   /* sidebar-primary pair must have contrast — previously both white. */
-  --sidebar-primary: #1E7BFE;
-  --sidebar-primary-foreground: oklch(1.0000 0 0);
-  --sidebar-accent: oklch(0.22 0.011 290);
-  --sidebar-accent-foreground: oklch(1.0000 0 0);
-  --sidebar-border: oklch(0.24 0.010 285);
-  --sidebar-ring: #1E7BFE;
+  --sidebar-primary: #3B82F6;
+  --sidebar-primary-foreground: #0A0B0E;
+  --sidebar-accent: #1C1E25;
+  --sidebar-accent-foreground: #8AB4FF;
+  --sidebar-border: #24262E;
+  --sidebar-ring: #3B82F6;
 
   /* ── Semantic palette (identical to light — brand-consistent across modes) ── */
   --success: oklch(0.72 0.18 152);
@@ -334,15 +368,15 @@
   --purple-hover: oklch(0.70 0.22 300);
   --gold: oklch(0.84 0.15 85);
 
-  --font-sans: "Open Sans", ui-sans-serif, sans-serif, system-ui;
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Segoe UI", "Helvetica Neue", "Noto Sans", "Liberation Sans", ui-sans-serif, system-ui, sans-serif;
   --font-serif: "Georgia", serif;
-  --font-mono: "Menlo", monospace;
-  --radius: 1.3rem;
+  --font-mono: var(--font-jetbrains, "JetBrains Mono"), ui-monospace, "SF Mono", Menlo, monospace;
+  --radius: 1.125rem;
 
   /* ── Surface tokens (dark theme: nested section + raised popover/drawer)
    *    Hue 285 now matches background family. ── */
-  --surface-subtle: oklch(0.13 0.009 285);
-  --surface-raised: oklch(0.195 0.011 285);
+  --surface-subtle: #0F1014;
+  --surface-raised: #16171D;
 
   /* ── Shadows (dark theme — same functional values, lower visibility) ── */
   --shadow-xs: 0 1px 2px 0 oklch(0 0 0 / 0.20);
@@ -362,6 +396,88 @@
   --chip-active-bg: oklch(0.6230 0.2140 259.8150 / 0.16);
   --chip-active-fg: oklch(0.78 0.14 259);
   --chip-idle-fg: oklch(0.65 0.02 276);
+
+  /* ── Harbor Night ("Ink") — see the :root Harbor block for the roles ── */
+  --primary-strong: #2563EB;
+  --primary-strong-hover: #1D4ED8;
+  --primary-glow: rgb(37 99 235 / 0.6);
+  --line-strong: #3A3D49;
+  --shadow-color: rgb(0 0 0 / 0.7);
+  --page-glow: radial-gradient(60% 40% at 80% 0%, rgb(59 130 246 / 0.07), transparent 70%);
+  --panel-bg: radial-gradient(120% 140% at 0% 0%, #1B1F2C 0%, #12141B 55%, #0C0D12 100%);
+  --panel-foreground: #E8EEF8;
+  --panel-muted: #A5B3CB;
+  --panel-node: #121318;
+  --chip-ok-bg: #0F2E22;     --chip-ok-fg: #6FE3B0;
+  --chip-warn-bg: #2E240F;   --chip-warn-fg: #F7C77E;
+  --chip-danger-bg: #3A1417; --chip-danger-fg: #FF9B9B;
+  --chip-neutral-bg: #1C1E25; --chip-neutral-fg: #B2B5C2;
+  --chip-info-bg: #14203A;   --chip-info-fg: #8AB4FF;
+  --chip-violet-bg: #211A3D; --chip-violet-fg: #C4A8FF;
+  --tile-inset: none;
+  --tile-text-mix: 55%;
+  --ease-harbor: cubic-bezier(.2, .7, .2, 1);
+  --ease-spring: cubic-bezier(.34, 1.56, .64, 1);
+}
+
+/* ── Harbor Dusk — warm violet-navy. A dark theme: `dark:` utilities apply
+ *    (see the custom variant at the top), so it inherits every .dark rule and
+ *    overrides only the palette. Declared after .dark so equal-specificity
+ *    values here win. ── */
+.dusk {
+  color-scheme: dark;
+  --background: #16162A;
+  --foreground: #F2EEF6;
+  --scrollbar-thumb: #3A3858;
+  --scrollbar-thumb-hover: #55527A;
+  --card: #1F1E37;
+  --card-foreground: #F2EEF6;
+  --popover: #1F1E37;
+  --popover-foreground: #F2EEF6;
+  --primary: #6F8DFF;
+  --primary-foreground: #0E1030;
+  --primary-hover: #A9BCFF;
+  --secondary: #F2EEF6;
+  --secondary-foreground: #16162A;
+  --muted: #24233F;
+  --muted-foreground: #A9A0BF;
+  --muted-foreground-soft: #8E86A6;
+  --accent: #2A2947;
+  --accent-foreground: #F2EEF6;
+  --border: #2E2C4A;
+  --input: #34325A;
+  --control-border: #6E6893;
+  --ring: #6F8DFF;
+  --sidebar: #1B1A31;
+  --sidebar-foreground: #F2EEF6;
+  --sidebar-primary: #6F8DFF;
+  --sidebar-primary-foreground: #0E1030;
+  --sidebar-accent: #2A2947;
+  --sidebar-accent-foreground: #A9BCFF;
+  --sidebar-border: #2E2C4A;
+  --sidebar-ring: #6F8DFF;
+  --surface-subtle: #1B1A31;
+  --surface-raised: #24233F;
+  --selection-bg: rgb(111 141 255 / 0.12);
+  --selection-bg-hover: rgb(111 141 255 / 0.18);
+  --selection-border: #6F8DFF;
+  --chip-active-bg: rgb(111 141 255 / 0.18);
+  --chip-active-fg: #A9BCFF;
+  --chip-idle-fg: #A9A0BF;
+  --primary-strong: #4B63E0;
+  --primary-strong-hover: #4459D6;
+  --primary-glow: rgb(111 141 255 / 0.55);
+  --line-strong: #4A4670;
+  --shadow-color: rgb(8 6 20 / 0.7);
+  --page-glow: radial-gradient(70% 45% at 85% 0%, rgb(243 180 130 / 0.10), transparent 70%), radial-gradient(60% 40% at 0% 30%, rgb(148 107 138 / 0.12), transparent 70%);
+  --panel-bg: radial-gradient(120% 140% at 0% 0%, #3B2F5C 0%, #262448 50%, #1B1A33 100%);
+  --panel-node: #131E3A;
+  --chip-ok-bg: #173A31;     --chip-ok-fg: #8EE0B4;
+  --chip-warn-bg: #3A2C1C;   --chip-warn-fg: #F6C98A;
+  --chip-danger-bg: #3A1D2E; --chip-danger-fg: #FFA3B1;
+  --chip-neutral-bg: #2A2947; --chip-neutral-fg: #C3BCD6;
+  --chip-info-bg: #25295A;   --chip-info-fg: #A9BCFF;
+  --chip-violet-bg: #33254F; --chip-violet-fg: #D1B8FF;
 }
 
 @theme inline {
@@ -406,6 +522,25 @@
 
   /* Brand hover variant — text-primary-hover, bg-primary-hover */
   --color-primary-hover: var(--primary-hover);
+
+  /* Harbor — bg-primary-strong, border-line-strong, bg-chip-ok-bg … */
+  --color-primary-strong: var(--primary-strong);
+  --color-primary-strong-hover: var(--primary-strong-hover);
+  --color-line-strong: var(--line-strong);
+  --color-panel-foreground: var(--panel-foreground);
+  --color-panel-muted: var(--panel-muted);
+  --color-chip-ok-bg: var(--chip-ok-bg);
+  --color-chip-ok-fg: var(--chip-ok-fg);
+  --color-chip-warn-bg: var(--chip-warn-bg);
+  --color-chip-warn-fg: var(--chip-warn-fg);
+  --color-chip-danger-bg: var(--chip-danger-bg);
+  --color-chip-danger-fg: var(--chip-danger-fg);
+  --color-chip-neutral-bg: var(--chip-neutral-bg);
+  --color-chip-neutral-fg: var(--chip-neutral-fg);
+  --color-chip-info-bg: var(--chip-info-bg);
+  --color-chip-info-fg: var(--chip-info-fg);
+  --color-chip-violet-bg: var(--chip-violet-bg);
+  --color-chip-violet-fg: var(--chip-violet-fg);
 
   /* Semantic palette mapped 1:1 with marketing site — utilities:
    *   bg-success / text-success / border-success (same for warn/info/
@@ -487,6 +622,12 @@ body {
   }
   body {
     @apply bg-background text-foreground;
+    background-image: var(--page-glow);
+    background-attachment: fixed;
+  }
+  h1, h2, h3 {
+    letter-spacing: -0.02em;
+    text-wrap: balance;
   }
 
   /* ── Scrollbars ──────────────────────────────────────────────────
@@ -567,19 +708,22 @@ body {
   .type-title {
     font-size: 1.5rem;
     line-height: 2rem;
-    font-weight: 650;
-    letter-spacing: -0.02em;
+    font-weight: 600;
+    letter-spacing: -0.03em;
+    text-wrap: balance;
   }
   .type-row {
     font-size: 0.875rem;
     line-height: 1.3rem;
   }
+  /* Harbor eyebrow shape: mono, wide-tracked. Colour stays with the caller. */
   .type-section {
-    font-size: 0.8125rem;
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
     line-height: 1.2rem;
-    font-weight: 600;
+    font-weight: 500;
     text-transform: uppercase;
-    letter-spacing: 0.05em;
+    letter-spacing: 0.08em;
   }
   .type-meta {
     font-size: 0.75rem;
@@ -777,8 +921,8 @@ body {
     cursor: pointer;
     border: 1px solid var(--border);
     background-color: var(--card);
-    border-radius: 0.5rem;
-    transition: background-color 150ms ease, border-color 150ms ease;
+    border-radius: 1rem;
+    transition: background-color 150ms ease, border-color 200ms var(--ease-harbor), transform 220ms var(--ease-harbor), box-shadow 220ms var(--ease-harbor);
   }
 
   .card-interactive:focus-visible {
@@ -786,9 +930,12 @@ body {
     box-shadow: 0 0 0 2px var(--ring);
   }
 
+  /* Harbor hover: borders carry structure, a shadow appears only while the
+     card is lifted. */
   .card-hover:hover {
-    background-color: var(--row-hover-bg);
-    border-color: color-mix(in oklch, var(--border) 60%, transparent);
+    border-color: var(--line-strong);
+    transform: translateY(-2px);
+    box-shadow: 0 24px 48px -30px var(--shadow-color);
   }
 
   .card-selected {
@@ -798,6 +945,67 @@ body {
 
   .card-selected.card-hover:hover {
     background-color: var(--selection-bg-hover);
+  }
+
+  /* ── Harbor recipes ──────────────────────────────────────────────
+     The marketing site's shapes, as utilities the components compose. */
+
+  /* Eyebrow: section labels, table heads, card kickers. */
+  .eyebrow {
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    line-height: 1rem;
+    font-weight: 500;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--primary-hover);
+  }
+
+  /* Deep panel ground (heroes, terminals, graph canvases). Text on it is
+     --panel-foreground in every theme. */
+  .panel-surface {
+    background: var(--panel-bg);
+    color: var(--panel-foreground);
+    border: 1px solid rgb(255 255 255 / 0.06);
+  }
+
+  /* Card lift for anything clickable that is not a .card-interactive. */
+  .lift {
+    transition: transform 220ms var(--ease-harbor), border-color 200ms var(--ease-harbor), box-shadow 220ms var(--ease-harbor);
+  }
+  .lift:hover {
+    transform: translateY(-2px);
+    border-color: var(--line-strong);
+    box-shadow: 0 24px 48px -30px var(--shadow-color);
+  }
+
+  /* Icon tile: a glyph in a tinted, dotted square. The tint is --ic (set by
+     ConceptIcon from the concept's accent); the glyph takes a lighter or
+     darker mix of it per theme. */
+  .icon-tile {
+    --ic: var(--primary);
+    position: relative;
+    overflow: hidden;
+    color: color-mix(in oklch, var(--ic) var(--tile-text-mix), var(--foreground));
+    background: radial-gradient(circle at 30% 20%, color-mix(in srgb, var(--ic) 20%, transparent), color-mix(in srgb, var(--ic) 7%, transparent) 70%);
+    border: 1px solid color-mix(in srgb, var(--ic) 32%, transparent);
+    box-shadow: var(--tile-inset);
+    transition: transform 300ms var(--ease-spring), border-color 300ms var(--ease-harbor);
+  }
+  .icon-tile::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    opacity: 0.35;
+    background-size: 6px 6px;
+    background-image: radial-gradient(circle at 1px 1px, color-mix(in srgb, var(--ic) 60%, transparent) 1px, transparent 0);
+    pointer-events: none;
+  }
+  .icon-tile > svg { position: relative; }
+  :hover > .icon-tile,
+  .group:hover .icon-tile {
+    transform: scale(1.08) rotate(-4deg);
+    border-color: color-mix(in srgb, var(--ic) 55%, transparent);
   }
 }
 
@@ -862,7 +1070,8 @@ body {
   background-color: oklch(0.96 0.04 155);
   color: oklch(0.42 0.12 155);
 }
-.dark .status-success {
+.dark .status-success,
+.dusk .status-success {
   background-color: oklch(0.22 0.05 155);
   color: oklch(0.72 0.15 160);
 }
@@ -870,7 +1079,8 @@ body {
   background-color: oklch(0.96 0.02 25);
   color: oklch(0.50 0.15 25);
 }
-.dark .status-error {
+.dark .status-error,
+.dusk .status-error {
   background-color: oklch(0.22 0.05 25);
   color: oklch(0.72 0.15 25);
 }
@@ -878,7 +1088,8 @@ body {
   background-color: oklch(0.96 0.04 85);
   color: oklch(0.50 0.12 70);
 }
-.dark .status-warning {
+.dark .status-warning,
+.dusk .status-warning {
   background-color: oklch(0.22 0.05 70);
   color: oklch(0.72 0.12 70);
 }
@@ -1179,7 +1390,8 @@ body {
      light block at the top of this file. Only the tokens print actually
      uses (backgrounds, text, borders); --chart-1..5 excluded (see above). */
   :root,
-  html.dark {
+  html.dark,
+  html.dusk {
     color-scheme: light;
     --background: oklch(0.9911 0 0);
     --foreground: oklch(0.1994 0.0470 270.6494);
