@@ -22,15 +22,16 @@ import (
 // Manager is a host-side watchdog. The state directory must be private,
 // durable server storage, never mounted into a runtime. One owner per directory.
 type Manager struct {
-	Docker     Docker
-	Authority  Authority
-	Catalog    Catalog
-	Limits     Limits
-	dir, owner string
-	lock       *os.File
-	mu         sync.Mutex
-	sessions   map[string]*Session
-	reconciled bool
+	Docker          Docker
+	Authority       Authority
+	Catalog         Catalog
+	Limits          Limits
+	dir, owner      string
+	lock            *os.File
+	mu              sync.Mutex
+	sessions        map[string]*Session
+	reconciled      bool
+	brokerTransport *brokerTransport
 }
 type Record struct {
 	Attempt, Container, Fingerprint, Status, Reason string
@@ -48,6 +49,7 @@ type Session struct {
 	secrets    []string
 	done       chan struct{}
 	once       sync.Once
+	broker     *brokerProcess
 }
 
 func New(dir string, d Docker, a Authority, c Catalog, l Limits) (*Manager, error) {
@@ -164,6 +166,9 @@ func (m *Manager) Start(ctx context.Context, handle string) (s *Session, err err
 	defer func() {
 		s := failedSession
 		if err != nil {
+			if s.broker != nil {
+				s.broker.close()
+			}
 			if s.id != "" {
 				clean, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 				if m.Docker.remove(clean, s.id) != nil {
@@ -222,6 +227,15 @@ func (m *Manager) Start(ctx context.Context, handle string) (s *Session, err err
 			launch.Files[c.File] = v
 		}
 	}
+	var brokerToken string
+	if p.Network != nil {
+		brokerToken, err = s.startBroker(ctx)
+		if err != nil {
+			return nil, err
+		}
+		launch.Env["CREWSHIP_BROKER_URL"] = "http://" + brokerAddress
+		launch.Env["CREWSHIP_BROKER_TOKEN"] = brokerToken
+	}
 	fresh, e := resolve(ctx, m.Authority, handle, map[string]bool{})
 	if e != nil || fresh.fingerprint() != p.fingerprint() {
 		return nil, ErrDenied
@@ -232,6 +246,9 @@ func (m *Manager) Start(ctx context.Context, handle string) (s *Session, err err
 	s.plan = fresh
 	s.record.Expires = fresh.Expires
 	s.secrets = secretValues(values)
+	if brokerToken != "" {
+		s.secrets = append(s.secrets, brokerToken)
+	}
 	payload, e := json.Marshal(launch)
 	if e != nil {
 		return nil, e
@@ -244,11 +261,21 @@ func (m *Manager) Start(ctx context.Context, handle string) (s *Session, err err
 	if err = m.save(&s.record); err != nil {
 		return nil, err
 	}
+	if s.broker != nil {
+		select {
+		case <-s.broker.done:
+			return nil, ErrDenied
+		default:
+		}
+	}
 	if err = cmd.Start(); err != nil {
 		return nil, errors.New("restricted launch failed")
 	}
 	m.sessions[p.Attempt] = s
 	go s.watch()
+	if s.broker != nil {
+		go s.watchBroker(s.broker.done)
+	}
 	go func() { _ = cmd.Wait(); s.Stop("process_exited") }()
 	return s, nil
 }
@@ -360,6 +387,9 @@ func (s *Session) watch() {
 // durable and blocks recovery; it never reports successful revocation optimistically.
 func (s *Session) Stop(reason string) {
 	s.once.Do(func() {
+		if s.broker != nil {
+			s.broker.close()
+		}
 		s.mu.Lock()
 		s.record.Status = "draining"
 		s.record.Reason = reason

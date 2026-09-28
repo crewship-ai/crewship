@@ -34,6 +34,23 @@ func run() error {
 		return fmt.Errorf("mode required")
 	}
 	switch os.Args[1] {
+	case "dns-probe":
+		var cfg struct{ Address string }
+		if err := json.NewDecoder(io.LimitReader(os.Stdin, 4096)).Decode(&cfg); err != nil {
+			return err
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		resolver := &net.Resolver{PreferGo: true, Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
+			return (&net.Dialer{}).DialContext(ctx, "udp", cfg.Address)
+		}}
+		_, err := resolver.LookupHost(ctx, "probe.invalid")
+		return err
+	case "broker":
+		if os.Getuid() != 1002 {
+			return fmt.Errorf("identity")
+		}
+		return restrictedruntime.RunHTTPBroker(context.Background(), os.Stdin, os.Stdout)
 	case "hold":
 		if os.Getuid() != 1002 {
 			return fmt.Errorf("identity")

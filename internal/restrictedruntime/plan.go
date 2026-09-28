@@ -36,6 +36,8 @@ type Mount struct {
 }
 type Credential struct{ ID, Env, File string }
 type Plan struct {
+	Profile                                                                 string // empty is the existing offline prototype
+	Network                                                                 *NetworkPlan
 	Workspace, Principal, Agent, Scope, Attempt, Origin, OriginID, Revision string
 	PrincipalKind                                                           string
 	Generation                                                              uint64
@@ -48,6 +50,9 @@ type Plan struct {
 }
 
 func (p Plan) validate(now time.Time) error {
+	if err := p.validateNetwork(); err != nil {
+		return err
+	}
 	for _, s := range []string{p.Workspace, p.Principal, p.Agent, p.Scope, p.Attempt, p.OriginID, p.Revision} {
 		if !identifier.MatchString(s) {
 			return ErrDenied
@@ -126,6 +131,9 @@ func (p Plan) provenance() string {
 // Narrow enforces the runtime portion of delegation. The application must also
 // enforce its object/operation grants, origin permissions and data provenance.
 func Narrow(parent, child Plan) error {
+	if err := narrowNetwork(parent, child); err != nil {
+		return err
+	}
 	if parent.Workspace != child.Workspace || parent.Principal != child.Principal || parent.PrincipalKind != child.PrincipalKind || parent.Scope != child.Scope || parent.Origin != child.Origin || parent.OriginID != child.OriginID || child.Expires.After(parent.Expires) {
 		return ErrDenied
 	}

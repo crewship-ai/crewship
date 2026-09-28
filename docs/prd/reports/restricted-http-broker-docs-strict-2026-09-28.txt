@@ -1,0 +1,5 @@
+docs-inventory: 694 API operations, 945 CLI commands
+docs-inventory: CLI parity 537 API paths, 0 with no command, 18 exempt
+docs-inventory: flag sections 166 flags documented only under another command's heading, 0 of them not in the baseline
+docs-inventory: wrote docs/prd/reports/release-1-0-api-cli-inventory.json and docs/prd/reports/release-1-0-api-cli-inventory.md
+docs-inventory: strict mode — every documentation gate is clean.

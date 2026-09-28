@@ -42,7 +42,7 @@ are not removed by a literal scrubber. Persistent state carries conservative
 provenance covering all mounted resources and credential references; reducing
 rights requires a new storage generation rather than restoring broader state.
 
-The only supported profile is **offline Docker on Linux**: private PID/IPC/
+The original profile is **offline Docker on Linux**: private PID/IPC/
 network namespaces, agent UID 1001, protected init/broker UID 1002,
 no privileges/capabilities, read-only rootfs,
 explicit CPU/RAM/PID limits and bounded private tmpfs. Network is `none`.
@@ -77,3 +77,29 @@ Production chat/routine/webhook/queue adapters, server-selected recall,
 external network mediation, hard disk quotas, upstream credential revocation,
 host reboot and full application acceptance remain integration/release gates.
 Controller SIGKILL expiry is covered by `TestLiveControllerCrashExpiry`.
+
+## Fixed-operation connected prototype
+
+`Plan.Profile="brokered-http-v1"` selects a separate, restricted prototype.
+The container still has **network=none**. A UID-1002 loopback broker passes only
+fixed operation IDs and bounded bodies over private Docker stdin/stdout to a host
+relay. Host-side `BrokerAuthority` reauthorizes operations and broker-only secrets,
+including exact account/revision binding. DNS is checked on each operation, including connected interface subnets; dial
+uses the validated IP and TLS verifies the original hostname. No redirects,
+proxy environment inheritance, arbitrary destination/method/header forwarding,
+CONNECT, WebSocket, SSE, streaming, refresh or persistent RW storage is supported.
+This is not general model/provider networking or completed Release 1.0 isolation.
+
+Agent bootstrap receives `CREWSHIP_BROKER_URL` and `CREWSHIP_BROKER_TOKEN`.
+It can POST a bounded body to `/v1/operations/<server-granted-ID>` with the token
+in `Authorization: Bearer …`. No other local route is offered. The opaque token
+is per attempt; retries cannot reuse it. The broker must be ready before launch;
+relay/broker failure cancels active work, stops and removes the owned container.
+No new upstream call is admitted after observed revocation. Already-started
+external effects cannot be undone. Responses are buffered and reauthorized.
+
+See `docs/prd/RESTRICTED-HTTP-BROKER-CONTRACT-2026-09-28.md` for the exact scope,
+limits, ownership boundary and acceptance contract. The same live harness now
+also tests the fixed-operation broker with synthetic TLS/DNS/neighbor controls.
+The private test transport seam maps a checked synthetic routable address to an
+owned loopback TLS endpoint; the production constructor exposes no such bypass.

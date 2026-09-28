@@ -1,0 +1,12 @@
+--- FAIL: TestBrokerConnectedInterfaceSubnetsDenied (0.00s)
+    --- FAIL: TestBrokerConnectedInterfaceSubnetsDenied/8.8.8.8/24->8.8.8.9 (0.00s)
+        broker_test.go:166: connected subnet neighbor accepted
+    --- FAIL: TestBrokerConnectedInterfaceSubnetsDenied/2001:4860:4860::8888/64->2001:4860:4860::8844 (0.00s)
+        broker_test.go:166: connected subnet neighbor accepted
+    --- FAIL: TestBrokerConnectedInterfaceSubnetsDenied/::ffff:8.8.8.8/120->8.8.8.9 (0.00s)
+        broker_test.go:166: connected subnet neighbor accepted
+    --- FAIL: TestBrokerConnectedInterfaceSubnetsDenied/8.8.8.8/24->::ffff:8.8.8.9 (0.00s)
+        broker_test.go:166: connected subnet neighbor accepted
+FAIL
+FAIL	github.com/crewship-ai/crewship/internal/restrictedruntime	0.004s
+FAIL
