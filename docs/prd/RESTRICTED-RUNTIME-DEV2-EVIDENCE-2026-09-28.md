@@ -62,7 +62,7 @@ secrets. Existing internal crews are unchanged.
 | Processes and control | UID 1001 sees its private PID namespace. Container termination includes a child holding an open secret FD. No host PID or IPC namespace is joined. |
 | Sidecar | The actual compiled `cmd/crewship-sidecar` runs as UID 1002. Its `/broker` key/state is unreadable to UID 1001. Each human has an independent sidecar and synthetic upstream at identical loopback ports. |
 | Credential proxy | Valid per-run token reaches the correct synthetic account. Other run's real token, forged token, missing identity and stale fingerprint are denied without increasing upstream call count. Fresh reconstruction uses a new run-bound key; the old token fails. |
-| Host and network | Network mode is `none`, only loopback exists, no host-gateway or Docker socket is supplied. An owned host listener has a host-side positive control and is unreachable from the process; external IPv4, IPv6 and DNS probes fail. |
+| Host and network | Network mode is `none`, only loopback exists, no host-gateway or Docker socket is supplied. An owned host listener has a host-side positive control and is unreachable from the process; external IPv4, IPv6 and DNS probes fail. These latter probes have no separate destination positive control; the enforced offline namespace is the evidence of general network denial. |
 | IPC | There is no usable host/API capability. Sidecar memory/assignment/credential host routes cannot fetch host data in this offline fixture. This is not a claim that a future connected host API is already narrowed. |
 | Restoration | Fresh attempt/generation remounts authorized persistent data; secrets are freshly delivered. Changed audience/provenance or a forged recorded container identity is refused. |
 
@@ -85,8 +85,8 @@ scripts/restricted-runtime-probe/run.sh -race
 
 The script builds its own bootstrap and the real sidecar, records their
 SHA-256s, pins the existing Alpine base by repo digest and removes its own
-image/context afterwards. Live tests are opt-in; a normal `go test` skip is
-not counted as process evidence. All failures in the opted-in gate are fatal.
+image/context afterwards. Live tests use the explicit `restrictedruntime_live` build tag; a normal
+`go test` excludes this gate and is not counted as process evidence. All failures in the opted-in gate are fatal.
 The fixture authority is server-side synthetic state, not a mocked allow flag
 inside the agent, but it does not substitute for the production grant store.
 
