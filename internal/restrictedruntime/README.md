@@ -84,7 +84,7 @@ Controller SIGKILL expiry is covered by `TestLiveControllerCrashExpiry`.
 The container still has **network=none**. A UID-1002 loopback broker passes only
 fixed operation IDs and bounded bodies over private Docker stdin/stdout to a host
 relay. Host-side `BrokerAuthority` reauthorizes operations and broker-only secrets,
-including exact account/revision binding. DNS is checked on each operation; dial
+including exact account/revision binding. DNS is checked on each operation, including connected interface subnets; dial
 uses the validated IP and TLS verifies the original hostname. No redirects,
 proxy environment inheritance, arbitrary destination/method/header forwarding,
 CONNECT, WebSocket, SSE, streaming, refresh or persistent RW storage is supported.

@@ -27,8 +27,8 @@ method, credential/account or upstream headers. No shared host firewall changes.
 At most 16 operations and 16 broker credentials; one active call per attempt;
 1 MiB maximum request/response; 10 second maximum upstream deadline. Responses
 are buffered and reauthorized before delivery. No partial oversized response.
-Host DNS resolution rejects any disallowed address in an answer plus host
-interface addresses; dial uses the validated IP, TLS uses the original name.
+Host DNS resolution rejects any disallowed address in an answer plus connected host
+interface subnets; dial uses the validated IP, TLS uses the original name.
 Every new call resolves DNS anew. No redirects, environment proxies or retries.
 
 ## Revocation and lifecycle

@@ -51,7 +51,7 @@ Raw evidence: [red-first](reports/restricted-http-broker-red-2026-09-28.txt),
 |---|---|---|
 | Fixed operation | Real TLS upstream receives exact POST/path and synthetic broker-held account credential | Wrong operation/token/account and oversized payload produce no unauthorized call; oversized response, redirect, SSE and post-response revocation release no response data |
 | Two attempts | Two humans with the same agent each call their own broker successfully | Cross-attempt and previous-generation tokens do not increment upstream count |
-| DNS rebinding | A synthetic routable DNS result is pinned to a real owned TLS endpoint through the private test dial adapter | Change that same hostname to loopback: no additional TLS request; unit cases include mapped IPv6, metadata/gateway, mixed answers and host interface IP |
+| DNS rebinding | A synthetic routable DNS result is pinned to a real owned TLS endpoint through the private test dial adapter | Change that same hostname to loopback: no additional TLS request; unit cases include mapped IPv6, metadata/gateway, mixed answers and connected host interface subnets |
 | Direct network | Owned host IPv4/IPv6 listeners are reachable; actual synthetic DNS answers on the host gateway; service in B returns its own count | A's network=none cannot reach host IPv4/IPv6/gateway, DNS responder or B's service; only loopback interface exists |
 | Revocation/expiry | A valid token first increments upstream count | Current revoked/expired authority denies another call and terminates the attempt; a fresh generation accepts only its new token |
 | Relay failure | Agent completes an authorized call before the channel is closed | Real broker sees stdin EOF; manager stops/removes container and verifies absence; count remains unchanged |
@@ -61,7 +61,7 @@ Raw evidence: [red-first](reports/restricted-http-broker-red-2026-09-28.txt),
 The **private** test transport maps a validated routable address to an owned
 loopback TLS server and installs its test CA. This makes tests reproducible
 without real provider accounts or external internet. Production New does not
-expose that override: it uses system DNS/interface addresses and normal TLS.
+expose that override: it uses system DNS/interface subnets and normal TLS.
 This is not a claim that a production provider adapter was exercised.
 
 ## Measurements
@@ -88,3 +88,24 @@ rollout is included. Broker failures deny further use and stop the owned attempt
 no newly admitted upstream call follows observed revocation. Already-started
 external effects cannot be undone, and literal redaction is not a classifier or
 protection against encoded disclosure. Release 1.0 is not complete.
+
+## Independent review correction: connected subnets
+
+Independent review of PR #2715 found that exact host-IP matching did not deny a
+public neighbor or gateway in the same connected subnet. A red-first regression
+reproduces this with host `8.8.8.8/24` and DNS answer `8.8.8.9`, global IPv6 and
+both IPv4-mapped directions. The fix checks the parsed interface CIDR with
+`IPNet.Contains`; malformed interface metadata still denies. An outside-subnet
+public address is the positive control. Reverting only this condition through a
+source overlay must make the regression fail again.
+
+This covers **connected interface subnets**, not every route in the host's
+routing table. Private/special addresses remain independently denied. Trusted
+host routing changes, public destinations reached through non-interface routes,
+and arbitrary upstream-side effects are not proven isolated by this check.
+
+Correction evidence: [red-first](reports/restricted-http-broker-subnet-red-2026-09-28.txt),
+[exact-IP-only mutation](reports/restricted-http-broker-subnet-mutation-2026-09-28.txt).
+All four regressions fail before the fix and under the mutation; the unmutated
+package passes `go test -race ./internal/restrictedruntime -count=1` (1.867 s)
+and targeted vet. A clean live rerun follows the corrective code commit.

@@ -145,11 +145,13 @@ func resolveBrokerIP(ctx context.Context, host string, lookup func(context.Conte
 			return nil, ErrDenied
 		}
 		for _, l := range local {
-			ip, _, err := net.ParseCIDR(l.String())
+			_, subnet, err := net.ParseCIDR(l.String())
 			if err != nil {
 				return nil, ErrDenied
 			}
-			if a.IP.Equal(ip) {
+			// Deny every address on a directly connected interface subnet,
+			// including public neighbors/gateways and IPv4-mapped addresses.
+			if subnet.Contains(a.IP) {
 				return nil, ErrDenied
 			}
 		}

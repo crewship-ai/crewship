@@ -144,3 +144,34 @@ func TestBrokerFramesRejectOversizeAndUnknownFields(t *testing.T) {
 		}
 	}
 }
+
+func TestBrokerConnectedInterfaceSubnetsDenied(t *testing.T) {
+	for _, tc := range []struct{ hostCIDR, target string }{
+		{"8.8.8.8/24", "8.8.8.9"},
+		{"2001:4860:4860::8888/64", "2001:4860:4860::8844"},
+		{"::ffff:8.8.8.8/120", "8.8.8.9"},
+		{"8.8.8.8/24", "::ffff:8.8.8.9"},
+	} {
+		t.Run(tc.hostCIDR+"->"+tc.target, func(t *testing.T) {
+			host, subnet, err := net.ParseCIDR(tc.hostCIDR)
+			if err != nil {
+				t.Fatal(err)
+			}
+			subnet.IP = host // InterfaceAddrs retains the host address, not network base.
+			locals := func() ([]net.Addr, error) { return []net.Addr{subnet}, nil }
+			lookup := func(context.Context, string) ([]net.IPAddr, error) {
+				return []net.IPAddr{{IP: net.ParseIP(tc.target)}}, nil
+			}
+			if _, err := resolveBrokerIP(context.Background(), "neighbor.example", lookup, locals); err == nil {
+				t.Fatal("connected subnet neighbor accepted")
+			}
+			// A public address outside all connected interface subnets remains valid.
+			lookup = func(context.Context, string) ([]net.IPAddr, error) {
+				return []net.IPAddr{{IP: net.ParseIP("1.1.1.1")}}, nil
+			}
+			if _, err := resolveBrokerIP(context.Background(), "upstream.example", lookup, locals); err != nil {
+				t.Fatal("outside-subnet positive control denied", err)
+			}
+		})
+	}
+}
