@@ -220,9 +220,11 @@ type Executor struct {
 	// memberCheck reports whether a user is a member of a workspace, so a
 	// notify step targeting `user:<id>` can degrade to a workspace notice
 	// (rather than silently black-holing the message) when the id isn't a
-	// member. Production wiring installs NewWorkspaceMemberChecker(db).
+	// member. Also revalidates the human trigger before routine dispatch.
+	// Production wiring installs NewWorkspaceMemberChecker(db).
 	// Nil = the guard is skipped (target trusted as-is).
-	memberCheck func(ctx context.Context, workspaceID, userID string) (bool, error)
+	memberCheck     func(ctx context.Context, workspaceID, userID string) (bool, error)
+	invocationCheck func(context.Context, RunInput) error
 
 	// crewAudience resolves a `crew:<slug>` notify target to the crew's
 	// human audience (its crew_members user ids) inside ONE workspace, so
@@ -722,6 +724,9 @@ func (e *Executor) Run(ctx context.Context, in RunInput) (*RunResult, error) {
 	if in.Mode == "" {
 		in.Mode = ModeRun
 	}
+	if err := e.checkInvokingUser(ctx, in); err != nil {
+		return nil, err
+	}
 	p, err := e.store.GetByID(ctx, in.PipelineID)
 	if err != nil {
 		return nil, fmt.Errorf("executor: load pipeline: %w", err)
@@ -990,12 +995,14 @@ type RunInput struct {
 	InvokingAgentID string
 	// InvokingUserID is the workspace user who triggered the run, when
 	// known (manual/UI/CLI triggers). Empty for unattended triggers
-	// (schedule, nested call_pipeline). Consumed by notify steps that
+	// (schedule); nested calls inherit the parent identity. Revalidated
+	// against current membership at execution boundaries. Consumed by notify steps that
 	// target `to: trigger`; empty → the notification falls back to a
 	// workspace-wide notice.
-	InvokingUserID string
-	Inputs         map[string]any
-	Mode           RunMode
+	InvokingUserID      string
+	InvocationAuthority string // Server-assigned admission policy; never user metadata.
+	Inputs              map[string]any
+	Mode                RunMode
 	// IdempotencyKey, when non-empty, makes Run dedupe via the wired
 	// IdempotencyStore: a duplicate request with the same
 	// (workspace_id, key) within the TTL returns the original run id
@@ -1248,6 +1255,15 @@ func cancelledRunMessage(current, failedAtStep string) string {
 }
 
 func (e *Executor) runDSL(ctx context.Context, in RunInput, depth int) (result *RunResult, err error) {
+	if err := e.checkInvokingUser(ctx, in); err != nil {
+		// Run may already have reserved an idempotency key. No run row exists
+		// yet at this boundary, so a revoked caller must not leave a ghost
+		// reservation that makes a later authorized retry look DEDUPED.
+		if depth == 0 && in.pipeline != nil && in.IdempotencyKey != "" && e.idempotency != nil {
+			_ = e.idempotency.Forget(ctx, in.WorkspaceID, in.pipeline.ID, in.IdempotencyKey)
+		}
+		return nil, err
+	}
 	if depth >= MaxNestedPipelineDepth {
 		return nil, ErrMaxDepthExceeded
 	}
@@ -1830,6 +1846,9 @@ func (e *Executor) runStepBody(
 	depth int,
 	priorCostUSD float64,
 ) (output string, costUSD float64, durationMs int64, err error) {
+	if err := e.checkInvokingUser(ctx, in); err != nil {
+		return "", 0, 0, err
+	}
 
 	// Wrap every step type in a routine.step span so the trace tree shows
 	// step boundaries even for transform / http / code steps that have no
@@ -1886,6 +1905,9 @@ func (e *Executor) dispatchStep(
 	depth int,
 	priorCostUSD float64,
 ) (string, float64, int64, error) {
+	if err := e.checkInvokingUser(ctx, in); err != nil {
+		return "", 0, 0, err
+	}
 	switch step.Type {
 	case StepAgentRun:
 		return e.runAgentStep(ctx, step, renderedPrompt, primary, fallback, in, runID, pipelineID, emit)
@@ -1927,6 +1949,9 @@ func (e *Executor) runStepHook(ctx context.Context, hook *Step, in RunInput, run
 // tokens. kind ("step hook" / "hook step") preserves each caller's
 // historical error wording.
 func (e *Executor) dispatchHookStep(ctx context.Context, hook *Step, in RunInput, render RenderContext, kind string) (string, error) {
+	if err := e.checkInvokingUser(ctx, in); err != nil {
+		return "", err
+	}
 	switch hook.Type {
 	case StepHTTP:
 		out, _, _, err := e.runHTTPStep(ctx, *hook, render, in)
@@ -2385,23 +2410,24 @@ func parentRunSlug(in RunInput) string {
 //     rather than starting a fresh one.
 func buildNestedRunInput(parent RunInput, target *Pipeline, dsl *DSL, nestedInputs map[string]any, parentRunID string, remaining float64, callPath []string, chainDepth int) RunInput {
 	return RunInput{
-		WorkspaceID:     parent.WorkspaceID,
-		AuthorCrewID:    target.AuthorCrewID, // nested runs in nested pipeline's author context
-		AuthorAgentID:   target.AuthorAgentID,
-		InvokingCrewID:  parent.AuthorCrewID, // parent's author IS the invoker for the nested call
-		InvokingAgentID: parent.AuthorAgentID,
-		InvokingUserID:  parent.InvokingUserID, // 3.7 — propagate the human trigger
-		TierOverride:    parent.TierOverride,   // 3.7 — propagate the batch/eval tier override
-		TriggeredVia:    TriggeredViaCallPipeline,
-		TriggeredByID:   parentRunID, // 3.8 — parentage for RunTree (once child rows persist)
-		Inputs:          nestedInputs,
-		Mode:            parent.Mode,
-		ChainDepth:      chainDepth,
-		ChainOrigin:     chainOrigin(parent, parentRunID),
-		remainingBudget: remaining,
-		callPath:        callPath,
-		pipeline:        target,
-		dsl:             dsl,
+		WorkspaceID:         parent.WorkspaceID,
+		AuthorCrewID:        target.AuthorCrewID, // nested runs in nested pipeline's author context
+		AuthorAgentID:       target.AuthorAgentID,
+		InvokingCrewID:      parent.AuthorCrewID, // parent's author IS the invoker for the nested call
+		InvokingAgentID:     parent.AuthorAgentID,
+		InvocationAuthority: parent.InvocationAuthority,
+		InvokingUserID:      parent.InvokingUserID, // 3.7 — propagate the human trigger
+		TierOverride:        parent.TierOverride,   // 3.7 — propagate the batch/eval tier override
+		TriggeredVia:        TriggeredViaCallPipeline,
+		TriggeredByID:       parentRunID, // 3.8 — parentage for RunTree (once child rows persist)
+		Inputs:              nestedInputs,
+		Mode:                parent.Mode,
+		ChainDepth:          chainDepth,
+		ChainOrigin:         chainOrigin(parent, parentRunID),
+		remainingBudget:     remaining,
+		callPath:            callPath,
+		pipeline:            target,
+		dsl:                 dsl,
 	}
 }
 
@@ -2518,25 +2544,26 @@ func (e *Executor) persistRunStart(ctx context.Context, in RunInput, runID, pipe
 		inputsRaw = []byte("{}")
 	}
 	rec := &RunRecord{
-		ID:              runID,
-		WorkspaceID:     in.WorkspaceID,
-		PipelineID:      pipelineID,
-		PipelineSlug:    pipelineSlug,
-		Status:          RunStatusRunning,
-		Mode:            in.Mode,
-		StartedAt:       startedAt,
-		InvokingCrewID:  in.InvokingCrewID,
-		InvokingAgentID: in.InvokingAgentID,
-		InvokingUserID:  in.InvokingUserID,
-		IdempotencyKey:  in.IdempotencyKey,
-		InputsJSON:      string(inputsRaw),
-		TriggeredVia:    in.TriggeredVia,
-		TriggeredByID:   in.TriggeredByID,
-		DueAt:           in.DueAt,
-		MetadataJSON:    in.MetadataJSON,
-		IsReplay:        in.IsReplay,
-		ReplayOf:        in.ReplayOf,
-		ChainDepth:      in.ChainDepth,
+		ID:                  runID,
+		WorkspaceID:         in.WorkspaceID,
+		PipelineID:          pipelineID,
+		PipelineSlug:        pipelineSlug,
+		Status:              RunStatusRunning,
+		Mode:                in.Mode,
+		StartedAt:           startedAt,
+		InvokingCrewID:      in.InvokingCrewID,
+		InvokingAgentID:     in.InvokingAgentID,
+		InvocationAuthority: in.InvocationAuthority,
+		InvokingUserID:      in.InvokingUserID,
+		IdempotencyKey:      in.IdempotencyKey,
+		InputsJSON:          string(inputsRaw),
+		TriggeredVia:        in.TriggeredVia,
+		TriggeredByID:       in.TriggeredByID,
+		DueAt:               in.DueAt,
+		MetadataJSON:        in.MetadataJSON,
+		IsReplay:            in.IsReplay,
+		ReplayOf:            in.ReplayOf,
+		ChainDepth:          in.ChainDepth,
 		// A run with no inherited origin IS the origin, so stamp its own id
 		// rather than NULL: "what set this off" then has an answer on every
 		// row, including the human-started ones a chain later grows out of.

@@ -508,3 +508,34 @@ func TestCrewPeerConvsRunE_Errors(t *testing.T) {
 		}
 	})
 }
+
+func TestCrewFileAccessRunE(t *testing.T) {
+	s := clitest.NewStubServer()
+	defer s.Close()
+	covSetupCLI(t, s)
+	covCrewsList(s)
+	route := "/api/v1/crew-connections/conn-42/file-access"
+	s.OnPut(route, clitest.JSONResponse(200, map[string]any{"access_version": 2}))
+	if err := crewFileAccessCmd.RunE(crewFileAccessCmd, []string{"conn-42", "alpha", "read", "1"}); err != nil {
+		t.Fatal(err)
+	}
+	calls := s.CallsFor("PUT", route)
+	if len(calls) != 1 {
+		t.Fatalf("calls=%d", len(calls))
+	}
+	var body struct {
+		Requester string `json:"requester_crew_id"`
+		Level     string `json:"level"`
+		Version   int    `json:"expected_version"`
+	}
+	if err := json.Unmarshal(calls[0].Body, &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Requester != "ccrewa1234567890123456789" || body.Level != "read" || body.Version != 1 {
+		t.Fatalf("body=%+v", body)
+	}
+	s.OnPut(route, clitest.ErrorResponse(409, "Connection changed"))
+	if err := crewFileAccessCmd.RunE(crewFileAccessCmd, []string{"conn-42", "alpha", "none", "1"}); err == nil || !strings.Contains(err.Error(), "Connection changed") {
+		t.Fatalf("stale update: %v", err)
+	}
+}

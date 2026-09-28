@@ -264,9 +264,14 @@ func (h *CrewMessagingHandler) ReadFile(w http.ResponseWriter, r *http.Request) 
 	if !h.assertBoundCrewWorkspace(w, r, requesterCrewID, targetCrewID) {
 		return
 	}
+	// The requester is an identity, not a free choice of which peer's grants
+	// to use. The target remains legitimately foreign for cross-crew sharing.
+	if !assertBoundCrewWorkspaceDB(w, r, h.db, h.logger, &requesterCrewID) {
+		return
+	}
 
-	// Validate connection: requester must be able to communicate with target.
-	allowed, err := h.canCommunicate(r, requesterCrewID, targetCrewID)
+	// Validate the directed shared-file permission.
+	allowed, err := h.canAccessSharedFiles(r, requesterCrewID, targetCrewID, false)
 	if err != nil {
 		h.logger.Error("check crew connection for file read", "error", err)
 		replyError(w, http.StatusInternalServerError, "internal error")
@@ -389,16 +394,29 @@ func (h *CrewMessagingHandler) WriteFile(w http.ResponseWriter, r *http.Request)
 		replyError(w, http.StatusBadRequest, "crewId, requester_crew_id, and path are required")
 		return
 	}
+	// Validate the unjoined destination. Joining first erased ../../ and
+	// allowed a delivery to overwrite a project outside incoming/<sender>.
+	cleanDest, validDest := normalizeRequestPath(destPath)
+	if !validDest || cleanDest == "." {
+		replyError(w, http.StatusBadRequest, "invalid delivery path")
+		return
+	}
+	destPath = cleanDest
 
 	// PR-F24 R-2: a bound token may only touch shared files of crews in
 	// its own workspace.
 	if !h.assertBoundCrewWorkspace(w, r, requesterCrewID, targetCrewID) {
 		return
 	}
+	// The requester is an identity, not a free choice of which peer's grants
+	// to use. The target remains legitimately foreign for cross-crew sharing.
+	if !assertBoundCrewWorkspaceDB(w, r, h.db, h.logger, &requesterCrewID) {
+		return
+	}
 
 	// Validate connection: requester must be able to write to target.
 	// For unidirectional connections, only the source can write.
-	allowed, err := h.canCommunicate(r, requesterCrewID, targetCrewID)
+	allowed, err := h.canAccessSharedFiles(r, requesterCrewID, targetCrewID, true)
 	if err != nil {
 		h.logger.Error("check crew connection for file write", "error", err)
 		replyError(w, http.StatusInternalServerError, "internal error")

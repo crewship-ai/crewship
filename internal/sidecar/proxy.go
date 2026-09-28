@@ -949,7 +949,7 @@ func (p *Proxy) forwardWithGraceRetry(r, outReq *http.Request, spec llmroute.Spe
 	if err != nil || resp.StatusCode != http.StatusUnauthorized || replay == nil || cred == nil {
 		return resp, false, err
 	}
-	grace, rotationID, ok := p.credStore.GraceFor(cred.ID, time.Now())
+	grace, rotationID, ok := p.credStore.GraceFor(cred.ID, time.Now(), actorID)
 	if !ok || grace == cred.Token {
 		return resp, false, nil
 	}

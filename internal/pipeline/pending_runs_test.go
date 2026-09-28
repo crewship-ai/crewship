@@ -28,6 +28,7 @@ CREATE TABLE pending_runs (
     tier_override TEXT, priority INTEGER NOT NULL DEFAULT 0, debounce_key TEXT,
     fire_at TEXT NOT NULL, expires_at TEXT, debounce_max_at TEXT,
     invoking_user_id TEXT,
+    invocation_authority TEXT NOT NULL DEFAULT '',
     status TEXT NOT NULL DEFAULT 'pending', fired_run_id TEXT,
     triggered_via TEXT,
     chain_depth INTEGER,

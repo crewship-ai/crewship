@@ -28,12 +28,18 @@ interface Crew {
   icon?: string | null
 }
 
+type FileAccess = "none" | "read" | "read_write"
+const FILE_ACCESS_LABELS: Record<FileAccess, string> = { none: "No file access", read: "Can view", read_write: "Can view and deliver" }
+
 interface Connection {
   id: string
   from_crew_id: string
   to_crew_id: string
   direction: string
   status: string
+  forward_file_access?: FileAccess
+  reverse_file_access?: FileAccess
+  access_version?: number
 }
 
 interface ConnectionsSectionProps {
@@ -144,6 +150,7 @@ export function ConnectionsSection({ workspaceId }: ConnectionsSectionProps) {
   const [crews, setCrews] = useState<Crew[]>([])
   const [connections, setConnections] = useState<Connection[]>([])
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState(false)
   const [selectedID, setSelectedID] = useState<string | null>(null)
   const [pendingPair, setPendingPair] = useState<string | null>(null)
   // Two questions, two views: "what can THIS crew reach" (the editor) and
@@ -158,14 +165,38 @@ export function ConnectionsSection({ workspaceId }: ConnectionsSectionProps) {
         apiFetch(`/api/v1/crew-connections?workspace_id=${workspaceId}`),
         apiFetch(`/api/v1/crews?workspace_id=${workspaceId}`),
       ])
-      if (connsRes.ok) setConnections(await connsRes.json())
-      if (crewsRes.ok) setCrews(await crewsRes.json())
+      if (!connsRes.ok || !crewsRes.ok) throw new Error("Access could not be loaded")
+      const [nextConnections, nextCrews] = await Promise.all([connsRes.json(), crewsRes.json()])
+      setConnections(nextConnections)
+      setCrews(nextCrews)
+      setLoadError(false)
+    } catch {
+      setLoadError(true)
     } finally {
       setLoading(false)
     }
   }, [workspaceId])
 
   useEffect(() => { fetchData() }, [fetchData])
+
+  async function changeFileAccess(connection: Connection, requester: Crew, peer: Crew, level: FileAccess) {
+    if (!canManage || !connection.access_version || pendingPair) return
+    setPendingPair(peer.id)
+    try {
+      const res = await apiFetch(`/api/v1/crew-connections/${connection.id}/file-access?workspace_id=${workspaceId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ requester_crew_id: requester.id, level, expected_version: connection.access_version }),
+      })
+      if (!res.ok) toast.error(await readApiError(res, "Could not update shared-file access"))
+      else toast.success("Shared-file access updated")
+      await fetchData()
+    } catch {
+      toast.error("Could not verify shared-file access. Reload before making another change.")
+    } finally {
+      setPendingPair(null)
+    }
+  }
 
   const selected = useMemo(
     () => crews.find((c) => c.id === selectedID) ?? crews[0],
@@ -225,6 +256,8 @@ export function ConnectionsSection({ workspaceId }: ConnectionsSectionProps) {
             from_crew_id: removed.from_crew_id,
             to_crew_id: removed.to_crew_id,
             direction: removed.direction,
+            forward_file_access: removed.forward_file_access,
+            reverse_file_access: removed.reverse_file_access,
           }),
         })
         // apiFetch resolves on 4xx/5xx, so a refused restore reaches here
@@ -262,10 +295,10 @@ export function ConnectionsSection({ workspaceId }: ConnectionsSectionProps) {
           return
         }
         const res = await apiFetch(
-          `/api/v1/crew-connections/${existing.id}?workspace_id=${workspaceId}`,
+          `/api/v1/crew-connections/${existing.id}?workspace_id=${workspaceId}${existing.access_version ? `&expected_version=${existing.access_version}` : ""}`,
           { method: "DELETE" },
         )
-        if (!res.ok) { toast.error("Failed to unlink"); return }
+        if (!res.ok) { toast.error(await readApiError(res, "Failed to unlink")); await fetchData(); return }
         toast.success(`${selected.name} and ${other.name} unlinked`)
         await fetchData()
         return
@@ -288,17 +321,23 @@ export function ConnectionsSection({ workspaceId }: ConnectionsSectionProps) {
 
       if (needsReplace && existing) {
         const del = await apiFetch(
-          `/api/v1/crew-connections/${existing.id}?workspace_id=${workspaceId}`,
+          `/api/v1/crew-connections/${existing.id}?workspace_id=${workspaceId}${existing.access_version ? `&expected_version=${existing.access_version}` : ""}`,
           { method: "DELETE" },
         )
-        if (!del.ok) { toast.error("Failed to change the link"); return }
+        if (!del.ok) { toast.error(await readApiError(del, "Failed to change the link")); await fetchData(); return }
         removed = existing
       }
 
       const res = await apiFetch(`/api/v1/crew-connections?workspace_id=${workspaceId}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ from_crew_id: from, to_crew_id: to, direction }),
+        body: JSON.stringify({
+          from_crew_id: from, to_crew_id: to, direction,
+          ...(removed ? {
+            forward_file_access: from === removed.from_crew_id ? removed.forward_file_access : removed.reverse_file_access,
+            reverse_file_access: from === removed.from_crew_id ? removed.reverse_file_access : removed.forward_file_access,
+          } : !existing ? { forward_file_access: "none", reverse_file_access: "none" } : {}),
+        }),
       })
       if (!res.ok) {
         await reportFailure(await readApiError(res, "Failed to change the link"))
@@ -324,6 +363,10 @@ export function ConnectionsSection({ workspaceId }: ConnectionsSectionProps) {
     )
   }
 
+  if (loadError && crews.length < 2) {
+    return <SettingsCard title="Crew links" description="Shared access could not be loaded"><p role="alert" className="px-4 py-4 text-sm">Current access could not be verified. <button type="button" className="underline" onClick={() => void fetchData()}>Retry</button></p></SettingsCard>
+  }
+
   if (crews.length < 2) {
     return (
       <SettingsCard title="Crew links" description="Which crews may hand work to which">
@@ -339,7 +382,7 @@ export function ConnectionsSection({ workspaceId }: ConnectionsSectionProps) {
   return (
     <SettingsCard
       title="Crew links"
-      description="Which crews may hand work to which — agents can only dispatch, message and share files across a link"
+      description="Choose who can hand work to whom, then set shared-file access for each direction. Viewing and delivering files does not grant access to credentials or private agent homes."
       actions={
         <div className="flex items-center rounded-md border border-border/60 p-0.5">
           {([
@@ -366,6 +409,7 @@ export function ConnectionsSection({ workspaceId }: ConnectionsSectionProps) {
         </div>
       }
     >
+      {loadError && <p role="alert" className="px-4 py-3 text-sm text-destructive">Current access could not be verified. Displayed settings may be out of date. <button type="button" className="underline" onClick={() => void fetchData()}>Retry</button></p>}
       {view === "matrix" ? (
         /* ── Audit view: every pair at once. Row hands work to column. ── */
         <div className="overflow-x-auto">
@@ -509,7 +553,7 @@ export function ConnectionsSection({ workspaceId }: ConnectionsSectionProps) {
                   {canManage ? (
                     <Select
                       value={state}
-                      disabled={pendingPair === other.id}
+                      disabled={!!pendingPair || loadError}
                       onValueChange={(v) => void applyState(other, v as PairState)}
                     >
                       <SelectTrigger
@@ -554,6 +598,30 @@ export function ConnectionsSection({ workspaceId }: ConnectionsSectionProps) {
                       {PAIR_LABELS[state]}
                     </span>
                   )}
+                  {state !== "none" && (() => {
+                    const connection = connectionFor(selected!.id, other.id)!
+                    const directions = [
+                      ...(state === "out" || state === "both" ? [[selected!, other]] : []),
+                      ...(state === "in" || state === "both" ? [[other, selected!]] : []),
+                    ]
+                    return <div className="basis-full space-y-2 pl-8">
+                      {directions.map(([requester, target]) => {
+                        const level = requester.id === connection.from_crew_id ? connection.forward_file_access : connection.reverse_file_access
+                        return <div key={requester.id} className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                          <span className="text-muted-foreground">{requester.name} → {target.name} shared files</span>
+                          {canManage ? <Select value={level ?? "unknown"} disabled={!canManage || !!pendingPair || loadError || !connection.access_version}
+                            onValueChange={value => void changeFileAccess(connection, requester, other, value as FileAccess)}>
+                            <SelectTrigger className="h-8 coarse:h-12 w-[180px] text-xs" aria-label={`${requester.name} access to ${target.name} shared files`}><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                              {!level && <SelectItem value="unknown">Access unavailable</SelectItem>}
+                              {Object.entries(FILE_ACCESS_LABELS).map(([value, label]) => <SelectItem key={value} value={value}>{label}</SelectItem>)}
+                            </SelectContent>
+                          </Select> : <span>{level ? FILE_ACCESS_LABELS[level] : "Access unavailable"}</span>}
+                        </div>
+                      })}
+                      <p className="text-[11px] text-muted-foreground">Delivering places files in the receiving crew’s incoming folder; it does not allow editing all of its files.</p>
+                    </div>
+                  })()}
                 </div>
               )
             })}

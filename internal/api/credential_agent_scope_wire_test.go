@@ -68,6 +68,9 @@ func TestAgentScope_BootResolverCarriesGrantedAgentIDs(t *testing.T) {
 	if !ok {
 		t.Fatal("the agent-scoped credential was not delivered")
 	}
+	if scope, ok := scoped.AgentGrants[agentA]; !ok || scope != "" {
+		t.Fatal("effective grants lost at API delivery")
+	}
 	if strings.Join(scoped.AgentIDs, ",") != agentA {
 		t.Errorf("AgentIDs = %v, want [%s]: the resolver dropped ownership, so the "+
 			"sidecar CredStore serves this endpoint to every member of the crew",

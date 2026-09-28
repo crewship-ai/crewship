@@ -407,6 +407,10 @@ func (h *PageHandler) DispatchAction(w http.ResponseWriter, r *http.Request) {
 		h.forgetActionKeys(r.Context(), wsID, pipelineID, keys)
 		return
 	}
+	authority := pipeline.PageActionInvocation{PageID: res.page.ID, PanelID: panelID, ActionID: actionID, PipelineID: pipelineID, ActionDigest: pipeline.PageActionDigest(res.action)}
+	if fence := pageApplicationFenceFrom(r.Context()); fence != nil {
+		authority.Publication = fence.version
+	}
 	pendingID, coalesced, err := h.enqueuePageAction(r.Context(), pipeline.PendingRun{
 		ID:           keys.pendingID,
 		WorkspaceID:  wsID,
@@ -424,9 +428,10 @@ func (h *PageHandler) DispatchAction(w http.ResponseWriter, r *http.Request) {
 		DebounceKey: debounceKey,
 		// Now, not a window: a button is not a debounce. The key is here for the
 		// uniqueness the index gives it, and fire_at says "on the next tick".
-		FireAt:         now,
-		InvokingUserID: user.ID,
-		TriggeredVia:   pipeline.TriggeredViaManual,
+		FireAt:              now,
+		InvokingUserID:      user.ID,
+		InvocationAuthority: authority.Authority(),
+		TriggeredVia:        pipeline.TriggeredViaManual,
 	})
 	if err != nil {
 		h.forgetActionKeys(r.Context(), wsID, pipelineID, keys)

@@ -18,6 +18,8 @@ func TestDSLUsesCrewContainer(t *testing.T) {
 	}{
 		{"agent_run", &DSL{Steps: []Step{{ID: "a", Type: StepAgentRun}}}, true},
 		{"script", &DSL{Steps: []Step{{ID: "s", Type: StepScript}}}, true},
+		{"gated agent", &DSL{Steps: []Step{{ID: "check", Type: StepQuery}, {ID: "work", Type: StepAgentRun, If: "{{ steps.check.output.has_work }}"}}}, false},
+		{"gated script", &DSL{Steps: []Step{{ID: "work", Type: StepScript, If: "false"}}}, false},
 		{"http only", &DSL{Steps: []Step{{ID: "h", Type: StepHTTP}}}, false},
 		{"transform only", &DSL{Steps: []Step{{ID: "t", Type: StepTransform}}}, false},
 		{"call_pipeline only", &DSL{Steps: []Step{{ID: "c", Type: StepCallPipeline}}}, false},

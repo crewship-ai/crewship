@@ -805,6 +805,14 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 		socketPath = config.DefaultSocketPath()
 	}
 	proxy := NewProxyHandler(r.db, r.logger, socketPath)
+	chatShares := NewChatSharesHandler(r.db, proxy, r.logger)
+	// A share bearer only reaches the read-only transcript handler. This route
+	// intentionally bypasses session authentication and workspace selection;
+	// its own validator binds the token to exactly one live chat.
+	r.mux.HandleFunc("GET /api/v1/shared-chats/{shareId}/messages", chatShares.Messages)
+	r.mux.Handle("GET /api/v1/agents/{agentId}/chats/{chatId}/shares", authed(wsCtx(http.HandlerFunc(chatShares.List))))
+	r.authedMut("POST", "/api/v1/agents/{agentId}/chats/{chatId}/shares", roleSelf, chatShares.Create)
+	r.authedMut("DELETE", "/api/v1/agents/{agentId}/chats/{chatId}/shares/{shareId}", roleSelf, chatShares.Revoke)
 	r.mux.Handle("GET /api/v1/crewshipd", authed(wsCtx(http.HandlerFunc(proxy.CrewshipdHealth))))
 	r.mux.Handle("GET /api/v1/agents/{agentId}/debug", authed(wsCtx(http.HandlerFunc(proxy.AgentDebug))))
 	r.mux.Handle("GET /api/v1/agents/{agentId}/files", authed(wsCtx(http.HandlerFunc(proxy.AgentFiles))))

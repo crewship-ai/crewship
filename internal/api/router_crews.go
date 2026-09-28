@@ -142,6 +142,8 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	// running sidecar containers). Literal "services" beats the {crewId}
 	// catch-all the same way "capabilities" does above, so no ordering
 	// hazard.
+	r.mux.Handle("GET /api/v1/crews/{crewId}/service-states", authed(wsCtx(http.HandlerFunc(crews.ServiceStates))))
+	r.authedMut("PUT", "/api/v1/crews/{crewId}/services/{serviceName}/state", roleCreate, crews.SetServiceState)
 	r.mux.Handle("GET /api/v1/crews/{crewId}/services", authed(wsCtx(http.HandlerFunc(crews.Services))))
 	// The whole-crew container inventory: the agent runtime AND the sidecars,
 	// with live state and usage. Wider than /services (which is sidecars
@@ -193,6 +195,7 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	conns := NewCrewConnectionHandler(r.db, r.logger)
 	r.mux.Handle("GET /api/v1/crew-connections", authed(wsCtx(http.HandlerFunc(conns.List))))
 	r.authedMut("POST", "/api/v1/crew-connections", roleCreate, conns.Create)
+	r.authedMut("PUT", "/api/v1/crew-connections/{connectionId}/file-access", roleCreate, conns.UpdateFileAccess)
 	r.authedMut("DELETE", "/api/v1/crew-connections/{connectionId}", roleCreate, conns.Delete)
 
 	// Integrations (MCP Gateway)

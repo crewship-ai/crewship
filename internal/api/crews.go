@@ -240,7 +240,7 @@ func (h *CrewHandler) restartCrewContainer(ctx context.Context, crewID string) {
 			},
 		},
 	}
-	reqURL := fmt.Sprintf("http://crewshipd/crews/%s/container/stop", url.PathEscape(crewID))
+	reqURL := fmt.Sprintf("http://crewshipd/crews/%s/container/recycle", url.PathEscape(crewID))
 	req, err := http.NewRequestWithContext(ctx, "POST", reqURL, nil)
 	if err != nil {
 		h.logger.Warn("failed to build container stop request", "error", err)
