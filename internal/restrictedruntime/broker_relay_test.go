@@ -164,3 +164,51 @@ func TestBrokerTLSRetainsHostnameVerification(t *testing.T) {
 		t.Fatal("TLS hostname mismatch accepted")
 	}
 }
+
+func TestBrokerAudienceChangeRevokesAttempt(t *testing.T) {
+	for _, phase := range []string{"before admission", "before response"} {
+		t.Run(phase, func(t *testing.T) {
+			p := connectedPlan()
+			p.Network.Grants[0].URL = "https://example.com/echo"
+			s, a := brokerTestSession(t, p)
+			changed := p
+			network := *p.Network
+			network.Audience = "replacement-audience"
+			changed.Network = &network
+			if changed.fingerprint() == p.fingerprint() {
+				t.Fatal("audience change did not change attempt fingerprint")
+			}
+			changeAudience := func() {
+				a.mu.Lock()
+				a.plans["h"] = changed
+				a.mu.Unlock()
+			}
+			var calls atomic.Int32
+			server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls.Add(1)
+				if phase == "before response" {
+					changeAudience()
+				}
+				_, _ = w.Write([]byte("private-response"))
+			}))
+			defer server.Close()
+			wantCalls := int32(1)
+			if phase == "before admission" {
+				changeAudience()
+				wantCalls = 0
+			}
+			out := s.brokerRequest(context.Background(), "token", brokerFrame{Token: "token", Operation: "echo"}, *syntheticBrokerTransport(t, server))
+			if out.Status != http.StatusForbidden || len(out.Body) != 0 || calls.Load() != wantCalls {
+				t.Fatalf("audience change: response=%+v upstream calls=%d want %d", out, calls.Load(), wantCalls)
+			}
+			select {
+			case <-s.done:
+				if s.Record().Status != "terminated" {
+					t.Fatal("changed audience did not terminate attempt")
+				}
+			case <-time.After(2 * time.Second):
+				t.Fatal("changed audience did not stop attempt")
+			}
+		})
+	}
+}

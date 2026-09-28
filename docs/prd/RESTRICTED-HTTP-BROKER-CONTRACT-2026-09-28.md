@@ -16,7 +16,8 @@ The exact proposed/approved Go types are in `internal/restrictedruntime/broker.g
 and broker-only credential references with revision/provider/account binding.
 `BrokerAuthority` extends the existing authority with current credential
 resolution. It may not accept authority from an agent request. All network fields
-participate in the plan fingerprint, provenance and delegation narrowing.
+participate in the plan fingerprint and provenance; operation and credential grants also constrain delegation narrowing.
+`Audience` is a server-owned per-attempt broker tag, not an A2/B data/output grant: a delegated child may receive its own tag and token, but changing the tag within an admitted attempt changes its fingerprint and denies further upstream admission and response delivery.
 
 Agent UID 1001 remains in network=none. A protected UID 1002 loopback broker
 uses a private framed Docker-exec stdin/stdout connection to the host relay.
