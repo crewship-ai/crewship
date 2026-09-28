@@ -36,6 +36,8 @@ type Mount struct {
 }
 type Credential struct{ ID, Env, File string }
 type Plan struct {
+	Profile                                                                 string // empty is the existing offline prototype
+	Network                                                                 *NetworkPlan
 	Workspace, Principal, Agent, Scope, Attempt, Origin, OriginID, Revision string
 	PrincipalKind                                                           string
 	Generation                                                              uint64
@@ -48,6 +50,9 @@ type Plan struct {
 }
 
 func (p Plan) validate(now time.Time) error {
+	if err := p.validateNetwork(); err != nil {
+		return err
+	}
 	for _, s := range []string{p.Workspace, p.Principal, p.Agent, p.Scope, p.Attempt, p.OriginID, p.Revision} {
 		if !identifier.MatchString(s) {
 			return ErrDenied
