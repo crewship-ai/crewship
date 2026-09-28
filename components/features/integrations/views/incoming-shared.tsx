@@ -4,7 +4,7 @@ import { ArrowDownToLine, Plus } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 
-export const card = "rounded-xl border border-foreground/[0.08] bg-card"
+export const card = "rounded-[20px] border border-border bg-card"
 export const time = (value?: string) =>
   value ? new Date(value).toLocaleString() : "—"
 export function IncomingError({
@@ -36,10 +36,10 @@ export function Loading() {
     >
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
         {[0, 1, 2, 3].map((i) => (
-          <Skeleton key={i} className="h-28 rounded-xl" />
+          <Skeleton key={i} className="h-28 rounded-[20px]" />
         ))}
       </div>
-      <Skeleton className="h-64 rounded-xl" />
+      <Skeleton className="h-64 rounded-[20px]" />
     </div>
   )
 }
@@ -52,7 +52,7 @@ export function Panel({
 }) {
   return (
     <section className={card}>
-      <h3 className="border-b border-foreground/[0.06] px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+      <h3 className="eyebrow border-b border-border px-4 py-3">
         {title}
       </h3>
       {children}
