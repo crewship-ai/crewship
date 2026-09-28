@@ -56,7 +56,7 @@ func (p Plan) validate(now time.Time) error {
 	if p.PrincipalKind != "human" && p.PrincipalKind != "service" {
 		return ErrDenied
 	}
-	if p.Generation == 0 || p.Mode != "restricted" || !p.Expires.After(now) || p.Expires.Sub(now) > 15*time.Second {
+	if p.Generation == 0 || p.Mode != "restricted" || !p.Expires.After(now) || p.Expires.Sub(now) > maxLease {
 		return ErrDenied
 	}
 	switch p.Origin {

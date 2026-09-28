@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+	"time"
 )
 
 // Docker uses argument vectors, never a host shell. Only nonsecret identifiers
@@ -110,7 +111,7 @@ func (d Docker) create(ctx context.Context, p Plan, c Catalog, l Limits, owner s
 	if e != nil {
 		return "", e
 	}
-	args := []string{"create", "--pull=never", "--name", "crewship-rtest-" + owner + "-" + p.Attempt, "--label", labelPrefix + "owner=" + owner, "--label", labelPrefix + "attempt=" + p.Attempt, "--label", labelPrefix + "plan=" + p.fingerprint(), "--user", "1001:1001", "--read-only", "--network", "none", "--ipc", "private", "--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--init", "--restart", "no", "--memory", fmt.Sprint(l.MemoryBytes), "--memory-swap", fmt.Sprint(l.MemoryBytes), "--cpus", fmt.Sprintf("%.9f", float64(l.NanoCPUs)/1e9), "--pids-limit", fmt.Sprint(l.PIDs), "--shm-size", "1048576", "--log-driver", "none", "--ulimit", "nofile=256:256", "--ulimit", "core=0:0"}
+	args := []string{"create", "--pull=never", "--name", "crewship-rtest-" + owner + "-" + p.Attempt, "--label", labelPrefix + "owner=" + owner, "--label", labelPrefix + "attempt=" + p.Attempt, "--label", labelPrefix + "plan=" + p.fingerprint(), "--user", "1002:1002", "--read-only", "--network", "none", "--ipc", "private", "--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--init", "--restart", "no", "--memory", fmt.Sprint(l.MemoryBytes), "--memory-swap", fmt.Sprint(l.MemoryBytes), "--cpus", fmt.Sprintf("%.9f", float64(l.NanoCPUs)/1e9), "--pids-limit", fmt.Sprint(l.PIDs), "--shm-size", "1048576", "--log-driver", "none", "--ulimit", "nofile=256:256", "--ulimit", "core=0:0"}
 	for _, target := range []string{"/home/agent", "/secrets", "/broker", "/tmp"} {
 		args = append(args, "--tmpfs", target+":"+privateTmpfs()[target])
 	}
@@ -148,4 +149,14 @@ func (d Docker) remove(ctx context.Context, id string) error {
 func (d Docker) stopped(ctx context.Context, id string) bool {
 	b, e := d.call(ctx, nil, "inspect", "--format", "{{.State.Running}}", id)
 	return e == nil && strings.TrimSpace(string(b)) == "false"
+}
+
+// renew delivers no task content or credentials; the protected init owns expiry.
+func (d Docker) renew(ctx context.Context, id string, expires time.Time) error {
+	b, e := json.Marshal(expires)
+	if e != nil {
+		return e
+	}
+	_, e = d.call(ctx, b, "exec", "-i", "--user", "1002:1002", id, "/opt/crewship-runner", "lease")
+	return e
 }
