@@ -1,3 +1,5 @@
+//go:build linux
+
 // restricted-runtime-probe is a trusted bootstrap for the offline acceptance
 // image. It is not a new production entrypoint or an agent-facing API.
 package main

@@ -1,3 +1,5 @@
+//go:build linux
+
 // Package restrictedruntime is an opt-in, offline Docker prototype. It is not
 // wired into production admission: only a trusted server Authority can supply
 // plans. Unsupported profiles fail closed, never falling back to crew exec.
