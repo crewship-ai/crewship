@@ -44,7 +44,7 @@ export function EditableUserMessage({
         initial={{ opacity: 0, scale: 0.98 }}
         animate={{ opacity: 1, scale: 1 }}
         transition={spring.snappy}
-        className="flex flex-col gap-2 rounded-2xl bg-primary/10 border border-primary/20 shadow-sm px-4 py-3 ml-auto max-w-[80%] w-full"
+        className="flex flex-col gap-2 rounded-[18px] rounded-tr-[6px] bg-primary/10 border border-primary/30 px-4 py-3 ml-auto max-w-[80%] w-full"
       >
         <textarea
           ref={taRef}
@@ -107,11 +107,11 @@ export function EditableUserMessage({
           that collapses newlines shows something the editor does not. It also
           keeps the attachment block of a message sent with a file readable
           (lib/attachment-message.ts) instead of running it onto one line. */}
-      <div className="whitespace-pre-wrap rounded-2xl rounded-br-sm bg-primary/10 border border-primary/20 shadow-sm px-4 py-3 text-sm">
+      <div className="whitespace-pre-wrap rounded-[18px] rounded-tr-[6px] bg-primary/10 border border-primary/30 px-4 py-3 text-sm">
         {text}
       </div>
       <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-        <span className="text-[10px] text-muted-foreground">
+        <span className="font-mono text-[10px] text-muted-foreground">
           {timestamp.toLocaleTimeString("en-GB", {
             hour: "2-digit",
             minute: "2-digit",

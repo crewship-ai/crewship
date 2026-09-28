@@ -45,7 +45,11 @@ export const Suggestion = ({
 
   return (
     <Button
-      className={cn("cursor-pointer rounded-full px-4", className)}
+      className={cn(
+        // Harbor: a quiet chip, not a second row of buttons competing with the composer.
+        "cursor-pointer rounded-full border-border bg-surface-subtle px-3.5 font-normal text-muted-foreground shadow-none hover:border-line-strong hover:bg-surface-subtle hover:text-foreground",
+        className,
+      )}
       onClick={handleClick}
       size={size}
       type="button"

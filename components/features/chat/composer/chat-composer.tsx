@@ -96,6 +96,18 @@ const NO_ATTACHMENTS: ComposerAttachment[] = []
  * AnimatePresence, so typing re-reconciled the entire message list
  * (O(turns) per keystroke on the app's hottest interactive path).
  */
+
+/**
+ * Harbor composer: an 18px card on the page ground with a brand focus ring.
+ * The border and radius live on the input group the prompt input renders,
+ * so the form reaches it by its data-slot instead of drawing a second box.
+ */
+const COMPOSER_SHELL = [
+  "[&_[data-slot=input-group]]:rounded-[18px] [&_[data-slot=input-group]]:border-border [&_[data-slot=input-group]]:bg-card [&_[data-slot=input-group]]:shadow-none dark:[&_[data-slot=input-group]]:bg-card",
+  "[&_[data-slot=input-group]]:transition-[border-color,box-shadow]",
+  "[&_[data-slot=input-group]:focus-within]:border-primary/60 [&_[data-slot=input-group]:focus-within]:ring-[3px] [&_[data-slot=input-group]:focus-within]:ring-primary/20",
+].join(" ")
+
 export function ChatComposer({
   agentId,
   sessionId,
@@ -335,7 +347,7 @@ export function ChatComposer({
             members={mentionMembers ?? []}
             onPick={handleMentionPick}
           />
-          <PromptInput className="rounded-xl border" onSubmit={handleTypedSubmit}>
+          <PromptInput className={COMPOSER_SHELL} onSubmit={handleTypedSubmit}>
             <PromptInputTextarea
               ref={mentionTextareaRef}
               value={input}
@@ -368,7 +380,7 @@ export function ChatComposer({
           members={mentionMembers ?? []}
           onPick={handleMentionPick}
         />
-        <PromptInput className="rounded-xl border" onSubmit={handleTypedSubmit}>
+        <PromptInput className={COMPOSER_SHELL} onSubmit={handleTypedSubmit}>
           <PromptInputTextarea
             ref={mentionTextareaRef}
             value={input}

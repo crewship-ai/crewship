@@ -33,6 +33,7 @@ import { useWorkspace } from "@/hooks/use-workspace"
 import { useDrawerStore } from "@/stores/drawer-store"
 
 import { Shimmer } from "@/components/ai-elements/shimmer"
+import { TypingDots } from "@/components/features/chat/messages/typing-indicator"
 import { TurnRenderer } from "./turn-renderer"
 import { PinToTopSpacer } from "./pin-to-top-spacer"
 import { RightPanel } from "./right-panel"
@@ -1286,8 +1287,9 @@ function StreamingIndicator({ isStreaming, turns, agentName }: StreamingIndicato
   )
   if (hasReply) return null
   return (
-    <div className="flex items-center gap-2 px-4 py-3 text-sm animate-in fade-in">
-      <Shimmer duration={1.6}>{`${agentName ?? "Agent"} is working…`}</Shimmer>
+    <div className="flex items-center gap-3 px-4 py-3 text-sm animate-in fade-in" data-slot="streaming-indicator">
+      <TypingDots name={agentName} />
+      <Shimmer duration={1.6} className="text-label">{`${agentName ?? "Agent"} is working…`}</Shimmer>
     </div>
   )
 }
