@@ -8,11 +8,12 @@ import (
 )
 
 func testPlan() Plan {
-	return Plan{Workspace: "w1", Principal: "h1", Agent: "a", Scope: "h1-chat1", Attempt: "attempt1", Origin: "chat", OriginID: "chat1", Revision: "r1", Generation: 1, Mode: "restricted", Expires: time.Now().Add(10 * time.Second), Mounts: []Mount{{"private", "/data/private", false}, {"shared", "/data/shared", true}}, Credentials: []Credential{{"direct", "DIRECT_TOKEN", "direct"}}, Command: []string{"sh", "-c", "sleep 3600"}}
+	return Plan{Workspace: "w1", Principal: "h1", PrincipalKind: "human", Agent: "a", Scope: "h1-chat1", Attempt: "attempt1", Origin: "chat", OriginID: "chat1", Revision: "r1", Generation: 1, Mode: "restricted", Expires: time.Now().Add(10 * time.Second), Mounts: []Mount{{"private", "/data/private", false}, {"shared", "/data/shared", true}}, Credentials: []Credential{{"direct", "DIRECT_TOKEN", "direct"}}, Command: []string{"sh", "-c", "sleep 3600"}}
 }
 func TestPlanRejectsUnsafeInputs(t *testing.T) {
 	tests := map[string]func(*Plan){
-		"legacy fallback": func(p *Plan) { p.Mode = "" }, "missing principal": func(p *Plan) { p.Principal = "" }, "path identity": func(p *Plan) { p.Scope = "../h2" }, "unknown origin": func(p *Plan) { p.Origin = "client-says-owner" }, "expired": func(p *Plan) { p.Expires = time.Now().Add(-time.Second) }, "long lease": func(p *Plan) { p.Expires = time.Now().Add(time.Minute) }, "raw mount": func(p *Plan) { p.Mounts[0].Target = "/var/run/docker.sock" }, "traversal": func(p *Plan) { p.Mounts[0].Target = "/data/a/../b" }, "nested mount": func(p *Plan) { p.Mounts[0].Target = "/data/shared/nested" }, "writable alias": func(p *Plan) { p.Mounts = append(p.Mounts, Mount{"shared", "/data/alias", false}) }, "duplicate target": func(p *Plan) { p.Mounts[0].Target = p.Mounts[1].Target }, "secret traversal": func(p *Plan) { p.Credentials[0].File = "../broker/key" }, "env loader": func(p *Plan) { p.Credentials[0].Env = "LD_PRELOAD" }, "duplicate secret": func(p *Plan) { p.Credentials = append(p.Credentials, p.Credentials[0]) }}
+		"legacy fallback": func(p *Plan) { p.Mode = "" }, "unknown principal kind": func(p *Plan) { p.PrincipalKind = "client-says-owner" },
+		"missing principal": func(p *Plan) { p.Principal = "" }, "path identity": func(p *Plan) { p.Scope = "../h2" }, "unknown origin": func(p *Plan) { p.Origin = "client-says-owner" }, "expired": func(p *Plan) { p.Expires = time.Now().Add(-time.Second) }, "long lease": func(p *Plan) { p.Expires = time.Now().Add(time.Minute) }, "raw mount": func(p *Plan) { p.Mounts[0].Target = "/var/run/docker.sock" }, "traversal": func(p *Plan) { p.Mounts[0].Target = "/data/a/../b" }, "nested mount": func(p *Plan) { p.Mounts[0].Target = "/data/shared/nested" }, "writable alias": func(p *Plan) { p.Mounts = append(p.Mounts, Mount{"shared", "/data/alias", false}) }, "duplicate target": func(p *Plan) { p.Mounts[0].Target = p.Mounts[1].Target }, "secret traversal": func(p *Plan) { p.Credentials[0].File = "../broker/key" }, "env loader": func(p *Plan) { p.Credentials[0].Env = "LD_PRELOAD" }, "duplicate secret": func(p *Plan) { p.Credentials = append(p.Credentials, p.Credentials[0]) }}
 	for name, mutate := range tests {
 		t.Run(name, func(t *testing.T) {
 			p := testPlan()
@@ -37,7 +38,8 @@ func TestDelegationOnlyNarrows(t *testing.T) {
 	if e := Narrow(p, c); e != nil {
 		t.Fatal(e)
 	}
-	for name, mutate := range map[string]func(*Plan){"write": func(c *Plan) { c.Mounts[0].ReadOnly = false }, "new resource": func(c *Plan) { c.Mounts[0].Resource = "foreign" }, "new secret": func(c *Plan) { c.Credentials = []Credential{{"foreign", "SECRET", ""}} }, "principal": func(c *Plan) { c.Principal = "h2" }, "audience": func(c *Plan) { c.Scope = "h2-chat" }, "longer lease": func(c *Plan) { c.Expires = p.Expires.Add(time.Second) }} {
+	for name, mutate := range map[string]func(*Plan){"write": func(c *Plan) { c.Mounts[0].ReadOnly = false }, "new resource": func(c *Plan) { c.Mounts[0].Resource = "foreign" }, "new secret": func(c *Plan) { c.Credentials = []Credential{{"foreign", "SECRET", ""}} }, "principal kind": func(c *Plan) { c.PrincipalKind = "service" },
+		"principal": func(c *Plan) { c.Principal = "h2" }, "audience": func(c *Plan) { c.Scope = "h2-chat" }, "longer lease": func(c *Plan) { c.Expires = p.Expires.Add(time.Second) }} {
 		t.Run(name, func(t *testing.T) {
 			v := c
 			v.Mounts = append([]Mount(nil), c.Mounts...)
