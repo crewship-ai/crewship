@@ -187,6 +187,22 @@ describe("needs attention", () => {
     expect(onSelectStatus).toHaveBeenCalledWith("attention")
   })
 
+  // Seven orange copies of one sentence read as seven problems. One pill per
+  // row, and the shared sentence once under the list.
+  it("gives each row a pill and says a shared reason once", () => {
+    const ids = ["a", "b", "c", "d", "e", "f", "g"]
+    renderOverview({
+      credentials: ids.map((id) => cred({ id, name: `KEY_${id}`, last_used_at: daysAgo(1) })),
+      missingToolIds: new Set(ids),
+    })
+    const pills = screen
+      .getAllByText("Tool missing")
+      .filter((el) => el.closest("[data-slot=status-pill]"))
+    expect(pills).toHaveLength(6)
+    expect(screen.getAllByText(/the CLI that reads it is missing from a crew/)).toHaveLength(1)
+    expect(screen.getByTestId("attention-summary")).toHaveTextContent(/7/)
+  })
+
   it("says everything is fine rather than showing an empty list", () => {
     renderOverview({ credentials: [cred({ id: "a", last_used_at: daysAgo(1) })] })
     expect(screen.getByText(/Nothing is expired, stale, or waiting/)).toBeInTheDocument()

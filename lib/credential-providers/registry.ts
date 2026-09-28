@@ -222,16 +222,15 @@ export interface BrandEntry {
   cli?: boolean
 }
 
-// brandColor returns the hex to use for rendering. The app is dark by
-// default, so any black brand picks up its darkHex automatically; if a
-// brand has no darkHex its hex is used as-is.
+// brandColor returns the CSS colour to paint the mark with. Two themes ship
+// (dark default, light), so a brand with a dark-surface override resolves
+// per theme through light-dark(): the official hex on the light ground,
+// darkHex under the .dark class (which sets color-scheme: dark). Brands
+// without an override read on both grounds and stay a plain hex.
 //
-// INVARIANT: app is dark-by-default; revisit this helper's signature
-// when a theme toggle ships — at that point this needs an isDark arg
-// or a useTheme() call. Search for "INVARIANT: app is dark" before
-// adding light-theme support.
+// Only valid as a CSS colour value (style={{ color }}), never for hex maths.
 export function brandColor(b: BrandEntry): string {
-  return b.darkHex ?? b.hex
+  return b.darkHex ? `light-dark(${b.hex}, ${b.darkHex})` : b.hex
 }
 
 export type BrandCategory =

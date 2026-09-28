@@ -7,6 +7,7 @@
 import { describe, it, expect } from "vitest"
 import {
   attentionQueue,
+  foldAttentionReasons,
   expiringSoon,
   recentlyUsed,
   typeBreakdown,
@@ -131,6 +132,57 @@ describe("attentionQueue", () => {
     const creds = Array.from({ length: 9 }, (_, i) => cred({ id: `x${i}`, status: "REVOKED" }))
     expect(attentionQueue(creds, NONE, 4)).toHaveLength(4)
     expect(attentionQueue(creds, NONE, Number.MAX_SAFE_INTEGER)).toHaveLength(9)
+  })
+})
+
+// Seven rows that each said "the CLI that reads it is missing from a crew" in
+// orange read as seven different problems. Each row gets a one-word pill; a
+// reason shared by two or more rows is said once, under the list.
+describe("attention pills and folded reasons", () => {
+  it.each([
+    [cred({ id: "r", status: "REVOKED" }), NONE, "Revoked", "danger"],
+    [cred({ id: "x", token_expires_at: daysAgo(3) }), NONE, "Expired", "danger"],
+    [cred({ id: "e", status: "ERROR" }), NONE, "Check failed", "danger"],
+    [cred({ id: "p", status: "PENDING_APPROVAL" }), NONE, "Needs approval", "blue"],
+    [cred({ id: "s", token_expires_at: inDays(4) }), NONE, "Expires in 4d", "warn"],
+    [cred({ id: "o", last_used_at: daysAgo(200) }), NONE, "Stale", "muted"],
+    [cred({ id: "t" }), new Set(["t"]), "Tool missing", "warn"],
+  ] as const)("labels %# as a pill", (c, missing, label, tone) => {
+    const [item] = attentionQueue([c], missing, 10)
+    expect(item.label).toBe(label)
+    expect(item.pillTone).toBe(tone)
+  })
+
+  it("folds a reason two rows share into one summary line", () => {
+    const creds = [
+      cred({ id: "a" }),
+      cred({ id: "b" }),
+      cred({ id: "c" }),
+      cred({ id: "r", status: "REVOKED" }),
+    ]
+    const queue = attentionQueue(creds, new Set(["a", "b", "c"]), 10)
+    const fold = foldAttentionReasons(queue)
+    expect(fold.summary).toEqual([
+      { kind: "tool", label: "Tool missing", reason: "the CLI that reads it is missing from a crew", count: 3 },
+    ])
+    expect(fold.rowReason(queue.find((i) => i.id === "a")!)).toBeNull()
+    expect(fold.rowReason(queue.find((i) => i.id === "r")!)).toBe("revoked")
+  })
+
+  it("keeps a lone reason on its row and says nothing underneath", () => {
+    const queue = attentionQueue([cred({ id: "t" })], new Set(["t"]), 10)
+    const fold = foldAttentionReasons(queue)
+    expect(fold.summary).toEqual([])
+    expect(fold.rowReason(queue[0])).toMatch(/CLI/)
+  })
+
+  it("does not fold two expiries with different dates into one reason", () => {
+    const queue = attentionQueue(
+      [cred({ id: "a", token_expires_at: inDays(2) }), cred({ id: "b", token_expires_at: inDays(9) })],
+      NONE,
+      10,
+    )
+    expect(foldAttentionReasons(queue).summary).toEqual([])
   })
 })
 

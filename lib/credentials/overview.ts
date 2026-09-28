@@ -25,6 +25,7 @@ import {
   EXPIRY_WARNING_DAYS,
   type CredentialLike,
 } from "./facets"
+import type { StatusTone } from "@/lib/format-status"
 
 /** What the overview reads off a credential, on top of the facet fields. */
 export interface OverviewCredential extends CredentialLike {
@@ -74,13 +75,20 @@ export function typeBreakdown(credentials: OverviewCredential[]): TypeBreakdownR
 
 export type AttentionTone = "error" | "warn"
 
+export type AttentionKind = "error" | "pending" | "expiring" | "stale" | "tool"
+
 export interface AttentionItem {
   id: string
   name: string
   provider: string
+  kind: AttentionKind
   /** Why this row is here, in the words the operator needs to act on. */
   reason: string
   tone: AttentionTone
+  /** The row's pill word ("Tool missing", "Expires in 4d"). */
+  label: string
+  /** The row's StatusPill tone. */
+  pillTone: StatusTone
   /**
    * Where the fix actually happens, when it is not on this page.
    *
@@ -143,7 +151,7 @@ export function attentionQueue(
     const missingTool = missingToolIds.has(c.id)
     if (!needsAttention(c) && !missingTool) continue
 
-    let kind: string
+    let kind: AttentionKind
     let reason: string
     let tone: AttentionTone = "warn"
     if (status === "Error") {
@@ -170,8 +178,10 @@ export function attentionQueue(
         id: c.id,
         name: c.name,
         provider: c.provider,
+        kind,
         reason,
         tone,
+        ...attentionPill(kind, reason),
         ...(kind === "pending" ? { href: "/inbox" } : {}),
       },
     })
@@ -181,6 +191,62 @@ export function attentionQueue(
     .sort((a, b) => a.rank - b.rank || a.item.name.localeCompare(b.item.name))
     .slice(0, limit)
     .map((s) => s.item)
+}
+
+const ERROR_LABEL: Record<string, string> = {
+  expired: "Expired",
+  revoked: "Revoked",
+  "rate limited": "Rate limited",
+  "the last check failed": "Check failed",
+}
+
+/** The one-word pill a queue row wears, and its tone. */
+function attentionPill(kind: AttentionKind, reason: string): { label: string; pillTone: StatusTone } {
+  switch (kind) {
+    case "error":
+      return { label: ERROR_LABEL[reason] ?? "Not usable", pillTone: "danger" }
+    case "pending":
+      return { label: "Needs approval", pillTone: "blue" }
+    case "expiring":
+      return { label: reason.charAt(0).toUpperCase() + reason.slice(1), pillTone: "warn" }
+    case "stale":
+      return { label: "Stale", pillTone: "muted" }
+    case "tool":
+      return { label: "Tool missing", pillTone: "warn" }
+  }
+}
+
+export interface FoldedReason {
+  kind: AttentionKind
+  label: string
+  reason: string
+  count: number
+}
+
+/**
+ * Say a shared reason once.
+ *
+ * A reason two or more rows carry word for word moves under the list as one
+ * line ("3 × Tool missing — …"); each of those rows keeps only its pill. A
+ * reason only one row has stays on that row, where it is still news.
+ */
+export function foldAttentionReasons(items: AttentionItem[]): {
+  summary: FoldedReason[]
+  rowReason: (item: AttentionItem) => string | null
+} {
+  const groups = new Map<string, FoldedReason>()
+  for (const item of items) {
+    const key = `${item.kind}\u0000${item.reason}`
+    const cur = groups.get(key)
+    if (cur) cur.count++
+    else groups.set(key, { kind: item.kind, label: item.label, reason: item.reason, count: 1 })
+  }
+  const summary = Array.from(groups.values()).filter((g) => g.count >= 2)
+  const folded = new Set(summary.map((g) => `${g.kind}\u0000${g.reason}`))
+  return {
+    summary,
+    rowReason: (item) => (folded.has(`${item.kind}\u0000${item.reason}`) ? null : item.reason),
+  }
 }
 
 /**
