@@ -5,6 +5,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -34,9 +35,19 @@ func run() error {
 	}
 	switch os.Args[1] {
 	case "hold":
-		for {
-			time.Sleep(time.Hour)
+		if os.Getuid() != 1002 {
+			return fmt.Errorf("identity")
 		}
+		return restrictedruntime.RunLeaseGuard(context.Background())
+	case "lease":
+		if os.Getuid() != 1002 {
+			return fmt.Errorf("identity")
+		}
+		var expires time.Time
+		if err := json.NewDecoder(io.LimitReader(os.Stdin, 4096)).Decode(&expires); err != nil {
+			return err
+		}
+		return restrictedruntime.RenewLease(expires)
 	case "launch":
 		if os.Getuid() != 1001 {
 			return fmt.Errorf("identity")

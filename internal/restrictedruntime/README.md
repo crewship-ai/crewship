@@ -26,9 +26,13 @@ to reconcile. Retrying uses a new attempt ID/generation and fresh authority.
 `Session.Stop` terminates the complete container and records whether Docker
 confirmed it. `Close` drains owned attempts. A host-side watchdog rechecks
 at five-second intervals and enforces the issued lease, which cannot exceed
-15 seconds. There is no legacy fallback. The watchdog is part of this host
-process: a host/controller crash is an explicitly unproven live-revocation
-case until restart reconciliation, not a promised independent daemon.
+15 seconds. There is no legacy fallback. A second lease guard runs as the
+container's protected init child under UID 1002. The Manager atomically renews
+its absolute deadline through a private Docker-stdin protocol. Without renewal
+it exits, causing init/the PID namespace to terminate even after Manager
+SIGKILL. Agent commands still run as UID 1001 and cannot signal init or write
+its lease. This does not promise progress during kernel/host suspension or
+prove provider-side invalidation of a previously read secret.
 
 `Session.Output` is bounded, currently reauthorized and literal-redacted,
 including secrets split across writes. This is not a public stream API or a
@@ -39,7 +43,8 @@ provenance covering all mounted resources and credential references; reducing
 rights requires a new storage generation rather than restoring broader state.
 
 The only supported profile is **offline Docker on Linux**: private PID/IPC/
-network namespaces, UID 1001, no privileges/capabilities, read-only rootfs,
+network namespaces, agent UID 1001, protected init/broker UID 1002,
+no privileges/capabilities, read-only rootfs,
 explicit CPU/RAM/PID limits and bounded private tmpfs. Network is `none`.
 Image-declared volumes and unexpected daemon configuration fail the audit
 before user code/secret delivery. Agent credentials enter over stdin into
@@ -70,4 +75,5 @@ sets `CREWSHIP_RESTRICTED_LIVE=1` and supplies
 its image through `CREWSHIP_RESTRICTED_IMAGE`; failures are not skipped.
 Production chat/routine/webhook/queue adapters, server-selected recall,
 external network mediation, hard disk quotas, upstream credential revocation,
-controller-crash expiry and host reboot are remaining integration/release gates.
+host reboot and full application acceptance remain integration/release gates.
+Controller SIGKILL expiry is covered by `TestLiveControllerCrashExpiry`.

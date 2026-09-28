@@ -14,6 +14,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -251,7 +252,7 @@ func (f *liveFixture) checkProfile(s *Session) {
 	}
 	r := rows[0]
 	h := r.HostConfig
-	if r.Config.User != "1001:1001" || h.NetworkMode != "none" || h.PidMode != "" || h.IpcMode != "private" || h.Privileged || !h.ReadonlyRootfs || len(h.CapAdd) > 0 || len(h.GroupAdd) > 0 || len(h.ExtraHosts) > 0 || len(h.Devices) > 0 || h.Memory != 128<<20 || h.MemorySwap != h.Memory || h.NanoCpus != 500000000 || h.PidsLimit != 48 || strings.Join(h.CapDrop, ",") != "ALL" || !strings.Contains(strings.Join(h.SecurityOpt, ","), "no-new-privileges") {
+	if r.Config.User != "1002:1002" || h.NetworkMode != "none" || h.PidMode != "" || h.IpcMode != "private" || h.Privileged || !h.ReadonlyRootfs || len(h.CapAdd) > 0 || len(h.GroupAdd) > 0 || len(h.ExtraHosts) > 0 || len(h.Devices) > 0 || h.Memory != 128<<20 || h.MemorySwap != h.Memory || h.NanoCpus != 500000000 || h.PidsLimit != 48 || strings.Join(h.CapDrop, ",") != "ALL" || !strings.Contains(strings.Join(h.SecurityOpt, ","), "no-new-privileges") {
 		f.t.Fatal("unexpected runtime profile")
 	}
 	expected := map[string]Mount{}
@@ -473,8 +474,11 @@ func TestLiveRecoveryAndIndependentService(t *testing.T) {
 	p.Mounts = nil
 	s := f.start("before-recovery", p, "synthetic-recovery")
 	// This owned fixture represents an already managed service, outside Manager.
-	service := strings.TrimSpace(string(f.must(nil, "run", "-d", "--network", "none", "--read-only", "--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--user", "1001:1001", "--memory", "32m", "--cpus", "0.25", "--pids-limit", "16", "--entrypoint", "/opt/crewship-runner", f.d.Image, "hold")))
+	service := strings.TrimSpace(string(f.must(nil, "run", "-d", "--network", "none", "--read-only", "--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--user", "1001:1001", "--memory", "32m", "--cpus", "0.25", "--pids-limit", "16", "--entrypoint", "/bin/sleep", f.d.Image, "3600")))
 	f.containers = append(f.containers, service)
+	if !strings.Contains(string(f.must(nil, "inspect", "--format", "{{.State.Running}}", service)), "true") {
+		t.Fatal("independent service did not start")
+	}
 	dir := f.m.dir
 	if _, e := New(dir, f.d, f.a, f.cat, f.m.Limits); e == nil {
 		t.Fatal("second controller acquired same state")
@@ -611,4 +615,79 @@ func TestLiveSharedUIDControl(t *testing.T) {
 	if !strings.Contains(got, "shared-uid-readable") {
 		t.Fatal("shared UID control did not reproduce")
 	}
+}
+
+// This test kills only its own child Manager process, never a shared server or
+// Docker daemon. Protected init must expire without any host Stop/Reconcile.
+func TestLiveControllerCrashExpiry(t *testing.T) {
+	if dir := os.Getenv("CREWSHIP_RESTRICTED_CRASH_CHILD"); dir != "" {
+		p := testPlan()
+		p.Attempt = "crash"
+		p.Mounts = nil
+		a := &fixtureAuthority{plans: map[string]Plan{"crash": p}, secrets: map[string]map[string]string{"crash": {"direct": "synthetic-crash-secret"}}, denied: map[string]bool{}, ttl: 15 * time.Second}
+		m, err := New(filepath.Join(dir, "state"), Docker{Image: os.Getenv("CREWSHIP_RESTRICTED_IMAGE")}, a, catalogMap{}, Limits{128 << 20, 500000000, 48})
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer m.Close()
+		s, err := m.Start(context.Background(), "crash")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "ready"), []byte(s.ID()), 0600); err != nil {
+			t.Fatal(err)
+		}
+		select {}
+	}
+	f := live(t)
+	dir := t.TempDir()
+	child := exec.CommandContext(f.ctx, os.Args[0], "-test.run=^TestLiveControllerCrashExpiry$", "-test.timeout=1m")
+	child.Env = append(os.Environ(), "CREWSHIP_RESTRICTED_CRASH_CHILD="+dir)
+	var childOutput bytes.Buffer
+	child.Stdout, child.Stderr = &childOutput, &childOutput
+	if err := child.Start(); err != nil {
+		t.Fatal(err)
+	}
+	waited := false
+	defer func() {
+		if !waited {
+			_ = child.Process.Kill()
+			_ = child.Wait()
+		}
+	}()
+	var id string
+	for until := time.Now().Add(10 * time.Second); time.Now().Before(until); {
+		b, err := os.ReadFile(filepath.Join(dir, "ready"))
+		if err == nil {
+			id = string(b)
+			break
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	if id == "" {
+		t.Fatal("child Manager did not admit its owned runtime")
+	}
+	f.containers = append(f.containers, id)
+	// A real UID-1001 attacker cannot signal init or forge its lease, even by
+	// invoking the same trusted binary. This is separate from namespace tests.
+	probe := `set -eu; test "$(id -u)" = 1001; if kill -TERM 1; then exit 91; fi; if cat /broker/runtime-lease.json; then exit 92; fi; if /opt/crewship-runner lease </dev/null; then exit 93; fi; echo guarded`
+	if got := string(f.must(nil, "exec", "--user", "1001:1001", id, "sh", "-c", probe)); !strings.Contains(got, "guarded") {
+		t.Fatal("init not protected")
+	}
+	at := time.Now()
+	if err := child.Process.Kill(); err != nil {
+		t.Fatal(err)
+	}
+	if err := child.Wait(); err == nil {
+		t.Fatal("test did not crash the Manager")
+	}
+	waited = true
+	for time.Since(at) < 17*time.Second {
+		if f.d.stopped(f.ctx, id) {
+			t.Logf("controller_crash_to_independent_stop_ms=%.3f", float64(time.Since(at).Microseconds())/1000)
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatal("runtime outlived lease after Manager SIGKILL")
 }

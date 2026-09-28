@@ -216,6 +216,9 @@ func (m *Manager) Start(ctx context.Context, handle string) (s *Session, err err
 	if e != nil || fresh.fingerprint() != p.fingerprint() {
 		return nil, ErrDenied
 	}
+	if err = m.Docker.renew(ctx, s.id, fresh.Expires); err != nil {
+		return nil, err
+	}
 	s.plan = fresh
 	s.record.Expires = fresh.Expires
 	s.secrets = secretValues(values)
@@ -302,6 +305,13 @@ func (s *Session) watch() {
 			inflight = false
 			if p.fingerprint() != s.plan.fingerprint() || !p.Expires.After(time.Now()) {
 				s.Stop("authority_changed")
+				return
+			}
+			renewCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+			err := s.manager.Docker.renew(renewCtx, s.id, p.Expires)
+			cancel()
+			if err != nil {
+				s.Stop("runtime_lease_delivery_failed")
 				return
 			}
 			// Anchor every renewed deadline to its issued expiry, never receipt+TTL.

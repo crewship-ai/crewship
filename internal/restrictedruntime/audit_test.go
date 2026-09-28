@@ -17,7 +17,7 @@ func TestAuditRejectsBroadenedDaemonConfiguration(t *testing.T) {
 			p.Mounts = nil
 			l := Limits{128 << 20, 500000000, 48}
 			h := map[string]any{"NetworkMode": "none", "IpcMode": "private", "ReadonlyRootfs": true, "Init": true, "Memory": l.MemoryBytes, "MemorySwap": l.MemoryBytes, "NanoCpus": l.NanoCPUs, "PidsLimit": l.PIDs, "CapDrop": []string{"ALL"}, "SecurityOpt": []string{"no-new-privileges"}, "RestartPolicy": map[string]string{"Name": "no"}, "LogConfig": map[string]string{"Type": "none"}, "Tmpfs": privateTmpfs()}
-			row := map[string]any{"Config": map[string]any{"User": "1001:1001", "Entrypoint": []string{"/opt/crewship-runner"}, "Cmd": []string{"hold"}}, "HostConfig": h}
+			row := map[string]any{"Config": map[string]any{"User": "1002:1002", "Entrypoint": []string{"/opt/crewship-runner"}, "Cmd": []string{"hold"}}, "HostConfig": h}
 			switch name {
 			case "host network":
 				h["NetworkMode"] = "host"
