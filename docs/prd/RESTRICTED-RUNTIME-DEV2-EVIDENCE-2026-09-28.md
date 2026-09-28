@@ -1,5 +1,9 @@
 # Restricted runtime: dev2 implementation and evidence
 
+Follow-up: the user subsequently authorized dev2 deployment and CLI validation;
+see the [deployment report](RESTRICTED-RUNTIME-DEV2-DEPLOYMENT-2026-09-28.md).
+The original prototype-only observations below retain their original scope.
+
 Date: 2026-09-28. Issue [#2709](https://github.com/crewship-ai/crewship/issues/2709),
 draft [PR #2710](https://github.com/crewship-ai/crewship/pull/2710). Companion
 application work remains [#2704](https://github.com/crewship-ai/crewship/pull/2704).
