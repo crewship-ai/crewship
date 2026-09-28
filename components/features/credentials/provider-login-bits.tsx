@@ -9,8 +9,10 @@
 
 import * as React from "react"
 
-import { Pill, type DetailTone } from "@/components/ui/detail"
-import { getBrand, brandColor } from "@/lib/credential-providers/registry"
+import { StatusPill } from "@/components/ui/status-pill"
+import { getBrand } from "@/lib/credential-providers/registry"
+import { brandTileColors } from "@/lib/credentials/brand-tile"
+import type { StatusTone } from "@/lib/format-status"
 import {
   formatClock,
   loginStatusLabel,
@@ -20,35 +22,58 @@ import {
 } from "@/lib/credentials/provider-logins"
 import { cn } from "@/lib/utils"
 
-const PILL_TONE: Record<LoginStatusTone, DetailTone> = {
+const PILL_TONE: Record<LoginStatusTone, StatusTone> = {
   success: "success",
   warn: "warn",
-  destructive: "destructive",
-  default: "default",
+  destructive: "danger",
+  default: "muted",
 }
 
 export function LoginStatusPill({ credential, className }: { credential: LoginCredential; className?: string }) {
   const { label, tone, status } = loginStatusLabel(credential)
   return (
-    <Pill tone={PILL_TONE[tone]} className={cn("whitespace-nowrap", className)} data-testid={`login-status-${status}`}>
-      {label}
-    </Pill>
+    <StatusPill
+      tone={PILL_TONE[tone]}
+      label={label}
+      className={cn("whitespace-nowrap", className)}
+      data-testid={`login-status-${status}`}
+    />
   )
 }
 
-/** The brand's own mark in a rounded tile — the row's leading glyph. */
-export function LoginBrandMark({ provider, size = "md" }: { provider: string; size?: "sm" | "md" }) {
+/**
+ * The brand's own mark as an app-icon tile — the row's leading glyph. The
+ * tile carries the brand's ground (Anthropic clay, OpenAI ink, the Gemini
+ * gradient) behind a white mark, so it reads the same on either theme.
+ */
+export function LoginBrandMark({
+  provider,
+  size = "md",
+  unavailable = false,
+}: {
+  provider: string
+  size?: "sm" | "md"
+  /** Greyed out at 35 % — a provider nobody can use from here. */
+  unavailable?: boolean
+}) {
   const brand = getBrand(provider)
   const Icon = brand.Icon
+  const { background, glyph } = brandTileColors(brand.key, brand.hex)
   return (
     <span
+      data-slot="brand-tile"
       className={cn(
-        "flex shrink-0 items-center justify-center rounded-lg border border-border/60 bg-surface-raised",
-        size === "sm" ? "h-6 w-6" : "h-8 w-8",
+        "flex shrink-0 items-center justify-center rounded-[28%]",
+        size === "sm" ? "h-6 w-6" : "h-9 w-9",
+        unavailable && "opacity-35 grayscale",
       )}
+      style={{
+        background,
+        boxShadow: "0 10px 24px -10px rgba(0,0,0,.45), inset 0 1px 0 rgba(255,255,255,.25)",
+      }}
       aria-hidden="true"
     >
-      <Icon className={size === "sm" ? "h-3.5 w-3.5" : "h-4 w-4"} style={{ color: brandColor(brand) }} />
+      <Icon className={size === "sm" ? "h-3.5 w-3.5" : "h-[18px] w-[18px]"} style={{ color: glyph }} />
     </span>
   )
 }

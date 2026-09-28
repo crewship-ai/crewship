@@ -54,6 +54,9 @@ export interface ProviderLoginsPanelProps {
 
 export function ProviderLoginsPanel({ logins, visible, onSelect, onSelectStatus, onAdd, onAssign }: ProviderLoginsPanelProps) {
   const totals = React.useMemo(() => loginTotals(logins), [logins])
+  // One unreadable quota is news on its row; every row unreadable is one
+  // fact, said once under the list, and the column goes.
+  const anyQuota = visible.some((c) => !!c.login?.quota)
 
   if (logins.length === 0) {
     return (
@@ -98,7 +101,7 @@ export function ProviderLoginsPanel({ logins, visible, onSelect, onSelectStatus,
           <KpiCard
             label="At limit"
             value={totals.atLimit}
-            valueColor={totals.atLimit > 0 ? "rgb(251, 191, 36)" : undefined}
+            valueColor={totals.atLimit > 0 ? "var(--warn)" : undefined}
             subtitle={
               totals.atLimit === 0
                 ? "no window is exhausted"
@@ -114,7 +117,7 @@ export function ProviderLoginsPanel({ logins, visible, onSelect, onSelectStatus,
           <KpiCard
             label="Expiring ≤ 30 d"
             value={totals.expiring}
-            valueColor={totals.expiring > 0 ? "rgb(251, 191, 36)" : undefined}
+            valueColor={totals.expiring > 0 ? "var(--warn)" : undefined}
             subtitle={
               totals.expiring === 0
                 ? "nothing expires this month"
@@ -147,11 +150,24 @@ export function ProviderLoginsPanel({ logins, visible, onSelect, onSelectStatus,
           {visible.length === 0 ? (
             <p className="py-6 text-center text-[11px] text-muted-foreground-soft">Nothing matches these filters.</p>
           ) : (
-            <ul role="list" aria-label="Provider logins" className="flex flex-col divide-y divide-border/40">
-              {visible.map((c) => (
-                <LoginRow key={c.id} credential={c} onSelect={() => onSelect(c.id)} onAssign={onAssign ? () => onAssign(c.id) : undefined} />
-              ))}
-            </ul>
+            <>
+              <ul role="list" aria-label="Provider logins" className="flex flex-col divide-y divide-border">
+                {visible.map((c) => (
+                  <LoginRow
+                    key={c.id}
+                    credential={c}
+                    showQuota={anyQuota}
+                    onSelect={() => onSelect(c.id)}
+                    onAssign={onAssign ? () => onAssign(c.id) : undefined}
+                  />
+                ))}
+              </ul>
+              {!anyQuota && (
+                <p data-testid="quota-unreadable" className="mt-2 border-t border-border pt-2.5 type-meta text-muted-foreground-soft">
+                  No provider here reports its quota windows, so usage is not drawn.
+                </p>
+              )}
+            </>
           )}
         </DashboardCard>
       </Appear>
@@ -167,9 +183,10 @@ export function ProviderLoginsPanel({ logins, visible, onSelect, onSelectStatus,
 }
 
 function LoginRow({
-  credential, onSelect, onAssign,
+  credential, showQuota, onSelect, onAssign,
 }: {
   credential: LoginCredential
+  showQuota: boolean
   onSelect: () => void
   onAssign?: () => void
 }) {
@@ -185,7 +202,7 @@ function LoginRow({
         type="button"
         onClick={onSelect}
         aria-label={`Open ${credential.name}`}
-        className="flex min-w-0 flex-1 flex-wrap items-center gap-x-4 gap-y-2 rounded-md text-left transition-colors hover:bg-foreground/[0.02]"
+        className="flex min-w-0 flex-1 flex-wrap items-center gap-x-4 gap-y-2 rounded-[10px] text-left transition-colors hover:bg-foreground/[0.03]"
       >
         <span className="flex min-w-0 flex-1 basis-[240px] items-center gap-3">
           <LoginBrandMark provider={login?.provider ?? credential.provider} />
@@ -208,9 +225,11 @@ function LoginRow({
           <Kv label="Pays for" value={paysForLabel(login?.pays_for)} />
         </span>
 
-        <span className="w-[200px] shrink-0">
-          {login ? <QuotaSummary login={login} /> : null}
-        </span>
+        {showQuota && (
+          <span className="w-[200px] shrink-0">
+            {login ? <QuotaSummary login={login} /> : null}
+          </span>
+        )}
       </button>
 
       <span className="flex shrink-0 items-center gap-2">
@@ -230,8 +249,8 @@ function LoginRow({
 function Kv({ label, value }: { label: string; value: string }) {
   return (
     <span className="flex min-w-[96px] flex-col gap-0.5">
-      <span className="type-meta text-muted-foreground-soft">{label}</span>
-      <span className="truncate text-[12px] font-medium text-foreground/90">{value}</span>
+      <span className="eyebrow text-muted-foreground-soft">{label}</span>
+      <span className="truncate text-[12px] font-medium text-foreground">{value}</span>
     </span>
   )
 }
