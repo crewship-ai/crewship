@@ -23,9 +23,6 @@ vi.mock("@/hooks/use-abilities", () => ({ useAbilities: () => ({ role: "OWNER" }
 vi.mock("@/hooks/use-issue-detail", () => ({
   useUrlSelection: (key: string) => useState(key === "calendar" ? h.view : "2028-01-16"),
 }))
-vi.mock("@/components/ui/crew-icon", () => ({
-  CrewIcon: ({ icon }: { icon: string }) => <span data-testid="routine-icon">{icon}</span>,
-}))
 vi.mock("next/link", () => ({
   default: ({ children, ...props }: React.AnchorHTMLAttributes<HTMLAnchorElement>) => <a {...props}>{children}</a>,
 }))
@@ -73,7 +70,7 @@ describe("routine calendar — month density", () => {
 
     const busy = screen.getByRole("button", { name: "Open 2028-01-16, 42 entries" })
     expect(within(busy).getByText("Morning briefing")).toBeInTheDocument()
-    expect(within(busy).getAllByTestId("routine-icon")).toHaveLength(2)
+    expect(busy.querySelectorAll('[data-slot="routine-glyph"]')).toHaveLength(2)
     expect(within(busy).getByTestId("calendar-cell-later")).toHaveTextContent("+40 later")
     expect(within(busy).queryByText(/×\d+/)).toBeNull()
     // Nothing inside the cell scrolls: the cell clips at a fixed height and lights up on hover.

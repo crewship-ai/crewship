@@ -7,7 +7,6 @@ const { fetcher, access } = vi.hoisted(() => ({ fetcher: vi.fn(), access: { role
 vi.mock("@/lib/api-fetch", () => ({ apiFetch: fetcher }))
 vi.mock("@/hooks/use-abilities", () => ({ useAbilities: () => access }))
 vi.mock("@/hooks/use-issue-detail", () => ({ useUrlSelection: (key: string) => useState(key === "calendar" ? "year" : "2028-01-01") }))
-vi.mock("@/components/ui/crew-icon", () => ({ CrewIcon: ({ icon }: { icon: string }) => <span data-testid="routine-icon">{icon}</span> }))
 vi.mock("next/link", () => ({ default: ({ children, ...props }: React.AnchorHTMLAttributes<HTMLAnchorElement>) => <a {...props}>{children}</a> }))
 
 describe("full routine calendar", () => {
@@ -25,7 +24,7 @@ describe("full routine calendar", () => {
     }
     // The year view shows a mark per day, not the routines' icons.
     await waitFor(() => expect(screen.getAllByRole("button", { name: /^Open 2028-\d\d-01, 1 entry$/ })).toHaveLength(12))
-    expect(screen.queryByTestId("routine-icon")).toBeNull()
+    expect(document.querySelector('[data-slot="routine-glyph"]')).toBeNull()
     // Opening a day from the year view shows its agenda, not the hour grid.
     fireEvent.click(screen.getByRole("button", { name: "Open 2028-02-01, 1 entry" }))
     const agenda = screen.getByRole("region", { name: "Day agenda" })
