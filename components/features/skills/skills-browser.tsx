@@ -77,13 +77,13 @@ const DOMAINS: Array<{ value: string; icon: typeof Code2 }> = [
   { value: "SALES", icon: HandCoins },
   { value: "CUSTOM", icon: Box },
 ]
-// Source colours map to trust tier — emerald=official, sky=verified,
-// neutral=community, violet=generated, amber=private. Tailwind text-*
+// Source colours match the card's StatusPill tones — blue=official,
+// green=verified, neutral=community, violet=generated, amber=private. Tailwind text-*
 // classes are applied directly on the icon so the count column keeps
 // the standard muted colour.
 const SOURCES = [
-  { value: "BUNDLED", label: "Official", icon: ShieldCheck, colour: "text-success" },
-  { value: "MARKETPLACE", label: "Verified", icon: BadgeCheck, colour: "text-sky-400" },
+  { value: "BUNDLED", label: "Official", icon: ShieldCheck, colour: "text-primary" },
+  { value: "MARKETPLACE", label: "Verified", icon: BadgeCheck, colour: "text-success" },
   { value: "CUSTOM", label: "Community", icon: Users, colour: "text-foreground/55" },
   { value: "GENERATED", label: "Generated", icon: Sparkles, colour: "text-purple" },
   { value: "MANAGED", label: "Private", icon: Lock, colour: "text-warn" },
@@ -111,7 +111,7 @@ const RAIL_COLLAPSED_PX = 44
 // rows read as equal-weight text.
 const MATURITIES = [
   { value: "OFFICIAL", label: "Official", dot: "bg-success" },
-  { value: "CURATED", label: "Curated", dot: "bg-sky-400" },
+  { value: "CURATED", label: "Curated", dot: "bg-primary" },
   { value: "COMMUNITY", label: "Community", dot: "bg-foreground/40" },
   { value: "EXPERIMENTAL", label: "Experimental", dot: "bg-warn" },
 ]

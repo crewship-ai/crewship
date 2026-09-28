@@ -1,5 +1,7 @@
 "use client"
 
+import { StatusPill } from "@/components/ui/status-pill"
+import { SOURCE_BADGE } from "./skill-card"
 import { useEffect, useMemo, useState } from "react"
 import { Streamdown } from "streamdown"
 import Link from "next/link"
@@ -7,10 +9,6 @@ import {
   Copy,
   Check,
   X,
-  ShieldCheck,
-  BadgeCheck,
-  Lock,
-  Dot,
   Sparkles,
   AlertTriangle,
   Trash2,
@@ -18,7 +16,6 @@ import {
 } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
-import { Badge } from "@/components/ui/badge"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { apiFetch } from "@/lib/api-fetch"
@@ -30,14 +27,6 @@ interface SkillDetail extends SkillCardData {
   homepage?: string | null
   agent_count?: number
   license?: string | null
-}
-
-const SOURCE_PILL: Record<string, { label: string; icon: React.ElementType; cls: string }> = {
-  BUNDLED:    { label: "Official",  icon: ShieldCheck, cls: "bg-blue-500/10 text-blue-300 border-blue-500/30" },
-  GENERATED:  { label: "Generated", icon: Sparkles,    cls: "bg-purple/10 text-purple border-purple/30" },
-  MARKETPLACE:{ label: "Verified",  icon: BadgeCheck,  cls: "bg-success/10 text-success border-success/30" },
-  CUSTOM:     { label: "Community", icon: Dot,         cls: "bg-foreground/[0.05] text-foreground/55 border-foreground/10" },
-  MANAGED:    { label: "Managed",   icon: Lock,        cls: "bg-foreground/[0.05] text-foreground/55 border-foreground/10" },
 }
 
 interface AgentRow {
@@ -120,8 +109,7 @@ export function SkillsDetailPanel({
     )
   }
 
-  const sourceCfg = SOURCE_PILL[skill.source] ?? SOURCE_PILL.CUSTOM
-  const SourceIcon = sourceCfg.icon
+  const sourceCfg = SOURCE_BADGE[skill.source] ?? SOURCE_BADGE.CUSTOM
   const vendor = skill.vendor || "community"
   const installCmd = `crewship skill install ${vendor}/${skill.slug}`
   const flagged = (detail?.scan_status ?? skill.scan_status) === "FLAGGED"
@@ -157,10 +145,7 @@ export function SkillsDetailPanel({
             </h2>
           </div>
           <div className="flex items-center gap-1">
-            <Badge variant="outline" className={`gap-1 ${sourceCfg.cls}`}>
-              <SourceIcon className="h-3 w-3" />
-              {sourceCfg.label}
-            </Badge>
+            <StatusPill tone={sourceCfg.tone} label={sourceCfg.label} />
             {onClose && (
               <Button variant="ghost" size="icon" onClick={onClose} className="h-7 w-7" aria-label="Close skill detail">
                 <X className="h-4 w-4" />
@@ -176,7 +161,7 @@ export function SkillsDetailPanel({
           </div>
         )}
 
-        <div className="flex items-center gap-2 rounded-md bg-black/30 border border-foreground/[0.08] px-2 py-1.5 text-xs font-mono text-foreground/85">
+        <div className="flex items-center gap-2 rounded-[10px] bg-surface-subtle border border-border px-2 py-1.5 text-xs font-mono text-foreground">
           <span className="flex-1 truncate">{installCmd}</span>
           <button
             type="button"
@@ -189,7 +174,7 @@ export function SkillsDetailPanel({
         </div>
       </header>
 
-      <div className="flex-1 min-h-0 overflow-y-auto p-4 prose prose-invert prose-sm max-w-none prose-headings:text-foreground/90 prose-p:text-foreground/70 prose-li:text-foreground/70 prose-code:text-info prose-code:bg-foreground/[0.06] prose-code:px-1 prose-code:rounded prose-pre:bg-black/40 prose-pre:border prose-pre:border-foreground/[0.08]">
+      <div className="flex-1 min-h-0 overflow-y-auto p-4 prose dark:prose-invert prose-sm max-w-none prose-headings:text-foreground/90 prose-p:text-foreground/70 prose-li:text-foreground/70 prose-code:text-info prose-code:bg-foreground/[0.06] prose-code:px-1 prose-code:rounded prose-pre:bg-surface-subtle prose-pre:border prose-pre:border-border">
         {loading && <p className="text-foreground/45 text-xs italic">Loading…</p>}
         {!loading && detail?.content && <Streamdown>{detail.content}</Streamdown>}
         {!loading && !detail?.content && (
