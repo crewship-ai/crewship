@@ -4,11 +4,12 @@ package restrictedruntime
 
 import (
 	"context"
-	"github.com/crewship-ai/crewship/internal/httpsafe"
 	"net"
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/httpsafe"
 )
 
 // NetworkPlan permits fixed, bounded HTTP operations, not general model networking.
