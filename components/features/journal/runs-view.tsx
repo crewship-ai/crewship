@@ -70,6 +70,8 @@ import { entityHref } from "@/lib/entity-links"
 import { useRouter } from "next/navigation"
 
 import { Skeleton } from "@/components/ui/skeleton"
+import { InlineEmpty } from "@/components/ui/inline-empty"
+import { shortId } from "@/lib/activity-stream"
 import { Button } from "@/components/ui/button"
 import { StatusBadge, StatusDot } from "@/components/ui/status-badge"
 import {
@@ -183,6 +185,13 @@ const TRIGGER_LABEL: Record<string, string> = {
 function triggerLabel(key: string, kind?: string): string {
   if (!key) return kind === "pipeline" ? "Routine" : "—"
   return TRIGGER_LABEL[key] ?? (key.charAt(0) + key.slice(1).toLowerCase())
+}
+
+/** Who ran it. A routine run has no agent, and "Unknown" on every one of them
+ * read as missing data rather than as what it is. */
+function RunActor({ run }: { run: Run }) {
+  if (run.agent_name) return <>{run.agent_name}</>
+  return <span className="text-muted-foreground">{run.kind === "pipeline" ? "Routine run" : "Unknown"}</span>
 }
 
 function LiveRunDuration({ startedAt }: { startedAt: string }) {
@@ -389,6 +398,10 @@ export function RunsView({
 
   const t = insights?.totals
   const rate = t ? successRate(t.succeeded, t.failed) : null
+  // The tiles and breakdowns read /runs/insights, which counts agent runs
+  // only. With none in the window they were four zeros and three "No data
+  // yet" boxes above a table full of routine runs; one line says why instead.
+  const noAgentRuns = t != null && t.total === 0 && t.running === 0
 
   return (
     <div className="h-full overflow-y-auto">
@@ -436,8 +449,22 @@ export function RunsView({
         </div>
 
         {/* ── 1. Live pulse strip ──────────────────────────────────── */}
-        <LivePulse runs={liveRuns} runningCount={insights?.totals.running ?? liveRuns.length} />
+        <LivePulse runs={liveRuns} runningCount={Math.max(insights?.totals.running ?? 0, liveRuns.length)} />
 
+        {noAgentRuns ? (
+          <div data-testid="runs-no-agent-runs">
+            <InlineEmpty
+              icon={Zap}
+              text={`No agent runs in the ${WINDOW_LABEL[window]}. The figures here count agent runs; routine runs are listed below and on Routines.`}
+              action={
+                <Link href="/routines" className="shrink-0 font-medium text-primary-hover hover:underline">
+                  Routines →
+                </Link>
+              }
+            />
+          </div>
+        ) : (
+          <>
         {/* ── 2. KPI row ───────────────────────────────────────────── */}
         <div className="grid gap-4 grid-cols-2 md:grid-cols-4">
           <RunsKpiTile
@@ -459,7 +486,7 @@ export function RunsView({
           <RunsKpiTile
             label="Failed"
             value={t ? t.failed.toLocaleString() : "—"}
-            valueColor={t && t.failed > 0 ? "rgb(248, 113, 113)" : undefined}
+            valueColor={t && t.failed > 0 ? "var(--destructive)" : undefined}
             icon={XCircle}
             iconTone="bg-destructive/20 text-destructive"
             sub={t && t.failed > 0 ? "needs attention" : "all clean"}
@@ -502,7 +529,7 @@ export function RunsView({
               total: c.total,
               failed: c.failed,
             }))}
-            barClass="bg-indigo-400/70"
+            barClass="bg-primary/60"
           />
         </div>
 
@@ -510,6 +537,9 @@ export function RunsView({
           <div className="text-[10px] text-muted-foreground/60 font-mono">
             aggregates cover the most recent runs in this window (cap reached)
           </div>
+        )}
+
+          </>
         )}
 
         {/* ── 4. Recent runs — filters ─────────────────────────────── */}
@@ -604,10 +634,10 @@ export function RunsView({
           </SettingsCard>
         ) : (
           <>
-            <div className="rounded-xl border border-border/60 bg-card overflow-hidden">
+            <div className="rounded-[20px] border border-border bg-card overflow-hidden">
               {/* Desktop header */}
               <div
-                className="hidden md:grid items-center gap-3 px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60 border-b border-border/60"
+                className="eyebrow hidden md:grid items-center gap-3 px-4 py-2 border-b border-border"
                 style={{ gridTemplateColumns: RUN_GRID }}
               >
                 <div>Run</div>
@@ -652,7 +682,7 @@ export function RunsView({
                       e.preventDefault()
                       router.push(traceHref)
                     }}
-                    title={`Open trace ${run.id.slice(0, 8)} in Timeline`}
+                    title={`Open trace ${shortId(run.id)} in Timeline`}
                     className={cn(
                       "grid items-center gap-x-3 gap-y-1 px-4 py-2 hover:bg-foreground/[0.02] transition-colors cursor-pointer outline-none focus-visible:bg-foreground/[0.04] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-success/40",
                       RUN_GRID_ROW,
@@ -660,14 +690,14 @@ export function RunsView({
                     )}
                   >
                     <span className="hidden text-[10px] font-mono text-muted-foreground/60 md:block">
-                      #{run.id.slice(0, 8)}
+                      {shortId(run.id)}
                     </span>
                     <Link
                       href={agentCanvasHref(run.agent_slug)}
                       onClick={(e) => e.stopPropagation()}
                       className="text-xs font-medium truncate hover:underline"
                     >
-                      {run.agent_name ?? <span className="text-muted-foreground/60">Unknown</span>}
+                      <RunActor run={run} />
                     </Link>
                     {run.crew_name && run.crew_slug ? (
                       <Link
@@ -714,7 +744,7 @@ export function RunsView({
                     <span className="hidden text-[11px] text-muted-foreground truncate md:block">
                       {triggerLabel(run.trigger_type, run.kind)}
                     </span>
-                    <span className="hidden text-[10px] font-mono text-indigo-300/80 truncate md:block">
+                    <span className="hidden text-[10px] font-mono text-muted-foreground truncate md:block">
                       {run.model ? shortModel(run.model) : <span className="text-muted-foreground/40">—</span>}
                     </span>
                     <span className="text-[11px] font-mono tabular-nums text-muted-foreground text-right">
@@ -793,9 +823,9 @@ function LivePulse({ runs, runningCount }: { runs: Run[]; runningCount: number }
   const router = useRouter()
   if (runningCount <= 0 && runs.length === 0) {
     return (
-      <div className="rounded-xl border border-border/60 bg-card px-4 py-3 flex items-center gap-2">
+      <div className="rounded-[20px] border border-border bg-card px-4 py-3 flex items-center gap-2">
         <span className="h-2 w-2 rounded-full bg-muted-foreground/30" />
-        <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/70">
+        <span className="eyebrow">
           Running now
         </span>
         <span className="text-[10px] font-mono text-muted-foreground/50">fleet idle</span>
@@ -803,10 +833,10 @@ function LivePulse({ runs, runningCount }: { runs: Run[]; runningCount: number }
     )
   }
   return (
-    <div className="rounded-xl border border-success/25 bg-card overflow-hidden">
+    <div className="rounded-[20px] border border-success/25 bg-card overflow-hidden">
       <div className="flex items-center gap-2 border-b border-border/40 px-4 py-2">
         <StatusDot status="IN_PROGRESS" live className="h-2 w-2" />
-        <span className="text-[11px] font-semibold uppercase tracking-wider text-foreground/85">
+        <span className="eyebrow">
           Running now
         </span>
         <span className="text-[10px] font-mono text-muted-foreground/60">
@@ -833,7 +863,7 @@ function LivePulse({ runs, runningCount }: { runs: Run[]; runningCount: number }
             >
               <StatusDot status="IN_PROGRESS" live className="h-1.5 w-1.5" />
               <span className="text-xs font-medium truncate w-40">
-                {run.agent_name ?? "Unknown"}
+                <RunActor run={run} />
               </span>
               <span className="text-[11px] text-muted-foreground truncate w-28 hidden sm:block">
                 {run.crew_name ?? "—"}
@@ -842,7 +872,7 @@ function LivePulse({ runs, runningCount }: { runs: Run[]; runningCount: number }
                 {triggerLabel(run.trigger_type, run.kind)}
               </span>
               {run.model && (
-                <span className="shrink-0 rounded border border-indigo-500/40 px-1 py-0 text-[9px] text-indigo-300 hidden md:block">
+                <span className="shrink-0 rounded border border-border px-1 py-0 text-[9px] text-muted-foreground hidden md:block">
                   {shortModel(run.model)}
                 </span>
               )}
@@ -880,9 +910,9 @@ function RunsKpiTile({
   const splitTotal = split ? split.ok + split.failed : 0
   const okPct = splitTotal > 0 ? (split!.ok / splitTotal) * 100 : 0
   return (
-    <div className="flex flex-col gap-1 rounded-xl border border-border/60 bg-card px-4 py-4">
+    <div className="flex flex-col gap-1 rounded-[20px] border border-border bg-card px-4 py-4">
       <div className="flex items-center justify-between">
-        <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">{label}</div>
+        <div className="eyebrow">{label}</div>
         <div className={cn("flex h-6 w-6 items-center justify-center rounded-md", iconTone)}>
           <Icon className="h-3.5 w-3.5" />
         </div>
@@ -929,10 +959,10 @@ function BreakdownCard({
 }) {
   const max = maxTotal(rows)
   return (
-    <div className="rounded-xl border border-border/60 bg-card overflow-hidden">
+    <div className="rounded-[20px] border border-border bg-card overflow-hidden">
       <div className="flex items-center gap-2 border-b border-border/40 px-4 py-2.5">
         <Icon className="h-3.5 w-3.5 text-muted-foreground/60" />
-        <span className="text-[11px] font-semibold uppercase tracking-wider">{title}</span>
+        <span className="eyebrow">{title}</span>
         <span className="ml-auto font-mono text-[10px] text-muted-foreground/60">{hint}</span>
       </div>
       {rows.length === 0 ? (
@@ -964,10 +994,10 @@ function BreakdownCard({
  * ----------------------------------------------------------------- */
 function TopCrewsCard({ crews }: { crews: RunInsights["by_crew"] }) {
   return (
-    <div className="rounded-xl border border-border/60 bg-card overflow-hidden">
+    <div className="rounded-[20px] border border-border bg-card overflow-hidden">
       <div className="flex items-center gap-2 border-b border-border/40 px-4 py-2.5">
         <Users className="h-3.5 w-3.5 text-muted-foreground/60" />
-        <span className="text-[11px] font-semibold uppercase tracking-wider">Top crews</span>
+        <span className="eyebrow">Top crews</span>
         <span className="ml-auto font-mono text-[10px] text-muted-foreground/60">volume · fail%</span>
       </div>
       {crews.length === 0 ? (
