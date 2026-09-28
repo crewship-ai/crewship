@@ -20,7 +20,7 @@ externí klienty před uzavřením níže uvedených bran.
 | Integrační kontrakt | Server sestavuje autoritu; runtime přijímá opaque handle, ne klientský Plan. Delegace se zužuje, obnova znovu autorizuje, širší původ dat blokuje obnovu po odebrání grantu. |
 | Kompatibilita | Existující interní crews beze změny. Prototyp nemá fallback do sdíleného běhu. Produkční výběr režimu ještě musí aplikace explicitně vynutit. |
 
-## Ověřené zdroje a výsledky
+## Předchozí ověřená baseline a měření
 
 - Implementace po opravě nezávislé expirace: `d47b73d8ac3b43fa6a7219353ce6ae99eedbb4a8`.
 - Evidence: `869d3ab90`; větev `feat/restricted-runtime-dev2`.
@@ -67,7 +67,9 @@ Manageru řeší osmý test `TestLiveControllerCrashExpiry`.
 6. **Rollout a review:** sdílený režim pouze pro explicitně důvěryhodné crews;
    chybějící autorita/unsupported profil musí odmítnout omezený běh bez fallbacku.
    Získat skutečné review implementace a aktuální zelené CI před sloučením.
-   Předchozí CodeRabbit rate-limit notice není review.
+   CodeRabbit skutečně provedl review commitu `d47b73d8a`; jeho pět připomínek
+   bylo zkontrolováno a opraveno v `9e84ecda1`. Novější head zatím znovu
+   zkontrolovaný není; green rate-limit notice není schválení.
 
 Kontejnery sdílejí kernel a Docker administrátor je důvěryhodný. Není ověřena
 odolnost proti kernel escape, pozastavení hostitele ani univerzální pevná lhůta
@@ -87,3 +89,36 @@ V integračním kódu vždy spouštět agentí příkazy explicitně jako UID 10
 Na startu provést `Reconcile`; retry je nový attempt a nové řešení credentials.
 Viz [serverový kontrakt](RESTRICTED-RUNTIME-SERVER-CONTRACT-2026-09-28.md)
 a [API balíčku](../../internal/restrictedruntime/README.md).
+
+## Finální opravy review a nové ověření
+
+Commit `9e84ecda1` explicitně vyžaduje privátní cgroup namespace a runc,
+odmítá dodatečné device rules/sysctls, rozlišuje potvrzenou absenci po
+odmítnutém startu od nejistého stavu Dockeru, odstraňuje ukončené kontejnery
+a při dalším přijetí uvolňuje ukončené sessions z paměti. Durable attempt
+záznamy zůstávají pro fencing/audit; jejich dlouhodobá retence patří integraci.
+Opraven byl i souběh při čtení readiness souboru v crash testu a sjednoceny
+odkazy na vlastníka aplikační autority (#2711).
+
+Regresní testy navíc odmítají rozšířenou daemon konfiguraci, ověřují odstranění
+kontejneru a přijetí dalšího klienta po zamítnutém mountu.
+
+Finální čistý PR zdroj `9e84ecda1`: všech osm živých testů prošlo s `-race`
+za 51,329 s; stop po pádu Manageru 14 972,722 ms. Cílené unit/race testy
+a `go vet ./...` prošly.
+
+Dev2 po opravách: `ab11a606631b117d918cd7f4e3c0e2de552c8f0d`, čistý build
+2026-09-28T12:46:06Z ověřený přes `/proc/<MainPID>/exe version`. Osm živých
+testů na tomto nasazeném zdroji prošlo za 57,354 s, SIGKILL → stop
+14 966,475 ms. CLI `whoami` a `system health` exit 0, veřejný web HTTP 200.
+WIP wireframy byly obnoveny a inventář zůstal shodný.
+
+Finální surové záznamy: [PR live testy](reports/restricted-runtime-final-review-live-2026-09-28.txt),
+[dev2 live testy](reports/restricted-runtime-final-review-deployed-2026-09-28.txt),
+[dev2 CLI](reports/restricted-runtime-final-review-cli-2026-09-28.txt).
+
+Opakovaná celorepozitářová Go sada po opravách: **147 balíčků prošlo**,
+12 balíčků bez testů, exit 0; [surový výstup](reports/restricted-runtime-final-review-go-2026-09-28.txt).
+Sada začala před posledním doplněním diagnostiky výsledku Docker kill; finální
+commit navíc samostatně prošel unit/race, vet a oběma živými běhy uvedenými výše.
+`agents-invariants` potvrdil všechny čtyři kontrolované invarianty.
