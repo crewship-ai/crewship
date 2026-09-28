@@ -44,7 +44,7 @@ function renderStrip() {
 function hint(): string {
   const label = screen.getByText("Pages")
   const header = label.closest("div")!.parentElement!
-  return header.querySelector(".text-\\[10px\\]")?.textContent ?? ""
+  return header.querySelector('[data-slot="dashboard-card-hint"]')?.textContent ?? ""
 }
 
 describe("PagesStrip", () => {

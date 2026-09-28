@@ -69,7 +69,7 @@ export function AuthSplitShell({
             through the sails, and on a phone the form is what the screen is
             for. The banner degrades to a clean brand strip. */}
         <div className="absolute z-10 hidden text-white lg:block lg:inset-x-[clamp(28px,3.4vw,52px)] lg:bottom-[clamp(40px,6vh,64px)] lg:max-w-[min(460px,62%)]">
-          <p className="font-mono text-[11px] uppercase tracking-[0.09em] text-white/70">
+          <p className="font-mono text-[11px] uppercase tracking-[0.09em] text-foreground/70">
             {eyebrow}
           </p>
           {/* A <p>, not a heading. The panel is order-first in the DOM, so an
@@ -79,7 +79,7 @@ export function AuthSplitShell({
           <p className="mt-3 text-balance text-2xl font-extrabold leading-[1.05] tracking-[-0.033em] lg:text-[clamp(28px,2.9vw,40px)]">
             {headline}
           </p>
-          <p className="mt-3 max-w-[36ch] text-sm leading-relaxed text-white/80">
+          <p className="mt-3 max-w-[36ch] text-sm leading-relaxed text-foreground/80">
             {blurb}
           </p>
         </div>

@@ -211,7 +211,7 @@ export function InboxV2Explorer({
       <div className="shrink-0 px-2 pb-2 pt-1">
         <InboxCrewPicker lookup={lookup} entries={entries} value={filters.crew} onChange={(crew) => set({ crew })} />
       </div>
-      <SidebarActiveChips className="border-b border-white/[0.06] pt-2">
+      <SidebarActiveChips className="border-b border-foreground/[0.06] pt-2">
         {attention && <SidebarActiveChip onRemove={onClearAttention ?? (() => {})}>{ATTENTION_LABELS[attention]}</SidebarActiveChip>}
         {filters.type && (
           <SidebarActiveChip onRemove={() => set({ type: null })}>{TYPE_LABEL[filters.type]}</SidebarActiveChip>

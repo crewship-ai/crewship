@@ -228,7 +228,7 @@ export function CredentialsOverview({
                     </>
                   )
                   const rowClass =
-                    "group flex items-center gap-2.5 rounded-md px-1.5 py-2 text-left transition-colors hover:bg-white/[0.03]"
+                    "group flex items-center gap-2.5 rounded-md px-1.5 py-2 text-left transition-colors hover:bg-foreground/[0.03]"
                   // A row whose fix is somewhere else links there. Opening the
                   // credential to be told "approve it in the inbox" is the
                   // scavenger hunt the deep link exists to remove.
@@ -274,7 +274,7 @@ export function CredentialsOverview({
                         biggest row: "half of everything is an api key" is the
                         readable fact, and a chart normalised to its own maximum
                         always shows one full bar whatever the data says. */}
-                    <span className="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-white/[0.05]">
+                    <span className="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-foreground/[0.05]">
                       <span
                         className="block h-full rounded-full bg-primary/70"
                         style={{ width: `${Math.max(row.share * 100, 2)}%` }}
@@ -318,7 +318,7 @@ export function CredentialsOverview({
                       key={credential.id}
                       type="button"
                       onClick={() => onSelect(credential.id)}
-                      className="group flex items-center gap-2.5 rounded-md px-1.5 py-2 text-left transition-colors hover:bg-white/[0.03]"
+                      className="group flex items-center gap-2.5 rounded-md px-1.5 py-2 text-left transition-colors hover:bg-foreground/[0.03]"
                     >
                       <span className="w-[52px] shrink-0 font-mono text-[11px] tabular-nums text-warn">
                         {days === 0 ? "today" : `${days}d`}
@@ -353,7 +353,7 @@ export function CredentialsOverview({
                       key={credential.id}
                       type="button"
                       onClick={() => onSelect(credential.id)}
-                      className="group flex items-center gap-2.5 rounded-md px-1.5 py-2 text-left transition-colors hover:bg-white/[0.03]"
+                      className="group flex items-center gap-2.5 rounded-md px-1.5 py-2 text-left transition-colors hover:bg-foreground/[0.03]"
                     >
                       <Icon
                         className="h-4 w-4 shrink-0"

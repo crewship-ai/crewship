@@ -603,8 +603,8 @@ export function CreateIssueModal({
                 key={p}
                 onClick={() => { setPriority(p); setPriorityOpen(false) }}
                 className={cn(
-                  "w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-xs hover:bg-white/[0.08] transition-colors",
-                  priority === p ? "text-foreground bg-white/[0.06]" : "text-muted-foreground",
+                  "w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-xs hover:bg-foreground/[0.08] transition-colors",
+                  priority === p ? "text-foreground bg-foreground/[0.06]" : "text-muted-foreground",
                 )}
               >
                 <PriorityIcon priority={p} className="h-3.5 w-3.5" />
@@ -918,7 +918,7 @@ export function CreateIssueModal({
               type="date"
               value={dueDate}
               onChange={(e) => { setDueDate(e.target.value); setDueDateOpen(false) }}
-              className="bg-transparent text-sm text-foreground outline-none border border-white/[0.1] rounded-md px-2 py-1"
+              className="bg-transparent text-sm text-foreground outline-none border border-foreground/[0.1] rounded-md px-2 py-1"
             />
             {dueDate && (
               <button
@@ -946,8 +946,8 @@ export function CreateIssueModal({
                 key={pts}
                 onClick={() => { setEstimate(pts); setEstimateOpen(false) }}
                 className={cn(
-                  "w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-xs hover:bg-white/[0.08] transition-colors",
-                  estimate === pts ? "text-foreground bg-white/[0.06]" : "text-muted-foreground",
+                  "w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-xs hover:bg-foreground/[0.08] transition-colors",
+                  estimate === pts ? "text-foreground bg-foreground/[0.06]" : "text-muted-foreground",
                 )}
               >
                 <span>{pts} points</span>
@@ -957,7 +957,7 @@ export function CreateIssueModal({
             {estimate != null && (
               <button
                 onClick={() => { setEstimate(null); setEstimateOpen(false) }}
-                className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-xs text-muted-foreground hover:bg-white/[0.08] transition-colors"
+                className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-xs text-muted-foreground hover:bg-foreground/[0.08] transition-colors"
               >
                 Clear estimate
               </button>
@@ -1079,7 +1079,7 @@ export function CreateIssueModal({
                 <button
                   key={label.id}
                   onClick={() => toggleLabel(label.id)}
-                  className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-xs hover:bg-white/[0.08] transition-colors"
+                  className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-xs hover:bg-foreground/[0.08] transition-colors"
                 >
                   <Checkbox
                     checked={selectedLabels.includes(label.id)}

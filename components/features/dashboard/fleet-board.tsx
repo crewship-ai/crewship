@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import Link from "next/link"
-import { Users } from "lucide-react"
+import { KeyRound, Users } from "lucide-react"
 
 import type { AgentSummary } from "@/app/(dashboard)/dashboard-types"
 import { formatCost } from "@/app/(dashboard)/dashboard-helpers"
@@ -52,6 +52,11 @@ export function deriveFleetBoard({
   })
 }
 
+/** Pure: crews whose status is only a missing tool (credential gap). */
+export function toolGapCrews(cards: FleetCard[]): string[] {
+  return cards.filter((card) => card.row.status === "Needs tool").map((card) => card.row.crew.name)
+}
+
 const TONE_RANK: Record<FleetHealthRow["tone"], number> = { danger: 0, warn: 1, blue: 2, muted: 3, success: 4 }
 
 /** Pure: the order the board shows crews in. Whatever needs a person comes
@@ -89,22 +94,40 @@ export function fleetAgentStatus(agents: Pick<AgentSummary, "status">[]): string
 export function FleetBoard({ cards: unordered, workspaceId }: { cards: FleetCard[]; workspaceId: string | null }) {
   const cards = React.useMemo(() => prioritiseFleet(unordered), [unordered])
   const listScroll = useListScroll()
+  const toolGaps = toolGapCrews(cards)
+  const foldToolGaps = toolGaps.length > 1
   if (cards.length === 0) return null
   // One row per crew instead of a card each: the same facts (state, agents,
   // runs) in a fifth of the height, so the board fits beside the results
   // instead of pushing everything below the fold (#2539).
   return (
-    <section aria-label="Your crews" data-testid="dashboard-fleet-board" className="rounded-xl border border-border/60 bg-card p-3 xl:flex xl:min-h-0 xl:flex-1 xl:flex-col">
-      <div className="mb-2.5 flex items-center justify-between">
-        <h2 className="inline-flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-foreground/70">
-          <Users className="h-3.5 w-3.5 text-muted-foreground-soft" /> Your crews
+    <section aria-label="Your crews" data-testid="dashboard-fleet-board" className="rounded-[20px] border border-border bg-card p-4 xl:flex xl:min-h-0 xl:flex-1 xl:flex-col">
+      <div className="mb-3 flex items-center justify-between">
+        <h2 className="eyebrow inline-flex items-center gap-1.5">
+          <Users className="h-3.5 w-3.5" /> Your crews
         </h2>
-        <span className="flex items-center gap-2 font-mono text-[10px] text-muted-foreground">
+        <span className="flex items-center gap-2 font-mono text-[11px] text-muted-foreground">
           {cards.length} {cards.length === 1 ? "crew" : "crews"}
           <ListScrollControls label="crews" controller={listScroll} />
           <Link href="/crews" className="text-primary-hover hover:underline">Crews →</Link>
         </span>
       </div>
+      {/* One missing credential used to light the same warning on every crew
+          that shares it. Two or more fold into one line with one action; the
+          rows keep the word, in a neutral tone. */}
+      {toolGaps.length > 1 && (
+        <Link
+          href="/credentials"
+          className="group mb-2 flex items-center gap-3 rounded-xl border border-chip-warn-fg/25 bg-chip-warn-bg px-3 py-2 text-label text-chip-warn-fg transition-colors hover:border-chip-warn-fg/50"
+        >
+          <KeyRound className="h-3.5 w-3.5 shrink-0" aria-hidden />
+          <span className="min-w-0 flex-1 truncate">
+            <span className="font-semibold">{toolGaps.length} crews need a tool</span>
+            <span className="opacity-80"> · {toolGaps.join(", ")}</span>
+          </span>
+          <span className="shrink-0 font-semibold group-hover:underline">Connect →</span>
+        </Link>
+      )}
       <div ref={listScroll.listRef} className="flex max-h-[350px] flex-col divide-y divide-border/50 overflow-y-auto overscroll-contain pr-1 xl:min-h-0 xl:max-h-none xl:flex-1" tabIndex={0} aria-label="All crews">
         {cards.map((card) => {
           const { row } = card
@@ -133,7 +156,7 @@ export function FleetBoard({ cards: unordered, workspaceId }: { cards: FleetCard
                 ))}
                 {card.agents.length > 5 && <span className="text-micro text-muted-foreground">+{card.agents.length - 5}</span>}
               </span>
-              <StatusPill tone={row.tone === "success" ? "muted" : row.tone} label={row.status} live={row.tone === "blue"} className="shrink-0" />
+              <StatusPill tone={row.tone === "success" || (foldToolGaps && row.status === "Needs tool") ? "muted" : row.tone} label={row.status} live={row.tone === "blue"} className="shrink-0" />
             </div>
           )
         })}

@@ -267,7 +267,7 @@ export function IssuesListView({ issues, onIssueClick, selectedIssueId, onBulkAc
             <div className="relative">
               <button
                 onClick={() => setBulkMenuOpen(bulkMenuOpen === "status" ? null : "status")}
-                className="px-2 py-1 text-[11px] rounded bg-white/[0.06] hover:bg-white/[0.1] text-foreground/80 transition-colors"
+                className="px-2 py-1 text-[11px] rounded bg-foreground/[0.06] hover:bg-foreground/[0.1] text-foreground/80 transition-colors"
               >
                 Status
               </button>
@@ -277,7 +277,7 @@ export function IssuesListView({ issues, onIssueClick, selectedIssueId, onBulkAc
                     <button
                       key={s.value}
                       onClick={() => handleBulkUpdate({ status: s.value })}
-                      className="w-full px-3 py-1.5 text-xs text-left hover:bg-white/[0.06] flex items-center gap-2"
+                      className="w-full px-3 py-1.5 text-xs text-left hover:bg-foreground/[0.06] flex items-center gap-2"
                     >
                       <StatusIcon status={s.value} className="h-3 w-3" />
                       {s.label}
@@ -289,7 +289,7 @@ export function IssuesListView({ issues, onIssueClick, selectedIssueId, onBulkAc
             <div className="relative">
               <button
                 onClick={() => setBulkMenuOpen(bulkMenuOpen === "priority" ? null : "priority")}
-                className="px-2 py-1 text-[11px] rounded bg-white/[0.06] hover:bg-white/[0.1] text-foreground/80 transition-colors"
+                className="px-2 py-1 text-[11px] rounded bg-foreground/[0.06] hover:bg-foreground/[0.1] text-foreground/80 transition-colors"
               >
                 Priority
               </button>
@@ -299,7 +299,7 @@ export function IssuesListView({ issues, onIssueClick, selectedIssueId, onBulkAc
                     <button
                       key={p.value}
                       onClick={() => handleBulkUpdate({ priority: p.value })}
-                      className="w-full px-3 py-1.5 text-xs text-left hover:bg-white/[0.06] flex items-center gap-2"
+                      className="w-full px-3 py-1.5 text-xs text-left hover:bg-foreground/[0.06] flex items-center gap-2"
                     >
                       <PriorityIcon priority={p.value} className="h-3 w-3" />
                       {p.label}
@@ -317,7 +317,7 @@ export function IssuesListView({ issues, onIssueClick, selectedIssueId, onBulkAc
             </span>
           )}
           <div className="flex-1" />
-          <button onClick={clearSelection} className="p-1 rounded hover:bg-white/[0.08] text-muted-foreground/60 hover:text-foreground transition-colors">
+          <button onClick={clearSelection} className="p-1 rounded hover:bg-foreground/[0.08] text-muted-foreground/60 hover:text-foreground transition-colors">
             <X className="h-3.5 w-3.5" />
           </button>
         </div>
@@ -448,7 +448,7 @@ export function IssuesListView({ issues, onIssueClick, selectedIssueId, onBulkAc
                     {(issue.sub_issues_count ?? 0) > 0 && (
                       <span
                         title={`${issue.sub_issues_count} sub-issues`}
-                        className="shrink-0 inline-flex items-center gap-0.5 rounded bg-white/[0.05] border border-white/[0.06] px-1 py-px text-[9px] font-medium text-muted-foreground tabular-nums"
+                        className="shrink-0 inline-flex items-center gap-0.5 rounded bg-foreground/[0.05] border border-foreground/[0.06] px-1 py-px text-[9px] font-medium text-muted-foreground tabular-nums"
                       >
                         {issue.sub_issues_count}
                       </span>

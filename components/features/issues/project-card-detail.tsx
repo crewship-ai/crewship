@@ -209,7 +209,7 @@ export function ProjectCardDetail({ project, stats, issues, actions, edit }: Pro
                     <li key={i.id}>
                       <Link
                         href={`/issues/${encodeURIComponent(i.identifier ?? i.id)}`}
-                        className="flex items-center gap-2.5 px-4 py-2 text-[12px] transition-colors hover:bg-white/[0.03]"
+                        className="flex items-center gap-2.5 px-4 py-2 text-[12px] transition-colors hover:bg-foreground/[0.03]"
                       >
                         <StatusIcon status={i.status} className="h-3.5 w-3.5 shrink-0" />
                         <span className="w-[54px] shrink-0 truncate font-mono text-[10px] text-muted-foreground">
@@ -281,7 +281,7 @@ export function ProjectCardDetail({ project, stats, issues, actions, edit }: Pro
                         <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">
                           {a.completed} of {a.total}
                         </span>
-                        <div className="h-1.5 w-16 shrink-0 overflow-hidden rounded-full bg-white/[0.06]">
+                        <div className="h-1.5 w-16 shrink-0 overflow-hidden rounded-full bg-foreground/[0.06]">
                           <div
                             className="h-full rounded-full bg-primary/70"
                             style={{

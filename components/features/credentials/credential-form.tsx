@@ -512,7 +512,7 @@ export function CredentialForm({
           primary organisation tool now that grouping is gone. */}
       <div className="space-y-1.5">
         <Label htmlFor="cred-tags" className="text-xs"><Tag className="h-3.5 w-3.5" /> Tags <span className="ml-auto text-muted-foreground font-normal">{values.tags.length}/8</span></Label>
-        <div className="flex items-center flex-wrap gap-1.5 rounded-md border border-white/10 bg-background px-2 py-1.5 min-h-[34px]">
+        <div className="flex items-center flex-wrap gap-1.5 rounded-md border border-foreground/10 bg-background px-2 py-1.5 min-h-[34px]">
           {values.tags.map((t) => (
             <Badge
               key={t}
@@ -759,7 +759,7 @@ export function CredentialForm({
         primaryDisabled={submitting}
         busy={submitting}
         onPrimary={() => formRef.current?.requestSubmit()}
-      /> : <div className="flex items-center gap-2 pt-2 border-t border-white/10">
+      /> : <div className="flex items-center gap-2 pt-2 border-t border-foreground/10">
         <Button type="button" variant="outline" onClick={onCancel} disabled={submitting} size="sm">
           Cancel
         </Button>

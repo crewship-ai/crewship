@@ -70,7 +70,7 @@ export function TopMissionsChart({ missions, format = formatUsd, emptyLabel = "N
             </div>
             <Progress
               value={pct}
-              className="h-1 bg-white/[0.06] mt-1"
+              className="h-1 bg-foreground/[0.06] mt-1"
               indicatorClassName={cn(indicatorClass, "transition-all duration-500")}
             />
           </>
@@ -79,7 +79,7 @@ export function TopMissionsChart({ missions, format = formatUsd, emptyLabel = "N
           <Link
             key={m.id}
             href={m.href}
-            className={cn("block rounded-md px-1.5 py-1 -mx-1.5 hover:bg-white/[0.03] transition-colors")}
+            className={cn("block rounded-md px-1.5 py-1 -mx-1.5 hover:bg-foreground/[0.03] transition-colors")}
           >
             {content}
           </Link>

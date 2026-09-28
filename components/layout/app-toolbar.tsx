@@ -216,7 +216,7 @@ export function AppToolbar() {
   }
 
   return (
-    <header className="flex h-[var(--app-header-h)] pt-[env(safe-area-inset-top)] shrink-0 items-center justify-between bg-card px-3 sm:px-4 border-b border-white/[0.1]">
+    <header className="flex h-[var(--app-header-h)] pt-[env(safe-area-inset-top)] shrink-0 items-center justify-between bg-card px-3 sm:px-4 border-b border-foreground/[0.1]">
       {/* Left: breadcrumb only */}
       <div className="flex items-center gap-1.5 min-w-0 overflow-hidden">
         {renderBreadcrumbs()}
@@ -254,7 +254,7 @@ export function AppToolbar() {
         <Button variant="outline" size="sm" className="hidden md:flex h-8 gap-2 rounded-full border-border bg-transparent text-muted-foreground hover:text-foreground px-3" aria-label="Search" onClick={() => setCmdkOpen(true)}>
           <Search className="h-3.5 w-3.5" />
           <span className="type-meta hidden sm:inline">Search...</span>
-          <kbd className="pointer-events-none hidden h-4 select-none items-center gap-0.5 rounded border border-white/[0.08] bg-white/[0.03] px-1 font-mono text-[10px] leading-none sm:flex">
+          <kbd className="pointer-events-none hidden h-4 select-none items-center gap-0.5 rounded border border-foreground/[0.08] bg-foreground/[0.03] px-1 font-mono text-[10px] leading-none sm:flex">
             &#8984;K
           </kbd>
         </Button>

@@ -161,7 +161,7 @@ export function ActivityFeed() {
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0 }}
             transition={{ type: "spring", stiffness: 380, damping: 32 }}
-            className="flex items-center gap-2 py-1 px-1 rounded hover:bg-white/[0.02]"
+            className="flex items-center gap-2 py-1 px-1 rounded hover:bg-foreground/[0.02]"
           >
             <span className="text-[10px] font-mono text-muted-foreground-soft w-[56px] shrink-0">{formatTime(e.ts)}</span>
             <span className={cn("text-[9px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded border shrink-0", tagStyle(e.label))}>

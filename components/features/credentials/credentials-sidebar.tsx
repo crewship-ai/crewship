@@ -370,7 +370,7 @@ export function CredentialsSidebar({
           collapsible
           collapsed={!tierOpen}
           onToggle={() => setTierOpen(!tierOpen)}
-          className="border-b border-white/[0.06]"
+          className="border-b border-foreground/[0.06]"
         >
           <SidebarRow selected={filters.tier === null} onSelect={() => set({ tier: null })}>
             <ShieldCheck className="h-3 w-3 shrink-0 text-muted-foreground/70" aria-hidden="true" />
@@ -421,7 +421,7 @@ export function CredentialsSidebar({
         collapsible
         collapsed={!statusOpen}
         onToggle={() => setStatusOpen(!statusOpen)}
-        className="border-b border-white/[0.06]"
+        className="border-b border-foreground/[0.06]"
       >
         {statusRows
           .filter((row) => row.always || row.count > 0)
@@ -465,7 +465,7 @@ export function CredentialsSidebar({
                     "inline-flex h-5 items-center gap-1 rounded px-1 text-[10px] transition-colors",
                     selectMode
                       ? "bg-primary/15 text-primary-hover"
-                      : "text-muted-foreground-soft hover:bg-white/[0.06] hover:text-foreground",
+                      : "text-muted-foreground-soft hover:bg-foreground/[0.06] hover:text-foreground",
                   )}
                 >
                   <ListChecks className="h-3 w-3" aria-hidden="true" />
@@ -480,7 +480,7 @@ export function CredentialsSidebar({
                   title={`Sorted by ${SORT_LABELS[sort].toLowerCase()}`}
                   aria-expanded={sortOpen}
                   onClick={() => setSortOpen(!sortOpen)}
-                  className="inline-flex h-5 items-center gap-1 rounded px-1 text-[10px] text-muted-foreground-soft transition-colors hover:bg-white/[0.06] hover:text-foreground"
+                  className="inline-flex h-5 items-center gap-1 rounded px-1 text-[10px] text-muted-foreground-soft transition-colors hover:bg-foreground/[0.06] hover:text-foreground"
                 >
                   <ArrowUpDown className="h-3 w-3" aria-hidden="true" />
                   {SORT_LABELS[sort]}
@@ -491,7 +491,7 @@ export function CredentialsSidebar({
                       <div className="fixed inset-0 z-40" onClick={() => setSortOpen(false)} />
                       <motion.div
                         {...dropdownAnim}
-                        className="absolute right-0 top-6 z-50 min-w-[150px] rounded-lg border border-white/[0.1] bg-card py-1 shadow-xl"
+                        className="absolute right-0 top-6 z-50 min-w-[150px] rounded-lg border border-foreground/[0.1] bg-card py-1 shadow-xl"
                       >
                         {(Object.keys(SORT_LABELS) as CredentialSortKey[]).map((key) => (
                           <button
@@ -502,7 +502,7 @@ export function CredentialsSidebar({
                               setSortOpen(false)
                             }}
                             className={cn(
-                              "flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-white/[0.06]",
+                              "flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-foreground/[0.06]",
                               sort === key ? "text-primary-hover" : "text-muted-foreground-soft",
                             )}
                           >

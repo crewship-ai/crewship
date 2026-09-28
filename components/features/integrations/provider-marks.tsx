@@ -306,7 +306,7 @@ export function ProviderMark({
         data-provider-mark={key}
         className={cn(
           "inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md",
-          "bg-white/[0.06] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.07)]",
+          "bg-foreground/[0.06] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.07)]",
           className,
         )}
       >

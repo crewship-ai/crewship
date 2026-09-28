@@ -533,7 +533,7 @@ export function ComposioIntegrations({
               navigations for one set of views is what made this read as a
               page inside a page. */}
           {section === undefined && (
-            <div className="flex gap-1 overflow-x-auto border-b border-white/10">
+            <div className="flex gap-1 overflow-x-auto border-b border-foreground/10">
               {TABS.map((t) => (
                 <button
                   key={t.key}
@@ -613,7 +613,7 @@ function KpiCard({
   sub: string
 }) {
   return (
-    <div className="rounded-xl border border-white/10 bg-card p-4">
+    <div className="rounded-xl border border-foreground/10 bg-card p-4">
       <div className="text-[11px] uppercase tracking-wider text-muted-foreground">{label}</div>
       <div className="mt-1.5 text-2xl font-semibold text-foreground">{value}</div>
       <div className="mt-0.5 text-[11px] text-muted-foreground">{sub}</div>
@@ -694,7 +694,7 @@ function ApiKeyModal({
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="block max-w-md rounded-xl border-white/10 bg-card shadow-2xl sm:max-w-md">
+      <DialogContent className="block max-w-md rounded-xl border-foreground/10 bg-card shadow-2xl sm:max-w-md">
         <DialogHeader>
           <DialogTitle className="text-base">Composio API key</DialogTitle>
           <DialogDescription className="text-xs leading-relaxed">
@@ -711,7 +711,7 @@ function ApiKeyModal({
               value={apiKey}
               onChange={(e) => setApiKey(e.target.value)}
               placeholder="ak_…"
-              className="w-full rounded-lg border border-white/10 bg-background px-3 py-2 font-mono text-sm focus:border-primary/50 focus:outline-none"
+              className="w-full rounded-lg border border-foreground/10 bg-background px-3 py-2 font-mono text-sm focus:border-primary/50 focus:outline-none"
             />
           </div>
           <div>
@@ -720,7 +720,7 @@ function ApiKeyModal({
               value={label}
               onChange={(e) => setLabel(e.target.value)}
               placeholder="Crewship_dev_1"
-              className="w-full rounded-lg border border-white/10 bg-background px-3 py-2 text-sm focus:border-primary/50 focus:outline-none"
+              className="w-full rounded-lg border border-foreground/10 bg-background px-3 py-2 text-sm focus:border-primary/50 focus:outline-none"
             />
           </div>
         </div>
@@ -817,7 +817,7 @@ function ConnectModal({
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="block max-w-md rounded-xl border-white/10 bg-card shadow-2xl sm:max-w-md">
+      <DialogContent className="block max-w-md rounded-xl border-foreground/10 bg-card shadow-2xl sm:max-w-md">
         <DialogHeader>
           <DialogTitle className="text-base">{title}</DialogTitle>
           <DialogDescription className="text-xs leading-relaxed">
@@ -834,7 +834,7 @@ function ConnectModal({
                 value={toolkitSlug}
                 onChange={(e) => setToolkitSlug(e.target.value)}
                 placeholder="e.g. gmail, github, slack"
-                className="w-full rounded-lg border border-white/10 bg-background px-3 py-2 text-sm focus:border-primary/50 focus:outline-none"
+                className="w-full rounded-lg border border-foreground/10 bg-background px-3 py-2 text-sm focus:border-primary/50 focus:outline-none"
               />
             </div>
           )}
@@ -844,7 +844,7 @@ function ConnectModal({
               <select
                 value={users.includes(userId) ? userId : ""}
                 onChange={(e) => setUserId(e.target.value)}
-                className="w-full rounded-lg border border-white/10 bg-background px-3 py-2 font-mono text-xs focus:border-primary/50 focus:outline-none"
+                className="w-full rounded-lg border border-foreground/10 bg-background px-3 py-2 font-mono text-xs focus:border-primary/50 focus:outline-none"
               >
                 <option value="">— new user —</option>
                 {users.map((u) => (
@@ -861,7 +861,7 @@ function ConnectModal({
               value={userId}
               onChange={(e) => setUserId(e.target.value)}
               placeholder="e.g. alice@acme.com or a stable user id"
-              className="w-full rounded-lg border border-white/10 bg-background px-3 py-2 font-mono text-xs focus:border-primary/50 focus:outline-none"
+              className="w-full rounded-lg border border-foreground/10 bg-background px-3 py-2 font-mono text-xs focus:border-primary/50 focus:outline-none"
             />
           </div>
         </div>
@@ -889,7 +889,7 @@ function NotConfigured({ onAddKey }: { onAddKey: () => void }) {
   return (
     <div
       className={cn(
-        "mx-auto mt-8 max-w-xl rounded-xl border border-white/10 bg-card p-8 text-center",
+        "mx-auto mt-8 max-w-xl rounded-xl border border-foreground/10 bg-card p-8 text-center",
         "shadow-lg shadow-primary/5",
       )}
     >
@@ -908,14 +908,14 @@ function NotConfigured({ onAddKey }: { onAddKey: () => void }) {
         </Button>
       </div>
       <div className="mt-6 grid gap-3 text-left sm:grid-cols-2">
-        <div className="rounded-lg border border-white/10 bg-white/[0.02] p-3">
+        <div className="rounded-lg border border-foreground/10 bg-foreground/[0.02] p-3">
           <ShieldCheck className="h-4 w-4 text-info" />
           <div className="mt-2 text-xs font-medium text-foreground/90">Per-user OAuth</div>
           <div className="mt-0.5 text-[11px] leading-relaxed text-muted-foreground">
             Each agent acts on behalf of the connected user — no shared secrets.
           </div>
         </div>
-        <div className="rounded-lg border border-white/10 bg-white/[0.02] p-3">
+        <div className="rounded-lg border border-foreground/10 bg-foreground/[0.02] p-3">
           <Plug className="h-4 w-4 text-info" />
           <div className="mt-2 text-xs font-medium text-foreground/90">Hundreds of apps</div>
           <div className="mt-0.5 text-[11px] leading-relaxed text-muted-foreground">

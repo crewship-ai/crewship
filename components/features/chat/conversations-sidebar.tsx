@@ -630,7 +630,7 @@ export function ConversationsSidebar({
         collapsible
         collapsed={!showOpen}
         onToggle={() => setShowOpen((v) => !v)}
-        className="border-b border-white/[0.06]"
+        className="border-b border-foreground/[0.06]"
       >
         {CHAT_SCOPES.map((s) => {
           const Icon = s.icon
@@ -676,7 +676,7 @@ export function ConversationsSidebar({
                       ? "text-muted-foreground-soft/50"
                       : isSelected
                         ? "bg-primary/15 text-primary"
-                        : "bg-white/[0.05] text-muted-foreground",
+                        : "bg-foreground/[0.05] text-muted-foreground",
                   )}
                 >
                   {total}
@@ -695,7 +695,7 @@ export function ConversationsSidebar({
             onClick={() => { setPicking((v) => !v); setQuery("") }}
             disabled={roster.length === 0 || !!loadError}
             aria-expanded={picking}
-            className="flex min-h-10 w-full items-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-3 text-sm text-foreground transition-colors hover:bg-white/[0.08] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:pointer-events-none disabled:opacity-40"
+            className="flex min-h-10 w-full items-center gap-2 rounded-lg border border-foreground/10 bg-foreground/[0.04] px-3 text-sm text-foreground transition-colors hover:bg-foreground/[0.08] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:pointer-events-none disabled:opacity-40"
           >
             <Plus className={cn("h-4 w-4", picking && "rotate-45")} aria-hidden="true" />
             {picking ? "Cancel" : "New conversation"}

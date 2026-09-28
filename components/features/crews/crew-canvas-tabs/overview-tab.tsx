@@ -70,7 +70,7 @@ export function OverviewTab({
                 "px-2 py-0.5 rounded border transition-colors",
                 activityFilter === "all"
                   ? "border-primary/45 bg-primary/15 text-primary"
-                  : "border-white/10 text-muted-foreground hover:text-foreground/80",
+                  : "border-foreground/10 text-muted-foreground hover:text-foreground/80",
               )}
             >
               All
@@ -85,7 +85,7 @@ export function OverviewTab({
                   "px-2 py-0.5 rounded border transition-colors",
                   activityFilter === a.id
                     ? "border-primary/45 bg-primary/15 text-primary"
-                    : "border-white/10 text-muted-foreground hover:text-foreground/80",
+                    : "border-foreground/10 text-muted-foreground hover:text-foreground/80",
                 )}
               >
                 {a.name}
@@ -93,7 +93,7 @@ export function OverviewTab({
             ))}
           </div>
         </div>
-        <div className="rounded-xl border border-white/8 bg-card max-h-[420px] overflow-hidden">
+        <div className="rounded-xl border border-foreground/8 bg-card max-h-[420px] overflow-hidden">
           <CrewActivityFeed
             limit={5}
             workspaceId={workspaceId}

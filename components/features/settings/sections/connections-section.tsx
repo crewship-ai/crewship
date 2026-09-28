@@ -511,7 +511,7 @@ export function ConnectionsSection({ workspaceId }: ConnectionsSectionProps) {
                   aria-label={c.name}
                   className={cn(
                     "flex shrink-0 items-center gap-2 border-b-2 px-3 py-2 text-left transition-colors sm:w-full sm:border-b-0 sm:border-l-2",
-                    isSelected ? "bg-accent/50" : "border-transparent hover:bg-white/[0.02]",
+                    isSelected ? "bg-accent/50" : "border-transparent hover:bg-foreground/[0.02]",
                   )}
                   style={isSelected ? { borderColor: tintOf(c) } : undefined}
                 >

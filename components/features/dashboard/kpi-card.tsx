@@ -51,15 +51,15 @@ export function KpiCard({
     <Root
       {...(onClick ? { type: "button" as const, onClick } : {})}
       className={cn(
-        "flex flex-col gap-1 px-4 py-4 rounded-xl border border-border/60 bg-card",
-        onClick && "text-left transition-colors hover:border-border hover:bg-card/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        "flex flex-col gap-1 px-5 py-4 rounded-[20px] border border-border bg-card",
+        onClick && "lift text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
       )}
     >
-      <div className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
+      <div className="eyebrow text-muted-foreground">
         {label}
       </div>
       <div
-        className="text-[28px] sm:text-[32px] font-semibold leading-none tabular-nums mt-1"
+        className="text-[28px] sm:text-[32px] font-semibold leading-none tracking-[-0.035em] tabular-nums mt-1.5"
         style={valueColor ? { color: valueColor } : undefined}
       >
         {value}

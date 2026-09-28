@@ -63,8 +63,8 @@ const SOURCE_BADGE: Record<string, { label: string; icon: React.ElementType; cla
   BUNDLED:   { label: "Official",  icon: ShieldCheck, className: "bg-blue-500/10 text-blue-300 border-blue-500/30" },
   GENERATED: { label: "Generated", icon: Sparkles,    className: "bg-purple/10 text-purple border-purple/30" },
   MARKETPLACE: { label: "Verified", icon: BadgeCheck, className: "bg-success/10 text-success border-success/30" },
-  CUSTOM:    { label: "Community", icon: Dot,         className: "bg-white/[0.05] text-white/55 border-white/10" },
-  MANAGED:   { label: "Managed",   icon: Lock,        className: "bg-white/[0.05] text-white/55 border-white/10" },
+  CUSTOM:    { label: "Community", icon: Dot,         className: "bg-foreground/[0.05] text-foreground/55 border-foreground/10" },
+  MANAGED:   { label: "Managed",   icon: Lock,        className: "bg-foreground/[0.05] text-foreground/55 border-foreground/10" },
 }
 
 // Domain colour — single accent chip per card per the mockup
@@ -82,7 +82,7 @@ const DOMAIN_COLORS: Record<string, string> = {
   SUPPORT:    "bg-cyan-500/12 text-cyan-300",
   FINANCE:    "bg-emerald-500/12 text-emerald-300",
   OPS:        "bg-indigo-500/12 text-indigo-300",
-  CUSTOM:     "bg-white/[0.06] text-white/65",
+  CUSTOM:     "bg-foreground/[0.06] text-foreground/65",
 }
 
 const DOMAIN_ICONS: Record<string, React.ElementType> = {
@@ -171,8 +171,8 @@ export function SkillCard({ skill, selected, onSelect }: SkillCardProps) {
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0 flex-1">
               <div className="flex items-baseline gap-1 truncate">
-                <span className="text-xs text-white/45 truncate">{vendor}/</span>
-                <span className="text-sm font-semibold text-white/95 truncate">{displayName}</span>
+                <span className="text-xs text-foreground/45 truncate">{vendor}/</span>
+                <span className="text-sm font-semibold text-foreground/95 truncate">{displayName}</span>
               </div>
             </div>
             <Badge
@@ -184,8 +184,8 @@ export function SkillCard({ skill, selected, onSelect }: SkillCardProps) {
             </Badge>
           </div>
 
-          <p className="mt-2 line-clamp-2 min-h-[2.4em] text-xs text-white/60 leading-relaxed">
-            {skill.description ?? <span className="italic text-white/35">No description</span>}
+          <p className="mt-2 line-clamp-2 min-h-[2.4em] text-xs text-foreground/60 leading-relaxed">
+            {skill.description ?? <span className="italic text-foreground/35">No description</span>}
           </p>
 
           <div className="mt-3 flex flex-wrap items-center gap-1.5">
@@ -211,7 +211,7 @@ export function SkillCard({ skill, selected, onSelect }: SkillCardProps) {
               even when descriptions are different lengths. */}
           <div className="flex-1" />
 
-          <div className="mt-3 flex items-center gap-3 text-[11px] text-white/45 tabular-nums">
+          <div className="mt-3 flex items-center gap-3 text-[11px] text-foreground/45 tabular-nums">
             <span className="flex items-center gap-1">
               <Download className="h-3 w-3" />
               {formatCount(skill.downloads)}
@@ -250,8 +250,8 @@ function InstalledAgents({ agents }: { agents: SkillInstalledAgent[] }) {
     }
   }
   return (
-    <div className="mt-3 pt-2 border-t border-white/[0.05] flex items-center gap-2">
-      <span className="inline-flex items-center gap-1 text-[10px] text-white/45 shrink-0">
+    <div className="mt-3 pt-2 border-t border-foreground/[0.05] flex items-center gap-2">
+      <span className="inline-flex items-center gap-1 text-[10px] text-foreground/45 shrink-0">
         <Users className="h-3 w-3" />
         Installed on
       </span>
@@ -267,11 +267,11 @@ function InstalledAgents({ agents }: { agents: SkillInstalledAgent[] }) {
             title={`${a.agent_name}${a.crew_name ? ` · ${a.crew_name}` : ""}`}
             width={20}
             height={20}
-            className="h-5 w-5 rounded-full ring-1 ring-black/40 bg-white/[0.04]"
+            className="h-5 w-5 rounded-full ring-1 ring-black/40 bg-foreground/[0.04]"
           />
         ))}
         {overflow > 0 && (
-          <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-white/[0.06] ring-1 ring-black/40 px-1 text-[9px] font-medium text-white/65 tabular-nums">
+          <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-foreground/[0.06] ring-1 ring-black/40 px-1 text-[9px] font-medium text-foreground/65 tabular-nums">
             +{overflow}
           </span>
         )}
@@ -282,7 +282,7 @@ function InstalledAgents({ agents }: { agents: SkillInstalledAgent[] }) {
             <CrewChip key={c.slug} name={c.name} color={c.color} />
           ))}
           {crews.size > 2 && (
-            <span className="text-[9px] text-white/45">+{crews.size - 2}</span>
+            <span className="text-[9px] text-foreground/45">+{crews.size - 2}</span>
           )}
         </div>
       )}
@@ -303,9 +303,9 @@ function CrewChip({ name, color }: { name: string; color: string | null }) {
     return (
       <span
         title={name}
-        className="inline-flex items-center gap-1 rounded-full border border-white/[0.08] bg-white/[0.03] px-1.5 py-0.5 text-[9px] font-medium text-white/65"
+        className="inline-flex items-center gap-1 rounded-full border border-foreground/[0.08] bg-foreground/[0.03] px-1.5 py-0.5 text-[9px] font-medium text-foreground/65"
       >
-        <span className="h-1.5 w-1.5 rounded-full bg-white/40" />
+        <span className="h-1.5 w-1.5 rounded-full bg-foreground/40" />
         <span className="truncate max-w-[80px]">{name}</span>
       </span>
     )
@@ -314,7 +314,7 @@ function CrewChip({ name, color }: { name: string; color: string | null }) {
     <span
       title={name}
       style={{ "--crew-color": color } as React.CSSProperties}
-      className="inline-flex items-center gap-1 rounded-full border border-[var(--crew-color)]/25 bg-white/[0.03] px-1.5 py-0.5 text-[9px] font-medium text-[var(--crew-color)]"
+      className="inline-flex items-center gap-1 rounded-full border border-[var(--crew-color)]/25 bg-foreground/[0.03] px-1.5 py-0.5 text-[9px] font-medium text-[var(--crew-color)]"
     >
       <span className="h-1.5 w-1.5 rounded-full bg-[var(--crew-color)]" />
       <span className="truncate max-w-[80px]">{name}</span>

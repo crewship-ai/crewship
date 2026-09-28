@@ -59,13 +59,13 @@ export function ProjectProgress({ projects, emptyLabel = "No active projects" }:
             </div>
             <Progress
               value={pct}
-              className="h-1 bg-white/[0.05]"
+              className="h-1 bg-foreground/[0.05]"
               indicatorClassName="bg-(--project-color) transition-all duration-500"
             />
           </div>
         )
         return p.href ? (
-          <Link key={p.id} href={p.href} className="block hover:bg-white/[0.02] -mx-2 px-2 rounded">
+          <Link key={p.id} href={p.href} className="block hover:bg-foreground/[0.02] -mx-2 px-2 rounded">
             {content}
           </Link>
         ) : (

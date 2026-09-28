@@ -41,7 +41,7 @@ describe("sidebar-kit", () => {
   it("SidebarFilterButton has no badge and inactive styling when count is 0", () => {
     render(<SidebarFilterButton activeCount={0} />)
     const btn = screen.getByRole("button", { name: /filter/i })
-    expect(btn.className).toContain("border-white/[0.08]")
+    expect(btn.className).toContain("border-foreground/[0.08]")
   })
 
   it("SidebarViewButton renders an accessible view control", () => {

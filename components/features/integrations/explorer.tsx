@@ -174,7 +174,7 @@ export function IntegrationsExplorer<K extends string>({
                 {...POPOVER_ANIM}
                 className={cn(
                   "absolute inset-x-2 top-[calc(100%-0.25rem)] z-50 max-h-[340px]",
-                  "overflow-y-auto rounded-lg border border-white/[0.1] bg-card py-1 shadow-xl",
+                  "overflow-y-auto rounded-lg border border-foreground/[0.1] bg-card py-1 shadow-xl",
                 )}
               >
                 {activeCount > 0 && (
@@ -184,7 +184,7 @@ export function IntegrationsExplorer<K extends string>({
                       onClearFilters()
                       setFilterOpen(false)
                     }}
-                    className="w-full px-3 py-1.5 text-left text-xs text-primary-hover hover:bg-white/[0.06]"
+                    className="w-full px-3 py-1.5 text-left text-xs text-primary-hover hover:bg-foreground/[0.06]"
                   >
                     Clear all filters
                   </button>
@@ -203,7 +203,7 @@ export function IntegrationsExplorer<K extends string>({
                           setFilterOpen(false)
                         }}
                         className={cn(
-                          "flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-white/[0.06]",
+                          "flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-foreground/[0.06]",
                           group.selected === opt.value
                             ? "text-primary-hover"
                             : "text-muted-foreground/80",

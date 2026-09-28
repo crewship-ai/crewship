@@ -128,7 +128,7 @@ export function ScheduleTab({ workspaceId, context }: { workspaceId: string; con
       )}
       <div className="grid grid-cols-2 gap-2.5 max-w-xl">
         {cells.map((c) => (
-          <div key={c.k} className="bg-background/40 border border-white/8 rounded-lg px-3 py-2.5">
+          <div key={c.k} className="bg-background/40 border border-foreground/8 rounded-lg px-3 py-2.5">
             <div className="text-[10px] uppercase tracking-wide text-muted-foreground-soft mb-1.5">{c.k}</div>
             <div className="text-foreground">{c.v}</div>
           </div>

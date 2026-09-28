@@ -231,7 +231,7 @@ export function RoutineActionsMenu({
             <input
               value={copyName}
               onChange={(e) => setCopyName(e.target.value)}
-              className="w-full rounded-md border border-white/[0.1] bg-background px-2.5 py-2 text-[13px]"
+              className="w-full rounded-md border border-foreground/[0.1] bg-background px-2.5 py-2 text-[13px]"
             />
           </label>
           <DialogFooter>

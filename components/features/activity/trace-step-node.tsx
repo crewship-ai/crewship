@@ -70,7 +70,7 @@ const KIND_VISUAL: Record<StepKind, { Icon: LucideIcon; label: string; tint: str
 const TRIGGER_VISUAL = { Icon: Zap, label: "trigger", tint: "text-warn" }
 
 const STATUS_RING: Record<StepStatus, { ring: string; bg: string }> = {
-  pending: { ring: "ring-1 ring-white/[0.08]", bg: "bg-card" },
+  pending: { ring: "ring-1 ring-foreground/[0.08]", bg: "bg-card" },
   running: {
     ring: "ring-2 ring-primary/60 shadow-[0_0_20px_rgba(30,123,254,0.25)]",
     bg: "bg-card",
@@ -84,7 +84,7 @@ const STATUS_RING: Record<StepStatus, { ring: string; bg: string }> = {
     ring: "ring-2 ring-destructive/60 shadow-[0_0_15px_rgba(244,63,94,0.2)]",
     bg: "bg-card",
   },
-  skipped: { ring: "ring-1 ring-white/[0.06] opacity-60", bg: "bg-card" },
+  skipped: { ring: "ring-1 ring-foreground/[0.06] opacity-60", bg: "bg-card" },
 }
 
 function StatusPip({ status }: { status: StepStatus }) {
@@ -115,7 +115,7 @@ function StatusPip({ status }: { status: StepStatus }) {
       )
     case "skipped":
       return (
-        <span className="absolute -right-1 -top-1 h-3.5 w-3.5 rounded-full bg-white/10 ring-2 ring-background" />
+        <span className="absolute -right-1 -top-1 h-3.5 w-3.5 rounded-full bg-foreground/10 ring-2 ring-background" />
       )
     case "pending":
     default:
@@ -298,7 +298,7 @@ function TraceStepNodeBase({ data }: NodeProps) {
         }
       }}
       className={cn(
-        "relative w-[200px] rounded-lg border border-white/[0.06] px-2.5 py-2 transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/80",
+        "relative w-[200px] rounded-lg border border-foreground/[0.06] px-2.5 py-2 transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/80",
         ring.bg,
         ring.ring,
         selected && "ring-2 ring-primary",
@@ -313,13 +313,13 @@ function TraceStepNodeBase({ data }: NodeProps) {
       <Handle
         type="target"
         position={Position.Top}
-        className="!h-2 !w-2 !border-0 !bg-white/30"
+        className="!h-2 !w-2 !border-0 !bg-foreground/30"
         isConnectable={false}
       />
       <Handle
         type="source"
         position={Position.Bottom}
-        className="!h-2 !w-2 !border-0 !bg-white/30"
+        className="!h-2 !w-2 !border-0 !bg-foreground/30"
         isConnectable={false}
       />
 
@@ -332,7 +332,7 @@ function TraceStepNodeBase({ data }: NodeProps) {
         <span className="truncate text-xs font-medium text-foreground">
           {describeStep(step, 1).title}
         </span>
-        <span className="ml-auto rounded bg-white/[0.06] px-1 py-0 text-[9px] uppercase tracking-wider text-muted-foreground">
+        <span className="ml-auto rounded bg-foreground/[0.06] px-1 py-0 text-[9px] uppercase tracking-wider text-muted-foreground">
           {visual.label}
         </span>
       </div>
@@ -363,7 +363,7 @@ function TraceStepNodeBase({ data }: NodeProps) {
           {subSpans.length > 0 && (
             <span
               className={cn(
-                "ml-auto inline-flex items-center gap-0.5 rounded bg-white/[0.06] px-1 py-0 text-[9px] font-medium",
+                "ml-auto inline-flex items-center gap-0.5 rounded bg-foreground/[0.06] px-1 py-0 text-[9px] font-medium",
                 selected ? "text-primary" : "text-muted-foreground",
               )}
             >
@@ -584,12 +584,12 @@ function TriggerNodeBase({ data }: NodeProps) {
     <div
       role="img"
       aria-label={`Trigger ${label}, ${d.pipelineName ?? "routine"}`}
-      className="relative w-[180px] rounded-lg border border-white/[0.06] bg-card px-2.5 py-2 ring-1 ring-warn/30"
+      className="relative w-[180px] rounded-lg border border-foreground/[0.06] bg-card px-2.5 py-2 ring-1 ring-warn/30"
     >
       <Handle
         type="source"
         position={Position.Bottom}
-        className="!h-2 !w-2 !border-0 !bg-white/30"
+        className="!h-2 !w-2 !border-0 !bg-foreground/30"
         isConnectable={false}
       />
       <div className="flex items-center gap-1.5">

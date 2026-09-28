@@ -131,7 +131,7 @@ function Picker({ label, children, menu, align = "start", className }: PickerPro
           aria-label={label}
           className={cn(
             "-mx-1 inline-flex min-w-0 max-w-full items-center gap-1.5 rounded px-1 py-0.5",
-            "text-left transition-colors hover:bg-white/[0.06]",
+            "text-left transition-colors hover:bg-foreground/[0.06]",
             className,
           )}
         >
@@ -162,7 +162,7 @@ function Option({
       type="button"
       onClick={onSelect}
       className={cn(
-        "flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[12px] transition-colors hover:bg-white/[0.06]",
+        "flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[12px] transition-colors hover:bg-foreground/[0.06]",
         current && "bg-primary/10 text-primary",
         tone === "muted" && "text-muted-foreground",
         tone === "destructive" && "text-destructive/90",
@@ -371,7 +371,7 @@ export function DueDatePicker({ issue, edit }: { issue: Mission; edit: IssueCard
                 void edit.patch({ due_date: "" })
                 close()
               }}
-              className="w-full rounded px-2 py-1 text-left text-[11px] text-muted-foreground transition-colors hover:bg-white/[0.06]"
+              className="w-full rounded px-2 py-1 text-left text-[11px] text-muted-foreground transition-colors hover:bg-foreground/[0.06]"
             >
               Clear due date
             </button>
@@ -609,7 +609,7 @@ export function LabelsPicker({ issue, edit }: { issue: Mission; edit: IssueCardE
         <button
           type="button"
           aria-label="Add label"
-          className="rounded p-1 text-muted-foreground-soft transition-colors hover:bg-white/[0.06] hover:text-foreground"
+          className="rounded p-1 text-muted-foreground-soft transition-colors hover:bg-foreground/[0.06] hover:text-foreground"
         >
           <Plus className="h-3.5 w-3.5" />
         </button>
@@ -689,7 +689,7 @@ export function AddRelationPicker({ edit }: { edit: IssueCardEdit }) {
         <button
           type="button"
           aria-label="Add link"
-          className="rounded p-1 text-muted-foreground-soft transition-colors hover:bg-white/[0.06] hover:text-foreground"
+          className="rounded p-1 text-muted-foreground-soft transition-colors hover:bg-foreground/[0.06] hover:text-foreground"
         >
           <Plus className="h-3.5 w-3.5" />
         </button>
@@ -752,7 +752,7 @@ export function RemoveRelationButton({
       type="button"
       aria-label={`Remove link to ${identifier}`}
       onClick={onRemove}
-      className="rounded p-0.5 text-muted-foreground-soft opacity-0 transition-all hover:bg-white/[0.08] hover:text-destructive focus-visible:opacity-100 group-hover:opacity-100"
+      className="rounded p-0.5 text-muted-foreground-soft opacity-0 transition-all hover:bg-foreground/[0.08] hover:text-destructive focus-visible:opacity-100 group-hover:opacity-100"
     >
       <X className="h-3 w-3" />
     </button>

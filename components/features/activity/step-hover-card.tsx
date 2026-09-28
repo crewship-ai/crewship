@@ -57,7 +57,7 @@ function Header({ status, step }: { status: StepStatus; step: TraceStep }) {
   return (
     <div className="flex items-center gap-1.5 border-b border-border px-3 py-2">
       <span className="font-mono text-[11px]">{step.id}</span>
-      <span className="rounded bg-white/[0.06] px-1 py-0 text-[9px] uppercase tracking-wider text-muted-foreground">
+      <span className="rounded bg-foreground/[0.06] px-1 py-0 text-[9px] uppercase tracking-wider text-muted-foreground">
         {step.type}
       </span>
       <span className={cn("ml-auto text-[10px] capitalize", STATUS_COLOR[status])}>

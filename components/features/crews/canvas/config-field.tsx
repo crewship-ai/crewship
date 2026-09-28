@@ -34,7 +34,7 @@ export function ConfigRow({ label, hint, htmlFor, children, full = false }: Conf
   return (
     <div
       className={cn(
-        "grid min-h-[38px] items-center gap-3.5 border-b border-border px-3 py-1.5 transition-colors last:border-b-0 hover:bg-white/[.025]",
+        "grid min-h-[38px] items-center gap-3.5 border-b border-border px-3 py-1.5 transition-colors last:border-b-0 hover:bg-foreground/[.025]",
         full ? "grid-cols-1 gap-1.5" : "grid-cols-1 md:grid-cols-[minmax(0,1fr)_248px]",
       )}
     >

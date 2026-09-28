@@ -210,12 +210,12 @@ export function RoutineRunsTab({ workspaceId, slug }: Props) {
           return (
             <li
               key={run.runId}
-              className={cn("transition-colors", expanded && "bg-white/[0.015]")}
+              className={cn("transition-colors", expanded && "bg-foreground/[0.015]")}
             >
               {/* Row is a flex div (not one big <button>) so the cancel
                   action can be a sibling control — nesting a button
                   inside the expand button would be invalid HTML. */}
-              <div className="flex w-full items-center gap-3 px-4 py-3 hover:bg-white/[0.025]">
+              <div className="flex w-full items-center gap-3 px-4 py-3 hover:bg-foreground/[0.025]">
                 <button
                   onClick={() => setExpandedRunId(expanded ? null : run.runId)}
                   className="flex min-w-0 flex-1 items-center gap-3 text-left"

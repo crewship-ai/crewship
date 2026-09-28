@@ -99,7 +99,7 @@ export function RecipeInstallSheet({
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent side="right" className="sm:max-w-[640px] p-0 flex flex-col">
-        <SheetHeader className="px-5 pt-4 pb-3 border-b border-white/10">
+        <SheetHeader className="px-5 pt-4 pb-3 border-b border-foreground/10">
           <SheetTitle className="text-base">
             Install {preview?.recipe.name ?? "recipe"}
             <span className="ml-2 text-sm text-muted-foreground font-normal">— step {step} of 3</span>
@@ -146,10 +146,10 @@ export function RecipeInstallSheet({
         </div>
 
         {error && (
-          <div className="px-5 py-2 text-xs text-destructive border-t border-white/10">{error}</div>
+          <div className="px-5 py-2 text-xs text-destructive border-t border-foreground/10">{error}</div>
         )}
 
-        <div className="px-5 py-3 border-t border-white/10 flex items-center gap-2">
+        <div className="px-5 py-3 border-t border-foreground/10 flex items-center gap-2">
           <button
             type="button"
             onClick={() => onOpenChange(false)}
@@ -163,7 +163,7 @@ export function RecipeInstallSheet({
               type="button"
               onClick={() => setStep((s) => (s - 1) as typeof s)}
               disabled={submitting}
-              className="text-sm px-3 py-1.5 rounded border border-white/10 text-foreground/80 hover:bg-white/5 ml-auto"
+              className="text-sm px-3 py-1.5 rounded border border-foreground/10 text-foreground/80 hover:bg-foreground/5 ml-auto"
             >
               ← Back
             </button>
@@ -190,7 +190,7 @@ export function RecipeInstallSheet({
 function StepStrip({ step }: { step: 1 | 2 | 3 }) {
   const labels = ["Preview", "Credentials", "Confirm"] as const
   return (
-    <nav className="px-5 py-3 border-b border-white/10 bg-card/50 flex items-center gap-3">
+    <nav className="px-5 py-3 border-b border-foreground/10 bg-card/50 flex items-center gap-3">
       {([1, 2, 3] as const).map((n, i) => (
         <React.Fragment key={n}>
           <div className="flex items-center gap-2 text-[12px] shrink-0">
@@ -198,13 +198,13 @@ function StepStrip({ step }: { step: 1 | 2 | 3 }) {
               "h-6 w-6 rounded-full border text-[11px] font-semibold flex items-center justify-center",
               n < step ? "bg-success/20 border-success/50 text-success"
                 : n === step ? "bg-primary/20 border-primary text-primary ring-2 ring-primary/20"
-                : "bg-card border-white/10 text-muted-foreground",
+                : "bg-card border-foreground/10 text-muted-foreground",
             )}>
               {n < step ? <Check className="h-3 w-3" strokeWidth={3} /> : n}
             </div>
             <span className={cn("font-medium", n !== step && "opacity-60")}>{labels[n - 1]}</span>
           </div>
-          {i < 2 && <div className={cn("flex-1 h-px", n < step ? "bg-success/40" : "bg-white/10")} />}
+          {i < 2 && <div className={cn("flex-1 h-px", n < step ? "bg-success/40" : "bg-foreground/10")} />}
         </React.Fragment>
       ))}
     </nav>
@@ -215,7 +215,7 @@ function PreviewStep({ preview }: { preview: PreviewResp }) {
   const r = preview.recipe
   return (
     <div className="space-y-4">
-      <div className="rounded-md border border-white/10 bg-background p-4">
+      <div className="rounded-md border border-foreground/10 bg-background p-4">
         <div className="text-sm font-medium">{r.name}</div>
         <div className="text-xs text-muted-foreground mt-1">{r.description}</div>
       </div>
@@ -287,7 +287,7 @@ function CredentialsStep({
   return (
     <div className="space-y-4">
       {needed.map((c) => (
-        <div key={c.env_var_name} className="space-y-2 rounded-md border border-white/10 bg-background p-3">
+        <div key={c.env_var_name} className="space-y-2 rounded-md border border-foreground/10 bg-background p-3">
           <div className="flex items-center justify-between">
             <span className="text-sm font-medium font-mono">{c.env_var_name}</span>
             <Badge variant="outline" className="text-[10px]">{c.label}</Badge>
@@ -300,7 +300,7 @@ function CredentialsStep({
                 value={credValues[c.env_var_name] ?? ""}
                 onChange={(e) => setCredValues((s) => ({ ...s, [c.env_var_name]: e.target.value }))}
                 placeholder={c.help_url ? `Get from ${c.help_url}` : "Paste value..."}
-                className="w-full bg-black/40 border border-white/10 rounded px-2.5 py-1.5 pr-9 text-xs font-mono outline-none focus:border-primary"
+                className="w-full bg-black/40 border border-foreground/10 rounded px-2.5 py-1.5 pr-9 text-xs font-mono outline-none focus:border-primary"
               />
               <button
                 type="button"
@@ -317,7 +317,7 @@ function CredentialsStep({
               value={credLabels[c.env_var_name] ?? ""}
               onChange={(e) => setCredLabels((s) => ({ ...s, [c.env_var_name]: e.target.value }))}
               placeholder={`e.g. production`}
-              className="w-full bg-black/40 border border-white/10 rounded px-2.5 py-1.5 text-xs outline-none focus:border-primary"
+              className="w-full bg-black/40 border border-foreground/10 rounded px-2.5 py-1.5 text-xs outline-none focus:border-primary"
             />
           </div>
           {c.help_url && (

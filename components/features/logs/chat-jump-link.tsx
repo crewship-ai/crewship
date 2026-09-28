@@ -50,7 +50,7 @@ export function ChatJumpLink({ entry }: { entry: JournalEntry }) {
     <Link
       href={href}
       onClick={(e) => e.stopPropagation()}
-      className="inline-flex items-center gap-1 rounded border border-border/60 bg-card px-1.5 py-0.5 text-[10px] font-mono text-primary hover:bg-white/[0.04] hover:underline underline-offset-2 transition-colors"
+      className="inline-flex items-center gap-1 rounded border border-border/60 bg-card px-1.5 py-0.5 text-[10px] font-mono text-primary hover:bg-foreground/[0.04] hover:underline underline-offset-2 transition-colors"
       title="Read the message in the chat — the journal entry records only its length"
     >
       <MessageSquare className="h-3 w-3 opacity-70" />

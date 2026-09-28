@@ -56,7 +56,7 @@ export function actionLabel(action: string): string {
 /** Chronological activity timeline with connector lines and actor labels. */
 export function ActivityFeed({ activities }: { activities: IssueActivity[] }) {
   return (
-    <div className="border-t border-white/[0.06] pt-3 px-4 pb-4">
+    <div className="border-t border-foreground/[0.06] pt-3 px-4 pb-4">
       <div className="flex items-center justify-between mb-3">
         <span className="text-[11px] font-semibold text-foreground/80">Activity</span>
       </div>
@@ -67,7 +67,7 @@ export function ActivityFeed({ activities }: { activities: IssueActivity[] }) {
           activities.map((a, i) => (
             <div key={a.id} className="flex items-start gap-2.5 py-1.5 relative">
               {i < activities.length - 1 && (
-                <div className="absolute left-[7px] top-[22px] w-px h-[calc(100%-6px)] bg-white/[0.06]" />
+                <div className="absolute left-[7px] top-[22px] w-px h-[calc(100%-6px)] bg-foreground/[0.06]" />
               )}
               <ActivityIcon action={a.action} />
               <div className="flex-1 min-w-0">

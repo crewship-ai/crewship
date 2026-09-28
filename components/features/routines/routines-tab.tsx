@@ -130,7 +130,7 @@ function RoutineRow({ routine, onOpen }: { routine: Pipeline; onOpen: () => void
           onOpen()
         }
       }}
-      className="group flex items-center gap-3 rounded-md border border-white/[0.06] bg-card/50 px-3 py-2 cursor-pointer hover:border-white/15 hover:bg-card transition-colors"
+      className="group flex items-center gap-3 rounded-md border border-foreground/[0.06] bg-card/50 px-3 py-2 cursor-pointer hover:border-foreground/15 hover:bg-card transition-colors"
     >
       <ScrollText className="h-4 w-4 shrink-0 text-muted-foreground" />
       <div className="min-w-0 flex-1">

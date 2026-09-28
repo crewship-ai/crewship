@@ -562,7 +562,7 @@ export function PagesRail({
             onClick={onCreateFolder}
             aria-label="New folder"
             title="New folder"
-            className="kit-tap inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-white/[0.08] bg-white/[0.04] text-muted-foreground transition-colors hover:text-foreground"
+            className="kit-tap inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-foreground/[0.08] bg-foreground/[0.04] text-muted-foreground transition-colors hover:text-foreground"
           >
             <FolderPlus className="h-3.5 w-3.5" aria-hidden />
           </button>
@@ -575,7 +575,7 @@ export function PagesRail({
             aria-pressed={selecting}
             title="Select several pages to move them together"
             className={cn(
-              "kit-tap inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-white/[0.08] bg-white/[0.04] text-muted-foreground transition-colors hover:text-foreground",
+              "kit-tap inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-foreground/[0.08] bg-foreground/[0.04] text-muted-foreground transition-colors hover:text-foreground",
               selecting && "border-primary/40 bg-primary/15 text-primary-hover",
             )}
           >
@@ -617,7 +617,7 @@ export function PagesRail({
       </SidebarActiveChips>
 
       {selecting && (
-        <div data-slot="pages-select-bar" className="flex items-center gap-2 border-b border-white/[0.06] px-3 py-1.5">
+        <div data-slot="pages-select-bar" className="flex items-center gap-2 border-b border-foreground/[0.06] px-3 py-1.5">
           <span className="type-nav-sub min-w-0 flex-1 truncate text-muted-foreground" aria-live="polite">
             {selected.size} selected
           </span>
@@ -798,7 +798,7 @@ export function PagesRail({
                             rows and another on the rest is unreadable at a
                             glance. */}
                         {page.tally.total > 0 && (
-                          <span className="type-nav-sub shrink-0 rounded-full bg-white/[0.05] px-1.5 py-px tabular-nums text-foreground">
+                          <span className="type-nav-sub shrink-0 rounded-full bg-foreground/[0.05] px-1.5 py-px tabular-nums text-foreground">
                             {page.tally.total}
                           </span>
                         )}

@@ -247,7 +247,7 @@ export function UnifiedExplorer({
           collapsible
           collapsed={!projectsOpen}
           onToggle={() => setProjectsOpen(!projectsOpen)}
-          className="border-b border-white/[0.06]"
+          className="border-b border-foreground/[0.06]"
         >
           {projects.map((p) => {
             const iconDef = getCrewIconDef(p.icon || "folder")
@@ -275,7 +275,7 @@ export function UnifiedExplorer({
       )}
 
       {/* ── Issues ── */}
-      <div className="flex-1 min-h-0 flex flex-col border-b border-white/[0.06]">
+      <div className="flex-1 min-h-0 flex flex-col border-b border-foreground/[0.06]">
         <SidebarSection
           label="Issues"
           count={

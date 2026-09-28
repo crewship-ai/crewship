@@ -104,7 +104,7 @@ export function SettingsTab({
       {/* Profile */}
       <section className="space-y-3">
         <h2 className="text-lg font-semibold">Profile</h2>
-        <div className="rounded-xl border border-white/8 bg-card divide-y divide-white/5">
+        <div className="rounded-xl border border-foreground/8 bg-card divide-y divide-foreground/5">
           <Row label="Name">
             <EditableField value={crew.name} onSave={(v) => patch({ name: v })} ariaLabel="Name" />
           </Row>
@@ -142,14 +142,14 @@ export function SettingsTab({
                   <button
                     type="button"
                     onClick={() => applyAvatarStyle(false)}
-                    className="text-[10px] px-2 py-0.5 rounded border border-white/10 text-foreground/80 hover:bg-white/5"
+                    className="text-[10px] px-2 py-0.5 rounded border border-foreground/10 text-foreground/80 hover:bg-foreground/5"
                   >
                     Apply to all
                   </button>
                   <button
                     type="button"
                     onClick={() => applyAvatarStyle(true)}
-                    className="text-[10px] px-2 py-0.5 rounded border border-white/10 text-foreground/80 hover:bg-white/5"
+                    className="text-[10px] px-2 py-0.5 rounded border border-foreground/10 text-foreground/80 hover:bg-foreground/5"
                     title="Apply this style and clear per-agent overrides"
                   >
                     Reset overrides
@@ -272,11 +272,11 @@ export function SettingsTab({
           </Link>
         </div>
         {!integrations || integrations.length === 0 ? (
-          <div className="rounded-xl border border-white/8 bg-card p-4 text-xs text-muted-foreground">
+          <div className="rounded-xl border border-foreground/8 bg-card p-4 text-xs text-muted-foreground">
             No integrations bound to this crew.
           </div>
         ) : (
-          <div className="rounded-xl border border-white/8 bg-card divide-y divide-white/5">
+          <div className="rounded-xl border border-foreground/8 bg-card divide-y divide-foreground/5">
             {integrations.map((i) => {
               const gap = i.auth_status === "missing" || i.auth_status === "expired"
               return (

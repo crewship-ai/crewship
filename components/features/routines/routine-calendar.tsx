@@ -613,7 +613,7 @@ export function RoutineCalendar({
     (_, i) => addDays(from, i),
   )
   return (
-    <section className="space-y-3 rounded-3xl border border-white/[0.06] bg-card p-4">
+    <section className="space-y-3 rounded-3xl border border-foreground/[0.06] bg-card p-4">
       {/* One toolbar, as the prototype draws it: views · ‹ Today › · title · filters. */}
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
         <nav
@@ -694,7 +694,7 @@ export function RoutineCalendar({
                 "inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] transition-colors",
                 filter === f
                   ? "border-primary/40 bg-primary/[0.12] text-primary"
-                  : "border-white/[0.08] bg-white/[0.02] text-muted-foreground hover:text-foreground/80",
+                  : "border-foreground/[0.08] bg-foreground/[0.02] text-muted-foreground hover:text-foreground/80",
               )}
             >
               <span aria-hidden className={cn("h-2 w-2 rounded-full", FILTER_DOT[f])} />

@@ -100,7 +100,7 @@ export function SubjectPicker({ subjects, directory, selected, onChange }: Subje
       </div>
 
       <div className="px-2 pb-1.5">
-        <div className="flex h-7 items-center gap-1.5 rounded-md border border-white/[0.08] bg-white/[0.04] px-2 focus-within:border-primary/40">
+        <div className="flex h-7 items-center gap-1.5 rounded-md border border-foreground/[0.08] bg-foreground/[0.04] px-2 focus-within:border-primary/40">
           <Search className="h-3 w-3 shrink-0 text-muted-foreground/50" />
           <input
             type="text"
@@ -201,7 +201,7 @@ function SubjectRow({
       onClick={onClick}
       data-testid={`subject-${actor.id}`}
       className={cn(
-        "flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs transition-colors hover:bg-white/[0.06]",
+        "flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs transition-colors hover:bg-foreground/[0.06]",
         active ? "text-primary" : "text-muted-foreground/80",
       )}
     >

@@ -76,7 +76,7 @@ export function ToolsTab({
           value={toolkit}
           onChange={(e) => setToolkit(e.target.value)}
           placeholder="Toolkit slug (gmail, github…)"
-          className="w-52 rounded-lg border border-white/10 bg-card px-3 py-1.5 text-xs text-foreground placeholder:text-muted-foreground focus:border-primary/50 focus:outline-none"
+          className="w-52 rounded-lg border border-foreground/10 bg-card px-3 py-1.5 text-xs text-foreground placeholder:text-muted-foreground focus:border-primary/50 focus:outline-none"
         />
         <div className="relative">
           <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
@@ -84,7 +84,7 @@ export function ToolsTab({
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search tools…"
-            className="w-56 rounded-lg border border-white/10 bg-card py-1.5 pl-8 pr-3 text-xs text-foreground placeholder:text-muted-foreground focus:border-primary/50 focus:outline-none"
+            className="w-56 rounded-lg border border-foreground/10 bg-card py-1.5 pl-8 pr-3 text-xs text-foreground placeholder:text-muted-foreground focus:border-primary/50 focus:outline-none"
           />
         </div>
       </div>
@@ -97,7 +97,7 @@ export function ToolsTab({
               key={s}
               type="button"
               onClick={() => setToolkit(s)}
-              className="inline-flex items-center gap-1 rounded-full border border-white/10 bg-white/[0.03] px-2 py-0.5 text-[11px] text-muted-foreground hover:text-foreground"
+              className="inline-flex items-center gap-1 rounded-full border border-foreground/10 bg-foreground/[0.03] px-2 py-0.5 text-[11px] text-muted-foreground hover:text-foreground"
             >
               <ToolkitIcon toolkit={{ slug: s }} size={12} />
               <span className="capitalize">{s}</span>
@@ -115,7 +115,7 @@ export function ToolsTab({
       ) : tools.length === 0 ? (
         <EmptyHint text={`No tools found for “${toolkit.trim()}”.`} />
       ) : (
-        <div className="overflow-hidden rounded-xl border border-white/10 bg-card">
+        <div className="overflow-hidden rounded-xl border border-foreground/10 bg-card">
           {/* The columns do not fit a phone; without this they were clipped
               by the rounded wrapper rather than reachable. */}
           <div className="overflow-x-auto">
@@ -134,7 +134,7 @@ export function ToolsTab({
             </thead>
             <tbody>
               {tools.map((t) => (
-                <tr key={t.slug} className="border-t border-white/[0.06] align-top">
+                <tr key={t.slug} className="border-t border-foreground/[0.06] align-top">
                   <td className="px-3 py-2.5 font-mono text-[11px] text-foreground/90">{t.slug}</td>
                   <td className="px-3 py-2.5 text-[13px]">{t.name}</td>
                   <td className="px-3 py-2.5 text-[12px] text-muted-foreground">{t.description}</td>
@@ -144,7 +144,7 @@ export function ToolsTab({
           </table>
           </div>
           {total > tools.length && (
-            <div className="border-t border-white/[0.06] px-3 py-2 text-[11px] text-muted-foreground">
+            <div className="border-t border-foreground/[0.06] px-3 py-2 text-[11px] text-muted-foreground">
               Showing {tools.length} of {total} tools — narrow with search.
             </div>
           )}

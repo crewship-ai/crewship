@@ -269,8 +269,8 @@ export default function DashboardPage() {
 
         <div className="flex flex-wrap items-center gap-2">
           <Radio className="h-3.5 w-3.5 text-primary-hover" aria-hidden />
-          <h2 className="text-[11px] font-semibold uppercase tracking-wider text-foreground/70">Agent run summary</h2>
-          <span className="font-mono text-[10px] text-muted-foreground">{reportWindow} · routine runs appear in Activity</span>
+          <h2 className="eyebrow">Agent run summary</h2>
+          <span className="font-mono text-[11px] text-muted-foreground">{reportWindow} · routine runs appear in Activity</span>
         </div>
 
         <Appear order={2}>

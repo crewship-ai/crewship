@@ -89,7 +89,7 @@ export function ContainerResourcesTile({ entries }: ContainerResourcesTileProps)
             <div className="hidden md:block min-w-0">
               <Progress
                 value={Math.min(100, e.memory_percent)}
-                className="h-[3px] bg-white/[0.05]"
+                className="h-[3px] bg-foreground/[0.05]"
                 indicatorClassName={cn(
                   "transition-all",
                   e.memory_percent > 85 ? "bg-destructive" : bgClass,

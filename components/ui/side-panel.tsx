@@ -59,7 +59,7 @@ export function SidePanel({
           className={cn(
             "flex h-full flex-col bg-card",
             borderClass,
-            "border-white/[0.06]",
+            "border-foreground/[0.06]",
             className,
           )}
         >
@@ -88,7 +88,7 @@ export function SidePanelHeader({
   return (
     <div
       className={cn(
-        "flex shrink-0 items-center gap-2 border-b border-white/[0.06] px-3 py-2",
+        "flex shrink-0 items-center gap-2 border-b border-foreground/[0.06] px-3 py-2",
         className,
       )}
     >
@@ -139,7 +139,7 @@ export function SidePanelFooter({
   return (
     <div
       className={cn(
-        "shrink-0 border-t border-white/[0.06] px-3 py-2",
+        "shrink-0 border-t border-foreground/[0.06] px-3 py-2",
         className,
       )}
     >

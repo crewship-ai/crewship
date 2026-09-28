@@ -87,7 +87,7 @@ function Shell({ children }: { children: React.ReactNode }) {
 function Bar({ value, of, token }: { value: number; of: number; token: string }) {
   const pct = of > 0 ? Math.round((value / of) * 100) : 0
   return (
-    <span className="h-1.5 w-14 shrink-0 overflow-hidden rounded-full bg-white/[0.08]">
+    <span className="h-1.5 w-14 shrink-0 overflow-hidden rounded-full bg-foreground/[0.08]">
       <span className="block h-full rounded-full" style={{ width: `${pct}%`, background: `var(${token})` }} />
     </span>
   )
@@ -107,7 +107,7 @@ function Line({
       {...(onClick ? { type: "button" as const, onClick } : {})}
       className={cn(
         "flex w-full items-center gap-2.5 rounded-md px-1.5 py-1.5 text-left text-[11.5px]",
-        onClick && "transition-colors hover:bg-white/[0.03]",
+        onClick && "transition-colors hover:bg-foreground/[0.03]",
       )}
     >
       {children}
@@ -290,7 +290,7 @@ export function IssuesOverview({
                       <button
                         type="button"
                         onClick={() => onOpenWorkflow(via[0].origin)}
-                        className="flex w-full items-center gap-1.5 rounded-md px-1.5 py-1 pl-7 text-left text-[10.5px] text-muted-foreground-soft transition-colors hover:bg-white/[0.03] hover:text-muted-foreground"
+                        className="flex w-full items-center gap-1.5 rounded-md px-1.5 py-1 pl-7 text-left text-[10.5px] text-muted-foreground-soft transition-colors hover:bg-foreground/[0.03] hover:text-muted-foreground"
                       >
                         <span className="truncate">
                           ↳ {via.map((c) => c.routine_slug || c.started_by).join(", ")}
@@ -418,7 +418,7 @@ export function AgentsOverview({
                       <button
                         type="button"
                         onClick={() => onOpenWorkflow(chainsFor[0].origin)}
-                        className="flex w-full items-center gap-1.5 rounded-md px-1.5 py-1 pl-7 text-left text-[10.5px] text-muted-foreground-soft transition-colors hover:bg-white/[0.03] hover:text-muted-foreground"
+                        className="flex w-full items-center gap-1.5 rounded-md px-1.5 py-1 pl-7 text-left text-[10.5px] text-muted-foreground-soft transition-colors hover:bg-foreground/[0.03] hover:text-muted-foreground"
                       >
                         <span className="truncate">
                           ↳ {chainsFor.map((c) => c.routine_slug || c.started_by).join(", ")}

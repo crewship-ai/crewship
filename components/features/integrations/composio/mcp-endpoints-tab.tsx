@@ -48,7 +48,7 @@ export function McpEndpointsTab({
           {rows.map(({ key, agent, binding }) => (
             <div
               key={key}
-              className="flex items-center justify-between gap-3 rounded-xl border border-white/10 bg-card px-4 py-3"
+              className="flex items-center justify-between gap-3 rounded-xl border border-foreground/10 bg-card px-4 py-3"
             >
               <div className="flex min-w-0 items-center gap-2 text-[12px]">
                 <span className="font-medium">{agent.name}</span>

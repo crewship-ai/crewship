@@ -264,7 +264,7 @@ interface CommandPaletteProps {
 
 const PALETTE_COMMAND_CLASS = [
   "[&_[data-slot=command-input-wrapper]]:h-11",
-  "[&_[data-slot=command-input-wrapper]]:border-white/[0.06]",
+  "[&_[data-slot=command-input-wrapper]]:border-foreground/[0.06]",
   "[&_[data-slot=command-input-wrapper]]:px-3",
   "[&_[cmdk-item]_svg]:h-4 [&_[cmdk-item]_svg]:w-4",
 ].join(" ")
@@ -275,7 +275,7 @@ const PALETTE_COMMAND_CLASS = [
 const PALETTE_GROUP_CLASS = [
   "p-0",
   "[&_[cmdk-group-heading]]:flex [&_[cmdk-group-heading]]:items-center",
-  "[&_[cmdk-group-heading]]:border-b [&_[cmdk-group-heading]]:border-white/[0.04]",
+  "[&_[cmdk-group-heading]]:border-b [&_[cmdk-group-heading]]:border-foreground/[0.04]",
   "[&_[cmdk-group-heading]]:bg-surface-subtle/60",
   "[&_[cmdk-group-heading]]:px-3 [&_[cmdk-group-heading]]:py-1",
   "[&_[cmdk-group-heading]]:font-normal",
@@ -291,7 +291,7 @@ const PALETTE_GROUP_CLASS = [
 // that rendered first won. The kind still trails so that typing "crew" or
 // "routine" lists them all.
 const PALETTE_ITEM_CLASS =
-  "gap-2.5 rounded-none px-3 py-2 data-[selected=true]:bg-white/[0.04] data-[selected=true]:text-foreground"
+  "gap-2.5 rounded-none px-3 py-2 data-[selected=true]:bg-foreground/[0.04] data-[selected=true]:text-foreground"
 
 // ── Recent ─────────────────────────────────────────────────────────────────
 //
@@ -635,7 +635,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
       description="Search agents, crews, skills, and more..."
       // Dropped from the top rather than centred: it belongs to the search
       // field in the bar, and the bar is where the eye already is.
-      className="top-[12dvh] translate-y-0 gap-0 rounded-lg border-white/[0.1] bg-card p-0 shadow-xl sm:max-w-[600px]"
+      className="top-[12dvh] translate-y-0 gap-0 rounded-lg border-foreground/[0.1] bg-card p-0 shadow-xl sm:max-w-[600px]"
       commandClassName={PALETTE_COMMAND_CLASS}
       filter={paletteFilter}
       showCloseButton={false}
@@ -1046,7 +1046,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
           said so. */}
       <div
         data-testid="palette-hints"
-        className="flex items-center gap-3 border-t border-white/[0.06] px-3 py-1.5"
+        className="flex items-center gap-3 border-t border-foreground/[0.06] px-3 py-1.5"
       >
         <PaletteHint keys={["↑", "↓"]}>navigate</PaletteHint>
         <PaletteHint keys={["↵"]}>open</PaletteHint>
@@ -1062,7 +1062,7 @@ function PaletteHint({ keys, children }: { keys: string[]; children: React.React
       {keys.map((k) => (
         <kbd
           key={k}
-          className="flex h-4 min-w-[16px] items-center justify-center rounded border border-white/[0.08] bg-white/[0.03] px-1 font-mono text-[10px] leading-none"
+          className="flex h-4 min-w-[16px] items-center justify-center rounded border border-foreground/[0.08] bg-foreground/[0.03] px-1 font-mono text-[10px] leading-none"
         >
           {k}
         </kbd>

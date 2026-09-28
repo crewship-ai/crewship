@@ -50,7 +50,7 @@ export function ExecTab({ workspaceId, context }: { workspaceId: string; context
           level.includes("info") ? "text-info" :
           "text-muted-foreground"
         return (
-          <div key={i} className="flex gap-2 hover:bg-white/[0.03] px-1 -mx-1 rounded">
+          <div key={i} className="flex gap-2 hover:bg-foreground/[0.03] px-1 -mx-1 rounded">
             {ts && <span className="text-muted-foreground shrink-0">{formatTime(String(ts))}</span>}
             {level && <span className={cn("shrink-0 uppercase", levelColor)}>{level}</span>}
             <span className="break-all">{String(msg)}</span>

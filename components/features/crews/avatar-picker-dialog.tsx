@@ -117,7 +117,7 @@ export function AvatarPickerBody({
             src={previewUrl}
             alt=""
             data-testid="avatar-preview"
-            className="h-14 w-14 shrink-0 rounded-xl border border-white/10 bg-muted"
+            className="h-14 w-14 shrink-0 rounded-xl border border-foreground/10 bg-muted"
           />
           <div className="flex min-w-0 flex-1 flex-col gap-1.5">
             <div className="flex items-center gap-2">
@@ -126,7 +126,7 @@ export function AvatarPickerBody({
                 value={draftSeed}
                 onChange={(e) => setDraftSeed(e.target.value)}
                 aria-label="Avatar seed"
-                className="min-w-0 flex-1 rounded border border-white/15 bg-background px-2 py-1.5 font-mono text-sm outline-none focus:border-primary"
+                className="min-w-0 flex-1 rounded border border-foreground/15 bg-background px-2 py-1.5 font-mono text-sm outline-none focus:border-primary"
               />
               <button
                 type="button"
@@ -150,7 +150,7 @@ export function AvatarPickerBody({
                   aria-label={`Use avatar seed ${qs}`}
                   className={cn(
                     "h-8 w-8 shrink-0 overflow-hidden rounded-md border transition-colors",
-                    draftSeed === qs ? "border-primary" : "border-white/10 hover:border-white/25",
+                    draftSeed === qs ? "border-primary" : "border-foreground/10 hover:border-foreground/25",
                   )}
                 >
                   <img src={getAgentAvatarUrl(qs, effectiveStyle)} alt="" className="h-full w-full" />
@@ -181,7 +181,7 @@ export function AvatarPickerBody({
             "flex w-full items-center gap-2 rounded-lg border px-2 py-1.5 text-left transition-colors",
             draftStyle === null
               ? "border-primary bg-primary/10"
-              : "border-white/10 hover:bg-white/5",
+              : "border-foreground/10 hover:bg-foreground/5",
           )}
         >
           <img
@@ -229,7 +229,7 @@ export function AvatarPickerBody({
                   "flex flex-col items-center gap-0.5 rounded-md border p-1 transition-colors",
                   draftStyle === s.value
                     ? "border-primary bg-primary/10"
-                    : "border-white/10 hover:bg-white/5",
+                    : "border-foreground/10 hover:bg-foreground/5",
                 )}
               >
                 <img

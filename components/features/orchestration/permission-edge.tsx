@@ -103,7 +103,7 @@ function PermissionEdgeInner({
             }}
           >
             <span>{label}</span>
-            <span className="text-white/30">
+            <span className="text-foreground/30">
               {isBidirectional ? "both" : "one-way"}
             </span>
           </div>

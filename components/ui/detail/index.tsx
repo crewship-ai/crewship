@@ -15,7 +15,7 @@ import { cn } from "@/lib/utils"
 // header, the same pill, at its own size. A count across app/ + components/
 // found twelve different ways to write "small text" (text-xs 1292×, text-[11px]
 // 752×, text-[10px] 729×, the token scale 505×) and 211 hand-rolled
-// border-white/10 dividers.
+// border-foreground/10 dividers.
 //
 // So the routine vocabulary moves here unchanged, and every detail screen —
 // agent, crew, issue, credential — builds from it. Adopting these is a visual
@@ -266,7 +266,7 @@ export interface EmptyStateProps {
 export function EmptyState({ icon: Icon, title, description, action }: EmptyStateProps) {
   return (
     <div className="flex flex-col items-center justify-center px-6 py-12 text-center">
-      <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-xl bg-white/[0.04]">
+      <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-xl bg-foreground/[0.04]">
         <Icon className="h-6 w-6 text-muted-foreground" />
       </div>
       <div className="text-body font-medium text-foreground">{title}</div>

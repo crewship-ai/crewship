@@ -208,7 +208,7 @@ export function AddMCPWizard({ workspaceId, open, onOpenChange, onAdded, crewId 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent side="right" className="sm:max-w-[720px] p-0 flex flex-col">
-        <SheetHeader className="px-5 pt-4 pb-3 border-b border-white/10">
+        <SheetHeader className="px-5 pt-4 pb-3 border-b border-foreground/10">
           <SheetTitle className="text-base">
             New MCP server
             <span className="ml-2 text-sm text-muted-foreground font-normal">— step {step} of 4</span>
@@ -262,10 +262,10 @@ export function AddMCPWizard({ workspaceId, open, onOpenChange, onAdded, crewId 
         </div>
 
         {error && (
-          <div className="px-5 py-2 text-xs text-destructive border-t border-white/10">{error}</div>
+          <div className="px-5 py-2 text-xs text-destructive border-t border-foreground/10">{error}</div>
         )}
 
-        <div className="px-5 py-3 border-t border-white/10 flex items-center gap-2">
+        <div className="px-5 py-3 border-t border-foreground/10 flex items-center gap-2">
           <span className="text-[11.5px] text-muted-foreground mr-auto">
             {step === 4 ? "⌘+Enter to add · Esc cancel" : `Step ${step} of 4 · ⌘+Enter to continue`}
           </span>
@@ -282,7 +282,7 @@ export function AddMCPWizard({ workspaceId, open, onOpenChange, onAdded, crewId 
               type="button"
               onClick={back}
               disabled={submitting}
-              className="text-sm px-3 py-1.5 rounded border border-white/10 text-foreground/80 hover:bg-white/5"
+              className="text-sm px-3 py-1.5 rounded border border-foreground/10 text-foreground/80 hover:bg-foreground/5"
             >
               ← Back
             </button>
@@ -323,7 +323,7 @@ function SourceStep({ source, setSource }: { source: Source | null; setSource: (
             onClick={() => setSource(c.id)}
             className={cn(
               "flex items-start gap-3 rounded-md border bg-background p-4 text-left transition-all",
-              isSel ? "border-primary ring-2 ring-primary/20" : "border-white/10 hover:border-white/25 hover:bg-white/[0.02]",
+              isSel ? "border-primary ring-2 ring-primary/20" : "border-foreground/10 hover:border-foreground/25 hover:bg-foreground/[0.02]",
             )}
           >
             <Icon className="h-5 w-5 shrink-0 mt-0.5" />
@@ -375,7 +375,7 @@ function ConfigureStep(p: {
                 key={e.id}
                 type="button"
                 onClick={() => p.useRegistryEntry(e)}
-                className="flex items-start gap-3 rounded-md border border-white/10 bg-background p-3 text-left hover:border-primary/40 hover:bg-primary/[0.02]"
+                className="flex items-start gap-3 rounded-md border border-foreground/10 bg-background p-3 text-left hover:border-primary/40 hover:bg-primary/[0.02]"
               >
                 <MCPLogo name={e.icon || e.name} transport={e.transport} className="h-6 w-6 shrink-0 mt-0.5 opacity-85" />
                 <div className="flex-1 min-w-0">
@@ -408,7 +408,7 @@ function ConfigureStep(p: {
                 key={t.name}
                 type="button"
                 onClick={() => p.useTemplate(t)}
-                className="flex items-center gap-2 rounded-md border border-white/10 bg-background px-3 py-2 text-left text-xs hover:border-primary/40"
+                className="flex items-center gap-2 rounded-md border border-foreground/10 bg-background px-3 py-2 text-left text-xs hover:border-primary/40"
               >
                 <Icon className="h-4 w-4 shrink-0" />
                 {t.label}
@@ -441,11 +441,11 @@ function ConfigureFields(p: {
       <div className="grid grid-cols-2 gap-3">
         <div>
           <label className="block text-[11px] uppercase tracking-wider text-muted-foreground font-medium mb-1.5">Name</label>
-          <input value={p.name} onChange={(e) => p.setName(e.target.value)} placeholder="github" className="w-full bg-background border border-white/15 rounded-md px-3 py-2 text-sm font-mono outline-none focus:border-primary" />
+          <input value={p.name} onChange={(e) => p.setName(e.target.value)} placeholder="github" className="w-full bg-background border border-foreground/15 rounded-md px-3 py-2 text-sm font-mono outline-none focus:border-primary" />
         </div>
         <div>
           <label className="block text-[11px] uppercase tracking-wider text-muted-foreground font-medium mb-1.5">Display name</label>
-          <input value={p.displayName} onChange={(e) => p.setDisplayName(e.target.value)} placeholder="GitHub" className="w-full bg-background border border-white/15 rounded-md px-3 py-2 text-sm outline-none focus:border-primary" />
+          <input value={p.displayName} onChange={(e) => p.setDisplayName(e.target.value)} placeholder="GitHub" className="w-full bg-background border border-foreground/15 rounded-md px-3 py-2 text-sm outline-none focus:border-primary" />
         </div>
       </div>
 
@@ -456,7 +456,7 @@ function ConfigureFields(p: {
             <button key={t} type="button" onClick={() => p.setTransport(t)}
               className={cn(
                 "rounded-md border bg-background p-2.5 text-left text-xs transition-all",
-                p.transport === t ? "border-primary ring-2 ring-primary/20" : "border-white/10 hover:border-white/25",
+                p.transport === t ? "border-primary ring-2 ring-primary/20" : "border-foreground/10 hover:border-foreground/25",
               )}
             >
               <div className="flex items-center gap-1.5 font-medium">
@@ -475,17 +475,17 @@ function ConfigureFields(p: {
         <>
           <div>
             <label className="block text-[11px] uppercase tracking-wider text-muted-foreground font-medium mb-1.5">Command</label>
-            <input value={p.command} onChange={(e) => p.setCommand(e.target.value)} placeholder="npx" className="w-full bg-background border border-white/15 rounded-md px-3 py-2 text-sm font-mono outline-none focus:border-primary" />
+            <input value={p.command} onChange={(e) => p.setCommand(e.target.value)} placeholder="npx" className="w-full bg-background border border-foreground/15 rounded-md px-3 py-2 text-sm font-mono outline-none focus:border-primary" />
           </div>
           <div>
             <label className="block text-[11px] uppercase tracking-wider text-muted-foreground font-medium mb-1.5">Args</label>
-            <input value={p.args} onChange={(e) => p.setArgs(e.target.value)} placeholder="-y @modelcontextprotocol/server-github" className="w-full bg-background border border-white/15 rounded-md px-3 py-2 text-sm font-mono outline-none focus:border-primary" />
+            <input value={p.args} onChange={(e) => p.setArgs(e.target.value)} placeholder="-y @modelcontextprotocol/server-github" className="w-full bg-background border border-foreground/15 rounded-md px-3 py-2 text-sm font-mono outline-none focus:border-primary" />
           </div>
         </>
       ) : (
         <div>
           <label className="block text-[11px] uppercase tracking-wider text-muted-foreground font-medium mb-1.5">Endpoint</label>
-          <input value={p.endpoint} onChange={(e) => p.setEndpoint(e.target.value)} placeholder="https://example.com/mcp" className="w-full bg-background border border-white/15 rounded-md px-3 py-2 text-sm font-mono outline-none focus:border-primary" />
+          <input value={p.endpoint} onChange={(e) => p.setEndpoint(e.target.value)} placeholder="https://example.com/mcp" className="w-full bg-background border border-foreground/15 rounded-md px-3 py-2 text-sm font-mono outline-none focus:border-primary" />
         </div>
       )}
 
@@ -499,14 +499,14 @@ function ConfigureFields(p: {
         Advanced settings
       </button>
       {p.advancedOpen && (
-        <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} className="space-y-2 pl-4 border-l border-white/10">
+        <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} className="space-y-2 pl-4 border-l border-foreground/10">
           <div>
             <label className="block text-[11px] uppercase tracking-wider text-muted-foreground font-medium mb-1">OAuth client ID</label>
-            <input value={p.oauthClientId} onChange={(e) => p.setOauthClientId(e.target.value)} placeholder="(if you bring your own OAuth app)" className="w-full bg-background border border-white/15 rounded-md px-3 py-1.5 text-xs font-mono outline-none focus:border-primary" />
+            <input value={p.oauthClientId} onChange={(e) => p.setOauthClientId(e.target.value)} placeholder="(if you bring your own OAuth app)" className="w-full bg-background border border-foreground/15 rounded-md px-3 py-1.5 text-xs font-mono outline-none focus:border-primary" />
           </div>
           <div>
             <label className="block text-[11px] uppercase tracking-wider text-muted-foreground font-medium mb-1">OAuth client secret</label>
-            <input type="password" value={p.oauthClientSecret} onChange={(e) => p.setOauthClientSecret(e.target.value)} className="w-full bg-background border border-white/15 rounded-md px-3 py-1.5 text-xs font-mono outline-none focus:border-primary" />
+            <input type="password" value={p.oauthClientSecret} onChange={(e) => p.setOauthClientSecret(e.target.value)} className="w-full bg-background border border-foreground/15 rounded-md px-3 py-1.5 text-xs font-mono outline-none focus:border-primary" />
           </div>
         </motion.div>
       )}
@@ -528,7 +528,7 @@ function AuthStep({ credentials, credentialId, setCredentialId, skipAuth, setSki
         onClick={() => { setSkipAuth(true); setCredentialId(null) }}
         className={cn(
           "w-full flex items-start gap-3 rounded-md border bg-background p-3 text-left transition-all",
-          skipAuth ? "border-primary ring-2 ring-primary/20" : "border-white/10 hover:border-white/25",
+          skipAuth ? "border-primary ring-2 ring-primary/20" : "border-foreground/10 hover:border-foreground/25",
         )}
       >
         <div className="flex-1">
@@ -547,7 +547,7 @@ function AuthStep({ credentials, credentialId, setCredentialId, skipAuth, setSki
               onClick={() => { setSkipAuth(false); setCredentialId(c.id) }}
               className={cn(
                 "w-full flex items-center gap-2 rounded-md border bg-background p-2.5 text-left text-xs transition-all",
-                credentialId === c.id ? "border-primary ring-2 ring-primary/20" : "border-white/10 hover:border-white/25",
+                credentialId === c.id ? "border-primary ring-2 ring-primary/20" : "border-foreground/10 hover:border-foreground/25",
               )}
             >
               <span className="font-mono">{c.name}</span>
@@ -584,7 +584,7 @@ function AssignStep({ crews, pickedCrewId, setPickedCrewId }: {
               onClick={() => setPickedCrewId(c.id)}
               className={cn(
                 "w-full flex items-center justify-between gap-2 rounded-md border bg-background p-2 text-left text-xs transition-all",
-                pickedCrewId === c.id ? "border-primary ring-2 ring-primary/20" : "border-white/10 hover:border-white/25",
+                pickedCrewId === c.id ? "border-primary ring-2 ring-primary/20" : "border-foreground/10 hover:border-foreground/25",
               )}
             >
               <span>{c.name}</span>
@@ -618,7 +618,7 @@ function AssignStep({ crews, pickedCrewId, setPickedCrewId }: {
 function StepStrip({ step }: { step: Step }) {
   const labels = ["Source", "Configure", "Auth", "Assign"] as const
   return (
-    <nav className="px-5 py-3 border-b border-white/10 bg-card/50 flex items-center gap-3">
+    <nav className="px-5 py-3 border-b border-foreground/10 bg-card/50 flex items-center gap-3">
       {([1, 2, 3, 4] as const).map((n, i) => (
         <React.Fragment key={n}>
           <div className="flex items-center gap-2 text-[12px] shrink-0">
@@ -626,13 +626,13 @@ function StepStrip({ step }: { step: Step }) {
               "h-6 w-6 rounded-full border text-[11px] font-semibold flex items-center justify-center",
               n < step ? "bg-success/20 border-success/50 text-success"
                 : n === step ? "bg-primary/20 border-primary text-primary ring-2 ring-primary/20"
-                : "bg-card border-white/10 text-muted-foreground",
+                : "bg-card border-foreground/10 text-muted-foreground",
             )}>
               {n < step ? <Check className="h-3 w-3" strokeWidth={3} /> : n}
             </div>
             <span className={cn("font-medium", n !== step && "opacity-60")}>{labels[n - 1]}</span>
           </div>
-          {i < 3 && <div className={cn("flex-1 h-px", n < step ? "bg-success/40" : "bg-white/10")} />}
+          {i < 3 && <div className={cn("flex-1 h-px", n < step ? "bg-success/40" : "bg-foreground/10")} />}
         </React.Fragment>
       ))}
     </nav>

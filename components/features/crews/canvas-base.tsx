@@ -284,7 +284,7 @@ export function CanvasTabs<TTab extends string>({
     <div
       role="tablist"
       aria-label={label}
-      className="flex items-center gap-5 border-b border-white/8 -mx-6 md:-mx-8 lg:-mx-12 px-6 md:px-8 lg:px-12 overflow-x-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]"
+      className="flex items-center gap-5 border-b border-foreground/8 -mx-6 md:-mx-8 lg:-mx-12 px-6 md:px-8 lg:px-12 overflow-x-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]"
     >
       {tabs.map((t) => {
         const selected = active === t.id

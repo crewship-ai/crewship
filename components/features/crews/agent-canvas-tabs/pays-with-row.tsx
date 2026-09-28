@@ -272,7 +272,7 @@ export function PaysWithRow({ workspaceId, agentId, agentName, cliAdapter, paysW
                       onClick={() => void choose(seat)}
                       className={cn(
                         "flex w-full items-center gap-2.5 px-3 py-2 text-left transition-colors",
-                        wrong ? "cursor-not-allowed opacity-50" : "hover:bg-white/[0.04]",
+                        wrong ? "cursor-not-allowed opacity-50" : "hover:bg-foreground/[0.04]",
                       )}
                     >
                       <LoginBrandMark provider={login.provider} size="sm" />

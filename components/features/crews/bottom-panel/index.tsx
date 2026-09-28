@@ -196,7 +196,7 @@ export function BottomPanel({
   return (
     <div
       className={cn(
-        "shrink-0 border-t border-white/8 bg-card flex flex-col relative",
+        "shrink-0 border-t border-foreground/8 bg-card flex flex-col relative",
         // Disable height transitions during a drag so the gesture
         // tracks the cursor 1:1 instead of lerping behind it.
         !dragging && "transition-[height] duration-200",
@@ -269,8 +269,8 @@ export function BottomPanel({
               onClick={() => handleTab(id)}
               className={cn(
                 "px-2.5 py-1 rounded flex items-center gap-1.5 transition-colors whitespace-nowrap",
-                active && "bg-white/[0.06] text-foreground",
-                !active && "text-muted-foreground hover:bg-white/5",
+                active && "bg-foreground/[0.06] text-foreground",
+                !active && "text-muted-foreground hover:bg-foreground/5",
               )}
             >
               <Icon className="h-3 w-3" />
@@ -283,7 +283,7 @@ export function BottomPanel({
           <button
             type="button"
             onClick={() => setOpen(!open)}
-            className="p-1 rounded hover:bg-white/5 text-muted-foreground"
+            className="p-1 rounded hover:bg-foreground/5 text-muted-foreground"
             aria-label={open ? "Collapse bottom panel" : "Expand bottom panel"}
             aria-expanded={open}
             title={open ? "Collapse" : "Expand"}
@@ -294,7 +294,7 @@ export function BottomPanel({
       </div>
 
       {open && (
-        <div role="tabpanel" aria-label={`${TAB_META[tab].label} panel`} className="flex-1 min-h-0 overflow-hidden border-t border-white/5">
+        <div role="tabpanel" aria-label={`${TAB_META[tab].label} panel`} className="flex-1 min-h-0 overflow-hidden border-t border-foreground/5">
           {tab === "messages" && <MessagesTab workspaceId={workspaceId} context={context} />}
           {tab === "exec" && <ExecTab workspaceId={workspaceId} context={context} />}
           {tab === "yaml" && <YamlTab workspaceId={workspaceId} context={context} />}

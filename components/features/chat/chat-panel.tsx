@@ -1206,7 +1206,7 @@ function CommandsButton({ onClick }: { onClick: () => void }) {
     >
       <Command className="h-3 w-3" aria-hidden="true" />
       <span className="hidden sm:inline">Commands</span>
-      <kbd className="pointer-events-none hidden select-none rounded border border-white/[0.08] bg-white/[0.03] px-1 font-mono text-[10px] leading-none sm:inline">
+      <kbd className="pointer-events-none hidden select-none rounded border border-foreground/[0.08] bg-foreground/[0.03] px-1 font-mono text-[10px] leading-none sm:inline">
         {CHAT_PALETTE_SHORTCUT}
       </kbd>
     </button>

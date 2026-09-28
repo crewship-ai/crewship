@@ -10,14 +10,14 @@ import { formatDurationSpan } from "@/lib/time"
 function RecentSessionsCard({ agentSlug, chats }: { agentSlug: string; chats: ChatRow[] | null }) {
   const recent = chats === null ? null : chats.slice(0, 5)
   return (
-    <div className="rounded-xl border border-white/8 bg-card overflow-hidden">
-      <div className="px-4 py-2.5 border-b border-white/5 flex items-center justify-between">
+    <div className="rounded-xl border border-foreground/8 bg-card overflow-hidden">
+      <div className="px-4 py-2.5 border-b border-foreground/5 flex items-center justify-between">
         <h3 className="text-sm font-semibold">Recent sessions</h3>
         <Link href={`/chat/${encodeURIComponent(agentSlug)}`} className="text-[11px] text-primary hover:underline">
           Open chat →
         </Link>
       </div>
-      <div className="divide-y divide-white/5">
+      <div className="divide-y divide-foreground/5">
         {recent === null ? (
           <div className="px-4 py-6 text-xs text-muted-foreground">Loading…</div>
         ) : recent.length === 0 ? (
@@ -27,7 +27,7 @@ function RecentSessionsCard({ agentSlug, chats }: { agentSlug: string; chats: Ch
             <Link
               key={c.id}
               href={`/chat/${encodeURIComponent(agentSlug)}?session=${encodeURIComponent(c.id)}`}
-              className="px-4 py-2.5 flex items-center gap-3 hover:bg-white/[0.025]"
+              className="px-4 py-2.5 flex items-center gap-3 hover:bg-foreground/[0.025]"
             >
               <span className={cn(
                 "w-1.5 h-1.5 rounded-full shrink-0",
@@ -52,14 +52,14 @@ function RecentSessionsCard({ agentSlug, chats }: { agentSlug: string; chats: Ch
 function RecentRunsCard({ agentId, runs }: { agentId: string; runs: RunRow[] | null }) {
   const recent = runs === null ? null : runs.slice(0, 5)
   return (
-    <div className="rounded-xl border border-white/8 bg-card overflow-hidden">
-      <div className="px-4 py-2.5 border-b border-white/5 flex items-center justify-between">
+    <div className="rounded-xl border border-foreground/8 bg-card overflow-hidden">
+      <div className="px-4 py-2.5 border-b border-foreground/5 flex items-center justify-between">
         <h3 className="text-sm font-semibold">Recent runs</h3>
         <Link href={`/runs?agent_id=${encodeURIComponent(agentId)}`} className="text-[11px] text-primary hover:underline">
           View all →
         </Link>
       </div>
-      <div className="divide-y divide-white/5">
+      <div className="divide-y divide-foreground/5">
         {recent === null ? (
           <div className="px-4 py-6 text-xs text-muted-foreground">Loading…</div>
         ) : recent.length === 0 ? (
@@ -93,11 +93,11 @@ function RecentRunsCard({ agentId, runs }: { agentId: string; runs: RunRow[] | n
 
 function PeersCard({ messages }: { messages: PeerMessageRow[] }) {
   return (
-    <section className="rounded-xl border border-white/8 bg-card overflow-hidden">
-      <div className="px-4 py-2.5 border-b border-white/5">
+    <section className="rounded-xl border border-foreground/8 bg-card overflow-hidden">
+      <div className="px-4 py-2.5 border-b border-foreground/5">
         <h3 className="text-sm font-semibold">Crew peers</h3>
       </div>
-      <div className="divide-y divide-white/5">
+      <div className="divide-y divide-foreground/5">
         {messages.slice(0, 4).map((m, i) => (
           <div key={m.id ?? i} className="px-4 py-2.5 flex items-center gap-3">
             <div className="w-7 h-7 rounded-full bg-muted grid place-items-center text-[10px] shrink-0">

@@ -802,7 +802,7 @@ export function IssueCardDetail({
                 )}
                 {project && (
                   <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
-                    <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-white/[0.06]">
+                    <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-foreground/[0.06]">
                       <div
                         className="h-full rounded-full bg-primary/60"
                         style={{ width: `${Math.min(project.progress, 100)}%` }}

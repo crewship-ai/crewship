@@ -77,7 +77,7 @@ export interface SubBarProps<T extends string = string> {
   className?: string
 }
 
-const ROW = "shrink-0 flex items-center h-9 bg-card border-b border-white/[0.08] px-2 sm:px-3"
+const ROW = "shrink-0 flex items-center h-9 bg-card border-b border-foreground/[0.08] px-2 sm:px-3"
 const SCROLL_X = "overflow-x-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]"
 
 export function SubBar<T extends string = string>({
@@ -109,7 +109,7 @@ export function SubBar<T extends string = string>({
               page is "Admin Console / Users" rather than a bare section label
               floating next to an unrelated heading. */}
           <h1 className="text-body whitespace-nowrap shrink-0">
-            <span className={section != null ? "font-normal text-muted-foreground" : "font-medium text-foreground"}>
+            <span className={section != null ? "font-normal text-muted-foreground" : "font-semibold tracking-[-0.01em] text-foreground"}>
               {title}
             </span>
             {section != null && (
@@ -211,7 +211,8 @@ type ActionProps = React.ComponentProps<typeof Button> & { icon?: LucideIcon }
 /** Primary CTA — soft/tinted. At most one per page. */
 export function SubBarPrimary({ icon: Icon, className, children, asChild, ...props }: ActionProps) {
   return (
-    <Button asChild={asChild} variant="soft" size="sm" className={cn("h-7 gap-1.5 text-xs", className)} {...props}>
+    // Harbor: the page's one primary action is the solid brand button.
+    <Button asChild={asChild} variant="default" size="sm" className={cn("h-7 gap-1.5 rounded-[9px] px-3 text-xs shadow-[0_6px_16px_-8px_var(--primary-glow)]", className)} {...props}>
       {Icon && <Icon className="h-3 w-3" />}
       {asChild ? <Slot.Slottable>{children}</Slot.Slottable> : children}
     </Button>

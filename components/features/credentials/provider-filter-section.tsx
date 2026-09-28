@@ -10,7 +10,7 @@ export function ProviderFilterSection({ providers, selected, onSelect, active = 
   active?: boolean
 }) {
   const options = providers.filter((p) => p.count > 0)
-  return <SidebarSection label="Providers" count={providers.reduce((sum, p) => sum + p.count, 0)} className="border-b border-white/[0.06]">
+  return <SidebarSection label="Providers" count={providers.reduce((sum, p) => sum + p.count, 0)} className="border-b border-foreground/[0.06]">
     <SidebarRow selected={active && selected.length === 0} onSelect={() => onSelect("")}>
       <span className="min-w-0 flex-1">All providers</span>
       <span className="type-meta tabular-nums text-muted-foreground">{providers.reduce((sum, p) => sum + p.count, 0)}</span>

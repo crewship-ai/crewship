@@ -211,7 +211,7 @@ export function RoutinesExplorer({
                 <motion.div
                   {...dropdownAnim}
                   role="menu"
-                  className="absolute right-0 top-9 z-50 min-w-[220px] max-h-[360px] overflow-y-auto rounded-lg border border-white/[0.08] bg-card/95 py-1 shadow-2xl ring-1 ring-black/40 backdrop-blur-xl"
+                  className="absolute right-0 top-9 z-50 min-w-[220px] max-h-[360px] overflow-y-auto rounded-lg border border-foreground/[0.08] bg-card/95 py-1 shadow-2xl ring-1 ring-black/40 backdrop-blur-xl"
                 >
                   <div className="px-3 py-1 text-[9px] font-semibold text-muted-foreground-soft uppercase tracking-wider">
                     Usage
@@ -227,7 +227,7 @@ export function RoutinesExplorer({
                         "flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs transition-colors",
                         filters.invocations === v
                           ? "bg-primary/10 text-primary-hover"
-                          : "text-muted-foreground/80 hover:bg-white/[0.06] hover:text-foreground",
+                          : "text-muted-foreground/80 hover:bg-foreground/[0.06] hover:text-foreground",
                       )}
                     >
                       {v === "popular" && <Flame className="h-3.5 w-3.5 shrink-0" />}
@@ -247,7 +247,7 @@ export function RoutinesExplorer({
                   ))}
                   {agents.length > 0 && (
                     <>
-                      <div className="border-t border-white/[0.06] mt-1" />
+                      <div className="border-t border-foreground/[0.06] mt-1" />
                       <div className="px-3 py-1 text-[9px] font-semibold text-muted-foreground-soft uppercase tracking-wider">
                         Authors
                       </div>
@@ -260,7 +260,7 @@ export function RoutinesExplorer({
                           "flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs transition-colors",
                           filters.authorAgentId === null
                             ? "bg-primary/10 text-primary-hover"
-                            : "text-muted-foreground/80 hover:bg-white/[0.06] hover:text-foreground",
+                            : "text-muted-foreground/80 hover:bg-foreground/[0.06] hover:text-foreground",
                         )}
                       >
                         <Users className="h-3.5 w-3.5 shrink-0 opacity-60" />
@@ -280,7 +280,7 @@ export function RoutinesExplorer({
                             "flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs transition-colors",
                             filters.authorAgentId === a.id
                               ? "bg-primary/10 text-primary-hover"
-                              : "text-muted-foreground/80 hover:bg-white/[0.06] hover:text-foreground",
+                              : "text-muted-foreground/80 hover:bg-foreground/[0.06] hover:text-foreground",
                           )}
                         >
                           <span
@@ -299,7 +299,7 @@ export function RoutinesExplorer({
                       ))}
                     </>
                   )}
-                  <div className="border-t border-white/[0.06] mt-1" />
+                  <div className="border-t border-foreground/[0.06] mt-1" />
                   <div className="px-3 py-1 text-[9px] font-semibold text-muted-foreground-soft uppercase tracking-wider">
                     Visibility
                   </div>
@@ -322,7 +322,7 @@ export function RoutinesExplorer({
                       "flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs transition-colors",
                       filters.showEphemeral
                         ? "bg-primary/10 text-primary-hover"
-                        : "text-muted-foreground/80 hover:bg-white/[0.06] hover:text-foreground",
+                        : "text-muted-foreground/80 hover:bg-foreground/[0.06] hover:text-foreground",
                     )}
                   >
                     <EyeOff className="h-3.5 w-3.5 shrink-0" />
@@ -348,7 +348,7 @@ export function RoutinesExplorer({
         collapsible
         collapsed={!statusOpen}
         onToggle={() => setStatusOpen(!statusOpen)}
-        className="border-b border-white/[0.06]"
+        className="border-b border-foreground/[0.06]"
       >
         {STATUS_BUCKETS.map((b) => {
           const IconComp = b.icon
@@ -392,7 +392,7 @@ export function RoutinesExplorer({
                       // brighter primary-hover token is the documented
                       // contrast-safe pair for brand-tinted chips.
                       ? "bg-primary/15 text-primary-hover"
-                      : "bg-white/[0.05] text-muted-foreground",
+                      : "bg-foreground/[0.05] text-muted-foreground",
                 )}
               >
                 {count}

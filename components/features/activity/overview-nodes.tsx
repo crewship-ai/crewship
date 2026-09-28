@@ -111,7 +111,7 @@ function RoutineNodeBase({ data: d }: NodeProps<Node<OverviewRoutineNodeData>>) 
         <ScrollText aria-hidden="true" className="h-2.5 w-2.5" />
         <span className="truncate font-mono">{d.slug}</span>
         {d.invocationCount !== undefined && d.invocationCount > 0 && (
-          <span className="ml-auto rounded bg-white/[0.06] px-1 py-0 text-[9px]">
+          <span className="ml-auto rounded bg-foreground/[0.06] px-1 py-0 text-[9px]">
             {d.invocationCount} runs
           </span>
         )}
@@ -139,11 +139,11 @@ function RunNodeBase({ data: d }: NodeProps<Node<OverviewRunNodeData>>) {
       aria-label={accessibleLabel}
       onKeyDown={activateOnEnterOrSpace}
       className={cn(
-        "relative w-[180px] rounded-lg border border-white/[0.06] bg-card px-2.5 py-2 transition-colors hover:bg-card/80 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/80",
+        "relative w-[180px] rounded-lg border border-foreground/[0.06] bg-card px-2.5 py-2 transition-colors hover:bg-card/80 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/80",
         isWait && "ring-1 ring-warn/40",
       )}
     >
-      <Handle type="target" position={Position.Left} className="!h-2 !w-2 !border-0 !bg-white/30" isConnectable={false} />
+      <Handle type="target" position={Position.Left} className="!h-2 !w-2 !border-0 !bg-foreground/30" isConnectable={false} />
       <div className="flex items-center gap-1.5">
         <span className={cn("flex h-4 w-4 shrink-0 items-center justify-center rounded-full", tint.bg)}>
           <SI className={cn("h-2.5 w-2.5", tint.icon)} aria-hidden="true" />
@@ -319,7 +319,7 @@ function StatusChip({ status }: { status: string }) {
           ? "bg-success/15 text-success"
           : s === "failed"
             ? "bg-destructive/15 text-destructive"
-            : "bg-white/[0.06] text-muted-foreground"
+            : "bg-foreground/[0.06] text-muted-foreground"
   return (
     <span className={cn("ml-auto rounded px-1 py-0 text-[9px] font-medium uppercase tracking-wide", cls)}>
       {status}

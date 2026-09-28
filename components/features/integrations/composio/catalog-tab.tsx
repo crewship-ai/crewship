@@ -49,7 +49,7 @@ export function CatalogTab({
               value={search}
               onChange={(e) => onSearch(e.target.value)}
               placeholder="Search apps (gmail, github, slack…)"
-              className="w-64 rounded-lg border border-white/10 bg-card py-1.5 pl-8 pr-3 text-xs text-foreground placeholder:text-muted-foreground focus:border-primary/50 focus:outline-none"
+              className="w-64 rounded-lg border border-foreground/10 bg-card py-1.5 pl-8 pr-3 text-xs text-foreground placeholder:text-muted-foreground focus:border-primary/50 focus:outline-none"
             />
           </div>
         )}
@@ -69,7 +69,7 @@ export function CatalogTab({
             return (
               <div
                 key={t.slug}
-                className="flex items-center gap-3 rounded-xl border border-white/10 bg-card p-3"
+                className="flex items-center gap-3 rounded-xl border border-foreground/10 bg-card p-3"
               >
                 <ToolkitIcon toolkit={{ slug: t.slug, logo: t.meta.logo }} />
                 <div className="min-w-0 flex-1">
@@ -85,7 +85,7 @@ export function CatalogTab({
                     "shrink-0 rounded-lg border px-2 py-1 text-[11px] transition-colors",
                     isConfigured
                       ? "border-success/30 text-success hover:bg-success/10"
-                      : "border-white/10 text-foreground/80 hover:border-primary/50 hover:text-primary",
+                      : "border-foreground/10 text-foreground/80 hover:border-primary/50 hover:text-primary",
                   )}
                 >
                   {isConfigured ? "+ Account" : "Connect"}

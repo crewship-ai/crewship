@@ -24,7 +24,7 @@ const STEP_TONE: Record<ReadableStep["kind"], string> = {
   query: "bg-info/15 text-info",
   foreach: "bg-purple/15 text-purple",
   crewship: "bg-success/15 text-success",
-  unknown: "bg-white/[0.06] text-muted-foreground",
+  unknown: "bg-foreground/[0.06] text-muted-foreground",
 }
 
 export function RoutineReadableSummary({
@@ -96,7 +96,7 @@ export function RoutineReadableSummary({
           {r.integrations.map((slug) => (
             <span
               key={slug}
-              className="inline-flex items-center gap-1.5 rounded-full border border-border/60 bg-white/[0.04] px-2 py-0.5 text-[11px] font-medium text-foreground/90"
+              className="inline-flex items-center gap-1.5 rounded-full border border-border/60 bg-foreground/[0.04] px-2 py-0.5 text-[11px] font-medium text-foreground/90"
               title={slug}
             >
               <Puzzle className="h-3 w-3 text-notice" aria-hidden />

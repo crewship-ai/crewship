@@ -247,7 +247,7 @@ export function PagesOverview({
                         onClick={() => onFilterState?.(row.state)}
                         className={cn(
                           "group flex items-center gap-2.5 rounded-md px-1.5 py-2 text-left transition-colors",
-                          !empty && onFilterState && "hover:bg-white/[0.03]",
+                          !empty && onFilterState && "hover:bg-foreground/[0.03]",
                           empty && "cursor-default",
                         )}
                       >
@@ -315,7 +315,7 @@ export function PagesOverview({
                         exit={{ opacity: 0, height: 0 }}
                         type="button"
                         onClick={() => onSelect(p.slug)}
-                        className="group flex items-center gap-2.5 overflow-hidden rounded-md px-1.5 py-2 text-left transition-colors hover:bg-white/[0.03]"
+                        className="group flex items-center gap-2.5 overflow-hidden rounded-md px-1.5 py-2 text-left transition-colors hover:bg-foreground/[0.03]"
                       >
                       <span
                         aria-hidden
@@ -383,7 +383,7 @@ export function PagesOverview({
                       {...listRow}
                       type="button"
                       onClick={() => onSelect(p.slug)}
-                      className="group flex items-center gap-2.5 rounded-md px-1.5 py-2 text-left transition-colors hover:bg-white/[0.03]"
+                      className="group flex items-center gap-2.5 rounded-md px-1.5 py-2 text-left transition-colors hover:bg-foreground/[0.03]"
                     >
                       <Icon
                         className={cn(

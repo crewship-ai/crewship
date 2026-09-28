@@ -230,7 +230,7 @@ export function AccessEditor({
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="block max-h-[88dvh] max-w-lg overflow-y-auto rounded-xl border-white/10 bg-card shadow-2xl sm:max-w-lg">
+      <DialogContent className="block max-h-[88dvh] max-w-lg overflow-y-auto rounded-xl border-foreground/10 bg-card shadow-2xl sm:max-w-lg">
         <DialogHeader>
           <DialogTitle className="text-base">Edit access — {agentName}</DialogTitle>
           <DialogDescription className="text-xs leading-relaxed">
@@ -253,7 +253,7 @@ export function AccessEditor({
               <select
                 value={users.includes(userId) ? userId : ""}
                 onChange={(e) => setUserId(e.target.value)}
-                className="rounded-lg border border-white/10 bg-background px-2.5 py-1.5 font-mono text-xs focus:border-primary/50 focus:outline-none"
+                className="rounded-lg border border-foreground/10 bg-background px-2.5 py-1.5 font-mono text-xs focus:border-primary/50 focus:outline-none"
               >
                 {!users.includes(userId) && <option value="">— pick a user —</option>}
                 {users.map((u) => (
@@ -277,9 +277,9 @@ export function AccessEditor({
               {apps.length === 0 ? (
                 <EmptyHint text="No apps granted yet. Use “+ Add app” to grant one of this user's connected apps." />
               ) : (
-                <div className="overflow-hidden rounded-xl border border-white/10">
+                <div className="overflow-hidden rounded-xl border border-foreground/10">
                   {apps.map((app) => (
-                    <div key={app.toolkit.slug} className="border-t border-white/[0.06] first:border-t-0">
+                    <div key={app.toolkit.slug} className="border-t border-foreground/[0.06] first:border-t-0">
                       <div className="flex items-center justify-between gap-2 px-3.5 py-2.5">
                         <span className="flex min-w-0 items-center gap-2 text-sm">
                           <ToolkitIcon toolkit={app.toolkit} size={16} />
@@ -292,7 +292,7 @@ export function AccessEditor({
                             value={app.mode}
                             onChange={(e) => setMode(app.toolkit.slug, e.target.value as Scope)}
                             className={cn(
-                              "rounded-lg border border-white/10 bg-background px-2 py-1 text-xs focus:border-primary/50 focus:outline-none",
+                              "rounded-lg border border-foreground/10 bg-background px-2 py-1 text-xs focus:border-primary/50 focus:outline-none",
                               app.mode === "off" && "text-muted-foreground",
                             )}
                           >
@@ -507,7 +507,7 @@ function ToolPicker({
   }
 
   return (
-    <div className="mx-3.5 mb-3 rounded-lg border border-dashed border-white/10 bg-white/[0.02] p-2.5">
+    <div className="mx-3.5 mb-3 rounded-lg border border-dashed border-foreground/10 bg-foreground/[0.02] p-2.5">
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
         <div className="relative">
           <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
@@ -515,28 +515,28 @@ function ToolPicker({
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder={`Search ${total || ""} tools…`}
-            className="w-44 rounded-lg border border-white/10 bg-background py-1.5 pl-8 pr-2 text-xs focus:border-primary/50 focus:outline-none"
+            className="w-44 rounded-lg border border-foreground/10 bg-background py-1.5 pl-8 pr-2 text-xs focus:border-primary/50 focus:outline-none"
           />
         </div>
         <div className="flex items-center gap-1.5">
           <button
             type="button"
             onClick={selectReadOnly}
-            className="rounded-md border border-white/10 px-2 py-0.5 text-[11px] text-muted-foreground hover:text-foreground"
+            className="rounded-md border border-foreground/10 px-2 py-0.5 text-[11px] text-muted-foreground hover:text-foreground"
           >
             Read-only
           </button>
           <button
             type="button"
             onClick={selectAll}
-            className="rounded-md border border-white/10 px-2 py-0.5 text-[11px] text-muted-foreground hover:text-foreground"
+            className="rounded-md border border-foreground/10 px-2 py-0.5 text-[11px] text-muted-foreground hover:text-foreground"
           >
             All
           </button>
           <button
             type="button"
             onClick={selectNone}
-            className="rounded-md border border-white/10 px-2 py-0.5 text-[11px] text-muted-foreground hover:text-foreground"
+            className="rounded-md border border-foreground/10 px-2 py-0.5 text-[11px] text-muted-foreground hover:text-foreground"
           >
             None
           </button>
@@ -558,7 +558,7 @@ function ToolPicker({
             return (
               <label
                 key={t.slug}
-                className="flex cursor-pointer items-center justify-between gap-2 border-t border-white/[0.05] py-1.5 first:border-t-0"
+                className="flex cursor-pointer items-center justify-between gap-2 border-t border-foreground/[0.05] py-1.5 first:border-t-0"
               >
                 <span className="flex min-w-0 items-center gap-2">
                   <input
@@ -573,7 +573,7 @@ function ToolPicker({
                 </span>
                 <span
                   className={cn(
-                    "shrink-0 rounded-full border border-white/10 px-1.5 py-px text-[9px]",
+                    "shrink-0 rounded-full border border-foreground/10 px-1.5 py-px text-[9px]",
                     read ? "text-muted-foreground" : "text-warn",
                   )}
                 >
@@ -646,7 +646,7 @@ export function AgentConnectorsCard({
   const actsAs = bindings[0]?.user_id
 
   return (
-    <div className={cn("rounded-xl border border-white/10 bg-card p-4", className)}>
+    <div className={cn("rounded-xl border border-foreground/10 bg-card p-4", className)}>
       <div className="flex items-center justify-between gap-3">
         <span className="flex items-center gap-1.5 text-sm font-medium">
           <Plug className="h-3.5 w-3.5 text-foreground/60" />

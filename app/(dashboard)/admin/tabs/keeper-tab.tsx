@@ -274,7 +274,7 @@ export const KeeperTab = React.memo(function KeeperTab({
                     type="button"
                     onClick={() => onSelectKeeperEntry(entry)}
                     className={cn(
-                      "flex flex-col gap-1 md:grid md:grid-cols-[minmax(0,1.2fr)_minmax(0,1.4fr)_70px_90px_60px_120px] md:items-center md:gap-3 w-full px-4 py-2.5 text-left hover:bg-white/[0.02] transition-colors",
+                      "flex flex-col gap-1 md:grid md:grid-cols-[minmax(0,1.2fr)_minmax(0,1.4fr)_70px_90px_60px_120px] md:items-center md:gap-3 w-full px-4 py-2.5 text-left hover:bg-foreground/[0.02] transition-colors",
                       idx < keeperLog.length - 1 && "border-b border-border/40",
                     )}
                   >

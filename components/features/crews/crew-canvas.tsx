@@ -264,7 +264,7 @@ export function CrewCanvas({
   return (
     <CanvasShell loading={false} error={null} notLoadedLabel="">
       {/* Header */}
-      <header className="flex items-start gap-5 pb-5 border-b border-white/8">
+      <header className="flex items-start gap-5 pb-5 border-b border-foreground/8">
         <button
           type="button"
           onClick={() => setIconPickerOpen(true)}
@@ -292,7 +292,7 @@ export function CrewCanvas({
             <h1 className="text-2xl font-semibold">
               {crew.name}
             </h1>
-            <span className="text-[11px] flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-muted text-foreground/80 border border-white/10">
+            <span className="text-[11px] flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-muted text-foreground/80 border border-foreground/10">
               Crew
             </span>
             {/* #1380 — surface the effective isolation posture on the surface
@@ -300,13 +300,13 @@ export function CrewCanvas({
             <CrewPrivilegedBadge devcontainerConfig={crew.devcontainer_config} />
           </div>
           <div className="flex items-center gap-2 text-sm text-muted-foreground flex-wrap">
-            <code className="text-foreground/80 text-xs px-1.5 py-0.5 rounded bg-muted border border-white/8">
+            <code className="text-foreground/80 text-xs px-1.5 py-0.5 rounded bg-muted border border-foreground/8">
               {crew.slug}
             </code>
             {crew.issue_prefix && (
               <>
                 <span className="text-muted-foreground-soft">·</span>
-                <span className="text-xs">prefix <code className="font-mono uppercase text-foreground/80 px-1 py-0.5 rounded bg-muted border border-white/8">{crew.issue_prefix}</code></span>
+                <span className="text-xs">prefix <code className="font-mono uppercase text-foreground/80 px-1 py-0.5 rounded bg-muted border border-foreground/8">{crew.issue_prefix}</code></span>
               </>
             )}
             <span className="text-muted-foreground-soft">·</span>
@@ -320,7 +320,7 @@ export function CrewCanvas({
           <button
             type="button"
             onClick={onOpenFiles}
-            className="px-3 py-2 text-sm rounded-lg border border-white/10 hover:bg-white/5 flex items-center gap-2"
+            className="px-3 py-2 text-sm rounded-lg border border-foreground/10 hover:bg-foreground/5 flex items-center gap-2"
             title="Open files in bottom panel"
           >
             <Files className="h-3.5 w-3.5" />

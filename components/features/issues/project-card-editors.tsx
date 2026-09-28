@@ -50,7 +50,7 @@ function Trigger({
       <button
         type="button"
         aria-label={label}
-        className="-mx-1 inline-flex min-w-0 max-w-full items-center gap-1.5 rounded px-1 py-0.5 text-left transition-colors hover:bg-white/[0.06]"
+        className="-mx-1 inline-flex min-w-0 max-w-full items-center gap-1.5 rounded px-1 py-0.5 text-left transition-colors hover:bg-foreground/[0.06]"
       >
         {children}
       </button>
@@ -74,7 +74,7 @@ function Option({
       type="button"
       onClick={onSelect}
       className={cn(
-        "flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[12px] transition-colors hover:bg-white/[0.06]",
+        "flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[12px] transition-colors hover:bg-foreground/[0.06]",
         current && "bg-primary/10 text-primary",
         tone === "muted" && "text-muted-foreground",
       )}

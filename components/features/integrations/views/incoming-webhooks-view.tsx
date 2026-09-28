@@ -264,7 +264,7 @@ export function IncomingWebhooksView({
             {!rows.length && !data.error && section !== "page" && (
               <Empty onAdd={() => onAdd()} />
             )}
-            <div className="border-t border-white/[0.06] px-4 py-3 text-xs text-muted-foreground">
+            <div className="border-t border-foreground/[0.06] px-4 py-3 text-xs text-muted-foreground">
               Workspace totals cover routine and agent endpoints. Page endpoints
               are read on demand from each Page; missing data is not counted as
               zero. Actions remain subject to the target&apos;s permissions.
@@ -273,7 +273,7 @@ export function IncomingWebhooksView({
           {(section === "page" || section === "endpoints") &&
             data.targets.some((t) => t.kind === "page") && (
               <Panel title="Pages · endpoints listed per Page">
-                <ul className="divide-y divide-white/[0.04]">
+                <ul className="divide-y divide-foreground/[0.04]">
                   {data.targets
                     .filter(
                       (t) =>
@@ -385,9 +385,9 @@ function EndpointTable({
             ))}
           </tr>
         </thead>
-        <tbody className="divide-y divide-white/[0.04]">
+        <tbody className="divide-y divide-foreground/[0.04]">
           {rows.map((r) => (
-            <tr key={r.id} className="hover:bg-white/[0.02]">
+            <tr key={r.id} className="hover:bg-foreground/[0.02]">
               <td className="px-4 py-3">
                 {onSelect ? (
                   <button
@@ -664,7 +664,7 @@ function RecentReceipts({
           />
         </div>
       ) : query.data?.length ? (
-        <ul className="divide-y divide-white/[0.04]">
+        <ul className="divide-y divide-foreground/[0.04]">
           {query.data.map((r) => (
             <li
               key={r.id}

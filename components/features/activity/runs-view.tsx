@@ -91,7 +91,7 @@ export function RunsView({ workspaceId }: RunsViewProps) {
   return (
     <div className="flex h-full flex-col bg-background">
       {/* Filter strip */}
-      <div className="flex shrink-0 items-center gap-1 border-b border-white/[0.06] px-3 py-2">
+      <div className="flex shrink-0 items-center gap-1 border-b border-foreground/[0.06] px-3 py-2">
         <FilterBtn label="Active" count={counts.active} active={filter === "active"} onClick={() => setFilter("active")} />
         <FilterBtn label="All" count={runs.length} active={filter === "all"} onClick={() => setFilter("all")} />
         <FilterBtn label="Completed" count={counts.completed} active={filter === "completed"} onClick={() => setFilter("completed")} />
@@ -113,7 +113,7 @@ export function RunsView({ workspaceId }: RunsViewProps) {
         ) : runs.length === 0 ? (
           <EmptyState filter={filter} />
         ) : (
-          <ul className="divide-y divide-white/[0.04]">
+          <ul className="divide-y divide-foreground/[0.04]">
             {runs.map((run) => (
               <RunCard
                 key={run.id}
@@ -153,7 +153,7 @@ function FilterBtn({
       <span>{label}</span>
       <span className={cn(
         "rounded px-1 py-0.5 text-[10px] tabular-nums",
-        active ? "bg-primary/20 text-primary/90" : "bg-white/[0.06] text-foreground/40",
+        active ? "bg-primary/20 text-primary/90" : "bg-foreground/[0.06] text-foreground/40",
       )}>
         {count}
       </span>
@@ -191,7 +191,7 @@ function RunCard({
         onClick={onToggle}
         aria-expanded={expanded}
         aria-controls={`run-card-content-${run.id}`}
-        className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-white/[0.02]"
+        className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-foreground/[0.02]"
       >
         <span
           className={cn(
@@ -292,7 +292,7 @@ function RunStepTree({ workspaceId, run }: { workspaceId: string; run: PipelineR
   const hasDSL = dslSteps.length > 0
 
   return (
-    <div className="border-t border-white/[0.06] bg-card/20 px-4 py-3 text-xs">
+    <div className="border-t border-foreground/[0.06] bg-card/20 px-4 py-3 text-xs">
       {/* Triggered-by row */}
       <div className="mb-2 flex items-center gap-2 text-[10px] text-muted-foreground/60">
         <Globe className="h-3 w-3" />
@@ -369,7 +369,7 @@ function RunStepTree({ workspaceId, run }: { workspaceId: string; run: PipelineR
       )}
 
       {/* Footer actions */}
-      <div className="mt-3 flex items-center justify-between border-t border-white/[0.04] pt-2">
+      <div className="mt-3 flex items-center justify-between border-t border-foreground/[0.04] pt-2">
         <span className="font-mono text-[10px] text-muted-foreground/40">{run.pipeline_slug}</span>
         <div className="flex items-center gap-2">
           {/* Show "Resolve in Inbox" whenever the current step is a
@@ -437,7 +437,7 @@ function StepRow({
         aria-expanded={hasOutput ? open : undefined}
         className={cn(
           "flex w-full items-center gap-2 rounded px-2 py-1 text-left transition-colors",
-          hasOutput ? "hover:bg-white/[0.04]" : "cursor-default",
+          hasOutput ? "hover:bg-foreground/[0.04]" : "cursor-default",
           isCurrent && "bg-warn/5",
           isPending && "opacity-50",
         )}
@@ -458,7 +458,7 @@ function StepRow({
         <span className="font-mono text-[10px] text-muted-foreground/60">{index}.</span>
         <span className="font-mono text-xs">{stepID}</span>
         {stepType && (
-          <span className="rounded bg-white/[0.06] px-1 py-0 font-mono text-[9px] text-muted-foreground">
+          <span className="rounded bg-foreground/[0.06] px-1 py-0 font-mono text-[9px] text-muted-foreground">
             {stepType}
           </span>
         )}

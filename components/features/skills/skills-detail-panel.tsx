@@ -36,8 +36,8 @@ const SOURCE_PILL: Record<string, { label: string; icon: React.ElementType; cls:
   BUNDLED:    { label: "Official",  icon: ShieldCheck, cls: "bg-blue-500/10 text-blue-300 border-blue-500/30" },
   GENERATED:  { label: "Generated", icon: Sparkles,    cls: "bg-purple/10 text-purple border-purple/30" },
   MARKETPLACE:{ label: "Verified",  icon: BadgeCheck,  cls: "bg-success/10 text-success border-success/30" },
-  CUSTOM:     { label: "Community", icon: Dot,         cls: "bg-white/[0.05] text-white/55 border-white/10" },
-  MANAGED:    { label: "Managed",   icon: Lock,        cls: "bg-white/[0.05] text-white/55 border-white/10" },
+  CUSTOM:     { label: "Community", icon: Dot,         cls: "bg-foreground/[0.05] text-foreground/55 border-foreground/10" },
+  MANAGED:    { label: "Managed",   icon: Lock,        cls: "bg-foreground/[0.05] text-foreground/55 border-foreground/10" },
 }
 
 interface AgentRow {
@@ -109,11 +109,11 @@ export function SkillsDetailPanel({
   if (!skill) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center">
-        <div className="rounded-full bg-white/[0.04] p-3">
-          <Sparkles className="h-5 w-5 text-white/35" />
+        <div className="rounded-full bg-foreground/[0.04] p-3">
+          <Sparkles className="h-5 w-5 text-foreground/35" />
         </div>
-        <p className="text-sm text-white/55">Select a skill to see details</p>
-        <p className="text-xs text-white/35">
+        <p className="text-sm text-foreground/55">Select a skill to see details</p>
+        <p className="text-xs text-foreground/35">
           Click any card to view the full SKILL.md, install on an agent, or assign to a crew.
         </p>
       </div>
@@ -136,7 +136,7 @@ export function SkillsDetailPanel({
 
   return (
     <div className="flex h-full flex-col min-h-0">
-      <header className="border-b border-white/[0.08] p-3 space-y-2 shrink-0">
+      <header className="border-b border-foreground/[0.08] p-3 space-y-2 shrink-0">
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0">
             {/* Top 'proklik' — vendor/slug doubles as a link to the
@@ -146,13 +146,13 @@ export function SkillsDetailPanel({
                 app/(dashboard)/skills/[skillId]/page.tsx. */}
             <Link
               href={`/skills/${skill.id}`}
-              className="group inline-flex items-center gap-1 text-[11px] text-white/55 hover:text-white/90 transition-colors"
+              className="group inline-flex items-center gap-1 text-[11px] text-foreground/55 hover:text-foreground/90 transition-colors"
               title="Open full page view"
             >
               <span className="truncate">{vendor}/{skill.slug}</span>
               <ExternalLink className="h-3 w-3 opacity-60 group-hover:opacity-100" />
             </Link>
-            <h2 className="text-base font-semibold text-white/95 truncate">
+            <h2 className="text-base font-semibold text-foreground/95 truncate">
               {skill.display_name ?? skill.name}
             </h2>
           </div>
@@ -176,12 +176,12 @@ export function SkillsDetailPanel({
           </div>
         )}
 
-        <div className="flex items-center gap-2 rounded-md bg-black/30 border border-white/[0.08] px-2 py-1.5 text-xs font-mono text-white/85">
+        <div className="flex items-center gap-2 rounded-md bg-black/30 border border-foreground/[0.08] px-2 py-1.5 text-xs font-mono text-foreground/85">
           <span className="flex-1 truncate">{installCmd}</span>
           <button
             type="button"
             onClick={copy}
-            className="rounded hover:bg-white/[0.06] p-1 text-white/55 hover:text-white/95 transition-colors"
+            className="rounded hover:bg-foreground/[0.06] p-1 text-foreground/55 hover:text-foreground/95 transition-colors"
             aria-label="Copy install command"
           >
             {copied ? <Check className="h-3.5 w-3.5 text-success" /> : <Copy className="h-3.5 w-3.5" />}
@@ -189,15 +189,15 @@ export function SkillsDetailPanel({
         </div>
       </header>
 
-      <div className="flex-1 min-h-0 overflow-y-auto p-4 prose prose-invert prose-sm max-w-none prose-headings:text-white/90 prose-p:text-white/70 prose-li:text-white/70 prose-code:text-info prose-code:bg-white/[0.06] prose-code:px-1 prose-code:rounded prose-pre:bg-black/40 prose-pre:border prose-pre:border-white/[0.08]">
-        {loading && <p className="text-white/45 text-xs italic">Loading…</p>}
+      <div className="flex-1 min-h-0 overflow-y-auto p-4 prose prose-invert prose-sm max-w-none prose-headings:text-foreground/90 prose-p:text-foreground/70 prose-li:text-foreground/70 prose-code:text-info prose-code:bg-foreground/[0.06] prose-code:px-1 prose-code:rounded prose-pre:bg-black/40 prose-pre:border prose-pre:border-foreground/[0.08]">
+        {loading && <p className="text-foreground/45 text-xs italic">Loading…</p>}
         {!loading && detail?.content && <Streamdown>{detail.content}</Streamdown>}
         {!loading && !detail?.content && (
-          <p className="text-white/45 text-xs italic">No body content available for this skill.</p>
+          <p className="text-foreground/45 text-xs italic">No body content available for this skill.</p>
         )}
       </div>
 
-      <footer className="border-t border-white/[0.08] p-3 flex items-center gap-2 text-xs shrink-0">
+      <footer className="border-t border-foreground/[0.08] p-3 flex items-center gap-2 text-xs shrink-0">
         <InstallToAgentDialog skill={skill} workspaceId={workspaceId} onInstalled={onChanged} />
         <AssignToCrewDialog skill={skill} workspaceId={workspaceId} onAssigned={onChanged} />
         <UninstallSkillDialog skill={skill} workspaceId={workspaceId} onUninstalled={onChanged} />
@@ -336,14 +336,14 @@ function InstallToAgentDialog({
           className="mb-2"
         />
 
-        <div className="max-h-72 overflow-y-auto rounded border border-white/[0.08] divide-y divide-white/[0.04]">
+        <div className="max-h-72 overflow-y-auto rounded border border-foreground/[0.08] divide-y divide-foreground/[0.04]">
           {loading ? (
-            <div className="p-4 text-center text-xs text-white/45">
+            <div className="p-4 text-center text-xs text-foreground/45">
               <Spinner className="h-3 w-3 inline mr-1" />
               Loading agents…
             </div>
           ) : filtered.length === 0 ? (
-            <div className="p-4 text-center text-xs text-white/45">No agents found.</div>
+            <div className="p-4 text-center text-xs text-foreground/45">No agents found.</div>
           ) : (
             filtered.map((a) => {
               const selected = picked.has(a.id)
@@ -360,17 +360,17 @@ function InstallToAgentDialog({
                     })
                   }
                   className={`flex w-full items-center gap-2 px-3 py-2 text-left text-xs transition-colors ${
-                    selected ? "bg-primary/[0.12]" : "hover:bg-white/[0.04]"
+                    selected ? "bg-primary/[0.12]" : "hover:bg-foreground/[0.04]"
                   }`}
                 >
                   <span
                     className={`inline-block h-3 w-3 rounded border ${
-                      selected ? "border-primary bg-primary" : "border-white/20"
+                      selected ? "border-primary bg-primary" : "border-foreground/20"
                     }`}
                   />
-                  <span className="font-medium text-white/90 flex-1 truncate">{a.name}</span>
+                  <span className="font-medium text-foreground/90 flex-1 truncate">{a.name}</span>
                   {a.crew && (
-                    <span className="text-[10px] text-white/45 truncate">{a.crew.name}</span>
+                    <span className="text-[10px] text-foreground/45 truncate">{a.crew.name}</span>
                   )}
                 </button>
               )
@@ -524,14 +524,14 @@ function UninstallSkillDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="max-h-72 overflow-y-auto rounded border border-white/[0.08] divide-y divide-white/[0.04]">
+        <div className="max-h-72 overflow-y-auto rounded border border-foreground/[0.08] divide-y divide-foreground/[0.04]">
           {loading ? (
-            <div className="p-4 text-center text-xs text-white/45">
+            <div className="p-4 text-center text-xs text-foreground/45">
               <Spinner className="h-3 w-3 inline mr-1" />
               Looking up agents that have this skill installed…
             </div>
           ) : installed.length === 0 ? (
-            <div className="p-4 text-center text-xs text-white/45">
+            <div className="p-4 text-center text-xs text-foreground/45">
               No agents currently have this skill installed.
             </div>
           ) : (
@@ -550,17 +550,17 @@ function UninstallSkillDialog({
                     })
                   }
                   className={`flex w-full items-center gap-2 px-3 py-2 text-left text-xs transition-colors ${
-                    selected ? "bg-destructive/[0.12]" : "hover:bg-white/[0.04]"
+                    selected ? "bg-destructive/[0.12]" : "hover:bg-foreground/[0.04]"
                   }`}
                 >
                   <span
                     className={`inline-block h-3 w-3 rounded border ${
-                      selected ? "border-destructive bg-destructive" : "border-white/20"
+                      selected ? "border-destructive bg-destructive" : "border-foreground/20"
                     }`}
                   />
-                  <span className="font-medium text-white/90 flex-1 truncate">{a.name}</span>
+                  <span className="font-medium text-foreground/90 flex-1 truncate">{a.name}</span>
                   {a.crew && (
-                    <span className="text-[10px] text-white/45 truncate">{a.crew.name}</span>
+                    <span className="text-[10px] text-foreground/45 truncate">{a.crew.name}</span>
                   )}
                 </button>
               )
@@ -694,14 +694,14 @@ function AssignToCrewDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="max-h-72 overflow-y-auto rounded border border-white/[0.08] divide-y divide-white/[0.04]">
+        <div className="max-h-72 overflow-y-auto rounded border border-foreground/[0.08] divide-y divide-foreground/[0.04]">
           {loading ? (
-            <div className="p-4 text-center text-xs text-white/45">
+            <div className="p-4 text-center text-xs text-foreground/45">
               <Spinner className="h-3 w-3 inline mr-1" />
               Loading crews…
             </div>
           ) : crews.length === 0 ? (
-            <div className="p-4 text-center text-xs text-white/45">No crews in this workspace.</div>
+            <div className="p-4 text-center text-xs text-foreground/45">No crews in this workspace.</div>
           ) : (
             crews.map((c) => {
               const selected = pickedCrew === c.id
@@ -711,17 +711,17 @@ function AssignToCrewDialog({
                   type="button"
                   onClick={() => setPickedCrew(c.id)}
                   className={`flex w-full items-center gap-2 px-3 py-2 text-left text-xs transition-colors ${
-                    selected ? "bg-primary/[0.12]" : "hover:bg-white/[0.04]"
+                    selected ? "bg-primary/[0.12]" : "hover:bg-foreground/[0.04]"
                   }`}
                 >
                   <span
                     className={`inline-block h-3 w-3 rounded-full border ${
-                      selected ? "border-primary bg-primary" : "border-white/20"
+                      selected ? "border-primary bg-primary" : "border-foreground/20"
                     }`}
                   />
-                  <span className="font-medium text-white/90 flex-1 truncate">{c.name}</span>
+                  <span className="font-medium text-foreground/90 flex-1 truncate">{c.name}</span>
                   {c._count?.agents != null && (
-                    <span className="text-[10px] text-white/45 tabular-nums">{c._count.agents} agents</span>
+                    <span className="text-[10px] text-foreground/45 tabular-nums">{c._count.agents} agents</span>
                   )}
                 </button>
               )

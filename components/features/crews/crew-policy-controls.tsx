@@ -307,7 +307,7 @@ export function CrewPolicyControls({ crewId, workspaceId, canEdit }: CrewPolicyC
 
   if (loading) {
     return (
-      <div className="rounded-xl border border-white/8 bg-card p-4 flex items-center gap-2 text-sm text-muted-foreground">
+      <div className="rounded-xl border border-foreground/8 bg-card p-4 flex items-center gap-2 text-sm text-muted-foreground">
         <Spinner className="h-3.5 w-3.5" /> Loading policy…
       </div>
     )
@@ -321,7 +321,7 @@ export function CrewPolicyControls({ crewId, workspaceId, canEdit }: CrewPolicyC
   }
 
   return (
-    <div className="rounded-xl border border-white/8 bg-card p-4 space-y-4">
+    <div className="rounded-xl border border-foreground/8 bg-card p-4 space-y-4">
       <div>
         <div className="text-xs uppercase tracking-wider text-muted-foreground mb-2">Autonomy level</div>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -335,7 +335,7 @@ export function CrewPolicyControls({ crewId, workspaceId, canEdit }: CrewPolicyC
                 "text-left rounded-lg border px-3 py-2 transition-colors",
                 targetAutonomy === opt.value
                   ? "border-primary/60 bg-primary/10"
-                  : "border-white/10 hover:bg-white/5",
+                  : "border-foreground/10 hover:bg-foreground/5",
                 (!effectiveCanEdit || saving) && "opacity-50 cursor-not-allowed",
               )}
               aria-pressed={targetAutonomy === opt.value}
@@ -363,7 +363,7 @@ export function CrewPolicyControls({ crewId, workspaceId, canEdit }: CrewPolicyC
                   "text-left rounded-lg border px-3 py-2 transition-colors",
                   targetBehavior === opt.value && !disabledByCombination
                     ? "border-primary/60 bg-primary/10"
-                    : "border-white/10 hover:bg-white/5",
+                    : "border-foreground/10 hover:bg-foreground/5",
                   (!effectiveCanEdit || saving || disabledByCombination) && "opacity-50 cursor-not-allowed",
                 )}
                 aria-pressed={targetBehavior === opt.value}
@@ -414,7 +414,7 @@ export function CrewPolicyControls({ crewId, workspaceId, canEdit }: CrewPolicyC
             onChange={(e) => setPendingMaxEphemeral(e.target.value)}
             className={cn(
               "w-24 rounded border bg-background px-2 py-1.5 text-sm focus:outline-none",
-              quotaInvalid ? "border-destructive/50 focus:border-destructive/70" : "border-white/10 focus:border-primary/50",
+              quotaInvalid ? "border-destructive/50 focus:border-destructive/70" : "border-foreground/10 focus:border-primary/50",
               (!effectiveCanEdit || saving) && "opacity-50 cursor-not-allowed",
             )}
             aria-invalid={quotaInvalid}
@@ -436,7 +436,7 @@ export function CrewPolicyControls({ crewId, workspaceId, canEdit }: CrewPolicyC
       </div>
 
       {(dirty || reason !== "") && (
-        <div className="space-y-2 pt-2 border-t border-white/5">
+        <div className="space-y-2 pt-2 border-t border-foreground/5">
           <label
             htmlFor={`crew-policy-reason-${crewId}`}
             className="block text-xs uppercase tracking-wider text-muted-foreground"
@@ -449,7 +449,7 @@ export function CrewPolicyControls({ crewId, workspaceId, canEdit }: CrewPolicyC
             value={reason}
             onChange={(e) => setReason(e.target.value)}
             placeholder="why are you changing this policy?"
-            className="w-full rounded border border-white/10 bg-background px-2 py-1.5 text-sm focus:outline-none focus:border-primary/50"
+            className="w-full rounded border border-foreground/10 bg-background px-2 py-1.5 text-sm focus:outline-none focus:border-primary/50"
             disabled={saving}
           />
           <div className="flex items-center gap-2">
@@ -476,7 +476,7 @@ export function CrewPolicyControls({ crewId, workspaceId, canEdit }: CrewPolicyC
                 setReason("")
               }}
               disabled={saving}
-              className="text-xs px-3 py-1.5 rounded border border-white/10 hover:bg-white/5"
+              className="text-xs px-3 py-1.5 rounded border border-foreground/10 hover:bg-foreground/5"
             >
               Cancel
             </button>
@@ -485,7 +485,7 @@ export function CrewPolicyControls({ crewId, workspaceId, canEdit }: CrewPolicyC
       )}
 
       {policy?.set_at && (
-        <div className="text-[11px] text-muted-foreground pt-2 border-t border-white/5">
+        <div className="text-[11px] text-muted-foreground pt-2 border-t border-foreground/5">
           Last changed {new Date(policy.set_at).toLocaleString()}
           {policy.reason ? ` — ${policy.reason}` : ""}
         </div>

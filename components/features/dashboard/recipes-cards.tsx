@@ -56,7 +56,7 @@ export function RecipesEmptyState({ workspaceId, onInstalled }: Props) {
               transition={{ duration: 0.2, delay: idx * 0.05 }}
               className={cn(
                 "group flex flex-col items-start gap-3 rounded-xl border bg-card p-5 text-left transition-all",
-                "border-white/10 hover:border-primary/50 hover:bg-white/[0.02] hover:shadow-lg hover:shadow-primary/5",
+                "border-foreground/10 hover:border-primary/50 hover:bg-foreground/[0.02] hover:shadow-lg hover:shadow-primary/5",
               )}
             >
               <CrewIcon icon={r.icon} color={asCrewColor(r.color)} size="md" />

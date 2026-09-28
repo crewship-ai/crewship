@@ -62,7 +62,7 @@ export const WorkspacesTab = React.memo(function WorkspacesTab({ orgs, onRefresh
             <div
               key={o.id}
               className={
-                "grid items-center gap-3 px-4 py-2 hover:bg-white/[0.02] " +
+                "grid items-center gap-3 px-4 py-2 hover:bg-foreground/[0.02] " +
                 (idx < orgs.length - 1 ? "border-b border-border/40" : "")
               }
               style={{ gridTemplateColumns: "minmax(0,1.8fr) 90px 90px 90px minmax(0,1fr)" }}

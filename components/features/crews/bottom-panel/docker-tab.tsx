@@ -102,7 +102,7 @@ export function DockerTab({
 
   return (
     <div className="h-full overflow-y-auto">
-      <div className="grid grid-cols-[1fr_180px_120px_80px_80px_70px] gap-3 px-4 py-2 border-b border-white/8 text-[10px] uppercase tracking-wide text-muted-foreground">
+      <div className="grid grid-cols-[1fr_180px_120px_80px_80px_70px] gap-3 px-4 py-2 border-b border-foreground/8 text-[10px] uppercase tracking-wide text-muted-foreground">
         <span>Container</span>
         <span>Image</span>
         <span>Status</span>
@@ -110,7 +110,7 @@ export function DockerTab({
         <span>RAM</span>
         <span>Agents</span>
       </div>
-      <div className="divide-y divide-white/5 text-sm">
+      <div className="divide-y divide-foreground/5 text-sm">
         {containers.map((c) => (
           <div
             key={c.name}

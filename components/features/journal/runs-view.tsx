@@ -654,7 +654,7 @@ export function RunsView({
                     }}
                     title={`Open trace ${run.id.slice(0, 8)} in Timeline`}
                     className={cn(
-                      "grid items-center gap-x-3 gap-y-1 px-4 py-2 hover:bg-white/[0.02] transition-colors cursor-pointer outline-none focus-visible:bg-white/[0.04] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-success/40",
+                      "grid items-center gap-x-3 gap-y-1 px-4 py-2 hover:bg-foreground/[0.02] transition-colors cursor-pointer outline-none focus-visible:bg-foreground/[0.04] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-success/40",
                       RUN_GRID_ROW,
                       idx < runs.length - 1 && "border-b border-border/40",
                     )}
@@ -829,7 +829,7 @@ function LivePulse({ runs, runningCount }: { runs: Run[]; runningCount: number }
                   router.push(traceHref)
                 }
               }}
-              className="flex items-center gap-3 px-4 py-2 hover:bg-white/[0.02] cursor-pointer outline-none focus-visible:bg-white/[0.04]"
+              className="flex items-center gap-3 px-4 py-2 hover:bg-foreground/[0.02] cursor-pointer outline-none focus-visible:bg-foreground/[0.04]"
             >
               <StatusDot status="IN_PROGRESS" live className="h-1.5 w-1.5" />
               <span className="text-xs font-medium truncate w-40">
@@ -894,7 +894,7 @@ function RunsKpiTile({
         {value}
       </div>
       {split && splitTotal > 0 && (
-        <div className="mt-2 flex h-1.5 w-full overflow-hidden rounded-full bg-white/[0.06]">
+        <div className="mt-2 flex h-1.5 w-full overflow-hidden rounded-full bg-foreground/[0.06]">
           <span className="bg-success/80" style={{ width: `${okPct}%` }} />
           <span className="bg-destructive/80" style={{ width: `${100 - okPct}%` }} />
         </div>
@@ -948,7 +948,7 @@ function BreakdownCard({
                   {r.failed > 0 && <span className="text-destructive/80"> · {r.failed} fail</span>}
                 </span>
               </div>
-              <div className="h-1.5 w-full overflow-hidden rounded-full bg-white/[0.06]">
+              <div className="h-1.5 w-full overflow-hidden rounded-full bg-foreground/[0.06]">
                 <span className={cn("block h-full rounded-full", barClass)} style={{ width: `${barPercent(r.total, max)}%` }} />
               </div>
             </li>

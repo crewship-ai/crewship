@@ -96,7 +96,7 @@ export function CrewsSubbar({
           onOpenExplorer && (
             <button
               type="button"
-              className="md:hidden p-1 rounded hover:bg-white/5 text-foreground/80"
+              className="md:hidden p-1 rounded hover:bg-foreground/5 text-foreground/80"
               onClick={onOpenExplorer}
               aria-label="Open explorer"
             >

@@ -170,7 +170,7 @@ export function WaitpointRunDetail({
 
   if (loading) {
     return (
-      <div className="space-y-2 rounded-md border border-white/[0.06] bg-card/30 p-3">
+      <div className="space-y-2 rounded-md border border-foreground/[0.06] bg-card/30 p-3">
         <Skeleton className="h-4 w-32" />
         <Skeleton className="h-12 w-full" />
         <Skeleton className="h-12 w-full" />
@@ -186,7 +186,7 @@ export function WaitpointRunDetail({
   }
   if (!run) {
     return (
-      <div className="rounded-md border border-white/[0.06] bg-card/30 p-3 text-xs text-muted-foreground">
+      <div className="rounded-md border border-foreground/[0.06] bg-card/30 p-3 text-xs text-muted-foreground">
         Run not found — it may have been pruned.
       </div>
     )
@@ -232,7 +232,7 @@ export function WaitpointRunDetail({
           "flex items-center justify-between rounded-md border px-3 py-2",
           isCompleted && "border-success/30 bg-success/5",
           isFailed && "border-destructive/30 bg-destructive/5",
-          isLive && !isCompleted && !isFailed && "border-white/[0.06] bg-card/30",
+          isLive && !isCompleted && !isFailed && "border-foreground/[0.06] bg-card/30",
         )}
       >
         <div className="flex items-center gap-2">
@@ -263,8 +263,8 @@ export function WaitpointRunDetail({
 
       {/* Step progression */}
       {steps.length > 0 ? (
-        <div className="rounded-md border border-white/[0.06] bg-card/30">
-          <div className="border-b border-white/[0.06] px-3 py-2 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/60">
+        <div className="rounded-md border border-foreground/[0.06] bg-card/30">
+          <div className="border-b border-foreground/[0.06] px-3 py-2 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/60">
             {/* Status label + step index reflect the actual run, not
               * a hardcoded "paused at step N+1". A completed run
               * shouldn't read as still paused, and the index is
@@ -283,7 +283,7 @@ export function WaitpointRunDetail({
               return `Progress · ${statusLabel} at step ${clampedIdx} of ${steps.length}`
             })()}
           </div>
-          <ol className="divide-y divide-white/[0.04]">
+          <ol className="divide-y divide-foreground/[0.04]">
             {steps.map((step, idx) => {
               const status = stepStatus(step, idx)
               const stepOutput = run.step_outputs?.[step.id]
@@ -300,7 +300,7 @@ export function WaitpointRunDetail({
           </ol>
         </div>
       ) : (
-        <div className="rounded-md border border-white/[0.06] bg-card/30 p-3 text-xs text-muted-foreground">
+        <div className="rounded-md border border-foreground/[0.06] bg-card/30 p-3 text-xs text-muted-foreground">
           Pipeline definition unavailable; showing accumulated outputs only.
         </div>
       )}
@@ -347,7 +347,7 @@ function StepRow({
         aria-controls={hasOutput && expanded ? panelId : undefined}
         className={cn(
           "flex w-full items-center gap-2 px-3 py-2 text-left transition-colors",
-          hasOutput ? "hover:bg-white/[0.02]" : "cursor-default opacity-70",
+          hasOutput ? "hover:bg-foreground/[0.02]" : "cursor-default opacity-70",
           status === "paused" && "bg-warn/5",
         )}
       >
@@ -356,7 +356,7 @@ function StepRow({
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
             <span className="text-xs font-medium">{step.id}</span>
-            <span className="rounded bg-white/[0.06] px-1.5 py-0.5 text-[9px] font-mono text-muted-foreground">
+            <span className="rounded bg-foreground/[0.06] px-1.5 py-0.5 text-[9px] font-mono text-muted-foreground">
               {step.type}
             </span>
             {step.type === "wait" && step.wait?.approval_prompt && (
@@ -378,7 +378,7 @@ function StepRow({
         )}
       </button>
       {expanded && hasOutput && (
-        <div id={panelId} role="region" className="border-t border-white/[0.04] bg-card/20">
+        <div id={panelId} role="region" className="border-t border-foreground/[0.04] bg-card/20">
           <pre className="overflow-auto px-3 py-2 font-mono text-[11px] text-foreground/80">
             {typeof output === "string" ? output : JSON.stringify(output, null, 2)}
           </pre>
@@ -412,7 +412,7 @@ function CollapsiblePanel({ title, children }: { title: string; children: React.
   // the toggle button + panel stay linked across re-renders.
   const panelId = `wp-panel-${title.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`
   return (
-    <div className="overflow-hidden rounded-md border border-white/[0.06] bg-card/30">
+    <div className="overflow-hidden rounded-md border border-foreground/[0.06] bg-card/30">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
@@ -421,12 +421,12 @@ function CollapsiblePanel({ title, children }: { title: string; children: React.
         // in the DOM — we render the region conditionally below, so
         // omit the attribute when collapsed to satisfy ARIA spec.
         aria-controls={open ? panelId : undefined}
-        className="flex w-full items-center gap-2 px-3 py-2 text-[10px] font-medium uppercase tracking-wider text-muted-foreground hover:bg-white/[0.02]"
+        className="flex w-full items-center gap-2 px-3 py-2 text-[10px] font-medium uppercase tracking-wider text-muted-foreground hover:bg-foreground/[0.02]"
       >
         {open ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
         {title}
       </button>
-      {open && <div id={panelId} role="region" className="border-t border-white/[0.06]">{children}</div>}
+      {open && <div id={panelId} role="region" className="border-t border-foreground/[0.06]">{children}</div>}
     </div>
   )
 }

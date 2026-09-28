@@ -53,7 +53,7 @@ export function StepIdentity({ state, setState, onPickIcon }: Props) {
               icon={state.icon}
               color={state.color}
               size="lg"
-              className="border border-white/10 transition-colors group-hover:border-white/25"
+              className="border border-foreground/10 transition-colors group-hover:border-foreground/25"
             />
             {/* strokeWidth 2.5, not lucide's default 2. `--spacing: 0.23rem`
                 makes h-3 eleven pixels, and a 24-unit viewBox scaled there

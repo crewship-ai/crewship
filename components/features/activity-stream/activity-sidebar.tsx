@@ -197,7 +197,7 @@ function ScopeSegments({
     <div
       role="group"
       aria-label="Activity status"
-      className="mx-2 mb-1.5 flex shrink-0 items-center gap-0.5 rounded-md border border-white/[0.08] bg-white/[0.04] p-0.5"
+      className="mx-2 mb-1.5 flex shrink-0 items-center gap-0.5 rounded-md border border-foreground/[0.08] bg-foreground/[0.04] p-0.5"
     >
       {segments.map((s) => {
         const selected = scope === s.key
@@ -214,8 +214,8 @@ function ScopeSegments({
               selected
                 ? "bg-primary/15 text-primary"
                 : empty
-                  ? "text-foreground/40 hover:bg-white/[0.04] hover:text-foreground"
-                  : "text-muted-foreground hover:bg-white/[0.04] hover:text-foreground",
+                  ? "text-foreground/40 hover:bg-foreground/[0.04] hover:text-foreground"
+                  : "text-muted-foreground hover:bg-foreground/[0.04] hover:text-foreground",
             )}
           >
             <span className="truncate">{s.label}</span>
@@ -254,7 +254,7 @@ function LensTabs({
   onLens: (l: LensKey) => void
 }) {
   return (
-    <div role="tablist" aria-label="Activity lens" className="mx-2 mb-1.5 flex shrink-0 gap-1 border-b border-white/[0.06]">
+    <div role="tablist" aria-label="Activity lens" className="mx-2 mb-1.5 flex shrink-0 gap-1 border-b border-foreground/[0.06]">
       {ACTIVITY_LENSES.map((l) => {
         const on = lens === l.key
         const n = counts[l.key]
@@ -366,7 +366,7 @@ function WorkflowRow({
           // routine's face would be the one thing worse than wearing none.
           <span
             aria-hidden
-            className="relative flex h-5 w-5 items-center justify-center rounded-md bg-white/[0.07] text-[10px] text-muted-foreground"
+            className="relative flex h-5 w-5 items-center justify-center rounded-md bg-foreground/[0.07] text-[10px] text-muted-foreground"
           >
             <Workflow className="h-3 w-3" />
           </span>

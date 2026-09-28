@@ -530,6 +530,17 @@ export function OutcomeKpis({
   spendPerRun?: number | null
 }) {
   const reduce = useReducedMotion()
+  // Nothing ran in the window: four tiles of zeros and dashes say one thing,
+  // so say it once. The tiles come back as soon as anything finishes.
+  if (data.completed === 0 && data.successTotal === 0 && data.p95Ms === 0) {
+    return (
+      <InlineEmpty
+        icon={Gauge}
+        text={<>No agent runs in the last {window}. Routine runs are counted in Activity.</>}
+        action={<Link href="/activity" className="shrink-0 text-label font-medium text-primary-hover hover:underline">Open Activity →</Link>}
+      />
+    )
+  }
   const cards = [
     {
       label: "Completed",
@@ -588,7 +599,7 @@ export function OutcomeKpis({
             key={card.label}
             whileHover={reduce ? undefined : { y: -2 }}
             transition={{ type: "spring", stiffness: 420, damping: 32 }}
-            className="group flex min-h-20 items-center gap-3 rounded-xl border border-border/60 bg-card px-3 py-3 transition-colors hover:border-border"
+            className="group flex min-h-20 items-center gap-3 rounded-[20px] border border-border bg-card px-4 py-3 transition-colors hover:border-line-strong"
           >
             <motion.span
               initial={reduce ? false : { opacity: 0, rotate: -12, scale: 0.82 }}

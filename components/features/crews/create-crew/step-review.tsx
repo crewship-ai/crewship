@@ -16,7 +16,7 @@ interface Props {
 
 export function StepReview({ state, onEdit, lineupSummary }: Props) {
   return (
-    <div className="rounded-lg border border-white/10 bg-card/50 p-4 space-y-1">
+    <div className="rounded-lg border border-foreground/10 bg-card/50 p-4 space-y-1">
       <Row label="Identity" onEdit={onEdit && (() => onEdit(1))}>
         <CrewIcon icon={state.icon} color={state.color} size="sm" />
         <strong>{state.name}</strong>
@@ -113,7 +113,7 @@ export function StepReview({ state, onEdit, lineupSummary }: Props) {
 
 function Row({ label, onEdit, children }: { label: string; onEdit?: (() => void) | undefined; children: React.ReactNode }) {
   return (
-    <div className="grid grid-cols-[110px_1fr] gap-2.5 items-center py-1.5 border-b border-dashed border-white/5 last:border-b-0">
+    <div className="grid grid-cols-[110px_1fr] gap-2.5 items-center py-1.5 border-b border-dashed border-foreground/5 last:border-b-0">
       <div className="text-[11.5px] text-muted-foreground flex items-center gap-1">
         {label}
         {onEdit && (
@@ -136,7 +136,7 @@ function Row({ label, onEdit, children }: { label: string; onEdit?: (() => void)
 }
 
 function Pill({ children }: { children: React.ReactNode }) {
-  return <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-white/5 text-foreground/80">{children}</span>
+  return <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-foreground/5 text-foreground/80">{children}</span>
 }
 
 function prettyMemory(mb: number): string {

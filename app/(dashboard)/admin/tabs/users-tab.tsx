@@ -109,7 +109,7 @@ export const UsersTab = React.memo(function UsersTab({ users, workspaceId, onRef
                   aria-expanded={isOpen}
                   aria-label={u.full_name ?? u.email}
                   className={cn(
-                    "grid w-full items-center gap-3 px-4 py-2 text-left hover:bg-white/[0.02]",
+                    "grid w-full items-center gap-3 px-4 py-2 text-left hover:bg-foreground/[0.02]",
                     idx < filtered.length - 1 && !isOpen && "border-b border-border/40",
                     isOpen && "bg-accent/40",
                   )}

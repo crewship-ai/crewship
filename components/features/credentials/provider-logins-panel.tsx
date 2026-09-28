@@ -185,7 +185,7 @@ function LoginRow({
         type="button"
         onClick={onSelect}
         aria-label={`Open ${credential.name}`}
-        className="flex min-w-0 flex-1 flex-wrap items-center gap-x-4 gap-y-2 rounded-md text-left transition-colors hover:bg-white/[0.02]"
+        className="flex min-w-0 flex-1 flex-wrap items-center gap-x-4 gap-y-2 rounded-md text-left transition-colors hover:bg-foreground/[0.02]"
       >
         <span className="flex min-w-0 flex-1 basis-[240px] items-center gap-3">
           <LoginBrandMark provider={login?.provider ?? credential.provider} />

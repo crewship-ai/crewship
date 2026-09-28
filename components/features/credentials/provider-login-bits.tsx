@@ -77,7 +77,7 @@ export function QuotaBar({
         aria-valuemin={0}
         aria-valuemax={100}
         aria-valuenow={known ? value : undefined}
-        className="h-1.5 w-24 shrink-0 overflow-hidden rounded-full bg-white/[0.06]"
+        className="h-1.5 w-24 shrink-0 overflow-hidden rounded-full bg-foreground/[0.06]"
       >
         {known && <span className={cn("block h-full rounded-full", fill)} style={{ width: `${Math.max(value, 2)}%` }} />}
       </span>

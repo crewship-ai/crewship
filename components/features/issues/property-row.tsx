@@ -53,7 +53,7 @@ export function PropertyRow({
   return (
     <div
       className={cn(
-        "flex items-center px-2 py-1 mx-1 rounded hover:bg-white/[0.03] transition-colors cursor-pointer overflow-hidden",
+        "flex items-center px-2 py-1 mx-1 rounded hover:bg-foreground/[0.03] transition-colors cursor-pointer overflow-hidden",
         className,
       )}
     >

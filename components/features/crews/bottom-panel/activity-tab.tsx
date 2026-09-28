@@ -68,7 +68,7 @@ export function ActivityTab({ workspaceId, context }: { workspaceId: string; con
 
   return (
     <div className="h-full overflow-y-auto p-4 text-xs">
-      <div className="relative pl-5 before:absolute before:left-[5px] before:top-1 before:bottom-1 before:w-px before:bg-white/10">
+      <div className="relative pl-5 before:absolute before:left-[5px] before:top-1 before:bottom-1 before:w-px before:bg-foreground/10">
         {entries.map((e) => (
           <div key={e.id} className="relative pb-4 pl-3.5">
             <span

@@ -113,8 +113,8 @@ export const RuntimeTab = React.memo(function RuntimeTab({
                         className={cn(
                           "flex items-center gap-3 rounded-lg border px-3 py-2",
                           rt.in_use
-                            ? "border-border bg-white/[0.04]"
-                            : "border-border/60 bg-white/[0.02]",
+                            ? "border-border bg-foreground/[0.04]"
+                            : "border-border/60 bg-foreground/[0.02]",
                         )}
                       >
                         <span
@@ -230,7 +230,7 @@ export const RuntimeTab = React.memo(function RuntimeTab({
                     href={url}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="flex items-center gap-2 rounded-lg border border-border/60 bg-white/[0.02] px-3 py-2 text-xs transition-colors hover:border-border hover:bg-white/[0.04]"
+                    className="flex items-center gap-2 rounded-lg border border-border/60 bg-foreground/[0.02] px-3 py-2 text-xs transition-colors hover:border-border hover:bg-foreground/[0.04]"
                   >
                     <RuntimeIcon runtime={key} className="h-3.5 w-3.5 shrink-0" />
                     <span className="font-medium">{runtimeBrand(key).label}</span>

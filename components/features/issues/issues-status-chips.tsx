@@ -71,14 +71,14 @@ export function IssuesStatusChips({
           "shrink-0 rounded-full border px-2.5 py-0.5 text-[11px] transition-colors",
           allActive
             ? "border-primary/40 bg-primary/[0.12] text-primary"
-            : "border-white/[0.08] bg-white/[0.02] text-muted-foreground hover:text-foreground/80",
+            : "border-foreground/[0.08] bg-foreground/[0.02] text-muted-foreground hover:text-foreground/80",
         )}
       >
         All
         <span className="ml-1 text-[10px] tabular-nums opacity-60">{allCount.toLocaleString()}</span>
       </button>
 
-      <div className="h-4 w-px bg-white/[0.08] shrink-0" />
+      <div className="h-4 w-px bg-foreground/[0.08] shrink-0" />
 
       {STATUS_CHIPS.map((status) => {
         const count = counts.get(status) ?? 0
@@ -95,7 +95,7 @@ export function IssuesStatusChips({
               "shrink-0 inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] transition-colors",
               active
                 ? "border-primary/40 bg-primary/[0.12] text-primary"
-                : "border-white/[0.08] bg-white/[0.02] text-muted-foreground hover:text-foreground/80",
+                : "border-foreground/[0.08] bg-foreground/[0.02] text-muted-foreground hover:text-foreground/80",
             )}
           >
             <StatusIcon status={status} className="h-3 w-3" />

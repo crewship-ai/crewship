@@ -159,7 +159,7 @@ export function MemoryTab({ agentId, agentSlug, crewId, workspaceId }: MemoryTab
       {/* Linear-style underline tab bar (PRD §9 UI guidelines). The
           export sits on the bar rather than inside a pane: it takes the
           whole scope, not the sub-tab being viewed. */}
-      <div className="flex items-center gap-2 border-b border-white/10">
+      <div className="flex items-center gap-2 border-b border-foreground/10">
         {tabs.map((s) => (
           <button
             key={s}
@@ -230,7 +230,7 @@ function OtherTiers({ agentSlug, hasCrew }: { agentSlug: string; hasCrew: boolea
   return (
     <section
       data-testid="memory-other-tiers"
-      className="space-y-3 rounded border border-white/10 p-3"
+      className="space-y-3 rounded border border-foreground/10 p-3"
     >
       <h3 className="text-sm font-semibold">Other memory this panel does not show</h3>
       <p className="text-xs text-muted-foreground">
@@ -394,7 +394,7 @@ function MemoryTierEditor({
               ariaLabel={`${title} (read-only)`}
             />
           ) : (
-            <pre className="rounded border border-white/10 bg-muted/60 p-3 text-sm whitespace-pre-wrap min-h-[8rem]">
+            <pre className="rounded border border-foreground/10 bg-muted/60 p-3 text-sm whitespace-pre-wrap min-h-[8rem]">
               {emptyContentPlaceholder(history)}
             </pre>
           )
@@ -431,7 +431,7 @@ function MemoryTierEditor({
                   <button
                     onClick={onReset}
                     disabled={saving || resetDisabled}
-                    className="rounded border border-white/10 px-3 py-1.5 text-sm hover:bg-white/5 disabled:opacity-50"
+                    className="rounded border border-foreground/10 px-3 py-1.5 text-sm hover:bg-foreground/5 disabled:opacity-50"
                   >
                     {resetLabel ?? "Reset"}
                   </button>
@@ -452,7 +452,7 @@ function MemoryTierEditor({
                 </button>
                 <button
                   onClick={() => setEditing(null)}
-                  className="rounded border border-white/10 px-3 py-1.5 text-sm hover:bg-white/5"
+                  className="rounded border border-foreground/10 px-3 py-1.5 text-sm hover:bg-foreground/5"
                 >
                   Cancel
                 </button>
@@ -840,7 +840,7 @@ function PersonaPanel({
               {crewPersona.bytes}/{PERSONA_CAP_BYTES} B
             </span>
           </header>
-          <pre className="rounded border border-white/10 bg-muted/40 p-3 text-sm whitespace-pre-wrap min-h-[4rem]">
+          <pre className="rounded border border-foreground/10 bg-muted/40 p-3 text-sm whitespace-pre-wrap min-h-[4rem]">
             {crewPersona.content || "(no crew persona configured)"}
           </pre>
           <p className="text-xs text-muted-foreground">
@@ -937,7 +937,7 @@ function PeersPanel({ agentId, workspaceId }: { agentId: string; workspaceId: st
                 onClick={() => loadDetail(p.user_id)}
                 aria-pressed={isActive}
                 aria-label={`Open peer card for ${p.user_id}`}
-                className={`w-full text-left cursor-pointer rounded border border-white/10 px-3 py-2 text-sm hover:bg-white/5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-success/60 ${
+                className={`w-full text-left cursor-pointer rounded border border-foreground/10 px-3 py-2 text-sm hover:bg-foreground/5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-success/60 ${
                   isActive ? "border-success/40 bg-success/5" : ""
                 }`}
               >
@@ -951,7 +951,7 @@ function PeersPanel({ agentId, workspaceId }: { agentId: string; workspaceId: st
         })}
       </ul>
 
-      <div className="rounded border border-white/10 p-3">
+      <div className="rounded border border-foreground/10 p-3">
         {active ? (
           <div className="space-y-3">
             <header className="flex items-center justify-between">

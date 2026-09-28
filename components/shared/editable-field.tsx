@@ -100,7 +100,7 @@ export function EditableField({
               value={value ?? ""}
               onChange={(e) => commit(e.target.value)}
               aria-label={ariaLabel}
-              className="appearance-none bg-transparent border border-transparent hover:border-white/10 rounded px-2 pr-6 py-0.5 text-sm text-foreground/90 cursor-pointer focus:outline-none focus:border-white/15"
+              className="appearance-none bg-transparent border border-transparent hover:border-foreground/10 rounded px-2 pr-6 py-0.5 text-sm text-foreground/90 cursor-pointer focus:outline-none focus:border-foreground/15"
             >
               {options.map((opt) => (
                 <option key={opt.value} value={opt.value} className="bg-muted">
@@ -137,7 +137,7 @@ export function EditableField({
             }
           }}
           className={cn(
-            "flex-1 bg-transparent border border-white/15 rounded px-2 py-0.5 text-sm text-foreground outline-none focus:border-primary",
+            "flex-1 bg-transparent border border-foreground/15 rounded px-2 py-0.5 text-sm text-foreground outline-none focus:border-primary",
             mono && "font-mono",
           )}
         />
@@ -148,7 +148,7 @@ export function EditableField({
           onClick={() => setEditing(true)}
           className={cn(
             "flex-1 text-left text-sm rounded px-2 py-0.5 -mx-2 transition-colors",
-            !readOnly && "hover:bg-white/5 cursor-text",
+            !readOnly && "hover:bg-foreground/5 cursor-text",
             readOnly && "cursor-default",
           )}
         >

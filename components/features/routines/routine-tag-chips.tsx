@@ -15,7 +15,7 @@ export function RunTagChips({ tags, className }: { tags?: string[] | null; class
       {clean.map((t) => (
         <span
           key={t}
-          className="inline-flex items-center gap-1 rounded-full border border-border/60 bg-white/[0.04] px-1.5 py-0 text-[10px] font-medium text-foreground/80"
+          className="inline-flex items-center gap-1 rounded-full border border-border/60 bg-foreground/[0.04] px-1.5 py-0 text-[10px] font-medium text-foreground/80"
           title={`Run tag: ${t}`}
         >
           <Tag className="h-2.5 w-2.5 text-muted-foreground" aria-hidden />

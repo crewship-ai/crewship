@@ -98,7 +98,7 @@ export function RoutinesFilterSidebar({
     <div className="flex h-full flex-col">
       {/* ── Search ── */}
       <div className="shrink-0 px-2 py-2">
-        <div className="flex h-8 items-center gap-1.5 rounded-md border border-white/[0.08] bg-white/[0.04] px-2.5">
+        <div className="flex h-8 items-center gap-1.5 rounded-md border border-foreground/[0.08] bg-foreground/[0.04] px-2.5">
           <Search className="h-3.5 w-3.5 shrink-0 text-muted-foreground-soft" aria-hidden="true" />
           <input
             type="text"
@@ -128,7 +128,7 @@ export function RoutinesFilterSidebar({
       </div>
 
       {/* ── Counts strip ── */}
-      <div className="mx-2 mb-2 shrink-0 rounded-md border border-white/[0.06] bg-white/[0.02] px-2 py-1.5">
+      <div className="mx-2 mb-2 shrink-0 rounded-md border border-foreground/[0.06] bg-foreground/[0.02] px-2 py-1.5">
         <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Showing</div>
         <div className="text-sm font-medium tabular-nums">
           {filteredCount} <span className="font-normal text-muted-foreground">of {totalRoutines}</span>
@@ -227,9 +227,9 @@ export function RoutinesFilterSidebar({
         )}
 
         {/* ── Visibility (ephemeral toggle) ── */}
-        <div className="border-t border-white/[0.06]">
+        <div className="border-t border-foreground/[0.06]">
           <div className="px-3 py-2">
-            <label className="flex cursor-pointer items-center justify-between rounded px-2 py-1 text-xs hover:bg-white/[0.04]">
+            <label className="flex cursor-pointer items-center justify-between rounded px-2 py-1 text-xs hover:bg-foreground/[0.04]">
               <span className="text-foreground/80">Show ephemeral</span>
               <input
                 type="checkbox"
@@ -258,10 +258,10 @@ interface SectionProps {
 
 function Section({ label, count, open, onToggle, children }: SectionProps) {
   return (
-    <div className="border-b border-white/[0.06]">
+    <div className="border-b border-foreground/[0.06]">
       <button
         onClick={onToggle}
-        className="flex w-full items-center gap-1.5 px-3 py-1.5 hover:bg-white/[0.02]"
+        className="flex w-full items-center gap-1.5 px-3 py-1.5 hover:bg-foreground/[0.02]"
       >
         <motion.div animate={{ rotate: open ? 0 : -90 }} transition={{ duration: 0.15 }}>
           <ChevronDown className="h-3 w-3 text-muted-foreground-soft" />

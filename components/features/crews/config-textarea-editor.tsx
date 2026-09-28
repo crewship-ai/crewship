@@ -91,8 +91,8 @@ export function ConfigTextareaEditor({
   }
 
   return (
-    <div className="rounded border border-white/8 bg-background/30">
-      <div className="flex items-center justify-between px-3 py-1.5 border-b border-white/5">
+    <div className="rounded border border-foreground/8 bg-background/30">
+      <div className="flex items-center justify-between px-3 py-1.5 border-b border-foreground/5">
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
           <FileCode2 className="h-3 w-3" />
           <span className="font-mono">{filename}</span>
@@ -144,7 +144,7 @@ export function ConfigTextareaEditor({
               <button
                 type="button"
                 onClick={() => setEditing(true)}
-                className="text-[11px] px-2 py-0.5 rounded border border-white/10 hover:bg-white/5 text-foreground/80"
+                className="text-[11px] px-2 py-0.5 rounded border border-foreground/10 hover:bg-foreground/5 text-foreground/80"
               >
                 {value ? "Edit" : "Add"}
               </button>
@@ -152,7 +152,7 @@ export function ConfigTextareaEditor({
           </div>
         )}
       </div>
-      {hint && <div className="px-3 py-1.5 text-[10px] text-muted-foreground border-b border-white/5">{hint}</div>}
+      {hint && <div className="px-3 py-1.5 text-[10px] text-muted-foreground border-b border-foreground/5">{hint}</div>}
       {editing ? (
         <textarea
           ref={taRef}

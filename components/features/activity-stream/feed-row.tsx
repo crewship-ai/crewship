@@ -86,8 +86,8 @@ export function FeedRow({
       aria-current={selected}
       className={cn(
         "group grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 rounded-md px-1.5 py-2 text-left",
-        "transition-colors hover:bg-white/[0.03]",
-        selected && "bg-white/[0.05]",
+        "transition-colors hover:bg-foreground/[0.03]",
+        selected && "bg-foreground/[0.05]",
       )}
     >
       {/* Who did it, not what kind of row it is. An agent gets its own
@@ -147,8 +147,8 @@ export function FeedRow({
                     : undefined
                 }
                 className={cn(
-                  "max-w-[140px] truncate rounded bg-white/[0.05] px-1 py-px",
-                  onSpineClick && "cursor-pointer hover:bg-white/[0.1] hover:text-foreground",
+                  "max-w-[140px] truncate rounded bg-foreground/[0.05] px-1 py-px",
+                  onSpineClick && "cursor-pointer hover:bg-foreground/[0.1] hover:text-foreground",
                   l.kind === "issue" && "font-mono text-info",
                 )}
               >

@@ -58,7 +58,7 @@ const versionChip = (active: boolean) =>
     "rounded-full border px-2.5 py-0.5 text-[11px] transition-colors",
     active
       ? "border-primary/40 bg-primary/[0.12] text-primary"
-      : "border-white/[0.08] bg-white/[0.02] text-muted-foreground hover:text-foreground/80",
+      : "border-foreground/[0.08] bg-foreground/[0.02] text-muted-foreground hover:text-foreground/80",
   )
 
 const CATCHUP_OPTIONS: Array<{ value: "skip" | "once" | "all"; label: string; hint: string }> = [
@@ -176,7 +176,7 @@ export function RoutineScheduleEditorDialog({
             <Label>When</Label>
             <RoutineRecurrenceFields cron={cronExpr} timezone={timezone} onCronChange={setCronExpr} onTimezoneChange={setTimezone} />
             <p className="text-[11px] text-muted-foreground">{describeCron(cronExpr)}</p>
-            <div className="rounded-md border border-white/[0.08] bg-background/50 p-2.5 text-[12px]" data-testid="schedule-preview">
+            <div className="rounded-md border border-foreground/[0.08] bg-background/50 p-2.5 text-[12px]" data-testid="schedule-preview">
               {previewLoading && <span className="text-muted-foreground">Computing next fire times…</span>}
               {previewError && <span className="text-destructive">{previewError}</span>}
               {!previewLoading && !previewError && preview && preview.occurrences.length > 0 && (

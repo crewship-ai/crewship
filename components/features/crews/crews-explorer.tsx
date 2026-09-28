@@ -227,7 +227,7 @@ export function CrewsExplorer({
   }
 
   return (
-    <div className="flex flex-col h-full bg-card border-r border-white/[0.1] overflow-hidden">
+    <div className="flex flex-col h-full bg-card border-r border-foreground/[0.1] overflow-hidden">
       {collapsed ? (
         <div className="flex items-center justify-center px-2 py-2 shrink-0">
           {collapseToggle}

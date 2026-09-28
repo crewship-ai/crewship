@@ -61,7 +61,7 @@ export function DeliveriesView({
   if (forbidden) {
     return (
       <div className="flex flex-col items-center justify-center px-6 py-20 text-center">
-        <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-lg bg-white/[0.04]">
+        <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-lg bg-foreground/[0.04]">
           <Lock className="h-4 w-4 text-muted-foreground/60" />
         </div>
         <div className="text-sm font-medium text-foreground/85">The delivery log is admin-only</div>
@@ -90,8 +90,8 @@ export function DeliveriesView({
       )}
 
       {deliveries.length === 0 ? (
-        <div className="flex flex-col items-center justify-center rounded-xl border border-white/[0.08] bg-card px-6 py-14 text-center">
-          <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-lg bg-white/[0.04]">
+        <div className="flex flex-col items-center justify-center rounded-xl border border-foreground/[0.08] bg-card px-6 py-14 text-center">
+          <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-lg bg-foreground/[0.04]">
             <Clock className="h-4 w-4 text-muted-foreground/60" />
           </div>
           <div className="text-sm font-medium text-foreground/85">Nothing sent yet</div>
@@ -101,8 +101,8 @@ export function DeliveriesView({
           </p>
         </div>
       ) : (
-        <div className="overflow-hidden rounded-xl border border-white/[0.08] bg-card">
-          <div className="flex items-center gap-2 border-b border-white/[0.06] px-4 py-2.5">
+        <div className="overflow-hidden rounded-xl border border-foreground/[0.08] bg-card">
+          <div className="flex items-center gap-2 border-b border-foreground/[0.06] px-4 py-2.5">
             <span className="text-[10px] font-semibold uppercase tracking-wider text-foreground/50">
               Deliveries
             </span>
@@ -113,7 +113,7 @@ export function DeliveriesView({
           <div className="overflow-x-auto">
             <table className="w-full border-collapse text-xs">
               <thead>
-                <tr className="border-b border-white/[0.06]">
+                <tr className="border-b border-foreground/[0.06]">
                   <Th>When</Th>
                   <Th>Category</Th>
                   <Th>Connection</Th>
@@ -125,7 +125,7 @@ export function DeliveriesView({
                 {deliveries.map((d) => (
                   <tr
                     key={d.id}
-                    className="border-b border-white/[0.04] last:border-0 hover:bg-white/[0.02]"
+                    className="border-b border-foreground/[0.04] last:border-0 hover:bg-foreground/[0.02]"
                   >
                     <td className="whitespace-nowrap px-4 py-2 font-mono text-[11px] tabular-nums text-muted-foreground">
                       {relative(d.created_at)}

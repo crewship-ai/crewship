@@ -29,7 +29,7 @@ export function RuntimeSection({
 
   return (
     <>
-      <div className="rounded-xl border border-white/8 bg-card p-4 space-y-4">
+      <div className="rounded-xl border border-foreground/8 bg-card p-4 space-y-4">
         {/* Model — primary, model-first picker. Adapter is auto-resolved
             and shown only when the choice is meaningful (Anthropic ↔
             Claude Code / OpenCode). */}
@@ -67,7 +67,7 @@ export function RuntimeSection({
                       "flex items-center gap-2.5 rounded-lg border px-3 py-2 text-left transition-colors",
                       isActive
                         ? "border-primary bg-primary/10 ring-1 ring-primary/30"
-                        : "border-white/10 hover:bg-white/[0.03]",
+                        : "border-foreground/10 hover:bg-foreground/[0.03]",
                     )}
                   >
                     <Icon className={cn("h-4 w-4 shrink-0", isActive ? "text-primary" : "text-muted-foreground")} />
@@ -99,7 +99,7 @@ export function RuntimeSection({
               value={customModelDraft}
               onChange={(e) => setCustomModelDraft(e.target.value)}
               placeholder="e.g. claude-3-7-sonnet or my-fine-tuned-llama"
-              className="flex-1 px-3 py-1.5 rounded-md border border-white/10 bg-muted text-sm font-mono outline-none focus:border-primary"
+              className="flex-1 px-3 py-1.5 rounded-md border border-foreground/10 bg-muted text-sm font-mono outline-none focus:border-primary"
               onKeyDown={(e) => {
                 if (e.key === "Enter" && customModelDraft.trim()) {
                   safePatch({ llm_model: customModelDraft.trim() })
@@ -131,7 +131,7 @@ export function RuntimeSection({
                 setCustomModelOpen(false)
                 setCustomModelDraft("")
               }}
-              className="px-3 py-1.5 rounded-md border border-white/10 hover:bg-white/5 text-sm text-muted-foreground"
+              className="px-3 py-1.5 rounded-md border border-foreground/10 hover:bg-foreground/5 text-sm text-muted-foreground"
             >
               Cancel
             </button>

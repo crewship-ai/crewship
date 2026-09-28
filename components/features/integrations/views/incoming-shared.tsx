@@ -4,7 +4,7 @@ import { ArrowDownToLine, Plus } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 
-export const card = "rounded-xl border border-white/[0.08] bg-card"
+export const card = "rounded-xl border border-foreground/[0.08] bg-card"
 export const time = (value?: string) =>
   value ? new Date(value).toLocaleString() : "—"
 export function IncomingError({
@@ -52,7 +52,7 @@ export function Panel({
 }) {
   return (
     <section className={card}>
-      <h3 className="border-b border-white/[0.06] px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+      <h3 className="border-b border-foreground/[0.06] px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
         {title}
       </h3>
       {children}
@@ -62,7 +62,7 @@ export function Panel({
 export function Empty({ onAdd }: { onAdd: () => void }) {
   return (
     <div className="flex flex-col items-center gap-3 px-6 py-12 text-center">
-      <span className="rounded-lg bg-white/[0.04] p-3">
+      <span className="rounded-lg bg-foreground/[0.04] p-3">
         <ArrowDownToLine className="size-5 text-muted-foreground" />
       </span>
       <h3 className="text-sm font-medium">No incoming endpoints yet</h3>

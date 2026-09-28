@@ -92,9 +92,9 @@ export function CrewsActivityFeed({ agents }: CrewsActivityFeedProps) {
   return (
     <div className="font-mono text-[11px] px-3 py-1 h-full overflow-y-auto">
       {entries.map((entry, i) => (
-        <div key={i} className="flex items-center gap-2 py-0.5 hover:bg-white/[0.02]">
+        <div key={i} className="flex items-center gap-2 py-0.5 hover:bg-foreground/[0.02]">
           <span className="text-muted-foreground/40 tabular-nums shrink-0 w-[52px]">{entry.ts.slice(11, 19)}</span>
-          <span className={cn("text-[10px] px-1 rounded bg-white/[0.03] shrink-0", typeColors[entry.type] || "text-muted-foreground")}>
+          <span className={cn("text-[10px] px-1 rounded bg-foreground/[0.03] shrink-0", typeColors[entry.type] || "text-muted-foreground")}>
             {entry.type}
           </span>
           <AgentAvatar seed={entry.avatarSeed} style={entry.avatarStyle} className="w-3.5 h-3.5 rounded-full shrink-0" />

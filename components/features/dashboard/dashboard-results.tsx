@@ -25,19 +25,44 @@ const FILTERS: { key: Filter; label: string }[] = [
 ]
 
 /** Failed routines belong in Activity and Inbox; a result exists after success. */
-export function completedRoutineResults(runs: PipelineRun[]) {
-  return runs.filter((run) => run.status === "completed").slice(0, 8)
+export interface RoutineResultGroup {
+  /** The newest completed run — the row links to its result. */
+  latest: PipelineRun
+  /** How many completed runs of this routine the row stands for. */
+  count: number
 }
 
-function WorkRow({ href, icon, kind, status, title, meta, action }: {
+/**
+ * One row per routine. A routine on a five-minute schedule used to fill every
+ * row with its own name; the group keeps the newest run as the link and says
+ * how many runs it covers. Order is the order of each routine's newest run.
+ */
+export function groupRoutineResults(runs: PipelineRun[], limit = 8): RoutineResultGroup[] {
+  const groups = new Map<string, RoutineResultGroup>()
+  for (const run of runs) {
+    if (run.status !== "completed") continue
+    const key = run.pipeline_slug || run.pipeline_name || run.id
+    const group = groups.get(key)
+    if (group) group.count += 1
+    else groups.set(key, { latest: run, count: 1 })
+  }
+  return [...groups.values()].slice(0, limit)
+}
+
+function WorkRow({ href, icon, kind, status, title, repeat, meta, action }: {
   href: string; icon: React.ReactNode; kind: string; status: React.ReactNode
-  title: string; meta: string; action: string
+  title: string; repeat?: number; meta: string; action: string
 }) {
   return <Link href={href} className="group flex min-w-0 items-center gap-2.5 rounded-md px-2 py-2 transition-colors hover:bg-primary/5 focus-visible:outline-2 focus-visible:outline-primary coarse:min-h-12">
     {icon}
     <span className="hidden w-16 shrink-0 font-mono text-micro text-muted-foreground sm:block">{kind}</span>
     <span className="hidden w-24 shrink-0 sm:block">{status}</span>
-    <span className="min-w-0 flex-1 truncate text-body font-medium">{title}</span>
+    <span className="flex min-w-0 flex-1 items-center gap-2">
+      <span className="truncate text-body font-medium">{title}</span>
+      {repeat != null && repeat > 1 && (
+        <span className="shrink-0 rounded-md bg-accent px-1.5 font-mono text-micro font-semibold tabular-nums text-muted-foreground" title={`${repeat} completed runs`}>×{repeat}</span>
+      )}
+    </span>
     <span className="hidden max-w-[180px] shrink-0 truncate text-label text-muted-foreground md:block">{meta}</span>
     <span className="hidden shrink-0 text-label font-medium text-muted-foreground transition-colors group-hover:text-primary-hover lg:block">{action}</span>
     <ArrowUpRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground transition-colors group-hover:text-primary-hover" aria-hidden />
@@ -62,7 +87,7 @@ export function DashboardResults({ review, inProgress, completed, activeAgentRun
 }) {
   const [filter, setFilter] = useState<Filter>("all")
   const listScroll = useListScroll()
-  const routineResults = completedRoutineResults(recentRoutineRuns)
+  const routineResults = groupRoutineResults(recentRoutineRuns)
   const liveRoutines = activeRoutineRuns.filter((run) => run.status === "running" || run.status === "queued" || run.status === "waiting")
   const runningCount = activeAgentRuns.length + liveRoutines.length
   const counts: Record<Filter, number> = {
@@ -101,7 +126,7 @@ export function DashboardResults({ review, inProgress, completed, activeAgentRun
       {show("review") && <WorkSection title="For review" count={review.length}>{review.map((issue) => issueRow(issue))}</WorkSection>}
       {show("finished") && <WorkSection title="Finished recently" count={completed.length + routineResults.length}>
         {completed.map((issue) => issueRow(issue, true))}
-        {routineResults.map((run) => <WorkRow key={`routine-done-${run.id}`} href={entityHref({ kind: "run", runId: run.id, pipelineSlug: run.pipeline_slug })} icon={<ScrollText className="h-6 w-6 shrink-0 text-muted-foreground" aria-hidden />} kind="Routine" status={<StatusPill status="COMPLETED" />} title={run.pipeline_name || run.pipeline_slug} meta={formatRelativeTime(run.ended_at || run.started_at)} action="Open result" />)}
+        {routineResults.map(({ latest: run, count }) => <WorkRow key={`routine-done-${run.id}`} href={entityHref({ kind: "run", runId: run.id, pipelineSlug: run.pipeline_slug })} icon={<ScrollText className="h-6 w-6 shrink-0 text-muted-foreground" aria-hidden />} kind="Routine" status={<StatusPill status="COMPLETED" />} title={run.pipeline_name || run.pipeline_slug} repeat={count} meta={count > 1 ? `last ${formatRelativeTime(run.ended_at || run.started_at)}` : formatRelativeTime(run.ended_at || run.started_at)} action="Open result" />)}
       </WorkSection>}
     </div>}
   </DashboardCard>

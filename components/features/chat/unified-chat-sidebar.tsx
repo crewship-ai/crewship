@@ -31,8 +31,8 @@ function Section({ title, children, count, open, onToggle, className }: {
   onToggle: () => void
   className?: string
 }) {
-  return <section aria-label={title} className={cn("border-b border-white/[0.06]", className)}>
-    <button type="button" aria-expanded={open} onClick={onToggle} className="kit-tap flex min-h-8 w-full items-center gap-1.5 px-3 py-1.5 text-left hover:bg-white/[0.02]">
+  return <section aria-label={title} className={cn("border-b border-foreground/[0.06]", className)}>
+    <button type="button" aria-expanded={open} onClick={onToggle} className="kit-tap flex min-h-8 w-full items-center gap-1.5 px-3 py-1.5 text-left hover:bg-foreground/[0.02]">
       <ChevronDown aria-hidden="true" className={cn("size-3 shrink-0 text-muted-foreground/60 transition-transform duration-150", !open && "-rotate-90")} />
       <span className="min-w-0 flex-1 truncate text-[10px] font-semibold uppercase tracking-wider text-foreground/50">{title}</span>
       {count !== undefined && <span className="text-[10px] tabular-nums text-muted-foreground">{count}</span>}
@@ -162,12 +162,12 @@ function ScopedChatSidebar({ props, rows: loadedRows, query, setQuery, stateKey 
             const known = Object.hasOwn(threadsByAgent, agent.id)
             const total = totalsByAgent?.[agent.id] ?? threadsByAgent[agent.id]?.length ?? 0
             const unreadCount = sessions.reduce((sum, row) => sum + (row.thread.unread_count ?? 0), 0)
-            return <div key={agent.id} className="px-1"><div className={cn("relative flex items-center rounded-md transition-colors hover:bg-white/[0.04]", selected && open && "bg-primary/10 before:absolute before:inset-y-1 before:left-0 before:w-0.5 before:rounded-full before:bg-primary")}>
+            return <div key={agent.id} className="px-1"><div className={cn("relative flex items-center rounded-md transition-colors hover:bg-foreground/[0.04]", selected && open && "bg-primary/10 before:absolute before:inset-y-1 before:left-0 before:w-0.5 before:rounded-full before:bg-primary")}>
               <button type="button" aria-label={`${open ? "Hide" : "Show"} ${agent.name} sessions`} aria-expanded={!!open} onClick={() => setExpanded(open ? {} : { [agent.id]: true })} className="kit-tap flex size-7 shrink-0 items-center justify-center text-muted-foreground">{open ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}</button>
               <button type="button" aria-label={`Open ${agent.name} chat`} aria-current={selected ? "page" : undefined} onClick={() => { if (selected && open) { setExpanded({}); return }; setExpanded({ [agent.id]: true }); const latest = sessions[0]; if (latest) onSelectThread(agent, latest.thread); else if ((scope === "direct" || scope === "all") && known && !props.threadErrors?.[agent.id] && props.threadsLoaded) start(agent) }} className="kit-tap flex min-h-9 min-w-0 flex-1 items-center gap-2 text-left text-xs"><AgentAvatar seed={agent.avatar_seed || agent.slug} style={agent.avatar_style} avatarUrl={agent.avatar_url} agentId={agent.id} className="size-6" /><span className="min-w-0 flex-1 truncate">{agent.name}</span><span className="text-[9px] text-muted-foreground">AI</span>{unreadCount > 0 && <span className="text-[10px] tabular-nums text-primary">{unreadCount}</span>}</button>
               <FavoriteButton name={agent.name} active={favorites.includes(`agent:${agent.id}`)} onClick={() => toggleFavorite(`agent:${agent.id}`)} />
             </div>
-            {open && <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} transition={{ duration: 0.18 }} className="ml-7 overflow-hidden border-l border-white/[0.08] pl-2">
+            {open && <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} transition={{ duration: 0.18 }} className="ml-7 overflow-hidden border-l border-foreground/[0.08] pl-2">
               {isDraft && <div role="status" aria-current="page" className="rounded-md bg-primary/10 px-2 py-2 text-xs">{agent.name} · Draft</div>}
               {props.threadErrors?.[agent.id] && <p role="alert" className="p-2 text-xs">Sessions unavailable. <button type="button" className="underline" onClick={props.onRetryThreads}>Retry</button></p>}
               {visibleSessions.map(({ thread }) => <button type="button" key={thread.id} aria-current={thread.id === activeThreadId ? "page" : undefined} onClick={() => onSelectThread(agent, thread)} className={cn("kit-tap block min-h-8 w-full truncate rounded-md px-2 text-left text-xs transition-colors hover:bg-accent", thread.id === activeThreadId && "bg-primary/10 text-primary")}>{classifyThread(thread) !== "direct" && <span className="mr-1 text-[9px] text-muted-foreground">{KIND_META[classifyThread(thread)].label} ·</span>}{thread.title || "Untitled session"}{!!thread.unread_count && <span className="ml-2">{thread.unread_count}</span>}</button>)}

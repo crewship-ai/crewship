@@ -146,8 +146,8 @@ export function ConnectionsView({
           onOpenAdd={onOpenAdd}
         />
       ) : (
-        <div className="overflow-hidden rounded-xl border border-white/[0.08] bg-card">
-          <div className="flex items-center gap-2 border-b border-white/[0.06] px-4 py-2.5">
+        <div className="overflow-hidden rounded-xl border border-foreground/[0.08] bg-card">
+          <div className="flex items-center gap-2 border-b border-foreground/[0.06] px-4 py-2.5">
             <span className="text-[10px] font-semibold uppercase tracking-wider text-foreground/50">
               Connections
             </span>
@@ -159,7 +159,7 @@ export function ConnectionsView({
           <div className="overflow-x-auto">
             <table className="w-full border-collapse text-xs">
               <thead>
-                <tr className="border-b border-white/[0.06]">
+                <tr className="border-b border-foreground/[0.06]">
                   <Th>Connection</Th>
                   <Th>Kind</Th>
                   <Th>Scope</Th>
@@ -176,7 +176,7 @@ export function ConnectionsView({
                   return (
                     <tr
                       key={row.id}
-                      className="border-b border-white/[0.04] last:border-0 hover:bg-white/[0.02]"
+                      className="border-b border-foreground/[0.04] last:border-0 hover:bg-foreground/[0.02]"
                     >
                       <td className="px-4 py-2.5">
                         {/* The whole identity cell opens the detail. The action
@@ -287,7 +287,7 @@ export function ConnectionsView({
             </table>
           </div>
 
-          <div className="border-t border-white/[0.06] px-4 py-2 text-[10px] text-muted-foreground/70">
+          <div className="border-t border-foreground/[0.06] px-4 py-2 text-[10px] text-muted-foreground/70">
             {canManageWorkspace
               ? "Workspace connections are shared with everyone here; personal ones are yours alone."
               : "You can add and manage your own personal connections. Workspace-wide ones need ADMIN or OWNER."}
@@ -331,8 +331,8 @@ function EmptyConnections({
 }) {
   const filtered = totalRows > 0
   return (
-    <div className="flex flex-col items-center justify-center rounded-xl border border-white/[0.08] bg-card px-6 py-14 text-center">
-      <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-lg bg-white/[0.04]">
+    <div className="flex flex-col items-center justify-center rounded-xl border border-foreground/[0.08] bg-card px-6 py-14 text-center">
+      <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-lg bg-foreground/[0.04]">
         <Plug className="h-4 w-4 text-muted-foreground/60" />
       </div>
       <div className="text-sm font-medium text-foreground/85">

@@ -1058,7 +1058,7 @@ function RunsList({ slug, workspaceId }: { slug: string; workspaceId: string }) 
                 <Link
                   href={activityHref(slug, r.id)}
                   data-testid={`run-row-${r.id}`}
-                  className="grid grid-cols-[auto_1fr_auto_auto] items-center gap-3 px-4 py-2.5 transition-colors hover:bg-white/[0.025]"
+                  className="grid grid-cols-[auto_1fr_auto_auto] items-center gap-3 px-4 py-2.5 transition-colors hover:bg-foreground/[0.025]"
                 >
                   <Icon
                     className={cn(
