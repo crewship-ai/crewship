@@ -13,6 +13,7 @@ import {
   answerRef,
   askRef,
   failureClusters,
+  foldRunBursts,
   liveSignal,
   openAsks,
   windowSpanDays,
@@ -461,5 +462,57 @@ describe("liveSignal", () => {
   it("reports no slowest rather than 0ms when nothing was timed", () => {
     // 0 would render as "0ms", which asserts an instant run that never ran.
     expect(liveSignal([entry()]).slowestMs).toBeNull()
+  })
+})
+
+/* ------------------------------------------------------------------ *
+ *  foldRunBursts — one routine's consecutive events are one row
+ * ------------------------------------------------------------------ */
+
+describe("foldRunBursts", () => {
+  const ev = (id: string, run?: string, severity = "info", slug = "coolify-ingest") =>
+    entry({ id, severity, payload: run ? { run_id: run, pipeline_slug: slug } : {} })
+
+  it("folds consecutive events of one routine into the newest, counting the rest", () => {
+    const rows = foldRunBursts([ev("a", "r1"), ev("b", "r1"), ev("c", "r0"), ev("d", "r2", "info", "digest"), ev("e")], 8)
+    expect(rows.map((r) => [r.entry.id, r.more])).toEqual([["a", 2], ["d", 0], ["e", 0]])
+  })
+
+  it("counts a page push by the routine that produced it as part of its run", () => {
+    // pages_api emits page.panel.updated with producer "routine/<slug>" and no run id.
+    const push = entry({ id: "p", entry_type: "page.panel.updated", payload: { producer: "routine/coolify-ingest", panel: "snapshot" } })
+    const rows = foldRunBursts([ev("a", "r1"), push, ev("b", "r1")], 8)
+    expect(rows.map((r) => [r.entry.id, r.more])).toEqual([["a", 2]])
+  })
+
+  it("counts an event that names only the run as part of that run's routine", () => {
+    // exec.command carries run_id but no pipeline_slug; the run's step events name both.
+    const exec = entry({ id: "x", entry_type: "exec.command", payload: { run_id: "r1" } })
+    const rows = foldRunBursts([ev("a", "r1"), exec, ev("b", "r1")], 8)
+    expect(rows.map((r) => [r.entry.id, r.more])).toEqual([["a", 2]])
+  })
+
+  it("does not fold across another routine", () => {
+    const rows = foldRunBursts([ev("a", "r1"), ev("b", "r2", "info", "digest"), ev("c", "r3")], 8)
+    expect(rows.map((r) => [r.entry.id, r.more])).toEqual([["a", 0], ["b", 0], ["c", 0]])
+  })
+
+  it("folds a burst of one event type from one source when there is no routine", () => {
+    // A webhook pushing twelve pages writes twelve page.panel.updated lines.
+    const push = (id: string, crew = "c1") => entry({ id, entry_type: "page.panel.updated", crew_id: crew, payload: {} })
+    const rows = foldRunBursts([push("a"), push("b"), push("c"), push("d", "c2"), ev("e"), ev("f")], 8)
+    expect(rows.map((r) => [r.entry.id, r.more])).toEqual([["a", 2], ["d", 0], ["e", 1]])
+  })
+
+  it("keeps a failed event visible instead of folding it under a quieter newest one", () => {
+    const rows = foldRunBursts([ev("a", "r1"), ev("b", "r1", "error"), ev("c", "r1")], 8)
+    expect(rows.map((r) => [r.entry.id, r.more])).toEqual([["a", 0], ["b", 1]])
+  })
+
+  it("caps the rows, not the events", () => {
+    const many = Array.from({ length: 30 }, (_, i) => ev(`x${i}`, `r${i}`, "info", `slug${Math.floor(i / 3)}`))
+    const rows = foldRunBursts(many, 4)
+    expect(rows).toHaveLength(4)
+    expect(rows.every((r) => r.more === 2)).toBe(true)
   })
 })

@@ -58,6 +58,8 @@ export interface FeedRowProps {
   selected?: boolean
   onSelect: () => void
   onSpineClick?: (link: SpineLink) => void
+  /** Older events of the same burst folded under this row (foldRunBursts). */
+  more?: number
 }
 
 export function FeedRow({
@@ -73,6 +75,7 @@ export function FeedRow({
   selected,
   onSelect,
   onSpineClick,
+  more = 0,
 }: FeedRowProps) {
   const meta = sourceMeta(activitySource(entry.entry_type))
   const spine = buildSpine(entry, labels)
@@ -121,10 +124,10 @@ export function FeedRow({
         <span className="block truncate text-[12.5px] text-foreground/90">{entry.summary}</span>
         <span className="mt-0.5 flex items-center gap-1.5 text-[10.5px] text-muted-foreground-soft">
           {actorName && <span className="truncate">{actorName}</span>}
-          {crewName && <span className="truncate">· {crewName}</span>}
-          {spine.map((l) => (
+          {crewName && <span className="truncate">{actorName ? "· " : ""}{crewName}</span>}
+          {spine.map((l, i) => (
             <React.Fragment key={`${l.kind}-${l.id}`}>
-              <span aria-hidden>›</span>
+              {(i > 0 || actorName || crewName) && <span aria-hidden>›</span>}
               <span
                 role={onSpineClick ? "link" : undefined}
                 tabIndex={onSpineClick ? 0 : undefined}
@@ -156,13 +159,19 @@ export function FeedRow({
               </span>
             </React.Fragment>
           ))}
+          {more > 0 && (
+            <span className="shrink-0 font-mono tabular-nums" title={`${more} older ${more === 1 ? "event" : "events"} like this one folded here — the journal lists each`}>
+              +{more} more
+            </span>
+          )}
         </span>
       </span>
 
       <span className="flex shrink-0 items-center gap-3 font-mono text-[10.5px] tabular-nums text-muted-foreground-soft">
-        {cost != null && <span>${cost.toFixed(3)}</span>}
+        {/* A zero is not a price: unmetered work printed "$0.000" on every row. */}
+        {cost != null && cost > 0 && <span>${cost.toFixed(3)}</span>}
         {duration != null && <span>{formatDurationMs(duration)}</span>}
-        <span className="w-12 text-right">{relTime(entry.ts)}</span>
+        <span className="min-w-12 whitespace-nowrap text-right">{relTime(entry.ts)}</span>
       </span>
     </button>
   )

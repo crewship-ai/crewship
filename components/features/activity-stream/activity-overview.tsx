@@ -1,4 +1,4 @@
-"use client"
+"use client";
 
 // The Activity overview — two questions, and the evidence for each.
 //
@@ -32,7 +32,7 @@
 // Every card is built from the same KpiCard / DashboardCard vocabulary as
 // the Routines overview, so the two pages stay one object at two subjects.
 
-import * as React from "react"
+import * as React from "react";
 import {
   Activity as ActivityIcon,
   AlertTriangle,
@@ -47,20 +47,21 @@ import {
   Terminal,
   TrendingDown,
   Workflow,
-} from "lucide-react"
-import type { LucideIcon } from "lucide-react"
-import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts"
+} from "lucide-react";
+import type { LucideIcon } from "lucide-react";
+import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts";
 
 import {
   ChartContainer,
   ChartTooltip,
   ChartTooltipContent,
   type ChartConfig,
-} from "@/components/ui/chart"
-import { Appear } from "@/components/ui/detail"
-import { KpiCard } from "@/components/features/dashboard/kpi-card"
-import { DashboardCard } from "@/components/features/dashboard/dashboard-card"
-import { cn } from "@/lib/utils"
+} from "@/components/ui/chart";
+import { Appear } from "@/components/ui/detail";
+import { InlineEmpty } from "@/components/ui/inline-empty";
+import { KpiCard } from "@/components/features/dashboard/kpi-card";
+import { DashboardCard } from "@/components/features/dashboard/dashboard-card";
+import { cn } from "@/lib/utils";
 import {
   activitySource,
   dailyCounts,
@@ -70,18 +71,19 @@ import {
   type ActivitySource,
   type SpineLabels,
   type SpineLink,
-} from "@/lib/activity-stream"
+} from "@/lib/activity-stream";
 import {
   failureClusters,
+  foldRunBursts,
   liveSignal,
   openAsks,
   windowSpanDays,
   zeroCopy,
   zeroKind,
-} from "@/lib/activity-overview"
-import type { JournalEntry } from "@/lib/types/journal"
+} from "@/lib/activity-overview";
+import type { JournalEntry } from "@/lib/types/journal";
 
-import { FeedRow } from "./feed-row"
+import { FeedRow } from "./feed-row";
 
 /** One icon per source — the tile in every row. */
 const SOURCE_ICON: Record<ActivitySource, LucideIcon> = {
@@ -95,38 +97,34 @@ const SOURCE_ICON: Record<ActivitySource, LucideIcon> = {
   memory: Brain,
   comms: MessageSquare,
   system: Bot,
-}
+};
 
 export function iconFor(entry: JournalEntry): LucideIcon {
-  return SOURCE_ICON[activitySource(entry.entry_type)] ?? Bot
-}
-
-function Empty({ icon: Icon, children }: { icon: LucideIcon; children: React.ReactNode }) {
-  return (
-    <div className="flex flex-col items-center justify-center gap-1.5 py-7 text-center">
-      <Icon className="h-4 w-4 text-muted-foreground-soft" />
-      <p className="max-w-[300px] text-[11px] leading-relaxed text-muted-foreground-soft">{children}</p>
-    </div>
-  )
+  return SOURCE_ICON[activitySource(entry.entry_type)] ?? Bot;
 }
 
 /** Reads a token to a real colour — recharts needs a value, not a var(). */
 function tokenColor(token: string): string {
-  if (typeof window === "undefined") return "currentColor"
-  return getComputedStyle(document.documentElement).getPropertyValue(token).trim() || "currentColor"
+  if (typeof window === "undefined") return "currentColor";
+  return (
+    getComputedStyle(document.documentElement).getPropertyValue(token).trim() ||
+    "currentColor"
+  );
 }
 
 export interface ActivityOverviewProps {
-  entries: JournalEntry[]
-  rangeLabel: string
-  labels: SpineLabels
-  agentName: (id?: string) => string | undefined
-  crewName: (id?: string) => string | undefined
-  crewMeta: (id?: string) => { icon?: string | null; color?: string | null } | undefined
-  selectedID?: string
-  onSelect: (e: JournalEntry) => void
-  onSpineClick: (l: SpineLink) => void
-  onScope: (s: ActivityScope | "all") => void
+  entries: JournalEntry[];
+  rangeLabel: string;
+  labels: SpineLabels;
+  agentName: (id?: string) => string | undefined;
+  crewName: (id?: string) => string | undefined;
+  crewMeta: (
+    id?: string,
+  ) => { icon?: string | null; color?: string | null } | undefined;
+  selectedID?: string;
+  onSelect: (e: JournalEntry) => void;
+  onSpineClick: (l: SpineLink) => void;
+  onScope: (s: ActivityScope | "all") => void;
 }
 
 export function ActivityOverview({
@@ -141,52 +139,80 @@ export function ActivityOverview({
   onSpineClick,
   onScope,
 }: ActivityOverviewProps) {
-  const total = entries.length
+  const total = entries.length;
 
   // Question 1. Not "rows of type approval.requested" — those stay in the
   // log after they are answered, so counting them reports a queue that was
   // already cleared. See lib/activity-overview.ts.
-  const waiting = React.useMemo(() => openAsks(entries), [entries])
+  const waiting = React.useMemo(() => openAsks(entries), [entries]);
 
   // Question 2. Grouped by the thing that is broken, so one routine failing
   // nine times is one row and not the whole panel.
-  const broken = React.useMemo(() => failureClusters(entries), [entries])
-  const failedTotal = React.useMemo(() => broken.reduce((n, c) => n + c.count, 0), [broken])
+  const broken = React.useMemo(() => failureClusters(entries), [entries]);
+  const failedTotal = React.useMemo(
+    () => broken.reduce((n, c) => n + c.count, 0),
+    [broken],
+  );
 
-  const live = React.useMemo(() => liveSignal(entries), [entries])
-  const latest = React.useMemo(() => entries.slice(0, 8), [entries])
+  const live = React.useMemo(() => liveSignal(entries), [entries]);
+  // One run writes a pair of lines per step; its consecutive events fold into
+  // one row so eight rows are eight things, not one run eight times.
+  const latest = React.useMemo(() => foldRunBursts(entries, 8), [entries]);
+  // Nothing in flight, nothing asked, nothing broken: one line says so. Four
+  // zero tiles and two empty cards said it six times at full height.
+  const quiet = live.running === 0 && waiting.length === 0 && failedTotal === 0;
+  const spendMeta = [
+    live.spendUSD > 0 ? `$${live.spendUSD.toFixed(2)} spent` : null,
+    live.slowestMs != null
+      ? `slowest ${formatDurationMs(live.slowestMs)}`
+      : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
 
   // Only as many columns as the window can actually speak for. A fixed 7
   // drawn from a 24-hour window is six empty bars that read as six quiet
   // days — the "nothing broke" lie, told with an axis. Below two days there
   // is no trend at all and the card does not render.
-  const spanDays = React.useMemo(() => windowSpanDays(entries), [entries])
-  const showTrend = spanDays >= 2
+  const spanDays = React.useMemo(() => windowSpanDays(entries), [entries]);
+  const showTrend = spanDays >= 2;
   const days = React.useMemo(
     () => (showTrend ? dailyCounts(entries, spanDays) : []),
     [entries, spanDays, showTrend],
-  )
-  const trendErrors = React.useMemo(() => days.reduce((n, d) => n + d.errors, 0), [days])
-  const trendTotal = React.useMemo(() => days.reduce((n, d) => n + d.total, 0), [days])
+  );
+  const trendErrors = React.useMemo(
+    () => days.reduce((n, d) => n + d.errors, 0),
+    [days],
+  );
+  const trendTotal = React.useMemo(
+    () => days.reduce((n, d) => n + d.total, 0),
+    [days],
+  );
 
   // A zero says which zero it is. "nothing broke" is a claim about the
   // world; this window only ever knew about itself.
-  const waitingZero = zeroKind(total, waiting.length)
-  const brokenZero = zeroKind(total, failedTotal)
+  const waitingZero = zeroKind(total, waiting.length);
+  const brokenZero = zeroKind(total, failedTotal);
   const waitingCopy = waitingZero
-    ? zeroCopy(waitingZero, total, "an approval, escalation or keeper request still open")
-    : null
-  const brokenCopy = brokenZero ? zeroCopy(brokenZero, total, "a failure") : null
+    ? zeroCopy(
+        waitingZero,
+        total,
+        "an approval, escalation or keeper request still open",
+      )
+    : null;
+  const brokenCopy = brokenZero
+    ? zeroCopy(brokenZero, total, "a failure")
+    : null;
 
   const chartConfig = React.useMemo<ChartConfig>(
     () => ({ errors: { label: "Failed", color: tokenColor("--destructive") } }),
     [],
-  )
+  );
 
   // Every row on this page draws its dot from the SAME window the cards count
   // over (#1876), so an approval already granted cannot wear a pulsing "waiting
   // on you" dot underneath a card that has correctly stopped counting it.
-  const scopes = React.useMemo(() => scopeByEntry(entries), [entries])
+  const scopes = React.useMemo(() => scopeByEntry(entries), [entries]);
 
   const rowProps = (e: JournalEntry) => ({
     entry: e,
@@ -201,7 +227,7 @@ export function ActivityOverview({
     selected: selectedID === e.id,
     onSelect: () => onSelect(e),
     onSpineClick,
-  })
+  });
 
   return (
     <div className="mx-auto flex max-w-[1800px] flex-col gap-4 p-4 md:p-6">
@@ -227,156 +253,203 @@ export function ActivityOverview({
           by shrinking the row instead of by choosing what goes in it.
           The four here are the four questions this page exists for, and
           each is a place to go rather than a number to read. */}
-      <Appear order={1}>
-        <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-          <KpiCard
-            label="Running now"
-            value={live.running}
-            subtitle={
-              live.running > 0
-                ? `${live.agents} ${live.agents === 1 ? "agent" : "agents"} at work`
-                : total === 0
-                  ? "nothing recorded in this window"
-                  : "nothing in flight"
-            }
-            valueColor={live.running > 0 ? tokenColor("--primary") : undefined}
-            onClick={live.running > 0 ? () => onScope("active") : undefined}
-          />
-          <KpiCard
-            label="Waiting on you"
-            value={waiting.length}
-            subtitle={
-              waitingCopy ? waitingCopy.subtitle : "approvals, escalations & keeper requests still open"
-            }
-            valueColor={waiting.length > 0 ? tokenColor("--warn") : undefined}
-            onClick={waiting.length > 0 ? () => onScope("waiting") : undefined}
-          />
-          <KpiCard
-            label="Failures"
-            value={failedTotal}
-            subtitle={
-              brokenCopy
-                ? brokenCopy.subtitle
-                : `${broken.length} ${broken.length === 1 ? "thing" : "things"} failing`
-            }
-            valueColor={failedTotal > 0 ? tokenColor("--destructive") : undefined}
-            onClick={failedTotal > 0 ? () => onScope("failed") : undefined}
-          />
-          <KpiCard
-            label={`Spend · ${rangeLabel.toLowerCase()}`}
-            // Not a placeholder zero: an em dash says "nothing was billed",
-            // where $0.00 reads as a measurement that came back empty.
-            value={live.spendUSD > 0 ? `$${live.spendUSD.toFixed(2)}` : "—"}
-            subtitle={
-              live.slowestMs != null ? `slowest ${formatDurationMs(live.slowestMs)}` : "no priced work yet"
-            }
-          />
-        </div>
-      </Appear>
+      {quiet ? (
+        <Appear order={1}>
+          <div data-testid="activity-quiet">
+            <InlineEmpty
+              icon={ShieldCheck}
+              text={
+                total === 0
+                  ? `Nothing was recorded in ${rangeLabel.toLowerCase()}. Widen the range or clear a filter.`
+                  : `Nothing running, waiting on you or failing in the ${total.toLocaleString()} ${total === 1 ? "event" : "events"} shown.`
+              }
+              action={
+                spendMeta ? (
+                  <span className="hidden shrink-0 font-mono text-micro tabular-nums text-muted-foreground-soft sm:inline">
+                    {spendMeta}
+                  </span>
+                ) : undefined
+              }
+            />
+          </div>
+        </Appear>
+      ) : (
+        <Appear order={1}>
+          <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+            <KpiCard
+              label="Running now"
+              value={live.running}
+              subtitle={
+                live.running > 0
+                  ? `${live.agents} ${live.agents === 1 ? "agent" : "agents"} at work`
+                  : total === 0
+                    ? "nothing recorded in this window"
+                    : "nothing in flight"
+              }
+              valueColor={
+                live.running > 0 ? tokenColor("--primary") : undefined
+              }
+              onClick={live.running > 0 ? () => onScope("active") : undefined}
+            />
+            <KpiCard
+              label="Waiting on you"
+              value={waiting.length}
+              subtitle={
+                waitingCopy
+                  ? waitingCopy.subtitle
+                  : "approvals, escalations & keeper requests still open"
+              }
+              valueColor={waiting.length > 0 ? tokenColor("--warn") : undefined}
+              onClick={
+                waiting.length > 0 ? () => onScope("waiting") : undefined
+              }
+            />
+            <KpiCard
+              label="Failures"
+              value={failedTotal}
+              subtitle={
+                brokenCopy
+                  ? brokenCopy.subtitle
+                  : `${broken.length} ${broken.length === 1 ? "thing" : "things"} failing`
+              }
+              valueColor={
+                failedTotal > 0 ? tokenColor("--destructive") : undefined
+              }
+              onClick={failedTotal > 0 ? () => onScope("failed") : undefined}
+            />
+            <KpiCard
+              label={`Spend · ${rangeLabel.toLowerCase()}`}
+              // Not a placeholder zero: an em dash says "nothing was billed",
+              // where $0.00 reads as a measurement that came back empty.
+              value={live.spendUSD > 0 ? `$${live.spendUSD.toFixed(2)}` : "—"}
+              subtitle={
+                live.slowestMs != null
+                  ? `slowest ${formatDurationMs(live.slowestMs)}`
+                  : "no priced work yet"
+              }
+            />
+          </div>
+        </Appear>
+      )}
 
       {/* ── The two questions ─────────────────────────────────────────
           Side by side, each with its evidence. The numbers moved up into
           the KPI row; repeating them here would put the same figure on
           screen twice, which is how two copies of one number start to
           disagree. */}
-      <Appear order={2}>
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-          {/* 1. Is anything waiting on me? */}
-          <div className="flex flex-col gap-4">
-            <DashboardCard
-              title="Open asks"
-              icon={Bell}
-              hint={waiting.length > 0 ? `${waiting.length} open` : undefined}
-              action={
-                waiting.length > 0 ? (
+      {/* An empty half is one line, not a card: a card-sized box that says
+          "nothing" is the page spending its best space on an absence. */}
+      {!quiet && (
+        <Appear order={2}>
+          <div
+            className={cn(
+              "grid grid-cols-1 gap-4",
+              waiting.length > 0 && broken.length > 0 && "lg:grid-cols-2",
+            )}
+          >
+            {/* 1. Is anything waiting on me? */}
+            {waiting.length === 0 ? (
+              <div data-testid="activity-no-asks">
+                <InlineEmpty icon={Inbox} text={waitingCopy?.panel} />
+              </div>
+            ) : (
+              <DashboardCard
+                title="Open asks"
+                icon={Bell}
+                hint={`${waiting.length} open`}
+                action={
                   <button
                     type="button"
                     onClick={() => onScope("waiting")}
-                    className="text-primary hover:underline"
+                    className="text-primary-hover hover:underline"
                   >
                     Show all →
                   </button>
-                ) : undefined
-              }
-            >
-              {waiting.length === 0 ? (
-                <Empty icon={Inbox}>{waitingCopy?.panel}</Empty>
-              ) : (
+                }
+              >
                 <div className="flex flex-col">
                   {waiting.slice(0, 6).map((e) => (
                     <FeedRow key={e.id} {...rowProps(e)} />
                   ))}
                 </div>
-              )}
-            </DashboardCard>
-          </div>
+              </DashboardCard>
+            )}
 
-          {/* 2. What is broken? */}
-          <div className="flex flex-col gap-4">
-            <DashboardCard
-              title="What is broken"
-              icon={AlertTriangle}
-              hint={failedTotal > 0 ? `${failedTotal} events` : undefined}
-              action={
-                failedTotal > 0 ? (
+            {/* 2. What is broken? */}
+            {broken.length === 0 ? (
+              <div data-testid="activity-nothing-broken">
+                <InlineEmpty icon={ShieldCheck} text={brokenCopy?.panel} />
+              </div>
+            ) : (
+              <DashboardCard
+                title="What is broken"
+                icon={AlertTriangle}
+                hint={`${failedTotal} events`}
+                action={
                   <button
                     type="button"
                     onClick={() => onScope("failed")}
-                    className="text-primary hover:underline"
+                    className="text-primary-hover hover:underline"
                   >
                     Show all →
                   </button>
-                ) : undefined
-              }
-            >
-              {broken.length === 0 ? (
-                <Empty icon={ShieldCheck}>{brokenCopy?.panel}</Empty>
-              ) : (
+                }
+              >
                 <div className="flex flex-col">
                   {/* One row per broken THING, with how many times it went
-                      wrong — nine rows from one routine is one thing to fix
-                      and used to eat the whole panel. */}
+                    wrong — nine rows from one routine is one thing to fix
+                    and used to eat the whole panel. */}
                   {broken.slice(0, 6).map((c) => (
                     <div key={c.key} className="flex items-center gap-1.5">
                       <div className="min-w-0 flex-1">
                         <FeedRow {...rowProps(c.latest)} />
                       </div>
                       {c.count > 1 && (
-                        <span className="shrink-0 rounded bg-destructive/15 px-1.5 py-0.5 font-mono text-[10px] tabular-nums text-destructive">
+                        <span className="shrink-0 rounded-md bg-destructive/15 px-1.5 py-0.5 font-mono text-micro tabular-nums text-destructive">
                           ×{c.count}
                         </span>
                       )}
                     </div>
                   ))}
                 </div>
-              )}
-            </DashboardCard>
+              </DashboardCard>
+            )}
           </div>
-        </div>
-      </Appear>
+        </Appear>
+      )}
 
       {/* ── Everything else, at the weight of everything else ───────── */}
       <Appear order={3}>
-        <div className={cn("grid grid-cols-1 gap-4", showTrend && "lg:grid-cols-3")}>
+        <div
+          className={cn(
+            "grid grid-cols-1 gap-4",
+            showTrend && "lg:grid-cols-3",
+          )}
+        >
           <DashboardCard
             className={cn(showTrend && "lg:col-span-2")}
             title="Latest activity"
             icon={ActivityIcon}
-            hint={latest.length > 0 ? `last ${latest.length}` : undefined}
+            hint={
+              latest.length > 0
+                ? `newest ${latest.reduce((n, r) => n + 1 + r.more, 0)} events`
+                : undefined
+            }
             action={
-              <a href="/journal" className="text-primary hover:underline">
+              <a href="/journal" className="text-primary-hover hover:underline">
                 Full journal →
               </a>
             }
           >
             {latest.length === 0 ? (
-              <Empty icon={ActivityIcon}>
-                No events were recorded in this window. Widen the range or clear a filter.
-              </Empty>
+              <InlineEmpty
+                icon={ActivityIcon}
+                text="No events were recorded in this window. Widen the range or clear a filter."
+              />
             ) : (
               <div className="flex flex-col">
-                {latest.map((e) => (
-                  <FeedRow key={e.id} {...rowProps(e)} />
+                {latest.map(({ entry: e, more }) => (
+                  <FeedRow key={e.id} {...rowProps(e)} more={more} />
                 ))}
               </div>
             )}
@@ -393,10 +466,18 @@ export function ActivityOverview({
             <DashboardCard
               title={`Failures · ${spanDays} days`}
               icon={TrendingDown}
-              hint={trendTotal > 0 ? `${trendErrors} of ${trendTotal}` : undefined}
+              hint={
+                trendTotal > 0 ? `${trendErrors} of ${trendTotal}` : undefined
+              }
             >
-              <ChartContainer config={chartConfig} className="aspect-auto h-[196px] w-full">
-                <BarChart data={days} margin={{ top: 8, right: 8, left: -22, bottom: 0 }}>
+              <ChartContainer
+                config={chartConfig}
+                className="aspect-auto h-[196px] w-full"
+              >
+                <BarChart
+                  data={days}
+                  margin={{ top: 8, right: 8, left: -22, bottom: 0 }}
+                >
                   <CartesianGrid vertical={false} strokeOpacity={0.08} />
                   <XAxis
                     dataKey="label"
@@ -405,7 +486,12 @@ export function ActivityOverview({
                     tickMargin={6}
                     className="text-[10px]"
                   />
-                  <YAxis allowDecimals={false} tickLine={false} axisLine={false} className="text-[10px]" />
+                  <YAxis
+                    allowDecimals={false}
+                    tickLine={false}
+                    axisLine={false}
+                    className="text-[10px]"
+                  />
                   <ChartTooltip content={<ChartTooltipContent />} />
                   {/* Failures only. This was a volume column with a red cap
                       stacked on it, and on a real instance the volume (260)
@@ -413,7 +499,11 @@ export function ActivityOverview({
                       a chart titled "Failures" whose failures could not be
                       compared between days. The rate that band carried is
                       in the header instead ("11 of 300"). */}
-                  <Bar dataKey="errors" fill="var(--color-errors)" radius={[2, 2, 0, 0]} />
+                  <Bar
+                    dataKey="errors"
+                    fill="var(--color-errors)"
+                    radius={[2, 2, 0, 0]}
+                  />
                 </BarChart>
               </ChartContainer>
             </DashboardCard>
@@ -421,5 +511,5 @@ export function ActivityOverview({
         </div>
       </Appear>
     </div>
-  )
+  );
 }
