@@ -35,6 +35,7 @@ type Mount struct {
 type Credential struct{ ID, Env, File string }
 type Plan struct {
 	Workspace, Principal, Agent, Scope, Attempt, Origin, OriginID, Revision string
+	PrincipalKind                                                           string
 	Generation                                                              uint64
 	Mode                                                                    string
 	Parent                                                                  string // opaque parent authority handle, never an agent-chosen identity
@@ -49,6 +50,9 @@ func (p Plan) validate(now time.Time) error {
 		if !identifier.MatchString(s) {
 			return ErrDenied
 		}
+	}
+	if p.PrincipalKind != "human" && p.PrincipalKind != "service" {
+		return ErrDenied
 	}
 	if p.Generation == 0 || p.Mode != "restricted" || !p.Expires.After(now) || p.Expires.Sub(now) > 15*time.Second {
 		return ErrDenied
@@ -120,7 +124,7 @@ func (p Plan) provenance() string {
 // Narrow enforces the runtime portion of delegation. The application must also
 // enforce its object/operation grants, origin permissions and data provenance.
 func Narrow(parent, child Plan) error {
-	if parent.Workspace != child.Workspace || parent.Principal != child.Principal || parent.Scope != child.Scope || parent.Origin != child.Origin || parent.OriginID != child.OriginID || child.Expires.After(parent.Expires) {
+	if parent.Workspace != child.Workspace || parent.Principal != child.Principal || parent.PrincipalKind != child.PrincipalKind || parent.Scope != child.Scope || parent.Origin != child.Origin || parent.OriginID != child.OriginID || child.Expires.After(parent.Expires) {
 		return ErrDenied
 	}
 	for _, c := range child.Mounts {
