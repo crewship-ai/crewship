@@ -72,7 +72,7 @@ function WorkRow({ href, icon, kind, status, title, repeat, meta, action }: {
 function WorkSection({ title, count, children }: { title: string; count: number; children: React.ReactNode }) {
   if (!count) return null
   return <section aria-label={title}>
-    <div className="sticky top-0 z-10 flex items-center gap-2 border-y border-border/60 bg-card px-2 py-1.5 text-micro font-semibold uppercase tracking-wider text-muted-foreground first:border-t-0">
+    <div className="sticky top-0 z-10 flex items-center gap-2 border-y border-border/60 bg-card px-2 py-1.5 font-mono text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground first:border-t-0">
       {title}<span className="rounded-full bg-muted px-1.5 py-0.5 font-mono text-[10px] tabular-nums">{count}</span>
     </div>
     <div className="divide-y divide-border/40">{children}</div>
@@ -111,7 +111,7 @@ export function DashboardResults({ review, inProgress, completed, activeAgentRun
       {FILTERS.map(({ key, label }) => <button key={key} type="button" aria-pressed={filter === key} onClick={() => setFilter(key)} className={cn("rounded-md px-2.5 py-1.5 text-label transition-colors coarse:min-h-12", filter === key ? "bg-primary/15 font-medium text-primary-hover" : "text-muted-foreground hover:bg-muted hover:text-foreground")}>{label}<span className="ml-1.5 font-mono text-micro tabular-nums opacity-70">{counts[key]}</span></button>)}
     </div>
     {(error || routineError) && <p role="status" className="mb-3 rounded-lg border border-warn/25 bg-warn/10 p-3 text-label text-warn">Some work could not refresh. Showing available results. <button type="button" onClick={onRetry} className="underline">Retry</button></p>}
-    {loading && counts.all === 0 ? <div className="space-y-3" aria-label="Loading results"><Skeleton className="h-9 rounded-md" /><Skeleton className="h-9 rounded-md" /><Skeleton className="h-9 rounded-md" /></div> : <div ref={listScroll.listRef} className="max-h-[440px] min-h-[210px] overflow-y-auto overscroll-contain pr-1 xl:min-h-0 xl:max-h-none xl:flex-1" tabIndex={0} aria-label="Work list">
+    {loading && counts.all === 0 ? <div className="space-y-3" aria-label="Loading results"><Skeleton className="h-9 rounded-md" /><Skeleton className="h-9 rounded-md" /><Skeleton className="h-9 rounded-md" /></div> : <div ref={listScroll.listRef} className="max-h-[440px] min-h-[210px] overflow-y-auto overscroll-contain pr-1 xl:flex xl:min-h-0 xl:max-h-none xl:flex-1 xl:flex-col" tabIndex={0} aria-label="Work list">
       {counts[filter] === 0 && <p className="px-2 py-8 text-center text-body text-muted-foreground">{routineLoading && filter === "running" ? "Checking live routines…" : filter === "all" ? "No work yet. Assign an issue or start a routine to see it here." : `No ${FILTERS.find((item) => item.key === filter)?.label.toLowerCase()} work right now.`}</p>}
       {show("running") && <WorkSection title="Running now" count={runningCount}>
         {activeAgentRuns.map((run) => {
@@ -128,6 +128,14 @@ export function DashboardResults({ review, inProgress, completed, activeAgentRun
         {completed.map((issue) => issueRow(issue, true))}
         {routineResults.map(({ latest: run, count }) => <WorkRow key={`routine-done-${run.id}`} href={entityHref({ kind: "run", runId: run.id, pipelineSlug: run.pipeline_slug })} icon={<ScrollText className="h-6 w-6 shrink-0 text-muted-foreground" aria-hidden />} kind="Routine" status={<StatusPill status="COMPLETED" />} title={run.pipeline_name || run.pipeline_slug} repeat={count} meta={count > 1 ? `last ${formatRelativeTime(run.ended_at || run.started_at)}` : formatRelativeTime(run.ended_at || run.started_at)} action="Open result" />)}
       </WorkSection>}
+      {/* A short list sits in a card sized to its neighbours. Say what the
+          empty part is for instead of leaving a blank pane. */}
+      {filter === "all" && counts.all > 0 && counts.all < 4 && (
+        <div data-slot="results-quiet" className="hidden flex-1 flex-col items-center justify-center gap-2 px-6 py-8 text-center xl:flex">
+          <span className="icon-tile inline-flex h-10 w-10 items-center justify-center rounded-xl" aria-hidden><CheckCheck className="h-4.5 w-4.5" /></span>
+          <p className="max-w-xs text-label text-muted-foreground">That is everything for now. Running work and issues waiting for your review appear here as they start.</p>
+        </div>
+      )}
     </div>}
   </DashboardCard>
 }

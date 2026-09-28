@@ -40,7 +40,7 @@ export function RunVolumeChart({
 
   if (buckets.length === 0 || series.length === 0) {
     return (
-      <div className="flex h-[160px] items-center justify-center text-label text-muted-foreground-soft">
+      <div className="flex items-center justify-center rounded-xl border border-dashed border-border bg-surface-subtle py-4 text-label text-muted-foreground">
         No run activity in this window
       </div>
     )
