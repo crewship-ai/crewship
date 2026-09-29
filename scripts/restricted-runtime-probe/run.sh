@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
-# Owned, offline dev2 acceptance image; never reloads a Crewship instance.
+# Owned acceptance image for this checkout; never reloads a Crewship instance.
 set -euo pipefail
 if [[ "$(uname -s)" != Linux ]]; then echo "This prototype requires Linux Docker." >&2; exit 1; fi
 cd "$(dirname "$0")/../.."
-probe_context=$(mktemp -d /tmp/crewship-dev2-restricted-build.XXXXXX)
-probe_tag="crewship-restricted-probe:dev2-$(date -u +%Y%m%d%H%M%S)-$$"
+probe_instance=$(basename "$PWD" | tr -cd 'a-zA-Z0-9_-')
+probe_context=$(mktemp -d "/tmp/crewship-${probe_instance}-restricted-build.XXXXXX")
+probe_tag="crewship-restricted-probe:${probe_instance}-$(date -u +%Y%m%d%H%M%S)-$$"
 cleanup() { docker image rm "$probe_tag" >/dev/null 2>&1 || true; rm -rf "$probe_context"; }
 trap cleanup EXIT
 probe_ldflags=$(scripts/build-stamp.sh ldflags)

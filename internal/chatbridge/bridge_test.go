@@ -405,3 +405,7 @@ func TestBridge_CancelledContextNoErrorEvent(t *testing.T) {
 		}
 	}
 }
+
+func (r *mockResolver) ResolveHumanChat(ctx context.Context, user, chat string) (*ChatInfo, error) {
+	return r.ResolveChat(ctx, chat)
+}

@@ -259,6 +259,10 @@ func synthValue(table string, c genColumn, allowed map[string]string, createSQL 
 // Each entry is a place the generator gave up, so keep the list readable: a
 // growing one is a signal, not an inconvenience.
 var genColumnOverrides = map[string]any{
+	// Resource grants have exactly one typed resource FK, so forks can remap it.
+	"access_grants.resource_kind": "agent",
+	"access_grants.project_id":    nil,
+	"access_grants.operation":     "chat",
 	// removed_json is unmarshalled into []journal.RemovedEntry, so the
 	// generic json_valid-satisfying "{}" makes rechainForkedJournal fail.
 	"journal_chain_checkpoints.removed_json": "[]",

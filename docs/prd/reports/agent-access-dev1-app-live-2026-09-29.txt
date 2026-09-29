@@ -1,0 +1,11 @@
+Development 1 only. Application source: ca379a58f4fce37c17ccc91018a919550bcb8961 (clean).
+Running /proc executable and static export matched. /api/health and /healthz: 200 status=ok. /readyz: 200 db=ok state=ok. CLI whoami: authenticated owner.
+{"workspace": "cmumerbjz0001a746ad91", "two_private_clients_same_agent": "PASS", "foreign_history": "404", "positive_ws_delivery": "2/2", "revocation": "DENIED_AND_SOCKET_CLOSED", "revoke_check_ms": 103}
+Owned workspace removed; synthetic users have no workspace access.
+{"workspace": "cmumetwt200068ed792b5", "two_private_clients_same_agent": "PASS", "foreign_history": "404", "positive_ws_delivery": "2/2", "http_stream_revocation": "CLOSED_WITHOUT_FRAME", "other_client_http_stream": "HEARTBEAT", "revocation": "DENIED_AND_SOCKET_CLOSED", "revoke_check_ms": 19480}
+Owned workspace removed; synthetic users have no workspace access.
+revoke_check_ms in the second probe includes waiting for the HTTP 20-second idle heartbeat. All owned workspaces removed by CLI; synthetic accounts remain without memberships.
+
+Repeat after index migration: 7626636fde530aa148ba2b481824586fd8dfe70d. Running executable and web export matched; health/readiness OK; all six indexes present.
+{"workspace": "cmumhu4j30001fc081422", "two_private_clients_same_agent": "PASS", "foreign_history": "404", "positive_ws_delivery": "2/2", "http_stream_revocation": "CLOSED_WITHOUT_FRAME", "other_client_http_stream": "HEARTBEAT", "revocation": "DENIED_AND_SOCKET_CLOSED", "revoke_check_ms": 19854}
+Owned workspace removed; synthetic users have no workspace access.

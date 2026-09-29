@@ -44,17 +44,21 @@ type fakeChatResumer struct {
 
 type fakeResumeCall struct {
 	userID, chatID, content string
+	opts                    ws.ChatMessageOption
 }
 
 func newFakeChatResumer() *fakeChatResumer {
 	return &fakeChatResumer{called: make(chan fakeResumeCall, 8)}
 }
 
-func (f *fakeChatResumer) HandleChatMessage(_ context.Context, userID, chatID, content string, streamFn func(ws.ChatEvent), _ ...ws.ChatMessageOption) error {
+func (f *fakeChatResumer) HandleChatMessage(_ context.Context, userID, chatID, content string, streamFn func(ws.ChatEvent), opts ...ws.ChatMessageOption) error {
 	for _, e := range f.stream {
 		streamFn(e)
 	}
-	call := fakeResumeCall{userID, chatID, content}
+	call := fakeResumeCall{userID: userID, chatID: chatID, content: content}
+	if len(opts) > 0 {
+		call.opts = opts[0]
+	}
 	f.mu.Lock()
 	f.calls = append(f.calls, call)
 	f.mu.Unlock()
@@ -508,19 +512,19 @@ func TestResumeDeferredChatMessage(t *testing.T) {
 				fake.err = ws.ErrCrewProvisioning
 				h.resumeMessage(msg, nil)
 				h.resumeMessage(msg, nil)
-				if got := h.deferredResumeCount(msg.ChatID); got != 2 {
+				if got := h.deferredResumeCount(pendingMessageKey(msg)); got != 2 {
 					t.Fatalf("count after two re-deferrals = %d, want 2", got)
 				}
 				fake.err = nil
 				h.resumeMessage(msg, nil) // ran
-				if got := h.deferredResumeCount(msg.ChatID); got != 0 {
+				if got := h.deferredResumeCount(pendingMessageKey(msg)); got != 0 {
 					t.Errorf("count after the message ran = %d, want 0", got)
 				}
 
 				fake.err = ws.ErrCrewProvisioning
 				h.resumeMessage(msg, nil)
 				h.resumeMessage(msg, errors.New("build failed: disk full")) // failed by its build
-				if got := h.deferredResumeCount(msg.ChatID); got != 0 {
+				if got := h.deferredResumeCount(pendingMessageKey(msg)); got != 0 {
 					t.Errorf("count after a failed build = %d, want 0", got)
 				}
 			},

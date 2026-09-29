@@ -2,9 +2,14 @@ package api
 
 import (
 	"database/sql"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/access"
+	"github.com/crewship-ai/crewship/internal/chataudience"
 )
 
 // CreateChat creates a new chat session record on behalf of the sidecar.
@@ -161,7 +166,53 @@ func (h *InternalHandler) ResolveChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if openedBy.Valid && openedBy.String != "" {
+		restricted, err := (access.Store{DB: h.db}).HasRestrictedMembership(r.Context(), openedBy.String)
+		if err != nil {
+			replyInternalError(w, h.logger, "resolve chat resource authority", err)
+			return
+		}
+		if restricted {
+			// The legacy resolver materializes crew-wide prompt, memory and
+			// credentials. Never use it for a restricted human conversation.
+			replyError(w, http.StatusForbidden, "Restricted runtime authority required")
+			return
+		}
+	}
 	h.resolveAgentConfigWithOpener(w, r, agentID, openedBy.String, visibility.String)
+}
+
+// ResolveHumanChat is host-only: crew/workspace tokens cannot assert a human
+// actor. Check current audience before ResolveChat loads any prompt or secret.
+// The existing origin-less resolver remains for classified service paths.
+func (h *InternalHandler) ResolveHumanChat(w http.ResponseWriter, r *http.Request) {
+	if InternalTokenWorkspaceFromContext(r.Context()) != "" || InternalTokenCrewFromContext(r.Context()) != "" {
+		replyError(w, http.StatusForbidden, "Human authority requires host authentication")
+		return
+	}
+	userID := r.URL.Query().Get("user_id")
+	var expected *chataudience.Receipt
+	if encoded := r.URL.Query().Get("receipt"); encoded != "" {
+		if len(encoded) > 2048 {
+			replyError(w, http.StatusNotFound, "Chat not found")
+			return
+		}
+		raw, e := base64.RawURLEncoding.DecodeString(encoded)
+		if e != nil || json.Unmarshal(raw, &expected) != nil || expected == nil {
+			replyError(w, http.StatusNotFound, "Chat not found")
+			return
+		}
+	}
+	receipt, err := chataudience.CaptureTrusted(r.Context(), h.db, r.PathValue("chatId"), userID, expected)
+	if err != nil {
+		replyInternalError(w, h.logger, "resolve human chat authority", err)
+		return
+	}
+	if receipt == nil {
+		replyError(w, http.StatusNotFound, "Chat not found")
+		return
+	}
+	h.ResolveChat(w, r.WithContext(chataudience.WithReceipt(r.Context(), receipt)))
 }
 
 // ResolveAgent returns the full configuration for a given agent ID.

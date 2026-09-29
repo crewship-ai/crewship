@@ -5,14 +5,14 @@ Tracking: [#2703](https://github.com/crewship-ai/crewship/issues/2703).
 Uživatel autorizoval vývoj, testy a nasazení na dev1. Základ implementace je
 `8dc421fdb` na main; jiné instance ani produkce nejsou cílem.
 
-## Aktuální stav k 28. 9. 2026
+## Aktuální stav k 29. 9. 2026
 
 Základ #2704, opravy #2712/#2713, izolovaný runtime prototyp #2710 a
 omezený síťový broker #2715 jsou v `main`. Prototyp runtime má živé testy na
 dev2, ale běžný chat, CLI ani rutiny do něj zatím nevstupují. Starší níže
 uvedené poznámky o draft PR zachycují stav v čase daného testu.
 
-První navazující oprava #2711 sjednocuje publikum lidských soukromých chatů
+Sloučená navazující oprava #2716 (v rámci #2711) sjednocuje publikum lidských soukromých chatů
 pro seznam, vyhledávání, historii, přílohy, reakce, účastníky, feedback a
 session stream. Samotná oprava čtecích cest není autorita A2/B: zůstávají
 granty ke konkrétním agentům a projektům, soubory, paměť, běhy, journal,
@@ -22,12 +22,21 @@ runtime. Release 1.0 proto zůstává otevřený do průchodu celé A2/B matice 
 Historické anonymní chaty bez prokazatelného původu zůstávají skryté; nové
 plánované a webhookové běhy svůj původ při vzniku zapisují.
 
+Na dev1 pokračuje společná serverová autorita, konzervativní vstupní brány a
+kontroly doručování streamů: [průběžný záznam](AGENT-ACCESS-CONTINUATION-2026-09-29.md).
+Tato rozpracovaná větev zatím není sloučená ani důkaz úplné klientské izolace.
+Dev1 je ověřené na `13cb8b29f`: 149 Go balíčků, vet, cílené race testy,
+živé dva účty a revokace streamů; lidský odesílatel se nově kontroluje ještě
+před materializací kontextu. Podrobnosti a hranice jsou v průběžném záznamu.
+CI posledního main buildu je nadále blokované billingem GitHub účtu;
+#2716 před merge nemělo dokončené nezávislé review.
+
 ## Dodávky a hranice
 
 | Balík | Stav | Akceptace |
 |---|---|---|
-| A1: směrované oprávnění sdílených souborů mezi crews | Implementováno a nasazeno na dev1, PR review/CI probíhá | Settings/API/CLI, none/read/read+delivery, stale update 409, role/workspace, odebrání dalšího requestu |
-| A2: agent→agent / projektové granty | Připravený návrh, neimplementováno | stabilní resource ID, efektivní dědění, všechny čtecí cesty, shell hranice |
+| A1: směrované oprávnění sdílených souborů mezi crews | Sloučeno v #2704 a nasazeno na dev1 | Settings/API/CLI, none/read/read+delivery, stale update 409, role/workspace, odebrání dalšího requestu |
+| A2: agent→agent / projektové granty | #2717 přidává typed grant store a pokusy; aplikační/runtime integrace nedokončená | stabilní resource ID, efektivní dědění, všechny čtecí cesty, shell hranice |
 | B: omezený klientský běh a konverzace | B1–B3: revokace členství, rutin a Page akcí implementována; B4 read-only share nasazen a ověřen na dev1; klientská izolace neimplementována | žadatel→běh→výstup, historie, paměť a artefakty dvou klientů |
 | C: service desired state / obnova po rebootu | Nasazeno na dev1; Docker ztráta kontejneru/data a server restart ověřeny; host reboot otevřený | durable running/stopped, rekonciliace, data/identity, žádná duplicita |
 | D: credentials / revokace konkrétního grantu | D1/D2: per-agent proxy grant snapshot/refresh a zachování deny-all implementovány; přímá delivery a izolace dále otevřené | rozdílné lease, odebrání jedinému agentovi, výpadek autority, izolovaná delivery |
@@ -71,8 +80,9 @@ se neskrývá za prázdný chat. Běžná autentizovaná historie se nemění.
 
 Grant je durable v SQLite; veřejná odpověď obsahuje pouze text, role, ID a čas.
 Vydavatel i agent, jeho případná crew a workspace musejí být stále živí.
-Workspace bundle backup granty nepřenáší; úplný snapshot databáze je jiný
-kontrakt a přirozeně je zachovává. Obnova DB je testována. Grant nevytváří
+Workspace bundle backup nepřenáší granty z `chat_read_shares`; konkrétní resource
+granty z `access_grants` zachovává. Úplný snapshot databáze je jiný kontrakt
+a přirozeně zachovává oba typy grantů. Obnova DB je testována. Grant nevytváří
 žádný agentí běh ani LLM volání; náklad je SQL kontrola a omezené čtení JSONL.
 
 Otevřené limity B4: stránkování dlouhé historie, správa sdílení v UI a retence

@@ -2,6 +2,29 @@
 
 Date: 2026-09-27. This is a test plan based on the current source tree, not a claim that A2/B is implemented or passing. It supplements [the implementation tracker](AGENT-ACCESS-RELEASE-1-IMPLEMENTATION-2026-09-27.md) and [runtime research](RESEARCH-AGENT-ACCESS-RUNTIME-HEARTBEAT-2026-09-27.md). A1's agent-to-crew gate does not prove human-to-agent, conversation, project, or process isolation.
 
+## Verified deltas on dev1, 2026-09-29
+
+The source descriptions in the table below are the **27 September inventory**.
+PR #2716 subsequently unified private-chat audience checks. Draft
+[#2717](https://github.com/crewship-ai/crewship/pull/2717) adds the next limited
+slice; it does not complete every acceptance case in a row.
+
+| Gate | Evidence now available | Still required |
+|---|---|---|
+| Human chat admission before context | `13cb8b29f`: real router + bridge tests for actor/audience/revocation; dev1 group participant send through host-only IPC, no-mention completion | Restricted runtime launch, durable service origins, scoped prompt/recall/provider and queued run authority |
+| Queued human admission epoch | Provisioning options preserve server-issued membership/chat receipt; migrated-DB revoke/restore tests and mutation control; restored chat receives a fresh generation; dev1 host resolver rejects old receipt after member rejoin and accepts a fresh one | Independent review, full live deferred execution, durable queue/service authority and isolated execution |
+| Exact human resource grants | Migrated-DB tests for agent/project operations, revision conflicts, removal/rejoin and two humans | Administrative API/Settings/CLI rollout, agent-side ceilings and service principals |
+| Private chat discovery | Authenticated router tests for exact chat grants, own list/count, foreign direct lookup; live dev1 two-human same-agent fixture | Complete restricted create/send flow and storage provenance |
+| Delivery revocation | Per-frame WS and HTTP checks; real dev1 positive delivery, member removal, socket close; other human stays connected | Restricted run output, logs/artifacts/journal and full-grant revocation through the production management API |
+| Delegation/retry | Durable authority tests: child cannot widen parent, parent revoke denies child, old membership/revision cannot resume | Queue/orchestrator integration and target-agent rights |
+| Backup | Full backup suite; policy roundtrip and fork remap; old attempt capability absent | Scoped runtime data, instance recovery and quotas |
+| Linux/process | Dev1 ran the standalone runtime harness with race: 11/11 live Docker cases passed | Real chat/CLI/routine dispatch into that runtime and provider adapters |
+
+Unintegrated restricted HTTP routes and shared terminals are denied. **A denial
+is not a passing positive scenario.** Restricted profile activation remains
+unavailable in the product. Build and evidence details are in the
+[continuation record](AGENT-ACCESS-CONTINUATION-2026-09-29.md).
+
 ## Shared fixture and invariant
 
 In one workspace create human `H1` and human `H2`, agents `A` and `B`, and distinct canary strings in each chat, file, artifact, memory item, and log. Give both humans ordinary workspace membership; grant only `H1` access to `A` and project `P1`, only `H2` access to `B` and project `P2`. Also create two *different private conversations with A*, one for each human, while granting both humans `A:chat`. Positive controls prove each human can use their own objects. Negative controls assert no object bytes, title, filename, count, search hit, metadata, run ID, or stream event for the other human. Repeat reads with direct IDs and pagination/search/count options; reject before IPC or storage access where possible. Run once with grants revoked after an already-open stream and after a job is queued. Expected response codes must be fixed by the new policy contract; a filtered list is empty and an unauthorized direct object lookup is an indistinguishable deny (usually 404), never a successful empty proxy response.

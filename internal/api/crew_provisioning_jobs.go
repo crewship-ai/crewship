@@ -55,13 +55,10 @@ type ProvisionJob struct {
 	// reload-replay via the GET endpoint.
 	Steps []string
 
-	// Pending holds at most one deferred chat message per chat, attached via
-	// AttachPendingMessage while chatbridge.Bridge.HandleChatMessage's
-	// auto-provision branch is waiting on this build. Keyed by ChatID so a
-	// second deferred send on the SAME chat — a manual resend while the build
-	// is still running, or a retried frame — coalesces onto the latest
-	// content instead of queuing a duplicate: only the most recent message
-	// for a given chat is worth replaying once the environment exists.
+	// Pending holds at most one deferred message per chat, sender and authority
+	// epoch. A repeated send by that same actor/epoch replaces its content;
+	// another human or a newly admitted epoch retains independent work.
+	// Attached while the crew's auto-provision job is running.
 	//
 	// Drained (read, then set to nil) in the SAME h.mu critical section that
 	// flips Status to a terminal value ("completed"/"failed") — see
@@ -72,7 +69,7 @@ type ProvisionJob struct {
 	// already terminal and AttachPendingMessage resumes it immediately
 	// instead of adding to a map nobody will ever drain again. There is no
 	// interleaving where both the drain and a late attach see the same entry.
-	Pending map[string]chatbridge.PendingChatMessage
+	Pending map[string]chatbridge.PendingChatMessage `json:"-"`
 }
 
 // orphanGCClient is the minimal slice of the Docker API used by the orphan-GC
@@ -529,12 +526,17 @@ func (h *ProvisioningHandler) EnqueueForCrew(ctx context.Context, crewID, worksp
 // runs, the build already finished.
 const resumeMessageTimeout = 10 * time.Minute
 
+func pendingMessageKey(msg chatbridge.PendingChatMessage) string {
+	key, _ := json.Marshal([]any{msg.ChatID, msg.UserID, msg.Opts.HumanAuthority})
+	return string(key)
+}
+
 // AttachPendingMessage attaches a chat send that chatbridge.Bridge deferred
 // (HandleChatMessage's auto-provision branch) to crewID's tracked
 // provisioning job, so the job resumes or fails the message exactly once when
 // it reaches a terminal state. See ProvisionJob.Pending for the at-most-once
-// mechanics this relies on: Pending is keyed by ChatID (a second attach for
-// the same chat coalesces rather than queuing a duplicate) and is drained
+// mechanics this relies on: Pending is keyed by chat, sender and authority (a repeated attach within
+// the same admission epoch coalesces rather than queuing a duplicate) and is drained
 // atomically with the job's Status transition, so a late attach — the job
 // already went terminal by the time this call takes the lock — resumes or
 // fails the message immediately instead of writing into a map nobody will
@@ -556,10 +558,9 @@ func (h *ProvisioningHandler) AttachPendingMessage(crewID string, msg chatbridge
 		if job.Pending == nil {
 			job.Pending = make(map[string]chatbridge.PendingChatMessage)
 		}
-		// Coalesce: the latest send for this chat is the only one worth
-		// replaying, and the map shape makes "replace" and "insert" the same
-		// operation.
-		job.Pending[msg.ChatID] = msg
+		// Coalesce only within one sender and authority epoch. Other humans
+		// or a newly admitted epoch retain independent pending work.
+		job.Pending[pendingMessageKey(msg)] = msg
 		h.mu.Unlock()
 		return true
 	case "completed":
@@ -705,7 +706,7 @@ func (h *ProvisioningHandler) resumeMessage(msg chatbridge.PendingChatMessage, b
 		return
 	}
 	if buildErr != nil {
-		h.clearDeferredResume(msg.ChatID)
+		h.clearDeferredResume(pendingMessageKey(msg))
 		run := h.wsHub.BeginSessionRun(msg.ChatID)
 		defer run.End()
 		// The build itself failed: say so plainly and point at the fix,
@@ -733,9 +734,9 @@ func (h *ProvisioningHandler) resumeMessage(msg chatbridge.PendingChatMessage, b
 	// loop #2431 describes, and the two answers are a wait and, past the
 	// bound, a verdict the user can act on. Both happen before the session
 	// run is opened so no chat sits "streaming" through a back-off.
-	attempt := h.noteDeferredResume(msg.ChatID)
+	attempt := h.noteDeferredResume(pendingMessageKey(msg))
 	if attempt > maxDeferredResumes {
-		h.clearDeferredResume(msg.ChatID)
+		h.clearDeferredResume(pendingMessageKey(msg))
 		h.logger.Error("deferred chat message gave up: every completed build left the crew unstartable",
 			"chat_id", msg.ChatID, "rebuilds", maxDeferredResumes)
 		run := h.wsHub.BeginSessionRun(msg.ChatID)
@@ -756,7 +757,7 @@ func (h *ProvisioningHandler) resumeMessage(msg chatbridge.PendingChatMessage, b
 		h.logger.Warn("deferred chat message deferred again by a completed build; backing off before the next resume",
 			"chat_id", msg.ChatID, "attempt", attempt, "delay", delay)
 		if !h.sleepBeforeResume(ctx, delay) {
-			h.clearDeferredResume(msg.ChatID)
+			h.clearDeferredResume(pendingMessageKey(msg))
 			return
 		}
 	}
@@ -781,15 +782,16 @@ func (h *ProvisioningHandler) resumeMessage(msg chatbridge.PendingChatMessage, b
 	// again — except in the pathological case where the image was pruned
 	// again in the seconds since this job finished, which re-enters the same
 	// defer-and-attach path and is handled identically to the first time.
+	msg.Opts.HumanResume = true
 	err := h.chatResumer.HandleChatMessage(ctx, msg.UserID, msg.ChatID, msg.Content, run.Emit, msg.Opts)
 	if err == nil {
-		h.clearDeferredResume(msg.ChatID)
+		h.clearDeferredResume(pendingMessageKey(msg))
 		return
 	}
 	// Only a re-deferral keeps the consecutive count; every other outcome
 	// ended this message's journey through the build queue.
 	if !errors.Is(err, ws.ErrCrewProvisioning) {
-		h.clearDeferredResume(msg.ChatID)
+		h.clearDeferredResume(pendingMessageKey(msg))
 	}
 	switch {
 	case errors.Is(err, chatbridge.ErrAgentBusyElsewhere):

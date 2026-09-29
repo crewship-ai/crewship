@@ -26,7 +26,7 @@ func (r *capabilityRevoker) RunStep(ctx context.Context, req AgentStepRequest) (
 func TestInvocationAuthorityPolicy(t *testing.T) {
 	db := openFactoryTestDB(t)
 	defer db.Close()
-	mustExec(t, db, `CREATE TABLE workspace_members(workspace_id TEXT,user_id TEXT,role TEXT,capabilities TEXT)`)
+	mustExec(t, db, `CREATE TABLE workspace_members(workspace_id TEXT,user_id TEXT,role TEXT,capabilities TEXT,access_mode TEXT NOT NULL DEFAULT 'trusted')`)
 	check := NewInvocationAuthorityChecker(db)
 	for _, tc := range []struct {
 		name, role, authority string
@@ -45,7 +45,7 @@ func TestInvocationAuthorityPolicy(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			mustExec(t, db, `DELETE FROM workspace_members`)
-			if _, err := db.Exec(`INSERT INTO workspace_members VALUES('ws','human',?,?)`, tc.role, tc.caps); err != nil {
+			if _, err := db.Exec(`INSERT INTO workspace_members(workspace_id,user_id,role,capabilities) VALUES('ws','human',?,?)`, tc.role, tc.caps); err != nil {
 				t.Fatal(err)
 			}
 			in := RunInput{WorkspaceID: "ws", InvokingUserID: "human", InvocationAuthority: tc.authority}
@@ -66,13 +66,26 @@ func TestInvocationAuthorityPolicy(t *testing.T) {
 	}
 }
 
+func TestInvocationAuthorityRestrictedCannotUseLegacyRun(t *testing.T) {
+	db := openFactoryTestDB(t)
+	defer db.Close()
+	mustExec(t, db, `CREATE TABLE workspace_members(workspace_id TEXT,user_id TEXT,role TEXT,capabilities TEXT,access_mode TEXT)`)
+	mustExec(t, db, `INSERT INTO workspace_members VALUES('w','human','MANAGER','["routine.run"]','restricted')`)
+	check := NewInvocationAuthorityChecker(db)
+	for _, authority := range []string{"", RoutineRunAuthority, RoutineBatchAuthority} {
+		if err := check(t.Context(), RunInput{WorkspaceID: "w", InvokingUserID: "human", InvocationAuthority: authority}); !errors.Is(err, ErrInvocationAuthorityRevoked) {
+			t.Errorf("legacy authority %q: %v", authority, err)
+		}
+	}
+}
+
 func TestInvocationAuthorityStopsAfterRevocation(t *testing.T) {
 	for _, change := range []string{"capability", "role", "resume"} {
 		t.Run(change, func(t *testing.T) {
 			db := openFactoryTestDB(t)
 			defer db.Close()
-			mustExec(t, db, `CREATE TABLE workspace_members(workspace_id TEXT,user_id TEXT,role TEXT,capabilities TEXT)`)
-			mustExec(t, db, `INSERT INTO workspace_members VALUES('ws_test','human','MEMBER','["routine.run"]')`)
+			mustExec(t, db, `CREATE TABLE workspace_members(workspace_id TEXT,user_id TEXT,role TEXT,capabilities TEXT,access_mode TEXT NOT NULL DEFAULT 'trusted')`)
+			mustExec(t, db, `INSERT INTO workspace_members(workspace_id,user_id,role,capabilities) VALUES('ws_test','human','MEMBER','["routine.run"]')`)
 			mock := newMockRunner()
 			deps := fullExecutorDeps(t, db, &capabilityRevoker{mock, db})
 			p := saveResumePipeline(t, deps.Store, "authority", resumeLinearDSL)

@@ -1222,3 +1222,7 @@ func TestHandleChatMessage_CancelledRunStillBillsTheLedger(t *testing.T) {
 		t.Errorf("billed tokens = (%d,%d), want (1000,500)", got.InputTokens, got.OutputTokens)
 	}
 }
+
+func (r *capResolver) ResolveHumanChat(ctx context.Context, user, chat string) (*ChatInfo, error) {
+	return r.ResolveChat(ctx, chat)
+}

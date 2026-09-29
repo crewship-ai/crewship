@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/crewship-ai/crewship/internal/chataudience"
 	"github.com/crewship-ai/crewship/internal/conversation"
 	"github.com/crewship-ai/crewship/internal/logcollector"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
@@ -428,22 +429,22 @@ func TestBridge_WarmStart_SkipsContainerCreate(t *testing.T) {
 // — falling back to 8192 and looking "fine" in isolated unit tests.
 func TestBridge_ResolverHTTP_MemoryFlowsToCrewConfig(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Both ResolveChat and the resource-config wire format land on
-		// /resolve; the bridge.Run path only calls ResolveChat.
+		// Human sends use the host-only resolver and receive an admission receipt.
 		if r.Header.Get("X-Internal-Token") != "tok" {
 			t.Errorf("missing internal token header on %s", r.URL.Path)
 		}
 		resp := chatResolveResponse{
-			AgentID:     "agent-http",
-			AgentSlug:   "valid-slug",
-			CrewID:      "crew-http",
-			CrewSlug:    "ops",
-			CLIAdapter:  "CLAUDE_CODE",
-			ToolProfile: "CODING",
-			TimeoutSecs: 30,
-			MemoryMB:    4096, // primary path: server says 4096
-			CPUs:        2.5,
-			NetworkMode: "free",
+			HumanAuthority: &chataudience.Receipt{UserID: "u", ChatID: "sess-http", MemberID: "member", MemberRevision: 1, ChatGeneration: "generation", ChatRevision: 1},
+			AgentID:        "agent-http",
+			AgentSlug:      "valid-slug",
+			CrewID:         "crew-http",
+			CrewSlug:       "ops",
+			CLIAdapter:     "CLAUDE_CODE",
+			ToolProfile:    "CODING",
+			TimeoutSecs:    30,
+			MemoryMB:       4096, // primary path: server says 4096
+			CPUs:           2.5,
+			NetworkMode:    "free",
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(resp)

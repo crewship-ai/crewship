@@ -15,15 +15,20 @@ import (
 	"sync/atomic"
 	"time"
 
+	"golang.org/x/net/websocket"
+
 	"github.com/crewship-ai/crewship/internal/auth"
 	"github.com/crewship-ai/crewship/internal/auth/sessions"
-	"golang.org/x/net/websocket"
+	"github.com/crewship-ai/crewship/internal/chataudience"
 )
 
 // ChatMessageOption carries optional per-message run settings from the
 // WebSocket frame (e.g. a `--max-turns` override). Passed variadically so
 // existing callers stay source-compatible; only the WS dispatch supplies one.
 type ChatMessageOption struct {
+	// Server-owned fields. The WS decoder constructs only MaxTurns and Metadata.
+	HumanAuthority *chataudience.Receipt `json:"-"`
+	HumanResume    bool                  `json:"-"`
 	// MaxTurns overrides the adapter agent-loop cap for this run. 0 = leave the
 	// adapter default in place.
 	MaxTurns int
@@ -437,6 +442,9 @@ func (h *Hub) SetChatHandler(handler ChatHandler) {
 
 // Broadcast sends a message to all clients subscribed to the given channel.
 func (h *Hub) Broadcast(channel string, msg ServerMessage) {
+	// Delivery authorization must use the actual routing channel, including
+	// producers that omitted (or accidentally mismatched) the envelope field.
+	msg.Channel = channel
 	data, ok := h.marshalFrame(msg)
 	if !ok {
 		return
@@ -465,6 +473,7 @@ func (h *Hub) BroadcastWorkspace(wsID, eventType string, payload any) {
 
 // BroadcastExcept sends a message to all channel subscribers except the excluded client.
 func (h *Hub) BroadcastExcept(channel string, exclude *Client, msg ServerMessage) {
+	msg.Channel = channel
 	data, ok := h.marshalFrame(msg)
 	if !ok {
 		return

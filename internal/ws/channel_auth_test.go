@@ -151,6 +151,8 @@ func openTestDB(t *testing.T) *sql.DB {
 	}
 	schema := `
 		CREATE TABLE workspace_members (
+            id TEXT,
+            access_mode TEXT NOT NULL DEFAULT 'trusted',
 			workspace_id TEXT NOT NULL,
 			user_id TEXT NOT NULL,
 			role TEXT NOT NULL DEFAULT 'MEMBER'
@@ -170,6 +172,7 @@ func openTestDB(t *testing.T) *sql.DB {
 			crew_id TEXT NOT NULL
 		);
 		CREATE TABLE chats (
+            agent_id TEXT,
 			id TEXT PRIMARY KEY,
 			workspace_id TEXT NOT NULL,
 			created_by TEXT,
@@ -177,7 +180,8 @@ func openTestDB(t *testing.T) *sql.DB {
 			origin TEXT,
 			visibility TEXT NOT NULL DEFAULT 'private'
 		);
-		CREATE TABLE chat_participants (chat_id TEXT NOT NULL, user_id TEXT NOT NULL);
+		CREATE TABLE access_grants (member_id TEXT, resource_kind TEXT, agent_id TEXT, project_id TEXT, operation TEXT);
+        CREATE TABLE chat_participants (chat_id TEXT NOT NULL, user_id TEXT NOT NULL);
 		CREATE TABLE pages (
 			id TEXT PRIMARY KEY,
 			workspace_id TEXT NOT NULL

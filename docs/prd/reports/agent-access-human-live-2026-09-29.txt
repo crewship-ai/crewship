@@ -1,0 +1,3 @@
+Authenticated group participant bridge: PASS (no model or container run)
+{"workspace": "cmumii5xd000df5e0fe1a", "two_private_clients_same_agent": "PASS", "foreign_history": "404", "positive_ws_delivery": "2/2", "http_stream_revocation": "CLOSED_WITHOUT_FRAME", "other_client_http_stream": "HEARTBEAT", "revocation": "DENIED_AND_SOCKET_CLOSED", "revoke_check_ms": 19908}
+Owned workspace removed; synthetic users have no workspace access.

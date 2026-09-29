@@ -6,6 +6,7 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/crewship-ai/crewship/internal/access"
 	"github.com/crewship-ai/crewship/internal/chataudience"
 )
 
@@ -27,6 +28,21 @@ func NewDBChannelAuthorizer(db *sql.DB) *DBChannelAuthorizer {
 		panic("ws: NewDBChannelAuthorizer called with nil *sql.DB")
 	}
 	return &DBChannelAuthorizer{db: db}
+}
+
+// CanDeliver rechecks queued frames immediately before socket delivery. An
+// already-open socket cannot retain access after a policy/audience change.
+// Empty-channel frames are protocol control messages; they still enforce the
+// restricted-profile ceiling. Errors deny delivery rather than retain a cache.
+func (a *DBChannelAuthorizer) CanDeliver(ctx context.Context, userID, channel string) (bool, error) {
+	if channel != "" {
+		return a.CanSubscribe(ctx, userID, channel)
+	}
+	if a == nil || a.db == nil || userID == "" {
+		return false, nil
+	}
+	restricted, err := (access.Store{DB: a.db}).HasRestrictedMembership(ctx, userID)
+	return err == nil && !restricted, err
 }
 
 // CanSubscribe reports whether the user is allowed to subscribe to the given
@@ -57,6 +73,16 @@ func (a *DBChannelAuthorizer) CanSubscribe(ctx context.Context, userID, channel 
 	}
 	chType, chID := channel[:idx], channel[idx+1:]
 
+	// Token/replay frames dominate delivery checks. Resolve both the global
+	// ceiling and exact audience in one indexed SQL snapshot, without a cache.
+	if chType == "session" {
+		return a.isSessionOwner(ctx, userID, chID)
+	}
+	restricted, err := (access.Store{DB: a.db}).HasRestrictedMembership(ctx, userID)
+	if err != nil || restricted {
+		return false, err
+	}
+
 	switch chType {
 	case "workspace":
 		return a.isMemberOfWorkspace(ctx, userID, chID)
@@ -64,8 +90,6 @@ func (a *DBChannelAuthorizer) CanSubscribe(ctx context.Context, userID, channel 
 		return a.isMemberOfCrewWorkspace(ctx, userID, chID)
 	case "agent":
 		return a.isMemberOfAgentWorkspace(ctx, userID, chID)
-	case "session":
-		return a.isSessionOwner(ctx, userID, chID)
 	case "keeper":
 		// keeper:{workspaceId} — check workspace membership
 		return a.isMemberOfWorkspace(ctx, userID, chID)
@@ -189,5 +213,5 @@ func (a *DBChannelAuthorizer) isMemberOfPageWorkspace(ctx context.Context, userI
 }
 
 func (a *DBChannelAuthorizer) isSessionOwner(ctx context.Context, userID, chatID string) (bool, error) {
-	return chataudience.CanRead(ctx, a.db, chatID, userID)
+	return chataudience.CanReadTrusted(ctx, a.db, chatID, userID)
 }

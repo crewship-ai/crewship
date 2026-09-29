@@ -4,12 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/crewship-ai/crewship/internal/devcontainer"
 	"io"
 	"strings"
 	"sync/atomic"
 	"testing"
 
+	"github.com/crewship-ai/crewship/internal/chataudience"
+	"github.com/crewship-ai/crewship/internal/devcontainer"
 	"github.com/crewship-ai/crewship/internal/provider"
 	"github.com/crewship-ai/crewship/internal/ws"
 )
@@ -199,6 +200,7 @@ func TestHandleChatMessageAutoTriggersProvisioning(t *testing.T) {
 	t.Parallel()
 	resolver := &mockResolver{
 		info: &ChatInfo{
+			HumanAuthority:     &chataudience.Receipt{UserID: "user-1", ChatID: "sess-1", MemberID: "original", MemberRevision: 2},
 			AgentID:            "a1",
 			AgentSlug:          "alice",
 			CrewID:             "crew-1",
@@ -236,6 +238,9 @@ func TestHandleChatMessageAutoTriggersProvisioning(t *testing.T) {
 	// SERVER can resume it once the build finishes — this is the whole fix:
 	// without this call, nothing but the client's own (removed) auto-resend
 	// would ever run this message again, which is exactly the silence bug.
+	if enq.attachMsg.Opts.HumanAuthority == nil || *enq.attachMsg.Opts.HumanAuthority != *resolver.info.HumanAuthority {
+		t.Fatal("deferred send lost its original authority")
+	}
 	if !enq.attachCalled {
 		t.Fatal("expected AttachPendingMessage to be called so the job can resume this message")
 	}

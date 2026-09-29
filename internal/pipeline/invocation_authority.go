@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/crewship-ai/crewship/internal/access"
 )
 
 const (
@@ -30,6 +32,15 @@ func HumanInvocationAuthority(userID, authority string) string {
 // Empty means a legacy or not-yet-classified source: membership still applies.
 func NewInvocationAuthorityChecker(db *sql.DB) func(context.Context, RunInput) error {
 	return func(ctx context.Context, in RunInput) error {
+		if in.InvokingUserID != "" && db != nil {
+			restricted, err := (access.Store{DB: db}).HasRestrictedMembership(ctx, in.InvokingUserID)
+			if err != nil {
+				return fmt.Errorf("routine resource authority: %w", err)
+			}
+			if restricted {
+				return ErrInvocationAuthorityRevoked
+			}
+		}
 		if in.InvocationAuthority == "" {
 			return nil
 		}

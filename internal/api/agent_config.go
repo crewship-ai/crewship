@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/crewship-ai/crewship/internal/chataudience"
 	"github.com/crewship-ai/crewship/internal/composio"
 	"github.com/crewship-ai/crewship/internal/credpolicy"
 	"github.com/crewship-ai/crewship/internal/database"
@@ -483,6 +484,18 @@ func (h *InternalHandler) resolveAgentConfigWithOpener(w http.ResponseWriter, r 
 	}
 	if data.roleTitle.Valid && data.roleTitle.String != "" {
 		resp["role_title"] = data.roleTitle.String
+	}
+	if receipt := chataudience.ReceiptFromContext(r.Context()); receipt != nil {
+		current, err := chataudience.CaptureTrusted(r.Context(), h.db, receipt.ChatID, receipt.UserID, receipt)
+		if err != nil {
+			replyInternalError(w, h.logger, "recheck human authority", err)
+			return
+		}
+		if current == nil {
+			replyError(w, http.StatusNotFound, "Chat not found")
+			return
+		}
+		resp["human_authority"] = current
 	}
 	writeJSON(w, http.StatusOK, resp)
 }

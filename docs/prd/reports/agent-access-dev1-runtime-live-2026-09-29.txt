@@ -1,0 +1,119 @@
+07bfd2360a97dbe1c9f71c03e1d9b5d5d471c993
+true
+28ae33252cac0a49fd2390ad92d9931f7d7f5fb870919f798f96b5ae40a74f86  /tmp/crewship-crewship_1-restricted-build.hOBsGj/runner
+690e6fbd8776508ef5d3a4750e1416f9b842d4360da848f0836ee1eb6373527c  /tmp/crewship-crewship_1-restricted-build.hOBsGj/sidecar
+#0 building with "default" instance using docker driver
+
+#1 [internal] load build definition from Dockerfile
+#1 transferring dockerfile: 268B done
+#1 DONE 0.1s
+
+#2 [internal] load metadata for docker.io/library/alpine@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6
+#2 DONE 0.0s
+
+#3 [internal] load .dockerignore
+#3 transferring context:
+#3 transferring context: 2B done
+#3 DONE 0.1s
+
+#4 [1/3] FROM docker.io/library/alpine@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6
+#4 resolve docker.io/library/alpine@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6 0.1s done
+#4 CACHED
+
+#5 [internal] load build context
+#5 transferring context: 61.71MB 0.1s done
+#5 DONE 0.2s
+
+#6 [2/3] COPY runner /opt/crewship-runner
+#6 DONE 0.2s
+
+#7 [3/3] COPY sidecar /opt/crewship-sidecar
+#7 DONE 0.1s
+
+#8 exporting to image
+#8 exporting layers
+#8 exporting layers 1.4s done
+#8 exporting manifest sha256:08664b12269a3718cdc447a57d8fb1e341666ad7ef78501b232a7637d19bd6be 0.0s done
+#8 exporting config sha256:b2de72f3cd901b1db94f0b702a48341474fd0a2880a265ce34787c5c5526cb80 0.0s done
+#8 exporting attestation manifest sha256:d01cc60c9dd460087fe45234fed13b79d20c5d7d0b4843c542327d6d5167ebce
+#8 exporting attestation manifest sha256:d01cc60c9dd460087fe45234fed13b79d20c5d7d0b4843c542327d6d5167ebce 0.1s done
+#8 exporting manifest list sha256:efe71ca747b9dfd5d3a05404b1512446e00fc816e89d66bbe656be55cd436bc5 0.0s done
+#8 naming to docker.io/library/crewship-restricted-probe:crewship_1-20260929075313-1714128
+#8 naming to docker.io/library/crewship-restricted-probe:crewship_1-20260929075313-1714128 done
+#8 unpacking to docker.io/library/crewship-restricted-probe:crewship_1-20260929075313-1714128
+#8 unpacking to docker.io/library/crewship-restricted-probe:crewship_1-20260929075313-1714128 0.2s done
+#8 DONE 1.9s
+=== RUN   TestLiveFixedOperationBroker
+    broker_live_test.go:57: startup_ms=584.274
+    broker_live_test.go:58: connected_start_ms=584.381
+    broker_live_test.go:63: connected_call_ms=62.187
+    broker_live_test.go:77: startup_ms=481.459
+    broker_live_test.go:130: startup_ms=467.006
+    broker_live_test.go:138: docker_stats={"BlockIO":"0B / 0B","CPUPerc":"0.67%","Container":"018b91ca71bc0618da5c56d2315d1fb4015b6bcd72b4270c061f47aae1681d0e","ID":"018b91ca71bc","MemPerc":"3.29%","MemUsage":"4.215MiB / 128MiB","Name":"crewship-rtest-b8ccdb2c235c085b-retry","NetIO":"0B / 0B","PIDs":"10"}
+    broker_live_test.go:138: cgroup_memory=4440064
+        7376896
+--- PASS: TestLiveFixedOperationBroker (4.64s)
+=== RUN   TestLiveFixedBrokerRelayFailure
+    broker_live_test.go:157: startup_ms=451.927
+    broker_live_test.go:180: relay_failure_to_removed_ms=239.088
+--- PASS: TestLiveFixedBrokerRelayFailure (0.76s)
+=== RUN   TestLiveFixedBrokerDirectNetworkDenied
+    broker_live_test.go:185: startup_ms=534.157
+--- PASS: TestLiveFixedBrokerDirectNetworkDenied (0.91s)
+=== RUN   TestLiveIsolationAndRecovery
+    live_test.go:152: startup_ms=449.190
+    live_test.go:153: startup_ms=446.651
+    live_test.go:162: mountinfo_entries=31
+    live_test.go:162: mountinfo_entries=31
+    live_test.go:195: startup_ms=445.838
+    live_test.go:214: startup_ms=482.331
+    live_test.go:237: docker_stats={"BlockIO":"0B / 0B","CPUPerc":"0.54%","Container":"8c36810e209cd35f13ea0973460ced6b8c703516f0cdf2be53b5a6082c1f432b","ID":"8c36810e209c","MemPerc":"1.63%","MemUsage":"2.082MiB / 128MiB","Name":"crewship-rtest-c106771e498e280c-a2","NetIO":"0B / 0B","PIDs":"6"}
+    live_test.go:237: cgroup_memory=2777088
+        5332992
+--- PASS: TestLiveIsolationAndRecovery (8.66s)
+=== RUN   TestLiveRevocationAndAdmission
+    live_test.go:301: startup_ms=498.244
+    live_test.go:325: revoke_to_confirmed_stop_ms=474.207
+    live_test.go:328: startup_ms=923.433
+    live_test.go:338: lease_expiry_stop_ms=1881.188
+--- PASS: TestLiveRevocationAndAdmission (5.18s)
+=== RUN   TestLiveNetworkAndSidecar
+    live_test.go:357: startup_ms=1035.146
+    live_test.go:377: sidecar_ready_ms=630.948
+    live_test.go:383: startup_ms=1197.708
+    live_test.go:384: sidecar_ready_ms=575.132
+    live_test.go:410: startup_ms=1109.132
+    live_test.go:411: sidecar_ready_ms=655.106
+    live_test.go:418: docker_stats={"BlockIO":"0B / 0B","CPUPerc":"1.06%","Container":"bb8f90ae338337021015500e74436c330ccda26be64ac9f2428de2474c7d8885","ID":"bb8f90ae3383","MemPerc":"11.91%","MemUsage":"15.25MiB / 128MiB","Name":"crewship-rtest-1ef404f05077e0e4-network-restored","NetIO":"0B / 0B","PIDs":"17"}
+    live_test.go:418: cgroup_memory=16408576
+        18087936
+--- PASS: TestLiveNetworkAndSidecar (10.85s)
+=== RUN   TestLiveStartupSamples
+    live_test.go:471: startup_ms=1119.510
+    live_test.go:471: startup_ms=1240.661
+    live_test.go:471: startup_ms=1537.919
+    live_test.go:471: startup_ms=1325.400
+    live_test.go:471: startup_ms=1361.375
+    live_test.go:474: docker_stats={"BlockIO":"0B / 0B","CPUPerc":"0.83%","Container":"856fa74a7e955dc4446dfb4889c317953d52c55da536368dbe7fe5c28ddf0a8c","ID":"856fa74a7e95","MemPerc":"1.57%","MemUsage":"2.012MiB / 128MiB","Name":"crewship-rtest-d88d8b00c1db00a4-sample4","NetIO":"0B / 0B","PIDs":"6"}
+    live_test.go:474: cgroup_memory=2666496
+        4415488
+    live_test.go:479: startup_samples=5 p50_ms=1325.556 p95_nearest_rank_ms=1538.129 image_cache=warm samples_ms=[1119.672 1240.8 1325.556 1361.76 1538.129]
+--- PASS: TestLiveStartupSamples (11.60s)
+=== RUN   TestLiveRecoveryAndIndependentService
+    live_test.go:486: startup_ms=1250.040
+    live_test.go:538: startup_ms=1476.887
+--- PASS: TestLiveRecoveryAndIndependentService (6.21s)
+=== RUN   TestLiveWatchdogOutageAndUnconfirmedTermination
+    live_test.go:550: startup_ms=1244.644
+    live_test.go:564: authority_loss_stop_ms=5289.243
+    live_test.go:588: startup_ms=498.095
+    live_test.go:613: startup_ms=559.354
+--- PASS: TestLiveWatchdogOutageAndUnconfirmedTermination (9.06s)
+=== RUN   TestLiveSharedUIDControl
+    live_test.go:621: startup_ms=1120.542
+--- PASS: TestLiveSharedUIDControl (1.95s)
+=== RUN   TestLiveControllerCrashExpiry
+    live_test.go:698: controller_crash_to_independent_stop_ms=15079.041
+--- PASS: TestLiveControllerCrashExpiry (17.21s)
+PASS
+ok  	github.com/crewship-ai/crewship/internal/restrictedruntime	78.049s

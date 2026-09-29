@@ -3,6 +3,7 @@ package chatbridge
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -11,6 +12,7 @@ import (
 	"net/url"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/chataudience"
 	"github.com/crewship-ai/crewship/internal/devcontainer"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
 )
@@ -59,6 +61,7 @@ func NewIPCResolver(nextjsURL, internalToken string, logger *slog.Logger) *IPCRe
 }
 
 type chatResolveResponse struct {
+	HumanAuthority        *chataudience.Receipt    `json:"human_authority"`
 	AgentID               string                   `json:"agent_id"`
 	AgentSlug             string                   `json:"agent_slug"`
 	AgentRole             string                   `json:"agent_role"`
@@ -463,6 +466,31 @@ func (r *IPCResolver) ResolveChat(ctx context.Context, chatID string) (*ChatInfo
 	return r.resolve(ctx, resolveURL)
 }
 
+// ResolveHumanChat binds context materialization to the authenticated sender.
+// The bridge obtains userID from the connection or server-owned queued message,
+// never message metadata. Only the host's internal token can call this route.
+func (r *IPCResolver) ResolveHumanChat(ctx context.Context, userID, chatID string) (*ChatInfo, error) {
+	if userID == "" || chatID == "" {
+		return nil, fmt.Errorf("human chat identity required")
+	}
+	resolveURL := r.baseURL + "/api/v1/internal/chats/" + url.PathEscape(chatID) + "/resolve-human?user_id=" + url.QueryEscape(userID)
+	if receipt := chataudience.ReceiptFromContext(ctx); receipt != nil {
+		raw, err := json.Marshal(receipt)
+		if err != nil {
+			return nil, err
+		}
+		resolveURL += "&receipt=" + base64.RawURLEncoding.EncodeToString(raw)
+	}
+	info, err := r.resolve(ctx, resolveURL)
+	if err != nil {
+		return nil, err
+	}
+	if info.HumanAuthority == nil {
+		return nil, fmt.Errorf("human authority receipt missing")
+	}
+	return info, nil
+}
+
 // ResolveAgent resolves an agent ID to its configuration via the internal API.
 // When workspaceID is non-empty it is sent as ?workspace_id= so the server
 // constrains the lookup to that tenant (404 on cross-tenant id).
@@ -715,6 +743,7 @@ func (r *IPCResolver) resolve(ctx context.Context, resolveURL string) (*ChatInfo
 		OpenedByUserID:        data.OpenedByUserID,
 		RoleTitle:             data.RoleTitle,
 		Visibility:            data.Visibility,
+		HumanAuthority:        data.HumanAuthority,
 		ApprovalMode:          data.ApprovalMode,
 	}, nil
 }
