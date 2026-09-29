@@ -3,9 +3,11 @@
 package restrictedruntime
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -16,6 +18,88 @@ import (
 
 	"golang.org/x/net/dns/dnsmessage"
 )
+
+func TestLiveStreamingBroker(t *testing.T) {
+	f := live(t)
+	p := streamingPlan()
+	p.Credentials = []Credential{{ID: "direct", Env: "DIRECT_TOKEN", File: "direct"}}
+	p.Network.Grants[0].URL = "https://example.com/stream"
+	p.Network.Grants[0].TimeoutMillis = 10000
+	p.Network.Grants[0].CredentialID = "broker-key"
+	p.Network.Credentials = []BrokerCredential{{ID: "broker-key", Revision: "r1", Provider: "test", Account: "account-a", Delivery: "broker-bearer-v1"}}
+	p.Command = []string{"sh", "-c", `printf '%s' "$CREWSHIP_BROKER_TOKEN" > /home/agent/broker-token; exec sleep 3600`}
+	f.m.Authority = &brokerFixtureAuthority{fixtureAuthority: f.a, material: BoundSecret{ID: "broker-key", Revision: "r1", Provider: "test", Account: "account-a", Value: "synthetic-stream-secret", Expires: time.Now().Add(time.Minute)}}
+	finish := make(chan struct{}, 1)
+	revoking := &atomic.Bool{}
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer synthetic-stream-secret" || r.URL.Path != "/stream" {
+			t.Error("stream reached wrong credential/operation")
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "data: first\n\n")
+		w.(http.Flusher).Flush()
+		if revoking.Load() {
+			select {
+			case <-finish:
+			case <-r.Context().Done():
+				return
+			}
+			_, _ = io.WriteString(w, "data: REVOKED_STREAM_CANARY\n\n")
+			return
+		}
+		// Keep the upstream open until the test sees a real partial response
+		// inside UID 1001. Buffered forwarding cannot pass this positive control.
+		select {
+		case <-finish:
+		case <-r.Context().Done():
+			return
+		}
+		_, _ = io.WriteString(w, "data: synthetic-stream-secret\n\n")
+	}))
+	t.Cleanup(server.Close)
+	f.m.brokerTransport = syntheticBrokerTransport(t, server)
+	s := f.start("stream", p, "synthetic-direct")
+	call := func(revoke bool) {
+		ctx, cancel := context.WithTimeout(f.ctx, 8*time.Second)
+		defer cancel()
+		cmd := f.d.command(ctx, "exec", "--user", "1001:1001", s.ID(), "sh", "-c", strings.Replace(liveBrokerCall, "-T 3", "-T 8", 1))
+		stdout, err := cmd.StdoutPipe()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := cmd.Start(); err != nil {
+			t.Fatal(err)
+		}
+		reader := bufio.NewReader(stdout)
+		line, readErr := reader.ReadString('\n')
+		if readErr != nil || line != "data: first\n" {
+			cancel()
+			_ = cmd.Wait()
+			t.Fatalf("positive streaming control failed: line=%q err=%v", line, readErr)
+		}
+		if revoke {
+			f.a.revoke("stream")
+		}
+		finish <- struct{}{}
+		rest, readErr := io.ReadAll(reader)
+		waitErr := cmd.Wait()
+		if strings.Contains(string(rest), "synthetic-stream-secret") || strings.Contains(string(rest), "REVOKED_STREAM_CANARY") {
+			t.Fatal("stream released a secret or post-revocation canary")
+		}
+		if !revoke && (readErr != nil || waitErr != nil || !strings.Contains(string(rest), "[REDACTED]")) {
+			t.Fatalf("positive streaming completion failed: read=%v wait=%v body=%q", readErr, waitErr, rest)
+		}
+	}
+	call(false)
+	revoking.Store(true)
+	call(true)
+	select {
+	case <-s.Done():
+	case <-time.After(3 * time.Second):
+		t.Fatal("stream revocation did not terminate the container")
+	}
+	t.Log("UID-1001 received first SSE event before upstream completion; broker secret redacted; revocation suppressed next event and terminated attempt")
+}
 
 func connectedLive(t *testing.T) (*liveFixture, Plan, *atomic.Int32, *atomic.Bool) {
 	t.Helper()

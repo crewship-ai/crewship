@@ -6,6 +6,8 @@ synthetic allow/deny callback at this boundary. It does **not** enable restricte
 chat, CLI, or routines yet.
 
 The authenticated host caller invokes `Prepare` with a trusted command builder.
+The caller must also enforce its existing RBAC/capability and origin checks;
+resource grants are an additional ceiling, not a replacement for those checks.
 Admission happens before the builder reads prompt or memory data. The builder
 receives the exact durable attempt, rights, principal and private data scope.
 Its command is persisted once, keyed by that attempt, and cannot be updated.

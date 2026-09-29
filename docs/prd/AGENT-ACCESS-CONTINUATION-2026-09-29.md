@@ -1,5 +1,10 @@
 # Agent Access / Runtime — pokračování na dev1, 29. 9. 2026
 
+**Aktualizace 13:02 UTC:** #2717 je sloučené jako `7bbb09832`, po úspěchu celého
+finálního CI a věcném review i schválení `56c103a98`. Starší věty o billing blokaci
+nebo draftu níže jsou historický protokol. Release 1.0 stále není přijatý;
+navazující runtime/provider/storage integrace pokračuje v oddělené větvi.
+
 Navazuje na #2703/#2711 a předání uživatele. Rozsah není UX Routines.
 Výchozí checkout i dev1: `07bfd2360` (#2716), čistý pracovní strom.
 Uživatel povolil pokračování implementace, testování a nasazování na dev1.
@@ -362,3 +367,32 @@ workspace odstraněn přes CLI, účty zůstávají bez členství. Report:
 GitHub automatický merge není v tomto repozitáři povolen; pokus o jeho nastavení
 byl odmítnut, žádná ochrana nebyla vypnuta. #2717 již má finální APPROVED review,
 ale při tomto zápisu stále čeká na poslední Go Race (internal/api) job.
+
+## Broker v2: omezený SSE transport
+
+Navazující větev doplňuje explicitní profil `brokered-http-v2`, network version 2
+a grant `ResponseMode=sse`. V1 zůstává pouze bufferovaný; prázdná nová pole se
+nepřidávají do jeho wire formátu. Cíl, metoda a účet jsou nadále pevné, bez
+redirectů či obecného proxy. Limit je nejvýše 1 MiB přijatých i doručených dat
+a pět minut. Každý vydaný frame ověřuje aktuální autoritu i expiraci vydaného
+credential; odvolaný nebo nedokončený stream skončí přerušením spojení. Tajemství
+rozdělené přes hranice čtení se zadržuje a rediguje, s lineárně omezeným hledáním
+prefixu. Čas čekání na modelové hlavičky zůstává omezený na nejvýše 30 sekund.
+
+Ověření finálního kódu: všech **150 Go balíků**, celý vet, cílené runtime race
+testy a **13/13 živých Docker případů**. UID 1001 obdržel první SSE event ještě
+před dokončením syntetického TLS upstreamu, broker secret se neobjevil v odpovědi
+a po revokaci nepřišel následující canary; kontejner skončil. Samostatný test se
+skutečným aplikačním grant store znovu zastavil H1 za 4,717 s při funkčním H2.
+Mutation overlay odstranil pouze per-frame broker authority check a test správně
+selhal doručením `REVOKED_CANARY`. Výsledky:
+
+- `reports/agent-access-broker-stream-go-2026-09-29.txt`
+- `reports/agent-access-broker-stream-live-2026-09-29.txt`
+- `reports/agent-access-broker-stream-mutation-2026-09-29.txt`
+
+Aplikační store adaptér a síťový SSE profil jsou zatím ověřené **odděleně**.
+`restricteddispatch.Authority` dosud nevydává síťové/credential granty a nemá
+produkční provider adapter. SSE transport sám neřeší modelovou sémantiku dokončení,
+ceny, scoped prompt/recall, storage ani veřejný chatový dispatch. Veřejná aktivace
+restricted profilu zůstává nedostupná. Celé PRD se tím neuzavírá.

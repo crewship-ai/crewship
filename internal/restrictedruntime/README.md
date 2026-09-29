@@ -103,3 +103,26 @@ limits, ownership boundary and acceptance contract. The same live harness now
 also tests the fixed-operation broker with synthetic TLS/DNS/neighbor controls.
 The private test transport seam maps a checked synthetic routable address to an
 owned loopback TLS endpoint; the production constructor exposes no such bypass.
+
+## Bounded streaming transport
+
+`Plan.Profile="brokered-http-v2"` and network version 2 additionally support an
+explicit `HTTPGrant.ResponseMode="sse"`. Version 1 retains buffered-only behavior;
+no operation implicitly gains streaming. The endpoint, method, account and
+request budget remain server-selected. This transport does not itself supply a
+production model/provider adapter or enable an application entrypoint.
+
+An SSE grant permits at most 1 MiB of upstream bytes and delivered bytes per
+response and a timeout of at most five minutes. Only a successful HTTP 200
+`text/event-stream` response with identity encoding is accepted. Each emitted
+frame rechecks live authority and the issued credential's expiry. The watchdog
+also ends an idle stream when authority expires. A denied/truncated stream aborts
+the local HTTP connection and cannot be mistaken for the reply to another
+request. Client disconnect closes the broker instead of recycling an outstanding
+reply into another request. There are no redirects, arbitrary headers, WebSocket
+or general proxy capabilities.
+
+Literal broker secrets are removed across read boundaries; an unfinished secret
+prefix is withheld at EOF. This does not remove encoded secrets or classify
+authorized model output. Model-specific completion semantics, pricing, credential
+grant adapters and downstream application audience checks remain separate gates.

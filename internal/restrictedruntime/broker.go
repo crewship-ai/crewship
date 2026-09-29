@@ -24,6 +24,7 @@ type HTTPGrant struct {
 	ID, Revision            string
 	Method, URL             string
 	CredentialID            string
+	ResponseMode            string `json:",omitempty"` // empty: bounded buffered response; "sse": explicit v2 streaming grant
 	MaxRequest, MaxResponse int64
 	TimeoutMillis           int64
 }
@@ -53,7 +54,8 @@ func (p Plan) validateNetwork() error {
 		return nil
 	}
 	n := p.Network
-	if p.Profile != "brokered-http-v1" || n == nil || n.Version != 1 || !identifier.MatchString(n.Audience) || len(n.Grants) == 0 || len(n.Grants) > 16 || len(n.Credentials) > 16 {
+	versionOK := n != nil && ((p.Profile == "brokered-http-v1" && n.Version == 1) || (p.Profile == "brokered-http-v2" && n.Version == 2))
+	if !versionOK || !identifier.MatchString(n.Audience) || len(n.Grants) == 0 || len(n.Grants) > 16 || len(n.Credentials) > 16 {
 		return ErrDenied
 	}
 	for _, m := range p.Mounts {
@@ -75,6 +77,12 @@ func (p Plan) validateNetwork() error {
 	}
 	ids := map[string]bool{}
 	for _, g := range n.Grants {
+		maxTimeout := int64(10000)
+		if g.ResponseMode == "sse" && p.Profile == "brokered-http-v2" {
+			maxTimeout = 300000
+		} else if g.ResponseMode != "" {
+			return ErrDenied
+		}
 		u, e := httpsafe.ValidateURL(g.URL)
 		if e != nil || u.Scheme != "https" || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || strings.Contains(u.Host, "%") || len(g.URL) > 2048 {
 			return ErrDenied
@@ -82,7 +90,7 @@ func (p Plan) validateNetwork() error {
 		if _, e = url.ParseRequestURI(g.URL); e != nil {
 			return ErrDenied
 		}
-		if !identifier.MatchString(g.ID) || !identifier.MatchString(g.Revision) || ids[g.ID] || (g.Method != "GET" && g.Method != "POST") || g.MaxRequest < 0 || g.MaxRequest > 1<<20 || g.MaxResponse < 1 || g.MaxResponse > 1<<20 || g.TimeoutMillis < 1 || g.TimeoutMillis > 10000 {
+		if !identifier.MatchString(g.ID) || !identifier.MatchString(g.Revision) || ids[g.ID] || (g.Method != "GET" && g.Method != "POST") || g.MaxRequest < 0 || g.MaxRequest > 1<<20 || g.MaxResponse < 1 || g.MaxResponse > 1<<20 || g.TimeoutMillis < 1 || g.TimeoutMillis > maxTimeout {
 			return ErrDenied
 		}
 		if g.CredentialID != "" && !creds[g.CredentialID] {
@@ -120,7 +128,7 @@ func narrowNetwork(parent, child Plan) error {
 	for _, c := range child.Network.Grants {
 		found := false
 		for _, p := range parent.Network.Grants {
-			if c.ID == p.ID && c.Revision == p.Revision && c.URL == p.URL && c.Method == p.Method && c.CredentialID == p.CredentialID && c.MaxRequest <= p.MaxRequest && c.MaxResponse <= p.MaxResponse && c.TimeoutMillis <= p.TimeoutMillis {
+			if c.ID == p.ID && c.Revision == p.Revision && c.URL == p.URL && c.Method == p.Method && c.CredentialID == p.CredentialID && c.ResponseMode == p.ResponseMode && c.MaxRequest <= p.MaxRequest && c.MaxResponse <= p.MaxResponse && c.TimeoutMillis <= p.TimeoutMillis {
 				found = true
 			}
 		}
