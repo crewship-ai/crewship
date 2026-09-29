@@ -3,7 +3,7 @@ import { render, screen, fireEvent, waitFor, cleanup, within } from "@testing-li
 
 const api = vi.fn()
 vi.mock("@/lib/api-fetch", () => ({ apiFetch: (...a: unknown[]) => api(...a) }))
-vi.mock("@/hooks/use-workspace", () => ({ useWorkspace: () => ({ workspaceId: "ws" }) }))
+vi.mock("@/hooks/use-workspace", () => ({ useWorkspace: () => ({ workspaceId: "ws" }), useCurrentWorkspaceId: () => "ws" }))
 let role = "OWNER"
 vi.mock("@/hooks/use-abilities", () => ({ useAbilities: () => ({ role }) }))
 let mobile = false
@@ -103,5 +103,91 @@ describe("Crew links page", () => {
     await screen.findByRole("region", { name: "Hands work to" })
     expect(screen.getByRole("tablist", { name: "View" })).toBeInTheDocument()
     expect(screen.getByRole("combobox", { name: "Crew" })).toHaveValue("engineering")
+  })
+})
+
+// The side panel works like every explorer sidebar: search, a Filter popover,
+// facets with counts; the crew is shown with what the database knows of it.
+describe("Crew links side panel and profile", () => {
+  const RICH = [
+    { id: "eng", name: "Engineering", slug: "engineering", icon: "terminal", color: "#3B82F6", network_mode: "restricted", container_memory_mb: 4096, container_cpus: 2,
+      runtime_image: "mcr.microsoft.com/devcontainers/javascript-node:22-bookworm@sha256:abc", _count: { agents: 2, members: 1 } },
+    { id: "ops", name: "Ops", slug: "ops", icon: "server", color: "#EF4444", network_mode: "free", description: "Keeps the lights on.", _count: { agents: 1, members: 0 } },
+    { id: "qa", name: "Quality", slug: "quality", network_mode: "restricted", _count: { agents: 0, members: 0 } },
+    { id: "col", name: "Collector", slug: "collector", network_mode: "restricted", _count: { agents: 0, members: 0 } },
+  ]
+  const AGENTS = [
+    { id: "a1", name: "Jamie", slug: "jamie", crew_id: "eng", status: "IDLE" },
+    { id: "a2", name: "Taylor", slug: "taylor", crew_id: "eng", status: "STOPPED" },
+    { id: "a3", name: "Riley", slug: "riley", crew_id: "ops", status: "IDLE" },
+  ]
+  beforeEach(() => {
+    api.mockImplementation(async (url: string) =>
+      url.includes("/crews?") ? ok(RICH) : url.includes("/crew-connections") ? ok(CONNS) : url.includes("/agents?") ? ok(AGENTS) : ok({}))
+  })
+  const panel = () => screen.getByRole("complementary", { name: "Crew links navigation" })
+
+  it("shows the crew's profile: description, agents, members, network, box and image", async () => {
+    render(<CrewLinksPage />)
+    const profile = await screen.findByRole("region", { name: "Engineering profile" })
+    await waitFor(() => expect(within(profile).getByText(/1 stopped/)).toBeInTheDocument())
+    expect(within(profile).getByText(/No description/)).toBeInTheDocument()
+    expect(within(profile).getByText("Restricted network")).toBeInTheDocument()
+    expect(within(profile).getByText("4 GB · 2 CPU")).toBeInTheDocument()
+    expect(within(profile).getByText("javascript-node:22-bookworm")).toBeInTheDocument()
+    expect(within(profile).getByRole("link", { name: /Open crew/ })).toHaveAttribute("href", "/crews?crew=engineering")
+    expect(within(profile).queryByText("Set icon and colour")).toBeNull()
+  })
+
+  it("offers to set an icon for a crew without one, and draws its tile dashed", async () => {
+    window.history.replaceState(null, "", "/settings/crew-links?crew=quality")
+    render(<CrewLinksPage />)
+    const profile = await screen.findByRole("region", { name: "Quality profile" })
+    expect(within(profile).getByRole("link", { name: "Set icon and colour" })).toHaveAttribute("href", "/crews?crew=quality")
+    expect(within(profile).getByTitle("No icon set")).toBeInTheDocument()
+  })
+
+  it("the search finds a crew by one of its agents", async () => {
+    render(<CrewLinksPage />)
+    await screen.findByRole("region", { name: "Engineering profile" })
+    await waitFor(() => expect(within(panel()).getByText("2 agents · 1 stopped")).toBeInTheDocument())
+    fireEvent.change(within(panel()).getByPlaceholderText("Search crews, agents…"), { target: { value: "riley" } })
+    expect(within(panel()).queryByRole("button", { name: /Engineering/ })).toBeNull()
+    expect(within(panel()).getByRole("button", { name: /^Ops/ })).toBeInTheDocument()
+    expect(new URLSearchParams(window.location.search).get("q")).toBe("riley")
+  })
+
+  it("the Links facet and the Agents filter narrow the crew list, and a chip removes one", async () => {
+    render(<CrewLinksPage />)
+    await screen.findByRole("region", { name: "Engineering profile" })
+    fireEvent.click(within(panel()).getByRole("button", { name: /No links/ }))
+    expect(within(panel()).queryByRole("button", { name: /^Engineering/ })).toBeNull()
+    expect(within(panel()).getByRole("button", { name: /^Collector/ })).toBeInTheDocument()
+    fireEvent.click(within(panel()).getByRole("button", { name: /Filter/ }))
+    fireEvent.click(screen.getByRole("button", { name: /With agents/ }))
+    expect(within(panel()).queryByRole("button", { name: /^Collector/ })).toBeNull()
+    expect(new URLSearchParams(window.location.search).get("agents")).toBe("with")
+    fireEvent.click(screen.getByRole("button", { name: "Remove filter No links" }))
+    expect(within(panel()).getByRole("button", { name: /^Engineering/ })).toBeInTheDocument()
+    expect(new URLSearchParams(window.location.search).get("links")).toBeNull()
+  })
+
+  it("the link map shows who hands work in and out, and a node opens that crew", async () => {
+    render(<CrewLinksPage />)
+    const map = await screen.findByRole("region", { name: "Link map" })
+    expect(within(map).getAllByRole("button", { name: "Open Ops" })).toHaveLength(2)
+    expect(within(map).getAllByRole("button", { name: "Open Quality" })).toHaveLength(1)
+    fireEvent.click(within(map).getAllByRole("button", { name: "Open Ops" })[0])
+    expect(await screen.findByRole("region", { name: "Ops profile" })).toBeInTheDocument()
+    expect(new URLSearchParams(window.location.search).get("crew")).toBe("ops")
+  })
+
+  it("heads the matrix columns with the crews' icons, named on hover", async () => {
+    render(<CrewLinksPage />)
+    await screen.findByRole("region", { name: "Engineering profile" })
+    fireEvent.click(screen.getByRole("button", { name: "Matrix" }))
+    const grid = await screen.findByRole("grid", { name: "Rows hand work to columns" })
+    expect(within(grid).getByRole("columnheader", { name: "Engineering (engineering)" })).toHaveAttribute("title", "Engineering (engineering)")
+    expect(within(grid).getByRole("columnheader", { name: "Collector (collector)" })).toBeInTheDocument()
   })
 })

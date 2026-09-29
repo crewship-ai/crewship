@@ -1,34 +1,43 @@
 "use client"
 
 import * as React from "react"
-import { ArrowRight, Download, Eye, Grid3x3, Link2, List, Plus, Search, Settings as SettingsIcon, ShieldCheck, Users, X } from "lucide-react"
+import { motion, useReducedMotion } from "motion/react"
+import { ArrowRight, Download, Eye, Grid3x3, Link2, List, Plus, Settings as SettingsIcon, ShieldCheck, Users, X } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { useIsMobile } from "@/hooks/use-mobile"
-import { CrewIcon } from "@/components/ui/crew-icon"
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { DrillNavItem, DrillNavSection, DrillPage } from "@/components/layout/drill-page"
+import { SidebarFacet, SidebarFacetOption, SidebarFilterPopover, SidebarSearch } from "@/components/layout/sidebar-kit"
 
 import {
+  DEFAULT_CREW_LINK_FILTERS,
   FILE_LABELS,
+  activeFacetCount,
+  agentCount,
   byName,
   combinePair,
   connectionBetween,
   crewLinkStats,
+  crewMatches,
   dirKey,
   directionSentence,
   directionsOf,
   duplicateNames,
+  isOpenNetwork,
   splitPair,
   stateOf,
   type Crew,
+  type CrewAgent,
+  type CrewLinkFilters,
   type Direction,
   type FileAccess,
 } from "./crew-links-model"
+import { CrewProfile, CrewTile, LinkMap, agentsLine } from "./crew-profile"
 import { useCrewLinks } from "./use-crew-links"
 
 type View = "crew" | "all" | "matrix"
@@ -38,90 +47,140 @@ const VIEWS: { key: View; label: string; icon: typeof List }[] = [
   { key: "matrix", label: "Matrix", icon: Grid3x3 },
 ]
 
-/** ?view= and ?crew= (a slug) keep the page shareable and reload-safe. */
-function readUrl(): { view: View; crew: string } {
-  if (typeof window === "undefined") return { view: "crew", crew: "" }
+interface UrlState { view: View; crew: string; filters: CrewLinkFilters }
+
+/** ?view=, ?crew= (a slug) and the filters (?links= ?agents= ?net= ?q=) keep
+ *  the page shareable and reload-safe. Defaults stay out of the URL. */
+function readUrl(): UrlState {
+  if (typeof window === "undefined") return { view: "crew", crew: "", filters: DEFAULT_CREW_LINK_FILTERS }
   const p = new URLSearchParams(window.location.search)
   const v = p.get("view")
-  return { view: v === "all" || v === "matrix" ? v : "crew", crew: p.get("crew") ?? "" }
+  const links = p.get("links")
+  const agents = p.get("agents")
+  const net = p.get("net")
+  return {
+    view: v === "all" || v === "matrix" ? v : "crew",
+    crew: p.get("crew") ?? "",
+    filters: {
+      links: links === "linked" || links === "none" ? links : "all",
+      agents: agents === "with" || agents === "none" ? agents : "",
+      net: net === "restricted" || net === "open" ? net : "",
+      q: p.get("q") ?? "",
+    },
+  }
 }
-function writeUrl(view: View, crew: string) {
+function writeUrl({ view, crew, filters }: UrlState) {
   const url = new URL(window.location.href)
-  if (view === "crew") url.searchParams.delete("view"); else url.searchParams.set("view", view)
-  if (crew && view === "crew") url.searchParams.set("crew", crew); else url.searchParams.delete("crew")
+  const set = (k: string, v: string, keep: boolean) => (keep ? url.searchParams.set(k, v) : url.searchParams.delete(k))
+  set("view", view, view !== "crew")
+  set("crew", crew, Boolean(crew) && view === "crew")
+  set("links", filters.links, filters.links !== "all")
+  set("agents", filters.agents, Boolean(filters.agents))
+  set("net", filters.net, Boolean(filters.net))
+  set("q", filters.q, Boolean(filters.q))
   window.history.replaceState(window.history.state, "", url.toString())
 }
+
+const LINK_FACETS: { key: CrewLinkFilters["links"]; label: string }[] = [
+  { key: "all", label: "All crews" },
+  { key: "linked", label: "Linked" },
+  { key: "none", label: "No links" },
+]
 
 export function CrewLinksPage() {
   const { workspaceId } = useWorkspace()
   const isMobile = useIsMobile()
+  const reduce = useReducedMotion()
   const links = useCrewLinks(workspaceId)
-  const { crews, connections, loading, loadError, canManage } = links
-  const [{ view, crew: crewSlug }, setNav] = React.useState(readUrl)
-  const [query, setQuery] = React.useState("")
-  const [onlyLinked, setOnlyLinked] = React.useState(false)
+  const { crews, connections, agentsByCrew, loading, loadError, canManage } = links
+  const [state, setState] = React.useState(readUrl)
+  const { view, crew: crewSlug, filters } = state
 
-  const setView = (v: View) => { setNav((n) => ({ ...n, view: v })); writeUrl(v, crewSlug) }
-  const selectCrew = (slug: string) => { setNav({ view: "crew", crew: slug }); writeUrl("crew", slug) }
+  const update = (next: Partial<UrlState>) => setState((prev) => {
+    const merged = { ...prev, ...next }
+    writeUrl(merged)
+    return merged
+  })
+  const setView = (v: View) => update({ view: v })
+  const selectCrew = (slug: string) => update({ view: "crew", crew: slug })
+  const setFilters = (next: Partial<CrewLinkFilters>) => update({ filters: { ...filters, ...next } })
 
   const dirs = React.useMemo(() => directionsOf(connections), [connections])
   const dups = React.useMemo(() => duplicateNames(crews), [crews])
   const stats = crewLinkStats(crews, connections)
   const linkedIds = React.useMemo(() => new Set(connections.flatMap((c) => [c.from_crew_id, c.to_crew_id])), [connections])
-  const matches = (c: Crew) => !query || `${c.name} ${c.slug}`.toLowerCase().includes(query.trim().toLowerCase())
+  const agentsOf = (c: Crew) => agentsByCrew?.get(c.id) ?? (agentsByCrew ? [] : undefined)
   const sorted = [...crews].sort(byName)
-  const withLinks = sorted.filter((c) => linkedIds.has(c.id) && matches(c))
-  const alone = sorted.filter((c) => !linkedIds.has(c.id) && matches(c))
-  const selected = crews.find((c) => c.slug === crewSlug) ?? withLinks[0] ?? sorted[0]
+  const shown = sorted.filter((c) => crewMatches(c, filters, linkedIds.has(c.id), agentsOf(c)))
+  const withLinks = shown.filter((c) => linkedIds.has(c.id))
+  const alone = shown.filter((c) => !linkedIds.has(c.id))
+  // An explicitly opened crew stays open even when a filter hides it in the list.
+  const selected = crews.find((c) => c.slug === crewSlug) ?? withLinks[0] ?? shown[0] ?? sorted[0]
   const filesUnknown = [...dirs.values()].some((d) => d.files === null)
   const outsOf = (id: string) => sorted.filter((c) => dirs.has(dirKey(id, c.id)))
   const insOf = (id: string) => sorted.filter((c) => dirs.has(dirKey(c.id, id)))
+  const facetCount = (key: CrewLinkFilters["links"]) => sorted.filter((c) => crewMatches(c, { ...filters, links: key }, linkedIds.has(c.id), agentsOf(c))).length
+  const popoverCount = Number(Boolean(filters.agents)) + Number(Boolean(filters.net))
+  const countWhere = (f: (c: Crew) => boolean) => crews.filter(f).length
+
+  const crewItem = (c: Crew, i: number) => (
+    <DrillNavItem key={c.id} index={i} selected={view === "crew" && selected?.id === c.id} onSelect={() => selectCrew(c.slug)} title={`${c.name} · ${c.slug}`}
+      icon={<CrewTile crew={c} />}
+      label={<>{c.name}{dups.has(c.name) && <span className="ml-1.5 font-mono text-[10.5px] text-muted-foreground">{c.slug}</span>}</>}
+      sub={agentsLine(c, agentsOf(c)) ?? undefined}
+      meta={linkedIds.has(c.id) ? <span title="hands work to · receives work from">↗{outsOf(c.id).length} ↙{insOf(c.id).length}</span> : undefined} />
+  )
+
+  const toolbar = (
+    <>
+      <SidebarSearch value={filters.q} onValueChange={(q) => setFilters({ q })} placeholder="Search crews, agents…" />
+      <SidebarFilterPopover label="Filter crews" activeCount={popoverCount} onClear={() => setFilters({ agents: "", net: "" })} panelClassName="min-w-[220px]">
+        <SidebarFacet label="Agents" resetLabel="Any crew" resetActive={!filters.agents} onReset={() => setFilters({ agents: "" })} first>
+          <SidebarFacetOption active={filters.agents === "with"} onToggle={() => setFilters({ agents: filters.agents === "with" ? "" : "with" })}>
+            With agents<span className="ml-auto font-mono text-[10px] text-muted-foreground">{countWhere((c) => (agentCount(c, agentsOf(c)) ?? 0) > 0)}</span>
+          </SidebarFacetOption>
+          <SidebarFacetOption active={filters.agents === "none"} onToggle={() => setFilters({ agents: filters.agents === "none" ? "" : "none" })}>
+            No agents (collectors)<span className="ml-auto font-mono text-[10px] text-muted-foreground">{countWhere((c) => agentCount(c, agentsOf(c)) === 0)}</span>
+          </SidebarFacetOption>
+        </SidebarFacet>
+        <SidebarFacet label="Network" resetLabel="Any network" resetActive={!filters.net} onReset={() => setFilters({ net: "" })}>
+          <SidebarFacetOption active={filters.net === "restricted"} onToggle={() => setFilters({ net: filters.net === "restricted" ? "" : "restricted" })}>
+            Restricted<span className="ml-auto font-mono text-[10px] text-muted-foreground">{countWhere((c) => c.network_mode != null && !isOpenNetwork(c))}</span>
+          </SidebarFacetOption>
+          <SidebarFacetOption active={filters.net === "open"} onToggle={() => setFilters({ net: filters.net === "open" ? "" : "open" })}>
+            Open<span className="ml-auto font-mono text-[10px] text-muted-foreground">{countWhere(isOpenNetwork)}</span>
+          </SidebarFacetOption>
+        </SidebarFacet>
+      </SidebarFilterPopover>
+    </>
+  )
 
   const nav = (
     <>
-      <DrillNavSection label="View">
+      <div className="mx-2 mt-1 grid grid-cols-3 gap-0.5 rounded-lg border border-border bg-surface-subtle p-0.5" role="group" aria-label="View">
         {VIEWS.map((v) => (
-          <DrillNavItem key={v.key} selected={view === v.key} onSelect={() => setView(v.key)} icon={<v.icon className="h-3.5 w-3.5 shrink-0 opacity-70" />} label={v.label} />
+          <button key={v.key} type="button" aria-pressed={view === v.key} onClick={() => setView(v.key)} data-drill-close
+            className={cn("flex h-7 items-center justify-center gap-1 rounded-md text-[11.5px] font-medium transition-colors", view === v.key ? "bg-card text-foreground shadow-xs" : "text-muted-foreground hover:text-foreground")}>
+            <v.icon className="h-3.5 w-3.5" />{v.label}
+          </button>
         ))}
+      </div>
+      <DrillNavSection label="Links" count={crews.length}>
+        {LINK_FACETS.map((f, i) => {
+          const n = facetCount(f.key)
+          return (
+            <DrillNavItem key={f.key} index={i} selected={filters.links === f.key} pressed={filters.links === f.key} muted={!n} onSelect={() => setFilters({ links: f.key })}
+              icon={<span className={cn("h-1.5 w-1.5 shrink-0 rounded-full", f.key === "linked" ? "bg-primary" : f.key === "none" ? "bg-muted-foreground" : "bg-border")} aria-hidden />}
+              label={f.label} meta={n} />
+          )
+        })}
       </DrillNavSection>
-      {view === "crew" && (
-        <>
-          <div className="px-3 pt-3">
-            <label className="flex h-8 items-center gap-2 rounded-md border border-border bg-surface-subtle px-2.5 text-muted-foreground focus-within:border-ring">
-              <Search className="h-3.5 w-3.5 shrink-0" />
-              <input type="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Find a crew…" aria-label="Find a crew" className="w-full bg-transparent text-control text-foreground outline-none placeholder:text-muted-foreground" />
-            </label>
-          </div>
-          {withLinks.length > 0 && (
-            <DrillNavSection label="Linked" count={withLinks.length}>
-              {withLinks.map((c) => (
-                <DrillNavItem key={c.id} selected={selected?.id === c.id} onSelect={() => selectCrew(c.slug)} title={`${c.name} · ${c.slug}`}
-                  icon={<CrewIcon icon={c.icon || "briefcase"} color={c.color} size="sm" />}
-                  label={<CrewLabel crew={c} dup={dups.has(c.name)} />}
-                  meta={<span title="hands work to · receives work from">↗{outsOf(c.id).length} ↙{insOf(c.id).length}</span>} />
-              ))}
-            </DrillNavSection>
-          )}
-          {alone.length > 0 && (
-            <DrillNavSection label="No links" count={alone.length}>
-              {alone.map((c) => (
-                <DrillNavItem key={c.id} muted selected={selected?.id === c.id} onSelect={() => selectCrew(c.slug)} title={`${c.name} · ${c.slug}`}
-                  icon={<CrewIcon icon={c.icon || "briefcase"} color={c.color} size="sm" />}
-                  label={<CrewLabel crew={c} dup={dups.has(c.name)} />} />
-              ))}
-            </DrillNavSection>
-          )}
-          {!withLinks.length && !alone.length && <p className="px-4 pt-3 text-xs text-muted-foreground">No crew matches “{query}”.</p>}
-        </>
-      )}
-      {view !== "crew" && (
-        <div className="px-3 pt-4">
-          <label className="flex cursor-pointer items-center gap-2 text-xs text-muted-foreground">
-            <Switch checked={onlyLinked} onCheckedChange={setOnlyLinked} aria-label="Only crews with links" />
-            Only crews with links
-          </label>
-        </div>
-      )}
+      <DrillNavSection label="Linked crews" count={withLinks.length}>
+        {withLinks.length ? withLinks.map(crewItem) : <p className="px-2 py-1 text-xs text-muted-foreground">No linked crew matches.</p>}
+      </DrillNavSection>
+      <DrillNavSection label="Crews without links" count={alone.length}>
+        {alone.length ? alone.map((c, i) => crewItem(c, i + withLinks.length)) : <p className="px-2 py-1 text-xs text-muted-foreground">None.</p>}
+      </DrillNavSection>
     </>
   )
 
@@ -144,25 +203,49 @@ export function CrewLinksPage() {
     </div>
   )
 
+  // The filters in words, each removable, above whatever view is open.
+  const chips: { key: string; label: string; clear: Partial<CrewLinkFilters> }[] = []
+  if (filters.q.trim()) chips.push({ key: "q", label: `“${filters.q.trim()}”`, clear: { q: "" } })
+  if (filters.links !== "all") chips.push({ key: "links", label: filters.links === "linked" ? "Linked" : "No links", clear: { links: "all" } })
+  if (filters.agents) chips.push({ key: "agents", label: filters.agents === "with" ? "With agents" : "No agents", clear: { agents: "" } })
+  if (filters.net) chips.push({ key: "net", label: filters.net === "open" ? "Open network" : "Restricted network", clear: { net: "" } })
+
   return (
     <DrillPage
       parent={{ href: "/settings", label: "Settings", icon: SettingsIcon }}
       title="Crew links"
       icon={Link2}
       description="Who hands work to whom, and whose shared files they see"
+      toolbar={toolbar}
       nav={nav}
       mobileNav={mobileNav}
+      filterCount={activeFacetCount(filters) + Number(Boolean(filters.q.trim()))}
     >
       {loading ? (
         <div className="space-y-3 p-4 md:p-6"><Skeleton className="h-10 rounded-lg" /><Skeleton className="h-[320px] rounded-card" /></div>
       ) : (
         <div className="space-y-4 p-4 md:p-6">
+          {chips.length > 0 && (
+            <div className="flex flex-wrap items-center gap-1.5" data-slot="crew-links-chips">
+              {chips.map((c) => (
+                <motion.span key={c.key} initial={reduce ? false : { scale: 0.85, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={{ duration: 0.18 }}
+                  className="inline-flex h-6 items-center gap-1 rounded-full bg-primary/10 pl-2.5 pr-1 text-[11.5px] font-medium text-primary-hover">
+                  {c.label}
+                  <button type="button" onClick={() => setFilters(c.clear)} aria-label={`Remove filter ${c.label}`} className="grid h-4 w-4 place-items-center rounded-full hover:bg-primary/20">
+                    <X className="h-3 w-3" />
+                  </button>
+                </motion.span>
+              ))}
+              <button type="button" onClick={() => setFilters(DEFAULT_CREW_LINK_FILTERS)} className="px-1.5 text-[11.5px] text-muted-foreground hover:text-foreground">Clear all</button>
+            </div>
+          )}
           {/* The summary answers the audit question before any crew is opened. */}
           <div className="flex flex-wrap items-center gap-x-5 gap-y-1.5 text-xs text-muted-foreground" data-slot="crew-links-summary">
             <Stat n={stats.links} one="link" many="links" />
             <Stat n={stats.directions} one="direction" many="directions" />
             {!filesUnknown && <Stat n={stats.delivering} one="direction can deliver files" many="directions can deliver files" />}
             <Stat n={stats.alone} one="crew works alone" many="crews work alone" />
+            {shown.length !== crews.length && <span><span className="font-mono tabular-nums text-foreground">{shown.length}</span> of {crews.length} crews shown</span>}
             {!canManage && <span className="ml-auto">Read-only — Managers and up change links.</span>}
           </div>
           {loadError && (
@@ -177,10 +260,13 @@ export function CrewLinksPage() {
           )}
 
           {view === "crew" && selected && (
-            <CrewDetail crew={selected} crews={sorted} dirs={dirs} dups={dups} links={links} outs={outsOf(selected.id)} ins={insOf(selected.id)} />
+            <motion.div key={selected.id} initial={reduce ? false : { opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.22, ease: [0.2, 0.7, 0.2, 1] }}>
+              <CrewDetail crew={selected} crews={sorted} dirs={dirs} dups={dups} links={links} outs={outsOf(selected.id)} ins={insOf(selected.id)}
+                agentsByCrew={agentsByCrew} onSelect={(c) => selectCrew(c.slug)} compact={isMobile} />
+            </motion.div>
           )}
-          {view === "all" && <AllLinks crews={crews} dirs={dirs} dups={dups} links={links} query={query} onQuery={setQuery} isMobile={isMobile} />}
-          {view === "matrix" && <Matrix crews={sorted.filter((c) => !onlyLinked || linkedIds.has(c.id))} dirs={dirs} dups={dups} links={links} />}
+          {view === "all" && <AllLinks crews={crews} shown={shown} dirs={dirs} dups={dups} links={links} isMobile={isMobile} />}
+          {view === "matrix" && <Matrix crews={shown} dirs={dirs} dups={dups} links={links} />}
 
           <Legend />
         </div>
@@ -206,11 +292,13 @@ function CrewLabel({ crew, dup }: { crew: Crew; dup: boolean }) {
   )
 }
 
-function CrewChip({ crew, dup }: { crew: Crew; dup: boolean }) {
+function CrewChip({ crew, dup, agents }: { crew: Crew; dup: boolean; agents?: CrewAgent[] }) {
+  const n = agents ? agents.length : null
   return (
     <span className="flex min-w-0 items-center gap-2 text-[13px] font-medium">
-      <CrewIcon icon={crew.icon || "briefcase"} color={crew.color} size="sm" />
+      <CrewTile crew={crew} />
       <CrewLabel crew={crew} dup={dup} />
+      {n != null && <span className="shrink-0 text-[11.5px] font-normal text-muted-foreground">· {n} {n === 1 ? "agent" : "agents"}</span>}
     </span>
   )
 }
@@ -248,7 +336,11 @@ function FilesControl({ from, to, files, links }: { from: Crew; to: Crew; files:
   )
 }
 
-function CrewDetail({ crew, crews, dirs, dups, links, outs, ins }: { crew: Crew; crews: Crew[]; dirs: Map<string, Direction>; dups: Set<string>; links: Links; outs: Crew[]; ins: Crew[] }) {
+function CrewDetail({ crew, crews, dirs, dups, links, outs, ins, agentsByCrew, onSelect, compact }: {
+  crew: Crew; crews: Crew[]; dirs: Map<string, Direction>; dups: Set<string>; links: Links; outs: Crew[]; ins: Crew[]
+  agentsByCrew: Map<string, CrewAgent[]> | null; onSelect: (c: Crew) => void; compact: boolean
+}) {
+  const agentsOf = (c: Crew) => agentsByCrew?.get(c.id) ?? (agentsByCrew ? [] : undefined)
   const remove = (from: Crew, to: Crew) => {
     // Drop one direction; the other one, if any, stays.
     const self = from
@@ -277,8 +369,8 @@ function CrewDetail({ crew, crews, dirs, dups, links, outs, ins }: { crew: Crew;
         return (
           <div key={other.id} className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-border/40 px-4 py-2.5 last:border-b-0">
             <div className="min-w-0 flex-1 basis-48">
-              <CrewChip crew={other} dup={dups.has(other.name)} />
-              <p className="mt-0.5 pl-8 text-[11.5px] text-muted-foreground">{directionSentence(from.name, to.name, d.files)}</p>
+              <CrewChip crew={other} dup={dups.has(other.name)} agents={agentsOf(other)} />
+              <p className="mt-0.5 pl-9 text-[11.5px] text-muted-foreground">{directionSentence(from.name, to.name, d.files)}</p>
             </div>
             <FilesControl from={from} to={to} files={d.files} links={links} />
             {links.canManage && (
@@ -302,16 +394,11 @@ function CrewDetail({ crew, crews, dirs, dups, links, outs, ins }: { crew: Crew;
   )
   return (
     <div className="space-y-4">
-      <div className="flex items-center gap-3">
-        <CrewIcon icon={crew.icon || "briefcase"} color={crew.color} size="md" />
-        <div className="min-w-0">
-          <h2 className="truncate text-lg font-semibold tracking-[-0.02em]">{crew.name}</h2>
-          <p className="font-mono text-[11px] text-muted-foreground">{crew.slug}</p>
-        </div>
-      </div>
+      <CrewProfile crew={crew} agents={agentsOf(crew)} />
+      <LinkMap crew={crew} ins={ins} outs={outs} dirs={dirs} agentsByCrew={agentsByCrew} onSelect={onSelect} compact={compact} />
       <div className="grid gap-4 xl:grid-cols-2">
-        {block("Hands work to", "and what it may read there", "out", outs)}
-        {block("Receives work from", "and what they may read here", "in", ins)}
+        {block("Hands work to", "and what it may do with their files", "out", outs)}
+        {block("Receives work from", "and what they may do with its files", "in", ins)}
       </div>
     </div>
   )
@@ -397,31 +484,30 @@ function DirectionEditor({ from, to, dirs, links, children }: { from: Crew; to: 
   )
 }
 
-function AllLinks({ crews, dirs, dups, links, query, onQuery, isMobile }: { crews: Crew[]; dirs: Map<string, Direction>; dups: Set<string>; links: Links; query: string; onQuery: (q: string) => void; isMobile: boolean }) {
+function AllLinks({ crews, shown, dirs, dups, links, isMobile }: { crews: Crew[]; shown: Crew[]; dirs: Map<string, Direction>; dups: Set<string>; links: Links; isMobile: boolean }) {
   const byId = new Map(crews.map((c) => [c.id, c]))
-  const q = query.trim().toLowerCase()
+  const visible = new Set(shown.map((c) => c.id))
+  const filtered = shown.length !== crews.length
+  // A direction shows when either end passes the side panel's filters.
   const rows = [...dirs.values()]
     .map((d) => ({ d, from: byId.get(d.from), to: byId.get(d.to) }))
     .filter((r): r is { d: Direction; from: Crew; to: Crew } => Boolean(r.from && r.to))
-    .filter((r) => !q || `${r.from.name} ${r.from.slug} ${r.to.name} ${r.to.slug}`.toLowerCase().includes(q))
+    .filter((r) => visible.has(r.from.id) || visible.has(r.to.id))
     .sort((a, b) => byName(a.from, b.from) || byName(a.to, b.to))
   return (
     <section className="overflow-hidden rounded-card border border-border bg-card" aria-label="All links">
-      <div className="flex items-center gap-2 border-b border-border/60 px-3 py-2">
-        <label className="flex h-8 min-w-0 flex-1 items-center gap-2 rounded-md border border-border bg-surface-subtle px-2.5 text-muted-foreground sm:max-w-xs">
-          <Search className="h-3.5 w-3.5 shrink-0" />
-          <input type="search" value={query} onChange={(e) => onQuery(e.target.value)} placeholder="Find a crew…" aria-label="Find a link by crew" className="w-full bg-transparent text-control text-foreground outline-none" />
-        </label>
-        <span className="ml-auto font-mono text-[11px] text-muted-foreground">{rows.length} directions</span>
+      <div className="flex items-center gap-2 border-b border-border/60 px-4 py-2">
+        <h3 className="text-sm font-semibold">Directions</h3>
+        <span className="ml-auto font-mono text-[11px] text-muted-foreground">{rows.length}</span>
       </div>
-      {rows.length === 0 && <p className="px-4 py-6 text-center text-xs text-muted-foreground">{q ? `No link involves “${query}”.` : "No crew can hand work to another yet."}</p>}
+      {rows.length === 0 && <p className="px-4 py-6 text-center text-xs text-muted-foreground">{filtered ? "No link involves the crews these filters show." : "No crew can hand work to another yet."}</p>}
       {rows.length > 0 && (isMobile ? (
         <div>
           {rows.map(({ d, from, to }) => (
             <DirectionEditor key={dirKey(d.from, d.to)} from={from} to={to} dirs={dirs} links={links}>
               <button type="button" className="flex w-full flex-col gap-1.5 border-b border-border/40 px-4 py-3 text-left last:border-b-0">
                 <span className="flex items-center gap-2 text-[13px]"><CrewChip crew={from} dup={dups.has(from.name)} /><ArrowRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" /><CrewChip crew={to} dup={dups.has(to.name)} /></span>
-                <span className="flex items-center gap-2 pl-8"><FilesChip files={d.files} /></span>
+                <span className="flex items-center gap-2 pl-9"><FilesChip files={d.files} /></span>
               </button>
             </DirectionEditor>
           ))}
@@ -466,13 +552,12 @@ function Matrix({ crews, dirs, dups, links }: { crews: Crew[]; dirs: Map<string,
               <th className="sticky left-0 top-0 z-30 min-w-[200px] border-b border-r border-border bg-surface-subtle px-3 py-2 text-left align-bottom">
                 <span className="eyebrow text-muted-foreground">From ↓ · hands work to →</span>
               </th>
+              {/* The crews' own icons head the columns: ten names turned on their
+                  side took a third of the card and still truncated. */}
               {crews.map((c, j) => (
-                <th key={c.id} scope="col" title={`${c.name} · ${c.slug}`}
-                  className={cn("sticky top-0 z-20 h-40 w-14 min-w-14 border-b border-border bg-surface-subtle align-bottom", hover?.c === j && "bg-[var(--selection-bg)]")}>
-                  <div className="mx-auto flex max-h-36 items-center gap-1.5 overflow-hidden whitespace-nowrap py-2 text-xs font-medium [transform:rotate(180deg)] [writing-mode:vertical-rl]">
-                    <CrewIcon icon={c.icon || "briefcase"} color={c.color} size="sm" />
-                    <span className="truncate">{c.name}{dups.has(c.name) ? ` · ${c.slug}` : ""}</span>
-                  </div>
+                <th key={c.id} scope="col" title={`${c.name} (${c.slug})`} aria-label={`${c.name} (${c.slug})`}
+                  className={cn("sticky top-0 z-20 w-14 min-w-14 border-b border-border bg-surface-subtle px-1 py-2 align-bottom", hover?.c === j && "bg-[var(--selection-bg)]")}>
+                  <CrewTile crew={c} className="mx-auto" />
                 </th>
               ))}
             </tr>

@@ -8,7 +8,8 @@
  *
  * Server facts this encodes (internal/api/audit.go):
  *   - the workspace trail filters on the server by search (action, entity type,
- *     person's name/email), user_id, entity_type, date_from, date_to;
+ *     person's name/email), user_id, entity_type, action (exact), date_from,
+ *     date_to;
  *   - the crews / credentials / keeper trails filter by date only;
  *   - created_at is compared as text, so date_to is exclusive-by-day unless the
  *     end is sent as the start of the following day.
@@ -26,6 +27,9 @@ export type AuditSource = (typeof AUDIT_SOURCES)[number]["value"]
 // with the write sites, or a category starts returning an empty list.
 export const AUDIT_CATEGORIES = [
   { label: "All", value: "all" },
+  // Agent runs are most of a busy workspace's log; the writer spells the type
+  // in lower case.
+  { label: "Runs", value: "agent_run" },
   { label: "Agents", value: "AGENT" },
   { label: "Crews", value: "CREW" },
   { label: "Crew links", value: "CREW_LINK" },
@@ -33,6 +37,14 @@ export const AUDIT_CATEGORIES = [
   { label: "People", value: "WorkspaceMember" },
   { label: "Workspace", value: "WORKSPACE" },
 ] as const
+
+/** How a run ended — sent as the exact action agent.run.<value>. */
+export const AUDIT_RESULTS = [
+  { value: "completed", label: "Completed", tone: "success" },
+  { value: "failed", label: "Failed", tone: "danger" },
+  { value: "cancelled", label: "Cancelled", tone: "muted" },
+] as const
+export type AuditResult = (typeof AUDIT_RESULTS)[number]["value"]
 
 export const AUDIT_RANGES = [
   { value: "1h", label: "Last hour", ms: 3_600_000 },
@@ -56,6 +68,8 @@ export interface AuditFilters {
   q: string
   /** Person (user id). Workspace trail only. */
   userId: string
+  /** How a run ended, or "". Workspace trail only. */
+  result: AuditResult | ""
 }
 
 export const DEFAULT_AUDIT_FILTERS: AuditFilters = {
@@ -66,13 +80,17 @@ export const DEFAULT_AUDIT_FILTERS: AuditFilters = {
   to: "",
   q: "",
   userId: "",
+  result: "",
 }
 
 /** Which filters a trail honours on the server. */
-export function sourceSupports(source: AuditSource): { search: boolean; person: boolean; category: boolean } {
+export function sourceSupports(source: AuditSource): { search: boolean; person: boolean; category: boolean; result: boolean } {
   const all = source === "workspace"
-  return { search: all, person: all, category: all }
+  return { search: all, person: all, category: all, result: all }
 }
+
+/** The action a result filter stands for. */
+export const resultAction = (result: AuditResult) => `agent.run.${result}`
 
 const DAY_MS = 86_400_000
 const isDay = (v: string) => /^\d{4}-\d{2}-\d{2}$/.test(v) && !Number.isNaN(Date.parse(`${v}T00:00:00Z`))
@@ -99,6 +117,7 @@ export function auditQueryParams(workspaceId: string, filters: AuditFilters, pag
   if (supports.search && q) params.set("search", q)
   if (supports.person && filters.userId) params.set("user_id", filters.userId)
   if (supports.category && filters.category !== "all") params.set("entity_type", filters.category)
+  if (supports.result && filters.result) params.set("action", resultAction(filters.result))
   const { from, to } = rangeBounds(filters, now)
   if (from) params.set("date_from", from)
   if (to) params.set("date_to", to)
@@ -115,6 +134,7 @@ const URL_KEYS: Record<keyof AuditFilters, string> = {
   to: "audit_to",
   q: "audit_q",
   userId: "audit_user",
+  result: "audit_result",
 }
 
 /** Merge the filters into an existing query string; defaults are omitted. */
@@ -145,6 +165,7 @@ export function filtersFromSearch(search: string): AuditFilters {
     to: range === "custom" && isDay(get("to")) ? get("to") : "",
     q: get("q"),
     userId: get("userId"),
+    result: AUDIT_RESULTS.some((x) => x.value === get("result")) ? (get("result") as AuditResult) : "",
   }
 }
 
@@ -167,7 +188,7 @@ export function rangeLabel(filters: AuditFilters): string {
 }
 
 export interface FilterChip {
-  key: "q" | "userId" | "category" | "range"
+  key: "q" | "userId" | "category" | "result" | "range"
   label: string
 }
 
@@ -179,6 +200,9 @@ export function activeFilterChips(filters: AuditFilters, people: Record<string, 
   if (supports.person && filters.userId) chips.push({ key: "userId", label: `Person: ${people[filters.userId] ?? "Unknown"}` })
   if (supports.category && filters.category !== "all") {
     chips.push({ key: "category", label: AUDIT_CATEGORIES.find((c) => c.value === filters.category)?.label ?? filters.category })
+  }
+  if (supports.result && filters.result) {
+    chips.push({ key: "result", label: `Runs: ${AUDIT_RESULTS.find((x) => x.value === filters.result)?.label.toLowerCase()}` })
   }
   if (filters.range !== DEFAULT_AUDIT_FILTERS.range) chips.push({ key: "range", label: rangeLabel(filters) })
   return chips

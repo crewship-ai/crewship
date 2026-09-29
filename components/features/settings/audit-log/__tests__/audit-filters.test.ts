@@ -64,14 +64,21 @@ describe("auditQueryParams", () => {
     })
   })
 
+  // "Failed runs" is the exact action the run writer records, so the server
+  // narrows it (and the total) instead of the page guessing from one page.
+  it("sends a run result as the exact action", () => {
+    expect(auditQueryParams("ws", f({ result: "failed" }), 1, 50, NOW).get("action")).toBe("agent.run.failed")
+    expect(auditQueryParams("ws", f({ source: "keeper", result: "failed" }), 1, 50, NOW).has("action")).toBe(false)
+  })
+
   it("trims the search and drops it when blank", () => {
     expect(auditQueryParams("ws", f({ q: "   " }), 1, 50, NOW).has("search")).toBe(false)
     expect(auditQueryParams("ws", f({ q: " deploy " }), 1, 50, NOW).get("search")).toBe("deploy")
   })
 
   it("knows which trail supports which filter", () => {
-    expect(sourceSupports("workspace")).toEqual({ search: true, person: true, category: true })
-    expect(sourceSupports("keeper")).toEqual({ search: false, person: false, category: false })
+    expect(sourceSupports("workspace")).toEqual({ search: true, person: true, category: true, result: true })
+    expect(sourceSupports("keeper")).toEqual({ search: false, person: false, category: false, result: false })
   })
 })
 

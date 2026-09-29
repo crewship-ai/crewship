@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { Shield, ChevronRight, ChevronLeft, RefreshCw, Download, ScrollText, Cpu } from "lucide-react"
 import { motion, AnimatePresence } from "motion/react"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -19,7 +19,8 @@ import {
   type AuditFilters,
 } from "../audit-log/audit-filters"
 import { useAuditFilters } from "../audit-log/use-audit-filters"
-import { AuditToolbar, type AuditPerson } from "../audit-log/audit-toolbar"
+import { AuditToolbar } from "../audit-log/audit-toolbar"
+import { useWorkspacePeople } from "../audit-log/use-workspace-people"
 
 interface AuditLog {
   id: string
@@ -186,9 +187,16 @@ interface CrewAuditSectionProps {
   /** Card heading; the Audit log page names the card by what it lists. */
   title?: string
   description?: string
+  /** The search / person / type / range bar; hidden when the page's side
+   *  panel holds those filters. */
+  showToolbar?: boolean
+  /** Fold adjacent repeats of the same event into one line. */
+  groupRepeats?: boolean
+  /** Mark rows that change who can reach what. */
+  highlightAccess?: boolean
 }
 
-export function CrewAuditSection({ workspaceId, filters: controlled, onFiltersChange, showSources = true, title = "Audit log", description = "Every state-changing action on this workspace, immutably recorded" }: CrewAuditSectionProps) {
+export function CrewAuditSection({ workspaceId, filters: controlled, onFiltersChange, showSources = true, title = "Audit log", description = "Every state-changing action on this workspace, immutably recorded", showToolbar = true, groupRepeats = true, highlightAccess = true }: CrewAuditSectionProps) {
   const [logs, setLogs] = useState<AuditLog[]>([])
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
@@ -411,7 +419,7 @@ export function CrewAuditSection({ workspaceId, filters: controlled, onFiltersCh
         })}
       </div>}
 
-      <AuditToolbar filters={filters} onChange={changeFilters} people={people} />
+      {showToolbar && <AuditToolbar filters={filters} onChange={changeFilters} people={people} />}
 
       {/* Error with stale data */}
       {error && logs.length > 0 && (
@@ -479,13 +487,14 @@ export function CrewAuditSection({ workspaceId, filters: controlled, onFiltersCh
                   {bucket.logs.length}
                 </span>
               </h3>
-              {foldRuns(bucket.logs).map((group) =>
+              {(groupRepeats ? foldRuns(bucket.logs) : bucket.logs.map((log) => ({ key: log.id, logs: [log] }))).map((group) =>
                 group.logs.length > 1 ? (
-                  <FoldedRun key={group.logs[0].id} group={group} />
+                  <FoldedRun key={group.logs[0].id} group={group} highlightAccess={highlightAccess} />
                 ) : (
                   <AuditRow
                     key={group.logs[0].id}
                     log={group.logs[0]}
+                    highlightAccess={highlightAccess}
                     expanded={expandedId === group.logs[0].id}
                     onToggle={() =>
                       setExpandedId(expandedId === group.logs[0].id ? null : group.logs[0].id)
@@ -532,29 +541,6 @@ export function CrewAuditSection({ workspaceId, filters: controlled, onFiltersCh
   )
 }
 
-/** The workspace's people, for the Person filter. Empty until it loads; a
- *  failure leaves the filter with "Everyone" only. */
-function useWorkspacePeople(workspaceId: string): AuditPerson[] {
-  const [people, setPeople] = useState<AuditPerson[]>([])
-  useEffect(() => {
-    let cancelled = false
-    apiFetch(`/api/v1/workspaces/${encodeURIComponent(workspaceId)}/members`)
-      .then(async (res) => (res.ok ? res.json() : []))
-      .then((rows: unknown) => {
-        if (cancelled || !Array.isArray(rows)) return
-        const list = rows
-          .map((r) => (r && typeof r === "object" ? (r as { user?: { id?: string; email?: string; full_name?: string | null } }).user : null))
-          .filter((u): u is { id: string; email: string; full_name?: string | null } => Boolean(u?.id))
-          .map((u) => ({ id: u.id, label: personLabel(u.full_name, u.email ?? "") || u.email }))
-          .sort((a, b) => a.label.localeCompare(b.label))
-        setPeople(list)
-      })
-      .catch(() => {})
-    return () => { cancelled = true }
-  }, [workspaceId])
-  return useMemo(() => people, [people])
-}
-
 /** The verb's tone: what was made, changed, removed or broke. */
 function verbTone(action: string): StatusTone {
   const tail = (action.includes(".") ? action.slice(action.lastIndexOf(".") + 1) : action).toLowerCase()
@@ -597,10 +583,10 @@ function Actor({ user }: { user: AuditLog["user"] }) {
  * without going and looking the id up somewhere else.
  */
 function AuditRow({
-  log, expanded, onToggle,
-}: { log: AuditLog; expanded: boolean; onToggle: () => void }) {
+  log, expanded, onToggle, highlightAccess = true,
+}: { log: AuditLog; expanded: boolean; onToggle: () => void; highlightAccess?: boolean }) {
   const label = entityLabel(log)
-  const security = isSecurityRelevant(log)
+  const security = highlightAccess && isSecurityRelevant(log)
   return (
     <div data-audit-weight={security ? "security" : "routine"}>
       <button
@@ -707,11 +693,11 @@ function AuditRow({
  * the day reads as "one thing happened fifty-six times" — which is what it
  * was — and the individual rows are one click away.
  */
-function FoldedRun({ group }: { group: AuditGroup }) {
+function FoldedRun({ group, highlightAccess = true }: { group: AuditGroup; highlightAccess?: boolean }) {
   const [open, setOpen] = useState(false)
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const first = group.logs[0]
-  const security = isSecurityRelevant(first)
+  const security = highlightAccess && isSecurityRelevant(first)
   return (
     <div data-audit-weight={security ? "security" : "routine"}>
       <button
@@ -753,6 +739,7 @@ function FoldedRun({ group }: { group: AuditGroup }) {
             <AuditRow
               key={log.id}
               log={log}
+              highlightAccess={highlightAccess}
               expanded={expandedId === log.id}
               onToggle={() => setExpandedId(expandedId === log.id ? null : log.id)}
             />

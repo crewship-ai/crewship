@@ -7,8 +7,13 @@ import {
   directionsOf,
   duplicateNames,
   splitPair,
+  crewMatches,
+  crewResources,
+  shortImage,
+  DEFAULT_CREW_LINK_FILTERS,
   type Connection,
   type Crew,
+  type CrewLinkFilters,
 } from "../crew-links-model"
 
 const crew = (id: string, name = id): Crew => ({ id, name, slug: id })
@@ -69,5 +74,30 @@ describe("directionSentence", () => {
 describe("duplicateNames", () => {
   it("finds names two crews share, so their slug can be shown", () => {
     expect([...duplicateNames([crew("a", "Sampler"), crew("b", "Sampler"), crew("c", "Ops")])]).toEqual(["Sampler"])
+  })
+})
+
+describe("crew filters and facts", () => {
+  const eng: Crew = { id: "eng", name: "Engineering", slug: "engineering", network_mode: "restricted", _count: { agents: 2 } }
+  const col: Crew = { id: "col", name: "Collector", slug: "collector", network_mode: "free", _count: { agents: 0 } }
+  const f = (over: Partial<CrewLinkFilters> = {}): CrewLinkFilters => ({ ...DEFAULT_CREW_LINK_FILTERS, ...over })
+
+  it("matches agent names, links, agents and network", () => {
+    const agents = [{ id: "a", name: "Riley", slug: "riley", crew_id: "eng" }]
+    expect(crewMatches(eng, f({ q: "ril" }), true, agents)).toBe(true)
+    expect(crewMatches(col, f({ q: "ril" }), false, [])).toBe(false)
+    expect(crewMatches(eng, f({ links: "none" }), true, undefined)).toBe(false)
+    expect(crewMatches(col, f({ agents: "none" }), false, undefined)).toBe(true)
+    expect(crewMatches(eng, f({ agents: "none" }), true, undefined)).toBe(false)
+    expect(crewMatches(col, f({ net: "open" }), false, undefined)).toBe(true)
+    expect(crewMatches(eng, f({ net: "open" }), true, undefined)).toBe(false)
+  })
+
+  it("reads the box and the image the way a person would", () => {
+    expect(crewResources({ ...eng, container_memory_mb: 256, container_cpus: 0.25 })).toBe("256 MB · 0.25 CPU")
+    expect(crewResources({ ...eng, container_memory_mb: 4096, container_cpus: 2 })).toBe("4 GB · 2 CPU")
+    expect(shortImage("mcr.microsoft.com/devcontainers/javascript-node:22@sha256:abc")).toBe("javascript-node:22")
+    expect(shortImage("python:3.12-slim")).toBe("python:3.12-slim")
+    expect(shortImage("")).toBeNull()
   })
 })

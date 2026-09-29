@@ -8,7 +8,7 @@ import { readApiError } from "@/lib/api-error"
 import { useAbilities } from "@/hooks/use-abilities"
 import { isManagerTier } from "@/lib/permissions/tiers"
 
-import { connectionBetween, stateOf, type Connection, type Crew, type FileAccess, type PairState } from "./crew-links-model"
+import { connectionBetween, stateOf, type Connection, type Crew, type CrewAgent, type FileAccess, type PairState } from "./crew-links-model"
 
 const PAIR_WORDS: Record<PairState, string> = { none: "not linked", out: "sends work", in: "receives work", both: "both ways" }
 
@@ -31,6 +31,9 @@ export function useCrewLinks(workspaceId: string | null) {
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState(false)
   const [pending, setPending] = useState(false)
+  // Agents, grouped by crew — who is in each crew. Null until (or unless)
+  // they load: a failed fetch only costs the profile its faces.
+  const [agentsByCrew, setAgentsByCrew] = useState<Map<string, CrewAgent[]> | null>(null)
   // Writes chain (link, then its file level); each step needs the rows the
   // previous one produced, not the ones this render closed over.
   const latest = useRef<Connection[]>([])
@@ -56,6 +59,27 @@ export function useCrewLinks(workspaceId: string | null) {
   }, [workspaceId])
 
   useEffect(() => { void reload() }, [reload])
+
+  useEffect(() => {
+    if (!workspaceId) return
+    let cancelled = false
+    apiFetch(`/api/v1/agents?workspace_id=${workspaceId}&limit=500`)
+      .then(async (res) => (res.ok ? res.json() : null))
+      .then((body: unknown) => {
+        if (cancelled || body == null) return
+        const list = (Array.isArray(body) ? body : (body as { agents?: unknown }).agents) as CrewAgent[] | undefined
+        if (!Array.isArray(list)) return
+        const grouped = new Map<string, CrewAgent[]>()
+        for (const a of list) {
+          if (!a?.crew_id) continue
+          const bucket = grouped.get(a.crew_id)
+          if (bucket) bucket.push(a); else grouped.set(a.crew_id, [a])
+        }
+        setAgentsByCrew(grouped)
+      })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [workspaceId])
 
   /** Set the pair (self, other) to `next`, seen from `self`. */
   const setPair = useCallback(async (self: Crew, other: Crew, next: PairState): Promise<boolean> => {
@@ -172,5 +196,5 @@ export function useCrewLinks(workspaceId: string | null) {
     }
   }, [workspaceId, canManage, reload])
 
-  return { crews, connections, loading, loadError, pending, canManage, reload, setPair, setFileAccess }
+  return { crews, connections, agentsByCrew, loading, loadError, pending, canManage, reload, setPair, setFileAccess }
 }
