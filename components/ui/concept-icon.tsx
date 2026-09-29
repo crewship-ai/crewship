@@ -73,7 +73,7 @@ export function ConceptIcon({
 
   return (
     // The chip is a Harbor icon tile (globals.css `.icon-tile`): gradient
-    // fill, dotted texture, hairline in the concept's tint, glyph in a
+    // fill, hairline in the concept's tint, glyph in a
     // theme-tuned mix of it. The tint travels as `--ic`.
     <span
       data-slot="concept-tile"

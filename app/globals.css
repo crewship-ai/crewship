@@ -948,7 +948,7 @@ body {
     box-shadow: 0 24px 48px -30px var(--shadow-color);
   }
 
-  /* Icon tile: a glyph in a tinted, dotted square. The tint is --ic (set by
+  /* Icon tile: a glyph in a tinted square (a soft radial wash, no pattern). The tint is --ic (set by
      ConceptIcon from the concept's accent); the glyph takes a lighter or
      darker mix of it per theme. */
   .icon-tile {
@@ -961,16 +961,6 @@ body {
     box-shadow: var(--tile-inset);
     transition: transform 300ms var(--ease-spring), border-color 300ms var(--ease-harbor);
   }
-  .icon-tile::before {
-    content: "";
-    position: absolute;
-    inset: 0;
-    opacity: 0.35;
-    background-size: 6px 6px;
-    background-image: radial-gradient(circle at 1px 1px, color-mix(in srgb, var(--ic) 60%, transparent) 1px, transparent 0);
-    pointer-events: none;
-  }
-  .icon-tile > svg { position: relative; }
   :hover > .icon-tile,
   .group:hover .icon-tile {
     transform: scale(1.08) rotate(-4deg);
