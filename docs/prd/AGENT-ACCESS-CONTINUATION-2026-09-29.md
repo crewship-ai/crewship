@@ -396,3 +396,16 @@ Aplikační store adaptér a síťový SSE profil jsou zatím ověřené **oddě
 produkční provider adapter. SSE transport sám neřeší modelovou sémantiku dokončení,
 ceny, scoped prompt/recall, storage ani veřejný chatový dispatch. Veřejná aktivace
 restricted profilu zůstává nedostupná. Celé PRD se tím neuzavírá.
+
+Finální nasazení větve po SSE změnách: dev1
+`f084be41aeeddd64b0f2033de02852cdaeeb5ec1`, clean, build
+`2026-09-29T13:17:30Z`. Skutečný `/proc/2745490/exe` a web export jsou shodné;
+autentizovaný CLI smoke i health/readiness prošly, schema `20260929123723`,
+Linux environ 0400/UID 1000. Nasazení nemění stav veřejné aktivace restricted
+profilu. Navazující PR musí ještě projít vzdáleným CI a nezávislou revizí.
+
+Další provider adapter musí kromě streamu svázat aktuální credential/account,
+model, rozpočet a povolený tvar požadavku s pokusem. Pevná HTTPS adresa sama
+o sobě neopravňuje číst libovolnou upstream konverzaci či soubor z téhož účtu.
+SDK route mapování, výběr scoped promptu/recallu a výstupní audience proto nesmějí
+převzít široký legacy resolver.
