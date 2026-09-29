@@ -1039,9 +1039,16 @@ body {
     opacity: 1;
     transition: opacity 160ms ease 90ms;
   }
+  /* Faded AND zero-width in the rail: the rows no longer clip (the Inbox
+     count overhangs its tile), so a SOON pill or the ⌘B hint would
+     otherwise make the rail scrollable sideways under keyboard focus. */
   [data-collapsible="icon"] .rail-label {
     opacity: 0;
     pointer-events: none;
+    max-width: 0;
+    margin-inline: 0;
+    padding-inline: 0;
+    overflow: hidden;
     transition-delay: 0ms;
   }
   .rail-group-head {
