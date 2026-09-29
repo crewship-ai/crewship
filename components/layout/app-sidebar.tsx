@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { MoreHorizontal, PanelLeftClose, PanelLeftOpen } from "lucide-react"
+import { PanelLeft, PanelLeftClose, PanelLeftDashed, type LucideIcon } from "lucide-react"
 import { CONCEPT_ICON } from "@/lib/concept-icons"
 import { navSections, isHiddenForRole } from "@/lib/nav-sections"
 import { useInboxUnreadCount } from "@/hooks/use-inbox"
@@ -13,7 +13,8 @@ import { WorkspaceSwitcher } from "@/components/layout/workspace-switcher"
 import { SidebarVersion } from "@/components/layout/sidebar-version"
 import { RAIL_ROW, RailGroupHead, RailLabel, RailTile, conceptOf } from "@/components/layout/rail"
 import {
-  DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuTrigger,
+  DropdownMenu, DropdownMenuContent, DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem,
+  DropdownMenuSeparator, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import {
   Sidebar,
@@ -103,7 +104,7 @@ export function AppSidebar() {
       {/* Pin / collapse, then — below a rule — which Crewship this is. */}
       <SidebarFooter className="rail-inset gap-1 pb-3 pt-2">
         <SidebarMenu>
-          <PinToggle />
+          <SidebarModeMenu />
         </SidebarMenu>
         <SidebarSeparator className="mx-0" />
         <SidebarMenu>
@@ -121,28 +122,55 @@ export function AppSidebar() {
  * third state to cycle through — the old button walked hover → pinned →
  * collapsed and nobody could say which one a click would land on.
  */
-function PinToggle() {
-  const { sidebarMode, togglePinned, peekOnHover, setPeekOnHover } = useSidebar()
-  const pinned = sidebarMode === "pinned"
-  const label = pinned ? "Collapse" : "Pin open"
+type SidebarModeKey = "pinned" | "hover" | "collapsed"
+const SIDEBAR_MODES: { key: SidebarModeKey; label: string; hint: string; icon: LucideIcon }[] = [
+  { key: "pinned", label: "Expanded", hint: "Always open with names", icon: PanelLeft },
+  { key: "hover", label: "Expand on hover", hint: "Icons, names under the pointer", icon: PanelLeftDashed },
+  { key: "collapsed", label: "Collapsed", hint: "Icons only, never opens", icon: PanelLeftClose },
+]
+
+/**
+ * The sidebar's three modes as one row with a menu, the same in the rail and
+ * the open panel: a mode kept behind the open panel's "…" could not be
+ * reached from Collapsed, the one mode that never opens. ⌘B pins and unpins,
+ * returning to whichever rail mode was chosen.
+ */
+function SidebarModeMenu() {
+  const { sidebarMode, setSidebarMode, togglePinned, setPeekOnHover } = useSidebar()
+  const current = SIDEBAR_MODES.find((m) => m.key === sidebarMode) ?? SIDEBAR_MODES[1]
+  const choose = (key: string) => {
+    if (key === "pinned") {
+      if (sidebarMode !== "pinned") togglePinned()
+      return
+    }
+    setPeekOnHover(key === "hover")
+    setSidebarMode(key as SidebarModeKey)
+  }
   return (
-    <SidebarMenuItem className="flex items-center">
-      <SidebarMenuButton onClick={togglePinned} tooltip={`${label} · ⌘B`} aria-label={`${label} the sidebar`} className={RAIL_ROW}>
-        <RailTile icon={pinned ? PanelLeftClose : PanelLeftOpen} className="rail-tile-static" />
-        <RailLabel className="text-[12.5px] text-muted-foreground">{label}</RailLabel>
-        <kbd className="rail-label mr-8 font-mono text-[10px] text-muted-foreground-soft">⌘B</kbd>
-      </SidebarMenuButton>
+    <SidebarMenuItem>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <button type="button" aria-label="Sidebar options"
-            className="rail-label absolute right-0 grid h-7 w-7 place-items-center rounded-md text-muted-foreground hover:bg-sidebar-accent hover:text-foreground group-data-[collapsible=icon]:pointer-events-none">
-            <MoreHorizontal className="h-3.5 w-3.5" />
-          </button>
+          <SidebarMenuButton tooltip={`Sidebar: ${current.label}`} aria-label={`Sidebar: ${current.label}`} className={RAIL_ROW}>
+            <RailTile icon={current.icon} className="rail-tile-static" />
+            <RailLabel className="text-[12.5px] text-muted-foreground">{current.label}</RailLabel>
+            <kbd className="rail-label mr-2 font-mono text-[10px] text-muted-foreground-soft">⌘B</kbd>
+          </SidebarMenuButton>
         </DropdownMenuTrigger>
-        <DropdownMenuContent side="top" align="end" className="w-52">
-          <DropdownMenuCheckboxItem checked={peekOnHover} onCheckedChange={(v) => setPeekOnHover(v === true)}>
-            Expand on hover
-          </DropdownMenuCheckboxItem>
+        <DropdownMenuContent side="right" align="end" sideOffset={8} className="w-60">
+          <DropdownMenuLabel className="text-[11px] font-normal text-muted-foreground">Sidebar</DropdownMenuLabel>
+          <DropdownMenuRadioGroup value={sidebarMode} onValueChange={choose}>
+            {SIDEBAR_MODES.map(({ key, label, hint, icon: Icon }) => (
+              <DropdownMenuRadioItem key={key} value={key} className="items-start gap-2">
+                <Icon className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+                <span className="grid leading-tight">
+                  <span>{label}</span>
+                  <span className="text-[11px] text-muted-foreground">{hint}</span>
+                </span>
+              </DropdownMenuRadioItem>
+            ))}
+          </DropdownMenuRadioGroup>
+          <DropdownMenuSeparator />
+          <p className="px-2 py-1 text-[11px] text-muted-foreground">⌘B pins and unpins</p>
         </DropdownMenuContent>
       </DropdownMenu>
     </SidebarMenuItem>

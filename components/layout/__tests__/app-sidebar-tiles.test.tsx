@@ -63,12 +63,36 @@ describe("one grid, one motion", () => {
     expect(row.className).toMatch(/group-data-\[collapsible=icon\]:overflow-visible!/)
   })
 
-  it("pins and collapses with one button, back to the rail the person chose", () => {
+  // Radix opens a menu on pointerdown, which jsdom's click does not send.
+  const openModes = () => {
+    fireEvent.pointerDown(screen.getByRole("button", { name: /^Sidebar:/ }), { button: 0, ctrlKey: false })
+    return screen.getByRole("menu")
+  }
+
+  it("offers all three sidebar modes from one row, reachable in the collapsed rail", () => {
     render(<SidebarProvider><AppSidebar /></SidebarProvider>)
-    fireEvent.click(screen.getByRole("button", { name: "Pin open the sidebar" }))
+    expect(screen.getByRole("button", { name: "Sidebar: Expand on hover" })).toBeInTheDocument()
+    const menu = openModes()
+    const options = Array.from(menu.querySelectorAll("[role=menuitemradio]")).map((e) => e.textContent)
+    expect(options.map((t) => t?.split(/(?=[A-Z⌘])/)[0])).toEqual(["Expanded", "Expand on hover", "Collapsed"])
+  })
+
+  it("keeps icons only when Collapsed is chosen, and ⌘B returns to it after pinning", () => {
+    render(<SidebarProvider><AppSidebar /></SidebarProvider>)
+    fireEvent.click(openModes().querySelectorAll("[role=menuitemradio]")[2])
+    expect(mode()).toBe("collapsed")
+    expect(screen.getByRole("button", { name: "Sidebar: Collapsed" })).toBeInTheDocument()
+    fireEvent.keyDown(window, { key: "b", metaKey: true })
     expect(mode()).toBe("pinned")
-    fireEvent.click(screen.getByRole("button", { name: "Collapse the sidebar" }))
-    expect(mode()).toBe("hover")
+    fireEvent.keyDown(window, { key: "b", metaKey: true })
+    expect(mode()).toBe("collapsed")
+  })
+
+  it("pins open from the menu", () => {
+    render(<SidebarProvider><AppSidebar /></SidebarProvider>)
+    fireEvent.click(openModes().querySelectorAll("[role=menuitemradio]")[0])
+    expect(mode()).toBe("pinned")
+    expect(screen.getByRole("button", { name: "Sidebar: Expanded" })).toBeInTheDocument()
   })
 
   it("toggles with ⌘B too", () => {
