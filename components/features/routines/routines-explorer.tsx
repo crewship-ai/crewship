@@ -474,19 +474,10 @@ export function RoutinesExplorer({
                               )}
                             />
                           )}
-                          {/* One tint for every glyph: the shape tells
-                              routines apart, the dot beside it carries the
-                              state. A hue per routine made the column a
-                              rainbow that meant nothing. */}
+                          {/* The glyph wears the routine's own colour (its
+                              identity); the dot beside it carries the state. */}
                           <span className="relative flex h-5 w-5 items-center justify-center">
-                            <RoutineGlyph
-                              routine={routine}
-                              variant="bare"
-                              className={cn(
-                                liveRun && (liveAwaiting ? "text-warn" : "text-primary-hover"),
-                                isSelected && !liveRun && "text-primary-hover",
-                              )}
-                            />
+                            <RoutineGlyph routine={routine} variant="bare" />
                           </span>
                           <span
                             aria-hidden

@@ -61,7 +61,10 @@ tokens and a handful of utilities, so it can be changed in one place.
 
 **One colour per row.** Severity is carried by the status pill. Icon tiles,
 avatars and titles in the same row stay neutral, so the one red or amber on a
-list is the thing to look at. Red is for what broke (failed run); amber for
+list is the thing to look at. The exception is identity: an entity that has
+its own colour — a crew (`CrewIcon`) or a routine (`RoutineGlyph`) — is always
+drawn in it, everywhere it appears. That colour names the thing; it never
+carries status. Red is for what broke (failed run); amber for
 what waits on a person (paused, needs a tool, approval).
 
 **Adding an accent:** a light and a dark block in `accents.css`, a row in
