@@ -349,3 +349,16 @@ Ověření na dev1:
 DB a skutečný Docker na dev1, nikoli veřejnou chat route živé aplikace. Produkční
 provider/prompt/recall, quota storage a chat/CLI/routine adapter nad touto hranicí
 zůstávají další implementační brány. Celé PRD není uzavřené.
+
+Nasazení této návaznosti: dev1 `7d86c9583c1911d0b75cf27fb3ed9cd0ac0d662e`,
+clean build `2026-09-29T12:48:32Z`, shodný skutečný proces a web export.
+Schema `20260929123723`; read-only kontrola potvrdila launch tabulku i immutable
+trigger. Health/readiness 200. Živý group human resolver a dva soukromí klienti
+stejného agenta prošli; starý receipt po odebrání/rejoin zůstal odmítnutý, nový
+fungoval. WS/HTTP revokace fungovala a druhý klient dostával heartbeat. Fixture
+workspace odstraněn přes CLI, účty zůstávají bez členství. Report:
+`reports/agent-access-dispatch-app-live-2026-09-29.txt`.
+
+GitHub automatický merge není v tomto repozitáři povolen; pokus o jeho nastavení
+byl odmítnut, žádná ochrana nebyla vypnuta. #2717 již má finální APPROVED review,
+ale při tomto zápisu stále čeká na poslední Go Race (internal/api) job.
