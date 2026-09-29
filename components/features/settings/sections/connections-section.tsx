@@ -85,6 +85,24 @@ function stateOf(conn: Connection | undefined, selfID: string): PairState {
   return conn.from_crew_id === selfID ? "out" : "in"
 }
 
+const byName = (a: Crew, b: Crew) => a.name.localeCompare(b.name)
+const touches = (c: Pick<Connection, "from_crew_id" | "to_crew_id">, a: string, b: string) =>
+  (c.from_crew_id === a && c.to_crew_id === b) || (c.from_crew_id === b && c.to_crew_id === a)
+
+/** From one crew's point of view: the crews it is linked to, then the rest,
+ *  each alphabetical. The selected crew itself is left out. */
+export function partitionOthers(crews: Crew[], selfID: string, connections: Pick<Connection, "from_crew_id" | "to_crew_id">[]): { linked: Crew[]; unlinked: Crew[] } {
+  const others = crews.filter((c) => c.id !== selfID).sort(byName)
+  const isLinked = (c: Crew) => connections.some((conn) => touches(conn, selfID, c.id))
+  return { linked: others.filter(isLinked), unlinked: others.filter((c) => !isLinked(c)) }
+}
+
+/** How many links the workspace has, and how many crews have none. */
+export function linkSummary(crews: Crew[], connections: Pick<Connection, "from_crew_id" | "to_crew_id">[]): { links: number; isolated: number } {
+  const linked = new Set(connections.flatMap((c) => [c.from_crew_id, c.to_crew_id]))
+  return { links: connections.length, isolated: crews.filter((c) => !linked.has(c.id)).length }
+}
+
 /** A crew's colour as something inline styles can use. */
 const tintOf = (crew?: Crew) => crewColorHex(crew?.color) ?? "currentColor"
 
@@ -377,7 +395,106 @@ export function ConnectionsSection({ workspaceId }: ConnectionsSectionProps) {
     )
   }
 
-  const others = crews.filter((c) => c.id !== selected?.id)
+  const { linked, unlinked } = partitionOthers(crews, selected!.id, connections)
+  const summary = linkSummary(crews, connections)
+
+  /** One other crew, from the selected crew's point of view. */
+  const renderRow = (other: Crew, last: boolean) => {
+              const state = stateOf(connectionFor(selected!.id, other.id), selected!.id)
+              const StateIcon = PAIR_ICONS[state]
+              const tint = state === "none" ? undefined : tintOf(state === "in" ? selected! : other)
+              return (
+                <div
+                  key={other.id}
+                  className={cn(
+                    "flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-2.5",
+                    !last && "border-b border-border/40",
+                  )}
+                >
+                  <CrewLinkFlow state={state} from={tintOf(selected)} to={tintOf(other)} />
+                  <CrewIcon icon={other.icon || "briefcase"} color={other.color} size="sm" />
+                  <div className="min-w-0 flex-1 basis-32">
+                    <div className="truncate text-xs text-foreground" title={other.name}>{other.name}</div>
+                    <div className="truncate text-[11px] text-muted-foreground">
+                      {PAIR_HINTS[state]}
+                    </div>
+                  </div>
+
+                  {canManage ? (
+                    <Select
+                      value={state}
+                      disabled={!!pendingPair || loadError}
+                      onValueChange={(v) => void applyState(other, v as PairState)}
+                    >
+                      <SelectTrigger
+                        className={cn(
+                          "h-7 w-[148px] text-xs transition-colors",
+                          state === "none" && "text-muted-foreground",
+                        )}
+                        aria-label={`Link between ${selected!.name} and ${other.name}`}
+                        style={
+                          tint
+                            ? {
+                                borderColor: `color-mix(in srgb, ${tint} 55%, transparent)`,
+                                backgroundColor: `color-mix(in srgb, ${tint} 12%, transparent)`,
+                              }
+                            : undefined
+                        }
+                      >
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {(Object.keys(PAIR_LABELS) as PairState[]).map((s) => {
+                          const Icon = PAIR_ICONS[s]
+                          return (
+                            <SelectItem key={s} value={s} className="text-xs">
+                              <span className="flex items-center gap-2">
+                                <Icon className="size-3 text-muted-foreground" />
+                                {PAIR_LABELS[s]}
+                              </span>
+                            </SelectItem>
+                          )
+                        })}
+                      </SelectContent>
+                    </Select>
+                  ) : (
+                    <span
+                      className="flex shrink-0 items-center gap-1.5 rounded-md border border-border/60 px-2.5 py-1 text-[11px] text-muted-foreground"
+                      style={
+                        tint ? { borderColor: `color-mix(in srgb, ${tint} 40%, transparent)` } : undefined
+                      }
+                    >
+                      <StateIcon className="size-3" />
+                      {PAIR_LABELS[state]}
+                    </span>
+                  )}
+                  {state !== "none" && (() => {
+                    const connection = connectionFor(selected!.id, other.id)!
+                    const directions = [
+                      ...(state === "out" || state === "both" ? [[selected!, other]] : []),
+                      ...(state === "in" || state === "both" ? [[other, selected!]] : []),
+                    ]
+                    return <div className="basis-full space-y-2 pl-8">
+                      {directions.map(([requester, target]) => {
+                        const level = requester.id === connection.from_crew_id ? connection.forward_file_access : connection.reverse_file_access
+                        return <div key={requester.id} className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                          <span className="text-muted-foreground">{requester.name} → {target.name} shared files</span>
+                          {canManage ? <Select value={level ?? "unknown"} disabled={!canManage || !!pendingPair || loadError || !connection.access_version}
+                            onValueChange={value => void changeFileAccess(connection, requester, other, value as FileAccess)}>
+                            <SelectTrigger className="h-8 coarse:h-12 w-[180px] text-xs" aria-label={`${requester.name} access to ${target.name} shared files`}><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                              {!level && <SelectItem value="unknown">Access unavailable</SelectItem>}
+                              {Object.entries(FILE_ACCESS_LABELS).map(([value, label]) => <SelectItem key={value} value={value}>{label}</SelectItem>)}
+                            </SelectContent>
+                          </Select> : <span>{level ? FILE_ACCESS_LABELS[level] : "Access unavailable"}</span>}
+                        </div>
+                      })}
+                      <p className="text-[11px] text-muted-foreground">Delivering places files in the receiving crew’s incoming folder; it does not allow editing all of its files.</p>
+                    </div>
+                  })()}
+                </div>
+              )
+              }
 
   return (
     <SettingsCard icon={Link2}
@@ -409,6 +526,18 @@ export function ConnectionsSection({ workspaceId }: ConnectionsSectionProps) {
         </div>
       }
     >
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-border/60 bg-surface-subtle px-4 py-2 text-xs text-muted-foreground" data-slot="crew-links-summary">
+        <span><span className="font-mono tabular-nums text-foreground">{summary.links}</span> {summary.links === 1 ? "link" : "links"} between {crews.length} crews</span>
+        {summary.isolated > 0 && (
+          <span><span className="font-mono tabular-nums text-foreground">{summary.isolated}</span> {summary.isolated === 1 ? "crew works" : "crews work"} alone</span>
+        )}
+        <span className="ml-auto hidden items-center gap-3 sm:flex" aria-hidden>
+          {(["out", "in", "both"] as const).map((k) => {
+            const Icon = PAIR_ICONS[k]
+            return <span key={k} className="inline-flex items-center gap-1"><Icon className="size-3" />{PAIR_LABELS[k]}</span>
+          })}
+        </span>
+      </div>
       {loadError && <p role="alert" className="px-4 py-3 text-sm text-destructive">Current access could not be verified. Displayed settings may be out of date. <button type="button" className="underline" onClick={() => void fetchData()}>Retry</button></p>}
       {view === "matrix" ? (
         /* ── Audit view: every pair at once. Row hands work to column. ── */
@@ -421,7 +550,7 @@ export function ConnectionsSection({ workspaceId }: ConnectionsSectionProps) {
               <tr className="border-b border-border/60">
                 <th
                   scope="col"
-                  className="px-4 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground"
+                  className="eyebrow px-4 py-2 text-left text-muted-foreground"
                 >
                   Can hand work to →
                 </th>
@@ -496,7 +625,7 @@ export function ConnectionsSection({ workspaceId }: ConnectionsSectionProps) {
               "who can Engineering hand work to?" — not "list all edges".
               Below `sm` the rail lies down and scrolls sideways rather than
               eating a third of a phone screen. */}
-          <div className="flex shrink-0 overflow-x-auto border-b border-border/40 sm:w-[172px] sm:flex-col sm:overflow-visible sm:border-b-0 sm:border-r lg:w-[196px]">
+          <div className="flex shrink-0 overflow-x-auto border-b border-border/40 sm:w-[188px] sm:flex-col sm:overflow-visible sm:border-b-0 sm:border-r lg:w-[220px]">
             {crews.map((c) => {
               const isSelected = c.id === selected?.id
               const n = linkCount(c.id)
@@ -509,9 +638,10 @@ export function ConnectionsSection({ workspaceId }: ConnectionsSectionProps) {
                   // Name the crew, not "Engineering 2": the link count beside
                   // it is a glance aid, not part of what this button is.
                   aria-label={c.name}
+                  title={c.name}
                   className={cn(
                     "flex shrink-0 items-center gap-2 border-b-2 px-3 py-2 text-left transition-colors sm:w-full sm:border-b-0 sm:border-l-2",
-                    isSelected ? "bg-accent/50" : "border-transparent hover:bg-foreground/[0.02]",
+                    isSelected ? "bg-[var(--selection-bg)]" : "border-transparent hover:bg-[var(--row-hover-bg)]",
                   )}
                   style={isSelected ? { borderColor: tintOf(c) } : undefined}
                 >
@@ -529,102 +659,24 @@ export function ConnectionsSection({ workspaceId }: ConnectionsSectionProps) {
               than squeezing: on a narrow pane the control drops to its own
               line instead of crushing the crew name to three letters. */}
           <div className="min-w-0 flex-1">
-            {others.map((other, i) => {
-              const state = stateOf(connectionFor(selected!.id, other.id), selected!.id)
-              const StateIcon = PAIR_ICONS[state]
-              const tint = state === "none" ? undefined : tintOf(state === "in" ? selected! : other)
-              return (
-                <div
-                  key={other.id}
-                  className={cn(
-                    "flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-2.5",
-                    i < others.length - 1 && "border-b border-border/40",
-                  )}
-                >
-                  <CrewLinkFlow state={state} from={tintOf(selected)} to={tintOf(other)} />
-                  <CrewIcon icon={other.icon || "briefcase"} color={other.color} size="sm" />
-                  <div className="min-w-0 flex-1 basis-32">
-                    <div className="truncate text-xs text-foreground">{other.name}</div>
-                    <div className="truncate text-[11px] text-muted-foreground">
-                      {PAIR_HINTS[state]}
-                    </div>
+            {/* The crews this one is linked to come first; the rest follow
+                under their own heading, so an existing link is never buried
+                among identical "Not linked" rows. */}
+            {linked.length === 0 && (
+              <p className="px-4 py-2 text-[11px] text-muted-foreground">
+                {selected!.name} is not linked to any crew yet. Choose who it can hand work to below.
+              </p>
+            )}
+            {([["Linked", linked], ["Not linked", unlinked]] as const).map(([heading, group]) =>
+              group.length === 0 ? null : (
+                <div key={heading}>
+                  <div className="eyebrow flex items-center gap-2 border-b border-border/40 px-4 py-1.5 text-muted-foreground">
+                    {heading}<span className="font-mono tabular-nums text-muted-foreground-soft">{group.length}</span>
                   </div>
-
-                  {canManage ? (
-                    <Select
-                      value={state}
-                      disabled={!!pendingPair || loadError}
-                      onValueChange={(v) => void applyState(other, v as PairState)}
-                    >
-                      <SelectTrigger
-                        className={cn(
-                          "h-7 w-[148px] rounded-full text-xs transition-colors",
-                          state === "none" && "text-muted-foreground",
-                        )}
-                        aria-label={`Link between ${selected!.name} and ${other.name}`}
-                        style={
-                          tint
-                            ? {
-                                borderColor: `color-mix(in srgb, ${tint} 55%, transparent)`,
-                                backgroundColor: `color-mix(in srgb, ${tint} 12%, transparent)`,
-                              }
-                            : undefined
-                        }
-                      >
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {(Object.keys(PAIR_LABELS) as PairState[]).map((s) => {
-                          const Icon = PAIR_ICONS[s]
-                          return (
-                            <SelectItem key={s} value={s} className="text-xs">
-                              <span className="flex items-center gap-2">
-                                <Icon className="size-3 text-muted-foreground" />
-                                {PAIR_LABELS[s]}
-                              </span>
-                            </SelectItem>
-                          )
-                        })}
-                      </SelectContent>
-                    </Select>
-                  ) : (
-                    <span
-                      className="flex shrink-0 items-center gap-1.5 rounded-full border border-border/60 px-2.5 py-1 text-[11px] text-muted-foreground"
-                      style={
-                        tint ? { borderColor: `color-mix(in srgb, ${tint} 40%, transparent)` } : undefined
-                      }
-                    >
-                      <StateIcon className="size-3" />
-                      {PAIR_LABELS[state]}
-                    </span>
-                  )}
-                  {state !== "none" && (() => {
-                    const connection = connectionFor(selected!.id, other.id)!
-                    const directions = [
-                      ...(state === "out" || state === "both" ? [[selected!, other]] : []),
-                      ...(state === "in" || state === "both" ? [[other, selected!]] : []),
-                    ]
-                    return <div className="basis-full space-y-2 pl-8">
-                      {directions.map(([requester, target]) => {
-                        const level = requester.id === connection.from_crew_id ? connection.forward_file_access : connection.reverse_file_access
-                        return <div key={requester.id} className="flex flex-wrap items-center justify-between gap-2 text-xs">
-                          <span className="text-muted-foreground">{requester.name} → {target.name} shared files</span>
-                          {canManage ? <Select value={level ?? "unknown"} disabled={!canManage || !!pendingPair || loadError || !connection.access_version}
-                            onValueChange={value => void changeFileAccess(connection, requester, other, value as FileAccess)}>
-                            <SelectTrigger className="h-8 coarse:h-12 w-[180px] text-xs" aria-label={`${requester.name} access to ${target.name} shared files`}><SelectValue /></SelectTrigger>
-                            <SelectContent>
-                              {!level && <SelectItem value="unknown">Access unavailable</SelectItem>}
-                              {Object.entries(FILE_ACCESS_LABELS).map(([value, label]) => <SelectItem key={value} value={value}>{label}</SelectItem>)}
-                            </SelectContent>
-                          </Select> : <span>{level ? FILE_ACCESS_LABELS[level] : "Access unavailable"}</span>}
-                        </div>
-                      })}
-                      <p className="text-[11px] text-muted-foreground">Delivering places files in the receiving crew’s incoming folder; it does not allow editing all of its files.</p>
-                    </div>
-                  })()}
+                  {group.map((other, i) => renderRow(other, i === group.length - 1))}
                 </div>
-              )
-            })}
+              ),
+            )}
           </div>
         </section>
       )}

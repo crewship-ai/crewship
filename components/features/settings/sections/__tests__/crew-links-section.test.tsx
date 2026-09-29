@@ -234,7 +234,7 @@ describe("Crew links — per-crew view", () => {
 
     // The graph is readable — it explains why an agent can or cannot reach
     // another crew, which a MEMBER debugging a run needs.
-    expect(screen.getByText(/both ways/i)).toBeInTheDocument()
+    expect(within(screen.getByRole("region", { name: "Crew links, per crew" })).getByText(/both ways/i)).toBeInTheDocument()
     expect(screen.queryByRole("combobox")).toBeNull()
     expect(mutations()).toHaveLength(0)
   })
