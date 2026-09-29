@@ -104,8 +104,8 @@ export const WorkspacesTab = React.memo(function WorkspacesTab({ orgs, users = [
         <Kpi icon={Building2} tint="var(--purple)" label="Workspaces" value={orgs.length} sub={scope === "workspace" ? "The one you are in" : "On this instance"} />
         <Kpi icon={Users} tint="var(--primary)" label="Members" value={total((o) => o._count_members)} sub={scope === "instance" ? `${users.length} people` : undefined} />
         <Kpi icon={Boxes} tint="var(--info)" label="Crews" value={total((o) => o._count_crews)} sub={`${total((o) => o._count_agents)} agents`} />
-        <Kpi icon={Activity} tint="var(--success)" label="Runs · 7 days" value={hasActivity ? total(runs) : "—"} sub={busiest && runs(busiest) > 0 ? `Busiest: ${busiest.name}` : undefined} />
-        <Kpi icon={DollarSign} tint="var(--warn)" label="Spend · 30 days" value={orgs.some((o) => o.cost_30d_usd !== undefined) ? usd(total((o) => o.cost_30d_usd ?? 0)) : "—"} sub="LLM tokens" />
+        <Kpi icon={Activity} tint="var(--success)" label="Runs · 7d" value={hasActivity ? total(runs) : "—"} sub={busiest && runs(busiest) > 0 ? `Busiest: ${busiest.name}` : undefined} />
+        <Kpi icon={DollarSign} tint="var(--warn)" label="Spend · 30d" value={orgs.some((o) => o.cost_30d_usd !== undefined) ? usd(total((o) => o.cost_30d_usd ?? 0)) : "—"} sub="LLM tokens" />
       </div>
 
       {scope === "workspace" && (

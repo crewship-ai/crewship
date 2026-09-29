@@ -95,6 +95,29 @@ describe("Admin › Users", () => {
     await waitFor(() => expect(h.apiFetch.mock.calls.some(([u]) => String(u).includes("/sessions/s-1/revoke"))).toBe(true))
   })
 
+  // Every expired cookie is a new session: the same browser on the same
+  // address is one row with a count, signed out together.
+  it("groups sessions of the same device", async () => {
+    const ua = "Mozilla/5.0 (X11; Linux x86_64) Chrome/140"
+    h.apiFetch.mockImplementation(async (u: string) =>
+      String(u).includes("/sessions?") ? ok({
+        sessions: [
+          { id: "a", created_at: iso(1), last_used_at: iso(1e3), expires_at: iso(-1), user_agent: ua, ip: "10.0.0.2", current: true },
+          { id: "b", created_at: iso(1), last_used_at: iso(5e3), expires_at: iso(-1), user_agent: ua, ip: "10.0.0.2" },
+          { id: "c", created_at: iso(1), last_used_at: iso(9e3), expires_at: iso(-1), user_agent: ua, ip: "10.0.0.2" },
+        ],
+        cli_tokens: [],
+      }) : ok([]))
+    render(<UsersTab users={USERS} workspaceId="ws-1" onRefresh={vi.fn()} />)
+    fireEvent.click(screen.getByRole("button", { name: "Demo User" }))
+    fireEvent.click(screen.getByRole("tab", { name: /sessions/i }))
+    await screen.findByText("× 3")
+    expect(document.querySelectorAll("[data-slot=admin-session-group]")).toHaveLength(1)
+    fireEvent.click(screen.getByRole("button", { name: "Sign out 2" }))
+    await waitFor(() => expect(h.apiFetch.mock.calls.filter(([u]) => /sessions\/[bc]\/revoke/.test(String(u)))).toHaveLength(2))
+    expect(h.apiFetch.mock.calls.some(([u]) => String(u).includes("sessions/a/revoke"))).toBe(false)
+  })
+
   it("changes a role in one workspace through the members API", async () => {
     render(<UsersTab users={USERS} workspaceId="ws-1" onRefresh={vi.fn()} />)
     fireEvent.click(screen.getByRole("button", { name: "Ondřej Veselý" }))
