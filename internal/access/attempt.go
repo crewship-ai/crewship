@@ -9,6 +9,8 @@ import (
 	"errors"
 	"slices"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
 // Attempt contains durable server authority, not prompt metadata. Handle is
@@ -118,7 +120,7 @@ func (s Store) Admit(ctx context.Context, user, workspace, agent, chat, parent s
 		parentValue = parentID
 	}
 	_, err = tx.ExecContext(ctx, `INSERT INTO access_attempts(id,handle_hash,member_id,member_revision,workspace_id,principal_id,agent_id,chat_id,parent_id,generation,rights,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`,
-		a.ID, digest(handle), m.ID, m.Revision, workspace, user, agent, chat, parentValue, generation, string(data), time.Now().UTC().Format(time.RFC3339Nano))
+		a.ID, digest(handle), m.ID, m.Revision, workspace, user, agent, chat, parentValue, generation, string(data), tsformat.Format(time.Now()))
 	if err != nil {
 		return "", Attempt{}, err
 	}
@@ -217,6 +219,6 @@ func (s Store) RevokeAttempt(ctx context.Context, handle string) error {
 	if s.DB == nil || handle == "" {
 		return ErrDenied
 	}
-	_, err := s.DB.ExecContext(ctx, `UPDATE access_attempts SET revoked_at=? WHERE handle_hash=? AND revoked_at IS NULL`, time.Now().UTC().Format(time.RFC3339Nano), digest(handle))
+	_, err := s.DB.ExecContext(ctx, `UPDATE access_attempts SET revoked_at=? WHERE handle_hash=? AND revoked_at IS NULL`, tsformat.Format(time.Now()), digest(handle))
 	return err
 }

@@ -10,6 +10,8 @@ import (
 	"encoding/hex"
 	"errors"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
 var ErrDenied = errors.New("resource authority denied")
@@ -200,7 +202,7 @@ func (s Store) Replace(ctx context.Context, actor, user, workspace, mode string,
 		} else {
 			projectID = r.ID
 		}
-		if _, err = tx.ExecContext(ctx, `INSERT INTO access_grants(id,member_id,resource_kind,agent_id,project_id,operation,created_by,created_at) VALUES(?,?,?,?,?,?,?,?)`, randomID(), m.ID, r.Kind, agentID, projectID, r.Operation, actor, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
+		if _, err = tx.ExecContext(ctx, `INSERT INTO access_grants(id,member_id,resource_kind,agent_id,project_id,operation,created_by,created_at) VALUES(?,?,?,?,?,?,?,?)`, randomID(), m.ID, r.Kind, agentID, projectID, r.Operation, actor, tsformat.Format(time.Now())); err != nil {
 			return m, err
 		}
 	}
