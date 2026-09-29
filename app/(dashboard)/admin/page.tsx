@@ -47,26 +47,13 @@ import { RateLimitsTab } from "./tabs/rate-limits-tab"
 
 
 /**
- * One line per section, under the heading — the same shape Settings uses.
+ * Sections that are settings (cards of rows) read in the same centred 768px
+ * column Settings uses. Dashboards and tables keep the wide column.
  *
- * Admin showed a bare icon and a word. Settings answers "what is this page for"
- * before the first control, which is most of what makes it readable, and the two
- * pages are the same kind of surface. A heading that only repeats the nav row you
- * just clicked is a heading that costs a line and says nothing.
+ * No heading repeats the section inside the page: the sub-bar already names
+ * it, exactly as Settings does, and each card says what it is for.
  */
-const SECTION_ABOUT: Partial<Record<TabKey, string>> = {
-  overview: "Instance health, size and activity at a glance.",
-  workspaces: "Every workspace on this instance.",
-  users: "Every account, and which workspaces it belongs to.",
-  providers: "Container runtime, images and the daemon's own health.",
-  notifications: "Where this instance can send a message, and whether it works.",
-  ratelimits: "Request budgets and lockout rules for the whole instance, tunable without a restart.",
-  posture: "How this instance is configured: deploy-time flags, read-only here.",
-  retention: "How long this instance keeps history before pruning it.",
-  security: "Who may read a secret: the judge that decides, and the checks around it.",
-  reviews: "What the judge has decided, and what is waiting on a human.",
-  backups: "Snapshots of this instance, and restoring from one.",
-}
+const SETTINGS_TABS: ReadonlySet<TabKey> = new Set<TabKey>(["providers", "notifications", "ratelimits", "posture", "retention", "backups"])
 
 export default function AdminPage() {
   const router = useRouter()
@@ -479,18 +466,7 @@ export default function AdminPage() {
           role="region"
           aria-label={activeItem ? `Admin ${activeItem.label}` : "Admin content"}
         >
-        <div className="p-4 md:p-6 space-y-4 max-w-5xl mx-auto">
-          {activeItem && (
-            <div className="space-y-1">
-              <div className="flex items-center gap-2">
-                <activeItem.icon className="h-3.5 w-3.5 text-foreground/50" />
-                <h1 className="text-body font-medium text-foreground/80">{activeItem.label}</h1>
-              </div>
-              {SECTION_ABOUT[activeItem.key] && (
-                <p className="text-xs text-muted-foreground leading-snug">{SECTION_ABOUT[activeItem.key]}</p>
-              )}
-            </div>
-          )}
+        <div className={cn("mx-auto space-y-4 p-4 md:p-6", activeItem && SETTINGS_TABS.has(activeItem.key) ? "max-w-3xl" : "max-w-5xl")}>
           {fetchError && (
             <div
               role="alert"

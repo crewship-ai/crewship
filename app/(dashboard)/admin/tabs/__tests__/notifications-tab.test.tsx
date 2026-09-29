@@ -4,7 +4,7 @@
 // admin one carried no information at all: eleven identical icons.
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen, cleanup, fireEvent } from "@testing-library/react"
+import { render, screen, cleanup, fireEvent, waitFor } from "@testing-library/react"
 
 import { NotificationsTab } from "../notifications-tab"
 
@@ -39,14 +39,6 @@ describe("Admin → Notifications", () => {
       expect.arrayContaining(["discord", "slack"]),
     )
   })
-
-  it("says that switching a provider off stops delivery, not just new channels", async () => {
-    render(<NotificationsTab workspaceId="ws-1" />)
-    await screen.findByRole("switch", { name: /discord/i })
-    // The old copy promised only "rejected at channel-create time", which is
-    // why an operator who switched Discord off kept receiving Discord posts.
-    expect(screen.getAllByText(/stops delivery|nothing more leaves/i).length).toBeGreaterThan(0)
-  })
 })
 
 // Grouped the way people choose a provider, with this workspace's usage, so
@@ -73,25 +65,46 @@ describe("Admin → Notifications, grouped and counted", () => {
     expect(await screen.findByRole("region", { name: "Chat" })).toBeInTheDocument()
     expect(screen.getByRole("region", { name: "Incident" })).toBeInTheDocument()
     expect(await screen.findByText("2 channels")).toBeInTheDocument()
-    expect(screen.getByText("2 / 3")).toBeInTheDocument()
+    expect(document.querySelector("[data-slot=settings-summary]")).toHaveTextContent("2 of 3 providers allowed")
+    expect(screen.getByRole("link", { name: /Channels live in Integrations/ })).toHaveAttribute("href", expect.stringContaining("/integrations"))
   })
 
-  it("filters to the providers that are off", async () => {
-    render(<NotificationsTab workspaceId="ws-1" />)
-    await screen.findByRole("region", { name: "Chat" })
-    fireEvent.click(screen.getByRole("button", { name: /^Off/ }))
-    expect(screen.queryByRole("region", { name: "Chat" })).toBeNull()
-    expect(screen.getByRole("switch", { name: /opsgenie/i })).toBeInTheDocument()
-  })
-
-  it("asks before silencing a provider channels depend on", async () => {
-    const confirm = vi.fn(() => false)
-    vi.stubGlobal("confirm", confirm)
+  it("asks in the row before silencing a provider channels depend on, and says delivery stops", async () => {
     render(<NotificationsTab workspaceId="ws-1" />)
     await screen.findByText("2 channels")
     fireEvent.click(screen.getByRole("switch", { name: /disable slack/i }))
-    expect(confirm).toHaveBeenCalledWith(expect.stringMatching(/2 channels/))
+    // The old copy promised only "rejected at channel-create time", which is
+    // why an operator who switched Discord off kept receiving Discord posts.
+    expect(screen.getByRole("alert")).toHaveTextContent(/2 channels stop delivering/)
     expect(h.apiFetch.mock.calls.some(([, init]) => (init as RequestInit | undefined)?.method === "PATCH")).toBe(false)
-    vi.unstubAllGlobals()
+
+    fireEvent.click(screen.getByRole("button", { name: "Switch off" }))
+    await waitFor(() => expect(h.apiFetch).toHaveBeenCalledWith(
+      "/api/v1/notification-providers/slack?workspace_id=ws-1",
+      expect.objectContaining({ method: "PATCH", body: JSON.stringify({ enabled: false }) }),
+    ))
+  })
+
+  it("switches an unused provider off without asking", async () => {
+    render(<NotificationsTab workspaceId="ws-1" />)
+    await screen.findByText("2 channels")
+    fireEvent.click(screen.getByRole("switch", { name: /disable discord/i }))
+    expect(screen.queryByRole("alert")).toBeNull()
+    await waitFor(() => expect(h.apiFetch).toHaveBeenCalledWith(
+      "/api/v1/notification-providers/discord?workspace_id=ws-1",
+      expect.objectContaining({ method: "PATCH" }),
+    ))
+  })
+})
+
+describe("Admin → Notifications, long categories", () => {
+  it("shows six providers and folds the rest behind one row", async () => {
+    const many = Array.from({ length: 9 }, (_, i) => ({ provider: `p${i}`, scheme: `p${i}`, enabled: true, label: `Provider ${i}`, category: "chat" }))
+    h.apiFetch.mockResolvedValue({ ok: true, status: 200, json: async () => ({ categories: [{ key: "chat", label: "Chat", hint: "" }], providers: many }) })
+    render(<NotificationsTab workspaceId="ws-1" />)
+    await screen.findByText("Provider 0")
+    expect(screen.queryByText("Provider 6")).toBeNull()
+    fireEvent.click(screen.getByRole("button", { name: "Show 3 more" }))
+    expect(screen.getByText("Provider 8")).toBeInTheDocument()
   })
 })

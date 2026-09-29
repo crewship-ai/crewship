@@ -1,15 +1,13 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useState } from "react"
-import { Bell, Boxes, FileText, Gauge, Globe, KeyRound, Pencil, RotateCcw, Search, Shield, Webhook, Zap, type LucideIcon } from "lucide-react"
+import { Bell, Boxes, FileText, Gauge, Globe, KeyRound, RotateCcw, Shield, Webhook, type LucideIcon } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
-import { SettingsCard } from "@/components/features/settings/shared"
+import { SettingsCard, SettingsEmpty, SettingsSaveBar, SettingsSegmented, SettingsSummary, SummaryItem, firstSentence } from "@/components/features/settings/shared"
 import { apiFetch } from "@/lib/api-fetch"
 import { cn } from "@/lib/utils"
-import { FilterChip, Kpi } from "./admin-kit"
 
 /** A single tunable rate limiter — GET /api/v1/admin/rate-limits. */
 interface Limiter {
@@ -26,11 +24,11 @@ interface Limiter {
 }
 
 /**
- * Admin → Rate Limiters: view + tune every configurable rate limit for the
+ * Admin → Limits: view + tune every configurable rate limit for the
  * instance. Overrides are INSTANCE-GLOBAL — they apply to the whole daemon,
- * not just the current workspace. Save PUTs the new value (validated
- * client-side against [min,max]), Reset DELETEs the override so the limiter
- * falls back to its compiled-in default.
+ * not just the current workspace. Edits collect in one save bar that PUTs
+ * each changed value (validated client-side against [min,max]); Reset
+ * DELETEs an override so the limiter falls back to its compiled-in default.
  */
 export function RateLimitsTab({ workspaceId }: { workspaceId: string | null }) {
   const [limiters, setLimiters] = useState<Limiter[]>([])
@@ -40,8 +38,7 @@ export function RateLimitsTab({ workspaceId }: { workspaceId: string | null }) {
   const [busyKey, setBusyKey] = useState<string | null>(null)
   // Per-key draft values for the number inputs, keyed by limiter key.
   const [drafts, setDrafts] = useState<Record<string, string>>({})
-  const [query, setQuery] = useState("")
-  const [area, setArea] = useState<string>("all")
+  const [saving, setSaving] = useState(false)
   const [onlyChanged, setOnlyChanged] = useState(false)
 
   const refresh = useCallback(async () => {
@@ -74,39 +71,34 @@ export function RateLimitsTab({ workspaceId }: { workspaceId: string | null }) {
     setDrafts((prev) => ({ ...prev, [updated.key]: String(updated.value) }))
   }, [])
 
-  const handleSave = useCallback(async (limiter: Limiter, raw: string) => {
+  // One PUT per changed limiter. Each result is merged as it lands, so a
+  // failure leaves only its own edit pending.
+  const handleSave = useCallback(async (edits: { limiter: Limiter; value: number }[]) => {
     if (!workspaceId) return
-    // Number("") is 0, not NaN — guard the empty string explicitly so an
-    // emptied field can never validate as 0 (harmless today since every
-    // min is >= 1, but robust if a future limiter allows 0).
-    const trimmed = raw.trim()
-    const value = Number(trimmed)
-    if (trimmed === "" || !Number.isInteger(value) || value < limiter.min || value > limiter.max) {
-      toast.error(`${limiter.display_name}: must be between ${limiter.min} and ${limiter.max}`)
-      return
-    }
-    setBusyKey(limiter.key)
-    try {
-      const res = await apiFetch(
-        `/api/v1/admin/rate-limits/${encodeURIComponent(limiter.key)}?workspace_id=${workspaceId}`,
-        {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ value }),
-        },
-      )
-      if (!res.ok) {
-        const errBody = await res.json().catch(() => null)
-        throw new Error(errBody?.error ?? errBody?.detail ?? `HTTP ${res.status}`)
+    setSaving(true)
+    let saved = 0
+    for (const { limiter, value } of edits) {
+      try {
+        const res = await apiFetch(
+          `/api/v1/admin/rate-limits/${encodeURIComponent(limiter.key)}?workspace_id=${workspaceId}`,
+          {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ value }),
+          },
+        )
+        if (!res.ok) {
+          const errBody = await res.json().catch(() => null)
+          throw new Error(errBody?.error ?? errBody?.detail ?? `HTTP ${res.status}`)
+        }
+        applyUpdated(await res.json())
+        saved++
+      } catch (e) {
+        toast.error(`${limiter.display_name}: ${e instanceof Error ? e.message : "Failed to update"}`)
       }
-      const updated: Limiter = await res.json()
-      applyUpdated(updated)
-      toast.success(`${limiter.display_name} updated`)
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to update limiter")
-    } finally {
-      setBusyKey(null)
     }
+    setSaving(false)
+    if (saved) toast.success(saved === 1 ? `${edits[0].limiter.display_name} updated` : `${saved} limits updated`)
   }, [workspaceId, applyUpdated])
 
   const handleReset = useCallback(async (limiter: Limiter) => {
@@ -121,9 +113,8 @@ export function RateLimitsTab({ workspaceId }: { workspaceId: string | null }) {
         const errBody = await res.json().catch(() => null)
         throw new Error(errBody?.error ?? errBody?.detail ?? `HTTP ${res.status}`)
       }
-      const updated: Limiter = await res.json()
-      applyUpdated(updated)
-      toast.success(`${limiter.display_name} reset to default`)
+      applyUpdated(await res.json())
+      toast.success(`${limiter.display_name} reset to ${limiter.default}`)
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to reset limiter")
     } finally {
@@ -143,162 +134,136 @@ export function RateLimitsTab({ workspaceId }: { workspaceId: string | null }) {
   }, [limiters])
 
   if (loading && limiters.length === 0) {
-    return <Skeleton className="h-[240px] rounded-xl" />
+    return <Skeleton className="h-[240px] rounded-card" />
   }
 
   if (error) {
     return (
-      <SettingsCard icon={Gauge} tint="var(--purple)"
-        title="Rate limiters"
-        description="Tune every configurable rate limit for this instance"
-      >
-        <div className="px-4 py-6 text-center text-[11px] text-muted-foreground">
-          Failed to load rate limiters ({error})
-        </div>
+      <SettingsCard icon={Gauge} tint="var(--purple)" title="Limits" description="Rate limits for the whole instance">
+        <SettingsEmpty>Failed to load rate limiters ({error})</SettingsEmpty>
       </SettingsCard>
     )
   }
 
   const changedCount = limiters.filter((l) => l.overridden).length
-  const q = query.trim().toLowerCase()
+  const edits = limiters.flatMap((l) => {
+    const raw = (drafts[l.key] ?? String(l.value)).trim()
+    return raw === String(l.value) ? [] : [{ limiter: l, raw, value: Number(raw), valid: validDraft(l, raw) }]
+  })
   const visible = groups
-    .filter(([group]) => area === "all" || area === group)
-    .map(([group, rows]) => [group, rows.filter((l) =>
-      (!onlyChanged || l.overridden) &&
-      (!q || `${l.display_name} ${l.description} ${l.key}`.toLowerCase().includes(q)))] as const)
+    .map(([group, rows]) => [group, rows.filter((l) => !onlyChanged || l.overridden)] as const)
     .filter(([, rows]) => rows.length > 0)
 
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Kpi icon={Gauge} tint="var(--primary)" label="Limits" value={limiters.length} sub={`${groups.length} areas`} />
-        <Kpi icon={Pencil} tint={changedCount ? "var(--warn)" : "var(--success)"} label="Changed" value={changedCount} sub={changedCount ? "Differ from the defaults" : "All at their defaults"} />
-        <Kpi icon={Globe} tint="var(--purple)" label="Applies to" value="Instance" sub="Every workspace at once" />
-        <Kpi icon={Zap} tint="var(--info)" label="Takes effect" value="Now" sub="No restart needed" />
-      </div>
-
-      <div className="flex flex-wrap items-center gap-2">
-        <label className="flex h-8 min-w-[220px] items-center gap-2 rounded-md border border-border bg-card px-2.5 text-muted-foreground focus-within:border-primary/40">
-          <Search className="h-3.5 w-3.5 shrink-0" />
-          <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search limits" aria-label="Search limits"
-            className="min-w-0 flex-1 bg-transparent text-xs text-foreground outline-none placeholder:text-muted-foreground-soft" />
-        </label>
-        <FilterChip pressed={onlyChanged} onClick={() => setOnlyChanged(!onlyChanged)} count={changedCount} dot="bg-warn">Changed only</FilterChip>
-        <span className="mx-1 h-5 w-px bg-border" aria-hidden />
-        <FilterChip pressed={area === "all"} onClick={() => setArea("all")}>All areas</FilterChip>
-        {groups.map(([group, rows]) => (
-          <FilterChip key={group} pressed={area === group} onClick={() => setArea(group)} count={rows.length}>{group}</FilterChip>
-        ))}
-      </div>
+      <SettingsSummary>
+        <SummaryItem n={limiters.length}>limits in {groups.length} areas</SummaryItem>
+        {changedCount
+          ? <SummaryItem n={changedCount} tone="warn">changed from default</SummaryItem>
+          : <SummaryItem>All at defaults</SummaryItem>}
+        <SummaryItem>Instance-wide · no restart</SummaryItem>
+        <span className="ml-auto">
+          <SettingsSegmented label="Show" value={onlyChanged ? "changed" : "all"} onChange={(v) => setOnlyChanged(v === "changed")}
+            options={[{ value: "all", label: "All" }, { value: "changed", label: "Changed" }]} />
+        </span>
+      </SettingsSummary>
 
       {visible.map(([group, rows]) => {
         const meta = GROUP_META[group] ?? { icon: Gauge, tint: "var(--purple)", about: "" }
+        const groupChanged = rows.filter((l) => l.overridden).length
         return (
-        <SettingsCard
-          key={group}
-          icon={meta.icon}
-          tint={meta.tint}
-          title={group}
-          description={meta.about || "Save applies an override, Reset restores the default"}
-          actions={<span className="font-mono text-[11px] text-muted-foreground">{rows.filter((l) => l.overridden).length ? `${rows.filter((l) => l.overridden).length} changed` : "defaults"}</span>}
-        >
-          {rows.map((l) => {
-            const draft = drafts[l.key] ?? String(l.value)
-            const trimmedDraft = draft.trim()
-            const parsed = Number(trimmedDraft)
-            const inRange = trimmedDraft !== "" && Number.isInteger(parsed) && parsed >= l.min && parsed <= l.max
-            const changed = String(l.value) !== trimmedDraft
-            const busy = busyKey === l.key
-            const inputId = `ratelimit-${l.key}`
-            const direction = l.value > l.default ? "looser" : l.value < l.default ? "tighter" : null
-            return (
-              <div
-                key={l.key}
-                data-limiter={l.key}
-                className={cn(
-                  "flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-border px-4 py-3 last:border-b-0",
-                  l.overridden && "bg-warn/[0.04]",
-                )}
-              >
-                <div className="min-w-0 flex-1 basis-56">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <label htmlFor={inputId} className="text-xs font-medium text-foreground">
-                      {l.display_name}
-                    </label>
-                    {l.overridden ? (
-                      <span className="rounded-full bg-warn/15 px-1.5 font-mono text-[10px] font-semibold text-warn">Overridden</span>
+          <SettingsCard
+            key={group}
+            icon={meta.icon}
+            tint={meta.tint}
+            title={group}
+            description={meta.about || undefined}
+            actions={<span className="font-mono text-[11px] text-muted-foreground">{groupChanged ? `${groupChanged} changed` : "defaults"}</span>}
+          >
+            {rows.map((l) => {
+              const draft = drafts[l.key] ?? String(l.value)
+              const trimmed = draft.trim()
+              const inRange = validDraft(l, trimmed)
+              const dirty = trimmed !== String(l.value)
+              const direction = l.value > l.default ? "looser" : l.value < l.default ? "tighter" : null
+              const inputId = `ratelimit-${l.key}`
+              return (
+                <div
+                  key={l.key}
+                  data-limiter={l.key}
+                  className={cn(
+                    "flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-border px-4 py-2.5 last:border-b-0 sm:flex-nowrap",
+                    dirty ? "bg-primary/[0.05]" : l.overridden && "bg-warn/[0.04]",
+                  )}
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <label htmlFor={inputId} className="text-[13px] text-foreground">{l.display_name}</label>
+                      {l.overridden && direction && (
+                        <span className="rounded-full bg-warn/15 px-1.5 font-mono text-[10px] text-warn">{direction} · default {l.default}</span>
+                      )}
+                    </div>
+                    {inRange ? (
+                      <p className="mt-0.5 truncate text-[11px] text-muted-foreground-soft" title={l.description}>{firstSentence(l.description)}</p>
                     ) : (
-                      <span className="rounded-full bg-muted px-1.5 font-mono text-[10px] text-muted-foreground">Default</span>
+                      <p className="mt-0.5 text-[11px] text-destructive">Must be between {l.min} and {l.max}</p>
                     )}
-                    {direction && <span className="text-[10.5px] text-muted-foreground">{direction} than the default {l.default}</span>}
                   </div>
-                  <p className="mt-0.5 line-clamp-2 text-[11.5px] leading-snug text-muted-foreground" title={l.description}>
-                    {l.description}
-                  </p>
-                </div>
-
-                <div className="flex shrink-0 items-center gap-2">
-                  <div className="flex flex-col items-end">
-                    <div className="flex items-center gap-1.5">
-                      <Input
+                  <div className="flex w-full shrink-0 items-center justify-end gap-2 sm:w-64">
+                    <div className={cn(
+                      "flex h-8 w-44 items-center overflow-hidden rounded-md border border-control-border bg-surface-subtle focus-within:border-ring",
+                      !inRange && "border-destructive",
+                    )}>
+                      <input
                         id={inputId}
-                        type="number"
+                        type="text"
                         inputMode="numeric"
-                        min={l.min}
-                        max={l.max}
                         value={draft}
                         aria-invalid={!inRange}
                         aria-label={`${l.display_name} value`}
-                        disabled={busy}
+                        disabled={saving || busyKey === l.key}
                         onChange={(e) => setDrafts((prev) => ({ ...prev, [l.key]: e.target.value }))}
-                        className={cn("h-8 w-24 text-right font-mono tabular-nums", changed && inRange && "border-primary/50")}
+                        className="h-full w-20 min-w-0 bg-transparent px-2 text-right font-mono text-control tabular-nums outline-none"
                       />
-                      <span className="w-20 shrink-0 truncate text-[11px] text-muted-foreground" title={l.unit}>{l.unit}</span>
+                      <span className="flex h-full flex-1 items-center truncate border-l border-border bg-muted px-2 text-[11px] text-muted-foreground" title={l.unit}>{l.unit}</span>
                     </div>
-                    <span className={cn("mt-0.5 text-[10px]", inRange ? "text-muted-foreground-soft" : "text-destructive")}>
-                      {inRange
-                        ? `default ${l.default} · range ${l.min}–${l.max}`
-                        : `must be between ${l.min} and ${l.max}`}
-                    </span>
+                    {l.overridden ? (
+                      <Button size="icon-sm" variant="ghost" className="h-7 w-7" disabled={saving || busyKey === l.key}
+                        onClick={() => handleReset(l)} aria-label={`Reset ${l.display_name} to ${l.default}`} title={`Reset to ${l.default}`}>
+                        <RotateCcw className="size-3.5" />
+                      </Button>
+                    ) : <span className="w-7" aria-hidden />}
                   </div>
-
-                  <Button
-                    size="xs"
-                    variant="soft"
-                    disabled={busy || !changed || !inRange}
-                    onClick={() => handleSave(l, draft)}
-                  >
-                    Save
-                  </Button>
-                  <Button
-                    size="xs"
-                    variant="ghost"
-                    disabled={busy || !l.overridden}
-                    onClick={() => handleReset(l)}
-                    aria-label={`Reset ${l.display_name} to default`}
-                  >
-                    <RotateCcw className="size-3" />
-                    Reset
-                  </Button>
                 </div>
-              </div>
-            )
-          })}
-        </SettingsCard>
+              )
+            })}
+          </SettingsCard>
         )
       })}
 
       {groups.length === 0 ? (
-        <SettingsCard icon={Gauge} tint="var(--purple)" title="Rate limiters" description="Tune every configurable rate limit for this instance">
-          <div className="px-4 py-6 text-center text-[11px] text-muted-foreground">
-            No rate limiters configured.
-          </div>
+        <SettingsCard icon={Gauge} tint="var(--purple)" title="Limits" description="Rate limits for the whole instance">
+          <SettingsEmpty>No rate limiters configured.</SettingsEmpty>
         </SettingsCard>
       ) : visible.length === 0 ? (
-        <div className="rounded-card border border-border bg-card px-4 py-6 text-center text-[12px] text-muted-foreground">No limit matches.</div>
+        <div className="rounded-card border border-border bg-card px-4 py-6 text-center text-xs text-muted-foreground">Every limit is at its default.</div>
       ) : null}
+
+      <SettingsSaveBar
+        count={edits.length}
+        saving={saving}
+        canSave={edits.every((e) => e.valid)}
+        onDiscard={() => setDrafts(Object.fromEntries(limiters.map((l) => [l.key, String(l.value)])))}
+        onSave={() => void handleSave(edits.map(({ limiter, value }) => ({ limiter, value })))}
+      />
     </div>
   )
+}
+
+/** Number("") is 0, not NaN — an emptied field must never validate as 0. */
+function validDraft(l: Limiter, raw: string): boolean {
+  const v = Number(raw)
+  return raw !== "" && Number.isInteger(v) && v >= l.min && v <= l.max
 }
 
 /** What each area protects, in one line, and its tile. Unknown groups fall

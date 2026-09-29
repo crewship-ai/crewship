@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest"
-import { render, screen, within } from "@testing-library/react"
+import { render, screen, fireEvent, within } from "@testing-library/react"
 
 import { RuntimeTab } from "../runtime-tab"
 import type { RuntimeEntry } from "../runtime-tab"
@@ -141,8 +141,10 @@ describe("RuntimeTab — the runtime inventory", () => {
     }
   })
 
-  it("also offers the runtimes not installed when one already is", () => {
+  it("also offers the runtimes not installed when one already is, folded into one row", () => {
     renderTab()
+    expect(screen.queryByTestId("runtime-install-colima")).toBeNull()
+    fireEvent.click(screen.getByRole("button", { name: /3 other runtimes supported/ }))
     // OrbStack, Podman and Apple are present; the rest are still worth naming.
     expect(screen.getByTestId("runtime-install-colima")).toBeInTheDocument()
     expect(screen.getByTestId("runtime-install-rancher")).toBeInTheDocument()

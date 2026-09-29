@@ -1,21 +1,16 @@
 import React from "react"
 import { toast } from "sonner"
-import { RefreshCw, AlertTriangle, ExternalLink, Container, Plug, Bot, ScrollText, Wrench, Trash2, Loader2 } from "lucide-react"
+import { RefreshCw, AlertTriangle, ChevronRight, ExternalLink, Container, ScrollText, Wrench, Trash2, Loader2 } from "lucide-react"
 import { StatusBadge, StatusDot } from "@/components/ui/status-badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import {
-  AlertDialog, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
-  AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
-} from "@/components/ui/alert-dialog"
-import { SettingsCard, SettingsRow } from "@/components/features/settings/shared"
+import { SettingsCard, SettingsDangerCard, SettingsRow, SettingsSegmented, SettingsSummary, SummaryItem } from "@/components/features/settings/shared"
 import { RuntimeIcon, runtimeBrand } from "@/components/icons/runtime-icons"
 import { apiFetch } from "@/lib/api-fetch"
 import { readApiError } from "@/lib/api-error"
 import { cn } from "@/lib/utils"
 import type { AgentsStatus, DaemonStatus } from "../types"
-import { Kpi } from "./admin-kit"
 import { formatUptime, goDurationSeconds } from "./overview-tab"
 
 /** One crew hardening control the runtime in use is measured not to deliver. */
@@ -83,173 +78,120 @@ const RuntimeInventory = React.memo(function RuntimeInventory({
     [allRuntimes],
   )
   const missing = Object.entries(runtimeInstallLinks).filter(([key]) => !present.has(key))
+  // With a runtime present the install links are a footnote, folded into one
+  // row; with none they are the only thing to do, so they show.
+  const [othersOpen, setOthersOpen] = React.useState(false)
+  const showOthers = othersOpen || !runtimeAvailable || ordered.length === 0
 
   return (
-      <SettingsCard icon={Container} tint="var(--purple)"
-        title="Container runtimes"
-        description="What this host has installed, and the one Crewship drives."
-        actions={
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-7 px-2.5 text-xs"
-            onClick={onCheckRuntime}
-            disabled={runtimeChecking}
-          >
-            <RefreshCw className={cn("mr-1.5 h-3 w-3", runtimeChecking && "animate-spin")} />
-            Re-detect
-          </Button>
-        }
-        padded
-      >
-        <div className="space-y-3">
-          {runtimeChecking && (
-            <div className="flex items-center gap-2">
-              <RefreshCw className="h-3 w-3 animate-spin text-muted-foreground" />
-              <span className="text-xs text-muted-foreground">Detecting runtimes…</span>
-            </div>
-          )}
-
-          {!runtimeChecking && runtimeAvailable && ordered.length > 0 && (
-            <>
-              <div className="flex flex-col gap-2">
-                {ordered.map((rt) => {
-                  const brand = runtimeBrand(rt.runtime)
-                  return (
-                    <div key={rt.runtime + rt.socket} className="flex flex-col gap-1">
-                      <div
-                        data-testid={`runtime-row-${rt.runtime}`}
-                        className={cn(
-                          "flex items-center gap-3 rounded-lg border px-3 py-2",
-                          rt.in_use
-                            ? "border-primary/30 bg-primary/[0.05] py-3"
-                            : "border-border/60 bg-foreground/[0.02]",
-                        )}
-                      >
-                        <span
-                          data-testid="runtime-icon"
-                          className={cn("flex shrink-0 items-center justify-center", rt.in_use ? "h-8 w-8" : "h-6 w-6")}
-                        >
-                          <RuntimeIcon runtime={rt.runtime} className={rt.in_use ? "h-5 w-5" : "h-4 w-4"} />
-                        </span>
-                        <div className="min-w-0 flex-1">
-                          <div className={cn("flex items-baseline gap-2", rt.in_use ? "text-sm" : "text-xs")}>
-                            <span className="font-medium">{brand.label}</span>
-                            {rt.version && (
-                              <span className="font-mono text-muted-foreground">{rt.version}</span>
-                            )}
-                          </div>
-                          {rt.socket && (
-                            <p className="mt-0.5 truncate font-mono text-[10px] text-muted-foreground">
-                              {rt.socket}
-                            </p>
-                          )}
-                        </div>
-                        <StatusBadge
-                          status={rt.in_use ? "COMPLETED" : "PENDING"}
-                          label={rt.in_use ? "In use" : "Detected"}
-                          className="text-[10px]"
-                        />
-                      </div>
-                      {/*
-                        Attached to the row rather than collected into one
-                        notice at the foot of the card: a gap is a property of a
-                        specific daemon at a specific version, and detaching it
-                        from the row that names them is how it stops being
-                        actionable. Only the in_use entry ever carries any.
-                      */}
-                      {rt.gaps && rt.gaps.length > 0 && (
-                        <div
-                          data-testid={`runtime-gaps-${rt.runtime}`}
-                          className="rounded-lg border border-warn/40 bg-warn/5 px-3 py-2 text-[11px] text-warn"
-                        >
-                          {rt.gaps.map((gap) => (
-                            <p key={gap.control} className="flex items-start gap-1.5">
-                              <AlertTriangle className="mt-[1px] h-3 w-3 shrink-0" />
-                              <span>
-                                <span className="font-mono font-medium">{gap.control}</span> is not
-                                honoured — {gap.detail}
-                              </span>
-                            </p>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  )
-                })}
-              </div>
-
-              {!anyInUse && (
-                <p
-                  data-testid="runtime-none-in-use"
-                  className="rounded-lg border border-warn/40 bg-warn/5 px-3 py-2 text-[11px] text-warn"
-                >
-                  No container runtime in use. These are installed, but this server started
-                  without a container provider — with <code>--no-docker</code>, or because the
-                  provider failed to start. Agents cannot run until it has one.
-                </p>
-              )}
-
-              {/*
-                The honesty requirement (#1690). `container.provider` accepts
-                only docker, apple or auto — there is no value for orbstack,
-                colima, rancher or podman, so nothing above is a choice the
-                operator can make here. Saying "the rest are what you could
-                switch to" is the mistake the CLI made (#1689) and it is not
-                repeated in pixels. These two levers are the real ones.
-              */}
-              <p
-                data-testid="runtime-switch-note"
-                className="text-[11px] leading-relaxed text-muted-foreground"
-              >
-                Crewship drives one runtime at a time; this is a report, not a setting.
-                Docker-compatible runtimes share one API and the first socket that answers
-                wins — point <code className="font-mono">DOCKER_HOST</code> at the daemon you
-                want. Apple Containers is its own provider, chosen with{" "}
-                <code className="font-mono">container.provider</code>.
-              </p>
-            </>
-          )}
-
-          {!runtimeChecking && !runtimeAvailable && (
-            <div className="flex items-center gap-3">
-              <AlertTriangle className="h-4 w-4 shrink-0 text-warn" />
-              <div className="min-w-0">
-                <div className="text-xs font-medium">No runtime detected</div>
-                <p className="text-[11px] text-muted-foreground">
-                  Install a container runtime to enable agent containers.
-                </p>
-              </div>
-            </div>
-          )}
-
-          {!runtimeChecking && missing.length > 0 && (
-            <div className="space-y-2">
-              {runtimeAvailable && ordered.length > 0 && (
-                <p className="font-mono text-[10.5px] uppercase tracking-[0.08em] text-muted-foreground-soft">
-                  Also supported
-                </p>
-              )}
-              <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3">
-                {missing.map(([key, url]) => (
-                  <a
-                    key={key}
-                    data-testid={`runtime-install-${key}`}
-                    href={url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex min-w-0 items-center gap-2 rounded-md border border-border/60 bg-foreground/[0.02] px-2.5 py-1.5 text-xs transition-colors hover:border-border hover:bg-foreground/[0.04]"
-                  >
-                    <RuntimeIcon runtime={key} className="h-3.5 w-3.5 shrink-0" />
-                    <span className="truncate font-medium">{runtimeBrand(key).label}</span>
-                    <ExternalLink className="ml-auto h-2.5 w-2.5 text-muted-foreground" />
-                  </a>
-                ))}
-              </div>
-            </div>
-          )}
+    <SettingsCard icon={Container} tint="var(--purple)"
+      title="Container runtime"
+      description="The runtime Crewship drives. This is a report, not a setting."
+      actions={
+        <Button variant="outline" size="sm" className="h-7 px-2.5 text-xs" onClick={onCheckRuntime} disabled={runtimeChecking}>
+          <RefreshCw className={cn("mr-1.5 h-3 w-3", runtimeChecking && "animate-spin")} />
+          Re-detect
+        </Button>
+      }
+    >
+      {runtimeChecking && (
+        <div className="flex items-center gap-2 border-b border-border px-4 py-3 text-xs text-muted-foreground">
+          <RefreshCw className="h-3 w-3 animate-spin" />Detecting runtimes…
         </div>
-      </SettingsCard>
+      )}
+
+      {!runtimeChecking && runtimeAvailable && ordered.length > 0 && (
+        <>
+          {ordered.map((rt) => {
+            const brand = runtimeBrand(rt.runtime)
+            return (
+              <div key={rt.runtime + rt.socket} className="border-b border-border">
+                <div data-testid={`runtime-row-${rt.runtime}`} className="flex items-center gap-3 px-4 py-2.5">
+                  <span data-testid="runtime-icon" className="grid h-7 w-7 shrink-0 place-items-center rounded-lg border border-border bg-surface-subtle">
+                    <RuntimeIcon runtime={rt.runtime} className="h-4 w-4" />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-baseline gap-2 text-[13px]">
+                      <span>{brand.label}</span>
+                      {rt.version && <span className="font-mono text-xs text-muted-foreground">{rt.version}</span>}
+                    </div>
+                    {rt.socket && <p className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground-soft">{rt.socket}</p>}
+                  </div>
+                  <StatusBadge status={rt.in_use ? "COMPLETED" : "PENDING"} label={rt.in_use ? "In use" : "Detected"} className="text-[10px]" />
+                </div>
+                {/*
+                  Attached to the row rather than collected into one notice at
+                  the foot of the card: a gap is a property of a specific daemon
+                  at a specific version. Only the in_use entry ever carries any.
+                */}
+                {rt.gaps && rt.gaps.length > 0 && (
+                  <div data-testid={`runtime-gaps-${rt.runtime}`} className="mx-4 mb-2.5 rounded-lg border border-warn/40 bg-warn/5 px-3 py-2 text-[11px] text-warn">
+                    {rt.gaps.map((gap) => (
+                      <p key={gap.control} className="flex items-start gap-1.5">
+                        <AlertTriangle className="mt-[1px] h-3 w-3 shrink-0" />
+                        <span><span className="font-mono font-medium">{gap.control}</span> is not honoured — {gap.detail}</span>
+                      </p>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )
+          })}
+
+          {!anyInUse && (
+            <p data-testid="runtime-none-in-use" className="mx-4 my-2.5 rounded-lg border border-warn/40 bg-warn/5 px-3 py-2 text-[11px] text-warn">
+              No container runtime in use. These are installed, but this server started without a
+              container provider (<code>--no-docker</code>, or the provider failed to start). Agents
+              cannot run until it has one.
+            </p>
+          )}
+
+          {/*
+            The honesty requirement (#1690). `container.provider` accepts only
+            docker, apple or auto — nothing above is a choice the operator can
+            make here, and saying otherwise is the mistake the CLI made (#1689).
+            These two levers are the real ones.
+          */}
+          <SettingsRow label="Use another runtime"
+            description={<span data-testid="runtime-switch-note" title="Crewship drives one runtime at a time. Docker-compatible runtimes share one API and the first socket that answers wins.">
+              Point <code className="font-mono">DOCKER_HOST</code> at its daemon; Apple Containers is chosen with <code className="font-mono">container.provider</code>.
+            </span>}>
+            <span />
+          </SettingsRow>
+        </>
+      )}
+
+      {!runtimeChecking && !runtimeAvailable && (
+        <SettingsRow label={<span className="inline-flex items-center gap-1.5"><AlertTriangle className="h-3.5 w-3.5 text-warn" />No runtime detected</span>}
+          description="Install a container runtime to run agent containers.">
+          <span />
+        </SettingsRow>
+      )}
+
+      {!runtimeChecking && missing.length > 0 && (
+        <>
+          {!showOthers && (
+            <button type="button" onClick={() => setOthersOpen(true)} aria-expanded={false}
+              className="flex w-full items-center gap-1.5 px-4 py-2.5 text-left text-xs text-muted-foreground hover:bg-accent hover:text-foreground">
+              <ChevronRight className="size-3.5" />
+              {missing.length} other runtime{missing.length === 1 ? "" : "s"} supported
+            </button>
+          )}
+          {showOthers && (
+            <div className="grid grid-cols-2 gap-1.5 px-4 py-3 sm:grid-cols-3">
+              {missing.map(([key, url]) => (
+                <a key={key} data-testid={`runtime-install-${key}`} href={url} target="_blank" rel="noopener noreferrer"
+                  className="flex min-w-0 items-center gap-2 rounded-md border border-border px-2.5 py-1.5 text-xs transition-colors hover:bg-accent">
+                  <RuntimeIcon runtime={key} className="h-3.5 w-3.5 shrink-0" />
+                  <span className="truncate">{runtimeBrand(key).label}</span>
+                  <ExternalLink className="ml-auto h-3 w-3 text-muted-foreground" />
+                </a>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+    </SettingsCard>
   )
 })
 
@@ -283,22 +225,32 @@ export const RuntimeTab = React.memo(function RuntimeTab(props: RuntimeTabProps)
   const log = useAdminRead<LogLevelState>(workspaceId ? `/api/v1/admin/log-level?workspace_id=${ws}` : null)
   const daemonUp = goDurationSeconds(daemon.data?.uptime)
 
+  const runtimeLabel = inUse ? `${runtimeBrand(inUse.runtime).label} ${inUse.version ?? ""}`.trim() : null
+
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4" data-slot="runtime-kpis">
-        <Kpi icon={Container} tint="var(--purple)" label="Runtime"
-          value={runtimeAvailable === null ? undefined : inUse ? `${runtimeBrand(inUse.runtime).label} ${inUse.version ?? ""}`.trim() : "None"}
-          sub={inUse ? "Driving the agents" : runtimeAvailable ? "Detected, none in use" : "Not detected"} />
-        <Kpi icon={Plug} tint="var(--primary)" label="Host daemon"
-          value={daemon.loading ? undefined : daemon.data ? (daemon.data.status === "ok" ? "Healthy" : daemon.data.status) : "—"}
-          sub={daemon.data ? `${daemon.data.connections} connection${daemon.data.connections === 1 ? "" : "s"}${daemonUp !== null ? ` · up ${formatUptime(daemonUp)}` : ""}` : undefined} />
-        <Kpi icon={Bot} tint="var(--success)" label="Agents"
-          value={agents.loading ? undefined : agents.data ? `${agents.data.running} running` : "—"}
-          sub={agents.data ? `${agents.data.idle} idle · ${agents.data.queued} queued${agents.data.error ? ` · ${agents.data.error} in error` : ""}` : undefined} />
-        <Kpi icon={ScrollText} tint="var(--info)" label="Log level"
-          value={log.loading ? undefined : log.data?.level ?? "—"}
-          sub={log.data ? (log.data.expires_at ? `until ${clock(log.data.expires_at)}` : log.data.level === log.data.baseline ? "Baseline" : `Baseline ${log.data.baseline}`) : undefined} />
-      </div>
+      <SettingsSummary slot="runtime-summary">
+          {runtimeAvailable !== null && (
+            inUse
+              ? <SummaryItem tone="success" n={runtimeLabel}>in use</SummaryItem>
+              : <SummaryItem tone="warn">{runtimeAvailable ? "Runtime detected, none in use" : "No runtime detected"}</SummaryItem>
+          )}
+          {daemon.data && (
+            <SummaryItem tone={daemon.data.status === "ok" ? "success" : "warn"}>
+              Daemon {daemon.data.status === "ok" ? "healthy" : daemon.data.status}{daemonUp !== null ? ` · up ${formatUptime(daemonUp)}` : ""}
+            </SummaryItem>
+          )}
+          {agents.data && (
+            <SummaryItem tone={agents.data.error ? "danger" : undefined}>
+              {agents.data.running} running · {agents.data.idle} idle · {agents.data.queued} queued{agents.data.error ? ` · ${agents.data.error} in error` : ""}
+            </SummaryItem>
+          )}
+          {log.data && (
+            <SummaryItem tone={log.data.level !== log.data.baseline ? "warn" : undefined}>
+              Log {log.data.level}{log.data.expires_at ? ` until ${clock(log.data.expires_at)}` : ""}
+            </SummaryItem>
+          )}
+      </SettingsSummary>
 
       <RuntimeInventory {...props} />
 
@@ -340,23 +292,6 @@ const DURATIONS = [
   { label: "4 hours", seconds: 14400 },
 ] as const
 
-/** Segmented choice as plain pressed buttons — this tab offers no select. */
-function Segmented<T extends string | number>({ label, options, value, onChange, disabled }: {
-  label: string; options: { value: T; label: string }[]; value: T; onChange: (v: T) => void; disabled?: boolean
-}) {
-  return (
-    <div className="inline-flex flex-wrap gap-0.5 rounded-lg border border-border bg-surface-subtle p-0.5" role="group" aria-label={label}>
-      {options.map((o) => (
-        <button key={String(o.value)} type="button" aria-pressed={value === o.value} disabled={disabled} onClick={() => onChange(o.value)}
-          className={cn("h-7 rounded-md px-2.5 text-xs transition-colors disabled:opacity-50",
-            value === o.value ? "bg-card font-medium text-foreground shadow-[0_0_0_1px_var(--border)]" : "text-muted-foreground hover:text-foreground")}>
-          {o.label}
-        </button>
-      ))}
-    </div>
-  )
-}
-
 function LoggingCard({ workspaceId, state, onChange }: { workspaceId: string; state: LogLevelState | null; onChange: (s: LogLevelState) => void }) {
   const [level, setLevel] = React.useState<string>("debug")
   const [ttl, setTtl] = React.useState<number>(900)
@@ -377,29 +312,32 @@ function LoggingCard({ workspaceId, state, onChange }: { workspaceId: string; st
     }
   }
   const overridden = !!state && (state.level !== state.baseline || !!state.expires_at)
+  const changes = !state || level !== state.level
   return (
     <SettingsCard icon={ScrollText} tint="var(--info)" title="Logging"
-      description="Raise verbosity while you chase something; it drops back to the baseline by itself.">
-      <SettingsRow label="Current level" description={state ? `Baseline ${state.baseline}` : undefined}>
-        {state ? (
-          <span className="inline-flex items-center gap-2 text-[11px] text-muted-foreground" data-slot="log-current">
+      description="Raise verbosity for a while; it drops back to the baseline by itself.">
+      <SettingsRow label="Level"
+        description={state ? (
+          <span data-slot="log-current" className="inline-flex items-center gap-1.5">
             <StatusDot status={overridden ? "BLOCKED" : "COMPLETED"} />
-            <span className="font-mono text-foreground/85">{state.level}</span>
-            {state.expires_at && <span>until {clock(state.expires_at)}</span>}
-            {overridden && (
-              <Button variant="outline" size="sm" className="h-7 px-2 text-xs" disabled={busy}
-                onClick={() => put({ level: state.baseline, ttl_seconds: 0 }, `Back to ${state.baseline}`)}>
-                Back to {state.baseline}
-              </Button>
-            )}
+            {overridden
+              ? `Now ${state.level}${state.expires_at ? ` until ${clock(state.expires_at)}` : ""} · baseline ${state.baseline}`
+              : `Baseline ${state.baseline}`}
           </span>
-        ) : <span className="text-[11px] text-muted-foreground">Not reported</span>}
+        ) : "Not reported"}>
+        <SettingsSegmented label="Level" options={LEVELS.map((l) => ({ value: l, label: l }))} value={level} onChange={setLevel} disabled={busy} />
       </SettingsRow>
-      <div className="flex flex-wrap items-center gap-2 px-4 py-3">
-        <Segmented label="Level" options={LEVELS.map((l) => ({ value: l, label: l }))} value={level} onChange={setLevel} disabled={busy} />
-        <span className="text-[11px] text-muted-foreground">for</span>
-        <Segmented label="Duration" options={DURATIONS.map((d) => ({ value: d.seconds, label: d.label }))} value={ttl} onChange={setTtl} disabled={busy} />
-        <Button size="sm" className="h-7 px-2.5 text-xs" disabled={busy}
+      <SettingsRow label="Drop back after" description="How long the new level holds">
+        <SettingsSegmented label="Duration" options={DURATIONS.map((d) => ({ value: d.seconds, label: d.label }))} value={ttl} onChange={setTtl} disabled={busy} />
+      </SettingsRow>
+      <div className="flex items-center justify-end gap-2 px-4 py-2.5">
+        {state && overridden && (
+          <Button variant="outline" size="sm" className="h-7 px-2.5 text-xs" disabled={busy}
+            onClick={() => put({ level: state.baseline, ttl_seconds: 0 }, `Back to ${state.baseline}`)}>
+            Back to {state.baseline}
+          </Button>
+        )}
+        <Button size="sm" className="h-7 px-3 text-xs" disabled={busy || !changes}
           onClick={() => put({ level, ttl_seconds: ttl }, `Log level ${level} for ${DURATIONS.find((d) => d.seconds === ttl)?.label}`)}>
           {busy && <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />}Apply
         </Button>
@@ -501,9 +439,10 @@ function MaintenanceCard({ workspaceId }: { workspaceId: string }) {
   }
 
   return (
-    <SettingsCard icon={Wrench} tint="var(--warn)" title="Maintenance" description="Clean-up the server can do for you. Each action says what it will remove first.">
+    <>
+    <SettingsCard icon={Wrench} tint="var(--warn)" title="Maintenance" description="Checking changes nothing. Each clean-up says what it removes first.">
       <SettingsRow label="Orphaned containers"
-        description="Crew containers still holding a token from before the master key was rotated. Checking changes nothing.">
+        description="Still holding a token from before the master key was rotated">
         <span className="flex flex-wrap items-center justify-end gap-1.5">
           <Button variant="outline" size="sm" className="h-7 px-2.5 text-xs" disabled={busy !== null} onClick={check}>
             {busy === "check" && <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />}Check
@@ -525,45 +464,36 @@ function MaintenanceCard({ workspaceId }: { workspaceId: string }) {
         </ul>
       )}
       {legacy && (
-        <SettingsRow label="Legacy resources" description="Containers and volumes left by an older Crewship naming scheme. Nothing current uses them.">
+        <SettingsRow label="Legacy resources" description="Containers and volumes from an older naming scheme; nothing uses them">
           <Button variant="outline" size="sm" className="h-7 px-2.5 text-xs" disabled={busy !== null} onClick={pruneLegacy} data-testid="legacy-remove">
             {busy === "legacy" && <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />}Remove
           </Button>
         </SettingsRow>
       )}
-      <div className="mx-4 my-3 flex flex-wrap items-center gap-3 rounded-lg border border-destructive/35 bg-destructive/[0.04] px-3 py-2.5" data-slot="runtime-danger">
-        <div className="min-w-0 flex-1">
-          <p className="text-xs font-medium text-destructive">Remove every crew runtime in this workspace</p>
-          <p className="text-[11px] text-muted-foreground">Stops and deletes each crew&apos;s containers and volumes. Cached images stay, so crews rebuild quickly on their next run.</p>
-        </div>
-        <Button variant="outline" size="sm" className="h-7 border-destructive/40 px-2.5 text-xs text-destructive" disabled={busy !== null} onClick={() => setConfirmOpen(true)}>
-          <Trash2 className="mr-1.5 h-3 w-3" />Remove runtimes…
-        </Button>
-      </div>
-      {result && <p className="px-4 pb-3 text-[11px] text-muted-foreground motion-safe:animate-in motion-safe:fade-in-0" role="status" data-slot="maintenance-result">{result}</p>}
-
-      <AlertDialog open={confirmOpen} onOpenChange={(v) => { if (busy !== "prune") { setConfirmOpen(v); if (!v) setTyped("") } }}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle className="flex items-center gap-2"><Trash2 className="h-4 w-4 text-destructive" />Remove every crew runtime?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Every crew in this workspace loses its running containers and volumes. Work in progress inside them is gone; cached images are kept.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <div className="grid gap-1.5">
-            <Label htmlFor="prune-confirm" className="text-xs">Type <span className="font-mono">remove</span> to confirm</Label>
-            <Input id="prune-confirm" value={typed} onChange={(e) => setTyped(e.target.value)} autoComplete="off" />
-          </div>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={busy === "prune"}>Cancel</AlertDialogCancel>
-            {/* Plain Button, not AlertDialogAction: the action closes the dialog
-                before the request answers. */}
-            <Button variant="destructive" disabled={typed.trim().toLowerCase() !== "remove" || busy === "prune"} onClick={pruneCrews}>
-              {busy === "prune" && <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />}Remove runtimes
-            </Button>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      {result && <p className="px-4 py-2.5 text-[11px] text-muted-foreground motion-safe:animate-in motion-safe:fade-in-0" role="status" data-slot="maintenance-result">{result}</p>}
     </SettingsCard>
+
+    <SettingsDangerCard icon={AlertTriangle} title="Danger zone" description="Irreversible actions on this workspace's crews">
+      <SettingsRow label="Remove every crew runtime"
+        description="Stops and deletes containers and volumes. Images stay cached, so crews rebuild fast.">
+        {confirmOpen
+          ? <Button variant="ghost" size="sm" className="h-7 px-2.5 text-xs" disabled={busy === "prune"} onClick={() => { setConfirmOpen(false); setTyped("") }}>Cancel</Button>
+          : <Button variant="outline" size="sm" className="h-7 border-destructive/40 px-2.5 text-xs text-destructive" disabled={busy !== null} onClick={() => setConfirmOpen(true)}>
+              <Trash2 className="mr-1.5 h-3 w-3" />Remove runtimes…
+            </Button>}
+      </SettingsRow>
+      {confirmOpen && (
+        <div className="flex flex-wrap items-center gap-2 px-4 pb-3" data-slot="runtime-danger">
+          <Label htmlFor="prune-confirm" className="text-[11px] font-normal text-muted-foreground">
+            Type <span className="font-mono text-foreground">remove</span> to delete every crew&apos;s containers and volumes
+          </Label>
+          <Input id="prune-confirm" value={typed} onChange={(e) => setTyped(e.target.value)} autoComplete="off" className="h-7 w-32 font-mono text-xs" />
+          <Button variant="destructive" size="sm" className="h-7 px-2.5 text-xs" disabled={typed.trim().toLowerCase() !== "remove" || busy === "prune"} onClick={pruneCrews}>
+            {busy === "prune" && <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />}Remove every runtime
+          </Button>
+        </div>
+      )}
+    </SettingsDangerCard>
+    </>
   )
 }

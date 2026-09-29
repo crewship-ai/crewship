@@ -1,4 +1,4 @@
-// Admin › Runtime beyond the inventory: the figures row, the log level an
+// Admin › Runtime beyond the inventory: the summary line, the log level an
 // operator can raise for a while, and the maintenance actions — each of which
 // looks before it removes, and the destructive one asks for a typed word.
 
@@ -56,16 +56,16 @@ function renderTab() {
 const calls = (pred: (u: string, init?: RequestInit) => boolean) =>
   h.apiFetch.mock.calls.filter(([u, init]) => pred(String(u), init as RequestInit | undefined))
 
-describe("Runtime — figures", () => {
-  it("reads the runtime, the daemon, agents and the log level", async () => {
+describe("Runtime — summary", () => {
+  it("says in one line what runs the agents, the daemon, agents and the log level", async () => {
     renderTab()
-    const kpis = document.querySelector("[data-slot=runtime-kpis]") as HTMLElement
-    expect(within(kpis).getByText("Docker 29.3.0")).toBeInTheDocument()
-    await waitFor(() => expect(within(kpis).getByText("Healthy")).toBeInTheDocument())
-    expect(within(kpis).getByText(/2 connections · up 1h 2m/)).toBeInTheDocument()
-    expect(within(kpis).getByText("3 running")).toBeInTheDocument()
-    expect(within(kpis).getByText(/13 idle · 1 queued/)).toBeInTheDocument()
-    expect(within(kpis).getByText("info")).toBeInTheDocument()
+    const line = document.querySelector("[data-slot=runtime-summary]") as HTMLElement
+    expect(line).toHaveTextContent("Docker 29.3.0 in use")
+    await waitFor(() => expect(line).toHaveTextContent("Daemon healthy · up 1h 2m"))
+    expect(line).toHaveTextContent("3 running · 13 idle · 1 queued")
+    expect(line).toHaveTextContent("Log info")
+    // The figures row is gone: one line, not four tiles.
+    expect(document.querySelector("[data-slot=admin-kpi]")).toBeNull()
   })
 })
 
@@ -111,15 +111,15 @@ describe("Runtime — maintenance", () => {
     expect(await screen.findByTestId("legacy-remove")).toBeInTheDocument()
   })
 
-  it("removes every crew runtime only after the word is typed", async () => {
+  it("removes every crew runtime from the Danger zone, only after the word is typed", async () => {
     renderTab()
-    fireEvent.click(screen.getByRole("button", { name: /remove runtimes/i }))
-    const dialog = await screen.findByRole("alertdialog")
-    const go = within(dialog).getByRole("button", { name: "Remove runtimes" })
+    const zone = screen.getByRole("region", { name: "Danger zone" })
+    fireEvent.click(within(zone).getByRole("button", { name: /remove runtimes/i }))
+    const go = within(zone).getByRole("button", { name: "Remove every runtime" })
     expect(go).toBeDisabled()
-    fireEvent.change(within(dialog).getByLabelText(/type/i), { target: { value: "remov" } })
+    fireEvent.change(within(zone).getByLabelText(/type/i), { target: { value: "remov" } })
     expect(go).toBeDisabled()
-    fireEvent.change(within(dialog).getByLabelText(/type/i), { target: { value: "remove" } })
+    fireEvent.change(within(zone).getByLabelText(/type/i), { target: { value: "remove" } })
     expect(go).toBeEnabled()
     fireEvent.click(go)
     await waitFor(() => expect(calls((u, i) => u.startsWith("/api/v1/admin/prune-crew-runtimes") && i?.method === "POST")).toHaveLength(1))
