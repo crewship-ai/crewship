@@ -21,15 +21,19 @@ import (
 const VisibleSQL = `EXISTS (
 	SELECT 1 FROM workspace_members wm
 	WHERE wm.workspace_id = c.workspace_id AND wm.user_id = ?
+	  AND (wm.access_mode = 'trusted' OR (wm.access_mode = 'restricted' AND EXISTS (
+	    SELECT 1 FROM access_grants g WHERE g.member_id = wm.id
+	      AND g.resource_kind = 'agent' AND g.agent_id = c.agent_id AND g.operation = 'chat'
+	  )))
 	  AND (
 	    (c.created_by = ? AND c.visibility IN ('private','group'))
 	    OR (c.visibility = 'group' AND EXISTS (
 	      SELECT 1 FROM chat_participants p
 	      WHERE p.chat_id = c.id AND p.user_id = ?
 	    ))
-	    OR (wm.role IN ('OWNER','ADMIN') AND c.created_by IS NOT NULL
+	    OR (wm.access_mode = 'trusted' AND wm.role IN ('OWNER','ADMIN') AND c.created_by IS NOT NULL
 	      AND c.visibility IN ('private','group'))
-	    OR (c.created_by IS NULL AND wm.role IN ('OWNER','ADMIN')
+	    OR (wm.access_mode = 'trusted' AND c.created_by IS NULL AND wm.role IN ('OWNER','ADMIN')
 	      AND (c.mode = 'MISSION' OR c.origin IN ('ROUTINE','CRON','WEBHOOK','AGENT')))
 	  )
 )`

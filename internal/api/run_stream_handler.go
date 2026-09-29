@@ -221,6 +221,18 @@ func (h *RunStreamHandler) Stream(w http.ResponseWriter, r *http.Request) {
 	replay := h.src.ReplaySession(channel, lastSeq)
 
 	st := &runStreamWriter{w: w, flusher: flusher, rc: http.NewResponseController(w), lastSeq: lastSeq}
+	st.authorize = func() error {
+		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+		defer cancel()
+		allowed, err := h.src.CanSubscribeChannel(ctx, user.ID, channel)
+		if err != nil {
+			return err
+		}
+		if !allowed {
+			return errors.New("stream authority revoked")
+		}
+		return nil
+	}
 	fromSeq := replay.FromSeq
 	active := replay.Active
 	st.write(runStreamFrame{Type: "stream.open", ChatID: chatID, FromSeq: &fromSeq, Active: &active})
@@ -382,10 +394,11 @@ func (h *RunStreamHandler) pump(ctx context.Context, st *runStreamWriter, obs *w
 // runStreamWriter serializes frames to the response and tracks the highest seq
 // already written, which is what makes replay-then-live safe to concatenate.
 type runStreamWriter struct {
-	w       http.ResponseWriter
-	flusher http.Flusher
-	rc      *http.ResponseController
-	lastSeq int64
+	authorize func() error
+	w         http.ResponseWriter
+	flusher   http.Flusher
+	rc        *http.ResponseController
+	lastSeq   int64
 	// writeErr latches the first failed write.
 	writeErr error
 }
@@ -397,6 +410,12 @@ func (s *runStreamWriter) failed() bool { return s.writeErr != nil }
 func (s *runStreamWriter) write(f runStreamFrame) {
 	if s.writeErr != nil {
 		return
+	}
+	if s.authorize != nil {
+		if err := s.authorize(); err != nil {
+			s.writeErr = err
+			return
+		}
 	}
 	data, err := json.Marshal(f)
 	if err != nil {

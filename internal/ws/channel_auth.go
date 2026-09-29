@@ -6,6 +6,7 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/crewship-ai/crewship/internal/access"
 	"github.com/crewship-ai/crewship/internal/chataudience"
 )
 
@@ -29,6 +30,21 @@ func NewDBChannelAuthorizer(db *sql.DB) *DBChannelAuthorizer {
 	return &DBChannelAuthorizer{db: db}
 }
 
+// CanDeliver rechecks queued frames immediately before socket delivery. An
+// already-open socket cannot retain access after a policy/audience change.
+// Empty-channel frames are protocol control messages; they still enforce the
+// restricted-profile ceiling. Errors deny delivery rather than retain a cache.
+func (a *DBChannelAuthorizer) CanDeliver(ctx context.Context, userID, channel string) (bool, error) {
+	if channel != "" {
+		return a.CanSubscribe(ctx, userID, channel)
+	}
+	if a == nil || a.db == nil || userID == "" {
+		return false, nil
+	}
+	restricted, err := (access.Store{DB: a.db}).HasRestrictedMembership(ctx, userID)
+	return err == nil && !restricted, err
+}
+
 // CanSubscribe reports whether the user is allowed to subscribe to the given
 // channel. Channel format: "type:id" (e.g., "workspace:abc123",
 // "session:xyz456").
@@ -48,6 +64,12 @@ func NewDBChannelAuthorizer(db *sql.DB) *DBChannelAuthorizer {
 func (a *DBChannelAuthorizer) CanSubscribe(ctx context.Context, userID, channel string) (bool, error) {
 	if a == nil || a.db == nil || userID == "" {
 		return false, nil
+	}
+	// Restricted streams remain closed until dispatch reauthorizes each
+	// event. Subscribe-time checks and a periodic sweep are not sufficient.
+	restricted, err := (access.Store{DB: a.db}).HasRestrictedMembership(ctx, userID)
+	if err != nil || restricted {
+		return false, err
 	}
 	// Parse "type:id" without allocating a []string — previously strings.SplitN
 	// cost one slice header per subscription call.

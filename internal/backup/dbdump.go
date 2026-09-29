@@ -115,6 +115,7 @@ var BackupTables = []string{
 	// Without it a restored chain reads every compacted gap as tampering.
 	"journal_chain_checkpoints",
 	"workspace_members",
+	"access_grants",
 	"workspace_invitations",
 	"workspace_mcp_servers",
 	"backup_destinations",

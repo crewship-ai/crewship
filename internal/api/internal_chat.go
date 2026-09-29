@@ -5,6 +5,8 @@ import (
 	"errors"
 	"net/http"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/access"
 )
 
 // CreateChat creates a new chat session record on behalf of the sidecar.
@@ -161,6 +163,19 @@ func (h *InternalHandler) ResolveChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if openedBy.Valid && openedBy.String != "" {
+		restricted, err := (access.Store{DB: h.db}).HasRestrictedMembership(r.Context(), openedBy.String)
+		if err != nil {
+			replyInternalError(w, h.logger, "resolve chat resource authority", err)
+			return
+		}
+		if restricted {
+			// The legacy resolver materializes crew-wide prompt, memory and
+			// credentials. Never use it for a restricted human conversation.
+			replyError(w, http.StatusForbidden, "Restricted runtime authority required")
+			return
+		}
+	}
 	h.resolveAgentConfigWithOpener(w, r, agentID, openedBy.String, visibility.String)
 }
 

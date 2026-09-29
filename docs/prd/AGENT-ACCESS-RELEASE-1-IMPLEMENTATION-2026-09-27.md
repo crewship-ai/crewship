@@ -5,14 +5,14 @@ Tracking: [#2703](https://github.com/crewship-ai/crewship/issues/2703).
 Uživatel autorizoval vývoj, testy a nasazení na dev1. Základ implementace je
 `8dc421fdb` na main; jiné instance ani produkce nejsou cílem.
 
-## Aktuální stav k 28. 9. 2026
+## Aktuální stav k 29. 9. 2026
 
 Základ #2704, opravy #2712/#2713, izolovaný runtime prototyp #2710 a
 omezený síťový broker #2715 jsou v `main`. Prototyp runtime má živé testy na
 dev2, ale běžný chat, CLI ani rutiny do něj zatím nevstupují. Starší níže
 uvedené poznámky o draft PR zachycují stav v čase daného testu.
 
-První navazující oprava #2711 sjednocuje publikum lidských soukromých chatů
+Sloučená navazující oprava #2716 (v rámci #2711) sjednocuje publikum lidských soukromých chatů
 pro seznam, vyhledávání, historii, přílohy, reakce, účastníky, feedback a
 session stream. Samotná oprava čtecích cest není autorita A2/B: zůstávají
 granty ke konkrétním agentům a projektům, soubory, paměť, běhy, journal,
@@ -21,6 +21,12 @@ runtime. Release 1.0 proto zůstává otevřený do průchodu celé A2/B matice 
 živé přejímky na konkrétním buildu.
 Historické anonymní chaty bez prokazatelného původu zůstávají skryté; nové
 plánované a webhookové běhy svůj původ při vzniku zapisují.
+
+Na dev1 pokračuje společná serverová autorita, konzervativní vstupní brány a
+kontroly doručování streamů: [průběžný záznam](AGENT-ACCESS-CONTINUATION-2026-09-29.md).
+Tato rozpracovaná větev zatím není sloučená ani důkaz úplné klientské izolace.
+CI posledního main buildu je nadále blokované billingem GitHub účtu;
+#2716 před merge nemělo dokončené nezávislé review.
 
 ## Dodávky a hranice
 

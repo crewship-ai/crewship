@@ -644,7 +644,9 @@ func (h *Handler) verifyAccess(ctx context.Context, userID, crewID string) error
 	err := h.db.QueryRowContext(ctx, `
 		SELECT wm.role FROM workspace_members wm
 		JOIN crews c ON c.workspace_id = wm.workspace_id
-		WHERE wm.user_id = ? AND c.id = ?
+		WHERE wm.user_id = ? AND c.id = ? AND wm.access_mode = 'trusted'
+		AND NOT EXISTS (SELECT 1 FROM workspace_members restricted
+		  WHERE restricted.user_id=wm.user_id AND restricted.access_mode='restricted')
 	`, userID, crewID).Scan(&role)
 	if err != nil {
 		return fmt.Errorf("access check query: %w", err)

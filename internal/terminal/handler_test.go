@@ -441,6 +441,10 @@ func TestVerifyAccess_MemberRoleAllowed(t *testing.T) {
 	if err := h.verifyAccess(context.Background(), "u1", "c1"); err != nil {
 		t.Errorf("unexpected: %v", err)
 	}
+	mustExec(t, db.DB, `UPDATE workspace_members SET access_mode='restricted' WHERE id='wm1'`)
+	if err := h.verifyAccess(context.Background(), "u1", "c1"); err == nil {
+		t.Fatal("restricted member received a shared crew shell")
+	}
 }
 
 func TestValidSlugRegex(t *testing.T) {

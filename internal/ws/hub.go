@@ -437,6 +437,9 @@ func (h *Hub) SetChatHandler(handler ChatHandler) {
 
 // Broadcast sends a message to all clients subscribed to the given channel.
 func (h *Hub) Broadcast(channel string, msg ServerMessage) {
+	// Delivery authorization must use the actual routing channel, including
+	// producers that omitted (or accidentally mismatched) the envelope field.
+	msg.Channel = channel
 	data, ok := h.marshalFrame(msg)
 	if !ok {
 		return
@@ -465,6 +468,7 @@ func (h *Hub) BroadcastWorkspace(wsID, eventType string, payload any) {
 
 // BroadcastExcept sends a message to all channel subscribers except the excluded client.
 func (h *Hub) BroadcastExcept(channel string, exclude *Client, msg ServerMessage) {
+	msg.Channel = channel
 	data, ok := h.marshalFrame(msg)
 	if !ok {
 		return

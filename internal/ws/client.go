@@ -156,6 +156,26 @@ func (c *Client) writePump() {
 // whether the caller should keep the pump running. A failed or timed-out
 // write returns false so writePump exits and the deferred Close runs.
 func (c *Client) writeFrame(msg []byte) bool {
+	var authorizer ChannelAuthorizer
+	if c.hub != nil {
+		authorizer = c.hub.channelAuth
+	}
+	if gate, ok := authorizer.(interface {
+		CanDeliver(context.Context, string, string) (bool, error)
+	}); ok {
+		var envelope struct {
+			Channel string `json:"channel"`
+		}
+		if json.Unmarshal(msg, &envelope) != nil {
+			return false
+		}
+		ctx, cancel := context.WithTimeout(c.ctx, 2*time.Second)
+		allowed, err := gate.CanDeliver(ctx, c.userID, envelope.Channel)
+		cancel()
+		if err != nil || !allowed {
+			return false
+		}
+	}
 	wait := c.writeWait
 	if wait <= 0 {
 		wait = defaultWriteWait
