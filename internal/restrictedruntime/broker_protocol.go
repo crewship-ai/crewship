@@ -26,6 +26,7 @@ type brokerFrame struct {
 	Body      []byte
 	Status    int
 	Limits    map[string]int64
+	Streams   map[string]int64 `json:",omitempty"`
 }
 
 func readBrokerFrame(r io.Reader, dst *brokerFrame) error {
@@ -79,6 +80,11 @@ func RunHTTPBroker(ctx context.Context, input io.Reader, output io.Writer) error
 			return ErrDenied
 		}
 	}
+	for id, n := range cfg.Streams {
+		if _, ok := cfg.Limits[id]; !ok || n < 1 || n > 1<<20 {
+			return ErrDenied
+		}
+	}
 	listener, err := net.Listen("tcp4", brokerAddress)
 	if err != nil {
 		return err
@@ -102,7 +108,11 @@ func RunHTTPBroker(ctx context.Context, input io.Reader, output io.Writer) error
 		}
 	}()
 	busy := make(chan struct{}, 1)
-	server := &http.Server{ReadHeaderTimeout: time.Second, ReadTimeout: 2 * time.Second, WriteTimeout: 12 * time.Second, IdleTimeout: time.Second, MaxHeaderBytes: 16 << 10}
+	writeTimeout := 12 * time.Second
+	if len(cfg.Streams) > 0 {
+		writeTimeout = 305 * time.Second
+	}
+	server := &http.Server{ReadHeaderTimeout: time.Second, ReadTimeout: 2 * time.Second, WriteTimeout: writeTimeout, IdleTimeout: time.Second, MaxHeaderBytes: 16 << 10}
 	server.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/octet-stream")
 		deny := func(code int) { w.WriteHeader(code) }
@@ -133,19 +143,58 @@ func RunHTTPBroker(ctx context.Context, input io.Reader, output io.Writer) error
 			_ = listener.Close()
 			return
 		}
-		select {
-		case f := <-replies:
-			if f.Kind != "response" || f.Status < 200 || f.Status > 599 || len(f.Body) > 1<<20 {
-				deny(503)
-				_ = listener.Close()
-				return
+		streaming := false
+		var streamed int64
+		abort := func() {
+			// A late reply must never become the response to another request.
+			_ = listener.Close()
+			panic(http.ErrAbortHandler)
+		}
+		for {
+			select {
+			case f := <-replies:
+				switch f.Kind {
+				case "response":
+					if streaming || f.Status < 200 || f.Status > 599 || len(f.Body) > 1<<20 {
+						abort()
+					}
+					w.WriteHeader(f.Status)
+					_, _ = w.Write(f.Body)
+					return
+				case "stream_start":
+					if streaming || cfg.Streams[id] == 0 || f.Status != 200 || len(f.Body) != 0 {
+						abort()
+					}
+					streaming = true
+					w.Header().Set("Content-Type", "text/event-stream")
+					w.Header().Set("Cache-Control", "no-store")
+					w.WriteHeader(200)
+				case "stream_chunk":
+					streamed += int64(len(f.Body))
+					if !streaming || len(f.Body) == 0 || streamed > cfg.Streams[id] {
+						abort()
+					}
+					if _, e := w.Write(f.Body); e != nil {
+						abort()
+					}
+				case "stream_end":
+					if !streaming || f.Status != 200 || len(f.Body) != 0 {
+						abort()
+					}
+					return
+				default:
+					abort()
+				}
+				if e := http.NewResponseController(w).Flush(); e != nil {
+					abort()
+				}
+			case <-stopped:
+				abort()
+			case <-ctx.Done():
+				abort()
+			case <-r.Context().Done():
+				abort()
 			}
-			w.WriteHeader(f.Status)
-			_, _ = w.Write(f.Body)
-		case <-stopped:
-			deny(503)
-		case <-ctx.Done():
-			deny(503)
 		}
 	})
 	if err = writeBrokerFrame(output, brokerFrame{Kind: "ready"}); err != nil {

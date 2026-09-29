@@ -17,4 +17,4 @@ sha256sum "$probe_context/runner" "$probe_context/sidecar"
 cp scripts/restricted-runtime-probe/Dockerfile "$probe_context/Dockerfile"
 probe_base=$(docker image inspect alpine:3 --format '{{index .RepoDigests 0}}')
 docker build --network=none --build-arg "BASE=$probe_base" -t "$probe_tag" "$probe_context"
-CREWSHIP_RESTRICTED_LIVE=1 CREWSHIP_RESTRICTED_IMAGE="$probe_tag" go test "${@}" -tags restrictedruntime_live -v ./internal/restrictedruntime -run TestLive -count=1 -timeout=6m
+CREWSHIP_RESTRICTED_LIVE=1 CREWSHIP_RESTRICTED_IMAGE="$probe_tag" go test "${@}" -tags restrictedruntime_live -v ./internal/restrictedruntime ./internal/restricteddispatch -run TestLive -count=1 -timeout=6m

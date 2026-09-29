@@ -1,5 +1,10 @@
 # Agent Access / Runtime — pokračování na dev1, 29. 9. 2026
 
+**Aktualizace 13:02 UTC:** #2717 je sloučené jako `7bbb09832`, po úspěchu celého
+finálního CI a věcném review i schválení `56c103a98`. Starší věty o billing blokaci
+nebo draftu níže jsou historický protokol. Release 1.0 stále není přijatý;
+navazující runtime/provider/storage integrace pokračuje v oddělené větvi.
+
 Navazuje na #2703/#2711 a předání uživatele. Rozsah není UX Routines.
 Výchozí checkout i dev1: `07bfd2360` (#2716), čistý pracovní strom.
 Uživatel povolil pokračování implementace, testování a nasazování na dev1.
@@ -312,3 +317,95 @@ akceptaci celé durable queue ani restricted runtime.
 Vzdálené CI `843dca032` nakonec celé prošlo. Novější kód vyžaduje vlastní CI;
 finální nezávislé review dosud chybí (poslední věcná revize `7626636f`). Další
 žádost o review byla odeslána 29. 9. v 12:12 UTC. PR #2717 není sloučené.
+
+## Propojení aplikačního store a runtime, další větev
+
+Finální věcné review #2717 nad `56c103a98` dorazilo jako revize 5352626632.
+Nemá nové actionable inline nálezy. Dvě drobné připomínky jsou zapracované
+na navazující větvi: kontextové SQL a defer Close v backup testu a dodatečná
+kontrola receiptu před načtením konfigurace. Původní vstupní i závěrečná kontrola
+zůstávají. #2717 je ready; při tomto zápisu čeká na dva vzdálené race joby.
+
+`internal/restricteddispatch` nyní implementuje runtime Authority skutečným
+`access.Store`. Příkaz sestavuje důvěryhodný server až po admission; následná
+kontrola revokace předchází uložení. Aditivní `restricted_launches` sváže neměnný
+příkaz s durable pokusem, bez uložení capability handle nebo credentials.
+Lease, vydání výstupu a nový start používají aktuální databázovou autoritu.
+Neúspěšná či zrušená příprava pokus odvolá. Workspace bundle nové launch payloady
+neobnovuje. Mounty jsou odmítnuté, credentials a síť nejsou v tomto adaptéru
+povolené. Nejde o veřejný execution endpoint ani zapnutí restricted profilu.
+
+Ověření na dev1:
+
+- Celý Go průchod: **150 balíků, exit 0**, celý vet, migration lint a invarianty.
+- Skutečný runtime + migrovaná aplikační DB, nikoli fixture Authority: dva lidé
+  stejného agenta běželi v oddělených kontejnerech pod UID 1001. H2 neviděl H1
+  soubor v `/tmp`, Docker socket ani `/data`. Po odvolání grantu se H1 výstup
+  odmítl a celý kontejner skončil za 4,776 s; H2 zůstal funkční.
+- Všech 11 původních Docker testů také prošlo s race. Pád controlleru → nezávislé
+  ukončení 14,983 s. Jde o jedno syntetické měření, nikoli produkční SLO.
+- Mutation test přes Go source overlay odstranil jen kontrolu po sestavení
+  příkazu a správně selhal. Pracovní zdroj se při mutaci neměnil.
+- Reporty: `reports/agent-access-dispatch-go-2026-09-29.txt`,
+  `reports/agent-access-dispatch-live-2026-09-29.txt`,
+  `reports/agent-access-dispatch-mutation-2026-09-29.txt`.
+
+**Stále nejde o běžný chat s modelem.** Test používá vlastněnou migrovanou fixture
+DB a skutečný Docker na dev1, nikoli veřejnou chat route živé aplikace. Produkční
+provider/prompt/recall, quota storage a chat/CLI/routine adapter nad touto hranicí
+zůstávají další implementační brány. Celé PRD není uzavřené.
+
+Nasazení této návaznosti: dev1 `7d86c9583c1911d0b75cf27fb3ed9cd0ac0d662e`,
+clean build `2026-09-29T12:48:32Z`, shodný skutečný proces a web export.
+Schema `20260929123723`; read-only kontrola potvrdila launch tabulku i immutable
+trigger. Health/readiness 200. Živý group human resolver a dva soukromí klienti
+stejného agenta prošli; starý receipt po odebrání/rejoin zůstal odmítnutý, nový
+fungoval. WS/HTTP revokace fungovala a druhý klient dostával heartbeat. Fixture
+workspace odstraněn přes CLI, účty zůstávají bez členství. Report:
+`reports/agent-access-dispatch-app-live-2026-09-29.txt`.
+
+GitHub automatický merge není v tomto repozitáři povolen; pokus o jeho nastavení
+byl odmítnut, žádná ochrana nebyla vypnuta. #2717 již má finální APPROVED review,
+ale při tomto zápisu stále čeká na poslední Go Race (internal/api) job.
+
+## Broker v2: omezený SSE transport
+
+Navazující větev doplňuje explicitní profil `brokered-http-v2`, network version 2
+a grant `ResponseMode=sse`. V1 zůstává pouze bufferovaný; prázdná nová pole se
+nepřidávají do jeho wire formátu. Cíl, metoda a účet jsou nadále pevné, bez
+redirectů či obecného proxy. Limit je nejvýše 1 MiB přijatých i doručených dat
+a pět minut. Každý vydaný frame ověřuje aktuální autoritu i expiraci vydaného
+credential; odvolaný nebo nedokončený stream skončí přerušením spojení. Tajemství
+rozdělené přes hranice čtení se zadržuje a rediguje, s lineárně omezeným hledáním
+prefixu. Čas čekání na modelové hlavičky zůstává omezený na nejvýše 30 sekund.
+
+Ověření finálního kódu: všech **150 Go balíků**, celý vet, cílené runtime race
+testy a **13/13 živých Docker případů**. UID 1001 obdržel první SSE event ještě
+před dokončením syntetického TLS upstreamu, broker secret se neobjevil v odpovědi
+a po revokaci nepřišel následující canary; kontejner skončil. Samostatný test se
+skutečným aplikačním grant store znovu zastavil H1 za 4,717 s při funkčním H2.
+Mutation overlay odstranil pouze per-frame broker authority check a test správně
+selhal doručením `REVOKED_CANARY`. Výsledky:
+
+- `reports/agent-access-broker-stream-go-2026-09-29.txt`
+- `reports/agent-access-broker-stream-live-2026-09-29.txt`
+- `reports/agent-access-broker-stream-mutation-2026-09-29.txt`
+
+Aplikační store adaptér a síťový SSE profil jsou zatím ověřené **odděleně**.
+`restricteddispatch.Authority` dosud nevydává síťové/credential granty a nemá
+produkční provider adapter. SSE transport sám neřeší modelovou sémantiku dokončení,
+ceny, scoped prompt/recall, storage ani veřejný chatový dispatch. Veřejná aktivace
+restricted profilu zůstává nedostupná. Celé PRD se tím neuzavírá.
+
+Finální nasazení větve po SSE změnách: dev1
+`f084be41aeeddd64b0f2033de02852cdaeeb5ec1`, clean, build
+`2026-09-29T13:17:30Z`. Skutečný `/proc/2745490/exe` a web export jsou shodné;
+autentizovaný CLI smoke i health/readiness prošly, schema `20260929123723`,
+Linux environ 0400/UID 1000. Nasazení nemění stav veřejné aktivace restricted
+profilu. Navazující PR musí ještě projít vzdáleným CI a nezávislou revizí.
+
+Další provider adapter musí kromě streamu svázat aktuální credential/account,
+model, rozpočet a povolený tvar požadavku s pokusem. Pevná HTTPS adresa sama
+o sobě neopravňuje číst libovolnou upstream konverzaci či soubor z téhož účtu.
+SDK route mapování, výběr scoped promptu/recallu a výstupní audience proto nesmějí
+převzít široký legacy resolver.

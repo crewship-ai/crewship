@@ -76,12 +76,16 @@ func (s *Session) startBroker(ctx context.Context) (string, error) {
 	s.broker = b
 	go func() { err := cmd.Wait(); b.close(); b.done <- err; close(b.done) }()
 	limits := map[string]int64{}
+	streams := map[string]int64{}
 	for _, g := range s.plan.Network.Grants {
 		limits[g.ID] = g.MaxRequest
+		if g.ResponseMode == "sse" {
+			streams[g.ID] = g.MaxResponse
+		}
 	}
 	ready := make(chan error, 1)
 	go func() {
-		err := writeBrokerFrame(in, brokerFrame{Kind: "configure", Token: token, Limits: limits})
+		err := writeBrokerFrame(in, brokerFrame{Kind: "configure", Token: token, Limits: limits, Streams: streams})
 		if err == nil {
 			var f brokerFrame
 			err = readBrokerFrame(out, &f)
@@ -118,7 +122,7 @@ func (s *Session) startBroker(ctx context.Context) (string, error) {
 			if req.Kind != "request" {
 				return
 			}
-			response := s.brokerRequest(owned, token, req, tr)
+			response := s.brokerExchange(owned, token, req, tr, func(f brokerFrame) error { return writeBrokerFrame(in, f) })
 			if writeBrokerFrame(in, response) != nil {
 				return
 			}
@@ -140,6 +144,10 @@ func (s *Session) brokerAuthorized(ctx context.Context) error {
 }
 
 func (s *Session) brokerRequest(parent context.Context, token string, req brokerFrame, tr brokerTransport) brokerFrame {
+	return s.brokerExchange(parent, token, req, tr, nil)
+}
+
+func (s *Session) brokerExchange(parent context.Context, token string, req brokerFrame, tr brokerTransport, emit func(brokerFrame) error) brokerFrame {
 	denied := brokerFrame{Kind: "response", Status: 403}
 	if subtle.ConstantTimeCompare([]byte(req.Token), []byte(token)) != 1 {
 		return denied
@@ -152,6 +160,9 @@ func (s *Session) brokerRequest(parent context.Context, token string, req broker
 		}
 	}
 	if grant == nil || int64(len(req.Body)) > grant.MaxRequest {
+		return denied
+	}
+	if grant.ResponseMode == "sse" && emit == nil {
 		return denied
 	}
 	ctx, cancel := context.WithTimeout(parent, time.Duration(grant.TimeoutMillis)*time.Millisecond)
@@ -203,9 +214,13 @@ func (s *Session) brokerRequest(parent context.Context, token string, req broker
 	if port == "" {
 		port = "443"
 	}
+	headerTimeout := 3 * time.Second
+	if grant.ResponseMode == "sse" {
+		headerTimeout = min(30*time.Second, time.Duration(grant.TimeoutMillis)*time.Millisecond)
+	}
 	transport := &http.Transport{
 		DisableKeepAlives: true, DisableCompression: true, MaxResponseHeaderBytes: 16 << 10,
-		TLSHandshakeTimeout: 3 * time.Second, ResponseHeaderTimeout: 3 * time.Second,
+		TLSHandshakeTimeout: 3 * time.Second, ResponseHeaderTimeout: headerTimeout,
 		TLSClientConfig: tr.tls,
 		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
 			return tr.dial(ctx, "tcp", net.JoinHostPort(ip.String(), port))
@@ -229,6 +244,9 @@ func (s *Session) brokerRequest(parent context.Context, token string, req broker
 		return brokerFrame{Kind: "response", Status: 502}
 	}
 	defer response.Body.Close()
+	if grant.ResponseMode == "sse" {
+		return s.brokerStream(ctx, response, *grant, secret, emit)
+	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 || strings.Contains(strings.ToLower(response.Header.Get("Content-Type")), "text/event-stream") || response.Header.Get("Upgrade") != "" || (response.Header.Get("Content-Encoding") != "" && response.Header.Get("Content-Encoding") != "identity") {
 		return brokerFrame{Kind: "response", Status: 502}
 	}

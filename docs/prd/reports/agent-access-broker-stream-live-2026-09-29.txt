@@ -1,0 +1,87 @@
+Development 1, owned Docker fixtures. scripts/restricted-runtime-probe/run.sh -race
+Application-store authority and broker v2 SSE tested separately; no production model/provider adapter is enabled.
+Final streaming source (including bounded prefix matching and omitted v1 wire fields).
+
+=== RUN   TestLiveStreamingBroker
+    broker_live_test.go:61: startup_ms=686.732
+    broker_live_test.go:101: UID-1001 received first SSE event before upstream completion; broker secret redacted; revocation suppressed next event and terminated attempt
+--- PASS: TestLiveStreamingBroker (1.41s)
+=== RUN   TestLiveFixedOperationBroker
+    broker_live_test.go:141: startup_ms=1138.020
+    broker_live_test.go:142: connected_start_ms=1138.114
+    broker_live_test.go:147: connected_call_ms=298.386
+    broker_live_test.go:161: startup_ms=1850.199
+    broker_live_test.go:214: startup_ms=626.227
+    broker_live_test.go:222: docker_stats={"BlockIO":"0B / 0B","CPUPerc":"1.09%","Container":"12185e99529f5f5986853ef9e10184458080309e6f515766b67b66cd846d97e5","ID":"12185e99529f","MemPerc":"2.98%","MemUsage":"3.82MiB / 128MiB","Name":"crewship-rtest-7fd4162e46f0398c-retry","NetIO":"0B / 0B","PIDs":"11"}
+    broker_live_test.go:222: cgroup_memory=4894720
+        6262784
+--- PASS: TestLiveFixedOperationBroker (7.81s)
+=== RUN   TestLiveFixedBrokerRelayFailure
+    broker_live_test.go:241: startup_ms=844.629
+    broker_live_test.go:264: relay_failure_to_removed_ms=376.690
+--- PASS: TestLiveFixedBrokerRelayFailure (1.36s)
+=== RUN   TestLiveFixedBrokerDirectNetworkDenied
+    broker_live_test.go:269: startup_ms=654.293
+--- PASS: TestLiveFixedBrokerDirectNetworkDenied (1.24s)
+=== RUN   TestLiveIsolationAndRecovery
+    live_test.go:152: startup_ms=1027.087
+    live_test.go:153: startup_ms=673.339
+    live_test.go:162: mountinfo_entries=31
+    live_test.go:162: mountinfo_entries=31
+    live_test.go:195: startup_ms=808.908
+    live_test.go:214: startup_ms=624.245
+    live_test.go:237: docker_stats={"BlockIO":"4.1kB / 0B","CPUPerc":"1.09%","Container":"9508d18e996288c169b414a36fbfb51b900b1a35ab8ea16f9e1f40a482313771","ID":"9508d18e9962","MemPerc":"1.65%","MemUsage":"2.117MiB / 128MiB","Name":"crewship-rtest-8708844f344843f3-a2","NetIO":"0B / 0B","PIDs":"6"}
+    live_test.go:237: cgroup_memory=2760704
+        4739072
+--- PASS: TestLiveIsolationAndRecovery (12.07s)
+=== RUN   TestLiveRevocationAndAdmission
+    live_test.go:301: startup_ms=911.446
+    live_test.go:325: revoke_to_confirmed_stop_ms=372.134
+    live_test.go:328: startup_ms=668.702
+    live_test.go:338: lease_expiry_stop_ms=2116.609
+--- PASS: TestLiveRevocationAndAdmission (5.94s)
+=== RUN   TestLiveNetworkAndSidecar
+    live_test.go:357: startup_ms=869.608
+    live_test.go:377: sidecar_ready_ms=406.889
+    live_test.go:383: startup_ms=683.606
+    live_test.go:384: sidecar_ready_ms=480.441
+    live_test.go:410: startup_ms=516.280
+    live_test.go:411: sidecar_ready_ms=470.266
+    live_test.go:418: docker_stats={"BlockIO":"0B / 0B","CPUPerc":"1.01%","Container":"fd696ab7394b8ad1268cd9a2f064c51889d4950467d704ed8c8f58cfdeda5173","ID":"fd696ab7394b","MemPerc":"12.49%","MemUsage":"15.99MiB / 128MiB","Name":"crewship-rtest-f2859d6d437e7529-network-restored","NetIO":"0B / 0B","PIDs":"17"}
+    live_test.go:418: cgroup_memory=17108992
+        18784256
+--- PASS: TestLiveNetworkAndSidecar (7.19s)
+=== RUN   TestLiveStartupSamples
+    live_test.go:471: startup_ms=869.012
+    live_test.go:471: startup_ms=729.924
+    live_test.go:471: startup_ms=495.991
+    live_test.go:471: startup_ms=650.688
+    live_test.go:471: startup_ms=526.285
+    live_test.go:474: docker_stats={"BlockIO":"0B / 0B","CPUPerc":"1.16%","Container":"ea671ecfad6f11d09f3a292d21df8e16cacd4c3813400cc7179f09fc7597a1bb","ID":"ea671ecfad6f","MemPerc":"1.53%","MemUsage":"1.961MiB / 128MiB","Name":"crewship-rtest-099a457fe39467a5-sample4","NetIO":"0B / 0B","PIDs":"6"}
+    live_test.go:474: cgroup_memory=2678784
+        4489216
+    live_test.go:479: startup_samples=5 p50_ms=650.820 p95_nearest_rank_ms=869.485 image_cache=warm samples_ms=[496.104 526.4 650.82 730.022 869.485]
+--- PASS: TestLiveStartupSamples (7.70s)
+=== RUN   TestLiveRecoveryAndIndependentService
+    live_test.go:486: startup_ms=767.242
+    live_test.go:538: startup_ms=507.245
+--- PASS: TestLiveRecoveryAndIndependentService (2.80s)
+=== RUN   TestLiveWatchdogOutageAndUnconfirmedTermination
+    live_test.go:550: startup_ms=537.811
+    live_test.go:564: authority_loss_stop_ms=5329.216
+    live_test.go:588: startup_ms=582.397
+    live_test.go:613: startup_ms=588.810
+--- PASS: TestLiveWatchdogOutageAndUnconfirmedTermination (7.84s)
+=== RUN   TestLiveSharedUIDControl
+    live_test.go:621: startup_ms=549.541
+--- PASS: TestLiveSharedUIDControl (1.00s)
+=== RUN   TestLiveControllerCrashExpiry
+    live_test.go:698: controller_crash_to_independent_stop_ms=15008.609
+--- PASS: TestLiveControllerCrashExpiry (15.70s)
+PASS
+ok  	github.com/crewship-ai/crewship/internal/restrictedruntime	73.094s
+=== RUN   TestLiveApplicationAuthorityStopsOnlyRevokedHuman
+    authority_live_test.go:83: real application grants: two UID-1001 containers, separate /tmp, revoked output denied, whole-container termination 4.717009192s, H2 remains authorized
+--- PASS: TestLiveApplicationAuthorityStopsOnlyRevokedHuman (68.32s)
+PASS
+ok  	github.com/crewship-ai/crewship/internal/restricteddispatch	69.350s

@@ -1,0 +1,9 @@
+Dev1 source 7d86c9583c1911d0b75cf27fb3ed9cd0ac0d662e, clean build 2026-09-29T12:48:32Z.
+Backend PID 2631832 and web/out identity verified. Schema 20260929123723; table and immutable trigger present.
+/api/health, /healthz, /readyz: 200. /proc/<pid>/environ: 0400, UID 1000.
+Reload built the frontend export successfully.
+
+Authenticated group participant bridge: PASS (no model or container run)
+Live original receipt denied after member removal and rejoin; new admission succeeds: PASS
+{"workspace": "cmumoau3f000159f0aa44", "two_private_clients_same_agent": "PASS", "foreign_history": "404", "positive_ws_delivery": "2/2", "http_stream_revocation": "CLOSED_WITHOUT_FRAME", "other_client_http_stream": "HEARTBEAT", "revocation": "DENIED_AND_SOCKET_CLOSED", "revoke_check_ms": 20004}
+Owned workspace removed; synthetic users have no workspace access.
