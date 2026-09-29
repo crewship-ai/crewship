@@ -23,6 +23,7 @@ import {
   SidebarMenuBadge,
   SidebarFooter,
   SidebarRail,
+  SidebarSeparator,
   useSidebar,
 } from "@/components/ui/sidebar"
 
@@ -120,10 +121,10 @@ export function AppSidebar() {
         ))}
       </SidebarContent>
 
-      {/* Which Crewship this is, then the sidebar mode toggle */}
-      <SidebarFooter className="p-2">
+      {/* The sidebar mode toggle, then — below a rule, at the very bottom —
+          which Crewship this is. */}
+      <SidebarFooter className="gap-1.5 p-2">
         <SidebarMenu>
-          <SidebarVersion />
           <SidebarMenuItem>
             <SidebarMenuButton
               onClick={() => {
@@ -157,6 +158,10 @@ export function AppSidebar() {
               )}
             </SidebarMenuButton>
           </SidebarMenuItem>
+        </SidebarMenu>
+        <SidebarSeparator className="mx-0" />
+        <SidebarMenu>
+          <SidebarVersion />
         </SidebarMenu>
       </SidebarFooter>
       <SidebarRail />

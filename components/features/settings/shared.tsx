@@ -44,12 +44,15 @@ export function SettingsCard({
   padded = false,
   icon,
   tint,
+  bodyClassName,
 }: {
   title: string
   description?: string
   actions?: ReactNode
   children: ReactNode
   className?: string
+  /** Classes for the body under the header (e.g. flex-1 in a stretched card). */
+  bodyClassName?: string
   padded?: boolean
   /** Glyph for the header's icon tile. */
   icon?: LucideIcon
@@ -65,7 +68,7 @@ export function SettingsCard({
       className={cn("overflow-hidden rounded-card border border-border bg-card", className)}
     >
       <SettingsCardHeader title={title} titleId={titleId} description={description} actions={actions} icon={icon} tint={tint} />
-      <div className={cn(padded && "p-4")}>{children}</div>
+      <div className={cn(padded && "p-4", bodyClassName)}>{children}</div>
     </section>
   )
 }

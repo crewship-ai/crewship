@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { render, screen, within } from "@testing-library/react"
+import { fireEvent, render, screen, within } from "@testing-library/react"
 
 import { OverviewTab } from "../overview-tab"
 
@@ -55,6 +55,20 @@ describe("Admin overview — what needs attention comes first", () => {
     const panel = screen.getByRole("region", { name: /needs attention/i })
     expect(within(panel).getByText(/rate limiter is OFF/i)).toBeInTheDocument()
     expect(within(panel).getByText(/private-egress/i)).toBeInTheDocument()
+  })
+
+  // A long list scrolls inside the card; each finding is its first sentence,
+  // with the rest one click away.
+  it("keeps findings to a line each, in a scrolling list", () => {
+    renderTab({ posture: { environment: "", warnings: [
+      { key: "rate_limit_disabled", severity: "high", message: "The API rate limiter is OFF. Anyone can hammer the login endpoint." },
+    ] } })
+    expect(document.querySelector("[data-slot=admin-findings]")?.className).toContain("overflow-y-auto")
+    expect(screen.getByText("The API rate limiter is OFF.")).toBeInTheDocument()
+    const details = screen.getByRole("button", { name: "Details" })
+    expect(details).toHaveAttribute("aria-expanded", "false")
+    fireEvent.click(details)
+    expect(screen.getByRole("button", { name: "Less" })).toHaveAttribute("aria-expanded", "true")
   })
 
   it("says everything is clear rather than hiding the block", () => {

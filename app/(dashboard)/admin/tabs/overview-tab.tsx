@@ -2,7 +2,7 @@ import Link from "next/link"
 import React, { type CSSProperties } from "react"
 import { motion, useReducedMotion } from "motion/react"
 import {
-  Activity, AlertTriangle, BadgeCheck, Boxes, Bot, Check, ChevronRight, Container, Cpu, Database,
+  Activity, AlertTriangle, Archive, BadgeCheck, Boxes, Bot, Check, ChevronRight, Container, Cpu, Database,
   HardDrive, Info, KeyRound, Loader2, Plug, Radio, ScrollText, ShieldCheck, Sparkles, Users,
   type LucideIcon,
 } from "lucide-react"
@@ -189,12 +189,13 @@ export const OverviewTab = React.memo(function OverviewTab({
   const journalOK = journal?.ok ?? journal?.valid
   const diskPct = health?.disk && !health.disk.error ? Math.round(health.disk.used_pct ?? 0) : null
   const daemonUp = goDurationSeconds(daemon?.uptime)
+  const noBackup = warnings.some((w) => w.key === "no_backup_recorded")
 
   // Real probes, never a hardcoded green (#868).
   const checks: Check[] = [
     {
       key: "db", icon: Database, label: "Database",
-      detail: health === null ? "Checking…" : health.db?.connected ? "SQLite · connected" : `SQLite · unreachable${health.db?.error ? ` (${health.db.error})` : ""}`,
+      detail: health === null ? "Checking…" : health.db?.connected ? "Connected" : "Unreachable",
       state: health === null ? "pending" : health.db?.connected ? "ok" : "bad",
     },
     {
@@ -294,89 +295,70 @@ export const OverviewTab = React.memo(function OverviewTab({
 
         {/* ── Capacity against the licence ── */}
         <section aria-label="Capacity" className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-          <Meter icon={Boxes} label="Crews" used={stats?.crews} limit={license?.max_crews} testId="admin-capacity-crews"
+          <Meter icon={Boxes} tint="var(--primary)" label="Crews" used={stats?.crews} limit={license?.max_crews} testId="admin-capacity-crews"
             note={overLimit(stats?.crews ?? 0, license?.max_crews) ? "Over the licensed limit — new crews are refused" : undefined} />
-          <Meter icon={Users} label="Members" used={stats?.users} limit={license?.max_members}
+          <Meter icon={Users} tint="var(--purple)" label="Members" used={stats?.users} limit={license?.max_members}
             note={overLimit(stats?.users ?? 0, license?.max_members) ? "Over the licensed seats — invitations are refused" : undefined} />
-          <Meter icon={Bot} label="Agents" used={stats?.agents}
+          <Meter icon={Bot} tint="var(--info)" label="Agents" used={stats?.agents}
             note={agents ? `${agents.running} running · ${agents.queued} queued${agents.error ? ` · ${agents.error} in error` : ""}` : license?.max_agents_per_crew ? `Up to ${license.max_agents_per_crew} per crew` : undefined}
             tone={agents?.error ? "bad" : undefined} />
-          <Meter icon={Activity} label="Running now" used={stats?.running} tone={stats && stats.running > 0 ? "live" : undefined}
+          <Meter icon={Activity} tint="var(--success)" label="Running now" used={stats?.running} tone={stats && stats.running > 0 ? "live" : undefined}
             note={runs ? `${runs.reduce((s, p) => s + p.value, 0)} runs in 7 days` : undefined} />
         </section>
 
-        <div className="grid gap-4 lg:grid-cols-5">
+        <div className="grid items-stretch gap-4 lg:grid-cols-5">
           {/* ── Needs attention ── First among the cards and present even
               when empty: an absent block reads as "not checked", an explicit
               all-clear is a different claim. It appears when the posture was
-              READ, not when it was bad. */}
-          <div className="lg:col-span-3">
+              READ, not when it was bad. Findings are one line each (the
+              message's first sentence) and open for the rest; a long list
+              scrolls inside the card instead of stretching the page. */}
+          <div className="flex min-w-0 lg:col-span-3">
             {posture ? (
-              <SettingsCard icon={AlertTriangle} tint={warnings.length ? "var(--warn)" : "var(--success)"} className="h-full"
-                  title="Needs attention"
-                  description={warnings.length === 0 ? "The instance's own read of its security posture" : `${warnings.length} finding${warnings.length === 1 ? "" : "s"} from the instance's own read of its security posture`}>
-                  {warnings.length === 0 ? (
-                    <div className="flex items-center gap-2 px-4 py-4 text-[12px] text-muted-foreground">
-                      <Check className="size-3.5 text-success" />
-                      Nothing needs attention — no posture warnings on this instance.
-                    </div>
-                  ) : (
-                    warnings.map((wn) => {
-                      const high = wn.severity === "high"
-                      const medium = wn.severity === "medium"
-                      const tint = high ? "var(--destructive)" : medium ? "var(--warn)" : "var(--info)"
-                      return (
-                        <div key={wn.key} data-severity={wn.severity} className="flex items-start gap-3 border-b border-border/60 px-4 py-3 last:border-b-0">
-                          <span className="icon-tile mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-lg" style={{ "--ic": tint } as CSSProperties} aria-hidden>
-                            {high || medium ? <AlertTriangle className="h-3.5 w-3.5" /> : <Info className="h-3.5 w-3.5" />}
-                          </span>
-                          <div className="min-w-0 flex-1">
-                            <StatusPill className="mb-1" tone={high ? "danger" : medium ? "warn" : "muted"} label={wn.severity.charAt(0).toUpperCase() + wn.severity.slice(1)} />
-                            <p className="text-[12px] leading-relaxed text-foreground/90">{wn.message}</p>
-                          </div>
-                          {FINDING_ACTIONS[wn.key] && (
-                            <Link href={FINDING_ACTIONS[wn.key].href} data-testid="admin-finding-action"
-                              className="inline-flex shrink-0 items-center gap-1 rounded-md border border-border px-2 py-1 text-[11px] font-medium text-foreground/90 transition-colors hover:border-primary/50 hover:text-primary-hover">
-                              {FINDING_ACTIONS[wn.key].label} <ChevronRight className="h-3 w-3" />
-                            </Link>
-                          )}
-                        </div>
-                      )
-                    })
-                  )}
-                </SettingsCard>
+              <SettingsCard icon={AlertTriangle} tint={warnings.length ? "var(--warn)" : "var(--success)"} className="flex w-full flex-col"
+                title="Needs attention"
+                description={warnings.length === 0 ? "The instance's own read of its security posture" : `${warnings.length} finding${warnings.length === 1 ? "" : "s"} from the instance's own read of its security posture`}>
+                {warnings.length === 0 ? (
+                  <div className="flex items-center gap-2 px-4 py-4 text-[12px] text-muted-foreground">
+                    <Check className="size-3.5 text-success" />
+                    Nothing needs attention — no posture warnings on this instance.
+                  </div>
+                ) : (
+                  <div className="max-h-[288px] overflow-y-auto" data-slot="admin-findings">
+                    {warnings.map((wn) => <Finding key={wn.key} finding={wn} />)}
+                  </div>
+                )}
+              </SettingsCard>
             ) : (
-              <Skeleton className="h-full min-h-40 rounded-card" />
+              <Skeleton className="min-h-40 w-full rounded-card" />
             )}
           </div>
 
           {/* ── The week's runs ── */}
-          <div className="lg:col-span-2">
-            <SettingsCard icon={Activity} title="Runs this week" className="h-full"
+          <div className="flex min-w-0 lg:col-span-2">
+            <SettingsCard icon={Activity} tint="var(--success)" title="Runs this week" className="flex w-full flex-col" bodyClassName="flex flex-1 flex-col"
               description={cost ? `${formatUsd(cost.reduce((s, p) => s + p.value, 0))} spent in 7 days` : "Agent and routine runs per day"}>
               <RunBars runs={runs} />
             </SettingsCard>
           </div>
         </div>
 
-        <div className="grid gap-4 lg:grid-cols-2">
-          {/* ── Platform ── */}
-          <SettingsCard icon={Cpu} tint="var(--purple)" title="Platform" description="What is running, and what it is running on">
-            <Row icon={Sparkles} label="Version">
-              <span className="font-mono text-foreground/85">{version?.current ?? "—"}</span>
-              {version?.schema_version ? <span className="font-mono text-muted-foreground-soft"> · schema {version.schema_version}</span> : null}
+        {/* ── Platform and integrity ── Five rows each, so the pair lines up;
+            every row is icon · name · status on the right. */}
+        <div className="grid items-stretch gap-4 lg:grid-cols-2">
+          <SettingsCard icon={Cpu} tint="var(--purple)" title="Platform" description="What is running, and what it is running on" className="h-full">
+            <Row icon={Cpu} label="Engine" description={health?.log_level?.level ? `Log level ${health.log_level.level}${health.log_level.expires_at ? " (temporary)" : ""}` : undefined}>
+              {health ? <><StatusDot status="COMPLETED" /> Up {formatUptime(health.uptime_seconds)}</> : "Checking…"}
             </Row>
-            <Row icon={Cpu} label="Engine">
-              {health ? <><StatusDot status="COMPLETED" /> Up {formatUptime(health.uptime_seconds)}{health.log_level?.level && <span className="font-mono text-muted-foreground-soft"> · log {health.log_level.level}{health.log_level.expires_at ? " (temporary)" : ""}</span>}</> : "Checking…"}
-            </Row>
-            <Row icon={Database} label="Database">
-              <StatusDot status={checks[0].state === "ok" ? "COMPLETED" : checks[0].state === "bad" ? "FAILED" : "PENDING"} /> {checks[0].detail}
+            <Row icon={Database} label="Database" description="SQLite">
+              <StatusDot status={checks[0].state === "ok" ? "COMPLETED" : checks[0].state === "bad" ? "FAILED" : "PENDING"} />
+              {checks[0].state === "bad" && health?.db?.error ? `Unreachable (${health.db.error})` : checks[0].detail}
             </Row>
             <Row icon={Container} label="Container runtime" description={runtimeInfo?.socket}>
               <StatusDot status={runtimeAvailable === true ? "COMPLETED" : "BLOCKED"} /> {runtimeLabel}
             </Row>
-            <Row icon={Plug} label="Host daemon" description="crewshipd — how agents reach the host">
-              {daemon ? <><StatusDot status={daemon.status === "ok" ? "COMPLETED" : "FAILED"} /> {daemon.status === "ok" ? "Healthy" : daemon.status} · {daemon.connections} conn.{daemonUp !== null ? ` · up ${formatUptime(daemonUp)}` : ""}</> : "Checking…"}
+            <Row icon={Plug} label="Host daemon" description="How agents reach the host">
+              {daemon ? <><StatusDot status={daemon.status === "ok" ? "COMPLETED" : "FAILED"} /> {daemon.connections} conn.{daemonUp !== null ? ` · up ${formatUptime(daemonUp)}` : ""}</> : "Checking…"}
             </Row>
             <SettingsRow label={<Label icon={HardDrive}>Disk</Label>} description={health?.disk?.path} border={false}>
               {/* The data volume is the one that fills in practice. A missing
@@ -387,7 +369,7 @@ export const OverviewTab = React.memo(function OverviewTab({
                 <span className="text-[11px] text-muted-foreground">Unavailable — {health.disk.error}</span>
               ) : (
                 <span className="flex items-center gap-2 text-[11px] text-muted-foreground">
-                  <Bar pct={health.disk.used_pct ?? 0} className="hidden w-24 sm:block" />
+                  <Bar pct={health.disk.used_pct ?? 0} className="hidden w-20 sm:block" />
                   <span className="font-mono tabular-nums text-foreground/80">{Math.round(health.disk.used_pct ?? 0)}%</span>
                   <span>{formatBytes(health.disk.free_bytes ?? 0)} free of {formatBytes(health.disk.total_bytes ?? 0)}</span>
                 </span>
@@ -396,61 +378,69 @@ export const OverviewTab = React.memo(function OverviewTab({
           </SettingsCard>
 
           {/* ── Integrity ── The instance's tamper-evidence and key custody. */}
-          <SettingsCard icon={ShieldCheck} tint="var(--success)" title="Integrity" description="Tamper-evidence, key custody and the credential judge">
-              <Row icon={ScrollText} label="Journal chain">
-                {journalPending ? (
-                  <><Loader2 className="h-3 w-3 animate-spin" /> Verifying…</>
-                ) : journal === null ? (
-                  "Not checked"
-                ) : journalOK === false || journal.error ? (
-                  <span className="text-destructive"><StatusDot status="FAILED" /> {journal.error ?? "Verification failed"}</span>
-                ) : (
-                  <><StatusDot status="COMPLETED" /> {(journalEntries ?? 0).toLocaleString()} entries verified</>
-                )}
-              </Row>
-              <Row icon={KeyRound} label="Encryption key" description={keySourceNote(health?.encryption_key_source)}>
-                <span className={cn("whitespace-nowrap", health?.encryption_key_source === "generated" && "text-warn")}>{keySourceLabel(health?.encryption_key_source)}</span>
-              </Row>
-              <Row icon={ShieldCheck} label="Keeper" description={keeperHealth && keeperHealth.samples > 0 ? `p95 ${keeperHealth.p95_latency_ms} ms · ${keeperHealth.judge_failures} judge failures` : undefined}>
-                {keeper === null ? "Not checked" : keeper.enabled ? <><StatusDot status="COMPLETED" /> On · {keeper.deny_count} denied of {keeper.total_requests}</> : <><StatusDot status="BLOCKED" /> Off</>}
-              </Row>
-              <SettingsRow label={<Label icon={Radio}>Telemetry</Label>} description="Toggle via `crewship telemetry on|off`" border={false}>
-                <span className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground">
-                  <StatusDot status={telemetry?.enabled ? "COMPLETED" : "PENDING"} />
-                  {telemetry === null ? "Unknown" : telemetry.enabled ? "Enabled" : "Disabled"}
-                </span>
-              </SettingsRow>
+          <SettingsCard icon={ShieldCheck} tint="var(--success)" title="Integrity" description="Tamper-evidence, key custody and the credential judge" className="h-full">
+            <Row icon={ScrollText} label="Journal chain" description={journal?.checkpoints ? `${journal.checkpoints} checkpoints` : undefined}>
+              {journalPending ? (
+                <><Loader2 className="h-3 w-3 animate-spin" /> Verifying…</>
+              ) : journal === null ? (
+                "Not checked"
+              ) : journalOK === false || journal.error ? (
+                <span className="text-destructive"><StatusDot status="FAILED" /> {journal.error ?? "Verification failed"}</span>
+              ) : (
+                <><StatusDot status="COMPLETED" /> {(journalEntries ?? 0).toLocaleString()} entries verified</>
+              )}
+            </Row>
+            <Row icon={KeyRound} label="Encryption key" description={keySourceNote(health?.encryption_key_source)}>
+              <StatusDot status={health?.encryption_key_source === "generated" ? "BLOCKED" : health?.encryption_key_source ? "COMPLETED" : "PENDING"} />
+              <span className={cn("whitespace-nowrap", health?.encryption_key_source === "generated" && "text-warn")}>{keySourceLabel(health?.encryption_key_source)}</span>
+            </Row>
+            <Row icon={Archive} label="Backups" description={noBackup ? "Nothing to restore from yet" : undefined}>
+              {posture === null ? "Checking…" : noBackup ? <><StatusDot status="BLOCKED" /><span className="text-warn">None recorded</span></> : <><StatusDot status="COMPLETED" /> Recorded</>}
+            </Row>
+            <Row icon={ShieldCheck} label="Keeper" description={keeperHealth && keeperHealth.samples > 0 ? `p95 ${keeperHealth.p95_latency_ms} ms · ${keeperHealth.judge_failures} judge failures` : "Judges every credential read"}>
+              {keeper === null ? "Checking…" : keeper.enabled ? <><StatusDot status="COMPLETED" /> On · {keeper.deny_count} denied of {keeper.total_requests}</> : <><StatusDot status="BLOCKED" /> Off</>}
+            </Row>
+            <SettingsRow label={<Label icon={Radio}>Telemetry</Label>} description="crewship telemetry on|off" border={false}>
+              <span className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                <StatusDot status={telemetry?.enabled ? "COMPLETED" : "PENDING"} />
+                {telemetry === null ? "Unknown" : telemetry.enabled ? "Enabled" : "Disabled"}
+              </span>
+            </SettingsRow>
           </SettingsCard>
         </div>
 
-        <div className="grid gap-4 lg:grid-cols-2">
+        <div className="grid items-stretch gap-4 lg:grid-cols-2">
           {/* ── AI helpers ── The models behind the judge, the curator and the
               monitors, and whether each one answers. */}
-          <SettingsCard icon={Bot} tint="var(--info)" title="AI helpers" description="The models behind the judge, reviews and monitors">
+          <SettingsCard icon={Bot} tint="var(--info)" title="AI helpers" description="The models behind the judge, reviews and monitors" className="h-full">
             {aux === null ? (
               <div className="space-y-2 p-4"><Skeleton className="h-4 w-full" /><Skeleton className="h-4 w-4/5" /></div>
             ) : aux.subsystems.length === 0 ? (
               <p className="px-4 py-4 text-[12px] text-muted-foreground">No helper models are configured.</p>
             ) : (
               aux.subsystems.map((s) => (
-                <SettingsRow key={s.id} label={s.label} description={s.reachable === undefined ? s.reach_detail : undefined}>
-                  <span className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground">
-                    <StatusDot status={s.healthy === false || s.reachable === false ? "FAILED" : s.reachable ? "COMPLETED" : "PENDING"} />
-                    <span className="font-mono">{[s.provider, s.model].filter(Boolean).join(" · ") || "not set"}</span>
+                <div key={s.id} className="flex items-center gap-3 border-b border-border px-4 py-2.5 last:border-b-0" data-slot="admin-aux">
+                  <StatusDot status={s.healthy === false || s.reachable === false ? "FAILED" : s.reachable ? "COMPLETED" : "PENDING"} />
+                  <span className="min-w-0 flex-1 truncate text-xs" title={s.label}>{s.label}</span>
+                  <span className="max-w-[55%] shrink-0 truncate rounded-md border border-border bg-muted/40 px-1.5 py-0.5 font-mono text-[10.5px] text-muted-foreground" title={[s.provider, s.model].filter(Boolean).join(" · ")}>
+                    {[s.provider, s.model].filter(Boolean).join(" · ") || "not set"}
                   </span>
-                </SettingsRow>
+                </div>
               ))
             )}
           </SettingsCard>
 
           {/* ── Licence ── */}
-          <SettingsCard icon={BadgeCheck} title="License" description={license ? `${editionLabel(license.edition)}${license.licensee_org ? ` · ${license.licensee_org}` : ""}` : "Edition and what it permits"}>
+          <SettingsCard icon={BadgeCheck} title="License" description="Edition and what it permits" className="h-full">
             {license ? (
               <>
-                <SettingsRow label="Crews"><Limit used={stats?.crews} limit={license.max_crews} /></SettingsRow>
-                <SettingsRow label="Members"><Limit used={stats?.users} limit={license.max_members} /></SettingsRow>
-                <SettingsRow label="Agents per crew"><span className="font-mono text-[11px] text-muted-foreground">up to {license.max_agents_per_crew}</span></SettingsRow>
-                <SettingsRow label="Features" border={false}>
+                <Row icon={BadgeCheck} label="Edition" description={license.licensee_org || undefined}>
+                  <span className="font-medium text-foreground/90">{editionLabel(license.edition)}</span>
+                </Row>
+                <Row icon={Boxes} label="Crews"><Limit used={stats?.crews} limit={license.max_crews} /></Row>
+                <Row icon={Users} label="Members"><Limit used={stats?.users} limit={license.max_members} /></Row>
+                <Row icon={Bot} label="Agents per crew"><span className="font-mono">up to {license.max_agents_per_crew}</span></Row>
+                <SettingsRow label={<Label icon={Sparkles}>Features</Label>} border={false}>
                   {license.features?.length ? (
                     <span className="flex flex-wrap justify-end gap-1">
                       {license.features.map((f) => (
@@ -458,7 +448,7 @@ export const OverviewTab = React.memo(function OverviewTab({
                       ))}
                     </span>
                   ) : (
-                    <span className="text-[11px] text-muted-foreground">Core features — no paid add-ons</span>
+                    <span className="text-[11px] text-muted-foreground">Core features</span>
                   )}
                 </SettingsRow>
               </>
@@ -516,26 +506,71 @@ function Limit({ used, limit }: { used?: number; limit?: number }) {
   )
 }
 
-/** One capacity figure: the count against its ceiling, as a number and a bar. */
-function Meter({ icon: Icon, label, used, limit, note, tone, testId }: {
-  icon: LucideIcon; label: string; used?: number; limit?: number; note?: string; tone?: "bad" | "live"; testId?: string
+/** One capacity figure: an icon tile, the count against its ceiling, a bar. */
+function Meter({ icon: Icon, tint, label, used, limit, note, tone, testId }: {
+  icon: LucideIcon; tint: string; label: string; used?: number; limit?: number; note?: string; tone?: "bad" | "live"; testId?: string
 }) {
   const over = overLimit(used ?? 0, limit)
   return (
-    <div className="rounded-card border border-border bg-card px-4 py-3">
-      <div className="flex items-center gap-2 text-muted-foreground">
-        <Icon className="h-3.5 w-3.5" aria-hidden />
-        <span className="eyebrow">{label}</span>
-      </div>
-      {used === undefined ? (
-        <Skeleton className="mt-2 h-6 w-16" />
-      ) : (
-        <div className={cn("mt-1 font-mono text-xl font-semibold tabular-nums", over || tone === "bad" ? "text-destructive" : tone === "live" ? "text-success" : "text-foreground")} data-testid={testId}>
-          {against(used, limit)}
+    <div className="flex flex-col rounded-card border border-border bg-card px-4 py-3.5" data-slot="admin-meter">
+      <div className="flex items-center gap-3">
+        <span className="icon-tile grid h-9 w-9 shrink-0 place-items-center rounded-lg" style={{ "--ic": over || tone === "bad" ? "var(--destructive)" : tint } as CSSProperties} aria-hidden>
+          <Icon className="h-4 w-4" />
+        </span>
+        <div className="min-w-0">
+          <div className="eyebrow text-muted-foreground">{label}</div>
+          {used === undefined ? (
+            <Skeleton className="mt-1 h-6 w-16" />
+          ) : (
+            <div className={cn("font-mono text-xl font-semibold leading-7 tabular-nums", over || tone === "bad" ? "text-destructive" : tone === "live" ? "text-success" : "text-foreground")} data-testid={testId}>
+              {against(used, limit)}
+            </div>
+          )}
         </div>
+      </div>
+      <div className="mt-3 flex h-4 items-center">
+        {limit ? <Bar pct={((used ?? 0) / limit) * 100} className="w-full" /> : <span className="truncate text-[11px] text-muted-foreground" title={note}>{note}</span>}
+      </div>
+      {limit ? <p className={cn("mt-1 truncate text-[11px]", over ? "text-destructive" : "text-muted-foreground")} title={note}>{note ?? `${Math.max(0, limit - (used ?? 0))} left on this licence`}</p> : null}
+    </div>
+  )
+}
+
+/** A posture finding: its first sentence as the line, the rest on demand. */
+function Finding({ finding }: { finding: { key: string; severity: string; message: string } }) {
+  const [open, setOpen] = React.useState(false)
+  const high = finding.severity === "high"
+  const medium = finding.severity === "medium"
+  const tint = high ? "var(--destructive)" : medium ? "var(--warn)" : "var(--info)"
+  const cut = finding.message.search(/\.\s/)
+  const head = cut > 0 ? finding.message.slice(0, cut + 1) : finding.message
+  const rest = cut > 0 ? finding.message.slice(cut + 2) : ""
+  const action = FINDING_ACTIONS[finding.key]
+  return (
+    <div data-severity={finding.severity} className="flex items-start gap-3 border-b border-border/60 px-4 py-3 last:border-b-0">
+      <span className="icon-tile mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-lg" style={{ "--ic": tint } as CSSProperties} aria-hidden>
+        {high || medium ? <AlertTriangle className="h-3.5 w-3.5" /> : <Info className="h-3.5 w-3.5" />}
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-center gap-2">
+          <StatusPill tone={high ? "danger" : medium ? "warn" : "muted"} label={finding.severity.charAt(0).toUpperCase() + finding.severity.slice(1)} />
+          <p className="min-w-0 flex-1 text-[12.5px] font-medium leading-snug text-foreground">{head}</p>
+        </div>
+        {rest && (
+          <p className={cn("mt-1 text-[12px] leading-relaxed text-muted-foreground", !open && "line-clamp-1")}>{rest}</p>
+        )}
+        {rest && (
+          <button type="button" onClick={() => setOpen(!open)} aria-expanded={open} className="mt-0.5 text-[11px] font-medium text-primary-hover hover:underline">
+            {open ? "Less" : "Details"}
+          </button>
+        )}
+      </div>
+      {action && (
+        <Link href={action.href} data-testid="admin-finding-action"
+          className="inline-flex shrink-0 items-center gap-1 rounded-md border border-border px-2 py-1 text-[11px] font-medium text-foreground/90 transition-colors hover:border-primary/50 hover:text-primary-hover">
+          {action.label} <ChevronRight className="h-3 w-3" />
+        </Link>
       )}
-      {limit ? <Bar pct={((used ?? 0) / limit) * 100} className="mt-2" /> : <span className="mt-2 block h-1.5" aria-hidden />}
-      <p className={cn("mt-1.5 truncate text-[11px]", over ? "text-destructive" : "text-muted-foreground")} title={note}>{note ?? " "}</p>
     </div>
   )
 }
@@ -544,33 +579,40 @@ function formatUsd(v: number): string {
   return v < 0.01 && v > 0 ? "<$0.01" : `$${v.toFixed(2)}`
 }
 
-/** Seven days of runs as bars, today on the right. */
+const WEEKDAY = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
+
+/** Seven days of runs as bars, today on the right; fills the card's height. */
 function RunBars({ runs }: { runs: TimeseriesPoint[] | null }) {
   const reduce = useReducedMotion()
-  if (runs === null) return <div className="p-4"><Skeleton className="h-24 w-full" /></div>
+  if (runs === null) return <div className="flex-1 p-4"><Skeleton className="h-full min-h-24 w-full" /></div>
   const max = Math.max(1, ...runs.map((r) => r.value))
   const total = runs.reduce((s, p) => s + p.value, 0)
+  const cols = { gridTemplateColumns: `repeat(${Math.max(1, runs.length)}, minmax(0, 1fr))` }
   return (
-    <div className="px-4 pb-3 pt-4" data-slot="admin-run-bars">
-      <div className="grid h-24 items-end gap-2" style={{ gridTemplateColumns: `repeat(${Math.max(1, runs.length)}, minmax(0, 1fr))` }}>
-        {runs.map((r, i) => (
-          <motion.span
-            key={r.ts}
-            title={`${new Date(r.ts).toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" })}: ${r.value} runs`}
-            className={cn("block rounded-[4px]", r.value ? "bg-primary/70" : "bg-border/70")}
-            style={{ height: r.value ? Math.max(6, (r.value / max) * 96) : 3, transformOrigin: "bottom" }}
-            initial={reduce ? false : { scaleY: 0 }}
-            animate={{ scaleY: 1 }}
-            transition={{ duration: 0.45, delay: i * 0.04, ease: [0.2, 0.7, 0.2, 1] }}
-          />
-        ))}
+    <div className="flex flex-1 flex-col px-4 pb-3 pt-4" data-slot="admin-run-bars">
+      <div className="flex items-baseline gap-2">
+        <span className="font-mono text-2xl font-semibold tabular-nums">{total}</span>
+        <span className="text-[12px] text-muted-foreground">runs in the last 7 days</span>
       </div>
-      <div className="mt-1.5 grid gap-2 text-center font-mono text-[10px] text-muted-foreground-soft" style={{ gridTemplateColumns: `repeat(${Math.max(1, runs.length)}, minmax(0, 1fr))` }} aria-hidden>
-        {runs.map((r) => <span key={r.ts}>{new Date(r.ts).toLocaleDateString(undefined, { weekday: "narrow" })}</span>)}
+      <div className="relative mt-3 min-h-28 flex-1">
+        <div className="absolute inset-0 grid items-end gap-2" style={cols}>
+          {runs.map((r, i) => (
+            <div key={r.ts} className="flex h-full flex-col justify-end" title={`${WEEKDAY[new Date(r.ts).getUTCDay()]} ${new Date(r.ts).getUTCDate()}: ${r.value} runs`}>
+              {r.value > 0 && <span className="mb-1 text-center font-mono text-[10px] text-muted-foreground">{r.value}</span>}
+              <motion.span
+                className={cn("block rounded-[4px]", r.value ? "bg-primary/70" : "bg-border/70")}
+                style={{ height: r.value ? `${Math.max(6, (r.value / max) * 80)}%` : 3, transformOrigin: "bottom" }}
+                initial={reduce ? false : { scaleY: 0 }}
+                animate={{ scaleY: 1 }}
+                transition={{ duration: 0.45, delay: i * 0.04, ease: [0.2, 0.7, 0.2, 1] }}
+              />
+            </div>
+          ))}
+        </div>
       </div>
-      <p className="mt-2 text-[11px] text-muted-foreground">
-        {total === 0 ? "No runs in the last 7 days." : <><span className="font-mono text-foreground/85">{total}</span> runs in the last 7 days</>}
-      </p>
+      <div className="mt-1.5 grid gap-2 text-center font-mono text-[10px] text-muted-foreground-soft" style={cols} aria-hidden>
+        {runs.map((r) => <span key={r.ts}>{WEEKDAY[new Date(r.ts).getUTCDay()]}</span>)}
+      </div>
     </div>
   )
 }
