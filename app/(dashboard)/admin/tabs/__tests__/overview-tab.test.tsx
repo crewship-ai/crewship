@@ -161,6 +161,13 @@ describe("Admin overview — integrity", () => {
     expect(within(panel).getByText(/32,?007/)).toBeInTheDocument()
   })
 
+  // The verify endpoint answers {ok, count, checkpoints}; reading only the
+  // older field names printed "0 entries verified" over a 284k-entry chain.
+  it("reads the entry count the server actually sends", () => {
+    renderTab({ journal: { ok: true, count: 284249, checkpoints: 4 } })
+    expect(within(screen.getByRole("region", { name: /integrity/i })).getByText(/284,249 entries verified/)).toBeInTheDocument()
+  })
+
   it("says where the encryption key came from", () => {
     renderTab()
     const panel = screen.getByRole("region", { name: /integrity/i })

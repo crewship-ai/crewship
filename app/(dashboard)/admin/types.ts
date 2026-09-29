@@ -80,6 +80,8 @@ export interface JournalIntegrity {
   valid?: boolean
   entries_verified?: number
   entries?: number
+  /** What the server actually sends (internal/api journal verify). */
+  count?: number
   checkpoints?: number
   error?: string
 }

@@ -140,15 +140,21 @@ const SEVERITY_ORDER: Record<string, number> = { high: 0, medium: 1, low: 2, inf
 function keySourceLabel(src?: string): string {
   switch (src) {
     case "generated":
-      return "Generated — the key file sits beside the database, so a disk copy carries both"
+      return "Generated"
     case "external":
-      return "External — injected by the environment"
+      return "External"
     case undefined:
     case "":
       return "Unknown"
     default:
       return src
   }
+}
+
+function keySourceNote(src?: string): string | undefined {
+  if (src === "generated") return "The key file sits beside the database, so a disk copy carries both"
+  if (src === "external") return "Injected by the environment"
+  return undefined
 }
 
 type Check = { key: string; icon: LucideIcon; label: string; detail: string; state: "ok" | "warn" | "bad" | "pending" }
@@ -179,7 +185,7 @@ export const OverviewTab = React.memo(function OverviewTab({
   const warnings = [...(posture?.warnings ?? [])].sort(
     (a, b) => (SEVERITY_ORDER[a.severity] ?? 9) - (SEVERITY_ORDER[b.severity] ?? 9),
   )
-  const journalEntries = journal?.entries_verified ?? journal?.entries
+  const journalEntries = journal?.count ?? journal?.entries_verified ?? journal?.entries
   const journalOK = journal?.ok ?? journal?.valid
   const diskPct = health?.disk && !health.disk.error ? Math.round(health.disk.used_pct ?? 0) : null
   const daemonUp = goDurationSeconds(daemon?.uptime)
@@ -242,7 +248,7 @@ export const OverviewTab = React.memo(function OverviewTab({
                   </a>
                 )}
               </div>
-              <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 font-mono text-[11.5px] text-muted-foreground">
+              <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 font-mono text-[11.5px] text-muted-foreground [&>span]:whitespace-nowrap">
                 {version ? (
                   <>
                     <span className="text-foreground/85">{version.current}</span>
@@ -256,7 +262,7 @@ export const OverviewTab = React.memo(function OverviewTab({
                 )}
               </p>
             </div>
-            <div className="flex flex-col items-end gap-1">
+            <div className="flex w-full items-center justify-between gap-2 sm:w-auto sm:flex-col sm:items-end sm:gap-1">
               {health === null || posture === null ? (
                 <Skeleton className="h-6 w-36 rounded-full" />
               ) : bad > 0 ? (
@@ -402,8 +408,8 @@ export const OverviewTab = React.memo(function OverviewTab({
                   <><StatusDot status="COMPLETED" /> {(journalEntries ?? 0).toLocaleString()} entries verified</>
                 )}
               </Row>
-              <Row icon={KeyRound} label="Encryption key">
-                <span className={cn("text-right", health?.encryption_key_source === "generated" && "text-warn")}>{keySourceLabel(health?.encryption_key_source)}</span>
+              <Row icon={KeyRound} label="Encryption key" description={keySourceNote(health?.encryption_key_source)}>
+                <span className={cn("whitespace-nowrap", health?.encryption_key_source === "generated" && "text-warn")}>{keySourceLabel(health?.encryption_key_source)}</span>
               </Row>
               <Row icon={ShieldCheck} label="Keeper" description={keeperHealth && keeperHealth.samples > 0 ? `p95 ${keeperHealth.p95_latency_ms} ms · ${keeperHealth.judge_failures} judge failures` : undefined}>
                 {keeper === null ? "Not checked" : keeper.enabled ? <><StatusDot status="COMPLETED" /> On · {keeper.deny_count} denied of {keeper.total_requests}</> : <><StatusDot status="BLOCKED" /> Off</>}
