@@ -79,7 +79,7 @@ To nenahrazuje přejímku plného instance snapshotu, storage kvót a host reboo
 - Dev1 smoke na původním buildu ověřil dva samostatné soukromé chaty stejného
   agenta a zaznamenal baseline stream revokace. Vlastněný testovací workspace
   byl odstraněn přes CLI; testovací účty nemají přístup k workspace.
-- Dev1 nyní běží na `ca379a58f4fce37c17ccc91018a919550bcb8961` (čistý build).
+- První nasazení této větve na dev1: `ca379a58f4fce37c17ccc91018a919550bcb8961` (čistý build).
   Ověřena identita `/proc/<pid>/exe`, shodný web export, `/api/health`, `/healthz`,
   `/readyz` i autentizovaný CLI `whoami`. Nasazení pouze přes
   `sudo systemctl reload crewship-ws@1`.
@@ -128,3 +128,24 @@ CodeRabbit dokončil věcné review zdrojového commitu `ca379a58f` (review
   zachovávají nové `access_grants`.
 
 Následná revize oprav a finální ověření ještě probíhají.
+
+## Obnovení práce po výpadku terminálu
+
+Poslední nasazení před výpadkem: `cd67e695a1f4d92e552fcbd716f631c822002dae`.
+Identita běžící binárky i webu, health/readiness a nový DB trigger byly ověřeny.
+Živý test znovu prošel: soukromé chaty a počty oddělené, cizí historie 404,
+WS H1 po odebrání uzavřen, HTTP H1 bez dalšího rámce, H2 dál dostává heartbeat.
+
+Po obnovení terminálu byl přečten finální úplný testovací log. Všechny balíky
+kromě `internal/database` prošly. Selhal skutečný schema invariant:
+`TestForeignKeyIndexPolicy` našel šest neindexovaných FK v nových tabulkách
+(40 místo původních 34). Nešlo pouze o pomalý disk. Nová append-only migrace
+`20260929094200_access_authority_foreign_key_indexes.sql` přidává indexy;
+limit testu zůstává 34. Cílený test již prošel, úplná sada se opakuje.
+
+Pro úplnou sadu musí **TMPDIR i GOTMPDIR** směřovat do vlastněného tmpfs
+adresáře. Pouhé TMPDIR nestačilo: Go testovací adresáře používaly GOTMPDIR.
+Dva superseded mezilehlé databázové běhy byly přerušeny a nejsou green evidence.
+Diskový běh API prošel (1468,164 s), database dosáhl 30min limitu. Korektní
+úplný tmpfs běh odhalil výše uvedenou chybu za 91,222 s databázového balíku.
+Živé aplikace a předchozí backup/restore testy používají normální úložiště.
