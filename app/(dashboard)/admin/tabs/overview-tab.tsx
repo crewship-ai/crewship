@@ -528,10 +528,14 @@ function Meter({ icon: Icon, tint, label, used, limit, note, tone, testId }: {
           )}
         </div>
       </div>
+      {/* The bar row stays (empty without a ceiling) so every tile's note
+          sits on the same line. */}
       <div className="mt-3 flex h-4 items-center">
-        {limit ? <Bar pct={((used ?? 0) / limit) * 100} className="w-full" /> : <span className="truncate text-[11px] text-muted-foreground" title={note}>{note}</span>}
+        {limit ? <Bar pct={((used ?? 0) / limit) * 100} className="w-full" /> : null}
       </div>
-      {limit ? <p className={cn("mt-1 truncate text-[11px]", over ? "text-destructive" : "text-muted-foreground")} title={note}>{note ?? `${Math.max(0, limit - (used ?? 0))} left on this licence`}</p> : null}
+      <p className={cn("mt-1 truncate text-[11px]", over ? "text-destructive" : "text-muted-foreground")} title={note}>
+        {note ?? (limit ? `${Math.max(0, limit - (used ?? 0))} left on this licence` : "\u00a0")}
+      </p>
     </div>
   )
 }
