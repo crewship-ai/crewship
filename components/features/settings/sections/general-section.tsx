@@ -127,7 +127,6 @@ export function GeneralSection({
 
   return (
     <div className="space-y-5">
-      <PagesAppearanceCard key={workspaceId} workspaceId={workspaceId} role={role} />
       {/* ── Identity ── */}
       <SettingsCard icon={Fingerprint}
         title="Identity"
@@ -279,6 +278,9 @@ export function GeneralSection({
           </span>
         </SettingsRow>
       </SettingsCard>
+
+      {/* Below identity and usage: it themes Page applications only. */}
+      <PagesAppearanceCard key={workspaceId} workspaceId={workspaceId} role={role} />
 
       {/* ── Security ──
           Workspace-wide, fail-closed, and nothing to do with any one crew —
