@@ -25,6 +25,10 @@ membership_id and revision. A stale revision fails with 409; it is never retried
 
 var workspaceMemberAccessGetCmd = &cobra.Command{
 	Use: "get <member-id-or-user-id>", Short: "Read the complete versioned access policy", Args: cobra.ExactArgs(1),
+	Long: `Read a member's current policy. Use --format json to obtain the complete
+document for the read-edit-set workflow; the default table shows a rights count.
+
+  crewship --format json workspace member access get MEMBER > policy.json`,
 	RunE: func(cmd *cobra.Command, args []string) error { return memberAccessCommand(cmd, args[0], false) },
 }
 

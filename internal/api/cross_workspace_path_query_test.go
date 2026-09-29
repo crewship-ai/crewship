@@ -96,6 +96,10 @@ var pathWorkspaceAllowlist = map[string]string{
 	// Presence check only: the value is never used to scope anything (skills
 	// are instance-wide), it just rejects a malformed route match.
 	"skills_bulk_import.go": "emptiness check only; the value is not used to scope any query",
+	// Equality rejection only: every query uses WorkspaceIDFromContext. The
+	// path can only deny a mismatch, never choose or widen the tenant. Covered
+	// for both methods by TestMemberAccessPolicyAuthenticatedRoutes.
+	"workspaces_member_access.go": "rejects path/context disagreement; only validated context scopes queries",
 }
 
 // TestNoHandlerReadsWorkspaceFromPath is the class-level guard. It parses the
@@ -105,7 +109,7 @@ var pathWorkspaceAllowlist = map[string]string{
 //
 // Written to the three-case discipline the audit asks of every source guard:
 //   - RED: a new unlisted read fails the test, naming file:line.
-//   - No false positive: the two allowlisted files stay green.
+//   - No false positive: the allowlisted files stay green.
 //   - No vacuous pass: every allowlist entry must actually be found, so a
 //     renamed file or a broken matcher fails loudly instead of reporting
 //     "nothing to check" as success.

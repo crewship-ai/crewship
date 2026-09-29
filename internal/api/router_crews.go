@@ -118,7 +118,9 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/members/{memberId}/capabilities",
 		authed(wsCtx(http.HandlerFunc(ws.GetMemberCapabilities))))
 	r.authedMut("PATCH", "/api/v1/workspaces/{workspaceId}/members/{memberId}/capabilities", roleManage, ws.PatchMemberCapabilities)
+	// openapi: responses 200,400,401,403,404,500
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/members/{memberId}/access", authed(wsCtx(http.HandlerFunc(ws.GetMemberAccess))))
+	// openapi: responses 200,400,401,403,404,409,500
 	r.authedMut("PUT", "/api/v1/workspaces/{workspaceId}/members/{memberId}/access", roleManage, ws.PutMemberAccess)
 	// Bulk variant — drives the Members capability grid in one
 	// round-trip instead of N+1 fan-out across per-member endpoints.

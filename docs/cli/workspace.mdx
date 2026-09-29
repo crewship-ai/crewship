@@ -371,3 +371,44 @@ The shortcut form (`invite <email>`) and the explicit form (`invite create <emai
 - [`crewship config`](/cli/config) — direct access to the `workspace` config key.
 - [`crewship admin`](/guides/admin-cli) — cross-workspace operations (only OWNER on the workspace itself, or instance admin).
 - [Workspaces API](/api-reference/workspaces) — `GET /api/v1/workspaces`.
+
+## `crewship workspace member access`
+
+Read or replace a member's resource access policy. These grants limit specific
+agent/project operations in addition to roles and capabilities. Current trusted
+OWNER/ADMIN access is required; scoped tokens need `workspace:admin`.
+Restricted mode currently blocks unintegrated routes, including model execution.
+It also applies to sessions with mixed trusted/restricted memberships.
+
+### `crewship workspace member access get <member-id-or-user-id>`
+
+Read the complete policy, including `membership_id`, `mode`, `revision` and
+`rights`. Accepts either a membership row ID or user ID. There are no
+command-specific flags. The default table shows MEMBER, MODE, REVISION and
+RIGHTS count; `--format json` returns the editable document.
+
+```bash
+crewship --workspace WORKSPACE --format json workspace member access get MEMBER > policy.json
+```
+
+### `crewship workspace member access set <member-id-or-user-id>`
+
+Replace the complete policy using its original membership ID and revision.
+Edit the `mode` and `rights` fields from `access get`; do not invent a revision.
+An explicit empty `rights` array in restricted mode denies all resource grants.
+Trusted mode requires empty rights and restores ordinary workspace access.
+
+| Flag | Required | Description |
+| --- | --- | --- |
+| `--file` | Yes | Complete policy JSON file; `-` reads JSON from stdin. |
+
+```bash
+crewship --workspace WORKSPACE --format json workspace member access set MEMBER --file policy.json
+```
+
+Success prints the resulting policy using the same output formats as `get`.
+A stale revision exits nonzero with HTTP 409; the command does not retry or
+silently refresh it. Revisions may advance by more than one. Missing/null rights,
+unknown fields and a document for a different membership are rejected.
+This command does not enable restricted model execution or stop an already
+running shared process. See [the API contract](/api-reference/workspaces#replace-member-resource-access).

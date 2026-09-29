@@ -54,6 +54,16 @@ func (h *WorkspaceHandler) GetMemberAccess(w http.ResponseWriter, r *http.Reques
 		h.memberAccessError(w, err)
 		return
 	}
+	h.writeMemberAccessPolicy(w, r, p)
+}
+
+// Fence the final document to the requested membership. Removal and rejoin
+// between target lookup and snapshot must not return a replacement membership.
+func (h *WorkspaceHandler) writeMemberAccessPolicy(w http.ResponseWriter, r *http.Request, p access.Policy) {
+	if p.ID != r.PathValue("memberId") {
+		h.memberAccessError(w, access.ErrDenied)
+		return
+	}
 	writeJSON(w, http.StatusOK, p)
 }
 
@@ -77,5 +87,5 @@ func (h *WorkspaceHandler) PutMemberAccess(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	p.Membership = m
-	writeJSON(w, http.StatusOK, p)
+	h.writeMemberAccessPolicy(w, r, p)
 }

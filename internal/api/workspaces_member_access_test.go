@@ -32,6 +32,25 @@ func TestMemberAccessRequiresWorkspaceAdminTokenScope(t *testing.T) {
 	}
 }
 
+func TestMemberAccessDocumentFencesRejoinedMembership(t *testing.T) {
+	h := newWsHandlerForTest(t)
+	for _, tc := range []struct {
+		id     string
+		status int
+	}{{"original-member", 200}, {"replacement-member", 404}} {
+		r := httptest.NewRequest("GET", "/", nil)
+		r.SetPathValue("memberId", "original-member")
+		w := httptest.NewRecorder()
+		h.writeMemberAccessPolicy(w, r, access.Policy{Membership: access.Membership{ID: tc.id, Mode: "restricted", Revision: 1}, Rights: []access.Right{}})
+		if w.Code != tc.status {
+			t.Fatalf("membership %s: got %d want %d", tc.id, w.Code, tc.status)
+		}
+		if tc.status == 404 && bytes.Contains(w.Body.Bytes(), []byte(tc.id)) {
+			t.Fatal("replacement policy leaked")
+		}
+	}
+}
+
 func TestMemberAccessPolicyAuthenticatedRoutes(t *testing.T) {
 	db := setupTestDB(t)
 	owner := seedTestUser(t, db)
@@ -113,4 +132,9 @@ func TestMemberAccessPolicyAuthenticatedRoutes(t *testing.T) {
 		t.Fatal("empty policy did not revoke grant")
 	}
 	request(owner, "GET", "/api/v1/workspaces/foreign/members/policy-member/access", "", 403)
+	// The query can validate our own tenant, but the path must not disagree.
+	// The handler uses the path only to reject, never to scope a DB query.
+	for _, method := range []string{"GET", "PUT"} {
+		request(owner, method, "/api/v1/workspaces/foreign/members/policy-member/access?workspace_id="+workspace, string(body), 404)
+	}
 }
