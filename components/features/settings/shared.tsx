@@ -1,6 +1,6 @@
 "use client"
 
-import type { CSSProperties, ReactNode } from "react"
+import { useId, type CSSProperties, type ReactNode } from "react"
 import type { LucideIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
 
@@ -43,12 +43,15 @@ export function SettingsCard({
   /** Tile tint, a CSS colour; brand blue by default, var(--purple) for system items. */
   tint?: string
 }) {
+  // The card is a named region: screen readers list it by its title.
+  const titleId = useId()
   return (
     <section
       data-slot="settings-card"
+      aria-labelledby={titleId}
       className={cn("overflow-hidden rounded-card border border-border bg-card", className)}
     >
-      <SettingsCardHeader title={title} description={description} actions={actions} icon={icon} tint={tint} />
+      <SettingsCardHeader title={title} titleId={titleId} description={description} actions={actions} icon={icon} tint={tint} />
       <div className={cn(padded && "p-4")}>{children}</div>
     </section>
   )
@@ -56,6 +59,7 @@ export function SettingsCard({
 
 function SettingsCardHeader({
   title,
+  titleId,
   description,
   actions,
   icon: Icon,
@@ -63,6 +67,7 @@ function SettingsCardHeader({
   danger = false,
 }: {
   title: string
+  titleId?: string
   description?: string
   actions?: ReactNode
   icon?: LucideIcon
@@ -81,7 +86,7 @@ function SettingsCardHeader({
         </span>
       )}
       <div className="min-w-0 flex-1">
-        <h3 className={cn("text-sm font-semibold leading-5 tracking-[-0.01em]", danger ? "text-destructive" : "text-foreground")}>
+        <h3 id={titleId} className={cn("text-sm font-semibold leading-5 tracking-[-0.01em]", danger ? "text-destructive" : "text-foreground")}>
           {title}
         </h3>
         {description && (

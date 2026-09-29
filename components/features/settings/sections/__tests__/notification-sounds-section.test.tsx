@@ -17,7 +17,7 @@ vi.mock("@/lib/notification-sounds", () => ({
   playNotificationSound: mocks.play,
   isNotificationAudioReady: () => mocks.ready,
 }))
-import { NotificationSoundSettings } from "../notification-sound-settings"
+import { NotificationSoundSettings } from "../notification-sounds-section"
 const scope = JSON.stringify(["viewer", "w"])
 function open() { /* Settings renders the controls inline. */ }
 beforeEach(() => {
@@ -39,7 +39,7 @@ describe("Personal notification sounds", () => {
     expect(screen.getByRole("slider", { name: "Notification volume" })).toHaveValue("35")
     expect(screen.getAllByRole("option")).toHaveLength(12)
     expect(mocks.unlock).not.toHaveBeenCalled(); expect(mocks.play).not.toHaveBeenCalled()
-    fireEvent.click(screen.getByRole("button", { name: "Enable sounds" }))
+    fireEvent.click(screen.getByRole("switch", { name: "Notification sounds" }))
     expect(mocks.unlock).toHaveBeenCalledTimes(1) // starts in the original click task
     await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Audio is ready"))
     expect(mocks.prefs.get(scope)?.enabled).toBe(true); expect(mocks.play).not.toHaveBeenCalled()
@@ -49,7 +49,7 @@ describe("Personal notification sounds", () => {
     fireEvent.change(screen.getByRole("slider"), { target: { value: "60" } })
     fireEvent.change(screen.getByRole("combobox", { name: "Chat sound" }), { target: { value: "glass" } })
     fireEvent.change(screen.getByRole("combobox", { name: "Inbox sound" }), { target: { value: "off" } })
-    fireEvent.click(screen.getByRole("checkbox", { name: "Do not disturb" }))
+    fireEvent.click(screen.getByRole("switch", { name: "Do not disturb" }))
     expect(mocks.prefs.get(scope)).toMatchObject({ volume: .6, chat: "glass", inbox: "off", dnd: true })
     expect(screen.getByRole("button", { name: "Preview Inbox sound" })).toBeDisabled()
     fireEvent.click(screen.getByRole("button", { name: "Preview Chat sound" }))
@@ -60,11 +60,11 @@ describe("Personal notification sounds", () => {
   it("reloads stored preferences and responds to storage and same-page events", () => {
     mocks.prefs.set(scope, { enabled: true, dnd: true, volume: .8, chat: "attention", inbox: "glass" })
     const view = render(<NotificationSoundSettings />); open()
-    expect(screen.getByRole("checkbox")).toBeChecked()
+    expect(screen.getByRole("switch", { name: "Do not disturb" })).toBeChecked()
     expect(screen.getByRole("slider")).toHaveValue("80")
     mocks.prefs.set(scope, { enabled: false, dnd: false, volume: .2, chat: "off", inbox: "chime" })
     act(() => window.dispatchEvent(new Event("storage")))
-    expect(screen.getByRole("checkbox")).not.toBeChecked(); expect(screen.getByRole("slider")).toHaveValue("20")
+    expect(screen.getByRole("switch", { name: "Do not disturb" })).not.toBeChecked(); expect(screen.getByRole("slider")).toHaveValue("20")
     mocks.prefs.set(scope, { enabled: false, dnd: false, volume: .4, chat: "glass", inbox: "chime" })
     act(() => window.dispatchEvent(new Event("sound-preferences")))
     expect(screen.getByRole("slider")).toHaveValue("40")
@@ -89,7 +89,7 @@ describe("Personal notification sounds", () => {
   it("reports blocked or failed audio honestly and can retry activation", async () => {
     mocks.unlock.mockResolvedValueOnce(false).mockRejectedValueOnce(new Error("blocked")).mockResolvedValue(true)
     render(<NotificationSoundSettings />); open()
-    fireEvent.click(screen.getByRole("button", { name: "Enable sounds" }))
+    fireEvent.click(screen.getByRole("switch", { name: "Notification sounds" }))
     await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("browser blocked audio"))
     expect(mocks.play).not.toHaveBeenCalled()
     fireEvent.click(screen.getByRole("button", { name: "Activate audio" }))
@@ -101,7 +101,7 @@ describe("Personal notification sounds", () => {
   it("reports failed previews and persistence exceptions without breaking the controls", async () => {
     mocks.play.mockResolvedValue(false); mocks.save.mockImplementation(() => { throw new Error("denied") })
     render(<NotificationSoundSettings />); open()
-    fireEvent.click(screen.getByRole("checkbox"))
+    fireEvent.click(screen.getByRole("switch", { name: "Do not disturb" }))
     expect(screen.getByRole("alert")).toHaveTextContent("could not be saved")
     fireEvent.click(screen.getByRole("button", { name: "Preview Chat sound" }))
     await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("preview could not play"))
@@ -118,7 +118,7 @@ describe("Personal notification sounds", () => {
     if (reason === "locks") Object.defineProperty(navigator, "locks", { configurable: true, value: undefined })
     else vi.mocked(localStorage.setItem).mockImplementation(() => { throw new Error("denied") })
     render(<NotificationSoundSettings />); open()
-    fireEvent.click(screen.getByRole("button", { name: "Enable sounds" }))
+    fireEvent.click(screen.getByRole("switch", { name: "Notification sounds" }))
     await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Automatic notifications are unavailable"))
     expect(screen.getByRole("status")).not.toHaveTextContent("Audio is ready")
     fireEvent.click(screen.getByRole("button", { name: "Preview Chat sound" }))

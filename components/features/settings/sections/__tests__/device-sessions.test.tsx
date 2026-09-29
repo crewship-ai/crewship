@@ -211,3 +211,52 @@ describe("DeviceSessions", () => {
     expect(await screen.findByText(/couldn't load/i)).toBeTruthy()
   })
 })
+
+// A workspace used from a script or a test browser collects dozens of
+// sessions; Profile showed all ~70 in one column. The five most recently
+// used are shown (this device first), the rest one click away in a
+// scrolling list.
+describe("DeviceSessions — long lists", () => {
+  beforeEach(() => {
+    cleanup()
+    apiFetch.mockReset()
+  })
+
+  const many = (n: number) =>
+    Array.from({ length: n }, (_, i) =>
+      sessionRow({
+        id: `s${i}`,
+        is_current: i === n - 1,
+        ip: `10.0.0.${i}`,
+        last_used_at: new Date(Date.UTC(2026, 8, 1, 0, i)).toISOString(),
+      }),
+    )
+
+  it("orders this device first, then by last use, newest first", async () => {
+    const { orderSessions } = await import("../device-sessions")
+    const out = orderSessions([
+      { ...sessionRow({ id: "old", is_current: false, last_used_at: "2026-09-01T00:00:00Z" }) },
+      { ...sessionRow({ id: "cur", is_current: true, last_used_at: "2026-08-01T00:00:00Z" }) },
+      { ...sessionRow({ id: "new", is_current: false, last_used_at: "2026-09-20T00:00:00Z" }) },
+    ] as never)
+    expect(out.map((s: { id: string }) => s.id)).toEqual(["cur", "new", "old"])
+  })
+
+  it("shows five sessions and folds the rest behind Show all", async () => {
+    mockList(many(12))
+    render(<DeviceSessions onSignOut={vi.fn()} />)
+    await screen.findByText("This device")
+    expect(screen.getAllByRole("button", { name: /^revoke /i })).toHaveLength(4)
+    const more = screen.getByRole("button", { name: /show all 12 sessions/i })
+    fireEvent.click(more)
+    await waitFor(() => expect(screen.getAllByRole("button", { name: /^revoke /i })).toHaveLength(11))
+    expect(screen.getByRole("button", { name: /show fewer/i })).toBeTruthy()
+  })
+
+  it("does not offer Show all when everything fits", async () => {
+    mockList(many(3))
+    render(<DeviceSessions onSignOut={vi.fn()} />)
+    await screen.findByText("This device")
+    expect(screen.queryByRole("button", { name: /show all/i })).toBeNull()
+  })
+})

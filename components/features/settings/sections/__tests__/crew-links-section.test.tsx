@@ -245,7 +245,7 @@ describe("Crew links — per-crew view", () => {
 
     // Not "dispatch tasks to the other" — that was the one path a link did
     // NOT enable until the sidecar learned to name a target crew.
-    const panel = screen.getByRole("region", { name: /crew links/i })
+    const panel = screen.getByRole("region", { name: "Crew links, per crew" })
     expect(within(panel).getByText(/hand work to/i)).toBeInTheDocument()
   })
 })

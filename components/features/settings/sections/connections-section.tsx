@@ -490,7 +490,7 @@ export function ConnectionsSection({ workspaceId }: ConnectionsSectionProps) {
         </div>
       ) : (
         /* ── Editor: one crew's point of view. ── */
-        <section aria-label="Crew links" className="flex flex-col sm:flex-row">
+        <section aria-label="Crew links, per crew" className="flex flex-col sm:flex-row">
           {/* Pick the crew you are thinking about. Everything beside it is
               stated from ITS point of view, which is how the question arrives:
               "who can Engineering hand work to?" — not "list all edges".
