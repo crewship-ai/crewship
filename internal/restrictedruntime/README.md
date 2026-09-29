@@ -126,3 +126,10 @@ Literal broker secrets are removed across read boundaries; an unfinished secret
 prefix is withheld at EOF. This does not remove encoded secrets or classify
 authorized model output. Model-specific completion semantics, pricing, credential
 grant adapters and downstream application audience checks remain separate gates.
+
+An explicit `HTTPGrant.Responses` policy adds a stateless text-only OpenAI
+Responses operation and the local SDK alias `POST /v1/responses`. It fixes the
+model and per-request output ceiling, forbids remote resources/tools/state, and
+uses the same host-side authorization for both local paths. It does not enable
+native agent tool loops or production dispatch. Contract and acceptance:
+[`RESTRICTED-RESPONSES-ADAPTER-2026-09-29.md`](../../docs/prd/RESTRICTED-RESPONSES-ADAPTER-2026-09-29.md).

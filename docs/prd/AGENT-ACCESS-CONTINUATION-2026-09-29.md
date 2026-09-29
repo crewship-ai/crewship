@@ -1,5 +1,12 @@
 # Agent Access / Runtime — pokračování na dev1, 29. 9. 2026
 
+**Aktualizace 21:13 UTC:** #2721 je sloučené jako `272b43f58793872c6db9241f715cf33fd8a0cdf1`.
+Finální head `939a30827` má skutečné schválení CodeRabbit, dokončený walkthrough
+a úspěšné CI včetně všech Go/race/frontend jobů. Security i CodeQL prošly;
+jejich anotace byly upozornění na verze Actions/runnerů, nikoli nález v tomto diffu.
+#2711 zůstává otevřené. Navazuje [textový Responses adaptér brokeru](RESTRICTED-RESPONSES-ADAPTER-2026-09-29.md);
+produkční restricted dispatch ani přejímka celého Release 1.0 zatím hotové nejsou.
+
 **Aktualizace 14:19 UTC:** #2720 je sloučené jako `51a931f423830bdb3ca6403b2fe27740e7bb8758`.
 Finální head `5eb345326` má skutečné CodeRabbit review/schválení 5353361661 a
 úspěšné CI, Security i CodeQL; CI run 36574189593 dokončil také všechny race joby.

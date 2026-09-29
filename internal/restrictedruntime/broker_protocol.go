@@ -20,13 +20,14 @@ const brokerAddress = "127.0.0.1:9121"
 const maxBrokerFrame = 2 << 20
 
 type brokerFrame struct {
-	Kind      string
-	Token     string
-	Operation string
-	Body      []byte
-	Status    int
-	Limits    map[string]int64
-	Streams   map[string]int64 `json:",omitempty"`
+	Kind               string
+	Token              string
+	Operation          string
+	Body               []byte
+	Status             int
+	Limits             map[string]int64
+	Streams            map[string]int64 `json:",omitempty"`
+	ResponsesOperation string           `json:",omitempty"`
 }
 
 func readBrokerFrame(r io.Reader, dst *brokerFrame) error {
@@ -85,6 +86,11 @@ func RunHTTPBroker(ctx context.Context, input io.Reader, output io.Writer) error
 			return ErrDenied
 		}
 	}
+	if cfg.ResponsesOperation != "" {
+		if _, ok := cfg.Limits[cfg.ResponsesOperation]; !ok || cfg.Streams[cfg.ResponsesOperation] == 0 {
+			return ErrDenied
+		}
+	}
 	listener, err := net.Listen("tcp4", brokerAddress)
 	if err != nil {
 		return err
@@ -116,13 +122,17 @@ func RunHTTPBroker(ctx context.Context, input io.Reader, output io.Writer) error
 	server.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/octet-stream")
 		deny := func(code int) { w.WriteHeader(code) }
-		if r.Method != "POST" || r.URL.RawQuery != "" || r.URL.RawPath != "" || r.Header.Get("Upgrade") != "" {
+		if r.Method != "POST" || r.URL.RawQuery != "" || r.URL.ForceQuery || r.URL.RawPath != "" || r.Header.Get("Upgrade") != "" || r.Header.Get("Content-Encoding") != "" {
 			deny(403)
 			return
 		}
 		id := strings.TrimPrefix(r.URL.Path, "/v1/operations/")
+		if r.URL.Path == "/v1/responses" && cfg.ResponsesOperation != "" {
+			id = cfg.ResponsesOperation
+		}
 		limit, ok := cfg.Limits[id]
-		if !ok || r.URL.Path != "/v1/operations/"+id || !identifier.MatchString(id) || subtle.ConstantTimeCompare([]byte(r.Header.Get("Authorization")), []byte("Bearer "+cfg.Token)) != 1 {
+		validPath := r.URL.Path == "/v1/operations/"+id || (r.URL.Path == "/v1/responses" && id == cfg.ResponsesOperation)
+		if !ok || !validPath || !identifier.MatchString(id) || subtle.ConstantTimeCompare([]byte(r.Header.Get("Authorization")), []byte("Bearer "+cfg.Token)) != 1 {
 			deny(403)
 			return
 		}
