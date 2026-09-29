@@ -1005,9 +1005,10 @@ body {
     border-radius: 0.7rem;
     border: 1px solid transparent;
     color: var(--muted-foreground);
-    transition: transform 300ms var(--ease-spring), border-color 300ms var(--ease-harbor), background-color 300ms var(--ease-harbor), color 200ms var(--ease-harbor);
+    transition: border-color 300ms var(--ease-harbor), background-color 300ms var(--ease-harbor), color 200ms var(--ease-harbor);
   }
-  .rail-tile > svg { width: 1.05rem; height: 1.05rem; }
+  /* Only the glyph moves on hover; the frame and the badge stay put. */
+  .rail-tile > svg { width: 1.05rem; height: 1.05rem; transition: transform 300ms var(--ease-spring); }
   .rail-tile[data-active="true"],
   :hover > .rail-tile {
     color: color-mix(in oklch, var(--ic) var(--tile-text-mix), var(--foreground));
@@ -1015,8 +1016,10 @@ body {
     border-color: color-mix(in srgb, var(--ic) 34%, transparent);
     box-shadow: var(--tile-inset);
   }
+  :hover > .rail-tile:not(.rail-tile-static) > svg {
+    transform: scale(1.12) rotate(-8deg);
+  }
   :hover > .rail-tile:not(.rail-tile-static) {
-    transform: scale(1.07) rotate(-4deg);
     border-color: color-mix(in srgb, var(--ic) 55%, transparent);
   }
   .rail-badge {
@@ -1059,7 +1062,7 @@ body {
     color: var(--muted-foreground-soft);
   }
   @media (prefers-reduced-motion: reduce) {
-    .rail-tile, :hover > .rail-tile, .rail-label { transition: none; transform: none; }
+    .rail-tile, .rail-tile > svg, :hover > .rail-tile > svg, .rail-label { transition: none; transform: none; }
   }
 }
 
