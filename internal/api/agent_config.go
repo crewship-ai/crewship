@@ -152,6 +152,17 @@ func (h *InternalHandler) resolveAgentConfig(w http.ResponseWriter, r *http.Requ
 // Called from ResolveChat which knows the (chat → created_by)
 // linkage; everyone else uses the zero-arg path.
 func (h *InternalHandler) resolveAgentConfigWithOpener(w http.ResponseWriter, r *http.Request, agentID, openedByUserID, visibility string) {
+	if receipt := chataudience.ReceiptFromContext(r.Context()); receipt != nil {
+		current, err := chataudience.CaptureTrusted(r.Context(), h.db, receipt.ChatID, receipt.UserID, receipt)
+		if err != nil {
+			replyInternalError(w, h.logger, "recheck human authority before context", err)
+			return
+		}
+		if current == nil {
+			replyError(w, http.StatusNotFound, "Chat not found")
+			return
+		}
+	}
 	data, err := h.loadAgentData(r, agentID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {

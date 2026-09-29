@@ -1,0 +1,84 @@
+Development 1 checkout, 2026-09-29. Working tree based on 56c103a98.
+Command: scripts/restricted-runtime-probe/run.sh -race
+Owned Docker fixtures only; migrated synthetic application DB; no model calls.
+This verifies Store -> runtime, not public chat/CLI/routine dispatch.
+
+=== RUN   TestLiveFixedOperationBroker
+    broker_live_test.go:57: startup_ms=456.424
+    broker_live_test.go:58: connected_start_ms=456.535
+    broker_live_test.go:63: connected_call_ms=65.924
+    broker_live_test.go:77: startup_ms=437.664
+    broker_live_test.go:130: startup_ms=408.188
+    broker_live_test.go:138: docker_stats={"BlockIO":"0B / 0B","CPUPerc":"0.67%","Container":"edde4f73d34c388e2adc850a9bdf90020ba030b2e74faae5f7079482eaf1f165","ID":"edde4f73d34c","MemPerc":"3.18%","MemUsage":"4.07MiB / 128MiB","Name":"crewship-rtest-4acb3c94255449db-retry","NetIO":"0B / 0B","PIDs":"11"}
+    broker_live_test.go:138: cgroup_memory=4579328
+        7041024
+--- PASS: TestLiveFixedOperationBroker (4.52s)
+=== RUN   TestLiveFixedBrokerRelayFailure
+    broker_live_test.go:157: startup_ms=425.667
+    broker_live_test.go:180: relay_failure_to_removed_ms=234.502
+--- PASS: TestLiveFixedBrokerRelayFailure (0.74s)
+=== RUN   TestLiveFixedBrokerDirectNetworkDenied
+    broker_live_test.go:185: startup_ms=553.258
+--- PASS: TestLiveFixedBrokerDirectNetworkDenied (1.05s)
+=== RUN   TestLiveIsolationAndRecovery
+    live_test.go:152: startup_ms=705.393
+    live_test.go:153: startup_ms=1019.863
+    live_test.go:162: mountinfo_entries=31
+    live_test.go:162: mountinfo_entries=31
+    live_test.go:195: startup_ms=853.154
+    live_test.go:214: startup_ms=678.135
+    live_test.go:237: docker_stats={"BlockIO":"0B / 0B","CPUPerc":"0.83%","Container":"55955623015dd2db5557efa0551ca60ae9819bc838d4f04a2dd3e1bc53d73f10","ID":"55955623015d","MemPerc":"1.67%","MemUsage":"2.137MiB / 128MiB","Name":"crewship-rtest-bab380c36a48e7c2-a2","NetIO":"0B / 0B","PIDs":"6"}
+    live_test.go:237: cgroup_memory=2752512
+        4857856
+--- PASS: TestLiveIsolationAndRecovery (11.68s)
+=== RUN   TestLiveRevocationAndAdmission
+    live_test.go:301: startup_ms=407.836
+    live_test.go:325: revoke_to_confirmed_stop_ms=319.457
+    live_test.go:328: startup_ms=515.583
+    live_test.go:338: lease_expiry_stop_ms=1775.984
+--- PASS: TestLiveRevocationAndAdmission (3.96s)
+=== RUN   TestLiveNetworkAndSidecar
+    live_test.go:357: startup_ms=837.508
+    live_test.go:377: sidecar_ready_ms=572.259
+    live_test.go:383: startup_ms=652.443
+    live_test.go:384: sidecar_ready_ms=583.650
+    live_test.go:410: startup_ms=648.614
+    live_test.go:411: sidecar_ready_ms=467.034
+    live_test.go:418: docker_stats={"BlockIO":"0B / 0B","CPUPerc":"1.02%","Container":"5d23e00e89dc33da63201ccc504e37ac5fffafafa62367380e553fc01e7ad3d9","ID":"5d23e00e89dc","MemPerc":"12.49%","MemUsage":"15.98MiB / 128MiB","Name":"crewship-rtest-eec9a519e8a3ca74-network-restored","NetIO":"0B / 0B","PIDs":"17"}
+    live_test.go:418: cgroup_memory=17276928
+        19329024
+--- PASS: TestLiveNetworkAndSidecar (8.91s)
+=== RUN   TestLiveStartupSamples
+    live_test.go:471: startup_ms=860.916
+    live_test.go:471: startup_ms=1314.775
+    live_test.go:471: startup_ms=1379.234
+    live_test.go:471: startup_ms=950.637
+    live_test.go:471: startup_ms=736.489
+    live_test.go:474: docker_stats={"BlockIO":"0B / 0B","CPUPerc":"1.00%","Container":"efd4ee3d1842de137b7948ff4cd0528b024028898457850c30f7d9b2906056de","ID":"efd4ee3d1842","MemPerc":"1.58%","MemUsage":"2.027MiB / 128MiB","Name":"crewship-rtest-75daab741cfb1b05-sample4","NetIO":"0B / 0B","PIDs":"6"}
+    live_test.go:474: cgroup_memory=2646016
+        4882432
+    live_test.go:479: startup_samples=5 p50_ms=950.782 p95_nearest_rank_ms=1379.436 image_cache=warm samples_ms=[740.729 861.132 950.782 1314.913 1379.436]
+--- PASS: TestLiveStartupSamples (10.33s)
+=== RUN   TestLiveRecoveryAndIndependentService
+    live_test.go:486: startup_ms=804.241
+    live_test.go:538: startup_ms=577.648
+--- PASS: TestLiveRecoveryAndIndependentService (2.82s)
+=== RUN   TestLiveWatchdogOutageAndUnconfirmedTermination
+    live_test.go:550: startup_ms=611.148
+    live_test.go:564: authority_loss_stop_ms=5231.614
+    live_test.go:588: startup_ms=483.002
+    live_test.go:613: startup_ms=566.854
+--- PASS: TestLiveWatchdogOutageAndUnconfirmedTermination (7.50s)
+=== RUN   TestLiveSharedUIDControl
+    live_test.go:621: startup_ms=587.947
+--- PASS: TestLiveSharedUIDControl (0.94s)
+=== RUN   TestLiveControllerCrashExpiry
+    live_test.go:698: controller_crash_to_independent_stop_ms=14982.928
+--- PASS: TestLiveControllerCrashExpiry (15.62s)
+PASS
+ok  	github.com/crewship-ai/crewship/internal/restrictedruntime	69.071s
+=== RUN   TestLiveApplicationAuthorityStopsOnlyRevokedHuman
+    authority_live_test.go:83: real application grants: two UID-1001 containers, separate /tmp, revoked output denied, whole-container termination 4.775998005s, H2 remains authorized
+--- PASS: TestLiveApplicationAuthorityStopsOnlyRevokedHuman (69.70s)
+PASS
+ok  	github.com/crewship-ai/crewship/internal/restricteddispatch	70.722s

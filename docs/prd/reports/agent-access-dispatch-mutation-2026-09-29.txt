@@ -1,0 +1,8 @@
+A Go source overlay removed only the post-builder Store.Resolve check.
+The working tree was never modified by this mutation. Expected failure:
+
+--- FAIL: TestAdmissionBeforeContextAndAfterBuild (1.45s)
+    authority_linux_test.go:116: revoked during context construction: <nil>
+FAIL
+FAIL	github.com/crewship-ai/crewship/internal/restricteddispatch	1.459s
+FAIL

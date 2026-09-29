@@ -428,16 +428,17 @@ func TestE2E_BackupRestoreRoundTrip(t *testing.T) {
 	}
 
 	// Restored chat rows must never revive server-issued human receipts.
-	receiptRows, err := source.Query(`SELECT id,authority_generation FROM chats WHERE workspace_id=?`, workspaceID)
+	receiptRows, err := source.QueryContext(t.Context(), `SELECT id,authority_generation FROM chats WHERE workspace_id=?`, workspaceID)
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer receiptRows.Close()
 	for receiptRows.Next() {
 		var id, before, after string
 		if err := receiptRows.Scan(&id, &before); err != nil {
 			t.Fatal(err)
 		}
-		if err := target.QueryRow(`SELECT authority_generation FROM chats WHERE id=?`, id).Scan(&after); err != nil {
+		if err := target.QueryRowContext(t.Context(), `SELECT authority_generation FROM chats WHERE id=?`, id).Scan(&after); err != nil {
 			t.Fatal(err)
 		}
 		if len(after) != 32 || after == before {
@@ -447,7 +448,6 @@ func TestE2E_BackupRestoreRoundTrip(t *testing.T) {
 	if err := receiptRows.Err(); err != nil {
 		t.Fatal(err)
 	}
-	receiptRows.Close()
 
 	// Per-table diff.
 	targetSnap := snapshotWorkspaceScopedTables(t, target, workspaceID)

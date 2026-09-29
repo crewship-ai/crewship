@@ -312,3 +312,40 @@ akceptaci celé durable queue ani restricted runtime.
 Vzdálené CI `843dca032` nakonec celé prošlo. Novější kód vyžaduje vlastní CI;
 finální nezávislé review dosud chybí (poslední věcná revize `7626636f`). Další
 žádost o review byla odeslána 29. 9. v 12:12 UTC. PR #2717 není sloučené.
+
+## Propojení aplikačního store a runtime, další větev
+
+Finální věcné review #2717 nad `56c103a98` dorazilo jako revize 5352626632.
+Nemá nové actionable inline nálezy. Dvě drobné připomínky jsou zapracované
+na navazující větvi: kontextové SQL a defer Close v backup testu a dodatečná
+kontrola receiptu před načtením konfigurace. Původní vstupní i závěrečná kontrola
+zůstávají. #2717 je ready; při tomto zápisu čeká na dva vzdálené race joby.
+
+`internal/restricteddispatch` nyní implementuje runtime Authority skutečným
+`access.Store`. Příkaz sestavuje důvěryhodný server až po admission; následná
+kontrola revokace předchází uložení. Aditivní `restricted_launches` sváže neměnný
+příkaz s durable pokusem, bez uložení capability handle nebo credentials.
+Lease, vydání výstupu a nový start používají aktuální databázovou autoritu.
+Neúspěšná či zrušená příprava pokus odvolá. Workspace bundle nové launch payloady
+neobnovuje. Mounty jsou odmítnuté, credentials a síť nejsou v tomto adaptéru
+povolené. Nejde o veřejný execution endpoint ani zapnutí restricted profilu.
+
+Ověření na dev1:
+
+- Celý Go průchod: **150 balíků, exit 0**, celý vet, migration lint a invarianty.
+- Skutečný runtime + migrovaná aplikační DB, nikoli fixture Authority: dva lidé
+  stejného agenta běželi v oddělených kontejnerech pod UID 1001. H2 neviděl H1
+  soubor v `/tmp`, Docker socket ani `/data`. Po odvolání grantu se H1 výstup
+  odmítl a celý kontejner skončil za 4,776 s; H2 zůstal funkční.
+- Všech 11 původních Docker testů také prošlo s race. Pád controlleru → nezávislé
+  ukončení 14,983 s. Jde o jedno syntetické měření, nikoli produkční SLO.
+- Mutation test přes Go source overlay odstranil jen kontrolu po sestavení
+  příkazu a správně selhal. Pracovní zdroj se při mutaci neměnil.
+- Reporty: `reports/agent-access-dispatch-go-2026-09-29.txt`,
+  `reports/agent-access-dispatch-live-2026-09-29.txt`,
+  `reports/agent-access-dispatch-mutation-2026-09-29.txt`.
+
+**Stále nejde o běžný chat s modelem.** Test používá vlastněnou migrovanou fixture
+DB a skutečný Docker na dev1, nikoli veřejnou chat route živé aplikace. Produkční
+provider/prompt/recall, quota storage a chat/CLI/routine adapter nad touto hranicí
+zůstávají další implementační brány. Celé PRD není uzavřené.
