@@ -19,8 +19,6 @@ import { ProfileSection } from "./sections/profile-section"
 import { PrivacySection } from "./sections/privacy-section"
 import { GeneralSection } from "./sections/general-section"
 import { MembersSection } from "./sections/members-section"
-import { ConnectionsSection } from "./sections/connections-section"
-import { CrewAuditSection } from "./sections/crew-audit-section"
 import { AccessSecretsSection } from "./sections/access-secrets-section"
 import { HooksSection } from "./sections/hooks-section"
 import { SectionMoved } from "./sections/section-moved"
@@ -84,6 +82,10 @@ export const MOVED_SECTIONS: Record<string, { href: string; label: string }> = {
   // the crew's own Settings tab already edits them — plus the MCP servers,
   // image, escalations and `allow_private_endpoints` this copy never had.
   crews: { href: "/crews", label: "Crews & Agents" },
+  // Nested pages of their own (DrillPage): too big for a card, and each needs
+  // its own side panel. The Settings row opens them; old ?tab= links follow.
+  connections: { href: "/settings/crew-links", label: "Crew links" },
+  audit: { href: "/settings/audit", label: "Audit log" },
 }
 
 // Resolve the initial tab from the URL `?tab=` param, falling back to
@@ -268,17 +270,11 @@ export function SettingsLayout() {
     if (activeTab === "privacy" && workspaceId) {
       return <PrivacySection workspaceId={workspaceId} />
     }
-    if (activeTab === "connections" && workspaceId) {
-      return <ConnectionsSection workspaceId={workspaceId} />
-    }
     if (activeTab === "hooks" && workspaceId) {
       return <HooksSection workspaceId={workspaceId} role={role} />
     }
     if (activeTab === "access-secrets" && workspaceId) {
       return <AccessSecretsSection workspaceId={workspaceId} role={role} members={members} />
-    }
-    if (activeTab === "audit" && workspaceId) {
-      return <CrewAuditSection workspaceId={workspaceId} />
     }
     if (activeTab === "general" && org && workspaceId) {
       return (

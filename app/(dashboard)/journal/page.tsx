@@ -92,7 +92,7 @@ const ALL_TABS: TabDef[] = [
  *   - Spend:    cost ledger surface — currently locked behind a "Soon"
  *               badge until LLM-cost attribution is prioritized.
  *
- * Audit log moved to `/settings?tab=audit` (admin compliance view).
+ * Audit log moved to `/settings/audit` (admin compliance view).
  * Eval / quartermaster replay surface was removed; the backend emit
  * machinery in `internal/quartermaster/` is preserved as a nice-to-have
  * to revisit when there are >=2 production missions worth comparing.

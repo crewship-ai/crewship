@@ -58,6 +58,7 @@ tokens and a handful of utilities, so it can be changed in one place.
 | Icon in a box | `icon-tile` utility (`ConceptIcon variant="chip"`) | tint via `--ic`; neutral unless the icon itself is the status |
 | Cards | `rounded-[20px] border bg-card`, hover `lift` | no resting shadow |
 | Deep panel | `panel-surface` | heroes, terminals, graph canvases |
+| Nested page | `DrillPage` (`components/layout/drill-page`) | a big sub-area (Settings › Crew links, › Audit log) gets its own route; its side panel REPLACES the parent's and starts with "← Parent". Never a third column, never a nested page inside a nested page; on a phone the panel folds into a back arrow plus tabs |
 
 **One colour per row.** Severity is carried by the status pill. Icon tiles,
 avatars and titles in the same row stay neutral, so the one red or amber on a

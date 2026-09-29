@@ -16,10 +16,9 @@ import {
   DEFAULT_AUDIT_FILTERS,
   activeFilterChips,
   auditQueryParams,
-  filtersFromSearch,
-  filtersToSearch,
   type AuditFilters,
 } from "../audit-log/audit-filters"
+import { useAuditFilters } from "../audit-log/use-audit-filters"
 import { AuditToolbar, type AuditPerson } from "../audit-log/audit-toolbar"
 
 interface AuditLog {
@@ -178,15 +177,26 @@ function dayHeading(day: string): string {
 
 interface CrewAuditSectionProps {
   workspaceId: string
+  /** Controlled filters, when a parent owns them (the Audit log page's side
+   *  panel picks the trail and time range). Omitted → the URL-backed hook. */
+  filters?: AuditFilters
+  onFiltersChange?: (next: Partial<AuditFilters>) => void
+  /** The trail tabs; hidden when the page's side panel shows them. */
+  showSources?: boolean
+  /** Card heading; the Audit log page names the card by what it lists. */
+  title?: string
+  description?: string
 }
 
-export function CrewAuditSection({ workspaceId }: CrewAuditSectionProps) {
+export function CrewAuditSection({ workspaceId, filters: controlled, onFiltersChange, showSources = true, title = "Audit log", description = "Every state-changing action on this workspace, immutably recorded" }: CrewAuditSectionProps) {
   const [logs, setLogs] = useState<AuditLog[]>([])
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [expandedId, setExpandedId] = useState<string | null>(null)
-  const [filters, setFilters] = useAuditFilters()
+  const [ownFilters, setOwnFilters] = useAuditFilters()
+  const filters = controlled ?? ownFilters
+  const setFilters = onFiltersChange ?? setOwnFilters
   const [page, setPage] = useState(1)
   const [pagination, setPagination] = useState<AuditPagination | null>(null)
   const [exporting, setExporting] = useState(false)
@@ -336,8 +346,8 @@ export function CrewAuditSection({ workspaceId }: CrewAuditSectionProps) {
 
   return (
     <SettingsCard icon={ScrollText}
-      title="Audit log"
-      description="Every state-changing action on this workspace, immutably recorded"
+      title={title}
+      description={description}
       actions={
         <>
           <Button
@@ -380,7 +390,7 @@ export function CrewAuditSection({ workspaceId }: CrewAuditSectionProps) {
           Four separate tables, one place to read them. The tables stay split
           — the keeper ledger is append-only on purpose — so this changes what
           is read, never where anything is stored. */}
-      <div className="flex flex-wrap items-center gap-1 border-b border-border/60 px-4 pt-2" role="tablist" aria-label="Audit trail">
+      {showSources && <div className="flex flex-wrap items-center gap-1 border-b border-border/60 px-4 pt-2" role="tablist" aria-label="Audit trail">
         {AUDIT_SOURCES.map((s) => {
           const on = filters.source === s.value
           return (
@@ -399,7 +409,7 @@ export function CrewAuditSection({ workspaceId }: CrewAuditSectionProps) {
             </button>
           )
         })}
-      </div>
+      </div>}
 
       <AuditToolbar filters={filters} onChange={changeFilters} people={people} />
 
@@ -520,28 +530,6 @@ export function CrewAuditSection({ workspaceId }: CrewAuditSectionProps) {
       )}
     </SettingsCard>
   )
-}
-
-/**
- * Audit filters kept in the page URL (audit_* params next to ?tab=audit), so a
- * reload, a shared link or Back lands on the same slice of the log. Uses the
- * History API directly: the filters are this section's state, not a route.
- */
-function useAuditFilters(): [AuditFilters, (next: Partial<AuditFilters>) => void] {
-  const [filters, setState] = useState<AuditFilters>(() =>
-    typeof window === "undefined" ? DEFAULT_AUDIT_FILTERS : filtersFromSearch(window.location.search),
-  )
-  const update = useCallback((next: Partial<AuditFilters>) => {
-    setState((prev) => {
-      const merged = { ...prev, ...next }
-      if (typeof window !== "undefined") {
-        const search = filtersToSearch(merged, window.location.search)
-        window.history.replaceState(window.history.state, "", `${window.location.pathname}${search}${window.location.hash}`)
-      }
-      return merged
-    })
-  }, [])
-  return [filters, update]
 }
 
 /** The workspace's people, for the Person filter. Empty until it loads; a

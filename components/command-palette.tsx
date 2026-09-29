@@ -1022,7 +1022,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
 
         <CommandGroup heading={<GroupLabel>Settings</GroupLabel>} className={PALETTE_GROUP_CLASS}>
           {settingsLinks.map((item) => {
-            const href = `/settings?tab=${item.key}`
+            const href = item.href ?? `/settings?tab=${item.key}`
             return (
               <CommandItem
                 key={item.key}
