@@ -54,6 +54,15 @@ describe("one grid, one motion", () => {
     expect(screen.getByRole("link", { name: "Inbox, 37 unread" })).toBeInTheDocument()
   })
 
+  it("lets the Inbox count sit over the tile's corner instead of being clipped by its row", () => {
+    // The badge overhangs the 2.25rem tile; the menu button's overflow-hidden
+    // cut it to a blue sliver in the rail and shaved its top when open.
+    render(<SidebarProvider><AppSidebar /></SidebarProvider>)
+    const row = screen.getByRole("link", { name: "Inbox, 37 unread" })
+    expect(row.className).toMatch(/(^|\s)overflow-visible!/)
+    expect(row.className).toMatch(/group-data-\[collapsible=icon\]:overflow-visible!/)
+  })
+
   it("pins and collapses with one button, back to the rail the person chose", () => {
     render(<SidebarProvider><AppSidebar /></SidebarProvider>)
     fireEvent.click(screen.getByRole("button", { name: "Pin open the sidebar" }))

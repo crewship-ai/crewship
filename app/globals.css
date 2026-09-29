@@ -1038,6 +1038,7 @@ body {
   }
   [data-collapsible="icon"] .rail-label {
     opacity: 0;
+    pointer-events: none;
     transition-delay: 0ms;
   }
   .rail-group-head {

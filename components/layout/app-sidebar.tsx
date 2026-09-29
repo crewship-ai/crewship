@@ -59,7 +59,7 @@ export function AppSidebar() {
         <WorkspaceSwitcher />
       </SidebarHeader>
 
-      <SidebarContent className="rail-inset gap-0! pb-2">
+      <SidebarContent className="rail-inset gap-0! overflow-x-hidden! pb-2">
         {navSections.map((section) => {
           const items = section.items.filter((item) => !isHiddenForRole(item, role, instanceAdmin))
           if (items.length === 0) return null
