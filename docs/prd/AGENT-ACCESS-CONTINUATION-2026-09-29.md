@@ -149,3 +149,26 @@ Dva superseded mezilehlé databázové běhy byly přerušeny a nejsou green evi
 Diskový běh API prošel (1468,164 s), database dosáhl 30min limitu. Korektní
 úplný tmpfs běh odhalil výše uvedenou chybu za 91,222 s databázového balíku.
 Živé aplikace a předchozí backup/restore testy používají normální úložiště.
+
+## Uzavřené ověření indexované varianty
+
+Zdrojový kód `7626636fde530aa148ba2b481824586fd8dfe70d`:
+
+- `go test ./... -count=1 -timeout=30m -p=4`: **149 balíků prošlo**, Go exit 0.
+  API 217,688 s, database 86,691 s. TMPDIR i GOTMPDIR ve vlastněném tmpfs.
+  Následný Python cleanup narazil na Dockerem vlastněné fixture soubory;
+  pouze tento konkrétní dočasný adresář byl odstraněn přes sudo. Není to
+  selhání testů ani důvod označovat předchozí neúspěšné běhy za zelené.
+- `go vet ./...`, migration lint a projektové invarianty prošly.
+- Nasazeno výhradně na dev1; skutečná běžící binárka i nový web export odpovídají
+  `7626636f`, čistý build. Health/readiness OK. Read-only kontrola sqlite_master
+  potvrdila všech šest indexů; do živé DB nebylo ručně zapisováno.
+- Živý WS/HTTP průchod znovu prošel na tomto buildu; vlastní chat/count, foreign
+  history 404, revokovaný klient odpojen bez dalšího rámce, druhý klient funkční.
+  Vlastněný workspace uklizen CLI a sessions odhlášeny.
+- GitHub check 109348982150 opět potvrzuje billing blokaci bez spuštění jobu.
+  CodeRabbit novou revizi zahájil; výsledek zatím není doložen v tomto záznamu.
+
+Surové výsledky: `reports/agent-access-go-2026-09-29.txt` a
+`reports/agent-access-dev1-app-live-2026-09-29.txt`.
+Tato přejímka uzavírá dodanou dílčí opravu, nikoli celý Release 1.0.

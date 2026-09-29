@@ -1,0 +1,167 @@
+Source tree: 7626636fde530aa148ba2b481824586fd8dfe70d
+Command: go test ./... -count=1 -timeout=30m -p=4
+TMPDIR and GOTMPDIR: same owned exec-enabled tmpfs directory. Go subprocess exit 0.
+ok  	github.com/crewship-ai/crewship/cmd/crewship	182.528s
+ok  	github.com/crewship-ai/crewship/cmd/crewship/seeddata	4.906s
+ok  	github.com/crewship-ai/crewship/cmd/crewship-sidecar	0.216s
+?   	github.com/crewship-ai/crewship/cmd/gen-journal-registry	[no test files]
+ok  	github.com/crewship-ai/crewship/cmd/gen-openapi	9.965s
+?   	github.com/crewship-ai/crewship/config	[no test files]
+?   	github.com/crewship-ai/crewship/examples/pages/ping-go	[no test files]
+ok  	github.com/crewship-ai/crewship/examples/pages-apps	3.428s
+ok  	github.com/crewship-ai/crewship/internal/access	3.125s
+ok  	github.com/crewship-ai/crewship/internal/admission	1.791s
+ok  	github.com/crewship-ai/crewship/internal/api	217.688s
+ok  	github.com/crewship-ai/crewship/internal/apidocs	0.171s
+ok  	github.com/crewship-ai/crewship/internal/askforms	0.014s
+ok  	github.com/crewship-ai/crewship/internal/auth	0.086s
+ok  	github.com/crewship-ai/crewship/internal/auth/internaltoken	0.004s
+ok  	github.com/crewship-ai/crewship/internal/auth/sessions	1.636s
+ok  	github.com/crewship-ai/crewship/internal/automation	1.482s
+ok  	github.com/crewship-ai/crewship/internal/backup	67.337s
+ok  	github.com/crewship-ai/crewship/internal/buildinfo	0.123s
+ok  	github.com/crewship-ai/crewship/internal/cartographer	1.812s
+ok  	github.com/crewship-ai/crewship/internal/chain	1.769s
+?   	github.com/crewship-ai/crewship/internal/chataudience	[no test files]
+ok  	github.com/crewship-ai/crewship/internal/chatbridge	0.537s
+ok  	github.com/crewship-ai/crewship/internal/chatkind	0.006s
+ok  	github.com/crewship-ai/crewship/internal/chatnotify	1.391s
+ok  	github.com/crewship-ai/crewship/internal/chatshare	7.148s
+ok  	github.com/crewship-ai/crewship/internal/cli	0.232s
+ok  	github.com/crewship-ai/crewship/internal/cli/clitest	0.013s
+ok  	github.com/crewship-ai/crewship/internal/cli/redact	0.008s
+ok  	github.com/crewship-ai/crewship/internal/cli/tui	0.018s
+ok  	github.com/crewship-ai/crewship/internal/codexauth	0.009s
+?   	github.com/crewship-ai/crewship/internal/codexauth/codexauthtest	[no test files]
+ok  	github.com/crewship-ai/crewship/internal/composio	0.009s
+ok  	github.com/crewship-ai/crewship/internal/config	0.009s
+ok  	github.com/crewship-ai/crewship/internal/connectors	0.010s
+ok  	github.com/crewship-ai/crewship/internal/consolidate	2.717s
+ok  	github.com/crewship-ai/crewship/internal/containerstate	0.006s
+ok  	github.com/crewship-ai/crewship/internal/conversation	1.420s
+ok  	github.com/crewship-ai/crewship/internal/crashreport	1.577s
+ok  	github.com/crewship-ai/crewship/internal/credname	0.002s
+ok  	github.com/crewship-ai/crewship/internal/credpolicy	0.001s
+ok  	github.com/crewship-ai/crewship/internal/credprovider	0.002s
+ok  	github.com/crewship-ai/crewship/internal/crewstart	0.079s
+ok  	github.com/crewship-ai/crewship/internal/database	86.691s
+ok  	github.com/crewship-ai/crewship/internal/devcontainer	26.230s
+ok  	github.com/crewship-ai/crewship/internal/diskusage	0.003s
+ok  	github.com/crewship-ai/crewship/internal/dispatch	12.116s
+ok  	github.com/crewship-ai/crewship/internal/dockerutil	0.012s
+?   	github.com/crewship-ai/crewship/internal/egressallow	[no test files]
+ok  	github.com/crewship-ai/crewship/internal/egresspolicy	0.006s
+ok  	github.com/crewship-ai/crewship/internal/encryption	0.015s
+ok  	github.com/crewship-ai/crewship/internal/ephemeral	1.347s
+ok  	github.com/crewship-ai/crewship/internal/episodic	0.194s
+ok  	github.com/crewship-ai/crewship/internal/featureflags	0.004s
+ok  	github.com/crewship-ai/crewship/internal/fileserver	0.813s
+ok  	github.com/crewship-ai/crewship/internal/fuzzy	0.037s
+ok  	github.com/crewship-ai/crewship/internal/geminiauth	0.002s
+ok  	github.com/crewship-ai/crewship/internal/gitlink	0.014s
+ok  	github.com/crewship-ai/crewship/internal/groupchat	1.476s
+ok  	github.com/crewship-ai/crewship/internal/groupchatnotify	1.298s
+ok  	github.com/crewship-ai/crewship/internal/harbormaster	4.640s
+ok  	github.com/crewship-ai/crewship/internal/hooks	6.472s
+ok  	github.com/crewship-ai/crewship/internal/httpsafe	0.004s
+ok  	github.com/crewship-ai/crewship/internal/inbox	1.473s
+ok  	github.com/crewship-ai/crewship/internal/journal	3.158s
+ok  	github.com/crewship-ai/crewship/internal/journalgen	0.002s
+ok  	github.com/crewship-ai/crewship/internal/keeper	0.002s
+ok  	github.com/crewship-ai/crewship/internal/keeper/behaviorhook	1.297s
+ok  	github.com/crewship-ai/crewship/internal/keeper/eval	0.016s
+ok  	github.com/crewship-ai/crewship/internal/keeper/evidence	0.017s
+ok  	github.com/crewship-ai/crewship/internal/keeper/gatekeeper	0.254s
+ok  	github.com/crewship-ai/crewship/internal/keeper/governance	1.353s
+ok  	github.com/crewship-ai/crewship/internal/keeper/health	1.266s
+ok  	github.com/crewship-ai/crewship/internal/keeper/routines	0.005s
+ok  	github.com/crewship-ai/crewship/internal/keeper/secrets	1.205s
+ok  	github.com/crewship-ai/crewship/internal/keepercfg	0.162s
+ok  	github.com/crewship-ai/crewship/internal/leader	0.085s
+ok  	github.com/crewship-ai/crewship/internal/license	0.003s
+ok  	github.com/crewship-ai/crewship/internal/llm	7.171s
+ok  	github.com/crewship-ai/crewship/internal/llm/endpoint	0.004s
+ok  	github.com/crewship-ai/crewship/internal/llmproxy	0.173s
+ok  	github.com/crewship-ai/crewship/internal/llmroute	0.005s
+ok  	github.com/crewship-ai/crewship/internal/logcollector	0.305s
+ok  	github.com/crewship-ai/crewship/internal/logging	0.170s
+ok  	github.com/crewship-ai/crewship/internal/lookout	0.008s
+ok  	github.com/crewship-ai/crewship/internal/mailer	0.005s
+ok  	github.com/crewship-ai/crewship/internal/manifest	0.063s
+ok  	github.com/crewship-ai/crewship/internal/manifest/crewfile	0.002s
+?   	github.com/crewship-ai/crewship/internal/manifest/internalapi	[no test files]
+ok  	github.com/crewship-ai/crewship/internal/manifest/kinds	0.036s
+ok  	github.com/crewship-ai/crewship/internal/memory	4.640s
+ok  	github.com/crewship-ai/crewship/internal/memory/memdiff	0.124s
+ok  	github.com/crewship-ai/crewship/internal/memory/memtest	0.054s
+ok  	github.com/crewship-ai/crewship/internal/memport	0.012s
+ok  	github.com/crewship-ai/crewship/internal/mentions	0.003s
+ok  	github.com/crewship-ai/crewship/internal/missionactivity	1.281s
+ok  	github.com/crewship-ai/crewship/internal/modelcatalog	0.010s
+ok  	github.com/crewship-ai/crewship/internal/notify	1.288s
+ok  	github.com/crewship-ai/crewship/internal/notifyroute	1.504s
+ok  	github.com/crewship-ai/crewship/internal/orchestrator	19.147s
+ok  	github.com/crewship-ai/crewship/internal/pagebuild	0.014s
+ok  	github.com/crewship-ai/crewship/internal/pages	0.551s
+ok  	github.com/crewship-ai/crewship/internal/paymaster	0.456s
+ok  	github.com/crewship-ai/crewship/internal/pipeline	24.067s
+ok  	github.com/crewship-ai/crewship/internal/policy	1.251s
+ok  	github.com/crewship-ai/crewship/internal/preflight	0.005s
+ok  	github.com/crewship-ai/crewship/internal/presence	0.466s
+ok  	github.com/crewship-ai/crewship/internal/provider	0.458s
+ok  	github.com/crewship-ai/crewship/internal/provider/apple	7.826s
+ok  	github.com/crewship-ai/crewship/internal/provider/bbolt	0.608s
+ok  	github.com/crewship-ai/crewship/internal/provider/docker	11.430s
+ok  	github.com/crewship-ai/crewship/internal/provider/localfs	0.356s
+ok  	github.com/crewship-ai/crewship/internal/provider/providertest	0.571s
+?   	github.com/crewship-ai/crewship/internal/provider/runtimestage	[no test files]
+ok  	github.com/crewship-ai/crewship/internal/providerlogin	0.005s
+ok  	github.com/crewship-ai/crewship/internal/providerpool	1.676s
+ok  	github.com/crewship-ai/crewship/internal/quartermaster	0.069s
+ok  	github.com/crewship-ai/crewship/internal/ratelimitcfg	0.005s
+ok  	github.com/crewship-ai/crewship/internal/recipes	0.002s
+ok  	github.com/crewship-ai/crewship/internal/restrictedruntime	0.423s
+ok  	github.com/crewship-ai/crewship/internal/runverdict	0.045s
+ok  	github.com/crewship-ai/crewship/internal/safepath	0.003s
+ok  	github.com/crewship-ai/crewship/internal/scheduler	2.826s
+ok  	github.com/crewship-ai/crewship/internal/scrubber	0.205s
+ok  	github.com/crewship-ai/crewship/internal/secrets	0.004s
+ok  	github.com/crewship-ai/crewship/internal/server	25.430s
+ok  	github.com/crewship-ai/crewship/internal/serviceconfig	0.002s
+?   	github.com/crewship-ai/crewship/internal/servicelifecycle	[no test files]
+ok  	github.com/crewship-ai/crewship/internal/services	1.285s
+ok  	github.com/crewship-ai/crewship/internal/shlex	0.002s
+ok  	github.com/crewship-ai/crewship/internal/sidecar	3.381s
+ok  	github.com/crewship-ai/crewship/internal/skills	1.491s
+ok  	github.com/crewship-ai/crewship/internal/skills/bundled	1.299s
+ok  	github.com/crewship-ai/crewship/internal/statuses	0.002s
+ok  	github.com/crewship-ai/crewship/internal/telemetry	0.010s
+ok  	github.com/crewship-ai/crewship/internal/terminal	1.996s
+ok  	github.com/crewship-ai/crewship/internal/testutil	2.580s
+?   	github.com/crewship-ai/crewship/internal/testutil/procgroupfixture	[no test files]
+ok  	github.com/crewship-ai/crewship/internal/todogate	1.447s
+ok  	github.com/crewship-ai/crewship/internal/tokenutil	0.001s
+ok  	github.com/crewship-ai/crewship/internal/tsformat	0.002s
+ok  	github.com/crewship-ai/crewship/internal/untrusted	0.006s
+ok  	github.com/crewship-ai/crewship/internal/update	0.192s
+ok  	github.com/crewship-ai/crewship/internal/usermodel	1.636s
+ok  	github.com/crewship-ai/crewship/internal/webhook	0.005s
+ok  	github.com/crewship-ai/crewship/internal/webhook/profiles	0.005s
+ok  	github.com/crewship-ai/crewship/internal/work	2.481s
+ok  	github.com/crewship-ai/crewship/internal/ws	0.396s
+?   	github.com/crewship-ai/crewship/schemas	[no test files]
+?   	github.com/crewship-ai/crewship/scripts/agents-invariants	[no test files]
+?   	github.com/crewship-ai/crewship/scripts/demo/ws-send-and-leave	[no test files]
+ok  	github.com/crewship-ai/crewship/scripts/deps-drift	0.005s
+ok  	github.com/crewship-ai/crewship/scripts/docker-api-surface	0.455s
+ok  	github.com/crewship-ai/crewship/scripts/dockerfile-sources	0.322s
+ok  	github.com/crewship-ai/crewship/scripts/docs-inventory	0.027s
+ok  	github.com/crewship-ai/crewship/scripts/docs-surface-check	0.338s
+ok  	github.com/crewship-ai/crewship/scripts/lint-migrations	0.072s
+ok  	github.com/crewship-ai/crewship/scripts/lint-tsformat	0.019s
+?   	github.com/crewship-ai/crewship/scripts/restricted-runtime-probe	[no test files]
+ok  	github.com/crewship-ai/crewship/tools/gen-ws-token	0.022s
+ok  	github.com/crewship-ai/crewship/tools/license-keygen	0.008s
+ok  	github.com/crewship-ai/crewship/tools/pages-build	0.006s
+ok  	github.com/crewship-ai/crewship/web	0.002s
+After the successful Go subprocess, Python cleanup failed on Docker-owned test fixtures; the exact owned temporary directory was subsequently removed via sudo rm -r.
