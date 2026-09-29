@@ -269,3 +269,62 @@ func TestDeletingParentAttemptDeletesDelegatedDescendants(t *testing.T) {
 		t.Fatalf("remaining=%d error=%v", remaining, err)
 	}
 }
+
+func TestRecreatedChatCannotReuseAttemptDataScope(t *testing.T) {
+	s := fixture(t)
+	policy(t, s, "h1", Right{"agent", "a", "run"})
+	_, first, err := s.Admit(t.Context(), "h1", "w", "a", "c1", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.DB.Exec(`DELETE FROM chats WHERE id='c1'; INSERT INTO chats(id,workspace_id,agent_id,created_by,visibility) VALUES('c1','w','a','h1','private')`); err != nil {
+		t.Fatal(err)
+	}
+	_, second, err := s.Admit(t.Context(), "h1", "w", "a", "c1", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Scope == second.Scope {
+		t.Fatal("recreated chat reused old private data scope")
+	}
+}
+
+func TestChatRevisionCannotRenewExistingAttempt(t *testing.T) {
+	s := fixture(t)
+	policy(t, s, "h1", Right{"agent", "a", "run"})
+	handle, first, err := s.Admit(t.Context(), "h1", "w", "a", "c1", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.DB.Exec(`UPDATE chats SET visibility='group' WHERE id='c1'; UPDATE chats SET visibility='private' WHERE id='c1'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.Resolve(t.Context(), handle); !errors.Is(err, ErrDenied) {
+		t.Fatalf("stale authority renewed: %v", err)
+	}
+	_, second, err := s.Admit(t.Context(), "h1", "w", "a", "c1", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Scope == second.Scope {
+		t.Fatal("restored audience reused previous data scope")
+	}
+}
+
+func TestAgentCrewChangeFencesExistingAttempt(t *testing.T) {
+	s := fixture(t)
+	policy(t, s, "h1", Right{"agent", "a", "run"})
+	handle, _, err := s.Admit(t.Context(), "h1", "w", "a", "c1", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.DB.Exec(`INSERT INTO crews(id,workspace_id,name,slug) VALUES('new-crew','w','New','new-crew'); UPDATE agents SET crew_id='new-crew' WHERE id='a'; UPDATE agents SET crew_id='crew' WHERE id='a'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.Resolve(t.Context(), handle); !errors.Is(err, ErrDenied) {
+		t.Fatalf("attempt survived changed runtime authority: %v", err)
+	}
+	if _, _, err = s.Admit(t.Context(), "h1", "w", "a", "c1", "", nil); err != nil {
+		t.Fatalf("new admission denied: %v", err)
+	}
+}

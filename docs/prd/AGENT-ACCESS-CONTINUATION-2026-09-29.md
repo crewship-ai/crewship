@@ -270,3 +270,11 @@ musí změnit. Round-trip test nyní výslovně požaduje novou neprázdnou gene
 každého obnoveného chatu; pouze tuto generaci vynechává z byte-for-byte hashe.
 Obsah a ostatní sloupce zůstávají porovnané. Obě cílené regrese následně prošly;
 celá sada běží znovu. Cílené race testy chatbridge/API prošly (1,070 / 72,094 s).
+
+
+Navazující kontrola společného store našla opětovné použití soukromého datového
+scope po smazání a znovuvytvoření téhož chat ID. Nový reproduktor nejprve selhal
+(`recreated chat reused old private data scope`). Uložené pokusy nyní zmrazí
+chat generation/revision při přijetí; Resolve porovnává tento stav s aktuálním
+chatem a datový scope zahrnuje obě hodnoty. Ani vrácení agenta do původní crew
+neobnoví starý pokus. Jde o další aditivní migraci, nikoli editaci už zapsané.

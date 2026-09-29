@@ -17,6 +17,8 @@ import (
 // returned only on admission; only its digest is persisted. Retries must Admit
 // again. Scope separates two clients of the same agent and changes on revocation.
 type Attempt struct {
+	ChatGeneration                               string
+	ChatRevision                                 int64
 	ID, Workspace, Principal, Agent, Chat, Scope string
 	Member                                       string
 	Revision, Generation                         int64
@@ -111,6 +113,12 @@ func (s Store) Admit(ctx context.Context, user, workspace, agent, chat, parent s
 	}
 	handle := randomID()
 	a = Attempt{ID: randomID(), Workspace: workspace, Principal: user, Agent: agent, Chat: chat, Member: m.ID, Revision: m.Revision, Generation: generation, Parent: parentID, Rights: unique}
+	if err = tx.QueryRowContext(ctx, `SELECT authority_generation,authority_revision FROM chats WHERE id=?`, chat).Scan(&a.ChatGeneration, &a.ChatRevision); err != nil {
+		return "", Attempt{}, err
+	}
+	if a.ChatGeneration == "" || a.ChatRevision < 1 {
+		return "", Attempt{}, ErrDenied
+	}
 	data, err := json.Marshal(unique)
 	if err != nil {
 		return "", Attempt{}, err
@@ -119,8 +127,8 @@ func (s Store) Admit(ctx context.Context, user, workspace, agent, chat, parent s
 	if parentID != "" {
 		parentValue = parentID
 	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO access_attempts(id,handle_hash,member_id,member_revision,workspace_id,principal_id,agent_id,chat_id,parent_id,generation,rights,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`,
-		a.ID, digest(handle), m.ID, m.Revision, workspace, user, agent, chat, parentValue, generation, string(data), tsformat.Format(time.Now()))
+	_, err = tx.ExecContext(ctx, `INSERT INTO access_attempts(id,handle_hash,member_id,member_revision,workspace_id,principal_id,agent_id,chat_id,parent_id,generation,rights,created_at,chat_generation,chat_revision) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		a.ID, digest(handle), m.ID, m.Revision, workspace, user, agent, chat, parentValue, generation, string(data), tsformat.Format(time.Now()), a.ChatGeneration, a.ChatRevision)
 	if err != nil {
 		return "", Attempt{}, err
 	}
@@ -132,7 +140,7 @@ func (s Store) Admit(ctx context.Context, user, workspace, agent, chat, parent s
 }
 
 func scope(a Attempt) string {
-	b, _ := json.Marshal([]any{a.Workspace, a.Principal, a.Chat, a.Member, a.Revision})
+	b, _ := json.Marshal([]any{a.Workspace, a.Principal, a.Chat, a.Member, a.Revision, a.ChatGeneration, a.ChatRevision})
 	return digest(string(b))
 }
 
@@ -147,8 +155,10 @@ func resolve(ctx context.Context, q queryer, key string, byHandle bool, seen map
 		column = "handle_hash"
 	}
 	var raw string
-	err := q.QueryRowContext(ctx, `SELECT id,member_id,member_revision,workspace_id,principal_id,agent_id,chat_id,COALESCE(parent_id,''),generation,rights FROM access_attempts WHERE `+column+`=? AND revoked_at IS NULL`, key).
-		Scan(&a.ID, &a.Member, &a.Revision, &a.Workspace, &a.Principal, &a.Agent, &a.Chat, &a.Parent, &a.Generation, &raw)
+	err := q.QueryRowContext(ctx, `SELECT a.id,a.member_id,a.member_revision,a.workspace_id,a.principal_id,a.agent_id,a.chat_id,COALESCE(a.parent_id,''),a.generation,a.rights,a.chat_generation,a.chat_revision
+ FROM access_attempts a JOIN chats c ON c.id=a.chat_id AND c.authority_generation=a.chat_generation AND c.authority_revision=a.chat_revision
+ WHERE a.`+column+`=? AND a.revoked_at IS NULL`, key).
+		Scan(&a.ID, &a.Member, &a.Revision, &a.Workspace, &a.Principal, &a.Agent, &a.Chat, &a.Parent, &a.Generation, &raw, &a.ChatGeneration, &a.ChatRevision)
 	if errors.Is(err, sql.ErrNoRows) {
 		err = ErrDenied
 	}
