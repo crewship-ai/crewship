@@ -1,7 +1,7 @@
 package main
 
 // cmd_page_webhook_test.go — the acceptance test for `crewship page webhook
-// create|list|revoke` (docs/prd/pages.md §10b.5c).
+// create|list|revoke` (docs/specs/pages.md §10b.5c).
 //
 // Epic #1935. The endpoint half is proved in internal/api/pages_webhooks_test.go;
 // this file proves the client half, which only the CLI can:

@@ -177,7 +177,7 @@ var allowlistedRoutes = []route{
 	{"GET", "/api/auth/csrf"},
 	{"GET", "/api/auth/session"},
 	{"GET", "/api/v1/oauth/callback"},
-	// Public pages (docs/prd/pages.md §7.3.1). A separate URL space that
+	// Public pages (docs/specs/pages.md §7.3.1). A separate URL space that
 	// "shares no session, no cookie and no workspace context with the app" —
 	// the 256-bit token in the path IS the credential, checked against a
 	// SHA-256 hash, an expiry, a revocation and a per-token rate limit inside

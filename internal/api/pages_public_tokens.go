@@ -1,6 +1,6 @@
 package api
 
-// Public pages — publishing, listing and revoking the links (docs/prd/pages.md
+// Public pages — publishing, listing and revoking the links (docs/specs/pages.md
 // §7.3).
 //
 // This file is the AUTHENTICATED half of the public surface: the three verbs a

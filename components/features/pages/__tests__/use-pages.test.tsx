@@ -1,5 +1,5 @@
 /**
- * The Pages data layer (PRD `docs/prd/pages.md` §4, §9b.2, §11, §11b).
+ * The Pages data layer (PRD `docs/specs/pages.md` §4, §9b.2, §11, §11b).
  *
  * The load-bearing assertions are the honest-arithmetic ones. A dashboard that
  * reports "0 stale" because the server told it nothing about freshness is the

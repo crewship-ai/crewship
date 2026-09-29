@@ -230,6 +230,10 @@ a support ticket.
 
 ## References
 
+- [Czech original with the post-verification revision](PRD-MODEL-SCOPED-CREDENTIALS-2026.md)
+  (superseded by this document; kept as the record of the review pass) — this
+  document is a translation of the original and **does not replace it
+  silently**: the revision's two decisions are summarised in the addendum below.
 - [Anthropic Messages API](https://platform.claude.com/docs/en/api/messages) — `model` top-level; batches nest under `requests[].params`
 - [Anthropic model migration / `fallbacks`](https://platform.claude.com/docs/en/about-claude/models/migration-guide.md) — served model can differ from requested
 - [Gemini `generateContent`](https://ai.google.dev/api/generate-content) — `{model=models/*}:generateContent` path grammar
@@ -244,3 +248,21 @@ research on the Gemini CLI but **could not be confirmed** in current Gemini API 
 `google-genai` SDK. The response carries `modelVersion` (the model that actually served the
 request) — read that if confirmation is needed. Do not build logic assuming `flash_fallback`
 exists without verifying first.
+
+## Addendum — decisions from the post-verification revision (2026-07-28)
+
+The Czech original was revised after a pass over the code; the revision answers
+Q2 above and sets sequencing. Full text in the
+[original §7 and §10](PRD-MODEL-SCOPED-CREDENTIALS-2026.md); the decisions:
+
+- **Enforce at assignment time, not only at request time (answers Q2).** The
+  model an agent runs with is set by `agent update --llm-model`; assigning a
+  model the credential forbids must fail **there**, with a message naming the
+  credential's allowed models. The runtime proxy check stays as a backstop
+  against bypass — it is not the primary UX, so the question "hard 403 or
+  softer failure" never has to be answered by the agent.
+- **Sequence after P3, as P9.** Assignment-time validation needs to know which
+  credential resolves for the agent — exactly what the credentials-V2 P2
+  (fanout) and P3 (binding `(scope, slot) → credential`) phases define. Writing
+  the check earlier means writing it against a resolution path that changes
+  within two PRs.

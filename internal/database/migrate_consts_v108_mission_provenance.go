@@ -8,7 +8,7 @@ package database
 // indistinguishable at the row level. Routines / pipelines have had
 // full authorship since v78; aligning missions closes that gap and
 // powers the F4.5 mission-outcomes-to-crew-memory hook
-// (.claude/context/prd/MISSION-OUTCOMES-TO-MEMORY.md).
+// (docs/prd/MISSION-OUTCOMES-TO-MEMORY.md).
 //
 // All three columns are nullable so legacy rows remain valid without
 // a backfill — the lesson hook only reads these fields when a NEW

@@ -149,7 +149,7 @@ def read_json_200(response, what):
     Media-type PARAMETERS are fine — `application/json; charset=utf-8` is
     application/json. Rejecting it would fail every server that spells the
     charset out, and a gate that cries wolf gets switched off, which
-    docs/prd/response-shape-contract.md gives as the reason #1815 is already in
+    docs/specs/response-shape-contract.md gives as the reason #1815 is already in
     that position.
     """
     if response.status != 200:

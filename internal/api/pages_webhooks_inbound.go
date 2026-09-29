@@ -1,6 +1,6 @@
 package api
 
-// Inbound panel webhooks — the UNAUTHENTICATED half (docs/prd/pages.md
+// Inbound panel webhooks — the UNAUTHENTICATED half (docs/specs/pages.md
 // §10b.5c).
 //
 //	POST /api/v1/page-webhooks/{token}

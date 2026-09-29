@@ -43,7 +43,7 @@ const APIVersion = "crewship/v1"
 // settings, recipes, crew templates, connectors, and hooks. Their
 // document types live under internal/manifest/kinds.
 //
-// Page is the 21st kind (docs/prd/pages.md §12 v1). Its spec type is
+// Page is the 21st kind (docs/specs/pages.md §12 v1). Its spec type is
 // the one internal/pages already owns, so a manifest page and a
 // `crewship page create --file` page are the same document.
 const (

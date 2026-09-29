@@ -144,7 +144,7 @@ Agent** request-body table:
 <Note>
 `suggested_prompts` and `ask_forms` are **not** accepted here. Create ignores
 unknown keys, so sending them succeeds with the columns left `null` — set them
-with a follow-up [Update Agent](#update-agent) call, which is what `crewship
+with a follow-up [Update Agent](https://github.com/crewship-ai/crewship/tree/07bfd2360a97dbe1c9f71c03e1d9b5d5d471c993/docs/prd#update-agent) call, which is what `crewship
 apply` does (`internal/manifest/plan.go`, `buildAgentPostCreateBody`).
 </Note>
 ```

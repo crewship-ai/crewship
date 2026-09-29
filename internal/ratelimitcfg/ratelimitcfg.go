@@ -183,7 +183,7 @@ var registry = []Meta{
 	// through at once and only the sustained rate is bounded. At the default
 	// that is four runs immediately, then one a minute.
 	{KeyKeeperReviewRun, "Keeper", "Manual review run", "Operator-triggered Keeper Reviews runs (`crewship keeper review run`), instance-wide. Each one spends a full evaluation on a paid model, so this is the cap on what the button can bill. Bursts up to one pass over the four evaluators regardless of this value.", "runs/hour", 60, 1, 3600},
-	// Pages (docs/prd/pages.md §10b.3). The dangerous number in Pages is not
+	// Pages (docs/specs/pages.md §10b.3). The dangerous number in Pages is not
 	// size, it is FREQUENCY: 24 panels × 100 pages × one push every 5 s is
 	// 2 880 writes per second, and SQLite has one writer. So the push rate is
 	// the limiter that keeps the feature affordable, and it is bounded twice.

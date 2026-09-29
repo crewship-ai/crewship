@@ -1,6 +1,6 @@
 package api
 
-// Pages — permissions (docs/prd/pages.md §7).
+// Pages — permissions (docs/specs/pages.md §7).
 //
 // Everything here is decided server-side. The client receives the CONTENT of
 // only the panels it may see — the rest arrive as sealed placeholders (§11b

@@ -14,7 +14,7 @@ func remainingAdminSystemSchemaCatalogV2() map[string]DomainSchema {
 	// Variadic `required`, matching schemas_core.go. Without it this file's
 	// schemas cannot say which properties a response always carries, so a body
 	// with every field renamed validates against them — see
-	// docs/prd/response-shape-contract.md.
+	// docs/specs/response-shape-contract.md.
 	obj := func(properties map[string]any, required ...string) map[string]any {
 		s := map[string]any{"type": "object", "properties": properties}
 		if len(required) > 0 {

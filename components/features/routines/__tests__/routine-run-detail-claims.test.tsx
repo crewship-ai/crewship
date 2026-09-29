@@ -6,7 +6,8 @@ import { RoutineRunDetail } from "../routine-run-detail"
 const PREVIEW_HASH = "a".repeat(64)
 
 // Guards for the run-detail claims in
-// docs/prd/HANDOFF-2026-09-08-ROUTINES-WORKSPACE.md. The shared run surface
+// Historical evidence: https://github.com/crewship-ai/crewship/blob/8dc421fdb5df28a8113ba1453682bc55464213e6/docs/prd/HANDOFF-2026-09-08-ROUTINES-WORKSPACE.md
+// The shared run surface
 // had no component test of its own; these pin the four sentences a reader of
 // that document would take as promises about what the page shows.
 

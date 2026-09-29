@@ -1,12 +1,19 @@
 # Client inbox — 2026-09-06
 
+**Public implementation notes.** Retained for contributors because they
+explain inbox navigation, identities and action boundaries. The current source
+and regression tests live in
+[`components/features/inbox-v2/`](../../components/features/inbox-v2/).
+Validation counts below record the original implementation runs, not a new
+full-suite result for the current checkout.
+
 Issue #2435, continues dashboard PR #2434 on dev1.
 
 - `/inbox` is the product route. Sidebar, command palette, notifications,
   credentials, crew, routine and activity links use it. `/inbox-v2` is a
   compatibility entry that replaces its URL while retaining query and hash;
   this is a client redirect compatible with Next static export.
-- Left column: three clear views (Needs action / Updates / History), search,
+- Left column: three clear views (To handle / Updates / History), search,
   crew filter, then readable rows with status, title, owner and age. With no
   actionable items the initial view opens Updates. Live arrivals do not
   override the user's chosen view. Desktop collapse leaves the list available

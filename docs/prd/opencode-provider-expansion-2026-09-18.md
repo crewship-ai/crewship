@@ -1,6 +1,6 @@
 # OpenCode provider expansion — supplemental analysis and implementation brief
 
-Date: 2026-09-18. Follow-up to [Go/Zen PRD](opencode-go-zen-integration-2026-09-16.md) and [acceptance handoff](opencode-go-zen-handoff-2026-09-18.md), attached to PR #2619. **This is proposed follow-up scope, not functionality shipped by that PR.** User priorities: use a newly purchased Z.AI product, expose the broad OpenCode provider ecosystem, retain working Codex and Claude Code workflows.
+Date: 2026-09-18. Follow-up to [Go/Zen PRD](opencode-go-zen-integration-2026-09-16.md) and [acceptance handoff](https://github.com/crewship-ai/crewship/blob/8dc421fdb5df28a8113ba1453682bc55464213e6/docs/prd/opencode-go-zen-handoff-2026-09-18.md), attached to PR #2619. **This is proposed follow-up scope, not functionality shipped by that PR.** User priorities: use a newly purchased Z.AI product, expose the broad OpenCode provider ecosystem, retain working Codex and Claude Code workflows.
 
 ## Decision
 

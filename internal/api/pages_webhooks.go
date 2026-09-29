@@ -1,6 +1,6 @@
 package api
 
-// Inbound panel webhooks — the HUMAN half (docs/prd/pages.md §10b.5c).
+// Inbound panel webhooks — the HUMAN half (docs/specs/pages.md §10b.5c).
 //
 // "A panel should be writable by anything, not only by something that can
 // execute the `crewship` binary — a cron on someone else's box, a Zapier step,

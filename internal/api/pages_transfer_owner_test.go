@@ -2,7 +2,7 @@ package api
 
 // Owner-departure transfer — tests for pages_transfer_owner.go and its
 // wiring into the user-erasure handler (admin_gdpr.go DeleteUserData).
-// docs/prd/pages.md §7.1 rule 1b, issue #1944.
+// docs/specs/pages.md §7.1 rule 1b, issue #1944.
 //
 // Table-driven core: TestPagesOwnerTransfer_TargetCrewResolution covers the
 // ordered rule itself (most panels, else member crew, else refuse). The

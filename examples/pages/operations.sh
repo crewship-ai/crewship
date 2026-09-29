@@ -8,7 +8,7 @@
 # what refreshes them: point it at your server and the same five panels start
 # reporting the machine this script runs on.
 #
-# It is deliberately unremarkable. docs/prd/pages.md §1 argues that adding a
+# It is deliberately unremarkable. docs/specs/pages.md §1 argues that adding a
 # data source to Pages is a scripting job rather than connector engineering, and
 # this is what that claim looks like when it is true: `free`, `uptime`, `df`,
 # one HTTP probe, and five pushes through the ordinary CLI. Nothing here imports

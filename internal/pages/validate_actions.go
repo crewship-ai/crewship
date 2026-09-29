@@ -1,6 +1,6 @@
 package pages
 
-// Actions — validation (docs/prd/pages.md §8b.1, and §8 rules 3, 4, 5, 9).
+// Actions — validation (docs/specs/pages.md §8b.1, and §8 rules 3, 4, 5, 9).
 //
 // spec.go declares the vocabulary. This file is the half that makes it mean
 // something: an action that does not validate is never stored, and the dispatch

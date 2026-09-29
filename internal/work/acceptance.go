@@ -30,7 +30,7 @@ const DefaultAcceptanceBudget = 2 * time.Second
 // crewship-dev: a 500 ms context against a write lock held elsewhere for 5 s
 // returned after 5044 ms — an order of magnitude past its budget, with the
 // context dutifully reporting "deadline exceeded" once it was finally let go.
-// The numbers are in docs/prd/ADR-QUEUE-RIVER-SQLITE-2026-09-10.md.
+// The numbers are in docs/decisions/ADR-QUEUE-RIVER-SQLITE-2026-09-10.md.
 //
 // The only thing that actually bounds the wait is busy_timeout, and that pragma
 // is per-connection state. Setting it on a connection borrowed from the main

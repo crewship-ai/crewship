@@ -1,6 +1,6 @@
 package api
 
-// Pages — `refresh:`, end to end (docs/prd/pages.md §12 v1.1, and §6's worked
+// Pages — `refresh:`, end to end (docs/specs/pages.md §12 v1.1, and §6's worked
 // example at line 422).
 //
 // The property every one of these defends is the same, and it is the reason
@@ -56,7 +56,7 @@ type pageRefreshRig struct {
 	userID string
 }
 
-// prdRefreshPanels is docs/prd/pages.md:401-434 on the wire, with the
+// prdRefreshPanels is docs/specs/pages.md:401-434 on the wire, with the
 // narrative panel's `refresh:` made explicit by the case under test.
 func prdRefreshPanels(refresh string) string {
 	field := ""

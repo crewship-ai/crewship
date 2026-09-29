@@ -119,7 +119,7 @@ acceptance checks.
 
 `custom-operations.page.yaml` is a single-file v2 export containing the reviewed
 React/TypeScript/CSS project and Page definition. Published version 3 is deployed
-at `https://crewship-dev3.unifylab.cz/pages/custom-operations` as **Operations Lab**.
+at `http://localhost:8083/pages/custom-operations` as **Operations Lab**.
 The source in this checkout now presents it as **Crewship Lab** with a blue
 palette; the live dev3 publication stays on its previous version until reviewed
 and published again. The URL slug is retained for existing links.
@@ -166,7 +166,7 @@ resolves to a JSON object preserving numbers and arrays. Invalid/null/scalar
 results fail before dispatch. Other crewship verbs retain string interpolation.
 
 Dev3 uses the opt-in reviewed-code same-origin development mode described in the
-[handoff](../../docs/prd/pages-apps-handoff.md); it does not establish process isolation.
+[handoff](https://github.com/crewship-ai/crewship/blob/8dc421fdb5df28a8113ba1453682bc55464213e6/docs/prd/pages-apps-handoff.md); it does not establish process isolation.
 
 
 ## Built-in demo seed

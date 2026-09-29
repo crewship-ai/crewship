@@ -626,7 +626,7 @@ func (s *Server) mountAPIRouter(
 	if goapi.E2EFixturesEnabled(os.Getenv) {
 		opts = append(opts, goapi.WithE2EFixtures())
 	}
-	// Pages' embed.v1 allow-list (docs/prd/pages.md §3.1). Installed once, here,
+	// Pages' embed.v1 allow-list (docs/specs/pages.md §3.1). Installed once, here,
 	// because internal/pages deliberately reads no environment of its own — a
 	// validator whose answer depends on an ambient variable cannot be tested at
 	// its boundary.

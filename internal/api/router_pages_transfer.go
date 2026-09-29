@@ -1,7 +1,7 @@
 package api
 
 // Route registration for the Pages portability and history surface
-// (docs/prd/pages.md §10b.1, §10b.2).
+// (docs/specs/pages.md §10b.1, §10b.2).
 //
 // It is a separate file from router_pages.go for the reason pages_internal.go
 // gives for its own registration — the group is self-contained, and a

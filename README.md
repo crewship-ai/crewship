@@ -345,7 +345,7 @@ crewship cost --workspace demo          # token + dollar ledger
 
 Full reference: [docs/cli/overview.mdx](docs/cli/overview.mdx) and
 [docs/api-reference/overview.mdx](docs/api-reference/overview.mdx). The docs are
-large — **85+ guides and 55+ API pages** under [`docs/`](docs/), rendered at
+large — **85+ guides and 55+ API pages** under [`docs/`](https://github.com/crewship-ai/crewship/tree/07bfd2360a97dbe1c9f71c03e1d9b5d5d471c993/docs/), rendered at
 [docs.crewship.ai](https://docs.crewship.ai) (coming soon).
 
 ---
@@ -491,7 +491,21 @@ A plain `go build ./...` always works, including in a fresh clone or
 `git worktree add`, because `web/out/.placeholder.html` is tracked. The
 resulting binary has **no UI**: every UI route answers `503` with a page
 saying the web UI was not built. That is deliberate — see
-[CONTRIBUTING.md](CONTRIBUTING.md#the-webout-embed).
+[docs/development/web-out-embed.md](docs/development/web-out-embed.md).
+
+## Find your way around
+
+| Working on | Start here |
+| --- | --- |
+| Backend or CLI | `internal/` for backend domains, `cmd/crewship/` for command wiring |
+| Frontend | `app/` for routes, `components/features/` for feature UI, `hooks/`, `lib/` and `stores/` for shared logic |
+| Tests | Tests beside the code; [browser suite guide](e2e/README.md) for end-to-end coverage |
+| Build and maintenance | [Script catalog](scripts/README.md) and `Makefile` |
+| Documentation | [Documentation map](docs/README.md) |
+
+See the [repository layout](docs/development/repository-layout.md) for placement
+rules, root configuration files and the distinction between product code,
+developer tools and generated output.
 
 ## Stack
 
@@ -500,19 +514,25 @@ saying the web UI was not built. That is deliberate — see
 | UI | Next.js 16 (static export), React 19, Tailwind 4, shadcn/ui |
 | Auth | NextAuth.js v5 (Auth.js), JWT + refresh tokens |
 | Database | SQLite via `modernc.org/sqlite`, Go-side migrations (no Prisma at runtime) |
-| Backend | Go 1.26 (`crewship`) — REST + WebSocket, Docker orchestration |
+| Backend | Go (`crewship`) — REST + WebSocket, Docker orchestration; toolchain pinned in [go.mod](go.mod) |
 | Agent runtime | Docker containers; Claude Code / OpenCode adapters, Ollama as a local-model provider under OpenCode (plus scaffolds) |
 | IPC | HTTP-over-Unix-socket, `<data dir>/crewship.sock` — `/tmp/crewship.sock` only for the packaged `/var/lib/crewship` install (X-Internal-Token auth) |
 
 > **Prisma is TypeScript-types only.** All schema changes go through
-> `internal/database/migrate.go`. Never run `prisma migrate`.
+> timestamped files in `internal/database/migrations/`; legacy and Go-only
+> migrations remain in `migrate.go`. See the [migration contract](internal/database/migrations/README.md).
+> Never run `prisma migrate`.
 
 ## Verify a change
 
 ```bash
-go test ./... && go vet ./...        # backend
+go test ./... -count=1 -timeout 40m && go vet ./... # full backend suite
 pnpm test && pnpm exec tsc --noEmit  # frontend
 ```
+
+The full Go suite can exceed the default ten-minute timeout on shared machines.
+Use [CONTRIBUTING.md](CONTRIBUTING.md) for the required checks for your change
+and the [script catalog](scripts/README.md) for faster preliminary checks.
 
 ## Contributing
 
@@ -524,7 +544,7 @@ Covenant 2.1).
 
 ## Community & links
 
-- **Docs:** [docs/](docs/) in this repo; hosted [docs.crewship.ai](https://docs.crewship.ai) coming soon
+- **Docs:** [docs/](https://github.com/crewship-ai/crewship/tree/07bfd2360a97dbe1c9f71c03e1d9b5d5d471c993/docs/) in this repo; hosted [docs.crewship.ai](https://docs.crewship.ai) coming soon
 - **Discord:** community help + showcase (invite on [crewship.ai](https://crewship.ai))
 - **Reddit:** [r/Crewship](https://reddit.com/r/Crewship)
 - **X / Twitter:** [@crewshipai](https://twitter.com/crewshipai) · **Bluesky:** [@crewship.ai](https://bsky.app/profile/crewship.ai)
@@ -535,4 +555,13 @@ Covenant 2.1).
 
 [Apache License 2.0](LICENSE) — free to use, modify, distribute.
 
-Copyright 2025-2026 Unify Technology s.r.o.
+The current self-hosted pre-release is free to use; infrastructure and AI-provider
+costs remain yours. Paid editions are planned as the product matures, with no
+pricing or launch date set. See [commercial direction](GOVERNANCE.md#commercial-direction).
+
+Copyright 2025-2026 Unify Technology, s.r.o.
+
+Crewship is developed and maintained by **Unify Technology, s.r.o.**, a Czech
+company (Company ID: 17266637). See [project governance](GOVERNANCE.md) for
+maintenance responsibilities and licensing scope, and [NOTICE](NOTICE) for
+company identification and third-party attributions.

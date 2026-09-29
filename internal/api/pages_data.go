@@ -1,6 +1,6 @@
 package api
 
-// Pages — the write path (docs/prd/pages.md §11, §4, §7.1b, §10, §10b.3).
+// Pages — the write path (docs/specs/pages.md §11, §4, §7.1b, §10, §10b.3).
 //
 //	PUT /api/v1/pages/{slug}/panels/{id}/data
 //
