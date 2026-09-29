@@ -209,3 +209,15 @@ describe("day theme semantic text contrast", () => {
     expect(contrast(luminanceFromRgb(tokenRgb("day", name)), luminanceFromRgb(tokenRgb("day", "card")))).toBeGreaterThanOrEqual(4.5)
   })
 })
+
+// The rail's concept hues (lib/concept-accents.ts) beyond the semantic set:
+// each is a glyph colour, so it has to read as text on the card in both themes.
+describe("concept hue text contrast", () => {
+  const HUES = ["indigo", "rose", "lime", "orange", "azure"]
+  it.each(HUES)("text-%s on card ≥ 4.5:1 in the day theme", (name) => {
+    expect(contrast(luminanceFromRgb(tokenRgb("day", name)), luminanceFromRgb(tokenRgb("day", "card")))).toBeGreaterThanOrEqual(4.5)
+  })
+  it.each(HUES)("text-%s on card ≥ 4.5:1 in the night theme", (name) => {
+    expect(contrast(luminanceFromRgb(tokenRgb("night", name)), luminanceFromRgb(tokenRgb("night", "card")))).toBeGreaterThanOrEqual(4.5)
+  })
+})

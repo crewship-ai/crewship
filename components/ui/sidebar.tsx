@@ -46,6 +46,7 @@ const SIDEBAR_WIDTH_MOBILE = "18rem"
 const SIDEBAR_WIDTH_ICON = "4rem"
 const SIDEBAR_KEYBOARD_SHORTCUT = "b"
 const SIDEBAR_MODE_KEY = "crewship_sidebar_mode"
+const SIDEBAR_RAIL_MODE_KEY = "crewship_sidebar_rail_mode"
 
 
 type SidebarMode = "hover" | "collapsed" | "pinned"
@@ -62,6 +63,12 @@ type SidebarContextProps = {
   setHoverExpanded: (expanded: boolean) => void
   sidebarMode: SidebarMode
   setSidebarMode: (mode: SidebarMode) => void
+  /** Pin the panel open, or collapse it back to the rail (⌘B). */
+  togglePinned: () => void
+  /** Whether the rail expands while the pointer is over it. A preference that
+   *  survives pinning: collapsing returns to the rail the person chose. */
+  peekOnHover: boolean
+  setPeekOnHover: (on: boolean) => void
 }
 
 const SidebarContext = React.createContext<SidebarContextProps | null>(null)
@@ -107,6 +114,32 @@ function SidebarProvider({
     localStorage.setItem(SIDEBAR_MODE_KEY, mode)
   }, [])
 
+  // Two states the person picks between — the rail or the pinned panel — and
+  // one preference, whether the rail peeks open on hover. It used to be three
+  // states cycled by one button, which nobody could predict. `hover` and
+  // `collapsed` remain the stored modes; the preference is the rail mode to
+  // return to when the panel is unpinned.
+  const [railMode, _setRailMode] = React.useState<"hover" | "collapsed">(() => {
+    if (typeof window === "undefined") return "hover"
+    return localStorage.getItem(SIDEBAR_RAIL_MODE_KEY) === "collapsed" ? "collapsed" : "hover"
+  })
+  const togglePinned = React.useCallback(() => {
+    if (sidebarMode === "pinned") {
+      setSidebarMode(railMode)
+    } else {
+      _setRailMode(sidebarMode)
+      localStorage.setItem(SIDEBAR_RAIL_MODE_KEY, sidebarMode)
+      setSidebarMode("pinned")
+    }
+  }, [sidebarMode, railMode, setSidebarMode])
+  const peekOnHover = sidebarMode === "pinned" ? railMode === "hover" : sidebarMode === "hover"
+  const setPeekOnHover = React.useCallback((on: boolean) => {
+    const next = on ? "hover" : "collapsed"
+    _setRailMode(next)
+    localStorage.setItem(SIDEBAR_RAIL_MODE_KEY, next)
+    if (sidebarMode !== "pinned") setSidebarMode(next)
+  }, [sidebarMode, setSidebarMode])
+
   // Derive open state from mode (pinned = open, hover/collapsed = closed)
   const [_open, _setOpen] = React.useState(sidebarMode === "pinned")
   const open = openProp ?? _open
@@ -143,11 +176,8 @@ function SidebarProvider({
         (event.metaKey || event.ctrlKey)
       ) {
         event.preventDefault()
-        // Cycle modes: hover → pinned → collapsed → hover
         if (!isMobile) {
-          setSidebarMode(
-            sidebarMode === "hover" ? "pinned" : sidebarMode === "pinned" ? "collapsed" : "hover"
-          )
+          togglePinned()
         } else {
           toggleSidebar()
         }
@@ -156,7 +186,7 @@ function SidebarProvider({
 
     window.addEventListener("keydown", handleKeyDown)
     return () => window.removeEventListener("keydown", handleKeyDown)
-  }, [toggleSidebar, sidebarMode, setSidebarMode, isMobile])
+  }, [toggleSidebar, togglePinned, isMobile])
 
   const state = open ? "expanded" : "collapsed"
 
@@ -173,8 +203,11 @@ function SidebarProvider({
       setHoverExpanded,
       sidebarMode,
       setSidebarMode,
+      togglePinned,
+      peekOnHover,
+      setPeekOnHover,
     }),
-    [state, open, setOpen, isMobile, openMobile, setOpenMobile, toggleSidebar, hoverExpanded, setHoverExpanded, sidebarMode, setSidebarMode]
+    [state, open, setOpen, isMobile, openMobile, setOpenMobile, toggleSidebar, hoverExpanded, setHoverExpanded, sidebarMode, setSidebarMode, togglePinned, peekOnHover, setPeekOnHover]
   )
 
   return (

@@ -38,12 +38,14 @@ describe("concept accents", () => {
     }
   })
 
-  it("keeps a rail group's concepts visually distinct", () => {
-    // Colour only helps if adjacent rows differ. These are the four Build rows,
-    // which is the group where two grey glyphs used to be indistinguishable.
-    const build = ["crews", "skills", "credentials", "integrations"] as const
-    const hues = new Set(build.map((c) => CONCEPT_ACCENT[c]))
-    expect(hues.size).toBe(build.length)
+  it("gives every coloured destination in the rail its own hue", () => {
+    // One hue per function across the whole rail, not only within a group:
+    // Dashboard and Issues were both blue, Routines and Crews both purple,
+    // Pages and Skills both green — the colour stopped naming the place.
+    const rail = ["dashboard", "inbox", "sessions", "issues", "routines", "pages", "activity", "journal",
+      "crews", "skills", "credentials", "integrations", "admin"] as const
+    const hues = rail.map((c) => CONCEPT_ACCENT[c])
+    expect(new Set(hues).size).toBe(rail.length)
   })
 
   it("gives a concept the same accent as the screen it opens", () => {

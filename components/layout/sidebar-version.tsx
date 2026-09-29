@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react"
 import Link from "next/link"
+import { RAIL_ROW } from "@/components/layout/rail"
 
 import { apiFetch } from "@/lib/api-fetch"
 import { useIsInstanceAdmin } from "@/hooks/use-auth"
@@ -62,10 +63,10 @@ export function SidebarVersion() {
   const update = build.newer && build.latest ? build.latest : null
   const body = (
     <>
-      <span className="icon-tile grid size-6 shrink-0 place-items-center rounded-md" aria-hidden>
-        <CrewshipLogo tight className="h-3 w-auto" />
+      <span className="rail-tile rail-tile-static" aria-hidden>
+        <CrewshipLogo tight className="h-3.5 w-auto" />
       </span>
-      <span className="grid min-w-0 flex-1 leading-tight">
+      <span className="rail-label grid min-w-0 flex-1 leading-tight">
         <span className="truncate text-[12px] font-medium">{name}</span>
         <span className="truncate font-mono text-[10.5px] text-muted-foreground" data-slot="sidebar-build">
           {label}
@@ -79,11 +80,11 @@ export function SidebarVersion() {
   return (
     <SidebarMenuItem>
       {instanceAdmin ? (
-        <SidebarMenuButton asChild size="lg" tooltip={tooltip} className="h-10">
+        <SidebarMenuButton asChild size="lg" tooltip={tooltip} className={RAIL_ROW}>
           <Link href="/admin?tab=overview" aria-label={tooltip}>{body}</Link>
         </SidebarMenuButton>
       ) : (
-        <SidebarMenuButton size="lg" tooltip={tooltip} className="h-10 cursor-default hover:bg-transparent" aria-label={tooltip}>
+        <SidebarMenuButton size="lg" tooltip={tooltip} className={`${RAIL_ROW} cursor-default hover:bg-transparent`} aria-label={tooltip}>
           {body}
         </SidebarMenuButton>
       )}

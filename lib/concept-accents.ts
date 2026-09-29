@@ -9,9 +9,11 @@
  *
  * ── Where the colours come from ──────────────────────────────────────────
  *
- * Nowhere new. Every accent below is one of the SEMANTIC tokens already in
- * globals.css — `--primary`, `--info`, `--notice`, `--success`, `--warn`,
- * `--gold`, `--purple`, `--destructive`. Those are declared identically in
+ * Mostly the SEMANTIC tokens already in globals.css — `--primary`, `--info`,
+ * `--notice`, `--success`, `--warn`, `--gold`, `--purple`, `--destructive` —
+ * plus five rail hues (`--indigo`, `--rose`, `--lime`, `--orange`, `--azure`)
+ * added so every destination in the rail has its own colour; each is defined
+ * per theme and its text contrast is tested like the semantic ones. Those are declared identically in
  * light and dark ("brand-consistent across modes") and their contrast is
  * already measured; inventing a parallel accent palette would be a second
  * source of truth for the same job, and the first one to drift.
@@ -48,6 +50,13 @@ export type AccentName =
   | "purple"
   | "red"
   | "slate"
+  // Rail hues added for one-colour-per-function (tokens in globals.css,
+  // contrast pinned in lib/__tests__/theme-contrast.test.ts).
+  | "indigo"
+  | "rose"
+  | "lime"
+  | "orange"
+  | "azure"
 
 export interface Accent {
   /** Glyph / matching label colour. */
@@ -69,6 +78,11 @@ export const ACCENT: Record<AccentName, Accent> = {
   gold: { fg: "text-gold", chip: "bg-gold/12 border-gold/25", soft: "bg-gold/10", tint: "var(--gold)" },
   purple: { fg: "text-purple-hover", chip: "bg-purple/12 border-purple/25", soft: "bg-purple/10", tint: "var(--purple)" },
   red: { fg: "text-destructive", chip: "bg-destructive/12 border-destructive/25", soft: "bg-destructive/10", tint: "var(--destructive)" },
+  indigo: { fg: "text-indigo", chip: "bg-indigo/12 border-indigo/25", soft: "bg-indigo/10", tint: "var(--indigo)" },
+  rose: { fg: "text-rose", chip: "bg-rose/12 border-rose/25", soft: "bg-rose/10", tint: "var(--rose)" },
+  lime: { fg: "text-lime", chip: "bg-lime/12 border-lime/25", soft: "bg-lime/10", tint: "var(--lime)" },
+  orange: { fg: "text-orange", chip: "bg-orange/12 border-orange/25", soft: "bg-orange/10", tint: "var(--orange)" },
+  azure: { fg: "text-azure", chip: "bg-azure/12 border-azure/25", soft: "bg-azure/10", tint: "var(--azure)" },
   slate: {
     fg: "text-muted-foreground",
     chip: "bg-foreground/[0.05] border-border/60",
@@ -93,12 +107,12 @@ export const CONCEPT_ACCENT = {
   dashboard: "blue",
   inbox: "sky",
   sessions: "teal",
-  issues: "blue",
+  issues: "indigo",
   // A mission is issue work in flight, and the two appear side by side in the
   // work cards — same family, same accent. concept-icons.ts gained the icon in
   // f85d1d41 without this entry, which is what the icon/accent parity test in
   // lib/__tests__/concept-accents.test.ts exists to catch.
-  missions: "blue",
+  missions: "indigo",
   routines: "purple",
   pages: "green",
 
@@ -111,10 +125,10 @@ export const CONCEPT_ACCENT = {
   work: "amber",
 
   // ── Build ──
-  crews: "purple",
-  skills: "green",
-  credentials: "amber",
-  integrations: "teal",
+  crews: "rose",
+  skills: "lime",
+  credentials: "orange",
+  integrations: "azure",
 
   // ── System ──
   marketplace: "slate",
@@ -127,7 +141,7 @@ export const CONCEPT_ACCENT = {
   runs: "gold",
   peers: "sky",
   channels: "teal",
-  tools: "teal",
+  tools: "azure",
   memory: "purple",
 } as const satisfies Record<string, AccentName>
 

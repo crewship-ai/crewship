@@ -1,5 +1,6 @@
 "use client"
 
+import { RAIL_ROW } from "@/components/layout/rail"
 import { useEffect, useState } from "react"
 import { Check, ChevronDown, Plus } from "lucide-react"
 import { toast } from "sonner"
@@ -66,17 +67,18 @@ export function WorkspaceSwitcher() {
                 size="lg"
                 tooltip={triggerLabel}
                 aria-label={`Current workspace: ${triggerLabel}`}
+                className={RAIL_ROW}
               >
-                <div className="flex h-6 w-6 items-center justify-center rounded-md bg-primary text-[9px] font-bold text-primary-foreground shrink-0">
+                <span className="rail-tile rail-tile-static bg-primary! text-[13px] font-bold text-primary-foreground! shadow-[inset_0_1px_0_rgb(255_255_255/.18)]" aria-hidden>
                   {workspace ? avatarLetter(workspace.name) : "·"}
-                </div>
-                <div className="grid flex-1 text-left text-sm leading-tight group-data-[collapsible=icon]:hidden">
+                </span>
+                <span className="rail-label grid min-w-0 flex-1 text-left leading-tight">
                   <span className="truncate font-semibold text-[13px]">{triggerLabel}</span>
                   {triggerSub && (
                     <span className="truncate text-[10px] text-muted-foreground">{triggerSub}</span>
                   )}
-                </div>
-                <ChevronDown className="h-3 w-3 text-muted-foreground shrink-0 group-data-[collapsible=icon]:hidden" />
+                </span>
+                <ChevronDown className="rail-label mr-2 h-3 w-3 shrink-0 text-muted-foreground" />
               </SidebarMenuButton>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start" side="bottom" className="w-72">

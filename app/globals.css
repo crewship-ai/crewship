@@ -177,6 +177,14 @@
      so the badge stays the brand purple. Measured: 5.20:1. */
   --purple-hover: oklch(0.50 0.22 300);
   --gold: #7A5E00;
+  /* Concept hues for the rail (lib/concept-accents.ts): one per function, at
+     one lightness per theme so none outweighs the rest; contrast pinned in
+     lib/__tests__/theme-contrast.test.ts. */
+  --indigo: oklch(0.50 0.17 285);
+  --rose: oklch(0.52 0.18 350);
+  --lime: oklch(0.50 0.12 130);
+  --orange: oklch(0.54 0.15 45);
+  --azure: oklch(0.50 0.10 225);
 
   --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Segoe UI", "Helvetica Neue", "Noto Sans", "Liberation Sans", ui-sans-serif, system-ui, sans-serif;
   --font-serif: "Georgia", serif;
@@ -377,6 +385,11 @@
      5.11:1, up from 4.48:1. Chroma unchanged at 0.22. */
   --purple-hover: oklch(0.70 0.22 300);
   --gold: oklch(0.84 0.15 85);
+  --indigo: oklch(0.74 0.13 285);
+  --rose: oklch(0.75 0.14 350);
+  --lime: oklch(0.84 0.16 125);
+  --orange: oklch(0.77 0.14 50);
+  --azure: oklch(0.79 0.11 220);
 
   --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Segoe UI", "Helvetica Neue", "Noto Sans", "Liberation Sans", ui-sans-serif, system-ui, sans-serif;
   --font-serif: "Georgia", serif;
@@ -511,6 +524,11 @@
   --color-purple: var(--purple);
   --color-purple-hover: var(--purple-hover);
   --color-gold: var(--gold);
+  --color-indigo: var(--indigo);
+  --color-rose: var(--rose);
+  --color-lime: var(--lime);
+  --color-orange: var(--orange);
+  --color-azure: var(--azure);
 
   --font-sans: var(--font-sans);
   --font-mono: var(--font-mono);
@@ -967,49 +985,78 @@ body {
     border-color: color-mix(in srgb, var(--ic) 55%, transparent);
   }
 
-  /* The nav rail's tiles (app-sidebar RailTile): the icon-tile shape without
-     the tint until it is earned. The page you are on is a full icon tile in
-     its concept's colour (--ic); the rest are quiet squares that take the
-     tint, the lift and the tilt when hovered. In the expanded rail they sit
-     beside a label and stay borderless until active or hovered; collapsed to
-     icons they are the button, so they show their outline. */
+  /* The app rail (components/layout/rail.tsx). One grid in both states: a
+     2.25rem tile column at a fixed inset — half the difference between the
+     rail and the tile — and a label that only fades. The panel widening is
+     the whole animation. */
+  .rail-inset {
+    padding-inline: calc((var(--sidebar-width-icon) - 2.25rem) / 2);
+  }
   .rail-tile {
     --ic: var(--primary);
+    position: relative;
     display: inline-grid;
     place-items: center;
     flex-shrink: 0;
-    width: 1.5rem;
-    height: 1.5rem;
-    border-radius: 0.5rem;
+    width: 2.25rem;
+    height: 2.25rem;
+    border-radius: 0.7rem;
     border: 1px solid transparent;
     color: var(--muted-foreground);
     transition: transform 300ms var(--ease-spring), border-color 300ms var(--ease-harbor), background-color 300ms var(--ease-harbor), color 200ms var(--ease-harbor);
   }
-  .rail-tile > svg { width: 0.875rem; height: 0.875rem; }
-  /* The button sizes the tile (size-9 in RAIL_BUTTON): this project's
-     --spacing is 0.23rem, so a fixed rem size here drifted from the button
-     and pushed the tile off-centre. */
-  [data-collapsible="icon"] .rail-tile {
-    width: 100%;
-    height: 100%;
-    border-radius: 0.625rem;
-    background: color-mix(in srgb, var(--foreground) 4%, transparent);
-    border-color: var(--border);
-  }
-  [data-collapsible="icon"] .rail-tile > svg { width: 1rem; height: 1rem; }
+  .rail-tile > svg { width: 1.05rem; height: 1.05rem; }
   .rail-tile[data-active="true"],
   :hover > .rail-tile {
     color: color-mix(in oklch, var(--ic) var(--tile-text-mix), var(--foreground));
-    background: radial-gradient(circle at 30% 20%, color-mix(in srgb, var(--ic) 20%, transparent), color-mix(in srgb, var(--ic) 7%, transparent) 70%);
-    border-color: color-mix(in srgb, var(--ic) 32%, transparent);
+    background: radial-gradient(circle at 30% 20%, color-mix(in srgb, var(--ic) 22%, transparent), color-mix(in srgb, var(--ic) 8%, transparent) 70%);
+    border-color: color-mix(in srgb, var(--ic) 34%, transparent);
     box-shadow: var(--tile-inset);
   }
-  :hover > .rail-tile {
-    transform: scale(1.08) rotate(-4deg);
+  :hover > .rail-tile:not(.rail-tile-static) {
+    transform: scale(1.07) rotate(-4deg);
     border-color: color-mix(in srgb, var(--ic) 55%, transparent);
   }
+  .rail-badge {
+    position: absolute;
+    top: -0.2rem;
+    left: 1.45rem;
+    min-width: 1rem;
+    padding: 0 0.25rem;
+    border-radius: 999px;
+    border: 2px solid var(--sidebar);
+    background: var(--info);
+    color: var(--background);
+    font: 600 0.6rem/0.8rem var(--font-mono);
+    text-align: center;
+  }
+  .rail-label {
+    opacity: 1;
+    transition: opacity 160ms ease 90ms;
+  }
+  [data-collapsible="icon"] .rail-label {
+    opacity: 0;
+    transition-delay: 0ms;
+  }
+  .rail-group-head {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    height: 1.5rem;
+    margin-top: 0.5rem;
+    white-space: nowrap;
+  }
+  .rail-group-rule { display: flex; justify-content: center; width: 2.25rem; flex-shrink: 0; }
+  .rail-group-rule > i { display: block; width: 1rem; height: 1px; background: var(--border); }
+  .rail-group-name {
+    font-family: var(--font-mono);
+    font-size: 0.625rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--muted-foreground-soft);
+  }
   @media (prefers-reduced-motion: reduce) {
-    .rail-tile, :hover > .rail-tile { transition: none; transform: none; }
+    .rail-tile, :hover > .rail-tile, .rail-label { transition: none; transform: none; }
   }
 }
 
