@@ -5,3 +5,10 @@ Go source overlay removes only operator authorization from access.Store.Policy. 
 FAIL
 FAIL	github.com/crewship-ai/crewship/internal/access	1.925s
 FAIL
+
+Second overlay removes only the final membership-ID delivery fence. Expected exit 1: a replacement membership must not be returned for the old path.
+--- FAIL: TestMemberAccessDocumentFencesRejoinedMembership (1.24s)
+    workspaces_member_access_test.go:46: membership replacement-member: got 200 want 404
+FAIL
+FAIL	github.com/crewship-ai/crewship/internal/api	1.274s
+FAIL

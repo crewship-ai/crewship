@@ -463,3 +463,35 @@ celý `go vet ./...`, migration lint a agent invariants prošly. Celý Go průch
 běží jako `/tmp/crewship-1-policy-full.log`; konečný stav a CI/review navazujícího
 PR je nutné ověřit v jeho těle/checks. Na dev1 běží kód výše uvedeného čistého
 commitu; následné změny této zprávy jsou jen dokumentace.
+
+
+### Finální ověření policy API a review oprav (#2721)
+
+Kód `4e21bba970e77232dbd2964c98048e564f2cdd7d` po CodeRabbit připomínkách
+navíc kontroluje identitu členství těsně před vydáním dokumentu: odebrání/rejoin
+mezi lookupem a snapshotem nesmí vrátit novou politiku přes staré ID. Regrese
+ověřuje tento případ a mutation overlay odstraněním samotné kontroly správně
+selhal. CLI get nápověda nyní výslovně popisuje --format json.
+
+API má explicitní schéma povinného CAS dokumentu a chybového 409 kontraktu;
+veřejné API/CLI reference i číselný přehled OpenAPI jsou aktualizované. Strict
+inventory je čistý. Source guard čtení workspaceId z path má úzkou výjimku s
+odůvodněním: hodnota se používá výhradně k odmítnutí neshody, všechny DB dotazy
+používají ověřený kontext. Nové autentizované GET/PUT regrese pro podvrženou
+kombinaci path/query kontrolu dokazují; žádná query nesměřuje podle path.
+
+**Finální celá Go sada: 150 testovaných balíků, exit 0**, celý vet, cílený race,
+OpenAPI consistency a strict docs inventory prošly. Report:
+`reports/agent-access-policy-go-2026-09-29.txt`. Pomalý původní diskový běh byl
+ukončen, není green evidence. Mezilehlý tmpfs běh odhalil uvedené dva invarianty;
+po opravách a poslední review změně celá sada proběhla znovu. Vždy používat
+TMPDIR **i** GOTMPDIR ve vlastněném exec-enabled tmpfs.
+
+Finální dev1 clean build `4e21bba97`, 2026-09-29T14:52:36Z, PID 2980119:
+identita skutečné binárky, environ 0400/UID 1000, health/readiness 200. Živé
+OpenAPI skutečně vydává povinné typované schéma i 409. Znovu prošel celý vlastní
+CLI/API scénář obou klientů a revokace; testovací workspaces uklizeny. Reporty
+live/mutation výše obsahují i závěrečné opakování. Staré CI na bdbe74a9b se známou
+chybou dokumentace bylo zrušeno kvůli nákladům; nový finální head musí dostat nové
+CI a review. Původní review #2721 obsahovalo 4 nálezy; všechny jsou zapracované.
+#2721 není důkazem hotového provider/runtime rollout. #2703 a #2711 zůstávají otevřené.

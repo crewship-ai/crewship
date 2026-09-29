@@ -11,3 +11,19 @@ First harness invocation incorrectly required revision +1; database grant/mode t
 
 Reproduction on dev1: /tmp/crewship-1-policy-live.py
 No real model or new agent container was invoked.
+
+Final review-fix deployment and repeated live acceptance:
+crewship dev
+  commit:  4e21bba970e77232dbd2964c98048e564f2cdd7d (clean)
+  built:   2026-09-29T14:52:36Z
+  go:      go1.27.1
+  os/arch: linux/amd64
+
+pid 2980119 process uid 1000 environ mode 0o400
+/api/health 200
+/healthz 200
+/readyz 200
+Live OpenAPI: typed mandatory policy and 409 contract PASS
+CLI policies: exact grant, private audience, unintegrated routes denied, stale replacement 409: PASS
+CLI deny-all revoked H1 chat/history; H2 still reads; old policy cannot restore grants: PASS
+Owned workspace removed; synthetic users have no workspace access.
