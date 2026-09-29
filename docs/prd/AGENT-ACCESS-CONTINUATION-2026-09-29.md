@@ -1,5 +1,11 @@
 # Agent Access / Runtime — pokračování na dev1, 29. 9. 2026
 
+**Aktualizace 14:19 UTC:** #2720 je sloučené jako `51a931f423830bdb3ca6403b2fe27740e7bb8758`.
+Finální head `5eb345326` má skutečné CodeRabbit review/schválení 5353361661 a
+úspěšné CI, Security i CodeQL; CI run 36574189593 dokončil také všechny race joby.
+#2711 se při merge #2717 uzavřelo, přestože aplikační integrace není hotová;
+bylo znovu otevřené. Další větev přidává [správu grantů přes API a CLI](AGENT-ACCESS-POLICY-API-2026-09-29.md).
+
 **Aktualizace 13:02 UTC:** #2717 je sloučené jako `7bbb09832`, po úspěchu celého
 finálního CI a věcném review i schválení `56c103a98`. Starší věty o billing blokaci
 nebo draftu níže jsou historický protokol. Release 1.0 stále není přijatý;
@@ -409,3 +415,83 @@ model, rozpočet a povolený tvar požadavku s pokusem. Pevná HTTPS adresa sama
 o sobě neopravňuje číst libovolnou upstream konverzaci či soubor z téhož účtu.
 SDK route mapování, výběr scoped promptu/recallu a výstupní audience proto nesmějí
 převzít široký legacy resolver.
+
+
+## Správa grantů přes API/CLI a živá revokace
+
+Větev `feat/access-policy-api-2711` přidává GET/PUT politiky členství a
+`workspace member access get/set`. Identitu operátora určuje autentizace;
+aktuální trusted OWNER/ADMIN se kontroluje v transakci. CLI token navíc potřebuje
+workspace:admin. Dokument musí obsahovat membership_id, revision, mode a výslovné
+rights; prázdné restricted rights znamenají deny-all. Starý zápis vrací 409,
+CLI si nesmí tiše načíst novou revizi a opakovat ho. Čtení politiky používá
+společný snapshot členství a grantů. Kontrakt: AGENT-ACCESS-POLICY-API-2026-09-29.md.
+
+Dev1 nasazeno z čistého `976dacddc6abf4bb4b07b0c8d5bb9b07e0afd374`, build
+2026-09-29T14:28:25Z. Skutečná binárka i web export odpovídají; health/readiness
+200, environ 0400 / UID 1000. Dva syntetičtí klienti stejného agenta dostali
+konkrétní chat grant přes nové CLI. Viděli vlastní chaty, cizí historii nikoli;
+unintegrované files/WS-token cesty zůstaly odmítnuté. CLI deny-all prvnímu odebral
+seznam i historii, druhý dál četl. Stará politika nemohla revokaci přepsat.
+Fixture workspace odstraněny a sessions odhlášeny. Report:
+`reports/agent-access-policy-live-2026-09-29.txt`. Kontrolní mutace odstranila pouze
+operator check a test zachytil neoprávněné čtení politiky:
+`reports/agent-access-policy-mutation-2026-09-29.txt`.
+
+Doplněná akceptace B4 na předchozím stejném aplikačním chatu (`f084be41a`):
+anonymní prohlížeč zobrazil neprázdný syntetický přepis, po odvolání tokenu jej
+API i browser odmítly. Token nebyl v URL/localStorage/sessionStorage. První
+harness potřeboval správně rozbalit chat_event; poté celý scénář prošel.
+Reprodukce a výstup jsou na dev1 v `/tmp/crewship-1-shared-nonempty-live.py`
+a stejnojmenném `.log`; detail také v těle #2720.
+
+Provider průzkum: skutečný dev1 image má Codex 0.157.0. V network-none kontejnerech
+s umělými credentials obě konfigurace custom provider (env-key a ChatGPT) poslaly
+/v1/responses na lokální mock a dokončily syntetické SSE s exit 0. ChatGPT navíc
+zkoušel automatické MCP síťové volání, které network-none zablokovalo. Vlastní
+base URL tedy sama nestačí; provider adapter musí omezit také pomocné cesty.
+Nešlo o skutečný model ani finální runtime/provider integraci. Reprodukce:
+`/tmp/crewship-1-codex-provider-success.py`, detail v těle #2720.
+
+Celé PRD zůstává otevřené. Správa grantů neaktivuje izolovaný modelový běh ani
+neřeší provider/account adapter, scoped prompt/recall, storage kvóty, Settings
+editor či produkční chat/CLI/routine dispatch. Sdílený host/Docker nebyl restartován.
+
+
+Ověření při zápisu této části: nové API/CLI/store testy i cílený race prošly,
+celý `go vet ./...`, migration lint a agent invariants prošly. Celý Go průchod
+běží jako `/tmp/crewship-1-policy-full.log`; konečný stav a CI/review navazujícího
+PR je nutné ověřit v jeho těle/checks. Na dev1 běží kód výše uvedeného čistého
+commitu; následné změny této zprávy jsou jen dokumentace.
+
+
+### Finální ověření policy API a review oprav (#2721)
+
+Kód `4e21bba970e77232dbd2964c98048e564f2cdd7d` po CodeRabbit připomínkách
+navíc kontroluje identitu členství těsně před vydáním dokumentu: odebrání/rejoin
+mezi lookupem a snapshotem nesmí vrátit novou politiku přes staré ID. Regrese
+ověřuje tento případ a mutation overlay odstraněním samotné kontroly správně
+selhal. CLI get nápověda nyní výslovně popisuje --format json.
+
+API má explicitní schéma povinného CAS dokumentu a chybového 409 kontraktu;
+veřejné API/CLI reference i číselný přehled OpenAPI jsou aktualizované. Strict
+inventory je čistý. Source guard čtení workspaceId z path má úzkou výjimku s
+odůvodněním: hodnota se používá výhradně k odmítnutí neshody, všechny DB dotazy
+používají ověřený kontext. Nové autentizované GET/PUT regrese pro podvrženou
+kombinaci path/query kontrolu dokazují; žádná query nesměřuje podle path.
+
+**Finální celá Go sada: 150 testovaných balíků, exit 0**, celý vet, cílený race,
+OpenAPI consistency a strict docs inventory prošly. Report:
+`reports/agent-access-policy-go-2026-09-29.txt`. Pomalý původní diskový běh byl
+ukončen, není green evidence. Mezilehlý tmpfs běh odhalil uvedené dva invarianty;
+po opravách a poslední review změně celá sada proběhla znovu. Vždy používat
+TMPDIR **i** GOTMPDIR ve vlastněném exec-enabled tmpfs.
+
+Finální dev1 clean build `4e21bba97`, 2026-09-29T14:52:36Z, PID 2980119:
+identita skutečné binárky, environ 0400/UID 1000, health/readiness 200. Živé
+OpenAPI skutečně vydává povinné typované schéma i 409. Znovu prošel celý vlastní
+CLI/API scénář obou klientů a revokace; testovací workspaces uklizeny. Reporty
+live/mutation výše obsahují i závěrečné opakování. Staré CI na bdbe74a9b se známou
+chybou dokumentace bylo zrušeno kvůli nákladům; nový finální head musí dostat nové
+CI a review. Původní review #2721 obsahovalo 4 nálezy; všechny jsou zapracované.
+#2721 není důkazem hotového provider/runtime rollout. #2703 a #2711 zůstávají otevřené.

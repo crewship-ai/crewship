@@ -1970,3 +1970,91 @@ by `validation_declared: false`. These results are not publication proofs.
 `400` means invalid definition, unsupported step type, missing sample values or
 malformed input; `403` means insufficient role. A failed output check returns
 `200` with `valid: false` so clients can display its evidence.
+
+## Get member resource access
+
+```http
+GET /api/v1/workspaces/{workspaceId}/members/{memberId}/access
+```
+
+Read a complete resource access policy in a consistent membership/grants snapshot.
+`workspaceId` is the canonical workspace ID; `memberId` is the membership row
+ID, not the user ID.
+
+**Auth:** Authenticated current trusted OWNER/ADMIN of this workspace. Scoped
+CLI tokens additionally require `workspace:admin` or its wildcard. Existing
+restricted-session restrictions also apply to mixed memberships.
+
+**Request:** No body. Path parameters: `workspaceId`, `memberId`. No additional
+query parameters are required.
+
+**Response:** `200 OK`, `Cache-Control: no-store`:
+
+```json
+{
+  "membership_id": "member_123",
+  "mode": "restricted",
+  "revision": 3,
+  "rights": [{"kind": "agent", "id": "agent_123", "operation": "chat"}]
+}
+```
+
+`rights` is an explicit array, including when empty. Agent operations are
+`discover`, `chat`, `run`, `delegate`; project operations are `list`, `read`,
+`write`, `delete`. Grants do not open application routes whose restricted
+runtime integration is incomplete.
+
+| Status | Condition |
+| --- | --- |
+| `200` | Policy returned |
+| `401` | Authentication required |
+| `403` | Workspace membership or token scope denied |
+| `404` | Member/policy unavailable, operator denied, or workspace path mismatch |
+| `500` | Database error |
+
+## Replace member resource access
+
+```http
+PUT /api/v1/workspaces/{workspaceId}/members/{memberId}/access
+```
+
+Atomically replace a member's resource ceiling. Roles, capabilities and
+conversation audience remain additional checks.
+
+**Auth:** Authenticated current trusted OWNER/ADMIN of the target workspace;
+scoped CLI tokens require `workspace:admin` or its wildcard. The server derives
+the operator from authentication, never the request body.
+
+**Request:** JSON body, maximum 64 KiB. All four fields are required:
+
+```json
+{
+  "membership_id": "member_123",
+  "mode": "restricted",
+  "revision": 3,
+  "rights": []
+}
+```
+
+`membership_id` must match the path's membership row. `revision` must match the
+current version read from GET. `mode` is `trusted` or `restricted`; `rights`
+contains at most 256 distinct `{kind,id,operation}` objects belonging to this
+workspace. Null/omitted rights and unknown fields are rejected. Empty restricted
+rights revoke all resource grants. Trusted mode requires empty rights and
+restores ordinary workspace access. OWNER/ADMIN targets cannot be restricted.
+
+**Response:** `200 OK`, `Cache-Control: no-store`, the same complete policy shape
+as GET with the new revision. Revisions are opaque versions and may advance by
+more than one. No live shared process is forcibly terminated by this endpoint;
+new authorization checks enforce the updated policy. Unintegrated restricted
+execution routes remain denied.
+
+| Status | Condition |
+| --- | --- |
+| `200` | Replacement committed |
+| `400` | Malformed/oversized JSON, missing fields, invalid mode or mismatched membership ID |
+| `401` | Authentication required |
+| `403` | Route role, workspace membership or token scope denied |
+| `404` | Unavailable member, operator denied, invalid/foreign/duplicate resource grant, or protected target |
+| `409` | Membership ID/revision changed; read the current policy and review the edit again |
+| `500` | Database error |
