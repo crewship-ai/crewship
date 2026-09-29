@@ -153,6 +153,17 @@ export function PersonProfile({ person, people, workspaces, workspaceId, meId, b
             </SettingsRow>
             {link && <SetupLinkBox url={link.url} expiresAt={link.expires_at} onDone={() => setLink(null)} />}
           </>
+        ) : !person.last_active_at ? (
+          // Never signed in and no link pending: whether anyone controls the
+          // account is the server's call (it refuses a link for one that is),
+          // so the page does not claim a password exists.
+          <>
+            <SettingsRow label="Password" description="Never signed in, and no setup link is pending.">
+              <Button size="sm" variant="outline" disabled={busy === `l:${person.id}`}
+                onClick={async () => setLink(await actions.issueLink(person.id, person.email))}>Issue setup link</Button>
+            </SettingsRow>
+            {link && <SetupLinkBox url={link.url} expiresAt={link.expires_at} onDone={() => setLink(null)} />}
+          </>
         ) : (
           <SettingsRow label="Password" description="Chosen by the person. Admins never see or set it.">
             <span className="text-[11px] text-muted-foreground">{person.email_verified ? "Email verified" : "Email not verified"}</span>

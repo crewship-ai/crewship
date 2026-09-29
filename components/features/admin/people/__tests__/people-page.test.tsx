@@ -130,6 +130,26 @@ describe("a person's workspace access", () => {
   })
 })
 
+describe("a person who never signed in", () => {
+  it("does not claim they chose a password, and offers a setup link", async () => {
+    const never = { ...USERS[2], id: "u-ghost", full_name: "Ghost", email: "ghost@ex.com", setup_link_expires_at: null, last_active_at: null, memberships: [m("ws-a", "Acme", "MEMBER")] }
+    h.apiFetch.mockImplementation(async (u: string, init?: RequestInit) => {
+      const url = String(u)
+      if (url.startsWith("/api/v1/admin/users?")) return res([...USERS, never])
+      if (url.startsWith("/api/v1/admin/workspaces?")) return res(WORKSPACES)
+      if (url.includes("/sessions")) return res({ sessions: [], cli_tokens: [] })
+      return res({ setup_url: "https://x/reset-password?token=zz", expires_at: FUTURE }, init?.method === "POST" ? 200 : 200)
+    })
+    render(<PeoplePage />)
+    await openPerson("Ghost")
+    const signIn = screen.getByRole("region", { name: "Sign-in" })
+    expect(signIn).not.toHaveTextContent("Chosen by the person")
+    expect(signIn).toHaveTextContent("Never signed in")
+    fireEvent.click(within(signIn).getByRole("button", { name: "Issue setup link" }))
+    await waitFor(() => expect(calls("POST", "/api/v1/admin/instance/people/u-ghost/setup-link")).toHaveLength(1))
+  })
+})
+
 describe("suspending", () => {
   it("asks in place, then suspends", async () => {
     render(<PeoplePage />)
