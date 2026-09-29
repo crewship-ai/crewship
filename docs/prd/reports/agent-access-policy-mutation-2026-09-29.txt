@@ -1,0 +1,7 @@
+Go source overlay removes only operator authorization from access.Store.Policy. Working source unchanged. Expected exit 1, unauthorized h1 read is detected:
+
+--- FAIL: TestPolicySnapshotRequiresCurrentTrustedAdmin (1.92s)
+    policy_test.go:19: h1 read policy: <nil>
+FAIL
+FAIL	github.com/crewship-ai/crewship/internal/access	1.925s
+FAIL

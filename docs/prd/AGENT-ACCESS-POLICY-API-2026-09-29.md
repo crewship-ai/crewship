@@ -8,7 +8,10 @@ denied; the policy does not bypass roles, token scopes or conversation audience.
 Only a **current trusted OWNER/ADMIN** of the target workspace may read or replace
 these policies. Scoped CLI tokens additionally require `workspace:admin` (or its
 wildcard). Restricted administrators cannot administer policy. OWNER/ADMIN members
-cannot be changed to restricted mode by this endpoint.
+cannot be changed to restricted mode by this endpoint. The current global
+restricted-user boundary also applies to users with mixed trusted/restricted
+memberships: adding a restricted membership closes unintegrated routes across
+their session, including administration of another workspace.
 
 Routes:
 
@@ -43,7 +46,8 @@ or null rights are rejected, as are unknown body fields. `trusted` requires an
 empty rights array and restores ordinary workspace access; it is not a narrower
 client setting. The actor always comes from authentication, not JSON.
 
-Every accepted replacement increments the membership revision. A stale revision
+Every accepted replacement advances the membership revision. Treat it as an
+opaque version: grant/role triggers can advance it by more than one. A stale revision
 returns 409 and the CLI neither refreshes it silently nor retries the update.
 Removing/re-adding a member changes its membership ID; an old policy must not be
 reused for the new membership. Membership, grants and administration authority

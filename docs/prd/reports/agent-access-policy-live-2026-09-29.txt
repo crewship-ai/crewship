@@ -1,0 +1,13 @@
+Development 1, source 976dacddc6abf4bb4b07b0c8d5bb9b07e0afd374 (clean)
+Build 2026-09-29T14:28:25Z; actual /proc/2881546/exe version verified.
+Web export matches source; PID environ UID 1000, mode 0400.
+/api/health, /healthz, /readyz: HTTP 200.
+
+CLI policies: exact grant, private audience, unintegrated routes denied, stale replacement 409: PASS
+CLI deny-all revoked H1 chat/history; H2 still reads; old policy cannot restore grants: PASS
+Owned workspace removed; synthetic users have no workspace access.
+
+First harness invocation incorrectly required revision +1; database grant/mode triggers legitimately advance it further. After changing that harness assertion to monotonic advancement, the complete run passed without application changes. Each owned workspace was removed, sessions signed out; synthetic users retain no memberships.
+
+Reproduction on dev1: /tmp/crewship-1-policy-live.py
+No real model or new agent container was invoked.
