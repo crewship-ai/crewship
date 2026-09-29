@@ -1,11 +1,11 @@
-import { LayoutDashboard, Users, Server, Shield, ShieldCheck, Database, History, ListTodo, Bell, Gauge } from "lucide-react"
+import { LayoutDashboard, Users, Server, Shield, Database, History, Bell, Gauge } from "lucide-react"
 import type { TabKey } from "./types"
 
 interface NavSection {
   label: string
   /** An item with an href is a nested page of its own (DrillPage), opened
    *  with a chevron like Settings › Crew links; the rest are sections here. */
-  items: { key: TabKey | "people"; label: string; icon: React.ElementType; href?: string }[]
+  items: { key: TabKey | "people" | "security-page"; label: string; icon: React.ElementType; href?: string }[]
 }
 
 export const sections: NavSection[] = [
@@ -32,9 +32,7 @@ export const sections: NavSection[] = [
   {
     label: "Security",
     items: [
-      { key: "posture", label: "Posture", icon: ShieldCheck },
-      { key: "security", label: "Keeper", icon: Shield },
-      { key: "reviews", label: "Keeper reviews", icon: ListTodo },
+      { key: "security-page", label: "Security", icon: Shield, href: "/admin/security" },
     ],
   },
   {
@@ -52,6 +50,9 @@ export const ALL_TABS: TabKey[] = sections.flatMap((s) => s.items.filter((i) => 
 const MOVED: Record<string, string> = {
   users: "/admin/people",
   workspaces: "/admin/people?view=workspaces",
+  posture: "/admin/security",
+  security: "/admin/security",
+  reviews: "/admin/security?section=activity",
 }
 
 /** Where an old ?tab= link now lives, or null when it is still a section here. */

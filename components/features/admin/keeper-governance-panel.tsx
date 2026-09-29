@@ -318,7 +318,9 @@ export interface KeeperGovernancePanelProps {
    * one error path for a single governance row — two components would each load
    * it and could disagree about what it says.
    */
-  section?: "judge" | "policy"
+  /** One card at a time for Admin › Security, which gives each its own
+   *  section: "watchdog", "alerts" (findings & routing), "leases". */
+  section?: "judge" | "policy" | "watchdog" | "alerts" | "leases"
 }
 
 /** Shape shared by every card: commit a partial governance update. */
@@ -462,6 +464,10 @@ export const KeeperGovernancePanel = React.memo(function KeeperGovernancePanel({
   if (section === "judge") {
     return <GovernanceModelCard gov={gov} credentials={govCredentials} canEdit={canEdit} put={put} workspaceId={workspaceId} />
   }
+
+  if (section === "watchdog") return <WatchdogCard gov={gov} serverEnabled={serverEnabled} canEdit={canEdit} put={put} />
+  if (section === "alerts") return <FindingsRoutingCard gov={gov} admins={admins} canEdit={canEdit} put={put} workspaceId={workspaceId} />
+  if (section === "leases") return <CredentialLeasesCard gov={gov} canEdit={canEdit} put={put} />
 
   return (
     <>

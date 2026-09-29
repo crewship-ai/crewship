@@ -8,7 +8,7 @@ tag: Experimental
 
 # Keeper Reviews — admin panel workflow
 
-The **Admin → Keeper reviews** panel surfaces every Keeper Phase 2 decision the platform has logged. Four sub-tabs correspond to the four F4 evaluators (PRD §6 F4.1–4.4); each row is one evaluator decision with the full LLM prompt + response retained for forensic inspection.
+**Admin → Security → Activity** surfaces every Keeper Phase 2 decision the platform has logged, next to the credential requests. The four F4 evaluators (PRD §6 F4.1–4.4) are four entries in its side panel; each row is one evaluator decision with the full LLM prompt + response retained for forensic inspection.
 
 <Note>
 The panel is a **read-only audit log**, not an action queue — there is no approve/reject button in the panel itself. Operator actions (confirming a lifecycle transition, approving a lesson) happen in the **inbox**, which is where the evaluators route their blocking rows. See "Operator action" in the decision tables below.
@@ -42,7 +42,7 @@ Backend reads from one source of truth — `GET /api/v1/admin/keeper/requests?li
 <Note>
   The cadences below are when each evaluator fires **on its own**. Any of the
   four can also be run on demand — `crewship keeper review run <slot>`, or the
-  **run now** link on the evaluator's row in Admin → Keeper. A manual run lands
+  **run now** link on the evaluator's row in Admin → Security → Background checks. A manual run lands
   in this panel like any other: same evaluator, same `keeper_requests` row, same
   escalation. See [Running a review on demand](/guides/keeper#running-a-review-on-demand).
 </Note>
@@ -157,14 +157,14 @@ After overnight cron runs, the panel typically has 10–50 pending rows across t
 
 ### "Why did Anna's skill get archived overnight?"
 
-1. Open Admin → Keeper Reviews → Skill Review
+1. Open Admin → Security → Activity → Skill review
 2. Filter by `agent_name=Anna` (browser Cmd+F — the panel doesn't have search yet; tracked as a UI nice-to-have)
 3. Click the matching row
 4. Read `ollama_prompt` to see the stats the evaluator received
 5. Read `ollama_raw_response` to see the LLM's full rationale
 6. If the decision was wrong, revert by setting `lifecycle_state` back via SQL (no UI override yet — tracked as a UI follow-up) and either:
    - Update the skill's failure-tolerance threshold in the evaluator prompt template (eng work)
-   - Pin the skill in the Keeper reviews panel so future reviews can't archive it
+   - Pin the skill so future reviews cannot archive it (no UI for this yet)
 
 ### "I think the behavior monitor is too noisy"
 

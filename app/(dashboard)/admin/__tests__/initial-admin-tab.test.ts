@@ -7,8 +7,7 @@ import { initialAdminTab, movedAdminTabHref } from "../navigation"
 // Keeper". Settings has had `?tab=` since its rewrite; this is the same contract.
 describe("initialAdminTab", () => {
   it("returns the section from a valid ?tab= param", () => {
-    expect(initialAdminTab("?tab=security")).toBe("security")
-    expect(initialAdminTab("?tab=reviews")).toBe("reviews")
+    expect(initialAdminTab("?tab=backups")).toBe("backups")
     expect(initialAdminTab("?tab=ratelimits")).toBe("ratelimits")
   })
 
@@ -24,12 +23,6 @@ describe("initialAdminTab", () => {
     expect(initialAdminTab("?tab=")).toBe("overview")
   })
 
-  // The two the user asked for by name, and the two most likely to be linked
-  // from a ticket or a runbook.
-  it("resolves the Keeper sections, which are the ones people link to", () => {
-    expect(initialAdminTab("?tab=security")).toBe("security")
-    expect(initialAdminTab("?tab=reviews")).toBe("reviews")
-  })
 })
 
 // Workspaces and Users became one nested page, Admin › People & workspaces.
@@ -38,6 +31,11 @@ describe("movedAdminTabHref", () => {
   it("sends the old Workspaces and Users tabs to the People page", () => {
     expect(movedAdminTabHref("?tab=users")).toBe("/admin/people")
     expect(movedAdminTabHref("?tab=workspaces")).toBe("/admin/people?view=workspaces")
+  })
+  it("sends Posture, Keeper and Keeper reviews to the Security page", () => {
+    expect(movedAdminTabHref("?tab=posture")).toBe("/admin/security")
+    expect(movedAdminTabHref("?tab=security")).toBe("/admin/security")
+    expect(movedAdminTabHref("?tab=reviews")).toBe("/admin/security?section=activity")
   })
   it("leaves every other section where it is", () => {
     expect(movedAdminTabHref("?tab=ratelimits")).toBeNull()

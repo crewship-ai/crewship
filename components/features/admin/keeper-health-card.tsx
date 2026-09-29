@@ -49,15 +49,21 @@ interface KeeperHealth {
   oldest?: string
 }
 
-export function KeeperHealthCard() {
+/**
+ * `workspaceId`: the route sits behind the admin floor, which resolves a
+ * workspace first. Asked without one it answered 400, which this card reads as
+ * "say nothing" — so it never appeared. It waits until the workspace is known.
+ */
+export function KeeperHealthCard({ workspaceId }: { workspaceId: string | null | undefined }) {
   const [health, setHealth] = useState<KeeperHealth | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
+    if (!workspaceId) return
     let live = true
     const load = async () => {
       try {
-        const res = await apiFetch("/api/v1/admin/keeper/health")
+        const res = await apiFetch(`/api/v1/admin/keeper/health?workspace_id=${encodeURIComponent(workspaceId)}`)
         if (!res.ok) {
           // A server without the endpoint degrades to saying nothing, not to
           // claiming health. Silence and "all clear" must not look the same.
@@ -72,7 +78,7 @@ export function KeeperHealthCard() {
     }
     void load()
     return () => { live = false }
-  }, [])
+  }, [workspaceId])
 
   if (error) return null
   if (!health) return null

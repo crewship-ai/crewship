@@ -19,16 +19,12 @@ import {
 } from "@/components/layout/sidebar-kit"
 
 import { sections, initialAdminTab, movedAdminTabHref, ALL_TABS } from "./navigation"
-import type { TabKey, Stats, KeeperStatus, KeeperLogEntry } from "./types"
-import { useAdminWebSocket } from "./hooks/use-admin-websocket"
+import type { TabKey, Stats, KeeperStatus } from "./types"
 import { useAdminOverview } from "./hooks/use-admin-overview"
 import { OverviewTab } from "./tabs/overview-tab"
 import { RuntimeTab } from "./tabs/runtime-tab"
 import type { RuntimeEntry } from "./tabs/runtime-tab"
-import { KeeperTab } from "./tabs/keeper-tab"
 import { BackupsTab } from "./tabs/backups-tab"
-import { KeeperQueuePanel } from "@/components/features/admin/keeper-queue-panel"
-import { SecurityPostureCard } from "@/components/features/admin/security-posture-card"
 import { MemoryConfigCard } from "@/components/features/admin/memory-config-card"
 import { NotificationsTab } from "./tabs/notifications-tab"
 import { RateLimitsTab } from "./tabs/rate-limits-tab"
@@ -52,7 +48,7 @@ import { RateLimitsTab } from "./tabs/rate-limits-tab"
  * No heading repeats the section inside the page: the sub-bar already names
  * it, exactly as Settings does, and each card says what it is for.
  */
-const SETTINGS_TABS: ReadonlySet<TabKey> = new Set<TabKey>(["providers", "notifications", "ratelimits", "posture", "retention", "backups"])
+const SETTINGS_TABS: ReadonlySet<TabKey> = new Set<TabKey>(["providers", "notifications", "ratelimits", "retention", "backups"])
 
 export default function AdminPage() {
   const router = useRouter()
@@ -110,14 +106,6 @@ export default function AdminPage() {
   const [runtimeChecking, setRuntimeChecking] = useState(false)
 
   const [keeperStatus, setKeeperStatus] = useState<KeeperStatus | null>(null)
-  const [keeperLog, setKeeperLog] = useState<KeeperLogEntry[]>([])
-  const [keeperLoading, setKeeperLoading] = useState(false)
-  const [selectedKeeperEntry, setSelectedKeeperEntry] = useState<KeeperLogEntry | null>(null)
-
-  const { keeperLiveEvents, keeperWsStatus } = useAdminWebSocket({
-    enabled: isAdmin && tab === "security",
-    workspaceId,
-  })
 
   const checkRuntime = useCallback(async () => {
     setRuntimeChecking(true)
@@ -199,20 +187,14 @@ export default function AdminPage() {
     void fetchData()
   }, [fetchData])
 
+  // The Overview's one-line keeper verdict. Everything else about the Keeper
+  // lives on its own page now (/admin/security).
   const fetchKeeperData = useCallback(async () => {
-    setKeeperLoading(true)
     try {
       const statusRes = await apiFetch(`/api/v1/system/keeper?workspace_id=${workspaceId}`)
       if (statusRes.ok) setKeeperStatus(await statusRes.json())
-
-      if (workspaceId) {
-        const logRes = await apiFetch(`/api/v1/admin/keeper/requests?workspace_id=${workspaceId}&limit=50`)
-        if (logRes.ok) setKeeperLog(await logRes.json())
-      }
     } catch {
-      // silently fail
-    } finally {
-      setKeeperLoading(false)
+      // The Overview line then reads "unknown", which is what it is.
     }
   }, [workspaceId])
 
@@ -221,10 +203,7 @@ export default function AdminPage() {
   }, [isAdmin, checkRuntime])
 
   useEffect(() => {
-    // Overview shows a one-line keeper verdict, so it needs the same status
-    // the Keeper tab does — otherwise the line reads "unknown" until someone
-    // happens to visit that tab.
-    if (isAdmin && (tab === "security" || tab === "overview")) fetchKeeperData()
+    if (isAdmin && tab === "overview") fetchKeeperData()
   }, [isAdmin, tab, fetchKeeperData])
 
   if (wsLoading || !isAdmin) {
@@ -279,9 +258,6 @@ export default function AdminPage() {
       )
     }
 
-    if (tab === "posture") {
-      return <SecurityPostureCard workspaceId={workspaceId} />
-    }
 
     if (tab === "retention") {
       return <MemoryConfigCard workspaceId={workspaceId} />
@@ -299,26 +275,8 @@ export default function AdminPage() {
       return <RateLimitsTab workspaceId={workspaceId} />
     }
 
-    if (tab === "reviews") {
-      return <KeeperQueuePanel workspaceId={workspaceId} />
-    }
 
 
-    if (tab === "security") {
-      return (
-        <KeeperTab
-          workspaceId={workspaceId}
-          keeperLoading={keeperLoading}
-          keeperStatus={keeperStatus}
-          keeperLog={keeperLog}
-          keeperLiveEvents={keeperLiveEvents}
-          keeperWsStatus={keeperWsStatus}
-          selectedKeeperEntry={selectedKeeperEntry}
-          onSelectKeeperEntry={setSelectedKeeperEntry}
-          onRefresh={fetchKeeperData}
-        />
-      )
-    }
 
     return null
   }

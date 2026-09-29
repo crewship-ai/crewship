@@ -34,7 +34,7 @@ afterEach(() => cleanup())
 describe("keeper health readout", () => {
   it("counts travel with the rate", async () => {
     serve(base)
-    render(<KeeperHealthCard />)
+    render(<KeeperHealthCard workspaceId="ws-1" />)
     // A percentage alone cannot be judged: 0% over four samples is noise, over
     // four hundred it is an outage.
     await waitFor(() =>
@@ -46,7 +46,7 @@ describe("keeper health readout", () => {
   // denies everything is broken.
   it("counts escalate as progress, not as refusal", async () => {
     serve({ ...base, allow: 0, deny: 0, escalate: 100, progressed_rate: 1 })
-    render(<KeeperHealthCard />)
+    render(<KeeperHealthCard workspaceId="ws-1" />)
     await waitFor(() =>
       expect(screen.getByTestId("keeper-health").textContent).toMatch(/100% of 100/))
   })
@@ -55,7 +55,7 @@ describe("keeper health readout", () => {
   // the judge refused everything when it decided nothing.
   it("says the window is empty rather than reporting 0%", async () => {
     serve({ ...base, samples: 0, allow: 0, deny: 0, escalate: 0, progressed_rate: 0 })
-    render(<KeeperHealthCard />)
+    render(<KeeperHealthCard workspaceId="ws-1" />)
     await waitFor(() => {
       const t = screen.getByTestId("keeper-health").textContent ?? ""
       expect(t).toMatch(/window is empty/i)
@@ -67,7 +67,7 @@ describe("keeper health readout", () => {
   // rather than letting the reader draw a conclusion the server refused to.
   it("marks a sample count too small to conclude from", async () => {
     serve({ ...base, samples: 5, min_samples: 20 })
-    render(<KeeperHealthCard />)
+    render(<KeeperHealthCard workspaceId="ws-1" />)
     await waitFor(() =>
       expect(screen.getByTestId("keeper-health").textContent).toMatch(/noise, not a signal/i))
   })
@@ -76,14 +76,28 @@ describe("keeper health readout", () => {
   // "Nothing rendered" and "all clear" must never look the same.
   it("renders nothing against a server that has no readout", async () => {
     serve({}, false, 404)
-    const { container } = render(<KeeperHealthCard />)
+    const { container } = render(<KeeperHealthCard workspaceId="ws-1" />)
     await waitFor(() => expect(container.textContent).toBe(""))
   })
 
   it("surfaces the server's alarm verbatim", async () => {
     serve({ ...base, progressed_rate: 0.1, alarm: { kind: "keeper.denying_everything", summary: "10% progressed over 100 decisions" } })
-    render(<KeeperHealthCard />)
+    render(<KeeperHealthCard workspaceId="ws-1" />)
     await waitFor(() =>
       expect(screen.getByTestId("keeper-health").textContent).toMatch(/denying_everything/))
+  })
+})
+
+// The route is behind the admin floor, which resolves a workspace first: asked
+// without one it answers 400, and the card read that as "nothing to show" and
+// hid itself — the judge's record never appeared on the Keeper page.
+describe("KeeperHealthCard scope", () => {
+  it("asks within the workspace, and not before it is known", async () => {
+    serve(base)
+    const spy = apiFetch
+    const { rerender } = render(<KeeperHealthCard workspaceId={null} />)
+    expect(spy).not.toHaveBeenCalled()
+    rerender(<KeeperHealthCard workspaceId="ws-1" />)
+    await waitFor(() => expect(spy).toHaveBeenCalledWith("/api/v1/admin/keeper/health?workspace_id=ws-1"))
   })
 })

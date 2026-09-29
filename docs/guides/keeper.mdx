@@ -386,19 +386,34 @@ quotes still count.
 
 ## The admin page, in the order it asks
 
-Deep-linkable, like Settings: **`/admin?tab=security`** is the Keeper page and
-**`/admin?tab=reviews`** is the decision queue. Paste either into a ticket or a
-runbook and it lands where you meant.
+Everything about Keeper lives on one page, **Admin → Security**
+(`/admin/security`), which also shows the server's security posture. Its side
+panel has three groups:
 
+- **Overview**: whether Keeper and its judge work, what needs attention (with a
+  link to fix each item), the server's deploy-time setup, the judge's recent
+  record and the last few decisions.
+- **Activity**: every credential request and every Phase-2 review in one list,
+  narrowed by kind and by decision. A row opens its intent, reason, command and
+  the judge's prompt and answer, with known secret formats redacted.
+- **Settings**: one section per subject, each labelled **Instance** (applies to
+  every workspace) or **Workspace** (this one only).
 
-Four cards, each answering one question, top to bottom:
+Every section is deep-linkable: `/admin/security?section=judge`, `?section=activity&stream=behavior`, and so on. Paste
+one into a ticket or a runbook and it lands where you meant. The old
+`/admin?tab=security`, `?tab=reviews` and `?tab=posture` links still land here.
 
-| Card | The question |
-|------|--------------|
-| **Credential access judge** | What decides, on this whole instance — model server, model, time budget, and the on/off switch. |
-| **Judge for this workspace** | …unless this workspace needs its own. This is where a **hosted** judge lives: Anthropic or an OpenAI-compatible endpoint, on an API key picked **by name** from your stored credentials. |
-| **Background checks** | The five scheduled evaluators. Collapsed to one line when they all run the same model, because on a stock instance they do. |
-| **Watch what agents do** | The behaviour monitor: off by default, and it asks nothing else until you turn it on. |
+| Section | Scope | The question |
+|------|------|--------------|
+| **Credential judge** | Instance | What decides: model server, model, time budget, and the on/off switch. |
+| **Decision rules** | Instance | What the judge may use when it decides, and when a person confirms. |
+| **This workspace** | Workspace | …unless this workspace needs its own judge. This is where a **hosted** judge lives: Anthropic or an OpenAI-compatible endpoint, on an API key picked **by name** from your stored credentials. |
+| **Background checks** | Instance | The scheduled evaluators and the models they run on. |
+| **Watchdog** | Workspace | The behaviour monitor: off by default, and it asks nothing else until you turn it on. |
+| **Alerts & approvals** | Workspace | Who a finding reaches, and whether an escalation needs a second approver. |
+| **Credential leases** | Workspace | Whether an approval lasts or expires. |
+
+Changing an **Instance** section needs an instance administrator.
 
 The split between the first two is real and not cosmetic: the first is the
 instance default and accepts a **native Ollama** endpoint only, the second
@@ -584,7 +599,7 @@ HTTP at `GET /api/v1/admin/keeper/health` (ADMIN+).
 
 ### Where to set this in the product
 
-**Admin → Keeper → Judge profile**, directly beneath the card that names the
+**Admin → Security → Decision rules**, directly beneath the section that names the
 model. That card answers *what decides*; the profile answers *under what rules*.
 
 Every row shows where its value came from — a built-in default, the preset you
@@ -754,7 +769,7 @@ key is allowed to live.
 
 | | **Instance judge** | **Workspace governance model** |
 |---|---|---|
-| Where | Admin → Keeper → **Credential access judge**, or `crewship keeper config` | Admin → Keeper → **Judge for this workspace**, or `crewship keeper model` |
+| Where | Admin → Security → **Credential judge**, or `crewship keeper config` | Admin → Security → **This workspace**, or `crewship keeper model` |
 | Applies to | every workspace on this server, as the default | one workspace, overriding the instance judge |
 | Providers | native Ollama **only** | `ollama`, `anthropic`, `openai_compat` (see the note below) |
 | Secrets | none — the row holds no credential reference | an `ENDPOINT_URL` or `API_KEY` credential from that workspace's vault |
@@ -950,8 +965,8 @@ and why it is a toggle rather than a constant.
 
 ### The one-minute setup
 
-1. **Point it at Ollama.** Enter the endpoint in Admin → Keeper → Credential
-   access judge. The models that endpoint serves appear under the model field as
+1. **Point it at Ollama.** Enter the endpoint in Admin → Security → Credential
+   judge. The models that endpoint serves appear under the model field as
    you type — click one instead of typing it.
 2. **Press Test.** Three stages, each naming its own fix:
 
@@ -1149,7 +1164,7 @@ exits non-zero when the finding reached nobody.
 Beyond the credential gatekeeper, Keeper runs a **behavioral watchdog** — a
 behavior monitor that samples agent tool calls and reviews them for
 anti-patterns (tight loops, scope creep, destructive sequences, credential
-probing). Workspace OWNERs/ADMINs control it in-app from **Admin → Keeper**, no
+probing). Workspace OWNERs/ADMINs control it in-app from **Admin → Security → Watchdog**, no
 server restart needed:
 
 <Warning>
@@ -1217,8 +1232,8 @@ Changes apply to the **next tool call**. The cadence is read from the workspace
 row on each observation, not captured when the server booted, so there is no
 restart and no per-workspace bleed on a shared instance.
 
-The **Require a second approver** switch sits in the same **Admin → Keeper →
-Watchdog governance** panel as the settings above and writes through the same
+The **Require a second approver** switch sits in **Admin → Security → Alerts &
+approvals**, next to the settings above, and writes through the same
 `PUT /api/v1/admin/keeper/governance` endpoint. Enabling it on a workspace with
 fewer than two eligible approvers (OWNER/ADMIN/MANAGER) is allowed but surfaces
 a non-blocking warning — the gate would otherwise deadlock. This is the in-app
@@ -1257,7 +1272,7 @@ answer to the sidecar's `/escalate` looks like.
 Every surface that offers you a resolve tells you which of the two applies, so
 you find out before you are refused rather than from the `403`:
 
-- **Admin → Keeper**, under the switch, while it is off: names the tier that
+- **Admin → Security → Credential judge**, under the switch, while it is off: names the tier that
   still requires a second approver.
 - **The escalation row** in the crew's escalations panel: says whether the
   workspace setting, the tier, or both apply to *that* request.
@@ -1407,8 +1422,8 @@ crewship keeper watch preset add credentials
 crewship keeper watch preset remove egress
 ```
 
-In the dashboard the same controls live in **Admin → Keeper → Watchdog
-governance**: a checklist of presets and a text area for the free-form rules.
+In the dashboard the same controls live in **Admin → Security →
+Watchdog**: a checklist of presets and a text area for the free-form rules.
 
 <Note>
   The watch spec is admin-authored config, gated by OWNER/ADMIN and
@@ -1520,8 +1535,8 @@ token. Those five used to be settable only through `CREWSHIP_AUX_*` at boot,
 which made the one Keeper spend decision an operator could see on the admin page
 the one they could not make.
 
-They are settable at runtime now, per slot, from **Admin → Keeper → Judge
-models** or the CLI. OWNER/ADMIN only.
+They are settable at runtime now, per slot, from **Admin → Security → Background
+checks** or the CLI. OWNER/ADMIN only.
 
 | Slot | What it evaluates |
 |------|-------------------|
