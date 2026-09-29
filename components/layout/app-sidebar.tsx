@@ -66,7 +66,7 @@ export function AppSidebar() {
           return (
             <SidebarGroup key={section.label} className="p-0!" aria-label={section.label}>
               <RailGroupHead label={section.label} />
-              <SidebarMenu className="gap-0.5">
+              <SidebarMenu className="gap-1">
                 {items.map((item) => {
                   const isActive = pathname === item.href || (item.href !== "/" && pathname.startsWith(item.href))
                   // FUTURE is announced, not built — the row reads as a

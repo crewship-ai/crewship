@@ -986,13 +986,13 @@ body {
   }
 
   /* The app rail (components/layout/rail.tsx). One grid in both states: a
-     2.25rem tile column at a fixed inset — half the difference between the
+     2rem tile column at a fixed inset — half the difference between the
      rail and the tile — and a label that only fades. The panel widening is
      the whole animation. */
   .rail-inset {
     /* !important: the collapsed sidebar's own group-data padding is a
        utility and would otherwise move the column 5.5px on open. */
-    padding-inline: calc((var(--sidebar-width-icon) - 2.25rem) / 2) !important;
+    padding-inline: calc((var(--sidebar-width-icon) - 2rem) / 2) !important;
   }
   .rail-tile {
     --ic: var(--primary);
@@ -1000,15 +1000,15 @@ body {
     display: inline-grid;
     place-items: center;
     flex-shrink: 0;
-    width: 2.25rem;
-    height: 2.25rem;
-    border-radius: 0.7rem;
+    width: 2rem;
+    height: 2rem;
+    border-radius: 0.6rem;
     border: 1px solid transparent;
     color: var(--muted-foreground);
     transition: border-color 300ms var(--ease-harbor), background-color 300ms var(--ease-harbor), color 200ms var(--ease-harbor);
   }
   /* Only the glyph moves on hover; the frame and the badge stay put. */
-  .rail-tile > svg { width: 1.05rem; height: 1.05rem; transition: transform 300ms var(--ease-spring); }
+  .rail-tile > svg { width: 0.95rem; height: 0.95rem; transition: transform 300ms var(--ease-spring); }
   .rail-tile[data-active="true"],
   :hover > .rail-tile {
     color: color-mix(in oklch, var(--ic) var(--tile-text-mix), var(--foreground));
@@ -1025,7 +1025,7 @@ body {
   .rail-badge {
     position: absolute;
     top: -0.2rem;
-    left: 1.45rem;
+    left: 1.2rem;
     min-width: 1rem;
     padding: 0 0.25rem;
     border-radius: 999px;
@@ -1059,7 +1059,7 @@ body {
     margin-top: 0.5rem;
     white-space: nowrap;
   }
-  .rail-group-rule { display: flex; justify-content: center; width: 2.25rem; flex-shrink: 0; }
+  .rail-group-rule { display: flex; justify-content: center; width: 2rem; flex-shrink: 0; }
   .rail-group-rule > i { display: block; width: 1rem; height: 1px; background: var(--border); }
   .rail-group-name {
     font-family: var(--font-mono);

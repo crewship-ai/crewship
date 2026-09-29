@@ -7,7 +7,7 @@ import { accentFor } from "@/lib/concept-accents"
 
 /**
  * The app rail's one grid. Every row — workspace, destinations, the pin
- * toggle, the build — is a 2.25rem tile column and a label, and the tile
+ * toggle, the build — is a 2rem tile column in a 2.25rem row and a label, and the tile
  * column sits at the same x in the rail and in the pinned panel. Opening the
  * panel therefore only widens it: nothing moves, nothing resizes, the labels
  * fade in a beat later (globals.css `.rail-*`). It used to switch on
@@ -25,7 +25,7 @@ import { accentFor } from "@/lib/concept-accents"
  *  hint) pushed the tile left out of the column. Unclipped, so the Inbox
  *  count can overhang the tile's corner; labels are width-0 or faded there. */
 export const RAIL_ROW =
-  "justify-start! group-data-[collapsible=icon]:justify-start! overflow-visible! group-data-[collapsible=icon]:overflow-visible! h-[2.25rem]! p-0! gap-3! rounded-[0.7rem]! group-data-[collapsible=icon]:w-[2.25rem]! group-data-[collapsible=icon]:h-[2.25rem]! group-data-[collapsible=icon]:p-0! group-data-[collapsible=icon]:gap-3! group-data-[collapsible=icon]:bg-transparent! group-data-[collapsible=icon]:hover:bg-transparent!"
+  "justify-start! group-data-[collapsible=icon]:justify-start! overflow-visible! group-data-[collapsible=icon]:overflow-visible! h-[2.25rem]! p-0! gap-3! rounded-[0.7rem]! group-data-[collapsible=icon]:w-[2rem]! group-data-[collapsible=icon]:h-[2.25rem]! group-data-[collapsible=icon]:p-0! group-data-[collapsible=icon]:gap-3! group-data-[collapsible=icon]:bg-transparent! group-data-[collapsible=icon]:hover:bg-transparent!"
 
 /** The concept a destination stands for, so its tile wears that colour. */
 export function conceptOf(href: string): string {
