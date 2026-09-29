@@ -2,6 +2,8 @@ import { describe, it, expect } from "vitest"
 import { readFileSync } from "node:fs"
 import path from "node:path"
 
+import { ACCENTS, DEFAULT_ACCENT, accentBlock, type AccentId } from "@/lib/theme/accents"
+
 // Guards the WCAG AA (4.5:1) contrast of the dark-theme brand tokens in
 // app/globals.css. The app renders dark-only (<html className="dark">),
 // so these pairs are exactly what axe's color-contrast rule measures in
@@ -12,6 +14,7 @@ import path from "node:path"
 // which forced the color-contrast axe rule to stay disabled.
 
 const css = readFileSync(path.resolve(__dirname, "../../app/globals.css"), "utf8")
+const accentsCss = readFileSync(path.resolve(__dirname, "../../app/styles/accents.css"), "utf8")
 
 // ── minimal color math (sRGB + OKLCH → relative luminance) ──────────────
 
@@ -79,8 +82,13 @@ function blend(
 // ── token extraction, per theme block ─────────────────────────────────────
 //
 // Harbor ships two palettes: :root (light) and .dark (the default). Each is a
-// block in globals.css ending where the next one starts; a
-// token missing from a block is a test failure, not a silent fallback.
+// block in globals.css ending where the next one starts; a token missing from
+// a block is a test failure, not a silent fallback.
+//
+// Brand-coloured tokens (--primary, --ring, links, blue chips …) hold
+// `var(--brand-*)`; the colour itself lives in app/styles/accents.css, one
+// block per accent and mode. Every check below runs for every accent in
+// ACCENTS, so a new accent cannot ship below AA.
 
 const THEMES = {
   day: [":root {\n  /* ── Light surfaces", "\n.dark {"],
@@ -97,14 +105,19 @@ function block(theme: Theme): string {
   return css.slice(start, end)
 }
 
-function token(theme: Theme, name: string): string {
+function token(theme: Theme, name: string, accent: AccentId = DEFAULT_ACCENT): string {
   const m = block(theme).match(new RegExp(`--${name}:\\s*([^;]+);`))
   expect(m, `--${name} present in the ${theme} theme`).toBeTruthy()
-  return (m as RegExpMatchArray)[1].trim()
+  const value = (m as RegExpMatchArray)[1].trim()
+  const ref = value.match(/^var\(--(brand[a-z-]*)\)$/)
+  if (!ref) return value
+  const brand = accentBlock(accentsCss, accent, theme === "night" ? "dark" : "light").get(ref[1])
+  expect(brand, `--${ref[1]} defined for accent ${accent} (${theme})`).toBeTruthy()
+  return brand as string
 }
 
-function tokenRgb(theme: Theme, name: string): [number, number, number] {
-  const value = token(theme, name)
+function tokenRgb(theme: Theme, name: string, accent?: AccentId): [number, number, number] {
+  const value = token(theme, name, accent)
   const hex = value.match(/^#([0-9a-fA-F]{6})$/)
   if (hex) return hexToRgb(value)
   const ok = value.match(/^oklch\(([\d.]+)\s+([\d.]+)\s+([\d.]+)\)$/)
@@ -113,90 +126,86 @@ function tokenRgb(theme: Theme, name: string): [number, number, number] {
   return oklchToRgb(Number(l), Number(c), Number(h))
 }
 
-const lum = (theme: Theme, name: string) => luminanceFromRgb(tokenRgb(theme, name))
 const WHITE = luminanceFromRgb([1, 1, 1])
+const ACCENT_IDS = ACCENTS.map((a) => a.id)
 
 // The dark theme carries the full axe-parity suite (the app is dark by default).
-describe.each(["night"] as const)("%s theme WCAG AA contrast (axe color-contrast parity)", (theme) => {
+describe.each(ACCENT_IDS)("accent %s — dark theme WCAG AA contrast (axe color-contrast parity)", (accent) => {
+  const theme = "night" as const
+  const lum = (name: string) => luminanceFromRgb(tokenRgb(theme, name, accent))
+
   it("primary-foreground on primary (bg-primary fills) ≥ 4.5:1", () => {
-    expect(contrast(lum(theme, "primary-foreground"), lum(theme, "primary"))).toBeGreaterThanOrEqual(4.5)
+    expect(contrast(lum("primary-foreground"), lum("primary"))).toBeGreaterThanOrEqual(4.5)
   })
 
   it("primary as text on background and card ≥ 4.5:1", () => {
-    const primary = lum(theme, "primary")
-    expect(contrast(primary, lum(theme, "background"))).toBeGreaterThanOrEqual(4.5)
-    expect(contrast(primary, lum(theme, "card"))).toBeGreaterThanOrEqual(4.5)
+    expect(contrast(lum("primary"), lum("background"))).toBeGreaterThanOrEqual(4.5)
+    expect(contrast(lum("primary"), lum("card"))).toBeGreaterThanOrEqual(4.5)
   })
 
-  it("primary-hover as chip text on bg-primary/15 and /20 over card ≥ 4.5:1", () => {
-    const hover = lum(theme, "primary-hover")
-    const primary = tokenRgb(theme, "primary")
-    const card = tokenRgb(theme, "card")
-    for (const alpha of [0.15, 0.2]) {
-      const tinted = luminanceFromRgb(blend(primary, alpha, card))
-      expect(contrast(hover, tinted), `text-primary-hover on bg-primary/${alpha * 100}`).toBeGreaterThanOrEqual(4.5)
+  it("primary-hover as chip text on bg-primary/15, /20 over card and /25 over both ≥ 4.5:1", () => {
+    const hover = lum("primary-hover")
+    const primary = tokenRgb(theme, "primary", accent)
+    for (const [alpha, surface] of [[0.15, "card"], [0.2, "card"], [0.25, "card"], [0.25, "background"]] as const) {
+      const tinted = luminanceFromRgb(blend(primary, alpha, tokenRgb(theme, surface, accent)))
+      expect(contrast(hover, tinted), `text-primary-hover on bg-primary/${alpha * 100} over ${surface}`).toBeGreaterThanOrEqual(4.5)
     }
-  })
-
-  // The dim metadata tier. Replaces text-muted-foreground/40–/70, which
-  // composited to 1.74–3.21:1 on the dark background — every one of
-  // those alpha variants failed AA for normal-size text.
-  it("muted-foreground-soft on background and card ≥ 4.5:1", () => {
-    const soft = lum(theme, "muted-foreground-soft")
-    expect(contrast(soft, lum(theme, "background"))).toBeGreaterThanOrEqual(4.5)
-    expect(contrast(soft, lum(theme, "card"))).toBeGreaterThanOrEqual(4.5)
   })
 
   it("primary-foreground on primary-hover ≥ 4.5:1", () => {
-    expect(contrast(lum(theme, "primary-foreground"), lum(theme, "primary-hover"))).toBeGreaterThanOrEqual(4.5)
-  })
-
-  // crew-policy-controls save button: hover tint capped at bg-primary/25
-  // (was /30 → 4.26:1 over card with text-primary-hover).
-  it("primary-hover as text on bg-primary/25 over card and background ≥ 4.5:1", () => {
-    const hover = lum(theme, "primary-hover")
-    const primary = tokenRgb(theme, "primary")
-    for (const surface of ["card", "background"] as const) {
-      const tinted = luminanceFromRgb(blend(primary, 0.25, tokenRgb(theme, surface)))
-      expect(contrast(hover, tinted), `text-primary-hover on bg-primary/25 over ${surface}`).toBeGreaterThanOrEqual(4.5)
-    }
+    expect(contrast(lum("primary-foreground"), lum("primary-hover"))).toBeGreaterThanOrEqual(4.5)
   })
 })
 
-// What both Harbor themes must hold.
-describe.each(["day", "night"] as const)("%s theme Harbor contrast", (theme) => {
+// What both Harbor themes must hold, for every accent.
+describe.each(ACCENT_IDS.flatMap((accent) => (["day", "night"] as const).map((theme) => [accent, theme] as const)))(
+  "accent %s — %s theme Harbor contrast",
+  (accent, theme) => {
+    const lum = (name: string) => luminanceFromRgb(tokenRgb(theme, name, accent))
+
+    it("white on primary-strong and primary-strong-hover (filled button) ≥ 4.5:1", () => {
+      expect(contrast(WHITE, lum("primary-strong"))).toBeGreaterThanOrEqual(4.5)
+      expect(contrast(WHITE, lum("primary-strong-hover"))).toBeGreaterThanOrEqual(4.5)
+    })
+
+    it("links (primary-hover) and primary text on background and card ≥ 4.5:1", () => {
+      for (const name of ["primary-hover", "primary"]) {
+        expect(contrast(lum(name), lum("background")), `${name} on background`).toBeGreaterThanOrEqual(4.5)
+        expect(contrast(lum(name), lum("card")), `${name} on card`).toBeGreaterThanOrEqual(4.5)
+      }
+    })
+
+    it("blue (brand) chip text on its fill ≥ 4.5:1", () => {
+      expect(contrast(lum("chip-info-fg"), lum("chip-info-bg"))).toBeGreaterThanOrEqual(4.5)
+    })
+  },
+)
+
+// Accent-independent tokens.
+describe.each(["day", "night"] as const)("%s theme neutral and status contrast", (theme) => {
+  const lum = (name: string) => luminanceFromRgb(tokenRgb(theme, name))
+
   it("muted-foreground on background and card ≥ 4.5:1", () => {
-    const muted = lum(theme, "muted-foreground")
-    expect(contrast(muted, lum(theme, "background"))).toBeGreaterThanOrEqual(4.5)
-    expect(contrast(muted, lum(theme, "card"))).toBeGreaterThanOrEqual(4.5)
+    expect(contrast(lum("muted-foreground"), lum("background"))).toBeGreaterThanOrEqual(4.5)
+    expect(contrast(lum("muted-foreground"), lum("card"))).toBeGreaterThanOrEqual(4.5)
   })
 
+  // The dim metadata tier. Replaces text-muted-foreground/40–/70, which
+  // composited to 1.74–3.21:1 on the dark background.
   it("muted-foreground-soft on card ≥ 4.5:1", () => {
-    expect(contrast(lum(theme, "muted-foreground-soft"), lum(theme, "card"))).toBeGreaterThanOrEqual(4.5)
+    expect(contrast(lum("muted-foreground-soft"), lum("card"))).toBeGreaterThanOrEqual(4.5)
   })
 
-  // The filled button: white label on primary-strong, at rest and on hover.
-  it("white on primary-strong and primary-strong-hover ≥ 4.5:1", () => {
-    expect(contrast(WHITE, lum(theme, "primary-strong"))).toBeGreaterThanOrEqual(4.5)
-    expect(contrast(WHITE, lum(theme, "primary-strong-hover"))).toBeGreaterThanOrEqual(4.5)
-  })
-
-  it("links (primary-hover) on background and card ≥ 4.5:1", () => {
-    const ink = lum(theme, "primary-hover")
-    expect(contrast(ink, lum(theme, "background"))).toBeGreaterThanOrEqual(4.5)
-    expect(contrast(ink, lum(theme, "card"))).toBeGreaterThanOrEqual(4.5)
-  })
-
-  it.each(["ok", "warn", "danger", "neutral", "info", "violet"])("chip %s text on its fill ≥ 4.5:1", (tone) => {
-    expect(contrast(lum(theme, `chip-${tone}-fg`), lum(theme, `chip-${tone}-bg`))).toBeGreaterThanOrEqual(4.5)
+  it.each(["ok", "warn", "danger", "neutral", "violet"])("chip %s text on its fill ≥ 4.5:1", (tone) => {
+    expect(contrast(lum(`chip-${tone}-fg`), lum(`chip-${tone}-bg`))).toBeGreaterThanOrEqual(4.5)
   })
 })
 
-// Day is the first light palette the app shows. The semantic tokens double as
+// Light is the first light palette the app shows. The semantic tokens double as
 // text colours (text-success, text-destructive …) and were tuned for a dark
 // ground, where lightness ≥ 0.72 reads; on white those fell to ~2–3:1.
 describe("day theme semantic text contrast", () => {
   it.each(["success", "warn", "destructive", "info", "notice", "gold"])("text-%s on card ≥ 4.5:1", (name) => {
-    expect(contrast(lum("day", name), lum("day", "card"))).toBeGreaterThanOrEqual(4.5)
+    expect(contrast(luminanceFromRgb(tokenRgb("day", name)), luminanceFromRgb(tokenRgb("day", "card")))).toBeGreaterThanOrEqual(4.5)
   })
 })

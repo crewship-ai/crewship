@@ -477,7 +477,7 @@ export function entryKindPill(entry: InboxV2Entry): EntryKindPill {
     }
     case "failed_run": return { label: "Failed run", tone: "danger" }
     case "schedule_missed": return { label: "Missed run", tone: "blue" }
-    case "schedule_circuit_breaker_tripped": return { label: "Paused schedule", tone: "danger" }
+    case "schedule_circuit_breaker_tripped": return { label: "Paused schedule", tone: "warn" }
     case "memory_consolidation": return { label: "Memory proposal", tone: "purple" }
     // B6's NEEDS_HUMAN card (#2349) and the a4 trigger-failure kinds were
     // written by the server long before the pill knew them, so they read as

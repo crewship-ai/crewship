@@ -38,7 +38,7 @@ import { useAppStore } from "@/lib/store"
 import { ProvisioningBadge } from "./app-toolbar-provisioning"
 import { SystemStatusPill } from "./status-pill"
 import { Volume2 } from "lucide-react"
-import { ThemeSwitcher } from "./theme-switcher"
+import { AccentPicker, ThemeSwitcher } from "./theme-switcher"
 
 // External destinations for the user menu. Kept here (not env-driven) because
 // they are stable public properties; the docs site is the Mintlify source of
@@ -318,6 +318,8 @@ export function AppToolbar() {
             <div className="px-2 pb-2">
               <div className="eyebrow mb-1.5 text-muted-foreground">Theme</div>
               <ThemeSwitcher />
+              <div className="eyebrow mb-1.5 mt-3 text-muted-foreground">Accent</div>
+              <AccentPicker />
             </div>
             <DropdownMenuSeparator />
             <DropdownMenuItem asChild className="gap-3 text-xs">

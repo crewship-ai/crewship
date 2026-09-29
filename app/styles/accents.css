@@ -1,0 +1,127 @@
+/* ── Accent themes ─────────────────────────────────────────────────────────
+ *
+ * The only place brand colours are written. app/globals.css maps these onto
+ * the app tokens (--primary, --ring, selection, blue chips); components never
+ * name an accent. The list the picker offers is lib/theme/accents.ts.
+ *
+ * Each accent has one light and one dark block, written with exactly these
+ * selectors (the tests parse them):
+ *     :root[data-accent="<id>"]          light
+ *     :root.dark[data-accent="<id>"]     dark
+ * Blue is also the fallback when no data-accent is set (bare :root / :root.dark).
+ * Specificity does the switching: :root.dark[data-accent] (0,3,0) beats the
+ * light block of the same accent (0,2,0), which beats the bare defaults.
+ *
+ * Every block defines every token below; lib/__tests__/theme-contrast.test.ts
+ * holds each accent to WCAG AA in both modes.
+ *
+ *   --brand               fills, focus ring, selection edge; text on the ground
+ *   --brand-foreground    text on a --brand fill
+ *   --brand-ink           links, brand text on tints
+ *   --brand-strong        filled primary button (white label ≥ 4.5:1)
+ *   --brand-strong-hover
+ *   --brand-glow          the primary button's coloured shadow
+ *   --brand-tint          opaque fill behind --brand-ink (blue chips)
+ * ────────────────────────────────────────────────────────────────────────── */
+
+/* Blue — the default, matches the marketing site */
+:root,
+:root[data-accent="blue"] {
+  --brand: #0E6BE8;
+  --brand-foreground: #FFFFFF;
+  --brand-ink: #0A4FB0;
+  --brand-strong: #0E6BE8;
+  --brand-strong-hover: #0A5CD0;
+  --brand-glow: rgb(14 107 232 / 0.55);
+  --brand-tint: #E7F0FD;
+}
+:root.dark,
+:root.dark[data-accent="blue"] {
+  --brand: #3B82F6;
+  --brand-foreground: #0A0B0E;
+  --brand-ink: #8AB4FF;
+  --brand-strong: #2563EB;
+  --brand-strong-hover: #1D4ED8;
+  --brand-glow: rgb(37 99 235 / 0.6);
+  --brand-tint: #14203A;
+}
+
+/* Indigo */
+:root[data-accent="indigo"] {
+  --brand: #4F46E5;
+  --brand-foreground: #FFFFFF;
+  --brand-ink: #3730A3;
+  --brand-strong: #4F46E5;
+  --brand-strong-hover: #4338CA;
+  --brand-glow: rgb(79 70 229 / 0.5);
+  --brand-tint: #EEF0FE;
+}
+:root.dark[data-accent="indigo"] {
+  --brand: #818CF8;
+  --brand-foreground: #0A0B0E;
+  --brand-ink: #A5B4FC;
+  --brand-strong: #4F46E5;
+  --brand-strong-hover: #4338CA;
+  --brand-glow: rgb(99 102 241 / 0.55);
+  --brand-tint: #1C1B40;
+}
+
+/* Violet */
+:root[data-accent="violet"] {
+  --brand: #7C3AED;
+  --brand-foreground: #FFFFFF;
+  --brand-ink: #5B21B6;
+  --brand-strong: #7C3AED;
+  --brand-strong-hover: #6D28D9;
+  --brand-glow: rgb(124 58 237 / 0.5);
+  --brand-tint: #F3EEFE;
+}
+:root.dark[data-accent="violet"] {
+  --brand: #A78BFA;
+  --brand-foreground: #0A0B0E;
+  --brand-ink: #C4B5FD;
+  --brand-strong: #7C3AED;
+  --brand-strong-hover: #6D28D9;
+  --brand-glow: rgb(139 92 246 / 0.55);
+  --brand-tint: #22173F;
+}
+
+/* Teal — kept on the cyan side so it never reads as the success green */
+:root[data-accent="teal"] {
+  --brand: #0E7490;
+  --brand-foreground: #FFFFFF;
+  --brand-ink: #155E75;
+  --brand-strong: #0E7490;
+  --brand-strong-hover: #155E75;
+  --brand-glow: rgb(14 116 144 / 0.5);
+  --brand-tint: #E3F4F8;
+}
+:root.dark[data-accent="teal"] {
+  --brand: #22D3EE;
+  --brand-foreground: #0A0B0E;
+  --brand-ink: #67E8F9;
+  --brand-strong: #0E7490;
+  --brand-strong-hover: #155E75;
+  --brand-glow: rgb(34 211 238 / 0.4);
+  --brand-tint: #0B2830;
+}
+
+/* Graphite — monochrome; status colours become the only hue on screen */
+:root[data-accent="graphite"] {
+  --brand: #334155;
+  --brand-foreground: #FFFFFF;
+  --brand-ink: #1E293B;
+  --brand-strong: #1F2937;
+  --brand-strong-hover: #111827;
+  --brand-glow: rgb(15 23 42 / 0.35);
+  --brand-tint: #EEF1F5;
+}
+:root.dark[data-accent="graphite"] {
+  --brand: #CBD5E1;
+  --brand-foreground: #0A0B0E;
+  --brand-ink: #E2E8F0;
+  --brand-strong: #3F4654;
+  --brand-strong-hover: #4B5263;
+  --brand-glow: rgb(0 0 0 / 0.6);
+  --brand-tint: #1F2229;
+}

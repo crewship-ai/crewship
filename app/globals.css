@@ -1,5 +1,7 @@
 @import "tailwindcss";
 @import "tw-animate-css";
+/* Brand colours per accent theme — see the header of that file. */
+@import "./styles/accents.css";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -95,9 +97,9 @@
 
   /* Brand — #0E6BE8 is the light-mode variant of the marketing site's
    *  #1E7BFE (deeper so it stays legible on white). Same hue family. */
-  --primary: #0E6BE8;
-  --primary-foreground: #FFFFFF;
-  --primary-hover: #0A4FB0;
+  --primary: var(--brand);
+  --primary-foreground: var(--brand-foreground);
+  --primary-hover: var(--brand-ink);
 
   --secondary: oklch(0.1994 0.0470 270.6494);
   --secondary-foreground: oklch(1.0000 0 0);
@@ -119,7 +121,7 @@
   --border: #D8E0EB;
   --input: #D8E0EB;
   --control-border: #8792AB;
-  --ring: #0E6BE8;
+  --ring: var(--brand);
 
   /* Chart palette — light-ground tuning, deliberately distinct from the
    *  .dark block below (was byte-identical light vs dark until this fix,
@@ -151,12 +153,12 @@
 
   --sidebar: #E6EEF7;
   --sidebar-foreground: #0F1733;
-  --sidebar-primary: #0E6BE8;
-  --sidebar-primary-foreground: oklch(1.0000 0 0);
+  --sidebar-primary: var(--brand);
+  --sidebar-primary-foreground: var(--brand-foreground);
   --sidebar-accent: #FFFFFF;
-  --sidebar-accent-foreground: #0A4FB0;
+  --sidebar-accent-foreground: var(--brand-ink);
   --sidebar-border: #D8E0EB;
-  --sidebar-ring: #0E6BE8;
+  --sidebar-ring: var(--brand);
 
   /* ── Semantic palette — Day values. The marketing-site lightness (≥ 0.72)
    *    reads on a dark ground only; these are the same hues taken dark enough
@@ -221,12 +223,12 @@
      Light theme uses primary-tinted overlays.
      Consumed via utility classes below (.row-selected, .row-hover, .chip-*).
      Components should NEVER hardcode bg-blue-500/X — use lib/interaction.ts. */
-  --selection-bg: oklch(0.5729 0.2337 264.3664 / 0.10);
-  --selection-bg-hover: oklch(0.5729 0.2337 264.3664 / 0.14);
-  --selection-border: oklch(0.5729 0.2337 264.3664);
+  --selection-bg: color-mix(in srgb, var(--brand) 12%, transparent);
+  --selection-bg-hover: color-mix(in srgb, var(--brand) 17%, transparent);
+  --selection-border: var(--brand);
   --row-hover-bg: oklch(0 0 0 / 0.03);
-  --chip-active-bg: oklch(0.5729 0.2337 264.3664 / 0.12);
-  --chip-active-fg: oklch(0.5729 0.2337 264.3664);
+  --chip-active-bg: color-mix(in srgb, var(--brand) 14%, transparent);
+  --chip-active-fg: var(--brand-ink);
   --chip-idle-fg: oklch(0.45 0.02 270);
 
   /* ── Harbor — the marketing site's design language, in app tokens ──
@@ -235,9 +237,9 @@
    *  the dark theme, where it is tuned as a text colour on the ground.
    *  --primary-hover doubles as Harbor's "primary-ink" (links, brand text on
    *  tints) — it already carries that job in 120+ call sites. */
-  --primary-strong: #0E6BE8;
-  --primary-strong-hover: #0A5CD0;
-  --primary-glow: rgb(14 107 232 / 0.55);
+  --primary-strong: var(--brand-strong);
+  --primary-strong-hover: var(--brand-strong-hover);
+  --primary-glow: var(--brand-glow);
   --line-strong: #B9C8DE;
   --shadow-color: rgb(15 23 51 / 0.35);
   --page-glow: none;
@@ -252,7 +254,7 @@
   --chip-warn-bg: #FCEFD9;   --chip-warn-fg: #8A5300;
   --chip-danger-bg: #FDE7E7; --chip-danger-fg: #B42318;
   --chip-neutral-bg: #E9EEF5; --chip-neutral-fg: #3F4A63;
-  --chip-info-bg: #E7F0FD;   --chip-info-fg: #0A4FB0;
+  --chip-info-bg: var(--brand-tint); --chip-info-fg: var(--brand-ink);
   --chip-violet-bg: #EFE8FC; --chip-violet-fg: #5B35B0;
   /* Icon tile glyph colours: the tint is the chip's own accent (--ic). */
   --tile-inset: inset 0 1px 0 rgb(255 255 255 / 0.35);
@@ -288,9 +290,9 @@
    *  primary-foreground is the page-background navy, not white: white on
    *  #1E7BFE is 3.95:1 (fails WCAG AA 4.5:1 for normal text); the dark
    *  navy reads at 5.22:1 while keeping the same brand blue surface. */
-  --primary: #3B82F6;
-  --primary-foreground: #0A0B0E;
-  --primary-hover: #8AB4FF;
+  --primary: var(--brand);
+  --primary-foreground: var(--brand-foreground);
+  --primary-hover: var(--brand-ink);
 
   --secondary: oklch(1.0000 0 0);
   --secondary-foreground: oklch(0.10 0.008 285);
@@ -313,7 +315,7 @@
   /* Operable form boundaries need more contrast than decorative separators.
    * Keep --input as the existing fill; brightening it also lifts backgrounds. */
   --control-border: oklch(0.54 0.010 285);
-  --ring: #3B82F6;
+  --ring: var(--brand);
 
   /* Chart palette — dark-ground tuning. Was byte-identical to the :root
    *  block above (same 5 values reused on a near-black ground as on
@@ -354,12 +356,12 @@
   --sidebar: #0D0E12;
   --sidebar-foreground: #EDEDF2;
   /* sidebar-primary pair must have contrast — previously both white. */
-  --sidebar-primary: #3B82F6;
-  --sidebar-primary-foreground: #0A0B0E;
+  --sidebar-primary: var(--brand);
+  --sidebar-primary-foreground: var(--brand-foreground);
   --sidebar-accent: #1C1E25;
-  --sidebar-accent-foreground: #8AB4FF;
+  --sidebar-accent-foreground: var(--brand-ink);
   --sidebar-border: #24262E;
-  --sidebar-ring: #3B82F6;
+  --sidebar-ring: var(--brand);
 
   /* ── Semantic palette (identical to light — brand-consistent across modes) ── */
   --success: oklch(0.72 0.18 152);
@@ -393,18 +395,18 @@
   --shadow-2xs: 0 1px 1px 0 oklch(0 0 0 / 0.18);
 
   /* ── Interaction tokens (dark theme overrides) ── */
-  --selection-bg: oklch(0.6230 0.2140 259.8150 / 0.10);
-  --selection-bg-hover: oklch(0.6230 0.2140 259.8150 / 0.14);
-  --selection-border: oklch(0.6230 0.2140 259.8150);
+  --selection-bg: color-mix(in srgb, var(--brand) 12%, transparent);
+  --selection-bg-hover: color-mix(in srgb, var(--brand) 17%, transparent);
+  --selection-border: var(--brand);
   --row-hover-bg: oklch(1 0 0 / 0.025);
-  --chip-active-bg: oklch(0.6230 0.2140 259.8150 / 0.16);
-  --chip-active-fg: oklch(0.78 0.14 259);
+  --chip-active-bg: color-mix(in srgb, var(--brand) 14%, transparent);
+  --chip-active-fg: var(--brand-ink);
   --chip-idle-fg: oklch(0.65 0.02 276);
 
   /* ── Harbor dark ("Ink") — see the :root Harbor block for the roles ── */
-  --primary-strong: #2563EB;
-  --primary-strong-hover: #1D4ED8;
-  --primary-glow: rgb(37 99 235 / 0.6);
+  --primary-strong: var(--brand-strong);
+  --primary-strong-hover: var(--brand-strong-hover);
+  --primary-glow: var(--brand-glow);
   --line-strong: #3A3D49;
   --shadow-color: rgb(0 0 0 / 0.7);
   --page-glow: radial-gradient(60% 40% at 80% 0%, rgb(59 130 246 / 0.07), transparent 70%);
@@ -416,7 +418,7 @@
   --chip-warn-bg: #2E240F;   --chip-warn-fg: #F7C77E;
   --chip-danger-bg: #3A1417; --chip-danger-fg: #FF9B9B;
   --chip-neutral-bg: #1C1E25; --chip-neutral-fg: #B2B5C2;
-  --chip-info-bg: #14203A;   --chip-info-fg: #8AB4FF;
+  --chip-info-bg: var(--brand-tint); --chip-info-fg: var(--brand-ink);
   --chip-violet-bg: #211A3D; --chip-violet-fg: #C4A8FF;
   --tile-inset: none;
   --tile-text-mix: 55%;
@@ -822,11 +824,15 @@ body {
      Composed by lib/interaction.ts constants.
      Use these via the ListRow / FilterChip primitives, not directly. */
 
+  /* Selected row, Harbor style: a tinted fill, a hairline in the accent,
+     and a short straight bar just inside the left edge. The bar is its own
+     element (::before), so it stays straight on a rounded row instead of
+     bending round the corner the way a border-left did. */
   .row-interactive {
+    position: relative;
     display: flex;
     cursor: pointer;
-    border-left: 2px solid transparent;
-    transition: background-color 150ms ease, border-color 150ms ease;
+    transition: background-color 150ms ease, box-shadow 150ms ease;
   }
 
   .row-interactive:focus-visible {
@@ -840,7 +846,18 @@ body {
 
   .row-selected {
     background-color: var(--selection-bg);
-    border-left-color: var(--selection-border);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--selection-border) 22%, transparent);
+  }
+
+  .row-selected::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 7px;
+    bottom: 7px;
+    width: 3px;
+    border-radius: 0 3px 3px 0;
+    background: var(--selection-border);
   }
 
   .row-selected.row-hover:hover {

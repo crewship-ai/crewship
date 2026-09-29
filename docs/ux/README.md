@@ -39,13 +39,34 @@ A screen that cannot answer 1 says so in one line, not with an empty pane.
 | Disabled primary button | a one-line reason beside it | onboarding's `blocking reason` pattern |
 | Irreversible action | `AlertDialog` that says what is lost and where to recover | Skip setup, delete, nuke |
 
-Type scale: `text-micro` / `text-label` / `text-body`; mono for ids, times,
-counts. Radii: cards 12px, chips 6px, pills full. Surfaces: `bg-card` on
-`bg-background`, borders `border-border/60`. Dark theme is the one the app runs
-today (`app/layout.tsx` pins `dark`); design for it. Whether light is
-supported is PLAN.md decision D5 — until it is decided, do not spend time on
-light-theme readability, and do not paint colours that would be impossible
-there either.
+Type scale: `text-micro` / `text-label` / `text-body`; mono only for machine
+text (ids, times, counts, durations). Section labels use the `eyebrow`
+utility.
+
+### Harbor: where the look lives
+
+The design language is Harbor (the marketing site's), expressed only through
+tokens and a handful of utilities, so it can be changed in one place.
+
+| What | Where | Rule |
+|---|---|---|
+| Light / dark palettes | `app/globals.css` (`:root`, `.dark`) | dark is the default; both are held to AA by `lib/__tests__/theme-contrast.test.ts` |
+| Accent (brand) colour | `app/styles/accents.css` + `lib/theme/accents.ts` | one light and one dark block per accent; components never name an accent colour, they use `primary` / `primary-hover` / `primary-strong` |
+| Theme + accent pickers | `components/layout/theme-switcher.tsx` (profile menu) | per browser; accent painted before first paint by `ACCENT_BOOT_SCRIPT` |
+| Selected row | `.row-selected` (via `ListRow` / `SidebarRow`, `lib/interaction.ts`) | tint + hairline + straight 3px bar; never a `border-left` on a rounded row |
+| Status chip | `StatusPill` and the `--chip-*-bg/fg` tokens | the only place a row shows severity |
+| Icon in a box | `icon-tile` utility (`ConceptIcon variant="chip"`) | tint via `--ic`; neutral unless the icon itself is the status |
+| Cards | `rounded-[20px] border bg-card`, hover `lift` | no resting shadow |
+| Deep panel | `panel-surface` | heroes, terminals, graph canvases |
+
+**One colour per row.** Severity is carried by the status pill. Icon tiles,
+avatars and titles in the same row stay neutral, so the one red or amber on a
+list is the thing to look at. Red is for what broke (failed run); amber for
+what waits on a person (paused, needs a tool, approval).
+
+**Adding an accent:** a light and a dark block in `accents.css`, a row in
+`ACCENTS`. Never a status hue (green, red, amber). The tests fail if the two
+files disagree or any pair drops below AA.
 
 ## 3. Motion (all under `useReducedMotion`)
 

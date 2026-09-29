@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next"
 import { JetBrains_Mono } from "next/font/google"
 import { Providers } from "@/components/providers"
 import { HISTORY_NAVIGATION_GUARD_SCRIPT } from "@/lib/navigation-history-guard"
+import { ACCENT_BOOT_SCRIPT } from "@/lib/theme/accents"
 import "./globals.css"
 
 // Harbor typography: the UI runs on the platform's system face (SF on Apple,
@@ -53,6 +54,8 @@ export default function RootLayout({
     <html lang="en" className="dark" suppressHydrationWarning>
       <head>
         <script id="crewship-history-guard" dangerouslySetInnerHTML={{ __html: HISTORY_NAVIGATION_GUARD_SCRIPT }} />
+        {/* Paints the stored accent theme before first paint (lib/theme/accents.ts). */}
+        <script id="crewship-accent" dangerouslySetInnerHTML={{ __html: ACCENT_BOOT_SCRIPT }} />
       </head>
       <body className={`${jetbrainsMono.variable} font-sans antialiased`}>
         <Providers>{children}</Providers>
