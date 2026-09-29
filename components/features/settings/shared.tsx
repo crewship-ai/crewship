@@ -22,6 +22,19 @@ import { cn } from "@/lib/utils"
  * (e.g. dropdowns, large forms). Default is zero-padded so SettingsRow
  * handles its own px/py.
  */
+/**
+ * The size of a form control in a SettingsRow: one height and width for every
+ * input, select and picker on the right of a row, so the column lines up and
+ * text size comes from the control primitives (text-control).
+ */
+export const settingsControl = "h-8 w-full sm:w-64"
+
+/** A custom picker button (popover combobox) dressed as SelectTrigger. */
+export const settingsPickerButton = cn(
+  settingsControl,
+  "inline-flex items-center justify-between gap-2 rounded-md border border-control-border bg-surface-subtle px-3 text-control text-foreground outline-none transition-colors hover:border-line-strong focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:opacity-50",
+)
+
 export function SettingsCard({
   title,
   description,

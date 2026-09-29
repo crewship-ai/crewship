@@ -1,6 +1,7 @@
 "use client"
 
-import { Palette } from "lucide-react"
+import { useState } from "react"
+import { Eye, Palette } from "lucide-react"
 
 import { SettingsCard } from "@/components/features/settings/shared"
 import { Input } from "@/components/ui/input"
@@ -11,6 +12,7 @@ import { useWorkspacePagesTheme, refreshWorkspaceSettings } from "@/hooks/use-wo
 import { apiFetch } from "@/lib/api-fetch"
 import { isAdminTier } from "@/lib/permissions/tiers"
 import { normalizePageTheme, DEFAULT_PAGE_THEME, colorContrast, type PageTheme } from "@/lib/pages/theme"
+import { PagesThemePreviewPanel } from "./pages-theme-preview"
 
 export function PagesAppearanceCard({ workspaceId, role }: { workspaceId: string; role: string | null }) {
   const sharedTheme = useWorkspacePagesTheme(workspaceId)
@@ -20,7 +22,18 @@ export function PagesAppearanceCard({ workspaceId, role }: { workspaceId: string
   const valid = Object.values(form.draft).every(v => /^#[0-9a-f]{6}$/i.test(v))
   const contrast = valid && Math.min(colorContrast(form.draft.text, form.draft.background), colorContrast(form.draft.text, form.draft.surface))
   const labels: Record<keyof PageTheme, string> = { accent: "Brand accent", background: "Background", surface: "Cards", text: "Text", muted: "Secondary text", border: "Borders" }
-  return <SettingsCard icon={Palette} title="Pages appearance" description="Company colors for Page applications — the Pages your agents build as apps. Agents receive this palette when they build one. Panel-only Pages and public share links keep the standard look.">
+  const [previewOpen, setPreviewOpen] = useState(false)
+  return <>
+  {previewOpen && <PagesThemePreviewPanel
+    theme={normalizePageTheme(editable ? form.draft : theme)}
+    dirty={form.isDirty}
+    editable={editable}
+    onChange={(key, value) => form.set(key, value)}
+    onClose={() => setPreviewOpen(false)}
+  />}
+  <SettingsCard icon={Palette} title="Pages appearance"
+    actions={<Button variant="outline" size="sm" className="h-7 gap-1.5 px-2.5 text-xs" aria-pressed={previewOpen} onClick={() => setPreviewOpen((v) => !v)}><Eye className="h-3.5 w-3.5" />Preview</Button>}
+    description="Company colors for Page applications — the Pages your agents build as apps. Agents receive this palette when they build one. Panel-only Pages and public share links keep the standard look.">
     <div className="grid gap-4 p-4 sm:grid-cols-2">
       {(Object.keys(labels) as (keyof PageTheme)[]).map(key => <div key={key} className="flex items-center justify-between gap-3 text-sm">
         <span>{labels[key]}</span>
@@ -45,4 +58,5 @@ export function PagesAppearanceCard({ workspaceId, role }: { workspaceId: string
       })} />
     </>}
   </SettingsCard>
+  </>
 }

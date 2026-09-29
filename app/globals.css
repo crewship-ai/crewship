@@ -560,6 +560,12 @@
   --text-micro--line-height: var(--typo-micro-lh);
   --text-label: var(--typo-label);
   --text-label--line-height: var(--typo-label-lh);
+  /* Every form control (Input, Textarea, SelectTrigger, native selects):
+     the size of the row label beside it, so a field never reads bigger or
+     smaller than its label. Touch devices still get 16px (the coarse-pointer
+     floor above), which is what keeps iOS from zooming. */
+  --text-control: 0.8125rem;
+  --text-control--line-height: 1.25rem;
   --text-body: var(--typo-body);
   --text-body--line-height: var(--typo-body-lh);
   --text-default: var(--typo-default);

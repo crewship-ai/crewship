@@ -141,7 +141,7 @@ function NativeSelect({ value, onChange, options, ...rest }: { value: string; on
         {...rest}
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        className="h-8 w-40 cursor-pointer appearance-none rounded-md border border-control-border bg-surface-subtle pl-3 pr-8 text-xs text-foreground outline-none transition-colors hover:border-line-strong focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+        className="h-8 w-40 cursor-pointer appearance-none rounded-md border border-control-border bg-surface-subtle pl-3 pr-8 text-control text-foreground outline-none transition-colors hover:border-line-strong focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
       >
         {options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
       </select>
