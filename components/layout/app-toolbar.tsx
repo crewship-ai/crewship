@@ -3,7 +3,7 @@
 import { usePathname } from "next/navigation"
 import { useEffect, useState } from "react"
 import Link from "next/link"
-import { useAuth } from "@/hooks/use-auth"
+import { useAuth, useIsInstanceAdmin } from "@/hooks/use-auth"
 import {
   BookOpen, ChevronDown, GitBranch, HelpCircle,
   LogOut, Search, User, X,
@@ -118,6 +118,7 @@ export function AppToolbar() {
   const setMobileNavOpen = useAppStore((st) => st.setMobileNavOpen)
   const [cmdkOpen, setCmdkOpen] = useState(false)
   const { role } = useAbilities()
+  const instanceAdmin = useIsInstanceAdmin()
   const breadcrumbs = useAppStore((s) => s.breadcrumbs)
 
   // ⌘K opens the global palette, on every route, and it is the ONLY listener
@@ -383,7 +384,7 @@ export function AppToolbar() {
                 <div key={section.label}>
                   <div className="px-3 py-1 text-micro uppercase tracking-wider font-semibold text-muted-foreground">{section.label}</div>
                   {section.items
-                    .filter((item) => !isHiddenForRole(item, role))
+                    .filter((item) => !isHiddenForRole(item, role, instanceAdmin))
                     .map((item) => {
                       const isActive = pathname === item.href || (item.href !== "/" && pathname.startsWith(item.href))
                       // FUTURE is announced, not built — the row reads as a

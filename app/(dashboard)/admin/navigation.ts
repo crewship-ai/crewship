@@ -1,9 +1,11 @@
-import { LayoutDashboard, Building, Users, Server, Shield, ShieldCheck, Database, History, ListTodo, Bell, Gauge } from "lucide-react"
+import { LayoutDashboard, Users, Server, Shield, ShieldCheck, Database, History, ListTodo, Bell, Gauge } from "lucide-react"
 import type { TabKey } from "./types"
 
 interface NavSection {
   label: string
-  items: { key: TabKey; label: string; icon: React.ElementType }[]
+  /** An item with an href is a nested page of its own (DrillPage), opened
+   *  with a chevron like Settings › Crew links; the rest are sections here. */
+  items: { key: TabKey | "people"; label: string; icon: React.ElementType; href?: string }[]
 }
 
 export const sections: NavSection[] = [
@@ -16,8 +18,7 @@ export const sections: NavSection[] = [
   {
     label: "Organizations",
     items: [
-      { key: "workspaces", label: "Workspaces", icon: Building },
-      { key: "users", label: "Users", icon: Users },
+      { key: "people", label: "People & workspaces", icon: Users, href: "/admin/people" },
     ],
   },
   {
@@ -45,7 +46,19 @@ export const sections: NavSection[] = [
   },
 ]
 
-export const ALL_TABS: TabKey[] = sections.flatMap((s) => s.items.map((i) => i.key))
+export const ALL_TABS: TabKey[] = sections.flatMap((s) => s.items.filter((i) => !i.href).map((i) => i.key as TabKey))
+
+/** Tabs that moved to a nested page, and where they went. */
+const MOVED: Record<string, string> = {
+  users: "/admin/people",
+  workspaces: "/admin/people?view=workspaces",
+}
+
+/** Where an old ?tab= link now lives, or null when it is still a section here. */
+export function movedAdminTabHref(search: string): string | null {
+  const t = new URLSearchParams(search).get("tab")
+  return t ? MOVED[t] ?? null : null
+}
 
 /**
  * Resolve the section from `?tab=`, falling back to Overview.

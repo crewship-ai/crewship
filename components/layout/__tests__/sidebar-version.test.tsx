@@ -3,8 +3,8 @@ import { render, screen, waitFor } from "@testing-library/react"
 
 const api = vi.fn()
 vi.mock("@/lib/api-fetch", () => ({ apiFetch: (...a: unknown[]) => api(...a) }))
-let role = "OWNER"
-vi.mock("@/hooks/use-abilities", () => ({ useAbilities: () => ({ role }) }))
+let instanceAdmin = true
+vi.mock("@/hooks/use-auth", () => ({ useIsInstanceAdmin: () => instanceAdmin }))
 vi.mock("@/components/ui/sidebar", () => ({
   SidebarMenuItem: ({ children }: { children: React.ReactNode }) => <li>{children}</li>,
   SidebarMenuButton: ({ children, asChild, tooltip: _t, size: _s, ...rest }: { children: React.ReactNode; asChild?: boolean; tooltip?: string; size?: string }) =>
@@ -16,7 +16,7 @@ import { SidebarVersion, buildLabel, editionName } from "../sidebar-version"
 const ok = (b: unknown) => ({ ok: true, json: async () => b })
 
 beforeEach(() => {
-  role = "OWNER"
+  instanceAdmin = true
   api.mockReset()
   api.mockImplementation(async (u: string) =>
     u.includes("version") ? ok({ current: "dev", commit: "d43bfd1f95636cbc", dirty: false }) : ok({ edition: "community" }))
@@ -35,15 +35,15 @@ describe("buildLabel", () => {
 })
 
 describe("SidebarVersion", () => {
-  it("shows the edition and build, linking an admin to the overview", async () => {
+  it("shows the edition and build, linking an instance admin to the overview", async () => {
     render(<SidebarVersion />)
     expect(await screen.findByText("Community Edition")).toBeInTheDocument()
     expect(screen.getByText("dev · d43bfd1")).toBeInTheDocument()
     expect(screen.getByRole("link").getAttribute("href")).toBe("/admin?tab=overview")
   })
 
-  it("is a plain label for a member", async () => {
-    role = "MEMBER"
+  it("is a plain label for anyone who does not administer the instance", async () => {
+    instanceAdmin = false
     render(<SidebarVersion />)
     await screen.findByText("Community Edition")
     expect(screen.queryByRole("link")).toBeNull()

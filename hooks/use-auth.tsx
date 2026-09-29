@@ -22,6 +22,9 @@ const sessionSchema = z.object({
     // visible on the next refresh() instead of waiting for a token rotation.
     // "" means the user has none — the caller falls back to initials.
     avatar_url: z.string().optional().default(""),
+    // Administers the instance (the Admin console is theirs). A workspace
+    // role does not decide this; the server does, per request.
+    is_instance_admin: z.boolean().optional().default(false),
   }),
   expires: z.string(),
 })
@@ -328,4 +331,15 @@ export function useSessionSafe() {
 export function useSession() {
   const { session, status } = useAuth()
   return { data: session, status }
+}
+
+/**
+ * Whether the signed-in person administers the instance — the only thing that
+ * shows the Admin console. null while the session is still loading, so a
+ * caller can wait instead of redirecting on a guess.
+ */
+export function useIsInstanceAdmin(): boolean | null {
+  const { data, status } = useSessionSafe()
+  if (status === "loading") return null
+  return data?.user.is_instance_admin ?? false
 }

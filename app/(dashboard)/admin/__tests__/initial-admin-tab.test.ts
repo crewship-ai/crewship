@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { initialAdminTab } from "../navigation"
+import { initialAdminTab, movedAdminTabHref } from "../navigation"
 
 // Admin was the one console whose URL never changed — /admin whichever section
 // you were on. So a section could not be bookmarked, pasted into a ticket, or
@@ -29,5 +29,18 @@ describe("initialAdminTab", () => {
   it("resolves the Keeper sections, which are the ones people link to", () => {
     expect(initialAdminTab("?tab=security")).toBe("security")
     expect(initialAdminTab("?tab=reviews")).toBe("reviews")
+  })
+})
+
+// Workspaces and Users became one nested page, Admin › People & workspaces.
+// A link someone saved to either tab still has to land on it.
+describe("movedAdminTabHref", () => {
+  it("sends the old Workspaces and Users tabs to the People page", () => {
+    expect(movedAdminTabHref("?tab=users")).toBe("/admin/people")
+    expect(movedAdminTabHref("?tab=workspaces")).toBe("/admin/people?view=workspaces")
+  })
+  it("leaves every other section where it is", () => {
+    expect(movedAdminTabHref("?tab=ratelimits")).toBeNull()
+    expect(movedAdminTabHref("")).toBeNull()
   })
 })

@@ -8,6 +8,7 @@ import { navSections, isHiddenForRole } from "@/lib/nav-sections"
 import { useInboxUnreadCount } from "@/hooks/use-inbox"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { useAbilities } from "@/hooks/use-abilities"
+import { useIsInstanceAdmin } from "@/hooks/use-auth"
 import { WorkspaceSwitcher } from "@/components/layout/workspace-switcher"
 import { SidebarVersion } from "@/components/layout/sidebar-version"
 import {
@@ -45,6 +46,7 @@ export { navSections }
 export function AppSidebar() {
   const pathname = usePathname()
   const { role } = useAbilities()
+  const instanceAdmin = useIsInstanceAdmin()
   const { sidebarMode, setSidebarMode } = useSidebar()
   // Live unread count for the Inbox row badge — shared with the
   // top-bar bell so they stay in lockstep without two pollers.
@@ -64,7 +66,7 @@ export function AppSidebar() {
             <SidebarGroupContent>
               <SidebarMenu>
                 {section.items
-                  .filter((item) => !isHiddenForRole(item, role))
+                  .filter((item) => !isHiddenForRole(item, role, instanceAdmin))
                   .map((item) => {
                     const isActive =
                       pathname === item.href ||

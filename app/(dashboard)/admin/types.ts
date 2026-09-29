@@ -30,6 +30,7 @@ export interface AdminOrg {
   cost_30d_usd?: number
   /** The caller's current workspace. */
   current?: boolean
+  owners?: { id: string; email: string; full_name: string | null }[]
 }
 
 /** Whose rows the admin lists hold: every workspace (the instance owner) or
@@ -65,6 +66,15 @@ export interface AdminUser {
   locked_until?: string | null
   failed_login_count?: number
   email_verified?: boolean
+  /** Administers the instance, and by which rule: "env" (CREWSHIP_OWNER_EMAIL),
+   *  "role" (named) or "oldest_workspace_owner" (the fallback while nobody is). */
+  instance_admin?: boolean
+  instance_admin_source?: string | null
+  /** Set while an instance admin has suspended the account. */
+  suspended_at?: string | null
+  suspended_reason?: string | null
+  /** Set while an unused setup link is pending: nobody has chosen the password. */
+  setup_link_expires_at?: string | null
 }
 
 /** GET /api/v1/admin/users/{userId}/sessions */

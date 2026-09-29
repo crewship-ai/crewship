@@ -119,8 +119,8 @@ export const editionLabel = (edition?: string) =>
 export const FINDING_ACTIONS: Record<string, { label: string; href: string }> = {
   no_backup_recorded: { label: "Create a backup", href: "/admin?tab=backups" },
   rate_limit_disabled: { label: "Limits", href: "/admin?tab=ratelimits" },
-  signup_open: { label: "Users", href: "/admin?tab=users" },
-  seed_account_default_password: { label: "Users", href: "/admin?tab=users" },
+  signup_open: { label: "People", href: "/admin/people" },
+  seed_account_default_password: { label: "People", href: "/admin/people" },
   privileged_credentials_enabled: { label: "Access & Secrets", href: "/settings?tab=access" },
   private_endpoints_in_use: { label: "Posture", href: "/admin?tab=posture" },
   private_endpoints_ceiling_open: { label: "Posture", href: "/admin?tab=posture" },

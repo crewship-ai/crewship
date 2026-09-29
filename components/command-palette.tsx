@@ -25,7 +25,7 @@ import {
 } from "@/lib/conversation-search"
 import { formatRelativeShort } from "@/lib/time"
 import { useAbilities } from "@/hooks/use-abilities"
-import { useSessionSafe } from "@/hooks/use-auth"
+import { useIsInstanceAdmin, useSessionSafe } from "@/hooks/use-auth"
 import { normalizePageList, toPageView, type PageView } from "@/hooks/use-pages"
 import { PageGlyph } from "@/components/features/pages/page-glyph"
 import { UserAvatar } from "@/components/ui/user-avatar"
@@ -399,7 +399,8 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
   // The Admin console is ADMIN+ (#865); the sidebar/toolbar already filter it,
   // so the palette must too — otherwise a MEMBER sees an "Admin" command that
   // just bounces them off /admin.
-  const isAdmin = role === "OWNER" || role === "ADMIN"
+  // Admin is the instance console: shown to instance administrators only.
+  const isAdmin = useIsInstanceAdmin() === true
 
   const [agents, setAgents] = useState<AgentResult[]>([])
   const [crews, setCrews] = useState<CrewResult[]>([])

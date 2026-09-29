@@ -4,8 +4,7 @@ import { useEffect, useState } from "react"
 import Link from "next/link"
 
 import { apiFetch } from "@/lib/api-fetch"
-import { useAbilities } from "@/hooks/use-abilities"
-import { isAdminTier } from "@/lib/permissions/tiers"
+import { useIsInstanceAdmin } from "@/hooks/use-auth"
 import { CrewshipLogo } from "@/components/branding/crewship-logo"
 import { SidebarMenuButton, SidebarMenuItem } from "@/components/ui/sidebar"
 
@@ -40,7 +39,7 @@ export function editionName(edition: string | undefined): string {
  * failure leaves the row out rather than printing "unknown".
  */
 export function SidebarVersion() {
-  const { role } = useAbilities()
+  const instanceAdmin = useIsInstanceAdmin()
   const [build, setBuild] = useState<Build | null>(null)
   const [edition, setEdition] = useState<string | undefined>()
 
@@ -79,7 +78,7 @@ export function SidebarVersion() {
 
   return (
     <SidebarMenuItem>
-      {isAdminTier(role) ? (
+      {instanceAdmin ? (
         <SidebarMenuButton asChild size="lg" tooltip={tooltip} className="h-10">
           <Link href="/admin?tab=overview" aria-label={tooltip}>{body}</Link>
         </SidebarMenuButton>

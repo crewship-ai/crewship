@@ -22,6 +22,7 @@ vi.mock("@/hooks/use-workspace", () => ({
 }))
 
 vi.mock("@/hooks/use-auth", () => ({
+  useIsInstanceAdmin: () => true,
   useSessionSafe: () => ({
     data: h.userId ? { user: { id: h.userId } } : null,
     status: h.authStatus,

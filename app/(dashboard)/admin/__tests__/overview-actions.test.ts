@@ -23,6 +23,11 @@ describe("admin overview actions", () => {
   it("points every admin action at a section that exists", () => {
     for (const { href } of Object.values(FINDING_ACTIONS)) {
       if (!href.startsWith("/admin")) continue
+      // Nested pages of the console (People & workspaces) are routes, not tabs.
+      if (href.startsWith("/admin/")) {
+        expect(["/admin/people"], href).toContain(new URL(href, "http://x").pathname)
+        continue
+      }
       const tab = new URL(href, "http://x").searchParams.get("tab")
       expect(ALL_TABS as string[], href).toContain(tab)
     }

@@ -3,10 +3,11 @@
 import { useEffect, useMemo, useState, useCallback, useRef } from "react"
 import { useRouter } from "next/navigation"
 import {
-  Shield, AlertTriangle, Menu,
+  Shield, AlertTriangle, ChevronRight, Menu,
 } from "lucide-react"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useWorkspace } from "@/hooks/use-workspace"
+import { useIsInstanceAdmin } from "@/hooks/use-auth"
 import { cn } from "@/lib/utils"
 import { apiFetch } from "@/lib/api-fetch"
 import { SubBar } from "@/components/layout/sub-bar"
@@ -17,16 +18,14 @@ import {
   SidebarToolbar, SidebarSearch, SidebarSection, SidebarRow, SIDEBAR_WIDTH,
 } from "@/components/layout/sidebar-kit"
 
-import { sections, initialAdminTab, ALL_TABS } from "./navigation"
-import type { TabKey, Stats, AdminOrg, AdminUser, AdminScope, KeeperStatus, KeeperLogEntry, LicenseInfo } from "./types"
+import { sections, initialAdminTab, movedAdminTabHref, ALL_TABS } from "./navigation"
+import type { TabKey, Stats, KeeperStatus, KeeperLogEntry } from "./types"
 import { useAdminWebSocket } from "./hooks/use-admin-websocket"
 import { useAdminOverview } from "./hooks/use-admin-overview"
 import { OverviewTab } from "./tabs/overview-tab"
 import { RuntimeTab } from "./tabs/runtime-tab"
 import type { RuntimeEntry } from "./tabs/runtime-tab"
 import { KeeperTab } from "./tabs/keeper-tab"
-import { WorkspacesTab } from "./tabs/workspaces-tab"
-import { UsersTab } from "./tabs/users-tab"
 import { BackupsTab } from "./tabs/backups-tab"
 import { KeeperQueuePanel } from "@/components/features/admin/keeper-queue-panel"
 import { SecurityPostureCard } from "@/components/features/admin/security-posture-card"
@@ -57,10 +56,12 @@ const SETTINGS_TABS: ReadonlySet<TabKey> = new Set<TabKey>(["providers", "notifi
 
 export default function AdminPage() {
   const router = useRouter()
-  const { workspaceId, role, loading: wsLoading } = useWorkspace()
-  // Admin console floor is ADMIN+ (#865) — kept in lockstep with the backend
-  // ADMIN+ route floor so an ADMIN can open the console they can already drive.
-  const isAdmin = role === "OWNER" || role === "ADMIN"
+  const { workspaceId, loading: wsLoading } = useWorkspace()
+  // The console belongs to instance administrators (instance_admin.go on the
+  // server): it retunes the whole server, so a workspace OWNER or ADMIN role
+  // does not open it. null while the session loads — wait, do not redirect.
+  const instanceAdmin = useIsInstanceAdmin()
+  const isAdmin = instanceAdmin === true
   // Deep-linkable, like /settings?tab=. Admin was the one console whose URL
   // never changed — /admin whichever section you were on — so a section could
   // not be bookmarked, linked in a ticket, or reloaded without losing your
@@ -92,14 +93,8 @@ export default function AdminPage() {
         .filter((s) => s.items.length > 0),
     [navQ],
   )
-  const firstNavMatch = filteredSections[0]?.items[0]?.key
+  const firstNavMatch = filteredSections[0]?.items[0]
   const [stats, setStats] = useState<Stats | null>(null)
-  const [orgs, setOrgs] = useState<AdminOrg[]>([])
-  const [users, setUsers] = useState<AdminUser[]>([])
-  // Every workspace and account for the instance owner, the caller's own
-  // workspace for everyone else — the server says which in X-Admin-Scope.
-  const [scope, setScope] = useState<AdminScope | undefined>()
-  const [license, setLicense] = useState<LicenseInfo | null>(null)
   // The Overview's reads, each landing on its own (hooks/use-admin-overview):
   // the slow journal walk no longer holds the whole page on a skeleton.
   const overview = useAdminOverview(workspaceId, isAdmin && tab === "overview")
@@ -158,12 +153,15 @@ export default function AdminPage() {
   }, [workspaceId])
 
   useEffect(() => {
-    if (wsLoading) return
+    if (wsLoading || instanceAdmin === null) return
     if (!isAdmin) {
       router.push("/")
       return
     }
-  }, [wsLoading, role, router])
+    // Workspaces and Users moved to their own page; an old link lands there.
+    const moved = movedAdminTabHref(window.location.search)
+    if (moved) router.replace(moved)
+  }, [wsLoading, instanceAdmin, isAdmin, router])
 
   // Lifted out of the effect so an action on a tab (creating a workspace,
   // adding a member) can ask for the same refresh the page does on mount —
@@ -181,38 +179,14 @@ export default function AdminPage() {
     {
       setLoading(true)
       try {
-        const [statsRes, orgsRes, usersRes, licenseRes] = await Promise.all([
-          apiFetch(`/api/v1/admin/stats?workspace_id=${workspaceId}`),
-          apiFetch(`/api/v1/admin/workspaces?workspace_id=${workspaceId}`),
-          apiFetch(`/api/v1/admin/users?workspace_id=${workspaceId}`),
-          apiFetch(`/api/v1/system/license?workspace_id=${workspaceId}`),
-        ])
+        // People and workspaces load on their own page (/admin/people); the
+        // console itself needs only the figures the Overview reads.
+        const statsRes = await apiFetch(`/api/v1/admin/stats?workspace_id=${workspaceId}`)
         if (isStale()) return
-
-        // Surface a failure on any of the three core tables instead of
-        // rendering them empty — the whole point of the honesty pass (#868).
-        const failed = [
-          ["stats", statsRes],
-          ["workspaces", orgsRes],
-          ["users", usersRes],
-        ].filter(([, res]) => !(res as Response).ok) as [string, Response][]
-        if (failed.length > 0) {
-          const [, first] = failed[0]
-          setFetchError(
-            `Failed to load ${failed.map(([n]) => n).join(", ")} (HTTP ${first.status}${first.status === 403 ? " — needs ADMIN or OWNER" : ""}).`,
-          )
-        } else {
-          setFetchError(null)
-        }
-
+        // A failure is visible, not a silently empty card — the honesty pass (#868).
+        setFetchError(statsRes.ok ? null
+          : `Failed to load stats (HTTP ${statsRes.status}${statsRes.status === 403 ? " — needs an instance administrator" : ""}).`)
         if (statsRes.ok) setStats(await statsRes.json())
-        if (orgsRes.ok) {
-          setOrgs(await orgsRes.json())
-          const s = orgsRes.headers?.get?.("X-Admin-Scope")
-          setScope(s === "instance" || s === "workspace" ? s : undefined)
-        }
-        if (licenseRes?.ok) setLicense(await licenseRes.json())
-        if (usersRes.ok) setUsers(await usersRes.json())
       } catch (e) {
         if (!isStale()) setFetchError(e instanceof Error ? e.message : "Network error loading admin data.")
       } finally {
@@ -244,14 +218,14 @@ export default function AdminPage() {
 
   useEffect(() => {
     if (isAdmin) checkRuntime()
-  }, [role, checkRuntime])
+  }, [isAdmin, checkRuntime])
 
   useEffect(() => {
     // Overview shows a one-line keeper verdict, so it needs the same status
     // the Keeper tab does — otherwise the line reads "unknown" until someone
     // happens to visit that tab.
     if (isAdmin && (tab === "security" || tab === "overview")) fetchKeeperData()
-  }, [role, tab, fetchKeeperData])
+  }, [isAdmin, tab, fetchKeeperData])
 
   if (wsLoading || !isAdmin) {
     return (
@@ -290,14 +264,6 @@ export default function AdminPage() {
           cost={overview.cost}
         />
       )
-    }
-
-    if (tab === "workspaces") {
-      return <WorkspacesTab orgs={orgs} users={users} scope={scope} license={license} onRefresh={fetchData} />
-    }
-
-    if (tab === "users") {
-      return <UsersTab users={users} workspaceId={workspaceId} scope={scope} onRefresh={fetchData} />
     }
 
     if (tab === "providers") {
@@ -357,7 +323,7 @@ export default function AdminPage() {
     return null
   }
 
-  const activeItem = sections.flatMap((s) => s.items).find((i) => i.key === tab)
+  const activeItem = sections.flatMap((s) => s.items).find((i) => !i.href && i.key === tab)
 
   /* One nav body, rendered into a permanent column on a desktop and into a
      Sheet on a phone. Choosing a section closes the Sheet — on a desktop
@@ -374,7 +340,8 @@ export default function AdminPage() {
           placeholder="Search admin…"
           onKeyDown={(e) => {
             if (e.key === "Enter" && firstNavMatch) {
-              setTab(firstNavMatch)
+              if (firstNavMatch.href) router.push(firstNavMatch.href)
+              else setTab(firstNavMatch.key as TabKey)
               setMobileNavOpen(false)
             }
           }}
@@ -391,13 +358,15 @@ export default function AdminPage() {
                   key={item.key}
                   selected={isActive}
                   onSelect={() => {
-                    setTab(item.key)
+                    if (item.href) router.push(item.href)
+                    else setTab(item.key as TabKey)
                     setMobileNavOpen(false)
                   }}
                   aria-label={item.label}
                 >
                   <Icon className={cn("h-3.5 w-3.5 shrink-0", isActive ? "opacity-100" : "opacity-60")} />
                   <span className="truncate flex-1">{item.label}</span>
+                  {item.href && <ChevronRight className="h-3.5 w-3.5 shrink-0 opacity-50" aria-hidden />}
                 </SidebarRow>
               )
             })}
@@ -433,7 +402,7 @@ export default function AdminPage() {
           ) : undefined
         }
         meta={
-          <span className="text-[10px] font-mono uppercase tracking-wide text-muted-foreground-soft">{role ?? ""}</span>
+          <span className="text-[10px] font-mono uppercase tracking-wide text-muted-foreground-soft">Instance admin</span>
         }
       />
 
@@ -466,7 +435,7 @@ export default function AdminPage() {
           role="region"
           aria-label={activeItem ? `Admin ${activeItem.label}` : "Admin content"}
         >
-        <div className={cn("mx-auto space-y-4 p-4 md:p-6", activeItem && SETTINGS_TABS.has(activeItem.key) ? "max-w-3xl" : "max-w-5xl")}>
+        <div className={cn("mx-auto space-y-4 p-4 md:p-6", SETTINGS_TABS.has(tab) ? "max-w-3xl" : "max-w-5xl")}>
           {fetchError && (
             <div
               role="alert"
