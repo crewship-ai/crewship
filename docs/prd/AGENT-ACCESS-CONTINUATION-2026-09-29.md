@@ -79,7 +79,18 @@ To nenahrazuje přejímku plného instance snapshotu, storage kvót a host reboo
 - Dev1 smoke na původním buildu ověřil dva samostatné soukromé chaty stejného
   agenta a zaznamenal baseline stream revokace. Vlastněný testovací workspace
   byl odstraněn přes CLI; testovací účty nemají přístup k workspace.
-- Nasazení nové větve a opakování živé přejímky zatím neproběhlo.
+- Dev1 nyní běží na `ca379a58f4fce37c17ccc91018a919550bcb8961` (čistý build).
+  Ověřena identita `/proc/<pid>/exe`, shodný web export, `/api/health`, `/healthz`,
+  `/readyz` i autentizovaný CLI `whoami`. Nasazení pouze přes
+  `sudo systemctl reload crewship-ws@1`.
+- Dva živé WS průchody po nasazení: vlastní chat/list/count a pozitivní události
+  2/2; cizí historie 404; po odebrání H1 další událost nedoručena a socket uzavřen
+  (první průchod 103 ms). H2 událost dostal.
+- Doplněn živý HTTP stream: oběma přišel `stream.open`, po odebrání H1 se jeho
+  stream uzavřel bez dalšího rámce; H2 dostal heartbeat. Detekce nečinného HTTP
+  streamu čekala na 20s heartbeat; není to 20s povolení dalších datových rámců.
+  Testovací workspace odstraněn CLI, sessions odhlášeny. Syntetické účty zůstávají
+  bez členství; netvrdíme odstranění všech user rows.
 - GitHub CI na main `07bfd2360` stále provedlo nula kroků; annotation checku
   109298406651 uvádí „account is locked due to a billing issue“. Lokální testy
   tento vzdálený acceptance gate nenahrazují.
@@ -97,3 +108,23 @@ To nenahrazuje přejímku plného instance snapshotu, storage kvót a host reboo
 5. Akceptace celé A2/B matice na konkrétním buildu, skutečné vzdálené CI a review.
 
 **Release 1.0 není dokončený ani přijatý.**
+
+## Nezávislé review #2717
+
+CodeRabbit dokončil věcné review zdrojového commitu `ca379a58f` (review
+5349737106). Dva nálezy byly ověřeny:
+
+- Mazání rodiče s delegovanými potomky vyvolalo FK chybu. Nový regresní test
+  nejprve selhal na SQLite 787. Protože původní migrace již běžela na dev1,
+  navazující migrace přidává mazání celé větve před odstraněním rodiče.
+  Rekurzivní SQL odstraní i vnuky při `recursive_triggers=OFF`; neměníme
+  historii nasazené migrace. Opravený test i celé access/WS balíčky prošly.
+- Chatové rámce nyní vyhodnocují globální omezení i publikum jediným SQL
+  dotazem ve stejném snapshotu. Žádná TTL cache povolení. Benchmark na dev1,
+  20 000 rozhodnutí na variantu: dvě query 67,605 µs / 3 212 B / 54 alokací;
+  jeden snapshot 61,574 µs / 1 329 B / 31 alokací. Jde o lokální mikrobenchmark,
+  nikoli produkční propustnost či SLO. Existující indexy pokrývají user a chat ID.
+- Upřesněna historická věta o zálohách: nepřenášejí `chat_read_shares`, ale
+  zachovávají nové `access_grants`.
+
+Následná revize oprav a finální ověření ještě probíhají.

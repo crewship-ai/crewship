@@ -239,3 +239,33 @@ func TestStalePolicyCannotGrantToRejoinedMembership(t *testing.T) {
 		t.Fatalf("stale policy applied to a new membership: %v", err)
 	}
 }
+
+func TestDeletingParentAttemptDeletesDelegatedDescendants(t *testing.T) {
+	s := fixture(t)
+	rights := []Right{{"agent", "a", "run"}, {"agent", "b", "run"}, {"agent", "b", "delegate"}}
+	policy(t, s, "h1", rights...)
+	parent, attempt, err := s.Admit(t.Context(), "h1", "w", "a", "c1", "", rights)
+	if err != nil {
+		t.Fatal(err)
+	}
+	child, _, err := s.Admit(t.Context(), "h1", "w", "b", "c1", parent, rights[1:])
+	if err != nil {
+		t.Fatal(err)
+	}
+	grandchild, _, err := s.Admit(t.Context(), "h1", "w", "b", "c1", child, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.DB.Exec(`DELETE FROM access_attempts WHERE id=?`, attempt.ID); err != nil {
+		t.Fatal(err)
+	}
+	for _, handle := range []string{parent, child, grandchild} {
+		if _, err = s.Resolve(t.Context(), handle); !errors.Is(err, ErrDenied) {
+			t.Fatalf("descendant survived parent deletion: %v", err)
+		}
+	}
+	var remaining int
+	if err = s.DB.QueryRow(`SELECT count(*) FROM access_attempts`).Scan(&remaining); err != nil || remaining != 0 {
+		t.Fatalf("remaining=%d error=%v", remaining, err)
+	}
+}

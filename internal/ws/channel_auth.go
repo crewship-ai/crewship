@@ -65,12 +65,6 @@ func (a *DBChannelAuthorizer) CanSubscribe(ctx context.Context, userID, channel 
 	if a == nil || a.db == nil || userID == "" {
 		return false, nil
 	}
-	// Restricted streams remain closed until dispatch reauthorizes each
-	// event. Subscribe-time checks and a periodic sweep are not sufficient.
-	restricted, err := (access.Store{DB: a.db}).HasRestrictedMembership(ctx, userID)
-	if err != nil || restricted {
-		return false, err
-	}
 	// Parse "type:id" without allocating a []string — previously strings.SplitN
 	// cost one slice header per subscription call.
 	idx := strings.IndexByte(channel, ':')
@@ -79,6 +73,16 @@ func (a *DBChannelAuthorizer) CanSubscribe(ctx context.Context, userID, channel 
 	}
 	chType, chID := channel[:idx], channel[idx+1:]
 
+	// Token/replay frames dominate delivery checks. Resolve both the global
+	// ceiling and exact audience in one indexed SQL snapshot, without a cache.
+	if chType == "session" {
+		return a.isSessionOwner(ctx, userID, chID)
+	}
+	restricted, err := (access.Store{DB: a.db}).HasRestrictedMembership(ctx, userID)
+	if err != nil || restricted {
+		return false, err
+	}
+
 	switch chType {
 	case "workspace":
 		return a.isMemberOfWorkspace(ctx, userID, chID)
@@ -86,8 +90,6 @@ func (a *DBChannelAuthorizer) CanSubscribe(ctx context.Context, userID, channel 
 		return a.isMemberOfCrewWorkspace(ctx, userID, chID)
 	case "agent":
 		return a.isMemberOfAgentWorkspace(ctx, userID, chID)
-	case "session":
-		return a.isSessionOwner(ctx, userID, chID)
 	case "keeper":
 		// keeper:{workspaceId} — check workspace membership
 		return a.isMemberOfWorkspace(ctx, userID, chID)
@@ -211,5 +213,11 @@ func (a *DBChannelAuthorizer) isMemberOfPageWorkspace(ctx context.Context, userI
 }
 
 func (a *DBChannelAuthorizer) isSessionOwner(ctx context.Context, userID, chatID string) (bool, error) {
-	return chataudience.CanRead(ctx, a.db, chatID, userID)
+	var one int
+	args := []any{chatID, userID}
+	args = append(args, chataudience.Args(userID)...)
+	err := a.db.QueryRowContext(ctx, `SELECT 1 FROM chats c WHERE c.id=?
+		AND NOT EXISTS (SELECT 1 FROM workspace_members WHERE user_id=? AND access_mode='restricted')
+		AND (`+chataudience.VisibleSQL+`)`, args...).Scan(&one)
+	return existsRow(err)
 }

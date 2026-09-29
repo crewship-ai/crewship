@@ -77,8 +77,9 @@ se neskrývá za prázdný chat. Běžná autentizovaná historie se nemění.
 
 Grant je durable v SQLite; veřejná odpověď obsahuje pouze text, role, ID a čas.
 Vydavatel i agent, jeho případná crew a workspace musejí být stále živí.
-Workspace bundle backup granty nepřenáší; úplný snapshot databáze je jiný
-kontrakt a přirozeně je zachovává. Obnova DB je testována. Grant nevytváří
+Workspace bundle backup nepřenáší granty z `chat_read_shares`; konkrétní resource
+granty z `access_grants` zachovává. Úplný snapshot databáze je jiný kontrakt
+a přirozeně zachovává oba typy grantů. Obnova DB je testována. Grant nevytváří
 žádný agentí běh ani LLM volání; náklad je SQL kontrola a omezené čtení JSONL.
 
 Otevřené limity B4: stránkování dlouhé historie, správa sdílení v UI a retence
