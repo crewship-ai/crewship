@@ -1,9 +1,12 @@
 "use client"
 
+import type * as React from "react"
+
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { PanelLeftClose, Pin, MousePointer2 } from "lucide-react"
 import { CONCEPT_ICON } from "@/lib/concept-icons"
+import { accentFor } from "@/lib/concept-accents"
 import { navSections, isHiddenForRole } from "@/lib/nav-sections"
 import { useInboxUnreadCount } from "@/hooks/use-inbox"
 import { useWorkspace } from "@/hooks/use-workspace"
@@ -80,8 +83,9 @@ export function AppSidebar() {
                             isActive={false}
                             tooltip={item.title}
                             size="sm"
+                            className={RAIL_BUTTON}
                           >
-                            <item.icon />
+                            <RailTile icon={item.icon} href={item.href} active={false} />
                             <span>{item.title}</span>
                           </SidebarMenuButton>
                           <SidebarMenuBadge className="text-micro bg-muted text-muted-foreground px-1.5">
@@ -100,9 +104,10 @@ export function AppSidebar() {
                           isActive={isActive}
                           tooltip={item.title}
                           size="sm"
+                          className={RAIL_BUTTON}
                         >
                           <Link href={item.href}>
-                            <item.icon />
+                            <RailTile icon={item.icon} href={item.href} active={isActive} />
                             <span>{item.title}</span>
                           </Link>
                         </SidebarMenuButton>
@@ -168,5 +173,36 @@ export function AppSidebar() {
       </SidebarFooter>
       <SidebarRail />
     </Sidebar>
+  )
+}
+
+/** In icon mode the tile IS the button: no padding, no second background. */
+const RAIL_BUTTON =
+  "group-data-[collapsible=icon]:p-0! group-data-[collapsible=icon]:bg-transparent! group-data-[collapsible=icon]:hover:bg-transparent!"
+
+/** The concept a destination stands for, so its tile wears that colour. */
+function conceptOf(href: string): string {
+  if (href === "/") return "dashboard"
+  const first = href.slice(1).split("/")[0]
+  return first === "chat" ? "sessions" : first
+}
+
+/**
+ * A destination's icon in a Harbor tile, the same one a nested page's collapsed
+ * panel shows (DrillPage): the page you are on is tinted in its concept's
+ * colour, the rest stay neutral and take the tint on hover, with the tile's
+ * lift and tilt. globals.css `.rail-tile`.
+ */
+function RailTile({ icon: Icon, href, active }: { icon: React.ElementType; href: string; active: boolean }) {
+  return (
+    <span
+      data-slot="rail-tile"
+      data-active={active ? "true" : undefined}
+      className="rail-tile"
+      style={{ "--ic": accentFor(conceptOf(href)).tint } as React.CSSProperties}
+      aria-hidden
+    >
+      <Icon />
+    </span>
   )
 }

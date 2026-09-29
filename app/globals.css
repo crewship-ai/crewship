@@ -966,6 +966,48 @@ body {
     transform: scale(1.08) rotate(-4deg);
     border-color: color-mix(in srgb, var(--ic) 55%, transparent);
   }
+
+  /* The nav rail's tiles (app-sidebar RailTile): the icon-tile shape without
+     the tint until it is earned. The page you are on is a full icon tile in
+     its concept's colour (--ic); the rest are quiet squares that take the
+     tint, the lift and the tilt when hovered. In the expanded rail they sit
+     beside a label and stay borderless until active or hovered; collapsed to
+     icons they are the button, so they show their outline. */
+  .rail-tile {
+    --ic: var(--primary);
+    display: inline-grid;
+    place-items: center;
+    flex-shrink: 0;
+    width: 1.5rem;
+    height: 1.5rem;
+    border-radius: 0.5rem;
+    border: 1px solid transparent;
+    color: var(--muted-foreground);
+    transition: transform 300ms var(--ease-spring), border-color 300ms var(--ease-harbor), background-color 300ms var(--ease-harbor), color 200ms var(--ease-harbor);
+  }
+  .rail-tile > svg { width: 0.875rem; height: 0.875rem; }
+  [data-collapsible="icon"] .rail-tile {
+    width: 2rem;
+    height: 2rem;
+    border-radius: 0.625rem;
+    background: color-mix(in srgb, var(--foreground) 4%, transparent);
+    border-color: var(--border);
+  }
+  [data-collapsible="icon"] .rail-tile > svg { width: 1rem; height: 1rem; }
+  .rail-tile[data-active="true"],
+  :hover > .rail-tile {
+    color: color-mix(in oklch, var(--ic) var(--tile-text-mix), var(--foreground));
+    background: radial-gradient(circle at 30% 20%, color-mix(in srgb, var(--ic) 20%, transparent), color-mix(in srgb, var(--ic) 7%, transparent) 70%);
+    border-color: color-mix(in srgb, var(--ic) 32%, transparent);
+    box-shadow: var(--tile-inset);
+  }
+  :hover > .rail-tile {
+    transform: scale(1.08) rotate(-4deg);
+    border-color: color-mix(in srgb, var(--ic) 55%, transparent);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .rail-tile, :hover > .rail-tile { transition: none; transform: none; }
+  }
 }
 
 /* Streamdown markdown inside chat messages */
