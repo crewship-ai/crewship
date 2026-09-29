@@ -1,0 +1,15 @@
+Development 1 only; deployment via sudo systemctl reload crewship-ws@1.
+Actual /proc/3563307/exe version: d0e2023e64d660ced626145192dc18c0c38fa3df (clean).
+Build: 2026-09-29T21:23:25Z; linux/amd64; go1.27.1.
+web/out build marker: d0e2023e6; built 2026-09-29 21:23 UTC.
+Backend process environ: UID 1000, mode 0400.
+GET /api/health, /healthz, /readyz: all 200.
+Authenticated CLI workspace list: PASS (private roster not retained).
+
+Post-deploy two-client policy CLI/API acceptance:
+CLI policies: exact grant, private audience, unintegrated routes denied, stale replacement 409: PASS
+CLI deny-all revoked H1 chat/history; H2 still reads; old policy cannot restore grants: PASS
+Owned workspace removed; synthetic users have no workspace access.
+
+The broker adapter is present in this build but production application dispatch remains gated.
+Provider/Docker positive acceptance used owned synthetic fixtures, not a paid upstream model.
