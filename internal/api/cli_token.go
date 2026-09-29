@@ -183,8 +183,12 @@ var knownScopes = map[string]struct{}{
 	"skills:write":      {},
 	"workspace:*":       {},
 	"workspace:admin":   {},
-	"webhooks:*":        {},
-	"webhooks:write":    {},
+	// instance:admin reaches the instance-gated routes (instance_admin.go).
+	// The gate still checks that the token's user IS an instance admin; the
+	// scope only lets a restricted token carry that power at all.
+	"instance:admin": {},
+	"webhooks:*":     {},
+	"webhooks:write": {},
 }
 
 // scopesPermittedByRole reports whether a caller with the given
@@ -210,7 +214,7 @@ func scopesPermittedByRole(role string, scopes []string) string {
 	rank := roleRank[role]
 	for _, s := range scopes {
 		switch s {
-		case "*", "workspace:admin", "workspace:*":
+		case "*", "workspace:admin", "workspace:*", "instance:admin":
 			// workspace:* grants workspace:admin via canScope's
 			// resource-wildcard, so it needs the same ADMIN gate.
 			if rank < roleRank["ADMIN"] {
@@ -617,7 +621,7 @@ func lookupCLIToken(ctx context.Context, db *sql.DB, token string) (tokenID, use
 		SELECT ct.id, ct.user_id, u.email, COALESCE(u.full_name, ''), ct.tier, ct.expires_at, ct.revoked_at, ct.scopes
 		FROM cli_tokens ct
 		JOIN users u ON u.id = ct.user_id
-		WHERE ct.token_hash = ?
+		WHERE ct.token_hash = ? AND u.suspended_at IS NULL
 	`, tokenHash).Scan(&tokenID, &userID, &email, &name, &tier, &expiresAt, &revokedAt, &scopesRaw)
 	if dbErr != nil {
 		if dbErr == sql.ErrNoRows {

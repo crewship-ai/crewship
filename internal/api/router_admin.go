@@ -41,16 +41,49 @@ func (r *Router) registerAdminRoutes() {
 	// openapi: responses 200,400,401,403,404,500
 	r.authedAdmin("GET", "/api/v1/admin/users/{userId}/sessions", people.Sessions)
 	// openapi: responses 204,400,401,403,404,500
-	r.authedMut("POST", "/api/v1/admin/users/{userId}/sessions/{sessionId}/revoke", roleManage, people.RevokeSession)
+	r.authedAdminMut("POST", "/api/v1/admin/users/{userId}/sessions/{sessionId}/revoke", people.RevokeSession)
 	// openapi: responses 200,400,401,403,404,500
-	r.authedMut("POST", "/api/v1/admin/users/{userId}/sessions/revoke-all", roleManage, people.RevokeAllSessions)
+	r.authedAdminMut("POST", "/api/v1/admin/users/{userId}/sessions/revoke-all", people.RevokeAllSessions)
 	// openapi: responses 204,400,401,403,404,500
-	r.authedMut("POST", "/api/v1/admin/users/{userId}/unlock", roleManage, people.Unlock)
+	r.authedAdminMut("POST", "/api/v1/admin/users/{userId}/unlock", people.Unlock)
+
+	// Instance administration (Admin › People & workspaces): add a person,
+	// give or take access in any workspace, create / hand over / delete
+	// workspaces, suspend accounts, reissue setup links and name the other
+	// instance admins. authedInstance: an instance admin, and no workspace in
+	// the request — they need not belong to what they manage.
+	inst := NewInstanceAdminHandler(r.db, r.logger, r.sessionsStore, r.Journal(), r.hub)
+	// openapi: responses 201,400,401,403,404,409,500,503
+	r.authedInstance("POST", "/api/v1/admin/instance/people", inst.CreatePerson)
+	// openapi: responses 200,400,401,403,404,409,500
+	r.authedInstance("POST", "/api/v1/admin/instance/people/{userId}/suspend", inst.Suspend)
+	// openapi: responses 204,401,403,404,500
+	r.authedInstance("POST", "/api/v1/admin/instance/people/{userId}/reactivate", inst.Reactivate)
+	// openapi: responses 200,401,403,404,409,500,503
+	r.authedInstance("POST", "/api/v1/admin/instance/people/{userId}/setup-link", inst.IssueSetupLink)
+	// openapi: responses 204,401,403,404,500
+	r.authedInstance("DELETE", "/api/v1/admin/instance/people/{userId}/setup-link", inst.RevokeSetupLink)
+	// openapi: responses 204,401,403,404,409,500
+	r.authedInstance("PUT", "/api/v1/admin/instance/admins/{userId}", inst.GrantAdmin)
+	// openapi: responses 204,401,403,404,409,500
+	r.authedInstance("DELETE", "/api/v1/admin/instance/admins/{userId}", inst.RevokeAdmin)
+	// openapi: responses 200,201,400,401,403,404,409,500
+	r.authedInstance("PUT", "/api/v1/admin/instance/workspaces/{workspaceId}/members/{userId}", inst.SetMembership)
+	// openapi: responses 204,401,403,404,409,500
+	r.authedInstance("DELETE", "/api/v1/admin/instance/workspaces/{workspaceId}/members/{userId}", inst.RemoveMembership)
+	// openapi: responses 201,400,401,403,409,500
+	r.authedInstance("POST", "/api/v1/admin/instance/workspaces", inst.CreateWorkspace)
+	// openapi: responses 200,400,401,403,404,409,500
+	r.authedInstance("POST", "/api/v1/admin/instance/workspaces/{workspaceId}/transfer-ownership", inst.TransferOwnership)
+	// openapi: responses 204,400,401,403,404,500
+	r.authedInstance("DELETE", "/api/v1/admin/instance/workspaces/{workspaceId}", inst.DeleteWorkspace)
+	// openapi: responses 200,401,403,500
+	r.authedInstance("GET", "/api/v1/admin/instance/audit", inst.AuditLog)
 
 	// Admin observability: runtime log-level toggle + disk/health read.
 	obs := NewAdminObservabilityHandler(r.db, r.logger)
 	r.authedAdmin("GET", "/api/v1/admin/log-level", obs.GetLogLevel)
-	r.authedMut("PUT", "/api/v1/admin/log-level", roleManage, obs.SetLogLevel)
+	r.authedInstanceMut("PUT", "/api/v1/admin/log-level", obs.SetLogLevel)
 	r.authedAdmin("GET", "/api/v1/admin/health", obs.Health)
 
 	// Master-key re-encryption (E1). Instance-wide walk of every stored
@@ -60,7 +93,7 @@ func (r *Router) registerAdminRoutes() {
 	// roleManage, same gate as the other instance-scoped admin operations
 	// (backups, prune-legacy-resources).
 	reencryptH := NewReencryptHandler(r.db, r.logger)
-	r.authedMut("POST", "/api/v1/admin/reencrypt", roleManage, reencryptH.Reencrypt)
+	r.authedInstanceMut("POST", "/api/v1/admin/reencrypt", reencryptH.Reencrypt)
 
 	// Keeper admin log
 	keeperLog := NewKeeperLogHandler(r.db, r.logger)
@@ -92,8 +125,8 @@ func (r *Router) registerAdminRoutes() {
 	// the removed "Rate Limits" placeholder tab with a real backend.
 	rateLimits := NewAdminRateLimitsHandler(r.ratelimitStore, r.logger)
 	r.authedAdmin("GET", "/api/v1/admin/rate-limits", rateLimits.List)
-	r.authedMut("PUT", "/api/v1/admin/rate-limits/{key}", roleManage, rateLimits.Set)
-	r.authedMut("DELETE", "/api/v1/admin/rate-limits/{key}", roleManage, rateLimits.Reset)
+	r.authedInstanceMut("PUT", "/api/v1/admin/rate-limits/{key}", rateLimits.Set)
+	r.authedInstanceMut("DELETE", "/api/v1/admin/rate-limits/{key}", rateLimits.Reset)
 
 	// Keeper instance judge configuration. Read ADMIN+, write OWNER/ADMIN. This
 	// is the INSTANCE layer (keeper_runtime_settings) that the per-workspace
@@ -105,8 +138,8 @@ func (r *Router) registerAdminRoutes() {
 	keeperCfg := NewAdminKeeperConfigHandler(r.keeperSettings, r.Journal(), r.logger)
 	r.authedAdmin("GET", "/api/v1/admin/keeper/health", NewAdminKeeperHealthHandler(r.logger).Get)
 	r.authedAdmin("GET", "/api/v1/admin/keeper/config", keeperCfg.Get)
-	r.authedMut("PUT", "/api/v1/admin/keeper/config", roleManage, keeperCfg.Put)
-	r.authedMut("DELETE", "/api/v1/admin/keeper/config", roleManage, keeperCfg.Reset)
+	r.authedInstanceMut("PUT", "/api/v1/admin/keeper/config", keeperCfg.Put)
+	r.authedInstanceMut("DELETE", "/api/v1/admin/keeper/config", keeperCfg.Reset)
 
 	// Judge verification + model discovery. The pair that makes configuring a
 	// local judge a one-minute job: paste an address, see what it serves, prove
@@ -114,14 +147,14 @@ func (r *Router) registerAdminRoutes() {
 	// address the caller can supply, which is a write-class capability even
 	// though one of them only returns a model list.
 	keeperJudge := NewAdminKeeperJudgeHandler(r.keeperSettings, r.logger).WithGovJudge(r.govModelJudge)
-	r.authedMut("POST", "/api/v1/admin/keeper/judge/test", roleManage, keeperJudge.Test)
+	r.authedInstanceMut("POST", "/api/v1/admin/keeper/judge/test", keeperJudge.Test)
 	r.authedMut("GET", "/api/v1/admin/keeper/judge/models", roleManage, keeperJudge.Models)
 	// The same check for a HOSTED judge (Anthropic / OpenAI-compatible built from
 	// a vault key). Separate route rather than a mode flag on /test: the stages
 	// differ because the failure modes do — there is no endpoint to reach and no
 	// model to pull, but there IS a key that can be missing, revoked or of the
 	// wrong type.
-	r.authedMut("POST", "/api/v1/admin/keeper/judge/test-hosted", roleManage, keeperJudge.TestHosted)
+	r.authedInstanceMut("POST", "/api/v1/admin/keeper/judge/test-hosted", keeperJudge.TestHosted)
 
 	// Keeper evaluator models. Same instance layer, for the OTHER half of the
 	// Keeper model stack: the five aux slots behind the watchdog and the Reviews
@@ -133,16 +166,16 @@ func (r *Router) registerAdminRoutes() {
 		// caller's own workspace before it is stored.
 		WithCredentials(newAuxCredentialCheck(r.db))
 	r.authedAdmin("GET", "/api/v1/admin/keeper/aux", keeperAux.Get)
-	r.authedMut("PUT", "/api/v1/admin/keeper/aux/{slot}", roleManage, keeperAux.Put)
-	r.authedMut("DELETE", "/api/v1/admin/keeper/aux/{slot}", roleManage, keeperAux.Reset)
+	r.authedInstanceMut("PUT", "/api/v1/admin/keeper/aux/{slot}", keeperAux.Put)
+	r.authedInstanceMut("DELETE", "/api/v1/admin/keeper/aux/{slot}", keeperAux.Reset)
 	// The collection-scoped DELETE is "reset every slot"; {slot} is empty there,
 	// which is exactly what AuxStore.Reset("") means.
-	r.authedMut("DELETE", "/api/v1/admin/keeper/aux", roleManage, keeperAux.Reset)
-	r.authedMut("POST", "/api/v1/admin/keeper/aux/use-judge", roleManage, keeperAux.UseJudge)
+	r.authedInstanceMut("DELETE", "/api/v1/admin/keeper/aux", keeperAux.Reset)
+	r.authedInstanceMut("POST", "/api/v1/admin/keeper/aux/use-judge", keeperAux.UseJudge)
 	// One real evaluation against a slot's model, on request. The card's default
 	// stays "not probed" — rendering a status page must not spend money — but an
 	// operator who asks explicitly should be able to find out.
-	r.authedMut("POST", "/api/v1/admin/keeper/aux/{slot}/probe", roleManage, keeperAux.Probe)
+	r.authedInstanceMut("POST", "/api/v1/admin/keeper/aux/{slot}/probe", keeperAux.Probe)
 
 	// Manual runs for the four Reviews evaluators (issue #1555). The
 	// evaluators were reachable only by the scheduler and by sidecars holding
@@ -310,7 +343,7 @@ func (r *Router) registerAdminRoutes() {
 	}
 	legacyH := NewLegacyResourceHandler(r.db, r.logger, legacyPruner, legacyDetector)
 	r.authedAdmin("GET", "/api/v1/admin/legacy-resources", legacyH.Detect)
-	r.authedMut("POST", "/api/v1/admin/prune-legacy-resources", roleManage, legacyH.Prune)
+	r.authedInstanceMut("POST", "/api/v1/admin/prune-legacy-resources", legacyH.Prune)
 
 	// Crew runtime teardown (admin-only). Removes the LIVE id-scoped docker
 	// containers+volumes of every crew in the workspace — the docker half of a

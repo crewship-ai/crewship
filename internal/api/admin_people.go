@@ -10,16 +10,15 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/auth/sessions"
-	"github.com/crewship-ai/crewship/internal/backup"
 )
 
 // Admin › Workspaces and Admin › Users.
 //
 // Scope. A workspace ADMIN or OWNER sees the workspace they are in — the
 // same rule every other /admin read follows, so a tenant admin never
-// enumerates the other tenants. The instance owner (CREWSHIP_OWNER_EMAIL,
-// the identity the backup surface already trusts) sees every workspace and
-// every account. Which of the two a response is says itself in the
+// enumerates the other tenants. An instance administrator (instance_admin.go:
+// CREWSHIP_OWNER_EMAIL, a named instance admin, or by fallback the oldest
+// workspace's owner) sees every workspace and every account. Which of the two a response is says itself in the
 // X-Admin-Scope header ("instance" or "workspace"), so a client never has to
 // guess whether one row means "one workspace" or "one you may see".
 //
@@ -39,15 +38,10 @@ const (
 	reasonAdminInvalidate = "admin_invalidate"
 )
 
-// isInstanceOwner reports whether the caller is the instance owner. A
-// request without a user (tests, internal callers) is not.
-func isInstanceOwner(r *http.Request) bool {
-	u := UserFromContext(r.Context())
-	return u != nil && backup.IsInstanceOwner(u.Email)
-}
-
-func adminScope(r *http.Request) string {
-	if isInstanceOwner(r) {
+// adminScope is "instance" for an instance administrator (instance_admin.go),
+// who sees every workspace and account, and "workspace" for everyone else.
+func adminScope(r *http.Request, db *sql.DB) string {
+	if isInstanceAdmin(r, db) {
 		return adminScopeInstance
 	}
 	return adminScopeWS
@@ -57,13 +51,13 @@ func adminScope(r *http.Request) string {
 // figures the Admin › Workspaces table shows.
 // GET /api/v1/admin/workspaces — requires ADMIN+.
 func (h *AdminHandler) ListWorkspaces(w http.ResponseWriter, r *http.Request) {
-	if !canRole(RoleFromContext(r.Context()), "manage") {
+	if !canAdministerInstance(r.Context()) {
 		replyError(w, http.StatusForbidden, "Forbidden: ADMIN or OWNER only")
 		return
 	}
 	ctx := r.Context()
 	currentWS := WorkspaceIDFromContext(ctx)
-	scope := adminScope(r)
+	scope := adminScope(r, h.db)
 	now := time.Now().UTC()
 	nowStr := now.Format(time.RFC3339)
 	since30 := now.Add(-30 * 24 * time.Hour).Format(time.RFC3339)
@@ -96,23 +90,24 @@ func (h *AdminHandler) ListWorkspaces(w http.ResponseWriter, r *http.Request) {
 	defer rows.Close()
 
 	type wsRow struct {
-		ID                         string  `json:"id"`
-		Name                       string  `json:"name"`
-		Slug                       string  `json:"slug"`
-		CreatedAt                  string  `json:"created_at"`
-		UpdatedAt                  string  `json:"updated_at"`
-		MemberCount                int     `json:"_count_members"`
-		AgentCount                 int     `json:"_count_agents"`
-		CrewCount                  int     `json:"_count_crews"`
-		PreferredLanguage          *string `json:"preferred_language"`
-		RunRetentionDays           *int64  `json:"run_retention_days"`
-		AllowPrivilegedCredentials bool    `json:"allow_privileged_credentials"`
-		PendingInvitations         int     `json:"pending_invitations"`
-		LastActivityAt             *string `json:"last_activity_at"`
-		Runs7d                     int     `json:"runs_7d"`
-		RunsByDay                  [7]int  `json:"runs_by_day"`
-		Cost30dUSD                 float64 `json:"cost_30d_usd"`
-		Current                    bool    `json:"current"`
+		ID                         string    `json:"id"`
+		Name                       string    `json:"name"`
+		Slug                       string    `json:"slug"`
+		CreatedAt                  string    `json:"created_at"`
+		UpdatedAt                  string    `json:"updated_at"`
+		MemberCount                int       `json:"_count_members"`
+		AgentCount                 int       `json:"_count_agents"`
+		CrewCount                  int       `json:"_count_crews"`
+		PreferredLanguage          *string   `json:"preferred_language"`
+		RunRetentionDays           *int64    `json:"run_retention_days"`
+		AllowPrivilegedCredentials bool      `json:"allow_privileged_credentials"`
+		PendingInvitations         int       `json:"pending_invitations"`
+		LastActivityAt             *string   `json:"last_activity_at"`
+		Runs7d                     int       `json:"runs_7d"`
+		RunsByDay                  [7]int    `json:"runs_by_day"`
+		Cost30dUSD                 float64   `json:"cost_30d_usd"`
+		Current                    bool      `json:"current"`
+		Owners                     []wsOwner `json:"owners"`
 	}
 
 	result := []*wsRow{}
@@ -140,6 +135,7 @@ func (h *AdminHandler) ListWorkspaces(w http.ResponseWriter, r *http.Request) {
 		}
 		ws.AllowPrivilegedCredentials = priv != 0
 		ws.Current = ws.ID == currentWS
+		ws.Owners = []wsOwner{}
 		result = append(result, &ws)
 		byID[ws.ID] = &ws
 	}
@@ -195,22 +191,62 @@ func (h *AdminHandler) ListWorkspaces(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if len(result) > 0 {
+		oq := `SELECT wm.workspace_id, u.id, u.email, u.full_name
+			FROM workspace_members wm JOIN users u ON u.id = wm.user_id
+			WHERE wm.role = 'OWNER'`
+		var oargs []any
+		if scope == adminScopeWS {
+			oq += ` AND wm.workspace_id = ?`
+			oargs = append(oargs, currentWS)
+		}
+		oq += ` ORDER BY wm.created_at`
+		or, err := h.db.QueryContext(ctx, oq, oargs...)
+		if err != nil {
+			replyInternalError(w, h.logger, "workspace owners (admin)", err)
+			return
+		}
+		defer or.Close()
+		for or.Next() {
+			var wsID string
+			var o wsOwner
+			if err := or.Scan(&wsID, &o.ID, &o.Email, &o.FullName); err != nil {
+				replyInternalError(w, h.logger, "scan workspace owner (admin)", err)
+				return
+			}
+			if ws, ok := byID[wsID]; ok {
+				ws.Owners = append(ws.Owners, o)
+			}
+		}
+		if err := or.Err(); err != nil {
+			replyInternalError(w, h.logger, "rows iteration (workspace owners)", err)
+			return
+		}
+	}
+
 	w.Header().Set(adminScopeHeader, scope)
 	writeJSON(w, http.StatusOK, result)
 }
 
+// wsOwner is one OWNER of a workspace in the admin list.
+type wsOwner struct {
+	ID       string  `json:"id"`
+	Email    string  `json:"email"`
+	FullName *string `json:"full_name"`
+}
+
 // ListUsers returns the accounts the caller may administer: members of the
-// current workspace, or — for the instance owner — every account, members
+// current workspace, or — for an instance admin — every account, members
 // of no workspace included. One row per person.
 // GET /api/v1/admin/users — requires ADMIN+.
 func (h *AdminHandler) ListUsers(w http.ResponseWriter, r *http.Request) {
-	if !canRole(RoleFromContext(r.Context()), "manage") {
+	if !canAdministerInstance(r.Context()) {
 		replyError(w, http.StatusForbidden, "Forbidden: ADMIN or OWNER only")
 		return
 	}
 	ctx := r.Context()
 	currentWS := WorkspaceIDFromContext(ctx)
-	scope := adminScope(r)
+	scope := adminScope(r, h.db)
 	now := time.Now().UTC()
 	nowStr := now.Format(time.RFC3339)
 
@@ -223,9 +259,12 @@ func (h *AdminHandler) ListUsers(w http.ResponseWriter, r *http.Request) {
 				WHERE s.user_id = u.id AND s.revoked_at IS NULL AND s.expires_at > ?),
 			(SELECT COUNT(*) FROM cli_tokens t
 				WHERE t.user_id = u.id AND t.revoked_at IS NULL
-				AND (t.expires_at IS NULL OR t.expires_at > ?))
+				AND (t.expires_at IS NULL OR t.expires_at > ?)),
+			u.instance_role, u.suspended_at, u.suspended_reason,
+			(SELECT MAX(v.expires) FROM verification_tokens v
+				WHERE v.identifier = u.email AND v.purpose = 'account_setup' AND v.expires > ?)
 		FROM users u`
-	args := []any{nowStr, nowStr}
+	args := []any{nowStr, nowStr, nowStr}
 	if scope == adminScopeWS {
 		q += ` WHERE EXISTS (SELECT 1 FROM workspace_members wm WHERE wm.user_id = u.id AND wm.workspace_id = ?)`
 		args = append(args, currentWS)
@@ -267,15 +306,31 @@ func (h *AdminHandler) ListUsers(w http.ResponseWriter, r *http.Request) {
 		LockedUntil      *string      `json:"locked_until"`
 		FailedLoginCount int          `json:"failed_login_count"`
 		EmailVerified    bool         `json:"email_verified"`
+		// InstanceAdmin and its source ("env", "role" or
+		// "oldest_workspace_owner") — see instance_admin.go.
+		InstanceAdmin       bool    `json:"instance_admin"`
+		InstanceAdminSource *string `json:"instance_admin_source"`
+		SuspendedAt         *string `json:"suspended_at"`
+		SuspendedReason     *string `json:"suspended_reason"`
+		// SetupLinkExpiresAt is set while an unused setup link is pending:
+		// the account exists and nobody has chosen its password yet.
+		SetupLinkExpiresAt *string `json:"setup_link_expires_at"`
+	}
+
+	fallbackOwners, err := instanceFallbackOwners(ctx, h.db)
+	if err != nil {
+		replyInternalError(w, h.logger, "list users: instance admins", err)
+		return
 	}
 
 	result := []*userRow{}
 	byID := map[string]*userRow{}
 	for rows.Next() {
 		var u userRow
-		var locked, verified, lastActive sql.NullString
+		var locked, verified, lastActive, instRole, suspended, suspendedReason, setupExp sql.NullString
 		if err := rows.Scan(&u.ID, &u.Email, &u.FullName, &u.AvatarURL, &u.CreatedAt,
-			&u.FailedLoginCount, &locked, &verified, &lastActive, &u.ActiveSessions, &u.CLITokens); err != nil {
+			&u.FailedLoginCount, &locked, &verified, &lastActive, &u.ActiveSessions, &u.CLITokens,
+			&instRole, &suspended, &suspendedReason, &setupExp); err != nil {
 			replyInternalError(w, h.logger, "scan user", err)
 			return
 		}
@@ -290,6 +345,19 @@ func (h *AdminHandler) ListUsers(w http.ResponseWriter, r *http.Request) {
 		u.EmailVerified = emailVerified(verified)
 		if lastActive.Valid && lastActive.String != "" {
 			u.LastActiveAt = &lastActive.String
+		}
+		if suspended.Valid && suspended.String != "" {
+			u.SuspendedAt = &suspended.String
+			if suspendedReason.Valid && suspendedReason.String != "" {
+				u.SuspendedReason = &suspendedReason.String
+			}
+		}
+		if setupExp.Valid && setupExp.String != "" {
+			u.SetupLinkExpiresAt = &setupExp.String
+		}
+		if src := instanceAdminSourceFor(u.Email, instRole.String, u.SuspendedAt != nil, fallbackOwners[u.ID]); src != "" {
+			u.InstanceAdmin = true
+			u.InstanceAdminSource = &src
 		}
 		u.Memberships = []membership{}
 		result = append(result, &u)
@@ -385,7 +453,7 @@ func NewAdminUsersHandler(db *sql.DB, logger *slog.Logger, store sessions.Store)
 
 // target resolves and authorises the {userId} a per-person action is about.
 //
-// Outside the instance owner, the person must be a member of the caller's
+// Outside an instance admin, the person must be a member of the caller's
 // workspace — anything else is a 404, the same answer as "no such user", so
 // the route cannot be used to probe which accounts exist. An ADMIN may not
 // act on an OWNER of the workspace (403): signing the owner out, or lifting
@@ -397,7 +465,7 @@ func (h *AdminUsersHandler) target(w http.ResponseWriter, r *http.Request) (acto
 		return nil, "", "", false
 	}
 	callerRole := RoleFromContext(r.Context())
-	if !canRole(callerRole, "manage") {
+	if !canAdministerInstance(r.Context()) {
 		replyError(w, http.StatusForbidden, "Forbidden: ADMIN or OWNER only")
 		return nil, "", "", false
 	}
@@ -408,7 +476,7 @@ func (h *AdminUsersHandler) target(w http.ResponseWriter, r *http.Request) (acto
 		return nil, "", "", false
 	}
 
-	if backup.IsInstanceOwner(actor.Email) {
+	if isInstanceAdmin(r, h.db) {
 		var one int
 		err := h.db.QueryRowContext(r.Context(), `SELECT 1 FROM users WHERE id = ?`, targetID).Scan(&one)
 		if errors.Is(err, sql.ErrNoRows) {

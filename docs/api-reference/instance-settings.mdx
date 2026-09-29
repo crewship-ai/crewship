@@ -8,7 +8,8 @@ tag: Experimental
 
 Instance settings are a singleton, instance-global key/value store (the
 `app_settings` table). Reads (List, Get) are open to `MANAGER` and above;
-writes (Put, Delete) require `OWNER` or `ADMIN`.
+writes (Put, Delete) require an instance administrator — the settings apply to
+every workspace, so a workspace `OWNER` or `ADMIN` role is not enough.
 
 **Sensitive-value redaction.** Values under these key patterns always read
 back as `***`, even on the same request that set them (write-only on read):
@@ -90,7 +91,7 @@ PUT /api/v1/instance/settings/{key}
 Upserts a value for `key`. An empty string is a valid value (e.g. clearing a
 banner); only an absent `value` field is rejected.
 
-**Auth:** `OWNER` or `ADMIN` role (`manage` tier)
+**Auth:** instance administrator; a workspace `OWNER` or `ADMIN` role is not enough
 
 **Request Body:**
 
@@ -129,7 +130,7 @@ Removes a key. Protected bootstrap markers cannot be deleted -- the guard
 fires before the delete, so a `403` is returned even if the row does not
 exist (a probing client cannot tell whether the marker was ever set).
 
-**Auth:** `OWNER` or `ADMIN` role
+**Auth:** instance administrator; a workspace `OWNER` or `ADMIN` role is not enough
 
 **Response:** `204 No Content`
 

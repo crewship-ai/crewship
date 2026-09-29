@@ -26,6 +26,7 @@ package api
 // 5-tier role model or the v109 capability layer.
 
 import (
+	"context"
 	"net/http"
 	"strings"
 )
@@ -199,7 +200,7 @@ func scopeForRoute(pattern string) string {
 // The enumeration test uses it so a typo'd or empty role fails the build.
 func isDeclaredRole(role string) bool {
 	switch role {
-	case roleCreate, roleManage, roleSelf, roleInline:
+	case roleCreate, roleManage, roleSelf, roleInline, roleInstance:
 		return true
 	default:
 		return false
@@ -289,5 +290,38 @@ type adminRoute struct {
 func (r *Router) authedAdmin(method, pattern string, h http.HandlerFunc) {
 	r.adminRoutes = append(r.adminRoutes, adminRoute{Method: method, Pattern: pattern})
 	r.mux.Handle(method+" "+pattern,
-		r.authMw.RequireAuth(r.authMw.RequireWorkspace(r.requireRoleScopeMW(roleManage, scopeSelf, h))))
+		r.authMw.RequireAuth(r.authMw.RequireWorkspace(r.requireAdminFloorMW(scopeSelf, h))))
+}
+
+// authedAdminMut registers an admin-console action on a person — sign their
+// sessions out, lift a lockout — at the same floor as authedAdmin: OWNER/ADMIN
+// of the current workspace, or an instance admin. Recorded as roleManage, the
+// role it has always had, so the manifest reads the same.
+func (r *Router) authedAdminMut(method, pattern string, h http.HandlerFunc) {
+	scope := scopeForRoute(pattern)
+	r.recordMut(method, pattern, roleManage, scope)
+	r.mux.Handle(method+" "+pattern,
+		r.authMw.RequireAuth(r.authMw.RequireWorkspace(r.requireAdminFloorMW(scope, h))))
+}
+
+// requireAdminFloorMW is the admin console's floor: OWNER/ADMIN of the
+// current workspace, or an instance administrator — who runs the console
+// whatever their role where they happen to stand. It marks the request when
+// the instance rule is what let it through, for canAdministerInstance.
+func (r *Router) requireAdminFloorMW(scope string, h http.HandlerFunc) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		ctx := req.Context()
+		if !canRole(RoleFromContext(ctx), roleManage) {
+			if !isInstanceAdmin(req, r.db) {
+				writeProblem(w, req, http.StatusForbidden, "Forbidden")
+				return
+			}
+			req = req.WithContext(context.WithValue(ctx, ctxInstanceAdmin, true))
+		}
+		if scope != scopeSelf && !canScope(req.Context(), scope) {
+			writeProblem(w, req, http.StatusForbidden, "Forbidden")
+			return
+		}
+		h(w, req)
+	})
 }

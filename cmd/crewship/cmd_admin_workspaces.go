@@ -7,7 +7,7 @@ package main
 // The endpoint had no CLI command. It is server-backed (not the
 // local-only recovery family in cmd_admin.go): it returns the CURRENT
 // workspace — the one the CLI's auth/workspace context resolves to — or,
-// for the instance owner, every workspace on the instance, each with
+// for an instance administrator, every workspace on the instance, each with
 // member/agent/crew counts, runs over the last week, spend over the last
 // 30 days and the last audited change. Scope is decided server-side (see
 // internal/api/admin_people.go) and reported in the X-Admin-Scope header.
@@ -50,8 +50,8 @@ var adminWorkspacesCmd = &cobra.Command{
 	Use:   "workspaces",
 	Short: "List the workspaces you administer, with counts, runs and spend (admin)",
 	Long: `GET /api/v1/admin/workspaces. A workspace ADMIN or OWNER gets one row, the
-workspace the CLI is authenticated against; the instance owner
-(CREWSHIP_OWNER_EMAIL on the server) gets every workspace on the instance.
+workspace the CLI is authenticated against; an instance administrator
+(see 'crewship admin instance') gets every workspace on the instance.
 Each row has counts for members, agents and crews, runs in the last 7 days,
 spend in the last 30 days and the time of the last audited change; the
 current workspace is marked with *.

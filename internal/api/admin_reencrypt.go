@@ -138,7 +138,7 @@ func NewReencryptHandler(db *sql.DB, logger *slog.Logger) *ReencryptHandler {
 // not in logs, not in errors, not in the audit row.
 func (h *ReencryptHandler) Reencrypt(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	if !canRole(RoleFromContext(ctx), "manage") {
+	if !canAdministerInstance(ctx) {
 		replyError(w, http.StatusForbidden, "admin role required")
 		return
 	}

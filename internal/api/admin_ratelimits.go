@@ -44,7 +44,7 @@ func (h *AdminRateLimitsHandler) List(w http.ResponseWriter, r *http.Request) {
 // Set overrides a limiter. PUT /api/v1/admin/rate-limits/{key} with
 // {"value": N}. Unknown key → 404; out-of-range value → 400.
 func (h *AdminRateLimitsHandler) Set(w http.ResponseWriter, r *http.Request) {
-	if !canRole(RoleFromContext(r.Context()), "manage") {
+	if !canAdministerInstance(r.Context()) {
 		replyError(w, http.StatusForbidden, "Forbidden")
 		return
 	}
@@ -90,7 +90,7 @@ func (h *AdminRateLimitsHandler) Set(w http.ResponseWriter, r *http.Request) {
 // Reset drops a limiter's override so it reverts to the shipped default.
 // DELETE /api/v1/admin/rate-limits/{key}.
 func (h *AdminRateLimitsHandler) Reset(w http.ResponseWriter, r *http.Request) {
-	if !canRole(RoleFromContext(r.Context()), "manage") {
+	if !canAdministerInstance(r.Context()) {
 		replyError(w, http.StatusForbidden, "Forbidden")
 		return
 	}

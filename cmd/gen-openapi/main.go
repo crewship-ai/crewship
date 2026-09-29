@@ -18,6 +18,9 @@
 //	r.authedMut("METHOD", "/path", role, ...)
 //	r.authedSelfMut("METHOD", "/path", ...)
 //	r.authedAdmin("METHOD", "/path", ...)
+//	r.authedAdminMut("METHOD", "/path", ...)
+//	r.authedInstance("METHOD", "/path", ...)
+//	r.authedInstanceMut("METHOD", "/path", ...)
 //
 // It deliberately does NOT infer schemas from handler readJSON/writeJSON
 // calls. The response schemas below cover the highest-value read-only
@@ -59,8 +62,10 @@ var outputPath = "internal/api/openapi.gen.json"
 // combinedPattern matches r.mux.Handle("METHOD /path", ...) / HandleFunc.
 var combinedPattern = regexp.MustCompile(`r\.mux\.Handle(?:Func)?\(\s*"([A-Z]+) (/[^"]*)"`)
 
-// splitPattern matches r.authedMut/authedSelfMut/authedAdmin("METHOD", "/path", ...).
-var splitPattern = regexp.MustCompile(`r\.authed(?:Mut|SelfMut|Admin)\(\s*"([A-Z]+)"\s*,\s*"(/[^"]*)"`)
+// splitPattern matches r.authedMut/authedSelfMut/authedAdmin/authedAdminMut/
+// authedInstance/authedInstanceMut("METHOD", "/path", ...). Longer names come
+// first in the alternation: "authedAdmin" must not stop short of "authedAdminMut(".
+var splitPattern = regexp.MustCompile(`r\.authed(?:Mut|SelfMut|AdminMut|Admin|InstanceMut|Instance)\(\s*"([A-Z]+)"\s*,\s*"(/[^"]*)"`)
 
 type route struct {
 	method string
@@ -1548,7 +1553,7 @@ func resolveHandlerRefs(call, src string) (inline []inlineHandler, targets []han
 // were built on that glob; the other one (internal/api's
 // route_authz_invariant_test.go) is the security-relevant half, and
 // internal/api/pages_internal.go was the file both of them could not see.
-var routeRegistrationCall = regexp.MustCompile(`\.(?:mux\.Handle|mux\.HandleFunc|authedMut|authedSelfMut|authedAdmin)\(`)
+var routeRegistrationCall = regexp.MustCompile(`\.(?:mux\.Handle|mux\.HandleFunc|authedMut|authedSelfMut|authedAdmin|authedAdminMut|authedInstance|authedInstanceMut)\(`)
 
 // routeSourceFiles lists the non-test Go files in routerDir that register at
 // least one route. A file that registers none is skipped only because it has
@@ -1693,7 +1698,7 @@ func inferHandlerInfo(rt route) handlerInfo {
 	if strings.Contains(rt.call, "authed") {
 		info.statuses["401"] = true
 	}
-	if strings.Contains(rt.call, "authedAdmin") || strings.Contains(rt.call, "authedMut") || strings.Contains(rt.call, "authedSelfMut") || strings.Contains(rt.call, "wsCtx") {
+	if strings.Contains(rt.call, "authedAdmin") || strings.Contains(rt.call, "authedMut") || strings.Contains(rt.call, "authedSelfMut") || strings.Contains(rt.call, "authedInstance") || strings.Contains(rt.call, "wsCtx") {
 		info.statuses["403"] = true
 	}
 	if strings.Contains(rt.call, "wsCtx") {

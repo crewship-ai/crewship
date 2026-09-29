@@ -233,17 +233,17 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	// Feature Flags (instance-default + per-workspace override). SPEC-2: new in this PR.
 	ff := NewFeatureFlagHandler(r.db, r.hub, r.logger)
 	r.mux.Handle("GET /api/v1/feature-flags", authed(wsCtx(http.HandlerFunc(ff.List))))
-	r.authedMut("POST", "/api/v1/feature-flags", roleManage, ff.Create)
-	r.authedMut("PATCH", "/api/v1/feature-flags/{key}", roleManage, ff.Update)
-	r.authedMut("DELETE", "/api/v1/feature-flags/{key}", roleManage, ff.Delete)
+	r.authedInstanceMut("POST", "/api/v1/feature-flags", ff.Create)
+	r.authedInstanceMut("PATCH", "/api/v1/feature-flags/{key}", ff.Update)
+	r.authedInstanceMut("DELETE", "/api/v1/feature-flags/{key}", ff.Delete)
 	r.authedMut("PUT", "/api/v1/feature-flags/{key}/override", roleManage, ff.UpsertOverride)
 	r.authedMut("DELETE", "/api/v1/feature-flags/{key}/override", roleManage, ff.DeleteOverride)
 	// Instance Settings (admin-only key/value config). SPEC-2: new in this PR.
 	inst := NewInstanceSettingsHandler(r.db, r.hub, r.logger)
 	r.mux.Handle("GET /api/v1/instance/settings", authed(wsCtx(http.HandlerFunc(inst.List))))
 	r.mux.Handle("GET /api/v1/instance/settings/{key}", authed(wsCtx(http.HandlerFunc(inst.Get))))
-	r.authedMut("PUT", "/api/v1/instance/settings/{key}", roleManage, inst.Put)
-	r.authedMut("DELETE", "/api/v1/instance/settings/{key}", roleManage, inst.Delete)
+	r.authedInstanceMut("PUT", "/api/v1/instance/settings/{key}", inst.Put)
+	r.authedInstanceMut("DELETE", "/api/v1/instance/settings/{key}", inst.Delete)
 	// Runtime capacity: what host admission control is holding, and why
 	// (#1668). Instance-scoped and read-only — the host is a property of the
 	// instance, not of a workspace. Authenticated but not admin-gated: any
@@ -376,7 +376,7 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	// toggle is ADMIN/OWNER (roleManage).
 	nph := NewNotifyProvidersHandler(r.db, r.logger)
 	r.mux.Handle("GET /api/v1/notification-providers", authed(wsCtx(http.HandlerFunc(nph.List))))
-	r.authedMut("PATCH", "/api/v1/notification-providers/{provider}", roleManage, nph.Patch)
+	r.authedInstanceMut("PATCH", "/api/v1/notification-providers/{provider}", nph.Patch)
 
 	// Per-user category x channel preference matrix (#1412). Self-scoped:
 	// every member manages their OWN matrix; the workspace is still in

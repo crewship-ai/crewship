@@ -89,6 +89,11 @@ type Router struct {
 	// this is the read half. The floor invariant walks it (and source-scans
 	// router_admin.go) so an admin read that forgets its gate fails the build.
 	adminRoutes []adminRoute
+
+	// instanceRoutes records every route behind the instance gate
+	// (authedInstance / authedInstanceMut, instance_admin.go), so the
+	// invariants can enumerate what only an instance admin may call.
+	instanceRoutes []instanceRoute
 	// e2eFixtures registers the browser-test seed surface under
 	// /api/v1/e2e/ (e2e_fixtures.go). Set only by WithE2EFixtures, which the
 	// server passes only when E2EFixturesEnabled says so; a router built

@@ -72,6 +72,8 @@ func routeRoleName(role string) string {
 		return "roleSelf"
 	case roleInline:
 		return "roleInline"
+	case roleInstance:
+		return "roleInstance"
 	default:
 		return "<unknown:" + role + ">"
 	}

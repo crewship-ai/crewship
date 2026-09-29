@@ -20,7 +20,7 @@ The file the admin CLI resolves and the server your CLI is configured for are **
 
 Two changes:
 
-- **`list-users` reads the server** (`GET /api/v1/admin/users`): the current workspace's members, or every account when you are the instance owner (`CREWSHIP_OWNER_EMAIL` on the server). It shows last activity, signed-in devices and lockout, and `--locked-only` works over HTTP.
+- **`list-users` reads the server** (`GET /api/v1/admin/users`): the current workspace's members, or every account when you are an instance administrator (`crewship admin instance` has the rules). It shows last activity, signed-in devices and lockout, and `--locked-only` works over HTTP.
 - **Every other verb here refuses to run when a server is named**, unless you pass `--local`. The refusal names the server, names the file, and names the flag. A server on `localhost` is not an exemption — `crewshipd` routinely runs with its own `DATABASE_URL` (every development clone uses `file:./crewship.db`), so "same host" says nothing about "same database".
 
 So the recovery commands in this guide carry `--local`. It costs one word and it is the difference between resetting the password you meant to reset and resetting one in a database nobody was looking at.

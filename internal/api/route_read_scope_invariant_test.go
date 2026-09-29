@@ -129,7 +129,7 @@ const readRouteWrapperLookahead = 4
 // registrationStart matches the beginning of ANY route registration, not just a
 // read one. It bounds the lookahead window: whatever follows belongs to the next
 // route, so it must not be read as this route's wrapper.
-var registrationStart = regexp.MustCompile(`^\s*r\.(mux\.Handle|mux\.HandleFunc|authedMut|authedSelfMut)\(`)
+var registrationStart = regexp.MustCompile(`^\s*r\.(mux\.Handle|mux\.HandleFunc|authedMut|authedSelfMut|authedInstance|authedInstanceMut|authedAdminMut)\(`)
 
 // readRoutesWithoutWorkspace are the read routes that legitimately carry no
 // workspace dimension. Each entry needs a reason a reviewer can check — "it is

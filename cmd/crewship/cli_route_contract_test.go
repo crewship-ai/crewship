@@ -921,10 +921,11 @@ func callSitesInBody(fset *token.FileSet, resolver *pathResolver, body *ast.Bloc
 	return out
 }
 
-// collectAPIRoutes reads the router's registration helpers. authedMut and
-// authedAdmin both wrap RequireAuth(RequireWorkspace(...)) — see
-// internal/api/rbac_routes.go — so registration alone tells us whether a
-// workspace is mandatory. authedSelfMut is RequireAuth only.
+// collectAPIRoutes reads the router's registration helpers. authedMut,
+// authedAdmin, authedAdminMut and authedInstanceMut all wrap
+// RequireAuth(RequireWorkspace(...)) — see internal/api/rbac_routes.go and
+// instance_admin.go — so registration alone tells us whether a workspace is
+// mandatory. authedSelfMut and authedInstance are RequireAuth only.
 func collectAPIRoutes(t *testing.T) map[string]apiRoute {
 	t.Helper()
 	root := repoRoot(t)
@@ -972,7 +973,7 @@ func collectAPIRoutes(t *testing.T) map[string]apiRoute {
 			}
 			pos := fset.Position(call.Pos())
 			switch sel.Sel.Name {
-			case "authedMut", "authedAdmin", "authedSelfMut":
+			case "authedMut", "authedAdmin", "authedSelfMut", "authedAdminMut", "authedInstance", "authedInstanceMut":
 				if len(call.Args) < 2 {
 					return true
 				}
@@ -981,7 +982,7 @@ func collectAPIRoutes(t *testing.T) map[string]apiRoute {
 				if !okM || !okP {
 					return true
 				}
-				add(method, pattern, sel.Sel.Name != "authedSelfMut", pos.String())
+				add(method, pattern, sel.Sel.Name != "authedSelfMut" && sel.Sel.Name != "authedInstance", pos.String())
 			case "Handle", "HandleFunc":
 				if len(call.Args) < 1 {
 					return true

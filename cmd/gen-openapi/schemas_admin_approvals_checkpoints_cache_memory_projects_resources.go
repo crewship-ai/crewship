@@ -63,8 +63,11 @@ func schemaCatalogAdminApprovalsCheckpointsCacheMemoryProjectsResources() map[st
 		}, "member_id", "workspace_id", "name", "slug", "role", "joined_at")),
 		"last_active_at": nullable(str()), "active_sessions": integer(), "cli_tokens": integer(),
 		"locked_until": nullable(str()), "failed_login_count": integer(), "email_verified": boolean(),
+		"instance_admin": boolean(), "instance_admin_source": nullable(str()),
+		"suspended_at": nullable(str()), "suspended_reason": nullable(str()), "setup_link_expires_at": nullable(str()),
 	}, "id", "email", "full_name", "avatar_url", "created_at", "workspace", "role", "memberships",
-		"last_active_at", "active_sessions", "cli_tokens", "locked_until", "failed_login_count", "email_verified")
+		"last_active_at", "active_sessions", "cli_tokens", "locked_until", "failed_login_count", "email_verified",
+		"instance_admin", "instance_admin_source", "suspended_at", "suspended_reason", "setup_link_expires_at")
 	adminWorkspace := object(map[string]any{
 		"id": str(), "name": str(), "slug": str(), "created_at": str(), "updated_at": str(),
 		"_count_members": integer(), "_count_agents": integer(), "_count_crews": integer(),
@@ -72,16 +75,18 @@ func schemaCatalogAdminApprovalsCheckpointsCacheMemoryProjectsResources() map[st
 		"allow_privileged_credentials": boolean(), "pending_invitations": integer(),
 		"last_activity_at": nullable(str()), "runs_7d": integer(), "runs_by_day": array(integer()),
 		"cost_30d_usd": number(), "current": boolean(),
+		"owners": array(object(map[string]any{"id": str(), "email": str(), "full_name": nullable(str())}, "id", "email", "full_name")),
 	}, "id", "name", "slug", "created_at", "updated_at", "_count_members", "_count_agents", "_count_crews",
 		"preferred_language", "run_retention_days", "allow_privileged_credentials", "pending_invitations",
-		"last_activity_at", "runs_7d", "runs_by_day", "cost_30d_usd", "current")
+		"last_activity_at", "runs_7d", "runs_by_day", "cost_30d_usd", "current", "owners")
 	// The three per-person POSTs carry no body; EmptyRequest is the shared
 	// component the other body-less admin actions name.
 	emptyRequest := ref("EmptyRequest")
 	adminScopeHeader := map[string]any{"X-Admin-Scope": map[string]any{
-		"description": "instance when the caller is the instance owner and the list covers every workspace; workspace when it covers the caller's workspace only.",
+		"description": "instance when the caller is an instance administrator and the list covers every workspace; workspace when it covers the caller's workspace only.",
 		"schema":      map[string]any{"type": "string", "enum": []string{"instance", "workspace"}},
 	}}
+	instanceMembership := object(map[string]any{"workspace_id": str(), "role": str()}, "workspace_id", "role")
 	adminUserSession := object(map[string]any{
 		"id": str(), "created_at": str(), "last_used_at": str(), "expires_at": str(),
 		"user_agent": str(), "ip": str(), "current": boolean(),
@@ -244,7 +249,39 @@ func schemaCatalogAdminApprovalsCheckpointsCacheMemoryProjectsResources() map[st
 		"POST /api/v1/admin/users/{userId}/sessions/{sessionId}/revoke": {SuccessStatuses: []string{"204"}, Request: emptyRequest},
 		"POST /api/v1/admin/users/{userId}/sessions/revoke-all":         {Response: object(map[string]any{"revoked": integer()}, "revoked"), Request: emptyRequest},
 		"POST /api/v1/admin/users/{userId}/unlock":                      {SuccessStatuses: []string{"204"}, Request: emptyRequest},
-		"GET /api/v1/admin/health":                                      {Response: object(map[string]any{"uptime_seconds": integer(), "log_level": anyObject(), "encryption_key_source": str(), "db": anyObject(), "disk": anyObject()})},
+		"POST /api/v1/admin/instance/people": {SuccessStatuses: []string{"201"},
+			Request: object(map[string]any{"email": str(), "full_name": str(), "memberships": array(instanceMembership)}, "email"),
+			Response: object(map[string]any{"user_id": str(), "email": str(), "memberships": array(instanceMembership), "setup_url": str(), "expires_at": str()},
+				"user_id", "email", "memberships", "setup_url", "expires_at")},
+		"POST /api/v1/admin/instance/people/{userId}/suspend": {Request: object(map[string]any{"reason": str()}),
+			Response: object(map[string]any{"user_id": str(), "suspended_at": str(), "sessions_revoked": integer(), "cli_tokens_revoked": integer()},
+				"user_id", "suspended_at", "sessions_revoked", "cli_tokens_revoked")},
+		"POST /api/v1/admin/instance/people/{userId}/reactivate": {SuccessStatuses: []string{"204"}, Request: emptyRequest},
+		"POST /api/v1/admin/instance/people/{userId}/setup-link": {Request: emptyRequest,
+			Response: object(map[string]any{"user_id": str(), "setup_url": str(), "expires_at": str()}, "user_id", "setup_url", "expires_at")},
+		"DELETE /api/v1/admin/instance/people/{userId}/setup-link": {SuccessStatuses: []string{"204"}},
+		"PUT /api/v1/admin/instance/admins/{userId}":               {SuccessStatuses: []string{"204"}, Request: emptyRequest},
+		"DELETE /api/v1/admin/instance/admins/{userId}":            {SuccessStatuses: []string{"204"}},
+		"PUT /api/v1/admin/instance/workspaces/{workspaceId}/members/{userId}": {SuccessStatuses: []string{"200", "201"},
+			Request: object(map[string]any{"role": str()}, "role"),
+			Response: object(map[string]any{"workspace_id": str(), "user_id": str(), "role": str(), "created": boolean()},
+				"workspace_id", "user_id", "role", "created")},
+		"DELETE /api/v1/admin/instance/workspaces/{workspaceId}/members/{userId}": {SuccessStatuses: []string{"204"}},
+		"POST /api/v1/admin/instance/workspaces": {SuccessStatuses: []string{"201"},
+			Request: object(map[string]any{"name": str(), "slug": str(), "owner_user_id": str(), "preferred_language": nullable(str())}, "name", "slug", "owner_user_id"),
+			Response: object(map[string]any{"id": str(), "name": str(), "slug": str(), "owner_user_id": str(), "created_at": str()},
+				"id", "name", "slug", "owner_user_id", "created_at")},
+		"POST /api/v1/admin/instance/workspaces/{workspaceId}/transfer-ownership": {
+			Request: object(map[string]any{"user_id": str()}, "user_id"),
+			Response: object(map[string]any{"workspace_id": str(), "owner_user_id": str(), "previous_owner_user_ids": array(str())},
+				"workspace_id", "owner_user_id", "previous_owner_user_ids")},
+		"DELETE /api/v1/admin/instance/workspaces/{workspaceId}": {SuccessStatuses: []string{"204"},
+			Request: object(map[string]any{"confirm_slug": str()}, "confirm_slug")},
+		"GET /api/v1/admin/instance/audit": {Response: array(object(map[string]any{
+			"id": str(), "user_id": nullable(str()), "user_email": nullable(str()), "action": str(), "entity_type": str(),
+			"entity_id": nullable(str()), "target_workspace_id": nullable(str()), "metadata": str(), "created_at": str(),
+		}, "id", "user_id", "user_email", "action", "entity_type", "entity_id", "target_workspace_id", "metadata", "created_at"))},
+		"GET /api/v1/admin/health": {Response: object(map[string]any{"uptime_seconds": integer(), "log_level": anyObject(), "encryption_key_source": str(), "db": anyObject(), "disk": anyObject()})},
 		"GET /api/v1/admin/security-posture": {Response: object(map[string]any{"environment": str(), "encryption_key_configured": boolean(), "plaintext_secrets_allowed": boolean(), "private_endpoints_ceiling": boolean(), "signup_open": boolean(), "oauth_configured": boolean(), "email_configured": boolean(), "rate_limit_disabled": boolean(), "rate_limit_effectively_disabled": boolean(), "warnings": array(object(map[string]any{"key": str(), "severity": str(), "message": str()}, "key", "severity", "message"))},
 			"environment", "encryption_key_configured", "plaintext_secrets_allowed", "private_endpoints_ceiling", "signup_open",
 			"oauth_configured", "email_configured", "rate_limit_disabled", "rate_limit_effectively_disabled", "warnings")},

@@ -57,7 +57,7 @@ Use these when a user (typically yourself) cannot log in:
 
 'list-users' is the exception: it reads the server the CLI targets
 (GET /api/v1/admin/users) — the current workspace, or every account for
-the instance owner. Pass --local to read the database file on this host
+an instance administrator. Pass --local to read the database file on this host
 instead. The per-person actions (devices, sign-out, unlock) are under
 'crewship admin user'.
 
@@ -80,8 +80,8 @@ var adminListUsersCmd = &cobra.Command{
 	Long: `List users.
 
 By default this reads GET /api/v1/admin/users on the server the CLI is
-pointed at: the members of the current workspace, or — when you are the
-instance owner (CREWSHIP_OWNER_EMAIL on the server) — every account on the
+pointed at: the members of the current workspace, or — when you are an
+instance administrator (see 'crewship admin instance') — every account on the
 instance. Each row says when the person was last active, how many devices
 are signed in, and whether the account is locked after failed sign-ins;
 --locked-only keeps just the locked ones.
@@ -829,10 +829,10 @@ func runAdminListUsers(cmd *cobra.Command, _ []string) error {
 	// came back from `crewship admin list-users | awk 'NR>1 {print $1}'` as if
 	// they were two more user rows.
 	if scope == "instance" {
-		fmt.Fprintln(cmd.ErrOrStderr(), "\n(every account on this instance — you are the instance owner)")
+		fmt.Fprintln(cmd.ErrOrStderr(), "\n(every account on this instance — you are an instance administrator)")
 	} else {
 		fmt.Fprintln(cmd.ErrOrStderr(),
-			"\n(workspace-scoped: this workspace's members; the instance owner sees every account, and `crewship admin list-users --local` reads the database file)")
+			"\n(workspace-scoped: this workspace's members; an instance administrator sees every account, and `crewship admin list-users --local` reads the database file)")
 	}
 	return nil
 }

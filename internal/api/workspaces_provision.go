@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"net/http"
@@ -123,11 +124,9 @@ func (h *WorkspaceHandler) ProvisionMember(w http.ResponseWriter, r *http.Reques
 	defer tx.Rollback() //nolint:errcheck
 
 	var userID string
-	var existingPassword, existingVerified sql.NullString
 	createdUser := false
 	err = tx.QueryRowContext(r.Context(),
-		`SELECT id, hashed_password, email_verified FROM users WHERE email = ?`,
-		email).Scan(&userID, &existingPassword, &existingVerified)
+		`SELECT id FROM users WHERE email = ?`, email).Scan(&userID)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		userID = uuid.NewString()
@@ -206,15 +205,11 @@ func (h *WorkspaceHandler) ProvisionMember(w http.ResponseWriter, r *http.Reques
 	//   · a verified email   — the address was proven at some point
 	// Only an account with none of them is genuinely unclaimed, which is
 	// exactly what this endpoint creates and may legitimately re-issue for.
-	var oauthLinks int
-	if err := tx.QueryRowContext(r.Context(),
-		`SELECT COUNT(*) FROM accounts WHERE userId = ?`, userID).Scan(&oauthLinks); err != nil {
-		replyInternalError(w, h.logger, "provision: oauth link check", err)
+	claimed, err := accountClaimedTx(r.Context(), tx, userID)
+	if err != nil {
+		replyInternalError(w, h.logger, "provision: claimed check", err)
 		return
 	}
-	claimed := (existingPassword.Valid && existingPassword.String != "") ||
-		oauthLinks > 0 ||
-		(existingVerified.Valid && existingVerified.String != "")
 	if claimed {
 		if err := tx.Commit(); err != nil {
 			replyInternalError(w, h.logger, "provision: commit", err)
@@ -229,26 +224,9 @@ func (h *WorkspaceHandler) ProvisionMember(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	rawToken, err := generateResetToken()
+	rawToken, expires, err := issueSetupTokenTx(r.Context(), tx, email)
 	if err != nil {
-		replyInternalError(w, h.logger, "provision: token gen", err)
-		return
-	}
-	expires := time.Now().UTC().Add(accountSetupTTL)
-	// Replace any earlier setup token for this address so re-issuing a link
-	// invalidates the one that went astray — the same handoff contract
-	// /forgot has, scoped to this purpose so the two never clobber each
-	// other.
-	if _, err := tx.ExecContext(r.Context(),
-		`DELETE FROM verification_tokens WHERE identifier = ? AND purpose = 'account_setup'`, email); err != nil {
-		replyInternalError(w, h.logger, "provision: clear old setup token", err)
-		return
-	}
-	if _, err := tx.ExecContext(r.Context(),
-		`INSERT INTO verification_tokens (identifier, token, expires, purpose)
-		 VALUES (?, ?, ?, 'account_setup')`,
-		email, hashResetToken(rawToken), expires.Format(time.RFC3339)); err != nil {
-		replyInternalError(w, h.logger, "provision: store setup token", err)
+		replyInternalError(w, h.logger, "provision: setup token", err)
 		return
 	}
 
@@ -263,7 +241,7 @@ func (h *WorkspaceHandler) ProvisionMember(w http.ResponseWriter, r *http.Reques
 		"workspace_id", workspaceID, "email", email, "role", role,
 		"created_user", createdUser, "by_user_id", UserFromContext(r.Context()).ID)
 
-	setupURL := origin + "/reset-password?token=" + url.QueryEscape(rawToken)
+	setupURL := setupLinkURL(origin, rawToken)
 
 	writeJSON(w, http.StatusCreated, provisionResponse{
 		UserID:      userID,
@@ -273,4 +251,53 @@ func (h *WorkspaceHandler) ProvisionMember(w http.ResponseWriter, r *http.Reques
 		SetupURL:    setupURL,
 		ExpiresAt:   expires.Format(time.RFC3339),
 	})
+}
+
+// accountClaimedTx reports whether somebody already controls the account, in
+// which case no setup link may be minted for it (see ProvisionMember: minting
+// one for a controlled account is account takeover). Any one of a password,
+// a linked OAuth row or a verified email means hands off.
+func accountClaimedTx(ctx context.Context, tx *sql.Tx, userID string) (bool, error) {
+	var password, verified sql.NullString
+	if err := tx.QueryRowContext(ctx,
+		`SELECT hashed_password, email_verified FROM users WHERE id = ?`, userID).Scan(&password, &verified); err != nil {
+		return false, err
+	}
+	var oauthLinks int
+	if err := tx.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM accounts WHERE userId = ?`, userID).Scan(&oauthLinks); err != nil {
+		return false, err
+	}
+	return (password.Valid && password.String != "") ||
+		oauthLinks > 0 ||
+		(verified.Valid && verified.String != ""), nil
+}
+
+// issueSetupTokenTx mints a setup link token for an unclaimed account and
+// returns the raw token (never stored) with its expiry. Any earlier setup
+// token for the address is replaced, so re-issuing invalidates the link that
+// went astray — scoped to its purpose so /forgot and this never clobber each
+// other.
+func issueSetupTokenTx(ctx context.Context, tx *sql.Tx, email string) (string, time.Time, error) {
+	rawToken, err := generateResetToken()
+	if err != nil {
+		return "", time.Time{}, err
+	}
+	expires := time.Now().UTC().Add(accountSetupTTL)
+	if _, err := tx.ExecContext(ctx,
+		`DELETE FROM verification_tokens WHERE identifier = ? AND purpose = 'account_setup'`, email); err != nil {
+		return "", time.Time{}, err
+	}
+	if _, err := tx.ExecContext(ctx,
+		`INSERT INTO verification_tokens (identifier, token, expires, purpose)
+		 VALUES (?, ?, ?, 'account_setup')`,
+		email, hashResetToken(rawToken), expires.Format(time.RFC3339)); err != nil {
+		return "", time.Time{}, err
+	}
+	return rawToken, expires, nil
+}
+
+// setupLinkURL is the page an invitee opens to choose a password.
+func setupLinkURL(origin, rawToken string) string {
+	return origin + "/reset-password?token=" + url.QueryEscape(rawToken)
 }

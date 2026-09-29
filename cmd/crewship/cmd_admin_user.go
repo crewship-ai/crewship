@@ -200,7 +200,7 @@ func adminUserTarget(email string) (*cli.Client, string, error) {
 		}
 	}
 	return nil, "", cli.WithExitCode(
-		fmt.Errorf("no account %s among the people you administer (members of the current workspace, or every account for the instance owner)", email),
+		fmt.Errorf("no account %s among the people you administer (members of the current workspace, or every account for an instance administrator)", email),
 		cli.ExitNotFound)
 }
 

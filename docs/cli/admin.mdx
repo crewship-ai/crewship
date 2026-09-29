@@ -83,8 +83,9 @@ crewship admin list-users --local
 | Command | Purpose |
 |---|---|
 | `reset-password` | Reset a user's password (interactive prompt or `--password` / `--password-stdin`). Local-only; needs `--local` when a server is named. |
-| `list-users` | List people on the server the CLI targets — the current workspace's members, or every account for the instance owner — with last activity, signed-in devices and lockout. `--local` lists every user in the instance from the database file. |
+| `list-users` | List people on the server the CLI targets — the current workspace's members, or every account for an instance administrator — with last activity, signed-in devices and lockout. `--local` lists every user in the instance from the database file. |
 | `user sessions/revoke-session/sign-out/unlock` | Per-person actions by email: list signed-in devices and CLI tokens, sign out one device or all of them, lift a sign-in lockout. **HTTP-backed — needs a running server + login.** |
+| `instance …` | Instance administration across every workspace: add people, give or take access, create, hand over and delete workspaces, suspend accounts, reissue setup links, name instance admins, read the instance audit. **HTTP-backed — needs a running server + login as an instance administrator.** `add-admin --local` is the break-glass path. |
 | `promote` | Promote a user to a workspace role (`OWNER`, `ADMIN`, `MANAGER`, `MEMBER`, `VIEWER`). Local-only; needs `--local` when a server is named. The server-side equivalent is `crewship workspace member role`. |
 | `invalidate-sessions` | Force-logout every active session for a user (no password change). Local-only; needs `--local` when a server is named. |
 | `sessions list` | Forensic read of `user_sessions` for one user — all rows, including revoked + expired. Local-only; needs `--local` when a server is named. |
@@ -162,9 +163,8 @@ crewship admin reset-password --email admin@example.com --password 's3cret!' --l
 Two different answers, deliberately:
 
 **Default — the server.** `GET /api/v1/admin/users` on the server the CLI
-targets (ADMIN+): the members of the current workspace, or — for the instance
-owner, the account whose email is `CREWSHIP_OWNER_EMAIL` on the server —
-every account on the instance. Columns: EMAIL, NAME, CREATED, ROLE
+targets (ADMIN+): the members of the current workspace, or — for an instance
+administrator — every account on the instance. Columns: EMAIL, NAME, CREATED, ROLE
 (`role@workspace-slug`, comma-joined), LAST ACTIVE, SESSIONS (signed-in
 devices), LOCKED (`until …` while a lockout is in force). Requires a login.
 
@@ -512,9 +512,8 @@ Acme *  acme  3        8       2      41       $18.42     2026-09-29 08:12 UTC  
 ```
 
 `GET /api/v1/admin/workspaces`. A workspace ADMIN or OWNER gets one row, the
-workspace the CLI is authenticated against. The instance owner (the account
-whose email is `CREWSHIP_OWNER_EMAIL` on the server) gets every workspace on
-the instance; `*` marks the current one. RUNS 7D counts runs started in the
+workspace the CLI is authenticated against. An instance administrator (see
+`crewship admin instance`) gets every workspace on the instance; `*` marks the current one. RUNS 7D counts runs started in the
 last seven UTC days, SPEND 30D is the estimated spend over the last 30 days,
 LAST ACTIVITY is the newest audit-log entry. A server older than those fields
 prints `-` for them.
@@ -527,8 +526,8 @@ Requires `OWNER` or `ADMIN` (`canRole "manage"`).
 
 Per-person actions on the server the CLI targets. People are named by email;
 the id is resolved through `GET /api/v1/admin/users`, so you can act on the
-members of your current workspace, or on any account if you are the instance
-owner. An ADMIN cannot act on an OWNER.
+members of your current workspace, or on any account if you are an instance
+administrator. An ADMIN cannot act on an OWNER.
 
 ```bash
 crewship admin user sessions jana@example.com
@@ -547,6 +546,135 @@ crewship admin user unlock jana@example.com
 The host-side `invalidate-sessions` and `sessions list` stay for when the
 server or the login is what is broken; these are the same actions over HTTP,
 for an admin who is signed in. Every action writes an audit-log entry.
+
+---
+
+## `crewship admin instance`
+
+What an instance administrator does across the whole server. People are named
+by email and workspaces by slug. Only an **instance administrator** may run
+these: `CREWSHIP_OWNER_EMAIL` on the server, anyone named with `add-admin`, or,
+while neither is set, the owners of the oldest workspace. Being ADMIN or OWNER
+of a workspace is not enough. Every action is recorded in the instance audit.
+
+```bash
+crewship admin instance add-person lucie@acme.example --name "Lucie H" --access acme-ops=MEMBER
+crewship admin instance grant jana@acme.example --workspace research-lab --role ADMIN
+crewship admin instance transfer research-lab --to eva@lab.example
+crewship admin instance suspend tomas@acme.example --reason "left the company"
+crewship admin instance add-admin jana@acme.example
+```
+
+### add-person \<email\>
+
+`POST /api/v1/admin/instance/people`. Creates the account, puts it in the
+workspaces you name and prints a setup link valid for 7 days. No email is
+sent; pass the link on yourself. The person chooses their own password.
+
+| Flag | Required | Description |
+|---|---|---|
+| `--name` | no | Full name. |
+| `--access` | no | Workspace access as `<slug>=<ROLE>`; repeat for several workspaces. |
+
+### grant \<email\>
+
+`PUT /api/v1/admin/instance/workspaces/{workspaceId}/members/{userId}`. Gives
+access to a workspace or changes the role there. OWNER is allowed; the last
+owner of a workspace cannot be moved down, use `transfer` instead.
+
+| Flag | Required | Description |
+|---|---|---|
+| `--workspace` | yes | Workspace slug. |
+| `--role` | no | `OWNER`, `ADMIN`, `MANAGER`, `MEMBER` (default) or `VIEWER`. |
+
+### revoke \<email\>
+
+`DELETE /api/v1/admin/instance/workspaces/{workspaceId}/members/{userId}`.
+Takes the person out of the workspace. Their pages move first, as when a
+workspace admin removes them. The last owner stays.
+
+| Flag | Required | Description |
+|---|---|---|
+| `--workspace` | yes | Workspace slug. |
+
+### create-workspace \<name\>
+
+`POST /api/v1/admin/instance/workspaces`. Creates an empty workspace owned by
+`--owner`. You are not added to it.
+
+| Flag | Required | Description |
+|---|---|---|
+| `--slug` | yes | Workspace slug, 2–50 characters. |
+| `--owner` | yes | Email of the owner. |
+| `--language` | no | Agent language, for example `cs` or `en`. |
+
+### transfer \<workspace-slug\>
+
+`POST /api/v1/admin/instance/workspaces/{workspaceId}/transfer-ownership`.
+Makes a member the owner; every previous owner stays on as ADMIN.
+
+| Flag | Required | Description |
+|---|---|---|
+| `--to` | yes | Email of the new owner. They must already be a member. |
+
+### delete-workspace \<slug\>
+
+`DELETE /api/v1/admin/instance/workspaces/{workspaceId}`. Deletes the
+workspace with its crews and agents. The instance audit keeps the record.
+
+| Flag | Required | Description |
+|---|---|---|
+| `--confirm` | yes | Repeat the slug. |
+
+### suspend \<email\>
+
+`POST /api/v1/admin/instance/people/{userId}/suspend`. The account can no
+longer sign in; every session and CLI token ends now. Workspace access is
+kept for `reactivate`. You cannot suspend yourself or the instance owner.
+
+| Flag | Required | Description |
+|---|---|---|
+| `--reason` | no | Why, for the audit. |
+
+### reactivate \<email\>
+
+`POST /api/v1/admin/instance/people/{userId}/reactivate`. Lifts a suspension.
+Ended sessions stay ended; the person signs in again.
+
+### setup-link \<email\>
+
+`POST /api/v1/admin/instance/people/{userId}/setup-link` prints a new setup
+link and voids the previous one. Only an account nobody has signed in to gets
+one; anyone else resets their own password.
+
+| Flag | Required | Description |
+|---|---|---|
+| `--revoke` | no | Void the pending link instead (`DELETE` on the same path). |
+
+### add-admin \<email\>
+
+`PUT /api/v1/admin/instance/admins/{userId}`. Names an instance administrator.
+Naming anyone turns off the oldest-workspace fallback: from then on the named
+admins and `CREWSHIP_OWNER_EMAIL` are the whole list.
+
+| Flag | Required | Description |
+|---|---|---|
+| `--local` | no | Write the database file on this host instead. The way in when nobody who could do it can sign in. |
+
+### remove-admin \<email\>
+
+`DELETE /api/v1/admin/instance/admins/{userId}`. Removes a named instance
+administrator. Nobody removes themselves; `CREWSHIP_OWNER_EMAIL` is changed in
+the server's environment.
+
+### audit
+
+`GET /api/v1/admin/instance/audit`. Instance-level actions, newest first.
+
+| Flag | Required | Description |
+|---|---|---|
+| `--limit` | no | Rows to return, 100 by default, 500 at most. |
+| `--for` | no | One person (email) or workspace (slug). |
 
 ---
 

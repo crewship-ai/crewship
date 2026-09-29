@@ -634,6 +634,7 @@ var NonBackedUpTables = map[string]struct{}{
 	"instance_config":         {},
 	"rate_limit_overrides":    {}, // instance-global limiter tuning (v168); must not clobber the target's own on restore
 	"keeper_runtime_settings": {}, // instance-global judge wiring; a restored workspace must not repoint the target's gatekeeper at the source's model server
+	"instance_audit_logs":     {}, // instance-level admin actions (Admin › People & workspaces); the target instance keeps its own trail
 	// keeper_aux_settings moved to BackupTableIntent (IntentExcludeOperational)
 	// in #1554: its new credential_id FK makes the reverse-FK walk discover it,
 	// and a discovered table must be classified there, not here. Same verdict —
