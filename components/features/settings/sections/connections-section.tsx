@@ -181,7 +181,7 @@ export function ConnectionsSection({ workspaceId }: ConnectionsSectionProps) {
     try {
       const [connsRes, crewsRes] = await Promise.all([
         apiFetch(`/api/v1/crew-connections?workspace_id=${workspaceId}`),
-        apiFetch(`/api/v1/crews?workspace_id=${workspaceId}`),
+        apiFetch(`/api/v1/crews?workspace_id=${workspaceId}&limit=500`),
       ])
       if (!connsRes.ok || !crewsRes.ok) throw new Error("Access could not be loaded")
       const [nextConnections, nextCrews] = await Promise.all([connsRes.json(), crewsRes.json()])

@@ -31,6 +31,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"sort"
 	"strings"
 	"time"
 )
@@ -451,7 +452,7 @@ func (h *CLITokenHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 
 	rows, err := h.db.QueryContext(r.Context(),
-		`SELECT id, name, tier, expires_at, created_at, last_used_at, revoked_at
+		`SELECT id, name, tier, expires_at, created_at, last_used_at, revoked_at, scopes
 		 FROM cli_tokens WHERE user_id = ? ORDER BY created_at DESC`, user.ID)
 	if err != nil {
 		replyInternalError(w, h.logger, "list cli_tokens", err)
@@ -462,8 +463,8 @@ func (h *CLITokenHandler) List(w http.ResponseWriter, r *http.Request) {
 	var tokens []map[string]interface{}
 	for rows.Next() {
 		var id, name, tier, createdAt string
-		var expiresAt, lastUsedAt, revokedAt sql.NullString
-		if err := rows.Scan(&id, &name, &tier, &expiresAt, &createdAt, &lastUsedAt, &revokedAt); err != nil {
+		var expiresAt, lastUsedAt, revokedAt, scopesRaw sql.NullString
+		if err := rows.Scan(&id, &name, &tier, &expiresAt, &createdAt, &lastUsedAt, &revokedAt, &scopesRaw); err != nil {
 			continue
 		}
 		t := map[string]interface{}{
@@ -480,6 +481,18 @@ func (h *CLITokenHandler) List(w http.ResponseWriter, r *http.Request) {
 		}
 		if revokedAt.Valid {
 			t["revoked_at"] = revokedAt.String
+		}
+		// Scopes narrow the token below the user's role. Without them in the
+		// list, a narrowed token looked exactly like an unrestricted one on the
+		// screen meant for auditing live access. Omitted when unrestricted,
+		// matching the create response.
+		if scopes := parseScopes(scopesRaw.String); len(scopes) > 0 {
+			list := make([]string, 0, len(scopes))
+			for s := range scopes {
+				list = append(list, s)
+			}
+			sort.Strings(list)
+			t["scopes"] = list
 		}
 		tokens = append(tokens, t)
 	}

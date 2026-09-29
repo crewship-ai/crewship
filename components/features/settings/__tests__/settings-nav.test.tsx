@@ -63,9 +63,13 @@ describe("SettingsNav visibility by role", () => {
     }
   })
 
-  it("gives a MANAGER Audit Log", () => {
+  // GET /api/v1/audit is ADMIN+, so a MANAGER could only ever see a 403.
+  it("gives a MANAGER Crew links but not Audit Log; an ADMIN gets both", () => {
     renderNav("MANAGER")
     expect(row("Crew links")).toBeTruthy()
+    expect(row("Audit Log")).toBeNull()
+    cleanup()
+    renderNav("ADMIN")
     expect(row("Audit Log")).toBeTruthy()
   })
 
@@ -122,7 +126,10 @@ describe("SettingsNav visibility by role", () => {
 describe("isSettingsSectionVisible", () => {
   it("agrees with the rendered nav", () => {
     expect(isSettingsSectionVisible("audit", "MEMBER")).toBe(false)
-    expect(isSettingsSectionVisible("audit", "MANAGER")).toBe(true)
+    // GET /api/v1/audit is ADMIN+ (router_admin.go, audit.go canRole("manage")):
+    // a MANAGER only ever got a 403 pane.
+    expect(isSettingsSectionVisible("audit", "MANAGER")).toBe(false)
+    expect(isSettingsSectionVisible("audit", "ADMIN")).toBe(true)
     // The link graph reads at any tier; only its controls are MANAGER+.
     expect(isSettingsSectionVisible("connections", "MEMBER")).toBe(true)
     expect(isSettingsSectionVisible("general", "MEMBER")).toBe(true)

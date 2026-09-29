@@ -558,3 +558,27 @@ func TestTokenValidate_401Plain(t *testing.T) {
 		t.Errorf("non-json mode must not write to stdout: %q", out.String())
 	}
 }
+
+// A narrowed token must read as narrowed: the list shows its scopes, and an
+// unrestricted token says so, matching Settings › Profile › CLI tokens.
+func TestTokenListRunE_ShowsScopes(t *testing.T) {
+	stub := covSetupCli4(t)
+	now := time.Now().UTC().Format(time.RFC3339)
+	stub.OnGet("/api/v1/auth/cli-tokens", clitest.JSONResponse(200, map[string]any{"data": []map[string]any{
+		{"id": "tok_scoped_0001", "name": "deploy", "created_at": now, "last_used_at": now, "scopes": []string{"credentials:write", "issues:write"}},
+		{"id": "tok_full_00001", "name": "laptop", "created_at": now, "last_used_at": now},
+	}}))
+	c, _, _ := covCmdWithBuffers(tokenListCmd, func(c *cobra.Command) {
+		c.Flags().Int("warn-stale-days", 90, "")
+	})
+	out, err := covCaptureStdoutCli4(t, func() error { return c.RunE(c, nil) })
+	if err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	if !strings.Contains(out, "SCOPES") || !strings.Contains(out, "credentials:write,issues:write") {
+		t.Errorf("scoped token scopes missing: %q", out)
+	}
+	if !strings.Contains(out, "all") {
+		t.Errorf("unrestricted token should read \"all\": %q", out)
+	}
+}

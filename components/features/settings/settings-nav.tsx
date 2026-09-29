@@ -6,7 +6,7 @@ import {
   Link2, Activity, Shield, KeyRound, Webhook,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { isManagerTier } from "@/lib/permissions/tiers"
+import { isAdminTier, isManagerTier } from "@/lib/permissions/tiers"
 import type { LucideIcon } from "lucide-react"
 import {
   SidebarToolbar,
@@ -110,9 +110,10 @@ const sections: NavSection[] = [
       // file: a shell hook running on the host is information a member is
       // entitled to, and the switch is the part they are not.
       { key: "hooks", label: "Lifecycle hooks", icon: Webhook },
-      // The audit log is not readable below MANAGER, so the pane would be
-      // empty — the one section where hiding beats read-only.
-      { key: "audit", label: "Audit Log", icon: Activity, visibleTo: isManagerTier },
+      // GET /api/v1/audit is ADMIN+ (router_admin.go authedAdmin, audit.go
+      // canRole("manage")); below that the pane could only show a 403 — the
+      // one section where hiding beats read-only.
+      { key: "audit", label: "Audit Log", icon: Activity, visibleTo: isAdminTier },
     ],
   },
 ]
