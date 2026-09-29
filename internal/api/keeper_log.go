@@ -81,7 +81,12 @@ func (h *KeeperLogHandler) List(w http.ResponseWriter, r *http.Request) {
 	rows, err := h.db.QueryContext(r.Context(), `
 		SELECT
 			kr.id, kr.requesting_agent_id, COALESCE(a.name,'Unknown'),
-			kr.requesting_crew_id, kr.credential_id, COALESCE(c.name,'Unknown'),
+			-- Phase-2 reviews (skill, behavior, memory health, lessons) are
+			-- about an agent, not a credential: credential_id is NULL there.
+			-- Scanning that NULL into a string failed and the row was skipped,
+			-- so Admin › Keeper reviews read 0 while the table held reviews.
+			COALESCE(kr.requesting_crew_id,''), COALESCE(kr.credential_id,''),
+			CASE WHEN kr.credential_id IS NULL THEN '' ELSE COALESCE(c.name,'Unknown') END,
 			kr.intent, kr.request_type, kr.command,
 			kr.decision, kr.reason, kr.risk_score, kr.exit_code,
 			kr.ollama_prompt, kr.ollama_raw_response,
