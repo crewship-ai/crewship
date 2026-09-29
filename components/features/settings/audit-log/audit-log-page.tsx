@@ -187,7 +187,7 @@ export function AuditLogPage() {
           </p>
         ) : workspaceId && (
           <>
-            <div className="flex min-h-6 flex-wrap items-center gap-1.5" data-slot="audit-chips">
+            {chips.length > 0 && <div className="flex flex-wrap items-center gap-1.5" data-slot="audit-chips">
               {chips.map((c) => (
                 <span key={c.key} className="inline-flex h-6 items-center gap-1 rounded-full bg-primary/10 pl-2.5 pr-1 text-[11.5px] font-medium text-primary-hover motion-safe:animate-in motion-safe:zoom-in-95">
                   {c.label}
@@ -201,7 +201,7 @@ export function AuditLogPage() {
               {filterCount > 0 && (
                 <button type="button" onClick={clearFilters} className="px-1.5 text-[11.5px] text-muted-foreground hover:text-foreground">Clear filters</button>
               )}
-            </div>
+            </div>}
             <AuditHistogram tally={tally} bounds={bounds} onPickDay={pickDay} now={now} truncated={activity.truncated} />
             <CrewAuditSection
               workspaceId={workspaceId}
