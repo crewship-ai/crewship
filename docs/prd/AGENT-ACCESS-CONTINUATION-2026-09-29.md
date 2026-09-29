@@ -278,3 +278,37 @@ scope po smazání a znovuvytvoření téhož chat ID. Nový reproduktor nejprve
 chat generation/revision při přijetí; Resolve porovnává tento stav s aktuálním
 chatem a datový scope zahrnuje obě hodnoty. Ani vrácení agenta do původní crew
 neobnoví starý pokus. Jde o další aditivní migraci, nikoli editaci už zapsané.
+
+
+### Finální ověření queue/scope změn na dev1
+
+- Zdroj `16e46f9eaecaf4f5c1ff0512940c9c99d932794a`, clean build
+  `2026-09-29T12:12:04Z`; shodné lokální/vzdálené CLI version, skutečný
+  `/proc/2539054/exe` a web export. Schema `20260929120500`.
+- Celý Go průchod po scope změně: 149 testovaných balíčků, exit 0; celý vet,
+  migration/tsformat lint, projektové invarianty a commit lint prošly.
+  Cílené race: chatbridge/API 1,070 / 72,094 s, celý access 69,146 s.
+  Předchozí full Go průchod queue změny také prošel po opravení fixture.
+- Živý host IPC resolver: vlastní receipt pozitivní; odstranění člena přes CLI
+  → původní receipt 404; přidání téhož uživatele zpět přes CLI → starý receipt
+  stále 404, nový receipt 200 s novou identitou členství. Žádné přímé DB zápisy.
+- Živý WS group send prošel skutečným human resolverem a skončil `no_reply`.
+  Dva klienti stejného agenta viděli jen své soukromé chaty; cizí historie 404.
+  WS po revokaci uzavřen bez další události, HTTP bez dalšího rámce, druhý klient
+  dále dostával událost i heartbeat. Vlastněný workspace odstraněn, sessions
+  odhlášeny; syntetičtí users zůstávají bez workspace členství.
+- Health/readiness 200. Linux `/proc/<pid>/environ` má mode 0400, vlastník UID
+  1000; skutečná hodnota host tokenu nebyla tisknuta ani ukládána do reportu.
+  Tato kontrola host procesu nenahrazuje již dříve provedený Docker harness
+  pro UID 1001/1002 a není důkaz připojeného izolovaného běhu.
+- Surové výsledky: `reports/agent-access-queue-live-2026-09-29.txt` a
+  `reports/agent-access-authority-final-go-2026-09-29.txt`.
+
+Živý revoke/rejoin průchod ověřil resolver použitý obnovou zpráv; nevytvářel
+čekající reálný modelový běh. Přenos přes provisioning resume a odmítnutí změny
+receiptu pokrývají automatické bridge/handler/IPC testy. Nepovažujeme to za
+akceptaci celé durable queue ani restricted runtime.
+
+Vzdálené CI `843dca032` nakonec celé prošlo. Novější kód vyžaduje vlastní CI;
+finální nezávislé review dosud chybí (poslední věcná revize `7626636f`). Další
+žádost o review byla odeslána 29. 9. v 12:12 UTC. PR #2717 není sloučené.
