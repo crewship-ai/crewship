@@ -33,6 +33,20 @@ func (r *Router) registerAdminRoutes() {
 	r.authedAdmin("GET", "/api/v1/admin/users", admin.ListUsers)
 	r.authedAdmin("GET", "/api/v1/admin/workspaces", admin.ListWorkspaces)
 
+	// Per-person admin actions (Admin › Users): a person's signed-in
+	// devices and CLI tokens, signing one or all of them out, and lifting a
+	// sign-in lockout. Same session store the auth middleware checks, so a
+	// revoke takes effect on the next request.
+	people := NewAdminUsersHandler(r.db, r.logger, r.sessionsStore)
+	// openapi: responses 200,400,401,403,404,500
+	r.authedAdmin("GET", "/api/v1/admin/users/{userId}/sessions", people.Sessions)
+	// openapi: responses 204,400,401,403,404,500
+	r.authedMut("POST", "/api/v1/admin/users/{userId}/sessions/{sessionId}/revoke", roleManage, people.RevokeSession)
+	// openapi: responses 200,400,401,403,404,500
+	r.authedMut("POST", "/api/v1/admin/users/{userId}/sessions/revoke-all", roleManage, people.RevokeAllSessions)
+	// openapi: responses 204,400,401,403,404,500
+	r.authedMut("POST", "/api/v1/admin/users/{userId}/unlock", roleManage, people.Unlock)
+
 	// Admin observability: runtime log-level toggle + disk/health read.
 	obs := NewAdminObservabilityHandler(r.db, r.logger)
 	r.authedAdmin("GET", "/api/v1/admin/log-level", obs.GetLogLevel)

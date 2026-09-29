@@ -17,6 +17,32 @@ export interface AdminOrg {
   _count_members: number
   _count_agents: number
   _count_crews: number
+  // Added with the admin lists redesign; optional so an older server's
+  // answer still renders.
+  preferred_language?: string | null
+  run_retention_days?: number | null
+  allow_privileged_credentials?: boolean
+  pending_invitations?: number
+  last_activity_at?: string | null
+  runs_7d?: number
+  /** Seven UTC days, oldest first, today last. */
+  runs_by_day?: number[]
+  cost_30d_usd?: number
+  /** The caller's current workspace. */
+  current?: boolean
+}
+
+/** Whose rows the admin lists hold: every workspace (the instance owner) or
+ *  only the caller's (everyone else). Read from the X-Admin-Scope header. */
+export type AdminScope = "instance" | "workspace"
+
+export interface AdminMembership {
+  member_id?: string
+  workspace_id: string
+  name: string
+  slug: string
+  role: string
+  joined_at: string
 }
 
 /** A user record as displayed in the admin users table. */
@@ -31,6 +57,20 @@ export interface AdminUser {
   created_at: string
   workspace: { id: string; name: string } | null
   role: string | null
+  memberships?: AdminMembership[]
+  last_active_at?: string | null
+  active_sessions?: number
+  cli_tokens?: number
+  /** Set only while the lockout is in force. */
+  locked_until?: string | null
+  failed_login_count?: number
+  email_verified?: boolean
+}
+
+/** GET /api/v1/admin/users/{userId}/sessions */
+export interface AdminUserSessions {
+  sessions: { id: string; created_at: string; last_used_at: string; expires_at: string; user_agent: string | null; ip: string | null; current?: boolean }[]
+  cli_tokens: { id: string; name: string; scopes?: string[] | string | null; created_at: string; last_used_at: string | null; expires_at: string | null }[]
 }
 
 /** Live health probe for the overview status dots — GET /api/v1/admin/health. */

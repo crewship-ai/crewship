@@ -50,16 +50,46 @@ func schemaCatalogAdminApprovalsCheckpointsCacheMemoryProjectsResources() map[st
 		"workspaces": integer(), "users": integer(), "crews": integer(),
 		"agents": integer(), "running": integer(),
 	})
+	// Admin › Users / Workspaces (internal/api/admin_people.go). The scope —
+	// current workspace, or every one for the instance owner — is in the
+	// X-Admin-Scope response header, not the body.
 	adminUser := object(map[string]any{
 		"id": str(), "email": str(), "full_name": nullable(str()),
 		"avatar_url": nullable(str()), "created_at": str(),
-		"workspace": object(map[string]any{"id": str(), "name": str(), "slug": str()}),
-		"role":      nullable(str()), "workspaces": array(object(map[string]any{"id": str(), "name": str(), "slug": str()})),
-	})
+		"workspace": nullable(object(map[string]any{"id": str(), "name": str(), "slug": str()})),
+		"role":      nullable(str()),
+		"memberships": array(object(map[string]any{
+			"member_id": str(), "workspace_id": str(), "name": str(), "slug": str(), "role": str(), "joined_at": str(),
+		}, "member_id", "workspace_id", "name", "slug", "role", "joined_at")),
+		"last_active_at": nullable(str()), "active_sessions": integer(), "cli_tokens": integer(),
+		"locked_until": nullable(str()), "failed_login_count": integer(), "email_verified": boolean(),
+	}, "id", "email", "full_name", "avatar_url", "created_at", "workspace", "role", "memberships",
+		"last_active_at", "active_sessions", "cli_tokens", "locked_until", "failed_login_count", "email_verified")
 	adminWorkspace := object(map[string]any{
 		"id": str(), "name": str(), "slug": str(), "created_at": str(), "updated_at": str(),
 		"_count_members": integer(), "_count_agents": integer(), "_count_crews": integer(),
-	})
+		"preferred_language": nullable(str()), "run_retention_days": nullable(integer()),
+		"allow_privileged_credentials": boolean(), "pending_invitations": integer(),
+		"last_activity_at": nullable(str()), "runs_7d": integer(), "runs_by_day": array(integer()),
+		"cost_30d_usd": number(), "current": boolean(),
+	}, "id", "name", "slug", "created_at", "updated_at", "_count_members", "_count_agents", "_count_crews",
+		"preferred_language", "run_retention_days", "allow_privileged_credentials", "pending_invitations",
+		"last_activity_at", "runs_7d", "runs_by_day", "cost_30d_usd", "current")
+	// The three per-person POSTs carry no body; EmptyRequest is the shared
+	// component the other body-less admin actions name.
+	emptyRequest := ref("EmptyRequest")
+	adminScopeHeader := map[string]any{"X-Admin-Scope": map[string]any{
+		"description": "instance when the caller is the instance owner and the list covers every workspace; workspace when it covers the caller's workspace only.",
+		"schema":      map[string]any{"type": "string", "enum": []string{"instance", "workspace"}},
+	}}
+	adminUserSession := object(map[string]any{
+		"id": str(), "created_at": str(), "last_used_at": str(), "expires_at": str(),
+		"user_agent": str(), "ip": str(), "current": boolean(),
+	}, "id", "created_at", "last_used_at", "expires_at", "user_agent", "ip", "current")
+	adminUserCLIToken := object(map[string]any{
+		"id": str(), "name": str(), "scopes": array(str()), "created_at": str(),
+		"last_used_at": nullable(str()), "expires_at": nullable(str()),
+	}, "id", "name", "scopes", "created_at", "last_used_at", "expires_at")
 
 	approval := object(map[string]any{
 		"id": str(), "workspace_id": str(), "crew_id": str(), "agent_id": str(), "mission_id": str(),
@@ -206,9 +236,15 @@ func schemaCatalogAdminApprovalsCheckpointsCacheMemoryProjectsResources() map[st
 	}, "source", "peer_generation", "scopes", "documents")
 	return map[string]DomainSchema{
 		"GET /api/v1/admin/stats":      {Response: stats},
-		"GET /api/v1/admin/users":      {Response: array(adminUser)},
-		"GET /api/v1/admin/workspaces": {Response: array(adminWorkspace)},
-		"GET /api/v1/admin/health":     {Response: object(map[string]any{"uptime_seconds": integer(), "log_level": anyObject(), "encryption_key_source": str(), "db": anyObject(), "disk": anyObject()})},
+		"GET /api/v1/admin/users":      {Response: array(adminUser), SuccessHeaders: adminScopeHeader},
+		"GET /api/v1/admin/workspaces": {Response: array(adminWorkspace), SuccessHeaders: adminScopeHeader},
+		"GET /api/v1/admin/users/{userId}/sessions": {Response: object(map[string]any{
+			"sessions": array(adminUserSession), "cli_tokens": array(adminUserCLIToken),
+		}, "sessions", "cli_tokens")},
+		"POST /api/v1/admin/users/{userId}/sessions/{sessionId}/revoke": {SuccessStatuses: []string{"204"}, Request: emptyRequest},
+		"POST /api/v1/admin/users/{userId}/sessions/revoke-all":         {Response: object(map[string]any{"revoked": integer()}, "revoked"), Request: emptyRequest},
+		"POST /api/v1/admin/users/{userId}/unlock":                      {SuccessStatuses: []string{"204"}, Request: emptyRequest},
+		"GET /api/v1/admin/health":                                      {Response: object(map[string]any{"uptime_seconds": integer(), "log_level": anyObject(), "encryption_key_source": str(), "db": anyObject(), "disk": anyObject()})},
 		"GET /api/v1/admin/security-posture": {Response: object(map[string]any{"environment": str(), "encryption_key_configured": boolean(), "plaintext_secrets_allowed": boolean(), "private_endpoints_ceiling": boolean(), "signup_open": boolean(), "oauth_configured": boolean(), "email_configured": boolean(), "rate_limit_disabled": boolean(), "rate_limit_effectively_disabled": boolean(), "warnings": array(object(map[string]any{"key": str(), "severity": str(), "message": str()}, "key", "severity", "message"))},
 			"environment", "encryption_key_configured", "plaintext_secrets_allowed", "private_endpoints_ceiling", "signup_open",
 			"oauth_configured", "email_configured", "rate_limit_disabled", "rate_limit_effectively_disabled", "warnings")},

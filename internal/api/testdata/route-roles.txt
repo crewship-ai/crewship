@@ -151,6 +151,9 @@ POST /api/v1/admin/prune-crew-runtimes roleManage
 POST /api/v1/admin/prune-legacy-resources roleManage
 POST /api/v1/admin/reap-orphan-containers roleManage
 POST /api/v1/admin/reencrypt roleManage
+POST /api/v1/admin/users/{userId}/sessions/revoke-all roleManage
+POST /api/v1/admin/users/{userId}/sessions/{sessionId}/revoke roleManage
+POST /api/v1/admin/users/{userId}/unlock roleManage
 POST /api/v1/agents roleInline
 POST /api/v1/agents/hire roleCreate
 POST /api/v1/agents/{agentId}/approve-hire roleCreate

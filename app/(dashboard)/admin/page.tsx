@@ -18,7 +18,7 @@ import {
 } from "@/components/layout/sidebar-kit"
 
 import { sections, initialAdminTab, ALL_TABS } from "./navigation"
-import type { TabKey, Stats, AdminOrg, AdminUser, KeeperStatus, KeeperLogEntry } from "./types"
+import type { TabKey, Stats, AdminOrg, AdminUser, AdminScope, KeeperStatus, KeeperLogEntry, LicenseInfo } from "./types"
 import { useAdminWebSocket } from "./hooks/use-admin-websocket"
 import { useAdminOverview } from "./hooks/use-admin-overview"
 import { OverviewTab } from "./tabs/overview-tab"
@@ -105,6 +105,10 @@ export default function AdminPage() {
   const [stats, setStats] = useState<Stats | null>(null)
   const [orgs, setOrgs] = useState<AdminOrg[]>([])
   const [users, setUsers] = useState<AdminUser[]>([])
+  // Every workspace and account for the instance owner, the caller's own
+  // workspace for everyone else — the server says which in X-Admin-Scope.
+  const [scope, setScope] = useState<AdminScope | undefined>()
+  const [license, setLicense] = useState<LicenseInfo | null>(null)
   // The Overview's reads, each landing on its own (hooks/use-admin-overview):
   // the slow journal walk no longer holds the whole page on a skeleton.
   const overview = useAdminOverview(workspaceId, isAdmin && tab === "overview")
@@ -186,10 +190,11 @@ export default function AdminPage() {
     {
       setLoading(true)
       try {
-        const [statsRes, orgsRes, usersRes] = await Promise.all([
+        const [statsRes, orgsRes, usersRes, licenseRes] = await Promise.all([
           apiFetch(`/api/v1/admin/stats?workspace_id=${workspaceId}`),
           apiFetch(`/api/v1/admin/workspaces?workspace_id=${workspaceId}`),
           apiFetch(`/api/v1/admin/users?workspace_id=${workspaceId}`),
+          apiFetch(`/api/v1/system/license?workspace_id=${workspaceId}`),
         ])
         if (isStale()) return
 
@@ -210,7 +215,12 @@ export default function AdminPage() {
         }
 
         if (statsRes.ok) setStats(await statsRes.json())
-        if (orgsRes.ok) setOrgs(await orgsRes.json())
+        if (orgsRes.ok) {
+          setOrgs(await orgsRes.json())
+          const s = orgsRes.headers?.get?.("X-Admin-Scope")
+          setScope(s === "instance" || s === "workspace" ? s : undefined)
+        }
+        if (licenseRes?.ok) setLicense(await licenseRes.json())
         if (usersRes.ok) setUsers(await usersRes.json())
       } catch (e) {
         if (!isStale()) setFetchError(e instanceof Error ? e.message : "Network error loading admin data.")
@@ -292,11 +302,11 @@ export default function AdminPage() {
     }
 
     if (tab === "workspaces") {
-      return <WorkspacesTab orgs={orgs} onRefresh={fetchData} />
+      return <WorkspacesTab orgs={orgs} users={users} scope={scope} license={license} onRefresh={fetchData} />
     }
 
     if (tab === "users") {
-      return <UsersTab users={users} workspaceId={workspaceId} onRefresh={fetchData} />
+      return <UsersTab users={users} workspaceId={workspaceId} scope={scope} onRefresh={fetchData} />
     }
 
     if (tab === "providers") {

@@ -36,8 +36,8 @@ and exited **0**.
 
 The rule now:
 
-- **`list-users` uses `GET /api/v1/admin/users`** on the targeted server,
-  scoped to the current workspace. It needs a login — **always**, not only when
+- **`list-users` uses `GET /api/v1/admin/users`** on the targeted server:
+  the current workspace's members, or every account for the instance owner. It needs a login — **always**, not only when
   something names a server. It is the one verb here that is not gated: it
   branches on `--local` alone, so on a host with no CLI config and no
   `CREWSHIP_SERVER` it still goes to the server and still fails with "not
@@ -83,7 +83,8 @@ crewship admin list-users --local
 | Command | Purpose |
 |---|---|
 | `reset-password` | Reset a user's password (interactive prompt or `--password` / `--password-stdin`). Local-only; needs `--local` when a server is named. |
-| `list-users` | List the users of the current workspace on the server the CLI targets. `--local` lists every user in the instance from the database file, with the lockout columns. |
+| `list-users` | List people on the server the CLI targets — the current workspace's members, or every account for the instance owner — with last activity, signed-in devices and lockout. `--local` lists every user in the instance from the database file. |
+| `user sessions/revoke-session/sign-out/unlock` | Per-person actions by email: list signed-in devices and CLI tokens, sign out one device or all of them, lift a sign-in lockout. **HTTP-backed — needs a running server + login.** |
 | `promote` | Promote a user to a workspace role (`OWNER`, `ADMIN`, `MANAGER`, `MEMBER`, `VIEWER`). Local-only; needs `--local` when a server is named. The server-side equivalent is `crewship workspace member role`. |
 | `invalidate-sessions` | Force-logout every active session for a user (no password change). Local-only; needs `--local` when a server is named. |
 | `sessions list` | Forensic read of `user_sessions` for one user — all rows, including revoked + expired. Local-only; needs `--local` when a server is named. |
@@ -91,7 +92,7 @@ crewship admin list-users --local
 | `reap-orphan-containers` | Detect (and with `--apply` reap) crew containers holding a stale internal token after a master rotation. **HTTP-backed — needs a running server + login.** |
 | `health` | Instance vitals: uptime, database liveness, disk headroom on the data volume, live log level, and where the encryption key came from. **HTTP-backed — needs a running server + login.** |
 | `stats` | Workspace counts read against the licensed ceilings (crews, agents, members, runs in flight). **HTTP-backed — needs a running server + login.** |
-| `workspaces` | The current workspace with member/agent/crew counts. **HTTP-backed — needs a running server + login.** |
+| `workspaces` | The workspaces you administer (the current one, or all of them for the instance owner) with counts, runs in 7 days, spend in 30 days and last activity. **HTTP-backed — needs a running server + login.** |
 | `gdpr export/delete` | Answer a data-subject request: export everything held about one person, or erase it. **HTTP-backed — needs a running server + login.** |
 | `security-posture` | Read-only view of the instance's env-driven security flags (encryption, egress ceiling, signup, rate limiting). **HTTP-backed — needs a running server + login.** |
 | `memory-config get/set` | Read or adjust the workspace's memory retention window. **HTTP-backed — needs a running server + login.** |
@@ -161,35 +162,36 @@ crewship admin reset-password --email admin@example.com --password 's3cret!' --l
 Two different answers, deliberately:
 
 **Default — the server.** `GET /api/v1/admin/users` on the server the CLI
-targets, scoped to the current workspace (ADMIN+). Columns: EMAIL, NAME,
-CREATED, ROLE (`role@workspace-slug`). Requires a login.
+targets (ADMIN+): the members of the current workspace, or — for the instance
+owner, the account whose email is `CREWSHIP_OWNER_EMAIL` on the server —
+every account on the instance. Columns: EMAIL, NAME, CREATED, ROLE
+(`role@workspace-slug`, comma-joined), LAST ACTIVE, SESSIONS (signed-in
+devices), LOCKED (`until …` while a lockout is in force). Requires a login.
 
 **`--local` — the database file on this host.** Every row in `users` ordered
 by `created_at ASC`, across every workspace. Columns: EMAIL, NAME, CREATED,
 LOCKED (derived from `locked_until`), FAILS (`failed_login_count`), ROLES
-(`role@workspace-slug`, comma-joined across workspaces).
+(`role@workspace-slug`, comma-joined across workspaces). Needs no server —
+the path for when the server or the login is what is broken.
 
 ```bash
-crewship admin list-users                        # the server's workspace
+crewship admin list-users                        # the server
+crewship admin list-users --locked-only          # who is stuck?
 crewship admin list-users --local                # this host's database file
-crewship admin list-users --locked-only --local  # who is stuck?
 ```
 
 | Flag | Default | Description |
 |---|---|---|
-| `--locked-only` | `false` | Filter to currently locked-out accounts only. Useful when triaging "who's stuck?" after a brute-force probe. **Requires `--local`** — the API does not return lockout state, and filtering on a field we do not have would print "no locked-out users" for a workspace full of them. Without `--local` the command exits 2 and says so. |
+| `--locked-only` | `false` | Keep only accounts under a sign-in lockout. Works over HTTP and with `--local`. Against a server too old to return lockout state the command exits 2 and says so, rather than printing "no locked-out users" for a workspace full of them. |
 | `--local` | `false` | Read the database file on this host instead of the server. |
 
-Lockout state lives only in the database file: `locked_until` and
-`failed_login_count` are not fields on `GET /api/v1/admin/users`. So the
-canonical "unlock this user" pair is run on the database host —
-`list-users --locked-only --local` followed by `reset-password --local`. The
-server-backed listing prints a note saying as much, so a clean table is
-never mistaken for "nobody is locked out".
+To lift a lock from the terminal: `crewship admin user unlock <email>` (over
+HTTP), or `reset-password --local` on the database host.
 
-That note goes to **stderr**, along with the "which database" note on the
-`--local` path. Stdout carries the table and nothing else, so
-`crewship admin list-users | awk 'NR>1 {print $1}'` yields addresses.
+Notes go to **stderr**: which people the list covers on the server path, and
+the "which database" note on the `--local` path. Stdout carries the table and
+nothing else, so `crewship admin list-users | awk 'NR>1 {print $1}'` yields
+addresses.
 
 That holds for an empty workspace too: stdout is the header row alone and
 `(no users in this workspace)` is printed on stderr, so the same pipe yields
@@ -505,18 +507,46 @@ crewship admin workspaces --format json | jq '.[0]._count_agents'
 ```
 
 ```
-NAME  SLUG  MEMBERS  AGENTS  CREWS  CREATED
-Acme  acme  3        8       2      2026-01-01T00:00:00Z
+NAME    SLUG  MEMBERS  AGENTS  CREWS  RUNS 7D  SPEND 30D  LAST ACTIVITY         CREATED
+Acme *  acme  3        8       2      41       $18.42     2026-09-29 08:12 UTC  2026-01-01T00:00:00Z
 ```
 
-`GET /api/v1/admin/workspaces`, scoped server-side to the workspace the CLI is
-currently authenticated against. Despite the plural name and the JSON array
-shape, this is **not** an instance-wide tenant listing — the handler filters
-`WHERE w.id = <caller's workspace>`, so it returns at most one row: the
-caller's own workspace, with member/agent/crew counts. An empty array means
-the workspace context could not be resolved, not "no workspaces exist".
+`GET /api/v1/admin/workspaces`. A workspace ADMIN or OWNER gets one row, the
+workspace the CLI is authenticated against. The instance owner (the account
+whose email is `CREWSHIP_OWNER_EMAIL` on the server) gets every workspace on
+the instance; `*` marks the current one. RUNS 7D counts runs started in the
+last seven UTC days, SPEND 30D is the estimated spend over the last 30 days,
+LAST ACTIVITY is the newest audit-log entry. A server older than those fields
+prints `-` for them.
 
 Requires `OWNER` or `ADMIN` (`canRole "manage"`).
+
+---
+
+## `crewship admin user`
+
+Per-person actions on the server the CLI targets. People are named by email;
+the id is resolved through `GET /api/v1/admin/users`, so you can act on the
+members of your current workspace, or on any account if you are the instance
+owner. An ADMIN cannot act on an OWNER.
+
+```bash
+crewship admin user sessions jana@example.com
+crewship admin user revoke-session jana@example.com <session-id>
+crewship admin user sign-out jana@example.com
+crewship admin user unlock jana@example.com
+```
+
+| Command | Endpoint | What it does |
+|---|---|---|
+| `user sessions <email>` | `GET /api/v1/admin/users/{userId}/sessions` | Lists signed-in devices (device, IP, last use; `*` marks your own) and live CLI tokens (name, scopes, last use — never the secret). `--format json` returns the endpoint's body. |
+| `user revoke-session <email> <session-id>` | `POST /api/v1/admin/users/{userId}/sessions/{sessionId}/revoke` | Signs the person out of one device. |
+| `user sign-out <email>` | `POST /api/v1/admin/users/{userId}/sessions/revoke-all` | Signs the person out of every device. The password and CLI tokens are untouched. |
+| `user unlock <email>` | `POST /api/v1/admin/users/{userId}/unlock` | Lifts a sign-in lockout and resets the failed-attempt counter. |
+
+The host-side `invalidate-sessions` and `sessions list` stay for when the
+server or the login is what is broken; these are the same actions over HTTP,
+for an admin who is signed in. Every action writes an audit-log entry.
 
 ---
 

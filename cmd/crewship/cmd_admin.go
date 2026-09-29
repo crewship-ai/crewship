@@ -56,8 +56,10 @@ Use these when a user (typically yourself) cannot log in:
   crewship admin promote --email=admin@example.com --role=OWNER --local
 
 'list-users' is the exception: it reads the server the CLI targets
-(GET /api/v1/admin/users), scoped to the current workspace. Pass
---local to read the database file on this host instead.
+(GET /api/v1/admin/users) — the current workspace, or every account for
+the instance owner. Pass --local to read the database file on this host
+instead. The per-person actions (devices, sign-out, unlock) are under
+'crewship admin user'.
 
 Because "the file I found" and "the server you named" are different
 targets, the local-only subcommands refuse to run when --server /
@@ -78,14 +80,16 @@ var adminListUsersCmd = &cobra.Command{
 	Long: `List users.
 
 By default this reads GET /api/v1/admin/users on the server the CLI is
-pointed at, scoped to the current workspace — which is what an admin
-asking "who is in here?" means, and what this command failed to do for
-its whole life before #2086.
+pointed at: the members of the current workspace, or — when you are the
+instance owner (CREWSHIP_OWNER_EMAIL on the server) — every account on the
+instance. Each row says when the person was last active, how many devices
+are signed in, and whether the account is locked after failed sign-ins;
+--locked-only keeps just the locked ones.
 
 --local reads the database file on this host instead. That path lists
-EVERY user in the instance, across all workspaces, and adds the LOCKED
-and FAILS columns (lockout state is not exposed by the API), so it is
-also the only way to answer --locked-only.`,
+EVERY user in the instance, across all workspaces, with the LOCKED and
+FAILS columns, and needs no server — use it when the server is down or
+the login is what is broken.`,
 	RunE: runAdminListUsers,
 }
 
@@ -663,16 +667,66 @@ const adminListUsersLocalHint = "\n(if that server is down, or the login is what
 	"`crewship admin list-users --local` reads the database file directly)"
 
 // adminAPIUser is one row of GET /api/v1/admin/users. Only the fields the
-// table renders are decoded; the endpoint is workspace-scoped by middleware,
-// so `workspace` is the caller's own and `role` is the membership in it.
+// table renders are decoded. `workspace`/`role` are the membership in the
+// caller's workspace; `memberships` lists every one the caller may see.
+//
+// The activity and lockout fields are pointers on purpose: a server older
+// than them omits them, and "absent" must not read as "0 sessions" or "not
+// locked" — see runAdminListUsers's --locked-only guard.
 type adminAPIUser struct {
+	ID        string  `json:"id" yaml:"id"`
 	Email     string  `json:"email" yaml:"email"`
 	FullName  *string `json:"full_name" yaml:"full_name"`
 	CreatedAt string  `json:"created_at" yaml:"created_at"`
 	Workspace *struct {
 		Slug string `json:"slug" yaml:"slug"`
 	} `json:"workspace" yaml:"workspace"`
-	Role *string `json:"role" yaml:"role"`
+	Role        *string `json:"role" yaml:"role"`
+	Memberships []struct {
+		Slug string `json:"slug" yaml:"slug"`
+		Role string `json:"role" yaml:"role"`
+	} `json:"memberships" yaml:"memberships"`
+	LastActiveAt     *string `json:"last_active_at" yaml:"last_active_at"`
+	ActiveSessions   *int    `json:"active_sessions" yaml:"active_sessions"`
+	LockedUntil      *string `json:"locked_until" yaml:"locked_until"`
+	FailedLoginCount *int    `json:"failed_login_count" yaml:"failed_login_count"`
+}
+
+// adminUserRoles renders a person's roles as ROLE@slug, one per workspace.
+func adminUserRoles(u adminAPIUser) string {
+	if len(u.Memberships) > 0 {
+		parts := make([]string, 0, len(u.Memberships))
+		for _, m := range u.Memberships {
+			parts = append(parts, m.Role+"@"+m.Slug)
+		}
+		return strings.Join(parts, ",")
+	}
+	role := "-"
+	if u.Role != nil && *u.Role != "" {
+		role = *u.Role
+	}
+	if u.Workspace != nil && u.Workspace.Slug != "" {
+		role += "@" + u.Workspace.Slug
+	}
+	return role
+}
+
+// fetchAdminUsers reads GET /api/v1/admin/users and the scope the server
+// answered for ("instance" or "workspace"; "" from a server older than it).
+func fetchAdminUsers(client *cli.Client) ([]adminAPIUser, string, error) {
+	resp, err := client.Get("/api/v1/admin/users")
+	if err != nil {
+		return nil, "", err
+	}
+	if err := cli.CheckError(resp); err != nil {
+		return nil, "", err
+	}
+	scope := resp.Header.Get("X-Admin-Scope")
+	var users []adminAPIUser
+	if err := cli.ReadJSON(resp, &users); err != nil {
+		return nil, "", err
+	}
+	return users, scope, nil
 }
 
 // runAdminListUsers reads the server the CLI targets, unless --local asks for
@@ -690,16 +744,6 @@ func runAdminListUsers(cmd *cobra.Command, _ []string) error {
 	}
 
 	lockedOnly, _ := cmd.Flags().GetBool("locked-only")
-	if lockedOnly {
-		// Lockout state is not on the API. Filtering client-side on a field we
-		// do not have would print "(no currently locked-out users)" for a
-		// workspace full of them — the same silent-wrong-answer shape this
-		// command is being fixed for.
-		return cli.WithExitCode(errors.New(
-			"--locked-only needs lockout state, which GET /api/v1/admin/users does not return.\n"+
-				"Run it on the host that owns the database:  crewship admin list-users --locked-only --local"),
-			cli.ExitValidation)
-	}
 
 	// Both failure paths carry the same hint. The original audience for this
 	// command is an operator whose server is down or whose login is exactly
@@ -710,26 +754,51 @@ func runAdminListUsers(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return fmt.Errorf("%w%s", err, adminListUsersLocalHint)
 	}
-	var users []adminAPIUser
-	if err := getJSON(client, "/api/v1/admin/users", &users); err != nil {
+	users, scope, err := fetchAdminUsers(client)
+	if err != nil {
 		return fmt.Errorf("%w%s", err, adminListUsersLocalHint)
 	}
 
+	if lockedOnly {
+		// A server older than the lockout fields omits them. Filtering on a
+		// field that is not there would print "(no currently locked-out
+		// users)" for a workspace full of them, so an absent field is a
+		// refusal, not a zero.
+		for _, u := range users {
+			if u.FailedLoginCount == nil {
+				return cli.WithExitCode(errors.New(
+					"--locked-only needs lockout state, which this server's GET /api/v1/admin/users does not return.\n"+
+						"Upgrade the server, or run it on the host that owns the database:  crewship admin list-users --locked-only --local"),
+					cli.ExitValidation)
+			}
+		}
+		kept := users[:0]
+		for _, u := range users {
+			if u.LockedUntil != nil && *u.LockedUntil != "" {
+				kept = append(kept, u)
+			}
+		}
+		users = kept
+	}
+
 	tw := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "EMAIL\tNAME\tCREATED\tROLE")
+	fmt.Fprintln(tw, "EMAIL\tNAME\tCREATED\tROLE\tLAST ACTIVE\tSESSIONS\tLOCKED")
 	for _, u := range users {
 		name := "-"
 		if u.FullName != nil && *u.FullName != "" {
 			name = *u.FullName
 		}
-		role := "-"
-		if u.Role != nil && *u.Role != "" {
-			role = *u.Role
+		last, sessionsCol, locked := "-", "-", "-"
+		if u.LastActiveAt != nil {
+			last = shortAdminTime(*u.LastActiveAt)
 		}
-		if u.Workspace != nil && u.Workspace.Slug != "" {
-			role += "@" + u.Workspace.Slug
+		if u.ActiveSessions != nil {
+			sessionsCol = fmt.Sprintf("%d", *u.ActiveSessions)
 		}
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", u.Email, name, shortAdminTime(u.CreatedAt), role)
+		if u.LockedUntil != nil && *u.LockedUntil != "" {
+			locked = "until " + shortAdminTime(*u.LockedUntil)
+		}
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", u.Email, name, shortAdminTime(u.CreatedAt), adminUserRoles(u), last, sessionsCol, locked)
 	}
 	if err := tw.Flush(); err != nil {
 		return err
@@ -745,7 +814,11 @@ func runAdminListUsers(cmd *cobra.Command, _ []string) error {
 		// seed` …)" stays on stdout: it is published example output in
 		// docs/guides/admin-cli.mdx and moving it is a change to a documented
 		// surface, not part of this fix.
-		fmt.Fprintln(cmd.ErrOrStderr(), "(no users in this workspace)")
+		if lockedOnly {
+			fmt.Fprintln(cmd.ErrOrStderr(), "(no currently locked-out users)")
+		} else {
+			fmt.Fprintln(cmd.ErrOrStderr(), "(no users in this workspace)")
+		}
 	}
 	// Say what this view does NOT cover, so nobody reads a clean table as
 	// "nobody is locked out".
@@ -755,8 +828,12 @@ func runAdminListUsers(cmd *cobra.Command, _ []string) error {
 	// middle of stdout breaks it: on stdout this blank line and this sentence
 	// came back from `crewship admin list-users | awk 'NR>1 {print $1}'` as if
 	// they were two more user rows.
-	fmt.Fprintln(cmd.ErrOrStderr(),
-		"\n(workspace-scoped; lockout state lives on the database host — `crewship admin list-users --local`)")
+	if scope == "instance" {
+		fmt.Fprintln(cmd.ErrOrStderr(), "\n(every account on this instance — you are the instance owner)")
+	} else {
+		fmt.Fprintln(cmd.ErrOrStderr(),
+			"\n(workspace-scoped: this workspace's members; the instance owner sees every account, and `crewship admin list-users --local` reads the database file)")
+	}
 	return nil
 }
 

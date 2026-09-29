@@ -31,8 +31,10 @@ function renderTab(props: Record<string, unknown> = {}) {
   return render(<UsersTab users={USERS} workspaceId="ws-1" onRefresh={vi.fn()} {...props} />)
 }
 
+// A row opens the person in a drawer; the data actions are its Data tab.
 function expandFredy() {
   fireEvent.click(screen.getByRole("button", { name: /fredy/i }))
+  fireEvent.click(screen.getByRole("tab", { name: "Data" }))
 }
 
 beforeEach(() => {
@@ -63,8 +65,8 @@ describe("Users — a row opens what you can do to that person", () => {
     expandFredy()
     fireEvent.click(screen.getByRole("button", { name: /export/i }))
 
-    await waitFor(() => expect(h.apiFetch).toHaveBeenCalled())
-    const [url] = h.apiFetch.mock.calls[0] as [string]
+    await waitFor(() => expect(h.apiFetch.mock.calls.some(([u]) => String(u).includes("/data"))).toBe(true))
+    const [url] = h.apiFetch.mock.calls.find(([u]) => String(u).includes("/data")) as [string]
     expect(url).toContain("/api/v1/admin/users/u-fredy/data")
     expect(url).toContain("workspace_id=ws-1")
   })
@@ -86,13 +88,13 @@ describe("Users — a row opens what you can do to that person", () => {
     expect(confirm).toBeEnabled()
   })
 
-  it("opens one row at a time", () => {
+  // One person at a time: the drawer is modal, and it names who it acts on.
+  it("opens the drawer for the person whose row was clicked", () => {
     renderTab()
     expandFredy()
-    fireEvent.click(screen.getByRole("button", { name: /demo user/i }))
-
-    expect(screen.queryByRole("region", { name: /pablosrbino@gmail.com/i })).toBeNull()
-    expect(screen.getByRole("region", { name: /demo@crewship\.ai/i })).toBeInTheDocument()
+    const drawer = screen.getByRole("dialog")
+    expect(within(drawer).getByText("pablosrbino@gmail.com")).toBeInTheDocument()
+    expect(within(drawer).queryByText("demo@crewship.ai")).toBeNull()
   })
 })
 

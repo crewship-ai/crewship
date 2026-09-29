@@ -20,10 +20,14 @@ The operational surface for OWNER and ADMIN roles: workspace stats, user managem
 | Method | Endpoint | Purpose |
 |--------|----------|---------|
 | `GET` | [/api/v1/admin/stats](#get-api-v1-admin-stats) | Aggregate stats for the current workspace |
-| `GET` | [/api/v1/admin/users](#get-api-v1-admin-users) | List workspace users with roles |
+| `GET` | [/api/v1/admin/users](#get-api-v1-admin-users) | List people with roles, activity and lockout state |
+| `GET` | [/api/v1/admin/users/\{userId\}/sessions](#get-api-v1-admin-users-userid-sessions) | A person's signed-in devices and live CLI tokens |
+| `POST` | [/api/v1/admin/users/\{userId\}/sessions/\{sessionId\}/revoke](#post-api-v1-admin-users-userid-sessions-sessionid-revoke) | Sign a person out of one device |
+| `POST` | [/api/v1/admin/users/\{userId\}/sessions/revoke-all](#post-api-v1-admin-users-userid-sessions-revoke-all) | Sign a person out of every device |
+| `POST` | [/api/v1/admin/users/\{userId\}/unlock](#post-api-v1-admin-users-userid-unlock) | Lift a sign-in lockout |
 | `GET` | [/api/v1/admin/users/\{userId\}/data](#get-api-v1-admin-users-userid-data) | GDPR Art. 15 — export every row referencing a user |
 | `DELETE` | [/api/v1/admin/users/\{userId\}/data](#delete-api-v1-admin-users-userid-data) | GDPR Art. 17 — cascade purge a user's data |
-| `GET` | [/api/v1/admin/workspaces](#get-api-v1-admin-workspaces) | Workspace details with member/agent/crew counts |
+| `GET` | [/api/v1/admin/workspaces](#get-api-v1-admin-workspaces) | Workspaces with counts, runs, spend and settings |
 | `POST` | [/api/v1/admin/prune-legacy-resources](#post-api-v1-admin-prune-legacy-resources) | Remove orphaned pre-C1 Docker resources |
 | `GET` | [/api/v1/admin/legacy-resources](#get-api-v1-admin-legacy-resources) | Detect orphaned pre-C1 Docker resources |
 | `GET` | [/api/v1/admin/health](#get-api-v1-admin-health) | Read uptime, database, disk, and logging health |
@@ -96,16 +100,23 @@ Returns aggregate statistics for the current workspace.
 
 ## GET /api/v1/admin/users
 
-Lists all users in the current workspace with their roles.
+Lists the people the caller administers, one row per person. A workspace
+`OWNER` or `ADMIN` gets the members of the current workspace. The **instance
+owner** — the account whose email matches `CREWSHIP_OWNER_EMAIL` on the
+server, the same identity the backup endpoints trust — gets every account on
+the instance, including accounts that belong to no workspace. The
+`X-Admin-Scope` response header says which: `workspace` or `instance`.
 
-**Required role:** OWNER
+**Required role:** ADMIN or OWNER (`manage` permission).
 
 **Request:** no body. **Response:** JSON array shown below.
 
 | Status | Condition |
 |--------|-----------|
-| `200` | Members returned. |
-| `403` | Caller is not OWNER. |
+| `200` | People returned. |
+| `401` | Missing authentication or workspace context. |
+| `403` | Caller is not ADMIN or OWNER. |
+| `500` | A query failed. |
 
 ### Response
 
@@ -117,12 +128,17 @@ Lists all users in the current workspace with their roles.
     "full_name": "Alice Chen",
     "avatar_url": "https://...",
     "created_at": "2025-01-01T00:00:00Z",
-    "workspace": {
-      "id": "ws-uuid",
-      "name": "Engineering",
-      "slug": "engineering"
-    },
-    "role": "ADMIN"
+    "workspace": { "id": "ws-uuid", "name": "Engineering", "slug": "engineering" },
+    "role": "ADMIN",
+    "memberships": [
+      { "member_id": "wm-cuid", "workspace_id": "ws-uuid", "name": "Engineering", "slug": "engineering", "role": "ADMIN", "joined_at": "2025-01-01T00:00:00Z" }
+    ],
+    "last_active_at": "2026-09-29T08:12:44Z",
+    "active_sessions": 2,
+    "cli_tokens": 1,
+    "locked_until": null,
+    "failed_login_count": 0,
+    "email_verified": true
   }
 ]
 ```
@@ -133,9 +149,116 @@ Lists all users in the current workspace with their roles.
 | `email` | `string` | User email address |
 | `full_name` | `string?` | Display name (nullable) |
 | `avatar_url` | `string?` | Avatar URL (nullable) |
-| `created_at` | `string` | ISO 8601 creation timestamp |
-| `workspace` | `object?` | Workspace details (id, name, slug) |
-| `role` | `string?` | Role in this workspace (OWNER, ADMIN, MEMBER, VIEWER) |
+| `created_at` | `string` | When the account was created |
+| `workspace` | `object?` | The membership in the caller's workspace, else the first one; null for an account in no workspace |
+| `role` | `string?` | Role in that workspace (OWNER, ADMIN, MANAGER, MEMBER, VIEWER) |
+| `memberships` | `array` | Every membership the caller may see: only the current workspace's for a workspace admin, all of them for the instance owner. `member_id` is the id the workspace member routes take. |
+| `last_active_at` | `string?` | Latest use of a session that is not signed out |
+| `active_sessions` | `int` | Signed-in devices (not revoked, not expired) |
+| `cli_tokens` | `int` | Live CLI tokens (not revoked, not expired) |
+| `locked_until` | `string?` | Set while a sign-in lockout is in force; null otherwise, including after a lock has run out |
+| `failed_login_count` | `int` | Consecutive failed sign-ins |
+| `email_verified` | `bool` | Whether the address has been verified |
+
+## `GET /api/v1/admin/users/{userId}/sessions`
+
+A person's signed-in devices, with device and IP address, and their live CLI
+tokens (name, scopes, last use — never the secret). `current` marks the
+session the caller is using.
+
+**Required role:** ADMIN or OWNER (`manage` permission). The person must be a
+member of the caller's workspace unless the caller is the instance owner;
+anyone else is `404`, the same answer as an id that does not exist. An ADMIN
+cannot act on an OWNER of the workspace.
+
+**Request:** no body; `userId` is the path parameter. **Response:**
+
+```json
+{
+  "sessions": [
+    { "id": "sess-cuid", "created_at": "2026-09-28T07:00:00Z", "last_used_at": "2026-09-29T08:12:44Z", "expires_at": "2026-10-28T07:00:00Z", "user_agent": "Chrome on macOS", "ip": "10.0.0.7", "current": false }
+  ],
+  "cli_tokens": [
+    { "id": "tok-cuid", "name": "laptop", "scopes": ["agents:read"], "created_at": "2026-09-01T10:00:00Z", "last_used_at": "2026-09-27T16:00:00Z", "expires_at": null }
+  ]
+}
+```
+
+| Status | Condition |
+|--------|-----------|
+| `200` | Sessions and tokens returned. |
+| `400` | Missing `userId`. |
+| `401` | Missing authentication. |
+| `403` | Caller is not ADMIN or OWNER, or an ADMIN targets an OWNER. |
+| `404` | No such person among those the caller administers. |
+| `500` | A query failed. |
+
+## `POST /api/v1/admin/users/{userId}/sessions/{sessionId}/revoke`
+
+Signs a person out of one device. The session is marked revoked with reason
+`admin_revoke`, and an audit entry `user.session_revoked` is written. Other
+devices and CLI tokens are untouched.
+
+**Required role:** ADMIN or OWNER, with the same reach rules as the sessions
+list above.
+
+**Request:** no body; `userId` and `sessionId` are path parameters.
+**Response:** `204 No Content`.
+
+| Status | Condition |
+|--------|-----------|
+| `204` | Signed out. |
+| `400` | Missing `userId` or `sessionId`. |
+| `401` | Missing authentication. |
+| `403` | Caller is not ADMIN or OWNER, or an ADMIN targets an OWNER. |
+| `404` | No such person, or the session is not theirs. |
+| `500` | The revoke failed. |
+
+## `POST /api/v1/admin/users/{userId}/sessions/revoke-all`
+
+Signs a person out of every device. Sessions are marked revoked with reason
+`admin_invalidate` — the reason the host-side `crewship admin
+invalidate-sessions` writes — and an audit entry `user.sessions_revoked` is
+written. The password stays as it is; CLI tokens are separate credentials and
+stay valid.
+
+**Required role:** ADMIN or OWNER, with the same reach rules as above.
+
+**Request:** no body; `userId` is the path parameter. **Response:**
+
+```json
+{ "revoked": 2 }
+```
+
+| Status | Condition |
+|--------|-----------|
+| `200` | Signed out; `revoked` counts the sessions ended. |
+| `400` | Missing `userId`. |
+| `401` | Missing authentication. |
+| `403` | Caller is not ADMIN or OWNER, or an ADMIN targets an OWNER. |
+| `404` | No such person among those the caller administers. |
+| `500` | The revoke failed. |
+
+## `POST /api/v1/admin/users/{userId}/unlock`
+
+Lifts a sign-in lockout: clears `locked_until` and resets the failed-attempt
+counter, so the person can sign in straight away. Writes an audit entry
+`user.unlocked`. Unlocking an account that is not locked succeeds and changes
+nothing.
+
+**Required role:** ADMIN or OWNER, with the same reach rules as above.
+
+**Request:** no body; `userId` is the path parameter. **Response:** `204 No
+Content`.
+
+| Status | Condition |
+|--------|-----------|
+| `204` | Unlocked. |
+| `400` | Missing `userId`. |
+| `401` | Missing authentication. |
+| `403` | Caller is not ADMIN or OWNER, or an ADMIN targets an OWNER. |
+| `404` | No such person among those the caller administers. |
+| `500` | The update failed. |
 
 ## Instance administration
 
@@ -576,20 +699,26 @@ On partial failure the same shape is returned with an additional `"error": "<fir
 
 ## Workspaces
 
-Workspace detail read, scoped to the current workspace. Requires the OWNER role.
+The workspaces the caller administers: the current one for a workspace admin,
+every workspace for the instance owner.
 
 ## GET /api/v1/admin/workspaces
 
-Lists workspace details with member, agent, and crew counts.
+Lists workspaces with their counts, the week's runs, the month's spend, a few
+settings and the last audited change. The `X-Admin-Scope` response header is
+`workspace` (one row, the current workspace) or `instance` (every workspace,
+for the instance owner).
 
-**Required role:** OWNER
+**Required role:** ADMIN or OWNER (`manage` permission).
 
 **Request:** no body. **Response:** JSON array shown below.
 
 | Status | Condition |
 |--------|-----------|
-| `200` | Current workspace returned. |
-| `403` | Caller is not OWNER. |
+| `200` | Workspaces returned. |
+| `401` | Missing authentication or workspace context. |
+| `403` | Caller is not ADMIN or OWNER. |
+| `500` | A query failed. |
 
 ### Response
 
@@ -603,14 +732,31 @@ Lists workspace details with member, agent, and crew counts.
     "updated_at": "2025-06-15T12:00:00Z",
     "_count_members": 12,
     "_count_agents": 8,
-    "_count_crews": 3
+    "_count_crews": 3,
+    "preferred_language": "en",
+    "run_retention_days": 90,
+    "allow_privileged_credentials": false,
+    "pending_invitations": 1,
+    "last_activity_at": "2026-09-29T08:12:44Z",
+    "runs_7d": 41,
+    "runs_by_day": [5, 8, 6, 9, 3, 0, 10],
+    "cost_30d_usd": 18.42,
+    "current": true
   }
 ]
 ```
 
-<Note>
-  This endpoint is scoped to the current workspace only. It does not list other workspaces in the system.
-</Note>
+| Field | Type | Description |
+|-------|------|-------------|
+| `preferred_language` | `string?` | Language agents answer in; null when unset |
+| `run_retention_days` | `int?` | How long runs are kept; null keeps them all |
+| `allow_privileged_credentials` | `bool` | Whether privileged credentials may be used |
+| `pending_invitations` | `int` | Invitations not accepted and not expired |
+| `last_activity_at` | `string?` | Time of the newest audit-log entry, as stored |
+| `runs_7d` | `int` | Runs started in the last seven UTC days, counted as the `runs_count` metric counts them |
+| `runs_by_day` | `int[7]` | The same, per UTC day, oldest first; the last entry is today |
+| `cost_30d_usd` | `number` | Estimated spend over the last 30 days, from the same source as the `cost_usd` metric |
+| `current` | `bool` | Whether this is the caller's current workspace |
 
 ## GET /api/v1/admin/journal/verify
 

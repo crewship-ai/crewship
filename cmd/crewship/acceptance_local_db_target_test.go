@@ -190,9 +190,12 @@ func TestAcceptance_AdminListUsers_ServerDownIsAnError(t *testing.T) {
 	}
 }
 
-// --locked-only cannot be answered from the API, and answering it anyway with
-// a client-side filter over a field the response does not carry would print
-// "(no currently locked-out users)" for a workspace full of them.
+// --locked-only cannot be answered from a server that does not return
+// lockout state (this stub is shaped like one from before the field), and
+// answering it anyway with a client-side filter over a field the response
+// does not carry would print "(no currently locked-out users)" for a
+// workspace full of them. A current server answers it over HTTP — see
+// TestAcceptance_AdminUserVerbs.
 func TestAcceptance_AdminListUsers_LockedOnlyRefusesOverHTTP(t *testing.T) {
 	stub := newAdminUsersStub(t)
 	dataDir := localDBFixture(t)
