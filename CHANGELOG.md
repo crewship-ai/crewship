@@ -10,6 +10,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 ## [Unreleased]
 
 ### Improved
+- Workspace administrators can read and replace versioned member resource policies through the API and `workspace member access`. Stale edits return 409; explicit empty restricted grants deny all. Restricted execution remains unavailable on unintegrated routes. (#2711)
 - Chat creators and workspace administrators can issue expiring, revocable read-only transcript tokens through `chat share` or the API. Recipients use `/shared-chat` without workspace membership; reads recheck issuer authority and exclude structured tools, reasoning, attachments and execution access. (#2703)
 - Routines can check assigned TODO issues without an LLM call using `query: assigned_issues`; conditional runtime steps no longer prewarm an otherwise idle container. (#2703)
 - Declared crew services can opt into persistent running/stopped intent from crew Settings or the CLI. A leased controller restores services independently of agent wakeups; missing credential references block startup, and explicit stops survive restart. (#2703)

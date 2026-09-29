@@ -1,5 +1,11 @@
 # Agent Access / Runtime — pokračování na dev1, 29. 9. 2026
 
+**Aktualizace 14:19 UTC:** #2720 je sloučené jako `51a931f423830bdb3ca6403b2fe27740e7bb8758`.
+Finální head `5eb345326` má skutečné CodeRabbit review/schválení 5353361661 a
+úspěšné CI, Security i CodeQL; CI run 36574189593 dokončil také všechny race joby.
+#2711 se při merge #2717 uzavřelo, přestože aplikační integrace není hotová;
+bylo znovu otevřené. Další větev přidává [správu grantů přes API a CLI](AGENT-ACCESS-POLICY-API-2026-09-29.md).
+
 **Aktualizace 13:02 UTC:** #2717 je sloučené jako `7bbb09832`, po úspěchu celého
 finálního CI a věcném review i schválení `56c103a98`. Starší věty o billing blokaci
 nebo draftu níže jsou historický protokol. Release 1.0 stále není přijatý;
