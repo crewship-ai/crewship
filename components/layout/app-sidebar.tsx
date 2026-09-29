@@ -176,9 +176,11 @@ export function AppSidebar() {
   )
 }
 
-/** In icon mode the tile IS the button: no padding, no second background. */
+/** In icon mode the tile IS the button: no padding, no second background, and
+ *  no gap — the collapsed label keeps zero width but a flex gap still pushed
+ *  the tile half a gap (3.7px) left of centre. */
 const RAIL_BUTTON =
-  "group-data-[collapsible=icon]:w-9! group-data-[collapsible=icon]:h-9! group-data-[collapsible=icon]:p-0! group-data-[collapsible=icon]:bg-transparent! group-data-[collapsible=icon]:hover:bg-transparent!"
+  "group-data-[collapsible=icon]:w-9! group-data-[collapsible=icon]:h-9! group-data-[collapsible=icon]:gap-0! group-data-[collapsible=icon]:p-0! group-data-[collapsible=icon]:bg-transparent! group-data-[collapsible=icon]:hover:bg-transparent!"
 
 /** Icon mode centres each tile in the rail; the list is otherwise left-aligned. */
 const RAIL_MENU = "group-data-[collapsible=icon]:items-center"
