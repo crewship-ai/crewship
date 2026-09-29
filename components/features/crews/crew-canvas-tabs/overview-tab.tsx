@@ -97,7 +97,7 @@ export function OverviewTab({
             ))}
           </div>
         </div>
-        <div className="rounded-[20px] border border-border bg-card max-h-[420px] overflow-hidden">
+        <div className="rounded-card border border-border bg-card max-h-[420px] overflow-hidden">
           <CrewActivityFeed
             limit={5}
             workspaceId={workspaceId}

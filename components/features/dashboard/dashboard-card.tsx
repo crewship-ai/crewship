@@ -20,7 +20,7 @@ export function DashboardCard({ title, icon: Icon, hint, action, className, chil
   return (
     <div
       className={cn(
-        "rounded-[20px] border border-border bg-card p-4",
+        "rounded-card border border-border bg-card p-4",
         className,
       )}
       {...rest}

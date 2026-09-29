@@ -28,7 +28,7 @@ export function InlineEmpty({
         className,
       )}
     >
-      <span className="icon-tile inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-[9px]" aria-hidden>
+      <span className="icon-tile inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md" aria-hidden>
         <Icon className="h-3.5 w-3.5" />
       </span>
       <span className="min-w-[12rem] flex-1">{text}</span>

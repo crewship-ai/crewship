@@ -542,7 +542,7 @@ export function RoutineCalendar({
     return (
       <section
         aria-label="Day agenda"
-        className="overflow-hidden rounded-[20px] border border-border bg-card"
+        className="overflow-hidden rounded-card border border-border bg-card"
       >
         <div className="flex flex-wrap items-center gap-2 border-b border-border/60 px-4 py-2.5">
           <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">

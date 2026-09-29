@@ -12,7 +12,7 @@ import { resolveRoutineIcon } from "@/lib/routine-identity"
 
 const TILE = {
   sm: "h-6 w-6 rounded-[7px]",
-  md: "h-7 w-7 rounded-[9px]",
+  md: "h-7 w-7 rounded-md",
 } as const
 
 export function RoutineGlyph({

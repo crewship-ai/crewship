@@ -303,7 +303,7 @@ export function ConfigCards<T extends string>({ value, options, onSave }: Config
           aria-checked={local === o.value}
           onClick={() => void commit(o.value)}
           className={cn(
-            "grid grid-cols-[auto_minmax(0,1fr)] items-center gap-2.5 rounded-[9px] border px-3 py-2.5 text-left transition-colors",
+            "grid grid-cols-[auto_minmax(0,1fr)] items-center gap-2.5 rounded-md border px-3 py-2.5 text-left transition-colors",
             local === o.value
               ? "border-primary bg-primary/10"
               : "border-border bg-background hover:border-foreground/25",

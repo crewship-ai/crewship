@@ -103,7 +103,7 @@ const NO_ATTACHMENTS: ComposerAttachment[] = []
  * so the form reaches it by its data-slot instead of drawing a second box.
  */
 const COMPOSER_SHELL = [
-  "[&_[data-slot=input-group]]:rounded-[18px] [&_[data-slot=input-group]]:border-border [&_[data-slot=input-group]]:bg-card [&_[data-slot=input-group]]:shadow-none dark:[&_[data-slot=input-group]]:bg-card",
+  "[&_[data-slot=input-group]]:rounded-2xl [&_[data-slot=input-group]]:border-border [&_[data-slot=input-group]]:bg-card [&_[data-slot=input-group]]:shadow-none dark:[&_[data-slot=input-group]]:bg-card",
   "[&_[data-slot=input-group]]:transition-[border-color,box-shadow]",
   "[&_[data-slot=input-group]:focus-within]:border-primary/60 [&_[data-slot=input-group]:focus-within]:ring-[3px] [&_[data-slot=input-group]:focus-within]:ring-primary/20",
 ].join(" ")

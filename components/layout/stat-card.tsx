@@ -22,7 +22,7 @@ export function StatCard({ title, value, subtitle, icon: Icon, iconClassName, cl
         <CardContent className="p-4 sm:p-5">
           <div className="flex items-center justify-between">
             <div className="eyebrow text-muted-foreground">{title}</div>
-            <div className={`flex h-8 w-8 items-center justify-center rounded-[10px] ${iconClassName ?? "icon-tile"}`}>
+            <div className={`flex h-8 w-8 items-center justify-center rounded-lg ${iconClassName ?? "icon-tile"}`}>
               {animatedIcon ?? <Icon className="h-4 w-4" />}
             </div>
           </div>

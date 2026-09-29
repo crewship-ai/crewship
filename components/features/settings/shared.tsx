@@ -46,7 +46,7 @@ export function SettingsCard({
   return (
     <section
       data-slot="settings-card"
-      className={cn("overflow-hidden rounded-[20px] border border-border bg-card", className)}
+      className={cn("overflow-hidden rounded-card border border-border bg-card", className)}
     >
       <SettingsCardHeader title={title} description={description} actions={actions} icon={icon} tint={tint} />
       <div className={cn(padded && "p-4")}>{children}</div>
@@ -73,7 +73,7 @@ function SettingsCardHeader({
     <div className="flex items-center gap-3 border-b border-border px-4 py-3">
       {Icon && (
         <span
-          className="icon-tile inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px]"
+          className="icon-tile inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg"
           style={{ "--ic": danger ? "var(--destructive)" : (tint ?? "var(--primary)") } as CSSProperties}
           aria-hidden
         >
@@ -166,7 +166,7 @@ export function SettingsDangerCard({
   return (
     <section
       data-slot="settings-card"
-      className="overflow-hidden rounded-[20px] border border-destructive/30 bg-card"
+      className="overflow-hidden rounded-card border border-destructive/30 bg-card"
     >
       <SettingsCardHeader title={title} description={description} actions={actions} icon={icon} danger />
       {children}

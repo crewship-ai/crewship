@@ -634,7 +634,7 @@ export function RunsView({
           </SettingsCard>
         ) : (
           <>
-            <div className="rounded-[20px] border border-border bg-card overflow-hidden">
+            <div className="rounded-card border border-border bg-card overflow-hidden">
               {/* Desktop header */}
               <div
                 className="eyebrow hidden md:grid items-center gap-3 px-4 py-2 border-b border-border"
@@ -823,7 +823,7 @@ function LivePulse({ runs, runningCount }: { runs: Run[]; runningCount: number }
   const router = useRouter()
   if (runningCount <= 0 && runs.length === 0) {
     return (
-      <div className="rounded-[20px] border border-border bg-card px-4 py-3 flex items-center gap-2">
+      <div className="rounded-card border border-border bg-card px-4 py-3 flex items-center gap-2">
         <span className="h-2 w-2 rounded-full bg-muted-foreground/30" />
         <span className="eyebrow">
           Running now
@@ -833,7 +833,7 @@ function LivePulse({ runs, runningCount }: { runs: Run[]; runningCount: number }
     )
   }
   return (
-    <div className="rounded-[20px] border border-success/25 bg-card overflow-hidden">
+    <div className="rounded-card border border-success/25 bg-card overflow-hidden">
       <div className="flex items-center gap-2 border-b border-border/40 px-4 py-2">
         <StatusDot status="IN_PROGRESS" live className="h-2 w-2" />
         <span className="eyebrow">
@@ -910,7 +910,7 @@ function RunsKpiTile({
   const splitTotal = split ? split.ok + split.failed : 0
   const okPct = splitTotal > 0 ? (split!.ok / splitTotal) * 100 : 0
   return (
-    <div className="flex flex-col gap-1 rounded-[20px] border border-border bg-card px-4 py-4">
+    <div className="flex flex-col gap-1 rounded-card border border-border bg-card px-4 py-4">
       <div className="flex items-center justify-between">
         <div className="eyebrow">{label}</div>
         <div className={cn("flex h-6 w-6 items-center justify-center rounded-md", iconTone)}>
@@ -959,7 +959,7 @@ function BreakdownCard({
 }) {
   const max = maxTotal(rows)
   return (
-    <div className="rounded-[20px] border border-border bg-card overflow-hidden">
+    <div className="rounded-card border border-border bg-card overflow-hidden">
       <div className="flex items-center gap-2 border-b border-border/40 px-4 py-2.5">
         <Icon className="h-3.5 w-3.5 text-muted-foreground/60" />
         <span className="eyebrow">{title}</span>
@@ -994,7 +994,7 @@ function BreakdownCard({
  * ----------------------------------------------------------------- */
 function TopCrewsCard({ crews }: { crews: RunInsights["by_crew"] }) {
   return (
-    <div className="rounded-[20px] border border-border bg-card overflow-hidden">
+    <div className="rounded-card border border-border bg-card overflow-hidden">
       <div className="flex items-center gap-2 border-b border-border/40 px-4 py-2.5">
         <Users className="h-3.5 w-3.5 text-muted-foreground/60" />
         <span className="eyebrow">Top crews</span>

@@ -48,7 +48,7 @@ export function ThemeSwitcher({ className }: { className?: string }) {
               setTheme(value)
             }}
             className={cn(
-              "flex h-8 items-center justify-center gap-1 rounded-[10px] text-micro font-medium text-muted-foreground transition-colors outline-none",
+              "flex h-8 items-center justify-center gap-1 rounded-lg text-micro font-medium text-muted-foreground transition-colors outline-none",
               "hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50",
               checked && "bg-card text-primary-hover shadow-xs",
             )}

@@ -66,11 +66,11 @@ export const MessageContent = ({
       //
       // User bubble — the brand tint with a brand hairline, so "yours" reads
       // at a glance without a saturated fill.
-      "group-[.is-user]:ml-auto group-[.is-user]:rounded-[18px] group-[.is-user]:rounded-tr-[6px]",
+      "group-[.is-user]:ml-auto group-[.is-user]:rounded-2xl group-[.is-user]:rounded-tr-[6px]",
       "group-[.is-user]:bg-primary/10 group-[.is-user]:border group-[.is-user]:border-primary/30",
       "group-[.is-user]:px-4 group-[.is-user]:py-3 group-[.is-user]:text-foreground",
       // Agent bubble — the card surface on the page ground.
-      "group-[.is-assistant]:rounded-[18px] group-[.is-assistant]:rounded-tl-[6px]",
+      "group-[.is-assistant]:rounded-2xl group-[.is-assistant]:rounded-tl-[6px]",
       "group-[.is-assistant]:bg-card group-[.is-assistant]:border group-[.is-assistant]:border-border",
       "group-[.is-assistant]:px-4 group-[.is-assistant]:py-3 group-[.is-assistant]:text-foreground",
       className

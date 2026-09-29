@@ -144,7 +144,7 @@ export function PagesOverview({
         </Appear>
 
         {error && (
-          <div className="rounded-[12px] border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+          <div className="rounded-xl border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
             {error}
           </div>
         )}
@@ -247,7 +247,7 @@ export function PagesOverview({
                         disabled={empty || !onFilterState}
                         onClick={() => onFilterState?.(row.state)}
                         className={cn(
-                          "group flex items-center gap-2.5 rounded-[10px] px-2 py-2 text-left transition-colors",
+                          "group flex items-center gap-2.5 rounded-lg px-2 py-2 text-left transition-colors",
                           !empty && onFilterState && "hover:bg-foreground/[0.03]",
                           empty && "cursor-default",
                         )}
@@ -316,7 +316,7 @@ export function PagesOverview({
                         exit={{ opacity: 0, height: 0 }}
                         type="button"
                         onClick={() => onSelect(p.slug)}
-                        className="group flex items-center gap-2.5 overflow-hidden rounded-[10px] px-2 py-2 text-left transition-colors hover:bg-foreground/[0.03]"
+                        className="group flex items-center gap-2.5 overflow-hidden rounded-lg px-2 py-2 text-left transition-colors hover:bg-foreground/[0.03]"
                       >
                       <span className="min-w-0 flex-1">
                         <span className="type-page-value block truncate text-foreground/90">
@@ -381,7 +381,7 @@ export function PagesOverview({
                       {...listRow}
                       type="button"
                       onClick={() => onSelect(p.slug)}
-                      className="group flex items-center gap-2.5 rounded-[10px] px-2 py-2 text-left transition-colors hover:bg-foreground/[0.03]"
+                      className="group flex items-center gap-2.5 rounded-lg px-2 py-2 text-left transition-colors hover:bg-foreground/[0.03]"
                     >
                       <Icon
                         className={cn(
@@ -424,14 +424,14 @@ function OverviewSkeleton() {
         <Skeleton className="h-9 w-48" />
         <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
           {Array.from({ length: 4 }, (_, i) => (
-            <Skeleton key={i} className="h-[104px] rounded-[20px]" />
+            <Skeleton key={i} className="h-[104px] rounded-card" />
           ))}
         </div>
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-          <Skeleton className="h-[228px] rounded-[20px]" />
-          <Skeleton className="h-[228px] rounded-[20px]" />
+          <Skeleton className="h-[228px] rounded-card" />
+          <Skeleton className="h-[228px] rounded-card" />
         </div>
-        <Skeleton className="h-[240px] rounded-[20px]" />
+        <Skeleton className="h-[240px] rounded-card" />
       </div>
     </div>
   )

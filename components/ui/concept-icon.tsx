@@ -43,7 +43,7 @@ export interface ConceptIconProps {
 
 const CHIP_SIZE = {
   sm: "h-6 w-6 rounded-[7px]",
-  md: "h-8 w-8 rounded-[10px]",
+  md: "h-8 w-8 rounded-lg",
   lg: "h-10 w-10 rounded-xl",
 } as const
 

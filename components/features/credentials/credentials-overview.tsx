@@ -237,7 +237,7 @@ export function CredentialsOverview({
                     </>
                   )
                   const rowClass =
-                    "group flex items-center gap-2.5 rounded-[10px] px-2 py-1.5 text-left transition-colors hover:bg-foreground/[0.04]"
+                    "group flex items-center gap-2.5 rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-foreground/[0.04]"
                   // A row whose fix is somewhere else links there. Opening the
                   // credential to be told "approve it in the inbox" is the
                   // scavenger hunt the deep link exists to remove.
@@ -422,17 +422,17 @@ export function CredentialsOverviewSkeleton() {
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <AppearStack>
           {Array.from({ length: 4 }, (_, i) => (
-            <Skeleton key={i} className="h-[104px] rounded-[20px]" />
+            <Skeleton key={i} className="h-[104px] rounded-card" />
           ))}
         </AppearStack>
       </div>
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <Skeleton className="h-[228px] rounded-[20px]" />
-        <Skeleton className="h-[228px] rounded-[20px]" />
+        <Skeleton className="h-[228px] rounded-card" />
+        <Skeleton className="h-[228px] rounded-card" />
       </div>
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <Skeleton className="h-[228px] rounded-[20px]" />
-        <Skeleton className="h-[228px] rounded-[20px]" />
+        <Skeleton className="h-[228px] rounded-card" />
+        <Skeleton className="h-[228px] rounded-card" />
       </div>
     </div>
   )

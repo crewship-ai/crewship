@@ -6,7 +6,7 @@ export function TypingDots({ name }: { name?: string | null }) {
     <div
       role="status"
       aria-label={`${who} is working`}
-      className="inline-flex w-fit items-center gap-1 rounded-[18px] rounded-tl-[6px] border border-border bg-card px-4 py-3.5"
+      className="inline-flex w-fit items-center gap-1 rounded-2xl rounded-tl-[6px] border border-border bg-card px-4 py-3.5"
     >
       {[0, 1, 2].map((i) => (
         <span

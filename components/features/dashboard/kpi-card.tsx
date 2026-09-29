@@ -51,7 +51,7 @@ export function KpiCard({
     <Root
       {...(onClick ? { type: "button" as const, onClick } : {})}
       className={cn(
-        "flex flex-col gap-1 px-5 py-4 rounded-[20px] border border-border bg-card",
+        "flex flex-col gap-1 px-5 py-4 rounded-card border border-border bg-card",
         onClick && "lift text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
       )}
     >

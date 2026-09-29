@@ -658,7 +658,7 @@ export function OrchestrationLayout({
             {leftCollapsed && (
               <button
                 aria-label="Open explorer"
-                className="absolute top-1 left-2 z-20 flex min-h-[44px] min-w-[44px] items-center justify-center rounded-[10px] text-muted-foreground hover:bg-foreground/[0.04] hover:text-foreground"
+                className="absolute top-1 left-2 z-20 flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg text-muted-foreground hover:bg-foreground/[0.04] hover:text-foreground"
                 onClick={() => setLeftCollapsed(false)}
               >
                 <PanelLeftOpen className="h-3.5 w-3.5" />

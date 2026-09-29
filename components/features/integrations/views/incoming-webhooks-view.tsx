@@ -536,7 +536,7 @@ function PageEndpoints({
   return (
     <>
       {read.loading ? (
-        <Skeleton className="h-36 rounded-[20px]" />
+        <Skeleton className="h-36 rounded-card" />
       ) : (
         <Panel title="Endpoints">
           <EndpointTable

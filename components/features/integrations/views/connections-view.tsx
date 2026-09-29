@@ -85,10 +85,10 @@ export function ConnectionsView({
       <div className="space-y-4 p-4 md:p-6">
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
           {Array.from({ length: 4 }).map((_, i) => (
-            <Skeleton key={i} className="h-[92px] rounded-[20px]" />
+            <Skeleton key={i} className="h-[92px] rounded-card" />
           ))}
         </div>
-        <Skeleton className="h-[260px] rounded-[20px]" />
+        <Skeleton className="h-[260px] rounded-card" />
       </div>
     )
   }
@@ -160,7 +160,7 @@ export function ConnectionsView({
           onOpenAdd={onOpenAdd}
         />
       ) : (
-        <div className="overflow-hidden rounded-[20px] border border-border bg-card">
+        <div className="overflow-hidden rounded-card border border-border bg-card">
           <div className="flex items-center gap-2 border-b border-border px-4 py-2.5">
             <span className="eyebrow">
               Connections

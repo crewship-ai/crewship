@@ -115,7 +115,7 @@ export function IssuesBoardView({ issues, onIssueClick, onCreateClick, selectedI
       <button
         type="button"
         onClick={() => toggleOpen(col.status)}
-        className="mt-1 w-full rounded-[10px] py-2 text-center font-mono text-[11px] text-primary-hover hover:bg-foreground/[0.04]"
+        className="mt-1 w-full rounded-lg py-2 text-center font-mono text-[11px] text-primary-hover hover:bg-foreground/[0.04]"
         data-testid={`board-fold-${col.status}`}
       >
         {col.hidden > 0 ? `${col.hidden} more · Show all` : "Show fewer"}

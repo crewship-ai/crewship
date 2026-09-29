@@ -101,7 +101,7 @@ export function FleetBoard({ cards: unordered, workspaceId }: { cards: FleetCard
   // runs) in a fifth of the height, so the board fits beside the results
   // instead of pushing everything below the fold (#2539).
   return (
-    <section aria-label="Your crews" data-testid="dashboard-fleet-board" className="rounded-[20px] border border-border bg-card p-4 xl:flex xl:min-h-0 xl:flex-1 xl:flex-col">
+    <section aria-label="Your crews" data-testid="dashboard-fleet-board" className="rounded-card border border-border bg-card p-4 xl:flex xl:min-h-0 xl:flex-1 xl:flex-col">
       <div className="mb-3 flex items-center justify-between">
         <h2 className="eyebrow inline-flex items-center gap-1.5">
           <Users className="h-3.5 w-3.5" /> Your crews

@@ -143,7 +143,7 @@ export function SkillCard({ skill, selected, onSelect }: SkillCardProps) {
       // card in the same row matches its tallest sibling — fixes the
       // "card heights jump around in a row" feedback the user pointed at.
       className={cn(
-        "group w-full h-full text-left flex rounded-[20px]",
+        "group w-full h-full text-left flex rounded-card",
         selected ? selection.card.selected : selection.card.default,
       )}
     >

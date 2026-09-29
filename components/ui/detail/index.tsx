@@ -187,7 +187,7 @@ export function DetailCard({
     <div
       data-slot="detail-card"
       data-testid={testId}
-      className={cn("overflow-hidden rounded-[20px] border bg-card", TONE_BORDER[tone], className)}
+      className={cn("overflow-hidden rounded-card border bg-card", TONE_BORDER[tone], className)}
     >
       {(title || action) && (
         <div className="flex items-center gap-2 border-b border-hairline px-4 py-2.5">
@@ -299,7 +299,7 @@ const STAT_TONE: Record<NonNullable<StatItem["tone"]>, string> = {
  */
 export function StatStrip({ items, className }: { items: StatItem[]; className?: string }) {
   return (
-    <div className={cn("flex flex-wrap overflow-hidden rounded-[20px] border border-border bg-card", className)}>
+    <div className={cn("flex flex-wrap overflow-hidden rounded-card border border-border bg-card", className)}>
       {items.map((s) => (
         <div key={s.label} className="min-w-[120px] flex-1 border-r border-hairline px-4 py-2.5 last:border-r-0">
           <div className="eyebrow text-muted-foreground">{s.label}</div>

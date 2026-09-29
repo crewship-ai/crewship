@@ -258,7 +258,7 @@ export function IssuesListView({ issues, onIssueClick, selectedIssueId, onBulkAc
   }
 
   return (
-    <div ref={scopeRef} data-slot="issues-list" className="@container/issues overflow-hidden rounded-[20px] border border-border bg-card">
+    <div ref={scopeRef} data-slot="issues-list" className="@container/issues overflow-hidden rounded-card border border-border bg-card">
       {/* Bulk action bar */}
       {selectedIds.size > 0 && (
         <div className="flex items-center gap-2 px-3 py-2 bg-primary/10 border-b border-primary/20">

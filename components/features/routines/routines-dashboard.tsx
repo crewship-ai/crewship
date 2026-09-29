@@ -367,7 +367,7 @@ function ResultRow({ run, count = 1, routine }: { run: DashboardRun; count?: num
   return (
     <Link
       href={routineRunHref(run.pipeline_slug, run.id)}
-      className="group grid grid-cols-[auto_auto_minmax(0,1fr)_auto] items-center gap-2.5 rounded-[10px] border-b border-border/50 px-2 py-2 transition-colors last:border-0 hover:bg-foreground/[0.03] coarse:min-h-12 @3xl/overview:grid-cols-[auto_auto_minmax(0,1fr)_auto_auto]"
+      className="group grid grid-cols-[auto_auto_minmax(0,1fr)_auto] items-center gap-2.5 rounded-lg border-b border-border/50 px-2 py-2 transition-colors last:border-0 hover:bg-foreground/[0.03] coarse:min-h-12 @3xl/overview:grid-cols-[auto_auto_minmax(0,1fr)_auto_auto]"
     >
       <RoutineGlyph routine={routine ?? { slug: run.pipeline_slug }} />
       <StatusPill tone={PILL[p.tone]} label={p.label} />

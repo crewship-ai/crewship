@@ -161,7 +161,7 @@ export function SkillsDetailPanel({
           </div>
         )}
 
-        <div className="flex items-center gap-2 rounded-[10px] bg-surface-subtle border border-border px-2 py-1.5 text-xs font-mono text-foreground">
+        <div className="flex items-center gap-2 rounded-lg bg-surface-subtle border border-border px-2 py-1.5 text-xs font-mono text-foreground">
           <span className="flex-1 truncate">{installCmd}</span>
           <button
             type="button"

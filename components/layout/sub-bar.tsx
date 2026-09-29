@@ -212,7 +212,7 @@ type ActionProps = React.ComponentProps<typeof Button> & { icon?: LucideIcon }
 export function SubBarPrimary({ icon: Icon, className, children, asChild, ...props }: ActionProps) {
   return (
     // Harbor: the page's one primary action is the solid brand button.
-    <Button asChild={asChild} variant="default" size="sm" className={cn("h-7 gap-1.5 rounded-[9px] px-3 text-xs shadow-[0_6px_16px_-8px_var(--primary-glow)]", className)} {...props}>
+    <Button asChild={asChild} variant="default" size="sm" className={cn("h-7 gap-1.5 rounded-md px-3 text-xs", className)} {...props}>
       {Icon && <Icon className="h-3 w-3" />}
       {asChild ? <Slot.Slottable>{children}</Slot.Slottable> : children}
     </Button>

@@ -181,7 +181,11 @@
   --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Segoe UI", "Helvetica Neue", "Noto Sans", "Liberation Sans", ui-sans-serif, system-ui, sans-serif;
   --font-serif: "Georgia", serif;
   --font-mono: var(--font-jetbrains, "JetBrains Mono"), ui-monospace, "SF Mono", Menlo, monospace;
-  --radius: 1.125rem;
+  /* Shape scale. Controls (rows, inputs, selects, buttons) are rounded-md
+     = 8px, small marks rounded-sm = 6px, cards rounded-card = 16px, chips
+     rounded-full. --radius drives sm/md/lg/xl below; cards have their own
+     token so a control never inherits a card's roundness. */
+  --radius: 0.625rem;
 
   /* ── Surface tokens (for nested sections & raised elements) ── */
   --surface-subtle: #FBFCFE;
@@ -223,10 +227,10 @@
      Light theme uses primary-tinted overlays.
      Consumed via utility classes below (.row-selected, .row-hover, .chip-*).
      Components should NEVER hardcode bg-blue-500/X — use lib/interaction.ts. */
-  --selection-bg: color-mix(in srgb, var(--brand) 12%, transparent);
-  --selection-bg-hover: color-mix(in srgb, var(--brand) 17%, transparent);
+  --selection-bg: color-mix(in srgb, var(--foreground) 7%, transparent);
+  --selection-bg-hover: color-mix(in srgb, var(--foreground) 9%, transparent);
   --selection-border: var(--brand);
-  --row-hover-bg: oklch(0 0 0 / 0.03);
+  --row-hover-bg: color-mix(in srgb, var(--foreground) 4%, transparent);
   --chip-active-bg: color-mix(in srgb, var(--brand) 14%, transparent);
   --chip-active-fg: var(--brand-ink);
   --chip-idle-fg: oklch(0.45 0.02 270);
@@ -377,7 +381,11 @@
   --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Segoe UI", "Helvetica Neue", "Noto Sans", "Liberation Sans", ui-sans-serif, system-ui, sans-serif;
   --font-serif: "Georgia", serif;
   --font-mono: var(--font-jetbrains, "JetBrains Mono"), ui-monospace, "SF Mono", Menlo, monospace;
-  --radius: 1.125rem;
+  /* Shape scale. Controls (rows, inputs, selects, buttons) are rounded-md
+     = 8px, small marks rounded-sm = 6px, cards rounded-card = 16px, chips
+     rounded-full. --radius drives sm/md/lg/xl below; cards have their own
+     token so a control never inherits a card's roundness. */
+  --radius: 0.625rem;
 
   /* ── Surface tokens (dark theme: nested section + raised popover/drawer)
    *    Hue 285 now matches background family. ── */
@@ -395,10 +403,10 @@
   --shadow-2xs: 0 1px 1px 0 oklch(0 0 0 / 0.18);
 
   /* ── Interaction tokens (dark theme overrides) ── */
-  --selection-bg: color-mix(in srgb, var(--brand) 12%, transparent);
-  --selection-bg-hover: color-mix(in srgb, var(--brand) 17%, transparent);
+  --selection-bg: color-mix(in srgb, var(--foreground) 7%, transparent);
+  --selection-bg-hover: color-mix(in srgb, var(--foreground) 9%, transparent);
   --selection-border: var(--brand);
-  --row-hover-bg: oklch(1 0 0 / 0.025);
+  --row-hover-bg: color-mix(in srgb, var(--foreground) 4%, transparent);
   --chip-active-bg: color-mix(in srgb, var(--brand) 14%, transparent);
   --chip-active-fg: var(--brand-ink);
   --chip-idle-fg: oklch(0.65 0.02 276);
@@ -512,6 +520,8 @@
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
+  /* rounded-card: every card, panel and dialog surface. */
+  --radius-card: 1rem;
 
   --shadow-2xs: var(--shadow-2xs);
   --shadow-xs: var(--shadow-xs);
@@ -824,15 +834,14 @@ body {
      Composed by lib/interaction.ts constants.
      Use these via the ListRow / FilterChip primitives, not directly. */
 
-  /* Selected row, Harbor style: a tinted fill, a hairline in the accent,
-     and a short straight bar just inside the left edge. The bar is its own
-     element (::before), so it stays straight on a rounded row instead of
-     bending round the corner the way a border-left did. */
+  /* Selected row: one quiet signal — a neutral fill and full-strength
+     text. No outline, no edge bar, no accent: the accent is kept for
+     actions, so a selected row never competes with a button. */
   .row-interactive {
     position: relative;
     display: flex;
     cursor: pointer;
-    transition: background-color 150ms ease, box-shadow 150ms ease;
+    transition: background-color 150ms ease;
   }
 
   .row-interactive:focus-visible {
@@ -846,18 +855,7 @@ body {
 
   .row-selected {
     background-color: var(--selection-bg);
-    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--selection-border) 22%, transparent);
-  }
-
-  .row-selected::before {
-    content: "";
-    position: absolute;
-    left: 0;
-    top: 7px;
-    bottom: 7px;
-    width: 3px;
-    border-radius: 0 3px 3px 0;
-    background: var(--selection-border);
+    color: var(--foreground);
   }
 
   .row-selected.row-hover:hover {

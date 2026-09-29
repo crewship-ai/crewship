@@ -16,7 +16,7 @@ const TONE_INK: Record<"blue" | "purple" | "green" | "amber", string> = {
 export function WorkspaceGlyph({ icon: Icon, tone = "blue", className }: { icon: LucideIcon; tone?: "blue" | "purple" | "green" | "amber"; className?: string }) {
   return (
     <span
-      className={cn("icon-tile inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px]", className)}
+      className={cn("icon-tile inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg", className)}
       style={{ "--ic": TONE_INK[tone] } as React.CSSProperties}
     >
       <Icon className="h-4 w-4" aria-hidden="true" />

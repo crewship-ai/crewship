@@ -123,7 +123,7 @@ export function HarborAgentCard({
           onSelect()
         }
       }}
-      className="group lift flex h-full flex-col gap-3 rounded-[20px] border border-border bg-card p-4"
+      className="group lift flex h-full flex-col gap-3 rounded-card border border-border bg-card p-4"
     >
       <span className="flex items-start gap-3">
         <AgentRingAvatar

@@ -490,7 +490,7 @@ export function ComposioIntegrations({
       {busy && <InventorySkeleton />}
 
       {!busy && error && (
-        <div className="rounded-[20px] border border-destructive/20 bg-destructive/5 p-4 text-sm text-destructive">
+        <div className="rounded-card border border-destructive/20 bg-destructive/5 p-4 text-sm text-destructive">
           Couldn&apos;t load Composio inventory: {error}
         </div>
       )}

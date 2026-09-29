@@ -251,7 +251,7 @@ export function IssueCardDetail({
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div className="flex min-w-0 items-start gap-3">
                 <div
-                  className="icon-tile flex h-10 w-10 shrink-0 items-center justify-center rounded-[12px]"
+                  className="icon-tile flex h-10 w-10 shrink-0 items-center justify-center rounded-xl"
                   style={{ "--ic": "var(--primary)" } as React.CSSProperties}
                 >
                   <StatusIcon status={issue.status} className="h-5 w-5" />
