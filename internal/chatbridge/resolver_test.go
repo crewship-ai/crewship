@@ -205,3 +205,28 @@ func TestIPCResolverCreateSessionError(t *testing.T) {
 		t.Fatal("expected error for server error")
 	}
 }
+
+func TestIPCResolverHumanChatBindsAuthenticatedSender(t *testing.T) {
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if r.URL.Path != "/api/v1/internal/chats/chat-123/resolve-human" || r.URL.Query().Get("user_id") != "user+one" || r.Header.Get("X-Internal-Token") != "synthetic-host" {
+			t.Errorf("wrong authority transport: path=%s actor=%s", r.URL.Path, r.URL.Query().Get("user_id"))
+		}
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	defer server.Close()
+	resolver := NewIPCResolver(server.URL, "synthetic-host", slog.Default())
+	if _, err := resolver.ResolveHumanChat(t.Context(), "user+one", "chat-123"); err == nil {
+		t.Fatal("denied resolver fell back")
+	}
+	if calls != 1 {
+		t.Fatalf("calls=%d", calls)
+	}
+	if _, err := resolver.ResolveHumanChat(t.Context(), "", "chat-123"); err == nil {
+		t.Fatal("missing identity accepted")
+	}
+	if calls != 1 {
+		t.Fatal("missing identity reached server")
+	}
+}

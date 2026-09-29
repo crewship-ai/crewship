@@ -111,8 +111,8 @@ To nenahrazuje přejímku plného instance snapshotu, storage kvót a host reboo
 
 ## Nezávislé review #2717
 
-CodeRabbit dokončil věcné review zdrojového commitu `ca379a58f` (review
-5349737106). Dva nálezy byly ověřeny:
+Věcné review zdrojového commitu `ca379a58f` bylo dokončeno
+([revize 5349737106](https://github.com/crewship-ai/crewship/pull/2717#pullrequestreview-5349737106)). Dva nálezy byly ověřeny:
 
 - Mazání rodiče s delegovanými potomky vyvolalo FK chybu. Nový regresní test
   nejprve selhal na SQLite 787. Protože původní migrace již běžela na dev1,
@@ -172,3 +172,35 @@ Zdrojový kód `7626636fde530aa148ba2b481824586fd8dfe70d`:
 Surové výsledky: `reports/agent-access-go-2026-09-29.txt` a
 `reports/agent-access-dev1-app-live-2026-09-29.txt`.
 Tato přejímka uzavírá dodanou dílčí opravu, nikoli celý Release 1.0.
+
+## Další krok: lidská autorita před načtením kontextu
+
+Po návratu prostředí pokračuje připojení skutečného odesílatele v chat bridge.
+`HandleChatMessage` nyní vyžaduje `HumanChatResolver`; chybějící rozhraní nesmí
+spadnout do starého resolveru. Produkční IPC předává autentizovaného odesílatele
+ze spojení nebo serverem uložené odložené zprávy, nikoli user_id z metadat.
+
+Nová host-only cesta `resolve-human` ověřuje současné publikum a absenci
+restricted profilu jedním SQL snapshotem **před** legacy načtením promptu,
+paměťové konfigurace a credentials. Workspace/crew token nesmí tvrdit lidskou
+identitu. Člen odebraný po přijetí zprávy nebo účastník odebraný ze skupiny tak
+nemůže při novém resolution použít dřívější rozhodnutí o přístupu.
+
+Cílené router/bridge/IPC testy prošly: pozitivní kontext, cizí chat, odebraný
+člen/účastník, restricted profil s platným chat grantem, forged metadata a
+nižší interní tokeny. Bridge reproduktor na původní implementaci selhal,
+protože místo lidské autority zavolal legacy resolver.
+
+Tento krok stále **nespouští restricted runtime** a nenahrazuje durable pokus,
+service origins ani grant-aware prompt/storage/provider adaptér. Již přijatý
+běžící proces se touto admission kontrolou okamžitě neukončuje.
+
+Revize zdrojového `7626636f` byla dokončena (5350699009); doporučení pro context
+v benchmark seed a diagnostiku SQL chyby jsou zapracována. Navazující lidská
+admission změna vyžaduje vlastní finální ověření a revizi.
+
+Ověření nové lidské admission: celý `go test ./... -count=1 -timeout=30m -p=4`
+prošel ve všech 149 testovaných balíčcích. `TMPDIR` i `GOTMPDIR` mířily do
+vlastněného tmpfs. Go skončilo s 0; následný Python úklid selhal na Docker-owned
+adresáři, který byl cíleně odstraněn. `go vet ./...`, migration lint a projektové
+invarianty prošly. Surový Go výstup: `reports/agent-access-human-go-2026-09-29.txt`.

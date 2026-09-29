@@ -3,8 +3,9 @@ package ws
 import (
 	"context"
 	"database/sql"
-	_ "modernc.org/sqlite"
 	"testing"
+
+	_ "modernc.org/sqlite"
 
 	"github.com/crewship-ai/crewship/internal/access"
 	"github.com/crewship-ai/crewship/internal/chataudience"
@@ -22,7 +23,7 @@ func BenchmarkChatDeliveryAuthorization(b *testing.B) {
 		`INSERT INTO agents(id,workspace_id,name,slug) VALUES('bench-agent','bench-workspace','Agent','bench-agent')`,
 		`INSERT INTO chats(id,workspace_id,agent_id,created_by,visibility) VALUES('bench-chat','bench-workspace','bench-agent','bench-user','private')`,
 	} {
-		if _, err := db.Exec(q); err != nil {
+		if _, err := db.ExecContext(b.Context(), q); err != nil {
 			b.Fatal(err)
 		}
 	}

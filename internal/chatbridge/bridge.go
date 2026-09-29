@@ -47,6 +47,13 @@ const ledgerWriteTimeout = 5 * time.Second
 // circular import (api → chatbridge → api).
 const AgentStatusPendingReview = "PENDING_REVIEW"
 
+// HumanChatResolver is required for human messages, including provisioned
+// message resumption. It must authorize the current sender before loading the
+// agent context. The legacy ChatResolver is not a fallback for this boundary.
+type HumanChatResolver interface {
+	ResolveHumanChat(context.Context, string, string) (*ChatInfo, error)
+}
+
 // ChatResolver provides the data layer for the chat bridge, resolving chat
 // sessions to agent configurations and managing run lifecycle records.
 type ChatResolver interface {
@@ -509,7 +516,11 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	// config errors (e.g. unprovisioned devcontainer) without polluting
 	// conversation history.
 	b.logger.Debug("resolving chat", "chat_id", chatID)
-	info, err := b.resolver.ResolveChat(ctx, chatID)
+	resolver, ok := b.resolver.(HumanChatResolver)
+	if !ok || userID == "" {
+		return fmt.Errorf("resolve chat: authenticated human resolver required")
+	}
+	info, err := resolver.ResolveHumanChat(ctx, userID, chatID)
 	if err != nil {
 		b.logger.Debug("ResolveChat failed", "error", err)
 		streamFn(ws.ChatEvent{Type: "error", Content: "failed to resolve chat"})

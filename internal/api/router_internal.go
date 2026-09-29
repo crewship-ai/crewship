@@ -93,6 +93,7 @@ func (r *Router) registerInternalRoutes(pipes *PipelineHandler, oh orchestration
 	r.mux.Handle("PATCH /api/v1/internal/credentials/{credentialId}", internalAuth(http.HandlerFunc(internal.UpdateCredentialStatus)))
 	r.mux.Handle("POST /api/v1/internal/chats", internalAuth(http.HandlerFunc(internal.CreateChat)))
 	r.mux.Handle("GET /api/v1/internal/chats/{chatId}/resolve", internalAuth(http.HandlerFunc(internal.ResolveChat)))
+	r.mux.Handle("GET /api/v1/internal/chats/{chatId}/resolve-human", internalAuth(http.HandlerFunc(internal.ResolveHumanChat)))
 	r.mux.Handle("GET /api/v1/internal/agents/{agentId}/resolve", internalAuth(http.HandlerFunc(internal.ResolveAgent)))
 	// GET .../agents/{agentId}/webhook-secret removed (#999) — the webhook
 	// handler reads the secret from its local DB; plaintext never over IPC.

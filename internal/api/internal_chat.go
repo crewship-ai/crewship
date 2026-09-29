@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/access"
+	"github.com/crewship-ai/crewship/internal/chataudience"
 )
 
 // CreateChat creates a new chat session record on behalf of the sidecar.
@@ -177,6 +178,27 @@ func (h *InternalHandler) ResolveChat(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	h.resolveAgentConfigWithOpener(w, r, agentID, openedBy.String, visibility.String)
+}
+
+// ResolveHumanChat is host-only: crew/workspace tokens cannot assert a human
+// actor. Check current audience before ResolveChat loads any prompt or secret.
+// The existing origin-less resolver remains for classified service paths.
+func (h *InternalHandler) ResolveHumanChat(w http.ResponseWriter, r *http.Request) {
+	if InternalTokenWorkspaceFromContext(r.Context()) != "" || InternalTokenCrewFromContext(r.Context()) != "" {
+		replyError(w, http.StatusForbidden, "Human authority requires host authentication")
+		return
+	}
+	userID := r.URL.Query().Get("user_id")
+	allowed, err := chataudience.CanReadTrusted(r.Context(), h.db, r.PathValue("chatId"), userID)
+	if err != nil {
+		replyInternalError(w, h.logger, "resolve human chat authority", err)
+		return
+	}
+	if !allowed {
+		replyError(w, http.StatusNotFound, "Chat not found")
+		return
+	}
+	h.ResolveChat(w, r)
 }
 
 // ResolveAgent returns the full configuration for a given agent ID.

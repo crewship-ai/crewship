@@ -7,6 +7,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 )
 
 // VisibleSQL is a predicate over `chats c`. Its three arguments are the
@@ -73,4 +74,25 @@ func canRead(ctx context.Context, db *sql.DB, chatID, userID, workspaceID string
 		return false, nil
 	}
 	return err == nil, err
+}
+
+// CanReadTrusted also rejects any restricted membership in the same SQL
+// snapshot. Shared-runtime context and legacy streams cannot use partial grants.
+func CanReadTrusted(ctx context.Context, db *sql.DB, chatID, userID string) (bool, error) {
+	if db == nil || chatID == "" || userID == "" {
+		return false, nil
+	}
+	var one int
+	args := []any{chatID, userID}
+	args = append(args, Args(userID)...)
+	err := db.QueryRowContext(ctx, `SELECT 1 FROM chats c WHERE c.id=?
+        AND NOT EXISTS (SELECT 1 FROM workspace_members WHERE user_id=? AND access_mode='restricted')
+        AND (`+VisibleSQL+`)`, args...).Scan(&one)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("trusted chat audience: %w", err)
+	}
+	return true, nil
 }

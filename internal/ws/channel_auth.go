@@ -213,11 +213,5 @@ func (a *DBChannelAuthorizer) isMemberOfPageWorkspace(ctx context.Context, userI
 }
 
 func (a *DBChannelAuthorizer) isSessionOwner(ctx context.Context, userID, chatID string) (bool, error) {
-	var one int
-	args := []any{chatID, userID}
-	args = append(args, chataudience.Args(userID)...)
-	err := a.db.QueryRowContext(ctx, `SELECT 1 FROM chats c WHERE c.id=?
-		AND NOT EXISTS (SELECT 1 FROM workspace_members WHERE user_id=? AND access_mode='restricted')
-		AND (`+chataudience.VisibleSQL+`)`, args...).Scan(&one)
-	return existsRow(err)
+	return chataudience.CanReadTrusted(ctx, a.db, chatID, userID)
 }

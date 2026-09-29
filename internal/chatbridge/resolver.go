@@ -463,6 +463,17 @@ func (r *IPCResolver) ResolveChat(ctx context.Context, chatID string) (*ChatInfo
 	return r.resolve(ctx, resolveURL)
 }
 
+// ResolveHumanChat binds context materialization to the authenticated sender.
+// The bridge obtains userID from the connection or server-owned queued message,
+// never message metadata. Only the host's internal token can call this route.
+func (r *IPCResolver) ResolveHumanChat(ctx context.Context, userID, chatID string) (*ChatInfo, error) {
+	if userID == "" || chatID == "" {
+		return nil, fmt.Errorf("human chat identity required")
+	}
+	resolveURL := r.baseURL + "/api/v1/internal/chats/" + url.PathEscape(chatID) + "/resolve-human?user_id=" + url.QueryEscape(userID)
+	return r.resolve(ctx, resolveURL)
+}
+
 // ResolveAgent resolves an agent ID to its configuration via the internal API.
 // When workspaceID is non-empty it is sent as ?workspace_id= so the server
 // constrains the lookup to that tenant (404 on cross-tenant id).
