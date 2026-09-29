@@ -67,7 +67,7 @@ export function AppSidebar() {
           <SidebarGroup key={section.label} className="px-2 py-1 group-data-[collapsible=icon]:px-1 group-data-[collapsible=icon]:py-0.5">
             <SidebarGroupLabel>{section.label}</SidebarGroupLabel>
             <SidebarGroupContent>
-              <SidebarMenu>
+              <SidebarMenu className={RAIL_MENU}>
                 {section.items
                   .filter((item) => !isHiddenForRole(item, role, instanceAdmin))
                   .map((item) => {
@@ -131,7 +131,7 @@ export function AppSidebar() {
       {/* The sidebar mode toggle, then — below a rule, at the very bottom —
           which Crewship this is. */}
       <SidebarFooter className="gap-1.5 p-2">
-        <SidebarMenu>
+        <SidebarMenu className={RAIL_MENU}>
           <SidebarMenuItem>
             <SidebarMenuButton
               onClick={() => {
@@ -178,7 +178,10 @@ export function AppSidebar() {
 
 /** In icon mode the tile IS the button: no padding, no second background. */
 const RAIL_BUTTON =
-  "group-data-[collapsible=icon]:p-0! group-data-[collapsible=icon]:bg-transparent! group-data-[collapsible=icon]:hover:bg-transparent!"
+  "group-data-[collapsible=icon]:w-9! group-data-[collapsible=icon]:h-9! group-data-[collapsible=icon]:p-0! group-data-[collapsible=icon]:bg-transparent! group-data-[collapsible=icon]:hover:bg-transparent!"
+
+/** Icon mode centres each tile in the rail; the list is otherwise left-aligned. */
+const RAIL_MENU = "group-data-[collapsible=icon]:items-center"
 
 /** The concept a destination stands for, so its tile wears that colour. */
 function conceptOf(href: string): string {

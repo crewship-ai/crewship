@@ -986,9 +986,12 @@ body {
     transition: transform 300ms var(--ease-spring), border-color 300ms var(--ease-harbor), background-color 300ms var(--ease-harbor), color 200ms var(--ease-harbor);
   }
   .rail-tile > svg { width: 0.875rem; height: 0.875rem; }
+  /* The button sizes the tile (size-9 in RAIL_BUTTON): this project's
+     --spacing is 0.23rem, so a fixed rem size here drifted from the button
+     and pushed the tile off-centre. */
   [data-collapsible="icon"] .rail-tile {
-    width: 2rem;
-    height: 2rem;
+    width: 100%;
+    height: 100%;
     border-radius: 0.625rem;
     background: color-mix(in srgb, var(--foreground) 4%, transparent);
     border-color: var(--border);
