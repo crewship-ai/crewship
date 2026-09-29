@@ -74,20 +74,27 @@ describe("Admin overview — what needs attention comes first", () => {
 describe("Admin overview — instance identity", () => {
   it("names the build and the update waiting for it", () => {
     renderTab()
-    expect(screen.getByText(/v0\.9\.2/)).toBeInTheDocument()
-    expect(screen.getByText(/v0\.9\.4/)).toBeInTheDocument()
+    const hero = screen.getByRole("region", { name: "Instance status" })
+    expect(within(hero).getByText("v0.9.2")).toBeInTheDocument()
+    expect(within(hero).getByText(/v0\.9\.4 available/)).toBeInTheDocument()
   })
 
   it("keeps quiet about updates when this build is current", () => {
     renderTab({ version: { current: "v0.9.4", latest: "v0.9.4", newer: false } })
-    expect(screen.getByText(/v0\.9\.4/)).toBeInTheDocument()
+    expect(within(screen.getByRole("region", { name: "Instance status" })).getByText("v0.9.4")).toBeInTheDocument()
     expect(screen.queryByText(/available/i)).toBeNull()
+  })
+
+  it("names the edition, not the licence id", () => {
+    renderTab()
+    expect(within(screen.getByRole("region", { name: "Instance status" })).getByText("Community Edition")).toBeInTheDocument()
   })
 
   it("reports disk headroom on the volume that fills", () => {
     renderTab()
-    expect(screen.getByText(/68%/)).toBeInTheDocument()
-    expect(screen.getByText(/15\.3 GB free/)).toBeInTheDocument()
+    const platform = screen.getByRole("region", { name: "Platform" })
+    expect(within(platform).getByText("68%")).toBeInTheDocument()
+    expect(within(platform).getByText(/15\.3 GB free/)).toBeInTheDocument()
   })
 
   it("does not render missing disk figures as zero", () => {
@@ -109,6 +116,41 @@ describe("Admin overview — capacity against the licence", () => {
     renderTab({ license: { ...LICENSE, max_members: 0 } })
     const panel = screen.getByRole("region", { name: /capacity/i })
     expect(within(panel).getByText("2")).toBeInTheDocument()
+  })
+})
+
+// The verdict line reads the same probes as the cards below it, and the one
+// slow probe says it is still running instead of claiming a result.
+describe("Admin overview — health checks", () => {
+  it("calls the instance healthy only when every check passes and nothing is flagged", () => {
+    renderTab({ posture: { environment: "", warnings: [] } })
+    expect(screen.getByText("All systems healthy")).toBeInTheDocument()
+  })
+
+  it("counts findings to review", () => {
+    renderTab()
+    expect(screen.getByText("1 finding to review")).toBeInTheDocument()
+  })
+
+  it("puts a failing check ahead of findings", () => {
+    renderTab({ health: { ...HEALTH, db: { connected: false, error: "locked" } } })
+    expect(screen.getByText("1 check failing")).toBeInTheDocument()
+    expect(document.querySelector('[data-check="db"]')?.getAttribute("data-state")).toBe("bad")
+  })
+
+  it("shows the journal walk as pending, not as unchecked", () => {
+    renderTab({ journal: null, journalPending: true })
+    expect(document.querySelector('[data-check="journal"]')?.getAttribute("data-state")).toBe("pending")
+    expect(screen.getAllByText(/Verifying…/).length).toBeGreaterThan(0)
+  })
+
+  it("reads the host daemon and the week's runs", () => {
+    renderTab({
+      daemon: { status: "ok", connections: 2, uptime: "1h2m3.5s" },
+      runs: [{ ts: "2026-09-28T00:00:00Z", value: 3 }, { ts: "2026-09-29T00:00:00Z", value: 4 }],
+    })
+    expect(within(screen.getByRole("region", { name: "Platform" })).getByText(/up 1h 2m/)).toBeInTheDocument()
+    expect(within(screen.getByRole("region", { name: "Runs this week" })).getByText(/runs in the last 7 days/)).toBeInTheDocument()
   })
 })
 
@@ -138,7 +180,7 @@ describe("Admin overview — integrity", () => {
   // "Rancher". Product names are not a capitalisation of their socket label.
   it("names the runtime in use the way its vendor writes it", () => {
     renderTab({ runtimeInfo: { runtime: "orbstack", version: "29.4.0", socket: "/var/run/docker.sock" } })
-    expect(screen.getByText(/OrbStack 29\.4\.0/)).toBeInTheDocument()
+    expect(within(screen.getByRole("region", { name: "Platform" })).getByText(/OrbStack 29\.4\.0/)).toBeInTheDocument()
   })
 
   // Runtimes installed, none driving anything: the server started without a
@@ -146,12 +188,12 @@ describe("Admin overview — integrity", () => {
   // the old label rendered it as "Unknown " (#1690).
   it("distinguishes a detected runtime from one that is actually in use", () => {
     renderTab({ runtimeAvailable: true, runtimeInfo: null })
-    expect(screen.getByText(/none in use/i)).toBeInTheDocument()
+    expect(within(screen.getByRole("region", { name: "Platform" })).getByText(/none in use/i)).toBeInTheDocument()
     expect(screen.queryByText(/unknown/i)).toBeNull()
   })
 
   it("still says so when nothing is detected at all", () => {
     renderTab({ runtimeAvailable: false, runtimeInfo: null })
-    expect(screen.getByText(/not detected/i)).toBeInTheDocument()
+    expect(within(screen.getByRole("region", { name: "Platform" })).getByText(/not detected/i)).toBeInTheDocument()
   })
 })

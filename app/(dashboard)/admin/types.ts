@@ -47,6 +47,14 @@ export interface AdminHealth {
 
 /** GET /api/v1/system/version — build identity plus the update check. */
 export interface VersionInfo {
+  /** Build identity (dev builds report "dev" as current). */
+  commit?: string
+  build_time?: string
+  go_version?: string
+  os?: string
+  arch?: string
+  dirty?: boolean
+  schema_version?: number
   current: string
   latest?: string | null
   newer?: boolean
@@ -142,3 +150,51 @@ export type TabKey =
   | "backups"
   | "notifications"
   | "ratelimits"
+
+/** GET /api/v1/crewshipd — the host daemon agents talk to. */
+export interface DaemonStatus {
+  status: string
+  connections: number
+  /** Go duration string, e.g. "5m53.3s". */
+  uptime: string
+}
+
+/** GET /api/v1/system/aux-status — the helper models behind the product. */
+export interface AuxSubsystem {
+  id: string
+  label: string
+  provider?: string
+  model?: string
+  healthy?: boolean
+  reachable?: boolean
+  reach_detail?: string
+}
+export interface AuxStatus {
+  subsystems: AuxSubsystem[]
+}
+
+/** GET /api/v1/agents/crews-status — every agent's state, counted. */
+export interface AgentsStatus {
+  total: number
+  running: number
+  error: number
+  idle: number
+  queued: number
+}
+
+/** GET /api/v1/admin/keeper/health — the credential judge's recent verdicts. */
+export interface KeeperHealth {
+  samples: number
+  allow: number
+  deny: number
+  escalate: number
+  judge_failures: number
+  p95_latency_ms: number
+  min_samples: number
+}
+
+/** One bucket of GET /api/v1/metrics/timeseries. */
+export interface TimeseriesPoint {
+  ts: string
+  value: number
+}

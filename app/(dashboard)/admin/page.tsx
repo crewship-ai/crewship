@@ -18,11 +18,9 @@ import {
 } from "@/components/layout/sidebar-kit"
 
 import { sections, initialAdminTab, ALL_TABS } from "./navigation"
-import type {
-  TabKey, Stats, AdminOrg, AdminUser, KeeperStatus, KeeperLogEntry, AdminHealth,
-  LicenseInfo, TelemetryInfo, VersionInfo, SecurityPosture, JournalIntegrity,
-} from "./types"
+import type { TabKey, Stats, AdminOrg, AdminUser, KeeperStatus, KeeperLogEntry } from "./types"
 import { useAdminWebSocket } from "./hooks/use-admin-websocket"
+import { useAdminOverview } from "./hooks/use-admin-overview"
 import { OverviewTab } from "./tabs/overview-tab"
 import { RuntimeTab } from "./tabs/runtime-tab"
 import type { RuntimeEntry } from "./tabs/runtime-tab"
@@ -107,16 +105,9 @@ export default function AdminPage() {
   const [stats, setStats] = useState<Stats | null>(null)
   const [orgs, setOrgs] = useState<AdminOrg[]>([])
   const [users, setUsers] = useState<AdminUser[]>([])
-  const [health, setHealth] = useState<AdminHealth | null>(null)
-  const [license, setLicense] = useState<LicenseInfo | null>(null)
-  const [telemetry, setTelemetry] = useState<TelemetryInfo | null>(null)
-  // The instance already computes all three of these and the overview showed
-  // none of them: which build is running (and whether a newer one exists),
-  // what the instance thinks of its own security posture, and whether the
-  // tamper-evident journal still verifies.
-  const [version, setVersion] = useState<VersionInfo | null>(null)
-  const [posture, setPosture] = useState<SecurityPosture | null>(null)
-  const [journal, setJournal] = useState<JournalIntegrity | null>(null)
+  // The Overview's reads, each landing on its own (hooks/use-admin-overview):
+  // the slow journal walk no longer holds the whole page on a skeleton.
+  const overview = useAdminOverview(workspaceId, isAdmin && tab === "overview")
   const [loading, setLoading] = useState(true)
   // A 403/500/network failure on the primary fetches must be visible, not a
   // silently empty table (#868). Populated by fetchData; cleared on success.
@@ -195,19 +186,10 @@ export default function AdminPage() {
     {
       setLoading(true)
       try {
-        const [
-          statsRes, orgsRes, usersRes, healthRes, licenseRes, telemetryRes,
-          versionRes, postureRes, journalRes,
-        ] = await Promise.all([
+        const [statsRes, orgsRes, usersRes] = await Promise.all([
           apiFetch(`/api/v1/admin/stats?workspace_id=${workspaceId}`),
           apiFetch(`/api/v1/admin/workspaces?workspace_id=${workspaceId}`),
           apiFetch(`/api/v1/admin/users?workspace_id=${workspaceId}`),
-          apiFetch(`/api/v1/admin/health?workspace_id=${workspaceId}`),
-          apiFetch(`/api/v1/system/license?workspace_id=${workspaceId}`),
-          apiFetch(`/api/v1/system/telemetry`),
-          apiFetch(`/api/v1/system/version`),
-          apiFetch(`/api/v1/admin/security-posture?workspace_id=${workspaceId}`),
-          apiFetch(`/api/v1/admin/journal/verify?workspace_id=${workspaceId}`),
         ])
         if (isStale()) return
 
@@ -230,14 +212,6 @@ export default function AdminPage() {
         if (statsRes.ok) setStats(await statsRes.json())
         if (orgsRes.ok) setOrgs(await orgsRes.json())
         if (usersRes.ok) setUsers(await usersRes.json())
-        // Health/license/telemetry feed the overview cards; a miss there just
-        // degrades those cards, it isn't a table-load failure.
-        if (healthRes.ok) setHealth(await healthRes.json())
-        if (licenseRes.ok) setLicense(await licenseRes.json())
-        if (telemetryRes.ok) setTelemetry(await telemetryRes.json())
-        if (versionRes.ok) setVersion(await versionRes.json())
-        if (postureRes.ok) setPosture(await postureRes.json())
-        if (journalRes.ok) setJournal(await journalRes.json())
       } catch (e) {
         if (!isStale()) setFetchError(e instanceof Error ? e.message : "Network error loading admin data.")
       } finally {
@@ -288,7 +262,8 @@ export default function AdminPage() {
   }
 
   function renderContent() {
-    if (loading && ALL_TABS.includes(tab)) {
+    // Overview fills card by card, so it never waits on the tables.
+    if (loading && tab !== "overview" && ALL_TABS.includes(tab)) {
       return <Skeleton className="h-[200px] rounded-xl" />
     }
 
@@ -298,13 +273,20 @@ export default function AdminPage() {
           stats={stats}
           runtimeAvailable={runtimeAvailable}
           runtimeInfo={runtimeInfo}
-          health={health}
-          license={license}
-          telemetry={telemetry}
-          version={version}
-          posture={posture}
-          journal={journal}
+          health={overview.health}
+          license={overview.license}
+          telemetry={overview.telemetry}
+          version={overview.version}
+          posture={overview.posture}
+          journal={overview.journal}
+          journalPending={!overview.settled.journal}
           keeper={keeperStatus}
+          daemon={overview.daemon}
+          aux={overview.aux}
+          agents={overview.agents}
+          keeperHealth={overview.keeperHealth}
+          runs={overview.runs}
+          cost={overview.cost}
         />
       )
     }

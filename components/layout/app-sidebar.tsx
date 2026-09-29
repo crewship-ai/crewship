@@ -9,6 +9,7 @@ import { useInboxUnreadCount } from "@/hooks/use-inbox"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { useAbilities } from "@/hooks/use-abilities"
 import { WorkspaceSwitcher } from "@/components/layout/workspace-switcher"
+import { SidebarVersion } from "@/components/layout/sidebar-version"
 import {
   Sidebar,
   SidebarContent,
@@ -119,9 +120,10 @@ export function AppSidebar() {
         ))}
       </SidebarContent>
 
-      {/* Sidebar mode toggle */}
+      {/* Which Crewship this is, then the sidebar mode toggle */}
       <SidebarFooter className="p-2">
         <SidebarMenu>
+          <SidebarVersion />
           <SidebarMenuItem>
             <SidebarMenuButton
               onClick={() => {
