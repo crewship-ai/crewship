@@ -1,4 +1,4 @@
-import { LayoutDashboard, Building, Users, Server, Shield, Database, ListTodo, Bell, Gauge } from "lucide-react"
+import { LayoutDashboard, Building, Users, Server, Shield, ShieldCheck, Database, History, ListTodo, Bell, Gauge } from "lucide-react"
 import type { TabKey } from "./types"
 
 interface NavSection {
@@ -25,12 +25,13 @@ export const sections: NavSection[] = [
     items: [
       { key: "providers", label: "Runtime", icon: Server },
       { key: "notifications", label: "Notifications", icon: Bell },
-      { key: "ratelimits", label: "Rate Limiters", icon: Gauge },
+      { key: "ratelimits", label: "Limits", icon: Gauge },
     ],
   },
   {
     label: "Security",
     items: [
+      { key: "posture", label: "Posture", icon: ShieldCheck },
       { key: "security", label: "Keeper", icon: Shield },
       { key: "reviews", label: "Keeper reviews", icon: ListTodo },
     ],
@@ -39,6 +40,7 @@ export const sections: NavSection[] = [
     label: "Data",
     items: [
       { key: "backups", label: "Backups", icon: Database },
+      { key: "retention", label: "Retention", icon: History },
     ],
   },
 ]

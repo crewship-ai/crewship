@@ -29,6 +29,8 @@ import { WorkspacesTab } from "./tabs/workspaces-tab"
 import { UsersTab } from "./tabs/users-tab"
 import { BackupsTab } from "./tabs/backups-tab"
 import { KeeperQueuePanel } from "@/components/features/admin/keeper-queue-panel"
+import { SecurityPostureCard } from "@/components/features/admin/security-posture-card"
+import { MemoryConfigCard } from "@/components/features/admin/memory-config-card"
 import { NotificationsTab } from "./tabs/notifications-tab"
 import { RateLimitsTab } from "./tabs/rate-limits-tab"
 
@@ -58,7 +60,9 @@ const SECTION_ABOUT: Partial<Record<TabKey, string>> = {
   users: "Every account, and which workspaces it belongs to.",
   providers: "Container runtime, images and the daemon's own health.",
   notifications: "Where this instance can send a message, and whether it works.",
-  ratelimits: "Request budgets, tunable without a restart.",
+  ratelimits: "Request budgets and lockout rules for the whole instance, tunable without a restart.",
+  posture: "How this instance is configured: deploy-time flags, read-only here.",
+  retention: "How long this instance keeps history before pruning it.",
   security: "Who may read a secret: the judge that decides, and the checks around it.",
   reviews: "What the judge has decided, and what is waiting on a human.",
   backups: "Snapshots of this instance, and restoring from one.",
@@ -320,6 +324,14 @@ export default function AdminPage() {
           workspaceId={workspaceId}
         />
       )
+    }
+
+    if (tab === "posture") {
+      return <SecurityPostureCard workspaceId={workspaceId} />
+    }
+
+    if (tab === "retention") {
+      return <MemoryConfigCard workspaceId={workspaceId} />
     }
 
     if (tab === "backups") {

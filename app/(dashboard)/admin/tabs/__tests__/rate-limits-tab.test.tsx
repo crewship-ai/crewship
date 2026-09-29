@@ -162,3 +162,36 @@ describe("client-side validation", () => {
     expect(h.apiFetch.mock.calls.every((c) => (c[1] as RequestInit | undefined)?.method !== "PUT")).toBe(true)
   })
 })
+
+// Seventeen limits across seven areas: the page answers "what did we change"
+// and "where is the login lockout" without scrolling past the rest.
+describe("finding a limit", () => {
+  const LIST = {
+    limiters: [
+      makeLimiter(),
+      makeLimiter({ key: "login.lockout_threshold", group: "Login", display_name: "Account lockout threshold", unit: "attempts", value: 20, default: 50, overridden: true }),
+      makeLimiter({ key: "pages.public_view_per_hour", group: "Pages", display_name: "Public page views", unit: "views/hour" }),
+    ],
+  }
+
+  it("counts what differs from the defaults and says which way", async () => {
+    h.apiFetch.mockResolvedValue(ok(LIST))
+    render(<RateLimitsTab workspaceId="ws-1" />)
+    expect(await screen.findByText("tighter than the default 50")).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: /^Changed only/ }))
+    expect(screen.queryByText("Auth endpoints")).toBeNull()
+    expect(screen.getByText("Account lockout threshold")).toBeInTheDocument()
+  })
+
+  it("narrows to one area and searches by name", async () => {
+    h.apiFetch.mockResolvedValue(ok(LIST))
+    render(<RateLimitsTab workspaceId="ws-1" />)
+    await screen.findByText("Auth endpoints")
+    fireEvent.click(screen.getByRole("button", { name: /^Pages/ }))
+    expect(screen.queryByText("Auth endpoints")).toBeNull()
+    fireEvent.click(screen.getByRole("button", { name: /^All areas/ }))
+    fireEvent.change(screen.getByLabelText("Search limits"), { target: { value: "lockout" } })
+    expect(screen.getByText("Account lockout threshold")).toBeInTheDocument()
+    expect(screen.queryByText("Public page views")).toBeNull()
+  })
+})

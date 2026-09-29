@@ -7,12 +7,10 @@ import type { RuntimeEntry } from "../runtime-tab"
 // The two workspace-scoped cards the tab also hosts each fetch on mount. They
 // are not what is under test here, and their in-flight requests are aborted at
 // teardown, which floods the run with unhandled AbortErrors.
-vi.mock("@/components/features/admin/security-posture-card", () => ({
-  SecurityPostureCard: () => null,
-}))
-vi.mock("@/components/features/admin/memory-config-card", () => ({
-  MemoryConfigCard: () => null,
-}))
+// The tab's own reads (daemon, agents, log level, legacy resources) are not
+// what this file is about; they answer "not available" here, and
+// runtime-tab-ops.test.tsx covers them.
+vi.mock("@/lib/api-fetch", () => ({ apiFetch: vi.fn(async () => ({ ok: false, status: 404, json: async () => null })) }))
 
 // Before #1690 this panel could only ever show one runtime — the endpoint
 // behind it returned on the first socket that answered — and it labelled the

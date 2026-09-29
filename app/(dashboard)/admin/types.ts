@@ -192,6 +192,8 @@ export type TabKey =
   | "backups"
   | "notifications"
   | "ratelimits"
+  | "posture"
+  | "retention"
 
 /** GET /api/v1/crewshipd — the host daemon agents talk to. */
 export interface DaemonStatus {

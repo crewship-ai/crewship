@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest"
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
 import { FINDING_ACTIONS, overLimit } from "../tabs/overview-tab"
+import { ALL_TABS } from "../navigation"
 
 // A finding without a verb is a worry; with one it is a task. The keys here
 // must be real posture keys, so a renamed key on the Go side is caught here
@@ -15,6 +16,16 @@ describe("admin overview actions", () => {
     }
     // The one finding every fresh instance shows must have an action.
     expect(FINDING_ACTIONS.no_backup_recorded).toBeTruthy()
+  })
+
+  // "/admin?tab=rate-limits" and "?tab=runtime" named sections that never
+  // existed, so the fix button landed on Overview again.
+  it("points every admin action at a section that exists", () => {
+    for (const { href } of Object.values(FINDING_ACTIONS)) {
+      if (!href.startsWith("/admin")) continue
+      const tab = new URL(href, "http://x").searchParams.get("tab")
+      expect(ALL_TABS as string[], href).toContain(tab)
+    }
   })
 
   it("flags a licensed ceiling only when it is exceeded", () => {
