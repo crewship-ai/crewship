@@ -990,7 +990,9 @@ body {
      rail and the tile — and a label that only fades. The panel widening is
      the whole animation. */
   .rail-inset {
-    padding-inline: calc((var(--sidebar-width-icon) - 2.25rem) / 2);
+    /* !important: the collapsed sidebar's own group-data padding is a
+       utility and would otherwise move the column 5.5px on open. */
+    padding-inline: calc((var(--sidebar-width-icon) - 2.25rem) / 2) !important;
   }
   .rail-tile {
     --ic: var(--primary);

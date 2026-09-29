@@ -20,9 +20,11 @@ import { accentFor } from "@/lib/concept-accents"
  */
 
 /** A SidebarMenuButton as a rail row: fixed height, no padding, the tile's
- *  own width when collapsed (so no second background shows behind it). */
+ *  own width when collapsed (so no second background shows behind it).
+ *  Start-aligned: centred, a row wider than its tile (the SOON pill, the ⌘B
+ *  hint) pushed the tile left out of the column. */
 export const RAIL_ROW =
-  "h-[2.25rem]! p-0! gap-3! rounded-[0.7rem]! group-data-[collapsible=icon]:w-[2.25rem]! group-data-[collapsible=icon]:h-[2.25rem]! group-data-[collapsible=icon]:p-0! group-data-[collapsible=icon]:gap-3! group-data-[collapsible=icon]:bg-transparent! group-data-[collapsible=icon]:hover:bg-transparent!"
+  "justify-start! group-data-[collapsible=icon]:justify-start! h-[2.25rem]! p-0! gap-3! rounded-[0.7rem]! group-data-[collapsible=icon]:w-[2.25rem]! group-data-[collapsible=icon]:h-[2.25rem]! group-data-[collapsible=icon]:p-0! group-data-[collapsible=icon]:gap-3! group-data-[collapsible=icon]:bg-transparent! group-data-[collapsible=icon]:hover:bg-transparent!"
 
 /** The concept a destination stands for, so its tile wears that colour. */
 export function conceptOf(href: string): string {
