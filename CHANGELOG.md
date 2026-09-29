@@ -35,6 +35,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - Activity now includes the accepted work ledger and webhook deliveries. The separate Work navigation item is removed; existing `/work` bookmarks open the corresponding Activity view. (#2636)
 
 ### Fixed
+- Deferred human chat messages preserve their original membership and conversation authority through provisioning. Revocation followed by rejoin or restored chat access cannot revive queued work; pending messages from different humans no longer overwrite each other. (#2711)
 - Human chat sends and deferred provisioning resumes now recheck the authenticated sender before loading prompts or credentials. Removed membership or group participation denies resolution; crew tokens cannot assert a human identity. (#2711)
 - **Open chat streams recheck access before each delivery.** WebSocket and HTTP run streams stop delivering when the current conversation authority denies access or cannot be checked. Resource grants and durable attempt authority add a server foundation for restricted clients; unintegrated execution, file, memory, and stream routes remain closed to that profile. Restricted client rollout is not yet enabled. (#2711)
 - A member can no longer attach a new agent chat to another member's private conversation by supplying its session ID. The API rejects the attempt instead of reporting a newly created chat. (#2711)

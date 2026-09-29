@@ -14,6 +14,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/admission"
 	"github.com/crewship-ai/crewship/internal/askforms"
+	"github.com/crewship-ai/crewship/internal/chataudience"
 	"github.com/crewship-ai/crewship/internal/conversation"
 	"github.com/crewship-ai/crewship/internal/crewstart"
 	"github.com/crewship-ai/crewship/internal/devcontainer"
@@ -84,9 +85,10 @@ type ChatResolver interface {
 // ChatInfo holds the resolved configuration for a chat session, including
 // agent identity, crew context, credentials, and resource settings.
 type ChatInfo struct {
-	AgentID   string
-	AgentSlug string
-	AgentRole string
+	HumanAuthority *chataudience.Receipt
+	AgentID        string
+	AgentSlug      string
+	AgentRole      string
 	// AgentStatus is the agents.status column at resolve time. Used by
 	// the bridge to refuse to start an agent that's PENDING_REVIEW
 	// (guided-autonomy hire waiting on operator approval). Empty when
@@ -520,12 +522,20 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	if !ok || userID == "" {
 		return fmt.Errorf("resolve chat: authenticated human resolver required")
 	}
+	if msgOpt.HumanResume && msgOpt.HumanAuthority == nil {
+		return fmt.Errorf("resolve chat: queued human authority required")
+	}
+	ctx = chataudience.WithReceipt(ctx, msgOpt.HumanAuthority)
 	info, err := resolver.ResolveHumanChat(ctx, userID, chatID)
 	if err != nil {
 		b.logger.Debug("ResolveChat failed", "error", err)
 		streamFn(ws.ChatEvent{Type: "error", Content: "failed to resolve chat"})
 		return fmt.Errorf("resolve chat: %w", err)
 	}
+	if msgOpt.HumanAuthority != nil && (info.HumanAuthority == nil || *msgOpt.HumanAuthority != *info.HumanAuthority) {
+		return fmt.Errorf("resolve chat: queued human authority changed")
+	}
+	msgOpt.HumanAuthority = info.HumanAuthority
 	b.logger.Debug("chat resolved", "agent_id", info.AgentID, "crew_id", info.CrewID)
 	pageSlug, hasPage, pageErr := requestedPageSlug(msgOpt.Metadata)
 	if pageErr != nil {
@@ -780,7 +790,7 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		// client to notice completion (the workspace realtime broadcast a
 		// client might miss entirely, see docs/prd/conversational-onboarding.md)
 		// or on the user to remember to resend. AttachPendingMessage's
-		// at-most-once contract (keyed by chat id, drained atomically with the
+		// at-most-once contract (keyed by chat/sender/authority, drained with the
 		// job's terminal-state transition) means a second deferred send on the
 		// same chat — e.g. an impatient manual resend while the build is still
 		// running — coalesces onto this one rather than queuing a duplicate

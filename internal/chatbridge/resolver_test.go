@@ -2,11 +2,15 @@ package chatbridge
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
+
+	"github.com/crewship-ai/crewship/internal/chataudience"
 )
 
 func TestIPCResolverResolveSession(t *testing.T) {
@@ -228,5 +232,36 @@ func TestIPCResolverHumanChatBindsAuthenticatedSender(t *testing.T) {
 	}
 	if calls != 1 {
 		t.Fatal("missing identity reached server")
+	}
+}
+
+func TestIPCResolverCarriesOriginalHumanReceipt(t *testing.T) {
+	receipt := &chataudience.Receipt{UserID: "human", ChatID: "chat", MemberID: "member", MemberRevision: 7, ChatGeneration: "generation", ChatRevision: 3}
+	var missing atomic.Bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, err := base64.RawURLEncoding.DecodeString(r.URL.Query().Get("receipt"))
+		if err != nil {
+			t.Error(err)
+		}
+		var got chataudience.Receipt
+		if json.Unmarshal(raw, &got) != nil || got != *receipt {
+			t.Error("host IPC lost original authority")
+		}
+		if missing.Load() {
+			_ = json.NewEncoder(w).Encode(map[string]any{})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"human_authority": receipt})
+	}))
+	defer server.Close()
+	resolver := NewIPCResolver(server.URL, "synthetic-host-token", slog.Default())
+	ctx := chataudience.WithReceipt(t.Context(), receipt)
+	info, err := resolver.ResolveHumanChat(ctx, "human", "chat")
+	if err != nil || info.HumanAuthority == nil || *info.HumanAuthority != *receipt {
+		t.Fatalf("receipt round trip: %v", err)
+	}
+	missing.Store(true)
+	if _, err = resolver.ResolveHumanChat(ctx, "human", "chat"); err == nil {
+		t.Fatal("legacy response without receipt admitted human work")
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/crewship-ai/crewship/internal/chataudience"
 	"github.com/crewship-ai/crewship/internal/ws"
 )
 
@@ -42,5 +43,34 @@ func TestHumanAdmissionRejectsResolverWithoutHumanAuthority(t *testing.T) {
 	bridge, _ := testBridge(t, legacyOnlyResolver{&mockResolver{}})
 	if err := bridge.HandleChatMessage(t.Context(), "human", "chat", "hello", func(ws.ChatEvent) {}); err == nil {
 		t.Fatal("legacy resolver admitted human work")
+	}
+}
+
+func TestQueuedHumanAdmissionRequiresOriginalReceipt(t *testing.T) {
+	r := &humanGuardResolver{}
+	bridge, _ := testBridge(t, r)
+	err := bridge.HandleChatMessage(t.Context(), "human", "chat", "hello", func(ws.ChatEvent) {}, ws.ChatMessageOption{HumanResume: true, Metadata: map[string]any{"human_authority": map[string]any{"member_id": "forged"}}})
+	if err == nil || r.actor != "" {
+		t.Fatal("missing server receipt reached context resolution")
+	}
+}
+
+type changedReceiptResolver struct{ mockResolver }
+
+func (r *changedReceiptResolver) ResolveHumanChat(ctx context.Context, actor, chat string) (*ChatInfo, error) {
+	receipt := chataudience.ReceiptFromContext(ctx)
+	if receipt == nil {
+		return nil, errors.New("missing receipt")
+	}
+	changed := *receipt
+	changed.MemberRevision++
+	return &ChatInfo{HumanAuthority: &changed}, nil
+}
+func TestQueuedHumanAdmissionCannotRefreshReceipt(t *testing.T) {
+	bridge, _ := testBridge(t, &changedReceiptResolver{})
+	receipt := &chataudience.Receipt{UserID: "human", ChatID: "chat", MemberID: "original", MemberRevision: 1}
+	err := bridge.HandleChatMessage(t.Context(), "human", "chat", "hello", func(ws.ChatEvent) {}, ws.ChatMessageOption{HumanResume: true, HumanAuthority: receipt})
+	if err == nil {
+		t.Fatal("resolver refreshed a queued message's authority")
 	}
 }

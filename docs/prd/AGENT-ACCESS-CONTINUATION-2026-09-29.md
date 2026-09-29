@@ -224,3 +224,49 @@ z opraveného úspěšného průchodu. Surový záznam:
 Finální diff `13cb8b29f` zatím nemá věcné nezávislé review: CodeRabbit ohlásil
 limit s přibližně 38 minutami do dalšího review. Zelený bot status není review.
 CI nadále blokuje účet/billing. PR #2717 zůstává draft, bez merge.
+
+
+## Navazující implementace: autorita čekající lidské zprávy
+
+Po obnovení GitHub billing prošly vzdálené funkční, race, frontend/browser,
+build, Security a CodeQL joby původního headu. Jediná chyba byla tsformat lint;
+`843dca032` ji opravil canonical timestamp formatterem. Dev1 na tomto buildu
+prošlo dalších 149 Go balíčků, celý vet a živý dvouklientský smoke. Vzdálený
+Go Lint nového headu je zelený; zbývající CI/review se ověřuje před merge.
+
+Nová práce zachovává původní autoritu lidské zprávy během provisioning čekání:
+
+- Host-only resolver vydá typed `human_authority` receipt z jednoho SQL snapshotu
+  současného publika, identity členství/revize a generace/revize chatu.
+- Receipt není bearer capability. Při obnově se znovu kontroluje současný přístup
+  a přesná shoda původního receiptu, před materializací kontextu i před vydáním
+  odpovědi resolveru. WS metadata jej nesmějí vytvářet.
+- Nová generace chatu brání obnově po smazání a znovuvytvoření stejného ID.
+  Změny a obnovení publika, agenta/crew nebo smazaného workspace posunou revizi.
+  Změny členství a odstranění účastníka využívají existující členskou revizi.
+- Bridge uchovává receipt v serverových options. Provisioning označí automatický
+  resume; chybějící receipt nebo pokus o jeho nahrazení se odmítne. IPC resolver
+  odmítne starou odpověď bez receiptu, bez legacy fallbacku.
+- Coalescence i počítání opakovaného odložení používají chat, odesílatele a celý
+  receipt. Druhý člověk či nová verze oprávnění nepřepíšou starou čekající práci.
+
+Cílené testy ověřují pozitivní aktuální admission, odstranění/rejoin člena,
+změnu/obnovení role a publika, odstranění/obnovu agenta či workspace, nové použití
+chat ID, účastníka odstraněného a přidaného zpět, vadný receipt, přenos přes
+host IPC a provisioning options i coalescenci. Mutation test vypnul pouze
+porovnání původního receiptu: stará zpráva dostala 200 místo 404 a test selhal.
+Kontrola je obnovena. První pokus reproduktoru selhal na krátkém syntetickém JWT
+secretu fixture; tento pokus se nepovažuje za bezpečnostní reprodukci.
+
+Tento krok nepřipojuje izolovaný runtime/provider/storage ani durable service
+principals. Provisioning pending zprávy jsou stále v paměti; receipt nedělá
+z této fronty durable queue a nezabíjí již spuštěný proces. Plná A2/B přejímka
+zůstává otevřená. Nová implementace ještě potřebuje finální nasazení a review.
+
+
+První celá sada nové queue změny našla dvě navazující testovací úpravy:
+HTTP fixture bridge musí vydat nový receipt a chat generation se při restore
+musí změnit. Round-trip test nyní výslovně požaduje novou neprázdnou generaci
+každého obnoveného chatu; pouze tuto generaci vynechává z byte-for-byte hashe.
+Obsah a ostatní sloupce zůstávají porovnané. Obě cílené regrese následně prošly;
+celá sada běží znovu. Cílené race testy chatbridge/API prošly (1,070 / 72,094 s).

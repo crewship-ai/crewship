@@ -288,6 +288,11 @@ func snapshotWorkspaceScopedTables(t *testing.T, db *sql.DB, workspaceID string)
 			}
 			row := map[string]any{}
 			for i, c := range cols {
+				// Restore deliberately regenerates this admission fence. It is
+				// asserted to differ explicitly in the round-trip test below.
+				if q.table == "chats" && c == "authority_generation" {
+					continue
+				}
 				// modernc.org/sqlite returns []byte for TEXT in some
 				// paths; normalize to string so the JSON encoding is
 				// stable across source-vs-target reads.
@@ -421,6 +426,28 @@ func TestE2E_BackupRestoreRoundTrip(t *testing.T) {
 	if restoreResult.CrewsCount != 2 {
 		t.Errorf("RestoreResult.CrewsCount=%d; expected 2 seeded crews", restoreResult.CrewsCount)
 	}
+
+	// Restored chat rows must never revive server-issued human receipts.
+	receiptRows, err := source.Query(`SELECT id,authority_generation FROM chats WHERE workspace_id=?`, workspaceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for receiptRows.Next() {
+		var id, before, after string
+		if err := receiptRows.Scan(&id, &before); err != nil {
+			t.Fatal(err)
+		}
+		if err := target.QueryRow(`SELECT authority_generation FROM chats WHERE id=?`, id).Scan(&after); err != nil {
+			t.Fatal(err)
+		}
+		if len(after) != 32 || after == before {
+			t.Fatalf("restored chat %s retained admission generation", id)
+		}
+	}
+	if err := receiptRows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	receiptRows.Close()
 
 	// Per-table diff.
 	targetSnap := snapshotWorkspaceScopedTables(t, target, workspaceID)

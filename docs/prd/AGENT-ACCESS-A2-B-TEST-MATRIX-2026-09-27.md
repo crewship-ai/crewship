@@ -12,6 +12,7 @@ slice; it does not complete every acceptance case in a row.
 | Gate | Evidence now available | Still required |
 |---|---|---|
 | Human chat admission before context | `13cb8b29f`: real router + bridge tests for actor/audience/revocation; dev1 group participant send through host-only IPC, no-mention completion | Restricted runtime launch, durable service origins, scoped prompt/recall/provider and queued run authority |
+| Queued human admission epoch | Provisioning options preserve server-issued membership/chat receipt; migrated-DB revoke/restore tests and mutation control; restored chat receives a fresh generation | Final dev1 receipt check, independent review, durable queue/service authority and isolated execution |
 | Exact human resource grants | Migrated-DB tests for agent/project operations, revision conflicts, removal/rejoin and two humans | Administrative API/Settings/CLI rollout, agent-side ceilings and service principals |
 | Private chat discovery | Authenticated router tests for exact chat grants, own list/count, foreign direct lookup; live dev1 two-human same-agent fixture | Complete restricted create/send flow and storage provenance |
 | Delivery revocation | Per-frame WS and HTTP checks; real dev1 positive delivery, member removal, socket close; other human stays connected | Restricted run output, logs/artifacts/journal and full-grant revocation through the production management API |

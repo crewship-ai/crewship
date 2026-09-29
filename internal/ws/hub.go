@@ -15,15 +15,20 @@ import (
 	"sync/atomic"
 	"time"
 
+	"golang.org/x/net/websocket"
+
 	"github.com/crewship-ai/crewship/internal/auth"
 	"github.com/crewship-ai/crewship/internal/auth/sessions"
-	"golang.org/x/net/websocket"
+	"github.com/crewship-ai/crewship/internal/chataudience"
 )
 
 // ChatMessageOption carries optional per-message run settings from the
 // WebSocket frame (e.g. a `--max-turns` override). Passed variadically so
 // existing callers stay source-compatible; only the WS dispatch supplies one.
 type ChatMessageOption struct {
+	// Server-owned fields. The WS decoder constructs only MaxTurns and Metadata.
+	HumanAuthority *chataudience.Receipt `json:"-"`
+	HumanResume    bool                  `json:"-"`
 	// MaxTurns overrides the adapter agent-loop cap for this run. 0 = leave the
 	// adapter default in place.
 	MaxTurns int
