@@ -25,6 +25,9 @@ plánované a webhookové běhy svůj původ při vzniku zapisují.
 Na dev1 pokračuje společná serverová autorita, konzervativní vstupní brány a
 kontroly doručování streamů: [průběžný záznam](AGENT-ACCESS-CONTINUATION-2026-09-29.md).
 Tato rozpracovaná větev zatím není sloučená ani důkaz úplné klientské izolace.
+Dev1 je ověřené na `13cb8b29f`: 149 Go balíčků, vet, cílené race testy,
+živé dva účty a revokace streamů; lidský odesílatel se nově kontroluje ještě
+před materializací kontextu. Podrobnosti a hranice jsou v průběžném záznamu.
 CI posledního main buildu je nadále blokované billingem GitHub účtu;
 #2716 před merge nemělo dokončené nezávislé review.
 
@@ -32,8 +35,8 @@ CI posledního main buildu je nadále blokované billingem GitHub účtu;
 
 | Balík | Stav | Akceptace |
 |---|---|---|
-| A1: směrované oprávnění sdílených souborů mezi crews | Implementováno a nasazeno na dev1, PR review/CI probíhá | Settings/API/CLI, none/read/read+delivery, stale update 409, role/workspace, odebrání dalšího requestu |
-| A2: agent→agent / projektové granty | Připravený návrh, neimplementováno | stabilní resource ID, efektivní dědění, všechny čtecí cesty, shell hranice |
+| A1: směrované oprávnění sdílených souborů mezi crews | Sloučeno v #2704 a nasazeno na dev1 | Settings/API/CLI, none/read/read+delivery, stale update 409, role/workspace, odebrání dalšího requestu |
+| A2: agent→agent / projektové granty | #2717 přidává typed grant store a pokusy; aplikační/runtime integrace nedokončená | stabilní resource ID, efektivní dědění, všechny čtecí cesty, shell hranice |
 | B: omezený klientský běh a konverzace | B1–B3: revokace členství, rutin a Page akcí implementována; B4 read-only share nasazen a ověřen na dev1; klientská izolace neimplementována | žadatel→běh→výstup, historie, paměť a artefakty dvou klientů |
 | C: service desired state / obnova po rebootu | Nasazeno na dev1; Docker ztráta kontejneru/data a server restart ověřeny; host reboot otevřený | durable running/stopped, rekonciliace, data/identity, žádná duplicita |
 | D: credentials / revokace konkrétního grantu | D1/D2: per-agent proxy grant snapshot/refresh a zachování deny-all implementovány; přímá delivery a izolace dále otevřené | rozdílné lease, odebrání jedinému agentovi, výpadek autority, izolovaná delivery |

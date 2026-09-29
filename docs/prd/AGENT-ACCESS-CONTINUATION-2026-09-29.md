@@ -204,3 +204,23 @@ prošel ve všech 149 testovaných balíčcích. `TMPDIR` i `GOTMPDIR` mířily 
 vlastněného tmpfs. Go skončilo s 0; následný Python úklid selhal na Docker-owned
 adresáři, který byl cíleně odstraněn. `go vet ./...`, migration lint a projektové
 invarianty prošly. Surový Go výstup: `reports/agent-access-human-go-2026-09-29.txt`.
+
+Nasazení lidské admission: dev1 `13cb8b29f79e5762c34f05b3789b5a4a21e4e957`,
+clean, build 2026-09-29T10:05:43Z. Identita ověřena přímo přes `/proc/2147661/exe`
+a vzdálené CLI version; shodný web export, health/readiness 200. Race testy
+chatbridge/WS/API prošly (1,086 / 1,242 / 90,572 s).
+
+Živý pozitivní průchod běžného skupinového chatu (druhý účastník, bez zmínky
+agenta) přes nový human IPC resolver dokončil `done/no_reply`; podvržené user_id
+v metadatech neměnilo přihlášenou identitu. Po odebrání účastníka historie 404.
+Dva soukromé chaty téhož agenta zůstaly oddělené; po odebrání členství H1 jeho
+WS uzavřen bez další události a HTTP stream bez rámce. H2 dostal událost i
+heartbeat. Vlastněný workspace odstraněn, sessions odhlášeny; syntetičtí users
+zůstávají bez členství. První dvě verze smoke měly chyby testovacího klienta
+(očekávání 201 místo 204, nerozbalený `chat_event`); výsledky výše pocházejí
+z opraveného úspěšného průchodu. Surový záznam:
+`reports/agent-access-human-live-2026-09-29.txt`.
+
+Finální diff `13cb8b29f` zatím nemá věcné nezávislé review: CodeRabbit ohlásil
+limit s přibližně 38 minutami do dalšího review. Zelený bot status není review.
+CI nadále blokuje účet/billing. PR #2717 zůstává draft, bez merge.
