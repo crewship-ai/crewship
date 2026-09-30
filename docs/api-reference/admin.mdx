@@ -2148,8 +2148,12 @@ readable with the key's private half. Audited as
 ## `GET /api/v1/admin/instance/backups/destinations`
 
 The off-site destinations: endpoint, bucket and prefix, the last connection
-test, how many bundles have a verified copy there and their size, and the
-plans that copy there. The secret access key is never returned.
+test, how many bundles have a verified copy there and their size, the plans
+that copy there, and what proved the newest copy's stored bytes
+(`last_verified_by`: `provider_checksum` — the store's own SHA-256 checksum
+of the object matched — or `download_rehash` — the copy was downloaded and
+re-hashed; `""` for a copy recorded before this was kept). The secret access
+key is never returned.
 
 **Auth:** instance administrator. **Request:** no body. **Response:**
 
@@ -2159,7 +2163,8 @@ plans that copy there. The secret access key is never returned.
     {"id": "bdst_…", "name": "r2", "kind": "s3", "endpoint": "https://acct.r2.cloudflarestorage.com", "region": "auto",
      "bucket": "crewship-backups", "prefix": "prod", "access_key_id": "…", "path_style": false, "allow_private_network": false,
      "last_test_at": "2026-09-30T08:00:00Z", "last_test_error": null, "created_by": "usr_…", "created_at": "2026-09-30T08:00:00Z",
-     "copies": 7, "copy_bytes": 9126805504, "last_verified_at": "2026-09-30T03:05:00Z", "used_by": ["Complete recovery"]}
+     "copies": 7, "copy_bytes": 9126805504, "last_verified_at": "2026-09-30T03:05:00Z", "last_verified_by": "provider_checksum",
+     "used_by": ["Complete recovery"]}
   ]
 }
 ```

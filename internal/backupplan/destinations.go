@@ -38,8 +38,11 @@ type Destination struct {
 	// their total size.
 	Copies    int   `json:"copies"`
 	CopyBytes int64 `json:"copy_bytes"`
-	// LastVerifiedAt is the newest verified copy.
+	// LastVerifiedAt is the newest verified copy, and LastVerifiedBy what
+	// proved its stored bytes: provider_checksum (the store's own SHA-256
+	// checksum matched) or download_rehash (downloaded and re-hashed).
 	LastVerifiedAt *string `json:"last_verified_at"`
+	LastVerifiedBy *string `json:"last_verified_by"`
 	// UsedBy names the plans that copy here.
 	UsedBy []string `json:"used_by"`
 
@@ -103,10 +106,14 @@ func ListDestinations(ctx context.Context, db *sql.DB) ([]Destination, error) {
 	plans, _ := ListPlans(ctx, db)
 	for i := range out {
 		d := &out[i]
-		var last sql.NullString
+		var last, by sql.NullString
 		_ = db.QueryRowContext(ctx, `SELECT COUNT(*), COALESCE(SUM(size),0), MAX(verified_at) FROM backup_copies WHERE destination_id = ?`, d.ID).
 			Scan(&d.Copies, &d.CopyBytes, &last)
 		d.LastVerifiedAt = strPtr(last)
+		if last.Valid {
+			_ = db.QueryRowContext(ctx, `SELECT verified_by FROM backup_copies WHERE destination_id = ? AND verified_at = ? ORDER BY bundle_path DESC LIMIT 1`, d.ID, last.String).Scan(&by)
+			d.LastVerifiedBy = strPtr(by)
+		}
 		for _, p := range plans {
 			for _, id := range p.Destinations {
 				if id == d.ID {
@@ -271,22 +278,25 @@ type Copy struct {
 	Size          int64  `json:"size"`
 	SHA256        string `json:"sha256"`
 	VerifiedAt    string `json:"verified_at"`
+	// VerifiedBy: offsite.VerifiedByProviderChecksum or
+	// offsite.VerifiedByDownloadRehash.
+	VerifiedBy string `json:"verified_by"`
 }
 
 // RecordCopy stores a verified copy (replacing an earlier one of the same
 // bundle at the same destination).
 func RecordCopy(ctx context.Context, ex execer, c Copy) error {
-	_, err := ex.ExecContext(ctx, `INSERT INTO backup_copies (id, bundle_path, destination_id, object_key, size, sha256, verified_at)
-		VALUES (?,?,?,?,?,?,?)
+	_, err := ex.ExecContext(ctx, `INSERT INTO backup_copies (id, bundle_path, destination_id, object_key, size, sha256, verified_at, verified_by)
+		VALUES (?,?,?,?,?,?,?,?)
 		ON CONFLICT(bundle_path, destination_id) DO UPDATE SET object_key=excluded.object_key, size=excluded.size,
-		sha256=excluded.sha256, verified_at=excluded.verified_at`,
-		newID("bcp_"), c.BundlePath, c.DestinationID, c.Key, c.Size, c.SHA256, c.VerifiedAt)
+		sha256=excluded.sha256, verified_at=excluded.verified_at, verified_by=excluded.verified_by`,
+		newID("bcp_"), c.BundlePath, c.DestinationID, c.Key, c.Size, c.SHA256, c.VerifiedAt, c.VerifiedBy)
 	return err
 }
 
 // CopiesOf lists a bundle's verified off-site copies.
 func CopiesOf(ctx context.Context, db *sql.DB, bundlePath string) ([]Copy, error) {
-	rows, err := db.QueryContext(ctx, `SELECT bundle_path, destination_id, object_key, size, sha256, verified_at FROM backup_copies
+	rows, err := db.QueryContext(ctx, `SELECT bundle_path, destination_id, object_key, size, sha256, verified_at, verified_by FROM backup_copies
 		WHERE bundle_path = ? ORDER BY destination_id`, bundlePath)
 	if err != nil {
 		if strings.Contains(err.Error(), "no such table") {
@@ -298,7 +308,7 @@ func CopiesOf(ctx context.Context, db *sql.DB, bundlePath string) ([]Copy, error
 	var out []Copy
 	for rows.Next() {
 		var c Copy
-		if err := rows.Scan(&c.BundlePath, &c.DestinationID, &c.Key, &c.Size, &c.SHA256, &c.VerifiedAt); err != nil {
+		if err := rows.Scan(&c.BundlePath, &c.DestinationID, &c.Key, &c.Size, &c.SHA256, &c.VerifiedAt, &c.VerifiedBy); err != nil {
 			return nil, err
 		}
 		out = append(out, c)

@@ -10,25 +10,36 @@ import (
 	"testing"
 )
 
+// Upload counts a copy only once the STORED bytes are proven: by the
+// provider's own SHA-256 checksum of the object, or — when the provider
+// returns none — by downloading and re-hashing it. The x-amz-meta-sha256
+// metadata is the uploader's own claim and never proves anything alone
+// (review B7).
 func TestUploadVerifies(t *testing.T) {
 	data := payload(6000)
 	cases := []struct {
 		name       string
 		partSize   int64
 		mutate     func(key string, o *fakeObject)
+		noChecksum bool // the provider ignores checksum headers
 		deep       bool
 		knownSHA   bool
 		wantErr    error
 		wantDelete bool // the bad remote copy is removed
+		wantBy     string
 	}{
-		{name: "single put verified by head", wantErr: nil},
-		{name: "multipart verified by head", partSize: 1024},
-		{name: "known sha skips hashing", knownSHA: true},
-		{name: "deep verify ok", deep: true},
+		{name: "single put verified by the provider's checksum", wantBy: VerifiedByProviderChecksum},
+		{name: "multipart verified by the provider's checksum", partSize: 1024, wantBy: VerifiedByProviderChecksum},
+		{name: "known sha skips hashing", knownSHA: true, wantBy: VerifiedByProviderChecksum},
+		{name: "deep verify downloads and re-hashes", deep: true, wantBy: VerifiedByDownloadRehash},
+		{name: "provider without checksums: downloaded and re-hashed", noChecksum: true, wantBy: VerifiedByDownloadRehash},
+		{name: "multipart, provider without checksums: downloaded and re-hashed", partSize: 1024, noChecksum: true, wantBy: VerifiedByDownloadRehash},
 		{name: "remote truncated", mutate: func(_ string, o *fakeObject) { o.data = o.data[:len(o.data)-1] }, wantErr: ErrVerifyFailed, wantDelete: true},
 		{name: "remote sha metadata differs", mutate: func(_ string, o *fakeObject) { o.sha256 = hexSHA([]byte("other")) }, wantErr: ErrVerifyFailed, wantDelete: true},
 		{name: "remote sha metadata missing", mutate: func(_ string, o *fakeObject) { o.sha256 = "" }, wantErr: ErrVerifyFailed, wantDelete: true},
-		{name: "content flipped, metadata intact: head passes", mutate: flipByte},
+		{name: "content flipped, metadata intact: the provider's checksum catches it", mutate: flipByte, wantErr: ErrVerifyFailed, wantDelete: true},
+		{name: "multipart content flipped, metadata intact: the provider's checksum catches it", partSize: 1024, mutate: flipByte, wantErr: ErrVerifyFailed, wantDelete: true},
+		{name: "content flipped, provider without checksums: the re-hash catches it", mutate: flipByte, noChecksum: true, wantErr: ErrVerifyFailed, wantDelete: true},
 		{name: "content flipped, metadata intact: deep catches it", mutate: flipByte, deep: true, wantErr: ErrVerifyFailed, wantDelete: true},
 		{name: "multipart remote truncated", partSize: 1024, mutate: func(_ string, o *fakeObject) { o.data = o.data[:100] }, wantErr: ErrVerifyFailed, wantDelete: true},
 	}
@@ -36,6 +47,7 @@ func TestUploadVerifies(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			fs := startFake(t)
 			fs.mutate = tc.mutate
+			fs.noChecksum = tc.noChecksum
 			s := fs.newS3(t, s3Opts{pathStyle: true, partSize: tc.partSize})
 			path := writeTemp(t, data)
 			opts := UploadOptions{VerifyDownload: tc.deep}
@@ -59,14 +71,37 @@ func TestUploadVerifies(t *testing.T) {
 			if obj.Size != int64(len(data)) || obj.SHA256 != hexSHA(data) || obj.Key != "ws/acme/b.tar.zst" {
 				t.Fatalf("Upload object = %+v", obj)
 			}
-			if tc.deep && fs.count("GET") != 1 {
-				t.Fatalf("deep verify made %d GETs, want 1", fs.count("GET"))
+			if obj.VerifiedBy != tc.wantBy {
+				t.Fatalf("verified by %q, want %q", obj.VerifiedBy, tc.wantBy)
 			}
-			if !tc.deep && fs.count("GET") != 0 {
-				t.Fatal("head-only verify downloaded the object")
+			wantGets := 0
+			if tc.wantBy == VerifiedByDownloadRehash {
+				wantGets = 1
+			}
+			if fs.count("GET") != wantGets {
+				t.Fatalf("verify made %d GETs, want %d", fs.count("GET"), wantGets)
 			}
 			if fs.count("HEAD") != 1 {
 				t.Fatalf("HEADs = %d, want 1", fs.count("HEAD"))
+			}
+		})
+	}
+}
+
+// The reviewer's reproduction of B7, through the bundle path the scheduler
+// uses: a store that keeps the length and the uploader's sha256 metadata but
+// holds different bytes must never be counted as a verified copy, whether
+// or not it returns checksums.
+func TestUploadBundleRefusesChangedStoredBytes(t *testing.T) {
+	for _, noChecksum := range []bool{false, true} {
+		t.Run(map[bool]string{false: "provider checksums", true: "no provider checksums"}[noChecksum], func(t *testing.T) {
+			fs := startFake(t)
+			fs.mutate = flipByte
+			fs.noChecksum = noChecksum
+			dst := fs.newS3(t, s3Opts{pathStyle: true})
+			path := writeTemp(t, []byte("review-only original backup bytes"))
+			if _, err := UploadBundle(context.Background(), dst, nil, path, "review.tar.zst", nil, UploadOptions{}); !errors.Is(err, ErrVerifyFailed) {
+				t.Fatalf("err = %v: a changed stored object was accepted as verified", err)
 			}
 		})
 	}

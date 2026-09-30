@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/xml"
 	"errors"
@@ -41,6 +42,16 @@ const (
 	// metaSHA256 is the user-metadata key carrying the object's SHA-256.
 	// S3 returns it on HEAD/GET as x-amz-meta-sha256.
 	metaSHA256Header = "X-Amz-Meta-Sha256"
+
+	// The S3 flexible-checksum headers. A PUT / UPLOAD-PART carries the
+	// SHA-256 of its body (base64) and the store refuses bytes that do not
+	// match it (BadDigest); HEAD with checksum mode ENABLED returns the
+	// store's own checksum of the object — composite "<b64>-<parts>" for a
+	// multipart upload — which is what Upload verifies against.
+	checksumSHA256Header    = "X-Amz-Checksum-Sha256"
+	checksumAlgorithmHeader = "X-Amz-Checksum-Algorithm"
+	sdkChecksumAlgHeader    = "X-Amz-Sdk-Checksum-Algorithm"
+	checksumModeHeader      = "X-Amz-Checksum-Mode"
 
 	maxErrorBody = 64 << 10
 )
@@ -514,16 +525,20 @@ func (s *S3) putSingle(ctx context.Context, key string, r io.Reader, size int64,
 	if got := hexSHA256(buf); got != sum {
 		return Object{}, fmt.Errorf("%w: %s: source sha256 %s, declared %s", ErrContentMismatch, key, got, sum)
 	}
+	raw, _ := hex.DecodeString(sum)
+	checksum := base64.StdEncoding.EncodeToString(raw)
 	h := http.Header{}
 	h.Set("Content-Type", "application/octet-stream")
 	h.Set(metaSHA256Header, sum)
+	h.Set(sdkChecksumAlgHeader, "SHA256")
+	h.Set(checksumSHA256Header, checksum)
 	resp, err := s.do(ctx, request{op: "PUT", method: http.MethodPut, key: key, fullKey: s.fullKey(key), header: h, body: buf, sum: sum})
 	if err != nil {
 		return Object{}, err
 	}
 	_, _ = io.Copy(io.Discard, resp.Body)
 	_ = resp.Body.Close()
-	return Object{Key: key, Size: size, SHA256: sum, ETag: resp.Header.Get("ETag"), Modified: s.clock.Now().UTC()}, nil
+	return Object{Key: key, Size: size, SHA256: sum, Checksum: checksum, ETag: resp.Header.Get("ETag"), Modified: s.clock.Now().UTC()}, nil
 }
 
 // expectEOF catches a source longer than declared (a file still growing).
@@ -540,9 +555,10 @@ func expectEOF(r io.Reader, key string, size int64) error {
 }
 
 type completedPart struct {
-	XMLName    xml.Name `xml:"Part"`
-	PartNumber int      `xml:"PartNumber"`
-	ETag       string   `xml:"ETag"`
+	XMLName        xml.Name `xml:"Part"`
+	PartNumber     int      `xml:"PartNumber"`
+	ETag           string   `xml:"ETag"`
+	ChecksumSHA256 string   `xml:"ChecksumSHA256,omitempty"`
 }
 
 func (s *S3) putMultipart(ctx context.Context, key string, r io.Reader, size int64, sum string, partSize int64) (obj Object, err error) {
@@ -550,6 +566,7 @@ func (s *S3) putMultipart(ctx context.Context, key string, r io.Reader, size int
 	h := http.Header{}
 	h.Set("Content-Type", "application/octet-stream")
 	h.Set(metaSHA256Header, sum)
+	h.Set(checksumAlgorithmHeader, "SHA256")
 	resp, err := s.do(ctx, request{op: "CREATE-MULTIPART", method: http.MethodPost, key: key, fullKey: fk, query: url.Values{"uploads": {""}}, header: h})
 	if err != nil {
 		return Object{}, err
@@ -580,6 +597,9 @@ func (s *S3) putMultipart(ctx context.Context, key string, r io.Reader, size int
 	}()
 
 	whole := sha256.New()
+	// composite hashes every part's raw SHA-256 in order: the store's
+	// checksum of a multipart object is base64(sha256(those)) + "-N".
+	composite := sha256.New()
 	buf := make([]byte, partSize)
 	var parts []completedPart
 	var sent int64
@@ -602,8 +622,14 @@ func (s *S3) putMultipart(ctx context.Context, key string, r io.Reader, size int
 			return Object{}, fmt.Errorf("offsite: put %s: read source: %w", key, rerr)
 		}
 		whole.Write(b)
+		partSum := sha256.Sum256(b)
+		composite.Write(partSum[:])
+		partChecksum := base64.StdEncoding.EncodeToString(partSum[:])
+		ph := http.Header{}
+		ph.Set(sdkChecksumAlgHeader, "SHA256")
+		ph.Set(checksumSHA256Header, partChecksum)
 		q := url.Values{"partNumber": {strconv.Itoa(n)}, "uploadId": {uploadID}}
-		presp, perr := s.do(ctx, request{op: "UPLOAD-PART", method: http.MethodPut, key: key, fullKey: fk, query: q, body: b})
+		presp, perr := s.do(ctx, request{op: "UPLOAD-PART", method: http.MethodPut, key: key, fullKey: fk, query: q, header: ph, body: b, sum: hex.EncodeToString(partSum[:])})
 		if perr != nil {
 			return Object{}, perr
 		}
@@ -613,7 +639,7 @@ func (s *S3) putMultipart(ctx context.Context, key string, r io.Reader, size int
 		if etag == "" {
 			return Object{}, fmt.Errorf("offsite: s3 UPLOAD-PART %s: part %d answered without an ETag", key, n)
 		}
-		parts = append(parts, completedPart{PartNumber: n, ETag: etag})
+		parts = append(parts, completedPart{PartNumber: n, ETag: etag, ChecksumSHA256: partChecksum})
 		sent += chunk
 	}
 	if eerr := expectEOF(r, key, size); eerr != nil {
@@ -623,6 +649,7 @@ func (s *S3) putMultipart(ctx context.Context, key string, r io.Reader, size int
 		return Object{}, fmt.Errorf("%w: %s: source sha256 %s, declared %s", ErrContentMismatch, key, got, sum)
 	}
 
+	checksum := base64.StdEncoding.EncodeToString(composite.Sum(nil)) + "-" + strconv.Itoa(len(parts))
 	etag, cerr := s.completeMultipart(ctx, key, fk, uploadID, parts)
 	if cerr != nil {
 		// A Complete whose response was lost may have succeeded; the retry
@@ -632,13 +659,14 @@ func (s *S3) putMultipart(ctx context.Context, key string, r io.Reader, size int
 		if errors.As(cerr, &se) && se.Code == "NoSuchUpload" {
 			if o, herr := s.Head(ctx, key); herr == nil && o.Size == size && strings.EqualFold(o.SHA256, sum) {
 				completed = true
+				o.Checksum = checksum
 				return o, nil
 			}
 		}
 		return Object{}, cerr
 	}
 	completed = true
-	return Object{Key: key, Size: size, SHA256: sum, ETag: etag, Modified: s.clock.Now().UTC()}, nil
+	return Object{Key: key, Size: size, SHA256: sum, Checksum: checksum, ETag: etag, Modified: s.clock.Now().UTC()}, nil
 }
 
 func (s *S3) completeMultipart(ctx context.Context, key, fk, uploadID string, parts []completedPart) (string, error) {
@@ -704,7 +732,9 @@ func (s *S3) Head(ctx context.Context, key string) (Object, error) {
 	if err := ValidateKey(key); err != nil {
 		return Object{}, err
 	}
-	resp, err := s.do(ctx, request{op: "HEAD", method: http.MethodHead, key: key, fullKey: s.fullKey(key)})
+	h := http.Header{}
+	h.Set(checksumModeHeader, "ENABLED")
+	resp, err := s.do(ctx, request{op: "HEAD", method: http.MethodHead, key: key, fullKey: s.fullKey(key), header: h})
 	if err != nil {
 		return Object{}, err
 	}
@@ -714,10 +744,11 @@ func (s *S3) Head(ctx context.Context, key string) (Object, error) {
 
 func objectFromHeaders(key string, resp *http.Response) Object {
 	o := Object{
-		Key:    key,
-		Size:   resp.ContentLength,
-		SHA256: strings.ToLower(resp.Header.Get(metaSHA256Header)),
-		ETag:   resp.Header.Get("ETag"),
+		Key:      key,
+		Size:     resp.ContentLength,
+		SHA256:   strings.ToLower(resp.Header.Get(metaSHA256Header)),
+		Checksum: strings.TrimSpace(resp.Header.Get(checksumSHA256Header)),
+		ETag:     resp.Header.Get("ETag"),
 	}
 	if o.Size < 0 {
 		if n, err := strconv.ParseInt(resp.Header.Get("Content-Length"), 10, 64); err == nil {

@@ -1301,11 +1301,20 @@ How a copy is made:
 
 - **Only finished bundles move.** Bundles are encrypted before they leave the
   server; the store never sees plaintext or keys.
-- **A copy counts only after it is checked.** After the upload, the server
-  reads the object's size and stored SHA-256 back from the store and compares
-  them with the local bundle. A stronger mode also downloads the copy and
-  hashes it. A copy that fails the check is deleted and reported, never
-  counted.
+- **A copy counts only after its stored bytes are proven.** Every upload
+  sends the SHA-256 of each request body in `x-amz-checksum-sha256`, so the
+  store refuses bytes that changed on the way. After the upload the server
+  asks the store for its own SHA-256 checksum of the object (`HEAD` with
+  checksum mode enabled; for a multipart upload the composite
+  checksum-of-part-checksums) and compares it with the one computed from the
+  local bundle. A store that returns no checksum (some S3-compatible stores
+  ignore the headers) has the copy downloaded and re-hashed instead — the
+  object's size and the uploader's own `x-amz-meta-sha256` metadata are
+  checked too, but never count as proof on their own. Which proof was used
+  is recorded per copy (`verified_by`: `provider_checksum` or
+  `download_rehash`) and shown under Storage ("verified by the provider's
+  checksum" / "downloaded and re-hashed") and in the run's `off-site` phase.
+  A copy that fails the check is deleted and reported, never counted.
 - **Large bundles upload in 64 MiB parts.** A failed or cancelled upload is
   aborted so no half-written parts stay billed in the bucket.
 - **Transient errors retry.** Server errors, throttling and timeouts retry

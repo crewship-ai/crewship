@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/xml"
 	"fmt"
@@ -52,6 +53,10 @@ type fakeS3 struct {
 	mutate func(key string, o *fakeObject)
 	// completeError makes COMPLETE-MULTIPART answer 200 with an <Error> body.
 	completeError bool
+	// noChecksum makes the fake a store that ignores the S3 checksum
+	// headers (as some S3-compatible stores do): nothing is checked on
+	// upload and HEAD returns no x-amz-checksum-sha256.
+	noChecksum bool
 }
 
 type fakeObject struct {
@@ -59,12 +64,51 @@ type fakeObject struct {
 	sha256   string
 	etag     string
 	modified time.Time
+	// checksummed: uploaded with the SHA256 checksum algorithm, so HEAD with
+	// x-amz-checksum-mode: ENABLED returns the store's checksum of the
+	// object. partSizes are the multipart part lengths (nil: single PUT);
+	// the store's checksum is then composite, "<b64>-<parts>".
+	checksummed bool
+	partSizes   []int
+}
+
+// providerChecksum is what a store that computes SHA-256 checksums itself
+// reports for the object as it holds it (after any corruption a test
+// injected): base64(sha256(data)), or for a multipart object the composite
+// base64(sha256(sha256(part1) || … )) + "-N" over the stored bytes split at
+// the part boundaries.
+func (o *fakeObject) providerChecksum() string {
+	if o.partSizes == nil {
+		s := sha256.Sum256(o.data)
+		return base64.StdEncoding.EncodeToString(s[:])
+	}
+	h := sha256.New()
+	off := 0
+	for _, n := range o.partSizes {
+		end := off + n
+		if end > len(o.data) {
+			end = len(o.data)
+		}
+		if off > end {
+			off = end
+		}
+		s := sha256.Sum256(o.data[off:end])
+		h.Write(s[:])
+		off += n
+	}
+	return base64.StdEncoding.EncodeToString(h.Sum(nil)) + "-" + strconv.Itoa(len(o.partSizes))
+}
+
+func b64SHA(b []byte) string {
+	s := sha256.Sum256(b)
+	return base64.StdEncoding.EncodeToString(s[:])
 }
 
 type fakeUpload struct {
-	key   string
-	sha   string
-	parts map[int][]byte
+	key         string
+	sha         string
+	parts       map[int][]byte
+	checksummed bool
 }
 
 func newFakeS3(t *testing.T) *fakeS3 {
@@ -154,14 +198,25 @@ func (f *fakeS3) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// A store that honours checksums refuses a body whose declared
+	// x-amz-checksum-sha256 does not match what arrived (BadDigest).
+	if want := r.Header.Get("X-Amz-Checksum-Sha256"); want != "" && !f.noChecksum && (op == "PUT" || op == "UPLOAD-PART") {
+		if want != b64SHA(body) {
+			writeS3Error(w, 400, "BadDigest")
+			return
+		}
+	}
+
 	switch op {
 	case "PUT":
-		f.putObject(w, key, body, r.Header.Get("X-Amz-Meta-Sha256"))
+		checksummed := !f.noChecksum && r.Header.Get("X-Amz-Checksum-Sha256") != ""
+		f.putObject(w, key, body, r.Header.Get("X-Amz-Meta-Sha256"), checksummed)
 	case "CREATE-MULTIPART":
 		f.mu.Lock()
 		f.nextID++
 		id := fmt.Sprintf("upload-%d", f.nextID)
-		f.uploads[id] = &fakeUpload{key: key, sha: r.Header.Get("X-Amz-Meta-Sha256"), parts: map[int][]byte{}}
+		f.uploads[id] = &fakeUpload{key: key, sha: r.Header.Get("X-Amz-Meta-Sha256"), parts: map[int][]byte{},
+			checksummed: !f.noChecksum && strings.EqualFold(r.Header.Get("X-Amz-Checksum-Algorithm"), "SHA256")}
 		f.mu.Unlock()
 		fmt.Fprintf(w, `<InitiateMultipartUploadResult><Bucket>%s</Bucket><Key>%s</Key><UploadId>%s</UploadId></InitiateMultipartUploadResult>`, f.bucket, xmlEscape(key), id)
 	case "UPLOAD-PART":
@@ -212,6 +267,14 @@ func (f *fakeS3) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if o.sha256 != "" {
 			w.Header().Set("X-Amz-Meta-Sha256", o.sha256)
 		}
+		if o.checksummed && strings.EqualFold(r.Header.Get("X-Amz-Checksum-Mode"), "ENABLED") {
+			w.Header().Set("X-Amz-Checksum-Sha256", o.providerChecksum())
+			if o.partSizes != nil {
+				w.Header().Set("X-Amz-Checksum-Type", "COMPOSITE")
+			} else {
+				w.Header().Set("X-Amz-Checksum-Type", "FULL_OBJECT")
+			}
+		}
 		if op == "GET" {
 			_, _ = w.Write(o.data)
 		}
@@ -243,27 +306,32 @@ func classify(method, key string, q url.Values) string {
 	return method
 }
 
-func (f *fakeS3) store(key string, data []byte, sha string) {
-	o := &fakeObject{data: data, sha256: sha, etag: `"` + hexSHA(data)[:32] + `"`, modified: time.Now().UTC().Truncate(time.Second)}
+func (f *fakeS3) store(key string, data []byte, sha string, checksummed bool, partSizes []int) {
+	o := &fakeObject{data: data, sha256: sha, etag: `"` + hexSHA(data)[:32] + `"`, modified: time.Now().UTC().Truncate(time.Second),
+		checksummed: checksummed, partSizes: partSizes}
 	if f.mutate != nil {
 		f.mutate(key, o)
 	}
 	f.objects[key] = o
 }
 
-func (f *fakeS3) putObject(w http.ResponseWriter, key string, body []byte, sha string) {
+func (f *fakeS3) putObject(w http.ResponseWriter, key string, body []byte, sha string, checksummed bool) {
 	f.mu.Lock()
-	f.store(key, body, sha)
+	f.store(key, body, sha, checksummed, nil)
 	etag := f.objects[key].etag
 	f.mu.Unlock()
 	w.Header().Set("ETag", etag)
+	if checksummed {
+		w.Header().Set("X-Amz-Checksum-Sha256", b64SHA(body))
+	}
 }
 
 func (f *fakeS3) completeMultipart(w http.ResponseWriter, id string, body []byte) {
 	var req struct {
 		Parts []struct {
-			PartNumber int
-			ETag       string
+			PartNumber     int
+			ETag           string
+			ChecksumSHA256 string
 		} `xml:"Part"`
 	}
 	if err := xml.Unmarshal(body, &req); err != nil || len(req.Parts) == 0 {
@@ -283,16 +351,25 @@ func (f *fakeS3) completeMultipart(w http.ResponseWriter, id string, body []byte
 		return
 	}
 	var data []byte
+	var sizes []int
 	for i, p := range req.Parts {
 		part, ok := up.parts[p.PartNumber]
 		if !ok || p.PartNumber != i+1 || p.ETag != `"`+hexSHA(part)[:32]+`"` {
 			writeS3Error(w, 400, "InvalidPart")
 			return
 		}
+		if up.checksummed && p.ChecksumSHA256 != b64SHA(part) {
+			writeS3Error(w, 400, "InvalidPart")
+			return
+		}
 		data = append(data, part...)
+		sizes = append(sizes, len(part))
 	}
 	delete(f.uploads, id)
-	f.store(up.key, data, up.sha)
+	if !up.checksummed {
+		sizes = nil
+	}
+	f.store(up.key, data, up.sha, up.checksummed, sizes)
 	fmt.Fprintf(w, `<CompleteMultipartUploadResult><Key>%s</Key><ETag>"mp-%d"</ETag></CompleteMultipartUploadResult>`, xmlEscape(up.key), len(req.Parts))
 }
 

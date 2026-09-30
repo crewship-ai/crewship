@@ -282,7 +282,24 @@ export interface OffsiteDestination {
   copies: number
   copy_bytes: number
   last_verified_at: string | null
+  /**
+   * What proved the newest copy's stored bytes: the store's own SHA-256
+   * checksum, or a download and re-hash. "" for a copy recorded before this
+   * was kept (counted on size and the uploader's metadata alone).
+   */
+  last_verified_by?: VerifiedBy | null
   used_by: string[]
+}
+
+export type VerifiedBy = "provider_checksum" | "download_rehash" | ""
+
+/** What proved an off-site copy's stored bytes, in words. */
+export function verifiedByText(by: VerifiedBy | null | undefined): string {
+  switch (by) {
+    case "provider_checksum": return "verified by the provider's checksum"
+    case "download_rehash": return "downloaded and re-hashed"
+    default: return "stored bytes not proven"
+  }
 }
 
 /** POST …/destinations body. */

@@ -112,10 +112,11 @@ func putRefs(ctx context.Context, dst Destination, key string, refs EnvironmentR
 	sum := hex.EncodeToString(h[:])
 	refMu.Lock()
 	defer refMu.Unlock()
-	if _, err := dst.Put(ctx, key, bytes.NewReader(b), int64(len(b)), sum); err != nil {
+	put, err := dst.Put(ctx, key, bytes.NewReader(b), int64(len(b)), sum)
+	if err != nil {
 		return fmt.Errorf("offsite: write environment refs: %w", err)
 	}
-	if _, err := verify(ctx, dst, key, int64(len(b)), sum, false, nil); err != nil {
+	if _, err := verify(ctx, dst, key, int64(len(b)), sum, put.Checksum, false, nil); err != nil {
 		return err
 	}
 	return nil

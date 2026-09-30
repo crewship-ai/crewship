@@ -23,6 +23,7 @@ import (
 	"io"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"text/tabwriter"
 
@@ -97,6 +98,7 @@ type backupDestinationRow struct {
 	Copies              int      `json:"copies" yaml:"copies"`
 	CopyBytes           int64    `json:"copy_bytes" yaml:"copy_bytes"`
 	LastVerifiedAt      *string  `json:"last_verified_at" yaml:"last_verified_at"`
+	LastVerifiedBy      *string  `json:"last_verified_by" yaml:"last_verified_by"`
 	UsedBy              []string `json:"used_by" yaml:"used_by"`
 }
 
@@ -410,11 +412,26 @@ var adminInstanceBackupsDestinationsListCmd = &cobra.Command{
 				if d.Prefix != "" {
 					loc += "/" + d.Prefix
 				}
-				fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%d\t%s\t%s\n", d.ID, d.Name, d.Endpoint, loc, d.Copies, test, backupDash(strings.Join(d.UsedBy, ", ")))
+				copies := strconv.Itoa(d.Copies)
+				if d.Copies > 0 && d.LastVerifiedBy != nil {
+					copies += " (" + backupVerifiedByWords(*d.LastVerifiedBy) + ")"
+				}
+				fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", d.ID, d.Name, d.Endpoint, loc, copies, test, backupDash(strings.Join(d.UsedBy, ", ")))
 			}
 			_ = tw.Flush()
 		})
 	},
+}
+
+// backupVerifiedByWords names what proved the newest copy's stored bytes.
+func backupVerifiedByWords(by string) string {
+	switch by {
+	case "provider_checksum":
+		return "provider checksum"
+	case "download_rehash":
+		return "downloaded and re-hashed"
+	}
+	return "not proven"
 }
 
 // readSecret reads the secret access key from a file ("-" is stdin).

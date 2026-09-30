@@ -519,11 +519,11 @@ func (s *Service) copyOffsite(ctx context.Context, r *Run, plan *Plan, path stri
 		if len(layers) > 0 {
 			layerNotes = append(layerNotes, fmt.Sprintf("%s: %d environment layer(s) uploaded, %d already there", name, tr.Environments.Transferred, tr.Environments.Present))
 		}
-		if err := RecordCopy(ctx, s.DB, Copy{BundlePath: path, DestinationID: id, Key: obj.Key, Size: obj.Size, SHA256: obj.SHA256, VerifiedAt: ts(s.now())}); err != nil {
+		if err := RecordCopy(ctx, s.DB, Copy{BundlePath: path, DestinationID: id, Key: obj.Key, Size: obj.Size, SHA256: obj.SHA256, VerifiedAt: ts(s.now()), VerifiedBy: obj.VerifiedBy}); err != nil {
 			failed = append(failed, fmt.Sprintf("%s: uploaded and verified, but the copy could not be recorded: %v", name, err))
 			continue
 		}
-		ok = append(ok, name)
+		ok = append(ok, fmt.Sprintf("%s (%s)", name, VerifiedByPhrase(obj.VerifiedBy)))
 	}
 	set := s.settings(ctx)
 	if len(failed) > 0 {
@@ -541,6 +541,18 @@ func (s *Service) copyOffsite(ctx context.Context, r *Run, plan *Plan, path stri
 		detail += " (" + strings.Join(layerNotes, "; ") + ")"
 	}
 	return "done", detail
+}
+
+// VerifiedByPhrase says in words what proved an off-site copy's stored
+// bytes.
+func VerifiedByPhrase(by string) string {
+	switch by {
+	case offsite.VerifiedByProviderChecksum:
+		return "verified by the provider's checksum"
+	case offsite.VerifiedByDownloadRehash:
+		return "downloaded and re-hashed"
+	}
+	return "stored bytes not proven"
 }
 
 // StoreEnvironmentBlobs is the environment layers a bundle needs from the

@@ -442,7 +442,7 @@ func TestS3ListPagination(t *testing.T) {
 	}
 	// An object outside the destination prefix must never be listed.
 	fs.mu.Lock()
-	fs.store("crewshipX/ws/a/9", []byte("x"), "")
+	fs.store("crewshipX/ws/a/9", []byte("x"), "", false, nil)
 	fs.mu.Unlock()
 
 	got, err := s.List(ctx, "ws/a/")
