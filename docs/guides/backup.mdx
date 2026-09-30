@@ -925,10 +925,13 @@ refused, because replacing would delete everything the bundle does not hold.
 - **One at a time.** One run executes at a time; the rest queue in order. A
   plan over several workspaces makes one run per workspace.
 - **Retention.** After a good run the plan's keep rules apply to that plan's
-  own bundles in that workspace — `keep_min` newest copies are never aged
-  out, then the newest copy of each of the last `keep_daily` days,
-  `keep_weekly` weeks and `keep_monthly` months. Pinned bundles, manual
-  bundles and other plans' bundles are never touched.
+  own bundles — per workspace for a Workspace backup plan, and to the plan's
+  instance bundles as one group for a Complete recovery plan — `keep_min`
+  newest copies are never aged out, then the newest copy of each of the last
+  `keep_daily` days, `keep_weekly` weeks and `keep_monthly` months. Pinned
+  bundles, manual bundles and other plans' bundles are never touched. A
+  bundle retention removes leaves the catalog, gives back the environment
+  layers no other bundle needs, and loses its off-site copies.
 
 ### Runs and their phases
 
@@ -991,7 +994,11 @@ workspaces:
   skipped or late runs. The whole-instance view also says when the latest
   instance backup cannot unlock credentials on a new server — the vault key
   versions its sealed values use that its recovery kit does not carry (all of
-  them when the kit was off), read from the bundle's own manifest.
+  them when the kit was off), read from the bundle's own manifest. When the
+  disk is too full for the next run to start (see
+  [Limits and the space floor](#limits-and-the-space-floor)), the first item
+  says so ("Backups will not start: the disk is 95% full"), with the figures,
+  what to do, and a link to Storage.
 - **Fourteen nights** — one mark per night: ok, late (a catch-up), skipped,
   failed or no run, with the best proof reached that night.
 - **Space** — what backups use, the free and total space where they are
@@ -999,7 +1006,8 @@ workspaces:
   the scope: the encrypted staging file and the finished bundle exist side by
   side until the bundle is renamed into place) and the room a restore needs
   (the largest bundle × 3: payloads compress about 3:1, and a restore stages
-  the decrypted payload).
+  the decrypted payload). `space.min_free_percent` is the floor in force and
+  `space.refusal` why the next run would not start, or null.
 
 ## Complete container environments
 
@@ -1073,8 +1081,8 @@ digests it needs (`contents.environments`, readable without the key so
 retention and off-site copies can work on it). With
 `CREWSHIP_BACKUP_ENV_INLINE=1` new bundles carry the layers inside the
 payload instead (`environment-blobs/`): self-contained, and larger. A bundle
-copied off-site without inline layers must take its blobs along; the off-site
-layer ships each shared blob once.
+copied off-site without inline layers takes its blobs along — see
+[Environment layers off-site](#environment-layers-off-site).
 
 ### Restoring an environment
 
@@ -1139,18 +1147,46 @@ decides how hard a backup may push the server:
 Before a run starts, the server compares the room it needs (twice the largest
 recent bundle of the same scope) with the free space where bundles are kept.
 A run that would leave less than 10 % of the disk free does not start: it is
-recorded as `skipped` with the figures, and an incident is raised. A host
-whose disk is shared with other data can move the floor with
-`CREWSHIP_BACKUP_MIN_FREE_PERCENT` (0–50).
+recorded as `skipped` with the figures and what to do, and an incident is
+raised. The refusal is not silent anywhere: the run's reason in Backup
+history, the first Needs attention item on the Overview (with a link to
+Storage), the Space card ("New backup runs will not start") and
+`crewship admin instance backups overview` all say it.
 
-Staging is encrypted before it touches disk: the payload streams through the
-compressor and the age encryption straight into one staging file, whose
-checksum and size are counted on the way. That file is removed after the run,
-and at the next start after a crash, together with an interrupted instance
-run's staging directory. (An instance run's consistent copy — the database
-snapshot and file stores taken inside the quiet window — is itself a copy of
-the live data and is staged as is, inside the backups directory, until it is
-packed.)
+The floor is set by one environment variable on the server:
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `CREWSHIP_BACKUP_MIN_FREE_PERCENT` | `10` | Percent of the disk that must stay free after a run's staging (0–50; other values are ignored and the default applies). |
+
+The default stays 10 %, because a backup that fills the disk takes the server
+down with it. Lower it only on a host whose disk is shared with other data
+and is routinely fuller than that — a development box at 95 % refuses every
+run at the default. Set it where the server's environment is set (the
+systemd unit or `.env`), restart the server, and the next run uses it:
+
+```bash
+# /etc/systemd/system/crewship.service.d/backup.conf
+[Service]
+Environment=CREWSHIP_BACKUP_MIN_FREE_PERCENT=3
+```
+
+The better fix is room: free space on the disk, keep fewer copies (the
+plan's keep rules), or move copies off-site.
+
+Staging is encrypted before it touches disk. A workspace run's payload
+streams through the compressor and the age encryption straight into one
+staging file, whose checksum and size are counted on the way. An instance
+run's consistent copy, taken inside the quiet window, never waits on disk in
+the clear either: the database snapshot is held in memory (SQLite's online
+backup API into an in-memory database) and serialized straight into the
+sealed payload, and every other staged file — each file store's copy, the
+crew and environment archives — is written through a key generated for that
+run that exists only in the server's memory (XChaCha20-Poly1305 in 64 KiB
+chunks) and decrypted while packing. The quiet window is no longer for it.
+Holding the snapshot costs memory: about the database's size during the run,
+twice that for a moment while it is serialized. Staging is removed after the
+run, on failure, and at the next start after a crash.
 
 ### Incidents and alerts
 
@@ -1165,6 +1201,12 @@ instance. One incident per plan and kind:
 | `stale` | The plan's newest good backup is older than `stale_alert_hours` (36). | A good run. |
 | `offsite` | An upload failed or did not verify. | The next verified upload. |
 | `drill` | A recorded test restore failed or was partial. | A drill that passes. |
+| `drill` (reminder) | No test restore for longer than `drill_reminder`: weekly (7 days) or monthly (31 days, the default). Counts from the oldest backup when none was ever drilled; nothing is raised while no backup exists. One instance-wide incident, not per plan. | Any recorded drill (`crewship backup drill --post`, or a drill recorded under Recovery), or `drill_reminder` set to `off`. |
+
+The reminder's message names the command to run, for example "No test
+restore in 32 days — run `crewship backup drill --bundle <newest bundle>
+--identity <key file>`." It is delivered once when it opens, like `stale`, and
+follows the `drill` switch under Keys & alerts.
 
 A repeat raises the incident's count instead of opening another. Each instance
 admin gets **one inbox item** per incident, in their primary workspace (the
@@ -1174,7 +1216,11 @@ successful backup: 32 hours ago." with **View failure** and **Retry**. A
 repeat refreshes the same item and marks it unread; resolving the incident
 resolves the item. The item routes under the `system.health` notification
 category, so each admin's own channels — email, Slack, Telegram and the rest,
-per their notification preferences — carry it too. An instance admin who
+per their notification preferences (Settings › Notifications) — carry it too.
+That is the only routing: `backup_settings.channels` is stored for a later
+release and sends nothing, so the Alerts card offers no per-channel switches
+and says "Each instance admin's inbox, then their own notification channels
+(Settings › Notifications)". An instance admin who
 belongs to no workspace has no inbox; they see incidents under Admin ›
 Backups and with `crewship admin instance backups incidents`. Which kinds are
 delivered is chosen under Keys & alerts (`--alerts`); the others are still
@@ -1263,7 +1309,7 @@ How a copy is made:
   the step that failed (upload, check or delete) so a missing bucket
   permission is obvious.
 - **Retention reaches the bucket.** When a plan's keep rules remove a local
-  bundle, its off-site copies are deleted with it.
+  bundle — workspace or instance — its off-site copies are deleted with it.
 
 Add a destination under Admin › Backups › Storage (**Add S3-compatible
 storage**) or with the CLI, then name it in a plan's destinations (Schedules ›
@@ -1283,47 +1329,33 @@ every recent backup of the selection has a verified off-site copy. A failed
 upload leaves the local bundle as it is, marks the run's `off-site` phase
 failed and raises an `offsite` incident.
 
-## Off-site destinations (upcoming)
+### Environment layers off-site
 
-<Note>
-Off-site copies are not configurable yet: there is no endpoint, CLI command
-or Storage page field for them in this release. This section describes the
-transfer layer that has landed in the server so the rules are known before
-the configuration arrives.
-</Note>
+A bundle whose [complete container environments](#complete-container-environments)
+keep their layers in the shared store (the default, not
+`CREWSHIP_BACKUP_ENV_INLINE=1`) would be missing them off-site on its own, so
+the copy takes them along:
 
-A backup that exists only on the server it protects does not survive losing
-that server. Off-site destinations copy finished bundles to object storage.
-The first destination type is **S3-compatible storage**: AWS S3, Cloudflare
-R2, Backblaze B2 (S3 API), Wasabi and MinIO. Google Drive is planned later.
+```text
+<prefix>/instance/crewship-instance-all-….tar.zst                    the bundle
+<prefix>/instance/crewship-instance-all-….tar.zst.environments.json  the layer digests it needs
+<prefix>/environments/blobs/sha256/<hex>                             each layer once
+```
 
-| Setting | Meaning |
-|---|---|
-| Endpoint | The service URL, for example `https://s3.eu-central-1.amazonaws.com` or `https://<account>.r2.cloudflarestorage.com`. `https://` only, unless private network access is allowed. |
-| Region | The signing region. Empty means `us-east-1`; R2 uses `auto`. |
-| Bucket, prefix | Where copies go. The prefix (for example `crewship/prod`) keeps several servers apart in one bucket. |
-| Access key | An access key ID and secret. They will be stored as a vault credential and never logged. |
-| Path-style addressing | Address the bucket as `endpoint/bucket` instead of `bucket.endpoint`. MinIO and most self-hosted stores need it; so does a bucket name with dots. |
-| Allow private network | Lets the endpoint be a loopback or LAN address (a MinIO on `192.168.x.x`) and permits plain `http://` for it. Off by default. Cloud metadata and link-local addresses stay blocked even when it is on. |
+The refs object is written first, then every layer the destination does not
+already hold with the same size and checksum (a nightly bundle usually
+uploads only what changed), then the bundle — each checked like the bundle.
+A layer missing from the local store fails the copy instead of leaving a
+bundle off-site that could not restore its environments. The run's `off-site`
+phase says how many layers were uploaded and how many were already there.
 
-How a copy is made:
-
-- **Only finished bundles move.** Bundles are encrypted before they leave the
-  server; the store never sees plaintext or keys.
-- **A copy counts only after it is checked.** After the upload, the server
-  reads the object's size and stored SHA-256 back from the store and compares
-  them with the local bundle. A stronger mode also downloads the copy and
-  hashes it. A copy that fails the check is deleted and reported, never
-  counted.
-- **Large bundles upload in 64 MiB parts.** A failed or cancelled upload is
-  aborted so no half-written parts stay billed in the bucket.
-- **Transient errors retry.** Server errors, throttling and timeouts retry
-  with backoff; permission errors do not.
-- **Uploads respect the upload limit** set under Storage, so a nightly copy
-  does not saturate the server's link.
-- **Connection test.** Saving a destination will write, check and delete one
-  small object, and the error names the step that failed (upload, check or
-  delete) so a missing bucket permission is obvious.
+The destination is its own reference count: when retention deletes a remote
+bundle, it deletes the layers that bundle needed only if no other refs object
+at the destination still names them, so a copy survives even when the
+server's database is lost. A restore from off-site downloads the bundle and
+the layers its refs object names into the backups directory and the
+environment store, checks each against its digest, and records the layers as
+the bundle's, so local retention keeps them.
 
 ## Compatibility
 
@@ -1387,14 +1419,14 @@ The following items are intentionally deferred to v0.2. They do
   [complete container environments](#complete-container-environments).
   Otherwise run an app-level flush manually before
   `crewship backup create`.
-- **Remote backends (S3 / B2 / GCS)** — bundles live on the server's
-  local disk only. The S3-compatible transfer layer has landed but is not
-  configurable yet (see [Off-site destinations](#off-site-destinations-upcoming)).
-  Today: use `scp` / `rclone` /
-  `restic` to ship bundles off-box, or stream a single bundle via
-  `GET /api/v1/admin/backups/download`.
-- **Scheduled backups** — no built-in scheduler. Wrap `crewship backup
-  create` in `cron` or `systemd.timer`.
+- **Remote backends** — S3-compatible storage only (see
+  [Off-site destinations](#off-site-destinations)); Google Drive and GCS
+  come later. For anything else use `scp` / `rclone` / `restic`, or stream a
+  single bundle via `GET /api/v1/admin/backups/download`.
+- **Scheduled backups** — plans run on the server's scheduler (see
+  [Backup plans and scheduled runs](#backup-plans-and-scheduled-runs)); the
+  per-workspace `crewship backup create` still fits `cron` or
+  `systemd.timer`.
 - **Forward migration replay hooks.** The plumbing is wired —
   migrations can register a per-version `restoreBackfill` function and
   the restorer walks the `applied ∖ manifest` set in ascending order

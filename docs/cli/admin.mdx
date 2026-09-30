@@ -1228,8 +1228,8 @@ crewship admin instance backups settings set --alerts failed,stale,offsite --sta
 | `--heartbeat-url` | no | A public https URL pinged after every good run, so an outside service alerts when the pings stop. `""` clears it. |
 | `--alerts` | no | Incident kinds that reach instance admins: `failed`, `incomplete`, `stale`, `offsite`, `drill` (`none` for no alerts). The others are still recorded. |
 | `--stale-hours` | no | A plan whose newest good backup is older than this raises a stale incident. 36 by default. |
-| `--drill-reminder` | no | `weekly`, `monthly` or `off`. |
-| `--channel` | no | Extra delivery routes, recorded with the settings; repeatable, replaces the list. |
+| `--drill-reminder` | no | `weekly`, `monthly` or `off`. Raises an instance-wide `drill` incident when the newest test restore is older than 7 or 31 days; resolved by the next recorded drill. |
+| `--channel` | no | Recorded with the settings for a later release; it routes nothing today (incidents reach each instance admin's inbox, then that admin's own notification channels). Repeatable, replaces the list. |
 
 ### backups recipients list
 
@@ -1320,8 +1320,10 @@ server's record of them goes. Written to the instance audit log.
 `GET /api/v1/admin/instance/backups/incidents`. One incident per plan and kind
 — `failed` (a run failed, was skipped or was interrupted twice), `incomplete`,
 `stale`, `offsite`, `drill` — counted on each repeat and resolved by the next
-good run or when the condition clears. Open incidents first. Each also sits
-in every instance admin's inbox.
+good run or when the condition clears. The drill reminder is one more
+`drill` incident with no plan (`plan_id` null): no test restore within the
+`drill_reminder` period, resolved by the next recorded drill. Open incidents
+first. Each also sits in every instance admin's inbox.
 
 | Flag | Required | Description |
 |---|---|---|
