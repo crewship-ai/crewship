@@ -370,3 +370,21 @@ func bindContextSource(ctx context.Context, tx *sql.Tx, a Attempt, id string) er
 	_, err = tx.ExecContext(ctx, `INSERT INTO access_context_dependencies(attempt_id,context_id,source_attempt_id,scope) VALUES(?,?,?,?) ON CONFLICT(attempt_id,context_id) DO NOTHING`, a.ID, id, origin, a.Scope)
 	return err
 }
+
+// CheckContextAttempt gates acknowledgments/history delivery for this exact
+// opaque attempt. Completion is permitted; revocation and revoked ancestors
+// remain denied. It returns no executable authority or renewable lease.
+func (s Store) CheckContextAttempt(ctx context.Context, handle string) error {
+	if s.DB == nil || handle == "" {
+		return ErrDenied
+	}
+	tx, err := s.DB.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err = resolveState(ctx, tx, digest(handle), true, map[string]bool{}, true); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
