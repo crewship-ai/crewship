@@ -9,6 +9,9 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+### Added
+- **Member resource access can be managed in Settings.** Workspace administrators can choose trusted or restricted access and replace exact agent/project operation grants. Stale edits require an explicit reload; an empty restricted policy revokes all resource operations. (#2711)
+
 ### Improved
 - Restricted runtime preparation can pin an explicit agent provider-key grant before building context. Credential revocation, rotation and model changes invalidate prepared attempts and descendants; regrant cannot revive them. Production restricted dispatch remains gated. (#2711)
 - The isolated runtime prototype can broker stateless text Responses requests with a server-selected model and output ceiling. Remote resource references and tools are denied; application model execution remains gated. (#2711)
