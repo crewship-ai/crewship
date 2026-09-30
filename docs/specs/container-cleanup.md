@@ -20,7 +20,11 @@ therefore re-keys it: runtimes labelled with the old identity are no longer
 adopted and must be removed by hand once. The running server holds an exclusive
 lock on its identity; a second live server on the same database file starts
 with automatic cleanup disabled and an empty instance label, as does a server
-whose database has no stable location (for example in-memory).
+whose database has no stable location (in-memory, including
+`mode=memory` URIs). The database location is the resolved path of the
+database file itself, so a symlink to a live database is the same database and
+meets its lock. Re-keying is a compare-and-swap on the nonce: several starts of
+the same copy settle on one identity.
 Do not copy the `installations` directory to another installation sharing a
 daemon. New runtime
 and service containers explicitly set the instance label, including an empty

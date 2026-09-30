@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -53,63 +54,78 @@ func LoadIdentity(ctx context.Context, root string, db *sql.DB, location string)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, err
 	}
-	return loadIdentity(ctx, dir, db, hex.EncodeToString(sum[:]), false)
+	return loadIdentity(ctx, dir, db, hex.EncodeToString(sum[:]))
 }
 
 var errLocationClaimed = errors.New("installation identity belongs to another database location")
 
-func loadIdentity(ctx context.Context, dir string, db *sql.DB, locator string, rekeyed bool) (*Identity, error) {
-	nonce, err := databaseNonce(ctx, db)
-	if err != nil {
-		return nil, err
-	}
-	owner, err := os.ReadFile(filepath.Join(dir, nonce+".db"))
-	switch {
-	case err == nil && strings.TrimSpace(string(owner)) != locator:
-		// Same nonce, different database location: take a new nonce rather
-		// than the original's identity.
-		if nonce, err = rekeyDatabase(ctx, db); err != nil {
-			return nil, err
-		}
-	case err != nil && !os.IsNotExist(err):
-		return nil, err
-	}
-	lock, err := os.OpenFile(filepath.Join(dir, nonce+".lock"), os.O_CREATE|os.O_RDWR, 0o600)
-	if err != nil {
-		return nil, err
-	}
-	held, err := tryExclusiveLock(lock)
-	if err != nil || !held {
-		lock.Close()
+// testHookBeforeRekey lets a test hold concurrent starts between reading the
+// nonce's owner and re-keying, the window the compare-and-swap protects.
+var testHookBeforeRekey func()
+
+// loadIdentity settles on exactly one identity per database even when several
+// starts of the same copy race: re-keying is a compare-and-swap on the nonce,
+// so a loser adopts the winner's nonce and then meets its lock.
+func loadIdentity(ctx context.Context, dir string, db *sql.DB, locator string) (*Identity, error) {
+	for attempt := 0; attempt < 4; attempt++ {
+		nonce, err := databaseNonce(ctx, db)
 		if err != nil {
 			return nil, err
 		}
-		return nil, ErrIdentityInUse
-	}
-	// Re-check under the lock: a copy starting at the same moment may have
-	// claimed this nonce first. Re-key once and take a fresh identity.
-	if err := claimLocation(filepath.Join(dir, nonce+".db"), locator); err != nil {
-		lock.Close()
-		if !errors.Is(err, errLocationClaimed) || rekeyed {
+		owner, err := os.ReadFile(filepath.Join(dir, nonce+".db"))
+		if err != nil && !os.IsNotExist(err) {
 			return nil, err
 		}
-		if _, err := rekeyDatabase(ctx, db); err != nil {
+		if err == nil && strings.TrimSpace(string(owner)) != locator {
+			if testHookBeforeRekey != nil {
+				testHookBeforeRekey()
+			}
+			// Same nonce, different database location: take a new nonce
+			// rather than the original's identity.
+			if err := rekeyDatabase(ctx, db, nonce); err != nil {
+				return nil, err
+			}
+			continue
+		}
+		lock, err := os.OpenFile(filepath.Join(dir, nonce+".lock"), os.O_CREATE|os.O_RDWR, 0o600)
+		if err != nil {
 			return nil, err
 		}
-		return loadIdentity(ctx, dir, db, locator, true)
+		held, err := tryExclusiveLock(lock)
+		if err != nil || !held {
+			lock.Close()
+			if err != nil {
+				return nil, err
+			}
+			return nil, ErrIdentityInUse
+		}
+		// Re-check under the lock: another database may have claimed this
+		// nonce between the read above and the lock.
+		if err := claimLocation(filepath.Join(dir, nonce+".db"), locator); err != nil {
+			lock.Close()
+			if !errors.Is(err, errLocationClaimed) {
+				return nil, err
+			}
+			if err := rekeyDatabase(ctx, db, nonce); err != nil {
+				return nil, err
+			}
+			continue
+		}
+		id, err := readOrCreateID(filepath.Join(dir, nonce))
+		if err != nil {
+			lock.Close()
+			return nil, err
+		}
+		return &Identity{ID: id, lock: lock}, nil
 	}
-	id, err := readOrCreateID(filepath.Join(dir, nonce))
-	if err != nil {
-		lock.Close()
-		return nil, err
-	}
-	return &Identity{ID: id, lock: lock}, nil
+	return nil, fmt.Errorf("installation identity did not settle")
 }
 
 // DatabaseLocation canonicalizes a database URL so that the same database
-// always yields the same location. SQLite file URLs resolve to an absolute,
-// symlink-free path without query options; other URLs keep scheme, host and
-// path but never credentials.
+// always yields the same location. SQLite file URLs resolve to the absolute,
+// symlink-free path of the database file itself (a symlink to the file is the
+// same database) without query options; in-memory databases have no stable
+// location. Other URLs keep scheme, host and path but never credentials.
 func DatabaseLocation(databaseURL string) (string, error) {
 	raw := strings.TrimSpace(databaseURL)
 	if raw == "" {
@@ -124,16 +140,26 @@ func DatabaseLocation(databaseURL string) (string, error) {
 		return scheme + "://" + rest, nil
 	}
 	path := strings.TrimPrefix(strings.TrimPrefix(raw, "file://"), "file:")
-	path, _, _ = strings.Cut(path, "?")
-	if path == "" || path == ":memory:" {
+	path, query, _ := strings.Cut(path, "?")
+	params, err := url.ParseQuery(query)
+	if err != nil {
+		return "", fmt.Errorf("parse database URL options: %w", err)
+	}
+	if strings.EqualFold(params.Get("mode"), "memory") || strings.EqualFold(params.Get("vfs"), "memdb") ||
+		path == "" || strings.HasPrefix(path, ":memory:") {
 		return "", fmt.Errorf("database has no stable location")
 	}
 	abs, err := filepath.Abs(path)
 	if err != nil {
 		return "", err
 	}
-	// Resolve the directory, not the file: the database file may not exist
-	// yet on a first start, but its directory does.
+	// The file exists by the time identity is loaded (after migrations);
+	// resolving it whole makes a symlinked path the same database.
+	if resolved, err := filepath.EvalSymlinks(abs); err == nil {
+		return "file:" + resolved, nil
+	} else if !os.IsNotExist(err) {
+		return "", err
+	}
 	dir, err := filepath.EvalSymlinks(filepath.Dir(abs))
 	if err != nil {
 		return "", err
@@ -175,15 +201,19 @@ func databaseNonce(ctx context.Context, db *sql.DB) (string, error) {
 	return nonce, nil
 }
 
-func rekeyDatabase(ctx context.Context, db *sql.DB) (string, error) {
+// rekeyDatabase replaces the nonce only if it is still the one this start
+// read. A concurrent start of the same database that re-keyed first wins; the
+// caller then re-reads and joins the winner's nonce instead of forking a
+// second identity for one database.
+func rekeyDatabase(ctx context.Context, db *sql.DB, expected string) error {
 	fresh, err := randomHex()
 	if err != nil {
-		return "", err
+		return err
 	}
-	if _, err := db.ExecContext(ctx, `UPDATE resource_cleanup_installation SET db_nonce=? WHERE id=1`, fresh); err != nil {
-		return "", fmt.Errorf("re-key copied database: %w", err)
+	if _, err := db.ExecContext(ctx, `UPDATE resource_cleanup_installation SET db_nonce=? WHERE id=1 AND db_nonce=?`, fresh, expected); err != nil {
+		return fmt.Errorf("re-key copied database: %w", err)
 	}
-	return fresh, nil
+	return nil
 }
 
 func randomHex() (string, error) {

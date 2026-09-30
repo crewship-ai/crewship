@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -486,5 +488,114 @@ func TestRevivedOwnerRowIsNotReportedAsCurrent(t *testing.T) {
 	c.Tick(context.Background())
 	if s, err := c.Statuses(context.Background(), "ws-a"); err != nil || len(s) != 0 {
 		t.Fatalf("revived crew still reported: %+v %v", s, err)
+	}
+}
+
+// Several starts of the same copied database racing between reading the old
+// owner and re-keying must still settle on one identity: one wins, the rest
+// meet its lock. Unconditional re-keying forked two identities for one file.
+func TestInstallationIdentityConcurrentStartsOfOneCopy(t *testing.T) {
+	root, original := t.TempDir(), migratedDB(t)
+	first, err := LoadIdentity(context.Background(), root, original.DB, original.location)
+	if err != nil {
+		t.Fatal(err)
+	}
+	originalID, originalNonce := first.ID, nonceOf(t, original)
+	first.Close()
+	copied := migratedDB(t)
+	if _, err := copied.Exec(`INSERT INTO resource_cleanup_installation(id,db_nonce) VALUES(1,?)`, originalNonce); err != nil {
+		t.Fatal(err)
+	}
+	path := strings.TrimPrefix(copied.location, "file:")
+	const starts = 3
+	var arrived sync.WaitGroup
+	arrived.Add(starts)
+	var once sync.Map
+	testHookBeforeRekey = func() {
+		// Hold every start here once, so all of them read the old owner.
+		if _, seen := once.LoadOrStore(goroutineKey(), true); !seen {
+			arrived.Done()
+			arrived.Wait()
+		}
+	}
+	t.Cleanup(func() { testHookBeforeRekey = nil })
+	type result struct {
+		identity *Identity
+		err      error
+	}
+	results := make(chan result, starts)
+	for i := 0; i < starts; i++ {
+		go func() {
+			db, err := sql.Open("sqlite", "file:"+path+"?_pragma=busy_timeout(5000)")
+			if err != nil {
+				results <- result{err: err}
+				return
+			}
+			t.Cleanup(func() { db.Close() })
+			identity, err := LoadIdentity(context.Background(), root, db, copied.location)
+			results <- result{identity, err}
+		}()
+	}
+	var held []*Identity
+	for i := 0; i < starts; i++ {
+		r := <-results
+		switch {
+		case r.err == nil:
+			held = append(held, r.identity)
+			t.Cleanup(func() { r.identity.Close() })
+		case !errors.Is(r.err, ErrIdentityInUse):
+			t.Fatalf("start failed: %v", r.err)
+		}
+	}
+	if len(held) != 1 {
+		t.Fatalf("%d live identities for one database file", len(held))
+	}
+	if held[0].ID == originalID {
+		t.Fatal("copy took the original's identity")
+	}
+}
+
+// goroutineKey identifies the calling goroutine for the test hook.
+func goroutineKey() string {
+	buf := make([]byte, 64)
+	buf = buf[:runtime.Stack(buf, false)]
+	return strings.Fields(string(buf))[1]
+}
+
+// A symlink to the live database file is the same database: the second start
+// must meet the live holder's lock, not re-key the original away from it.
+func TestInstallationIdentitySymlinkedDatabaseIsTheSameDatabase(t *testing.T) {
+	root, db := t.TempDir(), migratedDB(t)
+	holder, err := LoadIdentity(context.Background(), root, db.DB, db.location)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { holder.Close() })
+	link := filepath.Join(t.TempDir(), "linked.db")
+	if err := os.Symlink(strings.TrimPrefix(db.location, "file:"), link); err != nil {
+		t.Fatal(err)
+	}
+	location, err := DatabaseLocation("file:" + link)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if location != db.location {
+		t.Fatalf("symlink resolved to %q, want %q", location, db.location)
+	}
+	other, err := sql.Open("sqlite", "file:"+link)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { other.Close() })
+	if _, err := LoadIdentity(context.Background(), root, other, location); !errors.Is(err, ErrIdentityInUse) {
+		t.Fatalf("symlinked second start: %v", err)
+	}
+}
+
+func TestDatabaseLocationRejectsNamedMemory(t *testing.T) {
+	for _, u := range []string{"file:name?mode=memory&cache=shared", "file:x.db?vfs=memdb", "file::memory:", ":memory:"} {
+		if _, err := DatabaseLocation(u); err == nil {
+			t.Errorf("%s accepted as a stable location", u)
+		}
 	}
 }
