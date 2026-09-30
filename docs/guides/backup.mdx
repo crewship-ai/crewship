@@ -1303,14 +1303,55 @@ repeat refreshes the same item and marks it unread; resolving the incident
 resolves the item. The item routes under the `system.health` notification
 category, so each admin's own channels — email, Slack, Telegram and the rest,
 per their notification preferences (Settings › Notifications) — carry it too.
-That is the only routing: `backup_settings.channels` is stored for a later
-release and sends nothing, so the Alerts card offers no per-channel switches
-and says "Each instance admin's inbox, then their own notification channels
-(Settings › Notifications)". An instance admin who
-belongs to no workspace has no inbox; they see incidents under Admin ›
-Backups and with `crewship admin instance backups incidents`. Which kinds are
-delivered is chosen under Keys & alerts (`--alerts`); the others are still
-recorded.
+An instance admin who belongs to no workspace has no inbox; they see incidents
+under Admin › Backups and with `crewship admin instance backups incidents`.
+Which kinds are delivered is chosen under Keys & alerts (`--alerts`); the
+others are still recorded.
+
+#### Alert channels
+
+Beside the inboxes, the Alerts card's **Tell** row lists the notification
+channels that can carry backup alerts — Slack, Discord, Teams, e-mail, signed
+webhooks, Opsgenie and the rest of the provider catalog — and every one ticked
+hears every delivered incident, whoever is or is not looking at an inbox. The
+channels are the ones already configured under a workspace's Settings ›
+Notifications; nothing is stored twice. A channel is offered when it is
+workspace-wide (never a member's personal channel), switched on, its category
+allowlist admits **System health**, and its provider is switched on in Admin ›
+Notifications. With none, the card says to configure one there.
+
+Each channel gets **one message per incident state change**: when the incident
+opens, on each repeat, and a "resolved" message when it closes (only to the
+channels that were told it opened). The message reads:
+
+```
+Backup needs attention
+Plan: Nightly
+What happened: Nightly backup failed. Last successful backup: 32 hours ago.
+Detail: <the run's error>
+Repeats: 3 times since 2026-09-28T02:00:00Z · one incident
+Last good backup: 32 hours ago
+Open Backups: https://crewship.example.com/admin?tab=backups&section=overview
+```
+
+The link is made absolute against `CREWSHIP_PUBLIC_URL`; without it the
+message carries the path alone. Delivery is the notification system's own:
+the channel's sealed secret, the SSRF-safe transport that refuses private and
+loopback addresses at connect time, the provider kill switch and the secret
+scrubber. Every attempt is a row in the notification delivery log (visible
+under that workspace's deliveries), deduplicated per channel and state change,
+so a retry never sends the same change twice. A failed send is recorded with
+its reason, retried by the delivery recovery sweep (every 2 minutes, up to 5
+attempts) and shown on Overview as "Backup alerts could not be delivered to
+\<channel\>" until a later alert gets through. A retry is dropped, with the
+reason in the log, when the incident resolved in the meantime or the channel
+left the route or was switched off. **Send test** (`crewship admin instance
+backups test-alert --channel <id>`) sends a test message through the same
+path and says whether it arrived; tests are not written to the log.
+
+A channel already on the route that later becomes unusable (switched off,
+deleted) stays on it — other settings still save — and its alerts fail with
+the reason until it is removed. Adding a channel checks it is usable now.
 
 When the server itself is down its inbox is down too, so set a **heartbeat**:
 a public https URL (a healthchecks-style service) the server pings after

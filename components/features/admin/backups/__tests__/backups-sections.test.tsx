@@ -462,16 +462,87 @@ describe("Keys & alerts", () => {
     expect(screen.getByLabelText("Heartbeat URL")).toHaveValue("https://hc.example.com/ping/…")
   })
 
-  it("says where alerts really go, and offers no channel that routes nothing", async () => {
-    show("keys")
-    expect(await screen.findByText("Each instance admin's inbox, then their own notification channels (Settings › Notifications)")).toBeInTheDocument()
-    expect(screen.queryByText(/Slack/)).toBeNull()
-    expect(screen.queryByText(/email/i)).toBeNull()
-    const checkboxes = screen.getAllByRole("checkbox").map((c) => c.closest("label")?.textContent ?? "")
-    expect(checkboxes).toEqual([
-      "a run fails", "contents are incomplete", "newest backup older than 36 h", "off-site copy unreachable", "a drill fails or is overdue",
-    ])
-    expect(screen.getByLabelText("Heartbeat URL")).toBeInTheDocument()
+  it("tells the inbox always, and each configured channel with its last alert", async () => {
+    const { container } = show("keys")
+    const route = await waitFor(() => {
+      const el = container.querySelector("[data-slot=alert-route]")
+      if (!el) throw new Error("no alert route yet")
+      return el as HTMLElement
+    })
+    const inbox = within(route).getByLabelText(/Instance admins' inbox/)
+    expect(inbox).toBeChecked()
+    expect(inbox).toBeDisabled()
+    expect(within(route).getByLabelText("Slack · Platform")).toBeChecked()
+    expect(within(route).getByLabelText("Email ops@example.com · Platform")).not.toBeChecked()
+    expect(within(route).getByText(/last alert delivered/)).toBeInTheDocument()
+    expect(within(route).getByText("no alert sent yet")).toBeInTheDocument()
+    expect(within(route).getAllByRole("button", { name: "Send test" })).toHaveLength(2)
+    expect(screen.queryByText(/there is no separate channel list/)).toBeNull()
+  })
+
+  describe("against a server", () => {
+    const base = {
+      limits: { concurrency: 1, cpu_cores: 2, disk_mbps: 0, upload_mbps: 0 }, heartbeat_url: null, recovery_kit_enabled: false,
+      events: { failed: true, incomplete: true, stale: true, offsite: true, drill: true }, stale_alert_hours: 36, drill_reminder: "monthly",
+      destinations: [], instance_admins: 1, local_path: null,
+    }
+    const slack = { id: "nch_s", name: "Slack · Ops", kind: "chat", provider: "slack", workspace_id: "w", workspace_name: "Ops", last_delivery: null }
+    function serve(settings: Record<string, unknown>, testAlert?: Record<string, unknown>) {
+      h.apiFetch.mockImplementation(async (url: string, init?: RequestInit) => {
+        if (url.endsWith("/backups/settings/test-alert")) return new Response(JSON.stringify(testAlert), { status: 200 })
+        if (url.endsWith("/backups/settings") && init?.method === "PUT") {
+          return new Response(JSON.stringify({ ...base, ...settings, ...JSON.parse(String(init.body)) }), { status: 200 })
+        }
+        if (url.endsWith("/backups/settings")) return new Response(JSON.stringify({ ...base, ...settings }), { status: 200 })
+        return new Response("{}", { status: 404 })
+      })
+    }
+
+    it("says to configure a provider when no channel can carry alerts", async () => {
+      serve({ channels: [], available_channels: [], channel_status: [] })
+      show("keys", "")
+      expect(await screen.findByText(/Configure a provider in Admin › Notifications/)).toBeInTheDocument()
+      expect(screen.queryByRole("button", { name: "Send test" })).toBeNull()
+    })
+
+    it("saves a ticked channel with the alerts", async () => {
+      serve({ channels: [], available_channels: [slack], channel_status: [] })
+      show("keys", "")
+      fireEvent.click(await screen.findByLabelText("Slack · Ops"))
+      fireEvent.click(screen.getByRole("button", { name: "Save alerts" }))
+      await waitFor(() => expect(h.toast.success).toHaveBeenCalledWith("Alerts saved"))
+      const put = h.apiFetch.mock.calls.find(([u, init]) => String(u).endsWith("/backups/settings") && (init as RequestInit | undefined)?.method === "PUT")
+      expect(JSON.parse(String((put?.[1] as RequestInit).body))).toMatchObject({ channels: ["nch_s"] })
+    })
+
+    it("sends a test and shows when it did not arrive", async () => {
+      serve({ channels: [], available_channels: [slack], channel_status: [] },
+        { ok: false, channel_id: "nch_s", channel: "Slack · Ops", error: "webhook returned 503", sent_at: "2026-09-30T09:00:00Z" })
+      show("keys", "")
+      fireEvent.click(await screen.findByRole("button", { name: "Send test" }))
+      expect(await screen.findByText("test not delivered: webhook returned 503")).toBeInTheDocument()
+      const post = h.apiFetch.mock.calls.find(([u]) => String(u).endsWith("/backups/settings/test-alert"))
+      expect(post?.[1]).toMatchObject({ method: "POST", body: JSON.stringify({ channel_id: "nch_s" }) })
+      expect(h.toast.error).toHaveBeenCalledWith("Test alert to Slack · Ops was not delivered: webhook returned 503")
+    })
+
+    it("keeps a routed channel that is no longer offered, with why its alerts fail", async () => {
+      serve({
+        channels: ["nch_gone"], available_channels: [],
+        channel_status: [{ id: "nch_gone", available: false, last_delivery: { status: "failed", error: "the channel is switched off", at: "2026-09-30T03:00:00Z", incident_id: "bin_1" } }],
+      })
+      const { container } = show("keys", "")
+      const row = await waitFor(() => {
+        const el = container.querySelector("[data-slot=alert-channel-gone]")
+        if (!el) throw new Error("no gone row yet")
+        return el as HTMLElement
+      })
+      expect(within(row).getByText("no longer available")).toBeInTheDocument()
+      expect(within(row).getByText(/the channel is switched off/)).toBeInTheDocument()
+      expect(screen.queryByText(/Configure a provider/)).toBeNull()
+      fireEvent.click(within(row).getByRole("checkbox"))
+      expect(screen.getByRole("button", { name: "Save alerts" })).toBeInTheDocument()
+    })
   })
 
   it("will not add a key that is not an AGE public key", async () => {

@@ -1208,7 +1208,24 @@ crewship admin instance backups environments land
 cores for compression, disk and upload MB/s), the heartbeat URL and its last
 ping, which incidents reach the instance admins and after how many hours a
 plan counts as stale, the drill reminder, the recovery kit, and where copies
-are kept.
+are kept. "Also tell" lists the notification channels on the alert route with
+the outcome of the newest backup alert each was sent; "Could tell" lists the
+channels that could be added, with their ids.
+
+### backups test-alert
+
+`POST /api/v1/admin/instance/backups/settings/test-alert`. Sends a test alert
+to one notification channel now, through the same delivery a real backup
+alert uses, and says whether it arrived. Exits non-zero when it did not. The
+channel need not be on the alert route yet.
+
+```bash
+crewship admin instance backups test-alert --channel nch_1a2b3c4d5e6f7a8b
+```
+
+| Flag | Required | Description |
+|---|---|---|
+| `--channel` | yes | The notification channel id, from `backups settings get`. |
 
 ### backups settings set
 
@@ -1233,7 +1250,7 @@ crewship admin instance backups settings set --alerts failed,stale,offsite --sta
 | `--alerts` | no | Incident kinds that reach instance admins: `failed`, `incomplete`, `stale`, `offsite`, `drill` (`none` for no alerts). The others are still recorded. |
 | `--stale-hours` | no | A plan whose newest good backup is older than this raises a stale incident. 36 by default. |
 | `--drill-reminder` | no | `weekly`, `monthly` or `off`. Raises an instance-wide `drill` incident when the newest test restore is older than 7 or 31 days; resolved by the next recorded drill. |
-| `--channel` | no | Recorded with the settings for a later release; it routes nothing today (incidents reach each instance admin's inbox, then that admin's own notification channels). Repeatable, replaces the list. |
+| `--channel` | no | A notification channel id (from `settings get`) that hears every delivered incident beside the instance admins' inboxes. Repeatable, replaces the list; `""` empties it. Only a workspace-wide, switched-on channel whose allowlist admits System health, on a provider switched on in Admin › Notifications, can be added. |
 
 ### backups recipients list
 

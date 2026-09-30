@@ -674,6 +674,11 @@ func BuildOverview(ctx context.Context, db *sql.DB, in OverviewInput, now time.T
 				Detail: reason, Action: &AttentionAction{Kind: "storage", Label: "Storage"}})
 		}
 	}
+	// Alerts that did not reach a channel on the route: whoever relies on
+	// that channel hears nothing, so it is said here, in either scope.
+	for _, it := range AlertDeliveryFailures(ctx, db) {
+		add(it)
+	}
 	sort.SliceStable(out.NeedsAttention, func(i, j int) bool {
 		return out.NeedsAttention[i].Severity == "bad" && out.NeedsAttention[j].Severity != "bad"
 	})

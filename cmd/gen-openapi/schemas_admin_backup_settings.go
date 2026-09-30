@@ -27,8 +27,34 @@ func backupSettingsSchema() map[string]any {
 			"verified": bpBoolean(), "available": bpBoolean(),
 		}, "id", "kind", "label", "path", "used_bytes", "verified", "available")),
 		"instance_admins": bpInteger(), "local_path": bpNullable(bpStr()),
+		"available_channels": array(backupAlertChannelSchema()),
+		"channel_status": array(object(map[string]any{
+			"id": bpStr(), "available": bpBoolean(), "last_delivery": bpNullable(backupAlertDeliverySchema()),
+		}, "id", "available", "last_delivery")),
 	}, "limits", "heartbeat_url", "recovery_kit_enabled", "channels", "events", "stale_alert_hours", "drill_reminder",
-		"destinations", "instance_admins", "local_path")
+		"destinations", "instance_admins", "local_path", "available_channels", "channel_status")
+}
+
+// backupAlertDeliverySchema is the outcome of the newest backup alert on a
+// notification channel.
+func backupAlertDeliverySchema() map[string]any {
+	return object(map[string]any{
+		"status":      map[string]any{"type": "string", "enum": []string{"pending", "sent", "failed"}},
+		"error":       bpNullable(bpStr()),
+		"at":          bpStr(),
+		"incident_id": bpStr(),
+	}, "status", "error", "at", "incident_id")
+}
+
+// backupAlertChannelSchema is a notification channel backup alerts can go
+// to (the Keys & alerts picker).
+func backupAlertChannelSchema() map[string]any {
+	return object(map[string]any{
+		"id": bpStr(), "name": bpStr(),
+		"kind":     map[string]any{"type": "string", "enum": []string{"chat", "push", "incident", "email", "webhook"}},
+		"provider": bpStr(), "workspace_id": bpStr(), "workspace_name": bpStr(),
+		"last_delivery": bpNullable(backupAlertDeliverySchema()),
+	}, "id", "name", "kind", "provider", "workspace_id", "workspace_name", "last_delivery")
 }
 
 // backupSettingsRequest: every field optional; what is left out keeps its
@@ -82,6 +108,14 @@ func backupSettingsSchemaCatalog() map[string]DomainSchema {
 	return map[string]DomainSchema{
 		"GET /api/v1/admin/instance/backups/settings": {Response: backupSettingsSchema()},
 		"PUT /api/v1/admin/instance/backups/settings": {Request: backupSettingsRequest(), Response: backupSettingsSchema()},
+		// A test alert through the same delivery as a real one; a failed
+		// send is 200 with ok false and the error.
+		"POST /api/v1/admin/instance/backups/settings/test-alert": {
+			Request: object(map[string]any{"channel_id": bpStr()}, "channel_id"),
+			Response: object(map[string]any{
+				"ok": bpBoolean(), "channel_id": bpStr(), "channel": bpStr(), "error": bpNullable(bpStr()), "sent_at": bpStr(),
+			}, "ok", "channel_id", "channel", "error", "sent_at"),
+		},
 		"GET /api/v1/admin/instance/backups/recipients": {Response: object(map[string]any{
 			"data": array(backupRecipientSchema()),
 		}, "data")},

@@ -1,14 +1,17 @@
 "use client"
 
 import * as React from "react"
+import { toast } from "sonner"
 
 import { cn } from "@/lib/utils"
 import { SettingsCard } from "@/components/features/settings/shared"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { Chip, Eyebrow, FieldRow, Gate, InlineInput, ItemRow, SmallButton } from "./backups-kit"
-import { formatWhen, shortKey, type AlertEvents, type BackupIncident, type BackupRecipient, type BackupSettings, type VaultKeysResponse } from "./backups-model"
 import {
-  RECOVERY_SHEET_HREF, addRecipient, removeRecipient, saveBackupSettings, setRecoveryKit,
+  formatWhen, shortKey, type AlertChannel, type AlertDelivery, type AlertEvents, type BackupIncident, type BackupRecipient, type BackupSettings, type VaultKeysResponse,
+} from "./backups-model"
+import {
+  RECOVERY_SHEET_HREF, addRecipient, removeRecipient, saveBackupSettings, sendTestAlert, setRecoveryKit,
   useBackupSettings, useIncidents, useRecipients, useVaultKeys,
 } from "./use-backup-settings"
 import { perform } from "./use-backups-data"
@@ -137,11 +140,101 @@ const EVENTS: { key: keyof AlertEvents; label: string }[] = [
   { key: "drill", label: "a drill fails or is overdue" },
 ]
 
+const KIND_LABEL: Record<AlertChannel["kind"], string> = { chat: "chat", push: "push", incident: "incident", email: "email", webhook: "webhook" }
+
+/** How the newest backup alert on a channel went, in words and a tone. */
+export function deliveryLine(d: AlertDelivery | null | undefined): { text: string; tone: "ok" | "bad" | "muted" } {
+  if (!d) return { text: "no alert sent yet", tone: "muted" }
+  if (d.status === "sent") return { text: `last alert delivered ${formatWhen(d.at)}`, tone: "ok" }
+  if (d.status === "failed") return { text: `last alert not delivered ${formatWhen(d.at)}: ${d.error || "no reason recorded"}`, tone: "bad" }
+  return { text: "sending…", tone: "muted" }
+}
+
+type TestState = { busy: boolean; ok?: boolean; text?: string }
+
+/**
+ * Tell: where alerts go. The instance admins' inbox always; each notification
+ * channel the server offers (workspace-wide, admitting System health, its
+ * provider switched on) can be ticked to hear every alert too, and tested on
+ * the spot. A chosen channel the server no longer offers stays listed so it
+ * can be taken off, with why its alerts fail.
+ */
+export function AlertRoute({ settings, chosen, onChange, ctx }: {
+  settings: BackupSettings
+  chosen: string[]
+  onChange: (next: string[]) => void
+  ctx: SectionCtx
+}) {
+  const available = settings.available_channels ?? []
+  const status = new Map((settings.channel_status ?? []).map((c) => [c.id, c]))
+  const gone = chosen.filter((id) => !available.some((c) => c.id === id))
+  const [tests, setTests] = React.useState<Record<string, TestState>>({})
+  const toggle = (id: string, on: boolean) => onChange(on ? [...chosen, id] : chosen.filter((c) => c !== id))
+  const test = async (c: AlertChannel) => {
+    setTests((t) => ({ ...t, [c.id]: { busy: true } }))
+    const res = await perform(ctx.demo, () => sendTestAlert(c.id), "", "The test alert could not be sent")
+    if (!res) {
+      setTests((t) => ({ ...t, [c.id]: { busy: false } }))
+      return
+    }
+    if (res.ok) toast.success(`Test alert delivered to ${c.name}`)
+    else toast.error(`Test alert to ${c.name} was not delivered: ${res.error ?? "unknown error"}`)
+    setTests((t) => ({ ...t, [c.id]: { busy: false, ok: res.ok, text: res.ok ? "test delivered" : `test not delivered: ${res.error ?? "unknown error"}` } }))
+  }
+  return (
+    <div className="flex flex-col gap-1.5" data-slot="alert-route">
+      <label className="flex items-center gap-1.5">
+        <input type="checkbox" checked disabled />
+        Instance admins&apos; inbox
+        <span className="text-muted-foreground"> · always, and from there each admin&apos;s own channels under System health</span>
+      </label>
+      {available.map((c) => {
+        const on = chosen.includes(c.id)
+        const line = deliveryLine(status.get(c.id)?.last_delivery ?? c.last_delivery)
+        const t = tests[c.id]
+        return (
+          <div key={c.id} className="flex flex-wrap items-center gap-x-2 gap-y-1" data-slot="alert-channel">
+            <label className="flex items-center gap-1.5">
+              <input type="checkbox" checked={on} onChange={(e) => toggle(c.id, e.target.checked)} />
+              {c.name}
+            </label>
+            <Chip tone="muted">{KIND_LABEL[c.kind] ?? c.kind}</Chip>
+            <SmallButton onClick={() => void test(c)} disabled={t?.busy}>{t?.busy ? "Sending…" : "Send test"}</SmallButton>
+            <span className={cn("text-[12px]", t?.text ? (t.ok ? "text-success" : "text-destructive") : line.tone === "bad" ? "text-destructive" : line.tone === "ok" ? "text-success" : "text-muted-foreground")}>
+              {t?.text ?? line.text}
+            </span>
+          </div>
+        )
+      })}
+      {gone.map((id) => {
+        const line = deliveryLine(status.get(id)?.last_delivery)
+        return (
+          <div key={id} className="flex flex-wrap items-center gap-x-2 gap-y-1" data-slot="alert-channel-gone">
+            <label className="flex items-center gap-1.5">
+              <input type="checkbox" checked onChange={() => toggle(id, false)} />
+              <span className="font-mono text-[12px]">{id}</span>
+            </label>
+            <Chip tone="warn">no longer available</Chip>
+            <span className={cn("text-[12px]", line.tone === "bad" ? "text-destructive" : "text-muted-foreground")}>{line.text}</span>
+          </div>
+        )
+      })}
+      {available.length === 0 && gone.length === 0 && (
+        <span className="text-muted-foreground" data-slot="alert-route-empty">
+          No notification channel can carry backup alerts yet. Configure a provider in Admin › Notifications, then add a workspace-wide channel under Settings › Notifications.
+        </span>
+      )}
+    </div>
+  )
+}
+
 export function AlertsBody({ settings, incident, ctx, reload }: { settings: BackupSettings; incident: BackupIncident | null; ctx: SectionCtx; reload?: () => void }) {
   const [events, setEvents] = React.useState(settings.events)
   const [url, setUrl] = React.useState(settings.heartbeat_url ?? "")
+  const [channels, setChannels] = React.useState(settings.channels ?? [])
   const offsiteKnown = settings.destinations.some((d) => d.kind !== "local" && d.available)
-  const dirty = JSON.stringify(events) !== JSON.stringify(settings.events) || url !== (settings.heartbeat_url ?? "")
+  const channelsDirty = JSON.stringify(channels) !== JSON.stringify(settings.channels ?? [])
+  const dirty = JSON.stringify(events) !== JSON.stringify(settings.events) || url !== (settings.heartbeat_url ?? "") || channelsDirty
   return (
     <>
       <div className="flex flex-col gap-2 px-3.5 py-3">
@@ -162,9 +255,8 @@ export function AlertsBody({ settings, incident, ctx, reload }: { settings: Back
         </div>
       </div>
       <FieldRow label="Who">instance admins ({settings.instance_admins}) · <span className="text-muted-foreground">not workspace owners, who may not administer the instance</span></FieldRow>
-      <FieldRow label="Where">
-        <span data-slot="alert-route">Each instance admin&apos;s inbox, then their own notification channels (Settings › Notifications)</span>
-        <span className="text-muted-foreground"> · backup alerts arrive under System health; there is no separate channel list here</span>
+      <FieldRow label="Tell" hint="one message per incident change">
+        <AlertRoute settings={settings} chosen={channels} onChange={setChannels} ctx={ctx} />
       </FieldRow>
       <FieldRow label="When">
         <span className="flex flex-wrap gap-x-3.5 gap-y-1.5">
@@ -186,8 +278,11 @@ export function AlertsBody({ settings, incident, ctx, reload }: { settings: Back
       </FieldRow>
       {dirty && (
         <div className="flex items-center gap-2 border-t border-border px-4 py-2.5">
-          <SmallButton primary onClick={async () => { if (await perform(ctx.demo, () => saveBackupSettings({ events, heartbeat_url: url.trim() || null }), "Alerts saved", "The alerts could not be saved")) reload?.() }}>Save alerts</SmallButton>
-          <SmallButton onClick={() => { setEvents(settings.events); setUrl(settings.heartbeat_url ?? "") }}>Discard</SmallButton>
+          <SmallButton primary onClick={async () => {
+            const patch = { events, heartbeat_url: url.trim() || null, ...(channelsDirty ? { channels } : {}) }
+            if (await perform(ctx.demo, () => saveBackupSettings(patch), "Alerts saved", "The alerts could not be saved")) reload?.()
+          }}>Save alerts</SmallButton>
+          <SmallButton onClick={() => { setEvents(settings.events); setUrl(settings.heartbeat_url ?? ""); setChannels(settings.channels ?? []) }}>Discard</SmallButton>
         </div>
       )}
     </>

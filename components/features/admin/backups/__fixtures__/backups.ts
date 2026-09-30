@@ -190,7 +190,14 @@ export function settingsFixture(): BackupSettings {
     limits: { concurrency: 1, cpu_cores: 2, disk_mbps: 80, upload_mbps: 20 },
     heartbeat_url: "https://hc.example.com/ping/…",
     recovery_kit_enabled: false,
-    channels: [],
+    // The design's Tell row: the inbox, Slack #ops and an e-mail list.
+    channels: ["nch-slack"],
+    available_channels: [
+      { id: "nch-slack", name: "Slack · Platform", kind: "chat", provider: "slack", workspace_id: "ws-platform", workspace_name: "Platform",
+        last_delivery: { status: "sent", error: null, at: "2026-09-29T03:05:00Z", incident_id: "bin-1" } },
+      { id: "nch-mail", name: "Email ops@example.com · Platform", kind: "email", provider: "", workspace_id: "ws-platform", workspace_name: "Platform", last_delivery: null },
+    ],
+    channel_status: [{ id: "nch-slack", available: true, last_delivery: { status: "sent", error: null, at: "2026-09-29T03:05:00Z", incident_id: "bin-1" } }],
     events: { failed: true, incomplete: true, stale: true, offsite: true, drill: true },
     stale_alert_hours: 36,
     drill_reminder: "monthly",

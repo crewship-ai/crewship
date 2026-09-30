@@ -61,7 +61,10 @@ const (
 
 // Settings is the single backup_settings row as the settings API speaks it
 // (the console's BackupSettings minus the parts the API composes:
-// destinations, instance_admins, local_path).
+// destinations, instance_admins, local_path). Channels are notification
+// channel ids (notification_channels.id) every alert also goes to, beside the
+// instance admins' inboxes (alert_channels.go); the settings API checks the
+// ones it adds.
 type Settings struct {
 	Limits             Limits      `json:"limits"`
 	HeartbeatURL       *string     `json:"heartbeat_url"`
@@ -161,7 +164,7 @@ func (s *Settings) Normalize() error {
 			continue
 		}
 		if len(c) > 200 {
-			return invalid("a channel name is at most 200 characters")
+			return invalid("a channel id is at most 200 characters")
 		}
 		seen[c] = true
 		chans = append(chans, c)

@@ -24427,6 +24427,127 @@
               "application/json": {
                 "schema": {
                   "properties": {
+                    "available_channels": {
+                      "items": {
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "kind": {
+                            "enum": [
+                              "chat",
+                              "push",
+                              "incident",
+                              "email",
+                              "webhook"
+                            ],
+                            "type": "string"
+                          },
+                          "last_delivery": {
+                            "nullable": true,
+                            "properties": {
+                              "at": {
+                                "type": "string"
+                              },
+                              "error": {
+                                "nullable": true,
+                                "type": "string"
+                              },
+                              "incident_id": {
+                                "type": "string"
+                              },
+                              "status": {
+                                "enum": [
+                                  "pending",
+                                  "sent",
+                                  "failed"
+                                ],
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "status",
+                              "error",
+                              "at",
+                              "incident_id"
+                            ],
+                            "type": "object"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "provider": {
+                            "type": "string"
+                          },
+                          "workspace_id": {
+                            "type": "string"
+                          },
+                          "workspace_name": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "name",
+                          "kind",
+                          "provider",
+                          "workspace_id",
+                          "workspace_name",
+                          "last_delivery"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "channel_status": {
+                      "items": {
+                        "properties": {
+                          "available": {
+                            "type": "boolean"
+                          },
+                          "id": {
+                            "type": "string"
+                          },
+                          "last_delivery": {
+                            "nullable": true,
+                            "properties": {
+                              "at": {
+                                "type": "string"
+                              },
+                              "error": {
+                                "nullable": true,
+                                "type": "string"
+                              },
+                              "incident_id": {
+                                "type": "string"
+                              },
+                              "status": {
+                                "enum": [
+                                  "pending",
+                                  "sent",
+                                  "failed"
+                                ],
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "status",
+                              "error",
+                              "at",
+                              "incident_id"
+                            ],
+                            "type": "object"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "available",
+                          "last_delivery"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
                     "channels": {
                       "items": {
                         "type": "string"
@@ -24570,7 +24691,9 @@
                     "drill_reminder",
                     "destinations",
                     "instance_admins",
-                    "local_path"
+                    "local_path",
+                    "available_channels",
+                    "channel_status"
                   ],
                   "type": "object"
                 }
@@ -24723,6 +24846,127 @@
               "application/json": {
                 "schema": {
                   "properties": {
+                    "available_channels": {
+                      "items": {
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "kind": {
+                            "enum": [
+                              "chat",
+                              "push",
+                              "incident",
+                              "email",
+                              "webhook"
+                            ],
+                            "type": "string"
+                          },
+                          "last_delivery": {
+                            "nullable": true,
+                            "properties": {
+                              "at": {
+                                "type": "string"
+                              },
+                              "error": {
+                                "nullable": true,
+                                "type": "string"
+                              },
+                              "incident_id": {
+                                "type": "string"
+                              },
+                              "status": {
+                                "enum": [
+                                  "pending",
+                                  "sent",
+                                  "failed"
+                                ],
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "status",
+                              "error",
+                              "at",
+                              "incident_id"
+                            ],
+                            "type": "object"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "provider": {
+                            "type": "string"
+                          },
+                          "workspace_id": {
+                            "type": "string"
+                          },
+                          "workspace_name": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "name",
+                          "kind",
+                          "provider",
+                          "workspace_id",
+                          "workspace_name",
+                          "last_delivery"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "channel_status": {
+                      "items": {
+                        "properties": {
+                          "available": {
+                            "type": "boolean"
+                          },
+                          "id": {
+                            "type": "string"
+                          },
+                          "last_delivery": {
+                            "nullable": true,
+                            "properties": {
+                              "at": {
+                                "type": "string"
+                              },
+                              "error": {
+                                "nullable": true,
+                                "type": "string"
+                              },
+                              "incident_id": {
+                                "type": "string"
+                              },
+                              "status": {
+                                "enum": [
+                                  "pending",
+                                  "sent",
+                                  "failed"
+                                ],
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "status",
+                              "error",
+                              "at",
+                              "incident_id"
+                            ],
+                            "type": "object"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "available",
+                          "last_delivery"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
                     "channels": {
                       "items": {
                         "type": "string"
@@ -24866,7 +25110,9 @@
                     "drill_reminder",
                     "destinations",
                     "instance_admins",
-                    "local_path"
+                    "local_path",
+                    "available_channels",
+                    "channel_status"
                   ],
                   "type": "object"
                 }
@@ -25055,6 +25301,169 @@
               }
             },
             "description": "Forbidden"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/v1/admin/instance/backups/settings/test-alert": {
+      "post": {
+        "operationId": "post_api_v1_admin_instance_backups_settings_test-alert",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "channel_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "channel_id"
+                ],
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "channel": {
+                      "type": "string"
+                    },
+                    "channel_id": {
+                      "type": "string"
+                    },
+                    "error": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "sent_at": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "channel_id",
+                    "channel",
+                    "error",
+                    "sent_at"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
           },
           "500": {
             "content": {

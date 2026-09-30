@@ -9,6 +9,8 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/backup"
 	"github.com/crewship-ai/crewship/internal/backupplan"
+	"github.com/crewship-ai/crewship/internal/mailer"
+	"github.com/crewship-ai/crewship/internal/notify"
 	"github.com/crewship-ai/crewship/internal/provider"
 	"github.com/crewship-ai/crewship/internal/usermodel"
 )
@@ -405,12 +407,19 @@ func (r *Router) registerAdminRoutes() {
 	svc.Instance = &instanceExecutor{h: ib, db: r.db}
 	svc.Quiesce = backupQuiescer{h: ib, db: r.db}
 	svc.Pause = holdsPauser{db: r.db}
-	// Incidents reach every instance admin's inbox (admin_instance_backup_alerts.go),
-	// and a recorded drill raises or clears the plan's drill incident.
-	svc.Alerts = backupIncidentAlerter{db: r.db, logger: r.logger}
+	// Incidents reach every instance admin's inbox and the notification
+	// channels on the alert route (admin_instance_backup_alerts.go), and a
+	// recorded drill raises or clears the plan's drill incident. The channel
+	// alerter sends through the same gated dispatcher as every notification
+	// and registers its outbox deriver, so the recovery sweep retries it.
+	backupAlerts := backupplan.NewChannelAlerter(r.db,
+		newGatedDispatcher(notify.NewChannelStore(r.db), mailer.NewFromEnv(), r.logger, r.db), r.logger)
+	backupAlerts.Begin = beginBackgroundWork
+	svc.Alerts = backupIncidentAlerter{db: r.db, logger: r.logger, channels: backupAlerts}
 	ib.onDrill = svc.RecordDrillOutcome
 	r.backupPlans = svc
 	bp := NewInstanceBackupPlansHandler(ib, svc)
+	bp.alerts = backupAlerts
 	// openapi: responses 200,401,403,500
 	r.authedInstance("GET", "/api/v1/admin/instance/backups/plans", bp.ListPlans)
 	// openapi: responses 201,400,401,403,500
@@ -441,6 +450,8 @@ func (r *Router) registerAdminRoutes() {
 	r.authedInstance("GET", "/api/v1/admin/instance/backups/settings", bp.GetSettings)
 	// openapi: responses 200,400,401,403,500
 	r.authedInstance("PUT", "/api/v1/admin/instance/backups/settings", bp.PutSettings)
+	// openapi: responses 200,400,401,403,404,500
+	r.authedInstance("POST", "/api/v1/admin/instance/backups/settings/test-alert", bp.TestAlert)
 	// openapi: responses 200,401,403,500
 	r.authedInstance("GET", "/api/v1/admin/instance/backups/recipients", bp.ListRecipients)
 	// openapi: responses 201,400,401,403,409,500

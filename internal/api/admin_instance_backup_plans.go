@@ -37,6 +37,8 @@ type InstanceBackupPlansHandler struct {
 	svc *backupplan.Service
 	// backupsDir reports where bundles land (for the overview).
 	backupsDir func() (string, error)
+	// alerts sends test alerts to notification channels (Keys & alerts).
+	alerts *backupplan.ChannelAlerter
 }
 
 func NewInstanceBackupPlansHandler(h *InstanceBackupsHandler, svc *backupplan.Service) *InstanceBackupPlansHandler {
