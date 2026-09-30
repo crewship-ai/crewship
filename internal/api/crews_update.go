@@ -37,6 +37,7 @@ type updateCrewRequest struct {
 	DevcontainerConfig    *string   `json:"devcontainer_config"`
 	MiseConfig            *string   `json:"mise_config"`
 	ServicesJSON          *string   `json:"services_json"`
+	ExpectedServicesJSON  *string   `json:"expected_services_json"` // optional client snapshot CAS; omitted preserves legacy callers
 	// MaxEphemeralAgents is the hire-flow quota (see v103 migration
 	// + agents_hire.go). PR-G surfaces this on the policy panel so
 	// operators can raise/lower the cap without dropping to the CLI.
@@ -155,6 +156,10 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 	// TrimSpace handles a payload of "   " or "\n", which the
 	// previous != "" check would have stored verbatim, diverging
 	// from the documented clear-on-empty semantics.
+	if req.ExpectedServicesJSON != nil && (req.ServicesJSON == nil || len(*req.ExpectedServicesJSON) > 64*1024) {
+		replyError(w, http.StatusBadRequest, "expected_services_json requires services_json and must not exceed 64KB")
+		return
+	}
 	var previousServices sql.NullString
 	if req.ServicesJSON != nil {
 		if err := h.db.QueryRowContext(r.Context(), "SELECT services_json FROM crews WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL", crewID, workspaceID).Scan(&previousServices); err != nil {
@@ -167,6 +172,10 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 		previousPlain, openErr := serviceconfig.Open(previousServices.String)
 		if openErr != nil {
 			replyInternalError(w, h.logger, "open service configuration for update", openErr)
+			return
+		}
+		if req.ExpectedServicesJSON != nil && *req.ExpectedServicesJSON != previousPlain {
+			replyError(w, http.StatusConflict, "Service configuration changed; refresh before saving disk policy")
 			return
 		}
 		if serviceconfig.Public(previousServices.String) == serviceconfig.Redacted && *req.ServicesJSON != previousPlain {
