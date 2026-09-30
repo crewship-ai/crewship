@@ -23,7 +23,7 @@ HEAD. Původní live report má nesrovnalost mezi deklarovaným čistým zdrojem
 `/tmp/crewship-1-access-audit-live-20260930.log` a
 `/tmp/crewship-1-pr2723-go-test.log` (dočasné, nejsou tracked artifacts).
 
-Uživatel nyní autorizoval pokračování celého PRD a paralelní agenty GPT-6.1 Sol.
+Uživatel nyní autorizoval pokračování celého PRD a paralelní implementaci.
 Ti pracují v oddělených worktrees na scoped kontextu, durable rezervacích
 nákladů a produkčním restricted dispatchi. Žádná z těchto nových dodávek
 zatím neznamená dokončení Release 1.0; vyžadují integraci a přejímku.
@@ -114,7 +114,7 @@ nepublikovat bez rozmyslu: repozitář je veřejný.
 | #2722 | merged `50a9ea900066144581e9ddfa6ad506cfca47ad6d`, 30. 9. 07:15 UTC | Hostová politika pro stateless textové Responses; přesný model a tokenový strop, uzavřené schéma, SDK alias `/v1/responses`. |
 | #2723 | **OPEN**, head `3acdaa260` | Neměnná vazba aplikačního pokusu na provider credential/grant/model, monotónní revokace a zákaz rozšíření credentials při delegaci. |
 
-#2722 mělo skutečné schválení CodeRabbit na finálním headu `5eacc19ba` a zelené
+PR #2722 mělo skutečné schválení CodeRabbit na finálním headu `5eacc19ba` a zelené
 CI. ARM64 job vyžadoval jeden rerun kvůli 10s timeoutu existujícího Pages
 collector testu; kód ani timeout se kvůli tomu neměnil. U #2723 je příčina
 selhání známá a vyžaduje opravu; nepřenášet na ni vysvětlení z #2722.
