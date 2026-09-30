@@ -1,4 +1,4 @@
-//go:build linux
+//go:build linux && quota_vm
 
 package docker
 
@@ -22,7 +22,7 @@ import (
 func TestVMQuotaServiceRecovery(t *testing.T) {
 	stage := os.Getenv("CREWSHIP_QUOTA_VM_STAGE")
 	if stage == "" {
-		t.Skip("owned guest staged acceptance")
+		t.Fatal("owned guest staged acceptance")
 	}
 	if os.Geteuid() != 1000 {
 		t.Fatal("acceptance must use real authenticated host UID1000")
