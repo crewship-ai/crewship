@@ -17961,126 +17961,15 @@
                           "type": "string"
                         }
                       },
+                      "required": [
+                        "payload_sha256"
+                      ],
                       "type": "object"
                     },
-                    "compatible_targets": {
-                      "items": {
-                        "type": "string"
-                      },
-                      "type": "array"
-                    },
                     "contents": {
-                      "properties": {
-                        "auth_keys_included": {
-                          "type": "boolean"
-                        },
-                        "credstore_included": {
-                          "type": "boolean"
-                        },
-                        "crews": {
-                          "items": {
-                            "properties": {
-                              "agent_count": {
-                                "type": "integer"
-                              },
-                              "base_image_digest": {
-                                "type": "string"
-                              },
-                              "cached_image_digest": {
-                                "type": "string"
-                              },
-                              "config_hash": {
-                                "type": "string"
-                              },
-                              "crew_files_included": {
-                                "type": "boolean"
-                              },
-                              "devcontainer_config_included": {
-                                "type": "boolean"
-                              },
-                              "features": {
-                                "items": {
-                                  "properties": {
-                                    "digest": {
-                                      "type": "string"
-                                    },
-                                    "name": {
-                                      "type": "string"
-                                    }
-                                  },
-                                  "type": "object"
-                                },
-                                "type": "array"
-                              },
-                              "id": {
-                                "type": "string"
-                              },
-                              "memory_included": {
-                                "type": "boolean"
-                              },
-                              "mise_config_included": {
-                                "type": "boolean"
-                              },
-                              "name": {
-                                "type": "string"
-                              },
-                              "output_included": {
-                                "type": "boolean"
-                              },
-                              "payload_size_bytes": {
-                                "type": "integer"
-                              },
-                              "runtime_image": {
-                                "type": "string"
-                              },
-                              "slug": {
-                                "type": "string"
-                              },
-                              "system_included": {
-                                "type": "boolean"
-                              },
-                              "volumes_included": {
-                                "items": {
-                                  "type": "string"
-                                },
-                                "type": "array"
-                              },
-                              "workspace_included": {
-                                "type": "boolean"
-                              }
-                            },
-                            "type": "object"
-                          },
-                          "type": "array"
-                        },
-                        "instance_config_included": {
-                          "type": "boolean"
-                        },
-                        "memory_blobs_included": {
-                          "type": "integer"
-                        },
-                        "memory_blobs_missing": {
-                          "type": "integer"
-                        },
-                        "workspace": {
-                          "properties": {
-                            "id": {
-                              "type": "string"
-                            },
-                            "name": {
-                              "type": "string"
-                            },
-                            "slug": {
-                              "type": "string"
-                            }
-                          },
-                          "type": "object"
-                        }
-                      },
                       "type": "object"
                     },
                     "created_at": {
-                      "format": "date-time",
                       "type": "string"
                     },
                     "created_by": {
@@ -18107,49 +17996,31 @@
                         },
                         "enabled": {
                           "type": "boolean"
-                        },
-                        "key_derivation": {
-                          "type": "string"
-                        },
-                        "recipients": {
-                          "items": {
-                            "type": "string"
-                          },
-                          "type": "array"
                         }
                       },
+                      "required": [
+                        "enabled"
+                      ],
                       "type": "object"
                     },
                     "format_version": {
                       "type": "integer"
-                    },
-                    "schema_migration_versions": {
-                      "items": {
-                        "type": "integer"
-                      },
-                      "type": "array"
                     },
                     "scope": {
                       "type": "string"
                     },
                     "scope_level": {
                       "type": "string"
-                    },
-                    "source_instance": {
-                      "properties": {
-                        "docker_version": {
-                          "type": "string"
-                        },
-                        "hostname": {
-                          "type": "string"
-                        },
-                        "platform": {
-                          "type": "string"
-                        }
-                      },
-                      "type": "object"
                     }
                   },
+                  "required": [
+                    "format_version",
+                    "scope",
+                    "created_at",
+                    "encryption",
+                    "checksums",
+                    "contents"
+                  ],
                   "type": "object"
                 }
               }

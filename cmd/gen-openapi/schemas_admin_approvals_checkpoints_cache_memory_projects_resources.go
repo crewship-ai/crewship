@@ -406,6 +406,16 @@ func schemaCatalogAdminApprovalsCheckpointsCacheMemoryProjectsResources() map[st
 			}, "id", "path", "file_name", "scope", "scope_level", "kind", "workspace_id", "created_at", "size_bytes", "payload_sha256",
 				"encrypted", "format_version", "pinned", "proof_level", "proof_checked_at", "drill_result", "drill_at", "incomplete")),
 		}, "bundles")},
+		// One catalogued bundle's manifest (plaintext, never decrypted), any
+		// scope; contents differs by scope (workspace, crews, instance).
+		"GET /api/v1/admin/instance/backups/bundles/inspect": {Response: object(map[string]any{
+			"format_version": integer(), "crewship_version_at_backup": str(), "scope": str(), "scope_level": str(),
+			"created_at": str(),
+			"created_by": object(map[string]any{"user_id": str(), "email": str(), "role": str()}),
+			"encryption": object(map[string]any{"enabled": boolean(), "algorithm": str()}, "enabled"),
+			"checksums":  object(map[string]any{"payload_sha256": str()}, "payload_sha256"),
+			"contents":   map[string]any{"type": "object"},
+		}, "format_version", "scope", "created_at", "encryption", "checksums", "contents")},
 		"POST /api/v1/admin/instance/backups/bundles/pin": {
 			Request:  object(map[string]any{"path": str()}, "path"),
 			Response: object(map[string]any{"path": str(), "pinned": boolean()}, "path", "pinned")},
