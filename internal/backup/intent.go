@@ -36,6 +36,7 @@ import "sort"
 // table. Drift detection catches the omission in tests so an oversight
 // surfaces before a bundle ships missing rows.
 var BackupTableIntent = map[string]ScopedTableIntent{
+	"access_files":                 IntentExcludeRuntime, // classified outputs depend on excluded attempt authority
 	"access_grants":                IntentInclude,        // exact member/resource rights survive restore
 	"access_context_dependencies":  IntentExcludeRuntime, // dependency authority requires fresh admission
 	"access_context":               IntentExcludeRuntime, // prompt context requires fresh admission

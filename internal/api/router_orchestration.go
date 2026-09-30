@@ -52,6 +52,8 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	r.authedMut("POST", "/api/v1/agents/{agentId}/restricted-cli-chats", roleSelf, r.createRestrictedCLIContext)
 	r.authedMut("POST", "/api/v1/chats/{chatId}/restricted-run", roleSelf, r.restrictedTextRun)
 	r.mux.Handle("GET /api/v1/chats/{chatId}/restricted-attempts", authed(wsCtx(http.HandlerFunc(r.restrictedOutcomes))))
+	r.mux.Handle("GET /api/v1/chats/{chatId}/restricted-files", authed(wsCtx(http.HandlerFunc(r.restrictedFiles))))
+	r.mux.Handle("GET /api/v1/chats/{chatId}/restricted-files/{fileId}/download", authed(wsCtx(http.HandlerFunc(r.restrictedFiles))))
 	r.authedMut("POST", "/api/v1/chats/{chatId}/restricted-cli-run", roleSelf, r.restrictedCLIRun)
 	r.mux.Handle("GET /api/v1/chats/{chatId}/execution-profile", authed(wsCtx(http.HandlerFunc(r.executionProfile))))
 
