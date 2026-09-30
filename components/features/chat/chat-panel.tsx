@@ -306,7 +306,25 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
     }
   }, [pageContextSlug])
 
+  const executionProfileRef = useRef<"trusted" | "restricted" | "pending">("pending")
+  const [executionProfile, setExecutionProfile] = useState<"trusted" | "restricted" | "pending">("pending")
+  useEffect(() => {
+    executionProfileRef.current = "pending"
+    setExecutionProfile("pending")
+    if (!sessionId || !workspaceId) return
+    const controller = new AbortController()
+    void apiFetch(`/api/v1/chats/${encodeURIComponent(sessionId)}/execution-profile?workspace_id=${encodeURIComponent(workspaceId)}`,{signal:controller.signal}).then(async response => {
+      if (!response.ok) return
+      const profile = await response.json() as {mode:string}
+      if (profile.mode === "trusted" || profile.mode === "restricted") {executionProfileRef.current = profile.mode;setExecutionProfile(profile.mode)}
+    }).catch(() => {})
+    return () => controller.abort()
+  }, [sessionId,workspaceId])
+
   const { turns, sendMessage, stopGeneration, regenerateLastTurn, editAndResend, loadHistory, markHistoryUnavailable, resubscribeSession, isStreaming, connectionStatus } = useChat({
+    executionProfile,
+    getExecutionProfile: () => executionProfileRef.current,
+    workspaceId,
     wsUrl: getWsUrl(),
     getToken: getWsToken,
     sessionId,
@@ -576,12 +594,23 @@ export function ChatPanel({ agentId, sessionId, agentName, agentSlug, agentRole,
    *  (toastUploadFailure), and the send path leaves the draft in the box where
    *  the user can see it. */
   const ensureSessionForSend = useCallback(async (): Promise<boolean> => {
-    const ok = await ensureSession()
+    let ok = await ensureSession()
+    if (ok) {
+      try {
+        const response = await apiFetch(`/api/v1/chats/${encodeURIComponent(sessionId)}/execution-profile?workspace_id=${encodeURIComponent(workspaceId ?? "")}`)
+        if (!response.ok) ok = false
+        else {
+          const profile = await response.json() as {mode:string}
+          if (profile.mode === "trusted" || profile.mode === "restricted") {executionProfileRef.current = profile.mode;setExecutionProfile(profile.mode)}
+          else ok = false
+        }
+      } catch {ok = false}
+    }
     if (!ok) {
       toast.error("Couldn't start this conversation. Check your connection and try again.")
     }
     return ok
-  }, [ensureSession])
+  }, [ensureSession,sessionId,workspaceId])
 
   // #2121 — a suggestion/follow-up chip sends the instant it's clicked, and
   // on a draft session `ensureSessionForSend` awaits a real POST. `isStreaming`

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"net/url"
 	"os"
@@ -162,6 +163,33 @@ Examples:
 				return err
 			}
 			chatID = chatResult.ID
+		}
+
+		restricted, err := restrictedChatProfile(client, chatID)
+		if err != nil {
+			return err
+		}
+		if restricted {
+			if interactive {
+				return fmt.Errorf("restricted text interactive mode is not yet supported")
+			}
+			saveFile, err := openSaveFile(cmd)
+			if err != nil {
+				return err
+			}
+			if saveFile != nil {
+				defer saveFile.Close()
+			}
+			commandCtx := cmd.Context()
+			if commandCtx == nil {
+				commandCtx = context.Background()
+			}
+			signalCtx, stop := signal.NotifyContext(commandCtx, os.Interrupt, syscall.SIGTERM)
+			defer stop()
+			if timeoutSecs <= 0 {
+				client = client.WithTimeout(5 * time.Minute)
+			}
+			return runRestrictedText(client.WithContext(signalCtx), chatID, prompt, resolveMarkdownFromCmd(cmd), saveFile, noStream)
 		}
 
 		// Get WS token

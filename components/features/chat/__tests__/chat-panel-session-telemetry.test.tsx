@@ -87,6 +87,7 @@ function installFetch() {
   global.fetch = vi.fn(async (url: string, init?: RequestInit) => {
     const u = String(url)
     const method = (init?.method ?? "GET").toUpperCase()
+    if (u.includes("/execution-profile")) {return {ok:true,status:200,json:async()=>({mode:"trusted"})} as unknown as Response}
     if (u.includes("/messages")) {
       return { ok: true, status: 200, json: async () => ({ messages: [] }) } as unknown as Response
     }
