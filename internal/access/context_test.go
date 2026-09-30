@@ -268,3 +268,51 @@ func TestFrozenContextOriginRevokesConsumerAndDeletion(t *testing.T) {
 		})
 	}
 }
+
+func TestLongCompletedConversationRetainsBoundedPromptAndRevocation(t *testing.T) {
+	s := fixture(t)
+	run := Right{"agent", "a", "run"}
+	policy(t, s, "h1", run)
+	var first, last string
+	for i := 0; i < 155; i++ {
+		h, a, err := s.Admit(t.Context(), "h1", "w", "a", "c1", "", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		p, err := s.BuildContext(t.Context(), a, "next")
+		if err != nil {
+			t.Fatalf("turn %d: %v", i, err)
+		}
+		if len(p.Input) > 96000 {
+			t.Fatalf("unbounded prompt at %d", i)
+		}
+		text := "tiny completed turn"
+		if i == 0 {
+			text = "LONG_CONVERSATION_ORIGIN_CANARY"
+			first = h
+		}
+		if _, err = s.AppendContext(t.Context(), h, ContextUser, "tiny user"); err != nil {
+			t.Fatal(err)
+		}
+		if _, err = s.AppendContext(t.Context(), h, ContextAssistant, text); err != nil {
+			t.Fatal(err)
+		}
+		if err = s.CompleteAttempt(t.Context(), h); err != nil {
+			t.Fatal(err)
+		}
+		last = h
+	}
+	var direct int
+	if err := s.DB.QueryRow(`SELECT COUNT(*) FROM access_context_dependencies WHERE attempt_id=(SELECT id FROM access_attempts WHERE handle_hash=?)`, digest(last)).Scan(&direct); err != nil || direct > 256 {
+		t.Fatalf("unbounded direct provenance %d %v", direct, err)
+	}
+	if err := s.CheckContextAttempt(t.Context(), last); err != nil {
+		t.Fatalf("long completed provenance: %v", err)
+	}
+	if err := s.RevokeAttempt(t.Context(), first); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CheckContextAttempt(t.Context(), last); !errors.Is(err, ErrDenied) {
+		t.Fatalf("old causal origin failed to revoke latest: %v", err)
+	}
+}
