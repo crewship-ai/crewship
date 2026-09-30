@@ -762,17 +762,37 @@ crewship admin instance holds resume routines
 
 ### The quiet window
 
-Database and files must agree, so the copy is taken in a quiet window. The
-server first waits for running agent work to finish — up to two hours; a run
-that cannot drain is recorded as **skipped**, never forced. It then holds every
-write to protected data for the copy only: mutating requests answer `503`
-with `Retry-After` (the backup and instance-hold pages and sign-in stay
-usable), inbound webhooks answer `503`, schedules and queued work do not fire,
-and retention and garbage-collection sweeps wait. A hard cap of 20 minutes
-releases the hold and abandons the copy. The hold lives in memory only, so a
-crash mid-copy comes back with nothing held. Packing and encryption run
-**after** the hold is released; the run reports how long writes were held
-(`hold_ms`). Anything the bundle should hold and does not — attachment files
+Database and files must agree, so the copy is taken in a quiet window. It
+opens in three steps:
+
+1. **Running work drains.** The server waits for running agent work, started
+   work items and routine runs to finish — up to two hours. A run that cannot
+   drain is recorded as **skipped**, never forced.
+2. **Writes drain.** New writes are refused from here on, and the server waits
+   for the writes already in progress to finish. A write is every mutating
+   request (edits, uploads, sidecar and agent calls, inbound webhooks) and every
+   background task that changes data: retention and garbage-collection sweeps,
+   memory syncs and nightly consolidation, schedule fires, queued-work claims
+   and notification re-deliveries. Reads never count, so open streams, live
+   views and downloads do not hold the window up. The wait is bounded by the
+   **drain timeout** — 60 seconds by default, set with
+   `CREWSHIP_BACKUP_DRAIN_TIMEOUT` (a duration such as `90s`). A write still
+   running when it ends means the copy would not be consistent, so the window
+   is released without copying and the run is recorded as **skipped** ("writes
+   did not drain"), then retried like any other busy run.
+3. **The copy runs.** Only once no write is in progress does the copy start,
+   so the database snapshot and the file copy share one boundary no write
+   crosses.
+
+While the window is open (steps 2 and 3), mutating requests answer `503` with
+`Retry-After` (the backup and instance-hold pages and sign-in stay usable and
+are not counted as writes), inbound webhooks answer `503`, schedules and queued
+work do not fire, and a long sweep steps aside at its next batch and resumes
+after the window. A hard cap of 20 minutes on the copy releases the hold and
+abandons the copy; any error releases it too. All of this lives in memory
+only, so a crash mid-window comes back with nothing held. Packing and
+encryption run **after** the hold is released; the run reports how long writes
+were refused (`hold_ms`, the write drain plus the copy). Anything the bundle should hold and does not — attachment files
 missing from the storage root, memory versions without content, a provisioned
 crew whose container was gone, a vault key the server could not resolve — is
 recorded in `contents.incomplete`, never left out silently.
