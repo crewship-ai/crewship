@@ -111,13 +111,32 @@ func (s *Service) spaceRefusal(ctx context.Context, r *Run) string {
 		return ""
 	}
 	need := StagingNeed(entries, r.Scope, r.WorkspaceID, s.now())
+	return SpaceFloorRefusal(free, total, need)
+}
+
+// MinFreePercent is the space floor in force, in percent (the default 10,
+// or CREWSHIP_BACKUP_MIN_FREE_PERCENT).
+func MinFreePercent() int { return int(minFreeFraction()*100 + 0.5) }
+
+// SpaceFloorRefusal says why a run needing need bytes of staging must not
+// start on a disk with free of total bytes left — it would end below the
+// space floor — and what to do about it; "" when it may start. total 0
+// (unknown) never refuses.
+func SpaceFloorRefusal(free, total uint64, need int64) string {
+	if total == 0 {
+		return ""
+	}
+	if need < 0 {
+		need = 0
+	}
 	frac := minFreeFraction()
 	floor := uint64(float64(total) * frac)
 	if uint64(need) <= free && free-uint64(need) >= floor {
 		return ""
 	}
-	return fmt.Sprintf("not enough disk space: the run needs about %s for staging beside the finished backup, %s of %s is free, and a run that would leave less than %d%% free does not start",
-		humanBytes(need), humanBytes(int64(free)), humanBytes(int64(total)), int(frac*100+0.5))
+	return fmt.Sprintf("not enough disk space: the run needs about %s for staging beside the finished backup, %s of %s is free, and a run that would leave less than %d%% free does not start. "+
+		"Free space on this disk, keep fewer copies, or, on a host whose disk is shared with other data, lower the floor with %s (0-50, in percent) and restart the server",
+		humanBytes(need), humanBytes(int64(free)), humanBytes(int64(total)), MinFreePercent(), MinFreePercentEnv)
 }
 
 func humanBytes(n int64) string {

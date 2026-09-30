@@ -19693,6 +19693,13 @@
                         "free_bytes": {
                           "type": "integer"
                         },
+                        "min_free_percent": {
+                          "type": "integer"
+                        },
+                        "refusal": {
+                          "nullable": true,
+                          "type": "string"
+                        },
                         "restore_need_bytes": {
                           "type": "integer"
                         },
@@ -19708,7 +19715,9 @@
                         "free_bytes",
                         "total_bytes",
                         "staging_need_bytes",
-                        "restore_need_bytes"
+                        "restore_need_bytes",
+                        "min_free_percent",
+                        "refusal"
                       ],
                       "type": "object"
                     },

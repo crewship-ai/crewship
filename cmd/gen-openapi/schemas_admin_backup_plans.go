@@ -89,8 +89,8 @@ func backupOverviewSchema() map[string]any {
 			"date", "status", "proof", "detail")),
 		"space": object(map[string]any{
 			"backups_bytes": bpInteger(), "free_bytes": bpInteger(), "total_bytes": bpInteger(), "staging_need_bytes": bpInteger(),
-			"restore_need_bytes": bpInteger(),
-		}, "backups_bytes", "free_bytes", "total_bytes", "staging_need_bytes", "restore_need_bytes"),
+			"restore_need_bytes": bpInteger(), "min_free_percent": bpInteger(), "refusal": bpNullable(bpStr()),
+		}, "backups_bytes", "free_bytes", "total_bytes", "staging_need_bytes", "restore_need_bytes", "min_free_percent", "refusal"),
 		"workspaces": array(object(map[string]any{
 			"workspace_id": bpStr(), "name": bpStr(), "last_backup_at": bpNullable(bpStr()), "status": bpStr(), "plan": bpNullable(bpStr()), "proof": bpInteger(),
 		}, "workspace_id", "name", "last_backup_at", "status", "plan", "proof")),

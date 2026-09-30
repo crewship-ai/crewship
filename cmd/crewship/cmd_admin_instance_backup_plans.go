@@ -183,11 +183,13 @@ type backupOverview struct {
 		Detail *string `json:"detail" yaml:"detail"`
 	} `json:"nights" yaml:"nights"`
 	Space struct {
-		BackupsBytes     int64 `json:"backups_bytes" yaml:"backups_bytes"`
-		FreeBytes        int64 `json:"free_bytes" yaml:"free_bytes"`
-		TotalBytes       int64 `json:"total_bytes" yaml:"total_bytes"`
-		StagingNeedBytes int64 `json:"staging_need_bytes" yaml:"staging_need_bytes"`
-		RestoreNeedBytes int64 `json:"restore_need_bytes" yaml:"restore_need_bytes"`
+		BackupsBytes     int64   `json:"backups_bytes" yaml:"backups_bytes"`
+		FreeBytes        int64   `json:"free_bytes" yaml:"free_bytes"`
+		TotalBytes       int64   `json:"total_bytes" yaml:"total_bytes"`
+		StagingNeedBytes int64   `json:"staging_need_bytes" yaml:"staging_need_bytes"`
+		RestoreNeedBytes int64   `json:"restore_need_bytes" yaml:"restore_need_bytes"`
+		MinFreePercent   int     `json:"min_free_percent" yaml:"min_free_percent"`
+		Refusal          *string `json:"refusal" yaml:"refusal"`
 	} `json:"space" yaml:"space"`
 	Workspaces []struct {
 		WorkspaceID  string  `json:"workspace_id" yaml:"workspace_id"`
@@ -799,6 +801,9 @@ contents_checked, checksum_only or none.`,
 			fmt.Fprintf(w, "  nights     %s\n", strings.Join(marks, " "))
 			fmt.Fprintf(w, "  space      backups %d B · free %d of %d B · staging needs %d B · restore needs %d B\n",
 				out.Space.BackupsBytes, out.Space.FreeBytes, out.Space.TotalBytes, out.Space.StagingNeedBytes, out.Space.RestoreNeedBytes)
+			if out.Space.Refusal != nil {
+				fmt.Fprintf(w, "  runs       will not start: %s\n", *out.Space.Refusal)
+			}
 			if len(out.NeedsAttention) > 0 {
 				fmt.Fprintln(w, "Needs attention:")
 				for _, a := range out.NeedsAttention {

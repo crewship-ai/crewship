@@ -158,7 +158,13 @@ export function SpaceCard({ space }: { space: SpaceInfo }) {
         </div>
         <div className="text-[13.5px] text-muted-foreground">
           A backup run needs <b className="font-semibold tabular-nums text-foreground">{formatSize(space.staging_need_bytes)}</b> free for staging · restoring the largest backup needs <b className="font-semibold tabular-nums text-foreground">{formatSize(space.restore_need_bytes)}</b>
+          {space.min_free_percent != null && <> · a run that would leave less than {space.min_free_percent} % free does not start</>}
         </div>
+        {space.refusal && (
+          <p data-slot="space-refusal" className="rounded-md border border-destructive/40 bg-destructive/10 px-2.5 py-1.5 text-[13px] text-destructive">
+            <b className="font-semibold">New backup runs will not start.</b> {space.refusal}
+          </p>
+        )}
         <div className="flex h-2.5 overflow-hidden rounded-full bg-muted" role="img" aria-label={`Backups ${backups.toFixed(1)} %, everything else ${other.toFixed(1)} %, the rest free`}>
           <i className="block h-full bg-primary" style={{ width: `${backups}%` }} />
           <i className="block h-full bg-control-border" style={{ width: `${other}%` }} />

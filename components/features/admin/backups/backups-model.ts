@@ -72,6 +72,10 @@ export interface SpaceInfo {
   total_bytes: number
   staging_need_bytes: number
   restore_need_bytes: number
+  /** The space floor in force (CREWSHIP_BACKUP_MIN_FREE_PERCENT, default 10). */
+  min_free_percent?: number
+  /** Why the next run would not start for lack of room, and what to do; null when it would. */
+  refusal?: string | null
 }
 
 export interface WorkspaceCoverage {

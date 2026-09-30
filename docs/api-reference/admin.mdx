@@ -1632,10 +1632,15 @@ plan, and failed, skipped or late runs. For `scope=instance` it also says
 when the latest instance bundle cannot unlock credentials on a new server
 (`id` `vault`): the key versions its sealed values use that its recovery kit
 does not carry — all of them when the kit was off — read from the bundle's
-own manifest. `nights` is always fourteen entries
+own manifest. When the next run would be refused for lack of disk space
+it lists `id` `space` first (severity `bad`, action `storage`), whose detail
+gives the figures and what to do. `nights` is always fourteen entries
 ending today in the plan's timezone. `space.staging_need_bytes` is the
 largest recent bundle × 1.1 and `space.restore_need_bytes` the largest bundle
 × 3 (payloads compress about 3:1 and a restore stages the decrypted payload).
+`space.min_free_percent` is the space floor in force
+(`CREWSHIP_BACKUP_MIN_FREE_PERCENT`, default 10) and `space.refusal` why the
+next run would not start, or `null`.
 `workspaces` is present for `scope=workspaces`.
 
 **Auth:** instance administrator. **Request:** no body. **Response:**
@@ -1656,7 +1661,8 @@ largest recent bundle × 1.1 and `space.restore_need_bytes` the largest bundle
                        "action": {"kind": "history", "label": "View run", "workspace_id": "ws-cuid", "run_id": "br_…"}}],
   "nights": [{"date": "2026-09-30", "status": "ok", "proof": 1, "detail": null}],
   "space": {"backups_bytes": 38000000, "free_bytes": 120000000000, "total_bytes": 500000000000,
-            "staging_need_bytes": 41800000, "restore_need_bytes": 114000000},
+            "staging_need_bytes": 41800000, "restore_need_bytes": 114000000,
+            "min_free_percent": 10, "refusal": null},
   "workspaces": [{"workspace_id": "ws-cuid", "name": "Lab", "last_backup_at": "2026-09-30T01:00:00Z", "status": "ok", "plan": "Nightly", "proof": 1}],
   "instance_summary": "2 workspaces, 3 users, instance settings"
 }
@@ -1984,7 +1990,12 @@ writing staging and bundle files and on off-site uploads (0 is no cap; each
 cap is one limiter shared by every run). `heartbeat_url` is pinged after every
 good run, and `heartbeat_last_*` says how the last ping went. `events` says
 which incident kinds reach the instance admins, `stale_alert_hours` after how
-long without a good backup a plan counts as stale. `destinations` lists where
+long without a good backup a plan counts as stale. `drill_reminder`
+(`weekly`, `monthly` or `off`) raises an instance-wide `drill` incident when
+the newest test restore is older than 7 or 31 days. Incidents go to each
+instance admin's inbox and from there to that admin's own notification
+channels (the `system.health` category); `channels` is stored for a later
+release and routes nothing. `destinations` lists where
 copies can be kept: this server, each S3-compatible destination (`verified`
 once one upload there was checked), and Google Drive as not yet `available`.
 `instance_admins` counts who receives incidents.

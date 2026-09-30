@@ -62,6 +62,12 @@ type SpaceInfo struct {
 	TotalBytes       int64 `json:"total_bytes"`
 	StagingNeedBytes int64 `json:"staging_need_bytes"`
 	RestoreNeedBytes int64 `json:"restore_need_bytes"`
+	// MinFreePercent is the space floor in force: a run that would leave
+	// less than this share of the disk free does not start.
+	MinFreePercent int `json:"min_free_percent"`
+	// Refusal is why the next run would not start for lack of room, with
+	// what to do about it; null when it would.
+	Refusal *string `json:"refusal"`
 }
 
 type WorkspaceCoverage struct {
@@ -121,6 +127,8 @@ type OverviewInput struct {
 	WorkspaceIDs []string
 	BackupsDir   string
 	Kit          KitInfo
+	// Space overrides the disk reading (tests): free and total bytes.
+	Space func() (free, total uint64)
 }
 
 func tone(t string) *string { return &t }
@@ -605,10 +613,6 @@ func BuildOverview(ctx context.Context, db *sql.DB, in OverviewInput, now time.T
 				Detail: kitDetail(missing, sealed), Action: &AttentionAction{Kind: "keys", Label: "Keys"}})
 		}
 	}
-	sort.SliceStable(out.NeedsAttention, func(i, j int) bool {
-		return out.NeedsAttention[i].Severity == "bad" && out.NeedsAttention[j].Severity != "bad"
-	})
-
 	// ── Nights.
 	out.Nights = buildNights(runs, scoped, now, loc)
 
@@ -634,6 +638,22 @@ func BuildOverview(ctx context.Context, db *sql.DB, in OverviewInput, now time.T
 			out.Space.FreeBytes, out.Space.TotalBytes = int64(u.FreeBytes), int64(u.TotalBytes)
 		}
 	}
+	out.Space.MinFreePercent = MinFreePercent()
+	if in.Space != nil {
+		free, total := in.Space()
+		out.Space.FreeBytes, out.Space.TotalBytes = int64(free), int64(total)
+	}
+	if out.Space.TotalBytes > 0 {
+		if reason := SpaceFloorRefusal(uint64(out.Space.FreeBytes), uint64(out.Space.TotalBytes), out.Space.StagingNeedBytes); reason != "" {
+			out.Space.Refusal = &reason
+			used := 100 - int(float64(out.Space.FreeBytes)*100/float64(out.Space.TotalBytes))
+			add(AttentionItem{ID: "space", Severity: "bad", Title: fmt.Sprintf("Backups will not start: the disk is %d%% full", used),
+				Detail: reason, Action: &AttentionAction{Kind: "storage", Label: "Storage"}})
+		}
+	}
+	sort.SliceStable(out.NeedsAttention, func(i, j int) bool {
+		return out.NeedsAttention[i].Severity == "bad" && out.NeedsAttention[j].Severity != "bad"
+	})
 
 	// ── Per-workspace rows.
 	if in.Scope == ScopeWorkspaces {

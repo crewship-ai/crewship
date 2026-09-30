@@ -16,6 +16,7 @@ vi.mock("sonner", () => ({ toast: h.toast }))
 vi.mock("next/link", () => ({ default: ({ href, children, ...p }: { href: string; children: React.ReactNode }) => <a href={href} {...p}>{children}</a> }))
 
 import { BackupsConsole } from "../backups-console"
+import { SpaceCard } from "../backups-overview"
 import type { BackupsSection } from "@/app/(dashboard)/admin/navigation"
 
 function show(page: BackupsSection | "retention", search = "?demo=1") {
@@ -83,6 +84,44 @@ describe("Overview", () => {
     expect(within(table).queryByText("Coolify")).toBeNull()
     expect(within(table).getByText("never")).toBeInTheDocument()
     expect(screen.getByText("Sandbox: never backed up")).toBeInTheDocument()
+  })
+})
+
+describe("Space floor", () => {
+  const space = { backups_bytes: 1e9, free_bytes: 17e9, total_bytes: 342e9, staging_need_bytes: 4e9, restore_need_bytes: 9e9, min_free_percent: 10 }
+
+  it("says why runs will not start and what to do, when the floor refuses", () => {
+    const refusal = "not enough disk space: … Free space on this disk, keep fewer copies, or … lower the floor with CREWSHIP_BACKUP_MIN_FREE_PERCENT (0-50, in percent) and restart the server"
+    render(<SpaceCard space={{ ...space, refusal }} />)
+    const bar = screen.getByText("New backup runs will not start.").closest("[data-slot=space-refusal]") as HTMLElement
+    expect(bar).toHaveTextContent("CREWSHIP_BACKUP_MIN_FREE_PERCENT")
+    expect(screen.getByText(/less than 10 % free does not start/)).toBeInTheDocument()
+  })
+
+  it("stays quiet when there is room", () => {
+    const { container } = render(<SpaceCard space={{ ...space, refusal: null }} />)
+    expect(container.querySelector("[data-slot=space-refusal]")).toBeNull()
+  })
+
+  it("routes the needs-attention item to Storage", async () => {
+    h.apiFetch.mockImplementation(async (url: string) => {
+      if (url.includes("/backups/overview")) {
+        return new Response(JSON.stringify({
+          status: {
+            label: "Complete recovery", verdict: "none", protects: { value: "The whole instance" }, how_often: { value: "Daily" },
+            where: { value: "This server" }, how_long: { value: "3" }, really_restored: { value: "never" }, offsite_verified: false,
+          },
+          needs_attention: [{ id: "space", severity: "bad", title: "Backups will not start: the disk is 95% full", detail: "not enough disk space: …", action: { kind: "storage", label: "Storage" } }],
+          nights: [], space: { ...space, refusal: "not enough disk space: …" },
+        }), { status: 200 })
+      }
+      return new Response("{}", { status: 404 })
+    })
+    const { onNavigate } = show("overview", "")
+    const title = await screen.findByText("Backups will not start: the disk is 95% full")
+    const row = title.closest("[data-slot=item-row]") as HTMLElement
+    fireEvent.click(within(row).getByRole("button", { name: "Storage" }))
+    expect(onNavigate).toHaveBeenCalledWith("storage")
   })
 })
 
