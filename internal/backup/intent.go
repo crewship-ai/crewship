@@ -36,15 +36,17 @@ import "sort"
 // table. Drift detection catches the omission in tests so an oversight
 // surfaces before a bundle ships missing rows.
 var BackupTableIntent = map[string]ScopedTableIntent{
-	"access_context_delegations":   IntentExcludeRuntime, // cross-agent provenance requires fresh authority after restore
-	"access_context_dependencies":  IntentExcludeRuntime, // live source dependencies cannot survive authority reset
-	"restricted_workflow_jobs":     IntentExcludeRuntime, // encrypted private queue capsules and outputs belong to this instance
-	"access_grants":                IntentInclude,        // exact member/resource rights survive restore
-	"access_context":               IntentExcludeRuntime, // prompt context requires fresh admission
-	"access_attempt_outcomes":      IntentExcludeRuntime, // own-attempt audit references excluded execution authority
-	"access_attempts":              IntentExcludeRuntime, // restoring a bundle must not revive execution capabilities
-	"restricted_launches":          IntentExcludeRuntime, // frozen execution payloads require fresh admission after restore
-	"restricted_provider_bindings": IntentExcludeRuntime, // provider authority must be admitted anew after restore
+	"access_context_delegations":            IntentExcludeRuntime, // cross-agent provenance requires fresh authority after restore
+	"access_context_dependencies":           IntentExcludeRuntime, // live source dependencies cannot survive authority reset
+	"restricted_workflow_jobs":              IntentExcludeRuntime, // encrypted private queue capsules and outputs belong to this instance
+	"restricted_workflow_provider_policies": IntentExcludeRuntime, // immutable provider policies belong to private queued authority
+	"restricted_workflow_delegate_slots":    IntentExcludeRuntime, // active host delegation slots cannot survive restore
+	"access_grants":                         IntentInclude,        // exact member/resource rights survive restore
+	"access_context":                        IntentExcludeRuntime, // prompt context requires fresh admission
+	"access_attempt_outcomes":               IntentExcludeRuntime, // own-attempt audit references excluded execution authority
+	"access_attempts":                       IntentExcludeRuntime, // restoring a bundle must not revive execution capabilities
+	"restricted_launches":                   IntentExcludeRuntime, // frozen execution payloads require fresh admission after restore
+	"restricted_provider_bindings":          IntentExcludeRuntime, // provider authority must be admitted anew after restore
 	// Durable human collaboration: restore preserves history/ACL but suspends work.
 	"workspace_conversations":              IntentInclude,
 	"workspace_conversation_direct_pairs":  IntentInclude,
