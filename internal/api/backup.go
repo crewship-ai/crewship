@@ -19,10 +19,12 @@ import (
 	"github.com/crewship-ai/crewship/internal/journal"
 )
 
-// BackupHandler serves the /api/v1/admin/backups endpoints. All routes
-// require workspace role OWNER or ADMIN; the router wires authed() +
-// wsCtx() in front, but each handler double-checks via canRole to
-// avoid accidental downgrades when a caller supplies a stale token.
+// BackupHandler serves the /api/v1/admin/backups endpoints. Every route
+// acts on the one workspace the request names and requires OWNER or ADMIN
+// of it, or an instance administrator, who need not be a member
+// (authedAdmin / authedAdminWrite in the router). Each handler double-checks
+// via canAdministerInstance to avoid accidental downgrades when a caller
+// supplies a stale token.
 //
 // The handler depends on backup.DockerOps (an abstraction implemented
 // by backup.MobyDockerOps) rather than the concrete *docker.Client,
@@ -170,9 +172,9 @@ func (h *BackupHandler) Create(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	user := UserFromContext(ctx)
 	workspaceID := WorkspaceIDFromContext(ctx)
-	role := RoleFromContext(ctx)
+	role := backupActorRole(ctx)
 
-	if !canRole(role, "manage") {
+	if !canAdministerInstance(ctx) {
 		replyError(w, http.StatusForbidden, "admin role required")
 		return
 	}
@@ -386,10 +388,10 @@ type restoreRequest struct {
 func (h *BackupHandler) Restore(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	user := UserFromContext(ctx)
-	role := RoleFromContext(ctx)
+	role := backupActorRole(ctx)
 	workspaceID := WorkspaceIDFromContext(ctx)
 
-	if !canRole(role, "manage") {
+	if !canAdministerInstance(ctx) {
 		replyError(w, http.StatusForbidden, "admin role required")
 		return
 	}
@@ -1019,6 +1021,18 @@ func statusForBackupError(err error) int {
 // default "crewship-team-" prefix only when no provider is wired —
 // keeps unit tests + early-init code paths building without forcing
 // every test to construct a provider stub.
+// backupActorRole is the role a backup or restore acts with: the caller's
+// workspace role, or ADMIN for an instance administrator who is not a
+// member of the workspace (the backup runner requires OWNER or ADMIN, and a
+// restore into a new workspace grants the restoring admin this role there).
+func backupActorRole(ctx context.Context) string {
+	role := RoleFromContext(ctx)
+	if !backup.IsAdminRole(role) && canAdministerInstance(ctx) {
+		return "ADMIN"
+	}
+	return role
+}
+
 func (h *BackupHandler) resolveCrewContainerName() func(id, slug string) string {
 	if h.crewContainerName != nil {
 		return h.crewContainerName

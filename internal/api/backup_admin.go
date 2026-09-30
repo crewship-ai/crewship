@@ -22,9 +22,8 @@ import (
 func (h *BackupHandler) Unlock(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	user := UserFromContext(ctx)
-	role := RoleFromContext(ctx)
 	workspaceID := WorkspaceIDFromContext(ctx)
-	if !canRole(role, "manage") {
+	if !canAdministerInstance(ctx) {
 		replyError(w, http.StatusForbidden, "admin role required")
 		return
 	}
@@ -57,9 +56,8 @@ type rotateRequest struct {
 func (h *BackupHandler) Rotate(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	user := UserFromContext(ctx)
-	role := RoleFromContext(ctx)
 	workspaceID := WorkspaceIDFromContext(ctx)
-	if !canRole(role, "manage") {
+	if !canAdministerInstance(ctx) {
 		replyError(w, http.StatusForbidden, "admin role required")
 		return
 	}
@@ -126,9 +124,8 @@ func (h *BackupHandler) Rotate(w http.ResponseWriter, r *http.Request) {
 func (h *BackupHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	user := UserFromContext(ctx)
-	role := RoleFromContext(ctx)
 	workspaceID := WorkspaceIDFromContext(ctx)
-	if !canRole(role, "manage") {
+	if !canAdministerInstance(ctx) {
 		replyError(w, http.StatusForbidden, "admin role required")
 		return
 	}
@@ -178,9 +175,8 @@ func (h *BackupHandler) Delete(w http.ResponseWriter, r *http.Request) {
 func (h *BackupHandler) Download(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	user := UserFromContext(ctx)
-	role := RoleFromContext(ctx)
 	workspaceID := WorkspaceIDFromContext(ctx)
-	if !canRole(role, "manage") {
+	if !canAdministerInstance(ctx) {
 		replyError(w, http.StatusForbidden, "admin role required")
 		return
 	}
@@ -254,9 +250,8 @@ type selfTestRequest struct {
 
 func (h *BackupHandler) SelfTest(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	role := RoleFromContext(ctx)
 	workspaceID := WorkspaceIDFromContext(ctx)
-	if !canRole(role, "manage") {
+	if !canAdministerInstance(ctx) {
 		replyError(w, http.StatusForbidden, "admin role required")
 		return
 	}
