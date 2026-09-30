@@ -54,6 +54,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/pages"
+	"github.com/crewship-ai/crewship/internal/quiesce"
 )
 
 // pageSweepInterval is how often panels are checked. See the file header for
@@ -396,7 +397,14 @@ func (h *PageHandler) StartPanelFreshnessSweeper(ctx context.Context, interval t
 			case <-ctx.Done():
 				return
 			case <-t.C:
-				res, err := h.SweepPanelFreshness(ctx)
+				// The sweep records lapses and opens issues: one writer
+				// in the backup's quiet window barrier.
+				var res PageSweepResult
+				err := quiesce.Do(ctx, func(ctx context.Context) error {
+					var serr error
+					res, serr = h.SweepPanelFreshness(ctx)
+					return serr
+				})
 				if err != nil {
 					h.logger.Warn("pages: freshness sweep failed", "error", err)
 					continue

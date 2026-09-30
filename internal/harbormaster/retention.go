@@ -280,6 +280,10 @@ func SweepApprovalsRetention(
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return deleted, false, ctxErr
 		}
+		// Between batches: step out of a closing quiet window.
+		if yieldErr := quiesce.Yield(ctx); yieldErr != nil {
+			return deleted, false, yieldErr
+		}
 		res, execErr := db.ExecContext(ctx, stmt, args...)
 		if execErr != nil {
 			return deleted, false, fmt.Errorf("harbormaster: sweep approvals retention: %w", execErr)
@@ -300,10 +304,15 @@ func SweepApprovalsRetention(
 // returned on the first failure, so one bad workspace does not stop the
 // sweep for the rest — same as SweepAllWorkspacesAuditRetention.
 func SweepAllWorkspacesApprovalsRetention(ctx context.Context, db *sql.DB, logger *slog.Logger) error {
-	// Never delete under an instance backup's consistent copy.
-	if err := quiesce.WaitReleased(ctx); err != nil {
+	// Never delete under an instance backup's consistent copy: the whole sweep
+	// is a writer in the quiet window's barrier, and it yields between
+	// batches so a backup's drain never waits on it.
+	wr, err := quiesce.EnterWait(ctx)
+	if err != nil {
 		return err
 	}
+	defer wr.Leave()
+	ctx = wr.Context()
 	if db == nil {
 		return errors.New("harbormaster: sweep approvals retention: db is nil")
 	}

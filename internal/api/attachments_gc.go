@@ -167,10 +167,8 @@ func sweepAttachmentBlobs(ctx context.Context, db *sql.DB, logger *slog.Logger, 
 		// ./attachments happens to be in the process's working directory.
 		return 0
 	}
-	// Never delete under an instance backup's consistent copy.
-	if quiesce.WaitReleased(ctx) != nil {
-		return 0
-	}
+	// Never delete under an instance backup's consistent copy: this runs
+	// inside runAttachmentGCPass's writer, and yields it between workspaces.
 	base := filepath.Join(root, "attachments")
 	entries, err := os.ReadDir(base)
 	if err != nil {
@@ -186,6 +184,9 @@ func sweepAttachmentBlobs(ctx context.Context, db *sql.DB, logger *slog.Logger, 
 	var removed, workspaces int
 	for _, e := range entries {
 		if err := ctx.Err(); err != nil {
+			return removed
+		}
+		if err := quiesce.Yield(ctx); err != nil {
 			return removed
 		}
 		if !e.IsDir() {
@@ -222,7 +223,17 @@ func sweepAttachmentBlobs(ctx context.Context, db *sql.DB, logger *slog.Logger, 
 // can only be answered by walking the tree. The reclaim below asks "is there a
 // row no upload finished?" and can only be answered from the table — its blobs
 // are not in the tree the sweep walks, and half of them do not exist at all.
+//
+// The whole pass is one writer in the quiet window's barrier: it never
+// deletes a blob or a reservation between a backup's database snapshot and
+// its file copy.
 func runAttachmentGCPass(ctx context.Context, db *sql.DB, logger *slog.Logger, root string) {
+	wr, err := quiesce.EnterWait(ctx)
+	if err != nil {
+		return
+	}
+	defer wr.Leave()
+	ctx = wr.Context()
 	sweepAttachmentBlobs(ctx, db, logger, root)
 	reclaimUnpublishedChatAttachments(ctx, db, logger, root, chatAttachmentPublishGrace)
 }

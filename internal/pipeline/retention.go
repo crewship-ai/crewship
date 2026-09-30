@@ -191,10 +191,15 @@ WHERE `+runRetentionEligible,
 // Errors are accumulated with errors.Join so one bad workspace doesn't
 // stop the sweep for the rest.
 func SweepAllWorkspacesRunRetention(ctx context.Context, db *sql.DB, emitter journal.Emitter, keepLastN int) error {
-	// Never delete under an instance backup's consistent copy.
-	if err := quiesce.WaitReleased(ctx); err != nil {
+	// Never delete under an instance backup's consistent copy: the whole sweep
+	// is a writer in the quiet window's barrier, and it yields between
+	// workspaces so a backup's drain never waits on it.
+	wr, err := quiesce.EnterWait(ctx)
+	if err != nil {
 		return err
 	}
+	defer wr.Leave()
+	ctx = wr.Context()
 	if db == nil {
 		return errors.New("sweep all workspaces (runs): db is nil")
 	}
@@ -231,6 +236,9 @@ func SweepAllWorkspacesRunRetention(ctx context.Context, db *sql.DB, emitter jou
 		case <-ctx.Done():
 			return ctx.Err()
 		default:
+		}
+		if yieldErr := wr.Yield(ctx); yieldErr != nil {
+			return yieldErr
 		}
 		if _, sweepErr := SweepRunRetention(ctx, db, emitter, e.ID, e.Retention, keepLastN); sweepErr != nil {
 			errs = append(errs, fmt.Errorf("workspace %s: %w", e.ID, sweepErr))

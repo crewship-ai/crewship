@@ -106,6 +106,9 @@ func SweepInbox(ctx context.Context, db *sql.DB, workspaceID string, d int, now 
 		if err := ctx.Err(); err != nil {
 			return deleted, false, err
 		}
+		if err := quiesce.Yield(ctx); err != nil {
+			return deleted, false, err
+		}
 		res, err := db.ExecContext(ctx,
 			`DELETE FROM inbox_items WHERE id IN (SELECT id FROM inbox_items WHERE `+inboxEligible+` LIMIT ?)`,
 			workspaceID, c, sweepBatch)
@@ -130,6 +133,9 @@ func SweepChats(ctx context.Context, db *sql.DB, workspaceID string, d int, now 
 	deleted := 0
 	for i := 0; i < sweepMaxBatches; i++ {
 		if err := ctx.Err(); err != nil {
+			return deleted, false, err
+		}
+		if err := quiesce.Yield(ctx); err != nil {
 			return deleted, false, err
 		}
 		n, err := sweepChatBatch(ctx, db, workspaceID, c)
@@ -186,6 +192,9 @@ func SweepKeeperDecisions(ctx context.Context, db *sql.DB, workspaceID string, d
 	deleted := 0
 	for i := 0; i < sweepMaxBatches; i++ {
 		if err := ctx.Err(); err != nil {
+			return deleted, false, err
+		}
+		if err := quiesce.Yield(ctx); err != nil {
 			return deleted, false, err
 		}
 		n, err := sweepKeeperBatch(ctx, db, workspaceID, c)
@@ -250,10 +259,15 @@ func selectIDs(ctx context.Context, db DB, q string, args ...any) ([]string, err
 // SweepAll runs every set inbox, chats and Keeper decisions window. Errors are
 // collected, not returned on the first, so one workspace cannot stop the rest.
 func SweepAll(ctx context.Context, db *sql.DB, logger *slog.Logger, now time.Time) error {
-	// Never delete under an instance backup's consistent copy.
-	if err := quiesce.WaitReleased(ctx); err != nil {
+	// Never delete under an instance backup's consistent copy: the whole sweep
+	// is a writer in the quiet window's barrier, and it yields between
+	// windows and batches so a backup's drain never waits on it.
+	wr, err := quiesce.EnterWait(ctx)
+	if err != nil {
 		return err
 	}
+	defer wr.Leave()
+	ctx = wr.Context()
 	if db == nil {
 		return errors.New("retention: sweep: db is nil")
 	}
@@ -291,6 +305,9 @@ func SweepAll(ctx context.Context, db *sql.DB, logger *slog.Logger, now time.Tim
 	var errs []error
 	for _, j := range jobs {
 		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := wr.Yield(ctx); err != nil {
 			return err
 		}
 		var sweep func(context.Context, *sql.DB, string, int, time.Time) (int, bool, error)
