@@ -14,6 +14,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/access"
 	"github.com/crewship-ai/crewship/internal/api"
 	"github.com/crewship-ai/crewship/internal/restricteddispatch"
+	"github.com/crewship-ai/crewship/internal/restrictedpreflight"
 	"github.com/crewship-ai/crewship/internal/restrictedruntime"
 	"github.com/crewship-ai/crewship/internal/restrictedworkflow"
 )
@@ -87,6 +88,7 @@ func startRestrictedTextRuntime(ctx context.Context, db *sql.DB, databasePath st
 	}
 	// The private queue uses this registry for every step. Unknown started
 	// work is reconciled as failed, rather than automatically replayed.
+	workflow.SourceChecker = restrictedpreflight.CheckSource
 	if err = workflow.Start(ctx); err != nil {
 		closeAll()
 		return nil, fmt.Errorf("start restricted workflow: %w", err)
