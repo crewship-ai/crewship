@@ -345,7 +345,7 @@ crewship cost --workspace demo          # token + dollar ledger
 
 Full reference: [docs/cli/overview.mdx](docs/cli/overview.mdx) and
 [docs/api-reference/overview.mdx](docs/api-reference/overview.mdx). The docs are
-large — **85+ guides and 55+ API pages** under [`docs/`](https://github.com/crewship-ai/crewship/tree/07bfd2360a97dbe1c9f71c03e1d9b5d5d471c993/docs/), rendered at
+large — **85+ guides and 55+ API pages** under [`docs/`](docs/), rendered at
 [docs.crewship.ai](https://docs.crewship.ai) (coming soon).
 
 ---
@@ -544,7 +544,7 @@ Covenant 2.1).
 
 ## Community & links
 
-- **Docs:** [docs/](https://github.com/crewship-ai/crewship/tree/07bfd2360a97dbe1c9f71c03e1d9b5d5d471c993/docs/) in this repo; hosted [docs.crewship.ai](https://docs.crewship.ai) coming soon
+- **Docs:** [docs/](docs/) in this repo; hosted [docs.crewship.ai](https://docs.crewship.ai) coming soon
 - **Discord:** community help + showcase (invite on [crewship.ai](https://crewship.ai))
 - **Reddit:** [r/Crewship](https://reddit.com/r/Crewship)
 - **X / Twitter:** [@crewshipai](https://twitter.com/crewshipai) · **Bluesky:** [@crewship.ai](https://bsky.app/profile/crewship.ai)
