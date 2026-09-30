@@ -134,12 +134,14 @@ func computeSidecarSpecHash(svc *provider.CrewService) string {
 	})
 
 	payload := struct {
+		QuotaPolicy string
 		Command     []string
 		Env         [][2]string
 		Ports       []string
 		Volumes     []provider.CrewServiceVolume
 		Healthcheck *provider.CrewServiceHealthcheck
 	}{
+		QuotaPolicy: serviceQuotaPolicyVersion,
 		Command:     svc.Command,
 		Env:         envPairs,
 		Ports:       svc.Ports,
@@ -373,6 +375,15 @@ func (p *Provider) ensureSidecar(ctx context.Context, crewID, crewSlug string, s
 		} else if c.Labels[sidecarSpecHashLabel] != desiredHash {
 			drift = "spec drift (command/env/ports/volumes/healthcheck)"
 		}
+		if drift == "" {
+			inspected, err := p.client.ContainerInspect(ctx, c.ID, client.ContainerInspectOptions{})
+			if err != nil {
+				return "", fmt.Errorf("inspect service quota enforcement: %w", err)
+			}
+			if err = checkServiceQuotas(inspected.Container.HostConfig); err != nil {
+				drift = err.Error()
+			}
+		}
 		if drift != "" {
 			p.logger.Info("sidecar drift; recreating", "service", svc.Name, "reason", drift)
 			timeout := 5
@@ -503,6 +514,8 @@ func (p *Provider) ensureSidecar(ctx context.Context, crewID, crewSlug string, s
 			PidsLimit: &pidsLimit,
 		},
 	}
+
+	applyServiceQuotas(hostCfg)
 
 	// NetworkingConfig wires the sidecar to the crew bridge with a
 	// DNS alias so `redis` resolves inside the agent container.
