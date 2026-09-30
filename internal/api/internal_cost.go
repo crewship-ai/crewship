@@ -18,9 +18,9 @@ import (
 //
 // Fields the sidecar has no authority over — ledger ID, timestamp,
 // confidence — are derived server-side. The sidecar reports BillingMode
-// because it learned that from CREWSHIP_BILLING_MODE env var (set by the
-// orchestrator based on credential type at exec time), which is the
-// closest thing to ground truth available at the proxy hot path.
+// as an existing observation tag learned from CREWSHIP_BILLING_MODE at boot.
+// That label is not admission authority: cost/admit checks current host DB
+// state, and refuses legacy calls under hard budgets independently of it.
 type sidecarCostRecordRequest struct {
 	WorkspaceID  string `json:"workspace_id"`
 	CrewID       string `json:"crew_id"`
@@ -55,9 +55,10 @@ type sidecarCostRecordRequest struct {
 //     blocks, and we'd rather record an audit row with zeros than drop the
 //     event entirely.
 //
-// The handler does NOT pre-flight $ budgets — that's done at request time
-// in the Go middleware path; CLI traffic bypasses the middleware so the
-// budget check would have already been moot. EnforceQuota IS called when
+// This observer does not reserve funds. Go middleware reserves before calling
+// a provider, while managed legacy proxies call cost/admit before forwarding
+// and deny metered hard-budget traffic until a reservation protocol exists.
+// EnforceQuota is called when
 // quota signals are present so the journal's budget.warning /
 // budget.exceeded entries fire consistently across direct-API and CLI
 // traffic.

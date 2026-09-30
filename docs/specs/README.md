@@ -36,3 +36,12 @@ public contract here. Superseded a spec? Move it to
 
 - [`trusted-llm-hard-budgets.md`](trusted-llm-hard-budgets.md) — reservations before
   trusted provider calls and admission rules for legacy sidecar traffic.
+
+- [`project-files.md`](project-files.md) — immutable, explicitly selected project
+  files and their read-only restricted native mounts.
+- [`restricted-context.md`](restricted-context.md) — scoped chat, CLI run,
+  memory, files, profile selection and content-free attempt contracts.
+- [`private-issue-preflight.md`](private-issue-preflight.md) — atomic private
+  issue claims, budget/capacity checks, deduplication and recovery.
+- [`restricted-workflows.md`](restricted-workflows.md) — private routine admission,
+  filtered catalog, own receipts, Page polling and bounded delegated execution.

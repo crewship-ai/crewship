@@ -304,11 +304,13 @@ func buildDocument(routes []route) map[string]any {
 	_, workspaceConversationComponents := workspaceConversationSchemaCatalog()
 	_, routinesWorkspaceComponents := routinesWorkspaceSchemaCatalog()
 	_, workLedgerComponents := workLedgerSchemaCatalog()
+	_, restrictedContextComponents := restrictedContextSchemaCatalog()
+	_, restrictedWorkflowComponents := restrictedWorkflowSchemaCatalog()
 	_, chatShareComponents := chatShareSchemaCatalog()
 	for _, catalog := range []map[string]any{
 		coreResourceSchemas(), issueSkillCredentialSchemaComponents(), executionSchemaComponents(), crewWorkspaceComponentsV1,
 		credentialComponents, remainingCrewAgentComponentsV1, remainingComponents, finalAdminPlatformComponents, finalComponents,
-		coreResourceRequestComponentsV2, integrationsAuthRequestComponents, adminSpecialComponents, finalCoreRequestComponents, finalAuthComponents, onboardingProposalComponents, workspaceConversationComponents, routinesWorkspaceComponents, workLedgerComponents, chatShareComponents,
+		coreResourceRequestComponentsV2, integrationsAuthRequestComponents, adminSpecialComponents, finalCoreRequestComponents, finalAuthComponents, onboardingProposalComponents, workspaceConversationComponents, routinesWorkspaceComponents, workLedgerComponents, chatShareComponents, restrictedContextComponents, restrictedWorkflowComponents,
 	} {
 		for name, schema := range catalog {
 			// Domain catalogs are the audited source of truth.  They intentionally
@@ -636,6 +638,17 @@ func routeSchemaCatalog() map[string]DomainSchema {
 	}
 	chatShareRoutes, _ := chatShareSchemaCatalog()
 	for key, schema := range chatShareRoutes {
+		result[key] = mergeDomainSchema(result[key], schema)
+	}
+	restrictedContextRoutes, _ := restrictedContextSchemaCatalog()
+	for key, schema := range restrictedContextRoutes {
+		result[key] = mergeDomainSchema(result[key], schema)
+	}
+	for key, schema := range restrictedProjectFileSchemaCatalog() {
+		result[key] = mergeDomainSchema(result[key], schema)
+	}
+	restrictedWorkflowRoutes, _ := restrictedWorkflowSchemaCatalog()
+	for key, schema := range restrictedWorkflowRoutes {
 		result[key] = mergeDomainSchema(result[key], schema)
 	}
 	return result

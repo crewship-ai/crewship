@@ -301,6 +301,10 @@ func (h *ProxyHandler) ChatMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if restrictedChatHistory(h.db, w, r) {
+		return
+	}
+
 	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	if limit <= 0 {

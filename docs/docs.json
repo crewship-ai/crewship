@@ -118,6 +118,8 @@
                 ]
               },
               "guides/mcp-multi-cli",
+              "guides/restricted-native-codex",
+              "guides/restricted-login-identity-proof",
               "guides/keeper",
               "guides/autonomy-and-self-learning",
               "guides/keeper-reviews-panel",
@@ -287,6 +289,7 @@
               "cli/agent",
               "cli/ask",
               "cli/chat",
+              "cli/context",
               "cli/conversation",
               "cli/feedback",
               "cli/run",

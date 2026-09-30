@@ -151,6 +151,14 @@ func newWSEchoHandler(cap *wsCapture, events []cli.ChatEventPayload, loop bool) 
 func newRunServerCov(t *testing.T, cap *wsCapture, events []cli.ChatEventPayload, chatStatus, wsTokenStatus int) *httptest.Server {
 	t.Helper()
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/v1/agents/{agentId}/run-profile", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"mode":"trusted"}`))
+	})
+	mux.HandleFunc("GET /api/v1/chats/{chatId}/execution-profile", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"mode":"trusted"}`))
+	})
 	mux.HandleFunc("/api/v1/agents", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`[{"id":"` + covAgentID + `","slug":"viktor"}]`))
@@ -903,6 +911,10 @@ func TestRunCmdRunE_ShowThinkingFlag(t *testing.T) {
 
 func TestRunCmdRunE_ChatDecodeError(t *testing.T) {
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/v1/agents/{agentId}/run-profile", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"mode":"trusted"}`))
+	})
 	mux.HandleFunc("/api/v1/agents", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`[{"id":"` + covAgentID + `","slug":"viktor"}]`))
