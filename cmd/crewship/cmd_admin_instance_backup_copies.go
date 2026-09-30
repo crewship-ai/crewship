@@ -1,3 +1,5 @@
+//go:build !clionly
+
 package main
 
 // crewship admin instance backups copies — restore from an off-site copy:
