@@ -137,6 +137,13 @@ func (b *Backend) Ensure(k Key, size int64) (Descriptor, error) {
 	if !os.IsNotExist(err) {
 		return Descriptor{}, err
 	}
+	// Separate per-database helpers share one host allocation lock. Physical
+	// preallocation survives a crash; the next process observes reduced free space.
+	reservation, err := hostReservationLock()
+	if err != nil {
+		return Descriptor{}, err
+	}
+	defer reservation.Close()
 	// A complete preallocation is the reservation. Count even orphan images left
 	// by a crash, so cleanup cannot accidentally overcommit aggregate capacity.
 	entries, err := os.ReadDir(filepath.Join(b.root, "images"))
@@ -574,4 +581,58 @@ func (b *Backend) Release(k Key, reference string) error {
 	refs = slices.DeleteFunc(refs, func(r string) bool { return r == reference })
 	raw, _ := json.Marshal(refs)
 	return atomicFile(filepath.Join(b.root, "images", k.id()+".references"), raw)
+}
+
+// BindNamespace permanently binds a catalog to one operator-selected database identity.
+func (b *Backend) BindNamespace(namespace string) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.lock == nil || !component.MatchString(namespace) {
+		return ErrDenied
+	}
+	target := filepath.Join(b.root, "namespace")
+	f, err := safeFile(target)
+	if err == nil {
+		raw, e := io.ReadAll(io.LimitReader(f, 129))
+		f.Close()
+		if e != nil || string(raw) != namespace {
+			return ErrDenied
+		}
+		return nil
+	}
+	if !os.IsNotExist(err) {
+		return err
+	}
+	entries, err := os.ReadDir(filepath.Join(b.root, "images"))
+	if err != nil {
+		return err
+	}
+	if len(entries) != 0 {
+		return ErrDenied
+	}
+	return atomicFile(target, []byte(namespace))
+}
+
+func hostReservationLock() (*os.File, error) {
+	f, err := os.OpenFile("/run/crewship-quota-host-reserve.lock", os.O_CREATE|os.O_RDWR|unix.O_NOFOLLOW, 0600)
+	if err != nil {
+		return nil, err
+	}
+	var st unix.Stat_t
+	if err = unix.Fstat(int(f.Fd()), &st); err != nil || st.Uid != 0 || st.Mode&unix.S_IFMT != unix.S_IFREG || st.Mode&0777 != 0600 {
+		f.Close()
+		return nil, ErrDenied
+	}
+	deadline := time.Now().Add(2 * time.Minute)
+	for {
+		err = unix.Flock(int(f.Fd()), unix.LOCK_EX|unix.LOCK_NB)
+		if err == nil {
+			return f, nil
+		}
+		if !errors.Is(err, unix.EWOULDBLOCK) || time.Now().After(deadline) {
+			f.Close()
+			return nil, ErrUnavailable
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
 }

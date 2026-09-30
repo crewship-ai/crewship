@@ -16,16 +16,18 @@ import (
 )
 
 type Request struct {
+	Namespace string
 	Reference string
 	Operation string
 	Key       Key
 	Bytes     int64
 }
 type Response struct {
+	Namespace  string
 	Descriptor Descriptor
 	Error      string
 }
-type Client struct{ Socket string }
+type Client struct{ Socket, Namespace string }
 
 func peerUID(c *net.UnixConn) (uint32, error) {
 	raw, err := c.SyscallConn()
@@ -47,6 +49,7 @@ func peerUID(c *net.UnixConn) (uint32, error) {
 	return uid, inner
 }
 func (c Client) call(request Request) (Descriptor, error) {
+	request.Namespace = c.Namespace
 	if c.Socket == "" {
 		return Descriptor{}, ErrUnavailable
 	}
@@ -70,6 +73,9 @@ func (c Client) call(request Request) (Descriptor, error) {
 	var response Response
 	if err = json.NewDecoder(io.LimitReader(connection, 8192)).Decode(&response); err != nil {
 		return Descriptor{}, err
+	}
+	if response.Namespace != c.Namespace {
+		return Descriptor{}, ErrDenied
 	}
 	if response.Error != "" {
 		return Descriptor{}, fmt.Errorf("quota helper: %s: %w", response.Error, ErrUnavailable)
@@ -97,6 +103,21 @@ func (c Client) Recover() error { _, err := c.call(Request{Operation: "recover"}
 // Serve accepts only root and the administrator-configured host server UID.
 // Agent/broker UIDs are never accepted, even if misconfigured as serverUID.
 func Serve(ctx context.Context, socket string, serverUID uint32, b *Backend) error {
+	return ServeWithReady(ctx, socket, serverUID, b, nil)
+}
+
+// ServeWithReady publishes readiness only after the authenticated socket exists.
+func ServeWithReady(ctx context.Context, socket string, serverUID uint32, b *Backend, ready func() error) error {
+	return ServeNamespace(ctx, socket, serverUID, b, "", ready)
+}
+
+// ServeNamespace binds production peers to the immutable private catalog identity.
+func ServeNamespace(ctx context.Context, socket string, serverUID uint32, b *Backend, namespace string, ready func() error) error {
+	if namespace != "" {
+		if err := b.BindNamespace(namespace); err != nil {
+			return err
+		}
+	}
 	if os.Geteuid() != 0 || serverUID == 1001 || serverUID == 1002 || b == nil {
 		return ErrDenied
 	}
@@ -134,6 +155,11 @@ func Serve(ctx context.Context, socket string, serverUID uint32, b *Backend) err
 	if err = os.Chmod(socket, 0600); err != nil {
 		return err
 	}
+	if ready != nil {
+		if err = ready(); err != nil {
+			return err
+		}
+	}
 	go func() { <-ctx.Done(); listener.Close() }()
 	for {
 		conn, err := listener.AcceptUnix()
@@ -154,10 +180,10 @@ func Serve(ctx context.Context, socket string, serverUID uint32, b *Backend) err
 			var request Request
 			decoder := json.NewDecoder(io.LimitReader(conn, 4096))
 			decoder.DisallowUnknownFields()
-			if decoder.Decode(&request) != nil {
+			if decoder.Decode(&request) != nil || request.Namespace != namespace {
 				return
 			}
-			var response Response
+			response := Response{Namespace: namespace}
 			switch request.Operation {
 			case "ensure":
 				response.Descriptor, err = b.Ensure(request.Key, request.Bytes)

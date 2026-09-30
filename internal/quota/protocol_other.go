@@ -2,7 +2,7 @@
 
 package quota
 
-type Client struct{ Socket string }
+type Client struct{ Socket, Namespace string }
 
 func (Client) Ensure(Key, int64) (Descriptor, error) { return Descriptor{}, ErrUnavailable }
 func (Client) Verify(Key, int64) (Descriptor, error) { return Descriptor{}, ErrUnavailable }
