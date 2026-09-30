@@ -148,6 +148,11 @@ func ResolveIncidents(ctx context.Context, db *sql.DB, planID string, kinds []st
 	return open, nil
 }
 
+// GetIncident reads one incident by id (ErrNotFound when there is none).
+func GetIncident(ctx context.Context, db *sql.DB, id string) (*Incident, error) {
+	return scanIncident(db.QueryRowContext(ctx, `SELECT `+incidentColumns+` FROM backup_incidents WHERE id = ?`, id))
+}
+
 // SetIncidentInboxItems records the inbox rows delivered for an incident.
 func SetIncidentInboxItems(ctx context.Context, db *sql.DB, id string, ids []string) error {
 	if ids == nil {

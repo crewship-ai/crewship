@@ -20,6 +20,16 @@ import (
 // transient and leaves the row for the next sweep.
 type SourceDeriver func(ctx context.Context, db *sql.DB, d Delivery) (notify.CategoryMessage, error)
 
+// SourceGone is the error a SourceDeriver returns to give a row up: it
+// matches sql.ErrNoRows and reads as reason alone, which is what the
+// delivery log records.
+func SourceGone(reason string) error { return sourceGoneError(reason) }
+
+type sourceGoneError string
+
+func (e sourceGoneError) Error() string        { return string(e) }
+func (e sourceGoneError) Is(target error) bool { return target == sql.ErrNoRows }
+
 var sourceDerivers sync.Map // source_kind -> SourceDeriver
 
 // RegisterSourceDeriver makes outbox rows of sourceKind recoverable.

@@ -23,6 +23,7 @@ func TestRecovery_RegisteredSourceDeriver(t *testing.T) {
 		wantPosts  int
 		wantStatus string
 		wantError  string
+		wantExact  bool
 	}{
 		{
 			name: "derived message is delivered and marked sent",
@@ -37,6 +38,14 @@ func TestRecovery_RegisteredSourceDeriver(t *testing.T) {
 				return notify.CategoryMessage{}, fmt.Errorf("incident was resolved: %w", sql.ErrNoRows)
 			},
 			wantStatus: StatusFailed, wantError: "recovery: incident was resolved",
+		},
+		{
+			name: "SourceGone records its reason alone",
+			derive: func(context.Context, *sql.DB, Delivery) (notify.CategoryMessage, error) {
+				return notify.CategoryMessage{}, SourceGone("the channel is switched off")
+			},
+			wantStatus: StatusFailed, wantError: "recovery: the channel is switched off",
+			wantExact: true,
 		},
 		{
 			name: "a transient error leaves the row untouched for the next sweep",
@@ -78,7 +87,7 @@ func TestRecovery_RegisteredSourceDeriver(t *testing.T) {
 			if tc.wantError != "" {
 				var msg string
 				_ = db.QueryRow(`SELECT COALESCE(error,'') FROM notification_deliveries WHERE id = ?`, id).Scan(&msg)
-				if !strings.HasPrefix(msg, tc.wantError) {
+				if !strings.HasPrefix(msg, tc.wantError) || (tc.wantExact && msg != tc.wantError) {
 					t.Fatalf("error = %q, want prefix %q", msg, tc.wantError)
 				}
 			}

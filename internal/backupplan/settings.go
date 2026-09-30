@@ -63,17 +63,20 @@ const (
 // (the console's BackupSettings minus the parts the API composes:
 // destinations, instance_admins, local_path).
 type Settings struct {
-	Limits             Limits      `json:"limits"`
-	HeartbeatURL       *string     `json:"heartbeat_url"`
-	HeartbeatLastAt    *string     `json:"heartbeat_last_at"`
-	HeartbeatLastOK    *bool       `json:"heartbeat_last_ok"`
-	HeartbeatLastError *string     `json:"heartbeat_last_error"`
-	RecoveryKitEnabled bool        `json:"recovery_kit_enabled"`
-	Channels           []string    `json:"channels"`
-	Events             AlertEvents `json:"events"`
-	StaleAlertHours    int         `json:"stale_alert_hours"`
-	DrillReminder      string      `json:"drill_reminder"`
-	UpdatedAt          *string     `json:"updated_at"`
+	Limits             Limits  `json:"limits"`
+	HeartbeatURL       *string `json:"heartbeat_url"`
+	HeartbeatLastAt    *string `json:"heartbeat_last_at"`
+	HeartbeatLastOK    *bool   `json:"heartbeat_last_ok"`
+	HeartbeatLastError *string `json:"heartbeat_last_error"`
+	RecoveryKitEnabled bool    `json:"recovery_kit_enabled"`
+	// Channels are notification channel ids (notification_channels.id) every
+	// alert also goes to, beside the instance admins' inboxes
+	// (alert_channels.go); the settings API checks the ones it adds.
+	Channels        []string    `json:"channels"`
+	Events          AlertEvents `json:"events"`
+	StaleAlertHours int         `json:"stale_alert_hours"`
+	DrillReminder   string      `json:"drill_reminder"`
+	UpdatedAt       *string     `json:"updated_at"`
 }
 
 // DefaultSettings is what a fresh install has (the migration's defaults).
@@ -161,7 +164,7 @@ func (s *Settings) Normalize() error {
 			continue
 		}
 		if len(c) > 200 {
-			return invalid("a channel name is at most 200 characters")
+			return invalid("a channel id is at most 200 characters")
 		}
 		seen[c] = true
 		chans = append(chans, c)
