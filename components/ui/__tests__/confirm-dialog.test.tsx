@@ -47,3 +47,18 @@ describe("ConfirmDialog", () => {
     expect(onOpenChange).not.toHaveBeenCalledWith(false)
   })
 })
+
+// Button (asChild) and the action's own className are merged by Radix's Slot,
+// which concatenates without tailwind-merge: a bg-destructive passed as a
+// class lost to the default variant's bg-primary, and every "destructive"
+// confirmation in the app rendered a blue button.
+describe("ConfirmDialog destructive", () => {
+  it("renders the confirm button in the destructive variant", () => {
+    render(
+      <ConfirmDialog open onOpenChange={() => {}} title="Delete it?" confirmLabel="Delete" destructive onConfirm={() => {}} />,
+    )
+    const btn = screen.getByRole("button", { name: "Delete" })
+    expect(btn).toHaveAttribute("data-variant", "destructive")
+    expect(btn.className).not.toMatch(/(^|\s)bg-primary(\s|$)/)
+  })
+})

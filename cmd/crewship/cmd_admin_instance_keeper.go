@@ -232,13 +232,24 @@ func printGovChanges(cmd *cobra.Command, r instanceGovPutResult, verb string) {
 		}
 		parts := make([]string, 0, len(ws.Changes))
 		for _, c := range ws.Changes {
-			parts = append(parts, fmt.Sprintf("%s %v → %v", c.Field, c.Before, c.After))
+			parts = append(parts, fmt.Sprintf("%s %s → %s", c.Field, govValue(c.Field, c.Before), govValue(c.Field, c.After)))
 		}
 		fmt.Fprintf(w, "  %-24s %s\n", ws.WorkspaceSlug, strings.Join(parts, ", "))
 	}
 	if r.DefaultsUpdated {
 		fmt.Fprintln(w, "  New workspaces will start with these settings.")
 	}
+}
+
+// govValue prints a changed value the way the settings read: the sampling
+// cadence's 0 is "never set", which runs on the built-in default, not "never".
+func govValue(field string, v any) string {
+	if field == "behavior_sample_every" {
+		if n, ok := v.(float64); ok && n == 0 {
+			return "default (1 in 5)"
+		}
+	}
+	return fmt.Sprint(v)
 }
 
 // governancePatchFromFlags builds the partial update from the flags that were

@@ -57,6 +57,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - Activity now includes the accepted work ledger and webhook deliveries. The separate Work navigation item is removed; existing `/work` bookmarks open the corresponding Activity view. (#2636)
 
 ### Fixed
+- A destructive confirmation (delete, revoke, overwrite) showed its confirm button in the primary blue: the red was passed as a class that lost to the default variant. It is the destructive variant now.
 - Human chat context resolution rechecks the original authority immediately before loading agent configuration, in addition to admission and final delivery checks. (#2711)
 - Keeper reviews that name no credential (skill, behavior, memory health, lessons) no longer vanish from the keeper request list: a NULL credential id failed the scan and the row was skipped, so the reviews panel read 0 while reviews existed.
 - The judge's health card now asks within the workspace; without it the admin floor answered 400 and the card hid itself.

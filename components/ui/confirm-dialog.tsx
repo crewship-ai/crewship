@@ -119,7 +119,9 @@ export function ConfirmDialog({
           <AlertDialogAction
             disabled={disabled}
             aria-disabled={disabled || undefined}
-            className={cn(destructive && "bg-destructive text-white hover:bg-destructive/90")}
+            // The variant, not a class: Slot concatenates classes without
+            // tailwind-merge, so a bg-destructive class lost to bg-primary.
+            variant={destructive ? "destructive" : "default"}
             onClick={async (e) => {
               // Radix closes on click by default; keep it open until the
               // work is done so a failure can leave the person where they were.
