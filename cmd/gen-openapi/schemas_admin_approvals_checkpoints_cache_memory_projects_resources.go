@@ -385,12 +385,13 @@ func schemaCatalogAdminApprovalsCheckpointsCacheMemoryProjectsResources() map[st
 			"defaults": retentionWindows, "configured": stringArray(),
 		}, "defaults", "configured")},
 		"PUT /api/v1/admin/instance/retention/defaults": {
-			Request: object(map[string]any{"windows": retentionPatch, "dry_run": boolean()}, "windows"),
+			Request: object(map[string]any{"windows": retentionPatch, "dry_run": boolean(), "expect_preview": str()}, "windows"),
 			Response: object(map[string]any{
 				"applied": boolean(), "dry_run": boolean(), "affects_existing": boolean(),
-				"changes":  array(object(map[string]any{"key": str(), "from": nullable(integer()), "to": nullable(integer())}, "key", "from", "to")),
-				"defaults": retentionWindows,
-			}, "applied", "dry_run", "affects_existing", "changes", "defaults")},
+				"changes":    array(object(map[string]any{"key": str(), "from": nullable(integer()), "to": nullable(integer())}, "key", "from", "to")),
+				"defaults":   retentionWindows,
+				"preview_id": str(),
+			}, "applied", "dry_run", "affects_existing", "changes", "defaults", "preview_id")},
 		// Admin › Backups across workspaces. incomplete is null when the
 		// bundle's gaps were never recorded and [] when there are none;
 		// proof_level is 1 checksum, 2 contents checked, 3 test restore.

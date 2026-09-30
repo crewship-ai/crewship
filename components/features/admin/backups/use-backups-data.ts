@@ -103,7 +103,8 @@ export function useResource<T>(url: string | null, fixture: () => T, map?: (json
   return { ...state, reload }
 }
 
-export type SendResult<T> = { ok: true; data: T } | { ok: false; unavailable: boolean; error: string }
+/** A failed write carries the HTTP status when there was one (409 = stale preview). */
+export type SendResult<T> = { ok: true; data: T } | { ok: false; unavailable: boolean; error: string; status?: number }
 
 /** One write. A 404/405/501 is reported as unavailable, not as a failure. */
 export async function send<T = unknown>(url: string, method: string, body?: unknown): Promise<SendResult<T>> {
@@ -113,8 +114,8 @@ export async function send<T = unknown>(url: string, method: string, body?: unkn
       headers: body === undefined ? undefined : { "Content-Type": "application/json" },
       body: body === undefined ? undefined : JSON.stringify(body),
     })
-    if (isUnavailableStatus(res.status)) return { ok: false, unavailable: true, error: "Not available on this server yet" }
-    if (!res.ok) return { ok: false, unavailable: false, error: await readError(res, `HTTP ${res.status}`) }
+    if (isUnavailableStatus(res.status)) return { ok: false, unavailable: true, error: "Not available on this server yet", status: res.status }
+    if (!res.ok) return { ok: false, unavailable: false, error: await readError(res, `HTTP ${res.status}`), status: res.status }
     const data = res.status === 204 ? ({} as T) : ((await res.json().catch(() => ({}))) as T)
     return { ok: true, data }
   } catch (e) {

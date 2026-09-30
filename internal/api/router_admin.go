@@ -459,19 +459,33 @@ func (r *Router) registerAdminRoutes() {
 	r.authedInstance("GET", "/api/v1/admin/instance/backups/incidents", bp.ListIncidents)
 	// openapi: responses 200,401,403,500
 	r.authedInstance("GET", "/api/v1/admin/instance/backups/recovery-sheet", bp.RecoverySheet)
+	// Restore from an off-site copy: what a destination holds, and fetching a
+	// bundle back as a job (admin_instance_backup_copies.go).
+	copies := newOffsiteCopiesHandler(bp)
+	// openapi: query destination:string; responses 200,400,401,403,404,502
+	r.authedInstance("GET", "/api/v1/admin/instance/backups/copies", copies.List)
+	// openapi: responses 202,400,401,403,404,409,500,502
+	r.authedInstance("POST", "/api/v1/admin/instance/backups/copies/fetch", copies.Fetch)
+	// openapi: responses 200,401,403,404
+	r.authedInstance("GET", "/api/v1/admin/instance/backups/copies/fetch/{id}", copies.FetchStatus)
 
-	r.authedMut("POST", "/api/v1/admin/backups", roleManage, backupH.Create)
+	// One workspace's backups: OWNER/ADMIN of the workspace named, or an
+	// instance admin, who need not be a member of it (authedAdmin /
+	// authedAdminWrite). The handlers scope everything to that workspace.
+	r.authedAdminWrite("POST", "/api/v1/admin/backups", backupH.Create)
 	r.authedAdmin("GET", "/api/v1/admin/backups", backupH.List)
 	r.authedAdmin("GET", "/api/v1/admin/backups/status", backupH.Status)
-	r.authedAdmin("GET", "/api/v1/admin/backups/metrics", backupH.Metrics)
-	r.authedMut("DELETE", "/api/v1/admin/backups/status", roleManage, backupH.Unlock)
+	// Instance-wide counters: no workspace needed; the handler admits only
+	// an instance admin.
+	r.authedAdminAny("GET", "/api/v1/admin/backups/metrics", backupH.Metrics)
+	r.authedAdminWrite("DELETE", "/api/v1/admin/backups/status", backupH.Unlock)
 	r.authedAdmin("GET", "/api/v1/admin/backups/inspect", backupH.Inspect)
 	r.authedAdmin("GET", "/api/v1/admin/backups/verify", backupH.Verify)
-	r.authedMut("POST", "/api/v1/admin/backups/rotate", roleManage, backupH.Rotate)
+	r.authedAdminWrite("POST", "/api/v1/admin/backups/rotate", backupH.Rotate)
 	r.authedAdmin("GET", "/api/v1/admin/backups/download", backupH.Download)
-	r.authedMut("POST", "/api/v1/admin/backups/restore", roleManage, backupH.Restore)
-	r.authedMut("POST", "/api/v1/admin/backups/self-test", roleManage, backupH.SelfTest)
-	r.authedMut("DELETE", "/api/v1/admin/backups", roleManage, backupH.Delete)
+	r.authedAdminWrite("POST", "/api/v1/admin/backups/restore", backupH.Restore)
+	r.authedAdminWrite("POST", "/api/v1/admin/backups/self-test", backupH.SelfTest)
+	r.authedAdminWrite("DELETE", "/api/v1/admin/backups", backupH.Delete)
 
 	// Legacy C1 resources (admin-only). Detect/remove pre-C1 slug-only crew
 	// docker resources that survive nuke+reseed and block agent container

@@ -315,6 +315,34 @@ export interface NewOffsiteDestination {
   allow_private_network: boolean
 }
 
+/** One bundle at an off-site destination (GET /admin/instance/backups/copies). */
+export interface OffsiteCopy {
+  key: string
+  size: number
+  modified: string
+  scope: "instance" | "workspace"
+  workspace_id: string | null
+  /** Already on this server, at local_path. */
+  local: boolean
+  local_path: string | null
+}
+
+export interface OffsiteCopyList { destination_id: string; destination_name: string; copies: OffsiteCopy[] }
+
+/** An off-site fetch job (POST …/copies/fetch, GET …/copies/fetch/{id}). */
+export interface OffsiteFetch {
+  id: string
+  destination_id: string
+  key: string
+  status: "running" | "done" | "failed"
+  path: string | null
+  size: number
+  layers: number
+  error: string | null
+  started_at: string
+  ended_at: string | null
+}
+
 /** POST …/destinations/{id}/test, and the test part of a create. */
 export interface DestinationTest { ok: boolean; error: string | null; tested_at: string }
 
@@ -443,7 +471,8 @@ export interface RetentionChange {
   /** Rows the next sweep deletes because of this change. */
   rows_affected: number
 }
-export interface RetentionPutResponse { dry_run: boolean; changes: RetentionChange[] }
+/** preview_id fingerprints the targets and every from → to; a confirmation sends it back as expect_preview. */
+export interface RetentionPutResponse { dry_run: boolean; changes: RetentionChange[]; preview_id?: string }
 
 /** The workspaces the scope bar lists (GET /api/v1/admin/workspaces). */
 export interface ScopeWorkspace { id: string; name: string; slug: string }

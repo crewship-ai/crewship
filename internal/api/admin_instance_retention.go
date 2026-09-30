@@ -6,7 +6,7 @@ package api
 //	GET /api/v1/admin/instance/retention?ws=<id|slug>&ws=…   every window of the chosen (or all) workspaces, the defaults and the fixed instance limits
 //	PUT /api/v1/admin/instance/retention                     one, several or every existing workspace; dry_run previews
 //	GET /api/v1/admin/instance/retention/defaults            what a workspace created later starts with
-//	PUT /api/v1/admin/instance/retention/defaults            change those defaults; touches no existing workspace
+//	PUT /api/v1/admin/instance/retention/defaults            change those defaults; touches no existing workspace; dry_run previews, expect_preview confirms
 //
 // A save follows the Keeper governance pattern (admin_instance_keeper.go): one
 // transaction for every workspace or none and an instance audit entry per
@@ -343,19 +343,25 @@ type instanceRetentionDefaultsPutResponse struct {
 	// Defaults is every window as a new workspace would start after the save
 	// (or, on a dry run, would).
 	Defaults retention.Windows `json:"defaults"`
+	// PreviewID fingerprints every window's current default and every
+	// from → to. Send it back as expect_preview.
+	PreviewID string `json:"preview_id"`
 }
 
 // PutDefaults is PUT /api/v1/admin/instance/retention/defaults:
 //
-//	{ "windows": { "inbox_days": 90, "chats_days": null }, "dry_run": true }
+//	{ "windows": { "inbox_days": 90, "chats_days": null }, "dry_run": true, "expect_preview": "…" }
 //
 // Only the windows sent change. A window already at the value is not a change
-// and records nothing.
+// and records nothing. expect_preview, the preview_id of the dry run the admin
+// confirmed, holds the save to that preview: a default changed since is a 409
+// and nothing is written.
 func (h *InstanceRetentionHandler) PutDefaults(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	var body struct {
-		Windows map[string]json.RawMessage `json:"windows"`
-		DryRun  bool                       `json:"dry_run"`
+		Windows       map[string]json.RawMessage `json:"windows"`
+		DryRun        bool                       `json:"dry_run"`
+		ExpectPreview string                     `json:"expect_preview"`
 	}
 	if err := readJSON(r, &body); err != nil {
 		replyError(w, http.StatusBadRequest, "invalid JSON body")
@@ -389,7 +395,16 @@ func (h *InstanceRetentionHandler) PutDefaults(w http.ResponseWriter, r *http.Re
 		resp.Defaults[info.Key] = to
 		changed[info.Key] = to
 	}
-	if body.DryRun || len(changed) == 0 {
+	resp.PreviewID = retentionDefaultsPreviewID(cur, resp.Changes)
+	if body.DryRun {
+		writeJSON(w, http.StatusOK, resp)
+		return
+	}
+	if body.ExpectPreview != "" && body.ExpectPreview != resp.PreviewID {
+		replyError(w, http.StatusConflict, "the defaults changed since the preview; review the changes again")
+		return
+	}
+	if len(changed) == 0 {
 		writeJSON(w, http.StatusOK, resp)
 		return
 	}
@@ -409,6 +424,26 @@ func (h *InstanceRetentionHandler) PutDefaults(w http.ResponseWriter, r *http.Re
 	}
 	resp.Applied = true
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// retentionDefaultsPreviewID fingerprints a planned defaults save: every
+// window's current default (so a change to any of them, not only the ones
+// being saved, invalidates the preview) and every from → to.
+func retentionDefaultsPreviewID(cur retention.Windows, changes []instanceRetentionDefaultsChange) string {
+	type window struct {
+		Key  retention.Key `json:"key"`
+		Days *int          `json:"days"`
+	}
+	plan := struct {
+		Current []window                          `json:"current"`
+		Changes []instanceRetentionDefaultsChange `json:"changes"`
+	}{Current: []window{}, Changes: changes}
+	for _, info := range retention.Keys {
+		plan.Current = append(plan.Current, window{Key: info.Key, Days: cur[info.Key]})
+	}
+	b, _ := json.Marshal(plan)
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:12])
 }
 
 func (h *InstanceRetentionHandler) fail(w http.ResponseWriter, what string, err error) {

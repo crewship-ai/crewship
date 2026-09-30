@@ -34,46 +34,116 @@ function fmtChange(c: RetentionChange, label: string): string {
   return `${c.workspace_name} · ${label}: ${retentionLabel(c.from)} → ${retentionLabel(c.to)}${rows}`
 }
 
+/** What the confirmation says when the server refuses a stale preview (409). */
+export const STALE_PREVIEW = "Something changed since the preview — review again"
+
+/**
+ * A preview and the exact request it previewed. Confirming sends this
+ * snapshot — targets, changes and the server's preview_id — never whatever
+ * the form or the selection holds by then (review B3).
+ */
+interface RetentionPreview {
+  plan: RetentionChange[]
+  /** null is "every existing workspace". */
+  targets: string[] | null
+  changes: { key: string; days: number | null }[]
+  previewId?: string
+  /** For the dialog title: how many limits, on how many workspaces. */
+  count: number
+  all: boolean
+  size: number
+}
+
 export function RetentionBody({ rows, ctx, reload }: { rows: RetentionRow[]; ctx: SectionCtx; reload?: () => void }) {
   const [draft, setDraft] = React.useState<Record<string, number | null>>({})
-  const [plan, setPlan] = React.useState<RetentionChange[] | null>(null)
+  const [preview, setPreview] = React.useState<RetentionPreview | null>(null)
   const [busy, setBusy] = React.useState(false)
+  const [stale, setStale] = React.useState(false)
   const diff = retentionDiff(rows, draft)
   const editable = rows.filter((r) => !r.housekeeping)
   const housekeeping = rows.filter((r) => r.housekeeping)
-  const ids = [...ctx.selected]
+  const ids = [...ctx.selected].sort()
   // Every workspace ticked is sent as null: "every existing workspace", so one
-  // created while the dialog is open is not left out. It is a selection only;
-  // the defaults for new workspaces are a separate card and save below.
+  // created while the dialog is open is not left out (the server's preview_id
+  // covers the list, so that is a 409, not a silent extra write). It is a
+  // selection only; the defaults for new workspaces are a separate card.
   const all = ctx.workspaces.length > 0 && ids.length === ctx.workspaces.length
-  const target = all ? null : ids
   const label = (key: string) => rows.find((r) => r.key === key)?.label ?? key
   const changes = diff.map((d) => ({ key: d.key, days: d.to }))
 
+  // A draft and a preview belong to the workspaces they were made for. Any
+  // change of selection drops both; any change of the draft drops the
+  // preview. The epoch is bumped each time, so an answer asked for before
+  // (A→B→A included) is recognised as stale and dropped.
+  const scopeKey = all ? "all" : ids.join(",")
+  const draftKey = JSON.stringify(changes)
+  const epoch = React.useRef(0)
+  const scopeRef = React.useRef(scopeKey)
+  const draftKeyRef = React.useRef(draftKey)
+  const draftRef = React.useRef(draft)
+  draftRef.current = draft
+  React.useEffect(() => {
+    if (scopeRef.current === scopeKey) return
+    scopeRef.current = scopeKey
+    epoch.current += 1
+    if (Object.keys(draftRef.current).length > 0) toast.info("The selection changed, so the unsaved retention changes were dropped.")
+    setDraft({}); setPreview(null); setBusy(false); setStale(false)
+  }, [scopeKey])
+  React.useEffect(() => {
+    if (draftKeyRef.current === draftKey) return
+    draftKeyRef.current = draftKey
+    epoch.current += 1
+    setPreview(null); setBusy(false)
+  }, [draftKey])
+
   const review = async () => {
-    setBusy(true)
+    const asked = ++epoch.current
+    const snap = { targets: all ? null : ids, changes, count: diff.length, all, size: ids.length }
+    setBusy(true); setStale(false)
     if (ctx.demo) {
-      setPlan(ids.flatMap((id) => diff.map((d) => ({
+      setPreview({ ...snap, plan: ids.flatMap((id) => diff.map((d) => ({
         workspace_id: id, workspace_name: ctx.workspaces.find((w) => w.id === id)?.name ?? id, key: d.key, from: d.from, to: d.to,
         rows_affected: d.to !== null && (d.from === null || d.to < d.from) ? 120 : 0,
-      }))))
-    } else {
-      const r = await putRetention(target, changes, true)
-      if (r.ok) setPlan(r.data.changes)
-      else if (r.unavailable) toast.message("Data retention: not available on this server yet")
-      else toast.error(`The change could not be checked: ${r.error}`)
+      }))) })
+      setBusy(false)
+      return
     }
+    const r = await putRetention(snap.targets, snap.changes, true)
+    // An answer for a selection or a draft that is no longer on screen is dropped.
+    if (epoch.current !== asked) return
+    if (r.ok) setPreview({ ...snap, plan: r.data.changes, previewId: r.data.preview_id })
+    else if (r.unavailable) toast.message("Data retention: not available on this server yet")
+    else toast.error(`The change could not be checked: ${r.error}`)
     setBusy(false)
   }
-  const swept = (plan ?? []).reduce((a, c) => a + c.rows_affected, 0)
+  const apply = async () => {
+    const p = preview
+    if (!p) return
+    if (ctx.demo) { toast.message("Demo data · nothing was sent"); return }
+    const r = await putRetention(p.targets, p.changes, false, p.previewId)
+    if (!r.ok && r.status === 409) {
+      // Nothing was written. The draft stays so the admin can review again.
+      setStale(true)
+      toast.error(STALE_PREVIEW)
+      reload?.()
+      return
+    }
+    if (!r.ok) { toast.error(`The change could not be saved: ${r.error}`); throw new Error(r.error) }
+    toast.success("Retention saved")
+    setDraft({})
+    reload?.()
+  }
+  const plan = preview?.plan ?? []
+  const swept = plan.reduce((a, c) => a + c.rows_affected, 0)
   const consequences: Consequence[] = [
-    ...(plan ?? []).map((c) => ({ tone: (c.rows_affected ? "lost" : "warn") as Consequence["tone"], text: fmtChange(c, label(c.key)) })),
+    ...plan.map((c) => ({ tone: (c.rows_affected ? "lost" : "warn") as Consequence["tone"], text: fmtChange(c, label(c.key)) })),
     ...(swept ? [{ tone: "kept" as const, text: `${swept.toLocaleString("en-GB")} rows go at the next sweep; older backups still hold them until they age out.` }] : []),
     { tone: "kept" as const, text: "New workspaces are not changed; they start from Defaults for new workspaces." },
   ]
 
   return (
     <>
+      {stale && <WarnBar tone="bad" title={STALE_PREVIEW}>Nothing was written. The values below are still unsaved; Save shows the new preview.</WarnBar>}
       {ctx.selected.size > 1 && (
         <WarnBar title={`${ctx.selected.size} workspaces selected.`}>A change is written into each after a dialog lists what it overwrites. New workspaces are not affected; their defaults are set below.</WarnBar>
       )}
@@ -117,19 +187,12 @@ export function RetentionBody({ rows, ctx, reload }: { rows: RetentionRow[]; ctx
         Turning a limit on says how many rows go at the next sweep, and that older backups still hold them until they age out.
       </p>
       <SettingsSaveBar count={diff.length} saving={busy} onDiscard={() => setDraft({})} onSave={review} />
-      <ConfirmDialog open={plan !== null} onOpenChange={(o) => { if (!o) setPlan(null) }} destructive={swept > 0}
-        title={plan && plan.length ? `Apply ${diff.length} limit${diff.length === 1 ? "" : "s"} to ${all ? "every existing workspace" : `${ctx.selected.size} workspace${ctx.selected.size === 1 ? "" : "s"}`}?` : "Nothing to change"}
+      <ConfirmDialog open={preview !== null} onOpenChange={(o) => { if (!o) setPreview(null) }} destructive={swept > 0}
+        title={preview && plan.length ? `Apply ${preview.count} limit${preview.count === 1 ? "" : "s"} to ${preview.all ? "every existing workspace" : `${preview.size} workspace${preview.size === 1 ? "" : "s"}`}?` : "Nothing to change"}
         description="The dry run lists every value this overwrites."
         consequences={consequences}
         confirmLabel="Apply"
-        onConfirm={async () => {
-          if (ctx.demo) { toast.message("Demo data · nothing was sent"); return }
-          const r = await putRetention(target, changes, false)
-          if (!r.ok) { toast.error(`The change could not be saved: ${r.error}`); throw new Error(r.error) }
-          toast.success("Retention saved")
-          setDraft({})
-          reload?.()
-        }} />
+        onConfirm={apply} />
       <RetentionDefaultsCard rows={editable} demo={ctx.demo} />
     </>
   )
@@ -143,17 +206,50 @@ export function RetentionBody({ rows, ctx, reload }: { rows: RetentionRow[]; ctx
 export function RetentionDefaultsCard({ rows, demo }: { rows: RetentionRow[]; demo: boolean }) {
   const res = useRetentionDefaults(true)
   const [draft, setDraft] = React.useState<Record<string, number | null>>({})
-  const [preview, setPreview] = React.useState<RetentionDefaultsPut["changes"] | null>(null)
+  // The preview and the exact windows it previewed; confirming sends those
+  // with the server's preview_id, never the form as it is by then.
+  const [preview, setPreview] = React.useState<{ changes: RetentionDefaultsPut["changes"]; windows: Record<string, number | null>; previewId?: string } | null>(null)
+  const [stale, setStale] = React.useState(false)
   const current = res.data?.defaults ?? {}
   const edits = Object.entries(draft).filter(([k, v]) => current[k] !== v)
   const label = (key: string) => rows.find((r) => r.key === key)?.label ?? key
+  // Any edit drops a preview, and an answer to an older request is dropped.
+  const editsKey = JSON.stringify(edits)
+  const epoch = React.useRef(0)
+  const editsRef = React.useRef(editsKey)
+  React.useEffect(() => {
+    if (editsRef.current === editsKey) return
+    editsRef.current = editsKey
+    epoch.current += 1
+    setPreview(null)
+  }, [editsKey])
 
   const review = async () => {
-    if (demo) { setPreview(edits.map(([key, to]) => ({ key, from: current[key] ?? null, to }))); return }
-    const r = await putRetentionDefaults(Object.fromEntries(edits), true)
-    if (r.ok) setPreview(r.data.changes)
+    const asked = ++epoch.current
+    const windows = Object.fromEntries(edits)
+    setStale(false)
+    if (demo) { setPreview({ windows, changes: edits.map(([key, to]) => ({ key, from: current[key] ?? null, to })) }); return }
+    const r = await putRetentionDefaults(windows, true)
+    if (epoch.current !== asked) return
+    if (r.ok) setPreview({ windows, changes: r.data.changes, previewId: r.data.preview_id })
     else if (r.unavailable) toast.message("Defaults for new workspaces: not available on this server yet")
     else toast.error(`The defaults could not be checked: ${r.error}`)
+  }
+  const apply = async () => {
+    const p = preview
+    if (!p) return
+    if (demo) { toast.message("Demo data · nothing was sent"); return }
+    const r = await putRetentionDefaults(p.windows, false, p.previewId)
+    if (!r.ok && r.status === 409) {
+      setStale(true)
+      toast.error(STALE_PREVIEW)
+      res.reload()
+      return
+    }
+    if (!r.ok) { toast.error(`The defaults could not be saved: ${r.error}`); throw new Error(r.error) }
+    toast.success("Defaults for new workspaces saved")
+    setDraft({})
+    res.reload()
   }
 
   if (res.status === "unavailable") return null
@@ -163,6 +259,7 @@ export function RetentionDefaultsCard({ rows, demo }: { rows: RetentionRow[]; de
         <div className="text-[14px] font-medium">Defaults for new workspaces</div>
         <div className="text-[13px] text-muted-foreground">What a workspace created from now on starts with. Existing workspaces are not changed.</div>
       </div>
+      {stale && <div className="border-b border-border px-4 py-2.5"><WarnBar tone="bad" title={STALE_PREVIEW}>Nothing was written.</WarnBar></div>}
       <div className="overflow-x-auto">
         <table className="w-full">
           <tbody>
@@ -189,21 +286,14 @@ export function RetentionDefaultsCard({ rows, demo }: { rows: RetentionRow[]; de
         {edits.length > 0 && <Button size="sm" variant="ghost" onClick={() => setDraft({})}>Discard</Button>}
       </div>
       <ConfirmDialog open={preview !== null} onOpenChange={(o) => { if (!o) setPreview(null) }}
-        title={preview && preview.length ? `Change ${preview.length} default${preview.length === 1 ? "" : "s"} for new workspaces?` : "Nothing to change"}
+        title={preview && preview.changes.length ? `Change ${preview.changes.length} default${preview.changes.length === 1 ? "" : "s"} for new workspaces?` : "Nothing to change"}
         description="Only workspaces created from now on start with these."
         consequences={[
-          ...(preview ?? []).map((c) => ({ tone: "warn" as const, text: `${label(c.key)}: ${retentionLabel(c.from)} → ${retentionLabel(c.to)}` })),
+          ...(preview?.changes ?? []).map((c) => ({ tone: "warn" as const, text: `${label(c.key)}: ${retentionLabel(c.from)} → ${retentionLabel(c.to)}` })),
           { tone: "kept" as const, text: "No existing workspace changes." },
         ]}
         confirmLabel="Save defaults for new workspaces"
-        onConfirm={async () => {
-          if (demo) { toast.message("Demo data · nothing was sent"); return }
-          const r = await putRetentionDefaults(Object.fromEntries(edits), false)
-          if (!r.ok) { toast.error(`The defaults could not be saved: ${r.error}`); throw new Error(r.error) }
-          toast.success("Defaults for new workspaces saved")
-          setDraft({})
-          res.reload()
-        }} />
+        onConfirm={apply} />
     </div>
   )
 }

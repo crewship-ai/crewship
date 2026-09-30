@@ -1,19 +1,23 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"log/slog"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/api"
 	"github.com/crewship-ai/crewship/internal/backup"
+	"github.com/crewship-ai/crewship/internal/retention"
 	"github.com/crewship-ai/crewship/internal/testutil"
 )
 
@@ -44,7 +48,18 @@ func TestAcceptance_AdminInstanceRetention(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	srv := httptest.NewServer(router)
+	// interfere, when set, runs once right after the next defaults PUT is
+	// served — between the CLI's preview and its confirmation — standing in
+	// for another admin saving meanwhile.
+	var interfere atomic.Pointer[func()]
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		router.ServeHTTP(w, r)
+		if r.Method == http.MethodPut && r.URL.Path == "/api/v1/admin/instance/retention/defaults" {
+			if f := interfere.Swap(nil); f != nil {
+				(*f)()
+			}
+		}
+	}))
 	defer srv.Close()
 	cfg := filepath.Join(t.TempDir(), "cli.yaml")
 	if err := os.WriteFile(cfg, []byte("server: "+srv.URL+"\nworkspace: people\ntoken: "+token+"\nformat: table\n"), 0600); err != nil {
@@ -157,6 +172,24 @@ func TestAcceptance_AdminInstanceRetention(t *testing.T) {
 	if out := must("", "admin", "instance", "retention", "defaults", "set", "--chats-days", "120", "--yes"); !strings.Contains(out, "Existing workspaces are unchanged") {
 		t.Fatalf("defaults set:\n%s", out)
 	}
+	// The confirmation saves exactly what the preview showed: a default another
+	// admin changed in between makes the server refuse, and nothing is written.
+	stale := func() {
+		seven := 7
+		if err := retention.MergeDefaults(context.Background(), db, retention.Windows{retention.Chats: &seven}, time.Now()); err != nil {
+			t.Errorf("interfere: %v", err)
+		}
+	}
+	interfere.Store(&stale)
+	if out, err := run("", "admin", "instance", "retention", "defaults", "set", "--chats-days", "200", "--yes"); err == nil || !strings.Contains(out, "changed since the preview") {
+		t.Fatalf("stale defaults preview: %v\n%s", err, out)
+	}
+	if d, _, err := retention.Defaults(context.Background(), db); err != nil || d[retention.Chats] == nil || *d[retention.Chats] != 7 {
+		t.Fatalf("a refused defaults save wrote: %v %v", err, d[retention.Chats])
+	}
+	if out := must("", "admin", "instance", "retention", "defaults", "set", "--chats-days", "120", "--yes"); !strings.Contains(out, "Existing workspaces are unchanged") {
+		t.Fatalf("defaults set back:\n%s", out)
+	}
 	var chatRows int
 	_ = db.QueryRow(`SELECT COUNT(*) FROM retention_settings WHERE key = 'chats_days'`).Scan(&chatRows)
 	if chatRows != 0 {
@@ -186,8 +219,8 @@ func TestAcceptance_AdminInstanceRetention(t *testing.T) {
 	_ = db.QueryRow(`SELECT COUNT(*) FROM instance_audit_logs WHERE action = 'instance.retention_updated' AND target_workspace_id = 'ir-lab'`).Scan(&audited)
 	var defaultsAudited int
 	_ = db.QueryRow(`SELECT COUNT(*) FROM instance_audit_logs WHERE action = 'instance.retention_defaults_updated'`).Scan(&defaultsAudited)
-	if defaultsAudited != 1 {
-		t.Fatalf("defaults audit entries = %d, want 1", defaultsAudited)
+	if defaultsAudited != 2 {
+		t.Fatalf("defaults audit entries = %d, want 2 (the refused save records none)", defaultsAudited)
 	}
 	if audited != 2 {
 		t.Fatalf("lab audit entries = %d, want one per save that changed it", audited)

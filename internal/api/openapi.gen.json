@@ -18104,6 +18104,557 @@
         ]
       }
     },
+    "/api/v1/admin/instance/backups/copies": {
+      "get": {
+        "operationId": "get_api_v1_admin_instance_backups_copies",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "destination",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "copies": {
+                      "items": {
+                        "properties": {
+                          "key": {
+                            "type": "string"
+                          },
+                          "local": {
+                            "type": "boolean"
+                          },
+                          "local_path": {
+                            "nullable": true,
+                            "type": "string"
+                          },
+                          "modified": {
+                            "type": "string"
+                          },
+                          "scope": {
+                            "type": "string"
+                          },
+                          "size": {
+                            "type": "integer"
+                          },
+                          "workspace_id": {
+                            "nullable": true,
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "key",
+                          "size",
+                          "modified",
+                          "scope",
+                          "workspace_id",
+                          "local",
+                          "local_path"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "destination_id": {
+                      "type": "string"
+                    },
+                    "destination_name": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "destination_id",
+                    "destination_name",
+                    "copies"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Gateway"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/v1/admin/instance/backups/copies/fetch": {
+      "post": {
+        "operationId": "post_api_v1_admin_instance_backups_copies_fetch",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "destination_id": {
+                    "type": "string"
+                  },
+                  "key": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "destination_id",
+                  "key"
+                ],
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "destination_id": {
+                      "type": "string"
+                    },
+                    "ended_at": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "error": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "key": {
+                      "type": "string"
+                    },
+                    "layers": {
+                      "type": "integer"
+                    },
+                    "path": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "size": {
+                      "type": "integer"
+                    },
+                    "started_at": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "destination_id",
+                    "key",
+                    "status",
+                    "path",
+                    "size",
+                    "layers",
+                    "error",
+                    "started_at",
+                    "ended_at"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Accepted"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Gateway"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/v1/admin/instance/backups/copies/fetch/{id}": {
+      "get": {
+        "operationId": "get_api_v1_admin_instance_backups_copies_fetch_id",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "destination_id": {
+                      "type": "string"
+                    },
+                    "ended_at": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "error": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "key": {
+                      "type": "string"
+                    },
+                    "layers": {
+                      "type": "integer"
+                    },
+                    "path": {
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "size": {
+                      "type": "integer"
+                    },
+                    "started_at": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "destination_id",
+                    "key",
+                    "status",
+                    "path",
+                    "size",
+                    "layers",
+                    "error",
+                    "started_at",
+                    "ended_at"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "tags": [
+          "admin"
+        ]
+      }
+    },
     "/api/v1/admin/instance/backups/destinations": {
       "get": {
         "operationId": "get_api_v1_admin_instance_backups_destinations",
@@ -27889,6 +28440,9 @@
                   "dry_run": {
                     "type": "boolean"
                   },
+                  "expect_preview": {
+                    "type": "string"
+                  },
                   "windows": {
                     "properties": {
                       "approvals_days": {
@@ -28029,6 +28583,9 @@
                     },
                     "dry_run": {
                       "type": "boolean"
+                    },
+                    "preview_id": {
+                      "type": "string"
                     }
                   },
                   "required": [
@@ -28036,7 +28593,8 @@
                     "dry_run",
                     "affects_existing",
                     "changes",
-                    "defaults"
+                    "defaults",
+                    "preview_id"
                   ],
                   "type": "object"
                 }
@@ -28097,6 +28655,24 @@
               }
             },
             "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
           },
           "500": {
             "content": {

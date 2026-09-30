@@ -29,10 +29,18 @@ scope adds.
 ## Access control
 
 - **Instance administrators only.** Every instance backup route sits behind
-  the instance gate: the `CREWSHIP_OWNER_EMAIL` break-glass owner, anyone an
-  instance admin named (`users.instance_role = 'ADMIN'`), or — while nobody is
-  named — the owners of the oldest workspace. An OWNER or ADMIN of a single
-  workspace is refused with `403`. CLI tokens need the `instance:admin` scope.
+  the instance gate: the `CREWSHIP_OWNER_EMAIL` break-glass owner, or anyone
+  an instance admin named (`users.instance_role = 'ADMIN'`). An install that
+  named nobody named the owners of its oldest workspace once, the first time
+  anyone's status was asked, recorded it in the instance audit
+  (`instance.admin_bootstrapped`) and never does it again — removing every
+  named admin later does not hand the instance to that workspace's owners.
+  An OWNER or ADMIN of a single workspace is refused with `403`. CLI tokens
+  need the `instance:admin` scope.
+- **Per-workspace backups follow the same rule.** The `/api/v1/admin/backups*`
+  routes act on the workspace the request names and admit its OWNER or ADMIN,
+  or an instance administrator who is not a member of it. Nobody else reaches
+  another workspace's bundles.
 - **One run at a time.** A second run while one is going answers `409`.
 - **Always encrypted.** An unencrypted instance bundle is refused. Prefer age
   recipients (`age1…` public keys whose private halves live offline). A

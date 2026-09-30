@@ -85,6 +85,9 @@ The operational surface for OWNER and ADMIN roles: workspace stats, user managem
 | `DELETE` | [/api/v1/admin/instance/backups/destinations/\{id\}](#delete-api-v1-admin-instance-backups-destinations-id) | Remove a destination no plan copies to |
 | `GET` | [/api/v1/admin/instance/backups/incidents](#get-api-v1-admin-instance-backups-incidents) | Backup incidents, one per plan and kind |
 | `GET` | [/api/v1/admin/instance/backups/recovery-sheet](#get-api-v1-admin-instance-backups-recovery-sheet) | The recovery sheet (Markdown) |
+| `GET` | [/api/v1/admin/instance/backups/copies](#get-api-v1-admin-instance-backups-copies) | The bundles an off-site destination holds, and which are already here |
+| `POST` | [/api/v1/admin/instance/backups/copies/fetch](#post-api-v1-admin-instance-backups-copies-fetch) | Fetch a bundle back from off-site (a job) |
+| `GET` | [/api/v1/admin/instance/backups/copies/fetch/\{id\}](#get-api-v1-admin-instance-backups-copies-fetch-id) | Follow an off-site fetch |
 | `GET` | [/api/v1/admin/instance/holds](#get-api-v1-admin-instance-holds) | Automations an instance restore left held |
 | `POST` | [/api/v1/admin/instance/holds/resume](#post-api-v1-admin-instance-holds-resume) | Resume a held automation |
 | `POST` | [/api/v1/admin/prune-legacy-resources](#post-api-v1-admin-prune-legacy-resources) | Remove orphaned pre-C1 Docker resources |
@@ -2302,6 +2305,93 @@ Markdown text.
 | `401` | Missing authentication. |
 | `403` | Caller is not an instance administrator. |
 | `500` | A read failed. |
+
+## `GET /api/v1/admin/instance/backups/copies`
+
+Restore from an off-site copy, step one: every bundle a destination holds —
+not its `.environments.json` refs objects or environment layers — and whether
+this server already has it (`local`, with `local_path`). `scope` and
+`workspace_id` are read from the key (`instance/…` or
+`workspaces/<workspace id>/…`). `?destination=` is the destination id and is
+required.
+
+**Auth:** instance administrator. **Request:** query parameters only.
+**Response:**
+
+```json
+{
+  "destination_id": "bdst_…", "destination_name": "r2",
+  "copies": [
+    {"key": "instance/crewship-instance-20260929T010000Z.tar.zst", "size": 538181632, "modified": "2026-09-29T01:04:10Z",
+     "scope": "instance", "workspace_id": null, "local": false, "local_path": null}
+  ]
+}
+```
+
+| Status | Condition |
+|--------|-----------|
+| `200` | The list. |
+| `400` | No `destination`. |
+| `401` | Missing authentication. |
+| `403` | Caller is not an instance administrator. |
+| `404` | No destination with that id. |
+| `502` | The destination could not be opened or listed; the message says why. |
+
+## `POST /api/v1/admin/instance/backups/copies/fetch`
+
+Downloads one bundle, with every environment layer its refs object names,
+into this server's backups directory, each verified against its SHA-256, and
+records the layers as the bundle's so retention keeps them. The bundle is then
+an ordinary local bundle: restore a workspace from it, run a drill, or run
+`crewship recover` with it.
+
+A fetch can take far longer than one request may (the CLI gives up on a
+request after 30 seconds), so it runs as a job with its own six-hour deadline
+and the request answers `202` at once. Follow it with
+`GET …/copies/fetch/{id}`. The same destination and key while a fetch of it
+runs answers that job again. Jobs live in the server process: a restart
+forgets them, and a half-downloaded bundle never appears. Audited as
+`instance.backup_copy_fetched`.
+
+**Auth:** instance administrator. **Request:**
+
+```json
+{"destination_id": "bdst_…", "key": "instance/crewship-instance-20260929T010000Z.tar.zst"}
+```
+
+**Response:** the job (see the next section), `status` `running`.
+
+| Status | Condition |
+|--------|-----------|
+| `202` | Started, or already running. |
+| `400` | No `destination_id`, or `key` is not a bundle (a refs object, a layer, a path escape). |
+| `401` | Missing authentication. |
+| `403` | Caller is not an instance administrator. |
+| `404` | No destination with that id, or no object with that key there. |
+| `409` | The bundle is already on this server; `local_path` says where. |
+| `500` | The backups directory could not be resolved. |
+| `502` | The destination could not be reached. |
+
+## `GET /api/v1/admin/instance/backups/copies/fetch/{id}`
+
+One off-site fetch: `running`, `done` (`path` is the local bundle, `size` its
+bytes, `layers` how many environment layers came with it) or `failed`
+(`error` says why; nothing partial is left behind).
+
+**Auth:** instance administrator. **Request:** no body. **Response:**
+
+```json
+{"id": "cm…", "destination_id": "bdst_…", "key": "instance/crewship-instance-20260929T010000Z.tar.zst", "status": "done",
+ "path": "/var/lib/crewship/backups/crewship-instance-20260929T010000Z.tar.zst", "size": 538181632, "layers": 4,
+ "error": null, "started_at": "2026-09-30T09:00:00Z", "ended_at": "2026-09-30T09:06:41Z"}
+```
+
+| Status | Condition |
+|--------|-----------|
+| `200` | The job. |
+| `401` | Missing authentication. |
+| `403` | Caller is not an instance administrator. |
+| `404` | No fetch with that id on this server (a restart forgets them). |
 
 ## `GET /api/v1/admin/instance/holds`
 

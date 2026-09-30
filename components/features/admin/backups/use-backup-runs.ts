@@ -22,37 +22,62 @@ export function legacyRun(b: BackupListEntry, workspace: { id: string; name: str
 }
 
 /**
+ * The workspace a legacy per-workspace call (/admin/backups*) acts on: the
+ * run's own workspace, else the one workspace ticked in the scope bar, else
+ * the workspace the admin sits in. Always named explicitly, because an
+ * instance admin may act on a workspace they are not a member of.
+ */
+export function workspaceFor(ctx: { selected: Set<string>; currentWorkspaceId: string | null }, runWorkspaceId?: string | null): string | null {
+  if (runWorkspaceId) return runWorkspaceId
+  if (ctx.selected.size === 1) return [...ctx.selected][0]
+  return ctx.currentWorkspaceId
+}
+
+/**
  * GET /admin/instance/backups/runs, and — until that exists — the bundles the
- * legacy list already knows for the workspace the admin sits in
- * (GET /admin/backups), so the history is never blank on a server that has
- * backups. Legacy rows carry no phases and no proof beyond what a check adds.
+ * legacy list already knows (GET /admin/backups) for every workspace the
+ * scope bar ticks, each asked by name, so the history is never blank on a
+ * server that has backups and an instance admin sees workspaces they are not
+ * in. Legacy rows carry no phases and no proof beyond what a check adds.
  */
 export function useBackupRuns(scope: BackupScope, selected: Set<string>, all: ScopeWorkspace[]): Resource<BackupRun[]> & { source: "runs" | "legacy" } {
   const { workspaceId } = useWorkspace()
   const runs = useResource<BackupRun[]>(`${INSTANCE_BACKUPS}/runs?${scopeQuery(scope, selected, all)}&limit=100`, () => runsFixture(new Date()), listOf)
   const [legacy, setLegacy] = React.useState<Resource<BackupRun[]> | null>(null)
   const [tick, setTick] = React.useState(0)
-  const wsName = all.find((w) => w.id === workspaceId)?.name ?? null
+  const targets = React.useMemo(() => {
+    const ids = scope === "workspaces" && selected.size > 0 ? [...selected].sort() : workspaceId ? [workspaceId] : []
+    return ids.map((id) => ({ id, name: all.find((w) => w.id === id)?.name ?? (id === workspaceId ? "This workspace" : id) }))
+  }, [scope, selected, all, workspaceId])
+  const targetsKey = JSON.stringify(targets)
 
   React.useEffect(() => {
-    if (runs.status !== "unavailable" || !workspaceId) return
+    if (runs.status !== "unavailable" || targets.length === 0) return
     const controller = new AbortController()
+    const reload = () => setTick((t) => t + 1)
     void (async () => {
       try {
-        const res = await apiFetch(`/api/v1/admin/backups?workspace_id=${encodeURIComponent(workspaceId)}`, { signal: controller.signal })
-        if (controller.signal.aborted) return
-        if (!res.ok) {
-          setLegacy({ status: isUnavailableStatus(res.status) ? "unavailable" : "error", data: null, error: await readError(res, `HTTP ${res.status}`), demo: false, reload: () => setTick((t) => t + 1) })
-          return
+        const rows: BackupRun[] = []
+        for (const ws of targets) {
+          const res = await apiFetch(`/api/v1/admin/backups?workspace_id=${encodeURIComponent(ws.id)}`, { signal: controller.signal })
+          if (controller.signal.aborted) return
+          if (!res.ok) {
+            setLegacy({ status: isUnavailableStatus(res.status) ? "unavailable" : "error", data: null, error: await readError(res, `HTTP ${res.status}`), demo: false, reload })
+            return
+          }
+          rows.push(...listOf<BackupListEntry>(await res.json()).map((b) => legacyRun(b, ws)))
         }
-        const rows = listOf<BackupListEntry>(await res.json()).map((b) => legacyRun(b, workspaceId ? { id: workspaceId, name: wsName ?? "This workspace" } : null))
-        setLegacy({ status: "ready", data: rows, error: null, demo: false, reload: () => setTick((t) => t + 1) })
+        if (controller.signal.aborted) return
+        rows.sort((a, b) => (b.started_at ?? "").localeCompare(a.started_at ?? ""))
+        setLegacy({ status: "ready", data: rows, error: null, demo: false, reload })
       } catch (e) {
-        if (!controller.signal.aborted) setLegacy({ status: "error", data: null, error: e instanceof Error ? e.message : "Network error", demo: false, reload: () => setTick((t) => t + 1) })
+        if (!controller.signal.aborted) setLegacy({ status: "error", data: null, error: e instanceof Error ? e.message : "Network error", demo: false, reload })
       }
     })()
     return () => controller.abort()
-  }, [runs.status, workspaceId, wsName, tick])
+    // targetsKey stands for targets: the same workspaces are the same request.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [runs.status, targetsKey, tick])
 
   if (runs.status === "unavailable" && legacy) return { ...legacy, source: "legacy" }
   return { ...runs, source: "runs" }
@@ -82,7 +107,7 @@ export async function checkBundle(path: string, key: { identity?: string; passph
   }
 }
 
-/** The download link: the legacy streaming endpoint, which works today. */
+/** The download link: the legacy streaming endpoint, for the workspace named. */
 export function downloadHref(path: string, workspaceId: string | null): string | null {
   return workspaceId ? buildDownloadUrl(workspaceId, path) : null
 }

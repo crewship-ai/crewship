@@ -13,14 +13,39 @@ import {
   type RestoreChecks, type RestoreRecord, type RestoreReport, type RestoreTarget,
 } from "./backups-model"
 import { checksFixture, dryRunFixture, restorePhasesFixture } from "./__fixtures__/backups"
-import { useBackupRuns } from "./use-backup-runs"
-import { restore, restoreChecks, resumeHold, useHolds, useRestores } from "./use-backup-recovery"
-import { saveBackupSettings, useBackupSettings, useVaultKeys } from "./use-backup-settings"
+import { useBackupRuns, workspaceFor } from "./use-backup-runs"
+import { fetchAndWait, restore, restoreChecks, resumeHold, useHolds, useOffsiteCopies, useRestores } from "./use-backup-recovery"
+import { saveBackupSettings, useBackupSettings, useDestinations, useVaultKeys } from "./use-backup-settings"
 import { perform } from "./use-backups-data"
 import type { SectionCtx } from "./backups-console"
 
 type Sub = "new" | "history" | "drills"
 const STEPS = ["Backup", "Target", "Keys", "Checks", "Dry run", "Restore", "Resume"] as const
+// An instance target restores offline, where the key is: after the checks the
+// wizard shows the command, and there is no online dry run or restore step.
+const CLI_STEPS: { n: number; label: string }[] = [
+  { n: 1, label: "Backup" }, { n: 2, label: "Target" }, { n: 3, label: "Keys" }, { n: 4, label: "Checks" }, { n: 5, label: "Command line" }, { n: 7, label: "Resume" },
+]
+
+/** The file an admin keeps the private backup key in; the server never has it. */
+export const KEY_FILE_PLACEHOLDER = "<key-file>"
+
+/** Quote a path for a POSIX shell when it needs it. */
+export function shellQuote(s: string): string {
+  return /^[A-Za-z0-9_@%+=:,./-]+$/.test(s) ? s : `'${s.replace(/'/g, `'\\''`)}'`
+}
+
+/**
+ * The offline command for an instance target: `crewship recover` onto an empty
+ * server, or `crewship backup drill … --post` for an isolated test restore
+ * that records its result on this server.
+ */
+export function offlineCommand(target: RestoreTarget, bundle: string | null): string {
+  const b = bundle ? shellQuote(bundle) : "<bundle>"
+  return target === "isolated"
+    ? `crewship backup drill --bundle ${b} --identity ${KEY_FILE_PLACEHOLDER} --post`
+    : `crewship recover --bundle ${b} --identity ${KEY_FILE_PLACEHOLDER} --data-dir /var/lib/crewship`
+}
 
 /**
  * Backups › Recovery: a guided restore — pick a backup, a target, the keys;
@@ -67,12 +92,15 @@ export function RestoreWizard({ ctx, now = new Date() }: { ctx: SectionCtx; now?
   const [progress, setProgress] = React.useState<RestoreReport | null>(null)
   const [busy, setBusy] = React.useState(false)
   const [confirm, setConfirm] = React.useState(false)
+  const [offsite, setOffsite] = React.useState(false)
   const instance = ctx.scope === "instance"
   const cliOnly = target === "empty_server" || target === "isolated"
   const key = { identity: identity.trim() || undefined, passphrase: passphrase || undefined }
   const req = { path: path ?? "", target, ...key, as_workspace: target === "new_workspace" ? asName : undefined, as_crew: target === "crew" ? asName : undefined }
   const pool = (runs.data ?? []).filter((r) => r.bundle_path && (runs.source === "legacy" || (instance ? r.scope === "instance" : r.scope === "workspaces")))
   const picked = pool.find((r) => r.bundle_path === path) ?? null
+  // The workspace a workspace/crew restore acts on, named explicitly.
+  const restoreWs = workspaceFor(ctx, picked?.workspace_id)
 
   const runChecks = async () => {
     setBusy(true)
@@ -87,16 +115,18 @@ export function RestoreWizard({ ctx, now = new Date() }: { ctx: SectionCtx; now?
       setChecks(r.ok ? r.data : "unavailable")
     }
     setBusy(false)
-    setStep(4)
+    // An instance target has no online dry run (there is no instance restore
+    // route): straight on to the offline instructions.
+    setStep(cliOnly ? 5 : 4)
   }
   const dryRun = async () => {
     setBusy(true)
-    const out = ctx.demo ? dryRunFixture(ctx.scope) : await perform(false, () => restore({ ...req, dry_run: true }, ctx.currentWorkspaceId), "", "The dry run failed")
+    const out = ctx.demo ? dryRunFixture(ctx.scope) : await perform(false, () => restore({ ...req, dry_run: true }, restoreWs), "", "The dry run failed")
     setBusy(false)
     if (out) { setReport(out); setStep(5) }
   }
   const doRestore = async () => {
-    const out = ctx.demo ? restorePhasesFixture() : await perform(false, () => restore({ ...req, dry_run: false }, ctx.currentWorkspaceId), "Restore finished", "The restore failed")
+    const out = ctx.demo ? restorePhasesFixture() : await perform(false, () => restore({ ...req, dry_run: false }, restoreWs), "Restore finished", "The restore failed")
     if (!out) throw new Error("restore failed")
     setProgress(out)
     setStep(6)
@@ -106,16 +136,24 @@ export function RestoreWizard({ ctx, now = new Date() }: { ctx: SectionCtx; now?
   return (
     <>
       <ol className="flex flex-wrap gap-1.5" aria-label="Restore steps">
-        {STEPS.map((s, i) => (
-          <li key={s} aria-current={i + 1 === step ? "step" : undefined}
-            className={cn("rounded-full border px-2.5 py-1 text-[12.5px]", i + 1 === step ? "border-primary bg-primary/[0.14] text-foreground" : "border-border text-muted-foreground")}>
-            {i + 1}. {s}
+        {(cliOnly ? CLI_STEPS : STEPS.map((label, i) => ({ n: i + 1, label }))).map((s, i) => (
+          <li key={s.label} aria-current={s.n === step ? "step" : undefined}
+            className={cn("rounded-full border px-2.5 py-1 text-[12.5px]", s.n === step ? "border-primary bg-primary/[0.14] text-foreground" : "border-border text-muted-foreground")}>
+            {i + 1}. {s.label}
           </li>
         ))}
       </ol>
 
-      {step === 1 && (
-        <SettingsCard title="Pick a backup" actions={<SmallButton disabled title="Uploading a backup from another machine comes later">Upload a backup…</SmallButton>}>
+      {step === 1 && offsite && (
+        <OffsitePicker demo={ctx.demo} onClose={() => setOffsite(false)}
+          onPicked={(p) => { setPath(p); setOffsite(false); setStep(2) }} />
+      )}
+
+      {step === 1 && !offsite && (
+        <SettingsCard title="Pick a backup" actions={<>
+          <SmallButton onClick={() => setOffsite(true)}>From off-site storage…</SmallButton>
+          <SmallButton disabled title="Uploading a backup from another machine comes later">Upload a backup…</SmallButton>
+        </>}>
           <Gate resource={runs} what="Backups">
             {() => pool.length === 0 ? <p className="px-4 py-3 text-[12.5px] text-muted-foreground">No backup in this scope yet.</p> : (
               <div className="overflow-x-auto">
@@ -193,28 +231,19 @@ export function RestoreWizard({ ctx, now = new Date() }: { ctx: SectionCtx; now?
 
       {step === 4 && (
         <>
-          {checks === "unavailable" || checks === null ? (
-            <Unavailable what="checks before a restore; the dry run still reads the whole backup" />
-          ) : (
-            <SettingsCard title="Before anything changes">
-              <FieldRow label="Space"><Chip tone={checks.space.ok ? "ok" : "bad"}>{checks.space.ok ? "✓" : "✗"}</Chip> {formatSize(checks.space.need_bytes)} needed, {formatSize(checks.space.free_bytes)} free</FieldRow>
-              <FieldRow label="Format" detail="an older backup goes through a converter first; the original stays untouched">
-                <Chip tone={checks.format.ok ? "ok" : "bad"}>{checks.format.ok ? "✓" : "✗"}</Chip> v{checks.format.version}, {checks.format.converter ? "through a converter" : "restorable directly"}
-              </FieldRow>
-              <FieldRow label="Runtime" detail={checks.runtime.warnings.length ? checks.runtime.warnings.join(" · ") : undefined} detailTone="warn">
-                <Chip tone={checks.runtime.ok ? "ok" : "bad"}>{checks.runtime.ok ? "✓" : "✗"}</Chip> {checks.runtime.detail}
-              </FieldRow>
-              {checks.unsafe.length > 0 && (
-                <FieldRow label="Not carried over for safety" detail="restored switched off; turn back on by hand after review">{checks.unsafe.join(" · ")}</FieldRow>
-              )}
-              <FieldRow label="Conflicts">{checks.conflicts.ok && <><Chip tone="ok">✓</Chip> </>}{checks.conflicts.detail}</FieldRow>
-            </SettingsCard>
-          )}
+          <ChecksCard checks={checks} />
           <div><SmallButton primary onClick={dryRun} disabled={busy}>{busy ? "Running…" : "Run the dry run"}</SmallButton></div>
         </>
       )}
 
-      {step === 5 && report && (
+      {step === 5 && cliOnly && (
+        <>
+          <ChecksCard checks={checks} />
+          <OfflineCard target={target} bundle={path} onNext={() => setStep(7)} />
+        </>
+      )}
+
+      {step === 5 && !cliOnly && report && (
         <>
           <SettingsCard title="Dry run" actions={<Chip tone={report.result === "ok" ? "ok" : report.result === "partial" ? "warn" : "bad"}>{report.result}</Chip>}>
             <ul className="m-0 list-disc py-3 pl-8 pr-4 text-[13px] [&>li]:my-1">
@@ -223,19 +252,7 @@ export function RestoreWizard({ ctx, now = new Date() }: { ctx: SectionCtx; now?
               {report.notes.map((n) => <li key={n}>{n}</li>)}
             </ul>
           </SettingsCard>
-          {cliOnly ? (
-            <SettingsCard title={target === "empty_server" ? "Restore from the command line" : "Run the drill from the command line"}
-              description="the server keeps no private key, so this restore runs where the key is">
-              <pre className="overflow-x-auto px-4 py-3 font-mono text-[12px]">
-                {target === "empty_server"
-                  ? `crewship recover --bundle ${path ?? "<bundle>"} --identity ops-2026.key --data-dir /var/lib/crewship`
-                  : `crewship backup drill --bundle ${path ?? "<bundle>"} --identity ops-2026.key`}
-              </pre>
-              <div className="border-t border-border px-4 py-2.5"><SmallButton onClick={() => setStep(7)}>After the restore: what is held</SmallButton></div>
-            </SettingsCard>
-          ) : (
-            <div><SmallButton danger onClick={() => setConfirm(true)}>Restore…</SmallButton></div>
-          )}
+          <div><SmallButton danger onClick={() => setConfirm(true)}>Restore…</SmallButton></div>
           <ConfirmDialog open={confirm} onOpenChange={setConfirm} destructive title={target === "replace" ? "Replace the workspace?" : "Restore this backup?"}
             description="The restore runs in phases and keeps its progress across a restart of this server."
             consequences={[
@@ -264,6 +281,132 @@ export function RestoreWizard({ ctx, now = new Date() }: { ctx: SectionCtx; now?
 
       {step === 7 && <HeldCard ctx={ctx} onReset={reset} />}
     </>
+  )
+}
+
+/**
+ * Recovery step 1 from an off-site copy: pick a destination, see the bundles
+ * it holds, fetch one back (a server job, followed here) or use the copy this
+ * server already has, then carry on with that bundle.
+ */
+function OffsitePicker({ demo, onPicked, onClose }: { demo: boolean; onPicked: (path: string) => void; onClose: () => void }) {
+  const dests = useDestinations()
+  const [chosen, setChosen] = React.useState<string | null>(null)
+  const destId = chosen ?? dests.data?.[0]?.id ?? null
+  const copies = useOffsiteCopies(destId)
+  const [fetching, setFetching] = React.useState<string | null>(null)
+  const follow = React.useRef<AbortController | null>(null)
+  React.useEffect(() => () => follow.current?.abort(), [])
+
+  const fetchOne = async (key: string) => {
+    if (!destId) return
+    if (demo) { toast.message("Demo data · nothing was sent"); return }
+    setFetching(key)
+    follow.current = new AbortController()
+    const r = await fetchAndWait(destId, key, { signal: follow.current.signal })
+    setFetching(null)
+    if (r.ok) {
+      toast.success("Fetched · the bundle is on this server now")
+      onPicked(r.data)
+    } else if (!follow.current.signal.aborted) {
+      toast.error(`The copy could not be fetched: ${r.error}`)
+    }
+  }
+
+  return (
+    <SettingsCard title="From off-site storage" description="a bundle is fetched back to this server, verified, then restored like any other"
+      actions={<SmallButton onClick={onClose}>Back to this server's backups</SmallButton>}>
+      <Gate resource={dests} what="Off-site destinations">
+        {(list) => list.length === 0 ? (
+          <p className="px-4 py-3 text-[12.5px] text-muted-foreground">No off-site destination is set up. Add one in Storage.</p>
+        ) : (
+          <>
+            {list.length > 1 && (
+              <div className="border-b border-border px-4 py-2.5">
+                <SettingsSegmented<string> label="Destination" value={destId ?? ""} onChange={setChosen}
+                  options={list.map((d) => ({ value: d.id, label: d.name }))} />
+              </div>
+            )}
+            <Gate resource={copies} what="Off-site copies">
+              {(data) => data.copies.length === 0 ? (
+                <p className="px-4 py-3 text-[12.5px] text-muted-foreground">No bundle at {data.destination_name}.</p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full tabular-nums">
+                    <thead><tr>{["Bundle", "Scope", "Size", "Copied", ""].map((h) => <th key={h} className={TH}>{h}</th>)}</tr></thead>
+                    <tbody>
+                      {data.copies.map((c) => (
+                        <tr key={c.key} className="[&:last-child>td]:border-b-0">
+                          <td className={cn(TD, "font-mono text-[12px]")}>{c.key}</td>
+                          <td className={TD}>{c.scope === "instance" ? "Whole instance" : `Workspace ${c.workspace_id ?? ""}`}</td>
+                          <td className={TD}>{formatSize(c.size)}</td>
+                          <td className={TD}>{shortDate(new Date(c.modified))}</td>
+                          <td className={cn(TD, "text-right")}>
+                            {c.local && c.local_path
+                              ? <SmallButton onClick={() => onPicked(c.local_path!)} title={`Already on this server: ${c.local_path}`}>Use</SmallButton>
+                              : <SmallButton primary disabled={fetching !== null} onClick={() => void fetchOne(c.key)}>{fetching === c.key ? "Fetching…" : "Fetch"}</SmallButton>}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </Gate>
+          </>
+        )}
+      </Gate>
+    </SettingsCard>
+  )
+}
+
+function ChecksCard({ checks }: { checks: RestoreChecks | "unavailable" | null }) {
+  if (checks === "unavailable" || checks === null) return <Unavailable what="checks before a restore" />
+  return (
+    <SettingsCard title="Before anything changes">
+      <FieldRow label="Space"><Chip tone={checks.space.ok ? "ok" : "bad"}>{checks.space.ok ? "✓" : "✗"}</Chip> {formatSize(checks.space.need_bytes)} needed, {formatSize(checks.space.free_bytes)} free</FieldRow>
+      <FieldRow label="Format" detail="an older backup goes through a converter first; the original stays untouched">
+        <Chip tone={checks.format.ok ? "ok" : "bad"}>{checks.format.ok ? "✓" : "✗"}</Chip> v{checks.format.version}, {checks.format.converter ? "through a converter" : "restorable directly"}
+      </FieldRow>
+      <FieldRow label="Runtime" detail={checks.runtime.warnings.length ? checks.runtime.warnings.join(" · ") : undefined} detailTone="warn">
+        <Chip tone={checks.runtime.ok ? "ok" : "bad"}>{checks.runtime.ok ? "✓" : "✗"}</Chip> {checks.runtime.detail}
+      </FieldRow>
+      {checks.unsafe.length > 0 && (
+        <FieldRow label="Not carried over for safety" detail="restored switched off; turn back on by hand after review">{checks.unsafe.join(" · ")}</FieldRow>
+      )}
+      <FieldRow label="Conflicts">{checks.conflicts.ok && <><Chip tone="ok">✓</Chip> </>}{checks.conflicts.detail}</FieldRow>
+    </SettingsCard>
+  )
+}
+
+/**
+ * Where an instance restore really happens: on the machine that holds the
+ * private key. The exact command for the bundle picked, with the key file as
+ * a placeholder, and a Copy button.
+ */
+function OfflineCard({ target, bundle, onNext }: { target: RestoreTarget; bundle: string | null; onNext: () => void }) {
+  const cmd = offlineCommand(target, bundle)
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(cmd)
+      toast.success("Command copied")
+    } catch {
+      toast.error("Could not copy; select the command and copy it by hand")
+    }
+  }
+  return (
+    <SettingsCard title={target === "isolated" ? "Run the drill from the command line" : "Restore from the command line"}
+      description="the server keeps no private key, so this restore runs where the key is"
+      actions={<SmallButton onClick={() => void copy()}>Copy</SmallButton>}>
+      <pre className="overflow-x-auto whitespace-pre-wrap break-all px-4 py-3 font-mono text-[12px]">{cmd}</pre>
+      <p className="border-t border-border px-4 py-2.5 text-[12.5px] text-muted-foreground">
+        Replace <code className="font-mono">{KEY_FILE_PLACEHOLDER}</code> with the file that holds the private backup key (AGE-SECRET-KEY-1…).{" "}
+        {target === "isolated"
+          ? "The drill restores into a throwaway directory, checks attachments, credentials, memory and the journal, and --post records the result on this server."
+          : "Run it on the new server with an empty data directory, then start Crewship there; what was held stays held until you resume it."}
+      </p>
+      <div className="border-t border-border px-4 py-2.5"><SmallButton onClick={onNext}>After the restore: what is held</SmallButton></div>
+    </SettingsCard>
   )
 }
 

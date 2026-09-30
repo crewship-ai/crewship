@@ -19,8 +19,12 @@ crewship backup <subcommand> [flags]
 
 <Note>
   Every subcommand that talks to the server requires the **OWNER** or
-  **ADMIN** role on the target workspace — other roles are refused at both
-  the CLI and the server. `convert` works offline on a bundle file.
+  **ADMIN** role on the target workspace, or an instance administrator —
+  other roles are refused. The commands name the workspace explicitly
+  (`--workspace`, or the configured one), so an instance administrator works
+  on any workspace without being a member of it:
+  `crewship backup list --workspace lab`. `convert` works offline on a bundle
+  file.
 </Note>
 
 ## Subcommands
@@ -38,7 +42,7 @@ crewship backup <subcommand> [flags]
 | `status` | Show the active advisory lock for this workspace. |
 | `unlock` | Force-release a stale advisory lock (emergency only). |
 | `self-test` | Run the backup canary round-trip on a crew (admin diagnostic). |
-| `metrics` | Show process-lifetime backup counters (instance owner only). |
+| `metrics` | Show process-lifetime backup counters (instance administrators only). |
 | `convert` | Convert an older bundle to the current format (offline, no server or role needed; the original is never modified). |
 | `drill` | Test-restore an instance bundle in a throwaway directory and check it (offline); `--post` records the result. |
 
@@ -466,7 +470,7 @@ crewship backup metrics
 Output is pretty-printed JSON.
 
 <Note>
-  Gated to instance OWNER server-side.
+  Instance administrators only, server-side.
 </Note>
 
 ## See also

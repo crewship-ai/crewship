@@ -205,13 +205,18 @@ func (c *Client) NewRequest(ctx context.Context, method, path string, body io.Re
 	// that cache and re-resolve on every request. A definitive slug miss
 	// (typo'd --workspace) fails the request here, typed ExitNotFound, before
 	// it can ride through as a bogus workspace_id param.
-	wsID, err := c.resolveWorkspaceID(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if wsID != "" {
-		q := u.Query()
-		if q.Get("workspace_id") == "" {
+	//
+	// A workspace_id the caller put in the path is theirs: it is neither
+	// rewritten nor preceded by the preflight for the configured slug, which
+	// lists only the caller's own workspaces and would refuse one an instance
+	// admin names without being a member (the server resolves id or slug).
+	if u.Query().Get("workspace_id") == "" {
+		wsID, err := c.resolveWorkspaceID(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if wsID != "" {
+			q := u.Query()
 			q.Set("workspace_id", wsID)
 			u.RawQuery = q.Encode()
 		}

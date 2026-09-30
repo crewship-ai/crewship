@@ -49,7 +49,7 @@ var backupListCmd = &cobra.Command{
 			return err
 		}
 		client := newAPIClient()
-		resp, err := client.Get("/api/v1/admin/backups")
+		resp, err := client.Get(backupRoute("/api/v1/admin/backups"))
 		if err != nil {
 			return err
 		}
@@ -109,7 +109,7 @@ var backupInspectCmd = &cobra.Command{
 			return err
 		}
 		client := newAPIClient()
-		resp, err := client.Get("/api/v1/admin/backups/inspect?path=" + encodeQuery(args[0]))
+		resp, err := client.Get(backupRoute("/api/v1/admin/backups/inspect?path=" + encodeQuery(args[0])))
 		if err != nil {
 			return err
 		}
@@ -222,7 +222,7 @@ you need to know who acquired the lock (or wait for its TTL).`,
 			return err
 		}
 		client := newAPIClient()
-		resp, err := client.Get("/api/v1/admin/backups/status")
+		resp, err := client.Get(backupRoute("/api/v1/admin/backups/status"))
 		if err != nil {
 			return err
 		}
@@ -386,4 +386,21 @@ func truncateLong(s string, max int) string {
 // urlencoded expects.
 func encodeQuery(s string) string {
 	return url.QueryEscape(s)
+}
+
+// backupRoute names the workspace on a /api/v1/admin/backups* call
+// explicitly, as the --workspace flag or the config gives it (id or slug;
+// the server resolves either). An instance admin may act on a workspace
+// they are not a member of, which the client's own slug lookup — it lists
+// only the caller's workspaces — would refuse before the call is sent.
+func backupRoute(path string) string {
+	ws := cli.ResolveWorkspace(flagWorkspace, cliCfg)
+	if ws == "" {
+		return path
+	}
+	sep := "?"
+	if strings.Contains(path, "?") {
+		sep = "&"
+	}
+	return path + sep + "workspace_id=" + url.QueryEscape(ws)
 }

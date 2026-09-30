@@ -35,7 +35,7 @@ var backupVerifyCmd = &cobra.Command{
 			return err
 		}
 		client := newAPIClient()
-		resp, err := client.Get("/api/v1/admin/backups/verify?path=" + encodeQuery(args[0]))
+		resp, err := client.Get(backupRoute("/api/v1/admin/backups/verify?path=" + encodeQuery(args[0])))
 		if err != nil {
 			return err
 		}
@@ -106,7 +106,7 @@ non-interactive session --force is mandatory.`,
 			}
 		}
 		client := newAPIClient()
-		resp, err := client.Delete("/api/v1/admin/backups/status")
+		resp, err := client.Delete(backupRoute("/api/v1/admin/backups/status"))
 		if err != nil {
 			return err
 		}
@@ -181,7 +181,7 @@ points elsewhere.`,
 		}
 		client := newAPIClient()
 		path := args[0]
-		resp, err := client.Get("/api/v1/admin/backups/download?path=" + encodeQuery(path))
+		resp, err := client.Get(backupRoute("/api/v1/admin/backups/download?path=" + encodeQuery(path)))
 		if err != nil {
 			return err
 		}
@@ -250,7 +250,7 @@ returns the canary result with an "ok" boolean and per-stage timing.`,
 		if err != nil {
 			return err
 		}
-		resp, err := client.Post("/api/v1/admin/backups/self-test", map[string]string{
+		resp, err := client.Post(backupRoute("/api/v1/admin/backups/self-test"), map[string]string{
 			"crew_id": crewID,
 		})
 		if err != nil {
@@ -300,7 +300,7 @@ var backupRotateCmd = &cobra.Command{
 			"dry_run":   dryRun,
 		}
 		client := newAPIClient()
-		resp, err := client.Post("/api/v1/admin/backups/rotate", body)
+		resp, err := client.Post(backupRoute("/api/v1/admin/backups/rotate"), body)
 		if err != nil {
 			return err
 		}
