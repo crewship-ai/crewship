@@ -108,3 +108,8 @@ entry here for a new entrypoint, and test nontrivial executable changes.
 Before moving an existing file, update its CI, Makefile, package scripts,
 container COPY instructions, imports and documentation together. Duplicate
 looking names can have different contracts; do not consolidate on name alone.
+
+`acceptance-restricted-workflow-browser.mjs` runs only against the owned
+`TestLiveRestrictedWorkflowBrowser` synthetic fixture and a production static
+export. It exercises private routine and declared Page action forms; it must not
+be pointed at a shared development instance.

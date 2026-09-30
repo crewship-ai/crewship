@@ -159,6 +159,34 @@ func TestRestrictedOrdinaryRoutineAndDeclaredPageUsePrivateQueue(t *testing.T) {
 	spec := `{"apiVersion":"crewship/v1","kind":"Page","metadata":{"slug":"private-page"},"spec":{"name":"Private Page","panels":[{"id":"panel","schema":"status.v1","owner":"crew/wf-crew","producer":"script/status.sh","sla_seconds":30,"span":8,"actions":[{"id":"do-work","kind":"call","label":"Private work","routine":"private-work","params":{"task":"PAGE_PRIVATE_CANARY"}}]}]}}`
 	execOrFatal(t, db, `INSERT INTO pages(id,workspace_id,slug,name,owner_user_id,spec_json) VALUES('wf-page',?,'private-page','Private',?,?)`, workspace, owner, spec)
 	execOrFatal(t, db, `INSERT INTO page_panels(id,page_id,panel_id,schema,owner_crew_id,producer_kind,producer_ref,sla_seconds,span) VALUES('wf-panel','wf-page','panel','status.v1','wf-crew','script','status.sh',30,8)`)
+	pageCatalogPath := "/api/v1/workspaces/" + workspace + "/restricted-pages"
+	beforeCatalog := map[string]int{}
+	for _, table := range []string{"chats", "access_attempts", "restricted_workflow_jobs"} {
+		var count int
+		if err = db.QueryRowContext(t.Context(), `SELECT count(*) FROM `+table).Scan(&count); err != nil {
+			t.Fatal(err)
+		}
+		beforeCatalog[table] = count
+	}
+	pageCatalog := request("wf-h1", http.MethodGet, pageCatalogPath, "")
+	if pageCatalog.Code != 200 || pageCatalog.Header().Get("X-Total-Count") != "1" || !strings.Contains(pageCatalog.Body.String(), "do-work") {
+		t.Fatalf("allowed Page directory %d %s", pageCatalog.Code, pageCatalog.Body.String())
+	}
+	for _, forbidden := range []string{"PAGE_PRIVATE_CANARY", "producer", "params", "spec_json", "status.sh"} {
+		if strings.Contains(pageCatalog.Body.String(), forbidden) {
+			t.Fatalf("Page directory exposed %s", forbidden)
+		}
+	}
+	otherCatalog := request("wf-h2", http.MethodGet, pageCatalogPath, "")
+	if otherCatalog.Code != 200 || otherCatalog.Header().Get("X-Total-Count") != "0" || strings.Contains(otherCatalog.Body.String(), "private-page") {
+		t.Fatalf("Page floor leaked declaration/count %d %s", otherCatalog.Code, otherCatalog.Body.String())
+	}
+	for table, count := range beforeCatalog {
+		var after int
+		if err = db.QueryRowContext(t.Context(), `SELECT count(*) FROM `+table).Scan(&after); err != nil || after != count {
+			t.Fatalf("Page catalog issued %s authority %d != %d %v", table, after, count, err)
+		}
+	}
 	pagePath := "/api/v1/pages/private-page/panels/panel/actions/do-work"
 	rec := request("wf-h2", http.MethodPost, pagePath, `{"inputs":{}}`)
 	if rec.Code != 403 {
@@ -189,6 +217,38 @@ func TestRestrictedOrdinaryRoutineAndDeclaredPageUsePrivateQueue(t *testing.T) {
 	}
 	if status := request("wf-h1", http.MethodGet, statusPath, ""); status.Code != 200 || !strings.Contains(status.Body.String(), "answer-wf-h1") {
 		t.Fatalf("own Page completed status %d %s", status.Code, status.Body.String())
+	}
+	membership, err := store.Membership(t.Context(), "wf-h1", workspace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = store.Replace(t.Context(), owner, "wf-h1", workspace, "restricted", membership, nil); err != nil {
+		t.Fatal(err)
+	}
+	if catalog := request("wf-h1", http.MethodGet, pageCatalogPath, ""); catalog.Code != 200 || catalog.Header().Get("X-Total-Count") != "0" {
+		t.Fatal("Page directory ignored current target revocation", catalog.Code)
+	}
+	membership, err = store.Membership(t.Context(), "wf-h1", workspace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = store.Replace(t.Context(), owner, "wf-h1", workspace, "restricted", membership, []access.Right{{Kind: "agent", ID: "wf-agent", Operation: "run"}}); err != nil {
+		t.Fatal(err)
+	}
+	digest := strings.Repeat("a", 64)
+	execOrFatal(t, db, `INSERT INTO page_project_drafts(page_id,source_digest,revision,spec_json,updated_at) VALUES('wf-page',?,1,?,'2026-09-30T00:00:00Z')`, digest, spec)
+	if catalog := request("wf-h1", http.MethodGet, pageCatalogPath, ""); catalog.Code != 200 || catalog.Header().Get("X-Total-Count") != "0" {
+		t.Fatal("unpublished Page draft exposed executable actions", catalog.Code)
+	}
+	execOrFatal(t, db, `INSERT INTO page_project_builds(id,page_id,source_revision,source_digest,state,created_at) VALUES('wf-page-build','wf-page',1,?,'ready','2026-09-30T00:00:00Z')`, digest)
+	execOrFatal(t, db, `INSERT INTO page_project_publications(page_id,version,build_id,source_revision,source_digest,git_commit,artifact_digest,spec_json,checks_json,created_at) VALUES('wf-page',1,'wf-page-build',1,?,'synthetic-commit',?,?,'{}','2026-09-30T00:00:00Z')`, digest, digest, spec)
+	execOrFatal(t, db, `INSERT INTO page_project_live(page_id,version) VALUES('wf-page',1)`)
+	if catalog := request("wf-h1", http.MethodGet, pageCatalogPath, ""); catalog.Code != 200 || catalog.Header().Get("X-Total-Count") != "1" || !strings.Contains(catalog.Body.String(), `"publication":1`) {
+		t.Fatal("current publication missing from filtered Page directory", catalog.Code)
+	}
+	execOrFatal(t, db, `UPDATE pages SET spec_json=? WHERE id='wf-page'`, strings.Replace(spec, "Private work", "Changed work", 1))
+	if catalog := request("wf-h1", http.MethodGet, pageCatalogPath, ""); catalog.Code != 200 || catalog.Header().Get("X-Total-Count") != "0" || strings.Contains(catalog.Body.String(), "Changed work") {
+		t.Fatal("changed unpublished declaration escaped Page publication fence", catalog.Code)
 	}
 
 	var shared int
