@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"net/url"
 	"os"
 	"strings"
@@ -109,7 +110,12 @@ var backupInspectCmd = &cobra.Command{
 			return err
 		}
 		client := newAPIClient()
+		// Instance bundles answer on the instance route (the workspace
+		// route is a 404 for them).
 		resp, err := client.Get(backupRoute("/api/v1/admin/backups/inspect?path=" + encodeQuery(args[0])))
+		if tryInstanceBundleRoute(resp, err) {
+			resp, err = client.Get("/api/v1/admin/instance/backups/bundles/inspect?path=" + encodeQuery(args[0]))
+		}
 		if err != nil {
 			return err
 		}
@@ -403,4 +409,23 @@ func backupRoute(path string) string {
 		sep = "&"
 	}
 	return path + sep + "workspace_id=" + url.QueryEscape(ws)
+}
+
+// tryInstanceBundleRoute reports whether a bundle GET the workspace route
+// could not serve should be sent again to the instance route, which
+// resolves any catalogued bundle: 404 (no workspace bundle there) or 400 (a
+// path outside the workspace backups directory, where an instance run with
+// its own output directory writes). An instance bundle belongs to no
+// workspace, so the workspace route never finds it; the instance route
+// needs an instance admin, which is who holds instance bundles anyway.
+//
+// The caller sends both requests itself, so each route stays a literal at a
+// request call; this only decides, and closes the first response when the
+// second is to be sent.
+func tryInstanceBundleRoute(resp *http.Response, err error) bool {
+	if err != nil || resp == nil || (resp.StatusCode != http.StatusNotFound && resp.StatusCode != http.StatusBadRequest) {
+		return false
+	}
+	_ = resp.Body.Close()
+	return true
 }

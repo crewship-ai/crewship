@@ -177,11 +177,12 @@ func TestOpenAPISpec_AuthWorkspaceAndResponseContracts(t *testing.T) {
 		return content
 	}
 	for path, want := range map[string]string{
-		"/api/v1/journal/stream":          "text/event-stream",
-		"/api/v1/chats/{chatId}/stream":   "application/x-ndjson",
-		"/api/v1/memory/export":           "application/zip",
-		"/api/v1/admin/backups/download":  "application/zstd",
-		"/api/v1/agents/{agentId}/avatar": "image/svg+xml",
+		"/api/v1/journal/stream":                          "text/event-stream",
+		"/api/v1/chats/{chatId}/stream":                   "application/x-ndjson",
+		"/api/v1/memory/export":                           "application/zip",
+		"/api/v1/admin/backups/download":                  "application/zstd",
+		"/api/v1/admin/instance/backups/bundles/download": "application/zstd",
+		"/api/v1/agents/{agentId}/avatar":                 "image/svg+xml",
 	} {
 		if _, ok := contentTypes(path, "GET")[want]; !ok {
 			t.Errorf("%s response does not advertise %s", path, want)

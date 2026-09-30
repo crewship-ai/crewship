@@ -54,6 +54,9 @@ The operational surface for OWNER and ADMIN roles: workspace stats, user managem
 | `GET` | [/api/v1/admin/instance/backups/bundles](#get-api-v1-admin-instance-backups-bundles) | Every catalogued bundle with its proof level, pin and gaps |
 | `POST` | [/api/v1/admin/instance/backups/bundles/pin](#post-api-v1-admin-instance-backups-bundles-pin) | Pin a bundle so no retention rule deletes it |
 | `POST` | [/api/v1/admin/instance/backups/bundles/unpin](#post-api-v1-admin-instance-backups-bundles-unpin) | Remove a bundle's pin |
+| `GET` | [/api/v1/admin/instance/backups/bundles/inspect](#get-api-v1-admin-instance-backups-bundles-inspect) | A catalogued bundle's manifest, instance bundles included |
+| `GET` | [/api/v1/admin/instance/backups/bundles/verify](#get-api-v1-admin-instance-backups-bundles-verify) | Check a catalogued bundle's payload checksum (proof level 1) |
+| `GET` | [/api/v1/admin/instance/backups/bundles/download](#get-api-v1-admin-instance-backups-bundles-download) | Download a catalogued bundle, instance bundles included |
 | `GET` | [/api/v1/admin/instance/backups/restores](#get-api-v1-admin-instance-backups-restores) | Every restore, dry run and drill with its report |
 | `GET` | [/api/v1/admin/instance/backups/plans](#get-api-v1-admin-instance-backups-plans) | Every backup plan |
 | `POST` | [/api/v1/admin/instance/backups/plans](#post-api-v1-admin-instance-backups-plans) | Create a backup plan |
@@ -1293,6 +1296,84 @@ its instance audit entry (`instance.backup_unpinned`) commit together.
 | `403` | Caller is not an instance administrator. |
 | `404` | No catalogued bundle has that path. |
 | `500` | The write failed; nothing changed. |
+
+## `GET /api/v1/admin/instance/backups/bundles/inspect`
+
+The manifest of one catalogued bundle of any scope — an instance bundle
+included, which the per-workspace `GET /api/v1/admin/backups/inspect` cannot
+find because it belongs to no workspace. The manifest is plaintext: nothing
+is decrypted and no key is needed. `?path=` is the bundle's path as
+`GET …/backups/bundles` lists it; only a path in the catalog is ever opened.
+
+**Auth:** instance administrator. **Request:** no body. **Response:** the
+manifest, the same shape as the per-workspace inspect returns:
+
+```json
+{"format_version": 3, "scope": "instance", "created_at": "2026-09-30T02:00:00Z", "encryption": {"enabled": true, "algorithm": "age"}, "contents": {"instance": {"hold_ms": 412}}}
+```
+
+| Status | Condition |
+|--------|-----------|
+| `200` | The manifest. |
+| `400` | No `path`. |
+| `401` | Missing authentication. |
+| `403` | Caller is not an instance administrator. |
+| `404` | No catalogued bundle has that path, or its file is no longer on disk. |
+| `422` | The file is there but its manifest cannot be read. |
+| `500` | The catalog could not be read. |
+
+CLI: `crewship backup inspect <path>` asks the per-workspace route first and
+this one when that answers 404 or 400.
+
+## `GET /api/v1/admin/instance/backups/bundles/verify`
+
+Proof level 1 for one catalogued bundle of any scope: the sealed payload's
+SHA-256 against the manifest, without a key. The body is the per-workspace
+`GET /api/v1/admin/backups/verify`'s: `valid`, `size_bytes`, `manifest`,
+`error`, and — for an unencrypted bundle only — the row-count completeness
+fields. To check an encrypted bundle's contents, use
+`POST …/backups/bundles/check` with the key.
+
+**Auth:** instance administrator. **Request:** no body. **Response:**
+
+```json
+{"valid": true, "size_bytes": 1048576, "manifest": {"format_version": 3, "scope": "instance"}, "error": "", "completeness_checked": false, "completeness_skip_reason": "bundle is encrypted; verify does not decrypt the payload", "table_row_count_mismatches": null}
+```
+
+| Status | Condition |
+|--------|-----------|
+| `200` | Checked; `valid` says the outcome. |
+| `400` | No `path`. |
+| `401` | Missing authentication. |
+| `403` | Caller is not an instance administrator. |
+| `404` | No catalogued bundle has that path, or its file is no longer on disk. |
+| `500` | The bundle could not be read. |
+
+CLI: `crewship backup verify <path>`, with the same fallback as inspect.
+
+## `GET /api/v1/admin/instance/backups/bundles/download`
+
+The bytes of one catalogued bundle of any scope, as stored (encrypted, as
+every new bundle is), as `application/zstd` with `Content-Disposition:
+attachment`, `Cache-Control: no-store` and `Content-Length`. The download is
+recorded in the instance audit log (`instance.backup_downloaded`, with the
+bytes sent). Backup history's **Download** uses this route for an instance
+bundle.
+
+**Auth:** instance administrator. **Request:** no body. **Response:** the
+bundle file.
+
+| Status | Condition |
+|--------|-----------|
+| `200` | The bundle's bytes. |
+| `400` | No `path`. |
+| `401` | Missing authentication. |
+| `403` | Caller is not an instance administrator. |
+| `404` | No catalogued bundle has that path, or its file is no longer on disk. |
+| `500` | The file could not be read. |
+
+CLI: `crewship backup download <path> [--out file]`, with the same fallback as
+inspect.
 
 ## `GET /api/v1/admin/instance/backups/restores`
 

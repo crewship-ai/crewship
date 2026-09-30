@@ -244,6 +244,14 @@ crewship backup verify nightly.tar.zst
 One more limit, worth being precise about: the recorded count is `len(dump.Tables[table])`, read from the exact same in-memory dump that gets written into the payload — not an independent re-derivation. A create-time scoping bug that silently drops every row for a table (the shape of #1973) produces a dump that already agrees with itself, so this check would not have caught THAT bug on its own. What it catches is the payload diverging from what its own manifest claims — a corrupted or hand-edited bundle, or the two numbers drifting apart in a future refactor. "The bundle is intact" is the guarantee; "the bundle is everything" (independent re-derivation, or reconciling against the source instance) is stronger and out of scope here.
 </Note>
 
+
+An **instance bundle** belongs to no workspace, so the per-workspace routes
+answer 404 for it; `inspect`, `verify` and `download` then read it through the
+instance routes (`GET /api/v1/admin/instance/backups/bundles/inspect`,
+`…/verify`, `…/download`), which serve any catalogued bundle to an instance
+administrator. Backup history's **Download** uses the same route for an
+instance bundle, and each download is recorded in the instance audit log.
+
 ## Restore
 
 ```bash

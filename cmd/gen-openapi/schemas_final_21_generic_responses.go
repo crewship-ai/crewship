@@ -56,6 +56,8 @@ func final21GenericResponseSchemaCatalog() map[string]DomainSchema {
 
 	return map[string]DomainSchema{
 		"GET /api/v1/admin/backups/inspect": {Response: backupManifest},
+		// The same manifest for any catalogued bundle, instance bundles included.
+		"GET /api/v1/admin/instance/backups/bundles/inspect": {Response: backupManifest},
 		"POST /api/v1/admin/keeper/ask": {
 			Request: obj(map[string]any{
 				"requesting_agent_id": str(), "requesting_crew_id": str(), "workspace_id": str(),
