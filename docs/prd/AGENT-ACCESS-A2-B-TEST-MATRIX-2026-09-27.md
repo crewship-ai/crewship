@@ -19,7 +19,7 @@ acceptance case in a row.
 | Delivery revocation | Per-frame WS and HTTP checks; real dev1 positive delivery, member removal, socket close; other human stays connected | Restricted run output, logs/artifacts/journal and full-grant revocation through the production management API |
 | Delegation/retry | Durable authority tests: child cannot widen parent, parent revoke denies child, old membership/revision cannot resume | Queue/orchestrator integration and target-agent rights |
 | Backup | Full backup suite; policy roundtrip and fork remap; old attempt capability absent | Scoped runtime data, instance recovery and quotas |
-| Linux/process | Dev1 race harness: 15/15 live Docker cases on `7c1cad17d`, including application authority and provider revoke/regrant; synthetic keys, no paid model | Real chat/CLI/routine dispatch into that runtime and provider adapters |
+| Linux/process | Historical raw harness passed 15/15 but records `317d8257` with a dirty tree, so it does not prove clean `7c1cad17d` source identity. The successor audit in the handoff records an independent clean `3acdaa260` repeat: 15/15 with race, synthetic keys and no paid model | Real chat/CLI/routine dispatch into that runtime and provider adapters |
 
 Unintegrated restricted HTTP routes and shared terminals are denied. **A denial
 is not a passing positive scenario.** Restricted membership can be configured through API/CLI; ordinary restricted

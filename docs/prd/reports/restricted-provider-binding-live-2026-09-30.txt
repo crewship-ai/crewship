@@ -1,4 +1,11 @@
-Source: 7c1cad17d6b5328a2040ed8d86ffd58ff3d1c7fa (clean production code).
+Historical live-run artifact; source identity is not a verified clean build.
+Captured build HEAD: 317d8257e70ce1d5f1814b31df41486773ed064a; dirty: true.
+The original report declared clean source 7c1cad17d6b5328a2040ed8d86ffd58ff3d1c7fa,
+but that declaration contradicts the captured build stamp below. The unrecorded
+working-tree diff prevents attributing this raw run to a clean source commit.
+The raw output is preserved; its 15/15 pass is not clean-head release evidence.
+A later independent clean repeat at 3acdaa2608ce6723b543d43f65a56e59ef1d52dd
+is documented in AGENT-ACCESS-HANDOFF-2026-09-30.md, successor audit section.
 Development 1 only, 2026-09-30. Synthetic credentials, no external provider request.
 
 Command: scripts/restricted-runtime-probe/run.sh -race
