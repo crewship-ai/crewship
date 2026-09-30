@@ -248,6 +248,7 @@ type retentionDefaultsBody struct {
 	AffectsExisting bool            `json:"affects_existing"`
 	Defaults        map[string]*int `json:"defaults"`
 	Configured      []string        `json:"configured"`
+	PreviewID       string          `json:"preview_id"`
 	Changes         []struct {
 		Key  string `json:"key"`
 		From *int   `json:"from"`
@@ -358,6 +359,38 @@ func TestInstanceRetentionConfirmsTheSavePreviewed(t *testing.T) {
 	fresh := decodeAs[retentionPutBody](t, f.do(f.boss, "PUT", "/api/v1/admin/instance/retention", body).Body.Bytes())
 	rr = f.do(f.boss, "PUT", "/api/v1/admin/instance/retention", `{"workspace_ids":null,"expect_preview":"`+fresh.PreviewID+`","windows":{"inbox_days":30}}`)
 	wantCode(t, rr, http.StatusOK, "fresh preview")
+}
+
+// The defaults save is held to its preview the same way: a default changed by
+// someone else between the preview and the confirmation is a 409 and writes
+// nothing.
+func TestInstanceRetentionDefaultsConfirmTheSavePreviewed(t *testing.T) {
+	f := newInstanceFixture(t)
+	const url = "/api/v1/admin/instance/retention/defaults"
+	preview := decodeAs[retentionDefaultsBody](t, f.do(f.boss, "PUT", url, `{"dry_run":true,"windows":{"inbox_days":30}}`).Body.Bytes())
+	if preview.PreviewID == "" {
+		t.Fatal("a defaults dry run returns no preview_id")
+	}
+	// Someone else sets the inbox default meanwhile.
+	wantCode(t, f.do(f.boss, "PUT", url, `{"windows":{"inbox_days":7}}`), http.StatusOK, "concurrent save")
+	rr := f.do(f.boss, "PUT", url, `{"expect_preview":"`+preview.PreviewID+`","windows":{"inbox_days":30}}`)
+	wantCode(t, rr, http.StatusConflict, "stale defaults preview")
+	got := decodeAs[retentionDefaultsBody](t, f.do(f.boss, "GET", url, "").Body.Bytes())
+	if got.Defaults["inbox_days"] == nil || *got.Defaults["inbox_days"] != 7 {
+		t.Fatalf("a refused save wrote: inbox default = %v", got.Defaults["inbox_days"])
+	}
+	if n := retentionRows(t, f, `SELECT COUNT(*) FROM instance_audit_logs WHERE action = 'instance.retention_defaults_updated'`); n != 1 {
+		t.Fatalf("audit entries = %d, want only the concurrent save", n)
+	}
+	fresh := decodeAs[retentionDefaultsBody](t, f.do(f.boss, "PUT", url, `{"dry_run":true,"windows":{"inbox_days":30}}`).Body.Bytes())
+	if fresh.PreviewID == preview.PreviewID {
+		t.Fatal("the preview id did not move with the defaults")
+	}
+	rr = f.do(f.boss, "PUT", url, `{"expect_preview":"`+fresh.PreviewID+`","windows":{"inbox_days":30}}`)
+	wantCode(t, rr, http.StatusOK, "fresh defaults preview")
+	if got := decodeAs[retentionDefaultsBody](t, rr.Body.Bytes()); !got.Applied || got.PreviewID != fresh.PreviewID {
+		t.Fatalf("confirmed save = %+v", got)
+	}
 }
 
 // retention cannot import internal/api, so it carries its own copy of the

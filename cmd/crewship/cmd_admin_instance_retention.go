@@ -303,6 +303,7 @@ type retentionDefaultsPutResult struct {
 	AffectsExisting bool              `json:"affects_existing" yaml:"affects_existing"`
 	Changes         []retentionChange `json:"changes" yaml:"changes"`
 	Defaults        map[string]*int   `json:"defaults" yaml:"defaults"`
+	PreviewID       string            `json:"preview_id" yaml:"preview_id"`
 }
 
 var adminInstanceRetentionDefaultsCmd = &cobra.Command{
@@ -354,7 +355,9 @@ var adminInstanceRetentionDefaultsSetCmd = &cobra.Command{
 change; each takes a number of days (1–3650) or "forever". No existing
 workspace changes and nothing is deleted: this is only what a workspace
 created later starts with. It shows the change first and asks; --yes skips the
-question, --dry-run only shows.`,
+question, --dry-run only shows. The confirmation saves exactly what the
+preview showed: if another admin changed a default in between, the server
+refuses and nothing is written.`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, _ []string) error {
 		client, err := requireInstanceAdminClient()
@@ -386,6 +389,9 @@ question, --dry-run only shows.`,
 			return cli.WithExitCode(err, cli.ExitValidation)
 		}
 		body["dry_run"] = false
+		// Save exactly what was shown: a default another admin changed since
+		// the preview makes the server answer 409 and nothing is written.
+		body["expect_preview"] = preview.PreviewID
 		var out retentionDefaultsPutResult
 		if err := putJSON(client, "/api/v1/admin/instance/retention/defaults", body, &out); err != nil {
 			return err
