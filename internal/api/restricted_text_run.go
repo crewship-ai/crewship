@@ -109,5 +109,10 @@ func (r *Router) executionProfile(w http.ResponseWriter, req *http.Request) {
 		replyError(w, http.StatusForbidden, "execution unavailable")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"mode": member.Mode})
+	var visibility string
+	if err = r.db.QueryRowContext(req.Context(), `SELECT visibility FROM chats WHERE id=? AND workspace_id=?`, req.PathValue("chatId"), workspace).Scan(&visibility); err != nil {
+		replyError(w, http.StatusNotFound, "chat not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"mode": member.Mode, "audience": visibility})
 }

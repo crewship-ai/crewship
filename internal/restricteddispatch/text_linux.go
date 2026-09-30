@@ -52,7 +52,7 @@ func (r *TextRunner) execute(ctx context.Context, user, workspace, chat, input s
 		}
 	}
 	var agent, profile string
-	if err := store.DB.QueryRowContext(ctx, `SELECT c.agent_id,a.restricted_execution_profile FROM chats c JOIN agents a ON a.id=c.agent_id AND a.workspace_id=c.workspace_id WHERE c.id=? AND c.workspace_id=? AND c.visibility='private'`, chat, workspace).Scan(&agent, &profile); err != nil {
+	if err := store.DB.QueryRowContext(ctx, `SELECT c.agent_id,a.restricted_execution_profile FROM chats c JOIN agents a ON a.id=c.agent_id AND a.workspace_id=c.workspace_id WHERE c.id=? AND c.workspace_id=? AND c.visibility IN ('private','group')`, chat, workspace).Scan(&agent, &profile); err != nil {
 		return access.ErrDenied
 	}
 	if profile != "responses_text" {
