@@ -86,7 +86,7 @@ function Segmented({ field, value, onPick, name }: { field: Field; value: unknow
           aria-checked={value === o.value}
           onClick={() => onPick(o.value)}
           className={cn(
-            "rounded-md px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:text-foreground coarse:min-h-11 coarse:px-3.5",
+            "rounded-md px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:text-foreground coarse:min-h-[2.75rem] coarse:px-3.5",
             value === o.value && "bg-accent font-medium text-foreground",
           )}
         >

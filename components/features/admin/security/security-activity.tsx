@@ -138,7 +138,7 @@ export function SecurityActivity({ entries, stream, onStream, live, error, serve
           <div className="flex items-center gap-3 border-t border-border px-4 py-2 text-[12px] text-muted-foreground" data-slot="activity-paging">
             <span>{server.loading ? "Loading…" : `Showing ${rows.length} of ${server.total}`}</span>
             {rows.length < server.total && !server.loading && (
-              <button type="button" onClick={server.onLoadMore} className="ml-auto rounded-md border border-control-border px-2.5 py-1 text-[12px] hover:bg-accent coarse:min-h-11">
+              <button type="button" onClick={server.onLoadMore} className="ml-auto rounded-md border border-control-border px-2.5 py-1 text-[12px] hover:bg-accent coarse:min-h-[2.75rem]">
                 Load more
               </button>
             )}

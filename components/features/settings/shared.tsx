@@ -27,8 +27,8 @@ import { cn } from "@/lib/utils"
  * input, select and picker on the right of a row, so the column lines up and
  * text size comes from the control primitives (text-control).
  */
-// coarse:h-11 — a finger needs 44px; desktop density is untouched.
-export const settingsControl = "h-8 w-full sm:w-64 coarse:h-11"
+// coarse:h-[2.75rem] — a finger needs 44px; desktop density is untouched.
+export const settingsControl = "h-8 w-full sm:w-64 coarse:h-[2.75rem]"
 
 /** A custom picker button (popover combobox) dressed as SelectTrigger. */
 export const settingsPickerButton = cn(

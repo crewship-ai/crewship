@@ -180,7 +180,7 @@ export function SecurityPage() {
           if (v.startsWith("activity:")) update({ section: "activity", stream: v.slice(9) as Stream | "all" })
           else update({ section: v as Section })
         }}
-        className="h-9 w-full rounded-md border border-control-border bg-surface-subtle px-3 text-control coarse:h-11">
+        className="h-9 w-full rounded-md border border-control-border bg-surface-subtle px-3 text-control coarse:h-[2.75rem]">
         <option value="overview">Overview</option>
         <option value="matrix">What&apos;s on where</option>
         <option value="activity:all">Activity · all</option>
@@ -189,7 +189,7 @@ export function SecurityPage() {
       </select>
       <select aria-label="Workspaces" value={allTicked ? "all" : sel.size === 1 ? [...sel][0] : "some"}
         onChange={(e) => changeSelection(e.target.value === "all" ? new Set(workspaces.map((w) => w.id)) : new Set([e.target.value]))}
-        className="h-9 w-full rounded-md border border-control-border bg-surface-subtle px-3 text-control coarse:h-11">
+        className="h-9 w-full rounded-md border border-control-border bg-surface-subtle px-3 text-control coarse:h-[2.75rem]">
         <option value="all">All workspaces</option>
         {!allTicked && sel.size > 1 && <option value="some">{sel.size} workspaces</option>}
         {workspaces.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
