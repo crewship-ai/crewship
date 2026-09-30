@@ -147,7 +147,7 @@ var backupCreateCmd = &cobra.Command{
 				return err
 			}
 		}
-		resp, err := client.Post("/api/v1/admin/backups", body)
+		resp, err := client.Post(backupRoute("/api/v1/admin/backups"), body)
 		if err != nil {
 			return err
 		}
@@ -290,7 +290,7 @@ var backupRestoreCmd = &cobra.Command{
 			"files_only":   filesOnly,
 		}
 		client := newAPIClient()
-		resp, err := client.Post("/api/v1/admin/backups/restore", body)
+		resp, err := client.Post(backupRoute("/api/v1/admin/backups/restore"), body)
 		if err != nil {
 			return err
 		}
@@ -580,7 +580,7 @@ var backupDeleteCmd = &cobra.Command{
 			}
 		}
 		client := newAPIClient()
-		resp, err := client.Delete("/api/v1/admin/backups?path=" + encodeQuery(args[0]))
+		resp, err := client.Delete(backupRoute("/api/v1/admin/backups?path=" + encodeQuery(args[0])))
 		if err != nil {
 			return err
 		}
