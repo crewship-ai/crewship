@@ -10,6 +10,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 ## [Unreleased]
 
 ### Improved
+- Restricted chat and CLI runs can use an opt-in isolated text Responses worker with scoped history, durable cost reservations, live output authorization and no shared execution fallback. Agent discovery exposes only explicit grants; native tools and provider-login agents remain unsupported on this path. (#2711)
 - Restricted runtime preparation can pin an explicit agent provider-key grant before building context. Credential revocation, rotation and model changes invalidate prepared attempts and descendants; regrant cannot revive them. Production restricted dispatch remains gated. (#2711)
 - The isolated runtime prototype can broker stateless text Responses requests with a server-selected model and output ceiling. Remote resource references and tools are denied; application model execution remains gated. (#2711)
 - Workspace administrators can read and replace versioned member resource policies through the API and `workspace member access`. Stale edits return 409; explicit empty restricted grants deny all. Restricted execution remains unavailable on unintegrated routes. (#2711)

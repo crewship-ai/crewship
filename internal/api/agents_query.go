@@ -13,6 +13,9 @@ import (
 )
 
 func (h *AgentHandler) List(w http.ResponseWriter, r *http.Request) {
+	if restrictedDirectory(h.db, w, r) {
+		return
+	}
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	if workspaceID == "" {
 		replyError(w, http.StatusBadRequest, "workspace_id is required")
@@ -226,6 +229,9 @@ func (h *AgentHandler) List(w http.ResponseWriter, r *http.Request) {
 // batch helper kept out of the handler file.
 
 func (h *AgentHandler) Get(w http.ResponseWriter, r *http.Request) {
+	if restrictedDirectory(h.db, w, r) {
+		return
+	}
 	agentID := r.PathValue("agentId")
 	if agentID == "" {
 		replyError(w, http.StatusBadRequest, "agentId is required")

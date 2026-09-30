@@ -80,6 +80,7 @@ function turn(id: string, role: "user" | "assistant", content: string) {
 function stubFetch() {
   global.fetch = vi.fn((url: string) => {
     const u = String(url)
+    if (u.includes("/execution-profile")) {return {ok:true,status:200,json:async()=>({mode:"trusted"})} as unknown as Response}
     if (u.includes("/messages")) {
       return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ messages: [] }) }) as unknown as Promise<Response>
     }

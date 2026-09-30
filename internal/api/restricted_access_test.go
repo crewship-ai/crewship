@@ -73,18 +73,22 @@ func TestRestrictedAuthorityAcrossAuthenticatedRoutes(t *testing.T) {
 			"/api/v1/agents/access-a/files", "/api/v1/agents/access-a/logs",
 			"/api/v1/crews/access-crew/files", "/api/v1/agents/access-a/credentials",
 			"/api/v1/chats/" + other + "-chat/messages", "/api/v1/ws-token",
-			"/api/v1/workspaces", "/api/v1/projects", "/api/v1/journal",
+			"/api/v1/projects", "/api/v1/journal",
 		} {
 			rr = request(user, "GET", path)
 			if rr.Code != http.StatusNotFound {
 				t.Errorf("%s %s: status=%d body=%s", user, path, rr.Code, rr.Body.String())
 			}
 		}
-		for _, path := range []string{"/api/v1/agents/access-a/chats", "/api/v1/agents/access-a/start", "/api/v1/assignments"} {
+		for _, path := range []string{"/api/v1/agents/access-b/chats", "/api/v1/agents/access-a/start", "/api/v1/assignments"} {
 			rr = request(user, "POST", path)
 			if rr.Code != http.StatusNotFound {
 				t.Errorf("dispatch %s: %d %s", path, rr.Code, rr.Body.String())
 			}
+		}
+		rr = request(user, "GET", "/api/v1/workspaces")
+		if rr.Code != 200 || strings.Contains(rr.Body.String(), "agent_count") || strings.Contains(rr.Body.String(), "crew_count") || strings.Contains(rr.Body.String(), "member_count") {
+			t.Fatalf("workspace projection leaked broad metadata %d %s", rr.Code, rr.Body.String())
 		}
 		channels := ws.NewDBChannelAuthorizer(db)
 		for _, ch := range []string{"session:" + user + "-chat", "workspace:" + workspace, "agent:access-a", "files:access-crew", "journal:" + workspace, "providers:global"} {

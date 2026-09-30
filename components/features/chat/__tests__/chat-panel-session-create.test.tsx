@@ -91,6 +91,7 @@ function installFetch() {
     const u = String(url)
     const method = (init?.method ?? "GET").toUpperCase()
 
+    if (u.includes("/execution-profile")) {return {ok:true,status:200,json:async()=>({mode:"trusted"})} as unknown as Response}
     if (u.includes("/messages")) {
       const id = u.split("/chats/")[1].split("/")[0]
       if (!serverMessages[id] && missingHistoryStatus === 404) {

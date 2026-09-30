@@ -215,6 +215,9 @@ func (ws *workspaceResponse) fillNestedCount() {
 // GET /api/v1/workspaces
 
 func (h *WorkspaceHandler) List(w http.ResponseWriter, r *http.Request) {
+	if restrictedWorkspaceDirectory(h.db, w, r) {
+		return
+	}
 	user := UserFromContext(r.Context())
 	if user == nil {
 		replyError(w, http.StatusUnauthorized, "Unauthorized")

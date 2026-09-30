@@ -24,11 +24,23 @@ func (m *AuthMiddleware) restrictedRequest(w http.ResponseWriter, r *http.Reques
 		return true
 	}
 	switch r.Pattern {
+	case "GET /api/v1/agents", "GET /api/v1/agents/{agentId}", "GET /api/v1/workspaces":
+		// Dedicated restricted directory projections expose granted metadata only.
+		return true
 	case "GET /api/v1/auth/sessions", "POST /api/v1/auth/sessions/{id}/revoke",
 		"GET /api/v1/auth/cli-token/validate", "GET /api/v1/auth/cli-tokens",
 		"DELETE /api/v1/auth/cli-tokens/{tokenId}", "POST /api/v1/users/me/password":
 		return true
 	case "GET /api/v1/agents/{agentId}/chats":
+		var workspace string
+		err = m.db.QueryRowContext(r.Context(), `SELECT workspace_id FROM agents WHERE id=? AND deleted_at IS NULL`, r.PathValue("agentId")).Scan(&workspace)
+		if err == nil {
+			err = store.Check(r.Context(), userID, workspace, access.Right{Kind: "agent", ID: r.PathValue("agentId"), Operation: "chat"})
+		}
+	case "GET /api/v1/chats/{chatId}/execution-profile", "POST /api/v1/chats/{chatId}/restricted-run":
+		// Exact audience and server admission are enforced by these handlers.
+		return true
+	case "POST /api/v1/agents/{agentId}/chats":
 		var workspace string
 		err = m.db.QueryRowContext(r.Context(), `SELECT workspace_id FROM agents WHERE id=? AND deleted_at IS NULL`, r.PathValue("agentId")).Scan(&workspace)
 		if err == nil {

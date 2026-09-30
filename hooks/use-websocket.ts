@@ -18,6 +18,7 @@ const wsMessageSchema = z.object({
 export type WSMessage = z.infer<typeof wsMessageSchema>
 
 interface UseWebSocketOptions {
+  enabled?: boolean
   url: string
   /** Async callback that returns the current WS ticket. Called on
    *  each (re)connect so a stale ticket is never reused after a backend
@@ -95,6 +96,7 @@ const emitSessionExpired = broadcastSessionExpired
  *     should re-authenticate when it comes back).
  */
 export function useWebSocket({
+  enabled = true,
   url,
   getToken,
   onMessage,
@@ -155,6 +157,7 @@ export function useWebSocket({
   }, [updateStatus])
 
   const connect = useCallback(async () => {
+    if (!enabled) return
     // Only `terminatedRef` is permanent — once we've decided we'll
     // never reconnect (auth dead / past the backoff cap), bail. A set
     // `disconnectingRef` here used to bail too, but that broke the
@@ -288,7 +291,7 @@ export function useWebSocket({
       reconnectAttemptsRef.current = attempts + 1
       reconnectTimerRef.current = setTimeout(() => { void connect() }, delay)
     }
-  }, [url, updateStatus, terminateAuth, terminateTransport])
+  }, [url, enabled, updateStatus, terminateAuth, terminateTransport])
 
   const disconnect = useCallback(() => {
     disconnectingRef.current = true
@@ -326,9 +329,9 @@ export function useWebSocket({
   )
 
   useEffect(() => {
-    void connect()
+    if (enabled) void connect()
     return () => disconnect()
-  }, [connect, disconnect])
+  }, [connect, disconnect, enabled])
 
   return { status, send, disconnect, reconnect: () => { void connect() } }
 }
