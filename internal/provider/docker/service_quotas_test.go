@@ -12,9 +12,12 @@ import (
 )
 
 func TestServiceQuotaActualConfigurationDrift(t *testing.T) {
-	for _, field := range []string{"valid", "swap", "cpu", "memory", "pids", "logs", "tmpfs", "inspect_failure"} {
+	for _, field := range []string{"valid", "swap", "cpu", "memory", "pids", "logs", "tmpfs", "inspect_failure", "managed_restart"} {
 		t.Run(field, func(t *testing.T) {
 			svc := provider.CrewService{Name: "redis", Image: "redis:7"}
+			if field == "managed_restart" {
+				svc.ControllerManaged = true
+			}
 			hash := computeSidecarSpecHash(&svc)
 			hc := &container.HostConfig{}
 			applyServiceQuotas(hc)
@@ -60,6 +63,9 @@ func TestServiceQuotaActualConfigurationDrift(t *testing.T) {
 					if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 						t.Error(err)
 					}
+					if field == "managed_restart" && req.HostConfig.RestartPolicy.Name != container.RestartPolicyDisabled {
+						t.Error("managed service replacement still restarts autonomously")
+					}
 					if err := checkServiceQuotas(req.HostConfig); err != nil {
 						t.Errorf("replacement quota: %v", err)
 					}
@@ -98,5 +104,49 @@ func TestServiceQuotaCreateBounds(t *testing.T) {
 	}
 	if hc.MemorySwap != hc.Memory || hc.LogConfig.Config["max-size"] != "10m" || hc.LogConfig.Config["max-file"] != "3" || !strings.Contains(hc.Tmpfs["/tmp"], "size=67108864") {
 		t.Fatal("missing host-enforced limits")
+	}
+}
+
+func TestManagedServicePolicyChangesSpecAndPreservesLegacy(t *testing.T) {
+	svc := covRedisSvc()
+	legacy := computeSidecarSpecHash(&svc)
+	svc.ControllerManaged = true
+	if legacy == computeSidecarSpecHash(&svc) {
+		t.Fatal("managed restart policy missing from immutable desired spec")
+	}
+	h := captureSidecarHostConfig(t)
+	if h.RestartPolicy.Name != container.RestartPolicyOnFailure || h.RestartPolicy.MaximumRetryCount != 3 {
+		t.Fatal("legacy unmanaged service restart policy changed")
+	}
+}
+
+func TestManagedStopUpdatesExitedPreUpgradeContainer(t *testing.T) {
+	updated := false
+	stopped := false
+	p := newCovProvider(t, Config{}, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/containers/json"):
+			_, _ = w.Write([]byte(`[{"Id":"old","State":"exited","Labels":{"crewship.crew-id":"crew-a","crewship.kind":"sidecar","crewship.svc":"redis"}}]`))
+		case strings.HasSuffix(r.URL.Path, "/containers/old/update"):
+			updated = true
+			var body struct{ RestartPolicy container.RestartPolicy }
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			if body.RestartPolicy.Name != container.RestartPolicyDisabled {
+				t.Fatal("old service restart policy retained")
+			}
+			_, _ = w.Write([]byte(`{}`))
+		case strings.HasSuffix(r.URL.Path, "/stop"):
+			stopped = true
+			w.WriteHeader(204)
+		default:
+			t.Errorf("unexpected request %s", r.URL.Path)
+			w.WriteHeader(500)
+		}
+	})
+	if err := p.StopCrewService(t.Context(), "crew-a", "crew-a", "redis"); err != nil {
+		t.Fatal(err)
+	}
+	if !updated || stopped {
+		t.Fatalf("exited service stop must disable reboot restart updated%t stopped%t", updated, stopped)
 	}
 }

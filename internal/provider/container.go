@@ -114,13 +114,15 @@ type CrewConfig struct {
 // translates from the on-disk JSON into this struct before invoking
 // the provider.
 type CrewService struct {
-	Name        string
-	Image       string
-	Command     []string
-	Env         map[string]string // literal env vars (already resolved)
-	Ports       []string          // "5432" or "5432/tcp"
-	Volumes     []CrewServiceVolume
-	Healthcheck *CrewServiceHealthcheck
+	// ControllerManaged is server-derived durable intent, never public config.
+	ControllerManaged bool `json:"-" yaml:"-"`
+	Name              string
+	Image             string
+	Command           []string
+	Env               map[string]string // literal env vars (already resolved)
+	Ports             []string          // "5432" or "5432/tcp"
+	Volumes           []CrewServiceVolume
+	Healthcheck       *CrewServiceHealthcheck
 }
 
 // CrewServiceVolume names a per-crew named volume and where it

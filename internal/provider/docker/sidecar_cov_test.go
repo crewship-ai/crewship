@@ -1378,6 +1378,17 @@ func TestStopCrewService_OnlyStopsExactOwnedService(t *testing.T) {
 			_, _ = io.WriteString(w, `[{"Id":"owned","State":"running","Labels":{"crewship.crew-id":"crew-a","crewship.kind":"sidecar","crewship.svc":"redis"}},{"Id":"sibling","State":"running","Labels":{"crewship.crew-id":"crew-b","crewship.kind":"sidecar","crewship.svc":"redis"}},{"Id":"other-service","State":"running","Labels":{"crewship.crew-id":"crew-a","crewship.kind":"sidecar","crewship.svc":"postgres"}}]`)
 			return
 		}
+		if strings.HasSuffix(r.URL.Path, "/update") {
+			var body struct{ RestartPolicy container.RestartPolicy }
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.RestartPolicy.Name != container.RestartPolicyDisabled {
+				t.Fatal("missing durable stop policy")
+			}
+			if !strings.Contains(r.URL.Path, "/owned/") {
+				t.Fatal("foreign service restart updated")
+			}
+			_, _ = io.WriteString(w, `{}`)
+			return
+		}
 		if strings.HasSuffix(r.URL.Path, "/stop") {
 			stopped = append(stopped, r.URL.Path)
 			w.WriteHeader(204)

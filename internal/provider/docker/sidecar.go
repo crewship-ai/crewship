@@ -134,19 +134,21 @@ func computeSidecarSpecHash(svc *provider.CrewService) string {
 	})
 
 	payload := struct {
-		QuotaPolicy string
-		Command     []string
-		Env         [][2]string
-		Ports       []string
-		Volumes     []provider.CrewServiceVolume
-		Healthcheck *provider.CrewServiceHealthcheck
+		QuotaPolicy       string
+		ControllerManaged bool `json:"controller_managed,omitempty"`
+		Command           []string
+		Env               [][2]string
+		Ports             []string
+		Volumes           []provider.CrewServiceVolume
+		Healthcheck       *provider.CrewServiceHealthcheck
 	}{
-		QuotaPolicy: serviceQuotaPolicyVersion,
-		Command:     svc.Command,
-		Env:         envPairs,
-		Ports:       svc.Ports,
-		Volumes:     vols,
-		Healthcheck: svc.Healthcheck,
+		QuotaPolicy:       serviceQuotaPolicyVersion,
+		ControllerManaged: svc.ControllerManaged,
+		Command:           svc.Command,
+		Env:               envPairs,
+		Ports:             svc.Ports,
+		Volumes:           vols,
+		Healthcheck:       svc.Healthcheck,
 	}
 	data, err := json.Marshal(payload)
 	if err != nil {
@@ -383,6 +385,11 @@ func (p *Provider) ensureSidecar(ctx context.Context, crewID, crewSlug string, s
 			if err = checkServiceQuotas(inspected.Container.HostConfig); err != nil {
 				drift = err.Error()
 			}
+			if drift == "" {
+				if err = checkServiceRestartPolicy(inspected.Container.HostConfig, svc.ControllerManaged); err != nil {
+					drift = err.Error()
+				}
+			}
 		}
 		if drift != "" {
 			p.logger.Info("sidecar drift; recreating", "service", svc.Name, "reason", drift)
@@ -516,6 +523,9 @@ func (p *Provider) ensureSidecar(ctx context.Context, crewID, crewSlug string, s
 	}
 
 	applyServiceQuotas(hostCfg)
+	if svc.ControllerManaged {
+		hostCfg.RestartPolicy = container.RestartPolicy{Name: container.RestartPolicyDisabled}
+	}
 
 	// NetworkingConfig wires the sidecar to the crew bridge with a
 	// DNS alias so `redis` resolves inside the agent container.
@@ -718,16 +728,23 @@ func (p *Provider) StopCrewService(ctx context.Context, crewID, crewSlug, name s
 		return err
 	}
 	timeout := 10
+	var failures []error
 	for _, c := range result.Items {
 		if !sidecarMatchesCrew(c.Labels, crewID, sidecarKind) || c.Labels[sidecarSvcLabel] != name {
 			continue
+		}
+		// Correct pre-upgrade containers too: a stopped process with the old
+		// on-failure policy could otherwise resume during Docker/host reboot.
+		policy := container.RestartPolicy{Name: container.RestartPolicyDisabled}
+		if _, err := p.client.ContainerUpdate(ctx, c.ID, client.ContainerUpdateOptions{RestartPolicy: &policy}); err != nil {
+			failures = append(failures, fmt.Errorf("disable service restart: %w", err))
 		}
 		if c.State != "running" && c.State != "restarting" {
 			continue
 		}
 		if _, err := p.client.ContainerStop(ctx, c.ID, client.ContainerStopOptions{Timeout: &timeout}); err != nil {
-			return err
+			failures = append(failures, err)
 		}
 	}
-	return nil
+	return errors.Join(failures...)
 }
