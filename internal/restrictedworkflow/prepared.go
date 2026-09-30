@@ -22,8 +22,8 @@ type RightsExecutor interface {
 	ExecuteRunWithRights(context.Context, string, string, string, string, []access.Right, func(string, string) error) error
 }
 type PreparedMetadata struct {
-	OriginAttemptID, WorkspaceID, PrincipalID, MemberID, AgentID, RecipeHash, ChatID, ExecutionProfile string
-	MemberRevision                                                                                     int64
+	OriginAttemptID, WorkspaceID, PrincipalID, MemberID, AgentID, RecipeHash, ChatID, ExecutionProfile, WorkflowID string
+	MemberRevision                                                                                                 int64
 }
 
 func (p *PreparedInvocation) Metadata() PreparedMetadata {
@@ -31,7 +31,7 @@ func (p *PreparedInvocation) Metadata() PreparedMetadata {
 		return PreparedMetadata{}
 	}
 	j := p.job
-	return PreparedMetadata{j.Origin, j.Workspace, j.Principal, j.Member, j.Agent, j.RecipeHash, j.Chat, j.Profile, j.Revision}
+	return PreparedMetadata{j.Origin, j.Workspace, j.Principal, j.Member, j.Agent, j.RecipeHash, j.Chat, j.Profile, j.ID, j.Revision}
 }
 func (s *Service) PrepareManualWithRights(ctx context.Context, user, workspace, slug string, inputs map[string]any, expectedHash string, rights []access.Right, sourceFacet string) (*PreparedInvocation, error) {
 	if sourceFacet != "issue" || len(rights) != 1 || rights[0].Kind != "project" || rights[0].Operation != "read" || rights[0].ID == "" {
