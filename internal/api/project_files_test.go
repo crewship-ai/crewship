@@ -3,8 +3,11 @@ package api
 import (
 	"encoding/base64"
 	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -28,6 +31,21 @@ func (w *revokeProjectWriter) Write(p []byte) (int, error) {
 	return n, err
 }
 
+type revokeNetworkProjectWriter struct {
+	http.ResponseWriter
+	after func()
+}
+
+func (w *revokeNetworkProjectWriter) Write(p []byte) (int, error) {
+	n, err := w.ResponseWriter.Write(p)
+	if w.after != nil {
+		after := w.after
+		w.after = nil
+		after()
+	}
+	return n, err
+}
+func (w *revokeNetworkProjectWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
 func TestProjectFilesAuthenticatedRoutesAndStreamingRevocation(t *testing.T) {
 	db := setupTestDB(t)
 	owner := seedTestUser(t, db)
@@ -107,11 +125,43 @@ func TestProjectFilesAuthenticatedRoutesAndStreamingRevocation(t *testing.T) {
 	if r.Code != 409 {
 		t.Fatalf("stale overwrite %d", r.Code)
 	}
+	// A revoked chunked delivery must be detectably incomplete to a real HTTP client.
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		wrapped := &revokeNetworkProjectWriter{ResponseWriter: w, after: func() {
+			if _, err := db.ExecContext(req.Context(), `DELETE FROM access_grants WHERE project_id='pf-h1-project' AND operation='read'`); err != nil {
+				t.Error(err)
+			}
+		}}
+		router.ServeHTTP(wrapped, req)
+	}))
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, server.URL+url+"/"+version.ID+"/download", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Authorization", "Bearer "+tokens["pf-h1"])
+	response, err := server.Client().Do(req)
+	if err != nil {
+		server.Close()
+		t.Fatal(err)
+	}
+	raw, readErr := io.ReadAll(response.Body)
+	_ = response.Body.Close()
+	server.Close()
+	if response.StatusCode != 200 || !errors.Is(readErr, io.ErrUnexpectedEOF) || len(raw) != 16384 || response.ContentLength != version.Size || response.Header.Get("X-Content-SHA256") != version.SHA256 {
+		t.Fatalf("client accepted incomplete transfer: status%d bytes%d length%d err%v", response.StatusCode, len(raw), response.ContentLength, readErr)
+	}
+	member, err := store.Membership(t.Context(), "pf-h1", workspace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = store.Replace(t.Context(), owner, "pf-h1", workspace, "restricted", member, []access.Right{{Kind: "project", ID: "pf-h1-project", Operation: "read"}, {Kind: "project", ID: "pf-h1-project", Operation: "write"}}); err != nil {
+		t.Fatal(err)
+	}
 	stream := &revokeProjectWriter{ResponseRecorder: httptest.NewRecorder(), after: func() {
 		execOrFatal(t, db, `DELETE FROM access_grants WHERE project_id='pf-h1-project' AND operation='read'`)
 	}}
 	request("pf-h1", "GET", url+"/"+version.ID+"/download", "", stream)
-	if stream.Code != 200 || stream.Body.Len() != 16384 {
+	if stream.Code != 200 || stream.Body.Len() != 16384 || stream.Header().Get("Content-Length") != strconv.FormatInt(version.Size, 10) || stream.Header().Get("X-Content-SHA256") != version.SHA256 {
 		t.Fatalf("continued revoked stream %d bytes%d", stream.Code, stream.Body.Len())
 	}
 	r = httptest.NewRecorder()

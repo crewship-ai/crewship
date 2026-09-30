@@ -72,6 +72,7 @@ The same provenance is recorded twice more: as a `run.session_init` journal entr
 | --- | --- | --- |
 | `-p`, `--prompt <text>` | (unset) | Prompt text, `@path` to read a file, or `@-` for stdin. |
 | `--interactive` | `false` | Drop into a REPL after the first prompt. Ctrl-D exits, Ctrl-C cancels the current turn. |
+| `--project-file-version <version-id>` | (unset) | Explicit immutable project input for a restricted native run; repeat up to 16 times. Trusted runs reject this selection. |
 | `--chat <chat-id>` | (unset) | Continue an existing chat instead of creating one. |
 | `--no-stream` | `false` | Wait for completion and print the final text only. |
 | `--wait` | `false` | Alias for `--no-stream` — same spelling as `crewship pipeline run --wait` / `crewship hire --wait` / `crewship mission start --wait`, for scripts that want one consistent "block until done" flag across commands. |

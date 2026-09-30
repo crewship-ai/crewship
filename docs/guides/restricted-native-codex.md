@@ -3,7 +3,8 @@
 The `native_api_key` profile runs pinned Codex CLI 0.159.0 with its
 `workspace-write` sandbox inside a read-only, network-isolated Docker container.
 It can use only `exec_command` and `write_stdin` in its isolated scratch space.
-Persistent project mounts are not provided by this profile.
+Project inputs use explicit immutable versions in a verified read-only snapshot;
+selection is empty by default. See [project files](../specs/project-files.md).
 
 The host freezes scoped instructions and input before launch. It replaces the
 CLI's ambient instructions, tool schemas, cache identifiers, and metadata. Each
@@ -30,6 +31,11 @@ Bubblewrap 0.12 changes the proc-error path and prevents the pinned CLI's suppor
 private-PID proc fallback in this Docker environment. Sandbox policy must not be
 weakened to compensate. The production image is selected by its immutable SHA.
 
+Set `CREWSHIP_RESTRICTED_NATIVE_IMAGE` to that immutable image digest to enable
+the native runner. `CREWSHIP_RESTRICTED_RUNTIME_IMAGE` independently enables
+the immutable text-only worker. With neither configured, restricted execution
+remains unavailable. Both require Docker and persistent instance state.
+
 Legacy `PROVIDER_LOGIN` credentials remain unsupported for restricted native
 execution. Official Sign in with ChatGPT uses a separate preview API, typed scoped
 tokens, application-managed refresh, and subscription quota. Its preview does not
@@ -40,4 +46,4 @@ the bounded per-call accounting contract required here. See the official
 
 Acceptance uses synthetic TLS upstreams and real pinned CLI/tool execution; no
 paid provider calls. Run the explicit tagged native live canary with
-`CREWSHIP_RESTRICTED_LIVE=1 CREWSHIP_RESTRICTED_NATIVE_IMAGE=sha256:... go test -tags restrictedruntime_live ./internal/restricteddispatch -run TestLiveNativeFrozenToolsAndDurableAccounting`.
+`CREWSHIP_RESTRICTED_LIVE=1 CREWSHIP_RESTRICTED_NATIVE_IMAGE=sha256:... go test -tags restrictedruntime_live ./internal/restricteddispatch -run TestLiveNativeFrozenToolsAndDurableAccounting`. <!-- docs-inventory: ignore (the LIVE opt-in is read only by tagged acceptance tests) -->

@@ -11,7 +11,7 @@ Základ #2704, opravy #2712/#2713/#2716, runtime #2710 a broker #2715 jsou
 sloučené. Navíc jsou v main #2717 (durable autorita a omezení vstupů), #2720
 (aplikační adaptér izolovaného runtime), #2721 (správa grantů API/CLI) a #2722
 (omezené textové Responses požadavky). GitHub billing již CI neblokuje;
-#2722 prošlo CI a skutečným CodeRabbit review před merge. Starší poznámky níže
+PR #2722 prošlo CI a skutečným nezávislým review před merge. Starší poznámky níže
 jsou historický protokol, včetně omezení review/CI u #2716.
 
 Na dev1 je nyní čistý build `7c1cad17d`, navazující dosud nesloučená větev

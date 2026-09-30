@@ -11,18 +11,10 @@ import (
 	"github.com/crewship-ai/crewship/internal/auth"
 	"github.com/crewship-ai/crewship/internal/auth/sessions"
 	"github.com/crewship-ai/crewship/internal/encryption"
+	"github.com/crewship-ai/crewship/internal/restricteddispatch"
 	"github.com/crewship-ai/crewship/internal/restrictedpreflight"
 	"github.com/crewship-ai/crewship/internal/restrictedworkflow"
 )
-
-type preflightExecutor struct{}
-
-func (preflightExecutor) ExecuteRun(context.Context, string, string, string, string, func(string, string) error) error {
-	return access.ErrDenied
-}
-func (preflightExecutor) ExecuteRunWithRights(context.Context, string, string, string, string, []access.Right, func(string, string) error) error {
-	return access.ErrDenied
-}
 
 func TestRestrictedIssuePreflightAuthenticatedRouter(t *testing.T) {
 	setTestEncryptionKey(t)
@@ -69,7 +61,10 @@ func TestRestrictedIssuePreflightAuthenticatedRouter(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	wf, err := restrictedworkflow.New(db, preflightExecutor{})
+	wf, err := restrictedworkflow.New(db, &restricteddispatch.TextRunner{Authority: restricteddispatch.Authority{Store: store}, MaxOutputTokens: 128, StartSession: func(context.Context, string) (restricteddispatch.TextSession, error) {
+		t.Fatal("preflight admission started the model")
+		return nil, access.ErrDenied
+	}})
 	if err != nil {
 		t.Fatal(err)
 	}

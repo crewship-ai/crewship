@@ -78,3 +78,8 @@ Verification: `TestProjectFilesTwoHumansAndImmutableSelection`,
 `TestProjectFilesAuthenticatedRoutesAndStreamingRevocation`, and
 `TestLiveNativeInputFreezeReadonlyAndRestartCleanup` (explicit disposable Docker
 acceptance gate).
+
+The CLI `crewship run` accepts repeated `--project-file-version` selections
+for a restricted native run (maximum 16). Selection is empty by default;
+trusted runs reject this flag. The server rechecks every version and its exact
+project permission before building context or mounting bytes.

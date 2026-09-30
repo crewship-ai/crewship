@@ -24,7 +24,7 @@ func restrictedExecutionProfile(client *cli.Client, path string) (bool, error) {
 		return false, err
 	}
 	var profile struct {
-		Mode string `json:"mode"`
+		Mode string `json:"mode" yaml:"mode"`
 	}
 	if err = cli.ReadJSON(resp, &profile); err != nil {
 		return false, err
@@ -38,10 +38,10 @@ func restrictedExecutionProfile(client *cli.Client, path string) (bool, error) {
 		return false, fmt.Errorf("unknown execution profile")
 	}
 }
-func runRestrictedText(client *cli.Client, chat, input string, md *cli.MarkdownRenderer, save *cli.AtomicFile, noStream bool) error {
+func runRestrictedText(client *cli.Client, chat, input string, md *cli.MarkdownRenderer, save *cli.AtomicFile, noStream bool, versions []string) error {
 	format := cli.NewFormatter(cli.ResolveFormat(flagFormat, cliCfg))
 	var result strings.Builder
-	resp, err := client.Post("/api/v1/chats/"+chat+"/restricted-cli-run", map[string]string{"content": input})
+	resp, err := client.Post("/api/v1/chats/"+chat+"/restricted-cli-run", map[string]any{"content": input, "project_file_versions": versions})
 	if err != nil {
 		return err
 	}
@@ -58,8 +58,8 @@ func runRestrictedText(client *cli.Client, chat, input string, md *cli.MarkdownR
 			continue
 		}
 		var event struct {
-			Type string `json:"type"`
-			Text string `json:"text"`
+			Type string `json:"type" yaml:"type"`
+			Text string `json:"text" yaml:"text"`
 		}
 		if err = json.Unmarshal([]byte(strings.TrimPrefix(line, "data: ")), &event); err != nil {
 			return err

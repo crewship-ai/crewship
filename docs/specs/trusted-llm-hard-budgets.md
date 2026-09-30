@@ -76,3 +76,5 @@ legacy sidecar and continues to enforce its own cumulative financial limits.
 Rollout requires the updated managed sidecar binary. Rebuild and reconcile
 existing sidecars before claiming this legacy denial contract; an older proxy
 never calls the new host admission endpoint.
+
+<!-- docs-inventory: ignore-api /api/v1/internal/cost/admit — managed host-token IPC, deliberately excluded from the public OpenAPI catalog. -->

@@ -2,6 +2,7 @@ package restrictedworkflow
 
 import (
 	"context"
+	"encoding/json"
 
 	"github.com/crewship-ai/crewship/internal/access"
 )
@@ -12,6 +13,7 @@ type CatalogRoutine struct {
 	Slug           string         `json:"slug"`
 	Name           string         `json:"name"`
 	DefinitionHash string         `json:"definition_hash"`
+	ExecutionHash  string         `json:"execution_hash"`
 	Inputs         []CatalogInput `json:"inputs"`
 }
 type CatalogInput struct {
@@ -68,7 +70,11 @@ func (s *Service) Catalog(ctx context.Context, user, workspace string) ([]Catalo
 		if err != nil {
 			continue
 		}
-		item := CatalogRoutine{Slug: c.slug, Name: c.name, DefinitionHash: graph.Root.Hash, Inputs: []CatalogInput{}}
+		rawGraph, err := json.Marshal(graph)
+		if err != nil {
+			return nil, err
+		}
+		item := CatalogRoutine{ExecutionHash: hash(string(rawGraph)), Slug: c.slug, Name: c.name, DefinitionHash: graph.Root.Hash, Inputs: []CatalogInput{}}
 		for _, input := range d.DSL.Inputs {
 			item.Inputs = append(item.Inputs, CatalogInput{Name: input.Name, Type: input.Type, Required: input.Required && input.Default == nil})
 		}

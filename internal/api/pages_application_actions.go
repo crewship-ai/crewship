@@ -171,6 +171,9 @@ func (h *PageHandler) DispatchApplicationAction(w http.ResponseWriter, r *http.R
 	h.DispatchAction(w, copy)
 }
 func (h *PageHandler) ApplicationActionStatus(w http.ResponseWriter, r *http.Request) {
+	if h.serveRestrictedApplicationStatus(w, r) {
+		return
+	}
 	user := UserFromContext(r.Context())
 	if user == nil {
 		replyError(w, 401, "Unauthorized")

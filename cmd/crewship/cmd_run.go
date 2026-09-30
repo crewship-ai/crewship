@@ -62,6 +62,10 @@ Examples:
 			agentID = id
 		}
 
+		projectVersions, _ := cmd.Flags().GetStringArray("project-file-version")
+		if len(projectVersions) > 16 {
+			return fmt.Errorf("select at most 16 project file versions")
+		}
 		flagPrompt, _ := cmd.Flags().GetString("prompt")
 		withGitDiff, _ := cmd.Flags().GetBool("with-git-diff")
 		withGitDiffStaged, _ := cmd.Flags().GetBool("with-git-staged")
@@ -153,6 +157,9 @@ Examples:
 			if err != nil {
 				return err
 			}
+			if !restricted && len(projectVersions) > 0 {
+				return fmt.Errorf("project file versions require a restricted native run")
+			}
 			path := "/api/v1/agents/" + agentID + "/chats"
 			body := ChatCreationBody()
 			if restricted {
@@ -199,9 +206,12 @@ Examples:
 			if timeoutSecs <= 0 {
 				client = client.WithTimeout(5 * time.Minute)
 			}
-			return runRestrictedText(client.WithContext(signalCtx), chatID, prompt, resolveMarkdownFromCmd(cmd), saveFile, noStream)
+			return runRestrictedText(client.WithContext(signalCtx), chatID, prompt, resolveMarkdownFromCmd(cmd), saveFile, noStream, projectVersions)
 		}
 
+		if len(projectVersions) > 0 {
+			return fmt.Errorf("project file versions require a restricted native run")
+		}
 		// Get WS token
 		wsToken, err := cli.WSTokenFromServer(client)
 		if err != nil {
@@ -1145,6 +1155,7 @@ func init() {
 	runCmd.Flags().StringSlice("with-cmd", nil, "Append shell command output as context (repeatable)")
 	runCmd.Flags().Bool("paste", false, "Append the system clipboard as context (pbpaste/wl-paste/xclip/xsel)")
 	runCmd.Flags().Bool("dry-run", false, "Print the assembled prompt (with all context) and exit without running")
+	runCmd.Flags().StringArray("project-file-version", nil, "Select an immutable project file version for a restricted native run; repeat up to 16 times")
 	runCmd.Flags().Bool("estimate", false, "Print token count + cost estimate for the prompt and exit (no run)")
 	runCmd.Flags().Bool("markdown", false, "Render markdown ANSI styling (overrides config)")
 	runCmd.Flags().Bool("no-markdown", false, "Disable markdown ANSI styling (overrides config)")

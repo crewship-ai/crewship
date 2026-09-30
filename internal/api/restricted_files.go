@@ -4,6 +4,7 @@ import (
 	"mime"
 	"net/http"
 	"path"
+	"strconv"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/access"
@@ -29,6 +30,8 @@ func (r *Router) restrictedFiles(w http.ResponseWriter, req *http.Request) {
 			replyError(w, http.StatusNotFound, "File not found")
 			return
 		}
+		w.Header().Set("Content-Length", strconv.Itoa(len(content)))
+		w.Header().Set("X-Content-SHA256", version.SHA256)
 		w.Header().Set("Content-Type", "application/octet-stream")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": path.Base(version.Name)}))

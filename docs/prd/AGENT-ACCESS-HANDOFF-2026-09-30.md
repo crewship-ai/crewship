@@ -256,7 +256,10 @@ produkční diff. Kvůli samotnému předání nebyl znovu proveden reload.
 - [Full Go/vet/race](reports/restricted-provider-binding-go-2026-09-30.txt):
   finální celý průchod 150 balíčků, exit 0; targeted race 124.359 s; full vet.
 - [Živý Docker harness](reports/restricted-provider-binding-live-2026-09-30.txt):
-  15/15 s race, vlastní syntetické DB a credentials, dvě izolované lidské identity,
+  Historický raw běh prošel 15/15 s race, ale jeho build stamp je `317d8257`/dirty;
+  není důkazem čistého `7c1cad17d`. Nezávislý čistý opakovaný běh na `3acdaa260`
+  je uveden v předběžné přejímce nástupce výše. Původní běh použil vlastní
+  syntetické DB a credentials, dvě izolované lidské identity,
   Linux oprávnění a absence klíče v env/souborech, ukončení po provider revokaci,
   fresh admission po vrácení grantu. Žádný skutečný placený model nebyl volán.
 - [Mutace](reports/restricted-provider-binding-mutation-2026-09-30.txt): odstranění

@@ -216,3 +216,28 @@ func (r *restrictedExecutor) ExecuteRunWithProjectFiles(ctx context.Context, use
 	}
 	return runner.ExecuteRunWithProjectFiles(ctx, user, workspace, chat, input, versions, emit)
 }
+
+// Capability checking happens before graph admission, including every nested leaf.
+func (r *restrictedExecutor) SupportsWorkflowProfile(profile string) bool {
+	if r == nil {
+		return false
+	}
+	var runner api.RestrictedTextExecutor
+	switch profile {
+	case "responses_text":
+		runner = r.text
+	case "native_api_key":
+		runner = r.native
+	default:
+		return false
+	}
+	if _, ok := runner.(interface {
+		ExecuteWorkflowRun(context.Context, restricteddispatch.DelegatedRunRequest, func(string, string) error) (restricteddispatch.RunProof, error)
+	}); !ok {
+		return false
+	}
+	if capable, ok := runner.(interface{ SupportsWorkflowProfile(string) bool }); ok {
+		return capable.SupportsWorkflowProfile(profile)
+	}
+	return profile == "responses_text"
+}

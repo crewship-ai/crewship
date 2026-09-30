@@ -151,3 +151,36 @@ func TestRestrictedRegistryPreservesDelegationAndExplicitProjectInputs(t *testin
 		t.Fatalf("denials fell back or executed: %+v %+v", text, native)
 	}
 }
+
+type advertisedRestrictedRunner struct {
+	proofRestrictedRunner
+	profile string
+}
+
+func (r *advertisedRestrictedRunner) SupportsWorkflowProfile(profile string) bool {
+	return profile == r.profile
+}
+
+func TestRestrictedRegistryWorkflowCapabilitiesRequireExactInstalledProfile(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		runner  *restrictedExecutor
+		profile string
+		want    bool
+	}{
+		{"absent registry", nil, "responses_text", false},
+		{"untyped text", &restrictedExecutor{text: &selectedRestrictedRunner{}}, "responses_text", false},
+		{"typed text compatibility", &restrictedExecutor{text: &proofRestrictedRunner{}}, "responses_text", true},
+		{"native needs advertisement", &restrictedExecutor{native: &proofRestrictedRunner{}}, "native_api_key", false},
+		{"native installed", &restrictedExecutor{native: &advertisedRestrictedRunner{profile: "native_api_key"}}, "native_api_key", true},
+		{"wrong native advertisement", &restrictedExecutor{native: &advertisedRestrictedRunner{profile: "responses_text"}}, "native_api_key", false},
+		{"no cross-profile fallback", &restrictedExecutor{text: &advertisedRestrictedRunner{profile: "native_api_key"}}, "native_api_key", false},
+		{"login unavailable", &restrictedExecutor{native: &advertisedRestrictedRunner{profile: "native_api_key"}}, "native_account_login", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.runner.SupportsWorkflowProfile(tc.profile); got != tc.want {
+				t.Fatalf("capability for %q = %v, want %v", tc.profile, got, tc.want)
+			}
+		})
+	}
+}

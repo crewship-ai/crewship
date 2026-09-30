@@ -59,6 +59,7 @@ func (r *Router) registerPipelineRoutes() *PipelineHandler {
 	// invoking A routine, and fanning one out across a 50-item batch is a
 	// different amount of spend to hand a member.
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/restricted-routine-runs/{runId}", authed(wsCtx(http.HandlerFunc(r.restrictedWorkflowResult))))
+	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/restricted-routines", authed(wsCtx(http.HandlerFunc(r.restrictedRoutineCatalog))))
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/restricted-routine-runs", authed(wsCtx(http.HandlerFunc(r.restrictedWorkflowResults))))
 	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/pipelines/{slug}/run", roleInline, pipes.Run)
 	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/pipelines/{slug}/run_batch", roleCreate, pipes.RunBatch)

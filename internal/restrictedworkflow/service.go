@@ -147,6 +147,11 @@ func manualPolicy(ctx context.Context, q interface {
 	return ErrDenied
 }
 func (s *Service) AdmitManual(ctx context.Context, user, workspace, slug string, inputs map[string]any, expectedHash string, delay time.Duration, keys ...string) (Receipt, error) {
+	return s.AdmitManualFrozen(ctx, user, workspace, slug, inputs, expectedHash, "", delay, keys...)
+}
+
+// AdmitManualFrozen binds an optional catalog fingerprint to all nested recipes and provider slots.
+func (s *Service) AdmitManualFrozen(ctx context.Context, user, workspace, slug string, inputs map[string]any, expectedHash, expectedExecutionHash string, delay time.Duration, keys ...string) (Receipt, error) {
 	if delay < 0 || delay > 24*time.Hour {
 		return Receipt{}, ErrDenied
 	}
@@ -160,7 +165,7 @@ func (s *Service) AdmitManual(ctx context.Context, user, workspace, slug string,
 	if len(keys) == 1 {
 		key = keys[0]
 	}
-	return s.admit(ctx, user, workspace, slug, inputs, expectedHash, delay, nil, key, nil)
+	return s.admit(ctx, user, workspace, slug, inputs, expectedHash, delay, nil, key, nil, expectedExecutionHash)
 }
 func (s *Service) AdmitPage(ctx context.Context, user, workspace string, action pipeline.PageActionInvocation, inputs map[string]any, keys ...string) (Receipt, error) {
 	if err := pipeline.CheckDeclaredPageAction(ctx, s.db, user, workspace, action); err != nil {
@@ -179,7 +184,10 @@ func (s *Service) AdmitPage(ctx context.Context, user, workspace string, action 
 	}
 	return s.admit(ctx, user, workspace, slug, inputs, "", 0, &action, key, nil)
 }
-func (s *Service) admit(ctx context.Context, user, workspace, slug string, supplied map[string]any, expectedHash string, delay time.Duration, page *pipeline.PageActionInvocation, key string, prepared *PreparedInvocation) (Receipt, error) {
+func (s *Service) admit(ctx context.Context, user, workspace, slug string, supplied map[string]any, expectedHash string, delay time.Duration, page *pipeline.PageActionInvocation, key string, prepared *PreparedInvocation, expectedExecutions ...string) (Receipt, error) {
+	if len(expectedExecutions) > 1 {
+		return Receipt{}, ErrDenied
+	}
 	var receipt Receipt
 	store := access.Store{DB: s.db}
 	m, err := store.Membership(ctx, user, workspace)
@@ -217,6 +225,9 @@ func (s *Service) admit(ctx context.Context, user, workspace, slug string, suppl
 		return receipt, ErrDenied
 	}
 	graphHash := hash(string(rawGraph))
+	if len(expectedExecutions) == 1 && expectedExecutions[0] != "" && expectedExecutions[0] != graphHash {
+		return receipt, ErrDenied
+	}
 	if err = store.Check(ctx, user, workspace, access.Right{Kind: "agent", ID: agent, Operation: "run"}); err != nil {
 		return receipt, ErrDenied
 	}

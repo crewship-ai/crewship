@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -72,7 +73,7 @@ func TestRestrictedFileRoutesCurrentAuthorityAndMetadata(t *testing.T) {
 		t.Fatalf("metadata %d %s", rec.Code, rec.Body.String())
 	}
 	rec = request("file-h1", "file-h1-chat", "/"+v.ID+"/download")
-	if rec.Code != 200 || rec.Body.String() != "PRIVATE_FILE_BYTES" || rec.Header().Get("Content-Type") != "application/octet-stream" || rec.Header().Get("Cache-Control") != "no-store" || rec.Header().Get("X-Content-Type-Options") != "nosniff" {
+	if rec.Code != 200 || rec.Body.String() != "PRIVATE_FILE_BYTES" || rec.Header().Get("Content-Type") != "application/octet-stream" || rec.Header().Get("Cache-Control") != "no-store" || rec.Header().Get("X-Content-Type-Options") != "nosniff" || rec.Header().Get("Content-Length") != strconv.FormatInt(v.Size, 10) || rec.Header().Get("X-Content-SHA256") != v.SHA256 {
 		t.Fatalf("download %d %s %v", rec.Code, rec.Body.String(), rec.Header())
 	}
 	for _, chat := range []string{"file-h1-chat", "file-h2-chat"} {
