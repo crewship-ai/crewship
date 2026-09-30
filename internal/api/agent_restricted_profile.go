@@ -40,8 +40,8 @@ func (h *AgentHandler) UpdateRestrictedProfile(w http.ResponseWriter, r *http.Re
 	var body struct {
 		Profile string `json:"profile"`
 	}
-	if err := readJSON(r, &body); err != nil || (body.Profile != "disabled" && body.Profile != "responses_text") {
-		replyError(w, http.StatusBadRequest, "profile must be disabled or responses_text; native adapter is unavailable")
+	if err := readJSON(r, &body); err != nil || (body.Profile != "disabled" && body.Profile != "responses_text" && body.Profile != "native_api_key") {
+		replyError(w, http.StatusBadRequest, "profile must be disabled, responses_text or native_api_key")
 		return
 	}
 	// Credential/prompt/model policy remains separately enforced during admission.

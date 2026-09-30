@@ -255,8 +255,11 @@ func TestRestrictedTextRouterIsolatesTwoHumansAndHistory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rec := profilePut(ownerToken, "native_api_key"); rec.Code != 400 {
-		t.Fatalf("unimplemented native profile enabled %d", rec.Code)
+	if rec := profilePut(ownerToken, "native_api_key"); rec.Code != 200 {
+		t.Fatalf("admin could not configure native profile %d", rec.Code)
+	}
+	if rec := request("text-h1", "text-h1-chat", "native must not fall back to text"); rec.Code != 403 {
+		t.Fatalf("missing native runner silently fell back %d", rec.Code)
 	}
 	if rec := profilePut(ownerToken, "responses_text"); rec.Code != 200 {
 		t.Fatalf("admin could not configure text profile %d %s", rec.Code, rec.Body.String())

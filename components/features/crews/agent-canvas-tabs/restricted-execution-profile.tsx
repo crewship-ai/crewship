@@ -9,9 +9,9 @@ export function RestrictedExecutionProfile({ agentId, workspaceId, initialProfil
   const endpoint = `/api/v1/agents/${encodeURIComponent(agentId)}/restricted-execution?workspace_id=${encodeURIComponent(workspaceId)}`
   return <ConfigSelect
     label="Restricted client execution"
-    hint="Choose how restricted clients may use this agent. Text Responses uses an explicit OpenAI API key and has no tools or provider login. Changing this stops current restricted attempts."
+    hint="Text Responses and native Codex use an explicit OpenAI API key. Native Codex runs tools in a private scratch sandbox; the server must have its native worker installed. Changing this stops current restricted attempts."
     value={profile}
-    options={[{value:"disabled",label:"Disabled"},{value:"responses_text",label:"Isolated text Responses"}]}
+    options={[{value:"disabled",label:"Disabled"},{value:"responses_text",label:"Isolated text Responses"},{value:"native_api_key",label:"Isolated native Codex scratch tools"}]}
     onSave={async value => {
       const response = await apiFetch(endpoint, {method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({profile:value})})
       if (!response.ok) throw new Error("Could not update restricted execution")

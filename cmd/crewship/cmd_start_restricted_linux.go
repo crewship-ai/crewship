@@ -15,6 +15,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/api"
 	"github.com/crewship-ai/crewship/internal/restricteddispatch"
 	"github.com/crewship-ai/crewship/internal/restrictedruntime"
+	"github.com/crewship-ai/crewship/internal/restrictedworkflow"
 )
 
 var restrictedImageDigest = regexp.MustCompile(`^(sha256:[a-f0-9]{64}|[a-z0-9][a-z0-9._:/-]*@sha256:[a-f0-9]{64})$`)
@@ -24,10 +25,11 @@ var restrictedImageDigest = regexp.MustCompile(`^(sha256:[a-f0-9]{64}|[a-z0-9][a
 // Without this explicit opt-in, restricted execution remains unavailable.
 func startRestrictedTextRuntime(ctx context.Context, db *sql.DB, databasePath string, router *api.Router, noDocker bool, logger *slog.Logger) (func(), error) {
 	image := os.Getenv("CREWSHIP_RESTRICTED_RUNTIME_IMAGE")
-	if image == "" {
+	nativeImage := os.Getenv("CREWSHIP_RESTRICTED_NATIVE_IMAGE")
+	if image == "" && nativeImage == "" {
 		return func() {}, nil
 	}
-	if noDocker || router == nil || db == nil || !restrictedImageDigest.MatchString(image) {
+	if noDocker || router == nil || db == nil || (image != "" && !restrictedImageDigest.MatchString(image)) || (nativeImage != "" && !restrictedImageDigest.MatchString(nativeImage)) {
 		return nil, fmt.Errorf("restricted runtime requires Docker, an API router and an immutable image digest")
 	}
 	absoluteDB, err := filepath.Abs(databasePath)
@@ -35,20 +37,115 @@ func startRestrictedTextRuntime(ctx context.Context, db *sql.DB, databasePath st
 		return nil, fmt.Errorf("restricted runtime requires a persistent instance database")
 	}
 	authority := restricteddispatch.Authority{Store: access.Store{DB: db}}
-	manager, err := restrictedruntime.New(filepath.Join(filepath.Dir(absoluteDB), "restricted-runtime"), restrictedruntime.Docker{Image: image}, authority, authority,
-		restrictedruntime.Limits{MemoryBytes: 128 << 20, NanoCPUs: 500000000, PIDs: 32})
+	registry := &restrictedExecutor{db: db}
+	var managers []*restrictedruntime.Manager
+	var workflow *restrictedworkflow.Service
+	closeAll := func() {
+		if workflow != nil {
+			if err := workflow.Close(); err != nil {
+				logger.Error("restricted workflow shutdown failed", "error", err)
+			}
+		}
+		for _, manager := range managers {
+			if err := manager.Close(); err != nil {
+				logger.Error("restricted runtime shutdown failed", "error", err)
+			}
+		}
+	}
+	if image != "" {
+		manager, err := restrictedruntime.New(filepath.Join(filepath.Dir(absoluteDB), "restricted-runtime"), restrictedruntime.Docker{Image: image}, authority, authority, restrictedruntime.Limits{MemoryBytes: 128 << 20, NanoCPUs: 500000000, PIDs: 32})
+		if err != nil {
+			return nil, err
+		}
+		managers = append(managers, manager)
+		if err = manager.Reconcile(ctx); err != nil {
+			closeAll()
+			return nil, fmt.Errorf("reconcile restricted text runtime: %w", err)
+		}
+		registry.text = &restricteddispatch.TextRunner{Authority: authority, Manager: manager, MaxOutputTokens: 4096}
+		logger.Info("restricted text runtime enabled", "image", image)
+	}
+	if nativeImage != "" {
+		manager, err := restrictedruntime.NewNative(filepath.Join(filepath.Dir(absoluteDB), "restricted-native-runtime"), restrictedruntime.Docker{Image: nativeImage}, authority, authority, restrictedruntime.NativeLimits())
+		if err != nil {
+			closeAll()
+			return nil, err
+		}
+		managers = append(managers, manager)
+		if err = manager.Reconcile(ctx); err != nil {
+			closeAll()
+			return nil, fmt.Errorf("reconcile restricted native runtime: %w", err)
+		}
+		registry.native = &restricteddispatch.NativeRunner{Authority: authority, Manager: manager, MaxOutputTokens: 4096}
+		logger.Info("restricted native scratch runtime enabled", "image", nativeImage)
+	}
+	router.SetRestrictedTextRunner(registry)
+	workflow, err = restrictedworkflow.New(db, registry)
 	if err != nil {
+		closeAll()
 		return nil, err
 	}
-	if err = manager.Reconcile(ctx); err != nil {
-		_ = manager.Close()
-		return nil, fmt.Errorf("reconcile restricted runtime: %w", err)
+	// The private queue uses this registry for every step. Unknown started
+	// work is reconciled as failed, rather than automatically replayed.
+	if err = workflow.Start(ctx); err != nil {
+		closeAll()
+		return nil, fmt.Errorf("start restricted workflow: %w", err)
 	}
-	router.SetRestrictedTextRunner(&restricteddispatch.TextRunner{Authority: authority, Manager: manager, MaxOutputTokens: 4096})
-	logger.Info("restricted text runtime enabled", "image", image)
-	return func() {
-		if err := manager.Close(); err != nil {
-			logger.Error("restricted runtime shutdown failed", "error", err)
-		}
-	}, nil
+	router.SetRestrictedWorkflow(workflow)
+	return closeAll, nil
+}
+
+type restrictedExecutor struct {
+	db           *sql.DB
+	text, native api.RestrictedTextExecutor
+}
+
+func (r *restrictedExecutor) selectRunner(ctx context.Context, workspace, chat string) (api.RestrictedTextExecutor, error) {
+	if r == nil || r.db == nil {
+		return nil, access.ErrDenied
+	}
+	var profile string
+	if err := r.db.QueryRowContext(ctx, `SELECT a.restricted_execution_profile FROM chats c JOIN agents a ON a.id=c.agent_id AND a.workspace_id=c.workspace_id WHERE c.id=? AND c.workspace_id=? AND a.deleted_at IS NULL`, chat, workspace).Scan(&profile); err != nil {
+		return nil, access.ErrDenied
+	}
+	var runner api.RestrictedTextExecutor
+	switch profile {
+	case "responses_text":
+		runner = r.text
+	case "native_api_key":
+		runner = r.native
+	}
+	if runner == nil {
+		return nil, access.ErrDenied
+	}
+	return runner, nil
+}
+func (r *restrictedExecutor) Execute(ctx context.Context, user, workspace, chat, input string, emit func(string, string) error) error {
+	runner, err := r.selectRunner(ctx, workspace, chat)
+	if err != nil {
+		return err
+	}
+	return runner.Execute(ctx, user, workspace, chat, input, emit)
+}
+func (r *restrictedExecutor) ExecuteRun(ctx context.Context, user, workspace, chat, input string, emit func(string, string) error) error {
+	runner, err := r.selectRunner(ctx, workspace, chat)
+	if err != nil {
+		return err
+	}
+	return runner.ExecuteRun(ctx, user, workspace, chat, input, emit)
+}
+func (r *restrictedExecutor) ExecuteRunWithRights(ctx context.Context, user, workspace, chat, input string, rights []access.Right, emit func(string, string) error) error {
+	runner, err := r.selectRunner(ctx, workspace, chat)
+	if err != nil {
+		return err
+	}
+	if enhanced, ok := runner.(interface {
+		ExecuteRunWithRights(context.Context, string, string, string, string, []access.Right, func(string, string) error) error
+	}); ok {
+		return enhanced.ExecuteRunWithRights(ctx, user, workspace, chat, input, rights, emit)
+	}
+	if len(rights) != 0 {
+		return access.ErrDenied
+	}
+	return runner.ExecuteRun(ctx, user, workspace, chat, input, emit)
 }

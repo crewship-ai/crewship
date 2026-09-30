@@ -13,7 +13,7 @@ import (
 )
 
 func startRestrictedTextRuntime(_ context.Context, _ *sql.DB, _ string, _ *api.Router, _ bool, _ *slog.Logger) (func(), error) {
-	if os.Getenv("CREWSHIP_RESTRICTED_RUNTIME_IMAGE") != "" {
+	if os.Getenv("CREWSHIP_RESTRICTED_RUNTIME_IMAGE") != "" || os.Getenv("CREWSHIP_RESTRICTED_NATIVE_IMAGE") != "" {
 		return nil, fmt.Errorf("restricted text runtime requires Linux and Docker")
 	}
 	return func() {}, nil
