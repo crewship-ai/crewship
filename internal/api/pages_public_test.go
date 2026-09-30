@@ -1,6 +1,6 @@
 package api
 
-// Public pages — the six rules, one test each (docs/prd/pages.md §7.3).
+// Public pages — the six rules, one test each (docs/specs/pages.md §7.3).
 //
 // §7.3 opens by calling this "the highest-risk surface in the feature", and the
 // tests are written to that brief: every one of them is an assertion about what

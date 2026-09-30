@@ -1,7 +1,7 @@
 # Issues: předávání práce mezi agenty a lidmi
 
 Návrh a implementační/testovací plán, 2026-09-07. Navazuje na
-`docs/ux/issues-analysis-proposal-2026-09-07.md` z dev1 a na
+[archived snapshot](https://github.com/crewship-ai/crewship/blob/8dc421fdb5df28a8113ba1453682bc55464213e6/docs/ux/issues-analysis-proposal-2026-09-07.md) z dev1 a na
 [PRD Issues and Routines](PRD-ISSUES-AND-ROUTINES-2026.md).
 Nová analýza kódu: `origin/main` @ `038117517`; první implementační část
 na větvi `feat/issues-work-clarity`, issue #2447. Routines se zde mění pouze
@@ -9,7 +9,7 @@ v návrhu pravidel pro jejich zápisy/spouštění nad issue.
 
 **Stav:** původní návrh a audit před implementací. Rozšířená implementace #2449
 (převzetí člověkem, předání, výsledky, přílohy, formuláře a stránkování) je
-popsaná v [aktuálním handoffu](HANDOFF-2026-09-07-ISSUES-WORK.md).
+popsaná v [aktuálním handoffu](https://github.com/crewship-ai/crewship/blob/8dc421fdb5df28a8113ba1453682bc55464213e6/docs/prd/HANDOFF-2026-09-07-ISSUES-WORK.md).
 Níže uvedená matice zůstává návrhem cílových scénářů, nikoli tvrzením, že
 každý z nich prošel živým testem s agentem.
 

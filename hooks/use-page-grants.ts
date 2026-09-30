@@ -1,7 +1,7 @@
 "use client"
 
 /**
- * The Pages ACL and history data layer — PRD `docs/prd/pages.md` §7.1b
+ * The Pages ACL and history data layer — PRD `docs/specs/pages.md` §7.1b
  * (three verbs, three subject kinds), §10b.1 (versions and rollback).
  *
  *   GET    /api/v1/pages/{slug}/grants     the whole ACL, live rows and inert

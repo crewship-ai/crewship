@@ -186,7 +186,7 @@ var crewshipVerbs = map[string]crewshipVerb{
 		// (pages.ValidatePayload). It is required because a push with no payload
 		// has nothing to say; `state` is optional and defaults to "ok", because
 		// "ok"/"failed" is the producer's own verdict and silence means it
-		// worked (docs/prd/pages.md §4 rule 2).
+		// worked (docs/specs/pages.md §4 rule 2).
 		RequiredArgs: []string{"page", "panel", "data"},
 		// FALSE, and this is a decision rather than a default. The other five
 		// verbs that can act unattended do so by falling back to "system"; this

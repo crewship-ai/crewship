@@ -16,7 +16,7 @@ import (
 // 'issue' / 'notify' can land without a migration". This is 'issue' landing.
 //
 // WHY IT IS HERE AND NOT A SECOND EVENTING PATH.
-// Pages' wake gates (docs/prd/pages.md §5) need journal event → predicate →
+// Pages' wake gates (docs/specs/pages.md §5) need journal event → predicate →
 // debounced, rate-limited, coalesced action, which is precisely what this
 // package already does and what a second observer on the journal write path
 // would have had to reimplement — badly, because the hard parts of it are the

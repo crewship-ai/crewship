@@ -1,6 +1,6 @@
 package api
 
-// Pages — versions and rollback (docs/prd/pages.md §10b.1).
+// Pages — versions and rollback (docs/specs/pages.md §10b.1).
 //
 // "Several agents may rewrite one page, and the one who breaks it is rarely
 // the one who notices — so `crewship page rollback <slug> --to <seq>` is not a

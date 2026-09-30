@@ -1,5 +1,5 @@
 /**
- * Fetching a public page (PRD `docs/prd/pages.md` §7.3.1, §7.3.3).
+ * Fetching a public page (PRD `docs/specs/pages.md` §7.3.1, §7.3.3).
  *
  * The load-bearing assertions here are about what the REQUEST carries, not
  * about what the hook returns:

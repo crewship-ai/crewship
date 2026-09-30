@@ -1,7 +1,7 @@
 package sidecar
 
 // Pages — the producer door for a process running INSIDE a crew container
-// (docs/prd/pages.md §0, §4, §7.1 rule 4, §7.1b; issue #1946).
+// (docs/specs/pages.md §0, §4, §7.1 rule 4, §7.1b; issue #1946).
 //
 //	PUT /pages/{page}/{panel}                 body: the panel's payload
 //	PUT /pages/{page}/{panel}?state=failed    the producer's own verdict

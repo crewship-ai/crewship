@@ -18,7 +18,7 @@ attacks come from *inside* an agent container, holding a legitimate sidecar/inte
 
 ## Live validation
 
-**Tier A — 10/10 green** against `https://crewship-dev3.unifylab.cz` (re-run 2026-07-26,
+**Tier A — 10/10 green** against `http://localhost:8083` (re-run 2026-07-26,
 first run 2026-07-23):
 
 | Check | Result |
@@ -109,11 +109,11 @@ Both suites are opt-in in `run-all.sh` — see `WITH_ATTACK_SURFACE` /
 
 ```sh
 # Tier A (perimeter) — read-only, creates nothing:
-CREWSHIP=/path/to/crewship CREWSHIP_SERVER=https://crewship-dev3.unifylab.cz \
+CREWSHIP=/path/to/crewship CREWSHIP_SERVER=http://localhost:8083 \
   bash scripts/test-harness/test-attack-surface.sh
 
 # Tier B (insider) — creates a routine (soft-deleted on exit) and runs it in-container:
-CREWSHIP=/path/to/crewship CREWSHIP_SERVER=https://crewship-dev3.unifylab.cz \
+CREWSHIP=/path/to/crewship CREWSHIP_SERVER=http://localhost:8083 \
   CREWSHIP_PROFILE=<profile bound to that host> CREWSHIP_WORKSPACE=<workspace id> \
   bash scripts/test-harness/test-redteam-insider.sh
 ```

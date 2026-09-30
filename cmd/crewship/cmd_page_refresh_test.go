@@ -1,6 +1,6 @@
 package main
 
-// `crewship page create --file` and `refresh:` (docs/prd/pages.md §12 v1.1).
+// `crewship page create --file` and `refresh:` (docs/specs/pages.md §12 v1.1).
 //
 // The CLI's job is the same one it has for `wake:` — carry the field from the
 // YAML a human wrote into the JSON the server validates, and carry it WITHOUT

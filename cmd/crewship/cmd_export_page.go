@@ -1,7 +1,7 @@
 package main
 
 // `crewship export page [slug]` — the kinds path PRD §13 obstacle 6 said
-// `crewship export` was missing (docs/prd/pages.md):
+// `crewship export` was missing (docs/specs/pages.md):
 //
 //	"Manifest export is dead code for SPEC-2 kinds. ExportSavedViews,
 //	 ExportRoutines, ExportProjects have no non-test callers; crewship

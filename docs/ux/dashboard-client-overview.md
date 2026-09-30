@@ -1,5 +1,11 @@
 # Client dashboard — 2026-09-06
 
+**Public implementation notes.** Retained for contributors because they
+explain the dashboard's data and interaction choices. Read the dated updates
+below before treating the original layout as current. The implementation is
+in `app/(dashboard)/page.tsx` and
+[`components/features/dashboard/`](../../components/features/dashboard/).
+
 Scope: main dashboard on dev1, issue #2433. Reuses the existing theme,
 SubBar, DashboardCard, AgentAvatar, CrewIcon, StatusPill and entityHref.
 

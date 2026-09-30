@@ -1,6 +1,6 @@
 package api
 
-// Phase 1B of the queue mechanism (.claude/context/prd/QUEUE-MECHANISM-2026.md).
+// Phase 1B of the queue mechanism (docs/prd/QUEUE-MECHANISM-2026.md).
 // This file owns the "I have an assignment id, run it" path that Phase
 // 1A's primitives lacked — DispatchAssignment was the only door into
 // runAssignment, but the queue pump fires from the completion path

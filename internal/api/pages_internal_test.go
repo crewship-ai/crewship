@@ -1,6 +1,6 @@
 package api
 
-// Pages — the routine write path (#1945, docs/prd/pages.md §0, §7.1 rule 4,
+// Pages — the routine write path (#1945, docs/specs/pages.md §0, §7.1 rule 4,
 // §7.1b, §11, §11b.6).
 //
 // The public push is tested in pages_handler_test.go with a human on the other

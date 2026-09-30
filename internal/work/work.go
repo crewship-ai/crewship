@@ -26,7 +26,7 @@
 // transition carrying a stale generation is refused. The River spike measured a
 // queue whose completion predicate was (id, state='running') with no attempt
 // term, and watched a superseded worker overwrite the live attempt's result —
-// see docs/prd/ADR-QUEUE-RIVER-SQLITE-2026-09-10.md. Whichever queue is
+// see docs/decisions/ADR-QUEUE-RIVER-SQLITE-2026-09-10.md. Whichever queue is
 // underneath, this term is ours to carry.
 package work
 

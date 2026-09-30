@@ -1,11 +1,16 @@
 # Routines jako operátorská konzole — návrh UX, 15. září 2026
 
+**Aktualizace 28. 9. 2026:** PR #2562 byl sloučen 16. 9. 2026 jako
+`e705a498a6db9188037e31c54db6e5032be46fc6` a je součástí základu tohoto
+úklidu. Níže je historický stav k 15. 9., nikoli tvrzení o nyní otevřeném PR
+nebo aktuálním nasazení DEV1. Implementační kontrakt zůstává veřejný.
+
 Stav k 15. 9. 2026: implementováno v otevřeném PR [#2562](https://github.com/crewship-ai/crewship/pull/2562)
 a nasazeno a technicky ověřeno na DEV1. Nezávislé review a lidská přejímka zůstávají otevřené.
-Aktuální opravy a důkazy shrnuje [závěrečný report](../prd/reports/routines-operator-recovery-2026-09-15.md).
+Aktuální opravy a důkazy shrnuje [závěrečný report](https://github.com/crewship-ai/crewship/blob/07bfd2360a97dbe1c9f71c03e1d9b5d5d471c993/docs/prd/reports/routines-operator-recovery-2026-09-15.md).
 Následující diagnóza a prototyp zachycují původní návrh; implementační dodatky popisují jeho vývoj. Navazuje na [ROUTINES-CLIENT-EXPERIENCE-PRD-2026-09-08](../prd/ROUTINES-CLIENT-EXPERIENCE-PRD-2026-09-08.md),
 [ROUTINES-CLARITY-PRD-2026-09-15](../prd/ROUTINES-CLARITY-PRD-2026-09-15.md)
-a [validační report z 15. 9.](../prd/reports/routines-clarity-validation-2026-09-15.md).
+a [validační report z 15. 9.](https://github.com/crewship-ai/crewship/blob/07bfd2360a97dbe1c9f71c03e1d9b5d5d471c993/docs/prd/reports/routines-clarity-validation-2026-09-15.md).
 
 Prototyp: [`public/design/routines-operator-console-20260915.html`](../../public/design/routines-operator-console-20260915.html)
 (otevřít lokálně v prohlížeči; desktop i přepínač „Phone 390 px“; každé simulované

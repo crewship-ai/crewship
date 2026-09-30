@@ -92,7 +92,7 @@ entitlement or actual billed amounts.
 
 ## Acceptance handoff (2026-09-18)
 
-See [PRD validation and next-agent checklist](opencode-go-zen-handoff-2026-09-18.md)
+See [PRD validation and next-agent checklist](https://github.com/crewship-ai/crewship/blob/8dc421fdb5df28a8113ba1453682bc55464213e6/docs/prd/opencode-go-zen-handoff-2026-09-18.md)
 for requirement coverage, completed CI, actual dev3 deployment evidence and the
 remaining real-account acceptance/review gates. Implementation coverage is not
 proof of successful paid inference.

@@ -486,6 +486,17 @@ jobs:
       # The snapshot binary therefore answers 503 with the "web UI not
       # built" page on UI routes, which is the intended, honest behaviour
       # for a snapshot built without `pnpm build`.
+      # Archives and packages now include both Go and frontend dependency
+      # texts. Generate the same bundle as release/nightly from the locked
+      # install before the snapshot, even though this smoke skips the UI build.
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: "22"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: make licenses
+
       - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7
         with:
           version: "v2.6.1"

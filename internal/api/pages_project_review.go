@@ -1,6 +1,6 @@
 package api
 
-// The authorized review snapshot (docs/prd/pages.md §11, editor contract
+// The authorized review snapshot (docs/specs/pages.md §11, editor contract
 // `lib/pages/editor-contract.ts` → `ReviewSnapshotWire`).
 //
 // Publishing an application replaces executable code AND the Page declaration

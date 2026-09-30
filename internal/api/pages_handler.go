@@ -1,6 +1,6 @@
 package api
 
-// Pages — the HTTP surface (docs/prd/pages.md §11, §11b).
+// Pages — the HTTP surface (docs/specs/pages.md §11, §11b).
 //
 // A page holds no query, no datasource, no connection string and no
 // credentials: it renders the last payload a producer pushed, plus the

@@ -10,7 +10,7 @@ const statePath=process.env.TEAM_CHAT_STATE;assert.ok(statePath,'TEAM_CHAT_STATE
 const state = await readPrivateJson(statePath);
 if (!process.env.FILES_PREVIEW_MANIFEST) throw new Error('FILES_PREVIEW_MANIFEST must point to the printed fixture manifest');
 const manifest = await readPrivateJson(process.env.FILES_PREVIEW_MANIFEST);
-const base='https://crewship-dev2.unifylab.cz';assert.equal(manifest.server,base);
+const base = process.env.CREWSHIP_SERVER || 'http://localhost:8082';assert.equal(manifest.server,base);
 const artifacts = await createPrivateArtifacts('files-preview-live');
 const report={server:base,user_id:state.accounts.emma.user_id,fixture_directory:manifest.directory,fixture_origin:'Synthetic QA PDF/image/code uploaded by supported owner CLI; no agent execution.',checks:[],page_errors:[],failed_resources:[],pdf_assets:[]};
 const browser=await chromium.launch({headless:true});const context=await browser.newContext({viewport:{width:1500,height:1000}});const page=await context.newPage();

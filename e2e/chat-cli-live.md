@@ -38,7 +38,7 @@ not rerun setup repeatedly without cleaning failed runs. Never share config
 files or setup links. The script refuses targets other than Dev2.
 
 This script does not invoke models. Separate live agent-session and mixed-channel
-checks are recorded in the [Dev2 report](../docs/prd/reports/chat-cli-agent-dev2-2026-09-07.md).
+checks are recorded in the [Dev2 report](https://github.com/crewship-ai/crewship/blob/8dc421fdb5df28a8113ba1453682bc55464213e6/docs/prd/reports/chat-cli-agent-dev2-2026-09-07.md).
 
 ## CLI surface
 

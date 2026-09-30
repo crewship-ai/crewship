@@ -1,6 +1,6 @@
 package kinds
 
-// kind: Page and `refresh:` (docs/prd/pages.md §12 v1.1).
+// kind: Page and `refresh:` (docs/specs/pages.md §12 v1.1).
 //
 // The manifest door has to agree with the CLI door about what a page document
 // says — that is §6's promise, and it is why PageSpec carries

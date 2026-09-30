@@ -8,7 +8,7 @@ import { readApiError, readApiErrorDetail } from "@/lib/api-error"
 
 /**
  * The one shared executor behind every write button in the app (PRD
- * docs/prd/pages.md §8b.5).
+ * docs/specs/pages.md §8b.5).
  *
  * `apiFetch` resolves on 4xx/5xx — it only rejects on transport failure.
  * Issue #1563 was four mutations that toasted success for a write the

@@ -2,7 +2,7 @@
 
 > Historical scope: this review records the state before the subsequent fixes on
 > the same day. Current implementation and measured results are in
-> [the hardening handoff](pages-apps-hardening-handoff-2026-09-09.md).
+> [the hardening handoff](https://github.com/crewship-ai/crewship/blob/8dc421fdb5df28a8113ba1453682bc55464213e6/docs/prd/pages-apps-hardening-handoff-2026-09-09.md).
 
 Datum: 2026-09-09. Autor: Codex. Zadání: nezávisle analyzovat oponenturu,
 ověřit tvrzení proti implementaci a připravit podklad pro další práci na Pages.

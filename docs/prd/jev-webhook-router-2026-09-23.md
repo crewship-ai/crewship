@@ -18,7 +18,7 @@ The `review` option is mandatory. A selected probability below the per-step thre
 
 `pipeline.decision.evaluated` records the selected and suggested labels, probability distribution, threshold, model, provider and usage, correlated to the routine run and step. It does not copy the webhook state. This gives Keeper and offline evals evidence without treating a model score as authorization.
 
-The runnable [historical example](../../scripts/jev-eval/webhook-router.routine.json) has `sre`, `developer`, `review` and `ignore` choices. Its state template selects three event fields rather than forwarding the raw body or signature headers. The routine must declare the provider host in `egress_targets`; the author crew's network policy still applies. Instructions and setup from the closed branch remain in [its decisions CLI guide](https://github.com/crewship-ai/crewship/blob/e87396b3077f2610a5f38ec4ade10a872653898b/docs/cli/decisions.mdx#experimental-webhook-router-routine).
+The runnable [historical example](https://github.com/crewship-ai/crewship/blob/8dc421fdb5df28a8113ba1453682bc55464213e6/scripts/jev-eval/webhook-router.routine.json) has `sre`, `developer`, `review` and `ignore` choices. Its state template selects three event fields rather than forwarding the raw body or signature headers. The routine must declare the provider host in `egress_targets`; the author crew's network policy still applies. Instructions and setup from the closed branch remain in [its decisions CLI guide](https://github.com/crewship-ai/crewship/blob/e87396b3077f2610a5f38ec4ade10a872653898b/docs/cli/decisions.mdx#experimental-webhook-router-routine).
 
 The example's `review` branch is a durable approval waitpoint; `ignore` completes with an auditable decision and no agent call.
 

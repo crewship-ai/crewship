@@ -531,7 +531,7 @@ var startCmd = &cobra.Command{
 					if ah := apiRouter.Automations(); ah != nil {
 						ah.SetRefresh(refresh)
 					}
-					// Pages' wake gates (docs/prd/pages.md §5) compile to rows
+					// Pages' wake gates (docs/specs/pages.md §5) compile to rows
 					// in the SAME table, so a page save has to refresh the
 					// same registry — a gate authored a second ago that fires
 					// nothing for a minute reads as broken.
@@ -1227,7 +1227,7 @@ var startCmd = &cobra.Command{
 				defer recurringIssues.Stop()
 				logger.Info("recurring-issue dispatcher wired (cron triggers; 30s tick)")
 
-				// Pages' freshness sweeper (docs/prd/pages.md §4 rule 4).
+				// Pages' freshness sweeper (docs/specs/pages.md §4 rule 4).
 				// Nothing else notices a panel that stopped reporting: the
 				// verdict is computed on READ, so an unwatched page would go
 				// quiet and say nothing. One minute; the lapse is recorded in

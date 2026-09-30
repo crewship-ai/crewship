@@ -1,6 +1,6 @@
 # AWX + Omarchy: deset implementačních iterací po oponentuře
 
-Datum 2026-09-15. Stav: revidovaný plán k předávání Claude Code, nikoli potvrzení implementace nebo schválení nových oprávnění. Navazuje na [PRD](awx-omarchy-product-improvements-2026-09-14.md) a [oponenturu](reports/awx-omarchy-prd-opponent-2026-09-15.md). Reporty nepřepisovat: zachovávají původní důkazy a rozdíly proti této revizi.
+Datum 2026-09-15. Stav: revidovaný plán k předávání Claude Code, nikoli potvrzení implementace nebo schválení nových oprávnění. Navazuje na [PRD](awx-omarchy-product-improvements-2026-09-14.md) a [oponenturu](https://github.com/crewship-ai/crewship/blob/07bfd2360a97dbe1c9f71c03e1d9b5d5d471c993/docs/prd/reports/awx-omarchy-prd-opponent-2026-09-15.md). Reporty nepřepisovat: zachovávají původní důkazy a rozdíly proti této revizi.
 
 ## Jak práci předávat
 

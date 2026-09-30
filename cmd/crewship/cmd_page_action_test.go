@@ -1,7 +1,7 @@
 package main
 
 // cmd_page_action_test.go — the acceptance test for `crewship page action`
-// and `crewship page actions` (docs/prd/pages.md §8b, §11).
+// and `crewship page actions` (docs/specs/pages.md §8b, §11).
 //
 // Epic #1935. The endpoint half is proved in internal/api/pages_actions_test.go;
 // this file proves the client half, which only the CLI can:

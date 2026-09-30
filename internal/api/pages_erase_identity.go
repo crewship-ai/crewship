@@ -1,7 +1,7 @@
 package api
 
 // Art. 17 erasure — unnaming the subject on the Pages tables (issue #1976,
-// defect 2; docs/prd/pages.md §7.1b, §7.3.2, §10b.5c).
+// defect 2; docs/specs/pages.md §7.1b, §7.3.2, §10b.5c).
 //
 // # The contract this file implements
 //

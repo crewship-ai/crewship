@@ -4,7 +4,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { PagesLayout } from "@/components/features/pages/pages-layout"
 
-// /pages — the Pages surface (docs/prd/pages.md §9b).
+// /pages — the Pages surface (docs/specs/pages.md §9b).
 //
 // Three zones: the app's icon rail, a 280px filter rail on the shared
 // sidebar-kit, and the main pane — the overview here, one page's panel

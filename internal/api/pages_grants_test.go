@@ -1,6 +1,6 @@
 package api
 
-// Pages — the grants surface (docs/prd/pages.md §7.1 rules 3–5, §7.1b, §11).
+// Pages — the grants surface (docs/specs/pages.md §7.1 rules 3–5, §7.1b, §11).
 //
 // Six rules are enforced by pages_grants.go / pages_grants_authz.go, and each
 // one has a test below, in order:
