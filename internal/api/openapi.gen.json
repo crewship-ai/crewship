@@ -17327,9 +17327,6 @@
                     "changed": {
                       "type": "integer"
                     },
-                    "defaults_updated": {
-                      "type": "boolean"
-                    },
                     "preview_id": {
                       "type": "string"
                     },
@@ -17384,7 +17381,6 @@
                   "required": [
                     "applied",
                     "changed",
-                    "defaults_updated",
                     "workspaces",
                     "preview_id"
                   ],
@@ -17465,6 +17461,433 @@
               }
             },
             "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/v1/admin/instance/keeper/governance/defaults": {
+      "get": {
+        "operationId": "get_api_v1_admin_instance_keeper_governance_defaults",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "applied": {
+                      "type": "boolean"
+                    },
+                    "changes": {
+                      "items": {
+                        "properties": {
+                          "after": {},
+                          "before": {},
+                          "field": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "field",
+                          "before",
+                          "after"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "configured": {
+                      "type": "boolean"
+                    },
+                    "defaults": {
+                      "properties": {
+                        "auto_lease_seconds": {
+                          "type": "integer"
+                        },
+                        "behavior_sample_every": {
+                          "type": "integer"
+                        },
+                        "deny_notify_min_risk": {
+                          "type": "integer"
+                        },
+                        "enabled": {
+                          "type": "boolean"
+                        },
+                        "gov_model_credential_id": {
+                          "type": "string"
+                        },
+                        "gov_model_id": {
+                          "type": "string"
+                        },
+                        "gov_model_provider": {
+                          "type": "string"
+                        },
+                        "require_second_approver": {
+                          "type": "boolean"
+                        },
+                        "security_contact_user_id": {
+                          "type": "string"
+                        },
+                        "watch_presets": {
+                          "items": {
+                            "type": "string"
+                          },
+                          "type": "array"
+                        },
+                        "watch_spec": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "enabled",
+                        "deny_notify_min_risk"
+                      ],
+                      "type": "object"
+                    },
+                    "preview_id": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "applied",
+                    "configured",
+                    "defaults",
+                    "changes",
+                    "preview_id"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "tags": [
+          "admin"
+        ]
+      },
+      "put": {
+        "operationId": "put_api_v1_admin_instance_keeper_governance_defaults",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "dry_run": {
+                    "type": "boolean"
+                  },
+                  "expect_preview": {
+                    "type": "string"
+                  },
+                  "set": {
+                    "properties": {
+                      "auto_lease_seconds": {
+                        "type": "integer"
+                      },
+                      "behavior_sample_every": {
+                        "type": "integer"
+                      },
+                      "deny_notify_min_risk": {
+                        "type": "integer"
+                      },
+                      "enabled": {
+                        "type": "boolean"
+                      },
+                      "gov_model_credential_id": {
+                        "type": "string"
+                      },
+                      "gov_model_id": {
+                        "type": "string"
+                      },
+                      "gov_model_provider": {
+                        "type": "string"
+                      },
+                      "require_second_approver": {
+                        "type": "boolean"
+                      },
+                      "security_contact_user_id": {
+                        "type": "string"
+                      },
+                      "watch_presets": {
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
+                      },
+                      "watch_spec": {
+                        "type": "string"
+                      }
+                    },
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "set"
+                ],
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "applied": {
+                      "type": "boolean"
+                    },
+                    "changes": {
+                      "items": {
+                        "properties": {
+                          "after": {},
+                          "before": {},
+                          "field": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "field",
+                          "before",
+                          "after"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "configured": {
+                      "type": "boolean"
+                    },
+                    "defaults": {
+                      "properties": {
+                        "auto_lease_seconds": {
+                          "type": "integer"
+                        },
+                        "behavior_sample_every": {
+                          "type": "integer"
+                        },
+                        "deny_notify_min_risk": {
+                          "type": "integer"
+                        },
+                        "enabled": {
+                          "type": "boolean"
+                        },
+                        "gov_model_credential_id": {
+                          "type": "string"
+                        },
+                        "gov_model_id": {
+                          "type": "string"
+                        },
+                        "gov_model_provider": {
+                          "type": "string"
+                        },
+                        "require_second_approver": {
+                          "type": "boolean"
+                        },
+                        "security_contact_user_id": {
+                          "type": "string"
+                        },
+                        "watch_presets": {
+                          "items": {
+                            "type": "string"
+                          },
+                          "type": "array"
+                        },
+                        "watch_spec": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "enabled",
+                        "deny_notify_min_risk"
+                      ],
+                      "type": "object"
+                    },
+                    "preview_id": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "applied",
+                    "configured",
+                    "defaults",
+                    "changes",
+                    "preview_id"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
           },
           "409": {
             "content": {

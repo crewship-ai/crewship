@@ -688,12 +688,13 @@ for all workspaces.
 ### keeper set
 
 `PUT /api/v1/admin/instance/keeper/governance`. Sets the Keeper watchdog for
-one, several or all workspaces. Only the settings you pass change. For one
+one, several or all existing workspaces. Only the settings you pass change. For one
 workspace it saves straight away. For several, or `--all`, it first lists
 every workspace whose settings would be overwritten and asks, then saves
 exactly that: if a workspace was created or a setting changed in between, the
-server refuses and nothing is written. The save is all or nothing: if one workspace refuses the values, none changes. `--all` also
-sets what a workspace created later starts with.
+server refuses and nothing is written. The save is all or nothing: if one workspace refuses the values, none changes. `--all` means
+every existing workspace; what a new workspace starts with is `keeper
+defaults`.
 
 ```bash
 crewship admin instance keeper set --workspace lab --watchdog on --sample-every 10
@@ -704,7 +705,7 @@ crewship admin instance keeper set --all --watchdog on --deny-alert-risk 5 --dry
 | Flag | Required | Description |
 |---|---|---|
 | `--workspace` | one of the two | Workspace slugs, comma-separated. |
-| `--all` | one of the two | Every workspace, and what new workspaces start with. |
+| `--all` | one of the two | Every existing workspace. New ones start from `keeper defaults`. |
 | `--dry-run` | no | Show what would change, write nothing. |
 | `--yes` | no | Skip the confirmation for several workspaces. |
 | `--watchdog` | no | `on` or `off`. |
@@ -717,6 +718,34 @@ crewship admin instance keeper set --all --watchdog on --deny-alert-risk 5 --dry
 | `--gov-model` | no | Judge model id. Required with a provider. |
 | `--gov-credential` | no | Vault credential id for the judge. One workspace only. |
 | `--contact` | no | Security contact user id. One workspace only. |
+
+### keeper defaults
+
+`GET | PUT /api/v1/admin/instance/keeper/governance/defaults`. The template a
+new workspace's Keeper starts with: a workspace copies it when it is created
+and keeps its copy, so changing the template changes no existing workspace
+(`keeper set --all` does that). Without settings it shows the template; with
+them it shows the change, asks, and saves exactly what it showed.
+
+```bash
+crewship admin instance keeper defaults
+crewship admin instance keeper defaults --watchdog on --sample-every 10 --yes
+```
+
+| Flag | Required | Description |
+|---|---|---|
+| `--dry-run` | no | Show what would change, write nothing. |
+| `--yes` | no | Skip the confirmation. |
+| `--watchdog` | no | `on` or `off`. |
+| `--sample-every` | no | Review every Nth tool call, 1–100. |
+| `--deny-alert-risk` | no | Risk, 1–10, from which a DENY also reaches the inbox. |
+| `--second-approver` | no | `on` or `off`. |
+| `--lease` | no | Approved access lasts this long, e.g. `15m`; `0` keeps it standing. |
+| `--presets` | no | Watch presets, comma-separated. |
+| `--gov-provider` | no | Judge provider; empty uses the instance judge. |
+| `--gov-model` | no | Judge model id. |
+| `--gov-credential` | no | Refused: a judge credential belongs to one workspace. |
+| `--contact` | no | Refused: a security contact belongs to one workspace. |
 
 ### keeper requests
 

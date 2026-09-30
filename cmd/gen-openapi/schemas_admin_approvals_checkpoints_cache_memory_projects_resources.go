@@ -254,6 +254,11 @@ func schemaCatalogAdminApprovalsCheckpointsCacheMemoryProjectsResources() map[st
 		"gov_model_provider": str(), "gov_model_id": str(), "gov_model_credential_id": str(),
 		"auto_lease_seconds": integer(), "behavior_sample_every": integer(),
 	}
+	instanceDefaults := object(map[string]any{
+		"applied": boolean(), "configured": boolean(), "preview_id": str(),
+		"defaults": object(instanceGovSettings, "enabled", "deny_notify_min_risk"),
+		"changes":  array(object(map[string]any{"field": str(), "before": map[string]any{}, "after": map[string]any{}}, "field", "before", "after")),
+	}, "applied", "configured", "defaults", "changes", "preview_id")
 	withProps := func(maps ...map[string]any) map[string]any {
 		out := map[string]any{}
 		for _, m := range maps {
@@ -311,12 +316,16 @@ func schemaCatalogAdminApprovalsCheckpointsCacheMemoryProjectsResources() map[st
 				"set": object(instanceGovPatch),
 			}, "set"),
 			Response: object(map[string]any{
-				"applied": boolean(), "changed": integer(), "defaults_updated": boolean(), "preview_id": str(),
+				"applied": boolean(), "changed": integer(), "preview_id": str(),
 				"workspaces": array(object(withProps(instanceWsRef, map[string]any{
 					"changes":  array(object(map[string]any{"field": str(), "before": map[string]any{}, "after": map[string]any{}}, "field", "before", "after")),
 					"warnings": stringArray(),
 				}), append([]string{"changes"}, instanceWsRequired...)...)),
-			}, "applied", "changed", "defaults_updated", "workspaces", "preview_id")},
+			}, "applied", "changed", "workspaces", "preview_id")},
+		"GET /api/v1/admin/instance/keeper/governance/defaults": {Response: instanceDefaults},
+		"PUT /api/v1/admin/instance/keeper/governance/defaults": {
+			Request:  object(map[string]any{"dry_run": boolean(), "expect_preview": str(), "set": object(instanceGovPatch)}, "set"),
+			Response: instanceDefaults},
 		"GET /api/v1/admin/instance/keeper/requests": {Response: object(map[string]any{
 			"items": array(object(withProps(map[string]any{
 				"id": str(), "agent_id": str(), "agent_name": str(), "crew_id": str(), "credential_id": str(), "credential_name": str(),

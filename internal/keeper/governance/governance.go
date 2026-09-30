@@ -3,10 +3,9 @@
 // contact the watchdog snitches to, and the risk threshold at which a DENY
 // decision also lands in the inbox.
 //
-// Resolution contract: an explicit workspace row always wins; no row means
-// the instance defaults (defaults.go), which leave the watchdog OFF — it is
-// opt-in, running once an OWNER/ADMIN enables it or an instance admin saves
-// it on for all workspaces. The resolver is read on hot paths
+// Resolution contract: the workspace's own row. A workspace gets one when it
+// is created, copied from the instance defaults (defaults.go) — a template,
+// not a live policy. No row means the built-in opt-out: watchdog OFF. The resolver is read on hot paths
 // (the behavior hook fires per sampled tool call), so Resolve never returns an
 // error — a failed read falls back to disabled (fail-safe: monitoring off,
 // never a spurious escalation) and the caller's next sample retries naturally.
@@ -163,9 +162,10 @@ type Execer interface {
 }
 
 // Get returns the explicit workspace row. found is false when the workspace
-// has never been configured in-app; the settings are then the instance
-// defaults (see Defaults), which are the built-in opt-out — watchdog off —
-// until an instance admin saves something for all workspaces.
+// has none; the settings are then the built-in opt-out — watchdog off. Every
+// workspace gets a row when it is created (SeedWorkspace) and an existing one
+// got it from the 20260930 migration, so no row means something bypassed
+// both, and the safe answer is the opt-out.
 func Get(ctx context.Context, db Querier, workspaceID string) (Settings, bool, error) {
 	var (
 		s            Settings
@@ -182,11 +182,11 @@ func Get(ctx context.Context, db Querier, workspaceID string) (Settings, bool, e
 		Scan(&enabled, &contact, &s.DenyNotifyMinRisk, &s.WatchSpec, &presets, &secondApprov,
 			&s.GovModelProvider, &s.GovModelID, &govCredID, &s.AutoLeaseSeconds, &s.BehaviorSampleEvery)
 	if err == sql.ErrNoRows {
-		d, _, derr := Defaults(ctx, db)
-		if derr != nil {
-			return Settings{DenyNotifyMinRisk: DefaultDenyNotifyMinRisk}, false, derr
-		}
-		return d, false, nil
+		// No row: the built-in opt-out, never the current defaults. The
+		// defaults are a template copied in when a workspace is created
+		// (SeedWorkspace); reading them live here would let a later change of
+		// the defaults silently change this workspace.
+		return Settings{DenyNotifyMinRisk: DefaultDenyNotifyMinRisk}, false, nil
 	}
 	if err != nil {
 		return Settings{DenyNotifyMinRisk: DefaultDenyNotifyMinRisk}, false, fmt.Errorf("governance: get: %w", err)
@@ -294,9 +294,8 @@ func encodePresets(p []string) (string, error) {
 }
 
 // Resolve returns the watchdog settings a caller should act on: the explicit
-// workspace row when present, otherwise the instance defaults — which are the
-// opt-in default (disabled, default DENY-notify threshold) until an instance
-// admin saves settings for all workspaces. The watchdog is default-OFF per workspace (#1001) —
+// workspace row when present, otherwise the built-in opt-in default
+// (disabled, default DENY-notify threshold). The watchdog is default-OFF per workspace (#1001) —
 // a workspace only participates once an OWNER/ADMIN explicitly enables it, so
 // an unconfigured workspace resolves to Enabled=false regardless of the server
 // config. This is the single fetch-and-warn seam every read site shares
@@ -315,7 +314,7 @@ func Resolve(ctx context.Context, db *sql.DB, logger *slog.Logger, workspaceID s
 		}
 		return def
 	}
-	// No row: Get already answered with the instance defaults.
+	// No row: Get already answered with the built-in opt-out.
 	return s
 }
 

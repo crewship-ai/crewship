@@ -5,14 +5,19 @@ package api
 // sit in and whether or not they belong to it:
 //
 //	GET /api/v1/admin/instance/keeper/governance   every workspace's watchdog settings + the instance defaults
-//	PUT /api/v1/admin/instance/keeper/governance   one, several or all workspaces; dry_run previews
+//	PUT /api/v1/admin/instance/keeper/governance   one, several or all existing workspaces; dry_run previews
+//	GET|PUT /api/v1/admin/instance/keeper/governance/defaults   the template a new workspace copies
 //	GET /api/v1/admin/instance/keeper/requests     the decision log across workspaces, rows carry their workspace
 //	GET /api/v1/admin/instance/keeper/health       the rolling decision window of every workspace
 //
 // A save for several workspaces is one transaction: it lands in all of them or
 // in none, and each workspace it changes gets its own instance audit entry
-// saying what went from what to what. A save for all workspaces also becomes
-// the instance defaults a workspace created later starts from.
+// saying what went from what to what. "All" is the scope of that save —
+// every existing workspace — and nothing more.
+//
+// The defaults for new workspaces are a separate operation with its own
+// preview and confirmation (PUT …/governance/defaults): a template a
+// workspace copies when it is created, which changes no existing one.
 
 import (
 	"context"
@@ -160,7 +165,8 @@ func (h *InstanceKeeperHandler) ListGovernance(w http.ResponseWriter, r *http.Re
 type instanceGovernancePutBody struct {
 	// Workspaces names the targets by id or slug. Exclusive with All.
 	Workspaces []string `json:"workspaces"`
-	// All targets every workspace and also sets the instance defaults.
+	// All targets every existing workspace. It does not touch the defaults
+	// for new workspaces; that is PUT …/governance/defaults.
 	All bool `json:"all"`
 	// DryRun computes and returns the changes without writing anything: the
 	// console's "you are about to overwrite …" dialog is this response.
@@ -193,11 +199,11 @@ type instanceGovernanceChange struct {
 type instanceGovernancePutResponse struct {
 	Applied bool `json:"applied"`
 	// Changed is how many workspaces the save changes (or, on a dry run, would).
-	Changed         int                        `json:"changed"`
-	Workspaces      []instanceGovernanceChange `json:"workspaces"`
-	DefaultsUpdated bool                       `json:"defaults_updated"`
-	// PreviewID fingerprints what the save does (or would do): targets,
-	// every change and the defaults. Send it back as expect_preview.
+	Changed    int                        `json:"changed"`
+	Workspaces []instanceGovernanceChange `json:"workspaces"`
+	// PreviewID fingerprints what the save does (or would do): every target
+	// with its whole settings before and after. Send it back as
+	// expect_preview.
 	PreviewID string `json:"preview_id"`
 }
 
@@ -294,25 +300,11 @@ func (h *InstanceKeeperHandler) PutGovernance(w http.ResponseWriter, r *http.Req
 		resp.Workspaces = append(resp.Workspaces, c)
 	}
 
-	var defaultsAfter governance.Settings
-	if body.All {
-		d, _, err := governance.Defaults(ctx, tx)
-		if err != nil {
-			h.fail(w, "defaults", err)
-			return
-		}
-		if defaultsAfter, err = mergeGovernancePatch(d, body.Set); err != nil {
-			replyError(w, http.StatusBadRequest, "instance defaults: "+err.Error())
-			return
-		}
-		resp.DefaultsUpdated = true
-	}
-
 	fp := make([]governanceFingerprintRow, 0, len(plan))
 	for _, p := range plan {
 		fp = append(fp, governanceFingerprintRow{ID: p.change.ID, Before: p.before, After: p.after})
 	}
-	resp.PreviewID = governancePreviewID(fp, resp.DefaultsUpdated, defaultsAfter)
+	resp.PreviewID = governancePreviewID(fp, nil)
 	if body.DryRun {
 		writeJSON(w, http.StatusOK, resp)
 		return
@@ -339,18 +331,6 @@ func (h *InstanceKeeperHandler) PutGovernance(w http.ResponseWriter, r *http.Req
 			"changes":        p.change.Changes,
 			"targets":        len(targets),
 			"all":            body.All,
-		}); err != nil {
-			h.fail(w, "audit", err)
-			return
-		}
-	}
-	if body.All {
-		if err := governance.SetDefaults(ctx, tx, defaultsAfter); err != nil {
-			h.fail(w, "set defaults", err)
-			return
-		}
-		if err := auditInstance(ctx, r, tx, "instance.keeper_defaults_updated", "instance", "", "", map[string]any{
-			"set": body.Set,
 		}); err != nil {
 			h.fail(w, "audit", err)
 			return
@@ -393,20 +373,111 @@ type governanceFingerprintRow struct {
 }
 
 // governancePreviewID fingerprints a planned save: every target with its
-// full before and after, and the defaults when they change. Any drift since
-// the preview — a workspace added, a value changed, a rule rewritten to the
-// same length — gives another id.
-func governancePreviewID(rows []governanceFingerprintRow, defaultsUpdated bool, defaultsAfter governance.Settings) string {
+// full before and after (or, for the defaults, their before and after). Any
+// drift since the preview — a workspace added, a value changed, a rule
+// rewritten to the same length — gives another id.
+func governancePreviewID(rows []governanceFingerprintRow, defaults *governanceFingerprintRow) string {
 	plan := struct {
-		Workspaces []governanceFingerprintRow `json:"workspaces"`
-		Defaults   *governance.Settings       `json:"defaults,omitempty"`
-	}{Workspaces: rows}
-	if defaultsUpdated {
-		plan.Defaults = &defaultsAfter
-	}
+		Workspaces []governanceFingerprintRow `json:"workspaces,omitempty"`
+		Defaults   *governanceFingerprintRow  `json:"defaults,omitempty"`
+	}{Workspaces: rows, Defaults: defaults}
 	b, _ := json.Marshal(plan)
 	sum := sha256.Sum256(b)
 	return hex.EncodeToString(sum[:12])
+}
+
+// ── Defaults for new workspaces ─────────────────────────────────────────────
+
+type instanceDefaultsResponse struct {
+	Applied bool `json:"applied"`
+	// Configured is false until the defaults were ever saved; they are then
+	// the built-in opt-out.
+	Configured bool                    `json:"configured"`
+	Defaults   governance.Settings     `json:"defaults"`
+	Changes    []governanceFieldChange `json:"changes"`
+	PreviewID  string                  `json:"preview_id"`
+}
+
+type instanceDefaultsPutBody struct {
+	DryRun        bool                    `json:"dry_run"`
+	ExpectPreview string                  `json:"expect_preview,omitempty"`
+	Set           keeperGovernancePutBody `json:"set"`
+}
+
+// GetDefaults is GET /api/v1/admin/instance/keeper/governance/defaults.
+func (h *InstanceKeeperHandler) GetDefaults(w http.ResponseWriter, r *http.Request) {
+	d, found, err := governance.Defaults(r.Context(), h.db)
+	if err != nil {
+		h.fail(w, "defaults", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, instanceDefaultsResponse{Configured: found, Defaults: d, Changes: []governanceFieldChange{}})
+}
+
+// PutDefaults is PUT /api/v1/admin/instance/keeper/governance/defaults: the
+// template a workspace copies when it is created. It changes no existing
+// workspace. dry_run previews; expect_preview confirms exactly that preview.
+func (h *InstanceKeeperHandler) PutDefaults(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	var body instanceDefaultsPutBody
+	if err := readJSON(r, &body); err != nil {
+		replyError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	if reflect.DeepEqual(body.Set, keeperGovernancePutBody{}) {
+		replyError(w, http.StatusBadRequest, "nothing to change")
+		return
+	}
+	if body.Set.SecurityContactUserID != nil || body.Set.GovModelCredentialID != nil {
+		replyError(w, http.StatusBadRequest, "a security contact and a judge credential belong to one workspace and cannot be defaults")
+		return
+	}
+	tx, err := h.db.BeginTx(ctx, nil)
+	if err != nil {
+		h.fail(w, "begin", err)
+		return
+	}
+	defer func() { _ = tx.Rollback() }()
+	cur, found, err := governance.Defaults(ctx, tx)
+	if err != nil {
+		h.fail(w, "defaults", err)
+		return
+	}
+	after, err := mergeGovernancePatch(cur, body.Set)
+	if err != nil {
+		replyError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	resp := instanceDefaultsResponse{Configured: found, Defaults: after, Changes: diffGovernance(cur, after)}
+	resp.PreviewID = governancePreviewID(nil, &governanceFingerprintRow{ID: "defaults", Before: cur, After: after})
+	if body.DryRun {
+		resp.Defaults = cur
+		writeJSON(w, http.StatusOK, resp)
+		return
+	}
+	if body.ExpectPreview != "" && body.ExpectPreview != resp.PreviewID {
+		replyError(w, http.StatusConflict, "the defaults changed since the preview; review the changes again")
+		return
+	}
+	if len(resp.Changes) > 0 {
+		if err := governance.SetDefaults(ctx, tx, after); err != nil {
+			h.fail(w, "set defaults", err)
+			return
+		}
+		if err := auditInstance(ctx, r, tx, "instance.keeper_defaults_updated", "instance", "", "", map[string]any{
+			"changes": resp.Changes,
+		}); err != nil {
+			h.fail(w, "audit", err)
+			return
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		h.fail(w, "commit", err)
+		return
+	}
+	resp.Applied = true
+	resp.Configured = found || len(resp.Changes) > 0
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // diffGovernance lists the fields that differ, by their wire name, so the

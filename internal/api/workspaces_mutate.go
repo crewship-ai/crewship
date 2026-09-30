@@ -8,6 +8,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"github.com/crewship-ai/crewship/internal/keeper/governance"
 	"net/http"
 	"time"
 
@@ -80,6 +81,11 @@ func (h *WorkspaceHandler) Create(w http.ResponseWriter, r *http.Request) {
 		wsID, req.Name, req.Slug, req.PreferredLanguage, now, now)
 	if err != nil {
 		replyInternalError(w, h.logger, "insert workspace", err)
+		return
+	}
+	// The new workspace's own copy of the Keeper defaults (a template).
+	if err := governance.SeedWorkspace(r.Context(), tx, wsID); err != nil {
+		replyInternalError(w, h.logger, "keeper template", err)
 		return
 	}
 

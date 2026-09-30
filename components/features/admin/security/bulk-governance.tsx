@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { SettingsCard } from "@/components/features/settings/shared"
-import { saveInstanceGovernance, type GovSaveResult, type GovTargets, type InstanceGovRow, type InstanceGovSettings } from "./use-instance-keeper"
+import { saveDefaults, saveInstanceGovernance, type DefaultsResult, type GovSaveResult, type GovTargets, type InstanceGovRow, type InstanceGovSettings } from "./use-instance-keeper"
 
 /**
  * One form for several workspaces at once. Each field shows the value the
@@ -103,7 +103,8 @@ export function BulkGovernanceForm({
   section: BulkSection
   /** The selected workspaces. */
   rows: InstanceGovRow[]
-  /** Every workspace is selected: the save also sets the instance defaults. */
+  /** "All workspaces" is the scope: every existing workspace. It never
+   *  touches the defaults for new ones, which are saved on their own. */
   all: boolean
   onSaved: (r: GovSaveResult) => void
   /** Open one workspace's full editor: the settings that belong to a single
@@ -179,8 +180,8 @@ export function BulkGovernanceForm({
         <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warn" />
         <p>
           <b className="text-warn">{all ? `All ${n} workspace${n === 1 ? "" : "s"} selected.` : `${n} workspaces selected.`}</b>{" "}
-          Saving writes what you change here into {all ? "every workspace" : "each of them"} and replaces the value it has now.
-          Fields you leave alone stay as each workspace has them.{all && " New workspaces will start with these settings too."}
+          Saving writes what you change here into {all ? "every existing workspace" : "each of them"} and replaces the value it has now.
+          Fields you leave alone stay as each workspace has them. New workspaces are not changed: they start from Defaults for new workspaces.
         </p>
       </div>
       {onEditOne && (
@@ -197,7 +198,7 @@ export function BulkGovernanceForm({
           ))}
         </p>
       )}
-      <SettingsCard title={SECTION_TITLE[section]} description={all ? "Every workspace, and what a new workspace starts with" : `Settings for ${n} workspaces at once`}>
+      <SettingsCard title={SECTION_TITLE[section]} description={all ? "Every existing workspace at once" : `Settings for ${n} workspaces at once`}>
         <div className="flex flex-col gap-3 px-4 py-3">
           {fields.filter((f) => !f.when || f.when(draft, rows)).map((f) => {
             const shared = commonValue(rows, f.key)
@@ -251,7 +252,7 @@ export function BulkGovernanceForm({
         consequences={[
           { tone: "lost", text: "Each listed workspace's own value for these fields is replaced." },
           { tone: "kept", text: "Fields you did not change stay as each workspace has them. Every change is in the instance audit log." },
-          ...(preview?.result.defaults_updated ? [{ tone: "warn" as const, text: "New workspaces will start with these settings." }] : []),
+          { tone: "kept", text: "New workspaces are not changed; they start from Defaults for new workspaces." },
         ]}
         onConfirm={apply}
       />
@@ -289,3 +290,100 @@ function OverwriteTable({ result, fields }: { result: GovSaveResult; fields: Map
     </div>
   )
 }
+
+/** Every field the defaults carry, from all the per-workspace sections. */
+const DEFAULT_FIELDS: Field[] = (["watchdog", "alerts", "leases", "workspace-judge"] as BulkSection[]).flatMap((k) => BULK_FIELDS[k])
+
+/**
+ * Defaults for new workspaces: the template a workspace copies when it is
+ * created. An operation of its own — its own preview and confirmation — and
+ * it changes no existing workspace; "All workspaces" on a setting's page does
+ * that.
+ */
+export function DefaultsForm({ current, onSaved }: { current: InstanceGovSettings; onSaved: () => void }) {
+  const [draft, setDraft] = React.useState<Draft>({})
+  const [preview, setPreview] = React.useState<{ result: DefaultsResult; set: Partial<InstanceGovSettings> } | null>(null)
+  const [busy, setBusy] = React.useState(false)
+  const [error, setError] = React.useState<string | null>(null)
+  const row = { ...current, workspace_id: "defaults", workspace_name: "New workspaces", workspace_slug: "defaults", configured: true } as InstanceGovRow
+  const set = Object.fromEntries(Object.entries(draft)) as Partial<InstanceGovSettings>
+  const dirty = Object.keys(draft).length > 0
+  const byField = new Map(DEFAULT_FIELDS.map((f) => [f.key as string, f]))
+
+  async function review() {
+    setBusy(true); setError(null)
+    try {
+      setPreview({ result: await saveDefaults(set, true), set })
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "The change could not be checked")
+    } finally {
+      setBusy(false)
+    }
+  }
+  async function apply() {
+    if (!preview) return
+    try {
+      await saveDefaults(preview.set, false, preview.result.preview_id)
+      toast.success("Defaults for new workspaces saved")
+      setDraft({}); setPreview(null)
+      onSaved()
+    } catch (e) {
+      setPreview(null)
+      setError(e instanceof Error ? e.message : "The save failed; nothing was changed")
+    }
+  }
+
+  return (
+    <>
+      <SettingsCard title="Defaults for new workspaces" description="A new workspace copies these when it is created. No existing workspace changes.">
+        <div className="flex flex-col gap-3 px-4 py-3">
+          {DEFAULT_FIELDS.filter((f) => !f.when || f.when(draft, [row])).map((f) => {
+            const value = f.key in draft ? draft[f.key] : eff(f.key, row[f.key])
+            return (
+              <div key={f.key} className="grid gap-2 sm:grid-cols-[11rem_1fr] sm:items-center" data-field={f.key}>
+                <div>
+                  <div className="text-[13px]">{f.label}</div>
+                  <div className="text-[11px] text-muted-foreground">{f.hint}</div>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  {f.text ? (
+                    <Input aria-label={f.label} className="h-8 max-w-xs text-xs coarse:h-[2.75rem]" value={String(value ?? "")}
+                      onChange={(e) => setDraft((d) => ({ ...d, [f.key]: e.target.value }))} />
+                  ) : (
+                    <Segmented field={f} value={value} name={f.label} onPick={(v) => setDraft((d) => ({ ...d, [f.key]: v }))} />
+                  )}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+        <div className="flex flex-wrap items-center gap-2 border-t border-border px-4 py-2.5">
+          <Button size="sm" disabled={!dirty || busy} onClick={() => void review()}>Save defaults for new workspaces…</Button>
+          <Button size="sm" variant="outline" disabled={!dirty || busy} onClick={() => setDraft({})}>Reset</Button>
+          {error && <span role="status" className="text-[12px] text-destructive">{error}</span>}
+        </div>
+      </SettingsCard>
+      <ConfirmDialog
+        open={preview !== null}
+        onOpenChange={(o) => { if (!o) setPreview(null) }}
+        title="Save defaults for new workspaces?"
+        confirmLabel="Save defaults"
+        description={preview && (
+          <ul className="mt-2 space-y-0.5 rounded-md border border-border px-3 py-2 text-[12px]" data-slot="defaults-changes">
+            {preview.result.changes.map((c) => {
+              const f = byField.get(c.field)
+              const show = (v: unknown) => (f ? labelOf(f, eff(c.field as Key, v)) : String(v))
+              return <li key={c.field}>{`${f?.label ?? c.field}: ${show(c.before)} → ${show(c.after)}`}</li>
+            })}
+          </ul>
+        )}
+        consequences={[
+          { tone: "kept", text: "No existing workspace changes. To change them, use a setting's page with All workspaces." },
+          { tone: "warn", text: "Every workspace created from now on starts with these settings." },
+        ]}
+        onConfirm={apply}
+      />
+    </>
+  )
+}
+

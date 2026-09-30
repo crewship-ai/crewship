@@ -112,12 +112,35 @@ func TestAcceptance_AdminInstanceKeeper(t *testing.T) {
 	if !enabled("ik-lab") {
 		t.Fatal("a declined bulk save still wrote")
 	}
-	// --yes writes all of them and the defaults.
-	if out := must("admin", "instance", "keeper", "set", "--all", "--watchdog", "on", "--deny-alert-risk", "5", "--yes"); !strings.Contains(out, "New workspaces will start with these settings") {
+	// --yes writes every existing workspace — and not the defaults.
+	if out := must("admin", "instance", "keeper", "set", "--all", "--watchdog", "on", "--deny-alert-risk", "5", "--yes"); !strings.Contains(out, "Saved in") {
 		t.Fatalf("bulk save:\n%s", out)
 	}
 	if !enabled("ik-people") || !enabled("ik-lab") {
 		t.Fatal("--all missed a workspace")
+	}
+	var defaultsSaved int
+	_ = db.QueryRow(`SELECT COUNT(*) FROM app_settings WHERE key = 'keeper.governance_defaults'`).Scan(&defaultsSaved)
+	if defaultsSaved != 0 {
+		t.Fatal("set --all changed the defaults for new workspaces")
+	}
+
+	// The defaults are their own operation, and a workspace created after
+	// them takes a copy.
+	if out := must("admin", "instance", "keeper", "defaults", "--watchdog", "on", "--sample-every", "20", "--yes"); !strings.Contains(out, "existing ones are unchanged") {
+		t.Fatalf("defaults:\n%s", out)
+	}
+	if out := must("admin", "instance", "keeper", "defaults"); !strings.Contains(out, "1 in 20") {
+		t.Fatalf("show defaults:\n%s", out)
+	}
+	must("admin", "instance", "create-workspace", "Later", "--slug", "later", "--owner", "carol@lab.invalid")
+	var laterSample int
+	_ = db.QueryRow(`SELECT g.behavior_sample_every FROM keeper_governance_settings g JOIN workspaces w ON w.id = g.workspace_id WHERE w.slug = 'later'`).Scan(&laterSample)
+	if laterSample != 20 {
+		t.Fatalf("new workspace sample = %d, want its copy of the defaults (20)", laterSample)
+	}
+	if out, err := run("", "admin", "instance", "keeper", "defaults", "--contact", "ik-carol", "--yes"); err == nil || !strings.Contains(out, "belong to one workspace") {
+		t.Fatalf("contact as a default: %v\n%s", err, out)
 	}
 
 	// A person belongs to one workspace; the CLI passes the server's refusal on.

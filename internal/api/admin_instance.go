@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"github.com/crewship-ai/crewship/internal/keeper/governance"
 	"log/slog"
 	"net/http"
 	"os"
@@ -698,6 +699,11 @@ func (h *InstanceAdminHandler) CreateWorkspace(w http.ResponseWriter, r *http.Re
 		`INSERT INTO workspace_members (id, workspace_id, user_id, role, created_at, updated_at) VALUES (?, ?, ?, 'OWNER', ?, ?)`,
 		generateCUID(), wsID, req.OwnerUserID, now, now); err != nil {
 		replyInternalError(w, h.logger, "create workspace: owner membership", err)
+		return
+	}
+	// The new workspace's own copy of the Keeper defaults (a template).
+	if err := governance.SeedWorkspace(ctx, tx, wsID); err != nil {
+		replyInternalError(w, h.logger, "create workspace: keeper template", err)
 		return
 	}
 	if err := auditInstance(ctx, r, tx, "instance.workspace_created", "workspace", wsID, wsID, map[string]any{

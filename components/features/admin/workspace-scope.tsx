@@ -14,10 +14,11 @@ import { DrillNavItem, DrillNavSection } from "@/components/layout/drill-page"
  * each crew.
  *
  * "All workspaces" is its own choice, not "every row happens to be ticked":
- * it means every workspace now and every one created later (a save for all
- * also sets the defaults for new workspaces). Ticking rows by hand — even all
- * of them, even the only one — picks those workspaces and nothing more, so a
- * server with a single workspace still reaches that workspace's own editor.
+ * it means every existing workspace, including one created since the page
+ * loaded. It is a scope, never a change of what new workspaces start with —
+ * that is an operation of its own (Defaults for new workspaces). Ticking rows
+ * by hand — even all of them, even the only one — picks those workspaces, so
+ * a server with a single workspace still reaches that workspace's own editor.
  *
  * The selection lives in the URL, so a link shows what its sender saw: no ?ws
  * means all, ?ws=slug,slug the workspaces ticked, ?ws=none nothing.
@@ -78,7 +79,7 @@ function Avatar({ name }: { name: string }) {
 /** One line under the list saying what the ticks mean for this page. */
 export function scopeSummary(all: ScopeWorkspace[], scope: Scope, mode: "edit" | "view"): string {
   const n = scope.ids.size
-  if (scope.all) return mode === "view" ? `All ${n} workspace${n === 1 ? "" : "s"}` : "All workspaces · saving overwrites all, and new ones start with it"
+  if (scope.all) return mode === "view" ? `All ${n} workspace${n === 1 ? "" : "s"}` : "All workspaces · saving overwrites every existing one"
   if (n === 0) return "Nothing selected"
   const one = all.find((w) => scope.ids.has(w.id))
   if (mode === "view") return n === 1 ? one!.name : `${n} of ${all.length} workspaces`

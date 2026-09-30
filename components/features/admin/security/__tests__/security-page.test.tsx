@@ -87,11 +87,19 @@ beforeEach(() => {
     const url = String(u)
     if (url.startsWith("/api/v1/system/keeper")) return res(STATUS)
     if (url.startsWith("/api/v1/admin/security-posture")) return res(POSTURE)
+    if (url.startsWith("/api/v1/admin/instance/keeper/governance/defaults")) {
+      if (init?.method === "PUT") {
+        const body = JSON.parse(String(init.body))
+        return res({ applied: !body.dry_run, configured: true, preview_id: "d-1", defaults: { ...GOV.defaults, ...body.set },
+          changes: Object.entries(body.set).map(([field, after]) => ({ field, before: (GOV.defaults as Record<string, unknown>)[field] ?? null, after })) })
+      }
+      return res({ applied: false, configured: false, defaults: GOV.defaults, changes: [], preview_id: "" })
+    }
     if (url.startsWith("/api/v1/admin/instance/keeper/governance")) {
       if (init?.method === "PUT") {
         const body = JSON.parse(String(init.body))
         return res({
-          applied: !body.dry_run, changed: 1, defaults_updated: !!body.all,
+          applied: !body.dry_run, changed: 1, preview_id: "pv-1",
           workspaces: [
             { workspace_id: "ws-a", workspace_name: "Dess", workspace_slug: "dess", changes: [] },
             { workspace_id: "ws-b", workspace_name: "Coolify", workspace_slug: "coolify", changes: [{ field: "enabled", before: false, after: true }] },
@@ -265,11 +273,14 @@ describe("several workspaces at once", () => {
     const table = within(dialog).getByRole("table")
     expect(within(table).getByText("Coolify").closest("tr")).toHaveTextContent("Watchdog: Off → On")
     expect(within(table).getByText("Dess").closest("tr")).toHaveTextContent("no change")
-    expect(dialog).toHaveTextContent("New workspaces will start with these settings")
+    // "All" is the scope of the selection: every existing workspace, not the
+    // defaults for new ones.
+    expect(dialog).not.toHaveTextContent("New workspaces will start")
+    expect(dialog).toHaveTextContent("New workspaces are not changed")
 
     fireEvent.click(within(dialog).getByRole("button", { name: "Overwrite 1 workspace" }))
     await waitFor(() => expect(puts()).toHaveLength(2))
-    expect(puts()[1]).toEqual({ all: true, dry_run: false, set: { enabled: true } })
+    expect(puts()[1]).toEqual({ all: true, dry_run: false, expect_preview: "pv-1", set: { enabled: true } })
   })
 
   it("sends only the ticked workspaces when not all are ticked, and nothing on cancel", async () => {
@@ -328,7 +339,7 @@ describe("What's on where says what is enforced (review R8)", () => {
 })
 
 describe("All means the same with one workspace (review R9)", () => {
-  it("saves for all — and so for new workspaces — even when the server has only one", async () => {
+  it("saves for every existing workspace — never the defaults — even when the server has only one", async () => {
     const saved = GOV.workspaces.splice(1)
     try {
       window.history.replaceState(null, "", "/admin/security?section=watchdog")
@@ -381,6 +392,39 @@ describe("One workspace keeps its full editor (review follow-up)", () => {
     // Both ticked by hand is two workspaces, not "all": no defaults for new ones.
     expect(within(scope()).getByRole("button", { name: "All workspaces" })).toHaveAttribute("aria-pressed", "false")
     expect(new URLSearchParams(window.location.search).get("ws")).toBe("dess,coolify")
+  })
+})
+
+describe("Defaults for new workspaces, an operation of its own", () => {
+  const defaultsPuts = () => h.apiFetch.mock.calls
+    .filter(([u, init]) => String(u).includes("/governance/defaults") && (init as RequestInit | undefined)?.method === "PUT")
+    .map(([, init]) => JSON.parse(String((init as RequestInit).body)))
+
+  it("previews, says no existing workspace changes, and confirms exactly the preview", async () => {
+    window.history.replaceState(null, "", "/admin/security?section=defaults")
+    render(<SecurityPage />)
+    await waitFor(() => expect(document.querySelector("[data-field=enabled]")).not.toBeNull())
+    const enabled = document.querySelector("[data-field=enabled]") as HTMLElement
+    expect(scope()).toHaveAttribute("aria-disabled", "true")
+    fireEvent.click(within(enabled).getByRole("radio", { name: "On" }))
+    fireEvent.click(screen.getByRole("button", { name: "Save defaults for new workspaces…" }))
+    const dialog = await screen.findByRole("alertdialog")
+    expect(defaultsPuts()[0]).toEqual({ dry_run: true, set: { enabled: true } })
+    expect(dialog).toHaveTextContent("Watchdog: Off → On")
+    expect(dialog).toHaveTextContent("No existing workspace changes")
+    expect(puts().some((b) => "all" in b || "workspaces" in b)).toBe(false)
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save defaults" }))
+    await waitFor(() => expect(defaultsPuts()).toHaveLength(2))
+    expect(defaultsPuts()[1]).toEqual({ dry_run: false, expect_preview: "d-1", set: { enabled: true } })
+  })
+
+  it("shows what new workspaces start with as the first row of What's on where", async () => {
+    window.history.replaceState(null, "", "/admin/security?section=matrix")
+    render(<SecurityPage />)
+    const table = await screen.findByRole("region", { name: "What's on where" })
+    expect(within(table).getAllByRole("row")[1]).toHaveTextContent("New workspaces")
+    fireEvent.click(within(table).getByRole("button", { name: "Watchdog in New workspaces: Off" }))
+    await waitFor(() => expect(window.location.search).toContain("section=defaults"))
   })
 })
 

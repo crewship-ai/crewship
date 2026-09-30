@@ -56,7 +56,6 @@ export interface GovSaveResult {
   preview_id?: string
   applied: boolean
   changed: number
-  defaults_updated: boolean
   workspaces: { workspace_id: string; workspace_name: string; workspace_slug: string; changes: GovFieldChange[]; warnings?: string[] }[]
 }
 
@@ -102,6 +101,28 @@ export async function saveInstanceGovernance(targets: GovTargets, set: Partial<I
   })
   if (!r.ok) throw new Error(await errorOf(r))
   return (await r.json()) as GovSaveResult
+}
+
+export interface DefaultsResult {
+  applied: boolean
+  configured: boolean
+  defaults: InstanceGovSettings
+  changes: GovFieldChange[]
+  preview_id: string
+}
+
+/**
+ * PUT /admin/instance/keeper/governance/defaults: the template a new
+ * workspace copies when it is created. Changes no existing workspace.
+ */
+export async function saveDefaults(set: Partial<InstanceGovSettings>, dryRun: boolean, expectPreview?: string): Promise<DefaultsResult> {
+  const r = await apiFetch("/api/v1/admin/instance/keeper/governance/defaults", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ dry_run: dryRun, ...(expectPreview ? { expect_preview: expectPreview } : {}), set }),
+  })
+  if (!r.ok) throw new Error(await errorOf(r))
+  return (await r.json()) as DefaultsResult
 }
 
 /** What the decision log is narrowed to on the server (review R6). */

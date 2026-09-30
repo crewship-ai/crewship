@@ -82,6 +82,10 @@ func TestInstanceMutationsRollBackWhenTheAuditCannotBeWritten(t *testing.T) {
 			state: func(f *instanceFixture) string {
 				return scalar(f, `SELECT COALESCE(deleted_at,'') FROM workspaces WHERE id='ws-new'`)
 			}},
+		{name: "keeper defaults", method: "PUT", path: "/api/v1/admin/instance/keeper/governance/defaults", body: `{"set":{"enabled":true}}`,
+			state: func(f *instanceFixture) string {
+				return scalar(f, `SELECT COUNT(*) FROM app_settings WHERE key = 'keeper.governance_defaults'`)
+			}},
 		{name: "keeper governance", method: "PUT", path: "/api/v1/admin/instance/keeper/governance", body: `{"all":true,"set":{"enabled":true}}`,
 			state: func(f *instanceFixture) string { return scalar(f, `SELECT COUNT(*) FROM keeper_governance_settings`) }},
 	}

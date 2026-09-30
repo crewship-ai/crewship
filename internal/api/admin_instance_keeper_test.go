@@ -140,25 +140,82 @@ func TestInstanceKeeperGovernanceDryRunWritesNothing(t *testing.T) {
 	}
 }
 
-func TestInstanceKeeperGovernanceAllOverwritesEveryWorkspaceAndSeedsNewOnes(t *testing.T) {
+// "all" is the scope of the selection — every existing workspace — and never
+// a change of the defaults for new ones, which is an operation of its own.
+func TestInstanceKeeperGovernanceAllChangesExistingWorkspacesOnly(t *testing.T) {
 	f := newInstanceFixture(t)
 	if err := governance.Upsert(context.Background(), f.db, "ws-new", governance.Settings{Enabled: false, DenyNotifyMinRisk: 9}, ""); err != nil {
 		t.Fatal(err)
 	}
 	rr := f.do(f.boss, "PUT", "/api/v1/admin/instance/keeper/governance", `{"all":true,"set":{"enabled":true,"deny_notify_min_risk":5}}`)
 	wantCode(t, rr, http.StatusOK, "all")
-	resp := decodeAs[govPutResp](t, rr.Body.Bytes())
-	if !resp.Applied || !resp.DefaultsUpdated {
-		t.Fatalf("resp = %+v, want applied and defaults updated", resp)
+	if strings.Contains(rr.Body.String(), "defaults_updated") {
+		t.Fatalf("response still speaks of defaults: %s", rr.Body.String())
 	}
 	for _, ws := range []string{"ws-old", "ws-new"} {
 		if s, found := f.gov(ws); !found || !s.Enabled || s.DenyNotifyMinRisk != 5 {
 			t.Fatalf("%s = %+v (found %v), want overwritten", ws, s, found)
 		}
 	}
-	seedInstanceWorkspace(t, f.db, "ws-later", "2026-09-01 00:00:00")
-	if s, found := f.gov("ws-later"); found || !s.Enabled || s.DenyNotifyMinRisk != 5 {
-		t.Fatalf("new workspace = %+v (found %v), want it to start from what was saved for all", s, found)
+	if _, found, _ := governance.Defaults(context.Background(), f.db); found {
+		t.Fatal("a save for all workspaces changed the defaults for new ones")
+	}
+}
+
+type defaultsResp struct {
+	Applied   bool   `json:"applied"`
+	PreviewID string `json:"preview_id"`
+	Changes   []struct {
+		Field  string `json:"field"`
+		Before any    `json:"before"`
+		After  any    `json:"after"`
+	} `json:"changes"`
+	Defaults struct {
+		Enabled     bool `json:"enabled"`
+		DenyMinRisk int  `json:"deny_notify_min_risk"`
+	} `json:"defaults"`
+}
+
+// "Defaults for new workspaces" is its own operation: previewed, confirmed
+// against the preview, audited — and it changes no existing workspace.
+func TestInstanceKeeperDefaultsForNewWorkspaces(t *testing.T) {
+	const path = "/api/v1/admin/instance/keeper/governance/defaults"
+	f := newInstanceFixture(t)
+
+	wantCode(t, f.do(f.wsAdmin, "PUT", path, `{"set":{"enabled":true}}`), http.StatusForbidden, "workspace ADMIN")
+	for _, bad := range []string{`{"set":{}}`, `{"set":{"security_contact_user_id":"boss"}}`, `{"set":{"gov_model_credential_id":"c1"}}`, `{"set":{"deny_notify_min_risk":0}}`} {
+		wantCode(t, f.do(f.boss, "PUT", path, bad), http.StatusBadRequest, bad)
+	}
+
+	rr := f.do(f.boss, "PUT", path, `{"dry_run":true,"set":{"enabled":true,"deny_notify_min_risk":5}}`)
+	wantCode(t, rr, http.StatusOK, "preview")
+	p := decodeAs[defaultsResp](t, rr.Body.Bytes())
+	if p.Applied || p.PreviewID == "" || len(p.Changes) != 2 {
+		t.Fatalf("preview = %+v, want two changes and an id, nothing applied", p)
+	}
+	if _, found, _ := governance.Defaults(context.Background(), f.db); found {
+		t.Fatal("a preview wrote the defaults")
+	}
+
+	wantCode(t, f.do(f.boss, "PUT", path, `{"expect_preview":"not-it","set":{"enabled":true,"deny_notify_min_risk":5}}`), http.StatusConflict, "stale preview")
+
+	rr = f.do(f.boss, "PUT", path, `{"expect_preview":"`+p.PreviewID+`","set":{"enabled":true,"deny_notify_min_risk":5}}`)
+	wantCode(t, rr, http.StatusOK, "confirm")
+	got := decodeAs[defaultsResp](t, rr.Body.Bytes())
+	if !got.Applied || !got.Defaults.Enabled || got.Defaults.DenyMinRisk != 5 {
+		t.Fatalf("saved = %+v", got)
+	}
+	if !f.audited("instance.keeper_defaults_updated") {
+		t.Fatal("no instance audit entry")
+	}
+	if _, found := f.gov("ws-old"); found {
+		t.Fatal("saving the defaults touched an existing workspace")
+	}
+
+	rr = f.do(f.boss, "GET", path, "")
+	wantCode(t, rr, http.StatusOK, "read")
+	if d := decodeAs[defaultsResp](t, rr.Body.Bytes()); !d.Defaults.Enabled || d.Defaults.DenyMinRisk != 5 {
+		t.Fatalf("GET defaults = %+v", d.Defaults)
 	}
 }
 

@@ -10,9 +10,9 @@ import (
 )
 
 // DefaultsSettingKey is the app_settings row holding the instance defaults:
-// what an instance admin last saved for "All workspaces". Every workspace got
-// an explicit row at that moment; the defaults are what a workspace created
-// later starts from, since it has no row of its own.
+// the template a new workspace is created with. They are a template, not a
+// live policy — SeedWorkspace copies them into the workspace's own row when
+// it is created, and changing them later changes no existing workspace.
 const DefaultsSettingKey = "keeper.governance_defaults"
 
 // Defaults returns the instance defaults, or the built-in opt-out (watchdog
@@ -58,4 +58,39 @@ func defaultable(s Settings) Settings {
 	s.SecurityContactUserID = ""
 	s.GovModelCredentialID = ""
 	return s
+}
+
+// QueryExecer is a transaction (or the DB) that both reads and writes.
+type QueryExecer interface {
+	Querier
+	Execer
+}
+
+// SeedWorkspace gives a new workspace its own copy of the defaults (the
+// built-in opt-out when none were saved). Call it in the transaction that
+// creates the workspace. A row that already exists — a restored workspace
+// brings its own — is left alone.
+func SeedWorkspace(ctx context.Context, tx QueryExecer, workspaceID string) error {
+	d, _, err := Defaults(ctx, tx)
+	if err != nil {
+		return err
+	}
+	d = normalize(d)
+	presets, err := encodePresets(d.WatchPresets)
+	if err != nil {
+		return fmt.Errorf("governance: seed: %w", err)
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	_, err = tx.ExecContext(ctx, `
+		INSERT INTO keeper_governance_settings
+			(workspace_id, enabled, deny_notify_min_risk, watch_spec, watch_presets, require_second_approver,
+			 gov_model_provider, gov_model_id, auto_lease_seconds, behavior_sample_every, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(workspace_id) DO NOTHING`,
+		workspaceID, boolToInt(d.Enabled), d.DenyNotifyMinRisk, d.WatchSpec, presets, boolToInt(d.RequireSecondApprover),
+		d.GovModelProvider, d.GovModelID, d.AutoLeaseSeconds, d.BehaviorSampleEvery, now, now)
+	if err != nil {
+		return fmt.Errorf("governance: seed: %w", err)
+	}
+	return nil
 }

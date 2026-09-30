@@ -11,7 +11,7 @@ import type { KeeperLogEntry, KeeperStatus } from "@/app/(dashboard)/admin/types
 
 export type Scope = "instance" | "workspace"
 
-export type SettingsSection = "judge" | "rules" | "workspace-judge" | "background" | "watchdog" | "alerts" | "leases"
+export type SettingsSection = "judge" | "rules" | "defaults" | "workspace-judge" | "background" | "watchdog" | "alerts" | "leases"
 export type Section = "overview" | "matrix" | "activity" | SettingsSection
 
 /** Settings sections, in the order an operator meets them, each with the scope
@@ -21,6 +21,7 @@ export type Section = "overview" | "matrix" | "activity" | SettingsSection
 export const SETTINGS: { key: SettingsSection; label: string; scope: Scope; about: string }[] = [
   { key: "judge", label: "Credential judge", scope: "instance", about: "The model that allows, denies or escalates a secret" },
   { key: "rules", label: "Decision rules", scope: "instance", about: "What the judge may use, and when a person confirms" },
+  { key: "defaults", label: "Defaults for new workspaces", scope: "instance", about: "What a new workspace's watchdog starts with; existing workspaces do not change" },
   { key: "workspace-judge", label: "Judge per workspace", scope: "workspace", about: "A different judge for some workspaces, including a hosted one" },
   { key: "background", label: "Background checks", scope: "instance", about: "The models behind the scheduled reviews" },
   { key: "watchdog", label: "Watchdog", scope: "workspace", about: "Samples tool calls and raises findings" },

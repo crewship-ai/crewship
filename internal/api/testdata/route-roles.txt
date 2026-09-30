@@ -353,6 +353,7 @@ POST /api/v1/workspaces/{workspaceId}/work-items/{workItemId}/replay roleCreate
 POST /api/v1/workspaces/{workspaceId}/work-items/{workItemId}/resolve roleCreate
 PUT /api/v1/admin/instance/admins/{userId} roleInstance
 PUT /api/v1/admin/instance/keeper/governance roleInstance
+PUT /api/v1/admin/instance/keeper/governance/defaults roleInstance
 PUT /api/v1/admin/instance/workspaces/{workspaceId}/members/{userId} roleInstance
 PUT /api/v1/admin/keeper/aux/{slot} roleInstance
 PUT /api/v1/admin/keeper/config roleInstance

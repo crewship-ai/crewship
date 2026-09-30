@@ -17,8 +17,8 @@ import { WorkspaceScopeSection, readScope, writeScope, type Scope, type ScopeWor
 import { SecurityOverview } from "./security-overview"
 import { SecurityActivity } from "./security-activity"
 import { useSecurity } from "./use-security"
-import { useInstanceKeeper } from "./use-instance-keeper"
-import { BulkGovernanceForm, type BulkSection } from "./bulk-governance"
+import { useInstanceKeeper, type InstanceGovRow } from "./use-instance-keeper"
+import { BulkGovernanceForm, DefaultsForm, type BulkSection } from "./bulk-governance"
 import { WhatsOnWhere } from "./whats-on-where"
 import { SCOPE_HINT, SCOPE_LABEL, SETTINGS, STREAMS, isSection, type DecisionFilter, type Section, type SettingsSection, type Stream } from "./security-model"
 
@@ -26,7 +26,7 @@ const STREAM_ICON: Record<Stream, LucideIcon> = {
   requests: KeyRound, skill_review: Sparkles, behavior: Eye, memory_health: Brain, negative_learning: BookOpen,
 }
 const SETTINGS_ICON: Record<SettingsSection, LucideIcon> = {
-  judge: Gavel, rules: ListChecks, "workspace-judge": Building2, background: Clock, watchdog: Shield, alerts: Bell, leases: Timer,
+  judge: Gavel, rules: ListChecks, defaults: Sparkles, "workspace-judge": Building2, background: Clock, watchdog: Shield, alerts: Bell, leases: Timer,
 }
 const PANEL_SECTION: Record<BulkSection, "judge" | "watchdog" | "alerts" | "leases"> = {
   "workspace-judge": "judge", watchdog: "watchdog", alerts: "alerts", leases: "leases",
@@ -214,6 +214,8 @@ export function SecurityPage() {
           <SummaryItem>Every per-workspace setting, one row per workspace. Open a cell to change it there.</SummaryItem>
         </SettingsSummary>
         <WhatsOnWhere rows={inst.gov?.workspaces ?? []} selected={sel}
+          defaults={inst.gov ? ({ ...inst.gov.defaults, workspace_id: "defaults", workspace_name: "New workspaces", workspace_slug: "defaults" } as InstanceGovRow) : undefined}
+          onOpenDefaults={() => update({ section: "defaults" })}
           onOpen={(s, id) => { pickOne(id); update({ section: s }) }} />
       </>
     )
@@ -234,13 +236,14 @@ export function SecurityPage() {
             <span className={cn("mr-2 rounded-full px-2 font-mono text-[10.5px]", settings.scope === "instance" ? "bg-primary/10 text-primary-hover" : "bg-muted text-muted-foreground")}>
               {SCOPE_LABEL[settings.scope]}
             </span>
-            {bulk ? (singleRow ? `Editing ${singleRow.workspace_name}` : bulkRows ? (allTicked ? `All ${rows.length} workspace${rows.length === 1 ? "" : "s"}, and new ones` : `${rows.length} workspaces selected`) : SCOPE_HINT[settings.scope]) : SCOPE_HINT[settings.scope]}
+            {bulk ? (singleRow ? `Editing ${singleRow.workspace_name}` : bulkRows ? (allTicked ? `All ${rows.length} existing workspace${rows.length === 1 ? "" : "s"}` : `${rows.length} workspaces selected`) : SCOPE_HINT[settings.scope]) : SCOPE_HINT[settings.scope]}
           </SummaryItem>
           <SummaryItem>{settings.about}</SummaryItem>
         </SettingsSummary>
         {section === "judge" && workspaceId && <KeeperJudgeCard workspaceId={workspaceId} />}
         {section === "rules" && workspaceId && <KeeperProfileCard workspaceId={workspaceId} />}
         {section === "background" && workspaceId && <JudgeModelsCard workspaceId={workspaceId} />}
+        {section === "defaults" && inst.gov && <DefaultsForm current={inst.gov.defaults} onSaved={() => void inst.reloadGov()} />}
         {bulk && rows.length === 0 && <p className="text-[13px] text-muted-foreground">Tick one or more workspaces in the panel.</p>}
         {bulk && instanceProp && (
           <KeeperGovernancePanel key={instanceProp.row.workspace_id} workspaceId={instanceProp.row.workspace_id}

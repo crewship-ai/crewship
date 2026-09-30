@@ -20,7 +20,7 @@ const row = (id: string, extra: Partial<InstanceGovRow> = {}) => ({
 }) as InstanceGovRow
 const res = (data: unknown, status = 200) => ({ ok: status < 400, status, json: async () => data })
 const preview = (ids: string[], id = "p-1") => ({
-  applied: false, changed: ids.length, defaults_updated: false, preview_id: id,
+  applied: false, changed: ids.length, preview_id: id,
   workspaces: ids.map((w) => ({ workspace_id: w, workspace_name: w.toUpperCase(), workspace_slug: w, changes: [{ field: "enabled", before: false, after: true }] })),
 })
 const body = (i: number) => JSON.parse(h.api.mock.calls[i][1].body)

@@ -34,10 +34,13 @@ const COLS: { section: BulkSection; label: string; show: (r: InstanceGovRow) => 
   { section: "leases", label: "Lease", show: (r) => ({ text: lease(r.auto_lease_seconds) }) },
 ]
 
-export function WhatsOnWhere({ rows, selected, onOpen }: {
+export function WhatsOnWhere({ rows, selected, onOpen, defaults, onOpenDefaults }: {
   rows: InstanceGovRow[]
   selected: Set<string>
   onOpen: (section: BulkSection, workspaceId: string) => void
+  /** What a new workspace starts with, shown as the first row. */
+  defaults?: InstanceGovRow
+  onOpenDefaults?: () => void
 }) {
   return (
     <div className="overflow-x-auto rounded-card border border-border bg-card" role="region" aria-label="What's on where">
@@ -49,11 +52,30 @@ export function WhatsOnWhere({ rows, selected, onOpen }: {
           </tr>
         </thead>
         <tbody>
+          {defaults && (
+            <tr data-workspace="defaults" className="border-b border-border bg-muted/40">
+              <td className="px-3 py-2">
+                <div className="font-medium">New workspaces</div>
+                <div className="text-[10.5px] text-muted-foreground">copied when a workspace is created</div>
+              </td>
+              {COLS.map((c) => {
+                const v = c.show(defaults)
+                return (
+                  <td key={c.label} className="p-0">
+                    <button type="button" onClick={onOpenDefaults} aria-label={`${c.label} in New workspaces: ${v.text}`}
+                      className="kit-tap w-full whitespace-nowrap px-3 py-2 text-left italic text-muted-foreground hover:bg-muted">
+                      {v.text}
+                    </button>
+                  </td>
+                )
+              })}
+            </tr>
+          )}
           {rows.map((r) => (
             <tr key={r.workspace_id} data-workspace={r.workspace_slug} className={cn("border-b border-border last:border-b-0", selected.has(r.workspace_id) && "bg-accent/40")}>
               <td className="px-3 py-2">
                 <div className="font-medium">{r.workspace_name}</div>
-                {!r.configured && <div className="text-[10.5px] text-muted-foreground" title="Never set here; runs on the instance defaults">defaults</div>}
+                {!r.configured && <div className="text-[10.5px] text-muted-foreground" title="No settings of its own; runs on the built-in opt-out">built-in</div>}
               </td>
               {COLS.map((c) => {
                 const v = c.show(r)

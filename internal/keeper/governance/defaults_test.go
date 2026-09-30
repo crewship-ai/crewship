@@ -24,34 +24,78 @@ func TestDefaultsAbsentMeansBuiltIn(t *testing.T) {
 	}
 }
 
-func TestUnconfiguredWorkspaceStartsFromInstanceDefaults(t *testing.T) {
+// The defaults are a template, not a live policy: a workspace takes a copy
+// when it is created (SeedWorkspace) and keeps it. A workspace with no row of
+// its own reads the built-in opt-out, never whatever the defaults are today —
+// otherwise changing the defaults would silently change it.
+func TestAWorkspaceWithoutARowDoesNotFollowTheDefaults(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	if err := SetDefaults(ctx, db, Settings{Enabled: true, DenyNotifyMinRisk: 4}); err != nil {
+		t.Fatal(err)
+	}
+	got, found, err := Get(ctx, db, "ws1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if found || got.Enabled || got.DenyNotifyMinRisk != DefaultDenyNotifyMinRisk {
+		t.Fatalf("Get = %+v (found %v), want the built-in opt-out", got, found)
+	}
+}
+
+func TestSeedWorkspaceTakesACopyOfTheDefaults(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
 	in := Settings{
 		Enabled: true, DenyNotifyMinRisk: 4, WatchPresets: []string{"exfiltration"}, AutoLeaseSeconds: 900,
-		BehaviorSampleEvery: 10, RequireSecondApprover: true,
-		// Per-workspace references never become defaults: a user or a vault
-		// credential belongs to one workspace.
-		SecurityContactUserID: "u1", GovModelCredentialID: "cred-1",
+		BehaviorSampleEvery: 10, RequireSecondApprover: true, GovModelProvider: "ollama", GovModelID: "qwen",
 	}
 	if err := SetDefaults(ctx, db, in); err != nil {
-		t.Fatalf("SetDefaults: %v", err)
+		t.Fatal(err)
 	}
+	if err := SeedWorkspace(ctx, db, "ws1"); err != nil {
+		t.Fatalf("SeedWorkspace: %v", err)
+	}
+	got, found, _ := Get(ctx, db, "ws1")
+	if !found || !reflect.DeepEqual(got, in) {
+		t.Fatalf("seeded = %+v (found %v), want the defaults %+v", got, found, in)
+	}
+	// Changing the defaults afterwards leaves the workspace alone.
+	if err := SetDefaults(ctx, db, Settings{Enabled: false, DenyNotifyMinRisk: 9}); err != nil {
+		t.Fatal(err)
+	}
+	if after, _, _ := Get(ctx, db, "ws1"); !reflect.DeepEqual(after, in) {
+		t.Fatalf("after a defaults change the workspace reads %+v, want its own copy %+v", after, in)
+	}
+}
 
-	got, found, err := Get(ctx, db, "ws1")
-	if err != nil {
-		t.Fatalf("Get: %v", err)
+func TestSeedWorkspaceWithoutDefaultsWritesTheBuiltIn(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	if err := SeedWorkspace(ctx, db, "ws1"); err != nil {
+		t.Fatal(err)
 	}
-	if found {
-		t.Fatal("found = true for a workspace with no row; the console must still say it inherits")
+	got, found, _ := Get(ctx, db, "ws1")
+	if !found || got.Enabled || got.DenyNotifyMinRisk != DefaultDenyNotifyMinRisk {
+		t.Fatalf("seeded = %+v (found %v), want an explicit built-in row", got, found)
 	}
-	want := in
-	want.SecurityContactUserID, want.GovModelCredentialID = "", ""
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("Get = %+v, want the defaults %+v", got, want)
+}
+
+func TestSeedWorkspaceNeverOverwritesARow(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	own := Settings{Enabled: true, DenyNotifyMinRisk: 2}
+	if err := Upsert(ctx, db, "ws1", own, ""); err != nil {
+		t.Fatal(err)
 	}
-	if r := Resolve(ctx, db, nil, "ws1"); !reflect.DeepEqual(r, want) {
-		t.Fatalf("Resolve = %+v, want the defaults %+v", r, want)
+	if err := SetDefaults(ctx, db, Settings{DenyNotifyMinRisk: 9}); err != nil {
+		t.Fatal(err)
+	}
+	if err := SeedWorkspace(ctx, db, "ws1"); err != nil {
+		t.Fatal(err)
+	}
+	if got, _, _ := Get(ctx, db, "ws1"); !reflect.DeepEqual(got, own) {
+		t.Fatalf("Get = %+v, want the workspace's own %+v kept", got, own)
 	}
 }
 

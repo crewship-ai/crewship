@@ -88,6 +88,10 @@ func (r *Router) registerAdminRoutes() {
 	r.authedInstance("GET", "/api/v1/admin/instance/keeper/governance", ik.ListGovernance)
 	// openapi: responses 200,400,401,403,404,409,500
 	r.authedInstance("PUT", "/api/v1/admin/instance/keeper/governance", ik.PutGovernance)
+	// openapi: responses 200,401,403,500
+	r.authedInstance("GET", "/api/v1/admin/instance/keeper/governance/defaults", ik.GetDefaults)
+	// openapi: responses 200,400,401,403,409,500
+	r.authedInstance("PUT", "/api/v1/admin/instance/keeper/governance/defaults", ik.PutDefaults)
 	// openapi: responses 200,401,403,404,500
 	r.authedInstance("GET", "/api/v1/admin/instance/keeper/requests", ik.ListRequests)
 	// openapi: responses 200,401,403,500

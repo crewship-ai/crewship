@@ -6,6 +6,7 @@ package main
 //
 //	governance                          GET /api/v1/admin/instance/keeper/governance
 //	set (--workspace a,b | --all) …     PUT /api/v1/admin/instance/keeper/governance
+//	defaults [settings]                 GET | PUT /api/v1/admin/instance/keeper/governance/defaults
 //	requests [--workspace a,b]          GET /api/v1/admin/instance/keeper/requests
 //	health                              GET /api/v1/admin/instance/keeper/health
 //
@@ -59,11 +60,10 @@ type instanceGovChange struct {
 }
 
 type instanceGovPutResult struct {
-	Applied         bool                `json:"applied" yaml:"applied"`
-	Changed         int                 `json:"changed" yaml:"changed"`
-	DefaultsUpdated bool                `json:"defaults_updated" yaml:"defaults_updated"`
-	Workspaces      []instanceGovChange `json:"workspaces" yaml:"workspaces"`
-	PreviewID       string              `json:"preview_id" yaml:"preview_id"`
+	Applied    bool                `json:"applied" yaml:"applied"`
+	Changed    int                 `json:"changed" yaml:"changed"`
+	Workspaces []instanceGovChange `json:"workspaces" yaml:"workspaces"`
+	PreviewID  string              `json:"preview_id" yaml:"preview_id"`
 }
 
 var adminInstanceKeeperCmd = &cobra.Command{
@@ -71,13 +71,14 @@ var adminInstanceKeeperCmd = &cobra.Command{
 	Short: "The Keeper of every workspace: settings, decisions and health",
 	Long: `Admin › Security from the terminal, across every workspace on the server —
 including workspaces you are not a member of. Settings are saved for one,
-several or all workspaces; saving for several overwrites what each has, so
-'set' shows the changes first and asks. Saving for all also becomes what a
-workspace created later starts with.
+several or all existing workspaces; saving for several overwrites what each
+has, so 'set' shows the changes first and asks. What a workspace created
+later starts with is a separate template: 'defaults'.
 
   crewship admin instance keeper governance
   crewship admin instance keeper set --workspace coolify --watchdog on --sample-every 10
   crewship admin instance keeper set --all --watchdog on --dry-run
+  crewship admin instance keeper defaults --watchdog on --sample-every 10
   crewship admin instance keeper requests --workspace coolify,sandbox --decision DENY`,
 }
 
@@ -142,7 +143,7 @@ func sourceLabel(configured bool) string {
 	if configured {
 		return "own"
 	}
-	return "default"
+	return "built-in"
 }
 
 var adminInstanceKeeperSetCmd = &cobra.Command{
@@ -152,8 +153,9 @@ var adminInstanceKeeperSetCmd = &cobra.Command{
 change. For one workspace it saves straight away. For several, or --all, it
 first shows every workspace whose settings would be overwritten and asks;
 --yes skips the question, --dry-run only shows. The save is all or nothing:
-if one workspace refuses the values, none is changed. --all also sets what a
-workspace created later starts with.
+if one workspace refuses the values, none is changed. --all means every
+existing workspace; it does not change what a new workspace starts with (see
+'defaults').
 
 --contact and --gov-credential belong to one workspace and are refused with
 more than one.`,
@@ -195,7 +197,7 @@ more than one.`,
 				return resolvedFormatter(cmd).AutoHuman(preview, func() { printGovChanges(cmd, preview, "would change") })
 			}
 			printGovChanges(cmd, preview, "will change")
-			if preview.Changed == 0 && !preview.DefaultsUpdated {
+			if preview.Changed == 0 {
 				cli.PrintSuccess("Nothing to overwrite: every selected workspace already has these settings.")
 				return nil
 			}
@@ -217,11 +219,7 @@ more than one.`,
 					fmt.Fprintf(cmd.ErrOrStderr(), "warning (%s): %s\n", w.WorkspaceSlug, warn)
 				}
 			}
-			msg := fmt.Sprintf("Saved in %d workspace(s).", out.Changed)
-			if out.DefaultsUpdated {
-				msg += " New workspaces will start with these settings."
-			}
-			cli.PrintSuccess(msg)
+			cli.PrintSuccess(fmt.Sprintf("Saved in %d workspace(s).", out.Changed))
 		})
 	},
 }
@@ -239,9 +237,6 @@ func printGovChanges(cmd *cobra.Command, r instanceGovPutResult, verb string) {
 			parts = append(parts, fmt.Sprintf("%s %s → %s", c.Field, govValue(c.Field, c.Before), govValue(c.Field, c.After)))
 		}
 		fmt.Fprintf(w, "  %-24s %s\n", ws.WorkspaceSlug, strings.Join(parts, ", "))
-	}
-	if r.DefaultsUpdated {
-		fmt.Fprintln(w, "  New workspaces will start with these settings.")
 	}
 }
 
@@ -448,10 +443,102 @@ little to judge, which is not the same as healthy.`,
 	},
 }
 
+type instanceDefaultsResult struct {
+	Applied    bool           `json:"applied" yaml:"applied"`
+	Configured bool           `json:"configured" yaml:"configured"`
+	Defaults   instanceGovRow `json:"defaults" yaml:"defaults"`
+	Changes    []struct {
+		Field  string `json:"field" yaml:"field"`
+		Before any    `json:"before" yaml:"before"`
+		After  any    `json:"after" yaml:"after"`
+	} `json:"changes" yaml:"changes"`
+	PreviewID string `json:"preview_id" yaml:"preview_id"`
+}
+
+var adminInstanceKeeperDefaultsCmd = &cobra.Command{
+	Use:   "defaults [settings]",
+	Short: "Show or set what a new workspace's Keeper starts with",
+	Long: `GET | PUT /api/v1/admin/instance/keeper/governance/defaults. The template a
+workspace copies when it is created. Changing it changes no existing
+workspace — use 'set --all' for those. Without settings it shows the
+template; with them it shows the change and asks (--yes skips the question,
+--dry-run only shows), then saves exactly what it showed.
+
+--contact and --gov-credential belong to one workspace and are refused.`,
+	Args: cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, _ []string) error {
+		client, err := requireAuthAndWorkspace()
+		if err != nil {
+			return err
+		}
+		set, err := governancePatchFromFlags(cmd)
+		if err != nil {
+			return err
+		}
+		if len(set) == 0 {
+			var out instanceDefaultsResult
+			if err := getJSON(client, "/api/v1/admin/instance/keeper/governance/defaults", &out); err != nil {
+				return err
+			}
+			return resolvedFormatter(cmd).AutoHuman(out, func() {
+				d := out.Defaults
+				src := "built-in (never saved)"
+				if out.Configured {
+					src = "saved"
+				}
+				fmt.Fprintf(cmd.OutOrStdout(), "New workspaces start with (%s):\n  watchdog %s · review %s · DENY alert ≥ %d · four-eyes %s · lease %s · judge %s\n",
+					src, onOff(d.Enabled), sampleLabel(d.BehaviorSampleEvery), d.DenyNotifyMinRisk, onOff(d.RequireSecondApprover), leaseLabel(d.AutoLeaseSeconds), judgeLabel(d))
+			})
+		}
+		dry, _ := cmd.Flags().GetBool("dry-run")
+		var preview instanceDefaultsResult
+		if err := putJSON(client, "/api/v1/admin/instance/keeper/governance/defaults", map[string]any{"set": set, "dry_run": true}, &preview); err != nil {
+			return err
+		}
+		w := cmd.ErrOrStderr()
+		if len(preview.Changes) == 0 {
+			cli.PrintSuccess("Nothing to change: the defaults already say that.")
+			return nil
+		}
+		fmt.Fprintln(w, "New workspaces would start with:")
+		for _, c := range preview.Changes {
+			fmt.Fprintf(w, "  %s %s → %s\n", c.Field, govValue(c.Field, c.Before), govValue(c.Field, c.After))
+		}
+		fmt.Fprintln(w, "  No existing workspace changes.")
+		if dry {
+			return resolvedFormatter(cmd).AutoHuman(preview, func() {})
+		}
+		if err := confirmAction(cmd, "Save these defaults for new workspaces?"); err != nil {
+			return cli.WithExitCode(err, cli.ExitValidation)
+		}
+		var out instanceDefaultsResult
+		if err := putJSON(client, "/api/v1/admin/instance/keeper/governance/defaults", map[string]any{"set": set, "expect_preview": preview.PreviewID}, &out); err != nil {
+			return err
+		}
+		return resolvedFormatter(cmd).AutoHuman(out, func() {
+			cli.PrintSuccess("Saved. New workspaces start with these settings; existing ones are unchanged.")
+		})
+	},
+}
+
 func init() {
+	d := adminInstanceKeeperDefaultsCmd.Flags()
+	d.Bool("dry-run", false, "Show what would change, write nothing")
+	d.BoolP("yes", "y", false, "Skip the confirmation")
+	d.String("watchdog", "", "on | off")
+	d.Int("sample-every", 0, "Review every Nth tool call (1–100)")
+	d.Int("deny-alert-risk", 0, "Risk (1–10) from which a DENY also reaches the inbox")
+	d.String("second-approver", "", "on | off — four-eyes approval of credential escalations")
+	d.Duration("lease", 0, "Approved access lasts this long (0 = standing, min 1m, max 720h)")
+	d.StringSlice("presets", nil, "Watch presets, comma-separated")
+	d.String("gov-provider", "", "Judge provider: ollama | anthropic | openai_compat, empty = the instance judge")
+	d.String("gov-model", "", "Judge model id")
+	d.String("gov-credential", "", "Refused: a judge credential belongs to one workspace")
+	d.String("contact", "", "Refused: a security contact belongs to one workspace")
+
 	s := adminInstanceKeeperSetCmd.Flags()
 	s.StringSlice("workspace", nil, "Workspace slugs, comma-separated")
-	s.Bool("all", false, "Every workspace, and what new workspaces start with")
+	s.Bool("all", false, "Every existing workspace (new ones start from 'defaults')")
 	s.Bool("dry-run", false, "Show what would change, write nothing")
 	s.BoolP("yes", "y", false, "Skip the confirmation for several workspaces")
 	s.String("watchdog", "", "on | off")
@@ -472,7 +559,7 @@ func init() {
 	r.Int("limit", 50, "Rows to return (max 1000)")
 	r.Int("offset", 0, "Rows to skip")
 
-	adminInstanceKeeperCmd.AddCommand(adminInstanceKeeperGovernanceCmd, adminInstanceKeeperSetCmd,
+	adminInstanceKeeperCmd.AddCommand(adminInstanceKeeperGovernanceCmd, adminInstanceKeeperSetCmd, adminInstanceKeeperDefaultsCmd,
 		adminInstanceKeeperRequestsCmd, adminInstanceKeeperHealthCmd)
 	adminInstanceCmd.AddCommand(adminInstanceKeeperCmd)
 }

@@ -42,7 +42,9 @@ The operational surface for OWNER and ADMIN roles: workspace stats, user managem
 | `DELETE` | [/api/v1/admin/instance/admins/\{userId\}](#delete-api-v1-admin-instance-admins-userid) | Remove a named instance administrator |
 | `GET` | [/api/v1/admin/instance/audit](#get-api-v1-admin-instance-audit) | Instance-level actions, newest first |
 | `GET` | [/api/v1/admin/instance/keeper/governance](#get-api-v1-admin-instance-keeper-governance) | Every workspace's Keeper watchdog settings and the instance defaults |
-| `PUT` | [/api/v1/admin/instance/keeper/governance](#put-api-v1-admin-instance-keeper-governance) | Set the watchdog for one, several or all workspaces |
+| `PUT` | [/api/v1/admin/instance/keeper/governance](#put-api-v1-admin-instance-keeper-governance) | Set the watchdog for one, several or all existing workspaces |
+| `GET` | [/api/v1/admin/instance/keeper/governance/defaults](#get-api-v1-admin-instance-keeper-governance-defaults) | The template a new workspace's Keeper starts with |
+| `PUT` | [/api/v1/admin/instance/keeper/governance/defaults](#put-api-v1-admin-instance-keeper-governance-defaults) | Change that template; no existing workspace changes |
 | `GET` | [/api/v1/admin/instance/keeper/requests](#get-api-v1-admin-instance-keeper-requests) | Keeper decisions across workspaces |
 | `GET` | [/api/v1/admin/instance/keeper/health](#get-api-v1-admin-instance-keeper-health) | Every workspace's Keeper decision window |
 | `POST` | [/api/v1/admin/prune-legacy-resources](#post-api-v1-admin-prune-legacy-resources) | Remove orphaned pre-C1 Docker resources |
@@ -642,10 +644,11 @@ Actions: `instance.user_created`, `instance.member_added`,
 ## `GET /api/v1/admin/instance/keeper/governance`
 
 The Keeper watchdog settings of every workspace on the instance, including
-workspaces the caller is not a member of, and the instance defaults. A
-workspace with `configured: false` was never set and runs on the defaults.
-The defaults are what the last save for all workspaces set. Until then they
-are the built-in opt-out: watchdog off, DENY alerts from risk 7.
+workspaces the caller is not a member of, and the defaults for new
+workspaces. Every workspace has its own settings: it takes a copy of the
+defaults when it is created, and a later change of the defaults does not
+reach it. `configured: false` marks a workspace with no row of its own, which
+runs on the built-in opt-out: watchdog off, DENY alerts from risk 7.
 
 **Auth:** instance administrator. **Request:** no body. **Response:**
 
@@ -689,11 +692,12 @@ update with the same fields and bounds as the per-workspace
 `PUT /api/v1/admin/keeper/governance`: only the fields sent change.
 
 - `workspaces` names the targets by id or slug. `all: true` targets every
-  workspace and also sets the instance defaults that a workspace created
-  later starts with. Send one or the other.
+  existing workspace. Send one or the other. Neither changes what a new
+  workspace starts with; that is
+  `PUT /api/v1/admin/instance/keeper/governance/defaults`.
 - `dry_run: true` computes the changes and writes nothing. The console's
   confirmation dialog shows this response. Every response carries a
-  `preview_id`, a fingerprint of the targets, the changes and the defaults.
+  `preview_id`, a fingerprint of every target's settings before and after.
   Send it back as `expect_preview` when confirming: if a workspace was
   created or a value changed since the preview, the save answers `409` and
   writes nothing.
@@ -703,8 +707,7 @@ update with the same fields and bounds as the per-workspace
 - A workspace that already has the values is reported with empty `changes`
   and left alone. Each workspace that changes gets an
   `instance.keeper_governance_updated` entry in the instance audit, with the
-  fields it changed from and to. A save for all also records
-  `instance.keeper_defaults_updated`.
+  fields it changed from and to.
 - `security_contact_user_id` and `gov_model_credential_id` name something that
   belongs to one workspace, and are refused for more than one.
 
@@ -726,7 +729,6 @@ Confirming that preview:
 {
   "applied": false,
   "changed": 1,
-  "defaults_updated": true,
   "preview_id": "3f9c0a1b2d4e5f6a7b8c9d0e",
   "workspaces": [
     {
@@ -748,6 +750,61 @@ Confirming that preview:
 | `403` | Caller is not an instance administrator. |
 | `404` | A workspace in `workspaces` does not exist. |
 | `409` | `expect_preview` no longer matches: the workspaces or their settings changed since the preview. Nothing was saved. |
+| `500` | A write failed. Nothing was saved. |
+
+## `GET /api/v1/admin/instance/keeper/governance/defaults`
+
+The template a new workspace's Keeper watchdog starts with. A workspace copies
+it when it is created — through signup, the workspaces API or
+`POST /api/v1/admin/instance/workspaces` — and keeps that copy: changing the
+template later changes no existing workspace. `configured: false` means it
+was never saved and is the built-in opt-out.
+
+**Auth:** instance administrator. **Request:** no body. **Response:**
+
+```json
+{
+  "applied": false,
+  "configured": true,
+  "defaults": { "enabled": true, "deny_notify_min_risk": 5, "behavior_sample_every": 10, "auto_lease_seconds": 0 },
+  "changes": [],
+  "preview_id": ""
+}
+```
+
+| Status | Condition |
+|--------|-----------|
+| `200` | The template. |
+| `401` | Missing authentication. |
+| `403` | Caller is not an instance administrator. |
+| `500` | A read failed. |
+
+## `PUT /api/v1/admin/instance/keeper/governance/defaults`
+
+Changes the template for new workspaces. `set` takes the same fields and
+bounds as the workspace PUT, except `security_contact_user_id` and
+`gov_model_credential_id`: a person and a vault credential belong to one
+workspace, so they are refused here. `dry_run: true` returns the changes and a
+`preview_id` and writes nothing; send the id back as `expect_preview` to save
+exactly that, or get `409` if the template changed in between. A save records
+`instance.keeper_defaults_updated` in the instance audit, in the same
+transaction.
+
+**Auth:** instance administrator. **Request:**
+
+```json
+{ "expect_preview": "3f9c0a1b2d4e5f6a7b8c9d0e", "set": { "enabled": true, "behavior_sample_every": 10 } }
+```
+
+**Response:** as for `GET`, with `applied: true` and the `changes` made.
+
+| Status | Condition |
+|--------|-----------|
+| `200` | Saved, or previewed with `dry_run`. |
+| `400` | Nothing to change, a value out of bounds, or a per-workspace field. |
+| `401` | Missing authentication. |
+| `403` | Caller is not an instance administrator. |
+| `409` | `expect_preview` no longer matches. Nothing was saved. |
 | `500` | A write failed. Nothing was saved. |
 
 ## `GET /api/v1/admin/instance/keeper/requests`
