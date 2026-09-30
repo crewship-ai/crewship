@@ -358,16 +358,9 @@ func bindContextSource(ctx context.Context, tx *sql.Tx, a Attempt, id string) er
 	if origin == a.ID {
 		return nil
 	}
-	// Bound unique dependency ancestors, avoiding exponential path traversal.
-	var depth int
-	err := tx.QueryRowContext(ctx, `WITH RECURSIVE parents(id) AS (SELECT ? UNION SELECT d.source_attempt_id FROM access_context_dependencies d JOIN parents p ON d.attempt_id=p.id LIMIT 129) SELECT COUNT(*) FROM parents`, origin).Scan(&depth)
-	if err != nil {
-		return err
-	}
-	if depth >= 129 {
-		return ErrDenied
-	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO access_context_dependencies(attempt_id,context_id,source_attempt_id,scope) VALUES(?,?,?,?) ON CONFLICT(attempt_id,context_id) DO NOTHING`, a.ID, id, origin, a.Scope)
+	// Same-chat generations strictly increase; schema validation proves acyclic
+	// provenance without rejecting long conversations by ancestor count.
+	_, err := tx.ExecContext(ctx, `INSERT INTO access_context_dependencies(attempt_id,context_id,source_attempt_id,scope) VALUES(?,?,?,?) ON CONFLICT(attempt_id,context_id) DO NOTHING`, a.ID, id, origin, a.Scope)
 	return err
 }
 

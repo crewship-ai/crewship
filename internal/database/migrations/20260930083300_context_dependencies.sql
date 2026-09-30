@@ -15,14 +15,10 @@ BEGIN
  SELECT CASE WHEN NOT EXISTS(SELECT 1 FROM access_context c JOIN access_attempts a ON a.id=c.attempt_id JOIN access_attempts consumer ON consumer.id=NEW.attempt_id
  WHERE c.id=NEW.context_id AND c.attempt_id=NEW.source_attempt_id AND c.scope=NEW.scope AND a.revoked_at IS NULL AND consumer.revoked_at IS NULL AND consumer.completed_at IS NULL
  AND consumer.workspace_id=a.workspace_id AND consumer.principal_id=a.principal_id
- AND consumer.agent_id=a.agent_id AND consumer.chat_id=a.chat_id
+ AND consumer.agent_id=a.agent_id AND consumer.chat_id=a.chat_id AND consumer.generation>a.generation
  AND consumer.member_id=a.member_id AND consumer.member_revision=a.member_revision
  AND consumer.chat_generation=a.chat_generation AND consumer.chat_revision=a.chat_revision)
  THEN RAISE(ABORT,'invalid context origin') END;
- SELECT CASE WHEN EXISTS(WITH RECURSIVE parents(id) AS (
- SELECT NEW.source_attempt_id UNION SELECT d.source_attempt_id FROM access_context_dependencies d JOIN parents p ON d.attempt_id=p.id
- ) SELECT 1 FROM parents WHERE id=NEW.attempt_id)
- THEN RAISE(ABORT,'cyclic context dependency') END;
 END;
 CREATE TRIGGER access_context_source_revocation AFTER UPDATE OF revoked_at ON access_attempts
 WHEN OLD.revoked_at IS NULL AND NEW.revoked_at IS NOT NULL
