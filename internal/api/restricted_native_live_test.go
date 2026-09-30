@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -56,7 +57,7 @@ func TestLiveNativeHTTPRetainsOnlyOwnScratchFiles(t *testing.T) {
 		if e != nil {
 			t.Fatal(e)
 		}
-		if _, e = store.Replace(t.Context(), owner, user, workspace, "restricted", member, []access.Right{{Kind: "agent", ID: "native-agent", Operation: "chat"}}); e != nil {
+		if _, e = store.Replace(t.Context(), owner, user, workspace, "restricted", member, []access.Right{{Kind: "agent", ID: "native-agent", Operation: "chat"}, {Kind: "agent", ID: "native-agent", Operation: "discover"}}); e != nil {
 			t.Fatal(e)
 		}
 		if _, e = store.SaveNote(t.Context(), user, workspace, "native-agent", user+"-chat", "MEMORY_"+user); e != nil {
@@ -128,7 +129,20 @@ func TestLiveNativeHTTPRetainsOnlyOwnScratchFiles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	server := httptest.NewServer(router)
+	var handler http.Handler = router
+	if repo := os.Getenv("CREWSHIP_RESTRICTED_BROWSER_REPO"); repo != "" {
+		// Use the production static handler and actual authenticated API. The
+		// exported frontend is built independently before this opt-in test.
+		if _, e := os.Stat(filepath.Join(repo, "out", "index.html")); e != nil {
+			t.Fatal("production browser acceptance requires pnpm build first", e)
+		}
+		mux := http.NewServeMux()
+		mux.Handle("/api/", router)
+		mux.Handle("/ws", router)
+		mux.Handle("/", StaticFileHandler(os.DirFS(filepath.Join(repo, "out"))))
+		handler = mux
+	}
+	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)
 	client := &http.Client{Timeout: time.Minute}
 	request := func(actor, chat, method, suffix, content string) (int, string) {
@@ -167,6 +181,29 @@ func TestLiveNativeHTTPRetainsOnlyOwnScratchFiles(t *testing.T) {
 		}
 		if status, body = request(other, other+"-chat", "GET", "/restricted-files/"+files[0].ID+"/download", ""); status != 404 || strings.Contains(body, "PRIVATE_") {
 			t.Fatalf("foreign file leak %d %q", status, body)
+		}
+	}
+	if repo := os.Getenv("CREWSHIP_RESTRICTED_BROWSER_REPO"); repo != "" {
+		fixture, e := json.Marshal(map[string]any{"repo": repo, "server": server.URL, "tokens": tokens, "workspace": workspace})
+		if e != nil {
+			t.Fatal(e)
+		}
+		path := filepath.Join(t.TempDir(), "browser-fixture.json")
+		if e = os.WriteFile(path, fixture, 0600); e != nil {
+			t.Fatal(e)
+		}
+		command := exec.CommandContext(t.Context(), "node", filepath.Join(repo, "scripts/acceptance-restricted-browser.mjs"))
+		command.Env = append(os.Environ(), "CREWSHIP_BROWSER_FIXTURE="+path)
+		command.Stdout, command.Stderr = os.Stdout, os.Stderr
+		if e = command.Run(); e != nil {
+			t.Fatalf("actual restricted browser acceptance: %v", e)
+		}
+		// Closing both browser contexts must not withdraw completed outputs.
+		for _, actor := range []string{"native-h1", "native-h2"} {
+			files, e := store.FilesForChat(t.Context(), actor, workspace, "native-agent", actor+"-chat")
+			if e != nil || len(files) != 2 {
+				t.Fatalf("browser completion did not retain both own output versions: %s %+v %v", actor, files, e)
+			}
 		}
 	}
 }
