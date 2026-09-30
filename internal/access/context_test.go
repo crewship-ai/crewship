@@ -161,6 +161,9 @@ func TestCompletedAttemptRetainsHistoryWithoutExecutionReplay(t *testing.T) {
 	if err = s.CompleteAttempt(t.Context(), h); err != nil {
 		t.Fatal(err)
 	}
+	if err = s.CheckContextAttempt(t.Context(), h); err != nil {
+		t.Fatalf("completed provenance acknowledgment: %v", err)
+	}
 	if _, err = s.Resolve(t.Context(), h); !errors.Is(err, ErrDenied) {
 		t.Fatalf("completed runtime replay: %v", err)
 	}
@@ -196,6 +199,9 @@ func TestCompletedAttemptRetainsHistoryWithoutExecutionReplay(t *testing.T) {
 	}
 	if err = s.RevokeAttempt(t.Context(), h); err != nil {
 		t.Fatal(err)
+	}
+	if err = s.CheckContextAttempt(t.Context(), h); !errors.Is(err, ErrDenied) {
+		t.Fatalf("revoked provenance acknowledgment: %v", err)
 	}
 	history, err = s.ContextEntriesForChat(t.Context(), "h1", "w", "a", "c1")
 	if err != nil || len(history) != 0 {
