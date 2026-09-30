@@ -335,7 +335,7 @@ describe("Storage", () => {
 })
 
 describe("Recovery", () => {
-  it("walks Backup → Target → Keys → Checks → Dry run → Restore → Resume", async () => {
+  it("walks an instance target Backup → Target → Keys → Checks → Command line → Resume", async () => {
     const { container } = show("recovery")
     expect(await screen.findByText("Pick a backup")).toBeInTheDocument()
     fireEvent.click(container.querySelector("tbody tr") as HTMLElement)
@@ -345,10 +345,10 @@ describe("Recovery", () => {
     fireEvent.click(screen.getByRole("button", { name: "Run the checks" }))
     expect(await screen.findByText("Before anything changes")).toBeInTheDocument()
     expect(screen.getByText(/Docker socket mount on ops/)).toBeInTheDocument()
-    fireEvent.click(screen.getByRole("button", { name: "Run the dry run" }))
-    expect(await screen.findByText("12 attachments come back without files")).toBeInTheDocument()
-    // An instance target restores where the key is, from the CLI.
-    expect(screen.getByText(/crewship backup drill --bundle/)).toBeInTheDocument()
+    // An instance target restores where the key is, from the CLI: no online
+    // dry run, the command straight after the checks.
+    expect(screen.queryByRole("button", { name: "Run the dry run" })).toBeNull()
+    expect(screen.getByText(/crewship backup drill --bundle .* --identity <key-file> --post/)).toBeInTheDocument()
     fireEvent.click(screen.getByRole("button", { name: "After the restore: what is held" }))
     expect(await screen.findByText("17 routines")).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Resume" })).toBeInTheDocument()
