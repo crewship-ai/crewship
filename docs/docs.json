@@ -426,6 +426,7 @@
               "cli/system",
               "cli/instance",
               "cli/backup",
+              "cli/recover",
               "cli/features",
               "cli/feature-flag",
               "cli/runtimes",

@@ -63,7 +63,6 @@ Create a new backup bundle. Runs inline (seconds to minutes); no async job queue
   "crew_id": "",
   "passphrase": "correct horse battery staple",
   "recipient": "",
-  "no_encrypt": false,
   "output_dir": ""
 }
 ```
@@ -73,9 +72,9 @@ Create a new backup bundle. Runs inline (seconds to minutes); no async job queue
 | `scope` | `"workspace"` \| `"crew"` | Required. `"instance"` is reserved for the CLI-only flow and rejected by the API. |
 | `scope_level` | `"quick"` \| `"standard"` \| `"full"` | Optional. Defaults to `backup.DefaultScopeLevel` when omitted. Invalid values rejected with 400. |
 | `crew_id` | string | Required when `scope == "crew"`. Whitespace-only values are rejected. |
-| `passphrase` | string | AGE passphrase. Exactly one of `passphrase` / `recipient` / `no_encrypt` must be supplied. |
+| `passphrase` | string | AGE passphrase. Exactly one of `passphrase` / `recipient` must be supplied. |
 | `recipient` | string | AGE X25519 public key (`age1…`). Parsed with `age.ParseX25519Recipient`. |
-| `no_encrypt` | bool | Plaintext payload. Use for test / CI only. |
+| `no_encrypt` | bool | Refused with `400`: every new bundle is encrypted, because agent home folders inside a bundle can hold credentials the vault never sealed (`~/.aws`, `~/.ssh`, tool logins). |
 | `output_dir` | string | Optional override. Must resolve under the default backups directory (`$CREWSHIP_DATA_DIR/backups`, or `~/.crewship/backups` if unset); symlinks rejected. |
 
 ### Response — `201 Created`
@@ -102,7 +101,7 @@ Create a new backup bundle. Runs inline (seconds to minutes); no async job queue
 </Warning>
 
 <Note>
-  New bundles are written at `format_version` **3** (`backup.FormatVersion`, bumped v2→v3 on 2026-08-03 when the payload gained the `crew/<slug>` section carrying the crew and per-agent memory trees). Restore enforces an N-2 compatibility window: this binary reads `format_version` in `[MinSupportedFormatVersion, FormatVersion]` = `[1, 3]`. A bundle newer than the reader returns `ErrFormatTooNew` (400); older than the window returns `ErrFormatTooOld` (400).
+  New bundles are written at `format_version` **3** (`backup.FormatVersion`, bumped v2→v3 on 2026-08-03 when the payload gained the `crew/<slug>` section carrying the crew and per-agent memory trees). Restore enforces an N-2 compatibility window: this binary reads `format_version` in `[MinSupportedFormatVersion, FormatVersion]` = `[1, 3]`. A bundle newer than the reader returns `ErrFormatTooNew` (400); older than the window returns `ErrFormatTooOld` (400), whose message names the exact `crewship backup convert` command that writes a readable copy (see [Compatibility](/guides/backup#compatibility)).
 </Note>
 
 ### Page projects
@@ -309,7 +308,7 @@ Apply retention policy to the caller's workspace. Per-workspace only — another
 { "keep_last": 10, "keep_days": 30, "dry_run": false }
 ```
 
-At least one of `keep_last` / `keep_days` must be positive (0 disables the rule). Negatives are rejected.
+At least one of `keep_last` / `keep_days` must be positive (0 disables the rule). Negatives are rejected. `keep_last` is a floor: the newest `keep_last` bundles are always kept, however old. `keep_days` applies only beyond it (alone, the floor is one bundle). Bundles pinned through `POST /api/v1/admin/instance/backups/bundles/pin` are never deleted. Crew bundles are counted separately from workspace bundles.
 
 ### Response — `200 OK`
 
@@ -365,7 +364,7 @@ Restore a bundle into the current workspace.
 | Field | Notes |
 |---|---|
 | `path` | Required. Subject to the same path-safety checks as `inspect`. |
-| `passphrase` | Required for passphrase-encrypted bundles. Empty for `--no-encrypt` or recipient-encrypted bundles. |
+| `passphrase` | Required for passphrase-encrypted bundles. Empty for recipient-encrypted bundles and for legacy plaintext bundles. |
 | `identity` | AGE X25519 secret key (`AGE-SECRET-KEY-1…`) for bundles sealed with `--recipient`. Parsed with `age.ParseX25519Identity`; invalid values return 400. |
 | `as_workspace` | Land the workspace under a new slug. Docker phase is skipped; finish with `files_only` (below). |
 | `as_crew` | Land the crew under a new slug (crew-scope bundles only). Docker phase is skipped; finish with `files_only`. |

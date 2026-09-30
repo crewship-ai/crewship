@@ -72,6 +72,19 @@ what waits on a person (paused, needs a tool, approval).
 `ACCENTS`. Never a status hue (green, red, amber). The tests fail if the two
 files disagree or any pair drops below AA.
 
+### Admin › Backups
+
+Data › Backups is one Admin sidebar row that folds out six pages (Overview,
+Backup history, Schedules, Storage, Recovery, Keys & alerts) indented under it,
+with Data retention beside it — `?tab=backups&section=…`, `?tab=retention`.
+The scope (Whole instance / Selected workspaces, workspace chips with "N of
+M") is a strip in the content header, never in the panel, kept in
+`?scope=&ws=`; instance-only pages say "Instance setting · applies to every
+backup plan". Proof is always three levels (checksum, contents checked, test
+restore) and a partial test restore reads as partial, in the warn tone.
+Sections live in `components/features/admin/backups/`; `?demo=1` (never in a
+production build) draws them from `__fixtures__` for review.
+
 ## 3. Motion (all under `useReducedMotion`)
 
 - Sections enter with `Appear` staggered by `order` (0.045s apart, max 9).

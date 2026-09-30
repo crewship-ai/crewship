@@ -47,6 +47,46 @@ The operational surface for OWNER and ADMIN roles: workspace stats, user managem
 | `PUT` | [/api/v1/admin/instance/keeper/governance/defaults](#put-api-v1-admin-instance-keeper-governance-defaults) | Change that template; no existing workspace changes |
 | `GET` | [/api/v1/admin/instance/keeper/requests](#get-api-v1-admin-instance-keeper-requests) | Keeper decisions across workspaces |
 | `GET` | [/api/v1/admin/instance/keeper/health](#get-api-v1-admin-instance-keeper-health) | Every workspace's Keeper decision window |
+| `GET` | [/api/v1/admin/instance/retention](#get-api-v1-admin-instance-retention) | How long every workspace keeps each kind of data |
+| `PUT` | [/api/v1/admin/instance/retention](#put-api-v1-admin-instance-retention) | Set retention windows for one, several or every existing workspace |
+| `GET` | [/api/v1/admin/instance/retention/defaults](#get-api-v1-admin-instance-retention-defaults) | The retention windows a new workspace starts with |
+| `PUT` | [/api/v1/admin/instance/retention/defaults](#put-api-v1-admin-instance-retention-defaults) | Change the retention windows a new workspace starts with |
+| `GET` | [/api/v1/admin/instance/backups/bundles](#get-api-v1-admin-instance-backups-bundles) | Every catalogued bundle with its proof level, pin and gaps |
+| `POST` | [/api/v1/admin/instance/backups/bundles/pin](#post-api-v1-admin-instance-backups-bundles-pin) | Pin a bundle so no retention rule deletes it |
+| `POST` | [/api/v1/admin/instance/backups/bundles/unpin](#post-api-v1-admin-instance-backups-bundles-unpin) | Remove a bundle's pin |
+| `GET` | [/api/v1/admin/instance/backups/restores](#get-api-v1-admin-instance-backups-restores) | Every restore, dry run and drill with its report |
+| `GET` | [/api/v1/admin/instance/backups/plans](#get-api-v1-admin-instance-backups-plans) | Every backup plan |
+| `POST` | [/api/v1/admin/instance/backups/plans](#post-api-v1-admin-instance-backups-plans) | Create a backup plan |
+| `POST` | [/api/v1/admin/instance/backups/plans/preview-contents](#post-api-v1-admin-instance-backups-plans-preview-contents) | What a plan's bundles would carry |
+| `GET` | [/api/v1/admin/instance/backups/plans/\{id\}](#get-api-v1-admin-instance-backups-plans-id) | One backup plan |
+| `PUT` | [/api/v1/admin/instance/backups/plans/\{id\}](#put-api-v1-admin-instance-backups-plans-id) | Change a backup plan |
+| `DELETE` | [/api/v1/admin/instance/backups/plans/\{id\}](#delete-api-v1-admin-instance-backups-plans-id) | Delete a backup plan |
+| `GET` | [/api/v1/admin/instance/backups/plans/\{id\}/next](#get-api-v1-admin-instance-backups-plans-id-next) | A plan's next run times |
+| `GET` | [/api/v1/admin/instance/backups/plans/\{id\}/calendar](#get-api-v1-admin-instance-backups-plans-id-calendar) | A plan's runs and planned times per day |
+| `GET` | [/api/v1/admin/instance/backups/runs](#get-api-v1-admin-instance-backups-runs) | Backup run history with phases |
+| `POST` | [/api/v1/admin/instance/backups/run](#post-api-v1-admin-instance-backups-run) | Start a backup now: a plan, the whole instance or selected workspaces (asynchronous) |
+| `GET` | [/api/v1/admin/instance/backups/overview](#get-api-v1-admin-instance-backups-overview) | Whether a restore would work, gaps, nights and space |
+| `GET` | [/api/v1/admin/instance/backups/run/\{runId\}](#get-api-v1-admin-instance-backups-run-runid) | One run: status, phases and the bundle it wrote |
+| `GET` | [/api/v1/admin/instance/backups/vault-keys](#get-api-v1-admin-instance-backups-vault-keys) | Vault key versions and how many sealed values use each |
+| `PUT` | [/api/v1/admin/instance/backups/settings/recovery-kit](#put-api-v1-admin-instance-backups-settings-recovery-kit) | Put the vault keys in new instance bundles, or stop |
+| `POST` | [/api/v1/admin/instance/backups/bundles/check](#post-api-v1-admin-instance-backups-bundles-check) | Check a bundle's contents against its manifest (proof level 2) |
+| `POST` | [/api/v1/admin/instance/backups/restore/checks](#post-api-v1-admin-instance-backups-restore-checks) | Space, format, runtime, unsafe settings and conflicts before a restore |
+| `POST` | [/api/v1/admin/instance/backups/environments/land](#post-api-v1-admin-instance-backups-environments-land) | Load the crew environments an offline recover staged |
+| `POST` | [/api/v1/admin/instance/backups/drills](#post-api-v1-admin-instance-backups-drills) | Record a test restore (proof level 3) |
+| `GET` | [/api/v1/admin/instance/backups/drills](#get-api-v1-admin-instance-backups-drills) | Every recorded test restore |
+| `GET` | [/api/v1/admin/instance/backups/settings](#get-api-v1-admin-instance-backups-settings) | Backup limits, heartbeat, alerts, destinations and instance admins |
+| `PUT` | [/api/v1/admin/instance/backups/settings](#put-api-v1-admin-instance-backups-settings) | Change backup settings (partial) |
+| `GET` | [/api/v1/admin/instance/backups/recipients](#get-api-v1-admin-instance-backups-recipients) | Backup keys (age public keys) and the plans that use them |
+| `POST` | [/api/v1/admin/instance/backups/recipients](#post-api-v1-admin-instance-backups-recipients) | Add a backup key |
+| `DELETE` | [/api/v1/admin/instance/backups/recipients/\{id\}](#delete-api-v1-admin-instance-backups-recipients-id) | Remove a backup key no plan uses |
+| `GET` | [/api/v1/admin/instance/backups/destinations](#get-api-v1-admin-instance-backups-destinations) | Off-site destinations and their verified copies |
+| `POST` | [/api/v1/admin/instance/backups/destinations](#post-api-v1-admin-instance-backups-destinations) | Add an S3-compatible destination (connection tested first) |
+| `POST` | [/api/v1/admin/instance/backups/destinations/\{id\}/test](#post-api-v1-admin-instance-backups-destinations-id-test) | Test a destination's connection again |
+| `DELETE` | [/api/v1/admin/instance/backups/destinations/\{id\}](#delete-api-v1-admin-instance-backups-destinations-id) | Remove a destination no plan copies to |
+| `GET` | [/api/v1/admin/instance/backups/incidents](#get-api-v1-admin-instance-backups-incidents) | Backup incidents, one per plan and kind |
+| `GET` | [/api/v1/admin/instance/backups/recovery-sheet](#get-api-v1-admin-instance-backups-recovery-sheet) | The recovery sheet (Markdown) |
+| `GET` | [/api/v1/admin/instance/holds](#get-api-v1-admin-instance-holds) | Automations an instance restore left held |
+| `POST` | [/api/v1/admin/instance/holds/resume](#post-api-v1-admin-instance-holds-resume) | Resume a held automation |
 | `POST` | [/api/v1/admin/prune-legacy-resources](#post-api-v1-admin-prune-legacy-resources) | Remove orphaned pre-C1 Docker resources |
 | `GET` | [/api/v1/admin/legacy-resources](#get-api-v1-admin-legacy-resources) | Detect orphaned pre-C1 Docker resources |
 | `GET` | [/api/v1/admin/health](#get-api-v1-admin-health) | Read uptime, database, disk, and logging health |
@@ -901,6 +941,1379 @@ window is listed too: zero samples is its own answer, not a healthy one.
 | `401` | Missing authentication. |
 | `403` | Caller is not an instance administrator. |
 | `500` | A read failed. |
+
+## `GET /api/v1/admin/instance/retention`
+
+How long every workspace keeps each kind of data, including workspaces the
+caller is not a member of. Every window is a number of days, or `null` for
+forever. Inbox items, chats and Keeper decisions are forever until an
+administrator sets them.
+
+| Window | Default | Can be forever | What ages out |
+|--------|---------|----------------|---------------|
+| `routine_runs_days` | 90 | no | Finished routine runs. The last 10 runs of every routine, runs waiting on an approval and runs another run replays are always kept. |
+| `approvals_days` | 90 | yes | Decided approvals. Pending approvals and autonomy gates are never deleted. |
+| `audit_days` | forever | yes | Workspace audit entries. |
+| `credential_audit_days` | 90 | yes | Credential reads. The last use stays on the credential. |
+| `memory_versions_days` | 30 | no | Memory version history. The instance-wide pass also ages versions out after 30 days, keeping the latest few per file. |
+| `page_panel_data_days` | 7 | no | Page panel values, dropped on the panel's next push. The newest value always stays. |
+| `inbox_days` | forever | yes | Resolved inbox items, and read items that block nothing. Open items are never deleted. |
+| `chats_days` | forever | yes | Chats idle longer than the window that hold no open work (below). |
+| `keeper_decisions_days` | forever | yes | Decided Keeper requests with their ledger rows. Pending and escalated requests, and requests backing a live credential lease, are never deleted. |
+
+A chat holds open work, and is kept however old, while it has any delegation,
+an unresolved escalation, an unresolved reply item in the inbox, a pending
+approval that names it, an unfinished routine run, or an access grant issued
+inside the window that is not revoked.
+
+Query parameters:
+
+| Parameter | Description |
+|-----------|-------------|
+| `ws` | A workspace id or slug. Repeat it, or separate several with commas. Without it, every workspace. |
+
+**Auth:** instance administrator. **Request:** no body. **Response:**
+
+```json
+{
+  "workspaces": [
+    {
+      "workspace_id": "ws-cuid",
+      "workspace_name": "Lab",
+      "workspace_slug": "lab",
+      "windows": {
+        "routine_runs_days": 90, "approvals_days": 90, "audit_days": null,
+        "credential_audit_days": 90, "memory_versions_days": 30, "page_panel_data_days": 7,
+        "inbox_days": null, "chats_days": null, "keeper_decisions_days": 365
+      }
+    }
+  ],
+  "defaults": {
+    "routine_runs_days": 90, "approvals_days": 90, "audit_days": null,
+    "credential_audit_days": 90, "memory_versions_days": 30, "page_panel_data_days": 7,
+    "inbox_days": null, "chats_days": null, "keeper_decisions_days": 365
+  },
+  "defaults_configured": ["keeper_decisions_days"],
+  "keys": [
+    { "key": "inbox_days", "label": "Inbox items", "default_days": null, "forever_allowed": true, "min_days": 1, "max_days": 3650, "detail": "Resolved items, and read items that block nothing, …" }
+  ],
+  "housekeeping": [
+    { "key": "journal_compaction", "label": "Journal compaction", "value": "30 days", "detail": "Low-value journal entries older than 30 days move to the journal archive, …" }
+  ]
+}
+```
+
+`defaults` is what a workspace created now starts with; `defaults_configured`
+names the windows an administrator set with
+`PUT /api/v1/admin/instance/retention/defaults`, the rest are the product
+defaults. `keys` describes every window, in display order.
+`housekeeping` lists the limits the server applies on its own and nobody sets:
+journal compaction, the instance-wide memory version floor, the routine runs
+always kept, routine and agent webhook receipts, delivered work bodies, page
+project history, orphaned attachment files, unattributed credential reads and
+the pre-upgrade database snapshots.
+
+| Status | Condition |
+|--------|-----------|
+| `200` | Every chosen workspace, by name. |
+| `401` | Missing authentication. |
+| `403` | Caller is not an instance administrator. |
+| `404` | A workspace in `ws` does not exist. |
+| `500` | A read failed. |
+
+## `PUT /api/v1/admin/instance/retention`
+
+Sets retention windows for one, several or every existing workspace.
+`windows` carries only the windows being changed; `null` is forever where the
+window allows it.
+
+- `workspace_ids` is required. A list names the targets by id or slug; `null`
+  targets every workspace that exists now. Neither changes what a workspace
+  created later starts with: that is
+  `PUT /api/v1/admin/instance/retention/defaults`, a separate operation.
+- `dry_run: true` computes the changes and writes nothing. The preview lists
+  every workspace and, in it, every window that changes, each with
+  `rows_affected_next_sweep`: how many rows the next sweep deletes under the
+  new window. The rows are counted, not deleted, and backups taken
+  before still hold them. For page panel data the count is what each panel's
+  next push drops.
+- Every response carries a `preview_id` fingerprinting the targets and every
+  change. Send it back as `expect_preview` when confirming: if a workspace was
+  created or a window changed since the preview, the save answers `409` and
+  writes nothing. A save without `expect_preview`, or without any preview, is
+  allowed; the console always previews first.
+- The save is one transaction. A workspace that already has the values is
+  reported with empty `changes` and left alone. Each workspace that changes
+  gets an `instance.retention_updated` entry in the instance audit, with each
+  window's old and new value.
+- Saving a window deletes nothing by itself. The daily sweep does, at its next
+  run.
+
+**Auth:** instance administrator. **Request:**
+
+```json
+{ "workspace_ids": ["lab"], "dry_run": true, "windows": { "inbox_days": 90, "chats_days": null } }
+```
+
+**Response:**
+
+```json
+{
+  "applied": false,
+  "dry_run": true,
+  "changed": 1,
+  "rows_affected_next_sweep": 412,
+  "preview_id": "3f9c0a1b2d4e5f6a7b8c9d0e",
+  "workspaces": [
+    {
+      "workspace_id": "ws-cuid",
+      "workspace_name": "Lab",
+      "workspace_slug": "lab",
+      "changes": [ { "key": "inbox_days", "from": null, "to": 90, "rows_affected_next_sweep": 412 } ]
+    }
+  ]
+}
+```
+
+| Status | Condition |
+|--------|-----------|
+| `200` | Saved, or previewed with `dry_run`. |
+| `400` | `workspace_ids` missing or empty, nothing to change, an unknown window, a value that is not a whole number from 1 to 3650, or `null` for a window that cannot be forever. |
+| `401` | Missing authentication. |
+| `403` | Caller is not an instance administrator. |
+| `404` | A workspace in `workspace_ids` does not exist. |
+| `409` | `expect_preview` no longer matches. Nothing was saved. |
+| `500` | A write failed. Nothing was saved. |
+
+## `GET /api/v1/admin/instance/retention/defaults`
+
+The retention windows a workspace created now starts with, every window.
+`configured` names the windows an administrator set; the others are the
+product defaults in the table under `GET /api/v1/admin/instance/retention`.
+
+**Auth:** instance administrator. **Request:** no body. **Response:**
+
+```json
+{
+  "defaults": {
+    "routine_runs_days": 90, "approvals_days": 90, "audit_days": null,
+    "credential_audit_days": 90, "memory_versions_days": 30, "page_panel_data_days": 7,
+    "inbox_days": 90, "chats_days": null, "keeper_decisions_days": null
+  },
+  "configured": ["inbox_days"]
+}
+```
+
+| Status | Condition |
+|--------|-----------|
+| `200` | The defaults. |
+| `401` | Missing authentication. |
+| `403` | Caller is not an instance administrator. |
+| `500` | A read failed. |
+
+## `PUT /api/v1/admin/instance/retention/defaults`
+
+Changes the retention windows a workspace created later starts with. Only the
+windows sent change; `null` is forever where the window allows it. No existing
+workspace changes and nothing is deleted, so the response has no row counts
+and says so with `affects_existing: false`.
+
+- `dry_run: true` returns the changes and writes nothing.
+- A window already at the value is not a change. When anything changes, the
+  instance audit records `instance.retention_defaults_updated` with each
+  window's old and new value.
+- `defaults` in the response is every window as a new workspace starts after
+  the save (on a dry run, would).
+
+**Auth:** instance administrator. **Request:**
+
+```json
+{ "windows": { "inbox_days": 90, "chats_days": null }, "dry_run": true }
+```
+
+**Response:**
+
+```json
+{
+  "applied": false,
+  "dry_run": true,
+  "affects_existing": false,
+  "changes": [ { "key": "inbox_days", "from": null, "to": 90 } ],
+  "defaults": {
+    "routine_runs_days": 90, "approvals_days": 90, "audit_days": null,
+    "credential_audit_days": 90, "memory_versions_days": 30, "page_panel_data_days": 7,
+    "inbox_days": 90, "chats_days": null, "keeper_decisions_days": null
+  }
+}
+```
+
+| Status | Condition |
+|--------|-----------|
+| `200` | Saved, previewed with `dry_run`, or nothing to change. |
+| `400` | Nothing sent, an unknown window, a value that is not a whole number from 1 to 3650, or `null` for a window that cannot be forever. |
+| `401` | Missing authentication. |
+| `403` | Caller is not an instance administrator. |
+| `500` | A write failed. Nothing was saved. |
+## `GET /api/v1/admin/instance/backups/bundles`
+
+Every catalogued backup bundle on the server, across every workspace, newest
+first. Rows whose file is gone are pruned before the list is built.
+`?workspace=a,b` (slugs or ids) and `?scope=workspace|crew` narrow it.
+
+`proof_level` is `1` (written, payload checksum recorded), `2` (decrypted and
+every section checked against the manifest) or `3` (restored in isolation;
+`drill_result` says how that went: `ok`, `partial` or `failed`). `incomplete`
+lists what the bundle should hold and does not; `[]` means it recorded no
+gap, and `null` means the bundle was catalogued before gaps were recorded —
+not that it is complete. `kind` is `full` for every bundle made so far.
+
+**Auth:** instance administrator. **Request:** no body. **Response:**
+
+```json
+{
+  "bundles": [
+    {
+      "id": "bk_…",
+      "path": "/var/lib/crewship/backups/crewship-workspace-lab-20260930T020000Z.tar.zst",
+      "file_name": "crewship-workspace-lab-20260930T020000Z.tar.zst",
+      "scope": "workspace",
+      "scope_level": "standard",
+      "kind": "full",
+      "slug": "lab",
+      "workspace_id": "ws-cuid",
+      "workspace_name": "Lab",
+      "workspace_slug": "lab",
+      "created_at": "2026-09-30T02:00:00Z",
+      "created_by": "ops@example.com",
+      "size_bytes": 1048576,
+      "payload_sha256": "9f2c…",
+      "encrypted": true,
+      "format_version": 3,
+      "plan_id": "",
+      "run_id": "",
+      "pinned": false,
+      "proof_level": 1,
+      "proof_checked_at": null,
+      "drill_result": "",
+      "drill_at": null,
+      "drill_report": null,
+      "incomplete": [
+        {"kind": "attachment_missing", "detail": "2 attached file(s) were not on disk when the backup ran; …", "count": 2, "workspace": "ws-cuid"}
+      ]
+    }
+  ]
+}
+```
+
+| Status | Condition |
+|--------|-----------|
+| `200` | The list. |
+| `401` | Missing authentication. |
+| `403` | Caller is not an instance administrator. |
+| `404` | A workspace in `workspace` does not exist. |
+| `500` | A read failed. |
+
+## `POST /api/v1/admin/instance/backups/bundles/pin`
+
+Pins a catalogued bundle: no retention rule deletes it — not the age rule, not
+the count floor. The change and its instance audit entry
+(`instance.backup_pinned`) commit together.
+
+**Auth:** instance administrator. **Request:**
+
+```json
+{"path": "/var/lib/crewship/backups/crewship-workspace-lab-20260930T020000Z.tar.zst"}
+```
+
+**Response:**
+
+```json
+{"path": "/var/lib/crewship/backups/crewship-workspace-lab-20260930T020000Z.tar.zst", "pinned": true}
+```
+
+| Status | Condition |
+|--------|-----------|
+| `200` | Pinned (pinning a pinned bundle is not an error). |
+| `400` | No `path`, or the body is not JSON. |
+| `401` | Missing authentication. |
+| `403` | Caller is not an instance administrator. |
+| `404` | No catalogued bundle has that path. |
+| `500` | The write failed; nothing changed. |
+
+## `POST /api/v1/admin/instance/backups/bundles/unpin`
+
+The reverse of pin: retention rules apply to the bundle again. The change and
+its instance audit entry (`instance.backup_unpinned`) commit together.
+
+**Auth:** instance administrator. **Request:**
+
+```json
+{"path": "/var/lib/crewship/backups/crewship-workspace-lab-20260930T020000Z.tar.zst"}
+```
+
+**Response:**
+
+```json
+{"path": "/var/lib/crewship/backups/crewship-workspace-lab-20260930T020000Z.tar.zst", "pinned": false}
+```
+
+| Status | Condition |
+|--------|-----------|
+| `200` | Unpinned (unpinning an unpinned bundle is not an error). |
+| `400` | No `path`, or the body is not JSON. |
+| `401` | Missing authentication. |
+| `403` | Caller is not an instance administrator. |
+| `404` | No catalogued bundle has that path. |
+| `500` | The write failed; nothing changed. |
+
+## `GET /api/v1/admin/instance/backups/restores`
+
+Every restore, dry run and drill the server has run, newest first, with the
+full report the restore returned at the time. `kind` is `restore`, `dry_run`
+or `drill`. `result` is `ok`, `partial` — the restore landed, but its report
+names something skipped, missing or lowered (crew files not landed, credential
+tiers clamped, columns dropped, row counts short, attachment files missing or
+in conflict, or a gap the bundle itself recorded) — or `failed`, whose report
+carries the `error`. `?limit=N` returns at most N rows (default 100, at most
+500).
+
+**Auth:** instance administrator. **Request:** no body. **Response:**
+
+```json
+{
+  "restores": [
+    {
+      "id": "rr_…",
+      "kind": "dry_run",
+      "actor_user_id": "user-cuid",
+      "actor_email": "ops@example.com",
+      "bundle_path": "/var/lib/crewship/backups/crewship-workspace-lab-20260930T020000Z.tar.zst",
+      "target": "lab",
+      "result": "partial",
+      "report": {"rows_inserted": 412, "attachments_missing": 2, "incomplete": [ … ]},
+      "created_at": "2026-09-30T08:12:44.123Z"
+    }
+  ]
+}
+```
+
+| Status | Condition |
+|--------|-----------|
+| `200` | The list. |
+| `400` | `limit` is not 1–500. |
+| `401` | Missing authentication. |
+| `403` | Caller is not an instance administrator. |
+| `500` | A read failed. |
+
+
+## `GET /api/v1/admin/instance/backups/plans`
+
+Every backup plan, by name. A plan says what goes in (`preset`, `scope`,
+`workspace_ids`, `contents`, `env_mode`), when (`cadence`, `time_of_day`,
+`weekday`, `monthday`, `cron_expr` in `timezone`; `env_cadence` picks the
+runs that also take complete environments), for how long (`keep_min`, the
+newest copies no rule ages out, and `keep_daily`, `keep_weekly`,
+`keep_monthly`), who can open its bundles (`recipient_ids`) and how long a run
+waits for busy workspaces (`busy_wait_minutes`, looking again every
+`busy_retry_minutes`). `counts_as_protection` is false for custom plans.
+Plans run on the server's backup scheduler, never through an agent.
+
+**Auth:** instance administrator. **Request:** no body. **Response:**
+
+```json
+{
+  "data": [
+    {
+      "id": "bp_…", "name": "Nightly", "preset": "workspace", "scope": "workspaces",
+      "workspace_ids": ["ws-cuid"], "contents": [], "env_mode": "files",
+      "cadence": "daily", "time_of_day": "03:00", "weekday": null, "monthday": null, "cron_expr": null,
+      "timezone": "Europe/Prague", "env_cadence": "weekly",
+      "keep_min": 3, "keep_daily": 7, "keep_weekly": 4, "keep_monthly": 12,
+      "destinations": ["local"], "recipient_ids": ["age1…"],
+      "busy_wait_minutes": 120, "busy_retry_minutes": 15, "hold_cap_minutes": 20, "stale_alert_hours": 36,
+      "enabled": true, "next_run_at": "2026-10-01T01:00:00Z", "last_run_at": null,
+      "counts_as_protection": true, "created_at": "2026-09-30T10:00:00Z", "updated_at": "2026-09-30T10:00:00Z"
+    }
+  ]
+}
+```
+
+| Status | Condition |
+|--------|-----------|
+| `200` | The list. |
+| `401` | Missing authentication. |
+| `403` | Caller is not an instance administrator. |
+| `500` | A read failed. |
+
+## `POST /api/v1/admin/instance/backups/plans`
+
+Creates a plan. The body is a plan without `id`, `next_run_at` and
+`last_run_at`; every field it leaves out takes the preset's default.
+`complete` covers the whole instance with data daily at 03:00 and complete
+environments weekly; `workspace` covers the listed workspaces (none listed:
+every workspace) with every category; `custom` carries only `contents` plus
+what those need (see preview-contents). `workspace_ids` takes ids or slugs.
+`timezone` must be an IANA zone, `cron_expr` a five-field cron expression
+(parsed like routine schedules), `keep_min` at least 1, and `recipient_ids`
+must name at least one age public key or recipient: every backup is
+encrypted. Written to the instance audit log in the same transaction.
+
+**Auth:** instance administrator. **Request:**
+
+```json
+{"preset": "custom", "name": "Memory every 6 h", "contents": ["memory"], "cadence": "custom",
+ "cron_expr": "0 */6 * * *", "timezone": "Europe/Prague", "recipient_ids": ["age1…"]}
+```
+
+**Response:** the stored plan, as in the list.
+
+| Status | Condition |
+|--------|-----------|
+| `201` | Created. |
+| `400` | Invalid JSON, an unknown workspace or category, a bad timezone, cron or time, `keep_min` below 1, or no recipients. |
+| `401` | Missing authentication. |
+| `403` | Caller is not an instance administrator. |
+| `500` | The write failed; nothing changed. |
+
+## `POST /api/v1/admin/instance/backups/plans/preview-contents`
+
+What a plan's bundles would carry. `included` is what the plan chooses (a
+preset other than custom: every category; complete environments follow
+`env_mode`), `required` what is kept because an included category cannot be
+restored without it, with the categories that need it, and `excluded` the
+rest. The console shows the same rule while a plan is edited.
+
+**Auth:** instance administrator. **Request:**
+
+```json
+{"preset": "custom", "contents": ["memory"], "env_mode": "files"}
+```
+
+**Response:**
+
+```json
+{
+  "included": ["memory"],
+  "required": [{"key": "agents", "because": ["memory"]}],
+  "excluded": ["chats", "att", "routines", "journal", "creds", "pages", "files", "env"]
+}
+```
+
+| Status | Condition |
+|--------|-----------|
+| `200` | The resolution. |
+| `400` | Invalid JSON, an unknown preset, category or `env_mode`. |
+| `401` | Missing authentication. |
+| `403` | Caller is not an instance administrator. |
+
+## `GET /api/v1/admin/instance/backups/plans/{id}`
+
+One plan, as in the list.
+
+**Auth:** instance administrator. **Request:** no body. **Response:** the plan.
+
+| Status | Condition |
+|--------|-----------|
+| `200` | The plan. |
+| `401` | Missing authentication. |
+| `403` | Caller is not an instance administrator. |
+| `404` | No plan with that id. |
+| `500` | A read failed. |
+
+## `PUT /api/v1/admin/instance/backups/plans/{id}`
+
+Changes a plan. Fields the body leaves out keep their stored value; the same
+rules as create apply, and `next_run_at` is recomputed from now. Written to
+the instance audit log, with the plan before the change, in the same
+transaction.
+
+**Auth:** instance administrator. **Request:**
+
+```json
+{"cadence": "weekly", "weekday": 0, "env_mode": "complete"}
+```
+
+**Response:** the stored plan.
+
+| Status | Condition |
+|--------|-----------|
+| `200` | Updated. |
+| `400` | Invalid JSON or a value create would refuse. |
+| `401` | Missing authentication. |
+| `403` | Caller is not an instance administrator. |
+| `404` | No plan with that id. |
+| `500` | The write failed; nothing changed. |
+
+## `DELETE /api/v1/admin/instance/backups/plans/{id}`
+
+Deletes a plan. Its bundles and its run history stay. Written to the instance
+audit log in the same transaction.
+
+**Auth:** instance administrator. **Request:** no body. **Response:** no body.
+
+| Status | Condition |
+|--------|-----------|
+| `204` | Deleted. |
+| `401` | Missing authentication. |
+| `403` | Caller is not an instance administrator. |
+| `404` | No plan with that id. |
+| `500` | The write failed; nothing changed. |
+
+## `GET /api/v1/admin/instance/backups/plans/{id}/next`
+
+The plan's next `n` run times (default 5, at most 50) after now, and whether
+each also takes complete environments. Empty for a switched-off plan.
+
+**Auth:** instance administrator. **Request:** no body. **Response:**
+
+```json
+{"runs": [{"at": "2026-10-03T01:00:00Z", "environments": false}, {"at": "2026-10-04T01:00:00Z", "environments": true}]}
+```
+
+| Status | Condition |
+|--------|-----------|
+| `200` | The run times. |
+| `400` | `n` is not 1–50. |
+| `401` | Missing authentication. |
+| `403` | Caller is not an instance administrator. |
+| `404` | No plan with that id. |
+| `500` | A read failed. |
+
+## `GET /api/v1/admin/instance/backups/plans/{id}/calendar`
+
+Day by day from `from` to `to` (`YYYY-MM-DD` in the plan's timezone; by
+default the last 7 and the next 28 days, at most 400): the plan's runs as
+`done`, `skipped`, `catchup` or `failed`, and its due times after now as
+`planned`. Runs of one due time over several workspaces fold into one entry
+with the worst status. `kind` is `data` or `environments`; environments
+entries of past runs read `skipped` until complete environments are captured.
+
+**Auth:** instance administrator. **Request:** no body. **Response:**
+
+```json
+{"days": [{"date": "2026-10-04", "entries": [{"at": "2026-10-04T01:00:00Z", "kind": "data", "status": "planned"},
+                                             {"at": "2026-10-04T01:00:00Z", "kind": "environments", "status": "planned"}]}]}
+```
+
+| Status | Condition |
+|--------|-----------|
+| `200` | The calendar. |
+| `400` | A date is not `YYYY-MM-DD`, `to` is before `from`, or the span is over 400 days. |
+| `401` | Missing authentication. |
+| `403` | Caller is not an instance administrator. |
+| `404` | No plan with that id. |
+| `500` | A read failed. |
+
+## `GET /api/v1/admin/instance/backups/runs`
+
+Backup runs, newest first, each with its persisted phases (`wait` while busy
+workspaces were waited out, then `copy`, `pack`, `encrypt`, `check` —
+the checksum of the written bundle — and `off-site`, `skipped` with "not
+configured" until off-site copies exist). `status` is `running`, `done`,
+`incomplete` (a bundle was written and its manifest names what it lacks, in
+`incomplete`), `failed`, `interrupted` (the server stopped during the run; it
+was retried once, and `retried_at` says when the retry finished) or
+`skipped` (busy past the plan's window, or scheduled backups were held: while
+an instance restore's `routines` or `all` hold is set, scheduled and catch-up
+runs are recorded as skipped with the reason until an admin resumes it;
+manual runs still start). `trigger` is `schedule`, `manual` or `catchup`.
+`hold_ms` is how long writes were held for the consistent copy of an
+instance run (`null` for workspace runs, which hold no instance-wide window). The bundle's `proof_level`,
+`pinned`, `drill_*`, `format_version` and `restorable` come from the catalog.
+Narrow with `plan`, `scope` (`instance` or `workspaces`), `ws` (workspace ids
+or slugs, comma-separated) and `limit` (default 100, at most 500).
+
+**Auth:** instance administrator. **Request:** no body. **Response:**
+
+```json
+{
+  "data": [
+    {
+      "id": "br_…", "plan_id": "bp_…", "plan_name": "Nightly", "trigger": "schedule", "note": null,
+      "scope": "workspaces", "workspace_id": "ws-cuid", "workspace_name": "Lab", "kind": "full",
+      "status": "incomplete", "retried_at": null,
+      "phases": [{"name": "copy", "started_at": "2026-10-01T01:00:02Z", "ended_at": "2026-10-01T01:06:40Z", "status": "done", "detail": null}],
+      "bundle_path": "/var/lib/crewship/backups/crewship-workspace-lab-20261001T010002Z.tar.zst", "size_bytes": 38000000,
+      "error": null, "incomplete": [{"kind": "attachment_missing", "count": 3, "workspace_id": "ws-cuid", "detail": "…"}],
+      "started_at": "2026-10-01T01:00:00Z", "ended_at": "2026-10-01T01:21:00Z",
+      "proof_level": 1, "drill_result": null, "drill_at": null, "drill_note": null, "pinned": false,
+      "recipients": ["age1q7x…m3k"], "format_version": 3, "restorable": "direct", "legacy": false,
+      "phase": "", "environments": false, "due_at": "2026-10-01T01:00:00Z", "retry_of": null,
+      "categories": [], "catalog_id": "bk_…", "hold_ms": null
+    }
+  ]
+}
+```
+
+| Status | Condition |
+|--------|-----------|
+| `200` | The runs. |
+| `400` | `scope` is not `instance` or `workspaces`, or `limit` is not 1–500. |
+| `401` | Missing authentication. |
+| `403` | Caller is not an instance administrator. |
+| `404` | A workspace in `ws` does not exist. |
+| `500` | A read failed. |
+
+## `POST /api/v1/admin/instance/backups/run`
+
+Starts a backup now and answers at once. Every run — scheduled, catch-up or
+manual, instance or workspace — is a row of the server's backup service
+(never an agent), so a client that disconnects, or the CLI's 30-second
+timeout, cannot cancel it; follow it with
+[`GET …/backups/run/{runId}`](#get-api-v1-admin-instance-backups-run-runid).
+
+- With `plan_id`, runs that plan now (one run per workspace for a workspaces
+  plan).
+- Without it, `scope` says what to back up. `instance` writes one instance
+  bundle: the whole database, every file store and every crew container,
+  copied in one quiet window — running work is drained first, then every
+  write to protected data is held for the copy only (at most the plan's
+  `hold_cap_minutes`, 20 by default) and released before packing and
+  encryption. `workspaces` writes one bundle per workspace in
+  `workspace_ids` (ids or slugs; default every workspace), with `preset`,
+  `contents` and `env_mode` choosing what goes in. Without `preset`, an
+  instance run is `complete` and a workspaces run `workspace`.
+
+Every backup is encrypted. Give `recipient_ids` (age `age1…` public keys or
+recipient ids; `recipients` is accepted as another name) or `passphrase`, not
+both. Without either, the recipients of the enabled plan covering the scope
+are used; with `plan_id`, keys given in the request replace the plan's for
+this run. A passphrase is held in the server's memory until the run starts
+and is never stored or logged: a run whose server restarts before it starts
+fails and says so. When the vault keys' recovery kit is on, instance bundles
+carry them. `note` is shown with the run. Written to the instance audit log
+(the passphrase only as `passphrase: true`).
+
+**Auth:** instance administrator. **Request:**
+
+```json
+{"scope": "instance", "recipient_ids": ["age1q7x…m3k"], "note": "before upgrade"}
+```
+
+**Response** — `id` and `run_id` name the first run, `run_ids` every run
+queued:
+
+```json
+{"id": "br_…", "run_id": "br_…", "run_ids": ["br_…"], "status": "running"}
+```
+
+| Status | Condition |
+|--------|-----------|
+| `202` | Queued. |
+| `400` | Invalid JSON, `scope` is not `instance` or `workspaces`, both recipients and a passphrase, a recipient that is not an age key or known recipient id, no workspace to back up, or nothing to encrypt to. |
+| `401` | Missing authentication. |
+| `403` | Caller is not an instance administrator. |
+| `404` | No plan with that id, or an unknown workspace. |
+| `500` | The run could not be queued. |
+
+## `GET /api/v1/admin/instance/backups/overview`
+
+Whether a restore would work, for `scope=instance` (the default) or
+`scope=workspaces` narrowed by `ws` (ids or slugs; `none` selects nothing).
+`status.verdict` is the weakest proof among the latest full bundles of the
+selection — `verified` (a test restore went through), `partial` (a test
+restore or the bundle found gaps), `failed`, `contents_checked`,
+`checksum_only` or `none`; custom bundles never count, and an instance
+selection counts only instance bundles. The status rows say what is
+protected, how often, where, for how long and when it was really restored;
+`offsite_verified` stays false until an off-site copy has been uploaded and
+checked. `needs_attention` lists concrete problems: the latest bundle's gaps
+per workspace, workspaces never or not recently backed up, workspaces on no
+plan, and failed, skipped or late runs. For `scope=instance` it also says
+when the latest instance bundle cannot unlock credentials on a new server
+(`id` `vault`): the key versions its sealed values use that its recovery kit
+does not carry — all of them when the kit was off — read from the bundle's
+own manifest. `nights` is always fourteen entries
+ending today in the plan's timezone. `space.staging_need_bytes` is the
+largest recent bundle × 1.1 and `space.restore_need_bytes` the largest bundle
+× 3 (payloads compress about 3:1 and a restore stages the decrypted payload).
+`workspaces` is present for `scope=workspaces`.
+
+**Auth:** instance administrator. **Request:** no body. **Response:**
+
+```json
+{
+  "status": {
+    "label": "Nightly", "verdict": "checksum_only", "summary": null,
+    "protects": {"value": "1 of 1 workspaces on a plan", "detail": null, "detail_tone": null},
+    "how_often": {"value": "daily 03:00", "detail": "Europe/Prague · next 1 Oct 03:00", "detail_tone": null},
+    "where": {"value": "This server (/var/lib/crewship/backups)", "detail": "no off-site copy", "detail_tone": "warn"},
+    "how_long": {"value": "keep 3 checked, 7 daily, 4 weekly, 12 monthly", "detail": "the newest copies are never aged out", "detail_tone": null},
+    "really_restored": {"value": "Never test-restored", "detail": "a checksum is not a restore", "detail_tone": "warn"},
+    "offsite_verified": false
+  },
+  "needs_attention": [{"id": "run:br_…", "severity": "warn", "title": "Backup of Lab skipped on 29 Sep 03:00",
+                       "detail": "skipped: still busy after 120 minutes (2 agent(s) working)",
+                       "action": {"kind": "history", "label": "View run", "workspace_id": "ws-cuid", "run_id": "br_…"}}],
+  "nights": [{"date": "2026-09-30", "status": "ok", "proof": 1, "detail": null}],
+  "space": {"backups_bytes": 38000000, "free_bytes": 120000000000, "total_bytes": 500000000000,
+            "staging_need_bytes": 41800000, "restore_need_bytes": 114000000},
+  "workspaces": [{"workspace_id": "ws-cuid", "name": "Lab", "last_backup_at": "2026-09-30T01:00:00Z", "status": "ok", "plan": "Nightly", "proof": 1}],
+  "instance_summary": "2 workspaces, 3 users, instance settings"
+}
+```
+
+| Status | Condition |
+|--------|-----------|
+| `200` | The overview. |
+| `400` | `scope` is not `instance` or `workspaces`. |
+| `401` | Missing authentication. |
+| `403` | Caller is not an instance administrator. |
+| `404` | A workspace in `ws` does not exist. |
+| `500` | A read failed. |
+
+## `GET /api/v1/admin/instance/backups/run/{runId}`
+
+One run, in the same shape as an item of
+[`GET …/backups/runs`](#get-api-v1-admin-instance-backups-runs): `status`
+(`running` until it ends), the phases, the bundle it wrote (`bundle_path`,
+`size_bytes`, `proof_level`), how long writes were held (`hold_ms`) and
+every gap (`incomplete`). Runs are durable: they survive a restart, and a
+run the server stopped during is marked `interrupted` and retried once.
+
+**Auth:** instance administrator. **Request:** no body. **Response:**
+
+```json
+{
+  "id": "br_…", "plan_id": null, "plan_name": null, "trigger": "manual", "note": "before upgrade",
+  "scope": "instance", "workspace_id": null, "workspace_name": null, "kind": "full", "status": "done",
+  "phases": [{"name": "copy", "started_at": "2026-09-30T03:00:01Z", "ended_at": "2026-09-30T03:00:49Z", "status": "done", "detail": null}],
+  "bundle_path": "/var/lib/crewship/backups/crewship-instance-all-20260930T030000Z.tar.zst", "size_bytes": 81234567,
+  "error": null, "incomplete": [], "started_at": "2026-09-30T03:00:00Z", "ended_at": "2026-09-30T03:04:12Z",
+  "proof_level": 1, "pinned": false, "recipients": ["age1q7x…m3k"], "legacy": false, "hold_ms": 48210
+}
+```
+
+| Status | Condition |
+|--------|-----------|
+| `200` | The run. |
+| `401` | Missing authentication. |
+| `403` | Caller is not an instance administrator. |
+| `404` | No run with that id. |
+| `500` | A read failed. |
+
+## `GET /api/v1/admin/instance/backups/vault-keys`
+
+The vault key versions a restore needs: every version the database's sealed
+values (credentials, webhook secrets, integration keys) reference or this
+server has configured, the environment variable each is read from, how many
+sealed values use it, whether it mints new ones (`active`) and whether this
+server has a key for it (`present`, following the same `ENCRYPTION_KEY`
+fallback decryption applies). `recovery_kit.enabled` says whether new instance
+bundles carry the keys; `available` whether every referenced version could be
+carried. Counts only: no key material leaves the server.
+
+**Auth:** instance administrator. **Request:** no body. **Response:**
+
+```json
+{
+  "versions": [
+    {"version": "v1", "env": "ENCRYPTION_KEY", "active": false, "envelopes": 12, "present": true},
+    {"version": "v2", "env": "ENCRYPTION_KEY_V2", "active": true, "envelopes": 40, "present": true}
+  ],
+  "recovery_kit": {"available": true, "enabled": false}
+}
+```
+
+| Status | Condition |
+|--------|-----------|
+| `200` | The versions. |
+| `401` | Missing authentication. |
+| `403` | Caller is not an instance administrator. |
+| `500` | A read failed. |
+
+## `PUT /api/v1/admin/instance/backups/settings/recovery-kit`
+
+Turns the recovery kit on or off for new instance bundles. On, every key
+version the database references rides inside the encrypted payload of each
+instance bundle (never a workspace or crew bundle), so `crewship recover` can
+hand them to the restored server. Whoever holds a private key a bundle is
+encrypted to can then read every secret in it. The change and its instance
+audit entry (`instance.backup_recovery_kit_enabled` / `_disabled`) commit
+together.
+
+**Auth:** instance administrator. **Request:**
+
+```json
+{"enabled": true}
+```
+
+**Response:**
+
+```json
+{"enabled": true}
+```
+
+| Status | Condition |
+|--------|-----------|
+| `200` | Saved. |
+| `400` | No `enabled`, or the body is not JSON. |
+| `401` | Missing authentication. |
+| `403` | Caller is not an instance administrator. |
+| `500` | The write failed; nothing changed. |
+
+## `POST /api/v1/admin/instance/backups/bundles/check`
+
+Proof level 2 — contents checked. Decrypts a catalogued bundle with the key
+given (`identity`: the text of an age identity file, or `passphrase`), reads
+every section to the end, and compares table row counts and file digests with
+the manifest. Nothing is restored, and the key is used for this request only:
+never stored, never logged. On success the bundle's proof level rises to 2; a
+failed check lowers a bundle recorded at 2 back to 1. `absent` repeats what
+the bundle itself recorded as missing (attachment files, memory blobs, crew
+containers). Recorded in the instance audit log
+(`instance.backup_contents_checked`).
+
+**Auth:** instance administrator. **Request:**
+
+```json
+{"path": "/var/lib/crewship/backups/crewship-instance-all-20260930T030000Z.tar.zst", "identity": "AGE-SECRET-KEY-1…"}
+```
+
+**Response:**
+
+```json
+{
+  "ok": true,
+  "proof_level": 2,
+  "detail": "every section read (412 entries); 231 table(s) and 398 file(s) match the manifest",
+  "problems": [],
+  "absent": [],
+  "entries": 412,
+  "tables": 231,
+  "files": 398
+}
+```
+
+| Status | Condition |
+|--------|-----------|
+| `200` | The check ran; `ok` says whether it passed. |
+| `400` | No `path`, no key for an encrypted bundle, both keys, or an identity that is not an age secret key. |
+| `401` | Missing authentication. |
+| `403` | Caller is not an instance administrator. |
+| `404` | No catalogued bundle has that path, or its file is gone. |
+| `422` | The key does not open the bundle. |
+| `500` | The check could not run. |
+
+## `POST /api/v1/admin/instance/backups/restore/checks`
+
+The checks a restore runs before anything changes. `space`: room on the data
+directory (an instance bundle records exactly what it lands). `format`: the
+bundle's format version, and whether this server reads it directly or through
+a converter. `runtime`: whether Docker answers; a crew built on another
+architecture gets a warning that its environment is rebuilt from the crew
+image. `unsafe`: host settings in the crews' devcontainer configuration that a
+restore does not switch back on by itself — Docker socket mounts, privileged
+mode, host path binds; read only when a key is given, otherwise a runtime
+warning says they were not checked. `conflicts`: what the `target`
+(`empty_server`, `isolated`, `replace`, `new_workspace`, `crew`) already holds;
+an instance bundle restores only to `empty_server` (`crewship recover`) or
+`isolated` (`crewship backup drill`). `environments`: one runtime check per
+complete container environment the bundle carries — `action` is `restore`,
+`rebuild` (built for another architecture than this server's Docker, or
+`missing_blobs` of its layers are neither in the bundle nor in the store
+beside it: the data comes back, the environment is rebuilt from the crew
+image) or `skip` (no Docker); `runtime.detail` then names the Docker version
+and platform, each rebuild is also a runtime warning, the layers' bytes count
+toward `space`, and with a key `unsafe` also lists the recorded host settings
+of each environment. Always an array.
+
+**Auth:** instance administrator. **Request:**
+
+```json
+{"path": "/var/lib/crewship/backups/crewship-workspace-lab-20260930T020000Z.tar.zst", "target": "replace", "identity": "AGE-SECRET-KEY-1…"}
+```
+
+**Response:**
+
+```json
+{
+  "space": {"ok": true, "need_bytes": 245000000, "free_bytes": 81000000000},
+  "format": {"ok": true, "version": 3, "converter": false},
+  "runtime": {"ok": true, "detail": "Docker is available on this server (linux/amd64)", "warnings": []},
+  "unsafe": ["Docker socket mount on ops"],
+  "conflicts": {"ok": true, "detail": "replaces workspace lab on this server; its current data is overwritten"},
+  "environments": [
+    {"crew": "ops", "action": "restore", "platform": "linux/amd64", "host_platform": "linux/amd64", "missing_blobs": 0, "need_bytes": 1450000000, "detail": "linux/amd64, 1.4 GiB of image layers"}
+  ]
+}
+```
+
+| Status | Condition |
+|--------|-----------|
+| `200` | The checks. |
+| `400` | Unknown `target`, no `path`, both keys, or a bad identity. |
+| `401` | Missing authentication. |
+| `403` | Caller is not an instance administrator. |
+| `404` | No catalogued bundle has that path, or its file is gone. |
+| `422` | The bundle cannot be read, or the key does not open it. |
+| `500` | A check could not run. |
+
+## `POST /api/v1/admin/instance/backups/environments/land`
+
+Loads the complete container environments `crewship recover` staged under
+`<data dir>/restore-staging/environments/` (each workspace's records, and the
+image layers copied beside them), once the recovered server runs with Docker.
+Each image is reassembled and loaded; a Crewship crew's image gets its crew
+image tag back when the server has none, so Crewship recreates the crew from
+the captured environment with the runtime settings it manages. A container
+Crewship does not manage is recreated with its sanitized configuration and
+its mounts' content, then started. Settings recorded as not carried over for
+safety stay off. Every environment is reported with `result` `restored`,
+`rebuilt` (another architecture or missing layers) or `skipped` (no Docker,
+or an error) and its `reason`; `staged` is false when nothing was staged.
+`dry_run` checks only. The work runs on its own 30 minute deadline, so a
+client that gives up does not stop it halfway. A landing (not a dry run) is
+written to `landed.json` beside the staged files and recorded in the instance
+audit log (`instance.environments_landed`).
+
+**Auth:** instance administrator. **Request** (optional body):
+
+```json
+{"dry_run": false}
+```
+
+**Response:**
+
+```json
+{
+  "dir": "/var/lib/crewship/restore-staging/environments",
+  "staged": true,
+  "dry_run": false,
+  "environments": [
+    {"workspace": "ws_lab", "crew": "ops", "result": "restored", "image": "crewship-env/ops:20260930t030000-1a2b3c",
+     "unsafe": ["Docker socket mount on ops"], "notes": ["processes start fresh: what was only in memory is not restored"]},
+    {"workspace": "ws_lab", "crew": "researcher", "result": "rebuilt", "reason": "built for linux/arm64 and this server is linux/amd64: its data comes back, its environment is rebuilt from the crew image", "unsafe": []}
+  ]
+}
+```
+
+| Status | Condition |
+|--------|-----------|
+| `200` | The landing report. |
+| `400` | The body is not valid JSON. |
+| `401` | Missing authentication. |
+| `403` | Caller is not an instance administrator. |
+| `500` | The staged files could not be read. |
+
+## `POST /api/v1/admin/instance/backups/drills`
+
+Records a test restore run offline by `crewship backup drill --post`. The
+bundle must be catalogued at `path`, and `sha256` must be its payload digest —
+a drill of a different file is refused. `result` is `ok`, `partial` or
+`failed`; `report` is the drill's full report (its checks and what failed). An
+`ok` or `partial` drill raises the bundle to proof level 3 — a partial one
+stays shown as partial — and every drill is written to the restore history as
+kind `drill`. Recorded in the instance audit log
+(`instance.backup_drill_recorded`).
+
+**Auth:** instance administrator. **Request:**
+
+```json
+{
+  "path": "/var/lib/crewship/backups/crewship-instance-all-20260930T030000Z.tar.zst",
+  "sha256": "9f2c…",
+  "result": "partial",
+  "report": {"result": "partial", "checks": [{"name": "credentials_unlock", "status": "skipped", "detail": "…"}]}
+}
+```
+
+**Response** (`201`):
+
+```json
+{"path": "/var/lib/crewship/backups/crewship-instance-all-20260930T030000Z.tar.zst", "proof_level": 3, "drill_result": "partial", "drill_at": "2026-09-30T09:12:00Z", "report_id": "rr_…"}
+```
+
+| Status | Condition |
+|--------|-----------|
+| `201` | Recorded. |
+| `400` | `result` is not ok, partial or failed, or `report` is not JSON. |
+| `401` | Missing authentication. |
+| `403` | Caller is not an instance administrator. |
+| `404` | No catalogued bundle has that path. |
+| `409` | `sha256` does not match the catalogued bundle. |
+| `500` | The write failed. |
+
+## `GET /api/v1/admin/instance/backups/drills`
+
+Every recorded drill, newest first, as an array. `source_scope` is `instance`
+or `workspaces`; `warnings` counts the checks that did not pass plus the gaps
+the restore recorded.
+
+**Auth:** instance administrator. **Request:** no body. **Response:**
+
+```json
+[
+  {
+    "id": "rr_…",
+    "kind": "drill",
+    "actor": "ops@example.com",
+    "bundle_path": "/var/lib/crewship/backups/crewship-instance-all-20260930T030000Z.tar.zst",
+    "source_scope": "instance",
+    "source_name": "Whole instance",
+    "source_date": "2026-09-30T03:00:00Z",
+    "target": "isolated",
+    "result": "ok",
+    "warnings": 0,
+    "created_at": "2026-09-30T09:12:00Z"
+  }
+]
+```
+
+| Status | Condition |
+|--------|-----------|
+| `200` | The list. |
+| `401` | Missing authentication. |
+| `403` | Caller is not an instance administrator. |
+| `500` | A read failed. |
+
+## `GET /api/v1/admin/instance/backups/settings`
+
+The instance-wide backup settings. `limits`: how many runs execute at once
+(the rest queue), the CPU cores the compressor may use, and MB/s caps on
+writing staging and bundle files and on off-site uploads (0 is no cap; each
+cap is one limiter shared by every run). `heartbeat_url` is pinged after every
+good run, and `heartbeat_last_*` says how the last ping went. `events` says
+which incident kinds reach the instance admins, `stale_alert_hours` after how
+long without a good backup a plan counts as stale. `destinations` lists where
+copies can be kept: this server, each S3-compatible destination (`verified`
+once one upload there was checked), and Google Drive as not yet `available`.
+`instance_admins` counts who receives incidents.
+
+**Auth:** instance administrator. **Request:** no body. **Response:**
+
+```json
+{
+  "limits": {"concurrency": 1, "cpu_cores": 2, "disk_mbps": 80, "upload_mbps": 20},
+  "heartbeat_url": "https://hc.example.com/ping/5c3e…",
+  "heartbeat_last_at": "2026-09-30T03:04:10Z",
+  "heartbeat_last_ok": true,
+  "heartbeat_last_error": null,
+  "recovery_kit_enabled": false,
+  "channels": [],
+  "events": {"failed": true, "incomplete": true, "stale": true, "offsite": true, "drill": true},
+  "stale_alert_hours": 36,
+  "drill_reminder": "monthly",
+  "updated_at": "2026-09-30T08:00:00Z",
+  "destinations": [
+    {"id": "local", "kind": "local", "label": "This server", "path": "/var/lib/crewship/backups", "used_bytes": 27917287424, "verified": true, "available": true},
+    {"id": "bdst_…", "kind": "s3", "label": "r2", "path": null, "used_bytes": 9126805504, "verified": true, "available": true},
+    {"id": "drive", "kind": "drive", "label": "Google Drive", "path": null, "used_bytes": null, "verified": false, "available": false}
+  ],
+  "instance_admins": 3,
+  "local_path": "/var/lib/crewship/backups"
+}
+```
+
+| Status | Condition |
+|--------|-----------|
+| `200` | The settings. |
+| `401` | Missing authentication. |
+| `403` | Caller is not an instance administrator. |
+| `500` | A read failed. |
+
+## `PUT /api/v1/admin/instance/backups/settings`
+
+Changes the settings. The body is a partial settings object: what it leaves
+out keeps its value; `destinations`, `instance_admins`, `local_path` and the
+heartbeat's last ping are ignored. `heartbeat_url` must be a public https URL;
+`null` or `""` clears it. The change and its instance audit entry
+(`instance.backup_settings_updated`, before and after) commit together.
+Answers with the whole settings object.
+
+**Auth:** instance administrator. **Request:**
+
+```json
+{"limits": {"disk_mbps": 80, "upload_mbps": 20}, "events": {"failed": true, "incomplete": false, "stale": true, "offsite": true, "drill": true}}
+```
+
+**Response:** the whole settings object, in the shape `GET` answers.
+
+```json
+{"limits": {"concurrency": 1, "cpu_cores": 2, "disk_mbps": 80, "upload_mbps": 20}, "heartbeat_url": null, "recovery_kit_enabled": false,
+ "channels": [], "events": {"failed": true, "incomplete": false, "stale": true, "offsite": true, "drill": true},
+ "stale_alert_hours": 36, "drill_reminder": "monthly", "destinations": [], "instance_admins": 3, "local_path": "/var/lib/crewship/backups"}
+```
+
+| Status | Condition |
+|--------|-----------|
+| `200` | Saved. |
+| `400` | A limit out of range, a heartbeat URL that is not public https, an unknown drill reminder, or a body that is not JSON. |
+| `401` | Missing authentication. |
+| `403` | Caller is not an instance administrator. |
+| `500` | The write failed; nothing changed. |
+
+## `GET /api/v1/admin/instance/backups/recipients`
+
+The backup keys: age public keys backups are encrypted to, who holds each
+private half, a fingerprint for the printed recovery sheet, and the plans
+that use each key (by id or by the raw `age1…` key). The private halves never
+reach the server.
+
+**Auth:** instance administrator. **Request:** no body. **Response:**
+
+```json
+{
+  "data": [
+    {"id": "brk_…", "name": "ops-2026", "public_key": "age1q7x…m3k", "holder": "platform lead",
+     "fingerprint": "SHA256:1a2b3c4d5e6f7a8b", "created_by": "usr_…", "created_at": "2026-09-30T08:00:00Z", "used_by": ["Complete recovery"]}
+  ]
+}
+```
+
+| Status | Condition |
+|--------|-----------|
+| `200` | The list. |
+| `401` | Missing authentication. |
+| `403` | Caller is not an instance administrator. |
+| `500` | A read failed. |
+
+## `POST /api/v1/admin/instance/backups/recipients`
+
+Adds a backup key. `public_key` must be an age X25519 public key (`age1…`); a
+private key (`AGE-SECRET-KEY-1…`) is refused. Plans name the key by its id in
+`recipient_ids`. Audited as `instance.backup_recipient_added`.
+
+**Auth:** instance administrator. **Request:**
+
+```json
+{"name": "ops-2026", "public_key": "age1q7x…m3k", "holder": "platform lead"}
+```
+
+**Response:** `201` with the key, as in the list.
+
+| Status | Condition |
+|--------|-----------|
+| `201` | Added. |
+| `400` | No name, or not an age public key. |
+| `401` | Missing authentication. |
+| `403` | Caller is not an instance administrator. |
+| `409` | The same public key is already a backup key. |
+| `500` | The write failed. |
+
+## `DELETE /api/v1/admin/instance/backups/recipients/{id}`
+
+Removes a backup key. Refused while a plan still encrypts to it — change the
+plan first, so no plan is left encrypting to nobody. Backups already made stay
+readable with the key's private half. Audited as
+`instance.backup_recipient_removed`.
+
+**Auth:** instance administrator. **Request:** no body. **Response:** `204`.
+
+| Status | Condition |
+|--------|-----------|
+| `204` | Removed. |
+| `401` | Missing authentication. |
+| `403` | Caller is not an instance administrator. |
+| `404` | No backup key with that id. |
+| `409` | A plan still uses the key; the message names it. |
+| `500` | The write failed. |
+
+## `GET /api/v1/admin/instance/backups/destinations`
+
+The off-site destinations: endpoint, bucket and prefix, the last connection
+test, how many bundles have a verified copy there and their size, and the
+plans that copy there. The secret access key is never returned.
+
+**Auth:** instance administrator. **Request:** no body. **Response:**
+
+```json
+{
+  "data": [
+    {"id": "bdst_…", "name": "r2", "kind": "s3", "endpoint": "https://acct.r2.cloudflarestorage.com", "region": "auto",
+     "bucket": "crewship-backups", "prefix": "prod", "access_key_id": "…", "path_style": false, "allow_private_network": false,
+     "last_test_at": "2026-09-30T08:00:00Z", "last_test_error": null, "created_by": "usr_…", "created_at": "2026-09-30T08:00:00Z",
+     "copies": 7, "copy_bytes": 9126805504, "last_verified_at": "2026-09-30T03:05:00Z", "used_by": ["Complete recovery"]}
+  ]
+}
+```
+
+| Status | Condition |
+|--------|-----------|
+| `200` | The list. |
+| `401` | Missing authentication. |
+| `403` | Caller is not an instance administrator. |
+| `500` | A read failed. |
+
+## `POST /api/v1/admin/instance/backups/destinations`
+
+Adds an S3-compatible destination. The endpoint must be https and public;
+`allow_private_network: true` also allows loopback and private (LAN)
+addresses and plain http, and the answer then carries a `warning` — cloud
+metadata and link-local addresses stay blocked either way. Unless
+`skip_test`, the server first puts, reads back and deletes one small object;
+when that fails it answers `422` and stores nothing. The secret access key is
+sealed with the server's vault key and never returned, logged or audited.
+Audited as `instance.backup_destination_added`. A plan names the
+destination's id in `destinations` (after `local`, which every plan has);
+each bundle it writes is then uploaded and counted as an off-site copy only
+once the upload is verified at the destination.
+
+**Auth:** instance administrator. **Request:**
+
+```json
+{"name": "r2", "endpoint": "https://acct.r2.cloudflarestorage.com", "region": "auto", "bucket": "crewship-backups",
+ "prefix": "prod", "access_key_id": "…", "secret_access_key": "…", "path_style": false, "allow_private_network": false}
+```
+
+**Response:**
+
+```json
+{"destination": {"id": "bdst_…", "name": "r2", "kind": "s3", "copies": 0, "used_by": []},
+ "test": {"ok": true, "error": null, "tested_at": "2026-09-30T08:00:00Z"}, "warning": null}
+```
+
+| Status | Condition |
+|--------|-----------|
+| `201` | Added. |
+| `400` | Incomplete or refused configuration (endpoint, bucket name, keys). |
+| `401` | Missing authentication. |
+| `403` | Caller is not an instance administrator. |
+| `409` | This server has no vault key to seal the secret with. |
+| `422` | The connection test failed; nothing was stored. |
+| `500` | The write failed. |
+
+## `POST /api/v1/admin/instance/backups/destinations/{id}/test`
+
+Tests a stored destination again (put, read back, delete one small object)
+and stores the outcome.
+
+**Auth:** instance administrator. **Request:** no body. **Response:**
+
+```json
+{"ok": false, "error": "offsite: connection test: upload: S3 PUT …: 403 AccessDenied", "tested_at": "2026-09-30T08:00:00Z"}
+```
+
+| Status | Condition |
+|--------|-----------|
+| `200` | Tested; `ok` says how it went. |
+| `401` | Missing authentication. |
+| `403` | Caller is not an instance administrator. |
+| `404` | No destination with that id. |
+| `500` | A read failed. |
+
+## `DELETE /api/v1/admin/instance/backups/destinations/{id}`
+
+Removes a destination and the server's records of the copies made there. The
+copies stay in the bucket. Refused while a plan copies there. Audited as
+`instance.backup_destination_removed`.
+
+**Auth:** instance administrator. **Request:** no body. **Response:** `204`.
+
+| Status | Condition |
+|--------|-----------|
+| `204` | Removed. |
+| `401` | Missing authentication. |
+| `403` | Caller is not an instance administrator. |
+| `404` | No destination with that id. |
+| `409` | A plan still copies there; the message names it. |
+| `500` | The write failed. |
+
+## `GET /api/v1/admin/instance/backups/incidents`
+
+Backup incidents, open ones first, newest first: one per plan and kind —
+`failed` (a run failed, was skipped or was interrupted twice), `incomplete`
+(a bundle with recorded gaps), `stale` (no good backup for longer than
+`stale_alert_hours`), `offsite` (an upload failed or did not verify), `drill`
+(a test restore failed or was partial). A repeat raises `count` and moves
+`last_at`; the next good run, or the condition clearing, resolves it.
+`plan_id` is null for runs made without a plan. Each incident is also an
+inbox item for every instance admin (see the backup guide).
+
+`?state=` is `open` or `resolved`; `?limit=` 1–500 (100 by default).
+
+**Auth:** instance administrator. **Request:** no body. **Response:**
+
+```json
+{
+  "data": [
+    {"id": "bin_…", "plan_id": "bp_…", "plan_name": "Complete recovery", "kind": "failed", "state": "open", "count": 3,
+     "first_at": "2026-09-28T03:00:20Z", "last_at": "2026-09-30T03:00:20Z", "resolved_at": null,
+     "message": "Complete recovery backup failed. Last successful backup: 72 hours ago.", "run_id": "br_…"}
+  ]
+}
+```
+
+| Status | Condition |
+|--------|-----------|
+| `200` | The list. |
+| `400` | `state` or `limit` out of range. |
+| `401` | Missing authentication. |
+| `403` | Caller is not an instance administrator. |
+| `500` | A read failed. |
+
+## `GET /api/v1/admin/instance/backups/recovery-sheet`
+
+A Markdown page (`text/markdown`, sent as a download) to keep off this server:
+where the bundles are (this server and every off-site destination), the
+backup keys' names, holders and fingerprints with their public keys, whether
+the vault keys ride in the recovery kit, the exact `crewship recover` and
+`crewship backup drill` commands for the newest instance bundle, the plans,
+and who the instance admins are. It holds no private key, vault key or
+password.
+
+**Auth:** instance administrator. **Request:** no body. **Response:** the
+Markdown text.
+
+| Status | Condition |
+|--------|-----------|
+| `200` | The sheet. |
+| `401` | Missing authentication. |
+| `403` | Caller is not an instance administrator. |
+| `500` | A read failed. |
+
+## `GET /api/v1/admin/instance/holds`
+
+The automations an instance restore left held, as an array. `routines`:
+schedules, routine schedules and recurring issues do not fire. `webhooks`:
+inbound webhooks answer `503`. `queue`: queued work, delayed routine runs and
+notification retries do not start. `all` holds all three. `count` and `detail`
+say what is held.
+
+**Auth:** instance administrator. **Request:** no body. **Response:**
+
+```json
+[
+  {"key": "queue", "reason": "instance restore", "count": 2, "detail": "2 queued work item(s) and 0 delayed routine run(s); notification retries paused", "created_at": "2026-09-30T09:40:00Z"},
+  {"key": "routines", "reason": "instance restore", "count": 14, "detail": "12 schedule(s) and 2 recurring issue(s) will not fire", "created_at": "2026-09-30T09:40:00Z"},
+  {"key": "webhooks", "reason": "instance restore", "count": 3, "detail": "3 inbound webhook(s) answer 503", "created_at": "2026-09-30T09:40:00Z"}
+]
+```
+
+| Status | Condition |
+|--------|-----------|
+| `200` | The holds (empty when nothing is held). |
+| `401` | Missing authentication. |
+| `403` | Caller is not an instance administrator. |
+| `500` | A read failed. |
+
+## `POST /api/v1/admin/instance/holds/resume`
+
+Resumes one held automation (`routines`, `webhooks`, `queue`, or `all`). It
+takes effect at once. The change and its instance audit entry
+(`instance.hold_resumed`) commit together.
+
+**Auth:** instance administrator. **Request:**
+
+```json
+{"key": "routines"}
+```
+
+**Response:**
+
+```json
+{"key": "routines", "resumed": true}
+```
+
+| Status | Condition |
+|--------|-----------|
+| `200` | Resumed. |
+| `400` | `key` is not routines, webhooks, queue or all. |
+| `401` | Missing authentication. |
+| `403` | Caller is not an instance administrator. |
+| `404` | That automation is not held. |
+| `500` | The write failed; nothing changed. |
+
 ## Instance administration
 
 These routes require **ADMIN or OWNER** (`manage` permission). The mutation

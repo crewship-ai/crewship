@@ -129,7 +129,9 @@ API puts exec *creation* under `/containers`, so `EXEC: 0` does not stop it.
 | `ImageInspect` | `GET /images/{name}/json` | Checks presence locally, reads baked-in env |
 | `ImageList` | `GET /images/json` | Finds cached provisioning images to reuse |
 | `ImageRemove` | `DELETE /images/{name}` | Garbage-collects unreferenced `crewship-cache:*` images |
-| `ImageTag` | `POST /images/{name}/tag` | Restores the local tag after a digest-pinned pull |
+| `ImageTag` | `POST /images/{name}/tag` | Restores the local tag after a digest-pinned pull, and a restored crew image's tag |
+| `ImageSave` | `GET /images/get` | Saves a crew's committed image into the backup environment store (complete environments) |
+| `ImageLoad` | `POST /images/load` | Loads a backed-up environment image back on restore |
 
 ### Networks and volumes — `NETWORKS: 1`, `VOLUMES: 1`
 
@@ -178,6 +180,12 @@ needs provisioning fails with a `403` on `POST /commit` (or on the build). If yo
 turn them on, be clear about what you are granting: `BUILD` lets the caller run
 arbitrary `RUN` steps against arbitrary base images, and `COMMIT` lets it turn any
 running container into an image. Both are opt-in for that reason.
+
+Backups that take **complete container environments** (plans or runs with
+*Complete environment*, see [Backup and restore](/guides/backup#complete-container-environments))
+commit each crew container to a temporary image before saving it, so they need
+`COMMIT: 1` as well. Without it those runs still write every crew's files and
+record the environment as not captured; files-only backups never commit.
 
 <Note>
 The BuildKit path behind a proxy is documented from the code, not from a live

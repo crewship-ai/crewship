@@ -1,0 +1,64 @@
+---
+title: "crewship recover"
+description: "Restore a whole Crewship instance from an instance backup into an empty data directory — offline, with every automation held."
+icon: "life-buoy"
+stability: experimental
+tag: Experimental
+---
+
+# crewship recover
+
+Restore a whole Crewship instance from an **instance bundle** (made by
+`crewship admin instance backups run --scope instance`, or a Complete recovery
+plan). Runs locally, with no server running and none started: it writes a data
+directory a server can then boot from. For a workspace or crew bundle use
+[`crewship backup restore`](/cli/backup#crewship-backup-restore); to prove a
+bundle restores without keeping the result, use
+[`crewship backup drill`](/cli/backup#crewship-backup-drill).
+
+```bash
+crewship recover --bundle crewship-instance-all-20260930T030000Z.tar.zst --identity ops.key --data-dir /var/lib/crewship
+crewship recover --bundle b.tar.zst --passphrase-file pass.txt --data-dir ./restored --force
+```
+
+What it does, in order:
+
+1. Verifies the bundle's checksum, then decrypts it with your key.
+2. Refuses a non-empty `--data-dir` unless `--force`.
+3. Writes the database and every file store — attachments and workspace files
+   (`output/`), memory and its version history (`memory/`), page projects
+   (`page-projects/`), chats and skills — checking each file against the
+   bundle's own index.
+4. Applies database migrations forward to this Crewship version, with the
+   recovery kit's keys in place (a migration keyed off `ENCRYPTION_KEY` run
+   under another key would write wrong data).
+5. Drops every sign-in session, clears locks and leases, rewrites the memory
+   version paths to the new data directory, and rotates the session signing
+   key (a new `NEXTAUTH_SECRET` in `<data-dir>/secrets.env`).
+6. Writes the recovery kit's vault keys to `<data-dir>/recovered-keys.env`
+   (mode `0600`) as `ENCRYPTION_KEY=…`, `ENCRYPTION_KEY_V2=…` lines, exactly as
+   the source had them. Give them to the server before it starts, move them
+   into your secret store, and delete the file. Without a kit in the bundle it
+   says plainly that credentials stay unreadable until you supply the original
+   keys.
+7. **Holds** routines and schedules, inbound webhooks (they answer `503`) and
+   queued work, so the restored server boots with nothing firing. Resume each
+   with `crewship admin instance holds resume <key>` once you have checked it.
+
+It prints a report — `ok`, `partial` (and every gap: files that did not match,
+missing attachment files or memory blobs the bundle recorded, locked
+credentials) or `failed` — and stores it in the restored database's restore
+history. Crew container files are kept under
+`<data-dir>/restore-staging/crews/`: there are no containers to land them in
+until the crews are started.
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--bundle` | `string` | | The instance bundle (required). |
+| `--identity` | `string` | | age identity file (`AGE-SECRET-KEY-1…`) that opens the bundle. |
+| `--passphrase-file` | `string` | | Read the passphrase that opens the bundle from a file. |
+| `--data-dir` | `string` | | Where to write the restored instance (required). Must be empty unless `--force`. |
+| `--force` | `bool` | `false` | Allow a non-empty data directory: its database is replaced and files the bundle carries are overwritten. |
+
+See [Instance backup and recovery](/guides/backup#instance-backup-and-recovery)
+for the recovery kit, the quiet window and holds.

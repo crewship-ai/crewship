@@ -36,14 +36,14 @@ Skip backups for **ephemeral development workspaces** (the dev VM rebuilds them 
 | **Scope** | `workspace` (the workspace row + every crew under it) or `crew` (a single crew + its agents). Crew bundles restore independently of their parent workspace, so a "move this crew to another workspace" is a viable migration path. |
 | **Format version** | Integer in `MANIFEST.format_version`. Compatibility guarantee is N-2 — a bundle produced on format v3 restores on v3, v4, and v5 servers. Bumped only when a migration changes the bundle layout itself (not the schema rows inside). |
 | **`restoreBackfill` hook** | Per-migration Go function — replay logic lives in `internal/backup/runner_restore.go` (`replayRestoreBackfills`). Runs when a bundle predates a migration and the restoring server has columns the source didn't. Pure `ADD COLUMN` migrations rely on the SQL DEFAULT; complex backfills (JSON shape changes, foreign keys) provide a hook so restored rows land sanely. |
-| **AGE encryption** | The bundle's payload is sealed with `filippo.io/age`. Default mode is passphrase (`scrypt`-derived key); `--recipient age1…` switches to X25519 public-key encryption for hand-offs. `--no-encrypt` produces a plaintext payload for test/CI use only. |
+| **AGE encryption** | The bundle's payload is sealed with `filippo.io/age`, always. Default mode is passphrase (`scrypt`-derived key); `--recipient age1…` switches to X25519 public-key encryption for hand-offs. `--no-encrypt` is refused for new bundles: vault secrets stay sealed, but agent home folders inside a bundle can hold credentials the vault never sealed (`~/.aws`, `~/.ssh`, tool logins). Older plaintext bundles still restore. |
 | **Passphrase keyring** | Opt-in cache at `~/.crewship/backup-keyring.enc` (AGE-encrypted with a single OS-keyring-stored key) so operators don't retype the passphrase on every `rotate` / `verify`. Enabled via `--use-keyring` on `create` / `restore`. |
 | **Advisory lock** | A row in the `backup_locks` table, primary-keyed on workspace ID. Taken before any DB dump or docker pause; released by `defer Release()` on the happy path. 1-hour TTL (`DefaultLockTTL`) so a crashed backup self-heals after the window. |
 | **`refuseIfBackupInProgress` guard** | A shared middleware wired into the assignments, peer-query, and webhook handlers. Reads the lock state and refuses *new* agent runs while a backup is in progress — closes the TOCTOU window between `ensureAgentsIdle` (initial check) and `docker pause` (the actual freeze). |
 | **Dry-run restore** | `--dry-run` on `crewship backup restore`. Decrypts, validates the manifest, replays the DB transaction, then rolls back. The only side effect is one `backup.restore.dry_run` audit row — distinct from `backup.restore` so auditors can tell "verified" apart from "actually restored". |
 | **`--as-workspace` / `--as-crew` rename** | Restore the bundle under a new slug instead of the original. Skips the docker phase — the crews it just created have no containers yet — and names the crews whose files are therefore not landed. Finish with `crewship crew start` then `crewship backup restore … --files-only`. Avoids "two `acme` workspaces colliding" during DR drills. |
 | **`--files-only` resume** | Step 3 of a renamed restore: lands per-crew container state (workspace, memory tree, named volumes, `/var/lib`) into crews that already exist, changing no database rows. Authorised by the `backup_restore_origins` row the rename wrote — the caller's workspace must be one this instance created by restoring **this** bundle, matched on payload digest. Resolves each bundle crew through that record, so it writes to the crew the rename created rather than the crew the manifest names. |
-| **Retention sweep** | `crewship backup rotate --keep-last N --keep-days D`. Per-workspace — never touches another workspace's bundles. Both flags can be combined; both must be positive. `--dry-run` lists what would be deleted without touching disk. |
+| **Retention sweep** | `crewship backup rotate --keep-last N --keep-days D`. Per-workspace — never touches another workspace's bundles. The N newest bundles are always kept, however old; `--keep-days` applies only beyond them, and pinned bundles are never deleted. `--dry-run` lists what would be deleted without touching disk. |
 | **Stale lock** | A lock whose holder process is dead but whose row still exists. Detected when `acquired_at + DefaultLockTTL < now()`. Auto-released on next `create`; manually clearable via `crewship backup unlock --force` (admin-only, with confirmation). |
 | **Pre-migration snapshot** | An automatic safety net distinct from the manual bundle system. Whenever `crewship start` detects pending migrations, `database.SnapshotBeforeMigrate` writes a `VACUUM INTO` copy of the live SQLite database to `<dbpath>.pre-migrate-vN-to-vM-<UTC>.bak` before any DDL runs. Last 10 snapshots are retained per database; opt out with `CREWSHIP_SKIP_MIGRATION_BACKUP=1`. **Not a substitute** for proper backups — it's the binary upgrade safety net, not a disaster-recovery primitive. |
 | **Memory-version blobs** | Workspace-scope bundles carry the `memory_versions` audit-trail rows (agent/crew/workspace/pins/learned tiers) — but a row is only a pointer. The actual content lives in a content-addressed blob store at `{MemoryRoot}/versions/<sha[:2]>/<sha>`. The bundle collects the blob for every row it dumps into a `memory-blobs/` section inside the SAME AGE-sealed payload as the DB dump, and restore writes them back to the target's blob root **and rewrites each row's `payload_ref`** to the target's path (it's an absolute path baked in at write time, not portable across instances as-is). A row whose blob is already missing on disk at backup time is skipped, not fatal — reported via `manifest.contents.memory_blobs_missing`. |
@@ -82,7 +82,7 @@ crewship-<scope>-<slug>-<iso-ts>.tar.zst
 ```
 
 - **Scope:** `workspace` (workspace row + all its crews) or `crew` (single crew + its agents).
-- **Encryption:** AGE passphrase (default) or AGE X25519 recipient. `--no-encrypt` produces a plaintext payload for test / CI use.
+- **Encryption:** AGE passphrase (default) or AGE X25519 recipient — every new bundle is encrypted, because agent home folders inside a bundle can hold credentials the vault never sealed (`~/.aws`, `~/.ssh`, tool logins).
 - **Default location:** `$CREWSHIP_DATA_DIR/backups/` on the server (mode `0700`), or `~/.crewship/backups/` when `CREWSHIP_DATA_DIR` is unset — the same root every other piece of per-instance state resolves against, so isolated instances on one host never share a bundle directory. `--output`/`output_dir` overrides it explicitly.
 - **Naming:** `crewship-<scope>-<slug>-<iso-ts>.tar.zst`. Collisions append `-<hash8>`.
 
@@ -105,6 +105,37 @@ This section is written under a shared lease on the page project store, held fro
 </Warning>
 
 From `format_version` 3 onward every per-crew inclusion flag in the manifest is derived from what the collector observed itself writing, not from what it expected to write. A section that captured nothing reports `false`, which is also what stops the restore preflight from demanding a provisioned container for a crew that has no data.
+
+### Attached files, and what a bundle records as missing
+
+Files attached to issues, comments and chats live on the host under the storage
+root, one content-addressed file per upload, outside the database and outside
+every crew container. A workspace bundle carries each one its `attachments`
+rows reference, in an `attachment-blobs/` section inside the encrypted payload.
+Bundles written before this section existed carried the rows and none of the
+files: restoring one lands attachments whose downloads fail.
+
+On restore each file is written back under the workspace the restored row
+belongs to — the new workspace on a `--as-workspace` fork — and its SHA-256 is
+checked before it is put in place. A file already at that path is never
+overwritten: identical bytes count as already present, different bytes are
+left alone and reported as a conflict.
+
+Nothing a bundle lacks is silent. When a file the rows reference is not on disk
+at backup time (or attachment storage is not configured), the backup still
+completes, and the manifest records it: `contents.attachments_included`,
+`contents.attachments_missing`, and `contents.incomplete` — one item per kind of
+gap (`attachment_missing`, `memory_blob_missing`, `container_missing` for a
+provisioned crew whose container was gone, `environment_failed` for a crew
+whose complete environment could not be captured), each with a count and a
+sentence. The restore response repeats them with what the restore itself found
+(`attachments_restored`, `attachments_already_present`, `attachments_missing`,
+`attachments_conflicts`, `incomplete`, and `environments` — each crew's
+environment `restored`, `rebuilt` or `skipped`), and a restore with any of
+them is recorded as `partial`, not `ok`.
+
+The section is additive, so it did not change the format version: an older
+server restores such a bundle exactly as before, rows without files.
 
 ### Which rows a bundle carries
 
@@ -150,7 +181,7 @@ crewship backup create \
   --recipient age1ql3z7hjy54pw3hyww5ayyfg7zqgvc7w3j2elw8zmrj2kg5sfn9aqmcac8p
 ```
 
-`--recipient`, `--passphrase-file`, and `--no-encrypt` are mutually exclusive.
+`--recipient` and `--passphrase-file` are mutually exclusive. `--no-encrypt` is refused: every new bundle is encrypted.
 
 ## Back up a single crew
 
@@ -449,7 +480,13 @@ crewship backup rotate --keep-last 10 --keep-days 30 --dry-run
 #   …
 ```
 
-`rotate` applies retention per workspace — it never touches another workspace's bundles. Either `--keep-last N` (bundles above the N newest are dropped) or `--keep-days D` (bundles older than D days are dropped) must be positive; both can be combined.
+`rotate` applies retention per workspace — it never touches another workspace's bundles, and crew bundles are counted separately from workspace bundles (and per crew), so one never pushes the other out. Either flag must be positive:
+
+- `--keep-last N` is a floor: the N newest bundles are always kept, however old they are. Beyond them, with no `--keep-days`, everything goes.
+- `--keep-days D` applies only beyond that floor: a bundle past the N newest is kept while it is younger than D days. With `--keep-days` alone the floor is one bundle — no rotation deletes the last copy.
+- A bundle pinned with `crewship admin instance backups pin <path>` is never deleted by rotation.
+
+Before 2026-09-30 a bundle was dropped when it was beyond N **or** older than D days, so a workspace whose backups had stopped for longer than D days lost every copy at the next rotation.
 
 `delete` requires interactive confirmation, or `--force` in scripts / CI. The same rule applies to `backup unlock`.
 
@@ -695,50 +732,647 @@ fine for the dozens-to-hundreds of samples a single host accumulates
 between restarts; not a general-purpose histogram. For long-horizon
 reporting, ingest the `backup.*` rows from `audit_log`.
 
-## Instance-scope backup
+## Instance backup and recovery
 
-An instance-scope backup bundles **every workspace** on a Crewship host
-plus the cross-workspace surfaces that make the install usable — the
-credstore, the auth signing secret, and the instance identity
-(`instance_config.hostname`). It is the disaster-recovery path for an
-entire host, not a normal operational tool.
+An **instance bundle** is the whole Crewship in one file: a page-level
+snapshot of the entire database, every file store (attachment and workspace
+files, memory and its version history, page projects, chats, skills — each
+file listed with its SHA-256), and every workspace's crew containers. It is
+the disaster-recovery path for a host: restore it offline into an empty data
+directory and boot a server from it.
 
-Key differences from workspace/crew scope:
+Only instance administrators can take, check or restore one (the
+`CREWSHIP_OWNER_EMAIL` owner, a named instance admin, or — while nobody is
+named — the owners of the oldest workspace). Every instance bundle is
+encrypted; age recipients are preferred over a passphrase.
 
-- **Access control.** Gated by the `CREWSHIP_OWNER_EMAIL` env var
-  (server-level OWNER), not workspace role. A workspace OWNER / ADMIN
-  on their own is refused with HTTP 403.
-- **Rate limit.** One instance backup per user per sliding hour. A
-  runaway cron cannot DoS the host.
-- **Encryption is recipient-only.** `--passphrase-file` is refused for
-  this scope — the surface is too broad (every workspace's secrets in
-  one blob) to trust a brute-forceable passphrase. Callers must supply
-  an AGE `age1…` X25519 public key and hold the matching private key
-  offline.
-- **Cross-host restores force session-key rotation.** The bundle records
-  the source hostname; a restore onto a different target invalidates
-  every existing JWE session to prevent source-host tokens from
-  remaining valid after DR.
+```bash
+# Take one now and wait for it
+crewship admin instance backups run --scope instance --recipient age1… --wait
 
-Full threat model, crypto chain, and operational checklist:
-[Security → Instance-Scope Backup Security](/security/backup-instance-security).
+# Prove its contents (proof level 2), then prove it restores (proof level 3)
+crewship admin instance backups check <path> --identity ops.key
+crewship backup drill --bundle <path> --identity ops.key --post
+
+# Disaster recovery on a new host, offline
+crewship recover --bundle <path> --identity ops.key --data-dir /var/lib/crewship
+crewship admin instance holds list
+crewship admin instance holds resume routines
+```
+
+### The quiet window
+
+Database and files must agree, so the copy is taken in a quiet window. The
+server first waits for running agent work to finish — up to two hours; a run
+that cannot drain is recorded as **skipped**, never forced. It then holds every
+write to protected data for the copy only: mutating requests answer `503`
+with `Retry-After` (the backup and instance-hold pages and sign-in stay
+usable), inbound webhooks answer `503`, schedules and queued work do not fire,
+and retention and garbage-collection sweeps wait. A hard cap of 20 minutes
+releases the hold and abandons the copy. The hold lives in memory only, so a
+crash mid-copy comes back with nothing held. Packing and encryption run
+**after** the hold is released; the run reports how long writes were held
+(`hold_ms`). Anything the bundle should hold and does not — attachment files
+missing from the storage root, memory versions without content, a provisioned
+crew whose container was gone, a vault key the server could not resolve — is
+recorded in `contents.incomplete`, never left out silently.
+
+### The recovery kit
+
+Credentials and other sealed values are encrypted with vault keys
+(`ENCRYPTION_KEY`, `ENCRYPTION_KEY_V2` …) that live in the environment, not
+the database, so a database backup alone restores credentials nobody can read.
+With the **recovery kit** on, every key version the database references rides
+inside each instance bundle's encrypted payload — never in a workspace or crew
+bundle:
+
+```bash
+crewship admin instance backups vault-keys          # versions, sealed values per version
+crewship admin instance backups recovery-kit on     # audited; off by default
+```
+
+<Warning>
+Whoever holds a private backup key can read every secret in the instance.
+Keep the age private key on a different device from the live `ENCRYPTION_KEY`.
+</Warning>
+
+### Recovering an instance
+
+[`crewship recover`](/cli/recover) runs with no server: it verifies the
+checksum, decrypts, refuses a non-empty data directory (unless `--force`),
+lands the database and every file store and checks each file against the
+bundle's index, applies migrations forward, drops every sign-in session,
+clears locks and leases, rotates the session signing key, and writes the
+kit's keys to `<data-dir>/recovered-keys.env` (mode `0600`) — or says plainly
+that credentials stay unreadable when the bundle has no kit. Its report
+(`ok`, `partial` with every gap, or `failed`) is printed and stored in the
+restored database's restore history.
+
+The restored server boots with automations **held**: routines and schedules
+do not fire, inbound webhooks answer `503`, queued work and notification
+retries do not start. Check the server, then resume each:
+`crewship admin instance holds resume routines|webhooks|queue|all` (audited).
+Crew container files are kept under `<data-dir>/restore-staging/crews/` until
+the crews exist to receive them, and complete container environments under
+`<data-dir>/restore-staging/environments/` until the server runs with Docker
+([landing them](#after-an-offline-recover)).
+
+### Proving a backup
+
+Three proofs, never collapsed into one flag:
+
+| Proof | How | What it shows |
+|---|---|---|
+| 1 · checksum | every new bundle | the file is the one that was written |
+| 2 · contents checked | `crewship admin instance backups check <path>` | decrypted, every section read, row counts and file digests match the manifest |
+| 3 · test restore | `crewship backup drill --bundle <path> --post` | restored in isolation; attachments open, memory loads, credentials unlock, journals verify, routines stay held |
+
+A drill runs the same restore as `crewship recover` into a throwaway directory
+with nothing started — no message sent, no webhook called, no model run paid
+for — and reports `ok`, `partial` (what failed) or `failed`. `--post` records
+it on the server. `crewship admin instance backups restore-checks <path>`
+answers space, format, runtime, unsafe host settings and conflicts before a
+restore.
+
+See [Instance-Scope Backup Security](/security/backup-instance-security) for
+the threat model and crypto chain.
+
+## Backup plans and scheduled runs
+
+A backup plan tells the server what to back up, when, for how long and who
+can open the bundles. Plans are instance-level and belong to instance
+administrators (Admin › Backups › Schedules, or
+`crewship admin instance backups plans`). Every run happens in the server's
+own backup service — never through an agent or a model.
+
+### Presets
+
+| Preset | What goes in | Default schedule |
+|---|---|---|
+| `complete` (Complete recovery) | The whole instance: every workspace, users, settings, the keys a restore needs, and complete container environments. | Data daily at 03:00, environments weekly (Sundays). |
+| `workspace` (Workspace backup) | The selected workspaces (none selected: every workspace) with every category. | Daily at 03:00. |
+| `custom` | Only the categories you choose, plus what they need to be restorable. | Daily at 03:00, keeps 3 checked and 7 daily copies. |
+
+A `complete` plan writes an **instance bundle** (see
+[Instance backup and recovery](#instance-backup-and-recovery)):
+its runs drain running work, hold writes for the copy only, and carry the
+vault keys when the recovery kit is on. Its environment runs also capture
+every crew's [complete container environment](#complete-container-environments).
+
+<Note>
+After `crewship recover`, a server boots with its schedules held. Scheduled
+and catch-up backup runs are then recorded as **skipped** ("scheduled backups
+are held") until `crewship admin instance holds resume routines` (or `all`):
+a scheduled run on a server nobody has checked yet would rotate the good
+pre-restore copies away. A manual run still starts, so you can back up the
+restored server whenever you choose.
+</Note>
+
+A custom backup never counts as protecting a workspace: the Overview judges
+protection by full backups only, and a plan's `counts_as_protection` says
+false. The categories and what each needs:
+
+| Category | Contents | Needs |
+|---|---|---|
+| `agents` | Crews, agents and their settings (members, skills, MCP bindings, hooks, notification channels, budgets) | — |
+| `memory` | Memory, the crew memory tree and memory version history with its content | `agents` |
+| `chats` | Chats and conversations | — |
+| `att` | Attachment files | `chats` |
+| `routines` | Routines, schedules and run history | `agents` |
+| `journal` | Journal and checkpoints | — |
+| `creds` | Credentials and integrations | `agents` |
+| `pages` | Pages and their files | — |
+| `files` | Crew working files (workspace, outputs, home and tools volumes) | — |
+| `env` | Complete container environments — follows the plan's environment mode, not the list | `files` |
+
+A memory-only plan therefore carries the crews and agents rows (the
+dependency), the memory tables, the crew memory trees and the memory version
+blobs — no chats, no issues, no container working files. Issues, inbox items
+and approvals have no category of their own and ride full backups only.
+`crewship admin instance backups plans preview --contents memory` shows the
+resolution before you save. The bundle's manifest records `kind: custom` and
+its categories, and a restore with `--replace` from a custom bundle is
+refused, because replacing would delete everything the bundle does not hold.
+
+### When plans run
+
+- **Timezone.** `time_of_day` is a wall-clock time in the plan's IANA
+  `timezone`, so 03:00 stays 03:00 across daylight-saving changes. Cadence is
+  `daily`, `weekly` (`weekday`, 0 = Sunday), `monthly` (`monthday`, or the
+  first Sunday when none is set) or `custom` with a five-field cron
+  expression, parsed the same way routine schedules are.
+- **Environments.** With `env_mode: complete`, `env_cadence` picks the runs
+  that also take complete environments: `every` run, `weekly` (Sundays) or
+  `monthly` (the first Sunday); a weekly or monthly plan takes them with every
+  run. Such a run (`environments: true`) captures each crew's
+  [complete environment](#complete-container-environments) together with its
+  files, and its `environments` phase says how many were captured and how
+  much of their image layers is new.
+- **One run per night, whatever happens.** The scheduler looks every 30
+  seconds. It records each due run and the plan's next run time in one
+  transaction, and the database refuses a second run for the same plan, due
+  time and workspace — a restart or a second server cannot run the same night
+  twice.
+- **Catch-up.** If the server was down over one or more due times, or reached
+  a due time more than ten minutes late, it runs **one** catch-up backup when
+  it is back (`trigger: catchup`), never one per missed night. The catch-up
+  takes environments if any missed night would have.
+- **Busy workspaces.** Before a run starts, the scheduler checks for agents
+  at work and routine runs in progress in its workspace. While busy, the run
+  waits (phase `busy_wait`) and looks again every `busy_retry_minutes` (15 by
+  default), up to `busy_wait_minutes` (120) after it was due. Still busy then,
+  it is recorded as `skipped` with the reason.
+- **One at a time.** One run executes at a time; the rest queue in order. A
+  plan over several workspaces makes one run per workspace.
+- **Retention.** After a good run the plan's keep rules apply to that plan's
+  own bundles in that workspace — `keep_min` newest copies are never aged
+  out, then the newest copy of each of the last `keep_daily` days,
+  `keep_weekly` weeks and `keep_monthly` months. Pinned bundles, manual
+  bundles and other plans' bundles are never touched.
+
+### Runs and their phases
+
+Every run is a row with its phases, shown in Backup history and by
+`crewship admin instance backups runs`:
+
+| Phase | What happens |
+|---|---|
+| `wait` | Only when the workspace was busy: how long the run waited, and why. |
+| `copy` | Crew files are read and the database rows dumped. |
+| `pack` | The payload is closed. It was encrypted as it was written: no unencrypted copy of it ever reaches the disk. |
+| `encrypt` | The last encrypted chunk is flushed and the bundle written. |
+| `pack` | The payload is closed. It was encrypted as it was written: no unencrypted copy of it ever reaches the disk. |
+| `encrypt` | The last encrypted chunk is flushed and the bundle written. |
+| `check` | The written bundle's checksum is verified (proof level 1). |
+| `off-site` | The bundle is uploaded to each off-site destination of the plan and counted only once the copy is verified there; `skipped` ("not configured") for a plan that keeps copies on this server only. |
+| `off-site` | The bundle is uploaded to each off-site destination of the plan and counted only once the copy is verified there; `skipped` ("not configured") for a plan that keeps copies on this server only. |
+| `environments` | Only on runs that take complete environments: `done` with the count and the size of their image layers, `failed` when a crew's environment could not be captured (its files are still in the bundle, and the run is `incomplete`), `skipped` with no crew container to capture. |
+
+A run ends `done`, `incomplete` (a bundle was written and its manifest names
+what it lacks), `failed`, `skipped` or `interrupted`. When the server stops in
+the middle of a run, the next start marks it `interrupted`, removes its
+partial bundle file and its staging (for an instance run, the staging
+directory and partial bundle too), and retries it **once**; the
+partial bundle file and its staging (for an instance run, the staging
+directory and partial bundle too), and retries it **once**; the
+interrupted row gets `retried_at` when the retry finishes, and a retry that is
+itself interrupted is not retried again.
+
+`crewship admin instance backups run` (or **Back up now**) starts a run at
+once. It answers with the run id immediately and the backup finishes on the
+server, so neither a closed browser tab nor the CLI's 30-second timeout
+cancels it. Without a plan, the recipients come from the plan that covers the
+same scope, unless you give `--recipient` or `--passphrase-file`; a
+passphrase stays in the server's memory until the run starts and is never
+stored. `--wait` follows the run to the end, and
+`crewship admin instance backups run-status <id>` shows one run. Every run —
+scheduled, catch-up or manual, instance or workspace — is the same kind of
+durable run, listed by `backups runs`.
+
+### Overview
+
+`crewship admin instance backups overview` (Admin › Backups › Overview)
+answers whether a restore would work, for the whole instance or selected
+workspaces:
+
+- **Verdict** — the weakest proof among the latest full backups of the
+  selection: `verified` (test restore passed), `partial` (a test restore, or
+  the bundle itself, found gaps), `failed`, `contents_checked`,
+  `checksum_only`, or `none`. The whole-instance view counts instance
+  backups only, so it says `none` until the first one is written, and tells you how many
+  workspaces have workspace backups.
+- **Status rows** — what is protected, how often, where, how long copies are
+  kept, and the last test restore. The off-site copy is not counted until one
+  has been uploaded and checked.
+- **Needs attention** — the latest backup's gaps per workspace (missing
+  attachment files, memory versions without content, crews without their
+  container), workspaces never or not recently backed up (the plan's
+  `stale_alert_hours`, 36 by default), workspaces on no plan, and failed,
+  skipped or late runs. The whole-instance view also says when the latest
+  instance backup cannot unlock credentials on a new server — the vault key
+  versions its sealed values use that its recovery kit does not carry (all of
+  them when the kit was off), read from the bundle's own manifest.
+- **Fourteen nights** — one mark per night: ok, late (a catch-up), skipped,
+  failed or no run, with the best proof reached that night.
+- **Space** — what backups use, the free and total space where they are
+  kept, the staging a new backup needs (twice the largest recent bundle of
+  the scope: the encrypted staging file and the finished bundle exist side by
+  side until the bundle is renamed into place) and the room a restore needs
+  (the largest bundle × 3: payloads compress about 3:1, and a restore stages
+  the decrypted payload).
+
+## Complete container environments
+
+A backup's crew files (the Quick, Standard and Full levels) are the chosen
+folders only: `/workspace`, the crew memory tree, `/output`, the home and
+tools volumes, and with Full `/var/lib`. Restoring them needs the crew's
+image to still exist — and Crewship builds crew images locally
+(`crewship-cache:*`), so a lost host loses them. A plan or run set to
+**Complete environment** (Admin › Backups › Schedules › Container
+environments, `env_mode: complete`, `--env-mode complete`) also captures each
+crew container's complete environment.
+
+### What is captured
+
+| Part | How |
+|---|---|
+| The image, **with the container's local changes** | The container is committed to a temporary image under the same pause as its files, the image is `docker save`d, and every file of that archive (layers, image config, manifests) is stored once by its sha256 in the environment store. The temporary image is removed. An image digest alone would not do: registries disappear, and crew images were never in one. |
+| Every volume and bind mount | The crew's standard mounts ride the bundle's existing sections (a complete environment raises Quick to Standard so the home and tools volumes are always in). Any other mount's content — another named volume, a host bind — rides `environments/<crew>/mounts/<n>/`. Regenerable caches under `/home/agent` stay excluded as they always were. |
+| The configuration to recreate it safely | From `docker inspect`: user, working directory, entrypoint and command, environment, labels, exposed ports, network mode, memory, CPU and PID limits, read-only root, dropped capabilities, security options that tighten, tmpfs mounts, extra hosts, init and restart policy. |
+| Architecture and runtime | The image's os/architecture/variant, the Docker version and API version it was captured on, and the container's OCI runtime. |
+| A consistent state | Before the pause the collector runs a flush: `sync`, or the crew's own command from the container label `crewship.backup.flush` (for example `redis-cli save`), with a 30 second limit. A failing flush is recorded and the pause still gives a crash-consistent copy. |
+
+**Not captured: what was only in memory.** A restored environment starts its
+processes fresh — a running shell, an open editor, an in-memory cache and any
+process state are gone. Services that keep data only in memory should declare
+a flush hook that writes it to disk.
+
+**Secrets.** Crewship never puts credentials in a crew container's
+environment: they are written per run to `/secrets` (a tmpfs) and to that
+run's exec environment, and neither is captured. Any environment variable
+whose name looks like a secret (`…TOKEN`, `…SECRET`, `…PASSWORD`,
+`…API_KEY`, `…ACCESS_KEY`, `…CREDENTIAL`, `…AUTH…`, `…SESSION…`) is left out
+of the configuration by name, and blanked in the committed image, whose config
+would otherwise carry the container's whole environment. The dropped names
+are recorded; their values never are.
+
+### Not carried over for safety
+
+These host-level settings are recorded, listed in the restore checks as **Not
+carried over for safety**, and restored switched **off** — turn each back on
+by hand after review:
+
+- a Docker socket mount (`docker.sock`, `containerd.sock`, `podman.sock`) — not mounted;
+- privileged mode;
+- host PID, network, IPC, UTS or user namespaces (host network falls back to the default bridge);
+- added capabilities (`cap_add`);
+- device mappings and GPU requests;
+- host path binds — the path is not bound again; its captured content comes back in a volume at the same place;
+- published host ports;
+- `seccomp`, `apparmor` or SELinux label profiles that switch confinement off.
+
+The binds Crewship adds to every crew itself (the sidecar binary and the
+entrypoint from its runtime directory) are not taken from the backup either:
+Crewship supplies them when it creates the crew container.
+
+### Shared layers and retention
+
+The store lives beside the bundles, in `<backups dir>/environments/`:
+`blobs/sha256/<hex>` holds each distinct blob once, `index/` one record per
+captured environment. Nightly captures of the same crew share every base
+layer, so a new capture adds only what changed. The database tracks which
+bundle needs which blob (`environment_blobs`, `bundle_environment_refs`);
+when retention or `crewship backup delete` removes a bundle, its references
+go and only blobs **no other bundle needs** are deleted. A capture in
+progress holds its blobs under a pending reference until its bundle is
+written, so a concurrent cleanup never takes them.
+
+The bundle itself carries each crew's record (`environments/<crew>.json`,
+encrypted with the rest of the payload) and its manifest lists the blob
+digests it needs (`contents.environments`, readable without the key so
+retention and off-site copies can work on it). With
+`CREWSHIP_BACKUP_ENV_INLINE=1` new bundles carry the layers inside the
+payload instead (`environment-blobs/`): self-contained, and larger. A bundle
+copied off-site without inline layers must take its blobs along; the off-site
+layer ships each shared blob once.
+
+### Restoring an environment
+
+Before anything changes, the restore checks
+(`crewship admin instance backups restore-checks`, Recovery › Checks) add one
+runtime check per environment:
+
+| Check | Result |
+|---|---|
+| Architecture matches this server's Docker, every layer is available | **restore** |
+| Built for another architecture | **rebuild**: the crew's data comes back, its environment is rebuilt from the crew image — we do not promise to run any old environment on any architecture |
+| Layers neither in the bundle nor in the store beside it | **rebuild**, same as above |
+| No Docker on this server | **skip**: the data comes back, the environment waits until Docker is there |
+
+The room the layers need counts toward the space check, and with a key the
+recorded unsafe settings are listed.
+
+A restore then loads each environment before its crew's containers are
+looked for: the archive is reassembled from the store and loaded into Docker.
+For a Crewship crew the image also gets its crew image tag back when this
+server has none, so Crewship recreates the crew container from the captured
+environment, with the runtime settings it manages. A container Crewship does
+not manage is recreated with the sanitized configuration, its volumes get
+their captured content, and it is started. Each environment is reported
+`restored`, `rebuilt` or `skipped` with the reason (the restore's
+`environments` field), and anything but `restored` makes the restore
+`partial`.
+
+### After an offline recover
+
+`crewship recover` runs without a server and usually without Docker, so for
+an instance bundle it only stages the environments: each workspace's records
+under `<data-dir>/restore-staging/environments/<workspace>.tar.zst` and the
+layers they need under `.../environments/blobs/`, copied from the store
+beside the bundle (or read from the bundle when it carries them inline). A
+missing layer is a warning in the recover report: that crew's data comes
+back, its environment is rebuilt. Once the recovered server runs with Docker:
+
+```bash
+crewship admin instance backups environments land --dry-run   # check each one
+crewship admin instance backups environments land             # load them
+```
+
+`POST /api/v1/admin/instance/backups/environments/land` loads every staged
+environment the same way a restore does, writes `landed.json` beside them,
+and records one instance audit entry. Crew files staged under
+`restore-staging/crews/` are still landed from a workspace bundle once the
+crews run.
+
+### Limits and the space floor
+
+`crewship admin instance backups settings set` (Admin › Backups › Storage)
+decides how hard a backup may push the server:
+
+| Limit | Default | Effect |
+|---|---|---|
+| Runs at once | 1 | The rest queue. |
+| CPU cores | 2 | Goroutines the compressor may use while packing. |
+| Disk MB/s | no limit | Caps writing the staging file and the bundle. One limit shared by every run. |
+| Upload MB/s | no limit | Caps off-site uploads. One limit shared by every upload. |
+
+Before a run starts, the server compares the room it needs (twice the largest
+recent bundle of the same scope) with the free space where bundles are kept.
+A run that would leave less than 10 % of the disk free does not start: it is
+recorded as `skipped` with the figures, and an incident is raised. A host
+whose disk is shared with other data can move the floor with
+`CREWSHIP_BACKUP_MIN_FREE_PERCENT` (0–50).
+
+Staging is encrypted before it touches disk: the payload streams through the
+compressor and the age encryption straight into one staging file, whose
+checksum and size are counted on the way. That file is removed after the run,
+and at the next start after a crash, together with an interrupted instance
+run's staging directory. (An instance run's consistent copy — the database
+snapshot and file stores taken inside the quiet window — is itself a copy of
+the live data and is staged as is, inside the backups directory, until it is
+packed.)
+
+### Incidents and alerts
+
+When a backup goes wrong, the people who run the server hear about it — the
+**instance admins**, never workspace owners who may not administer the
+instance. One incident per plan and kind:
+
+| Kind | Raised when | Resolved when |
+|---|---|---|
+| `failed` | A run failed, was skipped (busy too long, not enough space) or was interrupted twice. | The plan's next good run. |
+| `incomplete` | A run wrote a bundle with recorded gaps. | The next run without gaps. |
+| `stale` | The plan's newest good backup is older than `stale_alert_hours` (36). | A good run. |
+| `offsite` | An upload failed or did not verify. | The next verified upload. |
+| `drill` | A recorded test restore failed or was partial. | A drill that passes. |
+
+A repeat raises the incident's count instead of opening another. Each instance
+admin gets **one inbox item** per incident, in their primary workspace (the
+oldest they own or administer, else the oldest they belong to) and visible to
+them alone: "Backup needs attention · Complete recovery backup failed. Last
+successful backup: 32 hours ago." with **View failure** and **Retry**. A
+repeat refreshes the same item and marks it unread; resolving the incident
+resolves the item. The item routes under the `system.health` notification
+category, so each admin's own channels — email, Slack, Telegram and the rest,
+per their notification preferences — carry it too. An instance admin who
+belongs to no workspace has no inbox; they see incidents under Admin ›
+Backups and with `crewship admin instance backups incidents`. Which kinds are
+delivered is chosen under Keys & alerts (`--alerts`); the others are still
+recorded.
+
+When the server itself is down its inbox is down too, so set a **heartbeat**:
+a public https URL (a healthchecks-style service) the server pings after
+every good run, with a 10-second timeout and one retry, never delaying the
+run. The outside service alerts when the pings stop. The last ping's time and
+outcome show in the settings.
+
+### Backup keys and the recovery sheet
+
+Backups are encrypted to **backup keys**: age public keys registered with
+`crewship admin instance backups recipients add` (Keys & alerts). Plans name
+them in `recipient_ids`. The private halves never reach the server; keep two
+keys held by different people, so one lost key is not a lost backup. A key a
+plan still uses cannot be removed.
+
+`crewship admin instance backups recovery-sheet` (the **Recovery sheet**
+download under Keys & alerts) prints a Markdown page to keep off the server:
+where the bundles are, the keys' names and fingerprints, whether the vault
+keys ride in the recovery kit, the exact `crewship recover` and
+`crewship backup drill` commands, the plans and the instance admins. It holds
+no secret.
 
 ## Admin UI
 
-A Backups tab lives in `/admin` for OWNER / ADMIN users. It wraps the
-same REST endpoints the CLI drives and adds:
+Admin › Data › **Backups** is for instance administrators. It folds out six
+pages in the Admin sidebar, each deep-linkable as
+`/admin?tab=backups&section=<page>`:
 
-- A status banner for the advisory lock (who holds it, TTL remaining).
-- Create / restore dialogs with passphrase input (no keyring — the
-  keyring is a CLI-side convenience; the browser never sees
-  `~/.crewship/`).
-- An inspect panel that renders the plaintext manifest without
-  decrypting the payload (same as `crewship backup inspect`).
-- A bundle list with size, scope, format version, and created-at,
-  fetched via `hooks/use-backups.ts`.
+| Page | What it answers |
+|---|---|
+| Overview | What is protected, how often, where, for how long, and whether a restore really worked — three separate proofs (checksum, contents checked, test restore), never one "restorable" flag. Warns while every copy sits on this server. |
+| Backup history | Every run, its phases, and how far each backup is proven. Pin, check contents, download, or start a restore from a run. |
+| Schedules | Backup plans: a preset (Complete recovery, Workspace backup) or a custom choice that keeps its dependencies, when it runs, a calendar of done and planned runs, and how many copies are kept. |
+| Storage | Where copies live, the room a run and a restore need, and the limits a backup runs under. |
+| Recovery | A guided restore: backup, target, keys, checks, dry run, restore, then resume what stayed held. A whole-instance restore runs from the CLI (`crewship recover`). |
+| Keys & alerts | The AGE public keys backups are encrypted to, the vault key versions restored secrets need, and who hears when a backup goes wrong. |
 
-The UI does **not** expose instance-scope operations — they remain
-CLI + env-gated to reduce blast radius from a compromised admin session.
+A strip above each page chooses **Whole instance** or **Selected
+workspaces**; the choice is kept in the URL. Admin › Data › **Data
+retention** sets how long each kind of live data is kept per workspace, and
+shows a dry run of what a change overwrites before it is saved.
+
+Pages whose server endpoints have not shipped yet say "Not available on this
+server yet" rather than showing figures. Overview, Backup history and
+Schedules read the plans, runs and overview endpoints described in
+[Backup plans and scheduled runs](#backup-plans-and-scheduled-runs); checks,
+downloads and workspace restores go through the existing backup endpoints.
+
+## Off-site destinations
+
+A backup that exists only on the server it protects does not survive losing
+that server. Off-site destinations copy finished bundles to object storage.
+The first destination type is **S3-compatible storage**: AWS S3, Cloudflare
+R2, Backblaze B2 (S3 API), Wasabi and MinIO. Google Drive is planned later.
+
+| Setting | Meaning |
+|---|---|
+| Endpoint | The service URL, for example `https://s3.eu-central-1.amazonaws.com` or `https://<account>.r2.cloudflarestorage.com`. `https://` only, unless private network access is allowed. |
+| Region | The signing region. Empty means `us-east-1`; R2 uses `auto`. |
+| Bucket, prefix | Where copies go. The prefix (for example `crewship/prod`) keeps several servers apart in one bucket. |
+| Access key | An access key ID and secret. The secret is sealed with the server's vault key and never returned or logged. |
+| Path-style addressing | Address the bucket as `endpoint/bucket` instead of `bucket.endpoint`. MinIO and most self-hosted stores need it; so does a bucket name with dots. |
+| Allow private network | Lets the endpoint be a loopback or LAN address (a MinIO on `192.168.x.x`) and permits plain `http://` for it. Off by default. Cloud metadata and link-local addresses stay blocked even when it is on. |
+
+How a copy is made:
+
+- **Only finished bundles move.** Bundles are encrypted before they leave the
+  server; the store never sees plaintext or keys.
+- **A copy counts only after it is checked.** After the upload, the server
+  reads the object's size and stored SHA-256 back from the store and compares
+  them with the local bundle. A stronger mode also downloads the copy and
+  hashes it. A copy that fails the check is deleted and reported, never
+  counted.
+- **Large bundles upload in 64 MiB parts.** A failed or cancelled upload is
+  aborted so no half-written parts stay billed in the bucket.
+- **Transient errors retry.** Server errors, throttling and timeouts retry
+  with backoff; permission errors do not.
+- **Uploads respect the upload limit** set under Storage, so a nightly copy
+  does not saturate the server's link.
+- **Connection test.** Saving a destination writes, checks and deletes one
+  small object first, and nothing is stored when that fails; the error names
+  the step that failed (upload, check or delete) so a missing bucket
+  permission is obvious.
+- **Retention reaches the bucket.** When a plan's keep rules remove a local
+  bundle, its off-site copies are deleted with it.
+
+Add a destination under Admin › Backups › Storage (**Add S3-compatible
+storage**) or with the CLI, then name it in a plan's destinations (Schedules ›
+Where):
+
+```bash
+crewship admin instance backups destinations add --name r2 \
+  --endpoint https://<account>.r2.cloudflarestorage.com --region auto \
+  --bucket crewship-backups --prefix prod --access-key-id <id> --secret-file r2.secret
+crewship admin instance backups plans update bp_… --destination local --destination bdst_…
+```
+
+Instance bundles land under `instance/` and workspace bundles under
+`workspaces/<workspace id>/` below the prefix. The Overview's **Where** row
+names the destinations, and the "Local copy only" warning disappears once
+every recent backup of the selection has a verified off-site copy. A failed
+upload leaves the local bundle as it is, marks the run's `off-site` phase
+failed and raises an `offsite` incident.
+
+## Off-site destinations (upcoming)
+
+<Note>
+Off-site copies are not configurable yet: there is no endpoint, CLI command
+or Storage page field for them in this release. This section describes the
+transfer layer that has landed in the server so the rules are known before
+the configuration arrives.
+</Note>
+
+A backup that exists only on the server it protects does not survive losing
+that server. Off-site destinations copy finished bundles to object storage.
+The first destination type is **S3-compatible storage**: AWS S3, Cloudflare
+R2, Backblaze B2 (S3 API), Wasabi and MinIO. Google Drive is planned later.
+
+| Setting | Meaning |
+|---|---|
+| Endpoint | The service URL, for example `https://s3.eu-central-1.amazonaws.com` or `https://<account>.r2.cloudflarestorage.com`. `https://` only, unless private network access is allowed. |
+| Region | The signing region. Empty means `us-east-1`; R2 uses `auto`. |
+| Bucket, prefix | Where copies go. The prefix (for example `crewship/prod`) keeps several servers apart in one bucket. |
+| Access key | An access key ID and secret. They will be stored as a vault credential and never logged. |
+| Path-style addressing | Address the bucket as `endpoint/bucket` instead of `bucket.endpoint`. MinIO and most self-hosted stores need it; so does a bucket name with dots. |
+| Allow private network | Lets the endpoint be a loopback or LAN address (a MinIO on `192.168.x.x`) and permits plain `http://` for it. Off by default. Cloud metadata and link-local addresses stay blocked even when it is on. |
+
+How a copy is made:
+
+- **Only finished bundles move.** Bundles are encrypted before they leave the
+  server; the store never sees plaintext or keys.
+- **A copy counts only after it is checked.** After the upload, the server
+  reads the object's size and stored SHA-256 back from the store and compares
+  them with the local bundle. A stronger mode also downloads the copy and
+  hashes it. A copy that fails the check is deleted and reported, never
+  counted.
+- **Large bundles upload in 64 MiB parts.** A failed or cancelled upload is
+  aborted so no half-written parts stay billed in the bucket.
+- **Transient errors retry.** Server errors, throttling and timeouts retry
+  with backoff; permission errors do not.
+- **Uploads respect the upload limit** set under Storage, so a nightly copy
+  does not saturate the server's link.
+- **Connection test.** Saving a destination will write, check and delete one
+  small object, and the error names the step that failed (upload, check or
+  delete) so a missing bucket permission is obvious.
+
+## Compatibility
+
+**The promise:** every supported backup remains recoverable through the
+current recovery tooling, directly or through maintained converters.
+
+Precisely:
+
+- **Supported** means every bundle Crewship has ever written, from
+  `format_version` 1 on. The oldest recoverable version is 1 and it is never
+  raised.
+- **Directly:** the current `restore`, `verify` and `inspect` read the
+  current `format_version` and the two before it (today 1 to 3).
+- **Through converters:** `crewship backup convert` turns a bundle from any
+  older version into one at the current version, one step per version. When
+  `restore`, `verify` or `inspect` meet a bundle older than they read
+  directly, they print the exact `convert` command for it instead of
+  failing with nothing to do.
+- **Recoverable** means everything the bundle actually contains comes back.
+  Data an older version never collected cannot be invented; the converter
+  names it in its report, and the converted manifest keeps the list.
+- A converted bundle is a **new file**. The original is only read, so it
+  can be kept as it is.
+
+What each step does today:
+
+| Step | Converts | Reports as not recoverable |
+|------|----------|----------------------------|
+| v1 → v2 | Sets `scope_level` to `standard` when absent (what bundles collected before presets existed). Keeps `schema_migration_versions`, so restore still replays backfills for newer migrations. The payload is unchanged: v2 changed restore rules, not the layout. | v1 dumped a fixed list of 10 tables (users, workspaces, crews, agents, skills, agent skills, crew members, chats, agent MCP bindings, journal entries). Issues, issue comments, credentials, memory versions, workspace files and members, routines, inbox items and pages were never in a v1 bundle. |
+| v2 → v3 | Sets `memory_included`, `output_included` and `crew_files_included` per crew from what the payload really holds. Before v3, `memory_included` was set without looking and described `/output`; the converted bundle still restores that `/output` section. | v1 and v2 bundles never contained `/crew`, the agents' and crews' memory trees (`.memory`). That memory cannot be recovered from them. |
+
+The report also warns when a bundle predates per-table row counts (its
+completeness cannot be verified; the converter does not invent counts) and
+when it has memory-version rows but no memory-blobs section.
+
+Keys: converting needs the key that opens the bundle, `--identity` or
+`--passphrase-file`. The converted bundle is sealed to the same age
+recipients, or the same passphrase, unless `--recipient` names new ones. A
+legacy unencrypted bundle is converted only with a `--recipient`, because
+new bundles are always encrypted. The payload is decrypted as a stream and
+never written to disk in plaintext.
+
+How it is kept true: CI restores a small fixture bundle for every format
+version on every run, converting it first when it is older than current,
+and checks that the workspace, crew, agent, issue and comment, journal
+entry, credential and memory version come back and that the crew file
+sections are in the bundle for the docker phase to land. A change to
+the bundle format cannot merge without a converter step from the previous
+version and a fixture for the new one; tests fail until both exist.
 
 ## Known caveats (v0.2 roadmap)
 
@@ -747,13 +1381,16 @@ The following items are intentionally deferred to v0.2. They do
 **not** block production use but are worth knowing.
 </Note>
 
-- **`preBackup` / `postBackup` hooks** — no user-defined hooks yet. If
-  your workspace has services that need an app-level flush, run them
-  manually before invoking `crewship backup create`.
+- **`preBackup` / `postBackup` hooks** — no general user-defined hooks
+  yet. A crew can declare a pre-pause flush command with the container
+  label `crewship.backup.flush`; it runs only for backups that take
+  [complete container environments](#complete-container-environments).
+  Otherwise run an app-level flush manually before
+  `crewship backup create`.
 - **Remote backends (S3 / B2 / GCS)** — bundles live on the server's
-  local disk only. The storage layer is now abstracted behind a
-  `StorageOps` interface so a future backend swap won't require a
-  second refactor of every call-site. Today: use `scp` / `rclone` /
+  local disk only. The S3-compatible transfer layer has landed but is not
+  configurable yet (see [Off-site destinations](#off-site-destinations-upcoming)).
+  Today: use `scp` / `rclone` /
   `restic` to ship bundles off-box, or stream a single bundle via
   `GET /api/v1/admin/backups/download`.
 - **Scheduled backups** — no built-in scheduler. Wrap `crewship backup
@@ -791,8 +1428,8 @@ Restore takes the advisory lock but a running `crewshipd` may still hold open ha
 A bundle written by format v5 will restore on v5, v6, and v7 servers; v8 onward, the compatibility window has rolled past it. If you're restoring from cold storage that's been sitting for a year+, verify the manifest's `format_version` against the destination first with `crewship backup inspect`.
 </Accordion>
 
-<Accordion title="--recipient / --passphrase-file / --no-encrypt are mutually exclusive">
-Passing two raises a CLI error rather than silently picking one. A bundle encrypted with `--recipient age1…` will not decrypt with a passphrase, and vice versa — match the restore flag to the original create flag.
+<Accordion title="--recipient and --passphrase-file are mutually exclusive; --no-encrypt is refused">
+Passing both raises a CLI error rather than silently picking one, and `--no-encrypt` is refused outright — every new bundle is encrypted. A bundle encrypted with `--recipient age1…` will not decrypt with a passphrase, and vice versa — match the restore flag to the original create flag.
 </Accordion>
 
 <Accordion title="Same-slug restore refuses by default">
@@ -818,7 +1455,8 @@ This is load-bearing — agents pull credentials from `/secrets` at runtime via 
 
 ## Security notes
 
-- The `/secrets` mount is **never** included in a bundle.
+- The `/secrets` mount is **never** included in a bundle, and vault secrets stay sealed inside it.
+- Agent home folders **are** included, and they can hold credentials the vault never saw — `~/.aws`, `~/.ssh`, CLI tool logins. That is why every new bundle is encrypted and `--no-encrypt` is refused.
 - The workspace bind mount (user code), the per-crew and crew-shared memory trees under `/crew` (v3 bundles and above), and the workspace-tier memory-version blob store (`memory_versions` content, workspace scope only) are all included. AGE encryption of the payload is the only defence against leakage from physical bundle distribution — treat bundles like any other backup of your source tree.
 - Every `backup.*` event writes to `audit_log` with user, role, scope, sealed-payload SHA-256, and size. Dry-run restores write `backup.restore.dry_run` so auditors can tell rehearsals from real cutover.
 
@@ -905,6 +1543,47 @@ Tools like `sqlite3` open it directly for inspection.
 **Use both.** Pre-migration snapshots cover binary upgrades; `crewship
 backup` covers DR, host migration, legal hold, and forensic
 preservation. They are not interchangeable.
+
+## Data retention
+
+Backups keep what existed when they were taken; retention decides how long
+the live database keeps it. Each workspace has nine windows, in days or
+forever, and a daily sweep deletes what falls outside them:
+
+| Window | Default |
+|--------|---------|
+| Routine runs (the last 10 per routine always stay) | 90 days |
+| Decided approvals | 90 days |
+| Workspace audit log | forever |
+| Credential reads | 90 days |
+| Memory version history | 30 days |
+| Page panel values (the newest always stays) | 7 days |
+| Resolved and read, non-blocking inbox items | forever |
+| Idle chats that hold no open work | forever |
+| Decided Keeper requests | forever |
+
+Open work is never swept: an unread or blocking inbox item, a pending or
+escalated Keeper request, a request backing a live credential lease, and a
+chat with a delegation, an unanswered escalation, an unresolved reply, a
+pending approval, an unfinished routine run or a recent access grant all
+stay, however old.
+
+An instance administrator sets the windows for one, several or all
+workspaces in **Admin › Data retention** or with
+`crewship admin instance retention set`. Before anything is saved, the
+preview says how many rows the next sweep would delete. "All workspaces"
+means every workspace that exists now; what a workspace created later starts
+with is a separate setting (`crewship admin instance retention defaults set`)
+that touches no existing data. Saving
+deletes nothing by itself; the next sweep does, and bundles taken before still
+hold what it removes. So a shorter window is safe to try only if your backups
+reach back far enough.
+
+The server also applies fixed limits nobody sets, such as journal compaction
+after 30 days, webhook receipts, delivered work bodies and page build history.
+`crewship admin instance retention get` lists them. See the
+[Admin API reference](/api-reference/admin)
+for every window's exact rule.
 
 ## Related
 
