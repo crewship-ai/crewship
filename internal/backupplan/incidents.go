@@ -6,13 +6,15 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"os"
+	"strconv"
 	"strings"
 	"time"
 )
 
 // Incident kinds: one open incident per (plan, kind).
 const (
-	IncidentFailed     = "failed"     // a run failed, was skipped, or was interrupted without a retry
+	IncidentFailed     = "failed"     // a run failed, was skipped SkipAlertAfter times in a row, or was interrupted without a retry
 	IncidentIncomplete = "incomplete" // a run wrote a bundle with recorded gaps
 	IncidentStale      = "stale"      // the plan's newest good backup is older than stale_alert_hours
 	IncidentOffsite    = "offsite"    // an off-site copy could not be made or verified
@@ -206,6 +208,70 @@ func ListIncidents(ctx context.Context, db *sql.DB, f IncidentFilter) ([]Inciden
 		}
 	}
 	return out, nil
+}
+
+// SkipAlertAfter is how many skipped runs in a row (of one plan, for one
+// workspace or the instance) raise the plan's "failed" incident. A single
+// skip — one night the server stayed busy — shows in Backup history and the
+// nights strip without paging anyone; the second in a row does.
+// SkipAlertAfterEnv overrides it (1-30).
+const SkipAlertAfter = 2
+
+// SkipAlertAfterEnv names the override of SkipAlertAfter.
+const SkipAlertAfterEnv = "CREWSHIP_BACKUP_SKIP_ALERT_AFTER"
+
+func skipAlertAfter() int {
+	if raw := strings.TrimSpace(os.Getenv(SkipAlertAfterEnv)); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil && n >= 1 && n <= 30 {
+			return n
+		}
+	}
+	return SkipAlertAfter
+}
+
+// consecutiveSkips counts the newest finished runs of the plan for the same
+// workspace ("" for an instance run) that ended skipped, stopping at the
+// first that did not. planID "" is runs made without a plan. Runs still in
+// progress are passed over.
+func consecutiveSkips(ctx context.Context, db *sql.DB, planID, workspaceID string) int {
+	q := `SELECT status FROM backup_runs WHERE plan_id = ? AND COALESCE(workspace_id, '') = ? AND status <> 'running'
+		ORDER BY COALESCE(ended_at, started_at) DESC, rowid DESC LIMIT 100`
+	args := []any{planID, workspaceID}
+	if planID == "" {
+		q = `SELECT status FROM backup_runs WHERE plan_id IS NULL AND COALESCE(workspace_id, '') = ? AND status <> 'running'
+		ORDER BY COALESCE(ended_at, started_at) DESC, rowid DESC LIMIT 100`
+		args = []any{workspaceID}
+	}
+	rows, err := db.QueryContext(ctx, q, args...)
+	if err != nil {
+		return 0
+	}
+	defer rows.Close()
+	n := 0
+	for rows.Next() {
+		var status string
+		if rows.Scan(&status) != nil || status != StatusSkipped {
+			break
+		}
+		n++
+	}
+	return n
+}
+
+// SkipReason is why a run was skipped, in the words the incident uses:
+// "writes did not drain", "not enough space", "backups are held" or
+// "workspace busy".
+func SkipReason(msg string) string {
+	m := strings.ToLower(msg)
+	switch {
+	case strings.Contains(m, "writes did not drain"):
+		return "writes did not drain"
+	case strings.Contains(m, "not enough disk space"), strings.Contains(m, "not enough space"):
+		return "not enough space"
+	case strings.Contains(m, "held"):
+		return "backups are held"
+	}
+	return "workspace busy"
 }
 
 // lastGoodRun is when the plan's newest done (or incomplete) run ended; nil

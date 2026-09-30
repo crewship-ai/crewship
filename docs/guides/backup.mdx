@@ -1269,7 +1269,8 @@ Before a run starts, the server compares the room it needs (twice the largest
 recent bundle of the same scope) with the free space where bundles are kept.
 A run that would leave less than 10 % of the disk free does not start: it is
 recorded as `skipped` with the figures and what to do, and an incident is
-raised. The refusal is not silent anywhere: the run's reason in Backup
+raised when it happens a second time in a row (see
+[Incidents and alerts](#incidents-and-alerts)). The refusal is not silent anywhere: the run's reason in Backup
 history, the first Needs attention item on the Overview (with a link to
 Storage), the Space card ("New backup runs will not start") and
 `crewship admin instance backups overview` all say it.
@@ -1317,12 +1318,21 @@ instance. One incident per plan and kind:
 
 | Kind | Raised when | Resolved when |
 |---|---|---|
-| `failed` | A run failed, was skipped (busy too long, not enough space) or was interrupted twice. | The plan's next good run. |
+| `failed` | A run failed or was interrupted twice, or the plan's runs were **skipped twice in a row** (for the same workspace, or the instance). The message says why: "Nightly backup skipped 2 times: writes did not drain" — or `workspace busy`, `not enough space`, `backups are held`. | The plan's next good run. |
 | `incomplete` | A run wrote a bundle with recorded gaps. | The next run without gaps. |
 | `stale` | The plan's newest good backup is older than `stale_alert_hours` (36). | A good run. |
 | `offsite` | An upload failed or did not verify. | The next verified upload. |
 | `drill` | A recorded test restore failed or was partial. | A drill that passes. |
 | `drill` (reminder) | No test restore for longer than `drill_reminder`: weekly (7 days) or monthly (31 days, the default). Counts from the oldest backup when none was ever drilled; nothing is raised while no backup exists. One instance-wide incident, not per plan. | Any recorded drill (`crewship backup drill --post`, or a drill recorded under Recovery), or `drill_reminder` set to `off`. |
+
+A single skipped run pages nobody: one night the server stayed busy, or the
+writes in progress did not drain in time, is shown as `skipped` with its reason
+in Backup history, as a skipped night in the Overview's nights strip and as a
+Needs attention item — and the next night usually runs. The second skipped run
+in a row raises the incident (set `CREWSHIP_BACKUP_SKIP_ALERT_AFTER` on the
+server, 1–30, to change how many; `1` pages on every skip), and a plan that
+keeps skipping past `stale_alert_hours` also raises `stale`. A good run
+resolves both and starts the count over.
 
 The reminder's message names the command to run, for example "No test
 restore in 32 days — run `crewship backup drill --bundle <newest bundle>

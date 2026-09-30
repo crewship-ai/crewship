@@ -2256,7 +2256,8 @@ copies stay in the bucket. Refused while a plan copies there. Audited as
 ## `GET /api/v1/admin/instance/backups/incidents`
 
 Backup incidents, open ones first, newest first: one per plan and kind —
-`failed` (a run failed, was skipped or was interrupted twice), `incomplete`
+`failed` (a run failed or was interrupted twice, or the plan's runs were
+skipped twice in a row — a single skip raises nothing), `incomplete`
 (a bundle with recorded gaps), `stale` (no good backup for longer than
 `stale_alert_hours`), `offsite` (an upload failed or did not verify), `drill`
 (a test restore failed or was partial). A repeat raises `count` and moves

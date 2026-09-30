@@ -385,8 +385,9 @@ func TestService_SpaceFloorRefusesARun(t *testing.T) {
 				if len(h.exec.calls()) != 0 {
 					t.Fatal("the executor ran anyway")
 				}
-				if inc := incidentsOf(t, h); len(inc) != 1 || inc[0].Kind != IncidentFailed || !strings.Contains(inc[0].Message, "did not run") {
-					t.Fatalf("incident = %+v", inc)
+				// One skip is visible (the run row) but pages nobody.
+				if inc := incidentsOf(t, h); len(inc) != 0 {
+					t.Fatalf("a single skip raised an incident: %+v", inc)
 				}
 				return
 			}
