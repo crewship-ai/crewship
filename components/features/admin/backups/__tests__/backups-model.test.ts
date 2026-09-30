@@ -142,7 +142,7 @@ describe("scope in the URL", () => {
 describe("formatting", () => {
   it("never phrases a partial test restore up", () => {
     expect(verdictHeadline("partial")).toEqual({ text: "Partial restore verified", tone: "warn" })
-    expect(verdictHeadline("contents_checked").text).toBe("Contents checked, never restored")
+    expect(verdictHeadline("contents_checked").text).toBe("Latest backup: contents checked, not test-restored yet")
     expect(proofLabel(3, "partial")).toBe("test restore · partial")
     expect(proofLabel(3, "ok")).toBe("test restore")
     expect(proofLabel(0)).toBe("—")

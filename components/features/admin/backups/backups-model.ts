@@ -835,8 +835,8 @@ export function verdictHeadline(v: RestoreVerdict): { text: string; tone: Tone }
     case "verified": return { text: "Restore verified", tone: "ok" }
     case "partial": return { text: "Partial restore verified", tone: "warn" }
     case "failed": return { text: "Test restore failed", tone: "bad" }
-    case "contents_checked": return { text: "Contents checked, never restored", tone: "warn" }
-    case "checksum_only": return { text: "Checksum only, never restored", tone: "warn" }
+    case "contents_checked": return { text: "Latest backup: contents checked, not test-restored yet", tone: "warn" }
+    case "checksum_only": return { text: "Latest backup: checksum only, not test-restored yet", tone: "warn" }
     default: return { text: "No backup yet", tone: "bad" }
   }
 }
