@@ -38,6 +38,7 @@ type Credential struct{ ID, Env, File string }
 type Plan struct {
 	Profile                                                                 string // empty is the existing offline prototype
 	Network                                                                 *NetworkPlan
+	NativeSandbox                                                           string // exact host-owned native sandbox policy fingerprint
 	Workspace, Principal, Agent, Scope, Attempt, Origin, OriginID, Revision string
 	PrincipalKind                                                           string
 	Generation                                                              uint64

@@ -32,6 +32,7 @@ type Manager struct {
 	sessions        map[string]*Session
 	reconciled      bool
 	brokerTransport *brokerTransport
+	nativeOnly      bool
 }
 type Record struct {
 	Attempt, Container, Fingerprint, Status, Reason string
@@ -140,6 +141,9 @@ func (m *Manager) Start(ctx context.Context, handle string) (s *Session, err err
 	p, err := resolve(ctx, m.Authority, handle, map[string]bool{})
 	if err != nil {
 		return nil, err
+	}
+	if (p.NativeSandbox != "") != m.nativeOnly || (m.nativeOnly && NativeSandboxReady(ctx) != nil) {
+		return nil, ErrDenied
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -289,7 +293,11 @@ type Bootstrap struct {
 func (s *Session) Write(p []byte) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.output.Len()+len(p) <= 1<<20 {
+	limit := 1 << 20
+	if s.plan.NativeSandbox != "" {
+		limit = 8 << 20
+	}
+	if s.output.Len()+len(p) <= limit {
 		_, _ = s.output.Write(p)
 	} else {
 		s.truncated = true
@@ -373,6 +381,9 @@ func (s *Session) watch() {
 					ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 					defer cancel()
 					p, _ := resolve(ctx, s.manager.Authority, s.handle, map[string]bool{})
+					if p.NativeSandbox != "" && NativeSandboxReady(ctx) != nil {
+						p = Plan{}
+					}
 					select {
 					case results <- p:
 					case <-s.done:

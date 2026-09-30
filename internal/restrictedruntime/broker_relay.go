@@ -79,18 +79,22 @@ func (s *Session) startBroker(ctx context.Context) (string, error) {
 	limits := map[string]int64{}
 	streams := map[string]int64{}
 	responsesOperation := ""
+	bufferedOperation := ""
 	for _, g := range s.plan.Network.Grants {
 		limits[g.ID] = g.MaxRequest
 		if g.ResponseMode == "sse" {
 			streams[g.ID] = g.MaxResponse
 		}
-		if g.Responses != nil {
+		if g.Native != nil {
+			bufferedOperation = g.ID
+		}
+		if g.Responses != nil || g.Native != nil {
 			responsesOperation = g.ID
 		}
 	}
 	ready := make(chan error, 1)
 	go func() {
-		err := writeBrokerFrame(in, brokerFrame{Kind: "configure", Token: token, Limits: limits, Streams: streams, ResponsesOperation: responsesOperation})
+		err := writeBrokerFrame(in, brokerFrame{Kind: "configure", Token: token, Limits: limits, Streams: streams, ResponsesOperation: responsesOperation, BufferedOperation: bufferedOperation})
 		if err == nil {
 			var f brokerFrame
 			err = readBrokerFrame(out, &f)
@@ -142,7 +146,7 @@ func (s *Session) brokerAuthorized(ctx context.Context) error {
 		return ErrDenied
 	}
 	p, err := resolve(ctx, s.manager.Authority, s.handle, map[string]bool{})
-	if err != nil || p.fingerprint() != s.plan.fingerprint() {
+	if err != nil || p.fingerprint() != s.plan.fingerprint() || (p.NativeSandbox != "" && NativeSandboxReady(ctx) != nil) {
 		return ErrDenied
 	}
 	return nil
@@ -182,6 +186,20 @@ func (s *Session) brokerExchange(parent context.Context, token string, req broke
 		var err error
 		req.Body, err = grant.Responses.responsesBody(req.Body)
 		if err != nil || int64(len(req.Body)) > grant.MaxRequest {
+			return denied
+		}
+	}
+	var native NativeBrokerAuthority
+	var nativeTicket string
+	if grant.Native != nil {
+		var ok bool
+		native, ok = s.manager.Authority.(NativeBrokerAuthority)
+		if !ok {
+			return denied
+		}
+		var err error
+		req.Body, nativeTicket, err = native.NativeRequest(ctx, s.handle, grant.CredentialID, req.Body)
+		if err != nil || nativeTicket == "" || int64(len(req.Body)) > grant.MaxRequest {
 			return denied
 		}
 	}
@@ -256,7 +274,7 @@ func (s *Session) brokerExchange(parent context.Context, token string, req broke
 	var accounting BrokerAccountingAuthority
 	var reservation string
 	usage := BrokerUsage{}
-	if grant.Responses != nil {
+	if grant.Responses != nil || grant.Native != nil {
 		var ok bool
 		accounting, ok = s.manager.Authority.(BrokerAccountingAuthority)
 		if !ok {
@@ -270,7 +288,18 @@ func (s *Session) brokerExchange(parent context.Context, token string, req broke
 		if json.Unmarshal(req.Body, &body) != nil {
 			return denied
 		}
-		reservation, err = accounting.BrokerReserve(ctx, s.handle, grant.CredentialID, grant.Responses.Model, int64(len(req.Body))+16384, body.MaxOutputTokens)
+		model := ""
+		if grant.Responses != nil {
+			model = grant.Responses.Model
+		}
+		if grant.Native != nil {
+			model = grant.Native.Model
+		}
+		maxInput := int64(len(req.Body)) + 16384
+		if grant.Native != nil {
+			maxInput = grant.Native.InputTokenCeiling
+		}
+		reservation, err = accounting.BrokerReserve(ctx, s.handle, grant.CredentialID, model, maxInput, body.MaxOutputTokens)
 		if err != nil || reservation == "" {
 			return denied
 		}
@@ -289,6 +318,11 @@ func (s *Session) brokerExchange(parent context.Context, token string, req broke
 		return brokerFrame{Kind: "response", Status: 502}
 	}
 	defer response.Body.Close()
+	if grant.Native != nil {
+		result, known := s.brokerNativeStream(ctx, response, *grant, secret, native, nativeTicket, emit)
+		usage = known
+		return result
+	}
 	if grant.ResponseMode == "sse" {
 		if grant.Responses == nil {
 			return s.brokerStream(ctx, response, *grant, secret, emit)
