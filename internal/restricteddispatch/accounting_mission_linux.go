@@ -40,6 +40,21 @@ func (a Authority) accountingMission(ctx context.Context, attempt access.Attempt
  LEFT JOIN missions mission ON mission.id=reservation.issue_id
  WHERE leaf.id=?`, attempt.ID).Scan(&facet, &mission, &valid)
 	if errors.Is(err, sql.ErrNoRows) {
+		// Generic delegation inherits a fully bound provider from its parent.
+		// Workflow orchestration parents have no provider binding: a lost slot
+		// must never downgrade their leaf to an unattributed paid request.
+		var slot bool
+		if err := a.Store.DB.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM restricted_workflow_delegate_slots WHERE parent_attempt_id=? AND agent_id=?)`, attempt.Parent, attempt.Agent).Scan(&slot); err != nil {
+			return "", err
+		}
+		if slot {
+			return "", access.ErrDenied
+		}
+		parent, e := loadProvider(ctx, a.Store.DB, attempt.Parent)
+		child, childError := loadProvider(ctx, a.Store.DB, attempt.ID)
+		if e != nil || childError != nil || parent.Credential != child.Credential || parent.Revision != child.Revision || parent.Model != child.Model || parent.Profile != child.Profile || parent.MaxOutputTokens < child.MaxOutputTokens {
+			return "", access.ErrDenied
+		}
 		return "", nil
 	}
 	if err != nil {

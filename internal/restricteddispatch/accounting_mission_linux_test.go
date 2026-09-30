@@ -24,6 +24,8 @@ func missionAccountingFixture(t *testing.T, issue bool) (Authority, []string, []
 	ctx := t.Context()
 	for _, q := range []string{
 		`UPDATE agents SET llm_model='gpt-5-mini',restricted_execution_profile='responses_text' WHERE id='a'`,
+		`INSERT INTO agents(id,workspace_id,crew_id,name,slug,agent_role,llm_provider,llm_model,restricted_execution_profile) VALUES('b','w','crew','B','budget-leaf-b','AGENT','OPENAI','gpt-5-mini','responses_text')`,
+		`INSERT INTO agent_credentials(id,agent_id,credential_id,env_var_name) VALUES('grant-b','b','key','OPENAI_API_KEY')`,
 		`INSERT INTO projects(id,workspace_id,name,slug) VALUES('project','w','Project','budget-project')`,
 		`INSERT INTO missions(id,workspace_id,crew_id,delegate_agent_id,lead_agent_id,trace_id,title,mission_type,status,project_id) VALUES('issue','w','crew','a','a','issue-budget-trace','Issue','issue','TODO','project')`,
 		`INSERT INTO pipelines(id,workspace_id,name,slug,definition_json,definition_hash,status) VALUES('recipe','w','Recipe','budget-recipe','{}','fixture','active')`,
@@ -33,7 +35,7 @@ func missionAccountingFixture(t *testing.T, issue bool) (Authority, []string, []
 			t.Fatal(err)
 		}
 	}
-	rights := []access.Right{{Kind: "agent", ID: "a", Operation: "run"}, {Kind: "agent", ID: "a", Operation: "delegate"}, {Kind: "project", ID: "project", Operation: "read"}}
+	rights := []access.Right{{Kind: "agent", ID: "a", Operation: "run"}, {Kind: "agent", ID: "b", Operation: "run"}, {Kind: "agent", ID: "b", Operation: "delegate"}, {Kind: "project", ID: "project", Operation: "read"}}
 	setRights(t, a, "h1", rights)
 	originHandle, origin, err := a.Store.Admit(ctx, "h1", "w", "a", "c1", "", rights)
 	if err != nil {
@@ -70,11 +72,11 @@ func missionAccountingFixture(t *testing.T, issue bool) (Authority, []string, []
 	if err != nil {
 		t.Fatal(err)
 	}
-	hash, err := a.ProviderDelegationHash(ctx, "h1", "w", "a")
+	hash, err := a.ProviderDelegationHash(ctx, "h1", "w", "b")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = a.FreezeWorkflowProvider(ctx, tx, "job", "a", hash, 1000); err != nil {
+	if err = a.FreezeWorkflowProvider(ctx, tx, "job", "b", hash, 1000); err != nil {
 		t.Fatal(err)
 	}
 	if err = tx.Commit(); err != nil {
@@ -90,13 +92,13 @@ func missionAccountingFixture(t *testing.T, issue bool) (Authority, []string, []
 	if _, err = a.Store.BuildContext(ctx, parent, "orchestrate classified source"); err != nil {
 		t.Fatal(err)
 	}
-	if err = a.BindProviderDelegation(ctx, parentHandle, "job", "a", hash, 1000); err != nil {
+	if err = a.BindProviderDelegation(ctx, parentHandle, "job", "b", hash, 1000); err != nil {
 		t.Fatal(err)
 	}
 	var handles []string
 	var attempts []access.Attempt
 	for range 2 {
-		h, attempt, err := a.PrepareDelegatedResponses(ctx, "h1", "w", "a", "c1", parentHandle, rights, 1000, func(context.Context, string, access.Attempt) ([]string, error) { return []string{"/bin/true"}, nil })
+		h, attempt, err := a.PrepareDelegatedResponses(ctx, "h1", "w", "b", "c1", parentHandle, rights, 1000, func(context.Context, string, access.Attempt) ([]string, error) { return []string{"/bin/true"}, nil })
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -209,5 +211,72 @@ func TestManualWorkflowAccountingLeavesMissionUnselected(t *testing.T) {
 	var count int
 	if err := a.Store.DB.QueryRowContext(t.Context(), `SELECT count(*) FROM cost_ledger WHERE mission_id IS NOT NULL AND mission_id<>''`).Scan(&count); err != nil || count != 0 {
 		t.Fatalf("manual selected mission: %d %v", count, err)
+	}
+}
+
+func TestIssueMissionAccountingMissingWorkflowAuthorityDenies(t *testing.T) {
+	for name, query := range map[string]string{
+		"slot delete":                 `DELETE FROM restricted_workflow_delegate_slots WHERE job_id='job'`,
+		"job delete":                  `DELETE FROM restricted_workflow_jobs WHERE id='job'`,
+		"damaged slot without revoke": `DROP TRIGGER restricted_workflow_delegate_slot_delete; DELETE FROM restricted_workflow_delegate_slots WHERE job_id='job'`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			a, handles, attempts := missionAccountingFixture(t, true)
+			if _, err := a.Store.DB.ExecContext(t.Context(), query); err != nil {
+				t.Fatal(err)
+			}
+			if name == "damaged slot without revoke" {
+				if _, err := a.Store.Resolve(t.Context(), handles[0]); err != nil {
+					t.Fatalf("fault fixture failed to preserve otherwise valid leaf: %v", err)
+				}
+			}
+			if _, err := a.accountingMission(t.Context(), attempts[0]); err == nil {
+				t.Fatal("missing workflow authority downgraded leaf to manual")
+			}
+			if _, err := a.BrokerReserve(t.Context(), handles[0], "key", "gpt-5-mini", 1000, 1000); err == nil {
+				t.Fatal("missing workflow authority admitted a paid request")
+			}
+			var count int
+			if err := a.Store.DB.QueryRowContext(t.Context(), `SELECT count(*) FROM cost_ledger`).Scan(&count); err != nil || count != 0 {
+				t.Fatalf("unattributed debit %d %v", count, err)
+			}
+		})
+	}
+}
+
+func TestGenericDelegationAccountingPreservesDifferentExplicitGrants(t *testing.T) {
+	a := providerFixture(t)
+	ctx := t.Context()
+	for _, q := range []string{
+		`UPDATE agents SET llm_model='gpt-5-mini' WHERE id='a'`,
+		`INSERT INTO agents(id,workspace_id,crew_id,name,slug,agent_role,llm_provider,llm_model) VALUES('b','w','crew','B','budget-generic-b','AGENT','OPENAI','gpt-5-mini')`,
+		`INSERT INTO agent_credentials(id,agent_id,credential_id,env_var_name) VALUES('grant-b','b','key','OPENAI_API_KEY')`,
+		`INSERT INTO budget_limits(id,workspace_id,scope_kind,scope_id,window,limit_usd,mode) VALUES('workspace-cap','w','workspace','w','month',100,'hard')`,
+	} {
+		if _, err := a.Store.DB.ExecContext(ctx, q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rights := []access.Right{{Kind: "agent", ID: "a", Operation: "run"}, {Kind: "agent", ID: "b", Operation: "run"}, {Kind: "agent", ID: "b", Operation: "delegate"}}
+	setRights(t, a, "h1", rights)
+	parentHandle, _, err := a.PrepareResponses(ctx, "h1", "w", "a", "c1", "", rights, 1000, command("/bin/true"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	handle, attempt, err := a.PrepareResponses(ctx, "h1", "w", "b", "c1", parentHandle, rights, 1000, command("/bin/true"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mission, err := a.accountingMission(ctx, attempt); err != nil || mission != "" {
+		t.Fatalf("generic grant inheritance denied %q %v", mission, err)
+	}
+	if _, err = a.BrokerReserve(ctx, handle, "key", "gpt-5-mini", 1000, 1000); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = a.Store.DB.ExecContext(ctx, `DELETE FROM agent_credentials WHERE id='grant'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = a.BrokerReserve(ctx, handle, "key", "gpt-5-mini", 1000, 1000); err == nil {
+		t.Fatal("child survived parent-only grant revoke")
 	}
 }
