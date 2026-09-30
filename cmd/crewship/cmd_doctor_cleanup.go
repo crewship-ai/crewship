@@ -13,9 +13,9 @@ import (
 )
 
 type localCleanupSnapshot struct {
-	InstanceID string `json:"instance_id"`
-	resourcelifecycle.Status
-	Stale bool `json:"stale"`
+	InstanceID               string `json:"instance_id" yaml:"instance_id"`
+	resourcelifecycle.Status `json:",inline" yaml:",inline"`
+	Stale                    bool `json:"stale" yaml:"stale"`
 }
 
 // Local file permissions, rather than deleted workspace membership, authorize

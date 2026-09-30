@@ -445,9 +445,9 @@ var crewDeleteCmd = &cobra.Command{
 		// a promise the server could not keep.
 		var deleted struct {
 			Cleanup *struct {
-				Scope string `json:"scope"`
-				State string `json:"state"`
-			} `json:"cleanup"`
+				Scope string `json:"scope" yaml:"scope"`
+				State string `json:"state" yaml:"state"`
+			} `json:"cleanup" yaml:"cleanup"`
 			SidecarTeardown struct {
 				Status string `json:"status" yaml:"status"`
 				Reason string `json:"reason" yaml:"reason"`

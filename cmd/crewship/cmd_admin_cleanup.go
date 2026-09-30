@@ -28,9 +28,9 @@ func newAdminCleanupCmd() *cobra.Command {
 			return err
 		}
 		var body struct {
-			Scope string                     `json:"scope"`
-			State string                     `json:"state"`
-			Items []resourcelifecycle.Status `json:"items"`
+			Scope string                     `json:"scope" yaml:"scope"`
+			State string                     `json:"state" yaml:"state"`
+			Items []resourcelifecycle.Status `json:"items" yaml:"items"`
 		}
 		if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
 			return err

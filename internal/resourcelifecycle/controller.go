@@ -17,10 +17,10 @@ import (
 var ErrNotFound = errors.New("container not found")
 
 type Mount struct {
-	Type        string `json:"type"`
-	Name        string `json:"name,omitempty"`
-	Source      string `json:"source,omitempty"`
-	Destination string `json:"destination"`
+	Type        string `json:"type" yaml:"type"`
+	Name        string `json:"name,omitempty" yaml:"name,omitempty"`
+	Source      string `json:"source,omitempty" yaml:"source,omitempty"`
+	Destination string `json:"destination" yaml:"destination"`
 }
 type Container struct {
 	ID         string
@@ -37,14 +37,14 @@ type Runtime interface {
 	Close() error
 }
 type Status struct {
-	CrewID       string `json:"crew_id"`
-	Scope        string `json:"scope"`
-	State        string `json:"state"`
-	ObservedAt   string `json:"observed_at,omitempty"`
-	Complete     bool   `json:"complete"`
-	Remaining    int    `json:"remaining"`
-	Unattributed int    `json:"unattributed"`
-	Error        string `json:"error,omitempty"`
+	CrewID       string `json:"crew_id" yaml:"crew_id"`
+	Scope        string `json:"scope" yaml:"scope"`
+	State        string `json:"state" yaml:"state"`
+	ObservedAt   string `json:"observed_at,omitempty" yaml:"observed_at,omitempty"`
+	Complete     bool   `json:"complete" yaml:"complete"`
+	Remaining    int    `json:"remaining" yaml:"remaining"`
+	Unattributed int    `json:"unattributed" yaml:"unattributed"`
+	Error        string `json:"error,omitempty" yaml:"error,omitempty"`
 }
 type Controller struct {
 	DB             *sql.DB
