@@ -91,8 +91,8 @@ func Do(ctx context.Context, fn func(ctx context.Context) error) error {
 // Outside runs fn with the writer ctx carries stepped out of the gate, and
 // re-enters it afterwards, waiting out a window that opened meanwhile. It is
 // for a stretch inside a writer that is not itself a write the barrier can
-// wait for — a routine run a scheduler starts, which the backup's busy probe
-// counts instead. With no writer inside in ctx fn simply runs. The error is
+// wait for — a routine run a scheduler starts, admitted with StartRun
+// before the step-out and counted as busy instead. With no writer inside in ctx fn simply runs. The error is
 // ctx's when the re-entry wait ended; the writer is then outside and its
 // Leave is a no-op.
 func Outside(ctx context.Context, fn func()) error {

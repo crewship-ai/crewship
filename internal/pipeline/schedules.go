@@ -1291,12 +1291,25 @@ func (s *PipelineScheduler) fireSingleOccurrence(ctx context.Context, sched *Sch
 		IdempotencyKey: ScheduledFireIdempotencyKey("sched", sched.ID, occBucket),
 	}
 
-	// The run is running work, not a write the barrier can wait for: step
-	// out of the gate for it and back in (after any window) for the
-	// bookkeeping below.
+	// The run is running work, not a write the barrier can wait for. It is
+	// admitted while the fire's writer is still inside the gate — so it is
+	// counted as busy before the writer steps out, and a window that closes
+	// in between cannot hold over it — then the fire steps out for the run
+	// and back in (after any window) for the bookkeeping below.
+	adm, ok := quiesce.StartRun(ctx)
+	if !ok {
+		// A window closed before this fire entered (the fire's writer is
+		// not inside): leave the occurrence due for the first tick after
+		// release.
+		return
+	}
 	var res *RunResult
 	var runErr error
-	if err := quiesce.Outside(ctx, func() { res, runErr = s.executor.Run(ctx, in) }); err != nil {
+	err = quiesce.Outside(ctx, func() {
+		defer adm.Done()
+		res, runErr = s.executor.Run(adm.Context(), in)
+	})
+	if err != nil {
 		return
 	}
 

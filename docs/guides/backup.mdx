@@ -809,6 +809,41 @@ missing from the storage root, memory versions without content, a provisioned
 crew whose container was gone, a vault key the server could not resolve — is
 recorded in `contents.incomplete`, never left out silently.
 
+#### What the window guarantees, and what it does not
+
+Covered — nothing below can write while the copy runs:
+
+- **Routine runs.** A run is admitted by the window before it writes anything
+  (its idempotency reservation, its run row, its steps) and counts as running
+  work from that moment until it returns — not only once its row says
+  `running`. Admission is refused while the window is closing or held: a due
+  schedule stays due, a deferred run stays pending and fires on the first
+  sweep after the release, and any other start (a resume after an approval
+  or a signal, a boot-time resume) waits for the release. A run admitted a
+  moment before the window closed is still counted when the server checks
+  running work again after the write drain, so the window does not hold and
+  retries instead. A run started inside a request, or by another run (a
+  nested routine), is admitted with its parent and counted the same way.
+- **Queued work and scheduled agent work.** A work item is `starting` from the
+  moment it is claimed, and the claim itself is a write the drain waits for.
+- **Agent runs started from a request** (assignments, webhooks, queries) hold
+  their workspace's guard, which the window takes as its last step; a run that
+  arrives after that is refused with "workspace is being backed up".
+- **Missions.** Each pass of a mission's loop is a write the drain waits for,
+  and no pass runs while the window is open; an assignment a pass dispatches is
+  admitted like a routine run.
+
+Not covered:
+
+- **Another server process.** Admission and the run count live in this
+  process's memory. A second replica writing to the same database is only seen
+  through its rows (`running` agents, routine runs and started work items), so
+  its runs are still counted only once their row says so.
+- **Work that ignores the gate.** A code path that writes without entering the
+  gate or being admitted — a mission's timeout clean-up, for one — is not held
+  back. The gate is enforced by review and by the guard tests, not by the
+  database.
+
 ### The recovery kit
 
 Credentials and other sealed values are encrypted with vault keys

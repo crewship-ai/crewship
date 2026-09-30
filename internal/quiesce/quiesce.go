@@ -19,6 +19,13 @@
 //     the barrier. A predicate checked once on the way in is not one — a
 //     request admitted a moment before the window keeps writing inside it.
 //
+//     Runs (routine runs) are running work, not writers: they are admitted
+//     with StartRun before they write anything and counted as busy from
+//     that moment until Done (runs.go). StartRun refuses while a window is
+//     closing or held, and Begin's re-check after the drain counts every
+//     run admitted before the close, so a window never holds over a run
+//     that is starting.
+//
 //   - Holds (Holds) — "did an instance restore leave automations stopped?".
 //     Persisted in instance_holds by `crewship recover`, read at boot, and
 //     cleared one key at a time by an instance admin. While a key is held the
@@ -129,6 +136,7 @@ type Controller struct {
 	window   *Window       // non-nil while closing or held
 	released chan struct{} // closed when no window is open
 	writers  int           // writers inside the gate
+	runs     int           // admitted runs not yet done (runs.go)
 	drained  chan struct{} // while closing with writers inside: the window's drained, closed by the last Leave
 }
 
@@ -238,7 +246,7 @@ func (c *Controller) Begin(ctx context.Context, opts Options) (*Window, error) {
 	deadline := time.Now().Add(busyWait)
 	lastWhat := ""
 	for {
-		n, what, err := busyCount(ctx, opts.Busy)
+		n, what, err := c.busyCount(ctx, opts.Busy)
 		if err != nil {
 			return nil, err
 		}
@@ -256,7 +264,10 @@ func (c *Controller) Begin(ctx context.Context, opts Options) (*Window, error) {
 			// Work that started between the busy check and the close (a
 			// writer that started a run, say) is waited for: check again
 			// with admission closed and the writers gone.
-			n2, what2, err := busyCount(ctx, opts.Busy)
+			// Admitted runs count here too: StartRun refuses from the
+			// close on, so a run admitted before it is still counted and
+			// none can be admitted after this check.
+			n2, what2, err := c.busyCount(ctx, opts.Busy)
 			if err != nil {
 				w.Release()
 				return nil, err
@@ -295,11 +306,28 @@ func (c *Controller) Begin(ctx context.Context, opts Options) (*Window, error) {
 	}
 }
 
-func busyCount(ctx context.Context, f BusyFunc) (int, string, error) {
-	if f == nil {
-		return 0, "", nil
+// busyCount is opts.Busy plus the runs admitted in this process (StartRun),
+// counted from admission rather than from the moment a run's row says
+// running.
+func (c *Controller) busyCount(ctx context.Context, f BusyFunc) (int, string, error) {
+	n, what := 0, ""
+	if f != nil {
+		var err error
+		n, what, err = f(ctx)
+		if err != nil {
+			return 0, "", err
+		}
 	}
-	return f(ctx)
+	if r := c.Runs(); r > 0 {
+		n += r
+		part := fmt.Sprintf("%d run(s) admitted in this process", r)
+		if what == "" {
+			what = part
+		} else {
+			what += ", " + part
+		}
+	}
+	return n, what, nil
 }
 
 func drainTimeoutFromEnv() time.Duration {
