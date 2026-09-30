@@ -2,6 +2,8 @@
   "name": "crewship",
   "version": "1.0.0-rc.1",
   "private": true,
+  "license": "Apache-2.0",
+  "author": "Unify Technology, s.r.o.",
   "packageManager": "pnpm@10.11.0",
   "type": "module",
   "engines": {

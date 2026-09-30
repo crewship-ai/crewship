@@ -41,10 +41,10 @@ scripts/restricted-runtime-probe/run.sh -race
   disabled the DNS address rejection and relay-stop action without editing the
   worktree; both negative gates failed again. Mutation failure is expected.
 
-Raw evidence: [red-first](reports/restricted-http-broker-red-2026-09-28.txt),
-[mutation](reports/restricted-http-broker-mutation-2026-09-28.txt),
-[clean live run](reports/restricted-http-broker-live-2026-09-28.txt),
-[full Go suite](reports/restricted-http-broker-go-2026-09-28.txt).
+Raw evidence: [red-first](https://github.com/crewship-ai/crewship/blob/07bfd2360a97dbe1c9f71c03e1d9b5d5d471c993/docs/prd/reports/restricted-http-broker-red-2026-09-28.txt),
+[mutation](https://github.com/crewship-ai/crewship/blob/07bfd2360a97dbe1c9f71c03e1d9b5d5d471c993/docs/prd/reports/restricted-http-broker-mutation-2026-09-28.txt),
+[clean live run](https://github.com/crewship-ai/crewship/blob/07bfd2360a97dbe1c9f71c03e1d9b5d5d471c993/docs/prd/reports/restricted-http-broker-live-2026-09-28.txt),
+[full Go suite](https://github.com/crewship-ai/crewship/blob/07bfd2360a97dbe1c9f71c03e1d9b5d5d471c993/docs/prd/reports/restricted-http-broker-go-2026-09-28.txt).
 
 ## What the tests actually establish
 
@@ -105,11 +105,11 @@ routing table. Private/special addresses remain independently denied. Trusted
 host routing changes, public destinations reached through non-interface routes,
 and arbitrary upstream-side effects are not proven isolated by this check.
 
-Correction evidence: [red-first](reports/restricted-http-broker-subnet-red-2026-09-28.txt),
-[exact-IP-only mutation](reports/restricted-http-broker-subnet-mutation-2026-09-28.txt).
+Correction evidence: [red-first](https://github.com/crewship-ai/crewship/blob/07bfd2360a97dbe1c9f71c03e1d9b5d5d471c993/docs/prd/reports/restricted-http-broker-subnet-red-2026-09-28.txt),
+[exact-IP-only mutation](https://github.com/crewship-ai/crewship/blob/07bfd2360a97dbe1c9f71c03e1d9b5d5d471c993/docs/prd/reports/restricted-http-broker-subnet-mutation-2026-09-28.txt).
 All four regressions fail before the fix and under the mutation; the unmutated
 package passes `go test -race ./internal/restrictedruntime -count=1` (1.867 s)
-and targeted vet. Final clean source `9db6c9a6a` also passes **11/11 live tests with -race in 57.251 s**, whole-repository vet and invariants. [Corrective live run](reports/restricted-http-broker-subnet-live-2026-09-28.txt). The earlier full Go result precedes this narrow fix; it was followed by these focused regressions.
+and targeted vet. Final clean source `9db6c9a6a` also passes **11/11 live tests with -race in 57.251 s**, whole-repository vet and invariants. [Corrective live run](https://github.com/crewship-ai/crewship/blob/07bfd2360a97dbe1c9f71c03e1d9b5d5d471c993/docs/prd/reports/restricted-http-broker-subnet-live-2026-09-28.txt). The earlier full Go result precedes this narrow fix; it was followed by these focused regressions.
 
 
 ## Remote checks at handoff
@@ -136,7 +136,7 @@ an explicitly experimental, injected-only subsection in
 The contract introduction now references #2710 without a stale fixed base SHA.
 
 `go run ./scripts/docs-inventory -strict` now passes every documentation gate
-([raw output](reports/restricted-http-broker-docs-strict-2026-09-28.txt)); targeted
+([raw output](https://github.com/crewship-ai/crewship/blob/07bfd2360a97dbe1c9f71c03e1d9b5d5d471c993/docs/prd/reports/restricted-http-broker-docs-strict-2026-09-28.txt)); targeted
 unit/race tests also pass (3.206 s). This correction changes documentation only.
 A fresh final-head CI workflow is requested; prior failed/cancelled runs are not
 counted as passing validation.

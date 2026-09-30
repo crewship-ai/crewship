@@ -1,5 +1,10 @@
 # Crewship UI/UX contract
 
+Related public implementation notes: [dashboard](dashboard-client-overview.md),
+[inbox](inbox-client-overview.md) and
+[routines operator console](routines-operator-console-contract-2026-09-15.md).
+Their dated design/validation records are not fresh verification results.
+
 The rules every screen follows, so that four people (or four agents) working on
 four areas at once produce ONE product. Written 2026-09-03 after the dashboard
 and onboarding redesign; those two screens are the reference implementation.

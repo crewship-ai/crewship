@@ -2,7 +2,7 @@
 # Pages — the acceptance suite, driving the REAL CLI against a running server.
 #
 # Issue #1937 (Pages slice 2: HTTP + CLI write path), epic #1935.
-# Spec: docs/prd/pages.md §11 (API and CLI surface), §7 (permissions),
+# Spec: docs/specs/pages.md §11 (API and CLI surface), §7 (permissions),
 # §4 (the freshness contract), §10 / §10b.3 (caps).
 #
 # ─── Registration ───────────────────────────────────────────────────────────

@@ -1,7 +1,7 @@
 "use client"
 
 /**
- * The in-app page editor — PRD `docs/prd/pages.md` §10b.1.
+ * The in-app page editor — PRD `docs/specs/pages.md` §10b.1.
  *
  * "**The editor already exists.** CodeMirror 6 is in `package.json:27-40` […]
  * and `components/features/routines/routine-create-dialog.tsx` already wires it up

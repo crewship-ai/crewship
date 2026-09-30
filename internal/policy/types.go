@@ -202,7 +202,7 @@ const (
 	ActionEscalationCreate Action = "escalation_create"
 
 	// ActionPageWrite — #1945: writing one PANEL's payload onto a page
-	// (docs/prd/pages.md §11). The capability the Pages feature turns on: a
+	// (docs/specs/pages.md §11). The capability the Pages feature turns on: a
 	// cheap script pushes a number, a threshold wakes an agent, and the agent
 	// writes its analysis back onto the same page (§0). Until this Action
 	// existed the verb was refused at SAVE — internal/pipeline/crewship_step.go

@@ -73,4 +73,4 @@ agent's answer against a known issue state on Dev2, and compare a real issue or
 routine event against its channel post. Record what ran separately from this
 contract; passing these checks is not a corporate capacity or retention SLA.
 
-Implementation and live acceptance: [Dev2 report](reports/chat-team-dev2-2026-09-07.md).
+Implementation and live acceptance: [Dev2 report](https://github.com/crewship-ai/crewship/blob/8dc421fdb5df28a8113ba1453682bc55464213e6/docs/prd/reports/chat-team-dev2-2026-09-07.md).

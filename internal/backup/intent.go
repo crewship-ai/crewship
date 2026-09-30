@@ -131,7 +131,7 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	"saved_views":        IntentInclude,
 
 	// === Pages (round-trip) ===================================
-	// PRD docs/prd/pages.md §10b.5 draws the line here: `crewship
+	// PRD docs/specs/pages.md §10b.5 draws the line here: `crewship
 	// export` carries the page SPEC only, because export moves
 	// configuration between installs. A BACKUP is a whole-instance
 	// snapshot, so it carries spec, grants, versions AND panel data —

@@ -1,7 +1,7 @@
 package main
 
 // Acceptance test for `crewship export page` — the door PRD §13 obstacle 6
-// predicted would be missing (docs/prd/pages.md): kinds.ExportPages shipped
+// predicted would be missing (docs/specs/pages.md): kinds.ExportPages shipped
 // tested and unreachable because `crewship export` knew only Crew and
 // Workspace.
 //

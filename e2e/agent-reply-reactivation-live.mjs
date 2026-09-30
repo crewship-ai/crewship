@@ -7,7 +7,7 @@ import path from 'node:path';
 import assert from 'node:assert/strict';
 const statePath=process.env.TEAM_CHAT_STATE;if(!statePath)throw new Error('TEAM_CHAT_STATE required');
 const state = await readPrivateJson(statePath);
-const base='https://crewship-dev2.unifylab.cz';
+const base = process.env.CREWSHIP_SERVER || 'http://localhost:8082';
 const chatId=process.env.AGENT_SOUND_CHAT_ID||'cmtsftvcj0002380b7512';
 const browser=await chromium.launch({headless:true});const ctx=await browser.newContext({viewport:{width:1440,height:1000}});
 const page=await ctx.newPage();

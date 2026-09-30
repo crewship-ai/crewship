@@ -1,7 +1,7 @@
 # spike-river — River over SQLite, evaluated
 
 Harness for [`docs/prd/SPIKE-RIVER-SQLITE-1-0.md`](../../docs/prd/SPIKE-RIVER-SQLITE-1-0.md).
-The verdict it produced is [`docs/prd/ADR-QUEUE-RIVER-SQLITE-2026-09-10.md`](../../docs/prd/ADR-QUEUE-RIVER-SQLITE-2026-09-10.md):
+The verdict it produced is [`docs/decisions/ADR-QUEUE-RIVER-SQLITE-2026-09-10.md`](../../docs/decisions/ADR-QUEUE-RIVER-SQLITE-2026-09-10.md):
 **reject for 1.0**.
 
 It is a **separate Go module** on purpose. River is not in the main `go.mod`, so

@@ -1,6 +1,6 @@
 package main
 
-// pagesSchemaCatalog describes the /api/v1/pages surface — docs/prd/pages.md
+// pagesSchemaCatalog describes the /api/v1/pages surface — docs/specs/pages.md
 // §11 (the routes), §11b (the wire decisions), §4 (freshness) and §7
 // (permissions).
 //

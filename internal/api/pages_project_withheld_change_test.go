@@ -1,6 +1,6 @@
 package api
 
-// Pages — the truthfulness of `reviewed_code: true` (docs/prd/pages.md §7.1b,
+// Pages — the truthfulness of `reviewed_code: true` (docs/specs/pages.md §7.1b,
 // §11).
 //
 // Withholding a panel from the review comparison stops the leak and stops the

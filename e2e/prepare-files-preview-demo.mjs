@@ -19,7 +19,7 @@ try {
  for(const name of files) execFileSync('/tmp/crewship-2-dev',['--profile','dev2','--server','http://localhost:8082','agent','file-write','ma-ena',directory+'/'+name,'--from',path.join(local,name)],{stdio:['ignore','pipe','pipe']});
  const crew_file=`shared/${directory}/crew-demo-preview.pdf`;
  execFileSync('/tmp/crewship-2-dev',['--profile','dev2','--server','http://localhost:8082','crew','files','save','copy-site',crew_file,'--file',path.join(local,'demo-preview.pdf')],{stdio:['ignore','pipe','pipe']});
- const manifest={crew_file,server:'https://crewship-dev2.unifylab.cz',agent_slug:'ma-ena',directory,local,files,description:'Synthetic QA fixtures uploaded with owner CLI; no agent model execution.'};
+ const manifest={crew_file,server:(process.env.CREWSHIP_SERVER || 'http://localhost:8082'),agent_slug:'ma-ena',directory,local,files,description:'Synthetic QA fixtures uploaded with owner CLI; no agent model execution.'};
  const manifestPath = path.join(local, 'files-preview-demo-manifest.json');
  await fs.writeFile(manifestPath,JSON.stringify(manifest,null,2),{mode:0o600,flag:'wx'});
  console.log(`FILES_PREVIEW_MANIFEST=${manifestPath}`);

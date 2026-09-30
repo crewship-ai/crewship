@@ -1,6 +1,6 @@
 package api
 
-// Pages — what the `read` verb decides (docs/prd/pages.md §7.1 rules 2–3,
+// Pages — what the `read` verb decides (docs/specs/pages.md §7.1 rules 2–3,
 // §7.1b's verb table).
 //
 // `read` was accepted, stored, journalled and listed for a while without any

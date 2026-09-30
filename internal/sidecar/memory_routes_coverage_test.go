@@ -114,7 +114,7 @@ var sidecarRouteGuards = map[string]routeGuardKind{
 	"POST /mission/create": guardHandlerIdentity,
 
 	// The page producer door (#1946). Per-agent, not crew-scoped: the panel
-	// names ONE producer (docs/prd/pages.md §7.1 rule 4) and the server checks
+	// names ONE producer (docs/specs/pages.md §7.1 rule 4) and the server checks
 	// the acting agent against it, so a sibling that pushed as the boot agent
 	// would be writing a panel it does not own.
 	"PUT /pages/": guardHandlerIdentity,

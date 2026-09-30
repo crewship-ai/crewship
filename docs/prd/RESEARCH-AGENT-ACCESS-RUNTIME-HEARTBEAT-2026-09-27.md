@@ -35,7 +35,7 @@ Pro 1.0 doporučuji dvě výslovné provozní hranice: důvěryhodná interní c
 
 Podklady v kódu: [proxy_files.go](../../internal/api/proxy_files.go), [helpers.go](../../internal/api/helpers.go), [routes_files.go](../../internal/server/routes_files.go), [agent_chats.go](../../internal/api/agent_chats.go), [docker_container.go](../../internal/provider/docker/docker_container.go), [run_paths.go](../../internal/orchestrator/run_paths.go), [episodic/recall.go](../../internal/episodic/recall.go), [terminal/handler.go](../../internal/terminal/handler.go), [capabilities.go](../../internal/api/capabilities.go), [pipelines_exec.go](../../internal/api/pipelines_exec.go), [pages_grants_authz.go](../../internal/api/pages_grants_authz.go), [port_expose_list_revoke_serve.go](../../internal/api/port_expose_list_revoke_serve.go).
 
-Navazující kontrakty: [chat workspace](chat-workspace-dev2-2026-09-25.md), [děděná Pages oprávnění](pages-folder-permissions-linux-model-2026-09-13.md), [Pages Apps v1](pages-apps-v1.md), [Routines audit 20. září](reports/routines-security-performance-audit-2026-09-20.md). Nálezy ze starého auditu se tímto automaticky neprohlašují za stále otevřené.
+Navazující kontrakty: [chat workspace](chat-workspace-dev2-2026-09-25.md), [děděná Pages oprávnění](pages-folder-permissions-linux-model-2026-09-13.md), [Pages Apps v1](pages-apps-v1.md), [Routines audit 20. září](https://github.com/crewship-ai/crewship/blob/07bfd2360a97dbe1c9f71c03e1d9b5d5d471c993/docs/prd/reports/routines-security-performance-audit-2026-09-20.md). Nálezy ze starého auditu se tímto automaticky neprohlašují za stále otevřené.
 
 ## 2. Oprávnění napříč produktem
 

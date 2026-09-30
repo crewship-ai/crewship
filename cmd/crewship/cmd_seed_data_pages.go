@@ -1,6 +1,6 @@
 package main
 
-// Seeding Pages (docs/prd/pages.md).
+// Seeding Pages (docs/specs/pages.md).
 //
 // A seeded workspace used to open its Pages section on nothing at all, which
 // for this feature is worse than it sounds: the whole of what a page does is

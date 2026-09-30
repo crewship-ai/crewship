@@ -107,7 +107,7 @@ func (a *DBChannelAuthorizer) CanSubscribe(ctx context.Context, userID, channel 
 		return a.isMemberOfMissionWorkspace(ctx, userID, chID)
 	case "page":
 		// page:{pageId} — every open page subscribes to one channel and a
-		// push broadcasts an invalidation on it (docs/prd/pages.md §10b.5b).
+		// push broadcasts an invalidation on it (docs/specs/pages.md §10b.5b).
 		//
 		// Without this case the authorizer fell through to default:false and
 		// no client could ever subscribe — the same failure the "user" case

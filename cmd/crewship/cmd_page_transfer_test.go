@@ -1,7 +1,7 @@
 package main
 
 // cmd_page_transfer_test.go — the acceptance test for `crewship page
-// export|import|versions|rollback` (docs/prd/pages.md §10b.1, §10b.2, §11b.13).
+// export|import|versions|rollback` (docs/specs/pages.md §10b.1, §10b.2, §11b.13).
 //
 // The endpoint half is proved in internal/api/pages_transfer_test.go and
 // internal/api/pages_versions_test.go. This file proves the half only the

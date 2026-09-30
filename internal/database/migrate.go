@@ -1542,7 +1542,7 @@ END;
 	//   - partial index on assignments(status, queued_at) WHERE
 	//     status='QUEUED' for the queue-pump read path.
 	// See internal/database/migrate_consts_v93_assignment_queue.go
-	// and .claude/context/prd/QUEUE-MECHANISM-2026.md.
+	// and docs/prd/QUEUE-MECHANISM-2026.md.
 	{version: 93, name: "add_assignment_queue", sql: migrationAddAssignmentQueue},
 	// v94 extends credentials + agent_credentials to support the
 	// USERPASS, SSH_KEY, CERTIFICATE, and GENERIC_SECRET vault types.

@@ -111,7 +111,7 @@ are not part of this first runnable group surface.
 ## Phase 2 — human direct messages (2026-09-07)
 
 Implemented, validated and deployed to Dev2; see
-[verification and deployment report](reports/chat-direct-messages-2026-09-07.md).
+[verification and deployment report](https://github.com/crewship-ai/crewship/blob/07bfd2360a97dbe1c9f71c03e1d9b5d5d471c993/docs/prd/reports/chat-direct-messages-2026-09-07.md).
 
 Open a direct message by selecting another current workspace member. The server
 returns the same conversation for that unordered pair within the workspace,

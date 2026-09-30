@@ -1,6 +1,6 @@
 package main
 
-// `crewship page` — the Pages CLI (docs/prd/pages.md §11).
+// `crewship page` — the Pages CLI (docs/specs/pages.md §11).
 //
 // One command per endpoint, which is the repo rule and the contract agents
 // actually read:

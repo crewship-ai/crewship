@@ -10,7 +10,7 @@ Tento dokument doplňuje [release audit](PRD-RELEASE-1-0-QUALITY-AUDIT.md), [rea
 
 [Crew runtime capacity](crew-runtime-capacity.md), [agent isolation](agent-isolation-findings-2026-08-01.md), [memory on wake](agent-memory-on-wake.md) a [memory retrieval](memory-retrieval-layer.md) obsahují další návrhy a historická měření. Jejich staré závěry o stavu implementace nelze automaticky přenést na dnešní kód. Například dnešní tmux příprava už některé zápisy slučuje do jednoho exec volání.
 
-Dlouhodobé mantinely jsou v [Memory Roadmap](../../.claude/context/prd/MEMORY-ROADMAP-2026.md), [Agent Continuity](../../.claude/context/prd/AGENT-CONTINUITY-2026.md) a [Queue Mechanism](../../.claude/context/prd/QUEUE-MECHANISM-2026.md): čitelná markdown paměť, SQLite, explicitní události, trvalý kolega a obnova práce. Návrh zachovává tyto principy. Zpřísnění přímého zápisu do sdílených souborů v paralelním režimu je vědomá změna kontraktu, popsaná v §7.
+Dlouhodobé mantinely jsou v [Memory Roadmap](../../docs/prd/MEMORY-ROADMAP-2026.md), [Agent Continuity](../../docs/prd/AGENT-CONTINUITY-2026.md) a [Queue Mechanism](../../docs/prd/QUEUE-MECHANISM-2026.md): čitelná markdown paměť, SQLite, explicitní události, trvalý kolega a obnova práce. Návrh zachovává tyto principy. Zpřísnění přímého zápisu do sdílených souborů v paralelním režimu je vědomá změna kontraktu, popsaná v §7.
 
 ## 2. Co dnes opravdu existuje
 

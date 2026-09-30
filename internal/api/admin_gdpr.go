@@ -128,7 +128,7 @@ import (
 //     re-attributing would falsify an accountability record; both wait on a
 //     decision, and the tests do not seed them. See #2308.
 //
-// # Pages (docs/prd/pages.md §7.1 rule 1b, issue #1944)
+// # Pages (docs/specs/pages.md §7.1 rule 1b, issue #1944)
 //
 // pages.owner_user_id references users(id) ON DELETE RESTRICT, so a page a
 // departing user owns is a row that would otherwise BLOCK this cascade

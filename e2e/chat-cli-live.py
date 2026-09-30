@@ -28,9 +28,8 @@ def main():
     parser.add_argument('--profile', required=True)
     parser.add_argument('--report', required=True)
     args = parser.parse_args()
-    if args.server.rstrip('/') not in ('http://localhost:8082', 'http://127.0.0.1:8082',
-                                       'https://crewship-dev2.unifylab.cz'):
-        parser.error('This live test is restricted to Dev2.')
+    if args.server.rstrip('/') not in ('http://localhost:8082', 'http://127.0.0.1:8082'):
+        parser.error('This live test is restricted to the local dev instance.')
     run_id = uuid.uuid4().hex[:12]
     private = Path(tempfile.mkdtemp(prefix='crewship-chat-cli-'))
     report = {'server': args.server, 'run_id': run_id, 'checks': [], 'cleanup': False}

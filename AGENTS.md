@@ -5,13 +5,21 @@ For contributor process see [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 **Codex sessions:** read [`CODEX.md`](CODEX.md) for the instance map and basic operating instructions.
 
-**Design context lives in two places, and they are not copies.**
-[`docs/prd/`](docs/prd/) is tracked, ships with the repo, and holds the
-release-1.0 audit, the readiness report and the session handoffs — start there.
-[`.claude/context/prd/`](.claude/context/prd/) holds longer-lived briefs
-(memory roadmap, credentials vault, colour tokens). This file used to point
-only at the second, which is how the entire release-1.0 body of work became
-invisible to anyone following it.
+**Design context and working records.**
+[`docs/README.md`](docs/README.md) is the map — from there, current contracts
+are [`docs/specs/`](docs/specs/README.md) (held to the code by
+`docs-inventory -strict`), decided architecture is
+[`docs/decisions/`](docs/decisions/README.md), operational procedures are
+[`docs/runbooks/`](docs/runbooks/README.md). Existing public proposals are
+indexed in [`docs/prd/`](docs/prd/README.md). New internal analyses, handoffs
+and experiments belong in the separate private context repository, discovered
+with `git config --get crewship.internalContext`; read its `AGENTS.md` and topic
+index when available. See the [boundary and migration rules](docs/development/private-context.md).
+Public builds and contributions must not require it. Read the specification
+that matches your task, not the whole archive.
+
+**Placement and tooling:** use the [repository layout](docs/development/repository-layout.md)
+and [script catalog](scripts/README.md) before adding a directory or running an unfamiliar helper.
 
 ## What Crewship is
 
@@ -47,7 +55,7 @@ make build              # prod: pnpm build → static export → embedded → ./
 make build:go           # Go binary only (+ sidecar)
 
 # Verification loop — run until green before considering work done:
-go test ./... -count=1  # all Go tests (Docker tests self-skip if daemon absent)
+go test ./... -count=1 -timeout 40m  # all Go tests (Docker tests self-skip if daemon absent)
 go vet ./...            # static analysis
 pnpm lint               # ESLint (UI/frontend changes)
 pnpm build              # confirm static export still builds (cross-cutting changes)
@@ -62,7 +70,7 @@ must exist for *any* Go build to compile. It is tracked-by-one-file
 with zero setup — **do not `mkdir web/out` or hand-roll an `index.html` stub**,
 and do not let a `git add -A` delete the placeholder after a build. Such a
 binary has no UI (every UI route → `503` + an explanatory page); run
-`make build` for a real one. Details: [`CONTRIBUTING.md`](CONTRIBUTING.md#the-webout-embed).
+`make build` for a real one. Details: [`docs/development/web-out-embed.md`](docs/development/web-out-embed.md).
 
 ## Before you merge: confirm the review happened
 
@@ -85,8 +93,7 @@ Exit 3 = at least one PR is not reviewed. Same trap, other producers: a check
 that concluded `skipped` or `neutral` is green without having run; CodeQL
 findings can live only in a run's annotations; and a re-trigger fired too early
 answers "✅ Action performed — Review finished." while submitting no review at
-all. Details and the re-trigger policy: [CONTRIBUTING.md → Wait for
-CodeRabbit](CONTRIBUTING.md#wait-for-coderabbit--and-check-that-it-actually-reviewed).
+all. Details and the re-trigger policy: [docs/development/coderabbit-review-process.md](docs/development/coderabbit-review-process.md).
 
 ## Architecture map (`internal/`)
 
@@ -203,7 +210,9 @@ does and cannot be, so they are prose and say so.
 
 ## When unsure
 
-Check `docs/prd/` first, then `.claude/context/prd/`, before assuming design or
-requirements. Keep them current after significant changes — and prefer pointing
-at the gate that enforces a fact over restating the fact, because prose with no
-check behind it is the thing that rots.
+Find the right category from [`docs/README.md`](docs/README.md), read the
+spec that matches the task ([`docs/specs/`](docs/specs/README.md)), then the
+proposal that motivated it ([`docs/prd/`](docs/prd/README.md)) — before
+assuming design or requirements. Keep documents current after significant
+changes — and prefer pointing at the gate that enforces a fact over restating
+the fact, because prose with no check behind it is the thing that rots.

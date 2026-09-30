@@ -1,7 +1,7 @@
 package main
 
 // `crewship page create --file` and the sensor half of the document
-// (docs/prd/pages.md §5, §4 rule 4).
+// (docs/specs/pages.md §5, §4 rule 4).
 //
 // The CLI's job here is to carry `wake:` and `on_failure:` from the YAML a
 // human wrote into the JSON the server validates, and to carry them WITHOUT

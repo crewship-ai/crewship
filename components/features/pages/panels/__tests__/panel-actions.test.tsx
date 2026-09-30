@@ -1,5 +1,5 @@
 /**
- * Panel actions — PRD `docs/prd/pages.md` §8b, and the four #1563 rules §8b.5
+ * Panel actions — PRD `docs/specs/pages.md` §8b, and the four #1563 rules §8b.5
  * says must not come back.
  *
  * Every assertion here is about a property somebody could plausibly break

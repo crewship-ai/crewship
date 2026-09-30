@@ -6,7 +6,8 @@ surface is anonymous crash reporting, whose default depends on the
 build flavour (on for prereleases, off for stable releases — details
 below). This page documents what that means in practice.
 
-**Controller:** Unify Technology s.r.o. (Czech Republic).
+**Controller:** Unify Technology, s.r.o. (Czech Republic), Company ID: 17266637.
+**Registered office:** Korunní 2569/108, Vinohrady, 101 00 Praha 10, Czech Republic.
 **Contact:** privacy@unify.cz
 **Supervisory authority:** Úřad pro ochranu osobních údajů (ÚOOÚ), Czech Republic.
 
@@ -25,7 +26,7 @@ equivalent on Linux/Windows:
   OpenAI, …) using the credentials you give it — over HTTPS,
   directly to those providers.
 
-**Crewship sends no usage data to Unify Technology s.r.o.** No usage
+**Crewship sends no usage data to Unify Technology, s.r.o.** No usage
 analytics, no phone-home on agent runs, no metrics. The one exception
 is **crash reporting** (Sentry), which is consent-gated and
 build-flavour-dependent — see "Crash reporting" below.
