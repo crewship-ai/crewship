@@ -20,6 +20,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/inbox"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/leader"
+	"github.com/crewship-ai/crewship/internal/quiesce"
 	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
@@ -957,6 +958,8 @@ func (s *PipelineScheduler) tick(ctx context.Context) {
 	// Leader gate: on a multi-replica deploy only the lease holder fires, so
 	// two replicas don't both dispatch the same due schedule. Nil gate (the
 	// single-instance default) always passes.
+	// quiesce.SchedulerGate also refuses while a backup's quiet window is
+	// closing or held; each fire below registers as its own writer.
 	if s.leaderGate != nil && !s.leaderGate.IsLeader() {
 		return
 	}
@@ -1033,6 +1036,17 @@ func ScheduledFireIdempotencyKey(kind, id, bucket string) string {
 }
 
 func (s *PipelineScheduler) fireOne(ctx context.Context, sched *Schedule) {
+	// A fire is a writer in the backup's quiet window barrier: its schedule
+	// bookkeeping never lands between a snapshot and a file copy. The routine
+	// run itself steps outside the gate (fireSingleOccurrence) — the busy
+	// probe counts it. A window that closed since the tick leaves the
+	// occurrence due for the first tick after release.
+	wr, ok := quiesce.Enter(ctx)
+	if !ok {
+		return
+	}
+	defer wr.Leave()
+	ctx = wr.Context()
 	// Compute the next run BEFORE invoking — if the run takes longer
 	// than the cron interval (e.g. minutely cron + 90s pipeline),
 	// the next_run_at is already in the past when we exit and the
@@ -1277,7 +1291,14 @@ func (s *PipelineScheduler) fireSingleOccurrence(ctx context.Context, sched *Sch
 		IdempotencyKey: ScheduledFireIdempotencyKey("sched", sched.ID, occBucket),
 	}
 
-	res, runErr := s.executor.Run(ctx, in)
+	// The run is running work, not a write the barrier can wait for: step
+	// out of the gate for it and back in (after any window) for the
+	// bookkeeping below.
+	var res *RunResult
+	var runErr error
+	if err := quiesce.Outside(ctx, func() { res, runErr = s.executor.Run(ctx, in) }); err != nil {
+		return
+	}
 
 	// Governance airbag: a routine that is 'proposed' (unapproved) or
 	// 'disabled' (admin-killed) is refused by the executor. On the cron path

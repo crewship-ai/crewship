@@ -16,6 +16,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/orchestrator"
 	"github.com/crewship-ai/crewship/internal/pipeline"
 	"github.com/crewship-ai/crewship/internal/provider"
+	"github.com/crewship-ai/crewship/internal/quiesce"
 	"github.com/crewship-ai/crewship/internal/work"
 	"github.com/robfig/cron/v3"
 )
@@ -107,6 +108,13 @@ func (s *Scheduler) SetLeaderGate(g leader.Gate) { s.leaderGate = g }
 // always may.
 func (s *Scheduler) isLeader() bool {
 	return s.leaderGate == nil || s.leaderGate.IsLeader()
+}
+
+// enter is isLeader for a fire that writes: through quiesce.SchedulerGate it
+// also registers the fire as a writer in the backup's quiet window barrier.
+// Call leave when the fire's writes are done.
+func (s *Scheduler) enter() (leave func(), ok bool) {
+	return quiesce.EnterVia(s.leaderGate)
 }
 
 // New creates a Scheduler that loads cron schedules from the database.

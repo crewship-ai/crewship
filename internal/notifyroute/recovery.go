@@ -11,6 +11,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/notify"
+	"github.com/crewship-ai/crewship/internal/quiesce"
 )
 
 // Recovery tuning. A delivery is retried at most recoveryMaxAttempts times
@@ -47,10 +48,18 @@ func (r *Router) RecoverStuckDeliveries(ctx context.Context) (attempted, sent in
 		return 0, 0
 	}
 	for _, d := range stuck {
+		// Each re-delivery (and the status it records) is one writer in the
+		// backup's quiet window barrier. Once a window starts closing the
+		// rest of the sweep waits for the next pass.
+		wr, ok := quiesce.Enter(ctx)
+		if !ok {
+			break
+		}
 		attempted++
 		if r.recoverOne(ctx, d) {
 			sent++
 		}
+		wr.Leave()
 	}
 	if attempted > 0 {
 		r.logger.Info("notifyroute: recovery sweep", "attempted", attempted, "sent", sent)

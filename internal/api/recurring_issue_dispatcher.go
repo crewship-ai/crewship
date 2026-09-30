@@ -11,6 +11,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/leader"
 	"github.com/crewship-ai/crewship/internal/pipeline"
+	"github.com/crewship-ai/crewship/internal/quiesce"
 	"github.com/crewship-ai/crewship/internal/ws"
 )
 
@@ -105,9 +106,16 @@ func (d *RecurringIssueDispatcher) tick(ctx context.Context) {
 	// Leader gate: only the lease holder fires on a multi-replica deploy, so
 	// two replicas don't both stamp the same due recurring issue. Nil gate
 	// (single-instance default) always passes.
-	if d.leaderGate != nil && !d.leaderGate.IsLeader() {
+	//
+	// Through quiesce.SchedulerGate the tick is also one writer in the
+	// backup's quiet window barrier: it stamps issues and advances schedules,
+	// so a window waits for a tick in progress and no tick starts while one
+	// is closing or held.
+	leave, ok := quiesce.EnterVia(d.leaderGate)
+	if !ok {
 		return
 	}
+	defer leave()
 	rows, err := d.db.QueryContext(ctx, `
 		SELECT id, workspace_id, crew_id, title, description, priority,
 		       project_id, milestone_id, assignee_type, assignee_id, labels_json, cron_expression,

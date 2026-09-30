@@ -6,6 +6,8 @@ import (
 	"log/slog"
 	"sync"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/quiesce"
 )
 
 // defaultDispatchConcurrency bounds how many claimed rows dispatch at
@@ -140,6 +142,13 @@ func (d *PendingRunDispatcher) sweep(ctx context.Context) {
 	if d.paused != nil && d.paused() {
 		return
 	}
+	// The expire pass and the listing are one writer in the backup's quiet
+	// window barrier; each claim below is its own (fireOne).
+	wr, ok := quiesce.Enter(ctx)
+	if !ok {
+		return
+	}
+	defer wr.Leave()
 	now := time.Now().UTC()
 	if n, err := d.store.ExpireDue(ctx, now); err != nil {
 		d.logger.Warn("pending dispatcher: expire", "error", err)
@@ -175,7 +184,15 @@ func (d *PendingRunDispatcher) sweep(ctx context.Context) {
 // through the executor, then backfills the resulting run id.
 func (d *PendingRunDispatcher) fireOne(ctx context.Context, pr PendingRun) {
 	// Claim the row first so a second tick (or replica) can't double-fire.
+	// The claim is a writer in the backup's quiet window barrier: a window
+	// that closed since the sweep leaves the row due for the first sweep
+	// after release. The run it starts is running work from then on.
+	wr, ok := quiesce.Enter(ctx)
+	if !ok {
+		return
+	}
 	claimed, err := d.store.ClaimDue(ctx, pr.ID, time.Now().UTC())
+	wr.Leave()
 	if err != nil {
 		d.logger.Warn("pending dispatcher: claim", "error", err, "pending_id", pr.ID)
 		return
@@ -248,8 +265,13 @@ func (d *PendingRunDispatcher) fireOne(ctx context.Context, pr PendingRun) {
 		return
 	}
 	// Backfill the fired run id now that we have it (claim used "").
+	// The run has finished, so the busy probe no longer counts it: the
+	// backfill is its own writer, and waits out a window rather than landing
+	// inside one.
 	if res != nil {
-		if uerr := d.store.SetFiredRunID(ctx, pr.ID, res.RunID); uerr != nil {
+		if uerr := quiesce.Do(ctx, func(ctx context.Context) error {
+			return d.store.SetFiredRunID(ctx, pr.ID, res.RunID)
+		}); uerr != nil {
 			d.logger.Warn("pending dispatcher: backfill run id", "error", uerr, "pending_id", pr.ID)
 		}
 	}
