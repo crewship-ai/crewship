@@ -2280,6 +2280,15 @@ jobs:
           name: nextjs-static-export
           path: web/out
       - run: bash scripts/embed-web-out.sh verify
+      # The snapshot must carry the same locked dependency license texts as
+      # release/nightly. The frontend export artifact alone has no node_modules.
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: make licenses
       - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94
         with:
           version: v2.6.1
