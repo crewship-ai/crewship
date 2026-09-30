@@ -100,30 +100,30 @@ type serviceBackupFence struct{ crew, token string }
 // captureServiceSnapshots leaves every acquired fence intact on failure. This
 // intentionally requires explicit operator recovery instead of restarting a
 // database whose capture may have failed midway through a consistent snapshot.
-func captureServiceSnapshots(ctx context.Context, db *sql.DB, runtime ServiceSnapshotRuntime, w *TarZstWriter, crews []CrewTarget, now time.Time, recoverMaintenance bool, register func(serviceBackupFence)) ([]serviceBackupFence, int, error) {
+func captureServiceSnapshots(ctx context.Context, db *sql.DB, runtime ServiceSnapshotRuntime, w *TarZstWriter, crews []CrewTarget, now time.Time, recoverMaintenance bool, register func(serviceBackupFence)) ([]serviceBackupFence, []serviceSnapshot, error) {
 	var fences []serviceBackupFence
-	count := 0
+	var captured []serviceSnapshot
 	for _, crew := range crews {
 		var body string
 		if err := db.QueryRowContext(ctx, `SELECT COALESCE(services_json,'') FROM crews WHERE id=?`, crew.ID).Scan(&body); err != nil {
-			return fences, count, err
+			return fences, captured, err
 		}
 		snapshots, err := declaredServiceSnapshots(body, crew.ID, crew.Slug)
 		if err != nil {
-			return fences, count, err
+			return fences, captured, err
 		}
 		if len(snapshots) == 0 {
 			continue
 		}
 		if runtime == nil || runtime.QuotaSnapshotNamespace() == "" {
-			return fences, count, fmt.Errorf("backup: quota service snapshot transport unavailable")
+			return fences, captured, fmt.Errorf("backup: quota service snapshot transport unavailable")
 		}
 		token, err := servicelifecycle.BeginBackupFence(ctx, db, crew.ID, "backup")
 		if err != nil && recoverMaintenance {
 			token, err = servicelifecycle.AdoptBackupFence(ctx, db, crew.ID, "backup")
 		}
 		if err != nil {
-			return fences, count, fmt.Errorf("%w: inspect backup status; only after the producer stops retry with --recover-services", err)
+			return fences, captured, fmt.Errorf("%w: inspect backup status; only after the producer stops retry with --recover-services", err)
 		}
 		fence := serviceBackupFence{crew.ID, token}
 		fences = append(fences, fence)
@@ -132,21 +132,21 @@ func captureServiceSnapshots(ctx context.Context, db *sql.DB, runtime ServiceSna
 		}
 		// Re-read after the atomic mutation fence closes the declaration race.
 		if err = db.QueryRowContext(ctx, `SELECT COALESCE(services_json,'') FROM crews WHERE id=?`, crew.ID).Scan(&body); err != nil {
-			return fences, count, err
+			return fences, captured, err
 		}
 		snapshots, err = declaredServiceSnapshots(body, crew.ID, crew.Slug)
 		if err != nil {
-			return fences, count, err
+			return fences, captured, err
 		}
 		stopped := map[string]bool{}
 		for _, snapshot := range snapshots {
 			snapshot.Namespace = runtime.QuotaSnapshotNamespace()
 			if err = db.QueryRowContext(ctx, `SELECT desired_state,version FROM service_runtime_intents WHERE crew_id=? AND service_name=?`, crew.ID, snapshot.Service).Scan(&snapshot.DesiredState, &snapshot.IntentVersion); err != nil {
-				return fences, count, fmt.Errorf("backup: quota service requires durable intent: %w", err)
+				return fences, captured, fmt.Errorf("backup: quota service requires durable intent: %w", err)
 			}
 			if !stopped[snapshot.Service] {
 				if err = runtime.StopCrewService(ctx, crew.ID, crew.Slug, snapshot.Service); err != nil {
-					return fences, count, err
+					return fences, captured, err
 				}
 				stopped[snapshot.Service] = true
 			}
@@ -162,18 +162,18 @@ func captureServiceSnapshots(ctx context.Context, db *sql.DB, runtime ServiceSna
 			_ = reader.CloseWithError(writeErr)
 			exportErr := <-done
 			if writeErr != nil {
-				return fences, count, writeErr
+				return fences, captured, writeErr
 			}
 			if exportErr != nil {
-				return fences, count, exportErr
+				return fences, captured, exportErr
 			}
 			snapshot.SHA256 = hex.EncodeToString(hasher.Sum(nil))
 			raw, _ := json.Marshal(snapshot)
 			if err = w.WriteFile(serviceSnapshotsPrefix+snapshot.name()+".json", 0600, now, raw); err != nil {
-				return fences, count, err
+				return fences, captured, err
 			}
-			count++
+			captured = append(captured, snapshot)
 		}
 	}
-	return fences, count, nil
+	return fences, captured, nil
 }

@@ -188,6 +188,13 @@ crewship backup restore bundle.tar.zst --use-keyring
 | `--use-keyring` | `bool` | `false` | Read the passphrase from `~/.crewship/backup-keyring.enc` before prompting. |
 | `--replace` | `bool` | `false` | Disaster-recovery path: wipe existing target rows matching the bundle's workspace (by id **or** slug) **before** restore, so the bundle lands with its original IDs after a `nuke` or fresh-instance bootstrap re-took the slug under a new id. Mutually exclusive with `--as-workspace` / `--as-crew`. |
 | `--dry-run` | `bool` | `false` | Verify format / checksum / decrypt, replay the restore tx, then roll back. Writes a `backup.restore.dry_run` audit row. |
+| `--recover-services` | `bool` | `false` | Recover selected interrupted quota service maintenance after prior producer and writer leases expire. |
+
+Quota service restores also support `--recover-services`. Ordinary retries keep
+unknown maintenance fenced. Inspect `backup status` first: a live producer or
+writer lease rejects recovery. Recovery stops exactly owned writers before
+verified image import; a failure never resumes desired service state. The flag
+does not unlock an unrelated live backup.
 
 ### Finishing a renamed restore
 
@@ -314,12 +321,6 @@ crewship backup delete old.tar.zst --force
 | `--yes` | `bool` | `false` | Alias for `--force` — the CLI-wide pre-confirmation convention. |
 
 ---
-
-Quota service restores also support `--recover-services`. Ordinary retries keep
-unknown maintenance fenced. Inspect `backup status` first: a live producer or
-writer lease rejects recovery. Recovery stops exactly owned writers before
-verified image import; a failure never resumes desired service state. The flag
-does not unlock an unrelated live backup.
 
 ## `crewship backup status`
 

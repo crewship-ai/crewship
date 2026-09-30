@@ -213,7 +213,7 @@ func CreateBackup(ctx context.Context, db *sql.DB, opts CreateOptions) (result *
 		return nil, err
 	}
 
-	if err := requireSupportedServiceBackups(ctx, db, target.CrewTargets); err != nil {
+	if err := requireSupportedServiceBackups(ctx, db, target.CrewTargets, opts.ServiceSnapshots); err != nil {
 		return nil, err
 	}
 
@@ -360,7 +360,7 @@ func CreateBackup(ctx context.Context, db *sql.DB, opts CreateOptions) (result *
 	ctx = captureCtx
 	fenceKeeper := &serviceFenceKeeper{db: db}
 	go fenceKeeper.run(ctx, cancelCapture)
-	serviceFences, serviceSnapshotCount, err := captureServiceSnapshots(ctx, db, opts.ServiceSnapshots, payloadWriter, target.CrewTargets, now, opts.RecoverServiceMaintenance, fenceKeeper.add)
+	serviceFences, capturedServiceSnapshots, err := captureServiceSnapshots(ctx, db, opts.ServiceSnapshots, payloadWriter, target.CrewTargets, now, opts.RecoverServiceMaintenance, fenceKeeper.add)
 	if err != nil {
 		_ = payloadWriter.Close()
 		_ = payloadFile.Close()
@@ -378,6 +378,7 @@ func CreateBackup(ctx context.Context, db *sql.DB, opts CreateOptions) (result *
 			}
 		}
 	}()
+	serviceSnapshotCount := len(capturedServiceSnapshots)
 	// 5a. Per-crew live data.
 	level := opts.Level
 	if !level.Valid() {
@@ -439,23 +440,10 @@ func CreateBackup(ctx context.Context, db *sql.DB, opts CreateOptions) (result *
 		return nil, err
 	}
 	if dump != nil {
-		declaredCount := 0
-		for _, row := range dump.Tables["crews"] {
-			body, _ := row["services_json"].(string)
-			crewID, _ := row["id"].(string)
-			slug, _ := row["slug"].(string)
-			snapshots, parseErr := declaredServiceSnapshots(body, crewID, slug)
-			if parseErr != nil {
-				_ = payloadWriter.Close()
-				_ = payloadFile.Close()
-				return nil, parseErr
-			}
-			declaredCount += len(snapshots)
-		}
-		if declaredCount != serviceSnapshotCount {
+		if err := requireSupportedDumpServiceBackups(dump, capturedServiceSnapshots); err != nil {
 			_ = payloadWriter.Close()
 			_ = payloadFile.Close()
-			return nil, fmt.Errorf("backup: quota declaration changed during capture")
+			return nil, err
 		}
 		if err := WriteDBSection(payloadWriter, dump, now); err != nil {
 			_ = payloadWriter.Close()

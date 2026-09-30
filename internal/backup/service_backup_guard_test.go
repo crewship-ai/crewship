@@ -10,7 +10,7 @@ import (
 	"testing"
 )
 
-const guardedQuotaServices = `[{"name":"db","quota_enforced":true,"volumes":[{"name":"data","generation":"g1","quota_bytes":33554432}]}]`
+const guardedQuotaServices = `[{"name":"db","quota_enforced":true,"volumes":[{"name":"data","generation":7,"mount":"/data","quota_bytes":33554432}]}]`
 
 func TestCreateBackupRejectsStandaloneServiceData(t *testing.T) {
 	db := openMigratedDBCov(t)
@@ -36,18 +36,18 @@ func TestCreateBackupRejectsStandaloneServiceData(t *testing.T) {
 
 func TestServiceBackupConfigurationGuard(t *testing.T) {
 	for _, raw := range []string{"", "[]", "null", `[{"name":"legacy","volumes":[{"name":"data"}]}]`, `[{"quota_enforced":true}]`} {
-		if err := requireSupportedServiceConfig(raw); err != nil {
+		if err := requireSupportedServiceConfig(raw, false); err != nil {
 			t.Fatalf("valid declaration rejected: %v", err)
 		}
 	}
 	for _, raw := range []string{guardedQuotaServices, "{", `{ "private-secret": "do-not-print" }`, "crewsvc:invalid-secret"} {
-		err := requireSupportedServiceConfig(raw)
+		err := requireSupportedServiceConfig(raw, false)
 		if err == nil || strings.Contains(err.Error(), "do-not-print") || strings.Contains(err.Error(), "invalid-secret") {
 			t.Fatalf("unsafe error: %v", err)
 		}
 	}
 	for _, value := range []any{guardedQuotaServices, []byte(guardedQuotaServices), 123} {
-		if err := requireSupportedDumpServiceBackups(&DBDump{Tables: map[string][]map[string]any{"crews": {{"services_json": value}}}}); err == nil {
+		if err := requireSupportedDumpServiceBackups(&DBDump{Tables: map[string][]map[string]any{"crews": {{"services_json": value}}}}, nil); err == nil {
 			t.Fatalf("dump accepted %T", value)
 		}
 	}
@@ -86,8 +86,51 @@ func TestServiceBackupGuardPreservesCancellation(t *testing.T) {
 	_, crew := seedCovWorkspace(t, db, "cancelguard")
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
-	err := requireSupportedServiceBackups(ctx, db, []CrewTarget{{ID: crew}})
+	err := requireSupportedServiceBackups(ctx, db, []CrewTarget{{ID: crew}}, nil)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("lost query cancellation: %v", err)
+	}
+}
+
+func TestServiceBackupDumpRequiresExactCapturedIdentityAndIntent(t *testing.T) {
+	proof := serviceSnapshot{Namespace: "synthetic-instance", CrewID: "crew", CrewSlug: "crew-slug", Service: "db", Volume: "data", Generation: 7, Bytes: 33554432, SHA256: strings.Repeat("a", 64), DesiredState: "running", IntentVersion: 9}
+	row := map[string]any{"id": "crew", "slug": "crew-slug", "services_json": guardedQuotaServices}
+	intent := map[string]any{"crew_id": "crew", "service_name": "db", "desired_state": "running", "version": int64(9)}
+	dump := &DBDump{Tables: map[string][]map[string]any{"crews": {row}, "service_runtime_intents": {intent}}}
+	if err := requireSupportedDumpServiceBackups(dump, []serviceSnapshot{proof}); err != nil {
+		t.Fatal(err)
+	}
+	for _, mutate := range []func(){
+		func() {
+			row["services_json"] = strings.ReplaceAll(guardedQuotaServices, `"generation":7`, `"generation":8`)
+		},
+		func() { row["services_json"] = strings.ReplaceAll(guardedQuotaServices, `33554432`, `67108864`) },
+		func() { row["id"] = "foreign-crew" },
+		func() { intent["version"] = int64(10) },
+		func() { intent["desired_state"] = "stopped" },
+	} {
+		row["id"] = "crew"
+		row["services_json"] = guardedQuotaServices
+		intent["version"] = int64(9)
+		intent["desired_state"] = "running"
+		mutate()
+		if err := requireSupportedDumpServiceBackups(dump, []serviceSnapshot{proof}); err == nil {
+			t.Fatal("same-count mutable dump bypassed snapshot consistency")
+		}
+	}
+}
+
+func TestServiceBackupAdmissionAcceptsOnlyConfiguredHostTransport(t *testing.T) {
+	db := openMigratedDBCov(t)
+	_, crew := seedCovWorkspace(t, db, "configured_snapshot_guard")
+	if _, err := db.Exec(`UPDATE crews SET services_json=? WHERE id=?`, guardedQuotaServices, crew); err != nil {
+		t.Fatal(err)
+	}
+	target := []CrewTarget{{ID: crew}}
+	if err := requireSupportedServiceBackups(t.Context(), db, target, nil); err == nil {
+		t.Fatal("missing transport admitted quota data")
+	}
+	if err := requireSupportedServiceBackups(t.Context(), db, target, &snapshotProbe{}); err != nil {
+		t.Fatal(err)
 	}
 }

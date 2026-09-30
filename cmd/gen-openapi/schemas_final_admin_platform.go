@@ -52,7 +52,7 @@ func finalAdminPlatformSchemaCatalog() (map[string]DomainSchema, map[string]any)
 		"path": str(), "file_name": str(), "size_bytes": integer(), "scope": str(), "scope_level": str(),
 		"encrypted": boolean(), "created_at": str(), "format_version": integer(),
 	})
-	backupStatus := object(map[string]any{"held": boolean(), "workspace_id": str(), "acquired_by": str(), "acquired_at": str(), "expires_at": str()})
+	backupStatus := object(map[string]any{"held": boolean(), "workspace_id": str(), "acquired_by": str(), "acquired_at": str(), "expires_at": str(), "service_maintenance": array(object(map[string]any{"crew_id": str(), "crew_slug": str(), "operation": str(), "created_at": str(), "producer_live": boolean()}, "crew_id", "crew_slug", "operation", "created_at", "producer_live"))}, "held", "service_maintenance")
 	// One table whose recorded row count disagrees with what was actually
 	// found (backup.TableRowCountMismatch). Shared by verify and restore.
 	rowCountMismatch := object(map[string]any{"table": str(), "recorded": integer(), "actual": integer()}, "table", "recorded", "actual")

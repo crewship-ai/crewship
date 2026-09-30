@@ -307,6 +307,7 @@ var responseShapeContracts = []struct {
 	{name: "Run", pointer: "/components/schemas/Run", value: runResponse{}},
 	{name: "RunList", pointer: "/components/schemas/RunList", value: runListResponse{}},
 	{name: "CrewAssignmentsResponseV1[]", pointer: "/components/schemas/CrewAssignmentsResponseV1/items", value: assignmentListItem{}},
+	{name: "GET /api/v1/admin/backups/status", pointer: "/components/schemas/FinalAdminPlatformBackupStatus", value: backupStatusResponse{}},
 	{name: "GET /api/v1/admin/backups/verify", pointer: "/components/schemas/FinalAdminPlatformBackupVerify", value: backupVerifyResponse{}},
 	{name: "POST /api/v1/admin/backups/restore", pointer: "/components/schemas/FinalAdminPlatformBackupRestore", value: backupRestoreResponse{}},
 	{name: "POST .../trigger 202", pointer: "/components/schemas/FinalWebhookFire/oneOf/0", value: webhook.AcceptedReceipt{}},

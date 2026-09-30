@@ -12,6 +12,15 @@ import (
 	"github.com/crewship-ai/crewship/internal/backup"
 )
 
+type backupStatusResponse struct {
+	ServiceMaintenance []backup.ServiceMaintenance `json:"service_maintenance" yaml:"service_maintenance"`
+	Held               bool                        `json:"held" yaml:"held"`
+	WorkspaceID        string                      `json:"workspace_id,omitempty" yaml:"workspace_id,omitempty"`
+	AcquiredBy         string                      `json:"acquired_by,omitempty" yaml:"acquired_by,omitempty"`
+	AcquiredAt         string                      `json:"acquired_at,omitempty" yaml:"acquired_at,omitempty"`
+	ExpiresAt          string                      `json:"expires_at,omitempty" yaml:"expires_at,omitempty"`
+}
+
 func (h *BackupHandler) List(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	role := RoleFromContext(ctx)
@@ -165,16 +174,7 @@ func (h *BackupHandler) Status(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	type statusResp struct {
-		ServiceMaintenance []backup.ServiceMaintenance `json:"service_maintenance" yaml:"service_maintenance"`
-		Held               bool                        `json:"held"`
-		WorkspaceID        string                      `json:"workspace_id,omitempty"`
-		AcquiredBy         string                      `json:"acquired_by,omitempty"`
-		AcquiredAt         string                      `json:"acquired_at,omitempty"`
-		ExpiresAt          string                      `json:"expires_at,omitempty"`
-	}
-
-	var out statusResp
+	var out backupStatusResponse
 	out.WorkspaceID = workspaceID
 	maintenance, err := backup.ServiceMaintenanceStatus(ctx, h.db, workspaceID)
 	if err != nil {
