@@ -105,6 +105,7 @@ or a listed endpoint nobody calls.
 | `ContainerWait` | `POST /containers/{id}/wait` | Blocks on one-shot helpers (secrets sweep, image cache warm) |
 | `ContainerPause` | `POST /containers/{id}/pause` | Quiesces a crew for a consistent backup |
 | `ContainerUnpause` | `POST /containers/{id}/unpause` | Resumes it afterwards |
+| `ContainerUpdate` | `POST /containers/{id}/update` | Applies managed service resource bounds before startup and recovery |
 | `CopyToContainer` | `HEAD` + `PUT /containers/{id}/archive` | Writes devcontainer features, restored backups, the sidecar binary |
 | `CopyFromContainer` | `GET /containers/{id}/archive` | Streams crew content out for a backup |
 | `ExecCreate` | `POST /containers/{id}/exec` | Creates the exec session an agent turn runs in |
@@ -212,12 +213,12 @@ inside the Crewship process is inconvenienced, not stopped.
 **The granularity is a path prefix, not an endpoint.** The table above is what
 *we* call. What the proxy *opens* is five whole namespaces. `CONTAINERS: 1` also
 allows `POST /containers/prune` (removes every stopped container on the host),
-`POST /containers/{id}/kill`, `POST /containers/{id}/update` (raise resource
-limits), `GET /containers/{id}/logs` and `GET /containers/{id}/export` —
+`POST /containers/{id}/kill`; the permitted update endpoint can also raise resource
+limits. It also permits `GET /containers/{id}/logs` and `GET /containers/{id}/export` —
 including for containers that have nothing to do with Crewship. `IMAGES: 1` also
 allows `POST /images/prune` and `POST /images/{name}/push`. `VOLUMES: 1` also
 allows `POST /volumes/prune`. The proxy has no way to express "only these
-thirty-one calls".
+listed calls".
 
 **You have moved the trust, not removed it.** The proxy container is now the one
 holding the socket. It is a smaller, simpler process than Crewship, which is a
