@@ -63,7 +63,19 @@ func (d Docker) checkVolume(ctx context.Context, p Plan, m Mount, name string) e
 		Options map[string]string
 		Labels  map[string]string
 	}
-	if json.Unmarshal(b, &v) != nil || len(v) != 1 || v[0].Driver != "local" || len(v[0].Options) != 0 {
+	if json.Unmarshal(b, &v) != nil || len(v) != 1 || v[0].Driver != "local" {
+		return ErrDenied
+	}
+	if p.NativeInputs != nil {
+		if !validNativeInputPlan(p) || m != p.Mounts[0] || !strings.HasPrefix(name, "crewship-rtest-input-") || len(v[0].Options) != len(nativeInputVolumeOptions) {
+			return ErrDenied
+		}
+		for key, expected := range nativeInputVolumeOptions {
+			if v[0].Options[key] != expected {
+				return ErrDenied
+			}
+		}
+	} else if len(v[0].Options) != 0 {
 		return ErrDenied
 	}
 	for k, want := range resourceLabels(p, m.Resource) {
@@ -112,6 +124,12 @@ func (d Docker) create(ctx context.Context, p Plan, c Catalog, l Limits, owner s
 		return "", e
 	}
 	args := []string{"create", "--pull=never", "--name", "crewship-rtest-" + owner + "-" + p.Attempt, "--label", labelPrefix + "owner=" + owner, "--label", labelPrefix + "attempt=" + p.Attempt, "--label", labelPrefix + "plan=" + p.fingerprint(), "--user", "1002:1002", "--read-only", "--network", "none", "--ipc", "private", "--cgroupns", "private", "--runtime", "runc", "--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--init", "--restart", "no", "--memory", fmt.Sprint(l.MemoryBytes), "--memory-swap", fmt.Sprint(l.MemoryBytes), "--cpus", fmt.Sprintf("%.9f", float64(l.NanoCPUs)/1e9), "--pids-limit", fmt.Sprint(l.PIDs), "--shm-size", "1048576", "--log-driver", "none", "--ulimit", "nofile=256:256", "--ulimit", "core=0:0"}
+	nativeOpts, cleanup, e := nativeSecurityOptions(ctx, p)
+	if e != nil {
+		return "", e
+	}
+	defer cleanup()
+	args = append(args, nativeOpts...)
 	for _, target := range []string{"/home/agent", "/secrets", "/broker", "/tmp"} {
 		args = append(args, "--tmpfs", target+":"+privateTmpfs()[target])
 	}

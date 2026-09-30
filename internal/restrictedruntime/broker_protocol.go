@@ -28,6 +28,7 @@ type brokerFrame struct {
 	Limits             map[string]int64
 	Streams            map[string]int64 `json:",omitempty"`
 	ResponsesOperation string           `json:",omitempty"`
+	BufferedOperation  string           `json:",omitempty"`
 }
 
 func readBrokerFrame(r io.Reader, dst *brokerFrame) error {
@@ -90,6 +91,9 @@ func RunHTTPBroker(ctx context.Context, input io.Reader, output io.Writer) error
 		if _, ok := cfg.Limits[cfg.ResponsesOperation]; !ok || cfg.Streams[cfg.ResponsesOperation] == 0 {
 			return ErrDenied
 		}
+	}
+	if cfg.BufferedOperation != "" && (cfg.BufferedOperation != cfg.ResponsesOperation || cfg.Streams[cfg.BufferedOperation] == 0) {
+		return ErrDenied
 	}
 	listener, err := net.Listen("tcp4", brokerAddress)
 	if err != nil {
@@ -155,6 +159,8 @@ func RunHTTPBroker(ctx context.Context, input io.Reader, output io.Writer) error
 		}
 		streaming := false
 		var streamed int64
+		buffered := id == cfg.BufferedOperation
+		var pending bytes.Buffer
 		abort := func() {
 			// A late reply must never become the response to another request.
 			_ = listener.Close()
@@ -178,25 +184,35 @@ func RunHTTPBroker(ctx context.Context, input io.Reader, output io.Writer) error
 					streaming = true
 					w.Header().Set("Content-Type", "text/event-stream")
 					w.Header().Set("Cache-Control", "no-store")
-					w.WriteHeader(200)
+					if !buffered {
+						w.WriteHeader(200)
+					}
 				case "stream_chunk":
 					streamed += int64(len(f.Body))
 					if !streaming || len(f.Body) == 0 || streamed > cfg.Streams[id] {
 						abort()
 					}
-					if _, e := w.Write(f.Body); e != nil {
+					if buffered {
+						_, _ = pending.Write(f.Body)
+					} else if _, e := w.Write(f.Body); e != nil {
 						abort()
 					}
 				case "stream_end":
 					if !streaming || f.Status != 200 || len(f.Body) != 0 {
 						abort()
 					}
+					if buffered {
+						w.WriteHeader(200)
+						_, _ = w.Write(pending.Bytes())
+					}
 					return
 				default:
 					abort()
 				}
-				if e := http.NewResponseController(w).Flush(); e != nil {
-					abort()
+				if !buffered {
+					if e := http.NewResponseController(w).Flush(); e != nil {
+						abort()
+					}
 				}
 			case <-stopped:
 				abort()

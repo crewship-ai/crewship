@@ -9,6 +9,7 @@ import (
 	"crypto/subtle"
 	"crypto/tls"
 	"encoding/hex"
+	"encoding/json"
 	"io"
 	"net"
 	"net/http"
@@ -78,18 +79,22 @@ func (s *Session) startBroker(ctx context.Context) (string, error) {
 	limits := map[string]int64{}
 	streams := map[string]int64{}
 	responsesOperation := ""
+	bufferedOperation := ""
 	for _, g := range s.plan.Network.Grants {
 		limits[g.ID] = g.MaxRequest
 		if g.ResponseMode == "sse" {
 			streams[g.ID] = g.MaxResponse
 		}
-		if g.Responses != nil {
+		if g.Native != nil {
+			bufferedOperation = g.ID
+		}
+		if g.Responses != nil || g.Native != nil {
 			responsesOperation = g.ID
 		}
 	}
 	ready := make(chan error, 1)
 	go func() {
-		err := writeBrokerFrame(in, brokerFrame{Kind: "configure", Token: token, Limits: limits, Streams: streams, ResponsesOperation: responsesOperation})
+		err := writeBrokerFrame(in, brokerFrame{Kind: "configure", Token: token, Limits: limits, Streams: streams, ResponsesOperation: responsesOperation, BufferedOperation: bufferedOperation})
 		if err == nil {
 			var f brokerFrame
 			err = readBrokerFrame(out, &f)
@@ -141,7 +146,7 @@ func (s *Session) brokerAuthorized(ctx context.Context) error {
 		return ErrDenied
 	}
 	p, err := resolve(ctx, s.manager.Authority, s.handle, map[string]bool{})
-	if err != nil || p.fingerprint() != s.plan.fingerprint() {
+	if err != nil || p.fingerprint() != s.plan.fingerprint() || (p.NativeSandbox != "" && NativeSandboxReady(ctx) != nil) {
 		return ErrDenied
 	}
 	return nil
@@ -181,6 +186,20 @@ func (s *Session) brokerExchange(parent context.Context, token string, req broke
 		var err error
 		req.Body, err = grant.Responses.responsesBody(req.Body)
 		if err != nil || int64(len(req.Body)) > grant.MaxRequest {
+			return denied
+		}
+	}
+	var native NativeBrokerAuthority
+	var nativeTicket string
+	if grant.Native != nil {
+		var ok bool
+		native, ok = s.manager.Authority.(NativeBrokerAuthority)
+		if !ok {
+			return denied
+		}
+		var err error
+		req.Body, nativeTicket, err = native.NativeRequest(ctx, s.handle, grant.CredentialID, req.Body)
+		if err != nil || nativeTicket == "" || int64(len(req.Body)) > grant.MaxRequest {
 			return denied
 		}
 	}
@@ -252,13 +271,69 @@ func (s *Session) brokerExchange(parent context.Context, token string, req broke
 	}
 	// Disable implicit replay even for idempotent operations.
 	request.GetBody = nil
+	var accounting BrokerAccountingAuthority
+	var reservation string
+	usage := BrokerUsage{}
+	if grant.Responses != nil || grant.Native != nil {
+		var ok bool
+		accounting, ok = s.manager.Authority.(BrokerAccountingAuthority)
+		if !ok {
+			return denied
+		}
+		// One token per UTF-8 byte plus framing for at most 256 messages is a
+		// pessimistic bound for this closed text adapter, including instructions.
+		var body struct {
+			MaxOutputTokens int64 `json:"max_output_tokens"`
+		}
+		if json.Unmarshal(req.Body, &body) != nil {
+			return denied
+		}
+		model := ""
+		if grant.Responses != nil {
+			model = grant.Responses.Model
+		}
+		if grant.Native != nil {
+			model = grant.Native.Model
+		}
+		maxInput := int64(len(req.Body)) + 16384
+		if grant.Native != nil {
+			maxInput = grant.Native.InputTokenCeiling
+		}
+		reservation, err = accounting.BrokerReserve(ctx, s.handle, grant.CredentialID, model, maxInput, body.MaxOutputTokens)
+		if err != nil || reservation == "" {
+			return denied
+		}
+		defer func() {
+			settleCtx, settleCancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer settleCancel()
+			_ = accounting.BrokerSettle(settleCtx, s.handle, reservation, usage)
+		}()
+		// Reservation DB I/O can race revocation. Never dispatch on stale authority.
+		if s.brokerAuthorized(ctx) != nil {
+			return denied
+		}
+	}
 	response, err := client.Do(request)
 	if err != nil {
 		return brokerFrame{Kind: "response", Status: 502}
 	}
 	defer response.Body.Close()
+	if grant.Native != nil {
+		result, known := s.brokerNativeStream(ctx, response, *grant, secret, native, nativeTicket, emit)
+		usage = known
+		return result
+	}
 	if grant.ResponseMode == "sse" {
-		return s.brokerStream(ctx, response, *grant, secret, emit)
+		if grant.Responses == nil {
+			return s.brokerStream(ctx, response, *grant, secret, emit)
+		}
+		var captured bytes.Buffer
+		response.Body = &accountingReadCloser{Reader: io.TeeReader(response.Body, &captured), Closer: response.Body}
+		result := s.brokerStream(ctx, response, *grant, secret, emit)
+		if result.Kind == "stream_end" && result.Status == 200 {
+			usage = terminalResponsesUsage(captured.Bytes(), grant.Responses.Model)
+		}
+		return result
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 || strings.Contains(strings.ToLower(response.Header.Get("Content-Type")), "text/event-stream") || response.Header.Get("Upgrade") != "" || (response.Header.Get("Content-Encoding") != "" && response.Header.Get("Content-Encoding") != "identity") {
 		return brokerFrame{Kind: "response", Status: 502}
@@ -278,4 +353,10 @@ func (s *Session) brokerExchange(parent context.Context, token string, req broke
 		return brokerFrame{Kind: "response", Status: 502}
 	}
 	return brokerFrame{Kind: "response", Status: response.StatusCode, Body: body}
+}
+
+// accountingReadCloser preserves closure while collecting bounded provider data.
+type accountingReadCloser struct {
+	io.Reader
+	io.Closer
 }

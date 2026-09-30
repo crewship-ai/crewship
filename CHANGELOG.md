@@ -14,6 +14,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Improved
 
+- Isolated execution packages support typed text and native Codex workers, readonly immutable project snapshots, independent delegated provider slots and bounded private workflows. HTTP and startup activation remain gated until the application integration is installed. (#2711)
+
 - ⚠️ **Behaviour change:** Legacy sidecar provider traffic is denied when an enabled hard budget cannot be attributed or reserved. Missing terminal usage retains a conservative debit; managed sidecars must be reconciled after upgrade. (#2711)
 
 - Backup creation rejects crews and workspaces with standalone quota service volumes until their snapshot transport is available, preventing successful bundles that omit service data. (#2703)
