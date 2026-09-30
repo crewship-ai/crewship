@@ -33,6 +33,9 @@ function LoginForm() {
   // the API response is.
   const signupSubmitted = searchParams.get("signup") === "submitted"
   const expired = searchParams.get("reason") === "expired"
+  // A sign-in refused on the server side (e.g. Google for a suspended
+  // account) lands here; like a wrong password, it does not say why.
+  const refused = searchParams.get("error") === "signin"
   const redirectTarget = safeRedirectPath(searchParams.get("redirect"))
   const { signIn } = useAuth()
   // First-run gate: on an empty Crewship install the visitor should
@@ -142,6 +145,11 @@ function LoginForm() {
                 aria-live="polite"
               >
                 Your session expired. Please sign in again.
+              </div>
+            )}
+            {refused && !error && (
+              <div className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive" role="alert">
+                We could not sign you in. Try again, or ask your administrator.
               </div>
             )}
             {error && (

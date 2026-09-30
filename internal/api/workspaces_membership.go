@@ -471,17 +471,14 @@ func (h *WorkspaceHandler) CreateInvitation(w http.ResponseWriter, r *http.Reque
 // instance route writes its audit entry there so the removal and its record
 // land together.
 func departWorkspace(ctx context.Context, db *sql.DB, j journal.Emitter, actorID, workspaceID, memberUserID string, alsoInTx ...func(*sql.Tx) error) error {
-	// Transfer BEFORE the membership row goes — a precondition, not a
-	// cleanup step, exactly as admin_gdpr.go's erasure cascade treats it.
-	// A refusal here must leave the member in place: proceeding with the
-	// DELETE anyway is precisely the "worse than the orphan the rule
-	// forbids" state issue #1952 describes — an owner with no standing in
-	// the workspace who still owns the page.
-	if _, err := transferDepartingUserPages(ctx, db, j, actorID, workspaceID, memberUserID); err != nil {
-		return err // *ErrPagesNeedManualTransfer passes through for a 409
-	}
-
-	// The departure itself: the workspace_members row AND every crew
+	// The page transfer comes first, inside the departure's transaction — a
+	// precondition, not a cleanup step, exactly as admin_gdpr.go's erasure
+	// cascade treats it. A refusal must leave the member in place:
+	// proceeding with the DELETE anyway is precisely the "worse than the
+	// orphan the rule forbids" state issue #1952 describes — an owner with
+	// no standing in the workspace who still owns the page.
+	//
+	// The departure itself: the pages, the workspace_members row AND every crew
 	// membership the user held in this workspace, in one transaction. Both or
 	// neither — a member who is workspace-removed but still crew-attached is
 	// the exact state issue #1976 reports, and a crash between two separate
@@ -490,7 +487,7 @@ func departWorkspace(ctx context.Context, db *sql.DB, j journal.Emitter, actorID
 	// write lock up front (same idiom as workspaces_delete.go).
 	//
 	// Ordering is load-bearing: the crew purge runs AFTER
-	// transferDepartingUserPages above, because §7.1 rule 1b's rule 2 ("else
+	// transferDepartingUserPagesTx below, because §7.1 rule 1b's rule 2 ("else
 	// the crew the departing user belonged to", resolveTransferTargetCrew in
 	// pages_transfer_owner.go) resolves the page's new owner by reading these
 	// very rows. Purge them first and rule 2 stops resolving, turning
@@ -500,6 +497,15 @@ func departWorkspace(ctx context.Context, db *sql.DB, j journal.Emitter, actorID
 		return fmt.Errorf("begin member removal tx: %w", err)
 	}
 	defer tx.Rollback()
+
+	// The page transfer runs in the same transaction, first: it reads the
+	// crew rows purged below, and it has to roll back with the rest of the
+	// departure — a removal that fails (or whose audit entry cannot be
+	// written) must not leave the person's pages already handed over.
+	transferred, err := transferDepartingUserPagesTx(ctx, tx, workspaceID, memberUserID)
+	if err != nil {
+		return err // *ErrPagesNeedManualTransfer passes through for a 409
+	}
 
 	if _, err := tx.ExecContext(ctx,
 		"DELETE FROM workspace_members WHERE user_id = ? AND workspace_id = ?",
@@ -533,5 +539,6 @@ func departWorkspace(ctx context.Context, db *sql.DB, j journal.Emitter, actorID
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit member removal: %w", err)
 	}
+	emitPageOwnerTransferJournals(ctx, j, workspaceID, actorID, memberUserID, transferred)
 	return nil
 }

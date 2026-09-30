@@ -118,6 +118,37 @@ func transferDepartingUserPages(ctx context.Context, db *sql.DB, j journal.Emitt
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	results, err := transferDepartingUserPagesTx(ctx, tx, wsID, userID)
+	if err != nil || len(results) == 0 {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit pages transfer: %w", err)
+	}
+	emitPageOwnerTransferJournals(ctx, j, wsID, actorID, userID, results)
+	return results, nil
+}
+
+// emitPageOwnerTransferJournals writes the journal entries for committed
+// transfers. Post-commit and best-effort (mirroring
+// PageHandler.journalGrantChange in pages_grants.go): the transfer itself
+// must not be held hostage to the journal writer, but a transfer nobody can
+// audit is not what §7.1 rule 1b asked for, so a failure is logged loudly
+// rather than swallowed.
+func emitPageOwnerTransferJournals(ctx context.Context, j journal.Emitter, wsID, actorID, userID string, results []pageOwnerTransferResult) {
+	if j == nil {
+		j = noopEmitter{}
+	}
+	for _, res := range results {
+		emitPageOwnerTransferJournal(ctx, j, wsID, actorID, userID, res)
+	}
+}
+
+// transferDepartingUserPagesTx is the transfer inside a caller's transaction,
+// so it commits or rolls back with the rest of a departure (the membership
+// rows, and on the instance route the audit entry). It neither commits nor
+// writes the journal; the caller does both.
+func transferDepartingUserPagesTx(ctx context.Context, tx *sql.Tx, wsID, userID string) ([]pageOwnerTransferResult, error) {
 	type pageRow struct{ id, slug, name string }
 	var pages []pageRow
 	rows, err := tx.QueryContext(ctx,
@@ -200,19 +231,6 @@ func transferDepartingUserPages(ctx context.Context, db *sql.DB, j journal.Emitt
 			ToCrewName: t.crewName,
 			Reason:     t.reason,
 		})
-	}
-
-	if err := tx.Commit(); err != nil {
-		return nil, fmt.Errorf("commit pages transfer: %w", err)
-	}
-
-	// Journal entries are emitted post-commit (best-effort, mirroring
-	// PageHandler.journalGrantChange in pages_grants.go): the transfer
-	// itself must not be held hostage to the journal writer, but a
-	// transfer nobody can audit is not what §7.1 rule 1b asked for, so a
-	// failure here is logged loudly rather than swallowed.
-	for _, res := range results {
-		emitPageOwnerTransferJournal(ctx, j, wsID, actorID, userID, res)
 	}
 
 	return results, nil

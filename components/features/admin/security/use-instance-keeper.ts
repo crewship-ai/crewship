@@ -186,8 +186,14 @@ export function useInstanceKeeper(selected: string[] | null, liveTick = 0, filte
     }
   }, [scope, url])
 
+  // One next-page read at a time: a second click while one is in flight
+  // would ask for the same offset and append the page twice.
+  const loadingMore = React.useRef(false)
+
   /** The next page of the same query, appended. */
   const loadMore = React.useCallback(async () => {
+    if (loadingMore.current) return
+    loadingMore.current = true
     const g = generation.current.requests
     const have = requests?.items.length ?? 0
     try {
@@ -198,6 +204,8 @@ export function useInstanceKeeper(selected: string[] | null, liveTick = 0, filte
       setRequests((prev) => prev ? { ...body, items: [...prev.items, ...body.items] } : body)
     } catch {
       /* the button stays; a retry is one click */
+    } finally {
+      loadingMore.current = false
     }
   }, [requests, url])
 

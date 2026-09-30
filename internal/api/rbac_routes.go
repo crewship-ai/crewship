@@ -316,7 +316,9 @@ func (r *Router) authedAdminPeople(method, pattern string, h http.HandlerFunc) {
 func (r *Router) workspaceOrInstanceAdmin(next http.Handler) http.Handler {
 	withWorkspace := r.authMw.RequireWorkspace(next)
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		named := req.URL.Query().Get("workspace_id") != "" || req.PathValue("workspaceId") != "" || req.Header.Get("X-Workspace-ID") != ""
+		// The People routes carry no {workspaceId} in the path, so the query
+		// and the header are the only ways a request names one.
+		named := req.URL.Query().Get("workspace_id") != "" || req.Header.Get("X-Workspace-ID") != ""
 		if !named && isInstanceAdmin(req, r.db) {
 			next.ServeHTTP(w, req.WithContext(context.WithValue(req.Context(), ctxInstanceAdmin, true)))
 			return

@@ -104,3 +104,25 @@ func TestInstanceMutationsRollBackWhenTheAuditCannotBeWritten(t *testing.T) {
 		})
 	}
 }
+
+// Removing a member first hands their pages to a crew. That hand-over is part
+// of the removal: when the audit entry cannot be written the pages stay with
+// the person, exactly like the membership (review follow-up, 2026-09-30).
+func TestInstanceRemoveMemberKeepsThePagesWhenTheAuditFails(t *testing.T) {
+	f := newInstanceFixture(t)
+	wmSeedCrew(t, f.db, "ws-old", "rv-crew", "Review", "review")
+	wmSeedCrewMember(t, f.db, "rv-crew", "wsadmin")
+	wmSeedPage(t, f.db, "ws-old", "rv-page", "review", "Review", "wsadmin", "")
+	mustExec(t, f.db, `CREATE TRIGGER reject_instance_audit BEFORE INSERT ON instance_audit_logs BEGIN SELECT RAISE(ABORT, 'audit unavailable'); END`)
+
+	rr := f.do(f.boss, "DELETE", "/api/v1/admin/instance/workspaces/ws-old/members/wsadmin", "")
+	wantCode(t, rr, http.StatusInternalServerError, "remove with the audit failing")
+
+	var owner, crew string
+	if err := f.db.QueryRow(`SELECT COALESCE(owner_user_id,''), COALESCE(owner_crew_id,'') FROM pages WHERE id = 'rv-page'`).Scan(&owner, &crew); err != nil {
+		t.Fatal(err)
+	}
+	if owner != "wsadmin" || crew != "" || f.role("ws-old", "wsadmin") == "" {
+		t.Fatalf("page owner = %q/%q, membership = %q; want everything as it was", owner, crew, f.role("ws-old", "wsadmin"))
+	}
+}

@@ -137,3 +137,34 @@ describe("R5 · green only after a check that ran", () => {
     expect(card).not.toHaveTextContent("Nothing yet")
   })
 })
+
+describe("follow-up · the same page loads once, and a preview belongs to one moment", () => {
+  it("does not append the same page twice when Load more is clicked twice", async () => {
+    let finish: (v: unknown) => void = () => {}
+    const second = new Promise((resolve) => { finish = resolve })
+    const page = (ids: string[]) => res({ items: ids.map((id) => ({ id })), total: 3, counts: {}, by_workspace: [], by_type: {} })
+    h.api.mockImplementation((url: string) => {
+      if (url.includes("/requests?")) return url.includes("offset=1") ? second : Promise.resolve(page(["first"]))
+      return Promise.resolve(res(url.endsWith("/health") ? { workspaces: [] } : { workspaces: [], defaults: {} }))
+    })
+    const r = renderHook(() => useInstanceKeeper(["a"]))
+    await waitFor(() => expect(r.result.current.requests?.items.length).toBe(1))
+    let p1: Promise<void> = Promise.resolve(), p2: Promise<void> = Promise.resolve()
+    act(() => { p1 = r.result.current.loadMore(); p2 = r.result.current.loadMore() })
+    await act(async () => { finish(page(["second"])); await Promise.all([p1, p2]) })
+    expect(r.result.current.requests?.items.map((i) => i.id)).toEqual(["first", "second"])
+  })
+
+  it("drops a preview asked for before the selection went away and came back", async () => {
+    let finish: (v: unknown) => void = () => {}
+    h.api.mockImplementation(() => new Promise((resolve) => { finish = resolve }))
+    const props = { section: "watchdog" as const, all: false, onSaved: vi.fn() }
+    const r = render(<BulkGovernanceForm {...props} rows={[row("a"), row("b")]} />)
+    fireEvent.click(screen.getByRole("radio", { name: "On" }))
+    fireEvent.click(screen.getByRole("button", { name: "Overwrite 2 workspaces…" }))
+    r.rerender(<BulkGovernanceForm {...props} rows={[row("c"), row("d")]} />)
+    r.rerender(<BulkGovernanceForm {...props} rows={[row("a"), row("b")]} />)
+    await act(async () => finish(res(preview(["a", "b"], "stale"))))
+    expect(screen.queryByRole("alertdialog")).toBeNull()
+  })
+})

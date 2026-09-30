@@ -259,6 +259,7 @@ func (h *InstanceKeeperHandler) PutGovernance(w http.ResponseWriter, r *http.Req
 
 	type planned struct {
 		change instanceGovernanceChange
+		before governance.Settings
 		after  governance.Settings
 	}
 	plan := make([]planned, 0, len(targets))
@@ -289,7 +290,7 @@ func (h *InstanceKeeperHandler) PutGovernance(w http.ResponseWriter, r *http.Req
 			resp.Changed++
 			c.Warnings = governanceWarnings(ctx, h.db, h.logger, ws.ID, body.Set)
 		}
-		plan = append(plan, planned{change: c, after: after})
+		plan = append(plan, planned{change: c, before: cur, after: after})
 		resp.Workspaces = append(resp.Workspaces, c)
 	}
 
@@ -307,7 +308,11 @@ func (h *InstanceKeeperHandler) PutGovernance(w http.ResponseWriter, r *http.Req
 		resp.DefaultsUpdated = true
 	}
 
-	resp.PreviewID = governancePreviewID(resp, defaultsAfter)
+	fp := make([]governanceFingerprintRow, 0, len(plan))
+	for _, p := range plan {
+		fp = append(fp, governanceFingerprintRow{ID: p.change.ID, Before: p.before, After: p.after})
+	}
+	resp.PreviewID = governancePreviewID(fp, resp.DefaultsUpdated, defaultsAfter)
 	if body.DryRun {
 		writeJSON(w, http.StatusOK, resp)
 		return
@@ -378,21 +383,25 @@ func (h *InstanceKeeperHandler) PutGovernance(w http.ResponseWriter, r *http.Req
 	writeJSON(w, http.StatusOK, resp)
 }
 
-// governancePreviewID fingerprints a planned save. Warnings are left out:
-// they are advice about the save, not part of what it writes.
-func governancePreviewID(resp instanceGovernancePutResponse, defaultsAfter governance.Settings) string {
-	type ws struct {
-		ID      string                  `json:"id"`
-		Changes []governanceFieldChange `json:"changes"`
-	}
+// governanceFingerprintRow is one workspace of a planned save, whole: the
+// settings before and after, the watch spec's text included, which the
+// changes list reports only by length.
+type governanceFingerprintRow struct {
+	ID     string              `json:"id"`
+	Before governance.Settings `json:"before"`
+	After  governance.Settings `json:"after"`
+}
+
+// governancePreviewID fingerprints a planned save: every target with its
+// full before and after, and the defaults when they change. Any drift since
+// the preview — a workspace added, a value changed, a rule rewritten to the
+// same length — gives another id.
+func governancePreviewID(rows []governanceFingerprintRow, defaultsUpdated bool, defaultsAfter governance.Settings) string {
 	plan := struct {
-		Workspaces []ws                 `json:"workspaces"`
-		Defaults   *governance.Settings `json:"defaults,omitempty"`
-	}{}
-	for _, w := range resp.Workspaces {
-		plan.Workspaces = append(plan.Workspaces, ws{ID: w.ID, Changes: w.Changes})
-	}
-	if resp.DefaultsUpdated {
+		Workspaces []governanceFingerprintRow `json:"workspaces"`
+		Defaults   *governance.Settings       `json:"defaults,omitempty"`
+	}{Workspaces: rows}
+	if defaultsUpdated {
 		plan.Defaults = &defaultsAfter
 	}
 	b, _ := json.Marshal(plan)

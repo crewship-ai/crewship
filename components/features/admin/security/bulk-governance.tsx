@@ -120,11 +120,15 @@ export function BulkGovernanceForm({
   // selection of the same size is another set of workspaces.
   const scopeKey = `${section}|${all ? "all" : ""}|${rows.map((r) => r.workspace_id).sort().join(",")}`
   const scopeRef = React.useRef(scopeKey)
+  // Bumped on every change of scope, so a preview asked for before the
+  // selection went away and came back is still recognised as stale.
+  const epoch = React.useRef(0)
   const draftRef = React.useRef(draft)
   draftRef.current = draft
   React.useEffect(() => {
     if (scopeRef.current === scopeKey) return
     scopeRef.current = scopeKey
+    epoch.current += 1
     if (Object.keys(draftRef.current).length > 0) toast.info("The selection changed, so the unsaved changes were dropped.")
     setDraft({}); setError(null); setPreview(null); setBusy(false)
   }, [scopeKey])
@@ -135,18 +139,18 @@ export function BulkGovernanceForm({
   const n = rows.length
 
   async function review() {
-    const asked = scopeKey
+    const asked = epoch.current
     const req = { targets, set }
     setBusy(true); setError(null)
     try {
       const result = await saveInstanceGovernance(req.targets, req.set, true)
       // An answer for a selection that is no longer on screen is dropped.
-      if (scopeRef.current !== asked) return
+      if (epoch.current !== asked) return
       setPreview({ result, ...req })
     } catch (e) {
-      if (scopeRef.current === asked) setError(e instanceof Error ? e.message : "The save could not be checked")
+      if (epoch.current === asked) setError(e instanceof Error ? e.message : "The save could not be checked")
     } finally {
-      if (scopeRef.current === asked) setBusy(false)
+      if (epoch.current === asked) setBusy(false)
     }
   }
 

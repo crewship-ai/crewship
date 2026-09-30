@@ -452,3 +452,26 @@ func TestInstanceKeeperRequestsFilterAndCountOnTheServer(t *testing.T) {
 		t.Fatalf("second page = %+v, want k2", p.Items)
 	}
 }
+
+// The watch spec is reported by length in the changes (the audit trail need
+// not carry the text), but the preview's fingerprint must see the text: a
+// rule rewritten to another of the same length since the preview is a
+// different plan (review follow-up, 2026-09-30).
+func TestInstanceKeeperPreviewSeesAWatchSpecRewrittenToTheSameLength(t *testing.T) {
+	f := newInstanceFixture(t)
+	ctx := context.Background()
+	if err := governance.Upsert(ctx, f.db, "ws-old", governance.Settings{DenyNotifyMinRisk: 7, WatchSpec: "AAAA"}, ""); err != nil {
+		t.Fatal(err)
+	}
+	rr := f.do(f.boss, "PUT", "/api/v1/admin/instance/keeper/governance", `{"workspaces":["ws-old"],"dry_run":true,"set":{"watch_spec":"BBBB"}}`)
+	wantCode(t, rr, http.StatusOK, "preview")
+	id := decodeAs[struct {
+		PreviewID string `json:"preview_id"`
+	}](t, rr.Body.Bytes()).PreviewID
+	mustExec(t, f.db, `UPDATE keeper_governance_settings SET watch_spec = 'CCCC' WHERE workspace_id = 'ws-old'`)
+	rr = f.do(f.boss, "PUT", "/api/v1/admin/instance/keeper/governance", `{"workspaces":["ws-old"],"expect_preview":"`+id+`","set":{"watch_spec":"BBBB"}}`)
+	wantCode(t, rr, http.StatusConflict, "watch spec rewritten since the preview")
+	if s, _ := f.gov("ws-old"); s.WatchSpec != "CCCC" {
+		t.Fatalf("watch spec = %q, want the rewrite left alone", s.WatchSpec)
+	}
+}
