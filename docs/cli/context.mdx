@@ -1,0 +1,178 @@
+---
+title: "crewship context"
+description: "Inspect authorized restricted context, immutable project files and private routine results."
+icon: "shield"
+stability: experimental
+tag: Experimental
+---
+
+# crewship context
+
+These commands use the authenticated server API and your selected workspace. Use exact chat, agent, project, file, version and run IDs; commands do not read another agent's directory or a local database. Server audience and resource grants apply on every request. Lists and receipts print JSON; downloads print bytes and `ask` prints the server's SSE stream.
+
+## chat inspect
+
+```bash
+crewship context chat inspect <chat-id>
+```
+
+Read your authorized context history, summaries and memory notes.
+
+## chat memory
+
+```bash
+crewship context chat memory <chat-id>
+```
+
+Read only the chat's authorized memory notes.
+
+## chat memory-add
+
+```bash
+crewship context chat memory-add <chat-id> "Remember this preference"
+```
+
+Add a private classified note of at most 8192 bytes.
+
+## chat memory-delete
+
+```bash
+crewship context chat memory-delete <chat-id> <entry-id>
+```
+
+Delete an exact authorized note. Existing dependent attempts are revoked by the server.
+
+## chat files
+
+```bash
+crewship context chat files <chat-id>
+```
+
+List immutable output file metadata for your authorized chat audience.
+
+## chat download
+
+```bash
+crewship context chat download <chat-id> <file-id> --out result.txt
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--out` | `-` | Exact local destination, or `-` for stdout. File downloads replace the destination only after a complete successful transfer. |
+
+## chat attempts
+
+```bash
+crewship context chat attempts <chat-id>
+```
+
+Inspect your visible attempt outcomes without exposing opaque execution handles.
+
+## chat profile
+
+```bash
+crewship context chat profile <chat-id>
+```
+
+Inspect the server-selected chat execution profile.
+
+## chat ask
+
+```bash
+crewship context chat ask <chat-id> "Explain the current result"
+```
+
+Send an ordinary restricted chat turn, requiring chat rights. The server chooses the installed profile, model, scoped prompt and provider; the command prints SSE frames. For an explicit host run requiring run rights, use `crewship run` and its declared project file version options.
+
+## execution-profile get
+
+```bash
+crewship context execution-profile get <agent-id>
+```
+
+Read the agent's restricted profile with agent edit authorization.
+
+## execution-profile set
+
+```bash
+crewship context execution-profile set <agent-id> native_api_key
+```
+
+Set `disabled`, `responses_text` or `native_api_key`. The server revokes existing bound attempts when the profile changes. Enabling a profile does not install its runtime or bypass admission, model, credential or budget checks.
+
+## project-files list
+
+```bash
+crewship context project-files list <project-id>
+```
+
+List current immutable version IDs and revision metadata with project read authorization.
+
+## project-files upload
+
+```bash
+crewship context project-files upload <project-id> ./input.txt --name docs/input.txt
+crewship context project-files upload <project-id> ./new.txt --file-id <file-id> --expected-revision 3
+```
+
+Upload a bounded regular local file as base64 bytes. Replacements require the exact file ID and current revision; a concurrent revision change returns a conflict.
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--name` | Local basename | Project-relative file name. |
+| `--file-id` | Empty | Existing file ID to replace; empty creates a new file. |
+| `--expected-revision` | `0` | Exact positive current revision for replacement; zero only creates a file. |
+
+## project-files retire
+
+```bash
+crewship context project-files retire <project-id> <file-id> --expected-revision 3
+```
+
+Retire the exact current file with project write authorization. The server revokes dependent execution attempts.
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--expected-revision` | `0` | Required positive current file revision. |
+
+## project-files download
+
+```bash
+crewship context project-files download <project-id> <version-id> --out input.txt
+```
+
+Download the exact immutable authorized version, without substituting a current version.
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--out` | `-` | Exact local destination, or `-` for stdout; local replacement occurs only after successful transfer. |
+
+## issue-preflight
+
+```bash
+crewship context issue-preflight <issue-id> --claim --agent-id <agent-id> --routine-slug <declared-routine>
+```
+
+Explicitly claim an assigned project-backed issue and enqueue its declared private preflight. The server selects the issue brief and actor, checks assignment, project rights and budget, and returns a private receipt. This is a mutation and never runs as an automatic list/read side effect.
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--claim` | `false` | Required explicit authorization to claim and enqueue. |
+| `--agent-id` | Empty | Required exact assigned agent ID. |
+| `--routine-slug` | Empty | Required declared private routine slug. |
+
+## routine-runs list
+
+```bash
+crewship context routine-runs list
+```
+
+List your authorized private run receipts in the selected workspace.
+
+## routine-runs result
+
+```bash
+crewship context routine-runs result <run-id>
+```
+
+Read an exact authorized private receipt and current classified output proof. Revoked source or provider authority prevents reading stale output.
