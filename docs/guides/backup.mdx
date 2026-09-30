@@ -611,7 +611,7 @@ The backup surface is CLI-first — every operation is reachable via `crewship b
 
 | Method | Path | What it does |
 |--------|------|--------------|
-| `POST` | `/api/v1/admin/backups` | Create a bundle. **Auth + OWNER/ADMIN.** Same trust gate as the CLI; concurrent calls hit the [advisory lock](#lock-semantics) and the second returns 409. |
+| `POST` | `/api/v1/admin/backups` | Create a bundle. **Auth + OWNER/ADMIN of the workspace, or an instance admin.** Same trust gate as the CLI; concurrent calls hit the [advisory lock](#lock-semantics) and the second returns 409. |
 | `GET`  | `/api/v1/admin/backups` | List bundles on disk for the current workspace. |
 | `GET`  | `/api/v1/admin/backups/inspect` | Plaintext manifest only — equivalent to `crewship backup inspect`. Takes the bundle as a query param; no passphrase required. |
 | `GET`  | `/api/v1/admin/backups/verify` | SHA-256 integrity check of the sealed bytes against the manifest, plus a completeness check for an unencrypted bundle (#2009) — payload row counts vs. `manifest.contents.table_row_counts`. **Does not decrypt** — no passphrase required, so an encrypted bundle's completeness is reported unverifiable rather than checked. No DB writes. |
@@ -620,6 +620,15 @@ The backup surface is CLI-first — every operation is reachable via `crewship b
 | `POST` | `/api/v1/admin/backups/rotate` | Retention sweep. Body accepts `keep_last`, `keep_days`, `dry_run`. |
 | `GET`  | `/api/v1/admin/backups/status` | Inspect the advisory lock state (used by `crewship backup status`). |
 | `DELETE` | `/api/v1/admin/backups/status` | Force-release a stale lock. Requires `force=true` body field — **never** call from automation without a confirmation gate. |
+
+Every route acts on the one workspace the request names (`workspace_id` in the
+query, or `X-Workspace-ID`; an id or a slug) and admits an OWNER or ADMIN of
+that workspace, or an **instance administrator, who need not be a member of
+it**. So an instance admin downloads, verifies and restores any workspace's
+backups — `crewship backup list --workspace lab`, or Admin › Backups with that
+workspace ticked — without joining it; a workspace ADMIN still reaches only
+their own. A bundle of another workspace answers `404` through the wrong
+workspace. `metrics` needs no workspace and admits only an instance admin.
 
 All routes are mounted in `internal/api/router_admin.go`. The CLI talks to these directly when run against a remote host (`--server` flag) and falls back to in-process Go calls when run on the same machine as `crewshipd` — bypassing HTTP entirely for the host-shell use case. The two paths share the same handler functions, so flags work identically.
 
@@ -707,7 +716,7 @@ basic-auth credentials or signed-URL tokens do not leak.
 
 ## Metrics
 
-`GET /api/v1/admin/backups/metrics` (instance OWNER only; see below)
+`GET /api/v1/admin/backups/metrics` (instance administrators only)
 returns a point-in-time snapshot of process-lifetime counters. The
 numbers reset on restart — persistent observability belongs in the
 audit log and its dashboards.
@@ -741,10 +750,13 @@ file listed with its SHA-256), and every workspace's crew containers. It is
 the disaster-recovery path for a host: restore it offline into an empty data
 directory and boot a server from it.
 
-Only instance administrators can take, check or restore one (the
-`CREWSHIP_OWNER_EMAIL` owner, a named instance admin, or — while nobody is
-named — the owners of the oldest workspace). Every instance bundle is
-encrypted; age recipients are preferred over a passphrase.
+Only instance administrators can take, check or restore one: the
+`CREWSHIP_OWNER_EMAIL` owner, or anyone named an instance admin. An install
+that named nobody named the owners of its oldest workspace once, the first
+time anyone's status was asked, and never again — removing every named admin
+later does not bring that rule back (`crewship admin instance add-admin
+--local` on the host is the way in). Every instance bundle is encrypted; age
+recipients are preferred over a passphrase.
 
 ```bash
 # Take one now and wait for it
@@ -1259,13 +1271,33 @@ pages in the Admin sidebar, each deep-linkable as
 | Backup history | Every run, its phases, and how far each backup is proven. Pin, check contents, download, or start a restore from a run. |
 | Schedules | Backup plans: a preset (Complete recovery, Workspace backup) or a custom choice that keeps its dependencies, when it runs, a calendar of done and planned runs, and how many copies are kept. |
 | Storage | Where copies live, the room a run and a restore need, and the limits a backup runs under. |
-| Recovery | A guided restore: backup, target, keys, checks, dry run, restore, then resume what stayed held. A whole-instance restore runs from the CLI (`crewship recover`). |
+| Recovery | A guided restore: backup, target, keys, checks, dry run, restore, then resume what stayed held. A whole-instance restore runs from the CLI; see [Recovery in the console](#recovery-in-the-console). |
 | Keys & alerts | The AGE public keys backups are encrypted to, the vault key versions restored secrets need, and who hears when a backup goes wrong. |
 
 A strip above each page chooses **Whole instance** or **Selected
 workspaces**; the choice is kept in the URL. Admin › Data › **Data
 retention** sets how long each kind of live data is kept per workspace, and
 shows a dry run of what a change overwrites before it is saved.
+
+### Recovery in the console
+
+- **Whole instance (Empty server, Isolated instance).** The server keeps no
+  private key and has no online instance restore, so after **Keys** and
+  **Checks** the wizard shows the command to run where the key is, for the
+  bundle picked, with a **Copy** button — no dry run in between. Empty server:
+  `crewship recover --bundle <bundle> --identity <key-file> --data-dir /var/lib/crewship`
+  on the new host. Isolated instance: `crewship backup drill --bundle <bundle>
+  --identity <key-file> --post`, a test restore into a throwaway directory
+  whose result is recorded on this server. Replace `<key-file>` with the file
+  holding the private backup key.
+- **A workspace or one crew.** Checks, a dry run with its full report, then
+  the restore, through `POST /api/v1/admin/backups/restore` for the
+  workspace the backup belongs to (or the one ticked in the strip). An
+  instance admin need not be a member of it.
+- **From off-site storage.** Step 1's **From off-site storage…** lists the
+  bundles a destination holds; **Fetch** downloads one back to this server
+  (see [Restore from an off-site copy](#restore-from-an-off-site-copy)) and
+  the wizard carries on with it, and **Use** takes a copy already here.
 
 Pages whose server endpoints have not shipped yet say "Not available on this
 server yet" rather than showing figures. Overview, Backup history and
@@ -1356,6 +1388,31 @@ server's database is lost. A restore from off-site downloads the bundle and
 the layers its refs object names into the backups directory and the
 environment store, checks each against its digest, and records the layers as
 the bundle's, so local retention keeps them.
+
+### Restore from an off-site copy
+
+When the server lost its bundles, or a new server is brought up from a
+bucket, fetch a copy back first; it is then an ordinary local bundle for a
+workspace restore, a drill or `crewship recover`.
+
+```bash
+crewship admin instance backups copies list --destination bdst_…
+crewship admin instance backups copies fetch --destination bdst_… \
+  --key instance/crewship-instance-20260929T010000Z.tar.zst --wait
+```
+
+`copies list` shows every bundle at the destination (not its layers or refs
+objects) and where this server already has it. `copies fetch` downloads the
+bundle and the layers its refs object names into the backups directory, each
+checked against its SHA-256, and records the layers as the bundle's. A fetch
+can take far longer than one HTTP request may, so the server runs it as a job
+with its own six-hour deadline and answers at once; `--wait` (or Recovery in
+the console) follows it, and `copies status <id>` looks it up later. A server
+restart forgets its fetches; a half-downloaded bundle never appears. A bundle
+already on this server is refused with its path. API:
+`GET /api/v1/admin/instance/backups/copies?destination=`,
+`POST /api/v1/admin/instance/backups/copies/fetch` and
+`GET /api/v1/admin/instance/backups/copies/fetch/{id}` (instance admins).
 
 ## Compatibility
 
@@ -1606,8 +1663,18 @@ workspaces in **Admin › Data retention** or with
 preview says how many rows the next sweep would delete. "All workspaces"
 means every workspace that exists now; what a workspace created later starts
 with is a separate setting (`crewship admin instance retention defaults set`)
-that touches no existing data. Saving
-deletes nothing by itself; the next sweep does, and bundles taken before still
+that touches no existing data.
+
+A save is held to the preview it confirmed. The console keeps the preview's
+targets and changes as they were; changing the selection or a value drops the
+preview (an answer that arrives for an earlier selection is ignored), and
+**Apply** sends exactly what was previewed with the server's `preview_id` as
+`expect_preview`. If a workspace or a window changed in between — another
+admin saved, or a workspace was created while "all" was ticked — the server
+answers `409`, nothing is written, and the console says "Something changed
+since the preview — review again". The defaults save works the same way, and
+so does `crewship admin instance retention set` and `retention defaults set`.
+Saving deletes nothing by itself; the next sweep does, and bundles taken before still
 hold what it removes. So a shorter window is safe to try only if your backups
 reach back far enough.
 
