@@ -122,7 +122,7 @@ func securityHeadersMiddleware(next http.Handler, pageRuntimeOrigin ...string) h
 					"img-src 'self' data: blob: https://logos.composio.dev; "+
 					"font-src 'self' data:; "+
 					"connect-src 'self'; "+
-					// Pages' embed.v1 panel (docs/prd/pages.md §3.1). Without
+					// Pages' embed.v1 panel (docs/specs/pages.md §3.1). Without
 					// this directive frame-src falls back to default-src
 					// 'self', so a correctly configured, human-vetted embed
 					// source is still refused by the browser — the panel would

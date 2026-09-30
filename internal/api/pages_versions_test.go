@@ -1,6 +1,6 @@
 package api
 
-// Pages — versions and rollback (docs/prd/pages.md §10b.1).
+// Pages — versions and rollback (docs/specs/pages.md §10b.1).
 //
 // The claim under test is the one §10b.1 states twice because it is the one
 // that costs somebody money if it is wrong:

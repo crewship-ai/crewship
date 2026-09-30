@@ -165,7 +165,7 @@ type Bundle struct {
 	Issues []kinds.IssueDocument
 
 	// Pages are workspace-scoped dashboards authored via `kind: Page`
-	// (docs/prd/pages.md §12 v1). The panel list inside each document is
+	// (docs/specs/pages.md §12 v1). The panel list inside each document is
 	// the internal/pages authoring type verbatim, so the same YAML is
 	// accepted by `crewship page create --file` and by `crewship apply`.
 	// Per-panel owner/producer references (crew, agent, routine) are

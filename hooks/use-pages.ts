@@ -1,7 +1,7 @@
 "use client"
 
 /**
- * The Pages data layer — PRD `docs/prd/pages.md` §11 / §11b (wire), §4
+ * The Pages data layer — PRD `docs/specs/pages.md` §11 / §11b (wire), §4
  * (freshness), §9b (what the shell needs to say).
  *
  * React Query, `apiFetch`, `[resource, workspaceId, params?]` keys, and

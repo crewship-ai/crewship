@@ -1,6 +1,6 @@
 # Návrh UX vkládání credentials a providerů
 
-Stav: **implementace na dev3** — viz [implementační zpráva](reports/credential-entry-implementation-2026-09-08.md) pro skutečný rozsah, kontrakty a ověření. Níže je původní schválený návrh. Navazuje na cleanup detailu a barevné tagy.
+Stav: **implementace na dev3** — viz [implementační zpráva](https://github.com/crewship-ai/crewship/blob/8dc421fdb5df28a8113ba1453682bc55464213e6/docs/prd/reports/credential-entry-implementation-2026-09-08.md) pro skutečný rozsah, kontrakty a ověření. Níže je původní schválený návrh. Navazuje na cleanup detailu a barevné tagy.
 Barvy, ikonky, typografie a komponenty Crewshipu se zachovávají. Mění se
 informační struktura, pořadí rozhodnutí a chování při chybách.
 

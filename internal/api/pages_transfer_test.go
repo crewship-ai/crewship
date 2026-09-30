@@ -1,6 +1,6 @@
 package api
 
-// Pages — export/import (docs/prd/pages.md §10b.2).
+// Pages — export/import (docs/specs/pages.md §10b.2).
 //
 // §10b.2 fixes exactly what "marketplace readiness in 1.0" means, and it is
 // three testable claims. This file is those three, plus the two rules that

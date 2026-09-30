@@ -55,8 +55,8 @@ controller death was 14,969.422 ms. Warm startup p50 was 456.712 ms and p95
 147 passing packages and 12 packages without tests. Temporary test databases
 used a private directory in `/dev/shm`; no host mount configuration changed.
 
-Raw source-pinned evidence: [live tests](reports/restricted-runtime-controller-expiry-2026-09-28.txt)
-and [full Go tests](reports/restricted-runtime-controller-expiry-go-2026-09-28.txt).
+Raw source-pinned evidence: [live tests](https://github.com/crewship-ai/crewship/blob/07bfd2360a97dbe1c9f71c03e1d9b5d5d471c993/docs/prd/reports/restricted-runtime-controller-expiry-2026-09-28.txt)
+and [full Go tests](https://github.com/crewship-ai/crewship/blob/07bfd2360a97dbe1c9f71c03e1d9b5d5d471c993/docs/prd/reports/restricted-runtime-controller-expiry-go-2026-09-28.txt).
 
 ## Authorized dev2 deployment
 
@@ -70,7 +70,7 @@ The eight live tests were repeated from this clean deployed source and passed
 with `-race` in 48.757 s. Independent container stop after killing the test's
 own controller took 15,093.872 ms, including Docker observation latency; this
 is an observed healthy-host result, not a universal 15-second stop guarantee.
-[Deployed-source raw evidence](reports/restricted-runtime-controller-expiry-deployed-2026-09-28.txt).
+[Deployed-source raw evidence](https://github.com/crewship-ai/crewship/blob/07bfd2360a97dbe1c9f71c03e1d9b5d5d471c993/docs/prd/reports/restricted-runtime-controller-expiry-deployed-2026-09-28.txt).
 Original untracked wireframe work was restored and its full status inventory
 matched the pre-deployment inventory. Recovery stashes remain available.
 No shared host, Docker daemon, dev1 or dev3 service was restarted.

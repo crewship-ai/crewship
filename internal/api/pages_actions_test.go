@@ -1,6 +1,6 @@
 package api
 
-// Pages — action dispatch (docs/prd/pages.md §8b).
+// Pages — action dispatch (docs/specs/pages.md §8b).
 //
 // The endpoint's SHAPE is the security property, so most of this file is about
 // what the shape refuses rather than what it does. In particular:

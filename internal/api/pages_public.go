@@ -1,6 +1,6 @@
 package api
 
-// Public pages — what somebody with no account receives (docs/prd/pages.md
+// Public pages — what somebody with no account receives (docs/specs/pages.md
 // §7.3).
 //
 // §7.3.1: "It is a different product, not a permission level." A public page is

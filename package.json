@@ -2,6 +2,8 @@
   "name": "crewship",
   "version": "1.0.0-rc.1",
   "private": true,
+  "license": "Apache-2.0",
+  "author": "Unify Technology, s.r.o.",
   "packageManager": "pnpm@10.11.0",
   "type": "module",
   "engines": {
@@ -159,7 +161,7 @@
     ],
     "overrides": {
       "lodash-es": ">=4.18.1",
-      "brace-expansion": ">=5.0.8",
+      "brace-expansion": ">=5.0.12",
       "ws": ">=8.21.0",
       "mermaid": ">=11.16.1",
       "@hono/node-server": ">=2.0.10",
@@ -173,7 +175,7 @@
       "postcss>nanoid": "^3.3.18",
       "@prisma/config>deepmerge-ts": "^8.0.0",
       "prisma>mysql2": "^3.23.1",
-      "ajv>fast-uri": "^4.1.4"
+      "ajv>fast-uri": "^4.1.5"
     }
   },
   "devDependencies": {

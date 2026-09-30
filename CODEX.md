@@ -9,11 +9,14 @@ Platforma pro týmy AI agentů na vlastním serveru. Go server obsahuje webové 
 
 Na serveru jsou tři samostatné běžící vývojové instance:
 
-| Adresář | API | Web | Veřejná adresa |
-|---|---|---|---|
-| `/srv/crewship/crewship_1` | `8081` | `3011` | https://crewship-dev1.unifylab.cz |
-| `/srv/crewship/crewship_2` | `8082` | `3012` | https://crewship-dev2.unifylab.cz |
-| `/srv/crewship/crewship_3` | `8083` | `3013` | https://crewship-dev3.unifylab.cz |
+| Adresář | API | Web |
+|---|---|---|
+| `/srv/crewship/crewship_1` | `8081` | `3011` |
+| `/srv/crewship/crewship_2` | `8082` | `3012` |
+| `/srv/crewship/crewship_3` | `8083` | `3013` |
+
+Konkrétní vzdálené adresy vývojových instancí a soukromých Git serverů patří
+do lokální konfigurace nebo soukromého kontextu, ne do veřejných instrukcí.
 
 - Na začátku ověř `pwd`, `git status --short` a `./dev.sh status`.
 - Pracuj pouze s instancí odpovídající aktuálnímu adresáři nebo zadání uživatele.
@@ -31,8 +34,14 @@ Na serveru jsou tři samostatné běžící vývojové instance:
 - Odpovídej stručně, v jazyce uživatele. Dodrž požadovaný rozsah práce.
 - Pravidla vývoje, claimů, testů a review jsou v [AGENTS.md](AGENTS.md)
   a [CONTRIBUTING.md](CONTRIBUTING.md); neopisuj je sem.
-- Produkt: [README.md](README.md). Návrhy a předání: [docs/prd/](docs/prd/),
-  potom `.claude/context/prd/`. Infrastruktura: `~/crewship-infra`.
+- Produkt: [README.md](README.md). Mapa dokumentace: [docs/README.md](docs/README.md)
+  (kontrakty `docs/specs/`, rozhodnutí `docs/decisions/`, runbooky
+  `docs/runbooks/`, dosavadní veřejné návrhy `docs/prd/` se stavovým indexem).
+  Infrastruktura: `~/crewship-infra`.
+- Soukromý pracovní kontext zjisti přes `git config --get crewship.internalContext`.
+  Je-li dostupný, přečti jeho `AGENTS.md` a příslušný rozcestník. Nové interní
+  analýzy, předání a experimenty ukládej tam. Hranice veřejné dokumentace:
+  [private-context.md](docs/development/private-context.md).
 - Ověř výsledek a rozlišuj, co říká dokumentace a co bylo skutečně vyzkoušeno.
 - Sem patří pouze stručné, dlouhodobě užitečné informace společné všem třem
-  instancím. Podrobné předání patří do `docs/prd/`; hesla a tokeny sem nepatří.
+  instancím. Podrobné interní předání patří do soukromého kontextu; hesla a tokeny sem nepatří.

@@ -1,5 +1,5 @@
 /**
- * Panel vocabulary — the closed set from PRD `docs/prd/pages.md` §3.
+ * Panel vocabulary — the closed set from PRD `docs/specs/pages.md` §3.
  *
  * The set is closed on purpose: a new panel kind is a server release, never a
  * user-supplied string. Everything downstream (the registry, the renderer)

@@ -1,7 +1,7 @@
 # Pages Apps — validation and remaining delivery gates, 2026-09-10
 
 Follow-up to issue #2472 and the user's request to fix the remaining problems.
-The [implementation handoff](pages-apps-hardening-handoff-2026-09-09.md) records
+The [implementation handoff](https://github.com/crewship-ai/crewship/blob/8dc421fdb5df28a8113ba1453682bc55464213e6/docs/prd/pages-apps-hardening-handoff-2026-09-09.md) records
 code changes, deployment, live acceptance evidence and recovery details.
 
 ## CI verified from GitHub

@@ -1,5 +1,5 @@
 /**
- * The in-app page editor — PRD `docs/prd/pages.md` §10b.1.
+ * The in-app page editor — PRD `docs/specs/pages.md` §10b.1.
  *
  * Four things are worth a test here, and they are the four that were got wrong
  * somewhere else in this repo first:

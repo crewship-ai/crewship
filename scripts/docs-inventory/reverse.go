@@ -55,21 +55,47 @@ var (
 // reverseGateApplies reports whether a documentation file makes claims this
 // gate is entitled to hold it to.
 //
-// docs/prd/** is excluded, and the reason is not convenience. A PRD is a design
-// document: it argues for behaviour that does NOT exist yet, and naming the
-// flag it proposes is the whole point. `docs/prd/keeper-configuration.md`
-// proposes `--wire`; `agent-isolation-findings-2026-08-01.md` writes "the first
+// Two directories are excluded by genre, and the reason is not convenience.
+//
+// docs/prd/** is proposals: a PRD argues for behaviour that does NOT exist
+// yet, and naming the flag it proposes is the whole point.
+// `docs/prd/keeper-configuration.md` proposes `--wire`;
+// `agent-isolation-findings-2026-08-01.md` writes "the first
 // `crewship restore`" as shorthand while reasoning about disaster recovery.
 // Gating those means every future design document reds the build on the day it
 // is written, which teaches people to route around the gate — the failure mode
 // this whole inventory exists to prevent.
 //
+// docs/archive/** is history: documents preserved for the record after being
+// superseded (see docs/archive/README.md). They describe the commands and
+// routes of the system as it was, or as it was proposed to be, at the time —
+// `docs/archive/pages-apps.md` evaluates frameworks that were never adopted.
+// Holding history to the current command tree reports drift that nobody is
+// allowed to fix (editing an archived document to match the present would
+// falsify the record), so the genre is excluded wholesale.
+//
+// Current contracts and runbooks are NOT excluded: docs/specs/** and
+// docs/runbooks/** moved out of docs/prd/ precisely so that this gate holds
+// them to the code they specify (2026-09-28 repository-clarity work; the gate
+// immediately caught a stale internal-route row in docs/specs/pages.md).
+//
 // The per-line `{/* docs-inventory: ignore */}` escape stays for the user-
 // facing tree, where an unbacked reference IS a defect and each exception
 // should cost a visible annotation. Whole-directory exclusion is reserved for
 // directories whose genre makes the check meaningless.
+var reverseGateExcludedPrefixes = []string{
+	"docs/prd/",
+	"docs/archive/",
+}
+
 func reverseGateApplies(path string) bool {
-	return !strings.HasPrefix(filepath.ToSlash(path), "docs/prd/")
+	slash := filepath.ToSlash(path)
+	for _, prefix := range reverseGateExcludedPrefixes {
+		if strings.HasPrefix(slash, prefix) {
+			return false
+		}
+	}
+	return true
 }
 
 // inventoryDocsToCode scans executable-looking documentation contexts:

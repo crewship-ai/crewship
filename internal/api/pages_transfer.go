@@ -1,6 +1,6 @@
 package api
 
-// Pages — portability (docs/prd/pages.md §10b.2).
+// Pages — portability (docs/specs/pages.md §10b.2).
 //
 // A "page template" is NOT a new noun. §10b.2 was rewritten once an earlier
 // draft proposed a built-in catalog kind: the right precedent is routines,

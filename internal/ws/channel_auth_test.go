@@ -109,7 +109,7 @@ func TestDBChannelAuthorizer_JournalChannel(t *testing.T) {
 }
 
 func TestDBChannelAuthorizer_PageChannel(t *testing.T) {
-	// docs/prd/pages.md §10b.5b: "an open page subscribes to one channel,
+	// docs/specs/pages.md §10b.5b: "an open page subscribes to one channel,
 	// page:{pageId}". Without a case here CanSubscribe falls through to
 	// default:false and nobody can subscribe — the failure the "user" case
 	// records as issue #614, and the one Pages shipped with. It hid because

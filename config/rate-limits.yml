@@ -166,7 +166,7 @@ websocket:
       - WebSocket send_message
 
 # ============================================
-# PAGES (docs/prd/pages.md 10b.3)
+# PAGES (docs/specs/pages.md 10b.3)
 # ============================================
 #
 # The dangerous number in Pages is push FREQUENCY, not size: 24 panels x 100

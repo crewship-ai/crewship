@@ -1,6 +1,6 @@
 # Routines — důkazní hodnota testů, 9. 9. 2026
 
-Evidence k [work orderu](WORK-ORDER-2026-09-09-ROUTINES-FIX-AND-UX.md) §9.
+Evidence k [work orderu](https://github.com/crewship-ai/crewship/blob/07bfd2360a97dbe1c9f71c03e1d9b5d5d471c993/docs/prd/WORK-ORDER-2026-09-09-ROUTINES-FIX-AND-UX.md) §9.
 Otázka nezní „jsou testy zelené" — jsou, 692 frontendových a celá Go sada,
 ověřeno. Otázka zní: **dokazují ty testy, že funkce fungují, nebo dokazují,
 že se stuby chovají jako stuby?**

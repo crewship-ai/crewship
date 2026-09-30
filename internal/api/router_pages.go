@@ -1,6 +1,6 @@
 package api
 
-// Pages route registration (docs/prd/pages.md §11).
+// Pages route registration (docs/specs/pages.md §11).
 //
 // The routes are WORKSPACE-UNSCOPED — /api/v1/pages/... with wsCtx supplying
 // the workspace (§11b decision 1), following saved-views, missions, runs,

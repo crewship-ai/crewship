@@ -3,12 +3,12 @@
 > **Archiv k 2026-09-10.** Historická evidence, nikoli aktuální stav ani potvrzení UX.
 > Rozsah, otevřené body a přejímku udržuje [živý PRD](ROUTINES-CLIENT-EXPERIENCE-PRD-2026-09-08.md).
 
-Aktuální souhrn a stav R1–R10: [závěrečné předání pro revizi](ENDING-2026-09-09-ROUTINES-REVIEW.md).
+Aktuální souhrn a stav R1–R10: [závěrečné předání pro revizi](https://github.com/crewship-ai/crewship/blob/07bfd2360a97dbe1c9f71c03e1d9b5d5d471c993/docs/prd/ENDING-2026-09-09-ROUTINES-REVIEW.md).
 Níže je chronologie; původní inventura nepopisuje stav po všech navazujících změnách.
 
 Datum: 2026-09-08. Výchozí HEAD `cd2074d0b`, `/srv/crewship/crewship_1`,
 větev `dev1/issues-preview`. Podklad: [PRD](ROUTINES-CLIENT-EXPERIENCE-PRD-2026-09-08.md)
-a [předání](HANDOFF-2026-09-08-ROUTINES-NEXT-AGENT.md).
+a [předání](https://github.com/crewship-ai/crewship/blob/8dc421fdb5df28a8113ba1453682bc55464213e6/docs/prd/HANDOFF-2026-09-08-ROUTINES-NEXT-AGENT.md).
 Toto je průběžná evidence implementace, nikoli potvrzení dokončeného Release 1.0.
 Uživatel požaduje práci na dev1 a ověřování přes CLI. UI text zůstává anglicky.
 
@@ -595,7 +595,7 @@ Ověření a nasazení call_pipeline dávky dokončeno:
 ### 2026-09-09 — klientská frontendová etapa
 
 Podrobný rozsah a browser evidence:
-`docs/ux/routines-client-frontend-2026-09-09.md`.
+[archived snapshot](https://github.com/crewship-ai/crewship/blob/8dc421fdb5df28a8113ba1453682bc55464213e6/docs/ux/routines-client-frontend-2026-09-09.md).
 
 - Nové skutečné UI: testovací pracovní oblast se třemi metodami a zachováním
   dat; per-step editor sample outputs; vizuální human decision builder se
@@ -636,7 +636,7 @@ Frontendová etapa dokončená a nasazená:
 
 ## Závěrečná kontrola 9. září, 12:15 UTC
 
-Aktuální stav R1–R10 a předání pro nezávislou revizi: [ENDING](ENDING-2026-09-09-ROUTINES-REVIEW.md).
+Aktuální stav R1–R10 a předání pro nezávislou revizi: [ENDING](https://github.com/crewship-ai/crewship/blob/07bfd2360a97dbe1c9f71c03e1d9b5d5d471c993/docs/prd/ENDING-2026-09-09-ROUTINES-REVIEW.md).
 Opraven replay s poškozenými historickými vstupy a tělem bez Content-Length; neplatné požadavky se odmítají před dispatch. Cílené handler testy prošly.
 Celá Go sada na TMPDIR=/tmp: exit0; celý vet: exit0. Offline fixture CLI ověřil úspěch i chybu. Invariants prošly. Migration lint proti HEAD prošel, proti origin/main má9 rozdílů historie větví; není to uzavřená integrace do main.
 Reload pouze dev1: exit0, PID2956508; lokální i veřejné /api/health200/statusok, binárka i JS asset ověřeny hashově. Přihlášený E2E stále neověřen.

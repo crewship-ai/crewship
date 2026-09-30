@@ -177,8 +177,8 @@ func TestCheckDsnReachability(t *testing.T) {
 		// The check dials host:443 through the package-level dialTCP hook
 		// (cmd_doctor.go), so this subtest never touches the real network
 		// or DNS resolver. It used to pick a hostname assumed not to
-		// resolve ("*.unreachable.invalid"), but a host with a wildcard
-		// search domain (e.g. crewship-dev's *.unifylab.cz) resolves every
+		// resolve ("*.unreachable.invalid"), but a host on a network
+		// with a wildcard search domain resolves every
 		// name and something answers on :443 — a latent environment
 		// dependency, not a bug in checkDsnReachability. Stubbing the dial
 		// function makes the WARN branch deterministic regardless of the

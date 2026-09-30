@@ -11,7 +11,7 @@ import (
 // override.
 //
 // Deliberately the same shape as TestMigrateV158_RunRetentionDays, because
-// docs/prd/pages.md §10b.3 asks for the same convention: a nullable INTEGER on
+// docs/specs/pages.md §10b.3 asks for the same convention: a nullable INTEGER on
 // workspaces, NULL = instance default. If this test and that one ever have to
 // differ, the convention has been broken.
 func TestMigratePageRetentionDays(t *testing.T) {

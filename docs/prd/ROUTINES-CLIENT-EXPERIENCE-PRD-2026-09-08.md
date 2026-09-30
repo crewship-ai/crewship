@@ -1,13 +1,13 @@
 # Routines: srozumitelná obsluha a spolehlivé autorování
 
-> Integrační opravy #2631 jsou sloučené a ověřené na DEV1. [Datovaný závěrečný stav, testy a zbývající přejímka](reports/routines-closeout-2026-09-22.md) uvádí přesný commit nasazení a hranice důkazů. §11 zůstává NOT VERIFIED; technické testy nejsou lidská přejímka.
+> Integrační opravy #2631 jsou sloučené a ověřené na DEV1. [Datovaný závěrečný stav, testy a zbývající přejímka](https://github.com/crewship-ai/crewship/blob/07bfd2360a97dbe1c9f71c03e1d9b5d5d471c993/docs/prd/reports/routines-closeout-2026-09-22.md) uvádí přesný commit nasazení a hranice důkazů. §11 zůstává NOT VERIFIED; technické testy nejsou lidská přejímka.
 
 **Navigace ve stavu k 18. září:** Tento PRD drží původní rozsah R1–R10 a lidskou přejímku §11. Navazující změny mají vlastní zadání a důkazy:
 
 - [Vstupy, pravidla práce a řešení problémů](ROUTINES-CLARITY-PRD-2026-09-15.md): [PR #2556](https://github.com/crewship-ai/crewship/pull/2556), issue #2555.
 - [Operator console, Edit a New routine](../ux/routines-operator-console-2026-09-15.md): [PR #2562](https://github.com/crewship-ai/crewship/pull/2562), issue #2560. [Integrační ověření DEV1 z 16. září](https://github.com/crewship-ai/crewship/pull/2562#issuecomment-5696159682) zaznamenává nasazenou větev, browser důkazy a stav merge v okamžiku ověření.
 - Opravy #2553 uzavírá [protokol po mergi](https://github.com/crewship-ai/crewship/pull/2553#issuecomment-5672592832). Novější merge, CI a identitu nasazení uvádějí validační protokoly v navazujících PR; starší důkazy nejsou nové přeměření serveru.
-- Integrační PR [#2617](https://github.com/crewship-ai/crewship/pull/2617) (CLI audit #2594–#2611 + #2616, opravy assignee-type a nullable backup schémat) je od 18. září sloučen; [validace 18. září](reports/routines-validation-2026-09-18.md) potvrzuje merge ancestry, DEV1 identitu i denní živé průchody R1–R10 a opravuje defekt #2573 (kaskáda mazání rutiny na plány, PR [#2620](https://github.com/crewship-ai/crewship/pull/2620)).
+- Integrační PR [#2617](https://github.com/crewship-ai/crewship/pull/2617) (CLI audit #2594–#2611 + #2616, opravy assignee-type a nullable backup schémat) je od 18. září sloučen; [validace 18. září](https://github.com/crewship-ai/crewship/blob/07bfd2360a97dbe1c9f71c03e1d9b5d5d471c993/docs/prd/reports/routines-validation-2026-09-18.md) potvrzuje merge ancestry, DEV1 identitu i denní živé průchody R1–R10 a opravuje defekt #2573 (kaskáda mazání rutiny na plány, PR [#2620](https://github.com/crewship-ai/crewship/pull/2620)).
 
 **Úvod níže je historický stav z 12. září. Lidská přejímka §11 zůstává otevřená; technické testy ani merge ji neuzavírají.**
 
@@ -18,7 +18,7 @@ P8 dokládá `f7a43cd22`, doplnění P8b přesně `7d470200a`.
 **Technické uzavření bylo předčasné:** oponentura 12. září reprodukovala
 obchvat rollbackem, opětovným zapnutím plánu a rozpor deadline v journalu;
 požaduje také opravy publikace, oddělení živých editorů a času/spouštění.
-Rozsah následných oprav uvádí [odpověď na oponenturu](reports/routines-opponent-2026-09-12.md);
+Rozsah následných oprav uvádí [odpověď na oponenturu](https://github.com/crewship-ai/crewship/blob/07bfd2360a97dbe1c9f71c03e1d9b5d5d471c993/docs/prd/reports/routines-opponent-2026-09-12.md);
 aktuální merge a CI jsou v [PR #2514](https://github.com/crewship-ai/crewship/pull/2514),
 přesná identita nasazení ve [veřejném protokolu](https://github.com/crewship-ai/crewship/issues/2473#issuecomment-5646862404).
 Lidská přejímka §11 zůstává otevřená; sloučení ani testy ji nenahrazují.
@@ -36,14 +36,14 @@ testy nejsou akceptace UX. Další fáze nemá přidávat další karty a vysvě
 odstavce. Musí zkrátit cestu od otázky klienta k odpovědi nebo konkrétní akci.
 
 Tento PRD určuje nový cílový UX a pořadí práce; nenahrazuje technické kontrakty
-v [předání Routines](HANDOFF-2026-09-08-ROUTINES-WORKSPACE.md) ani
-[předání Issues](HANDOFF-2026-09-08-ISSUES-EXECUTION.md). Starší wireframy nejsou
+v [předání Routines](https://github.com/crewship-ai/crewship/blob/8dc421fdb5df28a8113ba1453682bc55464213e6/docs/prd/HANDOFF-2026-09-08-ROUTINES-WORKSPACE.md) ani
+[předání Issues](https://github.com/crewship-ai/crewship/blob/8dc421fdb5df28a8113ba1453682bc55464213e6/docs/prd/HANDOFF-2026-09-08-ISSUES-EXECUTION.md). Starší wireframy nejsou
 závazné tam, kde odporují tomuto návrhu. Nový commit `42aa533b3` již část směru
 realizuje; nejprve ho posoudit a využít, ne začít od starých screenshotů.
 
 ## 2. Podklady a míra jistoty
 
-[Konkurenční výzkum](../ux/routines-competitive-review-2026-09-08.md) obsahuje
+[Konkurenční výzkum](https://github.com/crewship-ai/crewship/blob/8dc421fdb5df28a8113ba1453682bc55464213e6/docs/ux/routines-competitive-review-2026-09-08.md) obsahuje
 oficiální zdroje, omezení edic a konkrétní lokální soubory. Zkoumány Windmill,
 n8n, Dify, Make, Trigger.dev, LangSmith a AWX. Neproběhlo přihlášené testování
 konkurence, uživatelská studie ani výkonnostní benchmark.
@@ -184,7 +184,7 @@ kvůli uložení. Změna živé verze je explicitní akce s oprávněním, ne ka
 **Vstupní preset R7 ověřen na dev1 (2026-09-10):** souhrn je vidět u
 opakovaného i jednorázového plánu v detailu a kalendáři. Změna přes Edit inputs
 se promítla do obou míst; ověřeny prázdné vstupy, dlouhý text a detail při 390 px.
-Důkazy: [protokol R7](reports/r7-preset-visibility-2026-09-10.md). Toto splňuje
+Důkazy: [protokol R7](https://github.com/crewship-ai/crewship/blob/8dc421fdb5df28a8113ba1453682bc55464213e6/docs/prd/reports/r7-preset-visibility-2026-09-10.md). Toto splňuje
 část §5.5 o viditelnosti presetu; nenahrazuje přejímku DST/§9 ani uživatelovo
 potvrzení Edit/Test/Run.
 
@@ -404,7 +404,7 @@ Původní jedno interní měření prvního zobrazení: 470 ms, 32 API požadavk
       dvou opačných odpovědí (vždy jedno 200 a jedno 409).
 - [ ] Uživatel bez výkladu vysvětlil pět rutin a potvrdil Edit/Test.
       Zadání pěti úloh s odkazy přímo na dev1 je připravené v
-      [routines-human-gate-2026-09-11](reports/routines-human-gate-2026-09-11.md).
+      [routines-human-gate-2026-09-11](https://github.com/crewship-ai/crewship/blob/8dc421fdb5df28a8113ba1453682bc55464213e6/docs/prd/reports/routines-human-gate-2026-09-11.md).
 
 Závěrečný bod smí potvrdit pouze uživatel. Žádné interní měření, screenshot,
 review ani zelené CI není náhradou tohoto potvrzení.
@@ -412,7 +412,7 @@ review ani zelené CI není náhradou tohoto potvrzení.
 ## 12b. Technická přejímka §9 — 11. září
 
 Protokol s run IDs, přesným rozsahem každého scénáře a seznamem toho, co
-zůstává NEOVĚŘENO: [routines-acceptance-2026-09-11](reports/routines-acceptance-2026-09-11.md).
+zůstává NEOVĚŘENO: [routines-acceptance-2026-09-11](https://github.com/crewship-ai/crewship/blob/8dc421fdb5df28a8113ba1453682bc55464213e6/docs/prd/reports/routines-acceptance-2026-09-11.md).
 Doplněny byly náhlý pád a obnova, nejistý externí účinek, timeout a souběh
 rozhodnutí, serverová izolace oprávnění, neprovedená větev / foreach /
 skutečné pokusy, dva editoři a DST na skutečné dispatch cestě (dosud byla
@@ -555,7 +555,7 @@ regresní kontrolou, nikoli důkazem použitelnosti nebo pokrytí všech změn.
 
 **Oponent měl pravdu: původní podklad nedokládal nasazení ani přejímku.**
 Následující výsledky jsou nové pozorování přihlášeného Chromium na
-[dev1](https://crewship-dev1.unifylab.cz/routines), nikoli dodatečné přejmenování
+[dev1](http://localhost:8081/routines), nikoli dodatečné přejmenování
 unit testů na uživatelský důkaz. Interní průchod nenahrazuje potvrzení člověka.
 
 ### Nasazení a ochrana rozpracované práce

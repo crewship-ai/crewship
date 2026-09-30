@@ -475,7 +475,7 @@ ChatGPT předvolí device code (s importem jako alternativou), Gemini API key
 API-only provider nevyžaduje potvrzovat jedinou dostupnou metodu. Každý má
 konkrétní krátký návod a odkaz na vytvoření klíče. Owner, název/štítky a technický
 slot jsou upravitelné pod rozbalením. Zdroje a hranice podpory viz
-[`reports/provider-onboarding-guidance-2026-09-06.md`](reports/provider-onboarding-guidance-2026-09-06.md).
+[`reports/provider-onboarding-guidance-2026-09-06.md`](https://github.com/crewship-ai/crewship/blob/07bfd2360a97dbe1c9f71c03e1d9b5d5d471c993/docs/prd/reports/provider-onboarding-guidance-2026-09-06.md).
 
 Filtr **Providers** je přímo v levé liště Overview i Providers, včetně nulových
 počtů a volby „All providers". Výběr v Overview přepne do Providers. Nulový počet

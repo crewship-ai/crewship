@@ -70,7 +70,7 @@ Record the measured test results and live deployment separately from this
 contract. Do not infer that one isolated browser fixture read the user's live
 session or exercised paid model execution.
 
-Measured results and Dev2 deployment: [2026-09-07 report](reports/chat-unification-2026-09-07.md).
+Measured results and Dev2 deployment: [2026-09-07 report](https://github.com/crewship-ai/crewship/blob/07bfd2360a97dbe1c9f71c03e1d9b5d5d471c993/docs/prd/reports/chat-unification-2026-09-07.md).
 
 CLI parity and real multi-user Dev2 acceptance: [Chat CLI](../../e2e/chat-cli-live.md).
 Workspace rooms live under `crewship chat room`; existing agent sessions retain
@@ -103,4 +103,4 @@ locks its inputs until resolution and does not navigate after cancellation.
 Membership and workspace checks apply again on each retry. This is a new room,
 not an in-place broadening of access to an existing private conversation.
 
-Current implementation and acceptance: [sidebar/continuation report](reports/chat-navigation-dev2-2026-09-07.md).
+Current implementation and acceptance: [sidebar/continuation report](https://github.com/crewship-ai/crewship/blob/8dc421fdb5df28a8113ba1453682bc55464213e6/docs/prd/reports/chat-navigation-dev2-2026-09-07.md).

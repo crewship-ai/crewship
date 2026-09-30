@@ -61,7 +61,7 @@ def run_main(routes, spec, fetched):
 class ResponseShapesTest(unittest.TestCase):
     # The failure this whole check exists to catch: a body whose fields have
     # all been renamed. It is only detectable because the schema names its
-    # required properties — see docs/prd/response-shape-contract.md.
+    # required properties — see docs/specs/response-shape-contract.md.
     SPEC = {
         "paths": {
             "/api/v1/approvals": {
@@ -123,8 +123,8 @@ class ResponseShapesTest(unittest.TestCase):
         self.assertEqual(checked_base("http://localhost:8082"), "http://localhost:8082")
         self.assertEqual(checked_base("http://127.0.0.1:8082"), "http://127.0.0.1:8082")
         self.assertEqual(
-            checked_base("https://crewship-dev2.unifylab.cz/"),
-            "https://crewship-dev2.unifylab.cz")
+            checked_base("https://crewship.example.com/"),
+            "https://crewship.example.com")
 
     def test_rejects_a_scheme_that_is_neither_http_nor_https(self):
         for base in ("file:///etc/passwd", "ftp://example.com"):
@@ -138,7 +138,7 @@ class ResponseShapesTest(unittest.TestCase):
         # reporting, so this raises rather than silently dropping the header.
         handler = _RefuseRedirects()
         request = urllib.request.Request(
-            "https://crewship-dev2.unifylab.cz/api/v1/inbox",
+            "https://crewship.example.com/api/v1/inbox",
             headers={"Authorization": "Bearer sekrit"})
         with self.assertRaises(urllib.error.HTTPError) as caught:
             handler.redirect_request(

@@ -45,7 +45,7 @@ func (r *Router) registerRoutes() {
 		r.registerE2EFixtureRoutes(oh)
 	}
 
-	// Pages — the panel surface (docs/prd/pages.md §11). Workspace-unscoped
+	// Pages — the panel surface (docs/specs/pages.md §11). Workspace-unscoped
 	// routes plus the single panel write path.
 	r.registerPageRoutes()
 

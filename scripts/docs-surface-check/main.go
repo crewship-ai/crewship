@@ -164,12 +164,20 @@ var allowedUnescapedHeadings = map[string][]string{
 // this note is here so that arrives as a one-line change rather than a puzzle.
 var unnavigatedPages = map[string]bool{
 	"audit-methodology": true,
+	// docs/README.md is the repository-side documentation map (see its own
+	// header: repo navigation, deliberately not a Mintlify page).
+	"README": true,
 }
 
 // ux/ holds the UI/UX programme's contract, audits and plan — working
-// documents for the people and agents changing the product, not pages for
-// the people using it.
-var unnavigatedPrefixes = []string{"prd/", "ux/"}
+// documents for the people and agents changing the product, not pages for the
+// people using it. The same is true of the four genre directories created in
+// the 2026-09-28 repository-clarity reorganisation: specs/, decisions/,
+// runbooks/ and development/ are contributor-facing contracts and procedures
+// for this repository, and archive/ is history — none of them belongs in the
+// published site's sidebar (see docs/README.md, which is the repo-side map,
+// deliberately not a Mintlify page either).
+var unnavigatedPrefixes = []string{"prd/", "ux/", "specs/", "decisions/", "runbooks/", "development/", "archive/"}
 
 func unnavigatedByDesign(page string) bool {
 	if unnavigatedPages[page] {

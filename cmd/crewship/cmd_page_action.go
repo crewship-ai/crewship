@@ -1,7 +1,7 @@
 package main
 
 // `crewship page action` — dispatch a panel's declared action
-// (docs/prd/pages.md §8b, §11's "every API endpoint gets a CLI command").
+// (docs/specs/pages.md §8b, §11's "every API endpoint gets a CLI command").
 //
 //	GET  /api/v1/pages/{slug}/panels/{id}/actions             page actions <slug>/<panel>
 //	POST /api/v1/pages/{slug}/panels/{id}/actions/{actionId}  page action  <slug>/<panel> <id>
