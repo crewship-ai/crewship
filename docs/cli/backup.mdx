@@ -61,6 +61,7 @@ crewship backup create --scope=workspace --use-keyring
 | `--use-keyring` | `bool` | `false` | Cache and reuse the passphrase via `~/.crewship/backup-keyring.enc`. |
 | `--recipient` | `string` | | AGE X25519 public key (`age1…`) for asymmetric encryption. |
 | `--output` | `string` | `<data dir>/backups` | Override the output directory on the server. |
+| `--recover-services` | `bool` | `false` | Retry selected interrupted quota service maintenance after prior producer and writer leases expire. |
 
 `--recipient` is mutually exclusive with both `--passphrase-file` and
 `--no-encrypt` (each combination is rejected). `--no-encrypt` also wins
@@ -313,6 +314,12 @@ crewship backup delete old.tar.zst --force
 | `--yes` | `bool` | `false` | Alias for `--force` — the CLI-wide pre-confirmation convention. |
 
 ---
+
+Quota service restores also support `--recover-services`. Ordinary retries keep
+unknown maintenance fenced. Inspect `backup status` first: a live producer or
+writer lease rejects recovery. Recovery stops exactly owned writers before
+verified image import; a failure never resumes desired service state. The flag
+does not unlock an unrelated live backup.
 
 ## `crewship backup status`
 
