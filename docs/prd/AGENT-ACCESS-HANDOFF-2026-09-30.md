@@ -24,7 +24,7 @@ HEAD. Původní live report má nesrovnalost mezi deklarovaným čistým zdrojem
 `/tmp/crewship-1-pr2723-go-test.log` (dočasné, nejsou tracked artifacts).
 
 Uživatel nyní autorizoval pokračování celého PRD a paralelní implementaci.
-Ti pracují v oddělených worktrees na scoped kontextu, durable rezervacích
+Paralelní agenti pracují v oddělených worktrees na scoped kontextu, durable rezervacích
 nákladů a produkčním restricted dispatchi. Žádná z těchto nových dodávek
 zatím neznamená dokončení Release 1.0; vyžadují integraci a přejímku.
 
@@ -65,7 +65,7 @@ neuvádět; rozhodují dosud otevřené průřezové akceptační brány.
   důvod obcházet konvenci bez konkrétní potřeby. **Oprava ještě nebyla provedena.**
 - Spustit `go run ./scripts/lint-tsformat origin/main` a relevantní test,
   požadované kontroly po změně; potom push a kontrolovat nový finální head.
-- **Aktualizace během psaní předání, 07:49 UTC:** CodeRabbit dokončil review
+- **Aktualizace během psaní předání, 07:49 UTC:** Automatický reviewer dokončil review
   finálního headu `3acdaa260` a schválil jej, review ID `5363096947`, bez actionable
   komentářů. `scripts/review-status.sh 2723` potvrzuje skutečné review podle
   walkthrough i schválení (prázdné tělo review samo by nestačilo).
@@ -114,7 +114,7 @@ nepublikovat bez rozmyslu: repozitář je veřejný.
 | #2722 | merged `50a9ea900066144581e9ddfa6ad506cfca47ad6d`, 30. 9. 07:15 UTC | Hostová politika pro stateless textové Responses; přesný model a tokenový strop, uzavřené schéma, SDK alias `/v1/responses`. |
 | #2723 | **OPEN**, head `3acdaa260` | Neměnná vazba aplikačního pokusu na provider credential/grant/model, monotónní revokace a zákaz rozšíření credentials při delegaci. |
 
-PR #2722 mělo skutečné schválení CodeRabbit na finálním headu `5eacc19ba` a zelené
+PR #2722 mělo skutečné schválení review na finálním headu `5eacc19ba` a zelené
 CI. ARM64 job vyžadoval jeden rerun kvůli 10s timeoutu existujícího Pages
 collector testu; kód ani timeout se kvůli tomu neměnil. U #2723 je příčina
 selhání známá a vyžaduje opravu; nepřenášet na ni vysvětlení z #2722.
@@ -233,7 +233,7 @@ Nový vzdálený tsformat lint z oddílu 2 zůstává neopravený.
 
 Převzít claim, opravit tsformat, ověřit finální změnu a CI/review #2723. Nespouštět
 opakovaně celé CI na nezměněném kódu kvůli průběžným poznámkám. Před merge ověřit
-aktuální head a skutečné CodeRabbit review, ne jen zelenou kontrolu. Automatický
+aktuální head a skutečné review, ne jen zelenou kontrolu. Automatický
 merge repozitář neměl povolený; ruční merge až po splnění všech bran. #2711
 nezavírat — dříve jej automatické closing reference uzavřelo předčasně.
 
