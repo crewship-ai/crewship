@@ -24,7 +24,8 @@ type HTTPGrant struct {
 	ID, Revision            string
 	Method, URL             string
 	CredentialID            string
-	ResponseMode            string `json:",omitempty"` // empty: bounded buffered response; "sse": explicit v2 streaming grant
+	ResponseMode            string           `json:",omitempty"` // empty: bounded buffered response; "sse": explicit v2 streaming grant
+	Responses               *ResponsesPolicy `json:",omitempty"` // explicit stateless text-only OpenAI operation
 	MaxRequest, MaxResponse int64
 	TimeoutMillis           int64
 }
@@ -76,7 +77,14 @@ func (p Plan) validateNetwork() error {
 		creds[c.ID] = true
 	}
 	ids := map[string]bool{}
+	responses := false
 	for _, g := range n.Grants {
+		if g.Responses != nil {
+			if responses || p.Profile != "brokered-http-v2" || !g.validResponses(n.Credentials) {
+				return ErrDenied
+			}
+			responses = true
+		}
 		maxTimeout := int64(10000)
 		if g.ResponseMode == "sse" && p.Profile == "brokered-http-v2" {
 			maxTimeout = 300000
@@ -128,7 +136,7 @@ func narrowNetwork(parent, child Plan) error {
 	for _, c := range child.Network.Grants {
 		found := false
 		for _, p := range parent.Network.Grants {
-			if c.ID == p.ID && c.Revision == p.Revision && c.URL == p.URL && c.Method == p.Method && c.CredentialID == p.CredentialID && c.ResponseMode == p.ResponseMode && c.MaxRequest <= p.MaxRequest && c.MaxResponse <= p.MaxResponse && c.TimeoutMillis <= p.TimeoutMillis {
+			if c.ID == p.ID && c.Revision == p.Revision && c.URL == p.URL && c.Method == p.Method && c.CredentialID == p.CredentialID && c.ResponseMode == p.ResponseMode && c.MaxRequest <= p.MaxRequest && c.MaxResponse <= p.MaxResponse && c.TimeoutMillis <= p.TimeoutMillis && narrowResponses(p.Responses, c.Responses) {
 				found = true
 			}
 		}

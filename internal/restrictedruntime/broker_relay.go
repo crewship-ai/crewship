@@ -77,15 +77,19 @@ func (s *Session) startBroker(ctx context.Context) (string, error) {
 	go func() { err := cmd.Wait(); b.close(); b.done <- err; close(b.done) }()
 	limits := map[string]int64{}
 	streams := map[string]int64{}
+	responsesOperation := ""
 	for _, g := range s.plan.Network.Grants {
 		limits[g.ID] = g.MaxRequest
 		if g.ResponseMode == "sse" {
 			streams[g.ID] = g.MaxResponse
 		}
+		if g.Responses != nil {
+			responsesOperation = g.ID
+		}
 	}
 	ready := make(chan error, 1)
 	go func() {
-		err := writeBrokerFrame(in, brokerFrame{Kind: "configure", Token: token, Limits: limits, Streams: streams})
+		err := writeBrokerFrame(in, brokerFrame{Kind: "configure", Token: token, Limits: limits, Streams: streams, ResponsesOperation: responsesOperation})
 		if err == nil {
 			var f brokerFrame
 			err = readBrokerFrame(out, &f)
@@ -170,6 +174,15 @@ func (s *Session) brokerExchange(parent context.Context, token string, req broke
 	if s.brokerAuthorized(ctx) != nil {
 		go s.Stop("broker_authority_denied")
 		return denied
+	}
+	if grant.Responses != nil {
+		// Host validation applies equally to the SDK alias and operation-ID path,
+		// before resolving credentials or making any upstream connection.
+		var err error
+		req.Body, err = grant.Responses.responsesBody(req.Body)
+		if err != nil || int64(len(req.Body)) > grant.MaxRequest {
+			return denied
+		}
 	}
 	var secret BoundSecret
 	if grant.CredentialID != "" {

@@ -1,5 +1,33 @@
 # Agent Access / Runtime — pokračování na dev1, 29. 9. 2026
 
+**Aktualizace 21:13 UTC:** #2721 je sloučené jako `272b43f58793872c6db9241f715cf33fd8a0cdf1`.
+Finální head `939a30827` má skutečné schválení CodeRabbit, dokončený walkthrough
+a úspěšné CI včetně všech Go/race/frontend jobů. Security i CodeQL prošly;
+jejich anotace byly upozornění na verze Actions/runnerů, nikoli nález v tomto diffu.
+#2711 zůstává otevřené. Navazuje [textový Responses adaptér brokeru](RESTRICTED-RESPONSES-ADAPTER-2026-09-29.md);
+produkční restricted dispatch ani přejímka celého Release 1.0 zatím hotové nejsou.
+
+**Aktualizace 21:24 UTC:** dev1 backend i web běží z čistého `d0e2023e64d660ced626145192dc18c0c38fa3df`
+(nový broker adaptér, dosud nesloučená větev `feat/restricted-provider-2711`).
+Celý Go průchod dokončil 150 balíčků, full vet, cílený race, invarianty a migration
+lint prošly. Docker harness s race dokončil 14/14 testů včetně dvou klientů přes
+`/v1/responses`, odmítnutí cizích modelů/resource referencí/tokenů a revokace A
+bez zastavení B. Žádný skutečný placený model nebyl volán. Mutace odstranění
+kontroly těla prokazatelně rozbila regresi. První Docker běh selhal kvůli chybě
+fixture (nepřiznaný synthetic direct credential); opravený celý průchod je zelený.
+Po reloadu byly ověřené skutečná binárka, webový marker, health/readiness,
+oprávnění `/proc/<pid>/environ`, autentizované CLI a znovu pozitivní/negativní
+dvouklientská policy akceptace. Vlastní testovací tmpfs byl normálně odpojen.
+
+Důkazy: [Go](reports/restricted-responses-go-2026-09-29.txt),
+[Docker](reports/restricted-responses-live-2026-09-29.txt),
+[mutace](reports/restricted-responses-mutation-2026-09-29.txt),
+[nasazení dev1](reports/restricted-responses-dev1-2026-09-29.txt).
+Další integrační brána zůstává immutable provider/credential binding v aplikační
+autoritě, scoped prompt/history/recall, accounting a dispatch/output. Textový
+adaptér nepodporuje Codex tool loop ani ChatGPT subscription login. Nelze jej
+označit za dokončený běžný omezený chat.
+
 **Aktualizace 14:19 UTC:** #2720 je sloučené jako `51a931f423830bdb3ca6403b2fe27740e7bb8758`.
 Finální head `5eb345326` má skutečné CodeRabbit review/schválení 5353361661 a
 úspěšné CI, Security i CodeQL; CI run 36574189593 dokončil také všechny race joby.
