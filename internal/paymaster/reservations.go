@@ -76,33 +76,9 @@ func Reserve(ctx context.Context, db *sql.DB, r ReservationRequest) (Reservation
 		if b.ScopeKind == ScopeWorkspace {
 			capped = true
 		}
-		spent, err := sumSpend(ctx, conn, b, r.Scope, now)
+		spent, err := conservativeSumSpend(ctx, conn, b, r.Scope, now)
 		if err != nil {
 			return Reservation{}, err
-		}
-		// A pending request keeps consuming capacity even when its original
-		// ledger timestamp falls before the new calendar window. Crashed calls
-		// have no expiry/refund path and cannot become free at midnight.
-		if b.Window != WindowMission {
-			start, _ := windowStart(b.Window, now)
-			conditions := []string{"l.workspace_id=?", "r.state='pending'", "l.ts<?"}
-			args := []any{b.WorkspaceID, tsformat.Format(start)}
-			switch b.ScopeKind {
-			case ScopeCrew:
-				conditions = append(conditions, "l.crew_id=?")
-				args = append(args, b.ScopeID)
-			case ScopeMission:
-				conditions = append(conditions, "l.mission_id=?")
-				args = append(args, b.ScopeID)
-			case ScopeAgent:
-				conditions = append(conditions, "l.agent_id=?")
-				args = append(args, b.ScopeID)
-			}
-			var carried float64
-			if err := conn.QueryRowContext(ctx, "SELECT COALESCE(SUM(l.cost_usd),0) FROM restricted_cost_reservations r JOIN cost_ledger l ON l.id=r.ledger_id WHERE "+joinAnd(conditions), args...).Scan(&carried); err != nil {
-				return Reservation{}, err
-			}
-			spent += carried
 		}
 		if !finite(spent) || spent < 0 || spent+cost > b.LimitUSD {
 			return Reservation{}, &BudgetExceededError{Statuses: []BudgetStatus{{Budget: b, SpentUSD: spent + cost, LimitUSD: b.LimitUSD, State: StateExceeded}}}
