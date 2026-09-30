@@ -15,6 +15,8 @@ try {
     await context.addInitScript(id => localStorage.setItem('crewship.workspaceId', id), fixture.workspace)
     const page = await context.newPage()
     const failed = []
+    const modelRequests = []
+    page.on('request', request => { if (request.method() === 'POST' && request.url().includes('/restricted-run?')) modelRequests.push(request) })
     page.on('response', response => { if (response.url().includes('/api/') && response.status() >= 400) failed.push(`${response.status()} ${new URL(response.url()).pathname}`) })
     try {
       await page.goto(`${base}/chat/native-agent?session=${actor}-chat`, { waitUntil: 'domcontentloaded', timeout: 180000 })
@@ -38,6 +40,34 @@ try {
       const foreign = actor === 'native-h1' ? 'native-h2' : 'native-h1'
       const denied = await context.request.get(`${base}/api/v1/chats/${foreign}-chat/restricted-files?workspace_id=${fixture.workspace}`)
       if (denied.status() !== 404) throw new Error(`Foreign chat files returned ${denied.status()}`)
+      const ownFile = fixture.project_files[actor]
+      const foreignFile = fixture.project_files[foreign]
+      const openInputs = async () => {
+        const summary = page.locator('summary').filter({ hasText: /^Project inputs/ })
+        await expect(summary).toBeVisible({ timeout: 60000 })
+        await summary.click()
+        const picker = page.locator('details').filter({ has: summary })
+        await expect(picker.getByText(ownFile.name, { exact: true })).toBeVisible()
+        await expect(picker.getByText(foreignFile.name, { exact: true })).toHaveCount(0)
+        return picker
+      }
+      // A fresh draft requires an explicit authenticated preparation, never a
+      // paid warmup or an inferred agent profile.
+      await page.goto(`${base}/chat/native-agent?session=${actor}-input-draft`, { waitUntil: 'domcontentloaded' })
+      await expect(page.getByRole('checkbox')).toHaveCount(0)
+      const prepareResponse = page.waitForResponse(response => response.request().method() === 'POST' && response.url().includes('/agents/native-agent/chats?'))
+      await page.getByRole('button', { name: 'Prepare project inputs', exact: true }).click()
+      if ((await prepareResponse).status() >= 400) throw new Error('Draft preparation failed')
+      let picker = await openInputs()
+      if (modelRequests.length !== 0) throw new Error('Preparing inputs unexpectedly sent a model request')
+      await expect(picker.getByRole('checkbox')).not.toBeChecked()
+      await picker.getByRole('checkbox').check()
+      // Changing conversation discards selection instead of silently carrying
+      // a source from another message or reviving an earlier choice.
+      await page.goto(`${base}/chat/native-agent?session=${actor}-chat`, { waitUntil: 'domcontentloaded' })
+      picker = await openInputs()
+      await expect(picker.getByRole('checkbox')).not.toBeChecked()
+      await picker.getByRole('checkbox').check()
       const transcript = page.getByRole('log')
       const replies = transcript.getByText(`DONE_${actor}`, { exact: true })
       await expect(replies).toHaveCount(1)
@@ -48,9 +78,12 @@ try {
       await composer.press('Enter')
       const response = await runResponse
       if (response.status() !== 200) throw new Error('Browser native run was denied')
+      const payload = response.request().postDataJSON()
+      if (JSON.stringify(payload.project_file_versions) !== JSON.stringify([ownFile.version_id])) throw new Error('Browser did not forward only the explicit own version')
+      await expect(picker.getByRole('checkbox')).not.toBeChecked()
       await expect(replies).toHaveCount(before + 1, { timeout: 60000 })
       await expect(page.getByRole('button', { name: 'Download output.txt', exact: true })).toHaveCount(2, { timeout: 60000 })
-      console.log(`PASS actual browser ${actor} width=${width}: own memory, create/remove note, SHA-verified file download, foreign 404, composer native tool run and retained output`)
+      console.log(`PASS actual browser ${actor} width=${width}: own memory, create/remove note, SHA-verified file download, foreign 404, explicit draft preparation, own-only picker/reset, selected native transport and retained output`)
     } catch (error) {
       await page.screenshot({ path: join(scratch, `${actor}-failure.png`), fullPage: true })
       console.error(`Browser failure ${actor}; API errors ${failed.join(', ')}; evidence ${scratch}`)
