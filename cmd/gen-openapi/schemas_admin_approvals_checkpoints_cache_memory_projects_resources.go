@@ -307,16 +307,16 @@ func schemaCatalogAdminApprovalsCheckpointsCacheMemoryProjectsResources() map[st
 		}, "defaults", "workspaces")},
 		"PUT /api/v1/admin/instance/keeper/governance": {
 			Request: object(map[string]any{
-				"workspaces": stringArray(), "all": boolean(), "dry_run": boolean(),
+				"workspaces": stringArray(), "all": boolean(), "dry_run": boolean(), "expect_preview": str(),
 				"set": object(instanceGovPatch),
 			}, "set"),
 			Response: object(map[string]any{
-				"applied": boolean(), "changed": integer(), "defaults_updated": boolean(),
+				"applied": boolean(), "changed": integer(), "defaults_updated": boolean(), "preview_id": str(),
 				"workspaces": array(object(withProps(instanceWsRef, map[string]any{
 					"changes":  array(object(map[string]any{"field": str(), "before": map[string]any{}, "after": map[string]any{}}, "field", "before", "after")),
 					"warnings": stringArray(),
 				}), append([]string{"changes"}, instanceWsRequired...)...)),
-			}, "applied", "changed", "defaults_updated", "workspaces")},
+			}, "applied", "changed", "defaults_updated", "workspaces", "preview_id")},
 		"GET /api/v1/admin/instance/keeper/requests": {Response: object(map[string]any{
 			"items": array(object(withProps(map[string]any{
 				"id": str(), "agent_id": str(), "agent_name": str(), "crew_id": str(), "credential_id": str(), "credential_name": str(),
@@ -327,7 +327,8 @@ func schemaCatalogAdminApprovalsCheckpointsCacheMemoryProjectsResources() map[st
 			"total":        integer(),
 			"counts":       object(map[string]any{"allow": integer(), "deny": integer(), "escalate": integer(), "pending": integer()}, "allow", "deny", "escalate", "pending"),
 			"by_workspace": array(object(withProps(instanceWsRef, map[string]any{"count": integer()}), append([]string{"count"}, instanceWsRequired...)...)),
-		}, "items", "total", "counts", "by_workspace")},
+			"by_type":      integerMap(),
+		}, "items", "total", "counts", "by_workspace", "by_type")},
 		"GET /api/v1/admin/instance/keeper/health": {Response: object(map[string]any{
 			"workspaces": array(object(map[string]any{
 				"workspace_id": str(), "workspace_name": str(), "workspace_slug": str(),

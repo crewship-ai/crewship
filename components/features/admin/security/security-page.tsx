@@ -20,7 +20,7 @@ import { useSecurity } from "./use-security"
 import { useInstanceKeeper } from "./use-instance-keeper"
 import { BulkGovernanceForm, type BulkSection } from "./bulk-governance"
 import { WhatsOnWhere } from "./whats-on-where"
-import { SCOPE_HINT, SCOPE_LABEL, SETTINGS, STREAMS, isSection, streamCounts, type Section, type SettingsSection, type Stream } from "./security-model"
+import { SCOPE_HINT, SCOPE_LABEL, SETTINGS, STREAMS, isSection, type DecisionFilter, type Section, type SettingsSection, type Stream } from "./security-model"
 
 const STREAM_ICON: Record<Stream, LucideIcon> = {
   requests: KeyRound, skill_review: Sparkles, behavior: Eye, memory_health: Brain, negative_learning: BookOpen,
@@ -79,9 +79,19 @@ export function SecurityPage() {
 
   const [selected, setSelected] = React.useState<Set<string> | null>(null)
   const [total, setTotal] = React.useState(0)
+  const [decision, setDecision] = React.useState<DecisionFilter>("all")
+  // Activity filters on the server, over the whole history (review R6). The
+  // overview reads the log unfiltered.
+  const filter = React.useMemo(() => {
+    if (section !== "activity") return {}
+    return {
+      types: stream === "all" ? undefined : stream === "requests" ? ["access", "execute"] : [stream],
+      decision: decision === "all" ? undefined : decision,
+    }
+  }, [section, stream, decision])
   // null asks for every workspace — also when every one is ticked, so a
   // workspace created meanwhile is not left out of "all".
-  const inst = useInstanceKeeper(selected === null || selected.size === total ? null : [...selected], data.liveTick)
+  const inst = useInstanceKeeper(selected === null || selected.size === total ? null : [...selected], data.liveTick, filter)
 
   const workspaces: ScopeWorkspace[] = React.useMemo(() => {
     const counts = new Map((inst.requests?.by_workspace ?? []).map((b) => [b.workspace_id, b.count]))
@@ -104,11 +114,22 @@ export function SecurityPage() {
   const sel = React.useMemo(() => selected ?? new Set(workspaces.map((w) => w.id)), [selected, workspaces])
   const allTicked = sel.size === workspaces.length && workspaces.length > 0
   const entries = inst.requests?.items ?? []
-  const counts = streamCounts(entries)
+  // Per kind from the server, over every workspace ticked and all history.
+  const byType = inst.requests?.by_type ?? {}
+  const counts: Record<Stream, number> = {
+    requests: (byType.access ?? 0) + (byType.execute ?? 0) + (byType[""] ?? 0),
+    skill_review: byType.skill_review ?? 0, behavior: byType.behavior ?? 0,
+    memory_health: byType.memory_health ?? 0, negative_learning: byType.negative_learning ?? 0,
+  }
+  const activityTotal = Object.values(byType).reduce((a, b) => a + b, 0)
   const settings = SETTINGS.find((s) => s.key === section)
   const rows = (inst.gov?.workspaces ?? []).filter((w) => sel.has(w.workspace_id))
 
-  const singleRow = rows.length === 1 ? rows[0] : null
+  // "All workspaces" always means the bulk path, which also sets the defaults
+  // for new workspaces — with one workspace on the server as with many
+  // (review R9). One workspace ticked out of several is edited on its own.
+  const bulkRows = rows.length > 1 || (allTicked && rows.length > 0)
+  const singleRow = rows.length === 1 && !allTicked ? rows[0] : null
   const instanceProp = React.useMemo(
     () => (singleRow ? { row: singleRow, onSaved: () => void inst.reloadGov() } : undefined),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- the row object is the identity that matters
@@ -127,7 +148,7 @@ export function SecurityPage() {
         <DrillNavItem selected={section === "matrix"} onSelect={() => update({ section: "matrix" })}
           icon={<Grid3x3 className="h-3.5 w-3.5" />} label="What's on where" />
       </DrillNavSection>
-      <DrillNavSection label="Activity" count={inst.requests?.total ?? 0}>
+      <DrillNavSection label="Activity" count={activityTotal}>
         {STREAMS.map((s, i) => {
           const Icon = STREAM_ICON[s.key]
           const on = section === "activity" && stream === s.key
@@ -144,7 +165,7 @@ export function SecurityPage() {
           return (
             <DrillNavItem key={s.key} index={i} selected={section === s.key} onSelect={() => update({ section: s.key })}
               icon={<Icon className="h-3.5 w-3.5" />} label={s.label} title={SCOPE_HINT[s.scope]}
-              meta={<span className={cn("rounded px-1 text-[9.5px] uppercase", s.scope === "instance" ? "bg-primary/10 text-primary-hover" : "bg-muted")}>{s.scope === "instance" ? "inst" : "per ws"}</span>} />
+              meta={<span className={cn("rounded px-1 text-[10px]", s.scope === "instance" ? "bg-primary/10 text-primary-hover" : "bg-muted")}>{s.scope === "instance" ? "Instance" : "Per workspace"}</span>} />
           )
         })}
       </DrillNavSection>
@@ -159,7 +180,7 @@ export function SecurityPage() {
           if (v.startsWith("activity:")) update({ section: "activity", stream: v.slice(9) as Stream | "all" })
           else update({ section: v as Section })
         }}
-        className="h-9 w-full rounded-md border border-control-border bg-surface-subtle px-3 text-control">
+        className="h-9 w-full rounded-md border border-control-border bg-surface-subtle px-3 text-control coarse:h-11">
         <option value="overview">Overview</option>
         <option value="matrix">What&apos;s on where</option>
         <option value="activity:all">Activity · all</option>
@@ -168,7 +189,7 @@ export function SecurityPage() {
       </select>
       <select aria-label="Workspaces" value={allTicked ? "all" : sel.size === 1 ? [...sel][0] : "some"}
         onChange={(e) => changeSelection(e.target.value === "all" ? new Set(workspaces.map((w) => w.id)) : new Set([e.target.value]))}
-        className="h-9 w-full rounded-md border border-control-border bg-surface-subtle px-3 text-control">
+        className="h-9 w-full rounded-md border border-control-border bg-surface-subtle px-3 text-control coarse:h-11">
         <option value="all">All workspaces</option>
         {!allTicked && sel.size > 1 && <option value="some">{sel.size} workspaces</option>}
         {workspaces.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
@@ -184,7 +205,8 @@ export function SecurityPage() {
   } else if (section === "overview") {
     body = <SecurityOverview status={data.status} posture={data.posture} postureError={data.postureError} entries={entries}
       workspaceId={workspaceId ?? ""} counts={inst.requests ? { total: inst.requests.total, ...inst.requests.counts } : undefined}
-      health={inst.health.filter((h) => sel.has(h.workspace_id))}
+      health={inst.health.filter((h) => sel.has(h.workspace_id))} healthError={inst.healthError} activityError={inst.requestsError}
+      selectedCount={sel.size}
       onOpenActivity={() => update({ section: "activity", stream: "all" })} />
   } else if (section === "matrix") {
     body = (
@@ -199,7 +221,11 @@ export function SecurityPage() {
   } else if (section === "activity") {
     body = sel.size === 0
       ? <p className="text-[13px] text-muted-foreground">Tick a workspace in the panel.</p>
-      : <SecurityActivity entries={entries} stream={stream} onStream={(s) => update({ stream: s })} live={data.live} error={inst.requestsError} />
+      : <SecurityActivity entries={entries} stream={stream} onStream={(s) => update({ stream: s })} live={data.live} error={inst.requestsError}
+          server={{
+            decision, onDecision: setDecision, total: inst.requests?.total ?? 0, loading: inst.requestsLoading,
+            counts: inst.requests?.counts ?? { allow: 0, deny: 0, escalate: 0, pending: 0 }, onLoadMore: () => void inst.loadMore(),
+          }} />
   } else if (settings) {
     const bulk = isBulk(section)
     body = (
@@ -209,7 +235,7 @@ export function SecurityPage() {
             <span className={cn("mr-2 rounded-full px-2 font-mono text-[10.5px]", settings.scope === "instance" ? "bg-primary/10 text-primary-hover" : "bg-muted text-muted-foreground")}>
               {SCOPE_LABEL[settings.scope]}
             </span>
-            {bulk ? (rows.length === 1 ? `Editing ${rows[0].workspace_name}` : rows.length > 1 ? `${rows.length} workspaces selected` : SCOPE_HINT[settings.scope]) : SCOPE_HINT[settings.scope]}
+            {bulk ? (singleRow ? `Editing ${singleRow.workspace_name}` : bulkRows ? (allTicked ? `All ${rows.length} workspace${rows.length === 1 ? "" : "s"}, and new ones` : `${rows.length} workspaces selected`) : SCOPE_HINT[settings.scope]) : SCOPE_HINT[settings.scope]}
           </SummaryItem>
           <SummaryItem>{settings.about}</SummaryItem>
         </SettingsSummary>
@@ -221,7 +247,7 @@ export function SecurityPage() {
           <KeeperGovernancePanel key={instanceProp.row.workspace_id} workspaceId={instanceProp.row.workspace_id}
             serverEnabled={data.status?.enabled ?? false} section={PANEL_SECTION[section]} instance={instanceProp} />
         )}
-        {bulk && rows.length > 1 && (
+        {bulk && bulkRows && (
           <BulkGovernanceForm section={section} rows={rows} all={allTicked} onSaved={() => void inst.reloadGov()} />
         )}
       </>

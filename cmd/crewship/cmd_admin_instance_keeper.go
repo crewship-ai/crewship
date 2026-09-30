@@ -63,6 +63,7 @@ type instanceGovPutResult struct {
 	Changed         int                 `json:"changed" yaml:"changed"`
 	DefaultsUpdated bool                `json:"defaults_updated" yaml:"defaults_updated"`
 	Workspaces      []instanceGovChange `json:"workspaces" yaml:"workspaces"`
+	PreviewID       string              `json:"preview_id" yaml:"preview_id"`
 }
 
 var adminInstanceKeeperCmd = &cobra.Command{
@@ -202,6 +203,9 @@ more than one.`,
 				return cli.WithExitCode(err, cli.ExitValidation)
 			}
 			delete(body, "dry_run")
+			// Save exactly what was shown: a workspace created or a value
+			// changed since the preview makes the server answer 409.
+			body["expect_preview"] = preview.PreviewID
 		}
 		var out instanceGovPutResult
 		if err := putJSON(client, "/api/v1/admin/instance/keeper/governance", body, &out); err != nil {

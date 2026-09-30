@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -318,4 +319,136 @@ func TestInstanceAdminWhoIsAMemberReadsTheInstanceCards(t *testing.T) {
 	seedInstanceUser(t, f.db, "joe", "joe@ex.com", "ws-new", "MEMBER")
 	joe := mintTokenFor(t, f.db, "joe", "instfixjoe00000000000000000")
 	wantCode(t, f.do(joe, "GET", "/api/v1/admin/security-posture?workspace_id=ws-new", ""), http.StatusForbidden, "plain member")
+}
+
+// Review R7: an instance admin need not belong to any workspace, and the
+// People lists, like every instance surface, must answer them without one.
+func TestInstanceAdminWithoutAWorkspaceReadsPeopleAndWorkspaces(t *testing.T) {
+	f := newInstanceFixture(t)
+	mustExec(t, f.db, `UPDATE users SET instance_role = 'ADMIN' WHERE id = 'boss'`)
+	mustExec(t, f.db, `DELETE FROM workspace_members WHERE user_id = 'boss'`)
+	for _, path := range []string{"/api/v1/admin/users", "/api/v1/admin/workspaces", "/api/v1/admin/users/carol/sessions"} {
+		rr := f.do(f.boss, "GET", path, "")
+		wantCode(t, rr, http.StatusOK, path)
+	}
+	rr := f.do(f.boss, "GET", "/api/v1/admin/workspaces", "")
+	if b := rr.Body.String(); !strings.Contains(b, "ws-old") || !strings.Contains(b, "ws-new") {
+		t.Fatalf("workspaces = %s, want every workspace", b)
+	}
+	// Nobody else gets the instance view by leaving the workspace out.
+	seedInstanceUser(t, f.db, "joe", "joe@ex.com", "ws-new", "ADMIN")
+	joe := mintTokenFor(t, f.db, "joe", "instfixjoe00000000000000000")
+	wantCode(t, f.do(joe, "GET", "/api/v1/admin/users", ""), http.StatusBadRequest, "workspace admin without a workspace")
+}
+
+// Review R7: the instance:admin scope follows the instance role, so an
+// instance admin who is only a MEMBER somewhere (or nowhere) can still mint a
+// token narrowed to exactly that power.
+func TestInstanceAdminMintsAnInstanceScopedToken(t *testing.T) {
+	for _, c := range []struct {
+		name  string
+		setup string
+		want  int
+	}{
+		{"member somewhere", `UPDATE workspace_members SET role = 'MEMBER' WHERE user_id = 'boss'`, http.StatusOK},
+		{"member nowhere", `DELETE FROM workspace_members WHERE user_id = 'boss'`, http.StatusOK},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			f := newInstanceFixture(t)
+			mustExec(t, f.db, `UPDATE users SET instance_role = 'ADMIN' WHERE id = 'boss'`)
+			mustExec(t, f.db, c.setup)
+			rr := f.do(f.boss, "POST", "/api/v1/auth/cli-token", `{"name":"ops","scopes":["instance:admin"]}`)
+			wantCode(t, rr, c.want, "mint instance:admin")
+		})
+	}
+	f := newInstanceFixture(t)
+	seedInstanceUser(t, f.db, "ann", "ann@ex.com", "ws-new", "MEMBER")
+	mustExec(t, f.db, `UPDATE users SET instance_role = 'ADMIN' WHERE id = 'boss'`)
+	ann := mintTokenFor(t, f.db, "ann", "instfixann00000000000000000")
+	wantCode(t, f.do(ann, "POST", "/api/v1/auth/cli-token", `{"name":"ops","scopes":["instance:admin"]}`), http.StatusForbidden, "a plain member")
+}
+
+// Review R3: a save confirmed from a preview carries the preview's id, and
+// the server refuses it if what it would do is no longer what was shown — a
+// workspace created meanwhile, or a value someone else changed.
+func TestInstanceKeeperGovernanceRefusesASaveThatNoLongerMatchesItsPreview(t *testing.T) {
+	type preview struct {
+		PreviewID string `json:"preview_id"`
+	}
+	dry := func(f *instanceFixture) string {
+		rr := f.do(f.boss, "PUT", "/api/v1/admin/instance/keeper/governance", `{"all":true,"dry_run":true,"set":{"enabled":true}}`)
+		wantCode(t, rr, http.StatusOK, "dry run")
+		p := decodeAs[preview](t, rr.Body.Bytes())
+		if p.PreviewID == "" {
+			t.Fatal("a dry run returned no preview_id")
+		}
+		return p.PreviewID
+	}
+	apply := func(f *instanceFixture, id string) *httptest.ResponseRecorder {
+		return f.do(f.boss, "PUT", "/api/v1/admin/instance/keeper/governance", `{"all":true,"expect_preview":"`+id+`","set":{"enabled":true}}`)
+	}
+
+	t.Run("unchanged", func(t *testing.T) {
+		f := newInstanceFixture(t)
+		wantCode(t, apply(f, dry(f)), http.StatusOK, "apply the preview")
+		if s, _ := f.gov("ws-old"); !s.Enabled {
+			t.Fatal("not applied")
+		}
+	})
+	t.Run("a workspace created after the preview", func(t *testing.T) {
+		f := newInstanceFixture(t)
+		id := dry(f)
+		seedInstanceWorkspace(t, f.db, "ws-later", "2026-09-01 00:00:00")
+		wantCode(t, apply(f, id), http.StatusConflict, "new workspace since the preview")
+		if _, found := f.gov("ws-old"); found {
+			t.Fatal("written although the preview no longer held")
+		}
+	})
+	t.Run("a value changed after the preview", func(t *testing.T) {
+		f := newInstanceFixture(t)
+		id := dry(f)
+		if err := governance.Upsert(context.Background(), f.db, "ws-new", governance.Settings{Enabled: true, DenyNotifyMinRisk: 7}, ""); err != nil {
+			t.Fatal(err)
+		}
+		wantCode(t, apply(f, id), http.StatusConflict, "value changed since the preview")
+	})
+}
+
+// Review R6: the Activity page filters on the server and pages through the
+// whole history, so it needs several kinds at once (a credential request is
+// access or execute), counts per kind for the panel, and decision counts that
+// stay put while one decision is picked.
+func TestInstanceKeeperRequestsFilterAndCountOnTheServer(t *testing.T) {
+	f := newInstanceFixture(t)
+	mustExec(t, f.db, `INSERT INTO agents (id, workspace_id, name, slug) VALUES ('ag-o', 'ws-old', 'Old agent', 'oa')`)
+	mustExec(t, f.db, `INSERT INTO keeper_requests (id, requesting_agent_id, intent, decision, request_type, created_at) VALUES
+		('k1','ag-o','x','ALLOW','access','2026-09-01T00:00:01Z'), ('k2','ag-o','x','DENY','execute','2026-09-01T00:00:02Z'),
+		('k3','ag-o','x','ALLOW','behavior','2026-09-01T00:00:03Z'), ('k4','ag-o','x','DENY','access','2026-09-01T00:00:04Z')`)
+	type list struct {
+		Items []struct {
+			ID string `json:"id"`
+		} `json:"items"`
+		Total  int `json:"total"`
+		Counts struct {
+			Allow int `json:"allow"`
+			Deny  int `json:"deny"`
+		} `json:"counts"`
+		ByType map[string]int `json:"by_type"`
+	}
+	rr := f.do(f.boss, "GET", "/api/v1/admin/instance/keeper/requests?request_type=access,execute&decision=DENY&limit=1", "")
+	wantCode(t, rr, http.StatusOK, "filtered")
+	got := decodeAs[list](t, rr.Body.Bytes())
+	if got.Total != 2 || len(got.Items) != 1 || got.Items[0].ID != "k4" {
+		t.Fatalf("page = %+v, want k4 of 2 denied credential requests", got)
+	}
+	if got.Counts.Allow != 1 || got.Counts.Deny != 2 {
+		t.Fatalf("counts = %+v, want the decisions of every credential request, whatever decision is picked", got.Counts)
+	}
+	if got.ByType["access"] != 2 || got.ByType["execute"] != 1 || got.ByType["behavior"] != 1 {
+		t.Fatalf("by_type = %v, want every kind, whatever kind is picked", got.ByType)
+	}
+	rr = f.do(f.boss, "GET", "/api/v1/admin/instance/keeper/requests?request_type=access,execute&decision=DENY&limit=1&offset=1", "")
+	if p := decodeAs[list](t, rr.Body.Bytes()); len(p.Items) != 1 || p.Items[0].ID != "k2" {
+		t.Fatalf("second page = %+v, want k2", p.Items)
+	}
 }

@@ -466,7 +466,11 @@ func (h *WorkspaceHandler) CreateInvitation(w http.ResponseWriter, r *http.Reque
 // workspace route refuses to remove an owner at all, the instance route only
 // the last one. A *ErrPagesNeedManualTransfer comes back unwrapped so the
 // caller can answer 409 and leave the member in place.
-func departWorkspace(ctx context.Context, db *sql.DB, j journal.Emitter, actorID, workspaceID, memberUserID string) error {
+//
+// alsoInTx run inside the departure's transaction, before it commits; the
+// instance route writes its audit entry there so the removal and its record
+// land together.
+func departWorkspace(ctx context.Context, db *sql.DB, j journal.Emitter, actorID, workspaceID, memberUserID string, alsoInTx ...func(*sql.Tx) error) error {
 	// Transfer BEFORE the membership row goes — a precondition, not a
 	// cleanup step, exactly as admin_gdpr.go's erasure cascade treats it.
 	// A refusal here must leave the member in place: proceeding with the
@@ -519,6 +523,11 @@ func departWorkspace(ctx context.Context, db *sql.DB, j journal.Emitter, actorID
 		  AND crew_id IN (SELECT id FROM crews WHERE workspace_id = ?)
 	`, memberUserID, workspaceID); err != nil {
 		return fmt.Errorf("purge departing member's crew memberships: %w", err)
+	}
+	for _, f := range alsoInTx {
+		if err := f(tx); err != nil {
+			return err
+		}
 	}
 
 	if err := tx.Commit(); err != nil {

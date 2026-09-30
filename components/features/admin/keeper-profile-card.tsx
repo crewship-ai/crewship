@@ -31,7 +31,7 @@ import { Switch } from "@/components/ui/switch"
 import { Skeleton } from "@/components/ui/skeleton"
 import { SaveFooter } from "@/components/ui/save-footer"
 import { useDirtyForm } from "@/hooks/use-dirty-form"
-import { useAbilities } from "@/hooks/use-abilities"
+import { useIsInstanceAdmin } from "@/hooks/use-auth"
 import { SettingsCard, SettingsRow } from "@/components/features/settings/shared"
 import { cn } from "@/lib/utils"
 
@@ -113,8 +113,11 @@ async function errorFrom(res: Response, fallback: string): Promise<string> {
 export function KeeperProfileCard({ workspaceId }: { workspaceId?: string | null }) {
   const [p, setP] = useState<Partial<ProfileBlock> | null>(null)
   const [err, setErr] = useState<string | null>(null)
-  const { abilities } = useAbilities()
-  const canEdit = abilities.can("manage", "Workspace")
+  // An instance-wide setting: the PUT is authedInstanceMut, which admits an
+  // instance admin whatever their role in this workspace and refuses a
+  // workspace ADMIN who is not one. The card follows the same rule (review
+  // R2); the server stays the gate.
+  const canEdit = useIsInstanceAdmin() === true
 
   const form = useDirtyForm({
     name: p?.name?.value ?? "lean",

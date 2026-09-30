@@ -52,6 +52,8 @@ export interface InstanceGovList {
 export interface GovFieldChange { field: string; before: unknown; after: unknown }
 
 export interface GovSaveResult {
+  /** Fingerprint of what the save does; send it back to confirm a preview. */
+  preview_id?: string
   applied: boolean
   changed: number
   defaults_updated: boolean
@@ -63,6 +65,8 @@ export interface InstanceRequests {
   total: number
   counts: { allow: number; deny: number; escalate: number; pending: number }
   by_workspace: { workspace_id: string; workspace_name: string; workspace_slug: string; count: number }[]
+  /** Every kind under the workspace filter alone. */
+  by_type: Record<string, number>
 }
 
 export interface InstanceHealthRow {
@@ -90,65 +94,123 @@ async function errorOf(r: Response): Promise<string> {
 }
 
 /** PUT /admin/instance/keeper/governance. Throws the server's message. */
-export async function saveInstanceGovernance(targets: GovTargets, set: Partial<InstanceGovSettings>, dryRun = false): Promise<GovSaveResult> {
+export async function saveInstanceGovernance(targets: GovTargets, set: Partial<InstanceGovSettings>, dryRun = false, expectPreview?: string): Promise<GovSaveResult> {
   const r = await apiFetch("/api/v1/admin/instance/keeper/governance", {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ ...targets, dry_run: dryRun, set }),
+    body: JSON.stringify({ ...targets, dry_run: dryRun, ...(expectPreview ? { expect_preview: expectPreview } : {}), set }),
   })
   if (!r.ok) throw new Error(await errorOf(r))
   return (await r.json()) as GovSaveResult
 }
 
+/** What the decision log is narrowed to on the server (review R6). */
+export interface RequestFilter {
+  /** request_type values; a credential request is access or execute. */
+  types?: string[]
+  /** ALLOW, DENY, ESCALATE or PENDING. */
+  decision?: string
+}
+
+const PAGE = 100
+
 /**
  * The instance reads. `selected` narrows the decision log (null = every
- * workspace); the governance matrix and the health windows always cover them
- * all, since the panel and the matrix need every row.
+ * workspace) and `filter` narrows it by kind and decision, both on the server,
+ * which pages through the whole history. The governance matrix and the health
+ * windows always cover every workspace, since the panel and the matrix need
+ * every row.
+ *
+ * Every read carries a generation: an answer for a query that is no longer
+ * the current one (the selection or the filter moved on while it was in
+ * flight) is dropped, never shown under the new scope (review R4).
  */
-export function useInstanceKeeper(selected: string[] | null, liveTick = 0) {
+export function useInstanceKeeper(selected: string[] | null, liveTick = 0, filter: RequestFilter = {}) {
   const [gov, setGov] = React.useState<InstanceGovList | null>(null)
   const [govError, setGovError] = React.useState<string | null>(null)
   const [requests, setRequests] = React.useState<InstanceRequests | null>(null)
   const [requestsError, setRequestsError] = React.useState<string | null>(null)
+  const [requestsLoading, setRequestsLoading] = React.useState(true)
   const [health, setHealth] = React.useState<InstanceHealthRow[]>([])
+  const [healthError, setHealthError] = React.useState<string | null>(null)
   const [loading, setLoading] = React.useState(true)
 
-  const filter = selected === null ? "" : selected.length === 0 ? null : selected.join(",")
+  const scope = selected === null ? "" : selected.length === 0 ? null : selected.join(",")
+  const types = (filter.types ?? []).join(",")
+  const decision = filter.decision ?? ""
+  const queryKey = `${scope}|${types}|${decision}`
+  const generation = React.useRef({ gov: 0, requests: 0, health: 0 })
 
   const loadGov = React.useCallback(async () => {
+    const g = ++generation.current.gov
     try {
       const r = await apiFetch("/api/v1/admin/instance/keeper/governance")
+      if (g !== generation.current.gov) return
       if (!r.ok) { setGovError(await errorOf(r)); return }
       setGov((await r.json()) as InstanceGovList)
       setGovError(null)
     } catch {
-      setGovError("Workspace settings could not be read")
+      if (g === generation.current.gov) setGovError("Workspace settings could not be read")
     }
   }, [])
 
+  const url = React.useCallback((offset: number) => {
+    const q = new URLSearchParams({ limit: String(PAGE), offset: String(offset) })
+    if (scope) q.set("workspace", scope)
+    if (types) q.set("request_type", types)
+    if (decision) q.set("decision", decision)
+    return `/api/v1/admin/instance/keeper/requests?${q.toString()}`
+  }, [scope, types, decision])
+
   const loadRequests = React.useCallback(async () => {
-    if (filter === null) {
-      setRequests((prev) => ({ items: [], total: 0, counts: { allow: 0, deny: 0, escalate: 0, pending: 0 }, by_workspace: prev?.by_workspace ?? [] }))
+    const g = ++generation.current.requests
+    if (scope === null) {
+      setRequests((prev) => ({ items: [], total: 0, counts: { allow: 0, deny: 0, escalate: 0, pending: 0 }, by_workspace: prev?.by_workspace ?? [], by_type: {} }))
+      setRequestsError(null)
+      setRequestsLoading(false)
       return
     }
+    setRequestsLoading(true)
     try {
-      const q = new URLSearchParams({ limit: "500" })
-      if (filter) q.set("workspace", filter)
-      const r = await apiFetch(`/api/v1/admin/instance/keeper/requests?${q.toString()}`)
+      const r = await apiFetch(url(0))
+      if (g !== generation.current.requests) return
       if (!r.ok) { setRequestsError(await errorOf(r)); return }
-      setRequests((await r.json()) as InstanceRequests)
+      const body = (await r.json()) as InstanceRequests
+      if (g !== generation.current.requests) return
+      setRequests(body)
       setRequestsError(null)
     } catch {
-      setRequestsError("Activity could not be read")
+      if (g === generation.current.requests) setRequestsError("Activity could not be read")
+    } finally {
+      if (g === generation.current.requests) setRequestsLoading(false)
     }
-  }, [filter])
+  }, [scope, url])
+
+  /** The next page of the same query, appended. */
+  const loadMore = React.useCallback(async () => {
+    const g = generation.current.requests
+    const have = requests?.items.length ?? 0
+    try {
+      const r = await apiFetch(url(have))
+      if (g !== generation.current.requests || !r.ok) return
+      const body = (await r.json()) as InstanceRequests
+      if (g !== generation.current.requests) return
+      setRequests((prev) => prev ? { ...body, items: [...prev.items, ...body.items] } : body)
+    } catch {
+      /* the button stays; a retry is one click */
+    }
+  }, [requests, url])
 
   const loadHealth = React.useCallback(async () => {
+    const g = ++generation.current.health
     try {
       const r = await apiFetch("/api/v1/admin/instance/keeper/health")
-      if (r.ok) setHealth(((await r.json()) as { workspaces: InstanceHealthRow[] }).workspaces ?? [])
+      if (g !== generation.current.health) return
+      if (!r.ok) { setHealthError(await errorOf(r)); return }
+      setHealth(((await r.json()) as { workspaces: InstanceHealthRow[] }).workspaces ?? [])
+      setHealthError(null)
     } catch {
-      /* the overview says nothing rather than something wrong */
+      if (g === generation.current.health) setHealthError("Judge health could not be read")
     }
   }, [])
 
@@ -158,8 +220,9 @@ export function useInstanceKeeper(selected: string[] | null, liveTick = 0) {
     setLoading(false)
   }, [loadGov, loadRequests, loadHealth])
 
-  React.useEffect(() => { void reload() }, [reload])
-  React.useEffect(() => { if (liveTick) void loadRequests() }, [liveTick, loadRequests])
+  React.useEffect(() => { void loadRequests() }, [queryKey]) // eslint-disable-line react-hooks/exhaustive-deps -- the query key is the dependency
+  React.useEffect(() => { void Promise.all([loadGov(), loadHealth()]).then(() => setLoading(false)) }, [loadGov, loadHealth])
+  React.useEffect(() => { if (liveTick) void loadRequests() }, [liveTick]) // eslint-disable-line react-hooks/exhaustive-deps -- a live event reloads the current query
 
-  return { gov, govError, requests, requestsError, health, loading, reload, reloadGov: loadGov }
+  return { gov, govError, requests, requestsError, requestsLoading, loadMore, health, healthError, loading, reload, reloadGov: loadGov }
 }

@@ -65,7 +65,7 @@ var combinedPattern = regexp.MustCompile(`r\.mux\.Handle(?:Func)?\(\s*"([A-Z]+) 
 // splitPattern matches r.authedMut/authedSelfMut/authedAdmin/authedAdminMut/
 // authedInstance/authedInstanceMut("METHOD", "/path", ...). Longer names come
 // first in the alternation: "authedAdmin" must not stop short of "authedAdminMut(".
-var splitPattern = regexp.MustCompile(`r\.authed(?:Mut|SelfMut|AdminMut|Admin|InstanceMut|Instance)\(\s*"([A-Z]+)"\s*,\s*"(/[^"]*)"`)
+var splitPattern = regexp.MustCompile(`r\.authed(?:Mut|SelfMut|AdminPeople|AdminMut|Admin|InstanceMut|Instance)\(\s*"([A-Z]+)"\s*,\s*"(/[^"]*)"`)
 
 type route struct {
 	method string
@@ -1553,7 +1553,7 @@ func resolveHandlerRefs(call, src string) (inline []inlineHandler, targets []han
 // were built on that glob; the other one (internal/api's
 // route_authz_invariant_test.go) is the security-relevant half, and
 // internal/api/pages_internal.go was the file both of them could not see.
-var routeRegistrationCall = regexp.MustCompile(`\.(?:mux\.Handle|mux\.HandleFunc|authedMut|authedSelfMut|authedAdmin|authedAdminMut|authedInstance|authedInstanceMut)\(`)
+var routeRegistrationCall = regexp.MustCompile(`\.(?:mux\.Handle|mux\.HandleFunc|authedMut|authedSelfMut|authedAdmin|authedAdminMut|authedAdminPeople|authedInstance|authedInstanceMut)\(`)
 
 // routeSourceFiles lists the non-test Go files in routerDir that register at
 // least one route. A file that registers none is skipped only because it has

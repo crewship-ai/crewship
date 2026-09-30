@@ -690,8 +690,9 @@ for all workspaces.
 `PUT /api/v1/admin/instance/keeper/governance`. Sets the Keeper watchdog for
 one, several or all workspaces. Only the settings you pass change. For one
 workspace it saves straight away. For several, or `--all`, it first lists
-every workspace whose settings would be overwritten and asks. The save is all
-or nothing: if one workspace refuses the values, none changes. `--all` also
+every workspace whose settings would be overwritten and asks, then saves
+exactly that: if a workspace was created or a setting changed in between, the
+server refuses and nothing is written. The save is all or nothing: if one workspace refuses the values, none changes. `--all` also
 sets what a workspace created later starts with.
 
 ```bash
@@ -726,7 +727,7 @@ row with its workspace. The last line totals what the filter matches.
 | Flag | Required | Description |
 |---|---|---|
 | `--workspace` | no | Workspace slugs, comma-separated. All by default. |
-| `--type` | no | `access`, `execute`, `behavior`, `skill_review`, `memory_health` or `negative_learning`. |
+| `--type` | no | `access`, `execute`, `behavior`, `skill_review`, `memory_health` or `negative_learning`; several comma-separated. |
 | `--decision` | no | `ALLOW`, `DENY`, `ESCALATE` or `PENDING`. |
 | `--limit` | no | Rows to return, 50 by default, 1000 at most. |
 | `--offset` | no | Rows to skip. |

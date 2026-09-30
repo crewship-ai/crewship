@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -231,18 +232,30 @@ func (r *Router) recordInstance(method, pattern string) {
 	}
 }
 
+// instanceAuditExecer is the transaction the change runs in.
+type instanceAuditExecer interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+}
+
 // auditInstance records an instance-level action. It has no workspace, and
 // survives the deletion of the workspace or account it names.
-func auditInstance(r *http.Request, db *sql.DB, action, entityType, entityID, targetWorkspaceID string, metadata map[string]any) {
+//
+// It takes the transaction that makes the change, and its error must fail
+// that transaction: a grant of instance power, a suspension or a deletion
+// that commits with no audit entry is exactly what this trail exists to rule
+// out (review R1, 2026-09-30).
+func auditInstance(ctx context.Context, r *http.Request, tx instanceAuditExecer, action, entityType, entityID, targetWorkspaceID string, metadata map[string]any) error {
 	userID := ""
-	if u := UserFromContext(r.Context()); u != nil {
+	if u := UserFromContext(ctx); u != nil {
 		userID = u.ID
 	}
 	meta := "{}"
 	if metadata != nil {
-		if b, err := json.Marshal(metadata); err == nil {
-			meta = string(b)
+		b, err := json.Marshal(metadata)
+		if err != nil {
+			return fmt.Errorf("audit metadata: %w", err)
 		}
+		meta = string(b)
 	}
 	nullable := func(s string) any {
 		if s == "" {
@@ -250,9 +263,12 @@ func auditInstance(r *http.Request, db *sql.DB, action, entityType, entityID, ta
 		}
 		return s
 	}
-	_, _ = db.ExecContext(r.Context(), `
+	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO instance_audit_logs (id, user_id, action, entity_type, entity_id, target_workspace_id, metadata, ip_address, user_agent, created_at)
 		VALUES (lower(hex(randomblob(16))), ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		nullable(userID), action, entityType, nullable(entityID), nullable(targetWorkspaceID), meta,
-		nullable(clientIP(r)), nullable(r.UserAgent()), time.Now().UTC().Format(time.RFC3339Nano))
+		nullable(clientIP(r)), nullable(r.UserAgent()), time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
+		return fmt.Errorf("instance audit %s: %w", action, err)
+	}
+	return nil
 }

@@ -88,7 +88,7 @@ func TestEveryMutationRouteDeclaresRole(t *testing.T) {
 // registers dynamically (rbac_routes.go builds `method+" "+pattern`) has no
 // literal route to classify but is still a registrar, and it must be read
 // rather than assumed harmless.
-var routeRegistrationCall = regexp.MustCompile(`\.(?:mux\.Handle|mux\.HandleFunc|authedMut|authedSelfMut|authedAdmin|authedInstance|authedInstanceMut|authedAdminMut)\(`)
+var routeRegistrationCall = regexp.MustCompile(`\.(?:mux\.Handle|mux\.HandleFunc|authedMut|authedSelfMut|authedAdmin|authedInstance|authedInstanceMut|authedAdminPeople|authedAdminMut)\(`)
 
 // routeRegistrarFiles returns every non-test .go file in this package that
 // contains a route registration. Discovery is by content, never by filename.
@@ -145,7 +145,7 @@ var wrapperMutationLine = regexp.MustCompile(`r\.authed(?:Mut|SelfMut|Instance|I
 // It bounds the wrapper lookahead: whatever follows belongs to the next route,
 // so it must not be read as this one's wrapper. Same reasoning — and the same
 // measured bug — as readRouteWrapperLookahead in the read-side twin.
-var mutationRegistrationStart = regexp.MustCompile(`^\s*r\.(?:mux\.Handle|mux\.HandleFunc|authedMut|authedSelfMut|authedAdmin|authedInstance|authedInstanceMut|authedAdminMut)\(`)
+var mutationRegistrationStart = regexp.MustCompile(`^\s*r\.(?:mux\.Handle|mux\.HandleFunc|authedMut|authedSelfMut|authedAdmin|authedInstance|authedInstanceMut|authedAdminPeople|authedAdminMut)\(`)
 
 // mutationWrapperLookahead caps how many lines after a registration are joined
 // before looking for the wrapper. registerInternalPageRoutes puts the handler

@@ -297,12 +297,21 @@ of a workspace is not enough for these routes, nor for the instance-wide
 settings that also require it (log level, rate limits, re-encryption, legacy
 resource pruning, Keeper's judge and evaluator models, notification
 providers, instance settings and feature-flag definitions). A CLI token needs
-the `instance:admin` scope, or no scope restriction, to reach them.
+the `instance:admin` scope, or no scope restriction, to reach them. An
+instance administrator can mint an `instance:admin` token whatever their
+workspace role, including with no workspace at all.
+
+Every instance change and its audit entry are written in one transaction: if
+the audit entry cannot be written, the change is undone and the route answers
+`500`.
 
 An instance administrator also passes the ADMIN floor of every other
 `/api/v1/admin/` route, and `GET /api/v1/admin/users` and
 `GET /api/v1/admin/workspaces` answer for the whole instance
-(`X-Admin-Scope: instance`). Those lists carry `instance_admin` and
+(`X-Admin-Scope: instance`). Those two, and a person's sessions, unlock and
+sign-out routes, also answer an instance administrator who names no
+workspace, since they need not belong to one; anyone else still needs
+`workspace_id`. Those lists carry `instance_admin` and
 `instance_admin_source` (`env`, `role` or `oldest_workspace_owner`),
 `suspended_at`, `suspended_reason` and `setup_link_expires_at` per person, and
 `owners` per workspace. `GET /api/auth/session` returns `is_instance_admin`
@@ -683,7 +692,11 @@ update with the same fields and bounds as the per-workspace
   workspace and also sets the instance defaults that a workspace created
   later starts with. Send one or the other.
 - `dry_run: true` computes the changes and writes nothing. The console's
-  confirmation dialog shows this response.
+  confirmation dialog shows this response. Every response carries a
+  `preview_id`, a fingerprint of the targets, the changes and the defaults.
+  Send it back as `expect_preview` when confirming: if a workspace was
+  created or a value changed since the preview, the save answers `409` and
+  writes nothing.
 - The save is one transaction. When the merged settings are invalid in any
   workspace, the response is `400` naming that workspace, and nothing is
   written anywhere.
@@ -701,6 +714,12 @@ update with the same fields and bounds as the per-workspace
 { "all": true, "dry_run": true, "set": { "enabled": true, "deny_notify_min_risk": 5 } }
 ```
 
+Confirming that preview:
+
+```json
+{ "all": true, "expect_preview": "3f9c0a1b2d4e5f6a7b8c9d0e", "set": { "enabled": true, "deny_notify_min_risk": 5 } }
+```
+
 **Response:**
 
 ```json
@@ -708,6 +727,7 @@ update with the same fields and bounds as the per-workspace
   "applied": false,
   "changed": 1,
   "defaults_updated": true,
+  "preview_id": "3f9c0a1b2d4e5f6a7b8c9d0e",
   "workspaces": [
     {
       "workspace_id": "ws-cuid",
@@ -727,6 +747,7 @@ update with the same fields and bounds as the per-workspace
 | `401` | Missing authentication. |
 | `403` | Caller is not an instance administrator. |
 | `404` | A workspace in `workspaces` does not exist. |
+| `409` | `expect_preview` no longer matches: the workspaces or their settings changed since the preview. Nothing was saved. |
 | `500` | A write failed. Nothing was saved. |
 
 ## `GET /api/v1/admin/instance/keeper/requests`
@@ -739,12 +760,16 @@ Query parameters:
 
 - `workspace`: ids or slugs, comma-separated. Omitted or `all` means every
   workspace.
-- `request_type`: one kind, e.g. `access` or `behavior`.
+- `request_type`: one or more kinds, comma-separated, e.g. `access,execute`
+  for credential requests or `behavior`.
 - `decision`: `ALLOW`, `DENY`, `ESCALATE` or `PENDING`.
 - `limit`: default 200, at most 1000. `offset`: rows to skip.
 
-`total` and `counts` describe everything the filter matches. `by_workspace`
-counts every workspace regardless of the filter, for the panel beside the list.
+`total` is how many rows the whole filter matches, for paging. `counts` are
+the decisions under the workspace and kind filter, leaving `decision` out, so
+the decision chips keep their numbers while one is picked. `by_type` counts
+every kind under the workspace filter alone, and `by_workspace` every
+workspace regardless of the filter, for the panel beside the list.
 
 **Auth:** instance administrator. **Request:** no body. **Response:**
 
@@ -771,6 +796,7 @@ counts every workspace regardless of the filter, for the panel beside the list.
   ],
   "total": 1,
   "counts": { "allow": 0, "deny": 1, "escalate": 0, "pending": 0 },
+  "by_type": { "access": 1, "behavior": 4 },
   "by_workspace": [ { "workspace_id": "ws-cuid", "workspace_name": "Lab", "workspace_slug": "lab", "count": 12 } ]
 }
 ```

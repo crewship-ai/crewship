@@ -17256,6 +17256,9 @@
                   "dry_run": {
                     "type": "boolean"
                   },
+                  "expect_preview": {
+                    "type": "string"
+                  },
                   "set": {
                     "properties": {
                       "auto_lease_seconds": {
@@ -17327,6 +17330,9 @@
                     "defaults_updated": {
                       "type": "boolean"
                     },
+                    "preview_id": {
+                      "type": "string"
+                    },
                     "workspaces": {
                       "items": {
                         "properties": {
@@ -17379,7 +17385,8 @@
                     "applied",
                     "changed",
                     "defaults_updated",
-                    "workspaces"
+                    "workspaces",
+                    "preview_id"
                   ],
                   "type": "object"
                 }
@@ -17458,6 +17465,24 @@
               }
             },
             "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
           },
           "500": {
             "content": {
@@ -17721,6 +17746,12 @@
               "application/json": {
                 "schema": {
                   "properties": {
+                    "by_type": {
+                      "additionalProperties": {
+                        "type": "integer"
+                      },
+                      "type": "object"
+                    },
                     "by_workspace": {
                       "items": {
                         "properties": {
@@ -17863,7 +17894,8 @@
                     "items",
                     "total",
                     "counts",
-                    "by_workspace"
+                    "by_workspace",
+                    "by_type"
                   ],
                   "type": "object"
                 }

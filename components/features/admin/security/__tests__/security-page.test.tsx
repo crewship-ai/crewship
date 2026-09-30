@@ -51,11 +51,26 @@ const row = (id: string, ws: string, wsName: string, request_type: string, decis
   created_at: "2026-09-29T10:00:00Z", decided_at: null, ...extra,
 })
 const ITEMS = [row("k1", "ws-a", "Dess", "access", "ALLOW"), row("k2", "ws-b", "Coolify", "access", "DENY"), row("k3", "ws-b", "Coolify", "behavior", "ALLOW", { reason: "Reads look routine." })]
-const requests = (items: typeof ITEMS) => ({
-  items, total: items.length,
-  counts: { allow: items.filter((i) => i.decision === "ALLOW").length, deny: items.filter((i) => i.decision === "DENY").length, escalate: 0, pending: 0 },
+// The server's answer: filtered by workspace, kind and decision, counted the
+// way the endpoint counts (decisions without the decision filter, kinds under
+// the workspace filter alone), paged by limit/offset.
+const requests = (url: string) => {
+  const q = new URL(url, "http://x").searchParams
+  const ws = q.get("workspace")?.split(",")
+  const types = q.get("request_type")?.split(",")
+  const dec = q.get("decision")
+  const inWs = ITEMS.filter((i) => !ws || ws.includes(i.workspace_id))
+  const inType = inWs.filter((i) => !types || types.includes(i.request_type))
+  const all = inType.filter((i) => !dec || i.decision === dec)
+  const offset = Number(q.get("offset") ?? 0), limit = Number(q.get("limit") ?? 100)
+  const by_type: Record<string, number> = {}
+  for (const i of inWs) by_type[i.request_type] = (by_type[i.request_type] ?? 0) + 1
+  return {
+  items: all.slice(offset, offset + limit), total: all.length, by_type,
+  counts: { allow: inType.filter((i) => i.decision === "ALLOW").length, deny: inType.filter((i) => i.decision === "DENY").length, escalate: 0, pending: 0 },
   by_workspace: [{ workspace_id: "ws-a", workspace_name: "Dess", workspace_slug: "dess", count: 1 }, { workspace_id: "ws-b", workspace_name: "Coolify", workspace_slug: "coolify", count: 2 }],
-})
+  }
+}
 const HEALTH = { workspaces: [
   { workspace_id: "ws-a", workspace_name: "Dess", workspace_slug: "dess", samples: 40, min_samples: 20, progressed_rate: 0.8, judge_failure_rate: 0, p95_latency_ms: 900 },
   { workspace_id: "ws-b", workspace_name: "Coolify", workspace_slug: "coolify", samples: 3, min_samples: 20, progressed_rate: 1, judge_failure_rate: 0, p95_latency_ms: 700 },
@@ -85,10 +100,7 @@ beforeEach(() => {
       }
       return res(GOV)
     }
-    if (url.startsWith("/api/v1/admin/instance/keeper/requests")) {
-      const ws = new URL(url, "http://x").searchParams.get("workspace")
-      return res(requests(ws ? ITEMS.filter((i) => ws.split(",").includes(i.workspace_id)) : ITEMS))
-    }
+    if (url.startsWith("/api/v1/admin/instance/keeper/requests")) return res(requests(url))
     if (url.startsWith("/api/v1/admin/instance/keeper/health")) return res(HEALTH)
     return res({})
   })
@@ -251,7 +263,7 @@ describe("several workspaces at once", () => {
     const dialog = await screen.findByRole("alertdialog")
     expect(puts()).toEqual([{ all: true, dry_run: true, set: { enabled: true } }])
     const table = within(dialog).getByRole("table")
-    expect(within(table).getByText("Coolify").closest("tr")).toHaveTextContent("OffOn")
+    expect(within(table).getByText("Coolify").closest("tr")).toHaveTextContent("Watchdog: Off → On")
     expect(within(table).getByText("Dess").closest("tr")).toHaveTextContent("no change")
     expect(dialog).toHaveTextContent("New workspaces will start with these settings")
 
@@ -278,3 +290,58 @@ describe("several workspaces at once", () => {
     }
   })
 })
+
+describe("Activity on the server (review R6)", () => {
+  const reqURLs = () => h.apiFetch.mock.calls.map(([u]) => String(u)).filter((u) => u.includes("/keeper/requests"))
+
+  it("asks the server for the kind and decision picked, and pages through the rest", async () => {
+    render(<SecurityPage />)
+    fireEvent.click(await screen.findByRole("button", { name: /^Credential requests/ }))
+    await waitFor(() => expect(reqURLs().some((u) => u.includes("request_type=access%2Cexecute"))).toBe(true))
+    fireEvent.click(await screen.findByRole("button", { name: "Deny" }))
+    await waitFor(() => expect(reqURLs().some((u) => u.includes("decision=DENY"))).toBe(true))
+    const table = screen.getByRole("region", { name: "Activity" })
+    await waitFor(() => expect(within(table).getAllByRole("row")).toHaveLength(2))
+    expect(document.querySelector("[data-slot=activity-paging]")).toHaveTextContent("Showing 1 of 1")
+  })
+
+  it("counts each kind in the panel from the server, not from what was read", async () => {
+    render(<SecurityPage />)
+    await waitFor(() => expect(screen.getByRole("button", { name: /^Behavior/ })).toHaveTextContent("1"))
+    expect(screen.getByRole("button", { name: /^Credential requests/ })).toHaveTextContent("2")
+  })
+})
+
+describe("What's on where says what is enforced (review R8)", () => {
+  it("shows the tier's four-eyes floor when the workspace toggle is off, and where the judge comes from", async () => {
+    GOV.workspaces[1] = gov("ws-b", "Coolify", { effective_second_approver: { min_security_level: 4, min_security_level_label: "L4 · critical", source: "tier" } })
+    try {
+      window.history.replaceState(null, "", "/admin/security?section=matrix")
+      render(<SecurityPage />)
+      const table = await screen.findByRole("region", { name: "What's on where" })
+      expect(within(table).getByRole("button", { name: "Four-eyes in Coolify: L4 required" })).toBeInTheDocument()
+      expect(within(table).getByRole("button", { name: "Judge in Coolify: Instance judge (inherited)" })).toBeInTheDocument()
+    } finally {
+      GOV.workspaces[1] = gov("ws-b", "Coolify")
+    }
+  })
+})
+
+describe("All means the same with one workspace (review R9)", () => {
+  it("saves for all — and so for new workspaces — even when the server has only one", async () => {
+    const saved = GOV.workspaces.splice(1)
+    try {
+      window.history.replaceState(null, "", "/admin/security?section=watchdog")
+      render(<SecurityPage />)
+      expect(await screen.findByRole("alert")).toHaveTextContent("All 1 workspace selected")
+      expect(screen.queryByTestId("gov-watchdog")).toBeNull()
+      fireEvent.click(within(document.querySelector("[data-field=enabled]") as HTMLElement).getByRole("radio", { name: "Off" }))
+      fireEvent.click(screen.getByRole("button", { name: "Overwrite all 1 workspace…" }))
+      await screen.findByRole("alertdialog")
+      expect(puts()[0]).toMatchObject({ all: true, dry_run: true })
+    } finally {
+      GOV.workspaces.push(...saved)
+    }
+  })
+})
+

@@ -22,7 +22,7 @@ const SUMMARY_TONE: Record<Tone, "success" | "warn" | "danger" | undefined> = { 
  * deploy-time setup read-only, the judge's recent record, and the last few
  * events. Everything else is one click away in the side panel.
  */
-export function SecurityOverview({ status, posture, postureError, entries, workspaceId, onOpenActivity, counts, health }: {
+export function SecurityOverview({ status, posture, postureError, entries, workspaceId, onOpenActivity, counts, health, healthError, activityError, selectedCount }: {
   workspaceId: string
   status: KeeperStatus | null
   posture: Posture | null
@@ -35,9 +35,16 @@ export function SecurityOverview({ status, posture, postureError, entries, works
   /** Decision windows of the ticked workspaces. Without them, the current
    *  workspace's health card. */
   health?: InstanceHealthRow[]
+  healthError?: string | null
+  activityError?: string | null
+  /** How many workspaces are ticked, so an empty health table can say why. */
+  selectedCount?: number
 }) {
   const judge = judgeState(status)
   const list = findings(posture, status, FINDING_ACTIONS)
+  // Green is earned by a check that ran (review R5): the posture has to have
+  // been read. A failed or missing read says what could not be checked.
+  const unchecked = !posture ? (postureError ?? "The server's setup has not been read yet.") : null
   const waiting = counts ? counts.escalate + counts.pending : entries.filter((e) => e.decision === "ESCALATE" || e.decision === "PENDING").length
   const recent = entries.slice(0, 5)
 
@@ -52,10 +59,19 @@ export function SecurityOverview({ status, posture, postureError, entries, works
         <SummaryItem n={waiting} tone={waiting ? "warn" : undefined}>waiting for a person</SummaryItem>
       </SettingsSummary>
 
-      <SettingsCard icon={list.length ? AlertTriangle : ShieldCheck} tint={list.length ? "var(--warn)" : "var(--success)"}
-        title="Needs attention" description={list.length ? "What to fix first, most pressing on top" : "Nothing in this server's setup stands out"}
+      <SettingsCard icon={list.length || unchecked ? AlertTriangle : ShieldCheck} tint={unchecked ? "var(--destructive)" : list.length ? "var(--warn)" : "var(--success)"}
+        title="Needs attention" description={unchecked ? "The server's setup could not be checked" : list.length ? "What to fix first, most pressing on top" : "Nothing in this server's setup stands out"}
         actions={<span className="font-mono text-[11px] text-muted-foreground">{list.length}</span>}>
-        {list.length === 0 ? (
+        {unchecked && (
+          <div data-finding="unchecked" className="flex items-center gap-3 border-b border-border px-4 py-2.5 last:border-b-0">
+            <ShieldAlert className="h-4 w-4 shrink-0 text-destructive" />
+            <div className="min-w-0 flex-1">
+              <div className="text-[13px]">The server&apos;s setup could not be checked</div>
+              <div className="truncate text-[11px] text-muted-foreground-soft">{unchecked} Until it is read, nothing here says the setup is safe.</div>
+            </div>
+          </div>
+        )}
+        {list.length === 0 && !unchecked ? (
           <p className="px-4 py-3 text-[12px] text-success">Nothing in this instance&apos;s posture stands out.</p>
         ) : list.map((f) => (
           <div key={f.key} data-finding={f.key} className="flex items-center gap-3 border-b border-border px-4 py-2.5 last:border-b-0">
@@ -94,11 +110,13 @@ export function SecurityOverview({ status, posture, postureError, entries, works
         )}
       </SettingsCard>
 
-      {health ? <InstanceHealthCard rows={health} /> : <KeeperHealthCard workspaceId={workspaceId} />}
+      {health ? <InstanceHealthCard rows={health} error={healthError ?? null} selectedCount={selectedCount} /> : <KeeperHealthCard workspaceId={workspaceId} />}
 
       <SettingsCard icon={ActivityIcon} tint="var(--primary)" title="Recent activity" description="Credential decisions and background reviews"
         actions={<button type="button" onClick={onOpenActivity} className="inline-flex items-center gap-1 text-[12px] text-primary-hover hover:underline">All activity<ChevronRight className="h-3 w-3" /></button>}>
-        {recent.length === 0 ? (
+        {activityError ? (
+          <p className="px-4 py-3 text-[12px] text-destructive">Activity could not be read: {activityError}</p>
+        ) : recent.length === 0 ? (
           <p className="px-4 py-3 text-[12px] text-muted-foreground">Nothing yet. Decisions appear here as agents ask for secrets.</p>
         ) : recent.map((e) => (
           <div key={e.id} className="flex items-center gap-3 border-b border-border px-4 py-2.5 last:border-b-0">
@@ -126,13 +144,15 @@ export function SecurityOverview({ status, posture, postureError, entries, works
  * alarm. Below the sample minimum there is too little to judge, which is not
  * the same as healthy, and the row says so.
  */
-function InstanceHealthCard({ rows }: { rows: InstanceHealthRow[] }) {
+function InstanceHealthCard({ rows, error, selectedCount }: { rows: InstanceHealthRow[]; error: string | null; selectedCount?: number }) {
   const alarms = rows.filter((r) => r.alarm).length
   return (
-    <SettingsCard icon={ActivityIcon} tint={alarms ? "var(--destructive)" : "var(--success)"} title="Judge health"
-      description={alarms ? `${alarms} workspace${alarms === 1 ? "" : "s"} with a standing alarm` : "Recent decision window per workspace"}>
-      {rows.length === 0 ? (
-        <p className="px-4 py-3 text-[12px] text-muted-foreground">No workspace ticked.</p>
+    <SettingsCard icon={ActivityIcon} tint={error || alarms ? "var(--destructive)" : "var(--success)"} title="Judge health"
+      description={error ? "Could not be read" : alarms ? `${alarms} workspace${alarms === 1 ? "" : "s"} with a standing alarm` : "Recent decision window per workspace"}>
+      {error ? (
+        <p className="px-4 py-3 text-[12px] text-destructive">The judge&apos;s health could not be read: {error}</p>
+      ) : rows.length === 0 ? (
+        <p className="px-4 py-3 text-[12px] text-muted-foreground">{selectedCount === 0 ? "No workspace ticked." : "No decision window yet."}</p>
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full text-[12.5px]">

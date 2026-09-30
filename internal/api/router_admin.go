@@ -30,8 +30,8 @@ func (r *Router) registerAdminRoutes() {
 	// Admin
 	admin := NewAdminHandler(r.db, r.logger)
 	r.authedAdmin("GET", "/api/v1/admin/stats", admin.Stats)
-	r.authedAdmin("GET", "/api/v1/admin/users", admin.ListUsers)
-	r.authedAdmin("GET", "/api/v1/admin/workspaces", admin.ListWorkspaces)
+	r.authedAdminPeople("GET", "/api/v1/admin/users", admin.ListUsers)
+	r.authedAdminPeople("GET", "/api/v1/admin/workspaces", admin.ListWorkspaces)
 
 	// Per-person admin actions (Admin › Users): a person's signed-in
 	// devices and CLI tokens, signing one or all of them out, and lifting a
@@ -39,13 +39,13 @@ func (r *Router) registerAdminRoutes() {
 	// revoke takes effect on the next request.
 	people := NewAdminUsersHandler(r.db, r.logger, r.sessionsStore)
 	// openapi: responses 200,400,401,403,404,500
-	r.authedAdmin("GET", "/api/v1/admin/users/{userId}/sessions", people.Sessions)
+	r.authedAdminPeople("GET", "/api/v1/admin/users/{userId}/sessions", people.Sessions)
 	// openapi: responses 204,400,401,403,404,500
-	r.authedAdminMut("POST", "/api/v1/admin/users/{userId}/sessions/{sessionId}/revoke", people.RevokeSession)
+	r.authedAdminPeople("POST", "/api/v1/admin/users/{userId}/sessions/{sessionId}/revoke", people.RevokeSession)
 	// openapi: responses 200,400,401,403,404,500
-	r.authedAdminMut("POST", "/api/v1/admin/users/{userId}/sessions/revoke-all", people.RevokeAllSessions)
+	r.authedAdminPeople("POST", "/api/v1/admin/users/{userId}/sessions/revoke-all", people.RevokeAllSessions)
 	// openapi: responses 204,400,401,403,404,500
-	r.authedAdminMut("POST", "/api/v1/admin/users/{userId}/unlock", people.Unlock)
+	r.authedAdminPeople("POST", "/api/v1/admin/users/{userId}/unlock", people.Unlock)
 
 	// Instance administration (Admin › People & workspaces): add a person,
 	// give or take access in any workspace, create / hand over / delete
@@ -86,7 +86,7 @@ func (r *Router) registerAdminRoutes() {
 	ik := NewInstanceKeeperHandler(r.db, r.logger, r.Journal())
 	// openapi: responses 200,401,403,500
 	r.authedInstance("GET", "/api/v1/admin/instance/keeper/governance", ik.ListGovernance)
-	// openapi: responses 200,400,401,403,404,500
+	// openapi: responses 200,400,401,403,404,409,500
 	r.authedInstance("PUT", "/api/v1/admin/instance/keeper/governance", ik.PutGovernance)
 	// openapi: responses 200,401,403,404,500
 	r.authedInstance("GET", "/api/v1/admin/instance/keeper/requests", ik.ListRequests)

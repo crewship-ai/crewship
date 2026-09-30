@@ -86,7 +86,7 @@ function Segmented({ field, value, onPick, name }: { field: Field; value: unknow
           aria-checked={value === o.value}
           onClick={() => onPick(o.value)}
           className={cn(
-            "rounded-md px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:text-foreground",
+            "rounded-md px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:text-foreground coarse:min-h-11 coarse:px-3.5",
             value === o.value && "bg-accent font-medium text-foreground",
           )}
         >
@@ -109,10 +109,25 @@ export function BulkGovernanceForm({
 }) {
   const fields = BULK_FIELDS[section]
   const [draft, setDraft] = React.useState<Draft>({})
-  const [preview, setPreview] = React.useState<GovSaveResult | null>(null)
+  // The preview, and the exact request it previewed: confirming sends that
+  // request, never whatever the form holds by then (review R3).
+  const [preview, setPreview] = React.useState<{ result: GovSaveResult; targets: GovTargets; set: Partial<InstanceGovSettings> } | null>(null)
   const [busy, setBusy] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
-  React.useEffect(() => { setDraft({}); setError(null) }, [section, rows.length])
+
+  // A draft belongs to the workspaces it was made for: the section, which
+  // workspaces, and whether "all" (which also sets the defaults). Another
+  // selection of the same size is another set of workspaces.
+  const scopeKey = `${section}|${all ? "all" : ""}|${rows.map((r) => r.workspace_id).sort().join(",")}`
+  const scopeRef = React.useRef(scopeKey)
+  const draftRef = React.useRef(draft)
+  draftRef.current = draft
+  React.useEffect(() => {
+    if (scopeRef.current === scopeKey) return
+    scopeRef.current = scopeKey
+    if (Object.keys(draftRef.current).length > 0) toast.info("The selection changed, so the unsaved changes were dropped.")
+    setDraft({}); setError(null); setPreview(null); setBusy(false)
+  }, [scopeKey])
 
   const targets: GovTargets = all ? { all: true } : { workspaces: rows.map((r) => r.workspace_id) }
   const set = Object.fromEntries(Object.entries(draft)) as Partial<InstanceGovSettings>
@@ -120,19 +135,25 @@ export function BulkGovernanceForm({
   const n = rows.length
 
   async function review() {
+    const asked = scopeKey
+    const req = { targets, set }
     setBusy(true); setError(null)
     try {
-      setPreview(await saveInstanceGovernance(targets, set, true))
+      const result = await saveInstanceGovernance(req.targets, req.set, true)
+      // An answer for a selection that is no longer on screen is dropped.
+      if (scopeRef.current !== asked) return
+      setPreview({ result, ...req })
     } catch (e) {
-      setError(e instanceof Error ? e.message : "The save could not be checked")
+      if (scopeRef.current === asked) setError(e instanceof Error ? e.message : "The save could not be checked")
     } finally {
-      setBusy(false)
+      if (scopeRef.current === asked) setBusy(false)
     }
   }
 
   async function apply() {
+    if (!preview) return
     try {
-      const r = await saveInstanceGovernance(targets, set)
+      const r = await saveInstanceGovernance(preview.targets, preview.set, false, preview.result.preview_id)
       for (const w of r.workspaces) for (const warn of w.warnings ?? []) toast.warning(`${w.workspace_name}: ${warn}`)
       toast.success(`${SECTION_TITLE[section]} saved in ${r.changed} workspace${r.changed === 1 ? "" : "s"}`)
       setDraft({}); setPreview(null)
@@ -150,12 +171,12 @@ export function BulkGovernanceForm({
       <div role="alert" data-slot="bulk-warning" className="flex items-start gap-2.5 rounded-lg border border-warn/40 bg-warn/10 px-3 py-2.5 text-[12.5px]">
         <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warn" />
         <p>
-          <b className="text-warn">{all ? `All ${n} workspaces selected.` : `${n} workspaces selected.`}</b>{" "}
+          <b className="text-warn">{all ? `All ${n} workspace${n === 1 ? "" : "s"} selected.` : `${n} workspaces selected.`}</b>{" "}
           Saving writes what you change here into {all ? "every workspace" : "each of them"} and replaces the value it has now.
           Fields you leave alone stay as each workspace has them.{all && " New workspaces will start with these settings too."}
         </p>
       </div>
-      <SettingsCard title={SECTION_TITLE[section]} description={`Settings for ${n} workspaces at once`}>
+      <SettingsCard title={SECTION_TITLE[section]} description={all ? "Every workspace, and what a new workspace starts with" : `Settings for ${n} workspaces at once`}>
         <div className="flex flex-col gap-3 px-4 py-3">
           {fields.filter((f) => !f.when || f.when(draft, rows)).map((f) => {
             const shared = commonValue(rows, f.key)
@@ -191,7 +212,7 @@ export function BulkGovernanceForm({
         </div>
         <div className="flex flex-wrap items-center gap-2 border-t border-border px-4 py-2.5">
           <Button size="sm" variant="destructive" disabled={!dirty || busy} onClick={() => void review()}>
-            {all ? `Overwrite all ${n} workspaces…` : `Overwrite ${n} workspaces…`}
+            {all ? `Overwrite all ${n} workspace${n === 1 ? "" : "s"}…` : `Overwrite ${n} workspaces…`}
           </Button>
           <Button size="sm" variant="outline" disabled={!dirty || busy} onClick={() => setDraft({})}>Reset</Button>
           {!dirty && <span className="text-[12px] text-muted-foreground">Change a value to save</span>}
@@ -202,14 +223,14 @@ export function BulkGovernanceForm({
       <ConfirmDialog
         open={preview !== null}
         onOpenChange={(o) => { if (!o) setPreview(null) }}
-        title={`Overwrite ${SECTION_TITLE[section]} in ${preview?.changed ?? 0} workspace${preview?.changed === 1 ? "" : "s"}?`}
+        title={`Overwrite ${SECTION_TITLE[section]} in ${preview?.result.changed ?? 0} workspace${preview?.result.changed === 1 ? "" : "s"}?`}
         destructive
-        confirmLabel={preview?.changed ? `Overwrite ${preview.changed} workspace${preview.changed === 1 ? "" : "s"}` : "Save"}
-        description={preview && <OverwriteTable result={preview} fields={byField} />}
+        confirmLabel={preview?.result.changed ? `Overwrite ${preview.result.changed} workspace${preview.result.changed === 1 ? "" : "s"}` : "Save"}
+        description={preview && <OverwriteTable result={preview.result} fields={byField} />}
         consequences={[
           { tone: "lost", text: "Each listed workspace's own value for these fields is replaced." },
           { tone: "kept", text: "Fields you did not change stay as each workspace has them. Every change is in the instance audit log." },
-          ...(preview?.defaults_updated ? [{ tone: "warn" as const, text: "New workspaces will start with these settings." }] : []),
+          ...(preview?.result.defaults_updated ? [{ tone: "warn" as const, text: "New workspaces will start with these settings." }] : []),
         ]}
         onConfirm={apply}
       />
@@ -222,24 +243,24 @@ function OverwriteTable({ result, fields }: { result: GovSaveResult; fields: Map
     const f = fields.get(field)
     return f ? labelOf(f, eff(field as Key, v)) : String(v)
   }
+  const name = (field: string) => fields.get(field)?.label ?? field
   return (
     <div className="mt-2 max-h-64 overflow-auto rounded-md border border-border">
       <table className="w-full text-left text-[12px]" data-slot="overwrite-table">
         <thead className="text-[10.5px] uppercase text-muted-foreground">
-          <tr><th className="px-2.5 py-1.5 font-medium">Workspace</th><th className="px-2.5 py-1.5 font-medium">Now</th><th className="px-2.5 py-1.5 font-medium">After</th></tr>
+          <tr><th className="px-2.5 py-1.5 font-medium">Workspace</th><th className="px-2.5 py-1.5 font-medium">Change</th></tr>
         </thead>
         <tbody>
           {result.workspaces.map((w) => (
             <tr key={w.workspace_id} className={cn("border-t border-border", w.changes.length === 0 && "text-muted-foreground")}>
               <td className="px-2.5 py-1.5">{w.workspace_name}</td>
-              {w.changes.length === 0 ? (
-                <td className="px-2.5 py-1.5" colSpan={2}>no change</td>
-              ) : (
-                <>
-                  <td className="px-2.5 py-1.5 text-muted-foreground line-through">{w.changes.map((c) => show(c.field, c.before)).join(" · ")}</td>
-                  <td className="px-2.5 py-1.5 font-medium">{w.changes.map((c) => show(c.field, c.after)).join(" · ")}</td>
-                </>
-              )}
+              <td className="px-2.5 py-1.5">
+                {w.changes.length === 0 ? "no change" : (
+                  <ul className="space-y-0.5">
+                    {w.changes.map((c) => <li key={c.field}>{`${name(c.field)}: ${show(c.field, c.before)} → ${show(c.field, c.after)}`}</li>)}
+                  </ul>
+                )}
+              </td>
             </tr>
           ))}
         </tbody>

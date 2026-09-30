@@ -29,7 +29,13 @@ async function send(path: string, method: string, body?: unknown): Promise<Respo
   })
 }
 
-export function usePeople(workspaceId: string | null) {
+/**
+ * workspaceLoading: while the current workspace is still being resolved the
+ * lists wait for it; once there is none (an instance admin need not belong to
+ * any workspace) they are read without one, which the server answers for the
+ * whole instance.
+ */
+export function usePeople(workspaceId: string | null, workspaceLoading = false) {
   const [people, setPeople] = React.useState<Person[]>([])
   const [workspaces, setWorkspaces] = React.useState<Workspace[]>([])
   const [scope, setScope] = React.useState<AdminScope | undefined>()
@@ -38,9 +44,9 @@ export function usePeople(workspaceId: string | null) {
   const [busy, setBusy] = React.useState<string | null>(null)
 
   const reload = React.useCallback(async () => {
-    if (!workspaceId) return
+    if (!workspaceId && workspaceLoading) return
     try {
-      const q = `?workspace_id=${enc(workspaceId)}`
+      const q = workspaceId ? `?workspace_id=${enc(workspaceId)}` : ""
       const [u, w] = await Promise.all([apiFetch(`/api/v1/admin/users${q}`), apiFetch(`/api/v1/admin/workspaces${q}`)])
       if (!u.ok || !w.ok) {
         setError(await readApiError(u.ok ? w : u, "People and workspaces could not be read"))
@@ -57,7 +63,7 @@ export function usePeople(workspaceId: string | null) {
     } finally {
       setLoading(false)
     }
-  }, [workspaceId])
+  }, [workspaceId, workspaceLoading])
 
   React.useEffect(() => { void reload() }, [reload])
 

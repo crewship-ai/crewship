@@ -16,7 +16,9 @@ package api
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -25,7 +27,6 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/keeper/governance"
@@ -167,6 +168,12 @@ type instanceGovernancePutBody struct {
 	// Set is the partial update, the same fields and bounds as the
 	// per-workspace PUT /api/v1/admin/keeper/governance.
 	Set keeperGovernancePutBody `json:"set"`
+	// ExpectPreview is the preview_id of the dry run the admin confirmed. When
+	// sent, the save goes through only if it would do exactly what that
+	// preview showed — the same workspaces, the same changes, the same
+	// defaults — and answers 409 otherwise (a workspace created meanwhile, a
+	// value somebody else changed).
+	ExpectPreview string `json:"expect_preview,omitempty"`
 }
 
 type governanceFieldChange struct {
@@ -189,6 +196,9 @@ type instanceGovernancePutResponse struct {
 	Changed         int                        `json:"changed"`
 	Workspaces      []instanceGovernanceChange `json:"workspaces"`
 	DefaultsUpdated bool                       `json:"defaults_updated"`
+	// PreviewID fingerprints what the save does (or would do): targets,
+	// every change and the defaults. Send it back as expect_preview.
+	PreviewID string `json:"preview_id"`
 }
 
 // PutGovernance is PUT /api/v1/admin/instance/keeper/governance.
@@ -297,8 +307,13 @@ func (h *InstanceKeeperHandler) PutGovernance(w http.ResponseWriter, r *http.Req
 		resp.DefaultsUpdated = true
 	}
 
+	resp.PreviewID = governancePreviewID(resp, defaultsAfter)
 	if body.DryRun {
 		writeJSON(w, http.StatusOK, resp)
+		return
+	}
+	if body.ExpectPreview != "" && body.ExpectPreview != resp.PreviewID {
+		replyError(w, http.StatusConflict, "the settings or the workspaces changed since the preview; review the changes again")
 		return
 	}
 
@@ -314,7 +329,7 @@ func (h *InstanceKeeperHandler) PutGovernance(w http.ResponseWriter, r *http.Req
 			h.fail(w, "upsert", err)
 			return
 		}
-		if err := auditInstanceTx(ctx, r, tx, "instance.keeper_governance_updated", "workspace", p.change.ID, p.change.ID, map[string]any{
+		if err := auditInstance(ctx, r, tx, "instance.keeper_governance_updated", "workspace", p.change.ID, p.change.ID, map[string]any{
 			"workspace_name": p.change.Name,
 			"changes":        p.change.Changes,
 			"targets":        len(targets),
@@ -329,7 +344,7 @@ func (h *InstanceKeeperHandler) PutGovernance(w http.ResponseWriter, r *http.Req
 			h.fail(w, "set defaults", err)
 			return
 		}
-		if err := auditInstanceTx(ctx, r, tx, "instance.keeper_defaults_updated", "instance", "", "", map[string]any{
+		if err := auditInstance(ctx, r, tx, "instance.keeper_defaults_updated", "instance", "", "", map[string]any{
 			"set": body.Set,
 		}); err != nil {
 			h.fail(w, "audit", err)
@@ -361,6 +376,28 @@ func (h *InstanceKeeperHandler) PutGovernance(w http.ResponseWriter, r *http.Req
 		}
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// governancePreviewID fingerprints a planned save. Warnings are left out:
+// they are advice about the save, not part of what it writes.
+func governancePreviewID(resp instanceGovernancePutResponse, defaultsAfter governance.Settings) string {
+	type ws struct {
+		ID      string                  `json:"id"`
+		Changes []governanceFieldChange `json:"changes"`
+	}
+	plan := struct {
+		Workspaces []ws                 `json:"workspaces"`
+		Defaults   *governance.Settings `json:"defaults,omitempty"`
+	}{}
+	for _, w := range resp.Workspaces {
+		plan.Workspaces = append(plan.Workspaces, ws{ID: w.ID, Changes: w.Changes})
+	}
+	if resp.DefaultsUpdated {
+		plan.Defaults = &defaultsAfter
+	}
+	b, _ := json.Marshal(plan)
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:12])
 }
 
 // diffGovernance lists the fields that differ, by their wire name, so the
@@ -418,9 +455,15 @@ type instanceKeeperWorkspaceCount struct {
 
 type instanceKeeperRequestList struct {
 	Items []instanceKeeperRequest `json:"items"`
-	// Total and Counts describe everything the filter matches, not the page.
-	Total  int                  `json:"total"`
+	// Total is how many rows the whole filter matches, for paging.
+	Total int `json:"total"`
+	// Counts are the decisions under the workspace and kind filter, leaving
+	// the decision filter out: the chips that pick a decision keep their
+	// numbers while one is picked.
 	Counts instanceKeeperCounts `json:"counts"`
+	// ByType counts every kind under the workspace filter alone, for the
+	// panel's list of kinds.
+	ByType map[string]int `json:"by_type"`
 	// ByWorkspace counts every workspace's requests regardless of the
 	// filter: it is the panel next to the list, which keeps showing how much
 	// each workspace holds while the list is narrowed to some of them.
@@ -439,8 +482,8 @@ func (h *InstanceKeeperHandler) ListRequests(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	where := []string{"1=1"}
-	var args []any
+	var wsCond, typeCond, decCond string
+	var wsArgs, typeArgs, decArgs []any
 	if raw := strings.TrimSpace(q.Get("workspace")); raw != "" && raw != "all" {
 		ws, err := pick(every, strings.Split(raw, ","))
 		if err != nil {
@@ -450,21 +493,38 @@ func (h *InstanceKeeperHandler) ListRequests(w http.ResponseWriter, r *http.Requ
 		ph := make([]string, len(ws))
 		for i, x := range ws {
 			ph[i] = "?"
-			args = append(args, x.ID)
+			wsArgs = append(wsArgs, x.ID)
 		}
-		where = append(where, "a.workspace_id IN ("+strings.Join(ph, ",")+")")
+		wsCond = " AND a.workspace_id IN (" + strings.Join(ph, ",") + ")"
 	}
-	if t := strings.TrimSpace(q.Get("request_type")); t != "" {
-		where = append(where, "kr.request_type = ?")
-		args = append(args, t)
+	// request_type takes several kinds, comma-separated: a credential request
+	// is access or execute.
+	if raw := strings.TrimSpace(q.Get("request_type")); raw != "" {
+		var ph []string
+		for _, t := range strings.Split(raw, ",") {
+			if t = strings.TrimSpace(t); t != "" {
+				ph = append(ph, "?")
+				typeArgs = append(typeArgs, t)
+			}
+		}
+		if len(ph) > 0 {
+			typeCond = " AND kr.request_type IN (" + strings.Join(ph, ",") + ")"
+		}
 	}
 	if d := strings.ToUpper(strings.TrimSpace(q.Get("decision"))); d != "" {
 		if d == "PENDING" {
-			where = append(where, "(kr.decision IS NULL OR kr.decision = 'PENDING')")
+			decCond = " AND (kr.decision IS NULL OR kr.decision = 'PENDING')"
 		} else {
-			where = append(where, "kr.decision = ?")
-			args = append(args, d)
+			decCond = " AND kr.decision = ?"
+			decArgs = append(decArgs, d)
 		}
+	}
+	join := func(parts ...[]any) []any {
+		var out []any
+		for _, p := range parts {
+			out = append(out, p...)
+		}
+		return out
 	}
 	limit, offset := 200, 0
 	if v, err := strconv.Atoi(q.Get("limit")); err == nil && v > 0 {
@@ -473,9 +533,7 @@ func (h *InstanceKeeperHandler) ListRequests(w http.ResponseWriter, r *http.Requ
 	if v, err := strconv.Atoi(q.Get("offset")); err == nil && v >= 0 {
 		offset = v
 	}
-	cond := strings.Join(where, " AND ")
-
-	out := instanceKeeperRequestList{Items: []instanceKeeperRequest{}, ByWorkspace: []instanceKeeperWorkspaceCount{}}
+	out := instanceKeeperRequestList{Items: []instanceKeeperRequest{}, ByWorkspace: []instanceKeeperWorkspaceCount{}, ByType: map[string]int{}}
 	// The join to agents is what places a request in a workspace; a request
 	// whose agent is gone has no workspace to show under and is left out.
 	from := `FROM keeper_requests kr
@@ -483,7 +541,29 @@ func (h *InstanceKeeperHandler) ListRequests(w http.ResponseWriter, r *http.Requ
 		JOIN workspaces wsp ON wsp.id = a.workspace_id AND wsp.deleted_at IS NULL
 		LEFT JOIN credentials c ON c.id = kr.credential_id`
 
-	counts, err := h.db.QueryContext(ctx, `SELECT COALESCE(kr.decision, 'PENDING'), COUNT(*) `+from+` WHERE `+cond+` GROUP BY 1`, args...)
+	if err := h.db.QueryRowContext(ctx, `SELECT COUNT(*) `+from+` WHERE 1=1`+wsCond+typeCond+decCond,
+		join(wsArgs, typeArgs, decArgs)...).Scan(&out.Total); err != nil {
+		h.fail(w, "total", err)
+		return
+	}
+	types, err := h.db.QueryContext(ctx, `SELECT COALESCE(kr.request_type, ''), COUNT(*) `+from+` WHERE 1=1`+wsCond+` GROUP BY 1`, wsArgs...)
+	if err != nil {
+		h.fail(w, "by type", err)
+		return
+	}
+	for types.Next() {
+		var t string
+		var n int
+		if err := types.Scan(&t, &n); err != nil {
+			types.Close()
+			h.fail(w, "by type scan", err)
+			return
+		}
+		out.ByType[t] = n
+	}
+	types.Close()
+
+	counts, err := h.db.QueryContext(ctx, `SELECT COALESCE(kr.decision, 'PENDING'), COUNT(*) `+from+` WHERE 1=1`+wsCond+typeCond+` GROUP BY 1`, join(wsArgs, typeArgs)...)
 	if err != nil {
 		h.fail(w, "count", err)
 		return
@@ -496,7 +576,6 @@ func (h *InstanceKeeperHandler) ListRequests(w http.ResponseWriter, r *http.Requ
 			h.fail(w, "count scan", err)
 			return
 		}
-		out.Total += n
 		switch d {
 		case "ALLOW":
 			out.Counts.Allow += n
@@ -520,9 +599,9 @@ func (h *InstanceKeeperHandler) ListRequests(w http.ResponseWriter, r *http.Requ
 			kr.ollama_prompt, kr.ollama_raw_response,
 			kr.created_at, kr.decided_at, kr.judge_profile,
 			wsp.id, wsp.name
-		`+from+` WHERE `+cond+`
+		`+from+` WHERE 1=1`+wsCond+typeCond+decCond+`
 		ORDER BY kr.created_at DESC, kr.id DESC
-		LIMIT ? OFFSET ?`, append(args, limit, offset)...)
+		LIMIT ? OFFSET ?`, join(wsArgs, typeArgs, decArgs, []any{limit, offset})...)
 	if err != nil {
 		h.fail(w, "query", err)
 		return
@@ -603,30 +682,4 @@ func (h *InstanceKeeperHandler) Health(w http.ResponseWriter, r *http.Request) {
 func (h *InstanceKeeperHandler) fail(w http.ResponseWriter, what string, err error) {
 	h.logger.Error("instance keeper: "+what, "error", err)
 	replyError(w, http.StatusInternalServerError, "internal error")
-}
-
-// auditInstanceTx is auditInstance inside a transaction, so the audit entry
-// and the change it records commit together or not at all.
-func auditInstanceTx(ctx context.Context, r *http.Request, tx *sql.Tx, action, entityType, entityID, targetWorkspaceID string, metadata map[string]any) error {
-	userID := ""
-	if u := UserFromContext(ctx); u != nil {
-		userID = u.ID
-	}
-	b, err := json.Marshal(metadata)
-	if err != nil {
-		return err
-	}
-	meta := string(b)
-	nullable := func(s string) any {
-		if s == "" {
-			return nil
-		}
-		return s
-	}
-	_, err = tx.ExecContext(ctx, `
-		INSERT INTO instance_audit_logs (id, user_id, action, entity_type, entity_id, target_workspace_id, metadata, ip_address, user_agent, created_at)
-		VALUES (lower(hex(randomblob(16))), ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		nullable(userID), action, entityType, nullable(entityID), nullable(targetWorkspaceID), meta,
-		nullable(clientIP(r)), nullable(r.UserAgent()), time.Now().UTC().Format(time.RFC3339Nano))
-	return err
 }

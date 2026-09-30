@@ -31,6 +31,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -285,7 +286,16 @@ func (h *CLITokenHandler) Create(w http.ResponseWriter, r *http.Request) {
 	// role implicitly — no need to consult the membership table at
 	// all, which keeps the legacy "create a basic token" path working
 	// even in unit-test setups that didn't seed workspace_members.
-	if len(normalisedScopes) > 0 {
+	// instance:admin follows the instance role, not a workspace role: an
+	// instance admin may be a MEMBER somewhere, or in no workspace at all,
+	// and still has exactly that power to narrow a token to (review R7).
+	// It is taken out of the workspace check below; everything else still
+	// has to fit the caller's best workspace role.
+	roleScopes := normalisedScopes
+	if slices.Contains(normalisedScopes, "instance:admin") && isInstanceAdmin(r, h.db) {
+		roleScopes = slices.DeleteFunc(slices.Clone(normalisedScopes), func(s string) bool { return s == "instance:admin" })
+	}
+	if len(roleScopes) > 0 {
 		var callerRole string
 		if err := h.db.QueryRowContext(r.Context(), `
 			SELECT role FROM workspace_members
@@ -309,7 +319,7 @@ func (h *CLITokenHandler) Create(w http.ResponseWriter, r *http.Request) {
 			replyInternalError(w, h.logger, "cli_token: lookup caller role", err)
 			return
 		}
-		if denied := scopesPermittedByRole(callerRole, normalisedScopes); denied != "" {
+		if denied := scopesPermittedByRole(callerRole, roleScopes); denied != "" {
 			h.logger.Warn("cli_token: scope exceeds caller role",
 				"user_id", user.ID, "role", callerRole, "scope", denied)
 			replyError(w, http.StatusForbidden,

@@ -50,6 +50,33 @@ var instanceRoles = map[string]bool{"OWNER": true, "ADMIN": true, "MANAGER": tru
 
 func normRole(s string) string { return strings.ToUpper(strings.TrimSpace(s)) }
 
+// errNothingToDo ends an inTx body that found nothing to change; the caller
+// answers for it (a 404) instead of a 500.
+var errNothingToDo = errors.New("nothing to do")
+
+// inTx runs a one-statement change and its audit entry in one transaction.
+// It answers the 500 itself; false means the caller must return (after
+// answering for errNothingToDo if the body set that up).
+func (h *InstanceAdminHandler) inTx(w http.ResponseWriter, r *http.Request, what string, body func(tx *sql.Tx) error) bool {
+	tx, err := h.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		replyInternalError(w, h.logger, what+": begin", err)
+		return false
+	}
+	defer tx.Rollback() //nolint:errcheck
+	if err := body(tx); err != nil {
+		if !errors.Is(err, errNothingToDo) {
+			replyInternalError(w, h.logger, what, err)
+		}
+		return false
+	}
+	if err := tx.Commit(); err != nil {
+		replyInternalError(w, h.logger, what+": commit", err)
+		return false
+	}
+	return true
+}
+
 // ── People ──────────────────────────────────────────────────────────────────
 
 type instanceMembershipInput struct {
@@ -160,18 +187,23 @@ func (h *InstanceAdminHandler) CreatePerson(w http.ResponseWriter, r *http.Reque
 		replyInternalError(w, h.logger, "create person: setup token", err)
 		return
 	}
-	if err := tx.Commit(); err != nil {
-		replyInternalError(w, h.logger, "create person: commit", err)
+	if err := auditInstance(ctx, r, tx, "instance.user_created", "user", userID, "", map[string]any{
+		"email": email, "memberships": req.Memberships,
+	}); err != nil {
+		replyInternalError(w, h.logger, "create person: audit", err)
 		return
 	}
-
-	auditInstance(r, h.db, "instance.user_created", "user", userID, "", map[string]any{
-		"email": email, "memberships": req.Memberships,
-	})
 	// One row per workspace too, so each workspace's trail shows who joined
 	// it and how, not only the person's.
 	for _, m := range req.Memberships {
-		auditInstance(r, h.db, "instance.member_added", "workspace_member", userID, m.WorkspaceID, map[string]any{"role": m.Role, "via": "user_created"})
+		if err := auditInstance(ctx, r, tx, "instance.member_added", "workspace_member", userID, m.WorkspaceID, map[string]any{"role": m.Role, "via": "user_created"}); err != nil {
+			replyInternalError(w, h.logger, "create person: audit", err)
+			return
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		replyInternalError(w, h.logger, "create person: commit", err)
+		return
 	}
 	if req.Memberships == nil {
 		req.Memberships = []instanceMembershipInput{}
@@ -231,11 +263,12 @@ func (h *InstanceAdminHandler) Suspend(w http.ResponseWriter, r *http.Request) {
 	if s := strings.TrimSpace(req.Reason); s != "" {
 		reason = s
 	}
-	if _, err := h.db.ExecContext(ctx,
-		`UPDATE users SET suspended_at = ?, suspended_reason = ? WHERE id = ?`, now, reason, id); err != nil {
-		replyInternalError(w, h.logger, "suspend", err)
-		return
-	}
+	// Order: the sessions end first, then the suspension, the CLI tokens and
+	// the audit entry commit together. Sessions live in their own store and
+	// cannot join the transaction; ending them is harmless on its own (the
+	// person signs in again), so a failure after it leaves nothing half-done
+	// that matters. The reverse order could commit a suspension whose open
+	// sessions keep working.
 	var revoked int64
 	if h.sessions != nil {
 		n, err := h.sessions.RevokeAllForUser(ctx, id, reasonAdminRevoke)
@@ -245,16 +278,34 @@ func (h *InstanceAdminHandler) Suspend(w http.ResponseWriter, r *http.Request) {
 		}
 		revoked = n
 	}
-	res, err := h.db.ExecContext(ctx,
+	tx, err := h.db.BeginTx(ctx, nil)
+	if err != nil {
+		replyInternalError(w, h.logger, "suspend: begin", err)
+		return
+	}
+	defer tx.Rollback() //nolint:errcheck
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE users SET suspended_at = ?, suspended_reason = ? WHERE id = ?`, now, reason, id); err != nil {
+		replyInternalError(w, h.logger, "suspend", err)
+		return
+	}
+	res, err := tx.ExecContext(ctx,
 		`UPDATE cli_tokens SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL`, now, id)
 	if err != nil {
 		replyInternalError(w, h.logger, "suspend: revoke CLI tokens", err)
 		return
 	}
 	tokens, _ := res.RowsAffected()
-	auditInstance(r, h.db, "instance.user_suspended", "user", id, "", map[string]any{
+	if err := auditInstance(ctx, r, tx, "instance.user_suspended", "user", id, "", map[string]any{
 		"reason": req.Reason, "sessions_revoked": revoked, "cli_tokens_revoked": tokens,
-	})
+	}); err != nil {
+		replyInternalError(w, h.logger, "suspend: audit", err)
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		replyInternalError(w, h.logger, "suspend: commit", err)
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"user_id": id, "suspended_at": now, "sessions_revoked": revoked, "cli_tokens_revoked": tokens,
 	})
@@ -268,12 +319,15 @@ func (h *InstanceAdminHandler) Reactivate(w http.ResponseWriter, r *http.Request
 	if !ok {
 		return
 	}
-	if _, err := h.db.ExecContext(r.Context(),
-		`UPDATE users SET suspended_at = NULL, suspended_reason = NULL WHERE id = ?`, id); err != nil {
-		replyInternalError(w, h.logger, "reactivate", err)
+	if !h.inTx(w, r, "reactivate", func(tx *sql.Tx) error {
+		if _, err := tx.ExecContext(r.Context(),
+			`UPDATE users SET suspended_at = NULL, suspended_reason = NULL WHERE id = ?`, id); err != nil {
+			return err
+		}
+		return auditInstance(r.Context(), r, tx, "instance.user_reactivated", "user", id, "", nil)
+	}) {
 		return
 	}
-	auditInstance(r, h.db, "instance.user_reactivated", "user", id, "", nil)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -314,11 +368,14 @@ func (h *InstanceAdminHandler) IssueSetupLink(w http.ResponseWriter, r *http.Req
 		replyInternalError(w, h.logger, "setup link: token", err)
 		return
 	}
+	if err := auditInstance(ctx, r, tx, "instance.setup_link_issued", "user", id, "", nil); err != nil {
+		replyInternalError(w, h.logger, "setup link: audit", err)
+		return
+	}
 	if err := tx.Commit(); err != nil {
 		replyInternalError(w, h.logger, "setup link: commit", err)
 		return
 	}
-	auditInstance(r, h.db, "instance.setup_link_issued", "user", id, "", nil)
 	writeJSON(w, http.StatusOK, map[string]string{
 		"user_id": id, "setup_url": setupLinkURL(origin, raw), "expires_at": expires.Format(time.RFC3339),
 	})
@@ -332,17 +389,24 @@ func (h *InstanceAdminHandler) RevokeSetupLink(w http.ResponseWriter, r *http.Re
 	if !ok {
 		return
 	}
-	res, err := h.db.ExecContext(r.Context(),
-		`DELETE FROM verification_tokens WHERE identifier = ? AND purpose = 'account_setup'`, email)
-	if err != nil {
-		replyInternalError(w, h.logger, "revoke setup link", err)
+	none := false
+	if !h.inTx(w, r, "revoke setup link", func(tx *sql.Tx) error {
+		res, err := tx.ExecContext(r.Context(),
+			`DELETE FROM verification_tokens WHERE identifier = ? AND purpose = 'account_setup'`, email)
+		if err != nil {
+			return err
+		}
+		if n, _ := res.RowsAffected(); n == 0 {
+			none = true
+			return errNothingToDo
+		}
+		return auditInstance(r.Context(), r, tx, "instance.setup_link_revoked", "user", id, "", nil)
+	}) {
+		if none {
+			replyError(w, http.StatusNotFound, "no pending setup link")
+		}
 		return
 	}
-	if n, _ := res.RowsAffected(); n == 0 {
-		replyError(w, http.StatusNotFound, "no pending setup link")
-		return
-	}
-	auditInstance(r, h.db, "instance.setup_link_revoked", "user", id, "", nil)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -364,11 +428,14 @@ func (h *InstanceAdminHandler) GrantAdmin(w http.ResponseWriter, r *http.Request
 		replyError(w, http.StatusConflict, "reactivate this account before making it an instance admin")
 		return
 	}
-	if _, err := h.db.ExecContext(r.Context(), `UPDATE users SET instance_role = 'ADMIN' WHERE id = ?`, id); err != nil {
-		replyInternalError(w, h.logger, "grant admin", err)
+	if !h.inTx(w, r, "grant admin", func(tx *sql.Tx) error {
+		if _, err := tx.ExecContext(r.Context(), `UPDATE users SET instance_role = 'ADMIN' WHERE id = ?`, id); err != nil {
+			return err
+		}
+		return auditInstance(r.Context(), r, tx, "instance.admin_granted", "user", id, "", nil)
+	}) {
 		return
 	}
-	auditInstance(r, h.db, "instance.admin_granted", "user", id, "", nil)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -389,16 +456,23 @@ func (h *InstanceAdminHandler) RevokeAdmin(w http.ResponseWriter, r *http.Reques
 		replyError(w, http.StatusConflict, "this account is the instance owner (CREWSHIP_OWNER_EMAIL); change the server's environment instead")
 		return
 	}
-	res, err := h.db.ExecContext(r.Context(), `UPDATE users SET instance_role = NULL WHERE id = ? AND instance_role IS NOT NULL`, id)
-	if err != nil {
-		replyInternalError(w, h.logger, "revoke admin", err)
+	notNamed := false
+	if !h.inTx(w, r, "revoke admin", func(tx *sql.Tx) error {
+		res, err := tx.ExecContext(r.Context(), `UPDATE users SET instance_role = NULL WHERE id = ? AND instance_role IS NOT NULL`, id)
+		if err != nil {
+			return err
+		}
+		if n, _ := res.RowsAffected(); n == 0 {
+			notNamed = true
+			return errNothingToDo
+		}
+		return auditInstance(r.Context(), r, tx, "instance.admin_revoked", "user", id, "", nil)
+	}) {
+		if notNamed {
+			replyError(w, http.StatusNotFound, "this person is not a named instance admin")
+		}
 		return
 	}
-	if n, _ := res.RowsAffected(); n == 0 {
-		replyError(w, http.StatusNotFound, "this person is not a named instance admin")
-		return
-	}
-	auditInstance(r, h.db, "instance.admin_revoked", "user", id, "", nil)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -476,15 +550,18 @@ func (h *InstanceAdminHandler) SetMembership(w http.ResponseWriter, r *http.Requ
 			return
 		}
 	}
-	if err := tx.Commit(); err != nil {
-		replyInternalError(w, h.logger, "set membership: commit", err)
-		return
-	}
 	action := "instance.member_role_changed"
 	if created {
 		action = "instance.member_added"
 	}
-	auditInstance(r, h.db, action, "workspace_member", userID, wsID, map[string]any{"role": role, "previous_role": current})
+	if err := auditInstance(ctx, r, tx, action, "workspace_member", userID, wsID, map[string]any{"role": role, "previous_role": current}); err != nil {
+		replyInternalError(w, h.logger, "set membership: audit", err)
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		replyInternalError(w, h.logger, "set membership: commit", err)
+		return
+	}
 	status := http.StatusOK
 	if created {
 		status = http.StatusCreated
@@ -531,7 +608,10 @@ func (h *InstanceAdminHandler) RemoveMembership(w http.ResponseWriter, r *http.R
 	if a := UserFromContext(ctx); a != nil {
 		actorID = a.ID
 	}
-	if err := departWorkspace(ctx, h.db, h.journal, actorID, wsID, userID); err != nil {
+	audit := func(tx *sql.Tx) error {
+		return auditInstance(ctx, r, tx, "instance.member_removed", "workspace_member", userID, wsID, map[string]any{"role": role})
+	}
+	if err := departWorkspace(ctx, h.db, h.journal, actorID, wsID, userID, audit); err != nil {
 		var needsManual *ErrPagesNeedManualTransfer
 		if errors.As(err, &needsManual) {
 			replyError(w, http.StatusConflict, "cannot remove this member: "+err.Error())
@@ -540,7 +620,6 @@ func (h *InstanceAdminHandler) RemoveMembership(w http.ResponseWriter, r *http.R
 		replyInternalError(w, h.logger, "remove membership", err)
 		return
 	}
-	auditInstance(r, h.db, "instance.member_removed", "workspace_member", userID, wsID, map[string]any{"role": role})
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -621,13 +700,16 @@ func (h *InstanceAdminHandler) CreateWorkspace(w http.ResponseWriter, r *http.Re
 		replyInternalError(w, h.logger, "create workspace: owner membership", err)
 		return
 	}
+	if err := auditInstance(ctx, r, tx, "instance.workspace_created", "workspace", wsID, wsID, map[string]any{
+		"name": req.Name, "slug": req.Slug, "owner_user_id": req.OwnerUserID,
+	}); err != nil {
+		replyInternalError(w, h.logger, "create workspace: audit", err)
+		return
+	}
 	if err := tx.Commit(); err != nil {
 		replyInternalError(w, h.logger, "create workspace: commit", err)
 		return
 	}
-	auditInstance(r, h.db, "instance.workspace_created", "workspace", wsID, wsID, map[string]any{
-		"name": req.Name, "slug": req.Slug, "owner_user_id": req.OwnerUserID,
-	})
 	writeJSON(w, http.StatusCreated, map[string]any{
 		"id": wsID, "name": req.Name, "slug": req.Slug, "owner_user_id": req.OwnerUserID, "created_at": now,
 	})
@@ -701,16 +783,19 @@ func (h *InstanceAdminHandler) TransferOwnership(w http.ResponseWriter, r *http.
 		replyInternalError(w, h.logger, "transfer: promote", err)
 		return
 	}
+	if previous == nil {
+		previous = []string{}
+	}
+	if err := auditInstance(ctx, r, tx, "instance.workspace_ownership_transferred", "workspace", wsID, wsID, map[string]any{
+		"new_owner_user_id": req.UserID, "previous_owner_user_ids": previous,
+	}); err != nil {
+		replyInternalError(w, h.logger, "transfer: audit", err)
+		return
+	}
 	if err := tx.Commit(); err != nil {
 		replyInternalError(w, h.logger, "transfer: commit", err)
 		return
 	}
-	if previous == nil {
-		previous = []string{}
-	}
-	auditInstance(r, h.db, "instance.workspace_ownership_transferred", "workspace", wsID, wsID, map[string]any{
-		"new_owner_user_id": req.UserID, "previous_owner_user_ids": previous,
-	})
 	writeJSON(w, http.StatusOK, map[string]any{"workspace_id": wsID, "owner_user_id": req.UserID, "previous_owner_user_ids": previous})
 }
 
@@ -751,6 +836,12 @@ func (h *InstanceAdminHandler) DeleteWorkspace(w http.ResponseWriter, r *http.Re
 		replyInternalError(w, h.logger, "delete workspace", err)
 		return
 	}
+	if err := auditInstance(ctx, r, tx, "instance.workspace_deleted", "workspace", wsID, wsID, map[string]any{
+		"name": name, "slug": slug, "crews": len(crewIDs),
+	}); err != nil {
+		replyInternalError(w, h.logger, "delete workspace: audit", err)
+		return
+	}
 	if err := tx.Commit(); err != nil {
 		replyInternalError(w, h.logger, "delete workspace: commit", err)
 		return
@@ -759,9 +850,6 @@ func (h *InstanceAdminHandler) DeleteWorkspace(w http.ResponseWriter, r *http.Re
 		broadcastWorkspaceEvent(h.hub, wsID, "crew.deleted", map[string]string{"id": cid})
 	}
 	broadcastWorkspaceEvent(h.hub, wsID, "workspace.deleted", map[string]string{"id": wsID, "slug": slug})
-	auditInstance(r, h.db, "instance.workspace_deleted", "workspace", wsID, wsID, map[string]any{
-		"name": name, "slug": slug, "crews": len(crewIDs),
-	})
 	w.WriteHeader(http.StatusNoContent)
 }
 

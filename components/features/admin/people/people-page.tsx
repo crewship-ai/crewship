@@ -65,9 +65,9 @@ function writeUrl(s: UrlState) {
  * workspace's profile. It replaces the separate Workspaces and Users tabs.
  */
 export function PeoplePage() {
-  const { workspaceId } = useWorkspace()
+  const { workspaceId, loading: workspaceLoading } = useWorkspace()
   const { session } = useAuth()
-  const data = usePeople(workspaceId)
+  const data = usePeople(workspaceId, workspaceLoading)
   const { people, workspaces, loading, error, busy, actions, reload, scope } = data
   const [state, setState] = React.useState(readUrl)
   const [dialog, setDialog] = React.useState<"person" | "workspace" | null>(null)

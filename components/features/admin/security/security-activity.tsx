@@ -37,18 +37,37 @@ function subject(e: KeeperLogEntry): string {
  * A row opens its full record: intent, reason, command, the judge's prompt and
  * its raw answer, secrets redacted.
  */
-export function SecurityActivity({ entries, stream, onStream, live, error }: {
+export function SecurityActivity({ entries, stream, onStream, live, error, server }: {
   entries: KeeperLogEntry[]
   stream: Stream | "all"
   onStream: (s: Stream | "all") => void
   live: KeeperWsStatus
   error: string | null
+  /**
+   * The instance log, filtered and paged on the server (review R6): the
+   * entries already match stream and decision, the counts and total come
+   * from the server over the whole history, and more pages load on demand.
+   * Without it, the list is filtered here, in what was read.
+   */
+  server?: {
+    decision: DecisionFilter
+    onDecision: (d: DecisionFilter) => void
+    counts: { allow: number; deny: number; escalate: number; pending: number }
+    total: number
+    loading: boolean
+    onLoadMore: () => void
+  }
 }) {
-  const [decision, setDecision] = React.useState<DecisionFilter>("all")
+  const [localDecision, setLocalDecision] = React.useState<DecisionFilter>("all")
+  const decision = server ? server.decision : localDecision
+  const setDecision = server ? server.onDecision : setLocalDecision
   const [open, setOpen] = React.useState<KeeperLogEntry | null>(null)
   const inStream = filterActivity(entries, stream, "all")
   const rows = filterActivity(entries, stream, decision)
-  const count = (d: string) => inStream.filter((e) => (e.decision ?? "PENDING") === d).length
+  const serverCount: Record<string, number> | null = server
+    ? { ALLOW: server.counts.allow, DENY: server.counts.deny, ESCALATE: server.counts.escalate, PENDING: server.counts.pending }
+    : null
+  const count = (d: string) => serverCount ? serverCount[d] ?? 0 : inStream.filter((e) => (e.decision ?? "PENDING") === d).length
   const meta = STREAMS.find((s) => s.key === stream)
   // Rows from the instance log carry their workspace; show it.
   const byWorkspace = entries.some((e) => !!e.workspace_name)
@@ -105,7 +124,7 @@ export function SecurityActivity({ entries, stream, onStream, live, error }: {
                   <td className="px-3 py-2.5 text-right font-mono tabular-nums">{e.risk_score != null ? `${e.risk_score}/10` : "—"}</td>
                 </tr>
               ))}
-              {rows.length === 0 && (
+              {rows.length === 0 && !server?.loading && (
                 <tr><td colSpan={byWorkspace ? 6 : 5} className="px-3 py-8 text-center text-[12px] text-muted-foreground">
                   {inStream.length === 0 && stream !== "requests" && stream !== "all"
                     ? "Nothing recorded yet. These reviews run on a schedule, and behaviour only while the watchdog is on."
@@ -115,6 +134,16 @@ export function SecurityActivity({ entries, stream, onStream, live, error }: {
             </tbody>
           </table>
         </div>
+        {server && (
+          <div className="flex items-center gap-3 border-t border-border px-4 py-2 text-[12px] text-muted-foreground" data-slot="activity-paging">
+            <span>{server.loading ? "Loading…" : `Showing ${rows.length} of ${server.total}`}</span>
+            {rows.length < server.total && !server.loading && (
+              <button type="button" onClick={server.onLoadMore} className="ml-auto rounded-md border border-control-border px-2.5 py-1 text-[12px] hover:bg-accent coarse:min-h-11">
+                Load more
+              </button>
+            )}
+          </div>
+        )}
       </section>
 
       <Sheet open={!!open} onOpenChange={(o) => { if (!o) setOpen(null) }}>

@@ -299,7 +299,9 @@ export function DrillNavItem({
       title={title}
       style={{ animationDelay: `${Math.min(index, 12) * 18}ms` }}
       className={cn(
-        "drill-row-in row-interactive row-hover w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px]",
+        // kit-tap: 44px under a coarse pointer (globals.css), desktop density
+        // untouched — these rows are the panel's whole navigation on a phone.
+        "kit-tap drill-row-in row-interactive row-hover w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px]",
         selected && "row-selected font-medium",
         muted && !selected && "text-muted-foreground",
       )}

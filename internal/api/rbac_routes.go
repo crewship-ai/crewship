@@ -293,15 +293,36 @@ func (r *Router) authedAdmin(method, pattern string, h http.HandlerFunc) {
 		r.authMw.RequireAuth(r.authMw.RequireWorkspace(r.requireAdminFloorMW(scopeSelf, h))))
 }
 
-// authedAdminMut registers an admin-console action on a person — sign their
-// sessions out, lift a lockout — at the same floor as authedAdmin: OWNER/ADMIN
-// of the current workspace, or an instance admin. Recorded as roleManage, the
-// role it has always had, so the manifest reads the same.
-func (r *Router) authedAdminMut(method, pattern string, h http.HandlerFunc) {
-	scope := scopeForRoute(pattern)
-	r.recordMut(method, pattern, roleManage, scope)
+// authedAdminPeople registers the People & workspaces reads and actions: the
+// same floor as authedAdmin (OWNER/ADMIN of the workspace, or an instance admin), except that an instance admin may
+// leave the workspace out. An instance admin need not belong to any workspace
+// (review R7), and these routes answer for the whole instance to them anyway;
+// anyone else without a workspace still gets the 400 RequireWorkspace gives.
+func (r *Router) authedAdminPeople(method, pattern string, h http.HandlerFunc) {
+	scope := scopeSelf
+	if method == http.MethodGet {
+		r.adminRoutes = append(r.adminRoutes, adminRoute{Method: method, Pattern: pattern})
+	} else {
+		scope = scopeForRoute(pattern)
+		r.recordMut(method, pattern, roleManage, scope)
+	}
 	r.mux.Handle(method+" "+pattern,
-		r.authMw.RequireAuth(r.authMw.RequireWorkspace(r.requireAdminFloorMW(scope, h))))
+		r.authMw.RequireAuth(r.workspaceOrInstanceAdmin(r.requireAdminFloorMW(scope, h))))
+}
+
+// workspaceOrInstanceAdmin is RequireWorkspace, except that a request naming
+// no workspace at all goes on without one when the caller is an instance
+// admin. A request that names a workspace is resolved exactly as before.
+func (r *Router) workspaceOrInstanceAdmin(next http.Handler) http.Handler {
+	withWorkspace := r.authMw.RequireWorkspace(next)
+	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		named := req.URL.Query().Get("workspace_id") != "" || req.PathValue("workspaceId") != "" || req.Header.Get("X-Workspace-ID") != ""
+		if !named && isInstanceAdmin(req, r.db) {
+			next.ServeHTTP(w, req.WithContext(context.WithValue(req.Context(), ctxInstanceAdmin, true)))
+			return
+		}
+		withWorkspace.ServeHTTP(w, req)
+	})
 }
 
 // requireAdminFloorMW is the admin console's floor: OWNER/ADMIN of the
