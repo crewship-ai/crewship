@@ -9,6 +9,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/access"
 	"github.com/crewship-ai/crewship/internal/encryption"
+	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
 func providerFixture(t *testing.T) Authority {
@@ -184,7 +185,7 @@ func TestProviderExpiryAndUnsupportedCredentialModes(t *testing.T) {
 	a := providerFixture(t)
 	permitProviderDelegation(t, a)
 	expires := time.Now().Add(time.Minute).UTC()
-	if _, err := a.Store.DB.ExecContext(t.Context(), `UPDATE agent_credentials SET expires_at=?`, expires.Format(time.RFC3339Nano)); err != nil {
+	if _, err := a.Store.DB.ExecContext(t.Context(), `UPDATE agent_credentials SET expires_at=?`, tsformat.Format(expires)); err != nil {
 		t.Fatal(err)
 	}
 	h, _ := prepareProvider(t, a, "h1", "c1", "", 64)
