@@ -204,7 +204,7 @@ func TestCompletedAttemptRetainsHistoryWithoutExecutionReplay(t *testing.T) {
 }
 
 func TestFrozenContextOriginRevokesConsumerAndDeletion(t *testing.T) {
-	for _, mutation := range []string{"revoke", "delete"} {
+	for _, mutation := range []string{"revoke", "delete", "dependency_delete"} {
 		t.Run(mutation, func(t *testing.T) {
 			s := fixture(t)
 			run := Right{"agent", "a", "run"}
@@ -237,10 +237,15 @@ func TestFrozenContextOriginRevokesConsumerAndDeletion(t *testing.T) {
 			if err = s.DB.QueryRow(`SELECT COUNT(*) FROM access_context_dependencies WHERE attempt_id=? AND context_id=?`, a.ID, e.ID).Scan(&count); err != nil || count != 1 {
 				t.Fatalf("dependency not durable %d %v", count, err)
 			}
+			if _, err = s.DB.Exec(`INSERT INTO access_context_dependencies(attempt_id,context_id,source_attempt_id,scope) SELECT id,?,?,? FROM access_attempts WHERE handle_hash=?`, e.ID, origin.ID, a.Scope, digest(other)); err == nil {
+				t.Fatal("foreign consumer dependency accepted")
+			}
 			if mutation == "revoke" {
 				err = s.RevokeAttempt(t.Context(), source)
-			} else {
+			} else if mutation == "delete" {
 				_, err = s.DB.Exec(`DELETE FROM access_attempts WHERE id=?`, origin.ID)
+			} else {
+				_, err = s.DB.Exec(`DELETE FROM access_context_dependencies WHERE attempt_id=?`, a.ID)
 			}
 			if err != nil {
 				t.Fatal(err)
