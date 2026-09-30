@@ -2,6 +2,7 @@ package backupplan
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"io"
@@ -254,10 +255,121 @@ func (s *Service) checkStale(ctx context.Context) {
 	}
 }
 
+// DrillReminderPeriod is how old the newest test restore may get before
+// the reminder opens: weekly 7 days, monthly 31 days; 0 for off.
+func DrillReminderPeriod(reminder string) time.Duration {
+	switch reminder {
+	case DrillWeekly:
+		return 7 * 24 * time.Hour
+	case DrillMonthly:
+		return 31 * 24 * time.Hour
+	}
+	return 0
+}
+
+// drillEvery is how often the scheduler tick looks at the drill reminder.
+const drillEvery = 5 * time.Minute
+
+// checkDrillReminder raises the instance-wide "drill" incident when the
+// newest test restore (a catalog drill_at, or a restore_reports row of kind
+// drill) is older than the drill_reminder period, and resolves it once a
+// drill is recent enough or the reminder is off. With no drill ever, the
+// age counts from the oldest backup; with no backup at all there is nothing
+// to test and no reminder. Runs from Tick, at most every drillEvery.
+func (s *Service) checkDrillReminder(ctx context.Context) {
+	now := s.now()
+	s.mu.Lock()
+	due := s.lastDrill.IsZero() || now.Sub(s.lastDrill) >= drillEvery
+	if due {
+		s.lastDrill = now
+	}
+	s.mu.Unlock()
+	if !due {
+		return
+	}
+	set := s.settings(ctx)
+	period := DrillReminderPeriod(set.DrillReminder)
+	if period == 0 {
+		s.resolve(ctx, DrillReminderPlanID, IncidentDrill)
+		return
+	}
+	entries, err := backup.ListCatalog(ctx, s.DB, "")
+	if err != nil {
+		s.Logger.Warn("backup drill reminder: read catalog", "error", err)
+		return
+	}
+	var newestDrill, oldest *time.Time
+	var newest *backup.CatalogEntry
+	for i := range entries {
+		e := &entries[i]
+		if e.DrillAt != nil && (newestDrill == nil || e.DrillAt.After(*newestDrill)) {
+			t := *e.DrillAt
+			newestDrill = &t
+		}
+		if oldest == nil || e.CreatedAt.Before(*oldest) {
+			t := e.CreatedAt
+			oldest = &t
+		}
+		if e.Kind != backup.KindCustom && (newest == nil || e.CreatedAt.After(newest.CreatedAt)) {
+			newest = e
+		}
+	}
+	if t := newestDrillReport(ctx, s.DB); t != nil && (newestDrill == nil || t.After(*newestDrill)) {
+		newestDrill = t
+	}
+	since := newestDrill
+	if since == nil {
+		since = oldest
+	}
+	if since == nil || now.Sub(*since) <= period {
+		s.resolve(ctx, DrillReminderPlanID, IncidentDrill)
+		return
+	}
+	days := int(now.Sub(*since).Hours() / 24)
+	bundle := "<bundle>"
+	if newest != nil {
+		bundle = newest.FilePath
+	}
+	cmd := fmt.Sprintf("crewship backup drill --bundle %s --identity <key file>", bundle)
+	var msg string
+	if newestDrill == nil {
+		msg = fmt.Sprintf("No test restore yet, and the first backup is %s old — run `%s`.", plural(days, "day", "days"), cmd)
+	} else {
+		msg = fmt.Sprintf("No test restore in %s — run `%s`.", plural(days, "day", "days"), cmd)
+	}
+	s.raise(ctx, set, DrillReminderPlanID, IncidentDrill, msg, "", "", false)
+}
+
+// newestDrillReport is the newest restore_reports row of kind drill, or nil.
+func newestDrillReport(ctx context.Context, db *sql.DB) *time.Time {
+	rows, err := db.QueryContext(ctx, `SELECT created_at FROM restore_reports WHERE kind = ?`, backup.RestoreKindDrill)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	var out *time.Time
+	for rows.Next() {
+		var raw string
+		if rows.Scan(&raw) != nil {
+			continue
+		}
+		t, err := parseTS(raw)
+		if err != nil {
+			continue
+		}
+		if out == nil || t.After(*out) {
+			out = &t
+		}
+	}
+	return out
+}
+
 // RecordDrillOutcome raises the plan's "drill" incident for a failed or
 // partial test restore and clears it for an ok one. planID "" is a bundle
 // made without a plan. Called by the drills endpoint.
 func (s *Service) RecordDrillOutcome(ctx context.Context, planID, result, detail string) {
+	// Whatever its result, a drill was run: the reminder is answered.
+	s.resolve(ctx, DrillReminderPlanID, IncidentDrill)
 	if result == "ok" {
 		s.resolve(ctx, planID, IncidentDrill)
 		return

@@ -101,6 +101,7 @@ type Service struct {
 	allowPrivateHeartbeat bool
 	limiters              limiterSet
 	lastStale             time.Time
+	lastDrill             time.Time
 
 	// passphrases holds a manual run's passphrase, by run id, only until
 	// the run takes it. It is never written to the database: a run whose
@@ -208,6 +209,7 @@ func (s *Service) Tick(ctx context.Context) {
 	}
 	s.dispatch(ctx)
 	s.checkStale(ctx)
+	s.checkDrillReminder(ctx)
 }
 
 func initialPhases(env bool) []Phase {

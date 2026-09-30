@@ -16,8 +16,24 @@ const (
 	IncidentIncomplete = "incomplete" // a run wrote a bundle with recorded gaps
 	IncidentStale      = "stale"      // the plan's newest good backup is older than stale_alert_hours
 	IncidentOffsite    = "offsite"    // an off-site copy could not be made or verified
-	IncidentDrill      = "drill"      // a recorded drill (test restore) failed or was partial
+	IncidentDrill      = "drill"      // a recorded drill (test restore) failed or was partial, or none is recent enough (the reminder)
 )
+
+// DrillReminderPlanID is the plan_id slot of the drill reminder: an
+// instance-wide "drill" incident, kept apart from the per-plan drill
+// failures (and from plan_id "", which is bundles made without a plan) so
+// that recording a drill resolves the reminder without hiding a failure.
+// The API speaks it as plan_id null.
+const DrillReminderPlanID = "instance:drill-reminder"
+
+// incidentPlan is the API's plan_id for a stored one: nil for none and for
+// the drill reminder.
+func incidentPlan(planID string) *string {
+	if planID == "" || planID == DrillReminderPlanID {
+		return nil
+	}
+	return &planID
+}
 
 // Incident is one backup_incidents row (GET …/backups/incidents): the
 // console's BackupIncident plus the run it last came from.
@@ -49,9 +65,7 @@ func scanIncident(s scanner) (*Incident, error) {
 		}
 		return nil, err
 	}
-	if plan != "" {
-		in.PlanID = &plan
-	}
+	in.PlanID = incidentPlan(plan)
 	in.ResolvedAt, in.RunID = strPtr(resolved), strPtr(run)
 	in.InboxItemIDs = decodeStrings(inbox)
 	return &in, nil
@@ -67,9 +81,7 @@ func RaiseIncident(ctx context.Context, db *sql.DB, planID, kind, message, runID
 	switch {
 	case errors.Is(err, ErrNotFound):
 		in := &Incident{ID: newID("bin_"), Kind: kind, State: "open", Count: 1, FirstAt: ts(now), LastAt: ts(now), Message: message, InboxItemIDs: []string{}}
-		if planID != "" {
-			in.PlanID = &planID
-		}
+		in.PlanID = incidentPlan(planID)
 		if runID != "" {
 			in.RunID = &runID
 		}
