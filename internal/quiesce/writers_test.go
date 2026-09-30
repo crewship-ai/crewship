@@ -188,7 +188,7 @@ func TestWriterBarrier(t *testing.T) {
 			},
 		},
 		{
-			name: "a nested writer passes through its parent's registration",
+			name: "a child writer is admitted while closing and still waited for",
 			run: func(t *testing.T, c *Controller) {
 				parent, _ := c.Enter(context.Background())
 				res := beginAsync(c, long)
@@ -197,16 +197,64 @@ func TestWriterBarrier(t *testing.T) {
 				if !ok {
 					t.Fatal("a nested writer was refused by the drain its parent holds up")
 				}
-				child.Leave()
-				if c.Writers() != 1 {
-					t.Fatalf("writers = %d, nested enter must not count", c.Writers())
+				if c.Writers() != 2 {
+					t.Fatalf("writers = %d, the child must count", c.Writers())
 				}
+				// The parent finishes first (a goroutine outliving its
+				// request): the window still waits for the child.
 				parent.Leave()
+				select {
+				case r := <-res:
+					t.Fatalf("Begin returned (%v) while the child was still writing", r.err)
+				default:
+				}
+				if _, ok := c.Enter(parent.Context()); ok {
+					t.Fatal("a left parent's context still admits children")
+				}
+				child.Leave()
 				r := <-res
 				if r.err != nil {
 					t.Fatal(r.err)
 				}
 				r.w.Release()
+			},
+		},
+		{
+			name: "outside steps out for a run and re-enters after the window",
+			run: func(t *testing.T, c *Controller) {
+				wr, _ := c.Enter(context.Background())
+				var res <-chan beginResult
+				var held *Window
+				// Outside uses the default controller only through the ctx
+				// writer, so it works on c too.
+				err := Outside(wr.Context(), func() {
+					if c.Writers() != 0 {
+						t.Errorf("writers = %d during the run, want 0", c.Writers())
+					}
+					res = beginAsync(c, long)
+					r := <-res
+					if r.err != nil {
+						t.Error(r.err)
+						return
+					}
+					held = r.w
+					// Released concurrently with the re-entry: Outside
+					// must not count the writer again before it is.
+					go held.Release()
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if c.Holding() {
+					t.Fatal("re-entered while the window was still open")
+				}
+				if c.Writers() != 1 {
+					t.Fatalf("writers = %d after Outside, want 1", c.Writers())
+				}
+				wr.Leave()
+				if c.Writers() != 0 {
+					t.Fatalf("writers = %d after leave", c.Writers())
+				}
 			},
 		},
 		{
