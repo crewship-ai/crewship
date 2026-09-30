@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 type zeroes struct{}
@@ -117,4 +118,85 @@ func TestLiveBoundedFilesystemRecoveryAndAttachment(t *testing.T) {
 		t.Fatalf("restart lost data: %s %v", canary, err)
 	}
 	t.Logf("own64MiB fully preallocated ext4 overflow denied after%dbytes; helper recovery preserved data; active bind removal denied", written)
+}
+
+func TestLiveCatalogNamespaceIsolation(t *testing.T) {
+	if os.Getenv("CREWSHIP_LIVE_QUOTA_BACKEND") != "1" || os.Geteuid() != 0 {
+		t.Skip("isolated privileged namespace fixture")
+	}
+	var backends []*Backend
+	var descriptors []Descriptor
+	key := Key{"identical-restored-crew", "probe", "data", 1}
+	for _, namespace := range []string{"database-a", "database-b"} {
+		root := t.TempDir()
+		if err := os.Chmod(root, 0700); err != nil {
+			t.Fatal(err)
+		}
+		b, err := NewBackend(root, 64<<20, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		backends = append(backends, b)
+		if err = b.BindNamespace(namespace); err != nil {
+			t.Fatal(err)
+		}
+		if err = b.BindNamespace("wrong-database"); !errors.Is(err, ErrDenied) {
+			t.Fatalf("catalog identity changed: %v", err)
+		}
+		d, err := b.Ensure(key, 64<<20)
+		if err != nil {
+			t.Fatal(err)
+		}
+		descriptors = append(descriptors, d)
+	}
+	defer func() {
+		for _, b := range backends {
+			if err := b.Remove(key); err != nil {
+				t.Error(err)
+			}
+			b.Close()
+		}
+	}()
+	if descriptors[0].Mount == descriptors[1].Mount {
+		t.Fatal("restored identical IDs share physical catalog")
+	}
+	if err := os.WriteFile(filepath.Join(descriptors[0].Mount, "private-canary"), []byte("DATABASE_A_ONLY"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.ReadFile(filepath.Join(descriptors[1].Mount, "private-canary")); !os.IsNotExist(err) {
+		t.Fatalf("cross-instance data visible: %v", err)
+	}
+}
+
+func TestLiveHostReservationSerialization(t *testing.T) {
+	if os.Getenv("CREWSHIP_LIVE_QUOTA_BACKEND") != "1" || os.Geteuid() != 0 {
+		t.Skip("isolated root host-reservation lock")
+	}
+	first, err := hostReservationLock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer first.Close()
+	acquired := make(chan error, 1)
+	go func() {
+		second, e := hostReservationLock()
+		if e == nil {
+			second.Close()
+		}
+		acquired <- e
+	}()
+	select {
+	case e := <-acquired:
+		t.Fatalf("overlapping host disk admission: %v", e)
+	case <-time.After(100 * time.Millisecond):
+	}
+	first.Close()
+	select {
+	case e := <-acquired:
+		if e != nil {
+			t.Fatal(e)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("released host reservation lock remained unavailable")
+	}
 }

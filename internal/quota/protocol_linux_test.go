@@ -24,7 +24,7 @@ func TestClientRejectsUnprivilegedSocketPeer(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer listener.Close()
-	if _, err = (Client{socket}).Ensure(Key{"crew", "database", "data", 1}, 64<<20); !errors.Is(err, ErrDenied) {
+	if _, err = (Client{Socket: socket}).Ensure(Key{"crew", "database", "data", 1}, 64<<20); !errors.Is(err, ErrDenied) {
 		t.Fatalf("unprivileged helper impersonation accepted: %v", err)
 	}
 }
@@ -33,7 +33,7 @@ func TestQuotaClientIdentityProbe(t *testing.T) {
 	if socket == "" {
 		t.Skip("forked identity probe only")
 	}
-	d, err := (Client{socket}).Ensure(Key{"synthetic-crew", "socket-probe", "data", 1}, 64<<20)
+	d, err := (Client{Socket: socket}).Ensure(Key{"synthetic-crew", "socket-probe", "data", 1}, 64<<20)
 	if os.Geteuid() == 1001 || os.Geteuid() == 1002 {
 		if err == nil {
 			t.Fatal("agent/broker socket admitted")
@@ -48,7 +48,7 @@ func TestQuotaClientIdentityProbe(t *testing.T) {
 			t.Fatal("server UID could inspect private root catalog hostpath")
 		}
 	}
-	if _, err = (Client{socket}).Ensure(Key{"../host", "socket-probe", "data", 1}, 64<<20); err == nil {
+	if _, err = (Client{Socket: socket}).Ensure(Key{"../host", "socket-probe", "data", 1}, 64<<20); err == nil {
 		t.Fatal("caller path accepted by privileged helper")
 	}
 }
