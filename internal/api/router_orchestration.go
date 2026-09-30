@@ -57,6 +57,8 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	r.authedMut("POST", "/api/v1/chats/{chatId}/restricted-cli-run", roleSelf, r.restrictedCLIRun)
 	r.mux.Handle("GET /api/v1/chats/{chatId}/execution-profile", authed(wsCtx(http.HandlerFunc(r.executionProfile))))
 
+	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/issues/{issueId}/private-preflight", roleSelf, r.restrictedIssuePreflight)
+
 	// Human conversations share workspace authentication and enforce their own
 	// participant ACL in every store operation, independently of agent sessions.
 	wch := NewWorkspaceConversationsHandler(groupchat.New(r.db), r.logger)

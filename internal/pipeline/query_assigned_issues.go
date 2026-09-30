@@ -32,6 +32,7 @@ func (s *RunStore) hasAssignedIssues(ctx context.Context, workspace, crew, agent
  (rel.relation_type='blocked_by' AND rel.source_id=m.id)) AND blocker.status NOT IN ('DONE','CANCELLED'))
  AND NOT EXISTS (SELECT 1 FROM assignments a WHERE a.mission_id=m.id
  AND a.status NOT IN ('COMPLETED','FAILED','CANCELLED','TIMEOUT'))
+ AND NOT EXISTS (SELECT 1 FROM restricted_preflight_reservations r JOIN restricted_workflow_jobs j ON j.id=r.workflow_id WHERE r.issue_id=m.id AND j.state IN ('pending','running'))
  AND NOT EXISTS (SELECT 1 FROM issue_executions x JOIN pipeline_runs pr ON pr.id=x.routine_run_id
  WHERE x.mission_id=m.id AND pr.status IN ('queued','running','waiting'))
  ) ELSE NULL END`, agent, crew, workspace, workspace, crew, agent).Scan(&result)

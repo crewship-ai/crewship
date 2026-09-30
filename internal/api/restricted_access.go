@@ -24,6 +24,9 @@ func (m *AuthMiddleware) restrictedRequest(w http.ResponseWriter, r *http.Reques
 		return true
 	}
 	switch r.Pattern {
+	case "POST /api/v1/workspaces/{workspaceId}/issues/{issueId}/private-preflight":
+		return true // source grants, brief and routine authority are checked in one private reservation
+
 	case "GET /api/v1/chats/{chatId}/restricted-files", "GET /api/v1/chats/{chatId}/restricted-files/{fileId}/download":
 		return true // classified file handler derives the exact current audience
 	case "GET /api/v1/agents", "GET /api/v1/agents/{agentId}", "GET /api/v1/workspaces":
