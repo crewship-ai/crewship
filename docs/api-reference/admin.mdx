@@ -76,6 +76,7 @@ The operational surface for OWNER and ADMIN roles: workspace stats, user managem
 | `GET` | [/api/v1/admin/instance/backups/drills](#get-api-v1-admin-instance-backups-drills) | Every recorded test restore |
 | `GET` | [/api/v1/admin/instance/backups/settings](#get-api-v1-admin-instance-backups-settings) | Backup limits, heartbeat, alerts, destinations and instance admins |
 | `PUT` | [/api/v1/admin/instance/backups/settings](#put-api-v1-admin-instance-backups-settings) | Change backup settings (partial) |
+| `POST` | [/api/v1/admin/instance/backups/settings/test-alert](#post-api-v1-admin-instance-backups-settings-test-alert) | Send a test backup alert to a notification channel |
 | `GET` | [/api/v1/admin/instance/backups/recipients](#get-api-v1-admin-instance-backups-recipients) | Backup keys (age public keys) and the plans that use them |
 | `POST` | [/api/v1/admin/instance/backups/recipients](#post-api-v1-admin-instance-backups-recipients) | Add a backup key |
 | `DELETE` | [/api/v1/admin/instance/backups/recipients/\{id\}](#delete-api-v1-admin-instance-backups-recipients-id) | Remove a backup key no plan uses |
@@ -2013,8 +2014,15 @@ long without a good backup a plan counts as stale. `drill_reminder`
 (`weekly`, `monthly` or `off`) raises an instance-wide `drill` incident when
 the newest test restore is older than 7 or 31 days. Incidents go to each
 instance admin's inbox and from there to that admin's own notification
-channels (the `system.health` category); `channels` is stored for a later
-release and routes nothing. `destinations` lists where
+channels (the `system.health` category), and to every notification channel
+whose id is in `channels` — one message per incident state change (opened,
+each repeat, resolved). `available_channels` lists the channels that can be
+added (workspace-wide, switched on, admitting System health, on a provider
+switched on in Admin › Notifications) with `kind` `chat`, `push`, `incident`,
+`email` or `webhook` and the newest backup alert each was sent;
+`channel_status` says, per channel in `channels`, whether it is still
+available and how its newest alert went (`pending`, `sent` or `failed` with
+the error). `destinations` lists where
 copies can be kept: this server, each S3-compatible destination (`verified`
 once one upload there was checked), and Google Drive as not yet `available`.
 `instance_admins` counts who receives incidents.
@@ -2040,7 +2048,12 @@ once one upload there was checked), and Google Drive as not yet `available`.
     {"id": "drive", "kind": "drive", "label": "Google Drive", "path": null, "used_bytes": null, "verified": false, "available": false}
   ],
   "instance_admins": 3,
-  "local_path": "/var/lib/crewship/backups"
+  "local_path": "/var/lib/crewship/backups",
+  "available_channels": [
+    {"id": "nch_1a2b3c4d5e6f7a8b", "name": "Slack · Platform", "kind": "chat", "provider": "slack", "workspace_id": "ws_…",
+     "workspace_name": "Platform", "last_delivery": {"status": "sent", "error": null, "at": "2026-09-30T03:05:00Z", "incident_id": "bin_…"}}
+  ],
+  "channel_status": []
 }
 ```
 
@@ -2056,7 +2069,9 @@ once one upload there was checked), and Google Drive as not yet `available`.
 Changes the settings. The body is a partial settings object: what it leaves
 out keeps its value; `destinations`, `instance_admins`, `local_path` and the
 heartbeat's last ping are ignored. `heartbeat_url` must be a public https URL;
-`null` or `""` clears it. The change and its instance audit entry
+`null` or `""` clears it. A channel id added to `channels` must be one of
+`available_channels`; one already there stays even if it has since become
+unusable (its alerts then fail and say why). The change and its instance audit entry
 (`instance.backup_settings_updated`, before and after) commit together.
 Answers with the whole settings object.
 
@@ -2077,10 +2092,40 @@ Answers with the whole settings object.
 | Status | Condition |
 |--------|-----------|
 | `200` | Saved. |
-| `400` | A limit out of range, a heartbeat URL that is not public https, an unknown drill reminder, or a body that is not JSON. |
+| `400` | A limit out of range, a heartbeat URL that is not public https, an unknown drill reminder, a channel being added that is unknown or cannot carry backup alerts, or a body that is not JSON. |
 | `401` | Missing authentication. |
 | `403` | Caller is not an instance administrator. |
 | `500` | The write failed; nothing changed. |
+
+## `POST /api/v1/admin/instance/backups/settings/test-alert`
+
+Sends a test alert ("Backup alert test", with a link to Backups › Overview)
+to one notification channel now, through the same delivery a real backup
+alert uses — the channel's sealed secret, the SSRF-safe transport and the
+provider kill switch — and says whether it arrived. The channel need not be
+in `channels` yet. A failed send is `200` with `ok: false` and the error. Test
+alerts are not written to the notification delivery log.
+
+**Auth:** instance administrator. **Request:**
+
+```json
+{"channel_id": "nch_1a2b3c4d5e6f7a8b"}
+```
+
+**Response:**
+
+```json
+{"ok": true, "channel_id": "nch_1a2b3c4d5e6f7a8b", "channel": "Slack · Platform", "error": null, "sent_at": "2026-09-30T09:12:00Z"}
+```
+
+| Status | Condition |
+|--------|-----------|
+| `200` | Sent, or not delivered (`ok: false` with the error). |
+| `400` | No `channel_id`, a channel that cannot carry backup alerts (the reason is in the error), or a body that is not JSON. |
+| `401` | Missing authentication. |
+| `403` | Caller is not an instance administrator. |
+| `404` | No notification channel with that id (unknown, deleted or personal). |
+| `500` | A read failed. |
 
 ## `GET /api/v1/admin/instance/backups/recipients`
 

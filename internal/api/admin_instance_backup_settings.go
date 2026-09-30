@@ -5,6 +5,7 @@ package api
 //
 //	GET    /api/v1/admin/instance/backups/settings                 limits, heartbeat, alerts, destinations, instance admins
 //	PUT    /api/v1/admin/instance/backups/settings                 change (fields not sent keep their value)
+//	POST   /api/v1/admin/instance/backups/settings/test-alert      {channel_id}: send a test alert to one channel now
 //	GET    /api/v1/admin/instance/backups/recipients               backup keys (age public keys)
 //	POST   /api/v1/admin/instance/backups/recipients               {name, public_key, holder}
 //	DELETE /api/v1/admin/instance/backups/recipients/{id}          refused while a plan encrypts to it
@@ -58,6 +59,19 @@ type backupSettingsResponse struct {
 	Destinations   []backupDestinationView `json:"destinations"`
 	InstanceAdmins int                     `json:"instance_admins"`
 	LocalPath      *string                 `json:"local_path"`
+	// AvailableChannels are the notification channels that can carry
+	// backup alerts now (the picker); channels holds the chosen ids.
+	AvailableChannels []backupplan.AlertChannel `json:"available_channels"`
+	// ChannelStatus is the newest backup alert's outcome per chosen channel,
+	// including one that is no longer available (it then says why it fails).
+	ChannelStatus []backupAlertRouteEntry `json:"channel_status"`
+}
+
+// backupAlertRouteEntry is one chosen channel and how its alerts are going.
+type backupAlertRouteEntry struct {
+	ID           string                    `json:"id"`
+	Available    bool                      `json:"available"`
+	LastDelivery *backupplan.AlertDelivery `json:"last_delivery"`
 }
 
 func (p *InstanceBackupPlansHandler) settingsResponse(ctx context.Context) (*backupSettingsResponse, error) {
@@ -99,6 +113,17 @@ func (p *InstanceBackupPlansHandler) settingsResponse(ctx context.Context) (*bac
 		return nil, err
 	}
 	out.InstanceAdmins = len(admins)
+	if out.AvailableChannels, err = backupplan.ListAlertChannels(ctx, p.h.db); err != nil {
+		return nil, err
+	}
+	avail := map[string]bool{}
+	for _, c := range out.AvailableChannels {
+		avail[c.ID] = true
+	}
+	out.ChannelStatus = []backupAlertRouteEntry{}
+	for _, id := range set.Channels {
+		out.ChannelStatus = append(out.ChannelStatus, backupAlertRouteEntry{ID: id, Available: avail[id], LastDelivery: backupplan.LastAlertDelivery(ctx, p.h.db, id)})
+	}
 	return out, nil
 }
 
@@ -137,6 +162,10 @@ func (p *InstanceBackupPlansHandler) PutSettings(w http.ResponseWriter, r *http.
 		p.planError(w, "backup settings", err)
 		return
 	}
+	if err := backupplan.ValidateAlertChannels(ctx, p.h.db, next.Channels, before.Channels); err != nil {
+		p.planError(w, "backup settings", err)
+		return
+	}
 	userID, _ := actorUserID(r)
 	tx, err := p.h.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -165,6 +194,43 @@ func (p *InstanceBackupPlansHandler) PutSettings(w http.ResponseWriter, r *http.
 		return
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// testAlertRequest is POST …/backups/settings/test-alert.
+type testAlertRequest struct {
+	ChannelID string `json:"channel_id"`
+}
+
+// TestAlert is POST …/backups/settings/test-alert {channel_id}: sends a test
+// alert to one notification channel now, through the same delivery as a real
+// one, and says whether it arrived (200 with ok false and the error when it
+// did not). The channel need not be on the route yet; it must be one the
+// picker offers (404 for an unknown or personal channel, 400 for one that
+// cannot carry backup alerts, with the reason).
+func (p *InstanceBackupPlansHandler) TestAlert(w http.ResponseWriter, r *http.Request) {
+	var req testAlertRequest
+	if !decodeInstanceBody(w, r, &req) {
+		return
+	}
+	req.ChannelID = strings.TrimSpace(req.ChannelID)
+	if req.ChannelID == "" {
+		replyError(w, http.StatusBadRequest, "channel_id is required")
+		return
+	}
+	if p.alerts == nil {
+		p.h.fail(w, "test alert", errors.New("backup alerts are not wired on this server"))
+		return
+	}
+	res, err := p.alerts.Test(r.Context(), req.ChannelID)
+	if errors.Is(err, backupplan.ErrNotFound) {
+		replyError(w, http.StatusNotFound, "no notification channel with that id (see available_channels in GET …/backups/settings)")
+		return
+	}
+	if err != nil {
+		p.planError(w, "test alert", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
 }
 
 func settingsAuditMeta(s backupplan.Settings) map[string]any {

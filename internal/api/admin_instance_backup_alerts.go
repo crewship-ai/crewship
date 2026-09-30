@@ -23,7 +23,11 @@ package api
 //     Resolving the incident resolves every item it delivered.
 //  4. Category system.health: the inbox's external notifier fans the item out
 //     to each admin's own channels (email, Slack, Telegram, …) per their
-//     category preferences — that is the "also Slack, email" path.
+//     category preferences.
+//  5. The instance's alert route: every notification channel named in
+//     backup_settings.channels (Keys & alerts) gets one message per incident
+//     state change — opened, each repeat, resolved — whoever is or is not
+//     looking at an inbox (backupplan.ChannelAlerter, alert_channels.go).
 
 import (
 	"context"
@@ -89,6 +93,9 @@ func listInstanceAdmins(ctx context.Context, db *sql.DB) ([]instanceAdminRef, er
 type backupIncidentAlerter struct {
 	db     *sql.DB
 	logger *slog.Logger
+	// channels delivers to the alert route's notification channels; nil
+	// delivers to the inboxes only.
+	channels *backupplan.ChannelAlerter
 }
 
 func backupIncidentLink(inc *backupplan.Incident) string {
@@ -105,8 +112,11 @@ func backupIncidentSource(incidentID, userID string) string {
 }
 
 // Raised writes (or refreshes) the incident's item in every instance admin's
-// inbox.
+// inbox and sends it to the alert route's channels.
 func (a backupIncidentAlerter) Raised(ctx context.Context, inc *backupplan.Incident, opened bool, detail string) {
+	// The route first: it does not depend on the inbox, which is the part
+	// that fails along with the server.
+	a.channels.Raised(ctx, inc, opened, detail)
 	admins, err := listInstanceAdmins(ctx, a.db)
 	if err != nil {
 		a.logger.Warn("backup incident: list instance admins", "incident", inc.ID, "error", err)
@@ -156,8 +166,14 @@ func (a backupIncidentAlerter) Raised(ctx context.Context, inc *backupplan.Incid
 	}
 }
 
-// Resolved resolves every inbox item the incident delivered.
+// Resolved resolves every inbox item the incident delivered and tells the
+// channels that heard it opened.
 func (a backupIncidentAlerter) Resolved(ctx context.Context, inc *backupplan.Incident) {
+	a.channels.Resolved(ctx, inc)
+	a.resolveInboxItems(ctx, inc)
+}
+
+func (a backupIncidentAlerter) resolveInboxItems(ctx context.Context, inc *backupplan.Incident) {
 	if len(inc.InboxItemIDs) == 0 {
 		return
 	}

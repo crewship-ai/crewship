@@ -150,12 +150,13 @@ POST /api/v1/admin/instance/backups/copies/fetch roleInstance
 POST /api/v1/admin/instance/backups/destinations roleInstance
 POST /api/v1/admin/instance/backups/destinations/{id}/test roleInstance
 POST /api/v1/admin/instance/backups/drills roleInstance
+POST /api/v1/admin/instance/backups/environments/land roleInstance
 POST /api/v1/admin/instance/backups/plans roleInstance
 POST /api/v1/admin/instance/backups/plans/preview-contents roleInstance
-POST /api/v1/admin/instance/backups/run roleInstance
-POST /api/v1/admin/instance/backups/environments/land roleInstance
 POST /api/v1/admin/instance/backups/recipients roleInstance
 POST /api/v1/admin/instance/backups/restore/checks roleInstance
+POST /api/v1/admin/instance/backups/run roleInstance
+POST /api/v1/admin/instance/backups/settings/test-alert roleInstance
 POST /api/v1/admin/instance/holds/resume roleInstance
 POST /api/v1/admin/instance/people roleInstance
 POST /api/v1/admin/instance/people/{userId}/reactivate roleInstance
