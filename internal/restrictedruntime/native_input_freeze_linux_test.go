@@ -78,7 +78,11 @@ esac
 				}
 			}
 			row := func(id, name string, rw bool) []any {
-				return []any{map[string]any{"ID": id, "Name": "/" + name, "State": map[string]any{"Running": true}, "Config": map[string]any{"User": "1002:1002", "Entrypoint": []string{"/opt/crewship-runner"}, "Cmd": []string{"hold"}, "Labels": map[string]string{labelPrefix + "attempt": p.Attempt, labelPrefix + "plan": p.fingerprint(), labelPrefix + "input-owner": catalog.owner}}, "HostConfig": map[string]string{"NetworkMode": "none"}, "Mounts": []any{map[string]any{"Name": r.Volume, "Destination": NativeInputTarget, "RW": rw}}}}
+				user, entry, mode := "1002:1002", "/opt/crewship-runner", "hold"
+				if name == r.Populator {
+					user, entry, mode = "1001:1001", "/opt/crewship-native-runner", "project-input-hold"
+				}
+				return []any{map[string]any{"ID": id, "Name": "/" + name, "State": map[string]any{"Running": true}, "Config": map[string]any{"User": user, "Entrypoint": []string{entry}, "Cmd": []string{mode}, "Labels": map[string]string{labelPrefix + "attempt": p.Attempt, labelPrefix + "plan": p.fingerprint(), labelPrefix + "input-owner": catalog.owner}}, "HostConfig": map[string]string{"NetworkMode": "none"}, "Mounts": []any{map[string]any{"Name": r.Volume, "Destination": NativeInputTarget, "RW": rw}}}}
 			}
 			write("consumer.json", row("consumer-id", "consumer", scenario == "writable-consumer"))
 			write("writer.json", row("writer-id", r.Populator, true))

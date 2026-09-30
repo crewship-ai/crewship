@@ -75,7 +75,7 @@ func (c *FrozenNativeCatalog) stage(ctx context.Context, p Plan) (nativeSnapshot
 	if err != nil {
 		return r, err
 	}
-	args = []string{"create", "--pull=never", "--name", r.Populator, "--label", labelPrefix + "input-owner=" + c.owner, "--label", labelPrefix + "attempt=" + r.Attempt, "--label", labelPrefix + "plan=" + r.Fingerprint, "--user", "1002:1002", "--read-only", "--network", "none", "--ipc", "private", "--cgroupns", "private", "--runtime", "runc", "--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--init", "--restart", "no", "--memory", "134217728", "--memory-swap", "134217728", "--cpus", "0.250000000", "--pids-limit", "16", "--log-driver", "none", "--tmpfs", "/broker:" + privateTmpfs()["/broker"], "--mount", "type=volume,source=" + r.Volume + ",target=" + NativeInputTarget + ",volume-nocopy", "--entrypoint", "/opt/crewship-runner", image, "hold"}
+	args = []string{"create", "--pull=never", "--name", r.Populator, "--label", labelPrefix + "input-owner=" + c.owner, "--label", labelPrefix + "attempt=" + r.Attempt, "--label", labelPrefix + "plan=" + r.Fingerprint, "--user", "1001:1001", "--read-only", "--network", "none", "--ipc", "private", "--cgroupns", "private", "--runtime", "runc", "--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--init", "--restart", "no", "--memory", "134217728", "--memory-swap", "134217728", "--cpus", "0.250000000", "--pids-limit", "16", "--log-driver", "none", "--tmpfs", "/broker:" + privateTmpfs()["/broker"], "--mount", "type=volume,source=" + r.Volume + ",target=" + NativeInputTarget + ",volume-nocopy", "--entrypoint", "/opt/crewship-native-runner", image, "project-input-hold"}
 	if _, err := c.docker.call(ctx, nil, args...); err != nil {
 		return r, err
 	}
@@ -121,7 +121,7 @@ func (c *FrozenNativeCatalog) checkWriter(ctx context.Context, r nativeSnapshotR
 	}
 	v := rows[0]
 	h := v.HostConfig
-	if v.Image != image || v.Config.User != "1002:1002" || strings.Join(v.Config.Entrypoint, " ") != "/opt/crewship-runner" || strings.Join(v.Config.Cmd, " ") != "hold" || v.Config.Labels[labelPrefix+"input-owner"] != c.owner || v.Config.Labels[labelPrefix+"attempt"] != r.Attempt || v.Config.Labels[labelPrefix+"plan"] != r.Fingerprint || h.NetworkMode != "none" || h.PidMode != "" || h.Privileged || !h.ReadonlyRootfs || len(h.Binds) != 0 || len(h.CapAdd) != 0 || strings.Join(h.CapDrop, ",") != "ALL" || strings.Join(h.SecurityOpt, ",") != "no-new-privileges" || h.Memory != 134217728 || h.MemorySwap != h.Memory || h.NanoCpus != 250000000 || h.PidsLimit != 16 || h.RestartPolicy.Name != "no" || len(v.Mounts) != 1 || v.Mounts[0].Type != "volume" || v.Mounts[0].Name != r.Volume || v.Mounts[0].Destination != NativeInputTarget || !v.Mounts[0].RW {
+	if v.Image != image || v.Config.User != "1001:1001" || strings.Join(v.Config.Entrypoint, " ") != "/opt/crewship-native-runner" || strings.Join(v.Config.Cmd, " ") != "project-input-hold" || v.Config.Labels[labelPrefix+"input-owner"] != c.owner || v.Config.Labels[labelPrefix+"attempt"] != r.Attempt || v.Config.Labels[labelPrefix+"plan"] != r.Fingerprint || h.NetworkMode != "none" || h.PidMode != "" || h.Privileged || !h.ReadonlyRootfs || len(h.Binds) != 0 || len(h.CapAdd) != 0 || strings.Join(h.CapDrop, ",") != "ALL" || strings.Join(h.SecurityOpt, ",") != "no-new-privileges" || h.Memory != 134217728 || h.MemorySwap != h.Memory || h.NanoCpus != 250000000 || h.PidsLimit != 16 || h.RestartPolicy.Name != "no" || len(v.Mounts) != 1 || v.Mounts[0].Type != "volume" || v.Mounts[0].Name != r.Volume || v.Mounts[0].Destination != NativeInputTarget || !v.Mounts[0].RW {
 		return ErrDenied
 	}
 	return nil
@@ -198,7 +198,11 @@ func (c *FrozenNativeCatalog) checkAliases(ctx context.Context, r nativeSnapshot
 		v := rows[0]
 		isConsumer := v.ID == consumer
 		isWriter := strings.TrimPrefix(v.Name, "/") == r.Populator
-		if (!isConsumer && (!writerAllowed || !isWriter)) || v.Config.Labels[labelPrefix+"attempt"] != r.Attempt || v.Config.Labels[labelPrefix+"plan"] != r.Fingerprint || v.Config.User != "1002:1002" || strings.Join(v.Config.Entrypoint, " ") != "/opt/crewship-runner" || strings.Join(v.Config.Cmd, " ") != "hold" || v.HostConfig.NetworkMode != "none" || !v.State.Running {
+		wantUser, wantEntry, wantMode := "1002:1002", "/opt/crewship-runner", "hold"
+		if isWriter {
+			wantUser, wantEntry, wantMode = "1001:1001", "/opt/crewship-native-runner", "project-input-hold"
+		}
+		if (!isConsumer && (!writerAllowed || !isWriter)) || v.Config.Labels[labelPrefix+"attempt"] != r.Attempt || v.Config.Labels[labelPrefix+"plan"] != r.Fingerprint || v.Config.User != wantUser || strings.Join(v.Config.Entrypoint, " ") != wantEntry || strings.Join(v.Config.Cmd, " ") != wantMode || v.HostConfig.NetworkMode != "none" || !v.State.Running {
 			return ErrDenied
 		}
 		mountSeen := false
