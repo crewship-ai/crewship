@@ -40,7 +40,7 @@ const gov = (id: string, name: string, extra: Record<string, unknown> = {}) => (
   auto_lease_seconds: 0, behavior_sample_every: 0, ...extra,
 })
 const GOV = {
-  defaults: { configured: false, enabled: false, deny_notify_min_risk: 7 },
+  defaults: { configured: false, enabled: false, deny_notify_min_risk: 7, effective_second_approver: { min_security_level: 4, min_security_level_label: "L4 · critical", source: "tier" } },
   workspaces: [gov("ws-a", "Dess", { enabled: true, behavior_sample_every: 10 }), gov("ws-b", "Coolify")],
 }
 const row = (id: string, ws: string, wsName: string, request_type: string, decision: string, extra: Record<string, unknown> = {}) => ({
@@ -423,6 +423,8 @@ describe("Defaults for new workspaces, an operation of its own", () => {
     render(<SecurityPage />)
     const table = await screen.findByRole("region", { name: "What's on where" })
     expect(within(table).getAllByRole("row")[1]).toHaveTextContent("New workspaces")
+    // Four-eyes as enforced for a new workspace, like every row.
+    expect(within(table).getByRole("button", { name: "Four-eyes in New workspaces: L4 required" })).toBeInTheDocument()
     fireEvent.click(within(table).getByRole("button", { name: "Watchdog in New workspaces: Off" }))
     await waitFor(() => expect(window.location.search).toContain("section=defaults"))
   })

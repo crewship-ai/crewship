@@ -307,7 +307,7 @@ func schemaCatalogAdminApprovalsCheckpointsCacheMemoryProjectsResources() map[st
 		"DELETE /api/v1/admin/instance/workspaces/{workspaceId}": {SuccessStatuses: []string{"204"},
 			Request: object(map[string]any{"confirm_slug": str()}, "confirm_slug")},
 		"GET /api/v1/admin/instance/keeper/governance": {Response: object(map[string]any{
-			"defaults":   object(withProps(instanceGovSettings, map[string]any{"configured": boolean()}), "configured", "enabled"),
+			"defaults":   object(withProps(instanceGovSettings, map[string]any{"configured": boolean(), "effective_second_approver": anyObject()}), "configured", "enabled"),
 			"workspaces": array(object(withProps(instanceGovSettings, map[string]any{"configured": boolean(), "effective_second_approver": anyObject()}, instanceWsRef), append([]string{"configured", "enabled"}, instanceWsRequired...)...)),
 		}, "defaults", "workspaces")},
 		"PUT /api/v1/admin/instance/keeper/governance": {

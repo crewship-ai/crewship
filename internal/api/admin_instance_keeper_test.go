@@ -532,3 +532,22 @@ func TestInstanceKeeperPreviewSeesAWatchSpecRewrittenToTheSameLength(t *testing.
 		t.Fatalf("watch spec = %q, want the rewrite left alone", s.WatchSpec)
 	}
 }
+
+// The template reports four-eyes as enforced, like every workspace row: the
+// tier table requires a second approver at the top level for a new workspace
+// too, whatever the toggle says.
+func TestInstanceKeeperDefaultsCarryTheEnforcedFourEyes(t *testing.T) {
+	f := newInstanceFixture(t)
+	rr := f.do(f.boss, "GET", "/api/v1/admin/instance/keeper/governance", "")
+	wantCode(t, rr, http.StatusOK, "list")
+	got := decodeAs[struct {
+		Defaults struct {
+			Effective *struct {
+				Source string `json:"source"`
+			} `json:"effective_second_approver"`
+		} `json:"defaults"`
+	}](t, rr.Body.Bytes())
+	if got.Defaults.Effective == nil || got.Defaults.Effective.Source == "" {
+		t.Fatalf("defaults carry no effective_second_approver: %s", rr.Body.String())
+	}
+}

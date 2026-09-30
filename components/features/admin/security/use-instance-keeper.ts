@@ -45,7 +45,7 @@ export interface InstanceGovRow extends InstanceGovSettings {
 }
 
 export interface InstanceGovList {
-  defaults: InstanceGovSettings & { configured: boolean }
+  defaults: InstanceGovSettings & { configured: boolean; effective_second_approver?: InstanceGovRow["effective_second_approver"] }
   workspaces: InstanceGovRow[]
 }
 

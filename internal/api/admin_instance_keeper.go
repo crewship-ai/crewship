@@ -120,10 +120,13 @@ type instanceGovernanceRow struct {
 }
 
 type instanceGovernanceDefaults struct {
-	// Configured is false until an instance admin saves for all workspaces;
-	// the settings are then the built-in opt-out.
+	// Configured is false until the defaults were ever saved; the settings
+	// are then the built-in opt-out.
 	Configured bool `json:"configured"`
 	governance.Settings
+	// Four-eyes as a new workspace will have it enforced, as on every
+	// workspace row: the tier floor applies whatever the toggle says.
+	EffectiveSecondApprover effectiveSecondApprover `json:"effective_second_approver"`
 }
 
 type instanceGovernanceList struct {
@@ -145,7 +148,7 @@ func (h *InstanceKeeperHandler) ListGovernance(w http.ResponseWriter, r *http.Re
 		return
 	}
 	out := instanceGovernanceList{
-		Defaults:   instanceGovernanceDefaults{Configured: dFound, Settings: d},
+		Defaults:   instanceGovernanceDefaults{Configured: dFound, Settings: d, EffectiveSecondApprover: resolveEffectiveSecondApprover(d)},
 		Workspaces: make([]instanceGovernanceRow, 0, len(all)),
 	}
 	for _, ws := range all {
