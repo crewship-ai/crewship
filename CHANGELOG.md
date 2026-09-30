@@ -16,6 +16,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Improved
 
+- Restricted manual routines and declared Page actions can queue bounded single-agent workflows with private results, encrypted authority capsules, live declaration checks and no shared journal fallback.
+
 - Ordinary restricted CLI runs create their own private run context under the exact run permission, independently of chat permission.
 
 - Restricted group chat now shares only context classified for the exact live participants; audience and permission changes stop old attempts and start a fresh context.

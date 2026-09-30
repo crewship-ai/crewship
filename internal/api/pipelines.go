@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/pipeline"
+	"github.com/crewship-ai/crewship/internal/restrictedworkflow"
 	"github.com/crewship-ai/crewship/internal/runverdict"
 	"github.com/crewship-ai/crewship/internal/scrubber"
 )
@@ -22,22 +23,23 @@ import (
 // stub in tests) so the handler can be wired and tested before the
 // real orchestrator integration lands.
 type PipelineHandler struct {
-	storagePath  string
-	db           *sql.DB
-	logger       *slog.Logger
-	store        *pipeline.Store
-	resolver     *pipeline.Resolver
-	runner       pipeline.AgentRunner
-	emitter      pipeline.Emitter
-	waitpoints   pipeline.WaitpointStore  // optional; nil → wait approval steps fall back to in-memory timeout
-	ws           pipeline.WSBroadcaster   // optional; nil → no live pipeline event push to frontend
-	schedules    *pipeline.ScheduleStore  // optional; nil → schedule endpoints return 503
-	runs         *pipeline.RunRegistry    // optional; nil → cancel endpoint returns 503
-	webhooks     *pipeline.WebhookStore   // optional; nil → webhook endpoints return 503
-	runStore     *pipeline.RunStore       // optional; nil → list-runs falls back to journal LIKE scan, no persistence
-	codeRunner   pipeline.CodeRunner      // optional; nil → type:code steps fail closed with a wiring hint
-	scriptRunner pipeline.ScriptRunner    // optional; nil → type:script steps fail closed with a wiring hint
-	signals      *pipeline.SignalRegistry // optional; shared registry for wait:event signal delivery (Wave 4.3)
+	restrictedWorkflow func() *restrictedworkflow.Service
+	storagePath        string
+	db                 *sql.DB
+	logger             *slog.Logger
+	store              *pipeline.Store
+	resolver           *pipeline.Resolver
+	runner             pipeline.AgentRunner
+	emitter            pipeline.Emitter
+	waitpoints         pipeline.WaitpointStore  // optional; nil → wait approval steps fall back to in-memory timeout
+	ws                 pipeline.WSBroadcaster   // optional; nil → no live pipeline event push to frontend
+	schedules          *pipeline.ScheduleStore  // optional; nil → schedule endpoints return 503
+	runs               *pipeline.RunRegistry    // optional; nil → cancel endpoint returns 503
+	webhooks           *pipeline.WebhookStore   // optional; nil → webhook endpoints return 503
+	runStore           *pipeline.RunStore       // optional; nil → list-runs falls back to journal LIKE scan, no persistence
+	codeRunner         pipeline.CodeRunner      // optional; nil → type:code steps fail closed with a wiring hint
+	scriptRunner       pipeline.ScriptRunner    // optional; nil → type:script steps fail closed with a wiring hint
+	signals            *pipeline.SignalRegistry // optional; shared registry for wait:event signal delivery (Wave 4.3)
 	// crewshipActions dispatches `crewship` steps over loopback HTTP to the
 	// daemon's own internal API. Set by the router once the loopback URL and
 	// internal token are known; nil → crewship steps fail closed with a

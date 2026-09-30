@@ -47,10 +47,12 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/pagebuild"
 	"github.com/crewship-ai/crewship/internal/pages"
+	"github.com/crewship-ai/crewship/internal/restrictedworkflow"
 )
 
 func (r *Router) registerPageRoutes() {
 	p := NewPageHandler(r.db, r.hub, r.logger).SetJournal(r.Journal())
+	p.restrictedWorkflow = func() *restrictedworkflow.Service { return r.restrictedWorkflow }
 	// Held on the Router so cmd_start can reach THIS instance: it owns the
 	// create/update/delete paths that write wake-gate rules, and the freshness
 	// sweeper has to run against the same clock and journal.

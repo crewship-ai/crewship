@@ -47,6 +47,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/pagebuild"
 	"github.com/crewship-ai/crewship/internal/pages"
 	"github.com/crewship-ai/crewship/internal/policy"
+	"github.com/crewship-ai/crewship/internal/restrictedworkflow"
 	"github.com/crewship-ai/crewship/internal/ws"
 )
 
@@ -56,6 +57,7 @@ import (
 // freshness verdict is arithmetic against it, and "a panel goes stale exactly
 // at its SLA" is only testable if the test owns the clock.
 type PageHandler struct {
+	restrictedWorkflow               func() *restrictedworkflow.Service
 	projectStore                     *pages.ProjectStore
 	builds                           *pageBuildCoordinator
 	pageArtifacts                    *pagebuild.Store
