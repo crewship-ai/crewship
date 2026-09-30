@@ -82,7 +82,16 @@ try {
       if (JSON.stringify(payload.project_file_versions) !== JSON.stringify([ownFile.version_id])) throw new Error('Browser did not forward only the explicit own version')
       await expect(picker.getByRole('checkbox')).not.toBeChecked()
       await expect(replies).toHaveCount(before + 1, { timeout: 60000 })
-      await expect(page.getByRole('button', { name: 'Download output.txt', exact: true })).toHaveCount(2, { timeout: 60000 })
+      // Navigation recreated the disclosure in its closed default state.
+      // Open it as a user would before counting accessible retained downloads.
+      const outputFiles = page.locator('details').filter({ has: page.getByText('Output files', { exact: true }) })
+      await outputFiles.getByText('Output files', { exact: true }).click()
+      const retainedDownloads = outputFiles.getByRole('button', { name: 'Download output.txt', exact: true })
+      await expect(retainedDownloads).toHaveCount(2, { timeout: 60000 })
+      const retainedDownloadPromise = page.waitForEvent('download')
+      await retainedDownloads.last().click()
+      const retainedDownload = await retainedDownloadPromise
+      if ((await readFile(await retainedDownload.path(), 'utf8')) !== `PRIVATE_${actor}`) throw new Error('Selected native turn did not retain exact own output bytes')
       console.log(`PASS actual browser ${actor} width=${width}: own memory, create/remove note, SHA-verified file download, foreign 404, explicit draft preparation, own-only picker/reset, selected native transport and retained output`)
     } catch (error) {
       await page.screenshot({ path: join(scratch, `${actor}-failure.png`), fullPage: true })
