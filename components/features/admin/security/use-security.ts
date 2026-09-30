@@ -3,6 +3,7 @@
 import * as React from "react"
 
 import { apiFetch } from "@/lib/api-fetch"
+import { withWs } from "@/lib/admin-workspace-query"
 import type { KeeperStatus } from "@/app/(dashboard)/admin/types"
 import { useAdminWebSocket } from "@/app/(dashboard)/admin/hooks/use-admin-websocket"
 import type { Posture } from "./security-model"
@@ -19,21 +20,21 @@ import type { Posture } from "./security-model"
  * rather than splicing it in, so it never shows a row the server would not
  * return.
  */
-export function useSecurity(workspaceId: string | null) {
+export function useSecurity(workspaceId: string | null, workspaceLoading = false) {
   const [status, setStatus] = React.useState<KeeperStatus | null>(null)
   const [posture, setPosture] = React.useState<Posture | null>(null)
   const [postureError, setPostureError] = React.useState<string | null>(null)
   const [loading, setLoading] = React.useState(true)
 
-  const q = workspaceId ? `workspace_id=${encodeURIComponent(workspaceId)}` : ""
-
   const reload = React.useCallback(async () => {
-    if (!workspaceId) return
+    // With no workspace (an instance admin need not belong to one) these
+    // server-wide reads go without one; they only wait while it is loading.
+    if (!workspaceId && workspaceLoading) return
     setLoading(true)
     await Promise.all([
       (async () => {
         try {
-          const r = await apiFetch(`/api/v1/system/keeper?${q}`)
+          const r = await apiFetch(withWs("/api/v1/system/keeper", workspaceId))
           setStatus(r.ok ? ((await r.json()) as KeeperStatus) : null)
         } catch {
           setStatus(null)
@@ -41,7 +42,7 @@ export function useSecurity(workspaceId: string | null) {
       })(),
       (async () => {
         try {
-          const r = await apiFetch(`/api/v1/admin/security-posture?${q}`)
+          const r = await apiFetch(withWs("/api/v1/admin/security-posture", workspaceId))
           if (!r.ok) {
             setPostureError(r.status === 403 ? "Requires an instance administrator." : `Server setup could not be read (HTTP ${r.status}).`)
             return
@@ -54,7 +55,7 @@ export function useSecurity(workspaceId: string | null) {
       })(),
     ])
     setLoading(false)
-  }, [workspaceId, q])
+  }, [workspaceId, workspaceLoading])
 
   React.useEffect(() => { void reload() }, [reload])
 

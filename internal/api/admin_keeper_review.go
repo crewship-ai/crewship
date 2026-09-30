@@ -173,7 +173,7 @@ type reviewRunBody struct {
 // Run executes one evaluator now.
 // POST /api/v1/admin/keeper/review/{slot}/run
 func (h *AdminKeeperReviewHandler) Run(w http.ResponseWriter, r *http.Request) {
-	if !canRole(RoleFromContext(r.Context()), "manage") {
+	if !canAdministerInstance(r.Context()) {
 		replyError(w, http.StatusForbidden, "Forbidden")
 		return
 	}

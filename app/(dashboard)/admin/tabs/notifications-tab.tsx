@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button"
 import { SettingsCard, SettingsRow, SettingsSummary, SummaryItem } from "@/components/features/settings/shared"
 import { ProviderMark } from "@/components/features/integrations/provider-marks"
 import { apiFetch } from "@/lib/api-fetch"
+import { withWs, wsParam } from "@/lib/admin-workspace-query"
 
 interface ProviderInfo {
   provider: string
@@ -52,11 +53,10 @@ export function NotificationsTab({ workspaceId }: { workspaceId: string | null }
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
 
   const refresh = useCallback(async () => {
-    if (!workspaceId) return
     setLoading(true)
     setError(null)
     try {
-      const res = await apiFetch(`/api/v1/notification-providers?workspace_id=${workspaceId}`)
+      const res = await apiFetch(withWs("/api/v1/notification-providers", workspaceId))
       if (!res.ok) {
         setError(`HTTP ${res.status}`)
         return
@@ -70,15 +70,20 @@ export function NotificationsTab({ workspaceId }: { workspaceId: string | null }
       setLoading(false)
     }
     // Usage and the email transport are context: a failure leaves them out.
-    try {
-      const res = await apiFetch(`/api/v1/notification-channels?scope=all&workspace_id=${workspaceId}`)
-      const body = res?.ok ? await res.json() : null
-      setChannels(Array.isArray(body?.channels) ? body.channels : null)
-    } catch {
+    // Channels belong to a workspace; with none there is no usage to show.
+    if (workspaceId) {
+      try {
+        const res = await apiFetch(`/api/v1/notification-channels?scope=all&${wsParam(workspaceId)}`)
+        const body = res?.ok ? await res.json() : null
+        setChannels(Array.isArray(body?.channels) ? body.channels : null)
+      } catch {
+        setChannels(null)
+      }
+    } else {
       setChannels(null)
     }
     try {
-      const res = await apiFetch(`/api/v1/admin/security-posture?workspace_id=${workspaceId}`)
+      const res = await apiFetch(withWs("/api/v1/admin/security-posture", workspaceId))
       const body = res?.ok ? await res.json() : null
       setEmailConfigured(typeof body?.email_configured === "boolean" ? body.email_configured : null)
     } catch {
@@ -98,14 +103,13 @@ export function NotificationsTab({ workspaceId }: { workspaceId: string | null }
   }, [channels])
 
   const handleToggle = useCallback(async (provider: string, next: boolean) => {
-    if (!workspaceId) return
     setPending(null)
     setTogglingProvider(provider)
     // Optimistic flip.
     setProviders((prev) => prev.map((p) => (p.provider === provider ? { ...p, enabled: next } : p)))
     try {
       const res = await apiFetch(
-        `/api/v1/notification-providers/${encodeURIComponent(provider)}?workspace_id=${workspaceId}`,
+        withWs(`/api/v1/notification-providers/${encodeURIComponent(provider)}`, workspaceId),
         {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },

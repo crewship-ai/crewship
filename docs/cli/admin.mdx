@@ -557,7 +557,9 @@ these: `CREWSHIP_OWNER_EMAIL` on the server, or anyone named with `add-admin`.
 An install that names nobody names the owners of its oldest workspace once,
 the first time it is asked, and never again. Being ADMIN or OWNER of a
 workspace is not enough. Every action is recorded in the instance audit. The
-last active instance administrator cannot be removed or suspended.
+last active instance administrator cannot be removed or suspended. These
+commands need no workspace selected (`crewship workspace use`): an instance
+administrator may belong to none.
 
 ```bash
 crewship admin instance add-person lucie@acme.example --name "Lucie H" --access acme-ops=MEMBER

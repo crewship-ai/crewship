@@ -20,8 +20,7 @@ func NewAdminHandler(db *sql.DB, logger *slog.Logger) *AdminHandler {
 // Stats returns aggregate counts (workspaces, users, agents, running) for the current workspace.
 // GET /api/v1/admin/stats — requires ADMIN+ (OWNER or ADMIN).
 func (h *AdminHandler) Stats(w http.ResponseWriter, r *http.Request) {
-	role := RoleFromContext(r.Context())
-	if !canRole(role, "manage") {
+	if !canAdministerInstance(r.Context()) {
 		replyError(w, http.StatusForbidden, "Forbidden: ADMIN or OWNER only")
 		return
 	}
@@ -36,9 +35,37 @@ func (h *AdminHandler) Stats(w http.ResponseWriter, r *http.Request) {
 		Running int `json:"running"`
 	}
 
-	// Scope stats to the current workspace to prevent cross-workspace data leakage
+	// Scope stats to the current workspace to prevent cross-workspace data
+	// leakage. An instance admin who names no workspace sees the instance.
 	wsID := WorkspaceIDFromContext(r.Context())
 	var s stats
+	if wsID == "" {
+		for _, q := range []struct {
+			sql  string
+			dest *int
+		}{
+			{"SELECT COUNT(*) FROM workspaces WHERE deleted_at IS NULL", &s.Workspaces},
+			{"SELECT COUNT(*) FROM users", &s.Users},
+			{"SELECT COUNT(*) FROM crews WHERE deleted_at IS NULL", &s.Crews},
+			{"SELECT COUNT(*) FROM agents WHERE deleted_at IS NULL", &s.Agents},
+			{`SELECT COUNT(DISTINCT je1.workspace_id || ':' || je1.trace_id) FROM journal_entries je1
+				WHERE je1.entry_type = 'run.started'
+				AND NOT EXISTS (
+					SELECT 1 FROM journal_entries je2
+					WHERE je2.workspace_id = je1.workspace_id
+					AND je2.trace_id = je1.trace_id
+					AND je2.entry_type IN ('run.completed','run.failed','run.cancelled','run.timeout')
+				)`, &s.Running},
+		} {
+			if err := h.db.QueryRowContext(r.Context(), q.sql).Scan(q.dest); err != nil {
+				h.logger.Error("stats query", "sql", q.sql, "error", err)
+				replyError(w, http.StatusInternalServerError, "Internal server error")
+				return
+			}
+		}
+		writeJSON(w, http.StatusOK, s)
+		return
+	}
 	queries := []struct {
 		sql  string
 		args []any

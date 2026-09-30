@@ -32,6 +32,12 @@ export function PersonProfile({ person, people, workspaces, workspaceId, meId, b
   actions: Actions
   onChanged: () => void
 }) {
+  // Personal data is held per workspace. The admin's own workspace when the
+  // person is in it; otherwise one of theirs — an instance admin need not
+  // belong to any workspace.
+  const [dataWs, setDataWs] = React.useState(() =>
+    person.memberships.some((m) => m.workspace_id === workspaceId) ? workspaceId : (person.memberships[0]?.workspace_id ?? ""))
+
   const name = displayName(person)
   const status = personStatus(person)
   const isMe = person.id === meId
@@ -200,8 +206,15 @@ export function PersonProfile({ person, people, workspaces, workspaceId, meId, b
         </SettingsRow>
       </SettingsCard>
 
-      <SettingsCard icon={Database} tint="var(--info)" title="Personal data" description="Export or erase what this workspace holds about them" padded>
-        <UserDataActions userId={person.id} email={person.email} workspaceId={workspaceId} onErased={onChanged} />
+      <SettingsCard icon={Database} tint="var(--info)" title="Personal data" padded
+        description={dataWs ? `Export or erase what ${workspaces.find((w) => w.id === dataWs)?.name ?? "this workspace"} holds about them` : "They belong to no workspace, so no workspace holds data about them"}>
+        {person.memberships.length > 1 && (
+          <select aria-label="Workspace for personal data" value={dataWs} onChange={(e) => setDataWs(e.target.value)}
+            className="mb-2 h-8 rounded-md border border-control-border bg-surface-subtle px-2 text-xs coarse:h-[2.75rem]">
+            {person.memberships.map((m) => <option key={m.workspace_id} value={m.workspace_id}>{m.name}</option>)}
+          </select>
+        )}
+        {dataWs && <UserDataActions userId={person.id} email={person.email} workspaceId={dataWs} onErased={onChanged} />}
       </SettingsCard>
 
       <SettingsDangerCard icon={AlertTriangle} title="Danger zone" description="Ends this person's access everywhere at once">

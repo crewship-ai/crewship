@@ -53,8 +53,7 @@ func (h *KeeperLogHandler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Require ADMIN+ to view Keeper security logs
-	role := RoleFromContext(r.Context())
-	if !canRole(role, "manage") {
+	if !canAdministerInstance(r.Context()) {
 		replyError(w, http.StatusForbidden, "Forbidden: ADMIN or OWNER only")
 		return
 	}
@@ -168,7 +167,7 @@ func (h *KeeperLogHandler) ListEvents(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusUnauthorized, "Unauthorized")
 		return
 	}
-	if !canRole(RoleFromContext(r.Context()), "manage") {
+	if !canAdministerInstance(r.Context()) {
 		replyError(w, http.StatusForbidden, "Forbidden: ADMIN or OWNER only")
 		return
 	}

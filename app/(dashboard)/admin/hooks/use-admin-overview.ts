@@ -56,9 +56,12 @@ export function useAdminOverview(workspaceId: string | null, enabled: boolean): 
   const generation = useRef(0)
 
   const load = useCallback(() => {
-    if (!workspaceId || !enabled) return
+    if (!enabled) return
     const gen = ++generation.current
-    const ws = encodeURIComponent(workspaceId)
+    // An instance admin need not belong to a workspace: the instance-wide
+    // cards load without one, and the ones about a workspace settle empty.
+    const ws = workspaceId ? encodeURIComponent(workspaceId) : ""
+    const q = ws ? `?workspace_id=${ws}` : ""
     const put = (key: Key, value: unknown) => {
       if (gen !== generation.current) return
       setData((d) => ({ ...d, [key]: value ?? d[key], settled: { ...d.settled, [key]: true } }))
@@ -73,19 +76,25 @@ export function useAdminOverview(workspaceId: string | null, enabled: boolean): 
     }
     const cheap = [
       read("version", "/api/v1/system/version"),
-      read("health", `/api/v1/admin/health?workspace_id=${ws}`),
-      read("license", `/api/v1/system/license?workspace_id=${ws}`),
+      read("health", `/api/v1/admin/health${q}`),
+      read("license", `/api/v1/system/license${q}`),
       read("telemetry", "/api/v1/system/telemetry"),
-      read("posture", `/api/v1/admin/security-posture?workspace_id=${ws}`),
-      read("daemon", `/api/v1/crewshipd?workspace_id=${ws}`),
-      read("aux", `/api/v1/system/aux-status?workspace_id=${ws}`),
-      read("agents", `/api/v1/agents/crews-status?workspace_id=${ws}`),
-      read("keeperHealth", `/api/v1/admin/keeper/health?workspace_id=${ws}`),
-      read("runs", `/api/v1/metrics/timeseries?workspace_id=${ws}&metric=runs_count&window=7d&bucket=1d`, series),
-      read("cost", `/api/v1/metrics/timeseries?workspace_id=${ws}&metric=cost_usd&window=7d&bucket=1d`, series),
+      read("posture", `/api/v1/admin/security-posture${q}`),
+      read("aux", `/api/v1/system/aux-status${q}`),
     ]
+    if (!ws) {
+      for (const key of ["daemon", "agents", "keeperHealth", "runs", "cost", "journal"] as Key[]) put(key, null)
+      return
+    }
+    cheap.push(
+      read("daemon", `/api/v1/crewshipd${q}`),
+      read("agents", `/api/v1/agents/crews-status${q}`),
+      read("keeperHealth", `/api/v1/admin/keeper/health${q}`),
+      read("runs", `/api/v1/metrics/timeseries${q}&metric=runs_count&window=7d&bucket=1d`, series),
+      read("cost", `/api/v1/metrics/timeseries${q}&metric=cost_usd&window=7d&bucket=1d`, series),
+    )
     // The chain walk is the one expensive read; start it after the rest.
-    void Promise.allSettled(cheap).then(() => read("journal", `/api/v1/admin/journal/verify?workspace_id=${ws}`))
+    void Promise.allSettled(cheap).then(() => read("journal", `/api/v1/admin/journal/verify${q}`))
   }, [workspaceId, enabled])
 
   useEffect(() => { load() }, [load])

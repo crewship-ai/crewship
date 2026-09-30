@@ -973,7 +973,7 @@ func collectAPIRoutes(t *testing.T) map[string]apiRoute {
 			}
 			pos := fset.Position(call.Pos())
 			switch sel.Sel.Name {
-			case "authedMut", "authedAdmin", "authedSelfMut", "authedAdminMut", "authedAdminPeople", "authedInstance", "authedInstanceMut":
+			case "authedMut", "authedAdmin", "authedSelfMut", "authedAdminMut", "authedAdminPeople", "authedAdminWrite", "authedAdminAny", "authedInstance", "authedInstanceMut":
 				if len(call.Args) < 2 {
 					return true
 				}

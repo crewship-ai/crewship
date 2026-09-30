@@ -4,6 +4,7 @@ import * as React from "react"
 import { Bell, BookOpen, Brain, Building2, Clock, Eye, Gavel, Grid3x3, Home, KeyRound, ListChecks, RefreshCw, Shield, Sparkles, Timer, type LucideIcon } from "lucide-react"
 
 import { cn } from "@/lib/utils"
+import { INSTANCE_SCOPE } from "@/lib/admin-api"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -67,8 +68,11 @@ function writeUrl(s: UrlState) {
  * The instance settings cards are the existing ones, unchanged.
  */
 export function SecurityPage() {
-  const { workspaceId } = useWorkspace()
-  const data = useSecurity(workspaceId)
+  const { workspaceId, loading: workspaceLoading } = useWorkspace()
+  const data = useSecurity(workspaceId, workspaceLoading)
+  // The instance-wide cards need no workspace: an instance admin who belongs
+  // to none uses them with INSTANCE_SCOPE; null still means "not known yet".
+  const cardWs = workspaceId ?? (workspaceLoading ? null : INSTANCE_SCOPE)
   const [state, setState] = React.useState(readUrl)
   const { section, stream } = state
   const update = (next: Partial<UrlState>) => setState((prev) => {
@@ -240,9 +244,9 @@ export function SecurityPage() {
           </SummaryItem>
           <SummaryItem>{settings.about}</SummaryItem>
         </SettingsSummary>
-        {section === "judge" && workspaceId && <KeeperJudgeCard workspaceId={workspaceId} />}
-        {section === "rules" && workspaceId && <KeeperProfileCard workspaceId={workspaceId} />}
-        {section === "background" && workspaceId && <JudgeModelsCard workspaceId={workspaceId} />}
+        {section === "judge" && cardWs && <KeeperJudgeCard workspaceId={cardWs} />}
+        {section === "rules" && cardWs && <KeeperProfileCard workspaceId={cardWs} />}
+        {section === "background" && cardWs && <JudgeModelsCard workspaceId={cardWs} />}
         {section === "defaults" && inst.gov && <DefaultsForm current={inst.gov.defaults} onSaved={() => void inst.reloadGov()} />}
         {bulk && rows.length === 0 && <p className="text-[13px] text-muted-foreground">Tick one or more workspaces in the panel.</p>}
         {bulk && instanceProp && (

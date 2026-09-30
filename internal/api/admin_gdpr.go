@@ -246,7 +246,7 @@ func (h *AdminGDPRHandler) adminContext(w http.ResponseWriter, r *http.Request) 
 	}
 	// canRole("manage") admits OWNER and ADMIN — see helpers.go
 	// for the role tier table. MANAGER and below get 403.
-	if !canRole(RoleFromContext(r.Context()), "manage") {
+	if !canAdministerInstance(r.Context()) {
 		replyError(w, http.StatusForbidden, "Forbidden: ADMIN+ only")
 		return "", "", "", false
 	}

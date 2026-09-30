@@ -98,7 +98,7 @@ the credential lease and the judge. "default" means the workspace has never
 been set and follows the instance defaults (the last save for all).`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, _ []string) error {
-		client, err := requireAuthAndWorkspace()
+		client, err := requireAuthInstance()
 		if err != nil {
 			return err
 		}
@@ -161,7 +161,7 @@ existing workspace; it does not change what a new workspace starts with (see
 more than one.`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, _ []string) error {
-		client, err := requireAuthAndWorkspace()
+		client, err := requireAuthInstance()
 		if err != nil {
 			return err
 		}
@@ -345,7 +345,7 @@ behavior, skill_review, memory_health, negative_learning), --decision to
 ALLOW, DENY, ESCALATE or PENDING.`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, _ []string) error {
-		client, err := requireAuthAndWorkspace()
+		client, err := requireAuthInstance()
 		if err != nil {
 			return err
 		}
@@ -415,7 +415,7 @@ p95 latency, and any standing alarm. Below the sample minimum there is too
 little to judge, which is not the same as healthy.`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, _ []string) error {
-		client, err := requireAuthAndWorkspace()
+		client, err := requireAuthInstance()
 		if err != nil {
 			return err
 		}
@@ -467,7 +467,7 @@ template; with them it shows the change and asks (--yes skips the question,
 --contact and --gov-credential belong to one workspace and are refused.`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, _ []string) error {
-		client, err := requireAuthAndWorkspace()
+		client, err := requireAuthInstance()
 		if err != nil {
 			return err
 		}

@@ -129,7 +129,7 @@ const readRouteWrapperLookahead = 4
 // registrationStart matches the beginning of ANY route registration, not just a
 // read one. It bounds the lookahead window: whatever follows belongs to the next
 // route, so it must not be read as this route's wrapper.
-var registrationStart = regexp.MustCompile(`^\s*r\.(mux\.Handle|mux\.HandleFunc|authedMut|authedSelfMut|authedInstance|authedInstanceMut|authedAdminPeople|authedAdminMut)\(`)
+var registrationStart = regexp.MustCompile(`^\s*r\.(mux\.Handle|mux\.HandleFunc|authedMut|authedSelfMut|authedInstance|authedInstanceMut|authedAdminPeople|authedAdminWrite|authedAdminAny|authedAdminMut)\(`)
 
 // readRoutesWithoutWorkspace are the read routes that legitimately carry no
 // workspace dimension. Each entry needs a reason a reviewer can check — "it is
@@ -140,6 +140,7 @@ var registrationStart = regexp.MustCompile(`^\s*r\.(mux\.Handle|mux\.HandleFunc|
 // roleInline equivalent), say so explicitly in the reason, because that shifts
 // the guarantee off the chokepoint and onto that handler forever.
 var readRoutesWithoutWorkspace = map[string]string{
+	"GET /api/v1/notification-providers":          "the instance's provider registry (which shoutrrr providers exist and which an instance admin enabled), no workspace rows; a member reads it inside their workspace, an instance admin may read it with none (RequireWorkspaceOrInstanceAdmin, optional)",
 	"GET /api/v1/shared-chats/{shareId}/messages": "dedicated share bearer authenticates one live direct agent chat; the handler validates its bound workspace, agent, chat, issuer and expiry on each request and projects text only",
 	"GET /api/v1/pages/runtime/bootstrap":         "public constant HTML bootstrap; reads no database, source, artifact or user data; accepts only the configured runtime Host",
 	// Pre-auth / bootstrap. These run before a session exists, so there is no

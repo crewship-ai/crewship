@@ -30,7 +30,7 @@ func (r *Router) registerAdminRoutes() {
 
 	// Admin
 	admin := NewAdminHandler(r.db, r.logger)
-	r.authedAdmin("GET", "/api/v1/admin/stats", admin.Stats)
+	r.authedAdminAny("GET", "/api/v1/admin/stats", admin.Stats)
 	r.authedAdminPeople("GET", "/api/v1/admin/users", admin.ListUsers)
 	r.authedAdminPeople("GET", "/api/v1/admin/workspaces", admin.ListWorkspaces)
 
@@ -152,9 +152,9 @@ func (r *Router) registerAdminRoutes() {
 
 	// Admin observability: runtime log-level toggle + disk/health read.
 	obs := NewAdminObservabilityHandler(r.db, r.logger)
-	r.authedAdmin("GET", "/api/v1/admin/log-level", obs.GetLogLevel)
+	r.authedAdminAny("GET", "/api/v1/admin/log-level", obs.GetLogLevel)
 	r.authedInstanceMut("PUT", "/api/v1/admin/log-level", obs.SetLogLevel)
-	r.authedAdmin("GET", "/api/v1/admin/health", obs.Health)
+	r.authedAdminAny("GET", "/api/v1/admin/health", obs.Health)
 
 	// Master-key re-encryption (E1). Instance-wide walk of every stored
 	// AES-256-GCM envelope, re-encrypted to the current key version — the
@@ -186,7 +186,7 @@ func (r *Router) registerAdminRoutes() {
 	// signup open? is the limiter off?" without shell access to the box.
 	// Booleans only; no secret value is ever serialized.
 	posture := NewSecurityPostureHandler(r.allowSignup, r.googleClientID != "" && r.googleSecret != "", r.db, r.logger)
-	r.authedAdmin("GET", "/api/v1/admin/security-posture", posture.Get)
+	r.authedAdminAny("GET", "/api/v1/admin/security-posture", posture.Get)
 
 	// Runtime rate-limiter tuning (#1505 follow-up). Read ADMIN+, write
 	// OWNER/ADMIN. Lists every tunable limiter with its current value; an
@@ -194,7 +194,7 @@ func (r *Router) registerAdminRoutes() {
 	// buckets retune live, the rest read their value on next use). Replaces
 	// the removed "Rate Limits" placeholder tab with a real backend.
 	rateLimits := NewAdminRateLimitsHandler(r.ratelimitStore, r.logger)
-	r.authedAdmin("GET", "/api/v1/admin/rate-limits", rateLimits.List)
+	r.authedAdminAny("GET", "/api/v1/admin/rate-limits", rateLimits.List)
 	r.authedInstanceMut("PUT", "/api/v1/admin/rate-limits/{key}", rateLimits.Set)
 	r.authedInstanceMut("DELETE", "/api/v1/admin/rate-limits/{key}", rateLimits.Reset)
 
@@ -207,7 +207,7 @@ func (r *Router) registerAdminRoutes() {
 	// A change takes effect on the next credential request; no restart.
 	keeperCfg := NewAdminKeeperConfigHandler(r.keeperSettings, r.Journal(), r.logger)
 	r.authedAdmin("GET", "/api/v1/admin/keeper/health", NewAdminKeeperHealthHandler(r.logger).Get)
-	r.authedAdmin("GET", "/api/v1/admin/keeper/config", keeperCfg.Get)
+	r.authedAdminAny("GET", "/api/v1/admin/keeper/config", keeperCfg.Get)
 	r.authedInstanceMut("PUT", "/api/v1/admin/keeper/config", keeperCfg.Put)
 	r.authedInstanceMut("DELETE", "/api/v1/admin/keeper/config", keeperCfg.Reset)
 
@@ -218,7 +218,7 @@ func (r *Router) registerAdminRoutes() {
 	// though one of them only returns a model list.
 	keeperJudge := NewAdminKeeperJudgeHandler(r.keeperSettings, r.logger).WithGovJudge(r.govModelJudge)
 	r.authedInstanceMut("POST", "/api/v1/admin/keeper/judge/test", keeperJudge.Test)
-	r.authedAdmin("GET", "/api/v1/admin/keeper/judge/models", keeperJudge.Models)
+	r.authedAdminAny("GET", "/api/v1/admin/keeper/judge/models", keeperJudge.Models)
 	// The same check for a HOSTED judge (Anthropic / OpenAI-compatible built from
 	// a vault key). Separate route rather than a mode flag on /test: the stages
 	// differ because the failure modes do — there is no endpoint to reach and no
@@ -235,7 +235,7 @@ func (r *Router) registerAdminRoutes() {
 		// Which vault key each evaluator spends (#1554), validated against the
 		// caller's own workspace before it is stored.
 		WithCredentials(newAuxCredentialCheck(r.db))
-	r.authedAdmin("GET", "/api/v1/admin/keeper/aux", keeperAux.Get)
+	r.authedAdminAny("GET", "/api/v1/admin/keeper/aux", keeperAux.Get)
 	r.authedInstanceMut("PUT", "/api/v1/admin/keeper/aux/{slot}", keeperAux.Put)
 	r.authedInstanceMut("DELETE", "/api/v1/admin/keeper/aux/{slot}", keeperAux.Reset)
 	// The collection-scoped DELETE is "reset every slot"; {slot} is empty there,
@@ -256,13 +256,13 @@ func (r *Router) registerAdminRoutes() {
 	// routes do, so a manual run writes the same audit row a scheduled one
 	// does. OWNER/ADMIN: it spends model tokens and can escalate to the inbox.
 	keeperReview := NewAdminKeeperReviewHandler(r.db, r.keeperPhase2Handler(), r.logger)
-	r.authedMut("POST", "/api/v1/admin/keeper/review/{slot}/run", roleManage, keeperReview.Run)
+	r.authedAdminWrite("POST", "/api/v1/admin/keeper/review/{slot}/run", keeperReview.Run)
 
 	// Keeper watchdog governance (issue #1001 M0): workspace toggle, named
 	// security contact, DENY-notify threshold. Read ADMIN+, write OWNER/ADMIN.
 	keeperGov := NewKeeperGovernanceHandler(r.db, r.logger, r.Journal())
 	r.authedAdmin("GET", "/api/v1/admin/keeper/governance", keeperGov.Get)
-	r.authedMut("PUT", "/api/v1/admin/keeper/governance", roleManage, keeperGov.Put)
+	r.authedAdminWrite("PUT", "/api/v1/admin/keeper/governance", keeperGov.Put)
 
 	// Findings routing check. Sends ONE synthetic finding through the real inbox
 	// writer with real target resolution and returns who it reached. Whether a
@@ -276,7 +276,7 @@ func (r *Router) registerAdminRoutes() {
 		keeperBcast = &keeperWSBroadcaster{hub: r.hub}
 	}
 	keeperFindings := NewAdminKeeperFindingsHandler(r.db, r.Journal(), keeperBcast, r.logger)
-	r.authedMut("POST", "/api/v1/admin/keeper/findings/test", roleManage, keeperFindings.SendTest)
+	r.authedAdminWrite("POST", "/api/v1/admin/keeper/findings/test", keeperFindings.SendTest)
 
 	// PR-F F6: Admin GDPR cascade endpoints — Art. 15 access +
 	// Art. 17 erasure across the four cascadable tables
@@ -290,7 +290,7 @@ func (r *Router) registerAdminRoutes() {
 	gdprH := NewAdminGDPRHandler(r.db, r.logger, r.outputBasePath)
 	gdprH.SetJournal(r.Journal())
 	r.authedAdmin("GET", "/api/v1/admin/users/{userId}/data", gdprH.ExportUserData)
-	r.authedMut("DELETE", "/api/v1/admin/users/{userId}/data", roleManage, gdprH.DeleteUserData)
+	r.authedAdminWrite("DELETE", "/api/v1/admin/users/{userId}/data", gdprH.DeleteUserData)
 
 	// Memory stats — operator observability for the memory subsystem.
 	// Reads memory_versions directly; the audit watcher (Iter 1 of
@@ -331,7 +331,7 @@ func (r *Router) registerAdminRoutes() {
 	memCfg := NewMemoryConfigHandler(r.db, r.logger)
 	memCfg.SetJournal(r.Journal())
 	r.authedAdmin("GET", "/api/v1/admin/memory/config", memCfg.Get)
-	r.authedMut("PATCH", "/api/v1/admin/memory/config", roleManage, memCfg.Patch)
+	r.authedAdminWrite("PATCH", "/api/v1/admin/memory/config", memCfg.Patch)
 
 	// Manual runs of the two daily memory sweeps (#1702). The operator-model
 	// sweep fires at 05:00 UTC and the peer-card sweep at 04:00, and until
@@ -487,7 +487,7 @@ func (r *Router) registerAdminRoutes() {
 		}
 	}
 	legacyH := NewLegacyResourceHandler(r.db, r.logger, legacyPruner, legacyDetector)
-	r.authedAdmin("GET", "/api/v1/admin/legacy-resources", legacyH.Detect)
+	r.authedAdminAny("GET", "/api/v1/admin/legacy-resources", legacyH.Detect)
 	r.authedInstanceMut("POST", "/api/v1/admin/prune-legacy-resources", legacyH.Prune)
 
 	// Crew runtime teardown (admin-only). Removes the LIVE id-scoped docker
@@ -502,7 +502,7 @@ func (r *Router) registerAdminRoutes() {
 		}
 	}
 	crewRuntimeH := NewCrewRuntimeHandler(r.db, r.logger, runtimePruner)
-	r.authedMut("POST", "/api/v1/admin/prune-crew-runtimes", roleManage, crewRuntimeH.Prune)
+	r.authedAdminWrite("POST", "/api/v1/admin/prune-crew-runtimes", crewRuntimeH.Prune)
 
 	// #1385: reap crew containers orphaned by an internal-token master rotation
 	// across a restart — they hold a crew-bound token the new process rejects
@@ -511,5 +511,5 @@ func (r *Router) registerAdminRoutes() {
 	// them so the next dispatch re-mints a valid token. Nil provider (non-docker)
 	// or a provider without crew-container lookup → handler 503s.
 	orphanH := NewOrphanContainerHandler(r.db, r.logger, r.keeperContainer, r.internalToken)
-	r.authedMut("POST", "/api/v1/admin/reap-orphan-containers", roleManage, orphanH.Reap)
+	r.authedAdminWrite("POST", "/api/v1/admin/reap-orphan-containers", orphanH.Reap)
 }

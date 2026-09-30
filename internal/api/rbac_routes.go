@@ -278,19 +278,40 @@ type adminRoute struct {
 }
 
 // authedAdmin registers an admin-console READ route behind the ADMIN+ floor
-// (#865). The admin surface exposes cross-user / cross-workspace operational
-// data (stats, user/workspace listings, keeper audit, backups, memory
-// versions); before this it registered as authed(wsCtx(...)) with no role, so
-// any workspace MEMBER could read it while the destructive mutations behind
-// the same console were already ADMIN+. authedAdmin gates the reads at
-// roleManage (OWNER/ADMIN) from the registration — reusing the mutation
-// chokepoint (requireRoleScopeMW) with scopeSelf, since reads are not
-// scope-gated — and records the route so the floor invariant can enumerate it
-// and a forgotten gate is a build failure, not a review catch.
+// (#865): OWNER/ADMIN of the workspace, or an instance administrator — who may
+// leave the workspace out or name one they are not a member of
+// (RequireWorkspaceOrInstanceAdmin). Recorded so the floor invariant can
+// enumerate it and a forgotten gate is a build failure, not a review catch.
 func (r *Router) authedAdmin(method, pattern string, h http.HandlerFunc) {
 	r.adminRoutes = append(r.adminRoutes, adminRoute{Method: method, Pattern: pattern})
 	r.mux.Handle(method+" "+pattern,
-		r.authMw.RequireAuth(r.authMw.RequireWorkspace(r.requireAdminFloorMW(scopeSelf, h))))
+		r.authMw.RequireAuth(r.adminWorkspace(false, r.requireAdminFloorMW(scopeSelf, h))))
+}
+
+// authedAdminAny is authedAdmin for an instance-wide read (health, log level,
+// rate limits, posture, the Keeper judge, stats): an instance admin may also
+// name no workspace at all and gets the instance's answer.
+func (r *Router) authedAdminAny(method, pattern string, h http.HandlerFunc) {
+	r.adminRoutes = append(r.adminRoutes, adminRoute{Method: method, Pattern: pattern})
+	r.mux.Handle(method+" "+pattern,
+		r.authMw.RequireAuth(r.adminWorkspace(true, r.requireAdminFloorMW(scopeSelf, h))))
+}
+
+// authedAdminWrite is authedAdmin for a change to one workspace's settings
+// (Keeper governance, memory retention, a review run, a runtime prune): the
+// same floor, recorded as roleManage like the authedMut it replaces, so an
+// instance admin reaches a workspace they are not a member of.
+func (r *Router) authedAdminWrite(method, pattern string, h http.HandlerFunc) {
+	scope := scopeForRoute(pattern)
+	r.recordMut(method, pattern, roleManage, scope)
+	r.mux.Handle(method+" "+pattern,
+		r.authMw.RequireAuth(r.adminWorkspace(false, r.requireAdminFloorMW(scope, h))))
+}
+
+// adminWorkspace is RequireWorkspaceOrInstanceAdmin with this router's
+// instance-admin rule.
+func (r *Router) adminWorkspace(optional bool, next http.Handler) http.Handler {
+	return r.authMw.RequireWorkspaceOrInstanceAdmin(func(req *http.Request) bool { return isInstanceAdmin(req, r.db) }, optional, next)
 }
 
 // authedAdminPeople registers the People & workspaces reads and actions: the
@@ -307,24 +328,7 @@ func (r *Router) authedAdminPeople(method, pattern string, h http.HandlerFunc) {
 		r.recordMut(method, pattern, roleManage, scope)
 	}
 	r.mux.Handle(method+" "+pattern,
-		r.authMw.RequireAuth(r.workspaceOrInstanceAdmin(r.requireAdminFloorMW(scope, h))))
-}
-
-// workspaceOrInstanceAdmin is RequireWorkspace, except that a request naming
-// no workspace at all goes on without one when the caller is an instance
-// admin. A request that names a workspace is resolved exactly as before.
-func (r *Router) workspaceOrInstanceAdmin(next http.Handler) http.Handler {
-	withWorkspace := r.authMw.RequireWorkspace(next)
-	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		// The People routes carry no {workspaceId} in the path, so the query
-		// and the header are the only ways a request names one.
-		named := req.URL.Query().Get("workspace_id") != "" || req.Header.Get("X-Workspace-ID") != ""
-		if !named && isInstanceAdmin(req, r.db) {
-			next.ServeHTTP(w, req.WithContext(context.WithValue(req.Context(), ctxInstanceAdmin, true)))
-			return
-		}
-		withWorkspace.ServeHTTP(w, req)
-	})
+		r.authMw.RequireAuth(r.adminWorkspace(true, r.requireAdminFloorMW(scope, h))))
 }
 
 // requireAdminFloorMW is the admin console's floor: OWNER/ADMIN of the

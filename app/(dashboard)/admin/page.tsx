@@ -10,6 +10,7 @@ import { useWorkspace } from "@/hooks/use-workspace"
 import { useIsInstanceAdmin } from "@/hooks/use-auth"
 import { cn } from "@/lib/utils"
 import { apiFetch } from "@/lib/api-fetch"
+import { withWs } from "@/lib/admin-workspace-query"
 import { SubBar } from "@/components/layout/sub-bar"
 import { Button } from "@/components/ui/button"
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet"
@@ -128,7 +129,7 @@ export default function AdminPage() {
       // Pass workspace_id so the backend resolves this caller as ADMIN+ and
       // returns full host detail (versions/sockets) rather than the redacted
       // availability-only shape non-admin surfaces get (#865).
-      const res = await apiFetch(`/api/v1/system/runtime?workspace_id=${workspaceId}`)
+      const res = await apiFetch(withWs("/api/v1/system/runtime", workspaceId))
       if (!res.ok) {
         setRuntimeAvailable(false)
         return
@@ -176,7 +177,8 @@ export default function AdminPage() {
   // callback being recreated, which a local no longer does.
   const fetchGeneration = useRef(0)
   const fetchData = useCallback(async () => {
-    if (!workspaceId || !isAdmin) return
+    // An instance admin with no workspace gets the instance's figures.
+    if (!isAdmin) return
     const generation = ++fetchGeneration.current
     const isStale = () => generation !== fetchGeneration.current
     {
@@ -184,7 +186,7 @@ export default function AdminPage() {
       try {
         // People and workspaces load on their own page (/admin/people); the
         // console itself needs only the figures the Overview reads.
-        const statsRes = await apiFetch(`/api/v1/admin/stats?workspace_id=${workspaceId}`)
+        const statsRes = await apiFetch(withWs("/api/v1/admin/stats", workspaceId))
         if (isStale()) return
         // A failure is visible, not a silently empty card — the honesty pass (#868).
         setFetchError(statsRes.ok ? null
@@ -206,7 +208,7 @@ export default function AdminPage() {
   // lives on its own page now (/admin/security).
   const fetchKeeperData = useCallback(async () => {
     try {
-      const statusRes = await apiFetch(`/api/v1/system/keeper?workspace_id=${workspaceId}`)
+      const statusRes = await apiFetch(withWs("/api/v1/system/keeper", workspaceId))
       if (statusRes.ok) setKeeperStatus(await statusRes.json())
     } catch {
       // The Overview line then reads "unknown", which is what it is.

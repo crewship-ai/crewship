@@ -149,8 +149,10 @@ export function PeoplePage() {
     body = <div className="space-y-3"><Skeleton className="h-8 rounded-lg" /><Skeleton className="h-[320px] rounded-card" /></div>
   } else if (error) {
     body = <p role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">{error} <button type="button" className="underline" onClick={() => void reload()}>Retry</button></p>
-  } else if (person && workspaceId) {
-    body = <>{crumb(displayName(person))}<PersonProfile person={person} people={people} workspaces={workspaces} workspaceId={workspaceId} meId={session?.user.id} busy={busy} actions={actions} onChanged={() => void reload()} /></>
+  } else if (person) {
+    // An instance admin may belong to no workspace: the profile opens all the
+    // same, and what is per workspace picks one of the person's (below).
+    body = <>{crumb(displayName(person))}<PersonProfile person={person} people={people} workspaces={workspaces} workspaceId={workspaceId ?? ""} meId={session?.user.id} busy={busy} actions={actions} onChanged={() => void reload()} /></>
   } else if (ws) {
     body = <>{crumb(ws.name)}<WorkspaceProfile ws={ws} people={people} busy={busy} actions={actions} onDeleted={() => showView("workspaces")} /></>
   } else if (view === "workspaces") {

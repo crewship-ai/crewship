@@ -5,7 +5,8 @@ import { RefreshCw } from "lucide-react"
 import { toast } from "sonner"
 
 import { apiFetch } from "@/lib/api-fetch"
-import { adminFetch } from "@/lib/admin-api"
+import { withWs } from "@/lib/admin-workspace-query"
+import { adminFetch, realWorkspace } from "@/lib/admin-api"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
@@ -166,7 +167,9 @@ export function JudgeModelsCard({ workspaceId }: { workspaceId: string | null })
   // Which stored keys a slot may be pointed at (#1554). Same hook the governance
   // model's picker uses, so the two surfaces cannot disagree about what the
   // workspace holds — the list is filtered narrower here (see AUX_CREDENTIAL_TYPE).
-  const { credentials } = useCredentials(workspaceId ?? undefined)
+  // Vault credentials live in a workspace; an instance admin with none picks
+  // no key here (the instance's own endpoint still works).
+  const { credentials } = useCredentials(realWorkspace(workspaceId) ?? undefined)
   // The hook assigns whatever the endpoint returned without checking its shape,
   // so a non-array body would take this whole card down — and this card's job is
   // to REPORT breakage, not to become it.
@@ -177,7 +180,7 @@ export function JudgeModelsCard({ workspaceId }: { workspaceId: string | null })
   const load = useCallback(async () => {
     if (!workspaceId) return
     try {
-      const res = await apiFetch(`/api/v1/system/aux-status?workspace_id=${encodeURIComponent(workspaceId)}`)
+      const res = await apiFetch(withWs("/api/v1/system/aux-status", workspaceId))
       if (!res.ok) throw new Error(String(res.status))
       const data = await res.json()
       setRows(Array.isArray(data?.subsystems) ? data.subsystems : [])
@@ -586,14 +589,17 @@ function SlotEditor({
   const [catalogueError, setCatalogueError] = useState<string | null>(null)
   const provider = slot.provider.value
   useEffect(() => {
-    if (!workspaceId || !provider) { setCatalogue([]); return }
+    // The hosted catalogue is read per workspace; the Ollama list is the
+    // instance's own and needs none.
+    const ws = realWorkspace(workspaceId)
+    if (!workspaceId || !provider || (provider !== "ollama" && !ws)) { setCatalogue([]); return }
     const controller = new AbortController()
     void (async () => {
       try {
         const res = provider === "ollama"
           ? await adminFetch("/api/v1/admin/keeper/judge/models", workspaceId, { signal: controller.signal })
           : await apiFetch(
-              `/api/v1/models?provider=${encodeURIComponent(provider.toUpperCase())}&workspace_id=${encodeURIComponent(workspaceId)}`,
+              `/api/v1/models?provider=${encodeURIComponent(provider.toUpperCase())}&workspace_id=${encodeURIComponent(ws ?? "")}`,
               { signal: controller.signal },
             )
         const body = await res.json().catch(() => ({}))

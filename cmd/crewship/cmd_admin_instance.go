@@ -111,7 +111,7 @@ MANAGER, MEMBER or VIEWER). No email is sent: pass the printed setup link on
 yourself. It is valid for 7 days, and the person chooses their own password.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		client, err := requireAuthAndWorkspace()
+		client, err := requireAuthInstance()
 		if err != nil {
 			return err
 		}
@@ -150,7 +150,7 @@ with --role (default MEMBER), or changes the role they have. OWNER is allowed;
 the last owner of a workspace cannot be moved down — use 'transfer'.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		client, err := requireAuthAndWorkspace()
+		client, err := requireAuthInstance()
 		if err != nil {
 			return err
 		}
@@ -189,7 +189,7 @@ move first, exactly as when a workspace admin removes them. The last owner
 stays — use 'transfer' first.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		client, err := requireAuthAndWorkspace()
+		client, err := requireAuthInstance()
 		if err != nil {
 			return err
 		}
@@ -217,7 +217,7 @@ var adminInstanceCreateWorkspaceCmd = &cobra.Command{
 owned by --owner. You are not added to it.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		client, err := requireAuthAndWorkspace()
+		client, err := requireAuthInstance()
 		if err != nil {
 			return err
 		}
@@ -253,7 +253,7 @@ must already be a member ('grant' them first); every previous owner stays on
 as ADMIN.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		client, err := requireAuthAndWorkspace()
+		client, err := requireAuthInstance()
 		if err != nil {
 			return err
 		}
@@ -286,7 +286,7 @@ Crews and agents are removed with it; the instance audit keeps the record.`,
 		if confirm != args[0] {
 			return cli.WithExitCode(errors.New("--confirm must repeat the workspace slug"), cli.ExitValidation)
 		}
-		client, err := requireAuthAndWorkspace()
+		client, err := requireAuthInstance()
 		if err != nil {
 			return err
 		}
@@ -314,7 +314,7 @@ var adminInstanceSuspendCmd = &cobra.Command{
 ends; the account cannot sign in until 'reactivate'. Workspace access is kept.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		client, err := requireAuthAndWorkspace()
+		client, err := requireAuthInstance()
 		if err != nil {
 			return err
 		}
@@ -342,7 +342,7 @@ var adminInstanceReactivateCmd = &cobra.Command{
 	Long:  `POST /api/v1/admin/instance/people/{user}/reactivate. The person signs in again; ended sessions stay ended.`,
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		client, err := requireAuthAndWorkspace()
+		client, err := requireAuthInstance()
 		if err != nil {
 			return err
 		}
@@ -366,7 +366,7 @@ voids the previous one. --revoke voids the pending link instead (DELETE). An
 account somebody already signs in to gets no link: they reset their own password.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		client, err := requireAuthAndWorkspace()
+		client, err := requireAuthInstance()
 		if err != nil {
 			return err
 		}
@@ -409,7 +409,7 @@ nobody who could do it can sign in.`,
 		if local, _ := cmd.Flags().GetBool("local"); local {
 			return addInstanceAdminLocal(cmd, args[0])
 		}
-		client, err := requireAuthAndWorkspace()
+		client, err := requireAuthInstance()
 		if err != nil {
 			return err
 		}
@@ -453,7 +453,7 @@ var adminInstanceRemoveAdminCmd = &cobra.Command{
 CREWSHIP_OWNER_EMAIL is changed in the server's environment, not here.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		client, err := requireAuthAndWorkspace()
+		client, err := requireAuthInstance()
 		if err != nil {
 			return err
 		}
@@ -489,7 +489,7 @@ created, handed over and deleted. --for narrows it to one person (email) or
 workspace (slug).`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, _ []string) error {
-		client, err := requireAuthAndWorkspace()
+		client, err := requireAuthInstance()
 		if err != nil {
 			return err
 		}

@@ -358,7 +358,23 @@ the audit entry cannot be written, the change is undone and the route answers
 `500`.
 
 An instance administrator also passes the ADMIN floor of every other
-`/api/v1/admin/` route, and `GET /api/v1/admin/users` and
+`/api/v1/admin/` route, and need not belong to any workspace: on those routes
+they may name any live workspace in `workspace_id`, member or not (an unknown
+one is `404`), and the instance-wide reads — `GET /api/v1/admin/stats`,
+`/admin/health`, `/admin/log-level`, `/admin/rate-limits`,
+`/admin/security-posture`, `/admin/keeper/config`, `/admin/keeper/aux`,
+`/admin/keeper/judge/models`, `/admin/legacy-resources`,
+`/api/v1/system/keeper`, `/api/v1/system/aux-status` and
+`/api/v1/notification-providers` — also answer with no workspace at all, for
+the whole instance. A route about one workspace's data answers an instance
+administrator who names none with `400` ("choose a workspace"). The instance
+settings writes (log level, rate limits, Keeper judge, providers) need no
+workspace either. Everyone else keeps the workspace rules: `400` without a
+workspace, `403` outside theirs.
+
+`GET /api/v1/admin/stats` without a workspace counts the whole instance.
+
+Also, and `GET /api/v1/admin/users` and
 `GET /api/v1/admin/workspaces` answer for the whole instance
 (`X-Admin-Scope: instance`). Those two, and a person's sessions, unlock and
 sign-out routes, also answer an instance administrator who names no

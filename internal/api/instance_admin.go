@@ -245,6 +245,18 @@ func (r *Router) requireInstanceAdminMW(h http.HandlerFunc) http.Handler {
 
 type instanceAdminKey struct{}
 
+// markInstanceAdmin stamps ctxInstanceAdmin on a request from an instance
+// administrator and lets every request through: for a route open to anyone
+// that shows more to an admin (GET /system/runtime's host detail).
+func (r *Router) markInstanceAdmin(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if isInstanceAdmin(req, r.db) {
+			req = req.WithContext(context.WithValue(req.Context(), ctxInstanceAdmin, true))
+		}
+		next.ServeHTTP(w, req)
+	})
+}
+
 // ctxInstanceAdmin marks a request the instance gate has already cleared.
 var ctxInstanceAdmin = instanceAdminKey{}
 
@@ -283,7 +295,7 @@ func (r *Router) authedInstance(method, pattern string, h http.HandlerFunc) {
 func (r *Router) authedInstanceMut(method, pattern string, h http.HandlerFunc) {
 	r.recordInstance(method, pattern)
 	r.mux.Handle(method+" "+pattern,
-		r.authMw.RequireAuth(r.authMw.RequireWorkspace(r.requireInstanceAdminMW(h))))
+		r.authMw.RequireAuth(r.adminWorkspace(true, r.requireInstanceAdminMW(h))))
 }
 
 func (r *Router) recordInstance(method, pattern string) {

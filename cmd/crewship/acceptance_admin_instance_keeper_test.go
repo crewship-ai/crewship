@@ -155,6 +155,24 @@ func TestAcceptance_AdminInstanceKeeper(t *testing.T) {
 		t.Fatalf("health:\n%s", out)
 	}
 
+	// An instance admin need not have a workspace selected — or belong to
+	// one — to run instance commands.
+	noWS := filepath.Join(t.TempDir(), "cli-nows.yaml")
+	if err := os.WriteFile(noWS, []byte("server: "+srv.URL+"\ntoken: "+token+"\nformat: table\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{
+		{"admin", "instance", "keeper", "governance"},
+		{"admin", "instance", "audit", "--limit", "3"},
+		{"admin", "instance", "keeper", "defaults"},
+	} {
+		cmd := exec.Command(binary, args...)
+		cmd.Env = append(os.Environ(), "CREWSHIP_CONFIG="+noWS, "CREWSHIP_SERVER=", "CREWSHIP_PROFILE=", "CREWSHIP_TOKEN=", "CREWSHIP_WORKSPACE=", "NO_COLOR=1", "DATABASE_URL=")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("%v with no workspace selected: %v\n%s", args, err, out)
+		}
+	}
+
 	var audited int
 	_ = db.QueryRow(`SELECT COUNT(*) FROM instance_audit_logs WHERE action = 'instance.keeper_governance_updated' AND target_workspace_id = 'ik-lab'`).Scan(&audited)
 	if audited < 2 {

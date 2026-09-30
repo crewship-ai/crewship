@@ -450,6 +450,78 @@ func (m *AuthMiddleware) RequireWorkspace(next http.Handler) http.Handler {
 	})
 }
 
+// RequireWorkspaceOrInstanceAdmin is RequireWorkspace for the admin console,
+// where an instance administrator need not belong to what they administer:
+//
+//   - a member of the named workspace is resolved exactly as RequireWorkspace
+//     does, role and all;
+//   - an instance admin who names no workspace goes on without one — the
+//     handler answers for the whole instance, or 400s if it needs one;
+//   - an instance admin who names a live workspace they are not a member of
+//     goes on with that workspace and no workspace role; a workspace that
+//     does not exist is a 404.
+//
+// Either instance path marks the request (ctxInstanceAdmin), which is what
+// requireAdminFloorMW and canAdministerInstance read. Anyone else gets what
+// RequireWorkspace gives: 400 without a workspace, 403 outside theirs.
+//
+// optional says whether the route can answer an instance admin with no
+// workspace at all. A route that edits or reads one workspace's data passes
+// false, and such a request gets 400 "choose a workspace".
+func (m *AuthMiddleware) RequireWorkspaceOrInstanceAdmin(isAdmin func(*http.Request) bool, optional bool, next http.Handler) http.Handler {
+	withWorkspace := m.RequireWorkspace(next)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		user := UserFromContext(r.Context())
+		if user == nil {
+			writeAuthError(w, http.StatusUnauthorized, reasonNoCredentials)
+			return
+		}
+		workspaceID := r.URL.Query().Get("workspace_id")
+		if workspaceID == "" {
+			workspaceID = r.PathValue("workspaceId")
+		}
+		if workspaceID == "" {
+			workspaceID = r.Header.Get("X-Workspace-ID")
+		}
+		if workspaceID == "" {
+			if isAdmin(r) {
+				if !optional {
+					replyError(w, http.StatusBadRequest, "choose a workspace: this page shows one workspace's data (workspace_id)")
+					return
+				}
+				next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), ctxInstanceAdmin, true)))
+				return
+			}
+			withWorkspace.ServeHTTP(w, r)
+			return
+		}
+		var member int
+		if err := m.db.QueryRowContext(r.Context(), `
+			SELECT COUNT(*) FROM workspace_members wm JOIN workspaces w ON w.id = wm.workspace_id
+			 WHERE wm.user_id = ? AND (w.id = ? OR w.slug = ?) AND w.deleted_at IS NULL`,
+			user.ID, workspaceID, workspaceID).Scan(&member); err == nil && member > 0 {
+			withWorkspace.ServeHTTP(w, r)
+			return
+		}
+		if !isAdmin(r) {
+			withWorkspace.ServeHTTP(w, r)
+			return
+		}
+		var resolvedID string
+		err := m.db.QueryRowContext(r.Context(),
+			`SELECT id FROM workspaces WHERE (id = ? OR slug = ?) AND deleted_at IS NULL LIMIT 1`,
+			workspaceID, workspaceID).Scan(&resolvedID)
+		if err != nil {
+			replyError(w, http.StatusNotFound, "workspace not found")
+			return
+		}
+		ctx := context.WithValue(r.Context(), ctxWorkspaceID, resolvedID)
+		ctx = context.WithValue(ctx, ctxRole, "")
+		ctx = context.WithValue(ctx, ctxInstanceAdmin, true)
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
 // OptionalWorkspaceRole resolves the caller's workspace + role from the same
 // sources as RequireWorkspace (?workspace_id / {workspaceId} / X-Workspace-ID)
 // and stamps them into the context WHEN resolvable, but never fails: a missing

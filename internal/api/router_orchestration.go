@@ -375,7 +375,9 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	// member (roleSelf — informational, no secrets); the enable/disable
 	// toggle is ADMIN/OWNER (roleManage).
 	nph := NewNotifyProvidersHandler(r.db, r.logger)
-	r.mux.Handle("GET /api/v1/notification-providers", authed(wsCtx(http.HandlerFunc(nph.List))))
+	// The list is instance-wide: an instance admin may read it with no
+	// workspace (Admin › Notifications); a member still reads it in theirs.
+	r.mux.Handle("GET /api/v1/notification-providers", authed(r.adminWorkspace(true, http.HandlerFunc(nph.List))))
 	r.authedInstanceMut("PATCH", "/api/v1/notification-providers/{provider}", nph.Patch)
 
 	// Per-user category x channel preference matrix (#1412). Self-scoped:

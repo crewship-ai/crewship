@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { SettingsCard, SettingsEmpty, SettingsSaveBar, SettingsSegmented, SettingsSummary, SummaryItem, firstSentence } from "@/components/features/settings/shared"
 import { apiFetch } from "@/lib/api-fetch"
+import { withWs } from "@/lib/admin-workspace-query"
 import { cn } from "@/lib/utils"
 
 /** A single tunable rate limiter — GET /api/v1/admin/rate-limits. */
@@ -42,11 +43,10 @@ export function RateLimitsTab({ workspaceId }: { workspaceId: string | null }) {
   const [onlyChanged, setOnlyChanged] = useState(false)
 
   const refresh = useCallback(async () => {
-    if (!workspaceId) return
     setLoading(true)
     setError(null)
     try {
-      const res = await apiFetch(`/api/v1/admin/rate-limits?workspace_id=${workspaceId}`)
+      const res = await apiFetch(withWs("/api/v1/admin/rate-limits", workspaceId))
       if (!res.ok) {
         setError(`HTTP ${res.status}`)
         return
@@ -74,13 +74,12 @@ export function RateLimitsTab({ workspaceId }: { workspaceId: string | null }) {
   // One PUT per changed limiter. Each result is merged as it lands, so a
   // failure leaves only its own edit pending.
   const handleSave = useCallback(async (edits: { limiter: Limiter; value: number }[]) => {
-    if (!workspaceId) return
     setSaving(true)
     let saved = 0
     for (const { limiter, value } of edits) {
       try {
         const res = await apiFetch(
-          `/api/v1/admin/rate-limits/${encodeURIComponent(limiter.key)}?workspace_id=${workspaceId}`,
+          withWs(`/api/v1/admin/rate-limits/${encodeURIComponent(limiter.key)}`, workspaceId),
           {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
@@ -102,11 +101,10 @@ export function RateLimitsTab({ workspaceId }: { workspaceId: string | null }) {
   }, [workspaceId, applyUpdated])
 
   const handleReset = useCallback(async (limiter: Limiter) => {
-    if (!workspaceId) return
     setBusyKey(limiter.key)
     try {
       const res = await apiFetch(
-        `/api/v1/admin/rate-limits/${encodeURIComponent(limiter.key)}?workspace_id=${workspaceId}`,
+        withWs(`/api/v1/admin/rate-limits/${encodeURIComponent(limiter.key)}`, workspaceId),
         { method: "DELETE" },
       )
       if (!res.ok) {

@@ -66,7 +66,7 @@ func currentLogLevel() logLevelResponse {
 // GetLogLevel returns the live level, the configured baseline, and any
 // override expiry. GET /api/v1/admin/log-level.
 func (h *AdminObservabilityHandler) GetLogLevel(w http.ResponseWriter, r *http.Request) {
-	if !canRole(RoleFromContext(r.Context()), "manage") {
+	if !canAdministerInstance(r.Context()) {
 		replyError(w, http.StatusForbidden, "Forbidden")
 		return
 	}
@@ -78,7 +78,7 @@ func (h *AdminObservabilityHandler) GetLogLevel(w http.ResponseWriter, r *http.R
 // positive ttl auto-reverts to the baseline (capped so a forgotten debug
 // switch can't firehose the logs indefinitely — itself a disk-fill risk).
 func (h *AdminObservabilityHandler) SetLogLevel(w http.ResponseWriter, r *http.Request) {
-	if !canRole(RoleFromContext(r.Context()), "manage") {
+	if !canAdministerInstance(r.Context()) {
 		replyError(w, http.StatusForbidden, "Forbidden")
 		return
 	}
@@ -125,7 +125,7 @@ func (h *AdminObservabilityHandler) SetLogLevel(w http.ResponseWriter, r *http.R
 // different volume isn't reflected, but the default location is the volume
 // that fills in practice (DB + agent outputs + logs all live under it).
 func (h *AdminObservabilityHandler) Health(w http.ResponseWriter, r *http.Request) {
-	if !canRole(RoleFromContext(r.Context()), "manage") {
+	if !canAdministerInstance(r.Context()) {
 		replyError(w, http.StatusForbidden, "Forbidden")
 		return
 	}

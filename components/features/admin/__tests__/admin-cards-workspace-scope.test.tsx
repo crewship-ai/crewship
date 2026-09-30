@@ -20,8 +20,10 @@ vi.mock("@/app/(dashboard)/admin/hooks/use-admin-websocket", () => ({
 }))
 
 /** Admin › Security's reads (posture, keeper status, activity), as a component. */
-function SecurityReads({ workspaceId }: { workspaceId: string | null }) {
-  useSecurity(workspaceId)
+// loading: the workspace is still being resolved (useWorkspace().loading).
+// A resolved null is an instance admin with no workspace, and reads without one.
+function SecurityReads({ workspaceId, loading = false }: { workspaceId: string | null; loading?: boolean }) {
+  useSecurity(workspaceId, loading)
   return null
 }
 vi.mock("@/hooks/use-abilities", () => ({
@@ -67,7 +69,7 @@ describe("admin cards are workspace-scoped", () => {
   // Before the id resolves there is nothing to scope to, and firing the
   // request anyway is how you get a 400 rendered as "could not load".
   it("neither asks before the workspace is known", () => {
-    render(<SecurityReads workspaceId={null} />)
+    render(<SecurityReads workspaceId={null} loading />)
     render(<MemoryConfigCard workspaceId={null} />)
     expect(h.apiFetch).not.toHaveBeenCalled()
   })

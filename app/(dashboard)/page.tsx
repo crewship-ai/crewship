@@ -24,6 +24,8 @@ import { Appear } from "@/components/ui/detail"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useWorkspace } from "@/hooks/use-workspace"
+import { useIsInstanceAdmin } from "@/hooks/use-auth"
+import { dashboardLanding } from "@/lib/dashboard-landing"
 import { useActiveRoutineRuns } from "@/hooks/use-active-routine-runs"
 import { usePipelineSchedules } from "@/hooks/use-pipeline-schedules"
 import { useCredentialReadiness } from "@/hooks/use-credential-readiness"
@@ -83,18 +85,25 @@ export default function DashboardPage() {
   const [firstAgentId, setFirstAgentId] = useState<string | null>(null)
   const [reportWindow, setReportWindow] = useState<DashboardWindow>("24h")
 
+  const instanceAdmin = useIsInstanceAdmin()
+  const [onboardingCompleted, setOnboardingCompleted] = useState<boolean | null>(null)
   useEffect(() => {
     serverFetch("/api/v1/onboarding/status")
       .then((response) => (response.ok ? response.json() : null))
-      .then((data) => {
-        if (data && !data.completed) {
-          window.location.assign("/onboarding")
-          return
-        }
-        setOnboardingChecked(true)
-      })
-      .catch(() => setOnboardingChecked(true))
+      .then((data) => setOnboardingCompleted(data ? !!data.completed : true))
+      .catch(() => setOnboardingCompleted(true))
   }, [])
+  // An instance admin with no workspace lands in Admin, not the first-run
+  // wizard (lib/dashboard-landing.ts).
+  useEffect(() => {
+    const to = dashboardLanding({ workspaceId, workspaceLoading, instanceAdmin, onboardingCompleted })
+    if (to === "wait") return
+    if (to) {
+      window.location.assign(to)
+      return
+    }
+    setOnboardingChecked(true)
+  }, [workspaceId, workspaceLoading, instanceAdmin, onboardingCompleted])
 
   useEffect(() => {
     try {

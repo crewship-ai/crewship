@@ -283,7 +283,7 @@ func (h *SystemHandler) Runtime(w http.ResponseWriter, r *http.Request) {
 	// workspace_id (the admin console passes X-Workspace-ID) — get the full
 	// detail. A role-less or below-ADMIN caller gets the bare availability flag
 	// instead of a 403 so those non-admin surfaces keep working.
-	if !canRole(RoleFromContext(r.Context()), "manage") {
+	if !canAdministerInstance(r.Context()) {
 		// `in_use` alongside `available`, and the distinction is load-bearing
 		// rather than pedantic: `available` means a runtime is installed and
 		// answering a ping, which says nothing about whether THIS server is

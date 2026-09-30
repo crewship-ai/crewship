@@ -30,7 +30,7 @@ type rateLimitsListResponse struct {
 
 // List returns every limiter's current state. GET /api/v1/admin/rate-limits.
 func (h *AdminRateLimitsHandler) List(w http.ResponseWriter, r *http.Request) {
-	if !canRole(RoleFromContext(r.Context()), "manage") {
+	if !canAdministerInstance(r.Context()) {
 		replyError(w, http.StatusForbidden, "Forbidden")
 		return
 	}

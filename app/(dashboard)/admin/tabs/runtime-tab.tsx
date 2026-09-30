@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label"
 import { SettingsCard, SettingsDangerCard, SettingsRow, SettingsSegmented, SettingsSummary, SummaryItem } from "@/components/features/settings/shared"
 import { RuntimeIcon, runtimeBrand } from "@/components/icons/runtime-icons"
 import { apiFetch } from "@/lib/api-fetch"
+import { withWs } from "@/lib/admin-workspace-query"
 import { readApiError } from "@/lib/api-error"
 import { cn } from "@/lib/utils"
 import type { AgentsStatus, DaemonStatus } from "../types"
@@ -222,7 +223,9 @@ export const RuntimeTab = React.memo(function RuntimeTab(props: RuntimeTabProps)
   const ws = workspaceId ? encodeURIComponent(workspaceId) : ""
   const daemon = useAdminRead<DaemonStatus>(workspaceId ? `/api/v1/crewshipd?workspace_id=${ws}` : null)
   const agents = useAdminRead<AgentsStatus>(workspaceId ? `/api/v1/agents/crews-status?workspace_id=${ws}` : null)
-  const log = useAdminRead<LogLevelState>(workspaceId ? `/api/v1/admin/log-level?workspace_id=${ws}` : null)
+  // Log level and legacy resources are instance-wide: they load without a
+  // workspace. The daemon and crews rows are about one workspace.
+  const log = useAdminRead<LogLevelState>(withWs("/api/v1/admin/log-level", workspaceId))
   const daemonUp = goDurationSeconds(daemon.data?.uptime)
 
   const runtimeLabel = inUse ? `${runtimeBrand(inUse.runtime).label} ${inUse.version ?? ""}`.trim() : null
@@ -254,8 +257,8 @@ export const RuntimeTab = React.memo(function RuntimeTab(props: RuntimeTabProps)
 
       <RuntimeInventory {...props} />
 
-      {workspaceId && <LoggingCard workspaceId={workspaceId} state={log.data} onChange={log.set} />}
-      {workspaceId && <MaintenanceCard workspaceId={workspaceId} />}
+      <LoggingCard workspaceId={workspaceId} state={log.data} onChange={log.set} />
+      <MaintenanceCard workspaceId={workspaceId} />
     </div>
   )
 })
@@ -292,14 +295,14 @@ const DURATIONS = [
   { label: "4 hours", seconds: 14400 },
 ] as const
 
-function LoggingCard({ workspaceId, state, onChange }: { workspaceId: string; state: LogLevelState | null; onChange: (s: LogLevelState) => void }) {
+function LoggingCard({ workspaceId, state, onChange }: { workspaceId: string | null; state: LogLevelState | null; onChange: (s: LogLevelState) => void }) {
   const [level, setLevel] = React.useState<string>("debug")
   const [ttl, setTtl] = React.useState<number>(900)
   const [busy, setBusy] = React.useState(false)
   const put = async (body: { level: string; ttl_seconds: number }, done: string) => {
     setBusy(true)
     try {
-      const res = await apiFetch(`/api/v1/admin/log-level?workspace_id=${encodeURIComponent(workspaceId)}`, {
+      const res = await apiFetch(withWs("/api/v1/admin/log-level", workspaceId), {
         method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
       })
       if (!res.ok) { toast.error(await readApiError(res, "The log level was not changed")); return }
@@ -357,8 +360,8 @@ interface OrphanReport {
 
 const PROVIDER_ONLY = "Only available with the Docker provider."
 
-function MaintenanceCard({ workspaceId }: { workspaceId: string }) {
-  const ws = encodeURIComponent(workspaceId)
+function MaintenanceCard({ workspaceId }: { workspaceId: string | null }) {
+  const ws = workspaceId ? encodeURIComponent(workspaceId) : ""
   const [busy, setBusy] = React.useState<"check" | "reap" | "legacy" | "prune" | null>(null)
   const [orphans, setOrphans] = React.useState<OrphanReport | null>(null)
   const [legacy, setLegacy] = React.useState<boolean | null>(null)
@@ -370,7 +373,7 @@ function MaintenanceCard({ workspaceId }: { workspaceId: string }) {
     let cancelled = false
     ;(async () => {
       try {
-        const res = await apiFetch(`/api/v1/admin/legacy-resources?workspace_id=${ws}`)
+        const res = await apiFetch(withWs("/api/v1/admin/legacy-resources", workspaceId))
         const body = res?.ok ? await res.json() : null
         if (!cancelled) setLegacy(body ? !!body.present : false)
       } catch {
@@ -383,7 +386,7 @@ function MaintenanceCard({ workspaceId }: { workspaceId: string }) {
   /** POST an admin action; returns the body or null after saying why. */
   const post = async <T,>(path: string, fallback: string): Promise<T | null> => {
     try {
-      const res = await apiFetch(`${path}${path.includes("?") ? "&" : "?"}workspace_id=${ws}`, { method: "POST" })
+      const res = await apiFetch(withWs(path, workspaceId), { method: "POST" })
       if (res.status === 503) { toast.error(PROVIDER_ONLY); setResult(PROVIDER_ONLY); return null }
       if (!res.ok) { const m = await readApiError(res, fallback); toast.error(m); setResult(m); return null }
       return (await res.json()) as T
@@ -444,11 +447,11 @@ function MaintenanceCard({ workspaceId }: { workspaceId: string }) {
       <SettingsRow label="Orphaned containers"
         description="Still holding a token from before the master key was rotated">
         <span className="flex flex-wrap items-center justify-end gap-1.5">
-          <Button variant="outline" size="sm" className="h-7 px-2.5 text-xs" disabled={busy !== null} onClick={check}>
+          <Button variant="outline" size="sm" className="h-7 px-2.5 text-xs" disabled={busy !== null || !workspaceId} title={workspaceId ? undefined : "Choose a workspace: this acts on one workspace's crews"} onClick={check}>
             {busy === "check" && <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />}Check
           </Button>
           {orphans && !orphans.applied && orphans.count > 0 && (
-            <Button variant="outline" size="sm" className="h-7 px-2.5 text-xs text-destructive" disabled={busy !== null} onClick={reap}>
+            <Button variant="outline" size="sm" className="h-7 px-2.5 text-xs text-destructive" disabled={busy !== null || !workspaceId} title={workspaceId ? undefined : "Choose a workspace: this acts on one workspace's crews"} onClick={reap}>
               {busy === "reap" && <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />}Remove {orphans.count}
             </Button>
           )}
@@ -478,7 +481,7 @@ function MaintenanceCard({ workspaceId }: { workspaceId: string }) {
         description="Stops and deletes containers and volumes. Images stay cached, so crews rebuild fast.">
         {confirmOpen
           ? <Button variant="ghost" size="sm" className="h-7 px-2.5 text-xs" disabled={busy === "prune"} onClick={() => { setConfirmOpen(false); setTyped("") }}>Cancel</Button>
-          : <Button variant="outline" size="sm" className="h-7 border-destructive/40 px-2.5 text-xs text-destructive" disabled={busy !== null} onClick={() => setConfirmOpen(true)}>
+          : <Button variant="outline" size="sm" className="h-7 border-destructive/40 px-2.5 text-xs text-destructive" disabled={busy !== null || !workspaceId} title={workspaceId ? undefined : "Choose a workspace: this acts on one workspace's crews"} onClick={() => setConfirmOpen(true)}>
               <Trash2 className="mr-1.5 h-3 w-3" />Remove runtimes…
             </Button>}
       </SettingsRow>
