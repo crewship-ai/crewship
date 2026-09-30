@@ -36,6 +36,11 @@ import "sort"
 // table. Drift detection catches the omission in tests so an oversight
 // surfaces before a bundle ships missing rows.
 var BackupTableIntent = map[string]ScopedTableIntent{
+	"project_files":          IntentInclude,
+	"project_file_versions":  IntentInclude,
+	"project_file_blobs":     IntentInclude,        // base64 TEXT bytes retain their immutable version digest
+	"attempt_project_inputs": IntentExcludeRuntime, // native input authority must be admitted anew after restore
+
 	"access_context_delegations":   IntentExcludeRuntime, // classified cross-agent links require fresh attempt authority
 	"restricted_workflow_jobs":     IntentExcludeRuntime, // copying private queue capsules must not replay paid work
 	"access_files":                 IntentExcludeRuntime, // classified outputs depend on excluded attempt authority

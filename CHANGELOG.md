@@ -10,6 +10,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 ## [Unreleased]
 
 ### Added
+- Project files have explicit immutable versions, exact read/write grants, current checks during downloads, stale-write protection and aggregate storage limits. Retired bytes are removed while version provenance remains; native input capabilities require fresh admission. (#2711)
 - Agent Settings can opt restricted clients into native Codex scratch tools. The server pins a separate worker and sandbox policy, keeps API credentials in the host broker, accounts for each tool-followup model call, and delivers files only to the current conversation audience. (#2711)
 - Restricted conversations support human memory notes, scoped search and context-version export. Withdrawing a note revokes its provenance and dependent prepared runs; another participant cannot withdraw its author's note. (#2711)
 - Restricted runs can retain bounded immutable output files. Lists and downloads check the current private or explicit group audience; revocation hides filenames and bytes, and regrant does not resurrect old versions. (#2711)

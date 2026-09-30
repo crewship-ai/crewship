@@ -230,6 +230,9 @@ func resolveState(ctx context.Context, q queryer, key string, byHandle bool, see
 		return Attempt{}, ErrDenied
 	}
 	a.Scope = scope(a)
+	if err = checkProjectInputs(ctx, q, a); err != nil {
+		return Attempt{}, err
+	}
 	return a, nil
 }
 
