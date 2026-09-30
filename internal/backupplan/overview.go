@@ -219,19 +219,42 @@ func plural(n int, one, many string) string {
 }
 
 var incompleteNoun = map[string][2]string{
-	backup.IncompleteAttachmentMissing: {"attachment file missing", "attachment files missing"},
-	backup.IncompleteMemoryBlobMissing: {"memory version without content", "memory versions without content"},
-	backup.IncompleteContainerMissing:  {"crew without its container", "crews without their containers"},
+	backup.IncompleteAttachmentMissing:  {"attachment file missing", "attachment files missing"},
+	backup.IncompleteMemoryBlobMissing:  {"memory version without content", "memory versions without content"},
+	backup.IncompleteContainerMissing:   {"crew without its container", "crews without their containers"},
+	backup.IncompleteCrewSectionFailed:  {"crew folder Docker could not copy", "crew folders Docker could not copy"},
+	backup.IncompleteFileUnreadable:     {"file the server could not read", "files the server could not read"},
+	backup.IncompleteEnvironmentFailed:  {"container environment not captured", "container environments not captured"},
+	backup.IncompleteVaultKeyMissing:    {"vault key missing", "vault keys missing"},
+	backup.IncompleteAttachmentConflict: {"attachment file in conflict", "attachment files in conflict"},
+	backup.IncompleteFileMissing:        {"file missing", "files missing"},
+	backup.IncompleteFileMismatch:       {"file that does not match", "files that do not match"},
+	backup.IncompleteCredentialLocked:   {"credential that does not unlock", "credentials that do not unlock"},
 }
 
+// describeIncomplete sums the items per kind, in the order the kinds first
+// appear, and names each in words ("2 crews without their containers"), never
+// by its code.
 func describeIncomplete(items []backup.IncompleteItem) string {
-	var parts []string
+	var order []string
+	sum := map[string]int{}
 	for _, it := range items {
-		if n, ok := incompleteNoun[it.Kind]; ok {
-			parts = append(parts, plural(it.Count, n[0], n[1]))
-		} else {
-			parts = append(parts, fmt.Sprintf("%d × %s", it.Count, it.Kind))
+		if _, seen := sum[it.Kind]; !seen {
+			order = append(order, it.Kind)
 		}
+		n := it.Count
+		if n < 1 {
+			n = 1
+		}
+		sum[it.Kind] += n
+	}
+	parts := make([]string, 0, len(order))
+	for _, k := range order {
+		if n, ok := incompleteNoun[k]; ok {
+			parts = append(parts, plural(sum[k], n[0], n[1]))
+			continue
+		}
+		parts = append(parts, fmt.Sprintf("%d × %s", sum[k], strings.ReplaceAll(k, "_", " ")))
 	}
 	return strings.Join(parts, ", ")
 }

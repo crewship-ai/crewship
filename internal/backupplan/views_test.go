@@ -202,3 +202,17 @@ func TestOverview_InstanceScopeWithoutInstanceBundles(t *testing.T) {
 }
 
 func ptrTime(t time.Time) *time.Time { return &t }
+
+func TestDescribeIncomplete_SumsKindsInWords(t *testing.T) {
+	got := describeIncomplete([]backup.IncompleteItem{
+		{Kind: backup.IncompleteCrewSectionFailed, Count: 5},
+		{Kind: backup.IncompleteContainerMissing, Count: 1},
+		{Kind: backup.IncompleteContainerMissing, Count: 1},
+		{Kind: backup.IncompleteFileUnreadable, Count: 40},
+		{Kind: "something_new", Count: 2},
+	})
+	want := "5 crew folders Docker could not copy, 2 crews without their containers, 40 files the server could not read, 2 × something new"
+	if got != want {
+		t.Fatalf("got  %q\nwant %q", got, want)
+	}
+}

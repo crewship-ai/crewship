@@ -94,8 +94,8 @@ export function RetentionBody({ rows, ctx, reload }: { rows: RetentionRow[]; ctx
                       {r.note && <div className="text-[12.5px] text-muted-foreground">{r.note}</div>}
                     </td>
                     <td className={TD}>
-                      <SettingsSegmented<string> label={`Keep ${r.label} for`} value={r.mixed && !(r.key in draft) ? "" : value === null ? "forever" : String(value)}
-                        onChange={(v) => setDraft((d) => ({ ...d, [r.key]: v === "forever" ? null : Number(v) }))} options={options} />
+                      <div className="w-max"><SettingsSegmented<string> label={`Keep ${r.label} for`} value={r.mixed && !(r.key in draft) ? "" : value === null ? "forever" : String(value)}
+                        onChange={(v) => setDraft((d) => ({ ...d, [r.key]: v === "forever" ? null : Number(v) }))} options={options} /></div>
                     </td>
                   </tr>
                 )
@@ -175,8 +175,8 @@ export function RetentionDefaultsCard({ rows, demo }: { rows: RetentionRow[]; de
                 <tr key={r.key} data-key={r.key} className="[&:last-child>td]:border-b-0">
                   <td className={cn(TD, "whitespace-normal")}>{r.label}</td>
                   <td className={TD}>
-                    <SettingsSegmented<string> label={`New workspaces keep ${r.label} for`} value={value === null ? "forever" : String(value)}
-                      onChange={(v) => setDraft((d) => ({ ...d, [r.key]: v === "forever" ? null : Number(v) }))} options={options} />
+                    <div className="w-max"><SettingsSegmented<string> label={`New workspaces keep ${r.label} for`} value={value === null ? "forever" : String(value)}
+                      onChange={(v) => setDraft((d) => ({ ...d, [r.key]: v === "forever" ? null : Number(v) }))} options={options} /></div>
                   </td>
                 </tr>
               )
