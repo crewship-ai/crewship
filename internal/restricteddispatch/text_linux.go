@@ -29,14 +29,20 @@ type TextRunner struct {
 }
 
 func (r *TextRunner) Execute(ctx context.Context, user, workspace, chat, input string, emit func(string, string) error) error {
-	return r.execute(ctx, user, workspace, chat, input, emit, false)
+	return r.execute(ctx, user, workspace, chat, input, nil, emit, false)
 }
 
 // ExecuteRun is selected only by the dedicated authenticated CLI/run route.
 func (r *TextRunner) ExecuteRun(ctx context.Context, user, workspace, chat, input string, emit func(string, string) error) error {
-	return r.execute(ctx, user, workspace, chat, input, emit, true)
+	return r.execute(ctx, user, workspace, chat, input, nil, emit, true)
 }
-func (r *TextRunner) execute(ctx context.Context, user, workspace, chat, input string, emit func(string, string) error, runOperation bool) error {
+
+// ExecuteRunWithRights preserves additional server-classified source rights on
+// each fresh workflow step. Public request bodies cannot select these rights.
+func (r *TextRunner) ExecuteRunWithRights(ctx context.Context, user, workspace, chat, input string, rights []access.Right, emit func(string, string) error) error {
+	return r.execute(ctx, user, workspace, chat, input, rights, emit, true)
+}
+func (r *TextRunner) execute(ctx context.Context, user, workspace, chat, input string, rights []access.Right, emit func(string, string) error, runOperation bool) error {
 	if r == nil || (r.Manager == nil && r.StartSession == nil) || emit == nil || len(input) == 0 || len(input) > 32768 {
 		return access.ErrDenied
 	}
@@ -62,7 +68,7 @@ func (r *TextRunner) execute(ctx context.Context, user, workspace, chat, input s
 	if runOperation {
 		prepare = r.Authority.PrepareResponses
 	}
-	handle, _, err := prepare(ctx, user, workspace, agent, chat, "", nil, r.MaxOutputTokens, func(ctx context.Context, attempt access.Attempt) ([]string, error) {
+	handle, _, err := prepare(ctx, user, workspace, agent, chat, "", rights, r.MaxOutputTokens, func(ctx context.Context, attempt access.Attempt) ([]string, error) {
 		binding, err := loadProvider(ctx, store.DB, attempt.ID)
 		if err != nil {
 			return nil, err

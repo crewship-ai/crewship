@@ -21,13 +21,14 @@ type Executor interface {
 	ExecuteRun(context.Context, string, string, string, string, func(string, string) error) error
 }
 type Service struct {
-	db        *sql.DB
-	executor  Executor
-	lifecycle sync.Mutex
-	dispatch  sync.Mutex
-	cancel    context.CancelFunc
-	wg        sync.WaitGroup
-	wake      chan struct{}
+	db            *sql.DB
+	executor      Executor
+	lifecycle     sync.Mutex
+	dispatch      sync.Mutex
+	cancel        context.CancelFunc
+	wg            sync.WaitGroup
+	wake          chan struct{}
+	SourceChecker func(context.Context, pipeline.PageActionQuery, string) error
 }
 type Receipt struct {
 	ID     string `json:"run_id"`
@@ -44,6 +45,7 @@ type job struct {
 	ID, Workspace, Principal, Member, Pipeline, RecipeHash, Recipe, Agent, Profile, Chat, Origin, Handle, Idempotency, Source, PageAction, PageHash, Inputs, State, Outputs, Created, FireAt, Expires string
 	Page                                                                                                                                                                                              sql.NullString
 	Revision                                                                                                                                                                                          int64
+	Rights, SourceFacet                                                                                                                                                                               string
 }
 
 func New(db *sql.DB, executor Executor) (*Service, error) {
@@ -152,7 +154,7 @@ func (s *Service) AdmitManual(ctx context.Context, user, workspace, slug string,
 	if len(keys) == 1 {
 		key = keys[0]
 	}
-	return s.admit(ctx, user, workspace, slug, inputs, expectedHash, delay, nil, key)
+	return s.admit(ctx, user, workspace, slug, inputs, expectedHash, delay, nil, key, nil)
 }
 func (s *Service) AdmitPage(ctx context.Context, user, workspace string, action pipeline.PageActionInvocation, inputs map[string]any, keys ...string) (Receipt, error) {
 	if err := pipeline.CheckDeclaredPageAction(ctx, s.db, user, workspace, action); err != nil {
@@ -169,9 +171,9 @@ func (s *Service) AdmitPage(ctx context.Context, user, workspace string, action 
 	if len(keys) == 1 {
 		key = keys[0]
 	}
-	return s.admit(ctx, user, workspace, slug, inputs, "", 0, &action, key)
+	return s.admit(ctx, user, workspace, slug, inputs, "", 0, &action, key, nil)
 }
-func (s *Service) admit(ctx context.Context, user, workspace, slug string, supplied map[string]any, expectedHash string, delay time.Duration, page *pipeline.PageActionInvocation, key string) (Receipt, error) {
+func (s *Service) admit(ctx context.Context, user, workspace, slug string, supplied map[string]any, expectedHash string, delay time.Duration, page *pipeline.PageActionInvocation, key string, prepared *PreparedInvocation) (Receipt, error) {
 	var receipt Receipt
 	store := access.Store{DB: s.db}
 	m, err := store.Membership(ctx, user, workspace)
@@ -255,11 +257,18 @@ func (s *Service) admit(ctx context.Context, user, workspace, slug string, suppl
 			return receipt, err
 		}
 	}
+	var rights []access.Right
+	facet := ""
+	if prepared != nil {
+		rights = prepared.rights
+		facet = prepared.facet
+	}
+	rawRights, _ := json.Marshal(rights)
 	chatID := id()
 	if _, err = s.db.ExecContext(ctx, `INSERT INTO chats(id,workspace_id,agent_id,created_by,visibility,origin) VALUES(?,?,?,?,'private','ROUTINE')`, chatID, workspace, agent, user); err != nil {
 		return receipt, err
 	}
-	handle, origin, err := store.Admit(ctx, user, workspace, agent, chatID, "", nil)
+	handle, origin, err := store.Admit(ctx, user, workspace, agent, chatID, "", rights)
 	if err != nil {
 		return receipt, ErrDenied
 	}
@@ -286,23 +295,22 @@ func (s *Service) admit(ctx context.Context, user, workspace, slug string, suppl
 	if err != nil {
 		return receipt, ErrDenied
 	}
-	j := job{ID: id(), Workspace: workspace, Principal: user, Member: m.ID, Revision: m.Revision, Pipeline: pipelineID, RecipeHash: recipeHash, Recipe: recipe, Agent: agent, Profile: profile, Chat: chatID, Origin: origin.ID, Handle: ciphertext, Idempotency: idempotency, Source: source, Page: pageID, PageAction: pageAction, PageHash: pageHash, Inputs: string(rawInputs), State: "pending", Created: tsformat.Format(time.Now()), FireAt: tsformat.Format(time.Now().Add(delay)), Expires: tsformat.Format(time.Now().Add(delay + time.Hour))}
+	j := job{ID: id(), Workspace: workspace, Principal: user, Member: m.ID, Revision: m.Revision, Pipeline: pipelineID, RecipeHash: recipeHash, Recipe: recipe, Agent: agent, Profile: profile, Chat: chatID, Origin: origin.ID, Handle: ciphertext, Idempotency: idempotency, Source: source, Page: pageID, PageAction: pageAction, PageHash: pageHash, Inputs: string(rawInputs), Rights: string(rawRights), SourceFacet: facet, State: "pending", Created: tsformat.Format(time.Now()), FireAt: tsformat.Format(time.Now().Add(delay)), Expires: tsformat.Format(time.Now().Add(delay + time.Hour))}
+	if prepared != nil {
+		prepared.job = j
+		prepared.handle = handle
+		prepared.owner = s
+		accepted = true
+		return Receipt{j.ID, j.Chat, "PREPARED"}, nil
+	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return receipt, err
 	}
 	defer tx.Rollback()
-	// Acquire the writer before fencing and enqueue, so a declaration/member
-	// mutation cannot land between the final check and durable insertion.
-	if _, err = tx.ExecContext(ctx, `UPDATE access_attempts SET completed_at=completed_at WHERE id=?`, origin.ID); err != nil {
-		return receipt, err
-	}
-	if err = s.checkJob(ctx, tx, j, handle); err != nil {
-		return receipt, err
-	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO restricted_workflow_jobs(id,workspace_id,principal_id,member_id,member_revision,pipeline_id,recipe_hash,recipe_json,agent_id,execution_profile,chat_id,origin_attempt_id,origin_handle_ciphertext,source_kind,page_id,page_action_json,page_spec_hash,inputs_json,idempotency_key_hash,state,created_at,fire_at,expires_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, j.ID, j.Workspace, j.Principal, j.Member, j.Revision, j.Pipeline, j.RecipeHash, j.Recipe, j.Agent, j.Profile, j.Chat, j.Origin, j.Handle, j.Source, j.Page, j.PageAction, j.PageHash, j.Inputs, j.Idempotency, j.State, j.Created, j.FireAt, j.Expires)
+	receipt, err = s.EnqueuePrepared(ctx, tx, &PreparedInvocation{owner: s, job: j, handle: handle})
 	if err != nil {
-		return receipt, err
+		return Receipt{}, err
 	}
 	if err = tx.Commit(); err != nil {
 		return receipt, err
