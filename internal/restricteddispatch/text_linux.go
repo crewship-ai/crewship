@@ -29,20 +29,20 @@ type TextRunner struct {
 }
 
 func (r *TextRunner) Execute(ctx context.Context, user, workspace, chat, input string, emit func(string, string) error) error {
-	return r.execute(ctx, user, workspace, chat, input, nil, emit, false)
+	return r.execute(ctx, user, workspace, chat, input, nil, emit, false, nil)
 }
 
 // ExecuteRun is selected only by the dedicated authenticated CLI/run route.
 func (r *TextRunner) ExecuteRun(ctx context.Context, user, workspace, chat, input string, emit func(string, string) error) error {
-	return r.execute(ctx, user, workspace, chat, input, nil, emit, true)
+	return r.execute(ctx, user, workspace, chat, input, nil, emit, true, nil)
 }
 
 // ExecuteRunWithRights preserves additional server-classified source rights on
 // each fresh workflow step. Public request bodies cannot select these rights.
 func (r *TextRunner) ExecuteRunWithRights(ctx context.Context, user, workspace, chat, input string, rights []access.Right, emit func(string, string) error) error {
-	return r.execute(ctx, user, workspace, chat, input, rights, emit, true)
+	return r.execute(ctx, user, workspace, chat, input, rights, emit, true, nil)
 }
-func (r *TextRunner) execute(ctx context.Context, user, workspace, chat, input string, rights []access.Right, emit func(string, string) error, runOperation bool) error {
+func (r *TextRunner) execute(ctx context.Context, user, workspace, chat, input string, rights []access.Right, emit func(string, string) error, runOperation bool, proof *RunProof) error {
 	if r == nil || (r.Manager == nil && r.StartSession == nil) || emit == nil || len(input) == 0 || len(input) > 32768 {
 		return access.ErrDenied
 	}
@@ -198,7 +198,8 @@ func (r *TextRunner) execute(ctx context.Context, user, workspace, chat, input s
 			if !finished {
 				return errors.New("restricted response incomplete")
 			}
-			_, err = store.AppendContext(ctx, handle, "assistant", text.String())
+			assistant, appendErr := store.AppendContext(ctx, handle, "assistant", text.String())
+			err = appendErr
 			if err != nil {
 				return err
 			}
@@ -215,7 +216,34 @@ func (r *TextRunner) execute(ctx context.Context, user, workspace, chat, input s
 				return err
 			}
 			complete = true
+			if proof != nil {
+				*proof = NewRunProof(handle, []string{assistant.ID})
+			}
 			return nil
 		}
 	}
+}
+
+// ExecuteWorkflowRun returns the exact completed output proof to trusted queue
+// code. The delegated parent path stays denied until its frozen slot is bound.
+func (r *TextRunner) ExecuteWorkflowRun(ctx context.Context, request DelegatedRunRequest, emit func(string, string) error) (RunProof, error) {
+	if r == nil || request.ParentHandle != "" || len(request.SourceEntryIDs) != 0 {
+		return RunProof{}, access.ErrDenied
+	}
+	var agent string
+	if r.Authority.Store.DB.QueryRowContext(ctx, `SELECT agent_id FROM chats WHERE id=? AND workspace_id=?`, request.Chat, request.Workspace).Scan(&agent) != nil || agent != request.Agent {
+		return RunProof{}, access.ErrDenied
+	}
+	var proof RunProof
+	if err := r.execute(ctx, request.User, request.Workspace, request.Chat, request.Input, request.Rights, emit, true, &proof); err != nil {
+		return RunProof{}, err
+	}
+	return proof, nil
+}
+func (r *TextRunner) ExecuteDelegatedRun(ctx context.Context, request DelegatedRunRequest, emit func(string, string) error) error {
+	if request.ParentHandle == "" {
+		return access.ErrDenied
+	}
+	_, err := r.ExecuteWorkflowRun(ctx, request, emit)
+	return err
 }

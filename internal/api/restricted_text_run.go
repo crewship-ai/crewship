@@ -73,6 +73,11 @@ func (r *Router) restrictedTextExecute(w http.ResponseWriter, req *http.Request,
 		}
 		return controller.Flush()
 	}
+	var origin string
+	if r.db.QueryRowContext(req.Context(), `SELECT COALESCE(origin,'CHAT') FROM chats WHERE id=? AND workspace_id=?`, req.PathValue("chatId"), workspace).Scan(&origin) != nil || origin == "ROUTINE" {
+		replyError(w, http.StatusForbidden, "restricted text run denied or unavailable")
+		return
+	}
 	execute := r.restrictedText.Execute
 	if runOperation {
 		execute = r.restrictedText.ExecuteRun
