@@ -22,6 +22,9 @@ public contract here. Superseded a spec? Move it to
 
 ## Contents
 
+- [`quota-service-backup.md`](quota-service-backup.md) — offline fixed-ext4 service
+  snapshots and the explicit restore/recovery release boundary.
+
 - [`pages.md`](pages.md) — the Pages implementation reference: panel schemas, freshness,
   permission model, data model, API/CLI surface (§11), wire decisions
   (§11b). Referenced from ~140 code files by section anchor — treat section

@@ -42,7 +42,11 @@ package backup
 // asserting memory_included: true is asserting something that was never
 // checked. FormatVersionCrewMemory is the boundary every reader of that
 // flag must consult — see CrewSummary.HasCrewMemory.
-const FormatVersion = 3
+const FormatVersion = 4
+
+// Quota image sections require a newer reader: older restorers silently discard
+// unknown sections, which would restart services against empty data.
+const FormatVersionServiceSnapshots = 4
 
 // FormatVersionCrewMemory is the first format version whose
 // memory_included flag means what it says: observed, and about the real
@@ -51,9 +55,9 @@ const FormatVersionCrewMemory = 3
 
 // MinSupportedFormatVersion is the oldest bundle layout this binary can
 // still read. It implements the N-2 policy: MinSupportedFormatVersion =
-// max(1, FormatVersion-2). v1 bundles (encrypted AGE-passphrase, 10-
-// table dump) remain restorable.
-const MinSupportedFormatVersion = 1
+// max(1, FormatVersion-2). Format 4 reads v2/v3/v4; v1 requires an older
+// reader to migrate the bundle before restoring.
+const MinSupportedFormatVersion = 2
 
 // IsCompatible reports whether a bundle written with `written` can be
 // read by this binary (current reader at FormatVersion).

@@ -125,8 +125,9 @@ type Instance struct {
 // is primarily informational; the authoritative listing lives inside
 // the payload tar.
 type Contents struct {
-	Workspace *WorkspaceSummary `json:"workspace,omitempty" yaml:"workspace,omitempty"`
-	Crews     []CrewSummary     `json:"crews,omitempty" yaml:"crews,omitempty"`
+	ServiceSnapshots int               `json:"service_snapshots,omitempty" yaml:"service_snapshots,omitempty"`
+	Workspace        *WorkspaceSummary `json:"workspace,omitempty" yaml:"workspace,omitempty"`
+	Crews            []CrewSummary     `json:"crews,omitempty" yaml:"crews,omitempty"`
 
 	// Instance-scope only (V1.5, CRE-129). Nil for MVP bundles.
 	CredstoreIncluded      bool `json:"credstore_included,omitempty" yaml:"credstore_included,omitempty"`

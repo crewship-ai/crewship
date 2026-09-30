@@ -384,6 +384,11 @@ func (b *Backend) Remove(k Key) error {
 		if err = command("/usr/bin/umount", d.Mount); err != nil {
 			return err
 		}
+		// Unmount propagation must have removed canonical-path copies in all
+		// other namespaces too. A private same-path alias remains a live writer.
+		if err = detachedFromOtherMounts(dev, ""); err != nil {
+			return err
+		}
 		if err = command("/usr/sbin/losetup", "-d", dev); err != nil {
 			return err
 		}

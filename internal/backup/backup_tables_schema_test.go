@@ -43,6 +43,7 @@ import (
 // either add it to BackupTables (FK-safe order, plus BackupTableIntent) or
 // write its reason here. "It is not important" is not a reason; see #1437.
 var workspaceTablesNotBundled = map[string]string{
+	"service_backup_fences":             "host maintenance fences are reconstructed by physical service-data restore",
 	"codex_login_proofs":                "host-bound credential identity proof must be explicitly enrolled on a restored instance",
 	"restricted_native_sessions":        "native context and provider call leases must be admitted anew after restore",
 	"restricted_workflow_jobs":          "private execution capsules and queued paid work must not replay on a copied instance",
