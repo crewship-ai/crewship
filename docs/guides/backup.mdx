@@ -1032,7 +1032,7 @@ crew container's complete environment.
 
 | Part | How |
 |---|---|
-| The image, **with the container's local changes** | The container is committed to a temporary image under the same pause as its files, the image is `docker save`d, and every file of that archive (layers, image config, manifests) is stored once by its sha256 in the environment store. The temporary image is removed. An image digest alone would not do: registries disappear, and crew images were never in one. |
+| The image, **with the container's local changes** | The container is committed to a temporary image under the same pause as its files, the image is `docker save`d, and every file of that archive (layers, image config, manifests) is encrypted and stored once in the environment store (see [Encryption of the layers](#encryption-of-the-layers)). The temporary image is removed. An image digest alone would not do: registries disappear, and crew images were never in one. |
 | Every volume and bind mount | The crew's standard mounts ride the bundle's existing sections (a complete environment raises Quick to Standard so the home and tools volumes are always in). Any other mount's content — another named volume, a host bind — rides `environments/<crew>/mounts/<n>/`. Regenerable caches under `/home/agent` stay excluded as they always were. |
 | The configuration to recreate it safely | From `docker inspect`: user, working directory, entrypoint and command, environment, labels, exposed ports, network mode, memory, CPU and PID limits, read-only root, dropped capabilities, security options that tighten, tmpfs mounts, extra hosts, init and restart policy. |
 | Architecture and runtime | The image's os/architecture/variant, the Docker version and API version it was captured on, and the container's OCI runtime. |
@@ -1071,11 +1071,57 @@ The binds Crewship adds to every crew itself (the sidecar binary and the
 entrypoint from its runtime directory) are not taken from the backup either:
 Crewship supplies them when it creates the crew container.
 
+### Encryption of the layers
+
+A layer is a copy of the container's root filesystem and can hold private
+files, so the store never keeps one in the clear — on this server or
+off-site — and still stores a layer shared by many bundles only once:
+
+- The store works in **generations**. Each has a random 32-byte key.
+- Every layer is encrypted with a key derived from the generation key and
+  the layer's own SHA-256 (HKDF), as a chunked XChaCha20-Poly1305 stream.
+  The result is deterministic, so the same layer under the same generation
+  is the same encrypted object, stored once and named by the SHA-256 of the
+  encrypted bytes. Neither the store, the manifest nor a bucket shows a
+  layer's own digest.
+- The generation key is sealed with age to the backup's recipients,
+  `keys/<generation>/<set>.age` beside the store, and every bundle that uses
+  the generation carries the key inside its own encrypted payload
+  (`environment-keys/<generation>`). Restoring a bundle, landing its
+  environments after `crewship recover`, and a test restore (drill) need
+  nothing but the backup's identity; a drill also proves that every layer
+  in the store opens with the key the bundle carries.
+- So that the next backup can add layers to the same generation, the server
+  keeps the key too: in memory, and sealed with its vault key
+  (`ENCRYPTION_KEY`) in `keys/<generation>.json`. Someone who copies the
+  backups directory without the vault key reads no layer. Without a vault
+  key the server keeps it in memory only, and after a restart the next
+  backup starts a new generation (its layers are then stored again once).
+
+**Recipients and rotation.** A backup whose recipients include everyone the
+current generation was ever sealed to keeps using it; a recipient added
+since gets its own sealed copy of the key, and the layers are not encrypted
+again. The trade-off: whoever can open a generation's key can read every
+layer stored under it, including layers added after they were given it. So
+when a recipient is **removed** — a backup's recipients no longer include
+everyone the generation was sealed to — the store starts a **new
+generation**: every layer from then on is under a key the removed recipient
+never had. What it could open before (older layers, older bundles) stays
+open to it; rotate the backup keys and let retention age those copies out if
+that matters. A backup encrypted with a passphrase, or one without
+recipients, always gets a generation of its own.
+
+**Older stores.** Layers captured before this encryption stay as they were
+until retention removes the bundles that need them; they restore as before,
+but they are never copied off-site (the copy fails and says so). Take a new
+backup to get encrypted layers.
+
 ### Shared layers and retention
 
 The store lives beside the bundles, in `<backups dir>/environments/`:
-`blobs/sha256/<hex>` holds each distinct blob once, `index/` one record per
-captured environment. Nightly captures of the same crew share every base
+`blobs/sha256/<hex>` holds each distinct encrypted object once, `keys/` the
+generations and their sealed keys, `index/` one record per captured
+environment. Nightly captures of the same crew share every base
 layer, so a new capture adds only what changed. The database tracks which
 bundle needs which blob (`environment_blobs`, `bundle_environment_refs`);
 when retention or `crewship backup delete` removes a bundle, its references
@@ -1084,9 +1130,9 @@ progress holds its blobs under a pending reference until its bundle is
 written, so a concurrent cleanup never takes them.
 
 The bundle itself carries each crew's record (`environments/<crew>.json`,
-encrypted with the rest of the payload) and its manifest lists the blob
-digests it needs (`contents.environments`, readable without the key so
-retention and off-site copies can work on it). With
+encrypted with the rest of the payload) and the generation key, and its
+manifest lists the encrypted objects it needs (`contents.environments`,
+readable without the key so retention and off-site copies can work on it). With
 `CREWSHIP_BACKUP_ENV_INLINE=1` new bundles carry the layers inside the
 payload instead (`environment-blobs/`): self-contained, and larger. A bundle
 copied off-site without inline layers takes its blobs along — see
@@ -1361,7 +1407,11 @@ the copy takes them along:
 
 The refs object is written first, then every layer the destination does not
 already hold with the same size and checksum (a nightly bundle usually
-uploads only what changed), then the bundle — each checked like the bundle.
+uploads only what changed), then the generation's sealed key files under
+`<prefix>/environments/keys/<generation>/`, then the bundle — each checked
+like the bundle. The layers go up exactly as the store holds them,
+encrypted; a layer stored in the clear by an older version is refused
+rather than uploaded.
 A layer missing from the local store fails the copy instead of leaving a
 bundle off-site that could not restore its environments. The run's `off-site`
 phase says how many layers were uploaded and how many were already there.

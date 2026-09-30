@@ -374,7 +374,7 @@ func CreateBackup(ctx context.Context, db *sql.DB, opts CreateOptions) (result *
 	if !level.Valid() {
 		level = DefaultScopeLevel
 	}
-	envRun := newEnvironmentRun(db, outDir, opts.EnvMode, opts.EnvInline, now)
+	envRun := newEnvironmentRun(db, outDir, opts.EnvMode, opts.EnvInline, now, opts.Recipients, opts.Passphrase)
 	level = envRun.level(level)
 	defer func() {
 		if retErr != nil {

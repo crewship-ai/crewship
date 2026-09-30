@@ -1,6 +1,7 @@
 package offsite
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"os"
@@ -20,7 +21,14 @@ func (d dirBlobs) BlobPath(digest string) (string, error) {
 	return filepath.Join(string(d), h), nil
 }
 
+// putBlob stores a stand-in encrypted object (the magic, then data) the way
+// the environment store names its objects: by the SHA-256 of the object.
 func putBlob(t *testing.T, dir string, data []byte) string {
+	t.Helper()
+	return putRawBlob(t, dir, append([]byte(sealedBlobMagic), data...))
+}
+
+func putRawBlob(t *testing.T, dir string, data []byte) string {
 	t.Helper()
 	d := "sha256:" + hexSHA(data)
 	p, _ := dirBlobs(dir).BlobPath(d)
@@ -28,6 +36,41 @@ func putBlob(t *testing.T, dir string, data []byte) string {
 		t.Fatal(err)
 	}
 	return d
+}
+
+// The reviewer's reproduction of B1 at the off-site layer: a layer stored in
+// the clear (a store from before it was encrypted) is refused and nothing
+// reaches the bucket — a GET finds no object, let alone the plaintext.
+func TestUploadEnvironmentBlobsRefusesAPlaintextLayer(t *testing.T) {
+	ctx := context.Background()
+	fs := startFake(t)
+	dst := fs.newS3(t, s3Opts{pathStyle: true})
+	plain := []byte("review-only container layer with a private file")
+	root := t.TempDir()
+	digest := putRawBlob(t, root, plain)
+	for _, upload := range []func() error{
+		func() error {
+			_, err := UploadEnvironmentBlobs(ctx, dst, dirBlobs(root), "", []string{digest}, UploadOptions{})
+			return err
+		},
+		func() error {
+			_, err := UploadBundle(ctx, dst, dirBlobs(root), writeTemp(t, []byte("sealed bundle")), "b.tar.zst", []string{digest}, UploadOptions{})
+			return err
+		},
+	} {
+		if err := upload(); !errors.Is(err, ErrPlaintextLayer) {
+			t.Fatalf("err = %v, want ErrPlaintextLayer", err)
+		}
+	}
+	key, _ := EnvironmentBlobKey("", digest)
+	if _, _, err := dst.Get(ctx, key); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("the plaintext layer reached the bucket: %v", err)
+	}
+	for k, o := range fs.objects {
+		if bytes.Contains(o.data, plain) {
+			t.Fatalf("%s holds the plaintext layer", k)
+		}
+	}
 }
 
 func TestEnvironmentBlobsRoundTrip(t *testing.T) {
@@ -61,7 +104,7 @@ func TestEnvironmentBlobsRoundTrip(t *testing.T) {
 		t.Fatalf("download = %+v", down)
 	}
 	p, _ := dirBlobs(dst).BlobPath(own)
-	if b, err := os.ReadFile(p); err != nil || string(b) != "this bundle's own layer" {
+	if b, err := os.ReadFile(p); err != nil || string(b) != sealedBlobMagic+"this bundle's own layer" {
 		t.Fatalf("downloaded blob = %q, %v", b, err)
 	}
 	// Already local: not fetched again.

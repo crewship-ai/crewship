@@ -243,7 +243,7 @@ func RecoverInstance(ctx context.Context, opts RecoverOptions) (*RecoverReport, 
 		rep.Notes = append(rep.Notes, fmt.Sprintf("%d workspace(s) carry crew container files; they are kept under %s and are not in any container yet — start the crews, then land them from a workspace bundle or copy them in", len(ex.crewArchives), filepath.Join(dataDir, RecoveredCrewsDir)))
 	}
 	if len(m.Contents.Environments) > 0 {
-		stageRecoveredEnvironmentLayers(rep, m, opts, dataDir)
+		stageRecoveredEnvironmentLayers(rep, m, opts, dataDir, ex.envArchives)
 	}
 	if rep.PageProjectsPath != "" {
 		rep.Notes = append(rep.Notes, "set CREWSHIP_PAGE_PROJECTS_PATH="+rep.PageProjectsPath+" before starting the server")

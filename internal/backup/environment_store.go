@@ -5,7 +5,10 @@ package backup
 // keep retention from deleting a blob another bundle still needs.
 //
 //	<backups dir>/environments/
-//	  blobs/sha256/<hex>     one file per distinct blob (layer, config, manifest)
+//	  blobs/sha256/<hex>     one encrypted object per distinct blob (layer,
+//	                         config, manifest), named by the object's sha256
+//	  keys/<gen>.json        a store generation (environment_crypto.go)
+//	  keys/<gen>/<set>.age   its key, sealed to one recipient set
 //	  index/<env id>.json    the environment record, for work without the bundle
 //	  tmp/                   blobs being written
 //
@@ -13,6 +16,7 @@ package backup
 // a blob file under blobs/ always has the content its name says.
 
 import (
+	"bufio"
 	"context"
 	"crypto/sha256"
 	"database/sql"
@@ -135,16 +139,37 @@ func (s *EnvironmentStore) Open(_ context.Context, digest string) (io.ReadCloser
 	return f, st.Size(), nil
 }
 
-// Put writes r into the store and returns its digest. When want is set the
-// content must hash to it. A blob already present is kept and r drained.
+// Put writes r into the store as it is and returns its digest. When want is
+// set the content must hash to it. A blob already present is kept and r
+// drained. It copies objects that are already encrypted (staging a recover,
+// a bundle's inline objects); a layer captured from a container goes
+// through PutSealed.
 func (s *EnvironmentStore) Put(r io.Reader, want string) (digest string, size int64, err error) {
+	var n int64
+	digest, err = s.writeBlob(func(w io.Writer) error {
+		var err error
+		n, err = io.Copy(w, r)
+		return err
+	})
+	if err != nil {
+		return "", 0, err
+	}
+	if want != "" && want != digest {
+		return "", 0, fmt.Errorf("%w: content hashes to %s, expected %s", ErrBadDigest, digest, want)
+	}
+	return digest, n, nil
+}
+
+// writeBlob writes what fill produces to a temp file and names it by the
+// SHA-256 of those bytes. A digest already present keeps the file it has.
+func (s *EnvironmentStore) writeBlob(fill func(w io.Writer) error) (digest string, err error) {
 	tmpDir := filepath.Join(s.Dir, "tmp")
 	if err := os.MkdirAll(tmpDir, 0o700); err != nil {
-		return "", 0, err
+		return "", err
 	}
 	f, err := os.CreateTemp(tmpDir, "blob-*")
 	if err != nil {
-		return "", 0, err
+		return "", err
 	}
 	tmp := f.Name()
 	defer func() {
@@ -153,7 +178,11 @@ func (s *EnvironmentStore) Put(r io.Reader, want string) (digest string, size in
 		}
 	}()
 	h := sha256.New()
-	size, err = io.Copy(io.MultiWriter(f, h), r)
+	bw := bufio.NewWriterSize(io.MultiWriter(f, h), 256<<10)
+	err = fill(bw)
+	if err == nil {
+		err = bw.Flush()
+	}
 	if err == nil {
 		// Durable before it gets its final name: a blob that exists under
 		// its digest is trusted and never rewritten (Put keeps a present
@@ -165,33 +194,33 @@ func (s *EnvironmentStore) Put(r io.Reader, want string) (digest string, size in
 		err = cerr
 	}
 	if err != nil {
-		return "", 0, fmt.Errorf("backup: write environment blob: %w", err)
+		if errors.Is(err, ErrBadDigest) {
+			return "", err
+		}
+		return "", fmt.Errorf("backup: write environment blob: %w", err)
 	}
 	digest = "sha256:" + hex.EncodeToString(h.Sum(nil))
-	if want != "" && want != digest {
-		return "", 0, fmt.Errorf("%w: content hashes to %s, expected %s", ErrBadDigest, digest, want)
-	}
 	dst, err := s.BlobPath(digest)
 	if err != nil {
-		return "", 0, err
+		return "", err
 	}
 	if _, statErr := os.Stat(dst); statErr == nil {
 		_ = os.Remove(tmp)
-		return digest, size, nil
+		return digest, nil
 	}
 	if err := os.MkdirAll(filepath.Dir(dst), 0o700); err != nil {
-		return "", 0, err
+		return "", err
 	}
 	if err := os.Chmod(tmp, 0o400); err != nil {
-		return "", 0, err
+		return "", err
 	}
 	if err := os.Rename(tmp, dst); err != nil {
-		return "", 0, err
+		return "", err
 	}
 	if err := syncDir(filepath.Dir(dst)); err != nil {
-		return "", 0, err
+		return "", err
 	}
-	return digest, size, nil
+	return digest, nil
 }
 
 // syncDir fsyncs a directory so a rename into it survives a power cut.

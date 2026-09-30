@@ -111,7 +111,7 @@ func TestLive_EnvironmentRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	env, err := CollectEnvironment(ctx, ops, CrewTarget{ID: "c1", Slug: "envtest", ContainerID: name}, store, EnvironmentOptions{Payload: tw, Covered: map[string]bool{}})
+	env, err := CollectEnvironment(ctx, ops, CrewTarget{ID: "c1", Slug: "envtest", ContainerID: name}, store, EnvironmentOptions{Key: testStoreKey(t, store), Payload: tw, Covered: map[string]bool{}})
 	if err != nil {
 		t.Fatalf("CollectEnvironment: %v", err)
 	}
@@ -148,7 +148,7 @@ func TestLive_EnvironmentRoundTrip(t *testing.T) {
 	// A second capture of the same container shares every base layer.
 	var payload2 bytes.Buffer
 	tw2, _ := NewTarZstWriter(&payload2)
-	env2, err := CollectEnvironment(ctx, ops, CrewTarget{ID: "c1", Slug: "envtest", ContainerID: name}, store, EnvironmentOptions{Payload: tw2, NoFlush: true})
+	env2, err := CollectEnvironment(ctx, ops, CrewTarget{ID: "c1", Slug: "envtest", ContainerID: name}, store, EnvironmentOptions{Key: testStoreKey(t, store), Payload: tw2, NoFlush: true})
 	if err != nil {
 		t.Fatalf("second capture: %v", err)
 	}
@@ -187,7 +187,7 @@ func TestLive_EnvironmentRoundTrip(t *testing.T) {
 	}
 	open, has := BlobSources(store)
 	out := RestoreEnvironment(ctx, ops, got, EnvironmentRestoreOptions{
-		Open: open, Has: has, Recreate: true, Name: restoredName, VolumePrefix: volPrefix,
+		Open: open, Has: has, Keys: ex.EnvironmentKeys(), Recreate: true, Name: restoredName, VolumePrefix: volPrefix,
 		MountData: func(ctx context.Context, m EnvironmentMount) (io.ReadCloser, bool, error) {
 			return ex.OpenEnvironmentMount(ctx, "envtest", m)
 		},

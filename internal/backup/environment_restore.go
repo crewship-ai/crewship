@@ -140,8 +140,13 @@ func humanBytes(n int64) string {
 
 // EnvironmentRestoreOptions configure RestoreEnvironment.
 type EnvironmentRestoreOptions struct {
+	// Open reads a stored object as it is; Has reports whether one is
+	// available.
 	Open BlobOpener
 	Has  func(string) bool
+	// Keys holds the store generation keys (from the bundle's payload) that
+	// decrypt the environment's layers.
+	Keys EnvironmentKeys
 	// Host is the daemon's platform; zero asks the daemon.
 	Host RuntimeInfo
 	// Recreate creates and starts a container from the environment when
@@ -209,11 +214,16 @@ func RestoreEnvironment(ctx context.Context, ops DockerOps, env *Environment, op
 		out.Result, out.Reason = EnvRebuilt, chk.Detail
 		return out
 	}
+	if env.StoreKey != "" && len(opts.Keys[env.StoreKey]) != storeKeySize {
+		out.Result = EnvRebuilt
+		out.Reason = "its image layers are encrypted and the key that opens them (store generation " + env.StoreKey + ") is not in the bundle: its data comes back, its environment is rebuilt from the crew image"
+		return out
+	}
 	if opts.DryRun {
 		out.Result, out.Reason = EnvRestored, "dry run: "+chk.Detail
 		return out
 	}
-	if err := loadEnvironmentImage(ctx, eo, env, opts.Open); err != nil {
+	if err := loadEnvironmentImage(ctx, eo, env, EnvironmentBlobOpener(env, opts.Keys, opts.Open)); err != nil {
 		out.Result, out.Reason = EnvSkipped, err.Error()
 		return out
 	}
@@ -267,6 +277,7 @@ func restoreBundleEnvironments(ctx context.Context, opts RestoreOptions, ex *Ext
 		besides = EnvironmentStoreFor(filepath.Dir(opts.Path))
 	}
 	open, has := BlobSources(ex.InlineEnvironmentBlobs(), besides, opts.EnvironmentStore)
+	keys := ex.EnvironmentKeys()
 	var out []EnvironmentOutcome
 	for _, slug := range ex.Environments() {
 		env := ex.EnvironmentBySlug[slug]
@@ -274,7 +285,7 @@ func restoreBundleEnvironments(ctx context.Context, opts RestoreOptions, ex *Ext
 		if opts.DockerOps == nil {
 			o = EnvironmentOutcome{Crew: env.Crew, Result: EnvSkipped, Reason: "no Docker on this server: the crew's data comes back, its environment waits until Docker is", Unsafe: env.UnsafeSentences()}
 		} else {
-			o = RestoreEnvironment(ctx, opts.DockerOps, env, EnvironmentRestoreOptions{Open: open, Has: has, DryRun: dryRun})
+			o = RestoreEnvironment(ctx, opts.DockerOps, env, EnvironmentRestoreOptions{Open: open, Has: has, Keys: keys, DryRun: dryRun})
 		}
 		if opts.Logger != nil {
 			line := fmt.Sprintf("environment %s: %s", o.Crew, o.Result)

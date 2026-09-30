@@ -355,7 +355,7 @@ func CreateInstanceBackup(ctx context.Context, db *sql.DB, opts InstanceOptions)
 	if err != nil {
 		return nil, err
 	}
-	envRun := newEnvironmentRun(db, outAbs, opts.EnvMode, opts.EnvInline, now)
+	envRun := newEnvironmentRun(db, outAbs, opts.EnvMode, opts.EnvInline, now, opts.Recipients, opts.Passphrase)
 	level = envRun.level(level)
 	defer func() {
 		envRun.abortAll()

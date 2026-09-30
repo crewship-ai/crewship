@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+
+	"filippo.io/age"
 	"io"
 	"log/slog"
 	"os"
@@ -19,18 +21,40 @@ type environmentRun struct {
 	db         *sql.DB
 	pending    string
 	inline     bool
+	now        time.Time
+	recipients []age.Recipient
+	passphrase string
+	// storeKey is the generation the run's layers are encrypted under,
+	// chosen at the first capture (keyErr when that failed).
+	storeKey   *StoreKey
+	keyErr     error
+	keyChosen  bool
 	envs       []*Environment
 	deferred   []deferredEnvironment
 	incomplete []IncompleteItem
 }
 
 // newEnvironmentRun returns nil unless envMode asks for complete
-// environments.
-func newEnvironmentRun(db *sql.DB, backupsDir, envMode string, inline bool, now time.Time) *environmentRun {
+// environments. recipients / passphrase are the bundle's: the store key of
+// the run's layers is sealed to them (environment_crypto.go).
+func newEnvironmentRun(db *sql.DB, backupsDir, envMode string, inline bool, now time.Time, recipients []age.Recipient, passphrase string) *environmentRun {
 	if envMode != EnvModeComplete {
 		return nil
 	}
-	return &environmentRun{store: EnvironmentStoreFor(backupsDir), db: db, pending: newPendingRef(now), inline: inline}
+	return &environmentRun{store: EnvironmentStoreFor(backupsDir), db: db, pending: newPendingRef(now), inline: inline,
+		now: now, recipients: recipients, passphrase: passphrase}
+}
+
+// key returns the run's store generation key, choosing it once.
+func (r *environmentRun) key() (*StoreKey, error) {
+	if !r.keyChosen {
+		r.keyChosen = true
+		r.storeKey, r.keyErr = r.store.KeyFor(r.recipients, r.passphrase, r.now)
+		if r.keyErr != nil {
+			r.keyErr = fmt.Errorf("backup: environment store key: %w", r.keyErr)
+		}
+	}
+	return r.storeKey, r.keyErr
 }
 
 // level raises Quick to Standard: a complete environment carries every
@@ -49,8 +73,13 @@ func (r *environmentRun) collect(ctx context.Context, ops DockerOps, dst *TarZst
 	if r == nil {
 		return collectCrewSections(ctx, ops, dst, crew, level, want, nil)
 	}
+	key, err := r.key()
+	if err != nil {
+		r.fail(crew, err)
+		return collectCrewSections(ctx, ops, dst, crew, level, want, nil)
+	}
 	c, err := beginEnvironment(ctx, ops, crew, EnvironmentOptions{
-		Store: r.store, DB: r.db, PendingRef: r.pending, Payload: dst, Inline: r.inline,
+		Store: r.store, Key: key, DB: r.db, PendingRef: r.pending, Payload: dst, Inline: r.inline,
 		Covered: crewSectionsFor(level, want),
 	})
 	if err != nil {
@@ -103,8 +132,13 @@ func (r *environmentRun) collectDeferred(ctx context.Context, ops DockerOps, dst
 	if r == nil {
 		return collectCrewSections(ctx, ops, dst, crew, level, nil, nil)
 	}
+	key, err := r.key()
+	if err != nil {
+		r.fail(crew, err)
+		return collectCrewSections(ctx, ops, dst, crew, level, nil, nil)
+	}
 	c, err := beginEnvironment(ctx, ops, crew, EnvironmentOptions{
-		Store: r.store, DB: r.db, PendingRef: r.pending, Payload: dst, Inline: r.inline,
+		Store: r.store, Key: key, DB: r.db, PendingRef: r.pending, Payload: dst, Inline: r.inline,
 		Covered: crewSectionsFor(level, nil),
 	})
 	if err != nil {

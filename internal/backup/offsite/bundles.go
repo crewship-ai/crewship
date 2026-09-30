@@ -85,6 +85,11 @@ func UploadBundle(ctx context.Context, dst Destination, store LocalBlobs, localP
 		if err != nil {
 			return fail(fmt.Errorf("offsite: environment layers: %w", err))
 		}
+		// The sealed store keys go beside the layers, so the identity alone
+		// opens them even without this bundle.
+		if _, err := UploadEnvironmentKeys(ctx, dst, store, "", out.Blobs, o); err != nil {
+			return fail(fmt.Errorf("offsite: environment store keys: %w", err))
+		}
 		if env.Missing > 0 {
 			return fail(fmt.Errorf("offsite: %d environment layer(s) the bundle needs are not in the local store", env.Missing))
 		}
