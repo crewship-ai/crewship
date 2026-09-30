@@ -210,6 +210,10 @@ func CreateBackup(ctx context.Context, db *sql.DB, opts CreateOptions) (result *
 		return nil, err
 	}
 
+	if err := requireSupportedServiceBackups(ctx, db, target.CrewTargets); err != nil {
+		return nil, err
+	}
+
 	// 2. Reconcile each crew's ContainerID against the Docker daemon.
 	// LoadX populates ContainerID purely from the slug→name function,
 	// which means crews that have never been provisioned (no container
@@ -409,6 +413,11 @@ func CreateBackup(ctx context.Context, db *sql.DB, opts CreateOptions) (result *
 		return nil, err
 	}
 	if dump != nil {
+		if err := requireSupportedDumpServiceBackups(dump); err != nil {
+			_ = payloadWriter.Close()
+			_ = payloadFile.Close()
+			return nil, err
+		}
 		if err := WriteDBSection(payloadWriter, dump, now); err != nil {
 			_ = payloadWriter.Close()
 			_ = payloadFile.Close()

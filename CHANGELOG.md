@@ -10,6 +10,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 ## [Unreleased]
 
 ### Improved
+
+- Backup creation rejects crews and workspaces with standalone quota service volumes until their snapshot transport is available, preventing successful bundles that omit service data. (#2703)
 - Restricted runtime preparation can pin an explicit agent provider-key grant before building context. Credential revocation, rotation and model changes invalidate prepared attempts and descendants; regrant cannot revive them. Production restricted dispatch remains gated. (#2711)
 - The isolated runtime prototype can broker stateless text Responses requests with a server-selected model and output ceiling. Remote resource references and tools are denied; application model execution remains gated. (#2711)
 - Workspace administrators can read and replace versioned member resource policies through the API and `workspace member access`. Stale edits return 409; explicit empty restricted grants deny all. Restricted execution remains unavailable on unintegrated routes. (#2711)
