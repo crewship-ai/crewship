@@ -30,7 +30,11 @@ func (a Authority) BrokerReserve(ctx context.Context, handle, credential, model 
 	if err = a.Store.DB.QueryRowContext(ctx, `SELECT crew_id FROM agents WHERE id=? AND workspace_id=? AND deleted_at IS NULL`, attempt.Agent, attempt.Workspace).Scan(&crew); err != nil {
 		return "", err
 	}
-	reserved, err := paymaster.Reserve(ctx, a.Store.DB, paymaster.ReservationRequest{Scope: paymaster.Scope{WorkspaceID: attempt.Workspace, AgentID: attempt.Agent, CrewID: crew}, PrincipalID: attempt.Principal, AttemptID: attempt.ID, CredentialID: binding.Credential, Provider: "openai", Model: binding.Model, MaxInputTokens: maxInput, MaxOutputTokens: maxOutput})
+	mission, err := a.accountingMission(ctx, attempt)
+	if err != nil {
+		return "", err
+	}
+	reserved, err := paymaster.Reserve(ctx, a.Store.DB, paymaster.ReservationRequest{Scope: paymaster.Scope{WorkspaceID: attempt.Workspace, AgentID: attempt.Agent, CrewID: crew, MissionID: mission}, PrincipalID: attempt.Principal, AttemptID: attempt.ID, CredentialID: binding.Credential, Provider: "openai", Model: binding.Model, MaxInputTokens: maxInput, MaxOutputTokens: maxOutput})
 	return reserved.ID, err
 }
 
