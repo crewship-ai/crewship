@@ -2,6 +2,7 @@
 
 import { Skeleton } from "@/components/ui/skeleton"
 import { useWorkspace } from "@/hooks/use-workspace"
+import { RestrictedRoutines } from "@/components/features/routines/restricted-routines"
 import { RoutinesLayout } from "@/components/features/routines/routines-layout"
 
 // /routines — full asset-management surface for workspace routines.
@@ -12,7 +13,7 @@ import { RoutinesLayout } from "@/components/features/routines/routines-layout"
 //
 // See PIPELINES.md §17.3 for the full architecture.
 export default function RoutinesPage() {
-  const { workspaceId, loading: wsLoading } = useWorkspace()
+  const { workspaceId, workspace, loading: wsLoading } = useWorkspace()
 
   if (wsLoading || !workspaceId) {
     return (
@@ -26,5 +27,5 @@ export default function RoutinesPage() {
     )
   }
 
-  return <RoutinesLayout workspaceId={workspaceId} />
+  return workspace?.currentUserAccessMode === "restricted" ? <RestrictedRoutines key={workspaceId} workspaceId={workspaceId} /> : <RoutinesLayout workspaceId={workspaceId} />
 }

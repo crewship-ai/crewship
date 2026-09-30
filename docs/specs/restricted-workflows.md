@@ -1,0 +1,15 @@
+# Restricted private workflows
+
+Restricted members invoke manual routines through `POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/run`. Existing role or `routine.run` capability checks remain necessary. Each resolved leaf additionally requires current target-agent run authority; cross-agent delegation requires explicit delegate authority. Unsupported scripts, HTTP steps, cycles, cross-workspace targets and unavailable execution profiles fail before enqueue.
+
+The restricted JSON body accepts only `inputs`, `expected_definition_hash`, `expected_execution_hash` and `delay_seconds` (0–86400). The hashes check the server-resolved recipe and complete execution graph; they grant no authority. `Idempotency-Key` allows retries of the same admission. Admission returns HTTP 202 with `run_id`, `chat_id`, `status`, `restricted: true` and `status_url`.
+
+`GET /api/v1/workspaces/{workspaceId}/restricted-routines` returns an array of authorized routines containing only `slug`, `name`, `definition_hash`, `execution_hash` and input descriptors (`name`, scalar `type`, `required`). `X-Total-Count` counts this authorized projection. Prompts, input defaults, provider credentials, graph bodies and denied routines are excluded.
+
+`GET /api/v1/workspaces/{workspaceId}/restricted-routine-runs` lists the actor's currently authorized private runs. `GET /api/v1/workspaces/{workspaceId}/restricted-routine-runs/{runId}` returns `run_id`, `status`, `step_outputs` and `created_at`. Outputs are released only after completion and current provenance checks. Foreign, revoked and unavailable receipts return 404. Cleanup-revoked failures do not currently expose a result receipt.
+
+Declared Page actions use the same private queue with their original Page, panel, action and publication policy. Restricted polling through `GET /api/v1/pages/{slug}/application/actions/{pendingId}` requires an exact private job/Page/actor binding and returns `pending_id`, `run_id`, `pending_status`, `run_status`, `restricted`, `routine_revision_pinned` and `step_outputs`. It never falls back to a generic pending run or shared journal for an unmatched ID.
+
+Execution is bounded to 16 agent leaves, 64 graph nodes and nesting depth four. Frozen server-selected provider slots and opaque completion proofs retain provenance across delegated calls and a return to the original agent. Revoked source authority, recipe publication or provider grants invalidate descendants. Queued work rechecks authority before launch and while running; uncertain interrupted execution is not automatically retried. Workspace budget reservations precede provider requests, and missing terminal usage retains the conservative debit.
+
+These projections use private context and delivery rather than shared activity streams. The routine UI selects them using the server-derived current membership access mode. Text and native execution require an explicitly installed typed adapter for the configured profile; unsupported profiles have no trusted fallback.

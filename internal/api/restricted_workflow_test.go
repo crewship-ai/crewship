@@ -89,6 +89,16 @@ func TestRestrictedOrdinaryRoutineAndDeclaredPageUsePrivateQueue(t *testing.T) {
 		router.ServeHTTP(rec, req)
 		return rec
 	}
+
+	execOrFatal(t, db, `INSERT INTO pipelines(id,workspace_id,slug,name,definition_json,definition_hash,status) VALUES('foreign-routine',?,'foreign-work','FOREIGN_ROUTINE_CANARY','{"dsl_version":"1.0","name":"foreign","steps":[{"id":"work","type":"agent_run","agent_slug":"ungranted-agent","prompt":"HIDDEN_PROMPT_CANARY"}]}','foreign','active')`, workspace)
+	catalog := request("wf-h1", http.MethodGet, "/api/v1/workspaces/"+workspace+"/restricted-routines", "")
+	if catalog.Code != 200 || catalog.Header().Get("X-Total-Count") != "1" || strings.Contains(catalog.Body.String(), "FOREIGN_ROUTINE_CANARY") || strings.Contains(catalog.Body.String(), "agent_slug") || strings.Contains(catalog.Body.String(), "prompt") {
+		t.Fatalf("catalog leaked declaration/denied counts: %d %s", catalog.Code, catalog.Body.String())
+	}
+	workspaces := request("wf-h1", http.MethodGet, "/api/v1/workspaces", "")
+	if workspaces.Code != 200 || !strings.Contains(workspaces.Body.String(), `"currentUserAccessMode":"restricted"`) {
+		t.Fatal("automatic restricted directory mode missing", workspaces.Body.String())
+	}
 	manualPath := "/api/v1/workspaces/" + workspace + "/pipelines/private-work/run"
 	jobs := map[string]string{}
 	for _, user := range []string{"wf-h1", "wf-h2"} {
@@ -158,9 +168,29 @@ func TestRestrictedOrdinaryRoutineAndDeclaredPageUsePrivateQueue(t *testing.T) {
 	if rec.Code != 202 {
 		t.Fatalf("Page private queue %d %s", rec.Code, rec.Body.String())
 	}
+
+	var pageReceipt struct {
+		ID string `json:"run_id"`
+	}
+	if json.Unmarshal(rec.Body.Bytes(), &pageReceipt) != nil || pageReceipt.ID == "" {
+		t.Fatal("missing Page receipt")
+	}
+	statusPath := "/api/v1/pages/private-page/application/actions/" + pageReceipt.ID
+	if status := request("wf-h1", http.MethodGet, statusPath, ""); status.Code != 200 || !strings.Contains(status.Body.String(), `"pending_status":"pending"`) {
+		t.Fatalf("own Page pending status %d %s", status.Code, status.Body.String())
+	}
+	for _, check := range []struct{ user, path string }{{"wf-h2", statusPath}, {"wf-h1", "/api/v1/pages/guessed-page/application/actions/" + pageReceipt.ID}, {"wf-h1", "/api/v1/pages/private-page/application/actions/" + jobs["wf-h1"]}} {
+		if status := request(check.user, http.MethodGet, check.path, ""); status.Code != 404 {
+			t.Fatalf("foreign/mismatched Page receipt disclosed %d %s", status.Code, status.Body.String())
+		}
+	}
 	if worked, err := service.DispatchNext(t.Context()); !worked || err != nil {
 		t.Fatalf("Page dispatch %v %v", worked, err)
 	}
+	if status := request("wf-h1", http.MethodGet, statusPath, ""); status.Code != 200 || !strings.Contains(status.Body.String(), "answer-wf-h1") {
+		t.Fatalf("own Page completed status %d %s", status.Code, status.Body.String())
+	}
+
 	var shared int
 	for _, table := range []string{"pipeline_runs", "pending_runs"} {
 		if err = db.QueryRowContext(t.Context(), `SELECT count(*) FROM `+table).Scan(&shared); err != nil || shared != 0 {

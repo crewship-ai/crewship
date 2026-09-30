@@ -67,7 +67,7 @@ func restrictedWorkspaceDirectory(db *sql.DB, w http.ResponseWriter, r *http.Req
 	if !restricted {
 		return false
 	}
-	rows, err := db.QueryContext(r.Context(), `SELECT w.id,w.name,w.slug,wm.role FROM workspaces w JOIN workspace_members wm ON wm.workspace_id=w.id AND wm.user_id=? WHERE w.deleted_at IS NULL ORDER BY w.slug`, user.ID)
+	rows, err := db.QueryContext(r.Context(), `SELECT w.id,w.name,w.slug,wm.role,wm.access_mode FROM workspaces w JOIN workspace_members wm ON wm.workspace_id=w.id AND wm.user_id=? WHERE w.deleted_at IS NULL ORDER BY w.slug`, user.ID)
 	if err != nil {
 		replyError(w, http.StatusServiceUnavailable, "directory unavailable")
 		return true
@@ -75,12 +75,12 @@ func restrictedWorkspaceDirectory(db *sql.DB, w http.ResponseWriter, r *http.Req
 	defer rows.Close()
 	result := []map[string]string{}
 	for rows.Next() {
-		var id, name, slug, role string
-		if rows.Scan(&id, &name, &slug, &role) != nil {
+		var id, name, slug, role, mode string
+		if rows.Scan(&id, &name, &slug, &role, &mode) != nil {
 			replyError(w, http.StatusServiceUnavailable, "directory unavailable")
 			return true
 		}
-		result = append(result, map[string]string{"id": id, "name": name, "slug": slug, "current_user_role": role})
+		result = append(result, map[string]string{"id": id, "name": name, "slug": slug, "current_user_role": role, "currentUserRole": role, "currentUserAccessMode": mode})
 	}
 	if rows.Err() != nil {
 		replyError(w, http.StatusServiceUnavailable, "directory unavailable")

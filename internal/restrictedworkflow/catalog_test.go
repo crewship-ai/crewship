@@ -44,3 +44,33 @@ func TestCatalogFiltersUnadmittedGraphsAndPrivateDefinitionFields(t *testing.T) 
 		t.Fatal("routine capability revoked but directory available")
 	}
 }
+
+func TestCatalogFingerprintRejectsChangedNestedRecipeBeforeCreatingScope(t *testing.T) {
+	s, _ := graphFixture(t)
+	items, err := s.Catalog(t.Context(), "h1", "w")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var selected CatalogRoutine
+	for _, item := range items {
+		if item.Slug == "private-work" {
+			selected = item
+		}
+	}
+	if selected.ExecutionHash == "" {
+		t.Fatal("missing compiled graph fingerprint")
+	}
+	changed := strings.Replace(nestedRecipe, "Review ", "Changed ", 1)
+	if _, err = s.db.ExecContext(t.Context(), `UPDATE pipelines SET definition_json=?,definition_hash=? WHERE id='nested'`, changed, hash(changed)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.AdmitManualFrozen(t.Context(), "h1", "w", "private-work", map[string]any{"task": "private"}, selected.DefinitionHash, selected.ExecutionHash, 0, "same-request-id"); err == nil {
+		t.Fatal("stale nested catalog version admitted")
+	}
+	for _, table := range []string{"chats", "access_attempts", "restricted_workflow_jobs"} {
+		var n int
+		if err = s.db.QueryRowContext(t.Context(), `SELECT count(*) FROM `+table).Scan(&n); err != nil || n != 0 {
+			t.Fatal("stale version created execution scope", table, n, err)
+		}
+	}
+}

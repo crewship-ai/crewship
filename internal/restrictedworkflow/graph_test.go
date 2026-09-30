@@ -223,3 +223,28 @@ func TestNestedGraphRejectsCyclesAndUnsupportedSteps(t *testing.T) {
 		})
 	}
 }
+
+func TestTextExecutorRejectsNativeLeafBeforeAnyLaunch(t *testing.T) {
+	s, runner := graphFixture(t)
+	if _, err := s.db.ExecContext(t.Context(), `UPDATE agents SET restricted_execution_profile='native_api_key' WHERE id='other'`); err != nil {
+		t.Fatal(err)
+	}
+	runner.StartSession = func(context.Context, string) (restricteddispatch.TextSession, error) {
+		t.Fatal("unsupported native graph launched a prior text leaf")
+		return nil, nil
+	}
+	if _, err := s.AdmitManual(t.Context(), "h1", "w", "private-work", map[string]any{"task": "classified"}, "", 0); err == nil {
+		t.Fatal("native leaf admitted without explicit typed adapter")
+	}
+	var n int
+	if err := s.db.QueryRowContext(t.Context(), `SELECT count(*) FROM restricted_workflow_jobs`).Scan(&n); err != nil || n != 0 {
+		t.Fatal("unsupported native graph entered queue", n, err)
+	}
+	items, err := s.Catalog(t.Context(), "h1", "w")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 0 {
+		t.Fatal("unsupported native graph advertised", items)
+	}
+}

@@ -93,6 +93,9 @@ func (s *Service) checkGraph(ctx context.Context, q interface {
 				return ErrDenied
 			}
 			var profile string
+			if !s.supportsProfile(step.Profile) {
+				return ErrDenied
+			}
 			if q.QueryRowContext(ctx, `SELECT restricted_execution_profile FROM agents WHERE id=? AND workspace_id=? AND deleted_at IS NULL`, step.Agent, j.Workspace).Scan(&profile) != nil || profile != step.Profile {
 				return ErrDenied
 			}
@@ -245,7 +248,7 @@ func (s *Service) compileGraph(ctx context.Context, user, workspace, pipelineID 
 				}
 				rowErr := rows.Err()
 				rows.Close()
-				if err != nil || rowErr != nil || count != 1 || (g.Profile != "responses_text" && g.Profile != "native_api_key") {
+				if err != nil || rowErr != nil || count != 1 || !s.supportsProfile(g.Profile) || (g.Profile != "responses_text" && g.Profile != "native_api_key") {
 					return nil, ErrDenied
 				}
 				g.ProviderHash, err = authority.ProviderDelegationHash(ctx, user, workspace, g.Agent)

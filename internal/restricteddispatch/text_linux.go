@@ -281,3 +281,8 @@ func (r *TextRunner) ExecuteDelegatedRun(ctx context.Context, request DelegatedR
 	_, err := r.ExecuteWorkflowRun(ctx, request, emit)
 	return err
 }
+
+// SupportsWorkflowProfile advertises the installed stateless text adapter only.
+func (r *TextRunner) SupportsWorkflowProfile(profile string) bool {
+	return r != nil && profile == "responses_text" && (r.Manager != nil || r.StartSession != nil)
+}

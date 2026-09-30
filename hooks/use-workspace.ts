@@ -6,6 +6,7 @@ import { navigationAllowed } from "@/hooks/use-navigation-guard"
 import { apiFetch } from "@/lib/api-fetch"
 
 export interface WorkspaceData {
+  currentUserAccessMode?: "trusted" | "restricted"
   pages_theme?: Partial<import("@/lib/pages/theme").PageTheme> | null
   id: string
   name: string

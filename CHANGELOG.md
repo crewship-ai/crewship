@@ -10,6 +10,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 ## [Unreleased]
 
 ### Added
+- Restricted members can invoke an admitted routine from a minimal private catalog and poll their own routine or declared Page action receipts without a shared journal fallback. Catalog fingerprints also pin nested declarations across submission retries. (#2711)
 - Project files have explicit immutable versions, exact read/write grants, current checks during downloads, stale-write protection and aggregate storage limits. Retired bytes are removed while version provenance remains; native input capabilities require fresh admission. (#2711)
 - Agent Settings can opt restricted clients into native Codex scratch tools. The server pins a separate worker and sandbox policy, keeps API credentials in the host broker, accounts for each tool-followup model call, and delivers files only to the current conversation audience. (#2711)
 - Restricted conversations support human memory notes, scoped search and context-version export. Withdrawing a note revokes its provenance and dependent prepared runs; another participant cannot withdraw its author's note. (#2711)
@@ -19,7 +20,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Improved
 
-- Restricted manual routines and declared Page actions can queue bounded single-agent workflows with private results, encrypted authority capsules, live declaration checks and no shared journal fallback.
+- Restricted manual routines and declared Page actions can queue bounded nested workflows with explicit agent delegation, independent frozen provider slots, private proof-bound results and live declaration checks. Unsupported execution profiles are denied before any leaf starts.
 
 - Ordinary restricted CLI runs create their own private run context under the exact run permission, independently of chat permission.
 
