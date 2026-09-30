@@ -10,6 +10,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 ## [Unreleased]
 
 ### Improved
+- Restricted runtime preparation can pin an explicit agent provider-key grant before building context. Credential revocation, rotation and model changes invalidate prepared attempts and descendants; regrant cannot revive them. Production restricted dispatch remains gated. (#2711)
 - The isolated runtime prototype can broker stateless text Responses requests with a server-selected model and output ceiling. Remote resource references and tools are denied; application model execution remains gated. (#2711)
 - Workspace administrators can read and replace versioned member resource policies through the API and `workspace member access`. Stale edits return 409; explicit empty restricted grants deny all. Restricted execution remains unavailable on unintegrated routes. (#2711)
 - Release archives, Linux packages and container images now include dependency license texts and attribution manifests, with artifact checks that verify the bundled files. Contributor documentation now separates maintained contracts and guides from historical working records. (#2718)

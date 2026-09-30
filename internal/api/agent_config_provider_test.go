@@ -256,7 +256,8 @@ func TestEveryCredentialLoader_SplitsTheEndpointObject(t *testing.T) {
 		"internal/notify/channels.go":                                      "notification channel token (Slack, email), never an LLM provider",
 		// Pins provider = 'ANTHROPIC' in SQL, so an endpoint-backed row can
 		// never be selected. Verified in anthropicLLMCredentialFilter.
-		"internal/pipeline/runner_llm.go": "selects on provider = 'ANTHROPIC' explicitly; no endpoint-backed row can match",
+		"internal/pipeline/runner_llm.go":               "selects on provider = 'ANTHROPIC' explicitly; no endpoint-backed row can match",
+		"internal/restricteddispatch/provider_linux.go": "pins native provider='OPENAI' and type='API_KEY' in SQL; endpoint-backed providers and structured decrypted values are rejected, covered by provider binding regressions",
 	}
 
 	decryptMarkers := []string{"decryptCredential(", "encryption.Decrypt("}
