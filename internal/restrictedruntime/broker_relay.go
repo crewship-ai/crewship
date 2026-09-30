@@ -9,6 +9,7 @@ import (
 	"crypto/subtle"
 	"crypto/tls"
 	"encoding/hex"
+	"encoding/json"
 	"io"
 	"net"
 	"net/http"
@@ -252,13 +253,53 @@ func (s *Session) brokerExchange(parent context.Context, token string, req broke
 	}
 	// Disable implicit replay even for idempotent operations.
 	request.GetBody = nil
+	var accounting BrokerAccountingAuthority
+	var reservation string
+	usage := BrokerUsage{}
+	if grant.Responses != nil {
+		var ok bool
+		accounting, ok = s.manager.Authority.(BrokerAccountingAuthority)
+		if !ok {
+			return denied
+		}
+		// One token per UTF-8 byte plus framing for at most 256 messages is a
+		// pessimistic bound for this closed text adapter, including instructions.
+		var body struct {
+			MaxOutputTokens int64 `json:"max_output_tokens"`
+		}
+		if json.Unmarshal(req.Body, &body) != nil {
+			return denied
+		}
+		reservation, err = accounting.BrokerReserve(ctx, s.handle, grant.CredentialID, grant.Responses.Model, int64(len(req.Body))+16384, body.MaxOutputTokens)
+		if err != nil || reservation == "" {
+			return denied
+		}
+		defer func() {
+			settleCtx, settleCancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer settleCancel()
+			_ = accounting.BrokerSettle(settleCtx, s.handle, reservation, usage)
+		}()
+		// Reservation DB I/O can race revocation. Never dispatch on stale authority.
+		if s.brokerAuthorized(ctx) != nil {
+			return denied
+		}
+	}
 	response, err := client.Do(request)
 	if err != nil {
 		return brokerFrame{Kind: "response", Status: 502}
 	}
 	defer response.Body.Close()
 	if grant.ResponseMode == "sse" {
-		return s.brokerStream(ctx, response, *grant, secret, emit)
+		if grant.Responses == nil {
+			return s.brokerStream(ctx, response, *grant, secret, emit)
+		}
+		var captured bytes.Buffer
+		response.Body = &accountingReadCloser{Reader: io.TeeReader(response.Body, &captured), Closer: response.Body}
+		result := s.brokerStream(ctx, response, *grant, secret, emit)
+		if result.Kind == "stream_end" && result.Status == 200 {
+			usage = terminalResponsesUsage(captured.Bytes(), grant.Responses.Model)
+		}
+		return result
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 || strings.Contains(strings.ToLower(response.Header.Get("Content-Type")), "text/event-stream") || response.Header.Get("Upgrade") != "" || (response.Header.Get("Content-Encoding") != "" && response.Header.Get("Content-Encoding") != "identity") {
 		return brokerFrame{Kind: "response", Status: 502}
@@ -278,4 +319,10 @@ func (s *Session) brokerExchange(parent context.Context, token string, req broke
 		return brokerFrame{Kind: "response", Status: 502}
 	}
 	return brokerFrame{Kind: "response", Status: response.StatusCode, Body: body}
+}
+
+// accountingReadCloser preserves closure while collecting bounded provider data.
+type accountingReadCloser struct {
+	io.Reader
+	io.Closer
 }
