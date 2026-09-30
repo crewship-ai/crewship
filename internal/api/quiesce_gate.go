@@ -13,11 +13,16 @@ import (
 // The HTTP side of the instance backup's quiet window and of the automation
 // holds an instance restore leaves (internal/quiesce).
 //
-//   - While a quiet window is open every mutating request is answered 503
-//     with Retry-After, so no human edit, upload, agent write or sidecar call
-//     lands between the database snapshot and the file copy. Reads are
-//     untouched. The backup and instance-hold endpoints stay open (an admin
-//     must be able to watch and resume), and so does sign-in.
+//   - Every mutating request is a writer in the quiet window's barrier: it
+//     enters the gate before its handler runs and leaves when the handler
+//     returns. While a window is closing or held, entry is answered 503 with
+//     Retry-After, so no human edit, upload, agent write or sidecar call
+//     starts between the database snapshot and the file copy; and a window
+//     that is closing waits for the requests already inside, so none is still
+//     writing when the copy starts. Reads are untouched and never counted.
+//     The backup and instance-hold endpoints stay open and uncounted (an
+//     admin must be able to watch and resume, and a backup must not wait for
+//     its own request), and so does sign-in.
 //   - Inbound webhooks answer 503 while the window is open or while the
 //     "webhooks" hold is set. A sender retries; nothing is accepted and then
 //     silently dropped.
@@ -54,8 +59,10 @@ func hasAnyPrefix(p string, prefixes []string) bool {
 	return false
 }
 
-// quiesceGate wraps the router. It reads two in-memory flags per request and
-// touches nothing else.
+// quiesceGate wraps the router. Every mutating request outside the allowlist
+// enters the quiet window's gate before the handler runs and leaves when the
+// handler returns. GET, HEAD and OPTIONS never enter, so websockets, SSE
+// streams, downloads and long polls cannot hold a drain up.
 func quiesceGate(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		if !isMutatingMethod(req.Method) {
@@ -67,25 +74,21 @@ func quiesceGate(next http.Handler) http.Handler {
 		// backups/../../x" must not slip past the hold.
 		clean := path.Clean(req.URL.Path)
 		canonical := clean == req.URL.Path
-		if hasAnyPrefix(clean, inboundWebhookPrefixes) {
-			if quiesce.WebhooksPaused() {
-				writeHeld(w, req, "Inbound webhooks are held; retry later")
-				return
-			}
-			if !quiesce.WritesHeld() {
-				next.ServeHTTP(w, req)
-				return
-			}
-		}
-		if !quiesce.WritesHeld() {
-			next.ServeHTTP(w, req)
+		if hasAnyPrefix(clean, inboundWebhookPrefixes) && quiesce.WebhooksPaused() {
+			writeHeld(w, req, "Inbound webhooks are held; retry later")
 			return
 		}
 		if canonical && hasAnyPrefix(clean, quiesceOpenPrefixes) {
 			next.ServeHTTP(w, req)
 			return
 		}
-		writeHeld(w, req, "A consistent backup copy is being taken; writes are held for a few minutes — retry shortly")
+		writer, ok := quiesce.Enter(req.Context())
+		if !ok {
+			writeHeld(w, req, "A consistent backup copy is being taken; writes are held for a few minutes — retry shortly")
+			return
+		}
+		defer writer.Leave()
+		next.ServeHTTP(w, req.WithContext(writer.Context()))
 	})
 }
 
