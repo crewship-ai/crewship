@@ -129,11 +129,20 @@ func (s RunSpec) EnvMode() string {
 	return backup.EnvModeFiles
 }
 
-func (e *WorkspaceExecutor) Run(ctx context.Context, spec RunSpec, progress func(string)) (*RunResult, error) {
-	level := backup.ScopeLevelStandard
-	if spec.Preset == backup.PresetComplete {
-		level = backup.ScopeLevelFull
+// ScopeLevel is the per-crew file scope a run collects. Complete recovery
+// takes the full scope (/var/lib included) on every run, data-only days as
+// well as environment days: an environment snapshot is weekly at best and is
+// no substitute for today's service data. Every executor must use this, so
+// the instance and workspace runs of one preset collect the same files.
+func (s RunSpec) ScopeLevel() backup.ScopeLevel {
+	if s.Preset == backup.PresetComplete {
+		return backup.ScopeLevelFull
 	}
+	return backup.ScopeLevelStandard
+}
+
+func (e *WorkspaceExecutor) Run(ctx context.Context, spec RunSpec, progress func(string)) (*RunResult, error) {
+	level := spec.ScopeLevel()
 	res, err := backup.CreateBackup(ctx, e.DB, backup.CreateOptions{
 		Scope:              backup.ScopeWorkspace,
 		WorkspaceID:        spec.WorkspaceID,
