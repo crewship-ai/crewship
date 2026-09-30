@@ -379,6 +379,43 @@ func (s Store) FrozenProjectInputsForAttempt(ctx context.Context, attempt Attemp
 	return s.frozenProjectInputs(ctx, attempt.ID, false, &attempt)
 }
 
+// ProjectInputVersionsForAttempt is the host-only immutable metadata projection
+// used by runtime plan resolution. It avoids repeatedly copying source bytes.
+func (s Store) ProjectInputVersionsForAttempt(ctx context.Context, attempt Attempt) ([]ProjectFileVersion, error) {
+	if s.DB == nil {
+		return nil, ErrDenied
+	}
+	tx, err := s.DB.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	a, err := resolveState(ctx, tx, attempt.ID, false, map[string]bool{}, false)
+	if err != nil {
+		return nil, err
+	}
+	if a.Scope != attempt.Scope || a.Generation != attempt.Generation || a.Principal != attempt.Principal || a.Workspace != attempt.Workspace || a.Agent != attempt.Agent || a.Chat != attempt.Chat {
+		return nil, ErrDenied
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT v.id,v.file_id,v.project_id,v.name,v.revision,v.size_bytes,v.sha256,v.created_at FROM attempt_project_inputs i JOIN project_file_versions v ON v.id=i.version_id WHERE i.attempt_id=? ORDER BY v.id LIMIT 17`, a.ID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	versions := []ProjectFileVersion{}
+	for rows.Next() {
+		var v ProjectFileVersion
+		if err := rows.Scan(&v.ID, &v.FileID, &v.ProjectID, &v.Name, &v.Revision, &v.Size, &v.SHA256, &v.CreatedAt); err != nil {
+			return nil, err
+		}
+		versions = append(versions, v)
+	}
+	if err := rows.Err(); err != nil || len(versions) > 16 {
+		return nil, ErrDenied
+	}
+	return versions, nil
+}
+
 func (s Store) frozenProjectInputs(ctx context.Context, key string, byHandle bool, want *Attempt) ([]FrozenProjectInput, error) {
 	if s.DB == nil {
 		return nil, ErrDenied

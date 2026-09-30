@@ -145,6 +145,11 @@ func (m *Manager) Start(ctx context.Context, handle string) (s *Session, err err
 	if (p.NativeSandbox != "") != m.nativeOnly || (m.nativeOnly && NativeSandboxReady(ctx) != nil) {
 		return nil, ErrDenied
 	}
+	if p.NativeInputs != nil {
+		if _, ok := m.Catalog.(NativeInputCatalog); !ok {
+			return nil, ErrDenied
+		}
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.lock == nil || !m.reconciled {
@@ -188,6 +193,13 @@ func (m *Manager) Start(ctx context.Context, handle string) (s *Session, err err
 				}
 				cancel()
 			}
+			if s.plan.NativeInputs != nil && m.reconciled {
+				clean, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+				if m.Catalog.(NativeInputCatalog).ReleaseNativeInputs(clean, s.plan) != nil {
+					m.reconciled = false
+				}
+				cancel()
+			}
 			s.record.Status = "admission_failed"
 			if !m.reconciled {
 				s.record.Status = "termination_unconfirmed"
@@ -208,6 +220,14 @@ func (m *Manager) Start(ctx context.Context, handle string) (s *Session, err err
 	}
 	if _, err = m.Docker.call(ctx, nil, "start", s.id); err != nil {
 		return nil, err
+	}
+	if p.NativeInputs != nil {
+		if err = m.Catalog.(NativeInputCatalog).FreezeNativeInputs(ctx, p, s.id); err != nil {
+			return nil, err
+		}
+		if err = m.Docker.audit(ctx, s.id, p, m.Catalog, m.Limits); err != nil {
+			return nil, err
+		}
 	}
 	values, err := m.Authority.Secrets(ctx, handle)
 	if err != nil {
@@ -416,6 +436,11 @@ func (s *Session) Stop(reason string) {
 		name := "crewship-rtest-" + s.manager.owner + "-" + s.plan.Attempt
 		ids, lookupErr := s.manager.Docker.call(ctx, nil, "ps", "-aq", "--filter", "name=^/"+name+"$")
 		stopped := inspectErr != nil && lookupErr == nil && len(bytes.TrimSpace(ids)) == 0
+		if stopped && s.plan.NativeInputs != nil {
+			if s.manager.Catalog.(NativeInputCatalog).ReleaseNativeInputs(ctx, s.plan) != nil {
+				stopped = false
+			}
+		}
 		s.mu.Lock()
 		s.record.Status = "termination_unconfirmed"
 		if stopped {
@@ -488,6 +513,11 @@ func (m *Manager) Reconcile(ctx context.Context) error {
 		r.Reason = "reconciled"
 		if e = m.save(&r); e != nil {
 			return e
+		}
+	}
+	if c, ok := m.Catalog.(NativeInputCatalog); ok {
+		if err := c.ReconcileNativeInputs(ctx); err != nil {
+			return err
 		}
 	}
 	m.reconciled = true

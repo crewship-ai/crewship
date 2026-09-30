@@ -36,6 +36,11 @@ func run() error {
 	}
 	ctx := context.Background()
 	switch os.Args[1] {
+	case "verify-project-inputs":
+		if os.Getuid() != 1001 || len(os.Args) != 2 {
+			return errors.New("identity")
+		}
+		return verifyProjectInputs(os.Stdin)
 	case "hold":
 		if os.Getuid() != 1002 || len(os.Args) != 2 {
 			return errors.New("identity")

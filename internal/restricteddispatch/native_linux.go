@@ -60,14 +60,36 @@ func (a Authority) prepareNative(ctx context.Context, user, workspace, agent, ch
 		if e != nil {
 			return nil, e
 		}
-		if !utf8.ValidString(prompt.Instructions) || !utf8.ValidString(prompt.Input) || len(prompt.Instructions) > 128<<10 || len(prompt.Input) > 512<<10 || prompt.Input == "" {
-			return nil, access.ErrDenied
-		}
-		if _, e = a.Store.DB.ExecContext(ctx, `INSERT INTO restricted_native_sessions(attempt_id,workspace_id,principal_id,agent_id,scope_id,context_revision,instructions,initial_input) VALUES(?,?,?,?,?,?,?,?)`, attempt.ID, attempt.Workspace, attempt.Principal, attempt.Agent, attempt.Scope, attempt.Revision, prompt.Instructions, prompt.Input); e != nil {
-			return nil, e
-		}
-		return []string{"/opt/crewship-native-runner", "native", binding.Model}, nil
+		return a.freezeNativePrompt(ctx, attempt, prompt)
 	}, chatOperation)
+}
+
+// freezeNativePrompt is shared by direct and host-delegated native builders.
+// The caller pins the exact provider and binds/imports classified sources first.
+func (a Authority) freezeNativePrompt(ctx context.Context, attempt access.Attempt, prompt NativePrompt) ([]string, error) {
+	var err error
+	prompt, err = a.nativeProjectPrompt(ctx, attempt, prompt)
+	if err != nil {
+		return nil, err
+	}
+	binding, err := loadProvider(ctx, a.Store.DB, attempt.ID)
+	if err != nil || binding.Profile != "native_api_key" || (attempt.AdmissionOperation != "run" && attempt.AdmissionOperation != "chat") {
+		return nil, access.ErrDenied
+	}
+	if _, known := restrictedruntime.NativeContextCeiling(binding.Model); !known {
+		return nil, access.ErrDenied
+	}
+	var profile string
+	if err := a.Store.DB.QueryRowContext(ctx, `SELECT restricted_execution_profile FROM agents WHERE id=? AND workspace_id=? AND deleted_at IS NULL`, attempt.Agent, attempt.Workspace).Scan(&profile); err != nil || profile != "native_api_key" {
+		return nil, access.ErrDenied
+	}
+	if !utf8.ValidString(prompt.Instructions) || !utf8.ValidString(prompt.Input) || len(prompt.Instructions) > 128<<10 || len(prompt.Input) > 512<<10 || prompt.Input == "" {
+		return nil, access.ErrDenied
+	}
+	if _, err := a.Store.DB.ExecContext(ctx, `INSERT INTO restricted_native_sessions(attempt_id,workspace_id,principal_id,agent_id,scope_id,context_revision,instructions,initial_input) VALUES(?,?,?,?,?,?,?,?)`, attempt.ID, attempt.Workspace, attempt.Principal, attempt.Agent, attempt.Scope, attempt.Revision, prompt.Instructions, prompt.Input); err != nil {
+		return nil, err
+	}
+	return []string{"/opt/crewship-native-runner", "native", binding.Model}, nil
 }
 
 func (a Authority) attachNative(ctx context.Context, attempt access.Attempt, plan *restrictedruntime.Plan) error {
@@ -100,6 +122,14 @@ func (a Authority) attachNative(ctx context.Context, attempt access.Attempt, pla
 	plan.Network.Grants[0].Native = &restrictedruntime.NativePolicy{Model: binding.Model, MaxOutputTokens: binding.MaxOutputTokens, InputTokenCeiling: ceiling}
 	plan.Network.Grants[0].Responses = nil
 	plan.NativeSandbox = restrictedruntime.NativeSandboxFingerprint()
+	manifest, e := a.nativeInputManifest(ctx, attempt)
+	if e != nil {
+		return e
+	}
+	if manifest != nil {
+		plan.NativeInputs = manifest
+		plan.Mounts = []restrictedruntime.Mount{{Resource: restrictedruntime.NativeInputResource(*plan), Target: restrictedruntime.NativeInputTarget, ReadOnly: true}}
+	}
 	return nil
 }
 
